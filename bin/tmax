@@ -1,0 +1,15 @@
+#!/bin/bash
+
+# tmax editor launcher script
+# This script makes it easier to run tmax with the correct permissions
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
+
+# Run tmax with the main.ts file
+exec deno run \
+  --allow-read \
+  --allow-write \
+  --allow-run \
+  "$PROJECT_DIR/src/main.ts" \
+  "$@"

@@ -1,0 +1,174 @@
+;;; .tmaxrc - tmax configuration file example
+;;; Place this file in your home directory as ~/.tmaxrc
+
+;; Custom key bindings for enhanced navigation
+(key-bind "w" "(cursor-move (+ (cursor-line) 5) (cursor-column))" "normal")
+(key-bind "b" "(cursor-move (- (cursor-line) 5) (cursor-column))" "normal")
+
+;; Additional mode switching keys
+(key-bind "a" "(progn (cursor-move (cursor-line) (+ (cursor-column) 1)) (editor-set-mode \"insert\"))" "normal")
+(key-bind "A" "(progn (cursor-move (cursor-line) (length (buffer-line (cursor-line)))) (editor-set-mode \"insert\"))" "normal")
+
+;; Jump to beginning and end of buffer
+(key-bind "g" "(cursor-move 0 0)" "normal")
+(key-bind "G" "(cursor-move (- (buffer-line-count) 1) 0)" "normal")
+
+;; Enhanced editing commands
+(defun insert-line-above ()
+  "Insert a new line above the current line"
+  (let ((current-line (cursor-line)))
+    (cursor-move current-line 0)
+    (buffer-insert "\n")
+    (cursor-move current-line 0)))
+
+(defun insert-line-below ()
+  "Insert a new line below the current line"
+  (let ((current-line (cursor-line))
+        (current-column (cursor-column)))
+    (cursor-move current-line (length (buffer-line current-line)))
+    (buffer-insert "\n")
+    (cursor-move (+ current-line 1) 0)))
+
+(key-bind "O" "(insert-line-above)" "normal")
+(key-bind "o" "(insert-line-below)" "normal")
+
+;; Smart word movement
+(defun next-word ()
+  "Move cursor to the beginning of the next word"
+  (let ((line (buffer-line (cursor-line)))
+        (col (cursor-column)))
+    (let ((new-col (+ col 1)))
+      (while (and (< new-col (length line))
+                  (not (eq (substring line new-col (+ new-col 1)) " ")))
+        (setq new-col (+ new-col 1)))
+      (while (and (< new-col (length line))
+                  (eq (substring line new-col (+ new-col 1)) " "))
+        (setq new-col (+ new-col 1)))
+      (cursor-move (cursor-line) new-col))))
+
+(key-bind "w" "(next-word)" "normal")
+
+;; Buffer management shortcuts
+(defun quick-save ()
+  "Save current buffer"
+  (let ((buffer-name (buffer-current)))
+    (if buffer-name
+      (progn
+        (file-write buffer-name (buffer-text))
+        (editor-set-status (string-append "Saved " buffer-name)))
+      (editor-set-status "No buffer to save"))))
+
+(key-bind "s" "(quick-save)" "normal")
+
+;; Utility functions
+(defun word-count ()
+  "Count words in current buffer"
+  (let ((text (buffer-text)))
+    (length (split-string text " "))))
+
+(defun line-info ()
+  "Show current line information"
+  (let ((line-num (+ (cursor-line) 1))
+        (col-num (+ (cursor-column) 1))
+        (total-lines (buffer-line-count)))
+    (editor-set-status 
+      (string-append "Line " (number-to-string line-num) 
+                     "/" (number-to-string total-lines) 
+                     " Col " (number-to-string col-num)))))
+
+(key-bind "C-l" "(line-info)" "normal")
+
+;; Macros for common operations
+(defmacro when (condition &rest body)
+  "Execute body when condition is true"
+  `(if ,condition (progn ,@body) nil))
+
+(defmacro unless (condition &rest body)
+  "Execute body when condition is false"
+  `(if ,condition nil (progn ,@body)))
+
+(defmacro save-and-quit ()
+  "Save current buffer and quit"
+  '(progn
+     (quick-save)
+     (editor-quit)))
+
+;; Custom commands for development
+(defun duplicate-line ()
+  "Duplicate the current line"
+  (let ((line-content (buffer-line (cursor-line)))
+        (line-num (cursor-line)))
+    (cursor-move line-num (length line-content))
+    (buffer-insert "\n")
+    (buffer-insert line-content)))
+
+(defun delete-line ()
+  "Delete the current line"
+  (let ((line-num (cursor-line))
+        (line-content (buffer-line line-num)))
+    (cursor-move line-num 0)
+    (buffer-delete (+ (length line-content) 1))))
+
+(key-bind "d" "(delete-line)" "normal")
+
+;; Status line enhancements
+(defun update-status ()
+  "Update status line with buffer info"
+  (let ((mode (editor-mode))
+        (buffer-name (buffer-current))
+        (line-num (+ (cursor-line) 1))
+        (col-num (+ (cursor-column) 1)))
+    (editor-set-status 
+      (string-append "-- " (string-upcase mode) " -- " 
+                     (if buffer-name buffer-name "*scratch*") " "
+                     (number-to-string line-num) ":" 
+                     (number-to-string col-num)))))
+
+;; Auto-update status (you'd call this periodically)
+(key-bind "C-r" "(update-status)" "normal")
+
+;; Welcome message
+(editor-set-status "tmax loaded with custom configuration")
+
+;; Development helpers
+(defun eval-region ()
+  "Evaluate selected region as T-Lisp code"
+  ;; This would need visual mode selection to work fully
+  (editor-set-status "Eval region not implemented yet"))
+
+(defun toggle-mode ()
+  "Toggle between normal and insert mode"
+  (let ((current-mode (editor-mode)))
+    (if (eq current-mode "normal")
+      (editor-set-mode "insert")
+      (editor-set-mode "normal"))))
+
+(key-bind "TAB" "(toggle-mode)" "normal")
+
+;; File operations
+(defun new-buffer ()
+  "Create a new buffer"
+  (let ((buffer-name (string-append "*new-" (number-to-string (random)) "*")))
+    (buffer-create buffer-name)
+    (buffer-switch buffer-name)
+    (editor-set-status (string-append "Created buffer " buffer-name))))
+
+(defun switch-buffer ()
+  "Switch to next buffer"
+  (let ((buffers (buffer-list)))
+    (when (> (length buffers) 1)
+      (let ((current (buffer-current))
+            (next-buffer nil))
+        ;; Find next buffer in list
+        (dolist (buf buffers)
+          (when (and (not (eq buf current)) (not next-buffer))
+            (setq next-buffer buf)))
+        (when next-buffer
+          (buffer-switch next-buffer)
+          (editor-set-status (string-append "Switched to " next-buffer)))))))
+
+(key-bind "n" "(new-buffer)" "normal")
+(key-bind "B" "(switch-buffer)" "normal")
+
+;; Final configuration message
+(editor-set-status "tmax configuration loaded successfully")
