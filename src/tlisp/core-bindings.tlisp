@@ -1,0 +1,97 @@
+;; core-bindings.tlisp
+;; Default key bindings for tmax editor
+;; 
+;; This file contains all default key bindings extracted from TypeScript
+;; to achieve pure T-Lisp-centric key binding management.
+;; 
+;; Maintainer guidance:
+;; - Each (key-bind) call defines a key, command, and optional mode
+;; - Commands are T-Lisp expressions that get executed when keys are pressed
+;; - Modes: "normal", "insert", "visual", "command", "mx"
+;; - Keep bindings organized by functional groups for readability
+
+;; =================================================================
+;; BASIC NAVIGATION (Normal Mode)
+;; =================================================================
+;; Vim-style hjkl movement keys
+
+;; Move cursor left (h)
+(key-bind "h" "(cursor-move (cursor-line) (- (cursor-column) 1))" "normal")
+
+;; Move cursor down (j)
+(key-bind "j" "(cursor-move (+ (cursor-line) 1) (cursor-column))" "normal")
+
+;; Move cursor up (k)  
+(key-bind "k" "(cursor-move (- (cursor-line) 1) (cursor-column))" "normal")
+
+;; Move cursor right (l)
+(key-bind "l" "(cursor-move (cursor-line) (+ (cursor-column) 1))" "normal")
+
+;; =================================================================
+;; MODE SWITCHING
+;; =================================================================
+;; Transition between editor modes
+
+;; Enter insert mode from normal mode (i)
+(key-bind "i" "(editor-set-mode \"insert\")" "normal")
+
+;; Return to normal mode from insert mode (Escape)
+(key-bind "Escape" "(editor-set-mode \"normal\")" "insert")
+
+;; Enter command mode from normal mode (:)
+(key-bind ":" "(editor-enter-command-mode)" "normal")
+
+;; =================================================================
+;; COMMAND MODE BINDINGS
+;; =================================================================
+;; Key bindings specific to command mode
+
+;; Exit command mode (Escape)
+(key-bind "Escape" "(editor-exit-command-mode)" "command")
+
+;; Execute command line (Enter)
+(key-bind "Enter" "(editor-execute-command-line)" "command")
+
+;; =================================================================
+;; APPLICATION CONTROL
+;; =================================================================
+;; Global application control commands
+
+;; Quit editor from normal mode (q)
+(key-bind "q" "(editor-quit)" "normal")
+
+;; Quit editor from command mode (q)
+(key-bind "q" "(editor-quit)" "command")
+
+;; =================================================================
+;; M-X SYSTEM (Emacs-style)
+;; =================================================================
+;; Two-key sequence: SPC ; to activate M-x mode
+
+;; Handle space key - first part of SPC ; sequence
+(key-bind " " "(editor-handle-space)" "normal")
+
+;; Handle semicolon key - second part of SPC ; sequence
+(key-bind ";" "(editor-handle-semicolon)" "normal")
+
+;; =================================================================
+;; M-X MODE BINDINGS
+;; =================================================================
+;; Key bindings specific to M-x mode
+
+;; Exit M-x mode (Escape)
+(key-bind "Escape" "(editor-exit-mx-mode)" "mx")
+
+;; Execute M-x command (Enter)
+(key-bind "Enter" "(editor-execute-mx-command)" "mx")
+
+;; =================================================================
+;; BASIC EDITING (Insert Mode)
+;; =================================================================
+;; Essential editing operations in insert mode
+
+;; Delete character (Backspace)
+(key-bind "Backspace" "(buffer-delete 1)" "insert")
+
+;; Insert newline (Enter)
+(key-bind "Enter" "(buffer-insert \"\\n\")" "insert")
