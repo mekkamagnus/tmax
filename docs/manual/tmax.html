@@ -1,0 +1,2656 @@
+<!DOCTYPE html>
+<html>
+<!-- Created by GNU Texinfo 7.2, https://www.gnu.org/software/texinfo/ -->
+<head>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<!-- This manual is for tmax (version 1.0), a comprehensive terminal-based text editor
+with T-Lisp extensibility.
+
+Copyright © 2024 tmax contributors.
+
+Permission is granted to copy, distribute and/or modify this document
+under the terms of the GNU Free Documentation License, Version 1.3
+or any later version published by the Free Software Foundation;
+with no Invariant Sections, no Front-Cover Texts, and no Back-Cover Texts. -->
+<title>tmax - Terminal Text Editor with T-Lisp Extensibility</title>
+
+<meta name="description" content="tmax - Terminal Text Editor with T-Lisp Extensibility">
+<meta name="keywords" content="tmax - Terminal Text Editor with T-Lisp Extensibility">
+<meta name="resource-type" content="document">
+<meta name="distribution" content="global">
+<meta name="Generator" content="makeinfo">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+
+<link href="#Top" rel="start" title="Top">
+<link href="#Index" rel="index" title="Index">
+<link href="#SEC_Contents" rel="contents" title="Table of Contents">
+<link href="#Introduction" rel="next" title="Introduction">
+<style type="text/css">
+<!--
+a.copiable-link {visibility: hidden; text-decoration: none; line-height: 0em}
+a.summary-letter-printindex {text-decoration: none}
+div.example {margin-left: 3.2em}
+kbd.kbd {font-style: oblique}
+span:hover a.copiable-link {visibility: visible}
+td.printindex-index-entry {vertical-align: top}
+td.printindex-index-section {vertical-align: top; padding-left: 1em}
+th.entries-header-printindex {text-align:left}
+th.sections-header-printindex {text-align:left; padding-left: 1em}
+ul.mark-bullet {list-style-type: disc}
+ul.toc-numbered-mark {list-style: none}
+-->
+</style>
+
+
+</head>
+
+<body lang="en">
+
+
+
+
+<div class="top-level-extent" id="Top">
+<div class="nav-panel">
+<p>
+Next: <a href="#Introduction" accesskey="n" rel="next">Introduction</a> &nbsp; [<a href="#SEC_Contents" title="Table of contents" rel="contents">Contents</a>][<a href="#Index" title="Index" rel="index">Index</a>]</p>
+</div>
+<h1 class="top" id="tmax"><span>tmax<a class="copiable-link" href="#tmax"> &para;</a></span></h1>
+
+<p>This manual describes tmax, a comprehensive terminal-based text editor
+with T-Lisp extensibility.
+</p>
+<p>This manual is for tmax (version 1.0), a comprehensive terminal-based text editor
+with T-Lisp extensibility.
+</p>
+<p>Copyright &copy; 2024 tmax contributors.
+</p>
+<blockquote class="quotation">
+<p>Permission is granted to copy, distribute and/or modify this document
+under the terms of the GNU Free Documentation License, Version 1.3
+or any later version published by the Free Software Foundation;
+with no Invariant Sections, no Front-Cover Texts, and no Back-Cover Texts.
+</p></blockquote>
+
+
+<div class="region-contents" id="SEC_Contents">
+<h2 class="contents-heading">Table of Contents</h2>
+
+<div class="contents">
+
+<ul class="toc-numbered-mark">
+  <li><a id="toc-Introduction" href="#Introduction">1 Introduction</a>
+  <ul class="toc-numbered-mark">
+    <li><a id="toc-Key-Features" href="#Key-Features">1.1 Key Features</a></li>
+    <li><a id="toc-Target-Users" href="#Target-Users">1.2 Target Users</a></li>
+    <li><a id="toc-Architecture-Overview" href="#Architecture-Overview">1.3 Architecture Overview</a>
+    <ul class="toc-numbered-mark">
+      <li><a id="toc-TypeScript-Core-Responsibilities" href="#TypeScript-Core-Responsibilities">1.3.1 TypeScript Core Responsibilities</a></li>
+      <li><a id="toc-T_002dLisp-Engine-Responsibilities" href="#T_002dLisp-Engine-Responsibilities">1.3.2 T-Lisp Engine Responsibilities</a></li>
+    </ul></li>
+  </ul></li>
+  <li><a id="toc-Installation" href="#Installation">2 Installation</a>
+  <ul class="toc-numbered-mark">
+    <li><a id="toc-Requirements" href="#Requirements">2.1 Requirements</a></li>
+    <li><a id="toc-Installing-Deno" href="#Installing-Deno">2.2 Installing Deno</a></li>
+    <li><a id="toc-Getting-tmax" href="#Getting-tmax">2.3 Getting tmax</a></li>
+    <li><a id="toc-Running-tmax" href="#Running-tmax">2.4 Running tmax</a>
+    <ul class="toc-numbered-mark">
+      <li><a id="toc-Start-the-Editor" href="#Start-the-Editor">2.4.1 Start the Editor</a></li>
+      <li><a id="toc-Development-Mode-with-Auto_002dreload" href="#Development-Mode-with-Auto_002dreload">2.4.2 Development Mode with Auto-reload</a></li>
+      <li><a id="toc-T_002dLisp-REPL" href="#T_002dLisp-REPL">2.4.3 T-Lisp REPL</a></li>
+    </ul></li>
+    <li><a id="toc-Testing-the-Installation" href="#Testing-the-Installation">2.5 Testing the Installation</a></li>
+  </ul></li>
+  <li><a id="toc-Basic-Usage" href="#Basic-Usage">3 Basic Usage</a>
+  <ul class="toc-numbered-mark">
+    <li><a id="toc-Starting-tmax" href="#Starting-tmax">3.1 Starting tmax</a></li>
+    <li><a id="toc-Your-First-Session" href="#Your-First-Session">3.2 Your First Session</a></li>
+    <li><a id="toc-Essential-Keys" href="#Essential-Keys">3.3 Essential Keys</a>
+    <ul class="toc-numbered-mark">
+      <li><a id="toc-Immediate-Survival-Keys" href="#Immediate-Survival-Keys">3.3.1 Immediate Survival Keys</a></li>
+      <li><a id="toc-Basic-Movement" href="#Basic-Movement">3.3.2 Basic Movement</a></li>
+      <li><a id="toc-Mode-Switching" href="#Mode-Switching">3.3.3 Mode Switching</a></li>
+    </ul></li>
+    <li><a id="toc-Exiting-tmax" href="#Exiting-tmax">3.4 Exiting tmax</a></li>
+  </ul></li>
+  <li><a id="toc-Editing-Modes" href="#Editing-Modes">4 Editing Modes</a>
+  <ul class="toc-numbered-mark">
+    <li><a id="toc-Normal-Mode" href="#Normal-Mode">4.1 Normal Mode</a>
+    <ul class="toc-numbered-mark">
+      <li><a id="toc-Characteristics" href="#Characteristics">4.1.1 Characteristics</a></li>
+      <li><a id="toc-Navigation-Commands" href="#Navigation-Commands">4.1.2 Navigation Commands</a></li>
+    </ul></li>
+    <li><a id="toc-Insert-Mode" href="#Insert-Mode">4.2 Insert Mode</a>
+    <ul class="toc-numbered-mark">
+      <li><a id="toc-Entering-Insert-Mode" href="#Entering-Insert-Mode">4.2.1 Entering Insert Mode</a></li>
+      <li><a id="toc-In-Insert-Mode" href="#In-Insert-Mode">4.2.2 In Insert Mode</a></li>
+      <li><a id="toc-Status-Display" href="#Status-Display">4.2.3 Status Display</a></li>
+    </ul></li>
+    <li><a id="toc-Command-Mode" href="#Command-Mode">4.3 Command Mode</a>
+    <ul class="toc-numbered-mark">
+      <li><a id="toc-Entering-Command-Mode" href="#Entering-Command-Mode">4.3.1 Entering Command Mode</a></li>
+      <li><a id="toc-Command-Mode-Interface" href="#Command-Mode-Interface">4.3.2 Command Mode Interface</a></li>
+      <li><a id="toc-Available-Commands" href="#Available-Commands">4.3.3 Available Commands</a></li>
+    </ul></li>
+    <li><a id="toc-M_002dx-Mode" href="#M_002dx-Mode">4.4 M-x Mode</a>
+    <ul class="toc-numbered-mark">
+      <li><a id="toc-Entering-M_002dx-Mode" href="#Entering-M_002dx-Mode">4.4.1 Entering M-x Mode</a></li>
+      <li><a id="toc-M_002dx-Mode-Interface" href="#M_002dx-Mode-Interface">4.4.2 M-x Mode Interface</a></li>
+      <li><a id="toc-Available-Functions" href="#Available-Functions">4.4.3 Available Functions</a></li>
+    </ul></li>
+    <li><a id="toc-Visual-Mode" href="#Visual-Mode">4.5 Visual Mode</a></li>
+    <li><a id="toc-Mode-Transitions" href="#Mode-Transitions">4.6 Mode Transitions</a></li>
+  </ul></li>
+  <li><a id="toc-Key-Bindings" href="#Key-Bindings">5 Key Bindings</a>
+  <ul class="toc-numbered-mark">
+    <li><a id="toc-Default-Key-Bindings" href="#Default-Key-Bindings">5.1 Default Key Bindings</a>
+    <ul class="toc-numbered-mark">
+      <li><a id="toc-Normal-Mode-Bindings" href="#Normal-Mode-Bindings">5.1.1 Normal Mode Bindings</a></li>
+      <li><a id="toc-Insert-Mode-Bindings" href="#Insert-Mode-Bindings">5.1.2 Insert Mode Bindings</a></li>
+      <li><a id="toc-Command-Mode-Bindings" href="#Command-Mode-Bindings">5.1.3 Command Mode Bindings</a></li>
+      <li><a id="toc-M_002dx-Mode-Bindings" href="#M_002dx-Mode-Bindings">5.1.4 M-x Mode Bindings</a></li>
+    </ul></li>
+    <li><a id="toc-Customizing-Key-Bindings" href="#Customizing-Key-Bindings">5.2 Customizing Key Bindings</a>
+    <ul class="toc-numbered-mark">
+      <li><a id="toc-The-key_002dbind-Function" href="#The-key_002dbind-Function">5.2.1 The key-bind Function</a></li>
+      <li><a id="toc-Examples" href="#Examples-1">5.2.2 Examples</a></li>
+    </ul></li>
+    <li><a id="toc-Core-Bindings-File" href="#Core-Bindings-File">5.3 Core Bindings File</a>
+    <ul class="toc-numbered-mark">
+      <li><a id="toc-File-Structure" href="#File-Structure">5.3.1 File Structure</a></li>
+    </ul></li>
+  </ul></li>
+  <li><a id="toc-T_002dLisp-System" href="#T_002dLisp-System">6 T-Lisp System</a>
+  <ul class="toc-numbered-mark">
+    <li><a id="toc-T_002dLisp-Overview" href="#T_002dLisp-Overview">6.1 T-Lisp Overview</a></li>
+    <li><a id="toc-Basic-Syntax" href="#Basic-Syntax">6.2 Basic Syntax</a>
+    <ul class="toc-numbered-mark">
+      <li><a id="toc-Data-Types" href="#Data-Types">6.2.1 Data Types</a></li>
+      <li><a id="toc-Function-Calls" href="#Function-Calls">6.2.2 Function Calls</a></li>
+      <li><a id="toc-Variable-Binding" href="#Variable-Binding">6.2.3 Variable Binding</a></li>
+    </ul></li>
+    <li><a id="toc-Standard-Library-Functions" href="#Standard-Library-Functions">6.3 Standard Library Functions</a>
+    <ul class="toc-numbered-mark">
+      <li><a id="toc-Arithmetic-Functions" href="#Arithmetic-Functions">6.3.1 Arithmetic Functions</a></li>
+      <li><a id="toc-List-Functions" href="#List-Functions">6.3.2 List Functions</a></li>
+      <li><a id="toc-String-Functions" href="#String-Functions">6.3.3 String Functions</a></li>
+      <li><a id="toc-Control-Flow" href="#Control-Flow">6.3.4 Control Flow</a></li>
+      <li><a id="toc-Comparison-Functions" href="#Comparison-Functions">6.3.5 Comparison Functions</a></li>
+    </ul></li>
+    <li><a id="toc-Macro-System" href="#Macro-System">6.4 Macro System</a>
+    <ul class="toc-numbered-mark">
+      <li><a id="toc-Defining-Macros" href="#Defining-Macros">6.4.1 Defining Macros</a></li>
+      <li><a id="toc-Quasiquote-Syntax" href="#Quasiquote-Syntax">6.4.2 Quasiquote Syntax</a></li>
+      <li><a id="toc-Example-Usage" href="#Example-Usage">6.4.3 Example Usage</a></li>
+    </ul></li>
+    <li><a id="toc-Configuration-File" href="#Configuration-File">6.5 Configuration File</a>
+    <ul class="toc-numbered-mark">
+      <li><a id="toc-Example-_002etmaxrc" href="#Example-_002etmaxrc">6.5.1 Example .tmaxrc</a></li>
+    </ul></li>
+  </ul></li>
+  <li><a id="toc-T_002dLisp-Language-Reference" href="#T_002dLisp-Language-Reference">7 T-Lisp Language Reference</a>
+  <ul class="toc-numbered-mark">
+    <li><a id="toc-Language-Fundamentals" href="#Language-Fundamentals">7.1 Language Fundamentals</a>
+    <ul class="toc-numbered-mark">
+      <li><a id="toc-Lexical-Structure" href="#Lexical-Structure">7.1.1 Lexical Structure</a>
+      <ul class="toc-numbered-mark">
+        <li><a id="toc-Comments" href="#Comments">7.1.1.1 Comments</a></li>
+        <li><a id="toc-Identifiers" href="#Identifiers">7.1.1.2 Identifiers</a></li>
+      </ul></li>
+      <li><a id="toc-Data-Types-Reference" href="#Data-Types-Reference">7.1.2 Data Types Reference</a></li>
+    </ul></li>
+    <li><a id="toc-Expression-Evaluation" href="#Expression-Evaluation">7.2 Expression Evaluation</a>
+    <ul class="toc-numbered-mark">
+      <li><a id="toc-Function-Calls-1" href="#Function-Calls-1">7.2.1 Function Calls</a></li>
+      <li><a id="toc-Special-Forms" href="#Special-Forms">7.2.2 Special Forms</a></li>
+    </ul></li>
+    <li><a id="toc-Built_002din-Functions-Reference" href="#Built_002din-Functions-Reference">7.3 Built-in Functions Reference</a>
+    <ul class="toc-numbered-mark">
+      <li><a id="toc-Arithmetic-Operations" href="#Arithmetic-Operations">7.3.1 Arithmetic Operations</a></li>
+      <li><a id="toc-Comparison-Operations" href="#Comparison-Operations">7.3.2 Comparison Operations</a></li>
+      <li><a id="toc-List-Operations" href="#List-Operations">7.3.3 List Operations</a></li>
+      <li><a id="toc-String-Operations" href="#String-Operations">7.3.4 String Operations</a></li>
+      <li><a id="toc-Type-Predicates" href="#Type-Predicates">7.3.5 Type Predicates</a></li>
+    </ul></li>
+    <li><a id="toc-Advanced-Features" href="#Advanced-Features">7.4 Advanced Features</a>
+    <ul class="toc-numbered-mark">
+      <li><a id="toc-Macro-System-1" href="#Macro-System-1">7.4.1 Macro System</a>
+      <ul class="toc-numbered-mark">
+        <li><a id="toc-Quasiquote-Syntax-1" href="#Quasiquote-Syntax-1">7.4.1.1 Quasiquote Syntax</a></li>
+        <li><a id="toc-Macro-Examples" href="#Macro-Examples">7.4.1.2 Macro Examples</a></li>
+      </ul></li>
+      <li><a id="toc-Lexical-Scoping" href="#Lexical-Scoping">7.4.2 Lexical Scoping</a></li>
+      <li><a id="toc-Tail-Call-Optimization" href="#Tail-Call-Optimization">7.4.3 Tail Call Optimization</a></li>
+    </ul></li>
+  </ul></li>
+  <li><a id="toc-Buffer-Management" href="#Buffer-Management">8 Buffer Management</a>
+  <ul class="toc-numbered-mark">
+    <li><a id="toc-Understanding-Buffers" href="#Understanding-Buffers">8.1 Understanding Buffers</a></li>
+    <li><a id="toc-Buffer-Operations" href="#Buffer-Operations">8.2 Buffer Operations</a>
+    <ul class="toc-numbered-mark">
+      <li><a id="toc-Creating-Buffers" href="#Creating-Buffers">8.2.1 Creating Buffers</a></li>
+      <li><a id="toc-Switching-Buffers" href="#Switching-Buffers">8.2.2 Switching Buffers</a></li>
+    </ul></li>
+    <li><a id="toc-File-Operations" href="#File-Operations">8.3 File Operations</a>
+    <ul class="toc-numbered-mark">
+      <li><a id="toc-Opening-Files" href="#Opening-Files">8.3.1 Opening Files</a></li>
+      <li><a id="toc-Saving-Files" href="#Saving-Files">8.3.2 Saving Files</a></li>
+    </ul></li>
+    <li><a id="toc-Buffer-Implementation" href="#Buffer-Implementation">8.4 Buffer Implementation</a></li>
+  </ul></li>
+  <li><a id="toc-Configuration" href="#Configuration">9 Configuration</a>
+  <ul class="toc-numbered-mark">
+    <li><a id="toc-Configuration-File-1" href="#Configuration-File-1">9.1 Configuration File</a></li>
+    <li><a id="toc-Configuration-Examples" href="#Configuration-Examples">9.2 Configuration Examples</a>
+    <ul class="toc-numbered-mark">
+      <li><a id="toc-Basic-Key-Bindings" href="#Basic-Key-Bindings">9.2.1 Basic Key Bindings</a></li>
+      <li><a id="toc-Custom-Functions" href="#Custom-Functions">9.2.2 Custom Functions</a></li>
+      <li><a id="toc-Custom-Macros" href="#Custom-Macros">9.2.3 Custom Macros</a></li>
+      <li><a id="toc-Mode_002dSpecific-Configuration" href="#Mode_002dSpecific-Configuration">9.2.4 Mode-Specific Configuration</a></li>
+    </ul></li>
+  </ul></li>
+  <li><a id="toc-Command-Reference" href="#Command-Reference">10 Command Reference</a>
+  <ul class="toc-numbered-mark">
+    <li><a id="toc-Buffer-Functions" href="#Buffer-Functions">10.1 Buffer Functions</a></li>
+    <li><a id="toc-Cursor-Functions" href="#Cursor-Functions">10.2 Cursor Functions</a></li>
+    <li><a id="toc-Editor-Functions" href="#Editor-Functions">10.3 Editor Functions</a></li>
+    <li><a id="toc-Key-Binding-Functions" href="#Key-Binding-Functions">10.4 Key Binding Functions</a></li>
+    <li><a id="toc-File-Functions" href="#File-Functions">10.5 File Functions</a></li>
+  </ul></li>
+  <li><a id="toc-Examples-1" href="#Examples">11 Examples</a>
+  <ul class="toc-numbered-mark">
+    <li><a id="toc-Basic-Editing-Session" href="#Basic-Editing-Session">11.1 Basic Editing Session</a></li>
+    <li><a id="toc-Configuration-Examples-1" href="#Configuration-Examples-1">11.2 Configuration Examples</a>
+    <ul class="toc-numbered-mark">
+      <li><a id="toc-Programmer_0027s-Setup" href="#Programmer_0027s-Setup">11.2.1 Programmer&rsquo;s Setup</a></li>
+      <li><a id="toc-Writer_0027s-Setup" href="#Writer_0027s-Setup">11.2.2 Writer&rsquo;s Setup</a></li>
+    </ul></li>
+    <li><a id="toc-Advanced-Customization" href="#Advanced-Customization">11.3 Advanced Customization</a>
+    <ul class="toc-numbered-mark">
+      <li><a id="toc-Custom-Mode" href="#Custom-Mode">11.3.1 Custom Mode</a></li>
+      <li><a id="toc-Project-Management" href="#Project-Management">11.3.2 Project Management</a></li>
+    </ul></li>
+  </ul></li>
+  <li><a id="toc-Troubleshooting" href="#Troubleshooting">12 Troubleshooting</a>
+  <ul class="toc-numbered-mark">
+    <li><a id="toc-Installation-Issues" href="#Installation-Issues">12.1 Installation Issues</a>
+    <ul class="toc-numbered-mark">
+      <li><a id="toc-Deno-Not-Found" href="#Deno-Not-Found">12.1.1 Deno Not Found</a></li>
+      <li><a id="toc-Permission-Errors" href="#Permission-Errors">12.1.2 Permission Errors</a></li>
+    </ul></li>
+    <li><a id="toc-Runtime-Issues" href="#Runtime-Issues">12.2 Runtime Issues</a>
+    <ul class="toc-numbered-mark">
+      <li><a id="toc-Terminal-Display-Problems" href="#Terminal-Display-Problems">12.2.1 Terminal Display Problems</a></li>
+      <li><a id="toc-Key-Binding-Not-Working" href="#Key-Binding-Not-Working">12.2.2 Key Binding Not Working</a></li>
+      <li><a id="toc-Performance-Issues" href="#Performance-Issues">12.2.3 Performance Issues</a></li>
+    </ul></li>
+    <li><a id="toc-Configuration-Issues" href="#Configuration-Issues">12.3 Configuration Issues</a>
+    <ul class="toc-numbered-mark">
+      <li><a id="toc-_002etmaxrc-Not-Loading" href="#g_t_002etmaxrc-Not-Loading">12.3.1 .tmaxrc Not Loading</a></li>
+      <li><a id="toc-T_002dLisp-Syntax-Errors" href="#T_002dLisp-Syntax-Errors">12.3.2 T-Lisp Syntax Errors</a></li>
+    </ul></li>
+    <li><a id="toc-Getting-Help" href="#Getting-Help">12.4 Getting Help</a></li>
+  </ul></li>
+  <li><a id="toc-Index" href="#Index" rel="index">Index</a></li>
+</ul>
+</div>
+</div>
+<hr>
+<div class="chapter-level-extent" id="Introduction">
+<div class="nav-panel">
+<p>
+Next: <a href="#Installation" accesskey="n" rel="next">Installation</a>, Previous: <a href="#Top" accesskey="p" rel="prev">tmax</a>, Up: <a href="#Top" accesskey="u" rel="up">tmax</a> &nbsp; [<a href="#SEC_Contents" title="Table of contents" rel="contents">Contents</a>][<a href="#Index" title="Index" rel="index">Index</a>]</p>
+</div>
+<h2 class="chapter" id="Introduction-1"><span>1 Introduction<a class="copiable-link" href="#Introduction-1"> &para;</a></span></h2>
+
+<a class="index-entry-id" id="index-introduction"></a>
+<a class="index-entry-id" id="index-what-is-tmax"></a>
+
+<p>tmax is a comprehensive, extensible terminal-based text editor built with a
+TypeScript core and T-Lisp scripting system. Following the Emacs architecture
+philosophy, TypeScript handles low-level operations (terminal I/O, file system,
+memory management) while T-Lisp handles all higher-level editor functionality.
+</p>
+<ul class="mini-toc">
+<li><a href="#Key-Features" accesskey="1">Key Features</a></li>
+<li><a href="#Target-Users" accesskey="2">Target Users</a></li>
+<li><a href="#Architecture-Overview" accesskey="3">Architecture Overview</a></li>
+</ul>
+<div class="section-level-extent" id="Key-Features">
+<h3 class="section"><span>1.1 Key Features<a class="copiable-link" href="#Key-Features"> &para;</a></span></h3>
+
+<ul class="itemize mark-bullet">
+<li><strong class="strong">Full-screen modal editing</strong> with alternate screen buffer and viewport management
+</li><li><strong class="strong">Complete T-Lisp interpreter</strong> with tail-call optimization and macro system  
+</li><li><strong class="strong">Five editing modes</strong>: normal, insert, visual, command, and M-x
+</li><li><strong class="strong">Vim-like key bindings</strong> with proper hjkl navigation
+</li><li><strong class="strong">Command interface</strong> with both vim-style (:q, :w) and M-x (SPC ;) commands
+</li><li><strong class="strong">Multiple buffer management</strong> with gap buffer implementation
+</li><li><strong class="strong">Comprehensive editor API</strong> (25+ T-Lisp functions)
+</li><li><strong class="strong">Zero external dependencies</strong>
+</li></ul>
+
+</div>
+<div class="section-level-extent" id="Target-Users">
+<h3 class="section"><span>1.2 Target Users<a class="copiable-link" href="#Target-Users"> &para;</a></span></h3>
+
+<p>tmax is designed for:
+</p><ul class="itemize mark-bullet">
+<li>Software developers who want unlimited customization
+</li><li>System administrators who prefer keyboard-driven workflows
+</li><li>Power users who value extensibility over simplicity
+</li><li>Anyone interested in Lisp-based editor configuration
+</li></ul>
+
+</div>
+<div class="section-level-extent" id="Architecture-Overview">
+<h3 class="section"><span>1.3 Architecture Overview<a class="copiable-link" href="#Architecture-Overview"> &para;</a></span></h3>
+
+<ul class="mini-toc">
+<li><a href="#TypeScript-Core-Responsibilities" accesskey="1">TypeScript Core Responsibilities</a></li>
+<li><a href="#T_002dLisp-Engine-Responsibilities" accesskey="2">T-Lisp Engine Responsibilities</a></li>
+</ul>
+<div class="subsection-level-extent" id="TypeScript-Core-Responsibilities">
+<h4 class="subsection"><span>1.3.1 TypeScript Core Responsibilities<a class="copiable-link" href="#TypeScript-Core-Responsibilities"> &para;</a></span></h4>
+<ul class="itemize mark-bullet">
+<li>Terminal I/O with full-screen interface and alternate screen buffer
+</li><li>File system operations with async reading/writing and proper error handling
+</li><li>Memory management with efficient buffer operations and cursor tracking
+</li><li>T-Lisp interpreter runtime with complete interpreter and tail-call optimization
+</li><li>Buffer management using gap buffer implementation for efficient text editing
+</li><li>Viewport management for scrolling and cursor positioning in large files
+</li><li>Key handling with raw mode input and proper key normalization
+</li></ul>
+
+</div>
+<div class="subsection-level-extent" id="T_002dLisp-Engine-Responsibilities">
+<h4 class="subsection"><span>1.3.2 T-Lisp Engine Responsibilities<a class="copiable-link" href="#T_002dLisp-Engine-Responsibilities"> &para;</a></span></h4>
+<ul class="itemize mark-bullet">
+<li>Editor commands with all functionality exposed through T-Lisp API
+</li><li>Mode management for modal editing state and transitions
+</li><li>Key binding definitions with configurable key mappings
+</li><li>User interface logic including status line, command input, M-x functionality
+</li><li>Configuration management through .tmaxrc file loading and execution
+</li><li>Extensibility via custom functions, macros, and commands
+</li></ul>
+
+<hr>
+</div>
+</div>
+</div>
+<div class="chapter-level-extent" id="Installation">
+<div class="nav-panel">
+<p>
+Next: <a href="#Basic-Usage" accesskey="n" rel="next">Basic Usage</a>, Previous: <a href="#Introduction" accesskey="p" rel="prev">Introduction</a>, Up: <a href="#Top" accesskey="u" rel="up">tmax</a> &nbsp; [<a href="#SEC_Contents" title="Table of contents" rel="contents">Contents</a>][<a href="#Index" title="Index" rel="index">Index</a>]</p>
+</div>
+<h2 class="chapter" id="Installation-1"><span>2 Installation<a class="copiable-link" href="#Installation-1"> &para;</a></span></h2>
+
+<a class="index-entry-id" id="index-installation"></a>
+<a class="index-entry-id" id="index-setup"></a>
+<a class="index-entry-id" id="index-deno"></a>
+
+<ul class="mini-toc">
+<li><a href="#Requirements" accesskey="1">Requirements</a></li>
+<li><a href="#Installing-Deno" accesskey="2">Installing Deno</a></li>
+<li><a href="#Getting-tmax" accesskey="3">Getting tmax</a></li>
+<li><a href="#Running-tmax" accesskey="4">Running tmax</a></li>
+<li><a href="#Testing-the-Installation" accesskey="5">Testing the Installation</a></li>
+</ul>
+<div class="section-level-extent" id="Requirements">
+<h3 class="section"><span>2.1 Requirements<a class="copiable-link" href="#Requirements"> &para;</a></span></h3>
+
+<p>tmax requires:
+</p><ul class="itemize mark-bullet">
+<li>Deno 2.3.7 or later
+</li><li>Terminal with ANSI escape sequence support
+</li><li>Unix-like operating system (Linux, macOS, BSD)
+</li></ul>
+
+</div>
+<div class="section-level-extent" id="Installing-Deno">
+<h3 class="section"><span>2.2 Installing Deno<a class="copiable-link" href="#Installing-Deno"> &para;</a></span></h3>
+
+<p>If you don&rsquo;t have Deno installed:
+</p>
+<div class="example">
+<pre class="example-preformatted"># Linux/macOS
+curl -fsSL https://deno.land/install.sh | sh
+
+# Or using package managers:
+# macOS with Homebrew
+brew install deno
+
+# Linux with Snap
+snap install deno
+</pre></div>
+
+</div>
+<div class="section-level-extent" id="Getting-tmax">
+<h3 class="section"><span>2.3 Getting tmax<a class="copiable-link" href="#Getting-tmax"> &para;</a></span></h3>
+
+<p>Clone the repository and set up the development environment:
+</p>
+<div class="example">
+<pre class="example-preformatted">git clone &lt;repository-url&gt; tmax
+cd tmax
+</pre></div>
+
+</div>
+<div class="section-level-extent" id="Running-tmax">
+<h3 class="section"><span>2.4 Running tmax<a class="copiable-link" href="#Running-tmax"> &para;</a></span></h3>
+
+<ul class="mini-toc">
+<li><a href="#Start-the-Editor" accesskey="1">Start the Editor</a></li>
+<li><a href="#Development-Mode-with-Auto_002dreload" accesskey="2">Development Mode with Auto-reload</a></li>
+<li><a href="#T_002dLisp-REPL" accesskey="3">T-Lisp REPL</a></li>
+</ul>
+<div class="subsection-level-extent" id="Start-the-Editor">
+<h4 class="subsection"><span>2.4.1 Start the Editor<a class="copiable-link" href="#Start-the-Editor"> &para;</a></span></h4>
+<div class="example">
+<pre class="example-preformatted">deno task start [filename]
+</pre></div>
+
+</div>
+<div class="subsection-level-extent" id="Development-Mode-with-Auto_002dreload">
+<h4 class="subsection"><span>2.4.2 Development Mode with Auto-reload<a class="copiable-link" href="#Development-Mode-with-Auto_002dreload"> &para;</a></span></h4>
+<div class="example">
+<pre class="example-preformatted">deno task dev
+</pre></div>
+
+</div>
+<div class="subsection-level-extent" id="T_002dLisp-REPL">
+<h4 class="subsection"><span>2.4.3 T-Lisp REPL<a class="copiable-link" href="#T_002dLisp-REPL"> &para;</a></span></h4>
+<div class="example">
+<pre class="example-preformatted">deno task repl
+</pre></div>
+
+</div>
+</div>
+<div class="section-level-extent" id="Testing-the-Installation">
+<h3 class="section"><span>2.5 Testing the Installation<a class="copiable-link" href="#Testing-the-Installation"> &para;</a></span></h3>
+
+<p>Run the comprehensive test suite to verify your installation:
+</p>
+<div class="example">
+<pre class="example-preformatted">deno task test
+</pre></div>
+
+<p>This runs 131 tests across 8 comprehensive test suites.
+</p>
+<hr>
+</div>
+</div>
+<div class="chapter-level-extent" id="Basic-Usage">
+<div class="nav-panel">
+<p>
+Next: <a href="#Editing-Modes" accesskey="n" rel="next">Editing Modes</a>, Previous: <a href="#Installation" accesskey="p" rel="prev">Installation</a>, Up: <a href="#Top" accesskey="u" rel="up">tmax</a> &nbsp; [<a href="#SEC_Contents" title="Table of contents" rel="contents">Contents</a>][<a href="#Index" title="Index" rel="index">Index</a>]</p>
+</div>
+<h2 class="chapter" id="Basic-Usage-1"><span>3 Basic Usage<a class="copiable-link" href="#Basic-Usage-1"> &para;</a></span></h2>
+
+<a class="index-entry-id" id="index-basic-usage"></a>
+<a class="index-entry-id" id="index-getting-started"></a>
+
+<ul class="mini-toc">
+<li><a href="#Starting-tmax" accesskey="1">Starting tmax</a></li>
+<li><a href="#Your-First-Session" accesskey="2">Your First Session</a></li>
+<li><a href="#Essential-Keys" accesskey="3">Essential Keys</a></li>
+<li><a href="#Exiting-tmax" accesskey="4">Exiting tmax</a></li>
+</ul>
+<div class="section-level-extent" id="Starting-tmax">
+<h3 class="section"><span>3.1 Starting tmax<a class="copiable-link" href="#Starting-tmax"> &para;</a></span></h3>
+
+<p>Launch tmax from your terminal:
+</p>
+<div class="example">
+<pre class="example-preformatted">deno task start
+</pre></div>
+
+<p>Or open a specific file:
+</p>
+<div class="example">
+<pre class="example-preformatted">deno task start myfile.txt
+</pre></div>
+
+</div>
+<div class="section-level-extent" id="Your-First-Session">
+<h3 class="section"><span>3.2 Your First Session<a class="copiable-link" href="#Your-First-Session"> &para;</a></span></h3>
+
+<p>When tmax starts, you&rsquo;ll see:
+</p><ul class="itemize mark-bullet">
+<li>A full-screen interface using the alternate screen buffer
+</li><li>A status line at the bottom showing current mode and cursor position
+</li><li>The current buffer content (or empty *scratch* buffer)
+</li></ul>
+
+</div>
+<div class="section-level-extent" id="Essential-Keys">
+<h3 class="section"><span>3.3 Essential Keys<a class="copiable-link" href="#Essential-Keys"> &para;</a></span></h3>
+
+<ul class="mini-toc">
+<li><a href="#Immediate-Survival-Keys" accesskey="1">Immediate Survival Keys</a></li>
+<li><a href="#Basic-Movement" accesskey="2">Basic Movement</a></li>
+<li><a href="#Mode-Switching" accesskey="3">Mode Switching</a></li>
+</ul>
+<div class="subsection-level-extent" id="Immediate-Survival-Keys">
+<h4 class="subsection"><span>3.3.1 Immediate Survival Keys<a class="copiable-link" href="#Immediate-Survival-Keys"> &para;</a></span></h4>
+<dl class="table">
+<dt><kbd class="kbd">q</kbd></dt>
+<dd><p>Quit tmax (in normal mode)
+</p></dd>
+<dt><kbd class="kbd">:q</kbd></dt>
+<dd><p>Quit via command mode
+</p></dd>
+<dt><kbd class="kbd">Escape</kbd></dt>
+<dd><p>Return to normal mode from any other mode
+</p></dd>
+</dl>
+
+</div>
+<div class="subsection-level-extent" id="Basic-Movement">
+<h4 class="subsection"><span>3.3.2 Basic Movement<a class="copiable-link" href="#Basic-Movement"> &para;</a></span></h4>
+<dl class="table">
+<dt><kbd class="kbd">h</kbd></dt>
+<dd><p>Move cursor left
+</p></dd>
+<dt><kbd class="kbd">j</kbd></dt>
+<dd><p>Move cursor down
+</p></dd>
+<dt><kbd class="kbd">k</kbd></dt>
+<dd><p>Move cursor up
+</p></dd>
+<dt><kbd class="kbd">l</kbd></dt>
+<dd><p>Move cursor right
+</p></dd>
+</dl>
+
+</div>
+<div class="subsection-level-extent" id="Mode-Switching">
+<h4 class="subsection"><span>3.3.3 Mode Switching<a class="copiable-link" href="#Mode-Switching"> &para;</a></span></h4>
+<dl class="table">
+<dt><kbd class="kbd">i</kbd></dt>
+<dd><p>Enter insert mode
+</p></dd>
+<dt><kbd class="kbd">:</kbd></dt>
+<dd><p>Enter command mode
+</p></dd>
+<dt><kbd class="kbd">SPC ;</kbd></dt>
+<dd><p>Enter M-x mode (Emacs-style command execution)
+</p></dd>
+</dl>
+
+</div>
+</div>
+<div class="section-level-extent" id="Exiting-tmax">
+<h3 class="section"><span>3.4 Exiting tmax<a class="copiable-link" href="#Exiting-tmax"> &para;</a></span></h3>
+
+<p>From normal mode:
+</p><ul class="itemize mark-bullet">
+<li>Press <kbd class="kbd">q</kbd> to quit immediately
+</li><li>Press <kbd class="kbd">:</kbd> then type <kbd class="kbd">q</kbd> and press <kbd class="kbd">Enter</kbd>
+</li></ul>
+
+<hr>
+</div>
+</div>
+<div class="chapter-level-extent" id="Editing-Modes">
+<div class="nav-panel">
+<p>
+Next: <a href="#Key-Bindings" accesskey="n" rel="next">Key Bindings</a>, Previous: <a href="#Basic-Usage" accesskey="p" rel="prev">Basic Usage</a>, Up: <a href="#Top" accesskey="u" rel="up">tmax</a> &nbsp; [<a href="#SEC_Contents" title="Table of contents" rel="contents">Contents</a>][<a href="#Index" title="Index" rel="index">Index</a>]</p>
+</div>
+<h2 class="chapter" id="Editing-Modes-1"><span>4 Editing Modes<a class="copiable-link" href="#Editing-Modes-1"> &para;</a></span></h2>
+
+<a class="index-entry-id" id="index-modes"></a>
+<a class="index-entry-id" id="index-modal-editing"></a>
+
+<p>tmax uses a modal editing system with five distinct modes, each optimized for specific tasks.
+</p>
+<ul class="mini-toc">
+<li><a href="#Normal-Mode" accesskey="1">Normal Mode</a></li>
+<li><a href="#Insert-Mode" accesskey="2">Insert Mode</a></li>
+<li><a href="#Command-Mode" accesskey="3">Command Mode</a></li>
+<li><a href="#M_002dx-Mode" accesskey="4">M-x Mode</a></li>
+<li><a href="#Visual-Mode" accesskey="5">Visual Mode</a></li>
+<li><a href="#Mode-Transitions" accesskey="6">Mode Transitions</a></li>
+</ul>
+<div class="section-level-extent" id="Normal-Mode">
+<h3 class="section"><span>4.1 Normal Mode<a class="copiable-link" href="#Normal-Mode"> &para;</a></span></h3>
+
+<a class="index-entry-id" id="index-normal-mode"></a>
+<a class="index-entry-id" id="index-navigation"></a>
+
+<p>Normal mode is the default mode for navigation and text manipulation commands.
+</p>
+<ul class="mini-toc">
+<li><a href="#Characteristics" accesskey="1">Characteristics</a></li>
+<li><a href="#Navigation-Commands" accesskey="2">Navigation Commands</a></li>
+</ul>
+<div class="subsection-level-extent" id="Characteristics">
+<h4 class="subsection"><span>4.1.1 Characteristics<a class="copiable-link" href="#Characteristics"> &para;</a></span></h4>
+<ul class="itemize mark-bullet">
+<li>Primary mode for cursor movement
+</li><li>Text modification through commands
+</li><li>Access point to other modes
+</li><li>Status line shows &lsquo;<samp class="samp">-- NORMAL --</samp>&rsquo;
+</li></ul>
+
+</div>
+<div class="subsection-level-extent" id="Navigation-Commands">
+<h4 class="subsection"><span>4.1.2 Navigation Commands<a class="copiable-link" href="#Navigation-Commands"> &para;</a></span></h4>
+<dl class="table">
+<dt><kbd class="kbd">h</kbd></dt>
+<dd><p>Move cursor left one character
+</p></dd>
+<dt><kbd class="kbd">j</kbd></dt>
+<dd><p>Move cursor down one line  
+</p></dd>
+<dt><kbd class="kbd">k</kbd></dt>
+<dd><p>Move cursor up one line
+</p></dd>
+<dt><kbd class="kbd">l</kbd></dt>
+<dd><p>Move cursor right one character
+</p></dd>
+</dl>
+
+</div>
+</div>
+<div class="section-level-extent" id="Insert-Mode">
+<h3 class="section"><span>4.2 Insert Mode<a class="copiable-link" href="#Insert-Mode"> &para;</a></span></h3>
+
+<a class="index-entry-id" id="index-insert-mode"></a>
+<a class="index-entry-id" id="index-text-input"></a>
+
+<p>Insert mode is for entering and editing text directly.
+</p>
+<ul class="mini-toc">
+<li><a href="#Entering-Insert-Mode" accesskey="1">Entering Insert Mode</a></li>
+<li><a href="#In-Insert-Mode" accesskey="2">In Insert Mode</a></li>
+<li><a href="#Status-Display" accesskey="3">Status Display</a></li>
+</ul>
+<div class="subsection-level-extent" id="Entering-Insert-Mode">
+<h4 class="subsection"><span>4.2.1 Entering Insert Mode<a class="copiable-link" href="#Entering-Insert-Mode"> &para;</a></span></h4>
+<dl class="table">
+<dt><kbd class="kbd">i</kbd></dt>
+<dd><p>Insert text before cursor (from normal mode)
+</p></dd>
+</dl>
+
+</div>
+<div class="subsection-level-extent" id="In-Insert-Mode">
+<h4 class="subsection"><span>4.2.2 In Insert Mode<a class="copiable-link" href="#In-Insert-Mode"> &para;</a></span></h4>
+<ul class="itemize mark-bullet">
+<li>Type normally to insert text
+</li><li><kbd class="kbd">Backspace</kbd> deletes the previous character
+</li><li><kbd class="kbd">Enter</kbd> creates a new line
+</li><li><kbd class="kbd">Escape</kbd> returns to normal mode
+</li></ul>
+
+</div>
+<div class="subsection-level-extent" id="Status-Display">
+<h4 class="subsection"><span>4.2.3 Status Display<a class="copiable-link" href="#Status-Display"> &para;</a></span></h4>
+<p>Status line shows &lsquo;<samp class="samp">-- INSERT --</samp>&rsquo; with cursor position.
+</p>
+</div>
+</div>
+<div class="section-level-extent" id="Command-Mode">
+<h3 class="section"><span>4.3 Command Mode<a class="copiable-link" href="#Command-Mode"> &para;</a></span></h3>
+
+<a class="index-entry-id" id="index-command-mode"></a>
+<a class="index-entry-id" id="index-vim-commands"></a>
+
+<p>Command mode provides a vim-style command interface for file operations and editor control.
+</p>
+<ul class="mini-toc">
+<li><a href="#Entering-Command-Mode" accesskey="1">Entering Command Mode</a></li>
+<li><a href="#Command-Mode-Interface" accesskey="2">Command Mode Interface</a></li>
+<li><a href="#Available-Commands" accesskey="3">Available Commands</a></li>
+</ul>
+<div class="subsection-level-extent" id="Entering-Command-Mode">
+<h4 class="subsection"><span>4.3.1 Entering Command Mode<a class="copiable-link" href="#Entering-Command-Mode"> &para;</a></span></h4>
+<dl class="table">
+<dt><kbd class="kbd">:</kbd></dt>
+<dd><p>From normal mode, press colon to enter command mode
+</p></dd>
+</dl>
+
+</div>
+<div class="subsection-level-extent" id="Command-Mode-Interface">
+<h4 class="subsection"><span>4.3.2 Command Mode Interface<a class="copiable-link" href="#Command-Mode-Interface"> &para;</a></span></h4>
+<ul class="itemize mark-bullet">
+<li>Prompt shows &lsquo;<samp class="samp">:</samp>&rsquo; followed by your input
+</li><li>Type commands and press <kbd class="kbd">Enter</kbd> to execute
+</li><li><kbd class="kbd">Escape</kbd> cancels and returns to normal mode
+</li><li><kbd class="kbd">Backspace</kbd> deletes characters from command line
+</li></ul>
+
+</div>
+<div class="subsection-level-extent" id="Available-Commands">
+<h4 class="subsection"><span>4.3.3 Available Commands<a class="copiable-link" href="#Available-Commands"> &para;</a></span></h4>
+<dl class="table">
+<dt><code class="code">q</code></dt>
+<dd><p>Quit the editor
+</p></dd>
+<dt><code class="code">w</code></dt>
+<dd><p>Write (save) current buffer
+</p></dd>
+<dt><code class="code">wq</code></dt>
+<dd><p>Write and quit
+</p></dd>
+</dl>
+
+</div>
+</div>
+<div class="section-level-extent" id="M_002dx-Mode">
+<h3 class="section"><span>4.4 M-x Mode<a class="copiable-link" href="#M_002dx-Mode"> &para;</a></span></h3>
+
+<a class="index-entry-id" id="index-M_002dx-mode"></a>
+<a class="index-entry-id" id="index-emacs-commands"></a>
+
+<p>M-x mode provides Emacs-style function execution by name.
+</p>
+<ul class="mini-toc">
+<li><a href="#Entering-M_002dx-Mode" accesskey="1">Entering M-x Mode</a></li>
+<li><a href="#M_002dx-Mode-Interface" accesskey="2">M-x Mode Interface</a></li>
+<li><a href="#Available-Functions" accesskey="3">Available Functions</a></li>
+</ul>
+<div class="subsection-level-extent" id="Entering-M_002dx-Mode">
+<h4 class="subsection"><span>4.4.1 Entering M-x Mode<a class="copiable-link" href="#Entering-M_002dx-Mode"> &para;</a></span></h4>
+<dl class="table">
+<dt><kbd class="kbd">SPC ;</kbd></dt>
+<dd><p>From normal mode, press Space followed by semicolon
+</p></dd>
+</dl>
+
+</div>
+<div class="subsection-level-extent" id="M_002dx-Mode-Interface">
+<h4 class="subsection"><span>4.4.2 M-x Mode Interface<a class="copiable-link" href="#M_002dx-Mode-Interface"> &para;</a></span></h4>
+<ul class="itemize mark-bullet">
+<li>Prompt shows &lsquo;<samp class="samp">M-x </samp>&rsquo; followed by your input
+</li><li>Type function names and press <kbd class="kbd">Enter</kbd> to execute
+</li><li><kbd class="kbd">Escape</kbd> cancels and returns to normal mode
+</li><li><kbd class="kbd">Backspace</kbd> deletes characters from function name
+</li></ul>
+
+</div>
+<div class="subsection-level-extent" id="Available-Functions">
+<h4 class="subsection"><span>4.4.3 Available Functions<a class="copiable-link" href="#Available-Functions"> &para;</a></span></h4>
+<dl class="table">
+<dt><code class="code">cursor-position</code></dt>
+<dd><p>Show current cursor position
+</p></dd>
+<dt><code class="code">editor-mode</code></dt>
+<dd><p>Display current editing mode
+</p></dd>
+<dt><code class="code">quit</code></dt>
+<dd><p>Quit the editor
+</p></dd>
+</dl>
+
+</div>
+</div>
+<div class="section-level-extent" id="Visual-Mode">
+<h3 class="section"><span>4.5 Visual Mode<a class="copiable-link" href="#Visual-Mode"> &para;</a></span></h3>
+
+<a class="index-entry-id" id="index-visual-mode"></a>
+<a class="index-entry-id" id="index-text-selection"></a>
+
+<p>Visual mode is planned for text selection and manipulation (currently in development).
+</p>
+</div>
+<div class="section-level-extent" id="Mode-Transitions">
+<h3 class="section"><span>4.6 Mode Transitions<a class="copiable-link" href="#Mode-Transitions"> &para;</a></span></h3>
+
+<div class="example">
+<pre class="example-preformatted">Normal ←→ Insert    (i / Escape)
+Normal ←→ Command   (: / Escape)  
+Normal ←→ M-x      (SPC ; / Escape)
+Normal ←→ Visual   (planned)
+</pre></div>
+
+<hr>
+</div>
+</div>
+<div class="chapter-level-extent" id="Key-Bindings">
+<div class="nav-panel">
+<p>
+Next: <a href="#T_002dLisp-System" accesskey="n" rel="next">T-Lisp System</a>, Previous: <a href="#Editing-Modes" accesskey="p" rel="prev">Editing Modes</a>, Up: <a href="#Top" accesskey="u" rel="up">tmax</a> &nbsp; [<a href="#SEC_Contents" title="Table of contents" rel="contents">Contents</a>][<a href="#Index" title="Index" rel="index">Index</a>]</p>
+</div>
+<h2 class="chapter" id="Key-Bindings-1"><span>5 Key Bindings<a class="copiable-link" href="#Key-Bindings-1"> &para;</a></span></h2>
+
+<a class="index-entry-id" id="index-key-bindings"></a>
+<a class="index-entry-id" id="index-keybindings"></a>
+<a class="index-entry-id" id="index-customization"></a>
+
+<p>tmax uses a T-Lisp-centric key binding system that is fully customizable.
+</p>
+<ul class="mini-toc">
+<li><a href="#Default-Key-Bindings" accesskey="1">Default Key Bindings</a></li>
+<li><a href="#Customizing-Key-Bindings" accesskey="2">Customizing Key Bindings</a></li>
+<li><a href="#Core-Bindings-File" accesskey="3">Core Bindings File</a></li>
+</ul>
+<div class="section-level-extent" id="Default-Key-Bindings">
+<h3 class="section"><span>5.1 Default Key Bindings<a class="copiable-link" href="#Default-Key-Bindings"> &para;</a></span></h3>
+
+<ul class="mini-toc">
+<li><a href="#Normal-Mode-Bindings" accesskey="1">Normal Mode Bindings</a></li>
+<li><a href="#Insert-Mode-Bindings" accesskey="2">Insert Mode Bindings</a></li>
+<li><a href="#Command-Mode-Bindings" accesskey="3">Command Mode Bindings</a></li>
+<li><a href="#M_002dx-Mode-Bindings" accesskey="4">M-x Mode Bindings</a></li>
+</ul>
+<div class="subsection-level-extent" id="Normal-Mode-Bindings">
+<h4 class="subsection"><span>5.1.1 Normal Mode Bindings<a class="copiable-link" href="#Normal-Mode-Bindings"> &para;</a></span></h4>
+<table class="multitable">
+<thead><tr><th width="20%">Key</th><th width="40%">Command</th><th width="40%">Description</th></tr></thead>
+<tbody><tr><td width="20%"><kbd class="kbd">h</kbd></td><td width="40%"><code class="code">(cursor-move (cursor-line) (- (cursor-column) 1))</code></td><td width="40%">Move left</td></tr>
+<tr><td width="20%"><kbd class="kbd">j</kbd></td><td width="40%"><code class="code">(cursor-move (+ (cursor-line) 1) (cursor-column))</code></td><td width="40%">Move down</td></tr>
+<tr><td width="20%"><kbd class="kbd">k</kbd></td><td width="40%"><code class="code">(cursor-move (- (cursor-line) 1) (cursor-column))</code></td><td width="40%">Move up</td></tr>
+<tr><td width="20%"><kbd class="kbd">l</kbd></td><td width="40%"><code class="code">(cursor-move (cursor-line) (+ (cursor-column) 1))</code></td><td width="40%">Move right</td></tr>
+<tr><td width="20%"><kbd class="kbd">i</kbd></td><td width="40%"><code class="code">(editor-set-mode &quot;insert&quot;)</code></td><td width="40%">Enter insert mode</td></tr>
+<tr><td width="20%"><kbd class="kbd">:</kbd></td><td width="40%"><code class="code">(editor-enter-command-mode)</code></td><td width="40%">Enter command mode</td></tr>
+<tr><td width="20%"><kbd class="kbd">SPC</kbd></td><td width="40%"><code class="code">(editor-handle-space)</code></td><td width="40%">Start M-x sequence</td></tr>
+<tr><td width="20%"><kbd class="kbd">;</kbd></td><td width="40%"><code class="code">(editor-handle-semicolon)</code></td><td width="40%">Complete M-x sequence</td></tr>
+<tr><td width="20%"><kbd class="kbd">q</kbd></td><td width="40%"><code class="code">(editor-quit)</code></td><td width="40%">Quit editor</td></tr>
+</tbody>
+</table>
+
+</div>
+<div class="subsection-level-extent" id="Insert-Mode-Bindings">
+<h4 class="subsection"><span>5.1.2 Insert Mode Bindings<a class="copiable-link" href="#Insert-Mode-Bindings"> &para;</a></span></h4>
+<table class="multitable">
+<thead><tr><th width="20%">Key</th><th width="40%">Command</th><th width="40%">Description</th></tr></thead>
+<tbody><tr><td width="20%"><kbd class="kbd">Escape</kbd></td><td width="40%"><code class="code">(editor-set-mode &quot;normal&quot;)</code></td><td width="40%">Return to normal mode</td></tr>
+<tr><td width="20%"><kbd class="kbd">Backspace</kbd></td><td width="40%"><code class="code">(buffer-delete 1)</code></td><td width="40%">Delete previous character</td></tr>
+<tr><td width="20%"><kbd class="kbd">Enter</kbd></td><td width="40%"><code class="code">(buffer-insert &quot;\n&quot;)</code></td><td width="40%">Insert newline</td></tr>
+<tr><td width="20%">Printable chars</td><td width="40%"><code class="code">(buffer-insert &quot;char&quot;)</code></td><td width="40%">Insert character</td></tr>
+</tbody>
+</table>
+
+</div>
+<div class="subsection-level-extent" id="Command-Mode-Bindings">
+<h4 class="subsection"><span>5.1.3 Command Mode Bindings<a class="copiable-link" href="#Command-Mode-Bindings"> &para;</a></span></h4>
+<table class="multitable">
+<thead><tr><th width="20%">Key</th><th width="40%">Command</th><th width="40%">Description</th></tr></thead>
+<tbody><tr><td width="20%"><kbd class="kbd">Escape</kbd></td><td width="40%"><code class="code">(editor-exit-command-mode)</code></td><td width="40%">Cancel command mode</td></tr>
+<tr><td width="20%"><kbd class="kbd">Enter</kbd></td><td width="40%"><code class="code">(editor-execute-command-line)</code></td><td width="40%">Execute command</td></tr>
+<tr><td width="20%"><kbd class="kbd">q</kbd></td><td width="40%"><code class="code">(editor-quit)</code></td><td width="40%">Quit editor</td></tr>
+<tr><td width="20%">Printable chars</td><td width="40%">Added to command line</td><td width="40%">Build command</td></tr>
+</tbody>
+</table>
+
+</div>
+<div class="subsection-level-extent" id="M_002dx-Mode-Bindings">
+<h4 class="subsection"><span>5.1.4 M-x Mode Bindings<a class="copiable-link" href="#M_002dx-Mode-Bindings"> &para;</a></span></h4>
+<table class="multitable">
+<thead><tr><th width="20%">Key</th><th width="40%">Command</th><th width="40%">Description</th></tr></thead>
+<tbody><tr><td width="20%"><kbd class="kbd">Escape</kbd></td><td width="40%"><code class="code">(editor-exit-mx-mode)</code></td><td width="40%">Cancel M-x mode</td></tr>
+<tr><td width="20%"><kbd class="kbd">Enter</kbd></td><td width="40%"><code class="code">(editor-execute-mx-command)</code></td><td width="40%">Execute function</td></tr>
+<tr><td width="20%">Printable chars</td><td width="40%">Added to function name</td><td width="40%">Build function name</td></tr>
+</tbody>
+</table>
+
+</div>
+</div>
+<div class="section-level-extent" id="Customizing-Key-Bindings">
+<h3 class="section"><span>5.2 Customizing Key Bindings<a class="copiable-link" href="#Customizing-Key-Bindings"> &para;</a></span></h3>
+
+<p>Key bindings are defined in T-Lisp using the <code class="code">key-bind</code> function.
+</p>
+<ul class="mini-toc">
+<li><a href="#The-key_002dbind-Function" accesskey="1">The key-bind Function</a></li>
+<li><a href="#Examples-1" accesskey="2">Examples</a></li>
+</ul>
+<div class="subsection-level-extent" id="The-key_002dbind-Function">
+<h4 class="subsection"><span>5.2.1 The key-bind Function<a class="copiable-link" href="#The-key_002dbind-Function"> &para;</a></span></h4>
+
+<div class="example">
+<pre class="example-preformatted">(key-bind KEY COMMAND MODE)
+</pre></div>
+
+<dl class="table">
+<dt><var class="var">KEY</var></dt>
+<dd><p>String representing the key (e.g., &quot;h&quot;, &quot;Escape&quot;, &quot;Enter&quot;)
+</p></dd>
+<dt><var class="var">COMMAND</var></dt>
+<dd><p>T-Lisp expression as string to execute when key is pressed
+</p></dd>
+<dt><var class="var">MODE</var></dt>
+<dd><p>Optional mode restriction (&quot;normal&quot;, &quot;insert&quot;, &quot;visual&quot;, &quot;command&quot;, &quot;mx&quot;)
+</p></dd>
+</dl>
+
+</div>
+<div class="subsection-level-extent" id="Examples-1">
+<h4 class="subsection"><span>5.2.2 Examples<a class="copiable-link" href="#Examples-1"> &para;</a></span></h4>
+
+<div class="example">
+<pre class="example-preformatted">;; Bind 'x' to delete character in normal mode
+(key-bind &quot;x&quot; &quot;(buffer-delete 1)&quot; &quot;normal&quot;)
+
+;; Bind Ctrl+S to save (works in all modes)
+(key-bind &quot;C-s&quot; &quot;(quick-save)&quot;)
+
+;; Bind F1 to show help
+(key-bind &quot;F1&quot; &quot;(show-help)&quot; &quot;normal&quot;)
+</pre></div>
+
+</div>
+</div>
+<div class="section-level-extent" id="Core-Bindings-File">
+<h3 class="section"><span>5.3 Core Bindings File<a class="copiable-link" href="#Core-Bindings-File"> &para;</a></span></h3>
+
+<p>Default key bindings are stored in <samp class="file">src/tlisp/core-bindings.tlisp</samp>. This file is loaded automatically when tmax starts.
+</p>
+<ul class="mini-toc">
+<li><a href="#File-Structure" accesskey="1">File Structure</a></li>
+</ul>
+<div class="subsection-level-extent" id="File-Structure">
+<h4 class="subsection"><span>5.3.1 File Structure<a class="copiable-link" href="#File-Structure"> &para;</a></span></h4>
+<div class="example">
+<pre class="example-preformatted">;; =================================================================
+;; BASIC NAVIGATION (Normal Mode)  
+;; =================================================================
+(key-bind &quot;h&quot; &quot;(cursor-move (cursor-line) (- (cursor-column) 1))&quot; &quot;normal&quot;)
+;; ... more navigation bindings
+
+;; =================================================================  
+;; MODE SWITCHING
+;; =================================================================
+(key-bind &quot;i&quot; &quot;(editor-set-mode \&quot;insert\&quot;)&quot; &quot;normal&quot;)
+;; ... more mode bindings
+</pre></div>
+
+<hr>
+</div>
+</div>
+</div>
+<div class="chapter-level-extent" id="T_002dLisp-System">
+<div class="nav-panel">
+<p>
+Next: <a href="#T_002dLisp-Language-Reference" accesskey="n" rel="next">T-Lisp Language Reference</a>, Previous: <a href="#Key-Bindings" accesskey="p" rel="prev">Key Bindings</a>, Up: <a href="#Top" accesskey="u" rel="up">tmax</a> &nbsp; [<a href="#SEC_Contents" title="Table of contents" rel="contents">Contents</a>][<a href="#Index" title="Index" rel="index">Index</a>]</p>
+</div>
+<h2 class="chapter" id="T_002dLisp-System-1"><span>6 T-Lisp System<a class="copiable-link" href="#T_002dLisp-System-1"> &para;</a></span></h2>
+
+<a class="index-entry-id" id="index-T_002dLisp"></a>
+<a class="index-entry-id" id="index-scripting"></a>
+<a class="index-entry-id" id="index-extensibility"></a>
+
+<p>tmax includes a complete T-Lisp interpreter for editor customization and extensibility.
+</p>
+<ul class="mini-toc">
+<li><a href="#T_002dLisp-Overview" accesskey="1">T-Lisp Overview</a></li>
+<li><a href="#Basic-Syntax" accesskey="2">Basic Syntax</a></li>
+<li><a href="#Standard-Library-Functions" accesskey="3">Standard Library Functions</a></li>
+<li><a href="#Macro-System" accesskey="4">Macro System</a></li>
+<li><a href="#Configuration-File" accesskey="5">Configuration File</a></li>
+</ul>
+<div class="section-level-extent" id="T_002dLisp-Overview">
+<h3 class="section"><span>6.1 T-Lisp Overview<a class="copiable-link" href="#T_002dLisp-Overview"> &para;</a></span></h3>
+
+<p>T-Lisp (tmax Lisp) is a Lisp-1 dialect with:
+</p><ul class="itemize mark-bullet">
+<li>Lexical scoping
+</li><li>Tail-call optimization  
+</li><li>Macro system with quasiquote support
+</li><li>Comprehensive standard library (31 built-in functions)
+</li><li>Editor API integration (25+ editor-specific functions)
+</li></ul>
+
+</div>
+<div class="section-level-extent" id="Basic-Syntax">
+<h3 class="section"><span>6.2 Basic Syntax<a class="copiable-link" href="#Basic-Syntax"> &para;</a></span></h3>
+
+<ul class="mini-toc">
+<li><a href="#Data-Types" accesskey="1">Data Types</a></li>
+<li><a href="#Function-Calls" accesskey="2">Function Calls</a></li>
+<li><a href="#Variable-Binding" accesskey="3">Variable Binding</a></li>
+</ul>
+<div class="subsection-level-extent" id="Data-Types">
+<h4 class="subsection"><span>6.2.1 Data Types<a class="copiable-link" href="#Data-Types"> &para;</a></span></h4>
+<dl class="table">
+<dt><code class="code">Numbers</code></dt>
+<dd><p><code class="code">42</code>, <code class="code">3.14</code>, <code class="code">-17</code>
+</p></dd>
+<dt><code class="code">Strings</code></dt>
+<dd><p><code class="code">&quot;hello world&quot;</code>, <code class="code">&quot;file.txt&quot;</code>
+</p></dd>
+<dt><code class="code">Symbols</code></dt>
+<dd><p><code class="code">x</code>, <code class="code">my-var</code>, <code class="code">buffer-insert</code>
+</p></dd>
+<dt><code class="code">Lists</code></dt>
+<dd><p><code class="code">(a b c)</code>, <code class="code">(+ 1 2 3)</code>
+</p></dd>
+<dt><code class="code">Boolean</code></dt>
+<dd><p><code class="code">#t</code> (true), <code class="code">#f</code> (false)
+</p></dd>
+<dt><code class="code">Nil</code></dt>
+<dd><p><code class="code">nil</code> (empty list)
+</p></dd>
+</dl>
+
+</div>
+<div class="subsection-level-extent" id="Function-Calls">
+<h4 class="subsection"><span>6.2.2 Function Calls<a class="copiable-link" href="#Function-Calls"> &para;</a></span></h4>
+<div class="example">
+<pre class="example-preformatted">(function-name arg1 arg2 arg3)
+(+ 1 2 3)        ; Returns 6
+(buffer-insert &quot;hello&quot;)
+(cursor-move 10 5)
+</pre></div>
+
+</div>
+<div class="subsection-level-extent" id="Variable-Binding">
+<h4 class="subsection"><span>6.2.3 Variable Binding<a class="copiable-link" href="#Variable-Binding"> &para;</a></span></h4>
+<div class="example">
+<pre class="example-preformatted">;; Define variables
+(setq x 42)
+(setq name &quot;tmax&quot;)
+
+;; Let bindings (local scope)
+(let ((x 10) (y 20))
+  (+ x y))       ; Returns 30
+</pre></div>
+
+</div>
+</div>
+<div class="section-level-extent" id="Standard-Library-Functions">
+<h3 class="section"><span>6.3 Standard Library Functions<a class="copiable-link" href="#Standard-Library-Functions"> &para;</a></span></h3>
+
+<ul class="mini-toc">
+<li><a href="#Arithmetic-Functions" accesskey="1">Arithmetic Functions</a></li>
+<li><a href="#List-Functions" accesskey="2">List Functions</a></li>
+<li><a href="#String-Functions" accesskey="3">String Functions</a></li>
+<li><a href="#Control-Flow" accesskey="4">Control Flow</a></li>
+<li><a href="#Comparison-Functions" accesskey="5">Comparison Functions</a></li>
+</ul>
+<div class="subsection-level-extent" id="Arithmetic-Functions">
+<h4 class="subsection"><span>6.3.1 Arithmetic Functions<a class="copiable-link" href="#Arithmetic-Functions"> &para;</a></span></h4>
+<dl class="table">
+<dt><code class="code">(+...)</code></dt>
+<dd><p>Addition with any number of arguments
+</p></dd>
+<dt><code class="code">(-...)</code></dt>
+<dd><p>Subtraction with any number of arguments
+</p></dd>
+<dt><code class="code">(*...)</code></dt>
+<dd><p>Multiplication with any number of arguments
+</p></dd>
+<dt><code class="code">(/...)</code></dt>
+<dd><p>Division with any number of arguments
+</p></dd>
+<dt><code class="code">(mod a b)</code></dt>
+<dd><p>Modulo operation
+</p></dd>
+</dl>
+
+</div>
+<div class="subsection-level-extent" id="List-Functions">
+<h4 class="subsection"><span>6.3.2 List Functions<a class="copiable-link" href="#List-Functions"> &para;</a></span></h4>
+<dl class="table">
+<dt><code class="code">(cons a b)</code></dt>
+<dd><p>Create cons cell with car <var class="var">a</var> and cdr <var class="var">b</var>
+</p></dd>
+<dt><code class="code">(car list)</code></dt>
+<dd><p>Get first element of list
+</p></dd>
+<dt><code class="code">(cdr list)</code></dt>
+<dd><p>Get rest of list after first element
+</p></dd>
+<dt><code class="code">(length list)</code></dt>
+<dd><p>Get length of list
+</p></dd>
+<dt><code class="code">(nth n list)</code></dt>
+<dd><p>Get <var class="var">n</var>th element of list (0-indexed)
+</p></dd>
+<dt><code class="code">(append list1 list2)</code></dt>
+<dd><p>Concatenate two lists
+</p></dd>
+<dt><code class="code">(reverse list)</code></dt>
+<dd><p>Reverse a list
+</p></dd>
+</dl>
+
+</div>
+<div class="subsection-level-extent" id="String-Functions">
+<h4 class="subsection"><span>6.3.3 String Functions<a class="copiable-link" href="#String-Functions"> &para;</a></span></h4>
+<dl class="table">
+<dt><code class="code">(string-length str)</code></dt>
+<dd><p>Get length of string
+</p></dd>
+<dt><code class="code">(string-append str1 str2)</code></dt>
+<dd><p>Concatenate strings
+</p></dd>
+<dt><code class="code">(substring str start end)</code></dt>
+<dd><p>Extract substring
+</p></dd>
+</dl>
+
+</div>
+<div class="subsection-level-extent" id="Control-Flow">
+<h4 class="subsection"><span>6.3.4 Control Flow<a class="copiable-link" href="#Control-Flow"> &para;</a></span></h4>
+<dl class="table">
+<dt><code class="code">(if condition then else)</code></dt>
+<dd><p>Conditional expression
+</p></dd>
+<dt><code class="code">(when condition body...)</code></dt>
+<dd><p>Execute body if condition is true
+</p></dd>
+<dt><code class="code">(unless condition body...)</code></dt>
+<dd><p>Execute body if condition is false
+</p></dd>
+<dt><code class="code">(cond (test1 result1) (test2 result2) ... (else default))</code></dt>
+<dd><p>Multi-way conditional
+</p></dd>
+</dl>
+
+</div>
+<div class="subsection-level-extent" id="Comparison-Functions">
+<h4 class="subsection"><span>6.3.5 Comparison Functions<a class="copiable-link" href="#Comparison-Functions"> &para;</a></span></h4>
+<dl class="table">
+<dt><code class="code">(= a b)</code></dt>
+<dd><p>Numeric equality
+</p></dd>
+<dt><code class="code">(&lt; a b)</code></dt>
+<dd><p>Less than
+</p></dd>
+<dt><code class="code">(&gt; a b)</code></dt>
+<dd><p>Greater than
+</p></dd>
+<dt><code class="code">(&lt;= a b)</code></dt>
+<dd><p>Less than or equal
+</p></dd>
+<dt><code class="code">(&gt;= a b)</code></dt>
+<dd><p>Greater than or equal
+</p></dd>
+<dt><code class="code">(eq a b)</code></dt>
+<dd><p>Object identity
+</p></dd>
+<dt><code class="code">(equal a b)</code></dt>
+<dd><p>Structural equality
+</p></dd>
+</dl>
+
+</div>
+</div>
+<div class="section-level-extent" id="Macro-System">
+<h3 class="section"><span>6.4 Macro System<a class="copiable-link" href="#Macro-System"> &para;</a></span></h3>
+
+<p>T-Lisp supports macros with full quasiquote support.
+</p>
+<ul class="mini-toc">
+<li><a href="#Defining-Macros" accesskey="1">Defining Macros</a></li>
+<li><a href="#Quasiquote-Syntax" accesskey="2">Quasiquote Syntax</a></li>
+<li><a href="#Example-Usage" accesskey="3">Example Usage</a></li>
+</ul>
+<div class="subsection-level-extent" id="Defining-Macros">
+<h4 class="subsection"><span>6.4.1 Defining Macros<a class="copiable-link" href="#Defining-Macros"> &para;</a></span></h4>
+<div class="example">
+<pre class="example-preformatted">(defmacro when (condition &amp;rest body)
+  `(if ,condition (progn ,@body)))
+
+(defmacro save-and-quit ()
+  '(progn (quick-save) (editor-quit)))
+</pre></div>
+
+</div>
+<div class="subsection-level-extent" id="Quasiquote-Syntax">
+<h4 class="subsection"><span>6.4.2 Quasiquote Syntax<a class="copiable-link" href="#Quasiquote-Syntax"> &para;</a></span></h4>
+<dl class="table">
+<dt><code class="code">`expression</code></dt>
+<dd><p>Quasiquote - like quote but allows unquoting
+</p></dd>
+<dt><code class="code">,expression</code></dt>
+<dd><p>Unquote within quasiquote
+</p></dd>
+<dt><code class="code">,@expression</code></dt>
+<dd><p>Splice unquote - inserts list elements
+</p></dd>
+</dl>
+
+</div>
+<div class="subsection-level-extent" id="Example-Usage">
+<h4 class="subsection"><span>6.4.3 Example Usage<a class="copiable-link" href="#Example-Usage"> &para;</a></span></h4>
+<div class="example">
+<pre class="example-preformatted">(defmacro increment (var)
+  `(setq ,var (+ ,var 1)))
+
+(setq x 5)
+(increment x)  ; x is now 6
+</pre></div>
+
+</div>
+</div>
+<div class="section-level-extent" id="Configuration-File">
+<h3 class="section"><span>6.5 Configuration File<a class="copiable-link" href="#Configuration-File"> &para;</a></span></h3>
+
+<p>tmax loads <samp class="file">~/.tmaxrc</samp> on startup if it exists.
+</p>
+<ul class="mini-toc">
+<li><a href="#Example-_002etmaxrc" accesskey="1">Example .tmaxrc</a></li>
+</ul>
+<div class="subsection-level-extent" id="Example-_002etmaxrc">
+<h4 class="subsection"><span>6.5.1 Example .tmaxrc<a class="copiable-link" href="#Example-_002etmaxrc"> &para;</a></span></h4>
+<div class="example">
+<pre class="example-preformatted">;; ~/.tmaxrc - tmax configuration
+
+;; Define custom word count function
+(defun word-count ()
+  (let ((text (buffer-text)))
+    (length (split-string text &quot; &quot;))))
+
+;; Bind w to move 5 lines down in normal mode  
+(key-bind &quot;w&quot; &quot;(cursor-move (+ (cursor-line) 5) (cursor-column))&quot; &quot;normal&quot;)
+
+;; Define save-and-quit macro
+(defmacro save-and-quit ()
+  '(progn (quick-save) (editor-quit)))
+
+;; Custom status message
+(editor-set-status &quot;tmax ready - T-Lisp configured&quot;)
+</pre></div>
+
+<hr>
+</div>
+</div>
+</div>
+<div class="chapter-level-extent" id="T_002dLisp-Language-Reference">
+<div class="nav-panel">
+<p>
+Next: <a href="#Buffer-Management" accesskey="n" rel="next">Buffer Management</a>, Previous: <a href="#T_002dLisp-System" accesskey="p" rel="prev">T-Lisp System</a>, Up: <a href="#Top" accesskey="u" rel="up">tmax</a> &nbsp; [<a href="#SEC_Contents" title="Table of contents" rel="contents">Contents</a>][<a href="#Index" title="Index" rel="index">Index</a>]</p>
+</div>
+<h2 class="chapter" id="T_002dLisp-Language-Reference-1"><span>7 T-Lisp Language Reference<a class="copiable-link" href="#T_002dLisp-Language-Reference-1"> &para;</a></span></h2>
+
+<a class="index-entry-id" id="index-T_002dLisp-reference"></a>
+<a class="index-entry-id" id="index-language-reference"></a>
+<a class="index-entry-id" id="index-syntax-reference"></a>
+
+<p>This chapter provides a comprehensive reference for the T-Lisp language used in tmax.
+</p>
+<ul class="mini-toc">
+<li><a href="#Language-Fundamentals" accesskey="1">Language Fundamentals</a></li>
+<li><a href="#Expression-Evaluation" accesskey="2">Expression Evaluation</a></li>
+<li><a href="#Built_002din-Functions-Reference" accesskey="3">Built-in Functions Reference</a></li>
+<li><a href="#Advanced-Features" accesskey="4">Advanced Features</a></li>
+</ul>
+<div class="section-level-extent" id="Language-Fundamentals">
+<h3 class="section"><span>7.1 Language Fundamentals<a class="copiable-link" href="#Language-Fundamentals"> &para;</a></span></h3>
+
+<ul class="mini-toc">
+<li><a href="#Lexical-Structure" accesskey="1">Lexical Structure</a></li>
+<li><a href="#Data-Types-Reference" accesskey="2">Data Types Reference</a></li>
+</ul>
+<div class="subsection-level-extent" id="Lexical-Structure">
+<h4 class="subsection"><span>7.1.1 Lexical Structure<a class="copiable-link" href="#Lexical-Structure"> &para;</a></span></h4>
+
+<ul class="mini-toc">
+<li><a href="#Comments" accesskey="1">Comments</a></li>
+<li><a href="#Identifiers" accesskey="2">Identifiers</a></li>
+</ul>
+<div class="subsubsection-level-extent" id="Comments">
+<h4 class="subsubsection"><span>7.1.1.1 Comments<a class="copiable-link" href="#Comments"> &para;</a></span></h4>
+<div class="example">
+<pre class="example-preformatted">;; This is a single-line comment
+; This is also a comment
+</pre></div>
+
+</div>
+<div class="subsubsection-level-extent" id="Identifiers">
+<h4 class="subsubsection"><span>7.1.1.2 Identifiers<a class="copiable-link" href="#Identifiers"> &para;</a></span></h4>
+<p>Identifiers (symbols) can contain letters, numbers, and these characters: <code class="code">-</code>, <code class="code">_</code>, <code class="code">?</code>, <code class="code">!</code>, <code class="code">+</code>, <code class="code">*</code>, <code class="code">/</code>, <code class="code">&lt;</code>, <code class="code">&gt;</code>, <code class="code">=</code>
+</p>
+<p>Valid identifiers:
+</p><div class="example">
+<pre class="example-preformatted">x
+my-variable
+buffer-insert
+nil?
+set!
++
+&lt;=
+</pre></div>
+
+</div>
+</div>
+<div class="subsection-level-extent" id="Data-Types-Reference">
+<h4 class="subsection"><span>7.1.2 Data Types Reference<a class="copiable-link" href="#Data-Types-Reference"> &para;</a></span></h4>
+
+<dl class="table">
+<dt><code class="code">Numbers</code></dt>
+<dd><p>Integers and floating-point numbers
+</p><div class="example">
+<pre class="example-preformatted">42        ; integer
+-17       ; negative integer
+3.14      ; floating-point
+-2.5      ; negative float
+</pre></div>
+
+</dd>
+<dt><code class="code">Strings</code></dt>
+<dd><p>Text enclosed in double quotes. Supports escape sequences.
+</p><div class="example">
+<pre class="example-preformatted">&quot;hello world&quot;
+&quot;Line 1\nLine 2&quot;    ; newline
+&quot;Say \&quot;hello\&quot;&quot;     ; escaped quotes
+&quot;Path\\file.txt&quot;    ; escaped backslash
+</pre></div>
+
+</dd>
+<dt><code class="code">Symbols</code></dt>
+<dd><p>Identifiers that evaluate to themselves or variables
+</p><div class="example">
+<pre class="example-preformatted">'x           ; quoted symbol (literal)
+x            ; symbol (variable reference)
+'my-symbol   ; quoted symbol
+</pre></div>
+
+</dd>
+<dt><code class="code">Lists</code></dt>
+<dd><p>Ordered collections, fundamental data structure
+</p><div class="example">
+<pre class="example-preformatted">'(1 2 3)           ; quoted list
+(list 1 2 3)       ; constructed list
+'(a b (c d) e)     ; nested lists
+'()                ; empty list (same as nil)
+</pre></div>
+
+</dd>
+<dt><code class="code">Booleans</code></dt>
+<dd><p>Truth values
+</p><div class="example">
+<pre class="example-preformatted">#t          ; true
+#f          ; false
+</pre></div>
+
+</dd>
+<dt><code class="code">Nil</code></dt>
+<dd><p>Represents both false and empty list
+</p><div class="example">
+<pre class="example-preformatted">nil         ; nil/empty list
+'()         ; same as nil
+</pre></div>
+</dd>
+</dl>
+
+</div>
+</div>
+<div class="section-level-extent" id="Expression-Evaluation">
+<h3 class="section"><span>7.2 Expression Evaluation<a class="copiable-link" href="#Expression-Evaluation"> &para;</a></span></h3>
+
+<ul class="mini-toc">
+<li><a href="#Function-Calls-1" accesskey="1">Function Calls</a></li>
+<li><a href="#Special-Forms" accesskey="2">Special Forms</a></li>
+</ul>
+<div class="subsection-level-extent" id="Function-Calls-1">
+<h4 class="subsection"><span>7.2.1 Function Calls<a class="copiable-link" href="#Function-Calls-1"> &para;</a></span></h4>
+<div class="example">
+<pre class="example-preformatted">(function-name arg1 arg2 ...)
+(+ 1 2 3)                    ; arithmetic
+(buffer-insert &quot;text&quot;)       ; editor function
+(cons 'a '(b c))            ; list construction
+</pre></div>
+
+</div>
+<div class="subsection-level-extent" id="Special-Forms">
+<h4 class="subsection"><span>7.2.2 Special Forms<a class="copiable-link" href="#Special-Forms"> &para;</a></span></h4>
+
+<dl class="table">
+<dt><code class="code">(quote expr) or 'expr</code></dt>
+<dd><p>Returns expression without evaluation
+</p><div class="example">
+<pre class="example-preformatted">(quote x)       ; returns symbol x
+'x              ; same as above  
+'(1 2 3)        ; returns list (1 2 3)
+</pre></div>
+
+</dd>
+<dt><code class="code">(if condition then-expr else-expr)</code></dt>
+<dd><p>Conditional evaluation
+</p><div class="example">
+<pre class="example-preformatted">(if (&gt; x 0) &quot;positive&quot; &quot;not positive&quot;)
+(if (nil? list) 0 (length list))
+</pre></div>
+
+</dd>
+<dt><code class="code">(let ((var1 val1) (var2 val2) ...) body...)</code></dt>
+<dd><p>Local variable binding
+</p><div class="example">
+<pre class="example-preformatted">(let ((x 10) (y 20))
+  (+ x y))                  ; returns 30
+
+(let ((name &quot;tmax&quot;))
+  (string-append &quot;Hello &quot; name))
+</pre></div>
+
+</dd>
+<dt><code class="code">(defun name (params...) body...)</code></dt>
+<dd><p>Function definition
+</p><div class="example">
+<pre class="example-preformatted">(defun square (x)
+  (* x x))
+
+(defun greet (name)
+  (string-append &quot;Hello, &quot; name &quot;!&quot;))
+</pre></div>
+
+</dd>
+<dt><code class="code">(defmacro name (params...) body...)</code></dt>
+<dd><p>Macro definition
+</p><div class="example">
+<pre class="example-preformatted">(defmacro when (condition . body)
+  `(if ,condition (progn ,@body)))
+</pre></div>
+
+</dd>
+<dt><code class="code">(progn expr1 expr2 ...)</code></dt>
+<dd><p>Sequential evaluation, returns last expression
+</p><div class="example">
+<pre class="example-preformatted">(progn
+  (buffer-insert &quot;Hello&quot;)
+  (buffer-insert &quot; World&quot;)
+  (cursor-move 0 0))
+</pre></div>
+
+</dd>
+<dt><code class="code">(setq var value)</code></dt>
+<dd><p>Variable assignment
+</p><div class="example">
+<pre class="example-preformatted">(setq x 42)
+(setq name &quot;tmax&quot;)
+</pre></div>
+</dd>
+</dl>
+
+</div>
+</div>
+<div class="section-level-extent" id="Built_002din-Functions-Reference">
+<h3 class="section"><span>7.3 Built-in Functions Reference<a class="copiable-link" href="#Built_002din-Functions-Reference"> &para;</a></span></h3>
+
+<ul class="mini-toc">
+<li><a href="#Arithmetic-Operations" accesskey="1">Arithmetic Operations</a></li>
+<li><a href="#Comparison-Operations" accesskey="2">Comparison Operations</a></li>
+<li><a href="#List-Operations" accesskey="3">List Operations</a></li>
+<li><a href="#String-Operations" accesskey="4">String Operations</a></li>
+<li><a href="#Type-Predicates" accesskey="5">Type Predicates</a></li>
+</ul>
+<div class="subsection-level-extent" id="Arithmetic-Operations">
+<h4 class="subsection"><span>7.3.1 Arithmetic Operations<a class="copiable-link" href="#Arithmetic-Operations"> &para;</a></span></h4>
+<dl class="table">
+<dt><code class="code">(+ numbers...)</code></dt>
+<dd><p>Addition. With no arguments returns 0.
+</p><div class="example">
+<pre class="example-preformatted">(+)           ; 0
+(+ 5)         ; 5
+(+ 1 2 3 4)   ; 10
+</pre></div>
+
+</dd>
+<dt><code class="code">(- numbers...)</code></dt>
+<dd><p>Subtraction. With one argument, negation.
+</p><div class="example">
+<pre class="example-preformatted">(- 5)         ; -5
+(- 10 3)      ; 7
+(- 20 5 2)    ; 13
+</pre></div>
+
+</dd>
+<dt><code class="code">(* numbers...)</code></dt>
+<dd><p>Multiplication. With no arguments returns 1.
+</p><div class="example">
+<pre class="example-preformatted">(*)           ; 1
+(* 3)         ; 3
+(* 2 3 4)     ; 24
+</pre></div>
+
+</dd>
+<dt><code class="code">(/ numbers...)</code></dt>
+<dd><p>Division. With one argument, reciprocal.
+</p><div class="example">
+<pre class="example-preformatted">(/ 2)         ; 0.5
+(/ 8 2)       ; 4
+(/ 24 2 3)    ; 4
+</pre></div>
+
+</dd>
+<dt><code class="code">(mod dividend divisor)</code></dt>
+<dd><p>Modulo operation
+</p><div class="example">
+<pre class="example-preformatted">(mod 7 3)     ; 1
+(mod 10 4)    ; 2
+</pre></div>
+</dd>
+</dl>
+
+</div>
+<div class="subsection-level-extent" id="Comparison-Operations">
+<h4 class="subsection"><span>7.3.2 Comparison Operations<a class="copiable-link" href="#Comparison-Operations"> &para;</a></span></h4>
+<dl class="table">
+<dt><code class="code">(= numbers...)</code></dt>
+<dd><p>Numeric equality
+</p><div class="example">
+<pre class="example-preformatted">(= 3 3)       ; #t
+(= 1 2)       ; #f
+(= 1 1 1)     ; #t
+</pre></div>
+
+</dd>
+<dt><code class="code">(&lt; numbers...)</code></dt>
+<dd><p>Numeric less-than (ascending order)
+</p><div class="example">
+<pre class="example-preformatted">(&lt; 1 2)       ; #t
+(&lt; 3 2)       ; #f
+(&lt; 1 2 3)     ; #t
+</pre></div>
+
+</dd>
+<dt><code class="code">(&gt; numbers...)</code></dt>
+<dd><p>Numeric greater-than (descending order)
+</p><div class="example">
+<pre class="example-preformatted">(&gt; 2 1)       ; #t
+(&gt; 1 2)       ; #f
+(&gt; 3 2 1)     ; #t
+</pre></div>
+
+</dd>
+<dt><code class="code">(&lt;= numbers...)</code></dt>
+<dd><p>Numeric less-than-or-equal
+</p><div class="example">
+<pre class="example-preformatted">(&lt;= 1 2)      ; #t
+(&lt;= 2 2)      ; #t
+(&lt;= 3 2)      ; #f
+</pre></div>
+
+</dd>
+<dt><code class="code">(&gt;= numbers...)</code></dt>
+<dd><p>Numeric greater-than-or-equal
+</p><div class="example">
+<pre class="example-preformatted">(&gt;= 2 1)      ; #t
+(&gt;= 2 2)      ; #t
+(&gt;= 1 2)      ; #f
+</pre></div>
+
+</dd>
+<dt><code class="code">(equal expr1 expr2)</code></dt>
+<dd><p>Deep structural equality
+</p><div class="example">
+<pre class="example-preformatted">(equal 'a 'a)           ; #t
+(equal '(1 2) '(1 2))   ; #t
+(equal &quot;hi&quot; &quot;hi&quot;)       ; #t
+</pre></div>
+</dd>
+</dl>
+
+</div>
+<div class="subsection-level-extent" id="List-Operations">
+<h4 class="subsection"><span>7.3.3 List Operations<a class="copiable-link" href="#List-Operations"> &para;</a></span></h4>
+<dl class="table">
+<dt><code class="code">(cons car cdr)</code></dt>
+<dd><p>Construct cons cell (list node)
+</p><div class="example">
+<pre class="example-preformatted">(cons 1 '(2 3))         ; (1 2 3)
+(cons 'a 'b)            ; (a . b) - dotted pair
+(cons 1 nil)            ; (1)
+</pre></div>
+
+</dd>
+<dt><code class="code">(car list)</code></dt>
+<dd><p>Get first element (head) of list
+</p><div class="example">
+<pre class="example-preformatted">(car '(1 2 3))          ; 1
+(car '((a b) c))        ; (a b)
+</pre></div>
+
+</dd>
+<dt><code class="code">(cdr list)</code></dt>
+<dd><p>Get rest of list (tail) after first element
+</p><div class="example">
+<pre class="example-preformatted">(cdr '(1 2 3))          ; (2 3)
+(cdr '(a))              ; nil
+</pre></div>
+
+</dd>
+<dt><code class="code">(length list)</code></dt>
+<dd><p>Get number of elements in list
+</p><div class="example">
+<pre class="example-preformatted">(length '())            ; 0
+(length '(a b c))       ; 3
+</pre></div>
+
+</dd>
+<dt><code class="code">(nth n list)</code></dt>
+<dd><p>Get nth element (0-indexed)
+</p><div class="example">
+<pre class="example-preformatted">(nth 0 '(a b c))        ; a
+(nth 2 '(x y z))        ; z
+</pre></div>
+
+</dd>
+<dt><code class="code">(append list1 list2 ...)</code></dt>
+<dd><p>Concatenate lists
+</p><div class="example">
+<pre class="example-preformatted">(append '(1 2) '(3 4))      ; (1 2 3 4)
+(append '(a) '(b) '(c))     ; (a b c)
+</pre></div>
+
+</dd>
+<dt><code class="code">(reverse list)</code></dt>
+<dd><p>Reverse order of list elements
+</p><div class="example">
+<pre class="example-preformatted">(reverse '(1 2 3))      ; (3 2 1)
+(reverse '(a))          ; (a)
+</pre></div>
+
+</dd>
+<dt><code class="code">(list elements...)</code></dt>
+<dd><p>Create list from arguments
+</p><div class="example">
+<pre class="example-preformatted">(list)              ; nil
+(list 1 2 3)        ; (1 2 3)
+(list 'a (+ 1 2))   ; (a 3)
+</pre></div>
+</dd>
+</dl>
+
+</div>
+<div class="subsection-level-extent" id="String-Operations">
+<h4 class="subsection"><span>7.3.4 String Operations<a class="copiable-link" href="#String-Operations"> &para;</a></span></h4>
+<dl class="table">
+<dt><code class="code">(string-length str)</code></dt>
+<dd><p>Get length of string
+</p><div class="example">
+<pre class="example-preformatted">(string-length &quot;hello&quot;)     ; 5
+(string-length &quot;&quot;)          ; 0
+</pre></div>
+
+</dd>
+<dt><code class="code">(string-append str1 str2 ...)</code></dt>
+<dd><p>Concatenate strings
+</p><div class="example">
+<pre class="example-preformatted">(string-append &quot;hello&quot; &quot; &quot; &quot;world&quot;)  ; &quot;hello world&quot;
+(string-append &quot;a&quot; &quot;b&quot; &quot;c&quot;)          ; &quot;abc&quot;
+</pre></div>
+
+</dd>
+<dt><code class="code">(substring str start end)</code></dt>
+<dd><p>Extract portion of string
+</p><div class="example">
+<pre class="example-preformatted">(substring &quot;hello&quot; 1 4)     ; &quot;ell&quot;
+(substring &quot;world&quot; 0 2)     ; &quot;wo&quot;
+</pre></div>
+</dd>
+</dl>
+
+</div>
+<div class="subsection-level-extent" id="Type-Predicates">
+<h4 class="subsection"><span>7.3.5 Type Predicates<a class="copiable-link" href="#Type-Predicates"> &para;</a></span></h4>
+<dl class="table">
+<dt><code class="code">(nil? expr)</code></dt>
+<dd><p>Test if expression is nil
+</p><div class="example">
+<pre class="example-preformatted">(nil? nil)          ; #t
+(nil? '())          ; #t
+(nil? 0)            ; #f
+</pre></div>
+
+</dd>
+<dt><code class="code">(number? expr)</code></dt>
+<dd><p>Test if expression is a number
+</p><div class="example">
+<pre class="example-preformatted">(number? 42)        ; #t
+(number? 3.14)      ; #t
+(number? &quot;42&quot;)      ; #f
+</pre></div>
+
+</dd>
+<dt><code class="code">(string? expr)</code></dt>
+<dd><p>Test if expression is a string
+</p><div class="example">
+<pre class="example-preformatted">(string? &quot;hello&quot;)   ; #t
+(string? 'hello)    ; #f
+</pre></div>
+
+</dd>
+<dt><code class="code">(symbol? expr)</code></dt>
+<dd><p>Test if expression is a symbol
+</p><div class="example">
+<pre class="example-preformatted">(symbol? 'x)        ; #t
+(symbol? &quot;x&quot;)       ; #f
+</pre></div>
+
+</dd>
+<dt><code class="code">(list? expr)</code></dt>
+<dd><p>Test if expression is a proper list
+</p><div class="example">
+<pre class="example-preformatted">(list? '(1 2 3))    ; #t
+(list? nil)         ; #t
+(list? 'atom)       ; #f
+</pre></div>
+</dd>
+</dl>
+
+</div>
+</div>
+<div class="section-level-extent" id="Advanced-Features">
+<h3 class="section"><span>7.4 Advanced Features<a class="copiable-link" href="#Advanced-Features"> &para;</a></span></h3>
+
+<ul class="mini-toc">
+<li><a href="#Macro-System-1" accesskey="1">Macro System</a></li>
+<li><a href="#Lexical-Scoping" accesskey="2">Lexical Scoping</a></li>
+<li><a href="#Tail-Call-Optimization" accesskey="3">Tail Call Optimization</a></li>
+</ul>
+<div class="subsection-level-extent" id="Macro-System-1">
+<h4 class="subsection"><span>7.4.1 Macro System<a class="copiable-link" href="#Macro-System-1"> &para;</a></span></h4>
+<p>T-Lisp supports a full macro system with quasiquote.
+</p>
+<ul class="mini-toc">
+<li><a href="#Quasiquote-Syntax-1" accesskey="1">Quasiquote Syntax</a></li>
+<li><a href="#Macro-Examples" accesskey="2">Macro Examples</a></li>
+</ul>
+<div class="subsubsection-level-extent" id="Quasiquote-Syntax-1">
+<h4 class="subsubsection"><span>7.4.1.1 Quasiquote Syntax<a class="copiable-link" href="#Quasiquote-Syntax-1"> &para;</a></span></h4>
+<dl class="table">
+<dt><code class="code">`expr</code></dt>
+<dd><p>Quasiquote - like quote but allows unquoting
+</p></dd>
+<dt><code class="code">,expr</code></dt>
+<dd><p>Unquote - evaluate expression within quasiquote
+</p></dd>
+<dt><code class="code">,@expr</code></dt>
+<dd><p>Unquote-splice - insert list elements
+</p></dd>
+</dl>
+
+</div>
+<div class="subsubsection-level-extent" id="Macro-Examples">
+<h4 class="subsubsection"><span>7.4.1.2 Macro Examples<a class="copiable-link" href="#Macro-Examples"> &para;</a></span></h4>
+<div class="example">
+<pre class="example-preformatted">;; Simple macro
+(defmacro when (condition . body)
+  `(if ,condition (progn ,@body)))
+
+;; Usage
+(when (&gt; x 0)
+  (print &quot;positive&quot;)
+  (print &quot;number&quot;))
+
+;; Expands to:
+;; (if (&gt; x 0) 
+;;     (progn (print &quot;positive&quot;) (print &quot;number&quot;)))
+</pre></div>
+
+</div>
+</div>
+<div class="subsection-level-extent" id="Lexical-Scoping">
+<h4 class="subsection"><span>7.4.2 Lexical Scoping<a class="copiable-link" href="#Lexical-Scoping"> &para;</a></span></h4>
+<p>Variables are lexically scoped with proper closure support.
+</p>
+<div class="example">
+<pre class="example-preformatted">(defun make-counter ()
+  (let ((count 0))
+    (lambda ()
+      (setq count (+ count 1))
+      count)))
+
+(setq counter1 (make-counter))
+(setq counter2 (make-counter))
+
+(counter1)  ; 1
+(counter1)  ; 2
+(counter2)  ; 1 (independent)
+</pre></div>
+
+</div>
+<div class="subsection-level-extent" id="Tail-Call-Optimization">
+<h4 class="subsection"><span>7.4.3 Tail Call Optimization<a class="copiable-link" href="#Tail-Call-Optimization"> &para;</a></span></h4>
+<p>Recursive functions in tail position are optimized.
+</p>
+<div class="example">
+<pre class="example-preformatted">;; Tail-recursive factorial
+(defun factorial (n acc)
+  (if (&lt;= n 1) 
+      acc
+      (factorial (- n 1) (* n acc))))
+
+(defun fact (n)
+  (factorial n 1))
+</pre></div>
+
+<hr>
+</div>
+</div>
+</div>
+<div class="chapter-level-extent" id="Buffer-Management">
+<div class="nav-panel">
+<p>
+Next: <a href="#Configuration" accesskey="n" rel="next">Configuration</a>, Previous: <a href="#T_002dLisp-Language-Reference" accesskey="p" rel="prev">T-Lisp Language Reference</a>, Up: <a href="#Top" accesskey="u" rel="up">tmax</a> &nbsp; [<a href="#SEC_Contents" title="Table of contents" rel="contents">Contents</a>][<a href="#Index" title="Index" rel="index">Index</a>]</p>
+</div>
+<h2 class="chapter" id="Buffer-Management-1"><span>8 Buffer Management<a class="copiable-link" href="#Buffer-Management-1"> &para;</a></span></h2>
+
+<a class="index-entry-id" id="index-buffers"></a>
+<a class="index-entry-id" id="index-files"></a>
+<a class="index-entry-id" id="index-multiple-files"></a>
+
+<p>tmax uses a buffer-based approach to manage multiple files and text content.
+</p>
+<ul class="mini-toc">
+<li><a href="#Understanding-Buffers" accesskey="1">Understanding Buffers</a></li>
+<li><a href="#Buffer-Operations" accesskey="2">Buffer Operations</a></li>
+<li><a href="#File-Operations" accesskey="3">File Operations</a></li>
+<li><a href="#Buffer-Implementation" accesskey="4">Buffer Implementation</a></li>
+</ul>
+<div class="section-level-extent" id="Understanding-Buffers">
+<h3 class="section"><span>8.1 Understanding Buffers<a class="copiable-link" href="#Understanding-Buffers"> &para;</a></span></h3>
+
+<p>A buffer in tmax is an in-memory representation of text that may or may not be associated with a file. Each buffer:
+</p>
+<ul class="itemize mark-bullet">
+<li>Has a unique name
+</li><li>Contains text content using efficient gap buffer data structure
+</li><li>Tracks cursor position and viewport
+</li><li>May be associated with a file on disk
+</li></ul>
+
+</div>
+<div class="section-level-extent" id="Buffer-Operations">
+<h3 class="section"><span>8.2 Buffer Operations<a class="copiable-link" href="#Buffer-Operations"> &para;</a></span></h3>
+
+<ul class="mini-toc">
+<li><a href="#Creating-Buffers" accesskey="1">Creating Buffers</a></li>
+<li><a href="#Switching-Buffers" accesskey="2">Switching Buffers</a></li>
+</ul>
+<div class="subsection-level-extent" id="Creating-Buffers">
+<h4 class="subsection"><span>8.2.1 Creating Buffers<a class="copiable-link" href="#Creating-Buffers"> &para;</a></span></h4>
+<p>Buffers are created automatically when:
+</p><ul class="itemize mark-bullet">
+<li>Opening a file: <code class="code">deno task start filename.txt</code>
+</li><li>Starting tmax without arguments creates &lsquo;<samp class="samp">*scratch*</samp>&rsquo; buffer
+</li></ul>
+
+</div>
+<div class="subsection-level-extent" id="Switching-Buffers">
+<h4 class="subsection"><span>8.2.2 Switching Buffers<a class="copiable-link" href="#Switching-Buffers"> &para;</a></span></h4>
+<p>Currently, tmax maintains one active buffer at a time. Future versions will include buffer switching commands.
+</p>
+</div>
+</div>
+<div class="section-level-extent" id="File-Operations">
+<h3 class="section"><span>8.3 File Operations<a class="copiable-link" href="#File-Operations"> &para;</a></span></h3>
+
+<ul class="mini-toc">
+<li><a href="#Opening-Files" accesskey="1">Opening Files</a></li>
+<li><a href="#Saving-Files" accesskey="2">Saving Files</a></li>
+</ul>
+<div class="subsection-level-extent" id="Opening-Files">
+<h4 class="subsection"><span>8.3.1 Opening Files<a class="copiable-link" href="#Opening-Files"> &para;</a></span></h4>
+<div class="example">
+<pre class="example-preformatted">deno task start myfile.txt
+</pre></div>
+
+</div>
+<div class="subsection-level-extent" id="Saving-Files">
+<h4 class="subsection"><span>8.3.2 Saving Files<a class="copiable-link" href="#Saving-Files"> &para;</a></span></h4>
+<p>From command mode:
+</p><div class="example">
+<pre class="example-preformatted">:w    # Save current buffer
+:wq   # Save and quit
+</pre></div>
+
+</div>
+</div>
+<div class="section-level-extent" id="Buffer-Implementation">
+<h3 class="section"><span>8.4 Buffer Implementation<a class="copiable-link" href="#Buffer-Implementation"> &para;</a></span></h3>
+
+<p>tmax uses a gap buffer implementation for efficient text editing:
+</p>
+<ul class="itemize mark-bullet">
+<li>O(1) insertion/deletion at cursor position
+</li><li>Efficient memory usage for large files
+</li><li>Optimized for typical editing patterns
+</li></ul>
+
+<hr>
+</div>
+</div>
+<div class="chapter-level-extent" id="Configuration">
+<div class="nav-panel">
+<p>
+Next: <a href="#Command-Reference" accesskey="n" rel="next">Command Reference</a>, Previous: <a href="#Buffer-Management" accesskey="p" rel="prev">Buffer Management</a>, Up: <a href="#Top" accesskey="u" rel="up">tmax</a> &nbsp; [<a href="#SEC_Contents" title="Table of contents" rel="contents">Contents</a>][<a href="#Index" title="Index" rel="index">Index</a>]</p>
+</div>
+<h2 class="chapter" id="Configuration-1"><span>9 Configuration<a class="copiable-link" href="#Configuration-1"> &para;</a></span></h2>
+
+<a class="index-entry-id" id="index-configuration"></a>
+<a class="index-entry-id" id="index-customization-1"></a>
+<a class="index-entry-id" id="index-_002etmaxrc"></a>
+
+<p>tmax is highly configurable through T-Lisp scripting.
+</p>
+<ul class="mini-toc">
+<li><a href="#Configuration-File-1" accesskey="1">Configuration File</a></li>
+<li><a href="#Configuration-Examples" accesskey="2">Configuration Examples</a></li>
+</ul>
+<div class="section-level-extent" id="Configuration-File-1">
+<h3 class="section"><span>9.1 Configuration File<a class="copiable-link" href="#Configuration-File-1"> &para;</a></span></h3>
+
+<p>tmax loads <samp class="file">~/.tmaxrc</samp> on startup for user customization.
+</p>
+</div>
+<div class="section-level-extent" id="Configuration-Examples">
+<h3 class="section"><span>9.2 Configuration Examples<a class="copiable-link" href="#Configuration-Examples"> &para;</a></span></h3>
+
+<ul class="mini-toc">
+<li><a href="#Basic-Key-Bindings" accesskey="1">Basic Key Bindings</a></li>
+<li><a href="#Custom-Functions" accesskey="2">Custom Functions</a></li>
+<li><a href="#Custom-Macros" accesskey="3">Custom Macros</a></li>
+<li><a href="#Mode_002dSpecific-Configuration" accesskey="4">Mode-Specific Configuration</a></li>
+</ul>
+<div class="subsection-level-extent" id="Basic-Key-Bindings">
+<h4 class="subsection"><span>9.2.1 Basic Key Bindings<a class="copiable-link" href="#Basic-Key-Bindings"> &para;</a></span></h4>
+<div class="example">
+<pre class="example-preformatted">;; Bind Ctrl+S to save in normal mode
+(key-bind &quot;C-s&quot; &quot;(quick-save)&quot; &quot;normal&quot;)
+
+;; Bind F2 to show current time  
+(key-bind &quot;F2&quot; &quot;(editor-set-status (current-time))&quot; &quot;normal&quot;)
+</pre></div>
+
+</div>
+<div class="subsection-level-extent" id="Custom-Functions">
+<h4 class="subsection"><span>9.2.2 Custom Functions<a class="copiable-link" href="#Custom-Functions"> &para;</a></span></h4>
+<div class="example">
+<pre class="example-preformatted">;; Define function to insert current date
+(defun insert-date ()
+  (buffer-insert (format-date (current-time))))
+
+;; Bind it to a key
+(key-bind &quot;D&quot; &quot;(insert-date)&quot; &quot;normal&quot;)
+</pre></div>
+
+</div>
+<div class="subsection-level-extent" id="Custom-Macros">
+<h4 class="subsection"><span>9.2.3 Custom Macros<a class="copiable-link" href="#Custom-Macros"> &para;</a></span></h4>
+<div class="example">
+<pre class="example-preformatted">;; Macro for common operation
+(defmacro duplicate-line ()
+  '(progn 
+     (beginning-of-line)
+     (set-mark)
+     (end-of-line)  
+     (copy-region)
+     (newline)
+     (paste)))
+
+;; Bind macro to key
+(key-bind &quot;C-d&quot; &quot;(duplicate-line)&quot; &quot;normal&quot;) 
+</pre></div>
+
+</div>
+<div class="subsection-level-extent" id="Mode_002dSpecific-Configuration">
+<h4 class="subsection"><span>9.2.4 Mode-Specific Configuration<a class="copiable-link" href="#Mode_002dSpecific-Configuration"> &para;</a></span></h4>
+<div class="example">
+<pre class="example-preformatted">;; Different bindings for different modes
+(key-bind &quot;C-c&quot; &quot;(copy-selection)&quot; &quot;visual&quot;)
+(key-bind &quot;C-v&quot; &quot;(paste-clipboard)&quot; &quot;insert&quot;)
+(key-bind &quot;C-z&quot; &quot;(undo)&quot; &quot;normal&quot;)
+</pre></div>
+
+<hr>
+</div>
+</div>
+</div>
+<div class="chapter-level-extent" id="Command-Reference">
+<div class="nav-panel">
+<p>
+Next: <a href="#Examples" accesskey="n" rel="next">Examples</a>, Previous: <a href="#Configuration" accesskey="p" rel="prev">Configuration</a>, Up: <a href="#Top" accesskey="u" rel="up">tmax</a> &nbsp; [<a href="#SEC_Contents" title="Table of contents" rel="contents">Contents</a>][<a href="#Index" title="Index" rel="index">Index</a>]</p>
+</div>
+<h2 class="chapter" id="Command-Reference-1"><span>10 Command Reference<a class="copiable-link" href="#Command-Reference-1"> &para;</a></span></h2>
+
+<a class="index-entry-id" id="index-commands"></a>
+<a class="index-entry-id" id="index-API"></a>
+<a class="index-entry-id" id="index-functions"></a>
+
+<p>Complete reference for all available T-Lisp functions in tmax.
+</p>
+<ul class="mini-toc">
+<li><a href="#Buffer-Functions" accesskey="1">Buffer Functions</a></li>
+<li><a href="#Cursor-Functions" accesskey="2">Cursor Functions</a></li>
+<li><a href="#Editor-Functions" accesskey="3">Editor Functions</a></li>
+<li><a href="#Key-Binding-Functions" accesskey="4">Key Binding Functions</a></li>
+<li><a href="#File-Functions" accesskey="5">File Functions</a></li>
+</ul>
+<div class="section-level-extent" id="Buffer-Functions">
+<h3 class="section"><span>10.1 Buffer Functions<a class="copiable-link" href="#Buffer-Functions"> &para;</a></span></h3>
+
+<dl class="table">
+<dt><code class="code">(buffer-insert text)</code></dt>
+<dd><p>Insert <var class="var">text</var> at current cursor position.
+</p>
+</dd>
+<dt><code class="code">(buffer-delete count)</code></dt>
+<dd><p>Delete <var class="var">count</var> characters before cursor position.
+</p>
+</dd>
+<dt><code class="code">(buffer-text)</code></dt>
+<dd><p>Return entire buffer content as string.
+</p>
+</dd>
+<dt><code class="code">(buffer-length)</code></dt>
+<dd><p>Return total character count in buffer.
+</p>
+</dd>
+<dt><code class="code">(buffer-line-count)</code></dt>
+<dd><p>Return number of lines in buffer.
+</p>
+</dd>
+<dt><code class="code">(buffer-get-line line-num)</code></dt>
+<dd><p>Return content of line at <var class="var">line-num</var> (0-indexed).
+</p>
+</dd>
+<dt><code class="code">(buffer-substring start end)</code></dt>
+<dd><p>Return text between <var class="var">start</var> and <var class="var">end</var> positions.
+</p></dd>
+</dl>
+
+</div>
+<div class="section-level-extent" id="Cursor-Functions">
+<h3 class="section"><span>10.2 Cursor Functions<a class="copiable-link" href="#Cursor-Functions"> &para;</a></span></h3>
+
+<dl class="table">
+<dt><code class="code">(cursor-move line column)</code></dt>
+<dd><p>Move cursor to <var class="var">line</var> and <var class="var">column</var> (0-indexed).
+</p>
+</dd>
+<dt><code class="code">(cursor-line)</code></dt>
+<dd><p>Return current line number (0-indexed).
+</p>
+</dd>
+<dt><code class="code">(cursor-column)</code></dt>
+<dd><p>Return current column number (0-indexed).
+</p>
+</dd>
+<dt><code class="code">(cursor-position)</code></dt>
+<dd><p>Return list <code class="code">(line column)</code> of current position.
+</p></dd>
+</dl>
+
+</div>
+<div class="section-level-extent" id="Editor-Functions">
+<h3 class="section"><span>10.3 Editor Functions<a class="copiable-link" href="#Editor-Functions"> &para;</a></span></h3>
+
+<dl class="table">
+<dt><code class="code">(editor-mode)</code></dt>
+<dd><p>Return current editing mode as string.
+</p>
+</dd>
+<dt><code class="code">(editor-set-mode mode)</code></dt>
+<dd><p>Set editing mode to <var class="var">mode</var> (&quot;normal&quot;, &quot;insert&quot;, &quot;visual&quot;, &quot;command&quot;, &quot;mx&quot;).
+</p>
+</dd>
+<dt><code class="code">(editor-quit)</code></dt>
+<dd><p>Quit the editor immediately.
+</p>
+</dd>
+<dt><code class="code">(editor-status)</code></dt>
+<dd><p>Return current status message.
+</p>
+</dd>
+<dt><code class="code">(editor-set-status message)</code></dt>
+<dd><p>Set status line to display <var class="var">message</var>.
+</p>
+</dd>
+<dt><code class="code">(editor-enter-command-mode)</code></dt>
+<dd><p>Switch to command mode.
+</p>
+</dd>
+<dt><code class="code">(editor-exit-command-mode)</code></dt>
+<dd><p>Exit command mode and return to normal mode.
+</p>
+</dd>
+<dt><code class="code">(editor-execute-command-line)</code></dt>
+<dd><p>Execute the current command line content.
+</p>
+</dd>
+<dt><code class="code">(editor-handle-space)</code></dt>
+<dd><p>Handle space key press (part of M-x sequence).
+</p>
+</dd>
+<dt><code class="code">(editor-handle-semicolon)</code></dt>
+<dd><p>Handle semicolon key press (completes M-x sequence).
+</p>
+</dd>
+<dt><code class="code">(editor-exit-mx-mode)</code></dt>
+<dd><p>Exit M-x mode and return to normal mode.
+</p>
+</dd>
+<dt><code class="code">(editor-execute-mx-command)</code></dt>
+<dd><p>Execute the current M-x command.
+</p></dd>
+</dl>
+
+</div>
+<div class="section-level-extent" id="Key-Binding-Functions">
+<h3 class="section"><span>10.4 Key Binding Functions<a class="copiable-link" href="#Key-Binding-Functions"> &para;</a></span></h3>
+
+<dl class="table">
+<dt><code class="code">(key-bind key command [mode])</code></dt>
+<dd><p>Bind <var class="var">key</var> to execute <var class="var">command</var> in optional <var class="var">mode</var>.
+If <var class="var">mode</var> is omitted, binding applies to all modes.
+</p></dd>
+</dl>
+
+</div>
+<div class="section-level-extent" id="File-Functions">
+<h3 class="section"><span>10.5 File Functions<a class="copiable-link" href="#File-Functions"> &para;</a></span></h3>
+
+<p>File operations are performed through the editor interface:
+</p>
+<dl class="table">
+<dt><code class="code">(save-buffer)</code></dt>
+<dd><p>Save current buffer to associated file.
+</p>
+</dd>
+<dt><code class="code">(load-file filename)</code></dt>
+<dd><p>Load <var class="var">filename</var> into new buffer.
+</p></dd>
+</dl>
+
+<hr>
+</div>
+</div>
+<div class="chapter-level-extent" id="Examples">
+<div class="nav-panel">
+<p>
+Next: <a href="#Troubleshooting" accesskey="n" rel="next">Troubleshooting</a>, Previous: <a href="#Command-Reference" accesskey="p" rel="prev">Command Reference</a>, Up: <a href="#Top" accesskey="u" rel="up">tmax</a> &nbsp; [<a href="#SEC_Contents" title="Table of contents" rel="contents">Contents</a>][<a href="#Index" title="Index" rel="index">Index</a>]</p>
+</div>
+<h2 class="chapter" id="Examples-2"><span>11 Examples<a class="copiable-link" href="#Examples-2"> &para;</a></span></h2>
+
+<a class="index-entry-id" id="index-examples"></a>
+<a class="index-entry-id" id="index-usage-examples"></a>
+<a class="index-entry-id" id="index-real_002dworld-usage"></a>
+
+<p>Real-world examples of tmax usage and customization.
+</p>
+<ul class="mini-toc">
+<li><a href="#Basic-Editing-Session" accesskey="1">Basic Editing Session</a></li>
+<li><a href="#Configuration-Examples-1" accesskey="2">Configuration Examples</a></li>
+<li><a href="#Advanced-Customization" accesskey="3">Advanced Customization</a></li>
+</ul>
+<div class="section-level-extent" id="Basic-Editing-Session">
+<h3 class="section"><span>11.1 Basic Editing Session<a class="copiable-link" href="#Basic-Editing-Session"> &para;</a></span></h3>
+
+<div class="example">
+<pre class="example-preformatted"># Start tmax
+deno task start
+
+# Enter insert mode
+i
+
+# Type some text
+Hello, world!
+This is tmax.
+
+# Return to normal mode  
+&lt;Escape&gt;
+
+# Navigate around
+hjkl
+
+# Save and quit
+:wq
+</pre></div>
+
+</div>
+<div class="section-level-extent" id="Configuration-Examples-1">
+<h3 class="section"><span>11.2 Configuration Examples<a class="copiable-link" href="#Configuration-Examples-1"> &para;</a></span></h3>
+
+<ul class="mini-toc">
+<li><a href="#Programmer_0027s-Setup" accesskey="1">Programmer&rsquo;s Setup</a></li>
+<li><a href="#Writer_0027s-Setup" accesskey="2">Writer&rsquo;s Setup</a></li>
+</ul>
+<div class="subsection-level-extent" id="Programmer_0027s-Setup">
+<h4 class="subsection"><span>11.2.1 Programmer&rsquo;s Setup<a class="copiable-link" href="#Programmer_0027s-Setup"> &para;</a></span></h4>
+<div class="example">
+<pre class="example-preformatted">;; ~/.tmaxrc for programming
+
+;; Line numbers function
+(defun show-line-number ()
+  (editor-set-status 
+    (string-append &quot;Line: &quot; (number-to-string (+ (cursor-line) 1)))))
+
+;; Bind to show current line
+(key-bind &quot;L&quot; &quot;(show-line-number)&quot; &quot;normal&quot;)
+
+;; Quick comment toggle
+(defun toggle-comment ()
+  (beginning-of-line)
+  (if (looking-at &quot;;;&quot;)
+      (delete-char 2)
+    (insert &quot;;; &quot;)))
+
+(key-bind &quot;C-/&quot; &quot;(toggle-comment)&quot; &quot;normal&quot;)
+
+;; Auto-indent function  
+(defun smart-indent ()
+  (let ((current-indent (current-indentation)))
+    (newline)
+    (insert-spaces current-indent)))
+
+(key-bind &quot;Enter&quot; &quot;(smart-indent)&quot; &quot;insert&quot;)
+</pre></div>
+
+</div>
+<div class="subsection-level-extent" id="Writer_0027s-Setup">
+<h4 class="subsection"><span>11.2.2 Writer&rsquo;s Setup<a class="copiable-link" href="#Writer_0027s-Setup"> &para;</a></span></h4>
+<div class="example">
+<pre class="example-preformatted">;; ~/.tmaxrc for writing
+
+;; Word count function
+(defun word-count ()
+  (let ((text (buffer-text)))
+    (editor-set-status 
+      (string-append 
+        &quot;Words: &quot; 
+        (number-to-string (length (split-string text)))))))
+
+(key-bind &quot;W&quot; &quot;(word-count)&quot; &quot;normal&quot;)
+
+;; Insert current date
+(defun insert-date ()
+  (buffer-insert (format-time &quot;%Y-%m-%d&quot;)))
+
+(key-bind &quot;D&quot; &quot;(insert-date)&quot; &quot;normal&quot;)
+
+;; Paragraph navigation
+(key-bind &quot;}&quot; &quot;(next-paragraph)&quot; &quot;normal&quot;) 
+(key-bind &quot;{&quot; &quot;(previous-paragraph)&quot; &quot;normal&quot;)
+</pre></div>
+
+</div>
+</div>
+<div class="section-level-extent" id="Advanced-Customization">
+<h3 class="section"><span>11.3 Advanced Customization<a class="copiable-link" href="#Advanced-Customization"> &para;</a></span></h3>
+
+<ul class="mini-toc">
+<li><a href="#Custom-Mode" accesskey="1">Custom Mode</a></li>
+<li><a href="#Project-Management" accesskey="2">Project Management</a></li>
+</ul>
+<div class="subsection-level-extent" id="Custom-Mode">
+<h4 class="subsection"><span>11.3.1 Custom Mode<a class="copiable-link" href="#Custom-Mode"> &para;</a></span></h4>
+<div class="example">
+<pre class="example-preformatted">;; Define a custom &quot;code&quot; mode for programming
+(defun enter-code-mode ()
+  (editor-set-mode &quot;normal&quot;)
+  (editor-set-status &quot;-- CODE MODE --&quot;)
+  ;; Set up code-specific bindings
+  (key-bind &quot;TAB&quot; &quot;(smart-indent)&quot; &quot;normal&quot;)
+  (key-bind &quot;C-c C-c&quot; &quot;(compile-buffer)&quot; &quot;normal&quot;))
+
+(defun exit-code-mode ()
+  (editor-set-status &quot;-- NORMAL --&quot;)
+  ;; Remove code-specific bindings
+  (remove-key-bind &quot;TAB&quot; &quot;normal&quot;)
+  (remove-key-bind &quot;C-c C-c&quot; &quot;normal&quot;))
+
+;; Toggle code mode
+(key-bind &quot;C-c&quot; &quot;(enter-code-mode)&quot; &quot;normal&quot;)
+</pre></div>
+
+</div>
+<div class="subsection-level-extent" id="Project-Management">
+<h4 class="subsection"><span>11.3.2 Project Management<a class="copiable-link" href="#Project-Management"> &para;</a></span></h4>
+<div class="example">
+<pre class="example-preformatted">;; Project-specific configuration
+
+;; Quick file switching in project
+(defun open-project-file (filename)
+  (let ((project-root &quot;/path/to/project/&quot;))
+    (find-file (string-append project-root filename))))
+
+;; Bind common project files
+(key-bind &quot;1&quot; &quot;(open-project-file \&quot;main.ts\&quot;)&quot; &quot;normal&quot;)
+(key-bind &quot;2&quot; &quot;(open-project-file \&quot;README.md\&quot;)&quot; &quot;normal&quot;) 
+(key-bind &quot;3&quot; &quot;(open-project-file \&quot;package.json\&quot;)&quot; &quot;normal&quot;)
+
+;; Build project
+(defun build-project ()
+  (shell-command &quot;deno task build&quot;)
+  (editor-set-status &quot;Build complete&quot;))
+
+(key-bind &quot;B&quot; &quot;(build-project)&quot; &quot;normal&quot;)
+</pre></div>
+
+<hr>
+</div>
+</div>
+</div>
+<div class="chapter-level-extent" id="Troubleshooting">
+<div class="nav-panel">
+<p>
+Next: <a href="#Index" accesskey="n" rel="next">Index</a>, Previous: <a href="#Examples" accesskey="p" rel="prev">Examples</a>, Up: <a href="#Top" accesskey="u" rel="up">tmax</a> &nbsp; [<a href="#SEC_Contents" title="Table of contents" rel="contents">Contents</a>][<a href="#Index" title="Index" rel="index">Index</a>]</p>
+</div>
+<h2 class="chapter" id="Troubleshooting-1"><span>12 Troubleshooting<a class="copiable-link" href="#Troubleshooting-1"> &para;</a></span></h2>
+
+<a class="index-entry-id" id="index-troubleshooting"></a>
+<a class="index-entry-id" id="index-problems"></a>
+<a class="index-entry-id" id="index-debugging"></a>
+
+<p>Common issues and their solutions.
+</p>
+<ul class="mini-toc">
+<li><a href="#Installation-Issues" accesskey="1">Installation Issues</a></li>
+<li><a href="#Runtime-Issues" accesskey="2">Runtime Issues</a></li>
+<li><a href="#Configuration-Issues" accesskey="3">Configuration Issues</a></li>
+<li><a href="#Getting-Help" accesskey="4">Getting Help</a></li>
+</ul>
+<div class="section-level-extent" id="Installation-Issues">
+<h3 class="section"><span>12.1 Installation Issues<a class="copiable-link" href="#Installation-Issues"> &para;</a></span></h3>
+
+<ul class="mini-toc">
+<li><a href="#Deno-Not-Found" accesskey="1">Deno Not Found</a></li>
+<li><a href="#Permission-Errors" accesskey="2">Permission Errors</a></li>
+</ul>
+<div class="subsection-level-extent" id="Deno-Not-Found">
+<h4 class="subsection"><span>12.1.1 Deno Not Found<a class="copiable-link" href="#Deno-Not-Found"> &para;</a></span></h4>
+<p><strong class="strong">Problem:</strong> &lsquo;<samp class="samp">deno: command not found</samp>&rsquo;
+</p>
+<p><strong class="strong">Solution:</strong>
+</p><ol class="enumerate">
+<li> Install Deno: <a class="url" href="https://deno.land/manual/getting_started/installation">https://deno.land/manual/getting_started/installation</a>
+</li><li> Add Deno to PATH: <code class="code">export PATH=&quot;$HOME/.deno/bin:$PATH&quot;</code>  
+</li><li> Restart terminal and try again
+</li></ol>
+
+</div>
+<div class="subsection-level-extent" id="Permission-Errors">
+<h4 class="subsection"><span>12.1.2 Permission Errors<a class="copiable-link" href="#Permission-Errors"> &para;</a></span></h4>
+<p><strong class="strong">Problem:</strong> &lsquo;<samp class="samp">PermissionDenied</samp>&rsquo; when starting tmax
+</p>
+<p><strong class="strong">Solution:</strong>
+</p><ol class="enumerate">
+<li> Ensure proper permissions: <code class="code">deno run --allow-read --allow-write src/main.ts</code>
+</li><li> Check file permissions in project directory
+</li><li> Use <code class="code">deno task start</code> which has proper permissions configured
+</li></ol>
+
+</div>
+</div>
+<div class="section-level-extent" id="Runtime-Issues">
+<h3 class="section"><span>12.2 Runtime Issues<a class="copiable-link" href="#Runtime-Issues"> &para;</a></span></h3>
+
+<ul class="mini-toc">
+<li><a href="#Terminal-Display-Problems" accesskey="1">Terminal Display Problems</a></li>
+<li><a href="#Key-Binding-Not-Working" accesskey="2">Key Binding Not Working</a></li>
+<li><a href="#Performance-Issues" accesskey="3">Performance Issues</a></li>
+</ul>
+<div class="subsection-level-extent" id="Terminal-Display-Problems">
+<h4 class="subsection"><span>12.2.1 Terminal Display Problems<a class="copiable-link" href="#Terminal-Display-Problems"> &para;</a></span></h4>
+<p><strong class="strong">Problem:</strong> Garbled display or cursor positioning issues
+</p>
+<p><strong class="strong">Solution:</strong>
+</p><ol class="enumerate">
+<li> Ensure terminal supports ANSI escape sequences
+</li><li> Try different terminal: xterm, gnome-terminal, iTerm2
+</li><li> Check <code class="code">TERM</code> environment variable
+</li><li> Verify terminal size with <code class="code">tput cols; tput lines</code>
+</li></ol>
+
+</div>
+<div class="subsection-level-extent" id="Key-Binding-Not-Working">
+<h4 class="subsection"><span>12.2.2 Key Binding Not Working<a class="copiable-link" href="#Key-Binding-Not-Working"> &para;</a></span></h4>
+<p><strong class="strong">Problem:</strong> Custom key bindings don&rsquo;t respond
+</p>
+<p><strong class="strong">Solution:</strong>
+</p><ol class="enumerate">
+<li> Check T-Lisp syntax in <samp class="file">.tmaxrc</samp>
+</li><li> Verify key name format (e.g., &quot;C-c&quot; not &quot;Ctrl+C&quot;)
+</li><li> Test with simple binding: <code class="code">(key-bind &quot;x&quot; &quot;(editor-set-status \&quot;test\&quot;)&quot; &quot;normal&quot;)</code>
+</li><li> Check mode specificity - binding may be for different mode
+</li></ol>
+
+</div>
+<div class="subsection-level-extent" id="Performance-Issues">
+<h4 class="subsection"><span>12.2.3 Performance Issues<a class="copiable-link" href="#Performance-Issues"> &para;</a></span></h4>
+<p><strong class="strong">Problem:</strong> Slow response or high memory usage
+</p>
+<p><strong class="strong">Solution:</strong>  
+</p><ol class="enumerate">
+<li> Check file size - very large files may impact performance
+</li><li> Reduce complex T-Lisp functions in tight loops
+</li><li> Monitor with <code class="code">deno run --allow-read --inspect src/main.ts</code>
+</li><li> Consider splitting large files
+</li></ol>
+
+</div>
+</div>
+<div class="section-level-extent" id="Configuration-Issues">
+<h3 class="section"><span>12.3 Configuration Issues<a class="copiable-link" href="#Configuration-Issues"> &para;</a></span></h3>
+
+<ul class="mini-toc">
+<li><a href="#g_t_002etmaxrc-Not-Loading" accesskey="1">.tmaxrc Not Loading</a></li>
+<li><a href="#T_002dLisp-Syntax-Errors" accesskey="2">T-Lisp Syntax Errors</a></li>
+</ul>
+<div class="subsection-level-extent" id="g_t_002etmaxrc-Not-Loading">
+<h4 class="subsection"><span>12.3.1 .tmaxrc Not Loading<a class="copiable-link" href="#g_t_002etmaxrc-Not-Loading"> &para;</a></span></h4>
+<p><strong class="strong">Problem:</strong> Custom configuration not applied
+</p>
+<p><strong class="strong">Solution:</strong>
+</p><ol class="enumerate">
+<li> Verify file location: <samp class="file">~/.tmaxrc</samp> (exact path)
+</li><li> Check file permissions: <code class="code">ls -la ~/.tmaxrc</code>  
+</li><li> Test with simple configuration: <code class="code">(editor-set-status &quot;Config loaded&quot;)</code>
+</li><li> Check for T-Lisp syntax errors
+</li></ol>
+
+</div>
+<div class="subsection-level-extent" id="T_002dLisp-Syntax-Errors">
+<h4 class="subsection"><span>12.3.2 T-Lisp Syntax Errors<a class="copiable-link" href="#T_002dLisp-Syntax-Errors"> &para;</a></span></h4>
+<p><strong class="strong">Problem:</strong> &lsquo;<samp class="samp">SyntaxError</samp>&rsquo; when loading configuration
+</p>
+<p><strong class="strong">Solution:</strong>
+</p><ol class="enumerate">
+<li> Check parentheses balance
+</li><li> Verify string quoting: <code class="code">&quot;string&quot;</code> not <code class="code">'string'</code>  
+</li><li> Use proper escaping: <code class="code">&quot;\n&quot;</code> for newline
+</li><li> Test expressions in T-Lisp REPL: <code class="code">deno task repl</code>
+</li></ol>
+
+</div>
+</div>
+<div class="section-level-extent" id="Getting-Help">
+<h3 class="section"><span>12.4 Getting Help<a class="copiable-link" href="#Getting-Help"> &para;</a></span></h3>
+
+<ol class="enumerate">
+<li> Check this manual for relevant sections
+</li><li> Test with minimal configuration
+</li><li> Use T-Lisp REPL for testing: <code class="code">deno task repl</code>
+</li><li> Run test suite: <code class="code">deno task test</code>  
+</li><li> Report bugs with minimal reproduction case
+</li></ol>
+
+<hr>
+</div>
+</div>
+<div class="unnumbered-level-extent" id="Index">
+<div class="nav-panel">
+<p>
+Previous: <a href="#Troubleshooting" accesskey="p" rel="prev">Troubleshooting</a>, Up: <a href="#Top" accesskey="u" rel="up">tmax</a> &nbsp; [<a href="#SEC_Contents" title="Table of contents" rel="contents">Contents</a>][<a href="#Index" title="Index" rel="index">Index</a>]</p>
+</div>
+<h2 class="unnumbered" id="Index-1"><span>Index<a class="copiable-link" href="#Index-1"> &para;</a></span></h2>
+
+<div class="printindex cp-printindex">
+<table class="cp-letters-header-printindex"><tr><th>Jump to: &nbsp; </th><td><a class="summary-letter-printindex" href="#Index_cp_symbol-1"><b>.</b></a>
+ &nbsp; 
+<br>
+<a class="summary-letter-printindex" href="#Index_cp_letter-A"><b>A</b></a>
+ &nbsp; 
+<a class="summary-letter-printindex" href="#Index_cp_letter-B"><b>B</b></a>
+ &nbsp; 
+<a class="summary-letter-printindex" href="#Index_cp_letter-C"><b>C</b></a>
+ &nbsp; 
+<a class="summary-letter-printindex" href="#Index_cp_letter-D"><b>D</b></a>
+ &nbsp; 
+<a class="summary-letter-printindex" href="#Index_cp_letter-E"><b>E</b></a>
+ &nbsp; 
+<a class="summary-letter-printindex" href="#Index_cp_letter-F"><b>F</b></a>
+ &nbsp; 
+<a class="summary-letter-printindex" href="#Index_cp_letter-G"><b>G</b></a>
+ &nbsp; 
+<a class="summary-letter-printindex" href="#Index_cp_letter-I"><b>I</b></a>
+ &nbsp; 
+<a class="summary-letter-printindex" href="#Index_cp_letter-K"><b>K</b></a>
+ &nbsp; 
+<a class="summary-letter-printindex" href="#Index_cp_letter-L"><b>L</b></a>
+ &nbsp; 
+<a class="summary-letter-printindex" href="#Index_cp_letter-M"><b>M</b></a>
+ &nbsp; 
+<a class="summary-letter-printindex" href="#Index_cp_letter-N"><b>N</b></a>
+ &nbsp; 
+<a class="summary-letter-printindex" href="#Index_cp_letter-P"><b>P</b></a>
+ &nbsp; 
+<a class="summary-letter-printindex" href="#Index_cp_letter-R"><b>R</b></a>
+ &nbsp; 
+<a class="summary-letter-printindex" href="#Index_cp_letter-S"><b>S</b></a>
+ &nbsp; 
+<a class="summary-letter-printindex" href="#Index_cp_letter-T"><b>T</b></a>
+ &nbsp; 
+<a class="summary-letter-printindex" href="#Index_cp_letter-U"><b>U</b></a>
+ &nbsp; 
+<a class="summary-letter-printindex" href="#Index_cp_letter-V"><b>V</b></a>
+ &nbsp; 
+<a class="summary-letter-printindex" href="#Index_cp_letter-W"><b>W</b></a>
+ &nbsp; 
+</td></tr></table>
+<table class="cp-entries-printindex">
+<tr><td></td><th class="entries-header-printindex">Index Entry</th><th class="sections-header-printindex">Section</th></tr>
+<tr><td colspan="3"><hr></td></tr>
+<tr><th id="Index_cp_symbol-1">.</th></tr>
+<tr><td></td><td class="printindex-index-entry"><a href="#index-_002etmaxrc">.tmaxrc</a></td><td class="printindex-index-section"><a href="#Configuration">Configuration</a></td></tr>
+<tr><td colspan="3"><hr></td></tr>
+<tr><th id="Index_cp_letter-A">A</th></tr>
+<tr><td></td><td class="printindex-index-entry"><a href="#index-API">API</a></td><td class="printindex-index-section"><a href="#Command-Reference">Command Reference</a></td></tr>
+<tr><td colspan="3"><hr></td></tr>
+<tr><th id="Index_cp_letter-B">B</th></tr>
+<tr><td></td><td class="printindex-index-entry"><a href="#index-basic-usage">basic usage</a></td><td class="printindex-index-section"><a href="#Basic-Usage">Basic Usage</a></td></tr>
+<tr><td></td><td class="printindex-index-entry"><a href="#index-buffers">buffers</a></td><td class="printindex-index-section"><a href="#Buffer-Management">Buffer Management</a></td></tr>
+<tr><td colspan="3"><hr></td></tr>
+<tr><th id="Index_cp_letter-C">C</th></tr>
+<tr><td></td><td class="printindex-index-entry"><a href="#index-command-mode">command mode</a></td><td class="printindex-index-section"><a href="#Editing-Modes">Editing Modes</a></td></tr>
+<tr><td></td><td class="printindex-index-entry"><a href="#index-commands">commands</a></td><td class="printindex-index-section"><a href="#Command-Reference">Command Reference</a></td></tr>
+<tr><td></td><td class="printindex-index-entry"><a href="#index-configuration">configuration</a></td><td class="printindex-index-section"><a href="#Configuration">Configuration</a></td></tr>
+<tr><td></td><td class="printindex-index-entry"><a href="#index-customization">customization</a></td><td class="printindex-index-section"><a href="#Key-Bindings">Key Bindings</a></td></tr>
+<tr><td></td><td class="printindex-index-entry"><a href="#index-customization-1">customization</a></td><td class="printindex-index-section"><a href="#Configuration">Configuration</a></td></tr>
+<tr><td colspan="3"><hr></td></tr>
+<tr><th id="Index_cp_letter-D">D</th></tr>
+<tr><td></td><td class="printindex-index-entry"><a href="#index-debugging">debugging</a></td><td class="printindex-index-section"><a href="#Troubleshooting">Troubleshooting</a></td></tr>
+<tr><td></td><td class="printindex-index-entry"><a href="#index-deno">deno</a></td><td class="printindex-index-section"><a href="#Installation">Installation</a></td></tr>
+<tr><td colspan="3"><hr></td></tr>
+<tr><th id="Index_cp_letter-E">E</th></tr>
+<tr><td></td><td class="printindex-index-entry"><a href="#index-emacs-commands">emacs commands</a></td><td class="printindex-index-section"><a href="#Editing-Modes">Editing Modes</a></td></tr>
+<tr><td></td><td class="printindex-index-entry"><a href="#index-examples">examples</a></td><td class="printindex-index-section"><a href="#Examples">Examples</a></td></tr>
+<tr><td></td><td class="printindex-index-entry"><a href="#index-extensibility">extensibility</a></td><td class="printindex-index-section"><a href="#T_002dLisp-System">T-Lisp System</a></td></tr>
+<tr><td colspan="3"><hr></td></tr>
+<tr><th id="Index_cp_letter-F">F</th></tr>
+<tr><td></td><td class="printindex-index-entry"><a href="#index-files">files</a></td><td class="printindex-index-section"><a href="#Buffer-Management">Buffer Management</a></td></tr>
+<tr><td></td><td class="printindex-index-entry"><a href="#index-functions">functions</a></td><td class="printindex-index-section"><a href="#Command-Reference">Command Reference</a></td></tr>
+<tr><td colspan="3"><hr></td></tr>
+<tr><th id="Index_cp_letter-G">G</th></tr>
+<tr><td></td><td class="printindex-index-entry"><a href="#index-getting-started">getting started</a></td><td class="printindex-index-section"><a href="#Basic-Usage">Basic Usage</a></td></tr>
+<tr><td colspan="3"><hr></td></tr>
+<tr><th id="Index_cp_letter-I">I</th></tr>
+<tr><td></td><td class="printindex-index-entry"><a href="#index-insert-mode">insert mode</a></td><td class="printindex-index-section"><a href="#Editing-Modes">Editing Modes</a></td></tr>
+<tr><td></td><td class="printindex-index-entry"><a href="#index-installation">installation</a></td><td class="printindex-index-section"><a href="#Installation">Installation</a></td></tr>
+<tr><td></td><td class="printindex-index-entry"><a href="#index-introduction">introduction</a></td><td class="printindex-index-section"><a href="#Introduction">Introduction</a></td></tr>
+<tr><td colspan="3"><hr></td></tr>
+<tr><th id="Index_cp_letter-K">K</th></tr>
+<tr><td></td><td class="printindex-index-entry"><a href="#index-key-bindings">key bindings</a></td><td class="printindex-index-section"><a href="#Key-Bindings">Key Bindings</a></td></tr>
+<tr><td></td><td class="printindex-index-entry"><a href="#index-keybindings">keybindings</a></td><td class="printindex-index-section"><a href="#Key-Bindings">Key Bindings</a></td></tr>
+<tr><td colspan="3"><hr></td></tr>
+<tr><th id="Index_cp_letter-L">L</th></tr>
+<tr><td></td><td class="printindex-index-entry"><a href="#index-language-reference">language reference</a></td><td class="printindex-index-section"><a href="#T_002dLisp-Language-Reference">T-Lisp Language Reference</a></td></tr>
+<tr><td colspan="3"><hr></td></tr>
+<tr><th id="Index_cp_letter-M">M</th></tr>
+<tr><td></td><td class="printindex-index-entry"><a href="#index-M_002dx-mode">M-x mode</a></td><td class="printindex-index-section"><a href="#Editing-Modes">Editing Modes</a></td></tr>
+<tr><td></td><td class="printindex-index-entry"><a href="#index-modal-editing">modal editing</a></td><td class="printindex-index-section"><a href="#Editing-Modes">Editing Modes</a></td></tr>
+<tr><td></td><td class="printindex-index-entry"><a href="#index-modes">modes</a></td><td class="printindex-index-section"><a href="#Editing-Modes">Editing Modes</a></td></tr>
+<tr><td></td><td class="printindex-index-entry"><a href="#index-multiple-files">multiple files</a></td><td class="printindex-index-section"><a href="#Buffer-Management">Buffer Management</a></td></tr>
+<tr><td colspan="3"><hr></td></tr>
+<tr><th id="Index_cp_letter-N">N</th></tr>
+<tr><td></td><td class="printindex-index-entry"><a href="#index-navigation">navigation</a></td><td class="printindex-index-section"><a href="#Editing-Modes">Editing Modes</a></td></tr>
+<tr><td></td><td class="printindex-index-entry"><a href="#index-normal-mode">normal mode</a></td><td class="printindex-index-section"><a href="#Editing-Modes">Editing Modes</a></td></tr>
+<tr><td colspan="3"><hr></td></tr>
+<tr><th id="Index_cp_letter-P">P</th></tr>
+<tr><td></td><td class="printindex-index-entry"><a href="#index-problems">problems</a></td><td class="printindex-index-section"><a href="#Troubleshooting">Troubleshooting</a></td></tr>
+<tr><td colspan="3"><hr></td></tr>
+<tr><th id="Index_cp_letter-R">R</th></tr>
+<tr><td></td><td class="printindex-index-entry"><a href="#index-real_002dworld-usage">real-world usage</a></td><td class="printindex-index-section"><a href="#Examples">Examples</a></td></tr>
+<tr><td colspan="3"><hr></td></tr>
+<tr><th id="Index_cp_letter-S">S</th></tr>
+<tr><td></td><td class="printindex-index-entry"><a href="#index-scripting">scripting</a></td><td class="printindex-index-section"><a href="#T_002dLisp-System">T-Lisp System</a></td></tr>
+<tr><td></td><td class="printindex-index-entry"><a href="#index-setup">setup</a></td><td class="printindex-index-section"><a href="#Installation">Installation</a></td></tr>
+<tr><td></td><td class="printindex-index-entry"><a href="#index-syntax-reference">syntax reference</a></td><td class="printindex-index-section"><a href="#T_002dLisp-Language-Reference">T-Lisp Language Reference</a></td></tr>
+<tr><td colspan="3"><hr></td></tr>
+<tr><th id="Index_cp_letter-T">T</th></tr>
+<tr><td></td><td class="printindex-index-entry"><a href="#index-T_002dLisp">T-Lisp</a></td><td class="printindex-index-section"><a href="#T_002dLisp-System">T-Lisp System</a></td></tr>
+<tr><td></td><td class="printindex-index-entry"><a href="#index-T_002dLisp-reference">T-Lisp reference</a></td><td class="printindex-index-section"><a href="#T_002dLisp-Language-Reference">T-Lisp Language Reference</a></td></tr>
+<tr><td></td><td class="printindex-index-entry"><a href="#index-text-input">text input</a></td><td class="printindex-index-section"><a href="#Editing-Modes">Editing Modes</a></td></tr>
+<tr><td></td><td class="printindex-index-entry"><a href="#index-text-selection">text selection</a></td><td class="printindex-index-section"><a href="#Editing-Modes">Editing Modes</a></td></tr>
+<tr><td></td><td class="printindex-index-entry"><a href="#index-troubleshooting">troubleshooting</a></td><td class="printindex-index-section"><a href="#Troubleshooting">Troubleshooting</a></td></tr>
+<tr><td colspan="3"><hr></td></tr>
+<tr><th id="Index_cp_letter-U">U</th></tr>
+<tr><td></td><td class="printindex-index-entry"><a href="#index-usage-examples">usage examples</a></td><td class="printindex-index-section"><a href="#Examples">Examples</a></td></tr>
+<tr><td colspan="3"><hr></td></tr>
+<tr><th id="Index_cp_letter-V">V</th></tr>
+<tr><td></td><td class="printindex-index-entry"><a href="#index-vim-commands">vim commands</a></td><td class="printindex-index-section"><a href="#Editing-Modes">Editing Modes</a></td></tr>
+<tr><td></td><td class="printindex-index-entry"><a href="#index-visual-mode">visual mode</a></td><td class="printindex-index-section"><a href="#Editing-Modes">Editing Modes</a></td></tr>
+<tr><td colspan="3"><hr></td></tr>
+<tr><th id="Index_cp_letter-W">W</th></tr>
+<tr><td></td><td class="printindex-index-entry"><a href="#index-what-is-tmax">what is tmax</a></td><td class="printindex-index-section"><a href="#Introduction">Introduction</a></td></tr>
+<tr><td colspan="3"><hr></td></tr>
+</table>
+<table class="cp-letters-footer-printindex"><tr><th>Jump to: &nbsp; </th><td><a class="summary-letter-printindex" href="#Index_cp_symbol-1"><b>.</b></a>
+ &nbsp; 
+<br>
+<a class="summary-letter-printindex" href="#Index_cp_letter-A"><b>A</b></a>
+ &nbsp; 
+<a class="summary-letter-printindex" href="#Index_cp_letter-B"><b>B</b></a>
+ &nbsp; 
+<a class="summary-letter-printindex" href="#Index_cp_letter-C"><b>C</b></a>
+ &nbsp; 
+<a class="summary-letter-printindex" href="#Index_cp_letter-D"><b>D</b></a>
+ &nbsp; 
+<a class="summary-letter-printindex" href="#Index_cp_letter-E"><b>E</b></a>
+ &nbsp; 
+<a class="summary-letter-printindex" href="#Index_cp_letter-F"><b>F</b></a>
+ &nbsp; 
+<a class="summary-letter-printindex" href="#Index_cp_letter-G"><b>G</b></a>
+ &nbsp; 
+<a class="summary-letter-printindex" href="#Index_cp_letter-I"><b>I</b></a>
+ &nbsp; 
+<a class="summary-letter-printindex" href="#Index_cp_letter-K"><b>K</b></a>
+ &nbsp; 
+<a class="summary-letter-printindex" href="#Index_cp_letter-L"><b>L</b></a>
+ &nbsp; 
+<a class="summary-letter-printindex" href="#Index_cp_letter-M"><b>M</b></a>
+ &nbsp; 
+<a class="summary-letter-printindex" href="#Index_cp_letter-N"><b>N</b></a>
+ &nbsp; 
+<a class="summary-letter-printindex" href="#Index_cp_letter-P"><b>P</b></a>
+ &nbsp; 
+<a class="summary-letter-printindex" href="#Index_cp_letter-R"><b>R</b></a>
+ &nbsp; 
+<a class="summary-letter-printindex" href="#Index_cp_letter-S"><b>S</b></a>
+ &nbsp; 
+<a class="summary-letter-printindex" href="#Index_cp_letter-T"><b>T</b></a>
+ &nbsp; 
+<a class="summary-letter-printindex" href="#Index_cp_letter-U"><b>U</b></a>
+ &nbsp; 
+<a class="summary-letter-printindex" href="#Index_cp_letter-V"><b>V</b></a>
+ &nbsp; 
+<a class="summary-letter-printindex" href="#Index_cp_letter-W"><b>W</b></a>
+ &nbsp; 
+</td></tr></table>
+</div>
+
+</div>
+</div>
+
+
+
+</body>
+</html>

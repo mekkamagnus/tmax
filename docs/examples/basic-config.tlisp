@@ -1,0 +1,108 @@
+;; basic-config.tlisp
+;; Basic tmax configuration examples
+;; Copy desired sections to your ~/.tmaxrc file
+
+;; =================================================================
+;; BASIC KEY BINDINGS
+;; =================================================================
+
+;; Save with Ctrl+S (works in all modes)
+(key-bind "C-s" "(quick-save)")
+
+;; Show line number with 'L' in normal mode
+(key-bind "L" "(editor-set-status (string-append \"Line: \" (number-to-string (+ (cursor-line) 1))))" "normal")
+
+;; Quick quit with 'Q' (no confirmation)
+(key-bind "Q" "(editor-quit)" "normal")
+
+;; Insert date with 'D' in normal mode
+(key-bind "D" "(buffer-insert (current-date))" "normal")
+
+;; =================================================================
+;; SIMPLE FUNCTIONS
+;; =================================================================
+
+;; Function to count words in buffer
+(defun word-count ()
+  (let ((text (buffer-text)))
+    (editor-set-status 
+      (string-append "Words: " 
+                     (number-to-string (length (split-string text " ")))))))
+
+;; Bind word count to 'W' key
+(key-bind "W" "(word-count)" "normal")
+
+;; Function to go to beginning of buffer
+(defun beginning-of-buffer ()
+  (cursor-move 0 0))
+
+;; Function to go to end of buffer  
+(defun end-of-buffer ()
+  (let ((last-line (- (buffer-line-count) 1)))
+    (cursor-move last-line 0)))
+
+;; Bind to common keys
+(key-bind "g g" "(beginning-of-buffer)" "normal")
+(key-bind "G" "(end-of-buffer)" "normal")
+
+;; =================================================================
+;; STATUS LINE CUSTOMIZATION
+;; =================================================================
+
+;; Welcome message
+(editor-set-status "tmax ready - Basic config loaded")
+
+;; Function to show current position
+(defun show-position ()
+  (let ((line (+ (cursor-line) 1))
+        (col (+ (cursor-column) 1))
+        (total (buffer-line-count)))
+    (editor-set-status 
+      (string-append "Line " (number-to-string line) 
+                     " of " (number-to-string total)
+                     ", Column " (number-to-string col)))))
+
+;; Show position automatically on cursor movement
+(key-bind "h" "(progn (cursor-move (cursor-line) (- (cursor-column) 1)) (show-position))" "normal")
+(key-bind "j" "(progn (cursor-move (+ (cursor-line) 1) (cursor-column)) (show-position))" "normal")
+(key-bind "k" "(progn (cursor-move (- (cursor-line) 1) (cursor-column)) (show-position))" "normal") 
+(key-bind "l" "(progn (cursor-move (cursor-line) (+ (cursor-column) 1)) (show-position))" "normal")
+
+;; =================================================================
+;; BASIC MACROS
+;; =================================================================
+
+;; Macro to save and quit quickly
+(defmacro save-and-quit ()
+  '(progn (quick-save) (editor-quit)))
+
+;; Use with: (save-and-quit)
+
+;; Macro to duplicate current line (conceptual - requires additional functions)
+(defmacro duplicate-line ()
+  '(progn 
+     (beginning-of-line)
+     (let ((line-content (buffer-get-line (cursor-line))))
+       (end-of-line)
+       (buffer-insert "\n")
+       (buffer-insert line-content))))
+
+;; =================================================================
+;; SIMPLE MODE CUSTOMIZATION
+;; =================================================================
+
+;; Custom function for insert mode entry
+(defun enter-insert-with-message ()
+  (editor-set-mode "insert")
+  (editor-set-status "-- INSERT MODE -- Type Escape to exit"))
+
+;; Override default 'i' binding
+(key-bind "i" "(enter-insert-with-message)" "normal")
+
+;; Custom function for command mode
+(defun enter-command-with-help ()
+  (editor-enter-command-mode)
+  (editor-set-status "Command mode: :q (quit) :w (save) :wq (save & quit)"))
+
+;; Override default ':' binding  
+(key-bind ":" "(enter-command-with-help)" "normal")

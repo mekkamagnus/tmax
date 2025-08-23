@@ -1,0 +1,183 @@
+;; programming.tlisp
+;; Programming-focused tmax configuration
+;; Optimized for software development workflows
+
+;; =================================================================
+;; PROGRAMMING KEY BINDINGS
+;; =================================================================
+
+;; Comment/uncomment line with Ctrl+/
+(defun toggle-line-comment ()
+  (let ((line (buffer-get-line (cursor-line))))
+    (if (string-prefix-p ";; " line)
+        ;; Remove comment
+        (progn
+          (beginning-of-line)
+          (buffer-delete 3))
+      ;; Add comment
+      (progn
+        (beginning-of-line)
+        (buffer-insert ";; ")))))
+
+(key-bind "C-/" "(toggle-line-comment)" "normal")
+
+;; Automatic indentation on Enter in insert mode
+(defun smart-newline ()
+  (let ((current-line (buffer-get-line (cursor-line))))
+    (let ((indent-level (count-leading-spaces current-line)))
+      (buffer-insert "\n")
+      (dotimes (i indent-level)
+        (buffer-insert " ")))))
+
+(key-bind "Enter" "(smart-newline)" "insert")
+
+;; Tab for indentation (4 spaces)
+(defun indent-line ()
+  (buffer-insert "    "))
+
+(key-bind "Tab" "(indent-line)" "insert")
+(key-bind "Tab" "(indent-line)" "normal")
+
+;; =================================================================
+;; CODE NAVIGATION
+;; =================================================================
+
+;; Jump to function definition (simplified - looks for "function" or "defun")
+(defun find-function-definition (name)
+  (let ((search-term (string-append "function " name))
+        (alt-term (string-append "defun " name)))
+    (or (search-forward search-term)
+        (search-forward alt-term))))
+
+;; Go to line number
+(defun goto-line (line-num)
+  (cursor-move (- line-num 1) 0)
+  (editor-set-status (string-append "Line " (number-to-string line-num))))
+
+;; Bind to 'G' with number prefix (conceptual)
+(key-bind "G" "(goto-line (read-number \"Go to line: \"))" "normal")
+
+;; =================================================================
+;; PROJECT MANAGEMENT
+;; =================================================================
+
+;; Quick file templates
+(defun insert-typescript-template ()
+  (buffer-insert "/**\n")
+  (buffer-insert " * @file \n")
+  (buffer-insert " * @description \n")
+  (buffer-insert " */\n\n")
+  (buffer-insert "export class ClassName {\n")
+  (buffer-insert "  constructor() {\n")
+  (buffer-insert "    // TODO: Implementation\n")
+  (buffer-insert "  }\n")
+  (buffer-insert "}\n"))
+
+(defun insert-test-template ()
+  (buffer-insert "import { assertEquals } from \"https://deno.land/std@0.208.0/assert/mod.ts\";\n\n")
+  (buffer-insert "Deno.test(\"test description\", () => {\n")
+  (buffer-insert "  // Arrange\n")
+  (buffer-insert "  const expected = true;\n\n")
+  (buffer-insert "  // Act\n")
+  (buffer-insert "  const result = true;\n\n") 
+  (buffer-insert "  // Assert\n")
+  (buffer-insert "  assertEquals(result, expected);\n")
+  (buffer-insert "});\n"))
+
+;; Bind templates to keys
+(key-bind "T t" "(insert-typescript-template)" "normal")
+(key-bind "T s" "(insert-test-template)" "normal")
+
+;; =================================================================
+;; DEVELOPMENT WORKFLOW
+;; =================================================================
+
+;; Function to show current file stats
+(defun file-stats ()
+  (let ((lines (buffer-line-count))
+        (chars (buffer-length))
+        (words (length (split-string (buffer-text) " "))))
+    (editor-set-status 
+      (string-append "Lines: " (number-to-string lines)
+                     " Words: " (number-to-string words)  
+                     " Chars: " (number-to-string chars)))))
+
+(key-bind "S" "(file-stats)" "normal")
+
+;; TODO markers and navigation
+(defun insert-todo ()
+  (buffer-insert "// TODO: "))
+
+(defun insert-fixme ()
+  (buffer-insert "// FIXME: "))
+
+(defun insert-note ()
+  (buffer-insert "// NOTE: "))
+
+;; Bind TODO insertions
+(key-bind "T d" "(insert-todo)" "insert")
+(key-bind "T f" "(insert-fixme)" "insert") 
+(key-bind "T n" "(insert-note)" "insert")
+
+;; =================================================================
+;; CODE FORMATTING HELPERS
+;; =================================================================
+
+;; Function to align assignment operators (simplified)
+(defun align-assignments ()
+  (editor-set-status "Assignment alignment not yet implemented"))
+
+;; Parentheses/bracket matching helper
+(defun show-matching-paren ()
+  (let ((char (buffer-char-at (cursor-line) (cursor-column))))
+    (cond
+      ((eq char "(") (find-matching-paren "(" ")"))
+      ((eq char ")") (find-matching-paren ")" "("))
+      ((eq char "[") (find-matching-paren "[" "]"))
+      ((eq char "]") (find-matching-paren "]" "["))
+      ((eq char "{") (find-matching-paren "{" "}"))
+      ((eq char "}") (find-matching-paren "}" "{"))
+      (else (editor-set-status "Not on a bracket/paren")))))
+
+(key-bind "%" "(show-matching-paren)" "normal")
+
+;; =================================================================
+;; PROGRAMMING MODE SETUP
+;; =================================================================
+
+;; Enhanced status for programming
+(defun programming-status ()
+  (let ((mode (editor-mode))
+        (line (+ (cursor-line) 1))
+        (col (+ (cursor-column) 1)))
+    (editor-set-status 
+      (string-append "[PROG] " mode " | " 
+                     (number-to-string line) ":" 
+                     (number-to-string col)))))
+
+;; Update status on movement
+(key-bind "h" "(progn (cursor-move (cursor-line) (- (cursor-column) 1)) (programming-status))" "normal")
+(key-bind "j" "(progn (cursor-move (+ (cursor-line) 1) (cursor-column)) (programming-status))" "normal")
+(key-bind "k" "(progn (cursor-move (- (cursor-line) 1) (cursor-column)) (programming-status))" "normal")
+(key-bind "l" "(progn (cursor-move (cursor-line) (+ (cursor-column) 1)) (programming-status))" "normal")
+
+;; =================================================================
+;; UTILITY FUNCTIONS
+;; =================================================================
+
+;; Helper functions that would need to be implemented in the T-Lisp stdlib
+(defun count-leading-spaces (line)
+  "Count leading spaces in a line for indentation"
+  (let ((count 0))
+    (while (and (< count (string-length line))
+                (eq (string-ref line count) " "))
+      (setq count (+ count 1)))
+    count))
+
+(defun string-prefix-p (prefix string)
+  "Check if string starts with prefix"
+  (and (>= (string-length string) (string-length prefix))
+       (equal (substring string 0 (string-length prefix)) prefix)))
+
+;; Welcome message for programming mode
+(editor-set-status "tmax programming mode loaded - Happy coding!")

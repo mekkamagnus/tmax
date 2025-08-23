@@ -1,0 +1,1584 @@
+\input texinfo
+@setfilename tmax.info
+@settitle tmax - Terminal Text Editor with T-Lisp Extensibility
+@documentencoding UTF-8
+@documentlanguage en
+
+@copying
+This manual is for tmax (version 1.0), a comprehensive terminal-based text editor
+with T-Lisp extensibility.
+
+Copyright @copyright{} 2024 tmax contributors.
+
+@quotation
+Permission is granted to copy, distribute and/or modify this document
+under the terms of the GNU Free Documentation License, Version 1.3
+or any later version published by the Free Software Foundation;
+with no Invariant Sections, no Front-Cover Texts, and no Back-Cover Texts.
+@end quotation
+@end copying
+
+@titlepage
+@title tmax Manual
+@subtitle Terminal Text Editor with T-Lisp Extensibility
+@author tmax contributors
+@page
+@vskip 0pt plus 1filll
+@insertcopying
+@end titlepage
+
+@contents
+
+@ifnottex
+@node Top
+@top tmax
+
+This manual describes tmax, a comprehensive terminal-based text editor
+with T-Lisp extensibility.
+
+@insertcopying
+@end ifnottex
+
+@menu
+* Introduction::        What is tmax and why use it
+* Installation::        Getting tmax up and running
+* Basic Usage::         Your first steps with tmax
+* Editing Modes::       Understanding tmax's modal interface
+* Key Bindings::        Default keybindings and customization
+* T-Lisp System::       Programming and extending tmax
+* T-Lisp Language Reference:: Complete T-Lisp language reference
+* Buffer Management::   Working with multiple files
+* Configuration::       Customizing tmax to your needs
+* Command Reference::   Complete T-Lisp API documentation
+* Examples::            Real-world usage examples
+* Troubleshooting::     Common issues and solutions
+* Index::               Complete index
+@end menu
+
+@node Introduction
+@chapter Introduction
+
+@cindex introduction
+@cindex what is tmax
+
+tmax is a comprehensive, extensible terminal-based text editor built with a
+TypeScript core and T-Lisp scripting system. Following the Emacs architecture
+philosophy, TypeScript handles low-level operations (terminal I/O, file system,
+memory management) while T-Lisp handles all higher-level editor functionality.
+
+@section Key Features
+
+@itemize @bullet
+@item @strong{Full-screen modal editing} with alternate screen buffer and viewport management
+@item @strong{Complete T-Lisp interpreter} with tail-call optimization and macro system  
+@item @strong{Five editing modes}: normal, insert, visual, command, and M-x
+@item @strong{Vim-like key bindings} with proper hjkl navigation
+@item @strong{Command interface} with both vim-style (:q, :w) and M-x (SPC ;) commands
+@item @strong{Multiple buffer management} with gap buffer implementation
+@item @strong{Comprehensive editor API} (25+ T-Lisp functions)
+@item @strong{Zero external dependencies}
+@end itemize
+
+@section Target Users
+
+tmax is designed for:
+@itemize @bullet
+@item Software developers who want unlimited customization
+@item System administrators who prefer keyboard-driven workflows
+@item Power users who value extensibility over simplicity
+@item Anyone interested in Lisp-based editor configuration
+@end itemize
+
+@section Architecture Overview
+
+@subsection TypeScript Core Responsibilities
+@itemize @bullet
+@item Terminal I/O with full-screen interface and alternate screen buffer
+@item File system operations with async reading/writing and proper error handling
+@item Memory management with efficient buffer operations and cursor tracking
+@item T-Lisp interpreter runtime with complete interpreter and tail-call optimization
+@item Buffer management using gap buffer implementation for efficient text editing
+@item Viewport management for scrolling and cursor positioning in large files
+@item Key handling with raw mode input and proper key normalization
+@end itemize
+
+@subsection T-Lisp Engine Responsibilities  
+@itemize @bullet
+@item Editor commands with all functionality exposed through T-Lisp API
+@item Mode management for modal editing state and transitions
+@item Key binding definitions with configurable key mappings
+@item User interface logic including status line, command input, M-x functionality
+@item Configuration management through .tmaxrc file loading and execution
+@item Extensibility via custom functions, macros, and commands
+@end itemize
+
+@node Installation
+@chapter Installation
+
+@cindex installation
+@cindex setup
+@cindex deno
+
+@section Requirements
+
+tmax requires:
+@itemize @bullet
+@item Deno 2.3.7 or later
+@item Terminal with ANSI escape sequence support
+@item Unix-like operating system (Linux, macOS, BSD)
+@end itemize
+
+@section Installing Deno
+
+If you don't have Deno installed:
+
+@example
+# Linux/macOS
+curl -fsSL https://deno.land/install.sh | sh
+
+# Or using package managers:
+# macOS with Homebrew
+brew install deno
+
+# Linux with Snap
+snap install deno
+@end example
+
+@section Getting tmax
+
+Clone the repository and set up the development environment:
+
+@example
+git clone <repository-url> tmax
+cd tmax
+@end example
+
+@section Running tmax
+
+@subsection Start the Editor
+@example
+deno task start [filename]
+@end example
+
+@subsection Development Mode with Auto-reload
+@example  
+deno task dev
+@end example
+
+@subsection T-Lisp REPL
+@example
+deno task repl
+@end example
+
+@section Testing the Installation
+
+Run the comprehensive test suite to verify your installation:
+
+@example
+deno task test
+@end example
+
+This runs 131 tests across 8 comprehensive test suites.
+
+@node Basic Usage
+@chapter Basic Usage
+
+@cindex basic usage
+@cindex getting started
+
+@section Starting tmax
+
+Launch tmax from your terminal:
+
+@example
+deno task start
+@end example
+
+Or open a specific file:
+
+@example
+deno task start myfile.txt
+@end example
+
+@section Your First Session
+
+When tmax starts, you'll see:
+@itemize @bullet
+@item A full-screen interface using the alternate screen buffer
+@item A status line at the bottom showing current mode and cursor position
+@item The current buffer content (or empty *scratch* buffer)
+@end itemize
+
+@section Essential Keys
+
+@subsection Immediate Survival Keys
+@table @kbd
+@item q
+Quit tmax (in normal mode)
+@item :q
+Quit via command mode
+@item Escape
+Return to normal mode from any other mode
+@end table
+
+@subsection Basic Movement
+@table @kbd
+@item h
+Move cursor left
+@item j  
+Move cursor down
+@item k
+Move cursor up
+@item l
+Move cursor right
+@end table
+
+@subsection Mode Switching
+@table @kbd
+@item i
+Enter insert mode
+@item :
+Enter command mode
+@item SPC ;
+Enter M-x mode (Emacs-style command execution)
+@end table
+
+@section Exiting tmax
+
+From normal mode:
+@itemize @bullet
+@item Press @kbd{q} to quit immediately
+@item Press @kbd{:} then type @kbd{q} and press @kbd{Enter}
+@end itemize
+
+@node Editing Modes
+@chapter Editing Modes
+
+@cindex modes
+@cindex modal editing
+
+tmax uses a modal editing system with five distinct modes, each optimized for specific tasks.
+
+@section Normal Mode
+
+@cindex normal mode
+@cindex navigation
+
+Normal mode is the default mode for navigation and text manipulation commands.
+
+@subsection Characteristics
+@itemize @bullet
+@item Primary mode for cursor movement
+@item Text modification through commands
+@item Access point to other modes
+@item Status line shows @samp{-- NORMAL --}
+@end itemize
+
+@subsection Navigation Commands
+@table @kbd
+@item h
+Move cursor left one character
+@item j
+Move cursor down one line  
+@item k
+Move cursor up one line
+@item l
+Move cursor right one character
+@end table
+
+@section Insert Mode
+
+@cindex insert mode
+@cindex text input
+
+Insert mode is for entering and editing text directly.
+
+@subsection Entering Insert Mode
+@table @kbd
+@item i
+Insert text before cursor (from normal mode)
+@end table
+
+@subsection In Insert Mode
+@itemize @bullet
+@item Type normally to insert text
+@item @kbd{Backspace} deletes the previous character
+@item @kbd{Enter} creates a new line
+@item @kbd{Escape} returns to normal mode
+@end itemize
+
+@subsection Status Display
+Status line shows @samp{-- INSERT --} with cursor position.
+
+@section Command Mode
+
+@cindex command mode
+@cindex vim commands
+
+Command mode provides a vim-style command interface for file operations and editor control.
+
+@subsection Entering Command Mode
+@table @kbd
+@item :
+From normal mode, press colon to enter command mode
+@end table
+
+@subsection Command Mode Interface
+@itemize @bullet
+@item Prompt shows @samp{:} followed by your input
+@item Type commands and press @kbd{Enter} to execute
+@item @kbd{Escape} cancels and returns to normal mode
+@item @kbd{Backspace} deletes characters from command line
+@end itemize
+
+@subsection Available Commands
+@table @code
+@item q
+Quit the editor
+@item w
+Write (save) current buffer
+@item wq  
+Write and quit
+@end table
+
+@section M-x Mode
+
+@cindex M-x mode
+@cindex emacs commands
+
+M-x mode provides Emacs-style function execution by name.
+
+@subsection Entering M-x Mode
+@table @kbd
+@item SPC ;
+From normal mode, press Space followed by semicolon
+@end table
+
+@subsection M-x Mode Interface
+@itemize @bullet
+@item Prompt shows @samp{M-x } followed by your input
+@item Type function names and press @kbd{Enter} to execute
+@item @kbd{Escape} cancels and returns to normal mode
+@item @kbd{Backspace} deletes characters from function name
+@end itemize
+
+@subsection Available Functions
+@table @code
+@item cursor-position
+Show current cursor position
+@item editor-mode
+Display current editing mode
+@item quit
+Quit the editor
+@end table
+
+@section Visual Mode
+
+@cindex visual mode
+@cindex text selection
+
+Visual mode is planned for text selection and manipulation (currently in development).
+
+@section Mode Transitions
+
+@example
+Normal ←→ Insert    (i / Escape)
+Normal ←→ Command   (: / Escape)  
+Normal ←→ M-x      (SPC ; / Escape)
+Normal ←→ Visual   (planned)
+@end example
+
+@node Key Bindings
+@chapter Key Bindings
+
+@cindex key bindings
+@cindex keybindings
+@cindex customization
+
+tmax uses a T-Lisp-centric key binding system that is fully customizable.
+
+@section Default Key Bindings
+
+@subsection Normal Mode Bindings
+@multitable @columnfractions .2 .4 .4
+@headitem Key @tab Command @tab Description
+@item @kbd{h} @tab @code{(cursor-move (cursor-line) (- (cursor-column) 1))} @tab Move left
+@item @kbd{j} @tab @code{(cursor-move (+ (cursor-line) 1) (cursor-column))} @tab Move down
+@item @kbd{k} @tab @code{(cursor-move (- (cursor-line) 1) (cursor-column))} @tab Move up
+@item @kbd{l} @tab @code{(cursor-move (cursor-line) (+ (cursor-column) 1))} @tab Move right
+@item @kbd{i} @tab @code{(editor-set-mode "insert")} @tab Enter insert mode
+@item @kbd{:} @tab @code{(editor-enter-command-mode)} @tab Enter command mode
+@item @kbd{SPC} @tab @code{(editor-handle-space)} @tab Start M-x sequence
+@item @kbd{;} @tab @code{(editor-handle-semicolon)} @tab Complete M-x sequence
+@item @kbd{q} @tab @code{(editor-quit)} @tab Quit editor
+@end multitable
+
+@subsection Insert Mode Bindings
+@multitable @columnfractions .2 .4 .4
+@headitem Key @tab Command @tab Description
+@item @kbd{Escape} @tab @code{(editor-set-mode "normal")} @tab Return to normal mode
+@item @kbd{Backspace} @tab @code{(buffer-delete 1)} @tab Delete previous character
+@item @kbd{Enter} @tab @code{(buffer-insert "\n")} @tab Insert newline
+@item Printable chars @tab @code{(buffer-insert "char")} @tab Insert character
+@end multitable
+
+@subsection Command Mode Bindings
+@multitable @columnfractions .2 .4 .4
+@headitem Key @tab Command @tab Description
+@item @kbd{Escape} @tab @code{(editor-exit-command-mode)} @tab Cancel command mode
+@item @kbd{Enter} @tab @code{(editor-execute-command-line)} @tab Execute command
+@item @kbd{q} @tab @code{(editor-quit)} @tab Quit editor
+@item Printable chars @tab Added to command line @tab Build command
+@end multitable
+
+@subsection M-x Mode Bindings
+@multitable @columnfractions .2 .4 .4
+@headitem Key @tab Command @tab Description
+@item @kbd{Escape} @tab @code{(editor-exit-mx-mode)} @tab Cancel M-x mode
+@item @kbd{Enter} @tab @code{(editor-execute-mx-command)} @tab Execute function
+@item Printable chars @tab Added to function name @tab Build function name
+@end multitable
+
+@section Customizing Key Bindings
+
+Key bindings are defined in T-Lisp using the @code{key-bind} function.
+
+@subsection The key-bind Function
+
+@example
+(key-bind KEY COMMAND MODE)
+@end example
+
+@table @var
+@item KEY
+String representing the key (e.g., "h", "Escape", "Enter")
+@item COMMAND  
+T-Lisp expression as string to execute when key is pressed
+@item MODE
+Optional mode restriction ("normal", "insert", "visual", "command", "mx")
+@end table
+
+@subsection Examples
+
+@example
+;; Bind 'x' to delete character in normal mode
+(key-bind "x" "(buffer-delete 1)" "normal")
+
+;; Bind Ctrl+S to save (works in all modes)
+(key-bind "C-s" "(quick-save)")
+
+;; Bind F1 to show help
+(key-bind "F1" "(show-help)" "normal")
+@end example
+
+@section Core Bindings File
+
+Default key bindings are stored in @file{src/tlisp/core-bindings.tlisp}. This file is loaded automatically when tmax starts.
+
+@subsection File Structure
+@example
+;; =================================================================
+;; BASIC NAVIGATION (Normal Mode)  
+;; =================================================================
+(key-bind "h" "(cursor-move (cursor-line) (- (cursor-column) 1))" "normal")
+;; ... more navigation bindings
+
+;; =================================================================  
+;; MODE SWITCHING
+;; =================================================================
+(key-bind "i" "(editor-set-mode \"insert\")" "normal")
+;; ... more mode bindings
+@end example
+
+@node T-Lisp System
+@chapter T-Lisp System
+
+@cindex T-Lisp
+@cindex scripting
+@cindex extensibility
+
+tmax includes a complete T-Lisp interpreter for editor customization and extensibility.
+
+@section T-Lisp Overview
+
+T-Lisp (tmax Lisp) is a Lisp-1 dialect with:
+@itemize @bullet
+@item Lexical scoping
+@item Tail-call optimization  
+@item Macro system with quasiquote support
+@item Comprehensive standard library (31 built-in functions)
+@item Editor API integration (25+ editor-specific functions)
+@end itemize
+
+@section Basic Syntax
+
+@subsection Data Types
+@table @code
+@item Numbers
+@code{42}, @code{3.14}, @code{-17}
+@item Strings  
+@code{"hello world"}, @code{"file.txt"}
+@item Symbols
+@code{x}, @code{my-var}, @code{buffer-insert}
+@item Lists
+@code{(a b c)}, @code{(+ 1 2 3)}
+@item Boolean
+@code{#t} (true), @code{#f} (false)
+@item Nil
+@code{nil} (empty list)
+@end table
+
+@subsection Function Calls
+@example
+(function-name arg1 arg2 arg3)
+(+ 1 2 3)        ; Returns 6
+(buffer-insert "hello")
+(cursor-move 10 5)
+@end example
+
+@subsection Variable Binding
+@example
+;; Define variables
+(setq x 42)
+(setq name "tmax")
+
+;; Let bindings (local scope)
+(let ((x 10) (y 20))
+  (+ x y))       ; Returns 30
+@end example
+
+@section Standard Library Functions
+
+@subsection Arithmetic Functions
+@table @code
+@item (+...)
+Addition with any number of arguments
+@item (-...)  
+Subtraction with any number of arguments
+@item (*...)
+Multiplication with any number of arguments
+@item (/...)
+Division with any number of arguments
+@item (mod a b)
+Modulo operation
+@end table
+
+@subsection List Functions  
+@table @code
+@item (cons a b)
+Create cons cell with car @var{a} and cdr @var{b}
+@item (car list)
+Get first element of list
+@item (cdr list)
+Get rest of list after first element
+@item (length list)
+Get length of list
+@item (nth n list)
+Get @var{n}th element of list (0-indexed)
+@item (append list1 list2)
+Concatenate two lists
+@item (reverse list)
+Reverse a list
+@end table
+
+@subsection String Functions
+@table @code  
+@item (string-length str)
+Get length of string
+@item (string-append str1 str2)
+Concatenate strings
+@item (substring str start end)
+Extract substring
+@end table
+
+@subsection Control Flow
+@table @code
+@item (if condition then else)
+Conditional expression
+@item (when condition body...)
+Execute body if condition is true
+@item (unless condition body...)  
+Execute body if condition is false
+@item (cond (test1 result1) (test2 result2) ... (else default))
+Multi-way conditional
+@end table
+
+@subsection Comparison Functions
+@table @code
+@item (= a b)
+Numeric equality
+@item (< a b)
+Less than
+@item (> a b)  
+Greater than
+@item (<= a b)
+Less than or equal
+@item (>= a b)
+Greater than or equal
+@item (eq a b)
+Object identity
+@item (equal a b)
+Structural equality
+@end table
+
+@section Macro System
+
+T-Lisp supports macros with full quasiquote support.
+
+@subsection Defining Macros
+@example
+(defmacro when (condition &rest body)
+  `(if ,condition (progn ,@@body)))
+
+(defmacro save-and-quit ()
+  '(progn (quick-save) (editor-quit)))
+@end example
+
+@subsection Quasiquote Syntax
+@table @code
+@item `expression
+Quasiquote - like quote but allows unquoting
+@item ,expression
+Unquote within quasiquote
+@item ,@@expression  
+Splice unquote - inserts list elements
+@end table
+
+@subsection Example Usage
+@example
+(defmacro increment (var)
+  `(setq ,var (+ ,var 1)))
+
+(setq x 5)
+(increment x)  ; x is now 6
+@end example
+
+@section Configuration File
+
+tmax loads @file{~/.tmaxrc} on startup if it exists.
+
+@subsection Example .tmaxrc
+@example
+;; ~/.tmaxrc - tmax configuration
+
+;; Define custom word count function
+(defun word-count ()
+  (let ((text (buffer-text)))
+    (length (split-string text " "))))
+
+;; Bind w to move 5 lines down in normal mode  
+(key-bind "w" "(cursor-move (+ (cursor-line) 5) (cursor-column))" "normal")
+
+;; Define save-and-quit macro
+(defmacro save-and-quit ()
+  '(progn (quick-save) (editor-quit)))
+
+;; Custom status message
+(editor-set-status "tmax ready - T-Lisp configured")
+@end example
+
+@node T-Lisp Language Reference
+@chapter T-Lisp Language Reference
+
+@cindex T-Lisp reference
+@cindex language reference
+@cindex syntax reference
+
+This chapter provides a comprehensive reference for the T-Lisp language used in tmax.
+
+@section Language Fundamentals
+
+@subsection Lexical Structure
+
+@subsubsection Comments
+@example
+;; This is a single-line comment
+; This is also a comment
+@end example
+
+@subsubsection Identifiers
+Identifiers (symbols) can contain letters, numbers, and these characters: @code{-}, @code{_}, @code{?}, @code{!}, @code{+}, @code{*}, @code{/}, @code{<}, @code{>}, @code{=}
+
+Valid identifiers:
+@example
+x
+my-variable
+buffer-insert
+nil?
+set!
++
+<=
+@end example
+
+@subsection Data Types Reference
+
+@table @code
+@item Numbers
+Integers and floating-point numbers
+@example
+42        ; integer
+-17       ; negative integer
+3.14      ; floating-point
+-2.5      ; negative float
+@end example
+
+@item Strings
+Text enclosed in double quotes. Supports escape sequences.
+@example
+"hello world"
+"Line 1\nLine 2"    ; newline
+"Say \"hello\""     ; escaped quotes
+"Path\\file.txt"    ; escaped backslash
+@end example
+
+@item Symbols
+Identifiers that evaluate to themselves or variables
+@example
+'x           ; quoted symbol (literal)
+x            ; symbol (variable reference)
+'my-symbol   ; quoted symbol
+@end example
+
+@item Lists
+Ordered collections, fundamental data structure
+@example
+'(1 2 3)           ; quoted list
+(list 1 2 3)       ; constructed list
+'(a b (c d) e)     ; nested lists
+'()                ; empty list (same as nil)
+@end example
+
+@item Booleans
+Truth values
+@example
+#t          ; true
+#f          ; false
+@end example
+
+@item Nil
+Represents both false and empty list
+@example
+nil         ; nil/empty list
+'()         ; same as nil
+@end example
+@end table
+
+@section Expression Evaluation
+
+@subsection Function Calls
+@example
+(function-name arg1 arg2 ...)
+(+ 1 2 3)                    ; arithmetic
+(buffer-insert "text")       ; editor function
+(cons 'a '(b c))            ; list construction
+@end example
+
+@subsection Special Forms
+
+@table @code
+@item (quote expr) or 'expr
+Returns expression without evaluation
+@example
+(quote x)       ; returns symbol x
+'x              ; same as above  
+'(1 2 3)        ; returns list (1 2 3)
+@end example
+
+@item (if condition then-expr else-expr)
+Conditional evaluation
+@example
+(if (> x 0) "positive" "not positive")
+(if (nil? list) 0 (length list))
+@end example
+
+@item (let ((var1 val1) (var2 val2) ...) body...)
+Local variable binding
+@example
+(let ((x 10) (y 20))
+  (+ x y))                  ; returns 30
+
+(let ((name "tmax"))
+  (string-append "Hello " name))
+@end example
+
+@item (defun name (params...) body...)
+Function definition
+@example
+(defun square (x)
+  (* x x))
+
+(defun greet (name)
+  (string-append "Hello, " name "!"))
+@end example
+
+@item (defmacro name (params...) body...)
+Macro definition
+@example
+(defmacro when (condition . body)
+  `(if ,condition (progn ,@@body)))
+@end example
+
+@item (progn expr1 expr2 ...)
+Sequential evaluation, returns last expression
+@example
+(progn
+  (buffer-insert "Hello")
+  (buffer-insert " World")
+  (cursor-move 0 0))
+@end example
+
+@item (setq var value)
+Variable assignment
+@example
+(setq x 42)
+(setq name "tmax")
+@end example
+@end table
+
+@section Built-in Functions Reference
+
+@subsection Arithmetic Operations
+@table @code
+@item (+ numbers...)
+Addition. With no arguments returns 0.
+@example
+(+)           ; 0
+(+ 5)         ; 5
+(+ 1 2 3 4)   ; 10
+@end example
+
+@item (- numbers...)
+Subtraction. With one argument, negation.
+@example
+(- 5)         ; -5
+(- 10 3)      ; 7
+(- 20 5 2)    ; 13
+@end example
+
+@item (* numbers...)
+Multiplication. With no arguments returns 1.
+@example
+(*)           ; 1
+(* 3)         ; 3
+(* 2 3 4)     ; 24
+@end example
+
+@item (/ numbers...)
+Division. With one argument, reciprocal.
+@example
+(/ 2)         ; 0.5
+(/ 8 2)       ; 4
+(/ 24 2 3)    ; 4
+@end example
+
+@item (mod dividend divisor)
+Modulo operation
+@example
+(mod 7 3)     ; 1
+(mod 10 4)    ; 2
+@end example
+@end table
+
+@subsection Comparison Operations
+@table @code
+@item (= numbers...)
+Numeric equality
+@example
+(= 3 3)       ; #t
+(= 1 2)       ; #f
+(= 1 1 1)     ; #t
+@end example
+
+@item (< numbers...)
+Numeric less-than (ascending order)
+@example
+(< 1 2)       ; #t
+(< 3 2)       ; #f
+(< 1 2 3)     ; #t
+@end example
+
+@item (> numbers...)
+Numeric greater-than (descending order)
+@example
+(> 2 1)       ; #t
+(> 1 2)       ; #f
+(> 3 2 1)     ; #t
+@end example
+
+@item (<= numbers...)
+Numeric less-than-or-equal
+@example
+(<= 1 2)      ; #t
+(<= 2 2)      ; #t
+(<= 3 2)      ; #f
+@end example
+
+@item (>= numbers...)
+Numeric greater-than-or-equal
+@example
+(>= 2 1)      ; #t
+(>= 2 2)      ; #t
+(>= 1 2)      ; #f
+@end example
+
+@item (equal expr1 expr2)
+Deep structural equality
+@example
+(equal 'a 'a)           ; #t
+(equal '(1 2) '(1 2))   ; #t
+(equal "hi" "hi")       ; #t
+@end example
+@end table
+
+@subsection List Operations
+@table @code
+@item (cons car cdr)
+Construct cons cell (list node)
+@example
+(cons 1 '(2 3))         ; (1 2 3)
+(cons 'a 'b)            ; (a . b) - dotted pair
+(cons 1 nil)            ; (1)
+@end example
+
+@item (car list)
+Get first element (head) of list
+@example
+(car '(1 2 3))          ; 1
+(car '((a b) c))        ; (a b)
+@end example
+
+@item (cdr list)
+Get rest of list (tail) after first element
+@example
+(cdr '(1 2 3))          ; (2 3)
+(cdr '(a))              ; nil
+@end example
+
+@item (length list)
+Get number of elements in list
+@example
+(length '())            ; 0
+(length '(a b c))       ; 3
+@end example
+
+@item (nth n list)
+Get nth element (0-indexed)
+@example
+(nth 0 '(a b c))        ; a
+(nth 2 '(x y z))        ; z
+@end example
+
+@item (append list1 list2 ...)
+Concatenate lists
+@example
+(append '(1 2) '(3 4))      ; (1 2 3 4)
+(append '(a) '(b) '(c))     ; (a b c)
+@end example
+
+@item (reverse list)
+Reverse order of list elements
+@example
+(reverse '(1 2 3))      ; (3 2 1)
+(reverse '(a))          ; (a)
+@end example
+
+@item (list elements...)
+Create list from arguments
+@example
+(list)              ; nil
+(list 1 2 3)        ; (1 2 3)
+(list 'a (+ 1 2))   ; (a 3)
+@end example
+@end table
+
+@subsection String Operations
+@table @code
+@item (string-length str)
+Get length of string
+@example
+(string-length "hello")     ; 5
+(string-length "")          ; 0
+@end example
+
+@item (string-append str1 str2 ...)
+Concatenate strings
+@example
+(string-append "hello" " " "world")  ; "hello world"
+(string-append "a" "b" "c")          ; "abc"
+@end example
+
+@item (substring str start end)
+Extract portion of string
+@example
+(substring "hello" 1 4)     ; "ell"
+(substring "world" 0 2)     ; "wo"
+@end example
+@end table
+
+@subsection Type Predicates
+@table @code
+@item (nil? expr)
+Test if expression is nil
+@example
+(nil? nil)          ; #t
+(nil? '())          ; #t
+(nil? 0)            ; #f
+@end example
+
+@item (number? expr)
+Test if expression is a number
+@example
+(number? 42)        ; #t
+(number? 3.14)      ; #t
+(number? "42")      ; #f
+@end example
+
+@item (string? expr)
+Test if expression is a string
+@example
+(string? "hello")   ; #t
+(string? 'hello)    ; #f
+@end example
+
+@item (symbol? expr)
+Test if expression is a symbol
+@example
+(symbol? 'x)        ; #t
+(symbol? "x")       ; #f
+@end example
+
+@item (list? expr)
+Test if expression is a proper list
+@example
+(list? '(1 2 3))    ; #t
+(list? nil)         ; #t
+(list? 'atom)       ; #f
+@end example
+@end table
+
+@section Advanced Features
+
+@subsection Macro System
+T-Lisp supports a full macro system with quasiquote.
+
+@subsubsection Quasiquote Syntax
+@table @code
+@item `expr
+Quasiquote - like quote but allows unquoting
+@item ,expr  
+Unquote - evaluate expression within quasiquote
+@item ,@@expr
+Unquote-splice - insert list elements
+@end table
+
+@subsubsection Macro Examples
+@example
+;; Simple macro
+(defmacro when (condition . body)
+  `(if ,condition (progn ,@@body)))
+
+;; Usage
+(when (> x 0)
+  (print "positive")
+  (print "number"))
+
+;; Expands to:
+;; (if (> x 0) 
+;;     (progn (print "positive") (print "number")))
+@end example
+
+@subsection Lexical Scoping
+Variables are lexically scoped with proper closure support.
+
+@example
+(defun make-counter ()
+  (let ((count 0))
+    (lambda ()
+      (setq count (+ count 1))
+      count)))
+
+(setq counter1 (make-counter))
+(setq counter2 (make-counter))
+
+(counter1)  ; 1
+(counter1)  ; 2
+(counter2)  ; 1 (independent)
+@end example
+
+@subsection Tail Call Optimization
+Recursive functions in tail position are optimized.
+
+@example
+;; Tail-recursive factorial
+(defun factorial (n acc)
+  (if (<= n 1) 
+      acc
+      (factorial (- n 1) (* n acc))))
+
+(defun fact (n)
+  (factorial n 1))
+@end example
+
+@node Buffer Management
+@chapter Buffer Management
+
+@cindex buffers
+@cindex files
+@cindex multiple files
+
+tmax uses a buffer-based approach to manage multiple files and text content.
+
+@section Understanding Buffers
+
+A buffer in tmax is an in-memory representation of text that may or may not be associated with a file. Each buffer:
+
+@itemize @bullet
+@item Has a unique name
+@item Contains text content using efficient gap buffer data structure
+@item Tracks cursor position and viewport
+@item May be associated with a file on disk
+@end itemize
+
+@section Buffer Operations
+
+@subsection Creating Buffers
+Buffers are created automatically when:
+@itemize @bullet
+@item Opening a file: @code{deno task start filename.txt}
+@item Starting tmax without arguments creates @samp{*scratch*} buffer
+@end itemize
+
+@subsection Switching Buffers
+Currently, tmax maintains one active buffer at a time. Future versions will include buffer switching commands.
+
+@section File Operations
+
+@subsection Opening Files
+@example
+deno task start myfile.txt
+@end example
+
+@subsection Saving Files  
+From command mode:
+@example
+:w    # Save current buffer
+:wq   # Save and quit
+@end example
+
+@section Buffer Implementation
+
+tmax uses a gap buffer implementation for efficient text editing:
+
+@itemize @bullet
+@item O(1) insertion/deletion at cursor position
+@item Efficient memory usage for large files
+@item Optimized for typical editing patterns
+@end itemize
+
+@node Configuration
+@chapter Configuration
+
+@cindex configuration
+@cindex customization
+@cindex .tmaxrc
+
+tmax is highly configurable through T-Lisp scripting.
+
+@section Configuration File
+
+tmax loads @file{~/.tmaxrc} on startup for user customization.
+
+@section Configuration Examples
+
+@subsection Basic Key Bindings
+@example
+;; Bind Ctrl+S to save in normal mode
+(key-bind "C-s" "(quick-save)" "normal")
+
+;; Bind F2 to show current time  
+(key-bind "F2" "(editor-set-status (current-time))" "normal")
+@end example
+
+@subsection Custom Functions
+@example
+;; Define function to insert current date
+(defun insert-date ()
+  (buffer-insert (format-date (current-time))))
+
+;; Bind it to a key
+(key-bind "D" "(insert-date)" "normal")
+@end example
+
+@subsection Custom Macros
+@example
+;; Macro for common operation
+(defmacro duplicate-line ()
+  '(progn 
+     (beginning-of-line)
+     (set-mark)
+     (end-of-line)  
+     (copy-region)
+     (newline)
+     (paste)))
+
+;; Bind macro to key
+(key-bind "C-d" "(duplicate-line)" "normal") 
+@end example
+
+@subsection Mode-Specific Configuration
+@example
+;; Different bindings for different modes
+(key-bind "C-c" "(copy-selection)" "visual")
+(key-bind "C-v" "(paste-clipboard)" "insert")
+(key-bind "C-z" "(undo)" "normal")
+@end example
+
+@node Command Reference
+@chapter Command Reference
+
+@cindex commands
+@cindex API
+@cindex functions
+
+Complete reference for all available T-Lisp functions in tmax.
+
+@section Buffer Functions
+
+@table @code
+@item (buffer-insert text)
+Insert @var{text} at current cursor position.
+
+@item (buffer-delete count)  
+Delete @var{count} characters before cursor position.
+
+@item (buffer-text)
+Return entire buffer content as string.
+
+@item (buffer-length) 
+Return total character count in buffer.
+
+@item (buffer-line-count)
+Return number of lines in buffer.
+
+@item (buffer-get-line line-num)
+Return content of line at @var{line-num} (0-indexed).
+
+@item (buffer-substring start end)
+Return text between @var{start} and @var{end} positions.
+@end table
+
+@section Cursor Functions
+
+@table @code
+@item (cursor-move line column)
+Move cursor to @var{line} and @var{column} (0-indexed).
+
+@item (cursor-line)
+Return current line number (0-indexed).
+
+@item (cursor-column)  
+Return current column number (0-indexed).
+
+@item (cursor-position)
+Return list @code{(line column)} of current position.
+@end table
+
+@section Editor Functions
+
+@table @code
+@item (editor-mode)
+Return current editing mode as string.
+
+@item (editor-set-mode mode)
+Set editing mode to @var{mode} ("normal", "insert", "visual", "command", "mx").
+
+@item (editor-quit)
+Quit the editor immediately.
+
+@item (editor-status)  
+Return current status message.
+
+@item (editor-set-status message)
+Set status line to display @var{message}.
+
+@item (editor-enter-command-mode)
+Switch to command mode.
+
+@item (editor-exit-command-mode)
+Exit command mode and return to normal mode.
+
+@item (editor-execute-command-line)
+Execute the current command line content.
+
+@item (editor-handle-space)
+Handle space key press (part of M-x sequence).
+
+@item (editor-handle-semicolon)
+Handle semicolon key press (completes M-x sequence).
+
+@item (editor-exit-mx-mode)
+Exit M-x mode and return to normal mode.
+
+@item (editor-execute-mx-command)
+Execute the current M-x command.
+@end table
+
+@section Key Binding Functions
+
+@table @code
+@item (key-bind key command [mode])
+Bind @var{key} to execute @var{command} in optional @var{mode}.
+If @var{mode} is omitted, binding applies to all modes.
+@end table
+
+@section File Functions
+
+File operations are performed through the editor interface:
+
+@table @code  
+@item (save-buffer)
+Save current buffer to associated file.
+
+@item (load-file filename)
+Load @var{filename} into new buffer.
+@end table
+
+@node Examples
+@chapter Examples
+
+@cindex examples
+@cindex usage examples
+@cindex real-world usage
+
+Real-world examples of tmax usage and customization.
+
+@section Basic Editing Session
+
+@example
+# Start tmax
+deno task start
+
+# Enter insert mode
+i
+
+# Type some text
+Hello, world!
+This is tmax.
+
+# Return to normal mode  
+<Escape>
+
+# Navigate around
+hjkl
+
+# Save and quit
+:wq
+@end example
+
+@section Configuration Examples
+
+@subsection Programmer's Setup
+@example
+;; ~/.tmaxrc for programming
+
+;; Line numbers function
+(defun show-line-number ()
+  (editor-set-status 
+    (string-append "Line: " (number-to-string (+ (cursor-line) 1)))))
+
+;; Bind to show current line
+(key-bind "L" "(show-line-number)" "normal")
+
+;; Quick comment toggle
+(defun toggle-comment ()
+  (beginning-of-line)
+  (if (looking-at ";;")
+      (delete-char 2)
+    (insert ";; ")))
+
+(key-bind "C-/" "(toggle-comment)" "normal")
+
+;; Auto-indent function  
+(defun smart-indent ()
+  (let ((current-indent (current-indentation)))
+    (newline)
+    (insert-spaces current-indent)))
+
+(key-bind "Enter" "(smart-indent)" "insert")
+@end example
+
+@subsection Writer's Setup
+@example
+;; ~/.tmaxrc for writing
+
+;; Word count function
+(defun word-count ()
+  (let ((text (buffer-text)))
+    (editor-set-status 
+      (string-append 
+        "Words: " 
+        (number-to-string (length (split-string text)))))))
+
+(key-bind "W" "(word-count)" "normal")
+
+;; Insert current date
+(defun insert-date ()
+  (buffer-insert (format-time "%Y-%m-%d")))
+
+(key-bind "D" "(insert-date)" "normal")
+
+;; Paragraph navigation
+(key-bind "@}" "(next-paragraph)" "normal") 
+(key-bind "@{" "(previous-paragraph)" "normal")
+@end example
+
+@section Advanced Customization
+
+@subsection Custom Mode
+@example
+;; Define a custom "code" mode for programming
+(defun enter-code-mode ()
+  (editor-set-mode "normal")
+  (editor-set-status "-- CODE MODE --")
+  ;; Set up code-specific bindings
+  (key-bind "TAB" "(smart-indent)" "normal")
+  (key-bind "C-c C-c" "(compile-buffer)" "normal"))
+
+(defun exit-code-mode ()
+  (editor-set-status "-- NORMAL --")
+  ;; Remove code-specific bindings
+  (remove-key-bind "TAB" "normal")
+  (remove-key-bind "C-c C-c" "normal"))
+
+;; Toggle code mode
+(key-bind "C-c" "(enter-code-mode)" "normal")
+@end example
+
+@subsection Project Management
+@example
+;; Project-specific configuration
+
+;; Quick file switching in project
+(defun open-project-file (filename)
+  (let ((project-root "/path/to/project/"))
+    (find-file (string-append project-root filename))))
+
+;; Bind common project files
+(key-bind "1" "(open-project-file \"main.ts\")" "normal")
+(key-bind "2" "(open-project-file \"README.md\")" "normal") 
+(key-bind "3" "(open-project-file \"package.json\")" "normal")
+
+;; Build project
+(defun build-project ()
+  (shell-command "deno task build")
+  (editor-set-status "Build complete"))
+
+(key-bind "B" "(build-project)" "normal")
+@end example
+
+@node Troubleshooting  
+@chapter Troubleshooting
+
+@cindex troubleshooting
+@cindex problems
+@cindex debugging
+
+Common issues and their solutions.
+
+@section Installation Issues
+
+@subsection Deno Not Found
+@strong{Problem:} @samp{deno: command not found}
+
+@strong{Solution:}
+@enumerate
+@item Install Deno: @url{https://deno.land/manual/getting_started/installation}
+@item Add Deno to PATH: @code{export PATH="$HOME/.deno/bin:$PATH"}  
+@item Restart terminal and try again
+@end enumerate
+
+@subsection Permission Errors
+@strong{Problem:} @samp{PermissionDenied} when starting tmax
+
+@strong{Solution:}
+@enumerate
+@item Ensure proper permissions: @code{deno run --allow-read --allow-write src/main.ts}
+@item Check file permissions in project directory
+@item Use @code{deno task start} which has proper permissions configured
+@end enumerate
+
+@section Runtime Issues
+
+@subsection Terminal Display Problems
+@strong{Problem:} Garbled display or cursor positioning issues
+
+@strong{Solution:}
+@enumerate
+@item Ensure terminal supports ANSI escape sequences
+@item Try different terminal: xterm, gnome-terminal, iTerm2
+@item Check @code{TERM} environment variable
+@item Verify terminal size with @code{tput cols; tput lines}
+@end enumerate
+
+@subsection Key Binding Not Working  
+@strong{Problem:} Custom key bindings don't respond
+
+@strong{Solution:}
+@enumerate
+@item Check T-Lisp syntax in @file{.tmaxrc}
+@item Verify key name format (e.g., "C-c" not "Ctrl+C")
+@item Test with simple binding: @code{(key-bind "x" "(editor-set-status \"test\")" "normal")}
+@item Check mode specificity - binding may be for different mode
+@end enumerate
+
+@subsection Performance Issues
+@strong{Problem:} Slow response or high memory usage
+
+@strong{Solution:}  
+@enumerate
+@item Check file size - very large files may impact performance
+@item Reduce complex T-Lisp functions in tight loops
+@item Monitor with @code{deno run --allow-read --inspect src/main.ts}
+@item Consider splitting large files
+@end enumerate
+
+@section Configuration Issues
+
+@subsection .tmaxrc Not Loading
+@strong{Problem:} Custom configuration not applied
+
+@strong{Solution:}
+@enumerate  
+@item Verify file location: @file{~/.tmaxrc} (exact path)
+@item Check file permissions: @code{ls -la ~/.tmaxrc}  
+@item Test with simple configuration: @code{(editor-set-status "Config loaded")}
+@item Check for T-Lisp syntax errors
+@end enumerate
+
+@subsection T-Lisp Syntax Errors  
+@strong{Problem:} @samp{SyntaxError} when loading configuration
+
+@strong{Solution:}
+@enumerate
+@item Check parentheses balance
+@item Verify string quoting: @code{"string"} not @code{'string'}  
+@item Use proper escaping: @code{"\n"} for newline
+@item Test expressions in T-Lisp REPL: @code{deno task repl}
+@end enumerate
+
+@section Getting Help
+
+@enumerate
+@item Check this manual for relevant sections
+@item Test with minimal configuration
+@item Use T-Lisp REPL for testing: @code{deno task repl}
+@item Run test suite: @code{deno task test}  
+@item Report bugs with minimal reproduction case
+@end enumerate
+
+@node Index
+@unnumbered Index
+
+@printindex cp
+
+@bye
