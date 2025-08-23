@@ -13,7 +13,7 @@ As a tmax user, I want default key bindings defined in T-Lisp files, so that I c
 - **T-Lisp Keymaps:**
   - Implement a `hash-map` or `association-list` data type in T-Lisp
   - Define variables in T-Lisp to hold the keymaps for each mode (e.g., `*normal-mode-keymap*`)
-- **Core T-Lisp Bindings File:**
+- **Core T-Lisp Bindings File:** *(Detailed in `tlisp-core-bindings-migration.md`)*
   - Create a `core-bindings.tlisp` file to contain the default key bindings
   - This file will populate the T-Lisp keymap variables
   - Remove `initializeDefaultKeyMappings()` from `editor.ts` and load the T-Lisp file at startup
@@ -31,7 +31,9 @@ As a tmax user, I want default key bindings defined in T-Lisp files, so that I c
 
 ## 1. Overview
 
-This specification outlines the refactoring of tmax's key binding system from a TypeScript-centric approach to a T-Lisp-centric approach. This change will move all key binding logic into T-Lisp, making the system more extensible and allowing users to fully customize their editor experience through T-Lisp scripting.
+This specification outlines the complete refactoring of tmax's key binding system from a TypeScript-centric approach to a T-Lisp-centric approach. This change will move all key binding logic into T-Lisp, making the system more extensible and allowing users to fully customize their editor experience through T-Lisp scripting.
+
+**Implementation Note**: This specification covers the complete T-Lisp key binding system refactor. The immediate next step (Phase 1) is detailed in `tlisp-core-bindings-migration.md`, which should be implemented first before proceeding with the broader refactoring outlined in this document.
 
 ## 2. Core Concepts
 
@@ -117,10 +119,31 @@ This specification outlines the refactoring of tmax's key binding system from a 
 
 - **Modified Files:**
   - `src/tlisp/stdlib.ts`
-  - `src/editor/editor.ts`
+  - `src/editor/editor.ts` *(Phase 1 detailed in `tlisp-core-bindings-migration.md`)*
   - `src/editor/tlisp-api.ts`
   - `test/unit/tlisp.test.ts`
   - `test/unit/editor.test.ts`
 - **New Files:**
-  - `src/tlisp/core-bindings.tlisp`
+  - `src/tlisp/core-bindings.tlisp` *(Phase 1 detailed in `tlisp-core-bindings-migration.md`)*
   - `test/integration/keybinding.test.ts`
+
+## 8. Implementation Phases
+
+This comprehensive refactor should be implemented in phases:
+
+**Phase 1**: Core Bindings Migration *(see `tlisp-core-bindings-migration.md`)*
+- Create `src/tlisp/core-bindings.tlisp` file
+- Remove `initializeDefaultKeyMappings()` from editor.ts  
+- Add T-Lisp file loading mechanism
+
+**Phase 2**: T-Lisp Data Structures
+- Implement hash-map/association-list types in T-Lisp stdlib
+- Create mode-specific keymap variables in T-Lisp environment
+
+**Phase 3**: TypeScript Key Handling Refactor  
+- Remove TypeScript `keyMappings` Map from editor.ts
+- Update `handleKey()` to query T-Lisp environment
+
+**Phase 4**: Pure T-Lisp Key-Bind Function
+- Remove built-in `(key-bind)` function from TypeScript
+- Implement `(key-bind)` in T-Lisp standard library
