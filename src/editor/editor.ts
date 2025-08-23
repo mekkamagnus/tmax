@@ -17,7 +17,7 @@ import type { TerminalIO, FileSystem, TextBuffer } from "../core/types.ts";
 export interface KeyMapping {
   key: string;
   command: string;
-  mode?: "normal" | "insert" | "visual" | "command";
+  mode?: "normal" | "insert" | "visual" | "command" | "mx";
 }
 
 /**
@@ -55,8 +55,6 @@ export class Editor {
     this.keyMappings = new Map();
     
     this.initializeAPI();
-    this.initializeDefaultKeyMappings();
-    this.loadInitFile();
   }
 
   /**
@@ -89,7 +87,7 @@ export class Editor {
       
       const key = keyArg.value as string;
       const command = commandArg.value as string;
-      let mode: "normal" | "insert" | "visual" | "command" | undefined;
+      let mode: "normal" | "insert" | "visual" | "command" | "mx" | undefined;
       
       if (modeArg) {
         if (modeArg.type !== "string") {
@@ -130,39 +128,22 @@ export class Editor {
   }
 
   /**
-   * Initialize default key mappings
+   * Load core key bindings from T-Lisp file
    */
-  private initializeDefaultKeyMappings(): void {
-    // Basic navigation in normal mode
-    this.executeCommand("(key-bind \"h\" \"(cursor-move (cursor-line) (- (cursor-column) 1))\" \"normal\")");
-    this.executeCommand("(key-bind \"j\" \"(cursor-move (+ (cursor-line) 1) (cursor-column))\" \"normal\")");
-    this.executeCommand("(key-bind \"k\" \"(cursor-move (- (cursor-line) 1) (cursor-column))\" \"normal\")");
-    this.executeCommand("(key-bind \"l\" \"(cursor-move (cursor-line) (+ (cursor-column) 1))\" \"normal\")");
-    
-    // Mode switching
-    this.executeCommand("(key-bind \"i\" \"(editor-set-mode \\\"insert\\\")\" \"normal\")");
-    this.executeCommand("(key-bind \"Escape\" \"(editor-set-mode \\\"normal\\\")\" \"insert\")");
-    this.executeCommand("(key-bind \":\" \"(editor-enter-command-mode)\" \"normal\")");
-    
-    // Command mode bindings
-    this.executeCommand("(key-bind \"Escape\" \"(editor-exit-command-mode)\" \"command\")");
-    this.executeCommand("(key-bind \"Enter\" \"(editor-execute-command-line)\" \"command\")");
-    
-    // Application control
-    this.executeCommand("(key-bind \"q\" \"(editor-quit)\" \"normal\")");
-    this.executeCommand("(key-bind \"q\" \"(editor-quit)\" \"command\")");
-    
-    // Emacs-style M-x functionality with SPC ;
-    this.executeCommand("(key-bind \" \" \"(editor-handle-space)\" \"normal\")");
-    this.executeCommand("(key-bind \";\" \"(editor-handle-semicolon)\" \"normal\")");
-    
-    // M-x mode bindings
-    this.executeCommand("(key-bind \"Escape\" \"(editor-exit-mx-mode)\" \"mx\")");
-    this.executeCommand("(key-bind \"Enter\" \"(editor-execute-mx-command)\" \"mx\")");
-    
-    // Basic editing in insert mode
-    this.executeCommand("(key-bind \"Backspace\" \"(buffer-delete 1)\" \"insert\")");
-    this.executeCommand("(key-bind \"Enter\" \"(buffer-insert \\\"\\\\n\\\")\" \"insert\")");
+  private async loadCoreBindings(): Promise<void> {
+    try {
+      const coreBindingsContent = await this.state.filesystem.readFile("src/tlisp/core-bindings.tlisp");
+      this.interpreter.execute(coreBindingsContent);
+      this.state.statusMessage = "Core bindings loaded";
+    } catch (error) {
+      // Graceful fallback: use empty bindings and log error
+      const errorMsg = error instanceof Error ? error.message : String(error);
+      this.state.statusMessage = `Warning: Failed to load core bindings: ${errorMsg}`;
+      
+      // In production, you might want to fall back to hardcoded minimal bindings
+      // For now, we'll just log the error and continue with empty key mappings
+      console.warn("Core bindings file not found or corrupted. Editor will start with no default key bindings.");
+    }
   }
 
   /**
@@ -473,6 +454,10 @@ export class Editor {
    */
   async start(): Promise<void> {
     this.running = true;
+    
+    // Load core bindings and user init file
+    await this.loadCoreBindings();
+    await this.loadInitFile();
     
     // Create default buffer if none exists
     if (this.state.buffers.size === 0) {
