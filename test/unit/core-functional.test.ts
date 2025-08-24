@@ -5,10 +5,10 @@
 
 import { assertEquals, assertExists } from "https://deno.land/std@0.208.0/assert/mod.ts";
 import { Either, TaskEither } from "../../src/utils/task-either.ts";
-import { FunctionalFileSystemImpl, FileSystemUtils } from "../../src/core/filesystem-functional.ts";
-import { FunctionalTerminalIOImpl, TerminalUtils } from "../../src/core/terminal-functional.ts";
-import { FunctionalTextBufferImpl, BufferUtils } from "../../src/core/buffer-functional.ts";
-import { TypeGuards, Validators } from "../../src/core/types-functional.ts";
+import { FunctionalFileSystemImpl, FunctionalFileSystemUtils as FileSystemUtils } from "../../src/core/filesystem.ts";
+import { FunctionalTerminalIOImpl, FunctionalTerminalUtils as TerminalUtils } from "../../src/core/terminal.ts";
+import { FunctionalTextBufferImpl, FunctionalBufferUtils as BufferUtils } from "../../src/core/buffer.ts";
+import { TypeGuards, Validators } from "../../src/core/types.ts";
 
 Deno.test("Functional Core Modules", async (t) => {
   

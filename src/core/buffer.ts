@@ -1,143 +1,225 @@
 /**
  * @file buffer.ts
- * @description Buffer management implementation for tmax editor
+ * @description Functional buffer operations using Either for tmax editor
  */
 
-import type { TextBuffer, Position, Range } from "./types.ts";
+import type { Position, Range, TextBuffer } from "./types.ts";
+import { Either } from "../utils/task-either.ts";
 
 /**
- * Gap buffer implementation for efficient text editing
- * Based on the data structure used by Emacs and other editors
+ * Buffer operation error types
  */
-export class GapBuffer {
-  private buffer: (string | undefined)[];
-  private gapStart: number;
-  private gapEnd: number;
-  private readonly initialSize = 64;
+export type BufferError = string;
+
+/**
+ * Buffer operation result types
+ */
+export type BufferResult<T> = Either<BufferError, T>;
+
+/**
+ * Functional text buffer interface using Either
+ */
+export interface FunctionalTextBuffer {
+  /** Get the entire buffer content */
+  getContent(): BufferResult<string>;
+  
+  /** Get content of a specific line */
+  getLine(lineNumber: number): BufferResult<string>;
+  
+  /** Get number of lines in buffer */
+  getLineCount(): BufferResult<number>;
+  
+  /** Insert text at position */
+  insert(position: Position, text: string): BufferResult<FunctionalTextBuffer>;
+  
+  /** Delete text in range */
+  delete(range: Range): BufferResult<FunctionalTextBuffer>;
+  
+  /** Replace text in range */
+  replace(range: Range, text: string): BufferResult<FunctionalTextBuffer>;
+  
+  /** Get text in range */
+  getText(range: Range): BufferResult<string>;
+  
+  /** Get buffer statistics */
+  getStats(): BufferResult<{ lines: number; characters: number; words: number }>;
+}
+
+/**
+ * Immutable gap buffer implementation for functional text editing
+ */
+class FunctionalGapBuffer {
+  constructor(
+    private readonly buffer: ReadonlyArray<string | undefined>,
+    private readonly gapStart: number,
+    private readonly gapEnd: number
+  ) {}
 
   /**
    * Create a new gap buffer
-   * @param initialContent - Optional initial content
    */
-  constructor(initialContent = "") {
-    this.buffer = new Array(this.initialSize);
-    this.gapStart = 0;
-    this.gapEnd = this.initialSize;
+  static create(initialContent = ""): FunctionalGapBuffer {
+    const initialSize = 64;
+    const buffer = new Array(initialSize);
     
     if (initialContent) {
-      this.insert(0, initialContent);
+      for (let i = 0; i < initialContent.length; i++) {
+        buffer[i] = initialContent[i];
+      }
+      return new FunctionalGapBuffer(buffer, initialContent.length, initialSize);
     }
+    
+    return new FunctionalGapBuffer(buffer, 0, initialSize);
   }
 
   /**
    * Get the length of the buffer content (excluding gap)
-   * @returns Buffer length
    */
   length(): number {
     return this.buffer.length - (this.gapEnd - this.gapStart);
   }
 
   /**
-   * Insert text at the specified position
-   * @param position - Position to insert at
-   * @param text - Text to insert
+   * Insert text at the specified position (returns new buffer)
    */
-  insert(position: number, text: string): void {
-    this.moveGap(position);
+  insert(position: number, text: string): Either<string, FunctionalGapBuffer> {
+    if (position < 0 || position > this.length()) {
+      return Either.left(`Insert position ${position} is out of bounds (0-${this.length()})`);
+    }
+
+    const movedBuffer = this.moveGap(position);
+    if (Either.isLeft(movedBuffer)) {
+      return movedBuffer;
+    }
+
+    const buffer = movedBuffer.right;
     
-    // Ensure gap is large enough
-    if (text.length > this.gapEnd - this.gapStart) {
-      this.growGap(text.length);
+    // Check if gap is large enough
+    const gapSize = buffer.gapEnd - buffer.gapStart;
+    if (text.length > gapSize) {
+      const grownBuffer = buffer.growGap(text.length);
+      if (Either.isLeft(grownBuffer)) {
+        return grownBuffer;
+      }
+      return grownBuffer.right.insertIntoGap(text);
     }
     
-    // Insert characters into gap
-    for (let i = 0; i < text.length; i++) {
-      this.buffer[this.gapStart + i] = text[i]!;
-    }
-    
-    this.gapStart += text.length;
+    return buffer.insertIntoGap(text);
   }
 
   /**
-   * Delete text at the specified position
-   * @param position - Position to delete from
-   * @param length - Number of characters to delete
+   * Delete text at the specified position (returns new buffer)
    */
-  delete(position: number, length: number): void {
-    this.moveGap(position);
+  delete(position: number, length: number): Either<string, FunctionalGapBuffer> {
+    if (position < 0 || position >= this.length()) {
+      return Either.left(`Delete position ${position} is out of bounds (0-${this.length() - 1})`);
+    }
     
-    // Expand gap to include deleted characters
-    this.gapEnd = Math.min(this.gapEnd + length, this.buffer.length);
+    if (length <= 0) {
+      return Either.right(this);
+    }
+
+    const actualLength = Math.min(length, this.length() - position);
+    const movedBuffer = this.moveGap(position);
+    if (Either.isLeft(movedBuffer)) {
+      return movedBuffer;
+    }
+
+    const buffer = movedBuffer.right;
+    const newGapEnd = Math.min(buffer.gapEnd + actualLength, buffer.buffer.length);
+    
+    return Either.right(new FunctionalGapBuffer(
+      buffer.buffer,
+      buffer.gapStart,
+      newGapEnd
+    ));
   }
 
   /**
    * Get character at position
-   * @param position - Position to get character from
-   * @returns Character at position
    */
-  charAt(position: number): string {
+  charAt(position: number): Either<string, string> {
     if (position < 0 || position >= this.length()) {
-      throw new Error("Position out of bounds");
+      return Either.left(`Position ${position} is out of bounds (0-${this.length() - 1})`);
     }
     
     if (position < this.gapStart) {
-      return this.buffer[position] || "";
+      return Either.right(this.buffer[position] || "");
     } else {
-      return this.buffer[position + (this.gapEnd - this.gapStart)] || "";
+      const adjustedPosition = position + (this.gapEnd - this.gapStart);
+      return Either.right(this.buffer[adjustedPosition] || "");
     }
   }
 
   /**
    * Get substring from buffer
-   * @param start - Start position
-   * @param end - End position
-   * @returns Substring
    */
-  substring(start: number, end: number): string {
+  substring(start: number, end: number): Either<string, string> {
+    if (start < 0 || end < 0 || start > end || end > this.length()) {
+      return Either.left(`Invalid substring range: ${start}-${end} (buffer length: ${this.length()})`);
+    }
+
     let result = "";
     for (let i = start; i < end; i++) {
-      result += this.charAt(i);
+      const char = this.charAt(i);
+      if (Either.isLeft(char)) {
+        return char;
+      }
+      result += char.right;
     }
-    return result;
+    return Either.right(result);
   }
 
   /**
    * Convert buffer to string
-   * @returns String representation of buffer
    */
-  toString(): string {
+  toString(): Either<string, string> {
     return this.substring(0, this.length());
   }
 
   /**
-   * Move gap to specified position
-   * @param position - Target position for gap
+   * Move gap to specified position (returns new buffer)
    */
-  private moveGap(position: number): void {
+  private moveGap(position: number): Either<string, FunctionalGapBuffer> {
+    if (position < 0 || position > this.length()) {
+      return Either.left(`Gap move position ${position} is out of bounds`);
+    }
+
+    if (position === this.gapStart) {
+      return Either.right(this);
+    }
+
+    const newBuffer = [...this.buffer];
+    let newGapStart = this.gapStart;
+    let newGapEnd = this.gapEnd;
+
     if (position < this.gapStart) {
       // Move gap left
       const moveCount = this.gapStart - position;
       for (let i = 0; i < moveCount; i++) {
-        this.buffer[this.gapEnd - 1 - i] = this.buffer[this.gapStart - 1 - i];
+        newBuffer[newGapEnd - 1 - i] = newBuffer[newGapStart - 1 - i];
+        newBuffer[newGapStart - 1 - i] = undefined;
       }
-      this.gapStart -= moveCount;
-      this.gapEnd -= moveCount;
+      newGapStart -= moveCount;
+      newGapEnd -= moveCount;
     } else if (position > this.gapStart) {
       // Move gap right
       const moveCount = position - this.gapStart;
       for (let i = 0; i < moveCount; i++) {
-        this.buffer[this.gapStart + i] = this.buffer[this.gapEnd + i];
+        newBuffer[newGapStart + i] = newBuffer[newGapEnd + i];
+        newBuffer[newGapEnd + i] = undefined;
       }
-      this.gapStart += moveCount;
-      this.gapEnd += moveCount;
+      newGapStart += moveCount;
+      newGapEnd += moveCount;
     }
+
+    return Either.right(new FunctionalGapBuffer(newBuffer, newGapStart, newGapEnd));
   }
 
   /**
-   * Grow gap to accommodate more text
-   * @param minSize - Minimum size needed
+   * Grow gap to accommodate more text (returns new buffer)
    */
-  private growGap(minSize: number): void {
+  private growGap(minSize: number): Either<string, FunctionalGapBuffer> {
     const newSize = Math.max(this.buffer.length * 2, this.buffer.length + minSize);
     const newBuffer = new Array(newSize);
     
@@ -152,115 +234,186 @@ export class GapBuffer {
       newBuffer[afterGapStart + (i - this.gapEnd)] = this.buffer[i];
     }
     
-    this.buffer = newBuffer;
-    this.gapEnd = afterGapStart;
+    return Either.right(new FunctionalGapBuffer(newBuffer, this.gapStart, afterGapStart));
+  }
+
+  /**
+   * Insert text into the gap (returns new buffer)
+   */
+  private insertIntoGap(text: string): Either<string, FunctionalGapBuffer> {
+    if (text.length > this.gapEnd - this.gapStart) {
+      return Either.left("Gap is too small for insertion");
+    }
+
+    const newBuffer = [...this.buffer];
+    
+    // Insert characters into gap
+    for (let i = 0; i < text.length; i++) {
+      newBuffer[this.gapStart + i] = text[i];
+    }
+    
+    return Either.right(new FunctionalGapBuffer(
+      newBuffer,
+      this.gapStart + text.length,
+      this.gapEnd
+    ));
   }
 }
 
 /**
- * Text buffer implementation using gap buffer
- * Handles line-based operations and position/range conversions
+ * Functional text buffer implementation using gap buffer
  */
-export class TextBufferImpl implements TextBuffer {
-  private gapBuffer: GapBuffer;
-  private lines: string[];
+export class FunctionalTextBufferImpl implements FunctionalTextBuffer {
+  constructor(
+    private readonly gapBuffer: FunctionalGapBuffer,
+    private readonly lines: ReadonlyArray<string>
+  ) {}
 
   /**
    * Create a new text buffer
-   * @param content - Initial content
    */
-  constructor(content = "") {
-    this.gapBuffer = new GapBuffer(content);
-    this.lines = this.splitLines(content);
+  static create(content = ""): FunctionalTextBufferImpl {
+    const gapBuffer = FunctionalGapBuffer.create(content);
+    const lines = FunctionalTextBufferImpl.splitLines(content);
+    return new FunctionalTextBufferImpl(gapBuffer, lines);
   }
 
   /**
    * Get the entire buffer content
-   * @returns Buffer content as string
    */
-  getContent(): string {
+  getContent(): BufferResult<string> {
     return this.gapBuffer.toString();
   }
 
   /**
    * Get content of a specific line
-   * @param lineNumber - Line number (0-indexed)
-   * @returns Line content
    */
-  getLine(lineNumber: number): string {
+  getLine(lineNumber: number): BufferResult<string> {
     if (lineNumber < 0 || lineNumber >= this.lines.length) {
-      throw new Error("Line number out of bounds");
+      return Either.left(`Line number ${lineNumber} is out of bounds (0-${this.lines.length - 1})`);
     }
-    return this.lines[lineNumber]!;
+    return Either.right(this.lines[lineNumber]!);
   }
 
   /**
    * Get number of lines in buffer
-   * @returns Line count
    */
-  getLineCount(): number {
-    return this.lines.length;
+  getLineCount(): BufferResult<number> {
+    return Either.right(this.lines.length);
   }
 
   /**
-   * Insert text at position
-   * @param position - Position to insert at
-   * @param text - Text to insert
+   * Insert text at position (returns new buffer)
    */
-  insert(position: Position, text: string): void {
-    const offset = this.positionToOffset(position);
-    this.gapBuffer.insert(offset, text);
-    this.rebuildLines();
+  insert(position: Position, text: string): BufferResult<FunctionalTextBuffer> {
+    const offsetResult = this.positionToOffset(position);
+    if (Either.isLeft(offsetResult)) {
+      return offsetResult;
+    }
+
+    const newGapBuffer = this.gapBuffer.insert(offsetResult.right, text);
+    if (Either.isLeft(newGapBuffer)) {
+      return Either.left(`Insert failed: ${newGapBuffer.left}`);
+    }
+
+    const contentResult = newGapBuffer.right.toString();
+    if (Either.isLeft(contentResult)) {
+      return contentResult;
+    }
+
+    const newLines = FunctionalTextBufferImpl.splitLines(contentResult.right);
+    return Either.right(new FunctionalTextBufferImpl(newGapBuffer.right, newLines));
   }
 
   /**
-   * Delete text in range
-   * @param range - Range to delete
+   * Delete text in range (returns new buffer)
    */
-  delete(range: Range): void {
-    const startOffset = this.positionToOffset(range.start);
-    const endOffset = this.positionToOffset(range.end);
-    const length = endOffset - startOffset;
+  delete(range: Range): BufferResult<FunctionalTextBuffer> {
+    const startOffsetResult = this.positionToOffset(range.start);
+    if (Either.isLeft(startOffsetResult)) {
+      return startOffsetResult;
+    }
+
+    const endOffsetResult = this.positionToOffset(range.end);
+    if (Either.isLeft(endOffsetResult)) {
+      return endOffsetResult;
+    }
+
+    const length = endOffsetResult.right - startOffsetResult.right;
+    const newGapBuffer = this.gapBuffer.delete(startOffsetResult.right, length);
+    if (Either.isLeft(newGapBuffer)) {
+      return Either.left(`Delete failed: ${newGapBuffer.left}`);
+    }
+
+    const contentResult = newGapBuffer.right.toString();
+    if (Either.isLeft(contentResult)) {
+      return contentResult;
+    }
+
+    const newLines = FunctionalTextBufferImpl.splitLines(contentResult.right);
+    return Either.right(new FunctionalTextBufferImpl(newGapBuffer.right, newLines));
+  }
+
+  /**
+   * Replace text in range (returns new buffer)
+   */
+  replace(range: Range, text: string): BufferResult<FunctionalTextBuffer> {
+    const deletedBuffer = this.delete(range);
+    if (Either.isLeft(deletedBuffer)) {
+      return deletedBuffer;
+    }
     
-    this.gapBuffer.delete(startOffset, length);
-    this.rebuildLines();
-  }
-
-  /**
-   * Replace text in range
-   * @param range - Range to replace
-   * @param text - Replacement text
-   */
-  replace(range: Range, text: string): void {
-    this.delete(range);
-    this.insert(range.start, text);
+    return deletedBuffer.right.insert(range.start, text);
   }
 
   /**
    * Get text in range
-   * @param range - Range to get text from
-   * @returns Text in range
    */
-  getText(range: Range): string {
-    const startOffset = this.positionToOffset(range.start);
-    const endOffset = this.positionToOffset(range.end);
-    return this.gapBuffer.substring(startOffset, endOffset);
+  getText(range: Range): BufferResult<string> {
+    const startOffsetResult = this.positionToOffset(range.start);
+    if (Either.isLeft(startOffsetResult)) {
+      return startOffsetResult;
+    }
+
+    const endOffsetResult = this.positionToOffset(range.end);
+    if (Either.isLeft(endOffsetResult)) {
+      return endOffsetResult;
+    }
+
+    return this.gapBuffer.substring(startOffsetResult.right, endOffsetResult.right);
   }
 
   /**
-   * Get entire buffer content
-   * @returns Complete buffer content
+   * Get buffer statistics
    */
-  getCompleteContent(): string {
-    return this.gapBuffer.toString();
+  getStats(): BufferResult<{ lines: number; characters: number; words: number }> {
+    const contentResult = this.getContent();
+    if (Either.isLeft(contentResult)) {
+      return contentResult;
+    }
+
+    const content = contentResult.right;
+    const words = content.trim() ? content.trim().split(/\s+/).length : 0;
+    
+    return Either.right({
+      lines: this.lines.length,
+      characters: content.length,
+      words
+    });
   }
 
   /**
    * Convert position to buffer offset
-   * @param position - Position to convert
-   * @returns Buffer offset
    */
-  private positionToOffset(position: Position): number {
+  private positionToOffset(position: Position): BufferResult<number> {
+    if (position.line < 0 || position.line >= this.lines.length) {
+      return Either.left(`Line ${position.line} is out of bounds (0-${this.lines.length - 1})`);
+    }
+
+    if (position.column < 0) {
+      return Either.left(`Column ${position.column} cannot be negative`);
+    }
+
     let offset = 0;
     
     // Add characters from previous lines
@@ -269,27 +422,308 @@ export class TextBufferImpl implements TextBuffer {
     }
     
     // Add characters from current line
-    offset += Math.min(position.column, this.lines[position.line]?.length || 0);
+    const currentLine = this.lines[position.line]!;
+    const column = Math.min(position.column, currentLine.length);
+    offset += column;
     
-    return offset;
+    return Either.right(offset);
   }
 
   /**
    * Split content into lines
-   * @param content - Content to split
-   * @returns Array of lines
    */
-  private splitLines(content: string): string[] {
+  private static splitLines(content: string): ReadonlyArray<string> {
     if (!content) return [""];
     const lines = content.split("\n");
     return lines.length > 0 ? lines : [""];
   }
+}
+
+/**
+ * Buffer utility functions using functional patterns
+ */
+export const BufferUtils = {
+  /**
+   * Create buffer from file content with validation
+   */
+  fromContent: (content: string): BufferResult<FunctionalTextBuffer> => {
+    try {
+      const buffer = FunctionalTextBufferImpl.create(content);
+      return Either.right(buffer);
+    } catch (error) {
+      return Either.left(`Failed to create buffer: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  },
 
   /**
-   * Rebuild lines array from gap buffer
+   * Get word at position
    */
-  private rebuildLines(): void {
-    const content = this.gapBuffer.toString();
-    this.lines = this.splitLines(content);
+  getWordAt: (buffer: FunctionalTextBuffer, position: Position): BufferResult<string> => {
+    const contentResult = buffer.getContent();
+    if (Either.isLeft(contentResult)) {
+      return contentResult;
+    }
+
+    const content = contentResult.right;
+    const lines = content.split('\n');
+    
+    if (position.line >= lines.length) {
+      return Either.left(`Line ${position.line} is out of bounds`);
+    }
+
+    const line = lines[position.line]!;
+    if (position.column >= line.length) {
+      return Either.right("");
+    }
+
+    // Find word boundaries
+    const wordRegex = /\w+/g;
+    let match;
+    while ((match = wordRegex.exec(line)) !== null) {
+      const start = match.index;
+      const end = match.index + match[0]!.length;
+      
+      if (position.column >= start && position.column <= end) {
+        return Either.right(match[0]!);
+      }
+    }
+
+    return Either.right("");
+  },
+
+  /**
+   * Find all occurrences of text
+   */
+  findAll: (buffer: FunctionalTextBuffer, searchText: string): BufferResult<Position[]> => {
+    const contentResult = buffer.getContent();
+    if (Either.isLeft(contentResult)) {
+      return contentResult;
+    }
+
+    const content = contentResult.right;
+    const lines = content.split('\n');
+    const positions: Position[] = [];
+
+    for (let lineIndex = 0; lineIndex < lines.length; lineIndex++) {
+      const line = lines[lineIndex]!;
+      let columnIndex = 0;
+      
+      while (true) {
+        const foundIndex = line.indexOf(searchText, columnIndex);
+        if (foundIndex === -1) break;
+        
+        positions.push({ line: lineIndex, column: foundIndex });
+        columnIndex = foundIndex + 1;
+      }
+    }
+
+    return Either.right(positions);
+  },
+
+  /**
+   * Validate buffer integrity
+   */
+  validate: (buffer: FunctionalTextBuffer): BufferResult<{ valid: boolean; issues: string[] }> => {
+    const issues: string[] = [];
+
+    // Check line count consistency
+    const lineCountResult = buffer.getLineCount();
+    if (Either.isLeft(lineCountResult)) {
+      issues.push(`Line count error: ${lineCountResult.left}`);
+    }
+
+    // Check content accessibility
+    const contentResult = buffer.getContent();
+    if (Either.isLeft(contentResult)) {
+      issues.push(`Content access error: ${contentResult.left}`);
+    }
+
+    // Check stats computation
+    const statsResult = buffer.getStats();
+    if (Either.isLeft(statsResult)) {
+      issues.push(`Stats computation error: ${statsResult.left}`);
+    }
+
+    return Either.right({
+      valid: issues.length === 0,
+      issues
+    });
+  }
+};
+
+/**
+ * Backward compatibility wrapper for TextBufferImpl
+ * Provides the expected interface while using functional implementation internally
+ */
+export class TextBufferImpl implements TextBuffer {
+  private functionalBuffer: FunctionalTextBufferImpl;
+
+  constructor(initialContent = "") {
+    this.functionalBuffer = FunctionalTextBufferImpl.create(initialContent);
+  }
+
+  /**
+   * Get the entire buffer content
+   */
+  getContent(): string {
+    const result = this.functionalBuffer.getContent();
+    if (Either.isLeft(result)) {
+      throw new Error(result.left);
+    }
+    return result.right;
+  }
+
+  /**
+   * Get content of a specific line
+   */
+  getLine(lineNumber: number): string {
+    const result = this.functionalBuffer.getLine(lineNumber);
+    if (Either.isLeft(result)) {
+      throw new Error(result.left);
+    }
+    return result.right;
+  }
+
+  /**
+   * Get number of lines in buffer
+   */
+  getLineCount(): number {
+    const result = this.functionalBuffer.getLineCount();
+    if (Either.isLeft(result)) {
+      throw new Error(result.left);
+    }
+    return result.right;
+  }
+
+  /**
+   * Insert text at position
+   */
+  insert(position: Position, text: string): void {
+    const result = this.functionalBuffer.insert(position, text);
+    if (Either.isLeft(result)) {
+      throw new Error(result.left);
+    }
+    this.functionalBuffer = result.right as FunctionalTextBufferImpl;
+  }
+
+  /**
+   * Delete text in range
+   */
+  delete(range: Range): void {
+    const result = this.functionalBuffer.delete(range);
+    if (Either.isLeft(result)) {
+      throw new Error(result.left);
+    }
+    this.functionalBuffer = result.right as FunctionalTextBufferImpl;
+  }
+
+  /**
+   * Replace text in range
+   */
+  replace(range: Range, text: string): void {
+    const result = this.functionalBuffer.replace(range, text);
+    if (Either.isLeft(result)) {
+      throw new Error(result.left);
+    }
+    this.functionalBuffer = result.right as FunctionalTextBufferImpl;
+  }
+
+  /**
+   * Get text in range
+   */
+  getText(range: Range): string {
+    const result = this.functionalBuffer.getText(range);
+    if (Either.isLeft(result)) {
+      throw new Error(result.left);
+    }
+    return result.right;
+  }
+
+  /**
+   * Get buffer statistics
+   */
+  getStats(): { lines: number; characters: number; words: number } {
+    const result = this.functionalBuffer.getStats();
+    if (Either.isLeft(result)) {
+      throw new Error(result.left);
+    }
+    return result.right;
+  }
+}
+
+// Export utils with functional prefix to avoid conflicts
+export { BufferUtils as FunctionalBufferUtils };
+
+/**
+ * Backward compatibility wrapper for GapBuffer
+ * Provides the expected mutable interface while using functional implementation internally
+ */
+export class GapBuffer {
+  private buffer: FunctionalGapBuffer;
+
+  constructor(initialContent = "") {
+    this.buffer = FunctionalGapBuffer.create(initialContent);
+  }
+
+  /**
+   * Get the length of the buffer content (excluding gap)
+   */
+  length(): number {
+    return this.buffer.length();
+  }
+
+  /**
+   * Insert text at the specified position
+   */
+  insert(position: number, text: string): void {
+    const result = this.buffer.insert(position, text);
+    if (Either.isLeft(result)) {
+      throw new Error(result.left);
+    }
+    this.buffer = result.right;
+  }
+
+  /**
+   * Delete text at the specified position
+   */
+  delete(position: number, length: number): void {
+    const result = this.buffer.delete(position, length);
+    if (Either.isLeft(result)) {
+      throw new Error(result.left);
+    }
+    this.buffer = result.right;
+  }
+
+  /**
+   * Get character at position
+   */
+  charAt(position: number): string {
+    const result = this.buffer.charAt(position);
+    if (Either.isLeft(result)) {
+      throw new Error(result.left);
+    }
+    return result.right;
+  }
+
+  /**
+   * Get substring from buffer
+   */
+  substring(start: number, end: number): string {
+    const result = this.buffer.substring(start, end);
+    if (Either.isLeft(result)) {
+      throw new Error(result.left);
+    }
+    return result.right;
+  }
+
+  /**
+   * Convert buffer to string
+   */
+  toString(): string {
+    const result = this.buffer.toString();
+    if (Either.isLeft(result)) {
+      throw new Error(result.left);
+    }
+    return result.right;
   }
 }
