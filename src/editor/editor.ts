@@ -28,6 +28,7 @@ export class Editor {
   private interpreter: TLispInterpreterImpl;
   private keyMappings: Map<string, KeyMapping[]>;
   private running: boolean = false;
+  private coreBindingsLoaded: boolean = false;
 
   /**
    * Create a new editor instance
@@ -49,6 +50,10 @@ export class Editor {
       commandLine: "",
       spacePressed: false,
       mxCommand: "",
+      operations: {
+        saveFile: () => this.saveFile(),
+        openFile: (filename: string) => this.openFile(filename),
+      },
     };
 
     this.interpreter = new TLispInterpreterImpl();
@@ -125,24 +130,90 @@ export class Editor {
       const command = commandArg.value as string;
       return this.executeCommand(command);
     });
+
+    // Add file operations
+    this.interpreter.defineBuiltin("file-save", (args) => {
+      if (args.length !== 0) {
+        throw new Error("file-save requires no arguments");
+      }
+      
+      // Use async saveFile but return synchronously for T-Lisp
+      this.saveFile().catch((error) => {
+        this.state.statusMessage = `Save failed: ${error instanceof Error ? error.message : String(error)}`;
+      });
+      
+      return createString("saving...");
+    });
   }
 
   /**
    * Load core key bindings from T-Lisp file
    */
   private async loadCoreBindings(): Promise<void> {
+    // Try to find the core bindings file from current working directory
+    const possiblePaths = [
+      "src/tlisp/core-bindings.tlisp",
+      "./src/tlisp/core-bindings.tlisp",
+    ];
+
+    let loaded = false;
+    let lastError: string = "";
+
+    for (const path of possiblePaths) {
+      try {
+        const coreBindingsContent = await this.state.filesystem.readFile(path);
+        this.interpreter.execute(coreBindingsContent);
+        this.state.statusMessage = `Core bindings loaded from ${path}`;
+        this.coreBindingsLoaded = true;
+        loaded = true;
+        break;
+      } catch (error) {
+        lastError = error instanceof Error ? error.message : String(error);
+        continue;
+      }
+    }
+
+    if (!loaded) {
+      console.warn(`Failed to load core bindings from any path. Last error: ${lastError}`);
+      console.warn("Loading minimal fallback key bindings...");
+      this.loadFallbackBindings();
+      this.coreBindingsLoaded = true;
+      this.state.statusMessage = "Using fallback key bindings";
+    }
+  }
+
+  /**
+   * Ensure core bindings are loaded (lazy loading)
+   */
+  private async ensureCoreBindingsLoaded(): Promise<void> {
+    if (!this.coreBindingsLoaded) {
+      await this.loadCoreBindings();
+    }
+  }
+
+  /**
+   * Load minimal fallback key bindings when core-bindings.tlisp fails
+   */
+  private loadFallbackBindings(): void {
     try {
-      const coreBindingsContent = await this.state.filesystem.readFile("src/tlisp/core-bindings.tlisp");
-      this.interpreter.execute(coreBindingsContent);
-      this.state.statusMessage = "Core bindings loaded";
+      // Essential bindings for basic functionality
+      const fallbackBindings = `
+        ;; Minimal fallback bindings
+        (key-bind "q" "(editor-quit)" "normal")
+        (key-bind "i" "(editor-set-mode \\"insert\\")" "normal")
+        (key-bind "Escape" "(editor-set-mode \\"normal\\")" "insert")
+        (key-bind "h" "(cursor-move (cursor-line) (- (cursor-column) 1))" "normal")
+        (key-bind "j" "(cursor-move (+ (cursor-line) 1) (cursor-column))" "normal")
+        (key-bind "k" "(cursor-move (- (cursor-line) 1) (cursor-column))" "normal")
+        (key-bind "l" "(cursor-move (cursor-line) (+ (cursor-column) 1))" "normal")
+        (key-bind ":" "(editor-enter-command-mode)" "normal")
+        (key-bind "Escape" "(editor-exit-command-mode)" "command")
+        (key-bind "Enter" "(editor-execute-command-line)" "command")
+      `;
+      this.interpreter.execute(fallbackBindings);
     } catch (error) {
-      // Graceful fallback: use empty bindings and log error
-      const errorMsg = error instanceof Error ? error.message : String(error);
-      this.state.statusMessage = `Warning: Failed to load core bindings: ${errorMsg}`;
-      
-      // In production, you might want to fall back to hardcoded minimal bindings
-      // For now, we'll just log the error and continue with empty key mappings
-      console.warn("Core bindings file not found or corrupted. Editor will start with no default key bindings.");
+      console.error("Critical: Failed to load even fallback bindings:", error);
+      this.state.statusMessage = "Critical: No key bindings available";
     }
   }
 
@@ -200,6 +271,9 @@ export class Editor {
    * @param key - Key pressed
    */
   async handleKey(key: string): Promise<void> {
+    // Ensure core bindings are loaded before processing keys
+    await this.ensureCoreBindingsLoaded();
+    
     const normalizedKey = this.normalizeKey(key);
     
     // Handle printable characters in insert mode FIRST
@@ -351,9 +425,13 @@ export class Editor {
 
   /**
    * Render the editor
+   * @param fullRedraw - Whether to clear screen and redraw everything (default: false)
    */
-  async render(): Promise<void> {
-    await this.state.terminal.clear();
+  async render(fullRedraw: boolean = false): Promise<void> {
+    // Clear screen if explicitly requested
+    if (fullRedraw) {
+      await this.state.terminal.clear();
+    }
     
     if (!this.state.currentBuffer) {
       await this.state.terminal.moveCursor({ line: 0, column: 0 });
@@ -456,7 +534,7 @@ export class Editor {
     this.running = true;
     
     // Load core bindings and user init file
-    await this.loadCoreBindings();
+    await this.ensureCoreBindingsLoaded();
     await this.loadInitFile();
     
     // Create default buffer if none exists
@@ -464,9 +542,10 @@ export class Editor {
       this.createBuffer("*scratch*", "");
     }
     
+    // Initial render
+    await this.render(true);
+    
     while (this.running) {
-      await this.render();
-      
       // Get key input
       const key = await this.state.terminal.readKey();
       
@@ -479,6 +558,9 @@ export class Editor {
         // Handle other errors normally
         this.state.statusMessage = `Error: ${error instanceof Error ? error.message : String(error)}`;
       }
+      
+      // Render after handling input
+      await this.render(false);
     }
   }
 
@@ -501,5 +583,12 @@ export class Editor {
    */
   getInterpreter(): TLispInterpreterImpl {
     return this.interpreter;
+  }
+
+  /**
+   * Get key mappings (for testing)
+   */
+  getKeyMappings(): Map<string, KeyMapping[]> {
+    return this.keyMappings;
   }
 }

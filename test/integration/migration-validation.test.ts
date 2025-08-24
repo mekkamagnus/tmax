@@ -77,7 +77,8 @@ Deno.test("Migration Validation", async (t) => {
     const content = await filesystem.readFile("src/tlisp/core-bindings.tlisp");
     
     // Count actual key-bind calls (not comments)
-    const lines = content.split('\\n');\n    const keyBindLines = lines.filter(line => line.trim().startsWith('(key-bind'));
+    const lines = content.split('\n');
+    const keyBindLines = lines.filter(line => line.trim().startsWith('(key-bind'));
     const count = keyBindLines.length;
     
     // Should have exactly the same number as the original implementation

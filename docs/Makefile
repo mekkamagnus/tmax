@@ -24,7 +24,7 @@ html: $(HTML_TARGET)
 
 $(HTML_TARGET): $(TEXI_SOURCE)
 	@echo "Building HTML documentation..."
-	makeinfo --html --no-split $(TEXI_SOURCE) -o $(HTML_TARGET)
+	makeinfo --html --no-split --css-ref="https://cdn.jsdelivr.net/npm/@picocss/pico@2/css/pico.classless.min.css" $(TEXI_SOURCE) -o $(HTML_TARGET)
 
 # Build PDF format (requires TeX distribution)
 pdf: $(PDF_TARGET)

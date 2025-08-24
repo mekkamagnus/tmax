@@ -46,7 +46,22 @@ class TmaxApplication {
       await this.editor.start();
       
     } catch (error) {
-      console.error("Error starting tmax:", error instanceof Error ? error.message : String(error));
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      
+      if (errorMessage.includes("stdin is not a TTY")) {
+        console.error("Error: tmax must be run in a terminal.");
+        console.error("Please run tmax from a real terminal (not through pipes, redirects, or non-interactive environments).");
+      } else if (errorMessage.includes("raw mode")) {
+        console.error("Error: Failed to initialize terminal for raw input.");
+        console.error("This might be due to:");
+        console.error("  - Running in a non-interactive environment");
+        console.error("  - Terminal permissions issues");
+        console.error("  - Unsupported terminal type");
+        console.error(`Details: ${errorMessage}`);
+      } else {
+        console.error("Error starting tmax:", errorMessage);
+      }
+      
       await this.shutdown();
       Deno.exit(1);
     }

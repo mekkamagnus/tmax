@@ -3,6 +3,7 @@
     "start": "deno run --allow-read --allow-write --allow-run src/main.ts",
     "dev": "deno run --allow-read --allow-write --allow-run --watch src/main.ts",
     "repl": "deno run --allow-read --allow-write scripts/repl.ts",
+    "test-keys": "deno run --allow-read --allow-write scripts/test-keys.ts",
     "test": "deno test --allow-read --allow-write",
     "test:watch": "deno test --allow-read --allow-write --watch",
     "test:coverage": "deno test --allow-read --allow-write --coverage=coverage",

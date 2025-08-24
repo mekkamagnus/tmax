@@ -56,7 +56,12 @@ export class TerminalIOImpl implements TerminalIO {
    * Clear from cursor to end of line
    */
   async clearToEndOfLine(): Promise<void> {
-    await Deno.stdout.write(new TextEncoder().encode("\x1b[K"));
+    const encoded = new TextEncoder().encode("\x1b[K");
+    try {
+      Deno.stdout.writeSync(encoded);
+    } catch {
+      await Deno.stdout.write(encoded);
+    }
   }
 
   /**
@@ -79,7 +84,12 @@ export class TerminalIOImpl implements TerminalIO {
    */
   async moveCursor(position: Position): Promise<void> {
     const escapeSequence = `\x1b[${position.line + 1};${position.column + 1}H`;
-    await Deno.stdout.write(new TextEncoder().encode(escapeSequence));
+    const encoded = new TextEncoder().encode(escapeSequence);
+    try {
+      Deno.stdout.writeSync(encoded);
+    } catch {
+      await Deno.stdout.write(encoded);
+    }
   }
 
   /**
@@ -87,7 +97,14 @@ export class TerminalIOImpl implements TerminalIO {
    * @param text - Text to write
    */
   async write(text: string): Promise<void> {
-    await Deno.stdout.write(new TextEncoder().encode(text));
+    const encoded = new TextEncoder().encode(text);
+    // Use synchronous write to force immediate output
+    try {
+      Deno.stdout.writeSync(encoded);
+    } catch {
+      // Fallback to async write if sync fails
+      await Deno.stdout.write(encoded);
+    }
   }
 
   /**
@@ -110,15 +127,30 @@ export class TerminalIOImpl implements TerminalIO {
   }
 
   /**
+   * Check if stdin is a TTY (terminal)
+   */
+  private isStdinTTY(): boolean {
+    return Deno.stdin.isTerminal && Deno.stdin.isTerminal();
+  }
+
+  /**
    * Enter raw mode for character-by-character input
    */
   async enterRawMode(): Promise<void> {
     if (this.rawMode) return;
     
-    Deno.stdin.setRaw(true);
-    this.rawMode = true;
-    await this.enterAlternateScreen();
-    await this.hideCursor();
+    if (!this.isStdinTTY()) {
+      throw new Error("Cannot enter raw mode: stdin is not a TTY. tmax must be run in a terminal.");
+    }
+    
+    try {
+      Deno.stdin.setRaw(true);
+      this.rawMode = true;
+      await this.enterAlternateScreen();
+      await this.hideCursor();
+    } catch (error) {
+      throw new Error(`Failed to enter raw mode: ${error instanceof Error ? error.message : String(error)}`);
+    }
   }
 
   /**

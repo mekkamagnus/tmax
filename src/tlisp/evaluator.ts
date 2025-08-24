@@ -162,6 +162,8 @@ export class TLispEvaluator {
           return this.evalLambda(elements, env);
         case "defun":
           return this.evalDefun(elements, env);
+        case "cond":
+          return this.evalCond(elements, env, inTailPosition);
         default:
           return this.evalFunctionCall(elements, env, inTailPosition);
       }
@@ -362,6 +364,59 @@ export class TLispEvaluator {
     env.define(name.value as string, lambdaFunction);
     
     return name;
+  }
+
+  /**
+   * Evaluate cond special form
+   * @param elements - List elements
+   * @param env - Environment
+   * @param inTailPosition - Whether this evaluation is in tail position
+   * @returns Result of first matching condition
+   */
+  private evalCond(elements: TLispValue[], env: TLispEnvironment, inTailPosition: boolean = false): EvalResult {
+    if (elements.length < 2) {
+      throw new Error("cond requires at least 1 clause");
+    }
+    
+    // Process each clause (condition expression) pair
+    for (let i = 1; i < elements.length; i++) {
+      const clause = elements[i];
+      if (!clause) {
+        throw new Error("cond clause missing");
+      }
+      
+      if (clause.type !== "list") {
+        throw new Error("cond clause must be a list");
+      }
+      
+      const clauseElements = clause.value as TLispValue[];
+      if (clauseElements.length !== 2) {
+        throw new Error("cond clause must have exactly 2 elements: condition and expression");
+      }
+      
+      const condition = clauseElements[0];
+      const expression = clauseElements[1];
+      
+      if (!condition || !expression) {
+        throw new Error("cond clause missing condition or expression");
+      }
+      
+      // Special case for 't' (always true) condition - commonly used as else clause
+      if (condition.type === "symbol" && condition.value === "t") {
+        return this.evalInternal(expression, env, inTailPosition);
+      }
+      
+      // Evaluate condition
+      const conditionResult = this.eval(condition, env);
+      
+      // If condition is truthy, evaluate and return the expression
+      if (isTruthy(conditionResult)) {
+        return this.evalInternal(expression, env, inTailPosition);
+      }
+    }
+    
+    // No condition matched, return nil
+    return createNil();
   }
 
   /**

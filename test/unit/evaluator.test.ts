@@ -214,6 +214,96 @@ Deno.test("T-Lisp Evaluator", async (t) => {
     assertEquals(result, createNumber(120));
   });
 
+  await t.step("should evaluate cond expressions", () => {
+    // Simple cond with first condition true
+    let expr = parser.parse("(cond ((= 1 1) 'first) ((= 2 2) 'second))");
+    let result = evaluator.eval(expr, env);
+    assertEquals(result.type, "symbol");
+    assertEquals(result.value, "first");
+    
+    // Cond with second condition true
+    expr = parser.parse("(cond ((= 1 2) 'first) ((= 2 2) 'second))");
+    result = evaluator.eval(expr, env);
+    assertEquals(result.type, "symbol");
+    assertEquals(result.value, "second");
+    
+    // Cond with no matching conditions
+    expr = parser.parse("(cond ((= 1 2) 'first) ((= 3 4) 'second))");
+    result = evaluator.eval(expr, env);
+    assertEquals(result, createNil());
+  });
+
+  await t.step("should evaluate cond with 't' clause", () => {
+    // Cond with 't' as else clause
+    const expr = parser.parse("(cond ((= 1 2) 'first) (t 'default))");
+    const result = evaluator.eval(expr, env);
+    assertEquals(result.type, "symbol");
+    assertEquals(result.value, "default");
+  });
+
+  await t.step("should evaluate cond with complex conditions", () => {
+    // Cond with arithmetic conditions
+    const expr = parser.parse(`
+      (cond 
+        ((< 5 3) 'less)
+        ((> 5 3) 'greater)
+        (t 'equal))
+    `);
+    const result = evaluator.eval(expr, env);
+    assertEquals(result.type, "symbol");
+    assertEquals(result.value, "greater");
+  });
+
+  await t.step("should evaluate cond with complex expressions", () => {
+    // Cond with complex expressions in both condition and result
+    const expr = parser.parse(`
+      (let ((x 10))
+        (cond 
+          ((< x 5) (* x 2))
+          ((> x 15) (+ x 5))
+          (t (- x 3))))
+    `);
+    const result = evaluator.eval(expr, env);
+    assertEquals(result, createNumber(7)); // x=10, so (- 10 3) = 7
+  });
+
+  await t.step("should handle cond error cases", () => {
+    // Empty cond
+    assertThrows(() => {
+      const expr = parser.parse("(cond)");
+      evaluator.eval(expr, env);
+    }, Error, "cond requires at least 1 clause");
+    
+    // Invalid clause format
+    assertThrows(() => {
+      const expr = parser.parse("(cond 42)");
+      evaluator.eval(expr, env);
+    }, Error, "cond clause must be a list");
+    
+    // Clause with wrong number of elements
+    assertThrows(() => {
+      const expr = parser.parse("(cond (t))");
+      evaluator.eval(expr, env);
+    }, Error, "cond clause must have exactly 2 elements");
+  });
+
+  await t.step("should evaluate cond with tail-call optimization", () => {
+    // Define a recursive function using cond
+    const defExpr = parser.parse(`
+      (defun countdown (n)
+        (cond 
+          ((= n 0) 'done)
+          (t (countdown (- n 1)))))
+    `);
+    evaluator.eval(defExpr, env);
+    
+    // Test tail-call optimized recursion
+    const callExpr = parser.parse("(countdown 100)");
+    const result = evaluator.eval(callExpr, env);
+    assertEquals(result.type, "symbol");
+    assertEquals(result.value, "done");
+  });
+
   await t.step("should handle complex expressions", () => {
     const expr = parser.parse(`
       (let ((x 10) (y 5))

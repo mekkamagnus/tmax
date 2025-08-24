@@ -1,76 +1,80 @@
 * Phase 0: Initial Implementation (v0.1.0)
-** DONE Core Infrastructure
-*** DONE Terminal I/O system: Full-screen interface with alternate screen buffer
-*** DONE File system operations: open, save, create with proper error handling
-*** DONE Text buffer implementation: Gap buffer for efficient text editing
-*** DONE Viewport management: Scrolling and cursor positioning for large files
-*** DONE Key handling: Raw mode input with cross-platform key normalization
-*** DONE T-Lisp interpreter foundation: Complete interpreter architecture
-** DONE T-Lisp Engine
-*** DONE T-Lisp tokenizer and parser: Complete lexical analysis and AST generation
-*** DONE Evaluation engine: Full interpreter with lexical scoping
-*** DONE Standard library: 31 built-in functions
-*** DONE Macro system: Full quasiquote support with compile-time expansion
-*** DONE Interactive REPL: Complete development environment for T-Lisp
-*** DONE Tail-call optimization: Trampoline pattern prevents stack overflow
-** DONE Modal Editor
-*** DONE Modal editing system: Five modes (normal, insert, visual, command, M-x)
-*** DONE Key binding system: Configurable mappings with mode-specific behavior
-*** DONE Editor API: 25+ T-Lisp functions for complete editor control
-*** DONE Command interfaces: Both vim-style (:q, :w) and M-x (SPC ;) commands
-*** DONE Buffer management: Multiple buffers with efficient switching
-*** DONE Configuration system: .tmaxrc files with T-Lisp scripting
-** TODO Refactor Key Binding System to be T-Lisp Centric [1/4]
-*** TODO Introduce T-Lisp Keymaps [0/2]
-    - TODO Implement a `hash-map` or `association-list` data type in T-Lisp standard library
-    - TODO Define variables in T-Lisp to hold the keymaps for each mode (e.g., `*normal-mode-keymap*`)
+** DONE 0.1 Core Infrastructure
+*** DONE 0.1.1 Terminal I/O system: Full-screen interface with alternate screen buffer
+*** DONE 0.1.2 File system operations: open, save, create with proper error handling
+*** DONE 0.1.3 Text buffer implementation: Gap buffer for efficient text editing
+*** DONE 0.1.4 Viewport management: Scrolling and cursor positioning for large files
+*** DONE 0.1.5 Key handling: Raw mode input with cross-platform key normalization
+*** DONE 0.1.6 T-Lisp interpreter foundation: Complete interpreter architecture
+** DONE 0.2 T-Lisp Engine
+*** DONE 0.2.1 T-Lisp tokenizer and parser: Complete lexical analysis and AST generation
+*** DONE 0.2.2 Evaluation engine: Full interpreter with lexical scoping
+*** DONE 0.2.3 Standard library: 31 built-in functions
+*** DONE 0.2.4 Macro system: Full quasiquote support with compile-time expansion
+*** DONE 0.2.5 Interactive REPL: Complete development environment for T-Lisp
+*** DONE 0.2.6 Tail-call optimization: Trampoline pattern prevents stack overflow
+*** DONE 0.2.7 add cond to standard library
+** DONE 0.3 Modal Editor
+*** DONE 0.3.1 Modal editing system: Five modes (normal, insert, visual, command, M-x)
+*** DONE 0.3.2 Key binding system: Configurable mappings with mode-specific behavior
+*** DONE 0.3.3 Editor API: 25+ T-Lisp functions for complete editor control
+*** DONE 0.3.4 Command interfaces: Both vim-style (:q, :w) and M-x (SPC ;) commands
+*** DONE 0.3.5 Buffer management: Multiple buffers with efficient switching
+*** DONE 0.3.6 Configuration system: .tmaxrc files with T-Lisp scripting
+** TODO 0.4 Refactor Key Binding System to be T-Lisp Centric [1/4]
+*** TODO 0.4.1 Introduce T-Lisp Keymaps [0/2]
+    TODO 0.4.1.1 Implement a `hash-map` or `association-list` data type in T-Lisp standard library
+    TODO 0.4.1.2 Define variables in T-Lisp to hold the keymaps for each mode (e.g., `*normal-mode-keymap*`)
     STATUS: Currently using T-Lisp built-in functions (cons, car, cdr, member, nth) but lacks formal hash-map/association-list types and mode-specific keymap variables
-*** DONE Move Default Bindings to a Core T-Lisp File [1/2]
-    - DONE Default bindings using T-Lisp: All key bindings defined through executeCommand() calls using T-Lisp (key-bind) function
-    - TODO Create `src/tlisp/core-bindings.tlisp` file: Move hardcoded executeCommand() calls to separate .tlisp file and load at startup
-    - TODO Remove `initializeDefaultKeyMappings()` from editor.ts: Replace with loading core-bindings.tlisp file
-*** TODO Refactor the TypeScript Key Handling Engine [1/3]
-    - TODO Remove TypeScript `keyMappings` Map from editor.ts: Replace with T-Lisp environment queries
-    - TODO Update `handleKey()` to query T-Lisp environment: Look up commands in T-Lisp keymaps instead of TypeScript Map
-    - DONE TypeScript as "dumb" executor: handleKey() executes T-Lisp commands but still uses TypeScript keyMappings Map
+*** DONE 0.4.2 Move Default Bindings to a Core T-Lisp File [1/2]
+    DONE Default bindings using T-Lisp: All key bindings defined through executeCommand() calls using T-Lisp (key-bind) function
+    TODO 0.4.2.1 Create `src/tlisp/core-bindings.tlisp` file: Move hardcoded executeCommand() calls to separate .tlisp file and load at startup
+    TODO 0.4.2.2 Remove `initializeDefaultKeyMappings()` from editor.ts: Replace with loading core-bindings.tlisp file
+*** TODO 0.4.3 Refactor the TypeScript Key Handling Engine [1/3]
+    TODO 0.4.3.1 Remove TypeScript `keyMappings` Map from editor.ts: Replace with T-Lisp environment queries
+    TODO 0.4.3.2 Update `handleKey()` to query T-Lisp environment: Look up commands in T-Lisp keymaps instead of TypeScript Map
+    DONE TypeScript as "dumb" executor: handleKey() executes T-Lisp commands but still uses TypeScript keyMappings Map
     STATUS: Partial - TypeScript executes T-Lisp commands but still maintains its own keyMappings Map instead of pure T-Lisp lookup
-*** TODO Re-implement (key-bind) in T-Lisp [0/2]
-    - TODO Remove built-in `(key-bind)` function from editor.ts: Move from TypeScript built-in to pure T-Lisp implementation
-    - TODO Implement `(key-bind)` in T-Lisp standard library: Function should modify T-Lisp keymap variables instead of TypeScript Map
-    - TODO Create `src/tlisp/stdlib.ts`: New file for T-Lisp standard library including (key-bind), (get-binding), (remove-binding), (list-bindings)
+*** TODO 0.4.4 Re-implement (key-bind) in T-Lisp [0/2]
+    TODO 0.4.4.1 Remove built-in `(key-bind)` function from editor.ts: Move from TypeScript built-in to pure T-Lisp implementation
+    TODO 0.4.4.2 Implement `(key-bind)` in T-Lisp standard library: Function should modify T-Lisp keymap variables instead of TypeScript Map
+    TODO 0.4.4.3 Create `src/tlisp/stdlib.ts`: New file for T-Lisp standard library including (key-bind), (get-binding), (remove-binding), (list-bindings)
     STATUS: Currently implemented as TypeScript built-in function, needs to become pure T-Lisp function
 
-* Phase 1: Enhanced Editing (v0.2.0)
-** TODO Local Development Package Directories
-   - For development, support `tlisp/` and `tlpa/` directories in the project root.
-   - `tlisp/` is for personal scripts.
-   - `tlpa/` is for third-party packages.
+** TODO 0.5 init.tlisp Configuration
+   Support for an `init.tlisp` file for user configuration, similar to Emacs' `init.el`.
+*** Instructions
+   - This will require updating all documentation (README.md, docs/manual/tmax.texi, etc.) to remove mentions of `.tmaxrc` and replace with `init.tlisp`.
 
-** TODO init.tlisp Configuration
-   - Support for an `init.tlisp` file for user configuration, similar to Emacs' `init.el`.
-** TODO Advanced Text Objects
-   - Support for text objects like `ciw`, `daw`, etc.
-** TODO Visual Selection Modes
-   - Enhancements to visual selection capabilities.
-** TODO Jump Commands
-   - Implementation of jump commands such as `gg`, `G`, and `:line_number`.
-** TODO Search Functionality
-   - Adding search features like `/`, `n`, and `N`.
-** TODO Syntax Highlighting
-   - A framework for syntax highlighting.
-** TODO Buffer Management
-   - Improved handling of multiple files.
+* Phase 1: Enhanced Editing (v0.2.0)
+** TODO 1.1 Local Development Package Directories
+   For development, support `tlisp/` and `tlpa/` directories in the project root.
+   `tlisp/` is for personal scripts.
+   `tlpa/` is for third-party packages.
+
+** TODO 1.2 Advanced Text Objects
+   Support for text objects like `ciw`, `daw`, etc.
+** TODO 1.3 Visual Selection Modes
+   Enhancements to visual selection capabilities.
+** TODO 1.4 Jump Commands
+   Implementation of jump commands such as `gg`, `G`, and `:line_number`.
+** TODO 1.5 Search Functionality
+   Adding search features like `/`, `n`, and `N`.
+** TODO 1.6 Syntax Highlighting
+   A framework for syntax highlighting.
+** TODO 1.7 Buffer Management
+   Improved handling of multiple files.
 * Phase 2: Extensibility & Customization (v0.3.0)
-** TODO Plugin System
-   - A complete plugin system using T-Lisp, including plugin loading.
-   - This will include migrating the package directory to `~/.config/tmax/tlpa/`.
-** TODO Advanced T-Lisp Features
-   - Introduction of more advanced features to T-Lisp.
-** TODO Custom Key Binding System
-   - A system for creating custom key bindings.
-** TODO Macro Recording/Playback
-   - The ability to record and playback macros.
-** TODO Basic Configuration System
-   - An initial version of the configuration system.
-** TODO Performance Optimizations
-   - Further optimizations for performance.
+** TODO 2.1 Plugin System
+   A complete plugin system using T-Lisp, including plugin loading.
+   This will include migrating the package directory to `~/.config/tmax/tlpa/`.
+** TODO 2.2 Advanced T-Lisp Features
+   Introduction of more advanced features to T-Lisp.
+** TODO 2.3 Custom Key Binding System
+   A system for creating custom key bindings.
+** TODO 2.4 Macro Recording/Playback
+   The ability to record and playback macros.
+** TODO 2.5 Basic Configuration System
+   An initial version of the configuration system.
+** TODO 2.6 Performance Optimizations
+   Further optimizations for performance.

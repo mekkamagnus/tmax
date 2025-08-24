@@ -48,14 +48,37 @@ export class TLispInterpreterImpl implements TLispInterpreter {
   }
 
   /**
-   * Execute T-Lisp source code
+   * Execute T-Lisp source code (single expression or multiple expressions)
    * @param source - Source code to execute
    * @param env - Environment for execution
-   * @returns Execution result
+   * @returns Execution result (result of last expression for multiple expressions)
    */
   execute(source: string, env?: TLispEnvironment): TLispValue {
-    const expr = this.parse(source);
-    return this.eval(expr, env);
+    // Handle multi-expression sources by splitting on lines and executing each
+    const lines = source.split('\n');
+    const evalEnv = env || this.globalEnv;
+    let lastResult: TLispValue | null = null;
+
+    for (const line of lines) {
+      const trimmedLine = line.trim();
+      
+      // Skip empty lines and comments
+      if (trimmedLine === '' || trimmedLine.startsWith(';')) {
+        continue;
+      }
+
+      try {
+        const expr = this.parse(trimmedLine);
+        lastResult = this.eval(expr, evalEnv);
+      } catch (error) {
+        // Enhance error message with line context
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        throw new Error(`Error in line "${trimmedLine}": ${errorMessage}`);
+      }
+    }
+
+    // Return the last result, or nil if no expressions were executed
+    return lastResult || this.parse("nil");
   }
 
   /**

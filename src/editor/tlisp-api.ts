@@ -9,6 +9,14 @@ import { TextBufferImpl } from "../core/buffer.ts";
 import type { TerminalIO, FileSystem, TextBuffer } from "../core/types.ts";
 
 /**
+ * Editor operations that can be called from T-Lisp
+ */
+export interface EditorOperations {
+  saveFile: () => Promise<void>;
+  openFile: (filename: string) => Promise<void>;
+}
+
+/**
  * Editor state that can be accessed from T-Lisp
  */
 export interface EditorState {
@@ -25,6 +33,7 @@ export interface EditorState {
   commandLine: string;  // Command line input in command mode
   spacePressed: boolean;  // Track if space was just pressed for SPC ; sequence
   mxCommand: string;  // M-x command input
+  operations?: EditorOperations;  // Optional operations reference
 }
 
 /**
@@ -440,11 +449,30 @@ export function createEditorAPI(state: EditorState): Map<string, TLispFunctionIm
     if (command === "q" || command === "quit") {
       throw new Error("EDITOR_QUIT_SIGNAL");
     } else if (command === "w" || command === "write") {
-      // TODO: Implement save functionality
-      state.statusMessage = "Save functionality not implemented yet";
+      // Save current buffer
+      if (state.operations?.saveFile) {
+        state.operations.saveFile().catch((error) => {
+          state.statusMessage = `Save failed: ${error instanceof Error ? error.message : String(error)}`;
+        });
+        state.statusMessage = "Saving...";
+      } else {
+        state.statusMessage = "Save functionality not available";
+      }
     } else if (command === "wq") {
-      // TODO: Implement save and quit
-      state.statusMessage = "Save and quit functionality not implemented yet";
+      // Save and quit
+      if (state.operations?.saveFile) {
+        state.operations.saveFile().then(() => {
+          throw new Error("EDITOR_QUIT_SIGNAL");
+        }).catch((error) => {
+          if (error instanceof Error && error.message === "EDITOR_QUIT_SIGNAL") {
+            throw error; // Re-throw quit signal
+          }
+          state.statusMessage = `Save failed: ${error instanceof Error ? error.message : String(error)}`;
+        });
+        state.statusMessage = "Saving and quitting...";
+      } else {
+        state.statusMessage = "Save and quit functionality not available";
+      }
     } else if (command.startsWith("e ") || command.startsWith("edit ")) {
       // TODO: Implement file opening
       const filename = command.split(" ")[1];
