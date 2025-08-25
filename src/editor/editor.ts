@@ -240,8 +240,8 @@ export class Editor {
       this.state.lastCommand = command;
       return this.interpreter.execute(command);
     } catch (error) {
-      if (error instanceof Error && error.message === "EDITOR_QUIT_SIGNAL") {
-        throw error; // Re-throw quit signal
+      if (error instanceof Error && (error.message === "EDITOR_QUIT_SIGNAL" || error.message.includes("EDITOR_QUIT_SIGNAL"))) {
+        throw new Error("EDITOR_QUIT_SIGNAL"); // Re-throw clean quit signal
       }
       this.state.statusMessage = `Error: ${error instanceof Error ? error.message : String(error)}`;
       throw error;
@@ -334,8 +334,8 @@ export class Editor {
     try {
       this.executeCommand(mapping.command);
     } catch (error) {
-      if (error instanceof Error && error.message === "EDITOR_QUIT_SIGNAL") {
-        throw error; // Re-throw quit signal to main loop
+      if (error instanceof Error && (error.message === "EDITOR_QUIT_SIGNAL" || error.message.includes("EDITOR_QUIT_SIGNAL"))) {
+        throw new Error("EDITOR_QUIT_SIGNAL"); // Re-throw clean quit signal to main loop
       }
       this.state.statusMessage = `Command error: ${error instanceof Error ? error.message : String(error)}`;
     }
