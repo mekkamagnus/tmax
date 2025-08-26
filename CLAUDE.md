@@ -58,6 +58,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - **TryCatch Error Handling**: Use `tryCatch` methods for safe error handling without throwing exceptions
 - **Immutable State**: Prefer immutable data structures and pure functions
 - **Function Composition**: Chain operations using compose/pipe patterns
+- **Composition Over Inheritance**: Favor object composition over class inheritance for flexibility and testability
 - **Result Types**: Return Result<T, E> objects instead of throwing exceptions
 - **Option Types**: Use Option<T> for nullable values instead of null/undefined checks
 
@@ -175,8 +176,11 @@ const loadAndParseConfig = (path: string): Result<Config, string> =>
 
 ### Running the Application
 ```bash
-# Start editor
+# Start editor in normal mode (clean output)
 deno task start [filename]
+
+# Start editor in development mode (verbose logging)
+deno task start --dev [filename]
 
 # Start with auto-reload for development
 deno task dev
@@ -184,6 +188,24 @@ deno task dev
 # Run T-Lisp REPL
 deno task repl
 ```
+
+#### Operating Modes
+The editor has two distinct operating modes with different logging behaviors:
+
+**Normal Mode** (default):
+- Clean terminal output optimized for user experience
+- Logging level: ERROR only (critical errors)
+- Simple message format without emojis or colors
+- No stack traces to avoid terminal interference
+- Ideal for regular editing sessions
+
+**Development Mode** (`--dev` flag):
+- Verbose logging for debugging and AI development assistance
+- Logging level: DEBUG (comprehensive output)
+- AI-friendly formatting with emojis, colors, and structured data
+- Full stack traces and correlation IDs for troubleshooting
+- Detailed operation tracking for all terminal and editor operations
+- Bypasses TTY checks for non-interactive environments (Claude Code, etc.)
 
 ### Testing
 ```bash

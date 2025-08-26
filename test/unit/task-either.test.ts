@@ -312,9 +312,9 @@ Deno.test("TaskEither", async (t) => {
       .flatMap(content => TaskEitherUtils.parseJSON<Config>(content))
       .flatMap((config: Config) => {
         if (!config.apiUrl || config.timeout <= 0) {
-          return TaskEither.left<string, Config>("Invalid configuration");
+          return TaskEither.left("Invalid configuration");
         }
-        return TaskEither.right<string, Config>(config);
+        return TaskEither.right(config);
       })
       .map(config => ({
         ...config,
