@@ -1,0 +1,472 @@
+# Enhanced Save Functionality Design: :w and :wq with File Naming
+
+## Overview
+
+**FUNCTIONAL DESIGN** specification for enhancing the `:w` and `:wq` commands to support file naming, following tmax functional programming requirements:
+- Task-based operations with lazy evaluation
+- TaskEither for error handling  
+- No Promise usage or exception throwing
+- Functional composition patterns
+
+## Current State Analysis
+
+### Existing Implementation
+- ✅ Basic `:w` and `:wq` commands exist but only save to current buffer's associated file
+- ✅ `saveFile()` method implements file writing using buffer-to-filename mapping
+- ✅ Command parsing in `editor-execute-command-line` handles basic commands
+- ❌ **Missing**: Filename parsing from command arguments (e.g., `:w filename.txt`)
+- ❌ **Missing**: New file creation from commands
+- ❌ **Missing**: "Save As" functionality
+
+### Current Limitations
+1. No argument parsing for `:w filename` or `:wq filename`
+2. Cannot create new files via save commands
+3. No validation for file path safety or permissions
+4. Limited error handling for file operations
+5. No support for relative/absolute path resolution
+
+## Requirements
+
+### Functional Requirements
+
+1. **Command Syntax Support**
+   ```bash
+   :w                    # Save current buffer to associated file
+   :w filename.txt       # Save current buffer to specified file
+   :w path/to/file.txt   # Save with relative/absolute path
+   :wq                   # Save current buffer and quit
+   :wq filename.txt      # Save to specified file and quit
+   ```
+
+2. **File Operations**
+   - Save existing buffer to new filename (Save As)
+   - Create new files if they don't exist
+   - Overwrite existing files with confirmation
+   - Handle directory creation for nested paths
+   - Support both relative and absolute paths
+
+3. **Buffer Management**
+   - Update buffer-to-file associations after save
+   - Handle unnamed buffers (*scratch*)
+   - Maintain buffer state consistency
+
+4. **Error Handling**
+   - Invalid file paths or names
+   - Permission denied errors
+   - File system errors (disk full, read-only)
+   - Path traversal security validation
+
+### Non-Functional Requirements
+
+1. **Security**: Validate file paths to prevent directory traversal attacks
+2. **Performance**: Async file operations with proper error handling
+3. **Usability**: Clear status messages and error feedback
+4. **Consistency**: Follow existing tmax patterns and conventions
+
+## Architecture Design
+
+### 1. Command Parser Enhancement
+
+#### Functional Command Structure
+```typescript
+import { Task, TaskEither } from "../utils/task-either.ts";
+
+// Explicit error types for TaskEither
+export type SaveError = 
+  | "NO_BUFFER"
+  | "NO_FILENAME" 
+  | "INVALID_PATH"
+  | "PERMISSION_DENIED"
+  | "FILESYSTEM_ERROR"
+  | "SECURITY_VIOLATION";
+
+interface SaveCommand {
+  action: 'save' | 'saveAndQuit' | 'quit';
+  filename?: string;
+  options?: SaveOptions;
+}
+
+interface SaveOptions {
+  force?: boolean;      // Force overwrite (future: :w!)
+  backup?: boolean;     // Create backup (future: :w~)
+  encoding?: string;    // File encoding (future)
+}
+
+// Validation result using functional patterns
+interface ValidationResult {
+  valid: boolean;
+  error?: SaveError;
+  resolvedPath?: string;
+}
+```
+
+#### Functional Command Parsing
+```typescript
+// Task-based command parsing (lazy evaluation)
+const parseCommandTask = (commandLine: string): Task<SaveCommand | null> =>
+  Task.of(() => {
+    const trimmed = commandLine.trim();
+    
+    // Match patterns using functional composition
+    const saveMatch = trimmed.match(/^(w|write)(?:\s+(.+))?$/);
+    const saveQuitMatch = trimmed.match(/^(wq)(?:\s+(.+))?$/);
+    const quitMatch = trimmed.match(/^(q|quit)$/);
+    
+    if (saveMatch) {
+      return {
+        action: 'save' as const,
+        filename: saveMatch[2]?.trim()
+      };
+    }
+    
+    if (saveQuitMatch) {
+      return {
+        action: 'saveAndQuit' as const,
+        filename: saveQuitMatch[2]?.trim()
+      };
+    }
+    
+    if (quitMatch) {
+      return {
+        action: 'quit' as const
+      };
+    }
+    
+    return null;
+  });
+```
+
+### 2. Enhanced File Operations Interface
+
+#### Functional EditorOperations Interface
+```typescript
+export interface EditorOperations {
+  // ❌ OLD: Promise-based (violates functional requirements)
+  // saveFile: () => Promise<void>;
+  
+  // ✅ NEW: Task-based with explicit error types
+  saveCurrentBuffer: (filename?: string) => TaskEither<SaveError, void>;
+  validateFilePath: (path: string) => Task<ValidationResult>;
+  resolveFilePath: (path: string) => Task<string>;
+  createDirectoryIfNeeded: (path: string) => TaskEither<SaveError, void>;
+  updateBufferAssociation: (oldName: string, newName: string) => Task<void>;
+  openFile: (filename: string) => TaskEither<SaveError, void>;
+}
+
+// Error message mapping for user feedback
+const errorMessages: Record<SaveError, string> = {
+  NO_BUFFER: "No buffer to save",
+  NO_FILENAME: "No filename specified. Use :w filename.txt or ensure buffer has associated file",
+  INVALID_PATH: "Invalid file path. Check for invalid characters or path length",
+  PERMISSION_DENIED: "Permission denied. Check file/directory permissions", 
+  FILESYSTEM_ERROR: "File system error occurred",
+  SECURITY_VIOLATION: "Security violation: path traversal or system file access not allowed"
+};
+```
+
+### 3. Enhanced Save Implementation
+
+#### Functional Save Implementation with Task Composition
+```typescript
+// Task-based save implementation following functional patterns
+const saveCurrentBufferTask = (
+  state: EditorState,
+  filename?: string
+): TaskEither<SaveError, void> => {
+  
+  // Validate buffer exists using TaskEither pattern
+  const validateBuffer = (): TaskEither<SaveError, TextBuffer> =>
+    state.currentBuffer 
+      ? TaskEither.right(state.currentBuffer)
+      : TaskEither.left("NO_BUFFER" as SaveError);
+
+  // Determine target filename using functional composition
+  const determineFilename = (buffer: TextBuffer): TaskEither<SaveError, string> =>
+    filename 
+      ? TaskEither.right(filename)
+      : getCurrentBufferFilenameTask(state, buffer);
+
+  // File path validation with Task pattern
+  const validatePath = (path: string): TaskEither<SaveError, string> =>
+    validateFilePathTask(path)
+      .flatMap(validation => 
+        validation.valid
+          ? TaskEither.right(validation.resolvedPath!)
+          : TaskEither.left(validation.error!)
+      );
+
+  // Functional composition pipeline
+  return validateBuffer()
+    .flatMap(determineFilename)
+    .flatMap(validatePath) 
+    .flatMap(resolvedPath =>
+      // Compose directory creation and file writing
+      createDirectoryIfNeededTask(resolvedPath)
+        .flatMap(() => writeFileTask(state, resolvedPath))
+        .flatMap(() => updateBufferAssociationTask(state, filename, resolvedPath))
+        .map(() => {
+          // Immutable state update
+          state.statusMessage = `Saved ${resolvedPath}`;
+          return void 0;
+        })
+    );
+};
+
+// Individual Task functions for composition
+const getCurrentBufferFilenameTask = (
+  state: EditorState, 
+  buffer: TextBuffer
+): TaskEither<SaveError, string> =>
+  TaskEither.tryCatch(
+    () => {
+      for (const [name, buf] of state.buffers) {
+        if (buf === buffer && name !== "*scratch*") {
+          return name;
+        }
+      }
+      throw new Error("NO_FILENAME");
+    },
+    () => "NO_FILENAME" as SaveError
+  );
+
+// File path validation with Task pattern
+const validateFilePathTask = (path: string): Task<ValidationResult> =>
+  Task.of(() => {
+    // Security checks
+    if (path.includes('..')) {
+      return { valid: false, error: "SECURITY_VIOLATION" as SaveError };
+    }
+    
+    if (path.startsWith('/proc/') || path.startsWith('/sys/')) {
+      return { valid: false, error: "SECURITY_VIOLATION" as SaveError };
+    }
+    
+    if (path.length > 4096) {
+      return { valid: false, error: "INVALID_PATH" as SaveError };
+    }
+    
+    const invalidChars = /[<>:"|?*\x00-\x1f]/;
+    if (invalidChars.test(path)) {
+      return { valid: false, error: "INVALID_PATH" as SaveError };
+    }
+    
+    return { valid: true, resolvedPath: path };
+  });
+```
+
+### 4. Security and Validation
+
+#### Functional Security and File Operations
+```typescript
+// Directory creation using TaskEither
+const createDirectoryIfNeededTask = (filePath: string): TaskEither<SaveError, void> => {
+  const pathParts = filePath.split('/');
+  if (pathParts.length <= 1) {
+    return TaskEither.right(void 0);
+  }
+  
+  const dirPath = pathParts.slice(0, -1).join('/');
+  
+  return TaskEither.tryCatch(
+    async () => {
+      await Deno.mkdir(dirPath, { recursive: true });
+    },
+    (error) => {
+      const errorMsg = error instanceof Error ? error.message : String(error);
+      if (errorMsg.includes("already exists") || errorMsg.includes("File exists")) {
+        return void 0; // Directory exists, that's OK
+      }
+      return "FILESYSTEM_ERROR" as SaveError;
+    }
+  );
+};
+
+// File writing using TaskEither
+const writeFileTask = (
+  state: EditorState, 
+  resolvedPath: string
+): TaskEither<SaveError, void> =>
+  TaskEither.tryCatch(
+    async () => {
+      const content = state.currentBuffer!.getContent();
+      await state.filesystem.writeFile(resolvedPath, content);
+    },
+    (error) => {
+      const errorMsg = error instanceof Error ? error.message : String(error);
+      if (errorMsg.includes("Permission denied")) {
+        return "PERMISSION_DENIED" as SaveError;
+      }
+      return "FILESYSTEM_ERROR" as SaveError;
+    }
+  );
+
+// Buffer association update using Task
+const updateBufferAssociationTask = (
+  state: EditorState,
+  filename: string | undefined,
+  resolvedPath: string  
+): Task<void> =>
+  Task.of(() => {
+    if (!filename) return; // No association change needed
+    
+    // Find and remove old association
+    for (const [name, buffer] of state.buffers) {
+      if (buffer === state.currentBuffer && name !== "*scratch*") {
+        state.buffers.delete(name);
+        break;
+      }
+    }
+    
+    // Add new association
+    state.buffers.set(resolvedPath, state.currentBuffer!);
+  });
+```
+
+### 5. Integration with Existing Command System
+
+#### Updated Command Handler
+```typescript
+// In editor-execute-command-line function
+export function createEditorAPI(state: EditorState): Map<string, Function> {
+  api.set("editor-execute-command-line", async (args: TLispValue[]): Promise<TLispValue> => {
+    // ... existing code ...
+    
+    const command = state.commandLine.trim();
+    
+    // Parse enhanced save commands
+    const saveCmd = parseCommand(command);
+    if (saveCmd) {
+      try {
+        if (saveCmd.action === 'save') {
+          if (state.operations?.saveCurrentBuffer) {
+            await state.operations.saveCurrentBuffer(saveCmd.filename);
+            state.statusMessage = saveCmd.filename 
+              ? `Saved as ${saveCmd.filename}` 
+              : "Saved";
+          } else {
+            state.statusMessage = "Save functionality not available";
+          }
+        } else if (saveCmd.action === 'saveAndQuit') {
+          if (state.operations?.saveCurrentBuffer) {
+            await state.operations.saveCurrentBuffer(saveCmd.filename);
+            throw new Error("EDITOR_QUIT_SIGNAL");
+          } else {
+            state.statusMessage = "Save functionality not available";
+          }
+        }
+      } catch (error) {
+        if (error instanceof Error && error.message === "EDITOR_QUIT_SIGNAL") {
+          throw error; // Re-throw quit signal
+        }
+        state.statusMessage = `Save error: ${error instanceof Error ? error.message : String(error)}`;
+      }
+      
+      // Clear command and return to normal mode
+      state.commandLine = "";
+      state.mode = "normal";
+      return createString("save-command-executed");
+    }
+    
+    // ... rest of existing command handling ...
+  });
+}
+```
+
+## Implementation Phases
+
+### Phase 1: Command Parsing Enhancement
+- [ ] Implement `parseCommand()` function with regex-based parsing
+- [ ] Add unit tests for command parsing edge cases
+- [ ] Update command handler to use new parsing logic
+
+### Phase 2: File Path Validation
+- [ ] Implement `validateFilePath()` with security checks
+- [ ] Add path resolution for relative paths and ~ expansion
+- [ ] Create comprehensive test suite for path validation
+
+### Phase 3: Enhanced Save Operations
+- [ ] Implement `saveCurrentBuffer()` with filename parameter
+- [ ] Add directory creation logic
+- [ ] Update buffer-to-file associations
+- [ ] Add proper error handling and status messages
+
+### Phase 4: Integration and Testing
+- [ ] Update EditorOperations interface
+- [ ] Wire new functionality into existing command system
+- [ ] Create comprehensive integration tests
+- [ ] Update documentation
+
+### Phase 5: Advanced Features (Future)
+- [ ] Add `:w!` force overwrite functionality
+- [ ] Implement backup file creation (`:w~`)
+- [ ] Add file encoding support
+- [ ] Implement tab completion for filenames
+
+## Error Handling Strategy
+
+### Error Categories
+1. **User Input Errors**: Invalid syntax, malformed filenames
+2. **File System Errors**: Permission denied, disk full, read-only filesystem  
+3. **Security Errors**: Path traversal attempts, system file access
+4. **Application State Errors**: No buffer to save, editor not initialized
+
+### Error Messages and Recovery
+```typescript
+const ERROR_MESSAGES = {
+  NO_FILENAME: "No filename specified. Use :w filename.txt or ensure buffer has associated file",
+  INVALID_PATH: "Invalid file path. Check for invalid characters or path traversal",
+  PERMISSION_DENIED: "Permission denied. Check file/directory permissions",
+  DISK_FULL: "Insufficient disk space. Free up space and try again",
+  SECURITY_VIOLATION: "Security violation: attempted access to restricted path"
+};
+```
+
+## Testing Strategy
+
+### Unit Tests
+- Command parsing with various input formats
+- Path validation edge cases and security scenarios
+- File operations with mocked filesystem
+- Error handling for all failure modes
+
+### Integration Tests
+- Full workflow: command entry → parsing → validation → save → status update
+- Buffer association updates after save-as operations
+- Interaction with existing buffer and editor state
+
+### Security Tests
+- Path traversal prevention
+- System file access prevention
+- Long path handling
+- Invalid character handling
+
+## Migration Strategy
+
+### Backward Compatibility
+- Existing `:w` and `:wq` commands continue to work unchanged
+- No breaking changes to current API
+- Gradual enhancement approach
+
+### Rollout Plan
+1. **Phase 1**: Internal API changes with existing behavior preserved
+2. **Phase 2**: Enable filename arguments with feature flag
+3. **Phase 3**: Full functionality enabled by default
+4. **Phase 4**: Add advanced features
+
+## Future Enhancements
+
+### Planned Features
+- **File Explorer Integration**: `:e` command with tab completion
+- **Recent Files**: `:recent` or `:r` to access recently opened files
+- **Session Management**: Save and restore editor sessions
+- **Multiple File Operations**: `:wa` to save all modified buffers
+- **File Encoding**: Support for different character encodings
+- **Backup Strategies**: Automatic backups, versioned saves
+
+### Performance Optimizations
+- Async file operations with progress indication
+- File system watching for external changes
+- Incremental save for large files
+- Compressed save options
+
+This design provides a comprehensive foundation for implementing robust, secure, and user-friendly file save functionality in tmax while maintaining compatibility with existing code and following established architectural patterns.
