@@ -8,6 +8,7 @@
 import { Editor } from "./editor/editor.ts";
 import { TerminalIOImpl } from "./core/terminal.ts";
 import { FileSystemImpl } from "./core/filesystem.ts";
+import { Logger, LogLevel } from "./utils/logger.ts";
 
 /**
  * Main application class
@@ -17,8 +18,28 @@ class TmaxApplication {
   private terminal: TerminalIOImpl;
   private filesystem: FileSystemImpl;
 
-  constructor() {
-    this.terminal = new TerminalIOImpl();
+  constructor(private developmentMode = false) {
+    // Configure logger based on mode
+    const logger = Logger.getInstance();
+    if (developmentMode) {
+      // Development mode: keep verbose logging for debugging
+      logger.configure({
+        level: LogLevel.DEBUG,
+        structured: true,
+        includeStack: true,
+        aiFriendly: true
+      });
+    } else {
+      // Normal mode: minimize logging to prevent terminal interference
+      logger.configure({
+        level: LogLevel.ERROR, // Only show errors
+        structured: false,     // Simple format
+        includeStack: false,   // No stack traces
+        aiFriendly: false      // No emojis/formatting
+      });
+    }
+
+    this.terminal = new TerminalIOImpl(developmentMode);
     this.filesystem = new FileSystemImpl();
     this.editor = new Editor(this.terminal, this.filesystem);
   }
@@ -31,14 +52,17 @@ class TmaxApplication {
     
     // Parse command line arguments
     const args = Deno.args;
+    const fileArgs = args.filter(arg => !arg.startsWith('--'));
     
     try {
-      // Enter raw mode for terminal input
-      await this.terminal.enterRawMode();
+      // Enter raw mode for terminal input (skip in development mode)
+      if (!this.developmentMode) {
+        await this.terminal.enterRawMode();
+      }
       
       // If a file is specified, open it
-      if (args.length > 0) {
-        const filename = args[0];
+      if (fileArgs.length > 0) {
+        const filename = fileArgs[0];
         await this.editor.openFile(filename);
       }
       
@@ -81,7 +105,34 @@ class TmaxApplication {
  * Main entry point
  */
 async function main(): Promise<void> {
-  const app = new TmaxApplication();
+  // Check for development mode flag
+  const developmentMode = Deno.args.includes('--dev') || Deno.args.includes('--no-tty');
+  
+  // Show help if requested
+  if (Deno.args.includes('--help') || Deno.args.includes('-h')) {
+    console.log(`
+tmax - Terminal-based text editor
+
+Usage: tmax [options] [filename]
+
+Options:
+  --dev, --no-tty    Development mode (skip TTY checks for AI coding assistants)
+  --help, -h         Show this help message
+
+Examples:
+  tmax               # Start editor in normal mode
+  tmax file.txt      # Open file.txt
+  tmax --dev         # Start in development mode (for AI coding environments)
+  tmax --dev file.txt # Open file.txt in development mode
+    `);
+    Deno.exit(0);
+  }
+  
+  if (developmentMode) {
+    console.log("🔧 Development mode: TTY checks disabled for AI coding environments");
+  }
+  
+  const app = new TmaxApplication(developmentMode);
   
   // Handle Ctrl+C gracefully
   const sigintHandler = async () => {
