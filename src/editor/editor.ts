@@ -267,6 +267,19 @@ export class Editor {
   }
 
   /**
+   * Escape special characters for safe inclusion in T-Lisp string literals
+   */
+  private escapeKeyForTLisp(key: string): string {
+    // Escape special characters for T-Lisp string literals
+    return key
+      .replace(/\\/g, "\\\\")  // Escape backslashes first
+      .replace(/"/g, '\\"')    // Escape double quotes
+      .replace(/\n/g, "\\n")   // Escape newlines
+      .replace(/\t/g, "\\t")   // Escape tabs
+      .replace(/\r/g, "\\r");  // Escape carriage returns
+  }
+
+  /**
    * Handle key input
    * @param key - Key pressed
    */
@@ -280,7 +293,21 @@ export class Editor {
     // This ensures that normal characters like 'h', 'j', 'k', 'l' are inserted
     // even if they have key mappings for other modes
     if (this.state.mode === "insert" && key.length === 1 && key >= " " && key <= "~") {
-      this.executeCommand(`(buffer-insert "${key}")`);
+      const escapedKey = this.escapeKeyForTLisp(key);
+      this.executeCommand(`(buffer-insert "${escapedKey}")`);
+      return;
+    }
+    
+    // Handle Enter key in insert mode with proper escaping
+    if (this.state.mode === "insert" && normalizedKey === "Enter") {
+      const escapedNewline = this.escapeKeyForTLisp("\n");
+      this.executeCommand(`(buffer-insert "${escapedNewline}")`);
+      return;
+    }
+    
+    // Handle Backspace key in insert mode
+    if (this.state.mode === "insert" && normalizedKey === "Backspace") {
+      this.executeCommand("(buffer-delete 1)");
       return;
     }
     

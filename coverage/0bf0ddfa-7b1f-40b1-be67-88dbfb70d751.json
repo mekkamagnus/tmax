@@ -1,0 +1,36 @@
+{
+  "scriptId": "332",
+  "url": "file:///Users/mekael/Documents/programming/typescript/tmax/test/unit/terminal.test.ts",
+  "functions": [
+    {
+      "functionName": "",
+      "ranges": [{ "startOffset": 0, "endOffset": 960, "count": 1 }],
+      "isBlockCoverage": true
+    },
+    {
+      "functionName": "",
+      "ranges": [{ "startOffset": 276, "endOffset": 957, "count": 1 }],
+      "isBlockCoverage": true
+    },
+    {
+      "functionName": "",
+      "ranges": [{ "startOffset": 355, "endOffset": 429, "count": 1 }],
+      "isBlockCoverage": true
+    },
+    {
+      "functionName": "",
+      "ranges": [{ "startOffset": 475, "endOffset": 640, "count": 1 }],
+      "isBlockCoverage": true
+    },
+    {
+      "functionName": "",
+      "ranges": [{ "startOffset": 697, "endOffset": 813, "count": 1 }],
+      "isBlockCoverage": true
+    },
+    {
+      "functionName": "",
+      "ranges": [{ "startOffset": 863, "endOffset": 953, "count": 1 }],
+      "isBlockCoverage": true
+    }
+  ]
+}

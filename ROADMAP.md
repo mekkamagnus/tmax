@@ -12,6 +12,7 @@ This version is considered complete and functional, providing a solid foundation
 *   **File Operations**: Open, save, and create files through a command interface.
 *   **Zero Dependencies**: A self-contained application for security and simplicity.
 *   **Comprehensive Testing**: 131 tests across 8 suites.
+*   **Functional Programming Guidelines**: A comprehensive guide to the functional programming patterns used in the project.
 
 ## Future Versions
 
@@ -28,7 +29,24 @@ This version is considered complete and functional, providing a solid foundation
 
 *   **Plugin System**: A complete plugin system using T-Lisp, including plugin loading.
 *   **Advanced T-Lisp Features**: Introduction of more advanced features to T-Lisp.
-*   **Custom Key Binding System**: A system for creating custom key bindings.
+*   **Custom Key Binding System**: ✅ A system for creating custom key bindings.
 *   **Macro Recording/Playback**: The ability to record and playback macros.
 *   **Basic Configuration System**: An initial version of the configuration system.
 *   **Performance Optimizations**: Further optimizations for performance.
+
+### v0.4.0 - Advanced Features
+
+*   **LSP Integration**: Integration with the Language Server Protocol (LSP).
+*   **Multiple Windows/Panes**: Support for multiple windows and panes.
+*   **File Tree Explorer**: A file tree explorer for easier navigation.
+*   **Undo/Redo System**: A comprehensive undo/redo system.
+*   **Advanced Configuration**: A more advanced configuration system.
+
+### v0.5.0 - Community & Ecosystem
+
+*   **Community Plugin Repository**: A repository for community-contributed plugins.
+*   **Documentation Portal**: A dedicated portal for documentation.
+*   **Tutorials and Guides**: A collection of tutorials and guides.
+*   **Community Forum**: A forum for community discussions.
+
+

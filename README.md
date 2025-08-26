@@ -16,7 +16,7 @@ tmax is an extensible terminal-based text editor written in TypeScript, running 
 - ✅ Multiple buffer support
 - ✅ File operations (open, save, create)
 - ✅ Cursor movement and text editing
-- 🚧 Configurable key bindings (partial T-Lisp integration - see [T-Lisp Centric Keybindings Status](#t-lisp-centric-keybindings-status))
+- ✅ Configurable key bindings
 - ✅ Status line with mode and cursor position
 
 ### T-Lisp Integration
@@ -304,32 +304,12 @@ deno test test/unit/repl.test.ts
 
 MIT License - see LICENSE file for details.
 
-## T-Lisp Centric Keybindings Status
 
-The tmax editor is currently transitioning to a fully T-Lisp centric key binding system as outlined in [`specs/tlisp-centric-keybindings.md`](specs/tlisp-centric-keybindings.md).
-
-### Current Implementation Status
-- ✅ **T-Lisp (key-bind) function**: Available but implemented as TypeScript built-in
-- ✅ **T-Lisp command execution**: All key bindings execute T-Lisp commands
-- ✅ **Runtime key binding**: Can modify key bindings through T-Lisp at runtime
-- 🚧 **Pure T-Lisp keymaps**: Still uses TypeScript Map instead of T-Lisp variables
-- 🚧 **T-Lisp standard library**: Missing hash-map/association-list types and keymap functions
-- ❌ **core-bindings.tlisp**: Default bindings still hardcoded in TypeScript
-- ❌ **T-Lisp environment lookup**: handleKey() still queries TypeScript Map
-
-### Remaining Work
-1. **Create `src/tlisp/stdlib.ts`** with hash-map/association-list data types
-2. **Implement T-Lisp keymap variables** (e.g., `*normal-mode-keymap*`)
-3. **Create `src/tlisp/core-bindings.tlisp`** with default key bindings
-4. **Refactor handleKey()** to query T-Lisp environment instead of TypeScript Map
-5. **Move (key-bind) to pure T-Lisp** implementation in stdlib.ts
-
-See the [T-Lisp Centric Keybindings Specification](specs/tlisp-centric-keybindings.md) for complete implementation details.
 
 ## Roadmap
 
 ### Immediate Priority
-- [ ] Complete T-Lisp centric key binding system (see [specification](specs/tlisp-centric-keybindings.md))
+- [x] Complete T-Lisp centric key binding system
 
 ### Phase 1: Enhanced Editing (v0.2.0)
 - [ ] Visual mode selection
@@ -351,3 +331,6 @@ tmax follows the principle of "powerful core, extensible surface". The TypeScrip
 - Extend functionality through a consistent API
 
 The editor is designed to be both approachable for beginners and powerful for advanced users who want to craft their perfect editing environment.
+
+For more information on the functional patterns used in tmax, see the [Functional Programming Guidelines](./functional-patterns-guidelines.md).
+

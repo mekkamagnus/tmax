@@ -1,0 +1,126 @@
+{
+  "scriptId": "365",
+  "url": "file:///Users/mekael/Documents/programming/typescript/tmax/src/tlisp/tokenizer.ts",
+  "functions": [
+    {
+      "functionName": "",
+      "ranges": [{ "startOffset": 0, "endOffset": 5224, "count": 1 }],
+      "isBlockCoverage": true
+    },
+    {
+      "functionName": "<instance_members_initializer>",
+      "ranges": [{ "startOffset": 177, "endOffset": 199, "count": 1 }],
+      "isBlockCoverage": true
+    },
+    {
+      "functionName": "tokenize",
+      "ranges": [
+        { "startOffset": 321, "endOffset": 776, "count": 39 },
+        { "startOffset": 447, "endOffset": 753, "count": 449 },
+        { "startOffset": 520, "endOffset": 544, "count": 5 },
+        { "startOffset": 544, "endOffset": 599, "count": 444 },
+        { "startOffset": 599, "endOffset": 654, "count": 0 },
+        { "startOffset": 654, "endOffset": 747, "count": 444 }
+      ],
+      "isBlockCoverage": true
+    },
+    {
+      "functionName": "skipWhitespace",
+      "ranges": [
+        { "startOffset": 821, "endOffset": 943, "count": 449 },
+        { "startOffset": 880, "endOffset": 913, "count": 831 },
+        { "startOffset": 914, "endOffset": 939, "count": 387 }
+      ],
+      "isBlockCoverage": true
+    },
+    {
+      "functionName": "skipComment",
+      "ranges": [{ "startOffset": 998, "endOffset": 1107, "count": 0 }],
+      "isBlockCoverage": false
+    },
+    {
+      "functionName": "readToken",
+      "ranges": [
+        { "startOffset": 1192, "endOffset": 2151, "count": 444 },
+        { "startOffset": 1276, "endOffset": 1291, "count": 337 },
+        { "startOffset": 1293, "endOffset": 1340, "count": 214 },
+        { "startOffset": 1340, "endOffset": 1376, "count": 230 },
+        { "startOffset": 1376, "endOffset": 1423, "count": 21 },
+        { "startOffset": 1423, "endOffset": 1476, "count": 209 },
+        { "startOffset": 1476, "endOffset": 1523, "count": 0 },
+        { "startOffset": 1523, "endOffset": 1582, "count": 209 },
+        { "startOffset": 1582, "endOffset": 1770, "count": 0 },
+        { "startOffset": 1770, "endOffset": 1816, "count": 209 },
+        { "startOffset": 1816, "endOffset": 1855, "count": 0 },
+        { "startOffset": 1855, "endOffset": 1898, "count": 209 },
+        { "startOffset": 1898, "endOffset": 1943, "count": 127 },
+        { "startOffset": 1914, "endOffset": 1943, "count": 6 },
+        { "startOffset": 1945, "endOffset": 1984, "count": 82 },
+        { "startOffset": 1984, "endOffset": 2079, "count": 127 },
+        { "startOffset": 2079, "endOffset": 2150, "count": 0 }
+      ],
+      "isBlockCoverage": true
+    },
+    {
+      "functionName": "readString",
+      "ranges": [{ "startOffset": 2235, "endOffset": 3279, "count": 0 }],
+      "isBlockCoverage": false
+    },
+    {
+      "functionName": "readNumber",
+      "ranges": [
+        { "startOffset": 3338, "endOffset": 3786, "count": 82 },
+        { "startOffset": 3403, "endOffset": 3442, "count": 0 },
+        { "startOffset": 3483, "endOffset": 3511, "count": 174 },
+        { "startOffset": 3512, "endOffset": 3551, "count": 92 },
+        { "startOffset": 3609, "endOffset": 3763, "count": 0 }
+      ],
+      "isBlockCoverage": true
+    },
+    {
+      "functionName": "readSymbol",
+      "ranges": [
+        { "startOffset": 3850, "endOffset": 4022, "count": 127 },
+        { "startOffset": 3926, "endOffset": 3959, "count": 450 },
+        { "startOffset": 3960, "endOffset": 3999, "count": 324 }
+      ],
+      "isBlockCoverage": true
+    },
+    {
+      "functionName": "peek",
+      "ranges": [
+        { "startOffset": 4194, "endOffset": 4312, "count": 2513 },
+        { "startOffset": 4303, "endOffset": 4307, "count": 0 }
+      ],
+      "isBlockCoverage": true
+    },
+    {
+      "functionName": "advance",
+      "ranges": [
+        { "startOffset": 4408, "endOffset": 4465, "count": 651 },
+        { "startOffset": 4455, "endOffset": 4460, "count": 0 }
+      ],
+      "isBlockCoverage": true
+    },
+    {
+      "functionName": "isWhitespace",
+      "ranges": [{ "startOffset": 4587, "endOffset": 4639, "count": 831 }],
+      "isBlockCoverage": true
+    },
+    {
+      "functionName": "isDigit",
+      "ranges": [{ "startOffset": 4753, "endOffset": 4800, "count": 389 }],
+      "isBlockCoverage": true
+    },
+    {
+      "functionName": "isSymbolStart",
+      "ranges": [{ "startOffset": 4935, "endOffset": 5005, "count": 127 }],
+      "isBlockCoverage": true
+    },
+    {
+      "functionName": "isSymbolChar",
+      "ranges": [{ "startOffset": 5149, "endOffset": 5221, "count": 450 }],
+      "isBlockCoverage": true
+    }
+  ]
+}

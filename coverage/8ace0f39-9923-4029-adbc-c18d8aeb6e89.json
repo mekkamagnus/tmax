@@ -1,0 +1,82 @@
+{
+  "scriptId": "336",
+  "url": "file:///Users/mekael/Documents/programming/typescript/tmax/src/tlisp/values.ts",
+  "functions": [
+    {
+      "functionName": "",
+      "ranges": [{ "startOffset": 0, "endOffset": 3521, "count": 1 }],
+      "isBlockCoverage": true
+    },
+    {
+      "functionName": "createNil",
+      "ranges": [{ "startOffset": 177, "endOffset": 221, "count": 5 }],
+      "isBlockCoverage": true
+    },
+    {
+      "functionName": "createBoolean",
+      "ranges": [{ "startOffset": 352, "endOffset": 399, "count": 48 }],
+      "isBlockCoverage": true
+    },
+    {
+      "functionName": "createNumber",
+      "ranges": [{ "startOffset": 526, "endOffset": 572, "count": 115 }],
+      "isBlockCoverage": true
+    },
+    {
+      "functionName": "createString",
+      "ranges": [{ "startOffset": 699, "endOffset": 745, "count": 41 }],
+      "isBlockCoverage": true
+    },
+    {
+      "functionName": "createSymbol",
+      "ranges": [{ "startOffset": 871, "endOffset": 917, "count": 117 }],
+      "isBlockCoverage": true
+    },
+    {
+      "functionName": "createList",
+      "ranges": [{ "startOffset": 1040, "endOffset": 1093, "count": 116 }],
+      "isBlockCoverage": true
+    },
+    {
+      "functionName": "createFunction",
+      "ranges": [{ "startOffset": 1274, "endOffset": 1339, "count": 46 }],
+      "isBlockCoverage": true
+    },
+    {
+      "functionName": "createMacro",
+      "ranges": [{ "startOffset": 1505, "endOffset": 1567, "count": 0 }],
+      "isBlockCoverage": false
+    },
+    {
+      "functionName": "isNil",
+      "ranges": [{ "startOffset": 1680, "endOffset": 1723, "count": 13 }],
+      "isBlockCoverage": true
+    },
+    {
+      "functionName": "isMacro",
+      "ranges": [{ "startOffset": 1844, "endOffset": 1889, "count": 75 }],
+      "isBlockCoverage": true
+    },
+    {
+      "functionName": "isTruthy",
+      "ranges": [
+        { "startOffset": 2021, "endOffset": 2134, "count": 13 },
+        { "startOffset": 2052, "endOffset": 2065, "count": 1 },
+        { "startOffset": 2065, "endOffset": 2098, "count": 12 },
+        { "startOffset": 2098, "endOffset": 2117, "count": 11 },
+        { "startOffset": 2117, "endOffset": 2133, "count": 1 }
+      ],
+      "isBlockCoverage": true
+    },
+    {
+      "functionName": "valueToString",
+      "ranges": [{ "startOffset": 2291, "endOffset": 2863, "count": 0 }],
+      "isBlockCoverage": false
+    },
+    {
+      "functionName": "valuesEqual",
+      "ranges": [{ "startOffset": 3019, "endOffset": 3519, "count": 0 }],
+      "isBlockCoverage": false
+    }
+  ]
+}

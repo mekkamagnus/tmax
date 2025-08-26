@@ -52,6 +52,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - **Current test coverage**: 131 tests across 8 comprehensive test suites
 
 ### Functional Patterns
+
+#### Core Foundation
 - **Task-Based Operations**: Wrap all operations in task objects that can be composed and chained
 - **Favor Task Over Promises**: Use Task instead of Promise for lazy evaluation and better error handling
 - **TaskEither for Error Handling**: Use TaskEither utility for combining lazy evaluation with explicit error types
@@ -61,6 +63,14 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - **Composition Over Inheritance**: Favor object composition over class inheritance for flexibility and testability
 - **Result Types**: Return Result<T, E> objects instead of throwing exceptions
 - **Option Types**: Use Option<T> for nullable values instead of null/undefined checks
+
+#### Advanced Patterns (Future Enhancement)
+- **Pipeline Composition**: Use pipeline builders for readable sequential operations
+- **Reader Monad**: Dependency injection pattern for testable, loosely coupled code
+- **State Monad**: Immutable state management with guaranteed pure state transitions
+- **Lens/Optics**: Focused immutable updates for complex nested data structures
+- **Validation Applicative**: Error accumulation for comprehensive validation feedback
+- **Effect System**: Controlled side effects with explicit dependency management
 
 #### Task vs Promise Examples
 ```typescript
@@ -164,6 +174,114 @@ const loadAndParseConfig = (path: string): Result<Config, string> =>
     .mapError(error => `Config loading failed: ${error}`);
 ```
 
+#### Advanced Pattern Examples (Future Implementation)
+
+**Pipeline Composition Pattern:**
+```typescript
+// ✅ PREFER: Clean pipeline composition
+const saveCurrentBufferPipeline = (filename?: string): TaskEither<SaveError, void> =>
+  pipe
+    .from(validateCurrentBuffer())
+    .step(buffer => determineTargetFilename(buffer, filename))
+    .step(filename => validateFilePath(filename))
+    .tap(path => logDebug(`Saving to: ${path}`))
+    .step(path => createDirectoryIfNeeded(path).map(() => path))
+    .step(path => writeFileContent(path))
+    .effect(path => updateStatusMessage(`Saved ${path}`))
+    .map(() => void 0)
+    .build();
+
+// ❌ AVOID: Deep nesting
+return validateBuffer()
+  .flatMap(buffer => 
+    determineFilename(buffer)
+      .flatMap(filename =>
+        validatePath(filename)
+          .flatMap(path => saveFile(path))
+      )
+  );
+```
+
+**Reader Monad Pattern (Dependency Injection):**
+```typescript
+// Dependencies interface
+interface SaveDependencies {
+  readonly filesystem: FileSystem;
+  readonly currentBuffer: TextBuffer | null;
+  readonly logger: Logger;
+}
+
+// ✅ PREFER: Dependency injection with Reader
+const saveCurrentBufferReader = (filename?: string): ReaderTaskEither<SaveDependencies, SaveError, void> =>
+  ReaderTaskEither.ask<SaveDependencies, SaveError>()
+    .flatMap(deps => validateBufferReader(deps.currentBuffer))
+    .flatMap(buffer => determineFilenameReader(buffer, filename))
+    .flatMap(resolvedFilename => writeFileReader(resolvedFilename));
+
+// Usage with injected dependencies
+const result = await saveCurrentBufferReader("test.txt")
+  .run(dependencies)
+  .run();
+
+// ❌ AVOID: Direct state access
+this.state.currentBuffer
+this.state.filesystem.writeFile()
+```
+
+**State Monad Pattern (Immutable State):**
+```typescript
+// ✅ PREFER: Immutable state updates
+const updateStatusMessage = (message: string): State<EditorState, void> =>
+  State.modify(state => ({
+    ...state,
+    statusMessage: message
+  }));
+
+const saveWithStateUpdates = (filename: string): StateTaskEither<EditorState, SaveError, void> =>
+  StateTaskEither.get<EditorState, SaveError>()
+    .flatMap(state => StateTaskEither.lift(writeFileContent(filename, state.currentBuffer?.getContent())))
+    .flatMap(() => StateTaskEither.modify<EditorState, SaveError>(state => ({
+      ...state,
+      statusMessage: `Saved ${filename}`,
+      buffers: new Map(state.buffers).set(filename, state.currentBuffer!)
+    })));
+
+// ❌ AVOID: Direct state mutation
+this.state.statusMessage = `Saved ${resolvedPath}`;
+this.state.buffers.set(resolvedPath, buffer);
+```
+
+**Validation Applicative Pattern (Error Accumulation):**
+```typescript
+// ✅ PREFER: Collect all validation errors
+const validateSaveRequest = (
+  buffer: TextBuffer | null,
+  filename: string | undefined,
+  path: string
+): Validation<SaveError, SaveRequest> => {
+  
+  const bufferValidation = buffer 
+    ? Validation.success(buffer)
+    : Validation.failure<SaveError, TextBuffer>("NO_BUFFER");
+  
+  const filenameValidation = filename 
+    ? Validation.success(filename)
+    : Validation.failure<SaveError, string>("NO_FILENAME");
+    
+  const pathValidation = validatePathSyntax(path);
+    
+  // Combines all validations - collects ALL errors
+  return lift3((buffer: TextBuffer) => (filename: string) => (path: string): SaveRequest =>
+    ({ buffer, filename, path })
+  )(bufferValidation)(filenameValidation)(pathValidation);
+};
+
+// ❌ AVOID: Sequential validation (fails fast)
+validateBuffer()
+  .flatMap(determineFilename)
+  .flatMap(validatePath) // Stops here if buffer validation fails
+```
+
 ### Error Handling
 - **Task-based**: Use Task.tryCatch() for operations that may fail
 - **Result types**: Return Result<T, E> instead of throwing exceptions  
@@ -171,6 +289,10 @@ const loadAndParseConfig = (path: string): Result<Config, string> =>
 - **Centralized logging**: All errors logged via centralized logger
 - **Different log levels**: Based on error type and severity
 - **Graceful degradation**: User feedback with recovery options
+- **Error Accumulation**: Use Validation patterns to collect all errors (future enhancement)
+- **Effect System**: Controlled side effects with explicit error handling (future enhancement)
+
+**Implementation Roadmap**: See `functional-patterns-guidelines.md` for detailed specification and phased implementation plan of advanced functional programming patterns including Reader monad, State monad, Lens/Optics, Validation applicative, and Effect system.
 
 ## Development Commands
 

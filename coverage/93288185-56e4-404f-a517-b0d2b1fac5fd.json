@@ -1,0 +1,194 @@
+{
+  "scriptId": "334",
+  "url": "file:///Users/mekael/Documents/programming/typescript/tmax/src/core/terminal.ts",
+  "functions": [
+    {
+      "functionName": "",
+      "ranges": [{ "startOffset": 0, "endOffset": 17261, "count": 1 }],
+      "isBlockCoverage": true
+    },
+    {
+      "functionName": "<instance_members_initializer>",
+      "ranges": [{ "startOffset": 410, "endOffset": 460, "count": 1 }],
+      "isBlockCoverage": true
+    },
+    {
+      "functionName": "getSize",
+      "ranges": [{ "startOffset": 534, "endOffset": 1321, "count": 1 }],
+      "isBlockCoverage": true
+    },
+    {
+      "functionName": "clear",
+      "ranges": [{ "startOffset": 1365, "endOffset": 1793, "count": 0 }],
+      "isBlockCoverage": false
+    },
+    {
+      "functionName": "clearToEndOfLine",
+      "ranges": [{ "startOffset": 1844, "endOffset": 2295, "count": 0 }],
+      "isBlockCoverage": false
+    },
+    {
+      "functionName": "moveCursor",
+      "ranges": [{ "startOffset": 2347, "endOffset": 2560, "count": 0 }],
+      "isBlockCoverage": false
+    },
+    {
+      "functionName": "write",
+      "ranges": [{ "startOffset": 2616, "endOffset": 3477, "count": 0 }],
+      "isBlockCoverage": false
+    },
+    {
+      "functionName": "readKey",
+      "ranges": [{ "startOffset": 3519, "endOffset": 5463, "count": 0 }],
+      "isBlockCoverage": false
+    },
+    {
+      "functionName": "enterRawMode",
+      "ranges": [{ "startOffset": 5529, "endOffset": 7853, "count": 0 }],
+      "isBlockCoverage": false
+    },
+    {
+      "functionName": "exitRawMode",
+      "ranges": [{ "startOffset": 7922, "endOffset": 8892, "count": 0 }],
+      "isBlockCoverage": false
+    },
+    {
+      "functionName": "enterAlternateScreen",
+      "ranges": [{ "startOffset": 8940, "endOffset": 9046, "count": 0 }],
+      "isBlockCoverage": false
+    },
+    {
+      "functionName": "exitAlternateScreen",
+      "ranges": [{ "startOffset": 9093, "endOffset": 9197, "count": 0 }],
+      "isBlockCoverage": false
+    },
+    {
+      "functionName": "hideCursor",
+      "ranges": [{ "startOffset": 9227, "endOffset": 9310, "count": 0 }],
+      "isBlockCoverage": false
+    },
+    {
+      "functionName": "showCursor",
+      "ranges": [{ "startOffset": 9340, "endOffset": 9423, "count": 0 }],
+      "isBlockCoverage": false
+    },
+    {
+      "functionName": "isStdinTTY",
+      "ranges": [{ "startOffset": 9465, "endOffset": 9818, "count": 0 }],
+      "isBlockCoverage": false
+    },
+    {
+      "functionName": "isStdinTTYInternal",
+      "ranges": [{ "startOffset": 9879, "endOffset": 9966, "count": 0 }],
+      "isBlockCoverage": false
+    },
+    {
+      "functionName": "writeEscapeSequence",
+      "ranges": [{ "startOffset": 10037, "endOffset": 10665, "count": 0 }],
+      "isBlockCoverage": false
+    },
+    {
+      "functionName": "writeLines",
+      "ranges": [{ "startOffset": 10837, "endOffset": 11236, "count": 0 }],
+      "isBlockCoverage": false
+    },
+    {
+      "functionName": "clearArea",
+      "ranges": [{ "startOffset": 11307, "endOffset": 11691, "count": 0 }],
+      "isBlockCoverage": false
+    },
+    {
+      "functionName": "writeWrapped",
+      "ranges": [{ "startOffset": 11754, "endOffset": 12569, "count": 0 }],
+      "isBlockCoverage": false
+    },
+    {
+      "functionName": "setupEditorTerminal",
+      "ranges": [{ "startOffset": 12639, "endOffset": 13032, "count": 0 }],
+      "isBlockCoverage": false
+    },
+    {
+      "functionName": "cleanupEditorTerminal",
+      "ranges": [{ "startOffset": 13108, "endOffset": 13477, "count": 0 }],
+      "isBlockCoverage": false
+    },
+    {
+      "functionName": "getCapabilities",
+      "ranges": [{ "startOffset": 13539, "endOffset": 14396, "count": 0 }],
+      "isBlockCoverage": false
+    },
+    {
+      "functionName": "<instance_members_initializer>",
+      "ranges": [{ "startOffset": 14591, "endOffset": 14609, "count": 1 }],
+      "isBlockCoverage": true
+    },
+    {
+      "functionName": "TerminalIOImpl",
+      "ranges": [{ "startOffset": 14613, "endOffset": 14693, "count": 1 }],
+      "isBlockCoverage": true
+    },
+    {
+      "functionName": "getSize",
+      "ranges": [
+        { "startOffset": 14735, "endOffset": 14893, "count": 1 },
+        { "startOffset": 14832, "endOffset": 14864, "count": 0 }
+      ],
+      "isBlockCoverage": true
+    },
+    {
+      "functionName": "clear",
+      "ranges": [{ "startOffset": 14930, "endOffset": 15077, "count": 0 }],
+      "isBlockCoverage": false
+    },
+    {
+      "functionName": "clearToEndOfLine",
+      "ranges": [{ "startOffset": 15128, "endOffset": 15297, "count": 0 }],
+      "isBlockCoverage": false
+    },
+    {
+      "functionName": "moveCursor",
+      "ranges": [{ "startOffset": 15339, "endOffset": 15512, "count": 0 }],
+      "isBlockCoverage": false
+    },
+    {
+      "functionName": "write",
+      "ranges": [{ "startOffset": 15568, "endOffset": 15723, "count": 0 }],
+      "isBlockCoverage": false
+    },
+    {
+      "functionName": "readKey",
+      "ranges": [{ "startOffset": 15765, "endOffset": 15941, "count": 0 }],
+      "isBlockCoverage": false
+    },
+    {
+      "functionName": "enterRawMode",
+      "ranges": [{ "startOffset": 15974, "endOffset": 16135, "count": 0 }],
+      "isBlockCoverage": false
+    },
+    {
+      "functionName": "exitRawMode",
+      "ranges": [{ "startOffset": 16167, "endOffset": 16326, "count": 0 }],
+      "isBlockCoverage": false
+    },
+    {
+      "functionName": "enterAlternateScreen",
+      "ranges": [{ "startOffset": 16374, "endOffset": 16551, "count": 0 }],
+      "isBlockCoverage": false
+    },
+    {
+      "functionName": "exitAlternateScreen",
+      "ranges": [{ "startOffset": 16598, "endOffset": 16773, "count": 0 }],
+      "isBlockCoverage": false
+    },
+    {
+      "functionName": "hideCursor",
+      "ranges": [{ "startOffset": 16803, "endOffset": 16960, "count": 0 }],
+      "isBlockCoverage": false
+    },
+    {
+      "functionName": "showCursor",
+      "ranges": [{ "startOffset": 16990, "endOffset": 17147, "count": 0 }],
+      "isBlockCoverage": false
+    }
+  ]
+}

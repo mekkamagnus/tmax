@@ -1,0 +1,160 @@
+{
+  "scriptId": "334",
+  "url": "file:///Users/mekael/Documents/programming/typescript/tmax/src/core/filesystem.ts",
+  "functions": [
+    {
+      "functionName": "",
+      "ranges": [{ "startOffset": 0, "endOffset": 6455, "count": 1 }],
+      "isBlockCoverage": true
+    },
+    {
+      "functionName": "readFile",
+      "ranges": [{ "startOffset": 362, "endOffset": 425, "count": 2 }],
+      "isBlockCoverage": true
+    },
+    {
+      "functionName": "writeFile",
+      "ranges": [{ "startOffset": 490, "endOffset": 573, "count": 1 }],
+      "isBlockCoverage": true
+    },
+    {
+      "functionName": "exists",
+      "ranges": [{ "startOffset": 636, "endOffset": 1014, "count": 2 }],
+      "isBlockCoverage": true
+    },
+    {
+      "functionName": "",
+      "ranges": [
+        { "startOffset": 682, "endOffset": 903, "count": 2 },
+        { "startOffset": 736, "endOffset": 897, "count": 1 },
+        { "startOffset": 868, "endOffset": 897, "count": 0 }
+      ],
+      "isBlockCoverage": true
+    },
+    {
+      "functionName": "",
+      "ranges": [{ "startOffset": 905, "endOffset": 1008, "count": 0 }],
+      "isBlockCoverage": false
+    },
+    {
+      "functionName": "stat",
+      "ranges": [{ "startOffset": 1078, "endOffset": 1450, "count": 1 }],
+      "isBlockCoverage": true
+    },
+    {
+      "functionName": "",
+      "ranges": [
+        { "startOffset": 1122, "endOffset": 1341, "count": 1 },
+        { "startOffset": 1313, "endOffset": 1326, "count": 0 }
+      ],
+      "isBlockCoverage": true
+    },
+    {
+      "functionName": "",
+      "ranges": [{ "startOffset": 1343, "endOffset": 1444, "count": 0 }],
+      "isBlockCoverage": false
+    },
+    {
+      "functionName": "remove",
+      "ranges": [{ "startOffset": 1513, "endOffset": 1687, "count": 0 }],
+      "isBlockCoverage": false
+    },
+    {
+      "functionName": "backup",
+      "ranges": [{ "startOffset": 1733, "endOffset": 1980, "count": 0 }],
+      "isBlockCoverage": false
+    },
+    {
+      "functionName": "atomicSave",
+      "ranges": [{ "startOffset": 2065, "endOffset": 2624, "count": 0 }],
+      "isBlockCoverage": false
+    },
+    {
+      "functionName": "readJsonFile",
+      "ranges": [{ "startOffset": 2772, "endOffset": 2928, "count": 0 }],
+      "isBlockCoverage": false
+    },
+    {
+      "functionName": "writeJsonFile",
+      "ranges": [{ "startOffset": 3001, "endOffset": 3175, "count": 0 }],
+      "isBlockCoverage": false
+    },
+    {
+      "functionName": "copyFile",
+      "ranges": [{ "startOffset": 3241, "endOffset": 3440, "count": 0 }],
+      "isBlockCoverage": false
+    },
+    {
+      "functionName": "readFiles",
+      "ranges": [{ "startOffset": 3502, "endOffset": 3734, "count": 0 }],
+      "isBlockCoverage": false
+    },
+    {
+      "functionName": "saveWithRetry",
+      "ranges": [{ "startOffset": 3799, "endOffset": 4002, "count": 0 }],
+      "isBlockCoverage": false
+    },
+    {
+      "functionName": "ensureDir",
+      "ranges": [{ "startOffset": 4075, "endOffset": 4274, "count": 0 }],
+      "isBlockCoverage": false
+    },
+    {
+      "functionName": "listDir",
+      "ranges": [{ "startOffset": 4326, "endOffset": 4628, "count": 0 }],
+      "isBlockCoverage": false
+    },
+    {
+      "functionName": "isFile",
+      "ranges": [{ "startOffset": 4679, "endOffset": 4859, "count": 0 }],
+      "isBlockCoverage": false
+    },
+    {
+      "functionName": "isDirectory",
+      "ranges": [{ "startOffset": 4920, "endOffset": 5110, "count": 0 }],
+      "isBlockCoverage": false
+    },
+    {
+      "functionName": "<instance_members_initializer>",
+      "ranges": [{ "startOffset": 5305, "endOffset": 5325, "count": 1 }],
+      "isBlockCoverage": true
+    },
+    {
+      "functionName": "FileSystemImpl",
+      "ranges": [{ "startOffset": 5329, "endOffset": 5411, "count": 1 }],
+      "isBlockCoverage": true
+    },
+    {
+      "functionName": "readFile",
+      "ranges": [
+        { "startOffset": 5448, "endOffset": 5647, "count": 2 },
+        { "startOffset": 5575, "endOffset": 5646, "count": 1 }
+      ],
+      "isBlockCoverage": true
+    },
+    {
+      "functionName": "writeFile",
+      "ranges": [
+        { "startOffset": 5685, "endOffset": 5879, "count": 1 },
+        { "startOffset": 5832, "endOffset": 5875, "count": 0 }
+      ],
+      "isBlockCoverage": true
+    },
+    {
+      "functionName": "exists",
+      "ranges": [
+        { "startOffset": 5918, "endOffset": 6113, "count": 2 },
+        { "startOffset": 6041, "endOffset": 6084, "count": 0 }
+      ],
+      "isBlockCoverage": true
+    },
+    {
+      "functionName": "stat",
+      "ranges": [
+        { "startOffset": 6146, "endOffset": 6337, "count": 1 },
+        { "startOffset": 6265, "endOffset": 6308, "count": 0 }
+      ],
+      "isBlockCoverage": true
+    }
+  ]
+}

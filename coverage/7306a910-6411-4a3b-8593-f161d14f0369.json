@@ -1,0 +1,205 @@
+{
+  "scriptId": "335",
+  "url": "file:///Users/mekael/Documents/programming/typescript/tmax/src/utils/error-manager.ts",
+  "functions": [
+    {
+      "functionName": "",
+      "ranges": [{ "startOffset": 0, "endOffset": 10848, "count": 1 }],
+      "isBlockCoverage": true
+    },
+    {
+      "functionName": "",
+      "ranges": [{ "startOffset": 307, "endOffset": 740, "count": 1 }],
+      "isBlockCoverage": true
+    },
+    {
+      "functionName": "",
+      "ranges": [{ "startOffset": 820, "endOffset": 1017, "count": 1 }],
+      "isBlockCoverage": true
+    },
+    {
+      "functionName": "<instance_members_initializer>",
+      "ranges": [{ "startOffset": 1114, "endOffset": 1151, "count": 109 }],
+      "isBlockCoverage": true
+    },
+    {
+      "functionName": "TmaxError",
+      "ranges": [
+        { "startOffset": 1155, "endOffset": 1692, "count": 109 },
+        { "startOffset": 1380, "endOffset": 1476, "count": 1 }
+      ],
+      "isBlockCoverage": true
+    },
+    {
+      "functionName": "getUserMessage",
+      "ranges": [
+        { "startOffset": 1742, "endOffset": 1817, "count": 2 },
+        { "startOffset": 1797, "endOffset": 1812, "count": 0 }
+      ],
+      "isBlockCoverage": true
+    },
+    {
+      "functionName": "getSuggestions",
+      "ranges": [
+        { "startOffset": 1860, "endOffset": 1925, "count": 1 },
+        { "startOffset": 1915, "endOffset": 1920, "count": 0 }
+      ],
+      "isBlockCoverage": true
+    },
+    {
+      "functionName": "toAIFormat",
+      "ranges": [
+        { "startOffset": 1973, "endOffset": 3702, "count": 1 },
+        { "startOffset": 2121, "endOffset": 2133, "count": 0 },
+        { "startOffset": 2182, "endOffset": 2194, "count": 0 },
+        { "startOffset": 3459, "endOffset": 3550, "count": 0 }
+      ],
+      "isBlockCoverage": true
+    },
+    {
+      "functionName": "",
+      "ranges": [{ "startOffset": 3343, "endOffset": 3419, "count": 2 }],
+      "isBlockCoverage": true
+    },
+    {
+      "functionName": "<static_initializer>",
+      "ranges": [{ "startOffset": 3772, "endOffset": 3787, "count": 1 }],
+      "isBlockCoverage": true
+    },
+    {
+      "functionName": "<instance_members_initializer>",
+      "ranges": [{ "startOffset": 3791, "endOffset": 3833, "count": 1 }],
+      "isBlockCoverage": true
+    },
+    {
+      "functionName": "ErrorManager",
+      "ranges": [{ "startOffset": 3837, "endOffset": 3852, "count": 1 }],
+      "isBlockCoverage": true
+    },
+    {
+      "functionName": "getInstance",
+      "ranges": [{ "startOffset": 3862, "endOffset": 4005, "count": 1 }],
+      "isBlockCoverage": true
+    },
+    {
+      "functionName": "createError",
+      "ranges": [{ "startOffset": 4059, "endOffset": 4211, "count": 108 }],
+      "isBlockCoverage": true
+    },
+    {
+      "functionName": "recordError",
+      "ranges": [
+        { "startOffset": 4256, "endOffset": 4412, "count": 108 },
+        { "startOffset": 4368, "endOffset": 4408, "count": 0 }
+      ],
+      "isBlockCoverage": true
+    },
+    {
+      "functionName": "getErrorHistory",
+      "ranges": [{ "startOffset": 4448, "endOffset": 4518, "count": 10 }],
+      "isBlockCoverage": true
+    },
+    {
+      "functionName": "getRecentErrorsByCategory",
+      "ranges": [{ "startOffset": 4566, "endOffset": 4716, "count": 0 }],
+      "isBlockCoverage": false
+    },
+    {
+      "functionName": "getErrorStats",
+      "ranges": [{ "startOffset": 4755, "endOffset": 5500, "count": 9 }],
+      "isBlockCoverage": true
+    },
+    {
+      "functionName": "",
+      "ranges": [
+        { "startOffset": 4955, "endOffset": 5381, "count": 350 },
+        { "startOffset": 5039, "endOffset": 5051, "count": 0 },
+        { "startOffset": 5104, "endOffset": 5108, "count": 32 },
+        { "startOffset": 5188, "endOffset": 5200, "count": 0 },
+        { "startOffset": 5253, "endOffset": 5257, "count": 17 }
+      ],
+      "isBlockCoverage": true
+    },
+    {
+      "functionName": "clearHistory",
+      "ranges": [{ "startOffset": 5538, "endOffset": 5666, "count": 2 }],
+      "isBlockCoverage": true
+    },
+    {
+      "functionName": "generateAIReport",
+      "ranges": [{ "startOffset": 5736, "endOffset": 6903, "count": 2 }],
+      "isBlockCoverage": true
+    },
+    {
+      "functionName": "",
+      "ranges": [{ "startOffset": 6083, "endOffset": 6157, "count": 8 }],
+      "isBlockCoverage": true
+    },
+    {
+      "functionName": "",
+      "ranges": [{ "startOffset": 6245, "endOffset": 6319, "count": 4 }],
+      "isBlockCoverage": true
+    },
+    {
+      "functionName": "",
+      "ranges": [
+        { "startOffset": 6427, "endOffset": 6862, "count": 17 },
+        { "startOffset": 6497, "endOffset": 6509, "count": 0 },
+        { "startOffset": 6651, "endOffset": 6663, "count": 16 }
+      ],
+      "isBlockCoverage": true
+    },
+    {
+      "functionName": "validation",
+      "ranges": [
+        { "startOffset": 7040, "endOffset": 7469, "count": 103 },
+        { "startOffset": 7254, "endOffset": 7264, "count": 0 },
+        { "startOffset": 7328, "endOffset": 7338, "count": 0 }
+      ],
+      "isBlockCoverage": true
+    },
+    {
+      "functionName": "parsing",
+      "ranges": [
+        { "startOffset": 7511, "endOffset": 7984, "count": 1 },
+        { "startOffset": 7943, "endOffset": 7954, "count": 0 }
+      ],
+      "isBlockCoverage": true
+    },
+    {
+      "functionName": "io",
+      "ranges": [{ "startOffset": 8016, "endOffset": 8482, "count": 2 }],
+      "isBlockCoverage": true
+    },
+    {
+      "functionName": "runtime",
+      "ranges": [{ "startOffset": 8524, "endOffset": 8958, "count": 1 }],
+      "isBlockCoverage": true
+    },
+    {
+      "functionName": "userInput",
+      "ranges": [{ "startOffset": 9005, "endOffset": 9405, "count": 0 }],
+      "isBlockCoverage": false
+    },
+    {
+      "functionName": "tryCatch",
+      "ranges": [{ "startOffset": 9663, "endOffset": 10016, "count": 0 }],
+      "isBlockCoverage": false
+    },
+    {
+      "functionName": "fromPromise",
+      "ranges": [{ "startOffset": 10100, "endOffset": 10473, "count": 0 }],
+      "isBlockCoverage": false
+    },
+    {
+      "functionName": "throwLeft",
+      "ranges": [{ "startOffset": 10536, "endOffset": 10640, "count": 0 }],
+      "isBlockCoverage": false
+    },
+    {
+      "functionName": "logAndReturn",
+      "ranges": [{ "startOffset": 10697, "endOffset": 10844, "count": 0 }],
+      "isBlockCoverage": false
+    }
+  ]
+}

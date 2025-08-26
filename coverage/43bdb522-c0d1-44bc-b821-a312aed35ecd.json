@@ -1,0 +1,226 @@
+{
+  "scriptId": "362",
+  "url": "file:///Users/mekael/Documents/programming/typescript/tmax/src/utils/task-either.ts",
+  "functions": [
+    {
+      "functionName": "",
+      "ranges": [{ "startOffset": 0, "endOffset": 8337, "count": 1 }],
+      "isBlockCoverage": true
+    },
+    {
+      "functionName": "left",
+      "ranges": [{ "startOffset": 267, "endOffset": 323, "count": 0 }],
+      "isBlockCoverage": false
+    },
+    {
+      "functionName": "right",
+      "ranges": [{ "startOffset": 334, "endOffset": 392, "count": 223 }],
+      "isBlockCoverage": true
+    },
+    {
+      "functionName": "isLeft",
+      "ranges": [{ "startOffset": 404, "endOffset": 436, "count": 223 }],
+      "isBlockCoverage": true
+    },
+    {
+      "functionName": "isRight",
+      "ranges": [{ "startOffset": 449, "endOffset": 482, "count": 0 }],
+      "isBlockCoverage": false
+    },
+    {
+      "functionName": "map",
+      "ranges": [{ "startOffset": 491, "endOffset": 567, "count": 0 }],
+      "isBlockCoverage": false
+    },
+    {
+      "functionName": "mapLeft",
+      "ranges": [{ "startOffset": 580, "endOffset": 653, "count": 0 }],
+      "isBlockCoverage": false
+    },
+    {
+      "functionName": "flatMap",
+      "ranges": [{ "startOffset": 666, "endOffset": 728, "count": 0 }],
+      "isBlockCoverage": false
+    },
+    {
+      "functionName": "fold",
+      "ranges": [{ "startOffset": 738, "endOffset": 832, "count": 0 }],
+      "isBlockCoverage": false
+    },
+    {
+      "functionName": "getOrElse",
+      "ranges": [{ "startOffset": 847, "endOffset": 923, "count": 0 }],
+      "isBlockCoverage": false
+    },
+    {
+      "functionName": "tryCatch",
+      "ranges": [{ "startOffset": 937, "endOffset": 1102, "count": 0 }],
+      "isBlockCoverage": false
+    },
+    {
+      "functionName": "<instance_members_initializer>",
+      "ranges": [{ "startOffset": 1181, "endOffset": 1192, "count": 0 }],
+      "isBlockCoverage": true
+    },
+    {
+      "functionName": "Task",
+      "ranges": [{ "startOffset": 1196, "endOffset": 1261, "count": 0 }],
+      "isBlockCoverage": false
+    },
+    {
+      "functionName": "of",
+      "ranges": [{ "startOffset": 1325, "endOffset": 1389, "count": 0 }],
+      "isBlockCoverage": false
+    },
+    {
+      "functionName": "from",
+      "ranges": [{ "startOffset": 1456, "endOffset": 1513, "count": 0 }],
+      "isBlockCoverage": false
+    },
+    {
+      "functionName": "fromSync",
+      "ranges": [{ "startOffset": 1583, "endOffset": 1667, "count": 0 }],
+      "isBlockCoverage": false
+    },
+    {
+      "functionName": "run",
+      "ranges": [{ "startOffset": 1702, "endOffset": 1756, "count": 0 }],
+      "isBlockCoverage": false
+    },
+    {
+      "functionName": "map",
+      "ranges": [{ "startOffset": 1799, "endOffset": 1922, "count": 0 }],
+      "isBlockCoverage": false
+    },
+    {
+      "functionName": "flatMap",
+      "ranges": [{ "startOffset": 1962, "endOffset": 2101, "count": 0 }],
+      "isBlockCoverage": false
+    },
+    {
+      "functionName": "tryCatch",
+      "ranges": [{ "startOffset": 2166, "endOffset": 2517, "count": 0 }],
+      "isBlockCoverage": false
+    },
+    {
+      "functionName": "<instance_members_initializer>",
+      "ranges": [{ "startOffset": 2620, "endOffset": 2631, "count": 0 }],
+      "isBlockCoverage": true
+    },
+    {
+      "functionName": "TaskEither",
+      "ranges": [{ "startOffset": 2635, "endOffset": 2700, "count": 0 }],
+      "isBlockCoverage": false
+    },
+    {
+      "functionName": "right",
+      "ranges": [{ "startOffset": 2764, "endOffset": 2851, "count": 0 }],
+      "isBlockCoverage": false
+    },
+    {
+      "functionName": "left",
+      "ranges": [{ "startOffset": 2914, "endOffset": 2999, "count": 0 }],
+      "isBlockCoverage": false
+    },
+    {
+      "functionName": "from",
+      "ranges": [{ "startOffset": 3063, "endOffset": 3126, "count": 0 }],
+      "isBlockCoverage": false
+    },
+    {
+      "functionName": "tryCatch",
+      "ranges": [{ "startOffset": 3211, "endOffset": 3569, "count": 0 }],
+      "isBlockCoverage": false
+    },
+    {
+      "functionName": "fromSync",
+      "ranges": [{ "startOffset": 3645, "endOffset": 4025, "count": 0 }],
+      "isBlockCoverage": false
+    },
+    {
+      "functionName": "run",
+      "ranges": [{ "startOffset": 4066, "endOffset": 4120, "count": 0 }],
+      "isBlockCoverage": false
+    },
+    {
+      "functionName": "map",
+      "ranges": [{ "startOffset": 4163, "endOffset": 4304, "count": 0 }],
+      "isBlockCoverage": false
+    },
+    {
+      "functionName": "mapLeft",
+      "ranges": [{ "startOffset": 4346, "endOffset": 4495, "count": 0 }],
+      "isBlockCoverage": false
+    },
+    {
+      "functionName": "flatMap",
+      "ranges": [{ "startOffset": 4541, "endOffset": 4758, "count": 0 }],
+      "isBlockCoverage": false
+    },
+    {
+      "functionName": "andThen",
+      "ranges": [{ "startOffset": 4794, "endOffset": 4838, "count": 0 }],
+      "isBlockCoverage": false
+    },
+    {
+      "functionName": "fold",
+      "ranges": [{ "startOffset": 4902, "endOffset": 5067, "count": 0 }],
+      "isBlockCoverage": false
+    },
+    {
+      "functionName": "getOrElse",
+      "ranges": [{ "startOffset": 5125, "endOffset": 5294, "count": 0 }],
+      "isBlockCoverage": false
+    },
+    {
+      "functionName": "toTask",
+      "ranges": [{ "startOffset": 5355, "endOffset": 5538, "count": 0 }],
+      "isBlockCoverage": false
+    },
+    {
+      "functionName": "zip",
+      "ranges": [{ "startOffset": 5600, "endOffset": 5956, "count": 0 }],
+      "isBlockCoverage": false
+    },
+    {
+      "functionName": "sequence",
+      "ranges": [{ "startOffset": 6018, "endOffset": 6337, "count": 0 }],
+      "isBlockCoverage": false
+    },
+    {
+      "functionName": "parallel",
+      "ranges": [{ "startOffset": 6399, "endOffset": 6753, "count": 0 }],
+      "isBlockCoverage": false
+    },
+    {
+      "functionName": "readFile",
+      "ranges": [{ "startOffset": 6904, "endOffset": 7059, "count": 0 }],
+      "isBlockCoverage": false
+    },
+    {
+      "functionName": "writeFile",
+      "ranges": [{ "startOffset": 7126, "endOffset": 7301, "count": 0 }],
+      "isBlockCoverage": false
+    },
+    {
+      "functionName": "parseJSON",
+      "ranges": [{ "startOffset": 7368, "endOffset": 7515, "count": 0 }],
+      "isBlockCoverage": false
+    },
+    {
+      "functionName": "stringifyJSON",
+      "ranges": [{ "startOffset": 7591, "endOffset": 7751, "count": 0 }],
+      "isBlockCoverage": false
+    },
+    {
+      "functionName": "delay",
+      "ranges": [{ "startOffset": 7793, "endOffset": 7896, "count": 0 }],
+      "isBlockCoverage": false
+    },
+    {
+      "functionName": "retry",
+      "ranges": [{ "startOffset": 7951, "endOffset": 8333, "count": 0 }],
+      "isBlockCoverage": false
+    }
+  ]
+}

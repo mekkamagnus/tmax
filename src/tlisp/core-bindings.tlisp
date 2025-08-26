@@ -89,9 +89,4 @@
 ;; BASIC EDITING (Insert Mode)
 ;; =================================================================
 ;; Essential editing operations in insert mode
-
-;; Delete character (Backspace)
-(key-bind "Backspace" "(buffer-delete 1)" "insert")
-
-;; Insert newline (Enter)
-(key-bind "Enter" "(buffer-insert \"\\n\")" "insert")
+;; Note: Enter and Backspace are handled directly in editor.ts for proper escaping
