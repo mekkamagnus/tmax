@@ -91,6 +91,26 @@ export class InkTerminalIO implements FunctionalTerminalIO {
   }
 
   /**
+   * Get the current terminal size as a promise (for async operations)
+   */
+  async getSizeAsync(): Promise<Either<TerminalError, TerminalSize>> {
+    const fnLogger = this.logger.fn("getSizeAsync");
+    const correlationId = fnLogger.startOperation("get_size_async");
+
+    try {
+      const size = this.getSize();
+      fnLogger.completeOperation("get_size_async", correlationId);
+      return size;
+    } catch (error) {
+      const terminalError: TerminalError = `Failed to get terminal size asynchronously: ${error instanceof Error ? error.message : String(error)}`;
+      const errorObj = error instanceof Error ? error : new Error(String(error));
+
+      fnLogger.failOperation("get_size_async", correlationId, errorObj);
+      return Either.left(terminalError);
+    }
+  }
+
+  /**
    * Clear the terminal screen
    * In Deno-ink, clearing is handled by React rendering
    */
@@ -98,7 +118,7 @@ export class InkTerminalIO implements FunctionalTerminalIO {
     const fnLogger = this.logger.fn("clear");
     const correlationId = fnLogger.startOperation("clear_screen");
 
-    return TaskEither.of(void 0); // Handled by React rendering
+    return TaskEither.right(void 0); // Handled by React rendering
   }
 
   /**
@@ -109,7 +129,7 @@ export class InkTerminalIO implements FunctionalTerminalIO {
     const fnLogger = this.logger.fn("clearToEndOfLine");
     const correlationId = fnLogger.startOperation("clear_to_eol");
 
-    return TaskEither.of(void 0); // Handled by React rendering
+    return TaskEither.right(void 0); // Handled by React rendering
   }
 
   /**
@@ -127,7 +147,7 @@ export class InkTerminalIO implements FunctionalTerminalIO {
       correlationId
     });
 
-    return TaskEither.of(void 0);
+    return TaskEither.right(void 0);
   }
 
   /**
@@ -145,7 +165,7 @@ export class InkTerminalIO implements FunctionalTerminalIO {
     });
 
     // In Deno-ink, writing is handled by React components
-    return TaskEither.of(void 0);
+    return TaskEither.right(void 0);
   }
 
   /**
@@ -158,7 +178,7 @@ export class InkTerminalIO implements FunctionalTerminalIO {
     const correlationId = fnLogger.startOperation("read_key");
 
     return TaskEither.tryCatch(
-      () => {
+      async () => {
         // In a real Deno-ink implementation, this would connect to keyboard events
         // For now, we'll create a promise that would be resolved by external input handling
         return new Promise<string>((resolve, reject) => {
@@ -178,20 +198,11 @@ export class InkTerminalIO implements FunctionalTerminalIO {
         });
       },
       (error) => {
-        const tmaxError = ErrorFactory.runtime(
-          `Failed to read key: ${error instanceof Error ? error.message : String(error)}`,
-          "read_key",
-          error instanceof Error ? error : undefined,
-          {
-            module: "InkTerminalIO",
-            function: "readKey",
-            operation: "read_key",
-            correlationId
-          }
-        );
+        const terminalError: TerminalError = `Failed to read key: ${error instanceof Error ? error.message : String(error)}`;
+        const errorObj = error instanceof Error ? error : new Error(String(error));
 
-        fnLogger.failOperation("read_key", correlationId, tmaxError);
-        return tmaxError;
+        fnLogger.failOperation("read_key", correlationId, errorObj);
+        return terminalError;
       }
     );
   }
@@ -210,7 +221,7 @@ export class InkTerminalIO implements FunctionalTerminalIO {
     });
 
     this._isRawMode = true;
-    return TaskEither.of(void 0);
+    return TaskEither.right(void 0);
   }
 
   /**
@@ -227,7 +238,7 @@ export class InkTerminalIO implements FunctionalTerminalIO {
     });
 
     this._isRawMode = false;
-    return TaskEither.of(void 0);
+    return TaskEither.right(void 0);
   }
 
   /**
@@ -244,7 +255,7 @@ export class InkTerminalIO implements FunctionalTerminalIO {
     });
 
     this._isAlternateScreen = true;
-    return TaskEither.of(void 0);
+    return TaskEither.right(void 0);
   }
 
   /**
@@ -261,7 +272,7 @@ export class InkTerminalIO implements FunctionalTerminalIO {
     });
 
     this._isAlternateScreen = false;
-    return TaskEither.of(void 0);
+    return TaskEither.right(void 0);
   }
 
   /**
@@ -278,7 +289,7 @@ export class InkTerminalIO implements FunctionalTerminalIO {
     });
 
     this._isCursorHidden = true;
-    return TaskEither.of(void 0);
+    return TaskEither.right(void 0);
   }
 
   /**
@@ -295,7 +306,7 @@ export class InkTerminalIO implements FunctionalTerminalIO {
     });
 
     this._isCursorHidden = false;
-    return TaskEither.of(void 0);
+    return TaskEither.right(void 0);
   }
 
   /**
@@ -324,22 +335,22 @@ export class InkTerminalIO implements FunctionalTerminalIO {
       return Either.right(isTTY);
     } catch (error) {
       // Handle cases where isTerminal() throws an error
+      const errorObj = error instanceof Error ? error : new Error(String(error));
       const tmaxError = ErrorFactory.io(
         "Failed to check TTY status",
         "stdin",
         "check_tty",
-        error instanceof Error ? error : new Error(String(error)),
+        errorObj,
         {
           module: "InkTerminalIO",
-          function: "isStdinTTY",
-          operation: "check_tty"
+          function: "isStdinTTY"
         }
       );
 
-      fnLogger.error("Failed to check TTY status, falling back to non-TTY", {
+      fnLogger.error("Failed to check TTY status, falling back to non-TTY", errorObj, {
         operation: "check_tty",
         metadata: { fallback: false }
-      }, tmaxError);
+      });
 
       // Return false as a safe fallback for non-TTY environments
       return Either.right(false);

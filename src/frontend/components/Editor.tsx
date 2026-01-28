@@ -4,8 +4,11 @@
  * Handles file I/O errors during rendering and provides error feedback to users
  */
 
-import { Box, Text, Static, useApp, useInput } from "https://deno.land/x/ink@v3.0.0/mod.ts";
-import { useState, useEffect, useCallback } from "https://deno.land/x/ink@v3.0.0/vendor/react/index.ts";
+/** @jsxRuntime automatic */
+/** @jsxImportSource react */
+
+import { Box, Text, Static, useApp, useInput, useStdout } from "https://deno.land/x/ink@1.3/mod.ts";
+import { useState, useEffect, useCallback } from "https://deno.land/x/ink@1.3/vendor/react/index.ts";
 import { EditorState } from "../../core/types.ts";
 import { FunctionalTextBufferImpl } from "../../core/buffer.ts";
 import { Either } from "../../utils/task-either.ts";
@@ -23,6 +26,7 @@ export const Editor = ({ initialEditorState, onError }: EditorProps) => {
   const { state, setState, dispatch } = useEditorState(initialEditorState);
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
+  const { stdout } = useStdout();
   const { exit } = useApp();
 
   // Handle file I/O errors gracefully
@@ -48,8 +52,42 @@ export const Editor = ({ initialEditorState, onError }: EditorProps) => {
     }
   }, [setState, onError]);
 
+  // Handle terminal resize events
+  useEffect(() => {
+    if (!stdout) return;
+
+    const handleResize = () => {
+      // Dispatch resize action to update viewport and status
+      dispatch({
+        type: 'HANDLE_RESIZE',
+        width: stdout.columns,
+        height: stdout.rows
+      });
+
+      // Clear status message after a delay
+      setTimeout(() => {
+        setState(prev => ({
+          ...prev,
+          statusMessage: ''
+        }));
+      }, 2000);
+    };
+
+    // Listen for resize events
+    if (stdout.addListener) {
+      stdout.addListener('resize', handleResize);
+    }
+
+    // Cleanup listener on unmount
+    return () => {
+      if (stdout.removeListener) {
+        stdout.removeListener('resize', handleResize);
+      }
+    };
+  }, [stdout, setState, dispatch]);
+
   // Handle key input
-  useInput((input, key) => {
+  useInput((input: string, key: any) => {
     if (state.mode === 'command' || state.mode === 'mx') {
       // Command input is handled by CommandInput component
       return;
@@ -115,15 +153,15 @@ export const Editor = ({ initialEditorState, onError }: EditorProps) => {
       const newState = { ...prev };
       const buffer = prev.currentBuffer || FunctionalTextBufferImpl.create("");
       const lineCountResult = buffer.getLineCount();
-      
+
       if (Either.isLeft(lineCountResult)) {
         handleError(`Buffer error: ${lineCountResult.left}`);
         return prev;
       }
-      
+
       const lineCount = lineCountResult.right;
       const maxLine = Math.max(0, lineCount - 1);
-      
+
       switch (input.toLowerCase()) {
         case 'h':
           if (newState.cursorPosition.column > 0) {
@@ -152,7 +190,7 @@ export const Editor = ({ initialEditorState, onError }: EditorProps) => {
         case 'l':
           const currentLineResult = buffer.getLine(newState.cursorPosition.line);
           if (Either.isRight(currentLineResult)) {
-            const currentLine = currentLineResult.right;
+            const currentLine: string = currentLineResult.right;
             if (newState.cursorPosition.column < currentLine.length) {
               newState.cursorPosition = {
                 ...newState.cursorPosition,
@@ -170,7 +208,7 @@ export const Editor = ({ initialEditorState, onError }: EditorProps) => {
           newState.statusMessage = 'VISUAL mode';
           break;
       }
-      
+
       return newState;
     });
   };
@@ -184,14 +222,14 @@ export const Editor = ({ initialEditorState, onError }: EditorProps) => {
           line: prev.cursorPosition.line + 1,
           column: 0
         };
-        
+
         // Insert newline at current position
         const insertResult = buffer.insert(prev.cursorPosition, '\n');
         if (Either.isLeft(insertResult)) {
           handleError(`Insert error: ${insertResult.left}`);
           return prev;
         }
-        
+
         return {
           ...prev,
           currentBuffer: insertResult.right,
@@ -205,39 +243,39 @@ export const Editor = ({ initialEditorState, onError }: EditorProps) => {
           // At the very beginning, nothing to delete
           return prev;
         }
-        
+
         const buffer = prev.currentBuffer || FunctionalTextBufferImpl.create("");
         let targetPosition = { ...prev.cursorPosition };
-        
+
         if (prev.cursorPosition.column === 0) {
           // At beginning of line, need to join with previous line
           targetPosition = {
             line: prev.cursorPosition.line - 1,
             column: 0
           };
-          
+
           // Get previous line length to position cursor correctly
           const prevLineResult = buffer.getLine(targetPosition.line);
           if (Either.isRight(prevLineResult)) {
-            targetPosition.column = prevLineResult.right.length;
+            targetPosition.column = (prevLineResult.right as string).length;
           }
         } else {
           // Just move back one column
           targetPosition.column -= 1;
         }
-        
+
         // Delete character at target position
         const range = {
           start: targetPosition,
           end: prev.cursorPosition
         };
-        
+
         const deleteResult = buffer.delete(range);
         if (Either.isLeft(deleteResult)) {
           handleError(`Delete error: ${deleteResult.left}`);
           return prev;
         }
-        
+
         return {
           ...prev,
           currentBuffer: deleteResult.right,
@@ -248,18 +286,18 @@ export const Editor = ({ initialEditorState, onError }: EditorProps) => {
       // Regular character input
       setState(prev => {
         const buffer = prev.currentBuffer || FunctionalTextBufferImpl.create("");
-        
+
         const insertResult = buffer.insert(prev.cursorPosition, input);
         if (Either.isLeft(insertResult)) {
           handleError(`Insert error: ${insertResult.left}`);
           return prev;
         }
-        
+
         const newPosition = {
           line: prev.cursorPosition.line,
           column: prev.cursorPosition.column + 1
         };
-        
+
         return {
           ...prev,
           currentBuffer: insertResult.right,
@@ -294,7 +332,7 @@ export const Editor = ({ initialEditorState, onError }: EditorProps) => {
           <Text color="white">{error}</Text>
         </Box>
       )}
-      
+
       {/* Loading indicator */}
       {isLoading && (
         <Box paddingX={1} marginY={0.5}>
@@ -304,8 +342,8 @@ export const Editor = ({ initialEditorState, onError }: EditorProps) => {
 
       {/* Buffer View */}
       <Box flexGrow={1} flexDirection="column">
-        <BufferView 
-          buffer={state.currentBuffer || FunctionalTextBufferImpl.create("")} 
+        <BufferView
+          buffer={state.currentBuffer || FunctionalTextBufferImpl.create("")}
           cursorPosition={state.cursorPosition}
           viewportTop={state.viewportTop}
           onViewportChange={(top) => setState(prev => ({ ...prev, viewportTop: top }))}
@@ -315,7 +353,7 @@ export const Editor = ({ initialEditorState, onError }: EditorProps) => {
       {/* Command Input (when in command mode) */}
       {(state.mode === 'command' || state.mode === 'mx') && (
         <Box>
-          <CommandInput 
+          <CommandInput
             mode={state.mode}
             onExecute={(command) => {
               // For now, just show the command in status

@@ -4,13 +4,13 @@
  * Handles state synchronization between React and T-Lisp interpreter
  */
 
-import { useState, useEffect, useCallback } from "https://deno.land/x/ink@v3.0.0/vendor/react/index.ts";
-import { EditorState } from "../../core/types.ts";
+import { useState, useEffect, useCallback } from "https://deno.land/x/ink@1.3/vendor/react/index.ts";
+import { EditorState, Position } from "../../core/types.ts";
 import { FunctionalTextBufferImpl } from "../../core/buffer.ts";
 
 interface UseEditorStateReturn {
   state: EditorState;
-  setState: (stateUpdate: React.SetStateAction<EditorState>) => void;
+  setState: (stateUpdate: ((prevState: EditorState) => EditorState) | EditorState) => void;
   dispatch: (action: EditorAction) => void;
 }
 
@@ -21,10 +21,8 @@ type EditorAction =
   | { type: 'SET_BUFFER'; buffer: EditorState['currentBuffer'] }
   | { type: 'SET_STATUS_MESSAGE'; message: string }
   | { type: 'SET_VIEWPORT_TOP'; top: number }
-  | { type: 'UPDATE_STATE'; newState: Partial<EditorState> };
-
-// Define React types locally to avoid import issues
-type ReactSetStateAction<S> = S | ((prevState: S) => S);
+  | { type: 'UPDATE_STATE'; newState: Partial<EditorState> }
+  | { type: 'HANDLE_RESIZE'; width: number; height: number };
 
 export const useEditorState = (initialState: EditorState): UseEditorStateReturn => {
   const [state, setState] = useState<EditorState>(() => {
@@ -49,7 +47,7 @@ export const useEditorState = (initialState: EditorState): UseEditorStateReturn 
 
   // Dispatch function to handle actions
   const dispatch = useCallback((action: EditorAction) => {
-    setState(prevState => {
+    setState((prevState: EditorState) => {
       switch (action.type) {
         case 'SET_MODE':
           return { ...prevState, mode: action.mode };
@@ -68,6 +66,27 @@ export const useEditorState = (initialState: EditorState): UseEditorStateReturn 
 
         case 'UPDATE_STATE':
           return { ...prevState, ...action.newState };
+
+        case 'HANDLE_RESIZE':
+          // Handle terminal resize - adjust viewport if needed
+          let newViewportTop = prevState.viewportTop;
+
+          // If cursor is now beyond the visible area due to resize, adjust viewport
+          const visibleLines = Math.max(1, action.height - 2); // Leave space for status line
+          if (prevState.cursorPosition.line >= newViewportTop + visibleLines) {
+            newViewportTop = Math.max(0, prevState.cursorPosition.line - visibleLines + 1);
+          }
+
+          // If cursor is above viewport, adjust viewport
+          if (prevState.cursorPosition.line < newViewportTop) {
+            newViewportTop = Math.max(0, prevState.cursorPosition.line);
+          }
+
+          return {
+            ...prevState,
+            viewportTop: newViewportTop,
+            statusMessage: `Terminal resized to ${action.width}x${action.height}`
+          };
 
         default:
           console.warn(`Unknown action type: ${(action as any).type}`);

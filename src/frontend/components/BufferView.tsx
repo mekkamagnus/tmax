@@ -4,11 +4,15 @@
  * Handles long lines, empty buffers, and Unicode characters gracefully
  */
 
-import { Box, Text } from "https://deno.land/x/ink@v3.0.0/mod.ts";
-import { useState, useEffect } from "https://deno.land/x/ink@v3.0.0/vendor/react/index.ts";
+/** @jsxRuntime automatic */
+/** @jsxImportSource react */
+
+import { Box, Text } from "https://deno.land/x/ink@1.3/mod.ts";
+import { useState, useEffect, useCallback } from "https://deno.land/x/ink@1.3/vendor/react/index.ts";
 import { FunctionalTextBuffer } from "../../core/types.ts";
 import { Position } from "../../core/types.ts";
 import { FunctionalTextBufferImpl } from "../../core/buffer.ts";
+import { Either } from "../../utils/task-either.ts";
 
 interface BufferViewProps {
   buffer: FunctionalTextBuffer;
@@ -17,47 +21,64 @@ interface BufferViewProps {
   onViewportChange: (top: number) => void;
 }
 
-export const BufferView = ({ 
-  buffer, 
-  cursorPosition, 
-  viewportTop, 
-  onViewportChange 
+export const BufferView = ({
+  buffer,
+  cursorPosition,
+  viewportTop,
+  onViewportChange
 }: BufferViewProps) => {
   const [terminalWidth, setTerminalWidth] = useState(80);
   const [terminalHeight, setTerminalHeight] = useState(24);
 
-  // Get buffer content and line count
+  // Get buffer content and line count with error handling
   const lineCountResult = buffer.getLineCount();
-  const totalLines = lineCountResult._tag === 'Right' ? lineCountResult.right : 0;
-  
+  const totalLines = Either.isRight(lineCountResult) ? lineCountResult.right : 0;
+
   // Calculate viewport dimensions
   const visibleLines = Math.max(1, terminalHeight - 2); // Leave space for status/command line
-  
+
   // Adjust viewport if cursor goes out of view
   useEffect(() => {
     let newViewportTop = viewportTop;
-    
+
     // If cursor is above viewport, scroll up
     if (cursorPosition.line < viewportTop) {
-      newViewportTop = cursorPosition.line;
+      newViewportTop = Math.max(0, cursorPosition.line);
     }
     // If cursor is below viewport, scroll down
     else if (cursorPosition.line >= viewportTop + visibleLines) {
-      newViewportTop = cursorPosition.line - visibleLines + 1;
+      newViewportTop = Math.max(0, cursorPosition.line - visibleLines + 1);
     }
-    
+
     if (newViewportTop !== viewportTop) {
       onViewportChange(newViewportTop);
     }
   }, [cursorPosition, viewportTop, visibleLines, onViewportChange]);
 
-  // Render visible lines
+  // Safely get line content with error handling
+  const getSafeLineContent = useCallback((lineNumber: number): string => {
+    try {
+      const lineResult = buffer.getLine(lineNumber);
+      if (Either.isRight(lineResult)) {
+        return lineResult.right;
+      } else {
+        // Return empty string for error case, but log it
+        console.warn(`Error getting line ${lineNumber}:`, lineResult.left);
+        return '';
+      }
+    } catch (error) {
+      console.warn(`Exception getting line ${lineNumber}:`, error);
+      return '';
+    }
+  }, [buffer]);
+
+  // Render visible lines with proper error handling
   const renderLines = () => {
     const lines = [];
-    
+
     for (let i = 0; i < visibleLines; i++) {
       const lineNumber = viewportTop + i;
-      
+
       if (lineNumber >= totalLines) {
         // Render empty line if beyond buffer
         lines.push(
@@ -66,16 +87,15 @@ export const BufferView = ({
           </Box>
         );
       } else {
-        // Get line content
-        const lineResult = buffer.getLine(lineNumber);
-        const lineContent = lineResult._tag === 'Right' ? lineResult.right : '';
-        
+        // Get line content with error handling
+        const lineContent = getSafeLineContent(lineNumber);
+
         // Truncate long lines to terminal width with ellipsis
         let displayContent = lineContent;
         if (displayContent.length > terminalWidth) {
           displayContent = displayContent.substring(0, terminalWidth - 3) + '...';
         }
-        
+
         // Highlight cursor line if needed
         const isCursorLine = lineNumber === cursorPosition.line;
         const lineText = isCursorLine ? (
@@ -85,7 +105,7 @@ export const BufferView = ({
         ) : (
           <Text>{displayContent}</Text>
         );
-        
+
         lines.push(
           <Box key={`line-${lineNumber}`} width="100%">
             {lineText}
@@ -93,7 +113,7 @@ export const BufferView = ({
         );
       }
     }
-    
+
     return lines;
   };
 
