@@ -73,8 +73,8 @@ Developers needed a modern, extensible terminal editor that combines the best as
 - ✅ **Advanced functionality**: M-x commands, configurable key bindings
 
 ### Epic 2: Neovim-Compatible Interface ✅ COMPLETE
-**As a** Neovim user  
-**I want** familiar key bindings and interface  
+**As a** Neovim user
+**I want** familiar key bindings and interface
 **So that** I can use tmax without learning new keybindings
 
 #### Acceptance Criteria - Implementation Status

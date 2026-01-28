@@ -1,0 +1,267 @@
+{
+  "projectName": "tmax",
+  "branchName": "ralph/009-chore-migrate-ui-to-deno-ink",
+  "userStories": [
+    {
+      "id": "US-001",
+      "title": "Deno-ink Adapter Implementation",
+      "description": "Create a Deno-ink adapter that implements the existing FunctionalTerminalIO interface so that the editor can use React-based UI without breaking existing functional patterns",
+      "acceptanceCriteria": [
+        "The class implements all methods of FunctionalTerminalIO",
+        "All methods return TaskEither for functional compatibility",
+        "Methods include: getSize(), clear(), write(), moveCursor(), readKey(), enterRawMode(), exitRawMode(), enterAlternateScreen(), exitAlternateScreen(), hideCursor(), showCursor(), isStdinTTY()",
+        "Deno-ink's render() function is properly initialized",
+        "TypeScript compiles without errors",
+        "All adapter methods have unit tests",
+        "TaskEither error handling is tested for each method",
+        "Errors are returned in Either, not thrown",
+        "All tests pass with no regressions"
+      ],
+      "priority": 10,
+      "passes": false,
+      "notes": "SPEC-009 Story 1 - Create src/frontend/ink-adapter.ts with InkTerminalIO class"
+    },
+    {
+      "id": "US-002",
+      "title": "React Editor Component Structure",
+      "description": "Create a React component structure that matches the current tmax UI so that the editor maintains its visual layout while using Deno-ink",
+      "acceptanceCriteria": [
+        "Component accepts editorState: EditorState and onStateChange props",
+        "Component uses Deno-ink components: <Box>, <Text>",
+        "Layout matches current tmax UI (buffer view + status line)",
+        "TypeScript types are properly defined",
+        "Buffer displays text content",
+        "Status line shows mode and cursor position",
+        "Layout fills 100% of terminal height",
+        "No TypeScript errors"
+      ],
+      "priority": 9,
+      "passes": false,
+      "notes": "SPEC-009 Story 2 - Create src/frontend/components/Editor.tsx"
+    },
+    {
+      "id": "US-003",
+      "title": "Buffer Display with Viewport Management",
+      "description": "Create BufferView component that displays buffer text with proper viewport scrolling so that users can navigate large files efficiently",
+      "acceptanceCriteria": [
+        "Component renders only visible lines based on viewport",
+        "Lines are truncated to terminal width",
+        "Cursor position is visible and properly positioned",
+        "Long lines are handled gracefully (truncation or wrapping)",
+        "Viewport scrolls to show cursor position when moving",
+        "Cursor remains visible at all times",
+        "Rendering performance is acceptable (<50ms per update)",
+        "Lines are truncated to fit terminal width",
+        "Truncation is visually indicated (e.g., '...')",
+        "No text overflow or display corruption"
+      ],
+      "priority": 8,
+      "passes": false,
+      "notes": "SPEC-009 Story 3 - Create src/frontend/components/BufferView.tsx"
+    },
+    {
+      "id": "US-004",
+      "title": "Status Line Display",
+      "description": "Create StatusLine component that displays current editor mode, cursor position, and status messages so that users know the editor's current state",
+      "acceptanceCriteria": [
+        "Status line displays at bottom of screen",
+        "Shows current mode (NORMAL, INSERT, VISUAL, COMMAND, M-X)",
+        "Shows cursor position as 'line:column'",
+        "Shows status message when present",
+        "Shows command input in command mode (':command')",
+        "Shows M-x input in M-x mode ('M-x command')",
+        "Status line updates to show current mode",
+        "Mode display is visually distinct (color, bold, or inverse)",
+        "Updates happen immediately on mode change",
+        "Message displays in status line when T-Lisp API sets it",
+        "Message clears after timeout or action",
+        "Message doesn't obscure other status information"
+      ],
+      "priority": 7,
+      "passes": false,
+      "notes": "SPEC-009 Story 4 - Create src/frontend/components/StatusLine.tsx"
+    },
+    {
+      "id": "US-005",
+      "title": "Command Mode Input",
+      "description": "Create CommandInput component that handles typing commands in command mode and M-x mode so that users can execute editor commands",
+      "acceptanceCriteria": [
+        "Input field displays ':' prompt in command mode",
+        "Characters appear as user types",
+        "Backspace deletes characters",
+        "Enter submits command for execution",
+        "Escape exits command mode",
+        "Input field displays 'M-x ' prompt in M-x mode",
+        "Characters appear as user types in M-x",
+        "Backspace deletes characters in M-x",
+        "Enter submits function name for execution",
+        "Escape exits M-x mode",
+        "Error message displays in status line for invalid commands",
+        "Command mode remains active for correction",
+        "No crash or undefined behavior"
+      ],
+      "priority": 6,
+      "passes": false,
+      "notes": "SPEC-009 Story 5 - Create src/frontend/components/CommandInput.tsx"
+    },
+    {
+      "id": "US-006",
+      "title": "React State Management with T-Lisp Integration",
+      "description": "Create useEditorState hook that synchronizes React state with T-Lisp interpreter state so that T-Lisp functions can trigger UI updates and vice versa",
+      "acceptanceCriteria": [
+        "Hook bridges React state with EditorState interface",
+        "T-Lisp API functions can update state",
+        "State updates trigger React re-renders",
+        "React component updates update T-Lisp state",
+        "EditorState updates to 'insert' mode when (editor-mode 'insert') is called",
+        "React re-renders with new mode",
+        "Status line shows 'INSERT' mode",
+        "Key bindings switch to insert mode",
+        "EditorState buffer content updates when user types in insert mode",
+        "T-Lisp API can access updated content",
+        "Changes are visible to T-Lisp functions",
+        "No state synchronization issues"
+      ],
+      "priority": 5,
+      "passes": false,
+      "notes": "SPEC-009 Story 6 - Create src/frontend/hooks/useEditorState.ts"
+    },
+    {
+      "id": "US-007",
+      "title": "Editor Migration to React Rendering",
+      "description": "Refactor Editor class to use React components instead of manual rendering so that rendering is declarative and maintainable",
+      "acceptanceCriteria": [
+        "Manual render() method is removed (handled by React)",
+        "Manual renderStatusLine() method is removed (StatusLine component)",
+        "Manual positionCursor() method is removed (Ink handles cursor)",
+        "handleKey() triggers React state changes",
+        "T-Lisp interpreter integration is preserved",
+        "Key binding system is preserved",
+        "Application starts without errors",
+        "All 5 modes work: normal, insert, visual, command, M-x",
+        "All key bindings work as before",
+        "Buffer operations work: create, switch, delete",
+        "File operations work: open, save",
+        "Cursor movement works: hjkl, word movement, line movement",
+        "Viewport scrolling works smoothly for large files",
+        "Cursor stays visible during navigation",
+        "Performance is acceptable (no noticeable lag)"
+      ],
+      "priority": 4,
+      "passes": false,
+      "notes": "SPEC-009 Story 7 - Modify src/editor/editor.ts to use React components"
+    },
+    {
+      "id": "US-008",
+      "title": "Test Migration and Coverage",
+      "description": "Migrate all existing tests to pass after Deno-ink migration so that I have confidence the migration didn't break functionality",
+      "acceptanceCriteria": [
+        "All 131 tests pass without modification if possible",
+        "Tests that require adaptation are updated to work with React",
+        "New tests are added for React components",
+        "Test coverage remains ≥80%",
+        "Tests are adapted for InkTerminalIO instead of TerminalIOImpl",
+        "Assertions work with Deno-ink rendering",
+        "All terminal I/O tests pass",
+        "Tests are adapted for React component rendering",
+        "Tests use ink-testing-library for component assertions",
+        "T-Lisp integration tests still work",
+        "All editor tests pass",
+        "Tests use ink-testing-library for new components",
+        "Each component has independent tests",
+        "Component composition is tested",
+        "State management with useEditorState is tested",
+        "All frontend tests pass"
+      ],
+      "priority": 3,
+      "passes": false,
+      "notes": "SPEC-009 Story 8 - Update tests and create test/frontend/ directory tests"
+    },
+    {
+      "id": "US-009",
+      "title": "Type System Integration",
+      "description": "Add TypeScript types to support React components and Deno-ink so that I have type safety across the migration",
+      "acceptanceCriteria": [
+        "React component prop types are defined",
+        "Ink-specific types are added if needed",
+        "FunctionalTerminalIO interface remains stable",
+        "New types are documented with JSDoc comments",
+        "Zero TypeScript errors when running deno task check",
+        "All component props are properly typed",
+        "All hook parameters and return types are typed",
+        "No any types used without justification"
+      ],
+      "priority": 2,
+      "passes": false,
+      "notes": "SPEC-009 Story 9 - Update src/core/types.ts and create src/frontend/types.ts"
+    },
+    {
+      "id": "US-010",
+      "title": "Performance Parity",
+      "description": "Ensure the Deno-ink UI performs as well as the current implementation so that my editing experience is not degraded",
+      "acceptanceCriteria": [
+        "Render times are ≤ current manual rendering for large files",
+        "No noticeable lag during typing",
+        "Cursor movement feels responsive",
+        "Memory usage is reasonable",
+        "React.memo is used to prevent unnecessary re-renders",
+        "Virtual scrolling is implemented for large buffers if needed",
+        "Ink's maxFps setting is tuned if needed",
+        "Ink's incrementalRendering is used if needed",
+        "Performance is documented",
+        "Any differences are noted",
+        "Performance improvements are identified",
+        "Bottlenecks are addressed"
+      ],
+      "priority": 1,
+      "passes": false,
+      "notes": "SPEC-009 Story 10 - Profile and optimize performance"
+    },
+    {
+      "id": "US-011",
+      "title": "Error Handling and Edge Cases",
+      "description": "Implement comprehensive error handling and edge case management so that users don't lose work or encounter crashes",
+      "acceptanceCriteria": [
+        "Layout adapts to new size when terminal is resized",
+        "No crash or corruption on resize",
+        "Cursor remains visible after resize",
+        "TTY detection works properly in non-TTY environments",
+        "Graceful error message or fallback for non-TTY",
+        "No crash in non-TTY environment",
+        "Error is caught and handled when file I/O fails during rendering",
+        "User-friendly error message for I/O errors",
+        "No crash or undefined behavior on I/O errors",
+        "Empty buffers display correctly",
+        "Very long lines (> terminal width) handled",
+        "Binary files handled gracefully",
+        "Unicode and special characters display correctly"
+      ],
+      "priority": 11,
+      "passes": false,
+      "notes": "SPEC-009 Story 11 - Add error handling and edge case tests"
+    },
+    {
+      "id": "US-012",
+      "title": "Documentation Updates",
+      "description": "Update documentation to reflect the Deno-ink migration so that future developers understand the architecture",
+      "acceptanceCriteria": [
+        "Deno-ink migration is documented in README.md",
+        "Architecture description is updated",
+        "React-based UI is noted",
+        "Development instructions are updated",
+        "React integration with functional patterns is documented in functional-patterns-guidelines.md",
+        "Guidance on using functional patterns with React is added",
+        "Notes on which patterns to use where are included",
+        "Architectural changes are documented",
+        "Integration patterns are documented",
+        "Testing approach is documented",
+        "React component purpose is clarified in code comments",
+        "Integration with functional core is documented",
+        "Complex code sections have explanatory comments"
+      ],
+      "priority": 12,
+      "passes": false,
+      "notes": "SPEC-009 Story 12 - Update README.md, functional-patterns-guidelines.md, and code comments"
+    }
+  ]
+}
