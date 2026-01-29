@@ -23,22 +23,27 @@ Deno.test("Editor Implementation", async (t) => {
   await t.step("should create editor with default state", () => {
     setup();
     const state = editor.getState();
-    
+
     assertEquals(state.mode, "normal");
-    assertEquals(state.cursorLine, 0);
-    assertEquals(state.cursorColumn, 0);
-    assertEquals(state.currentBuffer, null);
-    assertEquals(state.buffers.size, 0);
+    assertEquals(state.cursorPosition.line, 0);
+    assertEquals(state.cursorPosition.column, 0);
+    assertEquals(state.currentBuffer, undefined);
   });
 
   await t.step("should create buffer", () => {
     setup();
     editor.createBuffer("test", "hello\nworld");
-    
+
     const state = editor.getState();
-    assertEquals(state.buffers.size, 1);
-    assertEquals(state.buffers.has("test"), true);
-    assertEquals(state.currentBuffer?.getContent(), "hello\nworld");
+    // currentBuffer should be set after createBuffer
+    assertEquals(state.currentBuffer !== undefined, true);
+
+    // getContent returns Either<BufferError, string>
+    const contentResult = state.currentBuffer?.getContent();
+    assertEquals(contentResult?._tag, "Right");
+    if (contentResult?._tag === "Right") {
+      assertEquals(contentResult.right, "hello\nworld");
+    }
   });
 
   await t.step("should execute T-Lisp editor API functions", () => {
@@ -61,16 +66,16 @@ Deno.test("Editor Implementation", async (t) => {
   await t.step("should handle cursor movement", () => {
     setup();
     editor.createBuffer("test", "hello\nworld");
-    
+
     const interpreter = editor.getInterpreter();
-    
+
     // Move cursor
     interpreter.execute("(cursor-move 1 2)");
-    
+
     const state = editor.getState();
-    assertEquals(state.cursorLine, 1);
-    assertEquals(state.cursorColumn, 2);
-    
+    assertEquals(state.cursorPosition.line, 1);
+    assertEquals(state.cursorPosition.column, 2);
+
     // Check cursor position function
     const position = interpreter.execute("(cursor-position)");
     const positionList = position.value as any[];
@@ -139,20 +144,17 @@ Deno.test("Editor Implementation", async (t) => {
   await t.step("should handle buffer management", () => {
     setup();
     const interpreter = editor.getInterpreter();
-    
+
     // Create multiple buffers
     interpreter.execute("(buffer-create \"buffer1\")");
     interpreter.execute("(buffer-create \"buffer2\")");
-    
-    const state = editor.getState();
-    assertEquals(state.buffers.size, 2);
-    
-    // List buffers
+
+    // List buffers - T-Lisp API function
     const bufferList = interpreter.execute("(buffer-list)");
     const bufferArray = bufferList.value as any[];
     assertEquals(bufferArray.length, 2);
-    
-    // Switch buffer
+
+    // Switch buffer - T-Lisp API function
     interpreter.execute("(buffer-switch \"buffer1\")");
     const currentBuffer = interpreter.execute("(buffer-current)");
     assertEquals(currentBuffer.value, "buffer1");

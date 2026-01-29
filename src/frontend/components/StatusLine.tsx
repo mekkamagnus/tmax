@@ -4,7 +4,7 @@
  * Shows mode, cursor position, and status messages
  */
 
-import { Box, Text } from "https://deno.land/x/ink@v3.0.0/mod.ts";
+import { Box, Text } from "ink";
 import { Position } from "../../core/types.ts";
 
 interface StatusLineProps {
@@ -13,10 +13,10 @@ interface StatusLineProps {
   statusMessage: string;
 }
 
-export const StatusLine = ({ 
-  mode, 
-  cursorPosition, 
-  statusMessage 
+export const StatusLine = ({
+  mode,
+  cursorPosition,
+  statusMessage
 }: StatusLineProps) => {
   // Determine display mode text and color
   const getModeDisplay = () => {
@@ -27,17 +27,17 @@ export const StatusLine = ({
       command: { text: 'COMMAND', color: 'cyan' },
       mx: { text: 'M-X', color: 'blue' }
     };
-    
+
     return modeInfo[mode];
   };
-  
+
   const modeDisplay = getModeDisplay();
 
   return (
-    <Box 
-      backgroundColor="blue" 
-      width="100%" 
-      paddingX={1} 
+    <Box
+      backgroundColor="blue"
+      width="100%"
+      paddingX={1}
       justifyContent="space-between"
     >
       {/* Left side: Mode and cursor position */}
@@ -48,7 +48,7 @@ export const StatusLine = ({
         <Text color="white"> </Text>
         <Text color="white">{`Line: ${cursorPosition.line + 1}, Col: ${cursorPosition.column + 1}`}</Text>
       </Box>
-      
+
       {/* Right side: Status message */}
       <Box flexGrow={1} justifyContent="flex-end">
         <Text color="white">{statusMessage}</Text>

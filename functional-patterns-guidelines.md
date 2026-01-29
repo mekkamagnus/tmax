@@ -444,3 +444,32 @@ See the comprehensive test suite in `test/unit/functional-patterns.test.ts` for 
 - **Deno Standard Library**: Use built-in utilities where possible
 
 This document serves as the authoritative guide for functional programming patterns in the tmax project. All developers should familiarize themselves with these patterns and apply them consistently throughout the codebase.
+
+## React Integration Patterns
+
+With the migration to Deno-ink, tmax now uses React components for terminal UI rendering. This section documents how functional patterns integrate with React components.
+
+### React Component Structure
+- **Editor Component**: Orchestrates the UI and manages state transitions
+- **BufferView Component**: Renders buffer content with efficient viewport management
+- **StatusLine Component**: Displays editor state information
+- **CommandInput Component**: Handles command and M-x mode input
+- **useEditorState Hook**: Bridges React state with functional editor state
+
+### Integration with Functional Core
+- The Editor class now focuses on logic and state management while React handles UI
+- T-Lisp API functions update React state through the useEditorState hook
+- Terminal I/O operations are handled by the InkTerminalIO adapter
+- Buffer operations remain functional but update React state for UI changes
+
+### State Management
+- React state is synchronized with EditorState interface
+- Actions dispatched through the useEditorState hook update editor state
+- T-Lisp functions can trigger React state updates for UI changes
+- The separation of concerns keeps logic in the functional core and UI in React components
+
+### Testing React Components
+- Components are tested using ink-testing-library
+- Functional behavior is tested separately from UI rendering
+- Integration tests verify the connection between React components and functional core
+- Mock implementations are used for terminal I/O during testing

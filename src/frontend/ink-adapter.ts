@@ -177,24 +177,37 @@ export class InkTerminalIO implements FunctionalTerminalIO {
     const fnLogger = this.logger.fn("readKey");
     const correlationId = fnLogger.startOperation("read_key");
 
+    // Create a promise that will be resolved when a key is pressed
+    // This will be connected to React component keyboard event handlers
     return TaskEither.tryCatch(
       async () => {
-        // In a real Deno-ink implementation, this would connect to keyboard events
-        // For now, we'll create a promise that would be resolved by external input handling
+        // In Deno-ink, keyboard events are handled differently than in raw mode
+        // We'll create a promise that gets resolved when a key event occurs
         return new Promise<string>((resolve, reject) => {
-          // This is a simplified version - in practice, this would be connected
-          // to React component keyboard event handlers
+          // Store the resolver in a way that can be accessed by React components
+          // We'll use a unique identifier to prevent conflicts
+          const resolverId = `tmax_key_resolver_${Date.now()}_${Math.random()}`;
 
-          // For now, we'll simulate by attaching to a global handler
-          // that would be triggered by React components
-          const handleKeyPress = (key: string) => {
-            resolve(key);
-          };
+          // Store the resolver in a global map
+          if (!(globalThis as any).__tmax_key_resolvers) {
+            (globalThis as any).__tmax_key_resolvers = new Map();
+          }
 
-          // Store the resolver so it can be called from React components
-          // This is a simplified approach - in reality, we'd have a more sophisticated
-          // event system connecting React components to this adapter
-          (globalThis as any).__tmax_key_resolver = handleKeyPress;
+          // Create a timeout that can be cleared later
+          const timeoutId = setTimeout(() => {
+            const resolvers = (globalThis as any).__tmax_key_resolvers;
+            if (resolvers && resolvers.has(resolverId)) {
+              resolvers.delete(resolverId);
+              reject(new Error("Timeout waiting for key press"));
+            }
+          }, 30000); // 30 second timeout
+
+          // Store both the resolver and timeout ID
+          (globalThis as any).__tmax_key_resolvers.set(resolverId, {
+            resolve,
+            reject,
+            timeoutId
+          });
         });
       },
       (error) => {
@@ -354,6 +367,75 @@ export class InkTerminalIO implements FunctionalTerminalIO {
 
       // Return false as a safe fallback for non-TTY environments
       return Either.right(false);
+    }
+  }
+
+  /**
+   * Resolve a pending key press promise from React components
+   * This method is called by React components when a key is pressed
+   */
+  resolveKeyPress(key: string): void {
+    const fnLogger = this.logger.fn("resolveKeyPress");
+
+    // Get the oldest resolver from the map and resolve it
+    const resolvers = (globalThis as any).__tmax_key_resolvers;
+    if (resolvers && resolvers.size > 0) {
+      // Get the first resolver in the map
+      const firstResolverKey = resolvers.keys().next().value;
+      const resolverData = resolvers.get(firstResolverKey);
+
+      if (resolverData) {
+        // Clear the timeout if it exists
+        if (resolverData.timeoutId) {
+          clearTimeout(resolverData.timeoutId);
+        }
+
+        if (resolverData.resolve) {
+          fnLogger.debug(`Resolving key press with key: ${key}`, {
+            operation: "resolve_key_press"
+          });
+
+          resolverData.resolve(key);
+        }
+        resolvers.delete(firstResolverKey);
+      }
+    } else {
+      fnLogger.warn("No pending key press resolver found", {
+        operation: "resolve_key_press",
+        metadata: { key }
+      });
+    }
+  }
+
+  /**
+   * Cancel a pending key press promise
+   * This method is called when we need to cancel waiting for a key press
+   */
+  cancelKeyPress(): void {
+    const fnLogger = this.logger.fn("cancelKeyPress");
+
+    // Get the oldest resolver from the map and reject it
+    const resolvers = (globalThis as any).__tmax_key_resolvers;
+    if (resolvers && resolvers.size > 0) {
+      // Get the first resolver in the map
+      const firstResolverKey = resolvers.keys().next().value;
+      const resolverData = resolvers.get(firstResolverKey);
+
+      if (resolverData) {
+        // Clear the timeout if it exists
+        if (resolverData.timeoutId) {
+          clearTimeout(resolverData.timeoutId);
+        }
+
+        if (resolverData.reject) {
+          fnLogger.debug("Cancelling pending key press", {
+            operation: "cancel_key_press"
+          });
+
+          resolverData.reject(new Error("Key press cancelled"));
+        }
+        resolvers.delete(firstResolverKey);
+      }
     }
   }
 }

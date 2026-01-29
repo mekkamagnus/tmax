@@ -1,12 +1,15 @@
 /**
  * @file terminal.ts
  * @description Functional terminal I/O operations using TaskEither for tmax editor
+ * Cross-platform implementation for Bun/Node
  */
 
 import type { TerminalSize, Position, TerminalIO } from "./types.ts";
 import { TaskEither, Either } from "../utils/task-either.ts";
 import { log } from "../utils/logger.ts";
 import { ErrorFactory, TmaxError, ErrorCategory } from "../utils/error-manager.ts";
+import * as readline from 'readline';
+import { stdin as stdin, stdout as stdout } from 'process';
 
 /**
  * Terminal operation result types
@@ -71,18 +74,17 @@ export class FunctionalTerminalIOImpl implements FunctionalTerminalIO {
    */
   getSize(): Either<TerminalError, TerminalSize> {
     const fnLogger = this.logger.fn("getSize");
-    
+
     try {
-      const size = Deno.consoleSize();
       const terminalSize = {
-        width: size.columns,
-        height: size.rows,
+        width: stdout.columns || 80,
+        height: stdout.rows || 24,
       };
-      
-      fnLogger.debug("Retrieved terminal size", { 
-        operation: "get_size" 
+
+      fnLogger.debug("Retrieved terminal size", {
+        operation: "get_size"
       }, terminalSize);
-      
+
       return Either.right(terminalSize);
     } catch (error) {
       // Return fallback size for non-TTY environments
@@ -90,7 +92,7 @@ export class FunctionalTerminalIOImpl implements FunctionalTerminalIO {
         width: 80,
         height: 24,
       };
-      
+
       fnLogger.warn("Using fallback terminal size", {
         operation: "get_size",
         metadata: { reason: "console_size_failed" }
@@ -155,9 +157,15 @@ export class FunctionalTerminalIOImpl implements FunctionalTerminalIO {
       async () => {
         const encoded = new TextEncoder().encode(text);
         try {
-          Deno.stdout.writeSync(encoded);
+          stdout.write(encoded);
         } catch {
-          await Deno.stdout.write(encoded);
+          // Async write as fallback
+          await new Promise<void>((resolve, reject) => {
+            stdout.write(encoded, (err) => {
+              if (err) reject(err);
+              else resolve();
+            });
+          });
         }
         fnLogger.completeOperation("write_text", correlationId);
       },
@@ -219,9 +227,19 @@ export class FunctionalTerminalIOImpl implements FunctionalTerminalIO {
           correlationId 
         });
 
-        const buffer = new Uint8Array(8);
-        const bytesRead = await Deno.stdin.read(buffer);
-        
+                const buffer = new Uint8Array(8);
+
+        // Read single keypress from stdin
+        const bytesRead = await new Promise<number>((resolve, reject) => {
+          stdin.readOnce(buffer, (err, bytesRead) => {
+            if (err) {
+              reject(err);
+            } else {
+              resolve(bytesRead);
+            }
+          });
+        });
+
         if (bytesRead === null) {
           throw ErrorFactory.io(
             "Failed to read from stdin",
@@ -240,7 +258,7 @@ export class FunctionalTerminalIOImpl implements FunctionalTerminalIO {
 
         const key = new TextDecoder().decode(buffer.subarray(0, bytesRead));
         fnLogger.completeOperation("read_key", correlationId, { key: key.replace(/\x1b/g, '\\x1b'), bytesRead });
-        
+
         return key;
       },
       (error) => {
@@ -313,12 +331,19 @@ export class FunctionalTerminalIOImpl implements FunctionalTerminalIO {
           return;
         }
         
-        fnLogger.debug("Setting raw mode", { 
+        fnLogger.debug("Setting raw mode", {
           operation: "enter_raw_mode",
-          correlationId 
+          correlationId
         });
-        
-        Deno.stdin.setRaw(true);
+
+        // Set raw mode using Bun's setRaw (cross-platform)
+        if (typeof Bun !== 'undefined' && (Bun as any).setRaw) {
+          (Bun as any).setRaw(true);
+        } else {
+          // Fallback for Node.js
+          readline.emitKeypressEvents(stdin, true);
+          stdin.setRawMode(true);
+        }
         this.rawMode = true;
         
         // Initialize alternate screen and hide cursor
@@ -390,7 +415,15 @@ export class FunctionalTerminalIOImpl implements FunctionalTerminalIO {
         
         await this.showCursor().run();
         await this.exitAlternateScreen().run();
-        Deno.stdin.setRaw(false);
+
+        // Exit raw mode
+        if (typeof Bun !== 'undefined' && (Bun as any).setRaw) {
+          (Bun as any).setRaw(false);
+        } else {
+          // Fallback for Node.js
+          stdin.setRawMode(false);
+          readline.emitKeypressEvents(stdin, false);
+        }
         this.rawMode = false;
         
         fnLogger.completeOperation("exit_raw_mode", correlationId);
@@ -466,7 +499,7 @@ export class FunctionalTerminalIOImpl implements FunctionalTerminalIO {
    * Internal helper to check if stdin is a TTY
    */
   private isStdinTTYInternal(): boolean {
-    return Deno.stdin.isTerminal();
+    return stdin.isTTY;
   }
 
   /**
@@ -477,9 +510,15 @@ export class FunctionalTerminalIOImpl implements FunctionalTerminalIO {
       async () => {
         const encoded = new TextEncoder().encode(sequence);
         try {
-          Deno.stdout.writeSync(encoded);
+          stdout.write(encoded);
         } catch {
-          await Deno.stdout.write(encoded);
+          // Async write as fallback
+          await new Promise<void>((resolve, reject) => {
+            stdout.write(encoded, (err) => {
+              if (err) reject(err);
+              else resolve();
+            });
+          });
         }
       },
       (error) => ErrorFactory.io(

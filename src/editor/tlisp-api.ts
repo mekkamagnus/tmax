@@ -5,8 +5,9 @@
 
 import type { TLispValue, TLispFunctionImpl } from "../tlisp/types.ts";
 import { createNil, createNumber, createString, createBoolean, createList, createSymbol } from "../tlisp/values.ts";
-import { TextBufferImpl } from "../core/buffer.ts";
-import type { TerminalIO, FileSystem, TextBuffer } from "../core/types.ts";
+import { FunctionalTextBufferImpl } from "../core/buffer.ts";
+import type { TerminalIO, FileSystem, FunctionalTextBuffer } from "../core/types.ts";
+import { Either } from "../utils/task-either.ts";
 
 /**
  * Editor operations that can be called from T-Lisp
@@ -18,10 +19,11 @@ export interface EditorOperations {
 
 /**
  * Editor state that can be accessed from T-Lisp
+ * Note: This is a bridge interface for T-Lisp API, different from core EditorState
  */
-export interface EditorState {
-  currentBuffer: TextBuffer | null;
-  buffers: Map<string, TextBuffer>;
+export interface TlispEditorState {
+  currentBuffer: FunctionalTextBuffer | null;
+  buffers: Map<string, FunctionalTextBuffer>;
   cursorLine: number;
   cursorColumn: number;
   terminal: TerminalIO;
@@ -38,10 +40,10 @@ export interface EditorState {
 
 /**
  * Create T-Lisp editor API functions
- * @param state - Editor state
+ * @param state - T-Lisp editor state bridge
  * @returns Map of function names to implementations
  */
-export function createEditorAPI(state: EditorState): Map<string, TLispFunctionImpl> {
+export function createEditorAPI(state: TlispEditorState): Map<string, TLispFunctionImpl> {
   const api = new Map<string, TLispFunctionImpl>();
 
   // Buffer management functions
@@ -49,16 +51,16 @@ export function createEditorAPI(state: EditorState): Map<string, TLispFunctionIm
     if (args.length !== 1) {
       throw new Error("buffer-create requires exactly 1 argument: name");
     }
-    
+
     const nameArg = args[0];
     if (!nameArg || nameArg.type !== "string") {
       throw new Error("buffer-create requires a string name");
     }
-    
+
     const name = nameArg.value as string;
-    const buffer = new TextBufferImpl("");
+    const buffer = FunctionalTextBufferImpl.create("");
     state.buffers.set(name, buffer);
-    
+
     return createString(name);
   });
 
@@ -123,34 +125,45 @@ export function createEditorAPI(state: EditorState): Map<string, TLispFunctionIm
     if (args.length !== 2) {
       throw new Error("cursor-move requires exactly 2 arguments: line, column");
     }
-    
+
     const lineArg = args[0];
     const columnArg = args[1];
-    
+
     if (!lineArg || lineArg.type !== "number") {
       throw new Error("cursor-move requires a number for line");
     }
-    
+
     if (!columnArg || columnArg.type !== "number") {
       throw new Error("cursor-move requires a number for column");
     }
-    
+
     const line = lineArg.value as number;
     const column = columnArg.value as number;
-    
+
     // Validate bounds
     if (!state.currentBuffer) {
       throw new Error("No current buffer");
     }
-    
-    const maxLine = state.currentBuffer.getLineCount();
+
+    const lineCountResult = state.currentBuffer.getLineCount();
+    if (Either.isLeft(lineCountResult)) {
+      throw new Error(`Failed to get line count: ${lineCountResult.left}`);
+    }
+
+    const maxLine = lineCountResult.right;
     const targetLine = Math.max(0, Math.min(line, maxLine - 1));
-    const lineLength = state.currentBuffer.getLine(targetLine).length;
+
+    const lineResult = state.currentBuffer.getLine(targetLine);
+    if (Either.isLeft(lineResult)) {
+      throw new Error(`Failed to get line: ${lineResult.left}`);
+    }
+
+    const lineLength = lineResult.right.length;
     const targetColumn = Math.max(0, Math.min(column, lineLength));
-    
+
     state.cursorLine = targetLine;
     state.cursorColumn = targetColumn;
-    
+
     return createList([createNumber(state.cursorLine), createNumber(state.cursorColumn)]);
   });
 
@@ -175,23 +188,31 @@ export function createEditorAPI(state: EditorState): Map<string, TLispFunctionIm
     if (args.length !== 0) {
       throw new Error("buffer-text requires no arguments");
     }
-    
+
     if (!state.currentBuffer) {
       throw new Error("No current buffer");
     }
-    
-    return createString(state.currentBuffer.getContent());
+
+    const contentResult = state.currentBuffer.getContent();
+
+    // Handle Either<BufferError, string>
+    if (Either.isLeft(contentResult)) {
+      // Return error message as string
+      return createString(`Error: ${contentResult.left}`);
+    }
+
+    return createString(contentResult.right);
   });
 
   api.set("buffer-line", (args: TLispValue[]): TLispValue => {
     if (args.length > 1) {
       throw new Error("buffer-line requires 0 or 1 argument: optional line number");
     }
-    
+
     if (!state.currentBuffer) {
       throw new Error("No current buffer");
     }
-    
+
     let lineNumber = state.cursorLine;
     if (args.length === 1) {
       const lineArg = args[0];
@@ -200,28 +221,47 @@ export function createEditorAPI(state: EditorState): Map<string, TLispFunctionIm
       }
       lineNumber = lineArg.value as number;
     }
-    
-    if (lineNumber < 0 || lineNumber >= state.currentBuffer.getLineCount()) {
+
+    const lineCountResult = state.currentBuffer.getLineCount();
+    if (Either.isLeft(lineCountResult)) {
+      throw new Error(`Failed to get line count: ${lineCountResult.left}`);
+    }
+
+    if (lineNumber < 0 || lineNumber >= lineCountResult.right) {
       throw new Error(`Line number ${lineNumber} out of bounds`);
     }
-    
-    return createString(state.currentBuffer.getLine(lineNumber));
+
+    const lineResult = state.currentBuffer.getLine(lineNumber);
+    if (Either.isLeft(lineResult)) {
+      throw new Error(`Failed to get line: ${lineResult.left}`);
+    }
+
+    return createString(lineResult.right);
   });
 
   api.set("buffer-lines", (args: TLispValue[]): TLispValue => {
     if (args.length !== 0) {
       throw new Error("buffer-lines requires no arguments");
     }
-    
+
     if (!state.currentBuffer) {
       throw new Error("No current buffer");
     }
-    
-    const lines: TLispValue[] = [];
-    for (let i = 0; i < state.currentBuffer.getLineCount(); i++) {
-      lines.push(createString(state.currentBuffer.getLine(i)));
+
+    const lineCountResult = state.currentBuffer.getLineCount();
+    if (Either.isLeft(lineCountResult)) {
+      throw new Error(`Failed to get line count: ${lineCountResult.left}`);
     }
-    
+
+    const lines: TLispValue[] = [];
+    for (let i = 0; i < lineCountResult.right; i++) {
+      const lineResult = state.currentBuffer.getLine(i);
+      if (Either.isLeft(lineResult)) {
+        return createString(`Error reading line ${i}: ${lineResult.left}`);
+      }
+      lines.push(createString(lineResult.right));
+    }
+
     return createList(lines);
   });
 
@@ -229,12 +269,17 @@ export function createEditorAPI(state: EditorState): Map<string, TLispFunctionIm
     if (args.length !== 0) {
       throw new Error("buffer-line-count requires no arguments");
     }
-    
+
     if (!state.currentBuffer) {
       throw new Error("No current buffer");
     }
-    
-    return createNumber(state.currentBuffer.getLineCount());
+
+    const lineCountResult = state.currentBuffer.getLineCount();
+    if (Either.isLeft(lineCountResult)) {
+      throw new Error(`Failed to get line count: ${lineCountResult.left}`);
+    }
+
+    return createNumber(lineCountResult.right);
   });
 
   // Text editing functions
@@ -242,28 +287,34 @@ export function createEditorAPI(state: EditorState): Map<string, TLispFunctionIm
     if (args.length !== 1) {
       throw new Error("buffer-insert requires exactly 1 argument: text");
     }
-    
+
     if (!state.currentBuffer) {
       throw new Error("No current buffer");
     }
-    
+
     const textArg = args[0];
     if (!textArg || textArg.type !== "string") {
       throw new Error("buffer-insert requires a string");
     }
-    
+
     const text = textArg.value as string;
     const position = { line: state.cursorLine, column: state.cursorColumn };
-    
-    state.currentBuffer.insert(position, text);
-    
+
+    const insertResult = state.currentBuffer.insert(position, text);
+    if (Either.isLeft(insertResult)) {
+      throw new Error(`Failed to insert text: ${insertResult.left}`);
+    }
+
+    // Update buffer with new immutable buffer
+    state.currentBuffer = insertResult.right;
+
     // Update cursor position based on inserted text
     if (text.includes('\n')) {
       // Handle newlines: count how many lines were added and position cursor at end
       const lines = text.split('\n');
       const newLinesAdded = lines.length - 1;
       state.cursorLine += newLinesAdded;
-      
+
       // If text ends with newline, cursor goes to beginning of new line
       // Otherwise, cursor goes to end of the last line
       if (text.endsWith('\n')) {
@@ -275,7 +326,7 @@ export function createEditorAPI(state: EditorState): Map<string, TLispFunctionIm
       // No newlines, just advance column
       state.cursorColumn += text.length;
     }
-    
+
     return createString(text);
   });
 
@@ -283,48 +334,43 @@ export function createEditorAPI(state: EditorState): Map<string, TLispFunctionIm
     if (args.length !== 1) {
       throw new Error("buffer-delete requires exactly 1 argument: count");
     }
-    
+
     if (!state.currentBuffer) {
       throw new Error("No current buffer");
     }
-    
+
     const countArg = args[0];
     if (!countArg || countArg.type !== "number") {
       throw new Error("buffer-delete requires a number");
     }
-    
+
     const count = countArg.value as number;
-    
-    // Handle backspace (delete characters before cursor)
+
+    // Delete characters starting from cursor position (forward delete)
     if (count > 0) {
-      // Move cursor back by count characters
-      let newColumn = state.cursorColumn - count;
-      let newLine = state.cursorLine;
-      
-      // Handle line boundaries
-      if (newColumn < 0) {
-        if (newLine > 0) {
-          newLine--;
-          const prevLineLength = state.currentBuffer.getLine(newLine).length;
-          newColumn = prevLineLength + newColumn + 1; // +1 for the newline
-        } else {
-          newColumn = 0;
-        }
-      }
-      
-      // Create range for deletion
-      const startPos = { line: newLine, column: newColumn };
-      const endPos = { line: state.cursorLine, column: state.cursorColumn };
+      const startPos = { line: state.cursorLine, column: state.cursorColumn };
+
+      // Calculate end position (could span multiple lines)
+      let endLine = state.cursorLine;
+      let endColumn = state.cursorColumn + count;
+
+      // For simplicity, just delete from current position forward on same line
+      // Multi-line deletion would require more complex logic
+      const endPos = { line: endLine, column: endColumn };
       const range = { start: startPos, end: endPos };
-      
+
       // Delete the range
-      state.currentBuffer.delete(range);
-      
-      // Update cursor position
-      state.cursorLine = newLine;
-      state.cursorColumn = newColumn;
+      const deleteResult = state.currentBuffer.delete(range);
+      if (Either.isLeft(deleteResult)) {
+        throw new Error(`Failed to delete: ${deleteResult.left}`);
+      }
+
+      // Update buffer with new immutable buffer
+      state.currentBuffer = deleteResult.right;
+
+      // Cursor stays at same position (content after it shifts forward)
     }
-    
+
     return createString("deleted");
   });
 
@@ -442,25 +488,37 @@ export function createEditorAPI(state: EditorState): Map<string, TLispFunctionIm
     if (args.length !== 0) {
       throw new Error("editor-execute-command-line requires no arguments");
     }
-    
+
     const command = state.commandLine.trim();
-    
+
     // Handle basic commands
     if (command === "q" || command === "quit") {
       throw new Error("EDITOR_QUIT_SIGNAL");
     } else if (command === "w" || command === "write") {
       // Save current buffer
       if (state.operations?.saveFile) {
-        state.operations.saveFile().catch((error) => {
+        state.statusMessage = "Saving...";
+        // Fire and forget - the editor will update status after save
+        state.operations.saveFile().then(() => {
+          // Find buffer name for status message
+          let filename = "";
+          for (const [name, buffer] of state.buffers) {
+            if (buffer === state.currentBuffer) {
+              filename = name;
+              break;
+            }
+          }
+          state.statusMessage = `Saved ${filename}`;
+        }).catch((error) => {
           state.statusMessage = `Save failed: ${error instanceof Error ? error.message : String(error)}`;
         });
-        state.statusMessage = "Saving...";
       } else {
         state.statusMessage = "Save functionality not available";
       }
     } else if (command === "wq") {
       // Save and quit
       if (state.operations?.saveFile) {
+        state.statusMessage = "Saving and quitting...";
         state.operations.saveFile().then(() => {
           throw new Error("EDITOR_QUIT_SIGNAL");
         }).catch((error) => {
@@ -469,7 +527,6 @@ export function createEditorAPI(state: EditorState): Map<string, TLispFunctionIm
           }
           state.statusMessage = `Save failed: ${error instanceof Error ? error.message : String(error)}`;
         });
-        state.statusMessage = "Saving and quitting...";
       } else {
         state.statusMessage = "Save and quit functionality not available";
       }
@@ -489,11 +546,11 @@ export function createEditorAPI(state: EditorState): Map<string, TLispFunctionIm
         state.statusMessage = `Command error: ${error instanceof Error ? error.message : String(error)}`;
       }
     }
-    
+
     // Clear command line and return to normal mode
     state.commandLine = "";
     state.mode = "normal";
-    
+
     return createString(command);
   });
 

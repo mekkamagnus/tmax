@@ -1,0 +1,26 @@
+{
+  "name": "tmax",
+  "version": "0.1.0",
+  "description": "Extensible terminal-based text editor with T-Lisp",
+  "type": "module",
+  "scripts": {
+    "start": "bun run src/main.tsx",
+    "dev": "bun --watch run src/main.tsx",
+    "repl": "bun run scripts/repl.ts",
+    "test": "bun test",
+    "test:ui": "bash test/ui/start-ui-test.sh",
+    "check": "bun build src/main.tsx --outdir /tmp/tmax-build"
+  },
+  "dependencies": {
+    "ink": "^4.4.1",
+    "react": "^18.3.1"
+  },
+  "devDependencies": {
+    "@types/bun": "latest",
+    "@types/react": "^18.3.1"
+  },
+  "browser": {
+    "fs": false,
+    "path": false
+  }
+}

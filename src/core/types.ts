@@ -173,6 +173,11 @@ export interface EditorState {
   statusMessage: string;
   viewportTop: number;
   config: EditorConfig;
+  commandLine: string;
+  mxCommand: string;
+  lastCommand?: string;
+  currentFilename?: string;  // Filename associated with current buffer
+  buffers?: Map<string, FunctionalTextBuffer>;
 }
 
 /**

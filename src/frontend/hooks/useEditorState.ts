@@ -1,30 +1,31 @@
 /**
  * @file useEditorState.ts
  * @description React hook for managing editor state with T-Lisp integration
- * Handles state synchronization between React and T-Lisp interpreter
+ * T-Lisp drives ALL state changes - React only renders the current state
  */
 
-import { useState, useEffect, useCallback } from "https://deno.land/x/ink@1.3/vendor/react/index.ts";
-import { EditorState, Position } from "../../core/types.ts";
+import { useState, useEffect, useCallback } from "react";
+import { EditorState } from "../../core/types.ts";
 import { FunctionalTextBufferImpl } from "../../core/buffer.ts";
+import type { Editor } from "../../editor/editor.ts";
 
 interface UseEditorStateReturn {
   state: EditorState;
   setState: (stateUpdate: ((prevState: EditorState) => EditorState) | EditorState) => void;
-  dispatch: (action: EditorAction) => void;
+  executeTlisp: (key: string) => Promise<void>;
 }
 
-// Define editor actions for state management
-type EditorAction =
-  | { type: 'SET_MODE'; mode: EditorState['mode'] }
-  | { type: 'SET_CURSOR_POSITION'; position: EditorState['cursorPosition'] }
-  | { type: 'SET_BUFFER'; buffer: EditorState['currentBuffer'] }
-  | { type: 'SET_STATUS_MESSAGE'; message: string }
-  | { type: 'SET_VIEWPORT_TOP'; top: number }
-  | { type: 'UPDATE_STATE'; newState: Partial<EditorState> }
-  | { type: 'HANDLE_RESIZE'; width: number; height: number };
-
-export const useEditorState = (initialState: EditorState): UseEditorStateReturn => {
+/**
+ * React hook that bridges the UI with the T-Lisp-powered Editor class
+ * The Editor class contains ALL business logic - this hook just:
+ * 1. Holds the current state for React to render
+ * 2. Executes T-Lisp functions via Editor.handleKey()
+ * 3. Updates React state when T-Lisp changes state
+ */
+export const useEditorState = (
+  initialState: EditorState,
+  editor: Editor
+): UseEditorStateReturn => {
   const [state, setState] = useState<EditorState>(() => {
     // Ensure we have a valid initial state
     return {
@@ -41,59 +42,41 @@ export const useEditorState = (initialState: EditorState): UseEditorStateReturn 
         maxUndoLevels: 100,
         showLineNumbers: true,
         wordWrap: false
-      }
+      },
+      commandLine: initialState.commandLine || "",
+      mxCommand: initialState.mxCommand || "",
+      currentFilename: initialState.currentFilename,
+      buffers: initialState.buffers,
     };
   });
 
-  // Dispatch function to handle actions
-  const dispatch = useCallback((action: EditorAction) => {
-    setState((prevState: EditorState) => {
-      switch (action.type) {
-        case 'SET_MODE':
-          return { ...prevState, mode: action.mode };
+  /**
+   * Execute a T-Lisp function by sending a key to the Editor class
+   * This is the ONLY way state should change - T-Lisp drives everything
+   */
+  const executeTlisp = useCallback(async (key: string): Promise<void> => {
+    try {
+      // Send key to Editor class, which processes it through T-Lisp
+      await editor.handleKey(key);
 
-        case 'SET_CURSOR_POSITION':
-          return { ...prevState, cursorPosition: action.position };
-
-        case 'SET_BUFFER':
-          return { ...prevState, currentBuffer: action.buffer };
-
-        case 'SET_STATUS_MESSAGE':
-          return { ...prevState, statusMessage: action.message };
-
-        case 'SET_VIEWPORT_TOP':
-          return { ...prevState, viewportTop: action.top };
-
-        case 'UPDATE_STATE':
-          return { ...prevState, ...action.newState };
-
-        case 'HANDLE_RESIZE':
-          // Handle terminal resize - adjust viewport if needed
-          let newViewportTop = prevState.viewportTop;
-
-          // If cursor is now beyond the visible area due to resize, adjust viewport
-          const visibleLines = Math.max(1, action.height - 2); // Leave space for status line
-          if (prevState.cursorPosition.line >= newViewportTop + visibleLines) {
-            newViewportTop = Math.max(0, prevState.cursorPosition.line - visibleLines + 1);
-          }
-
-          // If cursor is above viewport, adjust viewport
-          if (prevState.cursorPosition.line < newViewportTop) {
-            newViewportTop = Math.max(0, prevState.cursorPosition.line);
-          }
-
-          return {
-            ...prevState,
-            viewportTop: newViewportTop,
-            statusMessage: `Terminal resized to ${action.width}x${action.height}`
-          };
-
-        default:
-          console.warn(`Unknown action type: ${(action as any).type}`);
-          return prevState;
+      // After T-Lisp processes the key, sync the updated state back to React
+      // IMPORTANT: Always read fresh state from editor, don't use closure state
+      const newState = editor.getEditorState();
+      setState(newState);
+    } catch (error) {
+      // Handle quit signal
+      if (error instanceof Error && error.message === "EDITOR_QUIT_SIGNAL") {
+        // Re-throw to let the component handle exit
+        throw error;
       }
-    });
-  }, []);
+      // For other errors, update status message but don't crash
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      setState((prev: EditorState) => ({
+        ...prev,
+        statusMessage: `Error: ${errorMessage}`
+      }));
+    }
+  }, [editor]);
 
-  return { state, setState, dispatch };
+  return { state, setState, executeTlisp };
 };

@@ -12,7 +12,6 @@ import { createString } from "../tlisp/values.ts";
 import type { TerminalIO, FileSystem } from "../core/types.ts";
 import { Either } from "../utils/task-either.ts";
 import { FunctionalTextBufferImpl } from "../core/buffer.ts";
-import { TerminalRenderer } from "./renderer.ts";
 
 /**
  * Key mapping for editor commands
@@ -35,7 +34,6 @@ export class Editor {
   private coreBindingsLoaded: boolean = false;
   private terminal: TerminalIO;
   private filesystem: FileSystem;
-  private renderer: TerminalRenderer;
 
   /**
    * Create a new editor instance
@@ -45,7 +43,6 @@ export class Editor {
   constructor(terminal: TerminalIO, filesystem: FileSystem) {
     this.terminal = terminal;
     this.filesystem = filesystem;
-    this.renderer = new TerminalRenderer(terminal);
     this.state = {
       cursorPosition: { line: 0, column: 0 },
       mode: "normal",
@@ -364,7 +361,7 @@ export class Editor {
       this.executeCommand("(buffer-delete 1)");
     }
     // Handle command line input in command mode
-    if (this.state.mode === "command") {
+    else if (this.state.mode === "command") {
       if (key.length === 1 && key >= " " && key <= "~") {
         // Add character to command line
         this.state.commandLine += key;
@@ -437,9 +434,6 @@ export class Editor {
         }
       }
     }
-
-    // Render after handling key
-    await this.render();
   }
 
   /**
@@ -553,7 +547,8 @@ export class Editor {
     await this.loadInitFile();
 
     // Create default buffer if none exists
-    if (this.buffers.size === 0) {
+    // But check if currentBuffer was already set (e.g., from main.tsx with a file)
+    if (this.buffers.size === 0 && !this.state.currentBuffer) {
       this.createBuffer("*scratch*", "");
     }
   }
@@ -584,18 +579,6 @@ export class Editor {
    */
   getKeyMappings(): Map<string, KeyMapping[]> {
     return this.keyMappings;
-  }
-
-  /**
-   * Render the editor to the terminal
-   */
-  async render(): Promise<void> {
-    const buffer = this.state.currentBuffer;
-    if (!buffer) {
-      await this.terminal.write("No buffer loaded");
-      return;
-    }
-    await this.renderer.render(this.state, buffer);
   }
 
   /**

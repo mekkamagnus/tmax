@@ -15,6 +15,7 @@ import type {
   TLispFunctionImpl,
   TLispMacro,
   TLispMacroImpl,
+  TLispHashmap,
 } from "./types.ts";
 
 /**
@@ -107,6 +108,27 @@ export const createMacro = (
 });
 
 /**
+ * Create a T-Lisp hash-map value
+ * @param entries - Array of [key, value] tuples
+ * @returns T-Lisp hash-map
+ */
+export const createHashmap = (
+  entries?: [string, TLispValue][]
+): TLispHashmap => ({
+  type: "hashmap",
+  value: new Map(entries),
+});
+
+/**
+ * Check if value is a hash-map
+ * @param value - Value to check
+ * @returns True if hash-map
+ */
+export const isHashmap = (value: TLispValue): value is TLispHashmap => {
+  return value.type === "hashmap";
+};
+
+/**
  * Check if value is nil
  * @param value - Value to check
  * @returns True if nil
@@ -146,6 +168,13 @@ export const valueToString = (value: TLispValue): string => {
       return "nil";
     case "boolean":
       return (value.value as boolean) ? "t" : "nil";
+    case "hashmap": {
+      const map = value.value as Map<string, TLispValue>;
+      const entries = Array.from(map.entries())
+        .map(([k, v]) => `"${k}" ${valueToString(v)}`)
+        .join(" ");
+      return `{${entries}}`;
+    }
     case "number":
       return (value.value as number).toString();
     case "string":
@@ -185,6 +214,15 @@ export const valuesEqual = (a: TLispValue, b: TLispValue): boolean => {
       const bList = b.value as TLispValue[];
       if (aList.length !== bList.length) return false;
       return aList.every((val: TLispValue, i: number) => valuesEqual(val, bList[i]!));
+    case "hashmap":
+      const aMap = a.value as Map<string, TLispValue>;
+      const bMap = b.value as Map<string, TLispValue>;
+      if (aMap.size !== bMap.size) return false;
+      for (const [key, val] of aMap.entries()) {
+        const bVal = bMap.get(key);
+        if (bVal === undefined || !valuesEqual(val, bVal)) return false;
+      }
+      return true;
     case "function":
       return a.value === b.value;
     default:

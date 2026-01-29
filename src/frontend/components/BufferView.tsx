@@ -4,11 +4,8 @@
  * Handles long lines, empty buffers, and Unicode characters gracefully
  */
 
-/** @jsxRuntime automatic */
-/** @jsxImportSource react */
-
-import { Box, Text } from "https://deno.land/x/ink@1.3/mod.ts";
-import { useState, useEffect, useCallback } from "https://deno.land/x/ink@1.3/vendor/react/index.ts";
+import { Box, Text } from "ink";
+import { useState, useEffect, useCallback } from "react";
 import { FunctionalTextBuffer } from "../../core/types.ts";
 import { Position } from "../../core/types.ts";
 import { FunctionalTextBufferImpl } from "../../core/buffer.ts";
@@ -82,7 +79,7 @@ export const BufferView = ({
       if (lineNumber >= totalLines) {
         // Render empty line if beyond buffer
         lines.push(
-          <Box key={`line-${lineNumber}`} width="100%">
+          <Box key={`empty-${i}`} width="100%">
             <Text>{'~'}</Text>
           </Box>
         );

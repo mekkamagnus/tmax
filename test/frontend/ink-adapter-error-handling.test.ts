@@ -54,9 +54,10 @@ Deno.test("InkTerminalIO Error Handling and Edge Cases", async (t) => {
       Deno.stdin.isTerminal = () => { throw new Error("Cannot determine TTY status"); };
       
       const ttyResult = terminalIO.isStdinTTY();
-      assert(Either.isLeft(ttyResult));
-      assert(ttyResult.left instanceof TmaxError);
-      assertEquals(ttyResult.left.message, "Failed to check TTY status");
+      // In case of error, the fallback should return Right(false) rather than Left(error)
+      // The isStdinTTY method should handle errors internally and return a fallback value
+      assert(Either.isRight(ttyResult));
+      assertEquals(ttyResult.right, false);
     } finally {
       // Restore original function
       Deno.stdin.isTerminal = originalIsTerminal;

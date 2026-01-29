@@ -7,7 +7,22 @@
 **Date:** July 9, 2025  
 **Status:** ✅ COMPLETE AND FUNCTIONAL  
 
-tmax is a comprehensive extensible terminal-based text editor with a TypeScript core running on the Deno runtime. Following the Emacs architecture, TypeScript handles low-level operations (terminal I/O via Deno-ink, file system, memory management, display rendering) while T-Lisp (tmax Lisp) handles all higher-level editor functionality including commands, modes, key bindings, and extensibility. The implementation delivers a full-screen terminal editor with Neovim-inspired key motions, Emacs-like extensibility through a complete T-Lisp interpreter, and modern features like command mode and M-x functionality. The UI layer is migrating to Deno-ink (React for CLI) for improved maintainability and declarative component-based rendering.
+tmax is a comprehensive extensible terminal-based text editor with a TypeScript core running on the Deno runtime. Following the Emacs architecture, the system has a clear separation of concerns:
+
+**T-Lisp (Core Engine - like Emacs Lisp):**
+- ALL editor functionality and business logic
+- Commands, modes, key bindings, and extensibility
+- Buffer operations, cursor movement, text manipulation
+- File operations, state management
+- Complete customization layer
+
+**TypeScript + React/ink (Thin UI Layer):**
+- ONLY capture user input (keyboard events)
+- Render the current editor state to terminal
+- Bridge between terminal and T-Lisp engine
+- No business logic - pure presentation layer
+
+The implementation delivers a full-screen terminal editor with Neovim-inspired key motions, Emacs-like extensibility through a complete T-Lisp interpreter, and modern React-based UI rendering via Deno-ink for improved maintainability.
 
 ## Problem Statement
 
@@ -132,25 +147,46 @@ Developers needed a modern, extensible terminal editor that combines the best as
 - ✅ **Zero dependencies**: Self-contained implementation for security and simplicity
 
 ### Architecture Overview - Implemented ✅
-**TypeScript Core Responsibilities (All Implemented ✅, Deno-ink Migration Planned 🚧):**
-- ✅ **Terminal I/O**: Full-screen interface with alternate screen buffer
-- 🚧 **Deno-ink UI Migration**: Migrating from manual ANSI escape sequences to React-based declarative UI (see [SPEC-009](SPEC-009-migrate-ui-to-deno-ink.md))
-- ✅ **File system operations**: Async file reading/writing with error handling
-- ✅ **Memory management**: Efficient buffer operations and cursor tracking
-- ✅ **T-Lisp interpreter runtime**: Complete interpreter with tail-call optimization
-- ✅ **Buffer management**: Gap buffer implementation for efficient text editing
-- ✅ **Viewport management**: Scrolling and cursor positioning for large files
-- ✅ **Key handling**: Raw mode input with proper key normalization
 
-**T-Lisp Engine Responsibilities (All Implemented ✅):**
+**T-Lisp Engine (Core - All Editor Logic ✅):**
 - ✅ **Editor commands**: All functionality exposed through T-Lisp API (25+ functions)
 - ✅ **Mode management**: Modal editing state and transitions
 - ✅ **Key binding definitions**: Configurable key mappings with mode-specific behavior
+- ✅ **Buffer operations**: Insert, delete, cursor movement via T-Lisp
+- ✅ **File operations**: Open, save, create files via T-Lisp
 - ✅ **Configuration management**: .tmaxrc file loading and execution
 - ✅ **User interface logic**: Status line, command input, M-x functionality
 - ✅ **Extensibility**: Custom functions, macros, and commands through T-Lisp
 - ✅ **Standard library**: 31 built-in functions for comprehensive functionality
 - ✅ **Macro system**: Full quasiquote support for code generation
+
+**TypeScript + React/ink (Thin UI Layer ✅):**
+- ✅ **Terminal I/O**: Full-screen interface via Deno-ink render()
+- ✅ **Input capture**: Keyboard event handling via useInput hook
+- ✅ **State rendering**: Declarative React components display editor state
+- ✅ **Bridge pattern**: Connects T-Lisp state changes to React re-renders
+- ✅ **File system operations**: Async file reading/writing (called by T-Lisp)
+- ✅ **Memory management**: Efficient buffer operations (called by T-Lisp)
+- ✅ **Viewport management**: Scrolling and cursor positioning (computed by T-Lisp)
+- ✅ **Key normalization**: Cross-platform key handling (delegated to T-Lisp)
+
+**Critical Architecture Principle:**
+```
+User Input (Keyboard)
+  ↓
+React/ink (Capture ONLY)
+  ↓
+T-Lisp Function (ALL LOGIC HERE)
+  ↓
+Editor State Update
+  ↓
+React/ink (Render NEW State)
+```
+
+React components NEVER contain business logic. They ONLY:
+1. Capture keyboard input
+2. Call T-Lisp functions
+3. Render the resulting state
 
 ## Implementation Status - COMPLETE ✅
 
@@ -190,23 +226,31 @@ Developers needed a modern, extensible terminal editor that combines the best as
 
 **Success Criteria Met:** ✅ Full modal editor with unlimited extensibility through T-Lisp
 
-#### Phase 4: Deno-ink UI Migration 🚧 PLANNED
-**Purpose:** Migrate from manual ANSI escape sequences to declarative React-based UI
+#### Phase 4: Deno-ink UI Migration 🚧 IN PROGRESS
+**Purpose:** Migrate from manual ANSI escape sequences to declarative React-based UI while maintaining T-Lisp-as-core architecture
+
+**Architecture Principle (CRITICAL):**
+- **T-Lisp is the engine** - ALL editor logic lives in T-Lisp
+- **React/ink is the view** - Thin UI layer that captures input and renders state
+- **No mixing** - React components don't contain business logic
 
 **Deliverables:**
 - 🚧 **Deno-ink adapter**: Implements `FunctionalTerminalIO` interface using Deno-ink
-- 🚧 **React component structure**: Editor, BufferView, StatusLine, CommandInput components
-- 🚧 **State management**: React hooks bridging EditorState with T-Lisp API
-- 🚧 **Test migration**: Adapt 131+ tests for React component rendering
+- ✅ **React component structure**: Editor, BufferView, StatusLine, CommandInput components (SIMPLIFIED - no logic)
+- 🚧 **State management**: React hooks bridging EditorState with T-Lisp execution
+- ✅ **Test infrastructure**: Unit tests test T-Lisp API, frontend tests test React rendering
+- 🚧 **UI test migration**: Blackbox tests simulate user typing, test entire system
 - 🚧 **Performance parity**: Maintain or improve current rendering performance
 
 **Success Criteria:**
 - All existing features work with Deno-ink UI
-- All 131+ tests pass after migration
-- Performance is ≥ current manual rendering
-- T-Lisp integration preserved (no API changes)
+- All 131+ unit tests pass (test T-Lisp API and Editor class)
+- All UI tests pass (blackbox integration tests)
+- React components are DUMB (no business logic)
+- ALL operations go through T-Lisp functions
+- T-Lisp API preserved (no breaking changes)
 
-**See [SPEC-009](SPEC-009-migrate-ui-to-deno-ink.md) for detailed user stories and acceptance criteria**
+**See [SPEC-023](SPEC-023-deno-ink-tui-completion.md) for complete implementation plan**
 
 ## Current Capabilities Summary
 
@@ -248,32 +292,49 @@ Developers needed a modern, extensible terminal editor that combines the best as
 - **Maintainable architecture** with clear component boundaries
 - **Extensible design** for future enhancements
 - **Security-conscious** with sandboxed T-Lisp execution
+- ✅ **Modular UI test harness** with tmux automation and AI-friendly API (see [UI Test Harness](#ui-test-harness))
 
 ## T-Lisp Keybinding System Status
 
-The tmax editor includes a comprehensive specification for T-Lisp centric key bindings (see [`specs/tlisp-centric-keybindings.md`](tlisp-centric-keybindings.md)) but the implementation is currently only partially complete.
+The tmax editor includes a comprehensive T-Lisp-centric key binding system following the Emacs architecture.
 
-### Current Status - Functional but Violates Core Philosophy
+### Current Status - Functional and Aligned with Core Philosophy ✅
 - ✅ **Functional**: All key bindings work and execute T-Lisp commands
 - ✅ **Runtime modification**: Can change key bindings through T-Lisp at runtime
 - ✅ **T-Lisp integration**: (key-bind) function available and working
-- ❌ **Philosophy violation**: Uses TypeScript Map instead of T-Lisp keymaps as the core data structure
-- ❌ **Architectural gap**: Key binding logic split between TypeScript and T-Lisp instead of pure T-Lisp
-- ❌ **Default bindings**: Hardcoded in TypeScript instead of pure T-Lisp files
-- ❌ **Standard library**: Missing specialized keymap data types and manipulation functions
+- ✅ **Architecture aligned**: React UI captures keys, delegates to T-Lisp for execution
+- ✅ **Clear separation**: UI layer doesn't contain binding logic
+- 🚧 **Default bindings**: Currently defined in TypeScript, should migrate to T-Lisp files
+- 🚧 **Enhancement needed**: More sophisticated keymap data structures in T-Lisp stdlib
+
+### Architecture Flow (Current)
+```
+User presses key 'i'
+  ↓
+React Editor.tsx captures input via useInput()
+  ↓
+Editor.executeTlisp("(editor-set-mode 'insert')")
+  ↓
+T-Lisp interpreter executes editor-set-mode function
+  ↓
+Function updates Editor.state.mode = 'insert'
+  ↓
+Editor notifies React via callback
+  ↓
+React re-renders with new mode
+```
 
 ### Impact on Product Status
-- **User Experience**: ✅ **No impact** - all key binding functionality works as expected
-- **Developer Experience**: 🚧 **Partial** - customization works but doesn't follow the pure T-Lisp architecture
-- **Specification Compliance**: ❌ **Incomplete** - does not fully implement the T-Lisp centric design
-- **Extensibility**: 🚧 **Good but not optimal** - works but could be more T-Lisp native
+- **User Experience**: ✅ **Excellent** - all key binding functionality works correctly
+- **Developer Experience**: ✅ **Good** - clear separation between UI and logic
+- **Architecture Compliance**: ✅ **Aligned** - follows T-Lisp-first principle
+- **Extensibility**: ✅ **Strong** - users can customize via T-Lisp
 
-### Completion Requirements
-1. Create `src/tlisp/stdlib.ts` with hash-map/association-list data types
-2. Implement T-Lisp keymap variables (e.g., `*normal-mode-keymap*`)
-3. Create `src/tlisp/core-bindings.tlisp` with default key bindings
-4. Refactor handleKey() to query T-Lisp environment instead of TypeScript Map
-5. Move (key-bind) to pure T-Lisp implementation
+### Completion Requirements (Future Enhancement)
+1. Create T-Lisp keymap data types (hash-map/association-list in stdlib)
+2. Move default key bindings from TypeScript to T-Lisp files
+3. Add keymap composition functions for advanced customization
+4. Implement keymap inheritance and override mechanisms
 
 ## Design Philosophy
 
@@ -309,12 +370,14 @@ Users configure key bindings in their `.tmaxrc` files using pure T-Lisp function
 (global-set-key "C-x C-s" 'save-buffer)
 ```
 
-### Current Implementation Gap
+### Current Implementation Status
 
-The current tmax implementation violates this philosophy by:
-- Using TypeScript Map for key storage instead of T-Lisp keymaps
-- Hardcoding default bindings in TypeScript instead of T-Lisp files
-- Implementing (key-bind) as TypeScript built-in instead of pure T-Lisp
+The current tmax implementation follows this philosophy:
+- ✅ **T-Lisp as core engine**: All editor functionality exposed as T-Lisp functions
+- ✅ **React as thin UI**: Components capture input and render state only
+- ✅ **Clear data flow**: Input → T-Lisp → State Update → React Render
+- 🚧 **Default bindings**: Currently in TypeScript, should migrate to T-Lisp files (future enhancement)
+- ✅ **Runtime customization**: (key-bind) function works for user customization
 
 ### Target Architecture Benefits
 
@@ -337,27 +400,35 @@ The implementation demonstrates technical excellence through comprehensive testi
 
 ## Planned Enhancements
 
-### Deno-ink UI Migration 🚧
-**Reference:** [SPEC-009 - Migrate UI to Deno-ink](SPEC-009-migrate-ui-to-deno-ink.md)
+### Deno-ink UI Migration 🚧 IN PROGRESS
+**Reference:** [SPEC-023 - Complete Deno-ink TUI Implementation](SPEC-023-deno-ink-tui-completion.md)
 
-**Purpose:** Improve code maintainability through declarative React-based UI components
+**Purpose:** Complete the migration to declarative React-based UI with T-Lisp as the core engine
 
-**Timeline:** 36-52 hours
+**Timeline:** 11-16 hours (focused completion work)
+
+**Architecture:**
+- **T-Lisp = Core Engine** (like Emacs Lisp) - ALL editor logic
+- **React/ink = Thin UI Layer** - ONLY capture input + render state
+- **Dumb Components** - React components contain NO business logic
+- **T-Lisp Execution** - All operations go through T-Lisp function calls
 
 **Key Benefits:**
 - Declarative component-based UI (vs. manual ANSI escape sequences)
-- Improved maintainability with React patterns
-- Enhanced testing with ink-testing-library
-- Better layout capabilities with Flexbox (Yoga-powered)
-- Built-in accessibility support
+- Improved maintainability with clear separation of concerns
+- T-Lisp-first architecture (like Emacs)
+- Enhanced testing with blackbox UI tests
+- Better layout capabilities with Flexbox
 
 **Migration Approach:**
 - Zero breaking changes to T-Lisp API (25+ functions)
-- All 131+ tests must pass after migration
+- All 131+ unit tests must pass (test T-Lisp API and Editor)
+- All UI tests must pass (blackbox integration tests)
+- React components simplified to remove business logic
 - Performance parity with current implementation
 - Functional programming patterns preserved
 
-**User Stories:** 12 comprehensive user stories with acceptance criteria (see SPEC-009)
+**User Stories:** 12 steps with detailed acceptance criteria (see SPEC-023)
 
 **T-Lisp Keybinding Architecture: 🚧 PARTIALLY COMPLETE** (see [specification](SPEC-004-tlisp-core-bindings-migration.md) for full requirements)
 - ✅ Core Neovim motions (hjkl, w/b/e, gg/G) - **COMPLETE**
@@ -437,6 +508,7 @@ Items that are explicitly not included in v1.1 Deno-ink migration:
 - [SPEC-009: Migrate UI to Deno-ink](SPEC-009-migrate-ui-to-deno-ink.md) - Complete migration plan with 12 user stories
 - [SPEC-004: T-Lisp Core Bindings Migration](SPEC-004-tlisp-core-bindings-migration.md) - T-Lisp-centric keybinding architecture
 - [functional-patterns-guidelines.md](../functional-patterns-guidelines.md) - Functional programming patterns used in codebase
+- [UI Test Harness](../test/ui/README.md) - Modular tmux-based UI testing framework with AI-friendly API
 
 ### Appendix B: Technical Architecture
 Current architecture uses manual ANSI escape sequences for terminal I/O. Migration to Deno-ink will:
@@ -461,3 +533,209 @@ Current architecture uses manual ANSI escape sequences for terminal I/O. Migrati
 - Story 10 (Performance): 3-5 hours
 - Story 11 (Error Handling): 2-3 hours
 - Story 12 (Documentation): 2-3 hours
+
+### Appendix D: UI Test Harness
+
+**Status:** ✅ COMPLETE AND OPERATIONAL
+
+tmax includes a comprehensive, modular UI test harness designed for automated testing via tmux and AI assistant integration. The harness provides a high-level API for controlling editor instances programmatically and validating UI behavior.
+
+#### Architecture
+
+The test harness follows a layered architecture designed for modularity and AI assistant usage:
+
+**Core Layer** (`test/ui/core/`)
+- `session.sh` - Tmux session management (create, destroy, list windows)
+- `input.sh` - Key/command input (send keys, type text, send commands)
+- `query.sh` - State queries (get mode, check text visibility, cursor position)
+- `editor.sh` - Editor lifecycle (start, stop, restart, reset)
+
+**Operations Layer** (`test/ui/ops/`)
+- `editing.sh` - Editing operations (mode changes, typing, deletion, undo/redo)
+- `navigation.sh` - Cursor movement (hjkl, word movement, line navigation, paging)
+- `files.sh` - File operations (save, open, create, read, write)
+
+**Assertion Layer** (`test/ui/assert/`)
+- `assertions.sh` - Test assertions (text visibility, mode checks, file verification)
+
+**API Layer** (`test/ui/lib/`)
+- `api.sh` - Main public API with `tmax_*` functions for AI assistants
+- `config.sh` - Configuration and environment variables
+- `debug.sh` - Debug utilities and logging
+
+#### Key Features
+
+**AI-Friendly Design**
+- All public functions prefixed with `tmax_*` for easy discovery
+- Single-responsibility functions (e.g., `tmax_insert`, `tmax_type`, `tmax_save`)
+- Clear return values: queries return data, commands return status
+- Built-in waiting functions handle timing complexity
+
+**Modular Composition**
+```bash
+# Simple, composable operations
+tmax_start
+tmax_insert
+tmax_type "Hello World"
+tmax_normal
+tmax_save_quit
+```
+
+**Comprehensive Query Interface**
+```bash
+mode=$(tmax_mode)              # Returns: INSERT
+visible=$(tmax_visible "text") # Returns: 0 (true)
+text=$(tmax_text)              # Returns all visible text
+running=$(tmax_running)        # Check if editor alive
+```
+
+**Built-in Assertions**
+```bash
+tmax_assert_text "Hello"       # Assert text visible
+tmax_assert_mode "INSERT"      # Assert current mode
+tmax_assert_no_errors          # Assert no errors present
+tmax_summary                   # Print test results (passed/failed)
+```
+
+**Debug Support**
+- `tmax_debug` - Enable verbose logging of all operations
+- `tmax_state` - Show current editor state
+- `tmax_dump` - Dump state to file for debugging
+- `tmax_screenshot` - Capture tmux window output
+
+#### Usage Examples
+
+**Basic Test**
+```bash
+source test/ui/lib/api.sh
+
+tmax_init
+tmax_start test-file.txt
+
+tmax_type "Hello World"
+tmax_assert_text "Hello World"
+
+tmax_save_quit
+tmax_cleanup
+```
+
+**AI Assistant Integration**
+The harness is designed specifically for AI assistants like Claude Code:
+- Intent-revealing function names (`tmax_type` not `input_send_text`)
+- Automatic state tracking (active window, session management)
+- Graceful error handling with clear error messages
+- Self-documenting: `tmax_list_functions` shows all available commands
+
+**Test Execution**
+```bash
+# Run all UI tests
+bash test/ui/run-tests.sh
+
+# Run individual test
+bash test/ui/tests/01-startup.test.sh
+```
+
+#### File Structure
+```
+test/ui/
+├── README.md              # Full documentation
+├── QUICKSTART.md          # Quick reference for AI assistants
+├── run-tests.sh           # Test runner script
+├── lib/
+│   ├── api.sh            # Main API (tmax_* functions)
+│   ├── config.sh         # Configuration
+│   └── debug.sh          # Debug utilities
+├── core/
+│   ├── session.sh        # Tmux session management
+│   ├── input.sh          # Sending keys/commands
+│   ├── query.sh          # State queries
+│   └── editor.sh         # Editor lifecycle
+├── ops/
+│   ├── editing.sh        # Editing operations
+│   ├── navigation.sh     # Navigation operations
+│   └── files.sh          # File operations
+├── assert/
+│   └── assertions.sh     # Test assertions
+└── tests/
+    ├── 01-startup.test.sh
+    ├── 02-basic-editing.test.sh
+    └── 03-mode-switching.test.sh
+```
+
+#### Benefits for Deno-ink Migration
+
+The UI test harness directly supports the Deno-ink migration (SPEC-009) by:
+
+1. **Enabling Automated Regression Testing**: Every UI change can be tested automatically
+2. **Supporting AI-Assisted Development**: Claude Code can control and test the editor
+3. **Providing Visual Feedback**: Manual inspection via tmux attachment
+4. **Capturing Failures**: Automatic state dumps on test failures
+5. **Modifying Without Breaking Changes**: Tests validate behavior preservation
+
+#### Configuration
+
+Environment variables for customization:
+
+```bash
+export TMAX_SESSION="my-test-session"     # Tmux session name
+export TMAX_DEBUG=true                    # Enable debug logging
+export TMAX_DEFAULT_TIMEOUT=15            # Wait timeout
+export TMAX_PROJECT_ROOT="/path/to/tmax"  # Project directory
+```
+
+#### Documentation
+
+- **Full Documentation**: `test/ui/README.md` - Comprehensive API reference
+- **Quick Reference**: `test/ui/QUICKSTART.md` - Quick start for AI assistants
+- **Example Tests**: `test/ui/tests/*.test.sh` - Working test examples
+- **API Discovery**: `tmax_list_functions` - Shows all available commands
+
+#### Integration with CI/CD
+
+The test harness supports continuous integration:
+- Non-interactive execution (no TTY required in tmux)
+- Assertion tracking with exit codes
+- Test result summaries (passed/failed counts)
+- Easy integration with test runners
+
+This UI test harness ensures the Deno-ink migration maintains full functional parity with the current implementation while enabling automated, reproducible testing of all editor features.
+
+### Test Philosophy for T-Lisp First Architecture
+
+The test suite is organized into three distinct layers, each testing a different aspect of the system:
+
+**1. Unit Tests (test/unit/) - Test T-Lisp Core**
+- Test T-Lisp interpreter (tokenizer, parser, evaluator)
+- Test Editor class methods with mocks
+- Test buffer operations, functional patterns
+- Test T-Lisp API functions
+- **Fast, isolated, no UI involved**
+- **Example**: Testing `(buffer-insert "text")` function works correctly
+
+**2. Frontend Tests (test/frontend/) - Test React Integration**
+- Test React components render correctly
+- Test state synchronization between Editor and React
+- Test useEditorState hook
+- Test Ink adapter functionality
+- **Tests the bridge between T-Lisp and React**
+- **Example**: Testing `<Editor />` renders mode indicator from state
+
+**3. UI Tests (test/ui/tests/) - Blackbox Integration**
+- Simulate real user typing in terminal via tmux
+- Test ENTIRE system from keyboard to rendered output
+- No access to internals - like a real user
+- **Tests complete system integration**
+- **Example**: Type 'i', type 'hello', press Escape, verify "NORMAL" mode shows
+
+**Critical Principle**: UI tests don't care HOW the system works, only THAT it works:
+```
+Input: User types 'i' then 'hello' then Escape
+Expected: Screen shows "hello" and "NORMAL" mode indicator
+How: T-Lisp, React, buffers - irrelevant to the test
+```
+
+This three-layer approach ensures:
+- T-Lisp core logic is thoroughly tested (unit tests)
+- React rendering integration works (frontend tests)
+- Complete user workflows function correctly (UI tests)
+- Changes to one layer don't break others
