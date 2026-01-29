@@ -3,8 +3,7 @@
  * @description Comprehensive tests for advanced functional programming patterns
  */
 
-import { assertEquals, assertRejects, assert } from "https://deno.land/std@0.224.0/assert/mod.ts";
-import { describe, it } from "https://deno.land/std@0.224.0/testing/bdd.ts";
+import { describe, test, it, expect } from "bun:test";
 
 // Import all the functional patterns
 import { pipe, kleisli, pipeUtils } from "../../src/utils/pipeline.ts";
@@ -51,7 +50,7 @@ interface TestDependencies {
 }
 
 describe("Pipeline Pattern Tests", () => {
-  it("should compose operations with pipeline builder", async () => {
+  test("should compose operations with pipeline builder", async () => {
     const result = await pipe
       .start(5)
       .map(x => x * 2)
@@ -60,26 +59,26 @@ describe("Pipeline Pattern Tests", () => {
       .map(x => x.toString())
       .run();
 
-    assertEquals(result._tag, "Right");
+    expect(result._tag).toBe("Right");
     if (result._tag === "Right") {
-      assertEquals(result.right, "13");
+      expect(result.right).toBe("13");
     }
   });
 
-  it("should handle errors in pipeline", async () => {
+  test("should handle errors in pipeline", async () => {
     const result = await pipe
       .start("hello")
       .step(() => TaskEither.left<string, string>("ERROR"))
       .map(x => x.toUpperCase())
       .run();
 
-    assertEquals(result._tag, "Left");
+    expect(result._tag).toBe("Left");
     if (result._tag === "Left") {
-      assertEquals(result.left, "ERROR");
+      expect(result.left).toBe("ERROR");
     }
   });
 
-  it("should support parallel operations", async () => {
+  test("should support parallel operations", async () => {
     const pipeline1 = pipe.start(1).map(x => x * 2);
     const pipeline2 = pipe.start(3).map(x => x * 3);
 
@@ -87,40 +86,40 @@ describe("Pipeline Pattern Tests", () => {
       .parallel(pipeline2, (a, b) => a + b)
       .run();
 
-    assertEquals(result._tag, "Right");
+    expect(result._tag).toBe("Right");
     if (result._tag === "Right") {
-      assertEquals(result.right, 11); // (1*2) + (3*3) = 2 + 9 = 11
+      expect(result.right).toBe(11); // (1*2) + (3*3) = 2 + 9 = 11
     }
   });
 
-  it("should support conditional execution", async () => {
+  test("should support conditional execution", async () => {
     const result = await pipe
       .start(5)
       .when(x => x > 3, x => TaskEither.right<number, never>(x * 10))
       .run();
 
-    assertEquals(result._tag, "Right");
+    expect(result._tag).toBe("Right");
     if (result._tag === "Right") {
-      assertEquals(result.right, 50);
+      expect(result.right).toBe(50);
     }
   });
 
-  it("should compose Kleisli arrows", async () => {
+  test("should compose Kleisli arrows", async () => {
     const f = (x: number): TaskEither<string, string> => TaskEither.right(`num_${x}`);
     const g = (x: string): TaskEither<string, string> => TaskEither.right(`${x}_processed`);
 
     const composed = kleisli.compose(f, g);
     const result = await composed(42).run();
 
-    assertEquals(result._tag, "Right");
+    expect(result._tag).toBe("Right");
     if (result._tag === "Right") {
-      assertEquals(result.right, "num_42_processed");
+      expect(result.right).toBe("num_42_processed");
     }
   });
 });
 
 describe("Validation Pattern Tests", () => {
-  it("should accumulate validation errors", () => {
+  test("should accumulate validation errors", () => {
     const nameValidation = ValidationUtils.required(null, "Name is required");
     const emailValidation = ValidationUtils.required("", "Email is required")
       .flatMap(email => ValidationUtils.nonEmpty(email, "Email cannot be empty"));
@@ -129,15 +128,15 @@ describe("Validation Pattern Tests", () => {
     const result = lift3((name: string) => (email: string) => (age: number) => ({ name, email, age }))
       (nameValidation)(emailValidation)(ageValidation);
 
-    assert(result.isFailure());
+    expect(result.isFailure()).toBe(true);
     const errors = result.getErrors();
-    assertEquals(errors.length, 3);
-    assert(errors.includes("Name is required"));
-    assert(errors.includes("Email cannot be empty"));
-    assert(errors.includes("Age must be 0-120"));
+    expect(errors.length).toBe(3);
+    expect(errors.includes("Name is required")).toBe(true);
+    expect(errors.includes("Email cannot be empty")).toBe(true);
+    expect(errors.includes("Age must be 0-120")).toBe(true);
   });
 
-  it("should succeed with valid data", () => {
+  test("should succeed with valid data", () => {
     const nameValidation = ValidationUtils.required("John", "Name is required");
     const emailValidation = ValidationUtils.email("john@example.com");
     const ageValidation = ValidationUtils.numberInRange(25, 0, 120, "Age must be 0-120");
@@ -145,21 +144,21 @@ describe("Validation Pattern Tests", () => {
     const result = lift3((name: string) => (email: string) => (age: number) => ({ name, email, age }))
       (nameValidation)(emailValidation)(ageValidation);
 
-    assert(result.isSuccess());
-    assertEquals(result.getValue().name, "John");
-    assertEquals(result.getValue().email, "john@example.com");
-    assertEquals(result.getValue().age, 25);
+    expect(result.isSuccess()).toBe(true);
+    expect(result.getValue().name).toBe("John");
+    expect(result.getValue().email).toBe("john@example.com");
+    expect(result.getValue().age).toBe(25);
   });
 
-  it("should validate paths securely", () => {
+  test("should validate paths securely", () => {
     const maliciousPath = "../../../etc/passwd";
     const result = ValidationUtils.securePath(maliciousPath);
 
-    assert(result.isFailure());
-    assert(result.getErrors().includes("Path contains directory traversal"));
+    expect(result.isFailure()).toBe(true);
+    expect(result.getErrors().includes("Path contains directory traversal")).toBe(true);
   });
 
-  it("should support validation builder pattern", () => {
+  test("should support validation builder pattern", () => {
     const passwordValidator = validation.builder<string, string>()
       .rule(password => ValidationUtils.nonEmpty(password, "Password is required"))
       .rule(password => ValidationUtils.lengthBetween(password, 8, 128, "Password must be 8-128 characters"))
@@ -169,11 +168,11 @@ describe("Validation Pattern Tests", () => {
       .build();
 
     const weakPassword = passwordValidator("weak");
-    assert(weakPassword.isFailure());
-    assert(weakPassword.getErrors().length >= 3);
+    expect(weakPassword.isFailure()).toBe(true);
+    expect(weakPassword.getErrors().length >= 3).toBe(true);
 
     const strongPassword = passwordValidator("StrongPass123");
-    assert(strongPassword.isSuccess());
+    expect(strongPassword.isSuccess()).toBe(true);
   });
 });
 
@@ -193,12 +192,12 @@ describe("Lens/Optics Pattern Tests", () => {
     const nameLens = Lens.of<TestUser, 'name'>('name');
     const ageLens = Lens.of<TestUser, 'age'>('age');
 
-    assertEquals(nameLens.get(testUser), "John Doe");
-    assertEquals(ageLens.get(testUser), 30);
+    expect(nameLens.get(testUser)).toBe("John Doe");
+    expect(ageLens.get(testUser)).toBe(30);
 
     const updatedUser = nameLens.set("Jane Doe")(testUser);
-    assertEquals(updatedUser.name, "Jane Doe");
-    assertEquals(updatedUser.id, 1); // Other properties unchanged
+    expect(updatedUser.name).toBe("Jane Doe");
+    expect(updatedUser.id).toBe(1); // Other properties unchanged
   });
 
   it("should compose lenses for nested access", () => {
@@ -206,11 +205,11 @@ describe("Lens/Optics Pattern Tests", () => {
     const bioLens = Lens.of<TestUser['profile'], 'bio'>('bio');
     const profileBioLens = profileLens.compose(bioLens);
 
-    assertEquals(profileBioLens.get(testUser), "Software developer");
+    expect(profileBioLens.get(testUser)).toBe("Software developer");
 
     const updatedUser = profileBioLens.set("Senior developer")(testUser);
-    assertEquals(updatedUser.profile.bio, "Senior developer");
-    assertEquals(updatedUser.profile.tags, testUser.profile.tags); // Sibling unchanged
+    expect(updatedUser.profile.bio).toBe("Senior developer");
+    expect(updatedUser.profile.tags).toBe(testUser.profile.tags); // Sibling unchanged
   });
 
   it("should modify properties with functions", () => {

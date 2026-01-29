@@ -1,0 +1,24 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ES2022",
+    "moduleResolution": "bundler",
+    "esModuleInterop": true,
+    "allowSyntheticDefaultImports": true,
+    "strict": true,
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true,
+    "allowJs": true,
+    "checkJs": false,
+    "noEmit": true,
+    "jsx": "react-jsxdev",
+    "jsxImportSource": "react"
+  },
+  "include": [
+    "src/**/*",
+    "test/**/*",
+    "scripts/**/*",
+    "*.ts",
+    "*.tsx"
+  ]
+}

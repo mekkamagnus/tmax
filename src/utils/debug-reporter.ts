@@ -47,7 +47,8 @@ export interface DebugContext {
   }>;
   environment: {
     platform: string;
-    denoVersion: string;
+    bunVersion: string;
+    nodeVersion: string;
     tmaxVersion: string;
     workingDirectory: string;
     ttyStatus: boolean;
@@ -189,11 +190,12 @@ export class DebugReporter {
       performanceMetrics,
       activeOperations,
       environment: {
-        platform: Deno.build.os,
-        denoVersion: Deno.version.deno,
+        platform: process.platform,
+        bunVersion: typeof Bun !== 'undefined' ? Bun.version : 'N/A',
+        nodeVersion: process.version,
         tmaxVersion: "1.0.0", // TODO: Get from package.json
-        workingDirectory: Deno.cwd(),
-        ttyStatus: Deno.stdin.isTerminal()
+        workingDirectory: process.cwd(),
+        ttyStatus: process.stdin.isTTY
       }
     };
   }
@@ -374,7 +376,8 @@ export class DebugReporter {
     const filename = path || `debug-report-${Date.now()}.txt`;
     
     try {
-      await Deno.writeTextFile(filename, report);
+      const { writeFile } = await import("node:fs/promises");
+      await writeFile(filename, report, "utf-8");
       logger.info(`Debug report written to ${filename}`, {
         module: "DebugReporter",
         operation: "write_report"

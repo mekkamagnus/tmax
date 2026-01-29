@@ -1,10 +1,10 @@
-import { assertEquals } from "https://deno.land/std@0.224.0/assert/mod.ts";
+import { test, expect } from 'bun:test';
 import { Editor } from "./src/editor/editor.ts";
 import { TerminalIOImpl } from "./src/core/terminal.ts";
 import { FileSystemImpl } from "./src/core/filesystem.ts";
 import { Either } from "./src/utils/task-either.ts";
 
-Deno.test("buffer insert and save", async () => {
+test("buffer insert and save", async () => {
   const terminal = new TerminalIOImpl(false); // development mode
   const filesystem = new FileSystemImpl();
   const editor = new Editor(terminal, filesystem);
@@ -42,7 +42,7 @@ Deno.test("buffer insert and save", async () => {
 
       // Check if content contains "ABCX"
       if (newContent && Either.isRight(newContent)) {
-        assertEquals(newContent.right, "ABCX");
+        expect(newContent.right).toBe("ABCX");
         console.log("✓ Buffer insert works!");
       } else {
         console.error("✗ Buffer insert failed - wrong content type");
@@ -56,8 +56,13 @@ Deno.test("buffer insert and save", async () => {
   await editor.saveFile();
   const savedContent = await filesystem.readFile("test.txt");
   console.log("Saved content:", savedContent);
-  assertEquals(savedContent, "ABCX");
+  expect(savedContent).toBe("ABCX");
 
   // Cleanup
-  Deno.removeSync("test.txt");
+  try {
+    const { unlink } = await import("node:fs/promises");
+    await unlink("test.txt");
+  } catch {
+    // File might not exist, ignore error
+  }
 });

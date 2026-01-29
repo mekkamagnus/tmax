@@ -3,48 +3,48 @@
  * @description Tests for centralized error handling and logging system
  */
 
-import { assertEquals, assertExists, assert } from "https://deno.land/std@0.208.0/assert/mod.ts";
+import { describe, test, expect } from "bun:test";
 import { Logger, LogLevel, log } from "../../src/utils/logger.ts";
-import { 
-  ErrorManager, 
-  TmaxError, 
-  ErrorCategory, 
-  ErrorSeverity, 
+import {
+  ErrorManager,
+  TmaxError,
+  ErrorCategory,
+  ErrorSeverity,
   ErrorFactory,
-  errorManager 
+  errorManager
 } from "../../src/utils/error-manager.ts";
 import { debugReporter } from "../../src/utils/debug-reporter.ts";
 import { FunctionalTerminalIOImpl } from "../../src/core/terminal.ts";
 import { Either } from "../../src/utils/task-either.ts";
 
-Deno.test("Error Handling and Logging System", async (t) => {
-  
-  await t.step("Logger - should create structured logs", () => {
+describe("Error Handling and Logging System", () => {
+
+  test("Logger - should create structured logs", () => {
     const logger = Logger.getInstance();
-    
+
     // Test basic logging
     logger.info("Test info message", { module: "Test" });
     logger.warn("Test warning", { module: "Test", operation: "test_op" });
     logger.error("Test error", new Error("Test error"), { module: "Test" });
-    
+
     // Test module logger
     const moduleLogger = logger.module("TestModule");
     moduleLogger.debug("Debug from module");
     moduleLogger.info("Info from module");
-    
+
     // Test function logger
     const fnLogger = moduleLogger.fn("testFunction");
     const correlationId = fnLogger.startOperation("test_operation");
     fnLogger.completeOperation("test_operation", correlationId);
-    
-    assertEquals(typeof correlationId, "string");
-    assert(correlationId.startsWith("tmax-"));
+
+    expect(typeof correlationId).toBe("string");
+    expect(correlationId.startsWith("tmax-")).toBe(true);
   });
 
-  await t.step("ErrorManager - should create and track errors", () => {
+  test("ErrorManager - should create and track errors", () => {
     // Clear previous errors for clean test
     errorManager.clearHistory();
-    
+
     // Test error creation
     const error = errorManager.createError(
       "Test error message",
@@ -57,17 +57,17 @@ Deno.test("Error Handling and Logging System", async (t) => {
         suggestions: ["Try again", "Check input"]
       }
     );
-    
-    assertExists(error);
-    assertEquals(error.message, "Test error message");
-    assertEquals(error.context.category, ErrorCategory.VALIDATION);
-    assertEquals(error.context.severity, ErrorSeverity.HIGH);
-    assertEquals(error.getUserMessage(), "User-friendly error message");
-    assertEquals(error.getSuggestions().length, 2);
-    
+
+    expect(error).toBeDefined();
+    expect(error.message).toBe("Test error message");
+    expect(error.context.category).toBe(ErrorCategory.VALIDATION);
+    expect(error.context.severity).toBe(ErrorSeverity.HIGH);
+    expect(error.getUserMessage()).toBe("User-friendly error message");
+    expect(error.getSuggestions().length).toBe(2);
+
     // Test error history
     const history = errorManager.getErrorHistory();
-    assertEquals(history.length, 1);
+    expect(history.length).toBe(1);
     assertEquals(history[0].message, "Test error message");
     
     // Test error statistics

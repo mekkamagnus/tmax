@@ -1,9 +1,9 @@
-import { assertEquals } from "https://deno.land/std@0.224.0/assert/mod.ts";
+import { test, expect } from 'bun:test';
 import { Editor } from "./src/editor/editor.ts";
 import { TerminalIOImpl } from "./src/core/terminal.ts";
 import { FileSystemImpl } from "./src/core/filesystem.ts";
 
-Deno.test("character insertion and save bug reproduction", async () => {
+test("character insertion and save bug reproduction", async () => {
   const terminal = new TerminalIOImpl(false); // development mode
   const filesystem = new FileSystemImpl();
   const editor = new Editor(terminal, filesystem);
@@ -51,8 +51,13 @@ Deno.test("character insertion and save bug reproduction", async () => {
   console.log("Saved content:", savedContent);
   
   // The content should be "Hello World"
-  assertEquals(savedContent, "Hello World");
+  expect(savedContent).toBe("Hello World");
 
-  // Clean up - use Deno.remove directly since FileSystemImpl doesn't have unlink
-  await Deno.remove(testFileName).catch(() => {}); // Ignore error if file doesn't exist
+  // Clean up - use Bun-compatible file removal
+  try {
+    const { unlink } = await import("node:fs/promises");
+    await unlink(testFileName);
+  } catch {
+    // Ignore error if file doesn't exist
+  }
 });

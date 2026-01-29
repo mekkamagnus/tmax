@@ -1,9 +1,9 @@
-import { assertEquals } from "https://deno.land/std@0.210.0/testing/asserts.ts";
+import { test, expect } from 'bun:test';
 import { Editor } from "../src/editor/editor.ts";
 import { TerminalIOMock } from "./mocks/terminal-mock.ts";
 import { FileSystemMock } from "./mocks/filesystem-mock.ts";
 
-Deno.test("buffer insert and save should persist changes", async () => {
+test("buffer insert and save should persist changes", async () => {
   const terminal = new TerminalIOMock();
   const filesystem = new FileSystemMock();
   const editor = new Editor(terminal, filesystem);
@@ -18,7 +18,7 @@ Deno.test("buffer insert and save should persist changes", async () => {
   const initialState = editor.getState();
   const initialContent = initialState.currentBuffer?.getContent();
   console.log("Initial content:", initialContent);
-  assertEquals(initialContent?.right, "ABC");
+  expect(initialContent?.right).toBe("ABC");
 
   // Enter insert mode
   editor.setEditorState({ ...initialState, mode: "insert" });
@@ -43,5 +43,5 @@ Deno.test("buffer insert and save should persist changes", async () => {
   console.log("Saved content:", savedContent);
 
   // The file should contain "ABCX"
-  assertEquals(savedContent, "ABCX");
+  expect(savedContent).toBe("ABCX");
 });

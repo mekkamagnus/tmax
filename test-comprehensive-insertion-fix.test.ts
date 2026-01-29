@@ -1,9 +1,9 @@
-import { assertEquals } from "https://deno.land/std@0.224.0/assert/mod.ts";
+import { test, expect } from 'bun:test';
 import { Editor } from "./src/editor/editor.ts";
 import { TerminalIOImpl } from "./src/core/terminal.ts";
 import { FileSystemImpl } from "./src/core/filesystem.ts";
 
-Deno.test("comprehensive character insertion and save test", async () => {
+test("comprehensive character insertion and save test", async () => {
   const terminal = new TerminalIOImpl(false); // development mode
   const filesystem = new FileSystemImpl();
   const editor = new Editor(terminal, filesystem);
@@ -19,11 +19,11 @@ Deno.test("comprehensive character insertion and save test", async () => {
   await editor.start();
 
   // Verify we're in normal mode initially
-  assertEquals(editor.getMode(), "normal");
+  expect(editor.getMode()).toBe("normal");
 
   // Switch to insert mode
   await editor.handleKey("i");
-  assertEquals(editor.getMode(), "insert");
+  expect(editor.getMode()).toBe("insert");
 
   // Insert some text
   await editor.handleKey("H");
@@ -40,27 +40,27 @@ Deno.test("comprehensive character insertion and save test", async () => {
 
   // Exit insert mode
   await editor.handleKey("\x1b"); // Escape key
-  assertEquals(editor.getMode(), "normal");
+  expect(editor.getMode()).toBe("normal");
 
   // Verify the buffer contains the inserted text
   const stateAfterInsert = editor.getState();
   const contentAfterInsert = stateAfterInsert.currentBuffer?.getContent();
   if (contentAfterInsert && "right" in contentAfterInsert) {
-    assertEquals(contentAfterInsert.right, "Hello World");
+    expect(contentAfterInsert.right).toBe("Hello World");
   } else {
     throw new Error("Could not get buffer content after insert");
   }
 
   // Enter command mode
   await editor.handleKey(":");
-  assertEquals(editor.getMode(), "command");
+  expect(editor.getMode()).toBe("command");
 
   // Type 'w' to save
   await editor.handleKey("w");
 
   // Press Enter to execute the save command
   await editor.handleKey("\n"); // Enter key
-  assertEquals(editor.getMode(), "normal");
+  expect(editor.getMode()).toBe("normal");
 
   // Wait a bit for async save to complete
   await new Promise(resolve => setTimeout(resolve, 100));
@@ -70,8 +70,13 @@ Deno.test("comprehensive character insertion and save test", async () => {
   console.log("Saved content:", savedContent);
 
   // The content should be "Hello World"
-  assertEquals(savedContent, "Hello World");
+  expect(savedContent).toBe("Hello World");
 
   // Clean up
-  await Deno.remove(testFileName).catch(() => {}); // Ignore error if file doesn't exist
+  try {
+    const { unlink } = await import("node:fs/promises");
+    await unlink(testFileName);
+  } catch {
+    // Ignore error if file doesn't exist
+  }
 });

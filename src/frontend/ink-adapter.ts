@@ -329,16 +329,8 @@ export class InkTerminalIO implements FunctionalTerminalIO {
     const fnLogger = this.logger.fn("isStdinTTY");
 
     try {
-      // In some environments, Deno.stdin might not be available
-      if (typeof Deno === 'undefined' || !Deno?.stdin) {
-        fnLogger.warn("Deno.stdin not available, assuming non-TTY environment", {
-          operation: "check_tty",
-          metadata: { reason: "deno_stdin_unavailable" }
-        });
-        return Either.right(false);
-      }
-
-      const isTTY = Deno.stdin.isTerminal();
+      // Check if we're in a TTY environment using Node/Bun
+      const isTTY = process.stdin.isTTY;
 
       fnLogger.debug("Checked TTY status", {
         operation: "check_tty",

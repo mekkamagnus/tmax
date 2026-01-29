@@ -3,289 +3,289 @@
  * @description Tests for TaskEither utility
  */
 
-import { assertEquals, assertRejects } from "https://deno.land/std@0.208.0/assert/mod.ts";
+import { describe, test, expect } from 'bun:test';
 import { Either, Task, TaskEither, TaskEitherUtils } from "../../src/utils/task-either.ts";
 
-Deno.test("TaskEither", async (t) => {
-  await t.step("Either - should create Left and Right values", () => {
+describe("TaskEither", () => {
+  test("Either - should create Left and Right values", () => {
     const left = Either.left<string, number>("error");
     const right = Either.right<number, string>(42);
     
-    assertEquals(Either.isLeft(left), true);
-    assertEquals(Either.isRight(left), false);
+    expect(Either.isLeft(left)).toBe(true);
+    expect(Either.isRight(left)).toBe(false);
     if (Either.isLeft(left)) {
-      assertEquals(left.left, "error");
+      expect(left.left).toBe("error");
     }
-    
-    assertEquals(Either.isRight(right), true);
-    assertEquals(Either.isLeft(right), false);
+
+    expect(Either.isRight(right)).toBe(true);
+    expect(Either.isLeft(right)).toBe(false);
     if (Either.isRight(right)) {
-      assertEquals(right.right, 42);
+      expect(right.right).toBe(42);
     }
   });
   
-  await t.step("Either - should map Right values", () => {
+  test("Either - should map Right values", () => {
     const right = Either.right(10);
     const left = Either.left("error");
     
     const mappedRight = Either.map(right, x => x * 2);
     const mappedLeft = Either.map(left, x => x * 2);
-    
-    assertEquals(Either.isRight(mappedRight) && mappedRight.right, 20);
-    assertEquals(Either.isLeft(mappedLeft) && mappedLeft.left, "error");
+
+    expect(Either.isRight(mappedRight) && mappedRight.right).toBe(20);
+    expect(Either.isLeft(mappedLeft) && mappedLeft.left).toBe("error");
   });
-  
-  await t.step("Either - should flatMap Right values", () => {
+
+  test("Either - should flatMap Right values", () => {
     const right = Either.right(10);
     const left = Either.left("error");
-    
+
     const flatMappedRight = Either.flatMap(right, x => Either.right(x * 2));
     const flatMappedLeft = Either.flatMap(left, x => Either.right(x * 2));
-    
-    assertEquals(Either.isRight(flatMappedRight) && flatMappedRight.right, 20);
-    assertEquals(Either.isLeft(flatMappedLeft) && flatMappedLeft.left, "error");
+
+    expect(Either.isRight(flatMappedRight) && flatMappedRight.right).toBe(20);
+    expect(Either.isLeft(flatMappedLeft) && flatMappedLeft.left).toBe("error");
   });
-  
-  await t.step("Either - should fold values", () => {
+
+  test("Either - should fold values", () => {
     const right = Either.right(10);
     const left = Either.left("error");
-    
+
     const rightFolded = Either.fold(right, err => `Error: ${err}`, val => `Value: ${val}`);
     const leftFolded = Either.fold(left, err => `Error: ${err}`, val => `Value: ${val}`);
-    
-    assertEquals(rightFolded, "Value: 10");
-    assertEquals(leftFolded, "Error: error");
+
+    expect(rightFolded).toBe("Value: 10");
+    expect(leftFolded).toBe("Error: error");
   });
-  
-  await t.step("Either - should handle tryCatch", () => {
+
+  test("Either - should handle tryCatch", () => {
     const success = Either.tryCatch(() => JSON.parse('{"test": true}'));
     const failure = Either.tryCatch(() => JSON.parse('invalid json'));
-    
-    assertEquals(Either.isRight(success), true);
-    assertEquals(Either.isLeft(failure), true);
-    assertEquals(Either.isRight(success) && success.right.test, true);
+
+    expect(Either.isRight(success)).toBe(true);
+    expect(Either.isLeft(failure)).toBe(true);
+    expect(Either.isRight(success) && success.right.test).toBe(true);
   });
-  
-  await t.step("Task - should create and run tasks", async () => {
+
+  test("Task - should create and run tasks", async () => {
     const task = Task.of(42);
     const result = await task.run();
-    
-    assertEquals(result, 42);
+
+    expect(result).toBe(42);
   });
-  
-  await t.step("Task - should map over values", async () => {
+
+  test("Task - should map over values", async () => {
     const task = Task.of(10).map(x => x * 2);
     const result = await task.run();
-    
-    assertEquals(result, 20);
+
+    expect(result).toBe(20);
   });
-  
-  await t.step("Task - should flatMap tasks", async () => {
+
+  test("Task - should flatMap tasks", async () => {
     const task = Task.of(10).flatMap(x => Task.of(x * 2));
     const result = await task.run();
-    
-    assertEquals(result, 20);
+
+    expect(result).toBe(20);
   });
-  
-  await t.step("Task - should convert to TaskEither with tryCatch", async () => {
+
+  test("Task - should convert to TaskEither with tryCatch", async () => {
     const successTask = Task.fromSync(() => JSON.parse('{"test": true}'));
     const failureTask = Task.fromSync(() => JSON.parse('invalid json'));
-    
+
     const successTaskEither = successTask.tryCatch();
     const failureTaskEither = failureTask.tryCatch();
-    
+
     const successResult = await successTaskEither.run();
     const failureResult = await failureTaskEither.run();
-    
-    assertEquals(Either.isRight(successResult), true);
-    assertEquals(Either.isLeft(failureResult), true);
+
+    expect(Either.isRight(successResult)).toBe(true);
+    expect(Either.isLeft(failureResult)).toBe(true);
   });
-  
-  await t.step("TaskEither - should create Right and Left values", async () => {
+
+  test("TaskEither - should create Right and Left values", async () => {
     const rightTE = TaskEither.right(42);
     const leftTE = TaskEither.left("error");
-    
+
     const rightResult = await rightTE.run();
     const leftResult = await leftTE.run();
-    
-    assertEquals(Either.isRight(rightResult) && rightResult.right, 42);
-    assertEquals(Either.isLeft(leftResult) && leftResult.left, "error");
+
+    expect(Either.isRight(rightResult) && rightResult.right).toBe(42);
+    expect(Either.isLeft(leftResult) && leftResult.left).toBe("error");
   });
-  
-  await t.step("TaskEither - should handle tryCatch", async () => {
+
+  test("TaskEither - should handle tryCatch", async () => {
     const successTE = TaskEither.tryCatch(
       () => Promise.resolve(JSON.parse('{"test": true}'))
     );
     const failureTE = TaskEither.tryCatch(
       () => Promise.resolve(JSON.parse('invalid json'))
     );
-    
+
     const successResult = await successTE.run();
     const failureResult = await failureTE.run();
-    
-    assertEquals(Either.isRight(successResult), true);
-    assertEquals(Either.isLeft(failureResult), true);
+
+    expect(Either.isRight(successResult)).toBe(true);
+    expect(Either.isLeft(failureResult)).toBe(true);
   });
-  
-  await t.step("TaskEither - should map Right values", async () => {
+
+  test("TaskEither - should map Right values", async () => {
     const te = TaskEither.right(10);
     const mapped = te.map(x => x * 2);
     const result = await mapped.run();
-    
-    assertEquals(Either.isRight(result) && result.right, 20);
+
+    expect(Either.isRight(result) && result.right).toBe(20);
   });
-  
-  await t.step("TaskEither - should mapLeft values", async () => {
+
+  test("TaskEither - should mapLeft values", async () => {
     const te = TaskEither.left("error");
     const mapped = te.mapLeft(err => `Mapped: ${err}`);
     const result = await mapped.run();
-    
-    assertEquals(Either.isLeft(result) && result.left, "Mapped: error");
+
+    expect(Either.isLeft(result) && result.left).toBe("Mapped: error");
   });
-  
-  await t.step("TaskEither - should flatMap Right values", async () => {
+
+  test("TaskEither - should flatMap Right values", async () => {
     const te = TaskEither.right(10);
     const flatMapped = te.flatMap(x => TaskEither.right(x * 2));
     const result = await flatMapped.run();
-    
-    assertEquals(Either.isRight(result) && result.right, 20);
+
+    expect(Either.isRight(result) && result.right).toBe(20);
   });
-  
-  await t.step("TaskEither - should short-circuit on Left in flatMap", async () => {
+
+  test("TaskEither - should short-circuit on Left in flatMap", async () => {
     const te = TaskEither.left("error");
     const flatMapped = te.flatMap(x => TaskEither.right(x * 2));
     const result = await flatMapped.run();
-    
-    assertEquals(Either.isLeft(result) && result.left, "error");
+
+    expect(Either.isLeft(result) && result.left).toBe("error");
   });
-  
-  await t.step("TaskEither - should chain operations with andThen", async () => {
+
+  test("TaskEither - should chain operations with andThen", async () => {
     const te = TaskEither.right(10)
       .andThen(x => TaskEither.right(x * 2))
       .andThen(x => TaskEither.right(x + 5));
-    
+
     const result = await te.run();
-    assertEquals(Either.isRight(result) && result.right, 25);
+    expect(Either.isRight(result) && result.right).toBe(25);
   });
-  
-  await t.step("TaskEither - should fold values", async () => {
+
+  test("TaskEither - should fold values", async () => {
     const rightTE = TaskEither.right(10);
     const leftTE = TaskEither.left("error");
-    
+
     const rightTask = rightTE.fold(err => `Error: ${err}`, val => `Value: ${val}`);
     const leftTask = leftTE.fold(err => `Error: ${err}`, val => `Value: ${val}`);
-    
+
     const rightResult = await rightTask.run();
     const leftResult = await leftTask.run();
-    
-    assertEquals(rightResult, "Value: 10");
-    assertEquals(leftResult, "Error: error");
+
+    expect(rightResult).toBe("Value: 10");
+    expect(leftResult).toBe("Error: error");
   });
-  
-  await t.step("TaskEither - should getOrElse", async () => {
+
+  test("TaskEither - should getOrElse", async () => {
     const rightTE = TaskEither.right<number, string>(10);
     const leftTE = TaskEither.left<string, number>("error");
-    
+
     const rightTask = rightTE.getOrElse(0);
     const leftTask = leftTE.getOrElse(0);
-    
+
     const rightResult = await rightTask.run();
     const leftResult = await leftTask.run();
-    
-    assertEquals(rightResult, 10);
-    assertEquals(leftResult, 0);
+
+    expect(rightResult).toBe(10);
+    expect(leftResult).toBe(0);
   });
-  
-  await t.step("TaskEither - should zip values", async () => {
+
+  test("TaskEither - should zip values", async () => {
     const te1 = TaskEither.right<number, string>(10);
     const te2 = TaskEither.right<string, string>("hello");
     const te3 = TaskEither.left<string, number>("error");
-    
+
     const zipped = te1.zip(te2);
     const zippedWithError = te1.zip(te3);
-    
+
     const zippedResult = await zipped.run();
     const zippedErrorResult = await zippedWithError.run();
-    
-    assertEquals(Either.isRight(zippedResult) && zippedResult.right[0], 10);
-    assertEquals(Either.isRight(zippedResult) && zippedResult.right[1], "hello");
-    assertEquals(Either.isLeft(zippedErrorResult) && zippedErrorResult.left, "error");
+
+    expect(Either.isRight(zippedResult) && zippedResult.right[0]).toBe(10);
+    expect(Either.isRight(zippedResult) && zippedResult.right[1]).toBe("hello");
+    expect(Either.isLeft(zippedErrorResult) && zippedErrorResult.left).toBe("error");
   });
-  
-  await t.step("TaskEither - should sequence tasks", async () => {
+
+  test("TaskEither - should sequence tasks", async () => {
     const tasks = [
       TaskEither.right(1),
       TaskEither.right(2),
       TaskEither.right(3)
     ];
-    
+
     const tasksWithError = [
       TaskEither.right(1),
       TaskEither.left("error"),
       TaskEither.right(3)
     ];
-    
+
     const sequenced = TaskEither.sequence(tasks);
     const sequencedWithError = TaskEither.sequence(tasksWithError);
-    
+
     const sequencedResult = await sequenced.run();
     const sequencedErrorResult = await sequencedWithError.run();
-    
-    assertEquals(Either.isRight(sequencedResult) && sequencedResult.right, [1, 2, 3]);
-    assertEquals(Either.isLeft(sequencedErrorResult) && sequencedErrorResult.left, "error");
+
+    expect(Either.isRight(sequencedResult) && sequencedResult.right).toEqual([1, 2, 3]);
+    expect(Either.isLeft(sequencedErrorResult) && sequencedErrorResult.left).toBe("error");
   });
-  
-  await t.step("TaskEither - should run tasks in parallel", async () => {
+
+  test("TaskEither - should run tasks in parallel", async () => {
     const tasks = [
       TaskEither.right(1),
       TaskEither.right(2),
       TaskEither.right(3)
     ];
-    
+
     const parallel = TaskEither.parallel(tasks);
     const result = await parallel.run();
-    
-    assertEquals(Either.isRight(result) && result.right, [1, 2, 3]);
+
+    expect(Either.isRight(result) && result.right).toEqual([1, 2, 3]);
   });
-  
-  await t.step("TaskEitherUtils - should parse JSON", async () => {
+
+  test("TaskEitherUtils - should parse JSON", async () => {
     const validJSON = TaskEitherUtils.parseJSON('{"test": true}');
     const invalidJSON = TaskEitherUtils.parseJSON('invalid json');
-    
+
     const validResult = await validJSON.run();
     const invalidResult = await invalidJSON.run();
-    
-    assertEquals(Either.isRight(validResult), true);
-    assertEquals(Either.isLeft(invalidResult), true);
+
+    expect(Either.isRight(validResult)).toBe(true);
+    expect(Either.isLeft(invalidResult)).toBe(true);
   });
-  
-  await t.step("TaskEitherUtils - should stringify JSON", async () => {
+
+  test("TaskEitherUtils - should stringify JSON", async () => {
     const obj = { test: true, number: 42 };
     const stringify = TaskEitherUtils.stringifyJSON(obj);
     const result = await stringify.run();
-    
-    assertEquals(Either.isRight(result), true);
+
+    expect(Either.isRight(result)).toBe(true);
     if (Either.isRight(result)) {
       const parsed = JSON.parse(result.right);
-      assertEquals(parsed.test, true);
-      assertEquals(parsed.number, 42);
+      expect(parsed.test).toBe(true);
+      expect(parsed.number).toBe(42);
     }
   });
-  
-  await t.step("TaskEitherUtils - should handle delay", async () => {
+
+  test("TaskEitherUtils - should handle delay", async () => {
     const start = Date.now();
     const delay = TaskEitherUtils.delay(100);
     const result = await delay.run();
     const elapsed = Date.now() - start;
-    
-    assertEquals(Either.isRight(result), true);
-    assertEquals(elapsed >= 100, true);
+
+    expect(Either.isRight(result)).toBe(true);
+    expect(elapsed >= 100).toBe(true);
   });
-  
-  await t.step("TaskEitherUtils - should retry failed operations", async () => {
+
+  test("TaskEitherUtils - should retry failed operations", async () => {
     let attempts = 0;
     const maxAttempts = 3;
-    
+
     const flakyTask = () => TaskEither.fromSync(() => {
       attempts++;
       if (attempts < maxAttempts) {
@@ -293,21 +293,21 @@ Deno.test("TaskEither", async (t) => {
       }
       return "success";
     });
-    
+
     const retried = TaskEitherUtils.retry(flakyTask, maxAttempts, 10);
     const result = await retried.run();
-    
-    assertEquals(Either.isRight(result), true);
-    assertEquals(Either.isRight(result) && result.right, "success");
-    assertEquals(attempts, maxAttempts);
+
+    expect(Either.isRight(result)).toBe(true);
+    expect(Either.isRight(result) && result.right).toBe("success");
+    expect(attempts).toBe(maxAttempts);
   });
-  
-  await t.step("Complex workflow example", async () => {
+
+  test("Complex workflow example", async () => {
     // Simulate a complex workflow: read config, parse JSON, validate, and process
     const configContent = '{"apiUrl": "https://api.example.com", "timeout": 5000}';
-    
+
     type Config = {apiUrl: string, timeout: number};
-    
+
     const workflow = TaskEither.right<string, string>(configContent)
       .flatMap(content => TaskEitherUtils.parseJSON<Config>(content))
       .flatMap((config: Config) => {
@@ -320,14 +320,14 @@ Deno.test("TaskEither", async (t) => {
         ...config,
         processedAt: new Date().toISOString()
       }));
-    
+
     const result = await workflow.run();
-    
-    assertEquals(Either.isRight(result), true);
+
+    expect(Either.isRight(result)).toBe(true);
     if (Either.isRight(result)) {
-      assertEquals(result.right.apiUrl, "https://api.example.com");
-      assertEquals(result.right.timeout, 5000);
-      assertEquals(typeof result.right.processedAt, "string");
+      expect(result.right.apiUrl).toBe("https://api.example.com");
+      expect(result.right.timeout).toBe(5000);
+      expect(typeof result.right.processedAt).toBe("string");
     }
   });
 });

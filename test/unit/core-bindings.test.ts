@@ -3,24 +3,25 @@
  * @description Tests for T-Lisp core bindings file validation
  */
 
-import { assertEquals, assertStringIncludes } from "https://deno.land/std@0.208.0/assert/mod.ts";
+import { describe, test, expect } from "bun:test";
+import { readFile } from "node:fs/promises";
 import { TLispInterpreterImpl } from "../../src/tlisp/interpreter.ts";
 
 /**
  * Test T-Lisp core bindings file
  */
-Deno.test("Core Bindings T-Lisp File", async (t) => {
+describe("Core Bindings T-Lisp File", () => {
   const interpreter = new TLispInterpreterImpl();
 
-  await t.step("should exist and be readable", async () => {
-    const content = await Deno.readTextFile("src/tlisp/core-bindings.tlisp");
-    assertEquals(typeof content, "string");
-    assert(content.length > 0, "Core bindings file should not be empty");
+  test("should exist and be readable", async () => {
+    const content = await readFile("src/tlisp/core-bindings.tlisp", "utf-8");
+    expect(typeof content).toBe("string");
+    expect(content.length > 0).toBe(true, "Core bindings file should not be empty");
   });
 
-  await t.step("should contain valid T-Lisp syntax", async () => {
-    const content = await Deno.readTextFile("src/tlisp/core-bindings.tlisp");
-    
+  test("should contain valid T-Lisp syntax", async () => {
+    const content = await readFile("src/tlisp/core-bindings.tlisp", "utf-8");
+
     // Should not throw parsing errors
     try {
       interpreter.execute(content);
@@ -29,89 +30,82 @@ Deno.test("Core Bindings T-Lisp File", async (t) => {
     }
   });
 
-  await t.step("should contain all expected key-bind calls", async () => {
-    const content = await Deno.readTextFile("src/tlisp/core-bindings.tlisp");
-    
+  test("should contain all expected key-bind calls", async () => {
+    const content = await readFile("src/tlisp/core-bindings.tlisp", "utf-8");
+
     // Count key-bind function calls
     const keyBindMatches = content.match(/\(key-bind/g);
-    assertEquals(keyBindMatches?.length, 17, "Should contain exactly 17 key-bind calls");
+    expect(keyBindMatches?.length).toBe(17, "Should contain exactly 17 key-bind calls");
   });
 
-  await t.step("should contain basic navigation bindings", async () => {
-    const content = await Deno.readTextFile("src/tlisp/core-bindings.tlisp");
-    
+  test("should contain basic navigation bindings", async () => {
+    const content = await readFile("src/tlisp/core-bindings.tlisp", "utf-8");
+
     // Check for hjkl navigation
-    assertStringIncludes(content, '(key-bind "h"');
-    assertStringIncludes(content, '(key-bind "j"');
-    assertStringIncludes(content, '(key-bind "k"');
-    assertStringIncludes(content, '(key-bind "l"');
-    assertStringIncludes(content, '"normal"');
+    expect(content).toContain('(key-bind "h"');
+    expect(content).toContain('(key-bind "j"');
+    expect(content).toContain('(key-bind "k"');
+    expect(content).toContain('(key-bind "l"');
+    expect(content).toContain('"normal"');
   });
 
-  await t.step("should contain mode switching bindings", async () => {
-    const content = await Deno.readTextFile("src/tlisp/core-bindings.tlisp");
-    
+  test("should contain mode switching bindings", async () => {
+    const content = await readFile("src/tlisp/core-bindings.tlisp", "utf-8");
+
     // Check for mode switching
-    assertStringIncludes(content, '(key-bind "i"');
-    assertStringIncludes(content, '(key-bind "Escape"');
-    assertStringIncludes(content, '(editor-set-mode');
-    assertStringIncludes(content, '"insert"');
+    expect(content).toContain('(key-bind "i"');
+    expect(content).toContain('(key-bind "Escape"');
+    expect(content).toContain('(editor-set-mode');
+    expect(content).toContain('"insert"');
   });
 
-  await t.step("should contain M-x system bindings", async () => {
-    const content = await Deno.readTextFile("src/tlisp/core-bindings.tlisp");
-    
+  test("should contain M-x system bindings", async () => {
+    const content = await readFile("src/tlisp/core-bindings.tlisp", "utf-8");
+
     // Check for M-x functionality
-    assertStringIncludes(content, '(key-bind " "');  // Space key
-    assertStringIncludes(content, '(key-bind ";"');  // Semicolon key
-    assertStringIncludes(content, '(editor-handle-space)');
-    assertStringIncludes(content, '(editor-handle-semicolon)');
-    assertStringIncludes(content, '"mx"');
+    expect(content).toContain('(key-bind " "');  // Space key
+    expect(content).toContain('(key-bind ";"');  // Semicolon key
+    expect(content).toContain('(editor-handle-space)');
+    expect(content).toContain('(editor-handle-semicolon)');
+    expect(content).toContain('"mx"');
   });
 
-  await t.step("should contain command mode bindings", async () => {
-    const content = await Deno.readTextFile("src/tlisp/core-bindings.tlisp");
-    
+  test("should contain command mode bindings", async () => {
+    const content = await readFile("src/tlisp/core-bindings.tlisp", "utf-8");
+
     // Check for command mode
-    assertStringIncludes(content, '(editor-enter-command-mode)');
-    assertStringIncludes(content, '(editor-exit-command-mode)');
-    assertStringIncludes(content, '(editor-execute-command-line)');
-    assertStringIncludes(content, '"command"');
+    expect(content).toContain('(editor-enter-command-mode)');
+    expect(content).toContain('(editor-exit-command-mode)');
+    expect(content).toContain('(editor-execute-command-line)');
+    expect(content).toContain('"command"');
   });
 
-  await t.step("should contain editing bindings", async () => {
-    const content = await Deno.readTextFile("src/tlisp/core-bindings.tlisp");
-    
+  test("should contain editing bindings", async () => {
+    const content = await readFile("src/tlisp/core-bindings.tlisp", "utf-8");
+
     // Check for basic editing
-    assertStringIncludes(content, '(key-bind "Backspace"');
-    assertStringIncludes(content, '(key-bind "Enter"');
-    assertStringIncludes(content, '(buffer-delete');
-    assertStringIncludes(content, '(buffer-insert');
+    expect(content).toContain('(key-bind "Backspace"');
+    expect(content).toContain('(key-bind "Enter"');
+    expect(content).toContain('(buffer-delete');
+    expect(content).toContain('(buffer-insert');
   });
 
-  await t.step("should contain proper comments and organization", async () => {
-    const content = await Deno.readTextFile("src/tlisp/core-bindings.tlisp");
-    
+  test("should contain proper comments and organization", async () => {
+    const content = await readFile("src/tlisp/core-bindings.tlisp", "utf-8");
+
     // Check for organizational comments
-    assertStringIncludes(content, ";; core-bindings.tlisp");
-    assertStringIncludes(content, ";; BASIC NAVIGATION");
-    assertStringIncludes(content, ";; MODE SWITCHING");
-    assertStringIncludes(content, ";; M-X SYSTEM");
-    assertStringIncludes(content, ";; APPLICATION CONTROL");
+    expect(content).toContain(";; core-bindings.tlisp");
+    expect(content).toContain(";; BASIC NAVIGATION");
+    expect(content).toContain(";; MODE SWITCHING");
+    expect(content).toContain(";; M-X SYSTEM");
+    expect(content).toContain(";; APPLICATION CONTROL");
   });
 
-  await t.step("should not contain TypeScript string escaping", async () => {
-    const content = await Deno.readTextFile("src/tlisp/core-bindings.tlisp");
-    
+  test("should not contain TypeScript string escaping", async () => {
+    const content = await readFile("src/tlisp/core-bindings.tlisp", "utf-8");
+
     // Should not contain double-escaped strings like \\\"
-    assert(!content.includes('\\\\"'), "Should not contain TypeScript string escaping");
-    assert(!content.includes('\\\\n'), "Should not contain escaped newlines from TypeScript");
+    expect(content.includes('\\\\"')).toBe(false, "Should not contain TypeScript string escaping");
+    expect(content.includes('\\\\n')).toBe(false, "Should not contain escaped newlines from TypeScript");
   });
 });
-
-// Helper function for assertions
-function assert(condition: boolean, message: string): void {
-  if (!condition) {
-    throw new Error(message);
-  }
-}

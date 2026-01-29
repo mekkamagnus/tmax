@@ -261,22 +261,28 @@ export const saveWithStateUpdates = (filename?: string): StateTaskEither<EditorS
       const deps: SaveDependencies = {
         filesystem: {
           writeFile: async (path: string, content: string) => {
-            await Deno.writeTextFile(path, content);
+            const { writeFile } = await import("node:fs/promises");
+            await writeFile(path, content, "utf-8");
           },
           exists: async (path: string) => {
             try {
-              await Deno.stat(path);
+              const { stat } = await import("node:fs/promises");
+              await stat(path);
               return true;
             } catch {
               return false;
             }
           },
-          mkdir: Deno.mkdir,
+          mkdir: async (path: string, options?: { recursive?: boolean }) => {
+            const { mkdir } = await import("node:fs/promises");
+            await mkdir(path, options);
+          },
           stat: async (path: string) => {
-            const stat = await Deno.stat(path);
+            const { stat } = await import("node:fs/promises");
+            const nodeStat = await stat(path);
             return {
-              isDirectory: stat.isDirectory,
-              size: stat.size
+              isDirectory: nodeStat.isDirectory(),
+              size: nodeStat.size
             };
           }
         },

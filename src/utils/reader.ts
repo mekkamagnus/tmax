@@ -576,17 +576,27 @@ const saveCurrentBufferReader = (filename?: string): ReaderTaskEither<SaveDepend
 // Usage with actual dependencies
 const dependencies: SaveDependencies = {
   filesystem: {
-    readTextFile: Deno.readTextFile,
-    writeTextFile: Deno.writeTextFile,
-    exists: async (path) => {
+    readTextFile: async (path: string) => {
+      const { readFile } = await import("node:fs/promises");
+      return await readFile(path, "utf-8");
+    },
+    writeTextFile: async (path: string, content: string) => {
+      const { writeFile } = await import("node:fs/promises");
+      await writeFile(path, content, "utf-8");
+    },
+    exists: async (path: string) => {
       try {
-        await Deno.stat(path);
+        const { stat } = await import("node:fs/promises");
+        await stat(path);
         return true;
       } catch {
         return false;
       }
     },
-    mkdir: Deno.mkdir
+    mkdir: async (path: string, options?: { recursive?: boolean }) => {
+      const { mkdir } = await import("node:fs/promises");
+      await mkdir(path, options);
+    }
   },
   logger: {
     log: console.log,
