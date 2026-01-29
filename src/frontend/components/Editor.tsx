@@ -166,16 +166,29 @@ export const Editor = ({ initialEditorState, editor, filename, onStateChange, on
           <CommandInput
             mode={state.mode}
             onExecute={async (command) => {
-              // Command execution also goes through T-Lisp
-              // The command has been built up in state.commandLine by T-Lisp
-              // Now execute it via the T-Lisp API
+              // Execute the command directly via the editor
               try {
-                await executeTlisp("\n"); // Execute command via Enter key
-              } catch (error) {
-                if (error instanceof Error && error.message === "EDITOR_QUIT_SIGNAL") {
-                  exit();
-                  return;
+                if (state.mode === 'command') {
+                  // Handle vim-style commands
+                  const trimmedCommand = command.trim();
+                  if (trimmedCommand === 'q' || trimmedCommand === 'quit') {
+                    exit();
+                    return;
+                  } else if (trimmedCommand === 'w' || trimmedCommand === 'write') {
+                    await editor.saveFile();
+                    setState(editor.getEditorState());
+                  } else if (trimmedCommand === 'wq' || trimmedCommand === 'quit-write') {
+                    await editor.saveFile();
+                    exit();
+                    return;
+                  } else {
+                    handleError(`Unknown command: ${trimmedCommand}`);
+                  }
+                } else if (state.mode === 'mx') {
+                  // Handle M-x commands
+                  await editor.start(); // This will trigger the M-x execution
                 }
+              } catch (error) {
                 handleError(error instanceof Error ? error.message : String(error));
               }
             }}

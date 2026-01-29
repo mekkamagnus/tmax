@@ -115,15 +115,15 @@ export const BufferView = ({
   };
 
   return (
-    <Box flexDirection="column" flexGrow={1}>
+    <Box flexDirection="column" flexGrow={1} width="100%">
       {totalLines === 0 ? (
         // Handle empty buffer case
-        <Box width="100%" height="100%" justifyContent="center" alignItems="center">
+        <Box width="100%" flexGrow={1} justifyContent="center" alignItems="center">
           <Text color="gray">(empty buffer)</Text>
         </Box>
       ) : (
         // Render buffer content
-        <Box flexDirection="column" width="100%" height="100%">
+        <Box flexDirection="column" width="100%" flexGrow={1}>
           {renderLines()}
         </Box>
       )}

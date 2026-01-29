@@ -15,6 +15,46 @@ import { FunctionalTextBufferImpl } from './core/buffer.ts';
 import { EditorState } from './core/types.ts';
 
 /**
+ * Switch to alternate screen buffer (full screen mode)
+ */
+function enterFullScreen() {
+  // ANSI escape code to enter alternate screen buffer
+  process.stdout.write('\x1b[?1049h');
+
+  // Clear screen and move cursor to top-left
+  process.stdout.write('\x1b[2J');
+  process.stdout.write('\x1b[H');
+
+  // Hide cursor
+  process.stdout.write('\x1b[?25l');
+}
+
+/**
+ * Exit alternate screen buffer (restore normal screen)
+ */
+function exitFullScreen() {
+  // Show cursor
+  process.stdout.write('\x1b[?25h');
+
+  // Exit alternate screen buffer
+  process.stdout.write('\x1b[?1049l');
+}
+
+/**
+ * Cleanup handler to ensure terminal is restored on exit
+ */
+function setupCleanupHandlers() {
+  const cleanup = () => {
+    exitFullScreen();
+  };
+
+  // Handle various exit signals
+  process.on('SIGINT', cleanup);
+  process.on('SIGTERM', cleanup);
+  process.on('exit', cleanup);
+}
+
+/**
  * Main entry point that:
  * 1. Parses command line arguments
  * 2. Loads file if specified (or creates new buffer)
@@ -122,7 +162,7 @@ Examples:
       currentBuffer: FunctionalTextBufferImpl.create(""),
       cursorPosition: { line: 0, column: 0 },
       mode: 'normal' as const,
-      statusMessage: 'Welcome to tmax (Bun + Ink version with T-Lisp)',
+      statusMessage: '',
       viewportTop: 0,
       config: {
         theme: 'default',
@@ -142,6 +182,12 @@ Examples:
     // Set the initial state in the editor
     editor.setEditorState(initialState);
   }
+
+  // Enter full screen mode
+  enterFullScreen();
+
+  // Setup cleanup handlers to restore terminal on exit
+  setupCleanupHandlers();
 
   // Render the React-based editor
   // React is now a DUMB component - all logic goes through T-Lisp
@@ -171,6 +217,9 @@ Examples:
       process.exit(1);
     }
   }
+
+  // Restore terminal (cleanup handlers will also do this, but we do it here for safety)
+  exitFullScreen();
 }
 
 // Run the application

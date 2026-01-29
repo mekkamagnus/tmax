@@ -215,8 +215,6 @@ export class Editor {
       try {
         const coreBindingsContent = await this.filesystem.readFile(path);
         this.interpreter.execute(coreBindingsContent);
-        // Keep welcome message - log to console instead
-        console.log(`Core bindings loaded from ${path}`);
         this.coreBindingsLoaded = true;
         loaded = true;
         break;
@@ -278,10 +276,8 @@ export class Editor {
     try {
       const initContent = await this.filesystem.readFile("~/.tmaxrc");
       this.interpreter.execute(initContent);
-      console.log("Init file loaded: ~/.tmaxrc");
     } catch (error) {
-      // Init file not found or error - use defaults
-      console.log("No init file found, using defaults");
+      // Init file not found or error - use defaults (silent)
     }
   }
 
