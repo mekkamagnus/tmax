@@ -1,13 +1,13 @@
 # tmax - An Extensible Terminal Editor
 
-tmax is an extensible terminal-based text editor written in TypeScript, running on the Deno runtime. It features modal editing (inspired by Neovim) with Emacs-like extensibility through T-Lisp (tmax Lisp).
+tmax is an extensible terminal-based text editor written in TypeScript, running on the Bun runtime with React/ink for the terminal UI. It features modal editing (inspired by Neovim) with Emacs-like extensibility through T-Lisp (tmax Lisp).
 
 ## Architecture
 
 - **TypeScript Core**: Handles low-level operations (terminal I/O, file system, buffer management)
 - **T-Lisp Engine**: Handles high-level editor functionality and user customization
 - **Modal Interface**: Supports normal, insert, visual, and command modes
-- **React-based UI**: Modern UI rendering using Deno-ink for terminal React components
+- **React-based UI**: Modern declarative UI using ink for terminal React components
 - **Extensible**: Users can customize behavior through T-Lisp scripts
 
 ## Features
@@ -19,13 +19,14 @@ tmax is an extensible terminal-based text editor written in TypeScript, running 
 - ✅ Cursor movement and text editing
 - ✅ Configurable key bindings
 - ✅ Status line with mode and cursor position
+- ✅ Full-screen terminal interface with alternate screen buffer
 
 ### T-Lisp Integration
 - ✅ Full Lisp interpreter with standard library
 - ✅ Macro system with quasiquote support
 - ✅ Tail-call optimization
 - ✅ Interactive REPL for testing
-- ✅ Comprehensive editor API
+- ✅ Comprehensive editor API (25+ functions)
 
 ### T-Lisp Features
 - **Special Forms**: `quote`, `if`, `let`, `lambda`, `defun`, `defmacro`
@@ -37,15 +38,18 @@ tmax is an extensible terminal-based text editor written in TypeScript, running 
 ## Installation
 
 ### Prerequisites
-- [Deno](https://deno.land/) v1.20 or later
+- [Bun](https://bun.sh/) v1.0 or later
 
 ### Setup
 ```bash
 # Clone the repository
-git clone <repository-url>
+git clone https://github.com/mekkamagnus/tmax.git
 cd tmax
 
-# Make the launcher executable
+# Install dependencies
+bun install
+
+# Make the launcher executable (optional)
 chmod +x bin/tmax
 
 # Optional: Add to PATH
@@ -57,23 +61,18 @@ source ~/.bashrc
 
 ### Basic Usage
 ```bash
-# Start tmax with a new buffer (using deno task)
-deno task start
+# Start tmax with a new buffer
+bun run src/main.tsx
 
 # Start tmax with a file
-deno task start filename.txt
+bun run src/main.tsx filename.txt
 
 # Start with auto-reload during development
-deno task dev
+bun run dev
 
-# Or use the launcher script
-./bin/tmax
-
-# Open a specific file
-./bin/tmax filename.txt
-
-# Or if added to PATH
-tmax filename.txt
+# Or use npm scripts
+npm start
+npm run dev
 ```
 
 ### First Time Usage
@@ -107,11 +106,11 @@ tmax filename.txt
 
 ### T-Lisp REPL
 ```bash
-# Run the T-Lisp REPL for testing (using deno task)
-deno task repl
+# Run the T-Lisp REPL for testing
+bun run scripts/repl.ts
 
-# Or directly
-deno run --allow-read --allow-write scripts/repl.ts
+# Or use npm script
+npm run repl
 ```
 
 ## Configuration
@@ -192,50 +191,19 @@ tmax/
     └── tmax            # Launcher script
 ```
 
-### Available Deno Tasks
+### Available Scripts
 ```bash
 # Development
-deno task start          # Start the editor
-deno task dev            # Start with auto-reload
-deno task repl           # Run T-Lisp REPL
+bun run src/main.tsx     # Start the editor
+bun run dev              # Start with auto-reload
+bun run repl             # Run T-Lisp REPL
 
 # Testing
-deno task test           # Run all tests
-deno task test:watch     # Run tests in watch mode
-deno task test:coverage  # Run tests with coverage
-
-# Code Quality
-deno task lint           # Lint code
-deno task fmt            # Format code
-deno task fmt:check      # Check formatting
-deno task check          # Type check
+bun test                 # Run all tests
+bun run test:ui         # Run UI tests
 
 # Building
-deno task bundle         # Bundle to JavaScript
-deno task compile        # Compile to executable
-```
-
-### Running Tests
-```bash
-# Run all tests (using deno task)
-deno task test
-
-# Run tests with watch mode
-deno task test:watch
-
-# Run tests with coverage
-deno task test:coverage
-
-# Or run directly
-deno test
-
-# Run specific test suites
-deno test test/unit/tokenizer.test.ts
-deno test test/unit/parser.test.ts
-deno test test/unit/evaluator.test.ts
-deno test test/unit/macros.test.ts
-deno test test/unit/stdlib.test.ts
-deno test test/unit/repl.test.ts
+bun run build           # Build for production
 ```
 
 ### T-Lisp Examples
@@ -298,7 +266,7 @@ deno test test/unit/repl.test.ts
 1. Fork the repository
 2. Create a feature branch
 3. Make your changes
-4. Run tests: `deno test`
+4. Run tests: `bun test`
 5. Submit a pull request
 
 ## License
