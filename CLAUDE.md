@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-**tmax** is a comprehensive extensible terminal-based text editor with a TypeScript core running on the Deno runtime. Following the Emacs architecture, TypeScript handles low-level operations (terminal I/O, file system, memory management, display rendering) while T-Lisp (tmax Lisp) handles all higher-level editor functionality including commands, modes, key bindings, and extensibility.
+**tmax** is a comprehensive extensible terminal-based text editor with a TypeScript core running on the Bun runtime. Following the Emacs architecture, TypeScript handles low-level operations (terminal I/O, file system, memory management, display rendering) while T-Lisp (tmax Lisp) handles all higher-level editor functionality including commands, modes, key bindings, and extensibility.
 
 **Current Status: ✅ COMPLETE AND FUNCTIONAL**
 
@@ -28,7 +28,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - Functional programming should be used wherever possible
 - All functions and classes should have JS Doc comments
 - Use arrow functions
-- Use deno 2.3.7
+- Use bun runtime
 - Write simple, verbose code over terse, dense code
 - Use the standard library where possible. Avoid using external dependencies unless otherwise stated
 - Terminal-only interface (no GUI components)
@@ -41,15 +41,38 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - Include JSDoc comments for all functions
 - Use TypeScript throughout
 
+### Functional Programming Patterns
+- Use Option<T> type for nullable values (Some(value) | None)
+- Use Either<L, R> for error handling (Left(error) | Right(success))
+- Use TaskEither<E, T> for asynchronous operations with error handling
+- Implement validation utilities for common patterns (validateArgsCount, validateArgType, etc.)
+- Centralize error types using discriminated unions (BufferError, FileSystemError, TerminalError, ValidationError, ConfigError)
+- Return errors via Either.left() instead of throwing exceptions
+- Use functional composition and immutability where possible
+
 ### Testing Strategy
 - Always follow a Test-Driven Development workflow. Create and run test before code implementation
-- Use 'deno task test' for testing
+- Use 'bun test' for testing
 - All unit and integration tests should be placed directly in the `test` directory
 - Aim for high test coverage, especially for core logic
 - Tests should be isolated and repeatable
 - Use clear and descriptive names for test files and test cases
+
+### Bun Migration Notes
+- Replace Deno APIs with Bun/Node equivalents (Bun.file(), fs/promises, etc.)
+- Update import paths to use relative paths instead of Deno.land URLs
+- Use Bun-specific features where appropriate (Bun.spawn, Bun.write, etc.)
+- Update test syntax from Deno.test() to bun:test (describe, test, expect)
+- Replace assertEquals with expect().toBe(), assertThrows with expect().toThrow(), etc.
+
+### Error Handling Guidelines
+- Use centralized error types from src/error/types.ts
+- Replace throw statements with Either.left() or TaskEither.left() returns
+- Create validation utilities in src/utils/validation.ts for common checks
+- Use functional error handling patterns throughout the codebase
+- Implement proper error propagation from low-level to high-level functions
 - Follow Test-Driven Development (TDD)
-- **Current test coverage**: 131 tests across 8 comprehensive test suites
+- **Current test coverage**: 131+ tests across comprehensive test suites
 
 ### Functional Patterns
 
