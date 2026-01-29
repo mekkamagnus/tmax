@@ -305,9 +305,9 @@ The editor is designed to be both approachable for beginners and powerful for ad
 
 For more information on the functional patterns used in tmax, see the [Functional Programming Guidelines](./functional-patterns-guidelines.md).
 
-## Deno-ink Migration
+## Bun Runtime Migration
 
-tmax has been migrated to use Deno-ink for React-based terminal UI components. This provides a modern, declarative approach to terminal UI development while maintaining the functional patterns of the core editor.
+tmax has been migrated to use Bun runtime instead of Deno. This provides faster startup times and better performance while maintaining the functional patterns of the core editor.
 
 ### React Component Architecture
 - **Editor Component**: Main component orchestrating the UI with state management
