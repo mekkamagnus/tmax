@@ -1,7 +1,7 @@
 {
   "name": "tmax",
-  "version": "0.1.0",
-  "description": "Extensible terminal-based text editor with T-Lisp",
+  "version": "0.2.0",
+  "description": "Extensible terminal-based text editor with T-Lisp (Alpha)",
   "type": "module",
   "scripts": {
     "start": "bun run src/main.tsx",

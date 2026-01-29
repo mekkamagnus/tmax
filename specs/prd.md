@@ -3,9 +3,9 @@
 ## Executive Summary
 
 **Product Name:** tmax
-**Version:** 1.1 (Complete Implementation)
+**Version:** 0.2.0 (Alpha Release)
 **Date:** January 29, 2026
-**Status:** ✅ COMPLETE AND FUNCTIONAL
+**Status:** ✅ FUNCTIONAL ALPHA
 
 tmax is a comprehensive extensible terminal-based text editor with a TypeScript core running on the Bun runtime. Following the Emacs architecture, the system has a clear separation of concerns:
 
@@ -410,7 +410,7 @@ The implementation demonstrates technical excellence through comprehensive testi
 
 ## Planned Enhancements
 
-### Bun + ink UI Migration ✅ COMPLETE (v1.1.0)
+### Bun + ink UI Migration ✅ COMPLETE (v0.2.0)
 **Status:** Completed January 29, 2026
 
 **Achievements:**
@@ -444,22 +444,22 @@ The implementation demonstrates technical excellence through comprehensive testi
 - [ ] Search functionality (/, n, N)
 - [ ] Plugin loading system in T-Lisp
 
-### Post-v1.1 Releases
+### Post-v0.2 Releases (Roadmap)
 
-#### v1.2.0 - Enhanced Editing (Future)
+#### v0.3.0 - Enhanced Editing (Planned)
 - Advanced text objects (ciw, daw, etc.)
 - Visual selection modes
 - Syntax highlighting framework
 - Search functionality (/, n, N)
 - Advanced navigation (marks, jumplist)
 
-#### v1.3.0 - T-Lisp Keybinding Architecture (Future)
+#### v0.4.0 - T-Lisp Keybinding Architecture (Planned)
 - Complete T-Lisp-centric keybinding system (see [SPEC-004](SPEC-004-tlisp-core-bindings-migration.md))
 - Pure T-Lisp keymap data structures
 - Default bindings in T-Lisp files
 - Enhanced keybinding customization
 
-#### v1.4.0 - Extensibility (Future)
+#### v0.5.0 - Extensibility (Planned)
 - Plugin ecosystem foundation
 - Advanced T-Lisp features
 - Macro recording/playback
@@ -467,29 +467,28 @@ The implementation demonstrates technical excellence through comprehensive testi
 - Plugin loading system
 
 ### Dependencies and Blockers
-- **v1.1.0:** Deno-ink migration must preserve all T-Lisp API functionality
-- **v1.2.0:** Visual mode foundation required for text objects
-- **v1.3.0:** Keybinding architecture requires T-Lisp data structure enhancements
-- **External:** Deno runtime stability for TypeScript performance
+- **v0.3.0:** Visual mode foundation required for text objects
+- **v0.4.0:** Keybinding architecture requires T-Lisp data structure enhancements
+- **External:** Bun runtime stability for TypeScript performance
 
 ## Risks and Assumptions
 
 ### Risks
-- **Risk 1: Deno-ink Migration Complexity** - *Mitigation: Comprehensive user stories with acceptance criteria, incremental migration with testing at each step*
-- **Risk 2: Performance Regression** - *Mitigation: Performance benchmarks in migration spec, parity requirements, profiling during migration*
-- **Risk 3: T-Lisp API Breaking Changes** - *Mitigation: All 25+ functions must work, zero test regression requirement, comprehensive test suite (131 tests)*
+- **Risk 1: Performance at Scale** - *Mitigation: Profile with large files, optimize rendering pipeline*
+- **Risk 2: T-Lisp API Breaking Changes** - *Mitigation: All 25+ functions must work, zero test regression requirement, comprehensive test suite (131 tests)*
+- **Risk 3: Cross-platform Compatibility** - *Mitigation: Test on Linux, macOS, Windows with different terminal emulators*
 
 ### Assumptions
-- Deno-ink will provide sufficient performance for text editing operations
-- React component model will integrate cleanly with functional programming patterns
-- ink-testing-library will provide adequate testing capabilities for TUI components
+- Bun runtime will provide stable performance for text editing operations
+- React/ink component model will integrate cleanly with functional programming patterns
+- Terminal emulators will properly support alternate screen buffer and input modes
 
 ## Dependencies
 
 ### Internal Dependencies
-- **Deno-ink Migration:** Requires stable T-Lisp API (✅ complete)
-- **Component Testing:** Requires ink-testing-library compatibility with Deno
-- **State Management:** Requires bridge between React state and EditorState interface
+- **UI Testing:** Requires tmux for blackbox testing (✅ complete)
+- **State Management:** Requires bridge between React state and EditorState interface (✅ complete)
+- **Component Architecture:** Clean separation between UI (React) and logic (T-Lisp) (✅ complete)
 
 ### External Dependencies
 - **Bun:** Modern JavaScript runtime with optimal TypeScript and JSX support
@@ -499,10 +498,10 @@ The implementation demonstrates technical excellence through comprehensive testi
 
 ## Out of Scope
 
-Items that are explicitly not included in current releases:
+Items that are explicitly not included in alpha releases:
 - GUI components or web-based interfaces (terminal-only maintained)
 - Breaking changes to T-Lisp API (zero breaking changes requirement)
-- Changes to T-Lisp interpreter or standard library (stable since v1.0)
+- Changes to T-Lisp interpreter or standard library (stable since v0.1.0)
 
 ## Appendices
 

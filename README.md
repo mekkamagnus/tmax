@@ -1,6 +1,8 @@
-# tmax - An Extensible Terminal Editor
+# tmax - An Extensible Terminal Editor (Alpha)
 
 tmax is an extensible terminal-based text editor written in TypeScript, running on the Bun runtime with React/ink for the terminal UI. It features modal editing (inspired by Neovim) with Emacs-like extensibility through T-Lisp (tmax Lisp).
+
+> **Note:** tmax is currently in alpha release (v0.2.0). Features and APIs may change. Feedback and contributions are welcome!
 
 ## Architecture
 
