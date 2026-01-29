@@ -91,8 +91,8 @@ export interface KeyEvent {
 export interface StdoutWithResize {
   columns: number;
   rows: number;
-  addListener?: (event: string, handler: (...args: any[]) => void) => void;
-  removeListener?: (event: string, handler: (...args: any[]) => void) => void;
+  addListener?: (event: string, handler: (...args: unknown[]) => void) => void;
+  removeListener?: (event: string, handler: (...args: unknown[]) => void) => void;
 }
 
 /**
