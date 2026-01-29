@@ -3,6 +3,7 @@
  * @description T-Lisp REPL (Read-Eval-Print Loop) implementation
  */
 
+import { createInterface } from 'readline';
 import { TLispParser } from "./parser.ts";
 import { createEvaluatorWithBuiltins } from "./evaluator.ts";
 import { valueToString } from "./values.ts";
@@ -16,6 +17,7 @@ export class TLispREPL {
   private evaluator: any;
   private env: TLispEnvironment;
   private running: boolean = false;
+  private rl: any;
 
   /**
    * Create a new T-Lisp REPL
@@ -25,6 +27,10 @@ export class TLispREPL {
     const { evaluator, env } = createEvaluatorWithBuiltins();
     this.evaluator = evaluator;
     this.env = env;
+    this.rl = createInterface({
+      input: process.stdin,
+      output: process.stdout
+    });
   }
 
   /**
@@ -65,6 +71,7 @@ export class TLispREPL {
    */
   stop(): void {
     this.running = false;
+    this.rl.close();
   }
 
   /**
@@ -153,29 +160,19 @@ export class TLispREPL {
    * @returns User input
    */
   private async readInput(prompt: string): Promise<string> {
-    // Write prompt
-    await Deno.stdout.write(new TextEncoder().encode(prompt));
-    
-    // Read input line by line
-    const decoder = new TextDecoder();
-    let input = "";
-    
-    while (true) {
-      const buf = new Uint8Array(1);
-      const n = await Deno.stdin.read(buf);
-      if (n === null) {
-        this.stop();
-        return "";
-      }
-      
-      const char = decoder.decode(buf);
-      if (char === "\n") {
-        break;
-      }
-      input += char;
-    }
-    
-    return input.trim();
+    return new Promise((resolve) => {
+      this.rl.question(prompt, (answer: string) => {
+        resolve(answer.trim());
+      });
+    });
+  }
+
+  /**
+   * Stop the REPL
+   */
+  stop(): void {
+    this.running = false;
+    this.rl.close();
   }
 }
 

@@ -7,6 +7,7 @@ tmax is an extensible terminal-based text editor written in TypeScript, running 
 - **TypeScript Core**: Handles low-level operations (terminal I/O, file system, buffer management)
 - **T-Lisp Engine**: Handles high-level editor functionality and user customization
 - **Modal Interface**: Supports normal, insert, visual, and command modes
+- **React-based UI**: Modern UI rendering using Deno-ink for terminal React components
 - **Extensible**: Users can customize behavior through T-Lisp scripts
 
 ## Features
@@ -333,4 +334,22 @@ tmax follows the principle of "powerful core, extensible surface". The TypeScrip
 The editor is designed to be both approachable for beginners and powerful for advanced users who want to craft their perfect editing environment.
 
 For more information on the functional patterns used in tmax, see the [Functional Programming Guidelines](./functional-patterns-guidelines.md).
+
+## Deno-ink Migration
+
+tmax has been migrated to use Deno-ink for React-based terminal UI components. This provides a modern, declarative approach to terminal UI development while maintaining the functional patterns of the core editor.
+
+### React Component Architecture
+- **Editor Component**: Main component orchestrating the UI with state management
+- **BufferView Component**: Displays buffer content with viewport management
+- **StatusLine Component**: Shows editor mode, cursor position, and status messages
+- **CommandInput Component**: Handles command mode and M-x mode input
+- **useEditorState Hook**: Manages editor state with T-Lisp integration
+
+### Benefits of React-based UI
+- Declarative UI rendering that's easier to maintain
+- Better component composition and reusability
+- Improved performance through virtual DOM and efficient updates
+- Easier testing with component-based architecture
+- Seamless integration with T-Lisp functionality
 

@@ -333,16 +333,22 @@ export const TaskEitherUtils = {
    */
   readFile: (path: string): TaskEither<string, string> =>
     TaskEither.tryCatch(
-      () => Deno.readTextFile(path),
+      async () => {
+        const fs = await import('fs/promises');
+        return await fs.readFile(path, 'utf-8');
+      },
       (error) => `Failed to read file ${path}: ${error instanceof Error ? error.message : String(error)}`
     ),
-  
+
   /**
    * Create a TaskEither for file writing
    */
   writeFile: (path: string, content: string): TaskEither<string, void> =>
     TaskEither.tryCatch(
-      () => Deno.writeTextFile(path, content),
+      async () => {
+        const fs = await import('fs/promises');
+        await fs.writeFile(path, content, 'utf-8');
+      },
       (error) => `Failed to write file ${path}: ${error instanceof Error ? error.message : String(error)}`
     ),
   

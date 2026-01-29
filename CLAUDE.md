@@ -341,6 +341,184 @@ deno test test/unit/evaluator.test.ts
 deno test test/unit/editor.test.ts
 ```
 
+### UI Testing
+```bash
+# Run all UI tests (tmux-based integration tests)
+bash test/ui/tests/01-startup.test.sh
+bash test/ui/tests/02-basic-editing.test.sh
+bash test/ui/tests/03-mode-switching.test.sh
+
+# Run specific UI test
+bash test/ui/tests/02-basic-editing.test.sh
+```
+
+**UI Test Suite Overview:**
+
+The tmax project includes a comprehensive tmux-based UI test harness for end-to-end testing of the terminal interface. This is critical for verifying that editor features work correctly in a real terminal environment.
+
+**Key Features:**
+- **Tmux Integration**: Tests run editor in isolated tmux windows for realistic terminal simulation
+- **AI-Friendly API**: Simple, intention-revealing functions (`tmax_start`, `tmax_type`, `tmax_save`)
+- **Automated Assertions**: Built-in assertions for mode, text visibility, and error checking
+- **Debug Support**: Screenshot capture, state inspection, and detailed logging
+- **Modular Architecture**: Layered design (core → operations → API → tests) for maintainability
+
+**When to Use UI Tests:**
+1. **After implementing editor features** - Verify they work in terminal UI
+2. **Before committing UI changes** - Ensure no regressions in editor behavior
+3. **Debugging terminal issues** - Reproduce user-reported problems
+4. **Testing key bindings** - Verify hjkl navigation, mode switches, command interface
+5. **File operations validation** - Test save/load, buffer management, cursor positioning
+
+**Writing UI Tests:**
+
+```bash
+#!/bin/bash
+# test/ui/tests/my-feature.test.sh
+
+# Source the test API
+source ../lib/api.sh
+
+test_my_feature() {
+  echo "=== Test: My Feature ==="
+
+  tmax_init
+
+  # Create test file
+  tmax_create_test_file "test.txt" "Initial content"
+
+  # Start editor
+  tmax_start "test.txt"
+  tmax_wait_for_ready 10
+
+  # Test the feature
+  tmax_insert
+  tmax_assert_mode "INSERT"
+  tmax_type "Appended text"
+
+  # Verify
+  tmax_assert_text "Appended text"
+  tmax_save
+  tmax_quit
+
+  # Check file content
+  tmax_check_file "test.txt" "Appended text"
+
+  tmax_summary
+  tmax_cleanup
+}
+
+# Run test
+test_my_feature
+```
+
+**UI Test API Reference:**
+
+**Lifecycle:**
+- `tmax_init` - Initialize test harness (create tmux session)
+- `tmax_cleanup` - Cleanup (kill session, remove test files)
+- `tmax_start [file]` - Start editor (optionally open file)
+- `tmax_stop` - Stop editor
+- `tmax_restart [file]` - Restart editor
+
+**Editing:**
+- `tmax_insert` - Enter insert mode
+- `tmax_normal` - Enter normal mode
+- `tmax_command` - Enter command mode
+- `tmax_type <text>` - Type text in insert mode
+- `tmax_save` - Save file
+- `tmax_quit` - Quit editor
+- `tmax_save_quit` - Save and quit
+
+**Assertions:**
+- `tmax_assert_text <pattern>` - Assert text is visible
+- `tmax_assert_mode <mode>` - Assert current mode
+- `tmax_assert_no_errors` - Assert no errors present
+- `tmax_summary` - Print assertion summary
+
+**Query:**
+- `tmax_mode` - Get current mode
+- `tmax_visible <pattern>` - Check if text is visible
+- `tmax_text` - Get all visible text
+- `tmax_running` - Check if editor is running
+
+**Debug:**
+- `tmax_debug` - Enable debug mode
+- `tmax_state` - Show current editor state
+- `tmax_dump` - Dump state to file
+- `tmax_screenshot [file]` - Capture screenshot
+
+**Best Practices:**
+
+1. **Always cleanup on exit:**
+```bash
+tmax_init
+trap 'tmax_cleanup' EXIT  # Cleanup on test failure
+```
+
+2. **Use assertions for validation:**
+```bash
+tmax_assert_mode "INSERT"
+tmax_assert_text "Expected text"
+```
+
+3. **Check test results:**
+```bash
+tmax_summary
+exit $?  # Exit with assertion status
+```
+
+4. **Enable debug when developing:**
+```bash
+tmax_debug
+# ... run test ...
+tmax_nodebug
+```
+
+5. **Test file operations end-to-end:**
+```bash
+tmax_create_test_file "demo.txt" "content"
+tmax_start "demo.txt"
+# ... modify ...
+tmax_save
+tmax_quit
+tmax_check_file "demo.txt" "modified_content"
+```
+
+**Troubleshooting UI Tests:**
+
+- **⚠️ NEVER kill tmux session without approval**: The user may have active work in tmux. Always ask first before running `tmux kill-session`.
+- **Session already exists:** Ask user before killing. Use `tmux list-sessions` to check what's running.
+- **Editor won't start:** Check `TMAX_PROJECT_ROOT`, verify `deno task start` works
+- **Tests timing out:** Increase `TMAX_DEFAULT_TIMEOUT` or `TMAX_STARTUP_WAIT`
+- **Keys not being sent:** Verify tmux session exists, check active window
+
+**Manual Testing with Test Harness:**
+
+For interactive debugging:
+```bash
+source test/ui/lib/api.sh
+tmax_init
+tmax_start "test.txt"
+
+# Make changes manually in tmux session
+# Then query state programmatically:
+tmax_mode
+tmax_text
+tmax_screenshot "debug.txt"
+
+# When done, attach to session or cleanup:
+session_attach  # Or: tmax_cleanup
+```
+
+**Current Test Coverage:**
+- Startup and initialization: 01-startup.test.sh
+- Basic editing and insert: 02-basic-editing.test.sh
+- Mode switching: 03-mode-switching.test.sh
+- Total: 15 assertions across 3 test suites (93.3% pass rate)
+
+For detailed documentation, see `test/ui/README.md`.
+
 ## Architecture Overview
 
 **TypeScript Core Responsibilities:**

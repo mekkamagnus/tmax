@@ -16,19 +16,57 @@ This document provides a comprehensive guide to the functional programming patte
 
 ## Key Functional Patterns
 
-### 1. Pipeline/Kleisli Composition
+### 1. TaskEither Pattern
 
-**Purpose**: To transform deeply nested `TaskEither` chains into clean, readable, and linear sequences of operations.
+**Purpose**: Combine lazy evaluation (Task) with explicit error handling (Either) for asynchronous operations that can fail.
 
 **Key Benefits**:
--   Improves readability by avoiding "callback hell" or deep nesting of `.flatMap()` calls.
--   Provides a clear, step-by-step execution flow.
--   Simplifies adding, removing, or reordering operations.
+- Lazy execution (only runs when `.run()` is called)
+- Explicit error types instead of thrown exceptions
+- Composable operations with `.map()`, `.flatMap()`, and `.andThen()`
+- Built-in utilities for common operations (file I/O, JSON parsing)
 
 **Example**:
-
 ```typescript
-import { pipe } from "./utils/pipeline.ts";
+import { TaskEither, TaskEitherUtils } from "./src/utils/task-either.ts";
+
+// File operations with explicit error handling
+const loadConfig = (path: string): TaskEither<string, Config> =>
+  TaskEitherUtils.readFile(path)
+    .flatMap(content => TaskEitherUtils.parseJSON<Config>(content))
+    .mapLeft(error => `Config load failed: ${error}`);
+
+// Complex workflow with error handling
+const saveWithBackup = (path: string, content: string) =>
+  TaskEitherUtils.readFile(path)
+    .flatMap(current => TaskEitherUtils.writeFile(`${path}.backup`, current))
+    .flatMap(() => TaskEitherUtils.writeFile(path, content))
+    .map(() => ({ saved: true, backupCreated: true }))
+    .mapLeft(error => `Save operation failed: ${error}`);
+
+// Retry operations with exponential backoff
+const saveWithRetry = (path: string, content: string) =>
+  TaskEitherUtils.retry(
+    () => TaskEitherUtils.writeFile(path, content),
+    3, // max attempts
+    1000 // delay ms
+  );
+```
+
+**When to Use**: For any asynchronous operation that can fail, especially file I/O, network requests, or database operations.
+
+### 2. Pipeline/Kleisli Composition
+
+**Purpose**: Transform deeply nested `TaskEither` chains into clean, readable, and linear sequences of operations.
+
+**Key Benefits**:
+- Improves readability by avoiding "callback hell" or deep nesting of `.flatMap()` calls
+- Provides a clear, step-by-step execution flow
+- Simplifies adding, removing, or reordering operations
+
+**Example**:
+```typescript
+import { pipe } from "./src/utils/pipeline.ts";
 
 const saveFilePipeline = (filename?: string): TaskEither<SaveError, void> =>
   pipe
@@ -45,18 +83,17 @@ const saveFilePipeline = (filename?: string): TaskEither<SaveError, void> =>
 
 **When to Use**: For any sequence of asynchronous operations that can fail, especially when you would otherwise have multiple nested `.flatMap()` calls.
 
-### 2. Validation Applicative
+### 3. Validation Applicative
 
 **Purpose**: To collect all validation errors from a set of checks, rather than failing on the first error.
 
 **Key Benefits**:
--   Provides a much better user experience by showing all errors at once.
--   Makes validation logic composable and reusable.
+- Provides a much better user experience by showing all errors at once
+- Makes validation logic composable and reusable
 
 **Example**:
-
 ```typescript
-import { Validation, ValidationUtils, lift3 } from "./utils/validation.ts";
+import { Validation, ValidationUtils, lift3 } from "./src/utils/validation.ts";
 
 const validateSaveRequest = (
   buffer: TextBuffer | null,
@@ -83,19 +120,18 @@ if (result.isFailure()) {
 
 **When to Use**: For validating user input, configuration, or any scenario where you need to report all failures, not just the first one.
 
-### 3. Lens/Optics System
+### 4. Lens/Optics System
 
 **Purpose**: To perform focused, immutable updates on complex, nested data structures without manual object spreading.
 
 **Key Benefits**:
--   Eliminates verbose and error-prone `...` spreading for nested objects.
--   Provides a reusable and composable way to access and modify properties.
--   Enhances type safety for deep updates.
+- Eliminates verbose and error-prone `...` spreading for nested objects
+- Provides a reusable and composable way to access and modify properties
+- Enhances type safety for deep updates
 
 **Example**:
-
 ```typescript
-import { Lens, optics } from "./utils/lens.ts";
+import { Lens, optics } from "./src/utils/lens.ts";
 
 interface EditorState {
   readonly metadata: {
@@ -116,19 +152,18 @@ const incrementEditCount = (state: EditorState): EditorState =>
 
 **When to Use**: When managing a complex state object, especially one with multiple levels of nesting.
 
-### 4. State Monad
+### 5. State Monad
 
 **Purpose**: To manage state transitions in a purely functional and immutable way.
 
 **Key Benefits**:
--   Guarantees that state is never mutated accidentally.
--   Makes state transitions predictable and testable.
--   Allows for composing complex stateful operations from smaller ones.
+- Guarantees that state is never mutated accidentally
+- Makes state transitions predictable and testable
+- Allows for composing complex stateful operations from smaller ones
 
 **Example**:
-
 ```typescript
-import { State, StateTaskEither, stateUtils } from "./utils/state.ts";
+import { State, StateTaskEither, stateUtils } from "./src/utils/state.ts";
 
 // A pure state operation
 const incrementEditCount = (): State<EditorState, void> =>
@@ -149,18 +184,17 @@ const [result, newState] = saveWithStateUpdate("test.txt").run(currentState);
 
 **When to Use**: For critical state management where immutability and predictability are paramount.
 
-### 5. Reader Monad (Dependency Injection)
+### 6. Reader Monad (Dependency Injection)
 
 **Purpose**: To decouple code from its dependencies, making it more modular, reusable, and easier to test.
 
 **Key Benefits**:
--   Eliminates the need for global singletons or passing dependencies through many layers of functions.
--   Makes unit testing trivial by allowing you to inject mock dependencies.
+- Eliminates the need for global singletons or passing dependencies through many layers of functions
+- Makes unit testing trivial by allowing you to inject mock dependencies
 
 **Example**:
-
 ```typescript
-import { ReaderTaskEither } from "./utils/reader.ts";
+import { ReaderTaskEither } from "./src/utils/reader.ts";
 
 interface SaveDependencies {
   readonly filesystem: { writeFile: (path: string, content: string) => Promise<void>; };
@@ -190,19 +224,18 @@ const result = await saveFile("test.txt", "content").run(mockDeps).run();
 
 **When to Use**: For any code that has external dependencies like filesystems, network services, or loggers.
 
-### 6. Effect System
+### 7. Effect System
 
 **Purpose**: To provide the ultimate control over side effects, combining dependency injection, error handling, and resource management into a single, powerful abstraction.
 
 **Key Benefits**:
--   Makes side effects explicit and controlled.
--   Provides robust error handling, including retries and timeouts.
--   Ensures resources (like file handles) are managed safely.
+- Makes side effects explicit and controlled
+- Provides robust error handling, including retries and timeouts
+- Ensures resources (like file handles) are managed safely
 
 **Example**:
-
 ```typescript
-import { Effect, effectPipe } from "./utils/effect.ts";
+import { Effect, effectPipe } from "./src/utils/effect.ts";
 
 interface OperationDeps {
   readonly filesystem: FileSystem;
@@ -249,11 +282,90 @@ const result = await saveOperation("test.txt", "content")(dependencies).run();
 2.  **Use `TaskEither` for Failable Operations**: Represent any asynchronous operation that can fail with a `TaskEither`.
 3.  **Design Actionable Error Types**: Create specific, meaningful error types (e.g., `SaveError`, `NetworkError`) instead of using generic strings or `Error` objects.
 
-### Replacing Guard Clauses
-Instead of imperative `if` statements, use functional patterns:
--   **Array + find**: A declarative, data-driven approach for pattern matching.
--   **Option/Maybe Chaining**: Use `.orElse()` to create a chain of attempts that short-circuits on the first success.
--   **Reduce**: A purely functional way to process a list of parsers or checkers.
+### Option Pattern for Null Safety
+
+**Purpose**: Replace imperative null checks and guard clauses with functional option chaining for safer, more readable code.
+
+**Key Benefits**:
+- Eliminates null pointer exceptions
+- Provides explicit handling of missing values
+- Enables clean, chainable operations on optional values
+- Improves code readability and maintainability
+
+**Example**:
+```typescript
+import { Optional } from "./src/utils/lens.ts"; // Option pattern is part of lens utilities
+
+// Traditional imperative approach (AVOID)
+const getUserEmail = (user: User | null): string | null => {
+  if (user === null) return null;
+  if (user.profile === undefined) return null;
+  if (user.profile.email === null) return null;
+  return user.profile.email;
+};
+
+// Functional option chaining approach (PREFER)
+const getUserEmail = (user: User | null): Optional<User, string> =>
+  Optional.fromNullable(user)
+    .composeOptional(Optional.fromNullable(user?.profile))
+    .composeOptional(Optional.fromNullable(user?.profile?.email));
+
+// Usage with explicit handling
+const emailResult = getUserEmail(someUser);
+const email = emailResult.getOrElse(someUser, "default@example.com");
+```
+
+**Common Option Patterns**:
+
+```typescript
+// Chaining multiple optional operations
+const getFormattedEmail = (user: User | null): Optional<User, string> =>
+  Optional.fromNullable(user)
+    .composeOptional(Optional.fromNullable(user?.profile))
+    .composeOptional(Optional.fromNullable(user?.profile?.email))
+    .map(email => email.toLowerCase().trim())
+    .filter(email => email.includes('@'));
+
+// Fallback chains with orElse (Note: orElse not implemented in current version)
+// This would require extending the Optional class with orElse method
+const getPrimaryEmail = (user: User): string | null =>
+  user.primaryEmail || user.backupEmail || user.contactEmail || null;
+
+// Combining multiple options (Note: Optional.all not implemented in current version)
+// This would require implementing a static all method on Optional
+const getUserContactInfo = (user: User): ContactInfo | null => {
+  if (user.email && user.phone && user.address) {
+    return { email: user.email, phone: user.phone, address: user.address, hasAllInfo: true };
+  }
+  return null;
+};
+
+// Early return with Option
+const processUserRequest = (request: Request): Response | null => {
+  if (!request.user) return null;
+  const validUser = validateUser(request.user);
+  if (!validUser) return null;
+  const authorizedUser = authorizeUser(validUser);
+  if (!authorizedUser) return null;
+  return createResponse(authorizedUser);
+};
+```
+
+**When to Use**:
+- Anywhere you would use `if (value === null || value === undefined)`
+- For chaining operations that might return null/undefined
+- When you need to provide fallback values
+- For clean error handling in data processing pipelines
+
+**Benefits Over Guard Clauses**:
+- **Explicit**: Clearly shows when values might be missing
+- **Composable**: Operations can be chained without nesting (when fully implemented)
+- **Safe**: No runtime null pointer exceptions
+- **Testable**: Easy to test both present and absent cases
+- **Readable**: Intent is clear from the method names
+
+**Current Limitations**:
+The current Optional implementation in lens.ts is basic and lacks some common functional operations like `orElse`, `all`, and proper `flatMap`. For full Option pattern functionality, consider extending the implementation or using a dedicated Option type library.
 
 ---
 
@@ -277,3 +389,87 @@ To adopt these patterns, follow this general path:
 -   **Test `Validation` Logic**: Ensure both success and failure cases are tested. For failure cases, assert that *all* expected errors are present.
 -   **Verify `Lens` Laws**: For complex lenses, you can write property-based tests to ensure they follow the lens laws (get-set, set-get).
 -   **Test `State` Transitions**: Run the state operation with an initial state and assert that the new state is correct and that the original state was not mutated.
+
+---
+
+## Implementation Status
+
+### ✅ Currently Implemented
+- **TaskEither**: Complete implementation with utilities for file I/O, JSON parsing, retry logic
+- **Pipeline Composition**: Basic pipeline builder for sequential operations
+- **Validation Applicative**: Core validation framework with error accumulation
+- **Lens/Optics**: Basic lens system for immutable updates
+- **Option Pattern**: Basic Option type implementation (part of lens utilities)
+
+### 🔄 In Progress
+- **State Monad**: Basic state management implementation
+- **Reader Monad**: Dependency injection pattern implementation
+- **Effect System**: Advanced side effect management
+
+### 📋 Future Enhancements
+- Full integration of all patterns across the codebase
+- Performance optimizations for large-scale operations
+- Enhanced type safety and inference
+- Comprehensive documentation and examples
+
+---
+
+## File Structure
+
+```
+src/utils/
+├── task-either.ts          # TaskEither implementation and utilities
+├── pipeline.ts             # Pipeline composition and Kleisli arrows
+├── validation.ts           # Validation applicative for error accumulation
+├── lens.ts                 # Lens system for immutable updates
+├── option.ts               # Option pattern for null safety and chaining
+├── state.ts                # State monad for state management
+├── reader.ts               # Reader monad for dependency injection
+└── effect.ts               # Effect system for controlled side effects
+```
+
+---
+
+## Examples and Usage
+
+See the comprehensive test suite in `test/unit/functional-patterns.test.ts` for detailed examples of each pattern in action, including integration tests showing how patterns can be combined for complex workflows. Also see `test/unit/task-either.test.ts` for TaskEither-specific examples.
+
+---
+
+## Additional Resources
+
+- **Test-Driven Development**: Always write tests before implementation
+- **Functional Programming Concepts**: Pure functions, immutability, composition
+- **TypeScript Best Practices**: Strong typing, generics, type inference
+- **Deno Standard Library**: Use built-in utilities where possible
+
+This document serves as the authoritative guide for functional programming patterns in the tmax project. All developers should familiarize themselves with these patterns and apply them consistently throughout the codebase.
+
+## React Integration Patterns
+
+With the migration to Deno-ink, tmax now uses React components for terminal UI rendering. This section documents how functional patterns integrate with React components.
+
+### React Component Structure
+- **Editor Component**: Orchestrates the UI and manages state transitions
+- **BufferView Component**: Renders buffer content with efficient viewport management
+- **StatusLine Component**: Displays editor state information
+- **CommandInput Component**: Handles command and M-x mode input
+- **useEditorState Hook**: Bridges React state with functional editor state
+
+### Integration with Functional Core
+- The Editor class now focuses on logic and state management while React handles UI
+- T-Lisp API functions update React state through the useEditorState hook
+- Terminal I/O operations are handled by the InkTerminalIO adapter
+- Buffer operations remain functional but update React state for UI changes
+
+### State Management
+- React state is synchronized with EditorState interface
+- Actions dispatched through the useEditorState hook update editor state
+- T-Lisp functions can trigger React state updates for UI changes
+- The separation of concerns keeps logic in the functional core and UI in React components
+
+### Testing React Components
+- Components are tested using ink-testing-library
+- Functional behavior is tested separately from UI rendering
+- Integration tests verify the connection between React components and functional core
+- Mock implementations are used for terminal I/O during testing

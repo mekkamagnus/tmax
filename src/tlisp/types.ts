@@ -6,7 +6,7 @@
 /**
  * T-Lisp value types
  */
-export type TLispValueType = 
+export type TLispValueType =
   | "nil"
   | "boolean"
   | "number"
@@ -14,7 +14,8 @@ export type TLispValueType =
   | "symbol"
   | "list"
   | "function"
-  | "macro";
+  | "macro"
+  | "hashmap";
 
 /**
  * T-Lisp value interface
@@ -98,6 +99,14 @@ export interface TLispMacro extends TLispValue {
   type: "macro";
   value: TLispMacroImpl;
   name?: string;
+}
+
+/**
+ * T-Lisp hash-map value
+ */
+export interface TLispHashmap extends TLispValue {
+  type: "hashmap";
+  value: Map<string, TLispValue>;
 }
 
 /**

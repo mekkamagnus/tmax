@@ -1,15 +1,17 @@
 /**
  * @file editor.ts
- * @description Core editor implementation with T-Lisp extensibility
+ * @description Core editor implementation with T-Lisp extensibility for React UI
+ * This class manages the editor state and logic but delegates rendering to React components
  */
 
 import { TLispInterpreterImpl } from "../tlisp/interpreter.ts";
-import { TerminalIOImpl } from "../core/terminal.ts";
 import { FileSystemImpl } from "../core/filesystem.ts";
-import { TextBufferImpl } from "../core/buffer.ts";
-import { createEditorAPI, type EditorState } from "./tlisp-api.ts";
+import { createEditorAPI, TlispEditorState } from "./tlisp-api.ts";
+import type { EditorState, FunctionalTextBuffer } from "../core/types.ts";
 import { createString } from "../tlisp/values.ts";
-import type { TerminalIO, FileSystem, TextBuffer } from "../core/types.ts";
+import type { TerminalIO, FileSystem } from "../core/types.ts";
+import { Either } from "../utils/task-either.ts";
+import { FunctionalTextBufferImpl } from "../core/buffer.ts";
 
 /**
  * Key mapping for editor commands
@@ -25,40 +27,45 @@ export interface KeyMapping {
  */
 export class Editor {
   private state: EditorState;
+  private buffers: Map<string, FunctionalTextBufferImpl> = new Map();
   private interpreter: TLispInterpreterImpl;
   private keyMappings: Map<string, KeyMapping[]>;
   private running: boolean = false;
   private coreBindingsLoaded: boolean = false;
+  private terminal: TerminalIO;
+  private filesystem: FileSystem;
 
   /**
    * Create a new editor instance
-   * @param terminal - Terminal interface
+   * @param terminal - Terminal interface (may be unused in React UI)
    * @param filesystem - File system interface
    */
   constructor(terminal: TerminalIO, filesystem: FileSystem) {
+    this.terminal = terminal;
+    this.filesystem = filesystem;
     this.state = {
-      currentBuffer: null,
-      buffers: new Map(),
-      cursorLine: 0,
-      cursorColumn: 0,
-      terminal,
-      filesystem,
+      cursorPosition: { line: 0, column: 0 },
       mode: "normal",
-      lastCommand: "",
       statusMessage: "Welcome to tmax",
       viewportTop: 0,
-      commandLine: "",
-      spacePressed: false,
-      mxCommand: "",
-      operations: {
-        saveFile: () => this.saveFile(),
-        openFile: (filename: string) => this.openFile(filename),
+      config: {
+        theme: 'default',
+        tabSize: 4,
+        autoSave: false,
+        keyBindings: {},
+        maxUndoLevels: 100,
+        showLineNumbers: true,
+        wordWrap: false
       },
+      commandLine: "",
+      mxCommand: "",
+      currentFilename: undefined,
+      buffers: this.buffers,
     };
 
     this.interpreter = new TLispInterpreterImpl();
     this.keyMappings = new Map();
-    
+
     this.initializeAPI();
   }
 
@@ -66,8 +73,53 @@ export class Editor {
    * Initialize the T-Lisp API functions
    */
   private initializeAPI(): void {
-    const api = createEditorAPI(this.state);
-    
+    // Create a tlisp-api compatible state object
+    const editor = this;
+    const tlispState: TlispEditorState = {
+      get currentBuffer() {
+        return editor.state.currentBuffer ?? null;
+      },
+      set currentBuffer(v: FunctionalTextBuffer | null) {
+        // Update the buffer in the buffers map using tracked filename
+        if (v && editor.state.currentFilename) {
+          // Use the tracked filename to update the correct buffer entry
+          editor.buffers.set(editor.state.currentFilename, v as FunctionalTextBufferImpl);
+        }
+        editor.state.currentBuffer = v ?? undefined;
+      },
+      get buffers() {
+        return editor.buffers;
+      },
+      get cursorLine() { return editor.state.cursorPosition.line; },
+      set cursorLine(v: number) { editor.state.cursorPosition.line = v; },
+      get cursorColumn() { return editor.state.cursorPosition.column; },
+      set cursorColumn(v: number) { editor.state.cursorPosition.column = v; },
+      get terminal() { return editor.terminal; },
+      get filesystem() { return editor.filesystem; },
+      get mode() { return editor.state.mode; },
+      set mode(v: any) { editor.state.mode = v; },
+      get lastCommand() { return ""; },
+      set lastCommand(_: string) { },
+      get statusMessage() { return editor.state.statusMessage; },
+      set statusMessage(v: string) { editor.state.statusMessage = v; },
+      get viewportTop() { return editor.state.viewportTop; },
+      set viewportTop(v: number) { editor.state.viewportTop = v; },
+      get commandLine() { return editor.state.commandLine; },
+      set commandLine(v: string) { editor.state.commandLine = v; },
+      get spacePressed() { return false; },
+      set spacePressed(_: boolean) { },
+      get mxCommand() { return editor.state.mxCommand; },
+      set mxCommand(v: string) { editor.state.mxCommand = v; },
+      get operations() {
+        return {
+          saveFile: () => editor.saveFile(),
+          openFile: (filename: string) => editor.openFile(filename),
+        };
+      },
+    };
+
+    const api = createEditorAPI(tlispState);
+
     for (const [name, fn] of api) {
       this.interpreter.defineBuiltin(name, fn);
     }
@@ -161,9 +213,8 @@ export class Editor {
 
     for (const path of possiblePaths) {
       try {
-        const coreBindingsContent = await this.state.filesystem.readFile(path);
+        const coreBindingsContent = await this.filesystem.readFile(path);
         this.interpreter.execute(coreBindingsContent);
-        this.state.statusMessage = `Core bindings loaded from ${path}`;
         this.coreBindingsLoaded = true;
         loaded = true;
         break;
@@ -178,7 +229,8 @@ export class Editor {
       console.warn("Loading minimal fallback key bindings...");
       this.loadFallbackBindings();
       this.coreBindingsLoaded = true;
-      this.state.statusMessage = "Using fallback key bindings";
+      // Keep welcome message - fallback bindings loaded
+      console.log("Using fallback key bindings");
     }
   }
 
@@ -222,11 +274,10 @@ export class Editor {
    */
   private async loadInitFile(): Promise<void> {
     try {
-      const initContent = await this.state.filesystem.readFile("~/.tmaxrc");
+      const initContent = await this.filesystem.readFile("~/.tmaxrc");
       this.interpreter.execute(initContent);
     } catch (error) {
-      // Init file not found or error - use defaults
-      this.state.statusMessage = "No init file found, using defaults";
+      // Init file not found or error - use defaults (silent)
     }
   }
 
@@ -286,85 +337,98 @@ export class Editor {
   async handleKey(key: string): Promise<void> {
     // Ensure core bindings are loaded before processing keys
     await this.ensureCoreBindingsLoaded();
-    
+
     const normalizedKey = this.normalizeKey(key);
-    
+
     // Handle printable characters in insert mode FIRST
     // This ensures that normal characters like 'h', 'j', 'k', 'l' are inserted
     // even if they have key mappings for other modes
     if (this.state.mode === "insert" && key.length === 1 && key >= " " && key <= "~") {
       const escapedKey = this.escapeKeyForTLisp(key);
       this.executeCommand(`(buffer-insert "${escapedKey}")`);
-      return;
     }
-    
     // Handle Enter key in insert mode with proper escaping
-    if (this.state.mode === "insert" && normalizedKey === "Enter") {
+    else if (this.state.mode === "insert" && normalizedKey === "Enter") {
       const escapedNewline = this.escapeKeyForTLisp("\n");
       this.executeCommand(`(buffer-insert "${escapedNewline}")`);
-      return;
     }
-    
     // Handle Backspace key in insert mode
-    if (this.state.mode === "insert" && normalizedKey === "Backspace") {
+    else if (this.state.mode === "insert" && normalizedKey === "Backspace") {
       this.executeCommand("(buffer-delete 1)");
-      return;
     }
-    
     // Handle command line input in command mode
-    if (this.state.mode === "command") {
+    else if (this.state.mode === "command") {
       if (key.length === 1 && key >= " " && key <= "~") {
         // Add character to command line
         this.state.commandLine += key;
-        return;
-      } else if (normalizedKey === "Backspace" && this.state.commandLine.length > 0) {
+        return; // Don't process this key further
+      } else if (normalizedKey === "Backspace") {
         // Remove last character from command line
         this.state.commandLine = this.state.commandLine.slice(0, -1);
-        return;
+        return; // Don't process this key further
+      } else if (normalizedKey === "Escape") {
+        this.state.mode = "normal";
+        this.state.commandLine = "";
+        return; // Don't process this key further
+      } else if (normalizedKey === "Enter") {
+        // Execute the command line through the T-Lisp key binding system
+        // This ensures proper integration with the T-Lisp interpreter
+        try {
+          this.executeCommand(`(editor-execute-command-line)`);
+        } catch (error) {
+          if (error instanceof Error && (error.message === "EDITOR_QUIT_SIGNAL" || error.message.includes("EDITOR_QUIT_SIGNAL"))) {
+            throw new Error("EDITOR_QUIT_SIGNAL"); // Re-throw clean quit signal to main loop
+          }
+          this.state.statusMessage = `Command error: ${error instanceof Error ? error.message : String(error)}`;
+        }
+
+        // Clear command line and return to normal mode
+        this.state.commandLine = "";
+        this.state.mode = "normal";
+        return; // Don't process this key further
       }
+      // For other keys, fall through to key binding system
     }
-    
     // Handle M-x command input in mx mode
-    if (this.state.mode === "mx") {
+    else if (this.state.mode === "mx") {
       if (key.length === 1 && key >= " " && key <= "~") {
-        // Add character to M-x command
-        this.state.mxCommand += key;
-        return;
-      } else if (normalizedKey === "Backspace" && this.state.mxCommand.length > 0) {
-        // Remove last character from M-x command
-        this.state.mxCommand = this.state.mxCommand.slice(0, -1);
-        return;
+        // TODO: Implement M-x editing in terminal UI
+      } else if (normalizedKey === "Backspace") {
+        // TODO: Implement M-x editing in terminal UI
+      } else if (normalizedKey === "Enter") {
+        // Execute M-x command
+        if (this.state.mxCommand) {
+          this.executeCommand(`(${this.state.mxCommand})`);
+          this.state.mxCommand = ""; // Clear M-x command after execution
+        }
+      } else if (normalizedKey === "Escape") {
+        this.state.mode = "normal";
+        this.state.mxCommand = "";
       }
     }
-    
-    const mappings = this.keyMappings.get(normalizedKey);
-    
-    // Reset space state if any key other than semicolon is pressed after space
-    if (this.state.spacePressed && normalizedKey !== ";" && normalizedKey !== " ") {
-      this.state.spacePressed = false;
-      this.state.statusMessage = "";
-    }
-    
-    if (!mappings) {
-      this.state.statusMessage = `Unbound key: ${normalizedKey}`;
-      return;
-    }
+    // Handle regular key mappings
+    else {
+      const mappings = this.keyMappings.get(normalizedKey);
 
-    // Find mapping for current mode
-    const mapping = mappings.find(m => !m.mode || m.mode === this.state.mode);
-    if (!mapping) {
-      this.state.statusMessage = `Unbound key in ${this.state.mode} mode: ${normalizedKey}`;
-      return;
-    }
-
-    // Execute the mapped command
-    try {
-      this.executeCommand(mapping.command);
-    } catch (error) {
-      if (error instanceof Error && (error.message === "EDITOR_QUIT_SIGNAL" || error.message.includes("EDITOR_QUIT_SIGNAL"))) {
-        throw new Error("EDITOR_QUIT_SIGNAL"); // Re-throw clean quit signal to main loop
+      if (!mappings) {
+        this.state.statusMessage = `Unbound key: ${normalizedKey}`;
+      } else {
+        // Find mapping for current mode
+        const mapping = mappings.find(m => !m.mode || m.mode === this.state.mode);
+        if (!mapping) {
+          this.state.statusMessage = `Unbound key in ${this.state.mode} mode: ${normalizedKey}`;
+        } else {
+          // Execute the mapped command
+          try {
+            this.executeCommand(mapping.command);
+          } catch (error) {
+            if (error instanceof Error && (error.message === "EDITOR_QUIT_SIGNAL" || error.message.includes("EDITOR_QUIT_SIGNAL"))) {
+              throw new Error("EDITOR_QUIT_SIGNAL"); // Re-throw clean quit signal to main loop
+            }
+            this.state.statusMessage = `Command error: ${error instanceof Error ? error.message : String(error)}`;
+          }
+        }
       }
-      this.state.statusMessage = `Command error: ${error instanceof Error ? error.message : String(error)}`;
     }
   }
 
@@ -374,12 +438,11 @@ export class Editor {
    * @param content - Initial content
    */
   createBuffer(name: string, content: string = ""): void {
-    const buffer = new TextBufferImpl(content);
-    this.state.buffers.set(name, buffer);
-    
-    if (!this.state.currentBuffer) {
-      this.state.currentBuffer = buffer;
-    }
+    const buffer = FunctionalTextBufferImpl.create(content);
+    this.buffers.set(name, buffer);
+
+    // Always set currentBuffer to the newly created buffer
+    this.state.currentBuffer = buffer;
   }
 
   /**
@@ -388,9 +451,10 @@ export class Editor {
    */
   async openFile(filename: string): Promise<void> {
     try {
-      const content = await this.state.filesystem.readFile(filename);
+      const content = await this.filesystem.readFile(filename);
       this.createBuffer(filename, content);
-      this.state.currentBuffer = this.state.buffers.get(filename)!;
+      // Track the filename for save operations
+      this.state.currentFilename = filename;
       this.state.statusMessage = `Opened ${filename}`;
     } catch (error) {
       this.state.statusMessage = `Failed to open ${filename}: ${error instanceof Error ? error.message : String(error)}`;
@@ -406,24 +470,21 @@ export class Editor {
       return;
     }
 
-    // Find buffer name
-    let filename = "";
-    for (const [name, buffer] of this.state.buffers) {
-      if (buffer === this.state.currentBuffer) {
-        filename = name;
-        break;
-      }
-    }
-
+    // Use the tracked filename directly
+    const filename = this.state.currentFilename;
     if (!filename) {
       this.state.statusMessage = "Buffer has no associated file";
       return;
     }
 
     try {
-      const content = this.state.currentBuffer.getContent();
-      await this.state.filesystem.writeFile(filename, content);
-      this.state.statusMessage = `Saved ${filename}`;
+      const contentResult = this.state.currentBuffer.getContent();
+      if (Either.isRight(contentResult)) {
+        await this.filesystem.writeFile(filename, contentResult.right);
+        this.state.statusMessage = `Saved ${filename}`;
+      } else {
+        this.state.statusMessage = `Failed to get content: ${contentResult.left}`;
+      }
     } catch (error) {
       this.state.statusMessage = `Failed to save ${filename}: ${error instanceof Error ? error.message : String(error)}`;
     }
@@ -431,163 +492,60 @@ export class Editor {
 
   /**
    * Update viewport to ensure cursor is visible
+   * This method is now used by React components to manage viewport
    */
-  private updateViewport(): void {
-    const terminalSize = this.state.terminal.getSize();
-    const maxViewportLines = terminalSize.height - 1; // Reserve space for status line
-    
-    // Scroll down if cursor is below viewport
-    if (this.state.cursorLine >= this.state.viewportTop + maxViewportLines) {
-      this.state.viewportTop = this.state.cursorLine - maxViewportLines + 1;
-    }
-    
-    // Scroll up if cursor is above viewport
-    if (this.state.cursorLine < this.state.viewportTop) {
-      this.state.viewportTop = this.state.cursorLine;
-    }
-    
-    // Ensure viewport doesn't go negative
-    this.state.viewportTop = Math.max(0, this.state.viewportTop);
+  updateViewport(): void {
+    // This method is kept for compatibility with React components
+    // The actual viewport management is now handled by BufferView component
   }
 
   /**
-   * Render the editor
-   * @param fullRedraw - Whether to clear screen and redraw everything (default: false)
+   * Get editor state for React components
    */
-  async render(fullRedraw: boolean = false): Promise<void> {
-    // Clear screen if explicitly requested
-    if (fullRedraw) {
-      await this.state.terminal.clear();
-    }
-    
-    if (!this.state.currentBuffer) {
-      await this.state.terminal.moveCursor({ line: 0, column: 0 });
-      await this.state.terminal.write("No buffer loaded");
-      await this.renderStatusLine();
-      return;
-    }
+  getEditorState(): EditorState {
+    return {
+      currentBuffer: this.state.currentBuffer,
+      cursorPosition: this.state.cursorPosition,
+      mode: this.state.mode,
+      statusMessage: this.state.statusMessage,
+      viewportTop: this.state.viewportTop,
+      config: this.state.config,
+      commandLine: this.state.commandLine,
+      mxCommand: this.state.mxCommand,
+      currentFilename: this.state.currentFilename,
+      buffers: this.buffers as unknown as Map<string, FunctionalTextBuffer>,
+    };
+  }
 
-    this.updateViewport();
-    
-    const terminalSize = this.state.terminal.getSize();
-    const maxViewportLines = terminalSize.height - 1; // Reserve space for status line
-    const totalLines = this.state.currentBuffer.getLineCount();
-    
-    // Render visible lines
-    for (let viewportRow = 0; viewportRow < maxViewportLines; viewportRow++) {
-      const bufferLine = this.state.viewportTop + viewportRow;
-      
-      await this.state.terminal.moveCursor({ line: viewportRow, column: 0 });
-      
-      if (bufferLine < totalLines) {
-        const line = this.state.currentBuffer.getLine(bufferLine);
-        const displayLine = line.length > terminalSize.width ? 
-          line.substring(0, terminalSize.width - 1) : line;
-        await this.state.terminal.write(displayLine);
-      }
-      
-      await this.state.terminal.clearToEndOfLine();
-    }
-    
-    await this.renderStatusLine();
-    await this.positionCursor();
-  }
-  
   /**
-   * Render the status line at the bottom of the screen
+   * Set editor state from React components
    */
-  private async renderStatusLine(): Promise<void> {
-    const terminalSize = this.state.terminal.getSize();
-    const statusRow = terminalSize.height - 1;
-    
-    await this.state.terminal.moveCursor({ line: statusRow, column: 0 });
-    
-    let statusText: string;
-    
-    if (this.state.mode === "command") {
-      // In command mode, show the command line
-      statusText = `:${this.state.commandLine}`;
-    } else if (this.state.mode === "mx") {
-      // In M-x mode, show the M-x command line
-      statusText = `M-x ${this.state.mxCommand}`;
-    } else {
-      // In other modes, show mode and status
-      const mode = this.state.mode.toUpperCase();
-      const pos = `${this.state.cursorLine + 1}:${this.state.cursorColumn + 1}`;
-      statusText = `-- ${mode} -- ${pos} | ${this.state.statusMessage}`;
-    }
-    
-    // Truncate status if too long
-    const displayStatus = statusText.length > terminalSize.width ? 
-      statusText.substring(0, terminalSize.width) : statusText;
-    
-    await this.state.terminal.write(displayStatus);
-    await this.state.terminal.clearToEndOfLine();
-  }
-  
-  /**
-   * Position the cursor at the editing location
-   */
-  private async positionCursor(): Promise<void> {
-    if (this.state.mode === "command") {
-      // In command mode, position cursor at the command line
-      const terminalSize = this.state.terminal.getSize();
-      const statusRow = terminalSize.height - 1;
-      const commandCol = 1 + this.state.commandLine.length; // 1 for the ':' prefix
-      
-      await this.state.terminal.moveCursor({ line: statusRow, column: commandCol });
-    } else if (this.state.mode === "mx") {
-      // In M-x mode, position cursor at the M-x command line
-      const terminalSize = this.state.terminal.getSize();
-      const statusRow = terminalSize.height - 1;
-      const mxCol = 4 + this.state.mxCommand.length; // 4 for the 'M-x ' prefix
-      
-      await this.state.terminal.moveCursor({ line: statusRow, column: mxCol });
-    } else {
-      // In other modes, position cursor at the editing location
-      const screenRow = this.state.cursorLine - this.state.viewportTop;
-      const screenCol = this.state.cursorColumn;
-      
-      await this.state.terminal.moveCursor({ line: screenRow, column: screenCol });
-    }
-    
-    await this.state.terminal.showCursor();
+  setEditorState(newState: EditorState): void {
+    this.state.currentBuffer = newState.currentBuffer;
+    this.state.cursorPosition = newState.cursorPosition;
+    this.state.mode = newState.mode;
+    this.state.statusMessage = newState.statusMessage;
+    this.state.viewportTop = newState.viewportTop;
+    this.state.config = newState.config;
+    this.state.currentFilename = newState.currentFilename;
   }
 
   /**
    * Start the editor
+   * Note: In React UI mode, this method is used for initialization only
+   * The main event loop is handled by React components
    */
   async start(): Promise<void> {
     this.running = true;
-    
+
     // Load core bindings and user init file
     await this.ensureCoreBindingsLoaded();
     await this.loadInitFile();
-    
+
     // Create default buffer if none exists
-    if (this.state.buffers.size === 0) {
+    // But check if currentBuffer was already set (e.g., from main.tsx with a file)
+    if (this.buffers.size === 0 && !this.state.currentBuffer) {
       this.createBuffer("*scratch*", "");
-    }
-    
-    // Initial render
-    await this.render(true);
-    
-    while (this.running) {
-      // Get key input
-      const key = await this.state.terminal.readKey();
-      
-      try {
-        await this.handleKey(key);
-      } catch (error) {
-        if (error instanceof Error && error.message === "EDITOR_QUIT_SIGNAL") {
-          break;
-        }
-        // Handle other errors normally
-        this.state.statusMessage = `Error: ${error instanceof Error ? error.message : String(error)}`;
-      }
-      
-      // Render after handling input
-      await this.render(false);
     }
   }
 
@@ -617,5 +575,19 @@ export class Editor {
    */
   getKeyMappings(): Map<string, KeyMapping[]> {
     return this.keyMappings;
+  }
+
+  /**
+   * Check if editor is running
+   */
+  isRunning(): boolean {
+    return this.running;
+  }
+
+  /**
+   * Get current editor mode
+   */
+  getMode(): string {
+    return this.state.mode;
   }
 }

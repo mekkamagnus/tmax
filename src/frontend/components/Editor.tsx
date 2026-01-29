@@ -1,0 +1,215 @@
+/**
+ * @file Editor.tsx
+ * @description Main React Editor component for tmax with Deno-ink
+ * This is a DUMB component - ALL business logic is in T-Lisp
+ * It only captures input and renders the current state from T-Lisp
+ */
+
+import { Box, Text, useApp, useInput } from 'ink';
+import { useState, useEffect, useCallback, useRef } from "react";
+import { EditorState } from "../../core/types.ts";
+import { FunctionalTextBufferImpl } from "../../core/buffer.ts";
+import { Either } from "../../utils/task-either.ts";
+import { BufferView } from "./BufferView.tsx";
+import { StatusLine } from "./StatusLine.tsx";
+import { CommandInput } from "./CommandInput.tsx";
+import { useEditorState } from "../hooks/useEditorState.ts";
+import type { Editor as EditorClass } from "../../editor/editor.ts";
+
+interface EditorProps {
+  initialEditorState: EditorState;
+  editor: EditorClass;
+  filename?: string;
+  onStateChange?: (newState: EditorState) => void;
+  onError?: (error: Error) => void;
+}
+
+export const Editor = ({ initialEditorState, editor, filename, onStateChange, onError }: EditorProps) => {
+  const { state, setState, executeTlisp } = useEditorState(initialEditorState, editor);
+  const [error, setError] = useState<string | null>(null);
+  const [isLoading, setIsLoading] = useState(false);
+  const { exit } = useApp();
+
+  // Use a ref to always have access to the current state
+  const stateRef = useRef(state);
+  useEffect(() => {
+    stateRef.current = state;
+  }, [state]);
+
+  // Initialize the editor when component mounts
+  useEffect(() => {
+    const initEditor = async () => {
+      try {
+        await editor.start();
+        // Sync initial state from Editor class
+        setState(editor.getEditorState());
+      } catch (err) {
+        const errorMessage = err instanceof Error ? err.message : String(err);
+        handleError(`Failed to initialize editor: ${errorMessage}`);
+      }
+    };
+    initEditor();
+  }, [editor, setState]);
+
+  // Handle file I/O errors gracefully
+  const handleError = useCallback((errorMessage: string) => {
+    setError(errorMessage);
+    setState(prev => {
+      const newState = {
+        ...prev,
+        statusMessage: `ERROR: ${errorMessage}`
+      };
+
+      // Notify parent of state change
+      if (onStateChange) {
+        onStateChange(newState);
+      }
+
+      return newState;
+    });
+
+    // Clear error after 5 seconds
+    setTimeout(() => {
+      setError(null);
+      setState(prev => {
+        const newState = {
+          ...prev,
+          statusMessage: ""
+        };
+
+        if (onStateChange) {
+          onStateChange(newState);
+        }
+
+        return newState;
+      });
+    }, 5000);
+
+    // Call external error handler if provided
+    if (onError) {
+      onError(new Error(errorMessage));
+    }
+  }, [setState, onStateChange, onError]);
+
+  // Handle key input - ALL keys go through T-Lisp via executeTlisp
+  useInput(async (input: string, key: any) => {
+    try {
+      // Command mode input is handled by CommandInput component
+      // IMPORTANT: Use ref to always get current mode, not closure value
+      if (stateRef.current.mode === 'command' || stateRef.current.mode === 'mx') {
+        return;
+      }
+
+      // Escape key - normalize to the escape sequence T-Lisp expects
+      if (key.escape) {
+        await executeTlisp("\x1b");
+        return;
+      }
+
+      // Return key - normalize to newline for T-Lisp
+      if (key.return) {
+        await executeTlisp("\n");
+        return;
+      }
+
+      // Backspace key - normalize to backspace for T-Lisp
+      if (key.backspace || key.delete) {
+        await executeTlisp("\x7f");
+        return;
+      }
+
+      // All other keys - pass through to T-Lisp
+      // T-Lisp key bindings will determine what happens
+      if (input) {
+        await executeTlisp(input);
+      }
+    } catch (error) {
+      // Handle quit signal
+      if (error instanceof Error && error.message === "EDITOR_QUIT_SIGNAL") {
+        exit();
+        return;
+      }
+      // For other errors, show in status
+      handleError(error instanceof Error ? error.message : String(error));
+    }
+  }, [executeTlisp, exit]);
+
+  return (
+    <Box flexDirection="column" flexGrow={1}>
+      {/* Error display */}
+      {error && (
+        <Box paddingX={1} marginY={0.5}>
+          <Text color="white">{error}</Text>
+        </Box>
+      )}
+
+      {/* Loading indicator */}
+      {isLoading && (
+        <Box paddingX={1} marginY={0.5}>
+          <Text color="blue">Loading...</Text>
+        </Box>
+      )}
+
+      {/* Buffer View */}
+      <Box flexGrow={1} flexDirection="column">
+        <BufferView
+          buffer={state.currentBuffer || FunctionalTextBufferImpl.create("")}
+          cursorPosition={state.cursorPosition}
+          viewportTop={state.viewportTop}
+          onViewportChange={(top) => setState((prev: EditorState) => ({ ...prev, viewportTop: top }))}
+        />
+      </Box>
+
+      {/* Command Input (when in command mode) */}
+      {(state.mode === 'command' || state.mode === 'mx') && (
+        <Box>
+          <CommandInput
+            mode={state.mode}
+            onExecute={async (command) => {
+              // Execute the command directly via the editor
+              try {
+                if (state.mode === 'command') {
+                  // Handle vim-style commands
+                  const trimmedCommand = command.trim();
+                  if (trimmedCommand === 'q' || trimmedCommand === 'quit') {
+                    exit();
+                    return;
+                  } else if (trimmedCommand === 'w' || trimmedCommand === 'write') {
+                    await editor.saveFile();
+                    setState(editor.getEditorState());
+                  } else if (trimmedCommand === 'wq' || trimmedCommand === 'quit-write') {
+                    await editor.saveFile();
+                    exit();
+                    return;
+                  } else {
+                    handleError(`Unknown command: ${trimmedCommand}`);
+                  }
+                } else if (state.mode === 'mx') {
+                  // Handle M-x commands
+                  await editor.start(); // This will trigger the M-x execution
+                }
+              } catch (error) {
+                handleError(error instanceof Error ? error.message : String(error));
+              }
+            }}
+            onCancel={() => {
+              // Cancel also goes through T-Lisp
+              executeTlisp("\x1b").catch(err => {
+                if (err instanceof Error && err.message !== "EDITOR_QUIT_SIGNAL") {
+                  handleError(err.message);
+                }
+              });
+            }}
+          />
+        </Box>
+      )}
+
+      {/* Status Line */}
+      <StatusLine
+        mode={state.mode}
+        cursorPosition={state.cursorPosition}
+        statusMessage={state.statusMessage}
+      />
+    </Box>
+  );
+};
