@@ -97,7 +97,7 @@ export class Editor {
       get terminal() { return editor.terminal; },
       get filesystem() { return editor.filesystem; },
       get mode() { return editor.state.mode; },
-      set mode(v: any) { editor.state.mode = v; },
+      set mode(v: 'normal' | 'insert' | 'visual' | 'command' | 'mx') { editor.state.mode = v; },
       get lastCommand() { return ""; },
       set lastCommand(_: string) { },
       get statusMessage() { return editor.state.statusMessage; },
@@ -121,7 +121,18 @@ export class Editor {
     const api = createEditorAPI(tlispState);
 
     for (const [name, fn] of api) {
-      this.interpreter.defineBuiltin(name, fn);
+      // Wrap the Either-returning function to convert to the expected TLispFunctionImpl format
+      const wrappedFn = (args: TLispValue[]) => {
+        const result = fn(args);
+        if (Either.isLeft(result)) {
+          // Convert error to string representation or throw
+          // For now, we'll throw an error to match the expected behavior
+          throw new Error(`T-Lisp API Error: ${result.left.message}`);
+        }
+        return result.right;
+      };
+
+      this.interpreter.defineBuiltin(name, wrappedFn);
     }
 
     // Add key mapping functions
@@ -286,7 +297,7 @@ export class Editor {
    * @param command - Command to execute
    * @returns Result of command execution
    */
-  private executeCommand(command: string): any {
+  private executeCommand(command: string): unknown {
     try {
       this.state.lastCommand = command;
       return this.interpreter.execute(command);
