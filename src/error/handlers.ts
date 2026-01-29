@@ -13,28 +13,29 @@ import {
 export const formatError = (error: AppError): string => {
   let formatted = `${error.type}: ${error.variant}\n`;
   formatted += `Message: ${error.message}\n`;
-  
-  if (error.path) {
+
+  // Use type guards to safely access properties
+  if ('path' in error && error.path) {
     formatted += `Path: ${error.path}\n`;
   }
-  
-  if (error.configPath) {
+
+  if ('configPath' in error && error.configPath) {
     formatted += `Config Path: ${error.configPath}\n`;
   }
-  
-  if (error.field) {
+
+  if ('field' in error && error.field) {
     formatted += `Field: ${error.field}\n`;
   }
-  
-  if (error.value !== undefined) {
+
+  if ('value' in error && error.value !== undefined) {
     formatted += `Value: ${JSON.stringify(error.value)}\n`;
   }
-  
-  if (error.constraint) {
+
+  if ('constraint' in error && error.constraint) {
     formatted += `Constraint: ${error.constraint}\n`;
   }
-  
-  if (error.details) {
+
+  if ('details' in error && error.details) {
     formatted += `Details: ${JSON.stringify(error.details, null, 2)}\n`;
   }
   
