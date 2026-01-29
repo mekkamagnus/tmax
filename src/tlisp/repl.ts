@@ -3,21 +3,22 @@
  * @description T-Lisp REPL (Read-Eval-Print Loop) implementation
  */
 
-import { createInterface } from 'readline';
+import { createInterface, Interface } from 'readline';
 import { TLispParser } from "./parser.ts";
 import { createEvaluatorWithBuiltins } from "./evaluator.ts";
 import { valueToString } from "./values.ts";
 import type { TLispEnvironment } from "./types.ts";
+import { TLispEvaluator } from "./evaluator.ts";
 
 /**
  * T-Lisp REPL for interactive development
  */
 export class TLispREPL {
   private parser: TLispParser;
-  private evaluator: any;
+  private evaluator: TLispEvaluator;
   private env: TLispEnvironment;
   private running: boolean = false;
-  private rl: any;
+  private rl: Interface;
 
   /**
    * Create a new T-Lisp REPL
@@ -79,8 +80,12 @@ export class TLispREPL {
    * @param source - Source code to evaluate
    * @returns Evaluated result
    */
-  evaluate(source: string): any {
-    const expr = this.parser.parse(source);
+  evaluate(source: string) {
+    const parseResult = this.parser.parse(source);
+    if ('left' in parseResult) {
+      throw new Error(`Parse error: ${parseResult.left.message}`);
+    }
+    const expr = parseResult.right;
     return this.evaluator.eval(expr, this.env);
   }
 
@@ -143,9 +148,8 @@ export class TLispREPL {
    */
   private showEnvironment(): void {
     console.log("Environment bindings:");
-    const bindings = (this.env as any).bindings;
-    if (bindings && bindings.size > 0) {
-      for (const [name, value] of bindings) {
+    if ('bindings' in this.env && this.env.bindings && this.env.bindings.size > 0) {
+      for (const [name, value] of this.env.bindings) {
         console.log(`  ${name}: ${valueToString(value)}`);
       }
     } else {
@@ -165,14 +169,6 @@ export class TLispREPL {
         resolve(answer.trim());
       });
     });
-  }
-
-  /**
-   * Stop the REPL
-   */
-  stop(): void {
-    this.running = false;
-    this.rl.close();
   }
 }
 
