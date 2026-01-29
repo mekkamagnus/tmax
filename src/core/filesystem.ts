@@ -8,6 +8,7 @@ import type { FileStats, FileSystem } from "./types.ts";
 import { TaskEither, TaskEitherUtils, Either } from "../utils/task-either.ts";
 import * as fs from 'fs';
 import * as fsPromises from 'fs/promises';
+import { FileSystemError, createFileSystemError } from "../error/types.ts";
 
 /**
  * Functional file system operations interface using TaskEither
@@ -15,25 +16,25 @@ import * as fsPromises from 'fs/promises';
 export interface FunctionalFileSystem {
 
   /** Read file contents */
-  readFile(path: string): TaskEither<string, string>;
+  readFile(path: string): TaskEither<FileSystemError, string>;
 
   /** Write file contents */
-  writeFile(path: string, content: string): TaskEither<string, void>;
+  writeFile(path: string, content: string): TaskEither<FileSystemError, void>;
 
   /** Check if file exists */
-  exists(path: string): TaskEither<string, boolean>;
+  exists(path: string): TaskEither<FileSystemError, boolean>;
 
   /** Get file stats */
-  stat(path: string): TaskEither<string, FileStats>;
+  stat(path: string): TaskEither<FileSystemError, FileStats>;
 
   /** Remove a file */
-  remove(path: string): TaskEither<string, void>;
+  remove(path: string): TaskEither<FileSystemError, void>;
 
   /** Create backup of file */
-  backup(path: string): TaskEither<string, string>;
+  backup(path: string): TaskEither<FileSystemError, string>;
 
   /** Atomic save operation (backup + write) */
-  atomicSave(path: string, content: string): TaskEither<string, { saved: boolean; backupPath?: string }>;
+  atomicSave(path: string, content: string): TaskEither<FileSystemError, { saved: boolean; backupPath?: string }>;
 }
 
 /**
@@ -44,21 +45,43 @@ export class FunctionalFileSystemImpl implements FunctionalFileSystem {
   /**
    * Read file contents with proper error handling
    */
-  readFile(path: string): TaskEither<string, string> {
-    return TaskEitherUtils.readFile(path);
+  readFile(path: string): TaskEither<FileSystemError, string> {
+    return TaskEither.tryCatch(
+      async () => {
+        const fs = await import('fs/promises');
+        return await fs.readFile(path, 'utf-8');
+      },
+      (error) => createFileSystemError(
+        'ReadError',
+        `Failed to read file ${path}: ${error instanceof Error ? error.message : String(error)}`,
+        path,
+        { error: error instanceof Error ? error.message : String(error) }
+      )
+    );
   }
 
   /**
    * Write file contents with proper error handling
    */
-  writeFile(path: string, content: string): TaskEither<string, void> {
-    return TaskEitherUtils.writeFile(path, content);
+  writeFile(path: string, content: string): TaskEither<FileSystemError, void> {
+    return TaskEither.tryCatch(
+      async () => {
+        const fs = await import('fs/promises');
+        await fs.writeFile(path, content, 'utf-8');
+      },
+      (error) => createFileSystemError(
+        'WriteError',
+        `Failed to write file ${path}: ${error instanceof Error ? error.message : String(error)}`,
+        path,
+        { error: error instanceof Error ? error.message : String(error) }
+      )
+    );
   }
 
   /**
    * Check if file exists without throwing errors
    */
-  exists(path: string): TaskEither<string, boolean> {
+  exists(path: string): TaskEither<FileSystemError, boolean> {
     return TaskEither.tryCatch(
       async () => {
         try {
@@ -71,14 +94,19 @@ export class FunctionalFileSystemImpl implements FunctionalFileSystem {
           throw error;
         }
       },
-      (error) => `Failed to check if ${path} exists: ${error instanceof Error ? error.message : String(error)}`
+      (error) => createFileSystemError(
+        'StatError',
+        `Failed to check if ${path} exists: ${error instanceof Error ? error.message : String(error)}`,
+        path,
+        { error: error instanceof Error ? error.message : String(error) }
+      )
     );
   }
 
   /**
    * Get file stats with functional error handling
    */
-  stat(path: string): TaskEither<string, FileStats> {
+  stat(path: string): TaskEither<FileSystemError, FileStats> {
     return TaskEither.tryCatch(
       async () => {
         const info = await fsPromises.stat(path);
@@ -89,40 +117,49 @@ export class FunctionalFileSystemImpl implements FunctionalFileSystem {
           modified: info.mtime || new Date(),
         };
       },
-      (error) => `Failed to get stats for ${path}: ${error instanceof Error ? error.message : String(error)}`
+      (error) => createFileSystemError(
+        'StatError',
+        `Failed to get stats for ${path}: ${error instanceof Error ? error.message : String(error)}`,
+        path,
+        { error: error instanceof Error ? error.message : String(error) }
+      )
     );
   }
 
   /**
    * Remove a file with functional error handling
    */
-  remove(path: string): TaskEither<string, void> {
+  remove(path: string): TaskEither<FileSystemError, void> {
     return TaskEither.tryCatch(
       async () => {
         await fsPromises.unlink(path);
       },
-      (error) => `Failed to remove file ${path}: ${error instanceof Error ? error.message : String(error)}`
+      (error) => createFileSystemError(
+        'WriteError',
+        `Failed to remove file ${path}: ${error instanceof Error ? error.message : String(error)}`,
+        path,
+        { error: error instanceof Error ? error.message : String(error) }
+      )
     );
   }
 
   /**
    * Create a backup of the file
    */
-  backup(path: string): TaskEither<string, string> {
+  backup(path: string): TaskEither<FileSystemError, string> {
     const backupPath = `${path}.backup.${Date.now()}`;
 
     return this.readFile(path)
       .flatMap(content => this.writeFile(backupPath, content))
-      .map(() => backupPath)
-      .mapLeft(error => `Backup operation failed for ${path}: ${error}`);
+      .map(() => backupPath);
   }
 
   /**
    * Atomic save operation: backup existing file then write new content
    */
-  atomicSave(path: string, content: string): TaskEither<string, { saved: boolean; backupPath?: string }> {
+  atomicSave(path: string, content: string): TaskEither<FileSystemError, { saved: boolean; backupPath?: string }> {
     return this.exists(path)
-      .flatMap((fileExists: boolean): TaskEither<string, { saved: boolean; backupPath?: string }> => {
+      .flatMap((fileExists: boolean) => {
         if (!fileExists) {
           // File doesn't exist, just write it
           return this.writeFile(path, content)
@@ -135,8 +172,7 @@ export class FunctionalFileSystemImpl implements FunctionalFileSystem {
             this.writeFile(path, content)
               .map(() => ({ saved: true, backupPath }))
           );
-      })
-      .mapLeft(error => `Atomic save failed for ${path}: ${error}`);
+      });
   }
 }
 
@@ -147,18 +183,38 @@ export const FileSystemUtils = {
   /**
    * Read and parse JSON file
    */
-  readJsonFile: <T>(path: string): TaskEither<string, T> =>
-    TaskEitherUtils.readFile(path)
-      .flatMap(content => TaskEitherUtils.parseJSON<T>(content))
-      .mapLeft(error => `Failed to read JSON file ${path}: ${error}`),
+  readJsonFile: <T>(path: string): TaskEither<FileSystemError, T> =>
+    TaskEither.tryCatch(
+      async () => {
+        const fs = await import('fs/promises');
+        const content = await fs.readFile(path, 'utf-8');
+        return JSON.parse(content) as T;
+      },
+      (error) => createFileSystemError(
+        'ReadError',
+        `Failed to read JSON file ${path}: ${error instanceof Error ? error.message : String(error)}`,
+        path,
+        { error: error instanceof Error ? error.message : String(error) }
+      )
+    ),
 
   /**
    * Write JSON file with pretty formatting
    */
-  writeJsonFile: (path: string, data: unknown): TaskEither<string, void> =>
-    TaskEitherUtils.stringifyJSON(data)
-      .flatMap(content => TaskEitherUtils.writeFile(path, content))
-      .mapLeft(error => `Failed to write JSON file ${path}: ${error}`),
+  writeJsonFile: (path: string, data: unknown): TaskEither<FileSystemError, void> =>
+    TaskEither.tryCatch(
+      async () => {
+        const fs = await import('fs/promises');
+        const content = JSON.stringify(data, null, 2);
+        await fs.writeFile(path, content, 'utf-8');
+      },
+      (error) => createFileSystemError(
+        'WriteError',
+        `Failed to write JSON file ${path}: ${error instanceof Error ? error.message : String(error)}`,
+        path,
+        { error: error instanceof Error ? error.message : String(error) }
+      )
+    ),
 
   /**
    * Copy file from source to destination
