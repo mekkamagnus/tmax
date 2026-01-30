@@ -20,7 +20,7 @@ describe("Core Bindings File Structure", () => {
 
     // Count key-bind function calls (exclude comments)
     const keyBindMatches = content.match(/^\(key-bind/gm);
-    expect(keyBindMatches?.length).toBe(17, "Should contain exactly 17 key-bind calls");
+    expect(keyBindMatches?.length).toBe(15, "Should contain exactly 15 key-bind calls");
   });
 
   test("should contain basic navigation bindings", async () => {

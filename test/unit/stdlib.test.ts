@@ -3,312 +3,315 @@
  * @description Tests for T-Lisp standard library functions
  */
 
-import { assertEquals, assertThrows } from "@std/assert";
+import { describe, test, expect } from "bun:test";
 import { createEvaluatorWithBuiltins } from "../../src/tlisp/evaluator.ts";
 import { TLispParser } from "../../src/tlisp/parser.ts";
 import { createNumber, createString, createBoolean, createNil, createList, createSymbol } from "../../src/tlisp/values.ts";
+import { Either } from "../../src/utils/task-either.ts";
 
-/**
- * Test suite for T-Lisp standard library
- */
-Deno.test("T-Lisp Standard Library", async (t) => {
+describe("T-Lisp Standard Library", () => {
   const { evaluator, env } = createEvaluatorWithBuiltins();
   const parser = new TLispParser();
 
-  // String functions
-  await t.step("should handle string operations", async (t) => {
-    await t.step("length function", () => {
-      let expr = parser.parse('(length "hello")');
-      let result = evaluator.eval(expr, env);
-      assertEquals(result, createNumber(5));
-      
-      expr = parser.parse("(length '(1 2 3 4))");
-      result = evaluator.eval(expr, env);
-      assertEquals(result, createNumber(4));
-    });
+  // Helper to parse expression and extract .right value
+  const parseExpr = (code: string) => {
+    const result = parser.parse(code);
+    if (Either.isLeft(result)) {
+      throw new Error(`Parse error: ${result.left}`);
+    }
+    return result.right;
+  };
 
-    await t.step("substring function", () => {
-      const expr = parser.parse('(substring "hello world" 0 5)');
-      const result = evaluator.eval(expr, env);
-      assertEquals(result, createString("hello"));
-    });
-
-    await t.step("string-append function", () => {
-      const expr = parser.parse('(string-append "hello" " " "world")');
-      const result = evaluator.eval(expr, env);
-      assertEquals(result, createString("hello world"));
-    });
-
-    await t.step("string comparison functions", () => {
-      let expr = parser.parse('(string= "hello" "hello")');
-      let result = evaluator.eval(expr, env);
-      assertEquals(result, createBoolean(true));
-
-      expr = parser.parse('(string= "hello" "world")');
-      result = evaluator.eval(expr, env);
-      assertEquals(result, createBoolean(false));
-
-      expr = parser.parse('(string< "apple" "banana")');
-      result = evaluator.eval(expr, env);
-      assertEquals(result, createBoolean(true));
-
-      expr = parser.parse('(string> "banana" "apple")');
-      result = evaluator.eval(expr, env);
-      assertEquals(result, createBoolean(true));
-    });
-
-    await t.step("string case functions", () => {
-      let expr = parser.parse('(string-upcase "hello")');
-      let result = evaluator.eval(expr, env);
-      assertEquals(result, createString("HELLO"));
-
-      expr = parser.parse('(string-downcase "WORLD")');
-      result = evaluator.eval(expr, env);
-      assertEquals(result, createString("world"));
-    });
-  });
-
-  // List functions
-  await t.step("should handle advanced list operations", async (t) => {
-    await t.step("append function", () => {
-      const expr = parser.parse("(append '(1 2) '(3 4) '(5))");
-      const result = evaluator.eval(expr, env);
-      assertEquals(result.type, "list");
-      const list = result.value as any[];
-      assertEquals(list.length, 5);
-      assertEquals(list[0].value, 1);
-      assertEquals(list[4].value, 5);
-    });
-
-    await t.step("reverse function", () => {
-      const expr = parser.parse("(reverse '(1 2 3 4))");
-      const result = evaluator.eval(expr, env);
-      assertEquals(result.type, "list");
-      const list = result.value as any[];
-      assertEquals(list.length, 4);
-      assertEquals(list[0].value, 4);
-      assertEquals(list[3].value, 1);
-    });
-
-    await t.step("nth function", () => {
-      let expr = parser.parse("(nth 0 '(a b c))");
-      let result = evaluator.eval(expr, env);
-      assertEquals(result.type, "symbol");
-      assertEquals(result.value, "a");
-
-      expr = parser.parse("(nth 2 '(a b c))");
-      result = evaluator.eval(expr, env);
-      assertEquals(result.type, "symbol");
-      assertEquals(result.value, "c");
-
-      expr = parser.parse("(nth 5 '(a b c))");
-      result = evaluator.eval(expr, env);
-      assertEquals(result.type, "nil");
-    });
-
-    await t.step("last function", () => {
-      let expr = parser.parse("(last '(1 2 3 4))");
-      let result = evaluator.eval(expr, env);
-      assertEquals(result, createNumber(4));
-
-      expr = parser.parse("(last '())");
-      result = evaluator.eval(expr, env);
-      assertEquals(result.type, "nil");
-    });
-
-    await t.step("member function", () => {
-      let expr = parser.parse("(member 2 '(1 2 3 4))");
-      let result = evaluator.eval(expr, env);
-      assertEquals(result.type, "list");
-      let list = result.value as any[];
-      assertEquals(list.length, 3);
-      assertEquals(list[0].value, 2);
-
-      expr = parser.parse("(member 5 '(1 2 3 4))");
-      result = evaluator.eval(expr, env);
-      assertEquals(result.type, "nil");
-    });
-  });
-
-  // Type predicates
-  await t.step("should handle type predicates", async (t) => {
-    await t.step("basic type predicates", () => {
-      let expr = parser.parse("(numberp 42)");
-      let result = evaluator.eval(expr, env);
-      assertEquals(result, createBoolean(true));
-
-      expr = parser.parse('(stringp "hello")');
-      result = evaluator.eval(expr, env);
-      assertEquals(result, createBoolean(true));
-
-      expr = parser.parse("(symbolp 'foo)");
-      result = evaluator.eval(expr, env);
-      assertEquals(result, createBoolean(true));
-
-      expr = parser.parse("(listp '(1 2 3))");
-      result = evaluator.eval(expr, env);
-      assertEquals(result, createBoolean(true));
-
-      expr = parser.parse("(functionp +)");
-      result = evaluator.eval(expr, env);
-      assertEquals(result, createBoolean(true));
-    });
-
-    await t.step("number predicates", () => {
-      let expr = parser.parse("(zerop 0)");
-      let result = evaluator.eval(expr, env);
-      assertEquals(result, createBoolean(true));
-
-      expr = parser.parse("(zerop 5)");
-      result = evaluator.eval(expr, env);
-      assertEquals(result, createBoolean(false));
-
-      expr = parser.parse("(evenp 4)");
-      result = evaluator.eval(expr, env);
-      assertEquals(result, createBoolean(true));
-
-      expr = parser.parse("(evenp 3)");
-      result = evaluator.eval(expr, env);
-      assertEquals(result, createBoolean(false));
-
-      expr = parser.parse("(oddp 3)");
-      result = evaluator.eval(expr, env);
-      assertEquals(result, createBoolean(true));
-
-      expr = parser.parse("(oddp 4)");
-      result = evaluator.eval(expr, env);
-      assertEquals(result, createBoolean(false));
-    });
-  });
-
-  // Mathematical functions
-  await t.step("should handle mathematical operations", async (t) => {
-    await t.step("basic math functions", () => {
-      let expr = parser.parse("(abs -5)");
-      let result = evaluator.eval(expr, env);
-      assertEquals(result, createNumber(5));
-
-      expr = parser.parse("(abs 3)");
-      result = evaluator.eval(expr, env);
-      assertEquals(result, createNumber(3));
-
-      expr = parser.parse("(min 3 1 4 2)");
-      result = evaluator.eval(expr, env);
-      assertEquals(result, createNumber(1));
-
-      expr = parser.parse("(max 3 1 4 2)");
-      result = evaluator.eval(expr, env);
-      assertEquals(result, createNumber(4));
-    });
-
-    await t.step("advanced math functions", () => {
-      let expr = parser.parse("(sqrt 16)");
-      let result = evaluator.eval(expr, env);
-      assertEquals(result, createNumber(4));
-
-      expr = parser.parse("(expt 2 3)");
-      result = evaluator.eval(expr, env);
-      assertEquals(result, createNumber(8));
-
-      expr = parser.parse("(mod 7 3)");
-      result = evaluator.eval(expr, env);
-      assertEquals(result, createNumber(1));
-
-      expr = parser.parse("(floor 3.7)");
-      result = evaluator.eval(expr, env);
-      assertEquals(result, createNumber(3));
-
-      expr = parser.parse("(ceiling 3.2)");
-      result = evaluator.eval(expr, env);
-      assertEquals(result, createNumber(4));
-
-      expr = parser.parse("(round 3.6)");
-      result = evaluator.eval(expr, env);
-      assertEquals(result, createNumber(4));
-    });
-  });
-
-  // Logical functions
-  await t.step("should handle logical operations", () => {
-    let expr = parser.parse("(not t)");
-    let result = evaluator.eval(expr, env);
-    assertEquals(result, createBoolean(false));
-
-    expr = parser.parse("(not nil)");
-    result = evaluator.eval(expr, env);
-    assertEquals(result, createBoolean(true));
-
-    expr = parser.parse("(not 0)");
-    result = evaluator.eval(expr, env);
-    assertEquals(result, createBoolean(false));
-  });
-
-  // I/O functions
-  await t.step("should handle I/O operations", () => {
-    // Test print function (returns nil)
-    const expr = parser.parse('(print "hello" 42 t)');
+  // Helper to eval expression and extract .right value
+  const evalExpr = (expr: any) => {
     const result = evaluator.eval(expr, env);
-    assertEquals(result.type, "nil");
-  });
+    if (Either.isLeft(result)) {
+      throw new Error(`Eval error: ${result.left}`);
+    }
+    return result.right;
+  };
 
-  // Error handling
-  await t.step("should handle errors appropriately", async (t) => {
-    await t.step("should throw on wrong argument types", () => {
-      assertThrows(() => {
-        const expr = parser.parse("(length 42)");
-        evaluator.eval(expr, env);
-      });
+  describe("should handle string operations", () => {
+    test("length function", () => {
+      let expr = parseExpr('(length "hello")');
+      let result = evalExpr(expr, env);
+      expect(result).toEqual(createNumber(5));
 
-      assertThrows(() => {
-        const expr = parser.parse("(sqrt -4)");
-        evaluator.eval(expr, env);
-      });
-
-      assertThrows(() => {
-        const expr = parser.parse("(mod 5 0)");
-        evaluator.eval(expr, env);
-      });
+      expr = parseExpr("(length '(1 2 3 4))");
+      result = evalExpr(expr, env);
+      expect(result).toEqual(createNumber(4));
     });
 
-    await t.step("should throw on wrong argument counts", () => {
-      assertThrows(() => {
-        const expr = parser.parse("(abs 1 2)");
-        evaluator.eval(expr, env);
-      });
+    test("substring function", () => {
+      const expr = parseExpr('(substring "hello world" 0 5)');
+      const result = evalExpr(expr, env);
+      expect(result).toEqual(createString("hello"));
+    });
 
-      assertThrows(() => {
-        const expr = parser.parse("(min)");
-        evaluator.eval(expr, env);
-      });
+    test("string-append function", () => {
+      const expr = parseExpr('(string-append "hello" " " "world")');
+      const result = evalExpr(expr, env);
+      expect(result).toEqual(createString("hello world"));
+    });
+
+    test("string comparison functions", () => {
+      let expr = parseExpr('(string= "hello" "hello")');
+      let result = evalExpr(expr, env);
+      expect(result).toEqual(createBoolean(true));
+
+      expr = parseExpr('(string= "hello" "world")');
+      result = evalExpr(expr, env);
+      expect(result).toEqual(createBoolean(false));
+
+      expr = parseExpr('(string< "apple" "banana")');
+      result = evalExpr(expr, env);
+      expect(result).toEqual(createBoolean(true));
+
+      expr = parseExpr('(string> "banana" "apple")');
+      result = evalExpr(expr, env);
+      expect(result).toEqual(createBoolean(true));
+    });
+
+    test("string case functions", () => {
+      let expr = parseExpr('(string-upcase "hello")');
+      let result = evalExpr(expr, env);
+      expect(result).toEqual(createString("HELLO"));
+
+      expr = parseExpr('(string-downcase "WORLD")');
+      result = evalExpr(expr, env);
+      expect(result).toEqual(createString("world"));
     });
   });
 
-  // Integration tests
-  await t.step("should handle complex standard library usage", async (t) => {
-    await t.step("combined string and list operations", () => {
-      const expr = parser.parse(`
+  describe("should handle advanced list operations", () => {
+    test("append function", () => {
+      const expr = parseExpr("(append '(1 2) '(3 4) '(5))");
+      const result = evalExpr(expr, env);
+      expect(result.type).toBe("list");
+      const list = result.value as any[];
+      expect(list.length).toBe(5);
+      expect(list[0].value).toBe(1);
+      expect(list[4].value).toBe(5);
+    });
+
+    test("reverse function", () => {
+      const expr = parseExpr("(reverse '(1 2 3 4))");
+      const result = evalExpr(expr, env);
+      expect(result.type).toBe("list");
+      const list = result.value as any[];
+      expect(list.length).toBe(4);
+      expect(list[0].value).toBe(4);
+      expect(list[3].value).toBe(1);
+    });
+
+    test("nth function", () => {
+      let expr = parseExpr("(nth 0 '(a b c))");
+      let result = evalExpr(expr, env);
+      expect(result.type).toBe("symbol");
+      expect(result.value).toBe("a");
+
+      expr = parseExpr("(nth 2 '(a b c))");
+      result = evalExpr(expr, env);
+      expect(result.type).toBe("symbol");
+      expect(result.value).toBe("c");
+
+      expr = parseExpr("(nth 5 '(a b c))");
+      result = evalExpr(expr, env);
+      expect(result.type).toBe("nil");
+    });
+
+    test("last function", () => {
+      let expr = parseExpr("(last '(1 2 3 4))");
+      let result = evalExpr(expr, env);
+      expect(result).toEqual(createNumber(4));
+
+      expr = parseExpr("(last '())");
+      result = evalExpr(expr, env);
+      expect(result.type).toBe("nil");
+    });
+
+    test("member function", () => {
+      let expr = parseExpr("(member 2 '(1 2 3 4))");
+      let result = evalExpr(expr, env);
+      expect(result.type).toBe("list");
+      let list = result.value as any[];
+      expect(list.length).toBe(3);
+      expect(list[0].value).toBe(2);
+
+      expr = parseExpr("(member 5 '(1 2 3 4))");
+      result = evalExpr(expr, env);
+      expect(result.type).toBe("nil");
+    });
+  });
+
+  describe("should handle type predicates", () => {
+    test("basic type predicates", () => {
+      let expr = parseExpr("(numberp 42)");
+      let result = evalExpr(expr, env);
+      expect(result).toEqual(createBoolean(true));
+
+      expr = parseExpr('(stringp "hello")');
+      result = evalExpr(expr, env);
+      expect(result).toEqual(createBoolean(true));
+
+      expr = parseExpr("(symbolp 'foo)");
+      result = evalExpr(expr, env);
+      expect(result).toEqual(createBoolean(true));
+
+      expr = parseExpr("(listp '(1 2 3))");
+      result = evalExpr(expr, env);
+      expect(result).toEqual(createBoolean(true));
+
+      expr = parseExpr("(functionp +)");
+      result = evalExpr(expr, env);
+      expect(result).toEqual(createBoolean(true));
+    });
+
+    test("number predicates", () => {
+      let expr = parseExpr("(zerop 0)");
+      let result = evalExpr(expr, env);
+      expect(result).toEqual(createBoolean(true));
+
+      expr = parseExpr("(zerop 5)");
+      result = evalExpr(expr, env);
+      expect(result).toEqual(createBoolean(false));
+
+      expr = parseExpr("(evenp 4)");
+      result = evalExpr(expr, env);
+      expect(result).toEqual(createBoolean(true));
+
+      expr = parseExpr("(evenp 3)");
+      result = evalExpr(expr, env);
+      expect(result).toEqual(createBoolean(false));
+
+      expr = parseExpr("(oddp 3)");
+      result = evalExpr(expr, env);
+      expect(result).toEqual(createBoolean(true));
+
+      expr = parseExpr("(oddp 4)");
+      result = evalExpr(expr, env);
+      expect(result).toEqual(createBoolean(false));
+    });
+  });
+
+  describe("should handle mathematical operations", () => {
+    test("basic math functions", () => {
+      let expr = parseExpr("(abs -5)");
+      let result = evalExpr(expr, env);
+      expect(result).toEqual(createNumber(5));
+
+      expr = parseExpr("(abs 3)");
+      result = evalExpr(expr, env);
+      expect(result).toEqual(createNumber(3));
+
+      expr = parseExpr("(min 3 1 4 2)");
+      result = evalExpr(expr, env);
+      expect(result).toEqual(createNumber(1));
+
+      expr = parseExpr("(max 3 1 4 2)");
+      result = evalExpr(expr, env);
+      expect(result).toEqual(createNumber(4));
+    });
+
+    test("advanced math functions", () => {
+      let expr = parseExpr("(sqrt 16)");
+      let result = evalExpr(expr, env);
+      expect(result).toEqual(createNumber(4));
+
+      expr = parseExpr("(expt 2 3)");
+      result = evalExpr(expr, env);
+      expect(result).toEqual(createNumber(8));
+
+      expr = parseExpr("(mod 7 3)");
+      result = evalExpr(expr, env);
+      expect(result).toEqual(createNumber(1));
+
+      expr = parseExpr("(floor 3.7)");
+      result = evalExpr(expr, env);
+      expect(result).toEqual(createNumber(3));
+
+      expr = parseExpr("(ceiling 3.2)");
+      result = evalExpr(expr, env);
+      expect(result).toEqual(createNumber(4));
+
+      expr = parseExpr("(round 3.6)");
+      result = evalExpr(expr, env);
+      expect(result).toEqual(createNumber(4));
+    });
+  });
+
+  test("should handle logical operations", () => {
+    let expr = parseExpr("(not t)");
+    let result = evalExpr(expr, env);
+    expect(result).toEqual(createBoolean(false));
+
+    expr = parseExpr("(not nil)");
+    result = evalExpr(expr, env);
+    expect(result).toEqual(createBoolean(true));
+
+    expr = parseExpr("(not 0)");
+    result = evalExpr(expr, env);
+    expect(result).toEqual(createBoolean(false));
+  });
+
+  test("should handle I/O operations", () => {
+    // Test print function (returns nil)
+    const expr = parseExpr('(print "hello" 42 t)');
+    const result = evalExpr(expr, env);
+    expect(result.type).toBe("nil");
+  });
+
+  describe("should handle errors appropriately", () => {
+    test("should return error on wrong argument types", () => {
+      const expr1 = parseExpr("(length 42)");
+      const result1 = evaluator.eval(expr1, env);
+      expect(Either.isLeft(result1)).toBe(true);
+
+      const expr2 = parseExpr("(sqrt -4)");
+      const result2 = evaluator.eval(expr2, env);
+      expect(Either.isLeft(result2)).toBe(true);
+
+      const expr3 = parseExpr("(mod 5 0)");
+      const result3 = evaluator.eval(expr3, env);
+      expect(Either.isLeft(result3)).toBe(true);
+    });
+
+    test("should return error on wrong argument counts", () => {
+      const expr1 = parseExpr("(abs 1 2)");
+      const result1 = evaluator.eval(expr1, env);
+      expect(Either.isLeft(result1)).toBe(true);
+
+      const expr2 = parseExpr("(min)");
+      const result2 = evaluator.eval(expr2, env);
+      expect(Either.isLeft(result2)).toBe(true);
+    });
+  });
+
+  describe("should handle complex standard library usage", () => {
+    test("combined string and list operations", () => {
+      const expr = parseExpr(`
         (let ((words '("hello" "world" "from" "T-Lisp")))
-          (length (string-append 
-            (nth 0 words) 
-            " " 
+          (length (string-append
+            (nth 0 words)
+            " "
             (nth 1 words))))
       `);
-      const result = evaluator.eval(expr, env);
-      assertEquals(result, createNumber(11)); // "hello world".length
+      const result = evalExpr(expr, env);
+      expect(result).toEqual(createNumber(11)); // "hello world".length
     });
 
-    await t.step("mathematical computations", () => {
-      const expr = parser.parse(`
+    test("mathematical computations", () => {
+      const expr = parseExpr(`
         (let ((numbers '(1 2 3 4 5)))
           (+ (abs (- (nth 0 numbers) (nth 4 numbers)))
              (sqrt (expt (nth 1 numbers) 2))))
       `);
-      const result = evaluator.eval(expr, env);
-      assertEquals(result, createNumber(6)); // abs(1-5) + sqrt(2^2) = 4 + 2 = 6
+      const result = evalExpr(expr, env);
+      expect(result).toEqual(createNumber(6)); // abs(1-5) + sqrt(2^2) = 4 + 2 = 6
     });
 
-    await t.step("type checking and conditional logic", () => {
-      const expr = parser.parse(`
+    test("type checking and conditional logic", () => {
+      const expr = parseExpr(`
         (defun describe-value (x)
           (if (numberp x)
               (if (zerop x)
@@ -320,21 +323,21 @@ Deno.test("T-Lisp Standard Library", async (t) => {
       `);
       evaluator.eval(expr, env);
 
-      let testExpr = parser.parse("(describe-value 0)");
-      let result = evaluator.eval(testExpr, env);
-      assertEquals(result, createString("zero"));
+      let testExpr = parseExpr("(describe-value 0)");
+      let result = evalExpr(testExpr, env);
+      expect(result).toEqual(createString("zero"));
 
-      testExpr = parser.parse("(describe-value 4)");
-      result = evaluator.eval(testExpr, env);
-      assertEquals(result, createString("even number"));
+      testExpr = parseExpr("(describe-value 4)");
+      result = evalExpr(testExpr, env);
+      expect(result).toEqual(createString("even number"));
 
-      testExpr = parser.parse("(describe-value 3)");
-      result = evaluator.eval(testExpr, env);
-      assertEquals(result, createString("odd number"));
+      testExpr = parseExpr("(describe-value 3)");
+      result = evalExpr(testExpr, env);
+      expect(result).toEqual(createString("odd number"));
 
-      testExpr = parser.parse('(describe-value "hello")');
-      result = evaluator.eval(testExpr, env);
-      assertEquals(result, createString("text"));
+      testExpr = parseExpr('(describe-value "hello")');
+      result = evalExpr(testExpr, env);
+      expect(result).toEqual(createString("text"));
     });
   });
 });

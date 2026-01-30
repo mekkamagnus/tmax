@@ -3,36 +3,33 @@
  * @description Tests for terminal I/O system
  */
 
-import { assertEquals, assertExists } from "@std/assert";
+import { describe, test, expect } from "bun:test";
 import { TerminalIOImpl } from "../../src/core/terminal.ts";
 import type { TerminalIO } from "../../src/core/types.ts";
 
-/**
- * Test suite for terminal I/O functionality
- */
-Deno.test("TerminalIO", async (t) => {
+describe("TerminalIO", () => {
   let terminal: TerminalIO;
 
-  await t.step("should create terminal instance", () => {
+  test("should create terminal instance", () => {
     terminal = new TerminalIOImpl();
-    assertExists(terminal);
+    expect(terminal).toBeDefined();
   });
 
-  await t.step("should get terminal size", () => {
+  test("should get terminal size", () => {
     const size = terminal.getSize();
-    assertExists(size);
-    assertEquals(typeof size.width, "number");
-    assertEquals(typeof size.height, "number");
+    expect(size).toBeDefined();
+    expect(typeof size.width).toBe("number");
+    expect(typeof size.height).toBe("number");
   });
 
-  await t.step("should have cursor movement methods", () => {
-    assertExists(terminal.moveCursor);
-    assertExists(terminal.write);
-    assertExists(terminal.clear);
+  test("should have cursor movement methods", () => {
+    expect(terminal.moveCursor).toBeDefined();
+    expect(terminal.write).toBeDefined();
+    expect(terminal.clear).toBeDefined();
   });
 
-  await t.step("should have raw mode methods", () => {
-    assertExists(terminal.enterRawMode);
-    assertExists(terminal.exitRawMode);
+  test("should have raw mode methods", () => {
+    expect(terminal.enterRawMode).toBeDefined();
+    expect(terminal.exitRawMode).toBeDefined();
   });
 });

@@ -12,6 +12,11 @@ import { createString } from "../tlisp/values.ts";
 import type { TerminalIO, FileSystem } from "../core/types.ts";
 import { Either } from "../utils/task-either.ts";
 import { FunctionalTextBufferImpl } from "../core/buffer.ts";
+import { handleNormalMode } from "./handlers/normal-handler.ts";
+import { handleInsertMode } from "./handlers/insert-handler.ts";
+import { handleVisualMode } from "./handlers/visual-handler.ts";
+import { handleCommandMode } from "./handlers/command-handler.ts";
+import { handleMxMode } from "./handlers/mx-handler.ts";
 
 /**
  * Key mapping for editor commands
@@ -210,10 +215,45 @@ export class Editor {
   }
 
   /**
+   * Resolve the path to the core bindings file
+   * @returns Path to core bindings file or null if not found
+   */
+  private resolveBindingsPath(): string | null {
+    const possiblePaths = [
+      "src/tlisp/core-bindings.tlisp",
+      "./src/tlisp/core-bindings.tlisp",
+    ];
+
+    // For now, we'll just return the first path that exists
+    // In a more sophisticated implementation, we might check if the file exists
+    for (const path of possiblePaths) {
+      // We'll try each path in the loading function
+      return path; // Return first possible path to try
+    }
+    return null;
+  }
+
+  /**
+   * Load bindings from file
+   * @param path - Path to the bindings file
+   * @returns true if loaded successfully, false otherwise
+   */
+  private async loadBindingsFromFile(path: string): Promise<boolean> {
+    try {
+      const coreBindingsContent = await this.filesystem.readFile(path);
+      this.interpreter.execute(coreBindingsContent);
+      return true;
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      console.warn(`Failed to load bindings from ${path}: ${errorMessage}`);
+      return false;
+    }
+  }
+
+  /**
    * Load core key bindings from T-Lisp file
    */
   private async loadCoreBindings(): Promise<void> {
-    // Try to find the core bindings file from current working directory
     const possiblePaths = [
       "src/tlisp/core-bindings.tlisp",
       "./src/tlisp/core-bindings.tlisp",
@@ -223,15 +263,12 @@ export class Editor {
     let lastError: string = "";
 
     for (const path of possiblePaths) {
-      try {
-        const coreBindingsContent = await this.filesystem.readFile(path);
-        this.interpreter.execute(coreBindingsContent);
+      loaded = await this.loadBindingsFromFile(path);
+      if (loaded) {
         this.coreBindingsLoaded = true;
-        loaded = true;
         break;
-      } catch (error) {
-        lastError = error instanceof Error ? error.message : String(error);
-        continue;
+      } else {
+        lastError = `Failed to load from ${path}`;
       }
     }
 
@@ -351,95 +388,27 @@ export class Editor {
 
     const normalizedKey = this.normalizeKey(key);
 
-    // Handle printable characters in insert mode FIRST
-    // This ensures that normal characters like 'h', 'j', 'k', 'l' are inserted
-    // even if they have key mappings for other modes
-    if (this.state.mode === "insert" && key.length === 1 && key >= " " && key <= "~") {
-      const escapedKey = this.escapeKeyForTLisp(key);
-      this.executeCommand(`(buffer-insert "${escapedKey}")`);
-    }
-    // Handle Enter key in insert mode with proper escaping
-    else if (this.state.mode === "insert" && normalizedKey === "Enter") {
-      const escapedNewline = this.escapeKeyForTLisp("\n");
-      this.executeCommand(`(buffer-insert "${escapedNewline}")`);
-    }
-    // Handle Backspace key in insert mode
-    else if (this.state.mode === "insert" && normalizedKey === "Backspace") {
-      this.executeCommand("(buffer-delete 1)");
-    }
-    // Handle command line input in command mode
-    else if (this.state.mode === "command") {
-      if (key.length === 1 && key >= " " && key <= "~") {
-        // Add character to command line
-        this.state.commandLine += key;
-        return; // Don't process this key further
-      } else if (normalizedKey === "Backspace") {
-        // Remove last character from command line
-        this.state.commandLine = this.state.commandLine.slice(0, -1);
-        return; // Don't process this key further
-      } else if (normalizedKey === "Escape") {
-        this.state.mode = "normal";
-        this.state.commandLine = "";
-        return; // Don't process this key further
-      } else if (normalizedKey === "Enter") {
-        // Execute the command line through the T-Lisp key binding system
-        // This ensures proper integration with the T-Lisp interpreter
-        try {
-          this.executeCommand(`(editor-execute-command-line)`);
-        } catch (error) {
-          if (error instanceof Error && (error.message === "EDITOR_QUIT_SIGNAL" || error.message.includes("EDITOR_QUIT_SIGNAL"))) {
-            throw new Error("EDITOR_QUIT_SIGNAL"); // Re-throw clean quit signal to main loop
-          }
-          this.state.statusMessage = `Command error: ${error instanceof Error ? error.message : String(error)}`;
-        }
-
-        // Clear command line and return to normal mode
-        this.state.commandLine = "";
-        this.state.mode = "normal";
-        return; // Don't process this key further
-      }
-      // For other keys, fall through to key binding system
-    }
-    // Handle M-x command input in mx mode
-    else if (this.state.mode === "mx") {
-      if (key.length === 1 && key >= " " && key <= "~") {
-        // TODO: Implement M-x editing in terminal UI
-      } else if (normalizedKey === "Backspace") {
-        // TODO: Implement M-x editing in terminal UI
-      } else if (normalizedKey === "Enter") {
-        // Execute M-x command
-        if (this.state.mxCommand) {
-          this.executeCommand(`(${this.state.mxCommand})`);
-          this.state.mxCommand = ""; // Clear M-x command after execution
-        }
-      } else if (normalizedKey === "Escape") {
-        this.state.mode = "normal";
-        this.state.mxCommand = "";
-      }
-    }
-    // Handle regular key mappings
-    else {
-      const mappings = this.keyMappings.get(normalizedKey);
-
-      if (!mappings) {
-        this.state.statusMessage = `Unbound key: ${normalizedKey}`;
-      } else {
-        // Find mapping for current mode
-        const mapping = mappings.find(m => !m.mode || m.mode === this.state.mode);
-        if (!mapping) {
-          this.state.statusMessage = `Unbound key in ${this.state.mode} mode: ${normalizedKey}`;
-        } else {
-          // Execute the mapped command
-          try {
-            this.executeCommand(mapping.command);
-          } catch (error) {
-            if (error instanceof Error && (error.message === "EDITOR_QUIT_SIGNAL" || error.message.includes("EDITOR_QUIT_SIGNAL"))) {
-              throw new Error("EDITOR_QUIT_SIGNAL"); // Re-throw clean quit signal to main loop
-            }
-            this.state.statusMessage = `Command error: ${error instanceof Error ? error.message : String(error)}`;
-          }
-        }
-      }
+    // Dispatch to mode-specific handlers
+    switch (this.state.mode) {
+      case "normal":
+        await handleNormalMode(this, key, normalizedKey);
+        break;
+      case "insert":
+        await handleInsertMode(this, key, normalizedKey);
+        break;
+      case "visual":
+        await handleVisualMode(this, key, normalizedKey);
+        break;
+      case "command":
+        await handleCommandMode(this, key, normalizedKey);
+        break;
+      case "mx":
+        await handleMxMode(this, key, normalizedKey);
+        break;
+      default:
+        // Handle unknown mode as normal mode
+        await handleNormalMode(this, key, normalizedKey);
+        break;
     }
   }
 

@@ -3,173 +3,196 @@
  * @description Tests for T-Lisp hash-map data structure and standard library functions
  */
 
-import { assertEquals, assertExists } from "@std/assert";
+import { describe, test, expect } from "bun:test";
 import { createHashmap, isHashmap } from "../../src/tlisp/values.ts";
 import type { TLispValue } from "../../src/tlisp/types.ts";
 import { TLispInterpreterImpl } from "../../src/tlisp/interpreter.ts";
 import { registerStdlibFunctions } from "../../src/tlisp/stdlib.ts";
+import { Either } from "../../src/utils/task-either.ts";
 
-Deno.test("Hash-Map Data Structure", async (t) => {
+describe("Hash-Map Data Structure", () => {
   const interpreter = new TLispInterpreterImpl();
   registerStdlibFunctions(interpreter);
 
-  await t.step("should create empty hash-map", () => {
-    const result = interpreter.execute("(hashmap)");
-    assertEquals(result.type, "hashmap");
+  // Helper to execute code and extract .right value
+  const exec = (code: string) => {
+    const result = interpreter.execute(code);
+    if (Either.isLeft(result)) {
+      const error = result.left;
+      const errorMsg = typeof error === 'object' ? JSON.stringify(error) : String(error);
+      throw new Error(`Execution error: ${errorMsg}`);
+    }
+    return result.right;
+  };
+
+  test("should create empty hash-map", () => {
+    const result = exec("(hashmap)");
+    expect(result.type).toBe("hashmap");
     if (isHashmap(result)) {
-      assertEquals(result.value.size, 0);
+      expect(result.value.size).toBe(0);
     }
   });
 
-  await t.step("should create hash-map with string key-value pairs", () => {
-    const result = interpreter.execute('(hashmap "a" 1 "b" 2)');
-    assertEquals(result.type, "hashmap");
+  test("should create hash-map with string key-value pairs", () => {
+    const result = exec('(hashmap "a" 1 "b" 2)');
+    expect(result.type).toBe("hashmap");
     if (isHashmap(result)) {
-      assertEquals(result.value.size, 2);
-      assertEquals(result.value.get("a")?.type, "number");
-      assertEquals(result.value.get("b")?.type, "number");
+      expect(result.value.size).toBe(2);
+      expect(result.value.get("a")?.type).toBe("number");
+      expect(result.value.get("b")?.type).toBe("number");
     }
   });
 
-  await t.step("should evaluate values in hash-map", () => {
-    const result = interpreter.execute("(hashmap \"double\" (* 2 5))");
-    assertEquals(result.type, "hashmap");
+  test("should evaluate values in hash-map", () => {
+    const result = exec("(hashmap \"double\" (* 2 5))");
+    expect(result.type).toBe("hashmap");
     if (isHashmap(result)) {
       const value = result.value.get("double");
-      assertExists(value);
-      assertEquals(value.type, "number");
+      expect(value).toBeDefined();
+      expect(value.type).toBe("number");
       if (value.type === "number") {
-        assertEquals(value.value, 10);
+        expect(value.value).toBe(10);
       }
     }
   });
 
-  await t.step("should throw error for odd number of arguments", () => {
+  test("should throw error for odd number of arguments", () => {
     let errorThrown = false;
     try {
-      interpreter.execute('(hashmap "a" 1 "b")');
+      exec('(hashmap "a" 1 "b")');
     } catch (error) {
       errorThrown = true;
     }
-    assertEquals(errorThrown, true);
+    expect(errorThrown).toBe(true);
   });
 });
 
-Deno.test("Hash-Map Standard Library Functions", async (t) => {
+describe("Hash-Map Standard Library Functions", () => {
   const interpreter = new TLispInterpreterImpl();
   registerStdlibFunctions(interpreter);
 
-  await t.step("hashmap-get should retrieve value by key", () => {
-    const testMap = interpreter.execute('(hashmap "a" 1 "b" 2)');
+  // Helper to execute code and extract .right value
+  const exec = (code: string) => {
+    const result = interpreter.execute(code);
+    if (Either.isLeft(result)) {
+      const error = result.left;
+      const errorMsg = typeof error === 'object' ? JSON.stringify(error) : String(error);
+      throw new Error(`Execution error: ${errorMsg}`);
+    }
+    return result.right;
+  };
+
+  test("hashmap-get should retrieve value by key", () => {
+    const testMap = exec('(hashmap "a" 1 "b" 2)');
     interpreter.globalEnv.define("*test-map*", testMap);
-    const result = interpreter.execute('(hashmap-get *test-map* "a")');
-    assertEquals(result.type, "number");
+    const result = exec('(hashmap-get *test-map* "a")');
+    expect(result.type).toBe("number");
     if (result.type === "number") {
-      assertEquals(result.value, 1);
+      expect(result.value).toBe(1);
     }
   });
 
-  await t.step("hashmap-get should return nil for missing key", () => {
-    const testMap = interpreter.execute('(hashmap "a" 1)');
+  test("hashmap-get should return nil for missing key", () => {
+    const testMap = exec('(hashmap "a" 1)');
     interpreter.globalEnv.define("*test-map*", testMap);
-    const result = interpreter.execute('(hashmap-get *test-map* "missing")');
-    assertEquals(result.type, "nil");
+    const result = exec('(hashmap-get *test-map* "missing")');
+    expect(result.type).toBe("nil");
   });
 
-  await t.step("hashmap-set should add new key-value pair", () => {
-    const testMap = interpreter.execute('(hashmap)');
+  test("hashmap-set should add new key-value pair", () => {
+    const testMap = exec('(hashmap)');
     interpreter.globalEnv.define("*test-map*", testMap);
-    const result = interpreter.execute('(hashmap-set *test-map* "new" 42)');
-    assertEquals(result.type, "hashmap");
+    const result = exec('(hashmap-set *test-map* "new" 42)');
+    expect(result.type).toBe("hashmap");
     if (isHashmap(result)) {
-      assertEquals(result.value.size, 1);
+      expect(result.value.size).toBe(1);
       const value = result.value.get("new");
-      assertExists(value);
-      assertEquals(value.type, "number");
+      expect(value).toBeDefined();
+      expect(value.type).toBe("number");
       if (value.type === "number") {
-        assertEquals(value.value, 42);
+        expect(value.value).toBe(42);
       }
     }
   });
 
-  await t.step("hashmap-set should overwrite existing key", () => {
-    const testMap = interpreter.execute('(hashmap "a" 1)');
+  test("hashmap-set should overwrite existing key", () => {
+    const testMap = exec('(hashmap "a" 1)');
     interpreter.globalEnv.define("*test-map*", testMap);
-    const result = interpreter.execute('(hashmap-set *test-map* "a" 999)');
-    assertEquals(result.type, "hashmap");
+    const result = exec('(hashmap-set *test-map* "a" 999)');
+    expect(result.type).toBe("hashmap");
     if (isHashmap(result)) {
-      assertEquals(result.value.size, 1);
+      expect(result.value.size).toBe(1);
       const value = result.value.get("a");
-      assertExists(value);
-      assertEquals(value.type, "number");
+      expect(value).toBeDefined();
+      expect(value.type).toBe("number");
       if (value.type === "number") {
-        assertEquals(value.value, 999);
+        expect(value.value).toBe(999);
       }
     }
   });
 
-  await t.step("hashmap-keys should return list of all keys", () => {
-    const testMap = interpreter.execute('(hashmap "a" 1 "b" 2 "c" 3)');
+  test("hashmap-keys should return list of all keys", () => {
+    const testMap = exec('(hashmap "a" 1 "b" 2 "c" 3)');
     interpreter.globalEnv.define("*test-map*", testMap);
-    const result = interpreter.execute('(hashmap-keys *test-map*)');
-    assertEquals(result.type, "list");
+    const result = exec('(hashmap-keys *test-map*)');
+    expect(result.type).toBe("list");
     if (result.type === "list") {
       const listValue = result.value as TLispValue[];
-      assertEquals(listValue.length, 3);
+      expect(listValue.length).toBe(3);
       // Check that all values are strings
       for (const item of listValue) {
-        assertEquals(item.type, "string");
+        expect(item.type).toBe("string");
       }
     }
   });
 
-  await t.step("hashmap-values should return list of all values", () => {
-    const testMap = interpreter.execute('(hashmap "a" 1 "b" 2)');
+  test("hashmap-values should return list of all values", () => {
+    const testMap = exec('(hashmap "a" 1 "b" 2)');
     interpreter.globalEnv.define("*test-map*", testMap);
-    const result = interpreter.execute('(hashmap-values *test-map*)');
-    assertEquals(result.type, "list");
+    const result = exec('(hashmap-values *test-map*)');
+    expect(result.type).toBe("list");
     if (result.type === "list") {
       const listValue = result.value as TLispValue[];
-      assertEquals(listValue.length, 2);
+      expect(listValue.length).toBe(2);
     }
   });
 
-  await t.step("hashmap-has-key? should return true for existing key", () => {
-    const testMap = interpreter.execute('(hashmap "exists" 123)');
+  test("hashmap-has-key? should return true for existing key", () => {
+    const testMap = exec('(hashmap "exists" 123)');
     interpreter.globalEnv.define("*test-map*", testMap);
-    const result = interpreter.execute('(hashmap-has-key? *test-map* "exists")');
-    assertEquals(result.type, "boolean");
+    const result = exec('(hashmap-has-key? *test-map* "exists")');
+    expect(result.type).toBe("boolean");
     if (result.type === "boolean") {
-      assertEquals(result.value, true);
+      expect(result.value).toBe(true);
     }
   });
 
-  await t.step("hashmap-has-key? should return false for missing key", () => {
-    const testMap = interpreter.execute('(hashmap "a" 1)');
+  test("hashmap-has-key? should return false for missing key", () => {
+    const testMap = exec('(hashmap "a" 1)');
     interpreter.globalEnv.define("*test-map*", testMap);
-    const result = interpreter.execute('(hashmap-has-key? *test-map* "missing")');
-    assertEquals(result.type, "boolean");
+    const result = exec('(hashmap-has-key? *test-map* "missing")');
+    expect(result.type).toBe("boolean");
     if (result.type === "boolean") {
-      assertEquals(result.value, false);
+      expect(result.value).toBe(false);
     }
   });
 
-  await t.step("hashmap functions should throw error for non-hashmap argument", () => {
+  test("hashmap functions should throw error for non-hashmap argument", () => {
     let errorThrown = false;
     try {
-      interpreter.execute('(hashmap-get "not-a-map" "key")');
+      exec('(hashmap-get "not-a-map" "key")');
     } catch (error) {
       errorThrown = true;
     }
-    assertEquals(errorThrown, true);
+    expect(errorThrown).toBe(true);
   });
 });
 
-Deno.test("Editor Keymap Variables", async (t) => {
+describe("Editor Keymap Variables", () => {
   // Note: These tests verify that keymap variables can be created and accessed
   // Full editor initialization is tested in editor.test.ts
 
-  await t.step("should create keymap variables as hash-maps", () => {
+  test("should create keymap variables as hash-maps", () => {
     const interpreter = new TLispInterpreterImpl();
 
     // Create keymap variables manually (simulating what editor does)
@@ -183,16 +206,16 @@ Deno.test("Editor Keymap Variables", async (t) => {
     const insertKeymap = interpreter.globalEnv.lookup("*insert-mode-keymap*");
     const globalKeymap = interpreter.globalEnv.lookup("*global-keymap*");
 
-    assertExists(normalKeymap);
-    assertExists(insertKeymap);
-    assertExists(globalKeymap);
+    expect(normalKeymap).toBeDefined();
+    expect(insertKeymap).toBeDefined();
+    expect(globalKeymap).toBeDefined();
 
-    assertEquals(normalKeymap.type, "hashmap");
-    assertEquals(insertKeymap.type, "hashmap");
-    assertEquals(globalKeymap.type, "hashmap");
+    expect(normalKeymap.type).toBe("hashmap");
+    expect(insertKeymap.type).toBe("hashmap");
+    expect(globalKeymap.type).toBe("hashmap");
   });
 
-  await t.step("should initialize all six keymap variables", () => {
+  test("should initialize all six keymap variables", () => {
     const interpreter = new TLispInterpreterImpl();
 
     // Create all six keymap variables
@@ -213,10 +236,10 @@ Deno.test("Editor Keymap Variables", async (t) => {
     // Verify all exist
     for (const name of keymapNames) {
       const keymap = interpreter.globalEnv.lookup(name);
-      assertExists(keymap);
-      assertEquals(keymap.type, "hashmap");
+      expect(keymap).toBeDefined();
+      expect(keymap.type).toBe("hashmap");
       if (isHashmap(keymap)) {
-        assertEquals(keymap.value.size, 0);
+        expect(keymap.value.size).toBe(0);
       }
     }
   });

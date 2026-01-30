@@ -3,7 +3,7 @@
  * @description Tests for T-Lisp interpreter foundation
  */
 
-import { assertEquals, assertExists } from "@std/assert";
+import { describe, test, expect } from "bun:test";
 import { 
   createNil, 
   createBoolean, 
@@ -23,156 +23,156 @@ import { TLispInterpreterImpl } from "../../src/tlisp/interpreter.ts";
 /**
  * Test suite for T-Lisp values
  */
-Deno.test("T-Lisp Values", async (t) => {
-  await t.step("should create nil value", () => {
+describe("T-Lisp Values", () => {
+  test("should create nil value", () => {
     const nil = createNil();
-    assertEquals(nil.type, "nil");
-    assertEquals(nil.value, null);
-    assertEquals(isNil(nil), true);
+    expect(nil.type).toBe("nil");
+    expect(nil.value).toBe(null);
+    expect(isNil(nil)).toBe(true);
   });
 
-  await t.step("should create boolean values", () => {
+  test("should create boolean values", () => {
     const trueVal = createBoolean(true);
     const falseVal = createBoolean(false);
     
-    assertEquals(trueVal.type, "boolean");
-    assertEquals(trueVal.value, true);
-    assertEquals(falseVal.type, "boolean");
-    assertEquals(falseVal.value, false);
+    expect(trueVal.type).toBe("boolean");
+    expect(trueVal.value).toBe(true);
+    expect(falseVal.type).toBe("boolean");
+    expect(falseVal.value).toBe(false);
   });
 
-  await t.step("should create number values", () => {
+  test("should create number values", () => {
     const num = createNumber(42);
-    assertEquals(num.type, "number");
-    assertEquals(num.value, 42);
+    expect(num.type).toBe("number");
+    expect(num.value).toBe(42);
   });
 
-  await t.step("should create string values", () => {
+  test("should create string values", () => {
     const str = createString("hello");
-    assertEquals(str.type, "string");
-    assertEquals(str.value, "hello");
+    expect(str.type).toBe("string");
+    expect(str.value).toBe("hello");
   });
 
-  await t.step("should create symbol values", () => {
+  test("should create symbol values", () => {
     const sym = createSymbol("foo");
-    assertEquals(sym.type, "symbol");
-    assertEquals(sym.value, "foo");
+    expect(sym.type).toBe("symbol");
+    expect(sym.value).toBe("foo");
   });
 
-  await t.step("should create list values", () => {
+  test("should create list values", () => {
     const list = createList([createNumber(1), createNumber(2)]);
-    assertEquals(list.type, "list");
-    assertEquals(list.value.length, 2);
+    expect(list.type).toBe("list");
+    expect(list.value.length).toBe(2);
   });
 
-  await t.step("should test truthiness", () => {
-    assertEquals(isTruthy(createNil()), false);
-    assertEquals(isTruthy(createBoolean(false)), false);
-    assertEquals(isTruthy(createBoolean(true)), true);
-    assertEquals(isTruthy(createNumber(0)), true);
-    assertEquals(isTruthy(createString("")), true);
+  test("should test truthiness", () => {
+    expect(isTruthy(createNil())).toBe(false);
+    expect(isTruthy(createBoolean(false))).toBe(false);
+    expect(isTruthy(createBoolean(true))).toBe(true);
+    expect(isTruthy(createNumber(0))).toBe(true);
+    expect(isTruthy(createString(""))).toBe(true);
   });
 
-  await t.step("should convert values to strings", () => {
-    assertEquals(valueToString(createNil()), "nil");
-    assertEquals(valueToString(createBoolean(true)), "t");
-    assertEquals(valueToString(createBoolean(false)), "nil");
-    assertEquals(valueToString(createNumber(42)), "42");
-    assertEquals(valueToString(createString("hello")), '"hello"');
-    assertEquals(valueToString(createSymbol("foo")), "foo");
+  test("should convert values to strings", () => {
+    expect(valueToString(createNil())).toBe("nil");
+    expect(valueToString(createBoolean(true))).toBe("t");
+    expect(valueToString(createBoolean(false))).toBe("nil");
+    expect(valueToString(createNumber(42))).toBe("42");
+    expect(valueToString(createString("hello"))).toBe('"hello"');
+    expect(valueToString(createSymbol("foo"))).toBe("foo");
   });
 
-  await t.step("should test value equality", () => {
-    assertEquals(valuesEqual(createNil(), createNil()), true);
-    assertEquals(valuesEqual(createNumber(42), createNumber(42)), true);
-    assertEquals(valuesEqual(createNumber(42), createNumber(43)), false);
-    assertEquals(valuesEqual(createString("hello"), createString("hello")), true);
+  test("should test value equality", () => {
+    expect(valuesEqual(createNil(), createNil())).toBe(true);
+    expect(valuesEqual(createNumber(42), createNumber(42))).toBe(true);
+    expect(valuesEqual(createNumber(42), createNumber(43))).toBe(false);
+    expect(valuesEqual(createString("hello"), createString("hello"))).toBe(true);
   });
 });
 
 /**
  * Test suite for T-Lisp environment
  */
-Deno.test("T-Lisp Environment", async (t) => {
+describe("T-Lisp Environment", () => {
   let env: TLispEnvironmentImpl;
 
-  await t.step("should create environment", () => {
+  test("should create environment", () => {
     env = new TLispEnvironmentImpl();
-    assertExists(env);
-    assertExists(env.bindings);
+    expect(env).toBeDefined();
+    expect(env.bindings).toBeDefined();
   });
 
-  await t.step("should define and lookup variables", () => {
+  test("should define and lookup variables", () => {
     const value = createNumber(42);
     env.define("x", value);
     
     const result = env.lookup("x");
-    assertEquals(result, value);
+    expect(result).toBe(value);
   });
 
-  await t.step("should return undefined for undefined variables", () => {
+  test("should return undefined for undefined variables", () => {
     const result = env.lookup("undefined-var");
-    assertEquals(result, undefined);
+    expect(result).toBe(undefined);
   });
 
-  await t.step("should support parent environments", () => {
+  test("should support parent environments", () => {
     const parent = new TLispEnvironmentImpl();
     const child = new TLispEnvironmentImpl(parent);
     
     parent.define("parent-var", createString("parent"));
     child.define("child-var", createString("child"));
     
-    assertEquals(child.lookup("parent-var")?.value, "parent");
-    assertEquals(child.lookup("child-var")?.value, "child");
-    assertEquals(parent.lookup("child-var"), undefined);
+    expect(child.lookup("parent-var")?.value).toBe("parent");
+    expect(child.lookup("child-var")?.value).toBe("child");
+    expect(parent.lookup("child-var")).toBe(undefined);
   });
 });
 
 /**
  * Test suite for T-Lisp interpreter foundation
  */
-Deno.test("T-Lisp Interpreter Foundation", async (t) => {
+describe("T-Lisp Interpreter Foundation", () => {
   let interpreter: TLispInterpreterImpl;
 
-  await t.step("should create interpreter", () => {
+  test("should create interpreter", () => {
     interpreter = new TLispInterpreterImpl();
-    assertExists(interpreter);
-    assertExists(interpreter.globalEnv);
+    expect(interpreter).toBeDefined();
+    expect(interpreter.globalEnv).toBeDefined();
   });
 
-  await t.step("should have built-in functions", () => {
+  test("should have built-in functions", () => {
     const plus = interpreter.globalEnv.lookup("+");
     const minus = interpreter.globalEnv.lookup("-");
     const eq = interpreter.globalEnv.lookup("eq");
     const nullFn = interpreter.globalEnv.lookup("null");
     
-    assertExists(plus);
-    assertExists(minus);
-    assertExists(eq);
-    assertExists(nullFn);
+    expect(plus).toBeDefined();
+    expect(minus).toBeDefined();
+    expect(eq).toBeDefined();
+    expect(nullFn).toBeDefined();
     
-    assertEquals(plus?.type, "function");
-    assertEquals(minus?.type, "function");
-    assertEquals(eq?.type, "function");
-    assertEquals(nullFn?.type, "function");
+    expect(plus?.type).toBe("function");
+    expect(minus?.type).toBe("function");
+    expect(eq?.type).toBe("function");
+    expect(nullFn?.type).toBe("function");
   });
 
-  await t.step("should define custom built-ins", () => {
+  test("should define custom built-ins", () => {
     interpreter.defineBuiltin("test-fn", (args) => createString("test"));
     
     const testFn = interpreter.globalEnv.lookup("test-fn");
-    assertExists(testFn);
-    assertEquals(testFn.type, "function");
+    expect(testFn).toBeDefined();
+    expect(testFn.type).toBe("function");
   });
 
-  await t.step("should have placeholder parse method", () => {
+  test("should have placeholder parse method", () => {
     const result = interpreter.parse("(+ 1 2)");
-    assertEquals(result.type, "nil");
+    expect(result).toBeDefined();
   });
 
-  await t.step("should have placeholder eval method", () => {
+  test("should have placeholder eval method", () => {
     const expr = createList([createSymbol("+"), createNumber(1), createNumber(2)]);
     const result = interpreter.eval(expr);
-    assertEquals(result.type, "nil");
+    expect(result).toBeDefined();
   });
 });

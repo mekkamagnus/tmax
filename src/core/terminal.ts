@@ -10,6 +10,7 @@ import { log } from "../utils/logger.ts";
 import { ErrorFactory, TmaxError, ErrorCategory } from "../utils/error-manager.ts";
 import * as readline from 'readline';
 import { stdin as stdin, stdout as stdout } from 'process';
+import { DEFAULT_TERMINAL_COLS, DEFAULT_TERMINAL_ROWS } from "../constants/terminal.ts";
 
 /**
  * Terminal operation result types
@@ -77,8 +78,8 @@ export class FunctionalTerminalIOImpl implements FunctionalTerminalIO {
 
     try {
       const terminalSize = {
-        width: stdout.columns || 80,
-        height: stdout.rows || 24,
+        width: stdout.columns || DEFAULT_TERMINAL_COLS,
+        height: stdout.rows || DEFAULT_TERMINAL_ROWS,
       };
 
       fnLogger.debug("Retrieved terminal size", {
@@ -89,8 +90,8 @@ export class FunctionalTerminalIOImpl implements FunctionalTerminalIO {
     } catch (error) {
       // Return fallback size for non-TTY environments
       const fallbackSize = {
-        width: 80,
-        height: 24,
+        width: DEFAULT_TERMINAL_COLS,
+        height: DEFAULT_TERMINAL_ROWS,
       };
 
       fnLogger.warn("Using fallback terminal size", {

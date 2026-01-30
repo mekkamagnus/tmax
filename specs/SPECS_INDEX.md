@@ -23,7 +23,7 @@ All specification and documentation files are numbered for easy reference.
 - **SPEC-014** - Chore: Keybinding Phase 2
 - **SPEC-015** - Chore: UI Test Suite Tmux Session
 - **SPEC-016** - TypeScript Error Fixes Summary
-- **SPEC-024** - Chore: Functional Programming Refactoring and Code Cleanup
+- **SPEC-024** - Chore: Functional Programming Refactoring and Code Cleanup (ARCHIVED)
 
 ### Terminal UI Implementation (017-021)
 - **SPEC-017** - Terminal UI Complete

@@ -5,6 +5,7 @@
 
 import { TaskEither } from "./task-either.ts";
 import { Reader } from "./reader.ts";
+import { readFile, writeFile, stat, mkdir } from "node:fs/promises";
 
 /**
  * Effect type - represents a computation that depends on environment R,
@@ -574,19 +575,26 @@ const performSaveOperation = (filename: string): Effect<EditorDependencies, stri
     .build();
 
 // Usage with dependency injection
+
 const dependencies: EditorDependencies = {
   filesystem: {
-    readTextFile: Deno.readTextFile,
-    writeTextFile: Deno.writeTextFile,
+    readTextFile: async (path: string) => {
+      return await readFile(path, "utf-8");
+    },
+    writeTextFile: async (path: string, data: string) => {
+      await writeFile(path, data, "utf-8");
+    },
     exists: async (path) => {
       try {
-        await Deno.stat(path);
+        await stat(path);
         return true;
       } catch {
         return false;
       }
     },
-    mkdir: Deno.mkdir
+    mkdir: async (path: string, options?: { recursive?: boolean }) => {
+      return await mkdir(path, options);
+    }
   },
   logger: {
     log: console.log,

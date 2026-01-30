@@ -68,16 +68,16 @@ describe("Error Handling and Logging System", () => {
     // Test error history
     const history = errorManager.getErrorHistory();
     expect(history.length).toBe(1);
-    assertEquals(history[0].message, "Test error message");
+    expect(history[0].message).toBe("Test error message");
     
     // Test error statistics
     const stats = errorManager.getErrorStats();
-    assertEquals(stats.total, 1);
-    assertEquals(stats.byCategory[ErrorCategory.VALIDATION], 1);
-    assertEquals(stats.bySeverity[ErrorSeverity.HIGH], 1);
+    expect(stats.total).toBe(1);
+    expect(stats.byCategory[ErrorCategory.VALIDATION]).toBe(1);
+    expect(stats.bySeverity[ErrorSeverity.HIGH]).toBe(1);
   });
 
-  await t.step("ErrorFactory - should create specific error types", () => {
+test("ErrorFactory - should create specific error types", () => {
     errorManager.clearHistory();
     
     // Test validation error
@@ -88,10 +88,10 @@ describe("Error Handling and Logging System", () => {
       "valid@email.com"
     );
     
-    assertEquals(validationError.context.category, ErrorCategory.VALIDATION);
-    assertEquals(validationError.context.input, "not-an-email");
-    assertEquals(validationError.context.expected, "valid@email.com");
-    assert(validationError.getUserMessage().includes("Invalid email"));
+    expect(validationError.context.category).toBe(ErrorCategory.VALIDATION);
+    expect(validationError.context.input).toBe("not-an-email");
+    expect(validationError.context.expected).toBe("valid@email.com");
+    expect(validationError.getUserMessage().toBe(true).includes("Invalid email"));
     
     // Test parsing error
     const parseError = ErrorFactory.parsing(
@@ -100,9 +100,9 @@ describe("Error Handling and Logging System", () => {
       15
     );
     
-    assertEquals(parseError.context.category, ErrorCategory.PARSING);
-    assertEquals(parseError.context.input, "(defun incomplete");
-    assertEquals(parseError.context.metadata?.position, 15);
+    expect(parseError.context.category).toBe(ErrorCategory.PARSING);
+    expect(parseError.context.input).toBe("(defun incomplete");
+    expect(parseError.context.metadata?.position).toBe(15);
     
     // Test IO error
     const ioError = ErrorFactory.io(
@@ -112,13 +112,13 @@ describe("Error Handling and Logging System", () => {
       new Error("ENOENT")
     );
     
-    assertEquals(ioError.context.category, ErrorCategory.IO);
-    assertEquals(ioError.context.metadata?.path, "/path/to/file.txt");
-    assertEquals(ioError.context.metadata?.operation, "read");
-    assertExists(ioError.cause);
+    expect(ioError.context.category).toBe(ErrorCategory.IO);
+    expect(ioError.context.metadata?.path).toBe("/path/to/file.txt");
+    expect(ioError.context.metadata?.operation).toBe("read");
+    expect(ioError.cause).toBeDefined();
   });
 
-  await t.step("TmaxError - should provide AI-friendly formatting", () => {
+test("TmaxError - should provide AI-friendly formatting", () => {
     const error = new TmaxError(
       "Complex error for AI analysis",
       {
@@ -138,35 +138,35 @@ describe("Error Handling and Logging System", () => {
     
     const aiFormat = error.toAIFormat();
     
-    assert(aiFormat.includes("🚨 TMAX ERROR REPORT"));
-    assert(aiFormat.includes("Complex error for AI analysis"));
-    assert(aiFormat.includes("📦 Module: TestModule"));
-    assert(aiFormat.includes("⚡ Function: complexFunction"));
-    assert(aiFormat.includes("🔧 Operation: complex_operation"));
-    assert(aiFormat.includes("🏷️  Category: runtime"));
-    assert(aiFormat.includes("⚠️  Severity: critical"));
-    assert(aiFormat.includes("👤 User Message: Something went wrong"));
-    assert(aiFormat.includes("🔢 Error Code: ERR_COMPLEX_001"));
-    assert(aiFormat.includes("💡 Suggestions:"));
-    assert(aiFormat.includes("1. Restart the application"));
-    assert(aiFormat.includes("2. Check logs"));
-    assert(aiFormat.includes("📥 Input:"));
-    assert(aiFormat.includes("✅ Expected: \"successful execution\""));
-    assert(aiFormat.includes("❌ Actual: \"runtime failure\""));
+    expect(aiFormat.includes("🚨 TMAX ERROR REPORT").toBe(true));
+    expect(aiFormat.includes("Complex error for AI analysis").toBe(true));
+    expect(aiFormat.includes("📦 Module: TestModule").toBe(true));
+    expect(aiFormat.includes("⚡ Function: complexFunction").toBe(true));
+    expect(aiFormat.includes("🔧 Operation: complex_operation").toBe(true));
+    expect(aiFormat.includes("🏷️  Category: runtime").toBe(true));
+    expect(aiFormat.includes("⚠️  Severity: critical").toBe(true));
+    expect(aiFormat.includes("👤 User Message: Something went wrong").toBe(true));
+    expect(aiFormat.includes("🔢 Error Code: ERR_COMPLEX_001").toBe(true));
+    expect(aiFormat.includes("💡 Suggestions:").toBe(true));
+    expect(aiFormat.includes("1. Restart the application").toBe(true));
+    expect(aiFormat.includes("2. Check logs").toBe(true));
+    expect(aiFormat.includes("📥 Input:").toBe(true));
+    expect(aiFormat.includes("✅ Expected: \"successful execution\"").toBe(true));
+    expect(aiFormat.includes("❌ Actual: \"runtime failure\"").toBe(true));
   });
 
-  await t.step("DebugReporter - should track system health", () => {
+test("DebugReporter - should track system health", () => {
     const health = debugReporter.getSystemHealth();
     
-    assertExists(health);
-    assert(["healthy", "degraded", "critical"].includes(health.status));
-    assertEquals(typeof health.uptime, "number");
-    assertEquals(typeof health.errorRate, "number");
-    assertEquals(typeof health.recentErrors, "number");
-    assertEquals(typeof health.criticalErrors, "number");
+    expect(health).toBeDefined();
+    expect(["healthy", "degraded", "critical"].includes(health.status).toBe(true));
+    expect(typeof health.uptime).toBe("number");
+    expect(typeof health.errorRate).toBe("number");
+    expect(typeof health.recentErrors).toBe("number");
+    expect(typeof health.criticalErrors).toBe("number");
   });
 
-  await t.step("DebugReporter - should generate AI reports", () => {
+test("DebugReporter - should generate AI reports", () => {
     // Create some test errors first
     ErrorFactory.validation("Test validation error", "field1");
     ErrorFactory.runtime("Test runtime error", "test_operation");
@@ -174,19 +174,19 @@ describe("Error Handling and Logging System", () => {
     
     const report = debugReporter.generateAIReport();
     
-    assert(report.includes("🔬 TMAX DEBUG ANALYSIS REPORT"));
-    assert(report.includes("═══ SYSTEM HEALTH ═══"));
-    assert(report.includes("═══ ENVIRONMENT ═══"));
-    assert(report.includes("═══ ERROR ANALYSIS ═══"));
-    assert(report.includes("═══ AI TROUBLESHOOTING RECOMMENDATIONS ═══"));
+    expect(report.includes("🔬 TMAX DEBUG ANALYSIS REPORT").toBe(true));
+    expect(report.includes("═══ SYSTEM HEALTH ═══").toBe(true));
+    expect(report.includes("═══ ENVIRONMENT ═══").toBe(true));
+    expect(report.includes("═══ ERROR ANALYSIS ═══").toBe(true));
+    expect(report.includes("═══ AI TROUBLESHOOTING RECOMMENDATIONS ═══").toBe(true));
     
     // Check environment information
-    assert(report.includes("🖥️  Platform:"));
-    assert(report.includes("🦕 Deno Version:"));
-    assert(report.includes("💻 TTY Status:"));
+    expect(report.includes("🖥️  Platform:").toBe(true));
+    expect(report.includes("🦕 Deno Version:").toBe(true));
+    expect(report.includes("💻 TTY Status:").toBe(true));
   });
 
-  await t.step("DebugReporter - should track operation performance", () => {
+test("DebugReporter - should track operation performance", () => {
     const correlationId1 = "test-op-1";
     const correlationId2 = "test-op-2";
     
@@ -199,63 +199,63 @@ describe("Error Handling and Logging System", () => {
     
     const context = debugReporter.getDebugContext();
     
-    assertExists(context.performanceMetrics);
-    assertEquals(typeof context.performanceMetrics.operationsPerSecond, "number");
-    assertEquals(typeof context.performanceMetrics.averageResponseTime, "number");
+    expect(context.performanceMetrics).toBeDefined();
+    expect(typeof context.performanceMetrics.operationsPerSecond).toBe("number");
+    expect(typeof context.performanceMetrics.averageResponseTime).toBe("number");
     
     // Should have one active operation
-    assertEquals(context.activeOperations.length, 1);
-    assertEquals(context.activeOperations[0].operation, "slow_operation");
-    assertEquals(context.activeOperations[0].correlationId, correlationId2);
+    expect(context.activeOperations.length).toBe(1);
+    expect(context.activeOperations[0].operation).toBe("slow_operation");
+    expect(context.activeOperations[0].correlationId).toBe(correlationId2);
     
     // Complete the slow operation
     debugReporter.recordOperationComplete(correlationId2);
     
     const updatedContext = debugReporter.getDebugContext();
-    assertEquals(updatedContext.activeOperations.length, 0);
+    expect(updatedContext.activeOperations.length).toBe(0);
   });
 
-  await t.step("Integration - Terminal with enhanced error handling", async () => {
+  test("Integration - Terminal with enhanced error handling", async () => {
     // Test the enhanced terminal implementation
     const terminal = new FunctionalTerminalIOImpl();
     
     // Test getSize (should not throw)
     const sizeResult = terminal.getSize();
-    assert(Either.isRight(sizeResult) || Either.isLeft(sizeResult));
+    expect(Either.isRight(sizeResult).toBe(true) || Either.isLeft(sizeResult));
     
     if (Either.isRight(sizeResult)) {
       const size = sizeResult.right;
-      assertEquals(typeof size.width, "number");
-      assertEquals(typeof size.height, "number");
-      assert(size.width > 0);
-      assert(size.height > 0);
+      expect(typeof size.width).toBe("number");
+      expect(typeof size.height).toBe("number");
+      expect(size.width > 0).toBe(true);
+      expect(size.height > 0).toBe(true);
     }
     
     // Test readKey error handling (should fail gracefully when not in raw mode)
     const keyResult = await terminal.readKey().run();
-    assert(Either.isLeft(keyResult)); // Should fail because not in raw mode
+    expect(Either.isLeft(keyResult).toBe(true)); // Should fail because not in raw mode
     
     if (Either.isLeft(keyResult)) {
       const error = keyResult.left;
-      assert(error instanceof TmaxError);
-      assertEquals(error.context.category, ErrorCategory.VALIDATION);
-      assert(error.context.suggestions && error.context.suggestions.length > 0);
+      expect(error instanceof TmaxError).toBe(true);
+      expect(error.context.category).toBe(ErrorCategory.VALIDATION);
+      expect(error.context.suggestions && error.context.suggestions.length > 0).toBe(true);
     }
   });
 
-  await t.step("Error Manager - comprehensive report generation", () => {
+test("Error Manager - comprehensive report generation", () => {
     const aiReport = errorManager.generateAIReport();
     
-    assert(aiReport.includes("🔍 TMAX ERROR ANALYSIS REPORT"));
-    assert(aiReport.includes("📊 Total Errors:"));
-    assert(aiReport.includes("📈 BY CATEGORY:"));
-    assert(aiReport.includes("⚠️  BY SEVERITY:"));
+    expect(aiReport.includes("🔍 TMAX ERROR ANALYSIS REPORT").toBe(true));
+    expect(aiReport.includes("📊 Total Errors:").toBe(true));
+    expect(aiReport.includes("📈 BY CATEGORY:").toBe(true));
+    expect(aiReport.includes("⚠️  BY SEVERITY:").toBe(true));
     
     // Should contain error categories we created
-    assert(aiReport.includes("validation:") || aiReport.includes("runtime:") || aiReport.includes("io:"));
+    expect(aiReport.includes("validation:").toBe(true) || aiReport.includes("runtime:") || aiReport.includes("io:"));
   });
 
-  await t.step("Logger configuration and AI-friendly formatting", () => {
+test("Logger configuration and AI-friendly formatting", () => {
     const logger = Logger.getInstance();
     const originalConfig = logger.getConfig();
     
@@ -267,9 +267,9 @@ describe("Error Handling and Logging System", () => {
     });
     
     const newConfig = logger.getConfig();
-    assertEquals(newConfig.aiFriendly, true);
-    assertEquals(newConfig.structured, true);
-    assertEquals(newConfig.includeStack, true);
+    expect(newConfig.aiFriendly).toBe(true);
+    expect(newConfig.structured).toBe(true);
+    expect(newConfig.includeStack).toBe(true);
     
     // Test different log levels
     logger.debug("Debug message with AI formatting", { 
@@ -290,9 +290,9 @@ describe("Error Handling and Logging System", () => {
 
 });
 
-Deno.test("Error Handling Performance", async (t) => {
+describe("Error Handling Performance", () => {
   
-  await t.step("Should handle high error volume efficiently", () => {
+test("Should handle high error volume efficiently", () => {
     const startTime = performance.now();
     
     // Generate many errors
@@ -304,13 +304,13 @@ Deno.test("Error Handling Performance", async (t) => {
     const duration = endTime - startTime;
     
     // Should complete in reasonable time (less than 100ms for 100 errors)
-    assert(duration < 100, `Error generation took too long: ${duration}ms`);
+    expect(duration < 100, `Error generation took too long: ${duration}ms`).toBe(true);
     
     const stats = errorManager.getErrorStats();
-    assert(stats.total >= 100);
+    expect(stats.total >= 100).toBe(true);
   });
 
-  await t.step("Should generate reports efficiently", () => {
+test("Should generate reports efficiently", () => {
     const startTime = performance.now();
     
     const report = debugReporter.generateAIReport();
@@ -320,10 +320,10 @@ Deno.test("Error Handling Performance", async (t) => {
     const duration = endTime - startTime;
     
     // Report generation should be fast
-    assert(duration < 50, `Report generation took too long: ${duration}ms`);
+    expect(duration < 50, `Report generation took too long: ${duration}ms`).toBe(true);
     
-    assert(report.length > 0);
-    assert(aiReport.length > 0);
+    expect(report.length > 0).toBe(true);
+    expect(aiReport.length > 0).toBe(true);
   });
 
 });

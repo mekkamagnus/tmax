@@ -13,6 +13,13 @@ import {
   createSymbol,
   createList,
 } from "./values.ts";
+import { Either } from "../utils/task-either.ts";
+import { createConfigError, ConfigError } from "../error/types.ts";
+
+/**
+ * Parse error type for T-Lisp parsing errors
+ */
+export type ParseError = ConfigError;
 
 /**
  * T-Lisp parser for converting tokens into AST
@@ -32,14 +39,18 @@ export class TLispParser implements TLispParserInterface {
   /**
    * Parse T-Lisp source code into AST
    * @param source - Source code to parse
-   * @returns Parsed T-Lisp value
+   * @returns Either with ParseError or Parsed T-Lisp value
    */
-  parse(source: string): TLispValue {
-    this.tokens = this.tokenizer.tokenize(source);
+  parse(source: string): Either<ParseError, TLispValue> {
+    const tokenizeResult = this.tokenizer.tokenize(source);
+    if (Either.isLeft(tokenizeResult)) {
+      return Either.left(tokenizeResult.left);
+    }
+    this.tokens = tokenizeResult.right;
     this.pos = 0;
 
     if (this.tokens.length === 0) {
-      return createNil();
+      return Either.right(createNil());
     }
 
     // Check for unmatched closing parentheses before parsing
@@ -48,11 +59,11 @@ export class TLispParser implements TLispParserInterface {
       if (token === "(") parenCount++;
       else if (token === ")") parenCount--;
       if (parenCount < 0) {
-        throw new Error("Unmatched closing parenthesis");
+        return Either.left(createConfigError('ParseError', "Unmatched closing parenthesis"));
       }
     }
     if (parenCount > 0) {
-      throw new Error("Unmatched opening parenthesis");
+      return Either.left(createConfigError('ParseError', "Unmatched opening parenthesis"));
     }
 
     return this.parseExpression();
@@ -63,19 +74,19 @@ export class TLispParser implements TLispParserInterface {
    * @param source - Source code to tokenize
    * @returns Array of tokens
    */
-  tokenize(source: string): string[] {
+  tokenize(source: string): Either<TokenizeError, string[]> {
     return this.tokenizer.tokenize(source);
   }
 
   /**
    * Parse a single expression
-   * @returns Parsed T-Lisp value
+   * @returns Either with ParseError or Parsed T-Lisp value
    */
-  private parseExpression(): TLispValue {
+  private parseExpression(): Either<ParseError, TLispValue> {
     const token = this.peek();
 
     if (!token) {
-      throw new Error("Unexpected end of input");
+      return Either.left(createConfigError('ParseError', "Unexpected end of input"));
     }
 
     // Handle quote
@@ -105,7 +116,7 @@ export class TLispParser implements TLispParserInterface {
 
     // Handle unexpected closing parenthesis
     if (token === ")") {
-      throw new Error("Unexpected closing parenthesis");
+      return Either.left(createConfigError('ParseError', "Unexpected closing parenthesis"));
     }
 
     // Handle atoms
@@ -114,121 +125,166 @@ export class TLispParser implements TLispParserInterface {
 
   /**
    * Parse a quoted expression
-   * @returns Quoted expression as (quote expr)
+   * @returns Either with ParseError or Quoted expression as (quote expr)
    */
-  private parseQuote(): TLispValue {
-    this.consume("'");
-    const expr = this.parseExpression();
-    return createList([createSymbol("quote"), expr]);
+  private parseQuote(): Either<ParseError, TLispValue> {
+    const consumeResult = this.consume("'");
+    if (Either.isLeft(consumeResult)) {
+      return consumeResult;
+    }
+    const exprResult = this.parseExpression();
+    if (Either.isLeft(exprResult)) {
+      return exprResult;
+    }
+    return Either.right(createList([createSymbol("quote"), exprResult.right]));
   }
 
   /**
    * Parse a quasiquoted expression
-   * @returns Quasiquoted expression as (quasiquote expr)
+   * @returns Either with ParseError or Quasiquoted expression as (quasiquote expr)
    */
-  private parseQuasiquote(): TLispValue {
-    this.consume("`");
-    const expr = this.parseExpression();
-    return createList([createSymbol("quasiquote"), expr]);
+  private parseQuasiquote(): Either<ParseError, TLispValue> {
+    const consumeResult = this.consume("`");
+    if (Either.isLeft(consumeResult)) {
+      return consumeResult;
+    }
+    const exprResult = this.parseExpression();
+    if (Either.isLeft(exprResult)) {
+      return exprResult;
+    }
+    return Either.right(createList([createSymbol("quasiquote"), exprResult.right]));
   }
 
   /**
    * Parse an unquoted expression
-   * @returns Unquoted expression as (unquote expr)
+   * @returns Either with ParseError or Unquoted expression as (unquote expr)
    */
-  private parseUnquote(): TLispValue {
-    this.consume(",");
-    const expr = this.parseExpression();
-    return createList([createSymbol("unquote"), expr]);
+  private parseUnquote(): Either<ParseError, TLispValue> {
+    const consumeResult = this.consume(",");
+    if (Either.isLeft(consumeResult)) {
+      return consumeResult;
+    }
+    const exprResult = this.parseExpression();
+    if (Either.isLeft(exprResult)) {
+      return exprResult;
+    }
+    return Either.right(createList([createSymbol("unquote"), exprResult.right]));
   }
 
   /**
    * Parse an unquote-splicing expression
-   * @returns Unquote-splicing expression as (unquote-splicing expr)
+   * @returns Either with ParseError or Unquote-splicing expression as (unquote-splicing expr)
    */
-  private parseUnquoteSplicing(): TLispValue {
-    this.consume(",@");
-    const expr = this.parseExpression();
-    return createList([createSymbol("unquote-splicing"), expr]);
+  private parseUnquoteSplicing(): Either<ParseError, TLispValue> {
+    const consumeResult = this.consume(",@");
+    if (Either.isLeft(consumeResult)) {
+      return consumeResult;
+    }
+    const exprResult = this.parseExpression();
+    if (Either.isLeft(exprResult)) {
+      return exprResult;
+    }
+    return Either.right(createList([createSymbol("unquote-splicing"), exprResult.right]));
   }
 
   /**
    * Parse a list expression
-   * @returns List T-Lisp value
+   * @returns Either with ParseError or List T-Lisp value
    */
-  private parseList(): TLispValue {
-    this.consume("(");
+  private parseList(): Either<ParseError, TLispValue> {
+    const consumeResult = this.consume("(");
+    if (Either.isLeft(consumeResult)) {
+      return consumeResult;
+    }
+
     const elements: TLispValue[] = [];
 
     while (this.peek() !== ")" && this.pos < this.tokens.length) {
-      elements.push(this.parseExpression());
+      const exprResult = this.parseExpression();
+      if (Either.isLeft(exprResult)) {
+        return exprResult;
+      }
+      elements.push(exprResult.right);
     }
 
     if (this.peek() !== ")") {
-      throw new Error("Expected ')' to close list");
+      return Either.left(createConfigError('ParseError', "Expected ')' to close list"));
     }
 
-    this.consume(")");
-    return createList(elements);
+    const closeParenResult = this.consume(")");
+    if (Either.isLeft(closeParenResult)) {
+      return closeParenResult;
+    }
+
+    return Either.right(createList(elements));
   }
 
   /**
    * Parse an atomic expression (number, string, symbol, nil, boolean)
-   * @returns Atomic T-Lisp value
+   * @returns Either with ParseError or Atomic T-Lisp value
    */
-  private parseAtom(): TLispValue {
+  private parseAtom(): Either<ParseError, TLispValue> {
     const token = this.advance();
 
     if (!token) {
-      throw new Error("Unexpected end of input");
+      return Either.left(createConfigError('ParseError', "Unexpected end of input"));
     }
 
     // Handle nil
     if (token === "nil") {
-      return createNil();
+      return Either.right(createNil());
     }
 
     // Handle boolean true
     if (token === "t") {
-      return createBoolean(true);
+      return Either.right(createBoolean(true));
     }
 
     // Handle numbers
     if (this.isNumber(token)) {
-      return createNumber(parseFloat(token));
+      return Either.right(createNumber(parseFloat(token)));
     }
 
     // Handle strings
     if (this.isString(token)) {
-      return createString(this.parseStringLiteral(token));
+      const stringResult = this.parseStringLiteral(token);
+      if (Either.isLeft(stringResult)) {
+        return stringResult;
+      }
+      return Either.right(createString(stringResult.right));
     }
 
     // Handle symbols
-    return createSymbol(token);
+    return Either.right(createSymbol(token));
   }
 
   /**
    * Parse string literal, handling escape sequences
    * @param token - String token including quotes
-   * @returns String content without quotes
+   * @returns Either with ParseError or String content without quotes
    */
-  private parseStringLiteral(token: string): string {
+  private parseStringLiteral(token: string): Either<ParseError, string> {
     if (token.length < 2 || !token.startsWith('"') || !token.endsWith('"')) {
-      throw new Error("Invalid string literal");
+      return Either.left(createConfigError('ParseError', "Invalid string literal"));
     }
 
     // Remove quotes and handle escape sequences
     const content = token.slice(1, -1);
-    return content.replace(/\\(.)/g, (match, char) => {
-      switch (char) {
-        case "n": return "\n";
-        case "t": return "\t";
-        case "r": return "\r";
-        case "\\": return "\\";
-        case '"': return '"';
-        default: return char;
-      }
-    });
+    try {
+      const result = content.replace(/\\(.)/g, (match, char) => {
+        switch (char) {
+          case "n": return "\n";
+          case "t": return "\t";
+          case "r": return "\r";
+          case "\\": return "\\";
+          case '"': return '"';
+          default: return char;
+        }
+      });
+      return Either.right(result);
+    } catch (error) {
+      return Either.left(createConfigError('ParseError', `Error parsing string literal: ${error instanceof Error ? error.message : String(error)}`));
+    }
   }
 
   /**
@@ -248,14 +304,16 @@ export class TLispParser implements TLispParserInterface {
   }
 
   /**
-   * Consume expected token, throwing error if not found
+   * Consume expected token, returning error if not found
    * @param expected - Expected token
+   * @returns Either with ParseError if token doesn't match, or void if successful
    */
-  private consume(expected: string): void {
+  private consume(expected: string): Either<ParseError, void> {
     const token = this.advance();
     if (token !== expected) {
-      throw new Error(`Expected '${expected}' but got '${token}'`);
+      return Either.left(createConfigError('ParseError', `Expected '${expected}' but got '${token}'`));
     }
+    return Either.right(undefined);
   }
 
   /**

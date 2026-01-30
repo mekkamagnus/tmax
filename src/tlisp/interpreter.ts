@@ -5,8 +5,9 @@
 
 import type { TLispInterpreter, TLispEnvironment, TLispValue, TLispFunctionImpl } from "./types.ts";
 import { TLispParser } from "./parser.ts";
-import { TLispEvaluator, createEvaluatorWithBuiltins } from "./evaluator.ts";
+import { TLispEvaluator, createEvaluatorWithBuiltins, type EvalError } from "./evaluator.ts";
 import { createFunction } from "./values.ts";
+import { Either } from "../utils/task-either.ts";
 
 /**
  * T-Lisp interpreter implementation
@@ -33,7 +34,11 @@ export class TLispInterpreterImpl implements TLispInterpreter {
    * @returns Parsed T-Lisp value
    */
   parse(source: string): TLispValue {
-    return this.parser.parse(source);
+    const result = this.parser.parse(source);
+    if ('left' in result) {
+      throw new Error(`Parse error: ${result.left.message}`);
+    }
+    return result.right;
   }
 
   /**
@@ -51,40 +56,53 @@ export class TLispInterpreterImpl implements TLispInterpreter {
    * Execute T-Lisp source code (single expression or multiple expressions)
    * @param source - Source code to execute
    * @param env - Environment for execution
-   * @returns Execution result (result of last expression for multiple expressions)
+   * @returns Either with error or execution result (result of last expression for multiple expressions)
    */
-  execute(source: string, env?: TLispEnvironment): TLispValue {
+  execute(source: string, env?: TLispEnvironment): Either<EvalError, TLispValue> {
     // Handle multi-expression sources by splitting on lines and executing each
     const lines = source.split('\n');
     const evalEnv = env || this.globalEnv;
-    let lastResult: TLispValue | null = null;
+    let lastResult: Either<EvalError, TLispValue> | null = null;
 
     for (const line of lines) {
       const trimmedLine = line.trim();
-      
+
       // Skip empty lines and comments
       if (trimmedLine === '' || trimmedLine.startsWith(';')) {
         continue;
       }
 
-      try {
-        const expr = this.parse(trimmedLine);
-        lastResult = this.eval(expr, evalEnv);
-      } catch (error) {
-        // Enhance error message with line context
-        const errorMessage = error instanceof Error ? error.message : String(error);
-        throw new Error(`Error in line "${trimmedLine}": ${errorMessage}`);
+      const exprResult = this.parser.parse(trimmedLine);
+      if (Either.isLeft(exprResult)) {
+        return exprResult; // Return parse error
       }
+
+      const expr = exprResult.right;
+      const evalResult = this.evaluator.eval(expr, evalEnv);
+      if (Either.isLeft(evalResult)) {
+        return evalResult; // Return evaluation error
+      }
+
+      lastResult = evalResult;
     }
 
     // Return the last result, or nil if no expressions were executed
-    return lastResult || this.parse("nil");
+    if (lastResult) {
+      return lastResult;
+    }
+
+    const nilResult = this.parser.parse("nil");
+    if (Either.isLeft(nilResult)) {
+      return nilResult; // Return parse error
+    }
+
+    return Either.right(nilResult.right);
   }
 
   /**
    * Define a built-in function
    * @param name - Function name
-   * @param fn - Function implementation
+   * @param fn - Function implementation that returns Either
    */
   defineBuiltin(name: string, fn: TLispFunctionImpl): void {
     const func = createFunction(fn, name);

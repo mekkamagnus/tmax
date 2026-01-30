@@ -216,8 +216,8 @@ describe("Lens/Optics Pattern Tests", () => {
     const ageLens = Lens.of<TestUser, 'age'>('age');
     const olderUser = ageLens.modify(age => age + 1)(testUser);
 
-    assertEquals(olderUser.age, 31);
-    assertEquals(olderUser.name, testUser.name); // Other properties unchanged
+    expect(olderUser.age).toBe(31);
+    expect(olderUser.name).toBe(testUser.name); // Other properties unchanged
   });
 
   it("should work with arrays through traversals", () => {
@@ -226,8 +226,8 @@ describe("Lens/Optics Pattern Tests", () => {
     const profileTagsLens = profileLens.compose(tagsLens);
 
     const updatedUser = profileTagsLens.modify(tags => [...tags, "functional"])(testUser);
-    assertEquals(updatedUser.profile.tags.length, 3);
-    assert(updatedUser.profile.tags.includes("functional"));
+    expect(updatedUser.profile.tags.length).toBe(3);
+    expect(updatedUser.profile.tags.includes("functional")).toBe(true);
   });
 
   it("should batch multiple lens operations", () => {
@@ -239,8 +239,8 @@ describe("Lens/Optics Pattern Tests", () => {
       ageLens.set(32)
     )(testUser);
 
-    assertEquals(updatedUser.name, "Jane Smith");
-    assertEquals(updatedUser.age, 32);
+    expect(updatedUser.name).toBe("Jane Smith");
+    expect(updatedUser.age).toBe(32);
   });
 });
 
@@ -271,10 +271,10 @@ describe("State Pattern Tests", () => {
 
     const [, newState] = addUser(testUser).run(initialState);
 
-    assertEquals(newState.users.size, 1);
-    assertEquals(newState.users.get(1)?.name, "John");
-    assertEquals(newState.currentUserId, 1);
-    assert(newState !== initialState); // Immutability check
+    expect(newState.users.size).toBe(1);
+    expect(newState.users.get(1)?.name).toBe("John");
+    expect(newState.currentUserId).toBe(1);
+    expect(newState !== initialState).toBe(true); // Immutability check
   });
 
   it("should chain state operations", () => {
@@ -294,8 +294,8 @@ describe("State Pattern Tests", () => {
 
     const [finalState] = combined.run(initialState);
 
-    assertEquals(finalState.errorCount, 1);
-    assertEquals(finalState.statusMessage, "Error occurred");
+    expect(finalState.errorCount).toBe(1);
+    expect(finalState.statusMessage).toBe("Error occurred");
   });
 
   it("should support state utilities", () => {
@@ -305,8 +305,8 @@ describe("State Pattern Tests", () => {
     const combined = updateMessage.flatMap(() => incrementErrors);
     const [, newState] = combined.run(initialState);
 
-    assertEquals(newState.statusMessage, "Updated");
-    assertEquals(newState.errorCount, 5);
+    expect(newState.statusMessage).toBe("Updated");
+    expect(newState.errorCount).toBe(5);
   });
 
   it("should work with StateTaskEither for async operations", async () => {
@@ -317,10 +317,10 @@ describe("State Pattern Tests", () => {
 
     const result = await asyncOperation.run(initialState).run();
 
-    assertEquals(result._tag, "Right");
+    expect(result._tag).toBe("Right");
     if (result._tag === "Right") {
       const [, newState] = result.right;
-      assertEquals(newState.statusMessage, "Async operation completed");
+      expect(newState.statusMessage).toBe("Async operation completed");
     }
   });
 });
@@ -347,7 +347,7 @@ describe("Reader Pattern Tests", () => {
     const getMaxUsers = Reader.asks<TestDependencies, number>(deps => deps.config.maxUsers);
     const result = getMaxUsers.run(mockDependencies);
 
-    assertEquals(result, 100);
+    expect(result).toBe(100);
   });
 
   it("should compose Reader operations", () => {
@@ -356,7 +356,7 @@ describe("Reader Pattern Tests", () => {
     const doubleMax = getMaxUsers.map(max => max * 2);
 
     const result = doubleMax.run(mockDependencies);
-    assertEquals(result, 200);
+    expect(result).toBe(200);
   });
 
   it("should work with ReaderTaskEither for async operations", async () => {
@@ -366,16 +366,16 @@ describe("Reader Pattern Tests", () => {
           TaskEither.tryCatch(
             () => db.getUser(id),
             () => "Database error"
-          ).flatMap(user => 
+          ).flatMap(user =>
             user ? TaskEither.right<TestUser, string>(user) : TaskEither.left<string, TestUser>("User not found")
           )
         ));
 
     const result = await getUserReader(1).run(mockDependencies).run();
 
-    assertEquals(result._tag, "Right");
+    expect(result._tag).toBe("Right");
     if (result._tag === "Right") {
-      assertEquals(result.right.name, "John");
+      expect(result.right.name).toBe("John");
     }
   });
 
@@ -390,7 +390,7 @@ describe("Reader Pattern Tests", () => {
     }));
 
     const result = transformedReader.run(mockDependencies);
-    assertEquals(result, 200); // 100 * 2
+    expect(result).toBe(200); // 100 * 2
   });
 });
 
@@ -416,9 +416,9 @@ describe("Effect Pattern Tests", () => {
     const effect = Effect.succeed<TestDependencies, never, string>("Hello, World!");
     const result = await effect(testDeps).run();
 
-    assertEquals(result._tag, "Right");
+    expect(result._tag).toBe("Right");
     if (result._tag === "Right") {
-      assertEquals(result.right, "Hello, World!");
+      expect(result.right).toBe("Hello).toBe(World!");
     }
   });
 
@@ -426,9 +426,9 @@ describe("Effect Pattern Tests", () => {
     const failingEffect = Effect.fail<TestDependencies, string, never>("Something went wrong");
     const result = await failingEffect(testDeps).run();
 
-    assertEquals(result._tag, "Left");
+    expect(result._tag).toBe("Left");
     if (result._tag === "Left") {
-      assertEquals(result.left, "Something went wrong");
+      expect(result.left).toBe("Something went wrong");
     }
   });
 
@@ -436,9 +436,9 @@ describe("Effect Pattern Tests", () => {
     const getMaxUsers = EffectOps.map(Effect.access<TestDependencies, never>(), deps => deps.config.maxUsers);
     const result = await getMaxUsers(testDeps).run();
 
-    assertEquals(result._tag, "Right");
+    expect(result._tag).toBe("Right");
     if (result._tag === "Right") {
-      assertEquals(result.right, 100);
+      expect(result.right).toBe(100);
     }
   });
 
@@ -449,9 +449,9 @@ describe("Effect Pattern Tests", () => {
     const composed = EffectOps.flatMap(effect1, effect2);
     const result = await composed(testDeps).run();
 
-    assertEquals(result._tag, "Right");
+    expect(result._tag).toBe("Right");
     if (result._tag === "Right") {
-      assertEquals(result.right, "Value: 5");
+      expect(result.right).toBe("Value: 5");
     }
   });
 
@@ -463,9 +463,9 @@ describe("Effect Pattern Tests", () => {
     const parallel = EffectOps.parallel([effect1, effect2, effect3]);
     const result = await parallel(testDeps).run();
 
-    assertEquals(result._tag, "Right");
+    expect(result._tag).toBe("Right");
     if (result._tag === "Right") {
-      assertEquals(result.right, [1, 2, 3]);
+      expect(result.right).toBe([1, 2, 3]);
     }
   });
 
@@ -478,9 +478,9 @@ describe("Effect Pattern Tests", () => {
 
     const result = await recovered(testDeps).run();
 
-    assertEquals(result._tag, "Right");
+    expect(result._tag).toBe("Right");
     if (result._tag === "Right") {
-      assertEquals(result.right, 42);
+      expect(result.right).toBe(42);
     }
   });
 
@@ -492,9 +492,9 @@ describe("Effect Pattern Tests", () => {
       .provide(testDeps)
       .run();
 
-    assertEquals(result._tag, "Right");
+    expect(result._tag).toBe("Right");
     if (result._tag === "Right") {
-      assertEquals(result.right, "Result: 20");
+      expect(result.right).toBe("Result: 20");
     }
   });
 
@@ -514,11 +514,11 @@ describe("Effect Pattern Tests", () => {
     const retriedEffect = EffectOps.retry(flakyEffect, 5, 10); // 5 attempts, 10ms base delay
     const result = await retriedEffect(testDeps).run();
 
-    assertEquals(result._tag, "Right");
+    expect(result._tag).toBe("Right");
     if (result._tag === "Right") {
-      assertEquals(result.right, "Success!");
+      expect(result.right).toBe("Success!");
     }
-    assertEquals(attemptCount, 3);
+    expect(attemptCount).toBe(3);
   });
 });
 
@@ -556,8 +556,8 @@ describe("Integration Tests", () => {
         statusLens.set("User created successfully")
       )(initialState);
 
-      assertEquals(updatedState.user?.name, "John");
-      assertEquals(updatedState.status, "User created successfully");
+      expect(updatedState.user?.name).toBe("John");
+      expect(updatedState.status).toBe("User created successfully");
     }
   });
 
@@ -586,9 +586,9 @@ describe("Integration Tests", () => {
         hasErrorsLens.set(true)
       )(initialState);
 
-      assertEquals(updatedState.errors.length, 2);
-      assertEquals(updatedState.hasErrors, true);
-      assert(updatedState.errors.includes("Name is required"));
+      expect(updatedState.errors.length).toBe(2);
+      expect(updatedState.hasErrors).toBe(true);
+      expect(updatedState.errors.includes("Name is required"));
     }
   });
 });

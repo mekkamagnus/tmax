@@ -4,6 +4,7 @@
  */
 
 import { TaskEither, Either } from "../utils/task-either.ts";
+import { MAX_UNDO_LEVELS } from "../constants/buffer.ts";
 
 /**
  * Position in a text buffer
@@ -312,7 +313,7 @@ export const Validators = {
       tabSize: 4,
       autoSave: false,
       keyBindings: {},
-      maxUndoLevels: 100,
+      maxUndoLevels: MAX_UNDO_LEVELS,
       showLineNumbers: true,
       wordWrap: false
     };

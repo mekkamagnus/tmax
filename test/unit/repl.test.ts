@@ -3,126 +3,175 @@
  * @description Test suite for T-Lisp REPL
  */
 
-import { assertEquals } from "@std/assert";
+import { describe, test, expect } from "bun:test";
 import { TLispREPL } from "../../src/tlisp/repl.ts";
 import { createNumber, createString, createSymbol, createList } from "../../src/tlisp/values.ts";
+import { Either } from "../../src/utils/task-either.ts";
 
-Deno.test("T-Lisp REPL", async (t) => {
+describe("T-Lisp REPL", () => {
   const repl = new TLispREPL();
 
-  await t.step("should create REPL", () => {
-    assertEquals(typeof repl, "object");
+  test("should create REPL", () => {
+    expect(typeof repl).toBe("object");
   });
 
-  await t.step("should evaluate numbers", () => {
+  test("should evaluate numbers", () => {
     const result = repl.evaluate("42");
-    assertEquals(result, createNumber(42));
+    expect(Either.isRight(result)).toBe(true);
+    if (Either.isRight(result)) {
+      expect(result.right).toEqual(createNumber(42));
+    }
   });
 
-  await t.step("should evaluate strings", () => {
+  test("should evaluate strings", () => {
     const result = repl.evaluate("\"hello\"");
-    assertEquals(result, createString("hello"));
+    expect(Either.isRight(result)).toBe(true);
+    if (Either.isRight(result)) {
+      expect(result.right).toEqual(createString("hello"));
+    }
   });
 
-  await t.step("should evaluate arithmetic", () => {
+  test("should evaluate arithmetic", () => {
     const result = repl.evaluate("(+ 1 2 3)");
-    assertEquals(result, createNumber(6));
+    expect(Either.isRight(result)).toBe(true);
+    if (Either.isRight(result)) {
+      expect(result.right).toEqual(createNumber(6));
+    }
   });
 
-  await t.step("should evaluate function definition", () => {
+  test("should evaluate function definition", () => {
     const result = repl.evaluate("(defun square (x) (* x x))");
-    assertEquals(result, createSymbol("square"));
+    expect(Either.isRight(result)).toBe(true);
+    if (Either.isRight(result)) {
+      expect(result.right).toEqual(createSymbol("square"));
+    }
   });
 
-  await t.step("should evaluate function call", () => {
+  test("should evaluate function call", () => {
     // First define the function
     repl.evaluate("(defun square (x) (* x x))");
-    
+
     // Then call it
     const result = repl.evaluate("(square 5)");
-    assertEquals(result, createNumber(25));
+    expect(Either.isRight(result)).toBe(true);
+    if (Either.isRight(result)) {
+      expect(result.right).toEqual(createNumber(25));
+    }
   });
 
-  await t.step("should evaluate let expression", () => {
+  test("should evaluate let expression", () => {
     const result = repl.evaluate("(let ((x 10) (y 20)) (+ x y))");
-    assertEquals(result, createNumber(30));
+    expect(Either.isRight(result)).toBe(true);
+    if (Either.isRight(result)) {
+      expect(result.right).toEqual(createNumber(30));
+    }
   });
 
-  await t.step("should evaluate lambda expression", () => {
+  test("should evaluate lambda expression", () => {
     const result = repl.evaluate("((lambda (x) (* x 2)) 21)");
-    assertEquals(result, createNumber(42));
+    expect(Either.isRight(result)).toBe(true);
+    if (Either.isRight(result)) {
+      expect(result.right).toEqual(createNumber(42));
+    }
   });
 
-  await t.step("should evaluate macro definition", () => {
+  test("should evaluate macro definition", () => {
     const result = repl.evaluate("(defmacro when (cond body) `(if ,cond ,body nil))");
-    assertEquals(result, createSymbol("when"));
+    expect(Either.isRight(result)).toBe(true);
+    if (Either.isRight(result)) {
+      expect(result.right).toEqual(createSymbol("when"));
+    }
   });
 
-  await t.step("should evaluate macro expansion", () => {
+  test("should evaluate macro expansion", () => {
     // First define the macro
     repl.evaluate("(defmacro when (cond body) `(if ,cond ,body nil))");
-    
+
     // Then use it
     const result = repl.evaluate("(when t 42)");
-    assertEquals(result, createNumber(42));
+    expect(Either.isRight(result)).toBe(true);
+    if (Either.isRight(result)) {
+      expect(result.right).toEqual(createNumber(42));
+    }
   });
 
-  await t.step("should evaluate standard library functions", () => {
+  test("should evaluate standard library functions", () => {
     const result = repl.evaluate("(length \"hello\")");
-    assertEquals(result, createNumber(5));
+    expect(Either.isRight(result)).toBe(true);
+    if (Either.isRight(result)) {
+      expect(result.right).toEqual(createNumber(5));
+    }
   });
 
-  await t.step("should handle multi-line expressions", () => {
+  test("should handle multi-line expressions", () => {
     const multiline = `
       (defun factorial (n)
         (if (= n 0)
           1
           (* n (factorial (- n 1)))))
     `;
-    
+
     const defResult = repl.evaluate(multiline);
-    assertEquals(defResult, createSymbol("factorial"));
-    
+    expect(Either.isRight(defResult)).toBe(true);
+    if (Either.isRight(defResult)) {
+      expect(defResult.right).toEqual(createSymbol("factorial"));
+    }
+
     const callResult = repl.evaluate("(factorial 5)");
-    assertEquals(callResult, createNumber(120));
+    expect(Either.isRight(callResult)).toBe(true);
+    if (Either.isRight(callResult)) {
+      expect(callResult.right).toEqual(createNumber(120));
+    }
   });
 
-  await t.step("should handle list operations", () => {
+  test("should handle list operations", () => {
     const result = repl.evaluate("(append '(1 2) '(3 4))");
-    assertEquals(result, createList([
-      createNumber(1),
-      createNumber(2),
-      createNumber(3),
-      createNumber(4)
-    ]));
+    expect(Either.isRight(result)).toBe(true);
+    if (Either.isRight(result)) {
+      expect(result.right).toEqual(createList([
+        createNumber(1),
+        createNumber(2),
+        createNumber(3),
+        createNumber(4)
+      ]));
+    }
   });
 
-  await t.step("should handle quasiquote", () => {
+  test("should handle quasiquote", () => {
     repl.evaluate("(defun x () 42)");
     const result = repl.evaluate("`(test ,(x) end)");
-    assertEquals(result, createList([
-      createSymbol("test"),
-      createNumber(42),
-      createSymbol("end")
-    ]));
+    expect(Either.isRight(result)).toBe(true);
+    if (Either.isRight(result)) {
+      expect(result.right).toEqual(createList([
+        createSymbol("test"),
+        createNumber(42),
+        createSymbol("end")
+      ]));
+    }
   });
 
-  await t.step("should handle complex expression", () => {
+  test("should handle complex expression", () => {
     const complexExpr = `
       (let ((nums '(1 2 3 4 5)))
         (length nums))
     `;
-    
+
     const result = repl.evaluate(complexExpr);
-    assertEquals(result, createNumber(5));
+    expect(Either.isRight(result)).toBe(true);
+    if (Either.isRight(result)) {
+      expect(result.right).toEqual(createNumber(5));
+    }
   });
 
-  await t.step("should maintain state between evaluations", () => {
+  test("should maintain state between evaluations", () => {
     // Define a variable
     repl.evaluate("(defun add-one (x) (+ x 1))");
-    
+
     // Use it in another expression
     const result = repl.evaluate("(add-one 41)");
-    assertEquals(result, createNumber(42));
+    expect(Either.isRight(result)).toBe(true);
+    if (Either.isRight(result)) {
+      expect(result.right).toEqual(createNumber(42));
+    }
   });
 });

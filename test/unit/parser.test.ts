@@ -3,176 +3,186 @@
  * @description Tests for T-Lisp parser
  */
 
-import { assertEquals, assertThrows } from "@std/assert";
+import { describe, test, expect } from "bun:test";
 import { TLispParser } from "../../src/tlisp/parser.ts";
 import { valueToString } from "../../src/tlisp/values.ts";
+import { Either } from "../../src/utils/task-either.ts";
 
 /**
  * Test suite for T-Lisp parser
  */
-Deno.test("T-Lisp Parser", async (t) => {
+describe("T-Lisp Parser", () => {
   let parser: TLispParser;
 
-  await t.step("should create parser", () => {
+  test("should create parser", () => {
     parser = new TLispParser();
-    assertEquals(typeof parser.parse, "function");
+    expect(typeof parser.parse).toBe("function");
   });
 
-  await t.step("should parse nil", () => {
-    const result = parser.parse("nil");
-    assertEquals(result.type, "nil");
-    assertEquals(valueToString(result), "nil");
+  // Helper to parse and extract .right value
+  const parseResult = (code: string) => {
+    const result = parser.parse(code);
+    if (Either.isLeft(result)) {
+      throw new Error(`Parse error: ${JSON.stringify(result.left)}`);
+    }
+    return result.right;
+  };
+
+  test("should parse nil", () => {
+    const result = parseResult("nil");
+    expect(result.type).toBe("nil");
+    expect(valueToString(result)).toBe("nil");
   });
 
-  await t.step("should parse booleans", () => {
-    const trueResult = parser.parse("t");
-    assertEquals(trueResult.type, "boolean");
-    assertEquals(trueResult.value, true);
-    
-    const falseResult = parser.parse("nil");
-    assertEquals(falseResult.type, "nil");
+  test("should parse booleans", () => {
+    const trueResult = parseResult("t");
+    expect(trueResult.type).toBe("boolean");
+    expect(trueResult.value).toBe(true);
+
+    const falseResult = parseResult("nil");
+    expect(falseResult.type).toBe("nil");
   });
 
-  await t.step("should parse numbers", () => {
-    const intResult = parser.parse("42");
-    assertEquals(intResult.type, "number");
-    assertEquals(intResult.value, 42);
-    
-    const floatResult = parser.parse("3.14");
-    assertEquals(floatResult.type, "number");
-    assertEquals(floatResult.value, 3.14);
-    
-    const negativeResult = parser.parse("-10");
-    assertEquals(negativeResult.type, "number");
-    assertEquals(negativeResult.value, -10);
+  test("should parse numbers", () => {
+    const intResult = parseResult("42");
+    expect(intResult.type).toBe("number");
+    expect(intResult.value).toBe(42);
+
+    const floatResult = parseResult("3.14");
+    expect(floatResult.type).toBe("number");
+    expect(floatResult.value).toBe(3.14);
+
+    const negativeResult = parseResult("-10");
+    expect(negativeResult.type).toBe("number");
+    expect(negativeResult.value).toBe(-10);
   });
 
-  await t.step("should parse strings", () => {
-    const result = parser.parse('"hello world"');
-    assertEquals(result.type, "string");
-    assertEquals(result.value, "hello world");
-    
-    const emptyResult = parser.parse('""');
-    assertEquals(emptyResult.type, "string");
-    assertEquals(emptyResult.value, "");
+  test("should parse strings", () => {
+    const result = parseResult('"hello world"');
+    expect(result.type).toBe("string");
+    expect(result.value).toBe("hello world");
+
+    const emptyResult = parseResult('""');
+    expect(emptyResult.type).toBe("string");
+    expect(emptyResult.value).toBe("");
   });
 
-  await t.step("should parse symbols", () => {
-    const result = parser.parse("foo");
-    assertEquals(result.type, "symbol");
-    assertEquals(result.value, "foo");
-    
-    const complexResult = parser.parse("foo-bar?");
-    assertEquals(complexResult.type, "symbol");
-    assertEquals(complexResult.value, "foo-bar?");
+  test("should parse symbols", () => {
+    const result = parseResult("foo");
+    expect(result.type).toBe("symbol");
+    expect(result.value).toBe("foo");
+
+    const complexResult = parseResult("foo-bar?");
+    expect(complexResult.type).toBe("symbol");
+    expect(complexResult.value).toBe("foo-bar?");
   });
 
-  await t.step("should parse empty list", () => {
-    const result = parser.parse("()");
-    assertEquals(result.type, "list");
-    assertEquals((result.value as any[]).length, 0);
+  test("should parse empty list", () => {
+    const result = parseResult("()");
+    expect(result.type).toBe("list");
+    expect((result.value as any[]).length).toBe(0);
   });
 
-  await t.step("should parse simple list", () => {
-    const result = parser.parse("(+ 1 2)");
-    assertEquals(result.type, "list");
-    
+  test("should parse simple list", () => {
+    const result = parseResult("(+ 1 2)");
+    expect(result.type).toBe("list");
+
     const list = result.value as any[];
-    assertEquals(list.length, 3);
-    assertEquals(list[0].type, "symbol");
-    assertEquals(list[0].value, "+");
-    assertEquals(list[1].type, "number");
-    assertEquals(list[1].value, 1);
-    assertEquals(list[2].type, "number");
-    assertEquals(list[2].value, 2);
+    expect(list.length).toBe(3);
+    expect(list[0].type).toBe("symbol");
+    expect(list[0].value).toBe("+");
+    expect(list[1].type).toBe("number");
+    expect(list[1].value).toBe(1);
+    expect(list[2].type).toBe("number");
+    expect(list[2].value).toBe(2);
   });
 
-  await t.step("should parse nested lists", () => {
-    const result = parser.parse("(+ (* 2 3) 4)");
-    assertEquals(result.type, "list");
-    
+  test("should parse nested lists", () => {
+    const result = parseResult("(+ (* 2 3) 4)");
+    expect(result.type).toBe("list");
+
     const list = result.value as any[];
-    assertEquals(list.length, 3);
-    assertEquals(list[0].value, "+");
-    assertEquals(list[1].type, "list");
-    assertEquals(list[2].value, 4);
-    
+    expect(list.length).toBe(3);
+    expect(list[0].value).toBe("+");
+    expect(list[1].type).toBe("list");
+    expect(list[2].value).toBe(4);
+
     const nestedList = list[1].value as any[];
-    assertEquals(nestedList.length, 3);
-    assertEquals(nestedList[0].value, "*");
-    assertEquals(nestedList[1].value, 2);
-    assertEquals(nestedList[2].value, 3);
+    expect(nestedList.length).toBe(3);
+    expect(nestedList[0].value).toBe("*");
+    expect(nestedList[1].value).toBe(2);
+    expect(nestedList[2].value).toBe(3);
   });
 
-  await t.step("should parse quoted expressions", () => {
-    const result = parser.parse("'foo");
-    assertEquals(result.type, "list");
-    
+  test("should parse quoted expressions", () => {
+    const result = parseResult("'foo");
+    expect(result.type).toBe("list");
+
     const list = result.value as any[];
-    assertEquals(list.length, 2);
-    assertEquals(list[0].type, "symbol");
-    assertEquals(list[0].value, "quote");
-    assertEquals(list[1].type, "symbol");
-    assertEquals(list[1].value, "foo");
+    expect(list.length).toBe(2);
+    expect(list[0].type).toBe("symbol");
+    expect(list[0].value).toBe("quote");
+    expect(list[1].type).toBe("symbol");
+    expect(list[1].value).toBe("foo");
   });
 
-  await t.step("should parse quoted lists", () => {
-    const result = parser.parse("'(1 2 3)");
-    assertEquals(result.type, "list");
-    
+  test("should parse quoted lists", () => {
+    const result = parseResult("'(1 2 3)");
+    expect(result.type).toBe("list");
+
     const list = result.value as any[];
-    assertEquals(list.length, 2);
-    assertEquals(list[0].value, "quote");
-    assertEquals(list[1].type, "list");
-    
+    expect(list.length).toBe(2);
+    expect(list[0].value).toBe("quote");
+    expect(list[1].type).toBe("list");
+
     const quotedList = list[1].value as any[];
-    assertEquals(quotedList.length, 3);
-    assertEquals(quotedList[0].value, 1);
-    assertEquals(quotedList[1].value, 2);
-    assertEquals(quotedList[2].value, 3);
+    expect(quotedList.length).toBe(3);
+    expect(quotedList[0].value).toBe(1);
+    expect(quotedList[1].value).toBe(2);
+    expect(quotedList[2].value).toBe(3);
   });
 
-  await t.step("should parse function definition", () => {
-    const result = parser.parse("(defun square (x) (* x x))");
-    assertEquals(result.type, "list");
-    
+  test("should parse function definition", () => {
+    const result = parseResult("(defun square (x) (* x x))");
+    expect(result.type).toBe("list");
+
     const list = result.value as any[];
-    assertEquals(list.length, 4);
-    assertEquals(list[0].value, "defun");
-    assertEquals(list[1].value, "square");
-    assertEquals(list[2].type, "list");
-    assertEquals(list[3].type, "list");
+    expect(list.length).toBe(4);
+    expect(list[0].value).toBe("defun");
+    expect(list[1].value).toBe("square");
+    expect(list[2].type).toBe("list");
+    expect(list[3].type).toBe("list");
   });
 
-  await t.step("should handle whitespace and comments", () => {
-    const result = parser.parse(`
+  test("should handle whitespace and comments", () => {
+    const result = parseResult(`
       ; This is a comment
       (+ 1 2) ; Another comment
     `);
-    assertEquals(result.type, "list");
-    
+    expect(result.type).toBe("list");
+
     const list = result.value as any[];
-    assertEquals(list.length, 3);
-    assertEquals(list[0].value, "+");
-    assertEquals(list[1].value, 1);
-    assertEquals(list[2].value, 2);
+    expect(list.length).toBe(3);
+    expect(list[0].value).toBe("+");
+    expect(list[1].value).toBe(1);
+    expect(list[2].value).toBe(2);
   });
 
-  await t.step("should throw on unmatched parentheses", () => {
-    assertThrows(() => parser.parse("(+ 1 2"));
-    assertThrows(() => parser.parse("+ 1 2)"));
-    assertThrows(() => parser.parse("((+ 1 2)"));
+  test("should throw on unmatched parentheses", () => {
+    expect(() => parseResult("(+ 1 2")).toThrow();
+    expect(() => parseResult("+ 1 2)")).toThrow();
+    expect(() => parseResult("((+ 1 2)")).toThrow();
   });
 
-  await t.step("should throw on unterminated string", () => {
-    assertThrows(() => parser.parse('"unterminated'));
+  test("should throw on unterminated string", () => {
+    expect(() => parseResult('"unterminated')).toThrow();
   });
 
-  await t.step("should parse multiple expressions", () => {
-    const result = parser.parse("(+ 1 2) (* 3 4)");
+  test("should parse multiple expressions", () => {
+    const result = parseResult("(+ 1 2) (* 3 4)");
     // Should return first expression
-    assertEquals(result.type, "list");
+    expect(result.type).toBe("list");
     const list = result.value as any[];
-    assertEquals(list[0].value, "+");
+    expect(list[0].value).toBe("+");
   });
 });

@@ -5,6 +5,7 @@
 
 import { Either } from "./task-either.ts";
 import { logger, LogContext } from "./logger.ts";
+import { MAX_ERROR_HISTORY_SIZE } from "../constants/editor.ts";
 
 /**
  * Error categories for classification
@@ -174,7 +175,7 @@ export class TmaxError extends Error {
 export class ErrorManager {
   private static instance: ErrorManager;
   private errorHistory: TmaxError[] = [];
-  private maxHistorySize = 1000;
+  private maxHistorySize = MAX_ERROR_HISTORY_SIZE;
 
   private constructor() {}
 
@@ -234,7 +235,7 @@ export class ErrorManager {
     recentCount: number;
   } {
     const now = Date.now();
-    const oneHourAgo = now - (60 * 60 * 1000);
+    const oneHourAgo = now - (60 * 60 * 1000); // 1 hour in milliseconds
 
     const byCategory: Record<string, number> = {};
     const bySeverity: Record<string, number> = {};

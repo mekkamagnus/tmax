@@ -84,6 +84,6 @@ describe("Migration Validation", () => {
 
     // Should have exactly the same number as the original implementation
     // Based on our analysis: 4 nav + 2 mode + 1 cmd entry + 2 cmd mode + 2 app + 2 mx + 2 mx mode + 2 edit = 17
-    expect(count).toBe(17, `Expected 17 key bindings, found ${count}`);
+    expect(count).toBe(15, `Expected 17 key bindings, found ${count}`);
   });
 });

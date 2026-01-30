@@ -3,111 +3,204 @@
  * @description Tests for T-Lisp tokenizer
  */
 
-import { assertEquals } from "@std/assert";
+import { describe, test, expect } from "bun:test";
 import { TLispTokenizer } from "../../src/tlisp/tokenizer.ts";
+import { Either } from "../../src/utils/task-either.ts";
 
 /**
  * Test suite for T-Lisp tokenizer
  */
-Deno.test("T-Lisp Tokenizer", async (t) => {
+describe("T-Lisp Tokenizer", () => {
   let tokenizer: TLispTokenizer;
 
-  await t.step("should create tokenizer", () => {
+  test("should create tokenizer", () => {
     tokenizer = new TLispTokenizer();
-    assertEquals(typeof tokenizer.tokenize, "function");
+    expect(typeof tokenizer.tokenize).toBe("function");
   });
 
-  await t.step("should tokenize empty string", () => {
-    const tokens = tokenizer.tokenize("");
-    assertEquals(tokens, []);
+  test("should tokenize empty string", () => {
+    const result = tokenizer.tokenize("");
+    expect(Either.isRight(result)).toBe(true);
+    if (Either.isRight(result)) {
+      expect(result.right).toEqual([]);
+    }
   });
 
-  await t.step("should tokenize whitespace", () => {
-    const tokens = tokenizer.tokenize("   \t\n  ");
-    assertEquals(tokens, []);
+  test("should tokenize whitespace", () => {
+    const result = tokenizer.tokenize("   \t\n  ");
+    expect(Either.isRight(result)).toBe(true);
+    if (Either.isRight(result)) {
+      expect(result.right).toEqual([]);
+    }
   });
 
-  await t.step("should tokenize single atoms", () => {
-    assertEquals(tokenizer.tokenize("42"), ["42"]);
-    assertEquals(tokenizer.tokenize("hello"), ["hello"]);
-    assertEquals(tokenizer.tokenize("t"), ["t"]);
-    assertEquals(tokenizer.tokenize("nil"), ["nil"]);
+  test("should tokenize single atoms", () => {
+    const result1 = tokenizer.tokenize("42");
+    expect(Either.isRight(result1)).toBe(true);
+    if (Either.isRight(result1)) {
+      expect(result1.right).toEqual(["42"]);
+    }
+
+    const result2 = tokenizer.tokenize("hello");
+    expect(Either.isRight(result2)).toBe(true);
+    if (Either.isRight(result2)) {
+      expect(result2.right).toEqual(["hello"]);
+    }
+
+    const result3 = tokenizer.tokenize("t");
+    expect(Either.isRight(result3)).toBe(true);
+    if (Either.isRight(result3)) {
+      expect(result3.right).toEqual(["t"]);
+    }
+
+    const result4 = tokenizer.tokenize("nil");
+    expect(Either.isRight(result4)).toBe(true);
+    if (Either.isRight(result4)) {
+      expect(result4.right).toEqual(["nil"]);
+    }
   });
 
-  await t.step("should tokenize strings", () => {
-    assertEquals(tokenizer.tokenize('"hello"'), ['"hello"']);
-    assertEquals(tokenizer.tokenize('"hello world"'), ['"hello world"']);
-    assertEquals(tokenizer.tokenize('""'), ['""']);
+  test("should tokenize strings", () => {
+    const result1 = tokenizer.tokenize('"hello"');
+    expect(Either.isRight(result1)).toBe(true);
+    if (Either.isRight(result1)) {
+      expect(result1.right).toEqual(['"hello"']);
+    }
+
+    const result2 = tokenizer.tokenize('"hello world"');
+    expect(Either.isRight(result2)).toBe(true);
+    if (Either.isRight(result2)) {
+      expect(result2.right).toEqual(['"hello world"']);
+    }
+
+    const result3 = tokenizer.tokenize('""');
+    expect(Either.isRight(result3)).toBe(true);
+    if (Either.isRight(result3)) {
+      expect(result3.right).toEqual(['""']);
+    }
   });
 
-  await t.step("should tokenize symbols", () => {
-    assertEquals(tokenizer.tokenize("foo"), ["foo"]);
-    assertEquals(tokenizer.tokenize("foo-bar"), ["foo-bar"]);
-    assertEquals(tokenizer.tokenize("foo?"), ["foo?"]);
-    assertEquals(tokenizer.tokenize("foo!"), ["foo!"]);
+  test("should tokenize symbols", () => {
+    const result1 = tokenizer.tokenize("foo");
+    expect(Either.isRight(result1)).toBe(true);
+    if (Either.isRight(result1)) {
+      expect(result1.right).toEqual(["foo"]);
+    }
+
+    const result2 = tokenizer.tokenize("foo-bar");
+    expect(Either.isRight(result2)).toBe(true);
+    if (Either.isRight(result2)) {
+      expect(result2.right).toEqual(["foo-bar"]);
+    }
+
+    const result3 = tokenizer.tokenize("foo?");
+    expect(Either.isRight(result3)).toBe(true);
+    if (Either.isRight(result3)) {
+      expect(result3.right).toEqual(["foo?"]);
+    }
+
+    const result4 = tokenizer.tokenize("foo!");
+    expect(Either.isRight(result4)).toBe(true);
+    if (Either.isRight(result4)) {
+      expect(result4.right).toEqual(["foo!"]);
+    }
   });
 
-  await t.step("should tokenize parentheses", () => {
-    assertEquals(tokenizer.tokenize("()"), ["(", ")"]);
-    assertEquals(tokenizer.tokenize("(foo)"), ["(", "foo", ")"]);
-    assertEquals(tokenizer.tokenize("(foo bar)"), ["(", "foo", "bar", ")"]);
+  test("should tokenize parentheses", () => {
+    const result1 = tokenizer.tokenize("()");
+    expect(Either.isRight(result1)).toBe(true);
+    if (Either.isRight(result1)) {
+      expect(result1.right).toEqual(["(", ")"]);
+    }
+
+    const result2 = tokenizer.tokenize("(foo)");
+    expect(Either.isRight(result2)).toBe(true);
+    if (Either.isRight(result2)) {
+      expect(result2.right).toEqual(["(", "foo", ")"]);
+    }
+
+    const result3 = tokenizer.tokenize("(foo bar)");
+    expect(Either.isRight(result3)).toBe(true);
+    if (Either.isRight(result3)) {
+      expect(result3.right).toEqual(["(", "foo", "bar", ")"]);
+    }
   });
 
-  await t.step("should tokenize nested lists", () => {
-    assertEquals(
-      tokenizer.tokenize("(foo (bar baz))"),
-      ["(", "foo", "(", "bar", "baz", ")", ")"]
-    );
+  test("should tokenize nested lists", () => {
+    const result = tokenizer.tokenize("(foo (bar baz))");
+    expect(Either.isRight(result)).toBe(true);
+    if (Either.isRight(result)) {
+      expect(result.right).toEqual(["(", "foo", "(", "bar", "baz", ")", ")"]);
+    }
   });
 
-  await t.step("should tokenize quote", () => {
-    assertEquals(tokenizer.tokenize("'foo"), ["'", "foo"]);
-    assertEquals(tokenizer.tokenize("'(foo bar)"), ["'", "(", "foo", "bar", ")"]);
+  test("should tokenize quote", () => {
+    const result1 = tokenizer.tokenize("'foo");
+    expect(Either.isRight(result1)).toBe(true);
+    if (Either.isRight(result1)) {
+      expect(result1.right).toEqual(["'", "foo"]);
+    }
+
+    const result2 = tokenizer.tokenize("'(foo bar)");
+    expect(Either.isRight(result2)).toBe(true);
+    if (Either.isRight(result2)) {
+      expect(result2.right).toEqual(["'", "(", "foo", "bar", ")"]);
+    }
   });
 
-  await t.step("should tokenize arithmetic expressions", () => {
-    assertEquals(
-      tokenizer.tokenize("(+ 1 2)"),
-      ["(", "+", "1", "2", ")"]
-    );
-    assertEquals(
-      tokenizer.tokenize("(* (+ 1 2) 3)"),
-      ["(", "*", "(", "+", "1", "2", ")", "3", ")"]
-    );
+  test("should tokenize arithmetic expressions", () => {
+    const result1 = tokenizer.tokenize("(+ 1 2)");
+    expect(Either.isRight(result1)).toBe(true);
+    if (Either.isRight(result1)) {
+      expect(result1.right).toEqual(["(", "+", "1", "2", ")"]);
+    }
+
+    const result2 = tokenizer.tokenize("(* (+ 1 2) 3)");
+    expect(Either.isRight(result2)).toBe(true);
+    if (Either.isRight(result2)) {
+      expect(result2.right).toEqual(["(", "*", "(", "+", "1", "2", ")", "3", ")"]);
+    }
   });
 
-  await t.step("should tokenize function definitions", () => {
-    assertEquals(
-      tokenizer.tokenize("(defun square (x) (* x x))"),
-      ["(", "defun", "square", "(", "x", ")", "(", "*", "x", "x", ")", ")"]
-    );
+  test("should tokenize function definitions", () => {
+    const result = tokenizer.tokenize("(defun square (x) (* x x))");
+    expect(Either.isRight(result)).toBe(true);
+    if (Either.isRight(result)) {
+      expect(result.right).toEqual(["(", "defun", "square", "(", "x", ")", "(", "*", "x", "x", ")", ")"]);
+    }
   });
 
-  await t.step("should handle comments", () => {
-    assertEquals(
-      tokenizer.tokenize("(+ 1 2) ; this is a comment"),
-      ["(", "+", "1", "2", ")"]
-    );
-    assertEquals(
-      tokenizer.tokenize("; full line comment\n(+ 1 2)"),
-      ["(", "+", "1", "2", ")"]
-    );
+  test("should handle comments", () => {
+    const result1 = tokenizer.tokenize("(+ 1 2) ; this is a comment");
+    expect(Either.isRight(result1)).toBe(true);
+    if (Either.isRight(result1)) {
+      expect(result1.right).toEqual(["(", "+", "1", "2", ")"]);
+    }
+
+    const result2 = tokenizer.tokenize("; full line comment\n(+ 1 2)");
+    expect(Either.isRight(result2)).toBe(true);
+    if (Either.isRight(result2)) {
+      expect(result2.right).toEqual(["(", "+", "1", "2", ")"]);
+    }
   });
 
-  await t.step("should handle complex expressions", () => {
+  test("should handle complex expressions", () => {
     const code = `
       (defun factorial (n)
         (if (= n 0)
             1
             (* n (factorial (- n 1)))))
     `;
-    const tokens = tokenizer.tokenize(code);
-    assertEquals(tokens, [
-      "(", "defun", "factorial", "(", "n", ")",
-      "(", "if", "(", "=", "n", "0", ")",
-      "1",
-      "(", "*", "n", "(", "factorial", "(", "-", "n", "1", ")", ")", ")",
-      ")", ")"
-    ]);
+    const result = tokenizer.tokenize(code);
+    expect(Either.isRight(result)).toBe(true);
+    if (Either.isRight(result)) {
+      expect(result.right).toEqual([
+        "(", "defun", "factorial", "(", "n", ")",
+        "(", "if", "(", "=", "n", "0", ")",
+        "1",
+        "(", "*", "n", "(", "factorial", "(", "-", "n", "1", ")", ")", ")",
+        ")", ")"
+      ]);
+    }
   });
 });

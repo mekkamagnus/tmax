@@ -3,94 +3,110 @@
  * @description Performance tests for tail-call optimization
  */
 
-import { assertEquals } from "@std/assert";
+import { describe, test, expect } from "bun:test";
+import { Either } from "../../src/utils/task-either.ts";
 import { createEvaluatorWithBuiltins } from "../../src/tlisp/evaluator.ts";
 import { TLispParser } from "../../src/tlisp/parser.ts";
 import { createNumber } from "../../src/tlisp/values.ts";
 
-/**
- * Test suite for tail-call optimization performance
- */
-Deno.test("Tail-Call Optimization Performance", async (t) => {
+describe("Tail-Call Optimization Performance", () => {
   const { evaluator, env } = createEvaluatorWithBuiltins();
   const parser = new TLispParser();
 
-  await t.step("should handle deep recursion without stack overflow", () => {
+  // Helper to parse and extract .right value
+  const parseExpr = (code: string) => {
+    const result = parser.parse(code);
+    if (Either.isLeft(result)) {
+      throw new Error(`Parse error: ${result.left}`);
+    }
+    return result.right;
+  };
+
+  // Helper to eval and extract .right value
+  const evalExpr = (expr: any) => {
+    const result = evaluator.eval(expr, env);
+    if (Either.isLeft(result)) {
+      throw new Error(`Eval error: ${result.left}`);
+    }
+    return result.right;
+  };
+
+  test("should handle deep recursion without stack overflow", () => {
     // Define a tail-recursive function that would cause stack overflow without TCO
-    const defExpr = parser.parse(`
+    const defExpr = parseExpr(`
       (defun deep-countdown (n)
         (if (= n 0)
             'done
             (deep-countdown (- n 1))))
     `);
-    evaluator.eval(defExpr, env);
+    evalExpr(defExpr);
 
     // Test with a moderate number first to verify it works
-    const callExpr = parser.parse("(deep-countdown 100)");
-    const result = evaluator.eval(callExpr, env);
-    assertEquals(result.type, "symbol");
-    assertEquals(result.value, "done");
+    const callExpr = parseExpr("(deep-countdown 100)");
+    const result = evalExpr(callExpr);
+    expect(result.type).toBe("symbol");
+    expect(result.value).toBe("done");
   });
 
-  await t.step("should handle deep tail-recursive accumulation", () => {
+  test("should handle deep tail-recursive accumulation", () => {
     // Define a tail-recursive sum function
-    const defExpr = parser.parse(`
+    const defExpr = parseExpr(`
       (defun sum-to-n (n acc)
         (if (= n 0)
             acc
             (sum-to-n (- n 1) (+ acc n))))
     `);
-    evaluator.eval(defExpr, env);
+    evalExpr(defExpr);
 
     // Test sum of 1+2+...+100 = 5050
-    const callExpr = parser.parse("(sum-to-n 100 0)");
-    const result = evaluator.eval(callExpr, env);
-    assertEquals(result, createNumber(5050));
+    const callExpr = parseExpr("(sum-to-n 100 0)");
+    const result = evalExpr(callExpr);
+    expect(result).toEqual(createNumber(5050));
   });
 
-  await t.step("should handle complex tail-recursive computation", () => {
+  test("should handle complex tail-recursive computation", () => {
     // Define a tail-recursive function that computes powers
-    const defExpr = parser.parse(`
+    const defExpr = parseExpr(`
       (defun power-tail (base exp acc)
         (if (= exp 0)
             acc
             (power-tail base (- exp 1) (* acc base))))
     `);
-    evaluator.eval(defExpr, env);
+    evalExpr(defExpr);
 
     // Test 2^10 = 1024
-    const callExpr = parser.parse("(power-tail 2 10 1)");
-    const result = evaluator.eval(callExpr, env);
-    assertEquals(result, createNumber(1024));
+    const callExpr = parseExpr("(power-tail 2 10 1)");
+    const result = evalExpr(callExpr);
+    expect(result).toEqual(createNumber(1024));
   });
 
-  await t.step("should handle mutually recursive functions efficiently", () => {
+  test("should handle mutually recursive functions efficiently", () => {
     // Define mutually recursive functions for even/odd with large numbers
-    const defEvenExpr = parser.parse(`
+    const defEvenExpr = parseExpr(`
       (defun is-even-large (n)
         (if (= n 0)
             t
             (is-odd-large (- n 1))))
     `);
-    evaluator.eval(defEvenExpr, env);
+    evalExpr(defEvenExpr);
 
-    const defOddExpr = parser.parse(`
+    const defOddExpr = parseExpr(`
       (defun is-odd-large (n)
         (if (= n 0)
             nil
             (is-even-large (- n 1))))
     `);
-    evaluator.eval(defOddExpr, env);
+    evalExpr(defOddExpr);
 
     // Test with moderately large numbers
-    const evenExpr = parser.parse("(is-even-large 500)");
-    const evenResult = evaluator.eval(evenExpr, env);
-    assertEquals(evenResult.type, "boolean");
-    assertEquals(evenResult.value, true);
+    const evenExpr = parseExpr("(is-even-large 500)");
+    const evenResult = evalExpr(evenExpr);
+    expect(evenResult.type).toBe("boolean");
+    expect(evenResult.value).toBe(true);
 
-    const oddExpr = parser.parse("(is-odd-large 501)");
-    const oddResult = evaluator.eval(oddExpr, env);
-    assertEquals(oddResult.type, "boolean");
-    assertEquals(oddResult.value, true);
+    const oddExpr = parseExpr("(is-odd-large 501)");
+    const oddResult = evalExpr(oddExpr);
+    expect(oddResult.type).toBe("boolean");
+    expect(oddResult.value).toBe(true);
   });
 });

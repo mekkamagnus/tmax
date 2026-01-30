@@ -5,6 +5,7 @@
 
 import { errorManager, TmaxError, ErrorCategory, ErrorSeverity } from "./error-manager.ts";
 import { logger, LogLevel } from "./logger.ts";
+import { SLOW_OPERATION_THRESHOLD_MS } from "../constants/editor.ts";
 
 /**
  * System health metrics
@@ -63,7 +64,7 @@ export class DebugReporter {
   private startTime = Date.now();
   private operationMetrics = new Map<string, { count: number; totalTime: number; lastExecution: Date }>();
   private activeOperations = new Map<string, { operation: string; startTime: Date; module: string }>();
-  private slowOperationThreshold = 1000; // 1 second
+  private slowOperationThreshold = SLOW_OPERATION_THRESHOLD_MS; // 1 second
 
   private constructor() {}
 

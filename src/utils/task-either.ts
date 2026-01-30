@@ -311,15 +311,79 @@ export class TaskEither<L, R> {
     return new TaskEither(async () => {
       const eithers = await Promise.all(tasks.map(task => task.run()));
       const results: R[] = [];
-      
+
       for (const either of eithers) {
         if (Either.isLeft(either)) {
           return either;
         }
         results.push(either.right);
       }
-      
+
       return Either.right(results);
+    });
+  }
+
+  /**
+   * Perform a side effect on the Right value without changing it
+   */
+  tap(effect: (value: R) => void): TaskEither<L, R> {
+    return new TaskEither(async () => {
+      const either = await this.computation();
+      if (Either.isRight(either)) {
+        effect(either.right);
+      }
+      return either;
+    });
+  }
+
+  /**
+   * Perform a side effect on the Left value without changing it
+   */
+  tapError(effect: (error: L) => void): TaskEither<L, R> {
+    return new TaskEither(async () => {
+      const either = await this.computation();
+      if (Either.isLeft(either)) {
+        effect(either.left);
+      }
+      return either;
+    });
+  }
+
+  /**
+   * Chain another TaskEither only if a condition is met
+   */
+  chainIf(condition: boolean, f: (value: R) => TaskEither<L, R>): TaskEither<L, R> {
+    return condition ? this.flatMap(f) : this;
+  }
+
+  /**
+   * Swap the Left and Right sides of the Either
+   */
+  swap(): TaskEither<R, L> {
+    return new TaskEither(async () => {
+      const either = await this.computation();
+      if (Either.isLeft(either)) {
+        return Either.right(either.left);
+      } else {
+        return Either.left(either.right);
+      }
+    });
+  }
+
+  /**
+   * Create a TaskEither from a promise that may reject
+   */
+  static fromPromise<T, L>(
+    promise: Promise<T>,
+    onError: (error: unknown) => L
+  ): TaskEither<L, T> {
+    return new TaskEither(async () => {
+      try {
+        const result = await promise;
+        return Either.right(result);
+      } catch (error) {
+        return Either.left(onError(error));
+      }
     });
   }
 }

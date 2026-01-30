@@ -3,315 +3,459 @@
  * @description Tests for T-Lisp evaluator
  */
 
-import { assertEquals, assertThrows } from "@std/assert";
+import { expect, describe, test, beforeAll } from "bun:test";
 import { TLispEvaluator, createEvaluatorWithBuiltins } from "../../src/tlisp/evaluator.ts";
 import { TLispParser } from "../../src/tlisp/parser.ts";
 import { TLispEnvironment } from "../../src/tlisp/types.ts";
 import { createNumber, createString, createSymbol, createBoolean, createNil, valueToString } from "../../src/tlisp/values.ts";
+import { Either } from "../../src/utils/task-either.ts";
+
+// Create a helper function for assertion since we're using Bun test
+function assertEquals(actual: any, expected: any, msg?: string) {
+  expect(actual).toEqual(expected);
+}
 
 /**
  * Test suite for T-Lisp evaluator
  */
-Deno.test("T-Lisp Evaluator", async (t) => {
+
+describe("T-Lisp Evaluator", () => {
   let evaluator: TLispEvaluator;
   let parser: TLispParser;
   let env: TLispEnvironment;
 
-  await t.step("should create evaluator", () => {
+  beforeAll(() => {
     const result = createEvaluatorWithBuiltins();
     evaluator = result.evaluator;
     env = result.env;
     parser = new TLispParser();
   });
 
-  await t.step("should evaluate literals", () => {
+  // Helper to parse expression and extract .right value
+  const parseExpr = (code: string) => {
+    const result = parser.parse(code);
+    if (Either.isLeft(result)) {
+      throw new Error(`Parse error: ${JSON.stringify(result.left)}`);
+    }
+    return result.right;
+  };
+
+  // Helper to eval expression and extract .right value
+  const evalExpr = (expr: any) => {
+    const result = evaluator.eval(expr, env);
+    if (Either.isLeft(result)) {
+      throw new Error(`Eval error: ${JSON.stringify(result.left)}`);
+    }
+    return result.right;
+  };
+
+  test("should evaluate literals", () => {
     // Numbers
-    assertEquals(evaluator.eval(createNumber(42), env), createNumber(42));
-    
+    const numberResult = evaluator.eval(createNumber(42), env);
+    expect(Either.isRight(numberResult)).toBe(true);
+    if (Either.isRight(numberResult)) {
+      expect(numberResult.right).toEqual(createNumber(42));
+    }
+
     // Strings
-    assertEquals(evaluator.eval(createString("hello"), env), createString("hello"));
-    
+    const stringResult = evaluator.eval(createString("hello"), env);
+    expect(Either.isRight(stringResult)).toBe(true);
+    if (Either.isRight(stringResult)) {
+      expect(stringResult.right).toEqual(createString("hello"));
+    }
+
     // Booleans
-    assertEquals(evaluator.eval(createBoolean(true), env), createBoolean(true));
-    
+    const booleanResult = evaluator.eval(createBoolean(true), env);
+    expect(Either.isRight(booleanResult)).toBe(true);
+    if (Either.isRight(booleanResult)) {
+      expect(booleanResult.right).toEqual(createBoolean(true));
+    }
+
     // Nil
-    assertEquals(evaluator.eval(createNil(), env), createNil());
+    const nilResult = evaluator.eval(createNil(), env);
+    expect(Either.isRight(nilResult)).toBe(true);
+    if (Either.isRight(nilResult)) {
+      expect(nilResult.right).toEqual(createNil());
+    }
   });
 
-  await t.step("should evaluate symbols from environment", () => {
+  test("should evaluate symbols from environment", () => {
     env.define("x", createNumber(42));
     const result = evaluator.eval(createSymbol("x"), env);
-    assertEquals(result, createNumber(42));
+    expect(Either.isRight(result)).toBe(true);
+    if (Either.isRight(result)) {
+      expect(result.right).toEqual(createNumber(42));
+    }
   });
 
-  await t.step("should throw on undefined symbols", () => {
-    assertThrows(() => evaluator.eval(createSymbol("undefined-var"), env));
+  test("should return error on undefined symbols", () => {
+    const result = evaluator.eval(createSymbol("undefined-var"), env);
+    expect(Either.isLeft(result)).toBe(true);
   });
 
-  await t.step("should evaluate quoted expressions", () => {
-    const expr = parser.parse("'foo");
+  test("should evaluate quoted expressions", () => {
+    const expr = parseExpr("'foo");
     const result = evaluator.eval(expr, env);
-    assertEquals(result.type, "symbol");
-    assertEquals(result.value, "foo");
+    expect(Either.isRight(result)).toBe(true);
+    if (Either.isRight(result)) {
+      expect(result.right.type).toBe("symbol");
+      expect(result.right.value).toBe("foo");
+    }
   });
 
-  await t.step("should evaluate quoted lists", () => {
-    const expr = parser.parse("'(1 2 3)");
+  test("should evaluate quoted lists", () => {
+    const expr = parseExpr("'(1 2 3)");
     const result = evaluator.eval(expr, env);
-    assertEquals(result.type, "list");
-    const list = result.value as any[];
-    assertEquals(list.length, 3);
-    assertEquals(list[0].value, 1);
-    assertEquals(list[1].value, 2);
-    assertEquals(list[2].value, 3);
+    expect(Either.isRight(result)).toBe(true);
+    if (Either.isRight(result)) {
+      expect(result.right.type).toBe("list");
+      const list = result.right.value as any[];
+      expect(list.length).toBe(3);
+      expect(list[0].value).toBe(1);
+      expect(list[1].value).toBe(2);
+      expect(list[2].value).toBe(3);
+    }
   });
 
-  await t.step("should evaluate arithmetic expressions", () => {
+  test("should evaluate arithmetic expressions", () => {
     // Addition
-    let expr = parser.parse("(+ 1 2)");
+    let expr = parseExpr("(+ 1 2)");
     let result = evaluator.eval(expr, env);
-    assertEquals(result, createNumber(3));
-    
+    expect(Either.isRight(result)).toBe(true);
+    if (Either.isRight(result)) {
+      expect(result.right).toEqual(createNumber(3));
+    }
+
     // Subtraction
-    expr = parser.parse("(- 5 3)");
+    expr = parseExpr("(- 5 3)");
     result = evaluator.eval(expr, env);
-    assertEquals(result, createNumber(2));
-    
+    expect(Either.isRight(result)).toBe(true);
+    if (Either.isRight(result)) {
+      expect(result.right).toEqual(createNumber(2));
+    }
+
     // Multiplication
-    expr = parser.parse("(* 3 4)");
+    expr = parseExpr("(* 3 4)");
     result = evaluator.eval(expr, env);
-    assertEquals(result, createNumber(12));
-    
+    expect(Either.isRight(result)).toBe(true);
+    if (Either.isRight(result)) {
+      expect(result.right).toEqual(createNumber(12));
+    }
+
     // Division
-    expr = parser.parse("(/ 8 2)");
+    expr = parseExpr("(/ 8 2)");
     result = evaluator.eval(expr, env);
-    assertEquals(result, createNumber(4));
+    expect(Either.isRight(result)).toBe(true);
+    if (Either.isRight(result)) {
+      expect(result.right).toEqual(createNumber(4));
+    }
   });
 
-  await t.step("should evaluate nested arithmetic", () => {
-    const expr = parser.parse("(+ (* 2 3) (- 10 5))");
+  test("should evaluate nested arithmetic", () => {
+    const expr = parseExpr("(+ (* 2 3) (- 10 5))");
     const result = evaluator.eval(expr, env);
-    assertEquals(result, createNumber(11)); // (+ 6 5) = 11
+    expect(Either.isRight(result)).toBe(true);
+    if (Either.isRight(result)) {
+      expect(result.right).toEqual(createNumber(11)); // (+ 6 5) = 11
+    }
   });
 
-  await t.step("should evaluate comparison expressions", () => {
+  test("should evaluate comparison expressions", () => {
     // Equality
-    let expr = parser.parse("(= 2 2)");
+    let expr = parseExpr("(= 2 2)");
     let result = evaluator.eval(expr, env);
-    assertEquals(result, createBoolean(true));
-    
-    expr = parser.parse("(= 2 3)");
+    expect(Either.isRight(result)).toBe(true);
+    if (Either.isRight(result)) {
+      expect(result.right).toEqual(createBoolean(true));
+    }
+
+    expr = parseExpr("(= 2 3)");
     result = evaluator.eval(expr, env);
-    assertEquals(result, createBoolean(false));
-    
+    expect(Either.isRight(result)).toBe(true);
+    if (Either.isRight(result)) {
+      expect(result.right).toEqual(createBoolean(false));
+    }
+
     // Less than
-    expr = parser.parse("(< 1 2)");
+    expr = parseExpr("(< 1 2)");
     result = evaluator.eval(expr, env);
-    assertEquals(result, createBoolean(true));
-    
-    expr = parser.parse("(< 2 1)");
+    expect(Either.isRight(result)).toBe(true);
+    if (Either.isRight(result)) {
+      expect(result.right).toEqual(createBoolean(true));
+    }
+
+    expr = parseExpr("(< 2 1)");
     result = evaluator.eval(expr, env);
-    assertEquals(result, createBoolean(false));
+    expect(Either.isRight(result)).toBe(true);
+    if (Either.isRight(result)) {
+      expect(result.right).toEqual(createBoolean(false));
+    }
   });
 
-  await t.step("should evaluate if expressions", () => {
+  test("should evaluate if expressions", () => {
     // True condition
-    let expr = parser.parse("(if t 1 2)");
+    let expr = parseExpr("(if t 1 2)");
     let result = evaluator.eval(expr, env);
-    assertEquals(result, createNumber(1));
-    
+    expect(Either.isRight(result)).toBe(true);
+    if (Either.isRight(result)) {
+      expect(result.right).toEqual(createNumber(1));
+    }
+
     // False condition
-    expr = parser.parse("(if nil 1 2)");
+    expr = parseExpr("(if nil 1 2)");
     result = evaluator.eval(expr, env);
-    assertEquals(result, createNumber(2));
-    
+    expect(Either.isRight(result)).toBe(true);
+    if (Either.isRight(result)) {
+      expect(result.right).toEqual(createNumber(2));
+    }
+
     // Complex condition
-    expr = parser.parse("(if (< 1 2) 'yes 'no)");
+    expr = parseExpr("(if (< 1 2) 'yes 'no)");
     result = evaluator.eval(expr, env);
-    assertEquals(result.type, "symbol");
-    assertEquals(result.value, "yes");
+    expect(Either.isRight(result)).toBe(true);
+    if (Either.isRight(result)) {
+      expect(result.right.type).toBe("symbol");
+      expect(result.right.value).toBe("yes");
+    }
   });
 
-  await t.step("should evaluate let expressions", () => {
-    const expr = parser.parse("(let ((x 10) (y 20)) (+ x y))");
+  test("should evaluate let expressions", () => {
+    const expr = parseExpr("(let ((x 10) (y 20)) (+ x y))");
     const result = evaluator.eval(expr, env);
-    assertEquals(result, createNumber(30));
+    expect(Either.isRight(result)).toBe(true);
+    if (Either.isRight(result)) {
+      expect(result.right).toEqual(createNumber(30));
+    }
   });
 
-  await t.step("should evaluate lambda expressions", () => {
-    const expr = parser.parse("((lambda (x) (* x 2)) 5)");
+  test("should evaluate lambda expressions", () => {
+    const expr = parseExpr("((lambda (x) (* x 2)) 5)");
     const result = evaluator.eval(expr, env);
-    assertEquals(result, createNumber(10));
+    expect(Either.isRight(result)).toBe(true);
+    if (Either.isRight(result)) {
+      expect(result.right).toEqual(createNumber(10));
+    }
   });
 
-  await t.step("should evaluate defun expressions", () => {
-    const expr = parser.parse("(defun square (x) (* x x))");
-    evaluator.eval(expr, env);
-    
+  test("should evaluate defun expressions", () => {
+    const expr = parseExpr("(defun square (x) (* x x))");
+    const defResult = evaluator.eval(expr, env);
+    expect(Either.isRight(defResult)).toBe(true);
+
     // Test the defined function
-    const callExpr = parser.parse("(square 4)");
+    const callExpr = parseExpr("(square 4)");
     const result = evaluator.eval(callExpr, env);
-    assertEquals(result, createNumber(16));
+    expect(Either.isRight(result)).toBe(true);
+    if (Either.isRight(result)) {
+      expect(result.right).toEqual(createNumber(16));
+    }
   });
 
-  await t.step("should evaluate list operations", () => {
+  test("should evaluate list operations", () => {
     // cons
-    let expr = parser.parse("(cons 1 '(2 3))");
+    let expr = parseExpr("(cons 1 '(2 3))");
     let result = evaluator.eval(expr, env);
-    assertEquals(result.type, "list");
-    let list = result.value as any[];
-    assertEquals(list.length, 3);
-    assertEquals(list[0].value, 1);
-    
+    expect(Either.isRight(result)).toBe(true);
+    if (Either.isRight(result)) {
+      expect(result.right.type).toBe("list");
+      let list = result.right.value as any[];
+      expect(list.length).toBe(3);
+      expect(list[0].value).toBe(1);
+    }
+
     // car
-    expr = parser.parse("(car '(1 2 3))");
+    expr = parseExpr("(car '(1 2 3))");
     result = evaluator.eval(expr, env);
-    assertEquals(result, createNumber(1));
-    
+    expect(Either.isRight(result)).toBe(true);
+    if (Either.isRight(result)) {
+      expect(result.right).toEqual(createNumber(1));
+    }
+
     // cdr
-    expr = parser.parse("(cdr '(1 2 3))");
+    expr = parseExpr("(cdr '(1 2 3))");
     result = evaluator.eval(expr, env);
-    assertEquals(result.type, "list");
-    list = result.value as any[];
-    assertEquals(list.length, 2);
-    assertEquals(list[0].value, 2);
-    assertEquals(list[1].value, 3);
+    expect(Either.isRight(result)).toBe(true);
+    if (Either.isRight(result)) {
+      expect(result.right.type).toBe("list");
+      let list = result.right.value as any[];
+      expect(list.length).toBe(2);
+      expect(list[0].value).toBe(2);
+      expect(list[1].value).toBe(3);
+    }
   });
 
-  await t.step("should evaluate predicates", () => {
+  test("should evaluate predicates", () => {
     // null
-    let expr = parser.parse("(null nil)");
+    let expr = parseExpr("(null nil)");
     let result = evaluator.eval(expr, env);
-    assertEquals(result, createBoolean(true));
-    
-    expr = parser.parse("(null '(1 2))");
+    expect(Either.isRight(result)).toBe(true);
+    if (Either.isRight(result)) {
+      expect(result.right).toEqual(createBoolean(true));
+    }
+
+    expr = parseExpr("(null '(1 2))");
     result = evaluator.eval(expr, env);
-    assertEquals(result, createBoolean(false));
-    
+    expect(Either.isRight(result)).toBe(true);
+    if (Either.isRight(result)) {
+      expect(result.right).toEqual(createBoolean(false));
+    }
+
     // atom
-    expr = parser.parse("(atom 42)");
+    expr = parseExpr("(atom 42)");
     result = evaluator.eval(expr, env);
-    assertEquals(result, createBoolean(true));
-    
-    expr = parser.parse("(atom '(1 2))");
+    expect(Either.isRight(result)).toBe(true);
+    if (Either.isRight(result)) {
+      expect(result.right).toEqual(createBoolean(true));
+    }
+
+    expr = parseExpr("(atom '(1 2))");
     result = evaluator.eval(expr, env);
-    assertEquals(result, createBoolean(false));
+    expect(Either.isRight(result)).toBe(true);
+    if (Either.isRight(result)) {
+      expect(result.right).toEqual(createBoolean(false));
+    }
   });
 
-  await t.step("should handle recursive functions", () => {
+  test("should handle recursive functions", () => {
     // Define factorial function
-    const defExpr = parser.parse(`
+    const defExpr = parseExpr(`
       (defun factorial (n)
         (if (= n 0)
             1
             (* n (factorial (- n 1)))))
     `);
-    evaluator.eval(defExpr, env);
-    
+    const defResult = evaluator.eval(defExpr, env);
+    expect(Either.isRight(defResult)).toBe(true);
+
     // Test factorial
-    const callExpr = parser.parse("(factorial 5)");
+    const callExpr = parseExpr("(factorial 5)");
     const result = evaluator.eval(callExpr, env);
-    assertEquals(result, createNumber(120));
+    expect(Either.isRight(result)).toBe(true);
+    if (Either.isRight(result)) {
+      expect(result.right).toEqual(createNumber(120));
+    }
   });
 
-  await t.step("should evaluate cond expressions", () => {
+  test("should evaluate cond expressions", () => {
     // Simple cond with first condition true
-    let expr = parser.parse("(cond ((= 1 1) 'first) ((= 2 2) 'second))");
+    let expr = parseExpr("(cond ((= 1 1) 'first) ((= 2 2) 'second))");
     let result = evaluator.eval(expr, env);
-    assertEquals(result.type, "symbol");
-    assertEquals(result.value, "first");
-    
+    expect(Either.isRight(result)).toBe(true);
+    if (Either.isRight(result)) {
+      expect(result.right.type).toBe("symbol");
+      expect(result.right.value).toBe("first");
+    }
+
     // Cond with second condition true
-    expr = parser.parse("(cond ((= 1 2) 'first) ((= 2 2) 'second))");
+    expr = parseExpr("(cond ((= 1 2) 'first) ((= 2 2) 'second))");
     result = evaluator.eval(expr, env);
-    assertEquals(result.type, "symbol");
-    assertEquals(result.value, "second");
-    
+    expect(Either.isRight(result)).toBe(true);
+    if (Either.isRight(result)) {
+      expect(result.right.type).toBe("symbol");
+      expect(result.right.value).toBe("second");
+    }
+
     // Cond with no matching conditions
-    expr = parser.parse("(cond ((= 1 2) 'first) ((= 3 4) 'second))");
+    expr = parseExpr("(cond ((= 1 2) 'first) ((= 3 4) 'second))");
     result = evaluator.eval(expr, env);
-    assertEquals(result, createNil());
+    expect(Either.isRight(result)).toBe(true);
+    if (Either.isRight(result)) {
+      expect(result.right).toEqual(createNil());
+    }
   });
 
-  await t.step("should evaluate cond with 't' clause", () => {
+  test("should evaluate cond with 't' clause", () => {
     // Cond with 't' as else clause
-    const expr = parser.parse("(cond ((= 1 2) 'first) (t 'default))");
+    const expr = parseExpr("(cond ((= 1 2) 'first) (t 'default))");
     const result = evaluator.eval(expr, env);
-    assertEquals(result.type, "symbol");
-    assertEquals(result.value, "default");
+    expect(Either.isRight(result)).toBe(true);
+    if (Either.isRight(result)) {
+      expect(result.right.type).toBe("symbol");
+      expect(result.right.value).toBe("default");
+    }
   });
 
-  await t.step("should evaluate cond with complex conditions", () => {
+  test("should evaluate cond with complex conditions", () => {
     // Cond with arithmetic conditions
-    const expr = parser.parse(`
-      (cond 
+    const expr = parseExpr(`
+      (cond
         ((< 5 3) 'less)
         ((> 5 3) 'greater)
         (t 'equal))
     `);
     const result = evaluator.eval(expr, env);
-    assertEquals(result.type, "symbol");
-    assertEquals(result.value, "greater");
+    expect(Either.isRight(result)).toBe(true);
+    if (Either.isRight(result)) {
+      expect(result.right.type).toBe("symbol");
+      expect(result.right.value).toBe("greater");
+    }
   });
 
-  await t.step("should evaluate cond with complex expressions", () => {
+  test("should evaluate cond with complex expressions", () => {
     // Cond with complex expressions in both condition and result
-    const expr = parser.parse(`
+    const expr = parseExpr(`
       (let ((x 10))
-        (cond 
+        (cond
           ((< x 5) (* x 2))
           ((> x 15) (+ x 5))
           (t (- x 3))))
     `);
     const result = evaluator.eval(expr, env);
-    assertEquals(result, createNumber(7)); // x=10, so (- 10 3) = 7
+    expect(Either.isRight(result)).toBe(true);
+    if (Either.isRight(result)) {
+      expect(result.right).toEqual(createNumber(7)); // x=10, so (- 10 3) = 7
+    }
   });
 
-  await t.step("should handle cond error cases", () => {
+  test("should handle cond error cases", () => {
     // Empty cond
-    assertThrows(() => {
-      const expr = parser.parse("(cond)");
-      evaluator.eval(expr, env);
-    }, Error, "cond requires at least 1 clause");
-    
+    const expr = parseExpr("(cond)");
+    const result = evaluator.eval(expr, env);
+    expect(Either.isLeft(result)).toBe(true);
+
     // Invalid clause format
-    assertThrows(() => {
-      const expr = parser.parse("(cond 42)");
-      evaluator.eval(expr, env);
-    }, Error, "cond clause must be a list");
-    
+    const expr2 = parseExpr("(cond 42)");
+    const result2 = evaluator.eval(expr2, env);
+    expect(Either.isLeft(result2)).toBe(true);
+
     // Clause with wrong number of elements
-    assertThrows(() => {
-      const expr = parser.parse("(cond (t))");
-      evaluator.eval(expr, env);
-    }, Error, "cond clause must have exactly 2 elements");
+    const expr3 = parseExpr("(cond (t))");
+    const result3 = evaluator.eval(expr3, env);
+    expect(Either.isLeft(result3)).toBe(true);
   });
 
-  await t.step("should evaluate cond with tail-call optimization", () => {
+  test("should evaluate cond with tail-call optimization", () => {
     // Define a recursive function using cond
-    const defExpr = parser.parse(`
+    const defExpr = parseExpr(`
       (defun countdown (n)
-        (cond 
+        (cond
           ((= n 0) 'done)
           (t (countdown (- n 1)))))
     `);
-    evaluator.eval(defExpr, env);
-    
+    const defResult = evaluator.eval(defExpr, env);
+    expect(Either.isRight(defResult)).toBe(true);
+
     // Test tail-call optimized recursion
-    const callExpr = parser.parse("(countdown 100)");
+    const callExpr = parseExpr("(countdown 100)");
     const result = evaluator.eval(callExpr, env);
-    assertEquals(result.type, "symbol");
-    assertEquals(result.value, "done");
+    expect(Either.isRight(result)).toBe(true);
+    if (Either.isRight(result)) {
+      expect(result.right.type).toBe("symbol");
+      expect(result.right.value).toBe("done");
+    }
   });
 
-  await t.step("should handle complex expressions", () => {
-    const expr = parser.parse(`
+  test("should handle complex expressions", () => {
+    const expr = parseExpr(`
       (let ((x 10) (y 5))
         (if (> x y)
             (+ x y)
             (- x y)))
     `);
     const result = evaluator.eval(expr, env);
-    assertEquals(result, createNumber(15));
+    expect(Either.isRight(result)).toBe(true);
+    if (Either.isRight(result)) {
+      expect(result.right).toEqual(createNumber(15));
+    }
   });
 });

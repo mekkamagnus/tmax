@@ -3,6 +3,14 @@
  * @description T-Lisp tokenizer implementation
  */
 
+import { Either } from "../utils/task-either.ts";
+import { createConfigError, ConfigError } from "../error/types.ts";
+
+/**
+ * Tokenize error type for T-Lisp tokenization errors
+ */
+export type TokenizeError = ConfigError;
+
 /**
  * T-Lisp tokenizer for converting source code into tokens
  */
@@ -13,16 +21,16 @@ export class TLispTokenizer {
   /**
    * Tokenize T-Lisp source code
    * @param source - Source code to tokenize
-   * @returns Array of tokens
+   * @returns Either with TokenizeError or Array of tokens
    */
-  tokenize(source: string): string[] {
+  tokenize(source: string): Either<TokenizeError, string[]> {
     this.source = source;
     this.pos = 0;
     const tokens: string[] = [];
 
     while (this.pos < this.source.length) {
       this.skipWhitespace();
-      
+
       if (this.pos >= this.source.length) {
         break;
       }
@@ -33,13 +41,18 @@ export class TLispTokenizer {
         continue;
       }
 
-      const token = this.readToken();
+      const tokenResult = this.readToken();
+      if (Either.isLeft(tokenResult)) {
+        return tokenResult; // Propagate error
+      }
+
+      const token = tokenResult.right;
       if (token) {
         tokens.push(token);
       }
     }
 
-    return tokens;
+    return Either.right(tokens);
   }
 
   /**
@@ -62,24 +75,24 @@ export class TLispTokenizer {
 
   /**
    * Read the next token
-   * @returns Token string or null if no token
+   * @returns Either with TokenizeError or Token string or null if no token
    */
-  private readToken(): string | null {
+  private readToken(): Either<TokenizeError, string | null> {
     const char = this.peek();
 
     // Parentheses
     if (char === "(" || char === ")") {
-      return this.advance().toString();
+      return Either.right(this.advance().toString());
     }
 
     // Quote
     if (char === "'") {
-      return this.advance().toString();
+      return Either.right(this.advance().toString());
     }
 
     // Quasiquote (backquote)
     if (char === "`") {
-      return this.advance().toString();
+      return Either.right(this.advance().toString());
     }
 
     // Unquote and unquote-splicing
@@ -87,9 +100,9 @@ export class TLispTokenizer {
       if (this.peek(1) === "@") {
         this.advance(); // consume ','
         this.advance(); // consume '@'
-        return ",@";
+        return Either.right(",@");
       }
-      return this.advance().toString();
+      return Either.right(this.advance().toString());
     }
 
     // String literals
@@ -99,24 +112,24 @@ export class TLispTokenizer {
 
     // Numbers
     if (this.isDigit(char) || (char === "-" && this.isDigit(this.peek(1)))) {
-      return this.readNumber();
+      return Either.right(this.readNumber());
     }
 
     // Symbols/atoms
     if (this.isSymbolStart(char)) {
-      return this.readSymbol();
+      return Either.right(this.readSymbol());
     }
 
     // Unknown character - skip it
     this.pos++;
-    return null;
+    return Either.right(null);
   }
 
   /**
    * Read a string literal
-   * @returns String token including quotes
+   * @returns Either with TokenizeError or String token including quotes
    */
-  private readString(): string {
+  private readString(): Either<TokenizeError, string> {
     let result = "";
     result += this.advance(); // Opening quote
 
@@ -153,11 +166,10 @@ export class TLispTokenizer {
 
     if (this.pos < this.source.length) {
       result += this.advance(); // Closing quote
+      return Either.right(result);
     } else {
-      throw new Error("Unterminated string literal");
+      return Either.left(createConfigError('ParseError', "Unterminated string literal"));
     }
-
-    return result;
   }
 
   /**

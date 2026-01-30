@@ -3,8 +3,9 @@
  * @description Functional buffer operations using Either for tmax editor
  */
 
-import type { Position, Range, TextBuffer } from "./types.ts";
+import type { Position, Range, TextBuffer, FunctionalTextBuffer } from "./types.ts";
 import { Either } from "../utils/task-either.ts";
+import { DEFAULT_BUFFER_SIZE, BUFFER_GROWTH_FACTOR } from "../constants/buffer.ts";
 
 /**
  * Buffer operation error types
@@ -15,35 +16,6 @@ export type BufferError = string;
  * Buffer operation result types
  */
 export type BufferResult<T> = Either<BufferError, T>;
-
-/**
- * Functional text buffer interface using Either
- */
-export interface FunctionalTextBuffer {
-  /** Get the entire buffer content */
-  getContent(): BufferResult<string>;
-  
-  /** Get content of a specific line */
-  getLine(lineNumber: number): BufferResult<string>;
-  
-  /** Get number of lines in buffer */
-  getLineCount(): BufferResult<number>;
-  
-  /** Insert text at position */
-  insert(position: Position, text: string): BufferResult<FunctionalTextBuffer>;
-  
-  /** Delete text in range */
-  delete(range: Range): BufferResult<FunctionalTextBuffer>;
-  
-  /** Replace text in range */
-  replace(range: Range, text: string): BufferResult<FunctionalTextBuffer>;
-  
-  /** Get text in range */
-  getText(range: Range): BufferResult<string>;
-  
-  /** Get buffer statistics */
-  getStats(): BufferResult<{ lines: number; characters: number; words: number }>;
-}
 
 /**
  * Immutable gap buffer implementation for functional text editing
@@ -59,7 +31,7 @@ class FunctionalGapBuffer {
    * Create a new gap buffer
    */
   static create(initialContent = ""): FunctionalGapBuffer {
-    const initialSize = 64;
+    const initialSize = DEFAULT_BUFFER_SIZE;
     const buffer = new Array(initialSize);
     
     if (initialContent) {
@@ -220,7 +192,7 @@ class FunctionalGapBuffer {
    * Grow gap to accommodate more text (returns new buffer)
    */
   private growGap(minSize: number): Either<string, FunctionalGapBuffer> {
-    const newSize = Math.max(this.buffer.length * 2, this.buffer.length + minSize);
+    const newSize = Math.max(this.buffer.length * BUFFER_GROWTH_FACTOR, this.buffer.length + minSize);
     const newBuffer = new Array(newSize);
     
     // Copy content before gap
@@ -551,179 +523,6 @@ export const BufferUtils = {
   }
 };
 
-/**
- * Backward compatibility wrapper for TextBufferImpl
- * Provides the expected interface while using functional implementation internally
- */
-export class TextBufferImpl implements TextBuffer {
-  private functionalBuffer: FunctionalTextBufferImpl;
-
-  constructor(initialContent = "") {
-    this.functionalBuffer = FunctionalTextBufferImpl.create(initialContent);
-  }
-
-  /**
-   * Get the entire buffer content
-   */
-  getContent(): string {
-    const result = this.functionalBuffer.getContent();
-    if (Either.isLeft(result)) {
-      throw new Error(result.left);
-    }
-    return result.right;
-  }
-
-  /**
-   * Get content of a specific line
-   */
-  getLine(lineNumber: number): string {
-    const result = this.functionalBuffer.getLine(lineNumber);
-    if (Either.isLeft(result)) {
-      throw new Error(result.left);
-    }
-    return result.right;
-  }
-
-  /**
-   * Get number of lines in buffer
-   */
-  getLineCount(): number {
-    const result = this.functionalBuffer.getLineCount();
-    if (Either.isLeft(result)) {
-      throw new Error(result.left);
-    }
-    return result.right;
-  }
-
-  /**
-   * Insert text at position
-   */
-  insert(position: Position, text: string): void {
-    const result = this.functionalBuffer.insert(position, text);
-    if (Either.isLeft(result)) {
-      throw new Error(result.left);
-    }
-    this.functionalBuffer = result.right as FunctionalTextBufferImpl;
-  }
-
-  /**
-   * Delete text in range
-   */
-  delete(range: Range): void {
-    const result = this.functionalBuffer.delete(range);
-    if (Either.isLeft(result)) {
-      throw new Error(result.left);
-    }
-    this.functionalBuffer = result.right as FunctionalTextBufferImpl;
-  }
-
-  /**
-   * Replace text in range
-   */
-  replace(range: Range, text: string): void {
-    const result = this.functionalBuffer.replace(range, text);
-    if (Either.isLeft(result)) {
-      throw new Error(result.left);
-    }
-    this.functionalBuffer = result.right as FunctionalTextBufferImpl;
-  }
-
-  /**
-   * Get text in range
-   */
-  getText(range: Range): string {
-    const result = this.functionalBuffer.getText(range);
-    if (Either.isLeft(result)) {
-      throw new Error(result.left);
-    }
-    return result.right;
-  }
-
-  /**
-   * Get buffer statistics
-   */
-  getStats(): { lines: number; characters: number; words: number } {
-    const result = this.functionalBuffer.getStats();
-    if (Either.isLeft(result)) {
-      throw new Error(result.left);
-    }
-    return result.right;
-  }
-}
-
 // Export utils with functional prefix to avoid conflicts
 export { BufferUtils as FunctionalBufferUtils };
 
-/**
- * Backward compatibility wrapper for GapBuffer
- * Provides the expected mutable interface while using functional implementation internally
- */
-export class GapBuffer {
-  private buffer: FunctionalGapBuffer;
-
-  constructor(initialContent = "") {
-    this.buffer = FunctionalGapBuffer.create(initialContent);
-  }
-
-  /**
-   * Get the length of the buffer content (excluding gap)
-   */
-  length(): number {
-    return this.buffer.length();
-  }
-
-  /**
-   * Insert text at the specified position
-   */
-  insert(position: number, text: string): void {
-    const result = this.buffer.insert(position, text);
-    if (Either.isLeft(result)) {
-      throw new Error(result.left);
-    }
-    this.buffer = result.right;
-  }
-
-  /**
-   * Delete text at the specified position
-   */
-  delete(position: number, length: number): void {
-    const result = this.buffer.delete(position, length);
-    if (Either.isLeft(result)) {
-      throw new Error(result.left);
-    }
-    this.buffer = result.right;
-  }
-
-  /**
-   * Get character at position
-   */
-  charAt(position: number): string {
-    const result = this.buffer.charAt(position);
-    if (Either.isLeft(result)) {
-      throw new Error(result.left);
-    }
-    return result.right;
-  }
-
-  /**
-   * Get substring from buffer
-   */
-  substring(start: number, end: number): string {
-    const result = this.buffer.substring(start, end);
-    if (Either.isLeft(result)) {
-      throw new Error(result.left);
-    }
-    return result.right;
-  }
-
-  /**
-   * Convert buffer to string
-   */
-  toString(): string {
-    const result = this.buffer.toString();
-    if (Either.isLeft(result)) {
-      throw new Error(result.left);
-    }
-    return result.right;
-  }
-}

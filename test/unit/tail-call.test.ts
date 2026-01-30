@@ -3,70 +3,86 @@
  * @description Tests for tail-call optimization in T-Lisp evaluator
  */
 
-import { assertEquals } from "@std/assert";
+import { describe, test, expect } from "bun:test";
 import { createEvaluatorWithBuiltins } from "../../src/tlisp/evaluator.ts";
 import { TLispParser } from "../../src/tlisp/parser.ts";
 import { createNumber } from "../../src/tlisp/values.ts";
+import { Either } from "../../src/utils/task-either.ts";
 
-/**
- * Test suite for tail-call optimization
- */
-Deno.test("Tail-Call Optimization", async (t) => {
+describe("Tail-Call Optimization", () => {
   const { evaluator, env } = createEvaluatorWithBuiltins();
   const parser = new TLispParser();
 
-  await t.step("should handle simple tail recursion", () => {
+  // Helper to parse expression and extract .right value
+  const parseExpr = (code: string) => {
+    const result = parser.parse(code);
+    if (Either.isLeft(result)) {
+      throw new Error(`Parse error: ${result.left}`);
+    }
+    return result.right;
+  };
+
+  // Helper to eval expression and extract .right value
+  const evalExpr = (expr: any) => {
+    const result = evaluator.eval(expr, env);
+    if (Either.isLeft(result)) {
+      throw new Error(`Eval error: ${result.left}`);
+    }
+    return result.right;
+  };
+
+  test("should handle simple tail recursion", () => {
     // Define a tail-recursive factorial function
-    const defExpr = parser.parse(`
+    const defExpr = parseExpr(`
       (defun factorial-tail (n acc)
         (if (= n 0)
             acc
             (factorial-tail (- n 1) (* n acc))))
     `);
-    evaluator.eval(defExpr, env);
+    evalExpr(defExpr);
 
     // Test factorial with tail recursion
-    const callExpr = parser.parse("(factorial-tail 5 1)");
-    const result = evaluator.eval(callExpr, env);
-    assertEquals(result, createNumber(120));
+    const callExpr = parseExpr("(factorial-tail 5 1)");
+    const result = evalExpr(callExpr);
+    expect(result).toEqual(createNumber(120));
   });
 
-  await t.step("should handle tail-recursive countdown", () => {
+  test("should handle tail-recursive countdown", () => {
     // Define a tail-recursive countdown function
-    const defExpr = parser.parse(`
+    const defExpr = parseExpr(`
       (defun countdown (n)
         (if (= n 0)
             'done
             (countdown (- n 1))))
     `);
-    evaluator.eval(defExpr, env);
+    evalExpr(defExpr);
 
     // Test countdown - should not stack overflow even with large numbers
-    const callExpr = parser.parse("(countdown 100)");
-    const result = evaluator.eval(callExpr, env);
-    assertEquals(result.type, "symbol");
-    assertEquals(result.value, "done");
+    const callExpr = parseExpr("(countdown 100)");
+    const result = evalExpr(callExpr);
+    expect(result.type).toBe("symbol");
+    expect(result.value).toBe("done");
   });
 
-  await t.step("should handle tail-recursive sum", () => {
+  test("should handle tail-recursive sum", () => {
     // Define a tail-recursive sum function
-    const defExpr = parser.parse(`
+    const defExpr = parseExpr(`
       (defun sum-tail (n acc)
         (if (= n 0)
             acc
             (sum-tail (- n 1) (+ acc n))))
     `);
-    evaluator.eval(defExpr, env);
+    evalExpr(defExpr);
 
     // Test sum 1+2+3+4+5 = 15
-    const callExpr = parser.parse("(sum-tail 5 0)");
-    const result = evaluator.eval(callExpr, env);
-    assertEquals(result, createNumber(15));
+    const callExpr = parseExpr("(sum-tail 5 0)");
+    const result = evalExpr(callExpr);
+    expect(result).toEqual(createNumber(15));
   });
 
-  await t.step("should handle tail calls in if expressions", () => {
+  test("should handle tail calls in if expressions", () => {
     // Define a function that uses tail calls in both branches
-    const defExpr = parser.parse(`
+    const defExpr = parseExpr(`
       (defun even-odd (n)
         (if (= n 0)
             'even
@@ -74,64 +90,64 @@ Deno.test("Tail-Call Optimization", async (t) => {
                 'odd
                 (even-odd (- n 2)))))
     `);
-    evaluator.eval(defExpr, env);
+    evalExpr(defExpr);
 
     // Test even/odd detection
-    const evenExpr = parser.parse("(even-odd 10)");
-    const evenResult = evaluator.eval(evenExpr, env);
-    assertEquals(evenResult.type, "symbol");
-    assertEquals(evenResult.value, "even");
+    const evenExpr = parseExpr("(even-odd 10)");
+    const evenResult = evalExpr(evenExpr);
+    expect(evenResult.type).toBe("symbol");
+    expect(evenResult.value).toBe("even");
 
-    const oddExpr = parser.parse("(even-odd 11)");
-    const oddResult = evaluator.eval(oddExpr, env);
-    assertEquals(oddResult.type, "symbol");
-    assertEquals(oddResult.value, "odd");
+    const oddExpr = parseExpr("(even-odd 11)");
+    const oddResult = evalExpr(oddExpr);
+    expect(oddResult.type).toBe("symbol");
+    expect(oddResult.value).toBe("odd");
   });
 
-  await t.step("should handle tail calls in let expressions", () => {
+  test("should handle tail calls in let expressions", () => {
     // Define a function that uses tail calls within let
-    const defExpr = parser.parse(`
+    const defExpr = parseExpr(`
       (defun fibonacci-tail (n a b)
         (if (= n 0)
             a
             (let ((next-a b) (next-b (+ a b)))
               (fibonacci-tail (- n 1) next-a next-b))))
     `);
-    evaluator.eval(defExpr, env);
+    evalExpr(defExpr);
 
     // Test fibonacci - fib(6) = 8
-    const callExpr = parser.parse("(fibonacci-tail 6 0 1)");
-    const result = evaluator.eval(callExpr, env);
-    assertEquals(result, createNumber(8));
+    const callExpr = parseExpr("(fibonacci-tail 6 0 1)");
+    const result = evalExpr(callExpr);
+    expect(result).toEqual(createNumber(8));
   });
 
-  await t.step("should handle mutual tail recursion", () => {
+  test("should handle mutual tail recursion", () => {
     // Define mutually recursive functions
-    const defEvenExpr = parser.parse(`
+    const defEvenExpr = parseExpr(`
       (defun is-even (n)
         (if (= n 0)
             t
             (is-odd (- n 1))))
     `);
-    evaluator.eval(defEvenExpr, env);
+    evalExpr(defEvenExpr);
 
-    const defOddExpr = parser.parse(`
+    const defOddExpr = parseExpr(`
       (defun is-odd (n)
         (if (= n 0)
             nil
             (is-even (- n 1))))
     `);
-    evaluator.eval(defOddExpr, env);
+    evalExpr(defOddExpr);
 
     // Test mutual recursion
-    const evenExpr = parser.parse("(is-even 10)");
-    const evenResult = evaluator.eval(evenExpr, env);
-    assertEquals(evenResult.type, "boolean");
-    assertEquals(evenResult.value, true);
+    const evenExpr = parseExpr("(is-even 10)");
+    const evenResult = evalExpr(evenExpr);
+    expect(evenResult.type).toBe("boolean");
+    expect(evenResult.value).toBe(true);
 
-    const oddExpr = parser.parse("(is-odd 11)");
-    const oddResult = evaluator.eval(oddExpr, env);
-    assertEquals(oddResult.type, "boolean");
-    assertEquals(oddResult.value, true);
+    const oddExpr = parseExpr("(is-odd 11)");
+    const oddResult = evalExpr(oddExpr);
+    expect(oddResult.type).toBe("boolean");
+    expect(oddResult.value).toBe(true);
   });
 });

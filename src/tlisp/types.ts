@@ -3,6 +3,11 @@
  * @description T-Lisp type definitions and data structures
  */
 
+import { Either } from "../utils/task-either.ts";
+import { ParseError } from "./parser.ts";
+import { TokenizeError } from "./tokenizer.ts";
+import type { EvalError } from "../error/types.ts";
+
 /**
  * T-Lisp value types
  */
@@ -76,7 +81,7 @@ export interface TLispList extends TLispValue {
 /**
  * T-Lisp function type
  */
-export type TLispFunctionImpl = (args: TLispValue[]) => TLispValue;
+export type TLispFunctionImpl = (args: TLispValue[]) => Either<EvalError, TLispValue>;
 
 /**
  * T-Lisp function value
@@ -90,7 +95,7 @@ export interface TLispFunction extends TLispValue {
 /**
  * T-Lisp macro implementation function
  */
-export type TLispMacroImpl = (args: TLispValue[]) => TLispValue;
+export type TLispMacroImpl = (args: TLispValue[]) => Either<EvalError, TLispValue>;
 
 /**
  * T-Lisp macro value
@@ -140,10 +145,10 @@ export interface TLispInterpreter {
   parse(source: string): TLispValue;
   
   /** Evaluate T-Lisp expression */
-  eval(expr: TLispValue, env?: TLispEnvironment): TLispValue;
-  
+  eval(expr: TLispValue, env?: TLispEnvironment): Either<EvalError, TLispValue>;
+
   /** Execute T-Lisp source code */
-  execute(source: string, env?: TLispEnvironment): TLispValue;
+  execute(source: string, env?: TLispEnvironment): Either<EvalError, TLispValue>;
   
   /** Define a built-in function */
   defineBuiltin(name: string, fn: TLispFunctionImpl): void;
@@ -154,8 +159,8 @@ export interface TLispInterpreter {
  */
 export interface TLispParser {
   /** Parse source code into T-Lisp values */
-  parse(source: string): TLispValue;
-  
+  parse(source: string): Either<ParseError, TLispValue>;
+
   /** Tokenize source code */
-  tokenize(source: string): string[];
+  tokenize(source: string): Either<TokenizeError, string[]>;
 }

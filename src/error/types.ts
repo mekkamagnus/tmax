@@ -54,14 +54,25 @@ export type ConfigError = {
 };
 
 /**
+ * Evaluation error types
+ */
+export type EvalError = {
+  type: 'EvalError';
+  variant: 'SyntaxError' | 'RuntimeError' | 'TypeError' | 'ArithmeticError' | 'UndefinedSymbol';
+  message: string;
+  details?: Record<string, any>;
+};
+
+/**
  * Union type of all error types
  */
-export type AppError = 
-  | BufferError 
-  | FileSystemError 
-  | TerminalError 
-  | ValidationError 
-  | ConfigError;
+export type AppError =
+  | BufferError
+  | FileSystemError
+  | TerminalError
+  | ValidationError
+  | ConfigError
+  | EvalError;
 
 // Export the error creation functions
 export const createBufferError = (

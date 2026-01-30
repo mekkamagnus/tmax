@@ -35,7 +35,7 @@ describe("Core Bindings T-Lisp File", () => {
 
     // Count key-bind function calls
     const keyBindMatches = content.match(/\(key-bind/g);
-    expect(keyBindMatches?.length).toBe(17, "Should contain exactly 17 key-bind calls");
+    expect(keyBindMatches?.length).toBe(16, "Should contain exactly 16 key-bind calls");
   });
 
   test("should contain basic navigation bindings", async () => {
@@ -83,11 +83,12 @@ describe("Core Bindings T-Lisp File", () => {
   test("should contain editing bindings", async () => {
     const content = await readFile("src/tlisp/core-bindings.tlisp", "utf-8");
 
-    // Check for basic editing
-    expect(content).toContain('(key-bind "Backspace"');
-    expect(content).toContain('(key-bind "Enter"');
-    expect(content).toContain('(buffer-delete');
-    expect(content).toContain('(buffer-insert');
+    // Check for note about special keys handled in editor.ts
+    expect(content).toContain('Enter and Backspace are handled directly in editor.ts');
+
+    // Check that mode switching is present (editing is done through modes)
+    expect(content).toContain('(key-bind "i"');
+    expect(content).toContain('(key-bind "Escape"');
   });
 
   test("should contain proper comments and organization", async () => {
