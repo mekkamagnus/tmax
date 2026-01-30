@@ -16,16 +16,18 @@ interface BufferViewProps {
   cursorPosition: Position;
   viewportTop: number;
   onViewportChange: (top: number) => void;
+  terminalWidth: number;
+  terminalHeight: number;
 }
 
 export const BufferView = ({
   buffer,
   cursorPosition,
   viewportTop,
-  onViewportChange
+  onViewportChange,
+  terminalWidth,
+  terminalHeight
 }: BufferViewProps) => {
-  const [terminalWidth, setTerminalWidth] = useState(80);
-  const [terminalHeight, setTerminalHeight] = useState(24);
 
   // Get buffer content and line count with error handling
   const lineCountResult = buffer.getLineCount();

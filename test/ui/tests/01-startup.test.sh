@@ -25,6 +25,7 @@ test_startup() {
   assert_running "Editor should be running"
   assert_mode "NORMAL" "Should start in NORMAL mode"
   assert_no_errors "No errors should be present"
+  assert_screen_fill "UI should fill entire terminal height"
 
   tmax_summary
 

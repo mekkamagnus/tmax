@@ -193,6 +193,41 @@ assert_count() {
   fi
 }
 
+# Assert UI fills the screen completely
+# Checks that the number of visible lines matches the terminal height
+assert_screen_fill() {
+  local message="${1:-UI should fill the entire terminal height}"
+  local window="${2:-$TMAX_ACTIVE_WINDOW}"
+  local tolerance="${3:-2}"  # Allow small tolerance for borders/padding
+
+  # Get terminal height from tmux
+  local term_height
+  term_height=$(tmux display -t "${TMAX_SESSION}:${window}" -p '#{pane_height}' 2>/dev/null)
+
+  if [[ -z "$term_height" ]]; then
+    _assertion_record 1 "$message (failed to get terminal height)"
+    return 1
+  fi
+
+  # Capture the output and count lines
+  local output
+  output=$(query_capture_output "$window")
+  local line_count
+  line_count=$(echo "$output" | wc -l)
+
+  # Check if line count matches terminal height (within tolerance)
+  local diff=$((term_height - line_count))
+  local abs_diff=${diff#-}  # Absolute value
+
+  if [[ $abs_diff -le $tolerance ]]; then
+    _assertion_record 0 "$message (terminal: ${term_height} lines, rendered: ${line_count} lines)"
+    return 0
+  else
+    _assertion_record 1 "$message (terminal: ${term_height} lines, rendered: ${line_count} lines, diff: ${abs_diff})"
+    return 1
+  fi
+}
+
 # Print assertion summary
 assert_summary() {
   local total=$((TMAX_ASSERTIONS_PASSED + TMAX_ASSERTIONS_FAILED))

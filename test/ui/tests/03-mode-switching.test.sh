@@ -17,6 +17,9 @@ test_mode_switching() {
   tmax_start "mode-test.txt"
   tmax_wait_for_ready 10
 
+  # Verify UI fills screen
+  assert_screen_fill "UI should fill entire terminal height"
+
   # Start in NORMAL mode
   assert_mode "NORMAL" "Should start in NORMAL mode"
 

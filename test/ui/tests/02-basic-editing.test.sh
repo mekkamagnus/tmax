@@ -18,6 +18,9 @@ test_basic_editing() {
   tmax_start "test-edit.txt"
   tmax_wait_for_ready 10
 
+  # Verify UI fills screen
+  assert_screen_fill "UI should fill entire terminal height"
+
   # Verify file loaded
   assert_text_visible "Initial content" "File content should be visible"
 

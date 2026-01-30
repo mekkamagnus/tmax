@@ -14,6 +14,7 @@ import { BufferView } from "./BufferView.tsx";
 import { StatusLine } from "./StatusLine.tsx";
 import { CommandInput } from "./CommandInput.tsx";
 import { useEditorState } from "../hooks/useEditorState.ts";
+import { useTerminalDimensions } from "../hooks/useTerminalDimensions.ts";
 import type { Editor as EditorClass } from "../../editor/editor.ts";
 
 interface EditorProps {
@@ -29,6 +30,9 @@ export const Editor = ({ initialEditorState, editor, filename, onStateChange, on
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const { exit } = useApp();
+
+  // Get actual terminal dimensions
+  const { width: terminalWidth, height: terminalHeight } = useTerminalDimensions();
 
   // Use a ref to always have access to the current state
   const stateRef = useRef(state);
@@ -135,7 +139,7 @@ export const Editor = ({ initialEditorState, editor, filename, onStateChange, on
   }, [executeTlisp, exit]);
 
   return (
-    <Box flexDirection="column" flexGrow={1}>
+    <Box flexDirection="column" height={terminalHeight} width={terminalWidth}>
       {/* Error display */}
       {error && (
         <Box paddingX={1} marginY={0.5}>
@@ -157,6 +161,8 @@ export const Editor = ({ initialEditorState, editor, filename, onStateChange, on
           cursorPosition={state.cursorPosition}
           viewportTop={state.viewportTop}
           onViewportChange={(top) => setState((prev: EditorState) => ({ ...prev, viewportTop: top }))}
+          terminalWidth={terminalWidth}
+          terminalHeight={terminalHeight}
         />
       </Box>
 

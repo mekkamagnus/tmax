@@ -249,6 +249,14 @@ tmax_assert_no_errors() {
   assert_no_errors "$message" "$TMAX_TEST_WINDOW"
 }
 
+# Assert UI fills screen completely
+tmax_assert_screen_fill() {
+  local message="${1:-UI should fill the entire terminal height}"
+  local tolerance="${2:-2}"
+
+  assert_screen_fill "$message" "$TMAX_TEST_WINDOW" "$tolerance"
+}
+
 # Print summary
 tmax_summary() {
   assert_summary
@@ -384,7 +392,8 @@ tmax_list_functions() {
   echo ""
   echo "Assertion:"
   echo "  tmax_assert_text [pattern], tmax_assert_mode [mode]"
-  echo "  tmax_assert_no_errors, tmax_summary"
+  echo "  tmax_assert_no_errors, tmax_assert_screen_fill [tolerance]"
+  echo "  tmax_summary"
   echo ""
   echo "Debug:"
   echo "  tmax_debug, tmax_nodebug, tmax_state, tmax_dump, tmax_screenshot"
@@ -439,7 +448,7 @@ export -f tmax_insert tmax_normal tmax_command tmax_type tmax_type_line
 export -f tmax_save tmax_quit tmax_save_quit
 export -f tmax_move tmax_goto_line tmax_first_line tmax_last_line
 export -f tmax_mode tmax_visible tmax_text tmax_running
-export -f tmax_assert_text tmax_assert_mode tmax_assert_no_errors tmax_summary
+export -f tmax_assert_text tmax_assert_mode tmax_assert_no_errors tmax_assert_screen_fill tmax_summary
 export -f tmax_debug tmax_nodebug tmax_state tmax_dump tmax_screenshot
 export -f tmax_wait_for tmax_wait_for_ready tmax_wait_for_mode tmax_sleep
 export -f tmax_quick_edit tmax_create_test_file tmax_check_file
