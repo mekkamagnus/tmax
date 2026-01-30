@@ -1,7 +1,38 @@
+# Emacs
 .TODO.org.~undo-tree~
 TODO.org~
+*~
+\#*\#
+
+# Claude AI
 .claude/
+
+# Build artifacts
 deno.lock
 package-lock.json
 node_modules/
 bun.lockb
+
+# IDE/Editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*.swn
+*.bak
+*.tmp
+*.orig
+*.rej
+
+# Test output
+test-*.txt
+tmux-*.txt
+*.log
+
+# Debug files
+debug-*.txt
+debug-*.log
+
+# OS files
+.DS_Store
+Thumbs.db
