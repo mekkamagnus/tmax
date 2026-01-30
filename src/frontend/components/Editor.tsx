@@ -100,7 +100,9 @@ export const Editor = ({ initialEditorState, editor, filename, onStateChange, on
     try {
       // Command mode input is handled by CommandInput component
       // IMPORTANT: Use ref to always get current mode, not closure value
-      if (stateRef.current.mode === 'command' || stateRef.current.mode === 'mx') {
+      // Check both mode AND cursorFocus to ensure proper input routing
+      if ((stateRef.current.mode === 'command' || stateRef.current.mode === 'mx') &&
+          stateRef.current.cursorFocus === 'command') {
         return;
       }
 
@@ -204,6 +206,8 @@ export const Editor = ({ initialEditorState, editor, filename, onStateChange, on
                   // Handle M-x commands
                   await editor.start(); // This will trigger the M-x execution
                 }
+                // Explicitly set cursor focus back to buffer after command execution
+                setState((prev: EditorState) => ({ ...prev, cursorFocus: 'buffer' }));
               } catch (error) {
                 handleError(error instanceof Error ? error.message : String(error));
               }
@@ -215,6 +219,8 @@ export const Editor = ({ initialEditorState, editor, filename, onStateChange, on
                   handleError(err.message);
                 }
               });
+              // Explicitly set cursor focus back to buffer after cancel
+              setState((prev: EditorState) => ({ ...prev, cursorFocus: 'buffer' }));
             }}
           />
         </Box>

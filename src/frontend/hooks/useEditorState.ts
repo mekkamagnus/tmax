@@ -47,6 +47,7 @@ export const useEditorState = (
       mxCommand: initialState.mxCommand || "",
       currentFilename: initialState.currentFilename,
       buffers: initialState.buffers,
+      cursorFocus: initialState.cursorFocus || 'buffer',
     };
   });
 

@@ -33,6 +33,8 @@ export type TLispFunctionWithEither = (args: TLispValue[]) => Either<AppError, T
  * @param setSpacePressed - Function to set space pressed state
  * @param getMxCommand - Function to get current M-x command
  * @param setMxCommand - Function to set current M-x command
+ * @param getCursorFocus - Function to get cursor focus state
+ * @param setCursorFocus - Function to set cursor focus state
  * @returns Map of mode function names to implementations
  */
 export function createModeOps(
@@ -45,7 +47,9 @@ export function createModeOps(
   getSpacePressed: () => boolean,
   setSpacePressed: (pressed: boolean) => void,
   getMxCommand: () => string,
-  setMxCommand: (command: string) => void
+  setMxCommand: (command: string) => void,
+  getCursorFocus: () => 'buffer' | 'command',
+  setCursorFocus: (focus: 'buffer' | 'command') => void
 ): Map<string, TLispFunctionImpl> {
   const api = new Map<string, TLispFunctionImpl>();
 
@@ -149,6 +153,7 @@ export function createModeOps(
 
     setCommandLine("");
     setMode("command");
+    setCursorFocus('command');
 
     return Either.right(createString("command"));
   });
@@ -161,6 +166,7 @@ export function createModeOps(
 
     setCommandLine("");
     setMode("normal");
+    setCursorFocus('buffer');
 
     return Either.right(createString("normal"));
   });
@@ -175,6 +181,7 @@ export function createModeOps(
     setMode("normal");
     setSpacePressed(false);
     setStatusMessage("");
+    setCursorFocus('buffer');
 
     return Either.right(createString("normal"));
   });
@@ -224,6 +231,7 @@ export function createModeOps(
       // Empty command, just exit
       setMxCommand("");
       setMode("normal");
+      setCursorFocus('buffer');
       return Either.right(createString(""));
     }
 
@@ -247,6 +255,7 @@ export function createModeOps(
     // Clear M-x command and return to normal mode
     setMxCommand("");
     setMode("normal");
+    setCursorFocus('buffer');
 
     return Either.right(createString(command));
   });

@@ -45,6 +45,7 @@ export interface TlispEditorState {
   commandLine: string;  // Command line input in command mode
   spacePressed: boolean;  // Track if space was just pressed for SPC ; sequence
   mxCommand: string;  // M-x command input
+  cursorFocus: 'buffer' | 'command';  // Track where cursor focus should be
   operations?: EditorOperations;  // Optional operations reference
 }
 
@@ -94,7 +95,9 @@ export function createEditorAPI(state: TlispEditorState): Map<string, TLispFunct
     () => state.spacePressed,
     (pressed) => { state.spacePressed = pressed; },
     () => state.mxCommand,
-    (cmd) => { state.mxCommand = cmd; }
+    (cmd) => { state.mxCommand = cmd; },
+    () => state.cursorFocus,
+    (focus) => { state.cursorFocus = focus; }
   );
   for (const [key, value] of modeOps.entries()) {
     api.set(key, value);
@@ -118,7 +121,8 @@ export function createEditorAPI(state: TlispEditorState): Map<string, TLispFunct
     () => state.mode,
     (mode) => { state.mode = mode; },
     () => state.mxCommand,
-    (cmd) => { state.mxCommand = cmd; }
+    (cmd) => { state.mxCommand = cmd; },
+    (focus) => { state.cursorFocus = focus; }
   );
   for (const [key, value] of bindingsOps.entries()) {
     api.set(key, value);

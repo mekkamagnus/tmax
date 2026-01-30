@@ -179,6 +179,7 @@ export interface EditorState {
   lastCommand?: string;
   currentFilename?: string;  // Filename associated with current buffer
   buffers?: Map<string, FunctionalTextBuffer>;
+  cursorFocus?: 'buffer' | 'command';  // Track where cursor focus should be
 }
 
 /**

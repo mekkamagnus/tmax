@@ -66,6 +66,7 @@ export class Editor {
       mxCommand: "",
       currentFilename: undefined,
       buffers: this.buffers,
+      cursorFocus: 'buffer',
     };
 
     this.interpreter = new TLispInterpreterImpl();
@@ -115,6 +116,8 @@ export class Editor {
       set spacePressed(_: boolean) { },
       get mxCommand() { return editor.state.mxCommand; },
       set mxCommand(v: string) { editor.state.mxCommand = v; },
+      get cursorFocus() { return editor.state.cursorFocus ?? 'buffer'; },
+      set cursorFocus(v: 'buffer' | 'command') { editor.state.cursorFocus = v; },
       get operations() {
         return {
           saveFile: (filename?: string) => editor.saveFile(filename),
@@ -499,6 +502,7 @@ export class Editor {
       mxCommand: this.state.mxCommand,
       currentFilename: this.state.currentFilename,
       buffers: this.buffers as unknown as Map<string, FunctionalTextBuffer>,
+      cursorFocus: this.state.cursorFocus ?? 'buffer',
     };
   }
 
