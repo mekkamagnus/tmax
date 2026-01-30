@@ -117,7 +117,7 @@ export class Editor {
       set mxCommand(v: string) { editor.state.mxCommand = v; },
       get operations() {
         return {
-          saveFile: () => editor.saveFile(),
+          saveFile: (filename?: string) => editor.saveFile(filename),
           openFile: (filename: string) => editor.openFile(filename),
         };
       },
@@ -443,16 +443,17 @@ export class Editor {
 
   /**
    * Save current buffer
+   * @param filename - Optional filename to save to (overrides current filename)
    */
-  async saveFile(): Promise<void> {
+  async saveFile(filename?: string): Promise<void> {
     if (!this.state.currentBuffer) {
       this.state.statusMessage = "No buffer to save";
       return;
     }
 
-    // Use the tracked filename directly
-    const filename = this.state.currentFilename;
-    if (!filename) {
+    // Use provided filename or fall back to tracked filename
+    const saveFilename = filename || this.state.currentFilename;
+    if (!saveFilename) {
       this.state.statusMessage = "Buffer has no associated file";
       return;
     }
@@ -460,13 +461,17 @@ export class Editor {
     try {
       const contentResult = this.state.currentBuffer.getContent();
       if (Either.isRight(contentResult)) {
-        await this.filesystem.writeFile(filename, contentResult.right);
-        this.state.statusMessage = `Saved ${filename}`;
+        await this.filesystem.writeFile(saveFilename, contentResult.right);
+        // Update tracked filename if a new one was provided
+        if (filename && !this.state.currentFilename) {
+          this.state.currentFilename = filename;
+        }
+        this.state.statusMessage = `Saved ${saveFilename}`;
       } else {
         this.state.statusMessage = `Failed to get content: ${contentResult.left}`;
       }
     } catch (error) {
-      this.state.statusMessage = `Failed to save ${filename}: ${error instanceof Error ? error.message : String(error)}`;
+      this.state.statusMessage = `Failed to save ${saveFilename}: ${error instanceof Error ? error.message : String(error)}`;
     }
   }
 

@@ -187,6 +187,16 @@ export const Editor = ({ initialEditorState, editor, filename, onStateChange, on
                     await editor.saveFile();
                     exit();
                     return;
+                  } else if (trimmedCommand.startsWith('w ') || trimmedCommand.startsWith('write ')) {
+                    // Handle write with filename: "w file.txt" or "write file.txt"
+                    const parts = trimmedCommand.split(' ');
+                    const filename = parts.slice(1).join(' ');
+                    if (filename) {
+                      await editor.saveFile(filename);
+                      setState(editor.getEditorState());
+                    } else {
+                      handleError('No filename specified');
+                    }
                   } else {
                     handleError(`Unknown command: ${trimmedCommand}`);
                   }

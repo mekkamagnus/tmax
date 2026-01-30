@@ -27,7 +27,7 @@ export type TLispFunctionWithEither = (args: TLispValue[]) => Either<AppError, T
  * @returns Map of editor control function names to implementations
  */
 export function createBindingsOps(
-  getOperations: () => ({ saveFile?: () => Promise<void>; openFile?: (filename: string) => Promise<void> } | undefined),
+  getOperations: () => ({ saveFile?: (filename?: string) => Promise<void>; openFile?: (filename: string) => Promise<void> } | undefined),
   setStatusMessage: (message: string) => void,
   getCommandLine: () => string,
   setCommandLine: (command: string) => void,
@@ -63,14 +63,17 @@ export function createBindingsOps(
     if (command === "q" || command === "quit") {
       // Return quit signal instead of throwing
       return Either.right(createString("EDITOR_QUIT_SIGNAL"));
-    } else if (command === "w" || command === "write") {
-      // Save current buffer
+    } else if (command === "w" || command === "write" || command.startsWith("w ") || command.startsWith("write ")) {
+      // Save current buffer (with optional filename argument)
+      const parts = command.split(" ");
+      const filename = parts.length > 1 ? parts.slice(1).join(" ") : undefined;
+
       const ops = getOperations();
       if (ops?.saveFile) {
-        setStatusMessage("Saving...");
+        setStatusMessage(filename ? `Saving to ${filename}...` : "Saving...");
         // Fire and forget - the editor will update status after save
-        ops.saveFile().then(() => {
-          setStatusMessage("File saved");
+        ops.saveFile(filename).then(() => {
+          setStatusMessage(filename ? `Saved to ${filename}` : "File saved");
         }).catch((error) => {
           setStatusMessage(`Save failed: ${error instanceof Error ? error.message : String(error)}`);
         });
