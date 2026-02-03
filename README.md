@@ -2,7 +2,7 @@
 
 tmax is an extensible terminal-based text editor written in TypeScript, running on the Bun runtime with React/ink for the terminal UI. It features modal editing (inspired by Neovim) with Emacs-like extensibility through T-Lisp (tmax Lisp).
 
-> **Note:** tmax is currently in alpha release (v0.2.0). Features and APIs may change. Feedback and contributions are welcome!
+> **Note:** tmax is currently in alpha release (v0.1.0). Features and APIs may change. Feedback and contributions are welcome!
 
 ## Architecture
 
@@ -279,18 +279,18 @@ MIT License - see LICENSE file for details.
 
 ## Roadmap
 
-### Immediate Priority
-- [x] Complete T-Lisp centric key binding system
+For detailed development plans and phase breakdowns, see the [comprehensive roadmap](./docs/ROADMAP.md).
 
-### Phase 1: Enhanced Editing (v0.2.0)
-- [ ] Visual mode selection
-- [ ] Search and replace
-- [ ] Undo/redo system
-- [ ] Plugin system
-- [ ] Configuration management
-- [ ] Syntax highlighting
-- [ ] Multiple windows/panes
-- [ ] LSP integration
+### Current Focus
+- **Phase 0.4**: T-Lisp-centric key binding system refactor (in progress)
+- **Phase 1**: Core editing features for basic Evil-mode parity
+- **Phase 2**: Extensibility and plugin system
+- **Phase 3**: Advanced features (LSP integration, multiple windows)
+
+### Quick Links
+- [Product Requirements Document](./specs/prd.md) - Detailed feature specifications and implementation status
+- [Development Roadmap](./docs/ROADMAP.md) - Complete phase-by-phase development plan
+- [Functional Programming Guidelines](./functional-patterns-guidelines.md) - Architecture patterns and best practices
 
 ## Design Philosophy
 

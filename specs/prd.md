@@ -3,8 +3,8 @@
 ## Executive Summary
 
 **Product Name:** tmax
-**Version:** 0.2.0 (Alpha Release)
-**Date:** January 29, 2026
+**Version:** 0.1.0 (Initial Alpha Release)
+**Date:** February 3, 2025
 **Status:** ✅ FUNCTIONAL ALPHA
 
 tmax is a comprehensive extensible terminal-based text editor with a TypeScript core running on the Bun runtime. Following the Emacs architecture, the system has a clear separation of concerns:
@@ -21,6 +21,8 @@ tmax is a comprehensive extensible terminal-based text editor with a TypeScript 
 - Render the current editor state to terminal
 - Bridge between terminal and T-Lisp engine
 - No business logic - pure presentation layer
+
+**Current Development Focus:** Achieving basic "Emacs with Evil-mode" parity through implementation of core Vim editing commands (operators, navigation, search) and select Emacs features (kill ring, minibuffer, which-key).
 
 The implementation delivers a full-screen terminal editor with Neovim-inspired key motions, Emacs-like extensibility through a complete T-Lisp interpreter, and modern React-based UI rendering via Bun + ink for improved maintainability and declarative component architecture.
 
@@ -87,9 +89,9 @@ Developers needed a modern, extensible terminal editor that combines the best as
 - ✅ **File operations**: open, save, create through command interface
 - ✅ **Advanced functionality**: M-x commands, configurable key bindings
 
-### Epic 2: Neovim-Compatible Interface ✅ COMPLETE
-**As a** Neovim user  
-**I want** familiar key bindings and interface  
+### Epic 2: Neovim-Compatible Interface 🚧 IN PROGRESS
+**As a** Neovim user
+**I want** familiar key bindings and interface
 **So that** I can use tmax without learning new keybindings
 
 #### Acceptance Criteria - Implementation Status
@@ -98,9 +100,14 @@ Developers needed a modern, extensible terminal editor that combines the best as
 - ✅ **Command mode**: vim-style commands (:q, :w, :wq, :e filename)
 - ✅ **Status line**: Mode indication and cursor position
 - ✅ **Full-screen interface**: Takes over terminal like vim/neovim
-- ✅ **Jump commands**: gg, G, :line_number
-- [ ] Text objects (ciw, daw, etc.) - Planned for v1.2.0
-- [ ] Visual selection modes - Basic visual mode implemented, advanced features planned
+- 🚧 **Navigation**: Basic hjkl complete, advanced (w/b/e, 0/$) planned for v0.2.0
+- 🚧 **Operators**: Basic editing complete, d/y/c operators planned for v0.2.0
+- [ ] **Jump commands**: gg, G, :line_number - Planned for v0.2.0 (Phase 1.6)
+- [ ] **Text objects**: ciw, daw, etc. - Planned for v0.2.0 (Phase 1.8)
+- [ ] **Visual selection modes**: Basic visual mode implemented, advanced features planned for v0.2.0 (Phase 1.7)
+- [ ] **Search functionality**: /, ?, n, N - Planned for v0.2.0 (Phase 1.5)
+
+**Next Steps:** See Phase 1 (Core Editing) in Planned Enhancements below
 
 ### Epic 3: T-Lisp Extensibility System ✅ COMPLETE
 **As a** power user
@@ -114,7 +121,723 @@ Developers needed a modern, extensible terminal editor that combines the best as
 - ✅ **Editor API**: 25+ functions for complete editor control
 - ✅ **Configuration system**: .tmaxrc files with T-Lisp scripting
 - ✅ **Interactive T-Lisp REPL**: Complete development environment
-- [ ] Plugin system using T-Lisp - Planned for v1.4.0
+- 🚧 **Plugin system using T-Lisp** - Foundation complete, full system planned for v0.3.0 (Phase 2.1)
+- 🚧 **T-Lisp keybinding architecture** - Functional, refactor in progress (Phase 0.4)
+
+**Next Steps:** See Phase 0.4 (Key Binding Refactor) and Phase 2 (Extensibility) in Planned Enhancements below
+
+---
+
+## Detailed User Stories with Acceptance Criteria
+
+### Phase 0.4: T-Lisp-Centric Key Binding System
+
+#### US-0.4.1: T-Lisp Keymap Data Structures
+**As a** power user
+**I want** key bindings to be stored as T-Lisp data structures
+**So that** I can inspect, modify, and understand the entire key binding system
+
+**Acceptance Criteria:**
+- **Given** the T-Lisp environment is initialized
+  **When** I query `*normal-mode-keymap*`
+  **Then** I should see a hash-map of key bindings
+- **Given** a keymap hash-map exists
+  **When** I call `(get-binding "i" "normal")`
+  **Then** I should receive the bound command as a T-Lisp function
+- **Given** the keybinding system
+  **When** I inspect keymap inheritance
+  **Then** I should see context → mode → global precedence
+
+#### US-0.4.2: Core Bindings in T-Lisp Files
+**As a** developer
+**I want** default key bindings defined in T-Lisp files
+**So that** I can understand and modify default behavior
+
+**Acceptance Criteria:**
+- **Given** a fresh tmax installation
+  **When** tmax starts
+  **Then** it should load `src/tlisp/core-bindings.tlisp`
+- **Given** the core-bindings.tlisp file
+  **When** I read its contents
+  **Then** I should see all default bindings in T-Lisp syntax
+- **Given** a modified core-bindings.tlisp
+  **When** I restart tmax
+  **Then** my modifications should be active
+
+#### US-0.4.3: Pure T-Lisp Key Bind Function
+**As a** power user
+**I want** the `(key-bind)` function implemented in pure T-Lisp
+**So that** I can customize it or extend it
+
+**Acceptance Criteria:**
+- **Given** I'm in normal mode
+  **When** I evaluate `(key-bind "zz" "(center-cursor)" "normal")`
+  **Then** pressing `zz` should execute my custom function
+- **Given** a custom key binding
+  **When** I call `(remove-binding "zz" "normal")`
+  **Then** the binding should be removed
+- **Given** multiple key bindings
+  **When** I call `(list-bindings "normal")`
+  **Then** I should see all active bindings for that mode
+
+---
+
+### Phase 1: Core Editing Features
+
+#### US-1.1.1: Word Navigation
+**As a** developer
+**I want** to navigate by words using `w`, `b`, `e`
+**So that** I can quickly move through code
+
+**Acceptance Criteria:**
+- **Given** I'm in normal mode on any line
+  **When** I press `w`
+  **Then** cursor should move to start of next word
+- **Given** I'm in normal mode
+  **When** I press `b`
+  **Then** cursor should move to start of previous word
+- **Given** I'm in normal mode
+  **When** I press `e`
+  **Then** cursor should move to end of current word
+- **Given** I'm in normal mode
+  **When** I press `3w`
+  **Then** cursor should move forward 3 words
+- **Given** word navigation keys
+  **When** I reach the end of a line
+  **Then** navigation should continue to next line
+
+#### US-1.1.2: Line Navigation
+**As a** developer
+**I want** to navigate to line start/end using `0`, `$`, `^`
+**So that** I can quickly position cursor on a line
+
+**Acceptance Criteria:**
+- **Given** I'm in normal mode
+  **When** I press `0`
+  **Then** cursor should move to column 0
+- **Given** I'm in normal mode
+  **When** I press `$`
+  **Then** cursor should move to last character of line
+- **Given** I'm in normal mode
+  **When** I press `^`
+  **Then** cursor should move to first non-whitespace character
+
+#### US-1.2.1: Delete Operator
+**As a** developer
+**I want** to delete text using `d`, `dd`, `dw`, `x`
+**So that** I can remove unwanted text
+
+**Acceptance Criteria:**
+- **Given** I'm in normal mode
+  **When** I press `dd`
+  **Then** current line should be deleted
+- **Given** I'm in normal mode
+  **When** I press `dw`
+  **Then** word under cursor should be deleted
+- **Given** I'm in normal mode
+  **When** I press `x`
+  **Then** character under cursor should be deleted
+- **Given** I'm in normal mode
+  **When** I press `3dd`
+  **Then** 3 lines starting from current should be deleted
+- **Given** deleted text
+  **When** I delete more text
+  **Then** previous deletions should be stored (for future yank ring integration)
+
+#### US-1.2.2: Yank (Copy) Operator
+**As a** developer
+**I want** to yank (copy) text using `yy`, `yw`
+**So that** I can duplicate text
+
+**Acceptance Criteria:**
+- **Given** I'm in normal mode
+  **When** I press `yy`
+  **Then** current line should be yanked to register
+- **Given** I'm in normal mode
+  **When** I press `yw`
+  **Then** word under cursor should be yanked
+- **Given** yanked text
+  **When** I move cursor and press `p`
+  **Then** yanked text should be pasted after cursor
+- **Given** yanked text
+  **When** I press `P`
+  **Then** yanked text should be pasted before cursor
+
+#### US-1.2.3: Undo/Redo
+**As a** developer
+**I want** to undo and redo changes using `u`, `C-r`
+**So that** I can correct mistakes
+
+**Acceptance Criteria:**
+- **Given** I've made text changes
+  **When** I press `u` in normal mode
+  **Then** last change should be undone
+- **Given** undone changes
+  **When** I press `C-r` in normal mode
+  **Then** undone change should be redone
+- **Given** multiple edits
+  **When** I press `5u`
+  **Then** last 5 changes should be undone
+- **Given** undo history
+  **When** I make new changes after undo
+  **Then** redo history should be cleared
+
+#### US-1.3.1: Count Prefix
+**As a** developer
+**I want** to prefix commands with counts
+**So that** I can repeat operations efficiently
+
+**Acceptance Criteria:**
+- **Given** I'm in normal mode
+  **When** I press `3j`
+  **Then** cursor should move down 3 lines
+- **Given** I'm in normal mode
+  **When** I press `5dd`
+  **Then** 5 lines should be deleted
+- **Given** I'm in normal mode
+  **When** I press `10x`
+  **Then** 10 characters should be deleted
+- **Given** a count prefix
+  **When** I press a command without count
+  **Then** command should execute once (default count of 1)
+
+#### US-1.4.1: Change Operator
+**As a** developer
+**I want** to change text using `c`, `cw`, `cc`, `C`
+**So that** I can delete and enter insert mode in one action
+
+**Acceptance Criteria:**
+- **Given** I'm in normal mode
+  **When** I press `cw`
+  **Then** word under cursor should be deleted and insert mode entered
+- **Given** I'm in normal mode
+  **When** I press `cc`
+  **Then** entire line should be cleared and insert mode entered
+- **Given** I'm in normal mode
+  **When** I press `C`
+  **Then** from cursor to end of line should be deleted and insert mode entered
+- **Given** change operator
+  **When** I complete typing and press Escape
+  **Then** I should return to normal mode with changes applied
+
+#### US-1.5.1: Search Forward/Backward
+**As a** developer
+**I want** to search using `/pattern` and `?pattern`
+**So that** I can find text in my buffer
+
+**Acceptance Criteria:**
+- **Given** I'm in normal mode
+  **When** I press `/` and type a pattern
+  **Then** cursor should jump to first match after current position
+- **Given** I'm in normal mode
+  **When** I press `?` and type a pattern
+  **Then** cursor should jump to first match before current position
+- **Given** an active search
+  **When** I press `n`
+  **Then** cursor should jump to next match
+- **Given** an active search
+  **When** I press `N`
+  **Then** cursor should jump to previous match
+- **Given** search results
+  **When** multiple matches exist
+  **Then** they should be highlighted in the buffer
+
+#### US-1.5.2: Word Under Cursor Search
+**As a** developer
+**I want** to search for word under cursor using `*` and `#`
+**So that** I can quickly find other occurrences
+
+**Acceptance Criteria:**
+- **Given** cursor is on a word in normal mode
+  **When** I press `*`
+  **Then** search should start for that word forward
+- **Given** cursor is on a word in normal mode
+  **When** I press `#`
+  **Then** search should start for that word backward
+- **Given** word search active
+  **When** I press `n` or `N`
+  **Then** cursor should jump to next/previous occurrence of that word
+
+#### US-1.6.1: Jump Commands
+**As a** developer
+**I want** to jump to specific lines using `gg`, `G`, `:line_number`
+**So that** I can quickly navigate large files
+
+**Acceptance Criteria:**
+- **Given** I'm in normal mode
+  **When** I press `gg`
+  **Then** cursor should jump to first line of buffer
+- **Given** I'm in normal mode
+  **When** I press `G`
+  **Then** cursor should jump to last line of buffer
+- **Given** I'm in normal mode
+  **When** I press `:50` and Enter
+  **Then** cursor should jump to line 50
+- **Given** jump commands
+  **When** I jump to a line
+  **Then** viewport should scroll to show that line
+
+#### US-1.7.1: Visual Mode Selection
+**As a** developer
+**I want** to select text in visual mode using `v`, `V`, `C-v`
+**So that** I can perform operations on selected regions
+
+**Acceptance Criteria:**
+- **Given** I'm in normal mode
+  **When** I press `v`
+  **Then** characterwise visual mode should start
+- **Given** I'm in normal mode
+  **When** I press `V`
+  **Then** linewise visual mode should start
+- **Given** visual mode active
+  **When** I navigate with hjkl
+  **Then** selection should expand from start position
+- **Given** visual selection active
+  **When** I press `d`
+  **Then** selected text should be deleted
+- **Given** visual selection active
+  **When** I press `y`
+  **Then** selected text should be yanked
+- **Given** visual selection active
+  **When** I press `c`
+  **Then** selected text should be deleted and insert mode entered
+
+#### US-1.8.1: Basic Text Objects
+**As a** developer
+**I want** to operate on text objects like `iw`, `aw`, `is`, `as`
+**So that** I can edit with semantic precision
+
+**Acceptance Criteria:**
+- **Given** cursor is on a word in normal mode
+  **When** I press `diw`
+  **Then** inner word (excluding surrounding space) should be deleted
+- **Given** cursor is on a word in normal mode
+  **When** I press `daw`
+  **Then** outer word (including trailing space) should be deleted
+- **Given** cursor is in a sentence
+  **When** I press `dis`
+  **Then** inner sentence should be deleted
+- **Given** cursor is in a sentence
+  **When** I press `das`
+  **Then** outer sentence (including trailing space) should be deleted
+- **Given** text object commands
+  **When** I use `ciw` instead of `diw`
+  **Then** text object should be deleted and insert mode entered
+
+---
+
+### Phase 1.9: Kill Ring System (Emacs Integration)
+
+#### US-1.9.1: Kill Ring Storage
+**As a** power user
+**I want** deleted and yanked text stored in a kill ring
+**So that** I can access recent kills
+
+**Acceptance Criteria:**
+- **Given** I delete or yank text
+  **When** the operation completes
+  **Then** text should be added to kill ring
+- **Given** kill ring with 10 items
+  **When** I kill new text
+  **Then** oldest kill should be removed if ring is full
+- **Given** kill ring state
+  **When** I query `(kill-ring-latest)`
+  **Then** I should receive the most recent kill
+
+#### US-1.9.2: Yank Pop
+**As a** power user
+**I want** to cycle through kills using `M-y` after yanking
+**So that** I can access previous kills
+
+**Acceptance Criteria:**
+- **Given** I just yanked text with `C-y`
+  **When** I press `M-y`
+  **Then** yanked text should be replaced with previous kill
+- **Given** I'm cycling kills
+  **When** I press `M-y` multiple times
+  **Then** I should cycle through older kills
+- **Given** I cycle past oldest kill
+  **When** I press `M-y` again
+  **Then** I should wrap around to newest kill
+
+#### US-1.9.3: Evil Integration
+**As a** user familiar with both Emacs and Vim
+**I want** Evil delete/yank operations to use kill ring
+**So that** both paradigms work together
+
+**Acceptance Criteria:**
+- **Given** I delete with `dd` or `dw`
+  **When** I check kill ring
+  **Then** deleted text should be in kill ring
+- **Given** I yank with `yy` or `yw`
+  **When** I check kill ring
+  **Then** yanked text should be in kill ring
+- **Given** Evil and Emacs operations mixed
+  **When** I kill with `C-w` then delete with `dw`
+  **Then** both should be accessible via kill ring
+
+---
+
+### Phase 1.10: Minibuffer + Which-key + Fuzzy Match
+
+#### US-1.10.1: Minibuffer Input
+**As a** user
+**I want** a dedicated minibuffer for command input
+**So that** I have a consistent interface for commands
+
+**Acceptance Criteria:**
+- **Given** I press `SPC ;` (M-x)
+  **When** minibuffer appears
+  **Then** it should show prompt "M-x:" at bottom of screen
+- **Given** minibuffer is active
+  **When** I type a command name
+  **Then** my input should appear in minibuffer
+- **Given** minibuffer with input
+  **When** I press `C-g`
+  **Then** minibuffer should close without executing
+- **Given** minibuffer with input
+  **When** I press Enter
+  **Then** command should execute and minibuffer close
+
+#### US-1.10.2: Fuzzy Command Completion
+**As a** power user
+**I want** fuzzy matching for command names
+**So that** I can quickly find commands without exact typing
+
+**Acceptance Criteria:**
+- **Given** I'm in M-x mode
+  **When** I type "sw"
+  **Then** I should see commands matching "save-window", "switch-window"
+- **Given** fuzzy matches found
+  **When** multiple matches exist
+  **Then** they should be ranked by prefix matches first
+- **Given** completion list
+  **When** I press Tab
+  **Then** first match should be selected
+- **Given** selected completion
+  **When** I press Enter
+  **Then** selected command should execute
+
+#### US-1.10.3: Which-key Popup
+**As a** user learning tmax
+**I want** to see available keybindings after pressing a prefix
+**So that** I can discover bindings without memorizing
+
+**Acceptance Criteria:**
+- **Given** I press `SPC` (leader key)
+  **When** I wait 0.5 seconds
+  **Then** which-key popup should show available bindings
+- **Given** which-key popup visible
+  **When** I see "f  File operations"
+  **Then** I should understand `f` is a prefix key
+- **Given** I press `SPC f`
+  **When** submenu popup appears
+  **Then** I should see file operation bindings like "f  find-file"
+- **Given** which-key popup
+  **When** I press any bound key
+  **Then** popup should disappear and command execute
+- **Given** which-key popup
+  **When** I press `C-g`
+  **Then** popup should cancel and return to normal mode
+
+#### US-1.10.4: Command Documentation Preview
+**As a** user
+**I want** to see command documentation in completion
+**So that** I understand what commands do
+
+**Acceptance Criteria:**
+- **Given** I'm in M-x mode
+  **When** I select a command in completion list
+  **Then** its first docstring line should be visible
+- **Given** command with documentation
+  **When** I view it in M-x completion
+  **Then** I should see "Kill region between point and mark"
+- **Given** command with keybinding
+  **When** I view it in M-x completion
+  **Then** I should see "Binding: C-w" if it has one
+
+---
+
+### Phase 1.11: Help System
+
+#### US-1.11.1: Describe Key
+**As a** user
+**I want** to see what function a key runs using `describe-key`
+**So that** I can understand keybindings
+
+**Acceptance Criteria:**
+- **Given** I'm in normal mode
+  **When** I execute M-x `describe-key` and press a key
+  **Then** I should see the function bound to that key
+- **Given** I describe `w` in normal mode
+  **When** help buffer appears
+  **Then** I should see it runs `evil-forward-word-begin`
+- **Given** describe-key output
+  **When** function has documentation
+  **Then** I should see its docstring
+
+#### US-1.11.2: Describe Function
+**As a** user
+**I want** to see function documentation using `describe-function`
+**So that** I can learn what functions do
+
+**Acceptance Criteria:**
+- **Given** I execute M-x `describe-function`
+  **When** I enter a function name
+  **Then** I should see its full documentation
+- **Given** function documentation
+  **When** I view it
+  **Then** I should see signature, docstring, and keybindings
+
+#### US-1.11.3: Apropos Command
+**As a** power user
+**I want** to search commands by regex using `apropos-command`
+**So that** I can discover relevant commands
+
+**Acceptance Criteria:**
+- **Given** I execute M-x `apropos-command`
+  **When** I enter "save"
+  **Then** I should see all commands with "save" in their name
+- **Given** I enter "save.*buffer"
+  **Then** I should see commands matching both words
+- **Given** apropos results
+  **When** I select a command
+  **Then** I should view its documentation
+
+---
+
+### Phase 2: Extensibility & Plugin System
+
+#### US-2.1.1: Plugin Directory Structure
+**As a** plugin developer
+**I want** a standard plugin directory structure
+**So that** my plugins can be discovered and loaded
+
+**Acceptance Criteria:**
+- **Given** I install a plugin
+  **When** I place it in `~/.config/tmax/tlpa/plugin-name/`
+  **Then** tmax should discover it on startup
+- **Given** a plugin directory
+  **When** it contains `plugin.tlisp`
+  **Then** tmax should load it automatically
+- **Given** plugin with dependencies
+  **When** I specify them in `plugin.toml`
+  **Then** tmax should load dependencies first
+
+#### US-2.1.2: Plugin Lifecycle Hooks
+**As a** plugin developer
+**I want** lifecycle hooks for initialization
+**So that** my plugin can set up properly
+
+**Acceptance Criteria:**
+- **Given** a plugin defines `(plugin-init)`
+  **When** plugin loads
+  **Then** init function should execute
+- **Given** a plugin defines `(plugin-enable)`
+  **When** I enable the plugin
+  **Then** enable hook should execute
+- **Given** a plugin defines `(plugin-disable)`
+  **When** I disable the plugin
+  **Then** cleanup code should execute
+- **Given** a plugin defines `(plugin-unload)`
+  **When** plugin is unloaded
+  **Then** resources should be freed
+
+#### US-2.4.1: Macro Recording
+**As a** power user
+**I want** to record keyboard macros
+**So that** I can automate repetitive tasks
+
+**Acceptance Criteria:**
+- **Given** I'm in normal mode
+  **When** I press `qa` (q followed by register name)
+  **Then** recording should start for register `a`
+- **Given** recording is active
+  **When** I execute commands
+  **Then** they should be recorded without executing
+- **Given** recording active
+  **When** I press `q`
+  **Then** recording should stop and save to register
+- **Given** recorded macro in register `a`
+  **When** I press `@a`
+  **Then** macro should execute
+- **Given** I just executed a macro
+  **When** I press `@@`
+  **Then** last macro should execute again
+
+#### US-2.4.2: Macro Persistence
+**As a** power user
+**I want** macros to persist across sessions
+**So that** I don't lose recorded macros
+
+**Acceptance Criteria:**
+- **Given** I recorded a macro in register `a`
+  **When** I quit and restart tmax
+  **Then** macro in register `a` should still be available
+- **Given** persistent macros
+  **When** I edit `~/.config/tmax/macros.tlisp`
+  **Then** I should be able to modify recorded macros
+- **Given** edited macro file
+  **When** I restart tmax
+  **Then** my edits should be loaded
+
+---
+
+### Phase 3: Advanced Features
+
+#### US-3.1.1: LSP Client Connection
+**As a** developer
+**I want** tmax to connect to language servers
+**So that** I can have IDE features like autocomplete
+
+**Acceptance Criteria:**
+- **Given** I open a TypeScript file
+  **When** tmax starts
+  **Then** it should attempt to connect to `typescript-language-server`
+- **Given** LSP server running
+  **When** connection succeeds
+  **Then** "LSP connected" should appear in status line
+- **Given** LSP connection fails
+  **When** server is not available
+  **Then** error should be logged but editor remain functional
+
+#### US-3.1.2: LSP Diagnostics
+**As a** developer
+**I want** to see LSP diagnostics (errors, warnings)
+**So that** I can fix problems in my code
+
+**Acceptance Criteria:**
+- **Given** LSP connected and file has errors
+  **When** I open the file
+  **Then** error indicators should appear in gutter
+- **Given** diagnostics available
+  **When** I navigate to line with error
+  **Then** error message should appear in status line
+- **Given** multiple diagnostics
+  **When** I list diagnostics
+  **Then** I should see all errors and warnings
+
+#### US-3.2.1: Window Splitting
+**As a** developer
+**I want** to split windows horizontally and vertically
+**So that** I can view multiple files simultaneously
+
+**Acceptance Criteria:**
+- **Given** I'm in normal mode
+  **When** I execute `:split`
+  **Then** window should split horizontally
+- **Given** I'm in normal mode
+  **When** I execute `:vsplit`
+  **Then** window should split vertically
+- **Given** split windows
+  **When** I press `C-w w`
+  **Then** focus should move to next window
+- **Given** split windows
+  **When** I press `C-w q`
+  **Then** current window should close
+
+#### US-3.2.2: Window Resizing
+**As a** developer
+**I want** to resize split windows
+**So that** I can adjust the layout
+
+**Acceptance Criteria:**
+- **Given** two horizontal windows
+  **When** I press `C-w +` multiple times
+  **Then** current window height should increase
+- **Given** two horizontal windows
+  **When** I press `C-w -` multiple times
+  **Then** current window height should decrease
+- **Given** two vertical windows
+  **When** I press `C-w >` multiple times
+  **Then** current window width should increase
+- **Given** two vertical windows
+  **When** I press `C-w <` multiple times
+  **Then** current window width should decrease
+
+#### US-3.4.1: Undo Tree
+**As a** developer
+**I want** a branching undo tree
+**So that** I can explore alternative edit histories
+
+**Acceptance Criteria:**
+- **Given** I make edits A, B, C, undo to A, then make D
+  **When** I view undo tree
+  **Then** I should see branch: A → B → C and A → D
+- **Given** undo tree with branches
+  **When** I navigate to a branch point
+  **Then** I can choose which branch to follow
+- **Given** undo tree visualization
+  **When** I open it
+  **Then** I should see a visual representation of branches
+
+---
+
+### Phase 4: Community & Ecosystem
+
+#### US-4.1.1: Plugin Repository
+**As a** user
+**I want** to discover plugins in a central repository
+**So that** I can find useful extensions
+
+**Acceptance Criteria:**
+- **Given** I execute M-x `plugin-list`
+  **When** command runs
+  **Then** I should see available plugins from repository
+- **Given** plugin list
+  **When** I select a plugin
+  **Then** I should see description, author, and install command
+- **Given** selected plugin
+  **When** I choose to install
+  **Then** it should download to `~/.config/tmax/tlpa/`
+
+#### US-4.1.2: Plugin Submission
+**As a** plugin developer
+**I want** to submit my plugin to the repository
+**So that** others can discover and use it
+
+**Acceptance Criteria:**
+- **Given** I've created a plugin
+  **When** I submit to repository
+  **Then** it should undergo review process
+- **Given** submitted plugin
+  **When** review passes
+  **Then** plugin should be published to repository
+- **Given** published plugin
+  **When** users list plugins
+  **Then** my plugin should appear in results
+
+#### US-4.2.1: Documentation Website
+**As a** user
+**I want** comprehensive online documentation
+**So that** I can learn tmax features thoroughly
+
+**Acceptance Criteria:**
+- **Given** I visit documentation website
+  **When** I navigate to API reference
+  **Then** I should see all T-Lisp functions documented
+- **Given** documentation site
+  **When** I search for "key bindings"
+  **Then** I should find relevant tutorials and guides
+- **Given** API documentation
+  **When** I view a function
+  **Then** I should see signature, description, examples, and related functions
+
+#### US-4.3.1: Test Coverage Metrics
+**As a** developer
+**I want** to see test coverage metrics
+**So that** I can ensure code quality
+
+**Acceptance Criteria:**
+- **Given** I run tests with coverage
+  **When** tests complete
+  **Then** I should see percentage coverage for each module
+- **Given** coverage report
+  **When** I view it
+  **Then** I should see which lines are covered
+- **Given** coverage below threshold
+  **When** CI runs tests
+  **Then** build should fail with coverage report
 
 ## Technical Requirements
 
@@ -402,73 +1125,251 @@ The editor is designed to be both approachable for beginners (familiar vim bindi
 
 ## Conclusion
 
-tmax has successfully achieved its primary design goals and represents a functional, production-ready terminal-based text editor. It successfully combines the immediate productivity of vim-like modal editing with T-Lisp extensibility, providing both beginner-friendly operation and customization capabilities.
+tmax has successfully achieved its foundational design goals and represents a functional terminal-based text editor with a clear path forward. It successfully combines the initial productivity of vim-like modal editing with T-Lisp extensibility, providing both beginner-friendly operation and customization capabilities.
 
 The implementation demonstrates technical excellence through comprehensive testing, modern architecture, and clean code practices. Users can immediately begin editing text with familiar key bindings while exploring the T-Lisp customization system.
 
-**Status: ✅ FUNCTIONAL AND READY FOR USE**
+**Current Status: ✅ FUNCTIONAL v0.1.0 ALPHA**
+**Next Milestone: v0.2.0 - Basic Evil-Mode Parity** (Phase 1: Core Editing)
+
+The immediate development focus is implementing core Vim-style editing operators (delete, yank, change), enhanced navigation (word/line movements), and select Emacs features (kill ring, minibuffer with which-key, fuzzy search) to achieve basic "Emacs with Evil-mode" parity. This will transform tmax from a functional alpha into a practical daily editor.
+
+**Development Roadmap:** See `docs/ROADMAP.md` for complete implementation plan spanning:
+- Phase 0.4: Key Binding System Refactor (immediate priority)
+- Phase 1: Core Editing (v0.2.0) - Evil-mode fundamentals + Emacs integration
+- Phase 1.5: Enhanced Features (v0.2.1)
+- Phase 2-4: Extensibility, Advanced Features, Community ecosystem
 
 ## Planned Enhancements
 
-### Bun + ink UI Migration ✅ COMPLETE (v0.2.0)
-**Status:** Completed January 29, 2026
+### Immediate Priority: Key Binding System Refactor (Phase 0.4)
 
-**Achievements:**
-- ✅ Migrated to Bun runtime for modern JavaScript execution
-- ✅ Implemented React-based declarative UI using ink
-- ✅ Created Editor, BufferView, StatusLine, CommandInput components (dumb components)
-- ✅ Full-screen layout with proper flexbox positioning
-- ✅ Character insertion persistence bug fixes
-- ✅ Mode switching improvements
-- ✅ Command execution fixes (:q, :w, :wq)
-- ✅ Clean console output (removed debug logs)
-- ✅ All 131+ unit tests passing
-- ✅ All UI tests passing
+**Status:** 🚧 IN PROGRESS (1/4 Complete)
 
-**Architecture:**
-- **T-Lisp = Core Engine** (like Emacs Lisp) - ALL editor logic
-- **React/ink = Thin UI Layer** - ONLY capture input + render state
-- **Dumb Components** - React components contain NO business logic
-- **T-Lisp Execution** - All operations go through T-Lisp function calls
+**Objective:** Complete migration from TypeScript-centric to T-Lisp-centric key binding system.
 
-**Key Benefits Delivered:**
-- Declarative component-based UI (vs. manual ANSI escape sequences)
-- Improved maintainability with clear separation of concerns
-- T-Lisp-first architecture (like Emacs)
-- Enhanced testing with blackbox UI tests
-- Better layout capabilities with Flexbox
+**Progress:**
+- [x] T-Lisp keybinding functions work
+- [x] Runtime modification via (key-bind)
+- [ ] Implement T-Lisp keymaps (hash-map/association-list)
+- [ ] Create `src/tlisp/core-bindings.tlisp` file
+- [ ] Remove TypeScript `keyMappings` Map
+- [ ] Update `handleKey()` to query T-Lisp environment
+- [ ] Re-implement `(key-bind)` in pure T-Lisp
 
-**T-Lisp Keybinding Architecture: 🚧 PARTIALLY COMPLETE** (see [specification](SPEC-004-tlisp-core-bindings-migration.md) for full requirements)
-- ✅ Core Neovim motions (hjkl, w/b/e, gg/G) - **COMPLETE**
-- ✅ Basic commands (i, a, o, dd, yy, p) - **COMPLETE**
-- [ ] Search functionality (/, n, N)
-- [ ] Plugin loading system in T-Lisp
+**See:** `docs/ROADMAP.md` for detailed breakdown (Phase 0.4.1 - 0.4.4)
 
-### Post-v0.2 Releases (Roadmap)
+---
 
-#### v0.3.0 - Enhanced Editing (Planned)
-- Advanced text objects (ciw, daw, etc.)
-- Visual selection modes
+### Phase 1: Core Editing (v0.2.0) - Basic Evil-Mode Parity
+
+**Focus:** Implement fundamental Vim-style editing commands to reach basic "Emacs with Evil-mode" functionality.
+
+**Target Timeline:** 5-6 weeks
+
+#### 1.1 - Enhanced Navigation (CRITICAL)
+- Word navigation: `w`, `b`, `e`
+- Line navigation: `0`, `$`, `^`
+- Paragraph navigation: `{`, `}`
+
+#### 1.2 - Basic Operators (CRITICAL)
+- Delete: `dd`, `dw`, `x`
+- Yank (copy): `yy`, `yw`
+- Put (paste): `p`, `P`
+- Undo: `u`, `C-r`
+
+#### 1.3 - Counts (HIGH)
+- Parse count prefix: `3j`, `5dd`
+- Apply to motions and operators
+
+#### 1.4 - Change Operator (HIGH)
+- `cw`, `cc`, `C`
+- Change with text objects: `ci"`, `ca{`
+
+#### 1.5 - Search Functionality (HIGH)
+- `/pattern`, `?pattern`
+- `n`, `N` for next/previous
+- `*`, `#` for word under cursor
+
+#### 1.6 - Jump Commands (HIGH)
+- `gg`, `G`, `:line_number`
+
+#### 1.7 - Visual Selection Operations (MEDIUM)
+- Characterwise, linewise, blockwise
+- Visual operations: d, y, c
+
+#### 1.8 - Basic Text Objects (MEDIUM)
+- `iw`, `aw` (word)
+- `is`, `as` (sentence)
+
+#### 1.9 - Kill Ring System (Emacs Integration - HIGH)
+- Emacs-style clipboard with history
+- `C-w`, `M-w`, `C-y`, `M-y`
+- Integration with Evil yank/delete
+
+#### 1.10 - Minibuffer + Which-key + Fuzzy Match (Emacs Integration - HIGH)
+- Fuzzy matching for commands
+- Which-key popup for keybindings
+- Command documentation preview
+- Hierarchical leader key system
+
+#### 1.11 - Help System (Emacs Integration - MEDIUM)
+- `describe-key`, `describe-function`
+- `apropos-command`
+- Documentation storage
+
+#### 1.12 - Emacs Window Commands (Emacs Integration - LOW)
+- `C-x 2`, `C-x 3`, `C-x 1`, `C-x 0`
+- Emacs-style window management
+
+#### 1.13 - Fuzzy Search Commands (MEDIUM)
+- `fuzzy-search-line` - Search buffer lines
+- `fuzzy-switch-buffer` - Fuzzy buffer switch
+- `fuzzy-find-file` - Fuzzy file finding
+- `fuzzy-goto-line` - Jump with preview
+
+---
+
+### Phase 1.5: Enhanced Editing Features (v0.2.1)
+
+Advanced features that build on core editing foundation:
+- Advanced text objects (paragraphs, blocks, tags)
+- Visual selection enhancements
 - Syntax highlighting framework
-- Search functionality (/, n, N)
-- Advanced navigation (marks, jumplist)
+- Improved buffer management
 
-#### v0.4.0 - T-Lisp Keybinding Architecture (Planned)
-- Complete T-Lisp-centric keybinding system (see [SPEC-004](SPEC-004-tlisp-core-bindings-migration.md))
-- Pure T-Lisp keymap data structures
-- Default bindings in T-Lisp files
-- Enhanced keybinding customization
+---
 
-#### v0.5.0 - Extensibility (Planned)
-- Plugin ecosystem foundation
-- Advanced T-Lisp features
-- Macro recording/playback
-- Performance optimizations
-- Plugin loading system
+### Phase 2: Extensibility & Customization (v0.3.0)
+
+**Focus:** Enhance T-Lisp capabilities and plugin ecosystem.
+
+#### 2.1 - Plugin System
+- Plugin directory structure (`~/.config/tmax/tlpa/`)
+- Plugin loading and initialization
+- Plugin dependency management
+- Plugin lifecycle hooks
+
+#### 2.2 - Advanced T-Lisp Features
+- Module system for T-Lisp
+- Namespace support
+- Regular expression integration
+- Process spawning capabilities
+
+#### 2.3 - Key Binding System Completion
+- Complete Phase 0.4 refactor
+- Key binding validation
+- Mode-specific override system
+
+#### 2.4 - Macro Recording & Playback
+- `q{register}` recording
+- `@{register}` playback
+- Macro editing and persistence
+
+#### 2.5 - Configuration System
+- Configuration file validation
+- Error reporting
+- Configuration profiles
+- Hot-reloading
+
+---
+
+### Phase 3: Advanced Features (v0.4.0)
+
+**Focus:** Professional-grade features for power users.
+
+#### 3.1 - LSP Integration
+- LSP client architecture
+- Diagnostics display
+- Code completion
+- Go to definition
+- Find references
+
+#### 3.2 - Multiple Windows/Panes
+- Window splitting (horizontal/vertical)
+- Window navigation and management
+- Window layout persistence
+
+#### 3.3 - File Tree Explorer
+- File tree sidebar
+- File and directory operations
+- Git integration indicators
+
+#### 3.4 - Undo/Redo System
+- Undo tree implementation
+- Persistent undo history
+- Branching undo/redo
+
+---
+
+### Phase 4: Community & Ecosystem (v0.5.0)
+
+**Focus:** Build sustainable community and plugin ecosystem.
+
+#### 4.1 - Community Infrastructure
+- Plugin repository and registry
+- Plugin submission and review process
+- Community contribution guidelines
+
+#### 4.2 - Documentation Portal
+- Dedicated documentation website
+- API reference for T-Lisp functions
+- Plugin development tutorials
+- Video tutorials and walkthroughs
+
+#### 4.3 - Testing & Quality Assurance
+- Increase test coverage to 90%+
+- Automated UI testing
+- Performance benchmarking
+- Continuous integration
+
+#### 4.4 - Distribution & Packaging
+- Homebrew formula
+- Arch Linux AUR package
+- Debian/Ubuntu packages
+- Windows installer
+
+---
+
+### Future Enhancements (Post-Phase 1)
+
+Additional features that complement basic editing but are not required for basic Evil-mode parity:
+
+#### Context Actions (Embark-style)
+- Actions on completion candidates based on type
+- Context-aware menus for files, buffers, functions
+
+#### In-Buffer Completion (Corfu-style)
+- Auto-completion popup while typing
+- Prerequisite for LSP integration
+
+#### Advanced Navigation
+- imenu (jump to definitions)
+- tags (ctags/etags)
+- bookmarks
+- registers
+- mark rings
+
+#### Search Enhancement
+- ripgrep integration
+- project search
+- replace-in-files
+
+#### Editing Enhancements
+- multiple cursors
+- sort lines
+- delete duplicates
+- indent operations
+
+**See:** `docs/ROADMAP.md` for complete "Future Enhancements" section
+
+---
 
 ### Dependencies and Blockers
-- **v0.3.0:** Visual mode foundation required for text objects
-- **v0.4.0:** Keybinding architecture requires T-Lisp data structure enhancements
+- **Phase 0.4:** Must complete before extensive keybinding customization
+- **Phase 1:** Foundation for all future features
+- **Phase 2:** Requires Phase 0.4 completion for full plugin system
+- **Phase 3:** LSP integration requires Phase 1.9 (kill ring) and in-buffer completion
 - **External:** Bun runtime stability for TypeScript performance
 
 ## Risks and Assumptions
