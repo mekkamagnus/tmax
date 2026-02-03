@@ -1,12 +1,14 @@
 /**
  * @file search-ops.ts
- * @description Search operations for T-Lisp editor API (US-1.5.1)
+ * @description Search operations for T-Lisp editor API (US-1.5.1, US-1.5.2)
  *
  * Implements Vim-style search:
  * - search-forward: move to next match (/pattern)
  * - search-backward: move to previous match (?pattern)
  * - search-next: repeat search in same direction (n)
  * - search-previous: repeat search in opposite direction (N)
+ * - word-under-cursor-next: search for next occurrence of word under cursor (*)
+ * - word-under-cursor-previous: search for previous occurrence of word under cursor (#)
  * - search-pattern-get: get current search pattern
  * - search-direction-get: get current search direction
  * - search-clear: clear search state
@@ -437,7 +439,179 @@ export function createSearchOps(
     lastSearchPattern = "";
     lastSearchDirection = "forward";
     setStatusMessage("Search cleared");
-    
+
+    return Either.right(createNil());
+  });
+
+  /**
+   * Extract word under cursor
+   * @param text - Full text content
+   * @param line - Current line
+   * @param column - Current column
+   * @returns Word under cursor or empty string if not on a word
+   */
+  function extractWordUnderCursor(
+    text: string,
+    line: number,
+    column: number
+  ): string {
+    const lines = text.split('\n');
+
+    // Validate position
+    if (line < 0 || line >= lines.length) {
+      return "";
+    }
+
+    const lineText = lines[line]!;
+    if (column < 0 || column >= lineText.length) {
+      return "";
+    }
+
+    // Check if current character is a word character
+    const currentChar = lineText[column]!;
+    if (!isWordChar(currentChar)) {
+      return "";
+    }
+
+    // Find start of word
+    let start = column;
+    while (start > 0 && isWordChar(lineText[start - 1]!)) {
+      start--;
+    }
+
+    // Find end of word
+    let end = column;
+    while (end < lineText.length && isWordChar(lineText[end]!)) {
+      end++;
+    }
+
+    return lineText.substring(start, end);
+  }
+
+  /**
+   * Check if character is a word character (alphanumeric or underscore)
+   * @param char - Character to check
+   * @returns true if character is a word character
+   */
+  function isWordChar(char: string): boolean {
+    return /[a-zA-Z0-9_]/.test(char);
+  }
+
+  /**
+   * word-under-cursor-next - search for next occurrence of word under cursor (*)
+   * Usage: (word-under-cursor-next)
+   */
+  api.set("word-under-cursor-next", (args: TLispValue[]): Either<AppError, TLispValue> => {
+    if (args.length !== 0) {
+      return Either.left(createValidationError(
+        'ConstraintViolation',
+        'word-under-cursor-next requires 0 arguments',
+        'args',
+        args,
+        '0 arguments'
+      ));
+    }
+
+    const currentBuffer = getCurrentBuffer();
+    const bufferValidation = validateBufferExists(currentBuffer);
+    if (Either.isLeft(bufferValidation)) {
+      return Either.left(bufferValidation.left);
+    }
+
+    // Get buffer content
+    const contentResult = currentBuffer!.getContent();
+    if (Either.isLeft(contentResult)) {
+      return Either.left(createBufferError('InvalidOperation', `Failed to get buffer content: ${contentResult.left}`));
+    }
+
+    const text = contentResult.right;
+    const currentLine = getCursorLine();
+    const currentColumn = getCursorColumn();
+
+    // Extract word under cursor
+    const word = extractWordUnderCursor(text, currentLine, currentColumn);
+
+    if (word === "") {
+      setStatusMessage("No word under cursor");
+      return Either.left(createBufferError('InvalidOperation', 'No word under cursor'));
+    }
+
+    // Set search pattern and direction
+    lastSearchPattern = word;
+    lastSearchDirection = "forward";
+
+    // Find next match
+    const match = findNextMatch(text, word, currentLine, currentColumn);
+
+    if (!match) {
+      setStatusMessage(`Word '${word}' not found`);
+      return Either.left(createBufferError('NotFound', `Word '${word}' not found`));
+    }
+
+    // Update cursor position
+    setCursorLine(match.line);
+    setCursorColumn(match.column);
+
+    setStatusMessage(`Found: ${word}`);
+    return Either.right(createNil());
+  });
+
+  /**
+   * word-under-cursor-previous - search for previous occurrence of word under cursor (#)
+   * Usage: (word-under-cursor-previous)
+   */
+  api.set("word-under-cursor-previous", (args: TLispValue[]): Either<AppError, TLispValue> => {
+    if (args.length !== 0) {
+      return Either.left(createValidationError(
+        'ConstraintViolation',
+        'word-under-cursor-previous requires 0 arguments',
+        'args',
+        args,
+        '0 arguments'
+      ));
+    }
+
+    const currentBuffer = getCurrentBuffer();
+    const bufferValidation = validateBufferExists(currentBuffer);
+    if (Either.isLeft(bufferValidation)) {
+      return Either.left(bufferValidation.left);
+    }
+
+    // Get buffer content
+    const contentResult = currentBuffer!.getContent();
+    if (Either.isLeft(contentResult)) {
+      return Either.left(createBufferError('InvalidOperation', `Failed to get buffer content: ${contentResult.left}`));
+    }
+
+    const text = contentResult.right;
+    const currentLine = getCursorLine();
+    const currentColumn = getCursorColumn();
+
+    // Extract word under cursor
+    const word = extractWordUnderCursor(text, currentLine, currentColumn);
+
+    if (word === "") {
+      setStatusMessage("No word under cursor");
+      return Either.left(createBufferError('InvalidOperation', 'No word under cursor'));
+    }
+
+    // Set search pattern and direction
+    lastSearchPattern = word;
+    lastSearchDirection = "backward";
+
+    // Find previous match
+    const match = findPreviousMatch(text, word, currentLine, currentColumn);
+
+    if (!match) {
+      setStatusMessage(`Word '${word}' not found`);
+      return Either.left(createBufferError('NotFound', `Word '${word}' not found`));
+    }
+
+    // Update cursor position
+    setCursorLine(match.line);
+    setCursorColumn(match.column);
+
+    setStatusMessage(`Found: ${word}`);
     return Either.right(createNil());
   });
 

@@ -118,6 +118,17 @@
 (key-bind "C-v" "(visual-enter-block-mode)" "normal")
 
 ;; =================================================================
+;; WORD UNDER CURSOR SEARCH (US-1.5.2)
+;; =================================================================
+;; Vim-style * and # keys search for word under cursor
+
+;; Search for next occurrence of word under cursor (*)
+(key-bind "*" "(word-under-cursor-next)" "normal")
+
+;; Search for previous occurrence of word under cursor (#)
+(key-bind "#" "(word-under-cursor-previous)" "normal")
+
+;; =================================================================
 ;; M-X SYSTEM (Emacs-style)
 ;; =================================================================
 ;; Two-key sequence: SPC ; to activate M-x mode
