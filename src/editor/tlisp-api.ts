@@ -15,8 +15,9 @@ import { createFileOps } from "./api/file-ops.ts";
 import { createBindingsOps } from "./api/bindings-ops.ts";
 import { createWordOps } from "./api/word-ops.ts";
 import { createLineOps } from "./api/line-ops.ts";
-import { createDeleteOps } from "./api/delete-ops.ts";
+import { createDeleteOps, setDeleteRegister } from "./api/delete-ops.ts";
 import { createYankOps } from "./api/yank-ops.ts";
+import { createChangeOps } from "./api/change-ops.ts";
 import { createUndoRedoOps } from "./api/undo-redo-ops.ts";
 import { createCountOps } from "./api/count-ops.ts";
 
@@ -181,6 +182,21 @@ export function createEditorAPI(state: TlispEditorState): Map<string, TLispFunct
     (column) => { state.cursorColumn = column; }
   );
   for (const [key, value] of yankOps.entries()) {
+    api.set(key, value);
+  }
+
+  // Add change operator operations
+  const changeOps = createChangeOps(
+    () => state.currentBuffer,
+    (buffer) => { state.currentBuffer = buffer; },
+    () => state.cursorLine,
+    (line) => { state.cursorLine = line; },
+    () => state.cursorColumn,
+    (column) => { state.cursorColumn = column; },
+    (mode) => { state.mode = mode; },
+    setDeleteRegister
+  );
+  for (const [key, value] of changeOps.entries()) {
     api.set(key, value);
   }
 

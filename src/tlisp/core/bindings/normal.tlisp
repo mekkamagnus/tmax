@@ -92,6 +92,18 @@
 (key-bind "C-r" "(redo)" "normal")
 
 ;; =================================================================
+;; CHANGE OPERATOR (US-1.4.1)
+;; =================================================================
+;; Vim-style change operator: c{motion} deletes text and enters insert mode
+;;
+;; Note: Change operator functions are available via M-x:
+;;   - (change-word) - delete word and enter insert mode
+;;   - (change-line) - clear line and enter insert mode
+;;   - (change-to-line-end) - delete to end of line and enter insert mode
+;;
+;; Future enhancement: Implement operator-pending mode for 'c' + motion key sequences
+
+;; =================================================================
 ;; M-X SYSTEM (Emacs-style)
 ;; =================================================================
 ;; Two-key sequence: SPC ; to activate M-x mode
