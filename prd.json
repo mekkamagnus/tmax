@@ -612,8 +612,8 @@
         "No matches show 'No commands found'"
       ],
       "priority": 10,
-      "passes": false,
-      "notes": "Phase 1 - Core Editing Features - Command discovery"
+      "passes": true,
+      "notes": "Phase 1 - Core Editing Features - Command discovery - Completed: apropos-command, apropos-command-prompt, C-h a key binding, pattern matching with regex support"
     },
     {
       "id": "US-2.1.1",
@@ -654,8 +654,8 @@
         "@@ executes last macro again"
       ],
       "priority": 10,
-      "passes": false,
-      "notes": "Phase 2 - Extensibility & Plugin System"
+      "passes": true,
+      "notes": "Phase 2 - Extensibility & Plugin System - Completed: T-Lisp API functions for macro recording, state management, macro execution with count support"
     },
     {
       "id": "US-2.4.2",

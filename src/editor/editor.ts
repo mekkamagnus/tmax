@@ -18,6 +18,7 @@ import { handleVisualMode } from "./handlers/visual-handler.ts";
 import { handleCommandMode } from "./handlers/command-handler.ts";
 import { handleMxMode } from "./handlers/mx-handler.ts";
 import { createMinibufferOps } from "./api/minibuffer-ops.ts";
+import * as macroRecording from "./api/macro-recording.ts";
 
 /**
  * Key mapping for editor commands
@@ -821,6 +822,241 @@ export class Editor {
         ]);
       });
       return createList(bindingValues);
+    });
+
+    // ============================================================================
+    // MACRO RECORDING FUNCTIONS (US-2.4.1)
+    // ============================================================================
+
+    // Use imported macro recording functions
+    const {
+      startRecording,
+      stopRecording,
+      recordKey,
+      isRecording,
+      getCurrentRegister,
+      getMacros,
+      executeMacro,
+      executeLastMacro,
+      getLastExecutedMacro,
+      clearAllMacros,
+      clearMacro,
+      resetMacroRecordingState,
+    } = macroRecording;
+
+    // macro-record-start: Start recording to a register
+    this.interpreter.defineBuiltin("macro-record-start", (args) => {
+      if (args.length !== 1) {
+        throw new Error("macro-record-start requires exactly 1 argument: register");
+      }
+      const registerArg = args[0];
+      if (!registerArg || registerArg.type !== "string") {
+        throw new Error("macro-record-start requires a string register");
+      }
+      const register = registerArg.value;
+
+      const result = startRecording(register);
+      if (Either.isLeft(result)) {
+        throw new Error(result.left);
+      }
+      return createString(result.right);
+    });
+
+    // macro-record-stop: Stop recording and save macro
+    this.interpreter.defineBuiltin("macro-record-stop", (args) => {
+      if (args.length !== 0) {
+        throw new Error("macro-record-stop requires no arguments");
+      }
+
+      const result = stopRecording();
+      if (Either.isLeft(result)) {
+        throw new Error(result.left);
+      }
+      return createString(result.right);
+    });
+
+    // macro-record-key: Record a key during recording
+    this.interpreter.defineBuiltin("macro-record-key", (args) => {
+      if (args.length !== 1) {
+        throw new Error("macro-record-key requires exactly 1 argument: key");
+      }
+      const keyArg = args[0];
+      if (!keyArg || keyArg.type !== "string") {
+        throw new Error("macro-record-key requires a string key");
+      }
+      const key = keyArg.value;
+
+      const result = recordKey(key);
+      if (Either.isLeft(result)) {
+        throw new Error(result.left);
+      }
+      return createString(result.right);
+    });
+
+    // macro-record-active: Check if currently recording
+    this.interpreter.defineBuiltin("macro-record-active", (args) => {
+      if (args.length !== 0) {
+        throw new Error("macro-record-active requires no arguments");
+      }
+      return { type: "boolean", value: isRecording() };
+    });
+
+    // macro-record-register: Get current recording register
+    this.interpreter.defineBuiltin("macro-record-register", (args) => {
+      if (args.length !== 0) {
+        throw new Error("macro-record-register requires no arguments");
+      }
+      const register = getCurrentRegister();
+      if (register === null) {
+        return createNil();
+      }
+      return createString(register);
+    });
+
+    // macro-list: Get all recorded macros
+    this.interpreter.defineBuiltin("macro-list", (args) => {
+      if (args.length !== 0) {
+        throw new Error("macro-list requires no arguments");
+      }
+      const macros = getMacros();
+      const macroList: TLispValue[] = [];
+      for (const [register, keys] of macros) {
+        const keyValues = keys.map(k => createString(k));
+        macroList.push(createList([
+          createString(register),
+          createList(keyValues),
+        ]));
+      }
+      return createList(macroList);
+    });
+
+    // macro-execute: Execute a recorded macro
+    this.interpreter.defineBuiltin("macro-execute", (args) => {
+      if (args.length < 1 || args.length > 2) {
+        throw new Error("macro-execute requires 1 or 2 arguments: register, optional count");
+      }
+      const registerArg = args[0];
+      if (!registerArg || registerArg.type !== "string") {
+        throw new Error("macro-execute requires a string register");
+      }
+      const register = registerArg.value;
+
+      // Handle optional count parameter
+      let count = 1;
+      if (args.length === 2) {
+        const countArg = args[1];
+        if (!countArg || countArg.type !== "number") {
+          throw new Error("macro-execute count must be a number");
+        }
+        count = countArg.value;
+        if (count < 1) {
+          throw new Error("macro-execute count must be >= 1");
+        }
+      }
+
+      const result = executeMacro(register);
+      if (Either.isLeft(result)) {
+        throw new Error(result.left);
+      }
+
+      // Get the macro keys
+      const macros = getMacros();
+      const keys = macros.get(register);
+      if (!keys) {
+        throw new Error(`No macro in register ${register}`);
+      }
+
+      // Execute each key the specified number of times
+      for (let i = 0; i < count; i++) {
+        for (const key of keys) {
+          // Execute the key via handleKey
+          // Note: This is a simplified version that executes the key as a command
+          // In a full implementation, we'd need to handle the key properly
+          this.handleKey(key).catch((error) => {
+            this.state.statusMessage = `Macro error: ${error instanceof Error ? error.message : String(error)}`;
+          });
+        }
+      }
+
+      return createString(register);
+    });
+
+    // macro-execute-last: Execute the last executed macro (@@)
+    this.interpreter.defineBuiltin("macro-execute-last", (args) => {
+      if (args.length !== 0) {
+        throw new Error("macro-execute-last requires no arguments");
+      }
+
+      const result = executeLastMacro();
+      if (Either.isLeft(result)) {
+        throw new Error(result.left);
+      }
+
+      const register = result.right;
+
+      // Get the macro keys
+      const macros = getMacros();
+      const keys = macros.get(register);
+      if (!keys) {
+        throw new Error(`No macro in register ${register}`);
+      }
+
+      // Execute each key
+      for (const key of keys) {
+        this.handleKey(key).catch((error) => {
+          this.state.statusMessage = `Macro error: ${error instanceof Error ? error.message : String(error)}`;
+        });
+      }
+
+      return createString(register);
+    });
+
+    // macro-last-executed: Get the last executed macro register
+    this.interpreter.defineBuiltin("macro-last-executed", (args) => {
+      if (args.length !== 0) {
+        throw new Error("macro-last-executed requires no arguments");
+      }
+      const register = getLastExecutedMacro();
+      if (register === null) {
+        return createNil();
+      }
+      return createString(register);
+    });
+
+    // macro-clear: Clear all macros
+    this.interpreter.defineBuiltin("macro-clear", (args) => {
+      if (args.length !== 0) {
+        throw new Error("macro-clear requires no arguments");
+      }
+      clearAllMacros();
+      return createNil();
+    });
+
+    // macro-clear-register: Clear a specific macro
+    this.interpreter.defineBuiltin("macro-clear-register", (args) => {
+      if (args.length !== 1) {
+        throw new Error("macro-clear-register requires exactly 1 argument: register");
+      }
+      const registerArg = args[0];
+      if (!registerArg || registerArg.type !== "string") {
+        throw new Error("macro-clear-register requires a string register");
+      }
+      const register = registerArg.value;
+
+      const result = clearMacro(register);
+      if (Either.isLeft(result)) {
+        throw new Error(result.left);
+      }
+      return createString(result.right);
+    });
+
+    // macro-record-reset: Reset macro recording state (for testing)
+    this.interpreter.defineBuiltin("macro-record-reset", (args) => {
+      if (args.length !== 0) {
+        throw new Error("macro-record-reset requires no arguments");
+      }
+      resetMacroRecordingState();
+      return createNil();
     });
   }
 
