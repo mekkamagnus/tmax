@@ -59,6 +59,21 @@ function createTailCall(funcExpr: TLispValue, argExprs: TLispValue[], env: TLisp
 // Test registry to store defined tests
 const testRegistry: Map<string, { body: TLispValue[], name: string, params: TLispValue }> = new Map();
 
+// Suite registry to store test suites
+interface TestSuite {
+  name: string;
+  description?: string;
+  tests: string[]; // Test names
+  setup?: TLispValue[];
+  teardown?: TLispValue[];
+  parent?: string; // For nested suites
+}
+
+const suiteRegistry: Map<string, TestSuite> = new Map();
+
+// Track current suite being defined
+let currentSuite: string | null = null;
+
 /**
  * T-Lisp evaluator for executing T-Lisp expressions
  */
@@ -283,6 +298,12 @@ export class TLispEvaluator {
           return this.evalCond(elements, env, inTailPosition);
         case "deftest":
           return this.evalDeftest(elements, env);
+        case "deftest-suite":
+          return this.evalDeftestSuite(elements, env);
+        case "suite-setup":
+          return this.evalSuiteSetup(elements, env);
+        case "suite-teardown":
+          return this.evalSuiteTeardown(elements, env);
         case "deffixture":
           return this.evalDeffixture(elements, env);
         case "use-fixtures":
@@ -1181,6 +1202,152 @@ export class TLispEvaluator {
   }
 
   /**
+   * Evaluate deftest-suite special form
+   * @param elements - List elements
+   * @param env - Environment
+   * @returns Either with error or suite name
+   */
+  private evalDeftestSuite(elements: TLispValue[], env: TLispEnvironment): Either<EvalError, TLispValue> {
+    if (elements.length < 2) {
+      return Either.left({
+        type: 'EvalError',
+        variant: 'SyntaxError',
+        message: "deftest-suite requires at least 1 argument: suite name",
+        details: { expectedMin: 2, actual: elements.length }
+      });
+    }
+
+    const nameArg = elements[1];
+    if (!nameArg || (nameArg.type !== "string" && nameArg.type !== "symbol")) {
+      return Either.left({
+        type: 'EvalError',
+        variant: 'TypeError',
+        message: "deftest-suite name must be a string or symbol",
+        details: { nameType: nameArg?.type }
+      });
+    }
+
+    const suiteName = nameArg.value as string;
+
+    // Parse optional description
+    let description: string | undefined;
+    let contentStart = 2;
+
+    if (elements.length > 2 && elements[2].type === "string") {
+      description = elements[2].value as string;
+      contentStart = 3;
+    }
+
+    // Create suite
+    const suite: TestSuite = {
+      name: suiteName,
+      description,
+      tests: [],
+      parent: currentSuite || undefined
+    };
+
+    // Set as current suite for nested definitions
+    const previousSuite = currentSuite;
+    currentSuite = suiteName;
+
+    // Process suite body
+    for (let i = contentStart; i < elements.length; i++) {
+      const element = elements[i];
+
+      // Check for suite-setup
+      if (element.type === "list" && element.value.length > 0) {
+        const first = element.value[0];
+        if (first.type === "symbol" && first.value === "suite-setup") {
+          suite.setup = element.value.slice(1);
+          continue;
+        }
+        if (first.type === "symbol" && first.value === "suite-teardown") {
+          suite.teardown = element.value.slice(1);
+          continue;
+        }
+        if (first.type === "symbol" && first.value === "deftest") {
+          // Execute the deftest to register it in testRegistry
+          const testResult = this.evalDeftest(element.value, env);
+          if (Either.isLeft(testResult)) {
+            // Log error but continue
+            console.warn(`Failed to define test in suite: ${testResult.left.message}`);
+          } else {
+            // Add test to suite's test list
+            const testName = element.value[1];
+            if (testName && testName.type === "symbol") {
+              suite.tests.push(testName.value as string);
+            }
+          }
+        }
+        if (first.type === "symbol" && first.value === "deftest-suite") {
+          // Execute nested suite definition
+          const suiteResult = this.evalDeftestSuite(element.value, env);
+          if (Either.isLeft(suiteResult)) {
+            console.warn(`Failed to define nested suite: ${suiteResult.left.message}`);
+          } else {
+            // Add nested suite to parent's test list
+            const nestedName = element.value[1];
+            if (nestedName && (nestedName.type === "string" || nestedName.type === "symbol")) {
+              suite.tests.push(nestedName.value as string);
+            }
+          }
+        }
+      }
+    }
+
+    // Restore previous suite
+    currentSuite = previousSuite;
+
+    // Register suite
+    suiteRegistry.set(suiteName, suite);
+
+    // Return suite name
+    return Either.right(createString(suiteName));
+  }
+
+  /**
+   * Evaluate suite-setup special form
+   * @param elements - List elements
+   * @param env - Environment
+   * @returns Either with error or success
+   */
+  private evalSuiteSetup(elements: TLispValue[], env: TLispEnvironment): Either<EvalError, TLispValue> {
+    if (!currentSuite) {
+      return Either.left({
+        type: 'EvalError',
+        variant: 'SyntaxError',
+        message: "suite-setup must be used inside deftest-suite",
+        details: {}
+      });
+    }
+
+    // suite-setup is handled by deftest-suite, this is just a placeholder
+    // The actual setup body is stored in the suite object
+    return Either.right(createNil());
+  }
+
+  /**
+   * Evaluate suite-teardown special form
+   * @param elements - List elements
+   * @param env - Environment
+   * @returns Either with error or success
+   */
+  private evalSuiteTeardown(elements: TLispValue[], env: TLispEnvironment): Either<EvalError, TLispValue> {
+    if (!currentSuite) {
+      return Either.left({
+        type: 'EvalError',
+        variant: 'SyntaxError',
+        message: "suite-teardown must be used inside deftest-suite",
+        details: {}
+      });
+    }
+
+    // suite-teardown is handled by deftest-suite, this is just a placeholder
+    // The actual teardown body is stored in the suite object
+    return Either.right(createNil());
+  }
+
+  /**
    * Evaluate deffixture special form
    * @param elements - List elements
    * @param env - Environment
@@ -1546,6 +1713,23 @@ export class TLispEvaluator {
    */
   getAllTestNames(): string[] {
     return Array.from(testRegistry.keys());
+  }
+
+  /**
+   * Get suite definition by name
+   * @param name - Name of the suite
+   * @returns Suite definition or undefined if not found
+   */
+  getSuiteDefinition(name: string): TestSuite | undefined {
+    return suiteRegistry.get(name);
+  }
+
+  /**
+   * Get all suite names
+   * @returns Array of suite names
+   */
+  getAllSuiteNames(): string[] {
+    return Array.from(suiteRegistry.keys());
   }
 
   /**
@@ -3047,7 +3231,9 @@ export const createEvaluatorWithBuiltins = (): { evaluator: TLispEvaluator; env:
       return evaluator.eval(result.right, env);
     },
     getTestDefinition: (name: string) => evaluator.getTestDefinition(name),
-    getAllTestNames: () => evaluator.getAllTestNames()
+    getAllTestNames: () => evaluator.getAllTestNames(),
+    getSuiteDefinition: (name: string) => evaluator.getSuiteDefinition(name),
+    getAllSuiteNames: () => evaluator.getAllSuiteNames()
   } as any;
   registerStdlibFunctions(interpreterMock as any);
 

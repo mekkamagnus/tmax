@@ -29,6 +29,12 @@ let testCounts = { passed: 0, failed: 0, total: 0 };
 let globalSetupFunction: TLispValue | null = null;
 let globalTeardownFunction: TLispValue | null = null;
 
+// Suite-level setup and teardown tracking
+let suiteSetupFunction: TLispValue | null = null;
+let suiteTeardownFunction: TLispValue | null = null;
+let suiteSetupRan = false;
+let suiteTeardownShouldRun = false;
+
 // Fixture storage
 interface Fixture {
   name: string;
@@ -1235,4 +1241,176 @@ export function registerTestingFramework(interpreter: TLispInterpreter): void {
 
   // Store applyFixtures in a way that test-run can access it
   (interpreter as any).__applyFixtures__ = applyFixtures;
+
+  /**
+   * Run a specific test suite
+   * Usage: (test-run-suite "suite-name")
+   * Executes all tests in the suite and returns summary statistics
+   */
+  interpreter.defineBuiltin("test-run-suite", (args: TLispValue[]) => {
+    if (args.length !== 1) {
+      return Either.left({
+        type: 'EvalError',
+        variant: 'RuntimeError',
+        message: "test-run-suite requires exactly 1 argument: suite name",
+        details: { expected: 1, actual: args.length }
+      });
+    }
+
+    const nameArg = args[0];
+    if (!nameArg || (nameArg.type !== "string" && nameArg.type !== "symbol")) {
+      return Either.left({
+        type: 'EvalError',
+        variant: 'TypeError',
+        message: "test-run-suite requires a string or symbol as the argument (suite name)",
+        details: { argType: nameArg?.type }
+      });
+    }
+
+    const suiteName = nameArg.value as string;
+
+    // Get the suite definition
+    const suite = interpreter.getSuiteDefinition?.(suiteName);
+
+    if (!suite) {
+      return Either.left({
+        type: 'EvalError',
+        variant: 'RuntimeError',
+        message: `Suite '${suiteName}' not found`,
+        details: { suiteName }
+      });
+    }
+
+    // Reset suite-level state
+    suiteSetupRan = false;
+    suiteTeardownShouldRun = true;
+
+    let suitePassed = 0;
+    let suiteFailed = 0;
+
+    try {
+      // Run suite setup if defined
+      if (suite.setup && suite.setup.length > 0) {
+        for (const expr of suite.setup) {
+          const result = interpreter.eval(expr, interpreter.globalEnv);
+          if (Either.isLeft(result)) {
+            return Either.left({
+              type: 'EvalError',
+              variant: 'RuntimeError',
+              message: `Suite setup failed for '${suiteName}': ${result.left.message || result.left}`,
+              details: { suiteName, error: result.left }
+            });
+          }
+        }
+        suiteSetupRan = true;
+      }
+
+      // Collect all tests to run (including nested suites)
+      const testsToRun: string[] = [];
+
+      // Add direct tests
+      for (const testName of suite.tests) {
+        // Check if it's a test or nested suite
+        const testDef = interpreter.getTestDefinition?.(testName);
+        if (testDef) {
+          testsToRun.push(testName);
+        } else {
+          // Might be a nested suite
+          const nestedSuite = interpreter.getSuiteDefinition?.(testName);
+          if (nestedSuite) {
+            // Recursively run nested suite
+            const nestedResult = interpreter.eval(
+              { type: "list", value: [
+                { type: "symbol", value: "test-run-suite" },
+                nameArg
+              ]},
+              interpreter.globalEnv
+            );
+            if (Either.isLeft(nestedResult)) {
+              return nestedResult;
+            }
+            // Count from nested suite
+            if (nestedResult.right.type === "list") {
+              const [passed, failed] = nestedResult.right.value;
+              suitePassed += passed.value || 0;
+              suiteFailed += failed.value || 0;
+            }
+          }
+        }
+      }
+
+      // Run each test
+      for (const testName of testsToRun) {
+        const testDef = interpreter.getTestDefinition?.(testName);
+        if (!testDef) continue;
+
+        try {
+          const testEnv = interpreter.globalEnv.createChild();
+
+          // Execute test body
+          for (const expr of testDef.body) {
+            const result = interpreter.eval(expr, testEnv);
+            if (Either.isLeft(result)) {
+              throw new Error(`Test '${testName}' failed: ${result.left.message || result.left}`);
+            }
+          }
+
+          suitePassed++;
+        } catch (error) {
+          suiteFailed++;
+        }
+      }
+
+      // Run suite teardown if defined
+      if (suiteTeardownShouldRun && suite.teardown && suite.teardown.length > 0) {
+        for (const expr of suite.teardown) {
+          const result = interpreter.eval(expr, interpreter.globalEnv);
+          if (Either.isLeft(result)) {
+            console.warn(`Suite teardown failed for '${suiteName}': ${result.left.message || result.left}`);
+          }
+        }
+        suiteTeardownShouldRun = false;
+      }
+
+      // Return summary as list: [passed, failed, total]
+      return Either.right(createList([
+        createNumber(suitePassed),
+        createNumber(suiteFailed),
+        createNumber(suitePassed + suiteFailed)
+      ]));
+    } catch (error) {
+      return Either.left({
+        type: 'EvalError',
+        variant: 'RuntimeError',
+        message: `Error running suite '${suiteName}': ${error instanceof Error ? error.message : String(error)}`,
+        details: { suiteName, error: error instanceof Error ? error.message : String(error) }
+      });
+    }
+  });
+
+  /**
+   * List all test suites
+   * Usage: (list-suites)
+   * Returns a list of all registered suite names with descriptions
+   */
+  interpreter.defineBuiltin("list-suites", (args: TLispValue[]) => {
+    const suiteNames = interpreter.getAllSuiteNames?.() || [];
+
+    // Create list of suites with their info
+    const suitesInfo = suiteNames.map(name => {
+      const suite = interpreter.getSuiteDefinition?.(name);
+      if (!suite) {
+        return createString(name);
+      }
+
+      // Return a list with name and description
+      return createList([
+        createString(suite.name),
+        suite.description ? createString(suite.description) : createNil(),
+        createNumber(suite.tests.length)
+      ]);
+    });
+
+    return Either.right(createList(suitesInfo));
+  });
 }

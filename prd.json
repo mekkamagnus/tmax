@@ -152,7 +152,7 @@
         "Suite descriptions are visible when listing suites"
       ],
       "priority": 10,
-      "passes": false,
+      "passes": true,
       "notes": "Phase 0.5 - Test organization"
     },
     {
