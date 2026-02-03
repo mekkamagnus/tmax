@@ -54,12 +54,12 @@ export class MockFileSystem implements FileSystem {
   }
 
   /**
-   * Check if file exists
+   * Check if file or directory exists
    * @param path - File path
-   * @returns True if file exists
+   * @returns True if file or directory exists
    */
   async exists(path: string): Promise<boolean> {
-    return this.files.has(path);
+    return this.files.has(path) || this.stats.has(path);
   }
 
   /**
@@ -78,19 +78,37 @@ export class MockFileSystem implements FileSystem {
   /**
    * List directory contents
    * @param path - Directory path
-   * @returns Array of file names
+   * @returns Array of file and directory names
    */
   async readdir(path: string): Promise<string[]> {
-    const files: string[] = [];
+    const entries: string[] = [];
+    const seen = new Set<string>();
+
+    // Get files in this directory
     for (const [filePath] of this.files) {
       if (filePath.startsWith(path + "/")) {
         const relativePath = filePath.substring(path.length + 1);
-        if (!relativePath.includes("/")) {
-          files.push(relativePath);
+        const firstSegment = relativePath.includes("/") ? relativePath.split("/")[0] : relativePath;
+        if (!seen.has(firstSegment)) {
+          entries.push(firstSegment);
+          seen.add(firstSegment);
         }
       }
     }
-    return files;
+
+    // Get subdirectories
+    for (const [dirPath, stats] of this.stats) {
+      if (stats.isDirectory && dirPath.startsWith(path + "/")) {
+        const relativePath = dirPath.substring(path.length + 1);
+        const firstSegment = relativePath.includes("/") ? relativePath.split("/")[0] : relativePath;
+        if (!seen.has(firstSegment) && firstSegment) {
+          entries.push(firstSegment);
+          seen.add(firstSegment);
+        }
+      }
+    }
+
+    return entries;
   }
 
   /**
@@ -123,6 +141,19 @@ export class MockFileSystem implements FileSystem {
       isFile: true,
       isDirectory: false,
       size: content.length,
+      modified: new Date(),
+    });
+  }
+
+  /**
+   * Set directory entry (for testing)
+   * @param path - Directory path
+   */
+  setDirectory(path: string): void {
+    this.stats.set(path, {
+      isFile: false,
+      isDirectory: true,
+      size: 0,
       modified: new Date(),
     });
   }

@@ -422,4 +422,7 @@ export interface FileSystem {
   
   /** Get file stats */
   stat(path: string): Promise<FileStats>;
+
+  /** List directory contents */
+  readdir?(path: string): Promise<string[]>;
 }

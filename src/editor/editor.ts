@@ -577,6 +577,142 @@ export class Editor {
   }
 
   /**
+   * Load plugins from a directory (US-2.1.1)
+   * @param pluginDir - Path to directory containing plugin subdirectories
+   * @returns Result of plugin loading operation
+   */
+  async loadPluginsFromDirectory(pluginDir: string): Promise<{
+    /** Successfully loaded plugins */
+    loaded: string[];
+    /** Skipped plugins (no plugin.tlisp) */
+    skipped: string[];
+    /** Total plugins discovered */
+    total: number;
+    /** Errors encountered during loading */
+    errors: Array<{ plugin: string; error: string }>;
+  }> {
+    const result = {
+      loaded: [],
+      skipped: [],
+      total: 0,
+      errors: []
+    };
+
+    try {
+      // Check if plugin directory exists
+      const dirExists = await this.filesystem.exists(pluginDir);
+      if (!dirExists) {
+        result.errors.push({
+          plugin: 'directory',
+          error: `Plugin directory does not exist: ${pluginDir}`
+        });
+        return result;
+      }
+
+      // Read directory contents
+      // Try to use filesystem.readdir if available (for mock filesystem), otherwise fall back to fs
+      let entryNames: string[];
+      if (this.filesystem.readdir) {
+        const allEntries = await this.filesystem.readdir(pluginDir);
+        // For mock filesystem, we need to filter to only directories
+        // We'll check if each entry has a directory stat
+        const dirEntries: string[] = [];
+        for (const entry of allEntries) {
+          const entryPath = `${pluginDir}/${entry}`;
+          try {
+            const stat = await this.filesystem.stat(entryPath);
+            if (stat.isDirectory) {
+              dirEntries.push(entry);
+            }
+          } catch (e) {
+            // Stat failed, assume it's not a directory
+          }
+        }
+        entryNames = dirEntries;
+      } else {
+        // Use real fs module
+        const entriesWithTypes = await (await import('fs/promises')).readdir(pluginDir, { withFileTypes: true });
+        entryNames = entriesWithTypes
+          .filter((entry: any) => entry.isDirectory())
+          .map((entry: any) => entry.name);
+      }
+
+      result.total = entryNames.length;
+
+      // Load each plugin
+      for (const pluginName of entryNames) {
+        const pluginPath = `${pluginDir}/${pluginName}`;
+
+        try {
+          // Check if plugin.tlisp exists
+          const pluginFilePath = `${pluginPath}/plugin.tlisp`;
+          const pluginFileExists = await this.filesystem.exists(pluginFilePath);
+
+          if (!pluginFileExists) {
+            result.skipped.push(pluginName);
+            continue;
+          }
+
+          // Load plugin.toml if it exists
+          const tomlPath = `${pluginPath}/plugin.toml`;
+          const tomlExists = await this.filesystem.exists(tomlPath);
+
+          if (tomlExists) {
+            try {
+              const tomlContent = await this.filesystem.readFile(tomlPath);
+              // Parse TOML metadata (basic parsing for now)
+              // TODO: Implement full TOML parsing in future iteration
+              console.log(`Loading plugin metadata from: ${tomlPath}`);
+            } catch (error) {
+              // Don't fail plugin loading if toml has issues
+              console.warn(`Warning: Failed to load plugin.toml for ${pluginName}: ${error}`);
+            }
+          }
+
+          // Load plugin.tlisp
+          try {
+            const pluginContent = await this.filesystem.readFile(pluginFilePath);
+            const execResult = this.interpreter.execute(pluginContent);
+            if (execResult._tag === 'Left') {
+              // Parse or execution error
+              result.errors.push({
+                plugin: pluginName,
+                error: execResult.left.message
+              });
+              console.error(`Failed to load plugin ${pluginName}: ${execResult.left.message}`);
+            } else {
+              result.loaded.push(pluginName);
+              console.log(`Loaded plugin: ${pluginName}`);
+            }
+          } catch (error) {
+            result.errors.push({
+              plugin: pluginName,
+              error: error instanceof Error ? error.message : String(error)
+            });
+          }
+
+        } catch (error) {
+          const errorMessage = error instanceof Error ? error.message : String(error);
+          result.errors.push({
+            plugin: pluginName,
+            error: errorMessage
+          });
+          console.error(`Failed to load plugin ${pluginName}: ${errorMessage}`);
+        }
+      }
+
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      result.errors.push({
+        plugin: 'directory',
+        error: `Failed to read plugin directory: ${errorMessage}`
+      });
+    }
+
+    return result;
+  }
+
+  /**
    * Load minimal fallback key bindings when core-bindings.tlisp fails
    */
   private loadFallbackBindings(): void {
