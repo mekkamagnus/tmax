@@ -169,8 +169,8 @@
         "(assert-eventually condition timeout) polls for condition"
       ],
       "priority": 10,
-      "passes": false,
-      "notes": "Phase 0.5 - Async testing support"
+      "passes": true,
+      "notes": "Phase 0.5 - Async testing support - Completed: deftest-async, await, async-all, assert-eventually, timeout configuration"
     },
     {
       "id": "US-0.6.5",
