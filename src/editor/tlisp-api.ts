@@ -16,6 +16,7 @@ import { createBindingsOps } from "./api/bindings-ops.ts";
 import { createWordOps } from "./api/word-ops.ts";
 import { createLineOps } from "./api/line-ops.ts";
 import { createDeleteOps } from "./api/delete-ops.ts";
+import { createYankOps } from "./api/yank-ops.ts";
 
 /**
  * T-Lisp function implementation that returns Either for error handling
@@ -165,6 +166,19 @@ export function createEditorAPI(state: TlispEditorState): Map<string, TLispFunct
     (column) => { state.cursorColumn = column; }
   );
   for (const [key, value] of deleteOps.entries()) {
+    api.set(key, value);
+  }
+
+  // Add yank operator operations
+  const yankOps = createYankOps(
+    () => state.currentBuffer,
+    (buffer) => { state.currentBuffer = buffer; },
+    () => state.cursorLine,
+    (line) => { state.cursorLine = line; },
+    () => state.cursorColumn,
+    (column) => { state.cursorColumn = column; }
+  );
+  for (const [key, value] of yankOps.entries()) {
     api.set(key, value);
   }
 
