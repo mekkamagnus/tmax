@@ -29,6 +29,7 @@ import { createKillRingOps } from "./api/kill-ring.ts";
 import { createYankPopOps } from "./api/yank-pop-ops.ts";
 import { createEvilIntegrationOps } from "./api/evil-integration.ts";
 import { createLSPDiagnosticsOps } from "./api/lsp-diagnostics.ts";
+import { createPluginOps } from "./api/plugin-ops.ts";
 
 /**
  * T-Lisp function implementation that returns Either for error handling
@@ -309,6 +310,19 @@ export function createEditorAPI(state: TlispEditorState): Map<string, TLispFunct
     () => ({ state })
   );
   for (const [key, value] of lspDiagnosticsOps.entries()) {
+    api.set(key, value);
+  }
+
+  // Add plugin repository operations (US-4.1.1)
+  const pluginOps = createPluginOps(
+    state.filesystem,
+    () => {
+      // Get TLPA directory from environment or use default
+      const homeDir = process.env.HOME || '/tmp';
+      return `${homeDir}/.config/tmax/tlpa`;
+    }
+  );
+  for (const [key, value] of pluginOps.entries()) {
     api.set(key, value);
   }
 
