@@ -14,6 +14,7 @@ import { createModeOps } from "./api/mode-ops.ts";
 import { createFileOps } from "./api/file-ops.ts";
 import { createBindingsOps } from "./api/bindings-ops.ts";
 import { createWordOps } from "./api/word-ops.ts";
+import { createLineOps } from "./api/line-ops.ts";
 
 /**
  * T-Lisp function implementation that returns Either for error handling
@@ -138,6 +139,18 @@ export function createEditorAPI(state: TlispEditorState): Map<string, TLispFunct
     (column) => { state.cursorColumn = column; }
   );
   for (const [key, value] of wordOps.entries()) {
+    api.set(key, value);
+  }
+
+  // Add line navigation operations
+  const lineOps = createLineOps(
+    () => state.currentBuffer,
+    () => state.cursorLine,
+    (line) => { state.cursorLine = line; },
+    () => state.cursorColumn,
+    (column) => { state.cursorColumn = column; }
+  );
+  for (const [key, value] of lineOps.entries()) {
     api.set(key, value);
   }
 

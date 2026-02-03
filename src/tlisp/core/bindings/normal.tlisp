@@ -42,6 +42,26 @@
 (key-bind "e" "(word-end)" "normal")
 
 ;; =================================================================
+;; LINE NAVIGATION (US-1.1.2)
+;; =================================================================
+;; Vim-style line navigation keys
+
+;; Move to first column (0)
+(key-bind "0" "(line-first-column)" "normal")
+
+;; Move to last non-empty column ($)
+(key-bind "$" "(line-last-column)" "normal")
+
+;; Move to first non-blank column (_)
+(key-bind "_" "(line-first-non-blank)" "normal")
+
+;; Move to first non-blank of previous line (-)
+(key-bind "-" "(line-previous)" "normal")
+
+;; Move to first non-blank of next line (+)
+(key-bind "+" "(line-next)" "normal")
+
+;; =================================================================
 ;; MODE SWITCHING
 ;; =================================================================
 ;; Transition between editor modes
