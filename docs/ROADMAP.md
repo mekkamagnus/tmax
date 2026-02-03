@@ -156,12 +156,95 @@ This version provides a solid foundation for future development with comprehensi
 - End-to-end tests for complete key binding workflow
 - Tests for core-bindings.tlisp loading and error handling
 
-### Phase 0.5: Configuration System Enhancement
+### Phase 0.5: Testing Infrastructure Enhancement (TRT Framework)
 
-- [ ] Support for `init.tlisp` configuration file (replacing `.tmaxrc`)
-- [ ] Update all documentation to reference `init.tlisp`
-- [ ] Maintain backward compatibility with `.tmaxrc` during transition
-- [ ] Add configuration validation and error reporting
+**Status:** 📋 PLANNED
+**Priority:** HIGH (enables quality for Phase 1)
+**Timeline:** 1-2 weeks
+
+**Objective:** Implement TRT (Tmax Regression Testing) - a self-hosted T-Lisp testing framework inspired by Emacs ERT, enabling comprehensive testing of T-Lisp code and editor features.
+
+#### 0.5.1 - TRT Framework Implementation [CRITICAL]
+- [ ] Core TRT functions in T-Lisp (`src/tlisp/trt/trt.tlisp`)
+  - Test definition macros: `trt-deftest`, `trt-deftest-suite`
+  - Assertion helpers: `trt-assert-equals`, `trt-assert-true`, `trt-assert-false`
+  - Test execution and result collection
+  - Error handling and failure reporting
+- [ ] TypeScript API wrapper (`src/tlisp/trt/trt.ts`)
+  - Test runner interface
+  - Result formatting and display
+  - Integration with T-Lisp interpreter
+- [ ] Test runner script (`test/trt/runner.ts`)
+  - CLI interface for running tests
+  - File pattern matching (`**/*.tlisp`)
+  - Watch mode support for development
+  - Test result summary (passed/failed/total)
+
+#### 0.5.2 - Built-in Test Suites [HIGH]
+- [ ] Core T-Lisp tests (`src/tlisp/tests/core-tests.tlisp`)
+  - Value types and creation (`create-number`, `create-string`, etc.)
+  - Evaluation and environments
+  - Tail-call optimization verification
+  - Parser and tokenizer validation
+- [ ] Standard library tests (`src/tlisp/tests/stdlib-tests.tlisp`)
+  - Arithmetic operations (+, -, *, /)
+  - List manipulation (car, cdr, cons, append, map, filter)
+  - String operations (length, substring, string-append)
+  - Control flow (if, let, cond, progn)
+- [ ] Editor API tests (`src/tlisp/tests/editor-tests.tlisp`)
+  - Buffer operations (create, switch, insert, delete)
+  - Cursor movement (cursor-move, cursor-position)
+  - Mode management (editor-set-mode, editor-mode)
+  - File operations (file-read, file-write)
+
+#### 0.5.3 - CI/CD Integration [MEDIUM]
+- [ ] TRT tests in GitHub Actions workflow
+  - Automatic test execution on pull requests
+  - Test result reporting in PR comments
+- [ ] Test coverage reporting
+  - Track TRT test coverage over time
+  - Coverage badges for README
+- [ ] Performance regression detection
+  - Benchmark critical T-Lisp operations
+  - Alert on performance degradation
+- [ ] Automated test execution on commits
+  - Pre-commit hooks for TRT tests
+  - Block commits on failing tests
+
+#### 0.5.4 - User Testing Infrastructure [LOW]
+- [ ] `.tmax-trt/` directory for user tests
+  - Auto-discovery of user test suites
+  - Gitignored by default
+- [ ] Test discovery and loading
+  - Load user tests from home directory
+  - Merge with built-in test suites
+- [ ] Documentation for writing TRT tests
+  - TRT framework guide (`docs/TRT.md`)
+  - Test writing examples and best practices
+  - API reference for TRT functions
+- [ ] Example test suites
+  - Simple examples for new users
+  - Complex examples showing advanced usage
+
+**Success Criteria:**
+- ✅ Can run TRT tests with `bun run test:trt`
+- ✅ All existing T-Lisp features have TRT test coverage (80%+)
+- ✅ TRT tests pass in CI/CD pipeline
+- ✅ Users can write and run their own TRT tests in `.tmax-trt/`
+- ✅ Test results formatted clearly with pass/fail/error indicators
+- ✅ Watch mode enables rapid TDD workflow
+
+**Dependencies:**
+- Must complete after Phase 0.4 (key binding refactor) - TRT will test key bindings
+- Must complete before Phase 1.2 (basic operators) - enables TDD for complex features
+- Enables safer development of all Phase 1 features
+
+**Benefits:**
+- Self-hosted testing in T-Lisp (like Emacs ERT)
+- Users can test their configurations and plugins
+- Executable documentation through tests
+- Safer refactoring with regression tests
+- Better code quality for T-Lisp features
 
 ---
 

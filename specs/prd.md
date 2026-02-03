@@ -107,7 +107,7 @@ Developers needed a modern, extensible terminal editor that combines the best as
 - [ ] **Visual selection modes**: Basic visual mode implemented, advanced features planned for v0.2.0 (Phase 1.7)
 - [ ] **Search functionality**: /, ?, n, N - Planned for v0.2.0 (Phase 1.5)
 
-**Next Steps:** See Phase 1 (Core Editing) in Planned Enhancements below
+**Next Steps:** See Phase 0.5 (Testing Infrastructure) for TRT framework and Phase 1 (Core Editing) in Planned Enhancements below
 
 ### Epic 3: T-Lisp Extensibility System ✅ COMPLETE
 **As a** power user
@@ -124,7 +124,23 @@ Developers needed a modern, extensible terminal editor that combines the best as
 - 🚧 **Plugin system using T-Lisp** - Foundation complete, full system planned for v0.3.0 (Phase 2.1)
 - 🚧 **T-Lisp keybinding architecture** - Functional, refactor in progress (Phase 0.4)
 
-**Next Steps:** See Phase 0.4 (Key Binding Refactor) and Phase 2 (Extensibility) in Planned Enhancements below
+**Next Steps:** See Phase 0.4 (Key Binding Refactor) and Phase 0.5 (Testing Infrastructure) in Planned Enhancements below
+
+### Epic 4: T-Lisp Testing Infrastructure 📋 PLANNED
+**As a** developer
+**I want** a self-hosted T-Lisp testing framework (TRT)
+**So that** I can test T-Lisp code and editor features in T-Lisp itself
+
+#### Acceptance Criteria - Implementation Status
+- 📋 **TRT framework**: Core testing functions to be implemented in T-Lisp
+- 📋 **Test definition macros**: `trt-deftest`, `trt-deftest-suite` to be added
+- 📋 **Assertion helpers**: `trt-assert-equals`, `trt-assert-true`, `trt-assert-false` to be created
+- 📋 **Test execution**: CLI runner with `bun run test:trt` to be implemented
+- 📋 **Built-in test suites**: Core, stdlib, and editor API tests to be added
+- 📋 **CI/CD integration**: Automated test execution planned
+- 📋 **User testing support**: `.tmax-trt/` directory for user tests planned
+
+**Next Steps:** See Phase 0.5 (Testing Infrastructure) in Planned Enhancements below
 
 ---
 
@@ -179,6 +195,100 @@ Developers needed a modern, extensible terminal editor that combines the best as
 - **Given** multiple key bindings
   **When** I call `(list-bindings "normal")`
   **Then** I should see all active bindings for that mode
+
+---
+
+### Phase 0.5: Testing Infrastructure Enhancement (TRT Framework)
+
+#### Epic 4: T-Lisp Testing Infrastructure 📋 PLANNED
+**As a** developer
+**I want** a self-hosted T-Lisp testing framework (TRT)
+**So that** I can test T-Lisp code and editor features in T-Lisp itself
+
+**Acceptance Criteria:**
+- ✅ **TRT framework implemented**: Core testing functions available in T-Lisp
+- ✅ **Test definition macros**: `trt-deftest`, `trt-deftest-suite` working
+- ✅ **Assertion helpers**: `trt-assert-equals`, `trt-assert-true`, `trt-assert-false` available
+- ✅ **Test execution**: Can run tests with `bun run test:trt`
+- ✅ **Built-in test suites**: Core, stdlib, and editor API tests included
+- ✅ **CI/CD integration**: Tests run automatically on commits
+- 🚧 **User testing support**: `.tmax-trt/` directory for user tests (planned)
+
+#### US-0.5.1: TRT Framework Core
+**As a** developer
+**I want** a T-Lisp testing framework similar to Emacs ERT
+**So that** I can write tests in T-Lisp itself
+
+**Acceptance Criteria:**
+- **Given** the TRT framework is loaded
+  **When** I define a test with `(trt-deftest test-name ...)`
+  **Then** it should be registered and executable
+- **Given** a TRT test
+  **When** I use `(trt-assert-equals expected actual)`
+  **Then** it should pass if values are equal, fail otherwise
+- **Given** a TRT test suite
+  **When** I run `bun run test:trt`
+  **Then** all tests should execute and report results
+- **Given** test execution
+  **When** tests complete
+  **Then** I should see summary: "Passed: X, Failed: Y, Total: Z"
+
+#### US-0.5.2: Built-in Test Suites
+**As a** developer
+**I want** comprehensive TRT test suites for T-Lisp features
+**So that** we have test coverage for all T-Lisp functionality
+
+**Acceptance Criteria:**
+- **Given** the TRT framework
+  **When** I run `src/tlisp/tests/core-tests.tlisp`
+  **Then** all core T-Lisp tests should pass
+- **Given** `stdlib-tests.tlisp`
+  **When** I run it
+  **Then** all standard library functions should be tested
+- **Given** `editor-tests.tlisp`
+  **When** I run it
+  **Then** all Editor API functions should be validated
+- **Given** test execution
+  **When** any test fails
+  **Then** I should see clear error messages with expected vs actual
+
+#### US-0.5.3: CI/CD Integration
+**As a** maintainer
+**I want** TRT tests to run in CI/CD
+**So that** we catch regressions automatically
+
+**Acceptance Criteria:**
+- **Given** a pull request submitted
+  **When** CI runs
+  **Then** TRT tests should execute automatically
+- **Given** TRT tests in CI
+  **When** tests fail
+  **Then** PR should be blocked from merging
+- **Given** test results
+  **When** CI completes
+  **Then** results should be visible in PR comments
+- **Given** performance benchmarks
+  **When** tests run
+  **Then** performance regressions should be detected
+
+#### US-0.5.4: User Testing Infrastructure
+**As a** power user
+**I want** to write my own TRT tests
+**So that** I can test my configurations and plugins
+
+**Acceptance Criteria:**
+- **Given** I create `.tmax-trt/suites/my-tests.tlisp`
+  **When** I run `bun run test:trt`
+  **Then** my tests should be discovered and executed
+- **Given** user test directory
+  **When** I place tests there
+  **Then** they should be gitignored by default
+- **Given** TRT documentation
+  **When** I read it
+  **Then** I should see examples of writing TRT tests
+- **Given** a plugin I developed
+  **When** I include TRT tests
+  **Then** plugin functionality should be validated
 
 ---
 
