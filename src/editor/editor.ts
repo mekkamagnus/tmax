@@ -17,6 +17,7 @@ import { handleInsertMode } from "./handlers/insert-handler.ts";
 import { handleVisualMode } from "./handlers/visual-handler.ts";
 import { handleCommandMode } from "./handlers/command-handler.ts";
 import { handleMxMode } from "./handlers/mx-handler.ts";
+import { createMinibufferOps } from "./api/minibuffer-ops.ts";
 
 /**
  * Key mapping for editor commands
@@ -40,6 +41,9 @@ export class Editor {
   private terminal: TerminalIO;
   private filesystem: FileSystem;
   private countPrefix: number = 0;  // Accumulated count for count prefix commands
+  private commandHistory: string[] = [];  // Command history for M-x (US-1.10.1)
+  private historyIndex: number = 0;  // Current position in command history
+  private spacePressed: boolean = false;  // Track space key for SPC ; sequence (US-1.10.1)
 
   /**
    * Create a new editor instance
@@ -113,8 +117,8 @@ export class Editor {
       set viewportTop(v: number) { editor.state.viewportTop = v; },
       get commandLine() { return editor.state.commandLine; },
       set commandLine(v: string) { editor.state.commandLine = v; },
-      get spacePressed() { return false; },
-      set spacePressed(_: boolean) { },
+      get spacePressed() { return editor.spacePressed; },
+      set spacePressed(v: boolean) { editor.spacePressed = v; },
       get mxCommand() { return editor.state.mxCommand; },
       set mxCommand(v: string) { editor.state.mxCommand = v; },
       get cursorFocus() { return editor.state.cursorFocus ?? 'buffer'; },
@@ -391,6 +395,128 @@ export class Editor {
       
       return createString("saving...");
     });
+
+    // Add minibuffer API functions (US-1.10.1)
+    this.interpreter.defineBuiltin("minibuffer-active", (args) => {
+      if (args.length !== 0) {
+        throw new Error("minibuffer-active requires no arguments");
+      }
+      return { type: "boolean", value: this.state.mode === "mx" };
+    });
+
+    this.interpreter.defineBuiltin("minibuffer-get", (args) => {
+      if (args.length !== 0) {
+        throw new Error("minibuffer-get requires no arguments");
+      }
+      return createString(this.state.mxCommand);
+    });
+
+    this.interpreter.defineBuiltin("minibuffer-set", (args) => {
+      if (args.length !== 1) {
+        throw new Error("minibuffer-set requires exactly 1 argument: text");
+      }
+      const textArg = args[0];
+      if (!textArg || textArg.type !== "string") {
+        throw new Error("minibuffer-set requires a string");
+      }
+      this.state.mxCommand = textArg.value;
+      return createString(textArg.value);
+    });
+
+    this.interpreter.defineBuiltin("minibuffer-clear", (args) => {
+      if (args.length !== 0) {
+        throw new Error("minibuffer-clear requires no arguments");
+      }
+      this.state.mxCommand = "";
+      return createNil();
+    });
+
+    this.interpreter.defineBuiltin("minibuffer-history", (args) => {
+      if (args.length !== 0) {
+        throw new Error("minibuffer-history requires no arguments");
+      }
+      const historyValues = this.commandHistory.map(cmd => createString(cmd));
+      return createList(historyValues);
+    });
+
+    this.interpreter.defineBuiltin("minibuffer-history-add", (args) => {
+      if (args.length !== 1) {
+        throw new Error("minibuffer-history-add requires exactly 1 argument: command");
+      }
+      const commandArg = args[0];
+      if (!commandArg || commandArg.type !== "string") {
+        throw new Error("minibuffer-history-add requires a string");
+      }
+      const command = commandArg.value;
+      // Don't add duplicates of the most recent command
+      if (this.commandHistory.length === 0 || this.commandHistory[this.commandHistory.length - 1] !== command) {
+        this.commandHistory.push(command);
+      }
+      // Reset history index
+      this.historyIndex = this.commandHistory.length;
+      return createNil();
+    });
+
+    this.interpreter.defineBuiltin("minibuffer-history-previous", (args) => {
+      if (args.length !== 0) {
+        throw new Error("minibuffer-history-previous requires no arguments");
+      }
+      if (this.commandHistory.length === 0) {
+        this.state.statusMessage = "No command history";
+        return createNil();
+      }
+      // Move to previous command in history
+      if (this.historyIndex > 0) {
+        this.historyIndex--;
+        this.state.mxCommand = this.commandHistory[this.historyIndex];
+      } else {
+        // Already at oldest command
+        this.state.statusMessage = "Already at oldest command";
+      }
+      return createString(this.state.mxCommand);
+    });
+
+    this.interpreter.defineBuiltin("minibuffer-history-next", (args) => {
+      if (args.length !== 0) {
+        throw new Error("minibuffer-history-next requires no arguments");
+      }
+      if (this.commandHistory.length === 0) {
+        this.state.statusMessage = "No command history";
+        return createNil();
+      }
+      // Move to next command in history
+      if (this.historyIndex < this.commandHistory.length - 1) {
+        this.historyIndex++;
+        this.state.mxCommand = this.commandHistory[this.historyIndex];
+      } else if (this.historyIndex === this.commandHistory.length - 1) {
+        // At end of history, clear input
+        this.historyIndex = this.commandHistory.length;
+        this.state.mxCommand = "";
+      }
+      return createString(this.state.mxCommand);
+    });
+
+    this.interpreter.defineBuiltin("minibuffer-history-reset-index", (args) => {
+      if (args.length !== 0) {
+        throw new Error("minibuffer-history-reset-index requires no arguments");
+      }
+      this.historyIndex = this.commandHistory.length;
+      return createNil();
+    });
+
+    // Combined function for SPC ; that also resets history index
+    this.interpreter.defineBuiltin("editor-enter-mx-mode", (args) => {
+      if (args.length !== 0) {
+        throw new Error("editor-enter-mx-mode requires no arguments");
+      }
+      this.spacePressed = false;
+      this.state.mxCommand = "";
+      this.state.mode = "mx";
+      this.state.statusMessage = "";
+      this.state.cursorFocus = 'command';
+      this.historyIndex = this.commandHistory.length; // Reset history index
+      return createString("mx");
+    });
   }
 
   /**
@@ -468,6 +594,13 @@ export class Editor {
         (key-bind ":" "(editor-enter-command-mode)" "normal")
         (key-bind "Escape" "(editor-exit-command-mode)" "command")
         (key-bind "Enter" "(editor-execute-command-line)" "command")
+        
+        ;; M-x mode bindings (US-1.10.1)
+        (key-bind " " "(editor-handle-space)" "normal")
+        (key-bind ";" "(editor-enter-mx-mode)" "normal")
+        (key-bind "Escape" "(editor-exit-mx-mode)" "mx")
+        (key-bind "C-g" "(editor-exit-mx-mode)" "mx")
+        (key-bind "Enter" "(editor-execute-mx-command)" "mx")
       `;
       this.interpreter.execute(fallbackBindings);
     } catch (error) {
@@ -514,6 +647,12 @@ export class Editor {
    * @returns Normalized key string
    */
   private normalizeKey(key: string): string {
+    // Handle Alt/Meta key sequences (ESC + char)
+    if (key.startsWith("\x1b") && key.length > 1) {
+      const char = key.slice(1);
+      return `M-${char}`;
+    }
+
     // Convert common escape sequences to readable names
     switch (key) {
       case "\x01": return "C-a";

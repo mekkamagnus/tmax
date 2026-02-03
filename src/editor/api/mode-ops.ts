@@ -211,6 +211,10 @@ export function createModeOps(
       setMxCommand("");
       setMode("mx");
       setStatusMessage("");
+      setCursorFocus('command');
+      
+      // Note: History index reset will be handled by the editor
+      // through a separate mechanism (mode change detection)
     } else {
       // Just a semicolon in normal mode
       setStatusMessage("Unbound key: ;");

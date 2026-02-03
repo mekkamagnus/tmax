@@ -23,6 +23,7 @@ import { createUndoRedoOps } from "./api/undo-redo-ops.ts";
 import { createCountOps } from "./api/count-ops.ts";
 import { createVisualOps, getVisualSelection, setVisualSelection, clearVisualSelection } from "./api/visual-ops.ts";
 import { createTextObjectsOps } from "./api/text-objects-ops.ts";
+import { createMinibufferOps } from "./api/minibuffer-ops.ts";
 
 /**
  * T-Lisp function implementation that returns Either for error handling

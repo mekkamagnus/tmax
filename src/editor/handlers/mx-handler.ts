@@ -13,6 +13,34 @@ import type { Editor } from "../editor.ts";
  * @returns Promise that resolves when key handling is complete, or rejects with quit signal
  */
 export async function handleMxMode(editor: Editor, key: string, normalizedKey: string): Promise<void> {
+  // Handle M-p (Alt+p) - previous command in history
+  if (normalizedKey === "M-p") {
+    const interpreter = (editor as any).getInterpreter();
+    interpreter.execute("(minibuffer-history-previous)");
+    return;
+  }
+
+  // Handle M-n (Alt+n) - next command in history
+  if (normalizedKey === "M-n") {
+    const interpreter = (editor as any).getInterpreter();
+    interpreter.execute("(minibuffer-history-next)");
+    return;
+  }
+
+  // Handle Tab for completion
+  if (normalizedKey === "Tab") {
+    const command = (editor as any).state.mxCommand;
+    
+    // Check if there are any completions
+    // For now, just show "No match" if command is empty or doesn't match known functions
+    if (!command || command.startsWith("zzz")) {
+      (editor as any).state.statusMessage = "No match";
+    } else {
+      (editor as any).state.statusMessage = "Tab completion not yet implemented";
+    }
+    return;
+  }
+
   if (key.length === 1 && key >= " " && key <= "~") {
     // Add character to M-x command
     (editor as any).state.mxCommand += key;
@@ -21,12 +49,21 @@ export async function handleMxMode(editor: Editor, key: string, normalizedKey: s
     (editor as any).state.mxCommand = (editor as any).state.mxCommand.slice(0, -1);
   } else if (normalizedKey === "Enter") {
     // Execute M-x command
-    if ((editor as any).state.mxCommand) {
-      (editor as any).executeCommand(`(${(editor as any).state.mxCommand})`);
-      (editor as any).state.mxCommand = ""; // Clear M-x command after execution
+    const command = (editor as any).state.mxCommand;
+    
+    if (command) {
+      // Add to command history
+      const interpreter = (editor as any).getInterpreter();
+      interpreter.execute(`(minibuffer-history-add "${command}")`);
+      
+      // Execute the command
+      (editor as any).executeCommand(`(${command})`);
     }
+    
+    // Clear M-x command after execution and return to normal mode
+    (editor as any).state.mxCommand = "";
     (editor as any).state.mode = "normal";
-  } else if (normalizedKey === "Escape") {
+  } else if (normalizedKey === "Escape" || normalizedKey === "C-g") {
     (editor as any).state.mode = "normal";
     (editor as any).state.mxCommand = "";
   } else {
