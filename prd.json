@@ -467,7 +467,7 @@
         "(kill-ring-list) shows all items"
       ],
       "priority": 10,
-      "passes": false,
+      "passes": true,
       "notes": "Phase 1 - Core Editing Features - Emacs integration"
     },
     {
