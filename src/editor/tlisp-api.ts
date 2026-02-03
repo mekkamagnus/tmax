@@ -27,6 +27,7 @@ import { createMinibufferOps } from "./api/minibuffer-ops.ts";
 import { createJumpOps } from "./api/jump-ops.ts";
 import { createKillRingOps } from "./api/kill-ring.ts";
 import { createYankPopOps } from "./api/yank-pop-ops.ts";
+import { createEvilIntegrationOps } from "./api/evil-integration.ts";
 
 /**
  * T-Lisp function implementation that returns Either for error handling
@@ -281,6 +282,12 @@ export function createEditorAPI(state: TlispEditorState): Map<string, TLispFunct
   // Add kill ring operations (US-1.9.1)
   const killRingOps = createKillRingOps();
   for (const [key, value] of killRingOps.entries()) {
+    api.set(key, value);
+  }
+
+  // Add evil integration operations (US-1.9.3)
+  const evilIntegrationOps = createEvilIntegrationOps();
+  for (const [key, value] of evilIntegrationOps.entries()) {
     api.set(key, value);
   }
 

@@ -27,15 +27,17 @@ import {
   AppError
 } from "../../error/types.ts";
 import { killRingSave } from "./kill-ring.ts";
+import { registerDelete, resetRegisterState } from "./evil-integration.ts";
 
 /**
- * Register storage for deleted text
- * Simple implementation using a global variable
+ * Register storage for deleted text (legacy, for backward compatibility)
+ * @deprecated Use registerDelete from evil-integration.ts instead
  */
 let deleteRegister: string = "";
 
 /**
  * Get the current content of the delete register
+ * @deprecated Use getRegister('"') from evil-integration.ts instead
  */
 export function getDeleteRegister(): string {
   return deleteRegister;
@@ -43,9 +45,18 @@ export function getDeleteRegister(): string {
 
 /**
  * Set the delete register content
+ * @deprecated Use registerDelete from evil-integration.ts instead
  */
 export function setDeleteRegister(text: string): void {
   deleteRegister = text;
+}
+
+/**
+ * Reset delete register state (for testing)
+ */
+export function resetDeleteRegisterState(): void {
+  deleteRegister = "";
+  resetRegisterState();
 }
 
 /**
@@ -246,8 +257,8 @@ export function createDeleteOps(
     });
 
     if (Either.isRight(deletedTextResult)) {
-      setDeleteRegister(deletedTextResult.right);
-      killRingSave(deletedTextResult.right);  // Also save to kill ring (US-1.9.1)
+      setDeleteRegister(deletedTextResult.right);  // Legacy register
+      registerDelete(deletedTextResult.right, false);  // Evil Integration (US-1.9.3)
     }
 
     // Perform deletion
@@ -315,8 +326,8 @@ export function createDeleteOps(
     });
 
     if (Either.isRight(deletedTextResult)) {
-      setDeleteRegister(deletedTextResult.right);
-      killRingSave(deletedTextResult.right);  // Also save to kill ring (US-1.9.1)
+      setDeleteRegister(deletedTextResult.right);  // Legacy register
+      registerDelete(deletedTextResult.right, false);  // Evil Integration (US-1.9.3)
     }
 
     // Perform deletion
@@ -393,8 +404,8 @@ export function createDeleteOps(
     });
 
     if (Either.isRight(deletedTextResult)) {
-      setDeleteRegister(deletedTextResult.right);
-      killRingSave(deletedTextResult.right);  // Also save to kill ring (US-1.9.1)
+      setDeleteRegister(deletedTextResult.right);  // Legacy register
+      registerDelete(deletedTextResult.right, true);  // Evil Integration - line delete (US-1.9.3)
     }
 
     // Perform deletion
@@ -474,8 +485,8 @@ export function createDeleteOps(
     });
 
     if (Either.isRight(deletedTextResult)) {
-      setDeleteRegister(deletedTextResult.right);
-      killRingSave(deletedTextResult.right);  // Also save to kill ring (US-1.9.1)
+      setDeleteRegister(deletedTextResult.right);  // Legacy register
+      registerDelete(deletedTextResult.right, false);  // Evil Integration (US-1.9.3)
     }
 
     // Perform deletion

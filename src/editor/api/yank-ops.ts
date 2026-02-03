@@ -28,15 +28,17 @@ import {
 } from "../../error/types.ts";
 import { killRingSave } from "./kill-ring.ts";
 import { activateYankPopState } from "./yank-pop-ops.ts";
+import { registerYank, resetRegisterState } from "./evil-integration.ts";
 
 /**
- * Register storage for yanked text
- * Simple implementation using a global variable
+ * Register storage for yanked text (legacy, for backward compatibility)
+ * @deprecated Use registerYank from evil-integration.ts instead
  */
 let yankRegister: string = "";
 
 /**
  * Get the current content of the yank register
+ * @deprecated Use getRegister('0') from evil-integration.ts instead
  */
 export function getYankRegister(): string {
   return yankRegister;
@@ -44,9 +46,18 @@ export function getYankRegister(): string {
 
 /**
  * Set the yank register content
+ * @deprecated Use registerYank from evil-integration.ts instead
  */
 export function setYankRegister(text: string): void {
   yankRegister = text;
+}
+
+/**
+ * Reset yank register state (for testing)
+ */
+export function resetYankRegisterState(): void {
+  yankRegister = "";
+  resetRegisterState();
 }
 
 /**
@@ -184,8 +195,8 @@ export function createYankOps(
     });
 
     if (Either.isRight(yankedTextResult)) {
-      setYankRegister(yankedTextResult.right);
-      killRingSave(yankedTextResult.right);  // Also save to kill ring (US-1.9.1)
+      setYankRegister(yankedTextResult.right);  // Legacy register
+      registerYank(yankedTextResult.right);  // Evil Integration (US-1.9.3)
     }
 
     // Yank doesn't modify buffer - just return success
@@ -246,8 +257,8 @@ export function createYankOps(
     });
 
     if (Either.isRight(yankedTextResult)) {
-      setYankRegister(yankedTextResult.right);
-      killRingSave(yankedTextResult.right);  // Also save to kill ring (US-1.9.1)
+      setYankRegister(yankedTextResult.right);  // Legacy register
+      registerYank(yankedTextResult.right);  // Evil Integration (US-1.9.3)
     }
 
     // Yank doesn't modify buffer - just return success
@@ -299,8 +310,8 @@ export function createYankOps(
     });
 
     if (Either.isRight(yankedTextResult)) {
-      setYankRegister(yankedTextResult.right);
-      killRingSave(yankedTextResult.right);  // Also save to kill ring (US-1.9.1)
+      setYankRegister(yankedTextResult.right);  // Legacy register
+      registerYank(yankedTextResult.right);  // Evil Integration (US-1.9.3)
     }
 
     // Yank doesn't modify buffer - just return success

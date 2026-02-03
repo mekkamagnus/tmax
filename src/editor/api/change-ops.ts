@@ -27,6 +27,7 @@ import {
   AppError
 } from "../../error/types.ts";
 import { killRingSave } from "./kill-ring.ts";
+import { registerDelete } from "./evil-integration.ts";
 
 /**
  * Check if a character is a word character
@@ -167,8 +168,8 @@ export function createChangeOps(
     });
 
     if (Either.isRight(deletedTextResult)) {
-      setDeleteRegister(deletedTextResult.right);
-      killRingSave(deletedTextResult.right);  // Also save to kill ring (US-1.9.1)
+      setDeleteRegister(deletedTextResult.right);  // Legacy register
+      registerDelete(deletedTextResult.right, false);  // Evil Integration (US-1.9.3)
     }
 
     // Perform deletion
@@ -248,8 +249,8 @@ export function createChangeOps(
     });
 
     if (Either.isRight(deletedTextResult)) {
-      setDeleteRegister(deletedTextResult.right);
-      killRingSave(deletedTextResult.right);  // Also save to kill ring (US-1.9.1)
+      setDeleteRegister(deletedTextResult.right);  // Legacy register
+      registerDelete(deletedTextResult.right, false);  // Evil Integration (US-1.9.3)
     }
 
     // Perform deletion
@@ -320,8 +321,8 @@ export function createChangeOps(
     });
 
     if (Either.isRight(deletedTextResult)) {
-      setDeleteRegister(deletedTextResult.right);
-      killRingSave(deletedTextResult.right);  // Also save to kill ring (US-1.9.1)
+      setDeleteRegister(deletedTextResult.right);  // Legacy register
+      registerDelete(deletedTextResult.right, false);  // Evil Integration (US-1.9.3)
     }
 
     // Perform deletion

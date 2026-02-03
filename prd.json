@@ -500,7 +500,7 @@
         "\"+y stores in system clipboard"
       ],
       "priority": 10,
-      "passes": false,
+      "passes": true,
       "notes": "Phase 1 - Core Editing Features - Vim/Emacs bridge"
     },
     {

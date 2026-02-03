@@ -19,6 +19,7 @@
 import type { FunctionalTextBuffer, Position } from "../../core/types.ts";
 import { Either } from "../../utils/task-either.ts";
 import { killRingSave } from "./kill-ring.ts";
+import { registerDelete } from "./evil-integration.ts";
 
 /**
  * Register storage for deleted text
@@ -173,8 +174,8 @@ export function deleteInnerWord(
   const textToDelete = lines[line].substring(start, end);
 
   // Store in register
-  setDeleteRegister(textToDelete);
-  killRingSave(textToDelete);  // Also save to kill ring (US-1.9.1)
+  setDeleteRegister(textToDelete);  // Legacy register
+  registerDelete(textToDelete, false);  // Evil Integration (US-1.9.3)
 
   // Delete the text and return new buffer
   return buffer.delete({
@@ -226,8 +227,8 @@ export function deleteAroundWord(
   const textToDelete = lines[line].substring(start, end);
 
   // Store in register
-  setDeleteRegister(textToDelete);
-  killRingSave(textToDelete);  // Also save to kill ring (US-1.9.1)
+  setDeleteRegister(textToDelete);  // Legacy register
+  registerDelete(textToDelete, false);  // Evil Integration (US-1.9.3)
 
   // Delete the text and return new buffer
   return buffer.delete({
