@@ -499,22 +499,44 @@ export class TLispEvaluator {
 
   /**
    * Evaluate lambda special form
+   * Supports both 2-arg form (params body) and 3-arg form (params docstring body)
    * @param elements - List elements
    * @param env - Environment
    * @returns Either with error or lambda function
    */
   private evalLambda(elements: TLispValue[], env: TLispEnvironment): Either<EvalError, TLispValue> {
-    if (elements.length !== 3) {
+    if (elements.length !== 3 && elements.length !== 4) {
       return Either.left({
         type: 'EvalError',
         variant: 'SyntaxError',
-        message: "lambda requires exactly 2 arguments: parameters and body",
-        details: { expected: 3, actual: elements.length }
+        message: "lambda requires 2 or 3 arguments: parameters, [docstring], and body",
+        details: { expected: "3 or 4", actual: elements.length }
       });
     }
 
     const parameters = elements[1];
-    const body = elements[2];
+    
+    let docstring: string | undefined;
+    let body: TLispValue;
+    
+    if (elements.length === 4) {
+      // 3-arg form: (lambda params docstring body)
+      const doc = elements[2];
+      body = elements[3];
+      
+      if (doc.type !== "string") {
+        return Either.left({
+          type: 'EvalError',
+          variant: 'TypeError',
+          message: "lambda docstring must be a string",
+          details: { docstringType: doc.type }
+        });
+      }
+      docstring = doc.value as string;
+    } else {
+      // 2-arg form: (lambda params body)
+      body = elements[2];
+    }
 
     if (!parameters || !body) {
       return Either.left({
@@ -545,6 +567,9 @@ export class TLispEvaluator {
         });
       }
     }
+
+    // Extract parameter names for signature
+    const paramNames = paramList.map(p => p.type === "symbol" ? p.value as string : "?");
 
     // Create closure with tail-call optimization support
     const lambdaFunction = (args: TLispValue[]): Either<EvalError, TLispValue> => {
@@ -581,28 +606,57 @@ export class TLispEvaluator {
       return result;
     };
 
-    return Either.right(createFunction(lambdaFunction));
+    const funcValue = createFunction(lambdaFunction);
+    
+    // Add metadata to the function
+    if (docstring) {
+      funcValue.docstring = docstring;
+    }
+    funcValue.parameters = paramNames;
+
+    return Either.right(funcValue);
   }
 
   /**
    * Evaluate defun special form
+   * Supports both 3-arg form (name params body) and 4-arg form (name params docstring body)
    * @param elements - List elements
    * @param env - Environment
    * @returns Either with error or function symbol
    */
   private evalDefun(elements: TLispValue[], env: TLispEnvironment): Either<EvalError, TLispValue> {
-    if (elements.length !== 4) {
+    if (elements.length !== 4 && elements.length !== 5) {
       return Either.left({
         type: 'EvalError',
         variant: 'SyntaxError',
-        message: "defun requires exactly 3 arguments: name, parameters, and body",
-        details: { expected: 4, actual: elements.length }
+        message: "defun requires 3 or 4 arguments: name, parameters, [docstring], and body",
+        details: { expected: "4 or 5", actual: elements.length }
       });
     }
 
     const name = elements[1];
     const parameters = elements[2];
-    const body = elements[3];
+    
+    let docstring: TLispValue | undefined;
+    let body: TLispValue;
+    
+    if (elements.length === 5) {
+      // 4-arg form: (defun name params docstring body)
+      docstring = elements[3];
+      body = elements[4];
+      
+      if (docstring.type !== "string") {
+        return Either.left({
+          type: 'EvalError',
+          variant: 'TypeError',
+          message: "defun docstring must be a string",
+          details: { docstringType: docstring.type }
+        });
+      }
+    } else {
+      // 3-arg form: (defun name params body)
+      body = elements[3];
+    }
 
     if (!name || !parameters || !body) {
       return Either.left({
@@ -622,14 +676,33 @@ export class TLispEvaluator {
       });
     }
 
-    // Create lambda and bind it to the name
-    const lambdaExpr = createList([createSymbol("lambda"), parameters, body]);
+    // Extract parameter names for signature
+    let paramNames: string[] = [];
+    if (parameters.type === "list") {
+      const paramList = parameters.value as TLispValue[];
+      paramNames = paramList.map(p => p.type === "symbol" ? p.value as string : "?");
+    }
+
+    // Create lambda with docstring if provided
+    const lambdaExpr = docstring 
+      ? createList([createSymbol("lambda"), parameters, docstring, body])
+      : createList([createSymbol("lambda"), parameters, body]);
+      
     const lambdaFunctionResult = this.eval(lambdaExpr, env);
     if (Either.isLeft(lambdaFunctionResult)) {
       return lambdaFunctionResult;
     }
 
     const lambdaFunction = lambdaFunctionResult.right;
+    
+    // Add metadata to the function
+    if (lambdaFunction.type === "function") {
+      lambdaFunction.name = name.value as string;
+      if (docstring && docstring.type === "string") {
+        lambdaFunction.docstring = docstring.value;
+      }
+      lambdaFunction.parameters = paramNames;
+    }
 
     env.define(name.value as string, lambdaFunction);
 

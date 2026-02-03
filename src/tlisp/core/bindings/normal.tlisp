@@ -175,7 +175,20 @@
 ;; =================================================================
 ;; Emacs-style help system for discovering commands and key bindings
 
+;; C-h prefix for help commands
+(key-bind "C-h" "(editor-handle-help-prefix)" "normal")
+
+;; Describe key (C-h k) - Shows command bound to a key
+;; Interactive version that prompts user to press a key
+(key-bind "k" "(describe-key-prompt)" "normal")
+
+;; Describe function (C-h f) - Shows function documentation
+;; Prompts for function name and displays documentation
+(key-bind "f" "(describe-function-prompt)" "normal")
+
+;; Apropos command (C-h a) - Search for commands by pattern
+;; Future enhancement: US-1.11.3
+
 ;; Describe key - use T-Lisp function directly
 ;; Example: (describe-key "q" "normal") shows that q runs editor-quit
-;; Interactive describe-key (C-h k) is a future enhancement
-;; For now, use M-x and type: (describe-key "key" "mode")
+;; For now, you can also use M-x and type: (describe-key "key" "mode")

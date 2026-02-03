@@ -223,6 +223,20 @@ export function createModeOps(
     return Either.right(createString("semicolon"));
   });
 
+  // Help prefix handler (US-1.11.2)
+  api.set("editor-handle-help-prefix", (args: TLispValue[]): Either<AppError, TLispValue> => {
+    const argsValidation = validateArgsCount(args, 0, "editor-handle-help-prefix");
+    if (Either.isLeft(argsValidation)) {
+      return Either.left(argsValidation.left);
+    }
+
+    // Set a flag to indicate we're in help prefix mode
+    // The next key will determine which help function to call
+    setStatusMessage("Help: (k)ey, (f)unction");
+    
+    return Either.right(createString("help-prefix"));
+  });
+
   api.set("editor-execute-mx-command", (args: TLispValue[]): Either<AppError, TLispValue> => {
     const argsValidation = validateArgsCount(args, 0, "editor-execute-mx-command");
     if (Either.isLeft(argsValidation)) {

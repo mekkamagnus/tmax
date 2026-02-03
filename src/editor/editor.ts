@@ -416,6 +416,97 @@ export class Editor {
       return createString("waiting for key");
     });
 
+    // Add describe-function function (US-1.11.2)
+    this.interpreter.defineBuiltin("describe-function", (args) => {
+      if (args.length !== 1) {
+        throw new Error("describe-function requires exactly 1 argument: function-name");
+      }
+
+      const nameArg = args[0];
+      if (!nameArg || nameArg.type !== "string") {
+        throw new Error("describe-function requires a string function name");
+      }
+
+      const functionName = nameArg.value as string;
+
+      // Look up the function in the global environment
+      const func = this.interpreter.globalEnv.lookup(functionName);
+
+      if (!func) {
+        return createNil(); // Function not found
+      }
+
+      if (func.type !== "function") {
+        return createNil(); // Not a function
+      }
+
+      // Extract function information
+      const name = func.name || functionName;
+      const docstring = func.docstring || "No documentation available";
+      const parameters = func.parameters || [];
+
+      // Build signature
+      let signature: string;
+      if (parameters.length > 0) {
+        signature = `${name} (${parameters.join(" ")})`;
+      } else {
+        signature = `${name} ()`;
+      }
+
+      // Return structured information: [name, signature, docstring, file?]
+      const result: TLispValue[] = [
+        createString(name),
+        createString(signature),
+        createString(docstring)
+      ];
+
+      if (func.source) {
+        result.push(createString(func.source));
+      }
+
+      return createList(result);
+    });
+
+    // Add describe-function-prompt function (US-1.11.2)
+    // Interactive version that prompts user for function name
+    this.interpreter.defineBuiltin("describe-function-prompt", (args) => {
+      if (args.length !== 0) {
+        throw new Error("describe-function-prompt requires no arguments");
+      }
+
+      // Set a flag to indicate we're waiting for a function name to describe
+      this.state.describeFunctionPending = true;
+      this.state.statusMessage = "Describe function: ";
+
+      return createString("waiting for function name");
+    });
+
+    // Add describe-function-complete function (US-1.11.2)
+    // Returns list of function names matching a pattern
+    this.interpreter.defineBuiltin("describe-function-complete", (args) => {
+      if (args.length !== 1) {
+        throw new Error("describe-function-complete requires exactly 1 argument: pattern");
+      }
+
+      const patternArg = args[0];
+      if (!patternArg || patternArg.type !== "string") {
+        throw new Error("describe-function-complete requires a string pattern");
+      }
+
+      const pattern = (patternArg.value as string).toLowerCase();
+
+      // Get all function names from the global environment
+      const matchingFunctions: TLispValue[] = [];
+      
+      for (const [name, value] of this.interpreter.globalEnv.bindings) {
+        if (value.type === "function" && name.toLowerCase().includes(pattern)) {
+          matchingFunctions.push(createString(name));
+        }
+      }
+
+      return createList(matchingFunctions);
+    });
+
     // Add count prefix API functions (US-1.3.1)
     this.interpreter.defineBuiltin("count-get", (args) => {
       if (args.length !== 0) {

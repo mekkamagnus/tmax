@@ -90,6 +90,9 @@ export interface TLispFunction extends TLispValue {
   type: "function";
   value: TLispFunctionImpl;
   name?: string;
+  docstring?: string;
+  parameters?: string[];
+  source?: string;
 }
 
 /**

@@ -596,8 +596,8 @@
         "Completion shows matching functions while typing"
       ],
       "priority": 10,
-      "passes": false,
-      "notes": "Phase 1 - Core Editing Features - Help system"
+      "passes": true,
+      "notes": "Phase 1 - Core Editing Features - Help system - Completed: describe-function, describe-function-prompt, describe-function-complete, docstring support in defun/lambda"
     },
     {
       "id": "US-1.11.3",
