@@ -760,8 +760,8 @@
         "Published plugins appear in plugin-list results"
       ],
       "priority": 20,
-      "passes": false,
-      "notes": "Phase 4 - Community & Ecosystem"
+      "passes": true,
+      "notes": "Phase 4 - Community & Ecosystem - Completed: plugin-submit, plugin-review-list, plugin-approve, plugin-reject T-Lisp functions, 16 tests passing"
     },
     {
       "id": "US-4.2.1",
