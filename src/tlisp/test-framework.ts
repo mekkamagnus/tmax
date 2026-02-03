@@ -20,6 +20,17 @@ import {
 } from "./values.ts";
 import { Either } from "../utils/task-either.ts";
 import type { EvalError } from "../error/types.ts";
+import {
+  setOutputMode,
+  setColorMode,
+  setShowProgress,
+  formatTestResult,
+  formatProgress,
+  formatSummary,
+  formatFailingTests,
+  type TestResult,
+  type TestStats
+} from "./test-output.ts";
 
 // Test results storage
 let currentTestResults: { testName: string, passed: boolean, error?: string }[] = [];
@@ -280,15 +291,21 @@ export function registerTestingFramework(interpreter: TLispInterpreter): void {
     testCounts.failed = 0;
     testCounts.total = 0;
 
+    // Track timing
+    const startTime = Date.now();
+    const testResults: TestResult[] = [];
+
     try {
       // Get all test names from the evaluator's registry
       const testNames = interpreter.getAllTestNames?.() || [];
 
       // Run each registered test
-      for (const testName of testNames) {
+      for (let i = 0; i < testNames.length; i++) {
+        const testName = testNames[i];
         const testDef = interpreter.getTestDefinition?.(testName);
         if (!testDef) continue;
 
+        const testStartTime = Date.now();
         let testPassed = true;
         let errorMessage: string | undefined;
 
@@ -366,12 +383,45 @@ export function registerTestingFramework(interpreter: TLispInterpreter): void {
           }
 
           testCounts.passed++;
+          const testDuration = Date.now() - testStartTime;
           currentTestResults.push({ testName, passed: true });
+
+          // Store result with timing
+          testResults.push({
+            testName,
+            passed: true,
+            duration: testDuration
+          });
+
+          // Output test result
+          console.log(formatTestResult({
+            testName,
+            passed: true,
+            duration: testDuration
+          }));
+
         } catch (error) {
           testPassed = false;
           errorMessage = error instanceof Error ? error.message : String(error);
+          const testDuration = Date.now() - testStartTime;
           testCounts.failed++;
           currentTestResults.push({ testName, passed: false, error: errorMessage });
+
+          // Store result with timing
+          testResults.push({
+            testName,
+            passed: false,
+            error: errorMessage,
+            duration: testDuration
+          });
+
+          // Output test result
+          console.log(formatTestResult({
+            testName,
+            passed: false,
+            error: errorMessage,
+            duration: testDuration
+          }));
         } finally {
           // Run teardown if defined (always run regardless of test success/failure)
           if (globalTeardownFunction && globalTeardownFunction.type === "list") {
@@ -385,9 +435,36 @@ export function registerTestingFramework(interpreter: TLispInterpreter): void {
             }
           }
         }
+
+        // Show progress indicator
+        const progress = formatProgress(i + 1, testNames.length);
+        if (progress) {
+          process.stdout.write(progress);
+        }
+      }
+
+      // Clear progress line
+      if (testNames.length > 0) {
+        process.stdout.write('\r' + ' '.repeat(80) + '\r');
       }
 
       testCounts.total = testCounts.passed + testCounts.failed;
+      const totalDuration = Date.now() - startTime;
+
+      // Output failing tests at the end
+      const failingOutput = formatFailingTests(testResults);
+      if (failingOutput) {
+        console.log(failingOutput);
+      }
+
+      // Output summary statistics
+      console.log('\n' + formatSummary({
+        passed: testCounts.passed,
+        failed: testCounts.failed,
+        skipped: 0,
+        total: testCounts.total,
+        duration: totalDuration
+      }));
 
       // Return a summary as a list: [passed, failed, total]
       return Either.right(createList([
@@ -1919,5 +1996,151 @@ export function registerTestingFramework(interpreter: TLispInterpreter): void {
     // Real async/await would require Promise integration
     const value = args[0];
     return Either.right(value);
+  });
+
+  // ========== OUTPUT CONFIGURATION (US-0.6.5) ==========
+
+  /**
+   * Set output mode for test results
+   * Usage: (set-output-mode "normal"|"verbose"|"quiet"|"plain")
+   * Controls how test results are displayed
+   */
+  interpreter.defineBuiltin("set-output-mode", (args: TLispValue[]) => {
+    if (args.length !== 1) {
+      return Either.left({
+        type: 'EvalError',
+        variant: 'RuntimeError',
+        message: "set-output-mode requires exactly 1 argument: mode name",
+        details: { expected: 1, actual: args.length }
+      });
+    }
+
+    const modeArg = args[0];
+    if (modeArg.type !== "string") {
+      return Either.left({
+        type: 'EvalError',
+        variant: 'TypeError',
+        message: "set-output-mode argument must be a string (mode name)",
+        details: { argType: modeArg.type }
+      });
+    }
+
+    const mode = modeArg.value as string;
+    if (!["normal", "verbose", "quiet", "plain"].includes(mode)) {
+      return Either.left({
+        type: 'EvalError',
+        variant: 'RuntimeError',
+        message: `Invalid output mode: ${mode}. Must be one of: normal, verbose, quiet, plain`,
+        details: { mode }
+      });
+    }
+
+    setOutputMode(mode as any);
+    return Either.right(createBoolean(true));
+  });
+
+  /**
+   * Set verbosity level (alias for set-output-mode)
+   * Usage: (set-verbosity "normal"|"verbose"|"quiet")
+   */
+  interpreter.defineBuiltin("set-verbosity", (args: TLispValue[]) => {
+    if (args.length !== 1) {
+      return Either.left({
+        type: 'EvalError',
+        variant: 'RuntimeError',
+        message: "set-verbosity requires exactly 1 argument: verbosity level",
+        details: { expected: 1, actual: args.length }
+      });
+    }
+
+    const modeArg = args[0];
+    if (modeArg.type !== "string") {
+      return Either.left({
+        type: 'EvalError',
+        variant: 'TypeError',
+        message: "set-verbosity argument must be a string (verbosity level)",
+        details: { argType: modeArg.type }
+      });
+    }
+
+    const mode = modeArg.value as string;
+    if (!["normal", "verbose", "quiet"].includes(mode)) {
+      return Either.left({
+        type: 'EvalError',
+        variant: 'RuntimeError',
+        message: `Invalid verbosity level: ${mode}. Must be one of: normal, verbose, quiet`,
+        details: { mode }
+      });
+    }
+
+    setOutputMode(mode as any);
+    return Either.right(createBoolean(true));
+  });
+
+  /**
+   * Set color mode for test output
+   * Usage: (set-color-mode "auto"|"always"|"never")
+   * Controls whether colors are used in output
+   */
+  interpreter.defineBuiltin("set-color-mode", (args: TLispValue[]) => {
+    if (args.length !== 1) {
+      return Either.left({
+        type: 'EvalError',
+        variant: 'RuntimeError',
+        message: "set-color-mode requires exactly 1 argument: color mode",
+        details: { expected: 1, actual: args.length }
+      });
+    }
+
+    const modeArg = args[0];
+    if (modeArg.type !== "string") {
+      return Either.left({
+        type: 'EvalError',
+        variant: 'TypeError',
+        message: "set-color-mode argument must be a string (color mode)",
+        details: { argType: modeArg.type }
+      });
+    }
+
+    const mode = modeArg.value as string;
+    if (!["auto", "always", "never"].includes(mode)) {
+      return Either.left({
+        type: 'EvalError',
+        variant: 'RuntimeError',
+        message: `Invalid color mode: ${mode}. Must be one of: auto, always, never`,
+        details: { mode }
+      });
+    }
+
+    setColorMode(mode as any);
+    return Either.right(createBoolean(true));
+  });
+
+  /**
+   * Enable or disable progress indicator
+   * Usage: (set-progress-indicator true|false)
+   */
+  interpreter.defineBuiltin("set-progress-indicator", (args: TLispValue[]) => {
+    if (args.length !== 1) {
+      return Either.left({
+        type: 'EvalError',
+        variant: 'RuntimeError',
+        message: "set-progress-indicator requires exactly 1 argument: boolean",
+        details: { expected: 1, actual: args.length }
+      });
+    }
+
+    const showArg = args[0];
+    if (showArg.type !== "boolean") {
+      return Either.left({
+        type: 'EvalError',
+        variant: 'TypeError',
+        message: "set-progress-indicator argument must be a boolean",
+        details: { argType: showArg.type }
+      });
+    }
+
+    setShowProgress(showArg.value as boolean);
+    return Either.right(createBoolean(true));
   });
 }
