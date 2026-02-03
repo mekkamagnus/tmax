@@ -580,8 +580,8 @@
         "C-g cancels describe-key"
       ],
       "priority": 10,
-      "passes": false,
-      "notes": "Phase 1 - Core Editing Features - Help system"
+      "passes": true,
+      "notes": "Phase 1 - Core Editing Features - Help system - Completed: describe-key T-Lisp function, returns [command, key, mode, documentation], nil for unbound keys"
     },
     {
       "id": "US-1.11.2",
