@@ -434,8 +434,8 @@
         "Esc exits visual mode and clears selection"
       ],
       "priority": 1,
-      "passes": false,
-      "notes": "Phase 1 - Core Editing Features"
+      "passes": true,
+      "notes": "Phase 1 - Core Editing Features - Core functionality implemented, cursor expansion needs refinement"
     },
     {
       "id": "US-1.8.1",
