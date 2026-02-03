@@ -516,9 +516,31 @@ export class Editor {
   private normalizeKey(key: string): string {
     // Convert common escape sequences to readable names
     switch (key) {
+      case "\x01": return "C-a";
+      case "\x02": return "C-b";
+      case "\x03": return "C-c";
+      case "\x04": return "C-d";
+      case "\x05": return "C-e";
+      case "\x06": return "C-f";
+      case "\x07": return "C-g";
+      case "\x08": return "Backspace";
+      case "\x09": return "Tab";
+      case "\x0a": return "Enter";
+      case "\x0b": return "C-k";
+      case "\x0c": return "C-l";
+      case "\x0d": return "Enter";
+      case "\x0e": return "C-n";
+      case "\x0f": return "C-o";
+      case "\x10": return "C-p";
+      case "\x11": return "C-q";
+      case "\x12": return "C-r";
+      case "\x13": return "C-v";
+      case "\x14": return "C-w";
+      case "\x15": return "C-x";
+      case "\x16": return "C-y";
+      case "\x17": return "C-z";
       case "\x1b": return "Escape";
       case "\x7f": return "Backspace";
-      case "\x08": return "Backspace";
       case "\r": return "Enter";
       case "\n": return "Enter";
       case "\t": return "Tab";
@@ -777,5 +799,23 @@ export class Editor {
     const count = this.countPrefix > 0 ? this.countPrefix : 1;
     this.countPrefix = 0;
     return count;
+  }
+
+  /**
+   * Get current visual selection
+   * @returns Visual selection or null if not in visual mode
+   */
+  getSelection(): any {
+    const { getVisualSelection } = require("./api/visual-ops.ts");
+    return getVisualSelection();
+  }
+
+  /**
+   * Clear visual selection and exit visual mode
+   */
+  clearSelection(): void {
+    const { clearVisualSelection } = require("./api/visual-ops.ts");
+    clearVisualSelection();
+    this.state.mode = "normal";
   }
 }

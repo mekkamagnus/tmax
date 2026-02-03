@@ -31,6 +31,8 @@ export type TLispFunctionWithEither = (args: TLispValue[]) => Either<AppError, T
  * @param getCursorColumn - Function to get current cursor column
  * @param setCursorColumn - Function to set current cursor column
  * @param getCurrentBuffer - Function to get current buffer
+ * @param getMode - Function to get current editor mode (optional)
+ * @param updateVisualSelection - Function to update visual selection (optional)
  * @returns Map of cursor function names to implementations
  */
 export function createCursorOps(
@@ -38,7 +40,9 @@ export function createCursorOps(
   setCursorLine: (line: number) => void,
   getCursorColumn: () => number,
   setCursorColumn: (column: number) => void,
-  getCurrentBuffer: () => FunctionalTextBuffer | null
+  getCurrentBuffer: () => FunctionalTextBuffer | null,
+  getMode?: () => "normal" | "insert" | "visual" | "command" | "mx",
+  updateVisualSelection?: () => void
 ): Map<string, TLispFunctionImpl> {
   const api = new Map<string, TLispFunctionImpl>();
 
@@ -96,6 +100,15 @@ export function createCursorOps(
 
     setCursorLine(targetLine);
     setCursorColumn(targetColumn);
+
+    // Update visual selection if in visual mode
+    if (getMode && updateVisualSelection && getMode() === "visual") {
+      try {
+        updateVisualSelection();
+      } catch (error) {
+        // Ignore errors from visual update
+      }
+    }
 
     return Either.right(createList([createNumber(getCursorLine()), createNumber(getCursorColumn())]));
   });

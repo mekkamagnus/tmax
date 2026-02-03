@@ -382,7 +382,7 @@
         "Matched text is highlighted"
       ],
       "priority": 1,
-      "passes": false,
+      "passes": true,
       "notes": "Phase 1 - Core Editing Features"
     },
     {

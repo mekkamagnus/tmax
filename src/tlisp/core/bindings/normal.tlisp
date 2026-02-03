@@ -104,6 +104,20 @@
 ;; Future enhancement: Implement operator-pending mode for 'c' + motion key sequences
 
 ;; =================================================================
+;; VISUAL MODE (US-1.7.1)
+;; =================================================================
+;; Vim-style visual mode for text selection
+
+;; Enter character-wise visual mode (v)
+(key-bind "v" "(visual-enter-char-mode)" "normal")
+
+;; Enter line-wise visual mode (V/Shift+v)
+(key-bind "V" "(visual-enter-line-mode)" "normal")
+
+;; Enter block-wise visual mode (Ctrl+v)
+(key-bind "C-v" "(visual-enter-block-mode)" "normal")
+
+;; =================================================================
 ;; M-X SYSTEM (Emacs-style)
 ;; =================================================================
 ;; Two-key sequence: SPC ; to activate M-x mode

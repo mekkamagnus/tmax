@@ -21,6 +21,7 @@ import { createYankOps } from "./api/yank-ops.ts";
 import { createChangeOps } from "./api/change-ops.ts";
 import { createUndoRedoOps } from "./api/undo-redo-ops.ts";
 import { createCountOps } from "./api/count-ops.ts";
+import { createVisualOps, getVisualSelection, setVisualSelection, clearVisualSelection } from "./api/visual-ops.ts";
 
 /**
  * T-Lisp function implementation that returns Either for error handling
@@ -80,7 +81,7 @@ export function createEditorAPI(state: TlispEditorState): Map<string, TLispFunct
     api.set(key, value);
   }
 
-  // Add cursor operations
+  // Add cursor operations (without visual update callback initially)
   const cursorOps = createCursorOps(
     () => state.cursorLine,
     (line) => { state.cursorLine = line; },
@@ -232,6 +233,21 @@ export function createEditorAPI(state: TlispEditorState): Map<string, TLispFunct
   // Add count prefix operations
   // Note: These are integrated differently as they need editor instance access
   // The actual registration happens in editor.ts's initializeAPI method
+
+  // Add visual mode operations
+  const visualOps = createVisualOps(
+    () => state.currentBuffer,
+    () => state.cursorLine,
+    () => state.cursorColumn,
+    (line) => { state.cursorLine = line; },
+    (column) => { state.cursorColumn = column; },
+    () => state.mode,
+    (mode) => { state.mode = mode; },
+    (msg) => { state.statusMessage = msg; }
+  );
+  for (const [key, value] of visualOps.entries()) {
+    api.set(key, value);
+  }
 
   return api;
 }

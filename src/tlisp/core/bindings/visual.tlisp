@@ -11,18 +11,32 @@
 ;; - Keep bindings organized by functional groups for readability
 
 ;; =================================================================
-;; VISUAL MODE BINDINGS
+;; VISUAL MODE BINDINGS (US-1.7.1)
 ;; =================================================================
 ;; Key bindings specific to visual mode
 
+;; Navigation keys (same as normal mode)
+(key-bind "h" "(cursor-move (cursor-line) (- (cursor-column) 1))" "visual")
+(key-bind "j" "(cursor-move (+ (cursor-line) 1) (cursor-column))" "visual")
+(key-bind "k" "(cursor-move (- (cursor-line) 1) (cursor-column))" "visual")
+(key-bind "l" "(cursor-move (cursor-line) (+ (cursor-column) 1))" "visual")
+
+;; Word navigation
+(key-bind "w" "(word-next)" "visual")
+(key-bind "b" "(word-previous)" "visual")
+(key-bind "e" "(word-end)" "visual")
+
 ;; Exit visual mode (Escape)
-(key-bind "Escape" "(editor-set-mode \"normal\")" "visual")
+(key-bind "Escape" "(visual-exit)" "visual")
 
 ;; Delete selected text (d)
-(key-bind "d" "(delete-selection)" "visual")
+(key-bind "d" "(visual-delete)" "visual")
 
-;; Yank selected text (y)
-(key-bind "y" "(yank-selection)" "visual")
+;; Yank (copy) selected text (y)
+(key-bind "y" "(visual-yank)" "visual")
 
-;; Change selected text (c)
-(key-bind "c" "(change-selection)" "visual")
+;; Lowercase selected text (u)
+(key-bind "u" "(visual-lowercase)" "visual")
+
+;; Uppercase selected text (U)
+(key-bind "U" "(visual-uppercase)" "visual")
