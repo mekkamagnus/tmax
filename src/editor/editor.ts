@@ -20,6 +20,7 @@ import { handleMxMode } from "./handlers/mx-handler.ts";
 import { createMinibufferOps } from "./api/minibuffer-ops.ts";
 import * as macroRecording from "./api/macro-recording.ts";
 import { loadMacrosFromFile, saveMacrosToFile } from "./api/macro-persistence.ts";
+import { LSPClient } from "../lsp/client.ts";
 
 /**
  * Key mapping for editor commands
@@ -46,6 +47,7 @@ export class Editor {
   private commandHistory: string[] = [];  // Command history for M-x (US-1.10.1)
   private historyIndex: number = 0;  // Current position in command history
   private spacePressed: boolean = false;  // Track space key for SPC ; sequence (US-1.10.1)
+  private lspClient: LSPClient;  // LSP client for language server integration (US-3.1.1)
 
   /**
    * Create a new editor instance
@@ -83,6 +85,7 @@ export class Editor {
 
     this.interpreter = new TLispInterpreterImpl();
     this.keyMappings = new Map();
+    this.lspClient = new LSPClient(this.terminal, this.filesystem);
 
     this.initializeAPI();
   }
@@ -1471,7 +1474,13 @@ export class Editor {
       this.createBuffer(filename, content);
       // Track the filename for save operations
       this.state.currentFilename = filename;
-      this.state.statusMessage = `Opened ${filename}`;
+
+      // Notify LSP client about file open (US-3.1.1)
+      await this.lspClient.onFileOpen(filename, content);
+
+      // Update status message with LSP connection status (US-3.1.1)
+      const lspStatus = this.lspClient.getStatusMessage();
+      this.state.statusMessage = lspStatus ? `Opened ${filename} - ${lspStatus}` : `Opened ${filename}`;
     } catch (error) {
       this.state.statusMessage = `Failed to open ${filename}: ${error instanceof Error ? error.message : String(error)}`;
     }
