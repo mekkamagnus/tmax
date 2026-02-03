@@ -14,6 +14,11 @@ import {
   searchPlugins,
   generatePluginTlisp,
   generatePluginToml,
+  submitPlugin,
+  getPendingSubmissions,
+  approvePlugin,
+  rejectPlugin,
+  clearSubmissions,
   PluginMetadata
 } from './plugin-repository';
 
@@ -161,6 +166,105 @@ export function createPluginOps(
         plugin.homepage ? createString(plugin.homepage) : createNil(),
         plugin.license ? createString(plugin.license) : createNil()
       ]));
+    },
+
+    /**
+     * (plugin-submit "name" "description" "author") -> Submit plugin for review
+     */
+    'plugin-submit': (args: TLispValue[]): Either<Error, TLispValue> => {
+      if (args.length !== 3) {
+        return Either.right(createString(
+          'Error: plugin-submit requires three arguments (name, description, author)'
+        ));
+      }
+
+      const name = args[0];
+      const description = args[1];
+      const author = args[2];
+
+      if (name.type !== 'string') {
+        return Either.right(createString('Error: plugin-submit name must be a string'));
+      }
+
+      if (description.type !== 'string') {
+        return Either.right(createString('Error: plugin-submit description must be a string'));
+      }
+
+      if (author.type !== 'string') {
+        return Either.right(createString('Error: plugin-submit author must be a string'));
+      }
+
+      const result = submitPlugin(name.value, description.value, author.value);
+      return Either.right(createString(result.message));
+    },
+
+    /**
+     * (plugin-review-list) -> List pending plugin submissions
+     */
+    'plugin-review-list': (_args: TLispValue[]): Either<Error, TLispValue> => {
+      const submissions = getPendingSubmissions();
+
+      const submissionLists = submissions.map(submission => createList([
+        createString(submission.name),
+        createString(submission.description),
+        createString(submission.author),
+        createString(submission.status),
+        createString(submission.submittedAt.toISOString())
+      ]));
+
+      return Either.right(createList(submissionLists));
+    },
+
+    /**
+     * (plugin-approve "plugin-name") -> Approve plugin submission
+     */
+    'plugin-approve': (args: TLispValue[]): Either<Error, TLispValue> => {
+      if (args.length !== 1) {
+        return Either.right(createString(
+          'Error: plugin-approve requires exactly one argument (plugin-name)'
+        ));
+      }
+
+      const pluginName = args[0];
+      if (pluginName.type !== 'string') {
+        return Either.right(createString('Error: plugin-approve argument must be a string'));
+      }
+
+      const result = approvePlugin(pluginName.value);
+      return Either.right(createString(result.message));
+    },
+
+    /**
+     * (plugin-reject "plugin-name" "reason") -> Reject plugin submission
+     */
+    'plugin-reject': (args: TLispValue[]): Either<Error, TLispValue> => {
+      if (args.length !== 2) {
+        return Either.right(createString(
+          'Error: plugin-reject requires two arguments (plugin-name, reason)'
+        ));
+      }
+
+      const pluginName = args[0];
+      const reason = args[1];
+
+      if (pluginName.type !== 'string') {
+        return Either.right(createString('Error: plugin-reject plugin-name must be a string'));
+      }
+
+      if (reason.type !== 'string') {
+        return Either.right(createString('Error: plugin-reject reason must be a string'));
+      }
+
+      const result = rejectPlugin(pluginName.value, reason.value);
+      return Either.right(createString(result.message));
+    },
+
+    /**
+     * (plugin-clear-submissions) -> Clear all submissions (for testing)
+     */
+    'plugin-clear-submissions': (_args: TLispValue[]): Either<Error, TLispValue> => {
+      clearSubmissions();
+      return Either.right(createString('All submissions cleared'));
     }
   };
 

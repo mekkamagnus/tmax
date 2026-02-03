@@ -205,3 +205,193 @@ author = "${plugin.author}"
 
   return toml;
 }
+
+/**
+ * Plugin submission for review
+ */
+export interface PluginSubmission {
+  /** Unique plugin identifier */
+  name: string;
+  /** Human-readable description */
+  description: string;
+  /** Plugin author */
+  author: string;
+  /** Submission timestamp */
+  submittedAt: Date;
+  /** Submission status */
+  status: 'pending' | 'approved' | 'rejected';
+  /** Rejection reason (if rejected) */
+  rejectionReason?: string;
+}
+
+/**
+ * In-memory store for plugin submissions
+ * In production, this would be persisted to a database or file
+ */
+const PLUGIN_SUBMISSIONS: Map<string, PluginSubmission> = new Map();
+
+/**
+ * Validate plugin name format
+ * Must be lowercase, alphanumeric, hyphens only
+ */
+export function validatePluginName(name: string): boolean {
+  return /^[a-z0-9-]+$/.test(name) && name.length > 0 && name.length <= 50;
+}
+
+/**
+ * Submit a plugin for review
+ */
+export function submitPlugin(
+  name: string,
+  description: string,
+  author: string
+): { success: boolean; message: string; submission?: PluginSubmission } {
+  // Validate inputs
+  if (!name || !description || !author) {
+    return {
+      success: false,
+      message: 'Error: plugin-submit requires name, description, and author'
+    };
+  }
+
+  // Validate plugin name format
+  if (!validatePluginName(name)) {
+    return {
+      success: false,
+      message: 'Error: Plugin name must be lowercase letters, numbers, and hyphens only (e.g., "my-plugin")'
+    };
+  }
+
+  // Check for duplicate in repository
+  if (getPlugin(name)) {
+    return {
+      success: false,
+      message: `Error: Plugin "${name}" already exists in repository`
+    };
+  }
+
+  // Check for duplicate submission
+  if (PLUGIN_SUBMISSIONS.has(name)) {
+    const existing = PLUGIN_SUBMISSIONS.get(name)!;
+    if (existing.status === 'pending') {
+      return {
+        success: false,
+        message: `Error: Plugin "${name}" is already pending review`
+      };
+    }
+  }
+
+  // Create submission
+  const submission: PluginSubmission = {
+    name,
+    description,
+    author,
+    submittedAt: new Date(),
+    status: 'pending'
+  };
+
+  PLUGIN_SUBMISSIONS.set(name, submission);
+
+  return {
+    success: true,
+    message: `Plugin "${name}" submitted for review`,
+    submission
+  };
+}
+
+/**
+ * Get all pending submissions
+ */
+export function getPendingSubmissions(): PluginSubmission[] {
+  return Array.from(PLUGIN_SUBMISSIONS.values())
+    .filter(s => s.status === 'pending')
+    .sort((a, b) => a.submittedAt.getTime() - b.submittedAt.getTime());
+}
+
+/**
+ * Approve a plugin submission
+ * Adds it to the repository and removes from pending
+ */
+export function approvePlugin(name: string): { success: boolean; message: string } {
+  const submission = PLUGIN_SUBMISSIONS.get(name);
+
+  if (!submission) {
+    return {
+      success: false,
+      message: `Error: Plugin "${name}" not found in submissions`
+    };
+  }
+
+  if (submission.status !== 'pending') {
+    return {
+      success: false,
+      message: `Error: Plugin "${name}" is not pending review`
+    };
+  }
+
+  // Create plugin metadata
+  const plugin: PluginMetadata = {
+    name: submission.name,
+    description: submission.description,
+    author: submission.author,
+    version: '1.0.0',
+    installCommand: `plugin-install ${submission.name}`,
+    license: 'MIT'
+  };
+
+  // Add to repository
+  PLUGIN_REPOSITORY.push(plugin);
+
+  // Update submission status
+  submission.status = 'approved';
+
+  return {
+    success: true,
+    message: `Plugin "${name}" approved and added to repository`
+  };
+}
+
+/**
+ * Reject a plugin submission
+ * Does not add to repository
+ */
+export function rejectPlugin(name: string, reason: string): { success: boolean; message: string } {
+  const submission = PLUGIN_SUBMISSIONS.get(name);
+
+  if (!submission) {
+    return {
+      success: false,
+      message: `Error: Plugin "${name}" not found in submissions`
+    };
+  }
+
+  if (!reason || reason.trim().length === 0) {
+    return {
+      success: false,
+      message: 'Error: plugin-reject requires a rejection reason'
+    };
+  }
+
+  if (submission.status !== 'pending') {
+    return {
+      success: false,
+      message: `Error: Plugin "${name}" is not pending review`
+    };
+  }
+
+  // Update submission status
+  submission.status = 'rejected';
+  submission.rejectionReason = reason;
+
+  return {
+    success: true,
+    message: `Plugin "${name}" rejected: ${reason}`
+  };
+}
+
+/**
+ * Clear all submissions (for testing)
+ */
+export function clearSubmissions(): void {
+  PLUGIN_SUBMISSIONS.clear();
+}
