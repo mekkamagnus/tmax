@@ -1123,7 +1123,8 @@ export class Editor {
       (windows) => { this.state.windows = windows; },
       () => this.state.currentWindowIndex ?? 0,
       (index) => { this.state.currentWindowIndex = index; },
-      () => this.state.currentBuffer
+      () => this.state.currentBuffer,
+      () => this.terminal.getSize()
     );
 
     for (const [name, fn] of windowOps) {
@@ -1525,12 +1526,16 @@ export class Editor {
 
     // Initialize first window if this is the first buffer (US-3.2.1)
     if (!this.state.windows || this.state.windows.length === 0) {
+      // Get terminal size for window dimensions (US-3.2.2)
+      const terminalSize = this.terminal.getSize();
       const initialWindow: Window = {
         id: "window-main",
         buffer: buffer,
         cursorLine: this.state.cursorPosition.line,
         cursorColumn: this.state.cursorPosition.column,
         viewportTop: this.state.viewportTop,
+        height: terminalSize.height - 2, // Reserve space for status line and minibuffer
+        width: terminalSize.width,
       };
       this.state.windows = [initialWindow];
       this.state.currentWindowIndex = 0;

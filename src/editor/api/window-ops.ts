@@ -15,6 +15,7 @@ import { AppError } from "../../error/types.ts";
  * @param getCurrentWindowIndex - Function to get current window index
  * @param setCurrentWindowIndex - Function to set current window index
  * @param getCurrentBuffer - Function to get current buffer
+ * @param getTerminalSize - Function to get terminal size (US-3.2.2)
  * @returns Map of window operation names to implementations
  */
 export function createWindowOps(
@@ -22,7 +23,8 @@ export function createWindowOps(
   setWindows: (windows: Window[]) => void,
   getCurrentWindowIndex: () => number,
   setCurrentWindowIndex: (index: number) => void,
-  getCurrentBuffer: () => import("../../core/types.ts").FunctionalTextBuffer | undefined
+  getCurrentBuffer: () => import("../../core/types.ts").FunctionalTextBuffer | undefined,
+  getTerminalSize: () => { width: number; height: number }
 ): Map<string, TLispFunctionImpl> {
   const ops = new Map<string, TLispFunctionImpl>();
 
@@ -54,13 +56,35 @@ export function createWindowOps(
     }
 
     // Create new window with same buffer
+    // Get terminal size for window dimensions (US-3.2.2)
+    const terminalSize = getTerminalSize();
+    
+    // Calculate dimensions based on split type
+    const currentHeight = currentWindow.height || terminalSize.height - 2;
+    const currentWidth = currentWindow.width || terminalSize.width;
+    
+    let newHeight: number;
+    let newWidth: number;
+    
+    if (type === "horizontal") {
+      // Split horizontally: divide height
+      newHeight = Math.floor(currentHeight / 2);
+      newWidth = currentWidth;
+    } else {
+      // Split vertically: divide width
+      newHeight = currentHeight;
+      newWidth = Math.floor(currentWidth / 2);
+    }
+    
     const newWindow: Window = {
       id: `window-${Date.now()}`,
       buffer: currentBuffer,
       cursorLine: currentWindow.cursorLine,
       cursorColumn: currentWindow.cursorColumn,
       viewportTop: currentWindow.viewportTop,
-      splitType: type
+      splitType: type,
+      height: newHeight,
+      width: newWidth,
     };
 
     // Add new window after current window
@@ -181,6 +205,86 @@ export function createWindowOps(
     }
 
     return createNumber(getWindows().length);
+  });
+
+  /**
+   * Resize current window height by delta
+   * Usage: (window-resize-height delta)
+   */
+  ops.set("window-resize-height", (args: TLispValue[]) => {
+    if (args.length !== 1) {
+      throw new Error("window-resize-height requires one argument: delta");
+    }
+
+    const deltaValue = args[0];
+    if (deltaValue.type !== "number") {
+      throw new Error("window-resize-height delta must be a number");
+    }
+
+    const delta = deltaValue.value;
+    const windows = getWindows();
+    const currentIndex = getCurrentWindowIndex();
+    const currentWindow = windows[currentIndex];
+
+    if (!currentWindow) {
+      throw new Error("No current window");
+    }
+
+    const currentHeight = currentWindow.height || 24; // Default terminal height
+    const MIN_HEIGHT = 3; // Minimum window height
+
+    // Calculate new height with bounds checking
+    const newHeight = Math.max(MIN_HEIGHT, currentHeight + delta);
+
+    // Update current window height
+    const updatedWindows = [...windows];
+    updatedWindows[currentIndex] = {
+      ...currentWindow,
+      height: newHeight
+    };
+    setWindows(updatedWindows);
+
+    return createNil();
+  });
+
+  /**
+   * Resize current window width by delta
+   * Usage: (window-resize-width delta)
+   */
+  ops.set("window-resize-width", (args: TLispValue[]) => {
+    if (args.length !== 1) {
+      throw new Error("window-resize-width requires one argument: delta");
+    }
+
+    const deltaValue = args[0];
+    if (deltaValue.type !== "number") {
+      throw new Error("window-resize-width delta must be a number");
+    }
+
+    const delta = deltaValue.value;
+    const windows = getWindows();
+    const currentIndex = getCurrentWindowIndex();
+    const currentWindow = windows[currentIndex];
+
+    if (!currentWindow) {
+      throw new Error("No current window");
+    }
+
+    const currentWidth = currentWindow.width || 80; // Default terminal width
+    const MIN_WIDTH = 10; // Minimum window width
+
+    // Calculate new width with bounds checking
+    const newWidth = Math.max(MIN_WIDTH, currentWidth + delta);
+
+    // Update current window width
+    const updatedWindows = [...windows];
+    updatedWindows[currentIndex] = {
+      ...currentWindow,
+      width: newWidth
+    };
+    setWindows(updatedWindows);
+
+    return createNil();
   });
 
   return ops;

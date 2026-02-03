@@ -278,5 +278,20 @@ export function createModeOps(
     return Either.right(createString(command));
   });
 
+  // Window prefix handler (US-3.2.2)
+  // C-w prefix for window management commands
+  api.set("editor-handle-window-prefix", (args: TLispValue[]): Either<AppError, TLispValue> => {
+    const argsValidation = validateArgsCount(args, 0, "editor-handle-window-prefix");
+    if (Either.isLeft(argsValidation)) {
+      return Either.left(argsValidation.left);
+    }
+
+    // Set a flag to indicate we're in window prefix mode
+    // The next key will determine which window function to call
+    setStatusMessage("Window: (+)height (-)height (>)width (<)width (w)next (q)close");
+    
+    return Either.right(createString("window-prefix"));
+  });
+
   return api;
 }
