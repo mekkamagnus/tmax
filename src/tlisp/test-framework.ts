@@ -1,0 +1,891 @@
+/**
+ * @file test-framework.ts
+ * @description T-Lisp Testing Framework Implementation
+ * 
+ * This module implements the core testing framework for T-Lisp with
+ * deftest, test-run, test-run-all, and assertion functions.
+ */
+
+import type { TLispInterpreter, TLispValue } from "./types.ts";
+import { 
+  createBoolean, 
+  createList, 
+  createNil, 
+  createNumber, 
+  createString, 
+  isNil,
+  isTruthy,
+  valuesEqual,
+  valueToString
+} from "./values.ts";
+import { Either } from "../utils/task-either.ts";
+import type { EvalError } from "../error/types.ts";
+
+// Test results storage
+let currentTestResults: { testName: string, passed: boolean, error?: string }[] = [];
+let testCounts = { passed: 0, failed: 0, total: 0 };
+
+// Global setup and teardown functions
+let globalSetupFunction: TLispValue | null = null;
+let globalTeardownFunction: TLispValue | null = null;
+
+/**
+ * Register testing framework functions with the interpreter
+ * @param interpreter - The T-Lisp interpreter instance
+ */
+export function registerTestingFramework(interpreter: TLispInterpreter): void {
+  /**
+   * Define a test function
+   * Usage: (deftest test-name () body...)
+   * Defines a test that can be run later
+   */
+  interpreter.defineBuiltin("deftest", (args: TLispValue[]) => {
+    if (args.length < 2) {
+      return Either.left({
+        type: 'EvalError',
+        variant: 'RuntimeError',
+        message: "deftest requires at least 2 arguments: test name and parameter list",
+        details: { expected: 2, actual: args.length }
+      });
+    }
+
+    const nameArg = args[0];
+    const paramsArg = args[1];
+
+    if (!nameArg || (nameArg.type !== "string" && nameArg.type !== "symbol")) {
+      return Either.left({
+        type: 'EvalError',
+        variant: 'TypeError',
+        message: "deftest first argument must be a string or symbol (test name)",
+        details: { argType: nameArg?.type }
+      });
+    }
+
+    if (!paramsArg || paramsArg.type !== "list") {
+      return Either.left({
+        type: 'EvalError',
+        variant: 'TypeError',
+        message: "deftest second argument must be a list (parameters)",
+        details: { argType: paramsArg?.type }
+      });
+    }
+
+    const testName = nameArg.value as string;
+    const testBody = args.slice(2); // Everything after name and params
+
+    // Register the test
+    globalTestRegistry.set(testName, { body: testBody, name: testName });
+
+    return Either.right(createString(testName));
+  });
+
+  /**
+   * Run a specific test
+   * Usage: (test-run test-name)
+   * Executes the test and returns the result
+   */
+  interpreter.defineBuiltin("test-run", (args: TLispValue[]) => {
+    if (args.length !== 1) {
+      return Either.left({
+        type: 'EvalError',
+        variant: 'RuntimeError',
+        message: "test-run requires exactly 1 argument: test name",
+        details: { expected: 1, actual: args.length }
+      });
+    }
+
+    const nameArg = args[0];
+    if (!nameArg || (nameArg.type !== "string" && nameArg.type !== "symbol")) {
+      return Either.left({
+        type: 'EvalError',
+        variant: 'TypeError',
+        message: "test-run requires a string or symbol as the argument (test name)",
+        details: { argType: nameArg?.type }
+      });
+    }
+
+    const testName = nameArg.value as string;
+
+    // Access the test registry from the interpreter
+    // Since we can't directly access the evaluator's testRegistry,
+    // we'll need to implement a method to access it
+    // For now, let's assume the interpreter has a method to get test definitions
+    // We'll implement this as a workaround by trying to access it through eval
+
+    // This is a workaround - we'll need to implement a proper way to access the test registry
+    // For now, we'll use a special function that the evaluator implements
+    try {
+      // Get the test definition from the interpreter
+      const testDef = interpreter.getTestDefinition?.(testName);
+
+      if (!testDef) {
+        return Either.left({
+          type: 'EvalError',
+          variant: 'RuntimeError',
+          message: `Test '${testName}' not found`,
+          details: { testName }
+        });
+      }
+
+      let testPassed = true;
+      let errorMessage: string | undefined;
+
+      try {
+        // Create a child environment for this test to provide isolation
+        const testEnv = interpreter.globalEnv.createChild();
+
+        // Run setup if defined
+        if (globalSetupFunction && globalSetupFunction.type === "list") {
+          const setupExpressions = globalSetupFunction.value as TLispValue[];
+          for (const expr of setupExpressions) {
+            const result = interpreter.eval(expr, testEnv);
+            if (Either.isLeft(result)) {
+              throw new Error(`Setup for test '${testName}' failed: ${result.left.message || result.left}`);
+            }
+          }
+        }
+
+        // Execute each expression in the test body using the isolated environment
+        for (const expr of testDef.body) {
+          const result = interpreter.eval(expr, testEnv);
+          if (Either.isLeft(result)) {
+            throw new Error(`Test '${testName}' failed with error: ${result.left.message || result.left}`);
+          }
+        }
+
+        currentTestResults.push({ testName, passed: true });
+        testCounts.passed++;
+        testCounts.total++;
+      } catch (error) {
+        testPassed = false;
+        errorMessage = error instanceof Error ? error.message : String(error);
+        currentTestResults.push({ testName, passed: false, error: errorMessage });
+        testCounts.failed++;
+        testCounts.total++;
+      } finally {
+        // Run teardown if defined (always run regardless of test success/failure)
+        if (globalTeardownFunction && globalTeardownFunction.type === "list") {
+          const tearDownExpressions = globalTeardownFunction.value as TLispValue[];
+          for (const expr of tearDownExpressions) {
+            // Use the global environment for teardown to clean up global state
+            const result = interpreter.eval(expr, interpreter.globalEnv);
+            if (Either.isLeft(result)) {
+              console.warn(`Teardown for test '${testName}' failed: ${result.left.message || result.left}`);
+            }
+          }
+        }
+      }
+
+      return Either.right(createBoolean(testPassed));
+    } catch (error) {
+      return Either.left({
+        type: 'EvalError',
+        variant: 'RuntimeError',
+        message: `Error running test '${testName}': ${error instanceof Error ? error.message : String(error)}`,
+        details: { testName, error: error instanceof Error ? error.message : String(error) }
+      });
+    }
+  });
+
+  /**
+   * Run all registered tests
+   * Usage: (test-run-all)
+   * Executes all tests and returns summary statistics
+   */
+  interpreter.defineBuiltin("test-run-all", (args: TLispValue[]) => {
+    // Reset test results and counts
+    currentTestResults = [];
+    testCounts.passed = 0;
+    testCounts.failed = 0;
+    testCounts.total = 0;
+
+    try {
+      // Get all test names from the evaluator's registry
+      const testNames = interpreter.getAllTestNames?.() || [];
+
+      // Run each registered test
+      for (const testName of testNames) {
+        const testDef = interpreter.getTestDefinition?.(testName);
+        if (!testDef) continue;
+
+        let testPassed = true;
+        let errorMessage: string | undefined;
+
+        try {
+          // Create a child environment for this test to provide isolation
+          const testEnv = interpreter.globalEnv.createChild();
+
+          // Run setup if defined
+          if (globalSetupFunction && globalSetupFunction.type === "list") {
+            const setupExpressions = globalSetupFunction.value as TLispValue[];
+            for (const expr of setupExpressions) {
+              const result = interpreter.eval(expr, testEnv);
+              if (Either.isLeft(result)) {
+                throw new Error(`Setup for test '${testName}' failed: ${result.left.message || result.left}`);
+              }
+            }
+          }
+
+          // Execute each expression in the test body using the isolated environment
+          for (const expr of testDef.body) {
+            const result = interpreter.eval(expr, testEnv);
+            if (Either.isLeft(result)) {
+              throw new Error(`Test '${testName}' failed with error: ${result.left.message || result.left}`);
+            }
+          }
+
+          testCounts.passed++;
+          currentTestResults.push({ testName, passed: true });
+        } catch (error) {
+          testPassed = false;
+          errorMessage = error instanceof Error ? error.message : String(error);
+          testCounts.failed++;
+          currentTestResults.push({ testName, passed: false, error: errorMessage });
+        } finally {
+          // Run teardown if defined (always run regardless of test success/failure)
+          if (globalTeardownFunction && globalTeardownFunction.type === "list") {
+            const tearDownExpressions = globalTeardownFunction.value as TLispValue[];
+            for (const expr of tearDownExpressions) {
+              // Use the global environment for teardown to clean up global state
+              const result = interpreter.eval(expr, interpreter.globalEnv);
+              if (Either.isLeft(result)) {
+                console.warn(`Teardown for test '${testName}' failed: ${result.left.message || result.left}`);
+              }
+            }
+          }
+        }
+      }
+
+      testCounts.total = testCounts.passed + testCounts.failed;
+
+      // Return a summary as a list: [passed, failed, total]
+      return Either.right(createList([
+        createNumber(testCounts.passed),
+        createNumber(testCounts.failed),
+        createNumber(testCounts.total)
+      ]));
+    } catch (error) {
+      return Either.left({
+        type: 'EvalError',
+        variant: 'RuntimeError',
+        message: `Error running all tests: ${error instanceof Error ? error.message : String(error)}`,
+        details: { error: error instanceof Error ? error.message : String(error) }
+      });
+    }
+  });
+
+  /**
+   * Assert that a value is truthy
+   * Usage: (assert-true value)
+   * Passes when value is truthy, throws error otherwise
+   */
+  interpreter.defineBuiltin("assert-true", (args: TLispValue[]) => {
+    if (args.length !== 1) {
+      return Either.left({
+        type: 'EvalError',
+        variant: 'RuntimeError',
+        message: "assert-true requires exactly 1 argument: value",
+        details: { expected: 1, actual: args.length }
+      });
+    }
+
+    const value = args[0];
+    if (!isTruthy(value)) {
+      return Either.left({
+        type: 'EvalError',
+        variant: 'RuntimeError',
+        message: `Assertion failed: expected truthy value, got ${valueToString(value)}`,
+        details: { expected: "truthy", actual: valueToString(value) }
+      });
+    }
+
+    return Either.right(createBoolean(true));
+  });
+
+  /**
+   * Assert that a value is falsy
+   * Usage: (assert-false value)
+   * Passes when value is falsy, throws error otherwise
+   */
+  interpreter.defineBuiltin("assert-false", (args: TLispValue[]) => {
+    if (args.length !== 1) {
+      return Either.left({
+        type: 'EvalError',
+        variant: 'RuntimeError',
+        message: "assert-false requires exactly 1 argument: value",
+        details: { expected: 1, actual: args.length }
+      });
+    }
+
+    const value = args[0];
+    if (isTruthy(value)) {
+      return Either.left({
+        type: 'EvalError',
+        variant: 'RuntimeError',
+        message: `Assertion failed: expected falsy value, got ${valueToString(value)}`,
+        details: { expected: "falsy", actual: valueToString(value) }
+      });
+    }
+
+    return Either.right(createBoolean(true));
+  });
+
+  /**
+   * Assert that two values are equal
+   * Usage: (assert-equal expected actual)
+   * Passes when values are equal, throws error otherwise
+   */
+  interpreter.defineBuiltin("assert-equal", (args: TLispValue[]) => {
+    if (args.length !== 2) {
+      return Either.left({
+        type: 'EvalError',
+        variant: 'RuntimeError',
+        message: "assert-equal requires exactly 2 arguments: expected and actual",
+        details: { expected: 2, actual: args.length }
+      });
+    }
+
+    const [expected, actual] = args;
+    if (!valuesEqual(expected, actual)) {
+      return Either.left({
+        type: 'EvalError',
+        variant: 'RuntimeError',
+        message: `Assertion failed: expected ${valueToString(expected)}, got ${valueToString(actual)}`,
+        details: { expected: valueToString(expected), actual: valueToString(actual) }
+      });
+    }
+
+    return Either.right(createBoolean(true));
+  });
+
+  /**
+   * Assert that two values are not equal
+   * Usage: (assert-not-equal expected actual)
+   * Passes when values are not equal, throws error otherwise
+   */
+  interpreter.defineBuiltin("assert-not-equal", (args: TLispValue[]) => {
+    if (args.length !== 2) {
+      return Either.left({
+        type: 'EvalError',
+        variant: 'RuntimeError',
+        message: "assert-not-equal requires exactly 2 arguments: expected and actual",
+        details: { expected: 2, actual: args.length }
+      });
+    }
+
+    const [expected, actual] = args;
+    if (valuesEqual(expected, actual)) {
+      return Either.left({
+        type: 'EvalError',
+        variant: 'RuntimeError',
+        message: `Assertion failed: expected ${valueToString(expected)} to not equal ${valueToString(actual)}`,
+        details: { expected: valueToString(expected), actual: valueToString(actual) }
+      });
+    }
+
+    return Either.right(createBoolean(true));
+  });
+
+  /**
+   * Define a setup function to run before each test
+   * Usage: (setup () body...)
+   * Defines a function that runs before each test
+   */
+  interpreter.defineBuiltin("setup", (args: TLispValue[]) => {
+    if (args.length < 1) {
+      return Either.left({
+        type: 'EvalError',
+        variant: 'RuntimeError',
+        message: "setup requires at least 1 argument: parameter list",
+        details: { expectedMin: 1, actual: args.length }
+      });
+    }
+
+    const paramsArg = args[0];
+    if (paramsArg.type !== "list") {
+      return Either.left({
+        type: 'EvalError',
+        variant: 'TypeError',
+        message: "setup first argument must be a list (parameters)",
+        details: { argType: paramsArg.type }
+      });
+    }
+
+    // Store the setup function body (everything after params)
+    const setupBody = args.slice(1);
+
+    // For now, we'll store it globally - in a real implementation we'd want to
+    // associate it with the current test or test suite
+    // Just store the first argument as the setup function
+    globalSetupFunction = createList(setupBody);
+
+    return Either.right(createBoolean(true));
+  });
+
+  /**
+   * Define a teardown function to run after each test
+   * Usage: (teardown () body...)
+   * Defines a function that runs after each test
+   */
+  interpreter.defineBuiltin("teardown", (args: TLispValue[]) => {
+    if (args.length < 1) {
+      return Either.left({
+        type: 'EvalError',
+        variant: 'RuntimeError',
+        message: "teardown requires at least 1 argument: parameter list",
+        details: { expectedMin: 1, actual: args.length }
+      });
+    }
+
+    const paramsArg = args[0];
+    if (paramsArg.type !== "list") {
+      return Either.left({
+        type: 'EvalError',
+        variant: 'TypeError',
+        message: "teardown first argument must be a list (parameters)",
+        details: { argType: paramsArg.type }
+      });
+    }
+
+    // Store the teardown function body (everything after params)
+    const tearDownBody = args.slice(1);
+
+    // Store it globally
+    globalTeardownFunction = createList(tearDownBody);
+
+    return Either.right(createBoolean(true));
+  });
+
+  /**
+   * Define a variable in the current environment
+   * Usage: (defvar name value)
+   * Defines a variable with the given name and value
+   */
+  interpreter.defineBuiltin("defvar", (args: TLispValue[]) => {
+    if (args.length !== 2) {
+      return Either.left({
+        type: 'EvalError',
+        variant: 'RuntimeError',
+        message: "defvar requires exactly 2 arguments: name and value",
+        details: { expected: 2, actual: args.length }
+      });
+    }
+
+    const nameArg = args[0];
+    const valueArg = args[1];
+
+    if (!nameArg || nameArg.type !== "symbol") {
+      return Either.left({
+        type: 'EvalError',
+        variant: 'TypeError',
+        message: "defvar first argument must be a symbol (variable name)",
+        details: { argType: nameArg?.type }
+      });
+    }
+
+    const varName = nameArg.value as string;
+
+    // Define the variable in the global environment
+    interpreter.globalEnv.define(varName, valueArg);
+
+    return Either.right(valueArg);
+  });
+
+  /**
+   * Set the value of an existing variable
+   * Usage: (set! name value)
+   * Sets the value of an existing variable
+   */
+  interpreter.defineBuiltin("set!", (args: TLispValue[]) => {
+    if (args.length !== 2) {
+      return Either.left({
+        type: 'EvalError',
+        variant: 'RuntimeError',
+        message: "set! requires exactly 2 arguments: name and value",
+        details: { expected: 2, actual: args.length }
+      });
+    }
+
+    const nameArg = args[0];
+    const valueArg = args[1];
+
+    if (!nameArg || nameArg.type !== "symbol") {
+      return Either.left({
+        type: 'EvalError',
+        variant: 'TypeError',
+        message: "set! first argument must be a symbol (variable name)",
+        details: { argType: nameArg?.type }
+      });
+    }
+
+    const varName = nameArg.value as string;
+
+    try {
+      // Try to set the variable (will throw if it doesn't exist)
+      interpreter.globalEnv.set(varName, valueArg);
+      return Either.right(valueArg);
+    } catch (error) {
+      return Either.left({
+        type: 'EvalError',
+        variant: 'RuntimeError',
+        message: `set!: variable '${varName}' is not defined`,
+        details: { varName, error: error instanceof Error ? error.message : String(error) }
+      });
+    }
+  });
+
+  // ========== RICH ASSERTIONS (US-0.6.1) ==========
+
+  /**
+   * Assert that a list contains an item
+   * Usage: (assert-contains list item)
+   * Passes when item is in list, throws error otherwise
+   */
+  interpreter.defineBuiltin("assert-contains", (args: TLispValue[]) => {
+    if (args.length !== 2) {
+      return Either.left({
+        type: 'EvalError',
+        variant: 'RuntimeError',
+        message: "assert-contains requires exactly 2 arguments: list and item",
+        details: { expected: 2, actual: args.length }
+      });
+    }
+
+    const [listArg, itemArg] = args;
+
+    if (listArg.type !== "list") {
+      return Either.left({
+        type: 'EvalError',
+        variant: 'TypeError',
+        message: "assert-contains first argument must be a list",
+        details: { argType: listArg.type }
+      });
+    }
+
+    const listItems = listArg.value as TLispValue[];
+    const contains = listItems.some(item => valuesEqual(item, itemArg));
+
+    if (!contains) {
+      return Either.left({
+        type: 'EvalError',
+        variant: 'RuntimeError',
+        message: `Assertion failed: list does not contain item ${valueToString(itemArg)}`,
+        details: {
+          list: valueToString(listArg),
+          item: valueToString(itemArg)
+        }
+      });
+    }
+
+    return Either.right(createBoolean(true));
+  });
+
+  /**
+   * Assert that a string contains a substring
+   * Usage: (assert-contains-string haystack needle)
+   * Passes when haystack contains needle, throws error otherwise
+   */
+  interpreter.defineBuiltin("assert-contains-string", (args: TLispValue[]) => {
+    if (args.length !== 2) {
+      return Either.left({
+        type: 'EvalError',
+        variant: 'RuntimeError',
+        message: "assert-contains-string requires exactly 2 arguments: haystack and needle",
+        details: { expected: 2, actual: args.length }
+      });
+    }
+
+    const [haystackArg, needleArg] = args;
+
+    if (haystackArg.type !== "string") {
+      return Either.left({
+        type: 'EvalError',
+        variant: 'TypeError',
+        message: "assert-contains-string first argument must be a string (haystack)",
+        details: { argType: haystackArg.type }
+      });
+    }
+
+    if (needleArg.type !== "string") {
+      return Either.left({
+        type: 'EvalError',
+        variant: 'TypeError',
+        message: "assert-contains-string second argument must be a string (needle)",
+        details: { argType: needleArg.type }
+      });
+    }
+
+    const haystack = haystackArg.value as string;
+    const needle = needleArg.value as string;
+
+    if (!haystack.includes(needle)) {
+      return Either.left({
+        type: 'EvalError',
+        variant: 'RuntimeError',
+        message: `Assertion failed: "${haystack}" does not contain substring "${needle}"`,
+        details: {
+          haystack: `"${haystack}"`,
+          needle: `"${needle}"`
+        }
+      });
+    }
+
+    return Either.right(createBoolean(true));
+  });
+
+  /**
+   * Assert that a string matches a regex pattern
+   * Usage: (assert-matches pattern string)
+   * Passes when string matches pattern, throws error otherwise
+   */
+  interpreter.defineBuiltin("assert-matches", (args: TLispValue[]) => {
+    if (args.length !== 2) {
+      return Either.left({
+        type: 'EvalError',
+        variant: 'RuntimeError',
+        message: "assert-matches requires exactly 2 arguments: pattern and string",
+        details: { expected: 2, actual: args.length }
+      });
+    }
+
+    const [patternArg, stringArg] = args;
+
+    if (patternArg.type !== "string") {
+      return Either.left({
+        type: 'EvalError',
+        variant: 'TypeError',
+        message: "assert-matches first argument must be a string (regex pattern)",
+        details: { argType: patternArg.type }
+      });
+    }
+
+    if (stringArg.type !== "string") {
+      return Either.left({
+        type: 'EvalError',
+        variant: 'TypeError',
+        message: "assert-matches second argument must be a string (test string)",
+        details: { argType: stringArg.type }
+      });
+    }
+
+    const pattern = patternArg.value as string;
+    const testString = stringArg.value as string;
+
+    try {
+      const regex = new RegExp(pattern);
+      if (!regex.test(testString)) {
+        return Either.left({
+          type: 'EvalError',
+          variant: 'RuntimeError',
+          message: `Assertion failed: "${testString}" does not match pattern /${pattern}/`,
+          details: {
+            pattern: `/${pattern}/`,
+            string: `"${testString}"`
+          }
+        });
+      }
+    } catch (error) {
+      return Either.left({
+        type: 'EvalError',
+        variant: 'RuntimeError',
+        message: `Invalid regex pattern: ${error instanceof Error ? error.message : String(error)}`,
+        details: { pattern, error: error instanceof Error ? error.message : String(error) }
+      });
+    }
+
+    return Either.right(createBoolean(true));
+  });
+
+  /**
+   * Assert that a value is of a specific type
+   * Usage: (assert-type value type-symbol)
+   * Passes when value is of type, throws error otherwise
+   * Type symbols: number, string, boolean, list, symbol, nil, hashmap, function, macro
+   */
+  interpreter.defineBuiltin("assert-type", (args: TLispValue[]) => {
+    if (args.length !== 2) {
+      return Either.left({
+        type: 'EvalError',
+        variant: 'RuntimeError',
+        message: "assert-type requires exactly 2 arguments: value and type",
+        details: { expected: 2, actual: args.length }
+      });
+    }
+
+    const [valueArg, typeArg] = args;
+
+    if (typeArg.type !== "symbol") {
+      return Either.left({
+        type: 'EvalError',
+        variant: 'TypeError',
+        message: "assert-type second argument must be a symbol (type name)",
+        details: { argType: typeArg.type }
+      });
+    }
+
+    const expectedType = typeArg.value as string;
+    const actualType = valueArg.type;
+
+    if (actualType !== expectedType) {
+      return Either.left({
+        type: 'EvalError',
+        variant: 'RuntimeError',
+        message: `Assertion failed: expected type ${expectedType}, but got ${actualType}`,
+        details: {
+          expected: expectedType,
+          actual: actualType,
+          value: valueToString(valueArg)
+        }
+      });
+    }
+
+    return Either.right(createBoolean(true));
+  });
+
+  /**
+   * Assert that a value is greater than or equal to expected
+   * Usage: (assert->= value expected)
+   * Passes when value >= expected, throws error otherwise
+   */
+  interpreter.defineBuiltin("assert->=", (args: TLispValue[]) => {
+    if (args.length !== 2) {
+      return Either.left({
+        type: 'EvalError',
+        variant: 'RuntimeError',
+        message: "assert->= requires exactly 2 arguments: value and expected",
+        details: { expected: 2, actual: args.length }
+      });
+    }
+
+    const [valueArg, expectedArg] = args;
+
+    if (valueArg.type !== "number" || expectedArg.type !== "number") {
+      return Either.left({
+        type: 'EvalError',
+        variant: 'TypeError',
+        message: "assert->= both arguments must be numbers",
+        details: {
+          valueType: valueArg.type,
+          expectedType: expectedArg.type
+        }
+      });
+    }
+
+    const value = valueArg.value as number;
+    const expected = expectedArg.value as number;
+
+    if (value < expected) {
+      return Either.left({
+        type: 'EvalError',
+        variant: 'RuntimeError',
+        message: `Assertion failed: ${value} is not greater than or equal to ${expected}`,
+        details: {
+          value: value.toString(),
+          expected: expected.toString()
+        }
+      });
+    }
+
+    return Either.right(createBoolean(true));
+  });
+
+  /**
+   * Assert that a value is less than expected
+   * Usage: (assert-< value expected)
+   * Passes when value < expected, throws error otherwise
+   */
+  interpreter.defineBuiltin("assert-<", (args: TLispValue[]) => {
+    if (args.length !== 2) {
+      return Either.left({
+        type: 'EvalError',
+        variant: 'RuntimeError',
+        message: "assert-< requires exactly 2 arguments: value and expected",
+        details: { expected: 2, actual: args.length }
+      });
+    }
+
+    const [valueArg, expectedArg] = args;
+
+    if (valueArg.type !== "number" || expectedArg.type !== "number") {
+      return Either.left({
+        type: 'EvalError',
+        variant: 'TypeError',
+        message: "assert-< both arguments must be numbers",
+        details: {
+          valueType: valueArg.type,
+          expectedType: expectedArg.type
+        }
+      });
+    }
+
+    const value = valueArg.value as number;
+    const expected = expectedArg.value as number;
+
+    if (value >= expected) {
+      return Either.left({
+        type: 'EvalError',
+        variant: 'RuntimeError',
+        message: `Assertion failed: ${value} is not less than ${expected}`,
+        details: {
+          value: value.toString(),
+          expected: expected.toString()
+        }
+      });
+    }
+
+    return Either.right(createBoolean(true));
+  });
+
+  /**
+   * Assert that a value is approximately equal to expected within tolerance
+   * Usage: (assert-in-delta actual tolerance expected)
+   * Passes when |actual - expected| <= tolerance, throws error otherwise
+   */
+  interpreter.defineBuiltin("assert-in-delta", (args: TLispValue[]) => {
+    if (args.length !== 3) {
+      return Either.left({
+        type: 'EvalError',
+        variant: 'RuntimeError',
+        message: "assert-in-delta requires exactly 3 arguments: actual, tolerance, and expected",
+        details: { expected: 3, actual: args.length }
+      });
+    }
+
+    const [actualArg, toleranceArg, expectedArg] = args;
+
+    if (actualArg.type !== "number" || toleranceArg.type !== "number" || expectedArg.type !== "number") {
+      return Either.left({
+        type: 'EvalError',
+        variant: 'TypeError',
+        message: "assert-in-delta all arguments must be numbers",
+        details: {
+          actualType: actualArg.type,
+          toleranceType: toleranceArg.type,
+          expectedType: expectedArg.type
+        }
+      });
+    }
+
+    const actual = actualArg.value as number;
+    const tolerance = toleranceArg.value as number;
+    const expected = expectedArg.value as number;
+
+    const delta = Math.abs(actual - expected);
+
+    if (delta > tolerance) {
+      return Either.left({
+        type: 'EvalError',
+        variant: 'RuntimeError',
+        message: `Assertion failed: ${actual} is not within ${tolerance} of ${expected} (delta: ${delta})`,
+        details: {
+          actual: actual.toString(),
+          expected: expected.toString(),
+          tolerance: tolerance.toString(),
+          delta: delta.toString()
+        }
+      });
+    }
+
+    return Either.right(createBoolean(true));
+  });
+}

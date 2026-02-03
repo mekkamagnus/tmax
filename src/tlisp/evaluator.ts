@@ -17,9 +17,14 @@ import {
   isNil,
   isTruthy,
   isMacro,
+  valuesEqual,
+  valueToString
 } from "./values.ts";
 import { Either } from "../utils/task-either";
 import { createValidationError, type EvalError } from "../error/types";
+import { TLispParser } from "./parser.ts";
+import { registerStdlibFunctions } from "./stdlib.ts";
+import { registerTestingFramework } from "./test-framework.ts";
 
 
 /**
@@ -50,6 +55,9 @@ function isTailCall(result: EvalResult): result is TailCall {
 function createTailCall(funcExpr: TLispValue, argExprs: TLispValue[], env: TLispEnvironment): TailCall {
   return { type: "tail-call", funcExpr, argExprs, env };
 }
+
+// Test registry to store defined tests
+const testRegistry: Map<string, { body: TLispValue[], name: string, params: TLispValue }> = new Map();
 
 /**
  * T-Lisp evaluator for executing T-Lisp expressions
@@ -220,6 +228,10 @@ export class TLispEvaluator {
           return this.evalDefun(elements, env);
         case "cond":
           return this.evalCond(elements, env, inTailPosition);
+        case "deftest":
+          return this.evalDeftest(elements, env);
+        case "assert-error":
+          return this.evalAssertError(elements, env);
         default:
           return this.evalFunctionCall(elements, env, inTailPosition);
       }
@@ -1044,6 +1056,118 @@ export class TLispEvaluator {
       details: { funcType: func.type, args }
     });
   }
+
+  /**
+   * Evaluate deftest special form
+   * @param elements - List elements
+   * @param env - Environment
+   * @returns Either with error or function symbol
+   */
+  private evalDeftest(elements: TLispValue[], env: TLispEnvironment): Either<EvalError, TLispValue> {
+    if (elements.length < 3) {
+      return Either.left({
+        type: 'EvalError',
+        variant: 'SyntaxError',
+        message: "deftest requires at least 2 arguments: name, parameters, and body",
+        details: { expectedMin: 3, actual: elements.length }
+      });
+    }
+
+    const name = elements[1];
+    const parameters = elements[2];
+    const body = elements.length > 3 ? elements[3] : createNil(); // For now, just take the first body expression
+
+    if (!name || !parameters) {
+      return Either.left({
+        type: 'EvalError',
+        variant: 'SyntaxError',
+        message: "deftest missing required arguments",
+        details: { hasName: !!name, hasParameters: !!parameters }
+      });
+    }
+
+    if (name.type !== "symbol") {
+      return Either.left({
+        type: 'EvalError',
+        variant: 'TypeError',
+        message: "deftest name must be a symbol",
+        details: { nameType: name.type }
+      });
+    }
+
+    if (parameters.type !== "list") {
+      return Either.left({
+        type: 'EvalError',
+        variant: 'TypeError',
+        message: "deftest parameters must be a list",
+        details: { parametersType: parameters.type }
+      });
+    }
+
+    // Extract test name
+    const testName = name.value as string;
+
+    // Store the body expressions (from index 3 onwards)
+    const testBody = elements.slice(3);
+
+    // Store test in the registry
+    testRegistry.set(testName, { body: testBody, name: testName, params: parameters });
+
+    // Return the test name as a symbol to indicate success
+    return Either.right(name);
+  }
+
+  /**
+   * Get test definition by name
+   * @param name - Name of the test
+   * @returns Test definition or undefined if not found
+   */
+  getTestDefinition(name: string): { body: TLispValue[], name: string, params: TLispValue } | undefined {
+    return testRegistry.get(name);
+  }
+
+  /**
+   * Get all test names
+   * @returns Array of test names
+   */
+  getAllTestNames(): string[] {
+    return Array.from(testRegistry.keys());
+  }
+
+  /**
+   * Evaluate assert-error special form
+   * @param elements - List elements
+   * @param env - Environment
+   * @returns Either with error or boolean result
+   */
+  private evalAssertError(elements: TLispValue[], env: TLispEnvironment): Either<EvalError, TLispValue> {
+    if (elements.length !== 2) {
+      return Either.left({
+        type: 'EvalError',
+        variant: 'SyntaxError',
+        message: "assert-error requires exactly 1 argument: form",
+        details: { expected: 2, actual: elements.length } // 2 because first element is 'assert-error'
+      });
+    }
+
+    const form = elements[1];
+
+    // Try to evaluate the form
+    const result = this.eval(form, env);
+
+    if (Either.isLeft(result)) {
+      // Form raised an error as expected - return true
+      return Either.right(createBoolean(true));
+    } else {
+      // Form succeeded when it should have failed - return an error
+      return Either.left({
+        type: 'EvalError',
+        variant: 'RuntimeError',
+        message: `Expected error but form evaluated successfully to ${valueToString(result.right)}`,
+        details: { result: valueToString(result.right) }
+      });
+    }
+  }
 }
 
 /**
@@ -1386,7 +1510,12 @@ export const createEvaluatorWithBuiltins = (): { evaluator: TLispEvaluator; env:
 
     return Either.right(createList(listElements.slice(1)));
   }, "cdr"));
-  
+
+  // List constructor
+  env.define("list", createFunction((args: TLispValue[]) => {
+    return Either.right(createList(args));
+  }, "list"));
+
   // Predicate functions
   env.define("null", createFunction((args: TLispValue[]) => {
     if (args.length !== 1) {
@@ -2486,6 +2615,30 @@ export const createEvaluatorWithBuiltins = (): { evaluator: TLispEvaluator; env:
     console.log(output);
     return Either.right(createNil());
   }, "print"));
+
+  // Register standard library functions
+  const interpreterMock = {
+    defineBuiltin: (name: string, fn: any) => {
+      env.define(name, createFunction(fn, name));
+    },
+    globalEnv: env,
+    eval: (expr: TLispValue) => evaluator.eval(expr, env),
+    execute: (source: string) => {
+      // Simple execute implementation for the mock
+      const parser = new TLispParser();
+      const result = parser.parse(source);
+      if (Either.isLeft(result)) {
+        return result;
+      }
+      return evaluator.eval(result.right, env);
+    },
+    getTestDefinition: (name: string) => evaluator.getTestDefinition(name),
+    getAllTestNames: () => evaluator.getAllTestNames()
+  } as any;
+  registerStdlibFunctions(interpreterMock as any);
+
+  // Register testing framework functions
+  registerTestingFramework(interpreterMock as any);
 
   return { evaluator, env };
 };

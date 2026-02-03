@@ -1,618 +1,806 @@
 {
+  "_comment": [
+    "PRD (Product Requirements Document) for Ralph agent - tmax project",
+    "Converted from specs/prd.md on 2025-02-03"
+  ],
   "projectName": "tmax",
-  "branchName": "ralph/024-bun-migration-functional-refactor",
+  "branchName": "ralph/004-key-binding-system-refactor",
   "userStories": [
     {
-      "id": "US-024-00",
-      "title": "Replace Deno with Bun in package.json Configuration",
-      "description": "Update package.json to use Bun runtime instead of Deno. Remove Deno-specific configuration and add Bun-specific scripts and settings.",
+      "id": "US-0.4.1",
+      "title": "T-Lisp Keymap Data Structures",
+      "description": "Expose keymap data structures to T-Lisp so that key bindings can be programmatically manipulated through T-Lisp code.",
       "acceptanceCriteria": [
-        "package.json 'test' script uses 'bun test' instead of 'deno test'",
-        "package.json 'start' script uses 'bun run' instead of 'deno run'",
-        "package.json 'dev' script uses 'bun --watch' instead of 'deno task dev'",
-        "Bun is listed in prerequisites or installation instructions",
-        "No references to 'deno' in package.json scripts",
-        "All development commands use 'bun run' prefix",
-        "Bun version is specified if applicable"
+        "keymap-get function returns nested alist structure when inspected",
+        "defkeymap my-mode-map creates a new keymap in T-Lisp",
+        "keymap-define-key adds binding to existing keymap",
+        "keymap-lookup returns command bound to key",
+        "Keymap objects have mode, parent, and bindings properties"
       ],
       "priority": 1,
       "passes": true,
-      "notes": "SPEC-024 Phase 0.1 - Critical foundation step for runtime migration"
+      "notes": "Phase 0.4 - T-Lisp-Centric Key Binding System (25% complete)"
     },
     {
-      "id": "US-024-01",
-      "title": "Replace Deno Standard Library Imports with Node/Bun Equivalents",
-      "description": "Replace all 'https://deno.land/std/*' imports with npm packages or local imports. This includes assertion libraries, testing utilities, and any other Deno stdlib dependencies.",
+      "id": "US-0.4.2",
+      "title": "Core Bindings in T-Lisp Files",
+      "description": "Move all default key bindings from TypeScript to T-Lisp files so they can be modified through T-Lisp. Create core/bindings/*.tlisp files for each mode.",
       "acceptanceCriteria": [
-        "All imports from 'https://deno.land/std/assert/mod.ts' are removed",
-        "All imports from 'https://deno.land/std/testing/*' are removed",
-        "Test files use 'bun:test' built-in assertions instead",
-        "Source files use Node built-in modules (node:fs, node:path, etc.)",
-        "No Deno stdlib URLs remain in the codebase",
-        "Import statements compile without errors under Bun",
-        "All imports use relative paths or npm package names"
+        "core/bindings/normal.tlisp exists and loads on startup",
+        "core/bindings/insert.tlisp exists and loads for insert mode",
+        "core/bindings/visual.tlisp exists and loads for visual mode",
+        "core/bindings/command.tlisp exists and loads for command mode",
+        "Modifying binding files and restarting tmax reflects changes",
+        "Binding files use defkeymap to create keymap structures",
+        "~/.tmaxrc custom bindings override defaults"
       ],
       "priority": 1,
       "passes": true,
-      "notes": "SPEC-024 Phase 0.2 - Must be completed before other phases"
+      "notes": "Phase 0.4 - Critical for T-Lisp-first architecture"
     },
     {
-      "id": "US-024-02",
-      "title": "Replace Deno File System APIs with Bun/Node Equivalents",
-      "description": "Replace all Deno.readTextFile(), Deno.writeTextFile(), Deno.mkdir(), Deno.stat(), and Deno.remove() calls with Bun.file() or Node fs/promises equivalents.",
+      "id": "US-0.4.3",
+      "title": "Pure T-Lisp Key Bind Function",
+      "description": "Implement pure T-Lisp key-bind function for programmatic key binding definition. Support key sequences, mode-specific bindings, and binding removal.",
       "acceptanceCriteria": [
-        "Deno.readTextFile() replaced with Bun.file(path).text() or readTextFile from 'node:fs/promises'",
-        "Deno.writeTextFile() replaced with Bun.write() or writeFile from 'node:fs/promises'",
-        "Deno.mkdir() replaced with fs.mkdir() or Bun.$fs.mkdir()",
-        "Deno.stat() replaced with fs.stat() or Bun.$fs.stat()",
-        "Deno.remove() replaced with fs.rm() or Bun.$fs.unlink()",
-        "File operations work correctly with new APIs",
-        "Error handling is preserved with TaskEither pattern",
-        "All file I/O tests pass"
+        "(key-bind \"C-c C-c\" 'some-command) creates binding",
+        "(key-bind \"k\" 'kill-line \"normal\") creates mode-specific binding",
+        "(key-bind \"g d\" 'goto-definition) handles two-key sequences",
+        "(key-unbind \"C-c C-c\") removes binding",
+        "(key-bindings) lists all active bindings",
+        "(key-binding \"C-c C-c\") returns command and source info",
+        "Conflicting bindings override previous bindings",
+        "T-Lisp bindings execute when keys are pressed"
       ],
-      "priority": 2,
+      "priority": 1,
       "passes": true,
-      "notes": "SPEC-024 Phase 0.3 - Core filesystem functionality must work"
+      "notes": "Phase 0.4 - Core function for T-Lisp extensibility"
     },
     {
-      "id": "US-024-03",
-      "title": "Replace Deno Terminal APIs with Node/Bun Equivalents",
-      "description": "Replace Deno stdin/stdout handling and terminal control APIs with Node process.stdin/stdout or Bun-compatible alternatives.",
+      "id": "US-0.5.1",
+      "title": "Core Testing Framework MVP",
+      "description": "Implement basic testing framework for T-Lisp with deftest, test-run, and test-run-all functions. Support test execution, failure reporting, and summary statistics.",
       "acceptanceCriteria": [
-        "Deno.stdin.read() replaced with process.stdin.read() or equivalent",
-        "Deno.stdout.write() replaced with process.stdout.write() or equivalent",
-        "Terminal raw mode uses Node/Bun compatible implementation",
-        "ANSI escape code handling works cross-platform",
-        "Terminal size detection works with Bun",
-        "Alternate screen buffer handling works correctly",
-        "Cursor visibility control works",
-        "All terminal operations function as before"
+        "(deftest my-test () (assert-true t)) defines and passes test",
+        "(test-run \"tests/my-file-test.tlisp\") executes tests in file",
+        "Test failures show failure message and line number",
+        "(test-run-all) executes all test files",
+        "Test summary shows passed, failed, and total counts",
+        "Errors in tests are caught and reported properly"
       ],
-      "priority": 2,
+      "priority": 1,
       "passes": true,
-      "notes": "SPEC-024 Phase 0.4 - May need npm package like 'node-pty' for terminal control"
+      "notes": "Phase 0.5 - TRT Framework Foundation"
     },
     {
-      "id": "US-024-04",
-      "title": "Remove Deno Configuration Files and Import Maps",
-      "description": "Delete deno.json, deno.lock, and import_map.json files. Update tsconfig.json for Bun/Node module resolution. Ensure .gitignore includes node_modules/ and bun.lockb.",
+      "id": "US-0.5.2",
+      "title": "Essential Assertions",
+      "description": "Implement basic assertion functions for T-Lisp testing: assert-true, assert-false, assert-equal, assert-not-equal, assert-error.",
       "acceptanceCriteria": [
-        "deno.json file is deleted from project root",
-        "deno.lock file is deleted",
-        "import_map.json file is deleted",
-        "tsconfig.json has proper moduleResolution for Bun ('bundler' or 'node')",
-        ".gitignore includes 'node_modules/' entry",
-        ".gitignore includes 'bun.lockb' entry",
-        "Git repository no longer tracks Deno config files",
-        "Module resolution works correctly with Bun"
+        "(assert-true value) passes when value is truthy",
+        "(assert-false value) passes when value is falsy",
+        "(assert-equal expected actual) passes when values are equal",
+        "(assert-not-equal expected actual) passes when values differ",
+        "Failed assertions show expected vs actual values",
+        "(assert-error form) passes when form raises error"
       ],
-      "priority": 3,
+      "priority": 1,
       "passes": true,
-      "notes": "SPEC-024 Phase 0.5, 10.5 - Clean up Deno artifacts"
+      "notes": "Phase 0.5 - Core testing assertions"
     },
     {
-      "id": "US-024-05",
-      "title": "Create Option<T> Type for Nullable Values",
-      "description": "Implement Option<T> type (Some/None) for handling nullable values functionally. Create src/utils/option.ts with map, flatMap, fold, getOrElse methods and utility functions.",
+      "id": "US-0.5.3",
+      "title": "Basic Test Isolation",
+      "description": "Ensure tests don't interfere with each other by isolating test environments. Variables, buffers, and global state should be reset between tests.",
       "acceptanceCriteria": [
-        "src/utils/option.ts file exists with Option<T> type",
-        "Option<T> has Some and None variants",
-        "Option.map() method transforms value in Some",
-        "Option.flatMap() method chains Option-returning operations",
-        "Option.fold() method extracts value with default",
-        "Option.getOrElse() method returns value or default",
-        "Option.fromNullable() creates Option from nullable value",
-        "Option.fromNull() and Option.fromUndefined() utilities exist",
-        "JSDoc comments document all methods",
-        "Unit tests exist in test/unit/option.test.ts",
-        "All Option tests pass with Bun test"
+        "Variables defined in test A don't exist in test B",
+        "Buffers modified in test A are clean in test B",
+        "Global state changes are restored after test completes",
+        "Failed tests don't affect next test's environment",
+        "(setup) function executes before test runs",
+        "(teardown) function executes after test completes"
+      ],
+      "priority": 1,
+      "passes": true,
+      "notes": "Phase 0.5 - Test isolation critical for reliability"
+    },
+    {
+      "id": "US-0.6.1",
+      "title": "Rich Assertions",
+      "description": "Implement advanced assertions for T-Lisp testing: assert-contains, assert-contains-string, assert-matches, assert-type, numeric comparisons.",
+      "acceptanceCriteria": [
+        "(assert-contains list item) checks list membership",
+        "(assert-contains-string haystack needle) checks substring",
+        "(assert-matches pattern string) checks regex match",
+        "(assert-type value 'number) validates type",
+        "(assert->= value expected) and (assert-< value expected) for numeric comparisons",
+        "(assert-in-delta actual tolerance expected) for approximate equality",
+        "Failed assertions show detailed context"
       ],
       "priority": 10,
       "passes": true,
-      "notes": "SPEC-024 Phase 1.1 - Core functional primitive"
+      "notes": "Phase 0.5 - Enhanced testing capabilities"
     },
     {
-      "id": "US-024-06",
-      "title": "Create Centralized Error Type System",
-      "description": "Create src/error/types.ts with discriminated union error types (BufferError, FileSystemError, TerminalError, ValidationError, ConfigError) and src/error/handlers.ts with error formatting utilities.",
+      "id": "US-0.6.2",
+      "title": "Fixtures System",
+      "description": "Implement fixture system for T-Lisp tests with deffixture, use-fixtures, setup/teardown, and fixture lifecycle management.",
       "acceptanceCriteria": [
-        "src/error/types.ts exists with all error types defined",
-        "BufferError type exists with specific error variants",
-        "FileSystemError type exists with read/write/stat error variants",
-        "TerminalError type exists with I/O and mode error variants",
-        "ValidationError type exists with constraint violations",
-        "ConfigError type exists with configuration error variants",
-        "All error types use discriminated unions with 'type' field",
-        "src/error/handlers.ts exists with formatError() utility",
-        "src/error/handlers.ts has logError() utility",
-        "Error code constants are defined",
-        "JSDoc comments document all error types",
-        "Unit tests cover error type creation and formatting"
+        "(deffixture my-fixture ...) defines test fixture",
+        "(use-fixtures my-fixture) applies fixture to test",
+        "Fixture cleanup executes after test completes",
+        "Multiple fixtures are set up in order",
+        "Failed fixture setup skips test",
+        "Fixtures can return test data",
+        "Fixture scope controls lifecycle (once, each, all)"
       ],
       "priority": 10,
-      "passes": true,
-      "notes": "SPEC-024 Phase 1.2 - Foundation for centralized error handling"
+      "passes": false,
+      "notes": "Phase 0.5 - Test data management"
     },
     {
-      "id": "US-024-07",
-      "title": "Create Constants Files for Magic Numbers",
-      "description": "Create src/constants/buffer.ts, src/constants/terminal.ts, and src/constants/editor.ts with named constants for all hardcoded values like DEFAULT_BUFFER_SIZE = 64.",
+      "id": "US-0.6.3",
+      "title": "Test Suites",
+      "description": "Implement test suite organization with deftest-suite, suite-setup, and suite-teardown for grouping related tests.",
       "acceptanceCriteria": [
-        "src/constants/buffer.ts exists with DEFAULT_BUFFER_SIZE = 64",
-        "src/constants/buffer.ts has BUFFER_GROWTH_FACTOR = 2",
-        "src/constants/buffer.ts has MAX_BUFFER_SIZE constant",
-        "src/constants/terminal.ts has terminal-related constants",
-        "src/constants/editor.ts has editor configuration defaults",
-        "All magic numbers in code are replaced with constants",
-        "Constants use UPPER_SNAKE_CASE naming",
-        "Constants are exported and documented with JSDoc",
-        "No hardcoded numbers remain in source code"
+        "(deftest-suite my-suite ...) defines test suite",
+        "Running suite executes all tests in suite",
+        "(suite-setup) executes once before all tests",
+        "(suite-teardown) executes once after all tests",
+        "Nested suites execute when parent suite runs",
+        "(test-run-suite \"my-suite\") executes only that suite",
+        "Suite descriptions are visible when listing suites"
       ],
-      "priority": 15,
-      "passes": true,
-      "notes": "SPEC-024 Phase 1.3 - Improves code maintainability"
+      "priority": 10,
+      "passes": false,
+      "notes": "Phase 0.5 - Test organization"
     },
     {
-      "id": "US-024-08",
-      "title": "Enhance TaskEither Utility Methods",
-      "description": "Add tap(), tapError(), chainIf(), fromPromise(), and swap() methods to TaskEither class in src/utils/task-either.ts for improved functional composition.",
+      "id": "US-0.6.4",
+      "title": "Async Testing",
+      "description": "Implement async test support for T-Lisp with deftest-async, await, async-all, and timeout handling.",
       "acceptanceCriteria": [
-        "TaskEither.tap() method exists for side effects in success chain",
-        "TaskEither.tapError() method exists for side effects in error chain",
-        "TaskEither.chainIf() method exists for conditional chaining",
-        "TaskEither.fromPromise() static constructor exists",
-        "TaskEither.swap() method exists to convert Either<L,R> to Either<R,L>",
-        "All new methods have proper TypeScript types",
-        "All new methods have JSDoc documentation",
-        "Unit tests exist for each new method",
-        "Tests demonstrate usage patterns",
-        "No breaking changes to existing TaskEither API"
+        "(deftest-async my-async-test (done)) defines async test",
+        "Async test calls (done) when complete",
+        "Async tests timeout after configured duration",
+        "(await promise) continues test when promise resolves",
+        "(async-all tests) waits for all async tests",
+        "Failed async tests show error information",
+        "(assert-eventually condition timeout) polls for condition"
       ],
-      "priority": 15,
-      "passes": true,
-      "notes": "SPEC-024 Phase 1.4 - Enhanced functional utilities"
+      "priority": 10,
+      "passes": false,
+      "notes": "Phase 0.5 - Async testing support"
     },
     {
-      "id": "US-024-09",
-      "title": "Consolidate Duplicate FunctionalTextBuffer Interface Definitions",
-      "description": "Remove duplicate FunctionalTextBuffer interface from src/core/buffer.ts. Keep only the definition in src/core/types.ts. Update all imports to use the canonical definition.",
+      "id": "US-0.6.5",
+      "title": "Better CLI Output",
+      "description": "Improve test output formatting with colors, progress indicators, verbose/quiet modes, and summary statistics.",
       "acceptanceCriteria": [
-        "FunctionalTextBuffer interface exists only in src/core/types.ts",
-        "Duplicate definition removed from src/core/buffer.ts (lines 22-46)",
-        "All files import FunctionalTextBuffer from src/core/types.ts",
-        "No duplicate interface definitions in codebase",
-        "All imports are consolidated to single source",
-        "TypeScript compiles without ambiguous type errors",
-        "All tests pass after consolidation"
+        "Passing tests show green checkmarks",
+        "Failing tests show red X with file:line",
+        "Progress indicator shows during test runs",
+        "Summary shows duration and pass/fail counts",
+        "--verbose flag shows detailed output",
+        "--quiet flag shows only summary",
+        "Failing test output appears at end"
       ],
-      "priority": 20,
-      "passes": true,
-      "notes": "SPEC-024 Phase 2.1 - Remove code duplication"
+      "priority": 10,
+      "passes": false,
+      "notes": "Phase 0.5 - Better developer experience"
     },
     {
-      "id": "US-024-10",
-      "title": "Replace throw Errors with Either in T-Lisp API",
-      "description": "Refactor src/editor/tlisp-api.ts to return Either<ErrorType, TLispValue> instead of throwing errors. Create validation utilities for common patterns.",
+      "id": "US-0.6.6",
+      "title": "Basic Coverage",
+      "description": "Implement code coverage metrics for T-Lisp tests with percentage coverage, function-level reporting, and coverage thresholds.",
       "acceptanceCriteria": [
-        "No 'throw new Error()' statements in src/editor/tlisp-api.ts",
-        "All API functions return Either<ErrorType, TLispValue>",
-        "src/utils/validation.ts exists with validateArgsCount()",
-        "src/utils/validation.ts has validateArgType()",
-        "src/utils/validation.ts has validateBufferExists()",
-        "src/utils/validation.ts has validateFilePath()",
-        "Validation utilities return Either with proper error types",
-        "API functions use validation utilities consistently",
-        "Errors are returned via Either.left() not thrown",
-        "Unit tests verify Either returns instead of exceptions"
-      ],
-      "priority": 5,
-      "passes": true,
-      "notes": "SPEC-024 Phase 3.1, 3.2 - Critical for functional error handling"
-    },
-    {
-      "id": "US-024-11",
-      "title": "Replace throw Errors with Either in T-Lisp Evaluator",
-      "description": "Refactor src/tlisp/evaluator.ts to return Either<EvalError, TLispValue> instead of throwing. Update all call sites to handle Either results.",
-      "acceptanceCriteria": [
-        "No 'throw new Error()' in src/tlisp/evaluator.ts",
-        "Evaluator returns Either<EvalError, TLispValue>",
-        "All call sites handle Either results with fold/map/flatMap",
-        "Error types are specific (EvalError with variants)",
-        "Success and error paths are both tested",
-        "No uncaught exceptions during evaluation",
-        "Evaluator tests pass with Either assertions",
-        "Integration tests verify error propagation"
-      ],
-      "priority": 6,
-      "passes": true,
-      "notes": "SPEC-024 Phase 3.3 - Core T-Lisp interpreter"
-    },
-    {
-      "id": "US-024-12",
-      "title": "Replace throw Errors with Either in T-Lisp Parser",
-      "description": "Refactor src/tlisp/parser.ts to return Either<ParseError, TLispAST> instead of throwing. Update all call sites to handle Either results.",
-      "acceptanceCriteria": [
-        "No 'throw new Error()' in src/tlisp/parser.ts",
-        "Parser returns Either<ParseError, TLispAST>",
-        "All call sites handle Either results",
-        "ParseError types are specific and descriptive",
-        "Both valid and invalid input are tested",
-        "Error messages are helpful and actionable",
-        "Parser tests pass with Either assertions",
-        "Invalid syntax returns Either.left with details"
-      ],
-      "priority": 6,
-      "passes": true,
-      "notes": "SPEC-024 Phase 3.4 - Core T-Lisp parsing"
-    },
-    {
-      "id": "US-024-13",
-      "title": "Replace throw Errors with Either in T-Lisp Tokenizer",
-      "description": "Refactor src/tlisp/tokenizer.ts to return Either<TokenizeError, Token[]> instead of throwing. Update all call sites to handle Either results.",
-      "acceptanceCriteria": [
-        "No 'throw new Error()' in src/tlisp/tokenizer.ts",
-        "Tokenizer returns Either<TokenizeError, Token[]>",
-        "All call sites handle Either results",
-        "TokenizeError types capture lexical errors",
-        "Invalid tokens return descriptive errors",
-        "Valid token sequences are tested",
-        "Tokenizer tests pass with Either assertions",
-        "Error location information is preserved"
-      ],
-      "priority": 6,
-      "passes": true,
-      "notes": "SPEC-024 Phase 3.5 - Core T-Lisp tokenization"
-    },
-    {
-      "id": "US-024-14",
-      "title": "Replace 'any' Types in Editor Core",
-      "description": "Fix all 'any' types in src/editor/editor.ts. Replace 'set mode(v: any)' with proper EditorMode union type. Fix 'executeCommand(command: string): any' return type.",
-      "acceptanceCriteria": [
-        "EditorMode type defined as 'normal' | 'insert' | 'visual' | 'command' | 'mx'",
-        "set mode(v: any) replaced with set mode(v: EditorMode)",
-        "executeCommand() return type is properly typed (not 'any')",
-        "All other 'any' types in editor.ts are replaced",
-        "TypeScript compiles without 'any' type errors",
-        "EditorMode type is exported and reusable",
-        "All mode assignments are type-safe",
-        "Unit tests verify mode type safety"
-      ],
-      "priority": 7,
-      "passes": true,
-      "notes": "SPEC-024 Phase 4.1 - Type safety in editor core"
-    },
-    {
-      "id": "US-024-15",
-      "title": "Replace 'any' Types in T-Lisp REPL",
-      "description": "Replace all 'any' types in src/tlisp/repl.ts with proper TypeScript types. Define interfaces for REPL state and commands.",
-      "acceptanceCriteria": [
-        "REPL state interface exists with proper types",
-        "REPL command interface is defined",
-        "All 'any' types in repl.ts are replaced",
-        "Function parameters have explicit types",
-        "Return types are explicitly defined",
-        "JSDoc comments clarify complex types",
-        "No implicit 'any' remains in REPL",
-        "REPL tests pass with strict type checking"
-      ],
-      "priority": 12,
-      "passes": true,
-      "notes": "SPEC-024 Phase 4.2 - Type safety in REPL"
-    },
-    {
-      "id": "US-024-16",
-      "title": "Replace 'any' Types in Frontend Components",
-      "description": "Replace 'any' types in src/frontend/types.ts and event listeners. Define proper event types as discriminated unions (KeyEvent, MouseEvent, ResizeEvent).",
-      "acceptanceCriteria": [
-        "Event types defined as discriminated unions",
-        "KeyEvent type exists with proper properties",
-        "MouseEvent type exists if needed",
-        "ResizeEvent type exists if needed",
-        "Event listeners use union types instead of 'any'",
-        "onEvent: (event: KeyEvent | MouseEvent | ResizeEvent) => void",
-        "All frontend type definitions are specific",
-        "No 'any' in type definitions",
-        "Frontend tests verify type safety"
-      ],
-      "priority": 12,
-      "passes": true,
-      "notes": "SPEC-024 Phase 4.3 - Type safety in frontend"
-    },
-    {
-      "id": "US-024-17",
-      "title": "Create Comprehensive Type Definition File",
-      "description": "Create src/types/index.ts exporting all common types. Define EditorMode, KeySequence, CommandResult, BufferState, and ViewportState types.",
-      "acceptanceCriteria": [
-        "src/types/index.ts file exists",
-        "EditorMode type exported",
-        "KeySequence type defined",
-        "CommandResult type defined",
-        "BufferState type defined",
-        "ViewportState type defined",
-        "All common types are centralized",
-        "Types are properly documented with JSDoc",
-        "Other files import from src/types/index.ts",
-        "No duplicate type definitions across codebase",
-        "Type exports are organized and clear"
-      ],
-      "priority": 15,
-      "passes": true,
-      "notes": "SPEC-024 Phase 4.5 - Centralize type definitions"
-    },
-    {
-      "id": "US-024-18",
-      "title": "Refactor Filesystem to Use TaskEither Pattern",
-      "description": "Refactor src/core/filesystem.ts to use TaskEither<FileSystemError, T> instead of Promise<T>. Replace Deno APIs with Bun/Node equivalents. Implement functional error handling.",
-      "acceptanceCriteria": [
-        "All methods return TaskEither<FileSystemError, T>",
-        "readFile() returns TaskEither<FileSystemError, string>",
-        "writeFile() returns TaskEither<FileSystemError, void>",
-        "exists() returns TaskEither<FileSystemError, boolean>",
-        "stat() returns TaskEither<FileSystemError, FileStats>",
-        "remove() returns TaskEither<FileSystemError, void>",
-        "Deno APIs replaced with Bun.file() or Node fs/promises",
-        "Errors are returned via Either, not thrown",
-        "All filesystem call sites use TaskEither pattern",
-        "Filesystem tests pass with TaskEither assertions"
-      ],
-      "priority": 8,
-      "passes": true,
-      "notes": "SPEC-024 Phase 5.1 - Async operations with TaskEither"
-    },
-    {
-      "id": "US-024-19",
-      "title": "Refactor Terminal I/O to Use TaskEither Pattern",
-      "description": "Refactor src/core/terminal.ts to use TaskEither<TerminalError, void> for async methods. Update to FunctionalTerminalIO interface. Keep sync methods using Either.",
-      "acceptanceCriteria": [
-        "Async methods return TaskEither<TerminalError, void>",
-        "Sync methods return Either<TerminalError, T>",
-        "clear() returns TaskEither<TerminalError, void>",
-        "write() returns TaskEither<TerminalError, void>",
-        "moveCursor() returns TaskEither<TerminalError, void>",
-        "readKey() returns TaskEither<TerminalError, string>",
-        "enterRawMode() returns TaskEither<TerminalError, void>",
-        "exitRawMode() returns TaskEither<TerminalError, void>",
-        "Terminal APIs use Node/Bun compatible implementations",
-        "All terminal tests pass with TaskEither"
-      ],
-      "priority": 8,
-      "passes": true,
-      "notes": "SPEC-024 Phase 5.3 - Terminal I/O with TaskEither"
-    },
-    {
-      "id": "US-024-20",
-      "title": "Split createEditorAPI() into Functional Modules",
-      "description": "Split the large createEditorAPI() function into separate modules: buffer-ops.ts, cursor-ops.ts, mode-ops.ts, file-ops.ts, bindings-ops.ts in src/editor/api/ directory.",
-      "acceptanceCriteria": [
-        "src/editor/api/buffer-ops.ts exists with buffer operations",
-        "src/editor/api/cursor-ops.ts exists with cursor operations",
-        "src/editor/api/mode-ops.ts exists with mode operations",
-        "src/editor/api/file-ops.ts exists with file operations",
-        "src/editor/api/bindings-ops.ts exists with binding operations",
-        "Each module exports API function map",
-        "createEditorAPI() imports and composes these modules",
-        "Each module is independently testable",
-        "Functions are small and focused",
-        "createEditorAPI() is significantly smaller and clearer",
-        "All editor API tests still pass"
-      ],
-      "priority": 13,
-      "passes": true,
-      "notes": "SPEC-024 Phase 6.1 - Reduce complexity in tlisp-api.ts"
-    },
-    {
-      "id": "US-024-21",
-      "title": "Split handleKey() into Mode-Specific Handlers",
-      "description": "Extract mode-specific logic from handleKey() into separate handler files: normal-handler.ts, insert-handler.ts, visual-handler.ts, command-handler.ts, mx-handler.ts in src/editor/handlers/.",
-      "acceptanceCriteria": [
-        "src/editor/handlers/normal-handler.ts exists",
-        "src/editor/handlers/insert-handler.ts exists",
-        "src/editor/handlers/visual-handler.ts exists",
-        "src/editor/handlers/command-handler.ts exists",
-        "src/editor/handlers/mx-handler.ts exists",
-        "Each handler exports handleKey() for its mode",
-        "Main handleKey() dispatches to appropriate handler",
-        "Handler selection uses pattern matching or clean switch",
-        "Each handler is independently testable",
-        "Handler functions are focused and readable",
-        "All key handling tests pass",
-        "All modes work correctly"
-      ],
-      "priority": 13,
-      "passes": true,
-      "notes": "SPEC-024 Phase 6.2 - Reduce complexity in handleKey()"
-    },
-    {
-      "id": "US-024-22",
-      "title": "Extract loadCoreBindings() Logic",
-      "description": "Extract loadCoreBindings() logic into separate functions: path resolution, binding loading, and fallback. Compose these functions cleanly.",
-      "acceptanceCriteria": [
-        "resolveBindingsPath() function exists",
-        "loadBindingsFromFile() function exists",
-        "loadFallbackBindings() function exists",
-        "loadCoreBindings() composes these functions",
-        "Each function has single responsibility",
-        "Functions are pure or have clear side effects",
-        "Error handling uses Either/TaskEither",
-        "Functions are independently testable",
-        "Load bindings tests pass",
-        "Fallback mechanism works correctly"
-      ],
-      "priority": 18,
-      "passes": true,
-      "notes": "SPEC-024 Phase 6.3 - Improve loadCoreBindings() structure"
-    },
-    {
-      "id": "US-024-23",
-      "title": "Remove Legacy Wrapper Classes from Buffer",
-      "description": "Delete TextBufferImpl class (lines 558-652) and GapBuffer class (lines 661-729) from src/core/buffer.ts. Verify no code references these classes.",
-      "acceptanceCriteria": [
-        "TextBufferImpl class removed from src/core/buffer.ts",
-        "GapBuffer class removed from src/core/buffer.ts",
-        "No code references TextBufferImpl",
-        "No code references GapBuffer (legacy)",
-        "FunctionalGapBuffer remains (used by FunctionalTextBufferImpl)",
-        "All buffer tests pass",
-        "No TypeScript errors after removal",
-        "Code compiles successfully"
+        "--coverage flag shows coverage percentage",
+        "Coverage report shows which functions are covered",
+        "Untested functions are highlighted in report",
+        "--coverage-format json outputs JSON report",
+        "Coverage report shows which lines need coverage",
+        "Build fails when coverage below threshold"
       ],
       "priority": 20,
-      "passes": true,
-      "notes": "SPEC-024 Phase 7.1 - Remove dead code"
+      "passes": false,
+      "notes": "Phase 0.5 - Code quality metrics"
     },
     {
-      "id": "US-024-24",
-      "title": "Remove Backup Directory and Debug Artifacts",
-      "description": "Delete backups/original-core/ directory, debug-test.txt, manual-test.txt, mode-capture.txt, and unused scripts/debug-*.ts files.",
+      "id": "US-0.8.1",
+      "title": "Basic Server/Client Infrastructure",
+      "description": "Implement server/client architecture with tmax --daemon and tmaxclient command for instant file operations and T-Lisp evaluation.",
       "acceptanceCriteria": [
-        "backups/original-core/ directory deleted",
-        "debug-test.txt deleted",
-        "manual-test.txt deleted",
-        "mode-capture.txt deleted",
-        "Unused scripts/debug-*.ts files deleted",
-        "No broken references after deletion",
-        "Git repository no longer tracks these files",
-        ".gitignore updated to prevent future commits",
-        "Project root is clean"
-      ],
-      "priority": 25,
-      "passes": true,
-      "notes": "SPEC-024 Phase 7.2, 7.3 - Clean up project"
-    },
-    {
-      "id": "US-024-25",
-      "title": "Archive Completed Specs",
-      "description": "Review specs/SPECS_INDEX.md, move completed specs to specs/archive/ directory, and update the index.",
-      "acceptanceCriteria": [
-        "specs/SPECS_INDEX.md reviewed for completed specs",
-        "Completed specs moved to specs/archive/",
-        "SPECS_INDEX.md updated to remove archived specs",
-        "Archive directory exists",
-        "Spec links are updated if needed",
-        "Only active specs remain in main directory",
-        "Index is accurate and current"
-      ],
-      "priority": 25,
-      "passes": true,
-      "notes": "SPEC-024 Phase 7.4 - Organize specs"
-    },
-    {
-      "id": "US-024-26",
-      "title": "Update Tests to Use Bun Test Syntax",
-      "description": "Convert all test files from Deno test syntax to Bun test syntax. Replace Deno.test() with describe()/test() from bun:test. Replace assertEquals with expect().",
-      "acceptanceCriteria": [
-        "All test files import from 'bun:test'",
-        "Deno.test() replaced with describe()/test()",
-        "assertEquals replaced with expect().toBe()",
-        "assertRejects replaced with expect().rejects",
-        "assertThrows replaced with expect().toThrow()",
-        "Test structure uses describe() for suites",
-        "All 131+ tests pass with Bun test",
-        "Test syntax is consistent across all files",
-        "No Deno test imports remain",
-        "Tests are readable and well-organized"
-      ],
-      "priority": 4,
-      "passes": true,
-      "notes": "SPEC-024 Phase 9.1 - Must convert all tests for Bun"
-    },
-    {
-      "id": "US-024-27",
-      "title": "Update CLAUDE.md for Bun Runtime and Functional Patterns",
-      "description": "Update CLAUDE.md to document Bun runtime, remove Deno references, document functional patterns (Option, Either, TaskEither), and add Bun migration notes.",
-      "acceptanceCriteria": [
-        "CLAUDE.md documents Bun as primary runtime",
-        "All 'use deno' replaced with 'use bun'",
-        "Test commands use 'bun test'",
-        "Option<T> pattern documented with examples",
-        "Centralized error types documented",
-        "Either/TaskEither usage guidelines added",
-        "Bun Migration Notes section added",
-        "API replacement examples included",
-        "Error Handling section updated",
-        "Code examples use Bun APIs",
-        "All examples are accurate and tested"
-      ],
-      "priority": 22,
-      "passes": true,
-      "notes": "SPEC-024 Phase 10.1 - Critical documentation update"
-    },
-    {
-      "id": "US-024-28",
-      "title": "Update README.md for Bun Runtime",
-      "description": "Update README.md to reflect Bun runtime. Change installation from 'deno install' to 'bun install'. Update all command examples from 'deno task start' to 'bun run start'.",
-      "acceptanceCriteria": [
-        "README.md lists Bun as prerequisite (not Deno)",
-        "Installation uses 'bun install' instead of 'deno install",
-        "Start command uses 'bun run src/main.ts'",
-        "Dev command uses 'bun --watch' or 'bun run dev'",
-        "Test command uses 'bun test'",
-        "REPL command uses 'bun run repl'",
-        "All command examples use Bun syntax",
-        "Deno references removed or updated",
-        "Quick start guide works with Bun",
-        "All examples are accurate"
-      ],
-      "priority": 22,
-      "passes": true,
-      "notes": "SPEC-024 Phase 10.4 - User-facing documentation"
-    },
-    {
-      "id": "US-024-29",
-      "title": "Create Functional Error Handling Examples",
-      "description": "Create examples/functional-error-handling.ts with patterns for validation, async operations, nullable handling, error recovery, and error logging.",
-      "acceptanceCriteria": [
-        "examples/functional-error-handling.ts file exists",
-        "Validation with Either example included",
-        "Async operations with TaskEither example included",
-        "Nullable handling with Option example included",
-        "Error recovery and retry example included",
-        "Error logging pattern example included",
-        "All examples use Bun APIs (not Deno)",
-        "Code is commented and educational",
-        "Examples run without errors",
-        "Examples demonstrate best practices"
-      ],
-      "priority": 30,
-      "passes": true,
-      "notes": "SPEC-024 Phase 8.3 - Educational resource"
-    },
-    {
-      "id": "US-024-30",
-      "title": "Final Validation and Quality Gates",
-      "description": "Run all validation commands from SPEC-024. Ensure zero 'any' types, zero 'throw' statements (except TaskEither.tryCatch), zero Deno imports, and all tests pass.",
-      "acceptanceCriteria": [
-        "bun run tsc --noEmit completes with 0 errors",
-        "grep -r ': any' src/ returns 0 matches",
-        "grep -r 'throw new Error' src/ returns 0 matches",
-        "grep -r 'from \"https://deno.land' src/ returns 0 matches",
-        "grep -r 'Deno\\.' src/ returns 0 matches",
-        "deno.json and deno.lock files do not exist",
-        "import_map.json does not exist",
-        "bun test runs all 131+ tests successfully",
-        "All tests pass (100% pass rate)",
-        "bun run src/main.ts starts successfully",
-        "Application is fully functional on Bun",
-        "Code quality validation passes"
+        "tmax --daemon starts server on /tmp/tmax-$UID/server",
+        "tmaxclient file.txt opens file instantly (<100ms)",
+        "tmaxclient --eval '(buffer-list)' returns JSON output",
+        "tmaxclient blocks until buffer closed (wait mode)",
+        "Client exit code 0 if saved, 1 if discarded",
+        "tmaxclient -n file.txt opens in background mode",
+        "tmaxclient shows 'Server not running' error when server not available"
       ],
       "priority": 1,
       "passes": true,
-      "notes": "SPEC-024 Validation - Final gate before completion"
+      "notes": "Phase 0.8 - Server/Client Architecture - AI-native editor foundation"
+    },
+    {
+      "id": "US-0.8.2",
+      "title": "Advanced Client Commands",
+      "description": "Extend tmaxclient with buffer management, stdin insertion, git integration, custom socket paths, and ping command.",
+      "acceptanceCriteria": [
+        "tmaxclient --list-buffers shows all buffers with status",
+        "tmaxclient --kill-buffer scratch.tlisp closes buffer",
+        "echo 'TODO' | tmaxclient --insert-stdin inserts text",
+        "GIT_EDITOR='tmaxclient -nw' enables instant git commits",
+        "tmaxclient -s /tmp/my-project-socket connects to custom socket",
+        "tmaxclient --ping returns 0 if running, 1 if not"
+      ],
+      "priority": 1,
+      "passes": true,
+      "notes": "Phase 0.8 - Advanced client features"
+    },
+    {
+      "id": "US-0.8.3",
+      "title": "AI Agent Control",
+      "description": "Implement JSON-RPC protocol for AI agents to query editor state, execute T-Lisp code, and get help system responses. Enables 10x faster AI workflows.",
+      "acceptanceCriteria": [
+        "query:full-state returns JSON with buffers, cursor, variables, keybindings",
+        "describe-function command returns signature, docs, source, examples",
+        "find-usages command returns all function call locations",
+        "apropos-command command returns matching functions with docs",
+        "T-Lisp code execution + test verification completes in <100ms",
+        "describe-variable command returns value, type, docs, customization"
+      ],
+      "priority": 1,
+      "passes": false,
+      "notes": "Phase 0.8 - AI-native editor - key competitive advantage"
+    },
+    {
+      "id": "US-1.1.1",
+      "title": "Word Navigation",
+      "description": "Implement Vim-style word navigation with w (next word start), b (previous word start), e (word end), and count prefix support.",
+      "acceptanceCriteria": [
+        "w moves cursor to start of next word in normal mode",
+        "b moves cursor to start of previous word",
+        "e moves cursor to end of current word",
+        "3w moves cursor forward 3 words",
+        "Word navigation continues to next line at end of line"
+      ],
+      "priority": 1,
+      "passes": false,
+      "notes": "Phase 1 - Core Editing Features"
+    },
+    {
+      "id": "US-1.1.2",
+      "title": "Line Navigation",
+      "description": "Implement Vim-style line navigation with 0 (first column), $ (last non-empty), _ (first non-blank), - and + (line motion), and count prefix support.",
+      "acceptanceCriteria": [
+        "0 moves cursor to first column",
+        "$ moves cursor to last non-empty column",
+        "_ moves cursor to first non-blank column",
+        "- moves cursor to first non-blank of previous line",
+        "+ moves cursor to first non-blank of next line",
+        "5- moves cursor up 5 lines"
+      ],
+      "priority": 1,
+      "passes": false,
+      "notes": "Phase 1 - Core Editing Features"
+    },
+    {
+      "id": "US-1.2.1",
+      "title": "Delete Operator",
+      "description": "Implement Vim-style delete operator (d) with motion support. d{motion} deletes text and stores in register. Support dd for line deletion and count prefix.",
+      "acceptanceCriteria": [
+        "dw deletes current word",
+        "d$ deletes to end of line",
+        "dd deletes current line",
+        "3dd deletes 3 lines",
+        "d) deletes to end of sentence",
+        "Deleted text stored in default register",
+        "Undo works after delete operations"
+      ],
+      "priority": 1,
+      "passes": false,
+      "notes": "Phase 1 - Core Editing Features"
+    },
+    {
+      "id": "US-1.2.2",
+      "title": "Yank (Copy) Operator",
+      "description": "Implement Vim-style yank operator (y) with motion support. y{motion} copies text without deletion. Support yy for line yanking and p/P for pasting.",
+      "acceptanceCriteria": [
+        "yw yanks current word without deleting",
+        "yy yanks entire line",
+        "y$ yanks to end of line",
+        "p pastes after cursor position",
+        "P pastes before cursor position",
+        "Line paste puts text below current line",
+        "Character paste puts text after cursor"
+      ],
+      "priority": 1,
+      "passes": false,
+      "notes": "Phase 1 - Core Editing Features"
+    },
+    {
+      "id": "US-1.2.3",
+      "title": "Undo/Redo",
+      "description": "Implement Vim-style undo/redo with u (undo) and Ctrl+r (redo). Track edit history and handle undo branch clearing on new edits.",
+      "acceptanceCriteria": [
+        "u undoes last edit",
+        "Multiple u presses undo edits sequentially",
+        "Ctrl+r redoes undone edits",
+        "u only undoes last edit (not all)",
+        "New edits clear redo history",
+        "Undo to beginning shows 'Already at oldest change'",
+        "Redo to end shows 'Already at newest change'"
+      ],
+      "priority": 1,
+      "passes": false,
+      "notes": "Phase 1 - Core Editing Features"
+    },
+    {
+      "id": "US-1.3.1",
+      "title": "Count Prefix",
+      "description": "Implement Vim-style count prefix for commands. Number before command repeats action N times.",
+      "acceptanceCriteria": [
+        "3w moves forward 3 words",
+        "5dd deletes 5 lines",
+        "10x deletes 10 characters",
+        "2yy yanks 2 lines",
+        "3p pastes text 3 times",
+        "0w doesn't move cursor (zero count edge case)"
+      ],
+      "priority": 1,
+      "passes": false,
+      "notes": "Phase 1 - Core Editing Features"
+    },
+    {
+      "id": "US-1.4.1",
+      "title": "Change Operator",
+      "description": "Implement Vim-style change operator (c). c{motion} deletes text and enters insert mode. Support cc for line change and count prefix.",
+      "acceptanceCriteria": [
+        "cw deletes word and enters insert mode",
+        "cc clears line and enters insert mode",
+        "c$ deletes to end of line and enters insert mode",
+        "3cw deletes 3 words and enters insert mode",
+        "Esc returns to normal mode with new text",
+        "Deleted text stored in register"
+      ],
+      "priority": 1,
+      "passes": false,
+      "notes": "Phase 1 - Core Editing Features"
+    },
+    {
+      "id": "US-1.5.1",
+      "title": "Search Forward/Backward",
+      "description": "Implement Vim-style search with /pattern (forward) and ?pattern (backward). Support n/N for next/previous match and match highlighting.",
+      "acceptanceCriteria": [
+        "/pattern moves cursor to next match",
+        "?pattern moves cursor to previous match",
+        "n moves to next match",
+        "N moves to previous match",
+        "Pattern not found shows error message",
+        "Empty search reuses previous pattern",
+        "Matched text is highlighted"
+      ],
+      "priority": 1,
+      "passes": false,
+      "notes": "Phase 1 - Core Editing Features"
+    },
+    {
+      "id": "US-1.5.2",
+      "title": "Word Under Cursor Search",
+      "description": "Implement Vim-style word search with * (next occurrence) and # (previous occurrence) for word under cursor.",
+      "acceptanceCriteria": [
+        "* moves cursor to next occurrence of word under cursor",
+        "# moves cursor to previous occurrence",
+        "n continues in same direction",
+        "N reverses direction",
+        "Only whole word matches (special chars handled)",
+        "Word not found shows error message"
+      ],
+      "priority": 10,
+      "passes": false,
+      "notes": "Phase 1 - Core Editing Features"
+    },
+    {
+      "id": "US-1.6.1",
+      "title": "Jump Commands",
+      "description": "Implement Vim-style jump commands for navigating large files. gg (first line), G (last line), Ctrl+f/b (page up/down), Ctrl+d/u (half page).",
+      "acceptanceCriteria": [
+        "gg moves cursor to first line",
+        "G moves cursor to last line",
+        "50G moves cursor to line 50",
+        "Ctrl+f scrolls down one page",
+        "Ctrl+b scrolls up one page",
+        "Ctrl+d scrolls down half page",
+        "Ctrl+u scrolls up half page"
+      ],
+      "priority": 10,
+      "passes": false,
+      "notes": "Phase 1 - Core Editing Features"
+    },
+    {
+      "id": "US-1.7.1",
+      "title": "Visual Mode Selection",
+      "description": "Implement Vim-style visual mode with v (character-wise), V (line-wise), Ctrl+v (block-wise). Support text selection and manipulation.",
+      "acceptanceCriteria": [
+        "v enters character-wise visual mode",
+        "V enters line-wise visual mode",
+        "Ctrl+v enters block-wise visual mode",
+        "Cursor movement expands selection",
+        "d deletes selection",
+        "y yanks selection",
+        "u lowercases selection",
+        "U uppercases selection",
+        "Esc exits visual mode and clears selection"
+      ],
+      "priority": 1,
+      "passes": false,
+      "notes": "Phase 1 - Core Editing Features"
+    },
+    {
+      "id": "US-1.8.1",
+      "title": "Basic Text Objects",
+      "description": "Implement Vim-style text objects for inner/word (iw/aw), inner/around quotes/parens/braces (i\"/a\", i)/a), i{, etc.) for efficient text manipulation.",
+      "acceptanceCriteria": [
+        "diw deletes inner word",
+        "daw deletes word with trailing space",
+        "ci) deletes inside parens and enters insert mode",
+        "ca' deletes including quotes and enters insert mode",
+        "di) deletes inside parentheses",
+        "ci{ deletes inside braces and enters insert mode",
+        "dit deletes inside HTML/XML tag"
+      ],
+      "priority": 1,
+      "passes": false,
+      "notes": "Phase 1 - Core Editing Features - Vim superpower"
+    },
+    {
+      "id": "US-1.9.1",
+      "title": "Kill Ring Storage",
+      "description": "Implement Emacs-style kill ring for deleted/yanked text. Store multiple items in ring, rotate through history, and manage ring size.",
+      "acceptanceCriteria": [
+        "Deleted text added to front of kill-ring",
+        "New deletions push older items back",
+        "Ring size limit (default 5) removes oldest when full",
+        "p pastes item from front of kill-ring",
+        "(kill-ring-rotate) rotates ring items",
+        "(kill-ring-list) shows all items"
+      ],
+      "priority": 10,
+      "passes": false,
+      "notes": "Phase 1 - Core Editing Features - Emacs integration"
+    },
+    {
+      "id": "US-1.9.2",
+      "title": "Yank Pop",
+      "description": "Implement Emacs-style yank-pop (M-y) to cycle through kill ring history after pasting. Replace pasted text with previous kills.",
+      "acceptanceCriteria": [
+        "M-y after yank replaces with previous kill-ring item",
+        "Repeated M-y cycles through history",
+        "Cycling wraps from end to start",
+        "C-g cancels yank-pop and restores original",
+        "p pastes most recent kill",
+        "p then M-y replaces with second most recent"
+      ],
+      "priority": 10,
+      "passes": false,
+      "notes": "Phase 1 - Core Editing Features - Emacs integration"
+    },
+    {
+      "id": "US-1.9.3",
+      "title": "Evil Integration",
+      "description": "Integrate kill ring with Vim's register system. Map unnamed register, yank register (0), delete registers (1-9), named registers (a-z), and system clipboard (+).",
+      "acceptanceCriteria": [
+        "Delete stores in both unnamed register and kill-ring",
+        "Yank stores in register 0",
+        "dd stores in register 1",
+        "9 deletes rotate through registers 1-9",
+        "\"ayw stores in register a",
+        "\"A3w appends to register a",
+        "\"+y stores in system clipboard"
+      ],
+      "priority": 10,
+      "passes": false,
+      "notes": "Phase 1 - Core Editing Features - Vim/Emacs bridge"
+    },
+    {
+      "id": "US-1.10.1",
+      "title": "Minibuffer Input",
+      "description": "Implement Emacs-style minibuffer for command input. M-x enters command mode, Tab completes, Enter executes, C-g cancels. Support command history.",
+      "acceptanceCriteria": [
+        "M-x opens minibuffer at bottom of screen",
+        "Typing in minibuffer shows text",
+        "Tab completes or shows options",
+        "Enter executes command",
+        "C-g closes minibuffer without executing",
+        "M-p shows previous input from history",
+        "M-n shows next input from history",
+        "Commands requiring arguments prompt in minibuffer"
+      ],
+      "priority": 1,
+      "passes": false,
+      "notes": "Phase 1 - Core Editing Features - Emacs-style UI"
+    },
+    {
+      "id": "US-1.10.2",
+      "title": "Fuzzy Command Completion",
+      "description": "Implement fuzzy completion for minibuffer commands. Match commands by pattern (e.g., 'buf-s' matches 'buffer-save').",
+      "acceptanceCriteria": [
+        "Typing 'buf-s' shows 'buffer-save' completion",
+        "Typing 'bs' completes to 'buffer-save' (fuzzy)",
+        "Multiple matches show list",
+        "Typing with visible list filters matches",
+        "Single match completes fully",
+        "No matches show 'No match' message"
+      ],
+      "priority": 10,
+      "passes": false,
+      "notes": "Phase 1 - Core Editing Features - UX enhancement"
+    },
+    {
+      "id": "US-1.10.3",
+      "title": "Which-key Popup",
+      "description": "Implement which-key popup showing available bindings after typing key prefix. Pause 1 second to show popup.",
+      "acceptanceCriteria": [
+        "C-c (pause) shows all C-c bindings in popup",
+        "Popup shows key and command name for each binding",
+        "Pressing next key updates popup with next-level bindings",
+        "C-g closes popup",
+        "SPC (pause) shows all SPC-prefixed commands",
+        "Quick typing skips which-key (no pause)"
+      ],
+      "priority": 10,
+      "passes": false,
+      "notes": "Phase 1 - Core Editing Features - Key discovery"
+    },
+    {
+      "id": "US-1.10.4",
+      "title": "Command Documentation Preview",
+      "description": "Show command documentation in which-key popup or completion list. Display docstring preview for highlighted command.",
+      "acceptanceCriteria": [
+        "Which-key popup shows docs for highlighted command",
+        "Completion shows docstring preview pane",
+        "No documentation shows 'No documentation available'",
+        "Long docs truncated with '...' and show full on demand",
+        "C-h opens full documentation in help buffer"
+      ],
+      "priority": 20,
+      "passes": false,
+      "notes": "Phase 1 - Core Editing Features - UX polish"
+    },
+    {
+      "id": "US-1.11.1",
+      "title": "Describe Key",
+      "description": "Implement C-h k to show what command is bound to a key. Display key, command, and documentation.",
+      "acceptanceCriteria": [
+        "C-h k followed by key shows bound command",
+        "Unbound keys show 'Key is unbound'",
+        "Bound keys show key, command, and documentation",
+        "C-h k C-x C-f shows 'find-file' documentation",
+        "C-g cancels describe-key"
+      ],
+      "priority": 10,
+      "passes": false,
+      "notes": "Phase 1 - Core Editing Features - Help system"
+    },
+    {
+      "id": "US-1.11.2",
+      "title": "Describe Function",
+      "description": "Implement C-h f to view function documentation. Prompt for function name in minibuffer and show signature, docstring, and file location.",
+      "acceptanceCriteria": [
+        "C-h f prompts for function name in minibuffer",
+        "Typing 'buffer-save' shows function documentation",
+        "Docs show signature, docstring, and file location",
+        "Function not found shows error message",
+        "q closes help buffer",
+        "Completion shows matching functions while typing"
+      ],
+      "priority": 10,
+      "passes": false,
+      "notes": "Phase 1 - Core Editing Features - Help system"
+    },
+    {
+      "id": "US-1.11.3",
+      "title": "Apropos Command",
+      "description": "Implement C-h a to search for commands by pattern. Show all commands matching pattern with their bindings.",
+      "acceptanceCriteria": [
+        "C-h a prompts for search pattern",
+        "Typing 'save' shows all commands with 'save' in name",
+        "Typing 'save.*buffer' shows commands matching both words",
+        "Selecting command shows its documentation",
+        "Results show command name and binding",
+        "No matches show 'No commands found'"
+      ],
+      "priority": 10,
+      "passes": false,
+      "notes": "Phase 1 - Core Editing Features - Command discovery"
+    },
+    {
+      "id": "US-2.1.1",
+      "title": "Plugin Directory Structure",
+      "description": "Implement standard plugin directory structure. Plugins in ~/.config/tmax/tlpa/plugin-name/ are discovered on startup. Load plugin.tlisp automatically.",
+      "acceptanceCriteria": [
+        "Plugins in ~/.config/tmax/tlpa/plugin-name/ discovered on startup",
+        "plugin.tlisp loaded automatically",
+        "plugin.toml dependencies loaded first"
+      ],
+      "priority": 1,
+      "passes": false,
+      "notes": "Phase 2 - Extensibility & Plugin System"
+    },
+    {
+      "id": "US-2.1.2",
+      "title": "Plugin Lifecycle Hooks",
+      "description": "Implement plugin lifecycle hooks: plugin-init, plugin-enable, plugin-disable, plugin-unload. Execute hooks at appropriate times.",
+      "acceptanceCriteria": [
+        "(plugin-init) executes when plugin loads",
+        "(plugin-enable) executes when plugin enabled",
+        "(plugin-disable) executes cleanup code",
+        "(plugin-unload) frees resources"
+      ],
+      "priority": 1,
+      "passes": false,
+      "notes": "Phase 2 - Extensibility & Plugin System"
+    },
+    {
+      "id": "US-2.4.1",
+      "title": "Macro Recording",
+      "description": "Implement Vim-style keyboard macro recording. qa starts recording to register a, q stops recording, @a executes macro.",
+      "acceptanceCriteria": [
+        "qa starts recording for register a",
+        "Commands recorded without executing during recording",
+        "q stops recording and saves to register",
+        "@a executes recorded macro",
+        "@@ executes last macro again"
+      ],
+      "priority": 10,
+      "passes": false,
+      "notes": "Phase 2 - Extensibility & Plugin System"
+    },
+    {
+      "id": "US-2.4.2",
+      "title": "Macro Persistence",
+      "description": "Persist keyboard macros across sessions. Save to ~/.config/tmax/macros.tlisp and load on startup.",
+      "acceptanceCriteria": [
+        "Recorded macros persist across tmax restarts",
+        "Editing ~/.config/tmax/macros.tlisp modifies macros",
+        "Edited macros loaded on restart"
+      ],
+      "priority": 10,
+      "passes": false,
+      "notes": "Phase 2 - Extensibility & Plugin System"
+    },
+    {
+      "id": "US-3.1.1",
+      "title": "LSP Client Connection",
+      "description": "Connect to Language Server Protocol servers for IDE features. Attempt connection on file open based on file type.",
+      "acceptanceCriteria": [
+        "TypeScript files trigger typescript-language-server connection",
+        "Successful connection shows 'LSP connected' in status line",
+        "Failed connection logs error but keeps editor functional"
+      ],
+      "priority": 10,
+      "passes": false,
+      "notes": "Phase 3 - Advanced Features - LSP integration"
+    },
+    {
+      "id": "US-3.1.2",
+      "title": "LSP Diagnostics",
+      "description": "Display LSP diagnostics (errors, warnings) from language server. Show error indicators in gutter and messages in status line.",
+      "acceptanceCriteria": [
+        "Error indicators appear in gutter for diagnostics",
+        "Navigating to error line shows message in status line",
+        "Listing diagnostics shows all errors and warnings"
+      ],
+      "priority": 10,
+      "passes": false,
+      "notes": "Phase 3 - Advanced Features - LSP integration"
+    },
+    {
+      "id": "US-3.2.1",
+      "title": "Window Splitting",
+      "description": "Implement Vim-style window splitting. :split splits horizontally, :vsplit splits vertically. C-w w switches focus, C-w q closes window.",
+      "acceptanceCriteria": [
+        ":split splits window horizontally",
+        ":vsplit splits window vertically",
+        "C-w w moves focus to next window",
+        "C-w q closes current window"
+      ],
+      "priority": 10,
+      "passes": false,
+      "notes": "Phase 3 - Advanced Features - Multi-window editing"
+    },
+    {
+      "id": "US-3.2.2",
+      "title": "Window Resizing",
+      "description": "Implement Vim-style window resizing. C-w +/- resize height, C-w </> resize width.",
+      "acceptanceCriteria": [
+        "C-w + increases current window height",
+        "C-w - decreases current window height",
+        "C-w > increases current window width",
+        "C-w < decreases current window width"
+      ],
+      "priority": 10,
+      "passes": false,
+      "notes": "Phase 3 - Advanced Features - Multi-window editing"
+    },
+    {
+      "id": "US-3.4.1",
+      "title": "Undo Tree",
+      "description": "Implement branching undo tree for exploring alternative edit histories. Visualize branches and allow branch selection.",
+      "acceptanceCriteria": [
+        "Edits A, B, C, undo to A, then D shows branch: A→B→C and A→D",
+        "Navigating to branch point allows branch selection",
+        "Undo tree visualization shows branches"
+      ],
+      "priority": 20,
+      "passes": false,
+      "notes": "Phase 3 - Advanced Features - Enhanced undo"
+    },
+    {
+      "id": "US-4.1.1",
+      "title": "Plugin Repository",
+      "description": "Implement central plugin repository for discovery. M-x plugin-list shows available plugins with install commands.",
+      "acceptanceCriteria": [
+        "M-x plugin-list shows available plugins",
+        "Selecting plugin shows description, author, install command",
+        "Installing downloads to ~/.config/tmax/tlpa/"
+      ],
+      "priority": 20,
+      "passes": false,
+      "notes": "Phase 4 - Community & Ecosystem"
+    },
+    {
+      "id": "US-4.1.2",
+      "title": "Plugin Submission",
+      "description": "Implement plugin submission process for sharing plugins. Review process and publication to repository.",
+      "acceptanceCriteria": [
+        "Plugin submission triggers review process",
+        "Approved plugins published to repository",
+        "Published plugins appear in plugin-list results"
+      ],
+      "priority": 20,
+      "passes": false,
+      "notes": "Phase 4 - Community & Ecosystem"
+    },
+    {
+      "id": "US-4.2.1",
+      "title": "Documentation Website",
+      "description": "Create comprehensive online documentation. API reference, tutorials, and guides for T-Lisp functions and editor features.",
+      "acceptanceCriteria": [
+        "Documentation website shows all T-Lisp functions",
+        "Search for 'key bindings' finds tutorials and guides",
+        "Function docs show signature, description, examples, related functions"
+      ],
+      "priority": 20,
+      "passes": false,
+      "notes": "Phase 4 - Community & Ecosystem"
+    },
+    {
+      "id": "US-4.3.1",
+      "title": "Test Coverage Metrics",
+      "description": "Show test coverage metrics for code quality. Percentage coverage per module, line-level coverage reports, CI fail on low coverage.",
+      "acceptanceCriteria": [
+        "Running tests with coverage shows percentage per module",
+        "Coverage report shows which lines are covered",
+        "CI fails when coverage below threshold"
+      ],
+      "priority": 20,
+      "passes": false,
+      "notes": "Phase 4 - Community & Ecosystem"
     }
   ],
   "metadata": {
-    "createdAt": "2026-01-30",
-    "updatedFor": "Bun Runtime Migration and Functional Refactoring",
-    "specType": "refactor",
-    "specReference": "SPEC-024-chore_functional_refactoring.md",
-    "estimatedIterations": 30,
-    "criticalPath": [
-      "US-024-00",
-      "US-024-01",
-      "US-024-02",
-      "US-024-03",
-      "US-024-04",
-      "US-024-26"
-    ]
+    "createdAt": "2025-02-03",
+    "updatedAt": "2025-02-03",
+    "updatedFor": "Ralph agent - Key Binding System Refactor",
+    "specType": "feature",
+    "specReference": "specs/prd.md",
+    "totalUserStories": 49,
+    "priorityBreakdown": {
+      "P0 (critical)": 23,
+      "P1 (important)": 21,
+      "P2 (nice-to-have)": 5
+    }
   }
 }
