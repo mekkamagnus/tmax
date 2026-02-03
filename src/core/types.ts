@@ -199,6 +199,19 @@ export interface EditorState {
   describeKeyTimeout?: number;  // Timeout for describe-key prompt
   describeFunctionPending?: boolean;  // Waiting for function name to describe
   aproposCommandPending?: boolean;  // Waiting for search pattern for apropos
+  // LSP diagnostics state (US-3.1.2)
+  lspDiagnostics?: LSPDiagnostic[];  // Diagnostics from language server
+}
+
+/**
+ * LSP Diagnostic interface
+ */
+export interface LSPDiagnostic {
+  range: Range;
+  severity: 1 | 2 | 3 | 4;  // 1=Error, 2=Warning, 3=Information, 4=Hint
+  message: string;
+  source?: string;  // Source of the diagnostic (e.g., "typescript")
+  code?: string | number;  // Diagnostic code
 }
 
 /**

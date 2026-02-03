@@ -4,7 +4,7 @@
  * Handles connections to language servers for IDE features
  */
 
-import type { TerminalIO, FileSystem } from "../core/types.ts";
+import type { TerminalIO, FileSystem, LSPDiagnostic } from "../core/types.ts";
 
 /**
  * LSP client configuration options
@@ -21,6 +21,7 @@ interface LSPClientState {
   serverName: string | null;
   language: string | null;
   errors: string[];
+  diagnostics: LSPDiagnostic[];
 }
 
 /**
@@ -71,6 +72,7 @@ export class LSPClient {
       serverName: null,
       language: null,
       errors: [],
+      diagnostics: [],
     };
   }
 
@@ -226,6 +228,102 @@ export class LSPClient {
    */
   clearErrors(): void {
     this.state.errors = [];
+  }
+
+  /**
+   * Update diagnostics from language server
+   * @param diagnostics - Array of diagnostics
+   */
+  updateDiagnostics(diagnostics: LSPDiagnostic[]): void {
+    this.state.diagnostics = diagnostics;
+  }
+
+  /**
+   * Get current diagnostics
+   * @returns Array of diagnostics
+   */
+  getDiagnostics(): LSPDiagnostic[] {
+    return [...this.state.diagnostics];
+  }
+
+  /**
+   * Clear all diagnostics
+   */
+  clearDiagnostics(): void {
+    this.state.diagnostics = [];
+  }
+
+  /**
+   * Get diagnostics for a specific line
+   * @param line - Line number (0-based)
+   * @returns Array of diagnostics on that line
+   */
+  getDiagnosticsForLine(line: number): LSPDiagnostic[] {
+    return this.state.diagnostics.filter(
+      d => d.range.start.line <= line && d.range.end.line >= line
+    );
+  }
+
+  /**
+   * Simulate receiving diagnostics from language server
+   * In a real implementation, this would be called when the server sends diagnostic notifications
+   * @param filename - File being analyzed
+   * @param content - File content
+   */
+  async simulateDiagnostics(filename: string, content: string): Promise<void> {
+    if (!this.state.connected) {
+      return;
+    }
+
+    const language = this.state.language;
+    if (!language) {
+      return;
+    }
+
+    // Simulate diagnostics based on language
+    // In a real implementation, this would come from the language server
+    const diagnostics: LSPDiagnostic[] = [];
+
+    if (language === "typescript" || language === "javascript") {
+      // Simulate some common TypeScript/JavaScript errors
+      const lines = content.split("\n");
+
+      lines.forEach((line, index) => {
+        // Check for type errors (simple simulation)
+        if (line.includes(": string") && line.includes("= ")) {
+          const valueMatch = line.match(/=\s*(\d+)/);
+          if (valueMatch) {
+            diagnostics.push({
+              range: {
+                start: { line: index, character: line.indexOf(": string") },
+                end: { line: index, character: line.length }
+              },
+              severity: 1,
+              message: `Type 'number' is not assignable to type 'string'`,
+              source: "typescript"
+            });
+          }
+        }
+
+        // Check for unused variables
+        if (line.match(/const\s+(\w+)\s*=/)) {
+          const varName = line.match(/const\s+(\w+)\s*=/)?.[1];
+          if (varName && !content.includes(varName, line.indexOf(line) + line.length)) {
+            diagnostics.push({
+              range: {
+                start: { line: index, character: line.indexOf(varName) },
+                end: { line: index, character: line.indexOf(varName) + varName.length }
+              },
+              severity: 2,
+              message: `'${varName}' is declared but its value is never read`,
+              source: "typescript"
+            });
+          }
+        }
+      });
+    }
+
+    this.state.diagnostics = diagnostics;
   }
 
   /**

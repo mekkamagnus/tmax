@@ -693,7 +693,7 @@
         "Listing diagnostics shows all errors and warnings"
       ],
       "priority": 10,
-      "passes": false,
+      "passes": true,
       "notes": "Phase 3 - Advanced Features - LSP integration"
     },
     {

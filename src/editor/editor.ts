@@ -81,6 +81,8 @@ export class Editor {
       whichKeyPrefix: "",
       whichKeyBindings: [],
       whichKeyTimeout: 1000,
+      // LSP diagnostics state (US-3.1.2)
+      lspDiagnostics: [],
     };
 
     this.interpreter = new TLispInterpreterImpl();
@@ -133,6 +135,7 @@ export class Editor {
       set mxCommand(v: string) { editor.state.mxCommand = v; },
       get cursorFocus() { return editor.state.cursorFocus ?? 'buffer'; },
       set cursorFocus(v: 'buffer' | 'command') { editor.state.cursorFocus = v; },
+      get lspDiagnostics() { return editor.state.lspDiagnostics; },
       get operations() {
         return {
           saveFile: (filename?: string) => editor.saveFile(filename),
@@ -1477,6 +1480,12 @@ export class Editor {
 
       // Notify LSP client about file open (US-3.1.1)
       await this.lspClient.onFileOpen(filename, content);
+
+      // Simulate diagnostics from language server (US-3.1.2)
+      await this.lspClient.simulateDiagnostics(filename, content);
+
+      // Update editor state with diagnostics (US-3.1.2)
+      this.state.lspDiagnostics = this.lspClient.getDiagnostics();
 
       // Update status message with LSP connection status (US-3.1.1)
       const lspStatus = this.lspClient.getStatusMessage();

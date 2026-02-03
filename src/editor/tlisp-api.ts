@@ -28,6 +28,7 @@ import { createJumpOps } from "./api/jump-ops.ts";
 import { createKillRingOps } from "./api/kill-ring.ts";
 import { createYankPopOps } from "./api/yank-pop-ops.ts";
 import { createEvilIntegrationOps } from "./api/evil-integration.ts";
+import { createLSPDiagnosticsOps } from "./api/lsp-diagnostics.ts";
 
 /**
  * T-Lisp function implementation that returns Either for error handling
@@ -62,6 +63,7 @@ export interface TlispEditorState {
   mxCommand: string;  // M-x command input
   cursorFocus: 'buffer' | 'command';  // Track where cursor focus should be
   operations?: EditorOperations;  // Optional operations reference
+  lspDiagnostics?: import("../core/types.ts").LSPDiagnostic[];  // LSP diagnostics (US-3.1.2)
 }
 
 /**
@@ -299,6 +301,14 @@ export function createEditorAPI(state: TlispEditorState): Map<string, TLispFunct
     () => state.cursorColumn
   );
   for (const [key, value] of yankPopOps.entries()) {
+    api.set(key, value);
+  }
+
+  // Add LSP diagnostics operations (US-3.1.2)
+  const lspDiagnosticsOps = createLSPDiagnosticsOps(
+    () => ({ state })
+  );
+  for (const [key, value] of lspDiagnosticsOps.entries()) {
     api.set(key, value);
   }
 
