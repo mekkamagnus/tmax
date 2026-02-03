@@ -30,6 +30,7 @@ import { createYankPopOps } from "./api/yank-pop-ops.ts";
 import { createEvilIntegrationOps } from "./api/evil-integration.ts";
 import { createLSPDiagnosticsOps } from "./api/lsp-diagnostics.ts";
 import { createPluginOps } from "./api/plugin-ops.ts";
+import { createDocumentationOps } from "./api/documentation.ts";
 
 /**
  * T-Lisp function implementation that returns Either for error handling
@@ -323,6 +324,12 @@ export function createEditorAPI(state: TlispEditorState): Map<string, TLispFunct
     }
   );
   for (const [key, value] of pluginOps.entries()) {
+    api.set(key, value);
+  }
+
+  // Add documentation operations (US-4.2.1)
+  const documentationOps = createDocumentationOps(null as any); // Interpreter not needed for current implementation
+  for (const [key, value] of documentationOps.entries()) {
     api.set(key, value);
   }
 
