@@ -135,7 +135,7 @@
         "Fixture scope controls lifecycle (once, each, all)"
       ],
       "priority": 10,
-      "passes": false,
+      "passes": true,
       "notes": "Phase 0.5 - Test data management"
     },
     {
