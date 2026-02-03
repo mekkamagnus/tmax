@@ -31,6 +31,19 @@ import {
   type TestResult,
   type TestStats
 } from "./test-output.ts";
+import {
+  setCoverageEnabled,
+  resetCoverageState,
+  getCoverageReport,
+  getCoveragePercentage,
+  setCoverageThreshold,
+  getCoverageThreshold,
+  setCoverageFormat,
+  getCoverageFormat,
+  printCoverageReport,
+  generateCoverageReport,
+  isCoverageEnabled
+} from "./test-coverage.ts";
 
 // Test results storage
 let currentTestResults: { testName: string, passed: boolean, error?: string }[] = [];
@@ -2142,5 +2155,229 @@ export function registerTestingFramework(interpreter: TLispInterpreter): void {
 
     setShowProgress(showArg.value as boolean);
     return Either.right(createBoolean(true));
+  });
+
+  // ========== COVERAGE TRACKING (US-0.6.6) ==========
+
+  /**
+   * Enable or disable coverage tracking
+   * Usage: (coverage-enable true|false)
+   * Controls whether function calls are tracked for coverage
+   */
+  interpreter.defineBuiltin("coverage-enable", (args: TLispValue[]) => {
+    if (args.length !== 1) {
+      return Either.left({
+        type: 'EvalError',
+        variant: 'RuntimeError',
+        message: "coverage-enable requires exactly 1 argument: boolean",
+        details: { expected: 1, actual: args.length }
+      });
+    }
+
+    const enableArg = args[0];
+    if (enableArg.type !== "boolean") {
+      return Either.left({
+        type: 'EvalError',
+        variant: 'TypeError',
+        message: "coverage-enable argument must be a boolean",
+        details: { argType: enableArg.type }
+      });
+    }
+
+    setCoverageEnabled(enableArg.value as boolean);
+    return Either.right(createBoolean(true));
+  });
+
+  /**
+   * Get current coverage percentage
+   * Usage: (coverage-percentage)
+   * Returns the percentage of functions covered by tests
+   */
+  interpreter.defineBuiltin("coverage-percentage", (args: TLispValue[]) => {
+    const percentage = getCoveragePercentage();
+    return Either.right(createNumber(percentage));
+  });
+
+  /**
+   * Set coverage threshold
+   * Usage: (coverage-threshold 80)
+   * Sets the minimum coverage percentage required
+   */
+  interpreter.defineBuiltin("coverage-threshold", (args: TLispValue[]) => {
+    if (args.length !== 1) {
+      return Either.left({
+        type: 'EvalError',
+        variant: 'RuntimeError',
+        message: "coverage-threshold requires exactly 1 argument: percentage (0-100)",
+        details: { expected: 1, actual: args.length }
+      });
+    }
+
+    const thresholdArg = args[0];
+    if (thresholdArg.type !== "number") {
+      return Either.left({
+        type: 'EvalError',
+        variant: 'TypeError',
+        message: "coverage-threshold argument must be a number",
+        details: { argType: thresholdArg.type }
+      });
+    }
+
+    const threshold = thresholdArg.value as number;
+    if (threshold < 0 || threshold > 100) {
+      return Either.left({
+        type: 'EvalError',
+        variant: 'RuntimeError',
+        message: `Coverage threshold must be between 0 and 100, got ${threshold}`,
+        details: { threshold }
+      });
+    }
+
+    setCoverageThreshold(threshold);
+    return Either.right(createNumber(threshold));
+  });
+
+  /**
+   * Get coverage threshold
+   * Usage: (get-coverage-threshold)
+   * Returns the current coverage threshold
+   */
+  interpreter.defineBuiltin("get-coverage-threshold", (args: TLispValue[]) => {
+    const threshold = getCoverageThreshold();
+    return Either.right(createNumber(threshold));
+  });
+
+  /**
+   * Set coverage report format
+   * Usage: (coverage-format "text"|"json")
+   * Sets the output format for coverage reports
+   */
+  interpreter.defineBuiltin("coverage-format", (args: TLispValue[]) => {
+    if (args.length !== 1) {
+      return Either.left({
+        type: 'EvalError',
+        variant: 'RuntimeError',
+        message: "coverage-format requires exactly 1 argument: format (text|json)",
+        details: { expected: 1, actual: args.length }
+      });
+    }
+
+    const formatArg = args[0];
+    if (formatArg.type !== "string") {
+      return Either.left({
+        type: 'EvalError',
+        variant: 'TypeError',
+        message: "coverage-format argument must be a string (text or json)",
+        details: { argType: formatArg.type }
+      });
+    }
+
+    const format = formatArg.value as string;
+    if (format !== "text" && format !== "json") {
+      return Either.left({
+        type: 'EvalError',
+        variant: 'RuntimeError',
+        message: `Invalid coverage format: ${format}. Must be 'text' or 'json'`,
+        details: { format }
+      });
+    }
+
+    setCoverageFormat(format as any);
+    return Either.right(createString(format));
+  });
+
+  /**
+   * Get coverage report
+   * Usage: (coverage-report)
+   * Returns a coverage report with function-level details
+   */
+  interpreter.defineBuiltin("coverage-report", (args: TLispValue[]) => {
+    const report = getCoverageReport();
+
+    // Convert report to T-Lisp data structure
+    const functionsList = createList(
+      report.functions.map(f =>
+        createList([
+          createString(f.name),
+          createBoolean(f.covered),
+          createNumber(f.callCount)
+        ])
+      )
+    );
+
+    return Either.right(createList([
+      createNumber(report.percentage),
+      createNumber(report.totalFunctions),
+      createNumber(report.coveredFunctions),
+      functionsList
+    ]));
+  });
+
+  /**
+   * Print coverage report
+   * Usage: (coverage-print)
+   * Prints the coverage report to console
+   */
+  interpreter.defineBuiltin("coverage-print", (args: TLispValue[]) => {
+    printCoverageReport();
+    return Either.right(createNil());
+  });
+
+  /**
+   * Reset coverage state
+   * Usage: (coverage-reset)
+   * Clears all coverage tracking data
+   */
+  interpreter.defineBuiltin("coverage-reset", (args: TLispValue[]) => {
+    resetCoverageState();
+    return Either.right(createBoolean(true));
+  });
+
+  /**
+   * Check if coverage is enabled
+   * Usage: (coverage-enabled)
+   * Returns true if coverage tracking is enabled
+   */
+  interpreter.defineBuiltin("coverage-enabled", (args: TLispValue[]) => {
+    return Either.right(createBoolean(isCoverageEnabled()));
+  });
+
+  /**
+   * Get list of untested functions
+   * Usage: (coverage-untested)
+   * Returns a list of function names that haven't been covered
+   */
+  interpreter.defineBuiltin("coverage-untested", (args: TLispValue[]) => {
+    const report = getCoverageReport();
+    const untested = report.functions.filter(f => !f.covered);
+
+    return Either.right(createList(
+      untested.map(f => createString(f.name))
+    ));
+  });
+
+  /**
+   * Get list of tested functions
+   * Usage: (coverage-tested)
+   * Returns a list of function names that have been covered
+   */
+  interpreter.defineBuiltin("coverage-tested", (args: TLispValue[]) => {
+    const report = getCoverageReport();
+    const tested = report.functions.filter(f => f.covered);
+
+    return Either.right(createList(
+      tested.map(f => createString(f.name))
+    ));
+  });
+
+  /**
+   * Check if coverage meets threshold
+   * Usage: (coverage-meets-threshold)
+   * Returns true if coverage >= threshold
+   */
+  interpreter.defineBuiltin("coverage-meets-threshold", (args: TLispValue[]) => {
+    const percentage = getCoveragePercentage();
+    const threshold = getCoverageThreshold();
+    return Either.right(createBoolean(percentage >= threshold));
   });
 }

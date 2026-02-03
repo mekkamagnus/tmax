@@ -8,6 +8,7 @@ import { TLispParser } from "./parser.ts";
 import { TLispEvaluator, createEvaluatorWithBuiltins, type EvalError } from "./evaluator.ts";
 import { createFunction } from "./values.ts";
 import { Either } from "../utils/task-either.ts";
+import { isCoverageEnabled, registerFunction } from "./test-coverage.ts";
 
 /**
  * T-Lisp interpreter implementation
@@ -107,6 +108,11 @@ export class TLispInterpreterImpl implements TLispInterpreter {
   defineBuiltin(name: string, fn: TLispFunctionImpl): void {
     const func = createFunction(fn, name);
     this.globalEnv.define(name, func);
+
+    // Register builtin function for coverage tracking (US-0.6.6)
+    if (isCoverageEnabled()) {
+      registerFunction(name, undefined, undefined, true); // Mark as builtin
+    }
   }
 
   /**

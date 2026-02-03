@@ -25,6 +25,7 @@ import { createValidationError, type EvalError } from "../error/types";
 import { TLispParser } from "./parser.ts";
 import { registerStdlibFunctions } from "./stdlib.ts";
 import { registerTestingFramework } from "./test-framework.ts";
+import { registerFunction, markFunctionCovered, isCoverageEnabled } from "./test-coverage.ts";
 
 
 /**
@@ -704,6 +705,11 @@ export class TLispEvaluator {
       lambdaFunction.parameters = paramNames;
     }
 
+    // Register function for coverage tracking (US-0.6.6)
+    if (isCoverageEnabled()) {
+      registerFunction(name.value as string, parameters);
+    }
+
     env.define(name.value as string, lambdaFunction);
 
     return Either.right(name);
@@ -1164,6 +1170,14 @@ export class TLispEvaluator {
       }
 
       const args = argsResults.map(r => r.right);
+
+      // Track function call for coverage (US-0.6.6)
+      // Try to get function name from the symbol being called
+      if (isCoverageEnabled() && funcExpr.type === "symbol") {
+        const symbolName = funcExpr.value as string;
+        markFunctionCovered(symbolName);
+      }
+
       return this.evalFunctionCallInternal(func, args, env);
     }
   }
