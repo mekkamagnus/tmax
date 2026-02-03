@@ -39,6 +39,7 @@ export class Editor {
   private coreBindingsLoaded: boolean = false;
   private terminal: TerminalIO;
   private filesystem: FileSystem;
+  private countPrefix: number = 0;  // Accumulated count for count prefix commands
 
   /**
    * Create a new editor instance
@@ -336,6 +337,45 @@ export class Editor {
       
       const command = commandArg.value as string;
       return this.executeCommand(command);
+    });
+
+    // Add count prefix API functions (US-1.3.1)
+    this.interpreter.defineBuiltin("count-get", (args) => {
+      if (args.length !== 0) {
+        throw new Error("count-get requires no arguments");
+      }
+      return { type: "number", value: this.getCount() };
+    });
+
+    this.interpreter.defineBuiltin("count-set", (args) => {
+      if (args.length !== 1) {
+        throw new Error("count-set requires exactly 1 argument: count");
+      }
+      const countArg = args[0];
+      if (!countArg || countArg.type !== "number") {
+        throw new Error("count-set requires a number");
+      }
+      const count = countArg.value;
+      if (count < 0) {
+        throw new Error("count must be >= 0");
+      }
+      this.setCount(count);
+      return createNil();
+    });
+
+    this.interpreter.defineBuiltin("count-reset", (args) => {
+      if (args.length !== 0) {
+        throw new Error("count-reset requires no arguments");
+      }
+      this.resetCount();
+      return createNil();
+    });
+
+    this.interpreter.defineBuiltin("count-active", (args) => {
+      if (args.length !== 0) {
+        throw new Error("count-active requires no arguments");
+      }
+      return { type: "boolean", value: this.isCountActive() };
     });
 
     // Add file operations
@@ -696,5 +736,46 @@ export class Editor {
    */
   getMode(): string {
     return this.state.mode;
+  }
+
+  /**
+   * Get current count prefix
+   * @returns Current count (0 if no count active)
+   */
+  getCount(): number {
+    return this.countPrefix;
+  }
+
+  /**
+   * Set count prefix value
+   * @param count - Count value to set
+   */
+  setCount(count: number): void {
+    this.countPrefix = Math.max(0, count);
+  }
+
+  /**
+   * Reset count prefix to 0
+   */
+  resetCount(): void {
+    this.countPrefix = 0;
+  }
+
+  /**
+   * Check if count is active (greater than 0)
+   * @returns true if count is active
+   */
+  isCountActive(): boolean {
+    return this.countPrefix > 0;
+  }
+
+  /**
+   * Consume and return the current count, then reset
+   * @returns Current count (defaults to 1 if no count set)
+   */
+  consumeCount(): number {
+    const count = this.countPrefix > 0 ? this.countPrefix : 1;
+    this.countPrefix = 0;
+    return count;
   }
 }

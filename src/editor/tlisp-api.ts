@@ -18,6 +18,7 @@ import { createLineOps } from "./api/line-ops.ts";
 import { createDeleteOps } from "./api/delete-ops.ts";
 import { createYankOps } from "./api/yank-ops.ts";
 import { createUndoRedoOps } from "./api/undo-redo-ops.ts";
+import { createCountOps } from "./api/count-ops.ts";
 
 /**
  * T-Lisp function implementation that returns Either for error handling
@@ -198,5 +199,23 @@ export function createEditorAPI(state: TlispEditorState): Map<string, TLispFunct
     api.set(key, value);
   }
 
+  // Add count prefix operations
+  // Note: These are integrated differently as they need editor instance access
+  // The actual registration happens in editor.ts's initializeAPI method
+
   return api;
+}
+
+/**
+ * Create count prefix operations for T-Lisp API
+ * This is a separate function that requires editor instance access
+ * @param editor - Editor instance with count management
+ * @returns Map of count operation functions
+ */
+export function createCountAPI(editor: any): Map<string, TLispFunctionImpl> {
+  return createCountOps(
+    () => editor.getCount(),
+    (count: number) => editor.setCount(count),
+    () => editor.resetCount()
+  );
 }

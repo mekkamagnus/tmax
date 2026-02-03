@@ -30,6 +30,8 @@ export async function handleInsertMode(editor: Editor, key: string, normalizedKe
   // Handle Escape key to return to normal mode
   else if (normalizedKey === "Escape") {
     (editor as any).state.mode = "normal";
+    // Reset count prefix when switching modes (US-1.3.1)
+    (editor as any).resetCount();
   }
   // For other keys in insert mode, treat as regular key mappings
   else {

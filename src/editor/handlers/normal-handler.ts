@@ -14,22 +14,60 @@ import { Either } from "../../utils/task-either.ts";
  * @returns Promise that resolves when key handling is complete, or rejects with quit signal
  */
 export async function handleNormalMode(editor: Editor, key: string, normalizedKey: string): Promise<void> {
+  // Handle digit input for count prefix (US-1.3.1)
+  if (/^[0-9]$/.test(normalizedKey)) {
+    const digit = parseInt(normalizedKey, 10);
+    
+    // Accumulate count (multiply existing count by 10 and add digit)
+    // Special case: 0 at start doesn't accumulate (0w should do nothing)
+    const currentCount = (editor as any).countPrefix || 0;
+    if (currentCount === 0 && digit === 0) {
+      // 0 at start - keep count at 0 (will result in no operation when command executes)
+      (editor as any).setCount(0);
+      (editor as any).state.statusMessage = `Count: 0`;
+    } else {
+      (editor as any).setCount(currentCount * 10 + digit);
+      (editor as any).state.statusMessage = `Count: ${currentCount * 10 + digit}`;
+    }
+    return;
+  }
+
   // Handle regular key mappings in normal mode
   const keyMappings = (editor as any).keyMappings; // Access private property
   const mappings = keyMappings.get(normalizedKey);
 
   if (!mappings) {
+    // Unbound key - reset count
+    (editor as any).resetCount();
     (editor as any).state.statusMessage = `Unbound key: ${normalizedKey}`;
   } else {
     // Find mapping for normal mode
     const mapping = mappings.find((m: any) => !m.mode || m.mode === "normal");
     if (!mapping) {
+      (editor as any).resetCount();
       (editor as any).state.statusMessage = `Unbound key in normal mode: ${normalizedKey}`;
     } else {
-      // Execute the mapped command
+      // Execute the mapped command with count applied
       try {
-        (editor as any).executeCommand(mapping.command);
+        let command = mapping.command;
+        const count = (editor as any).getCount();
+        
+        // If count is active, repeat the command N times
+        // For count=0, execute once with special handling (Vim behavior: 0w does nothing)
+        if (count > 0) {
+          // Execute command N times
+          for (let i = 0; i < count; i++) {
+            (editor as any).executeCommand(command);
+          }
+          // Reset count after use
+          (editor as any).resetCount();
+        } else {
+          // count is 0 - execute once (commands should handle 0 appropriately)
+          (editor as any).executeCommand(command);
+        }
       } catch (error) {
+        // Reset count on error
+        (editor as any).resetCount();
         if (error instanceof Error && (error.message === "EDITOR_QUIT_SIGNAL" || error.message.includes("EDITOR_QUIT_SIGNAL"))) {
           throw new Error("EDITOR_QUIT_SIGNAL"); // Re-throw clean quit signal to main loop
         }
