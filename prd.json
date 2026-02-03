@@ -667,8 +667,8 @@
         "Edited macros loaded on restart"
       ],
       "priority": 10,
-      "passes": false,
-      "notes": "Phase 2 - Extensibility & Plugin System"
+      "passes": true,
+      "notes": "Phase 2 - Extensibility & Plugin System - Completed: Macro save/load via ~/.config/tmax/macros.tlisp, auto-save on record-stop, auto-load on startup"
     },
     {
       "id": "US-3.1.1",

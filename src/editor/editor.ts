@@ -19,6 +19,7 @@ import { handleCommandMode } from "./handlers/command-handler.ts";
 import { handleMxMode } from "./handlers/mx-handler.ts";
 import { createMinibufferOps } from "./api/minibuffer-ops.ts";
 import * as macroRecording from "./api/macro-recording.ts";
+import { loadMacrosFromFile, saveMacrosToFile } from "./api/macro-persistence.ts";
 
 /**
  * Key mapping for editor commands
@@ -872,6 +873,13 @@ export class Editor {
       if (Either.isLeft(result)) {
         throw new Error(result.left);
       }
+
+      // Save macros to disk after recording stops (US-2.4.2)
+      // Fire-and-forget: save in background without blocking
+      editor.saveMacros().catch(error => {
+        console.warn("Failed to save macros:", error);
+      });
+
       return createString(result.right);
     });
 
@@ -1114,6 +1122,35 @@ export class Editor {
   private async ensureCoreBindingsLoaded(): Promise<void> {
     if (!this.coreBindingsLoaded) {
       await this.loadCoreBindings();
+    }
+  }
+
+  /**
+   * Load saved macros from ~/.config/tmax/macros.tlisp (US-2.4.2)
+   */
+  private async loadSavedMacros(): Promise<void> {
+    try {
+      const loaded = await loadMacrosFromFile(this.filesystem);
+      if (loaded) {
+        this.state.statusMessage = "Macros loaded from ~/.config/tmax/macros.tlisp";
+      }
+      // If file doesn't exist, that's fine - it's the first run
+    } catch (error) {
+      console.warn("Failed to load macros:", error);
+    }
+  }
+
+  /**
+   * Save recorded macros to ~/.config/tmax/macros.tlisp (US-2.4.2)
+   */
+  async saveMacros(): Promise<void> {
+    try {
+      const saved = await saveMacrosToFile(this.filesystem);
+      if (saved) {
+        this.state.statusMessage = "Macros saved to ~/.config/tmax/macros.tlisp";
+      }
+    } catch (error) {
+      console.warn("Failed to save macros:", error);
     }
   }
 
@@ -1526,6 +1563,9 @@ export class Editor {
     // Load core bindings and user init file
     await this.ensureCoreBindingsLoaded();
     await this.loadInitFile();
+
+    // Load saved macros from ~/.config/tmax/macros.tlisp (US-2.4.2)
+    await this.loadSavedMacros();
 
     // Create default buffer if none exists
     // But check if currentBuffer was already set (e.g., from main.tsx with a file)

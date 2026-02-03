@@ -168,6 +168,22 @@ export class MockFileSystem implements FileSystem {
   }
 
   /**
+   * Get directory entry (for testing)
+   * @param path - Directory path
+   * @returns Directory stats or undefined
+   */
+  getDirectory(path: string): { type: string; children: Record<string, any> } | undefined {
+    const stats = this.stats.get(path);
+    if (stats?.isDirectory) {
+      return {
+        type: "directory",
+        children: {}
+      };
+    }
+    return undefined;
+  }
+
+  /**
    * Get all file paths
    * @returns Array of file paths
    */

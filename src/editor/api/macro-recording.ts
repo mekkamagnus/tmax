@@ -238,3 +238,21 @@ export function getRecordedKeys(): string[] {
 export function setLastExecutedMacro(register: string): void {
   macroState.lastExecutedMacro = register;
 }
+
+/**
+ * Set a macro directly (for loading from file)
+ * @param register - The register to set
+ * @param keys - The keys to store
+ * @returns Either error or success
+ */
+export function setMacro(register: string, keys: string[]): Either<string, string> {
+  // Validate register
+  if (!isValidRegister(register)) {
+    return Either.left(`Invalid register: ${register}`);
+  }
+
+  // Set the macro
+  macroState.macros.set(register, keys);
+
+  return Either.right(register);
+}
