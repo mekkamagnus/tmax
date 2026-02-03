@@ -298,6 +298,8 @@ export class TLispEvaluator {
           return this.evalCond(elements, env, inTailPosition);
         case "deftest":
           return this.evalDeftest(elements, env);
+        case "deftest-async":
+          return this.evalDeftestAsync(elements, env);
         case "deftest-suite":
           return this.evalDeftestSuite(elements, env);
         case "suite-setup":
@@ -1196,6 +1198,65 @@ export class TLispEvaluator {
 
     // Store test in the registry
     testRegistry.set(testName, { body: testBody, name: testName, params: parameters });
+
+    // Return the test name as a symbol to indicate success
+    return Either.right(name);
+  }
+
+  /**
+   * Evaluate deftest-async special form
+   * @param elements - List elements
+   * @param env - Environment
+   * @returns Either with error or function symbol
+   */
+  private evalDeftestAsync(elements: TLispValue[], env: TLispEnvironment): Either<EvalError, TLispValue> {
+    if (elements.length < 3) {
+      return Either.left({
+        type: 'EvalError',
+        variant: 'SyntaxError',
+        message: "deftest-async requires at least 2 arguments: name, parameters (with 'done'), and body",
+        details: { expectedMin: 3, actual: elements.length }
+      });
+    }
+
+    const name = elements[1];
+    const parameters = elements[2];
+
+    if (!name || !parameters) {
+      return Either.left({
+        type: 'EvalError',
+        variant: 'SyntaxError',
+        message: "deftest-async missing required arguments",
+        details: { hasName: !!name, hasParameters: !!parameters }
+      });
+    }
+
+    if (name.type !== "symbol") {
+      return Either.left({
+        type: 'EvalError',
+        variant: 'TypeError',
+        message: "deftest-async name must be a symbol",
+        details: { nameType: name.type }
+      });
+    }
+
+    if (parameters.type !== "list") {
+      return Either.left({
+        type: 'EvalError',
+        variant: 'TypeError',
+        message: "deftest-async parameters must be a list",
+        details: { parametersType: parameters.type }
+      });
+    }
+
+    // Extract test name
+    const testName = name.value as string;
+
+    // Store the body expressions (from index 3 onwards)
+    const testBody = elements.slice(3);
+
+    // Store test in the registry with async flag
+    testRegistry.set(testName, { body: testBody, name: testName, params: parameters, isAsync: true });
 
     // Return the test name as a symbol to indicate success
     return Either.right(name);
