@@ -24,6 +24,7 @@ import { createCountOps } from "./api/count-ops.ts";
 import { createVisualOps, getVisualSelection, setVisualSelection, clearVisualSelection } from "./api/visual-ops.ts";
 import { createTextObjectsOps } from "./api/text-objects-ops.ts";
 import { createMinibufferOps } from "./api/minibuffer-ops.ts";
+import { createJumpOps } from "./api/jump-ops.ts";
 
 /**
  * T-Lisp function implementation that returns Either for error handling
@@ -260,6 +261,18 @@ export function createEditorAPI(state: TlispEditorState): Map<string, TLispFunct
     (mode) => { state.mode = mode; }
   );
   for (const [key, value] of textObjectsOps.entries()) {
+    api.set(key, value);
+  }
+
+  // Add jump operations (US-1.6.1)
+  const jumpOps = createJumpOps(
+    () => state.currentBuffer,
+    () => state.cursorLine,
+    (line) => { state.cursorLine = line; },
+    () => state.cursorColumn,
+    (column) => { state.cursorColumn = column; }
+  );
+  for (const [key, value] of jumpOps.entries()) {
     api.set(key, value);
   }
 

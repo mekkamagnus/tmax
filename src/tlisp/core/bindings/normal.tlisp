@@ -129,6 +129,29 @@
 (key-bind "#" "(word-under-cursor-previous)" "normal")
 
 ;; =================================================================
+;; JUMP COMMANDS (US-1.6.1)
+;; =================================================================
+;; Vim-style jump commands for navigating large files
+
+;; Jump to first line (gg) - needs two g presses, handled via bindings-ops
+;; For now, use M-x to call jump-to-first-line directly
+
+;; Jump to last line (G/Shift+g)
+(key-bind "G" "(jump-to-last-line)" "normal")
+
+;; Page down (Ctrl+f)
+(key-bind "C-f" "(page-down)" "normal")
+
+;; Page up (Ctrl+b)
+(key-bind "C-b" "(page-up)" "normal")
+
+;; Half page down (Ctrl+d)
+(key-bind "C-d" "(half-page-down)" "normal")
+
+;; Half page up (Ctrl+u)
+(key-bind "C-u" "(half-page-up)" "normal")
+
+;; =================================================================
 ;; M-X SYSTEM (Emacs-style)
 ;; =================================================================
 ;; Two-key sequence: SPC ; to activate M-x mode
