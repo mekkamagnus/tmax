@@ -201,6 +201,9 @@ export interface EditorState {
   aproposCommandPending?: boolean;  // Waiting for search pattern for apropos
   // LSP diagnostics state (US-3.1.2)
   lspDiagnostics?: LSPDiagnostic[];  // Diagnostics from language server
+  // Window management (US-3.2.1)
+  windows?: Window[];  // Array of windows
+  currentWindowIndex?: number;  // Index of currently focused window
 }
 
 /**
@@ -212,6 +215,22 @@ export interface LSPDiagnostic {
   message: string;
   source?: string;  // Source of the diagnostic (e.g., "typescript")
   code?: string | number;  // Diagnostic code
+}
+
+/**
+ * Window interface (US-3.2.1)
+ */
+export interface Window {
+  id: string;  // Unique window identifier
+  buffer: FunctionalTextBuffer;  // Buffer displayed in window
+  cursorLine: number;  // Cursor line position within window
+  cursorColumn: number;  // Cursor column position within window
+  viewportTop: number;  // First line visible in window viewport
+  splitType?: 'horizontal' | 'vertical';  // How this window was created
+  height?: number;  // Window height in rows (for horizontal splits)
+  width?: number;  // Window width in columns (for vertical splits)
+  row?: number;  // Window starting row (0-indexed)
+  col?: number;  // Window starting column (0-indexed)
 }
 
 /**

@@ -7,7 +7,7 @@
 import { TLispInterpreterImpl } from "../tlisp/interpreter.ts";
 import { FileSystemImpl } from "../core/filesystem.ts";
 import { createEditorAPI, TlispEditorState } from "./tlisp-api.ts";
-import type { EditorState, FunctionalTextBuffer } from "../core/types.ts";
+import type { EditorState, FunctionalTextBuffer, Window } from "../core/types.ts";
 import { createString, createList, createNil, createNumber } from "../tlisp/values.ts";
 import type { TerminalIO, FileSystem } from "../core/types.ts";
 import { Either } from "../utils/task-either.ts";
@@ -21,6 +21,7 @@ import { createMinibufferOps } from "./api/minibuffer-ops.ts";
 import * as macroRecording from "./api/macro-recording.ts";
 import { loadMacrosFromFile, saveMacrosToFile } from "./api/macro-persistence.ts";
 import { LSPClient } from "../lsp/client.ts";
+import { createWindowOps } from "./api/window-ops.ts";
 
 /**
  * Key mapping for editor commands
@@ -83,6 +84,9 @@ export class Editor {
       whichKeyTimeout: 1000,
       // LSP diagnostics state (US-3.1.2)
       lspDiagnostics: [],
+      // Window management (US-3.2.1)
+      windows: [],
+      currentWindowIndex: 0,
     };
 
     this.interpreter = new TLispInterpreterImpl();
@@ -113,10 +117,50 @@ export class Editor {
       get buffers() {
         return editor.buffers;
       },
-      get cursorLine() { return editor.state.cursorPosition.line; },
-      set cursorLine(v: number) { editor.state.cursorPosition.line = v; },
-      get cursorColumn() { return editor.state.cursorPosition.column; },
-      set cursorColumn(v: number) { editor.state.cursorPosition.column = v; },
+      get cursorLine() { 
+        // Return current window's cursor line if windows exist, otherwise global
+        const windows = editor.state.windows;
+        if (windows && windows.length > 0) {
+          const currentWindow = windows[editor.state.currentWindowIndex ?? 0];
+          if (currentWindow) {
+            return currentWindow.cursorLine;
+          }
+        }
+        return editor.state.cursorPosition.line; 
+      },
+      set cursorLine(v: number) { 
+        // Update both global and current window cursor position (US-3.2.1)
+        editor.state.cursorPosition.line = v;
+        const windows = editor.state.windows;
+        if (windows && windows.length > 0) {
+          const currentWindow = windows[editor.state.currentWindowIndex ?? 0];
+          if (currentWindow) {
+            currentWindow.cursorLine = v;
+          }
+        }
+      },
+      get cursorColumn() { 
+        // Return current window's cursor column if windows exist, otherwise global
+        const windows = editor.state.windows;
+        if (windows && windows.length > 0) {
+          const currentWindow = windows[editor.state.currentWindowIndex ?? 0];
+          if (currentWindow) {
+            return currentWindow.cursorColumn;
+          }
+        }
+        return editor.state.cursorPosition.column; 
+      },
+      set cursorColumn(v: number) { 
+        // Update both global and current window cursor position (US-3.2.1)
+        editor.state.cursorPosition.column = v;
+        const windows = editor.state.windows;
+        if (windows && windows.length > 0) {
+          const currentWindow = windows[editor.state.currentWindowIndex ?? 0];
+          if (currentWindow) {
+            currentWindow.cursorColumn = v;
+          }
+        }
+      },
       get terminal() { return editor.terminal; },
       get filesystem() { return editor.filesystem; },
       get mode() { return editor.state.mode; },
@@ -1072,6 +1116,19 @@ export class Editor {
       resetMacroRecordingState();
       return createNil();
     });
+
+    // Add window management operations (US-3.2.1)
+    const windowOps = createWindowOps(
+      () => this.state.windows || [],
+      (windows) => { this.state.windows = windows; },
+      () => this.state.currentWindowIndex ?? 0,
+      (index) => { this.state.currentWindowIndex = index; },
+      () => this.state.currentBuffer
+    );
+
+    for (const [name, fn] of windowOps) {
+      this.interpreter.defineBuiltin(name, fn);
+    }
   }
 
   /**
@@ -1465,6 +1522,29 @@ export class Editor {
 
     // Always set currentBuffer to the newly created buffer
     this.state.currentBuffer = buffer;
+
+    // Initialize first window if this is the first buffer (US-3.2.1)
+    if (!this.state.windows || this.state.windows.length === 0) {
+      const initialWindow: Window = {
+        id: "window-main",
+        buffer: buffer,
+        cursorLine: this.state.cursorPosition.line,
+        cursorColumn: this.state.cursorPosition.column,
+        viewportTop: this.state.viewportTop,
+      };
+      this.state.windows = [initialWindow];
+      this.state.currentWindowIndex = 0;
+    } else {
+      // Update current window's buffer
+      const currentWindow = this.state.windows[this.state.currentWindowIndex ?? 0];
+      if (currentWindow) {
+        currentWindow.buffer = buffer;
+        // Sync window cursor with global cursor position
+        currentWindow.cursorLine = this.state.cursorPosition.line;
+        currentWindow.cursorColumn = this.state.cursorPosition.column;
+        currentWindow.viewportTop = this.state.viewportTop;
+      }
+    }
   }
 
   /**
