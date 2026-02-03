@@ -534,7 +534,7 @@
         "No matches show 'No match' message"
       ],
       "priority": 10,
-      "passes": false,
+      "passes": true,
       "notes": "Phase 1 - Core Editing Features - UX enhancement"
     },
     {
