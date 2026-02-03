@@ -148,6 +148,59 @@ export class TLispEvaluator {
   }
 
   /**
+   * Evaluate assert-type special form
+   * @param elements - List elements (excluding 'assert-type')
+   * @param env - Environment
+   * @returns Either with error or success
+   */
+  private evalAssertType(elements: TLispValue[], env: TLispEnvironment): Either<EvalError, TLispValue> {
+    if (elements.length < 3) {
+      return Either.left({
+        type: 'EvalError',
+        variant: 'RuntimeError',
+        message: "assert-type requires exactly 2 arguments: value and type",
+        details: { expected: 2, actual: elements.length - 1 }
+      });
+    }
+
+    const valueArg = elements[1]; // Will be evaluated
+    const typeArg = elements[2]; // NOT evaluated
+
+    if (typeArg.type !== "symbol") {
+      return Either.left({
+        type: 'EvalError',
+        variant: 'TypeError',
+        message: "assert-type second argument must be a symbol (type name)",
+        details: { argType: typeArg.type }
+      });
+    }
+
+    // Evaluate the value
+    const valueResult = this.eval(valueArg, env);
+    if (Either.isLeft(valueResult)) {
+      return valueResult;
+    }
+
+    const expectedType = typeArg.value as string;
+    const actualType = valueResult.right.type;
+
+    if (actualType !== expectedType) {
+      return Either.left({
+        type: 'EvalError',
+        variant: 'RuntimeError',
+        message: `Assertion failed: expected type ${expectedType}, but got ${actualType}`,
+        details: {
+          expected: expectedType,
+          actual: actualType,
+          value: valueToString(valueResult.right)
+        }
+      });
+    }
+
+    return Either.right(createBoolean(true));
+  }
+
+  /**
    * Evaluate a symbol by looking it up in the environment
    * @param symbol - Symbol to evaluate
    * @param env - Environment for lookup
@@ -230,6 +283,16 @@ export class TLispEvaluator {
           return this.evalCond(elements, env, inTailPosition);
         case "deftest":
           return this.evalDeftest(elements, env);
+        case "deffixture":
+          return this.evalDeffixture(elements, env);
+        case "use-fixtures":
+          return this.evalUseFixtures(elements, env);
+        case "defvar":
+          return this.evalDefvar(elements, env);
+        case "set!":
+          return this.evalSetBang(elements, env);
+        case "assert-type":
+          return this.evalAssertType(elements, env);
         case "assert-error":
           return this.evalAssertError(elements, env);
         default:
@@ -1115,6 +1178,357 @@ export class TLispEvaluator {
 
     // Return the test name as a symbol to indicate success
     return Either.right(name);
+  }
+
+  /**
+   * Evaluate deffixture special form
+   * @param elements - List elements
+   * @param env - Environment
+   * @returns Either with error or fixture name
+   */
+  private evalDeffixture(elements: TLispValue[], env: TLispEnvironment): Either<EvalError, TLispValue> {
+    if (elements.length < 3) {
+      return Either.left({
+        type: 'EvalError',
+        variant: 'SyntaxError',
+        message: "deffixture requires at least 2 arguments: name, parameters, and body",
+        details: { expectedMin: 3, actual: elements.length }
+      });
+    }
+
+    const name = elements[1];
+    const parameters = elements[2];
+
+    if (!name || !parameters) {
+      return Either.left({
+        type: 'EvalError',
+        variant: 'SyntaxError',
+        message: "deffixture missing required arguments",
+        details: { hasName: !!name, hasParameters: !!parameters }
+      });
+    }
+
+    if (name.type !== "symbol") {
+      return Either.left({
+        type: 'EvalError',
+        variant: 'TypeError',
+        message: "deffixture name must be a symbol",
+        details: { nameType: name.type }
+      });
+    }
+
+    if (parameters.type !== "list") {
+      return Either.left({
+        type: 'EvalError',
+        variant: 'TypeError',
+        message: "deffixture parameters must be a list",
+        details: { parametersType: parameters.type }
+      });
+    }
+
+    // Extract fixture name
+    const fixtureName = name.value as string;
+
+    // Parse optional scope keyword from body
+    let scope: 'each' | 'once' | 'all' = 'each';
+    let bodyStartIndex = 3;
+
+    // Check if first body element is a scope keyword list like (:scope each)
+    if (elements.length > 3 && elements[3].type === "list") {
+      const scopeList = elements[3].value as TLispValue[];
+      if (scopeList.length >= 2) {
+        const keyword = scopeList[0];
+        const scopeValue = scopeList[1];
+        if (keyword.type === "symbol" && keyword.value === "scope" && scopeValue.type === "symbol") {
+          const scopeStr = scopeValue.value as string;
+          if (scopeStr === "each" || scopeStr === "once" || scopeStr === "all") {
+            scope = scopeStr;
+            bodyStartIndex = 4;
+          }
+        }
+      }
+    }
+
+    // Extract setup, teardown, and body from remaining elements
+    let setupBody: TLispValue[] = [];
+    let teardownBody: TLispValue[] = [];
+    let body: TLispValue[] = [];
+
+    for (let i = bodyStartIndex; i < elements.length; i++) {
+      const arg = elements[i];
+      if (arg.type === "list") {
+        const listItems = arg.value as TLispValue[];
+        if (listItems.length > 0) {
+          const first = listItems[0];
+          if (first.type === "symbol") {
+            if (first.value === "setup") {
+              setupBody = listItems.slice(1);
+            } else if (first.value === "teardown") {
+              teardownBody = listItems.slice(1);
+            } else {
+              // Regular body expression
+              body.push(arg);
+            }
+          } else {
+            // Regular body expression (non-symbol first element)
+            body.push(arg);
+          }
+        }
+      } else {
+        // Non-list body expression
+        body.push(arg);
+      }
+    }
+
+    // Import the necessary types and functions from test-framework
+    // We need to access the fixture registry, so we'll use a global approach
+    // The fixture registry is in test-framework.ts, so we need to make it accessible
+
+    // For now, let's use a workaround: store fixture info in the global environment
+    // This isn't ideal but will work for the MVP
+    const fixtureData = {
+      name: fixtureName,
+      params: parameters,
+      body,
+      setupBody,
+      teardownBody,
+      scope
+    };
+
+    // Store in global environment as a special variable
+    // The test-framework will access this
+    (globalThis as any).__deffixture_data__ = (globalThis as any).__deffixture_data__ || new Map();
+    (globalThis as any).__deffixture_data__.set(fixtureName, fixtureData);
+
+    // Return the fixture name as a symbol to indicate success
+    return Either.right(name);
+  }
+
+  /**
+   * Evaluate use-fixtures special form
+   * @param elements - List elements (excluding 'use-fixtures')
+   * @param env - Environment
+   * @returns Either with error or success
+   */
+  private evalUseFixtures(elements: TLispValue[], env: TLispEnvironment): Either<EvalError, TLispValue> {
+    if (elements.length < 2) {
+      return Either.left({
+        type: 'EvalError',
+        variant: 'RuntimeError',
+        message: "use-fixtures requires at least 1 argument: fixture name",
+        details: { expectedMin: 2, actual: elements.length }
+      });
+    }
+
+    // Collect fixture names from arguments (elements[0] is 'use-fixtures', elements[1+] are args)
+    const fixtureNames: string[] = [];
+    for (let i = 1; i < elements.length; i++) {
+      const arg = elements[i];
+      if (arg.type === "symbol") {
+        fixtureNames.push(arg.value as string);
+      } else if (arg.type === "string") {
+        fixtureNames.push(arg.value as string);
+      } else {
+        return Either.left({
+          type: 'EvalError',
+          variant: 'TypeError',
+          message: "use-fixtures arguments must be symbols or strings (fixture names)",
+          details: { argType: arg.type }
+        });
+      }
+    }
+
+    // Get fixtures from global storage
+    const globalFixtures = (globalThis as any).__deffixture_data__;
+    if (!globalFixtures) {
+      return Either.right(createBoolean(true)); // No fixtures to apply
+    }
+
+    // Apply each fixture in order
+    for (const name of fixtureNames) {
+      const fixtureData = globalFixtures.get(name);
+      if (!fixtureData) {
+        return Either.left({
+          type: 'EvalError',
+          variant: 'RuntimeError',
+          message: `Fixture '${name}' not found`,
+          details: { fixtureName: name }
+        });
+      }
+
+      // Execute fixture body
+      for (const expr of fixtureData.body || []) {
+        const result = this.eval(expr, env);
+        if (Either.isLeft(result)) {
+          return result;
+        }
+      }
+
+      // Execute fixture setup
+      for (const expr of fixtureData.setupBody || []) {
+        const result = this.eval(expr, env);
+        if (Either.isLeft(result)) {
+          return result;
+        }
+      }
+
+      // Store teardown for later - we'll need a way to track this
+      // For now, store in a special variable in the environment
+      const teardowns = env.lookup("__fixture_teardowns__") || createList([]);
+      const teardownList = teardowns.type === "list" ? [...teardowns.value] : [];
+      teardownList.push({ fixture: name, teardown: fixtureData.teardownBody || [] });
+      env.define("__fixture_teardowns__", createList(teardownList));
+    }
+
+    return Either.right(createBoolean(true));
+  }
+
+  /**
+   * Evaluate defvar special form
+   * @param elements - List elements (excluding 'defvar')
+   * @param env - Environment
+   * @returns Either with error or the defined value
+   */
+  private evalDefvar(elements: TLispValue[], env: TLispEnvironment): Either<EvalError, TLispValue> {
+    if (elements.length < 3) {
+      return Either.left({
+        type: 'EvalError',
+        variant: 'RuntimeError',
+        message: "defvar requires exactly 2 arguments: name and value",
+        details: { expected: 2, actual: elements.length - 1 }
+      });
+    }
+
+    const nameArg = elements[1]; // Not evaluated
+    const valueArg = elements[2]; // Will be evaluated
+
+    if (!nameArg || nameArg.type !== "symbol") {
+      return Either.left({
+        type: 'EvalError',
+        variant: 'TypeError',
+        message: "defvar first argument must be a symbol (variable name)",
+        details: { argType: nameArg?.type }
+      });
+    }
+
+    const varName = nameArg.value as string;
+
+    // Evaluate the value expression
+    const valueResult = this.eval(valueArg, env);
+    if (Either.isLeft(valueResult)) {
+      return valueResult;
+    }
+
+    // Define the variable in the global environment
+    // We need to find the root environment (the top-level global env)
+    // For now, define in the current environment
+    // TODO: Find the actual global environment
+    env.define(varName, valueResult.right);
+
+    return Either.right(valueResult.right);
+  }
+
+  /**
+   * Evaluate set! special form
+   * @param elements - List elements (excluding 'set!')
+   * @param env - Environment
+   * @returns Either with error or the new value
+   */
+  private evalSetBang(elements: TLispValue[], env: TLispEnvironment): Either<EvalError, TLispValue> {
+    if (elements.length < 3) {
+      return Either.left({
+        type: 'EvalError',
+        variant: 'RuntimeError',
+        message: "set! requires exactly 2 arguments: name and new value",
+        details: { expected: 2, actual: elements.length - 1 }
+      });
+    }
+
+    const nameArg = elements[1]; // Not evaluated
+    const valueArg = elements[2]; // Will be evaluated
+
+    if (!nameArg || nameArg.type !== "symbol") {
+      return Either.left({
+        type: 'EvalError',
+        variant: 'TypeError',
+        message: "set! first argument must be a symbol (variable name)",
+        details: { argType: nameArg?.type }
+      });
+    }
+
+    const varName = nameArg.value as string;
+
+    // Evaluate the new value expression
+    const valueResult = this.eval(valueArg, env);
+    if (Either.isLeft(valueResult)) {
+      return valueResult;
+    }
+
+    // Set the variable in the environment
+    try {
+      env.set(varName, valueResult.right);
+      return Either.right(valueResult.right);
+    } catch (error) {
+      return Either.left({
+        type: 'EvalError',
+        variant: 'RuntimeError',
+        message: `set!: variable '${varName}' is not defined`,
+        details: { varName, error: error instanceof Error ? error.message : String(error) }
+      });
+    }
+  }
+
+  /**
+   * Evaluate assert-type special form
+   * @param elements - List elements (excluding 'assert-type')
+   * @param env - Environment
+   * @returns Either with error or success
+   */
+  private evalAssertType(elements: TLispValue[], env: TLispEnvironment): Either<EvalError, TLispValue> {
+    if (elements.length < 3) {
+      return Either.left({
+        type: 'EvalError',
+        variant: 'RuntimeError',
+        message: "assert-type requires exactly 2 arguments: value and type",
+        details: { expected: 2, actual: elements.length - 1 }
+      });
+    }
+
+    const valueArg = elements[1]; // Will be evaluated
+    const typeArg = elements[2]; // NOT evaluated
+
+    if (typeArg.type !== "symbol") {
+      return Either.left({
+        type: 'EvalError',
+        variant: 'TypeError',
+        message: "assert-type second argument must be a symbol (type name)",
+        details: { argType: typeArg.type }
+      });
+    }
+
+    // Evaluate the value
+    const valueResult = this.eval(valueArg, env);
+    if (Either.isLeft(valueResult)) {
+      return valueResult;
+    }
+
+    const expectedType = typeArg.value as string;
+    const actualType = valueResult.right.type;
+
+    if (actualType !== expectedType) {
+      return Either.left({
+        type: 'EvalError',
+        variant: 'RuntimeError',
+        message: `Assertion failed: expected type ${expectedType}, but got ${actualType}`,
+        details: {
+          expected: expectedType,
+          actual: actualType,
+          value: valueToString(valueResult.right)
+        }
+      });
+    }
+
+    return Either.right(createBoolean(true));
   }
 
   /**

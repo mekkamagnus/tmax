@@ -29,6 +29,31 @@ let testCounts = { passed: 0, failed: 0, total: 0 };
 let globalSetupFunction: TLispValue | null = null;
 let globalTeardownFunction: TLispValue | null = null;
 
+// Fixture storage
+interface Fixture {
+  name: string;
+  params: TLispValue;
+  body: TLispValue[]; // Main body to execute
+  setupBody?: TLispValue[];
+  teardownBody?: TLispValue[];
+  scope: 'each' | 'once' | 'all';
+}
+
+const fixtureRegistry = new Map<string, Fixture>();
+const activeFixturesForTest = new Map<string, string[]>(); // test -> fixtures
+let onceFixturesExecuted = new Set<string>(); // Track which 'once' fixtures have run
+let allFixturesExecuted = new Set<string>(); // Track which 'all' fixtures have run
+
+/**
+ * Reset fixture state (for testing or between test runs)
+ */
+export function resetFixtureState(): void {
+  fixtureRegistry.clear();
+  activeFixturesForTest.clear();
+  onceFixturesExecuted.clear();
+  allFixturesExecuted.clear();
+}
+
 /**
  * Register testing framework functions with the interpreter
  * @param interpreter - The T-Lisp interpreter instance
@@ -134,6 +159,20 @@ export function registerTestingFramework(interpreter: TLispInterpreter): void {
         // Create a child environment for this test to provide isolation
         const testEnv = interpreter.globalEnv.createChild();
 
+        // Check for fixtures in __current_fixtures__
+        let currentFixtures: string[] = [];
+        try {
+          const fixturesVar = testEnv.lookup("__current_fixtures__");
+          if (fixturesVar && fixturesVar.type === "list") {
+            const fixturesList = fixturesVar.value as TLispValue[];
+            currentFixtures = fixturesList
+              .filter(f => f.type === "string")
+              .map(f => f.value as string);
+          }
+        } catch {
+          // No fixtures defined
+        }
+
         // Run setup if defined
         if (globalSetupFunction && globalSetupFunction.type === "list") {
           const setupExpressions = globalSetupFunction.value as TLispValue[];
@@ -145,12 +184,48 @@ export function registerTestingFramework(interpreter: TLispInterpreter): void {
           }
         }
 
-        // Execute each expression in the test body using the isolated environment
-        for (const expr of testDef.body) {
-          const result = interpreter.eval(expr, testEnv);
-          if (Either.isLeft(result)) {
-            throw new Error(`Test '${testName}' failed with error: ${result.left.message || result.left}`);
+        // Apply fixtures if any
+        if (currentFixtures.length > 0) {
+          // use-fixtures is now a special form that handles fixtures directly
+          // So we just execute the test body normally
+          // The use-fixtures call will handle setting up the fixtures
+          for (const expr of testDef.body) {
+            const result = interpreter.eval(expr, testEnv);
+            if (Either.isLeft(result)) {
+              throw new Error(`Test '${testName}' failed with error: ${result.left.message || result.left}`);
+            }
           }
+        } else {
+          // Execute each expression in the test body using the isolated environment
+          for (const expr of testDef.body) {
+            const result = interpreter.eval(expr, testEnv);
+            if (Either.isLeft(result)) {
+              throw new Error(`Test '${testName}' failed with error: ${result.left.message || result.left}`);
+            }
+          }
+        }
+
+        // Run fixture teardowns if any
+        try {
+          const teardownsVar = testEnv.lookup("__fixture_teardowns__");
+          if (teardownsVar && teardownsVar.type === "list") {
+            const teardowns = teardownsVar.value as any[];
+            // Run teardowns in reverse order
+            for (let i = teardowns.length - 1; i >= 0; i--) {
+              const teardownInfo = teardowns[i];
+              if (teardownInfo.teardown && teardownInfo.teardown.length > 0) {
+                for (const expr of teardownInfo.teardown) {
+                  const result = interpreter.eval(expr, interpreter.globalEnv);
+                  if (Either.isLeft(result)) {
+                    console.warn(`Fixture '${teardownInfo.fixture}' teardown failed: ${result.left.message || result.left}`);
+                  }
+                }
+              }
+            }
+          }
+        } catch (teardownError) {
+          // Log but don't fail the test
+          console.warn(`Fixture teardown error: ${teardownError}`);
         }
 
         currentTestResults.push({ testName, passed: true });
@@ -215,6 +290,20 @@ export function registerTestingFramework(interpreter: TLispInterpreter): void {
           // Create a child environment for this test to provide isolation
           const testEnv = interpreter.globalEnv.createChild();
 
+          // Check for fixtures in __current_fixtures__
+          let currentFixtures: string[] = [];
+          try {
+            const fixturesVar = testEnv.lookup("__current_fixtures__");
+            if (fixturesVar && fixturesVar.type === "list") {
+              const fixturesList = fixturesVar.value as TLispValue[];
+              currentFixtures = fixturesList
+                .filter(f => f.type === "string")
+                .map(f => f.value as string);
+            }
+          } catch {
+            // No fixtures defined
+          }
+
           // Run setup if defined
           if (globalSetupFunction && globalSetupFunction.type === "list") {
             const setupExpressions = globalSetupFunction.value as TLispValue[];
@@ -226,12 +315,48 @@ export function registerTestingFramework(interpreter: TLispInterpreter): void {
             }
           }
 
-          // Execute each expression in the test body using the isolated environment
-          for (const expr of testDef.body) {
-            const result = interpreter.eval(expr, testEnv);
-            if (Either.isLeft(result)) {
-              throw new Error(`Test '${testName}' failed with error: ${result.left.message || result.left}`);
+          // Apply fixtures if any
+          if (currentFixtures.length > 0) {
+            // use-fixtures is now a special form that handles fixtures directly
+            // So we just execute the test body normally
+            // The use-fixtures call will handle setting up the fixtures
+            for (const expr of testDef.body) {
+              const result = interpreter.eval(expr, testEnv);
+              if (Either.isLeft(result)) {
+                throw new Error(`Test '${testName}' failed with error: ${result.left.message || result.left}`);
+              }
             }
+          } else {
+            // Execute each expression in the test body using the isolated environment
+            for (const expr of testDef.body) {
+              const result = interpreter.eval(expr, testEnv);
+              if (Either.isLeft(result)) {
+                throw new Error(`Test '${testName}' failed with error: ${result.left.message || result.left}`);
+              }
+            }
+          }
+
+          // Run fixture teardowns if any
+          try {
+            const teardownsVar = testEnv.lookup("__fixture_teardowns__");
+            if (teardownsVar && teardownsVar.type === "list") {
+              const teardowns = teardownsVar.value as any[];
+              // Run teardowns in reverse order
+              for (let i = teardowns.length - 1; i >= 0; i--) {
+                const teardownInfo = teardowns[i];
+                if (teardownInfo.teardown && teardownInfo.teardown.length > 0) {
+                  for (const expr of teardownInfo.teardown) {
+                    const result = interpreter.eval(expr, interpreter.globalEnv);
+                    if (Either.isLeft(result)) {
+                      console.warn(`Fixture '${teardownInfo.fixture}' teardown failed: ${result.left.message || result.left}`);
+                    }
+                  }
+                }
+              }
+            }
+          } catch (teardownError) {
+            // Log but don't fail the test
+            console.warn(`Fixture teardown error: ${teardownError}`);
           }
 
           testCounts.passed++;
@@ -888,4 +1013,226 @@ export function registerTestingFramework(interpreter: TLispInterpreter): void {
 
     return Either.right(createBoolean(true));
   });
+
+  // ========== FIXTURE SYSTEM (US-0.6.2) ==========
+
+  /**
+   * Define a test fixture
+   * Usage: (deffixture fixture-name (:scope each|once|all) body...)
+   * Defines a fixture that can be used in tests
+   * Note: This is a wrapper - the actual work is done by the special form in evaluator
+   */
+  interpreter.defineBuiltin("deffixture", (args: TLispValue[]) => {
+    // The special form has already stored the fixture data
+    // This builtin is just for compatibility - it returns the fixture name
+    const nameArg = args[0];
+    if (!nameArg || (nameArg.type !== "string" && nameArg.type !== "symbol")) {
+      return Either.left({
+        type: 'EvalError',
+        variant: 'TypeError',
+        message: "deffixture first argument must be a string or symbol (fixture name)",
+        details: { argType: nameArg?.type }
+      });
+    }
+
+    const fixtureName = nameArg.value as string;
+    return Either.right(createString(fixtureName));
+  });
+
+  /**
+   * Helper function to get fixture from global storage or registry
+   */
+  function getFixture(name: string): Fixture | undefined {
+    // First check global storage from special form
+    const globalFixtures = (globalThis as any).__deffixture_data__;
+    if (globalFixtures && globalFixtures.has(name)) {
+      const data = globalFixtures.get(name);
+      // Convert to Fixture format
+      return {
+        name: data.name,
+        params: data.params,
+        body: data.body || [],
+        setupBody: data.setupBody || [],
+        teardownBody: data.teardownBody || [],
+        scope: data.scope || 'each'
+      };
+    }
+
+    // Then check local registry
+    return fixtureRegistry.get(name);
+  }
+
+  /**
+   * Apply fixtures to a test
+   * Usage: (use-fixtures fixture1 fixture2 ...)
+   * Applies the specified fixtures to the current test
+   */
+  interpreter.defineBuiltin("use-fixtures", (args: TLispValue[]) => {
+    if (args.length === 0) {
+      return Either.left({
+        type: 'EvalError',
+        variant: 'RuntimeError',
+        message: "use-fixtures requires at least 1 argument: fixture name",
+        details: { expectedMin: 1, actual: args.length }
+      });
+    }
+
+    // Collect fixture names
+    const fixtureNames: string[] = [];
+    for (const arg of args) {
+      if (arg.type === "symbol") {
+        fixtureNames.push(arg.value as string);
+      } else if (arg.type === "string") {
+        fixtureNames.push(arg.value as string);
+      } else {
+        return Either.left({
+          type: 'EvalError',
+          variant: 'TypeError',
+          message: "use-fixtures arguments must be symbols or strings (fixture names)",
+          details: { argType: arg.type }
+        });
+      }
+    }
+
+    // Apply fixtures immediately in the current environment
+    // We need to get the current environment - but builtin functions don't have access to it
+    // For now, let's store the fixtures and let the test runner handle it
+
+    // Store in a special global variable that test-run will check
+    const currentFixturesList = createList(
+      fixtureNames.map(name => createString(name))
+    );
+
+    // Store in a special global variable that test-run will check
+    interpreter.globalEnv.define("__current_fixtures__", currentFixturesList);
+
+    // Also apply fixtures immediately if possible
+    // We need access to the current environment for this
+    // For now, return success and let the test framework handle it
+    return Either.right(createBoolean(true));
+  });
+
+  /**
+   * Run fixture setup
+   * @param fixture - Fixture to set up
+   * @param interpreter - Interpreter instance
+   * @param env - Environment for setup
+   */
+  function runFixtureSetup(fixture: Fixture, interpreter: TLispInterpreter, env: any): Either<any, any> {
+    if (fixture.setupBody && fixture.setupBody.length > 0) {
+      for (const expr of fixture.setupBody) {
+        const result = interpreter.eval(expr, env);
+        if (Either.isLeft(result)) {
+          return result;
+        }
+      }
+    }
+    return Either.right(createBoolean(true));
+  }
+
+  /**
+   * Run fixture teardown
+   * @param fixture - Fixture to tear down
+   * @param interpreter - Interpreter instance
+   * @param env - Environment for teardown
+   */
+  function runFixtureTeardown(fixture: Fixture, interpreter: TLispInterpreter, env: any): Either<any, any> {
+    if (fixture.teardownBody && fixture.teardownBody.length > 0) {
+      for (const expr of fixture.teardownBody) {
+        const result = interpreter.eval(expr, env);
+        if (Either.isLeft(result)) {
+          return result;
+        }
+      }
+    }
+    return Either.right(createBoolean(true));
+  }
+
+  /**
+   * Apply fixtures to a test execution
+   * @param interpreter - Interpreter instance
+   * @param testEnv - Test environment
+   * @param testBody - Test body to execute
+   * @param fixtureNames - List of fixture names to apply
+   */
+  function applyFixtures(
+    interpreter: TLispInterpreter,
+    testEnv: any,
+    testBody: TLispValue[],
+    fixtureNames: string[]
+  ): Either<any, any> {
+    const fixturesToRun: Fixture[] = [];
+
+    // Collect fixtures to run (in order)
+    for (const name of fixtureNames) {
+      const fixture = getFixture(name);
+      if (!fixture) {
+        return Either.left({
+          type: 'EvalError',
+          variant: 'RuntimeError',
+          message: `Fixture '${name}' not found`,
+          details: { fixtureName: name }
+        });
+      }
+      fixturesToRun.push(fixture);
+    }
+
+    // Run setup for each fixture
+    for (const fixture of fixturesToRun) {
+      // Skip if 'once' fixture already ran
+      if (fixture.scope === "once" && onceFixturesExecuted.has(fixture.name)) {
+        continue;
+      }
+
+      // Skip if 'all' fixture already ran
+      if (fixture.scope === "all" && allFixturesExecuted.has(fixture.name)) {
+        continue;
+      }
+
+      // Execute fixture body first
+      for (const expr of fixture.body) {
+        const result = interpreter.eval(expr, testEnv);
+        if (Either.isLeft(result)) {
+          return result;
+        }
+      }
+
+      // Then run setup
+      const setupResult = runFixtureSetup(fixture, interpreter, testEnv);
+      if (Either.isLeft(setupResult)) {
+        return setupResult;
+      }
+
+      // Mark as executed
+      if (fixture.scope === "once") {
+        onceFixturesExecuted.add(fixture.name);
+      } else if (fixture.scope === "all") {
+        allFixturesExecuted.add(fixture.name);
+      }
+    }
+
+    // Execute test body
+    let testResult: Either<any, any> = Either.right(createBoolean(true));
+    for (const expr of testBody) {
+      testResult = interpreter.eval(expr, testEnv);
+      if (Either.isLeft(testResult)) {
+        break;
+      }
+    }
+
+    // Run teardown in reverse order
+    for (let i = fixturesToRun.length - 1; i >= 0; i--) {
+      const fixture = fixturesToRun[i];
+      const teardownResult = runFixtureTeardown(fixture, interpreter, interpreter.globalEnv);
+      // Log but don't fail on teardown errors
+      if (Either.isLeft(teardownResult)) {
+        console.warn(`Fixture '${fixture.name}' teardown failed: ${teardownResult.left.message || teardownResult.left}`);
+      }
+    }
+
+    return testResult;
+  }
+
+  // Store applyFixtures in a way that test-run can access it
+  (interpreter as any).__applyFixtures__ = applyFixtures;
 }
