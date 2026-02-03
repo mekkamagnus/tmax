@@ -451,7 +451,7 @@
         "dit deletes inside HTML/XML tag"
       ],
       "priority": 1,
-      "passes": false,
+      "passes": true,
       "notes": "Phase 1 - Core Editing Features - Vim superpower"
     },
     {

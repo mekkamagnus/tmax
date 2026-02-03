@@ -22,6 +22,7 @@ import { createChangeOps } from "./api/change-ops.ts";
 import { createUndoRedoOps } from "./api/undo-redo-ops.ts";
 import { createCountOps } from "./api/count-ops.ts";
 import { createVisualOps, getVisualSelection, setVisualSelection, clearVisualSelection } from "./api/visual-ops.ts";
+import { createTextObjectsOps } from "./api/text-objects-ops.ts";
 
 /**
  * T-Lisp function implementation that returns Either for error handling
@@ -246,6 +247,18 @@ export function createEditorAPI(state: TlispEditorState): Map<string, TLispFunct
     (msg) => { state.statusMessage = msg; }
   );
   for (const [key, value] of visualOps.entries()) {
+    api.set(key, value);
+  }
+
+  // Add text object operations
+  const textObjectsOps = createTextObjectsOps(
+    () => state.currentBuffer,
+    (buffer) => { state.currentBuffer = buffer; },
+    () => state.cursorLine,
+    () => state.cursorColumn,
+    (mode) => { state.mode = mode; }
+  );
+  for (const [key, value] of textObjectsOps.entries()) {
     api.set(key, value);
   }
 
