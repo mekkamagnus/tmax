@@ -483,7 +483,7 @@
         "p then M-y replaces with second most recent"
       ],
       "priority": 10,
-      "passes": false,
+      "passes": true,
       "notes": "Phase 1 - Core Editing Features - Emacs integration"
     },
     {

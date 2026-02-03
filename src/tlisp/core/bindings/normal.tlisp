@@ -118,6 +118,14 @@
 (key-bind "C-v" "(visual-enter-block-mode)" "normal")
 
 ;; =================================================================
+;; YANK POP (US-1.9.2)
+;; =================================================================
+;; Emacs-style yank-pop for cycling through kill ring history
+
+;; Yank-pop - replace yanked text with previous kill-ring item (M-y/Alt+y)
+(key-bind "M-y" "(yank-pop)" "normal")
+
+;; =================================================================
 ;; WORD UNDER CURSOR SEARCH (US-1.5.2)
 ;; =================================================================
 ;; Vim-style * and # keys search for word under cursor

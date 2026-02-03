@@ -27,6 +27,7 @@ import {
   AppError
 } from "../../error/types.ts";
 import { killRingSave } from "./kill-ring.ts";
+import { activateYankPopState } from "./yank-pop-ops.ts";
 
 /**
  * Register storage for yanked text
@@ -385,6 +386,9 @@ export function createYankOps(
       // Move cursor to first non-blank of pasted line
       setCursorLine(currentLine + 1);
       setCursorColumn(0);
+
+      // Activate yank-pop state for M-y support (US-1.9.2)
+      activateYankPopState(pasteText, { line: currentLine + 1, column: 0 });
     } else {
       // Character paste: paste after cursor position
       const insertPos = { line: currentLine, column: currentColumn + 1 };
@@ -407,6 +411,9 @@ export function createYankOps(
       // Move cursor to first character of pasted text
       setCursorLine(currentLine);
       setCursorColumn(currentColumn + 1);
+
+      // Activate yank-pop state for M-y support (US-1.9.2)
+      activateYankPopState(pasteText, insertPos);
     }
 
     return Either.right(createNil());
@@ -478,6 +485,9 @@ export function createYankOps(
       // Move cursor to first non-blank of pasted line
       setCursorLine(currentLine);
       setCursorColumn(0);
+
+      // Activate yank-pop state for M-y support (US-1.9.2)
+      activateYankPopState(pasteText, { line: currentLine, column: 0 });
     } else {
       // Character paste: paste before cursor position
       const insertPos = { line: currentLine, column: currentColumn };
@@ -500,6 +510,9 @@ export function createYankOps(
       // Move cursor to first character of pasted text
       setCursorLine(currentLine);
       setCursorColumn(currentColumn);
+
+      // Activate yank-pop state for M-y support (US-1.9.2)
+      activateYankPopState(pasteText, insertPos);
     }
 
     return Either.right(createNil());

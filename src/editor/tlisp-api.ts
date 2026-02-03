@@ -26,6 +26,7 @@ import { createTextObjectsOps } from "./api/text-objects-ops.ts";
 import { createMinibufferOps } from "./api/minibuffer-ops.ts";
 import { createJumpOps } from "./api/jump-ops.ts";
 import { createKillRingOps } from "./api/kill-ring.ts";
+import { createYankPopOps } from "./api/yank-pop-ops.ts";
 
 /**
  * T-Lisp function implementation that returns Either for error handling
@@ -280,6 +281,17 @@ export function createEditorAPI(state: TlispEditorState): Map<string, TLispFunct
   // Add kill ring operations (US-1.9.1)
   const killRingOps = createKillRingOps();
   for (const [key, value] of killRingOps.entries()) {
+    api.set(key, value);
+  }
+
+  // Add yank-pop operations (US-1.9.2)
+  const yankPopOps = createYankPopOps(
+    () => state.currentBuffer,
+    (buffer) => { state.currentBuffer = buffer; },
+    () => state.cursorLine,
+    () => state.cursorColumn
+  );
+  for (const [key, value] of yankPopOps.entries()) {
     api.set(key, value);
   }
 
