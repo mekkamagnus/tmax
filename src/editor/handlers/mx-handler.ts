@@ -4,6 +4,30 @@
  */
 
 import type { Editor } from "../editor.ts";
+import { getBestMatch, getFuzzyCompletions } from "../utils/fuzzy-completion.ts";
+
+/**
+ * Get all available T-Lisp function names for completion
+ * @param editor - Editor instance
+ * @returns Array of function names
+ */
+function getAvailableCommands(editor: Editor): string[] {
+  const interpreter = (editor as any).getInterpreter();
+  const globalEnv = interpreter.globalEnv;
+
+  // Get all symbols from global environment
+  const commands: string[] = [];
+  if (globalEnv && globalEnv.bindings) {
+    for (const [name, value] of globalEnv.bindings.entries()) {
+      // Only include functions, not variables or other types
+      if (value && value.type === "function") {
+        commands.push(name);
+      }
+    }
+  }
+
+  return commands;
+}
 
 /**
  * Handle key input in M-x mode
@@ -27,16 +51,42 @@ export async function handleMxMode(editor: Editor, key: string, normalizedKey: s
     return;
   }
 
-  // Handle Tab for completion
+  // Handle Tab for fuzzy completion (US-1.10.2)
   if (normalizedKey === "Tab") {
     const command = (editor as any).state.mxCommand;
-    
-    // Check if there are any completions
-    // For now, just show "No match" if command is empty or doesn't match known functions
-    if (!command || command.startsWith("zzz")) {
+
+    if (!command) {
       (editor as any).state.statusMessage = "No match";
+      return;
+    }
+
+    // Get all available commands
+    const commands = getAvailableCommands(editor);
+
+    if (commands.length === 0) {
+      (editor as any).state.statusMessage = "No commands available";
+      return;
+    }
+
+    // Try to find best match
+    const bestMatch = getBestMatch(command, commands);
+
+    if (bestMatch) {
+      // Single match - complete it
+      (editor as any).state.mxCommand = bestMatch;
+      (editor as any).state.statusMessage = `Completed: ${bestMatch}`;
     } else {
-      (editor as any).state.statusMessage = "Tab completion not yet implemented";
+      // Multiple matches - show them
+      const completions = getFuzzyCompletions(command, commands);
+
+      if (completions.length === 0) {
+        (editor as any).state.statusMessage = "No match";
+      } else {
+        // Show up to 5 matches in status message
+        const matchesToShow = completions.slice(0, 5).map(c => c.command).join(", ");
+        const more = completions.length > 5 ? ` (+${completions.length - 5} more)` : "";
+        (editor as any).state.statusMessage = `Matches: ${matchesToShow}${more}`;
+      }
     }
     return;
   }

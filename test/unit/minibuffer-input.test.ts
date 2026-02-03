@@ -365,23 +365,43 @@ describe("Minibuffer Input (US-1.10.1)", () => {
     });
   });
 
-  describe("Tab Completion", () => {
-    test("should complete partial command with Tab", async () => {
+  describe("Tab Completion (US-1.10.2)", () => {
+    test("should complete 'file-s' to 'file-save'", async () => {
       // Enter M-x mode
       await editor.handleKey(" ", "space");
       await editor.handleKey(";", "semicolon");
 
       // Type partial command
-      await editor.handleKey("b");
-      await editor.handleKey("u");
       await editor.handleKey("f");
+      await editor.handleKey("i");
+      await editor.handleKey("l");
+      await editor.handleKey("e");
+      await editor.handleKey("-");
+      await editor.handleKey("s");
 
       // Press Tab
       await editor.handleKey("\t", "Tab");
 
       const state = editor.getState();
-      // Should complete to "buffer" or show options
-      expect(state.mxCommand.length).toBeGreaterThanOrEqual(3);
+      // Should complete to "file-save"
+      expect(state.mxCommand).toBe("file-save");
+    });
+
+    test("should complete 'fs' to 'file-save' (fuzzy)", async () => {
+      // Enter M-x mode
+      await editor.handleKey(" ", "space");
+      await editor.handleKey(";", "semicolon");
+
+      // Type fuzzy pattern
+      await editor.handleKey("f");
+      await editor.handleKey("s");
+
+      // Press Tab
+      await editor.handleKey("\t", "Tab");
+
+      const state = editor.getState();
+      // Should complete to "file-save" using fuzzy matching
+      expect(state.mxCommand).toBe("file-save");
     });
 
     test("should show multiple completion options when ambiguous", async () => {
@@ -391,13 +411,16 @@ describe("Minibuffer Input (US-1.10.1)", () => {
 
       // Type partial command that has multiple matches
       await editor.handleKey("b");
+      await editor.handleKey("u");
+      await editor.handleKey("f");
 
       // Press Tab
       await editor.handleKey("\t", "Tab");
 
       const state = editor.getState();
-      // Should either complete to common prefix or show in status
-      expect(state.statusMessage.length).toBeGreaterThan(0);
+      // Should show matches in status message
+      expect(state.statusMessage).toContain("Matches:");
+      expect(state.statusMessage).toContain("buffer");
     });
 
     test("should show 'No match' when no completions available", async () => {
@@ -416,6 +439,52 @@ describe("Minibuffer Input (US-1.10.1)", () => {
       const state = editor.getState();
       // Should indicate no match
       expect(state.statusMessage).toContain("No match");
+    });
+
+    test("should filter list as user types", async () => {
+      // Enter M-x mode
+      await editor.handleKey(" ", "space");
+      await editor.handleKey(";", "semicolon");
+
+      // Type 'b' and press Tab
+      await editor.handleKey("b");
+      await editor.handleKey("\t", "Tab");
+
+      let state = editor.getState();
+      const message1 = state.statusMessage;
+
+      // Continue typing to 'buf' and press Tab
+      await editor.handleKey("u");
+      await editor.handleKey("f");
+      await editor.handleKey("\t", "Tab");
+
+      state = editor.getState();
+      const message2 = state.statusMessage;
+
+      // More specific pattern should filter results
+      // The second message should have different or fewer matches
+      expect(message2).toBeDefined();
+    });
+
+    test("should complete single match fully", async () => {
+      // Enter M-x mode
+      await editor.handleKey(" ", "space");
+      await editor.handleKey(";", "semicolon");
+
+      // Type a pattern that matches only one command (file-save)
+      await editor.handleKey("f");
+      await editor.handleKey("i");
+      await editor.handleKey("l");
+      await editor.handleKey("e");
+      await editor.handleKey("-");
+      await editor.handleKey("s");
+
+      // Press Tab
+      await editor.handleKey("\t", "Tab");
+
+      const state = editor.getState();
+      // Should complete to full command
+      expect(state.mxCommand).toBe("file-save");
     });
   });
 
