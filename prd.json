@@ -518,8 +518,8 @@
         "Commands requiring arguments prompt in minibuffer"
       ],
       "priority": 1,
-      "passes": false,
-      "notes": "Phase 1 - Core Editing Features - Emacs-style UI"
+      "passes": true,
+      "notes": "Phase 1 - Core Editing Features - Emacs-style UI - Implemented with command history (M-p/M-n), text input, and basic Tab completion"
     },
     {
       "id": "US-1.10.2",
