@@ -102,7 +102,7 @@ To avoid confusion, here are Emacs features we're **not** implementing:
 This version provides a solid foundation for future development with comprehensive core functionality.
 
 ### Completed Features
-- ✅ **Core Editor**: A terminal-based editor with intuitive Neovim-style key motions (hjkl navigation)
+- ✅ **Core Editor**: A T-Lisp-based terminal editor with vim-style key bindings (hjkl navigation)
 - ✅ **T-Lisp Extensibility**: A complete T-Lisp interpreter with tail-call optimization and macro system for unlimited customization
 - ✅ **Modal Editing**: Five editing modes: normal, insert, visual, command, and M-x
 - ✅ **File Operations**: Open, save, and create files through a command interface

@@ -7,7 +7,7 @@
 **Date:** July 9, 2025  
 **Status:** ✅ COMPLETE AND FUNCTIONAL  
 
-tmax is a comprehensive extensible terminal-based text editor with a TypeScript core running on the Deno runtime. Following the Emacs architecture, TypeScript handles low-level operations (terminal I/O via Deno-ink, file system, memory management, display rendering) while T-Lisp (tmax Lisp) handles all higher-level editor functionality including commands, modes, key bindings, and extensibility. The implementation delivers a full-screen terminal editor with Neovim-inspired key motions, Emacs-like extensibility through a complete T-Lisp interpreter, and modern features like command mode and M-x functionality. The UI layer is migrating to Deno-ink (React for CLI) for improved maintainability and declarative component-based rendering.
+tmax is a comprehensive extensible terminal-based text editor with a TypeScript core running on the Bun runtime. Following the Emacs architecture, TypeScript handles low-level operations (terminal I/O via ink, file system, memory management, display rendering) while T-Lisp (tmax Lisp) handles all higher-level editor functionality including commands, modes, key bindings, and extensibility. The implementation delivers a full-screen terminal editor with vim-style key bindings as the interface layer, complete Emacs-like extensibility through a T-Lisp interpreter (like Emacs Lisp), and modern features like command mode and M-x functionality. The UI layer uses ink (React for CLI) for improved maintainability and declarative component-based rendering.
 
 ## Problem Statement
 

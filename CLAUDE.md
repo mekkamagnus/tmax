@@ -32,7 +32,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - Write simple, verbose code over terse, dense code
 - Use the standard library where possible. Avoid using external dependencies unless otherwise stated
 - Terminal-only interface (no GUI components)
-- Implement Neovim-style buffer management (gap buffer/rope data structures)
+- Implement efficient buffer management (gap buffer/rope data structures)
 - T-Lisp interpreter for all higher-level functionality
 - No external dependencies beyond Deno standard library
 

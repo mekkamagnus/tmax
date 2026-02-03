@@ -24,7 +24,7 @@ tmax is a comprehensive extensible terminal-based text editor with a TypeScript 
 
 **Current Development Focus:** Achieving basic "Emacs with Evil-mode" parity through implementation of core Vim editing commands (operators, navigation, search) and select Emacs features (kill ring, minibuffer, which-key).
 
-The implementation delivers a full-screen terminal editor with Neovim-inspired key motions, Emacs-like extensibility through a complete T-Lisp interpreter, and modern React-based UI rendering via Bun + ink for improved maintainability and declarative component architecture.
+The implementation delivers a full-screen terminal editor with vim-style key motions as the interface layer, complete Emacs-like extensibility through a T-Lisp interpreter (like Emacs Lisp), and modern React-based UI rendering via Bun + ink for improved maintainability and declarative component architecture.
 
 ## Problem Statement
 
@@ -45,7 +45,7 @@ Developers needed a modern, extensible terminal editor that combines the best as
 ## Goals and Objectives
 
 ### Primary Goals (All Achieved ✅)
-- ✅ **Create a terminal-based editor** with intuitive Neovim-style key motions
+- ✅ **Create a terminal-based editor** with T-Lisp (like Emacs Lisp) as the core engine and vim-style key bindings as the interface
 - ✅ **Implement full-screen interface** with alternate screen buffer and viewport management
 - ✅ **Provide unlimited extensibility** through complete T-Lisp interpreter
 - ✅ **Support multiple editing modes** (normal, insert, visual, command, M-x)
@@ -89,17 +89,17 @@ Developers needed a modern, extensible terminal editor that combines the best as
 - ✅ **File operations**: open, save, create through command interface
 - ✅ **Advanced functionality**: M-x commands, configurable key bindings
 
-### Epic 2: Neovim-Compatible Interface 🚧 IN PROGRESS
-**As a** Neovim user
-**I want** familiar key bindings and interface
-**So that** I can use tmax without learning new keybindings
+### Epic 2: Vim-Style Key Bindings 🚧 IN PROGRESS
+**As a** developer familiar with vim
+**I want** vim-style key bindings as the interface
+**So that** I can be productive immediately while using T-Lisp for extensibility
 
 #### Acceptance Criteria - Implementation Status
 - ✅ **Modal editing**: Familiar normal/insert/visual mode behavior
 - ✅ **Key bindings**: hjkl navigation, i for insert, Escape to exit
 - ✅ **Command mode**: vim-style commands (:q, :w, :wq, :e filename)
 - ✅ **Status line**: Mode indication and cursor position
-- ✅ **Full-screen interface**: Takes over terminal like vim/neovim
+- ✅ **Full-screen interface**: Takes over terminal like vim
 - 🚧 **Navigation**: Basic hjkl complete, advanced (w/b/e, 0/$) planned for v0.2.0
 - 🚧 **Operators**: Basic editing complete, d/y/c operators planned for v0.2.0
 - [ ] **Jump commands**: gg, G, :line_number - Planned for v0.2.0 (Phase 1.6)
