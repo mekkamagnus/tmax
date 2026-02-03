@@ -187,7 +187,8 @@
 (key-bind "f" "(describe-function-prompt)" "normal")
 
 ;; Apropos command (C-h a) - Search for commands by pattern
-;; Future enhancement: US-1.11.3
+;; Prompts for search pattern and displays matching commands
+(key-bind "a" "(apropos-command-prompt)" "normal")
 
 ;; Describe key - use T-Lisp function directly
 ;; Example: (describe-key "q" "normal") shows that q runs editor-quit

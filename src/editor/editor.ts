@@ -507,6 +507,83 @@ export class Editor {
       return createList(matchingFunctions);
     });
 
+    // Add apropos-command function (US-1.11.3)
+    // Search for commands by pattern, returning name, binding, and documentation
+    this.interpreter.defineBuiltin("apropos-command", (args) => {
+      if (args.length !== 1) {
+        throw new Error("apropos-command requires exactly 1 argument: pattern");
+      }
+
+      const patternArg = args[0];
+      if (!patternArg || patternArg.type !== "string") {
+        throw new Error("apropos-command requires a string pattern");
+      }
+
+      const pattern = (patternArg.value as string).toLowerCase();
+
+      // Find all matching commands
+      const matchingCommands: TLispValue[] = [];
+
+      // Search through all functions in the global environment
+      for (const [name, value] of this.interpreter.globalEnv.bindings) {
+        if (value.type === "function") {
+          const lowerName = name.toLowerCase();
+
+          // Check if the pattern matches (supports simple regex patterns)
+          let matches = false;
+          try {
+            // Try to match as regex first
+            const regex = new RegExp(pattern, "i");
+            matches = regex.test(lowerName);
+          } catch {
+            // If invalid regex, fall back to simple substring match
+            matches = lowerName.includes(pattern);
+          }
+
+          if (matches) {
+            // Get key bindings for this command
+            const bindings: string[] = [];
+            for (const [key, mappings] of this.keyMappings) {
+              for (const mapping of mappings) {
+                if (mapping.command === name) {
+                  const modeStr = mapping.mode ? ` (${mapping.mode})` : "";
+                  bindings.push(`${key}${modeStr}`);
+                }
+              }
+            }
+
+            // Build result: [name, bindings, docstring]
+            const func = value as TLispFunctionImpl;
+            const docstring = func.docstring || "No documentation available";
+
+            const result: TLispValue[] = [
+              createString(name),
+              bindings.length > 0 ? createString(bindings.join(", ")) : createString(""),
+              createString(docstring)
+            ];
+
+            matchingCommands.push(createList(result));
+          }
+        }
+      }
+
+      return createList(matchingCommands);
+    });
+
+    // Add apropos-command-prompt function (US-1.11.3)
+    // Interactive version that prompts user for search pattern
+    this.interpreter.defineBuiltin("apropos-command-prompt", (args) => {
+      if (args.length !== 0) {
+        throw new Error("apropos-command-prompt requires no arguments");
+      }
+
+      // Set a flag to indicate we're waiting for a search pattern
+      this.state.aproposCommandPending = true;
+      this.state.statusMessage = "Apropos command: ";
+
+      return createString("waiting for search pattern");
+    });
+
     // Add count prefix API functions (US-1.3.1)
     this.interpreter.defineBuiltin("count-get", (args) => {
       if (args.length !== 0) {

@@ -194,9 +194,11 @@ export interface EditorState {
   whichKeyPrefix?: string;  // Current key prefix being explored
   whichKeyBindings?: WhichKeyBinding[];  // Bindings for current prefix
   whichKeyTimeout?: number;  // Configurable timeout in milliseconds (default 1000)
-  // Help system state (US-1.11.1)
+  // Help system state (US-1.11.1, US-1.11.2, US-1.11.3)
   describeKeyPending?: boolean;  // Waiting for key press to describe
   describeKeyTimeout?: number;  // Timeout for describe-key prompt
+  describeFunctionPending?: boolean;  // Waiting for function name to describe
+  aproposCommandPending?: boolean;  // Waiting for search pattern for apropos
 }
 
 /**
