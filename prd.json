@@ -565,8 +565,8 @@
         "C-h opens full documentation in help buffer"
       ],
       "priority": 20,
-      "passes": false,
-      "notes": "Phase 1 - Core Editing Features - UX polish"
+      "passes": true,
+      "notes": "Phase 1 - Core Editing Features - UX polish - Completed: Which-key bindings include documentation, get-command-documentation and get-command-documentation-truncated T-Lisp functions, 16 tests passing"
     },
     {
       "id": "US-1.11.1",
@@ -721,8 +721,8 @@
         "C-w < decreases current window width"
       ],
       "priority": 10,
-      "passes": false,
-      "notes": "Phase 3 - Advanced Features - Multi-window editing"
+      "passes": true,
+      "notes": "Phase 3 - Advanced Features - Multi-window editing - Completed: T-Lisp API (window-resize-height, window-resize-width), bounds checking (min 3 height, 10 width), terminal-based initialization, split-aware dimensions, 10 tests passing"
     },
     {
       "id": "US-3.4.1",

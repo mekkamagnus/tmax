@@ -867,12 +867,89 @@ export class Editor {
       }
       const bindings = this.state.whichKeyBindings || [];
       const bindingValues = bindings.map((binding: any) => {
-        return createList([
+        const result = [
           createString(binding.key),
           createString(binding.command),
-        ]);
+        ];
+
+        // Include documentation if available (US-1.10.4)
+        if (binding.documentation) {
+          result.push(createString(binding.documentation));
+        }
+
+        return createList(result);
       });
       return createList(bindingValues);
+    });
+
+    // ============================================================================
+    // COMMAND DOCUMENTATION PREVIEW FUNCTIONS (US-1.10.4)
+    // ============================================================================
+
+    // Get documentation for a command
+    this.interpreter.defineBuiltin("get-command-documentation", (args) => {
+      if (args.length !== 1) {
+        throw new Error("get-command-documentation requires exactly 1 argument: command-name");
+      }
+
+      const nameArg = args[0];
+      if (!nameArg || nameArg.type !== "string") {
+        throw new Error("get-command-documentation requires a string command name");
+      }
+
+      const commandName = nameArg.value as string;
+
+      // Look up the function in the global environment
+      const func = this.interpreter.globalEnv.lookup(commandName);
+
+      if (!func || func.type !== "function") {
+        return createString("No documentation available");
+      }
+
+      // Return docstring if available
+      if (func.docstring) {
+        return createString(func.docstring);
+      }
+
+      return createString("No documentation available");
+    });
+
+    // Get truncated documentation for preview pane
+    this.interpreter.defineBuiltin("get-command-documentation-truncated", (args) => {
+      if (args.length !== 2) {
+        throw new Error("get-command-documentation-truncated requires exactly 2 arguments: command-name and max-length");
+      }
+
+      const nameArg = args[0];
+      if (!nameArg || nameArg.type !== "string") {
+        throw new Error("get-command-documentation-truncated requires a string command name");
+      }
+
+      const lengthArg = args[1];
+      if (!lengthArg || lengthArg.type !== "number") {
+        throw new Error("get-command-documentation-truncated requires a number for max-length");
+      }
+
+      const commandName = nameArg.value as string;
+      const maxLength = lengthArg.value as number;
+
+      // Look up the function in the global environment
+      const func = this.interpreter.globalEnv.lookup(commandName);
+
+      if (!func || func.type !== "function") {
+        return createString("No documentation available");
+      }
+
+      // Get documentation
+      const doc = func.docstring || "No documentation available";
+
+      // Truncate if needed
+      if (doc.length <= maxLength) {
+        return createString(doc);
+      }
+
+      // Truncate and add ellipsis
+      return createString(doc.substring(0, maxLength - 3) + "...");
     });
 
     // ============================================================================

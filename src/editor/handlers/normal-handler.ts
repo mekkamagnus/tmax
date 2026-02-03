@@ -10,6 +10,7 @@ import {
   deactivateWhichKey,
   isPrefixKey,
   findBindingsForPrefix,
+  findBindingsForPrefixWithDocs,
   formatWhichKeyBindings,
   isWhichKeyActive
 } from "../utils/which-key.ts";
@@ -61,7 +62,10 @@ export async function handleNormalMode(editor: Editor, key: string, normalizedKe
   if (isPrefixKey(normalizedKey, keyMappings, "normal")) {
     // Schedule which-key activation
     const newPrefix = currentPrefix ? `${currentPrefix} ${normalizedKey}` : normalizedKey;
-    const bindings = findBindingsForPrefix(newPrefix, keyMappings, "normal");
+
+    // Get bindings with documentation (US-1.10.4)
+    const interpreter = (editor as any).interpreter;
+    const bindings = findBindingsForPrefixWithDocs(newPrefix, keyMappings, "normal", interpreter);
 
     scheduleWhichKey(newPrefix, bindings, () => {
       // Update editor state when which-key activates
@@ -69,7 +73,7 @@ export async function handleNormalMode(editor: Editor, key: string, normalizedKe
       (editor as any).state.whichKeyPrefix = newPrefix;
       (editor as any).state.whichKeyBindings = bindings;
 
-      // Format bindings for display
+      // Format bindings for display with documentation preview
       const formatted = formatWhichKeyBindings(bindings, newPrefix);
       (editor as any).state.statusMessage = `Which-key: ${formatted.join(", ")}`;
     });

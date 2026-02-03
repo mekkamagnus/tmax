@@ -171,6 +171,7 @@ export interface WhichKeyBinding {
   key: string;
   command: string;
   mode: string;
+  documentation?: string;  // Command documentation for preview (US-1.10.4)
 }
 
 /**
