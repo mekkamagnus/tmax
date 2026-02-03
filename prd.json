@@ -186,7 +186,7 @@
         "Failing test output appears at end"
       ],
       "priority": 10,
-      "passes": false,
+      "passes": true,
       "notes": "Phase 0.5 - Better developer experience"
     },
     {
