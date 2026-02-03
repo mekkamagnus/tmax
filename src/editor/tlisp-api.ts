@@ -17,6 +17,7 @@ import { createWordOps } from "./api/word-ops.ts";
 import { createLineOps } from "./api/line-ops.ts";
 import { createDeleteOps } from "./api/delete-ops.ts";
 import { createYankOps } from "./api/yank-ops.ts";
+import { createUndoRedoOps } from "./api/undo-redo-ops.ts";
 
 /**
  * T-Lisp function implementation that returns Either for error handling
@@ -179,6 +180,21 @@ export function createEditorAPI(state: TlispEditorState): Map<string, TLispFunct
     (column) => { state.cursorColumn = column; }
   );
   for (const [key, value] of yankOps.entries()) {
+    api.set(key, value);
+  }
+
+  // Add undo/redo operations
+  const undoRedoOps = createUndoRedoOps(
+    () => state.currentBuffer,
+    (buffer) => { state.currentBuffer = buffer; },
+    () => state.cursorLine,
+    (line) => { state.cursorLine = line; },
+    () => state.cursorColumn,
+    (column) => { state.cursorColumn = column; },
+    () => state.statusMessage,
+    (msg) => { state.statusMessage = msg; }
+  );
+  for (const [key, value] of undoRedoOps.entries()) {
     api.set(key, value);
   }
 

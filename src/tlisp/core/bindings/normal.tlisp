@@ -81,6 +81,17 @@
 (key-bind "q" "(editor-quit)" "normal")
 
 ;; =================================================================
+;; UNDO/REDO (US-1.2.3)
+;; =================================================================
+;; Vim-style undo/redo keys
+
+;; Undo last edit (u)
+(key-bind "u" "(undo)" "normal")
+
+;; Redo undone edit (Ctrl+r)
+(key-bind "C-r" "(redo)" "normal")
+
+;; =================================================================
 ;; M-X SYSTEM (Emacs-style)
 ;; =================================================================
 ;; Two-key sequence: SPC ; to activate M-x mode

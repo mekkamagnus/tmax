@@ -333,7 +333,7 @@
         "Redo to end shows 'Already at newest change'"
       ],
       "priority": 1,
-      "passes": false,
+      "passes": true,
       "notes": "Phase 1 - Core Editing Features"
     },
     {
