@@ -8,7 +8,7 @@ import { TLispInterpreterImpl } from "../tlisp/interpreter.ts";
 import { FileSystemImpl } from "../core/filesystem.ts";
 import { createEditorAPI, TlispEditorState } from "./tlisp-api.ts";
 import type { EditorState, FunctionalTextBuffer } from "../core/types.ts";
-import { createString, createList, createNil } from "../tlisp/values.ts";
+import { createString, createList, createNil, createNumber } from "../tlisp/values.ts";
 import type { TerminalIO, FileSystem } from "../core/types.ts";
 import { Either } from "../utils/task-either.ts";
 import { FunctionalTextBufferImpl } from "../core/buffer.ts";
@@ -72,6 +72,11 @@ export class Editor {
       currentFilename: undefined,
       buffers: this.buffers,
       cursorFocus: 'buffer',
+      // Which-key popup state (US-1.10.3)
+      whichKeyActive: false,
+      whichKeyPrefix: "",
+      whichKeyBindings: [],
+      whichKeyTimeout: 1000,
     };
 
     this.interpreter = new TLispInterpreterImpl();
@@ -516,6 +521,70 @@ export class Editor {
       this.state.cursorFocus = 'command';
       this.historyIndex = this.commandHistory.length; // Reset history index
       return createString("mx");
+    });
+
+    // Which-key API functions (US-1.10.3)
+    this.interpreter.defineBuiltin("which-key-enable", (args) => {
+      if (args.length !== 0) {
+        throw new Error("which-key-enable requires no arguments");
+      }
+      this.state.whichKeyTimeout = this.state.whichKeyTimeout || 1000;
+      return createNil();
+    });
+
+    this.interpreter.defineBuiltin("which-key-disable", (args) => {
+      if (args.length !== 0) {
+        throw new Error("which-key-disable requires no arguments");
+      }
+      this.state.whichKeyTimeout = 0;
+      this.state.whichKeyActive = false;
+      this.state.whichKeyPrefix = "";
+      this.state.whichKeyBindings = [];
+      return createNil();
+    });
+
+    this.interpreter.defineBuiltin("which-key-timeout", (args) => {
+      if (args.length !== 1) {
+        throw new Error("which-key-timeout requires exactly 1 argument: milliseconds");
+      }
+      const timeoutArg = args[0];
+      if (!timeoutArg || timeoutArg.type !== "number") {
+        throw new Error("which-key-timeout requires a number");
+      }
+      const timeout = timeoutArg.value;
+      if (timeout < 0) {
+        throw new Error("which-key-timeout must be a positive number");
+      }
+      this.state.whichKeyTimeout = timeout;
+      return createNumber(timeout);
+    });
+
+    this.interpreter.defineBuiltin("which-key-active", (args) => {
+      if (args.length !== 0) {
+        throw new Error("which-key-active requires no arguments");
+      }
+      return { type: "boolean", value: this.state.whichKeyActive || false };
+    });
+
+    this.interpreter.defineBuiltin("which-key-prefix", (args) => {
+      if (args.length !== 0) {
+        throw new Error("which-key-prefix requires no arguments");
+      }
+      return createString(this.state.whichKeyPrefix || "");
+    });
+
+    this.interpreter.defineBuiltin("which-key-bindings", (args) => {
+      if (args.length !== 0) {
+        throw new Error("which-key-bindings requires no arguments");
+      }
+      const bindings = this.state.whichKeyBindings || [];
+      const bindingValues = bindings.map((binding: any) => {
+        return createList([
+          createString(binding.key),
+          createString(binding.command),
+        ]);
+      });
+      return createList(bindingValues);
     });
   }
 

@@ -165,6 +165,15 @@ export interface EditorConfig {
 }
 
 /**
+ * Which-key binding display information
+ */
+export interface WhichKeyBinding {
+  key: string;
+  command: string;
+  mode: string;
+}
+
+/**
  * Editor state interface
  */
 export interface EditorState {
@@ -180,6 +189,11 @@ export interface EditorState {
   currentFilename?: string;  // Filename associated with current buffer
   buffers?: Map<string, FunctionalTextBuffer>;
   cursorFocus?: 'buffer' | 'command';  // Track where cursor focus should be
+  // Which-key popup state (US-1.10.3)
+  whichKeyActive?: boolean;  // Whether which-key popup is currently displayed
+  whichKeyPrefix?: string;  // Current key prefix being explored
+  whichKeyBindings?: WhichKeyBinding[];  // Bindings for current prefix
+  whichKeyTimeout?: number;  // Configurable timeout in milliseconds (default 1000)
 }
 
 /**

@@ -5,6 +5,15 @@
 
 import type { Editor } from "../editor.ts";
 import { Either } from "../../utils/task-either.ts";
+import {
+  scheduleWhichKey,
+  deactivateWhichKey,
+  isPrefixKey,
+  findBindingsForPrefix,
+  formatWhichKeyBindings,
+  isWhichKeyActive
+} from "../utils/which-key.ts";
+import type { WhichKeyBinding } from "../../core/types.ts";
 
 /**
  * Handle key input in normal mode
@@ -14,10 +23,22 @@ import { Either } from "../../utils/task-either.ts";
  * @returns Promise that resolves when key handling is complete, or rejects with quit signal
  */
 export async function handleNormalMode(editor: Editor, key: string, normalizedKey: string): Promise<void> {
+  // Handle C-g to cancel which-key popup (US-1.10.3)
+  if (normalizedKey === "C-g") {
+    if (isWhichKeyActive()) {
+      deactivateWhichKey();
+      (editor as any).state.whichKeyActive = false;
+      (editor as any).state.whichKeyPrefix = "";
+      (editor as any).state.whichKeyBindings = [];
+      (editor as any).state.statusMessage = "";
+      return;
+    }
+  }
+
   // Handle digit input for count prefix (US-1.3.1)
   if (/^[0-9]$/.test(normalizedKey)) {
     const digit = parseInt(normalizedKey, 10);
-    
+
     // Accumulate count (multiply existing count by 10 and add digit)
     // Special case: 0 at start doesn't accumulate (0w should do nothing)
     const currentCount = (editor as any).countPrefix || 0;
@@ -32,8 +53,35 @@ export async function handleNormalMode(editor: Editor, key: string, normalizedKe
     return;
   }
 
+  // Handle which-key popup (US-1.10.3)
+  const keyMappings = (editor as any).keyMappings;
+  const currentPrefix = (editor as any).state.whichKeyPrefix || "";
+
+  // Check if this key could be a prefix for other bindings
+  if (isPrefixKey(normalizedKey, keyMappings, "normal")) {
+    // Schedule which-key activation
+    const newPrefix = currentPrefix ? `${currentPrefix} ${normalizedKey}` : normalizedKey;
+    const bindings = findBindingsForPrefix(newPrefix, keyMappings, "normal");
+
+    scheduleWhichKey(newPrefix, bindings, () => {
+      // Update editor state when which-key activates
+      (editor as any).state.whichKeyActive = true;
+      (editor as any).state.whichKeyPrefix = newPrefix;
+      (editor as any).state.whichKeyBindings = bindings;
+
+      // Format bindings for display
+      const formatted = formatWhichKeyBindings(bindings, newPrefix);
+      (editor as any).state.statusMessage = `Which-key: ${formatted.join(", ")}`;
+    });
+  } else {
+    // Not a prefix key, deactivate which-key
+    deactivateWhichKey();
+    (editor as any).state.whichKeyActive = false;
+    (editor as any).state.whichKeyPrefix = "";
+    (editor as any).state.whichKeyBindings = [];
+  }
+
   // Handle regular key mappings in normal mode
-  const keyMappings = (editor as any).keyMappings; // Access private property
   const mappings = keyMappings.get(normalizedKey);
 
   if (!mappings) {
@@ -51,7 +99,13 @@ export async function handleNormalMode(editor: Editor, key: string, normalizedKe
       try {
         let command = mapping.command;
         const count = (editor as any).getCount();
-        
+
+        // Deactivate which-key before executing command (US-1.10.3)
+        deactivateWhichKey();
+        (editor as any).state.whichKeyActive = false;
+        (editor as any).state.whichKeyPrefix = "";
+        (editor as any).state.whichKeyBindings = [];
+
         // If count is active, repeat the command N times
         // For count=0, execute once with special handling (Vim behavior: 0w does nothing)
         if (count > 0) {
