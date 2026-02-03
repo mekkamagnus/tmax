@@ -26,6 +26,37 @@ tmax is a comprehensive extensible terminal-based text editor with a TypeScript 
 
 The implementation delivers a full-screen terminal editor with vim-style key motions as the interface layer, complete Emacs-like extensibility through a T-Lisp interpreter (like Emacs Lisp), and modern React-based UI rendering via Bun + ink for improved maintainability and declarative component architecture.
 
+## Current Development Status
+
+**🎯 ACTIVE WORK: Phase 0.4 - Key Binding System Refactor** (25% Complete)
+
+**Critical Path Sequential Development:**
+```
+✅ Phase 0.1-0.3: Infrastructure & T-Lisp Engine (COMPLETE)
+🚧 Phase 0.4:     Key Binding Refactor (IN PROGRESS - 1/4 complete)
+⏸️  Phase 0.5:     Testing Infrastructure (BLOCKED by 0.4)
+📋 Phase 0.8:     Server/Client Architecture (PLANNED - can run parallel)
+⏸️  Phase 1:       Core Editing Features (BLOCKED by 0.4 + 0.5)
+```
+
+**Why Phase 0.4 Must Complete First:**
+- Architecture violation: Core philosophy is "T-Lisp-first", but default bindings still in TypeScript
+- Phase 1 will add 20+ new key bindings (w, b, e, dd, yy, cw, etc.) - must have T-Lisp keymaps working
+- Building on incomplete architecture creates technical debt
+
+**Phase 0.8 (Server/Client) Can Run in Parallel:**
+- Independent architecture (socket server, client CLI)
+- Doesn't depend on key binding system
+- Can be developed alongside Phase 0.4 and 0.5
+- Enables AI agent control and instant file operations
+
+**Estimated Timeline to Phase 1:**
+- Phase 0.4 completion: ~3-5 days (75% remaining)
+- Phase 0.5 MVP (TRT Testing): 8 days
+- **Phase 1 can start in approximately 11-13 days** (if Phase 0.8 runs in parallel)
+
+**See:** "Planned Enhancements" section below for complete development sequence.
+
 ## Problem Statement
 
 ### Problem Addressed
@@ -107,7 +138,7 @@ Developers needed a modern, extensible terminal editor that combines the best as
 - [ ] **Visual selection modes**: Basic visual mode implemented, advanced features planned for v0.2.0 (Phase 1.7)
 - [ ] **Search functionality**: /, ?, n, N - Planned for v0.2.0 (Phase 1.5)
 
-**Next Steps:** See Phase 0.5 (Testing Infrastructure) for TRT framework and Phase 1 (Core Editing) in Planned Enhancements below
+**Next Steps:** Complete Phase 0.4 (Key Binding Refactor), then Phase 0.5 (Testing Infrastructure) before starting Phase 1 (Core Editing). See Planned Enhancements below for complete development sequence.
 
 ### Epic 3: T-Lisp Extensibility System ✅ COMPLETE
 **As a** power user
@@ -124,7 +155,7 @@ Developers needed a modern, extensible terminal editor that combines the best as
 - 🚧 **Plugin system using T-Lisp** - Foundation complete, full system planned for v0.3.0 (Phase 2.1)
 - 🚧 **T-Lisp keybinding architecture** - Functional, refactor in progress (Phase 0.4)
 
-**Next Steps:** See Phase 0.4 (Key Binding Refactor) and Phase 0.5 (Testing Infrastructure) in Planned Enhancements below
+**Next Steps:** Complete Phase 0.4 (Key Binding Refactor) FIRST, then Phase 0.5 (Testing Infrastructure). See Planned Enhancements below for complete development sequence showing Phase 0.4 → Phase 0.5 → Phase 1.
 
 ### Epic 4: T-Lisp Testing Infrastructure 📋 PLANNED
 **As a** developer
@@ -132,15 +163,31 @@ Developers needed a modern, extensible terminal editor that combines the best as
 **So that** I can test T-Lisp code and editor features in T-Lisp itself
 
 #### Acceptance Criteria - Implementation Status
-- 📋 **TRT framework**: Core testing functions to be implemented in T-Lisp
-- 📋 **Test definition macros**: `trt-deftest`, `trt-deftest-suite` to be added
-- 📋 **Assertion helpers**: `trt-assert-equals`, `trt-assert-true`, `trt-assert-false` to be created
-- 📋 **Test execution**: CLI runner with `bun run test:trt` to be implemented
-- 📋 **Built-in test suites**: Core, stdlib, and editor API tests to be added
-- 📋 **CI/CD integration**: Automated test execution planned
-- 📋 **User testing support**: `.tmax-trt/` directory for user tests planned
+**🚨 MUST HAVE (MVP - 8 days)**
+- 📋 **Core Framework**: `deftest` macro, `should-equal` assertion, test discovery, CLI runner
+- 📋 **Essential Assertions**: 4 core assertions (equal, truthy, falsy, throws)
+- 📋 **Basic Isolation**: Environment reset, global state cleanup, before/after hooks
 
-**Next Steps:** See Phase 0.5 (Testing Infrastructure) in Planned Enhancements below
+**⭐ SHOULD HAVE (Phase 0.6 - +10 days)**
+- 📋 **Rich Assertions**: 20+ assertions (strings, collections, numerics, custom)
+- 📋 **Fixtures System**: `deffixture`, `with-fixture` macros with auto-cleanup
+- 📋 **Test Suites**: `describe-suite` with nested organization and suite hooks
+- 📋 **Async Testing**: `deftest-async` with timeout protection
+- 📋 **Better CLI**: Progress indicators, ANSI colors, per-file results
+- 📋 **Basic Coverage**: Line coverage with text format and thresholds
+
+**💡 NICE TO HAVE (Phase 0.7+ - +15-20 days)**
+- 📋 **Advanced Isolation**: Four-layer strategy, flaky test detection
+- 📋 **Parametrized Tests**: Table-driven tests with per-case hooks
+- 📋 **Snapshot Testing**: External `.snap` files with interactive updates
+- 📋 **Test Explorer UI**: Buffer-based hierarchical tree view
+- 📋 **Examples as Tests**: Docstring examples that serve as tests
+- 📋 **Watch Mode & TDD**: Smart test selection with Red-Green-Refactor cycle
+- 📋 **Advanced Coverage**: Branch/function coverage with HTML reports
+- 📋 **Mocking & Spying**: Spy/mock functions with verification APIs
+- 📋 **Benchmarking**: Performance measurement with regression detection
+
+**Next Steps:** Phase 0.5 (Testing Infrastructure) begins AFTER Phase 0.4 completion. See Detailed User Stories below, [RFC-001: TRT Framework](../rfcs/RFC-001-trt-framework.md) for complete specification, and [ROADMAP](../docs/ROADMAP.md#phase-05-testing-infrastructure-enhancement-trt-framework) for implementation breakdown.
 
 ---
 
@@ -200,95 +247,598 @@ Developers needed a modern, extensible terminal editor that combines the best as
 
 ### Phase 0.5: Testing Infrastructure Enhancement (TRT Framework)
 
-#### Epic 4: T-Lisp Testing Infrastructure 📋 PLANNED
-**As a** developer
-**I want** a self-hosted T-Lisp testing framework (TRT)
-**So that** I can test T-Lisp code and editor features in T-Lisp itself
+**Status:** 📋 PLANNED
+**Priority:** HIGH (enables quality for Phase 1)
+**Timeline:** 1-2 weeks (MVP: 8 days)
 
-**Acceptance Criteria:**
-- ✅ **TRT framework implemented**: Core testing functions available in T-Lisp
-- ✅ **Test definition macros**: `trt-deftest`, `trt-deftest-suite` working
-- ✅ **Assertion helpers**: `trt-assert-equals`, `trt-assert-true`, `trt-assert-false` available
-- ✅ **Test execution**: Can run tests with `bun run test:trt`
-- ✅ **Built-in test suites**: Core, stdlib, and editor API tests included
-- ✅ **CI/CD integration**: Tests run automatically on commits
-- 🚧 **User testing support**: `.tmax-trt/` directory for user tests (planned)
+**Objective:** Implement TRT (Tmax Regression Testing) - a self-hosted T-Lisp testing framework inspired by Emacs ERT, enabling comprehensive testing of T-Lisp code and editor features.
 
-#### US-0.5.1: TRT Framework Core
+**Feature Prioritization:**
+
+#### 🚨 MUST HAVE (MVP - 8 days)
+Essential features for any functional test framework - Delivers working test framework with basic functionality
+
+#### ⭐ SHOULD HAVE (Phase 0.6 - +10 days)
+Important features for real-world development workflows - Delivers professional-grade testing infrastructure
+
+#### 💡 NICE TO HAVE (Phase 0.7+ - +15-20 days)
+Advanced features and polish - Delivers enterprise-grade testing framework
+
+**See [RFC-001: TRT Framework](../rfcs/RFC-001-trt-framework.md) for complete specification.**
+
+---
+
+### MVP Breakdown (Phase 0.5 - 8 days)
+
+#### US-0.5.1: Core Framework MVP (4 days)
 **As a** developer
-**I want** a T-Lisp testing framework similar to Emacs ERT
-**So that** I can write tests in T-Lisp itself
+**I want** a basic T-Lisp testing framework
+**So that** I can write and run tests in T-Lisp itself
 
 **Acceptance Criteria:**
 - **Given** the TRT framework is loaded
-  **When** I define a test with `(trt-deftest test-name ...)`
+  **When** I define a test with `(deftest test-name ...)`
   **Then** it should be registered and executable
 - **Given** a TRT test
-  **When** I use `(trt-assert-equals expected actual)`
+  **When** I use `(should-equal expected actual)`
   **Then** it should pass if values are equal, fail otherwise
-- **Given** a TRT test suite
-  **When** I run `bun run test:trt`
-  **Then** all tests should execute and report results
+- **Given** the test runner CLI
+  **When** I run `tmax --test`
+  **Then** all `*.test.tlisp` files should be discovered and executed
+- **Given** test execution completes
+  **When** tests pass
+  **Then** exit code should be 0 (CI/CD success)
+- **Given** test execution completes
+  **When** tests fail
+  **Then** exit code should be 1 (CI/CD failure)
 - **Given** test execution
   **When** tests complete
   **Then** I should see summary: "Passed: X, Failed: Y, Total: Z"
 
-#### US-0.5.2: Built-in Test Suites
+#### US-0.5.2: Essential Assertions (2 days)
 **As a** developer
-**I want** comprehensive TRT test suites for T-Lisp features
-**So that** we have test coverage for all T-Lisp functionality
+**I want** basic assertion helpers
+**So that** I can validate test behavior
 
 **Acceptance Criteria:**
-- **Given** the TRT framework
-  **When** I run `src/tlisp/tests/core-tests.tlisp`
-  **Then** all core T-Lisp tests should pass
-- **Given** `stdlib-tests.tlisp`
-  **When** I run it
-  **Then** all standard library functions should be tested
-- **Given** `editor-tests.tlisp`
-  **When** I run it
-  **Then** all Editor API functions should be validated
-- **Given** test execution
-  **When** any test fails
-  **Then** I should see clear error messages with expected vs actual
+- **Given** a test with values
+  **When** I use `(should-equal expected actual)`
+  **Then** it should pass if values are equal, fail with clear message otherwise
+- **Given** a test with truthy value
+  **When** I use `(should-be-truthy value)`
+  **Then** it should pass if value is truthy (not nil/false), fail otherwise
+- **Given** a test with falsy value
+  **When** I use `(should-be-falsy value)`
+  **Then** it should pass if value is nil/false, fail otherwise
+- **Given** a test with error-throwing code
+  **When** I use `(should-throw (lambda () (error "test")))`
+  **Then** it should pass if error is thrown, fail otherwise
+- **Given** assertion failure
+  **When** test fails
+  **Then** I should see clear error message with expected vs actual values
 
-#### US-0.5.3: CI/CD Integration
-**As a** maintainer
-**I want** TRT tests to run in CI/CD
-**So that** we catch regressions automatically
+#### US-0.5.3: Basic Isolation (2 days)
+**As a** developer
+**I want** tests to be isolated from each other
+**So that** tests don't interfere with each other
 
 **Acceptance Criteria:**
-- **Given** a pull request submitted
-  **When** CI runs
-  **Then** TRT tests should execute automatically
-- **Given** TRT tests in CI
+- **Given** two tests that modify global state
+  **When** tests run sequentially
+  **Then** second test should not see state from first test
+- **Given** a test that creates buffers
+  **When** test completes
+  **Then** buffers should be cleaned up (environment reset)
+- **Given** a test with setup hook
+  **When** I use `(before-test (lambda () (setup-code)))`
+  **Then** setup code should run before test executes
+- **Given** a test with teardown hook
+  **When** I use `(after-test (lambda () (cleanup-code)))`
+  **Then** cleanup code should run after test completes (even if test fails)
+
+**MVP Success Criteria:**
+- ✅ Can define and run tests with `deftest` macro
+- ✅ Test discovery works automatically for `*.test.tlisp` files
+- ✅ Basic assertions pass/fail (4 core assertions)
+- ✅ Tests isolated with no state leakage
+- ✅ CI/CD integration ready with proper exit codes
+
+---
+
+### Should Have Breakdown (Phase 0.6 - +10 days)
+
+#### US-0.6.1: Rich Assertions (3 days)
+**As a** developer
+**I want** comprehensive assertion library
+**So that** I can test complex data structures and edge cases
+
+**Acceptance Criteria:**
+- **Given** string assertions
+  **When** I use `(should-contain "hello" "hello world")`
+  **Then** it should pass if substring found
+- **Given** regex assertions
+  **When** I use `(should-match "^test.*" "test-value")`
+  **Then** it should pass if pattern matches
+- **Given** collection assertions
+  **When** I use `(should-have-length 3 '(1 2 3))`
+  **Then** it should pass if length matches
+- **Given** numeric assertions
+  **When** I use `(should-be-greater-than 5 3)`
+  **Then** it should pass if first > second
+- **Given** floating-point comparison
+  **When** I use `(should-be-close-to 3.14 3.14159 0.01)`
+  **Then** it should pass if values within tolerance
+- **Given** custom assertion needs
+  **When** I use `(defassertion should-be-positive (lambda (x) (> x 0)))`
+  **Then** I should be able to define custom assertions
+
+#### US-0.6.2: Fixtures System (3 days)
+**As a** developer
+**I want** reusable test fixtures
+**So that** I can set up common test contexts easily
+
+**Acceptance Criteria:**
+- **Given** a fixture definition
+  **When** I use `(deffixture test-buffer (setup (buffer-create) teardown (buffer-kill)))`
+  **Then** fixture should be registered with setup and teardown
+- **Given** a test using fixture
+  **When** I use `(with-fixture test-buffer (buf) (test-code buf))`
+  **Then** setup should run before test, teardown after (even if test fails)
+- **Given** fixture with function scope
+  **When** I specify `:scope :function`
+  **Then** fixture should be recreated for each test function
+- **Given** fixture with suite scope
+  **When** I specify `:scope :suite`
+  **Then** fixture should be created once per test suite
+- **Given** fixture dependencies
+  **When** fixture A uses fixture B
+  **Then** fixtures should be set up in dependency order (B before A)
+- **Given** test failure
+  **When** using fixture
+  **Then** fixture teardown should still run (auto-cleanup)
+
+#### US-0.6.3: Test Suites (2 days)
+**As a** developer
+**I want** to organize tests into suites
+**So that** I can group related tests and manage them together
+
+**Acceptance Criteria:**
+- **Given** related tests
+  **When** I use `(describe-suite "Buffer Operations" (deftest test-insert ...) (deftest test-delete ...))`
+  **Then** tests should be grouped under "Buffer Operations"
+- **Given** nested test organization
+  **When** I use nested `describe-suite` calls
+  **Then** I should have hierarchical test structure
+- **Given** suite-level hooks
+  **When** I use `:before-all` and `:after-all`
+  **Then** hooks should run once before/after all tests in suite
+- **Given** multiple test suites
+  **When** I run `tmax --test --suite "Buffer Operations"`
+  **Then** only that suite should execute
+- **Given** test suite results
+  **When** tests complete
+  **Then** I should see per-suite summaries in output
+
+#### US-0.6.4: Async Testing (4 days)
+**As a** developer
+**I want** to test async operations
+**So that** I can verify file operations, promises, and async code
+
+**Acceptance Criteria:**
+- **Given** async test definition
+  **When** I use `(deftest-async test-async (should-await-equal expected (async-func)))`
+  **Then** test should wait for async operation to complete
+- **Given** async assertions
+  **When** I use `(should-await-equal expected promise)`
+  **Then** assertion should await promise before comparing
+- **Given** async error testing
+  **When** I use `(should-await-throw (lambda () (async-error-func)))`
+  **Then** assertion should verify promise rejection
+- **Given** timeout protection
+  **When** async test takes too long (default 5000ms)
+  **Then** test should fail with timeout error
+- **Given** async error handling
+  **When** async operation throws unhandled error
+  **Then** test should fail with proper error message
+
+#### US-0.6.5: Better CLI Output (2 days)
+**As a** developer
+**I want** professional test output
+**So that** I can quickly understand test results
+
+**Acceptance Criteria:**
+- **Given** running tests
+  **When** tests execute
+  **Then** I should see progress indicator (dots or spinner)
+- **Given** test output
+  **When** tests pass
+  **Then** I should see green checkmarks (ANSI colors)
+- **Given** test output
   **When** tests fail
-  **Then** PR should be blocked from merging
-- **Given** test results
-  **When** CI completes
-  **Then** results should be visible in PR comments
-- **Given** performance benchmarks
+  **Then** I should see red X marks with error details (ANSI colors)
+- **Given** test execution
+  **When** all tests complete
+  **Then** I should see summary: "Passed: 15 (100%) | Failed: 0 | Total: 15"
+- **Given** multiple test files
   **When** tests run
-  **Then** performance regressions should be detected
+  **Then** output should be organized by file with per-file statistics
+- **Given** verbose mode
+  **When** I run `tmax --test --verbose`
+  **Then** I should see detailed output for each test (names, assertions)
 
-#### US-0.5.4: User Testing Infrastructure
-**As a** power user
-**I want** to write my own TRT tests
-**So that** I can test my configurations and plugins
+#### US-0.6.6: Basic Coverage (4 days)
+**As a** developer
+**I want** code coverage reporting
+**So that** I can measure test completeness
 
 **Acceptance Criteria:**
-- **Given** I create `.tmax-trt/suites/my-tests.tlisp`
-  **When** I run `bun run test:trt`
-  **Then** my tests should be discovered and executed
-- **Given** user test directory
-  **When** I place tests there
-  **Then** they should be gitignored by default
-- **Given** TRT documentation
-  **When** I read it
-  **Then** I should see examples of writing TRT tests
-- **Given** a plugin I developed
-  **When** I include TRT tests
-  **Then** plugin functionality should be validated
+- **Given** running tests with coverage
+  **When** I execute `tmax --test --coverage`
+  **Then** I should see line coverage percentage for each file
+- **Given** coverage report
+  **When** tests complete
+  **Then** I should see summary with total coverage percentage
+- **Given** coverage by file
+  **When** coverage report displays
+  **Then** I should see which files have low coverage (below threshold)
+- **Given** text format output
+  **When** I run coverage report
+  **Then** I should see human-readable table with file names and percentages
+- **Given** coverage thresholds
+  **When** I run `tmax --test --coverage --threshold=80`
+  **Then** build should fail if coverage below 80%
+- **Given** exclude patterns
+  **When** I configure coverage excludes for test files
+  **Then** those files should not count toward coverage percentage
+
+**Phase 0.6 Deliverables:**
+- ✅ Rich assertion library (20+ assertions)
+- ✅ Reusable test fixtures with auto-cleanup
+- ✅ Test suite organization with hierarchical structure
+- ✅ Async operation testing with timeout protection
+- ✅ Professional CLI output with ANSI colors
+- ✅ Code coverage measurement and thresholds
+
+---
+
+### Nice to Have Breakdown (Phase 0.7+ - +15-20 days)
+
+#### Advanced Test Isolation
+**As a** developer
+**I want** advanced test isolation strategies
+**So that** tests are completely independent and reliable
+
+**Acceptance Criteria:**
+- **Given** four-layer isolation strategy
+  **When** tests run
+  **Then** environment, buffer, global, and module state should be isolated
+- **Given** buffer auto-cleanup
+  **When** I use `(with-test-buffer (buf "content") (test-code))`
+  **Then** buffer should be automatically killed after test
+- **Given** flaky test detection
+  **When** test fails intermittently
+  **Then** test should be marked as flaky with retry logic
+- **Given** strict mode
+  **When** I enable `trt-strict-mode`
+  **Then** tests should fail if state leakage detected
+
+#### Parametrized Tests
+**As a** developer
+**I want** table-driven tests
+**So that** I can test multiple cases with one test definition
+
+**Acceptance Criteria:**
+- **Given** parametrized test
+  **When** I use `(deftest-parametrized test-addition '((a b expected) (1 2 3) (5 5 10)))`
+  **Then** test should run once per row with parameters bound
+- **Given** parametrized test
+  **When** any case fails
+  **Then** I should see which specific case failed (with parameters)
+- **Given** parametrized test
+  **When** I need per-case setup
+  **Then** I should be able to define `:before-each` and `:after-each` hooks
+
+#### Snapshot Testing
+**As a** developer
+**I want** snapshot testing
+**So that** I can detect unintended output changes
+
+**Acceptance Criteria:**
+- **Given** snapshot assertion
+  **When** I use `(should-match-snapshot ast)`
+  **Then** output should be compared to stored snapshot (`.snap` file)
+- **Given** inline snapshot
+  **When** I use `(should-match-inline-snapshot buf #s(buffer ...))`
+  **Then** snapshot should be stored inline in test file
+- **Given** snapshot update workflow
+  **When** I run `tmax --test --update-snapshots`
+  **Then** I should review changes interactively (Update/Keep/Diff/Skip/All/Quit)
+- **Given** snapshot mismatch
+  **When** snapshot differs from stored
+  **Then** I should see diff visualization (side-by-side or unified)
+
+#### Test Explorer UI
+**As a** developer
+**I want** buffer-based Test Explorer
+**So that** I can navigate and run tests interactively
+
+**Acceptance Criteria:**
+- **Given** Test Explorer buffer
+  **When** I open it
+  **Then** I should see hierarchical tree view of all tests
+- **Given** test in Test Explorer
+  **When** I press Enter on test
+  **Then** test should execute and results should display
+- **Given** test in Test Explorer
+  **When** I press keybinding for "jump to definition"
+  **Then** cursor should jump to test definition in source file
+- **Given** test suite in Test Explorer
+  **When** I expand suite
+  **Then** I should see all tests in that suite
+- **Given** Test Explorer
+  **When** tests run
+  **Then** status indicators should update in real-time
+
+#### Examples as Tests
+**As a** developer
+**I want** docstring examples to serve as tests
+**So that** documentation is always accurate
+
+**Acceptance Criteria:**
+- **Given** function with docstring examples
+  **When** docstring contains `;; => (result)` comments
+  **Then** examples should be executable as tests
+- **Given** example testing
+  **When** I run `tmax --test --examples`
+  **Then** all docstring examples should be validated
+- **Given** example coverage
+  **When** examples run
+  **Then** I should see which functions have examples tested
+- **Given** triple purpose
+  **When** I write docstring examples
+  **Then** they should serve as documentation, tests, and demos
+
+#### Watch Mode & TDD
+**As a** developer
+**I want** watch mode for rapid TDD workflow
+**So that** I get immediate feedback on code changes
+
+**Acceptance Criteria:**
+- **Given** watch mode enabled
+  **When** I save a file
+  **Then** affected tests should run automatically
+- **Given** smart test selection
+  **When** I modify `buffer.tlisp`
+  **Then** only buffer-related tests should run (based on dependency graph)
+- **Given** TDD workflow mode
+  **When** I run `tmax --test --tdd`
+  **Then** I should see Red-Green-Refactor cycle tracking
+- **Given** watch mode menu
+  **When** tests are running
+  **Then** I should see interactive menu (a=all f=failed p=pattern q=quit)
+- **Given** watch mode
+  **When** files change rapidly
+  **Then** test runs should be debounced (avoid excessive re-runs)
+
+#### Advanced Coverage
+**As a** developer
+**I want** comprehensive coverage reporting
+**So that** I can identify untested code paths
+
+**Acceptance Criteria:**
+- **Given** branch coverage
+  **When** I run coverage with `--branch-coverage`
+  **Then** I should see which branches (if/cond) were not tested
+- **Given** function coverage
+  **When** coverage report displays
+  **Then** I should see which functions were never called
+- **Given** HTML report generation
+  **When** I run `tmax --test --coverage --format=html`
+  **Then** I should see interactive HTML report with line-by-line coverage
+- **Given** CI/CD integration
+  **When** I generate lcov format
+  **Then** coverage should upload to Codecov/Coveralls
+- **Given** threshold enforcement
+  **When** I set `trt-coverage-thresholds` with lines/branches/functions
+  **Then** build should fail if any metric below threshold
+- **Given** coverage trending
+  **When** coverage runs repeatedly
+  **Then** I should see coverage improvements/deterioration over time
+
+#### Mocking & Spying
+**As a** developer
+**I want** mocking and spying capabilities
+**So that** I can isolate units under test
+
+**Acceptance Criteria:**
+- **Given** spy function
+  **When** I use `(spy-on 'function-name)`
+  **Then** function calls should be tracked (arguments, return values, call count)
+- **Given** mock function
+  **When** I use `(mock-fn (lambda (args) return-value))`
+  **Then** I should create a function with custom implementation
+- **Given** spy verification
+  **When** I use `(verify-called-with 'function-name '(arg1 arg2))`
+  **Then** verification should pass if function was called with those arguments
+- **Given** spy verification
+  **When** I use `(verify-called-times 'function-name 3)`
+  **Then** verification should pass if function was called exactly 3 times
+- **Given** module mocking
+  **When** I use `(mock-module 'module-name mock-implementation)`
+  **Then** module should be replaced with mock at runtime (no hoisting issues)
+- **Given** mock return values
+  **When** I use `(mock-returns 'function-name '(val1 val2 val3))`
+  **Then** consecutive calls should return different values
+- **Given** spy cleanup
+  **When** test completes
+  **Then** all spies and mocks should be automatically reset
+
+#### Benchmarking
+**As a** developer
+**I want** performance benchmarking
+**So that** I can detect performance regressions
+
+**Acceptance Criteria:**
+- **Given** benchmark test
+  **When** I use `(deftest-bench test-bench (operation-to-benchmark))`
+  **Then** operation should be executed many times and measured
+- **Given** benchmark execution
+  **When** benchmark completes
+  **Then** I should see ops/sec, variance, and min/max/mean times
+- **Given** baseline storage
+  **When** benchmarks run
+  **Then** results should be stored in `.trt-baselines/` directory
+- **Given** performance regression
+  **When** benchmark shows >10% degradation from baseline
+  **Then** test should fail with performance warning
+- **Given** benchmark suites
+  **When** I use `(describe-bench "String Operations" ...)`
+  **Then** benchmarks should be grouped and reported together
+- **Given** comparison benchmarking
+  **When** I compare two implementations
+  **Then** I should see side-by-side performance comparison
+
+**Phase 0.7+ Deliverables:**
+- ✅ Advanced isolation with four-layer strategy and flaky test detection
+- ✅ Parametrized tests with table-driven syntax
+- ✅ Snapshot testing with interactive update workflow
+- ✅ Buffer-based Test Explorer UI with hierarchical view
+- ✅ Examples as tests with docstring validation
+- ✅ Watch mode with smart test selection and TDD workflow
+- ✅ Advanced coverage (branch/function) with HTML reports
+- ✅ Mocking and spying with comprehensive verification APIs
+- ✅ Benchmarking integration with regression detection
+
+**Timeline:**
+- MVP (Phase 0.5): 8 days - Essential testing framework
+- Should Have (Phase 0.6): +10 days (18 days total) - Production-ready infrastructure
+- Nice to Have (Phase 0.7+): +15-20 days (33-38 days total) - Enterprise-grade features
+
+**See [RFC-001: TRT Framework](../rfcs/RFC-001-trt-framework.md) for complete technical specification.**
+
+---
+
+### Phase 0.8: Server/Client Architecture
+
+**Status:** 📋 PLANNED
+**Priority:** HIGH (enables AI agent control and instant file operations)
+**Timeline:** 2.5-3 weeks
+
+**Objective:** Implement server/client architecture inspired by Emacs' `emacsclient` system, enabling instant file opening, T-Lisp evaluation from command line, and AI agent control of the editor.
+
+**Key Innovation:** This transforms tmax into an **AI-native editor**, the first terminal editor designed from the ground up for AI agent control.
+
+#### US-0.8.1: Basic Server/Client Infrastructure (1 week)
+
+**As a** developer
+**I want** to control a running tmax instance from the command line
+**So that** I can open files instantly and execute T-Lisp commands without startup overhead
+
+**Acceptance Criteria:**
+- **Given** I want to start tmax as a server
+  **When** I execute `tmax --daemon`
+  **Then** server should start listening on `/tmp/tmax-$UID/server`
+- **Given** the server is running
+  **When** I execute `tmaxclient file.txt`
+  **Then** file should open instantly in running tmax (<100ms)
+- **Given** I want to evaluate T-Lisp code
+  **When** I execute `tmaxclient --eval '(buffer-list)'`
+  **Then** I should receive the buffer list as JSON output
+- **Given** I open a file with wait mode
+  **When** I execute `tmaxclient file.txt` (no flags)
+  **Then** client should block until buffer is closed
+  **And** exit code should be 0 if saved, 1 if discarded
+- **Given** I want background mode
+  **When** I execute `tmaxclient -n file.txt`
+  **Then** file should open in background and client returns immediately
+- **Given** server is not running
+  **When** I execute `tmaxclient file.txt`
+  **Then** I should see error message "Server not running"
+  **And** exit code should be 1
+
+#### US-0.8.2: Advanced Client Commands (1 week)
+
+**As a** power user
+**I want** advanced client commands for buffer management and integration
+**So that** I can use tmaxclient in scripts, git, and file managers
+
+**Acceptance Criteria:**
+- **Given** I want to list all buffers
+  **When** I execute `tmaxclient --list-buffers`
+  **Then** I should see list of buffers with names, modified status, and sizes
+- **Given** I want to kill a buffer
+  **When** I execute `tmaxclient --kill-buffer scratch.tlisp`
+  **Then** buffer should be closed
+- **Given** I want to insert text from stdin
+  **When** I execute `echo "TODO" | tmaxclient --insert-stdin`
+  **Then** text should be inserted at cursor position
+- **Given** I want to use tmax as git editor
+  **When** I set `GIT_EDITOR='tmaxclient -nw'`
+  **And** I run `git commit`
+  **Then** commit message should open in tmax
+  **And** changes should be instant (<100ms vs 2-5s startup)
+- **Given** I want custom socket path
+  **When** I execute `tmaxclient -s /tmp/my-project-socket file.txt`
+  **Then** client should connect to custom socket
+- **Given** I want to check server status
+  **When** I execute `tmaxclient --ping`
+  **Then** exit code 0 if running, 1 if not running
+
+#### US-0.8.3: AI Agent Control (3-5 days)
+
+**As an** AI agent
+**I want** full programmatic control over the tmax editor
+**So that** I can explore codebases, make changes, and verify results 10x faster than file-based workflows
+
+**Acceptance Criteria:**
+- **Given** I want to query full editor state
+  **When** I send `{"method": "query", "params": {"query": "full-state"}}`
+  **Then** I should receive JSON with buffers, cursor, variables, keybindings, mark-ring
+- **Given** I want to understand a function
+  **When** I send `{"method": "command", "params": {"command": "describe-function", "function-name": "buffer-insert"}}`
+  **Then** I should receive signature, documentation, source location, examples, and related functions
+- **Given** I want to find function usage
+  **When** I send `{"method": "command", "params": {"command": "find-usages", "function": "cursor-move"}}`
+  **Then** I should receive list of all locations where function is called
+- **Given** I want to search for functions
+  **When** I send `{"method": "command", "params": {"command": "apropos-command", "pattern": "buffer.*save"}}`
+  **Then** I should receive matching functions with bindings and documentation
+- **Given** I want to execute and verify changes
+  **When** I send T-Lisp code to modify a function
+  **And** then send test execution command
+  **Then** I should receive test results in <100ms (10x faster than file-based workflow)
+- **Given** I want to inspect variable values
+  **When** I send `{"method": "command", "params": {"command": "describe-variable", "variable-name": "*test-coverage-target*"}}`
+  **Then** I should receive value, type, documentation, and customization info
+
+**Phase 0.8 Deliverables:**
+- ✅ Server/client infrastructure (Unix socket + TCP)
+- ✅ AI agent protocol with full state query and help system
+- ✅ Integration examples (git, file managers, shells)
+- ✅ AI agent client libraries (Python, TypeScript)
+- ✅ 10x faster AI development workflows (62ms vs 605ms per iteration)
+
+**Success Criteria:**
+- ✅ Can start server and connect from client
+- ✅ Instant file opening (<100ms vs 2-5s startup)
+- ✅ AI agents can query full editor state
+- ✅ AI agents can execute T-Lisp and get results
+- ✅ Help system accessible via JSON-RPC
+- ✅ Integration with git, file managers, shells working
+
+**Dependencies:**
+- Can be developed in parallel with Phase 0.4-0.7
+- Must complete before Phase 2 (extensibility) for plugin development
+- Enables AI-assisted development for all future features
+
+**Benefits:**
+- Instant file operations without startup overhead
+- AI agent control for automated development
+- REPL-driven development from external tools
+- Integration with Unix philosophy (pipelines, scripts)
+- **Competitive advantage: First AI-native terminal editor**
+
+**See [RFC-002: Server/Client Architecture](../rfcs/RFC-002-server-client-architecture.md) for complete technical specification.**
 
 ---
 
@@ -1244,17 +1794,51 @@ The implementation demonstrates technical excellence through comprehensive testi
 
 The immediate development focus is implementing core Vim-style editing operators (delete, yank, change), enhanced navigation (word/line movements), and select Emacs features (kill ring, minibuffer with which-key, fuzzy search) to achieve basic "Emacs with Evil-mode" parity. This will transform tmax from a functional alpha into a practical daily editor.
 
-**Development Roadmap:** See `docs/ROADMAP.md` for complete implementation plan spanning:
-- Phase 0.4: Key Binding System Refactor (immediate priority)
-- Phase 1: Core Editing (v0.2.0) - Evil-mode fundamentals + Emacs integration
-- Phase 1.5: Enhanced Features (v0.2.1)
+**Development Roadmap:** See `docs/ROADMAP.md` for complete implementation plan. Current focus:
+- Phase 0.4: Key Binding System Refactor (IN PROGRESS - 1/4 complete) ⬅️ CURRENT
+- Phase 0.5: Testing Infrastructure Enhancement (BLOCKED by Phase 0.4) ⬅️ NEXT
+- Phase 1: Core Editing (v0.2.0) - Evil-mode fundamentals + Emacs integration (BLOCKED by Phase 0.4 + 0.5)
+- Phase 1.5: Enhanced Features (v0.2.1) (BLOCKED by Phase 1)
 - Phase 2-4: Extensibility, Advanced Features, Community ecosystem
 
 ## Planned Enhancements
 
-### Immediate Priority: Key Binding System Refactor (Phase 0.4)
+### Development Sequence (Critical Path)
+
+**tmax follows a strict sequential development approach to ensure architectural integrity before adding features.**
+
+```
+Phase 0.4 (Key Binding Refactor) ⬅️ CURRENT - 1/4 Complete
+    ↓ MUST COMPLETE FIRST
+Phase 0.5 (Testing Infrastructure) ⬅️ BLOCKED - 8-18 days
+    ↓ ENABLES QUALITY FOR
+
+Phase 1 (Core Editing Features) ⬅️ BLOCKED - 5-6 weeks
+    ↓ FOUNDATION FOR
+Phase 1.5+ (Enhanced Features) ⬅️ BLOCKED
+
+PARALLEL TRACK (can run simultaneously):
+
+Phase 0.8 (Server/Client Architecture) 📋 PLANNED - 2.5-3 weeks
+    ├─ Server mode (tmax --daemon)
+    ├─ Client CLI (tmaxclient)
+    ├─ AI agent control (JSON-RPC protocol)
+    └─ REPL-driven development from external tools
+```
+
+**Why This Sequence Matters:**
+1. **Phase 0.4 completes the T-Lisp-first architecture** - Core philosophy violation until done
+2. **Phase 0.5 establishes testing before complexity** - Building tests on incomplete architecture creates technical debt
+3. **Phase 1 adds 20+ new key bindings** - Must have T-Lisp keymaps working first
+4. **Phase 0.8 (parallel) enables AI control** - Independent architecture, enhances all future development
+
+---
+
+### Phase 0.4: Key Binding System Refactor (CURRENT PRIORITY)
 
 **Status:** 🚧 IN PROGRESS (1/4 Complete)
+**Timeline:** ~3-5 days to complete remaining 75%
+**Blocker:** YES - Blocks Phase 0.5 and Phase 1
 
 **Objective:** Complete migration from TypeScript-centric to T-Lisp-centric key binding system.
 
@@ -1271,7 +1855,127 @@ The immediate development focus is implementing core Vim-style editing operators
 
 ---
 
+### Phase 0.5: Testing Infrastructure Enhancement (NEXT PRIORITY)
+
+**Status:** 📋 PLANNED (BLOCKED by Phase 0.4)
+**Timeline:** 8-18 days (MVP: 8 days, Should Have: +10 days, Nice to Have: +15-20 days)
+**Blocker:** YES - Blocks quality assurance for Phase 1
+
+**Objective:** Implement TRT (Tmax Regression Testing) - a self-hosted T-Lisp testing framework inspired by Emacs ERT, enabling comprehensive testing of T-Lisp code and editor features.
+
+**Why This Must Come Before Phase 1:**
+- Phase 1 adds complex features (operators, text objects, visual selection)
+- Building tests on stable architecture prevents rework
+- TRT will test all Phase 1 features in T-Lisp itself
+- Catches regressions before they accumulate
+
+**See:** [RFC-001: TRT Framework](../rfcs/RFC-001-trt-framework.md) for complete specification
+
+---
+
+### Phase 0.8: Server/Client Architecture (PARALLEL TRACK)
+
+**Status:** 📋 PLANNED (Can run parallel to Phase 0.4 and 0.5)
+**Timeline:** 2.5-3 weeks (MVP: 1 week, Advanced: +1 week, AI: +3-5 days)
+**Priority:** HIGH - Enables AI agent control and instant file operations
+**Dependencies:** None (independent architecture)
+
+**Focus:** Implement server/client architecture for instant file operations, T-Lisp evaluation from command line, and AI agent control - transforming tmax into an **AI-native editor**.
+
+**Key Innovation:** First terminal editor designed from the ground up for AI agent control, enabling:
+- ✅ **Full Editor Visibility** - Query buffers, variables, functions, stack traces via JSON-RPC
+- ✅ **Instant Operations** - <100ms file opening vs 2-5s startup (10-50x faster)
+- ✅ **AI Agent Control** - Programmatic access to all editor features
+- ✅ **REPL-Driven Development** - Interactive development from external tools
+- ✅ **10x Faster AI Workflows** - In-memory operations (62ms vs 605ms per iteration)
+
+#### Phase 0.8.1: Basic Server/Client [CRITICAL] (1 week)
+
+**Server Mode:**
+- `tmax --daemon` - Start background server
+- Unix socket: `/tmp/tmax-$UID/server`
+- JSON-RPC protocol handler
+- Graceful shutdown (SIGTERM, SIGINT)
+
+**Client CLI:**
+- `tmaxclient file.txt` - Open file instantly
+- `tmaxclient --eval '(code)'` - Evaluate T-Lisp
+- `tmaxclient -n file.txt` - Background mode
+- `tmaxclient -nw file.txt` - Terminal mode (for $EDITOR)
+- Error handling (server not running)
+
+#### Phase 0.8.2: Advanced Features [IMPORTANT] (1 week)
+
+**Advanced Commands:**
+- `tmaxclient --list-buffers` - List buffers
+- `tmaxclient --kill-buffer name` - Kill buffer
+- `tmaxclient --insert text` - Insert text
+- `tmaxclient --insert-stdin` - Insert from stdin
+- `tmaxclient --server-info` - Server status
+- `tmaxclient --ping` - Check if running
+
+**Socket Management:**
+- Custom socket paths: `-s /path/to/socket`
+- Environment variable: `$TMAX_SOCKET`
+- Multiple server instances
+- TCP sockets (remote access)
+
+**Integration:**
+- Git: `GIT_EDITOR='tmaxclient -nw'`
+- File managers: ranger, lf, nnn, fzf
+- Shell functions: tf, tb, tl, te
+
+#### Phase 0.8.3: AI Agent Enhancement [MEDIUM] (3-5 days)
+
+**AI Query Methods:**
+- `describe-function` - Full documentation, signature, source
+- `describe-variable` - Value, type, documentation
+- `apropos-command` - Search by pattern
+- `find-function-source` - Locate definition
+- `find-usages` - Cross-reference analysis
+- `xref` - Callers, callees
+
+**Help System Integration:**
+- Query help system via JSON-RPC
+- Structured documentation (signature, docs, examples)
+- Source location with file:line references
+- Related functions and cross-references
+
+**T-Lisp Server API:**
+- `(server-running-p)` - Check status
+- `(server-clients)` - List clients
+- `(server-broadcast message)` - Send to all
+- Server hooks (connect, disconnect, start, shutdown)
+
+**Benefits:**
+- ✅ Instant file operations (no startup overhead)
+- ✅ AI agent control (10x faster development)
+- ✅ REPL-driven development (external tools)
+- ✅ Unix philosophy integration (pipelines, scripts)
+- ✅ **Competitive advantage: First AI-native terminal editor**
+
+**Success Criteria:**
+- ✅ Server starts, client connects (<100ms)
+- ✅ AI agents query full state, execute T-Lisp
+- ✅ Help system accessible via JSON-RPC
+- ✅ Git, file managers, shells integrated
+- ✅ 10x faster AI workflows vs file-based
+
+**See:** [RFC-002: Server/Client Architecture](../rfcs/RFC-002-server-client-architecture.md) for complete specification
+
+**Why This Can Run in Parallel:**
+- Independent architecture (doesn't affect key bindings or testing)
+- Separate socket server and client CLI
+- Enhances all future development (AI can help build Phase 1+ features)
+- Doesn't block Phase 1 (can be integrated incrementally)
+
+---
+
 ### Phase 1: Core Editing (v0.2.0) - Basic Evil-Mode Parity
+
+**Status:** 📋 PLANNED (BLOCKED by Phase 0.4 and Phase 0.5)
+**Timeline:** 5-6 weeks
+**Dependencies:** Phase 0.4 COMPLETE, Phase 0.5 MVP COMPLETE
 
 **Focus:** Implement fundamental Vim-style editing commands to reach basic "Emacs with Evil-mode" functionality.
 
@@ -1476,11 +2180,20 @@ Additional features that complement basic editing but are not required for basic
 ---
 
 ### Dependencies and Blockers
-- **Phase 0.4:** Must complete before extensive keybinding customization
-- **Phase 1:** Foundation for all future features
+
+**Critical Development Path (Sequential Requirements):**
+- **Phase 0.4 (Key Binding Refactor):** MUST COMPLETE FIRST - Blocks Phase 0.5 and Phase 1
+- **Phase 0.5 (Testing Infrastructure):** Requires Phase 0.4 completion - Blocks Phase 1 quality assurance
+- **Phase 1 (Core Editing):** Requires Phase 0.4 + Phase 0.5 MVP - Foundation for all future features
+
+**Future Dependencies:**
+- **Phase 1.5:** Requires Phase 1 completion
 - **Phase 2:** Requires Phase 0.4 completion for full plugin system
 - **Phase 3:** LSP integration requires Phase 1.9 (kill ring) and in-buffer completion
-- **External:** Bun runtime stability for TypeScript performance
+
+**External Dependencies:**
+- **Bun Runtime:** Stable performance for TypeScript execution
+- **Terminal Emulators:** Proper support for alternate screen buffer and input modes
 
 ## Risks and Assumptions
 

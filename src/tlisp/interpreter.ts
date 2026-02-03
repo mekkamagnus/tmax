@@ -108,4 +108,25 @@ export class TLispInterpreterImpl implements TLispInterpreter {
     const func = createFunction(fn, name);
     this.globalEnv.define(name, func);
   }
+
+  /**
+   * Get test definition by name
+   * @param name - Name of the test
+   * @returns Test definition or undefined if not found
+   */
+  getTestDefinition(name: string): { body: TLispValue[], name: string, params: TLispValue } | undefined {
+    // Access the evaluator's test registry
+    // Since the evaluator is private, we need to add a method to access the registry
+    // This is a workaround - ideally we'd have a cleaner interface
+    return (this.evaluator as any).getTestDefinition?.(name);
+  }
+
+  /**
+   * Get all test names
+   * @returns Array of test names
+   */
+  getAllTestNames(): string[] {
+    // Access the evaluator's test registry
+    return (this.evaluator as any).getAllTestNames?.() || [];
+  }
 }

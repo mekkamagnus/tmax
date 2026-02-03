@@ -1,0 +1,2 @@
+(defvar *test-var* 42)
+(print *test-var*)

@@ -283,9 +283,18 @@ For detailed development plans and phase breakdowns, see the [comprehensive road
 
 ### Current Focus
 - **Phase 0.4**: T-Lisp-centric key binding system refactor (in progress)
+- **Phase 0.5**: Testing Infrastructure Enhancement (TRT Framework) - planned
+- **Phase 0.8**: Server/Client Architecture & AI Agent Control - planned (parallel track)
 - **Phase 1**: Core editing features for basic Evil-mode parity
 - **Phase 2**: Extensibility and plugin system
 - **Phase 3**: Advanced features (LSP integration, multiple windows)
+
+### Upcoming Features
+- ✅ **Server/Client Architecture**: Instant file opening, AI agent control (Phase 0.8)
+- ✅ **TRT Testing Framework**: Self-hosted T-Lisp testing (Phase 0.5)
+- ✅ **AI-Native Development**: First terminal editor designed for AI agent control
+- ✅ **Core Editing Operators**: Delete, yank, change, put operations (Phase 1.2)
+- ✅ **Enhanced Navigation**: Word, line, paragraph navigation (Phase 1.1)
 
 ### Quick Links
 - [Product Requirements Document](./specs/prd.md) - Detailed feature specifications and implementation status

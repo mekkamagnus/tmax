@@ -8,7 +8,7 @@ import { TLispInterpreterImpl } from "../tlisp/interpreter.ts";
 import { FileSystemImpl } from "../core/filesystem.ts";
 import { createEditorAPI, TlispEditorState } from "./tlisp-api.ts";
 import type { EditorState, FunctionalTextBuffer } from "../core/types.ts";
-import { createString } from "../tlisp/values.ts";
+import { createString, createList, createNil } from "../tlisp/values.ts";
 import type { TerminalIO, FileSystem } from "../core/types.ts";
 import { Either } from "../utils/task-either.ts";
 import { FunctionalTextBufferImpl } from "../core/buffer.ts";
@@ -148,23 +148,23 @@ export class Editor {
       if (args.length < 2 || args.length > 3) {
         throw new Error("key-bind requires 2 or 3 arguments: key, command, optional mode");
       }
-      
+
       const keyArg = args[0];
       const commandArg = args[1];
       const modeArg = args[2];
-      
+
       if (!keyArg || keyArg.type !== "string") {
         throw new Error("key-bind requires a string key");
       }
-      
+
       if (!commandArg || commandArg.type !== "string") {
         throw new Error("key-bind requires a string command");
       }
-      
+
       const key = keyArg.value as string;
       const command = commandArg.value as string;
       let mode: "normal" | "insert" | "visual" | "command" | "mx" | undefined;
-      
+
       if (modeArg) {
         if (modeArg.type !== "string") {
           throw new Error("key-bind mode must be a string");
@@ -175,16 +175,152 @@ export class Editor {
         }
         mode = modeStr as "normal" | "insert" | "visual" | "command" | "mx";
       }
-      
+
       const mapping: KeyMapping = { key, command, mode };
-      
+
       if (!this.keyMappings.has(key)) {
         this.keyMappings.set(key, []);
       }
-      
-      this.keyMappings.get(key)!.push(mapping);
-      
+
+      // Remove any existing mappings for the same key and mode to handle conflicts
+      const existingMappings = this.keyMappings.get(key)!;
+      const filteredMappings = existingMappings.filter(existing =>
+        !(existing.mode === mode || (!existing.mode && !mode))
+      );
+
+      // Add the new mapping
+      filteredMappings.push(mapping);
+      this.keyMappings.set(key, filteredMappings);
+
       return createString(key);
+    });
+
+    // Add key unbind function
+    this.interpreter.defineBuiltin("key-unbind", (args) => {
+      if (args.length < 1 || args.length > 2) {
+        throw new Error("key-unbind requires 1 or 2 arguments: key, optional mode");
+      }
+
+      const keyArg = args[0];
+      const modeArg = args[1];
+
+      if (!keyArg || keyArg.type !== "string") {
+        throw new Error("key-unbind requires a string key");
+      }
+
+      const key = keyArg.value as string;
+      let mode: "normal" | "insert" | "visual" | "command" | "mx" | undefined;
+
+      if (modeArg) {
+        if (modeArg.type !== "string") {
+          throw new Error("key-unbind mode must be a string");
+        }
+        const modeStr = modeArg.value as string;
+        if (!["normal", "insert", "visual", "command", "mx"].includes(modeStr)) {
+          throw new Error(`Invalid mode: ${modeStr}`);
+        }
+        mode = modeStr as "normal" | "insert" | "visual" | "command" | "mx";
+      }
+
+      if (this.keyMappings.has(key)) {
+        const existingMappings = this.keyMappings.get(key)!;
+
+        if (mode) {
+          // Remove only mappings for the specific mode
+          const filteredMappings = existingMappings.filter(existing => existing.mode !== mode);
+          if (filteredMappings.length === 0) {
+            this.keyMappings.delete(key);
+          } else {
+            this.keyMappings.set(key, filteredMappings);
+          }
+        } else {
+          // Remove all mappings for the key
+          this.keyMappings.delete(key);
+        }
+      }
+
+      return createString(key);
+    });
+
+    // Add function to list all active bindings
+    this.interpreter.defineBuiltin("key-bindings", (args) => {
+      if (args.length !== 0) {
+        throw new Error("key-bindings takes no arguments");
+      }
+
+      // Create a list of all key mappings
+      const allBindings: TLispValue[] = [];
+      for (const [key, mappings] of this.keyMappings) {
+        for (const mapping of mappings) {
+          // Create a list representing this binding: [key, command, mode?]
+          const bindingInfo: TLispValue[] = [
+            createString(mapping.key),
+            createString(mapping.command)
+          ];
+
+          if (mapping.mode) {
+            bindingInfo.push(createString(mapping.mode));
+          }
+
+          allBindings.push(createList(bindingInfo));
+        }
+      }
+
+      return createList(allBindings);
+    });
+
+    // Add function to get specific binding info
+    this.interpreter.defineBuiltin("key-binding", (args) => {
+      if (args.length < 1 || args.length > 2) {
+        throw new Error("key-binding requires 1 or 2 arguments: key, optional mode");
+      }
+
+      const keyArg = args[0];
+      const modeArg = args[1];
+
+      if (!keyArg || keyArg.type !== "string") {
+        throw new Error("key-binding requires a string key");
+      }
+
+      const key = keyArg.value as string;
+      let mode: "normal" | "insert" | "visual" | "command" | "mx" | undefined;
+
+      if (modeArg) {
+        if (modeArg.type !== "string") {
+          throw new Error("key-binding mode must be a string");
+        }
+        const modeStr = modeArg.value as string;
+        if (!["normal", "insert", "visual", "command", "mx"].includes(modeStr)) {
+          throw new Error(`Invalid mode: ${modeStr}`);
+        }
+        mode = modeStr as "normal" | "insert" | "visual" | "command" | "mx";
+      }
+
+      const mappings = this.keyMappings.get(key);
+      if (!mappings || mappings.length === 0) {
+        return createNil(); // No bindings found
+      }
+
+      // If mode is specified, find the specific mode binding
+      if (mode) {
+        const specificMapping = mappings.find(m => m.mode === mode);
+        if (specificMapping) {
+          return createList([
+            createString(specificMapping.command),
+            createString("source"), // Could be extended to show source file
+            createString(mode)
+          ]);
+        }
+        return createNil(); // No binding found for specific mode
+      } else {
+        // Return the first mapping (or the one without mode if available)
+        const mapping = mappings[0]; // Return first available mapping
+        return createList([
+          createString(mapping.command),
+          createString("source"), // Could be extended to show source file
+          createString(mapping.mode || "all")
+        ]);
+      }
     });
 
     // Add command execution function
@@ -218,25 +354,6 @@ export class Editor {
   }
 
   /**
-   * Resolve the path to the core bindings file
-   * @returns Path to core bindings file or null if not found
-   */
-  private resolveBindingsPath(): string | null {
-    const possiblePaths = [
-      "src/tlisp/core-bindings.tlisp",
-      "./src/tlisp/core-bindings.tlisp",
-    ];
-
-    // For now, we'll just return the first path that exists
-    // In a more sophisticated implementation, we might check if the file exists
-    for (const path of possiblePaths) {
-      // We'll try each path in the loading function
-      return path; // Return first possible path to try
-    }
-    return null;
-  }
-
-  /**
    * Load bindings from file
    * @param path - Path to the bindings file
    * @returns true if loaded successfully, false otherwise
@@ -254,35 +371,34 @@ export class Editor {
   }
 
   /**
-   * Load core key bindings from T-Lisp file
+   * Load core key bindings from T-Lisp files
    */
   private async loadCoreBindings(): Promise<void> {
-    const possiblePaths = [
-      "src/tlisp/core-bindings.tlisp",
-      "./src/tlisp/core-bindings.tlisp",
+    const bindingFiles = [
+      "src/tlisp/core/bindings/normal.tlisp",
+      "src/tlisp/core/bindings/insert.tlisp",
+      "src/tlisp/core/bindings/visual.tlisp",
+      "src/tlisp/core/bindings/command.tlisp",
     ];
 
-    let loaded = false;
+    let allLoaded = true;
     let lastError: string = "";
 
-    for (const path of possiblePaths) {
-      loaded = await this.loadBindingsFromFile(path);
-      if (loaded) {
-        this.coreBindingsLoaded = true;
-        break;
-      } else {
+    for (const path of bindingFiles) {
+      const loaded = await this.loadBindingsFromFile(path);
+      if (!loaded) {
+        allLoaded = false;
         lastError = `Failed to load from ${path}`;
       }
     }
 
-    if (!loaded) {
-      console.warn(`Failed to load core bindings from any path. Last error: ${lastError}`);
+    if (!allLoaded) {
+      console.warn(`Failed to load some core bindings. Last error: ${lastError}`);
       console.warn("Loading minimal fallback key bindings...");
       this.loadFallbackBindings();
-      this.coreBindingsLoaded = true;
-      // Keep welcome message - fallback bindings loaded
-      console.log("Using fallback key bindings");
     }
+
+    this.coreBindingsLoaded = true;
   }
 
   /**
@@ -327,8 +443,10 @@ export class Editor {
     try {
       const initContent = await this.filesystem.readFile("~/.tmaxrc");
       this.interpreter.execute(initContent);
+      console.log("Loaded custom ~/.tmaxrc bindings");
     } catch (error) {
       // Init file not found or error - use defaults (silent)
+      // This is expected if the user hasn't created a ~/.tmaxrc file yet
     }
   }
 

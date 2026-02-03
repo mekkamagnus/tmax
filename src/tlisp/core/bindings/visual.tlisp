@@ -1,0 +1,28 @@
+;; visual.tlisp
+;; Default key bindings for visual mode in tmax editor
+;;
+;; This file contains all default key bindings for visual mode, extracted from TypeScript
+;; to achieve pure T-Lisp-centric key binding management.
+;;
+;; Maintainer guidance:
+;; - Each (key-bind) call defines a key, command, and optional mode
+;; - Commands are T-Lisp expressions that get executed when keys are pressed
+;; - Mode is specified as "visual" for all bindings in this file
+;; - Keep bindings organized by functional groups for readability
+
+;; =================================================================
+;; VISUAL MODE BINDINGS
+;; =================================================================
+;; Key bindings specific to visual mode
+
+;; Exit visual mode (Escape)
+(key-bind "Escape" "(editor-set-mode \"normal\")" "visual")
+
+;; Delete selected text (d)
+(key-bind "d" "(delete-selection)" "visual")
+
+;; Yank selected text (y)
+(key-bind "y" "(yank-selection)" "visual")
+
+;; Change selected text (c)
+(key-bind "c" "(change-selection)" "visual")

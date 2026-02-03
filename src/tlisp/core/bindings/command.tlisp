@@ -1,0 +1,30 @@
+;; command.tlisp
+;; Default key bindings for command mode in tmax editor
+;;
+;; This file contains all default key bindings for command mode, extracted from TypeScript
+;; to achieve pure T-Lisp-centric key binding management.
+;;
+;; Maintainer guidance:
+;; - Each (key-bind) call defines a key, command, and optional mode
+;; - Commands are T-Lisp expressions that get executed when keys are pressed
+;; - Mode is specified as "command" for all bindings in this file
+;; - Keep bindings organized by functional groups for readability
+
+;; =================================================================
+;; COMMAND MODE BINDINGS
+;; =================================================================
+;; Key bindings specific to command mode
+
+;; Exit command mode (Escape)
+(key-bind "Escape" "(editor-exit-command-mode)" "command")
+
+;; Execute command line (Enter)
+(key-bind "Enter" "(editor-execute-command-line)" "command")
+
+;; =================================================================
+;; APPLICATION CONTROL
+;; =================================================================
+;; Global application control commands
+
+;; Quit editor from command mode (q)
+(key-bind "q" "(editor-quit)" "command")

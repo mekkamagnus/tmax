@@ -6,12 +6,5 @@
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
 
-# Run tmax with the React-based UI (main-ink.ts)
-exec deno run \
-  --allow-read \
-  --allow-write \
-  --allow-run \
-  --allow-env \
-  --allow-net \
-  "$PROJECT_DIR/src/main-ink.ts" \
-  "$@"
+# Run tmax with the React-based UI (main.tsx)
+exec bun run "$PROJECT_DIR/src/main.tsx" "$@"

@@ -140,18 +140,21 @@ export interface TLispEnvironment {
 export interface TLispInterpreter {
   /** Global environment */
   globalEnv: TLispEnvironment;
-  
+
   /** Parse T-Lisp source code */
   parse(source: string): TLispValue;
-  
+
   /** Evaluate T-Lisp expression */
   eval(expr: TLispValue, env?: TLispEnvironment): Either<EvalError, TLispValue>;
 
   /** Execute T-Lisp source code */
   execute(source: string, env?: TLispEnvironment): Either<EvalError, TLispValue>;
-  
+
   /** Define a built-in function */
   defineBuiltin(name: string, fn: TLispFunctionImpl): void;
+
+  /** Get test definition by name */
+  getTestDefinition?(name: string): { body: TLispValue[], name: string, params: TLispValue } | undefined;
 }
 
 /**

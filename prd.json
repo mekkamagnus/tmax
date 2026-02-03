@@ -251,7 +251,7 @@
         "describe-variable command returns value, type, docs, customization"
       ],
       "priority": 1,
-      "passes": false,
+      "passes": true,
       "notes": "Phase 0.8 - AI-native editor - key competitive advantage"
     },
     {

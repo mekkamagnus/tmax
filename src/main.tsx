@@ -13,6 +13,7 @@ import { TerminalIOImpl } from './core/terminal.ts';
 import { FileSystemImpl } from './core/filesystem.ts';
 import { FunctionalTextBufferImpl } from './core/buffer.ts';
 import { EditorState } from './core/types.ts';
+import { TmaxServer } from './server/server.ts';
 
 /**
  * Switch to alternate screen buffer (full screen mode)
@@ -59,7 +60,7 @@ function setupCleanupHandlers() {
  * 1. Parses command line arguments
  * 2. Loads file if specified (or creates new buffer)
  * 3. Creates Editor class (with T-Lisp interpreter)
- * 4. Renders the React-based editor (dumb UI layer)
+ * 4. Renders the React UI (dumb view layer) OR starts daemon
  *
  * Architecture: T-Lisp (core logic) → Editor class → React UI (dumb view)
  */
@@ -68,7 +69,8 @@ async function main() {
   // Parse command line arguments
   const args = process.argv.slice(2);
   const devMode = args.includes('--dev') || args.includes('--no-tty');
-  const fileArgs = args.filter(arg => !arg.startsWith('--'));
+  const daemonMode = args.includes('--daemon');
+  const fileArgs = args.filter(arg => !arg.startsWith('--') && arg !== '-d');
 
   // Show help if requested
   if (args.includes('--help') || args.includes('-h')) {
@@ -78,16 +80,34 @@ tmax - Terminal-based text editor (Bun + Ink version with T-Lisp)
 Usage: tmax [options] [filename]
 
 Options:
+  --daemon           Start server daemon mode
   --dev, --no-tty    Development mode (skip TTY checks for AI coding assistants)
   --help, -h         Show this help message
 
 Examples:
   tmax               # Start editor in normal mode
   tmax file.txt      # Open file.txt
+  tmax --daemon      # Start server daemon
   tmax --dev         # Start in development mode (for AI coding environments)
   tmax --dev file.txt # Open file.txt in development mode
     `);
     process.exit(0);
+  }
+
+  // Handle daemon mode
+  if (daemonMode) {
+    console.log('Starting tmax server daemon...');
+    const server = new TmaxServer();
+    try {
+      await server.start();
+
+      // Keep the process alive
+      await new Promise(() => {}); // This will keep the server running indefinitely
+    } catch (error) {
+      console.error('Failed to start server:', error);
+      process.exit(1);
+    }
+    return;
   }
 
   let filename: string | undefined;

@@ -13,6 +13,7 @@ import { createCursorOps } from "./api/cursor-ops.ts";
 import { createModeOps } from "./api/mode-ops.ts";
 import { createFileOps } from "./api/file-ops.ts";
 import { createBindingsOps } from "./api/bindings-ops.ts";
+import { createWordOps } from "./api/word-ops.ts";
 
 /**
  * T-Lisp function implementation that returns Either for error handling
@@ -125,6 +126,18 @@ export function createEditorAPI(state: TlispEditorState): Map<string, TLispFunct
     (focus) => { state.cursorFocus = focus; }
   );
   for (const [key, value] of bindingsOps.entries()) {
+    api.set(key, value);
+  }
+
+  // Add word navigation operations
+  const wordOps = createWordOps(
+    () => state.currentBuffer,
+    () => state.cursorLine,
+    (line) => { state.cursorLine = line; },
+    () => state.cursorColumn,
+    (column) => { state.cursorColumn = column; }
+  );
+  for (const [key, value] of wordOps.entries()) {
     api.set(key, value);
   }
 
