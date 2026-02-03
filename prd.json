@@ -398,7 +398,7 @@
         "Word not found shows error message"
       ],
       "priority": 10,
-      "passes": false,
+      "passes": true,
       "notes": "Phase 1 - Core Editing Features"
     },
     {
@@ -625,8 +625,8 @@
         "plugin.toml dependencies loaded first"
       ],
       "priority": 1,
-      "passes": false,
-      "notes": "Phase 2 - Extensibility & Plugin System"
+      "passes": true,
+      "notes": "Phase 2 - Extensibility & Plugin System - Completed: Plugin discovery from tlpa directory, plugin.tlisp loading, plugin.toml support"
     },
     {
       "id": "US-2.1.2",
@@ -639,8 +639,8 @@
         "(plugin-unload) frees resources"
       ],
       "priority": 1,
-      "passes": false,
-      "notes": "Phase 2 - Extensibility & Plugin System"
+      "passes": true,
+      "notes": "Phase 2 - Extensibility & Plugin System - Completed: Plugin discovery from tlpa directory, plugin.tlisp loading, plugin.toml support"
     },
     {
       "id": "US-2.4.1",
