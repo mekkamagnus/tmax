@@ -169,3 +169,13 @@
 
 ;; Handle semicolon key - second part of SPC ; sequence
 (key-bind ";" "(editor-handle-semicolon)" "normal")
+
+;; =================================================================
+;; HELP SYSTEM (US-1.11.1 - US-1.11.3)
+;; =================================================================
+;; Emacs-style help system for discovering commands and key bindings
+
+;; Describe key - use T-Lisp function directly
+;; Example: (describe-key "q" "normal") shows that q runs editor-quit
+;; Interactive describe-key (C-h k) is a future enhancement
+;; For now, use M-x and type: (describe-key "key" "mode")

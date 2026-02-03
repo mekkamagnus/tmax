@@ -338,14 +338,82 @@ export class Editor {
       if (args.length !== 1) {
         throw new Error("execute-command requires exactly 1 argument: command");
       }
-      
+
       const commandArg = args[0];
       if (!commandArg || commandArg.type !== "string") {
         throw new Error("execute-command requires a string command");
       }
-      
+
       const command = commandArg.value as string;
       return this.executeCommand(command);
+    });
+
+    // Add describe-key function (US-1.11.1)
+    this.interpreter.defineBuiltin("describe-key", (args) => {
+      if (args.length < 1 || args.length > 2) {
+        throw new Error("describe-key requires 1 or 2 arguments: key, optional mode");
+      }
+
+      const keyArg = args[0];
+      const modeArg = args[1];
+
+      if (!keyArg || keyArg.type !== "string") {
+        throw new Error("describe-key requires a string key");
+      }
+
+      const key = keyArg.value as string;
+      let mode: "normal" | "insert" | "visual" | "command" | "mx" | undefined;
+
+      if (modeArg) {
+        if (modeArg.type !== "string") {
+          throw new Error("describe-key mode must be a string");
+        }
+        const modeStr = modeArg.value as string;
+        if (!["normal", "insert", "visual", "command", "mx"].includes(modeStr)) {
+          throw new Error(`Invalid mode: ${modeStr}`);
+        }
+        mode = modeStr as "normal" | "insert" | "visual" | "command" | "mx";
+      } else {
+        // Use current mode if not specified
+        mode = this.getMode() as "normal" | "insert" | "visual" | "command" | "mx";
+      }
+
+      const mappings = this.keyMappings.get(key);
+      if (!mappings || mappings.length === 0) {
+        return createNil(); // Key is unbound
+      }
+
+      // Find the specific mode binding
+      let mapping = mappings.find(m => m.mode === mode);
+      if (!mapping && mode) {
+        // Try to find a binding without a mode (global binding)
+        mapping = mappings.find(m => !m.mode);
+      }
+      if (!mapping) {
+        mapping = mappings[0]; // Fall back to first binding
+      }
+
+      // Return structured information: [command, key, mode, documentation]
+      return createList([
+        createString(mapping.command),
+        createString(key),
+        createString(mapping.mode || mode || "all"),
+        createString("No documentation available") // TODO: Implement function documentation lookup
+      ]);
+    });
+
+    // Add describe-key-prompt function (US-1.11.1)
+    // Interactive version that prompts user to press a key
+    this.interpreter.defineBuiltin("describe-key-prompt", (args) => {
+      if (args.length !== 0) {
+        throw new Error("describe-key-prompt requires no arguments");
+      }
+
+      // Set a flag to indicate we're waiting for a key to describe
+      this.state.describeKeyPending = true;
+      this.state.statusMessage = "Describe key: press a key";
+
+      return createString("waiting for key");
     });
 
     // Add count prefix API functions (US-1.3.1)
