@@ -16,6 +16,7 @@ import { createBindingsOps } from "./api/bindings-ops.ts";
 import { createWordOps } from "./api/word-ops.ts";
 import { createLineOps } from "./api/line-ops.ts";
 import { createDeleteOps, setDeleteRegister } from "./api/delete-ops.ts";
+import { createSearchOps } from "./api/search-ops.ts";
 import { createYankOps } from "./api/yank-ops.ts";
 import { createChangeOps } from "./api/change-ops.ts";
 import { createUndoRedoOps } from "./api/undo-redo-ops.ts";
@@ -212,6 +213,19 @@ export function createEditorAPI(state: TlispEditorState): Map<string, TLispFunct
     (msg) => { state.statusMessage = msg; }
   );
   for (const [key, value] of undoRedoOps.entries()) {
+    api.set(key, value);
+  }
+
+  // Add search operations
+  const searchOps = createSearchOps(
+    () => state.currentBuffer,
+    () => state.cursorLine,
+    (line) => { state.cursorLine = line; },
+    () => state.cursorColumn,
+    (column) => { state.cursorColumn = column; },
+    (message) => { state.statusMessage = message; }
+  );
+  for (const [key, value] of searchOps.entries()) {
     api.set(key, value);
   }
 
