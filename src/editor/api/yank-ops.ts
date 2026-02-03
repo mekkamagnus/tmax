@@ -26,6 +26,7 @@ import {
   createBufferError,
   AppError
 } from "../../error/types.ts";
+import { killRingSave } from "./kill-ring.ts";
 
 /**
  * Register storage for yanked text
@@ -183,6 +184,7 @@ export function createYankOps(
 
     if (Either.isRight(yankedTextResult)) {
       setYankRegister(yankedTextResult.right);
+      killRingSave(yankedTextResult.right);  // Also save to kill ring (US-1.9.1)
     }
 
     // Yank doesn't modify buffer - just return success
@@ -244,6 +246,7 @@ export function createYankOps(
 
     if (Either.isRight(yankedTextResult)) {
       setYankRegister(yankedTextResult.right);
+      killRingSave(yankedTextResult.right);  // Also save to kill ring (US-1.9.1)
     }
 
     // Yank doesn't modify buffer - just return success
@@ -296,6 +299,7 @@ export function createYankOps(
 
     if (Either.isRight(yankedTextResult)) {
       setYankRegister(yankedTextResult.right);
+      killRingSave(yankedTextResult.right);  // Also save to kill ring (US-1.9.1)
     }
 
     // Yank doesn't modify buffer - just return success

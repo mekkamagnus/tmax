@@ -9,6 +9,7 @@
  * - delete-to-sentence-end: delete to end of sentence (d))
  * - All functions support count prefix for repeated deletions
  * - Deleted text stored in register for pasting
+ * - Deleted text also added to kill ring (US-1.9.1)
  */
 
 import type { TLispValue, TLispFunctionImpl } from "../../tlisp/types.ts";
@@ -25,6 +26,7 @@ import {
   createBufferError,
   AppError
 } from "../../error/types.ts";
+import { killRingSave } from "./kill-ring.ts";
 
 /**
  * Register storage for deleted text
@@ -245,6 +247,7 @@ export function createDeleteOps(
 
     if (Either.isRight(deletedTextResult)) {
       setDeleteRegister(deletedTextResult.right);
+      killRingSave(deletedTextResult.right);  // Also save to kill ring (US-1.9.1)
     }
 
     // Perform deletion
@@ -313,6 +316,7 @@ export function createDeleteOps(
 
     if (Either.isRight(deletedTextResult)) {
       setDeleteRegister(deletedTextResult.right);
+      killRingSave(deletedTextResult.right);  // Also save to kill ring (US-1.9.1)
     }
 
     // Perform deletion
@@ -390,6 +394,7 @@ export function createDeleteOps(
 
     if (Either.isRight(deletedTextResult)) {
       setDeleteRegister(deletedTextResult.right);
+      killRingSave(deletedTextResult.right);  // Also save to kill ring (US-1.9.1)
     }
 
     // Perform deletion
@@ -470,6 +475,7 @@ export function createDeleteOps(
 
     if (Either.isRight(deletedTextResult)) {
       setDeleteRegister(deletedTextResult.right);
+      killRingSave(deletedTextResult.right);  // Also save to kill ring (US-1.9.1)
     }
 
     // Perform deletion

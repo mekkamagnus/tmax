@@ -9,6 +9,7 @@
  * - All functions support count prefix for repeated changes
  * - Deleted text stored in register for pasting
  * - After deletion, editor switches to insert mode
+ * - Deleted text also added to kill ring (US-1.9.1)
  */
 
 import type { TLispValue, TLispFunctionImpl } from "../../tlisp/types.ts";
@@ -25,6 +26,7 @@ import {
   createBufferError,
   AppError
 } from "../../error/types.ts";
+import { killRingSave } from "./kill-ring.ts";
 
 /**
  * Check if a character is a word character
@@ -166,6 +168,7 @@ export function createChangeOps(
 
     if (Either.isRight(deletedTextResult)) {
       setDeleteRegister(deletedTextResult.right);
+      killRingSave(deletedTextResult.right);  // Also save to kill ring (US-1.9.1)
     }
 
     // Perform deletion
@@ -246,6 +249,7 @@ export function createChangeOps(
 
     if (Either.isRight(deletedTextResult)) {
       setDeleteRegister(deletedTextResult.right);
+      killRingSave(deletedTextResult.right);  // Also save to kill ring (US-1.9.1)
     }
 
     // Perform deletion
@@ -317,6 +321,7 @@ export function createChangeOps(
 
     if (Either.isRight(deletedTextResult)) {
       setDeleteRegister(deletedTextResult.right);
+      killRingSave(deletedTextResult.right);  // Also save to kill ring (US-1.9.1)
     }
 
     // Perform deletion
