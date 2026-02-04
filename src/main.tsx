@@ -18,10 +18,16 @@ import { Logger, LogLevel } from './utils/logger.ts';
 
 /**
  * Switch to alternate screen buffer (full screen mode)
+ * Skips alternate screen buffer if TMAX_TEST_MODE is set (for UI testing)
  */
 function enterFullScreen() {
-  // ANSI escape code to enter alternate screen buffer
-  process.stdout.write('\x1b[?1049h');
+  // Check if we're in test mode (UI testing via tmux)
+  const testMode = process.env.TMAX_TEST_MODE === 'true';
+
+  if (!testMode) {
+    // ANSI escape code to enter alternate screen buffer
+    process.stdout.write('\x1b[?1049h');
+  }
 
   // Clear screen and move cursor to top-left
   process.stdout.write('\x1b[2J');
@@ -33,13 +39,19 @@ function enterFullScreen() {
 
 /**
  * Exit alternate screen buffer (restore normal screen)
+ * Skips alternate screen buffer exit if TMAX_TEST_MODE is set
  */
 function exitFullScreen() {
   // Show cursor
   process.stdout.write('\x1b[?25h');
 
-  // Exit alternate screen buffer
-  process.stdout.write('\x1b[?1049l');
+  // Check if we're in test mode
+  const testMode = process.env.TMAX_TEST_MODE === 'true';
+
+  if (!testMode) {
+    // Exit alternate screen buffer
+    process.stdout.write('\x1b[?1049l');
+  }
 }
 
 /**
@@ -342,8 +354,10 @@ Examples:
     // Configure Ink options for development/testing environments
     const inkOptions: any = {};
 
-    // In dev mode, provide a mock stdin to bypass TTY checks
-    if (devMode) {
+    // In dev mode, only use mock stdin if we're NOT in a real TTY
+    // This allows the editor to work properly in tmux while still supporting
+    // non-TTY environments like Claude Code
+    if (devMode && !process.stdin.isTTY) {
       const { Duplex } = await import('stream');
       const mockStdin = new Duplex({
         read() { /* No-op in dev mode - input comes from test harness */ },

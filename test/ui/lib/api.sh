@@ -43,6 +43,12 @@ tmax_init() {
 
   session_create
 
+  # Clean up old FIFO if it exists
+  if [[ -p "$TMAX_TEST_INPUT_FIFO" ]]; then
+    rm -f "$TMAX_TEST_INPUT_FIFO"
+    log_debug "Removed old test input FIFO"
+  fi
+
   log_info "Test harness ready"
   log_info "Session: $TMAX_SESSION"
   log_info "Test window: $TMAX_SESSION:$TMAX_TEST_WINDOW"

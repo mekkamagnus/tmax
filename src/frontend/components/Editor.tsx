@@ -34,6 +34,9 @@ export const Editor = ({ initialEditorState, editor, filename, onStateChange, on
   // Get actual terminal dimensions
   const { width: terminalWidth, height: terminalHeight } = useTerminalDimensions();
 
+  // Check if we're in test mode with FIFO input
+  const testInputFifo = process.env.TMAX_TEST_INPUT_FIFO;
+
   // Use a ref to always have access to the current state
   const stateRef = useRef(state);
   useEffect(() => {
@@ -43,10 +46,24 @@ export const Editor = ({ initialEditorState, editor, filename, onStateChange, on
   // Initialize the editor when component mounts
   useEffect(() => {
     const initEditor = async () => {
+      // Debug logging - write to file for reliable capture in tests
+      const debugMode = process.env.TMAX_TEST_MODE === 'true' || process.env.TMAX_DEBUG === 'true';
+      if (debugMode) {
+        const fs = await import('fs');
+        const debugLog = `[EDITOR] Component mounting, stdin.isTTY: ${process.stdin.isTTY}, TMAX_TEST_MODE: ${process.env.TMAX_TEST_MODE}\n`;
+        fs.appendFileSync('/tmp/tmax-debug.log', debugLog);
+      }
+
       try {
         await editor.start();
         // Sync initial state from Editor class
         setState(editor.getEditorState());
+
+        if (debugMode) {
+          const fs = await import('fs');
+          const debugLog = `[EDITOR] Editor initialized, mode: ${editor.getEditorState().mode}\n`;
+          fs.appendFileSync('/tmp/tmax-debug.log', debugLog);
+        }
       } catch (err) {
         const errorMessage = err instanceof Error ? err.message : String(err);
         handleError(`Failed to initialize editor: ${errorMessage}`);
@@ -97,6 +114,19 @@ export const Editor = ({ initialEditorState, editor, filename, onStateChange, on
 
   // Handle key input - ALL keys go through T-Lisp via executeTlisp
   useInput(async (input: string, key: any) => {
+    // Debug logging to trace input reception - write to file for reliable capture
+    const debugMode = process.env.TMAX_TEST_MODE === 'true' || process.env.TMAX_DEBUG === 'true';
+    if (debugMode) {
+      const fs = await import('fs');
+      const inputStr = input === '\x1b' ? '\\x1b (Escape)' :
+                       input === '\r' ? '\\r (Return)' :
+                       input === '\x7f' ? '\\x7f (Backspace)' :
+                       `"${input}"`;
+      const keyInfo = Object.keys(key).filter(k => key[k] === true).join(', ') || 'none';
+      const debugLog = `[INPUT] Received key: ${inputStr}, flags: ${keyInfo}, mode: ${stateRef.current.mode}\n`;
+      fs.appendFileSync('/tmp/tmax-debug.log', debugLog);
+    }
+
     try {
       // Command mode input is handled by CommandInput component
       // IMPORTANT: Use ref to always get current mode, not closure value
@@ -139,6 +169,84 @@ export const Editor = ({ initialEditorState, editor, filename, onStateChange, on
       handleError(error instanceof Error ? error.message : String(error));
     }
   }, [executeTlisp, exit]);
+
+  // Test mode: Read input from file if configured (for automated testing)
+  useEffect(() => {
+    if (!testInputFifo) return;
+
+    const fs = require('fs');
+    const debugLog = (msg: string) => {
+      if (process.env.TMAX_TEST_MODE === 'true') {
+        fs.appendFileSync('/tmp/tmax-debug.log', msg + '\n');
+      }
+    };
+
+    debugLog(`[TEST INPUT] Starting to poll file: ${testInputFifo}`);
+
+    // Track last read position to only read new content
+    let lastPosition = 0;
+    let running = true;
+
+    // Initialize the input file
+    if (!fs.existsSync(testInputFifo)) {
+      try {
+        fs.writeFileSync(testInputFifo, '');
+        lastPosition = 0;
+        debugLog(`[TEST INPUT] Created input file at ${testInputFifo}`);
+      } catch (err) {
+        debugLog(`[TEST INPUT] Failed to create input file: ${err}`);
+        return;
+      }
+    }
+
+    // Poll file for new input
+    const pollFile = async () => {
+      while (running) {
+        try {
+          const stats = fs.statSync(testInputFifo);
+          if (stats.size > lastPosition) {
+            // Read new content
+            const buffer = Buffer.alloc(stats.size - lastPosition);
+            const fd = fs.openSync(testInputFifo, 'r');
+            fs.readSync(fd, buffer, 0, buffer.length, lastPosition);
+            fs.closeSync(fd);
+
+            const input = buffer.toString('utf8');
+            debugLog(`[TEST INPUT] Read ${input.length} bytes: "${input}"`);
+
+            // Process each character
+            for (const char of input) {
+              try {
+                await executeTlisp(char);
+              } catch (error) {
+                if (error instanceof Error && error.message === "EDITOR_QUIT_SIGNAL") {
+                  exit();
+                  return;
+                }
+              }
+            }
+
+            lastPosition = stats.size;
+          }
+
+          // Poll every 100ms
+          await new Promise(resolve => setTimeout(resolve, 100));
+        } catch (err) {
+          if (running) {
+            debugLog(`[TEST INPUT] Poll error: ${err}`);
+          }
+          await new Promise(resolve => setTimeout(resolve, 100));
+        }
+      }
+    };
+
+    pollFile();
+
+    return () => {
+      running = false;
+      debugLog('[TEST INPUT] Stopped polling input file');
+    };
+  }, [testInputFifo, executeTlisp, exit]);
 
   return (
     <Box flexDirection="column" height={terminalHeight} width={terminalWidth}>

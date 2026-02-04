@@ -25,6 +25,12 @@ editor_start() {
   # Change to project directory
   input_send_command "cd \"$TMAX_PROJECT_ROOT\""
 
+  # Set test mode environment variable to skip alternate screen buffer
+  input_send_command "export TMAX_TEST_MODE=true"
+
+  # Set FIFO path for automated input delivery
+  input_send_command "export TMAX_TEST_INPUT_FIFO=$TMAX_TEST_INPUT_FIFO"
+
   # Build start command
   local start_cmd="$TMAX_START_CMD"
   if [[ -n "$file" ]]; then

@@ -37,6 +37,12 @@ export TMAX_CAPTURE_LINES="${TMAX_CAPTURE_LINES:-100}"
 export TMAX_DEBUG="${TMAX_DEBUG:-false}"
 export TMAX_VERBOSE="${TMAX_VERBOSE:-false}"
 
+# Test Mode - skip alternate screen buffer for tmux capture
+export TMAX_TEST_MODE="${TMAX_TEST_MODE:-true}"
+
+# Test input file for automated input delivery (polled by editor)
+export TMAX_TEST_INPUT_FIFO="${TMAX_TEST_INPUT_FIFO:-/tmp/tmax-test-input.txt}"
+
 # Paths
 # Use git to find project root, fallback to relative path
 _detect_project_root() {
@@ -53,9 +59,9 @@ export TMAX_PROJECT_ROOT="${TMAX_PROJECT_ROOT:-$(_detect_project_root)}"
 export TMAX_TEST_DIR="${TMAX_TEST_DIR:-/tmp/tmax-ui-tests}"
 
 # Editor Commands
-# Use React-based UI (ink) with --dev flag for non-TTY environments
+# Run without --dev flag in tmux (real TTY available)
 export BUN_BIN="${BUN_BIN:-$HOME/.bun/bin/bun}"
-export TMAX_START_CMD="${TMAX_START_CMD:-$BUN_BIN run src/main.tsx --dev}"
+export TMAX_START_CMD="${TMAX_START_CMD:-$BUN_BIN run src/main.tsx}"
 export TMAX_START_FLAGS="${TMAX_START_FLAGS:-}"
 
 # Key Sequences
