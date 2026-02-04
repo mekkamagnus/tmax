@@ -167,7 +167,7 @@ describe("Core Binding Files Loading", () => {
 ;; Change selected text (c)
 (key-bind "c" "(change-selection)" "visual")`);
 
-    mockFileSystem.files.set("~/.tmaxrc", `(key-bind "C-c C-c" "(custom-command)" "normal")`); // Custom binding
+    mockFileSystem.files.set("~/.config/tmax/init.tlisp", `(key-bind "C-c C-c" "(custom-command)" "normal")`); // Custom binding
     editor = new Editor(mockTerminal, mockFileSystem);
   });
 
@@ -229,7 +229,7 @@ describe("Core Binding Files Loading", () => {
     expect(commandEscapeMapping!.mode).toBe("command");
   });
 
-  test("should load custom bindings from ~/.tmaxrc that can override defaults", async () => {
+  test("should load custom bindings from ~/.config/tmax/init.tlisp that can override defaults", async () => {
     await editor.start();
 
     const keyMappings = editor.getKeyMappings();

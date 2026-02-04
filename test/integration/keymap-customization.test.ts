@@ -1,9 +1,9 @@
 /**
  * @file keymap-customization.test.ts
- * @description End-to-end tests for .tmaxrc keymap customization
+ * @description End-to-end tests for init.tlisp keymap customization
  *
  * Tests for user customization workflows:
- * - Loading custom keybindings from .tmaxrc
+ * - Loading custom keybindings from init.tlisp
  * - Custom bindings override defaults
  * - Multiple keymaps for different modes
  * - Runtime keymap modification via M-x
@@ -80,7 +80,7 @@ describe("Keymap Customization E2E", () => {
     filesystem = new MockFileSystem();
 
     // Create a temporary config path for testing
-    tempConfigPath = path.join(os.tmpdir(), `.tmaxrc-test-${Date.now()}`);
+    tempConfigPath = path.join(os.tmpdir(), `.tmax-test-${Date.now()}`);
   });
 
   afterEach(async () => {
@@ -92,10 +92,10 @@ describe("Keymap Customization E2E", () => {
     }
   });
 
-  describe(".tmaxrc Loading", () => {
-    test("should load and execute .tmaxrc file during editor start", async () => {
-      // Create a .tmaxrc file with a custom keymap
-      const tmaxrcContent = `
+  describe("init.tlisp Loading", () => {
+    test("should load and execute init.tlisp file during editor start", async () => {
+      // Create a init.tlisp file with a custom keymap
+      const initContent = `
 ;; Custom keymap configuration
 (defkeymap "*my-custom-keymap*")
 (setq "*my-custom-keymap*" (keymap-define-key *my-custom-keymap* "j" "custom-down"))
@@ -104,15 +104,15 @@ describe("Keymap Customization E2E", () => {
 ;; Register the keymap for normal mode
 (keymap-set "normal" *my-custom-keymap*)
 `;
-      filesystem.writeFile(tempConfigPath, tmaxrcContent);
+      filesystem.writeFile(tempConfigPath, initContent);
 
-      // Create editor (which would normally load ~/.tmaxrc)
+      // Create editor (which would normally load ~/.config/tmax/init.tlisp)
       editor = new Editor(terminal, filesystem);
 
-      // Manually execute the .tmaxrc content (simulating what loadInitFile does)
+      // Manually execute the init.tlisp content (simulating what loadInitFile does)
       const interpreter = (editor as any).interpreter as TLispInterpreterImpl;
       registerStdlibFunctions(interpreter);
-      interpreter.execute(tmaxrcContent);
+      interpreter.execute(initContent);
 
       // Verify the keymap was defined
       const keymap = interpreter.globalEnv.lookup("*my-custom-keymap*");
@@ -128,8 +128,8 @@ describe("Keymap Customization E2E", () => {
       expect(command).toBe("custom-down");
     });
 
-    test("should handle missing .tmaxrc gracefully", async () => {
-      // Don't create a .tmaxrc file
+    test("should handle missing init.tlisp gracefully", async () => {
+      // Don't create a init.tlisp file
       editor = new Editor(terminal, filesystem);
 
       // Editor should still initialize without errors
@@ -141,13 +141,13 @@ describe("Keymap Customization E2E", () => {
       expect(keymapSync.hasKeymap("normal")).toBe(false);
     });
 
-    test("should handle malformed .tmaxrc gracefully", async () => {
-      // Create a .tmaxrc file with invalid T-Lisp syntax
-      const tmaxrcContent = `
+    test("should handle malformed init.tlisp gracefully", async () => {
+      // Create a init.tlisp file with invalid T-Lisp syntax
+      const initContent = `
 ;; Invalid T-Lisp syntax
 (defkeymap "missing-quote
 `;
-      filesystem.writeFile(tempConfigPath, tmaxrcContent);
+      filesystem.writeFile(tempConfigPath, initContent);
 
       editor = new Editor(terminal, filesystem);
 
@@ -159,19 +159,19 @@ describe("Keymap Customization E2E", () => {
 
   describe("Custom Bindings Override Defaults", () => {
     test("T-Lisp keymap should override TypeScript bindings", async () => {
-      // Create .tmaxrc that overrides 'j' key
-      const tmaxrcContent = `
+      // Create init.tlisp that overrides 'j' key
+      const initContent = `
 ;; Override default 'j' binding
 (defkeymap "*override-keymap*")
 (setq "*override-keymap*" (keymap-define-key *override-keymap* "j" "my-custom-command"))
 (keymap-set "normal" *override-keymap*)
 `;
-      filesystem.writeFile(tempConfigPath, tmaxrcContent);
+      filesystem.writeFile(tempConfigPath, initContent);
 
       editor = new Editor(terminal, filesystem);
       const interpreter = (editor as any).interpreter as TLispInterpreterImpl;
       registerStdlibFunctions(interpreter);
-      interpreter.execute(tmaxrcContent);
+      interpreter.execute(initContent);
 
       // Verify custom binding takes precedence
       const keymapSync = (editor as any).keymapSync;
@@ -179,8 +179,8 @@ describe("Keymap Customization E2E", () => {
       expect(command).toBe("my-custom-command");
     });
 
-    test("should allow binding multiple keys in .tmaxrc", async () => {
-      const tmaxrcContent = `
+    test("should allow binding multiple keys in init.tlisp", async () => {
+      const initContent = `
 ;; Multiple custom bindings
 (defkeymap "*multi-keymap*")
 (setq "*multi-keymap*" (keymap-define-key *multi-keymap* "j" "cmd1"))
@@ -188,7 +188,7 @@ describe("Keymap Customization E2E", () => {
 (setq "*multi-keymap*" (keymap-define-key *multi-keymap* "l" "cmd3"))
 (keymap-set "normal" *multi-keymap*)
 `;
-      filesystem.writeFile(tempConfigPath, tmaxrcContent);
+      filesystem.writeFile(tempConfigPath, initContent);
 
       editor = new Editor(terminal, filesystem);
       const interpreter = (editor as any).interpreter as TLispInterpreterImpl;

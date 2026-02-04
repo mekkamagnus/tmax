@@ -477,4 +477,7 @@ export interface FileSystem {
 
   /** List directory contents */
   readdir?(path: string): Promise<string[]>;
+
+  /** Create directory recursively (SPEC-025) */
+  createDir(path: string): Promise<void>;
 }

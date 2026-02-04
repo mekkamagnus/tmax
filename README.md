@@ -90,7 +90,7 @@ npm run dev
 - **Command mode**: Press `:` for vim-style commands
 - **M-x mode**: Press `SPC ;` to execute T-Lisp functions by name
 - **Multiple buffers**: Use `:e filename` to open additional files
-- **Customization**: Create `~/.tmaxrc` with T-Lisp configuration
+- **Customization**: Create `~/.config/tmax/init.tlisp` with T-Lisp configuration
 
 ### Key Bindings (Default)
 
@@ -117,7 +117,7 @@ npm run repl
 
 ## Configuration
 
-Create a `.tmaxrc` file in your home directory to customize tmax:
+Create an `init.tlisp` file in `~/.config/tmax/` to customize tmax:
 
 ```lisp
 ;; Custom key bindings
@@ -138,6 +138,30 @@ Create a `.tmaxrc` file in your home directory to customize tmax:
 
 (key-bind "zz" "(center-cursor)" "normal")
 ```
+
+### Init File Features
+
+**Reload Configuration**:
+- Use `M-x: (eval-init-file)` to reload your init file without restarting
+- Useful for testing configuration changes
+
+**Evaluate Buffer**:
+- Use `M-x: (eval-buffer)` to evaluate the current buffer as T-Lisp code
+- Perfect for testing functions and key bindings without saving
+- Works great with the `*scratch*` buffer
+
+**Custom Init File**:
+- Use `--init-file` flag to load a custom configuration:
+  ```bash
+  tmax --init-file ./my-config.tlisp
+  ```
+- Use `/dev/null` to disable init file loading:
+  ```bash
+  tmax --init-file /dev/null
+  ```
+
+**Query Init File**:
+- `(init-file-path)` - Returns the path to the current init file
 
 ## T-Lisp Editor API
 

@@ -129,6 +129,13 @@ async function main() {
     }
   });
 
+  // Parse --init-file flag (SPEC-025)
+  const initFileArgIndex = args.indexOf('--init-file');
+  let initFilePath: string | undefined;
+  if (initFileArgIndex !== -1 && args[initFileArgIndex + 1]) {
+    initFilePath = args[initFileArgIndex + 1];
+  }
+
   // Show help if requested
   if (args.includes('--help') || args.includes('-h')) {
     console.log(`
@@ -139,6 +146,7 @@ Usage: tmax [options] [filename]
 Options:
   --daemon           Start server daemon mode
   --dev, --no-tty    Development mode (skip TTY checks for AI coding assistants)
+  --init-file FILE   Use custom init file (default: ~/.config/tmax/init.tlisp)
   --help, -h         Show this help message
 
 Examples:
@@ -147,6 +155,7 @@ Examples:
   tmax --daemon      # Start server daemon
   tmax --dev         # Start in development mode (for AI coding environments)
   tmax --dev file.txt # Open file.txt in development mode
+  tmax --init-file ./my-config.tlisp # Use custom init file
     `);
     startupLog.completeOperation('editor-initialization', startupId);
     process.exit(0);
@@ -208,7 +217,7 @@ Examples:
     metadata: { phase: 'init-editor' }
   });
 
-  const editor = new EditorClass(terminal, filesystem);
+  const editor = new EditorClass(terminal, filesystem, initFilePath);
   startupLog.debug('Editor instance created', {
     correlationId: startupId,
     data: {

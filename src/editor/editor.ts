@@ -53,13 +53,15 @@ export class Editor {
   private spacePressed: boolean = false;  // Track space key for SPC ; sequence (US-1.10.1)
   private lspClient: LSPClient;  // LSP client for language server integration (US-3.1.1)
   keymapSync: KeymapSync;  // Bridge layer for T-Lisp keymap integration (US-0.4.1)
+  private currentInitFile: string = '';  // Path to current init file (SPEC-025)
 
   /**
    * Create a new editor instance
    * @param terminal - Terminal interface (may be unused in React UI)
    * @param filesystem - File system interface
+   * @param initFilePath - Optional path to custom init file (SPEC-025)
    */
-  constructor(terminal: TerminalIO, filesystem: FileSystem) {
+  constructor(terminal: TerminalIO, filesystem: FileSystem, initFilePath?: string) {
     const editorLog = log.module('editor').fn('constructor');
     const initId = editorLog.startOperation('editor-construction');
 
@@ -67,6 +69,12 @@ export class Editor {
 
     this.terminal = terminal;
     this.filesystem = filesystem;
+
+    // Store init file path for later use (SPEC-025)
+    if (initFilePath) {
+      this.currentInitFile = initFilePath;
+    }
+
     this.state = {
       cursorPosition: { line: 0, column: 0 },
       mode: "normal",
@@ -1263,6 +1271,21 @@ export class Editor {
     for (const [name, fn] of windowOps) {
       this.interpreter.defineBuiltin(name, fn);
     }
+
+    // Init file operations (SPEC-025)
+    this.interpreter.defineBuiltin("eval-init-file", async (args) => {
+      await this.evalInitFile();
+      return createNil();
+    });
+
+    this.interpreter.defineBuiltin("init-file-path", (args) => {
+      return createString(this.currentInitFile || "");
+    });
+
+    // Buffer evaluation (SPEC-025)
+    this.interpreter.defineBuiltin("eval-buffer", (args) => {
+      return this.evalBuffer();
+    });
   }
 
   /**
@@ -1521,31 +1544,54 @@ export class Editor {
   }
 
   /**
-   * Load initialization file (.tmaxrc)
+   * Load initialization file (SPEC-025)
    *
-   * Loads and executes the user's .tmaxrc configuration file.
+   * Loads and executes the user's init.tlisp configuration file.
    * This file can contain:
    * - Custom keymap definitions using defkeymap
    * - Keymap registrations using keymap-set
    * - Any other T-Lisp initialization code
    *
-   * The file is loaded from ~/.tmaxrc (user's home directory)
+   * The file is loaded from ~/.config/tmax/init.tlisp (XDG config directory)
+   * @param initFilePath - Optional custom init file path
    */
-  private async loadInitFile(): Promise<void> {
+  private async loadInitFile(initFilePath?: string): Promise<void> {
     const initLog = log.module('editor').fn('loadInitFile');
 
-    // Expand ~ to home directory
+    // Determine init file path
     const homeDir = process.env.HOME || process.env.USERPROFILE || '.';
-    const configPath = `${homeDir}/.tmaxrc`;
+    const configDir = `${homeDir}/.config/tmax`;
+    const defaultInitFile = `${configDir}/init.tlisp`;
+
+    const initFile = initFilePath || defaultInitFile;
+
+    // Store for later reference
+    this.currentInitFile = initFile;
 
     try {
-      initLog.debug(`Loading init file: ${configPath}`);
+      // Create config directory if it doesn't exist (only for default path)
+      if (!initFilePath) {
+        try {
+          await this.filesystem.createDir(configDir);
+          initLog.debug('Created config directory', { data: { path: configDir } });
+        } catch (dirError) {
+          // Directory creation failed - might already exist or permission error
+          initLog.debug('Config directory creation failed or already exists', {
+            data: {
+              path: configDir,
+              error: dirError instanceof Error ? dirError.message : String(dirError)
+            }
+          });
+        }
+      }
 
-      const initContent = await this.filesystem.readFile(configPath);
+      initLog.debug(`Loading init file: ${initFile}`);
+
+      const initContent = await this.filesystem.readFile(initFile);
       this.interpreter.execute(initContent);
 
-      initLog.info('Loaded custom ~/.tmaxrc configuration', {
-        data: { path: configPath }
+      initLog.info('Loaded init file', {
+        data: { path: initFile }
       });
 
       // Log any keymaps that were registered
@@ -1554,19 +1600,67 @@ export class Editor {
       );
 
       if (registeredKeymaps.length > 0) {
-        initLog.info('Registered T-Lisp keymaps from .tmaxrc', {
+        initLog.info('Registered T-Lisp keymaps from init file', {
           data: { modes: registeredKeymaps }
         });
       }
     } catch (error) {
       // Init file not found or error - use defaults (silent)
-      // This is expected if the user hasn't created a ~/.tmaxrc file yet
-      initLog.debug('No .tmaxrc file found or error loading it', {
+      // This is expected if the user hasn't created an init file yet
+      initLog.debug('No init file found or error loading it', {
         data: {
-          path: configPath,
+          path: initFile,
           error: error instanceof Error ? error.message : String(error)
         }
       });
+    }
+  }
+
+  /**
+   * Reload init file without restarting editor (SPEC-025)
+   * Useful for testing configuration changes
+   */
+  async evalInitFile(): Promise<void> {
+    const initLog = log.module('editor').fn('evalInitFile');
+    initLog.info('Reloading init file', { data: { path: this.currentInitFile } });
+
+    // Reload using stored init file path
+    await this.loadInitFile(this.currentInitFile || undefined);
+
+    initLog.info('Init file reloaded successfully');
+  }
+
+  /**
+   * Evaluate current buffer as T-Lisp code (SPEC-025)
+   * Useful for testing T-Lisp code without saving to file
+   * @returns The result of the last expression evaluated
+   */
+  evalBuffer(): TLispValue {
+    const evalLog = log.module('editor').fn('evalBuffer');
+    
+    if (!this.state.currentBuffer) {
+      evalLog.warn('No buffer to evaluate');
+      return createNil();
+    }
+
+    const bufferContent = this.state.currentBuffer.getContent();
+    evalLog.debug('Evaluating buffer content', { 
+      data: { 
+        bufferName: this.state.currentBuffer.getName(),
+        length: bufferContent.length 
+      } 
+    });
+
+    try {
+      const result = this.interpreter.execute(bufferContent);
+      evalLog.info('Buffer evaluated successfully');
+      return result;
+    } catch (error) {
+      const errorMsg = error instanceof Error ? error.message : String(error);
+      evalLog.error('Error evaluating buffer', { 
+        data: { error: errorMsg } 
+      });
+      throw error;
     }
   }
 
@@ -1866,7 +1960,7 @@ export class Editor {
 
     // Load core bindings and user init file
     await this.ensureCoreBindingsLoaded();
-    await this.loadInitFile();
+    await this.loadInitFile(this.currentInitFile || undefined);
 
     // Load saved macros from ~/.config/tmax/macros.tlisp (US-2.4.2)
     await this.loadSavedMacros();

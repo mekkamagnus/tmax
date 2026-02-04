@@ -174,6 +174,24 @@ export class FunctionalFileSystemImpl implements FunctionalFileSystem {
           );
       });
   }
+
+  /**
+   * Create directory recursively (SPEC-025)
+   */
+  createDir(path: string): TaskEither<FileSystemError, void> {
+    return TaskEither.tryCatch(
+      async () => {
+        const fs = await import('fs/promises');
+        await fs.mkdir(path, { recursive: true });
+      },
+      (error) => createFileSystemError(
+        'CreateDirError',
+        `Failed to create directory ${path}: ${error instanceof Error ? error.message : String(error)}`,
+        path,
+        { error: error instanceof Error ? error.message : String(error) }
+      )
+    );
+  }
 }
 
 /**
@@ -342,6 +360,16 @@ export class FileSystemImpl implements FileSystem {
       throw new Error(result.left);
     }
     return result.right;
+  }
+
+  /**
+   * Create directory recursively (SPEC-025)
+   */
+  async createDir(path: string): Promise<void> {
+    const result = await this.functionalFileSystem.createDir(path).run();
+    if (Either.isLeft(result)) {
+      throw new Error(result.left);
+    }
   }
 }
 

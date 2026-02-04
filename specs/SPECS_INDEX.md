@@ -2,7 +2,7 @@
 
 All specification and documentation files are numbered for easy reference.
 
-## Complete List (24 Specs)
+## Complete List (25 Specs)
 
 ### Core Specifications (001-009)
 - **SPEC-001** - Update/Delete Notes
@@ -15,7 +15,7 @@ All specification and documentation files are numbered for easy reference.
 - **SPEC-008** - Implementation Spec: Save Improved
 - **SPEC-009** - Migrate UI to Deno Ink
 
-### Chores and Tasks (010-024)
+### Chores and Tasks (010-025)
 - **SPEC-010** - PRD (Additional/Updated Version)
 - **SPEC-011** - Chore: Terminal UI Event Loop
 - **SPEC-012** - Chore: Fix TypeScript Errors
@@ -24,6 +24,7 @@ All specification and documentation files are numbered for easy reference.
 - **SPEC-015** - Chore: UI Test Suite Tmux Session
 - **SPEC-016** - TypeScript Error Fixes Summary
 - **SPEC-024** - Chore: UI Test Harness Refactoring
+- **SPEC-025** - Chore: Init File System Refactoring
 
 ### Terminal UI Implementation (017-021)
 - **SPEC-017** - Terminal UI Complete
@@ -34,7 +35,7 @@ All specification and documentation files are numbered for easy reference.
 
 ## Summary
 
-- **Total Specs:** 24
+- **Total Specs:** 25
 - **Date:** 2026-02-04
 - **Status:** All files properly numbered and organized
 
@@ -47,5 +48,10 @@ To find a spec by topic:
 - **Testing:** SPEC-015, SPEC-019, SPEC-020, SPEC-024
 - **TypeScript:** SPEC-012, SPEC-016
 - **Keybindings:** SPEC-013, SPEC-014
-- **Chores:** SPEC-011, SPEC-012, SPEC-024
+- **Chores:** SPEC-011, SPEC-012, SPEC-024, SPEC-025
 - **Test Refactoring:** SPEC-024
+- **Configuration:** SPEC-025
+
+## Related ADRs
+
+- **ADR 056** - Init File System Refactoring (Implementation of SPEC-025)
