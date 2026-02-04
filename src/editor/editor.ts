@@ -23,6 +23,8 @@ import { loadMacrosFromFile, saveMacrosToFile } from "./api/macro-persistence.ts
 import { LSPClient } from "../lsp/client.ts";
 import { createWindowOps } from "./api/window-ops.ts";
 import { log } from "../utils/logger.ts";
+import { KeymapSync } from "./keymap-sync.ts";
+import { createKeymapOps } from "./api/keymap-ops.ts";
 
 /**
  * Key mapping for editor commands
@@ -50,6 +52,7 @@ export class Editor {
   private historyIndex: number = 0;  // Current position in command history
   private spacePressed: boolean = false;  // Track space key for SPC ; sequence (US-1.10.1)
   private lspClient: LSPClient;  // LSP client for language server integration (US-3.1.1)
+  keymapSync: KeymapSync;  // Bridge layer for T-Lisp keymap integration (US-0.4.1)
 
   /**
    * Create a new editor instance
@@ -111,6 +114,11 @@ export class Editor {
 
     this.keyMappings = new Map();
     this.lspClient = new LSPClient(this.terminal, this.filesystem);
+
+    // Initialize KeymapSync for T-Lisp keymap integration (US-0.4.1)
+    editorLog.info('Initializing KeymapSync', { correlationId: initId });
+    this.keymapSync = new KeymapSync(this.interpreter);
+    editorLog.debug('KeymapSync initialized', { correlationId: initId });
 
     // Initialize API
     editorLog.info('Initializing T-Lisp API', { correlationId: initId });
@@ -500,6 +508,21 @@ export class Editor {
 
       return createString("waiting for key");
     });
+
+    // Register keymap-ops API functions (US-0.4.1)
+    const keymapOps = createKeymapOps(this.interpreter, this.keymapSync);
+    for (const [name, fn] of keymapOps) {
+      // Wrap the Either-returning function to convert to the expected TLispFunctionImpl format
+      const wrappedFn = (args: TLispValue[]) => {
+        const result = fn(args);
+        if (Either.isLeft(result)) {
+          throw new Error(`keymap-ops Error: ${result.left}`);
+        }
+        return result.right;
+      };
+
+      this.interpreter.defineBuiltin(name, wrappedFn);
+    }
 
     // Add describe-function function (US-1.11.2)
     this.interpreter.defineBuiltin("describe-function", (args) => {
@@ -1498,16 +1521,52 @@ export class Editor {
   }
 
   /**
-   * Load initialization file
+   * Load initialization file (.tmaxrc)
+   *
+   * Loads and executes the user's .tmaxrc configuration file.
+   * This file can contain:
+   * - Custom keymap definitions using defkeymap
+   * - Keymap registrations using keymap-set
+   * - Any other T-Lisp initialization code
+   *
+   * The file is loaded from ~/.tmaxrc (user's home directory)
    */
   private async loadInitFile(): Promise<void> {
+    const initLog = log.module('editor').fn('loadInitFile');
+
+    // Expand ~ to home directory
+    const homeDir = process.env.HOME || process.env.USERPROFILE || '.';
+    const configPath = `${homeDir}/.tmaxrc`;
+
     try {
-      const initContent = await this.filesystem.readFile("~/.tmaxrc");
+      initLog.debug(`Loading init file: ${configPath}`);
+
+      const initContent = await this.filesystem.readFile(configPath);
       this.interpreter.execute(initContent);
-      console.log("Loaded custom ~/.tmaxrc bindings");
+
+      initLog.info('Loaded custom ~/.tmaxrc configuration', {
+        data: { path: configPath }
+      });
+
+      // Log any keymaps that were registered
+      const registeredKeymaps = ["normal", "insert", "visual", "command", "mx"].filter(mode =>
+        this.keymapSync.hasKeymap(mode)
+      );
+
+      if (registeredKeymaps.length > 0) {
+        initLog.info('Registered T-Lisp keymaps from .tmaxrc', {
+          data: { modes: registeredKeymaps }
+        });
+      }
     } catch (error) {
       // Init file not found or error - use defaults (silent)
       // This is expected if the user hasn't created a ~/.tmaxrc file yet
+      initLog.debug('No .tmaxrc file found or error loading it', {
+        data: {
+          path: configPath,
+          error: error instanceof Error ? error.message : String(error)
+        }
+      });
     }
   }
 

@@ -339,6 +339,39 @@ export function registerStdlibFunctions(interpreter: TLispInterpreter): void {
     return command === undefined ? createNil() : command;
   });
 
+  /**
+   * Set a variable in the current environment
+   * Usage: (setq variable-name value)
+   * Sets the variable to the given value and returns the value
+   * The variable name can be a string or a symbol
+   */
+  interpreter.defineBuiltin("setq", (args: TLispValue[]): TLispValue => {
+    if (args.length !== 2) {
+      throw new Error("setq requires exactly 2 arguments: variable name and value");
+    }
+
+    const [nameArg, valueArg] = args;
+
+    if (!nameArg) {
+      throw new Error("setq first argument cannot be null");
+    }
+
+    let variableName: string;
+
+    if (nameArg.type === "string") {
+      variableName = nameArg.value as string;
+    } else if (nameArg.type === "symbol") {
+      variableName = nameArg.value as string;
+    } else {
+      throw new Error("setq first argument must be a string or symbol (variable name)");
+    }
+
+    // Define the variable in the global environment
+    interpreter.globalEnv.define(variableName, valueArg);
+
+    return valueArg;
+  });
+
   // Testing framework variables
   const testRegistry: Map<string, { body: TLispValue[], name: string }> = new Map();
   let currentTestResults: { testName: string, passed: boolean, error?: string }[] = [];
