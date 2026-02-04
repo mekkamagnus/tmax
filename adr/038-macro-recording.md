@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted
+**proposed**
 
 ## Context
 
@@ -132,4 +132,3 @@ Created `test/unit/editor.test.ts`:
 - `3@a` replays 3 times
 - `@@` replays last macro
 - Macros execute commands correctly
-- Recording state tracked correctly

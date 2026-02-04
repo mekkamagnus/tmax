@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted
+**proposed**
 
 ## Context
 
@@ -136,4 +136,3 @@ Created `test/unit/test-tlisp-testing-framework.test.ts`:
 - Suites can include other suites
 - Running suite executes all tests
 - Suite results aggregate correctly
-- Nested suites work as expected

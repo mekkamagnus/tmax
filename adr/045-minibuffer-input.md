@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted
+**proposed**
 
 ## Context
 
@@ -160,4 +160,3 @@ Created `test/unit/editor.test.ts`:
 - Cursor navigation works
 - History navigation works
 - Submit executes command
-- Cancel closes minibuffer

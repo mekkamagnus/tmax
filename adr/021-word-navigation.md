@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted
+**proposed**
 
 ## Context
 
@@ -102,4 +102,3 @@ Created `test/unit/editor.test.ts`:
 - `W`/`E`/`B` handle WORD movements
 - Count prefix repeats movement correctly
 - Works at buffer boundaries
-- Handles empty buffers

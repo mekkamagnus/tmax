@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted
+**proposed**
 
 ## Context
 
@@ -138,4 +138,3 @@ Created `test/unit/editor.test.ts`:
 - Wrap-around works
 - Highlights show matches
 - Case sensitivity toggle works
-- Empty pattern uses last search

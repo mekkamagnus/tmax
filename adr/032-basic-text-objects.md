@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted
+**proposed**
 
 ## Context
 
@@ -150,4 +150,3 @@ Created `test/unit/editor.test.ts`:
 - `a(` selects a parentheses
 - Operators work with text objects
 - Cursor positioning correct
-- Works with nested structures

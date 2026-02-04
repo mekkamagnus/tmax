@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted
+**proposed**
 
 ## Context
 
@@ -162,4 +162,3 @@ Created `test/unit/editor.test.ts`:
 - `Ctrl-y` cycles through kill ring
 - Kill ring limited to max size
 - Duplicates not pushed
-- Cursor positioning correct after paste

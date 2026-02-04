@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted
+**proposed**
 
 ## Context
 
@@ -120,4 +120,3 @@ Created `test/unit/editor.test.ts`:
 - Examples are clear
 - Related commands listed
 - RET executes command
-- ESC cancels

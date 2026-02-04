@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted
+**proposed**
 
 ## Context
 
@@ -120,4 +120,3 @@ Created `test/unit/editor.test.ts`:
 - Mode changes to insert after change
 - Cursor position correct after change
 - Count prefix works (3cw changes 3 words)
-- Works in visual mode

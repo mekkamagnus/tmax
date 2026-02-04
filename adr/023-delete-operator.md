@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted
+**proposed**
 
 ## Context
 
@@ -126,4 +126,3 @@ Created `test/unit/editor.test.ts`:
 - Deleted text in kill ring
 - Cursor position correct after delete
 - Works with all motions
-- Count prefix works (3dw deletes 3 words)

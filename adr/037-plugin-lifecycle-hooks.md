@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted
+**proposed**
 
 ## Context
 
@@ -128,4 +128,3 @@ Created `test/unit/plugin.test.ts`:
 - Hooks execute in order
 - Hook removal works
 - Errors in hooks don't crash editor
-- Multiple hooks per event work

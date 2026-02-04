@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted
+**proposed**
 
 ## Context
 
@@ -80,4 +80,3 @@ Created `test/unit/keymap-data-structures.test.ts`:
 - Verify `keymap-get` returns correct alist
 - Verify `keymap-set` modifies global keymap
 - Verify `keymap-keys` returns list of bound keys
-- Test alist ↔ Map conversion accuracy

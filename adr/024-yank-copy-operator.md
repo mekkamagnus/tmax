@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted
+**proposed**
 
 ## Context
 
@@ -130,4 +130,3 @@ Created `test/unit/editor.test.ts`:
 - Yanked text in kill ring
 - Buffer unchanged after yank
 - Cursor position unchanged
-- Count prefix works (3yw yanks 3 words)

@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted
+**proposed**
 
 ## Context
 
@@ -80,4 +80,3 @@ Manual testing confirmed:
 - All default bindings load correctly from T-Lisp files
 - Missing binding files fall back to TypeScript defaults
 - Syntax errors in binding files show clear error messages
-- Key bindings work in all modes (normal, insert, visual, command, M-x)

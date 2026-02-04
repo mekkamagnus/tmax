@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted
+**proposed**
 
 ## Context
 
@@ -110,4 +110,3 @@ Created `test/unit/editor.test.ts`:
 - Display renders correctly
 - Timeout works
 - Key selection executes command
-- ESC cancels which-key

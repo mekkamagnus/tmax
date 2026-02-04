@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted
+**proposed**
 
 ## Context
 
@@ -142,4 +142,3 @@ Created `test/unit/server-daemon.test.ts`:
 - Stop command terminates agent
 - Progress broadcasts to clients
 - Multiple clients can monitor agent
-- Agent cleanup on completion

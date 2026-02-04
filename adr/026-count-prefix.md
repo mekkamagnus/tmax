@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted
+**proposed**
 
 ## Context
 
@@ -116,4 +116,3 @@ Created `test/unit/editor.test.ts`:
 - Large counts work (100j)
 - Count 0 is treated as 1
 - Count applies to motions correctly
-- Count applies to operators correctly

@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted
+**proposed**
 
 ## Context
 
@@ -108,4 +108,3 @@ Created `test/unit/plugin.test.ts`:
 - Package creation correct
 - Upload succeeds
 - Validation catches errors
-- Test execution works

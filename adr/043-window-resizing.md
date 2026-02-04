@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted
+**proposed**
 
 ## Context
 
@@ -138,4 +138,3 @@ Created `test/unit/editor.test.ts`:
 - `Ctrl-w =` equalizes windows
 - Count prefix works
 - Size constraints enforced
-- Minimum sizes respected

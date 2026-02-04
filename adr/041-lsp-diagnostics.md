@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted
+**proposed**
 
 ## Context
 
@@ -102,4 +102,3 @@ Created `test/unit/editor.test.ts`:
 - Navigation works
 - Quick fixes apply correctly
 - Severity levels render correctly
-- Multiple diagnostics handled

@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted
+**proposed**
 
 ## Context
 
@@ -138,4 +138,3 @@ Created `test/unit/test-tlisp-testing-framework.test.ts`:
 - Timeout prevents infinite hangs
 - Async assertions work
 - Error handling in async tests
-- Multiple async operations in sequence

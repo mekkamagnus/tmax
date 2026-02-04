@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted
+**proposed**
 
 ## Context
 
@@ -114,4 +114,3 @@ Created `test/unit/editor.test.ts`:
 - Load non-existent macro returns empty
 - File format is valid T-Lisp
 - Auto-save on record stop
-- Auto-load on editor start

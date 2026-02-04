@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted
+**proposed**
 
 ## Context
 
@@ -140,4 +140,3 @@ Created `test/unit/server-client.test.ts`:
 - Cursor commands update position
 - Mode switches work remotely
 - Search operations find matches
-- Undo/redo works across client connection

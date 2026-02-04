@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted
+**proposed**
 
 ## Context
 
@@ -106,4 +106,3 @@ Created `test/unit/editor.test.ts`:
 - Unbound keys show message
 - Display shows command and description
 - Location shown
-- ESC cancels

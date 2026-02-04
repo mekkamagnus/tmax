@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted
+**proposed**
 
 ## Context
 
@@ -124,4 +124,3 @@ Created `test/unit/editor.test.ts`:
 - State transitions work
 - Emacs key bindings work
 - Hybrid workflows work
-- No conflicts between systems

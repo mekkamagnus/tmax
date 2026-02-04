@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted
+**proposed**
 
 ## Context
 
@@ -110,4 +110,3 @@ Created `test/unit/test-tlisp-testing-framework.test.ts`:
 - `assert-equal` compares values correctly
 - `assert-not-equal` detects inequality
 - `assert-error` catches errors
-- All assertions throw `AssertionError` on failure

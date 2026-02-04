@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted
+**proposed**
 
 ## Context
 
@@ -142,4 +142,3 @@ Manual testing confirmed:
 - Report renders correctly
 - HTML report generates
 - Thresholds enforced
-- Uncovered files identified

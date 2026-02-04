@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted
+**proposed**
 
 ## Context
 
@@ -110,4 +110,3 @@ Created `test/unit/editor.test.ts`:
 - Examples shown
 - Related functions listed
 - Completion works
-- Unbound functions show error

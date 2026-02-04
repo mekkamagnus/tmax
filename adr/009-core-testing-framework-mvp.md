@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted
+**proposed**
 
 ## Context
 
@@ -100,4 +100,3 @@ Created `test/unit/test-tlisp-testing-framework.test.ts`:
 - Verify `test-run` executes tests and returns results
 - Verify `test-run-all` runs all tests and reports statistics
 - Verify test failures don't crash the framework
-- Verify assertion failures are reported correctly

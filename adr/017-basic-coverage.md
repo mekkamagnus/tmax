@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted
+**proposed**
 
 ## Context
 
@@ -150,4 +150,3 @@ Created `test/unit/test-tlisp-testing-framework.test.ts`:
 - Line coverage percentages accurate
 - Function coverage counts correct
 - Coverage reports render correctly
-- Coverage thresholds enforce minimums

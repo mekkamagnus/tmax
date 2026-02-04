@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted
+**proposed**
 
 ## Context
 
@@ -108,4 +108,3 @@ Created `test/unit/editor.test.ts`:
 - Works only after paste
 - Cycles backwards correctly
 - Multiple `M-y` cycles continue
-- Undo works after yank pop

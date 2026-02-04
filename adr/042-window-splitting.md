@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted
+**proposed**
 
 ## Context
 
@@ -138,4 +138,3 @@ Created `test/unit/editor.test.ts`:
 - Windows resize correctly
 - Buffers shared across windows
 - `Ctrl-w q` closes window
-- `Ctrl-w o` closes other windows

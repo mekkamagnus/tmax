@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted
+**proposed**
 
 ## Context
 
@@ -154,4 +154,3 @@ Created `test/unit/editor.test.ts`:
 - Undo after new change clears redo
 - Cursor position restored
 - Works across all edit types
-- History size limited

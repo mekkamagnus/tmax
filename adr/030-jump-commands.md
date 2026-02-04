@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted
+**proposed**
 
 ## Context
 
@@ -144,4 +144,3 @@ Created `test/unit/editor.test.ts`:
 - `Ctrl-o` goes to older jump
 - `Ctrl-i` goes to newer jump
 - Jump list tracks movements
-- Jump list limited in size

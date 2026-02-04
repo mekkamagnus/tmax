@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted
+**proposed**
 
 ## Context
 
@@ -138,4 +138,3 @@ Created `test/unit/editor.test.ts`:
 - Display renders correctly
 - Filtering works
 - RET shows details
-- ESC cancels

@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted
+**proposed**
 
 ## Context
 
@@ -106,4 +106,3 @@ Created `test/unit/editor.test.ts`:
 - Word boundaries detected correctly
 - Non-word characters handled
 - Empty word case handled
-- Case sensitivity works
