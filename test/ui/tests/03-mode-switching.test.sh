@@ -2,17 +2,13 @@
 # Test: Mode Switching
 # Verify all editor modes work correctly
 
-# Source API from test/ui root directory
+# Source test framework from test/ui root directory
 TEST_UI_DIR="$(dirname "${BASH_SOURCE[0]}")"
-source "$TEST_UI_DIR/../lib/api.sh"
+source "$TEST_UI_DIR/../lib/test-framework.sh"
 
-test_mode_switching() {
-  echo "=== Test: Mode Switching ==="
-
-  tmax_init
-
+test_mode_switching_logic() {
   # Create a test file in project root
-  echo "" > /home/mekael/Documents/tmax/mode-test.txt
+  setup_test_file "mode-test.txt" ""
 
   tmax_start "mode-test.txt"
   tmax_wait_for_ready 10
@@ -47,13 +43,10 @@ test_mode_switching() {
   tmax_normal
   assert_mode "NORMAL" "Should return to NORMAL mode"
 
-  tmax_summary
-
   # Cleanup
   tmax_quit
-  rm -f /home/mekael/Documents/tmax/mode-test.txt
-  tmax_cleanup
+  cleanup_test_file "mode-test.txt"
 }
 
 # Run test
-test_mode_switching
+run_test "Mode Switching" test_mode_switching_logic

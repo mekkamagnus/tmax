@@ -2,19 +2,16 @@
 # Test: Application Startup
 # Verify that the editor starts correctly and shows welcome message
 
-# Source API from test/ui root directory
+# Source test framework from test/ui root directory
 TEST_UI_DIR="$(dirname "${BASH_SOURCE[0]}")"
-source "$TEST_UI_DIR/../lib/api.sh"
+source "$TEST_UI_DIR/../lib/test-framework.sh"
 
-test_startup() {
-  echo "=== Test: Application Startup ==="
+test_startup_logic() {
   echo "Running in visible window: $TMAX_SESSION:$TMAX_TEST_WINDOW"
   echo ""
 
-  tmax_init
-
   # Create a test file in project root
-  echo "" > /home/mekael/Documents/tmax/startup-test.txt
+  setup_test_file "startup-test.txt" ""
 
   tmax_start "startup-test.txt"
 
@@ -22,19 +19,13 @@ test_startup() {
   tmax_wait_for_ready 10
 
   # Assertions
-  assert_running "Editor should be running"
-  assert_mode "NORMAL" "Should start in NORMAL mode"
-  assert_no_errors "No errors should be present"
-  assert_screen_fill "UI should fill entire terminal height"
-
-  tmax_summary
+  assert_common_startup
 
   # Cleanup
   tmax_quit
   sleep 1
-  rm -f /home/mekael/Documents/tmax/startup-test.txt
-  tmax_cleanup
+  cleanup_test_file "startup-test.txt"
 }
 
 # Run test
-test_startup
+run_test "Application Startup" test_startup_logic

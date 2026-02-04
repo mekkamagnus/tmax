@@ -5,6 +5,7 @@
 CORE_DIR="$(dirname "${BASH_SOURCE[0]}")"
 source "$CORE_DIR/../lib/config.sh"
 source "$CORE_DIR/../lib/debug.sh"
+source "$CORE_DIR/../lib/common.sh"
 
 # Capture window output
 query_capture_output() {

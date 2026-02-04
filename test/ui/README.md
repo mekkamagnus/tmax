@@ -50,6 +50,83 @@ Public interface for AI assistants
 - `api.sh` - Main entry point with `tmax_*` functions
 - `config.sh` - Configuration
 - `debug.sh` - Debug utilities
+- `common.sh` - Common utility functions (window targets, mode verification, session validation)
+- `test-framework.sh` - Test framework utilities (standardized test execution, file utilities)
+
+## Test Framework
+
+The test framework (`test-framework.sh`) provides standardized test execution with automatic setup/teardown and common assertion patterns.
+
+### Using the Test Framework
+
+```bash
+#!/bin/bash
+# test/ui/tests/my-feature.test.sh
+
+# Source test framework
+source ../lib/test-framework.sh
+
+test_my_feature_logic() {
+  # Create test file
+  setup_test_file "test.txt" "Initial content"
+
+  # Start editor
+  tmax_start "test.txt"
+  tmax_wait_for_ready 10
+
+  # Use common assertions
+  assert_common_startup  # Running, NORMAL mode, no errors, screen fill
+  assert_text_visible "Initial content"
+
+  # Test the feature
+  tmax_insert
+  tmax_type "Appended text"
+  tmax_normal
+
+  # Cleanup
+  tmax_quit
+  cleanup_test_file "test.txt"
+}
+
+# Run test with automatic setup/teardown
+run_test "My Feature" test_my_feature_logic
+```
+
+### Test Framework Functions
+
+#### Test Execution
+- `run_test <name> <function>` - Run test with automatic init/cleanup/summary
+- `assert_common_startup` - Run common startup assertions (running, mode, errors, screen fill)
+
+#### Test File Utilities
+- `setup_test_file <filename> [content] [location]` - Create test file
+- `cleanup_test_file <filename> [location]` - Remove test file
+
+### Migration from Old Pattern
+
+**Before:**
+```bash
+test_my_feature() {
+  echo "=== Test: My Feature ==="
+  tmax_init
+  echo "content" > "$TMAX_PROJECT_ROOT/test.txt"
+  tmax_start "test.txt"
+  # ... test logic ...
+  tmax_summary
+  tmax_cleanup
+}
+test_my_feature
+```
+
+**After (with framework):**
+```bash
+test_my_feature_logic() {
+  setup_test_file "test.txt" "content"
+  tmax_start "test.txt"
+  # ... test logic ...
+}
+run_test "My Feature" test_my_feature_logic
+```
 
 ## Configuration
 
@@ -252,30 +329,37 @@ session_kill
 
 ## Writing Test Scripts
 
-Organize tests as executable scripts:
+Organize tests as executable scripts using the test framework:
 
 ```bash
 #!/bin/bash
 # test/ui/tests/my-test.test.sh
 
-source ../lib/api.sh
+# Source test framework
+source ../lib/test-framework.sh
 
-test_my_feature() {
-  tmax_init
-  tmax_start
+test_my_feature_logic() {
+  # Setup
+  setup_test_file "test.txt" "content"
 
-  # Test logic here
+  # Test logic
+  tmax_start "test.txt"
   tmax_type "test"
   tmax_assert_text "test"
 
-  tmax_summary
-
-  tmax_cleanup
+  # Cleanup
+  tmax_quit
+  cleanup_test_file "test.txt"
 }
 
-# Run test
-test_my_feature
+# Run test with automatic setup/teardown
+run_test "My Feature" test_my_feature_logic
 ```
+
+**Key benefits:**
+- `run_test` handles `tmax_init`, `tmax_summary`, and `tmax_cleanup` automatically
+- `setup_test_file` and `cleanup_test_file` manage test files consistently
+- `assert_common_startup` provides standard startup validation
 
 ## Debugging Failed Tests
 
@@ -406,7 +490,9 @@ test/ui/
 ├── lib/
 │   ├── api.sh            # Main API (tmax_* functions)
 │   ├── config.sh         # Configuration
-│   └── debug.sh          # Debug utilities
+│   ├── debug.sh          # Debug utilities
+│   ├── common.sh         # Common utility functions
+│   └── test-framework.sh # Test framework utilities
 ├── core/
 │   ├── session.sh        # Tmux session management
 │   ├── input.sh          # Sending keys/commands
@@ -420,7 +506,10 @@ test/ui/
 │   └── assertions.sh     # Test assertions
 └── tests/
     ├── 01-startup.test.sh
-    ├── 02-editing.test.sh
+    ├── 02-basic-editing.test.sh
+    ├── 03-mode-switching.test.sh
+    ├── 04-full-height-layout.test.sh
+    ├── 05-command-mode-cursor-focus.test.sh
     └── ...
 ```
 

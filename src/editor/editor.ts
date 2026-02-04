@@ -22,6 +22,7 @@ import * as macroRecording from "./api/macro-recording.ts";
 import { loadMacrosFromFile, saveMacrosToFile } from "./api/macro-persistence.ts";
 import { LSPClient } from "../lsp/client.ts";
 import { createWindowOps } from "./api/window-ops.ts";
+import { log } from "../utils/logger.ts";
 
 /**
  * Key mapping for editor commands
@@ -56,6 +57,11 @@ export class Editor {
    * @param filesystem - File system interface
    */
   constructor(terminal: TerminalIO, filesystem: FileSystem) {
+    const editorLog = log.module('editor').fn('constructor');
+    const initId = editorLog.startOperation('editor-construction');
+
+    editorLog.info('Initializing editor instance', { correlationId: initId });
+
     this.terminal = terminal;
     this.filesystem = filesystem;
     this.state = {
@@ -89,11 +95,38 @@ export class Editor {
       currentWindowIndex: 0,
     };
 
+    editorLog.debug('Editor state initialized', {
+      correlationId: initId,
+      data: {
+        mode: this.state.mode,
+        theme: this.state.config.theme,
+        tabSize: this.state.config.tabSize
+      }
+    });
+
+    // Create interpreter
+    editorLog.info('Creating T-Lisp interpreter', { correlationId: initId });
     this.interpreter = new TLispInterpreterImpl();
+    editorLog.debug('T-Lisp interpreter created', { correlationId: initId });
+
     this.keyMappings = new Map();
     this.lspClient = new LSPClient(this.terminal, this.filesystem);
 
+    // Initialize API
+    editorLog.info('Initializing T-Lisp API', { correlationId: initId });
     this.initializeAPI();
+
+    // Note: Key bindings are loaded lazily on first key press via ensureCoreBindingsLoaded()
+    editorLog.debug('Key bindings will be loaded on first key press', {
+      correlationId: initId
+    });
+
+    editorLog.completeOperation('editor-construction', initId, {
+      data: {
+        mode: this.state.mode,
+        apiInitialized: true
+      }
+    });
   }
 
   /**
@@ -1560,6 +1593,19 @@ export class Editor {
    * @param key - Key pressed
    */
   async handleKey(key: string): Promise<void> {
+    const keyLog = log.module('editor').fn('handleKey');
+
+    // Log key press in DEBUG mode (can be very verbose)
+    const previousMode = this.state.mode;
+    keyLog.debug(`Key pressed: ${key}`, {
+      data: {
+        key,
+        normalizedKey: this.normalizeKey(key),
+        currentMode: previousMode,
+        cursorPosition: this.state.cursorPosition
+      }
+    });
+
     // Ensure core bindings are loaded before processing keys
     await this.ensureCoreBindingsLoaded();
 
@@ -1586,6 +1632,25 @@ export class Editor {
         // Handle unknown mode as normal mode
         await handleNormalMode(this, key, normalizedKey);
         break;
+    }
+
+    // Log mode changes (INFO level)
+    if (previousMode !== this.state.mode) {
+      keyLog.info(`Mode changed: ${previousMode} → ${this.state.mode}`, {
+        data: {
+          previousMode,
+          newMode: this.state.mode,
+          triggerKey: key
+        }
+      });
+    }
+
+    // Log errors
+    if (this.state.statusMessage?.includes('Error')) {
+      keyLog.error('Editor error occurred', undefined, {
+        operation: 'handleKeyPress',
+        data: { statusMessage: this.state.statusMessage, key }
+      });
     }
   }
 

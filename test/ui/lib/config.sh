@@ -38,7 +38,18 @@ export TMAX_DEBUG="${TMAX_DEBUG:-false}"
 export TMAX_VERBOSE="${TMAX_VERBOSE:-false}"
 
 # Paths
-export TMAX_PROJECT_ROOT="${TMAX_PROJECT_ROOT:-/home/mekael/Documents/tmax}"
+# Use git to find project root, fallback to relative path
+_detect_project_root() {
+  if git rev-parse --show-toplevel >/dev/null 2>&1; then
+    git rev-parse --show-toplevel
+  else
+    # Fallback: go up 4 levels from lib directory (lib -> ui -> test -> project)
+    local script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+    dirname "$(dirname "$(dirname "$(dirname "$script_dir")")")"
+  fi
+}
+
+export TMAX_PROJECT_ROOT="${TMAX_PROJECT_ROOT:-$(_detect_project_root)}"
 export TMAX_TEST_DIR="${TMAX_TEST_DIR:-/tmp/tmax-ui-tests}"
 
 # Editor Commands

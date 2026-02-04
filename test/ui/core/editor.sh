@@ -5,6 +5,7 @@
 CORE_DIR="$(dirname "${BASH_SOURCE[0]}")"
 source "$CORE_DIR/../lib/config.sh"
 source "$CORE_DIR/../lib/debug.sh"
+source "$CORE_DIR/../lib/common.sh"
 
 # Source other core modules (relative to this file)
 source "$CORE_DIR/session.sh"
@@ -22,12 +23,12 @@ editor_start() {
   session_set_active_window "$TMAX_TEST_WINDOW"
 
   # Change to project directory
-  input_send_command "cd $TMAX_PROJECT_ROOT"
+  input_send_command "cd \"$TMAX_PROJECT_ROOT\""
 
   # Build start command
   local start_cmd="$TMAX_START_CMD"
   if [[ -n "$file" ]]; then
-    start_cmd="$start_cmd $file"
+    start_cmd="$start_cmd \"$file\""
   fi
 
   # Start the editor

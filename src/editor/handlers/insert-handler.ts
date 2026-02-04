@@ -4,6 +4,7 @@
  */
 
 import type { Editor } from "../editor.ts";
+import { log } from "../../utils/logger.ts";
 
 /**
  * Handle key input in insert mode
@@ -13,6 +14,15 @@ import type { Editor } from "../editor.ts";
  * @returns Promise that resolves when key handling is complete
  */
 export async function handleInsertMode(editor: Editor, key: string, normalizedKey: string): Promise<void> {
+  const handlerLog = log.module('handlers').fn('handleInsertMode');
+
+  // Log Escape key to return to normal mode
+  if (normalizedKey === "Escape") {
+    handlerLog.info('Returning to normal mode from insert mode', {
+      data: { triggerKey: 'Escape', fromMode: 'insert' }
+    });
+  }
+
   // Handle printable characters in insert mode
   if (key.length === 1 && key >= " " && key <= "~") {
     const escapedKey = (editor as any).escapeKeyForTLisp(key);
@@ -25,6 +35,9 @@ export async function handleInsertMode(editor: Editor, key: string, normalizedKe
   }
   // Handle Backspace key in insert mode
   else if (normalizedKey === "Backspace") {
+    handlerLog.debug('Deleting character in insert mode', {
+      data: { key: 'Backspace' }
+    });
     (editor as any).executeCommand("(buffer-delete 1)");
   }
   // Handle Escape key to return to normal mode

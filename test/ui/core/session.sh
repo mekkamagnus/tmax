@@ -5,18 +5,12 @@
 CORE_DIR="$(dirname "${BASH_SOURCE[0]}")"
 source "$CORE_DIR/../lib/config.sh"
 source "$CORE_DIR/../lib/debug.sh"
+source "$CORE_DIR/../lib/common.sh"
 
 # Get the active tmux session (the one running this script)
 session_get_active() {
-  if ! command -v tmux &> /dev/null; then
-    log_error "tmux is not installed"
-    return 1
-  fi
-
-  if [[ -z "$TMUX" ]]; then
-    log_error "Not in a tmux session"
-    return 1
-  fi
+  validate_tmux_installation || return 1
+  validate_tmux_session || return 1
 
   local session
   session=$(tmux display-message -p '#S' 2>/dev/null)
@@ -34,18 +28,8 @@ session_get_active() {
 session_validate() {
   log_debug "Validating tmux environment..."
 
-  # Check if tmux is installed
-  if ! command -v tmux &> /dev/null; then
-    log_error "tmux is not installed. Please install tmux first."
-    return 1
-  fi
-
-  # Check if in tmux session
-  if [[ -z "$TMUX" ]]; then
-    log_error "Not in a tmux session. UI tests must be run from within tmux."
-    log_error "Start tmux with: tmux new -s my-session"
-    return 1
-  fi
+  validate_tmux_installation || return 1
+  validate_tmux_session || return 1
 
   # Detect and use the active session
   local active_session
@@ -134,20 +118,40 @@ session_create_test_window() {
   log_debug "Creating test window in session: $TMAX_SESSION"
 
   # Kill ALL windows with test-editor name to prevent duplicates
-  local window_ids=$(tmux list-windows -t "$TMAX_SESSION" -F "#{window_name} #{window_id}" 2>/dev/null | grep "^$TMAX_TEST_WINDOW " | awk '{print $2}')
-  if [[ -n "$window_ids" ]]; then
-    log_info "Killing existing test-editor windows: $window_ids"
-    for wid in $window_ids; do
-      tmux kill-window -t "$TMAX_SESSION:$wid" 2>/dev/null
-    done
-    sleep "$TMAX_OPERATION_DELAY"
-  fi
+  kill_matching_windows "$TMAX_TEST_WINDOW"
 
   # Create new test window
   tmux new-window -t "$TMAX_SESSION" -n "$TMAX_TEST_WINDOW"
 
   # Wait for window to be ready
   sleep "$TMAX_OPERATION_DELAY"
+
+  # Select the window so it's visible
+  session_select_test_window
+
+  log_info "Test window created and selected: $TMAX_SESSION:$TMAX_TEST_WINDOW"
+  echo "$TMAX_TEST_WINDOW"
+}
+
+# Create test window with initial command
+session_create_test_window_with_cmd() {
+  local cmd="$1"
+
+  if ! session_exists; then
+    log_error "Session does not exist: $TMAX_SESSION"
+    return 1
+  fi
+
+  log_debug "Creating test window in session: $TMAX_SESSION with command"
+
+  # Kill ALL windows with test-editor name to prevent duplicates
+  kill_matching_windows "$TMAX_TEST_WINDOW"
+
+  # Create new test window with the specified command
+  tmux new-window -t "$TMAX_SESSION" -n "$TMAX_TEST_WINDOW" "$cmd"
+
+  # Wait for window to be ready
+  sleep "$TMAX_STARTUP_WAIT"
 
   # Select the window so it's visible
   session_select_test_window
@@ -172,16 +176,8 @@ session_cleanup() {
   log_debug "Cleaning up test window: $TMAX_TEST_WINDOW"
 
   # Kill ALL windows with test-editor name
-  local window_ids=$(tmux list-windows -t "$TMAX_SESSION" -F "#{window_name} #{window_id}" 2>/dev/null | grep "^$TMAX_TEST_WINDOW " | awk '{print $2}')
-  if [[ -n "$window_ids" ]]; then
-    log_info "Cleaning up test-editor windows: $window_ids"
-    for wid in $window_ids; do
-      tmux kill-window -t "$TMAX_SESSION:$wid" 2>/dev/null
-    done
-    log_info "Test window(s) cleaned up"
-  else
-    log_debug "Test window not found: $TMAX_TEST_WINDOW"
-  fi
+  kill_matching_windows "$TMAX_TEST_WINDOW"
+  log_info "Test window(s) cleaned up"
 
   export TMAX_ACTIVE_WINDOW=""
   return 0

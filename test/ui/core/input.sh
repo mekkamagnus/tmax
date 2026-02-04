@@ -5,18 +5,7 @@
 CORE_DIR="$(dirname "${BASH_SOURCE[0]}")"
 source "$CORE_DIR/../lib/config.sh"
 source "$CORE_DIR/../lib/debug.sh"
-
-# Helper: Get the full window target (session:window)
-_get_window_target() {
-  local window="${1:-$TMAX_ACTIVE_WINDOW}"
-
-  if [[ -z "$window" ]]; then
-    log_error "No active window set. Use session_set_active_window() first."
-    return 1
-  fi
-
-  echo "${TMAX_SESSION}:${window}"
-}
+source "$CORE_DIR/../lib/common.sh"
 
 # Send a single key to the active window
 input_send_key() {
@@ -24,7 +13,7 @@ input_send_key() {
   local window="${2:-$TMAX_ACTIVE_WINDOW}"
 
   local target
-  target=$(_get_window_target "$window") || return 1
+  target=$(get_window_target "$window") || return 1
 
   log_action "Send key: $key"
 
@@ -40,7 +29,7 @@ input_send_keys() {
   shift
 
   local target
-  target=$(_get_window_target "$window") || return 1
+  target=$(get_window_target "$window") || return 1
 
   log_action "Send keys: $*"
 
@@ -56,11 +45,11 @@ input_send_command() {
   local window="${2:-$TMAX_ACTIVE_WINDOW}"
 
   local target
-  target=$(_get_window_target "$window") || return 1
+  target=$(get_window_target "$window") || return 1
 
   log_action "Send command: $command"
 
-  tmux send-keys -t "$target" "$command" Enter
+  tmux send-keys -t "$target" "$command" C-m
   sleep "$TMAX_OPERATION_DELAY"
 }
 
@@ -70,7 +59,7 @@ input_send_text() {
   local window="${2:-$TMAX_ACTIVE_WINDOW}"
 
   local target
-  target=$(_get_window_target "$window") || return 1
+  target=$(get_window_target "$window") || return 1
 
   log_action "Send text: $text"
 

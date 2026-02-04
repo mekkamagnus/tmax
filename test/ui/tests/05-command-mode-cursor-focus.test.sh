@@ -2,17 +2,13 @@
 # Test: Command Mode Cursor Focus
 # Verify cursor returns to buffer after command mode execution
 
-# Source API from test/ui root directory
+# Source test framework from test/ui root directory
 TEST_UI_DIR="$(dirname "${BASH_SOURCE[0]}")"
-source "$TEST_UI_DIR/../lib/api.sh"
+source "$TEST_UI_DIR/../lib/test-framework.sh"
 
-test_command_mode_cursor_focus() {
-  echo "=== Test: Command Mode Cursor Focus ==="
-
-  tmax_init
-
+test_command_mode_cursor_focus_logic() {
   # Create a test file in project root
-  echo "Initial content" > /home/mekael/Documents/tmax/test-cursor-focus.txt
+  setup_test_file "test-cursor-focus.txt" "Initial content"
 
   # Start editor with file (relative to project root)
   tmax_start "test-cursor-focus.txt"
@@ -87,13 +83,13 @@ test_command_mode_cursor_focus() {
   tmax_quit
 
   # Check file was saved with all our edits
-  tmax_check_file "/home/mekael/Documents/tmax/test-cursor-focus.txt" "more content"
-  tmax_check_file "/home/mekael/Documents/tmax/test-cursor-focus.txt" "even more"
-  tmax_check_file "/home/mekael/Documents/tmax/test-cursor-focus.txt" "after error"
+  tmax_check_file "$TMAX_PROJECT_ROOT/test-cursor-focus.txt" "more content"
+  tmax_check_file "$TMAX_PROJECT_ROOT/test-cursor-focus.txt" "even more"
+  tmax_check_file "$TMAX_PROJECT_ROOT/test-cursor-focus.txt" "after error"
 
-  tmax_summary
-  tmax_cleanup
+  # Cleanup
+  cleanup_test_file "test-cursor-focus.txt"
 }
 
 # Run test
-test_command_mode_cursor_focus
+run_test "Command Mode Cursor Focus" test_command_mode_cursor_focus_logic
