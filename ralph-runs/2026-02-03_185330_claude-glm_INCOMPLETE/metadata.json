@@ -1,0 +1,31 @@
+{
+  "run_id": "2026-02-03_185330_claude-glm_INCOMPLETE",
+  "start_time": "2026-02-03T18:53:30Z",
+  "end_time": "2026-02-04T00:01:00Z",
+  "duration_seconds": 18450,
+  "agent": "claude-glm",
+  "iterations_completed": 30,
+  "iterations_target": 30,
+  "stories_started": 30,
+  "stories_completed": 8,
+  "git_commit_sha": "f601f83",
+  "test_results": {
+    "passing": 650,
+    "failing": 0
+  },
+  "performance_metrics": {
+    "avg_iteration_duration_seconds": 615,
+    "avg_stories_per_iteration": 0.27,
+    "min_per_story": 38.48
+  },
+  "issues": [
+    {
+      "type": "api_connection_error",
+      "count": 3,
+      "description": "API connection errors in final iterations impacted completion rate"
+    }
+  ],
+  "status": "INCOMPLETE",
+  "api_endpoint": "https://api.z.ai/api/anthropic",
+  "notes": "First claude-glm run - API stability issues in final iterations, 8 stories completed"
+}

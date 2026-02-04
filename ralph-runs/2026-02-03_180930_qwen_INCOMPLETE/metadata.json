@@ -1,0 +1,31 @@
+{
+  "run_id": "2026-02-03_180930_qwen_INCOMPLETE",
+  "start_time": "2026-02-03T18:09:30Z",
+  "end_time": "2026-02-03T22:48:00Z",
+  "duration_seconds": 16710,
+  "agent": "qwen",
+  "iterations_completed": 21,
+  "iterations_target": 20,
+  "stories_started": 9,
+  "stories_completed": 21,
+  "git_commit_sha": "5c65828",
+  "test_results": {
+    "passing": 500,
+    "failing": 0
+  },
+  "performance_metrics": {
+    "avg_iteration_duration_seconds": 796,
+    "avg_stories_per_iteration": 1.0,
+    "min_per_story": 7.97
+  },
+  "issues": [
+    {
+      "type": "none",
+      "count": 0,
+      "description": "Initial run - completed 21 stories from ~9 starting point"
+    }
+  ],
+  "status": "INCOMPLETE",
+  "api_endpoint": "default",
+  "notes": "First Ralph run - established baseline with qwen agent, 21 stories completed"
+}
