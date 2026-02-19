@@ -4,6 +4,7 @@
  */
 
 import { describe, test, expect } from "bun:test";
+import { strict as assert } from "node:assert";
 import { InkTerminalIO } from "../../src/frontend/ink-adapter.ts";
 import { Either } from "../../src/utils/task-either.ts";
 import { ErrorFactory, TmaxError } from "../../src/utils/error-manager.ts";

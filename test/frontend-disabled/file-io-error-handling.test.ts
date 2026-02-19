@@ -4,6 +4,7 @@
  */
 
 import { describe, test, expect } from "bun:test";
+import { strict as assert } from "node:assert";
 import { ErrorFactory, TmaxError } from "../../src/utils/error-manager.ts";
 import { FunctionalFileSystem } from "../../src/core/types.ts";
 import { FileSystemImpl } from "../../src/core/filesystem.ts";
