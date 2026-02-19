@@ -4,6 +4,7 @@
  */
 
 import { describe, test, expect } from "bun:test";
+import { strict as assert } from "node:assert";
 import { Editor } from "../../src/frontend/components/Editor.tsx";
 import { BufferView } from "../../src/frontend/components/BufferView.tsx";
 import { StatusLine } from "../../src/frontend/components/StatusLine.tsx";
