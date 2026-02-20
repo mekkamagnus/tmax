@@ -40,7 +40,7 @@ tmax is an extensible terminal-based text editor written in TypeScript, running 
 ## Installation
 
 ### Prerequisites
-- [Bun](https://bun.sh/) v1.0 or later
+- [Node.js](https://nodejs.org/) v20 or later
 
 ### Setup
 ```bash
@@ -49,12 +49,15 @@ git clone https://github.com/mekkamagnus/tmax.git
 cd tmax
 
 # Install dependencies
-bun install
+npm install
+
+# Register the `tmax` command globally
+npm link
 
 # Make the launcher executable (optional)
 chmod +x bin/tmax
 
-# Optional: Add to PATH
+# Optional: Add local launcher to PATH instead of npm link
 echo 'export PATH="$PATH:$(pwd)/bin"' >> ~/.bashrc
 source ~/.bashrc
 ```
@@ -64,13 +67,13 @@ source ~/.bashrc
 ### Basic Usage
 ```bash
 # Start tmax with a new buffer
-bun run src/main.tsx
+tmax
 
 # Start tmax with a file
-bun run src/main.tsx filename.txt
+tmax filename.txt
 
 # Start with auto-reload during development
-bun run dev
+npm run dev
 
 # Or use npm scripts
 npm start
@@ -109,7 +112,7 @@ npm run dev
 ### T-Lisp REPL
 ```bash
 # Run the T-Lisp REPL for testing
-bun run scripts/repl.ts
+npm run repl
 
 # Or use npm script
 npm run repl
@@ -196,16 +199,16 @@ tmax/
 ### Available Scripts
 ```bash
 # Development
-bun run src/main.tsx     # Start the editor
-bun run dev              # Start with auto-reload
-bun run repl             # Run T-Lisp REPL
+tmax                     # Start the editor
+npm run dev              # Start with auto-reload
+npm run repl             # Run T-Lisp REPL
 
 # Testing
-bun test                 # Run all tests
-bun run test:ui         # Run UI tests
+npm test                 # Run all tests
+npm run test:ui         # Run UI tests
 
 # Building
-bun run build           # Build for production
+npm run build           # Build for production
 ```
 
 ### T-Lisp Examples

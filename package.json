@@ -4,24 +4,28 @@
   "description": "Extensible terminal-based text editor with T-Lisp (Alpha)",
   "type": "module",
   "scripts": {
-    "start": "bun run src/main.tsx",
-    "dev": "bun --watch run src/main.tsx",
+    "start": "node --import tsx src/main.tsx",
+    "dev": "node --watch --import tsx src/main.tsx --dev",
     "repl": "bun run scripts/repl.ts",
     "test": "bun test",
     "test:ui": "bash test/ui/start-ui-test.sh",
-    "check": "bun build src/main.tsx --outdir /tmp/tmax-build"
+    "check": "node --import tsx --eval \"import('./src/main.tsx')\" -- --help"
   },
   "dependencies": {
     "ink": "^4.4.1",
     "react": "^18.3.1",
-    "typescript": "^5.9.3"
+    "typescript": "^5.9.3",
+    "tsx": "^4.20.5"
   },
   "devDependencies": {
-    "@types/bun": "latest",
-    "@types/react": "^18.3.1"
+    "@types/react": "^18.3.1",
+    "@types/bun": "latest"
   },
   "browser": {
     "fs": false,
     "path": false
+  },
+  "bin": {
+    "tmax": "./bin/tmax"
   }
 }
