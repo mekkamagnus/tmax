@@ -15,6 +15,7 @@ import { StatusLine } from "./StatusLine.tsx";
 import { CommandInput } from "./CommandInput.tsx";
 import { useEditorState } from "../hooks/useEditorState.ts";
 import { useTerminalDimensions } from "../hooks/useTerminalDimensions.ts";
+import { splitInputForTlisp } from "../input.ts";
 import type { Editor as EditorClass } from "../../editor/editor.ts";
 
 interface EditorProps {
@@ -124,10 +125,12 @@ export const Editor = ({ initialEditorState, editor, filename, onStateChange, on
         return;
       }
 
-      // All other keys - pass through to T-Lisp
-      // T-Lisp key bindings will determine what happens
+      // All other keys - split batched chunks into per-key events
+      // T-Lisp key bindings process one key at a time
       if (input) {
-        await executeTlisp(input);
+        for (const keyInput of splitInputForTlisp(input)) {
+          await executeTlisp(keyInput);
+        }
       }
     } catch (error) {
       // Handle quit signal

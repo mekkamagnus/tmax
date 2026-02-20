@@ -14,7 +14,7 @@ test_startup() {
   tmax_init
 
   # Create a test file in project root
-  echo "" > /home/mekael/Documents/tmax/startup-test.txt
+  echo "" > "$TMAX_PROJECT_ROOT/startup-test.txt"
 
   tmax_start "startup-test.txt"
 
@@ -32,7 +32,7 @@ test_startup() {
   # Cleanup
   tmax_quit
   sleep 1
-  rm -f /home/mekael/Documents/tmax/startup-test.txt
+  rm -f "$TMAX_PROJECT_ROOT/startup-test.txt"
   tmax_cleanup
 }
 
