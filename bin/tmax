@@ -1,10 +1,20 @@
-#!/bin/bash
+#!/usr/bin/env bash
 
 # tmax editor launcher script
-# This script makes it easier to run tmax with the correct permissions
+set -euo pipefail
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SCRIPT_PATH="${BASH_SOURCE[0]}"
+if command -v readlink >/dev/null 2>&1; then
+  SCRIPT_PATH="$(readlink -f "$SCRIPT_PATH")"
+fi
+
+SCRIPT_DIR="$(cd "$(dirname "$SCRIPT_PATH")" && pwd)"
 PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
+ENTRYPOINT="$PROJECT_DIR/src/main.tsx"
 
-# Run tmax with the React-based UI (main.tsx)
-exec bun run "$PROJECT_DIR/src/main.tsx" "$@"
+if command -v node >/dev/null 2>&1; then
+  exec node --import tsx "$ENTRYPOINT" "$@"
+fi
+
+printf '%s\n' "Error: node is required to run tmax. Install Node.js 20+ from https://nodejs.org" >&2
+exit 1

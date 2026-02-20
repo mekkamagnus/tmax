@@ -64,9 +64,59 @@ export interface FunctionalTerminalIO {
 /**
  * Functional terminal I/O implementation using TaskEither
  */
+/**
+ * Tokenize raw terminal input into logical key events.
+ * Handles pasted/rapid input chunks and common ANSI escape sequences.
+ */
+export const tokenizeTerminalInput = (input: string): string[] => {
+  const keys: string[] = [];
+  let index = 0;
+
+  while (index < input.length) {
+    if (input[index] !== "") {
+      const codePoint = input.codePointAt(index);
+      if (codePoint === undefined) {
+        break;
+      }
+
+      const key = String.fromCodePoint(codePoint);
+      keys.push(key);
+      index += key.length;
+      continue;
+    }
+
+    const remaining = input.slice(index);
+    const csiMatch = remaining.match(/^\[[0-9;?]*[ -/]*[@-~]/);
+    if (csiMatch?.[0]) {
+      keys.push(csiMatch[0]);
+      index += csiMatch[0].length;
+      continue;
+    }
+
+    const ss3Match = remaining.match(/^O[@-~]/);
+    if (ss3Match?.[0]) {
+      keys.push(ss3Match[0]);
+      index += ss3Match[0].length;
+      continue;
+    }
+
+    if (remaining.length >= 2) {
+      keys.push(remaining.slice(0, 2));
+      index += 2;
+      continue;
+    }
+
+    keys.push("");
+    index += 1;
+  }
+
+  return keys;
+};
+
 export class FunctionalTerminalIOImpl implements FunctionalTerminalIO {
   private rawMode = false;
   private logger = log.module("Terminal");
+  private pendingKeys: string[] = [];
   
   constructor(private developmentMode = false) {}
 
@@ -223,14 +273,25 @@ export class FunctionalTerminalIOImpl implements FunctionalTerminalIO {
           return 'q';
         }
 
-        fnLogger.debug("Reading key from stdin", { 
+        if (this.pendingKeys.length > 0) {
+          const bufferedKey = this.pendingKeys.shift();
+          if (bufferedKey !== undefined) {
+            fnLogger.completeOperation("read_key", correlationId, {
+              key: bufferedKey.replace(//g, '\x1b'),
+              source: "pending"
+            });
+            return bufferedKey;
+          }
+        }
+
+        fnLogger.debug("Reading key from stdin", {
           operation: "read_key",
-          correlationId 
+          correlationId
         });
 
-                const buffer = new Uint8Array(8);
+        const buffer = new Uint8Array(64);
 
-        // Read single keypress from stdin
+        // Read raw key input from stdin
         const bytesRead = await new Promise<number>((resolve, reject) => {
           stdin.readOnce(buffer, (err, bytesRead) => {
             if (err) {
@@ -241,7 +302,7 @@ export class FunctionalTerminalIOImpl implements FunctionalTerminalIO {
           });
         });
 
-        if (bytesRead === null) {
+        if (bytesRead === 0) {
           throw ErrorFactory.io(
             "Failed to read from stdin",
             "stdin",
@@ -257,10 +318,35 @@ export class FunctionalTerminalIOImpl implements FunctionalTerminalIO {
           );
         }
 
-        const key = new TextDecoder().decode(buffer.subarray(0, bytesRead));
-        fnLogger.completeOperation("read_key", correlationId, { key: key.replace(/\x1b/g, '\\x1b'), bytesRead });
+        const rawInput = new TextDecoder().decode(buffer.subarray(0, bytesRead));
+        const tokenizedKeys = tokenizeTerminalInput(rawInput);
 
-        return key;
+        if (tokenizedKeys.length === 0) {
+          throw ErrorFactory.io(
+            "No key events decoded from stdin",
+            "stdin",
+            "read_key",
+            undefined,
+            {
+              module: "Terminal",
+              function: "readKey",
+              operation: "read_key",
+              correlationId,
+              suggestions: ["Check terminal encoding", "Verify raw input stream state"]
+            }
+          );
+        }
+
+        const [firstKey, ...remainingKeys] = tokenizedKeys;
+        this.pendingKeys = remainingKeys;
+
+        fnLogger.completeOperation("read_key", correlationId, {
+          key: firstKey.replace(//g, '\x1b'),
+          bytesRead,
+          tokenizedCount: tokenizedKeys.length
+        });
+
+        return firstKey;
       },
       (error) => {
         if (error instanceof TmaxError) {

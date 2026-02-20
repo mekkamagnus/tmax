@@ -8,6 +8,19 @@ else
   export TMAX_ACTIVE_SESSION=""
 fi
 
+# UI testing mode
+# - tmux: full interactive UI testing via tmux panes
+# - direct: basic non-tmux startup/output checks
+# - auto: choose tmux when available in an active tmux session, else direct
+export TMAX_UI_TEST_MODE="${TMAX_UI_TEST_MODE:-auto}"
+if [[ "$TMAX_UI_TEST_MODE" == "auto" ]]; then
+  if command -v tmux &> /dev/null && [[ -n "$TMUX" ]]; then
+    export TMAX_UI_TEST_MODE="tmux"
+  else
+    export TMAX_UI_TEST_MODE="direct"
+  fi
+fi
+
 # Session Configuration
 # Use detected session if available, otherwise fallback to default
 if [[ -n "$TMAX_ACTIVE_SESSION" ]]; then
@@ -37,31 +50,19 @@ export TMAX_CAPTURE_LINES="${TMAX_CAPTURE_LINES:-100}"
 export TMAX_DEBUG="${TMAX_DEBUG:-false}"
 export TMAX_VERBOSE="${TMAX_VERBOSE:-false}"
 
-# Test Mode - skip alternate screen buffer for tmux capture
-export TMAX_TEST_MODE="${TMAX_TEST_MODE:-true}"
-
-# Test input file for automated input delivery (polled by editor)
-export TMAX_TEST_INPUT_FIFO="${TMAX_TEST_INPUT_FIFO:-/tmp/tmax-test-input.txt}"
-
 # Paths
-# Use git to find project root, fallback to relative path
-_detect_project_root() {
-  if git rev-parse --show-toplevel >/dev/null 2>&1; then
-    git rev-parse --show-toplevel
-  else
-    # Fallback: go up 4 levels from lib directory (lib -> ui -> test -> project)
-    local script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-    dirname "$(dirname "$(dirname "$(dirname "$script_dir")")")"
-  fi
-}
-
-export TMAX_PROJECT_ROOT="${TMAX_PROJECT_ROOT:-$(_detect_project_root)}"
+DEFAULT_TMAX_PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
+export TMAX_PROJECT_ROOT="${TMAX_PROJECT_ROOT:-$DEFAULT_TMAX_PROJECT_ROOT}"
 export TMAX_TEST_DIR="${TMAX_TEST_DIR:-/tmp/tmax-ui-tests}"
+export TMAX_DIRECT_OUTPUT_FILE="${TMAX_DIRECT_OUTPUT_FILE:-$TMAX_TEST_DIR/direct-editor.log}"
+export TMAX_DIRECT_STATUS_FILE="${TMAX_DIRECT_STATUS_FILE:-$TMAX_TEST_DIR/direct-editor.status}"
+export TMAX_DIRECT_TIMEOUT="${TMAX_DIRECT_TIMEOUT:-6}"
 
 # Editor Commands
-# Run without --dev flag in tmux (real TTY available)
-export BUN_BIN="${BUN_BIN:-$HOME/.bun/bin/bun}"
-export TMAX_START_CMD="${TMAX_START_CMD:-$BUN_BIN run src/main.tsx}"
+# Use React-based UI (ink) with --dev flag for non-TTY environments
+DEFAULT_BUN_BIN="$(command -v bun 2>/dev/null || true)"
+export BUN_BIN="${BUN_BIN:-${DEFAULT_BUN_BIN:-bun}}"
+export TMAX_START_CMD="${TMAX_START_CMD:-$BUN_BIN run src/main.tsx --dev}"
 export TMAX_START_FLAGS="${TMAX_START_FLAGS:-}"
 
 # Key Sequences

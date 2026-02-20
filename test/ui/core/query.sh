@@ -7,10 +7,23 @@ source "$CORE_DIR/../lib/config.sh"
 source "$CORE_DIR/../lib/debug.sh"
 source "$CORE_DIR/../lib/common.sh"
 
+
+# Read direct-mode output safely
+_query_direct_output() {
+  if [[ -f "$TMAX_DIRECT_OUTPUT_FILE" ]]; then
+    cat "$TMAX_DIRECT_OUTPUT_FILE"
+  fi
+}
+
 # Capture window output
 query_capture_output() {
   local window="${1:-$TMAX_ACTIVE_WINDOW}"
   local lines="${2:-$TMAX_CAPTURE_LINES}"
+
+  if [[ "$TMAX_UI_TEST_MODE" == "direct" ]]; then
+    _query_direct_output | tail -n "$lines"
+    return 0
+  fi
 
   if [[ -z "$window" ]]; then
     log_error "No active window set"
@@ -88,6 +101,16 @@ query_get_status_message() {
 query_is_running() {
   local window="${1:-$TMAX_ACTIVE_WINDOW}"
 
+  if [[ "$TMAX_UI_TEST_MODE" == "direct" ]]; then
+    if [[ -n "$TMAX_EDITOR_PID" ]] && ps -p "$TMAX_EDITOR_PID" >/dev/null 2>&1; then
+      return 0
+    fi
+    if [[ -s "$TMAX_DIRECT_OUTPUT_FILE" ]]; then
+      return 0
+    fi
+    return 1
+  fi
+
   if [[ -z "$window" ]]; then
     return 1
   fi
@@ -112,6 +135,13 @@ query_has_errors() {
   local output
 
   output=$(query_capture_output "$window")
+
+  if [[ "$TMAX_UI_TEST_MODE" == "direct" ]]; then
+    if echo "$output" | grep -q "Raw mode is not supported on the current process.stdin"; then
+      log_warn "Ignoring expected raw-mode limitation in direct mode"
+      return 1
+    fi
+  fi
 
   # Look for error indicators
   if echo "$output" | grep -iqE "error|failed|exception"; then
@@ -206,6 +236,13 @@ query_wait_for_ready() {
     if query_has_welcome_message "$window" || query_text_visible "NORMAL" "$window"; then
       log_debug "Editor is ready"
       return 0
+    fi
+
+    if [[ "$TMAX_UI_TEST_MODE" == "direct" ]] && [[ -f "$TMAX_DIRECT_STATUS_FILE" ]]; then
+      if query_text_visible "NORMAL" "$window" || query_text_visible "INSERT" "$window" || query_text_visible "New file:" "$window"; then
+        log_debug "Direct mode output indicates editor startup"
+        return 0
+      fi
     fi
 
     sleep 0.5

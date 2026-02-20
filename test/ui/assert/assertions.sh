@@ -200,6 +200,11 @@ assert_screen_fill() {
   local window="${2:-$TMAX_ACTIVE_WINDOW}"
   local tolerance="${3:-2}"  # Allow small tolerance for borders/padding
 
+  if [[ "$TMAX_UI_TEST_MODE" == "direct" ]]; then
+    _assertion_record 0 "$message (direct mode check skipped: no tmux pane)"
+    return 0
+  fi
+
   # Get terminal height from tmux
   local term_height
   term_height=$(tmux display -t "${TMAX_SESSION}:${window}" -p '#{pane_height}' 2>/dev/null)

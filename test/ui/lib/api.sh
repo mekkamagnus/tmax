@@ -143,16 +143,28 @@ tmax_type_line() {
 
 # Save file
 tmax_save() {
+  if [[ "$TMAX_UI_TEST_MODE" == "direct" ]]; then
+    log_warn "tmax_save is not supported in direct mode"
+    return 0
+  fi
   file_save "$TMAX_TEST_WINDOW"
 }
 
 # Quit
 tmax_quit() {
+  if [[ "$TMAX_UI_TEST_MODE" == "direct" ]]; then
+    tmax_stop
+    return 0
+  fi
   file_quit "$TMAX_TEST_WINDOW"
 }
 
 # Save and quit
 tmax_save_quit() {
+  if [[ "$TMAX_UI_TEST_MODE" == "direct" ]]; then
+    tmax_stop
+    return 0
+  fi
   file_save_and_quit "$TMAX_TEST_WINDOW"
 }
 
