@@ -8,6 +8,19 @@ else
   export TMAX_ACTIVE_SESSION=""
 fi
 
+# UI testing mode
+# - tmux: full interactive UI testing via tmux panes
+# - direct: basic non-tmux startup/output checks
+# - auto: choose tmux when available in an active tmux session, else direct
+export TMAX_UI_TEST_MODE="${TMAX_UI_TEST_MODE:-auto}"
+if [[ "$TMAX_UI_TEST_MODE" == "auto" ]]; then
+  if command -v tmux &> /dev/null && [[ -n "$TMUX" ]]; then
+    export TMAX_UI_TEST_MODE="tmux"
+  else
+    export TMAX_UI_TEST_MODE="direct"
+  fi
+fi
+
 # Session Configuration
 # Use detected session if available, otherwise fallback to default
 if [[ -n "$TMAX_ACTIVE_SESSION" ]]; then
@@ -38,12 +51,17 @@ export TMAX_DEBUG="${TMAX_DEBUG:-false}"
 export TMAX_VERBOSE="${TMAX_VERBOSE:-false}"
 
 # Paths
-export TMAX_PROJECT_ROOT="${TMAX_PROJECT_ROOT:-/home/mekael/Documents/tmax}"
+DEFAULT_TMAX_PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
+export TMAX_PROJECT_ROOT="${TMAX_PROJECT_ROOT:-$DEFAULT_TMAX_PROJECT_ROOT}"
 export TMAX_TEST_DIR="${TMAX_TEST_DIR:-/tmp/tmax-ui-tests}"
+export TMAX_DIRECT_OUTPUT_FILE="${TMAX_DIRECT_OUTPUT_FILE:-$TMAX_TEST_DIR/direct-editor.log}"
+export TMAX_DIRECT_STATUS_FILE="${TMAX_DIRECT_STATUS_FILE:-$TMAX_TEST_DIR/direct-editor.status}"
+export TMAX_DIRECT_TIMEOUT="${TMAX_DIRECT_TIMEOUT:-6}"
 
 # Editor Commands
 # Use React-based UI (ink) with --dev flag for non-TTY environments
-export BUN_BIN="${BUN_BIN:-$HOME/.bun/bin/bun}"
+DEFAULT_BUN_BIN="$(command -v bun 2>/dev/null || true)"
+export BUN_BIN="${BUN_BIN:-${DEFAULT_BUN_BIN:-bun}}"
 export TMAX_START_CMD="${TMAX_START_CMD:-$BUN_BIN run src/main.tsx --dev}"
 export TMAX_START_FLAGS="${TMAX_START_FLAGS:-}"
 
