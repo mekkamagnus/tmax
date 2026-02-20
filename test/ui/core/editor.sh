@@ -17,18 +17,43 @@ editor_start() {
 
   log_info "Starting editor in visible window${file:+ with file: $file}"
 
+  # Build start command
+  local start_cmd="$TMAX_START_CMD"
+  if [[ -n "$file" ]]; then
+    start_cmd="$start_cmd $file"
+  fi
+
+  if [[ "$TMAX_UI_TEST_MODE" == "direct" ]]; then
+    log_info "Starting editor in direct mode (no tmux)"
+
+    mkdir -p "$TMAX_TEST_DIR"
+    : > "$TMAX_DIRECT_OUTPUT_FILE"
+    : > "$TMAX_DIRECT_STATUS_FILE"
+
+    (
+      cd "$TMAX_PROJECT_ROOT" || exit 1
+      timeout "${TMAX_DIRECT_TIMEOUT}s" bash -lc "$start_cmd" > "$TMAX_DIRECT_OUTPUT_FILE" 2>&1
+      echo "$?" > "$TMAX_DIRECT_STATUS_FILE"
+    ) &
+
+    export TMAX_EDITOR_PID=$!
+    sleep "$TMAX_STARTUP_WAIT"
+
+    if query_wait_for_ready "$TMAX_DEFAULT_TIMEOUT"; then
+      log_info "Editor startup check completed in direct mode"
+      return 0
+    fi
+
+    log_error "Editor failed startup checks in direct mode"
+    return 1
+  fi
+
   # Create test window (visible in active session)
   session_create_test_window
   session_set_active_window "$TMAX_TEST_WINDOW"
 
   # Change to project directory
   input_send_command "cd $TMAX_PROJECT_ROOT"
-
-  # Build start command
-  local start_cmd="$TMAX_START_CMD"
-  if [[ -n "$file" ]]; then
-    start_cmd="$start_cmd $file"
-  fi
 
   # Start the editor
   input_send_command "$start_cmd"
@@ -57,6 +82,14 @@ editor_stop() {
   fi
 
   log_info "Stopping editor"
+
+  if [[ "$TMAX_UI_TEST_MODE" == "direct" ]]; then
+    if [[ -n "$TMAX_EDITOR_PID" ]]; then
+      kill "$TMAX_EDITOR_PID" 2>/dev/null || true
+    fi
+    export TMAX_EDITOR_PID=""
+    return 0
+  fi
 
   # Try graceful quit first
   input_send_vim_command "q" "$window"

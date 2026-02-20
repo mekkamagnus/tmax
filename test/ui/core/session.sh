@@ -34,6 +34,11 @@ session_get_active() {
 session_validate() {
   log_debug "Validating tmux environment..."
 
+  if [[ "$TMAX_UI_TEST_MODE" == "direct" ]]; then
+    log_info "Direct mode enabled: skipping tmux validation"
+    return 0
+  fi
+
   # Check if tmux is installed
   if ! command -v tmux &> /dev/null; then
     log_error "tmux is not installed. Please install tmux first."
@@ -66,6 +71,11 @@ session_validate() {
 # Setup - ensure we're using active session
 session_create() {
   log_debug "Using session: $TMAX_SESSION"
+
+  if [[ "$TMAX_UI_TEST_MODE" == "direct" ]]; then
+    log_debug "Direct mode: no tmux session creation required"
+    return 0
+  fi
 
   # We don't create sessions - we use the active one
   if ! session_exists; then
