@@ -73,6 +73,12 @@ export const Editor = ({ initialEditorState, editor, filename, onStateChange, on
     initEditor();
   }, [editor, setState]);
 
+  // Update terminal size when dimensions change
+  useEffect(() => {
+    // Update the InkTerminalIO with the actual terminal dimensions
+    editor.updateTerminalSize(terminalWidth, terminalHeight);
+  }, [terminalWidth, terminalHeight, editor]);
+
   // Handle file I/O errors gracefully
   const handleError = useCallback((errorMessage: string) => {
     setError(errorMessage);

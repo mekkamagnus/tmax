@@ -11,7 +11,7 @@
  */
 
 import type { TLispValue, TLispFunctionImpl } from "../../tlisp/types.ts";
-import { createNumber, createString, createNil } from "../../tlisp/values.ts";
+import { createNumber, createString, createNil, createList } from "../../tlisp/values.ts";
 import type { FunctionalTextBuffer, Position } from "../../core/types.ts";
 import { Either } from "../../utils/task-either.ts";
 import {
@@ -69,6 +69,7 @@ export function clearVisualSelection(): void {
 /**
  * Create visual mode operations API functions
  * @param getBuffer - Function to get current buffer
+ * @param setBuffer - Function to set current buffer (for mutations)
  * @param getCursorLine - Function to get current cursor line
  * @param getCursorColumn - Function to get current cursor column
  * @param setCursorLine - Function to set cursor line
@@ -80,6 +81,7 @@ export function clearVisualSelection(): void {
  */
 export function createVisualOps(
   getBuffer: () => FunctionalTextBuffer | null,
+  setBuffer: (buffer: FunctionalTextBuffer | null) => void,
   getCursorLine: () => number,
   getCursorColumn: () => number,
   setCursorLine: (line: number) => void,
@@ -280,8 +282,10 @@ export function createVisualOps(
       return Either.left(deleteResult.left);
     }
 
-    // Update buffer and exit visual mode
-    // Note: Buffer is immutable, so we need to update the reference
+    // Update buffer with the new buffer (immutable operation)
+    setBuffer(deleteResult.right);
+
+    // Exit visual mode
     visualSelection = null;
     setMode("normal");
     setStatusMessage("");
@@ -399,6 +403,9 @@ export function createVisualOps(
       return Either.left(replaceResult.left);
     }
 
+    // Update buffer with the new buffer (immutable operation)
+    setBuffer(replaceResult.right);
+
     // Exit visual mode
     visualSelection = null;
     setMode("normal");
@@ -459,6 +466,9 @@ export function createVisualOps(
     if (Either.isLeft(replaceResult)) {
       return Either.left(replaceResult.left);
     }
+
+    // Update buffer with the new buffer (immutable operation)
+    setBuffer(replaceResult.right);
 
     // Exit visual mode
     visualSelection = null;

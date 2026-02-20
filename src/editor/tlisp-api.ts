@@ -91,13 +91,20 @@ export function createEditorAPI(state: TlispEditorState): Map<string, TLispFunct
     api.set(key, value);
   }
 
-  // Add cursor operations (without visual update callback initially)
+  // Add cursor operations with visual selection update support (US-1.7.1)
   const cursorOps = createCursorOps(
     () => state.cursorLine,
     (line) => { state.cursorLine = line; },
     () => state.cursorColumn,
     (column) => { state.cursorColumn = column; },
-    () => state.currentBuffer
+    () => state.currentBuffer,
+    () => state.mode, // getMode - for visual selection updates
+    () => { // updateVisualSelection callback
+      const selection = getVisualSelection();
+      if (selection) {
+        selection.end = { line: state.cursorLine, column: state.cursorColumn };
+      }
+    }
   );
   for (const [key, value] of cursorOps.entries()) {
     api.set(key, value);
@@ -153,7 +160,14 @@ export function createEditorAPI(state: TlispEditorState): Map<string, TLispFunct
     () => state.cursorLine,
     (line) => { state.cursorLine = line; },
     () => state.cursorColumn,
-    (column) => { state.cursorColumn = column; }
+    (column) => { state.cursorColumn = column; },
+    () => state.mode, // getMode
+    () => { // updateVisualSelection
+      const selection = getVisualSelection();
+      if (selection) {
+        selection.end = { line: state.cursorLine, column: state.cursorColumn };
+      }
+    }
   );
   for (const [key, value] of wordOps.entries()) {
     api.set(key, value);
@@ -247,6 +261,7 @@ export function createEditorAPI(state: TlispEditorState): Map<string, TLispFunct
   // Add visual mode operations
   const visualOps = createVisualOps(
     () => state.currentBuffer,
+    (buffer) => { state.currentBuffer = buffer; },
     () => state.cursorLine,
     () => state.cursorColumn,
     (line) => { state.cursorLine = line; },

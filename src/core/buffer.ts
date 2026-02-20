@@ -31,16 +31,18 @@ class FunctionalGapBuffer {
    * Create a new gap buffer
    */
   static create(initialContent = ""): FunctionalGapBuffer {
-    const initialSize = DEFAULT_BUFFER_SIZE;
+    // Calculate initial size - ensure it's large enough for content plus some gap space
+    const minSize = initialContent.length + DEFAULT_BUFFER_SIZE;
+    const initialSize = Math.max(DEFAULT_BUFFER_SIZE, minSize);
     const buffer = new Array(initialSize);
-    
+
     if (initialContent) {
       for (let i = 0; i < initialContent.length; i++) {
         buffer[i] = initialContent[i];
       }
       return new FunctionalGapBuffer(buffer, initialContent.length, initialSize);
     }
-    
+
     return new FunctionalGapBuffer(buffer, 0, initialSize);
   }
 

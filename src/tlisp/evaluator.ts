@@ -319,6 +319,8 @@ export class TLispEvaluator {
           return this.evalAssertType(elements, env);
         case "assert-error":
           return this.evalAssertError(elements, env);
+        case "progn":
+          return this.evalProgn(elements, env, inTailPosition);
         default:
           return this.evalFunctionCall(elements, env, inTailPosition);
       }
@@ -1913,6 +1915,41 @@ export class TLispEvaluator {
         details: { result: valueToString(result.right) }
       });
     }
+  }
+
+  /**
+   * Evaluate progn special form (US-1.7.1)
+   * Evaluates each expression in sequence and returns the value of the last one
+   * @param elements - List elements (excluding 'progn')
+   * @param env - Environment
+   * @param inTailPosition - Whether this evaluation is in tail position
+   * @returns Either with error or result of last expression
+   */
+  private evalProgn(elements: TLispValue[], env: TLispEnvironment, inTailPosition: boolean = false): Either<EvalError, EvalResult> {
+    // progn takes any number of arguments, evaluates them sequentially
+    // and returns the value of the last expression
+    const bodyExprs = elements.slice(1);
+
+    if (bodyExprs.length === 0) {
+      return Either.right(createNil());
+    }
+
+    // Evaluate all expressions sequentially
+    let lastResult: Either<EvalError, EvalResult> = Either.right(createNil());
+
+    for (let i = 0; i < bodyExprs.length; i++) {
+      const expr = bodyExprs[i];
+
+      // Last expression is in tail position
+      const isInTailPosition = inTailPosition && (i === bodyExprs.length - 1);
+      lastResult = this.evalInternal(expr, env, isInTailPosition);
+
+      if (Either.isLeft(lastResult)) {
+        return lastResult;
+      }
+    }
+
+    return lastResult;
   }
 }
 

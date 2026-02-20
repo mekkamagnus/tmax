@@ -136,26 +136,38 @@ async function main() {
     initFilePath = args[initFileArgIndex + 1];
   }
 
+  // Get version from package.json
+  const VERSION = "0.2.0";
+
+  // Show version if requested
+  if (args.includes('--version') || args.includes('-v')) {
+    console.log(`tmax v${VERSION} (T-Lisp powered terminal editor)`);
+    startupLog.completeOperation('editor-initialization', startupId);
+    process.exit(0);
+  }
+
   // Show help if requested
   if (args.includes('--help') || args.includes('-h')) {
     console.log(`
 tmax - Terminal-based text editor (Bun + Ink version with T-Lisp)
+Version: ${VERSION}
 
 Usage: tmax [options] [filename]
 
 Options:
-  --daemon           Start server daemon mode
-  --dev, --no-tty    Development mode (skip TTY checks for AI coding assistants)
-  --init-file FILE   Use custom init file (default: ~/.config/tmax/init.tlisp)
-  --help, -h         Show this help message
+  -v, --version       Show version and exit
+  -h, --help          Show this help message
+  --daemon            Start server daemon mode
+  --dev, --no-tty     Development mode (skip TTY checks for AI coding assistants)
+  --init-file FILE    Use custom init file (default: ~/.config/tmax/init.tlisp)
 
 Examples:
-  tmax               # Start editor in normal mode
-  tmax file.txt      # Open file.txt
-  tmax --daemon      # Start server daemon
-  tmax --dev         # Start in development mode (for AI coding environments)
-  tmax --dev file.txt # Open file.txt in development mode
-  tmax --init-file ./my-config.tlisp # Use custom init file
+  tmax                    # Start editor in normal mode
+  tmax file.txt           # Open file.txt
+  tmax --daemon           # Start server daemon
+  tmax --dev              # Start in development mode (for AI coding environments)
+  tmax --dev file.txt     # Open file.txt in development mode
+  tmax --init-file ./my-config.tlisp  # Use custom init file
     `);
     startupLog.completeOperation('editor-initialization', startupId);
     process.exit(0);

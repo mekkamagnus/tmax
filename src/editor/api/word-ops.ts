@@ -273,6 +273,8 @@ function findWordEnd(
  * @param setCursorLine - Function to set cursor line
  * @param getCursorColumn - Function to get cursor column
  * @param setCursorColumn - Function to set cursor column
+ * @param getMode - Function to get current editor mode
+ * @param updateVisualSelection - Optional function to update visual selection end position
  * @returns Map of word navigation function names to implementations
  */
 export function createWordOps(
@@ -280,9 +282,20 @@ export function createWordOps(
   getCursorLine: () => number,
   setCursorLine: (line: number) => void,
   getCursorColumn: () => number,
-  setCursorColumn: (column: number) => void
+  setCursorColumn: (column: number) => void,
+  getMode?: () => "normal" | "insert" | "visual" | "command" | "mx",
+  updateVisualSelection?: () => void
 ): Map<string, TLispFunctionImpl> {
   const api = new Map<string, TLispFunctionImpl>();
+
+  /**
+   * Helper function to update visual selection if in visual mode
+   */
+  const updateVisualSelectionIfNeeded = (): void => {
+    if (getMode && updateVisualSelection && getMode() === "visual") {
+      updateVisualSelection();
+    }
+  };
 
   /**
    * word-next - move to start of next word (w key in Vim)
@@ -337,6 +350,9 @@ export function createWordOps(
     // Update cursor position
     setCursorLine(currentLine);
     setCursorColumn(currentColumn);
+
+    // Update visual selection if in visual mode
+    updateVisualSelectionIfNeeded();
 
     return Either.right(createNil());
   });
@@ -395,6 +411,9 @@ export function createWordOps(
     setCursorLine(currentLine);
     setCursorColumn(currentColumn);
 
+    // Update visual selection if in visual mode
+    updateVisualSelectionIfNeeded();
+
     return Either.right(createNil());
   });
 
@@ -451,6 +470,9 @@ export function createWordOps(
     // Update cursor position
     setCursorLine(currentLine);
     setCursorColumn(currentColumn);
+
+    // Update visual selection if in visual mode
+    updateVisualSelectionIfNeeded();
 
     return Either.right(createNil());
   });

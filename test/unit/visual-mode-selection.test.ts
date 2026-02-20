@@ -264,7 +264,7 @@ describe("Visual Mode Selection - US-1.7.1", () => {
         const lineResult = buffer.getLine(0);
         expect(Either.isRight(lineResult)).toBe(true);
         if (Either.isRight(lineResult)) {
-          expect(lineResult.right.substring(0, 6)).toBe("hello");
+          expect(lineResult.right.substring(0, 5)).toBe("hello");
         }
       }
     });
@@ -285,7 +285,7 @@ describe("Visual Mode Selection - US-1.7.1", () => {
         const lineResult = buffer.getLine(0);
         expect(Either.isRight(lineResult)).toBe(true);
         if (Either.isRight(lineResult)) {
-          expect(lineResult.right.substring(0, 6)).toBe("HELLO");
+          expect(lineResult.right.substring(0, 5)).toBe("HELLO");
         }
       }
     });

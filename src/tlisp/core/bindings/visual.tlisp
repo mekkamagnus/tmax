@@ -15,16 +15,16 @@
 ;; =================================================================
 ;; Key bindings specific to visual mode
 
-;; Navigation keys (same as normal mode)
-(key-bind "h" "(cursor-move (cursor-line) (- (cursor-column) 1))" "visual")
-(key-bind "j" "(cursor-move (+ (cursor-line) 1) (cursor-column))" "visual")
-(key-bind "k" "(cursor-move (- (cursor-line) 1) (cursor-column))" "visual")
-(key-bind "l" "(cursor-move (cursor-line) (+ (cursor-column) 1))" "visual")
+;; Navigation keys (same as normal mode) - update visual selection after movement
+(key-bind "h" "(progn (cursor-move (cursor-line) (- (cursor-column) 1)) (visual-update-end))" "visual")
+(key-bind "j" "(progn (cursor-move (+ (cursor-line) 1) (cursor-column)) (visual-update-end))" "visual")
+(key-bind "k" "(progn (cursor-move (- (cursor-line) 1) (cursor-column)) (visual-update-end))" "visual")
+(key-bind "l" "(progn (cursor-move (cursor-line) (+ (cursor-column) 1)) (visual-update-end))" "visual")
 
-;; Word navigation
-(key-bind "w" "(word-next)" "visual")
-(key-bind "b" "(word-previous)" "visual")
-(key-bind "e" "(word-end)" "visual")
+;; Word navigation - update visual selection after movement
+(key-bind "w" "(progn (word-next) (visual-update-end))" "visual")
+(key-bind "b" "(progn (word-previous) (visual-update-end))" "visual")
+(key-bind "e" "(progn (word-end) (visual-update-end))" "visual")
 
 ;; Exit visual mode (Escape)
 (key-bind "Escape" "(visual-exit)" "visual")

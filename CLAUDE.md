@@ -354,14 +354,14 @@ The editor has two distinct operating modes with different logging behaviors:
 
 ### Testing
 ```bash
-# Run all tests (131 tests across 8 suites)
-deno task test
+# Run all tests
+bun test
 
-# Run specific test suites
-deno test test/unit/tokenizer.test.ts
-deno test test/unit/parser.test.ts
-deno test test/unit/evaluator.test.ts
-deno test test/unit/editor.test.ts
+# Run specific test files
+bun test test/unit/tokenizer.test.ts
+bun test test/unit/parser.test.ts
+bun test test/unit/evaluator.test.ts
+bun test test/unit/editor.test.ts
 ```
 
 ### UI Testing

@@ -214,9 +214,9 @@ assert_screen_fill() {
     return 1
   fi
 
-  # Capture the output and count lines
+  # Capture the output and count lines (exclude scrollback history)
   local output
-  output=$(query_capture_output "$window")
+  output=$(query_capture_output "$window" "" false)
   local line_count
   line_count=$(echo "$output" | wc -l)
 

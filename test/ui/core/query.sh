@@ -16,9 +16,14 @@ _query_direct_output() {
 }
 
 # Capture window output
+# Parameters:
+#   $1 - Window name (optional, defaults to TMAX_ACTIVE_WINDOW)
+#   $2 - Number of lines to capture (optional, defaults to TMAX_CAPTURE_LINES)
+#   $3 - Include scrollback history (optional, defaults to true)
 query_capture_output() {
   local window="${1:-$TMAX_ACTIVE_WINDOW}"
   local lines="${2:-$TMAX_CAPTURE_LINES}"
+  local include_scrollback="${3:-true}"
 
   if [[ "$TMAX_UI_TEST_MODE" == "direct" ]]; then
     _query_direct_output | tail -n "$lines"
@@ -30,7 +35,13 @@ query_capture_output() {
     return 1
   fi
 
-  tmux capture-pane -t "${TMAX_SESSION}:${window}" -p -S -"$lines" 2>/dev/null
+  if [[ "$include_scrollback" == "true" ]]; then
+    # Capture with scrollback history
+    tmux capture-pane -t "${TMAX_SESSION}:${window}" -p -S -"$lines" 2>/dev/null
+  else
+    # Capture only visible pane (no scrollback, no -S flag)
+    tmux capture-pane -t "${TMAX_SESSION}:${window}" -p 2>/dev/null
+  fi
 }
 
 # Check if text is visible in the window

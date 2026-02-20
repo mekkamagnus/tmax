@@ -1,18 +1,20 @@
-import { describe, test, beforeEach, afterEach } from "bun:test";
+import { describe, test, beforeEach, afterEach, expect } from "bun:test";
 import { Editor } from "../../src/editor/editor.ts";
 import { MockTerminal } from "../mocks/terminal.ts";
 import { MockFileSystem } from "../mocks/filesystem.ts";
+import { loadBindingFilesIntoMock } from "../helpers/test-helpers.ts";
 
 describe("Debug Fixture", () => {
   let editor: Editor;
   let mockTerminal: MockTerminal;
   let mockFileSystem: MockFileSystem;
 
-  beforeEach(() => {
+  beforeEach(async () => {
     mockTerminal = new MockTerminal();
     mockFileSystem = new MockFileSystem();
+    await loadBindingFilesIntoMock(mockFileSystem);
     editor = new Editor(mockTerminal, mockFileSystem);
-    editor.start();
+    await editor.start();
   });
 
   afterEach(() => {

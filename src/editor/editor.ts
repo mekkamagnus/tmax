@@ -1951,6 +1951,19 @@ export class Editor {
   }
 
   /**
+   * Update terminal size - called when terminal dimensions change
+   * @param width - New terminal width
+   * @param height - New terminal height
+   */
+  updateTerminalSize(width: number, height: number): void {
+    // Check if terminal has updateSize method (InkTerminalIO does)
+    const terminalIO = this.terminal as any;
+    if (typeof terminalIO.updateSize === 'function') {
+      terminalIO.updateSize(width, height);
+    }
+  }
+
+  /**
    * Start the editor
    * Note: In React UI mode, this method is used for initialization only
    * The main event loop is handled by React components
