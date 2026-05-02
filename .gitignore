@@ -13,6 +13,13 @@ package-lock.json
 node_modules/
 bun.lockb
 
+# Compiled binaries
+dist/
+release/
+*.exe
+tmax-*
+tmax.exe
+
 # IDE/Editor files
 .vscode/
 .idea/

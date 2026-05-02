@@ -1,0 +1,2 @@
+(defvar *test-debug-var* 99)
+*test-debug-var*
