@@ -28,6 +28,14 @@ export async function handleVisualMode(editor: Editor, key: string, normalizedKe
       // Execute the mapped command
       try {
         (editor as any).executeCommand(mapping.command);
+
+        // Update visual selection end position after command execution
+        // This allows cursor movement to expand the selection
+        const interpreter = (editor as any).interpreter;
+        if (interpreter) {
+          const result = interpreter.execute("(visual-update-end)");
+          // Ignore errors - visual-update-end only works if in visual mode
+        }
       } catch (error) {
         if (error instanceof Error && (error.message === "EDITOR_QUIT_SIGNAL" || error.message.includes("EDITOR_QUIT_SIGNAL"))) {
           throw new Error("EDITOR_QUIT_SIGNAL"); // Re-throw clean quit signal to main loop

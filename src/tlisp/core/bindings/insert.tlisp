@@ -1,0 +1,25 @@
+;; insert.tlisp
+;; Default key bindings for insert mode in tmax editor
+;;
+;; This file contains all default key bindings for insert mode, extracted from TypeScript
+;; to achieve pure T-Lisp-centric key binding management.
+;;
+;; Maintainer guidance:
+;; - Each (key-bind) call defines a key, command, and optional mode
+;; - Commands are T-Lisp expressions that get executed when keys are pressed
+;; - Mode is specified as "insert" for all bindings in this file
+;; - Keep bindings organized by functional groups for readability
+
+;; =================================================================
+;; MODE SWITCHING
+;; =================================================================
+;; Transition between editor modes
+
+;; Return to normal mode from insert mode (Escape)
+(key-bind "Escape" "(editor-set-mode \"normal\")" "insert")
+
+;; =================================================================
+;; BASIC EDITING (Insert Mode)
+;; =================================================================
+;; Essential editing operations in insert mode
+;; Note: Enter and Backspace are handled directly in editor.ts for proper escaping

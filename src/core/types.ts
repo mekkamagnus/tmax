@@ -165,6 +165,16 @@ export interface EditorConfig {
 }
 
 /**
+ * Which-key binding display information
+ */
+export interface WhichKeyBinding {
+  key: string;
+  command: string;
+  mode: string;
+  documentation?: string;  // Command documentation for preview (US-1.10.4)
+}
+
+/**
  * Editor state interface
  */
 export interface EditorState {
@@ -180,6 +190,48 @@ export interface EditorState {
   currentFilename?: string;  // Filename associated with current buffer
   buffers?: Map<string, FunctionalTextBuffer>;
   cursorFocus?: 'buffer' | 'command';  // Track where cursor focus should be
+  // Which-key popup state (US-1.10.3)
+  whichKeyActive?: boolean;  // Whether which-key popup is currently displayed
+  whichKeyPrefix?: string;  // Current key prefix being explored
+  whichKeyBindings?: WhichKeyBinding[];  // Bindings for current prefix
+  whichKeyTimeout?: number;  // Configurable timeout in milliseconds (default 1000)
+  // Help system state (US-1.11.1, US-1.11.2, US-1.11.3)
+  describeKeyPending?: boolean;  // Waiting for key press to describe
+  describeKeyTimeout?: number;  // Timeout for describe-key prompt
+  describeFunctionPending?: boolean;  // Waiting for function name to describe
+  aproposCommandPending?: boolean;  // Waiting for search pattern for apropos
+  // LSP diagnostics state (US-3.1.2)
+  lspDiagnostics?: LSPDiagnostic[];  // Diagnostics from language server
+  // Window management (US-3.2.1)
+  windows?: Window[];  // Array of windows
+  currentWindowIndex?: number;  // Index of currently focused window
+}
+
+/**
+ * LSP Diagnostic interface
+ */
+export interface LSPDiagnostic {
+  range: Range;
+  severity: 1 | 2 | 3 | 4;  // 1=Error, 2=Warning, 3=Information, 4=Hint
+  message: string;
+  source?: string;  // Source of the diagnostic (e.g., "typescript")
+  code?: string | number;  // Diagnostic code
+}
+
+/**
+ * Window interface (US-3.2.1)
+ */
+export interface Window {
+  id: string;  // Unique window identifier
+  buffer: FunctionalTextBuffer;  // Buffer displayed in window
+  cursorLine: number;  // Cursor line position within window
+  cursorColumn: number;  // Cursor column position within window
+  viewportTop: number;  // First line visible in window viewport
+  splitType?: 'horizontal' | 'vertical';  // How this window was created
+  height?: number;  // Window height in rows (for horizontal splits)
+  width?: number;  // Window width in columns (for vertical splits)
+  row?: number;  // Window starting row (0-indexed)
+  col?: number;  // Window starting column (0-indexed)
 }
 
 /**
@@ -422,4 +474,10 @@ export interface FileSystem {
   
   /** Get file stats */
   stat(path: string): Promise<FileStats>;
+
+  /** List directory contents */
+  readdir?(path: string): Promise<string[]>;
+
+  /** Create directory recursively (SPEC-025) */
+  createDir(path: string): Promise<void>;
 }

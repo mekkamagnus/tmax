@@ -17,9 +17,15 @@ import {
   isNil,
   isTruthy,
   isMacro,
+  valuesEqual,
+  valueToString
 } from "./values.ts";
 import { Either } from "../utils/task-either";
 import { createValidationError, type EvalError } from "../error/types";
+import { TLispParser } from "./parser.ts";
+import { registerStdlibFunctions } from "./stdlib.ts";
+import { registerTestingFramework } from "./test-framework.ts";
+import { registerFunction, markFunctionCovered, isCoverageEnabled } from "./test-coverage.ts";
 
 
 /**
@@ -50,6 +56,24 @@ function isTailCall(result: EvalResult): result is TailCall {
 function createTailCall(funcExpr: TLispValue, argExprs: TLispValue[], env: TLispEnvironment): TailCall {
   return { type: "tail-call", funcExpr, argExprs, env };
 }
+
+// Test registry to store defined tests
+const testRegistry: Map<string, { body: TLispValue[], name: string, params: TLispValue }> = new Map();
+
+// Suite registry to store test suites
+interface TestSuite {
+  name: string;
+  description?: string;
+  tests: string[]; // Test names
+  setup?: TLispValue[];
+  teardown?: TLispValue[];
+  parent?: string; // For nested suites
+}
+
+const suiteRegistry: Map<string, TestSuite> = new Map();
+
+// Track current suite being defined
+let currentSuite: string | null = null;
 
 /**
  * T-Lisp evaluator for executing T-Lisp expressions
@@ -140,6 +164,59 @@ export class TLispEvaluator {
   }
 
   /**
+   * Evaluate assert-type special form
+   * @param elements - List elements (excluding 'assert-type')
+   * @param env - Environment
+   * @returns Either with error or success
+   */
+  private evalAssertType(elements: TLispValue[], env: TLispEnvironment): Either<EvalError, TLispValue> {
+    if (elements.length < 3) {
+      return Either.left({
+        type: 'EvalError',
+        variant: 'RuntimeError',
+        message: "assert-type requires exactly 2 arguments: value and type",
+        details: { expected: 2, actual: elements.length - 1 }
+      });
+    }
+
+    const valueArg = elements[1]; // Will be evaluated
+    const typeArg = elements[2]; // NOT evaluated
+
+    if (typeArg.type !== "symbol") {
+      return Either.left({
+        type: 'EvalError',
+        variant: 'TypeError',
+        message: "assert-type second argument must be a symbol (type name)",
+        details: { argType: typeArg.type }
+      });
+    }
+
+    // Evaluate the value
+    const valueResult = this.eval(valueArg, env);
+    if (Either.isLeft(valueResult)) {
+      return valueResult;
+    }
+
+    const expectedType = typeArg.value as string;
+    const actualType = valueResult.right.type;
+
+    if (actualType !== expectedType) {
+      return Either.left({
+        type: 'EvalError',
+        variant: 'RuntimeError',
+        message: `Assertion failed: expected type ${expectedType}, but got ${actualType}`,
+        details: {
+          expected: expectedType,
+          actual: actualType,
+          value: valueToString(valueResult.right)
+        }
+      });
+    }
+
+    return Either.right(createBoolean(true));
+  }
+
+  /**
    * Evaluate a symbol by looking it up in the environment
    * @param symbol - Symbol to evaluate
    * @param env - Environment for lookup
@@ -220,6 +297,30 @@ export class TLispEvaluator {
           return this.evalDefun(elements, env);
         case "cond":
           return this.evalCond(elements, env, inTailPosition);
+        case "deftest":
+          return this.evalDeftest(elements, env);
+        case "deftest-async":
+          return this.evalDeftestAsync(elements, env);
+        case "deftest-suite":
+          return this.evalDeftestSuite(elements, env);
+        case "suite-setup":
+          return this.evalSuiteSetup(elements, env);
+        case "suite-teardown":
+          return this.evalSuiteTeardown(elements, env);
+        case "deffixture":
+          return this.evalDeffixture(elements, env);
+        case "use-fixtures":
+          return this.evalUseFixtures(elements, env);
+        case "defvar":
+          return this.evalDefvar(elements, env);
+        case "set!":
+          return this.evalSetBang(elements, env);
+        case "assert-type":
+          return this.evalAssertType(elements, env);
+        case "assert-error":
+          return this.evalAssertError(elements, env);
+        case "progn":
+          return this.evalProgn(elements, env, inTailPosition);
         default:
           return this.evalFunctionCall(elements, env, inTailPosition);
       }
@@ -401,22 +502,44 @@ export class TLispEvaluator {
 
   /**
    * Evaluate lambda special form
+   * Supports both 2-arg form (params body) and 3-arg form (params docstring body)
    * @param elements - List elements
    * @param env - Environment
    * @returns Either with error or lambda function
    */
   private evalLambda(elements: TLispValue[], env: TLispEnvironment): Either<EvalError, TLispValue> {
-    if (elements.length !== 3) {
+    if (elements.length !== 3 && elements.length !== 4) {
       return Either.left({
         type: 'EvalError',
         variant: 'SyntaxError',
-        message: "lambda requires exactly 2 arguments: parameters and body",
-        details: { expected: 3, actual: elements.length }
+        message: "lambda requires 2 or 3 arguments: parameters, [docstring], and body",
+        details: { expected: "3 or 4", actual: elements.length }
       });
     }
 
     const parameters = elements[1];
-    const body = elements[2];
+    
+    let docstring: string | undefined;
+    let body: TLispValue;
+    
+    if (elements.length === 4) {
+      // 3-arg form: (lambda params docstring body)
+      const doc = elements[2];
+      body = elements[3];
+      
+      if (doc.type !== "string") {
+        return Either.left({
+          type: 'EvalError',
+          variant: 'TypeError',
+          message: "lambda docstring must be a string",
+          details: { docstringType: doc.type }
+        });
+      }
+      docstring = doc.value as string;
+    } else {
+      // 2-arg form: (lambda params body)
+      body = elements[2];
+    }
 
     if (!parameters || !body) {
       return Either.left({
@@ -447,6 +570,9 @@ export class TLispEvaluator {
         });
       }
     }
+
+    // Extract parameter names for signature
+    const paramNames = paramList.map(p => p.type === "symbol" ? p.value as string : "?");
 
     // Create closure with tail-call optimization support
     const lambdaFunction = (args: TLispValue[]): Either<EvalError, TLispValue> => {
@@ -483,28 +609,57 @@ export class TLispEvaluator {
       return result;
     };
 
-    return Either.right(createFunction(lambdaFunction));
+    const funcValue = createFunction(lambdaFunction);
+    
+    // Add metadata to the function
+    if (docstring) {
+      funcValue.docstring = docstring;
+    }
+    funcValue.parameters = paramNames;
+
+    return Either.right(funcValue);
   }
 
   /**
    * Evaluate defun special form
+   * Supports both 3-arg form (name params body) and 4-arg form (name params docstring body)
    * @param elements - List elements
    * @param env - Environment
    * @returns Either with error or function symbol
    */
   private evalDefun(elements: TLispValue[], env: TLispEnvironment): Either<EvalError, TLispValue> {
-    if (elements.length !== 4) {
+    if (elements.length !== 4 && elements.length !== 5) {
       return Either.left({
         type: 'EvalError',
         variant: 'SyntaxError',
-        message: "defun requires exactly 3 arguments: name, parameters, and body",
-        details: { expected: 4, actual: elements.length }
+        message: "defun requires 3 or 4 arguments: name, parameters, [docstring], and body",
+        details: { expected: "4 or 5", actual: elements.length }
       });
     }
 
     const name = elements[1];
     const parameters = elements[2];
-    const body = elements[3];
+    
+    let docstring: TLispValue | undefined;
+    let body: TLispValue;
+    
+    if (elements.length === 5) {
+      // 4-arg form: (defun name params docstring body)
+      docstring = elements[3];
+      body = elements[4];
+      
+      if (docstring.type !== "string") {
+        return Either.left({
+          type: 'EvalError',
+          variant: 'TypeError',
+          message: "defun docstring must be a string",
+          details: { docstringType: docstring.type }
+        });
+      }
+    } else {
+      // 3-arg form: (defun name params body)
+      body = elements[3];
+    }
 
     if (!name || !parameters || !body) {
       return Either.left({
@@ -524,14 +679,38 @@ export class TLispEvaluator {
       });
     }
 
-    // Create lambda and bind it to the name
-    const lambdaExpr = createList([createSymbol("lambda"), parameters, body]);
+    // Extract parameter names for signature
+    let paramNames: string[] = [];
+    if (parameters.type === "list") {
+      const paramList = parameters.value as TLispValue[];
+      paramNames = paramList.map(p => p.type === "symbol" ? p.value as string : "?");
+    }
+
+    // Create lambda with docstring if provided
+    const lambdaExpr = docstring 
+      ? createList([createSymbol("lambda"), parameters, docstring, body])
+      : createList([createSymbol("lambda"), parameters, body]);
+      
     const lambdaFunctionResult = this.eval(lambdaExpr, env);
     if (Either.isLeft(lambdaFunctionResult)) {
       return lambdaFunctionResult;
     }
 
     const lambdaFunction = lambdaFunctionResult.right;
+    
+    // Add metadata to the function
+    if (lambdaFunction.type === "function") {
+      lambdaFunction.name = name.value as string;
+      if (docstring && docstring.type === "string") {
+        lambdaFunction.docstring = docstring.value;
+      }
+      lambdaFunction.parameters = paramNames;
+    }
+
+    // Register function for coverage tracking (US-0.6.6)
+    if (isCoverageEnabled()) {
+      registerFunction(name.value as string, parameters);
+    }
 
     env.define(name.value as string, lambdaFunction);
 
@@ -993,6 +1172,14 @@ export class TLispEvaluator {
       }
 
       const args = argsResults.map(r => r.right);
+
+      // Track function call for coverage (US-0.6.6)
+      // Try to get function name from the symbol being called
+      if (isCoverageEnabled() && funcExpr.type === "symbol") {
+        const symbolName = funcExpr.value as string;
+        markFunctionCovered(symbolName);
+      }
+
       return this.evalFunctionCallInternal(func, args, env);
     }
   }
@@ -1043,6 +1230,726 @@ export class TLispEvaluator {
       message: `Cannot call non-function: ${func.type}`,
       details: { funcType: func.type, args }
     });
+  }
+
+  /**
+   * Evaluate deftest special form
+   * @param elements - List elements
+   * @param env - Environment
+   * @returns Either with error or function symbol
+   */
+  private evalDeftest(elements: TLispValue[], env: TLispEnvironment): Either<EvalError, TLispValue> {
+    if (elements.length < 3) {
+      return Either.left({
+        type: 'EvalError',
+        variant: 'SyntaxError',
+        message: "deftest requires at least 2 arguments: name, parameters, and body",
+        details: { expectedMin: 3, actual: elements.length }
+      });
+    }
+
+    const name = elements[1];
+    const parameters = elements[2];
+    const body = elements.length > 3 ? elements[3] : createNil(); // For now, just take the first body expression
+
+    if (!name || !parameters) {
+      return Either.left({
+        type: 'EvalError',
+        variant: 'SyntaxError',
+        message: "deftest missing required arguments",
+        details: { hasName: !!name, hasParameters: !!parameters }
+      });
+    }
+
+    if (name.type !== "symbol") {
+      return Either.left({
+        type: 'EvalError',
+        variant: 'TypeError',
+        message: "deftest name must be a symbol",
+        details: { nameType: name.type }
+      });
+    }
+
+    if (parameters.type !== "list") {
+      return Either.left({
+        type: 'EvalError',
+        variant: 'TypeError',
+        message: "deftest parameters must be a list",
+        details: { parametersType: parameters.type }
+      });
+    }
+
+    // Extract test name
+    const testName = name.value as string;
+
+    // Store the body expressions (from index 3 onwards)
+    const testBody = elements.slice(3);
+
+    // Store test in the registry
+    testRegistry.set(testName, { body: testBody, name: testName, params: parameters });
+
+    // Return the test name as a symbol to indicate success
+    return Either.right(name);
+  }
+
+  /**
+   * Evaluate deftest-async special form
+   * @param elements - List elements
+   * @param env - Environment
+   * @returns Either with error or function symbol
+   */
+  private evalDeftestAsync(elements: TLispValue[], env: TLispEnvironment): Either<EvalError, TLispValue> {
+    if (elements.length < 3) {
+      return Either.left({
+        type: 'EvalError',
+        variant: 'SyntaxError',
+        message: "deftest-async requires at least 2 arguments: name, parameters (with 'done'), and body",
+        details: { expectedMin: 3, actual: elements.length }
+      });
+    }
+
+    const name = elements[1];
+    const parameters = elements[2];
+
+    if (!name || !parameters) {
+      return Either.left({
+        type: 'EvalError',
+        variant: 'SyntaxError',
+        message: "deftest-async missing required arguments",
+        details: { hasName: !!name, hasParameters: !!parameters }
+      });
+    }
+
+    if (name.type !== "symbol") {
+      return Either.left({
+        type: 'EvalError',
+        variant: 'TypeError',
+        message: "deftest-async name must be a symbol",
+        details: { nameType: name.type }
+      });
+    }
+
+    if (parameters.type !== "list") {
+      return Either.left({
+        type: 'EvalError',
+        variant: 'TypeError',
+        message: "deftest-async parameters must be a list",
+        details: { parametersType: parameters.type }
+      });
+    }
+
+    // Extract test name
+    const testName = name.value as string;
+
+    // Store the body expressions (from index 3 onwards)
+    const testBody = elements.slice(3);
+
+    // Store test in the registry with async flag
+    testRegistry.set(testName, { body: testBody, name: testName, params: parameters, isAsync: true });
+
+    // Return the test name as a symbol to indicate success
+    return Either.right(name);
+  }
+
+  /**
+   * Evaluate deftest-suite special form
+   * @param elements - List elements
+   * @param env - Environment
+   * @returns Either with error or suite name
+   */
+  private evalDeftestSuite(elements: TLispValue[], env: TLispEnvironment): Either<EvalError, TLispValue> {
+    if (elements.length < 2) {
+      return Either.left({
+        type: 'EvalError',
+        variant: 'SyntaxError',
+        message: "deftest-suite requires at least 1 argument: suite name",
+        details: { expectedMin: 2, actual: elements.length }
+      });
+    }
+
+    const nameArg = elements[1];
+    if (!nameArg || (nameArg.type !== "string" && nameArg.type !== "symbol")) {
+      return Either.left({
+        type: 'EvalError',
+        variant: 'TypeError',
+        message: "deftest-suite name must be a string or symbol",
+        details: { nameType: nameArg?.type }
+      });
+    }
+
+    const suiteName = nameArg.value as string;
+
+    // Parse optional description
+    let description: string | undefined;
+    let contentStart = 2;
+
+    if (elements.length > 2 && elements[2].type === "string") {
+      description = elements[2].value as string;
+      contentStart = 3;
+    }
+
+    // Create suite
+    const suite: TestSuite = {
+      name: suiteName,
+      description,
+      tests: [],
+      parent: currentSuite || undefined
+    };
+
+    // Set as current suite for nested definitions
+    const previousSuite = currentSuite;
+    currentSuite = suiteName;
+
+    // Process suite body
+    for (let i = contentStart; i < elements.length; i++) {
+      const element = elements[i];
+
+      // Check for suite-setup
+      if (element.type === "list" && element.value.length > 0) {
+        const first = element.value[0];
+        if (first.type === "symbol" && first.value === "suite-setup") {
+          suite.setup = element.value.slice(1);
+          continue;
+        }
+        if (first.type === "symbol" && first.value === "suite-teardown") {
+          suite.teardown = element.value.slice(1);
+          continue;
+        }
+        if (first.type === "symbol" && first.value === "deftest") {
+          // Execute the deftest to register it in testRegistry
+          const testResult = this.evalDeftest(element.value, env);
+          if (Either.isLeft(testResult)) {
+            // Log error but continue
+            console.warn(`Failed to define test in suite: ${testResult.left.message}`);
+          } else {
+            // Add test to suite's test list
+            const testName = element.value[1];
+            if (testName && testName.type === "symbol") {
+              suite.tests.push(testName.value as string);
+            }
+          }
+        }
+        if (first.type === "symbol" && first.value === "deftest-suite") {
+          // Execute nested suite definition
+          const suiteResult = this.evalDeftestSuite(element.value, env);
+          if (Either.isLeft(suiteResult)) {
+            console.warn(`Failed to define nested suite: ${suiteResult.left.message}`);
+          } else {
+            // Add nested suite to parent's test list
+            const nestedName = element.value[1];
+            if (nestedName && (nestedName.type === "string" || nestedName.type === "symbol")) {
+              suite.tests.push(nestedName.value as string);
+            }
+          }
+        }
+      }
+    }
+
+    // Restore previous suite
+    currentSuite = previousSuite;
+
+    // Register suite
+    suiteRegistry.set(suiteName, suite);
+
+    // Return suite name
+    return Either.right(createString(suiteName));
+  }
+
+  /**
+   * Evaluate suite-setup special form
+   * @param elements - List elements
+   * @param env - Environment
+   * @returns Either with error or success
+   */
+  private evalSuiteSetup(elements: TLispValue[], env: TLispEnvironment): Either<EvalError, TLispValue> {
+    if (!currentSuite) {
+      return Either.left({
+        type: 'EvalError',
+        variant: 'SyntaxError',
+        message: "suite-setup must be used inside deftest-suite",
+        details: {}
+      });
+    }
+
+    // suite-setup is handled by deftest-suite, this is just a placeholder
+    // The actual setup body is stored in the suite object
+    return Either.right(createNil());
+  }
+
+  /**
+   * Evaluate suite-teardown special form
+   * @param elements - List elements
+   * @param env - Environment
+   * @returns Either with error or success
+   */
+  private evalSuiteTeardown(elements: TLispValue[], env: TLispEnvironment): Either<EvalError, TLispValue> {
+    if (!currentSuite) {
+      return Either.left({
+        type: 'EvalError',
+        variant: 'SyntaxError',
+        message: "suite-teardown must be used inside deftest-suite",
+        details: {}
+      });
+    }
+
+    // suite-teardown is handled by deftest-suite, this is just a placeholder
+    // The actual teardown body is stored in the suite object
+    return Either.right(createNil());
+  }
+
+  /**
+   * Evaluate deffixture special form
+   * @param elements - List elements
+   * @param env - Environment
+   * @returns Either with error or fixture name
+   */
+  private evalDeffixture(elements: TLispValue[], env: TLispEnvironment): Either<EvalError, TLispValue> {
+    if (elements.length < 3) {
+      return Either.left({
+        type: 'EvalError',
+        variant: 'SyntaxError',
+        message: "deffixture requires at least 2 arguments: name, parameters, and body",
+        details: { expectedMin: 3, actual: elements.length }
+      });
+    }
+
+    const name = elements[1];
+    const parameters = elements[2];
+
+    if (!name || !parameters) {
+      return Either.left({
+        type: 'EvalError',
+        variant: 'SyntaxError',
+        message: "deffixture missing required arguments",
+        details: { hasName: !!name, hasParameters: !!parameters }
+      });
+    }
+
+    if (name.type !== "symbol") {
+      return Either.left({
+        type: 'EvalError',
+        variant: 'TypeError',
+        message: "deffixture name must be a symbol",
+        details: { nameType: name.type }
+      });
+    }
+
+    if (parameters.type !== "list") {
+      return Either.left({
+        type: 'EvalError',
+        variant: 'TypeError',
+        message: "deffixture parameters must be a list",
+        details: { parametersType: parameters.type }
+      });
+    }
+
+    // Extract fixture name
+    const fixtureName = name.value as string;
+
+    // Parse optional scope keyword from body
+    let scope: 'each' | 'once' | 'all' = 'each';
+    let bodyStartIndex = 3;
+
+    // Check if first body element is a scope keyword list like (:scope each)
+    if (elements.length > 3 && elements[3].type === "list") {
+      const scopeList = elements[3].value as TLispValue[];
+      if (scopeList.length >= 2) {
+        const keyword = scopeList[0];
+        const scopeValue = scopeList[1];
+        if (keyword.type === "symbol" && keyword.value === "scope" && scopeValue.type === "symbol") {
+          const scopeStr = scopeValue.value as string;
+          if (scopeStr === "each" || scopeStr === "once" || scopeStr === "all") {
+            scope = scopeStr;
+            bodyStartIndex = 4;
+          }
+        }
+      }
+    }
+
+    // Extract setup, teardown, and body from remaining elements
+    let setupBody: TLispValue[] = [];
+    let teardownBody: TLispValue[] = [];
+    let body: TLispValue[] = [];
+
+    for (let i = bodyStartIndex; i < elements.length; i++) {
+      const arg = elements[i];
+      if (arg.type === "list") {
+        const listItems = arg.value as TLispValue[];
+        if (listItems.length > 0) {
+          const first = listItems[0];
+          if (first.type === "symbol") {
+            if (first.value === "setup") {
+              setupBody = listItems.slice(1);
+            } else if (first.value === "teardown") {
+              teardownBody = listItems.slice(1);
+            } else {
+              // Regular body expression
+              body.push(arg);
+            }
+          } else {
+            // Regular body expression (non-symbol first element)
+            body.push(arg);
+          }
+        }
+      } else {
+        // Non-list body expression
+        body.push(arg);
+      }
+    }
+
+    // Import the necessary types and functions from test-framework
+    // We need to access the fixture registry, so we'll use a global approach
+    // The fixture registry is in test-framework.ts, so we need to make it accessible
+
+    // For now, let's use a workaround: store fixture info in the global environment
+    // This isn't ideal but will work for the MVP
+    const fixtureData = {
+      name: fixtureName,
+      params: parameters,
+      body,
+      setupBody,
+      teardownBody,
+      scope
+    };
+
+    // Store in global environment as a special variable
+    // The test-framework will access this
+    (globalThis as any).__deffixture_data__ = (globalThis as any).__deffixture_data__ || new Map();
+    (globalThis as any).__deffixture_data__.set(fixtureName, fixtureData);
+
+    // Return the fixture name as a symbol to indicate success
+    return Either.right(name);
+  }
+
+  /**
+   * Evaluate use-fixtures special form
+   * @param elements - List elements (excluding 'use-fixtures')
+   * @param env - Environment
+   * @returns Either with error or success
+   */
+  private evalUseFixtures(elements: TLispValue[], env: TLispEnvironment): Either<EvalError, TLispValue> {
+    if (elements.length < 2) {
+      return Either.left({
+        type: 'EvalError',
+        variant: 'RuntimeError',
+        message: "use-fixtures requires at least 1 argument: fixture name",
+        details: { expectedMin: 2, actual: elements.length }
+      });
+    }
+
+    // Collect fixture names from arguments (elements[0] is 'use-fixtures', elements[1+] are args)
+    const fixtureNames: string[] = [];
+    for (let i = 1; i < elements.length; i++) {
+      const arg = elements[i];
+      if (arg.type === "symbol") {
+        fixtureNames.push(arg.value as string);
+      } else if (arg.type === "string") {
+        fixtureNames.push(arg.value as string);
+      } else {
+        return Either.left({
+          type: 'EvalError',
+          variant: 'TypeError',
+          message: "use-fixtures arguments must be symbols or strings (fixture names)",
+          details: { argType: arg.type }
+        });
+      }
+    }
+
+    // Get fixtures from global storage
+    const globalFixtures = (globalThis as any).__deffixture_data__;
+    if (!globalFixtures) {
+      return Either.right(createBoolean(true)); // No fixtures to apply
+    }
+
+    // Apply each fixture in order
+    for (const name of fixtureNames) {
+      const fixtureData = globalFixtures.get(name);
+      if (!fixtureData) {
+        return Either.left({
+          type: 'EvalError',
+          variant: 'RuntimeError',
+          message: `Fixture '${name}' not found`,
+          details: { fixtureName: name }
+        });
+      }
+
+      // Execute fixture body
+      for (const expr of fixtureData.body || []) {
+        const result = this.eval(expr, env);
+        if (Either.isLeft(result)) {
+          return result;
+        }
+      }
+
+      // Execute fixture setup
+      for (const expr of fixtureData.setupBody || []) {
+        const result = this.eval(expr, env);
+        if (Either.isLeft(result)) {
+          return result;
+        }
+      }
+
+      // Store teardown for later - we'll need a way to track this
+      // For now, store in a special variable in the environment
+      const teardowns = env.lookup("__fixture_teardowns__") || createList([]);
+      const teardownList = teardowns.type === "list" ? [...teardowns.value] : [];
+      teardownList.push({ fixture: name, teardown: fixtureData.teardownBody || [] });
+      env.define("__fixture_teardowns__", createList(teardownList));
+    }
+
+    return Either.right(createBoolean(true));
+  }
+
+  /**
+   * Evaluate defvar special form
+   * @param elements - List elements (excluding 'defvar')
+   * @param env - Environment
+   * @returns Either with error or the defined value
+   */
+  private evalDefvar(elements: TLispValue[], env: TLispEnvironment): Either<EvalError, TLispValue> {
+    if (elements.length < 3) {
+      return Either.left({
+        type: 'EvalError',
+        variant: 'RuntimeError',
+        message: "defvar requires exactly 2 arguments: name and value",
+        details: { expected: 2, actual: elements.length - 1 }
+      });
+    }
+
+    const nameArg = elements[1]; // Not evaluated
+    const valueArg = elements[2]; // Will be evaluated
+
+    if (!nameArg || nameArg.type !== "symbol") {
+      return Either.left({
+        type: 'EvalError',
+        variant: 'TypeError',
+        message: "defvar first argument must be a symbol (variable name)",
+        details: { argType: nameArg?.type }
+      });
+    }
+
+    const varName = nameArg.value as string;
+
+    // Evaluate the value expression
+    const valueResult = this.eval(valueArg, env);
+    if (Either.isLeft(valueResult)) {
+      return valueResult;
+    }
+
+    // Define the variable in the global environment
+    // We need to find the root environment (the top-level global env)
+    // For now, define in the current environment
+    // TODO: Find the actual global environment
+    env.define(varName, valueResult.right);
+
+    return Either.right(valueResult.right);
+  }
+
+  /**
+   * Evaluate set! special form
+   * @param elements - List elements (excluding 'set!')
+   * @param env - Environment
+   * @returns Either with error or the new value
+   */
+  private evalSetBang(elements: TLispValue[], env: TLispEnvironment): Either<EvalError, TLispValue> {
+    if (elements.length < 3) {
+      return Either.left({
+        type: 'EvalError',
+        variant: 'RuntimeError',
+        message: "set! requires exactly 2 arguments: name and new value",
+        details: { expected: 2, actual: elements.length - 1 }
+      });
+    }
+
+    const nameArg = elements[1]; // Not evaluated
+    const valueArg = elements[2]; // Will be evaluated
+
+    if (!nameArg || nameArg.type !== "symbol") {
+      return Either.left({
+        type: 'EvalError',
+        variant: 'TypeError',
+        message: "set! first argument must be a symbol (variable name)",
+        details: { argType: nameArg?.type }
+      });
+    }
+
+    const varName = nameArg.value as string;
+
+    // Evaluate the new value expression
+    const valueResult = this.eval(valueArg, env);
+    if (Either.isLeft(valueResult)) {
+      return valueResult;
+    }
+
+    // Set the variable in the environment
+    try {
+      env.set(varName, valueResult.right);
+      return Either.right(valueResult.right);
+    } catch (error) {
+      return Either.left({
+        type: 'EvalError',
+        variant: 'RuntimeError',
+        message: `set!: variable '${varName}' is not defined`,
+        details: { varName, error: error instanceof Error ? error.message : String(error) }
+      });
+    }
+  }
+
+  /**
+   * Evaluate assert-type special form
+   * @param elements - List elements (excluding 'assert-type')
+   * @param env - Environment
+   * @returns Either with error or success
+   */
+  private evalAssertType(elements: TLispValue[], env: TLispEnvironment): Either<EvalError, TLispValue> {
+    if (elements.length < 3) {
+      return Either.left({
+        type: 'EvalError',
+        variant: 'RuntimeError',
+        message: "assert-type requires exactly 2 arguments: value and type",
+        details: { expected: 2, actual: elements.length - 1 }
+      });
+    }
+
+    const valueArg = elements[1]; // Will be evaluated
+    const typeArg = elements[2]; // NOT evaluated
+
+    if (typeArg.type !== "symbol") {
+      return Either.left({
+        type: 'EvalError',
+        variant: 'TypeError',
+        message: "assert-type second argument must be a symbol (type name)",
+        details: { argType: typeArg.type }
+      });
+    }
+
+    // Evaluate the value
+    const valueResult = this.eval(valueArg, env);
+    if (Either.isLeft(valueResult)) {
+      return valueResult;
+    }
+
+    const expectedType = typeArg.value as string;
+    const actualType = valueResult.right.type;
+
+    if (actualType !== expectedType) {
+      return Either.left({
+        type: 'EvalError',
+        variant: 'RuntimeError',
+        message: `Assertion failed: expected type ${expectedType}, but got ${actualType}`,
+        details: {
+          expected: expectedType,
+          actual: actualType,
+          value: valueToString(valueResult.right)
+        }
+      });
+    }
+
+    return Either.right(createBoolean(true));
+  }
+
+  /**
+   * Get test definition by name
+   * @param name - Name of the test
+   * @returns Test definition or undefined if not found
+   */
+  getTestDefinition(name: string): { body: TLispValue[], name: string, params: TLispValue } | undefined {
+    return testRegistry.get(name);
+  }
+
+  /**
+   * Get all test names
+   * @returns Array of test names
+   */
+  getAllTestNames(): string[] {
+    return Array.from(testRegistry.keys());
+  }
+
+  /**
+   * Get suite definition by name
+   * @param name - Name of the suite
+   * @returns Suite definition or undefined if not found
+   */
+  getSuiteDefinition(name: string): TestSuite | undefined {
+    return suiteRegistry.get(name);
+  }
+
+  /**
+   * Get all suite names
+   * @returns Array of suite names
+   */
+  getAllSuiteNames(): string[] {
+    return Array.from(suiteRegistry.keys());
+  }
+
+  /**
+   * Evaluate assert-error special form
+   * @param elements - List elements
+   * @param env - Environment
+   * @returns Either with error or boolean result
+   */
+  private evalAssertError(elements: TLispValue[], env: TLispEnvironment): Either<EvalError, TLispValue> {
+    if (elements.length !== 2) {
+      return Either.left({
+        type: 'EvalError',
+        variant: 'SyntaxError',
+        message: "assert-error requires exactly 1 argument: form",
+        details: { expected: 2, actual: elements.length } // 2 because first element is 'assert-error'
+      });
+    }
+
+    const form = elements[1];
+
+    // Try to evaluate the form
+    const result = this.eval(form, env);
+
+    if (Either.isLeft(result)) {
+      // Form raised an error as expected - return true
+      return Either.right(createBoolean(true));
+    } else {
+      // Form succeeded when it should have failed - return an error
+      return Either.left({
+        type: 'EvalError',
+        variant: 'RuntimeError',
+        message: `Expected error but form evaluated successfully to ${valueToString(result.right)}`,
+        details: { result: valueToString(result.right) }
+      });
+    }
+  }
+
+  /**
+   * Evaluate progn special form (US-1.7.1)
+   * Evaluates each expression in sequence and returns the value of the last one
+   * @param elements - List elements (excluding 'progn')
+   * @param env - Environment
+   * @param inTailPosition - Whether this evaluation is in tail position
+   * @returns Either with error or result of last expression
+   */
+  private evalProgn(elements: TLispValue[], env: TLispEnvironment, inTailPosition: boolean = false): Either<EvalError, EvalResult> {
+    // progn takes any number of arguments, evaluates them sequentially
+    // and returns the value of the last expression
+    const bodyExprs = elements.slice(1);
+
+    if (bodyExprs.length === 0) {
+      return Either.right(createNil());
+    }
+
+    // Evaluate all expressions sequentially
+    let lastResult: Either<EvalError, EvalResult> = Either.right(createNil());
+
+    for (let i = 0; i < bodyExprs.length; i++) {
+      const expr = bodyExprs[i];
+
+      // Last expression is in tail position
+      const isInTailPosition = inTailPosition && (i === bodyExprs.length - 1);
+      lastResult = this.evalInternal(expr, env, isInTailPosition);
+
+      if (Either.isLeft(lastResult)) {
+        return lastResult;
+      }
+    }
+
+    return lastResult;
   }
 }
 
@@ -1386,7 +2293,12 @@ export const createEvaluatorWithBuiltins = (): { evaluator: TLispEvaluator; env:
 
     return Either.right(createList(listElements.slice(1)));
   }, "cdr"));
-  
+
+  // List constructor
+  env.define("list", createFunction((args: TLispValue[]) => {
+    return Either.right(createList(args));
+  }, "list"));
+
   // Predicate functions
   env.define("null", createFunction((args: TLispValue[]) => {
     if (args.length !== 1) {
@@ -2486,6 +3398,32 @@ export const createEvaluatorWithBuiltins = (): { evaluator: TLispEvaluator; env:
     console.log(output);
     return Either.right(createNil());
   }, "print"));
+
+  // Register standard library functions
+  const interpreterMock = {
+    defineBuiltin: (name: string, fn: any) => {
+      env.define(name, createFunction(fn, name));
+    },
+    globalEnv: env,
+    eval: (expr: TLispValue) => evaluator.eval(expr, env),
+    execute: (source: string) => {
+      // Simple execute implementation for the mock
+      const parser = new TLispParser();
+      const result = parser.parse(source);
+      if (Either.isLeft(result)) {
+        return result;
+      }
+      return evaluator.eval(result.right, env);
+    },
+    getTestDefinition: (name: string) => evaluator.getTestDefinition(name),
+    getAllTestNames: () => evaluator.getAllTestNames(),
+    getSuiteDefinition: (name: string) => evaluator.getSuiteDefinition(name),
+    getAllSuiteNames: () => evaluator.getAllSuiteNames()
+  } as any;
+  registerStdlibFunctions(interpreterMock as any);
+
+  // Register testing framework functions
+  registerTestingFramework(interpreterMock as any);
 
   return { evaluator, env };
 };

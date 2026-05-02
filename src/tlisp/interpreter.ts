@@ -8,6 +8,7 @@ import { TLispParser } from "./parser.ts";
 import { TLispEvaluator, createEvaluatorWithBuiltins, type EvalError } from "./evaluator.ts";
 import { createFunction } from "./values.ts";
 import { Either } from "../utils/task-either.ts";
+import { isCoverageEnabled, registerFunction } from "./test-coverage.ts";
 
 /**
  * T-Lisp interpreter implementation
@@ -107,5 +108,31 @@ export class TLispInterpreterImpl implements TLispInterpreter {
   defineBuiltin(name: string, fn: TLispFunctionImpl): void {
     const func = createFunction(fn, name);
     this.globalEnv.define(name, func);
+
+    // Register builtin function for coverage tracking (US-0.6.6)
+    if (isCoverageEnabled()) {
+      registerFunction(name, undefined, undefined, true); // Mark as builtin
+    }
+  }
+
+  /**
+   * Get test definition by name
+   * @param name - Name of the test
+   * @returns Test definition or undefined if not found
+   */
+  getTestDefinition(name: string): { body: TLispValue[], name: string, params: TLispValue } | undefined {
+    // Access the evaluator's test registry
+    // Since the evaluator is private, we need to add a method to access the registry
+    // This is a workaround - ideally we'd have a cleaner interface
+    return (this.evaluator as any).getTestDefinition?.(name);
+  }
+
+  /**
+   * Get all test names
+   * @returns Array of test names
+   */
+  getAllTestNames(): string[] {
+    // Access the evaluator's test registry
+    return (this.evaluator as any).getAllTestNames?.() || [];
   }
 }

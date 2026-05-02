@@ -13,6 +13,24 @@ import { createCursorOps } from "./api/cursor-ops.ts";
 import { createModeOps } from "./api/mode-ops.ts";
 import { createFileOps } from "./api/file-ops.ts";
 import { createBindingsOps } from "./api/bindings-ops.ts";
+import { createWordOps } from "./api/word-ops.ts";
+import { createLineOps } from "./api/line-ops.ts";
+import { createDeleteOps, setDeleteRegister } from "./api/delete-ops.ts";
+import { createSearchOps } from "./api/search-ops.ts";
+import { createYankOps } from "./api/yank-ops.ts";
+import { createChangeOps } from "./api/change-ops.ts";
+import { createUndoRedoOps } from "./api/undo-redo-ops.ts";
+import { createCountOps } from "./api/count-ops.ts";
+import { createVisualOps, getVisualSelection, setVisualSelection, clearVisualSelection } from "./api/visual-ops.ts";
+import { createTextObjectsOps } from "./api/text-objects-ops.ts";
+import { createMinibufferOps } from "./api/minibuffer-ops.ts";
+import { createJumpOps } from "./api/jump-ops.ts";
+import { createKillRingOps } from "./api/kill-ring.ts";
+import { createYankPopOps } from "./api/yank-pop-ops.ts";
+import { createEvilIntegrationOps } from "./api/evil-integration.ts";
+import { createLSPDiagnosticsOps } from "./api/lsp-diagnostics.ts";
+import { createPluginOps } from "./api/plugin-ops.ts";
+import { createDocumentationOps } from "./api/documentation.ts";
 
 /**
  * T-Lisp function implementation that returns Either for error handling
@@ -47,6 +65,7 @@ export interface TlispEditorState {
   mxCommand: string;  // M-x command input
   cursorFocus: 'buffer' | 'command';  // Track where cursor focus should be
   operations?: EditorOperations;  // Optional operations reference
+  lspDiagnostics?: import("../core/types.ts").LSPDiagnostic[];  // LSP diagnostics (US-3.1.2)
 }
 
 /**
@@ -72,13 +91,20 @@ export function createEditorAPI(state: TlispEditorState): Map<string, TLispFunct
     api.set(key, value);
   }
 
-  // Add cursor operations
+  // Add cursor operations with visual selection update support (US-1.7.1)
   const cursorOps = createCursorOps(
     () => state.cursorLine,
     (line) => { state.cursorLine = line; },
     () => state.cursorColumn,
     (column) => { state.cursorColumn = column; },
-    () => state.currentBuffer
+    () => state.currentBuffer,
+    () => state.mode, // getMode - for visual selection updates
+    () => { // updateVisualSelection callback
+      const selection = getVisualSelection();
+      if (selection) {
+        selection.end = { line: state.cursorLine, column: state.cursorColumn };
+      }
+    }
   );
   for (const [key, value] of cursorOps.entries()) {
     api.set(key, value);
@@ -128,5 +154,213 @@ export function createEditorAPI(state: TlispEditorState): Map<string, TLispFunct
     api.set(key, value);
   }
 
+  // Add word navigation operations
+  const wordOps = createWordOps(
+    () => state.currentBuffer,
+    () => state.cursorLine,
+    (line) => { state.cursorLine = line; },
+    () => state.cursorColumn,
+    (column) => { state.cursorColumn = column; },
+    () => state.mode, // getMode
+    () => { // updateVisualSelection
+      const selection = getVisualSelection();
+      if (selection) {
+        selection.end = { line: state.cursorLine, column: state.cursorColumn };
+      }
+    }
+  );
+  for (const [key, value] of wordOps.entries()) {
+    api.set(key, value);
+  }
+
+  // Add line navigation operations
+  const lineOps = createLineOps(
+    () => state.currentBuffer,
+    () => state.cursorLine,
+    (line) => { state.cursorLine = line; },
+    () => state.cursorColumn,
+    (column) => { state.cursorColumn = column; }
+  );
+  for (const [key, value] of lineOps.entries()) {
+    api.set(key, value);
+  }
+
+  // Add delete operator operations
+  const deleteOps = createDeleteOps(
+    () => state.currentBuffer,
+    (buffer) => { state.currentBuffer = buffer; },
+    () => state.cursorLine,
+    (line) => { state.cursorLine = line; },
+    () => state.cursorColumn,
+    (column) => { state.cursorColumn = column; }
+  );
+  for (const [key, value] of deleteOps.entries()) {
+    api.set(key, value);
+  }
+
+  // Add yank operator operations
+  const yankOps = createYankOps(
+    () => state.currentBuffer,
+    (buffer) => { state.currentBuffer = buffer; },
+    () => state.cursorLine,
+    (line) => { state.cursorLine = line; },
+    () => state.cursorColumn,
+    (column) => { state.cursorColumn = column; }
+  );
+  for (const [key, value] of yankOps.entries()) {
+    api.set(key, value);
+  }
+
+  // Add change operator operations
+  const changeOps = createChangeOps(
+    () => state.currentBuffer,
+    (buffer) => { state.currentBuffer = buffer; },
+    () => state.cursorLine,
+    (line) => { state.cursorLine = line; },
+    () => state.cursorColumn,
+    (column) => { state.cursorColumn = column; },
+    (mode) => { state.mode = mode; },
+    setDeleteRegister
+  );
+  for (const [key, value] of changeOps.entries()) {
+    api.set(key, value);
+  }
+
+  // Add undo/redo operations
+  const undoRedoOps = createUndoRedoOps(
+    () => state.currentBuffer,
+    (buffer) => { state.currentBuffer = buffer; },
+    () => state.cursorLine,
+    (line) => { state.cursorLine = line; },
+    () => state.cursorColumn,
+    (column) => { state.cursorColumn = column; },
+    () => state.statusMessage,
+    (msg) => { state.statusMessage = msg; }
+  );
+  for (const [key, value] of undoRedoOps.entries()) {
+    api.set(key, value);
+  }
+
+  // Add search operations
+  const searchOps = createSearchOps(
+    () => state.currentBuffer,
+    () => state.cursorLine,
+    (line) => { state.cursorLine = line; },
+    () => state.cursorColumn,
+    (column) => { state.cursorColumn = column; },
+    (message) => { state.statusMessage = message; }
+  );
+  for (const [key, value] of searchOps.entries()) {
+    api.set(key, value);
+  }
+
+  // Add count prefix operations
+  // Note: These are integrated differently as they need editor instance access
+  // The actual registration happens in editor.ts's initializeAPI method
+
+  // Add visual mode operations
+  const visualOps = createVisualOps(
+    () => state.currentBuffer,
+    (buffer) => { state.currentBuffer = buffer; },
+    () => state.cursorLine,
+    () => state.cursorColumn,
+    (line) => { state.cursorLine = line; },
+    (column) => { state.cursorColumn = column; },
+    () => state.mode,
+    (mode) => { state.mode = mode; },
+    (msg) => { state.statusMessage = msg; }
+  );
+  for (const [key, value] of visualOps.entries()) {
+    api.set(key, value);
+  }
+
+  // Add text object operations
+  const textObjectsOps = createTextObjectsOps(
+    () => state.currentBuffer,
+    (buffer) => { state.currentBuffer = buffer; },
+    () => state.cursorLine,
+    () => state.cursorColumn,
+    (mode) => { state.mode = mode; }
+  );
+  for (const [key, value] of textObjectsOps.entries()) {
+    api.set(key, value);
+  }
+
+  // Add jump operations (US-1.6.1)
+  const jumpOps = createJumpOps(
+    () => state.currentBuffer,
+    () => state.cursorLine,
+    (line) => { state.cursorLine = line; },
+    () => state.cursorColumn,
+    (column) => { state.cursorColumn = column; }
+  );
+  for (const [key, value] of jumpOps.entries()) {
+    api.set(key, value);
+  }
+
+  // Add kill ring operations (US-1.9.1)
+  const killRingOps = createKillRingOps();
+  for (const [key, value] of killRingOps.entries()) {
+    api.set(key, value);
+  }
+
+  // Add evil integration operations (US-1.9.3)
+  const evilIntegrationOps = createEvilIntegrationOps();
+  for (const [key, value] of evilIntegrationOps.entries()) {
+    api.set(key, value);
+  }
+
+  // Add yank-pop operations (US-1.9.2)
+  const yankPopOps = createYankPopOps(
+    () => state.currentBuffer,
+    (buffer) => { state.currentBuffer = buffer; },
+    () => state.cursorLine,
+    () => state.cursorColumn
+  );
+  for (const [key, value] of yankPopOps.entries()) {
+    api.set(key, value);
+  }
+
+  // Add LSP diagnostics operations (US-3.1.2)
+  const lspDiagnosticsOps = createLSPDiagnosticsOps(
+    () => ({ state })
+  );
+  for (const [key, value] of lspDiagnosticsOps.entries()) {
+    api.set(key, value);
+  }
+
+  // Add plugin repository operations (US-4.1.1)
+  const pluginOps = createPluginOps(
+    state.filesystem,
+    () => {
+      // Get TLPA directory from environment or use default
+      const homeDir = process.env.HOME || '/tmp';
+      return `${homeDir}/.config/tmax/tlpa`;
+    }
+  );
+  for (const [key, value] of pluginOps.entries()) {
+    api.set(key, value);
+  }
+
+  // Add documentation operations (US-4.2.1)
+  const documentationOps = createDocumentationOps(null as any); // Interpreter not needed for current implementation
+  for (const [key, value] of documentationOps.entries()) {
+    api.set(key, value);
+  }
+
   return api;
+}
+
+/**
+ * Create count prefix operations for T-Lisp API
+ * This is a separate function that requires editor instance access
+ * @param editor - Editor instance with count management
+ * @returns Map of count operation functions
+ */
+export function createCountAPI(editor: any): Map<string, TLispFunctionImpl> {
+  return createCountOps(
+    () => editor.getCount(),
+    (count: number) => editor.setCount(count),
+    () => editor.resetCount()
+  );
 }

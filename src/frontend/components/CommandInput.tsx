@@ -36,7 +36,10 @@ export const CommandInput = ({
   }, [mode]);
 
   // Handle key input for command input
+  // Note: isFocused check removed because Editor.tsx already stops processing
+  // input when in command/mx mode, so this component should always receive input
   useInput((input: string, key: any) => {
+
     // Handle escape key to cancel
     if (key.escape) {
       onCancel();

@@ -4,6 +4,7 @@
  */
 
 import type { Editor } from "../editor.ts";
+import { log } from "../../utils/logger.ts";
 
 /**
  * Handle key input in command mode
@@ -13,6 +14,27 @@ import type { Editor } from "../editor.ts";
  * @returns Promise that resolves when key handling is complete, or rejects with quit signal
  */
 export async function handleCommandMode(editor: Editor, key: string, normalizedKey: string): Promise<void> {
+  const handlerLog = log.module('handlers').fn('handleCommandMode');
+
+  // Log Escape key to return to normal mode
+  if (normalizedKey === "Escape") {
+    handlerLog.info('Cancelling command mode, returning to normal mode', {
+      data: {
+        triggerKey: 'Escape',
+        fromMode: 'command',
+        commandWasCancelled: true
+      }
+    });
+  }
+
+  // Log Enter key to execute command
+  if (normalizedKey === "Enter") {
+    const commandLine = (editor as any).state.commandLine;
+    handlerLog.info('Executing command line', {
+      data: { command: commandLine }
+    });
+  }
+
   if (key.length === 1 && key >= " " && key <= "~") {
     // Add character to command line
     (editor as any).state.commandLine += key;
@@ -30,10 +52,23 @@ export async function handleCommandMode(editor: Editor, key: string, normalizedK
     // This ensures proper integration with the T-Lisp interpreter
     try {
       (editor as any).executeCommand(`(editor-execute-command-line)`);
+      handlerLog.info('Command executed successfully', {
+        data: { command: (editor as any).state.commandLine }
+      });
     } catch (error) {
       if (error instanceof Error && (error.message === "EDITOR_QUIT_SIGNAL" || error.message.includes("EDITOR_QUIT_SIGNAL"))) {
+        handlerLog.info('Quit signal received from command', {
+          data: { signal: error.message }
+        });
         throw new Error("EDITOR_QUIT_SIGNAL"); // Re-throw clean quit signal to main loop
       }
+
+      const err = error instanceof Error ? error : new Error(String(error));
+      handlerLog.error('Command execution failed', err, {
+        operation: 'command-line',
+        data: { command: (editor as any).state.commandLine }
+      });
+
       (editor as any).state.statusMessage = `Command error: ${error instanceof Error ? error.message : String(error)}`;
     }
 

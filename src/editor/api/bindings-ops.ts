@@ -7,7 +7,7 @@ import type { TLispValue, TLispFunctionImpl } from "../../tlisp/types.ts";
 import { createNil, createNumber, createString, createBoolean, createList, createSymbol } from "../../tlisp/values.ts";
 import { Either } from "../../utils/task-either.ts";
 import { validateArgsCount } from "../../utils/validation.ts";
-import { createValidationError, AppError } from "../../error/types.ts";
+import { createValidationError, AppError, EvalError } from "../../error/types.ts";
 
 /**
  * T-Lisp function implementation that returns Either for error handling
@@ -47,10 +47,14 @@ export function createBindingsOps(
       return Either.left(argsValidation.left);
     }
 
-    // Signal the editor to stop
-    // This will be handled by the main editor loop
-    // For now, return a special quit signal value instead of throwing
-    return Either.right(createString("EDITOR_QUIT_SIGNAL"));
+    // Signal the editor to stop by returning an error with the quit signal
+    // The wrapper will throw this as an Error with message "EDITOR_QUIT_SIGNAL"
+    // which will be caught by the mode handlers
+    return Either.left({
+      type: 'EvalError',
+      variant: 'RuntimeError',
+      message: 'EDITOR_QUIT_SIGNAL'
+    } as EvalError);
   });
 
   api.set("editor-execute-command-line", (args: TLispValue[]): Either<AppError, TLispValue> => {
@@ -63,8 +67,12 @@ export function createBindingsOps(
 
     // Handle basic commands
     if (command === "q" || command === "quit") {
-      // Return quit signal instead of throwing
-      return Either.right(createString("EDITOR_QUIT_SIGNAL"));
+      // Return quit signal as an error that will be thrown by the wrapper
+      return Either.left({
+        type: 'EvalError',
+        variant: 'RuntimeError',
+        message: 'EDITOR_QUIT_SIGNAL'
+      } as EvalError);
     } else if (command === "w" || command === "write" || command.startsWith("w ") || command.startsWith("write ")) {
       // Save current buffer (with optional filename argument)
       const parts = command.split(" ");
@@ -83,16 +91,23 @@ export function createBindingsOps(
         setStatusMessage("Save functionality not available");
       }
     } else if (command === "wq") {
-      // Save and quit
+      // Save and quit - save is fire-and-forget, then quit immediately
       const ops = getOperations();
       if (ops?.saveFile) {
         setStatusMessage("Saving and quitting...");
+        // Fire and forget the save - quit will happen immediately
         ops.saveFile().then(() => {
-          // Return quit signal instead of throwing
-          return Either.right(createString("EDITOR_QUIT_SIGNAL"));
+          // Save completed successfully
         }).catch((error) => {
-          setStatusMessage(`Save failed: ${error instanceof Error ? error.message : String(error)}`);
+          // Note: we've already quit by the time this runs
+          console.error(`Save failed: ${error instanceof Error ? error.message : String(error)}`);
         });
+        // Return quit signal immediately after initiating save
+        return Either.left({
+          type: 'EvalError',
+          variant: 'RuntimeError',
+          message: 'EDITOR_QUIT_SIGNAL'
+        } as EvalError);
       } else {
         setStatusMessage("Save and quit functionality not available");
       }

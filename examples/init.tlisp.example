@@ -1,5 +1,6 @@
-;;; .tmaxrc - tmax configuration file example
-;;; Place this file in your home directory as ~/.tmaxrc
+;;; init.tlisp - tmax configuration file example
+;;; Place this file in ~/.config/tmax/init.tlisp
+;;; This file is loaded automatically when tmax starts
 
 ;; Custom key bindings for enhanced navigation
 (key-bind "w" "(cursor-move (+ (cursor-line) 5) (cursor-column))" "normal")
@@ -172,3 +173,12 @@
 
 ;; Final configuration message
 (editor-set-status "tmax configuration loaded successfully")
+
+;; NOTE: You can reload this configuration without restarting tmax
+;; by using M-x: (eval-init-file)
+;; Or check which init file is loaded with: (init-file-path)
+;;
+;; For testing T-Lisp code, you can use (eval-buffer) in the scratch buffer:
+;; 1. Write your T-Lisp code in *scratch* buffer
+;; 2. Press M-x: (eval-buffer)
+;; 3. Your code is executed immediately

@@ -211,12 +211,30 @@ export function createModeOps(
       setMxCommand("");
       setMode("mx");
       setStatusMessage("");
+      setCursorFocus('command');
+      
+      // Note: History index reset will be handled by the editor
+      // through a separate mechanism (mode change detection)
     } else {
       // Just a semicolon in normal mode
       setStatusMessage("Unbound key: ;");
     }
 
     return Either.right(createString("semicolon"));
+  });
+
+  // Help prefix handler (US-1.11.2)
+  api.set("editor-handle-help-prefix", (args: TLispValue[]): Either<AppError, TLispValue> => {
+    const argsValidation = validateArgsCount(args, 0, "editor-handle-help-prefix");
+    if (Either.isLeft(argsValidation)) {
+      return Either.left(argsValidation.left);
+    }
+
+    // Set a flag to indicate we're in help prefix mode
+    // The next key will determine which help function to call
+    setStatusMessage("Help: (k)ey, (f)unction");
+    
+    return Either.right(createString("help-prefix"));
   });
 
   api.set("editor-execute-mx-command", (args: TLispValue[]): Either<AppError, TLispValue> => {
@@ -258,6 +276,21 @@ export function createModeOps(
     setCursorFocus('buffer');
 
     return Either.right(createString(command));
+  });
+
+  // Window prefix handler (US-3.2.2)
+  // C-w prefix for window management commands
+  api.set("editor-handle-window-prefix", (args: TLispValue[]): Either<AppError, TLispValue> => {
+    const argsValidation = validateArgsCount(args, 0, "editor-handle-window-prefix");
+    if (Either.isLeft(argsValidation)) {
+      return Either.left(argsValidation.left);
+    }
+
+    // Set a flag to indicate we're in window prefix mode
+    // The next key will determine which window function to call
+    setStatusMessage("Window: (+)height (-)height (>)width (<)width (w)next (q)close");
+    
+    return Either.right(createString("window-prefix"));
   });
 
   return api;
