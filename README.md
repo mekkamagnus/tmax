@@ -40,7 +40,7 @@ tmax is an extensible terminal-based text editor written in TypeScript, running 
 ## Installation
 
 ### Prerequisites
-- [Bun](https://bun.sh/) v1.0 or later
+- [Node.js](https://nodejs.org/) v20 or later
 
 ### Setup
 ```bash
@@ -49,12 +49,15 @@ git clone https://github.com/mekkamagnus/tmax.git
 cd tmax
 
 # Install dependencies
-bun install
+npm install
+
+# Register the `tmax` command globally
+npm link
 
 # Make the launcher executable (optional)
 chmod +x bin/tmax
 
-# Optional: Add to PATH
+# Optional: Add local launcher to PATH instead of npm link
 echo 'export PATH="$PATH:$(pwd)/bin"' >> ~/.bashrc
 source ~/.bashrc
 ```
@@ -64,13 +67,13 @@ source ~/.bashrc
 ### Basic Usage
 ```bash
 # Start tmax with a new buffer
-bun run src/main.tsx
+tmax
 
 # Start tmax with a file
-bun run src/main.tsx filename.txt
+tmax filename.txt
 
 # Start with auto-reload during development
-bun run dev
+npm run dev
 
 # Or use npm scripts
 npm start
@@ -90,7 +93,7 @@ npm run dev
 - **Command mode**: Press `:` for vim-style commands
 - **M-x mode**: Press `SPC ;` to execute T-Lisp functions by name
 - **Multiple buffers**: Use `:e filename` to open additional files
-- **Customization**: Create `~/.tmaxrc` with T-Lisp configuration
+- **Customization**: Create `~/.config/tmax/init.tlisp` with T-Lisp configuration
 
 ### Key Bindings (Default)
 
@@ -109,7 +112,7 @@ npm run dev
 ### T-Lisp REPL
 ```bash
 # Run the T-Lisp REPL for testing
-bun run scripts/repl.ts
+npm run repl
 
 # Or use npm script
 npm run repl
@@ -117,7 +120,7 @@ npm run repl
 
 ## Configuration
 
-Create a `.tmaxrc` file in your home directory to customize tmax:
+Create an `init.tlisp` file in `~/.config/tmax/` to customize tmax:
 
 ```lisp
 ;; Custom key bindings
@@ -138,6 +141,30 @@ Create a `.tmaxrc` file in your home directory to customize tmax:
 
 (key-bind "zz" "(center-cursor)" "normal")
 ```
+
+### Init File Features
+
+**Reload Configuration**:
+- Use `M-x: (eval-init-file)` to reload your init file without restarting
+- Useful for testing configuration changes
+
+**Evaluate Buffer**:
+- Use `M-x: (eval-buffer)` to evaluate the current buffer as T-Lisp code
+- Perfect for testing functions and key bindings without saving
+- Works great with the `*scratch*` buffer
+
+**Custom Init File**:
+- Use `--init-file` flag to load a custom configuration:
+  ```bash
+  tmax --init-file ./my-config.tlisp
+  ```
+- Use `/dev/null` to disable init file loading:
+  ```bash
+  tmax --init-file /dev/null
+  ```
+
+**Query Init File**:
+- `(init-file-path)` - Returns the path to the current init file
 
 ## T-Lisp Editor API
 
@@ -196,16 +223,16 @@ tmax/
 ### Available Scripts
 ```bash
 # Development
-bun run src/main.tsx     # Start the editor
-bun run dev              # Start with auto-reload
-bun run repl             # Run T-Lisp REPL
+tmax                     # Start the editor
+npm run dev              # Start with auto-reload
+npm run repl             # Run T-Lisp REPL
 
 # Testing
-bun test                 # Run all tests
-bun run test:ui         # Run UI tests
+npm test                 # Run all tests
+npm run test:ui         # Run UI tests
 
 # Building
-bun run build           # Build for production
+npm run build           # Build for production
 ```
 
 ### T-Lisp Examples
@@ -283,9 +310,18 @@ For detailed development plans and phase breakdowns, see the [comprehensive road
 
 ### Current Focus
 - **Phase 0.4**: T-Lisp-centric key binding system refactor (in progress)
+- **Phase 0.5**: Testing Infrastructure Enhancement (TRT Framework) - planned
+- **Phase 0.8**: Server/Client Architecture & AI Agent Control - planned (parallel track)
 - **Phase 1**: Core editing features for basic Evil-mode parity
 - **Phase 2**: Extensibility and plugin system
 - **Phase 3**: Advanced features (LSP integration, multiple windows)
+
+### Upcoming Features
+- ✅ **Server/Client Architecture**: Instant file opening, AI agent control (Phase 0.8)
+- ✅ **TRT Testing Framework**: Self-hosted T-Lisp testing (Phase 0.5)
+- ✅ **AI-Native Development**: First terminal editor designed for AI agent control
+- ✅ **Core Editing Operators**: Delete, yank, change, put operations (Phase 1.2)
+- ✅ **Enhanced Navigation**: Word, line, paragraph navigation (Phase 1.1)
 
 ### Quick Links
 - [Product Requirements Document](./specs/prd.md) - Detailed feature specifications and implementation status

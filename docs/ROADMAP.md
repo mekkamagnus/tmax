@@ -160,71 +160,184 @@ This version provides a solid foundation for future development with comprehensi
 
 **Status:** 📋 PLANNED
 **Priority:** HIGH (enables quality for Phase 1)
-**Timeline:** 1-2 weeks
+**Timeline:** 1-2 weeks (MVP: 8 days)
 
 **Objective:** Implement TRT (Tmax Regression Testing) - a self-hosted T-Lisp testing framework inspired by Emacs ERT, enabling comprehensive testing of T-Lisp code and editor features.
 
-#### 0.5.1 - TRT Framework Implementation [CRITICAL]
-- [ ] Core TRT functions in T-Lisp (`src/tlisp/trt/trt.tlisp`)
-  - Test definition macros: `trt-deftest`, `trt-deftest-suite`
-  - Assertion helpers: `trt-assert-equals`, `trt-assert-true`, `trt-assert-false`
-  - Test execution and result collection
-  - Error handling and failure reporting
-- [ ] TypeScript API wrapper (`src/tlisp/trt/trt.ts`)
-  - Test runner interface
-  - Result formatting and display
-  - Integration with T-Lisp interpreter
-- [ ] Test runner script (`test/trt/runner.ts`)
-  - CLI interface for running tests
-  - File pattern matching (`**/*.tlisp`)
-  - Watch mode support for development
-  - Test result summary (passed/failed/total)
+**Feature Prioritization:**
 
-#### 0.5.2 - Built-in Test Suites [HIGH]
-- [ ] Core T-Lisp tests (`src/tlisp/tests/core-tests.tlisp`)
-  - Value types and creation (`create-number`, `create-string`, etc.)
-  - Evaluation and environments
-  - Tail-call optimization verification
-  - Parser and tokenizer validation
-- [ ] Standard library tests (`src/tlisp/tests/stdlib-tests.tlisp`)
-  - Arithmetic operations (+, -, *, /)
-  - List manipulation (car, cdr, cons, append, map, filter)
-  - String operations (length, substring, string-append)
-  - Control flow (if, let, cond, progn)
-- [ ] Editor API tests (`src/tlisp/tests/editor-tests.tlisp`)
-  - Buffer operations (create, switch, insert, delete)
-  - Cursor movement (cursor-move, cursor-position)
-  - Mode management (editor-set-mode, editor-mode)
-  - File operations (file-read, file-write)
+**🚨 MUST HAVE (MVP - 8 days)**
+- Essential features for any functional test framework
+- Delivers working test framework with basic functionality
 
-#### 0.5.3 - CI/CD Integration [MEDIUM]
-- [ ] TRT tests in GitHub Actions workflow
-  - Automatic test execution on pull requests
-  - Test result reporting in PR comments
-- [ ] Test coverage reporting
-  - Track TRT test coverage over time
-  - Coverage badges for README
-- [ ] Performance regression detection
-  - Benchmark critical T-Lisp operations
-  - Alert on performance degradation
-- [ ] Automated test execution on commits
-  - Pre-commit hooks for TRT tests
-  - Block commits on failing tests
+**⭐ SHOULD HAVE (Phase 0.6 - +10 days)**
+- Important features for real-world development workflows
+- Delivers professional-grade testing infrastructure
 
-#### 0.5.4 - User Testing Infrastructure [LOW]
-- [ ] `.tmax-trt/` directory for user tests
-  - Auto-discovery of user test suites
-  - Gitignored by default
-- [ ] Test discovery and loading
-  - Load user tests from home directory
-  - Merge with built-in test suites
-- [ ] Documentation for writing TRT tests
-  - TRT framework guide (`docs/TRT.md`)
-  - Test writing examples and best practices
-  - API reference for TRT functions
-- [ ] Example test suites
-  - Simple examples for new users
-  - Complex examples showing advanced usage
+**💡 NICE TO HAVE (Phase 0.7+ - +15-20 days)**
+- Advanced features and polish
+- Delivers enterprise-grade testing framework
+
+See [RFC-001: TRT Framework](../rfcs/RFC-001-trt-framework.md) for complete specification and prioritization details.
+
+---
+
+#### MVP Breakdown (Phase 0.5 - 8 days)
+
+##### Phase 0.5.1: Core Framework MVP [CRITICAL] (4 days)
+- [ ] `deftest` macro - Define tests
+- [ ] `should-equal` assertion - Basic equality check
+- [ ] Test runner CLI - `tmax --test` entry point
+- [ ] Test discovery - Find `*.test.tlisp` files automatically
+- [ ] Basic CLI output - Pass/fail results with test names
+- [ ] Exit codes - CI/CD integration (0=success, 1=failure)
+
+##### Phase 0.5.2: Essential Assertions [CRITICAL] (2 days)
+- [ ] Core assertions (4 total)
+  - [ ] `should-equal` - Compare values
+  - [ ] `should-be-truthy` - Truthy check
+  - [ ] `should-be-falsy` - Falsy check
+  - [ ] `should-throw` - Error thrown check
+- [ ] Error message formatting - Clear failure messages
+
+##### Phase 0.5.3: Basic Isolation [CRITICAL] (2 days)
+- [ ] Environment reset between tests
+- [ ] Global state cleanup (clear buffers, reset variables)
+- [ ] Simple before/after hooks - Setup and teardown
+
+**MVP Deliverables:**
+- ✅ Can define and run tests
+- ✅ Test discovery works automatically
+- ✅ Basic assertions pass/fail
+- ✅ Tests isolated (no state leakage)
+- ✅ CI/CD integration ready
+
+---
+
+#### Should Have Breakdown (Phase 0.6 - +10 days)
+
+##### Phase 0.6.1: Rich Assertions [IMPORTANT] (3 days)
+- [ ] String assertions (5+ assertions)
+  - [ ] `should-contain` - Substring check
+  - [ ] `should-match` - Regex match
+  - [ ] `should-be-empty-string` - Empty check
+- [ ] Collection assertions (4+ assertions)
+  - [ ] `should-have-length` - Length check
+  - [ ] `should-contain` - Element in collection
+  - [ ] `should-be-empty` - Empty collection
+- [ ] Numeric assertions (4+ assertions)
+  - [ ] `should-be-greater-than`
+  - [ ] `should-be-less-than`
+  - [ ] `should-be-close-to` - Approximate equality
+- [ ] Custom assertion API - `defassertion`
+
+##### Phase 0.6.2: Fixtures System [IMPORTANT] (3 days)
+- [ ] `deffixture` macro - Define reusable fixtures
+- [ ] `with-fixture` macro - Use fixture in test
+- [ ] Fixture scopes - `:function`, `:suite`
+- [ ] Auto-cleanup - Even if test fails
+- [ ] Fixture dependencies - Fixtures using other fixtures
+
+##### Phase 0.6.3: Test Suites [IMPORTANT] (2 days)
+- [ ] `describe-suite` macro - Group related tests
+- [ ] Nested test organization - Hierarchical structure
+- [ ] Suite-level hooks - `:before-all`, `:after-all`
+- [ ] Per-suite filtering - Run specific suites
+
+##### Phase 0.6.4: Async Testing [IMPORTANT] (4 days)
+- [ ] `deftest-async` macro - Async test support
+- [ ] Async assertions (2 assertions)
+  - [ ] `should-await-equal` - Await and compare
+  - [ ] `should-await-throw` - Await error check
+- [ ] Timeout protection - Fail if too slow
+- [ ] Async error handling - Proper rejection detection
+
+##### Phase 0.6.5: Better CLI Output [IMPORTANT] (2 days)
+- [ ] Progress indicators - Show test progress
+- [ ] ANSI colored output - Visual clarity
+- [ ] Test summary statistics - Count and percentage
+- [ ] Per-file results - Organized output
+- [ ] Verbose mode toggle - Detailed output option
+
+##### Phase 0.6.6: Basic Coverage [IMPORTANT] (4 days)
+- [ ] Line coverage tracking - Which lines executed
+- [ ] Coverage summary - Overall percentage
+- [ ] Per-file coverage - File-by-file breakdown
+- [ ] Text format output - Human-readable
+- [ ] Coverage thresholds - Fail if below target
+
+**Phase 0.6 Deliverables:**
+- ✅ Rich assertion library (20+ assertions)
+- ✅ Reusable test fixtures
+- ✅ Test suite organization
+- ✅ Async operation testing
+- ✅ Professional CLI output
+- ✅ Code coverage measurement
+
+---
+
+#### Nice to Have Breakdown (Phase 0.7+ - +15-20 days)
+
+Can be implemented incrementally as needed:
+
+##### Advanced Test Isolation
+- Four-layer isolation strategy (environment, buffer, global, module)
+- Buffer auto-cleanup with `with-test-buffer` macro
+- Flaky test detection with retry logic
+- Strict mode (fail if state leaks detected)
+
+##### Parametrized Tests
+- `deftest-parametrized` macro
+- Table-driven test syntax
+- Per-case setup/teardown hooks
+
+##### Snapshot Testing
+- `should-match-snapshot` assertion
+- External `.snap` files
+- Interactive update workflow
+- Diff visualization (side-by-side, unified)
+
+##### Test Explorer UI
+- Buffer-based Test Explorer
+- Hierarchical tree view
+- Interactive keybindings
+- Jump to test definition
+
+##### Examples as Tests
+- Test docstring examples automatically
+- Example coverage tracking
+- Triple purpose (docs/tests/demos)
+
+##### Watch Mode & TDD
+- File watcher implementation
+- Smart test selection (affected tests)
+- TDD workflow (Red-Green-Refactor)
+- Interactive watch menu
+
+##### Advanced Coverage
+- Branch coverage tracking
+- Function coverage tracking
+- HTML report generation
+- Lcov format for CI/CD
+- Threshold enforcement and trending
+
+##### Mocking & Spying
+- `spy-on` function
+- `mock-fn` creation
+- Call verification APIs
+- Module mocking with runtime evaluation
+
+##### Benchmarking
+- `deftest-bench` macro
+- Performance measurement (ops/sec, variance)
+- Baseline tracking and comparison
+- Regression detection
+
+**Phase 0.7+ Deliverables:**
+- ✅ Enterprise features (all nice-to-have items)
+- ✅ Advanced isolation and reliability
+- ✅ Developer experience enhancements
+- ✅ Performance optimization tools
 
 **Success Criteria:**
 - ✅ Can run TRT tests with `bun run test:trt`
@@ -245,6 +358,185 @@ This version provides a solid foundation for future development with comprehensi
 - Executable documentation through tests
 - Safer refactoring with regression tests
 - Better code quality for T-Lisp features
+
+---
+
+### Phase 0.8: Server/Client Architecture
+
+**Status:** 📋 PLANNED
+**Priority:** HIGH (enables AI agent control and instant file operations)
+**Timeline:** 2.5-3 weeks
+
+**Objective:** Implement server/client architecture inspired by Emacs' `emacsclient` system, enabling instant file opening, T-Lisp evaluation from command line, and AI agent control of the editor.
+
+**Key Innovation:** This transforms tmax into an **AI-native editor**, the first terminal editor designed from the ground up for AI agent control.
+
+**Feature Prioritization:**
+
+**🚨 MUST HAVE (MVP - Phase 0.8.1, 1 week)**
+- Server mode (`tmax --daemon`)
+- Client CLI (`tmaxclient`)
+- File opening with wait/no-wait modes
+- T-Lisp evaluation from command line
+- Basic JSON-RPC protocol over Unix socket
+
+**⭐ SHOULD HAVE (Phase 0.8.2, +1 week)**
+- Advanced client commands (list, kill, insert buffers)
+- Custom socket paths and multiple server instances
+- Extended wait modes (terminal, background, new frame)
+- Integration examples (git, file managers, shells)
+
+**💡 NICE TO HAVE (Phase 0.8.3, +1 week)**
+- TCP sockets for remote access
+- Auto-start server on first client request
+- T-Lisp server API (hooks, client info, broadcast)
+- AI agent protocol extensions (full state query, help system)
+
+**AI Agent Capabilities (Unique to tmax):**
+
+Full editor control via JSON-RPC protocol:
+- ✅ **State Query** - Get full editor state (buffers, vars, cursor, selections)
+- ✅ **Code Execution** - Evaluate T-Lisp and get results
+- ✅ **Help System** - Query functions (`describe-function`, `describe-variable`, `apropos`)
+- ✅ **Source Navigation** - Find function sources, cross-references
+- ✅ **Real-Time Feedback** - 10x faster than file-based workflows (62ms vs 605ms)
+
+**See [RFC-002: Server/Client Architecture](../rfcs/RFC-002-server-client-architecture.md) for complete specification.**
+
+---
+
+#### Phase 0.8.1: Basic Server/Client [CRITICAL] (1 week)
+
+**Server Implementation:**
+- [ ] `tmax --daemon` command
+- [ ] Unix socket listener (`/tmp/tmax-$UID/server`)
+- [ ] JSON-RPC protocol handler
+- [ ] Connection management (accept, close, cleanup)
+- [ ] T-Lisp execution engine integration
+- [ ] Graceful shutdown (SIGTERM, SIGINT)
+
+**Client Implementation:**
+- [ ] `tmaxclient` CLI tool
+- [ ] File opening: `tmaxclient file.txt`
+- [ ] T-Lisp eval: `tmaxclient --eval '(code)'`
+- [ ] Wait mode (block until buffer closed)
+- [ ] No-wait mode (`-n` flag)
+- [ ] Error handling (server not running, connection refused)
+
+**AI Agent Protocol (Core):**
+- [ ] Query method: `{"method": "query", "params": {"query": "full-state"}}`
+- [ ] Eval method: `{"method": "eval", "params": {"code": "(buffer-list)"}}
+- [ ] Command method: `{"method": "command", "params": {"command": "save-buffer"}}`
+
+**Testing:**
+- [ ] Unit tests for server socket handling
+- [ ] Unit tests for client connection logic
+- [ ] Integration tests (server + client)
+- [ ] Manual testing with real workflows (git, file managers)
+
+---
+
+#### Phase 0.8.2: Advanced Client Features [IMPORTANT] (1 week)
+
+**Client Commands:**
+- [ ] `tmaxclient --list-buffers` - List all buffers
+- [ ] `tmaxclient --kill-buffer name` - Kill specific buffer
+- [ ] `tmaxclient --insert text` - Insert text at cursor
+- [ ] `tmaxclient --insert-stdin` - Insert from stdin pipe
+- [ ] `tmaxclient --script file.tlisp` - Execute T-Lisp file
+- [ ] `tmaxclient --server-info` - Get server status
+- [ ] `tmaxclient --ping` - Check if server running
+
+**Socket Management:**
+- [ ] Custom socket paths: `-s /path/to/socket`
+- [ ] Environment variable: `$TMAX_SOCKET`
+- [ ] Multiple server instances support
+- [ ] Socket conflict detection
+- [ ] Socket cleanup on shutdown
+
+**Wait Modes:**
+- [ ] `-c` flag (new frame/buffer mode)
+- [ ] `-nw` flag (terminal mode for $EDITOR)
+- [ ] Exit codes based on buffer state (saved/discarded)
+
+**Integration Examples:**
+- [ ] Git integration (`$GIT_EDITOR='tmaxclient -nw'`)
+- [ ] File manager examples (ranger, lf, nnn, fzf)
+- [ ] Shell function examples (tf, tb, tl, te)
+- [ ] Script examples (Python, shell)
+
+---
+
+#### Phase 0.8.3: AI Agent Enhancement [MEDIUM] (3-5 days)
+
+**Extended Query Methods:**
+- [ ] `describe-function` - Get function documentation, signature, source location
+- [ ] `describe-variable` - Get variable value, documentation, customization info
+- [ ] `apropos-command` - Search functions by pattern
+- [ ] `find-function-source` - Locate function definition
+- [ ] `find-usages` - Find all calls/references to function
+- [ ] `xref` - Cross-reference analysis (callers, callees)
+
+**Help System Integration:**
+- [ ] Query help system via JSON-RPC
+- [ ] Return structured documentation (signature, docs, examples, related)
+- [ ] Support for `describe-key`, `describe-variable`, `apropos`
+- [ ] Source location with file:line references
+
+**TCP Sockets:**
+- [ ] `tmax --daemon=tcp:host:port`
+- [ ] `tmaxclient -s host:port file.txt`
+- [ ] Remote connection support
+- [ ] SSH tunnel examples
+- [ ] Security considerations (localhost only by default)
+
+**Auto-Start:**
+- [ ] `--autostart` flag for client
+- [ ] Config option: `(setq server-autostart t)`
+- [ ] Server detection logic
+- [ ] Automatic server startup on first request
+
+**T-Lisp Server API:**
+- [ ] `(server-running-p)` - Check server status
+- [ ] `(server-socket-path)` - Get socket path
+- [ ] `(server-clients)` - List connected clients
+- [ ] `(server-broadcast message)` - Send to all clients
+- [ ] `(server-current-client)` - Get current client info
+- [ ] Server hooks: `server-client-connect-hook`, `server-client-disconnect-hook`
+- [ ] Server hooks: `server-start-hook`, `server-shutdown-hook`
+
+**Documentation:**
+- [ ] User guide for server/client usage
+- [ ] AI agent integration guide (Python, TypeScript examples)
+- [ ] T-Lisp API reference for server functions
+- [ ] Troubleshooting guide (socket permissions, etc.)
+
+**Phase 0.8 Deliverables:**
+- ✅ Server/client infrastructure (Unix socket + TCP)
+- ✅ AI agent protocol with full state query and help system
+- ✅ Integration examples (git, file managers, shells)
+- ✅ AI agent client libraries (Python, TypeScript)
+- ✅ Comprehensive documentation for REPL-driven development with AI
+
+**Success Criteria:**
+- ✅ Can start server and connect from client
+- ✅ Instant file opening (<100ms vs 2-5s startup)
+- ✅ AI agents can query full editor state
+- ✅ AI agents can execute T-Lisp and get results
+- ✅ Help system accessible via JSON-RPC
+- ✅ Integration with git, file managers, shells working
+
+**Dependencies:**
+- Can be developed in parallel with Phase 0.4-0.7
+- Must complete before Phase 2 (extensibility) for plugin development
+- Enables AI-assisted development for all future features
+
+**Benefits:**
+- Instant file operations without startup overhead
+- AI agent control for automated development
+- REPL-driven development from external tools
+- Integration with Unix philosophy (pipelines, scripts)
+- Competitive advantage: First AI-native terminal editor
 
 ---
 
