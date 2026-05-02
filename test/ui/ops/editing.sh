@@ -4,6 +4,7 @@
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/../lib/config.sh"
 source "$SCRIPT_DIR/../lib/debug.sh"
+source "$SCRIPT_DIR/../lib/common.sh"
 source "$SCRIPT_DIR/../core/input.sh"
 source "$SCRIPT_DIR/../core/query.sh"
 
@@ -19,15 +20,7 @@ editing_enter_insert_mode() {
   sleep "$TMAX_OPERATION_DELAY"
 
   # Verify mode change
-  local mode
-  mode=$(query_get_mode "$window")
-  if [[ "$mode" == "INSERT" ]]; then
-    log_debug "Successfully entered INSERT mode"
-    return 0
-  else
-    log_warn "Mode is: $mode (expected INSERT)"
-    return 1
-  fi
+  verify_mode_change "INSERT" "$window"
 }
 
 # Enter normal mode
@@ -40,15 +33,7 @@ editing_enter_normal_mode() {
   sleep "$TMAX_OPERATION_DELAY"
 
   # Verify mode change
-  local mode
-  mode=$(query_get_mode "$window")
-  if [[ "$mode" == "NORMAL" ]]; then
-    log_debug "Successfully entered NORMAL mode"
-    return 0
-  else
-    log_warn "Mode is: $mode (expected NORMAL)"
-    return 1
-  fi
+  verify_mode_change "NORMAL" "$window"
 }
 
 # Enter command mode
@@ -63,15 +48,7 @@ editing_enter_command_mode() {
   sleep "$TMAX_OPERATION_DELAY"
 
   # Verify mode change
-  local mode
-  mode=$(query_get_mode "$window")
-  if [[ "$mode" == "COMMAND" ]]; then
-    log_debug "Successfully entered COMMAND mode"
-    return 0
-  else
-    log_warn "Mode is: $mode (expected COMMAND)"
-    return 1
-  fi
+  verify_mode_change "COMMAND" "$window"
 }
 
 # Enter M-x mode
@@ -86,15 +63,7 @@ editing_enter_mx_mode() {
   sleep "$TMAX_OPERATION_DELAY"
 
   # Verify mode change
-  local mode
-  mode=$(query_get_mode "$window")
-  if [[ "$mode" == "M-X" ]]; then
-    log_debug "Successfully entered M-X mode"
-    return 0
-  else
-    log_warn "Mode is: $mode (expected M-X)"
-    return 1
-  fi
+  verify_mode_change "M-X" "$window"
 }
 
 # Type text in insert mode

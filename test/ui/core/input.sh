@@ -5,17 +5,36 @@
 CORE_DIR="$(dirname "${BASH_SOURCE[0]}")"
 source "$CORE_DIR/../lib/config.sh"
 source "$CORE_DIR/../lib/debug.sh"
+source "$CORE_DIR/../lib/common.sh"
 
-# Helper: Get the full window target (session:window)
-_get_window_target() {
-  local window="${1:-$TMAX_ACTIVE_WINDOW}"
+# Translate special key names to actual control characters
+input_translate_key() {
+  local key="$1"
 
-  if [[ -z "$window" ]]; then
-    log_error "No active window set. Use session_set_active_window() first."
+  case "$key" in
+    "C-[") echo -ne "\x1b" ;;      # Escape
+    "Enter") echo -ne "\x0d" ;;     # Return/Enter
+    "Space") echo -ne " " ;;        # Space
+    "Backspace") echo -ne "\x7f" ;; # Backspace
+    "Tab") echo -ne "\x09" ;;      # Tab
+    *) echo -n "$key" ;;            # Literal character
+  esac
+}
+
+# Write input to test input file (for testing)
+input_write_to_fifo() {
+  local input="$1"
+
+  if [[ -n "$TMAX_TEST_INPUT_FIFO" ]]; then
+    # Translate special keys and append to test input file
+    local translated=$(input_translate_key "$input")
+    echo -n "$translated" >> "$TMAX_TEST_INPUT_FIFO"
+    log_debug "Wrote to test input file: $input (as ${#translated} bytes)"
+    return 0
+  else
+    # Test input not configured, fall back to tmux send-keys
     return 1
   fi
-
-  echo "${TMAX_SESSION}:${window}"
 }
 
 # Send a single key to the active window
@@ -23,12 +42,21 @@ input_send_key() {
   local key="$1"
   local window="${2:-$TMAX_ACTIVE_WINDOW}"
 
+  # Try FIFO first (for testing)
+  if input_write_to_fifo "$key"; then
+    log_debug "Sent key via FIFO: $key"
+    sleep "$TMAX_KEY_DELAY"
+    return 0
+  fi
+
+  # Fall back to tmux send-keys
   local target
-  target=$(_get_window_target "$window") || return 1
+  target=$(get_window_target "$window") || return 1
 
   log_action "Send key: $key"
 
-  tmux send-keys -t "$target" "$key"
+  # Use -l (literal) flag to send keys without translation for raw mode applications
+  tmux send-keys -l -t "$target" "$key"
 
   # Small delay after each key
   sleep "$TMAX_KEY_DELAY"
@@ -40,12 +68,13 @@ input_send_keys() {
   shift
 
   local target
-  target=$(_get_window_target "$window") || return 1
+  target=$(get_window_target "$window") || return 1
 
   log_action "Send keys: $*"
 
   for key in "$@"; do
-    tmux send-keys -t "$target" "$key"
+    # Use -l (literal) flag for raw mode applications
+    tmux send-keys -l -t "$target" "$key"
     sleep "$TMAX_KEY_DELAY"
   done
 }
@@ -56,11 +85,11 @@ input_send_command() {
   local window="${2:-$TMAX_ACTIVE_WINDOW}"
 
   local target
-  target=$(_get_window_target "$window") || return 1
+  target=$(get_window_target "$window") || return 1
 
   log_action "Send command: $command"
 
-  tmux send-keys -t "$target" "$command" Enter
+  tmux send-keys -t "$target" "$command" C-m
   sleep "$TMAX_OPERATION_DELAY"
 }
 
@@ -69,15 +98,24 @@ input_send_text() {
   local text="$1"
   local window="${2:-$TMAX_ACTIVE_WINDOW}"
 
-  local target
-  target=$(_get_window_target "$window") || return 1
-
   log_action "Send text: $text"
 
-  # Send each character to handle special keys properly
+  # Try to write to test input file first
+  if [[ -n "$TMAX_TEST_INPUT_FIFO" ]]; then
+    # Write the entire text at once
+    echo -n "$text" >> "$TMAX_TEST_INPUT_FIFO"
+    log_debug "Wrote text to input file: $text (${#text} chars)"
+    sleep "$TMAX_KEY_DELAY"
+    return 0
+  fi
+
+  # Fall back to tmux send-keys for each character
+  local target
+  target=$(get_window_target "$window") || return 1
+
   for (( i=0; i<${#text}; i++ )); do
     char="${text:$i:1}"
-    tmux send-keys -t "$target" "$char"
+    tmux send-keys -l -t "$target" "$char"
     sleep "$TMAX_KEY_DELAY"
   done
 }

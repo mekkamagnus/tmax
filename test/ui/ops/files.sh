@@ -5,6 +5,7 @@
 OPS_DIR="$(dirname "${BASH_SOURCE[0]}")"
 source "$OPS_DIR/../lib/config.sh"
 source "$OPS_DIR/../lib/debug.sh"
+source "$OPS_DIR/../lib/common.sh"
 source "$OPS_DIR/../core/input.sh"
 source "$OPS_DIR/../core/query.sh"
 source "$OPS_DIR/editing.sh"

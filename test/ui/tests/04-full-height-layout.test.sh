@@ -3,17 +3,14 @@
 # Verify that the editor UI fills the entire terminal height
 # This test catches regressions where the status bar appears in the middle of the screen
 
-# Source API from test/ui root directory
+# Source test framework from test/ui root directory
 TEST_UI_DIR="$(dirname "${BASH_SOURCE[0]}")"
-source "$TEST_UI_DIR/../lib/api.sh"
+source "$TEST_UI_DIR/../lib/test-framework.sh"
 
-test_full_height_layout() {
-  echo "=== Test: Full Height Layout ==="
+test_full_height_layout_logic() {
   echo "Verifying UI fills entire terminal height"
   echo "Running in visible window: $TMAX_SESSION:$TMAX_TEST_WINDOW"
   echo ""
-
-  tmax_init
 
   # Create a test file with enough lines to fill any reasonable terminal
   # 100 lines should be enough for any terminal (typical max is 50-60 lines)
@@ -72,14 +69,11 @@ test_full_height_layout() {
     fi
   fi
 
-  tmax_summary
-
   # Cleanup
   tmax_quit
   sleep 1
   rm -f "$TEST_FILE"
-  tmax_cleanup
 }
 
 # Run test
-test_full_height_layout
+run_test "Full Height Layout" test_full_height_layout_logic

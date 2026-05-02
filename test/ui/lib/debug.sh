@@ -56,8 +56,12 @@ dump_state() {
     echo "Active Window: $TMAX_ACTIVE_WINDOW"
     echo "Last Action: $TMAX_LAST_ACTION"
     echo ""
-    echo "=== Tmux Window Output ==="
-    tmux capture-pane -t "$TMAX_SESSION:$window" -p -S -"$TMAX_CAPTURE_LINES" 2>/dev/null || echo "Failed to capture window"
+    echo "=== Window Output ==="
+    if [[ "$TMAX_UI_TEST_MODE" == "direct" ]]; then
+      cat "$TMAX_DIRECT_OUTPUT_FILE" 2>/dev/null || echo "No direct output available"
+    else
+      tmux capture-pane -t "$TMAX_SESSION:$window" -p -S -"$TMAX_CAPTURE_LINES" 2>/dev/null || echo "Failed to capture window"
+    fi
     echo ""
     echo "=== Environment ==="
     echo "TMAX_DEBUG: $TMAX_DEBUG"
@@ -78,7 +82,11 @@ capture_screenshot() {
   local window="${1:-$TMAX_ACTIVE_WINDOW}"
   local output_file="${2:-$TMAX_TEST_DIR/screenshot-$(date +%s).txt}"
 
-  tmux capture-pane -t "$TMAX_SESSION:$window" -p -S -"$TMAX_CAPTURE_LINES" > "$output_file" 2>/dev/null
+  if [[ "$TMAX_UI_TEST_MODE" == "direct" ]]; then
+    cat "$TMAX_DIRECT_OUTPUT_FILE" > "$output_file" 2>/dev/null || true
+  else
+    tmux capture-pane -t "$TMAX_SESSION:$window" -p -S -"$TMAX_CAPTURE_LINES" > "$output_file" 2>/dev/null
+  fi
   log_info "Screenshot saved to: $output_file"
   echo "$output_file"
 }
@@ -91,6 +99,14 @@ show_state() {
   echo "Window: $window"
   echo "Session: $TMAX_SESSION"
   echo ""
+
+  if [[ "$TMAX_UI_TEST_MODE" == "direct" ]]; then
+    echo "Mode: DIRECT"
+    echo ""
+    echo "=== Captured Output ==="
+    cat "$TMAX_DIRECT_OUTPUT_FILE" 2>/dev/null || echo "No direct output available"
+    return 0
+  fi
 
   if tmux list-sessions 2>/dev/null | grep -q "^$TMAX_SESSION:"; then
     echo "Session: RUNNING"

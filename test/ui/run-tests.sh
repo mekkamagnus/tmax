@@ -4,12 +4,9 @@
 
 set -e
 
-# Colors
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-BLUE='\033[0;34m'
-NC='\033[0m'
+# Source configuration for color definitions
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$SCRIPT_DIR/lib/config.sh"
 
 # Configuration
 TEST_DIR="$(dirname "$0")/tests"
@@ -51,7 +48,7 @@ echo ""
 
 # Check if tmux is available
 if ! command -v tmux &> /dev/null; then
-    echo -e "${RED}Error: tmux is not installed${NC}"
+    echo -e "${TMAX_COLOR_RED}Error: tmux is not installed${TMAX_COLOR_NC}"
     echo "Install tmux to run UI tests:"
     echo "  sudo apt-get install tmux"
     exit 1
@@ -59,7 +56,7 @@ fi
 
 # Check if in tmux session
 if [[ -z "$TMUX" ]]; then
-    echo -e "${YELLOW}Warning: Not in a tmux session${NC}"
+    echo -e "${TMAX_COLOR_YELLOW}Warning: Not in a tmux session${TMAX_COLOR_NC}"
     echo "For interactive testing, run from within tmux."
     echo ""
     if [[ "$INTERACTIVE_MODE" == "true" ]]; then
@@ -67,7 +64,7 @@ if [[ -z "$TMUX" ]]; then
         INTERACTIVE_MODE=false
     fi
 else
-    echo -e "${GREEN}In tmux session: $(tmux display-message -p '#S')${NC}"
+    echo -e "${TMAX_COLOR_GREEN}In tmux session: $(tmux display-message -p '#S')${TMAX_COLOR_NC}"
     echo ""
 fi
 
@@ -75,7 +72,7 @@ fi
 if [[ "$INTERACTIVE_MODE" == "true" ]] || [[ "$TMAX_KEEP_WINDOW" == "true" ]]; then
     export TMAX_KEEP_WINDOW=true
     export TMAX_INTERACTIVE=true
-    echo -e "${BLUE}Interactive mode: windows will be visible${NC}"
+    echo -e "${TMAX_COLOR_BLUE}Interactive mode: windows will be visible${TMAX_COLOR_NC}"
     echo ""
 else
     export TMAX_KEEP_WINDOW=false
@@ -105,11 +102,11 @@ for test_file in "$TEST_DIR"/*.test.sh; do
         # Run test from test directory to fix relative paths
         if (cd "$(dirname "$test_file")" && bash "$(basename "$test_file")"); then
             PASSED=$((PASSED + 1))
-            echo -e "${GREEN}✓ $test_name PASSED${NC}"
+            echo -e "${TMAX_COLOR_GREEN}✓ $test_name PASSED${TMAX_COLOR_NC}"
         else
             FAILED=$((FAILED + 1))
             FAILED_TESTS+=("$test_name")
-            echo -e "${RED}✗ $test_name FAILED${NC}"
+            echo -e "${TMAX_COLOR_RED}✗ $test_name FAILED${TMAX_COLOR_NC}"
         fi
 
         # Small delay between tests
@@ -126,7 +123,7 @@ if [[ "$INTERACTIVE_MODE" == "true" ]]; then
     echo "========================================="
     echo "Window: $TMAX_SESSION:$TMAX_TEST_WINDOW"
     echo ""
-    echo -e "${GREEN}Test window kept open for inspection${NC}"
+    echo -e "${TMAX_COLOR_GREEN}Test window kept open for inspection${TMAX_COLOR_NC}"
     echo ""
     echo "To inspect the window:"
     echo "  tmux select-window -t $TMAX_SESSION:$TMAX_TEST_WINDOW"
@@ -146,12 +143,12 @@ echo "========================================="
 echo "  Test Summary"
 echo "========================================="
 echo "Total:  $TOTAL"
-echo -e "${GREEN}Passed: ${PASSED}${NC}"
-echo -e "${RED}Failed: ${FAILED}${NC}"
+echo -e "${TMAX_COLOR_GREEN}Passed: ${PASSED}${TMAX_COLOR_NC}"
+echo -e "${TMAX_COLOR_RED}Failed: ${FAILED}${TMAX_COLOR_NC}"
 
 if [[ $FAILED -gt 0 ]]; then
     echo ""
-    echo -e "${RED}Failed tests:${NC}"
+    echo -e "${TMAX_COLOR_RED}Failed tests:${TMAX_COLOR_NC}"
     for test in "${FAILED_TESTS[@]}"; do
         echo "  - $test"
     done
@@ -159,7 +156,7 @@ if [[ $FAILED -gt 0 ]]; then
     exit 1
 else
     echo ""
-    echo -e "${GREEN}All tests passed!${NC}"
+    echo -e "${TMAX_COLOR_GREEN}All tests passed!${TMAX_COLOR_NC}"
     echo ""
     exit 0
 fi

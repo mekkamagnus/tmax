@@ -4,12 +4,9 @@
 
 set -e
 
-# Colors
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-BLUE='\033[0;34m'
-NC='\033[0m'
+# Source configuration for color definitions
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$SCRIPT_DIR/lib/config.sh"
 
 # Configuration
 export TMAX_KEEP_WINDOW=true
@@ -30,7 +27,7 @@ echo ""
 
 # Check if in tmux
 if [[ -z "$TMUX" ]]; then
-  echo -e "${YELLOW}Warning: Not in tmux session${NC}"
+  echo -e "${TMAX_COLOR_YELLOW}Warning: Not in tmux session${TMAX_COLOR_NC}"
   echo "For best experience, run from within tmux."
   echo ""
 fi
@@ -41,7 +38,7 @@ source "$(dirname "$0")/lib/api.sh"
 tmax_init
 
 # Trap to ensure cleanup on exit
-trap 'echo -e "\n${YELLOW}Interrupted. Test window kept open for inspection.${NC}"' INT
+trap 'echo -e "\n${TMAX_COLOR_YELLOW}Interrupted. Test window kept open for inspection.${TMAX_COLOR_NC}"' INT
 
 # Run all test files
 for test_file in "$TEST_DIR"/*.test.sh; do
@@ -51,18 +48,18 @@ for test_file in "$TEST_DIR"/*.test.sh; do
 
         echo ""
         echo "========================================="
-        echo -e "${BLUE}Running: $test_name${NC}"
+        echo -e "${TMAX_COLOR_BLUE}Running: $test_name${TMAX_COLOR_NC}"
         echo "========================================="
         echo "Window: $TMAX_SESSION:$TMAX_TEST_WINDOW"
         echo ""
 
         if bash "$test_file"; then
             PASSED=$((PASSED + 1))
-            echo -e "${GREEN}✓ $test_name PASSED${NC}"
+            echo -e "${TMAX_COLOR_GREEN}✓ $test_name PASSED${TMAX_COLOR_NC}"
         else
             FAILED=$((FAILED + 1))
             FAILED_TESTS+=("$test_name")
-            echo -e "${RED}✗ $test_name FAILED${NC}"
+            echo -e "${TMAX_COLOR_RED}✗ $test_name FAILED${TMAX_COLOR_NC}"
         fi
 
         # Show window location and prompt
@@ -88,8 +85,8 @@ echo "========================================="
 echo "  Test Summary"
 echo "========================================="
 echo "Total:  $TOTAL"
-echo -e "${GREEN}Passed: ${PASSED}${NC}"
-echo -e "${RED}Failed: ${FAILED}${NC}"
+echo -e "${TMAX_COLOR_GREEN}Passed: ${PASSED}${TMAX_COLOR_NC}"
+echo -e "${TMAX_COLOR_RED}Failed: ${FAILED}${TMAX_COLOR_NC}"
 
 if [[ $FAILED -gt 0 ]]; then
     echo ""
@@ -106,7 +103,7 @@ echo "========================================="
 echo "Window: $TMAX_SESSION:$TMAX_TEST_WINDOW"
 echo ""
 if [[ "$TMAX_KEEP_WINDOW" == "true" ]]; then
-    echo -e "${GREEN}Test window kept open for inspection${NC}"
+    echo -e "${TMAX_COLOR_GREEN}Test window kept open for inspection${TMAX_COLOR_NC}"
     echo ""
     echo "To inspect the window:"
     echo "  tmux select-window -t $TMAX_SESSION:$TMAX_TEST_WINDOW"

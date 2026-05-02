@@ -2,17 +2,13 @@
 # Test: Basic Editing
 # Verify basic text editing functionality
 
-# Source API from test/ui root directory
+# Source test framework from test/ui root directory
 TEST_UI_DIR="$(dirname "${BASH_SOURCE[0]}")"
-source "$TEST_UI_DIR/../lib/api.sh"
+source "$TEST_UI_DIR/../lib/test-framework.sh"
 
-test_basic_editing() {
-  echo "=== Test: Basic Editing ==="
-
-  tmax_init
-
+test_basic_editing_logic() {
   # Create a test file in project root
-  echo "Initial content" > /home/mekael/Documents/tmax/test-edit.txt
+  setup_test_file "test-edit.txt" "Initial content"
 
   # Start editor with file (relative to project root)
   tmax_start "test-edit.txt"
@@ -42,19 +38,15 @@ test_basic_editing() {
   sleep 1
 
   # Check file was saved
-  if assert_file_contains "/home/mekael/Documents/tmax/test-edit.txt" "Appended text" "File should contain appended text"; then
+  if assert_file_contains "$TMAX_PROJECT_ROOT/test-edit.txt" "Appended text" "File should contain appended text"; then
     # Cleanup only if test passed
-    rm -f /home/mekael/Documents/tmax/test-edit.txt
-    tmax_cleanup
+    cleanup_test_file "test-edit.txt"
   else
     # Keep file for inspection
-    echo "Test failed - file kept at /home/mekael/Documents/tmax/test-edit.txt"
-    cat /home/mekael/Documents/tmax/test-edit.txt
-    tmax_cleanup
+    echo "Test failed - file kept at $TMAX_PROJECT_ROOT/test-edit.txt"
+    cat "$TMAX_PROJECT_ROOT/test-edit.txt"
   fi
-
-  tmax_summary
 }
 
 # Run test
-test_basic_editing
+run_test "Basic Editing" test_basic_editing_logic
