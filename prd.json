@@ -32,7 +32,7 @@
         "core/bindings/command.tlisp exists and loads for command mode",
         "Modifying binding files and restarting tmax reflects changes",
         "Binding files use defkeymap to create keymap structures",
-        "~/.tmaxrc custom bindings override defaults"
+        "~/.config/tmax/init.tlisp custom bindings override defaults"
       ],
       "priority": 1,
       "passes": true,

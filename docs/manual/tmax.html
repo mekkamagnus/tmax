@@ -186,7 +186,7 @@ with no Invariant Sections, no Front-Cover Texts, and no Back-Cover Texts.
     </ul></li>
     <li><a id="toc-Configuration-File" href="#Configuration-File">6.5 Configuration File</a>
     <ul class="toc-numbered-mark">
-      <li><a id="toc-Example-_002etmaxrc" href="#Example-_002etmaxrc">6.5.1 Example .tmaxrc</a></li>
+      <li><a id="toc-Example-init_002etlisp" href="#Example-init_002etlisp">6.5.1 Example init.tlisp</a></li>
     </ul></li>
   </ul></li>
   <li><a id="toc-T_002dLisp-Language-Reference" href="#T_002dLisp-Language-Reference">7 T-Lisp Language Reference</a>
@@ -287,7 +287,7 @@ with no Invariant Sections, no Front-Cover Texts, and no Back-Cover Texts.
     </ul></li>
     <li><a id="toc-Configuration-Issues" href="#Configuration-Issues">12.3 Configuration Issues</a>
     <ul class="toc-numbered-mark">
-      <li><a id="toc-_002etmaxrc-Not-Loading" href="#g_t_002etmaxrc-Not-Loading">12.3.1 .tmaxrc Not Loading</a></li>
+      <li><a id="toc-init_002etlisp-Not-Loading" href="#g_t_init_002etlisp-Not-Loading">12.3.1 init.tlisp Not Loading</a></li>
       <li><a id="toc-T_002dLisp-Syntax-Errors" href="#T_002dLisp-Syntax-Errors">12.3.2 T-Lisp Syntax Errors</a></li>
     </ul></li>
     <li><a id="toc-Getting-Help" href="#Getting-Help">12.4 Getting Help</a></li>
@@ -371,7 +371,7 @@ memory management) while T-Lisp handles all higher-level editor functionality.
 </li><li>Mode management for modal editing state and transitions
 </li><li>Key binding definitions with configurable key mappings
 </li><li>User interface logic including status line, command input, M-x functionality
-</li><li>Configuration management through .tmaxrc file loading and execution
+</li><li>Configuration management through <samp class="file">~/.config/tmax/init.tlisp</samp> file loading and execution
 </li><li>Extensibility via custom functions, macros, and commands
 </li></ul>
 
@@ -1222,15 +1222,15 @@ Next: <a href="#T_002dLisp-Language-Reference" accesskey="n" rel="next">T-Lisp L
 <div class="section-level-extent" id="Configuration-File">
 <h3 class="section"><span>6.5 Configuration File<a class="copiable-link" href="#Configuration-File"> &para;</a></span></h3>
 
-<p>tmax loads <samp class="file">~/.tmaxrc</samp> on startup if it exists.
+<p>tmax loads <samp class="file">~/.config/tmax/init.tlisp</samp> on startup if it exists.
 </p>
 <ul class="mini-toc">
-<li><a href="#Example-_002etmaxrc" accesskey="1">Example .tmaxrc</a></li>
+<li><a href="#Example-init_002etlisp" accesskey="1">Example init.tlisp</a></li>
 </ul>
-<div class="subsection-level-extent" id="Example-_002etmaxrc">
-<h4 class="subsection"><span>6.5.1 Example .tmaxrc<a class="copiable-link" href="#Example-_002etmaxrc"> &para;</a></span></h4>
+<div class="subsection-level-extent" id="Example-init_002etlisp">
+<h4 class="subsection"><span>6.5.1 Example init.tlisp<a class="copiable-link" href="#Example-init_002etlisp"> &para;</a></span></h4>
 <div class="example">
-<pre class="example-preformatted">;; ~/.tmaxrc - tmax configuration
+<pre class="example-preformatted">;; ~/.config/tmax/init.tlisp - tmax configuration
 
 ;; Define custom word count function
 (defun word-count ()
@@ -1929,7 +1929,7 @@ Next: <a href="#Command-Reference" accesskey="n" rel="next">Command Reference</a
 <div class="section-level-extent" id="Configuration-File-1">
 <h3 class="section"><span>9.1 Configuration File<a class="copiable-link" href="#Configuration-File-1"> &para;</a></span></h3>
 
-<p>tmax loads <samp class="file">~/.tmaxrc</samp> on startup for user customization.
+<p>tmax loads <samp class="file">~/.config/tmax/init.tlisp</samp> on startup for user customization.
 </p>
 </div>
 <div class="section-level-extent" id="Configuration-Examples">
@@ -2207,7 +2207,7 @@ hjkl
 <div class="subsection-level-extent" id="Programmer_0027s-Setup">
 <h4 class="subsection"><span>11.2.1 Programmer&rsquo;s Setup<a class="copiable-link" href="#Programmer_0027s-Setup"> &para;</a></span></h4>
 <div class="example">
-<pre class="example-preformatted">;; ~/.tmaxrc for programming
+<pre class="example-preformatted">;; ~/.config/tmax/init.tlisp for programming
 
 ;; Line numbers function
 (defun show-line-number ()
@@ -2239,7 +2239,7 @@ hjkl
 <div class="subsection-level-extent" id="Writer_0027s-Setup">
 <h4 class="subsection"><span>11.2.2 Writer&rsquo;s Setup<a class="copiable-link" href="#Writer_0027s-Setup"> &para;</a></span></h4>
 <div class="example">
-<pre class="example-preformatted">;; ~/.tmaxrc for writing
+<pre class="example-preformatted">;; ~/.config/tmax/init.tlisp for writing
 
 ;; Word count function
 (defun word-count ()
@@ -2398,7 +2398,7 @@ Next: <a href="#Index" accesskey="n" rel="next">Index</a>, Previous: <a href="#E
 </p>
 <p><strong class="strong">Solution:</strong>
 </p><ol class="enumerate">
-<li> Check T-Lisp syntax in <samp class="file">.tmaxrc</samp>
+<li> Check T-Lisp syntax in <samp class="file">init.tlisp</samp>
 </li><li> Verify key name format (e.g., &quot;C-c&quot; not &quot;Ctrl+C&quot;)
 </li><li> Test with simple binding: <code class="code">(key-bind &quot;x&quot; &quot;(editor-set-status \&quot;test\&quot;)&quot; &quot;normal&quot;)</code>
 </li><li> Check mode specificity - binding may be for different mode
@@ -2423,17 +2423,17 @@ Next: <a href="#Index" accesskey="n" rel="next">Index</a>, Previous: <a href="#E
 <h3 class="section"><span>12.3 Configuration Issues<a class="copiable-link" href="#Configuration-Issues"> &para;</a></span></h3>
 
 <ul class="mini-toc">
-<li><a href="#g_t_002etmaxrc-Not-Loading" accesskey="1">.tmaxrc Not Loading</a></li>
+<li><a href="#g_t_init_002etlisp-Not-Loading" accesskey="1">init.tlisp Not Loading</a></li>
 <li><a href="#T_002dLisp-Syntax-Errors" accesskey="2">T-Lisp Syntax Errors</a></li>
 </ul>
-<div class="subsection-level-extent" id="g_t_002etmaxrc-Not-Loading">
-<h4 class="subsection"><span>12.3.1 .tmaxrc Not Loading<a class="copiable-link" href="#g_t_002etmaxrc-Not-Loading"> &para;</a></span></h4>
+<div class="subsection-level-extent" id="g_t_init_002etlisp-Not-Loading">
+<h4 class="subsection"><span>12.3.1 init.tlisp Not Loading<a class="copiable-link" href="#g_t_init_002etlisp-Not-Loading"> &para;</a></span></h4>
 <p><strong class="strong">Problem:</strong> Custom configuration not applied
 </p>
 <p><strong class="strong">Solution:</strong>
 </p><ol class="enumerate">
-<li> Verify file location: <samp class="file">~/.tmaxrc</samp> (exact path)
-</li><li> Check file permissions: <code class="code">ls -la ~/.tmaxrc</code>  
+<li> Verify file location: <samp class="file">~/.config/tmax/init.tlisp</samp> (exact path)
+</li><li> Check file permissions: <code class="code">ls -la ~/.config/tmax/init.tlisp</code>
 </li><li> Test with simple configuration: <code class="code">(editor-set-status &quot;Config loaded&quot;)</code>
 </li><li> Check for T-Lisp syntax errors
 </li></ol>
@@ -2521,7 +2521,7 @@ Previous: <a href="#Troubleshooting" accesskey="p" rel="prev">Troubleshooting</a
 <tr><td></td><th class="entries-header-printindex">Index Entry</th><th class="sections-header-printindex">Section</th></tr>
 <tr><td colspan="3"><hr></td></tr>
 <tr><th id="Index_cp_symbol-1">.</th></tr>
-<tr><td></td><td class="printindex-index-entry"><a href="#index-_002etmaxrc">.tmaxrc</a></td><td class="printindex-index-section"><a href="#Configuration">Configuration</a></td></tr>
+<tr><td></td><td class="printindex-index-entry"><a href="#index-init_002etlisp">init.tlisp</a></td><td class="printindex-index-section"><a href="#Configuration">Configuration</a></td></tr>
 <tr><td colspan="3"><hr></td></tr>
 <tr><th id="Index_cp_letter-A">A</th></tr>
 <tr><td></td><td class="printindex-index-entry"><a href="#index-API">API</a></td><td class="printindex-index-section"><a href="#Command-Reference">Command Reference</a></td></tr>

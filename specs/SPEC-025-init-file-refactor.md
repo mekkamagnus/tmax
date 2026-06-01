@@ -2,19 +2,19 @@
 
 ## Chore Description
 Refactor the tmax initialization file system to modernize configuration management and improve developer experience. The refactoring includes:
-1. Rename `.tmaxrc` to `init.tlisp` for better clarity
+1. Rename `.tmaxrc` (previously `.tmaxrc`) to `init.tlisp` for better clarity
 2. Relocate configuration from `~/` to `~/.config/tmax/` (XDG Base Directory compliance)
 3. Add `eval-init-file` T-Lisp function to reload configuration without restarting
 4. Add `--init-file` CLI flag to override default init file path for testing
 
-**NOTE**: This is an alpha project. No backward compatibility with `.tmaxrc` is maintained.
+**NOTE**: This is an alpha project. No backward compatibility with `.tmaxrc` (previously `.tmaxrc`) is maintained.
 
 ## Relevant Files
 
 ### Files to Modify
 
 - **src/editor/editor.ts** (lines 1524-1571)
-  - Contains `loadInitFile()` method that currently loads `~/.tmaxrc`
+  - Contains `loadInitFile()` method that currently loads `~/.tmaxrc` (previously `.tmaxrc`)
   - Needs refactoring to support new location, filename, and CLI override
   - Needs to add `evalInitFile()` method for runtime reloading
   - Update `initializeAPI()` to register new T-Lisp functions
@@ -30,7 +30,7 @@ Refactor the tmax initialization file system to modernize configuration manageme
   - Update content with new file paths and `eval-init-file` usage
 
 - **README.md** (lines 118-140)
-  - Documentation referencing `.tmaxrc`
+  - Documentation referencing `.tmaxrc` (previously `.tmaxrc`)
   - Configuration section needs complete update
   - Add documentation for new features
 
@@ -62,7 +62,7 @@ Refactor the tmax initialization file system to modernize configuration manageme
 
 #### Modify src/editor/editor.ts loadInitFile() method
 - Update to use XDG config directory: `~/.config/tmax/`
-- Change default filename from `.tmaxrc` to `init.tlisp`
+- Change default filename from `.tmaxrc` (previously `.tmaxrc`) to `init.tlisp`
 - Add config directory creation if it doesn't exist
 - Store init file path in Editor state for later reference
 
@@ -176,11 +176,11 @@ const editor = new EditorClass(terminal, filesystem, initFilePath);
 - Update all references to new filename
 - Update examples with new file path
 - Add `eval-init-file` usage examples
-- Document migration from `.tmaxrc`
+- Document migration from `.tmaxrc` (previously `.tmaxrc`)
 
 #### Update README.md
 - Update Configuration section (lines 118-140)
-- Change `.tmaxrc` → `init.tlisp` references
+- Change `.tmaxrc` (previously `.tmaxrc`) → `init.tlisp` references
 - Update file path: `~/.config/tmax/init.tlisp`
 - Add `eval-init-file` documentation
 - Add `--init-file` flag documentation
@@ -193,14 +193,14 @@ const editor = new EditorClass(terminal, filesystem, initFilePath);
 ### Phase 6: Migration Helper (Optional)
 
 #### Create src/editor/migration.ts
-- Add `migrateTmaxrc()` function to copy `.tmaxrc` to new location
+- Add `migrateTmaxrc()` function to copy `.tmaxrc` (previously `.tmaxrc`) to new location
 - Create backup of original file
 - Register `migrate-tmaxrc` T-Lisp function
 
 ```typescript
 export async function migrateTmaxrc(filesystem: FileSystem): Promise<boolean> {
   const homeDir = process.env.HOME || process.env.USERPROFILE || '.';
-  const oldFile = `${homeDir}/.tmaxrc`;
+  const oldFile = `${homeDir}/.tmaxrc`; // previously `.tmaxrc`
   const newDir = `${homeDir}/.config/tmax`;
   const newFile = `${newDir}/init.tlisp`;
 
@@ -296,7 +296,7 @@ bash test/ui/tests/03-mode-switching.test.sh
 - [ ] All integration tests pass
 - [ ] Documentation updated (README, examples)
 - [ ] No regressions in existing functionality
-- [ ] All `.tmaxrc` references removed from codebase
+- [ ] All `.tmaxrc` (previously `.tmaxrc`) references removed from codebase
 
 ## Notes
 
@@ -306,7 +306,7 @@ bash test/ui/tests/03-mode-switching.test.sh
 - This is standard for modern Linux/Unix applications
 
 ### Breaking Changes
-- **Impact**: Users with existing `.tmaxrc` files need to move to `~/.config/tmax/init.tlisp`
+- **Impact**: Users with existing `.tmaxrc` (previously `.tmaxrc`) files need to move to `~/.config/tmax/init.tlisp`
 - **Migration**: Users manually move file to new location
 - **Note**: This is an alpha project, breaking changes are acceptable
 

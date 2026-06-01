@@ -6,6 +6,8 @@
   "scripts": {
     "start": "node --import tsx src/main.tsx",
     "dev": "node --watch --import tsx src/main.tsx --dev",
+    "tui": "bun src/client/tui-client.ts",
+    "daemon": "bun src/server/server.ts",
     "repl": "bun run scripts/repl.ts",
     "test": "bun test",
     "test:ui": "bash test/ui/start-ui-test.sh",

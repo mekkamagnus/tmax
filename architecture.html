@@ -1,0 +1,762 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>tmax Architecture</title>
+  <style>
+    :root {
+      --bg: #0d1117;
+      --surface: #161b22;
+      --surface2: #1c2333;
+      --border: #30363d;
+      --text: #e6edf3;
+      --text-muted: #8b949e;
+      --accent: #58a6ff;
+      --green: #3fb950;
+      --purple: #bc8cff;
+      --orange: #f0883e;
+      --red: #ff7b72;
+      --teal: #39d353;
+      --yellow: #d29922;
+    }
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.6;
+      padding: 2rem;
+      max-width: 1200px;
+      margin: 0 auto;
+    }
+    h1 {
+      font-size: 2.5rem;
+      margin-bottom: 0.5rem;
+      background: linear-gradient(135deg, var(--accent), var(--purple));
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }
+    .subtitle {
+      color: var(--text-muted);
+      font-size: 1.1rem;
+      margin-bottom: 2.5rem;
+    }
+    h2 {
+      font-size: 1.5rem;
+      margin: 2.5rem 0 1rem;
+      color: var(--accent);
+      border-bottom: 1px solid var(--border);
+      padding-bottom: 0.5rem;
+    }
+    h3 {
+      font-size: 1.15rem;
+      margin: 1.5rem 0 0.75rem;
+      color: var(--purple);
+    }
+    p { margin-bottom: 0.75rem; color: var(--text-muted); }
+    code {
+      background: var(--surface2);
+      padding: 0.15rem 0.4rem;
+      border-radius: 4px;
+      font-family: 'SF Mono', 'Fira Code', monospace;
+      font-size: 0.9em;
+      color: var(--orange);
+    }
+
+    /* Architecture Diagram */
+    .diagram {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 2rem;
+      margin: 1.5rem 0;
+      overflow-x: auto;
+    }
+    .layer {
+      border: 2px solid var(--border);
+      border-radius: 8px;
+      padding: 1rem 1.25rem;
+      margin-bottom: 0.75rem;
+      position: relative;
+    }
+    .layer-label {
+      position: absolute;
+      top: -0.65rem;
+      left: 1rem;
+      background: var(--surface);
+      padding: 0 0.5rem;
+      font-size: 0.8rem;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+    }
+    .layer-ui { border-color: var(--accent); }
+    .layer-ui .layer-label { color: var(--accent); }
+    .layer-editor { border-color: var(--purple); }
+    .layer-editor .layer-label { color: var(--purple); }
+    .layer-core { border-color: var(--green); }
+    .layer-core .layer-label { color: var(--green); }
+    .layer-runtime { border-color: var(--orange); }
+    .layer-runtime .layer-label { color: var(--orange); }
+
+    .boxes {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.5rem;
+      margin-top: 0.5rem;
+    }
+    .box {
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 0.5rem 0.75rem;
+      font-size: 0.85rem;
+      min-width: 120px;
+      text-align: center;
+    }
+    .box strong {
+      display: block;
+      color: var(--text);
+      font-size: 0.9rem;
+      margin-bottom: 0.15rem;
+    }
+    .box small { color: var(--text-muted); }
+    .box.highlight {
+      border-color: var(--yellow);
+      background: rgba(210, 153, 34, 0.08);
+    }
+
+    .arrow {
+      text-align: center;
+      color: var(--text-muted);
+      font-size: 1.5rem;
+      padding: 0.25rem 0;
+      letter-spacing: 0.5rem;
+    }
+
+    /* Data Flow */
+    .flow {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      flex-wrap: wrap;
+      margin: 1rem 0;
+    }
+    .flow-step {
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 0.6rem 1rem;
+      font-size: 0.85rem;
+      text-align: center;
+      flex-shrink: 0;
+    }
+    .flow-step strong { display: block; color: var(--text); }
+    .flow-step small { color: var(--text-muted); }
+    .flow-arrow {
+      color: var(--accent);
+      font-size: 1.2rem;
+      flex-shrink: 0;
+    }
+
+    /* Component Table */
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin: 1rem 0;
+      font-size: 0.9rem;
+    }
+    th, td {
+      text-align: left;
+      padding: 0.6rem 1rem;
+      border-bottom: 1px solid var(--border);
+    }
+    th {
+      color: var(--accent);
+      font-weight: 600;
+      background: var(--surface);
+    }
+    td { color: var(--text-muted); }
+    td:first-child { color: var(--text); font-family: monospace; }
+
+    /* Stats Grid */
+    .stats {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+      gap: 1rem;
+      margin: 1.5rem 0;
+    }
+    .stat {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 1.25rem;
+      text-align: center;
+    }
+    .stat .number {
+      font-size: 2rem;
+      font-weight: 700;
+      background: linear-gradient(135deg, var(--accent), var(--purple));
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }
+    .stat .label {
+      font-size: 0.85rem;
+      color: var(--text-muted);
+      margin-top: 0.25rem;
+    }
+
+    /* File Tree */
+    .tree {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 1.25rem 1.5rem;
+      font-family: 'SF Mono', 'Fira Code', monospace;
+      font-size: 0.85rem;
+      line-height: 1.8;
+      margin: 1rem 0;
+    }
+    .tree .dir { color: var(--accent); }
+    .tree .file { color: var(--text); }
+    .tree .comment { color: var(--text-muted); }
+
+    /* T-Lisp Pipeline */
+    .pipeline {
+      display: flex;
+      align-items: stretch;
+      gap: 0;
+      margin: 1rem 0;
+    }
+    .pipeline-stage {
+      flex: 1;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      padding: 1rem;
+      text-align: center;
+      position: relative;
+    }
+    .pipeline-stage:first-child { border-radius: 8px 0 0 8px; }
+    .pipeline-stage:last-child { border-radius: 0 8px 8px 0; }
+    .pipeline-stage strong {
+      display: block;
+      color: var(--text);
+      margin-bottom: 0.25rem;
+    }
+    .pipeline-stage small { color: var(--text-muted); }
+    .pipeline-arrow {
+      display: flex;
+      align-items: center;
+      color: var(--green);
+      font-size: 1.5rem;
+      background: var(--surface2);
+      padding: 0 0.4rem;
+      border-top: 1px solid var(--border);
+      border-bottom: 1px solid var(--border);
+    }
+
+    /* Mode Diagram */
+    .modes {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+      gap: 1rem;
+      margin: 1rem 0;
+    }
+    .mode-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 1rem;
+      text-align: center;
+    }
+    .mode-card .mode-name {
+      font-size: 1.1rem;
+      font-weight: 700;
+      margin-bottom: 0.5rem;
+    }
+    .mode-card .mode-keys {
+      font-family: monospace;
+      font-size: 0.8rem;
+      color: var(--orange);
+      margin-bottom: 0.5rem;
+    }
+    .mode-card p {
+      font-size: 0.8rem;
+      margin: 0;
+    }
+
+    .mode-normal .mode-name { color: var(--green); }
+    .mode-insert .mode-name { color: var(--accent); }
+    .mode-visual .mode-name { color: var(--purple); }
+    .mode-command .mode-name { color: var(--orange); }
+    .mode-mx .mode-name { color: var(--yellow); }
+
+    /* Responsive */
+    @media (max-width: 768px) {
+      body { padding: 1rem; }
+      h1 { font-size: 1.75rem; }
+      .pipeline { flex-direction: column; }
+      .pipeline-stage:first-child { border-radius: 8px 8px 0 0; }
+      .pipeline-stage:last-child { border-radius: 0 0 8px 8px; }
+      .pipeline-arrow {
+        justify-content: center;
+        padding: 0.3rem;
+        border: 1px solid var(--border);
+        border-top: none;
+        border-bottom: none;
+      }
+    }
+  </style>
+</head>
+<body>
+
+<h1>tmax</h1>
+<p class="subtitle">T-Lisp powered terminal text editor &mdash; Emacs architecture with TypeScript core and Lisp extensibility</p>
+
+<div class="stats">
+  <div class="stat">
+    <div class="number">26K</div>
+    <div class="label">Lines of TypeScript</div>
+  </div>
+  <div class="stat">
+    <div class="number">80+</div>
+    <div class="label">Source files</div>
+  </div>
+  <div class="stat">
+    <div class="number">25+</div>
+    <div class="label">T-Lisp API functions</div>
+  </div>
+  <div class="stat">
+    <div class="number">0</div>
+    <div class="label">External dependencies</div>
+  </div>
+</div>
+
+<!-- Architecture Diagram -->
+<h2>Layered Architecture</h2>
+<p>tmax follows the Emacs split-brain architecture: a fast compiled core handles I/O and data structures, while a Lisp dialect handles all editor logic, commands, and extensibility.</p>
+
+<div class="diagram">
+  <!-- UI Layer -->
+  <div class="layer layer-ui">
+    <div class="layer-label">Presentation Layer</div>
+    <div class="boxes">
+      <div class="box">
+        <strong>React + Ink</strong>
+        <small>Terminal UI rendering</small>
+      </div>
+      <div class="box">
+        <strong>Editor.tsx</strong>
+        <small>Root component</small>
+      </div>
+      <div class="box">
+        <strong>useEditorState</strong>
+        <small>React hook bridge</small>
+      </div>
+      <div class="box">
+        <strong>useTerminalDims</strong>
+        <small>Resize handling</small>
+      </div>
+    </div>
+  </div>
+
+  <div class="arrow">&darr;</div>
+
+  <!-- Editor Layer -->
+  <div class="layer layer-editor">
+    <div class="layer-label">Editor Logic Layer (T-Lisp Driven)</div>
+    <div class="boxes">
+      <div class="box highlight">
+        <strong>Editor</strong>
+        <small>State machine &amp; orchestrator</small>
+      </div>
+      <div class="box">
+        <strong>Mode Handlers</strong>
+        <small>normal / insert / visual / command / mx</small>
+      </div>
+      <div class="box highlight">
+        <strong>T-Lisp API</strong>
+        <small>20+ operation modules</small>
+      </div>
+      <div class="box">
+        <strong>KeymapSync</strong>
+        <small>T-Lisp keymap bridge</small>
+      </div>
+    </div>
+    <div style="margin-top: 0.75rem;">
+      <div class="boxes">
+        <div class="box"><strong>Buffer Ops</strong><small>create/switch/text</small></div>
+        <div class="box"><strong>Cursor Ops</strong><small>move/position</small></div>
+        <div class="box"><strong>Mode Ops</strong><small>get/set modes</small></div>
+        <div class="box"><strong>Delete Ops</strong><small>char/word/line</small></div>
+        <div class="box"><strong>Yank Ops</strong><small>copy/paste/register</small></div>
+        <div class="box"><strong>Search Ops</strong><small>find/replace</small></div>
+        <div class="box"><strong>Undo Tree</strong><small>undo/redo</small></div>
+        <div class="box"><strong>Text Objects</strong><small>word/line/paragraph</small></div>
+        <div class="box"><strong>Visual Ops</strong><small>selection</small></div>
+        <div class="box"><strong>LSP Diags</strong><small>language server</small></div>
+        <div class="box"><strong>Plugin Ops</strong><small>.tlpa packages</small></div>
+        <div class="box"><strong>Macro Rec</strong><small>record/playback</small></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="arrow">&darr;</div>
+
+  <!-- T-Lisp Layer -->
+  <div class="layer layer-core">
+    <div class="layer-label">T-Lisp Interpreter</div>
+    <div class="boxes">
+      <div class="box">
+        <strong>Tokenizer</strong>
+        <small>Lexical analysis</small>
+      </div>
+      <div class="box">
+        <strong>Parser</strong>
+        <small>AST generation</small>
+      </div>
+      <div class="box highlight">
+        <strong>Evaluator</strong>
+        <small>TCO, lexical scope</small>
+      </div>
+      <div class="box">
+        <strong>Stdlib</strong>
+        <small>31 built-in fns</small>
+      </div>
+      <div class="box">
+        <strong>Environment</strong>
+        <small>Scoped bindings</small>
+      </div>
+      <div class="box">
+        <strong>Values</strong>
+        <small>Types &amp; constructors</small>
+      </div>
+    </div>
+  </div>
+
+  <div class="arrow">&darr;</div>
+
+  <!-- Core Layer -->
+  <div class="layer layer-runtime">
+    <div class="layer-label">Runtime &amp; Platform Layer</div>
+    <div class="boxes">
+      <div class="box">
+        <strong>Terminal IO</strong>
+        <small>Raw mode, ANSI escapes</small>
+      </div>
+      <div class="box">
+        <strong>Gap Buffer</strong>
+        <small>Immutable text storage</small>
+      </div>
+      <div class="box">
+        <strong>FileSystem</strong>
+        <small>Async file I/O</small>
+      </div>
+      <div class="box">
+        <strong>LSP Client</strong>
+        <small>Language server protocol</small>
+      </div>
+      <div class="box">
+        <strong>Bun Runtime</strong>
+        <small>Process, stdin/stdout</small>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Data Flow -->
+<h2>Keystroke Data Flow</h2>
+<p>Every key press flows through the layered architecture, from raw terminal input to UI update.</p>
+
+<div class="flow">
+  <div class="flow-step">
+    <strong>Bun stdin</strong>
+    <small>Raw key bytes</small>
+  </div>
+  <div class="flow-arrow">&rarr;</div>
+  <div class="flow-step">
+    <strong>React / Ink</strong>
+    <small>Key normalization</small>
+  </div>
+  <div class="flow-arrow">&rarr;</div>
+  <div class="flow-step">
+    <strong>Editor.handleKey()</strong>
+    <small>Dispatch by mode</small>
+  </div>
+  <div class="flow-arrow">&rarr;</div>
+  <div class="flow-step">
+    <strong>Mode Handler</strong>
+    <small>normal/insert/visual/etc</small>
+  </div>
+  <div class="flow-arrow">&rarr;</div>
+  <div class="flow-step">
+    <strong>T-Lisp eval</strong>
+    <small>Execute command</small>
+  </div>
+  <div class="flow-arrow">&rarr;</div>
+  <div class="flow-step">
+    <strong>State update</strong>
+    <small>React re-render</small>
+  </div>
+</div>
+
+<!-- T-Lisp Pipeline -->
+<h2>T-Lisp Execution Pipeline</h2>
+<p>T-Lisp source code passes through four stages from text to result. The evaluator supports tail-call optimization and lexical scoping.</p>
+
+<div class="pipeline">
+  <div class="pipeline-stage">
+    <strong>Source</strong>
+    <small><code>"(defun hello () ...)"</code></small>
+  </div>
+  <div class="pipeline-arrow">&rarr;</div>
+  <div class="pipeline-stage">
+    <strong>Tokenizer</strong>
+    <small>Lex &rarr; tokens</small>
+  </div>
+  <div class="pipeline-arrow">&rarr;</div>
+  <div class="pipeline-stage">
+    <strong>Parser</strong>
+    <small>Tokens &rarr; AST</small>
+  </div>
+  <div class="pipeline-arrow">&rarr;</div>
+  <div class="pipeline-stage">
+    <strong>Evaluator</strong>
+    <small>AST &rarr; value<br/>(TCO, macros)</small>
+  </div>
+</div>
+
+<!-- Modal System -->
+<h2>Modal Editing System</h2>
+<p>Five editing modes provide vim-like modal editing, all driven by T-Lisp key bindings.</p>
+
+<div class="modes">
+  <div class="mode-card mode-normal">
+    <div class="mode-name">Normal</div>
+    <div class="mode-keys">h j k l d y c w b</div>
+    <p>Navigation, operators, text objects</p>
+  </div>
+  <div class="mode-card mode-insert">
+    <div class="mode-name">Insert</div>
+    <div class="mode-keys">i a o O Escape</div>
+    <p>Direct text entry</p>
+  </div>
+  <div class="mode-card mode-visual">
+    <div class="mode-name">Visual</div>
+    <div class="mode-keys">v V Escape</div>
+    <p>Selection and highlighting</p>
+  </div>
+  <div class="mode-card mode-command">
+    <div class="mode-name">Command</div>
+    <div class="mode-keys">: Enter</div>
+    <p>vim-style ex commands (:w, :q)</p>
+  </div>
+  <div class="mode-card mode-mx">
+    <div class="mode-name">M-x</div>
+    <div class="mode-keys">SPC ; Tab</div>
+    <p>Emacs-style command execution</p>
+  </div>
+</div>
+
+<!-- Project Structure -->
+<h2>Project Structure</h2>
+
+<div class="tree">
+  <span class="dir">src/</span><br>
+  &nbsp;&nbsp;<span class="dir">core/</span>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="comment"># Platform layer (terminal, buffer, filesystem)</span><br>
+  &nbsp;&nbsp;&nbsp;&nbsp;<span class="file">terminal.ts</span>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="comment"># 914 lines - ANSI escapes, raw mode, alternate screen</span><br>
+  &nbsp;&nbsp;&nbsp;&nbsp;<span class="file">buffer.ts</span>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="comment"># 530 lines - Immutable gap buffer implementation</span><br>
+  &nbsp;&nbsp;&nbsp;&nbsp;<span class="file">filesystem.ts</span>&nbsp;&nbsp;&nbsp;&nbsp;<span class="comment"># 377 lines - Async file read/write</span><br>
+  &nbsp;&nbsp;&nbsp;&nbsp;<span class="file">types.ts</span>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="comment"># 482 lines - Core type definitions</span><br>
+  &nbsp;&nbsp;<span class="dir">tlisp/</span>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="comment"># T-Lisp interpreter (tokenizer &rarr; parser &rarr; evaluator)</span><br>
+  &nbsp;&nbsp;&nbsp;&nbsp;<span class="file">tokenizer.ts</span>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="comment"># 267 lines - Lexical analysis</span><br>
+  &nbsp;&nbsp;&nbsp;&nbsp;<span class="file">parser.ts</span>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="comment"># 335 lines - AST generation</span><br>
+  &nbsp;&nbsp;&nbsp;&nbsp;<span class="file">evaluator.ts</span>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="comment"># 3,433 lines - Expression evaluation with TCO</span><br>
+  &nbsp;&nbsp;&nbsp;&nbsp;<span class="file">stdlib.ts</span>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="comment"># 598 lines - 31 built-in functions</span><br>
+  &nbsp;&nbsp;&nbsp;&nbsp;<span class="file">environment.ts</span>&nbsp;&nbsp;&nbsp;<span class="comment"># 77 lines - Lexical scoping chains</span><br>
+  &nbsp;&nbsp;&nbsp;&nbsp;<span class="file">values.ts</span>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="comment"># 230 lines - Value constructors</span><br>
+  &nbsp;&nbsp;&nbsp;&nbsp;<span class="file">interpreter.ts</span>&nbsp;&nbsp;&nbsp;<span class="comment"># 145 lines - Facade (parse &rarr; eval)</span><br>
+  &nbsp;&nbsp;<span class="dir">editor/</span>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="comment"># Editor logic (state machine + T-Lisp API)</span><br>
+  &nbsp;&nbsp;&nbsp;&nbsp;<span class="file">editor.ts</span>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="comment"># 2,097 lines - Core editor class</span><br>
+  &nbsp;&nbsp;&nbsp;&nbsp;<span class="file">tlisp-api.ts</span>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="comment"># 87 lines - API registry (20+ modules)</span><br>
+  &nbsp;&nbsp;&nbsp;&nbsp;<span class="dir">handlers/</span>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="comment"># Mode-specific key handlers</span><br>
+  &nbsp;&nbsp;&nbsp;&nbsp;<span class="dir">api/</span>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="comment"># 20+ T-Lisp operation modules</span><br>
+  &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="file">buffer-ops.ts</span>&nbsp;&nbsp;&nbsp;&nbsp;<span class="comment"># Buffer CRUD</span><br>
+  &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="file">cursor-ops.ts</span>&nbsp;&nbsp;&nbsp;&nbsp;<span class="comment"># Cursor movement</span><br>
+  &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="file">delete-ops.ts</span>&nbsp;&nbsp;&nbsp;&nbsp;<span class="comment"># Deletion operators</span><br>
+  &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="file">undo-tree.ts</span>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="comment"># Undo/redo tree</span><br>
+  &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="file">yank-ops.ts</span>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="comment"># Yank (copy/paste)</span><br>
+  &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="file">search-ops.ts</span>&nbsp;&nbsp;&nbsp;&nbsp;<span class="comment"># Search/find</span><br>
+  &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="file">text-objects.ts</span>&nbsp;&nbsp;<span class="comment"># Structural text objects</span><br>
+  &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="file">...17 more</span><br>
+  &nbsp;&nbsp;<span class="dir">frontend/</span>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="comment"># React UI (thin rendering layer)</span><br>
+  &nbsp;&nbsp;&nbsp;&nbsp;<span class="dir">hooks/</span>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="comment"># React hooks</span><br>
+  &nbsp;&nbsp;&nbsp;&nbsp;<span class="file">ink-adapter.ts</span>&nbsp;&nbsp;&nbsp;<span class="comment"># Ink rendering adapter</span><br>
+  &nbsp;&nbsp;<span class="dir">lsp/</span>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="comment"># Language Server Protocol client</span><br>
+  &nbsp;&nbsp;<span class="dir">utils/</span>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="comment"># FP utilities (TaskEither, Option, Lens, etc.)</span><br>
+  &nbsp;&nbsp;<span class="dir">error/</span>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="comment"># Error types and handlers</span><br>
+  &nbsp;&nbsp;<span class="dir">constants/</span>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="comment"># Editor, buffer, terminal constants</span><br>
+  &nbsp;&nbsp;<span class="file">main.tsx</span>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="comment"># Entry point (CLI args &rarr; components &rarr; render)</span><br>
+  <span class="dir">test/</span><br>
+  &nbsp;&nbsp;<span class="dir">unit/</span>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="comment"># Unit tests</span><br>
+  &nbsp;&nbsp;<span class="dir">ui/</span>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="comment"># tmux-based UI tests</span><br>
+  <span class="dir">rules/</span>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="comment"># Path-scoped coding rules</span><br>
+  <span class="dir">specs/</span>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="comment"># Feature specifications</span>
+</div>
+
+<!-- Component Relationships -->
+<h2>Key Component Relationships</h2>
+
+<table>
+  <thead>
+    <tr>
+      <th>Component</th>
+      <th>File</th>
+      <th>Responsibility</th>
+      <th>Size</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>Editor</td>
+      <td>editor/editor.ts</td>
+      <td>State machine, key dispatch, mode transitions, T-Lisp orchestration</td>
+      <td>2,097</td>
+    </tr>
+    <tr>
+      <td>Evaluator</td>
+      <td>tlisp/evaluator.ts</td>
+      <td>Expression evaluation, tail-call optimization, macro expansion</td>
+      <td>3,433</td>
+    </tr>
+    <tr>
+      <td>Terminal</td>
+      <td>core/terminal.ts</td>
+      <td>Raw mode I/O, ANSI escape sequences, alternate screen buffer</td>
+      <td>914</td>
+    </tr>
+    <tr>
+      <td>Gap Buffer</td>
+      <td>core/buffer.ts</td>
+      <td>Immutable gap buffer for efficient text insertion/deletion</td>
+      <td>530</td>
+    </tr>
+    <tr>
+      <td>T-Lisp API</td>
+      <td>editor/tlisp-api.ts</td>
+      <td>Registry composing 20+ operation modules into T-Lisp bindings</td>
+      <td>87</td>
+    </tr>
+    <tr>
+      <td>Stdlib</td>
+      <td>tlisp/stdlib.ts</td>
+      <td>31 built-in functions (arithmetic, lists, strings, control flow)</td>
+      <td>598</td>
+    </tr>
+    <tr>
+      <td>Entry Point</td>
+      <td>main.tsx</td>
+      <td>CLI parsing, component wiring, React render, cleanup handlers</td>
+      <td>454</td>
+    </tr>
+  </tbody>
+</table>
+
+<!-- Startup Sequence -->
+<h2>Startup Sequence</h2>
+<p>The editor initializes in five distinct phases, each building on the previous.</p>
+
+<div class="flow">
+  <div class="flow-step">
+    <strong>Phase 1</strong>
+    <small>Parse CLI args</small>
+  </div>
+  <div class="flow-arrow">&rarr;</div>
+  <div class="flow-step">
+    <strong>Phase 2</strong>
+    <small>Create core<br/>(Terminal, FS)</small>
+  </div>
+  <div class="flow-arrow">&rarr;</div>
+  <div class="flow-step">
+    <strong>Phase 3</strong>
+    <small>Init Editor<br/>(T-Lisp interp.)</small>
+  </div>
+  <div class="flow-arrow">&rarr;</div>
+  <div class="flow-step">
+    <strong>Phase 4</strong>
+    <small>Load file or<br/>empty buffer</small>
+  </div>
+  <div class="flow-arrow">&rarr;</div>
+  <div class="flow-step">
+    <strong>Phase 5</strong>
+    <small>Render React UI<br/>(alternate screen)</small>
+  </div>
+</div>
+
+<!-- FP Patterns -->
+<h2>Functional Programming Patterns</h2>
+<p>The codebase uses a consistent set of functional programming abstractions throughout.</p>
+
+<table>
+  <thead>
+    <tr>
+      <th>Pattern</th>
+      <th>Utility</th>
+      <th>Usage</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>Either&lt;E, A&gt;</td>
+      <td>utils/task-either.ts</td>
+      <td>Error handling without exceptions (all T-Lisp operations return Either)</td>
+    </tr>
+    <tr>
+      <td>TaskEither&lt;E, A&gt;</td>
+      <td>utils/task-either.ts</td>
+      <td>Async operations with error handling (file I/O, terminal ops)</td>
+    </tr>
+    <tr>
+      <td>Option&lt;A&gt;</td>
+      <td>utils/option.ts</td>
+      <td>Null-safe value access</td>
+    </tr>
+    <tr>
+      <td>Lens</td>
+      <td>utils/lens.ts</td>
+      <td>Immutable state updates on nested editor state</td>
+    </tr>
+    <tr>
+      <td>Reader</td>
+      <td>utils/reader.ts</td>
+      <td>Dependency injection for operation modules</td>
+    </tr>
+    <tr>
+      <td>Pipeline</td>
+      <td>utils/pipeline.ts</td>
+      <td>Composable operation chains</td>
+    </tr>
+  </tbody>
+</table>
+
+<!-- Key Design Decisions -->
+<h2>Key Design Decisions</h2>
+
+<h3>Emacs Split-Brain Architecture</h3>
+<p>Following Emacs, the TypeScript core handles performance-critical work (terminal I/O, buffer management, rendering) while T-Lisp handles all editor behavior (commands, modes, key bindings, extensibility). This means new features can be added via T-Lisp without touching TypeScript.</p>
+
+<h3>Immutable Gap Buffer</h3>
+<p>Text is stored in a functional gap buffer implementation (<code>FunctionalGapBuffer</code>) that returns new instances on mutation rather than modifying in place. This pairs with the React rendering model and enables cheap undo/redo snapshots.</p>
+
+<h3>React as Dumb View</h3>
+<p>The React + Ink layer is purely presentational. All logic flows through the Editor class and T-Lisp. React components read state and call editor methods &mdash; they never contain business logic.</p>
+
+<h3>Zero Dependencies</h3>
+<p>The entire editor has zero external npm dependencies (Ink is bundled). The Bun runtime provides the standard library. This keeps startup fast and the bundle minimal.</p>
+
+<h3>Operation Module Pattern</h3>
+<p>Editor API functions are organized as independent factory functions (<code>createBufferOps</code>, <code>createCursorOps</code>, etc.) that receive an <code>EditorStateAccess</code> interface and return a <code>Map&lt;string, TLispFunctionImpl&gt;</code>. The <code>createEditorAPI</code> function composes all modules into a single registry.</p>
+
+</body>
+</html>

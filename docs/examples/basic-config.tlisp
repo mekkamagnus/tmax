@@ -1,6 +1,6 @@
 ;; basic-config.tlisp
 ;; Basic tmax configuration examples
-;; Copy desired sections to your ~/.tmaxrc file
+;; Copy desired sections to your ~/.config/tmax/init.tlisp file
 
 ;; =================================================================
 ;; BASIC KEY BINDINGS

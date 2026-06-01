@@ -1,0 +1,1250 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>tmax — Software Requirements Specification</title>
+<style>
+  :root {
+    --bg: #0d1117;
+    --surface: #161b22;
+    --surface2: #1c2333;
+    --border: #30363d;
+    --text: #e6edf3;
+    --text-muted: #8b949e;
+    --accent: #58a6ff;
+    --green: #3fb950;
+    --yellow: #d29922;
+    --red: #f85149;
+    --purple: #bc8cff;
+    --cyan: #39d353;
+    --tag-pass: #1a3a2a;
+    --tag-pass-text: #3fb950;
+    --tag-partial: #3a2f1a;
+    --tag-partial-text: #d29922;
+    --tag-plan: #1a2a3a;
+    --tag-plan-text: #58a6ff;
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    line-height: 1.6;
+    padding: 0;
+  }
+
+  .hero {
+    background: linear-gradient(135deg, #0d1117 0%, #161b22 50%, #1a1e2e 100%);
+    border-bottom: 1px solid var(--border);
+    padding: 3rem 2rem 2rem;
+    text-align: center;
+  }
+
+  .hero h1 {
+    font-size: 2rem;
+    font-weight: 700;
+    letter-spacing: -0.02em;
+    margin-bottom: 0.25rem;
+  }
+
+  .hero h1 span { color: var(--accent); }
+
+  .hero .subtitle {
+    color: var(--text-muted);
+    font-size: 1.05rem;
+    margin-bottom: 1rem;
+  }
+
+  .meta {
+    display: flex;
+    justify-content: center;
+    gap: 2rem;
+    font-size: 0.85rem;
+    color: var(--text-muted);
+  }
+
+  .meta span { display: flex; align-items: center; gap: 0.35rem; }
+
+  .container {
+    max-width: 960px;
+    margin: 0 auto;
+    padding: 2rem;
+  }
+
+  /* Stats bar */
+  .stats-bar {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 1rem;
+    margin-bottom: 2.5rem;
+  }
+
+  .stat-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 1.25rem;
+    text-align: center;
+  }
+
+  .stat-card .number {
+    font-size: 2rem;
+    font-weight: 700;
+    line-height: 1;
+  }
+
+  .stat-card .label {
+    font-size: 0.8rem;
+    color: var(--text-muted);
+    margin-top: 0.35rem;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+  }
+
+  .stat-card.pass .number { color: var(--green); }
+  .stat-card.partial .number { color: var(--yellow); }
+  .stat-card.plan .number { color: var(--accent); }
+
+  /* TOC */
+  nav.toc {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 1.25rem 1.5rem;
+    margin-bottom: 2.5rem;
+  }
+
+  nav.toc h2 {
+    font-size: 0.85rem;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--text-muted);
+    margin-bottom: 0.75rem;
+  }
+
+  nav.toc ol {
+    list-style: none;
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+    gap: 0.35rem 1.5rem;
+  }
+
+  nav.toc a {
+    color: var(--accent);
+    text-decoration: none;
+    font-size: 0.9rem;
+    transition: color 0.15s;
+  }
+
+  nav.toc a:hover { color: var(--text); text-decoration: underline; }
+
+  /* Section headers */
+  .section-title {
+    font-size: 1.35rem;
+    font-weight: 700;
+    margin: 2.5rem 0 0.75rem;
+    padding-bottom: 0.5rem;
+    border-bottom: 2px solid var(--border);
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+  }
+
+  .section-title .icon { font-size: 1.1rem; }
+
+  .subsection-title {
+    font-size: 1.1rem;
+    font-weight: 600;
+    color: var(--text-muted);
+    margin: 1.75rem 0 0.5rem;
+  }
+
+  /* User story cards */
+  .story {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 1.25rem 1.5rem;
+    margin-bottom: 1rem;
+    transition: border-color 0.2s;
+  }
+
+  .story:hover { border-color: #444c56; }
+
+  .story-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: 1rem;
+    margin-bottom: 0.5rem;
+  }
+
+  .story-id {
+    font-weight: 700;
+    font-size: 0.95rem;
+    color: var(--accent);
+    white-space: nowrap;
+  }
+
+  .story-title {
+    font-size: 0.95rem;
+    line-height: 1.5;
+  }
+
+  .story-meta {
+    font-size: 0.82rem;
+    color: var(--text-muted);
+    margin: 0.35rem 0 0.75rem;
+    font-family: 'SF Mono', 'Fira Code', monospace;
+  }
+
+  .status-tag {
+    display: inline-block;
+    padding: 0.15rem 0.55rem;
+    border-radius: 12px;
+    font-size: 0.75rem;
+    font-weight: 600;
+    white-space: nowrap;
+  }
+
+  .status-tag.pass { background: var(--tag-pass); color: var(--tag-pass-text); }
+  .status-tag.partial { background: var(--tag-partial); color: var(--tag-partial-text); }
+  .status-tag.plan { background: var(--tag-plan); color: var(--tag-plan-text); }
+
+  /* Criteria list */
+  .criteria {
+    list-style: none;
+    margin-top: 0.5rem;
+    padding-top: 0.5rem;
+    border-top: 1px solid var(--border);
+  }
+
+  .criteria li {
+    padding: 0.3rem 0;
+    font-size: 0.88rem;
+    display: flex;
+    align-items: flex-start;
+    gap: 0.5rem;
+    line-height: 1.55;
+  }
+
+  .criteria li .marker {
+    flex-shrink: 0;
+    font-weight: 700;
+    width: 1.5rem;
+    text-align: center;
+  }
+
+  .criteria li.pass .marker { color: var(--green); }
+  .criteria li.partial .marker { color: var(--yellow); }
+  .criteria li.plan .marker { color: var(--accent); }
+
+  .criteria li .text { color: var(--text); opacity: 0.92; }
+
+  /* As a / I want / So that block */
+  .user-story-block {
+    display: grid;
+    gap: 0.15rem;
+    margin-bottom: 0.5rem;
+    font-size: 0.9rem;
+  }
+
+  .user-story-block .role { color: var(--purple); font-weight: 600; }
+  .user-story-block .want { color: var(--text); }
+  .user-story-block .benefit { color: var(--text-muted); }
+
+  /* NFR section */
+  .nfr-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+    gap: 1rem;
+    margin-bottom: 2rem;
+  }
+
+  .nfr-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 1rem 1.25rem;
+  }
+
+  .nfr-card h3 {
+    font-size: 0.95rem;
+    font-weight: 600;
+    margin-bottom: 0.5rem;
+    color: var(--accent);
+  }
+
+  .nfr-card ul {
+    list-style: none;
+    font-size: 0.88rem;
+  }
+
+  .nfr-card ul li {
+    padding: 0.2rem 0;
+    display: flex;
+    align-items: flex-start;
+    gap: 0.4rem;
+  }
+
+  .nfr-card ul li .check { color: var(--green); flex-shrink: 0; }
+
+  /* Constraints */
+  .constraint-section {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 1.25rem 1.5rem;
+    margin-bottom: 1rem;
+  }
+
+  .constraint-section h3 {
+    font-size: 0.95rem;
+    font-weight: 600;
+    color: var(--text-muted);
+    margin-bottom: 0.5rem;
+  }
+
+  .constraint-section ul {
+    list-style: none;
+    font-size: 0.88rem;
+  }
+
+  .constraint-section ul li {
+    padding: 0.25rem 0;
+    padding-left: 1rem;
+    position: relative;
+  }
+
+  .constraint-section ul li::before {
+    content: '→';
+    position: absolute;
+    left: 0;
+    color: var(--accent);
+  }
+
+  /* Footer */
+  footer {
+    text-align: center;
+    padding: 2rem;
+    color: var(--text-muted);
+    font-size: 0.8rem;
+    border-top: 1px solid var(--border);
+    margin-top: 3rem;
+  }
+
+  /* Progress bar */
+  .progress-container {
+    margin-bottom: 2.5rem;
+  }
+
+  .progress-bar {
+    height: 8px;
+    background: var(--surface2);
+    border-radius: 4px;
+    overflow: hidden;
+    display: flex;
+  }
+
+  .progress-bar .seg-pass { background: var(--green); }
+  .progress-bar .seg-partial { background: var(--yellow); }
+  .progress-bar .seg-plan { background: #1f3a5f; }
+
+  .progress-labels {
+    display: flex;
+    justify-content: space-between;
+    font-size: 0.8rem;
+    color: var(--text-muted);
+    margin-top: 0.4rem;
+  }
+
+  @media (max-width: 640px) {
+    .stats-bar { grid-template-columns: 1fr; }
+    .hero h1 { font-size: 1.5rem; }
+    .meta { flex-direction: column; gap: 0.25rem; }
+    .nfr-grid { grid-template-columns: 1fr; }
+  }
+</style>
+</head>
+<body>
+
+<div class="hero">
+  <h1><span>tmax</span> Software Requirements Specification</h1>
+  <div class="subtitle">T-Lisp Powered Terminal Editor</div>
+  <div class="meta">
+    <span>Version 0.2.0</span>
+    <span>2026-05-16</span>
+    <span>35 User Stories &middot; 150+ Criteria</span>
+  </div>
+</div>
+
+<div class="container">
+
+  <!-- Stats -->
+  <div class="stats-bar" id="stats-bar">
+    <div class="stat-card pass"><div class="number" id="stat-pass">0</div><div class="label">Implemented</div></div>
+    <div class="stat-card partial"><div class="number" id="stat-partial">0</div><div class="label">Partial</div></div>
+    <div class="stat-card plan"><div class="number" id="stat-plan">0</div><div class="label">Planned</div></div>
+  </div>
+
+  <!-- Progress bar -->
+  <div class="progress-container">
+    <div class="progress-bar">
+      <div class="seg-pass" id="prog-pass" style="width:0%"></div>
+      <div class="seg-partial" id="prog-partial" style="width:0%"></div>
+      <div class="seg-plan" id="prog-plan" style="width:0%"></div>
+    </div>
+    <div class="progress-labels">
+      <span id="prog-label-pass"></span>
+      <span id="prog-label-plan"></span>
+    </div>
+  </div>
+
+  <!-- TOC -->
+  <nav class="toc">
+    <h2>Contents</h2>
+    <ol>
+      <li><a href="#introduction">1. Introduction</a></li>
+      <li><a href="#overview">2. Overall Description</a></li>
+      <li><a href="#phase-0">3.0 Phase 0 — Infrastructure</a></li>
+      <li><a href="#phase-1">3.1 Phase 1 — Core Editing</a></li>
+      <li><a href="#phase-2">3.2 Phase 2 — Extensibility</a></li>
+      <li><a href="#phase-3">3.3 Phase 3 — Advanced Features</a></li>
+      <li><a href="#phase-4">3.4 Phase 4 — Community</a></li>
+      <li><a href="#phase-08">Phase 0.8 — Server/Client</a></li>
+      <li><a href="#nfr">4. Non-Functional Requirements</a></li>
+      <li><a href="#constraints">5. Constraints</a></li>
+    </ol>
+  </nav>
+
+  <!-- Introduction -->
+  <h2 class="section-title" id="introduction"><span class="icon">1.</span> Introduction</h2>
+  <div class="story">
+    <p>tmax is a terminal-based text editor with an Emacs-style split-brain architecture: TypeScript handles low-level operations (terminal I/O, file system, buffer management) while <strong>T-Lisp</strong> (tmax Lisp) handles all editor logic including commands, modes, key bindings, and extensibility.</p>
+    <p style="margin-top:0.75rem;"><strong>Interchangeable Frontends:</strong></p>
+    <ul style="margin-left:1.25rem; font-size:0.9rem;">
+      <li><strong>Steep</strong> (default) — Elm Architecture with direct ANSI output, zero dependencies</li>
+      <li><strong>Ink</strong> (<code>--ink</code> flag) — React/Ink reconciler</li>
+    </ul>
+    <p style="margin-top:0.75rem; color:var(--text-muted); font-size:0.9rem;"><strong>Target Users:</strong> Developers, system administrators, and power users who prefer keyboard-driven terminal workflows with unlimited customization.</p>
+  </div>
+
+  <!-- Overview -->
+  <h2 class="section-title" id="overview"><span class="icon">2.</span> Overall Description</h2>
+  <div class="story">
+    <h3 style="font-size:0.9rem; color:var(--accent); margin-bottom:0.5rem;">System Architecture</h3>
+    <pre style="background:var(--bg); padding:0.75rem 1rem; border-radius:6px; font-size:0.82rem; overflow-x:auto; color:var(--text-muted);">User Input → Frontend (Steep or Ink)
+  → Editor.handleKey(key) → EditorState
+  → T-Lisp interpreter → editor API (25+ ops modules)
+  → Frontend renders new state</pre>
+    <h3 style="font-size:0.9rem; color:var(--accent); margin:0.75rem 0 0.5rem;">Editor Modes</h3>
+    <p style="font-size:0.9rem;">Five modes: <strong>normal</strong>, <strong>insert</strong>, <strong>visual</strong>, <strong>command</strong>, <strong>M-x</strong></p>
+    <h3 style="font-size:0.9rem; color:var(--accent); margin:0.75rem 0 0.5rem;">Key Components</h3>
+    <table style="width:100%; font-size:0.85rem; border-collapse:collapse;">
+      <tr style="border-bottom:1px solid var(--border);">
+        <th style="text-align:left; padding:0.35rem 0.5rem; color:var(--text-muted);">Component</th>
+        <th style="text-align:left; padding:0.35rem 0.5rem; color:var(--text-muted);">Location</th>
+        <th style="text-align:left; padding:0.35rem 0.5rem; color:var(--text-muted);">Responsibility</th>
+      </tr>
+      <tr style="border-bottom:1px solid var(--border);"><td style="padding:0.35rem 0.5rem;">T-Lisp Interpreter</td><td style="padding:0.35rem 0.5rem;"><code>src/tlisp/</code></td><td style="padding:0.35rem 0.5rem;">Parse, evaluate, macro-expand</td></tr>
+      <tr style="border-bottom:1px solid var(--border);"><td style="padding:0.35rem 0.5rem;">Editor Core</td><td style="padding:0.35rem 0.5rem;"><code>src/editor/</code></td><td style="padding:0.35rem 0.5rem;">State machine, key dispatch, API registry</td></tr>
+      <tr style="border-bottom:1px solid var(--border);"><td style="padding:0.35rem 0.5rem;">Editor API</td><td style="padding:0.35rem 0.5rem;"><code>src/editor/api/</code></td><td style="padding:0.35rem 0.5rem;">25+ operation modules</td></tr>
+      <tr style="border-bottom:1px solid var(--border);"><td style="padding:0.35rem 0.5rem;">Core</td><td style="padding:0.35rem 0.5rem;"><code>src/core/</code></td><td style="padding:0.35rem 0.5rem;">Terminal I/O, filesystem, buffer</td></tr>
+      <tr style="border-bottom:1px solid var(--border);"><td style="padding:0.35rem 0.5rem;">Frontend</td><td style="padding:0.35rem 0.5rem;"><code>src/frontend/</code></td><td style="padding:0.35rem 0.5rem;">Steep and Ink renderers</td></tr>
+      <tr><td style="padding:0.35rem 0.5rem;">Shared Render</td><td style="padding:0.35rem 0.5rem;"><code>src/frontend/render/</code></td><td style="padding:0.35rem 0.5rem;">Pure render functions</td></tr>
+    </table>
+  </div>
+
+  <!-- Phase 0 -->
+  <h2 class="section-title" id="phase-0"><span class="icon">3.0</span> Phase 0: Infrastructure</h2>
+
+  <div class="story" data-status="pass">
+    <div class="story-header">
+      <div>
+        <span class="story-id">US-0.4.1</span>
+        <span class="story-title">T-Lisp Keymap Data Structures</span>
+      </div>
+      <span class="status-tag pass">Implemented</span>
+    </div>
+    <div class="user-story-block">
+      <div><span class="role">As a</span> power user</div>
+      <div><span class="role">I want</span> key bindings stored as T-Lisp data structures</div>
+      <div><span class="role">So that</span> I can inspect, modify, and understand the entire key binding system</div>
+    </div>
+    <div class="story-meta">src/editor/api/bindings-ops.ts · keymap-ops.ts · keymap-sync.ts</div>
+    <ul class="criteria">
+      <li class="pass"><span class="marker">&#10003;</span> <span class="text">Given the T-Lisp environment is initialized, when I query <code>*normal-mode-keymap*</code>, then I should see a hash-map of key bindings</span></li>
+      <li class="pass"><span class="marker">&#10003;</span> <span class="text">Given a keymap hash-map exists, when I call <code>(get-binding "i" "normal")</code>, then I should receive the bound command as a T-Lisp function</span></li>
+      <li class="pass"><span class="marker">&#10003;</span> <span class="text">Given the keybinding system, when I inspect keymap inheritance, then I should see context → mode → global precedence</span></li>
+    </ul>
+  </div>
+
+  <div class="story" data-status="partial">
+    <div class="story-header">
+      <div>
+        <span class="story-id">US-0.4.2</span>
+        <span class="story-title">Core Bindings in T-Lisp Files</span>
+      </div>
+      <span class="status-tag partial">Partial</span>
+    </div>
+    <div class="user-story-block">
+      <div><span class="role">As a</span> developer</div>
+      <div><span class="role">I want</span> default key bindings defined in T-Lisp files</div>
+      <div><span class="role">So that</span> I can understand and modify default behavior</div>
+    </div>
+    <div class="story-meta">Bindings load from T-Lisp, some fallback to TypeScript</div>
+    <ul class="criteria">
+      <li class="pass"><span class="marker">&#10003;</span> <span class="text">Given a fresh tmax installation, when tmax starts, then it should load core T-Lisp bindings</span></li>
+      <li class="pass"><span class="marker">&#10003;</span> <span class="text">Given the core bindings file, when I read its contents, then I should see all default bindings in T-Lisp syntax</span></li>
+      <li class="partial"><span class="marker">~</span> <span class="text">Given a modified core-bindings file, when I restart tmax, then my modifications should be active</span></li>
+    </ul>
+  </div>
+
+  <div class="story" data-status="pass">
+    <div class="story-header">
+      <div>
+        <span class="story-id">US-0.4.3</span>
+        <span class="story-title">Pure T-Lisp Key Bind Function</span>
+      </div>
+      <span class="status-tag pass">Implemented</span>
+    </div>
+    <div class="user-story-block">
+      <div><span class="role">As a</span> power user</div>
+      <div><span class="role">I want</span> the <code>(key-bind)</code> function implemented in pure T-Lisp</div>
+      <div><span class="role">So that</span> I can customize it or extend it</div>
+    </div>
+    <div class="story-meta">src/editor/api/bindings-ops.ts</div>
+    <ul class="criteria">
+      <li class="pass"><span class="marker">&#10003;</span> <span class="text">Given I'm in normal mode, when I evaluate <code>(key-bind "zz" "(center-cursor)" "normal")</code>, then pressing <code>zz</code> should execute my custom function</span></li>
+      <li class="pass"><span class="marker">&#10003;</span> <span class="text">Given a custom key binding, when I call <code>(remove-binding "zz" "normal")</code>, then the binding should be removed</span></li>
+      <li class="pass"><span class="marker">&#10003;</span> <span class="text">Given multiple key bindings, when I call <code>(list-bindings "normal")</code>, then I should see all active bindings for that mode</span></li>
+    </ul>
+  </div>
+
+  <div class="story" data-status="pass">
+    <div class="story-header">
+      <div>
+        <span class="story-id">US-0.5.1</span>
+        <span class="story-title">Core Testing Framework MVP</span>
+      </div>
+      <span class="status-tag pass">Implemented</span>
+    </div>
+    <div class="user-story-block">
+      <div><span class="role">As a</span> developer</div>
+      <div><span class="role">I want</span> a basic T-Lisp testing framework</div>
+      <div><span class="role">So that</span> I can write and run tests in T-Lisp itself</div>
+    </div>
+    <div class="story-meta">src/tlisp/test-registry.ts · test-coverage.ts</div>
+    <ul class="criteria">
+      <li class="pass"><span class="marker">&#10003;</span> <span class="text">Given the TRT framework, when I define <code>(deftest test-name ...)</code>, then it should be registered and executable</span></li>
+      <li class="pass"><span class="marker">&#10003;</span> <span class="text">Given a TRT test, when I use <code>(should-equal expected actual)</code>, then it should pass if values are equal</span></li>
+      <li class="pass"><span class="marker">&#10003;</span> <span class="text">Given the test runner CLI, when I run tests, then all test files should be discovered and executed</span></li>
+      <li class="pass"><span class="marker">&#10003;</span> <span class="text">Given tests pass, then exit code should be 0</span></li>
+      <li class="pass"><span class="marker">&#10003;</span> <span class="text">Given tests fail, then exit code should be 1</span></li>
+      <li class="pass"><span class="marker">&#10003;</span> <span class="text">Given test execution, then I should see summary: "Passed: X, Failed: Y, Total: Z"</span></li>
+    </ul>
+  </div>
+
+  <div class="story" data-status="pass">
+    <div class="story-header">
+      <div>
+        <span class="story-id">US-0.5.2</span>
+        <span class="story-title">Essential Assertions</span>
+      </div>
+      <span class="status-tag pass">Implemented</span>
+    </div>
+    <div class="user-story-block">
+      <div><span class="role">As a</span> developer</div>
+      <div><span class="role">I want</span> basic assertion helpers</div>
+      <div><span class="role">So that</span> I can validate test behavior</div>
+    </div>
+    <ul class="criteria">
+      <li class="pass"><span class="marker">&#10003;</span> <span class="text">Given <code>(should-equal expected actual)</code>, then it should pass if values are equal, fail with clear message otherwise</span></li>
+      <li class="pass"><span class="marker">&#10003;</span> <span class="text">Given <code>(should-be-truthy value)</code>, then it should pass if value is truthy</span></li>
+      <li class="pass"><span class="marker">&#10003;</span> <span class="text">Given <code>(should-be-falsy value)</code>, then it should pass if value is nil/false</span></li>
+      <li class="pass"><span class="marker">&#10003;</span> <span class="text">Given <code>(should-throw ...)</code>, then it should pass if error is thrown</span></li>
+    </ul>
+  </div>
+
+  <div class="story" data-status="pass">
+    <div class="story-header">
+      <div>
+        <span class="story-id">US-0.5.3</span>
+        <span class="story-title">Basic Test Isolation</span>
+      </div>
+      <span class="status-tag pass">Implemented</span>
+    </div>
+    <div class="story-meta">clearTestRegistry()</div>
+    <ul class="criteria">
+      <li class="pass"><span class="marker">&#10003;</span> <span class="text">Given two tests that modify global state, when tests run sequentially, then second test should not see state from first test</span></li>
+      <li class="pass"><span class="marker">&#10003;</span> <span class="text">Given a test with setup hook, when I define before-test, then setup code should run before test executes</span></li>
+      <li class="pass"><span class="marker">&#10003;</span> <span class="text">Given a test with teardown hook, when I define after-test, then cleanup code should run after test completes</span></li>
+    </ul>
+  </div>
+
+  <div class="story" data-status="pass">
+    <div class="story-header">
+      <div>
+        <span class="story-id">US-0.6.6</span>
+        <span class="story-title">Basic Coverage</span>
+      </div>
+      <span class="status-tag pass">Implemented</span>
+    </div>
+    <div class="story-meta">src/tlisp/test-coverage.ts</div>
+    <ul class="criteria">
+      <li class="pass"><span class="marker">&#10003;</span> <span class="text">Given running tests with coverage, then I should see line coverage percentage for each function</span></li>
+      <li class="pass"><span class="marker">&#10003;</span> <span class="text">Given coverage report, then I should see summary with total coverage percentage</span></li>
+      <li class="pass"><span class="marker">&#10003;</span> <span class="text">Given coverage thresholds, when coverage is below threshold, then build should report warning</span></li>
+    </ul>
+  </div>
+
+  <!-- Phase 1 -->
+  <h2 class="section-title" id="phase-1"><span class="icon">3.1</span> Phase 1: Core Editing</h2>
+
+  <div class="story" data-status="pass">
+    <div class="story-header">
+      <div><span class="story-id">US-1.1.1</span> <span class="story-title">Word Navigation</span></div>
+      <span class="status-tag pass">Implemented</span>
+    </div>
+    <div class="story-meta">src/editor/api/word-ops.ts</div>
+    <ul class="criteria">
+      <li class="pass"><span class="marker">&#10003;</span> <span class="text">Given normal mode, when I press <code>w</code>, then cursor moves to start of next word</span></li>
+      <li class="pass"><span class="marker">&#10003;</span> <span class="text">Given normal mode, when I press <code>b</code>, then cursor moves to start of previous word</span></li>
+      <li class="pass"><span class="marker">&#10003;</span> <span class="text">Given normal mode, when I press <code>e</code>, then cursor moves to end of current word</span></li>
+      <li class="pass"><span class="marker">&#10003;</span> <span class="text">Given normal mode, when I press <code>3w</code>, then cursor moves forward 3 words</span></li>
+      <li class="pass"><span class="marker">&#10003;</span> <span class="text">Given word navigation at end of line, then navigation continues to next line</span></li>
+    </ul>
+  </div>
+
+  <div class="story" data-status="pass">
+    <div class="story-header">
+      <div><span class="story-id">US-1.1.2</span> <span class="story-title">Line Navigation</span></div>
+      <span class="status-tag pass">Implemented</span>
+    </div>
+    <div class="story-meta">src/editor/api/line-ops.ts</div>
+    <ul class="criteria">
+      <li class="pass"><span class="marker">&#10003;</span> <span class="text">Given normal mode, when I press <code>0</code>, then cursor moves to column 0</span></li>
+      <li class="pass"><span class="marker">&#10003;</span> <span class="text">Given normal mode, when I press <code>$</code>, then cursor moves to last character of line</span></li>
+      <li class="pass"><span class="marker">&#10003;</span> <span class="text">Given normal mode, when I press <code>^</code>, then cursor moves to first non-whitespace character</span></li>
+    </ul>
+  </div>
+
+  <div class="story" data-status="pass">
+    <div class="story-header">
+      <div><span class="story-id">US-1.2.1</span> <span class="story-title">Delete Operator</span></div>
+      <span class="status-tag pass">Implemented</span>
+    </div>
+    <div class="story-meta">src/editor/api/delete-ops.ts</div>
+    <ul class="criteria">
+      <li class="pass"><span class="marker">&#10003;</span> <span class="text">Given normal mode, when I press <code>dd</code>, then current line is deleted</span></li>
+      <li class="pass"><span class="marker">&#10003;</span> <span class="text">Given normal mode, when I press <code>dw</code>, then word under cursor is deleted</span></li>
+      <li class="pass"><span class="marker">&#10003;</span> <span class="text">Given normal mode, when I press <code>x</code>, then character under cursor is deleted</span></li>
+      <li class="pass"><span class="marker">&#10003;</span> <span class="text">Given normal mode, when I press <code>3dd</code>, then 3 lines are deleted</span></li>
+      <li class="pass"><span class="marker">&#10003;</span> <span class="text">Given deleted text, then previous deletions are stored in kill ring</span></li>
+    </ul>
+  </div>
+
+  <div class="story" data-status="pass">
+    <div class="story-header">
+      <div><span class="story-id">US-1.2.2</span> <span class="story-title">Yank (Copy) Operator</span></div>
+      <span class="status-tag pass">Implemented</span>
+    </div>
+    <div class="story-meta">src/editor/api/yank-ops.ts</div>
+    <ul class="criteria">
+      <li class="pass"><span class="marker">&#10003;</span> <span class="text">Given normal mode, when I press <code>yy</code>, then current line is yanked to register</span></li>
+      <li class="pass"><span class="marker">&#10003;</span> <span class="text">Given normal mode, when I press <code>yw</code>, then word under cursor is yanked</span></li>
+      <li class="pass"><span class="marker">&#10003;</span> <span class="text">Given yanked text, when I press <code>p</code>, then yanked text is pasted after cursor</span></li>
+      <li class="pass"><span class="marker">&#10003;</span> <span class="text">Given yanked text, when I press <code>P</code>, then yanked text is pasted before cursor</span></li>
+    </ul>
+  </div>
+
+  <div class="story" data-status="pass">
+    <div class="story-header">
+      <div><span class="story-id">US-1.2.3</span> <span class="story-title">Undo/Redo</span></div>
+      <span class="status-tag pass">Implemented</span>
+    </div>
+    <div class="story-meta">src/editor/api/undo-redo-ops.ts</div>
+    <ul class="criteria">
+      <li class="pass"><span class="marker">&#10003;</span> <span class="text">Given text changes, when I press <code>u</code> in normal mode, then last change is undone</span></li>
+      <li class="pass"><span class="marker">&#10003;</span> <span class="text">Given undone changes, when I press <code>C-r</code>, then undone change is redone</span></li>
+      <li class="pass"><span class="marker">&#10003;</span> <span class="text">Given multiple edits, when I press <code>5u</code>, then last 5 changes are undone</span></li>
+      <li class="pass"><span class="marker">&#10003;</span> <span class="text">Given undo history, when I make new changes after undo, then redo history is cleared</span></li>
+    </ul>
+  </div>
+
+  <div class="story" data-status="pass">
+    <div class="story-header">
+      <div><span class="story-id">US-1.3.1</span> <span class="story-title">Count Prefix</span></div>
+      <span class="status-tag pass">Implemented</span>
+    </div>
+    <div class="story-meta">src/editor/api/count-ops.ts · editor.ts</div>
+    <ul class="criteria">
+      <li class="pass"><span class="marker">&#10003;</span> <span class="text">Given normal mode, when I press <code>3j</code>, then cursor moves down 3 lines</span></li>
+      <li class="pass"><span class="marker">&#10003;</span> <span class="text">Given normal mode, when I press <code>5dd</code>, then 5 lines are deleted</span></li>
+      <li class="pass"><span class="marker">&#10003;</span> <span class="text">Given normal mode, when I press <code>10x</code>, then 10 characters are deleted</span></li>
+      <li class="pass"><span class="marker">&#10003;</span> <span class="text">Given no count prefix, then command executes once (default count of 1)</span></li>
+    </ul>
+  </div>
+
+  <div class="story" data-status="pass">
+    <div class="story-header">
+      <div><span class="story-id">US-1.4.1</span> <span class="story-title">Change Operator</span></div>
+      <span class="status-tag pass">Implemented</span>
+    </div>
+    <div class="story-meta">src/editor/api/change-ops.ts</div>
+    <ul class="criteria">
+      <li class="pass"><span class="marker">&#10003;</span> <span class="text">Given normal mode, when I press <code>cw</code>, then word is deleted and insert mode entered</span></li>
+      <li class="pass"><span class="marker">&#10003;</span> <span class="text">Given normal mode, when I press <code>cc</code>, then entire line is cleared and insert mode entered</span></li>
+      <li class="pass"><span class="marker">&#10003;</span> <span class="text">Given normal mode, when I press <code>C</code>, then from cursor to end of line is deleted and insert mode entered</span></li>
+      <li class="pass"><span class="marker">&#10003;</span> <span class="text">Given change operator, when I complete typing and press Escape, then I return to normal mode</span></li>
+    </ul>
+  </div>
+
+  <div class="story" data-status="partial">
+    <div class="story-header">
+      <div><span class="story-id">US-1.5.1</span> <span class="story-title">Search Forward/Backward</span></div>
+      <span class="status-tag partial">Partial</span>
+    </div>
+    <div class="story-meta">src/editor/api/search-ops.ts</div>
+    <ul class="criteria">
+      <li class="pass"><span class="marker">&#10003;</span> <span class="text">Given normal mode, when I press <code>/</code> and type a pattern, then cursor jumps to first match</span></li>
+      <li class="pass"><span class="marker">&#10003;</span> <span class="text">Given normal mode, when I press <code>?</code> and type a pattern, then cursor jumps to first match backward</span></li>
+      <li class="pass"><span class="marker">&#10003;</span> <span class="text">Given an active search, when I press <code>n</code>, then cursor jumps to next match</span></li>
+      <li class="pass"><span class="marker">&#10003;</span> <span class="text">Given an active search, when I press <code>N</code>, then cursor jumps to previous match</span></li>
+      <li class="partial"><span class="marker">~</span> <span class="text">Given search results with multiple matches, then they should be highlighted in the buffer</span></li>
+    </ul>
+  </div>
+
+  <div class="story" data-status="pass">
+    <div class="story-header">
+      <div><span class="story-id">US-1.5.2</span> <span class="story-title">Word Under Cursor Search</span></div>
+      <span class="status-tag pass">Implemented</span>
+    </div>
+    <div class="story-meta">src/editor/api/search-ops.ts</div>
+    <ul class="criteria">
+      <li class="pass"><span class="marker">&#10003;</span> <span class="text">Given cursor on a word, when I press <code>*</code>, then search starts forward for that word</span></li>
+      <li class="pass"><span class="marker">&#10003;</span> <span class="text">Given cursor on a word, when I press <code>#</code>, then search starts backward for that word</span></li>
+      <li class="pass"><span class="marker">&#10003;</span> <span class="text">Given word search active, when I press <code>n</code>/<code>N</code>, then cursor jumps to next/previous occurrence</span></li>
+    </ul>
+  </div>
+
+  <div class="story" data-status="pass">
+    <div class="story-header">
+      <div><span class="story-id">US-1.6.1</span> <span class="story-title">Jump Commands</span></div>
+      <span class="status-tag pass">Implemented</span>
+    </div>
+    <div class="story-meta">src/editor/api/jump-ops.ts</div>
+    <ul class="criteria">
+      <li class="pass"><span class="marker">&#10003;</span> <span class="text">Given normal mode, when I press <code>gg</code>, then cursor jumps to first line of buffer</span></li>
+      <li class="pass"><span class="marker">&#10003;</span> <span class="text">Given normal mode, when I press <code>G</code>, then cursor jumps to last line of buffer</span></li>
+      <li class="pass"><span class="marker">&#10003;</span> <span class="text">Given normal mode, when I press <code>:50</code> and Enter, then cursor jumps to line 50</span></li>
+      <li class="pass"><span class="marker">&#10003;</span> <span class="text">Given jump commands, when I jump to a line, then viewport scrolls to show that line</span></li>
+    </ul>
+  </div>
+
+  <div class="story" data-status="pass">
+    <div class="story-header">
+      <div><span class="story-id">US-1.7.1</span> <span class="story-title">Visual Mode Selection</span></div>
+      <span class="status-tag pass">Implemented</span>
+    </div>
+    <div class="story-meta">src/editor/api/visual-ops.ts</div>
+    <ul class="criteria">
+      <li class="pass"><span class="marker">&#10003;</span> <span class="text">Given normal mode, when I press <code>v</code>, then characterwise visual mode starts</span></li>
+      <li class="pass"><span class="marker">&#10003;</span> <span class="text">Given normal mode, when I press <code>V</code>, then linewise visual mode starts</span></li>
+      <li class="pass"><span class="marker">&#10003;</span> <span class="text">Given visual mode active, when I navigate with hjkl, then selection expands from start</span></li>
+      <li class="pass"><span class="marker">&#10003;</span> <span class="text">Given visual selection, when I press <code>d</code>, then selected text is deleted</span></li>
+      <li class="pass"><span class="marker">&#10003;</span> <span class="text">Given visual selection, when I press <code>y</code>, then selected text is yanked</span></li>
+      <li class="pass"><span class="marker">&#10003;</span> <span class="text">Given visual selection, when I press <code>c</code>, then selected text is deleted and insert mode entered</span></li>
+    </ul>
+  </div>
+
+  <div class="story" data-status="pass">
+    <div class="story-header">
+      <div><span class="story-id">US-1.8.1</span> <span class="story-title">Basic Text Objects</span></div>
+      <span class="status-tag pass">Implemented</span>
+    </div>
+    <div class="story-meta">src/editor/api/text-objects-ops.ts · text-objects.ts</div>
+    <ul class="criteria">
+      <li class="pass"><span class="marker">&#10003;</span> <span class="text">Given cursor on a word, when I press <code>diw</code>, then inner word (excluding surrounding space) is deleted</span></li>
+      <li class="pass"><span class="marker">&#10003;</span> <span class="text">Given cursor on a word, when I press <code>daw</code>, then outer word (including trailing space) is deleted</span></li>
+      <li class="pass"><span class="marker">&#10003;</span> <span class="text">Given cursor in a sentence, when I press <code>dis</code>, then inner sentence is deleted</span></li>
+      <li class="pass"><span class="marker">&#10003;</span> <span class="text">Given cursor in a sentence, when I press <code>das</code>, then outer sentence is deleted</span></li>
+      <li class="pass"><span class="marker">&#10003;</span> <span class="text">Given text object commands, when I use <code>ciw</code> instead of <code>diw</code>, then insert mode is entered</span></li>
+    </ul>
+  </div>
+
+  <div class="story" data-status="pass">
+    <div class="story-header">
+      <div><span class="story-id">US-1.9.1</span> <span class="story-title">Kill Ring Storage</span></div>
+      <span class="status-tag pass">Implemented</span>
+    </div>
+    <div class="story-meta">src/editor/api/kill-ring.ts</div>
+    <ul class="criteria">
+      <li class="pass"><span class="marker">&#10003;</span> <span class="text">Given I delete or yank text, then text is added to kill ring</span></li>
+      <li class="pass"><span class="marker">&#10003;</span> <span class="text">Given kill ring with 10 items, when I kill new text, then oldest kill is removed if ring is full</span></li>
+      <li class="pass"><span class="marker">&#10003;</span> <span class="text">Given kill ring state, when I query <code>(kill-ring-latest)</code>, then I receive the most recent kill</span></li>
+    </ul>
+  </div>
+
+  <div class="story" data-status="pass">
+    <div class="story-header">
+      <div><span class="story-id">US-1.9.2</span> <span class="story-title">Yank Pop</span></div>
+      <span class="status-tag pass">Implemented</span>
+    </div>
+    <div class="story-meta">src/editor/api/yank-pop-ops.ts</div>
+    <ul class="criteria">
+      <li class="pass"><span class="marker">&#10003;</span> <span class="text">Given I just yanked text, when I press <code>M-y</code>, then yanked text is replaced with previous kill</span></li>
+      <li class="pass"><span class="marker">&#10003;</span> <span class="text">Given I'm cycling kills, when I press <code>M-y</code> multiple times, then I cycle through older kills</span></li>
+      <li class="pass"><span class="marker">&#10003;</span> <span class="text">Given I cycle past oldest kill, when I press <code>M-y</code> again, then I wrap around to newest kill</span></li>
+    </ul>
+  </div>
+
+  <div class="story" data-status="pass">
+    <div class="story-header">
+      <div><span class="story-id">US-1.9.3</span> <span class="story-title">Evil Integration</span></div>
+      <span class="status-tag pass">Implemented</span>
+    </div>
+    <div class="story-meta">src/editor/api/evil-integration.ts</div>
+    <ul class="criteria">
+      <li class="pass"><span class="marker">&#10003;</span> <span class="text">Given I delete with <code>dd</code>/<code>dw</code>, then deleted text is in kill ring</span></li>
+      <li class="pass"><span class="marker">&#10003;</span> <span class="text">Given I yank with <code>yy</code>/<code>yw</code>, then yanked text is in kill ring</span></li>
+      <li class="pass"><span class="marker">&#10003;</span> <span class="text">Given Evil and Emacs operations mixed, then both are accessible via kill ring</span></li>
+    </ul>
+  </div>
+
+  <div class="story" data-status="pass">
+    <div class="story-header">
+      <div><span class="story-id">US-1.10.1</span> <span class="story-title">Minibuffer Input</span></div>
+      <span class="status-tag pass">Implemented</span>
+    </div>
+    <div class="story-meta">src/editor/api/minibuffer-ops.ts</div>
+    <ul class="criteria">
+      <li class="pass"><span class="marker">&#10003;</span> <span class="text">Given I press <code>SPC ;</code>, then minibuffer shows "M-x:" at bottom of screen</span></li>
+      <li class="pass"><span class="marker">&#10003;</span> <span class="text">Given minibuffer is active, when I type, then input appears in minibuffer</span></li>
+      <li class="pass"><span class="marker">&#10003;</span> <span class="text">Given minibuffer with input, when I press <code>C-g</code>, then minibuffer closes</span></li>
+      <li class="pass"><span class="marker">&#10003;</span> <span class="text">Given minibuffer with input, when I press Enter, then command executes and minibuffer closes</span></li>
+    </ul>
+  </div>
+
+  <div class="story" data-status="partial">
+    <div class="story-header">
+      <div><span class="story-id">US-1.10.2</span> <span class="story-title">Fuzzy Command Completion</span></div>
+      <span class="status-tag partial">Partial</span>
+    </div>
+    <div class="story-meta">Command history exists, fuzzy matching planned</div>
+    <ul class="criteria">
+      <li class="partial"><span class="marker">~</span> <span class="text">Given M-x mode, when I type "sw", then I should see commands matching "save-window", "switch-window"</span></li>
+      <li class="partial"><span class="marker">~</span> <span class="text">Given fuzzy matches, when multiple matches exist, then they should be ranked by prefix matches first</span></li>
+      <li class="plan"><span class="marker">&#9675;</span> <span class="text">Given completion list, when I press Tab, then first match should be selected</span></li>
+      <li class="plan"><span class="marker">&#9675;</span> <span class="text">Given selected completion, when I press Enter, then selected command should execute</span></li>
+    </ul>
+  </div>
+
+  <div class="story" data-status="pass">
+    <div class="story-header">
+      <div><span class="story-id">US-1.10.3</span> <span class="story-title">Which-key Popup</span></div>
+      <span class="status-tag pass">Implemented</span>
+    </div>
+    <div class="story-meta">src/editor/utils/which-key.ts</div>
+    <ul class="criteria">
+      <li class="pass"><span class="marker">&#10003;</span> <span class="text">Given I press <code>SPC</code>, when I wait 0.5s, then which-key popup shows available bindings</span></li>
+      <li class="pass"><span class="marker">&#10003;</span> <span class="text">Given which-key popup, when I see "f File operations", then I understand <code>f</code> is a prefix key</span></li>
+      <li class="pass"><span class="marker">&#10003;</span> <span class="text">Given I press <code>SPC f</code>, then submenu popup appears with file operation bindings</span></li>
+      <li class="pass"><span class="marker">&#10003;</span> <span class="text">Given which-key popup, when I press any bound key, then popup disappears and command executes</span></li>
+      <li class="pass"><span class="marker">&#10003;</span> <span class="text">Given which-key popup, when I press <code>C-g</code>, then popup cancels and returns to normal mode</span></li>
+    </ul>
+  </div>
+
+  <div class="story" data-status="pass">
+    <div class="story-header">
+      <div><span class="story-id">US-1.10.4</span> <span class="story-title">Command Documentation Preview</span></div>
+      <span class="status-tag pass">Implemented</span>
+    </div>
+    <div class="story-meta">src/editor/api/documentation.ts</div>
+    <ul class="criteria">
+      <li class="pass"><span class="marker">&#10003;</span> <span class="text">Given M-x mode, when I select a command, then its first docstring line is visible</span></li>
+      <li class="pass"><span class="marker">&#10003;</span> <span class="text">Given command with documentation, then I should see docstring in completion</span></li>
+      <li class="pass"><span class="marker">&#10003;</span> <span class="text">Given command with keybinding, then I should see "Binding: X" if it has one</span></li>
+    </ul>
+  </div>
+
+  <div class="story" data-status="pass">
+    <div class="story-header">
+      <div><span class="story-id">US-1.11.1</span> <span class="story-title">Describe Key</span></div>
+      <span class="status-tag pass">Implemented</span>
+    </div>
+    <ul class="criteria">
+      <li class="pass"><span class="marker">&#10003;</span> <span class="text">Given M-x <code>describe-key</code> and press a key, then I see the function bound to that key</span></li>
+      <li class="pass"><span class="marker">&#10003;</span> <span class="text">Given I describe <code>w</code> in normal mode, then help buffer shows it runs forward-word</span></li>
+      <li class="pass"><span class="marker">&#10003;</span> <span class="text">Given describe-key output, then I should see function docstring</span></li>
+    </ul>
+  </div>
+
+  <div class="story" data-status="pass">
+    <div class="story-header">
+      <div><span class="story-id">US-1.11.2</span> <span class="story-title">Describe Function</span></div>
+      <span class="status-tag pass">Implemented</span>
+    </div>
+    <ul class="criteria">
+      <li class="pass"><span class="marker">&#10003;</span> <span class="text">Given M-x <code>describe-function</code>, then I see full documentation</span></li>
+      <li class="pass"><span class="marker">&#10003;</span> <span class="text">Given function documentation, then I should see signature, docstring, and keybindings</span></li>
+    </ul>
+  </div>
+
+  <div class="story" data-status="partial">
+    <div class="story-header">
+      <div><span class="story-id">US-1.11.3</span> <span class="story-title">Apropos Command</span></div>
+      <span class="status-tag partial">Partial</span>
+    </div>
+    <ul class="criteria">
+      <li class="pass"><span class="marker">&#10003;</span> <span class="text">Given M-x <code>apropos-command</code> with "save", then I see all commands with "save" in name</span></li>
+      <li class="pass"><span class="marker">&#10003;</span> <span class="text">Given "save.*buffer", then I see commands matching both words</span></li>
+      <li class="plan"><span class="marker">&#9675;</span> <span class="text">Given apropos results, when I select a command, then I should view its documentation</span></li>
+    </ul>
+  </div>
+
+  <!-- Phase 2 -->
+  <h2 class="section-title" id="phase-2"><span class="icon">3.2</span> Phase 2: Extensibility</h2>
+
+  <div class="story" data-status="partial">
+    <div class="story-header">
+      <div><span class="story-id">US-2.1.1</span> <span class="story-title">Plugin Directory Structure</span></div>
+      <span class="status-tag partial">Partial</span>
+    </div>
+    <div class="story-meta">src/editor/api/plugin-ops.ts</div>
+    <ul class="criteria">
+      <li class="pass"><span class="marker">&#10003;</span> <span class="text">Given I install a plugin in <code>~/.config/tmax/tlpa/plugin-name/</code>, then tmax discovers it on startup</span></li>
+      <li class="pass"><span class="marker">&#10003;</span> <span class="text">Given a plugin with <code>plugin.tlisp</code>, then tmax loads it automatically</span></li>
+      <li class="plan"><span class="marker">&#9675;</span> <span class="text">Given plugin with dependencies, when I specify them in manifest, then tmax loads dependencies first</span></li>
+    </ul>
+  </div>
+
+  <div class="story" data-status="partial">
+    <div class="story-header">
+      <div><span class="story-id">US-2.1.2</span> <span class="story-title">Plugin Lifecycle Hooks</span></div>
+      <span class="status-tag partial">Partial</span>
+    </div>
+    <div class="story-meta">Load/unload works, enable/disable hooks planned</div>
+    <ul class="criteria">
+      <li class="pass"><span class="marker">&#10003;</span> <span class="text">Given a plugin defines <code>(plugin-init)</code>, when plugin loads, then init function executes</span></li>
+      <li class="plan"><span class="marker">&#9675;</span> <span class="text">Given <code>(plugin-enable)</code>, when I enable the plugin, then enable hook executes</span></li>
+      <li class="plan"><span class="marker">&#9675;</span> <span class="text">Given <code>(plugin-disable)</code>, when I disable the plugin, then cleanup code executes</span></li>
+      <li class="plan"><span class="marker">&#9675;</span> <span class="text">Given <code>(plugin-unload)</code>, when plugin is unloaded, then resources are freed</span></li>
+    </ul>
+  </div>
+
+  <div class="story" data-status="pass">
+    <div class="story-header">
+      <div><span class="story-id">US-2.4.1</span> <span class="story-title">Macro Recording</span></div>
+      <span class="status-tag pass">Implemented</span>
+    </div>
+    <div class="story-meta">src/editor/api/macro-recording.ts</div>
+    <ul class="criteria">
+      <li class="pass"><span class="marker">&#10003;</span> <span class="text">Given normal mode, when I press <code>qa</code>, then recording starts for register <code>a</code></span></li>
+      <li class="pass"><span class="marker">&#10003;</span> <span class="text">Given recording is active, when I execute commands, then they are recorded</span></li>
+      <li class="pass"><span class="marker">&#10003;</span> <span class="text">Given recording active, when I press <code>q</code>, then recording stops and saves to register</span></li>
+      <li class="pass"><span class="marker">&#10003;</span> <span class="text">Given recorded macro in register <code>a</code>, when I press <code>@a</code>, then macro executes</span></li>
+      <li class="pass"><span class="marker">&#10003;</span> <span class="text">Given I just executed a macro, when I press <code>@@</code>, then last macro executes again</span></li>
+    </ul>
+  </div>
+
+  <div class="story" data-status="pass">
+    <div class="story-header">
+      <div><span class="story-id">US-2.4.2</span> <span class="story-title">Macro Persistence</span></div>
+      <span class="status-tag pass">Implemented</span>
+    </div>
+    <div class="story-meta">src/editor/api/macro-persistence.ts</div>
+    <ul class="criteria">
+      <li class="pass"><span class="marker">&#10003;</span> <span class="text">Given recorded macro in register <code>a</code>, when I quit and restart, then macro is still available</span></li>
+      <li class="pass"><span class="marker">&#10003;</span> <span class="text">Given persistent macros, when I edit <code>~/.config/tmax/macros.tlisp</code>, then I can modify recorded macros</span></li>
+      <li class="pass"><span class="marker">&#10003;</span> <span class="text">Given edited macro file, when I restart tmax, then my edits are loaded</span></li>
+    </ul>
+  </div>
+
+  <!-- Phase 3 -->
+  <h2 class="section-title" id="phase-3"><span class="icon">3.3</span> Phase 3: Advanced Features</h2>
+
+  <div class="story" data-status="partial">
+    <div class="story-header">
+      <div><span class="story-id">US-3.1.1</span> <span class="story-title">LSP Client Connection</span></div>
+      <span class="status-tag partial">Partial</span>
+    </div>
+    <div class="story-meta">src/lsp/client.ts — framework exists, not production-ready</div>
+    <ul class="criteria">
+      <li class="partial"><span class="marker">~</span> <span class="text">Given I open a TypeScript file, then tmax should attempt to connect to language server</span></li>
+      <li class="partial"><span class="marker">~</span> <span class="text">Given LSP server running, then "LSP connected" should appear in status line</span></li>
+      <li class="pass"><span class="marker">&#10003;</span> <span class="text">Given LSP connection fails, then error is logged but editor remains functional</span></li>
+    </ul>
+  </div>
+
+  <div class="story" data-status="partial">
+    <div class="story-header">
+      <div><span class="story-id">US-3.1.2</span> <span class="story-title">LSP Diagnostics</span></div>
+      <span class="status-tag partial">Partial</span>
+    </div>
+    <div class="story-meta">src/editor/api/lsp-diagnostics.ts — state tracking exists, display incomplete</div>
+    <ul class="criteria">
+      <li class="partial"><span class="marker">~</span> <span class="text">Given LSP connected and file has errors, then error indicators should appear in gutter</span></li>
+      <li class="partial"><span class="marker">~</span> <span class="text">Given diagnostics available, when I navigate to error line, then error message appears in status</span></li>
+      <li class="partial"><span class="marker">~</span> <span class="text">Given multiple diagnostics, when I list diagnostics, then I see all errors and warnings</span></li>
+    </ul>
+  </div>
+
+  <div class="story" data-status="pass">
+    <div class="story-header">
+      <div><span class="story-id">US-3.2.1</span> <span class="story-title">Window Splitting</span></div>
+      <span class="status-tag pass">Implemented</span>
+    </div>
+    <div class="story-meta">src/editor/api/window-ops.ts — data structures and management</div>
+    <ul class="criteria">
+      <li class="pass"><span class="marker">&#10003;</span> <span class="text">Given normal mode, when I execute <code>:split</code>, then window splits horizontally</span></li>
+      <li class="pass"><span class="marker">&#10003;</span> <span class="text">Given normal mode, when I execute <code>:vsplit</code>, then window splits vertically</span></li>
+      <li class="pass"><span class="marker">&#10003;</span> <span class="text">Given split windows, when I press <code>C-w w</code>, then focus moves to next window</span></li>
+      <li class="pass"><span class="marker">&#10003;</span> <span class="text">Given split windows, when I press <code>C-w q</code>, then current window closes</span></li>
+    </ul>
+  </div>
+
+  <div class="story" data-status="plan">
+    <div class="story-header">
+      <div><span class="story-id">US-3.2.2</span> <span class="story-title">Window Resizing</span></div>
+      <span class="status-tag plan">Planned</span>
+    </div>
+    <ul class="criteria">
+      <li class="plan"><span class="marker">&#9675;</span> <span class="text">Given two horizontal windows, when I press <code>C-w +</code>, then current window height increases</span></li>
+      <li class="plan"><span class="marker">&#9675;</span> <span class="text">Given two horizontal windows, when I press <code>C-w -</code>, then current window height decreases</span></li>
+      <li class="plan"><span class="marker">&#9675;</span> <span class="text">Given two vertical windows, when I press <code>C-w &gt;</code>, then current window width increases</span></li>
+      <li class="plan"><span class="marker">&#9675;</span> <span class="text">Given two vertical windows, when I press <code>C-w &lt;</code>, then current window width decreases</span></li>
+    </ul>
+  </div>
+
+  <div class="story" data-status="partial">
+    <div class="story-header">
+      <div><span class="story-id">US-3.4.1</span> <span class="story-title">Undo Tree</span></div>
+      <span class="status-tag partial">Partial</span>
+    </div>
+    <div class="story-meta">src/editor/api/undo-tree.ts</div>
+    <ul class="criteria">
+      <li class="pass"><span class="marker">&#10003;</span> <span class="text">Given edits A, B, C, undo to A, then make D, when I view undo tree, then I see branch: A → B → C and A → D</span></li>
+      <li class="pass"><span class="marker">&#10003;</span> <span class="text">Given undo tree with branches, when I navigate to branch point, then I can choose which branch to follow</span></li>
+      <li class="partial"><span class="marker">~</span> <span class="text">Given undo tree visualization, when I open it, then I should see a visual representation of branches</span></li>
+    </ul>
+  </div>
+
+  <!-- Phase 4 -->
+  <h2 class="section-title" id="phase-4"><span class="icon">3.4</span> Phase 4: Community</h2>
+
+  <div class="story" data-status="plan">
+    <div class="story-header">
+      <div><span class="story-id">US-4.1.1</span> <span class="story-title">Plugin Repository</span></div>
+      <span class="status-tag plan">Planned</span>
+    </div>
+    <div class="story-meta">src/editor/api/plugin-repository.ts — stub exists</div>
+    <ul class="criteria">
+      <li class="plan"><span class="marker">&#9675;</span> <span class="text">Given M-x <code>plugin-list</code>, then I should see available plugins from repository</span></li>
+      <li class="plan"><span class="marker">&#9675;</span> <span class="text">Given plugin list, when I select a plugin, then I see description, author, and install command</span></li>
+      <li class="plan"><span class="marker">&#9675;</span> <span class="text">Given selected plugin, when I choose to install, then it downloads to <code>~/.config/tmax/tlpa/</code></span></li>
+    </ul>
+  </div>
+
+  <div class="story" data-status="plan">
+    <div class="story-header">
+      <div><span class="story-id">US-4.1.2</span> <span class="story-title">Plugin Submission</span></div>
+      <span class="status-tag plan">Planned</span>
+    </div>
+    <ul class="criteria">
+      <li class="plan"><span class="marker">&#9675;</span> <span class="text">Given I've created a plugin, when I submit to repository, then it undergoes review process</span></li>
+      <li class="plan"><span class="marker">&#9675;</span> <span class="text">Given submitted plugin, when review passes, then plugin is published</span></li>
+      <li class="plan"><span class="marker">&#9675;</span> <span class="text">Given published plugin, when users list plugins, then my plugin appears in results</span></li>
+    </ul>
+  </div>
+
+  <div class="story" data-status="plan">
+    <div class="story-header">
+      <div><span class="story-id">US-4.2.1</span> <span class="story-title">Documentation Website</span></div>
+      <span class="status-tag plan">Planned</span>
+    </div>
+    <ul class="criteria">
+      <li class="plan"><span class="marker">&#9675;</span> <span class="text">Given documentation website, when I navigate to API reference, then I see all T-Lisp functions documented</span></li>
+      <li class="plan"><span class="marker">&#9675;</span> <span class="text">Given documentation site, when I search for "key bindings", then I find relevant tutorials</span></li>
+      <li class="plan"><span class="marker">&#9675;</span> <span class="text">Given API documentation, when I view a function, then I see signature, description, examples</span></li>
+    </ul>
+  </div>
+
+  <div class="story" data-status="pass">
+    <div class="story-header">
+      <div><span class="story-id">US-4.3.1</span> <span class="story-title">Test Coverage Metrics</span></div>
+      <span class="status-tag pass">Implemented</span>
+    </div>
+    <div class="story-meta">src/tlisp/test-coverage.ts</div>
+    <ul class="criteria">
+      <li class="pass"><span class="marker">&#10003;</span> <span class="text">Given I run tests with coverage, then I see percentage coverage for each module</span></li>
+      <li class="pass"><span class="marker">&#10003;</span> <span class="text">Given coverage report, then I see which functions are covered</span></li>
+      <li class="pass"><span class="marker">&#10003;</span> <span class="text">Given coverage below threshold, then build should report warning</span></li>
+    </ul>
+  </div>
+
+  <!-- Phase 0.8 -->
+  <h2 class="section-title" id="phase-08"><span class="icon">0.8</span> Server/Client Architecture</h2>
+
+  <div class="story" data-status="partial">
+    <div class="story-header">
+      <div><span class="story-id">US-0.8.1</span> <span class="story-title">Basic Server/Client Infrastructure</span></div>
+      <span class="status-tag partial">Partial</span>
+    </div>
+    <div class="story-meta">src/server/server.ts · tmax --daemon</div>
+    <ul class="criteria">
+      <li class="pass"><span class="marker">&#10003;</span> <span class="text">Given I want to start tmax as a server, when I execute <code>tmax --daemon</code>, then server starts listening</span></li>
+      <li class="pass"><span class="marker">&#10003;</span> <span class="text">Given the server is running, when I connect, then file operations work instantly</span></li>
+      <li class="partial"><span class="marker">~</span> <span class="text">Given I want to evaluate T-Lisp from CLI, when I execute eval command, then I receive output</span></li>
+      <li class="plan"><span class="marker">&#9675;</span> <span class="text">Given I open a file with wait mode, then client should block until buffer is closed</span></li>
+      <li class="plan"><span class="marker">&#9675;</span> <span class="text">Given server is not running, when I execute client command, then I should see error message</span></li>
+    </ul>
+  </div>
+
+  <div class="story" data-status="plan">
+    <div class="story-header">
+      <div><span class="story-id">US-0.8.2</span> <span class="story-title">Advanced Client Commands</span></div>
+      <span class="status-tag plan">Planned</span>
+    </div>
+    <ul class="criteria">
+      <li class="plan"><span class="marker">&#9675;</span> <span class="text">Given I want to list buffers, when I execute <code>tmaxclient --list-buffers</code>, then I see buffer list</span></li>
+      <li class="plan"><span class="marker">&#9675;</span> <span class="text">Given I want to kill a buffer, when I execute <code>tmaxclient --kill-buffer name</code>, then buffer closes</span></li>
+      <li class="plan"><span class="marker">&#9675;</span> <span class="text">Given I want to use tmax as git editor, when I set <code>GIT_EDITOR</code>, then commit message opens in tmax</span></li>
+    </ul>
+  </div>
+
+  <div class="story" data-status="plan">
+    <div class="story-header">
+      <div><span class="story-id">US-0.8.3</span> <span class="story-title">AI Agent Control</span></div>
+      <span class="status-tag plan">Planned</span>
+    </div>
+    <ul class="criteria">
+      <li class="plan"><span class="marker">&#9675;</span> <span class="text">Given I want full editor state, when I send query, then I receive JSON with buffers, cursor, variables</span></li>
+      <li class="plan"><span class="marker">&#9675;</span> <span class="text">Given I want to understand a function, when I send describe command, then I receive documentation</span></li>
+      <li class="plan"><span class="marker">&#9675;</span> <span class="text">Given I want to execute and verify changes, when I send T-Lisp code, then I receive results</span></li>
+    </ul>
+  </div>
+
+  <!-- NFR -->
+  <h2 class="section-title" id="nfr"><span class="icon">4.</span> Non-Functional Requirements</h2>
+
+  <div class="nfr-grid">
+    <div class="nfr-card">
+      <h3>Performance</h3>
+      <ul>
+        <li><span class="check">&#10003;</span> Fast startup (&lt;500ms cold start)</li>
+        <li><span class="check">&#10003;</span> Responsive editing with efficient gap buffer</li>
+        <li><span class="check">&#10003;</span> Steep frontend renders in ~1-2ms per keystroke</li>
+      </ul>
+    </div>
+    <div class="nfr-card">
+      <h3>Security</h3>
+      <ul>
+        <li><span class="check">&#10003;</span> Zero external runtime dependencies (Steep)</li>
+        <li><span class="check">&#10003;</span> Sandboxed T-Lisp execution environment</li>
+        <li><span class="check">&#10003;</span> No network access from editor core</li>
+      </ul>
+    </div>
+    <div class="nfr-card">
+      <h3>Portability</h3>
+      <ul>
+        <li><span class="check">&#10003;</span> Cross-platform: macOS, Linux (Windows planned)</li>
+        <li><span class="check">&#10003;</span> Bun runtime and Node.js compatibility (via tsx)</li>
+        <li><span class="check">&#10003;</span> Standard ANSI terminal support</li>
+      </ul>
+    </div>
+    <div class="nfr-card">
+      <h3>Reliability</h3>
+      <ul>
+        <li><span class="check">&#10003;</span> Comprehensive error handling with graceful degradation</li>
+        <li><span class="check">&#10003;</span> Terminal state restored on exit</li>
+        <li><span class="check">&#10003;</span> 1215+ passing tests across 118 test files</li>
+      </ul>
+    </div>
+    <div class="nfr-card">
+      <h3>Extensibility</h3>
+      <ul>
+        <li><span class="check">&#10003;</span> 25+ T-Lisp API modules for complete editor control</li>
+        <li><span class="check">&#10003;</span> 31 built-in T-Lisp standard library functions</li>
+        <li><span class="check">&#10003;</span> Macro system with quasiquote support</li>
+        <li><span class="check">&#10003;</span> Plugin loading from <code>~/.config/tmax/tlpa/</code></li>
+      </ul>
+    </div>
+  </div>
+
+  <!-- Constraints -->
+  <h2 class="section-title" id="constraints"><span class="icon">5.</span> Constraints</h2>
+
+  <div class="constraint-section">
+    <h3>Technical Constraints</h3>
+    <ul>
+      <li><strong>Runtime:</strong> Bun (primary) or Node.js with tsx (secondary)</li>
+      <li><strong>Terminal:</strong> Requires alternate screen buffer and raw mode support</li>
+      <li><strong>Language:</strong> TypeScript core with T-Lisp scripting layer</li>
+      <li><strong>Frontend:</strong> Steep (default, direct ANSI) or Ink (optional, React/Ink)</li>
+    </ul>
+  </div>
+
+  <div class="constraint-section">
+    <h3>Design Constraints</h3>
+    <ul>
+      <li>T-Lisp handles all editor logic; frontends are thin view layers</li>
+      <li>Editor API operations mutate state through <code>EditorStateAccess</code> proxy</li>
+      <li><code>Editor.handleKey()</code> returns <code>EditorState</code> (Elm Architecture bridge)</li>
+      <li>All T-Lisp functions registered via <code>createEditorAPI()</code> factory</li>
+    </ul>
+  </div>
+
+  <div class="constraint-section">
+    <h3>Development Constraints</h3>
+    <ul>
+      <li>Sequential phase development (architecture before features)</li>
+      <li>Zero breaking changes to T-Lisp API</li>
+      <li>All new key bindings must go through T-Lisp keymaps</li>
+      <li>UI tests via tmux harness for terminal behavior validation</li>
+    </ul>
+  </div>
+
+  <footer>
+    tmax SRS v0.2.0 &middot; Generated from <code>docs/srs.md</code> &middot; 2026-05-16
+  </footer>
+
+</div>
+
+<script>
+// Count criteria by status
+(function() {
+  const stories = document.querySelectorAll('.story');
+  let pass = 0, partial = 0, plan = 0, total = 0;
+
+  stories.forEach(story => {
+    story.querySelectorAll('.criteria li').forEach(li => {
+      total++;
+      if (li.classList.contains('pass')) pass++;
+      else if (li.classList.contains('partial')) partial++;
+      else if (li.classList.contains('plan')) plan++;
+    });
+  });
+
+  document.getElementById('stat-pass').textContent = pass;
+  document.getElementById('stat-partial').textContent = partial;
+  document.getElementById('stat-plan').textContent = plan;
+
+  const pPass = (pass / total * 100).toFixed(1);
+  const pPartial = (partial / total * 100).toFixed(1);
+  const pPlan = (plan / total * 100).toFixed(1);
+
+  document.getElementById('prog-pass').style.width = pPass + '%';
+  document.getElementById('prog-partial').style.width = pPartial + '%';
+  document.getElementById('prog-plan').style.width = pPlan + '%';
+
+  document.getElementById('prog-label-pass').textContent = Math.round(pPass) + '% complete';
+  document.getElementById('prog-label-plan').textContent = Math.round(pPlan) + '% planned';
+})();
+</script>
+
+</body>
+</html>

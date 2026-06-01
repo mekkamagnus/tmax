@@ -196,7 +196,7 @@ These are NOT required for a working editor:
 4. **Syntax highlighting** - Language-specific highlighting
 5. **Auto-completion** - Context-aware completions
 6. **Split screen** - Multiple windows
-7. **Configuration file** - ~/.tmaxrc loading
+7. **Configuration file** - `~/.config/tmax/init.tlisp` loading
 8. **Macros** - Record and replay keystrokes
 
 ## Conclusion

@@ -109,7 +109,7 @@ This version provides a solid foundation for future development with comprehensi
 - ✅ **Multiple Buffers**: Efficient buffer management with gap buffer implementation
 - ✅ **Zero Dependencies**: A self-contained application for security and simplicity
 - ✅ **Key Bindings**: Configurable key bindings through T-Lisp API
-- ✅ **Configuration**: .tmaxrc file support for user customization
+- ✅ **Configuration**: `~/.config/tmax/init.tlisp` file support for user customization
 - ✅ **Testing**: 131+ tests across 8 comprehensive test suites
 - ✅ **Functional Programming Guidelines**: Comprehensive guide to functional programming patterns used in the project
 - ✅ **Bun Runtime**: Complete migration from Deno to Bun for improved performance

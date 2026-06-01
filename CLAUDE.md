@@ -1,5 +1,7 @@
 # CLAUDE.md
 
+**tmax** is a terminal-based text editor where a TypeScript core handles terminal I/O, file system, and rendering, while a built-in Lisp dialect (T-Lisp) handles all editor logic — commands, modes, key bindings, and extensibility. Zero external dependencies. Runs on Bun.
+
 Behavioral guidelines to reduce common LLM coding mistakes. Merge with project-specific instructions as needed.
 
 **Tradeoff:** These guidelines bias toward caution over speed. For trivial tasks, use judgment.
@@ -69,13 +71,15 @@ Strong success criteria let you loop independently. Weak criteria ("make it work
 
 **These guidelines are working if:** fewer unnecessary changes in diffs, fewer rewrites due to overcomplication, and clarifying questions come before implementation rather than after mistakes.
 
-## 5. Installed CLI Tools (use these, not the defaults)
+## 5. Installed CLI Tools
 
-- `bun` is installed - prefer it over `node` and `npm`
-- `ripgrep` (`rg`) is installed - prefer it over `grep`
-- `jq` is installed - use for JSON processing
-- `gh` is installed - use for GitHub interaction
-- `tmux` is installed - use for UI testing of the terminal editor (see test harness in `test/ui/`)
+Prefer these tools when available:
+
+- `rg` for search
+- `jq` for JSON processing
+- `gh` for GitHub interaction
+- `playwright-cli` for browser automation and UI verification
+- `tmux` for long-running terminal work
 
 ## 6. Learn From Corrections
 
@@ -145,7 +149,7 @@ The goal is an accurate report, not a defensive one.
 - **Mode management**: Modal editing state and transitions
 - **Key binding definitions**: Configurable key mappings
 - **User interface logic**: Status line, command input, M-x functionality
-- **Configuration management**: .tmaxrc file loading and execution
+- **Configuration management**: `~/.config/tmax/init.tlisp` file loading and execution
 - **Extensibility**: Custom functions, macros, and commands
 
 ## Key Components
@@ -203,7 +207,7 @@ bun run start
 
 ### T-Lisp Customization
 ```lisp
-;; ~/.tmaxrc configuration file
+;; ~/.config/tmax/init.tlisp configuration file
 (defun word-count ()
   (let ((text (buffer-text)))
     (length (split-string text " "))))

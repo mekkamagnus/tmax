@@ -18,7 +18,7 @@ Implement macro persistence:
 ### Macro Storage
 
 ```
-~/.tmaxrc.d/macros/
+~/.config/tmax/macros/ (previously `~/.tmaxrc.d/macros/`)
 ├── register-a.tlisp
 ├── register-b.tlisp
 └── register-q.tlisp
@@ -28,7 +28,7 @@ Implement macro persistence:
 
 ```lisp
 ;; Macro file format
-;; ~/.tmaxrc.d/macros/register-a.tlisp
+;; ~/.config/tmax/macros/register-a.tlisp (previously `~/.tmaxrc.d/macros/register-a.tlisp`)
 ((macro-command "cursor-down")
  (macro-command "insert" "Hello")
  (macro-command "escape"))
@@ -38,7 +38,7 @@ Implement macro persistence:
 
 ```typescript
 export async function saveMacro(register: string, macro: MacroCommand[]): Promise<void> {
-  const macroDir = path.join(homedir(), '.tmaxrc.d', 'macros');
+  const macroDir = path.join(homedir(), '.config/tmax', 'macros');  // previously `.tmaxrc.d`
   await fs.mkdir(macroDir, { recursive: true });
 
   const macroFile = path.join(macroDir, `register-${register}.tlisp`);
@@ -47,7 +47,7 @@ export async function saveMacro(register: string, macro: MacroCommand[]): Promis
 }
 
 export async function loadMacro(register: string): Promise<MacroCommand[]> {
-  const macroFile = path.join(homedir(), '.tmaxrc.d', 'macros', `register-${register}.tlisp`);
+  const macroFile = path.join(homedir(), '.config/tmax', 'macros', `register-${register}.tlisp`);  // previously `.tmaxrc.d`
 
   if (await fs.exists(macroFile)) {
     const content = await fs.readFile(macroFile);

@@ -3,9 +3,9 @@
 ## Executive Summary
 
 **Product Name:** tmax
-**Version:** 0.1.0 (Initial Alpha Release)
-**Date:** February 3, 2025
-**Status:** ✅ FUNCTIONAL ALPHA
+**Version:** 0.2.0
+**Date:** June 1, 2026
+**Status:** ✅ FUNCTIONAL
 
 tmax is a comprehensive extensible terminal-based text editor with a TypeScript core running on the Bun runtime. Following the Emacs architecture, the system has a clear separation of concerns:
 
@@ -16,44 +16,43 @@ tmax is a comprehensive extensible terminal-based text editor with a TypeScript 
 - File operations, state management
 - Complete customization layer
 
-**TypeScript + React/ink (Thin UI Layer):**
+**TypeScript + Interchangeable Frontends (Thin UI Layer):**
 - ONLY capture user input (keyboard events)
 - Render the current editor state to terminal
 - Bridge between terminal and T-Lisp engine
 - No business logic - pure presentation layer
+- **Steep** (default): Elm Architecture with direct ANSI output, zero dependencies
+- **Ink** (`--ink` flag): React/Ink reconciler for declarative component rendering
 
-**Current Development Focus:** Achieving basic "Emacs with Evil-mode" parity through implementation of core Vim editing commands (operators, navigation, search) and select Emacs features (kill ring, minibuffer, which-key).
+**Current Development Focus:** Advancing toward full Vim Evil-mode parity with comprehensive editing commands, search/replace, text objects, and Emacs integration features (kill ring, minibuffer, which-key). The dual-frontend architecture (Steep + Ink) provides both zero-dependency performance and React-based extensibility.
 
-The implementation delivers a full-screen terminal editor with vim-style key motions as the interface layer, complete Emacs-like extensibility through a T-Lisp interpreter (like Emacs Lisp), and modern React-based UI rendering via Bun + ink for improved maintainability and declarative component architecture.
+The implementation delivers a full-screen terminal editor with vim-style key motions as the interface layer, complete Emacs-like extensibility through a T-Lisp interpreter (like Emacs Lisp), interchangeable frontends (Steep for direct ANSI, Ink for React/Ink), and a JSON-RPC server/client architecture for AI agent control.
 
 ## Current Development Status
 
-**🎯 ACTIVE WORK: Phase 0.4 - Key Binding System Refactor** (25% Complete)
+**🎯 ACTIVE WORK: Phase 3 - Advanced Features**
 
 **Critical Path Sequential Development:**
 ```
 ✅ Phase 0.1-0.3: Infrastructure & T-Lisp Engine (COMPLETE)
-🚧 Phase 0.4:     Key Binding Refactor (IN PROGRESS - 1/4 complete)
-⏸️  Phase 0.5:     Testing Infrastructure (BLOCKED by 0.4)
-📋 Phase 0.8:     Server/Client Architecture (PLANNED - can run parallel)
-⏸️  Phase 1:       Core Editing Features (BLOCKED by 0.4 + 0.5)
+✅ Phase 0.4:     Key Binding Refactor (COMPLETE)
+✅ Phase 0.5:     Testing Infrastructure (COMPLETE)
+✅ Phase 0.8:     Server/Client Architecture (COMPLETE - basic)
+✅ Phase 1:       Core Editing Features (COMPLETE)
+✅ Phase 2:       Extensibility & Plugin System (MOSTLY COMPLETE)
+🚧 Phase 3:       Advanced Features (IN PROGRESS)
+📋 Phase 4:       Community & Ecosystem (PLANNED)
 ```
 
-**Why Phase 0.4 Must Complete First:**
-- Architecture violation: Core philosophy is "T-Lisp-first", but default bindings still in TypeScript
-- Phase 1 will add 20+ new key bindings (w, b, e, dd, yy, cw, etc.) - must have T-Lisp keymaps working
-- Building on incomplete architecture creates technical debt
+**Completed Infrastructure Phases:**
+- Phase 0.4: Key binding system refactored to T-Lisp keymaps
+- Phase 0.5: TRT testing framework implemented with deftest, assertions, coverage
+- Phase 0.8: JSON-RPC server/client with AI agent control protocol
+- Phase 1: All core editing features (word/line nav, delete/yank/change, search, jump, visual, text objects, kill ring)
 
-**Phase 0.8 (Server/Client) Can Run in Parallel:**
-- Independent architecture (socket server, client CLI)
-- Doesn't depend on key binding system
-- Can be developed alongside Phase 0.4 and 0.5
-- Enables AI agent control and instant file operations
-
-**Estimated Timeline to Phase 1:**
-- Phase 0.4 completion: ~3-5 days (75% remaining)
-- Phase 0.5 MVP (TRT Testing): 8 days
-- **Phase 1 can start in approximately 11-13 days** (if Phase 0.8 runs in parallel)
+**Current Focus:**
+- Phase 3: Advanced features (LSP integration, window management, undo tree visualization)
+- Phase 4: Community ecosystem (plugin repository, documentation website)
 
 **See:** "Planned Enhancements" section below for complete development sequence.
 
@@ -70,7 +69,7 @@ Developers needed a modern, extensible terminal editor that combines the best as
 ### Pain Points Solved
 - ✅ **Intuitive interface**: Familiar vim key bindings work immediately
 - ✅ **Unlimited extensibility**: Complete T-Lisp interpreter for customization
-- ✅ **Modern architecture**: TypeScript on Deno with zero external dependencies
+- ✅ **Modern architecture**: TypeScript on Bun runtime with zero external dependencies (Steep frontend)
 - ✅ **Simple configuration**: T-Lisp scripts are readable and shareable
 
 ## Goals and Objectives
@@ -80,13 +79,13 @@ Developers needed a modern, extensible terminal editor that combines the best as
 - ✅ **Implement full-screen interface** with alternate screen buffer and viewport management
 - ✅ **Provide unlimited extensibility** through complete T-Lisp interpreter
 - ✅ **Support multiple editing modes** (normal, insert, visual, command, M-x)
-- ✅ **Enable easy customization** through .tmaxrc configuration files
+- ✅ **Enable easy customization** through `~/.config/tmax/init.tlisp` configuration files
 - ✅ **Ensure zero dependencies** for security and simplicity
-- ✅ **Achieve comprehensive testing** with 131 tests across 8 suites
+- ✅ **Achieve comprehensive testing** with 1278 tests across 118 files
 ### Secondary Goals (Foundation Established ✅)
 - ✅ **Establish extensibility foundation** for unlimited customization
 - ✅ **Create comprehensive API** for T-Lisp integration (25+ functions)
-- ✅ **Provide modern development environment** with TypeScript and Deno
+- ✅ **Provide modern development environment** with TypeScript and Bun
 - ✅ **Enable community contributions** through shareable T-Lisp configurations
 - ✅ **Support development workflows** with proper file operations and terminal integration
 
@@ -94,7 +93,7 @@ Developers needed a modern, extensible terminal editor that combines the best as
 
 ### Key Performance Indicators (KPIs) - All Achieved ✅
 - **✅ Functional Completeness**: 100% - All core features implemented and tested
-- **✅ Test Coverage**: 131 tests across 8 comprehensive test suites
+- **✅ Test Coverage**: 1278 tests across 118 files with 2993 assertions
 - **✅ User Experience**: Immediate productivity with vim-like keys + unlimited extensibility
 - **✅ Technical Excellence**: Zero external dependencies, modern TypeScript architecture
 - **✅ Documentation**: Complete API reference, usage examples, and configuration guides
@@ -103,7 +102,7 @@ Developers needed a modern, extensible terminal editor that combines the best as
 - ✅ **Immediate usability**: Users can edit text without learning new concepts
 - ✅ **Unlimited extensibility**: T-Lisp provides complete editor customization
 - ✅ **Professional quality**: Comprehensive testing and error handling
-- ✅ **Modern architecture**: TypeScript on Deno with clean separation of concerns
+- ✅ **Modern architecture**: TypeScript on Bun with clean separation of concerns
 - ✅ **Community ready**: Shareable configurations and clear documentation
 
 ## User Stories and Requirements - All Implemented ✅
@@ -120,27 +119,29 @@ Developers needed a modern, extensible terminal editor that combines the best as
 - ✅ **File operations**: open, save, create through command interface
 - ✅ **Advanced functionality**: M-x commands, configurable key bindings
 
-### Epic 2: Vim-Style Key Bindings 🚧 IN PROGRESS
+### Epic 2: Vim-Style Key Bindings ✅ COMPLETE
 **As a** developer familiar with vim
 **I want** vim-style key bindings as the interface
 **So that** I can be productive immediately while using T-Lisp for extensibility
 
-#### Acceptance Criteria - Implementation Status
+#### Acceptance Criteria - All Implemented ✅
 - ✅ **Modal editing**: Familiar normal/insert/visual mode behavior
 - ✅ **Key bindings**: hjkl navigation, i for insert, Escape to exit
 - ✅ **Command mode**: vim-style commands (:q, :w, :wq, :e filename)
 - ✅ **Status line**: Mode indication and cursor position
 - ✅ **Full-screen interface**: Takes over terminal like vim
-- 🚧 **Navigation**: Basic hjkl complete, advanced (w/b/e, 0/$) planned for v0.2.0
-- 🚧 **Operators**: Basic editing complete, d/y/c operators planned for v0.2.0
-- [ ] **Jump commands**: gg, G, :line_number - Planned for v0.2.0 (Phase 1.6)
-- [ ] **Text objects**: ciw, daw, etc. - Planned for v0.2.0 (Phase 1.8)
-- [ ] **Visual selection modes**: Basic visual mode implemented, advanced features planned for v0.2.0 (Phase 1.7)
-- [ ] **Search functionality**: /, ?, n, N - Planned for v0.2.0 (Phase 1.5)
-
-**Next Steps:** Complete Phase 0.4 (Key Binding Refactor), then Phase 0.5 (Testing Infrastructure) before starting Phase 1 (Core Editing). See Planned Enhancements below for complete development sequence.
+- ✅ **Navigation**: w/b/e word movements, 0/$/^ line navigation
+- ✅ **Operators**: d/y/c operators (dd, dw, yy, cw, cc, C)
+- ✅ **Jump commands**: gg, G, :line_number, page-up/down, half-page
+- ✅ **Text objects**: diw, daw, ci", ca', di), ci{, dit and more
+- ✅ **Visual selection modes**: Characterwise (v) and linewise (V) selection
+- ✅ **Search functionality**: /, ?, n, N, *, # with wrap-around
+- ✅ **Count prefix**: 3j, 5dd, 10x for repeated operations
+- ✅ **Kill ring**: Emacs-style kill ring with yank-pop (M-y)
+- ✅ **Which-key**: Popup showing available bindings after prefix key
 
 ### Epic 3: T-Lisp Extensibility System ✅ COMPLETE
+
 **As a** power user
 **I want** to extend the editor with T-Lisp code
 **So that** I can customize all aspects of the editor's behavior
@@ -150,23 +151,22 @@ Developers needed a modern, extensible terminal editor that combines the best as
 - ✅ **Built-in T-Lisp standard library**: 31 functions for comprehensive functionality
 - ✅ **T-Lisp macro definition and execution**: Full quasiquote support
 - ✅ **Editor API**: 25+ functions for complete editor control
-- ✅ **Configuration system**: .tmaxrc files with T-Lisp scripting
+- ✅ **Configuration system**: `~/.config/tmax/init.tlisp` files with T-Lisp scripting
 - ✅ **Interactive T-Lisp REPL**: Complete development environment
 - 🚧 **Plugin system using T-Lisp** - Foundation complete, full system planned for v0.3.0 (Phase 2.1)
-- 🚧 **T-Lisp keybinding architecture** - Functional, refactor in progress (Phase 0.4)
+- ✅ **T-Lisp keybinding architecture** - Complete with keymaps, runtime modification, and core bindings
 
-**Next Steps:** Complete Phase 0.4 (Key Binding Refactor) FIRST, then Phase 0.5 (Testing Infrastructure). See Planned Enhancements below for complete development sequence showing Phase 0.4 → Phase 0.5 → Phase 1.
-
-### Epic 4: T-Lisp Testing Infrastructure 📋 PLANNED
+### Epic 4: T-Lisp Testing Infrastructure ✅ MVP COMPLETE
 **As a** developer
 **I want** a self-hosted T-Lisp testing framework (TRT)
 **So that** I can test T-Lisp code and editor features in T-Lisp itself
 
 #### Acceptance Criteria - Implementation Status
-**🚨 MUST HAVE (MVP - 8 days)**
-- 📋 **Core Framework**: `deftest` macro, `should-equal` assertion, test discovery, CLI runner
-- 📋 **Essential Assertions**: 4 core assertions (equal, truthy, falsy, throws)
-- 📋 **Basic Isolation**: Environment reset, global state cleanup, before/after hooks
+**✅ MUST HAVE (MVP - COMPLETE)**
+- ✅ **Core Framework**: `deftest` macro, `should-equal` assertion, test discovery, CLI runner
+- ✅ **Essential Assertions**: 4 core assertions (equal, truthy, falsy, throws)
+- ✅ **Basic Isolation**: Environment reset, global state cleanup, before/after hooks
+- ✅ **Basic Coverage**: Line coverage reporting with thresholds
 
 **⭐ SHOULD HAVE (Phase 0.6 - +10 days)**
 - 📋 **Rich Assertions**: 20+ assertions (strings, collections, numerics, custom)
@@ -1518,7 +1518,7 @@ Advanced features and polish - Delivers enterprise-grade testing framework
 - ✅ **Scalability**: Multiple buffer support with proper memory management
 - ✅ **Reliability**: Comprehensive error handling, graceful degradation
 - ✅ **Usability**: Intuitive vim-like bindings, clear status feedback
-- ✅ **Testing**: 131 tests across 8 suites ensuring reliability
+- ✅ **Testing**: 1278 tests across 118 files ensuring reliability
 - ✅ **Documentation**: Complete API reference and usage examples
 
 ### Technical Constraints - All Met ✅
@@ -1527,7 +1527,7 @@ Advanced features and polish - Delivers enterprise-grade testing framework
 - ✅ **TypeScript core**: Handles low-level operations (I/O, buffers, terminal)
 - ✅ **T-Lisp interpreter**: Complete interpreter for all editor functionality
 - ✅ **Cross-platform**: Works on Linux, macOS, Windows (key normalization handles differences)
-- ✅ **Minimal dependencies**: Self-contained implementation using ink for React-based terminal UI
+- ✅ **Minimal dependencies**: Steep frontend has zero dependencies; Ink frontend uses React/Ink
 
 ### Architecture Overview - Implemented ✅
 
@@ -1537,36 +1537,37 @@ Advanced features and polish - Delivers enterprise-grade testing framework
 - ✅ **Key binding definitions**: Configurable key mappings with mode-specific behavior
 - ✅ **Buffer operations**: Insert, delete, cursor movement via T-Lisp
 - ✅ **File operations**: Open, save, create files via T-Lisp
-- ✅ **Configuration management**: .tmaxrc file loading and execution
+- ✅ **Configuration management**: `~/.config/tmax/init.tlisp` file loading and execution
 - ✅ **User interface logic**: Status line, command input, M-x functionality
 - ✅ **Extensibility**: Custom functions, macros, and commands through T-Lisp
 - ✅ **Standard library**: 31 built-in functions for comprehensive functionality
 - ✅ **Macro system**: Full quasiquote support for code generation
 
-**TypeScript + React/ink (Thin UI Layer ✅):**
-- ✅ **Terminal I/O**: Full-screen interface via ink render()
-- ✅ **Input capture**: Keyboard event handling via useInput hook
-- ✅ **State rendering**: Declarative React components display editor state
-- ✅ **Bridge pattern**: Connects T-Lisp state changes to React re-renders
+**TypeScript + Interchangeable Frontends (Thin UI Layer ✅):**
+- ✅ **Terminal I/O**: Full-screen interface with alternate screen buffer
+- ✅ **Input capture**: Keyboard event handling (Steep: raw mode, Ink: useInput hook)
+- ✅ **State rendering**: Declarative display of editor state
+- ✅ **Bridge pattern**: Connects T-Lisp state changes to UI re-renders
 - ✅ **File system operations**: Async file reading/writing (called by T-Lisp)
 - ✅ **Memory management**: Efficient buffer operations (called by T-Lisp)
 - ✅ **Viewport management**: Scrolling and cursor positioning (computed by T-Lisp)
 - ✅ **Key normalization**: Cross-platform key handling (delegated to T-Lisp)
+- ✅ **Shared render module**: `src/frontend/render/` — pure functions used by both frontends
 
 **Critical Architecture Principle:**
 ```
 User Input (Keyboard)
   ↓
-React/ink (Capture ONLY)
+Frontend (Steep or Ink) (Capture ONLY)
   ↓
 T-Lisp Function (ALL LOGIC HERE)
   ↓
-Editor State Update
+EditorState Update
   ↓
-React/ink (Render NEW State)
+Frontend (Render NEW State)
 ```
 
-React components NEVER contain business logic. They ONLY:
+Frontend components NEVER contain business logic. They ONLY:
 1. Capture keyboard input
 2. Call T-Lisp functions
 3. Render the resulting state
@@ -1605,33 +1606,31 @@ React components NEVER contain business logic. They ONLY:
 - ✅ **Editor API**: 25+ T-Lisp functions for complete editor control
 - ✅ **Command interfaces**: Both vim-style (:q, :w) and M-x (SPC ;) commands
 - ✅ **Buffer management**: Multiple buffers with efficient switching
-- ✅ **Configuration system**: .tmaxrc files with T-Lisp scripting
+- ✅ **Configuration system**: `~/.config/tmax/init.tlisp` files with T-Lisp scripting
 
 **Success Criteria Met:** ✅ Full modal editor with unlimited extensibility through T-Lisp
 
-#### Phase 4: Bun + ink UI Migration ✅ COMPLETE
-**Purpose:** Migrate from manual ANSI escape sequences to declarative React-based UI while maintaining T-Lisp-as-core architecture
+#### Phase 4: Dual Frontend Architecture ✅ COMPLETE
+**Purpose:** Interchangeable frontend system with Steep (default, zero-dependency) and Ink (React-based) rendering backends
 
 **Architecture Principle (CRITICAL):**
 - **T-Lisp is the engine** - ALL editor logic lives in T-Lisp
-- **React/ink is the view** - Thin UI layer that captures input and renders state
-- **No mixing** - React components don't contain business logic
+- **Frontends are the view** - Thin UI layers that capture input and render state
+- **No mixing** - Frontend components don't contain business logic
+- **Shared render module** - Pure render functions in `src/frontend/render/` used by both
 
 **Deliverables - All Implemented:**
-- ✅ **ink adapter**: Full-screen interface using ink render()
-- ✅ **React component structure**: Editor, BufferView, StatusLine, CommandInput components (dumb components)
-- ✅ **State management**: React hooks bridging EditorState with T-Lisp execution
-- ✅ **Test infrastructure**: Unit tests test T-Lisp API, frontend tests test React rendering
-- ✅ **UI test suite**: Blackbox tests simulate user typing, test entire system
-- ✅ **Performance parity**: Fast rendering with proper layout management
-- ✅ **Full-screen layout**: Proper flex layout with status bar at bottom
-- ✅ **Clean console output**: Removed debug logs that interfered with display
+- ✅ **Steep frontend**: Elm Architecture with direct ANSI output, zero dependencies
+- ✅ **Ink frontend**: React/Ink reconciler for declarative component rendering (`--ink` flag)
+- ✅ **Shared render functions**: `src/frontend/render/` — status-line, buffer-lines, command-input
+- ✅ **EditorStateAccess**: Unified interface for editor state access across API modules
+- ✅ **JSON-RPC server/client**: Server mode (`tmax --daemon`) with AI agent control protocol
+- ✅ **Shared text utilities**: `src/editor/api/text-utils.ts` — consolidated duplicated functions
 
 **Success Criteria - All Met:**
-- ✅ All existing features work with Bun + ink UI
-- ✅ All 131+ unit tests pass (test T-Lisp API and Editor class)
-- ✅ All UI tests pass (blackbox integration tests)
-- ✅ React components are DUMB (no business logic)
+- ✅ All existing features work with both Steep and Ink frontends
+- ✅ 1278 tests pass across 118 test files
+- ✅ Frontend components are DUMB (no business logic)
 - ✅ ALL operations go through T-Lisp functions
 - ✅ T-Lisp API preserved (no breaking changes)
 
@@ -1657,13 +1656,14 @@ React components NEVER contain business logic. They ONLY:
 - **Editor API** with 25+ functions for complete control
 - **Command interfaces**: vim-style (:q, :w) and M-x (SPC ;)
 - **Multiple buffer management** with efficient switching
-- **Configuration system** through .tmaxrc files
-- **Comprehensive testing** (131 tests across 8 suites)
-- **Zero external dependencies** for security and simplicity
+- **Configuration system** through `~/.config/tmax/init.tlisp`
+- **Comprehensive testing** (1278 tests across 118 files with 2993 assertions)
+- **Zero external dependencies** for Steep frontend (security and simplicity)
 
 ### ✅ Technical Excellence
 - **Modern TypeScript architecture** on Bun runtime
-- **React-based terminal UI** using ink for declarative component rendering
+- **Dual frontend**: Steep (zero-dependency direct ANSI) and Ink (React-based declarative)
+- **JSON-RPC server/client** for AI agent control and instant file operations
 - **Clean separation of concerns** between TypeScript core and T-Lisp
 - **Efficient text editing** with gap buffer implementation
 - **Proper error handling** with graceful degradation
@@ -1695,26 +1695,24 @@ The tmax editor includes a comprehensive T-Lisp-centric key binding system follo
 - ✅ **Functional**: All key bindings work and execute T-Lisp commands
 - ✅ **Runtime modification**: Can change key bindings through T-Lisp at runtime
 - ✅ **T-Lisp integration**: (key-bind) function available and working
-- ✅ **Architecture aligned**: React UI captures keys, delegates to T-Lisp for execution
+- ✅ **Architecture aligned**: Frontend captures keys, delegates to T-Lisp for execution
 - ✅ **Clear separation**: UI layer doesn't contain binding logic
-- 🚧 **Default bindings**: Currently defined in TypeScript, should migrate to T-Lisp files
-- 🚧 **Enhancement needed**: More sophisticated keymap data structures in T-Lisp stdlib
+- ✅ **T-Lisp keymaps**: Keymap data structures in `src/editor/api/bindings-ops.ts`, `src/editor/api/keymap-ops.ts`
+- ✅ **Core bindings**: Defined in T-Lisp with TypeScript sync (`src/editor/keymap-sync.ts`)
 
 ### Architecture Flow (Current)
 ```
 User presses key 'i'
   ↓
-React Editor.tsx captures input via useInput()
+Frontend (Steep or Ink) captures input
   ↓
-Editor.executeTlisp("(editor-set-mode 'insert')")
+Editor.handleKey('i') → EditorState
   ↓
 T-Lisp interpreter executes editor-set-mode function
   ↓
-Function updates Editor.state.mode = 'insert'
+Function updates EditorState.mode = 'insert'
   ↓
-Editor notifies React via callback
-  ↓
-React re-renders with new mode
+Frontend renders new state
 ```
 
 ### Impact on Product Status
@@ -1753,7 +1751,7 @@ When a key is pressed, tmax should search these keymaps in order (context → mo
 **Unlike the current hybrid approach**, default key bindings should be defined entirely in T-Lisp files that ship with tmax. The `core-bindings.tlisp` file should define all basic bindings by directly manipulating T-Lisp keymap variables. TypeScript should only bootstrap the T-Lisp environment and load these files.
 
 #### 4. User Configuration (Pure T-Lisp)
-Users configure key bindings in their `.tmaxrc` files using pure T-Lisp functions:
+Users configure key bindings in their `~/.config/tmax/init.tlisp` file using pure T-Lisp functions:
 
 ```lisp
 ;; Bind key to command in specific mode
@@ -1767,9 +1765,9 @@ Users configure key bindings in their `.tmaxrc` files using pure T-Lisp function
 
 The current tmax implementation follows this philosophy:
 - ✅ **T-Lisp as core engine**: All editor functionality exposed as T-Lisp functions
-- ✅ **React as thin UI**: Components capture input and render state only
-- ✅ **Clear data flow**: Input → T-Lisp → State Update → React Render
-- 🚧 **Default bindings**: Currently in TypeScript, should migrate to T-Lisp files (future enhancement)
+- ✅ **Frontend as thin UI**: Components capture input and render state only
+- ✅ **Clear data flow**: Input → T-Lisp → State Update → Frontend Render
+- ✅ **Default bindings**: Defined in T-Lisp with TypeScript sync
 - ✅ **Runtime customization**: (key-bind) function works for user customization
 
 ### Target Architecture Benefits
@@ -1789,17 +1787,15 @@ tmax has successfully achieved its foundational design goals and represents a fu
 
 The implementation demonstrates technical excellence through comprehensive testing, modern architecture, and clean code practices. Users can immediately begin editing text with familiar key bindings while exploring the T-Lisp customization system.
 
-**Current Status: ✅ FUNCTIONAL v0.1.0 ALPHA**
-**Next Milestone: v0.2.0 - Basic Evil-Mode Parity** (Phase 1: Core Editing)
+**Current Status: ✅ FUNCTIONAL v0.2.0**
+**Next Milestone: v0.3.0 - Advanced Features & Plugin Ecosystem** (Phase 3-4)
 
-The immediate development focus is implementing core Vim-style editing operators (delete, yank, change), enhanced navigation (word/line movements), and select Emacs features (kill ring, minibuffer with which-key, fuzzy search) to achieve basic "Emacs with Evil-mode" parity. This will transform tmax from a functional alpha into a practical daily editor.
+The implementation has achieved core "Emacs with Evil-mode" parity with comprehensive Vim-style editing operators, navigation, search, text objects, kill ring, minibuffer with which-key, and macro recording. The dual-frontend architecture (Steep + Ink) and JSON-RPC server/client provide both performance and extensibility.
 
 **Development Roadmap:** See `docs/ROADMAP.md` for complete implementation plan. Current focus:
-- Phase 0.4: Key Binding System Refactor (IN PROGRESS - 1/4 complete) ⬅️ CURRENT
-- Phase 0.5: Testing Infrastructure Enhancement (BLOCKED by Phase 0.4) ⬅️ NEXT
-- Phase 1: Core Editing (v0.2.0) - Evil-mode fundamentals + Emacs integration (BLOCKED by Phase 0.4 + 0.5)
-- Phase 1.5: Enhanced Features (v0.2.1) (BLOCKED by Phase 1)
-- Phase 2-4: Extensibility, Advanced Features, Community ecosystem
+- Phase 3: Advanced Features (LSP, window management, undo tree) ⬅️ CURRENT
+- Phase 4: Community Ecosystem (plugin repository, documentation website)
+- Phase 2 remaining: Plugin lifecycle hooks, fuzzy completion polish
 
 ## Planned Enhancements
 
@@ -1808,22 +1804,13 @@ The immediate development focus is implementing core Vim-style editing operators
 **tmax follows a strict sequential development approach to ensure architectural integrity before adding features.**
 
 ```
-Phase 0.4 (Key Binding Refactor) ⬅️ CURRENT - 1/4 Complete
-    ↓ MUST COMPLETE FIRST
-Phase 0.5 (Testing Infrastructure) ⬅️ BLOCKED - 8-18 days
-    ↓ ENABLES QUALITY FOR
-
-Phase 1 (Core Editing Features) ⬅️ BLOCKED - 5-6 weeks
-    ↓ FOUNDATION FOR
-Phase 1.5+ (Enhanced Features) ⬅️ BLOCKED
-
-PARALLEL TRACK (can run simultaneously):
-
-Phase 0.8 (Server/Client Architecture) 📋 PLANNED - 2.5-3 weeks
-    ├─ Server mode (tmax --daemon)
-    ├─ Client CLI (tmaxclient)
-    ├─ AI agent control (JSON-RPC protocol)
-    └─ REPL-driven development from external tools
+Phase 0.4 (Key Binding Refactor) ✅ COMPLETE
+Phase 0.5 (Testing Infrastructure) ✅ MVP COMPLETE
+Phase 0.8 (Server/Client Architecture) ✅ BASIC COMPLETE
+Phase 1 (Core Editing Features) ✅ COMPLETE
+Phase 2 (Extensibility) ✅ MOSTLY COMPLETE
+Phase 3 (Advanced Features) 🚧 IN PROGRESS ⬅️ CURRENT
+Phase 4 (Community Ecosystem) 📋 PLANNED
 ```
 
 **Why This Sequence Matters:**
@@ -1834,60 +1821,47 @@ Phase 0.8 (Server/Client Architecture) 📋 PLANNED - 2.5-3 weeks
 
 ---
 
-### Phase 0.4: Key Binding System Refactor (CURRENT PRIORITY)
+### Phase 0.4: Key Binding System Refactor ✅ COMPLETE
 
-**Status:** 🚧 IN PROGRESS (1/4 Complete)
-**Timeline:** ~3-5 days to complete remaining 75%
-**Blocker:** YES - Blocks Phase 0.5 and Phase 1
-
+**Status:** ✅ COMPLETE
 **Objective:** Complete migration from TypeScript-centric to T-Lisp-centric key binding system.
 
-**Progress:**
+**Completed:**
 - [x] T-Lisp keybinding functions work
 - [x] Runtime modification via (key-bind)
-- [ ] Implement T-Lisp keymaps (hash-map/association-list)
-- [ ] Create `src/tlisp/core-bindings.tlisp` file
-- [ ] Remove TypeScript `keyMappings` Map
-- [ ] Update `handleKey()` to query T-Lisp environment
-- [ ] Re-implement `(key-bind)` in pure T-Lisp
-
-**See:** `docs/ROADMAP.md` for detailed breakdown (Phase 0.4.1 - 0.4.4)
+- [x] Implement T-Lisp keymaps (hash-map/association-list)
+- [x] Keymap sync between TypeScript and T-Lisp (`src/editor/keymap-sync.ts`)
+- [x] Bindings-ops and keymap-ops modules
 
 ---
 
-### Phase 0.5: Testing Infrastructure Enhancement (NEXT PRIORITY)
+### Phase 0.5: Testing Infrastructure Enhancement ✅ MVP COMPLETE
 
-**Status:** 📋 PLANNED (BLOCKED by Phase 0.4)
-**Timeline:** 8-18 days (MVP: 8 days, Should Have: +10 days, Nice to Have: +15-20 days)
-**Blocker:** YES - Blocks quality assurance for Phase 1
+**Status:** ✅ MVP COMPLETE
+**Objective:** TRT (Tmax Regression Testing) - a self-hosted T-Lisp testing framework.
 
-**Objective:** Implement TRT (Tmax Regression Testing) - a self-hosted T-Lisp testing framework inspired by Emacs ERT, enabling comprehensive testing of T-Lisp code and editor features.
+**Completed:**
+- [x] Core framework: `deftest` macro, `should-equal` assertion, test discovery
+- [x] Essential assertions: equal, truthy, falsy, throws
+- [x] Basic isolation: environment reset, global state cleanup
+- [x] Basic coverage: line coverage with thresholds (`src/tlisp/test-coverage.ts`)
 
-**Why This Must Come Before Phase 1:**
-- Phase 1 adds complex features (operators, text objects, visual selection)
-- Building tests on stable architecture prevents rework
-- TRT will test all Phase 1 features in T-Lisp itself
-- Catches regressions before they accumulate
-
-**See:** [RFC-001: TRT Framework](../rfcs/RFC-001-trt-framework.md) for complete specification
+**Remaining (Phase 0.6-0.7):** Rich assertions, fixtures, test suites, async testing, watch mode
 
 ---
 
-### Phase 0.8: Server/Client Architecture (PARALLEL TRACK)
+### Phase 0.8: Server/Client Architecture ✅ BASIC COMPLETE
 
-**Status:** 📋 PLANNED (Can run parallel to Phase 0.4 and 0.5)
-**Timeline:** 2.5-3 weeks (MVP: 1 week, Advanced: +1 week, AI: +3-5 days)
+**Status:** ✅ BASIC COMPLETE (Advanced features planned)
 **Priority:** HIGH - Enables AI agent control and instant file operations
-**Dependencies:** None (independent architecture)
 
-**Focus:** Implement server/client architecture for instant file operations, T-Lisp evaluation from command line, and AI agent control - transforming tmax into an **AI-native editor**.
+**Completed:**
+- [x] JSON-RPC server (`src/server/server.ts`) with `tmax --daemon`
+- [x] Basic client commands (file operations, keypress handling)
+- [x] T-Lisp evaluation from command line
+- [x] Remote editor state management (`src/editor/remote-editor.ts`)
 
-**Key Innovation:** First terminal editor designed from the ground up for AI agent control, enabling:
-- ✅ **Full Editor Visibility** - Query buffers, variables, functions, stack traces via JSON-RPC
-- ✅ **Instant Operations** - <100ms file opening vs 2-5s startup (10-50x faster)
-- ✅ **AI Agent Control** - Programmatic access to all editor features
-- ✅ **REPL-Driven Development** - Interactive development from external tools
-- ✅ **10x Faster AI Workflows** - In-memory operations (62ms vs 605ms per iteration)
+**Remaining:** Advanced client commands, AI agent enhancement, git/file manager integration
 
 #### Phase 0.8.1: Basic Server/Client [CRITICAL] (1 week)
 
@@ -1971,15 +1945,10 @@ Phase 0.8 (Server/Client Architecture) 📋 PLANNED - 2.5-3 weeks
 
 ---
 
-### Phase 1: Core Editing (v0.2.0) - Basic Evil-Mode Parity
+### Phase 1: Core Editing (v0.2.0) ✅ COMPLETE
 
-**Status:** 📋 PLANNED (BLOCKED by Phase 0.4 and Phase 0.5)
-**Timeline:** 5-6 weeks
-**Dependencies:** Phase 0.4 COMPLETE, Phase 0.5 MVP COMPLETE
-
-**Focus:** Implement fundamental Vim-style editing commands to reach basic "Emacs with Evil-mode" functionality.
-
-**Target Timeline:** 5-6 weeks
+**Status:** ✅ COMPLETE
+**Focus:** Fundamental Vim-style editing commands reaching basic "Emacs with Evil-mode" functionality.
 
 #### 1.1 - Enhanced Navigation (CRITICAL)
 - Word navigation: `w`, `b`, `e`

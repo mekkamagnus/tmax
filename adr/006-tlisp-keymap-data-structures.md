@@ -11,7 +11,7 @@ The tmax editor had all key binding definitions hardcoded in TypeScript, making 
 1. **Programmatic manipulation** of key bindings from T-Lisp
 2. **Plugin customization** of key bindings
 3. **Runtime key binding inspection** and modification
-4. **User customization** through .tmaxrc configuration
+4. **User customization** through `~/.config/tmax/init.tlisp` configuration
 
 The keymap system was entirely encapsulated within TypeScript's `Map` data structures, with no API exposed to the T-Lisp interpreter.
 
@@ -66,7 +66,7 @@ Keymaps are represented as hashmaps with three properties:
 #### Architecture
 
 ```
-User defines keymap in .tmaxrc → T-Lisp → KeymapSync → Editor Key Registry → Works!
+User defines keymap in `~/.config/tmax/init.tlisp` → T-Lisp → KeymapSync → Editor Key Registry → Works!
                                                     ↑
                                  User modifies keymap at runtime → KeymapSync → Immediate effect
 ```
@@ -82,7 +82,7 @@ User defines keymap in .tmaxrc → T-Lisp → KeymapSync → Editor Key Registry
 - **Editor Constructor**: Initializes KeymapSync instance
 - **Editor.initializeAPI()**: Registers keymap-ops functions with T-Lisp interpreter
 - **Editor.handleKey()**: Checks T-Lisp keymaps before TypeScript registry
-- **Editor.loadInitFile()**: Loads and executes ~/.tmaxrc configuration
+- **Editor.loadInitFile()**: Loads and executes `~/.config/tmax/init.tlisp` configuration
 - **T-Lisp Interpreter**: Keymap-ops functions available in global environment
 
 ## Consequences
@@ -90,7 +90,7 @@ User defines keymap in .tmaxrc → T-Lisp → KeymapSync → Editor Key Registry
 ### Benefits
 
 1. **Plugin Development**: Plugins can now define and modify key bindings
-2. **Runtime Customization**: Users can customize bindings in .tmaxrc
+2. **Runtime Customization**: Users can customize bindings in `~/.config/tmax/init.tlisp`
 3. **Debugging**: Can inspect key bindings programmatically
 4. **Flexibility**: Full keymap control from T-Lisp layer
 5. **No Breaking Changes**: T-Lisp keymaps checked first, TypeScript registry as fallback
@@ -142,7 +142,7 @@ User defines keymap in .tmaxrc → T-Lisp → KeymapSync → Editor Key Registry
   - Error handling
 
 - `test/integration/keymap-customization.test.ts` (9 tests)
-  - .tmaxrc loading and execution
+  - `~/.config/tmax/init.tlisp` loading and execution
   - Custom bindings override defaults
   - Multiple keymaps for different modes
   - Runtime keymap modification via M-x
@@ -151,7 +151,7 @@ User defines keymap in .tmaxrc → T-Lisp → KeymapSync → Editor Key Registry
 ### UI Tests
 
 - `test/ui/tests/04-keymap-customization.test.sh` (5 tests)
-  - Custom keybinding in .tmaxrc works
+  - Custom keybinding in `~/.config/tmax/init.tlisp` works
   - Runtime keymap modification via M-x
   - Mode-specific keymaps
   - Keymap precedence and conflicts
@@ -166,10 +166,10 @@ User defines keymap in .tmaxrc → T-Lisp → KeymapSync → Editor Key Registry
 
 ## Example Usage
 
-### Define Custom Keymap in .tmaxrc
+### Define Custom Keymap in `~/.config/tmax/init.tlisp`
 
 ```lisp
-;; ~/.tmaxrc configuration file
+;; ~/.config/tmax/init.tlisp configuration file
 
 ;; Create custom keymap
 (defkeymap "*my-custom-keymap*")

@@ -19,7 +19,7 @@ Implement plugin repository:
 ### Repository Structure
 
 ```
-~/.tmaxrc.d/plugins/repository/
+~/.config/tmax/plugins/repository/ (previously `~/.tmaxrc.d/plugins/repository/`)
 ├── index.json                 # Plugin index
 ├── plugin-a/
 │   ├── plugin-a-1.0.0.tgz    # Plugin package

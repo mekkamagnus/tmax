@@ -1,0 +1,345 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>CHORE-04 — System Improvements</title>
+  <style>
+    :root {
+      --bg: #0d1117;
+      --surface: #161b22;
+      --border: #30363d;
+      --text: #c9d1d9;
+      --heading: #f0f6fc;
+      --muted: #8b949e;
+      --accent: #58a6ff;
+      --green: #3fb950;
+      --red: #f85149;
+      --orange: #d29922;
+      --purple: #bc8cff;
+      --code-bg: #1c2128;
+    }
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.6;
+      padding: 2rem;
+      max-width: 960px;
+      margin: 0 auto;
+    }
+    h1 {
+      color: var(--heading);
+      font-size: 1.75rem;
+      margin-bottom: 0.5rem;
+      padding-bottom: 0.75rem;
+      border-bottom: 1px solid var(--border);
+    }
+    h2 {
+      color: var(--heading);
+      font-size: 1.35rem;
+      margin-top: 2rem;
+      margin-bottom: 0.75rem;
+      padding-bottom: 0.5rem;
+      border-bottom: 1px solid var(--border);
+    }
+    h3 {
+      color: var(--accent);
+      font-size: 1.1rem;
+      margin-top: 1.5rem;
+      margin-bottom: 0.5rem;
+    }
+    p { margin-bottom: 0.75rem; }
+    strong { color: var(--heading); }
+    code {
+      background: var(--code-bg);
+      padding: 0.15em 0.4em;
+      border-radius: 4px;
+      font-size: 0.9em;
+      font-family: 'SF Mono', 'Fira Code', monospace;
+    }
+    pre {
+      background: var(--code-bg);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 1rem;
+      overflow-x: auto;
+      margin-bottom: 1rem;
+    }
+    pre code {
+      background: none;
+      padding: 0;
+      font-size: 0.85rem;
+      line-height: 1.5;
+    }
+    ul, ol { margin-left: 1.5rem; margin-bottom: 0.75rem; }
+    li { margin-bottom: 0.35rem; }
+    li::marker { color: var(--muted); }
+
+    .priority-badge {
+      display: inline-block;
+      padding: 0.15em 0.6em;
+      border-radius: 12px;
+      font-size: 0.8rem;
+      font-weight: 600;
+      margin-right: 0.5rem;
+    }
+    .p0 { background: #f8514922; color: var(--red); border: 1px solid #f8514944; }
+    .p05 { background: #d2992222; color: var(--orange); border: 1px solid #d2992244; }
+    .p1 { background: #d2992222; color: var(--orange); border: 1px solid #d2992244; }
+    .p2 { background: #58a6ff22; color: var(--accent); border: 1px solid #58a6ff44; }
+    .p3 { background: #bc8cff22; color: var(--purple); border: 1px solid #bc8cff44; }
+    .p4 { background: #3fb95022; color: var(--green); border: 1px solid #3fb95044; }
+
+    .file-list { list-style: none; margin-left: 0; }
+    .file-list li { padding: 0.3em 0; }
+    .file-list code { color: var(--accent); }
+
+    .validation-cmd {
+      display: block;
+      margin-bottom: 0.5rem;
+      padding: 0.1rem 0;
+    }
+
+    .section-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 1.25rem;
+      margin-bottom: 1rem;
+    }
+
+    .toc {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 1.25rem;
+      margin-bottom: 2rem;
+    }
+    .toc ul { list-style: none; margin-left: 0; }
+    .toc li { padding: 0.25em 0; }
+    .toc a { color: var(--accent); text-decoration: none; }
+    .toc a:hover { text-decoration: underline; }
+
+    .note-box {
+      background: #58a6ff0d;
+      border-left: 3px solid var(--accent);
+      padding: 0.75rem 1rem;
+      border-radius: 0 6px 6px 0;
+      margin-bottom: 0.75rem;
+    }
+  </style>
+</head>
+<body>
+
+<h1>CHORE-04 — System Improvements</h1>
+<p>Test Fix &middot; Logging &middot; Keymap Migration &middot; Editor Split &middot; Save File</p>
+
+<nav class="toc">
+  <strong>Contents</strong>
+  <ul>
+    <li><a href="#description">Chore Description</a></li>
+    <li><a href="#files">Relevant Files</a></li>
+    <li><a href="#steps">Step by Step Tasks</a></li>
+    <li><a href="#validation">Validation Commands</a></li>
+    <li><a href="#notes">Notes</a></li>
+  </ul>
+</nav>
+
+<h2 id="description">Chore Description</h2>
+
+<p>A prioritized sequence of improvements to the tmax editor. Each priority level depends on the one before it.</p>
+
+<div class="section-card">
+  <p><span class="priority-badge p0">P0</span> <strong>Fix test harness</strong></p>
+  <p>48 test failures across 2 files (<code>test-fixtures-system.test.ts</code>, <code>test-tlisp-testing-framework.test.ts</code>). Root cause: mock filesystem can't resolve <code>src/tlisp/core/bindings/*</code>, so <code>loadCoreBindings()</code> falls back to minimal bindings. T-Lisp testing framework also has internal bugs.</p>
+</div>
+
+<div class="section-card">
+  <p><span class="priority-badge p05">P0.5</span> <strong><code>.tmaxrc</code> &rarr; <code>init.tlisp</code> cleanup (DONE)</strong></p>
+  <p>All files updated to reference <code>~/.config/tmax/init.tlisp</code>. ADR/RFC files preserve historical context with "(previously <code>.tmaxrc</code>)" notes.</p>
+</div>
+
+<div class="section-card">
+  <p><span class="priority-badge p1">P1</span> <strong>Quiet the logging</strong></p>
+  <p><code>FunctionLogger</code> emits ~34 lines of structured JSON per test. 1,278 tests produce 43,000 lines of output. Gate behind <code>DEBUG=tmax</code> env var.</p>
+</div>
+
+<div class="section-card">
+  <p><span class="priority-badge p2">P2</span> <strong>T-Lisp keymap migration (SPEC-005)</strong></p>
+  <p>Move key storage from TypeScript <code>Map&lt;string, KeyMapping[]&gt;</code> to pure T-Lisp tagged alists. TypeScript becomes a thin executor; all key dispatch logic lives in T-Lisp.</p>
+</div>
+
+<div class="section-card">
+  <p><span class="priority-badge p3">P3</span> <strong>Split <code>editor.ts</code></strong></p>
+  <p>2,097 lines in one file. Split into ~5 focused modules by responsibility.</p>
+</div>
+
+<div class="section-card">
+  <p><span class="priority-badge p4">P4</span> <strong>Save-file feature (SPEC-032)</strong></p>
+  <p>Fix broken <code>save-buffer</code> in daemon. Add <code>save-file</code> JSON-RPC method.</p>
+</div>
+
+<h2 id="files">Relevant Files</h2>
+
+<h3>Test infrastructure (P0)</h3>
+<ul class="file-list">
+  <li><code>test/mocks/filesystem.ts</code> &mdash; Mock filesystem; needs to resolve binding file paths</li>
+  <li><code>test/unit/test-fixtures-system.test.ts</code> &mdash; 10 failing tests</li>
+  <li><code>test/unit/test-tlisp-testing-framework.test.ts</code> &mdash; 17 failing tests</li>
+  <li><code>src/tlisp/test-framework.ts</code> &mdash; Internal bugs in cleanup and assertions</li>
+  <li><code>src/editor/editor.ts</code> &mdash; <code>loadCoreBindings()</code> line 1320, <code>loadBindingsFromFile()</code> line 1305</li>
+</ul>
+
+<h3><code>.tmaxrc</code> cleanup (P0.5) &mdash; DONE</h3>
+<ul class="file-list">
+  <li><code>docs/README.md</code>, <code>specs/prd.md</code>, <code>prd.json</code>, <code>docs/ROADMAP.md</code>, <code>TEST_TMAX.md</code></li>
+  <li><code>adr/007-core-bindings-in-tlisp-files.md</code>, <code>adr/006-tlisp-keymap-data-structures.md</code>, <code>adr/003-final-architecture-tlisp-first.md</code></li>
+  <li><code>adr/036-plugin-directory-structure.md</code>, <code>adr/039-macro-persistence.md</code>, <code>adr/052-plugin-repository.md</code>, <code>adr/056-init-file-refactoring.md</code></li>
+  <li><code>rfcs/RFC-002-server-client-architecture.md</code></li>
+  <li><code>specs/SPEC-003-core-editor.md</code>, <code>specs/SPEC-025-init-file-refactor.md</code></li>
+  <li><code>SPEC-023-COMPLETION-SUMMARY.md</code>, <code>TODO.org</code></li>
+  <li><code>docs/manual/tmax.html</code>, <code>docs/manual/tmax.texi</code>, <code>docs/contributing/CONTRIBUTING.md</code></li>
+  <li><code>docs/examples/basic-config.tlisp</code>, <code>test-binding-files.ts</code></li>
+</ul>
+
+<h3>Logging (P1)</h3>
+<ul class="file-list">
+  <li><code>src/utils/logger.ts</code> &mdash; <code>FunctionLogger</code> class; needs env var gating</li>
+  <li><code>src/main.tsx</code> &mdash; Logger initialization</li>
+</ul>
+
+<h3>Keymap migration (P2)</h3>
+<ul class="file-list">
+  <li><code>src/editor/editor.ts</code> &mdash; <code>keyMappings</code> Map (delete), <code>initializeAPI()</code> (refactor), <code>handleKey()</code> (replace)</li>
+  <li><code>src/editor/keymap-sync.ts</code> &mdash; Delete after migration</li>
+  <li><code>src/tlisp/core/bindings/*.tlisp</code> &mdash; Will use new keymap format</li>
+  <li><code>src/tlisp/evaluator.ts</code> &mdash; May need <code>:keymap</code> tagged alist handling</li>
+  <li><code>specs/SPEC-005-tlisp-centric-keybindings.md</code> &mdash; Target architecture spec</li>
+</ul>
+
+<h3>Editor split (P3)</h3>
+<ul class="file-list">
+  <li><code>src/editor/editor.ts</code> &mdash; 2,097 lines; split target</li>
+</ul>
+<p><strong>New files:</strong></p>
+<ul class="file-list">
+  <li><code>src/editor/editor-api.ts</code> &mdash; T-Lisp builtin registration</li>
+  <li><code>src/editor/editor-keys.ts</code> &mdash; Key dispatch, binding loading, prefix handling</li>
+  <li><code>src/editor/editor-modes.ts</code> &mdash; Mode state, transitions, mode-specific behavior</li>
+  <li><code>src/editor/editor-render.ts</code> &mdash; Screen rendering, status line, viewport</li>
+</ul>
+
+<h3>Save-file (P4)</h3>
+<ul class="file-list">
+  <li><code>src/server/server.ts</code> &mdash; Add <code>save-file</code> JSON-RPC method, fix broken <code>save-buffer</code> at line 462</li>
+  <li><code>src/editor/editor.ts</code> &mdash; <code>saveFile()</code> method at line 1894</li>
+  <li><code>src/server/serialize.ts</code> &mdash; Serialization helpers</li>
+  <li><code>bin/tmaxclient</code> &mdash; Needs <code>--save</code> and <code>--save-as</code> flags</li>
+  <li><code>specs/SPEC-032-save-file.md</code> &mdash; Feature spec</li>
+</ul>
+
+<h2 id="steps">Step by Step Tasks</h2>
+
+<h3><span class="priority-badge p0">P0</span> Fix test harness</h3>
+<ul>
+  <li>Investigate <code>test/mocks/filesystem.ts</code> to understand how it resolves paths</li>
+  <li>Make the mock filesystem serve real binding files from <code>src/tlisp/core/bindings/</code> &mdash; either by reading from disk at test setup time or by embedding the file contents</li>
+  <li>Fix T-Lisp testing framework bugs in <code>src/tlisp/test-framework.ts</code>:
+    <ul>
+      <li><code>Undefined symbol: value</code> in cleanup phase</li>
+      <li>Assertion failures in <code>test-failing-test</code> (<code>expected truthy value, got nil</code>)</li>
+      <li><code>test-cleanup</code> failures</li>
+    </ul>
+  </li>
+  <li>Run the two failing test files individually to verify fixes:
+    <ul>
+      <li><code>bun test test/unit/test-fixtures-system.test.ts</code></li>
+      <li><code>bun test test/unit/test-tlisp-testing-framework.test.ts</code></li>
+    </ul>
+  </li>
+  <li>Run full suite to verify zero regressions</li>
+</ul>
+
+<h3><span class="priority-badge p05">P0.5</span> Replace all <code>.tmaxrc</code> references with <code>init.tlisp</code> (DONE)</h3>
+<ul>
+  <li>Searched all 24 files for <code>.tmaxrc</code></li>
+  <li>Replaced with correct reference: <code>~/.config/tmax/init.tlisp</code> for descriptive text, <code>init.tlisp</code> for short references</li>
+  <li>Preserved historical context in ADR/RFC files (noted as &ldquo;previously <code>.tmaxrc</code>&rdquo; where appropriate)</li>
+  <li>Verified no <code>.tmaxrc</code> references remain (except ADR/RFC historical notes)</li>
+</ul>
+
+<h3><span class="priority-badge p1">P1</span> Gate logging behind DEBUG env var</h3>
+<ul>
+  <li>Read <code>src/utils/logger.ts</code> fully to understand <code>FunctionLogger</code> structure</li>
+  <li>Add a check at the top of each logging method (<code>info</code>, <code>warn</code>, <code>debug</code>, <code>error</code>, <code>startOperation</code>, <code>completeOperation</code>): if <code>process.env.DEBUG</code> does not include <code>tmax</code>, return immediately</li>
+  <li>Ensure the check happens once (module-level constant) rather than on every call</li>
+  <li>Verify test output is clean: <code>bun test 2&gt;&amp;1 | wc -l</code> should be dramatically reduced</li>
+  <li>Verify logging still works: <code>DEBUG=tmax bun test test/unit/tokenizer.test.ts</code> should show structured logs</li>
+</ul>
+
+<h3><span class="priority-badge p2">P2</span> T-Lisp keymap migration</h3>
+<ul>
+  <li><strong>Define keymap data structure:</strong> Implement <code>:keymap</code> tagged alist support. A keymap is <code>(:keymap (key . binding) ...)</code>. A binding is either a command string or a nested keymap (for prefix keys).</li>
+  <li><strong>Create mode keymap variables:</strong> Define <code>*normal-mode-keymap*</code>, <code>*insert-mode-keymap*</code>, <code>*visual-mode-keymap*</code>, <code>*command-keymap*</code>, <code>*mx-keymap*</code> as T-Lisp <code>defvar</code> variables initialized to empty <code>(:keymap)</code>.</li>
+  <li><strong>Implement <code>(lookup-key keymap key)</code>:</strong> Searches a keymap alist for a key. Returns the binding (command string), a nested keymap (prefix), or <code>nil</code> (unbound).</li>
+  <li><strong>Rewrite <code>(key-bind key command mode)</code>:</strong> Instead of writing to TypeScript Map, look up the mode's keymap variable and insert/update the <code>(key . command)</code> pair in the alist.</li>
+  <li><strong>Implement <code>(handle-key key)</code>:</strong> Single entry point for key dispatch. Maintains internal prefix state. Looks up key in <code>*current-keymap*</code>. Returns <code>:executed</code> (ran a command), <code>:prefix</code> (buffering for next key), or <code>:unbound</code>. Executes commands via <code>eval</code>.</li>
+  <li><strong>Update binding files:</strong> Change <code>src/tlisp/core/bindings/*.tlisp</code> to use new keymap format where beneficial. Prefix keys (like <code>g</code> for <code>gg</code>) should define nested keymaps.</li>
+  <li><strong>Update TypeScript dispatch:</strong> Replace <code>handleKey()</code> in editor.ts with a single call to <code>(handle-key normalizedKey)</code>. Process the return status: <code>:executed</code> &rarr; re-render, <code>:prefix</code> &rarr; show prefix indicator, <code>:unbound</code> &rarr; beep/message.</li>
+  <li><strong>Delete TypeScript key infrastructure:</strong> Remove <code>keyMappings</code> Map, <code>KeyMapping</code> interface, <code>loadFallbackBindings()</code>, <code>initializeDefaultKeyMappings()</code>, and <code>KeymapSync</code> class.</li>
+  <li><strong>Update <code>*current-keymap*</code> on mode change:</strong> When mode transitions happen, T-Lisp sets <code>*current-keymap*</code> to the appropriate mode keymap variable.</li>
+  <li>Add T-Lisp tests for keymap operations via <code>deftest</code></li>
+  <li>Add Bun integration tests for the new dispatch flow</li>
+  <li>Run full test suite</li>
+</ul>
+
+<h3><span class="priority-badge p3">P3</span> Split editor.ts</h3>
+<ul>
+  <li><strong>Create <code>src/editor/editor-api.ts</code>:</strong> Extract all <code>defineBuiltin</code> calls from <code>initializeAPI()</code> (~500 lines). Export a single <code>registerEditorAPI(editor)</code> function.</li>
+  <li><strong>Create <code>src/editor/editor-keys.ts</code>:</strong> Extract key handling: <code>handleKey()</code>, <code>loadCoreBindings()</code>, <code>loadBindingsFromFile()</code>, <code>ensureCoreBindingsLoaded()</code>, prefix state management.</li>
+  <li><strong>Create <code>src/editor/editor-modes.ts</code>:</strong> Extract mode state: mode getter/setter, mode transitions, mode-specific behavior, <code>*current-keymap*</code> swapping.</li>
+  <li><strong>Create <code>src/editor/editor-render.ts</code>:</strong> Extract rendering: <code>render()</code>, status line rendering, viewport management, screen update logic.</li>
+  <li><strong>Update <code>src/editor/editor.ts</code>:</strong> Becomes a thin orchestrator importing from the four new modules. Constructor, <code>start()</code>, <code>stop()</code>, main loop.</li>
+  <li>Run <code>bunx tsc --noEmit</code> to verify all types resolve</li>
+  <li>Run full test suite</li>
+</ul>
+
+<h3><span class="priority-badge p4">P4</span> Save-file feature</h3>
+<ul>
+  <li>Follow <code>specs/SPEC-032-save-file.md</code> implementation plan</li>
+  <li>Fix broken <code>save-buffer</code> in <code>src/server/server.ts</code> line 462: replace <code>this.editor.getState().currentBuffer.content</code> with <code>this.editor.saveFile()</code></li>
+  <li>Add <code>save-file</code> JSON-RPC method to <code>src/server/server.ts</code></li>
+  <li>Add <code>--save</code> and <code>--save-as</code> flags to <code>bin/tmaxclient</code></li>
+  <li>Run full test suite</li>
+</ul>
+
+<h2 id="validation">Validation Commands</h2>
+
+<pre><code><span class="validation-cmd">bun test                                          # Full suite: 0 failures</span>
+<span class="validation-cmd">bun test test/unit/test-fixtures-system.test.ts    # Previously failing: must pass</span>
+<span class="validation-cmd">bun test test/unit/test-tlisp-testing-framework.test.ts  # Previously failing: must pass</span>
+<span class="validation-cmd">rg '\.tmaxrc'                                      # Zero matches (except ADR/RFC notes) &mdash; DONE</span>
+<span class="validation-cmd">DEBUG=tmax bun test test/unit/tokenizer.test.ts    # Must show structured logs</span>
+<span class="validation-cmd">bun test 2>&1 | grep "LOG ENTRY" | wc -l           # Must be 0 (silent by default)</span>
+<span class="validation-cmd">bunx tsc --noEmit                                  # Zero type errors</span>
+<span class="validation-cmd">rg "keyMappings|KeyMapping|loadFallbackBindings|KeymapSync" src/  # Zero after P2</span></code></pre>
+
+<h2 id="notes">Notes</h2>
+
+<div class="note-box">
+  <p>P2 is the architectural centerpiece and the riskiest change. P0 and P1 should be complete and validated before starting P2.</p>
+</div>
+<div class="note-box">
+  <p>The P3 editor split is most useful when done after P2, since P2 changes the key dispatch fundamentally. Splitting before P2 would mean splitting code that's about to be rewritten.</p>
+</div>
+<div class="note-box">
+  <p>All decisions from the grill session are documented in <code>CONTEXT.md</code> at the project root.</p>
+</div>
+<div class="note-box">
+  <p>The T-Lisp keymap design follows the Emacs principle: tagged keymaps (<code>:keymap</code>), procedural <code>key-bind</code>, prefix state in Lisp, <code>handle-key</code> as single dispatch entry point.</p>
+</div>
+
+</body>
+</html>

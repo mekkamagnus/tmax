@@ -183,7 +183,7 @@ Another description
 
 ### High-Priority Areas
 1. **T-Lisp API Reference**: Complete function documentation with examples
-2. **Configuration Examples**: More real-world `.tmaxrc` configurations
+2. **Configuration Examples**: More real-world `~/.config/tmax/init.tlisp` configurations
 3. **Troubleshooting**: Solutions to common user problems
 4. **Advanced Usage**: Power-user features and techniques
 

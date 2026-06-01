@@ -68,7 +68,7 @@ Modified `src/main.tsx` to load core bindings during initialization:
 
 ### Future Considerations
 
-1. **User Overrides**: Support `~/.tmaxrc.d/bindings/*.tlisp` for user customizations
+1. **User Overrides**: Support `~/.config/tmax/bindings/*.tlisp` for user customizations (previously `~/.tmaxrc.d/bindings/`)
 2. **Binding Profiles**: Switch between different binding schemes (vim, emacs, etc.)
 3. **Validation**: Add binding syntax validation before loading
 4. **Documentation**: Auto-generate binding reference from .tlisp files
