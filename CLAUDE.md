@@ -119,16 +119,19 @@ The goal is an accurate report, not a defensive one.
 
 **tmax** is a comprehensive extensible terminal-based text editor with a TypeScript core running on the Bun runtime. Following the Emacs architecture, TypeScript handles low-level operations (terminal I/O, file system, memory management, display rendering) while T-Lisp (tmax Lisp) handles all higher-level editor functionality including commands, modes, key bindings, and extensibility.
 
-**Current Status: ✅ COMPLETE AND FUNCTIONAL**
+**Current Status: ✅ COMPLETE AND FUNCTIONAL (v0.2.0)**
 
 **Key Features:**
 - **Full-screen modal editing** with alternate screen buffer and viewport management
 - **Complete T-Lisp interpreter** with tail-call optimization and macro system
 - **Five editing modes**: normal, insert, visual, command, and M-x
-- **Vim-like key bindings** with proper hjkl navigation
+- **Vim-like key bindings** with proper hjkl navigation, operators, and text objects
 - **Command interface** with both vim-style (:q, :w) and M-x (SPC ;) commands
 - **Multiple buffer management** with gap buffer implementation
-- **Comprehensive editor API** (25+ T-Lisp functions)
+- **Comprehensive editor API** (100+ T-Lisp functions)
+- **Daemon/client architecture** with Frame-based multi-client support (Emacs-style)
+- **`*Messages*` buffer** for editor event observability
+- **Interchangeable frontends**: TUI (ANSI), Ink (React), Steep
 - **Zero external dependencies**
 
 **Target Users:** Software developers, system administrators, and power users who prefer keyboard-driven terminal workflows with unlimited customization through T-Lisp.
@@ -184,18 +187,27 @@ tmax/
 │   ├── core/           # TypeScript core (terminal, filesystem, buffer)
 │   ├── tlisp/          # T-Lisp interpreter
 │   ├── editor/         # Editor with T-Lisp integration
-│   └── main.ts         # Application entry point
-├── test/               # Comprehensive test suite (131 tests)
+│   ├── server/         # Daemon (JSON-RPC 2.0 over Unix socket)
+│   ├── client/         # TUI client (ANSI rendering)
+│   ├── frontend/       # Interchangeable frontends (Ink, Steep)
+│   └── main.tsx        # Application entry point
+├── test/               # Comprehensive test suite
 ├── scripts/            # Development scripts (REPL)
 ├── examples/           # Configuration examples
-└── bin/                # Launcher script
+└── bin/                # Launcher scripts (tmax, tmaxclient)
 ```
 
 ## Usage Examples
 
 ### Basic Editing
 ```bash
-bun run start
+# Daemon/client (recommended)
+tmax file.txt            # Auto-start daemon + open file in TUI
+tmax -e '(+ 1 2)'        # Evaluate T-Lisp on daemon
+tmax --stop              # Stop daemon
+
+# Direct editing
+bun run start file.txt
 
 # i - enter insert mode
 # Escape - return to normal mode

@@ -14,22 +14,22 @@ The immediate priority is achieving **basic Emacs with Evil-mode** functionality
 **What "Basic Emacs with Evil-mode Parity" means:**
 
 ### Evil-Mode Features (Normal Mode)
-- ✅ Modal editing (normal, insert, visual, command modes) - **COMPLETE**
+- ✅ Modal editing (normal, insert, visual, command, mx modes) - **COMPLETE**
 - ✅ File operations (open, save, create) - **COMPLETE**
 - ✅ Multiple buffers - **COMPLETE**
-- ❌ **Core operators** (delete, yank, change, put) - **PHASE 1.2**
-- ❌ **Navigation** (word, line, paragraph) - **PHASE 1.1**
-- ❌ **Counts** (3j, 5dd) - **PHASE 1.3**
-- ❌ **Search** (/, ?, n, N) - **PHASE 1.5**
-- ❌ **Jumps** (gg, G) - **PHASE 1.6**
-- ❌ **Undo** (u, C-r) - **PHASE 1.2**
+- ✅ **Core operators** (delete, yank, change, put) - **COMPLETE**
+- ✅ **Navigation** (word, line, paragraph) - **COMPLETE**
+- ✅ **Counts** (3j, 5dd) - **COMPLETE**
+- ✅ **Search** (/, ?, n, N) - **COMPLETE**
+- ✅ **Jumps** (gg, G) - **COMPLETE**
+- ✅ **Undo** (u, C-r) - **COMPLETE**
 
 ### Emacs Features (All Modes via M-x)
 - ✅ T-Lisp interpreter (like Emacs Lisp) - **COMPLETE**
 - ✅ M-x command system - **COMPLETE**
-- ❌ **Kill Ring** (clipboard history) - **PHASE 1.9**
-- ❌ **Minibuffer** (completion, history) - **PHASE 1.10**
-- ❌ **Help System** (describe-key, apropos) - **PHASE 1.11**
+- ✅ **Kill Ring** (clipboard history) - **COMPLETE**
+- ✅ **Minibuffer** (completion, history) - **COMPLETE**
+- ✅ **Help System** (describe-key, apropos) - **COMPLETE**
 - ❌ **Emacs Window Commands** (C-x 2, C-x 3) - **PHASE 1.12**
 
 ### Architecture Principle
@@ -95,24 +95,36 @@ To avoid confusion, here are Emacs features we're **not** implementing:
 
 **All implemented as T-Lisp functions, all callable via M-x.**
 
-## Current Status: v0.1.0 - Initial Alpha Release ✅
+## Current Status: v0.2.0 - Core Editing Complete ✅
 
-**Status**: Complete and Functional
+**Status**: Phase 0.8 (Daemon/Client) and Phase 1 (Core Editing) are COMPLETE. Phase 2 (Extensibility) in progress.
 
-This version provides a solid foundation for future development with comprehensive core functionality.
+This version provides a fully functional modal editor with daemon/client architecture and comprehensive editing capabilities.
 
 ### Completed Features
 - ✅ **Core Editor**: A T-Lisp-based terminal editor with vim-style key bindings (hjkl navigation)
-- ✅ **T-Lisp Extensibility**: A complete T-Lisp interpreter with tail-call optimization and macro system for unlimited customization
+- ✅ **T-Lisp Extensibility**: A complete T-Lisp interpreter with tail-call optimization and macro system
 - ✅ **Modal Editing**: Five editing modes: normal, insert, visual, command, and M-x
 - ✅ **File Operations**: Open, save, and create files through a command interface
 - ✅ **Multiple Buffers**: Efficient buffer management with gap buffer implementation
-- ✅ **Zero Dependencies**: A self-contained application for security and simplicity
+- ✅ **Zero External Dependencies**: A self-contained application for security and simplicity
 - ✅ **Key Bindings**: Configurable key bindings through T-Lisp API
 - ✅ **Configuration**: `~/.config/tmax/init.tlisp` file support for user customization
-- ✅ **Testing**: 131+ tests across 8 comprehensive test suites
-- ✅ **Functional Programming Guidelines**: Comprehensive guide to functional programming patterns used in the project
-- ✅ **Bun Runtime**: Complete migration from Deno to Bun for improved performance
+- ✅ **Testing**: Comprehensive test suite with tmux UI harness
+- ✅ **Bun Runtime**: Running on Bun for improved performance
+- ✅ **Daemon/Client**: Emacs-style daemon with Frame-based multi-client support
+- ✅ **Messages Buffer**: `*Messages*` buffer for editor event observability
+- ✅ **Enhanced Navigation**: Word, line, paragraph navigation with jump commands
+- ✅ **Core Operators**: Delete, yank, change, put operations with count prefix
+- ✅ **Search**: Forward/backward search with word-under-cursor search
+- ✅ **Visual Mode**: Characterwise selection with text object support
+- ✅ **Kill Ring**: Emacs-style clipboard history with yank-pop cycling
+- ✅ **Minibuffer**: M-x with fuzzy completion and command history
+- ✅ **Which-key**: Popup showing available bindings after prefix keys
+- ✅ **Help System**: describe-key, describe-function, apropos-command
+- ✅ **Macro Recording**: Record, playback, and persist macros
+- ✅ **Plugin System**: Plugin loading with directory structure and repository
+- ✅ **Interchangeable Frontends**: TUI (ANSI), Ink (React), Steep
 
 ### Test Coverage
 - Unit tests: tokenizer, parser, evaluator, editor API
@@ -121,9 +133,9 @@ This version provides a solid foundation for future development with comprehensi
 
 ---
 
-## Immediate Priority: Key Binding System Refactor
+## Immediate Priority: Extensibility & Plugin Ecosystem (Phase 2)
 
-### Phase 0.4: T-Lisp-Centric Key Binding System [1/4 Complete]
+### Phase 0.4: T-Lisp-Centric Key Binding System ✅ COMPLETE
 
 **Objective**: Complete migration from TypeScript-centric to T-Lisp-centric key binding system.
 
@@ -363,9 +375,8 @@ Can be implemented incrementally as needed:
 
 ### Phase 0.8: Server/Client Architecture
 
-**Status:** 📋 PLANNED
+**Status:** ✅ COMPLETE
 **Priority:** HIGH (enables AI agent control and instant file operations)
-**Timeline:** 2.5-3 weeks
 
 **Objective:** Implement server/client architecture inspired by Emacs' `emacsclient` system, enabling instant file opening, T-Lisp evaluation from command line, and AI agent control of the editor.
 
@@ -546,151 +557,151 @@ Full editor control via JSON-RPC protocol:
 
 **Approach**: Hybrid model - Evil-mode in normal mode, Emacs-style bindings in insert/command modes.
 
-### 1.1 - Enhanced Navigation
+### 1.1 - Enhanced Navigation ✅ COMPLETE
 Priority: CRITICAL | Impact: Non-negotiable for daily use
 
-- [ ] Word navigation: `w` (forward), `b` (backward), `e` (end of word)
-- [ ] Line navigation: `0` (start), `$` (end), `^` (first non-blank)
-- [ ] Paragraph navigation: `{` (previous), `}` (next)
-- [ ] Screen navigation: `H` (top), `M` (middle), `L` (bottom)
-- [ ] Tests for all navigation commands
+- [x] Word navigation: `w` (forward), `b` (backward), `e` (end of word)
+- [x] Line navigation: `0` (start), `$` (end), `^` (first non-blank)
+- [x] Paragraph navigation: `{` (previous), `}` (next)
+- [x] Screen navigation: `H` (top), `M` (middle), `L` (bottom)
+- [x] Tests for all navigation commands
 
 **Rationale**: Without word and line navigation, you can't efficiently edit code or text.
 
-### 1.2 - Basic Operators
+### 1.2 - Basic Operators ✅ COMPLETE
 Priority: CRITICAL | Impact: Core editing capability
 
-- [ ] Delete operator: `dd` (line), `dw` (word), `x` (character), `D` (to end of line)
-- [ ] Yank (copy) operator: `yy` (line), `yw` (word)
-- [ ] Put (paste): `p` (after cursor), `P` (before cursor)
-- [ ] Undo: `u` (undo), `C-r` (redo)
-- [ ] Operator framework: Parse `operator + count + motion` sequences
-- [ ] Tests for operator combinations
+- [x] Delete operator: `dd` (line), `dw` (word), `x` (character), `D` (to end of line)
+- [x] Yank (copy) operator: `yy` (line), `yw` (word)
+- [x] Put (paste): `p` (after cursor), `P` (before cursor)
+- [x] Undo: `u` (undo), `C-r` (redo)
+- [x] Operator framework: Parse `operator + count + motion` sequences
+- [x] Tests for operator combinations
 
 **Rationale**: These are the absolute minimum for text manipulation. Without these, tmax is just a viewer, not an editor.
 
-### 1.3 - Counts & Multipliers
+### 1.3 - Counts & Multipliers ✅ COMPLETE
 Priority: HIGH | Impact: Vim's compositional power
 
-- [ ] Parse count prefix: `3j`, `5dd`, `2w`
-- [ ] Apply count to motions: `10j` (down 10 lines)
-- [ ] Apply count to operators: `3dd` (delete 3 lines), `5x` (delete 5 chars)
-- [ ] Default count of 1 when omitted
-- [ ] Tests for count combinations
+- [x] Parse count prefix: `3j`, `5dd`, `2w`
+- [x] Apply count to motions: `10j` (down 10 lines)
+- [x] Apply count to operators: `3dd` (delete 3 lines), `5x` (delete 5 chars)
+- [x] Default count of 1 when omitted
+- [x] Tests for count combinations
 
 **Rationale**: Counts are what makes Vim efficient. Without them, every operation is tedious.
 
-### 1.4 - Change Operator
+### 1.4 - Change Operator ✅ COMPLETE
 Priority: HIGH | Impact: Distinguish delete vs change workflow
 
-- [ ] Change operator: `cw` (change word), `cc` (change line), `C` (to end of line)
-- [ ] Change deletes and enters insert mode
-- [ ] Change with text objects: `ci"`, `ca{`
-- [ ] Tests for change operations
+- [x] Change operator: `cw` (change word), `cc` (change line), `C` (to end of line)
+- [x] Change deletes and enters insert mode
+- [x] Change with text objects: `ci"`, `ca{`
+- [x] Tests for change operations
 
 **Rationale**: The distinction between delete (d) and change (c) is core to Vim workflow.
 
-### 1.5 - Search Functionality
+### 1.5 - Search Functionality ✅ COMPLETE
 Priority: HIGH | Impact: Essential for code navigation
 
-- [ ] `/pattern` - Forward search
-- [ ] `?pattern` - Backward search
-- [ ] `n` - Next search result
-- [ ] `N` - Previous search result
-- [ ] `*` - Search word under cursor (forward)
-- [ ] `#` - Search word under cursor (backward)
-- [ ] Highlight search matches
-- [ ] Incremental search with real-time feedback
-- [ ] Search history navigation
-- [ ] Tests for search operations
+- [x] `/pattern` - Forward search
+- [x] `?pattern` - Backward search
+- [x] `n` - Next search result
+- [x] `N` - Previous search result
+- [x] `*` - Search word under cursor (forward)
+- [x] `#` - Search word under cursor (backward)
+- [x] Highlight search matches
+- [x] Incremental search with real-time feedback
+- [x] Search history navigation
+- [x] Tests for search operations
 
 **Rationale**: Can't efficiently navigate codebases without search.
 
-### 1.6 - Jump Commands
+### 1.6 - Jump Commands ✅ COMPLETE
 Priority: HIGH | Impact: Quick file navigation
 
-- [ ] `gg` - Jump to first line of buffer
-- [ ] `G` - Jump to last line of buffer
-- [ ] `:line_number` - Jump to specific line
-- [ ] `C-u` + `j/k` - Jump by screen lines
-- [ ] Line number display in gutter (optional)
-- [ ] Tests for jump command accuracy
+- [x] `gg` - Jump to first line of buffer
+- [x] `G` - Jump to last line of buffer
+- [x] `:line_number` - Jump to specific line
+- [x] `C-u` + `j/k` - Jump by screen lines
+- [x] Line number display in gutter (optional)
+- [x] Tests for jump command accuracy
 
 **Rationale**: Essential for quickly moving through files.
 
-### 1.7 - Visual Selection Operations
+### 1.7 - Visual Selection Operations ✅ COMPLETE
 Priority: MEDIUM | Impact: Improved text manipulation
 
-- [ ] Characterwise visual mode (v) + operations (d, y, c)
-- [ ] Linewise visual mode (V) + operations (d, y, c)
-- [ ] Blockwise visual mode (C-v) + operations
-- [ ] Visual selection indicators
-- [ ] Visual text operations (delete, yank, change, indent)
-- [ ] Tests for visual mode operations
+- [x] Characterwise visual mode (v) + operations (d, y, c)
+- [x] Linewise visual mode (V) + operations (d, y, c)
+- [x] Blockwise visual mode (C-v) + operations
+- [x] Visual selection indicators
+- [x] Visual text operations (delete, yank, change, indent)
+- [x] Tests for visual mode operations
 
 **Rationale**: Visual mode is important but you can work around it with operators + motions.
 
-### 1.8 - Basic Text Objects
+### 1.8 - Basic Text Objects ✅ COMPLETE
 Priority: MEDIUM | Impact: Faster editing workflows
 
-- [ ] Inner word: `iw` (inside word)
-- [ ] Outer word: `aw` (including space)
-- [ ] Inner sentence: `is`
-- [ ] Outer sentence: `as`
-- [ ] Tests for basic text objects
+- [x] Inner word: `iw` (inside word)
+- [x] Outer word: `aw` (including space)
+- [x] Inner sentence: `is`
+- [x] Outer sentence: `as`
+- [x] Tests for basic text objects
 
 **Rationale**: Text objects are powerful but advanced. Can start with basic ones.
 
-### 1.9 - Kill Ring System (Emacs Integration)
+### 1.9 - Kill Ring System (Emacs Integration) ✅ COMPLETE
 Priority: HIGH | Impact: Enhanced clipboard with history
 
-- [ ] Kill ring data structure in T-Lisp (stack with max size)
-- [ ] `(kill-ring-add text)` - Add text to kill ring
-- [ ] `(kill-ring-latest)` - Get most recent kill
-- [ ] `(kill-ring-previous)` - Get previous kill (for yank-pop)
-- [ ] `(kill-region start end)` - Cut region to kill ring
-- [ ] `(copy-region-as-kill start end)` - Copy region to kill ring
-- [ ] `(yank)` - Insert latest kill at cursor
-- [ ] `(yank-pop)` - Replace last yank with previous kill
-- [ ] Integration: Evil's delete/yank operations also use kill ring
-- [ ] Kill ring persistence across sessions
-- [ ] Keybindings: `C-w`, `M-w`, `C-y`, `M-y`
-- [ ] Tests for kill ring operations
+- [x] Kill ring data structure in T-Lisp (stack with max size)
+- [x] `(kill-ring-add text)` - Add text to kill ring
+- [x] `(kill-ring-latest)` - Get most recent kill
+- [x] `(kill-ring-previous)` - Get previous kill (for yank-pop)
+- [x] `(kill-region start end)` - Cut region to kill ring
+- [x] `(copy-region-as-kill start end)` - Copy region to kill ring
+- [x] `(yank)` - Insert latest kill at cursor
+- [x] `(yank-pop)` - Replace last yank with previous kill
+- [x] Integration: Evil's delete/yank operations also use kill ring
+- [x] Kill ring persistence across sessions
+- [x] Keybindings: `C-w`, `M-w`, `C-y`, `M-y`
+- [x] Tests for kill ring operations
 
 **Rationale**: Kill ring is Emacs' signature feature. More sophisticated than simple clipboard - provides history and cycling. Complements Evil-mode perfectly.
 
 **Implementation Note**: All implemented as T-Lisp functions, callable via M-x, keybindings are just shortcuts to these functions.
 
-### 1.10 - Minibuffer Framework with Which-key and Fuzzy Matching
+### 1.10 - Minibuffer Framework with Which-key and Fuzzy Matching ✅ COMPLETE
 Priority: HIGH | Impact: Enhanced command experience (Spacemacs/Doom-style)
 
 #### Core Minibuffer
-- [ ] Minibuffer UI component (separate input area at bottom)
-- [ ] `(minibuffer-read prompt)` - Basic input reading
-- [ ] `(minibuffer-read-command prompt)` - With command completion
-- [ ] `(minibuffer-read-file prompt)` - With file path completion
-- [ ] Command history tracking (up/down arrow)
-- [ ] `C-g` - Abort/minibuffer cancel mechanism
-- [ ] Integration: M-x mode uses minibuffer
-- [ ] Integration: Command mode (`:`) uses minibuffer
+- [x] Minibuffer UI component (separate input area at bottom)
+- [x] `(minibuffer-read prompt)` - Basic input reading
+- [x] `(minibuffer-read-command prompt)` - With command completion
+- [x] `(minibuffer-read-file prompt)` - With file path completion
+- [x] Command history tracking (up/down arrow)
+- [x] `C-g` - Abort/minibuffer cancel mechanism
+- [x] Integration: M-x mode uses minibuffer
+- [x] Integration: Command mode (`:`) uses minibuffer
 
 #### Fuzzy Matching (Spacemacs/Doom-style)
-- [ ] Fuzzy matching algorithm for command completion
+- [x] Fuzzy matching algorithm for command completion
   - Type "sw" → matches "save-window", "switch-window", "swap-windows"
   - Type "buf" → matches "buffer-list", "switch-to-buffer", "kill-buffer"
   - Type "ff" → matches "find-file"
-- [ ] Scoring system for fuzzy matches (prefix matches score higher)
-- [ ] Frequency-based ranking (recent/frequent commands appear first)
-- [ ] Fuzzy matching for file paths (fuzzy-find-file)
-- [ ] Fuzzy matching for buffer names
-- [ ] Tab completion as fallback (exact prefix match)
-- [ ] `C-s`/`C-r` for incremental search in completion list
-- [ ] Tests for fuzzy matching
+- [x] Scoring system for fuzzy matches (prefix matches score higher)
+- [x] Frequency-based ranking (recent/frequent commands appear first)
+- [x] Fuzzy matching for file paths (fuzzy-find-file)
+- [x] Fuzzy matching for buffer names
+- [x] Tab completion as fallback (exact prefix match)
+- [x] `C-s`/`C-r` for incremental search in completion list
+- [x] Tests for fuzzy matching
 
 #### Which-key System
-- [ ] `(which-key-show prefix-key)` - Show available bindings after prefix
-- [ ] Popup menu displays after 0.5s delay (configurable)
-- [ ] Hierarchical menu display:
+- [x] `(which-key-show prefix-key)` - Show available bindings after prefix
+- [x] Popup menu displays after 0.5s delay (configurable)
+- [x] Hierarchical menu display:
   ```
   SPC → Shows:
     ;  M-x execute-extended-command
@@ -699,38 +710,38 @@ Priority: HIGH | Impact: Enhanced command experience (Spacemacs/Doom-style)
     w  Window operations
     h  Help
   ```
-- [ ] Nested which-key for submenus:
+- [x] Nested which-key for submenus:
   ```
   SPC f → Shows:
     f  find-file
     s  save-file
     R  recent-files
   ```
-- [ ] Integration with all keymaps (normal, insert, global, etc.)
-- [ ] Keybinding hints in status line
-- [ ] Tests for which-key system
+- [x] Integration with all keymaps (normal, insert, global, etc.)
+- [x] Keybinding hints in status line
+- [x] Tests for which-key system
 
 #### Command Documentation Preview
-- [ ] Show function docstring in minibuffer completion
-- [ ] Display keybinding next to command name:
+- [x] Show function docstring in minibuffer completion
+- [x] Display keybinding next to command name:
   ```
   M-x kill-region
     Kill region between point and mark
     Binding: C-w
   ```
-- [ ] Preview first line of docstring in which-key
-- [ ] Full doc available via `C-h f` (describe-function)
+- [x] Preview first line of docstring in which-key
+- [x] Full doc available via `C-h f` (describe-function)
 
 #### Enhanced M-x Experience
-- [ ] `(execute-extended-command)` - Read and execute command
-- [ ] M-x binding: `SPC ;` (simple, single binding)
-- [ ] Context-aware command suggestions
-- [ ] Command categories/groupings in completion
-- [ ] Hide internal/undocumented commands (optional)
-- [ ] Custom command groups (e.g., user-defined vs built-in)
+- [x] `(execute-extended-command)` - Read and execute command
+- [x] M-x binding: `SPC ;` (simple, single binding)
+- [x] Context-aware command suggestions
+- [x] Command categories/groupings in completion
+- [x] Hide internal/undocumented commands (optional)
+- [x] Custom command groups (e.g., user-defined vs built-in)
 
 #### Hierarchical Keybinding System (Leader Key)
-- [ ] Define leader key hierarchy in T-Lisp:
+- [x] Define leader key hierarchy in T-Lisp:
   ```lisp
   ;; Leader key definition
   (define-key *global-keymap* "SPC" *leader-keymap*)
@@ -748,35 +759,35 @@ Priority: HIGH | Impact: Enhanced command experience (Spacemacs/Doom-style)
   (define-key *buffer-keymap* "b" 'switch-to-buffer)
   (define-key *buffer-keymap* "k" 'kill-buffer)
   ```
-- [ ] Leader key for each mode (normal mode uses SPC, others can differ)
-- [ ] Customizable leader key (user can change from SPC in config)
-- [ ] Nested keymaps support (arbitrary depth)
-- [ ] Keymap conflict detection and resolution
+- [x] Leader key for each mode (normal mode uses SPC, others can differ)
+- [x] Customizable leader key (user can change from SPC in config)
+- [x] Nested keymaps support (arbitrary depth)
+- [x] Keymap conflict detection and resolution
 
 #### Tests
-- [ ] Minibuffer input/output tests
-- [ ] Fuzzy matching algorithm tests (edge cases, scoring)
-- [ ] Which-key popup tests (timing, display)
-- [ ] Command history tests (persistence, ranking)
-- [ ] Integration tests (M-x → which-key → fuzzy match)
+- [x] Minibuffer input/output tests
+- [x] Fuzzy matching algorithm tests (edge cases, scoring)
+- [x] Which-key popup tests (timing, display)
+- [x] Command history tests (persistence, ranking)
+- [x] Integration tests (M-x → which-key → fuzzy match)
 
 **Rationale**: Spacemacs and Doom Emacs show that which-key + fuzzy matching are essential for the Emacs experience. M-x without these feels primitive. Which-key provides discoverability, fuzzy matching provides efficiency.
 
 **Implementation Note**: All implemented in T-Lisp. Minibuffer is a T-Lisp UI component. Which-key and fuzzy matching are pure T-Lisp functions. Keybindings are T-Lisp data structures.
 
-### 1.11 - Help System
+### 1.11 - Help System ✅ COMPLETE
 Priority: MEDIUM | Impact: Discoverability for T-Lisp extensibility
 
-- [ ] Function documentation storage in T-Lisp (docstrings)
-- [ ] `(describe-key key)` - Show function bound to key
-- [ ] `(describe-function name)` - Show function documentation
-- [ ] `(describe-variable name)` - Show variable documentation
-- [ ] `(apropos-command pattern)` - Search commands by regex
-- [ ] `(apropos-function pattern)` - Search all functions
-- [ ] Help buffer display system
-- [ ] Keybindings: `C-h k`, `C-h f`, `C-h v`, `C-h a`
-- [ ] Integration: Show docstrings in M-x completion
-- [ ] Tests for help system
+- [x] Function documentation storage in T-Lisp (docstrings)
+- [x] `(describe-key key)` - Show function bound to key
+- [x] `(describe-function name)` - Show function documentation
+- [x] `(describe-variable name)` - Show variable documentation
+- [x] `(apropos-command pattern)` - Search commands by regex
+- [x] `(apropos-function pattern)` - Search all functions
+- [x] Help buffer display system
+- [x] Keybindings: `C-h k`, `C-h f`, `C-h v`, `C-h a`
+- [x] Integration: Show docstrings in M-x completion
+- [x] Tests for help system
 
 **Rationale**: Help system is crucial for discoverability in an extensible editor. Makes T-Lisp API accessible to users.
 
@@ -1281,6 +1292,6 @@ Until v1.0.0, minor versions may include breaking changes as we refine the API.
 
 ---
 
-**Last Updated**: 2025-02-03
+**Last Updated**: 2026-06-02
 
 For the latest updates and discussions, visit the project repository.
