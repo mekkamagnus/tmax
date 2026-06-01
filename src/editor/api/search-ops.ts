@@ -18,6 +18,7 @@ import type { TLispValue, TLispFunctionImpl } from "../../tlisp/types.ts";
 import { createString, createNil, createSymbol } from "../../tlisp/values.ts";
 import type { FunctionalTextBuffer } from "../../core/types.ts";
 import { Either } from "../../utils/task-either.ts";
+import { isWordChar } from "./text-utils.ts";
 import {
   validateArgsCount,
   validateArgType,
@@ -493,10 +494,6 @@ export function createSearchOps(
    * @param char - Character to check
    * @returns true if character is a word character
    */
-  function isWordChar(char: string): boolean {
-    return /[a-zA-Z0-9_]/.test(char);
-  }
-
   /**
    * word-under-cursor-next - search for next occurrence of word under cursor (*)
    * Usage: (word-under-cursor-next)

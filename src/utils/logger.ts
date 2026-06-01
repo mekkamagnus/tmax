@@ -5,6 +5,9 @@
 
 import { Either } from "./task-either.ts";
 
+// Gate all logging behind DEBUG=tmax env var. Default: silent.
+const LOGGING_ENABLED = typeof process !== "undefined" && (process.env.DEBUG?.includes("tmax") ?? false);
+
 /**
  * Log levels for structured logging
  */
@@ -205,6 +208,7 @@ export class Logger {
    * Write log entry to output
    */
   private writeEntry(entry: LogEntry): void {
+    if (!LOGGING_ENABLED) return;
     if (entry.level < this.config.level) {
       return;
     }

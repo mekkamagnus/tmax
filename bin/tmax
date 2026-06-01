@@ -1,6 +1,5 @@
 #!/usr/bin/env bash
-
-# tmax editor launcher script
+# tmax — unified editor CLI (emacs-style daemon/client)
 set -euo pipefail
 
 SCRIPT_PATH="${BASH_SOURCE[0]}"
@@ -10,11 +9,134 @@ fi
 
 SCRIPT_DIR="$(cd "$(dirname "$SCRIPT_PATH")" && pwd)"
 PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
-ENTRYPOINT="$PROJECT_DIR/src/main.tsx"
+DAEMON="$PROJECT_DIR/src/server/server.ts"
+TUI="$PROJECT_DIR/src/client/tui-client.ts"
+CLIENT="$PROJECT_DIR/bin/tmaxclient"
+TMAX_UID="$(id -u)"
+SOCKET="/tmp/tmax-${TMAX_UID}/server"
 
-if command -v node >/dev/null 2>&1; then
-  exec node --import tsx "$ENTRYPOINT" "$@"
+usage() {
+  cat <<EOF
+Usage: tmax [options] [file]
+
+Options:
+  --daemon       Start daemon only (no TUI frame)
+  -e EXPR        Evaluate T-Lisp expression (like emacsclient -e)
+  --stop         Stop the running daemon
+  -t             Open a new terminal frame
+  -h, --help     Show this help message
+
+Examples:
+  tmax                  Start daemon + open TUI frame
+  tmax file.txt         Start daemon + open TUI with file
+  tmax --daemon         Start daemon only
+  tmax -e '(buffer-text)'  Evaluate T-Lisp
+  tmax --stop           Stop daemon
+EOF
+  exit 0
+}
+
+# Check if daemon is alive
+is_running() {
+  "$CLIENT" --ping 2>/dev/null
+}
+
+# Wait for daemon to be ready
+wait_for_daemon() {
+  local attempts=0
+  while [ $attempts -lt 25 ]; do
+    if is_running >/dev/null 2>&1; then
+      return 0
+    fi
+    sleep 0.2
+    attempts=$((attempts + 1))
+  done
+  echo "Error: Daemon did not start" >&2
+  return 1
+}
+
+# Start daemon if not running
+ensure_daemon() {
+  if is_running >/dev/null 2>&1; then
+    return 0
+  fi
+
+  # Start daemon in background
+  bun "$DAEMON" >/dev/null 2>&1 &
+  local daemon_pid=$!
+
+  # Wait for socket
+  if wait_for_daemon; then
+    return 0
+  fi
+
+  echo "Error: Failed to start daemon (pid $daemon_pid)" >&2
+  return 1
+}
+
+# Parse arguments
+DAEMON_ONLY=false
+EVAL_EXPR=""
+STOP=false
+FILES=()
+
+for arg in "$@"; do
+  case "$arg" in
+    --daemon)   DAEMON_ONLY=true ;;
+    -e)         shift_mode=eval ;;
+    --stop)     STOP=true ;;
+    -t)         ;; # -t is default behavior (open terminal frame)
+    -h|--help)  usage ;;
+    *)
+      if [ "${shift_mode:-}" = "eval" ]; then
+        EVAL_EXPR="$arg"
+        shift_mode=""
+      else
+        FILES+=("$arg")
+      fi
+      ;;
+  esac
+done
+
+# Handle --stop
+if [ "$STOP" = true ]; then
+  if is_running >/dev/null 2>&1; then
+    # Send eval to stop
+    "$CLIENT" --eval '(editor-quit)' 2>/dev/null || true
+    sleep 0.5
+    # Force kill if still running
+    if [ -S "$SOCKET" ]; then
+      rm -f "$SOCKET"
+    fi
+    echo "Daemon stopped"
+  else
+    echo "Daemon not running"
+  fi
+  exit 0
 fi
 
-printf '%s\n' "Error: node is required to run tmax. Install Node.js 20+ from https://nodejs.org" >&2
-exit 1
+# Handle -e (eval only, no TUI)
+if [ -n "$EVAL_EXPR" ]; then
+  ensure_daemon
+  exec "$CLIENT" --eval "$EVAL_EXPR"
+fi
+
+# Handle --daemon only
+if [ "$DAEMON_ONLY" = true ]; then
+  if is_running >/dev/null 2>&1; then
+    echo "Daemon already running"
+    exit 0
+  fi
+  exec bun "$DAEMON"
+fi
+
+# Default: ensure daemon + open TUI frame (with optional file)
+ensure_daemon
+
+# Open file if specified
+if [ ${#FILES[@]} -gt 0 ]; then
+  "$CLIENT" "${FILES[0]}" 2>/dev/null
+fi
+
+# Launch TUI client (exec replaces this process)
+exec bun "$TUI"

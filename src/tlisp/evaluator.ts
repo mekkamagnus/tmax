@@ -1858,6 +1858,14 @@ export class TLispEvaluator {
   }
 
   /**
+   * Clear all test and suite registries
+   */
+  clearTestRegistries(): void {
+    testRegistry.clear();
+    suiteRegistry.clear();
+  }
+
+  /**
    * Get all test names
    * @returns Array of test names
    */

@@ -82,6 +82,27 @@ export function resetFixtureState(): void {
   activeFixturesForTest.clear();
   onceFixturesExecuted.clear();
   allFixturesExecuted.clear();
+  // Clear global test/fixture registries to prevent cross-test leakage
+  currentTestResults = [];
+  testCounts = { passed: 0, failed: 0, total: 0 };
+  globalSetupFunction = null;
+  globalTeardownFunction = null;
+  suiteSetupFunction = null;
+  suiteTeardownFunction = null;
+  (globalThis as any).__deffixture_data__?.clear();
+}
+
+/**
+ * Reset all test state including evaluator registries
+ * Call this in beforeEach with the interpreter to get full isolation
+ */
+export function resetAllTestState(interpreter?: any): void {
+  resetFixtureState();
+  if (interpreter && typeof interpreter.clearTestRegistries === 'function') {
+    interpreter.clearTestRegistries();
+  } else if (interpreter && interpreter.evaluator) {
+    (interpreter.evaluator as any).clearTestRegistries?.();
+  }
 }
 
 /**
@@ -1194,17 +1215,14 @@ export function registerTestingFramework(interpreter: TLispInterpreter): void {
     // We need to get the current environment - but builtin functions don't have access to it
     // For now, let's store the fixtures and let the test runner handle it
 
-    // Store in a special global variable that test-run will check
+    // Store fixture names for test-run to reference
     const currentFixturesList = createList(
       fixtureNames.map(name => createString(name))
     );
-
-    // Store in a special global variable that test-run will check
     interpreter.globalEnv.define("__current_fixtures__", currentFixturesList);
 
-    // Also apply fixtures immediately if possible
-    // We need access to the current environment for this
-    // For now, return success and let the test framework handle it
+    // Note: The evaluator's evalUseFixtures special form handles actual fixture
+    // application. This builtin is a fallback that only stores fixture names.
     return Either.right(createBoolean(true));
   });
 

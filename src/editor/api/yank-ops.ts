@@ -63,58 +63,7 @@ export function resetYankRegisterState(): void {
 /**
  * Check if a character is a word character
  */
-function isWordChar(char: string): boolean {
-  return /[a-zA-Z0-9_]/.test(char);
-}
-
-/**
- * Find the end of the current word starting from position
- * Returns the position after the last character of the word
- */
-function findWordEnd(
-  text: string,
-  line: number,
-  column: number
-): { line: number; column: number } {
-  const lines = text.split('\n');
-
-  // Handle empty text
-  if (lines.length === 0 || (lines.length === 1 && lines[0] === '')) {
-    return { line: 0, column: 0 };
-  }
-
-  // Clamp to valid range
-  let currentLine = Math.max(0, Math.min(line, lines.length - 1));
-  let currentColumn = Math.max(0, Math.min(column, lines[currentLine]!.length - 1));
-
-  const lineText = lines[currentLine]!;
-
-  // If we're not on a word character, find the next word
-  if (currentColumn >= lineText.length || !isWordChar(lineText[currentColumn]!)) {
-    // Skip non-word characters
-    while (currentColumn < lineText.length && !isWordChar(lineText[currentColumn]!)) {
-      currentColumn++;
-    }
-
-    // If we reached end of line, move to next line
-    if (currentColumn >= lineText.length && currentLine < lines.length - 1) {
-      currentLine++;
-      currentColumn = 0;
-      while (currentLine < lines.length && currentColumn >= lines[currentLine]!.length) {
-        currentLine++;
-        currentColumn = 0;
-      }
-      return { line: currentLine, column: currentColumn };
-    }
-  }
-
-  // Now skip through the word
-  while (currentColumn < lineText.length && isWordChar(lineText[currentColumn]!)) {
-    currentColumn++;
-  }
-
-  return { line: currentLine, column: currentColumn };
-}
+import { isWordChar, findWordEnd } from "./text-utils.ts";
 
 /**
  * Create yank operator API functions

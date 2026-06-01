@@ -70,9 +70,11 @@ export async function handleNormalMode(editor: Editor, key: string, normalizedKe
       // 0 at start - keep count at 0 (will result in no operation when command executes)
       (editor as any).setCount(0);
       (editor as any).state.statusMessage = `Count: 0`;
+      (editor as any).logMessage('Count: 0');
     } else {
       (editor as any).setCount(currentCount * 10 + digit);
       (editor as any).state.statusMessage = `Count: ${currentCount * 10 + digit}`;
+      (editor as any).logMessage(`Count: ${currentCount * 10 + digit}`);
     }
     return;
   }
@@ -118,6 +120,7 @@ export async function handleNormalMode(editor: Editor, key: string, normalizedKe
     });
     (editor as any).resetCount();
     (editor as any).state.statusMessage = `Unbound key: ${normalizedKey}`;
+    (editor as any).logMessage(`Unbound key: ${normalizedKey}`);
   } else {
     // Find mapping for normal mode
     const mapping = mappings.find((m: any) => !m.mode || m.mode === "normal");
@@ -127,6 +130,7 @@ export async function handleNormalMode(editor: Editor, key: string, normalizedKe
       });
       (editor as any).resetCount();
       (editor as any).state.statusMessage = `Unbound key in normal mode: ${normalizedKey}`;
+      (editor as any).logMessage(`Unbound key in normal mode: ${normalizedKey}`);
     } else {
       // Log command execution
       handlerLog.debug(`Executing command: ${mapping.command}`, {
@@ -178,6 +182,7 @@ export async function handleNormalMode(editor: Editor, key: string, normalizedKe
         });
 
         (editor as any).state.statusMessage = `Command error: ${error instanceof Error ? error.message : String(error)}`;
+        (editor as any).logMessage(`Command error: ${error instanceof Error ? error.message : String(error)}`);
       }
     }
   }

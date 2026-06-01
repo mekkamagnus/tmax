@@ -260,6 +260,7 @@ tmaxclient - Client for tmax server
 Usage: tmaxclient [options] [filename]
 
 Options:
+  --tui                  Launch TUI client (full terminal editor)
   --eval CODE            Evaluate T-Lisp code
   --list-buffers         List all buffers
   --kill-buffer NAME     Kill specific buffer
@@ -267,6 +268,7 @@ Options:
   --insert-stdin         Insert from stdin
   --script FILE          Execute T-Lisp file
   --server-info          Get server info
+  --messages             Show *Messages* buffer
   --ping                 Check if server running
   -n, --no-wait         Don't wait for buffer to close
   -c                     Open in new frame/buffer (not implemented yet)
@@ -298,8 +300,10 @@ Examples:
   let insertText: string | undefined;
   let scriptFile: string | undefined;
   let serverInfo = args.includes('--server-info');
+  let showMessages = args.includes('--messages');
   let ping = args.includes('--ping');
   let insertStdin = args.includes('--insert-stdin');
+  let tuiMode = args.includes('--tui');
 
   // Parse socket path
   const socketIndex = args.indexOf('-s');
@@ -346,6 +350,23 @@ Examples:
     arg !== socketPath
   );
 
+  // Handle TUI mode by spawning the TUI client process
+  if (tuiMode) {
+    const { spawn } = require('child_process');
+    const path = require('path');
+    const tuiClientPath = path.resolve(__dirname, '..', 'src', 'client', 'tui-client.ts');
+    const tuiArgs = [];
+    if (socketPath) {
+      tuiArgs.push('-s', socketPath);
+    }
+    const child = spawn('bun', [tuiClientPath, ...tuiArgs], {
+      stdio: 'inherit',
+      env: process.env
+    });
+    child.on('exit', (code: number) => process.exit(code));
+    return;
+  }
+
   // Special handling for ping - don't require server connection
   if (ping) {
     // Try to connect to test if server is running
@@ -380,6 +401,11 @@ Examples:
   if (serverInfo) {
     const info = await client.query('full-state');
     console.log(JSON.stringify(info, null, 2));
+  } else if (showMessages) {
+    const result = await client.query('messages');
+    if (result && result.messages) {
+      result.messages.forEach((msg: string) => console.log(msg));
+    }
   } else if (listBuffers) {
     const buffers = await client.executeCommand('list-buffers');
     // Format output similar to how a real editor might show buffer list

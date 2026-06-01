@@ -40,9 +40,7 @@ import {
  * @param char - Character to check
  * @returns true if character is alphanumeric or underscore
  */
-function isWordChar(char: string): boolean {
-  return /[a-zA-Z0-9_]/.test(char);
-}
+import { isWordChar } from "./text-utils.ts";
 
 /**
  * Find the start of the next word (w command)

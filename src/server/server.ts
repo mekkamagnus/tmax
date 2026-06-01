@@ -14,7 +14,9 @@ import { Editor } from '../editor/editor.ts';
 import { TerminalIOImpl } from '../core/terminal.ts';
 import { FileSystemImpl } from '../core/filesystem.ts';
 import { FunctionalTextBufferImpl } from '../core/buffer.ts';
-import { EditorState } from '../core/types.ts';
+import { EditorState, Frame } from '../core/types.ts';
+import { registerTestingFramework } from '../tlisp/test-framework.ts';
+import { editorStateToJson } from './serialize.ts';
 
 // JSON-RPC 2.0 interfaces
 interface JSONRPCRequest {
@@ -47,6 +49,8 @@ export class TmaxServer {
   private socketPath: string;
   private editor: Editor;
   private clients: Map<string, ClientConnection>;
+  private frames: Map<string, Frame> = new Map();
+  private activeFrameId: string | null = null;
   private isRunning: boolean = false;
   private testMode: boolean = false;
 
@@ -63,7 +67,6 @@ export class TmaxServer {
 
     // Load test framework to provide defvar and other testing utilities
     const interpreter = this.editor.getInterpreter();
-    const { registerTestingFramework } = require('../tlisp/test-framework.ts');
     registerTestingFramework(interpreter);
 
     // Initialize default state
@@ -92,6 +95,98 @@ export class TmaxServer {
   }
 
   /**
+   * Create a new frame (independent viewport)
+   */
+  createFrame(): string {
+    const id = `frame-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+    const state = this.editor.getState();
+    const frame: Frame = {
+      id,
+      cursorPosition: { ...state.cursorPosition },
+      viewportTop: state.viewportTop,
+      mode: state.mode,
+      commandLine: state.commandLine,
+      mxCommand: state.mxCommand,
+      currentFilename: state.currentFilename,
+      currentBuffer: state.currentBuffer,
+      statusMessage: state.statusMessage,
+      cursorFocus: 'buffer',
+      lastActivity: new Date(),
+    };
+    this.frames.set(id, frame);
+    this.activeFrameId = id;
+    (this.editor as any).logMessage(`Frame created: ${id}`);
+    return id;
+  }
+
+  /**
+   * Get frame by id, throw if not found
+   */
+  private getFrame(id: string): Frame {
+    const frame = this.frames.get(id);
+    if (!frame) throw new Error(`Frame not found: ${id}`);
+    return frame;
+  }
+
+  /**
+   * Resolve frame from params or fall back to active frame
+   */
+  private resolveFrame(params: any): Frame {
+    if (params?.frameId) return this.getFrame(params.frameId);
+    if (this.activeFrameId) return this.getFrame(this.activeFrameId);
+    throw new Error('No active frame');
+  }
+
+  /**
+   * Sync frame state TO the editor (before operations that use editor state)
+   */
+  private syncFrameToEditor(frame: Frame): void {
+    this.editor.setEditorState({
+      currentBuffer: frame.currentBuffer,
+      cursorPosition: { ...frame.cursorPosition },
+      mode: frame.mode,
+      statusMessage: frame.statusMessage,
+      viewportTop: frame.viewportTop,
+      config: this.editor.getState().config,
+      commandLine: frame.commandLine,
+      mxCommand: frame.mxCommand,
+      currentFilename: frame.currentFilename,
+    });
+  }
+
+  /**
+   * Sync editor state back TO the frame (after operations that mutated editor)
+   */
+  private syncEditorToFrame(frame: Frame): void {
+    const state = this.editor.getState();
+    frame.cursorPosition = { ...state.cursorPosition };
+    frame.viewportTop = state.viewportTop;
+    frame.mode = state.mode;
+    frame.commandLine = state.commandLine;
+    frame.mxCommand = state.mxCommand;
+    frame.currentFilename = state.currentFilename;
+    frame.currentBuffer = state.currentBuffer;
+    frame.statusMessage = state.statusMessage;
+    frame.lastActivity = new Date();
+  }
+
+  /**
+   * Delete a frame (on client disconnect)
+   */
+  private deleteFrame(id: string): void {
+    this.frames.delete(id);
+    if (this.activeFrameId === id) {
+      // Pick the most recent remaining frame
+      let latest: Frame | null = null;
+      for (const f of this.frames.values()) {
+        if (!latest || f.lastActivity > latest.lastActivity) latest = f;
+      }
+      this.activeFrameId = latest?.id ?? null;
+    }
+    (this.editor as any).logMessage(`Frame deleted: ${id}`);
+  }
+
+  /**
    * Get the default socket path for the server
    */
   private getDefaultSocketPath(): string {
@@ -103,6 +198,13 @@ export class TmaxServer {
    * Start the server
    */
   async start(): Promise<void> {
+    (this.editor as any).logMessage('Server started');
+
+    // Load core bindings and init file before starting
+    await (this.editor as any).ensureCoreBindingsLoaded();
+    await (this.editor as any).loadInitFile(undefined);
+    console.log('Core bindings and init file loaded');
+
     // Ensure the socket directory exists
     const socketDir = this.socketPath.substring(0, this.socketPath.lastIndexOf('/'));
     await this.mkdirp(socketDir);
@@ -135,27 +237,43 @@ export class TmaxServer {
    */
   private handleConnection(conn: Socket): void {
     const clientId = `client-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
-    
+    let clientFrameId: string | null = null;
+
     const client: ClientConnection = {
       id: clientId,
       pid: conn.remotePort ? parseInt(conn.remotePort.toString()) : undefined,
       socket: conn,
       connectedAt: new Date()
     };
-    
+
     this.clients.set(clientId, client);
     console.log(`Client connected: ${clientId}`);
-    
+
     // Set up connection handlers
     conn.on('data', async (data) => {
       try {
         const requestStr = data.toString();
-        // Handle potential multiple JSON objects in one data chunk
         const requests = this.parseMultipleRequests(requestStr);
-        
+
         for (const request of requests) {
+          // Auto-create frame on connect-frame request
+          if (request.method === 'connect-frame') {
+            clientFrameId = this.createFrame();
+            if (conn.writable) {
+              conn.write(JSON.stringify({ jsonrpc: '2.0', id: request.id, result: { frameId: clientFrameId } }) + '\n');
+            }
+            continue;
+          }
+
+          // Inject frameId into frame-aware methods if client has a frame
+          if (clientFrameId && !request.params?.frameId) {
+            if (['keypress', 'render-state'].includes(request.method)) {
+              request.params = { ...request.params, frameId: clientFrameId };
+            }
+          }
+
           const response = await this.processRequest(request);
-          
+
           if (conn.writable) {
             conn.write(JSON.stringify(response) + '\n');
           }
@@ -170,20 +288,22 @@ export class TmaxServer {
             message: `Internal error: ${error instanceof Error ? error.message : 'Unknown error'}`
           }
         };
-        
+
         if (conn.writable) {
           conn.write(JSON.stringify(errorResponse) + '\n');
         }
       }
     });
-    
+
     conn.on('close', () => {
       console.log(`Client disconnected: ${clientId}`);
+      if (clientFrameId) this.deleteFrame(clientFrameId);
       this.clients.delete(clientId);
     });
-    
+
     conn.on('error', (err) => {
       console.error(`Client ${clientId} error:`, err);
+      if (clientFrameId) this.deleteFrame(clientFrameId);
       this.clients.delete(clientId);
     });
   }
@@ -279,6 +399,12 @@ export class TmaxServer {
         case 'insert':
           result = await this.handleInsert(request.params);
           break;
+        case 'keypress':
+          result = await this.handleKeypress(request.params);
+          break;
+        case 'render-state':
+          result = await this.handleRenderState(request.params);
+          break;
         default:
           return {
             jsonrpc: '2.0',
@@ -350,6 +476,17 @@ export class TmaxServer {
     };
 
     this.editor.setEditorState(newState);
+    (this.editor as any).logMessage(`Opened ${filepath}`);
+
+    // Update active frame if one exists
+    if (this.activeFrameId) {
+      const frame = this.frames.get(this.activeFrameId);
+      if (frame) {
+        frame.currentFilename = filepath;
+        frame.currentBuffer = buffer;
+        frame.statusMessage = `Opened ${filepath}`;
+      }
+    }
 
     return {
       buffer: filepath,
@@ -397,12 +534,67 @@ export class TmaxServer {
     }
 
     try {
-      // For now, we'll execute a T-Lisp command to insert the text
-      const result = this.editor.executeTlisp(`(buffer-insert "${text.replace(/"/g, '\\"')}")`);
-      return result;
+      const interpreter = this.editor.getInterpreter();
+      const escaped = text
+        .replace(/\\/g, '\\\\')
+        .replace(/\n/g, '\\n')
+        .replace(/\r/g, '\\r')
+        .replace(/\t/g, '\\t')
+        .replace(/"/g, '\\"');
+      const result = interpreter.execute(`(buffer-insert "${escaped}")`);
+      if (result._tag === 'Left') {
+        throw new Error(result.left.message || 'T-Lisp evaluation error');
+      }
+      return this.tlispValueToJson(result.right);
     } catch (error) {
       throw new Error(`Insert error: ${error instanceof Error ? error.message : 'Unknown error'}`);
     }
+  }
+
+  /**
+   * Handle keypress from TUI client
+   */
+  private async handleKeypress(params: any): Promise<any> {
+    const key = params.key;
+    if (!key) {
+      throw new Error('Key is required for keypress');
+    }
+
+    try {
+      // If frameId provided, sync frame -> editor, handle key, sync back
+      if (params.frameId) {
+        const frame = this.getFrame(params.frameId);
+        this.activeFrameId = params.frameId;
+        this.syncFrameToEditor(frame);
+        await this.editor.handleKey(key);
+        this.syncEditorToFrame(frame);
+        return editorStateToJson(this.editor.getEditorState());
+      }
+      // No frameId — operate on editor directly (backward compat)
+      await this.editor.handleKey(key);
+      return editorStateToJson(this.editor.getEditorState());
+    } catch (error) {
+      if (error instanceof Error && error.message === 'EDITOR_QUIT_SIGNAL') {
+        if (params.frameId) {
+          const frame = this.getFrame(params.frameId);
+          this.syncEditorToFrame(frame);
+        }
+        const state = editorStateToJson(this.editor.getEditorState());
+        return { ...state, quitSignal: true };
+      }
+      throw error;
+    }
+  }
+
+  /**
+   * Handle render-state request (frame-scoped)
+   */
+  private async handleRenderState(params: any): Promise<any> {
+    if (params?.frameId) {
+      const frame = this.getFrame(params.frameId);
+      this.syncFrameToEditor(frame);
+    }
+    return editorStateToJson(this.editor.getEditorState());
   }
 
   /**
@@ -417,28 +609,33 @@ export class TmaxServer {
 
     // For now, we'll handle a few basic commands
     switch (command) {
-      case 'list-buffers':
-        return this.editor.getState().buffers.map(buf => buf.name);
-      case 'kill-buffer':
+      case 'list-buffers': {
+        const buffers = this.editor.getState().buffers;
+        const names: string[] = [];
+        buffers?.forEach((_buf, name) => names.push(name));
+        return names;
+      }
+      case 'kill-buffer': {
         const bufferName = params.bufferName;
         if (bufferName) {
-          const index = this.editor.getState().buffers.findIndex(buf => buf.name === bufferName);
-          if (index !== -1) {
-            this.editor.getState().buffers.splice(index, 1);
+          const buffers = this.editor.getState().buffers;
+          if (buffers?.has(bufferName)) {
+            buffers.delete(bufferName);
             return { success: true, killed: bufferName };
           } else {
             return { success: false, error: `Buffer ${bufferName} not found` };
           }
         }
         throw new Error('Buffer name required for kill-buffer');
-      case 'save-buffer':
+      }
+      case 'save-buffer': {
         const currentFile = this.editor.getState().currentFilename;
         if (currentFile) {
-          const fs = new FileSystemImpl();
-          await fs.writeFile(currentFile, this.editor.getState().currentBuffer.content);
+          await this.editor.saveFile(currentFile);
           return { success: true, saved: currentFile };
         }
         throw new Error('No file to save');
+      }
       case 'server-info':
         return {
           status: 'running',
@@ -680,6 +877,10 @@ export class TmaxServer {
       case 'functions':
         // Query the T-Lisp interpreter for available functions
         return this.getTlispFunctions();
+      case 'messages': {
+        const msgs = (this.editor as any).messages as string[];
+        return { messages: msgs };
+      }
       case 'function-documentation':
         const functionName = params.functionName;
         if (functionName) {
@@ -729,8 +930,8 @@ export class TmaxServer {
   private async handlePing(): Promise<any> {
     return {
       status: 'running',
-      uptime: Math.floor((Date.now() - this.server.address() ? Date.now() : Date.now()) / 1000),
-      clients: this.clients.size
+      server: 'tmax',
+      frames: this.frames.size
     };
   }
 
@@ -795,4 +996,13 @@ export class TmaxServer {
   isServerRunning(): boolean {
     return this.isRunning;
   }
+}
+
+// Main entry point when run directly
+if (import.meta.main) {
+  const server = new TmaxServer();
+  server.start().catch((err) => {
+    console.error('Failed to start server:', err);
+    process.exit(1);
+  });
 }
