@@ -223,7 +223,7 @@ deno task test
 - Syntax highlighting
 - Search and replace
 - Split screen
-- Configuration file loading (~/.tmaxrc)
+- Configuration file loading (`~/.config/tmax/init.tlisp`, previously `~/.tmaxrc`)
 - Macro recording and replay
 
 ## Conclusion

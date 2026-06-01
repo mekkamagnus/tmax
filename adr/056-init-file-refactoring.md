@@ -8,11 +8,11 @@
 
 The tmax editor used a simple initialization file system with several limitations:
 
-1. **Non-standard location**: Configuration file (`~/.tmaxrc`) in home directory violated XDG Base Directory specification
+1. **Non-standard location**: Configuration file (`~/.tmaxrc`, previously `.tmaxrc`) in home directory violated XDG Base Directory specification
 2. **No config reload**: Required full editor restart to test configuration changes
 3. **No eval-buffer**: Couldn't test T-Lisp code without saving to files
 4. **Inflexible init path**: Couldn't specify custom init file location for testing
-5. **Unclear naming**: `.tmaxrc` filename didn't indicate file format (T-Lisp)
+5. **Unclear naming**: `.tmaxrc` (previously `.tmaxrc`) filename didn't indicate file format (T-Lisp)
 
 These limitations slowed down development workflow and made tmax non-compliant with modern Unix/Linux standards.
 
@@ -20,7 +20,7 @@ These limitations slowed down development workflow and made tmax non-compliant w
 
 Refactor the init file system to provide:
 - XDG-compliant configuration directory (`~/.config/tmax/`)
-- Clearer filename (`init.tlisp` instead of `.tmaxrc`)
+- Clearer filename (`init.tlisp` instead of `.tmaxrc` (previously `.tmaxrc`))
 - Runtime configuration reloading via `eval-init-file`
 - Buffer evaluation for testing T-Lisp code via `eval-buffer`
 - Custom init file path via `--init-file` CLI flag
@@ -197,7 +197,7 @@ User can test: M-x ; (eval-buffer)
 
 **Before:**
 ```
-~/.tmaxrc                          # Single file in home directory
+~/.tmaxrc                          # Single file in home directory (previously `.tmaxrc`)
 ```
 
 **After:**
@@ -209,11 +209,11 @@ User can test: M-x ; (eval-buffer)
 
 #### Migration Path
 
-**For users with existing `.tmaxrc`:**
+**For users with existing `.tmaxrc` (previously `.tmaxrc`):**
 ```bash
 # Manual migration
 mkdir -p ~/.config/tmax
-mv ~/.tmaxrc ~/.config/tmax/init.tlisp
+mv ~/.tmaxrc ~/.config/tmax/init.tlisp  # previously `.tmaxrc`
 
 # Or use M-x to migrate (in future)
 M-x ; (migrate-tmaxrc)  # NOT IMPLEMENTED - manual migration only
@@ -232,14 +232,14 @@ M-x ; (migrate-tmaxrc)  # NOT IMPLEMENTED - manual migration only
 
 ### Trade-offs
 
-1. **Breaking Change**: Existing `.tmaxrc` files require manual migration
+1. **Breaking Change**: Existing `.tmaxrc` (previously `.tmaxrc`) files require manual migration
 2. **Directory Creation**: Requires filesystem write access (silent failure)
-3. **Alpha Project**: No backward compatibility with `.tmaxrc` (acceptable for alpha)
+3. **Alpha Project**: No backward compatibility with `.tmaxrc` (previously `.tmaxrc`) (acceptable for alpha)
 4. **Multiple Locations**: Users may be confused about where config lives
 
 ### Compatibility
 
-- **No Legacy Support**: `.tmaxrc` is not automatically migrated
+- **No Legacy Support**: `.tmaxrc` (previously `.tmaxrc`) is not automatically migrated
 - **User Action Required**: Manual migration or create new init file
 - **Alpha Status**: Breaking changes acceptable for alpha phase
 

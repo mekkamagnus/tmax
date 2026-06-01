@@ -19,7 +19,7 @@ Implement plugin directory structure:
 ### Plugin Directories
 
 ```
-~/.tmaxrc.d/plugins/       # User plugins
+~/.config/tmax/plugins/       # User plugins (previously `~/.tmaxrc.d/plugins/`)
 ├── plugin1/
 │   ├── plugin.tlisp      # Main plugin file
 │   ├── manifest.json     # Plugin metadata

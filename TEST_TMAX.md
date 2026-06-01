@@ -83,7 +83,7 @@ deno task start
 If keys still don't work in a real terminal:
 1. Verify you're in the project directory
 2. Run diagnostic tests above
-3. Check `~/.tmaxrc` configuration file
+3. Check `~/.config/tmax/init.tlisp` configuration file
 4. File an issue with diagnostic output
 
 ## Architecture Notes

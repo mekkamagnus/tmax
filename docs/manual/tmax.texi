@@ -108,7 +108,7 @@ tmax is designed for:
 @item Mode management for modal editing state and transitions
 @item Key binding definitions with configurable key mappings
 @item User interface logic including status line, command input, M-x functionality
-@item Configuration management through .tmaxrc file loading and execution
+@item Configuration management through @file{~/.config/tmax/init.tlisp} file loading and execution
 @item Extensibility via custom functions, macros, and commands
 @end itemize
 
@@ -655,11 +655,11 @@ Splice unquote - inserts list elements
 
 @section Configuration File
 
-tmax loads @file{~/.tmaxrc} on startup if it exists.
+tmax loads @file{~/.config/tmax/init.tlisp} on startup if it exists.
 
-@subsection Example .tmaxrc
+@subsection Example init.tlisp
 @example
-;; ~/.tmaxrc - tmax configuration
+;; ~/.config/tmax/init.tlisp - tmax configuration
 
 ;; Define custom word count function
 (defun word-count ()
@@ -1180,13 +1180,13 @@ tmax uses a gap buffer implementation for efficient text editing:
 
 @cindex configuration
 @cindex customization
-@cindex .tmaxrc
+@cindex init.tlisp
 
 tmax is highly configurable through T-Lisp scripting.
 
 @section Configuration File
 
-tmax loads @file{~/.tmaxrc} on startup for user customization.
+tmax loads @file{~/.config/tmax/init.tlisp} on startup for user customization.
 
 @section Configuration Examples
 
@@ -1379,7 +1379,7 @@ hjkl
 
 @subsection Programmer's Setup
 @example
-;; ~/.tmaxrc for programming
+;; ~/.config/tmax/init.tlisp for programming
 
 ;; Line numbers function
 (defun show-line-number ()
@@ -1409,7 +1409,7 @@ hjkl
 
 @subsection Writer's Setup
 @example
-;; ~/.tmaxrc for writing
+;; ~/.config/tmax/init.tlisp for writing
 
 ;; Word count function
 (defun word-count ()
@@ -1525,7 +1525,7 @@ Common issues and their solutions.
 
 @strong{Solution:}
 @enumerate
-@item Check T-Lisp syntax in @file{.tmaxrc}
+@item Check T-Lisp syntax in @file{init.tlisp}
 @item Verify key name format (e.g., "C-c" not "Ctrl+C")
 @item Test with simple binding: @code{(key-bind "x" "(editor-set-status \"test\")" "normal")}
 @item Check mode specificity - binding may be for different mode
@@ -1544,13 +1544,13 @@ Common issues and their solutions.
 
 @section Configuration Issues
 
-@subsection .tmaxrc Not Loading
+@subsection init.tlisp Not Loading
 @strong{Problem:} Custom configuration not applied
 
 @strong{Solution:}
-@enumerate  
-@item Verify file location: @file{~/.tmaxrc} (exact path)
-@item Check file permissions: @code{ls -la ~/.tmaxrc}  
+@enumerate
+@item Verify file location: @file{~/.config/tmax/init.tlisp} (exact path)
+@item Check file permissions: @code{ls -la ~/.config/tmax/init.tlisp}  
 @item Test with simple configuration: @code{(editor-set-status "Config loaded")}
 @item Check for T-Lisp syntax errors
 @end enumerate

@@ -20,7 +20,7 @@
 *** DONE 0.3.3 Editor API: 25+ T-Lisp functions for complete editor control
 *** DONE 0.3.4 Command interfaces: Both vim-style (:q, :w) and M-x (SPC ;) commands
 *** DONE 0.3.5 Buffer management: Multiple buffers with efficient switching
-*** DONE 0.3.6 Configuration system: .tmaxrc files with T-Lisp scripting
+*** DONE 0.3.6 Configuration system: `~/.config/tmax/init.tlisp` files with T-Lisp scripting
 ** TODO 0.4 Refactor Key Binding System to be T-Lisp Centric [1/4]
 *** TODO 0.4.1 Introduce T-Lisp Keymaps [0/2]
     TODO 0.4.1.1 Implement a `hash-map` or `association-list` data type in T-Lisp standard library
@@ -44,7 +44,7 @@
 ** TODO 0.5 init.tlisp Configuration
    Support for an `init.tlisp` file for user configuration, similar to Emacs' `init.el`.
 *** Instructions
-   - This will require updating all documentation (README.md, docs/manual/tmax.texi, etc.) to remove mentions of `.tmaxrc` and replace with `init.tlisp`.
+   - This will require updating all documentation (README.md, docs/manual/tmax.texi, etc.) to remove mentions of `.tmaxrc` (previously `.tmaxrc`) and replace with `init.tlisp`.
 
 * Phase 1: Enhanced Editing (v0.2.0)
 ** TODO 1.1 Local Development Package Directories

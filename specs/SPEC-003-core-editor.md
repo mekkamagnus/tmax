@@ -32,8 +32,7 @@ Developers needed a modern, extensible terminal editor that combines the best as
 - ✅ **Implement full-screen interface** with alternate screen buffer and viewport management
 - ✅ **Provide unlimited extensibility** through complete T-Lisp interpreter
 - ✅ **Support multiple editing modes** (normal, insert, visual, command, M-x)
-- ✅ **Enable easy customization** through .tmaxrc configuration files
-- ✅ **Ensure zero dependencies** for security and simplicity
+- ✅ **Enable easy customization** through `~/.config/tmax/init.tlisp` configuration files
 - ✅ **Achieve comprehensive testing** with 131 tests across 8 suites
 ### Secondary Goals (Foundation Established ✅)
 - ✅ **Establish extensibility foundation** for unlimited customization
@@ -97,7 +96,7 @@ Developers needed a modern, extensible terminal editor that combines the best as
 - ✅ **Built-in T-Lisp standard library**: 31 functions for comprehensive functionality
 - ✅ **T-Lisp macro definition and execution**: Full quasiquote support
 - ✅ **Editor API**: 25+ functions for complete editor control
-- ✅ **Configuration system**: .tmaxrc files with T-Lisp scripting
+- ✅ **Configuration system**: `~/.config/tmax/init.tlisp` files with T-Lisp scripting
 - ✅ **Interactive T-Lisp REPL**: Complete development environment
 - [ ] Plugin system using T-Lisp - Planned for v1.4.0
 
@@ -146,7 +145,7 @@ Developers needed a modern, extensible terminal editor that combines the best as
 - ✅ **Editor commands**: All functionality exposed through T-Lisp API (25+ functions)
 - ✅ **Mode management**: Modal editing state and transitions
 - ✅ **Key binding definitions**: Configurable key mappings with mode-specific behavior
-- ✅ **Configuration management**: .tmaxrc file loading and execution
+- ✅ **Configuration management**: `~/.config/tmax/init.tlisp` file loading and execution
 - ✅ **User interface logic**: Status line, command input, M-x functionality
 - ✅ **Extensibility**: Custom functions, macros, and commands through T-Lisp
 - ✅ **Standard library**: 31 built-in functions for comprehensive functionality
@@ -186,7 +185,7 @@ Developers needed a modern, extensible terminal editor that combines the best as
 - ✅ **Editor API**: 25+ T-Lisp functions for complete editor control
 - ✅ **Command interfaces**: Both vim-style (:q, :w) and M-x (SPC ;) commands
 - ✅ **Buffer management**: Multiple buffers with efficient switching
-- ✅ **Configuration system**: .tmaxrc files with T-Lisp scripting
+- ✅ **Configuration system**: `~/.config/tmax/init.tlisp` files with T-Lisp scripting
 
 **Success Criteria Met:** ✅ Full modal editor with unlimited extensibility through T-Lisp
 
@@ -221,7 +220,7 @@ Developers needed a modern, extensible terminal editor that combines the best as
 - **Editor API** with 25+ functions for complete control
 - **Command interfaces**: vim-style (:q, :w) and M-x (SPC ;)
 - **Multiple buffer management** with efficient switching
-- **Configuration system** through .tmaxrc files
+- **Configuration system** through `~/.config/tmax/init.tlisp`
 - **Comprehensive testing** (131 tests across 8 suites)
 - **Zero external dependencies** for security and simplicity
 
@@ -299,7 +298,7 @@ When a key is pressed, tmax should search these keymaps in order (context → mo
 **Unlike the current hybrid approach**, default key bindings should be defined entirely in T-Lisp files that ship with tmax. The `core-bindings.tlisp` file should define all basic bindings by directly manipulating T-Lisp keymap variables. TypeScript should only bootstrap the T-Lisp environment and load these files.
 
 #### 4. User Configuration (Pure T-Lisp)
-Users configure key bindings in their `.tmaxrc` files using pure T-Lisp functions:
+Users configure key bindings in their `~/.config/tmax/init.tlisp` file using pure T-Lisp functions:
 
 ```lisp
 ;; Bind key to command in specific mode

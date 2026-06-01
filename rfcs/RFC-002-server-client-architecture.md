@@ -750,7 +750,7 @@ tmaxclient -s localhost:8080 file.txt
 tmaxclient --autostart file.txt
 
 # Or enable by default in config
-# ~/.tmaxrc
+# ~/.config/tmax/init.tlisp (previously `~/.tmaxrc`)
 (setq server-autostart t)
 ```
 
