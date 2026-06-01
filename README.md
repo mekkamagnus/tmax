@@ -1,34 +1,56 @@
-# tmax - An Extensible Terminal Editor (Alpha)
+# tmax - An Extensible Terminal Editor
 
-tmax is an extensible terminal-based text editor written in TypeScript, running on the Bun runtime with React/ink for the terminal UI. It follows the Emacs architecture: a T-Lisp interpreter (like Emacs Lisp) handles all editor functionality, with vim-style key bindings as the user interface layer.
+tmax is an extensible terminal-based text editor written in TypeScript, running on the Bun runtime. It follows the Emacs architecture: a T-Lisp interpreter (like Emacs Lisp) handles all editor functionality, with vim-style key bindings as the user interface layer.
 
-> **Note:** tmax is currently in alpha release (v0.1.0). Features and APIs may change. Feedback and contributions are welcome!
+The daemon/client architecture mirrors Emacs (`tmax --daemon` / `tmaxclient`), supporting multiple TUI frames sharing the same buffers and interpreter. A built-in `*Messages*` buffer provides observability for both users and AI agents.
+
+> **Note:** tmax is currently in development (v0.2.0). Features and APIs may change. Feedback and contributions are welcome!
 
 ## Architecture
 
 - **TypeScript Core**: Handles low-level operations (terminal I/O, file system, buffer management)
 - **T-Lisp Engine**: Handles high-level editor functionality and user customization
-- **Modal Interface**: Supports normal, insert, visual, and command modes
-- **React-based UI**: Modern declarative UI using ink for terminal React components
+- **Modal Interface**: Supports normal, insert, visual, command, and M-x modes
+- **Daemon/Client**: Emacs-style daemon with multiple TUI frames sharing state
+- **Interchangeable Frontends**: TUI (ANSI), Ink (React), or Steep — same editor core
 - **Extensible**: Users can customize behavior through T-Lisp scripts
 
 ## Features
 
 ### Core Functionality
-- ✅ Modal editing with vim-like key bindings
-- ✅ Multiple buffer support
+- ✅ Modal editing with vim-like key bindings (hjkl navigation)
+- ✅ Five editing modes: normal, insert, visual, command, and M-x
+- ✅ Multiple buffer support with gap buffer implementation
 - ✅ File operations (open, save, create)
-- ✅ Cursor movement and text editing
-- ✅ Configurable key bindings
+- ✅ Cursor movement and text editing with word/line navigation
+- ✅ Delete, yank, change, and put operators
+- ✅ Visual mode selection with text objects
+- ✅ Search forward/backward with word-under-cursor search
+- ✅ Undo/redo with count prefix support
+- ✅ Configurable key bindings with which-key popup
 - ✅ Status line with mode and cursor position
 - ✅ Full-screen terminal interface with alternate screen buffer
+- ✅ `*Messages*` buffer for event logging and observability
+
+### Daemon/Client Architecture
+- ✅ Emacs-style daemon (`tmax --daemon`) with Unix socket RPC
+- ✅ Frame-based multi-client support (independent viewports, shared buffers)
+- ✅ TUI client with 200ms state polling
+- ✅ CLI client for eval, insert, buffers, ping, messages queries
+- ✅ Unified `tmax` CLI with auto-daemon-start
+- ✅ AI agent control via JSON-RPC 2.0 protocol
 
 ### T-Lisp Integration
 - ✅ Full Lisp interpreter with standard library
 - ✅ Macro system with quasiquote support
 - ✅ Tail-call optimization
 - ✅ Interactive REPL for testing
-- ✅ Comprehensive editor API (25+ functions)
+- ✅ Comprehensive editor API (100+ functions)
+- ✅ Kill ring with yank-pop cycling
+- ✅ Macro recording and playback
+- ✅ Fuzzy command completion in M-x
+- ✅ Help system (describe-key, describe-function, apropos-command)
+- ✅ Plugin loading and repository system
 
 ### T-Lisp Features
 - **Special Forms**: `quote`, `if`, `let`, `lambda`, `defun`, `defmacro`
@@ -40,7 +62,7 @@ tmax is an extensible terminal-based text editor written in TypeScript, running 
 ## Installation
 
 ### Prerequisites
-- [Node.js](https://nodejs.org/) v20 or later
+- [Bun](https://bun.sh/) runtime
 
 ### Setup
 ```bash
@@ -49,35 +71,50 @@ git clone https://github.com/mekkamagnus/tmax.git
 cd tmax
 
 # Install dependencies
-npm install
+bun install
 
-# Register the `tmax` command globally
-npm link
-
-# Make the launcher executable (optional)
+# Make the launcher executable
 chmod +x bin/tmax
 
-# Optional: Add local launcher to PATH instead of npm link
+# Add to PATH
 echo 'export PATH="$PATH:$(pwd)/bin"' >> ~/.bashrc
 source ~/.bashrc
 ```
 
 ## Usage
 
-### Basic Usage
+### Daemon/Client (Recommended)
 ```bash
-# Start tmax with a new buffer
-tmax
-
-# Start tmax with a file
+# Start tmax with a file (auto-starts daemon if needed)
 tmax filename.txt
 
-# Start with auto-reload during development
-npm run dev
+# Start daemon only (no TUI)
+tmax --daemon
 
-# Or use npm scripts
-npm start
-npm run dev
+# Evaluate T-Lisp on the daemon
+tmax -e '(+ 1 2)'
+
+# Stop the daemon
+tmax --stop
+```
+
+### Client Commands
+```bash
+tmaxclient file.txt           # Open file in daemon
+tmaxclient --eval '(code)'    # Evaluate T-Lisp
+tmaxclient --list-buffers     # List open buffers
+tmaxclient --messages         # Show *Messages* buffer
+tmaxclient --ping             # Check if daemon running
+tmaxclient --tui              # Launch TUI client
+```
+
+### Direct Editing (No Daemon)
+```bash
+# Run editor directly (no daemon)
+bun run start filename.txt
+
+# Development mode with auto-reload
+bun run dev
 ```
 
 ### First Time Usage
@@ -99,8 +136,16 @@ npm run dev
 
 #### Normal Mode
 - `h`, `j`, `k`, `l` - Move cursor left, down, up, right
+- `w`, `b`, `e` - Word forward, backward, end of word
+- `0`, `$` - Line start, line end
+- `gg`, `G` - Jump to top, jump to bottom
 - `i` - Enter insert mode
+- `v` - Enter visual mode
 - `:` - Enter command mode
+- `SPC ;` - Enter M-x mode
+- `dd` - Delete line, `yy` - Yank line, `p` - Put
+- `x` - Delete character, `u` - Undo, `C-r` - Redo
+- `/` - Search forward, `n` - Next match
 - `q` - Quit editor
 
 #### Insert Mode
@@ -112,10 +157,7 @@ npm run dev
 ### T-Lisp REPL
 ```bash
 # Run the T-Lisp REPL for testing
-npm run repl
-
-# Or use npm script
-npm run repl
+bun run repl
 ```
 
 ## Configuration
@@ -209,30 +251,33 @@ tmax/
 ├── src/
 │   ├── core/           # TypeScript core (terminal, filesystem, buffer)
 │   ├── tlisp/          # T-Lisp interpreter implementation
-│   ├── editor/         # Editor implementation with T-Lisp API
-│   └── main.ts         # Application entry point
+│   ├── editor/         # Editor with T-Lisp API, handlers, operations
+│   ├── server/         # Daemon (JSON-RPC 2.0 over Unix socket)
+│   ├── client/         # TUI client (ANSI rendering)
+│   ├── frontend/       # Interchangeable frontends (Ink, Steep)
+│   └── main.tsx        # Application entry point
 ├── test/
 │   ├── unit/           # Unit tests
+│   ├── ui/             # UI tests (tmux harness)
 │   └── mocks/          # Mock implementations
 ├── scripts/
 │   └── repl.ts         # T-Lisp REPL
 └── bin/
-    └── tmax            # Launcher script
+    ├── tmax            # Unified CLI (daemon/client)
+    └── tmaxclient      # Daemon client CLI
 ```
 
 ### Available Scripts
 ```bash
 # Development
-tmax                     # Start the editor
-npm run dev              # Start with auto-reload
-npm run repl             # Run T-Lisp REPL
+tmax                     # Start the editor (auto-daemon)
+bun run dev              # Start with auto-reload
+bun run repl             # Run T-Lisp REPL
+bun run daemon           # Start daemon only
 
 # Testing
-npm test                 # Run all tests
-npm run test:ui         # Run UI tests
-
-# Building
-npm run build           # Build for production
+bun test                 # Run all tests
+bun run test:ui          # Run UI tests
 ```
 
 ### T-Lisp Examples
@@ -309,24 +354,22 @@ MIT License - see LICENSE file for details.
 For detailed development plans and phase breakdowns, see the [comprehensive roadmap](./docs/ROADMAP.md).
 
 ### Current Focus
-- **Phase 0.4**: T-Lisp-centric key binding system refactor (in progress)
-- **Phase 0.5**: Testing Infrastructure Enhancement (TRT Framework) - planned
-- **Phase 0.8**: Server/Client Architecture & AI Agent Control - planned (parallel track)
-- **Phase 1**: Core editing features for basic Evil-mode parity
-- **Phase 2**: Extensibility and plugin system
+- **Phase 1**: Core editing features — COMPLETE (navigation, operators, search, visual mode, text objects)
+- **Phase 2**: Extensibility and plugin system — in progress
 - **Phase 3**: Advanced features (LSP integration, multiple windows)
 
-### Upcoming Features
-- ✅ **Server/Client Architecture**: Instant file opening, AI agent control (Phase 0.8)
-- ✅ **TRT Testing Framework**: Self-hosted T-Lisp testing (Phase 0.5)
-- ✅ **AI-Native Development**: First terminal editor designed for AI agent control
-- ✅ **Core Editing Operators**: Delete, yank, change, put operations (Phase 1.2)
-- ✅ **Enhanced Navigation**: Word, line, paragraph navigation (Phase 1.1)
+### Recent Milestones
+- ✅ **Daemon/Client Architecture**: Emacs-style daemon with Frame-based multi-client support
+- ✅ **Messages Buffer**: `*Messages*` buffer for editor event observability
+- ✅ **Core Editing Operators**: Delete, yank, change, put operations with count prefix
+- ✅ **Enhanced Navigation**: Word, line, paragraph navigation with jump commands
+- ✅ **Kill Ring**: Emacs-style clipboard history with yank-pop
+- ✅ **Help System**: describe-key, describe-function, apropos-command
+- ✅ **Which-key Popup**: Shows available bindings after prefix keys
 
 ### Quick Links
 - [Product Requirements Document](./specs/prd.md) - Detailed feature specifications and implementation status
 - [Development Roadmap](./docs/ROADMAP.md) - Complete phase-by-phase development plan
-- [Functional Programming Guidelines](./functional-patterns-guidelines.md) - Architecture patterns and best practices
 
 ## Design Philosophy
 
@@ -339,23 +382,14 @@ tmax follows the principle of "powerful core, extensible surface". The TypeScrip
 
 The editor is designed to be both approachable for beginners and powerful for advanced users who want to craft their perfect editing environment.
 
-For more information on the functional patterns used in tmax, see the [Functional Programming Guidelines](./functional-patterns-guidelines.md).
+For more information on the architecture patterns used in tmax, see the [rules/](./rules/) directory.
 
-## Bun Runtime Migration
+## Frontend Architecture
 
-tmax has been migrated to use Bun runtime instead of Deno. This provides faster startup times and better performance while maintaining the functional patterns of the core editor.
+tmax supports multiple interchangeable frontends:
+- **TUI Client** (default): Direct ANSI escape sequence rendering, no framework dependencies
+- **Ink Frontend**: React/Deno-ink based with component architecture
+- **Steep Frontend**: Experimental native terminal frontend
 
-### React Component Architecture
-- **Editor Component**: Main component orchestrating the UI with state management
-- **BufferView Component**: Displays buffer content with viewport management
-- **StatusLine Component**: Shows editor mode, cursor position, and status messages
-- **CommandInput Component**: Handles command mode and M-x mode input
-- **useEditorState Hook**: Manages editor state with T-Lisp integration
-
-### Benefits of React-based UI
-- Declarative UI rendering that's easier to maintain
-- Better component composition and reusability
-- Improved performance through virtual DOM and efficient updates
-- Easier testing with component-based architecture
-- Seamless integration with T-Lisp functionality
+All frontends communicate with the editor core through the same interface. The daemon/client architecture enables remote frontends via JSON-RPC over Unix sockets.
 

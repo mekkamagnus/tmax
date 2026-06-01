@@ -10,7 +10,7 @@ tmax/
 │   ├── core/           # TypeScript core (terminal, filesystem, buffer)
 │   ├── tlisp/          # T-Lisp interpreter
 │   ├── editor/         # Editor with T-Lisp integration
-│   │   ├── api/        # 25+ T-Lisp API modules
+│   │   ├── api/        # 100+ T-Lisp API modules
 │   │   │   ├── text-utils.ts       # Shared text utility functions
 │   │   │   └── editor-state.ts     # EditorStateAccess interface
 │   │   └── handlers/   # Mode-specific key handlers
@@ -25,8 +25,9 @@ tmax/
 │   │   │   ├── command-input.ts
 │   │   │   └── input.ts
 │   │   └── components/ # Legacy Ink components
-│   ├── server/         # JSON-RPC server/client
-│   └── main.ts         # Application entry point
+│   ├── server/         # JSON-RPC daemon (Frame-based multi-client)
+│   ├── client/         # TUI client (ANSI rendering, 200ms polling)
+│   └── main.tsx        # Application entry point
 ├── test/               # Test suite (1278 tests)
 ├── specs/              # PRD, SRS, RFC specifications
 ├── docs/               # Documentation
