@@ -15,6 +15,14 @@ _query_direct_output() {
   fi
 }
 
+
+# Read direct-mode output safely
+_query_direct_output() {
+  if [[ -f "$TMAX_DIRECT_OUTPUT_FILE" ]]; then
+    cat "$TMAX_DIRECT_OUTPUT_FILE"
+  fi
+}
+
 # Capture window output
 # Parameters:
 #   $1 - Window name (optional, defaults to TMAX_ACTIVE_WINDOW)
@@ -24,6 +32,11 @@ query_capture_output() {
   local window="${1:-$TMAX_ACTIVE_WINDOW}"
   local lines="${2:-$TMAX_CAPTURE_LINES}"
   local include_scrollback="${3:-true}"
+
+  if [[ "$TMAX_UI_TEST_MODE" == "direct" ]]; then
+    _query_direct_output | tail -n "$lines"
+    return 0
+  fi
 
   if [[ "$TMAX_UI_TEST_MODE" == "direct" ]]; then
     _query_direct_output | tail -n "$lines"
