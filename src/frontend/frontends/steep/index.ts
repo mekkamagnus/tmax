@@ -1,0 +1,97 @@
+import type { Editor as EditorClass } from "../../../editor/editor.ts";
+import type { EditorState } from "../../../core/types.ts";
+import type { Frontend } from "../types.ts";
+import { renderBufferLines, getVisibleViewportTop } from "../../render/buffer-lines.ts";
+import { renderCommandInput } from "../../render/command-input.ts";
+import { renderStatusLine } from "../../render/status-line.ts";
+import { Input } from "./input.ts";
+import { Screen } from "./screen.ts";
+
+export class SteepFrontend implements Frontend {
+  async run(editor: EditorClass, initialState: EditorState): Promise<void> {
+    const screen = new Screen();
+    const input = new Input();
+
+    let state = initialState;
+    let stopped = false;
+    let stopResize = () => {};
+
+    const cleanup = () => {
+      if (stopped) return;
+      stopped = true;
+      stopResize();
+      input.stop();
+      screen.showCursor();
+      screen.exitAltScreen();
+    };
+
+    const render = () => {
+      const { width, height } = screen.getDims();
+      const bufferHeight = Math.max(1, height - 2);
+      const lines = renderBufferLines(state, width, bufferHeight);
+
+      screen.clear();
+      lines.forEach((line, i) => screen.writeAt(i, 0, line));
+
+      if (state.mode === "command" || state.mode === "mx") {
+        screen.writeAt(height - 2, 0, renderCommandInput(state, width));
+      }
+
+      screen.writeAt(height - 1, 0, renderStatusLine(state, width));
+
+      const viewportTop = getVisibleViewportTop(state, bufferHeight);
+      const cursorRow = Math.max(0, Math.min(bufferHeight - 1, state.cursorPosition.line - viewportTop));
+      const cursorCol = Math.max(0, Math.min(width - 1, state.cursorPosition.column));
+      screen.moveTo(cursorRow, cursorCol);
+    };
+
+    try {
+      await editor.start();
+      screen.enterAltScreen();
+      screen.hideCursor();
+
+      const dims = screen.getDims();
+      editor.updateTerminalSize(dims.width, dims.height);
+      state = editor.getEditorState();
+
+      stopResize = screen.onResize(() => {
+        const nextDims = screen.getDims();
+        editor.updateTerminalSize(nextDims.width, nextDims.height);
+        state = editor.getEditorState();
+        render();
+      });
+
+      input.onKey(async (msg) => {
+        try {
+          await editor.handleKey(msg.key);
+          state = editor.getEditorState();
+          render();
+        } catch (error) {
+          if (error instanceof Error && error.message === "EDITOR_QUIT_SIGNAL") {
+            cleanup();
+            process.exit(0);
+          }
+
+          state = { ...editor.getEditorState(), statusMessage: `Error: ${String(error)}` };
+          render();
+        }
+      });
+
+      input.start();
+      render();
+
+      await new Promise<void>((resolve) => {
+        process.once("SIGINT", () => {
+          cleanup();
+          resolve();
+        });
+        process.once("SIGTERM", () => {
+          cleanup();
+          resolve();
+        });
+      });
+    } finally {
+      cleanup();
+    }
+  }
+}
