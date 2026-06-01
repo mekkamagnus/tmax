@@ -19,10 +19,18 @@ export class MockFileSystem implements FileSystem {
    */
   async readFile(path: string): Promise<string> {
     const content = this.files.get(path);
-    if (content === undefined) {
-      throw new Error(`File not found: ${path}`);
+    if (content !== undefined) {
+      return content;
     }
-    return content;
+    // Fall through to real filesystem for core binding files
+    if (path.startsWith("src/tlisp/core/bindings/") && path.endsWith(".tlisp")) {
+      try {
+        return await Bun.file(path).text();
+      } catch {
+        throw new Error(`File not found: ${path}`);
+      }
+    }
+    throw new Error(`File not found: ${path}`);
   }
 
   /**
@@ -59,7 +67,18 @@ export class MockFileSystem implements FileSystem {
    * @returns True if file or directory exists
    */
   async exists(path: string): Promise<boolean> {
-    return this.files.has(path) || this.stats.has(path);
+    if (this.files.has(path) || this.stats.has(path)) {
+      return true;
+    }
+    // Fall through for core binding files
+    if (path.startsWith("src/tlisp/core/bindings/")) {
+      try {
+        return await Bun.file(path).exists();
+      } catch {
+        return false;
+      }
+    }
+    return false;
   }
 
   /**

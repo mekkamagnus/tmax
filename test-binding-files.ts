@@ -23,7 +23,7 @@ async function testBindingFiles() {
   filesystem.files.set("src/tlisp/core/bindings/insert.tlisp", insertContent);
   filesystem.files.set("src/tlisp/core/bindings/visual.tlisp", visualContent);
   filesystem.files.set("src/tlisp/core/bindings/command.tlisp", commandContent);
-  filesystem.files.set("~/.tmaxrc", "(key-bind \"C-c C-c\" \"(custom-command)\" \"normal\")");
+  filesystem.files.set("~/.config/tmax/init.tlisp", "(key-bind \"C-c C-c\" \"(custom-command)\" \"normal\")");
   
   const editor = new Editor(terminal, filesystem);
   

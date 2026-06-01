@@ -8,6 +8,7 @@ import { expect } from "bun:test";
 import { Editor } from "../../src/editor/editor.ts";
 import { MockTerminal } from "../mocks/terminal.ts";
 import { MockFileSystem } from "../mocks/filesystem.ts";
+import { resetAllTestState } from "../../src/tlisp/test-framework.ts";
 
 describe("T-Lisp Testing Framework", () => {
   let editor: Editor;
@@ -21,6 +22,8 @@ describe("T-Lisp Testing Framework", () => {
     editor = new Editor(mockTerminal, mockFileSystem);
     // Start the editor to initialize the interpreter
     editor.start();
+    // Reset all test state for clean isolation
+    resetAllTestState(editor.getInterpreter());
   });
 
   afterEach(() => {
