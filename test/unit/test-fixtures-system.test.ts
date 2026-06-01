@@ -8,7 +8,7 @@ import { describe, test, expect, beforeEach, afterEach } from "bun:test";
 import { Editor } from "../../src/editor/editor.ts";
 import { MockTerminal } from "../mocks/terminal.ts";
 import { MockFileSystem } from "../mocks/filesystem.ts";
-import { resetFixtureState } from "../../src/tlisp/test-framework.ts";
+import { resetFixtureState, resetAllTestState } from "../../src/tlisp/test-framework.ts";
 
 describe("T-Lisp Fixture System (US-0.6.2)", () => {
   let editor: Editor;
@@ -20,8 +20,8 @@ describe("T-Lisp Fixture System (US-0.6.2)", () => {
     mockFileSystem = new MockFileSystem();
     editor = new Editor(mockTerminal, mockFileSystem);
     editor.start();
-    // Reset fixture state for clean test isolation
-    resetFixtureState();
+    // Reset all test state for clean isolation
+    resetAllTestState(editor.getInterpreter());
   });
 
   afterEach(() => {
