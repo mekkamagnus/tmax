@@ -66,6 +66,7 @@ export interface TlispEditorState {
   cursorFocus: 'buffer' | 'command';  // Track where cursor focus should be
   operations?: EditorOperations;  // Optional operations reference
   lspDiagnostics?: import("../core/types.ts").LSPDiagnostic[];  // LSP diagnostics (US-3.1.2)
+  logMessage?: (msg: string) => void;  // Log to *Messages* buffer
 }
 
 /**
@@ -347,6 +348,31 @@ export function createEditorAPI(state: TlispEditorState): Map<string, TLispFunct
   for (const [key, value] of documentationOps.entries()) {
     api.set(key, value);
   }
+
+  // Add messages operations
+  const messagesBuf = state.buffers.get('*Messages*');
+  api.set('messages-buffer', (_args: TLispValue[]): Either<AppError, TLispValue> => {
+    const buf = state.buffers.get('*Messages*');
+    if (!buf) return Either.right(createString(''));
+    const content = buf.getContent();
+    if (content._tag === 'Left') return Either.right(createString(''));
+    return Either.right(createString(content.right));
+  });
+
+  api.set('message', (args: TLispValue[]): Either<AppError, TLispValue> => {
+    if (args.length === 0) return Either.left(createValidationError('message', 'requires at least 1 argument'));
+    const text = args.map(a => {
+      switch (a.type) {
+        case 'string': return a.value;
+        case 'number': return String(a.value);
+        case 'boolean': return String(a.value);
+        default: return '';
+      }
+    }).join(' ');
+    state.statusMessage = text;
+    if (state.logMessage) state.logMessage(text);
+    return Either.right(createString(text));
+  });
 
   return api;
 }

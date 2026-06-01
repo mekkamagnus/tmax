@@ -6,7 +6,6 @@
  */
 
 import { render } from 'ink';
-import { Box, Text } from 'ink';
 import { Editor } from './frontend/components/Editor.tsx';
 import { Editor as EditorClass } from './editor/editor.ts';
 import { TerminalIOImpl } from './core/terminal.ts';
@@ -15,6 +14,7 @@ import { FunctionalTextBufferImpl } from './core/buffer.ts';
 import { EditorState } from './core/types.ts';
 import { TmaxServer } from './server/server.ts';
 import { Logger, LogLevel } from './utils/logger.ts';
+import { SteepFrontend } from './frontend/frontends/steep/index.ts';
 
 /**
  * Switch to alternate screen buffer (full screen mode)
@@ -149,7 +149,7 @@ async function main() {
   // Show help if requested
   if (args.includes('--help') || args.includes('-h')) {
     console.log(`
-tmax - Terminal-based text editor (Bun + Ink version with T-Lisp)
+tmax - Terminal-based text editor (T-Lisp powered)
 Version: ${VERSION}
 
 Usage: tmax [options] [filename]
@@ -158,15 +158,16 @@ Options:
   -v, --version       Show version and exit
   -h, --help          Show this help message
   --daemon            Start server daemon mode
+  --ink               Use Ink/React frontend (default: native Steep frontend)
   --dev, --no-tty     Development mode (skip TTY checks for AI coding assistants)
   --init-file FILE    Use custom init file (default: ~/.config/tmax/init.tlisp)
 
 Examples:
-  tmax                    # Start editor in normal mode
+  tmax                    # Start editor with native frontend
   tmax file.txt           # Open file.txt
   tmax --daemon           # Start server daemon
-  tmax --dev              # Start in development mode (for AI coding environments)
-  tmax --dev file.txt     # Open file.txt in development mode
+  tmax --ink file.txt     # Open file.txt with Ink frontend
+  tmax --dev              # Start in development mode
   tmax --init-file ./my-config.tlisp  # Use custom init file
     `);
     startupLog.completeOperation('editor-initialization', startupId);
@@ -358,95 +359,72 @@ Examples:
   }
 
   // Phase 5: Initialize UI
-  startupLog.info('Phase 5: Initializing React UI', {
-    correlationId: startupId,
-    metadata: { phase: 'init-ui' }
-  });
+  const useInk = args.includes('--ink');
 
-  // Enter full screen mode
-  enterFullScreen();
-
-  // Setup cleanup handlers to restore terminal on exit
-  setupCleanupHandlers();
-
-  // Render the React-based editor
-  // React is now a DUMB component - all logic goes through T-Lisp
-  try {
-    // Configure Ink options for development/testing environments
-    const inkOptions: any = {};
-
-    // In dev mode, only use mock stdin if we're NOT in a real TTY
-    // This allows the editor to work properly in tmux while still supporting
-    // non-TTY environments like Claude Code
-    if (devMode && !process.stdin.isTTY) {
-      const { Duplex } = await import('stream');
-      const mockStdin = new Duplex({
-        read() { /* No-op in dev mode - input comes from test harness */ },
-        write(_chunk, _encoding, callback) { callback(); }
-      });
-      // Mock isTTY for Ink's internal checks
-      (mockStdin as any).isTTY = true;
-      inkOptions.stdin = mockStdin;
-    }
-
-    const { waitUntilExit } = render(
-      <Editor
-        initialEditorState={initialState}
-        editor={editor}
-        filename={filename}
-        onError={(error: Error) => {
-          console.error("Editor error:", error.message);
-        }}
-      />,
-      inkOptions
-    );
-
-    startupLog.info('React UI rendered successfully', {
+  if (useInk) {
+    startupLog.info('Phase 5: Initializing Ink/React UI', {
       correlationId: startupId,
-      data: {
-        filename: filename || '<new buffer>',
-        mode: initialState.mode
+      metadata: { phase: 'init-ui', frontend: 'ink' }
+    });
+
+    enterFullScreen();
+    setupCleanupHandlers();
+
+    try {
+      const inkOptions: any = {};
+
+      if (devMode && !process.stdin.isTTY) {
+        const { Duplex } = await import('stream');
+        const mockStdin = new Duplex({
+          read() { /* No-op in dev mode */ },
+          write(_chunk: any, _encoding: any, callback: () => void) { callback(); }
+        });
+        (mockStdin as any).isTTY = true;
+        inkOptions.stdin = mockStdin;
       }
-    });
 
-    const totalStartupTime = Date.now() - startTime;
-    startupLog.completeOperation('editor-initialization', startupId, {
-      data: {
-        totalTime: totalStartupTime,
-        filename: filename || '<new buffer>',
-        mode: initialState.mode
-      }
-    });
+      const { waitUntilExit } = render(
+        <Editor
+          initialEditorState={initialState}
+          editor={editor}
+          filename={filename}
+          onError={(error: Error) => {
+            console.error("Editor error:", error.message);
+          }}
+        />,
+        inkOptions
+      );
 
-    perfLog.info('Startup performance metrics', {
-      data: {
-        totalStartupTime,
-        mode: devMode ? 'development' : 'normal'
-      }
-    });
+      const totalStartupTime = Date.now() - startTime;
+      startupLog.completeOperation('editor-initialization', startupId, {
+        data: { totalTime: totalStartupTime, frontend: 'ink' }
+      });
 
-    await waitUntilExit();
-  } catch (error) {
-    const errorMessage = error instanceof Error ? error.message : String(error);
-    const err = error instanceof Error ? error : new Error(errorMessage);
-
-    startupLog.failOperation('editor-initialization', startupId, err, {
-      phase: 'init-ui'
-    });
-
-    if (errorMessage.includes("stdin is not a TTY") && !devMode) {
-      console.error("Error: tmax must be run in a terminal.");
-      console.error("Use --dev flag for non-TTY environments (testing, AI assistants).");
-      console.error(`Details: ${errorMessage}`);
-      process.exit(1);
-    } else {
+      await waitUntilExit();
+      exitFullScreen();
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
       console.error("Error starting tmax:", errorMessage);
+      exitFullScreen();
       process.exit(1);
+    }
+  } else {
+    startupLog.info('Phase 5: Initializing Steep native frontend', {
+      correlationId: startupId,
+      metadata: { phase: 'init-ui', frontend: 'steep' }
+    });
+
+    const frontend = new SteepFrontend();
+    try {
+      await frontend.run(editor, initialState, filename);
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      if (!errorMessage.includes('EDITOR_QUIT_SIGNAL')) {
+        console.error("Error starting tmax:", errorMessage);
+        process.exit(1);
+      }
     }
   }
-
-  // Restore terminal (cleanup handlers will also do this, but we do it here for safety)
-  exitFullScreen();
 }
 
 // Run the application

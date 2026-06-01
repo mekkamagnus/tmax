@@ -57,6 +57,7 @@ export async function handleMxMode(editor: Editor, key: string, normalizedKey: s
 
     if (!command) {
       (editor as any).state.statusMessage = "No match";
+      (editor as any).logMessage("M-x: No match");
       return;
     }
 
@@ -65,6 +66,7 @@ export async function handleMxMode(editor: Editor, key: string, normalizedKey: s
 
     if (commands.length === 0) {
       (editor as any).state.statusMessage = "No commands available";
+      (editor as any).logMessage("M-x: No commands available");
       return;
     }
 
@@ -75,12 +77,14 @@ export async function handleMxMode(editor: Editor, key: string, normalizedKey: s
       // Single match - complete it
       (editor as any).state.mxCommand = bestMatch;
       (editor as any).state.statusMessage = `Completed: ${bestMatch}`;
+      (editor as any).logMessage(`M-x completed: ${bestMatch}`);
     } else {
       // Multiple matches - show them
       const completions = getFuzzyCompletions(command, commands);
 
       if (completions.length === 0) {
         (editor as any).state.statusMessage = "No match";
+        (editor as any).logMessage("M-x: No fuzzy match");
       } else {
         // Show up to 5 matches in status message
         const matchesToShow = completions.slice(0, 5).map(c => c.command).join(", ");
@@ -123,11 +127,13 @@ export async function handleMxMode(editor: Editor, key: string, normalizedKey: s
 
     if (!mappings) {
       (editor as any).state.statusMessage = `Unbound key: ${normalizedKey}`;
+      (editor as any).logMessage(`Unbound key: ${normalizedKey}`);
     } else {
       // Find mapping for mx mode
       const mapping = mappings.find((m: any) => !m.mode || m.mode === "mx");
       if (!mapping) {
         (editor as any).state.statusMessage = `Unbound key in mx mode: ${normalizedKey}`;
+        (editor as any).logMessage(`Unbound key in mx mode: ${normalizedKey}`);
       } else {
         // Execute the mapped command
         try {
@@ -137,6 +143,7 @@ export async function handleMxMode(editor: Editor, key: string, normalizedKey: s
             throw new Error("EDITOR_QUIT_SIGNAL"); // Re-throw clean quit signal to main loop
           }
           (editor as any).state.statusMessage = `Command error: ${error instanceof Error ? error.message : String(error)}`;
+          (editor as any).logMessage(`Command error: ${error instanceof Error ? error.message : String(error)}`);
         }
       }
     }

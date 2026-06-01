@@ -53,11 +53,13 @@ export async function handleInsertMode(editor: Editor, key: string, normalizedKe
 
     if (!mappings) {
       (editor as any).state.statusMessage = `Unbound key: ${normalizedKey}`;
+      (editor as any).logMessage(`Unbound key: ${normalizedKey}`);
     } else {
       // Find mapping for insert mode
       const mapping = mappings.find((m: any) => !m.mode || m.mode === "insert");
       if (!mapping) {
         (editor as any).state.statusMessage = `Unbound key in insert mode: ${normalizedKey}`;
+        (editor as any).logMessage(`Unbound key in insert mode: ${normalizedKey}`);
       } else {
         // Execute the mapped command
         try {
@@ -67,6 +69,7 @@ export async function handleInsertMode(editor: Editor, key: string, normalizedKe
             throw new Error("EDITOR_QUIT_SIGNAL"); // Re-throw clean quit signal to main loop
           }
           (editor as any).state.statusMessage = `Command error: ${error instanceof Error ? error.message : String(error)}`;
+          (editor as any).logMessage(`Command error: ${error instanceof Error ? error.message : String(error)}`);
         }
       }
     }

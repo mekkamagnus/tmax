@@ -32,13 +32,7 @@ import {
  * @param lineText - Text of the line
  * @returns Column index of first non-blank character
  */
-function findFirstNonBlankColumn(lineText: string): number {
-  let column = 0;
-  while (column < lineText.length && /\s/.test(lineText[column]!)) {
-    column++;
-  }
-  return column;
-}
+import { findFirstNonBlankColumn } from "./text-utils.ts";
 
 /**
  * Get terminal height for page size calculation

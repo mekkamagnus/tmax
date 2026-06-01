@@ -164,10 +164,13 @@ export function lspDiagnosticsCount(
     const editor = getCurrentBuffer();
     const diagnostics = editor.state.lspDiagnostics || [];
 
-    const errors = diagnostics.filter(d => d.severity === 1).length;
-    const warnings = diagnostics.filter(d => d.severity === 2).length;
-    const info = diagnostics.filter(d => d.severity === 3).length;
-    const hints = diagnostics.filter(d => d.severity === 4).length;
+    let errors = 0, warnings = 0, info = 0, hints = 0;
+    for (const d of diagnostics) {
+      if (d.severity === 1) errors++;
+      else if (d.severity === 2) warnings++;
+      else if (d.severity === 3) info++;
+      else if (d.severity === 4) hints++;
+    }
 
     return createList([
       createList([createString("errors"), createNumber(errors)]),

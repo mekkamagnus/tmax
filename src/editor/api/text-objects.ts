@@ -20,6 +20,7 @@ import type { FunctionalTextBuffer, Position } from "../../core/types.ts";
 import { Either } from "../../utils/task-either.ts";
 import { killRingSave } from "./kill-ring.ts";
 import { registerDelete } from "./evil-integration.ts";
+import { findWordStart, findWordEndOnLine as findWordEnd, findWordEndWithSpace } from "./text-utils.ts";
 
 /**
  * Register storage for deleted text
@@ -39,101 +40,6 @@ export function getDeleteRegister(): string {
  */
 export function setDeleteRegister(text: string): void {
   deleteRegister = text;
-}
-
-/**
- * Check if a character is a word character
- * Word characters are alphanumeric plus underscore
- */
-function isWordChar(char: string): boolean {
-  return /^[a-zA-Z0-9_]$/.test(char);
-}
-
-/**
- * Check if a character is whitespace
- */
-function isWhitespace(char: string): boolean {
-  return /^\s$/.test(char);
-}
-
-/**
- * Find the start of the word at the given position
- */
-function findWordStart(content: string, line: number, column: number): Either<string, number> {
-  const lines = content.split("\n");
-
-  if (line >= lines.length) {
-    return Either.left("Line out of bounds");
-  }
-
-  const currentLine = lines[line];
-
-  // Skip whitespace to find the word
-  while (column < currentLine.length && isWhitespace(currentLine[column])) {
-    column++;
-  }
-
-  // Find start of word
-  while (column > 0 && isWordChar(currentLine[column - 1])) {
-    column--;
-  }
-
-  return Either.right(column);
-}
-
-/**
- * Find the end of the word at the given position
- */
-function findWordEnd(content: string, line: number, column: number): Either<string, number> {
-  const lines = content.split("\n");
-
-  if (line >= lines.length) {
-    return Either.left("Line out of bounds");
-  }
-
-  const currentLine = lines[line];
-
-  // Skip whitespace to find the word
-  while (column < currentLine.length && isWhitespace(currentLine[column])) {
-    column++;
-  }
-
-  // Find end of word
-  while (column < currentLine.length && isWordChar(currentLine[column])) {
-    column++;
-  }
-
-  return Either.right(column);
-}
-
-/**
- * Find the end of the word including trailing whitespace
- */
-function findWordEndWithSpace(content: string, line: number, column: number): Either<string, number> {
-  const lines = content.split("\n");
-
-  if (line >= lines.length) {
-    return Either.left("Line out of bounds");
-  }
-
-  const currentLine = lines[line];
-
-  // Skip whitespace to find the word
-  while (column < currentLine.length && isWhitespace(currentLine[column])) {
-    column++;
-  }
-
-  // Find end of word
-  while (column < currentLine.length && isWordChar(currentLine[column])) {
-    column++;
-  }
-
-  // Include trailing whitespace
-  while (column < currentLine.length && isWhitespace(currentLine[column])) {
-    column++;
-  }
-
-  return Either.right(column);
 }
 
 /**

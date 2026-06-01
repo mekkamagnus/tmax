@@ -244,6 +244,24 @@ export interface KeyBinding {
 }
 
 /**
+ * Frame — per-client viewport state (like an Emacs frame)
+ * Each TUI client gets its own Frame. Frames share buffers, interpreter, config.
+ */
+export interface Frame {
+  id: string;
+  cursorPosition: Position;
+  viewportTop: number;
+  mode: EditorState["mode"];
+  commandLine: string;
+  mxCommand: string;
+  currentFilename?: string;
+  currentBuffer?: FunctionalTextBuffer;
+  statusMessage: string;
+  cursorFocus: 'buffer' | 'command';
+  lastActivity: Date;
+}
+
+/**
  * Editor operations interface using functional patterns
  */
 export interface FunctionalEditorOperations {

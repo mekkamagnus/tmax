@@ -48,6 +48,7 @@ export class Editor {
   private terminal: TerminalIO;
   private filesystem: FileSystem;
   private countPrefix: number = 0;  // Accumulated count for count prefix commands
+  private messages: string[] = [];
   private commandHistory: string[] = [];  // Command history for M-x (US-1.10.1)
   private historyIndex: number = 0;  // Current position in command history
   private spacePressed: boolean = false;  // Track space key for SPC ; sequence (US-1.10.1)
@@ -123,6 +124,9 @@ export class Editor {
     this.keyMappings = new Map();
     this.lspClient = new LSPClient(this.terminal, this.filesystem);
 
+    // Create *Messages* buffer
+    this.buffers.set('*Messages*', FunctionalTextBufferImpl.create(''));
+
     // Initialize KeymapSync for T-Lisp keymap integration (US-0.4.1)
     editorLog.info('Initializing KeymapSync', { correlationId: initId });
     this.keymapSync = new KeymapSync(this.interpreter);
@@ -131,6 +135,8 @@ export class Editor {
     // Initialize API
     editorLog.info('Initializing T-Lisp API', { correlationId: initId });
     this.initializeAPI();
+
+    this.logMessage('Welcome to tmax');
 
     // Note: Key bindings are loaded lazily on first key press via ensureCoreBindingsLoaded()
     editorLog.debug('Key bindings will be loaded on first key press', {
@@ -229,6 +235,7 @@ export class Editor {
       get cursorFocus() { return editor.state.cursorFocus ?? 'buffer'; },
       set cursorFocus(v: 'buffer' | 'command') { editor.state.cursorFocus = v; },
       get lspDiagnostics() { return editor.state.lspDiagnostics; },
+      logMessage: (msg: string) => editor.logMessage(msg),
       get operations() {
         return {
           saveFile: (filename?: string) => editor.saveFile(filename),
@@ -1817,6 +1824,17 @@ export class Editor {
   }
 
   /**
+   * Log a message to the *Messages* buffer
+   */
+  logMessage(msg: string): void {
+    const now = new Date();
+    const ts = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}:${String(now.getSeconds()).padStart(2, '0')}`;
+    const line = `[${ts}] ${msg}`;
+    this.messages.push(line);
+    this.buffers.set('*Messages*', FunctionalTextBufferImpl.create(this.messages.join('\n')));
+  }
+
+  /**
    * Create a new buffer
    * @param name - Buffer name
    * @param content - Initial content
@@ -1879,8 +1897,10 @@ export class Editor {
       // Update status message with LSP connection status (US-3.1.1)
       const lspStatus = this.lspClient.getStatusMessage();
       this.state.statusMessage = lspStatus ? `Opened ${filename} - ${lspStatus}` : `Opened ${filename}`;
+      this.logMessage(`Opened ${filename}`);
     } catch (error) {
       this.state.statusMessage = `Failed to open ${filename}: ${error instanceof Error ? error.message : String(error)}`;
+      this.logMessage(`Failed to open ${filename}: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
 
@@ -1910,6 +1930,7 @@ export class Editor {
           this.state.currentFilename = filename;
         }
         this.state.statusMessage = `Saved ${saveFilename}`;
+        this.logMessage(`Saved ${saveFilename}`);
       } else {
         this.state.statusMessage = `Failed to get content: ${contentResult.left}`;
       }
