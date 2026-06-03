@@ -80,6 +80,7 @@ Prefer these tools when available:
 - `gh` for GitHub interaction
 - `playwright-cli` for browser automation and UI verification
 - `tmux` for long-running terminal work
+- `uv` for Python package and project management
 
 ## 6. Learn From Corrections
 
