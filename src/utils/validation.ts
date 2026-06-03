@@ -151,3 +151,169 @@ export const validateEditorMode = (
   }
   return Either.right(undefined);
 };
+
+/**
+ * Validation value that can accumulate multiple errors.
+ */
+export class Validation<E, A> {
+  private constructor(
+    private readonly value: A | undefined,
+    private readonly errors: E[]
+  ) {}
+
+  /**
+   * Create a successful validation.
+   */
+  static success<E, A>(value: A): Validation<E, A> {
+    return new Validation(value, []);
+  }
+
+  /**
+   * Create a failed validation.
+   */
+  static failure<E, A = never>(errors: E | E[]): Validation<E, A> {
+    return new Validation(undefined, Array.isArray(errors) ? errors : [errors]);
+  }
+
+  /**
+   * Whether this validation succeeded.
+   */
+  isSuccess(): boolean {
+    return this.errors.length === 0;
+  }
+
+  /**
+   * Whether this validation failed.
+   */
+  isFailure(): boolean {
+    return !this.isSuccess();
+  }
+
+  /**
+   * Get the successful value.
+   */
+  getValue(): A {
+    if (this.isFailure()) {
+      throw new Error('Cannot get value from failed validation');
+    }
+    return this.value as A;
+  }
+
+  /**
+   * Get accumulated errors.
+   */
+  getErrors(): E[] {
+    return [...this.errors];
+  }
+
+  /**
+   * Map a successful value.
+   */
+  map<B>(fn: (value: A) => B): Validation<E, B> {
+    return this.isSuccess()
+      ? Validation.success(fn(this.value as A))
+      : Validation.failure(this.errors);
+  }
+
+  /**
+   * Chain a validation-producing function.
+   */
+  flatMap<B>(fn: (value: A) => Validation<E, B>): Validation<E, B> {
+    return this.isSuccess() ? fn(this.value as A) : Validation.failure(this.errors);
+  }
+}
+
+/**
+ * Lift a curried binary function into Validation.
+ */
+export const lift2 =
+  <A, B, C>(fn: (a: A) => (b: B) => C) =>
+  <E>(va: Validation<E, A>) =>
+  (vb: Validation<E, B>): Validation<E, C> => {
+    const errors = [...va.getErrors(), ...vb.getErrors()];
+    return errors.length > 0
+      ? Validation.failure(errors)
+      : Validation.success(fn(va.getValue())(vb.getValue()));
+  };
+
+/**
+ * Lift a curried ternary function into Validation.
+ */
+export const lift3 =
+  <A, B, C, D>(fn: (a: A) => (b: B) => (c: C) => D) =>
+  <E>(va: Validation<E, A>) =>
+  (vb: Validation<E, B>) =>
+  (vc: Validation<E, C>): Validation<E, D> => {
+    const errors = [...va.getErrors(), ...vb.getErrors(), ...vc.getErrors()];
+    return errors.length > 0
+      ? Validation.failure(errors)
+      : Validation.success(fn(va.getValue())(vb.getValue())(vc.getValue()));
+  };
+
+/**
+ * Common validation helpers.
+ */
+export const ValidationUtils = {
+  required: <T>(value: T | null | undefined, message: string): Validation<string, T> =>
+    value === null || value === undefined
+      ? Validation.failure(message)
+      : Validation.success(value),
+
+  nonEmpty: (value: string, message: string): Validation<string, string> =>
+    value.length === 0 ? Validation.failure(message) : Validation.success(value),
+
+  numberInRange: (
+    value: number,
+    min: number,
+    max: number,
+    message: string
+  ): Validation<string, number> =>
+    value < min || value > max ? Validation.failure(message) : Validation.success(value),
+
+  email: (value: string, message = 'Invalid email'): Validation<string, string> =>
+    /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value)
+      ? Validation.success(value)
+      : Validation.failure(message),
+
+  securePath: (path: string): Validation<string, string> =>
+    path.includes('..')
+      ? Validation.failure('Path contains directory traversal')
+      : Validation.success(path),
+
+  lengthBetween: (
+    value: string,
+    min: number,
+    max: number,
+    message: string
+  ): Validation<string, string> =>
+    value.length < min || value.length > max ? Validation.failure(message) : Validation.success(value),
+
+  matches: (
+    value: string,
+    pattern: RegExp,
+    message: string
+  ): Validation<string, string> =>
+    pattern.test(value) ? Validation.success(value) : Validation.failure(message),
+};
+
+/**
+ * Builder helpers for composing validation rules.
+ */
+export const validation = {
+  builder: <T, E = string>() => {
+    const rules: Array<(value: T) => Validation<E, T>> = [];
+    const builder = {
+      rule(rule: (value: T) => Validation<E, T>) {
+        rules.push(rule);
+        return builder;
+      },
+      build() {
+        return (value: T): Validation<E, T> => {
+          const errors = rules.flatMap(rule => rule(value).getErrors());
+          return errors.length > 0 ? Validation.failure(errors) : Validation.success(value);
+        };
+      }
+    };
+    return builder;
+  }
+};

@@ -223,7 +223,7 @@ export class DebugReporter {
     lines.push(
       "═══ ENVIRONMENT ═══",
       `🖥️  Platform: ${context.environment.platform}`,
-      `🦕 Deno Version: ${context.environment.denoVersion}`,
+      `🥟 Bun Version: ${typeof Bun !== "undefined" ? Bun.version : "N/A"}`,
       `📦 Tmax Version: ${context.environment.tmaxVersion}`,
       `📁 Working Dir: ${context.environment.workingDirectory}`,
       `💻 TTY Status: ${context.environment.ttyStatus ? 'Connected' : 'Not Connected'}`,

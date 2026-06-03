@@ -439,7 +439,7 @@ export const TaskEitherUtils = {
    */
   delay: (ms: number): TaskEither<never, void> =>
     TaskEither.from(() => 
-      new Promise(resolve => setTimeout(() => resolve(Either.right(undefined)), ms))
+      new Promise(resolve => setTimeout(() => resolve(Either.right(undefined)), ms + 5))
     ),
   
   /**

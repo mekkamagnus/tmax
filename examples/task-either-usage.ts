@@ -114,7 +114,7 @@ const loadProjectFiles = (projectPath: string) => {
 const validateProject = (projectPath: string) => {
   const checks = [
     TaskEitherUtils.readFile(`${projectPath}/package.json`).map(() => "package.json exists"),
-    TaskEitherUtils.readFile(`${projectPath}/deno.json`).map(() => "deno.json exists"),
+    TaskEitherUtils.readFile(`${projectPath}/bun.lock`).map(() => "bun.lock exists"),
     TaskEitherUtils.readFile(`${projectPath}/src/main.ts`).map(() => "main.ts exists")
   ];
   
