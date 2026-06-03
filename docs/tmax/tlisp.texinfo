@@ -1,0 +1,1979 @@
+\input texinfo
+@setfilename tlisp.info
+@settitle T-Lisp Language and API Reference
+@documentencoding UTF-8
+@documentlanguage en
+
+@copying
+This manual is the T-Lisp Language and API Reference for tmax (version 0.2.0).
+
+Copyright @copyright{} 2024 tmax contributors.
+
+@quotation
+Permission is granted to copy, distribute and/or modify this document
+under the terms of the GNU Free Documentation License, Version 1.3
+or any later version published by the Free Software Foundation;
+with no Invariant Sections, no Front-Cover Texts, and no Back-Cover Texts.
+@end quotation
+@end copying
+
+@titlepage
+@title T-Lisp Reference Manual
+@subtitle Language and API Reference for tmax
+@author tmax contributors
+@page
+@vskip 0pt plus 1filll
+@insertcopying
+@end titlepage
+
+@contents
+
+@ifnottex
+@node Top
+@top T-Lisp Reference
+
+This manual documents the T-Lisp language and the complete editor API
+for tmax, the extensible terminal-based text editor.
+
+@insertcopying
+@end ifnottex
+
+@menu
+* Introduction::              What is T-Lisp
+* Lexical Structure::         Comments, identifiers, literals
+* Data Types::                Numbers, strings, symbols, lists, booleans, nil
+* Evaluation::                How expressions are evaluated
+* Special Forms::             quote, if, let, lambda, defun, defmacro, etc.
+* Quasiquote System::         Template quoting with unquote
+* Standard Library::          Built-in functions
+* Macro System::              Defining and using macros
+* Tail Call Optimization::    Writing efficient recursive functions
+* Editor API --- Buffer::     Buffer manipulation functions
+* Editor API --- Cursor::     Cursor position and movement
+* Editor API --- Text Editing:: Delete, yank, change, paste
+* Editor API --- Search::     Search and replace operations
+* Editor API --- Visual::     Visual selection operations
+* Editor API --- Text Objects:: Structured text objects
+* Editor API --- Kill Ring::  Clipboard history operations
+* Editor API --- Undo/Redo::  Undo and redo operations
+* Editor API --- Modes::      Editor mode operations
+* Editor API --- Files::      File system operations
+* Editor API --- Key Bindings:: Key binding and command execution
+* Editor API --- Minibuffer:: Minibuffer operations
+* Editor API --- Hooks::      Hook system operations
+* Editor API --- Loading::    load, provide, require, and load-path
+* Editor API --- Syntax::     Syntax highlighting operations
+* Editor API --- Major Modes:: Major mode operations
+* Editor API --- Minor Modes:: Minor mode operations
+* Editor API --- Plugins::    Plugin system operations
+* Editor API --- Windows::    Window management operations
+* Editor API --- Registers::  Register operations
+* Editor API --- LSP::        LSP diagnostics operations
+* Editor API --- Navigation:: Word, line, jump, page navigation
+* Editor API --- Count Prefix:: Count prefix operations
+* Editor API --- Dired::      Directory editor operations
+* Editor API --- Replace::    Replace operations
+* Editor API --- Indent::     Indentation operations
+* Editor API --- Miscellaneous:: message, messages-buffer, documentation
+* Testing Framework::         T-Lisp testing functions
+* Index::                     Function and concept index
+@end menu
+
+@node Introduction
+@chapter Introduction
+
+@cindex T-Lisp
+@cindex introduction
+
+T-Lisp (tmax Lisp) is a Lisp-1 dialect embedded in the tmax terminal text editor.
+It provides all editor extensibility through a comprehensive API.
+
+@itemize @bullet
+@item @strong{Lisp-1 dialect} --- variables and functions share the same namespace
+@item @strong{Lexical scoping} --- variables are scoped to their defining block
+@item @strong{Tail-call optimization} --- recursive calls in tail position use constant stack
+@item @strong{Macro system} --- full quasiquote support for metaprogramming
+@item @strong{200+ editor API functions} --- complete control over the editor
+@item @strong{Testing framework} --- built-in test definitions and assertions
+@end itemize
+
+@node Lexical Structure
+@chapter Lexical Structure
+
+@cindex lexical structure
+@cindex comments
+@cindex identifiers
+
+@section Comments
+
+Comments begin with @code{;} and extend to end of line:
+
+@example
+;; This is a comment
+(+ 1 2) ; inline comment
+@end example
+
+@section Identifiers
+
+Identifiers may contain letters, digits, and: @code{-}, @code{_}, @code{?}, @code{!}, @code{+}, @code{*}, @code{/}, @code{<}, @code{>}, @code{=}
+
+@example
+x  my-variable  buffer-insert  nil?  set!  +  <=
+@end example
+
+@section String Literals
+
+Double-quoted with escape sequences:
+
+@example
+"hello world"
+"Line 1\nLine 2"
+"Say \"hello\""
+@end example
+
+@section Number Literals
+
+@example
+42    -17    3.14    -2.5
+@end example
+
+@section Special Tokens
+
+@table @code
+@item ( )
+Parentheses delimit lists and function calls
+@item '
+Quote --- shorthand for @code{(quote ...)}
+@item `
+Quasiquote --- template quotation
+@item ,
+Unquote --- evaluate within quasiquote
+@item @code{,@@}
+Unquote-splice --- splice list elements within quasiquote
+@end table
+
+@node Data Types
+@chapter Data Types
+
+@cindex data types
+
+@table @code
+@item Numbers
+Integers and floating-point: @code{42}, @code{-17}, @code{3.14}
+
+@item Strings
+Text in double quotes: @code{"hello"}, @code{"file.txt"}
+
+@item Symbols
+Identifiers that name variables: @code{x}, @code{buffer-insert}
+
+@item Lists
+Ordered collections: @code{'(1 2 3)}, @code{(list 1 2 3)}
+
+@item Booleans
+@code{#t} (true), @code{#f} (false)
+
+@item Nil
+Empty list / false: @code{nil} or @code{'()}
+
+@item Hash Maps
+Key-value stores: @code{(hashmap "key" "value")}
+
+@item Functions
+Created with @code{lambda} or @code{defun}
+
+@item Macros
+Created with @code{defmacro}
+@end table
+
+@node Evaluation
+@chapter Evaluation
+
+@cindex evaluation
+
+@itemize @bullet
+@item @strong{Self-evaluating}: numbers, strings, booleans, nil evaluate to themselves
+@item @strong{Symbols}: looked up in the current environment chain
+@item @strong{Lists}: first element is the function, remaining elements are evaluated as arguments
+@item @strong{Special forms}: @code{if}, @code{let}, @code{lambda}, etc.---evaluated with custom rules
+@end itemize
+
+@example
+(+ 1 2 3)         ; function call => 6
+(if (> x 0) x 0)  ; special form
+(let ((x 10)) x)   ; special form => 10
+@end example
+
+@node Special Forms
+@chapter Special Forms
+
+@cindex special forms
+
+@deffn Special Form quote expr
+Return @var{expr} without evaluating it.
+@example
+(quote x)    ; => x
+'(1 2 3)     ; => (1 2 3)
+@end example
+@end deffn
+
+@deffn Special Form if condition then-expr else-expr
+Evaluate @var{condition}. If truthy, evaluate and return @var{then-expr}; otherwise evaluate and return @var{else-expr}.
+@example
+(if (> 3 2) "yes" "no")  ; => "yes"
+@end example
+@end deffn
+
+@deffn Special Form let bindings body...
+Create local variable bindings. @var{bindings} is a list of @code{(name value)} pairs.
+@example
+(let ((x 10) (y 20))
+  (+ x y))  ; => 30
+@end example
+@end deffn
+
+@deffn Special Form lambda params docstring? body...
+Create an anonymous function. Optional @var{docstring} after @var{params}.
+@example
+(lambda (x) (* x x))
+(funcall (lambda (x y) (+ x y)) 3 4)  ; => 7
+@end example
+@end deffn
+
+@deffn Special Form defun name params docstring? body...
+Define a named function in the current environment.
+@example
+(defun square (x)
+  (* x x))
+(square 5)  ; => 25
+@end example
+@end deffn
+
+@deffn Special Form defmacro name params body...
+Define a macro. The body is evaluated at expansion time, not call time.
+@example
+(defmacro when (condition . body)
+  `(if ,condition (progn ,@@body)))
+@end example
+@end deffn
+
+@deffn Special Form progn expr...
+Evaluate each expression in sequence. Return the value of the last.
+@example
+(progn
+  (buffer-insert "Hello")
+  (cursor-move 0 0))
+@end example
+@end deffn
+
+@deffn Special Form cond clause...
+Multi-way conditional. Each clause is @code{(condition expr)}. Use @code{t} as condition for else.
+@example
+(cond
+  ((< x 0) "negative")
+  ((= x 0) "zero")
+  (t "positive"))
+@end example
+@end deffn
+
+@deffn Special Form defvar name value
+Define a variable in the global environment.
+@example
+(defvar tab-width 4)
+@end example
+@end deffn
+
+@deffn Special Form set! name value
+Set an existing variable's value.
+@example
+(set! tab-width 2)
+@end example
+@end deffn
+
+@node Quasiquote System
+@chapter Quasiquote System
+
+@cindex quasiquote
+@cindex unquote
+@cindex macro
+
+@deffn Special Form quasiquote expr @code{`}
+Template quotation --- like @code{quote} but allows selective evaluation.
+@example
+`(a b c)              ; => (a b c)
+@end example
+@end deffn
+
+@deffn Special Form unquote expr @code{,}
+Evaluate @var{expr} within a quasiquote.
+@example
+(let ((x 42))
+  `(the answer is ,x))  ; => (the answer is 42)
+@end example
+@end deffn
+
+@deffn Special Form unquote-splicing expr @code{,@@}
+Splice list elements into the enclosing quasiquote.
+@example
+(let ((nums '(1 2 3)))
+  `(before ,@@nums after))  ; => (before 1 2 3 after)
+@end example
+@end deffn
+
+@node Standard Library
+@chapter Standard Library
+
+@cindex standard library
+
+@section Arithmetic
+
+@deffn Function + numbers...
+Addition. With no arguments returns 0.
+@example
+(+)          ; => 0
+(+ 5)        ; => 5
+(+ 1 2 3)    ; => 6
+@end example
+@end deffn
+
+@deffn Function - numbers...
+Subtraction. With one argument, negation.
+@example
+(- 5)        ; => -5
+(- 10 3)     ; => 7
+(- 20 5 2)   ; => 13
+@end example
+@end deffn
+
+@deffn Function * numbers...
+Multiplication. With no arguments returns 1.
+@example
+(*)          ; => 1
+(* 3 4)      ; => 12
+@end example
+@end deffn
+
+@deffn Function / numbers...
+Division. With one argument, reciprocal.
+@example
+(/ 2)        ; => 0.5
+(/ 10 2)     ; => 5
+@end example
+@end deffn
+
+@deffn Function mod dividend divisor
+Modulo operation.
+@example
+(mod 7 3)    ; => 1
+@end example
+@end deffn
+
+@deffn Function abs number
+Absolute value.
+@example
+(abs -5)     ; => 5
+@end example
+@end deffn
+
+@deffn Function min numbers...
+Minimum of arguments.
+@example
+(min 3 1 4 1 5)  ; => 1
+@end example
+@end deffn
+
+@deffn Function max numbers...
+Maximum of arguments.
+@example
+(max 3 1 4 1 5)  ; => 5
+@end example
+@end deffn
+
+@deffn Function sqrt number
+Square root.
+@example
+(sqrt 16)    ; => 4
+@end example
+@end deffn
+
+@deffn Function expt base exponent
+Exponentiation.
+@example
+(expt 2 10)  ; => 1024
+@end example
+@end deffn
+
+@deffn Function floor number
+Round down to integer.
+@end deffn
+
+@deffn Function ceiling number
+Round up to integer.
+@end deffn
+
+@deffn Function round number
+Round to nearest integer.
+@end deffn
+
+@section Comparison
+
+@deffn Function = a b
+Numeric equality.
+@example
+(= 3 3)      ; => #t
+(= 1 2)      ; => #f
+@end example
+@end deffn
+
+@deffn Function < a b
+Less than.
+@example
+(< 1 2)      ; => #t
+@end example
+@end deffn
+
+@deffn Function > a b
+Greater than.
+@example
+(> 3 2)      ; => #t
+@end example
+@end deffn
+
+@deffn Function eq a b
+Object identity comparison.
+@end deffn
+
+@section List Operations
+
+@deffn Function cons elem list
+Prepend @var{elem} to @var{list}.
+@example
+(cons 1 '(2 3))  ; => (1 2 3)
+@end example
+@end deffn
+
+@deffn Function car list
+First element of @var{list}.
+@example
+(car '(1 2 3))   ; => 1
+@end example
+@end deffn
+
+@deffn Function cdr list
+Rest of @var{list} after first element.
+@example
+(cdr '(1 2 3))   ; => (2 3)
+@end example
+@end deffn
+
+@deffn Function list elements...
+Create a list from arguments.
+@example
+(list 1 2 3)     ; => (1 2 3)
+@end example
+@end deffn
+
+@deffn Function append lists...
+Concatenate lists.
+@example
+(append '(1 2) '(3 4))  ; => (1 2 3 4)
+@end example
+@end deffn
+
+@deffn Function reverse list
+Reverse a list.
+@example
+(reverse '(1 2 3))  ; => (3 2 1)
+@end example
+@end deffn
+
+@deffn Function nth n list
+Get @var{n}th element (0-indexed).
+@example
+(nth 0 '(a b c))  ; => a
+@end example
+@end deffn
+
+@deffn Function last list
+Get last element.
+@example
+(last '(1 2 3))   ; => 3
+@end example
+@end deffn
+
+@deffn Function member item list
+Find @var{item} in @var{list}; return tail from match or nil.
+@end deffn
+
+@deffn Function length string-or-list
+Length of string or list.
+@example
+(length "hello")  ; => 5
+(length '(1 2 3)) ; => 3
+@end example
+@end deffn
+
+@section String Operations
+
+@deffn Function substring str start end
+Extract substring from @var{start} to @var{end}.
+@example
+(substring "hello" 1 4)  ; => "ell"
+@end example
+@end deffn
+
+@deffn Function string-append strings...
+Concatenate strings.
+@example
+(string-append "hello" " " "world")  ; => "hello world"
+@end example
+@end deffn
+
+@deffn Function string= a b
+String equality.
+@end deffn
+
+@deffn Function string< a b
+String less-than (lexicographic).
+@end deffn
+
+@deffn Function string> a b
+String greater-than (lexicographic).
+@end deffn
+
+@deffn Function string-upcase str
+Convert to uppercase.
+@end deffn
+
+@deffn Function string-downcase str
+Convert to lowercase.
+@end deffn
+
+@section Type Predicates
+
+@deffn Function null expr
+Test if @var{expr} is nil or empty list.
+@end deffn
+
+@deffn Function atom expr
+Test if @var{expr} is not a list.
+@end deffn
+
+@deffn Function numberp expr
+Test if @var{expr} is a number.
+@end deffn
+
+@deffn Function stringp expr
+Test if @var{expr} is a string.
+@end deffn
+
+@deffn Function symbolp expr
+Test if @var{expr} is a symbol.
+@end deffn
+
+@deffn Function listp expr
+Test if @var{expr} is a list.
+@end deffn
+
+@deffn Function functionp expr
+Test if @var{expr} is a function.
+@end deffn
+
+@deffn Function zerop number
+Test if @var{number} is zero.
+@end deffn
+
+@deffn Function evenp number
+Test if @var{number} is even.
+@end deffn
+
+@deffn Function oddp number
+Test if @var{number} is odd.
+@end deffn
+
+@section Logical
+
+@deffn Function not expr
+Logical negation. Returns @code{#t} if @var{expr} is falsy.
+@end deffn
+
+@section I/O
+
+@deffn Function print args...
+Print arguments to stdout.
+@end deffn
+
+@section Hash Maps
+
+@deffn Function hashmap key1 value1 key2 value2...
+Create a hash map from key-value pairs.
+@example
+(hashmap "name" "tmax" "version" "0.2")
+@end example
+@end deffn
+
+@deffn Function hashmap-get map key
+Get value for @var{key} from @var{map}. Returns nil if not found.
+@end deffn
+
+@deffn Function hashmap-set map key value
+Return new map with @var{key} set to @var{value} (immutable).
+@end deffn
+
+@deffn Function hashmap-keys map
+Return list of all keys.
+@end deffn
+
+@deffn Function hashmap-values map
+Return list of all values.
+@end deffn
+
+@deffn Function hashmap-has-key? map key
+Test if @var{map} contains @var{key}.
+@end deffn
+
+@section Keymaps
+
+@deffn Function defkeymap name
+Create and define a new keymap.
+@end deffn
+
+@deffn Function keymap-get keymap property
+Get a property from a keymap.
+@end deffn
+
+@deffn Function keymap-define-key keymap key command
+Bind @var{key} to @var{command} in @var{keymap}.
+@end deffn
+
+@deffn Function keymap-lookup keymap key
+Look up binding for @var{key} in @var{keymap}.
+@end deffn
+
+@section Variables
+
+@deffn Function setq name value
+Set variable @var{name} to @var{value} in the global environment.
+@example
+(setq tab-width 4)
+@end example
+@end deffn
+
+@node Macro System
+@chapter Macro System
+
+@cindex macros
+@cindex defmacro
+
+Macros transform code at expansion time. They receive unevaluated arguments
+and produce new code to be evaluated.
+
+@example
+(defmacro when (condition . body)
+  `(if ,condition (progn ,@@body)))
+
+(when (> x 0)
+  (print "positive")
+  (print x))
+;; Expands to: (if (> x 0) (progn (print "positive") (print x)))
+@end example
+
+Key points:
+@itemize @bullet
+@item Macro arguments are @strong{not} evaluated before the macro runs
+@item The macro body produces a new expression (the @strong{expansion})
+@item The expansion is then evaluated in the calling environment
+@item Use quasiquote (@code{`}) with unquote (@code{,}) and splice (@code{,@@}) to build expansions
+@end itemize
+
+@node Tail Call Optimization
+@chapter Tail Call Optimization
+
+@cindex tail call optimization
+@cindex TCO
+
+T-Lisp optimizes recursive calls in tail position to use constant stack space.
+A call is in tail position when it is the last thing a function does.
+
+@example
+;; Tail-recursive factorial
+(defun factorial (n acc)
+  (if (<= n 1)
+      acc
+      (factorial (- n 1) (* n acc))))
+
+(defun fact (n)
+  (factorial n 1))
+
+(fact 100)  ; Works without stack overflow
+@end example
+
+The recursive call to @code{factorial} is in tail position because it is the
+result of the @code{if} expression in the else branch.
+
+@node Editor API --- Buffer
+@chapter Editor API --- Buffer
+
+@cindex buffer operations
+@cindex buffer API
+
+@deffn Function buffer-create name
+Create a new buffer named @var{name}.
+@end deffn
+
+@deffn Function buffer-switch name
+Switch to buffer @var{name}.
+@end deffn
+
+@deffn Function buffer-current
+Return name of current buffer, or nil.
+@end deffn
+
+@deffn Function buffer-list
+Return list of all buffer names.
+@end deffn
+
+@deffn Function buffer-text
+Return entire buffer content as string.
+@end deffn
+
+@deffn Function buffer-line @var{lineNum}
+Return content of line @var{lineNum}. If omitted, returns current line.
+@end deffn
+
+@deffn Function buffer-lines
+Return list of all lines in current buffer.
+@end deffn
+
+@deffn Function buffer-line-count
+Return number of lines in current buffer.
+@end deffn
+
+@deffn Function buffer-insert text
+Insert @var{text} at cursor position and advance cursor.
+@end deffn
+
+@deffn Function buffer-delete count
+Delete @var{count} characters at cursor. Returns deleted text.
+@end deffn
+
+@deffn Function buffer-filename
+Return filename of current buffer, or nil.
+@end deffn
+
+@deffn Function set-buffer-filename path
+Set filename for current buffer to @var{path}.
+@end deffn
+
+@deffn Function buffer-modified-p
+Return @code{#t} if buffer has unsaved changes.
+@end deffn
+
+@deffn Function set-buffer-modified-p flag
+Set modified flag to @var{flag}.
+@end deffn
+
+@deffn Function buffer-get-line-indent lineNum
+Return indentation level (number of spaces) of line @var{lineNum}.
+@end deffn
+
+@deffn Function buffer-set-line-indent lineNum column
+Set indentation of line @var{lineNum} to @var{column} spaces.
+@end deffn
+
+@deffn Function buffer-previous-non-blank-line lineNum
+Find previous non-blank line number from @var{lineNum}. Returns -1 if none.
+@end deffn
+
+@deffn Function buffer-line-matches lineNum pattern
+Test if line @var{lineNum} matches regex @var{pattern}.
+@end deffn
+
+@node Editor API --- Cursor
+@chapter Editor API --- Cursor
+
+@cindex cursor operations
+
+@deffn Function cursor-position
+Return current cursor position as @code{(line column)} list.
+@example
+(cursor-position)  ; => (5 10)
+@end example
+@end deffn
+
+@deffn Function cursor-move line column
+Move cursor to @var{line} and @var{column} (0-indexed).
+@end deffn
+
+@deffn Function cursor-line
+Return current cursor line number (0-indexed).
+@end deffn
+
+@deffn Function cursor-column
+Return current cursor column number (0-indexed).
+@end deffn
+
+@node Editor API --- Text Editing
+@chapter Editor API --- Text Editing
+
+@cindex delete
+@cindex yank
+@cindex change
+@cindex paste
+
+@section Delete Operations
+
+@deffn Function delete-word count
+Delete @var{count} words from cursor (dw).
+@end deffn
+
+@deffn Function delete-to-line-end
+Delete from cursor to end of line (d$).
+@end deffn
+
+@deffn Function delete-line count
+Delete current line and @var{count}-1 lines below (dd).
+@end deffn
+
+@deffn Function delete-to-sentence-end
+Delete from cursor to end of sentence (d)).
+@end deffn
+
+@deffn Function delete-register-get
+Get content of the delete register.
+@end deffn
+
+@section Yank (Copy) Operations
+
+@deffn Function yank-chars count
+Yank @var{count} characters from cursor (yl).
+@end deffn
+
+@deffn Function yank-word count
+Yank @var{count} words from cursor (yw).
+@end deffn
+
+@deffn Function yank-line count
+Yank current line and @var{count}-1 lines below (yy).
+@end deffn
+
+@deffn Function yank-to-line-end
+Yank from cursor to end of line (y$).
+@end deffn
+
+@deffn Function yank-register-get
+Get content of the yank register.
+@end deffn
+
+@deffn Function yank-register-set text
+Set yank register to @var{text}.
+@end deffn
+
+@section Paste Operations
+
+@deffn Function paste-after count
+Paste after cursor @var{count} times (p).
+@end deffn
+
+@deffn Function paste-before count
+Paste before cursor @var{count} times (P).
+@end deffn
+
+@section Change Operations
+
+@deffn Function change-word count
+Change @var{count} words from cursor (cw).
+@end deffn
+
+@deffn Function change-line count
+Change current line and @var{count}-1 lines below (cc).
+@end deffn
+
+@deffn Function change-to-line-end
+Change from cursor to end of line (c$).
+@end deffn
+
+@node Editor API --- Search
+@chapter Editor API --- Search
+
+@cindex search
+@cindex incremental search
+
+@deffn Function search-forward pattern
+Search forward for @var{pattern}.
+@end deffn
+
+@deffn Function search-backward pattern
+Search backward for @var{pattern}.
+@end deffn
+
+@deffn Function search-next
+Move to next search match.
+@end deffn
+
+@deffn Function search-previous
+Move to previous search match.
+@end deffn
+
+@deffn Function word-under-cursor-next
+Find next occurrence of word under cursor.
+@end deffn
+
+@deffn Function word-under-cursor-previous
+Find previous occurrence of word under cursor.
+@end deffn
+
+@deffn Function search-pattern-get
+Return current search pattern.
+@end deffn
+
+@deffn Function search-direction-get
+Return search direction (@code{"forward"} or @code{"backward"}).
+@end deffn
+
+@deffn Function search-clear
+Clear search highlighting.
+@end deffn
+
+@deffn Function search-find-all-matches pattern
+Find all matches for @var{pattern} in buffer.
+@end deffn
+
+@deffn Function search-set-highlight-ranges ranges
+Set highlight ranges for search display.
+@end deffn
+
+@deffn Function search-incremental-start pattern
+Start incremental search with initial @var{pattern}.
+@end deffn
+
+@deffn Function search-incremental-update char
+Add @var{char} to incremental search pattern.
+@end deffn
+
+@deffn Function search-incremental-backspace
+Remove last character from incremental search.
+@end deffn
+
+@deffn Function search-incremental-finish
+Finish incremental search and move to match.
+@end deffn
+
+@deffn Function search-incremental-cancel
+Cancel incremental search.
+@end deffn
+
+@node Editor API --- Visual
+@chapter Editor API --- Visual
+
+@cindex visual mode
+@cindex visual selection
+
+@deffn Function visual-enter-char-mode
+Enter visual character mode (v).
+@end deffn
+
+@deffn Function visual-enter-line-mode
+Enter visual line mode (V).
+@end deffn
+
+@deffn Function visual-enter-block-mode
+Enter visual block mode (C-v).
+@end deffn
+
+@deffn Function visual-exit
+Exit visual mode.
+@end deffn
+
+@deffn Function visual-get-selection
+Return current visual selection as range.
+@end deffn
+
+@deffn Function visual-update-end line column
+Update visual selection end to @var{line} and @var{column}.
+@end deffn
+
+@deffn Function visual-delete
+Delete text within visual selection.
+@end deffn
+
+@deffn Function visual-yank
+Yank (copy) text within visual selection.
+@end deffn
+
+@deffn Function visual-lowercase
+Convert visual selection to lowercase.
+@end deffn
+
+@deffn Function visual-uppercase
+Convert visual selection to uppercase.
+@end deffn
+
+@node Editor API --- Text Objects
+@chapter Editor API --- Text Objects
+
+@cindex text objects
+
+@deffn Function delete-inner-word
+Delete word inside surrounding delimiters (diw).
+@end deffn
+
+@deffn Function delete-around-word
+Delete word and surrounding delimiters (daw).
+@end deffn
+
+@deffn Function change-inner-single-quote
+Change text inside single quotes (ci').
+@end deffn
+
+@deffn Function change-around-single-quote
+Change text including single quotes (ca').
+@end deffn
+
+@deffn Function change-inner-double-quote
+Change text inside double quotes (ci").
+@end deffn
+
+@deffn Function change-around-double-quote
+Change text including double quotes (ca").
+@end deffn
+
+@deffn Function change-inner-paren
+Change text inside parentheses (ci)).
+@end deffn
+
+@deffn Function delete-inner-paren
+Delete text inside parentheses (di)).
+@end deffn
+
+@deffn Function change-inner-brace
+Change text inside braces (ci@}).
+@end deffn
+
+@deffn Function delete-inner-brace
+Delete text inside braces (di@}).
+@end deffn
+
+@deffn Function delete-inner-bracket
+Delete text inside brackets (di]).
+@end deffn
+
+@deffn Function delete-inner-angle
+Delete text inside angle brackets (di>).
+@end deffn
+
+@deffn Function delete-inner-tag
+Delete HTML/XML tag content (dit).
+@end deffn
+
+@node Editor API --- Kill Ring
+@chapter Editor API --- Kill Ring
+
+@cindex kill ring
+@cindex clipboard
+
+@deffn Function kill-ring-save text
+Add @var{text} to the kill ring.
+@end deffn
+
+@deffn Function kill-ring-yank
+Return most recently killed text.
+@end deffn
+
+@deffn Function kill-ring-rotate
+Rotate kill ring for cycling to next entry.
+@end deffn
+
+@deffn Function kill-ring-list
+Return all entries in the kill ring.
+@end deffn
+
+@deffn Function set-kill-ring-max size
+Set maximum kill ring size to @var{size}.
+@end deffn
+
+@deffn Function get-kill-ring-max
+Return current maximum kill ring size.
+@end deffn
+
+@deffn Function yank-pop
+Replace last yanked text with previous kill ring entry.
+@end deffn
+
+@deffn Function yank-pop-active
+Return @code{#t} if yank-pop cycling is active.
+@end deffn
+
+@deffn Function yank-pop-reset
+Reset yank-pop state.
+@end deffn
+
+@node Editor API --- Undo/Redo
+@chapter Editor API --- Undo/Redo
+
+@cindex undo
+@cindex redo
+
+@deffn Function undo
+Undo the last edit.
+@end deffn
+
+@deffn Function redo
+Redo the last undone edit.
+@end deffn
+
+@deffn Function undo-history-push operation
+Push an operation description to undo history.
+@end deffn
+
+@deffn Function undo-history-clear
+Clear the undo history.
+@end deffn
+
+@deffn Function undo-history-count
+Return number of operations in undo history.
+@end deffn
+
+@deffn Function undo-get-status
+Return current undo/redo status message.
+@end deffn
+
+@node Editor API --- Modes
+@chapter Editor API --- Modes
+
+@cindex modes
+@cindex editor mode
+
+@deffn Function editor-mode
+Return current editing mode as string.
+@example
+(editor-mode)  ; => "normal"
+@end example
+@end deffn
+
+@deffn Function editor-set-mode mode
+Set editing mode to @var{mode}. Valid values: @code{"normal"}, @code{"insert"}, @code{"visual"}, @code{"command"}, @code{"mx"}.
+@end deffn
+
+@deffn Function editor-status
+Return current status message.
+@end deffn
+
+@deffn Function editor-set-status message
+Set status line to display @var{message}.
+@end deffn
+
+@deffn Function editor-command-line
+Return current command line content.
+@end deffn
+
+@deffn Function editor-set-command-line command
+Set command line content to @var{command}.
+@end deffn
+
+@deffn Function editor-enter-command-mode
+Switch to command mode.
+@end deffn
+
+@deffn Function editor-exit-command-mode
+Exit command mode and return to normal mode.
+@end deffn
+
+@deffn Function editor-exit-mx-mode
+Exit M-x mode and return to normal mode.
+@end deffn
+
+@deffn Function editor-handle-space
+Handle space key press (part of SPC ; M-x sequence).
+@end deffn
+
+@deffn Function editor-handle-semicolon
+Handle semicolon key press (completes M-x sequence).
+@end deffn
+
+@deffn Function editor-handle-help-prefix
+Handle @kbd{?} key press (show help).
+@end deffn
+
+@deffn Function editor-execute-mx-command command
+Execute M-x @var{command} by name.
+@end deffn
+
+@deffn Function editor-handle-window-prefix
+Handle @kbd{C-x} key prefix for window commands.
+@end deffn
+
+@node Editor API --- Files
+@chapter Editor API --- Files
+
+@cindex file operations
+
+@deffn Function write-file-content filename content
+Write @var{content} to @var{filename}.
+@end deffn
+
+@deffn Function read-file-content filename
+Read content of @var{filename} as string.
+@end deffn
+
+@deffn Function file-exists-p path
+Return @code{#t} if @var{path} exists.
+@end deffn
+
+@deffn Function file-modtime path
+Return modification time of @var{path} as timestamp.
+@end deffn
+
+@deffn Function file-stat path
+Return file statistics (size, mtime, isFile, isDir).
+@end deffn
+
+@deffn Function file-copy source dest
+Copy file from @var{source} to @var{dest}.
+@end deffn
+
+@deffn Function make-backup-file filename
+Create a backup of @var{filename}.
+@end deffn
+
+@deffn Function file-remove path
+Delete file at @var{path}.
+@end deffn
+
+@deffn Function file-mkdir path
+Create directory at @var{path}.
+@end deffn
+
+@deffn Function read-dir path
+Read directory contents as list of file objects.
+@end deffn
+
+@node Editor API --- Key Bindings
+@chapter Editor API --- Key Bindings
+
+@cindex key bindings
+
+@deffn Function editor-quit
+Quit the editor, optionally saving changes.
+@end deffn
+
+@deffn Function editor-execute-command-line
+Execute the current command line content as a command.
+@end deffn
+
+@node Editor API --- Minibuffer
+@chapter Editor API --- Minibuffer
+
+@cindex minibuffer
+
+@deffn Function minibuffer-active
+Return @code{#t} if minibuffer is active.
+@end deffn
+
+@deffn Function minibuffer-get
+Return current minibuffer content.
+@end deffn
+
+@deffn Function minibuffer-set text
+Set minibuffer content to @var{text}.
+@end deffn
+
+@deffn Function minibuffer-clear
+Clear minibuffer content.
+@end deffn
+
+@deffn Function minibuffer-history
+Return minibuffer history as list.
+@end deffn
+
+@deffn Function minibuffer-history-add entry
+Add @var{entry} to minibuffer history.
+@end deffn
+
+@deffn Function minibuffer-history-previous
+Navigate to previous history entry.
+@end deffn
+
+@deffn Function minibuffer-history-next
+Navigate to next history entry.
+@end deffn
+
+@deffn Function minibuffer-history-reset-index
+Reset history navigation index.
+@end deffn
+
+@node Editor API --- Hooks
+@chapter Editor API --- Hooks
+
+@cindex hooks
+
+@deffn Function add-hook hook-name callback
+Add @var{callback} to hook @var{hook-name}.  The callback may be a
+string function name, a symbol naming a function, or a lambda/function
+value.  By default callbacks are prepended.  Pass a truthy third
+argument to append.
+@end deffn
+
+@deffn Function remove-hook hook-name callback
+Remove @var{callback} from hook @var{hook-name}.
+@end deffn
+
+@deffn Function run-hooks hook-name
+Run all callbacks registered for @var{hook-name}.
+@end deffn
+
+@deffn Function hook-list hook-name
+Return readable entries for @var{hook-name}.  Callable hooks are shown
+as values such as @code{#<lambda>} rather than raw object strings.
+@end deffn
+
+@node Editor API --- Loading
+@chapter Editor API --- Loading
+
+@cindex load
+@cindex provide
+@cindex require
+@cindex features
+
+@deffn Function load file
+Read and evaluate a T-Lisp file.  @var{file} may be absolute, relative
+to the current working directory, or resolvable from @code{load-path}.
+@end deffn
+
+@deffn Function load-path-add directory
+Add @var{directory} to the load path if it is not already present.
+@end deffn
+
+@deffn Function load-path-list
+Return the current load path list.
+@end deffn
+
+@deffn Function provide feature
+Mark @var{feature} as provided by the current file.
+@end deffn
+
+@deffn Function featurep feature
+Return true when @var{feature} has been provided.
+@end deffn
+
+@deffn Function require feature @r{[}file@r{]}
+Load @var{feature} if it is not already provided.  If @var{file} is
+omitted, tmax searches for a file named after @var{feature}.  The call
+succeeds only when evaluation provides the requested feature.
+@end deffn
+
+@node Editor API --- Syntax
+@chapter Editor API --- Syntax Highlighting
+
+@cindex syntax highlighting
+
+@deffn Function syntax-set-language name
+Set active language for syntax highlighting.
+@end deffn
+
+@deffn Function syntax-get-language
+Return current language name.
+@end deffn
+
+@deffn Function syntax-highlight-enable
+Enable syntax highlighting.
+@end deffn
+
+@deffn Function syntax-highlight-disable
+Disable syntax highlighting.
+@end deffn
+
+@deffn Function syntax-highlight-toggle
+Toggle syntax highlighting on/off.
+@end deffn
+
+@deffn Function syntax-tokenize-line lineNum
+Tokenize buffer line @var{lineNum} and return tokens.
+@end deffn
+
+@deffn Function syntax-apply-highlights spans
+Store highlight spans for rendering.
+@end deffn
+
+@deffn Function syntax-clear-highlights
+Clear all stored highlight spans.
+@end deffn
+
+@deffn Function syntax-highlight-line lineNum
+Return highlight spans for line @var{lineNum}.
+@end deffn
+
+@node Editor API --- Major Modes
+@chapter Editor API --- Major Modes
+
+@cindex major modes
+
+@deffn Function major-mode-register name extensions @r{[}syntax-language indent-increase indent-decrease@r{]}
+Register a major mode named @var{name}.  @var{extensions} is a list of
+file extensions; leading dots are normalized, so @code{".py"} and
+@code{"py"} match the same files.
+@end deffn
+
+@deffn Function major-mode-set name
+Set the current buffer's major mode to @var{name} and run its hook.
+@end deffn
+
+@deffn Function major-mode-get
+Return the current buffer-local major mode name.
+@end deffn
+
+@deffn Function major-mode-list
+Return list of all registered major modes.
+@end deffn
+
+@deffn Function major-mode-auto-detect
+Auto-detect and activate the current buffer's major mode from
+registered auto-mode rules.
+@end deffn
+
+@deffn Function auto-mode-add pattern mode @r{[}kind@r{]}
+Add an auto-mode rule.  @var{kind} may be @code{"regexp"} for a
+regular-expression rule; otherwise @var{pattern} is treated as an
+extension.
+@end deffn
+
+@deffn Function auto-mode-list
+Return registered auto-mode rules.
+@end deffn
+
+@deffn Function auto-mode-detect filename
+Return the mode that would be selected for @var{filename}, or
+@code{"fundamental"} when no rule matches.
+@end deffn
+
+@deffn Function major-mode-hook-add name callback
+Add @var{callback} to major mode @var{name}'s hook.
+@end deffn
+
+@deffn Function major-mode-hook-run name
+Run hooks for major mode @var{name}.
+@end deffn
+
+@node Editor API --- Minor Modes
+@chapter Editor API --- Minor Modes
+
+@cindex minor modes
+@cindex global minor modes
+
+Minor modes are buffer-local feature modes.  Active global minor modes
+apply to existing buffers and future buffers unless a buffer has an
+explicit local override.
+
+@deffn Function define-minor-mode name description @r{[}lighter global@r{]}
+Register a minor mode.  This low-level helper records the mode name,
+description, lighter, and whether it supports global activation.  Built
+in T-Lisp mode files define the user-facing commands such as
+@code{line-numbers-mode} and @code{global-line-numbers-mode}.
+@end deffn
+
+Generated mode commands follow the Emacs-style argument rule used by
+the built-ins: no argument toggles, @code{t} or a positive number
+enables, and @code{nil}, zero, or a negative number disables.
+
+@deffn Function minor-mode-register name description @r{[}lighter@r{]}
+Register or update a minor mode.
+@end deffn
+
+@deffn Function minor-mode-set-keymap name keymap
+Associate an existing T-Lisp keymap value with a minor mode.
+@end deffn
+
+@deffn Function minor-mode-toggle name
+Toggle @var{name} for the current buffer.
+@end deffn
+
+@deffn Function minor-mode-set name state
+Enable or disable @var{name} for the current buffer.
+@end deffn
+
+@deffn Function minor-mode-active-p name
+Return true when @var{name} is active in the current buffer.
+@end deffn
+
+@deffn Function minor-mode-list-active
+Return active minor mode names for the current buffer.
+@end deffn
+
+@deffn Function minor-mode-list-all
+Return all registered minor mode names.
+@end deffn
+
+@deffn Function minor-mode-lighter name
+Return @var{name}'s status-line lighter.
+@end deffn
+
+@deffn Function minor-mode-list-lighters
+Return lighters for active minor modes in the current buffer.
+@end deffn
+
+@deffn Function minor-mode-global-p name
+Return whether @var{name} supports globalized behavior.
+@end deffn
+
+@deffn Function global-minor-mode-set name state
+Enable or disable @var{name} globally.  Disabling removes global-sourced
+activations while preserving explicit buffer-local re-enables.
+@end deffn
+
+@deffn Function global-minor-mode-active-p name
+Return whether @var{name} is globally active.
+@end deffn
+
+@deffn Function global-minor-mode-list-active
+Return active global minor mode names.
+@end deffn
+
+@node Editor API --- Plugins
+@chapter Editor API --- Plugins
+
+@cindex plugins
+@cindex TLPA
+
+@deffn Function plugin-list
+Return list of all installed plugins.
+@end deffn
+
+@deffn Function plugin-show name
+Show details about plugin @var{name}.
+@end deffn
+
+@deffn Function plugin-install name
+Install plugin @var{name} from TLPA repository.
+@end deffn
+
+@deffn Function plugin-search query
+Search for available plugins matching @var{query}.
+@end deffn
+
+@deffn Function plugin-info name
+Return information about plugin @var{name}.
+@end deffn
+
+@deffn Function plugin-submit name url description
+Submit a new plugin to the TLPA repository.
+@end deffn
+
+@deffn Function plugin-review-list
+List plugins awaiting review.
+@end deffn
+
+@deffn Function plugin-approve name
+Approve a submitted plugin.
+@end deffn
+
+@deffn Function plugin-reject name reason
+Reject a submitted plugin with @var{reason}.
+@end deffn
+
+@deffn Function plugin-clear-submissions
+Clear all plugin submissions.
+@end deffn
+
+@node Editor API --- Windows
+@chapter Editor API --- Windows
+
+@cindex windows
+@cindex splitting
+
+@deffn Function split-window type
+Split window @code{"horizontal"} or @code{"vertical"}.
+@end deffn
+
+@deffn Function window-next
+Switch to next window.
+@end deffn
+
+@deffn Function window-prev
+Switch to previous window.
+@end deffn
+
+@deffn Function window-close
+Close current window.
+@end deffn
+
+@deffn Function window-list
+Return list of all windows.
+@end deffn
+
+@deffn Function window-current
+Return current window index.
+@end deffn
+
+@deffn Function window-count
+Return total number of windows.
+@end deffn
+
+@deffn Function window-resize-height delta
+Resize current window height by @var{delta}.
+@end deffn
+
+@deffn Function window-resize-width delta
+Resize current window width by @var{delta}.
+@end deffn
+
+@node Editor API --- Registers
+@chapter Editor API --- Registers
+
+@cindex registers
+
+@deffn Function get-register name
+Return content of named register @var{name}.
+@end deffn
+
+@deffn Function set-register name text
+Set content of register @var{name} to @var{text}.
+@end deffn
+
+@deffn Function register-get name
+Return register content (legacy alias for @code{get-register}).
+@end deffn
+
+@deffn Function register-set name text
+Set register content (legacy alias for @code{set-register}).
+@end deffn
+
+@deffn Function yank-delete-store text isDelete
+Store @var{text} in appropriate register based on @var{isDelete}.
+@end deffn
+
+@deffn Function register-list
+Return all registers with their contents.
+@end deffn
+
+@deffn Function paste-from-register name
+Paste content from register @var{name}.
+@end deffn
+
+@node Editor API --- LSP
+@chapter Editor API --- LSP Diagnostics
+
+@cindex LSP
+@cindex diagnostics
+
+@deffn Function lsp-diagnostics-list
+Return all LSP diagnostics for current buffer.
+@end deffn
+
+@deffn Function lsp-diagnostics-for-line line
+Return diagnostics for @var{line}.
+@end deffn
+
+@deffn Function lsp-diagnostics-current-line
+Return diagnostics for current cursor line.
+@end deffn
+
+@deffn Function lsp-diagnostics-count
+Return total number of diagnostics.
+@end deffn
+
+@deffn Function lsp-diagnostics-clear
+Clear all LSP diagnostics.
+@end deffn
+
+@deffn Function lsp-diagnostics-has-errors
+Return @code{#t} if any error-level diagnostics exist.
+@end deffn
+
+@node Editor API --- Navigation
+@chapter Editor API --- Navigation
+
+@cindex navigation
+@cindex word navigation
+@cindex page navigation
+
+@section Word Navigation
+
+@deffn Function word-next
+Move cursor to start of next word.
+@end deffn
+
+@deffn Function word-previous
+Move cursor to start of previous word.
+@end deffn
+
+@deffn Function word-end
+Move cursor to end of current word.
+@end deffn
+
+@section Line Navigation
+
+@deffn Function line-first-column
+Move cursor to first column of current line.
+@end deffn
+
+@deffn Function line-last-column
+Move cursor to last column of current line.
+@end deffn
+
+@deffn Function line-first-non-blank
+Move cursor to first non-blank character.
+@end deffn
+
+@deffn Function line-previous
+Move cursor to previous line.
+@end deffn
+
+@deffn Function line-next
+Move cursor to next line.
+@end deffn
+
+@section Jump Navigation
+
+@deffn Function jump-to-first-line
+Jump to first line of buffer (gg).
+@end deffn
+
+@deffn Function jump-to-last-line
+Jump to last line of buffer (G).
+@end deffn
+
+@deffn Function jump-to-line line
+Jump to @var{line} number.
+@end deffn
+
+@section Page Navigation
+
+@deffn Function page-down
+Move down one page.
+@end deffn
+
+@deffn Function page-up
+Move up one page.
+@end deffn
+
+@deffn Function half-page-down
+Move down half a page.
+@end deffn
+
+@deffn Function half-page-up
+Move up half a page.
+@end deffn
+
+@node Editor API --- Count Prefix
+@chapter Editor API --- Count Prefix
+
+@cindex count prefix
+
+@deffn Function count-get
+Return current count prefix value.
+@end deffn
+
+@deffn Function count-set number
+Set count prefix to @var{number}.
+@end deffn
+
+@deffn Function count-reset
+Reset count prefix to 1.
+@end deffn
+
+@deffn Function count-active
+Return @code{#t} if count prefix is active.
+@end deffn
+
+@node Editor API --- Dired
+@chapter Editor API --- Dired
+
+@cindex dired
+@cindex directory editor
+
+@deffn Function dired-format-listing entries
+Format directory listing for display.
+@end deffn
+
+@deffn Function dired-insert-listing path
+Insert directory listing for @var{path} into buffer.
+@end deffn
+
+@deffn Function dired-parse-current-entry
+Parse current line in dired buffer.
+@end deffn
+
+@deffn Function dired-is-directory-p path
+Return @code{#t} if @var{path} is a directory.
+@end deffn
+
+@deffn Function dired-toggle-mark
+Toggle mark on current file.
+@end deffn
+
+@deffn Function dired-get-marked
+Return list of marked files.
+@end deffn
+
+@deffn Function dired-refresh
+Refresh dired buffer contents.
+@end deffn
+
+@node Editor API --- Replace
+@chapter Editor API --- Replace
+
+@cindex replace
+@cindex query replace
+
+@deffn Function replace-find-matches pattern
+Find all matches for replacement @var{pattern}.
+@end deffn
+
+@deffn Function buffer-replace-range start end text
+Replace text in range from @var{start} to @var{end} with @var{text}.
+@end deffn
+
+@deffn Function replace-state-init pattern
+Initialize replace state with @var{pattern}.
+@end deffn
+
+@deffn Function replace-apply-current
+Apply current replacement and move to next match.
+@end deffn
+
+@deffn Function replace-skip
+Skip current replacement and move to next.
+@end deffn
+
+@deffn Function replace-apply-all
+Apply all remaining replacements.
+@end deffn
+
+@deffn Function replace-exit
+Exit replace mode.
+@end deffn
+
+@deffn Function replace-show-current
+Show current replacement match.
+@end deffn
+
+@node Editor API --- Indent
+@chapter Editor API --- Indent
+
+@cindex indentation
+
+@deffn Function indent-calculate-column text
+Calculate proper indentation for @var{text}.
+@end deffn
+
+@deffn Function indent-set-rules language rules
+Set indentation rules for @var{language}.
+@end deffn
+
+@deffn Function indent-get-rules language
+Return indentation rules for @var{language}.
+@end deffn
+
+@deffn Function indent-apply-line lineNum
+Apply auto-indentation to line @var{lineNum}.
+@end deffn
+
+@deffn Function indent-apply-region start end
+Apply auto-indentation to lines from @var{start} to @var{end}.
+@end deffn
+
+@node Editor API --- Miscellaneous
+@chapter Editor API --- Miscellaneous
+
+@cindex messages
+@cindex documentation
+
+@section Messages
+
+@deffn Function message args...
+Display @var{args} in status line and log to @code{*Messages*} buffer.
+@example
+(message "Hello, " name "!")
+@end example
+@end deffn
+
+@deffn Function messages-buffer
+Return content of the @code{*Messages*} buffer.
+@end deffn
+
+@section Documentation
+
+@deffn Function documentation-list
+Return list of all available documentation topics.
+@end deffn
+
+@deffn Function documentation-search query
+Search documentation for topics matching @var{query}.
+@end deffn
+
+@deffn Function documentation-get topic
+Return content for documentation @var{topic}.
+@end deffn
+
+@deffn Function documentation-categories
+Return list of documentation categories.
+@end deffn
+
+@deffn Function documentation-by-category category
+Return documentation topics in @var{category}.
+@end deffn
+
+@section Keymap Operations
+
+@deffn Function keymap-set keymap key command
+Set key binding in @var{keymap}.
+@end deffn
+
+@deffn Function keymap-keys keymap
+Return list of all bound keys in @var{keymap}.
+@end deffn
+
+@deffn Function keymap-active
+Return currently active keymap.
+@end deffn
+
+@node Testing Framework
+@chapter Testing Framework
+
+@cindex testing
+@cindex assertions
+
+T-Lisp includes a built-in testing framework for writing and running tests.
+
+@deffn Function deftest name () body...
+Define a named test.
+@example
+(deftest "addition works" ()
+  (assert-equal 3 (+ 1 2)))
+@end example
+@end deffn
+
+@deffn Function test-run name
+Run the test named @var{name}.
+@end deffn
+
+@deffn Function test-run-all
+Run all registered tests. Returns @code{(passed failed total)}.
+@end deffn
+
+@deffn Function assert-true value
+Assert that @var{value} is truthy.
+@end deffn
+
+@deffn Function assert-false value
+Assert that @var{value} is falsy.
+@end deffn
+
+@deffn Function assert-equal expected actual
+Assert that @var{expected} equals @var{actual}.
+@end deffn
+
+@deffn Function assert-not-equal expected actual
+Assert that @var{expected} does not equal @var{actual}.
+@end deffn
+
+@deffn Function assert-error form
+Assert that @var{form} raises an error when evaluated.
+@end deffn
+
+@node Index
+@unnumbered Index
+
+@printindex cp
+
+@bye

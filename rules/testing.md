@@ -6,19 +6,21 @@ scope: test/**/*
 
 Applies to all test files in `test/`.
 
-## Two Test Layers
+## Three Test Layers
 
-This project has two distinct test layers:
+This project has three distinct test layers:
 
 | Layer | What it tests | Runner | Location |
 |-------|--------------|--------|----------|
 | **Bun tests** | TypeScript core, editor, interpreter, integration | `bun test` | `test/unit/*.test.ts`, `test/integration/*.test.ts` |
 | **T-Lisp tests** | T-Lisp extensions, key bindings, editor API | `(test-run-all)` via interpreter | Defined inline with `deftest` |
+| **UI tests** | End-to-end terminal interaction | `bash test/ui/tests/*.sh` | `test/ui/tests/*.test.sh` |
 
 ### When to use which
 
 - **Bun tests** — TypeScript functions, interpreter internals, terminal I/O, buffer management, error handling in the core
 - **T-Lisp tests** — Editor commands (`cursor-move`, `word-next`, etc.), key bindings, user-facing T-Lisp API, init file behavior, extensions written in T-Lisp
+- **UI tests** — Full editor startup, mode switching, rendering, key handling in real tmux terminal
 
 ## Bun Test Rules
 
@@ -56,44 +58,109 @@ import { describe, test, expect } from "bun:test";
 
 ## T-Lisp Test Rules
 
-### Available assertions
+The T-Lisp testing framework is implemented in `src/tlisp/test-framework.ts` and registered automatically when the interpreter starts. Tests can be run from the REPL, from Bun tests, or via the daemon.
+
+### Running T-Lisp Tests
+
+```bash
+# Via daemon (evaluate test file, then run)
+tmax -e '(test-run-all)'
+
+# Via REPL
+bun run repl
+> (deftest "my-test" () (assert-true t))
+> (test-run-all)
+
+# Via Bun test (see test/unit/test-tlisp-testing-framework.test.ts)
+bun test test/unit/test-tlisp-testing-framework.test.ts
+```
+
+### Assertions
 
 ```
-assert-true value
-assert-false value
-assert-equal expected actual
-assert-not-equal expected actual
-assert-contains list item
-assert-contains-string haystack needle
-assert-matches pattern string
-assert-type value type-symbol
-assert->= value expected
-assert-< value expected
-assert-in-delta actual tolerance expected
-assert-eventually condition-fn timeout-ms
+(assert-true value)                          — pass if truthy
+(assert-false value)                         — pass if falsy
+(assert-equal expected actual)               — pass if values equal
+(assert-not-equal expected actual)           — pass if values differ
+(assert-contains list item)                  — pass if item in list
+(assert-contains-string haystack needle)     — pass if substring found
+(assert-matches pattern string)              — pass if regex matches
+(assert-type value type-symbol)              — pass if value is type (number, string, boolean, list, symbol, nil, hashmap, function, macro)
+(assert->= value expected)                   — pass if value >= expected
+(assert-< value expected)                    — pass if value < expected
+(assert-in-delta actual tolerance expected)  — pass if |actual - expected| <= tolerance
+(assert-eventually condition-fn timeout-ms)  — pass if condition becomes true
 ```
 
-### Test lifecycle
+### Test Lifecycle
 
 ```
-(deftest "test-name" () body...)          — define a test
-(test-run "test-name")                    — run a single test
-(test-run-all)                            — run all defined tests
-(test-run-suite "suite-name")             — run tests in a suite
+(deftest "test-name" () body...)       — define a test
+(test-run "test-name")                 — run a single test
+(test-run-all)                         — run all defined tests
+(test-run-suite "suite-name")          — run tests in a suite
+(list-suites)                          — list all registered suites
+```
+
+### Setup and Teardown
+
+```
+(setup () body...)                     — run before each test
+(teardown () body...)                  — run after each test
 ```
 
 ### Fixtures
 
 ```
-(defixture "fixture-name"
+(deffixture "fixture-name"
   :setup ((...))
   :teardown ((...))
   :scope each|once|all)
+
+(use-fixtures fixture1 fixture2 ...)   — apply fixtures to current test
 ```
+
+Fixture scopes:
+- `each` — setup/teardown for every test
+- `once` — setup runs once, teardown after all tests
+- `all` — same as `once`
+
+### Suites
+
+Tests can be grouped into suites via `defsuite` (special form in evaluator). Run with `test-run-suite`.
 
 ### Coverage
 
-T-Lisp tests support coverage reporting via `test-coverage.ts`.
+```
+(coverage-enable true|false)           — enable/disable coverage tracking
+(coverage-percentage)                  — get coverage percentage
+(coverage-report)                      — get detailed coverage report
+(coverage-print)                       — print coverage report to console
+(coverage-reset)                       — clear coverage data
+(coverage-enabled)                     — check if coverage is enabled
+(coverage-tested)                      — list covered functions
+(coverage-untested)                    — list uncovered functions
+(coverage-meets-threshold)             — check if coverage >= threshold
+(coverage-threshold N)                 — set minimum coverage (0-100)
+(coverage-format "text"|"json")        — set report format
+```
+
+### Output Configuration
+
+```
+(set-output-mode "normal"|"verbose"|"quiet"|"plain")  — control output verbosity
+(set-verbosity "normal"|"verbose"|"quiet")             — alias for set-output-mode
+(set-color-mode "auto"|"always"|"never")               — control color output
+(set-progress-indicator true|false)                     — show/hide progress bar
+```
+
+### Async Testing
+
+```
+(set-async-timeout ms)                 — set default async timeout (default 2000ms)
+(async-all)                            — run all async tests
+(done)                                 — signal async test completion
+```
 
 ## Mock Filesystem
 

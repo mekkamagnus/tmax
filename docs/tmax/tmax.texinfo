@@ -1,0 +1,2034 @@
+\input texinfo   @c -*-texinfo-*-
+@c %**start of header
+@setfilename tmax.info
+@settitle tmax Manual
+@set VERSION 0.2.0
+@set UPDATED 2 June 2026
+@c %**end of header
+
+@copying
+This manual is for tmax version @value{VERSION}, an extensible
+terminal-based text editor.
+
+Copyright @copyright{} 2024--2026 tmax contributors.
+
+@quotation
+Permission is hereby granted, free of charge, to any person obtaining a
+copy of this software and associated documentation files (the
+``Software''), to deal in the Software without restriction, including
+without limitation the rights to use, copy, modify, merge, publish,
+distribute, sublicense, and/or sell copies of the Software, and to
+permit persons to whom the Software is furnished to do so, subject to
+the following conditions:
+
+The above copyright notice and this permission notice shall be included
+in all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED ``AS IS'', WITHOUT WARRANTY OF ANY KIND,
+EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.
+IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY
+CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT,
+TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE
+SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+@end quotation
+@end copying
+
+@titlepage
+@title tmax Manual
+@subtitle An Extensible Terminal-Based Text Editor
+@subtitle Version @value{VERSION}
+@author tmax Contributors
+@page
+@vskip 0pt plus 1filll
+@insertcopying
+@end titlepage
+
+@contents
+
+@ifnottex
+@node Top
+@top tmax Manual
+
+tmax is an extensible terminal-based text editor written in TypeScript,
+running on the Bun runtime.  It follows the Emacs architecture: a
+TypeScript core handles terminal I/O, file system operations, and buffer
+management, while a built-in Lisp dialect called T-Lisp handles all
+editor functionality---commands, modes, key bindings, and extensibility.
+
+This manual describes tmax version @value{VERSION}.
+
+@insertcopying
+@end ifnottex
+
+@menu
+* Introduction::                What tmax is and why it exists.
+* Installation::                Getting tmax running on your system.
+* Daemon/Client Architecture::  The server-based editing model.
+* Basic Usage::                 Starting, editing, and saving files.
+* Editing Modes::               Normal, insert, visual, command, and M-x.
+* Key Bindings::                Default key bindings for all modes.
+* Operators and Text Objects::  Delete, yank, change, and text objects.
+* Search and Replace::          Finding and replacing text.
+* Kill Ring::                   Emacs-style clipboard history.
+* Buffer Management::           Working with multiple buffers.
+* Configuration::               Customizing tmax with init files.
+* Plugin System::               Extending tmax with plugins.
+* Frontends::                   TUI, Ink, and Steep frontends.
+* Troubleshooting::             Common problems and their solutions.
+* Command Reference::           Summary of commands and T-Lisp functions.
+* Index::                       Combined concept and command index.
+@end menu
+
+@c ============================================================
+@node Introduction
+@chapter Introduction
+@cindex introduction
+
+tmax is a terminal-based text editor designed for software developers,
+system administrators, and power users who prefer keyboard-driven
+terminal workflows.  It combines the extensibility of Emacs with the
+modal editing efficiency of Vim.
+
+@cindex architecture
+@cindex T-Lisp
+@cindex TypeScript core
+The editor follows a split architecture inspired by GNU Emacs.  A
+TypeScript core, running on the @uref{https://bun.sh/, Bun runtime},
+handles low-level operations: terminal I/O with alternate screen buffer,
+file system access, memory management, and display rendering.  All
+higher-level editor functionality---commands, modes, key bindings,
+and user customization---is implemented in T-Lisp, a built-in Lisp
+dialect with tail-call optimization and a macro system.
+
+@cindex zero dependencies
+tmax has zero external runtime dependencies.  The only requirement is
+the Bun runtime itself.
+
+@section Key Features
+
+@itemize @bullet
+@item
+@cindex modal editing
+@cindex vim key bindings
+Modal editing with Vim-style key bindings (hjkl navigation, operators,
+text objects).
+@item
+@cindex editing modes
+Five editing modes: normal, insert, visual, command, and M-x.
+@item
+@cindex T-Lisp interpreter
+Complete T-Lisp interpreter with lexical scoping, tail-call
+optimization, quasiquote macros, and a standard library of over 30
+built-in functions.
+@item
+@cindex editor API
+Comprehensive editor API with over 100 T-Lisp functions across 35 API
+modules.
+@item
+@cindex daemon/client
+Daemon/client architecture with JSON-RPC 2.0 over Unix sockets,
+supporting multiple simultaneous TUI frames sharing the same buffers
+and interpreter state.
+@item
+@cindex frontends
+Interchangeable frontends: TUI (ANSI escape sequences), Ink (React), and
+Steep.
+@item
+@cindex kill ring
+Kill ring with yank-pop cycling, similar to the Emacs kill ring.
+@item
+@cindex help system
+Built-in help system: @code{describe-key}, @code{describe-function},
+and @code{apropos-command}.
+@item
+@cindex which-key
+Which-key popup showing available bindings after prefix keys.
+@item
+@cindex plugin system
+Plugin system with a TLPA (T-Lisp Package Archive) repository.
+@item
+@cindex macro recording
+Keyboard macro recording and playback.
+@item
+@cindex LSP diagnostics
+LSP diagnostics integration.
+@item
+@cindex Messages buffer
+A @code{*Messages*} buffer for editor event logging and observability.
+@end itemize
+
+@section Design Philosophy
+
+@cindex design philosophy
+tmax follows the principle of ``powerful core, extensible surface.''
+The TypeScript core provides efficient, reliable low-level operations,
+while T-Lisp provides unlimited customization possibilities.  This
+architecture allows users to:
+
+@itemize @bullet
+@item Customize editor behavior without recompiling.
+@item Create complex macros and commands in T-Lisp.
+@item Share configurations as T-Lisp scripts.
+@item Extend functionality through a consistent, documented API.
+@end itemize
+
+@c ============================================================
+@node Installation
+@chapter Installation
+@cindex installation
+
+@section Prerequisites
+
+@cindex Bun runtime
+@cindex prerequisites
+tmax requires the @uref{https://bun.sh/, Bun} JavaScript/TypeScript
+runtime.  Bun provides fast startup times and native TypeScript support
+without a compilation step.
+
+Install Bun by following the instructions at
+@uref{https://bun.sh/}.  On macOS and Linux, the quickest method is:
+
+@example
+curl -fsSL https://bun.sh/install | bash
+@end example
+
+@section Building from Source
+
+@cindex building from source
+@cindex git clone
+Clone the repository and install dependencies:
+
+@example
+# Clone the repository
+git clone https://github.com/mekkamagnus/tmax.git
+cd tmax
+
+# Install dependencies
+bun install
+
+# Make the launcher executable
+chmod +x bin/tmax bin/tmaxclient
+@end example
+
+@section Adding to Your PATH
+
+@cindex PATH
+@cindex launcher scripts
+Add the @file{bin/} directory to your shell's @code{PATH} so you can
+run @command{tmax} from anywhere:
+
+@example
+echo 'export PATH="$PATH:/path/to/tmax/bin"' >> ~/.bashrc
+source ~/.bashrc
+@end example
+
+Replace @file{/path/to/tmax} with the actual path to your clone.
+
+@section Verifying the Installation
+
+@cindex verification
+Confirm that tmax is working:
+
+@example
+# Check if tmax is on your PATH
+which tmax
+
+# Ping a running daemon (or just start the editor)
+tmax --help
+
+# Run the test suite
+bun test
+@end example
+
+@section Development Scripts
+
+@cindex development scripts
+The following @code{bun} scripts are available in the project:
+
+@table @code
+@item bun run start
+Run the editor directly (no daemon).  Accepts a filename argument.
+@item bun run dev
+Run the editor in development mode with auto-reload on file changes.
+@item bun run repl
+Start the T-Lisp REPL for interactive experimentation.
+@item bun run daemon
+Start the daemon only (no TUI frame).
+@item bun run tui
+Start the TUI client directly.
+@item bun test
+Run the full test suite.
+@item bun run test:ui
+Run UI tests using the tmux test harness.
+@end table
+
+@c ============================================================
+@node Daemon/Client Architecture
+@chapter Daemon/Client Architecture
+@cindex daemon
+@cindex client
+@cindex server
+@cindex architecture, daemon/client
+
+tmax uses an Emacs-style daemon/client architecture.  A background
+daemon process (@command{tmax --daemon}) holds all editor state:
+buffers, the T-Lisp interpreter, configuration, and the kill ring.
+Multiple TUI clients (``frames'') can connect to the same daemon, each
+with an independent viewport but sharing the same underlying state.
+
+@section Starting the Daemon
+
+@cindex starting daemon
+@cindex @command{tmax --daemon}
+The daemon is the server process that manages all editor state.  It
+listens on a Unix domain socket for JSON-RPC 2.0 requests.
+
+@example
+# Start daemon only (no TUI)
+tmax --daemon
+@end example
+
+@cindex auto-daemon-start
+When you run @command{tmax} without @code{--daemon}, it automatically
+starts the daemon if one is not already running, then opens a TUI frame.
+
+@example
+# This auto-starts the daemon if needed
+tmax myfile.txt
+@end example
+
+@section The Unified CLI
+
+@cindex unified CLI
+@cindex @command{tmax} command
+The @command{tmax} command is the primary interface for both daemon and
+client operations.
+
+@table @code
+@item tmax [@var{file}]
+Start daemon (if not running) and open a TUI frame.  If @var{file} is
+given, open it in the editor.
+@item tmax --daemon
+Start the daemon only, without opening a TUI frame.
+@item tmax -e @var{expr}
+Evaluate a T-Lisp expression on the daemon and print the result.
+@item tmax --stop
+Stop the running daemon.
+@item tmax -t
+Open a new terminal frame (this is the default behavior).
+@item tmax --init-file @var{path}
+Load a custom init file instead of the default
+@file{~/.config/tmax/init.tlisp}.
+@item tmax -h
+@itemx tmax --help
+Show usage information.
+@end table
+
+@section The Client CLI
+
+@cindex @command{tmaxclient} command
+@cindex client commands
+The @command{tmaxclient} command provides direct access to daemon
+operations without opening a TUI frame.
+
+@table @code
+@item tmaxclient @var{file}
+Open @var{file} in the daemon.
+@item tmaxclient --eval '@var{code}'
+Evaluate T-Lisp code on the daemon.
+@item tmaxclient --list-buffers
+List all open buffers.
+@item tmaxclient --kill-buffer @var{name}
+Kill (close) a specific buffer.
+@item tmaxclient --messages
+Show the contents of the @code{*Messages*} buffer.
+@item tmaxclient --ping
+Check whether the daemon is running.
+@item tmaxclient --tui
+Launch the TUI client.
+@item tmaxclient --insert @var{text}
+Insert text at the current cursor position.
+@item tmaxclient --insert-stdin
+Read from standard input and insert at the cursor.
+@item tmaxclient --script @var{file}
+Execute a T-Lisp script file on the daemon.
+@item tmaxclient --server-info
+Query and display full server state.
+@item tmaxclient -s @var{path}
+Use a custom socket path.
+@item tmaxclient -n
+@itemx tmaxclient --no-wait
+Open a file without waiting for the buffer to close.
+@end table
+
+@section JSON-RPC 2.0 Protocol
+
+@cindex JSON-RPC
+@cindex protocol
+@cindex socket
+Clients communicate with the daemon using JSON-RPC 2.0 over a Unix
+domain socket.  The default socket path is
+@file{/tmp/tmax-@var{UID}/server}, where @var{UID} is your user ID.
+
+The protocol supports the following methods:
+
+@table @code
+@item ping
+Health check.  Returns @code{@{"status": "running"@}}.
+@item open
+Open a file in the daemon.  Parameters: @code{filepath}, @code{wait}.
+@item eval
+Evaluate T-Lisp code.  Parameters: @code{code}.
+@item insert
+Insert text at the current cursor.  Parameters: @code{text}.
+@item command
+Execute an editor command.  Parameters: @code{command}, plus
+command-specific parameters.
+@item query
+Query server state.  Parameters: @code{query} (e.g.,
+@code{"full-state"}, @code{"messages"}).
+@end table
+
+@section Frames
+
+@cindex frames
+@cindex multi-client
+@cindex Frame
+Each TUI client connected to the daemon is called a @dfn{frame}.
+Frames share the same buffers and T-Lisp interpreter but maintain
+independent viewports, cursor positions, and scrolling state.  This
+means you can have two terminal windows editing different parts of the
+same file simultaneously.
+
+@c ============================================================
+@node Basic Usage
+@chapter Basic Usage
+@cindex basic usage
+
+@section Starting the Editor
+
+@cindex starting tmax
+The recommended way to start tmax is through the unified CLI:
+
+@example
+# Start with a file (auto-starts daemon)
+tmax myfile.txt
+
+# Start with an empty buffer
+tmax
+@end example
+
+For quick editing without the daemon:
+
+@example
+bun run start myfile.txt
+@end example
+
+@section First Steps
+
+@cindex first steps
+@cindex tutorial
+When tmax starts, you are in @dfn{normal mode}.  The status line at the
+bottom of the screen shows the current mode and cursor position.
+
+@enumerate
+@item
+@cindex insert mode, entering
+Press @kbd{i} to enter @dfn{insert mode} and start typing text.
+@item
+@cindex normal mode, returning to
+Press @kbd{Escape} to return to normal mode.
+@item
+@cindex saving
+@cindex @code{:w}
+Press @kbd{:} to enter command mode, type @kbd{w}, and press
+@kbd{Enter} to save the file.
+@item
+@cindex quitting
+@cindex @code{:q}
+Press @kbd{:} to enter command mode, type @kbd{q}, and press
+@kbd{Enter} to quit.
+@item
+@cindex @code{:wq}
+To save and quit in one step, type @kbd{:wq} and press @kbd{Enter}.
+@end enumerate
+
+@section Editing a File
+
+@cindex editing workflow
+A typical editing workflow:
+
+@example
+tmax myfile.txt    @r{Open a file}
+i                  @r{Enter insert mode}
+@i{type your text}
+Escape             @r{Return to normal mode}
+hjkl               @r{Navigate with h, j, k, l}
+dd                 @r{Delete a line}
+yy                 @r{Yank (copy) a line}
+p                  @r{Paste after cursor}
+:wq Enter          @r{Save and quit}
+@end example
+
+@section The Status Line
+
+@cindex status line
+The status line at the bottom of the terminal shows:
+
+@itemize @bullet
+@item The current editing mode (@code{NORMAL}, @code{INSERT},
+@code{VISUAL}, @code{COMMAND}, or @code{M-X}).
+@item The current buffer's major mode, such as @code{[python]} or
+@code{[fundamental]}.
+@item Active minor-mode lighters, such as @code{(Ln Fill)}.
+@item The cursor position (line and column).
+@item Status messages (e.g., ``Saved'', ``File not found'').
+@end itemize
+
+Daemon clients can query the same mode metadata with
+@command{tmaxclient --status --json}.  The editor state includes
+@code{currentMajorMode}, @code{activeMinorModes}, and
+@code{activeMinorModeLighters}, so UI tests and client integrations can
+verify mode behavior without scraping terminal text.
+
+@section The @code{*Messages*} Buffer
+
+@cindex @code{*Messages*} buffer
+@cindex messages buffer
+@cindex observability
+tmax maintains a special buffer called @code{*Messages*} that logs
+editor events: file operations, mode changes, errors, and T-Lisp
+evaluation results.  This buffer is useful for debugging and for
+monitoring what the editor is doing.
+
+@example
+:messages         @r{View the Messages buffer (in command mode)}
+tmaxclient --messages  @r{View from the command line}
+@end example
+
+@c ============================================================
+@node Editing Modes
+@chapter Editing Modes
+@cindex editing modes
+@cindex modes
+
+tmax has five editing modes, each with its own key bindings and
+behavior.
+
+@menu
+* Normal Mode::      Navigation and commands.
+* Insert Mode::      Entering text.
+* Visual Mode::      Selecting text.
+* Command Mode::     Vim-style ex commands.
+* M-x Mode::        Execute T-Lisp functions by name.
+@end menu
+
+@node Normal Mode
+@section Normal Mode
+@cindex normal mode
+
+Normal mode is the default mode when tmax starts.  In this mode,
+keystrokes are interpreted as commands rather than text input.  You use
+normal mode for navigation, text manipulation, and issuing editor
+commands.
+
+@cindex entering normal mode
+To return to normal mode from any other mode, press @kbd{Escape}.
+
+Normal mode supports a @dfn{count prefix}: typing a number before a
+command repeats the command that many times.  For example, @kbd{3j}
+moves the cursor down three lines, and @kbd{5dd} deletes five lines.
+
+@node Insert Mode
+@section Insert Mode
+@cindex insert mode
+
+Insert mode is for entering text directly into the buffer.  Characters
+you type are inserted at the cursor position.
+
+@cindex entering insert mode
+@cindex @kbd{i}
+Press @kbd{i} to enter insert mode from normal mode.
+
+@cindex exiting insert mode
+Press @kbd{Escape} to return to normal mode.
+
+While in insert mode:
+
+@table @kbd
+@item Escape
+Return to normal mode.
+@item Backspace
+Delete the character before the cursor.
+@item Enter
+Insert a newline.
+@item Any printable character
+Insert at cursor position.
+@end table
+
+@node Visual Mode
+@section Visual Mode
+@cindex visual mode
+
+@cindex visual mode IS IMPLEMENTED
+Visual mode allows you to select text and then operate on the selection.
+tmax supports three types of visual selection:
+
+@table @kbd
+@item v
+@cindex character-wise selection
+Character-wise visual selection.  The selection spans from the starting
+cursor position to wherever you move the cursor.
+@item V
+@cindex line-wise selection
+Line-wise visual selection.  Entire lines are selected.
+@item C-v
+@cindex block-wise selection
+Block-wise (rectangular) visual selection.
+@end table
+
+@cindex visual mode operations
+While a visual selection is active, you can operate on it:
+
+@table @kbd
+@item d
+Delete the selected text.
+@item y
+Yank (copy) the selected text into the kill ring.
+@item u
+Convert the selected text to lowercase.
+@item U
+Convert the selected text to uppercase.
+@item Escape
+Cancel the selection and return to normal mode.
+@end table
+
+@node Command Mode
+@section Command Mode
+@cindex command mode
+@cindex ex commands
+@cindex @kbd{:}
+
+Command mode provides a command line at the bottom of the screen for
+entering Vim-style ex commands.
+
+@cindex entering command mode
+Press @kbd{:} from normal mode to enter command mode.
+
+@cindex command mode commands
+@table @code
+@item :w
+Save the current file.
+@item :q
+Quit the editor.
+@item :wq
+Save and quit.
+@item :e @var{filename}
+Open a file for editing.
+@end table
+
+Press @kbd{Enter} to execute the command.  Press @kbd{Escape} to cancel.
+
+@node M-x Mode
+@section M-x Mode
+@cindex M-x mode
+@cindex @kbd{SPC ;}
+
+M-x mode lets you execute T-Lisp functions by name, similar to the
+Emacs @kbd{M-x} command.  It provides fuzzy command completion.
+
+@cindex entering M-x mode
+Press @kbd{SPC ;} (space followed by semicolon) from normal mode to
+enter M-x mode.
+
+@cindex M-x examples
+Type the name of a T-Lisp function and press @kbd{Enter} to execute it.
+Examples:
+
+@table @code
+@item cursor-position
+Display the current cursor position.
+@item editor-mode
+Display the current editing mode.
+@item quit
+Quit the editor.
+@item eval-buffer
+Evaluate the current buffer as T-Lisp code.
+@item eval-init-file
+Reload the init file.
+@end table
+
+Press @kbd{Escape} to cancel M-x mode without executing a command.
+
+@c ============================================================
+@node Key Bindings
+@chapter Key Bindings
+@cindex key bindings
+@cindex keymaps
+
+@section Normal Mode Key Bindings
+
+@cindex normal mode key bindings
+
+@subsection Navigation
+
+@table @kbd
+@item h
+Move cursor left.
+@item j
+Move cursor down.
+@item k
+Move cursor up.
+@item l
+Move cursor right.
+@item w
+Move to the beginning of the next word.
+@item b
+Move to the beginning of the previous word.
+@item e
+Move to the end of the current word.
+@item 0
+Move to the beginning of the line.
+@item $
+Move to the end of the line.
+@item gg
+Move to the top of the file.
+@item G
+Move to the bottom of the file.
+@end table
+
+@subsection Mode Switching
+
+@table @kbd
+@item i
+Enter insert mode.
+@item v
+Enter character-wise visual mode.
+@item V
+Enter line-wise visual mode.
+@item C-v
+Enter block-wise visual mode.
+@item :
+Enter command mode.
+@item SPC ;
+Enter M-x mode.
+@end table
+
+@subsection Editing
+
+@table @kbd
+@item dd
+Delete the current line.
+@item yy
+Yank (copy) the current line.
+@item p
+Paste (put) after the cursor.
+@item P
+Paste (put) before the cursor.
+@item x
+Delete the character under the cursor.
+@item dw
+Delete to the end of the word.
+@item cw
+Change to the end of the word (delete and enter insert mode).
+@item u
+Undo the last change.
+@item C-r
+Redo the last undone change.
+@end table
+
+@subsection Search
+
+@table @kbd
+@item /
+Search forward.
+@item ?
+Search backward.
+@item n
+Jump to the next search match.
+@end table
+
+@subsection Count Prefix
+
+@cindex count prefix
+@cindex numeric prefix
+Most normal-mode commands accept a numeric count prefix.  Type a number
+before the command to repeat it:
+
+@table @kbd
+@item 3j
+Move down 3 lines.
+@item 5dd
+Delete 5 lines.
+@item 2yy
+Yank 2 lines.
+@item 10G
+Go to line 10.
+@end table
+
+@subsection Other
+
+@table @kbd
+@item q
+Quit the editor (single-file mode, no daemon).
+@end table
+
+@section Insert Mode Key Bindings
+
+@table @kbd
+@item Escape
+Return to normal mode.
+@item Backspace
+Delete the character before the cursor.
+@item Enter
+Insert a newline.
+@item @var{char}
+Insert the character at cursor position.
+@end table
+
+@section Visual Mode Key Bindings
+
+@table @kbd
+@item d
+Delete the selected text.
+@item y
+Yank (copy) the selected text.
+@item u
+Convert selection to lowercase.
+@item U
+Convert selection to uppercase.
+@item Escape
+Cancel selection and return to normal mode.
+@end table
+
+@section Command Mode Key Bindings
+
+@table @kbd
+@item @var{text}
+Enter command text.
+@item Enter
+Execute the command.
+@item Backspace
+Delete the last character.
+@item Escape
+Cancel and return to normal mode.
+@end table
+
+@section Custom Key Bindings
+
+@cindex custom key bindings
+@cindex @code{key-bind}
+You can define custom key bindings in your init file using the
+@code{key-bind} function:
+
+@example
+(key-bind "w" "(cursor-move (+ (cursor-line) 5) (cursor-column))" "normal")
+(key-bind "b" "(cursor-move (- (cursor-line) 5) (cursor-column))" "normal")
+@end example
+
+The @code{key-bind} function takes three arguments:
+
+@table @code
+@item key
+The key sequence to bind (a string).
+@item command
+The T-Lisp expression to evaluate when the key is pressed (a string).
+@item mode
+The mode in which the binding is active: @code{"normal"},
+@code{"insert"}, @code{"visual"}, @code{"command"}, or @code{"mx"}.
+@end table
+
+@section Which-Key Popup
+
+@cindex which-key
+@cindex prefix keys
+When you press a prefix key (such as @kbd{SPC} or @kbd{g}), tmax
+briefly displays a popup showing all the key bindings that start with
+that prefix.  This popup disappears after a configurable timeout
+(default 1000 milliseconds) or when you press the next key.
+
+@c ============================================================
+@node Operators and Text Objects
+@chapter Operators and Text Objects
+@cindex operators
+@cindex text objects
+
+@section Operators
+
+@cindex operators
+Operators are commands that perform an action on a range of text.  tmax
+supports the following operators in normal mode:
+
+@table @kbd
+@item d
+@cindex delete operator
+Delete operator.  Combined with a motion or text object to delete text.
+Examples: @kbd{dd} (delete line), @kbd{dw} (delete word), @kbd{d$}
+(delete to end of line).
+@item y
+@cindex yank operator
+Yank (copy) operator.  Combined with a motion or text object to copy
+text into the kill ring.  Examples: @kbd{yy} (yank line), @kbd{yw}
+(yank word).
+@item c
+@cindex change operator
+Change operator.  Deletes text and enters insert mode.  Examples:
+@kbd{cw} (change word), @kbd{cc} (change entire line).
+@end table
+
+@section Text Objects
+
+@cindex text objects
+Text objects define structural units of text that can be used with
+operators.  Text objects come in two forms: @dfn{inner} (@code{i})
+which excludes surrounding whitespace and delimiters, and @dfn{around}
+(@code{a}) which includes them.
+
+@subsection Word Text Object
+
+@table @kbd
+@item diw
+Delete inner word (the word under the cursor, excluding surrounding
+spaces).
+@item daw
+Delete around word (the word plus surrounding spaces).
+@end table
+
+@subsection Quoted String Text Objects
+
+@table @kbd
+@item ci'
+Change inner single-quoted string.
+@item ca'
+Change around single-quoted string (including the quotes).
+@item ci"
+Change inner double-quoted string.
+@item ca"
+Change around double-quoted string (including the quotes).
+@end table
+
+@subsection Parenthesis and Bracket Text Objects
+
+@table @kbd
+@item di(
+@itemx di)
+Delete inner parentheses (contents within parentheses).
+@item ci(
+@itemx ci)
+Change inner parentheses.
+@item di@{
+@itemx di@}
+Delete inner braces (contents within braces).
+@item ci@{
+@itemx ci@}
+Change inner braces.
+@item di[
+@itemx di]
+Delete inner brackets.
+@item di<
+Delete inner angle brackets.
+@item dit
+Delete inner HTML/XML tag.
+@end table
+
+@section Count Prefix with Operators
+
+@cindex count prefix, operators
+Operators support the numeric count prefix to multiply their effect:
+
+@table @kbd
+@item 3dd
+Delete 3 lines.
+@item 5dw
+Delete 5 words.
+@item 2yy
+Yank 2 lines.
+@end table
+
+@c ============================================================
+@node Search and Replace
+@chapter Search and Replace
+@cindex search
+@cindex replace
+
+@section Incremental Search
+
+@cindex incremental search
+@cindex @kbd{/}
+@cindex @kbd{?}
+@cindex @kbd{n}
+
+tmax provides incremental search in normal mode:
+
+@table @kbd
+@item /@var{pattern}
+Search forward for @var{pattern}.
+@item ?@var{pattern}
+Search backward for @var{pattern}.
+@item n
+Jump to the next match in the search direction.
+@item *
+Search forward for the word under the cursor.
+@end table
+
+When you press @kbd{/} or @kbd{?}, the cursor moves to the command
+line.  Type your search pattern and press @kbd{Enter}.  Press
+@kbd{Escape} to cancel the search.
+
+@section Replace Operations
+
+@cindex replace
+@cindex @code{replace-start}
+@cindex @code{replace-next}
+
+Replace operations are available through the T-Lisp API:
+
+@example
+@group
+;; Start a replace session
+(replace-start "old" "new")
+
+;; Replace the current match and move to next
+(replace-next)
+
+;; Replace all matches
+(replace-all "old" "new")
+@end group
+@end example
+
+@section Replace T-Lisp Functions
+
+@table @code
+@item (replace-start @var{find} @var{replace})
+Initialize a replace session, finding all occurrences of @var{find} and
+preparing to replace them with @var{replace}.
+@item (replace-next)
+Replace the current match and advance to the next one.
+@item (replace-all @var{find} @var{replace})
+Replace all occurrences of @var{find} with @var{replace} in the
+current buffer.
+@item (replace-cancel)
+Cancel the current replace session.
+@item (replace-status)
+Return the current state of the replace session.
+@end table
+
+@c ============================================================
+@node Kill Ring
+@chapter Kill Ring
+@cindex kill ring
+@cindex clipboard
+@cindex yank
+
+tmax implements an Emacs-style kill ring, a circular buffer that stores
+multiple entries of deleted or yanked text.  This is more powerful than
+a simple clipboard because you can cycle through previous deletions.
+
+@section How the Kill Ring Works
+
+@itemize @bullet
+@item When you delete text (e.g., with @kbd{dd}, @kbd{dw}, or visual
+mode @kbd{d}), the deleted text is added to the front of the kill ring.
+@item When you yank with @kbd{p} or @kbd{P}, the most recent entry from
+the kill ring is pasted.
+@item Use @code{yank-pop} to cycle through older entries in the kill
+ring.
+@item The default kill ring size is 5 entries.  When the ring is full,
+the oldest entry is discarded.
+@end itemize
+
+@section Kill Ring T-Lisp Functions
+
+@table @code
+@item (kill-ring-add @var{text})
+Add @var{text} to the front of the kill ring.
+@item (kill-ring-yank)
+Return the most recent entry from the kill ring.
+@item (kill-ring-rotate)
+Rotate the kill ring, making the second-most-recent entry the current
+one.  Use this to cycle through previous deletions.
+@item (kill-ring-list)
+Return a list of all entries currently in the kill ring.
+@item (kill-ring-size)
+Return the number of entries in the kill ring.
+@item (kill-ring-clear)
+Remove all entries from the kill ring.
+@end table
+
+@section Yank-Pop
+
+@cindex yank-pop
+@cindex cycling the kill ring
+After yanking text with @kbd{p} or @kbd{P}, you can cycle through the
+kill ring entries by calling @code{(yank-pop)}.  Each invocation
+replaces the just-yanked text with the next older entry from the kill
+ring.
+
+@example
+;; After pressing p to yank, cycle to the previous kill:
+M-x yank-pop
+@end example
+
+@c ============================================================
+@node Buffer Management
+@chapter Buffer Management
+@cindex buffers
+@cindex buffer management
+
+tmax supports multiple buffers simultaneously.  Each buffer holds the
+contents of a file (or scratch text) and maintains its own cursor
+position.
+
+@section Opening Buffers
+
+@cindex opening buffers
+@cindex @code{:e}
+
+Use command mode to open files into new buffers:
+
+@example
+:e otherfile.txt
+@end example
+
+Alternatively, use the T-Lisp API:
+
+@example
+(buffer-create "scratch")
+(buffer-switch "otherfile.txt")
+@end example
+
+@section Switching Buffers
+
+@cindex switching buffers
+@cindex @code{buffer-switch}
+
+Switch between open buffers using the T-Lisp API:
+
+@example
+(buffer-switch "myfile.txt")
+@end example
+
+To list all open buffers from the command line:
+
+@example
+tmaxclient --list-buffers
+@end example
+
+@section Special Buffers
+
+@cindex special buffers
+tmax creates several special buffers automatically:
+
+@table @code
+@item *Messages*
+A log of editor events, T-Lisp evaluations, and status messages.
+Updated continuously as you use the editor.
+@item *scratch*
+A scratch buffer for temporary text and T-Lisp experimentation.  Use
+@code{(eval-buffer)} to evaluate its contents as T-Lisp code.
+@end table
+
+@section Buffer T-Lisp Functions
+
+@table @code
+@item (buffer-create @var{name})
+Create a new empty buffer with the given name.
+@item (buffer-switch @var{name})
+Switch to the buffer named @var{name}.
+@item (buffer-current)
+Return the name of the current buffer.
+@item (buffer-list)
+Return a list of all open buffer names.
+@item (buffer-text)
+Return the full text content of the current buffer.
+@item (buffer-line [@var{n}])
+Return the content of line @var{n} (or the current line if @var{n} is
+omitted).
+@item (buffer-line-count)
+Return the number of lines in the current buffer.
+@item (buffer-insert @var{text})
+Insert @var{text} at the current cursor position.
+@item (buffer-delete @var{count})
+Delete @var{count} characters starting at the cursor position.
+@item (buffer-save [@var{filename}])
+Save the current buffer to its associated file, or to @var{filename} if
+provided.
+@item (buffer-save-as @var{filename})
+Save the current buffer to a new file and update the buffer's filename
+association.
+@item (buffer-kill @var{name})
+Kill (close) the buffer named @var{name}.
+@end table
+
+@section Gap Buffer Implementation
+
+@cindex gap buffer
+@cindex implementation, buffer
+tmax uses a @dfn{gap buffer} data structure for efficient text editing.
+A gap buffer maintains a gap (empty space) at the cursor position,
+making insertions and deletions at the cursor O(1) operations.  Moving
+the cursor moves the gap, which is an O(n) operation where n is the
+distance moved.
+
+@c ============================================================
+@node Configuration
+@chapter Configuration
+@cindex configuration
+@cindex customization
+@cindex init file
+
+tmax is configured through T-Lisp scripts.  The primary configuration
+file is @file{~/.config/tmax/init.tlisp}, which is loaded automatically
+when the editor starts.
+
+@section The Init File
+
+@cindex init file
+@cindex @file{init.tlisp}
+@cindex @file{~/.config/tmax/init.tlisp}
+Create or edit @file{~/.config/tmax/init.tlisp} to customize tmax.
+This file is a standard T-Lisp script that runs in the editor's global
+environment, so you have access to the full T-Lisp editor API.
+
+Example init file:
+
+@example
+@group
+;; ~/.config/tmax/init.tlisp
+
+;; Custom key bindings
+(key-bind "w" "(cursor-move (+ (cursor-line) 5) (cursor-column))" "normal")
+(key-bind "b" "(cursor-move (- (cursor-line) 5) (cursor-column))" "normal")
+
+;; Custom macros
+(defmacro save-and-quit ()
+  '(progn
+     (file-write (buffer-current) (buffer-text))
+     (editor-quit)))
+
+;; Custom commands
+(defun center-cursor ()
+  (let ((line-count (buffer-line-count))
+        (center-line (/ line-count 2)))
+    (cursor-move center-line 0)))
+
+(key-bind "zz" "(center-cursor)" "normal")
+@end group
+@end example
+
+@section Custom Init File Path
+
+@cindex @code{--init-file}
+@cindex custom init file
+
+You can specify a custom init file on the command line:
+
+@example
+tmax --init-file ./my-config.tlisp
+@end example
+
+To disable init file loading entirely, use @file{/dev/null}:
+
+@example
+tmax --init-file /dev/null
+@end example
+
+@section Reloading Configuration
+
+@cindex reloading configuration
+@cindex @code{eval-init-file}
+
+To reload your init file without restarting the editor:
+
+@example
+M-x eval-init-file
+@end example
+
+Or from the command line:
+
+@example
+tmax -e '(eval-init-file)'
+@end example
+
+@section Evaluating a Buffer
+
+@cindex @code{eval-buffer}
+@cindex evaluating buffer contents
+
+You can evaluate the contents of the current buffer as T-Lisp code:
+
+@example
+M-x eval-buffer
+@end example
+
+This is particularly useful with the @code{*scratch*} buffer for
+testing T-Lisp expressions interactively.
+
+@section Init File T-Lisp Functions
+
+@table @code
+@item (init-file-path)
+Return the path to the current init file.
+@item (eval-init-file)
+Reload and evaluate the init file.
+@item (eval-buffer)
+Evaluate the current buffer's text as T-Lisp code.
+@end table
+
+@section Editor Settings
+
+@cindex editor settings
+@cindex configuration variables
+The editor state includes the following configurable settings:
+
+@table @code
+@item tab-size
+Tab width for indentation (default: 4).
+@item show-line-numbers
+Whether to display line numbers (default: true).
+@item word-wrap
+Whether to wrap long lines (default: false).
+@item max-undo-levels
+Maximum number of undo levels (default: 100).
+@item auto-save
+Whether to automatically save changes (default: false).
+@end table
+
+@section Macro Recording and Playback
+
+@cindex macro recording
+@cindex macros, keyboard
+@cindex @kbd{q}
+@cindex @kbd{@var{register}}
+
+tmax supports Vim-style keyboard macro recording:
+
+@table @kbd
+@item q@var{a}
+Start recording a macro into register @var{a} (any lowercase letter or
+digit).
+@item q
+Stop recording the macro.
+@item @@@var{a}
+Execute the macro stored in register @var{a}.
+@item @@@@
+Execute the most recently executed macro again.
+@end table
+
+Example workflow:
+
+@example
+qa        @r{Start recording into register a}
+jjdd      @r{Move down two lines, delete one}
+q         @r{Stop recording}
+@@a       @r{Replay the macro}
+@end example
+
+@section T-Lisp Standard Library
+
+@cindex standard library
+@cindex built-in functions
+The T-Lisp interpreter includes a standard library of built-in functions.
+These are available in the global environment without any imports.
+
+@subsection Arithmetic
+
+@table @code
+@item (+ @var{a} @var{b} @dots{})
+Addition.  Accepts any number of arguments.
+@item (- @var{a} @var{b} @dots{})
+Subtraction.
+@item (* @var{a} @var{b} @dots{})
+Multiplication.
+@item (/ @var{a} @var{b})
+Division.
+@item (mod @var{a} @var{b})
+Modulo.
+@item (abs @var{n})
+Absolute value.
+@item (sqrt @var{n})
+Square root.
+@item (expt @var{base} @var{exp})
+Exponentiation.
+@item (floor @var{n})
+Floor.
+@item (ceiling @var{n})
+Ceiling.
+@item (round @var{n})
+Round to nearest integer.
+@item (min @var{a} @var{b} @dots{})
+Minimum.
+@item (max @var{a} @var{b} @dots{})
+Maximum.
+@end table
+
+@subsection Comparison
+
+@table @code
+@item (= @var{a} @var{b})
+Numeric equality.
+@item (< @var{a} @var{b})
+Less than.
+@item (> @var{a} @var{b})
+Greater than.
+@item (eq @var{a} @var{b})
+Identity/equality test.
+@end table
+
+@subsection List Operations
+
+@table @code
+@item (cons @var{a} @var{b})
+Construct a pair.
+@item (car @var{list})
+First element of a list.
+@item (cdr @var{list})
+Rest of a list.
+@item (list @var{a} @var{b} @dots{})
+Create a list from arguments.
+@item (append @var{list1} @var{list2})
+Concatenate two lists.
+@item (reverse @var{list})
+Reverse a list.
+@item (nth @var{n} @var{list})
+Return the @var{n}th element of @var{list} (zero-indexed).
+@item (last @var{list})
+Return the last element of @var{list}.
+@item (member @var{item} @var{list})
+Return the sublist starting at @var{item}, or nil if not found.
+@item (length @var{seq})
+Return the length of a list or string.
+@end table
+
+@subsection String Operations
+
+@table @code
+@item (substring @var{str} @var{start} @var{end})
+Extract a substring.
+@item (string-append @var{a} @var{b} @dots{})
+Concatenate strings.
+@item (string= @var{a} @var{b})
+String equality.
+@item (string< @var{a} @var{b})
+String less-than (lexicographic).
+@item (string> @var{a} @var{b})
+String greater-than (lexicographic).
+@item (string-upcase @var{str})
+Convert to uppercase.
+@item (string-downcase @var{str})
+Convert to lowercase.
+@end table
+
+@subsection Predicates
+
+@table @code
+@item (null @var{x})
+True if @var{x} is nil.
+@item (atom @var{x})
+True if @var{x} is not a pair/list.
+@item (numberp @var{x})
+True if @var{x} is a number.
+@item (stringp @var{x})
+True if @var{x} is a string.
+@item (symbolp @var{x})
+True if @var{x} is a symbol.
+@item (listp @var{x})
+True if @var{x} is a list.
+@item (functionp @var{x})
+True if @var{x} is a function.
+@item (zerop @var{n})
+True if @var{n} is zero.
+@item (evenp @var{n})
+True if @var{n} is even.
+@item (oddp @var{n})
+True if @var{n} is odd.
+@item (not @var{x})
+Logical negation.
+@end table
+
+@subsection Special Forms
+
+@table @code
+@item (quote @var{x})
+@cindex @code{quote}
+Return @var{x} unevaluated.  Abbreviated as @code{'x}.
+@item (if @var{cond} @var{then} @var{else})
+@cindex @code{if}
+Conditional expression.
+@item (let ((@var{var1} @var{val1}) @dots{}) @var{body})
+@cindex @code{let}
+Local variable bindings.
+@item (lambda (@var{params}) @var{body})
+@cindex @code{lambda}
+Anonymous function.
+@item (defun @var{name} (@var{params}) @var{body})
+@cindex @code{defun}
+Define a named function.
+@item (defmacro @var{name} (@var{params}) @var{body})
+@cindex @code{defmacro}
+Define a macro.
+@item (progn @var{expr1} @var{expr2} @dots{})
+@cindex @code{progn}
+Evaluate expressions sequentially, return the last result.
+@item (cond (@var{test1} @var{expr1}) (@var{test2} @var{expr2}) @dots{})
+@cindex @code{cond}
+Multi-branch conditional.
+@end table
+
+@subsection Quasiquote
+
+@table @code
+@item `@var{template}
+@cindex quasiquote
+Quasiquote: construct a list template, evaluating only unquoted parts.
+@item ,@var{expr}
+@cindex unquote
+Unquote: evaluate @var{expr} inside a quasiquote.
+@item @code{,@@@var{expr}}
+@cindex unquote-splicing
+Unquote-splicing: evaluate @var{expr} and splice the resulting list
+into the surrounding list.
+@end table
+
+@subsection Hash Maps
+
+@table @code
+@item (hashmap @var{key1} @var{val1} @dots{})
+Create a hash map from key-value pairs.
+@item (hashmap-get @var{map} @var{key})
+Look up a value by key.  Returns nil if not found.
+@item (hashmap-set @var{map} @var{key} @var{val})
+Return a new hash map with @var{key} set to @var{val}.
+@item (hashmap-keys @var{map})
+Return a list of all keys.
+@item (hashmap-values @var{map})
+Return a list of all values.
+@item (hashmap-has-key? @var{map} @var{key})
+Return true if @var{map} contains @var{key}.
+@end table
+
+@subsection Keymaps
+
+@table @code
+@item (defkeymap @var{name})
+Define a named keymap.
+@item (keymap-define-key @var{keymap} @var{key} @var{binding})
+Bind @var{key} to @var{binding} in @var{keymap}.
+@item (keymap-get @var{keymap} @var{key})
+Look up the binding for @var{key}.
+@item (keymap-lookup @var{keymap} @var{key})
+Look up a key binding, following parent keymap chains.
+@end table
+
+@subsection I/O
+
+@table @code
+@item (print @var{x})
+Print a value to the terminal.
+@end table
+
+@c ============================================================
+@node Plugin System
+@chapter Plugin System
+@cindex plugins
+@cindex TLPA
+@cindex package archive
+
+tmax supports a plugin system through the TLPA (T-Lisp Package Archive)
+repository.  Plugins are T-Lisp scripts that extend the editor's
+functionality.
+
+@section Plugin Management
+
+@cindex plugin management
+Plugins are managed through T-Lisp functions:
+
+@table @code
+@item (plugin-list)
+List all available plugins in the TLPA repository.
+@item (plugin-show @var{name})
+Show detailed information about a specific plugin.
+@item (plugin-install @var{name})
+Install a plugin from the repository.
+@item (plugin-search @var{query})
+Search the repository for plugins matching @var{query}.
+@item (plugin-info @var{name})
+Return metadata about an installed plugin.
+@end table
+
+@section Plugin Installation Directory
+
+@cindex plugin directory
+@cindex @file{~/.config/tmax/tlpa/}
+Installed plugins are stored in @file{~/.config/tmax/tlpa/}.  Each
+plugin is a T-Lisp file (or a directory containing a main T-Lisp file)
+that is loaded into the editor's T-Lisp environment.
+
+@section Available Plugins
+
+The TLPA repository includes plugins such as:
+
+@table @code
+@item theme-solarized
+Solarized dark color theme for tmax.
+@item theme-monokai
+Monokai color scheme for tmax.
+@item lsp-typescript
+TypeScript language server integration.
+@item lsp-python
+Python language server integration.
+@item vim-emulation
+Additional Vim compatibility bindings.
+@item auto-pairs
+Automatic bracket and quote pairing.
+@end table
+
+@section Creating Plugins
+
+@cindex creating plugins
+To create a plugin, write a T-Lisp script that defines functions, key
+bindings, and commands.  Place the file in
+@file{~/.config/tmax/tlpa/} or submit it to the TLPA repository.
+
+A plugin is a standard T-Lisp file.  For example:
+
+@example
+@group
+;; my-plugin.tlisp
+;; A simple plugin that adds line numbering toggle
+
+(defun toggle-line-numbers ()
+  (let ((current (editor-config "showLineNumbers")))
+    (editor-set-config "showLineNumbers"
+                       (not current))))
+
+(key-bind "SPC tn" "(toggle-line-numbers)" "normal")
+@end group
+@end example
+
+@section Submitting Plugins
+
+@cindex submitting plugins
+Plugins can be submitted to the TLPA repository for inclusion.  Each
+plugin submission includes metadata: name, description, author,
+version, license, and optional homepage URL.
+
+@c ============================================================
+@node Frontends
+@chapter Frontends
+@cindex frontends
+@cindex interchangeable frontends
+
+tmax supports multiple interchangeable frontends.  All frontends
+communicate with the editor core through the same interface, and the
+daemon/client architecture enables remote frontends via JSON-RPC over
+Unix sockets.
+
+@section TUI Frontend (Default)
+
+@cindex TUI frontend
+@cindex ANSI terminal
+@cindex terminal frontend
+The default frontend is a TUI (Terminal User Interface) client that
+renders directly using ANSI escape sequences.  It requires no external
+frameworks or dependencies.
+
+Features:
+@itemize @bullet
+@item Full-screen interface with alternate screen buffer.
+@item Raw mode input with proper key normalization.
+@item Viewport management with scrolling for large files.
+@item Status line with mode and cursor position.
+@item Which-key popup overlay.
+@item 200ms state polling when connected to the daemon.
+@end itemize
+
+Start the TUI frontend:
+
+@example
+tmax              @r{Auto-start daemon + TUI}
+tmaxclient --tui  @r{Start TUI connected to running daemon}
+bun run tui       @r{Start TUI directly}
+@end example
+
+@section Ink Frontend (React)
+
+@cindex Ink frontend
+@cindex React frontend
+The Ink frontend uses the @uref{https://github.com/vadimdemedes/ink,
+Ink} framework (React for the terminal) to render the editor UI as
+React components.  This frontend provides a component-based architecture
+for more complex UI layouts.
+
+The Ink frontend is located in @file{src/frontend/} and uses the same
+editor core API as the TUI frontend.
+
+@section Steep Frontend
+
+@cindex Steep frontend
+The Steep frontend is an experimental native terminal frontend that
+provides an alternative rendering approach.  It is under active
+development.
+
+@section Selecting a Frontend
+
+The frontend is determined by how you launch tmax:
+
+@itemize @bullet
+@item @command{tmax} and @command{tmaxclient --tui} use the TUI frontend.
+@item The Ink frontend can be used through the React entry point
+(@file{src/main.tsx}).
+@end itemize
+
+All frontends share the same editor core, key bindings, and T-Lisp
+environment.  Switching frontends does not affect your configuration or
+customization.
+
+@c ============================================================
+@node Troubleshooting
+@chapter Troubleshooting
+@cindex troubleshooting
+@cindex problems
+@cindex FAQ
+
+@section The Daemon Will Not Start
+
+@cindex daemon, won't start
+If @command{tmax --daemon} fails:
+
+@itemize @bullet
+@item Check that another tmax daemon is not already running:
+@example
+tmaxclient --ping
+@end example
+@item Check for stale socket files:
+@example
+ls /tmp/tmax-$(id -u)/
+rm -f /tmp/tmax-$(id -u)/server
+@end example
+@item Check that Bun is installed and on your PATH:
+@example
+which bun
+bun --version
+@end example
+@end itemize
+
+@section Key Bindings Not Working
+
+@cindex key bindings, not working
+@cindex bindings, troubleshooting
+If custom key bindings from your init file are not taking effect:
+
+@itemize @bullet
+@item Check the init file for T-Lisp syntax errors:
+@example
+bun run repl
+> (load-file "~/.config/tmax/init.tlisp")
+@end example
+@item Reload the init file from within the editor:
+@example
+M-x eval-init-file
+@end example
+@item Check the @code{*Messages*} buffer for error messages:
+@example
+tmaxclient --messages
+@end example
+@end itemize
+
+@section The Editor Freezes or Does Not Respond
+
+@cindex editor freezes
+@cindex unresponsive
+@itemize @bullet
+@item Make sure you are not in command mode or M-x mode with a pending
+input.  Press @kbd{Escape} to return to normal mode.
+@item If the TUI client is disconnected from the daemon, restart it:
+@example
+tmaxclient --tui
+@end example
+@item As a last resort, stop and restart the daemon:
+@example
+tmax --stop
+tmax
+@end example
+@end itemize
+
+@section File Encoding Issues
+
+@cindex encoding
+@cindex UTF-8
+tmax reads and writes files using UTF-8 encoding.  If you encounter
+encoding issues, verify that your terminal is configured for UTF-8:
+
+@example
+echo $LANG
+@r{Should contain "UTF-8"}
+@end example
+
+@section Init File Errors
+
+@cindex init file errors
+If the init file contains errors, tmax will log them to the
+@code{*Messages*} buffer but will still start.  Check the messages:
+
+@example
+tmaxclient --messages
+@end example
+
+To skip the init file entirely:
+
+@example
+tmax --init-file /dev/null
+@end example
+
+@section Getting Help
+
+@cindex help
+@cindex @code{describe-key}
+@cindex @code{describe-function}
+@cindex @code{apropos-command}
+
+tmax includes a built-in help system:
+
+@table @code
+@item (describe-key @var{key})
+Show documentation for the command bound to @var{key}.
+@item (describe-function @var{name})
+Show documentation for the T-Lisp function @var{name}.
+@item (apropos-command @var{pattern})
+List all commands matching @var{pattern}.
+@end table
+
+Access these through M-x mode:
+
+@example
+SPC ; describe-key Enter
+SPC ; describe-function Enter
+SPC ; apropos-command Enter
+@end example
+
+@c ============================================================
+@node Command Reference
+@chapter Command Reference
+@cindex command reference
+@cindex reference
+
+This chapter provides a brief summary of available commands.  For full
+documentation of each function, use the built-in help system
+(@pxref{Troubleshooting}).
+
+@section Editor API Categories
+
+@cindex API categories
+The T-Lisp editor API is organized into the following modules:
+
+@table @code
+@item Buffer Operations (@file{buffer-ops})
+Create, switch, query, and manipulate buffers.
+@item Cursor Operations (@file{cursor-ops})
+Move and query the cursor position.
+@item Mode Operations (@file{mode-ops})
+Get and set the editor mode.
+@item File Operations (@file{file-ops})
+Read and write files.
+@item Bindings Operations (@file{bindings-ops})
+Query and manage key bindings.
+@item Word Operations (@file{word-ops})
+Word-level navigation and manipulation.
+@item Line Operations (@file{line-ops})
+Line-level operations.
+@item Delete Operations (@file{delete-ops})
+Delete text and manage the delete register.
+@item Yank Operations (@file{yank-ops})
+Yank text and manage the yank register.
+@item Change Operations (@file{change-ops})
+Change (replace) text.
+@item Undo/Redo Operations (@file{undo-redo-ops})
+Undo and redo editing changes.
+@item Count Operations (@file{count-ops})
+Numeric count prefix for commands.
+@item Visual Operations (@file{visual-ops})
+Visual mode selection management.
+@item Text Objects (@file{text-objects-ops})
+Structural text objects (word, quotes, brackets).
+@item Search Operations (@file{search-ops})
+Forward and backward text search.
+@item Replace Operations (@file{replace-ops})
+Find and replace functionality.
+@item Kill Ring (@file{kill-ring})
+Emacs-style kill ring management.
+@item Yank Pop (@file{yank-pop-ops})
+Cycle through kill ring entries.
+@item Jump Operations (@file{jump-ops})
+Jump to specific positions (top, bottom, line number).
+@item Minibuffer Operations (@file{minibuffer-ops})
+Minibuffer interaction.
+@item LSP Diagnostics (@file{lsp-diagnostics})
+Language server protocol diagnostics.
+@item Plugin Operations (@file{plugin-ops})
+Plugin discovery and management.
+@item Documentation (@file{documentation})
+Help system and documentation lookup.
+@item Hook Operations (@file{hook-ops})
+Event hooks for editor extensibility.
+@item Syntax Operations (@file{syntax-ops})
+Syntax highlighting and analysis.
+@item Indent Operations (@file{indent-ops})
+Automatic indentation.
+@item Major Mode Operations (@file{major-mode-ops})
+Major mode management.
+@item Dired Operations (@file{dired-ops})
+Directory editor functionality.
+@item Evil Integration (@file{evil-integration})
+Vim-emulation compatibility layer.
+@item Window Operations (@file{window-ops})
+Window layout management.
+@item Editor State (@file{editor-state})
+Query and modify editor state.
+@item Text Utilities (@file{text-utils})
+Text manipulation utilities.
+@item Keymap Operations (@file{keymap-ops})
+T-Lisp keymap management.
+@item Macro Recording (@file{macro-recording})
+Keyboard macro recording and playback.
+@item Macro Persistence (@file{macro-persistence})
+Save and load macros to/from files.
+@end table
+
+@section Cursor Functions
+
+@table @code
+@item (cursor-position)
+Return the cursor position as a list @code{(@var{line} @var{column})}.
+@item (cursor-move @var{line} @var{column})
+Move the cursor to the specified line and column.
+@item (cursor-line)
+Return the current line number (zero-indexed).
+@item (cursor-column)
+Return the current column number (zero-indexed).
+@end table
+
+@section Mode Functions
+
+@table @code
+@item (editor-mode)
+Return the current editor mode as a string.
+@item (editor-set-mode @var{mode})
+Set the editor mode.  @var{mode} must be one of:
+@code{"normal"}, @code{"insert"}, @code{"visual"},
+@code{"command"}, or @code{"mx"}.
+@item (editor-status)
+Return the current status message.
+@item (editor-set-status @var{message})
+Set the status line message.
+@item (editor-quit)
+Quit the editor.
+@end table
+
+@section File Functions
+
+@table @code
+@item (file-read @var{filename})
+Read and return the contents of @var{filename}.
+@item (file-write @var{filename} @var{content})
+Write @var{content} to @var{filename}.
+@end table
+
+@section LSP Diagnostics Functions
+
+@table @code
+@item (lsp-diagnostics-list)
+List all current LSP diagnostics.
+@item (lsp-diagnostics-for-line @var{line})
+Return diagnostics for the specified line.
+@item (lsp-diagnostics-current-line)
+Return diagnostics for the current cursor line.
+@item (lsp-diagnostics-count)
+Return diagnostic counts by severity.
+@item (lsp-diagnostics-clear)
+Clear all diagnostics.
+@item (lsp-diagnostics-has-errors)
+Return true if there are any error-level diagnostics.
+@end table
+
+@section Hook Functions
+
+@table @code
+@item (add-hook @var{hook-name} @var{function})
+Add @var{function} to the named hook.
+@item (remove-hook @var{hook-name} @var{function})
+Remove @var{function} from the named hook.
+@item (run-hooks @var{hook-name})
+Execute all functions attached to the named hook.
+@end table
+
+@section Testing Framework
+
+@cindex testing framework
+@cindex T-Lisp testing
+The T-Lisp interpreter includes a built-in testing framework:
+
+@table @code
+@item (deftest @var{name} () @var{body})
+Define a named test.
+@item (test-run @var{name})
+Run a specific test.
+@item (test-run-all)
+Run all defined tests.
+@item (assert-true @var{expr})
+Assert that @var{expr} is true.
+@item (assert-false @var{expr})
+Assert that @var{expr} is false.
+@item (assert-equal @var{expected} @var{actual})
+Assert equality.
+@item (assert-not-equal @var{a} @var{b})
+Assert inequality.
+@item (assert-error @var{expr})
+Assert that @var{expr} throws an error.
+@item (defvar @var{name} @var{value})
+Define a test variable.
+@item (set! @var{name} @var{value})
+Mutate a variable (only in test context).
+@item (deftest-suite @var{name} () @var{body})
+Define a test suite.
+@end table
+
+@section T-Lisp REPL
+
+@cindex REPL
+@cindex interactive evaluation
+The T-Lisp REPL (Read-Eval-Print Loop) lets you experiment with T-Lisp
+interactively:
+
+@example
+bun run repl
+@end example
+
+In the REPL, you can type T-Lisp expressions and see their results
+immediately:
+
+@example
+@group
+> (+ 1 2 3)
+6
+> (car '(1 2 3))
+1
+> (string-append "hello" " " "world")
+"hello world"
+> (defun square (n) (* n n))
+> (square 7)
+49
+@end group
+@end example
+
+For the complete T-Lisp language and API reference, see the
+@cite{T-Lisp Reference Manual} (@file{tlisp.info}).
+
+@c ============================================================
+@node Index
+@unnumbered Index
+
+@printindex cp
+
+@bye

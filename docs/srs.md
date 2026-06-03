@@ -2,7 +2,7 @@
 
 **Product:** tmax — T-Lisp Powered Terminal Editor  
 **Version:** 0.2.0  
-**Date:** 2026-05-16  
+**Date:** 2026-06-03  
 
 ---
 
@@ -450,6 +450,132 @@ Five modes: **normal**, **insert**, **visual**, **command**, **M-x**
 ---
 
 ### 3.2 Phase 2: Extensibility
+
+#### US-2.0.1: Built-In Mode Loading and Feature Registry
+**As a** tmax user using daemon and direct editor workflows  
+**I want** built-in mode libraries loaded before user init files and before client eval requests  
+**So that** major modes, minor modes, hooks, and mode commands are available consistently everywhere  
+
+**Status:** ✅ Implemented for built-in mode loading and truthful feature tracking (`src/tlisp/core/modes/`, `src/editor/api/load-ops.ts`)
+
+**Acceptance Criteria:**
+- ✅ Given tmax starts in daemon mode, when the daemon reports ready, then `(major-mode-list)` includes `fundamental`, `python`, `typescript`, `lisp`, and `go`
+- ✅ Given tmax starts in daemon mode, when I query `(featurep "python-mode")` and `(featurep "line-numbers-mode")`, then both should be true without first calling `require`
+- ✅ Given a mode file fails to parse or evaluate, when tmax starts, then startup diagnostics and tests should expose the failure instead of silently accepting partial mode state
+- ✅ Given I call `(require FEATURE)`, when the feature is missing or the file does not call `(provide FEATURE)`, then `require` should fail and `(featurep FEATURE)` should remain false
+- ✅ Given direct editor, daemon, TUI, and tests initialize the editor runtime, when they query loaded features, then they should see the same built-in mode registry
+
+#### US-2.0.2: Buffer-Local Major Modes and Auto-Mode Detection
+**As a** developer editing files in different languages  
+**I want** each buffer to have its own major mode selected by file rules  
+**So that** language-specific behavior does not leak between buffers  
+
+**Status:** ✅ Implemented for buffer-local major modes and extension/regexp auto-mode rules (`src/editor/api/major-mode-ops.ts`, `src/editor/auto-mode.ts`)
+
+**Acceptance Criteria:**
+- ✅ Given I open a `.py`, `.ts`, `.tlisp`, or `.go` file, when the buffer becomes current, then the expected major mode should activate for that buffer
+- ✅ Given I switch between two buffers with different file types, when I query current major mode, then each buffer should restore its own major mode
+- ✅ Given a mode registers extensions with or without a leading dot, when auto-mode detection runs, then both forms should match correctly
+- ✅ Given a major mode activates, when it has an activation hook, then that hook should execute through the live interpreter
+- ✅ Given a file has no matching rule, when it opens, then the buffer should use `fundamental` mode
+
+#### US-2.0.3: Minor Mode Definition and Generated Commands
+**As a** T-Lisp extension author  
+**I want** to define minor modes in T-Lisp with generated toggle commands  
+**So that** editor features can be composed without TypeScript changes  
+
+**Status:** ✅ Implemented for low-level minor-mode API, built-in line-numbers/auto-fill modes, and generated command semantics (`src/editor/api/minor-mode-ops.ts`)
+
+**Acceptance Criteria:**
+- ✅ Given I call `define-minor-mode` or the documented fallback sequence, when the mode file loads, then the minor mode should register with name, description, lighter, hooks, and optional keymap
+- ✅ Given a generated mode command is called with no argument, `t`, `nil`, a positive number, `0`, or a negative number, then it should follow Emacs-style enable/disable semantics
+- ✅ Given `line-numbers` is activated, when the buffer renders, then line number state should actually change and the `Ln` lighter should appear
+- ✅ Given `line-numbers` is deactivated, when line numbers were already enabled before activation, then the previous buffer-local setting should be restored
+- ✅ Given `auto-fill` is activated or deactivated, when the buffer config is inspected, then real wrap/fill state should change and restore predictably
+
+#### US-2.0.4: Global Minor Modes and Local Overrides
+**As a** tmax user  
+**I want** global minor modes with explicit buffer-local overrides  
+**So that** session-wide features apply broadly while individual buffers can opt out or back in  
+
+**Status:** ✅ Implemented for existing/future buffers and explicit local disable/re-enable semantics
+
+**Acceptance Criteria:**
+- ✅ Given I enable a global minor mode, when existing buffers are inspected, then the mode should be active in each buffer unless explicitly disabled
+- ✅ Given I enable a global minor mode, when I create or open a future buffer, then the buffer should inherit the global mode
+- ✅ Given I locally disable a globally enabled minor mode in one buffer, when I switch buffers, then only that buffer should remain disabled
+- ✅ Given I locally re-enable a mode after global activation, when the global mode is later disabled, then the locally re-enabled buffer should preserve its explicit local state
+- ✅ Given global minor mode state is serialized, when a client queries status or full state, then active global modes and current buffer modes should be observable
+
+#### US-2.0.5: Callable Mode Hooks
+**As a** T-Lisp extension author  
+**I want** mode hooks to accept function names, symbols, and lambdas  
+**So that** modes can customize buffers using normal Lisp functions  
+
+**Status:** ✅ Implemented for string, symbol, and lambda hooks through live editor/daemon eval paths
+
+**Acceptance Criteria:**
+- ✅ Given I add a string function-name hook, when `run-hooks` executes, then the named function should run
+- ✅ Given I add a symbol hook, when `run-hooks` executes, then the symbol should resolve to a callable function and run
+- ✅ Given I add a lambda hook, when `run-hooks` executes through `tmaxclient --eval`, then the lambda body should run and produce an observable state change
+- ✅ Given I append a hook, when multiple hooks run, then default/prepend and append ordering should be deterministic
+- ✅ Given I inspect hooks with `hook-list`, when callable hooks are present, then the output should be readable and must not contain `"[object Object]"`
+
+#### US-2.0.6: Mode-Aware Key Resolution and Discovery
+**As a** keyboard-driven editor user  
+**I want** active minor-mode and major-mode keymaps to participate in one resolver  
+**So that** key precedence and key discovery are predictable  
+
+**Status:** 🚧 Partially implemented (`src/editor/key-resolution.ts` has precedence rules; handler/which-key routing remains a follow-up)
+
+**Acceptance Criteria:**
+- ✅ Given a key is bound by two active minor modes, when resolved through the central resolver, then the most recently activated minor mode should win
+- ✅ Given a key is bound by an active minor mode and the current major mode, when resolved through the central resolver, then the minor-mode binding should win
+- ✅ Given a key is not handled by active minor or major modes, when resolved through the central resolver, then mode-specific and global bindings should continue to work
+- 📋 Given I run `describe-key`, `key-binding`, or which-key, when a binding comes from a minor or major mode, then the source mode should be visible
+- 📋 Given modal editing behavior uses direct primitives, when key resolution is centralized, then existing normal, insert, visual, command, and M-x behavior should not regress
+
+#### US-2.0.7: Mode Observability in Daemon and Renderers
+**As an** AI harness, client author, or tmax user  
+**I want** mode metadata exposed through daemon state and rendered status lines  
+**So that** clients and tests can verify mode behavior without fragile screen scraping  
+
+**Status:** ✅ Implemented for daemon status, frame/full-state metadata, and ANSI/Ink status lines
+
+**Acceptance Criteria:**
+- ✅ Given I run `tmaxclient --json --status`, when a major mode or minor mode is active, then the JSON should include `currentMajorMode`, `activeMinorModes`, and `activeMinorModeLighters`
+- ✅ Given a client queries frame, render-state, or full-state data, when mode state is active, then the same mode metadata should be present
+- ✅ Given daemon-tmux renders the editor, when a Python buffer has line numbers active, then the status line should show a compact form such as `NORMAL [python] (Ln)`
+- 📋 Given many minor modes are active, when the status line is narrower than the full mode string, then text should remain width-safe and not overlap
+- ✅ Given the Ink renderer is used, when mode metadata changes, then its status line should match the direct ANSI renderer's mode display
+
+#### US-2.0.8: Lisp-First Command and Policy Ownership
+**As a** tmax maintainer  
+**I want** user-facing editor policy to live in T-Lisp by default  
+**So that** tmax grows as a Lisp editor with a TypeScript substrate  
+
+**Status:** 🚧 Partially implemented (`docs/lisp-ownership-map.md`, representative command libraries exist; broader migration remains ongoing)
+
+**Acceptance Criteria:**
+- 📋 Given a new user-facing command is added, when it does not need a missing primitive, then it should be implemented in T-Lisp
+- 📋 Given TypeScript exposes a low-level primitive, when user-facing behavior composes that primitive, then the composition, keybinding, docs, and command metadata should live in T-Lisp
+- 📋 Given command metadata is needed for M-x, which-key, or `describe-key`, when a Lisp-owned command is loaded, then metadata should be registered from T-Lisp through `defcommand`, `command-register`, or equivalent
+- 📋 Given the ownership map is updated, when it reports progress, then it should use the runtime TypeScript/TSX-to-T-Lisp ratio and mark partial work honestly
+- 📋 Given representative editing, search, replace, buffer/file/window, help/discovery, and dired workflows are migrated, when tests run, then each category should have at least one Lisp-owned command validated through the interpreter or daemon
+
+#### US-2.0.9: Native T-Lisp Tests for Lisp-Owned Behavior
+**As an** AI harness implementing tmax behavior  
+**I want** Lisp-owned behavior covered by native T-Lisp tests  
+**So that** the Lisp layer has first-class regression coverage instead of relying only on TypeScript unit tests  
+
+**Status:** ✅ Implemented for mode-system native tests and Python daemon/daemon-tmux coverage
+
+**Acceptance Criteria:**
+- ✅ Given mode behavior is implemented in T-Lisp, when tests are added, then native T-Lisp tests should cover loaded features, generated mode commands, hook forms, and command metadata where possible
+- ✅ Given native T-Lisp tests exist, when the daemon loads the test file and runs `(test-run-all)`, then failures should be reported clearly to the harness
+- ✅ Given the Python UI suite runs, when mode-system coverage exists, then daemon-first mode tests should run by default
+- ✅ Given daemon-tmux is used by mode tests, when assertions are made, then tmux should be limited to renderer/status-line behavior and not general command validation
+- 📋 Given a behavior cannot yet be expressed in native T-Lisp tests, when the spec is implemented, then the gap should be documented and covered by Bun or Python daemon tests
 
 #### US-2.1.1: Plugin Directory Structure
 **As a** plugin developer  

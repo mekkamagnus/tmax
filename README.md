@@ -105,6 +105,9 @@ tmaxclient --eval '(code)'    # Evaluate T-Lisp
 tmaxclient --list-buffers     # List open buffers
 tmaxclient --messages         # Show *Messages* buffer
 tmaxclient --ping             # Check if daemon running
+tmaxclient --status --json    # Structured daemon/client/frame status
+tmaxclient --clients --json   # Connected client metadata
+tmaxclient --frames --json    # Connected TUI frame metadata
 tmaxclient --tui              # Launch TUI client
 ```
 
@@ -358,8 +361,22 @@ For detailed development plans and phase breakdowns, see the [comprehensive road
 - **Phase 2**: Extensibility and plugin system — in progress
 - **Phase 3**: Advanced features (LSP integration, multiple windows)
 
+### Modes and Lisp Ownership
+
+tmax loads built-in T-Lisp mode libraries before user init files and daemon eval requests. Major modes are buffer-local and selected by auto-mode rules for extensions such as `.py`, `.ts`, `.tlisp`, and `.go`. Minor modes are composable per-buffer features with status-line lighters; built-ins include `line-numbers` (`Ln`) and `auto-fill` (`Fill`).
+
+```lisp
+(line-numbers-mode t)
+(global-auto-fill-mode t)
+(add-hook "mode-python-activate-hook"
+  (lambda () (minor-mode-set "auto-fill" t)))
+```
+
+Clients can assert mode state with `tmaxclient --status --json`, which exposes `currentMajorMode`, `activeMinorModes`, and `activeMinorModeLighters`.
+
 ### Recent Milestones
 - ✅ **Daemon/Client Architecture**: Emacs-style daemon with Frame-based multi-client support
+- ✅ **Lisp-First Mode System**: Built-in major/minor modes load from T-Lisp and expose daemon-visible metadata
 - ✅ **Messages Buffer**: `*Messages*` buffer for editor event observability
 - ✅ **Core Editing Operators**: Delete, yank, change, put operations with count prefix
 - ✅ **Enhanced Navigation**: Word, line, paragraph navigation with jump commands
@@ -388,8 +405,7 @@ For more information on the architecture patterns used in tmax, see the [rules/]
 
 tmax supports multiple interchangeable frontends:
 - **TUI Client** (default): Direct ANSI escape sequence rendering, no framework dependencies
-- **Ink Frontend**: React/Deno-ink based with component architecture
+- **Ink Frontend**: React/Ink based with component architecture
 - **Steep Frontend**: Experimental native terminal frontend
 
 All frontends communicate with the editor core through the same interface. The daemon/client architecture enables remote frontends via JSON-RPC over Unix sockets.
-

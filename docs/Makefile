@@ -1,5 +1,8 @@
 # Documentation build system for tmax
 # Requires: texinfo, texi2pdf, makeinfo
+#
+# Note: The primary manuals live in docs/tmax/ (tmax.texinfo, tlisp.texinfo)
+# This Makefile handles the legacy manual in docs/manual/
 
 MANUAL_DIR = manual
 TEXI_SOURCE = $(MANUAL_DIR)/tmax.texi
@@ -7,7 +10,7 @@ INFO_TARGET = $(MANUAL_DIR)/tmax.info
 HTML_TARGET = $(MANUAL_DIR)/tmax.html
 PDF_TARGET = $(MANUAL_DIR)/tmax.pdf
 
-.PHONY: all info html pdf clean help
+.PHONY: all info html pdf clean help new-manuals
 
 # Build all documentation formats
 all: info html pdf
@@ -98,12 +101,21 @@ help:
 	@echo "  view-html   - View HTML documentation in browser" 
 	@echo "  view-pdf    - View PDF documentation"
 	@echo "  check-deps  - Check for required tools"
+	@echo "  new-manuals - Build docs/tmax/ manuals (tmax.info, tlisp.info)"
 	@echo "  help        - Show this help message"
 	@echo ""
 	@echo "Requirements:"
 	@echo "  makeinfo    - From GNU Texinfo package"
 	@echo "  texi2pdf    - From GNU Texinfo package (for PDF)"
 	@echo "  TeX         - LaTeX distribution (for PDF)"
+	@echo ""
+	@echo "New manuals (docs/tmax/):"
+	@echo "  cd tmax && make all    - Build tmax.info, tlisp.info, and HTML"
+
+# Build the new docs/tmax/ manuals
+new-manuals:
+	@echo "Building docs/tmax/ manuals..."
+	cd tmax && $(MAKE) all
 
 # Default help if no target specified
 .DEFAULT_GOAL := help

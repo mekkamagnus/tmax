@@ -1,0 +1,1987 @@
+This is tmax.info, produced by makeinfo version 7.3 from tmax.texinfo.
+
+This manual is for tmax version 0.2.0, an extensible terminal-based text
+editor.
+
+   Copyright © 2024-2026 tmax contributors.
+
+     Permission is hereby granted, free of charge, to any person
+     obtaining a copy of this software and associated documentation
+     files (the "Software"), to deal in the Software without
+     restriction, including without limitation the rights to use, copy,
+     modify, merge, publish, distribute, sublicense, and/or sell copies
+     of the Software, and to permit persons to whom the Software is
+     furnished to do so, subject to the following conditions:
+
+     The above copyright notice and this permission notice shall be
+     included in all copies or substantial portions of the Software.
+
+     THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
+     EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+     MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
+     NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS
+     BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN
+     ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
+     CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+     SOFTWARE.
+
+
+File: tmax.info,  Node: Top,  Next: Introduction,  Up: (dir)
+
+tmax Manual
+***********
+
+tmax is an extensible terminal-based text editor written in TypeScript,
+running on the Bun runtime.  It follows the Emacs architecture: a
+TypeScript core handles terminal I/O, file system operations, and buffer
+management, while a built-in Lisp dialect called T-Lisp handles all
+editor functionality--commands, modes, key bindings, and extensibility.
+
+   This manual describes tmax version 0.2.0.
+
+   This manual is for tmax version 0.2.0, an extensible terminal-based
+text editor.
+
+   Copyright © 2024-2026 tmax contributors.
+
+     Permission is hereby granted, free of charge, to any person
+     obtaining a copy of this software and associated documentation
+     files (the "Software"), to deal in the Software without
+     restriction, including without limitation the rights to use, copy,
+     modify, merge, publish, distribute, sublicense, and/or sell copies
+     of the Software, and to permit persons to whom the Software is
+     furnished to do so, subject to the following conditions:
+
+     The above copyright notice and this permission notice shall be
+     included in all copies or substantial portions of the Software.
+
+     THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
+     EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+     MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
+     NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS
+     BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN
+     ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
+     CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+     SOFTWARE.
+
+* Menu:
+
+* Introduction::                What tmax is and why it exists.
+* Installation::                Getting tmax running on your system.
+* Daemon/Client Architecture::  The server-based editing model.
+* Basic Usage::                 Starting, editing, and saving files.
+* Editing Modes::               Normal, insert, visual, command, and M-x.
+* Key Bindings::                Default key bindings for all modes.
+* Operators and Text Objects::  Delete, yank, change, and text objects.
+* Search and Replace::          Finding and replacing text.
+* Kill Ring::                   Emacs-style clipboard history.
+* Buffer Management::           Working with multiple buffers.
+* Configuration::               Customizing tmax with init files.
+* Plugin System::               Extending tmax with plugins.
+* Frontends::                   TUI, Ink, and Steep frontends.
+* Troubleshooting::             Common problems and their solutions.
+* Command Reference::           Summary of commands and T-Lisp functions.
+* Index::                       Combined concept and command index.
+
+
+File: tmax.info,  Node: Introduction,  Next: Installation,  Prev: Top,  Up: Top
+
+1 Introduction
+**************
+
+tmax is a terminal-based text editor designed for software developers,
+system administrators, and power users who prefer keyboard-driven
+terminal workflows.  It combines the extensibility of Emacs with the
+modal editing efficiency of Vim.
+
+   The editor follows a split architecture inspired by GNU Emacs.  A
+TypeScript core, running on the Bun runtime (https://bun.sh/), handles
+low-level operations: terminal I/O with alternate screen buffer, file
+system access, memory management, and display rendering.  All
+higher-level editor functionality--commands, modes, key bindings, and
+user customization--is implemented in T-Lisp, a built-in Lisp dialect
+with tail-call optimization and a macro system.
+
+   tmax has zero external runtime dependencies.  The only requirement is
+the Bun runtime itself.
+
+1.1 Key Features
+================
+
+   • Modal editing with Vim-style key bindings (hjkl navigation,
+     operators, text objects).
+   • Five editing modes: normal, insert, visual, command, and M-x.
+   • Complete T-Lisp interpreter with lexical scoping, tail-call
+     optimization, quasiquote macros, and a standard library of over 30
+     built-in functions.
+   • Comprehensive editor API with over 100 T-Lisp functions across 35
+     API modules.
+   • Daemon/client architecture with JSON-RPC 2.0 over Unix sockets,
+     supporting multiple simultaneous TUI frames sharing the same
+     buffers and interpreter state.
+   • Interchangeable frontends: TUI (ANSI escape sequences), Ink
+     (React), and Steep.
+   • Kill ring with yank-pop cycling, similar to the Emacs kill ring.
+   • Built-in help system: ‘describe-key’, ‘describe-function’, and
+     ‘apropos-command’.
+   • Which-key popup showing available bindings after prefix keys.
+   • Plugin system with a TLPA (T-Lisp Package Archive) repository.
+   • Keyboard macro recording and playback.
+   • LSP diagnostics integration.
+   • A ‘*Messages*’ buffer for editor event logging and observability.
+
+1.2 Design Philosophy
+=====================
+
+tmax follows the principle of "powerful core, extensible surface."  The
+TypeScript core provides efficient, reliable low-level operations, while
+T-Lisp provides unlimited customization possibilities.  This
+architecture allows users to:
+
+   • Customize editor behavior without recompiling.
+   • Create complex macros and commands in T-Lisp.
+   • Share configurations as T-Lisp scripts.
+   • Extend functionality through a consistent, documented API.
+
+
+File: tmax.info,  Node: Installation,  Next: Daemon/Client Architecture,  Prev: Introduction,  Up: Top
+
+2 Installation
+**************
+
+2.1 Prerequisites
+=================
+
+tmax requires the Bun (https://bun.sh/) JavaScript/TypeScript runtime.
+Bun provides fast startup times and native TypeScript support without a
+compilation step.
+
+   Install Bun by following the instructions at <https://bun.sh/>.  On
+macOS and Linux, the quickest method is:
+
+     curl -fsSL https://bun.sh/install | bash
+
+2.2 Building from Source
+========================
+
+Clone the repository and install dependencies:
+
+     # Clone the repository
+     git clone https://github.com/mekkamagnus/tmax.git
+     cd tmax
+
+     # Install dependencies
+     bun install
+
+     # Make the launcher executable
+     chmod +x bin/tmax bin/tmaxclient
+
+2.3 Adding to Your PATH
+=======================
+
+Add the ‘bin/’ directory to your shell's ‘PATH’ so you can run ‘tmax’
+from anywhere:
+
+     echo 'export PATH="$PATH:/path/to/tmax/bin"' >> ~/.bashrc
+     source ~/.bashrc
+
+   Replace ‘/path/to/tmax’ with the actual path to your clone.
+
+2.4 Verifying the Installation
+==============================
+
+Confirm that tmax is working:
+
+     # Check if tmax is on your PATH
+     which tmax
+
+     # Ping a running daemon (or just start the editor)
+     tmax --help
+
+     # Run the test suite
+     bun test
+
+2.5 Development Scripts
+=======================
+
+The following ‘bun’ scripts are available in the project:
+
+‘bun run start’
+     Run the editor directly (no daemon).  Accepts a filename argument.
+‘bun run dev’
+     Run the editor in development mode with auto-reload on file
+     changes.
+‘bun run repl’
+     Start the T-Lisp REPL for interactive experimentation.
+‘bun run daemon’
+     Start the daemon only (no TUI frame).
+‘bun run tui’
+     Start the TUI client directly.
+‘bun test’
+     Run the full test suite.
+‘bun run test:ui’
+     Run UI tests using the tmux test harness.
+
+
+File: tmax.info,  Node: Daemon/Client Architecture,  Next: Basic Usage,  Prev: Installation,  Up: Top
+
+3 Daemon/Client Architecture
+****************************
+
+tmax uses an Emacs-style daemon/client architecture.  A background
+daemon process (‘tmax --daemon’) holds all editor state: buffers, the
+T-Lisp interpreter, configuration, and the kill ring.  Multiple TUI
+clients ("frames") can connect to the same daemon, each with an
+independent viewport but sharing the same underlying state.
+
+3.1 Starting the Daemon
+=======================
+
+The daemon is the server process that manages all editor state.  It
+listens on a Unix domain socket for JSON-RPC 2.0 requests.
+
+     # Start daemon only (no TUI)
+     tmax --daemon
+
+   When you run ‘tmax’ without ‘--daemon’, it automatically starts the
+daemon if one is not already running, then opens a TUI frame.
+
+     # This auto-starts the daemon if needed
+     tmax myfile.txt
+
+3.2 The Unified CLI
+===================
+
+The ‘tmax’ command is the primary interface for both daemon and client
+operations.
+
+‘tmax [FILE]’
+     Start daemon (if not running) and open a TUI frame.  If FILE is
+     given, open it in the editor.
+‘tmax --daemon’
+     Start the daemon only, without opening a TUI frame.
+‘tmax -e EXPR’
+     Evaluate a T-Lisp expression on the daemon and print the result.
+‘tmax --stop’
+     Stop the running daemon.
+‘tmax -t’
+     Open a new terminal frame (this is the default behavior).
+‘tmax --init-file PATH’
+     Load a custom init file instead of the default
+     ‘~/.config/tmax/init.tlisp’.
+‘tmax -h’
+‘tmax --help’
+     Show usage information.
+
+3.3 The Client CLI
+==================
+
+The ‘tmaxclient’ command provides direct access to daemon operations
+without opening a TUI frame.
+
+‘tmaxclient FILE’
+     Open FILE in the daemon.
+‘tmaxclient --eval 'CODE'’
+     Evaluate T-Lisp code on the daemon.
+‘tmaxclient --list-buffers’
+     List all open buffers.
+‘tmaxclient --kill-buffer NAME’
+     Kill (close) a specific buffer.
+‘tmaxclient --messages’
+     Show the contents of the ‘*Messages*’ buffer.
+‘tmaxclient --ping’
+     Check whether the daemon is running.
+‘tmaxclient --tui’
+     Launch the TUI client.
+‘tmaxclient --insert TEXT’
+     Insert text at the current cursor position.
+‘tmaxclient --insert-stdin’
+     Read from standard input and insert at the cursor.
+‘tmaxclient --script FILE’
+     Execute a T-Lisp script file on the daemon.
+‘tmaxclient --server-info’
+     Query and display full server state.
+‘tmaxclient -s PATH’
+     Use a custom socket path.
+‘tmaxclient -n’
+‘tmaxclient --no-wait’
+     Open a file without waiting for the buffer to close.
+
+3.4 JSON-RPC 2.0 Protocol
+=========================
+
+Clients communicate with the daemon using JSON-RPC 2.0 over a Unix
+domain socket.  The default socket path is ‘/tmp/tmax-UID/server’, where
+UID is your user ID.
+
+   The protocol supports the following methods:
+
+‘ping’
+     Health check.  Returns ‘{"status": "running"}’.
+‘open’
+     Open a file in the daemon.  Parameters: ‘filepath’, ‘wait’.
+‘eval’
+     Evaluate T-Lisp code.  Parameters: ‘code’.
+‘insert’
+     Insert text at the current cursor.  Parameters: ‘text’.
+‘command’
+     Execute an editor command.  Parameters: ‘command’, plus
+     command-specific parameters.
+‘query’
+     Query server state.  Parameters: ‘query’ (e.g., ‘"full-state"’,
+     ‘"messages"’).
+
+3.5 Frames
+==========
+
+Each TUI client connected to the daemon is called a “frame”.  Frames
+share the same buffers and T-Lisp interpreter but maintain independent
+viewports, cursor positions, and scrolling state.  This means you can
+have two terminal windows editing different parts of the same file
+simultaneously.
+
+
+File: tmax.info,  Node: Basic Usage,  Next: Editing Modes,  Prev: Daemon/Client Architecture,  Up: Top
+
+4 Basic Usage
+*************
+
+4.1 Starting the Editor
+=======================
+
+The recommended way to start tmax is through the unified CLI:
+
+     # Start with a file (auto-starts daemon)
+     tmax myfile.txt
+
+     # Start with an empty buffer
+     tmax
+
+   For quick editing without the daemon:
+
+     bun run start myfile.txt
+
+4.2 First Steps
+===============
+
+When tmax starts, you are in “normal mode”.  The status line at the
+bottom of the screen shows the current mode and cursor position.
+
+  1. Press ‘i’ to enter “insert mode” and start typing text.
+  2. Press ‘Escape’ to return to normal mode.
+  3. Press ‘:’ to enter command mode, type ‘w’, and press ‘Enter’ to
+     save the file.
+  4. Press ‘:’ to enter command mode, type ‘q’, and press ‘Enter’ to
+     quit.
+  5. To save and quit in one step, type ‘:wq’ and press ‘Enter’.
+
+4.3 Editing a File
+==================
+
+A typical editing workflow:
+
+     tmax myfile.txt    Open a file
+     i                  Enter insert mode
+     type your text
+     Escape             Return to normal mode
+     hjkl               Navigate with h, j, k, l
+     dd                 Delete a line
+     yy                 Yank (copy) a line
+     p                  Paste after cursor
+     :wq Enter          Save and quit
+
+4.4 The Status Line
+===================
+
+The status line at the bottom of the terminal shows:
+
+   • The current editing mode (‘NORMAL’, ‘INSERT’, ‘VISUAL’, ‘COMMAND’,
+     or ‘M-X’).
+   • The current buffer's major mode, such as ‘[python]’ or
+     ‘[fundamental]’.
+   • Active minor-mode lighters, such as ‘(Ln Fill)’.
+   • The cursor position (line and column).
+   • Status messages (e.g., "Saved", "File not found").
+
+   Daemon clients can query the same mode metadata with ‘tmaxclient
+--status --json’.  The editor state includes ‘currentMajorMode’,
+‘activeMinorModes’, and ‘activeMinorModeLighters’, so UI tests and
+client integrations can verify mode behavior without scraping terminal
+text.
+
+4.5 The ‘*Messages*’ Buffer
+===========================
+
+tmax maintains a special buffer called ‘*Messages*’ that logs editor
+events: file operations, mode changes, errors, and T-Lisp evaluation
+results.  This buffer is useful for debugging and for monitoring what
+the editor is doing.
+
+     :messages         View the Messages buffer (in command mode)
+     tmaxclient --messages  View from the command line
+
+
+File: tmax.info,  Node: Editing Modes,  Next: Key Bindings,  Prev: Basic Usage,  Up: Top
+
+5 Editing Modes
+***************
+
+tmax has five editing modes, each with its own key bindings and
+behavior.
+
+* Menu:
+
+* Normal Mode::      Navigation and commands.
+* Insert Mode::      Entering text.
+* Visual Mode::      Selecting text.
+* Command Mode::     Vim-style ex commands.
+* M-x Mode::        Execute T-Lisp functions by name.
+
+
+File: tmax.info,  Node: Normal Mode,  Next: Insert Mode,  Up: Editing Modes
+
+5.1 Normal Mode
+===============
+
+Normal mode is the default mode when tmax starts.  In this mode,
+keystrokes are interpreted as commands rather than text input.  You use
+normal mode for navigation, text manipulation, and issuing editor
+commands.
+
+   To return to normal mode from any other mode, press ‘Escape’.
+
+   Normal mode supports a “count prefix”: typing a number before a
+command repeats the command that many times.  For example, ‘3j’ moves
+the cursor down three lines, and ‘5dd’ deletes five lines.
+
+
+File: tmax.info,  Node: Insert Mode,  Next: Visual Mode,  Prev: Normal Mode,  Up: Editing Modes
+
+5.2 Insert Mode
+===============
+
+Insert mode is for entering text directly into the buffer.  Characters
+you type are inserted at the cursor position.
+
+   Press ‘i’ to enter insert mode from normal mode.
+
+   Press ‘Escape’ to return to normal mode.
+
+   While in insert mode:
+
+‘Escape’
+     Return to normal mode.
+‘Backspace’
+     Delete the character before the cursor.
+‘Enter’
+     Insert a newline.
+‘Any printable character’
+     Insert at cursor position.
+
+
+File: tmax.info,  Node: Visual Mode,  Next: Command Mode,  Prev: Insert Mode,  Up: Editing Modes
+
+5.3 Visual Mode
+===============
+
+Visual mode allows you to select text and then operate on the selection.
+tmax supports three types of visual selection:
+
+‘v’
+     Character-wise visual selection.  The selection spans from the
+     starting cursor position to wherever you move the cursor.
+‘V’
+     Line-wise visual selection.  Entire lines are selected.
+‘C-v’
+     Block-wise (rectangular) visual selection.
+
+   While a visual selection is active, you can operate on it:
+
+‘d’
+     Delete the selected text.
+‘y’
+     Yank (copy) the selected text into the kill ring.
+‘u’
+     Convert the selected text to lowercase.
+‘U’
+     Convert the selected text to uppercase.
+‘Escape’
+     Cancel the selection and return to normal mode.
+
+
+File: tmax.info,  Node: Command Mode,  Next: M-x Mode,  Prev: Visual Mode,  Up: Editing Modes
+
+5.4 Command Mode
+================
+
+Command mode provides a command line at the bottom of the screen for
+entering Vim-style ex commands.
+
+   Press ‘:’ from normal mode to enter command mode.
+
+‘:w’
+     Save the current file.
+‘:q’
+     Quit the editor.
+‘:wq’
+     Save and quit.
+‘:e FILENAME’
+     Open a file for editing.
+
+   Press ‘Enter’ to execute the command.  Press ‘Escape’ to cancel.
+
+
+File: tmax.info,  Node: M-x Mode,  Prev: Command Mode,  Up: Editing Modes
+
+5.5 M-x Mode
+============
+
+M-x mode lets you execute T-Lisp functions by name, similar to the Emacs
+‘M-x’ command.  It provides fuzzy command completion.
+
+   Press ‘SPC ;’ (space followed by semicolon) from normal mode to enter
+M-x mode.
+
+   Type the name of a T-Lisp function and press ‘Enter’ to execute it.
+Examples:
+
+‘cursor-position’
+     Display the current cursor position.
+‘editor-mode’
+     Display the current editing mode.
+‘quit’
+     Quit the editor.
+‘eval-buffer’
+     Evaluate the current buffer as T-Lisp code.
+‘eval-init-file’
+     Reload the init file.
+
+   Press ‘Escape’ to cancel M-x mode without executing a command.
+
+
+File: tmax.info,  Node: Key Bindings,  Next: Operators and Text Objects,  Prev: Editing Modes,  Up: Top
+
+6 Key Bindings
+**************
+
+6.1 Normal Mode Key Bindings
+============================
+
+6.1.1 Navigation
+----------------
+
+‘h’
+     Move cursor left.
+‘j’
+     Move cursor down.
+‘k’
+     Move cursor up.
+‘l’
+     Move cursor right.
+‘w’
+     Move to the beginning of the next word.
+‘b’
+     Move to the beginning of the previous word.
+‘e’
+     Move to the end of the current word.
+‘0’
+     Move to the beginning of the line.
+‘$’
+     Move to the end of the line.
+‘gg’
+     Move to the top of the file.
+‘G’
+     Move to the bottom of the file.
+
+6.1.2 Mode Switching
+--------------------
+
+‘i’
+     Enter insert mode.
+‘v’
+     Enter character-wise visual mode.
+‘V’
+     Enter line-wise visual mode.
+‘C-v’
+     Enter block-wise visual mode.
+‘:’
+     Enter command mode.
+‘SPC ;’
+     Enter M-x mode.
+
+6.1.3 Editing
+-------------
+
+‘dd’
+     Delete the current line.
+‘yy’
+     Yank (copy) the current line.
+‘p’
+     Paste (put) after the cursor.
+‘P’
+     Paste (put) before the cursor.
+‘x’
+     Delete the character under the cursor.
+‘dw’
+     Delete to the end of the word.
+‘cw’
+     Change to the end of the word (delete and enter insert mode).
+‘u’
+     Undo the last change.
+‘C-r’
+     Redo the last undone change.
+
+6.1.4 Search
+------------
+
+‘/’
+     Search forward.
+‘?’
+     Search backward.
+‘n’
+     Jump to the next search match.
+
+6.1.5 Count Prefix
+------------------
+
+Most normal-mode commands accept a numeric count prefix.  Type a number
+before the command to repeat it:
+
+‘3j’
+     Move down 3 lines.
+‘5dd’
+     Delete 5 lines.
+‘2yy’
+     Yank 2 lines.
+‘10G’
+     Go to line 10.
+
+6.1.6 Other
+-----------
+
+‘q’
+     Quit the editor (single-file mode, no daemon).
+
+6.2 Insert Mode Key Bindings
+============================
+
+‘Escape’
+     Return to normal mode.
+‘Backspace’
+     Delete the character before the cursor.
+‘Enter’
+     Insert a newline.
+‘CHAR’
+     Insert the character at cursor position.
+
+6.3 Visual Mode Key Bindings
+============================
+
+‘d’
+     Delete the selected text.
+‘y’
+     Yank (copy) the selected text.
+‘u’
+     Convert selection to lowercase.
+‘U’
+     Convert selection to uppercase.
+‘Escape’
+     Cancel selection and return to normal mode.
+
+6.4 Command Mode Key Bindings
+=============================
+
+‘TEXT’
+     Enter command text.
+‘Enter’
+     Execute the command.
+‘Backspace’
+     Delete the last character.
+‘Escape’
+     Cancel and return to normal mode.
+
+6.5 Custom Key Bindings
+=======================
+
+You can define custom key bindings in your init file using the
+‘key-bind’ function:
+
+     (key-bind "w" "(cursor-move (+ (cursor-line) 5) (cursor-column))" "normal")
+     (key-bind "b" "(cursor-move (- (cursor-line) 5) (cursor-column))" "normal")
+
+   The ‘key-bind’ function takes three arguments:
+
+‘key’
+     The key sequence to bind (a string).
+‘command’
+     The T-Lisp expression to evaluate when the key is pressed (a
+     string).
+‘mode’
+     The mode in which the binding is active: ‘"normal"’, ‘"insert"’,
+     ‘"visual"’, ‘"command"’, or ‘"mx"’.
+
+6.6 Which-Key Popup
+===================
+
+When you press a prefix key (such as ‘SPC’ or ‘g’), tmax briefly
+displays a popup showing all the key bindings that start with that
+prefix.  This popup disappears after a configurable timeout (default
+1000 milliseconds) or when you press the next key.
+
+
+File: tmax.info,  Node: Operators and Text Objects,  Next: Search and Replace,  Prev: Key Bindings,  Up: Top
+
+7 Operators and Text Objects
+****************************
+
+7.1 Operators
+=============
+
+Operators are commands that perform an action on a range of text.  tmax
+supports the following operators in normal mode:
+
+‘d’
+     Delete operator.  Combined with a motion or text object to delete
+     text.  Examples: ‘dd’ (delete line), ‘dw’ (delete word), ‘d$’
+     (delete to end of line).
+‘y’
+     Yank (copy) operator.  Combined with a motion or text object to
+     copy text into the kill ring.  Examples: ‘yy’ (yank line), ‘yw’
+     (yank word).
+‘c’
+     Change operator.  Deletes text and enters insert mode.  Examples:
+     ‘cw’ (change word), ‘cc’ (change entire line).
+
+7.2 Text Objects
+================
+
+Text objects define structural units of text that can be used with
+operators.  Text objects come in two forms: “inner” (‘i’) which excludes
+surrounding whitespace and delimiters, and “around” (‘a’) which includes
+them.
+
+7.2.1 Word Text Object
+----------------------
+
+‘diw’
+     Delete inner word (the word under the cursor, excluding surrounding
+     spaces).
+‘daw’
+     Delete around word (the word plus surrounding spaces).
+
+7.2.2 Quoted String Text Objects
+--------------------------------
+
+‘ci'’
+     Change inner single-quoted string.
+‘ca'’
+     Change around single-quoted string (including the quotes).
+‘ci"’
+     Change inner double-quoted string.
+‘ca"’
+     Change around double-quoted string (including the quotes).
+
+7.2.3 Parenthesis and Bracket Text Objects
+------------------------------------------
+
+‘di(’
+‘di)’
+     Delete inner parentheses (contents within parentheses).
+‘ci(’
+‘ci)’
+     Change inner parentheses.
+‘di{’
+‘di}’
+     Delete inner braces (contents within braces).
+‘ci{’
+‘ci}’
+     Change inner braces.
+‘di[’
+‘di]’
+     Delete inner brackets.
+‘di<’
+     Delete inner angle brackets.
+‘dit’
+     Delete inner HTML/XML tag.
+
+7.3 Count Prefix with Operators
+===============================
+
+Operators support the numeric count prefix to multiply their effect:
+
+‘3dd’
+     Delete 3 lines.
+‘5dw’
+     Delete 5 words.
+‘2yy’
+     Yank 2 lines.
+
+
+File: tmax.info,  Node: Search and Replace,  Next: Kill Ring,  Prev: Operators and Text Objects,  Up: Top
+
+8 Search and Replace
+********************
+
+8.1 Incremental Search
+======================
+
+tmax provides incremental search in normal mode:
+
+‘/PATTERN’
+     Search forward for PATTERN.
+‘?PATTERN’
+     Search backward for PATTERN.
+‘n’
+     Jump to the next match in the search direction.
+‘*’
+     Search forward for the word under the cursor.
+
+   When you press ‘/’ or ‘?’, the cursor moves to the command line.
+Type your search pattern and press ‘Enter’.  Press ‘Escape’ to cancel
+the search.
+
+8.2 Replace Operations
+======================
+
+Replace operations are available through the T-Lisp API:
+
+     ;; Start a replace session
+     (replace-start "old" "new")
+
+     ;; Replace the current match and move to next
+     (replace-next)
+
+     ;; Replace all matches
+     (replace-all "old" "new")
+
+8.3 Replace T-Lisp Functions
+============================
+
+‘(replace-start FIND REPLACE)’
+     Initialize a replace session, finding all occurrences of FIND and
+     preparing to replace them with REPLACE.
+‘(replace-next)’
+     Replace the current match and advance to the next one.
+‘(replace-all FIND REPLACE)’
+     Replace all occurrences of FIND with REPLACE in the current buffer.
+‘(replace-cancel)’
+     Cancel the current replace session.
+‘(replace-status)’
+     Return the current state of the replace session.
+
+
+File: tmax.info,  Node: Kill Ring,  Next: Buffer Management,  Prev: Search and Replace,  Up: Top
+
+9 Kill Ring
+***********
+
+tmax implements an Emacs-style kill ring, a circular buffer that stores
+multiple entries of deleted or yanked text.  This is more powerful than
+a simple clipboard because you can cycle through previous deletions.
+
+9.1 How the Kill Ring Works
+===========================
+
+   • When you delete text (e.g., with ‘dd’, ‘dw’, or visual mode ‘d’),
+     the deleted text is added to the front of the kill ring.
+   • When you yank with ‘p’ or ‘P’, the most recent entry from the kill
+     ring is pasted.
+   • Use ‘yank-pop’ to cycle through older entries in the kill ring.
+   • The default kill ring size is 5 entries.  When the ring is full,
+     the oldest entry is discarded.
+
+9.2 Kill Ring T-Lisp Functions
+==============================
+
+‘(kill-ring-add TEXT)’
+     Add TEXT to the front of the kill ring.
+‘(kill-ring-yank)’
+     Return the most recent entry from the kill ring.
+‘(kill-ring-rotate)’
+     Rotate the kill ring, making the second-most-recent entry the
+     current one.  Use this to cycle through previous deletions.
+‘(kill-ring-list)’
+     Return a list of all entries currently in the kill ring.
+‘(kill-ring-size)’
+     Return the number of entries in the kill ring.
+‘(kill-ring-clear)’
+     Remove all entries from the kill ring.
+
+9.3 Yank-Pop
+============
+
+After yanking text with ‘p’ or ‘P’, you can cycle through the kill ring
+entries by calling ‘(yank-pop)’.  Each invocation replaces the
+just-yanked text with the next older entry from the kill ring.
+
+     ;; After pressing p to yank, cycle to the previous kill:
+     M-x yank-pop
+
+
+File: tmax.info,  Node: Buffer Management,  Next: Configuration,  Prev: Kill Ring,  Up: Top
+
+10 Buffer Management
+********************
+
+tmax supports multiple buffers simultaneously.  Each buffer holds the
+contents of a file (or scratch text) and maintains its own cursor
+position.
+
+10.1 Opening Buffers
+====================
+
+Use command mode to open files into new buffers:
+
+     :e otherfile.txt
+
+   Alternatively, use the T-Lisp API:
+
+     (buffer-create "scratch")
+     (buffer-switch "otherfile.txt")
+
+10.2 Switching Buffers
+======================
+
+Switch between open buffers using the T-Lisp API:
+
+     (buffer-switch "myfile.txt")
+
+   To list all open buffers from the command line:
+
+     tmaxclient --list-buffers
+
+10.3 Special Buffers
+====================
+
+tmax creates several special buffers automatically:
+
+‘*Messages*’
+     A log of editor events, T-Lisp evaluations, and status messages.
+     Updated continuously as you use the editor.
+‘*scratch*’
+     A scratch buffer for temporary text and T-Lisp experimentation.
+     Use ‘(eval-buffer)’ to evaluate its contents as T-Lisp code.
+
+10.4 Buffer T-Lisp Functions
+============================
+
+‘(buffer-create NAME)’
+     Create a new empty buffer with the given name.
+‘(buffer-switch NAME)’
+     Switch to the buffer named NAME.
+‘(buffer-current)’
+     Return the name of the current buffer.
+‘(buffer-list)’
+     Return a list of all open buffer names.
+‘(buffer-text)’
+     Return the full text content of the current buffer.
+‘(buffer-line [N])’
+     Return the content of line N (or the current line if N is omitted).
+‘(buffer-line-count)’
+     Return the number of lines in the current buffer.
+‘(buffer-insert TEXT)’
+     Insert TEXT at the current cursor position.
+‘(buffer-delete COUNT)’
+     Delete COUNT characters starting at the cursor position.
+‘(buffer-save [FILENAME])’
+     Save the current buffer to its associated file, or to FILENAME if
+     provided.
+‘(buffer-save-as FILENAME)’
+     Save the current buffer to a new file and update the buffer's
+     filename association.
+‘(buffer-kill NAME)’
+     Kill (close) the buffer named NAME.
+
+10.5 Gap Buffer Implementation
+==============================
+
+tmax uses a “gap buffer” data structure for efficient text editing.  A
+gap buffer maintains a gap (empty space) at the cursor position, making
+insertions and deletions at the cursor O(1) operations.  Moving the
+cursor moves the gap, which is an O(n) operation where n is the distance
+moved.
+
+
+File: tmax.info,  Node: Configuration,  Next: Plugin System,  Prev: Buffer Management,  Up: Top
+
+11 Configuration
+****************
+
+tmax is configured through T-Lisp scripts.  The primary configuration
+file is ‘~/.config/tmax/init.tlisp’, which is loaded automatically when
+the editor starts.
+
+11.1 The Init File
+==================
+
+Create or edit ‘~/.config/tmax/init.tlisp’ to customize tmax.  This file
+is a standard T-Lisp script that runs in the editor's global
+environment, so you have access to the full T-Lisp editor API.
+
+   Example init file:
+
+     ;; ~/.config/tmax/init.tlisp
+
+     ;; Custom key bindings
+     (key-bind "w" "(cursor-move (+ (cursor-line) 5) (cursor-column))" "normal")
+     (key-bind "b" "(cursor-move (- (cursor-line) 5) (cursor-column))" "normal")
+
+     ;; Custom macros
+     (defmacro save-and-quit ()
+       '(progn
+          (file-write (buffer-current) (buffer-text))
+          (editor-quit)))
+
+     ;; Custom commands
+     (defun center-cursor ()
+       (let ((line-count (buffer-line-count))
+             (center-line (/ line-count 2)))
+         (cursor-move center-line 0)))
+
+     (key-bind "zz" "(center-cursor)" "normal")
+
+11.2 Custom Init File Path
+==========================
+
+You can specify a custom init file on the command line:
+
+     tmax --init-file ./my-config.tlisp
+
+   To disable init file loading entirely, use ‘/dev/null’:
+
+     tmax --init-file /dev/null
+
+11.3 Reloading Configuration
+============================
+
+To reload your init file without restarting the editor:
+
+     M-x eval-init-file
+
+   Or from the command line:
+
+     tmax -e '(eval-init-file)'
+
+11.4 Evaluating a Buffer
+========================
+
+You can evaluate the contents of the current buffer as T-Lisp code:
+
+     M-x eval-buffer
+
+   This is particularly useful with the ‘*scratch*’ buffer for testing
+T-Lisp expressions interactively.
+
+11.5 Init File T-Lisp Functions
+===============================
+
+‘(init-file-path)’
+     Return the path to the current init file.
+‘(eval-init-file)’
+     Reload and evaluate the init file.
+‘(eval-buffer)’
+     Evaluate the current buffer's text as T-Lisp code.
+
+11.6 Editor Settings
+====================
+
+The editor state includes the following configurable settings:
+
+‘tab-size’
+     Tab width for indentation (default: 4).
+‘show-line-numbers’
+     Whether to display line numbers (default: true).
+‘word-wrap’
+     Whether to wrap long lines (default: false).
+‘max-undo-levels’
+     Maximum number of undo levels (default: 100).
+‘auto-save’
+     Whether to automatically save changes (default: false).
+
+11.7 Macro Recording and Playback
+=================================
+
+tmax supports Vim-style keyboard macro recording:
+
+‘qA’
+     Start recording a macro into register A (any lowercase letter or
+     digit).
+‘q’
+     Stop recording the macro.
+‘@A’
+     Execute the macro stored in register A.
+‘@@’
+     Execute the most recently executed macro again.
+
+   Example workflow:
+
+     qa        Start recording into register a
+     jjdd      Move down two lines, delete one
+     q         Stop recording
+     @a       Replay the macro
+
+11.8 T-Lisp Standard Library
+============================
+
+The T-Lisp interpreter includes a standard library of built-in
+functions.  These are available in the global environment without any
+imports.
+
+11.8.1 Arithmetic
+-----------------
+
+‘(+ A B ...)’
+     Addition.  Accepts any number of arguments.
+‘(- A B ...)’
+     Subtraction.
+‘(* A B ...)’
+     Multiplication.
+‘(/ A B)’
+     Division.
+‘(mod A B)’
+     Modulo.
+‘(abs N)’
+     Absolute value.
+‘(sqrt N)’
+     Square root.
+‘(expt BASE EXP)’
+     Exponentiation.
+‘(floor N)’
+     Floor.
+‘(ceiling N)’
+     Ceiling.
+‘(round N)’
+     Round to nearest integer.
+‘(min A B ...)’
+     Minimum.
+‘(max A B ...)’
+     Maximum.
+
+11.8.2 Comparison
+-----------------
+
+‘(= A B)’
+     Numeric equality.
+‘(< A B)’
+     Less than.
+‘(> A B)’
+     Greater than.
+‘(eq A B)’
+     Identity/equality test.
+
+11.8.3 List Operations
+----------------------
+
+‘(cons A B)’
+     Construct a pair.
+‘(car LIST)’
+     First element of a list.
+‘(cdr LIST)’
+     Rest of a list.
+‘(list A B ...)’
+     Create a list from arguments.
+‘(append LIST1 LIST2)’
+     Concatenate two lists.
+‘(reverse LIST)’
+     Reverse a list.
+‘(nth N LIST)’
+     Return the Nth element of LIST (zero-indexed).
+‘(last LIST)’
+     Return the last element of LIST.
+‘(member ITEM LIST)’
+     Return the sublist starting at ITEM, or nil if not found.
+‘(length SEQ)’
+     Return the length of a list or string.
+
+11.8.4 String Operations
+------------------------
+
+‘(substring STR START END)’
+     Extract a substring.
+‘(string-append A B ...)’
+     Concatenate strings.
+‘(string= A B)’
+     String equality.
+‘(string< A B)’
+     String less-than (lexicographic).
+‘(string> A B)’
+     String greater-than (lexicographic).
+‘(string-upcase STR)’
+     Convert to uppercase.
+‘(string-downcase STR)’
+     Convert to lowercase.
+
+11.8.5 Predicates
+-----------------
+
+‘(null X)’
+     True if X is nil.
+‘(atom X)’
+     True if X is not a pair/list.
+‘(numberp X)’
+     True if X is a number.
+‘(stringp X)’
+     True if X is a string.
+‘(symbolp X)’
+     True if X is a symbol.
+‘(listp X)’
+     True if X is a list.
+‘(functionp X)’
+     True if X is a function.
+‘(zerop N)’
+     True if N is zero.
+‘(evenp N)’
+     True if N is even.
+‘(oddp N)’
+     True if N is odd.
+‘(not X)’
+     Logical negation.
+
+11.8.6 Special Forms
+--------------------
+
+‘(quote X)’
+     Return X unevaluated.  Abbreviated as ‘'x’.
+‘(if COND THEN ELSE)’
+     Conditional expression.
+‘(let ((VAR1 VAL1) ...) BODY)’
+     Local variable bindings.
+‘(lambda (PARAMS) BODY)’
+     Anonymous function.
+‘(defun NAME (PARAMS) BODY)’
+     Define a named function.
+‘(defmacro NAME (PARAMS) BODY)’
+     Define a macro.
+‘(progn EXPR1 EXPR2 ...)’
+     Evaluate expressions sequentially, return the last result.
+‘(cond (TEST1 EXPR1) (TEST2 EXPR2) ...)’
+     Multi-branch conditional.
+
+11.8.7 Quasiquote
+-----------------
+
+‘`TEMPLATE’
+     Quasiquote: construct a list template, evaluating only unquoted
+     parts.
+‘,EXPR’
+     Unquote: evaluate EXPR inside a quasiquote.
+‘,@EXPR’
+     Unquote-splicing: evaluate EXPR and splice the resulting list into
+     the surrounding list.
+
+11.8.8 Hash Maps
+----------------
+
+‘(hashmap KEY1 VAL1 ...)’
+     Create a hash map from key-value pairs.
+‘(hashmap-get MAP KEY)’
+     Look up a value by key.  Returns nil if not found.
+‘(hashmap-set MAP KEY VAL)’
+     Return a new hash map with KEY set to VAL.
+‘(hashmap-keys MAP)’
+     Return a list of all keys.
+‘(hashmap-values MAP)’
+     Return a list of all values.
+‘(hashmap-has-key? MAP KEY)’
+     Return true if MAP contains KEY.
+
+11.8.9 Keymaps
+--------------
+
+‘(defkeymap NAME)’
+     Define a named keymap.
+‘(keymap-define-key KEYMAP KEY BINDING)’
+     Bind KEY to BINDING in KEYMAP.
+‘(keymap-get KEYMAP KEY)’
+     Look up the binding for KEY.
+‘(keymap-lookup KEYMAP KEY)’
+     Look up a key binding, following parent keymap chains.
+
+11.8.10 I/O
+-----------
+
+‘(print X)’
+     Print a value to the terminal.
+
+
+File: tmax.info,  Node: Plugin System,  Next: Frontends,  Prev: Configuration,  Up: Top
+
+12 Plugin System
+****************
+
+tmax supports a plugin system through the TLPA (T-Lisp Package Archive)
+repository.  Plugins are T-Lisp scripts that extend the editor's
+functionality.
+
+12.1 Plugin Management
+======================
+
+Plugins are managed through T-Lisp functions:
+
+‘(plugin-list)’
+     List all available plugins in the TLPA repository.
+‘(plugin-show NAME)’
+     Show detailed information about a specific plugin.
+‘(plugin-install NAME)’
+     Install a plugin from the repository.
+‘(plugin-search QUERY)’
+     Search the repository for plugins matching QUERY.
+‘(plugin-info NAME)’
+     Return metadata about an installed plugin.
+
+12.2 Plugin Installation Directory
+==================================
+
+Installed plugins are stored in ‘~/.config/tmax/tlpa/’.  Each plugin is
+a T-Lisp file (or a directory containing a main T-Lisp file) that is
+loaded into the editor's T-Lisp environment.
+
+12.3 Available Plugins
+======================
+
+The TLPA repository includes plugins such as:
+
+‘theme-solarized’
+     Solarized dark color theme for tmax.
+‘theme-monokai’
+     Monokai color scheme for tmax.
+‘lsp-typescript’
+     TypeScript language server integration.
+‘lsp-python’
+     Python language server integration.
+‘vim-emulation’
+     Additional Vim compatibility bindings.
+‘auto-pairs’
+     Automatic bracket and quote pairing.
+
+12.4 Creating Plugins
+=====================
+
+To create a plugin, write a T-Lisp script that defines functions, key
+bindings, and commands.  Place the file in ‘~/.config/tmax/tlpa/’ or
+submit it to the TLPA repository.
+
+   A plugin is a standard T-Lisp file.  For example:
+
+     ;; my-plugin.tlisp
+     ;; A simple plugin that adds line numbering toggle
+
+     (defun toggle-line-numbers ()
+       (let ((current (editor-config "showLineNumbers")))
+         (editor-set-config "showLineNumbers"
+                            (not current))))
+
+     (key-bind "SPC tn" "(toggle-line-numbers)" "normal")
+
+12.5 Submitting Plugins
+=======================
+
+Plugins can be submitted to the TLPA repository for inclusion.  Each
+plugin submission includes metadata: name, description, author, version,
+license, and optional homepage URL.
+
+
+File: tmax.info,  Node: Frontends,  Next: Troubleshooting,  Prev: Plugin System,  Up: Top
+
+13 Frontends
+************
+
+tmax supports multiple interchangeable frontends.  All frontends
+communicate with the editor core through the same interface, and the
+daemon/client architecture enables remote frontends via JSON-RPC over
+Unix sockets.
+
+13.1 TUI Frontend (Default)
+===========================
+
+The default frontend is a TUI (Terminal User Interface) client that
+renders directly using ANSI escape sequences.  It requires no external
+frameworks or dependencies.
+
+   Features:
+   • Full-screen interface with alternate screen buffer.
+   • Raw mode input with proper key normalization.
+   • Viewport management with scrolling for large files.
+   • Status line with mode and cursor position.
+   • Which-key popup overlay.
+   • 200ms state polling when connected to the daemon.
+
+   Start the TUI frontend:
+
+     tmax              Auto-start daemon + TUI
+     tmaxclient --tui  Start TUI connected to running daemon
+     bun run tui       Start TUI directly
+
+13.2 Ink Frontend (React)
+=========================
+
+The Ink frontend uses the Ink (https://github.com/vadimdemedes/ink)
+framework (React for the terminal) to render the editor UI as React
+components.  This frontend provides a component-based architecture for
+more complex UI layouts.
+
+   The Ink frontend is located in ‘src/frontend/’ and uses the same
+editor core API as the TUI frontend.
+
+13.3 Steep Frontend
+===================
+
+The Steep frontend is an experimental native terminal frontend that
+provides an alternative rendering approach.  It is under active
+development.
+
+13.4 Selecting a Frontend
+=========================
+
+The frontend is determined by how you launch tmax:
+
+   • ‘tmax’ and ‘tmaxclient --tui’ use the TUI frontend.
+   • The Ink frontend can be used through the React entry point
+     (‘src/main.tsx’).
+
+   All frontends share the same editor core, key bindings, and T-Lisp
+environment.  Switching frontends does not affect your configuration or
+customization.
+
+
+File: tmax.info,  Node: Troubleshooting,  Next: Command Reference,  Prev: Frontends,  Up: Top
+
+14 Troubleshooting
+******************
+
+14.1 The Daemon Will Not Start
+==============================
+
+If ‘tmax --daemon’ fails:
+
+   • Check that another tmax daemon is not already running:
+          tmaxclient --ping
+   • Check for stale socket files:
+          ls /tmp/tmax-$(id -u)/
+          rm -f /tmp/tmax-$(id -u)/server
+   • Check that Bun is installed and on your PATH:
+          which bun
+          bun --version
+
+14.2 Key Bindings Not Working
+=============================
+
+If custom key bindings from your init file are not taking effect:
+
+   • Check the init file for T-Lisp syntax errors:
+          bun run repl
+          > (load-file "~/.config/tmax/init.tlisp")
+   • Reload the init file from within the editor:
+          M-x eval-init-file
+   • Check the ‘*Messages*’ buffer for error messages:
+          tmaxclient --messages
+
+14.3 The Editor Freezes or Does Not Respond
+===========================================
+
+   • Make sure you are not in command mode or M-x mode with a pending
+     input.  Press ‘Escape’ to return to normal mode.
+   • If the TUI client is disconnected from the daemon, restart it:
+          tmaxclient --tui
+   • As a last resort, stop and restart the daemon:
+          tmax --stop
+          tmax
+
+14.4 File Encoding Issues
+=========================
+
+tmax reads and writes files using UTF-8 encoding.  If you encounter
+encoding issues, verify that your terminal is configured for UTF-8:
+
+     echo $LANG
+     Should contain "UTF-8"
+
+14.5 Init File Errors
+=====================
+
+If the init file contains errors, tmax will log them to the ‘*Messages*’
+buffer but will still start.  Check the messages:
+
+     tmaxclient --messages
+
+   To skip the init file entirely:
+
+     tmax --init-file /dev/null
+
+14.6 Getting Help
+=================
+
+tmax includes a built-in help system:
+
+‘(describe-key KEY)’
+     Show documentation for the command bound to KEY.
+‘(describe-function NAME)’
+     Show documentation for the T-Lisp function NAME.
+‘(apropos-command PATTERN)’
+     List all commands matching PATTERN.
+
+   Access these through M-x mode:
+
+     SPC ; describe-key Enter
+     SPC ; describe-function Enter
+     SPC ; apropos-command Enter
+
+
+File: tmax.info,  Node: Command Reference,  Next: Index,  Prev: Troubleshooting,  Up: Top
+
+15 Command Reference
+********************
+
+This chapter provides a brief summary of available commands.  For full
+documentation of each function, use the built-in help system (*note
+Troubleshooting::).
+
+15.1 Editor API Categories
+==========================
+
+The T-Lisp editor API is organized into the following modules:
+
+‘Buffer Operations (buffer-ops)’
+     Create, switch, query, and manipulate buffers.
+‘Cursor Operations (cursor-ops)’
+     Move and query the cursor position.
+‘Mode Operations (mode-ops)’
+     Get and set the editor mode.
+‘File Operations (file-ops)’
+     Read and write files.
+‘Bindings Operations (bindings-ops)’
+     Query and manage key bindings.
+‘Word Operations (word-ops)’
+     Word-level navigation and manipulation.
+‘Line Operations (line-ops)’
+     Line-level operations.
+‘Delete Operations (delete-ops)’
+     Delete text and manage the delete register.
+‘Yank Operations (yank-ops)’
+     Yank text and manage the yank register.
+‘Change Operations (change-ops)’
+     Change (replace) text.
+‘Undo/Redo Operations (undo-redo-ops)’
+     Undo and redo editing changes.
+‘Count Operations (count-ops)’
+     Numeric count prefix for commands.
+‘Visual Operations (visual-ops)’
+     Visual mode selection management.
+‘Text Objects (text-objects-ops)’
+     Structural text objects (word, quotes, brackets).
+‘Search Operations (search-ops)’
+     Forward and backward text search.
+‘Replace Operations (replace-ops)’
+     Find and replace functionality.
+‘Kill Ring (kill-ring)’
+     Emacs-style kill ring management.
+‘Yank Pop (yank-pop-ops)’
+     Cycle through kill ring entries.
+‘Jump Operations (jump-ops)’
+     Jump to specific positions (top, bottom, line number).
+‘Minibuffer Operations (minibuffer-ops)’
+     Minibuffer interaction.
+‘LSP Diagnostics (lsp-diagnostics)’
+     Language server protocol diagnostics.
+‘Plugin Operations (plugin-ops)’
+     Plugin discovery and management.
+‘Documentation (documentation)’
+     Help system and documentation lookup.
+‘Hook Operations (hook-ops)’
+     Event hooks for editor extensibility.
+‘Syntax Operations (syntax-ops)’
+     Syntax highlighting and analysis.
+‘Indent Operations (indent-ops)’
+     Automatic indentation.
+‘Major Mode Operations (major-mode-ops)’
+     Major mode management.
+‘Dired Operations (dired-ops)’
+     Directory editor functionality.
+‘Evil Integration (evil-integration)’
+     Vim-emulation compatibility layer.
+‘Window Operations (window-ops)’
+     Window layout management.
+‘Editor State (editor-state)’
+     Query and modify editor state.
+‘Text Utilities (text-utils)’
+     Text manipulation utilities.
+‘Keymap Operations (keymap-ops)’
+     T-Lisp keymap management.
+‘Macro Recording (macro-recording)’
+     Keyboard macro recording and playback.
+‘Macro Persistence (macro-persistence)’
+     Save and load macros to/from files.
+
+15.2 Cursor Functions
+=====================
+
+‘(cursor-position)’
+     Return the cursor position as a list ‘(LINE COLUMN)’.
+‘(cursor-move LINE COLUMN)’
+     Move the cursor to the specified line and column.
+‘(cursor-line)’
+     Return the current line number (zero-indexed).
+‘(cursor-column)’
+     Return the current column number (zero-indexed).
+
+15.3 Mode Functions
+===================
+
+‘(editor-mode)’
+     Return the current editor mode as a string.
+‘(editor-set-mode MODE)’
+     Set the editor mode.  MODE must be one of: ‘"normal"’, ‘"insert"’,
+     ‘"visual"’, ‘"command"’, or ‘"mx"’.
+‘(editor-status)’
+     Return the current status message.
+‘(editor-set-status MESSAGE)’
+     Set the status line message.
+‘(editor-quit)’
+     Quit the editor.
+
+15.4 File Functions
+===================
+
+‘(file-read FILENAME)’
+     Read and return the contents of FILENAME.
+‘(file-write FILENAME CONTENT)’
+     Write CONTENT to FILENAME.
+
+15.5 LSP Diagnostics Functions
+==============================
+
+‘(lsp-diagnostics-list)’
+     List all current LSP diagnostics.
+‘(lsp-diagnostics-for-line LINE)’
+     Return diagnostics for the specified line.
+‘(lsp-diagnostics-current-line)’
+     Return diagnostics for the current cursor line.
+‘(lsp-diagnostics-count)’
+     Return diagnostic counts by severity.
+‘(lsp-diagnostics-clear)’
+     Clear all diagnostics.
+‘(lsp-diagnostics-has-errors)’
+     Return true if there are any error-level diagnostics.
+
+15.6 Hook Functions
+===================
+
+‘(add-hook HOOK-NAME FUNCTION)’
+     Add FUNCTION to the named hook.
+‘(remove-hook HOOK-NAME FUNCTION)’
+     Remove FUNCTION from the named hook.
+‘(run-hooks HOOK-NAME)’
+     Execute all functions attached to the named hook.
+
+15.7 Testing Framework
+======================
+
+The T-Lisp interpreter includes a built-in testing framework:
+
+‘(deftest NAME () BODY)’
+     Define a named test.
+‘(test-run NAME)’
+     Run a specific test.
+‘(test-run-all)’
+     Run all defined tests.
+‘(assert-true EXPR)’
+     Assert that EXPR is true.
+‘(assert-false EXPR)’
+     Assert that EXPR is false.
+‘(assert-equal EXPECTED ACTUAL)’
+     Assert equality.
+‘(assert-not-equal A B)’
+     Assert inequality.
+‘(assert-error EXPR)’
+     Assert that EXPR throws an error.
+‘(defvar NAME VALUE)’
+     Define a test variable.
+‘(set! NAME VALUE)’
+     Mutate a variable (only in test context).
+‘(deftest-suite NAME () BODY)’
+     Define a test suite.
+
+15.8 T-Lisp REPL
+================
+
+The T-Lisp REPL (Read-Eval-Print Loop) lets you experiment with T-Lisp
+interactively:
+
+     bun run repl
+
+   In the REPL, you can type T-Lisp expressions and see their results
+immediately:
+
+     > (+ 1 2 3)
+     6
+     > (car '(1 2 3))
+     1
+     > (string-append "hello" " " "world")
+     "hello world"
+     > (defun square (n) (* n n))
+     > (square 7)
+     49
+
+   For the complete T-Lisp language and API reference, see the ‘T-Lisp
+Reference Manual’ (‘tlisp.info’).
+
+
+File: tmax.info,  Node: Index,  Prev: Command Reference,  Up: Top
+
+Index
+*****
+
+ [index ]
+* Menu:
+
+* --init-file:                           Configuration.       (line  42)
+* ::                                     Command Mode.        (line   6)
+* :e:                                    Buffer Management.   (line  13)
+* :q:                                    Basic Usage.         (line  31)
+* :w:                                    Basic Usage.         (line  29)
+* :wq:                                   Basic Usage.         (line  33)
+* ?:                                     Search and Replace.  (line   9)
+* *Messages* buffer:                     Basic Usage.         (line  72)
+* /:                                     Search and Replace.  (line   9)
+* ~/.config/tmax/init.tlisp:             Configuration.       (line  13)
+* ~/.config/tmax/tlpa/:                  Plugin System.       (line  29)
+* ANSI terminal:                         Frontends.           (line  14)
+* API categories:                        Command Reference.   (line  13)
+* apropos-command:                       Troubleshooting.     (line  68)
+* architecture:                          Introduction.        (line  11)
+* architecture, daemon/client:           Daemon/Client Architecture.
+                                                              (line   6)
+* auto-daemon-start:                     Daemon/Client Architecture.
+                                                              (line  21)
+* basic usage:                           Basic Usage.         (line   6)
+* bindings, troubleshooting:             Troubleshooting.     (line  23)
+* block-wise selection:                  Visual Mode.         (line  15)
+* buffer management:                     Buffer Management.   (line   6)
+* buffer-switch:                         Buffer Management.   (line  25)
+* buffers:                               Buffer Management.   (line   6)
+* building from source:                  Installation.        (line  21)
+* built-in functions:                    Configuration.       (line 122)
+* Bun runtime:                           Installation.        (line   9)
+* change operator:                       Operators and Text Objects.
+                                                              (line  21)
+* character-wise selection:              Visual Mode.         (line  10)
+* client:                                Daemon/Client Architecture.
+                                                              (line   6)
+* client commands:                       Daemon/Client Architecture.
+                                                              (line  54)
+* clipboard:                             Kill Ring.           (line   6)
+* command mode:                          Command Mode.        (line   6)
+* command mode commands:                 Command Mode.        (line  11)
+* command reference:                     Command Reference.   (line   6)
+* cond:                                  Configuration.       (line 254)
+* configuration:                         Configuration.       (line   6)
+* configuration variables:               Configuration.       (line  84)
+* count prefix:                          Key Bindings.        (line  86)
+* count prefix, operators:               Operators and Text Objects.
+                                                              (line  79)
+* creating plugins:                      Plugin System.       (line  54)
+* custom init file:                      Configuration.       (line  42)
+* custom key bindings:                   Key Bindings.        (line 145)
+* customization:                         Configuration.       (line   6)
+* cycling the kill ring:                 Kill Ring.           (line  41)
+* daemon:                                Daemon/Client Architecture.
+                                                              (line   6)
+* daemon, won't start:                   Troubleshooting.     (line   9)
+* daemon/client:                         Introduction.        (line  33)
+* defmacro:                              Configuration.       (line 250)
+* defun:                                 Configuration.       (line 248)
+* delete operator:                       Operators and Text Objects.
+                                                              (line  13)
+* describe-function:                     Troubleshooting.     (line  68)
+* describe-key:                          Troubleshooting.     (line  68)
+* design philosophy:                     Introduction.        (line  50)
+* development scripts:                   Installation.        (line  61)
+* editing modes:                         Introduction.        (line  27)
+* editing modes <1>:                     Editing Modes.       (line   6)
+* editing workflow:                      Basic Usage.         (line  38)
+* editor API:                            Introduction.        (line  31)
+* editor freezes:                        Troubleshooting.     (line  36)
+* editor settings:                       Configuration.       (line  84)
+* encoding:                              Troubleshooting.     (line  47)
+* entering command mode:                 Command Mode.        (line   9)
+* entering insert mode:                  Insert Mode.         (line   9)
+* entering M-x mode:                     M-x Mode.            (line   9)
+* entering normal mode:                  Normal Mode.         (line  11)
+* eval-buffer:                           Configuration.       (line  64)
+* eval-init-file:                        Configuration.       (line  53)
+* evaluating buffer contents:            Configuration.       (line  64)
+* ex commands:                           Command Mode.        (line   6)
+* exiting insert mode:                   Insert Mode.         (line  11)
+* FAQ:                                   Troubleshooting.     (line   6)
+* first steps:                           Basic Usage.         (line  24)
+* Frame:                                 Daemon/Client Architecture.
+                                                              (line 112)
+* frames:                                Daemon/Client Architecture.
+                                                              (line 112)
+* frontends:                             Introduction.        (line  36)
+* frontends <1>:                         Frontends.           (line   6)
+* gap buffer:                            Buffer Management.   (line  78)
+* git clone:                             Installation.        (line  21)
+* help:                                  Troubleshooting.     (line  68)
+* help system:                           Introduction.        (line  39)
+* i:                                     Insert Mode.         (line   9)
+* if:                                    Configuration.       (line 242)
+* implementation, buffer:                Buffer Management.   (line  78)
+* incremental search:                    Search and Replace.  (line   9)
+* init file:                             Configuration.       (line   6)
+* init file <1>:                         Configuration.       (line  13)
+* init file errors:                      Troubleshooting.     (line  56)
+* init.tlisp:                            Configuration.       (line  13)
+* Ink frontend:                          Frontends.           (line  35)
+* insert mode:                           Insert Mode.         (line   6)
+* insert mode, entering:                 Basic Usage.         (line  27)
+* installation:                          Installation.        (line   6)
+* interactive evaluation:                Command Reference.   (line 178)
+* interchangeable frontends:             Frontends.           (line   6)
+* introduction:                          Introduction.        (line   6)
+* JSON-RPC:                              Daemon/Client Architecture.
+                                                              (line  88)
+* key bindings:                          Key Bindings.        (line   6)
+* key bindings, not working:             Troubleshooting.     (line  23)
+* key-bind:                              Key Bindings.        (line 145)
+* keymaps:                               Key Bindings.        (line   6)
+* kill ring:                             Introduction.        (line  38)
+* kill ring <1>:                         Kill Ring.           (line   6)
+* lambda:                                Configuration.       (line 246)
+* launcher scripts:                      Installation.        (line  36)
+* let:                                   Configuration.       (line 244)
+* line-wise selection:                   Visual Mode.         (line  13)
+* LSP diagnostics:                       Introduction.        (line  44)
+* M-x examples:                          M-x Mode.            (line  12)
+* M-x mode:                              M-x Mode.            (line   6)
+* macro recording:                       Introduction.        (line  43)
+* macro recording <1>:                   Configuration.       (line 100)
+* macros, keyboard:                      Configuration.       (line 100)
+* Messages buffer:                       Introduction.        (line  45)
+* messages buffer:                       Basic Usage.         (line  72)
+* modal editing:                         Introduction.        (line  25)
+* modes:                                 Editing Modes.       (line   6)
+* multi-client:                          Daemon/Client Architecture.
+                                                              (line 112)
+* n:                                     Search and Replace.  (line   9)
+* normal mode:                           Normal Mode.         (line   6)
+* normal mode key bindings:              Key Bindings.        (line   9)
+* normal mode, returning to:             Basic Usage.         (line  28)
+* numeric prefix:                        Key Bindings.        (line  86)
+* observability:                         Basic Usage.         (line  72)
+* opening buffers:                       Buffer Management.   (line  13)
+* operators:                             Operators and Text Objects.
+                                                              (line   6)
+* operators <1>:                         Operators and Text Objects.
+                                                              (line   9)
+* package archive:                       Plugin System.       (line   6)
+* PATH:                                  Installation.        (line  36)
+* plugin directory:                      Plugin System.       (line  29)
+* plugin management:                     Plugin System.       (line  13)
+* plugin system:                         Introduction.        (line  42)
+* plugins:                               Plugin System.       (line   6)
+* prefix keys:                           Key Bindings.        (line 165)
+* prerequisites:                         Installation.        (line   9)
+* problems:                              Troubleshooting.     (line   6)
+* progn:                                 Configuration.       (line 252)
+* protocol:                              Daemon/Client Architecture.
+                                                              (line  88)
+* q:                                     Configuration.       (line 100)
+* quasiquote:                            Configuration.       (line 260)
+* quitting:                              Basic Usage.         (line  31)
+* quote:                                 Configuration.       (line 240)
+* React frontend:                        Frontends.           (line  35)
+* reference:                             Command Reference.   (line   6)
+* REGISTER:                              Configuration.       (line 100)
+* reloading configuration:               Configuration.       (line  53)
+* REPL:                                  Command Reference.   (line 178)
+* replace:                               Search and Replace.  (line   6)
+* replace <1>:                           Search and Replace.  (line  27)
+* replace-next:                          Search and Replace.  (line  27)
+* replace-start:                         Search and Replace.  (line  27)
+* saving:                                Basic Usage.         (line  29)
+* search:                                Search and Replace.  (line   6)
+* server:                                Daemon/Client Architecture.
+                                                              (line   6)
+* socket:                                Daemon/Client Architecture.
+                                                              (line  88)
+* SPC ;:                                 M-x Mode.            (line   6)
+* special buffers:                       Buffer Management.   (line  36)
+* standard library:                      Configuration.       (line 122)
+* starting daemon:                       Daemon/Client Architecture.
+                                                              (line  15)
+* starting tmax:                         Basic Usage.         (line   9)
+* status line:                           Basic Usage.         (line  53)
+* Steep frontend:                        Frontends.           (line  46)
+* submitting plugins:                    Plugin System.       (line  73)
+* switching buffers:                     Buffer Management.   (line  25)
+* T-Lisp:                                Introduction.        (line  11)
+* T-Lisp interpreter:                    Introduction.        (line  28)
+* T-Lisp testing:                        Command Reference.   (line 150)
+* terminal frontend:                     Frontends.           (line  14)
+* testing framework:                     Command Reference.   (line 150)
+* text objects:                          Operators and Text Objects.
+                                                              (line   6)
+* text objects <1>:                      Operators and Text Objects.
+                                                              (line  27)
+* TLPA:                                  Plugin System.       (line   6)
+* tmax --daemon:                         Daemon/Client Architecture.
+                                                              (line  15)
+* tmax command:                          Daemon/Client Architecture.
+                                                              (line  30)
+* tmaxclient command:                    Daemon/Client Architecture.
+                                                              (line  54)
+* troubleshooting:                       Troubleshooting.     (line   6)
+* TUI frontend:                          Frontends.           (line  14)
+* tutorial:                              Basic Usage.         (line  24)
+* TypeScript core:                       Introduction.        (line  11)
+* unified CLI:                           Daemon/Client Architecture.
+                                                              (line  30)
+* unquote:                               Configuration.       (line 263)
+* unquote-splicing:                      Configuration.       (line 265)
+* unresponsive:                          Troubleshooting.     (line  36)
+* UTF-8:                                 Troubleshooting.     (line  47)
+* verification:                          Installation.        (line  47)
+* vim key bindings:                      Introduction.        (line  25)
+* visual mode:                           Visual Mode.         (line   6)
+* visual mode IS IMPLEMENTED:            Visual Mode.         (line   6)
+* visual mode operations:                Visual Mode.         (line  17)
+* which-key:                             Introduction.        (line  41)
+* which-key <1>:                         Key Bindings.        (line 165)
+* yank:                                  Kill Ring.           (line   6)
+* yank operator:                         Operators and Text Objects.
+                                                              (line  17)
+* yank-pop:                              Kill Ring.           (line  41)
+* zero dependencies:                     Introduction.        (line  19)
+
+
+Tag Table:
+Node: Top1309
+Node: Introduction4113
+Node: Installation6728
+Node: Daemon/Client Architecture8718
+Node: Basic Usage12569
+Node: Editing Modes15156
+Node: Normal Mode15583
+Node: Insert Mode16188
+Node: Visual Mode16770
+Node: Command Mode17629
+Node: M-x Mode18145
+Node: Key Bindings18896
+Node: Operators and Text Objects22536
+Node: Search and Replace24858
+Node: Kill Ring26334
+Node: Buffer Management28081
+Node: Configuration30620
+Node: Plugin System37990
+Node: Frontends40302
+Node: Troubleshooting42376
+Node: Command Reference44698
+Node: Index50819
+
+End Tag Table
+
+
+Local Variables:
+coding: utf-8
+End:

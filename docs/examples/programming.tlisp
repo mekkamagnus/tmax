@@ -74,8 +74,8 @@
   (buffer-insert "}\n"))
 
 (defun insert-test-template ()
-  (buffer-insert "import { assertEquals } from \"https://deno.land/std@0.208.0/assert/mod.ts\";\n\n")
-  (buffer-insert "Deno.test(\"test description\", () => {\n")
+  (buffer-insert "import { test, expect } from \"bun:test\";\n\n")
+  (buffer-insert "test(\"test description\", () => {\n")
   (buffer-insert "  // Arrange\n")
   (buffer-insert "  const expected = true;\n\n")
   (buffer-insert "  // Act\n")

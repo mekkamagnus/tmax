@@ -31,6 +31,12 @@ tmax.exe
 *.orig
 *.rej
 
+# Coverage
+coverage/
+
+# Generated HTML
+*.html
+
 # Test output
 test-*.txt
 tmux-*.txt

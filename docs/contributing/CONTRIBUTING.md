@@ -45,9 +45,8 @@ We use **GNU Texinfo** for the main manual (`docs/manual/tmax.texi`) because:
 
 3. **Build Documentation**:
    ```bash
-   make all         # Build all formats
+   make all         # Build default documentation
    make info        # Just GNU Info format
-   make html        # Just HTML format
    make pdf         # Just PDF (requires TeX)
    ```
 
@@ -137,7 +136,6 @@ Another description
    ```bash
    make validate    # Check Texinfo syntax
    make info        # Build and test
-   make html        # Verify HTML output
    ```
 
 4. **Test Documentation**:
