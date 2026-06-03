@@ -91,7 +91,7 @@ test("ErrorFactory - should create specific error types", () => {
     expect(validationError.context.category).toBe(ErrorCategory.VALIDATION);
     expect(validationError.context.input).toBe("not-an-email");
     expect(validationError.context.expected).toBe("valid@email.com");
-    expect(validationError.getUserMessage().toBe(true).includes("Invalid email"));
+    expect(validationError.getUserMessage().includes("Invalid email")).toBe(true);
     
     // Test parsing error
     const parseError = ErrorFactory.parsing(
@@ -138,28 +138,28 @@ test("TmaxError - should provide AI-friendly formatting", () => {
     
     const aiFormat = error.toAIFormat();
     
-    expect(aiFormat.includes("🚨 TMAX ERROR REPORT").toBe(true));
-    expect(aiFormat.includes("Complex error for AI analysis").toBe(true));
-    expect(aiFormat.includes("📦 Module: TestModule").toBe(true));
-    expect(aiFormat.includes("⚡ Function: complexFunction").toBe(true));
-    expect(aiFormat.includes("🔧 Operation: complex_operation").toBe(true));
-    expect(aiFormat.includes("🏷️  Category: runtime").toBe(true));
-    expect(aiFormat.includes("⚠️  Severity: critical").toBe(true));
-    expect(aiFormat.includes("👤 User Message: Something went wrong").toBe(true));
-    expect(aiFormat.includes("🔢 Error Code: ERR_COMPLEX_001").toBe(true));
-    expect(aiFormat.includes("💡 Suggestions:").toBe(true));
-    expect(aiFormat.includes("1. Restart the application").toBe(true));
-    expect(aiFormat.includes("2. Check logs").toBe(true));
-    expect(aiFormat.includes("📥 Input:").toBe(true));
-    expect(aiFormat.includes("✅ Expected: \"successful execution\"").toBe(true));
-    expect(aiFormat.includes("❌ Actual: \"runtime failure\"").toBe(true));
+    expect(aiFormat.includes("🚨 TMAX ERROR REPORT")).toBe(true);
+    expect(aiFormat.includes("Complex error for AI analysis")).toBe(true);
+    expect(aiFormat.includes("📦 Module: TestModule")).toBe(true);
+    expect(aiFormat.includes("⚡ Function: complexFunction")).toBe(true);
+    expect(aiFormat.includes("🔧 Operation: complex_operation")).toBe(true);
+    expect(aiFormat.includes("🏷️  Category: runtime")).toBe(true);
+    expect(aiFormat.includes("⚠️  Severity: critical")).toBe(true);
+    expect(aiFormat.includes("👤 User Message: Something went wrong")).toBe(true);
+    expect(aiFormat.includes("🔢 Error Code: ERR_COMPLEX_001")).toBe(true);
+    expect(aiFormat.includes("💡 Suggestions:")).toBe(true);
+    expect(aiFormat.includes("1. Restart the application")).toBe(true);
+    expect(aiFormat.includes("2. Check logs")).toBe(true);
+    expect(aiFormat.includes("📥 Input:")).toBe(true);
+    expect(aiFormat.includes("✅ Expected: \"successful execution\"")).toBe(true);
+    expect(aiFormat.includes("❌ Actual: \"runtime failure\"")).toBe(true);
   });
 
 test("DebugReporter - should track system health", () => {
     const health = debugReporter.getSystemHealth();
     
     expect(health).toBeDefined();
-    expect(["healthy", "degraded", "critical"].includes(health.status).toBe(true));
+    expect(["healthy", "degraded", "critical"].includes(health.status)).toBe(true);
     expect(typeof health.uptime).toBe("number");
     expect(typeof health.errorRate).toBe("number");
     expect(typeof health.recentErrors).toBe("number");
@@ -174,16 +174,16 @@ test("DebugReporter - should generate AI reports", () => {
     
     const report = debugReporter.generateAIReport();
     
-    expect(report.includes("🔬 TMAX DEBUG ANALYSIS REPORT").toBe(true));
-    expect(report.includes("═══ SYSTEM HEALTH ═══").toBe(true));
-    expect(report.includes("═══ ENVIRONMENT ═══").toBe(true));
-    expect(report.includes("═══ ERROR ANALYSIS ═══").toBe(true));
-    expect(report.includes("═══ AI TROUBLESHOOTING RECOMMENDATIONS ═══").toBe(true));
+    expect(report.includes("🔬 TMAX DEBUG ANALYSIS REPORT")).toBe(true);
+    expect(report.includes("═══ SYSTEM HEALTH ═══")).toBe(true);
+    expect(report.includes("═══ ENVIRONMENT ═══")).toBe(true);
+    expect(report.includes("═══ ERROR ANALYSIS ═══")).toBe(true);
+    expect(report.includes("═══ AI TROUBLESHOOTING RECOMMENDATIONS ═══")).toBe(true);
     
     // Check environment information
-    expect(report.includes("🖥️  Platform:").toBe(true));
-    expect(report.includes("🦕 Deno Version:").toBe(true));
-    expect(report.includes("💻 TTY Status:").toBe(true));
+    expect(report.includes("🖥️  Platform:")).toBe(true);
+    expect(report.includes("Bun Version:")).toBe(true);
+    expect(report.includes("💻 TTY Status:")).toBe(true);
   });
 
 test("DebugReporter - should track operation performance", () => {
@@ -221,7 +221,7 @@ test("DebugReporter - should track operation performance", () => {
     
     // Test getSize (should not throw)
     const sizeResult = terminal.getSize();
-    expect(Either.isRight(sizeResult).toBe(true) || Either.isLeft(sizeResult));
+    expect(Either.isRight(sizeResult) || Either.isLeft(sizeResult)).toBe(true);
     
     if (Either.isRight(sizeResult)) {
       const size = sizeResult.right;
@@ -233,7 +233,7 @@ test("DebugReporter - should track operation performance", () => {
     
     // Test readKey error handling (should fail gracefully when not in raw mode)
     const keyResult = await terminal.readKey().run();
-    expect(Either.isLeft(keyResult).toBe(true)); // Should fail because not in raw mode
+    expect(Either.isLeft(keyResult)).toBe(true); // Should fail because not in raw mode
     
     if (Either.isLeft(keyResult)) {
       const error = keyResult.left;
@@ -246,13 +246,13 @@ test("DebugReporter - should track operation performance", () => {
 test("Error Manager - comprehensive report generation", () => {
     const aiReport = errorManager.generateAIReport();
     
-    expect(aiReport.includes("🔍 TMAX ERROR ANALYSIS REPORT").toBe(true));
-    expect(aiReport.includes("📊 Total Errors:").toBe(true));
-    expect(aiReport.includes("📈 BY CATEGORY:").toBe(true));
-    expect(aiReport.includes("⚠️  BY SEVERITY:").toBe(true));
+    expect(aiReport.includes("🔍 TMAX ERROR ANALYSIS REPORT")).toBe(true);
+    expect(aiReport.includes("📊 Total Errors:")).toBe(true);
+    expect(aiReport.includes("📈 BY CATEGORY:")).toBe(true);
+    expect(aiReport.includes("⚠️  BY SEVERITY:")).toBe(true);
     
     // Should contain error categories we created
-    expect(aiReport.includes("validation:").toBe(true) || aiReport.includes("runtime:") || aiReport.includes("io:"));
+    expect(aiReport.includes("validation:") || aiReport.includes("runtime:") || aiReport.includes("io:")).toBe(true);
   });
 
 test("Logger configuration and AI-friendly formatting", () => {

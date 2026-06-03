@@ -418,7 +418,7 @@ describe("Effect Pattern Tests", () => {
 
     expect(result._tag).toBe("Right");
     if (result._tag === "Right") {
-      expect(result.right).toBe("Hello).toBe(World!");
+      expect(result.right).toBe("Hello, World!");
     }
   });
 
@@ -465,7 +465,7 @@ describe("Effect Pattern Tests", () => {
 
     expect(result._tag).toBe("Right");
     if (result._tag === "Right") {
-      expect(result.right).toBe([1, 2, 3]);
+      expect(result.right).toEqual([1, 2, 3]);
     }
   });
 

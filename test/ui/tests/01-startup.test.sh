@@ -8,7 +8,8 @@ source "$TEST_UI_DIR/../lib/api.sh"
 
 test_startup() {
   echo "=== Test: Application Startup ==="
-  echo "Running in visible window: $TMAX_SESSION:$TMAX_TEST_WINDOW"
+  echo "Running in mode: $TMAX_UI_TEST_MODE"
+  echo "Window: $TMAX_SESSION:$TMAX_TEST_WINDOW"
   echo ""
 
   tmax_init
@@ -21,9 +22,15 @@ test_startup() {
   # Wait for editor to be ready
   tmax_wait_for_ready 10
 
-  # Assertions
+  # Assertions — use daemon queries when available for reliability
   assert_running "Editor should be running"
-  assert_mode "NORMAL" "Should start in NORMAL mode"
+
+  if [[ "$TMAX_UI_TEST_MODE" == "daemon-tmux" ]]; then
+    tmax_assert_daemon_mode "NORMAL" "Should start in NORMAL mode (daemon)"
+  else
+    assert_mode "NORMAL" "Should start in NORMAL mode"
+  fi
+
   assert_no_errors "No errors should be present"
   assert_screen_fill "UI should fill entire terminal height"
 

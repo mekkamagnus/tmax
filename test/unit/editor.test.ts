@@ -176,17 +176,26 @@ describe("Editor Implementation", () => {
 
     const interpreter = editor.getInterpreter();
 
-    // file-read is not implemented - it throws an error
-    // This test verifies that the error is properly thrown
-    expect(() => {
-      interpreter.execute("(file-read \"test.txt\")");
-    }).toThrow();
+    // file-exists-p checks if a file exists (sync)
+    const existsResult = interpreter.execute("(file-exists-p \"/nonexistent.txt\")");
+    expect(Either.isRight(existsResult)).toBe(true);
+    if (Either.isRight(existsResult)) {
+      expect(existsResult.right.value).toBe(false);
+    }
 
-    // file-write is also not implemented through the T-Lisp API
-    // File operations should be done through the editor methods directly
-    expect(() => {
-      interpreter.execute("(file-write \"output.txt\" \"new content\")");
-    }).toThrow();
+    // write-file-content returns nil immediately (fire-and-forget async)
+    const writeResult = interpreter.execute("(write-file-content \"/tmp/tmax-test-write.txt\" \"hello\")");
+    expect(Either.isRight(writeResult)).toBe(true);
+    if (Either.isRight(writeResult)) {
+      expect(writeResult.right.type).toBe("nil");
+    }
+
+    // read-file-content returns nil for nonexistent files
+    const readResult = interpreter.execute("(read-file-content \"/nonexistent.txt\")");
+    expect(Either.isRight(readResult)).toBe(true);
+    if (Either.isRight(readResult)) {
+      expect(readResult.right.type).toBe("nil");
+    }
   });
 
   test("should handle complex editor operations", () => {

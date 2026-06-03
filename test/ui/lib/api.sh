@@ -215,6 +215,68 @@ tmax_last_line() {
 }
 
 # ============================================================================
+# DAEMON API
+# Reliable queries via tmaxclient (bypasses screen-scraping)
+# ============================================================================
+
+# Evaluate T-Lisp expression via daemon
+tmax_daemon_eval() {
+  local expr="$1"
+
+  if [[ "$TMAX_UI_TEST_MODE" != "daemon-tmux" ]]; then
+    log_warn "daemon_eval requires daemon-tmux mode"
+    return 1
+  fi
+
+  query_daemon_eval "$expr"
+}
+
+# Get mode via daemon (reliable)
+tmax_daemon_mode() {
+  query_daemon_mode
+}
+
+# Get buffer text via daemon (reliable)
+tmax_daemon_text() {
+  query_daemon_buffer_text
+}
+
+# Assert mode via daemon (reliable, no screen-scraping)
+tmax_assert_daemon_mode() {
+  local expected_mode="$1"
+  local message="${2:-Should be in mode: $expected_mode (via daemon)}"
+
+  local actual_mode
+  actual_mode=$(query_daemon_mode)
+
+  if [[ "$actual_mode" == "$expected_mode" ]]; then
+    log_info "PASS: $message"
+    export TMAX_ASSERTIONS_PASSED=$((TMAX_ASSERTIONS_PASSED + 1))
+    return 0
+  else
+    log_error "FAIL: $message (actual: $actual_mode)"
+    export TMAX_ASSERTIONS_FAILED=$((TMAX_ASSERTIONS_FAILED + 1))
+    return 1
+  fi
+}
+
+# Assert buffer contains text via daemon (reliable)
+tmax_assert_daemon_text() {
+  local pattern="$1"
+  local message="${2:-Buffer should contain: $pattern (via daemon)}"
+
+  if query_daemon_text_contains "$pattern"; then
+    log_info "PASS: $message"
+    export TMAX_ASSERTIONS_PASSED=$((TMAX_ASSERTIONS_PASSED + 1))
+    return 0
+  else
+    log_error "FAIL: $message"
+    export TMAX_ASSERTIONS_FAILED=$((TMAX_ASSERTIONS_FAILED + 1))
+    return 1
+  fi
+}
+
+# ============================================================================
 # QUERY API
 # ============================================================================
 
@@ -408,6 +470,10 @@ tmax_list_functions() {
   echo "Query:"
   echo "  tmax_mode, tmax_visible [pattern], tmax_text, tmax_running"
   echo ""
+  echo "Daemon (reliable, requires daemon-tmux mode):"
+  echo "  tmax_daemon_eval [expr], tmax_daemon_mode, tmax_daemon_text"
+  echo "  tmax_assert_daemon_mode [mode], tmax_assert_daemon_text [pattern]"
+  echo ""
   echo "Assertion:"
   echo "  tmax_assert_text [pattern], tmax_assert_mode [mode]"
   echo "  tmax_assert_no_errors, tmax_assert_screen_fill [tolerance]"
@@ -466,6 +532,8 @@ export -f tmax_insert tmax_normal tmax_command tmax_type tmax_type_line
 export -f tmax_save tmax_quit tmax_save_quit
 export -f tmax_move tmax_goto_line tmax_first_line tmax_last_line
 export -f tmax_mode tmax_visible tmax_text tmax_running
+export -f tmax_daemon_eval tmax_daemon_mode tmax_daemon_text
+export -f tmax_assert_daemon_mode tmax_assert_daemon_text
 export -f tmax_assert_text tmax_assert_mode tmax_assert_no_errors tmax_assert_screen_fill tmax_summary
 export -f tmax_debug tmax_nodebug tmax_state tmax_dump tmax_screenshot
 export -f tmax_wait_for tmax_wait_for_ready tmax_wait_for_mode tmax_sleep

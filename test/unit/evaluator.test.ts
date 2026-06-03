@@ -219,6 +219,40 @@ describe("T-Lisp Evaluator", () => {
     }
   });
 
+  test("should bind optional supplied-p parameters", () => {
+    let expr = parseExpr("(defun optional-supplied-test (&optional (arg nil arg-supplied-p)) (if arg-supplied-p arg 'missing))");
+    let result = evaluator.eval(expr, env);
+    expect(Either.isRight(result)).toBe(true);
+
+    expr = parseExpr("(optional-supplied-test)");
+    result = evaluator.eval(expr, env);
+    expect(Either.isRight(result)).toBe(true);
+    if (Either.isRight(result)) {
+      expect(result.right.type).toBe("symbol");
+      expect(result.right.value).toBe("missing");
+    }
+
+    expr = parseExpr("(optional-supplied-test nil)");
+    result = evaluator.eval(expr, env);
+    expect(Either.isRight(result)).toBe(true);
+    if (Either.isRight(result)) {
+      expect(result.right.type).toBe("nil");
+    }
+  });
+
+  test("should allow a string literal as the only defun body form", () => {
+    let expr = parseExpr('(defun string-body-fn () "hello from custom")');
+    let result = evaluator.eval(expr, env);
+    expect(Either.isRight(result)).toBe(true);
+
+    expr = parseExpr("(string-body-fn)");
+    result = evaluator.eval(expr, env);
+    expect(Either.isRight(result)).toBe(true);
+    if (Either.isRight(result)) {
+      expect(result.right).toEqual(createString("hello from custom"));
+    }
+  });
+
   test("should evaluate let expressions", () => {
     const expr = parseExpr("(let ((x 10) (y 20)) (+ x y))");
     const result = evaluator.eval(expr, env);

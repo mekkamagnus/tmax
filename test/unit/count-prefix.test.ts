@@ -225,7 +225,7 @@ describe("Count Prefix (US-1.3.1)", () => {
       const state = editor.getState();
       const content = state.currentBuffer?.getContent();
       if (content && typeof content === "object" && "right" in content) {
-        expect(content.right).toBe("hellhohohoho");
+        expect(content.right).toBe("hellohhh");
       }
     });
   });

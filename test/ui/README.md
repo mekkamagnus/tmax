@@ -1,528 +1,134 @@
-# tmax UI Test Harness
+# tmax UI Test Suite
 
-A modular, AI-friendly test harness for controlling tmax editor via tmux. Designed for automated UI testing and manual debugging.
+Python-based functional test suite for tmax editor. Tests run in `daemon` mode by default (fast, no tmux needed) with `daemon-tmux` mode reserved for TUI renderer tests.
 
 ## Quick Start
 
 ```bash
-# Source the API
-source test/ui/lib/api.sh
+# Run the full suite (daemon + daemon-tmux)
+cd test/ui
+uv run python run_python_suite.py
 
-# Initialize
-tmax_init
+# Run daemon-only tests
+uv run python run_python_suite.py daemon
 
-# Start editor
-tmax_start
+# Run daemon-tmux tests only
+uv run python run_python_suite.py daemon-tmux
 
-# Do something
-tmax_type "Hello World"
+# Run a single test
+uv run python tests/01_startup.py
+TMAX_UI_TEST_MODE=daemon-tmux uv run python tests/10_renderer_layout.py
 
-# Save and quit
-tmax_save_quit
-
-# Cleanup
-tmax_cleanup
+# Run pure helper unit tests
+uv run python tests/test_harness_helpers.py
 ```
 
-## Architecture
-
-The test harness is organized into layers:
-
-### 1. **Core Layer** (`core/`)
-Low-level tmux and editor operations
-- `session.sh` - Tmux session management
-- `input.sh` - Sending keys and commands
-- `query.sh` - Querying editor state
-- `editor.sh` - Editor lifecycle (start/stop/restart)
-
-### 2. **Operations Layer** (`ops/`)
-High-level editing operations
-- `editing.sh` - Mode changes, typing, deletion
-- `navigation.sh` - Cursor movement
-- `files.sh` - File operations
-
-### 3. **Assertion Layer** (`assert/`)
-Test verification
-- `assertions.sh` - Assertions and test tracking
-
-### 4. **API Layer** (`lib/`)
-Public interface for AI assistants
-- `api.sh` - Main entry point with `tmax_*` functions
-- `config.sh` - Configuration
-- `debug.sh` - Debug utilities
-- `common.sh` - Common utility functions (window targets, mode verification, session validation)
-- `test-framework.sh` - Test framework utilities (standardized test execution, file utilities)
-
-## Test Framework
-
-The test framework (`test-framework.sh`) provides standardized test execution with automatic setup/teardown and common assertion patterns.
-
-### Using the Test Framework
-
-```bash
-#!/bin/bash
-# test/ui/tests/my-feature.test.sh
-
-# Source test framework
-source ../lib/test-framework.sh
-
-test_my_feature_logic() {
-  # Create test file
-  setup_test_file "test.txt" "Initial content"
-
-  # Start editor
-  tmax_start "test.txt"
-  tmax_wait_for_ready 10
-
-  # Use common assertions
-  assert_common_startup  # Running, NORMAL mode, no errors, screen fill
-  assert_text_visible "Initial content"
-
-  # Test the feature
-  tmax_insert
-  tmax_type "Appended text"
-  tmax_normal
-
-  # Cleanup
-  tmax_quit
-  cleanup_test_file "test.txt"
-}
-
-# Run test with automatic setup/teardown
-run_test "My Feature" test_my_feature_logic
-```
-
-### Test Framework Functions
-
-#### Test Execution
-- `run_test <name> <function>` - Run test with automatic init/cleanup/summary
-- `assert_common_startup` - Run common startup assertions (running, mode, errors, screen fill)
-
-#### Test File Utilities
-- `setup_test_file <filename> [content] [location]` - Create test file
-- `cleanup_test_file <filename> [location]` - Remove test file
-
-### Migration from Old Pattern
-
-**Before:**
-```bash
-test_my_feature() {
-  echo "=== Test: My Feature ==="
-  tmax_init
-  echo "content" > "$TMAX_PROJECT_ROOT/test.txt"
-  tmax_start "test.txt"
-  # ... test logic ...
-  tmax_summary
-  tmax_cleanup
-}
-test_my_feature
-```
-
-**After (with framework):**
-```bash
-test_my_feature_logic() {
-  setup_test_file "test.txt" "content"
-  tmax_start "test.txt"
-  # ... test logic ...
-}
-run_test "My Feature" test_my_feature_logic
-```
-
-## Configuration
-
-Environment variables (set before sourcing `api.sh`):
-
-```bash
-export TMAX_SESSION="my-test-session"     # Tmux session name
-export TMAX_DEBUG=true                    # Enable debug logging
-export TMAX_DEFAULT_TIMEOUT=15            # Default wait timeout
-export TMAX_PROJECT_ROOT="/path/to/tmax"  # Project directory
-```
-
-## API Reference
-
-### Lifecycle
-
-```bash
-tmax_init                    # Initialize test harness (create session)
-tmax_cleanup                 # Cleanup (kill session)
-tmax_start [file]            # Start editor (optionally open file)
-tmax_stop                    # Stop editor
-tmax_restart [file]          # Restart editor
-```
-
-### Editing
-
-```bash
-tmax_insert                  # Enter insert mode
-tmax_normal                  # Enter normal mode
-tmax_command                 # Enter command mode
-tmax_type <text>             # Type text in insert mode
-tmax_type_line <text>        # Type text and return to normal mode
-tmax_save                    # Save file
-tmax_quit                    # Quit editor
-tmax_save_quit               # Save and quit
-```
-
-### Navigation
-
-```bash
-tmax_move <dir> [count]      # Move cursor (up/down/left/right)
-tmax_goto_line <n>           # Go to line number
-tmax_first_line              # Go to first line
-tmax_last_line               # Go to last line
-```
-
-### Query
-
-```bash
-tmax_mode                    # Get current mode
-tmax_visible <pattern>       # Check if text is visible
-tmax_text                    # Get all visible text
-tmax_running                 # Check if editor is running
-```
-
-### Assertion
-
-```bash
-tmax_assert_text <pattern>   # Assert text is visible
-tmax_assert_mode <mode>      # Assert current mode
-tmax_assert_no_errors        # Assert no errors present
-tmax_summary                 # Print assertion summary
-```
-
-### Debug
-
-```bash
-tmax_debug                   # Enable debug mode
-tmax_nodebug                 # Disable debug mode
-tmax_state                   # Show current editor state
-tmax_dump                    # Dump state to file
-tmax_screenshot [file]       # Capture screenshot
-```
-
-### Helpers
-
-```bash
-tmax_wait_for <pattern>      # Wait for text to appear
-tmax_wait_for_mode <mode>    # Wait for mode change
-tmax_sleep <seconds>         # Sleep for N seconds
-tmax_quick_edit <file> <content>  # Start, edit, save, quit
-tmax_create_test_file <file> <content>  # Create test file
-tmax_check_file <file> <pattern>       # Verify file content
-```
-
-## Usage Examples
-
-### Example 1: Basic Editing Test
-
-```bash
-source test/ui/lib/api.sh
-
-tmax_init
-tmax_start test-file.txt
-
-tmax_type "Hello World"
-tmax_save
-tmax_quit
-
-tmax_cleanup
-```
-
-### Example 2: Mode Switching Test
-
-```bash
-source test/ui/lib/api.sh
-
-tmax_init
-tmax_start
-
-tmax_assert_mode "NORMAL"
-tmax_insert
-tmax_assert_mode "INSERT"
-tmax_normal
-tmax_assert_mode "NORMAL"
-
-tmax_summary
-tmax_cleanup
-```
-
-### Example 3: File Operations
-
-```bash
-source test/ui/lib/api.sh
-
-tmax_init
-tmax_create_test_file "demo.txt" "Initial content"
-
-tmax_start "demo.txt"
-tmax_assert_text "Initial content"
-
-tmax_type " - Appended"
-tmax_save
-tmax_quit
-
-tmax_check_file "demo.txt" "Appended"
-tmax_cleanup
-```
-
-### Example 4: Navigation Test
-
-```bash
-source test/ui/lib/api.sh
-
-tmax_init
-tmax_start
-
-# Type multiple lines
-for i in {1..20}; do
-  tmax_type_line "Line $i"
-done
-
-# Navigate around
-tmax_move down 10
-tmax_move right 5
-tmax_goto_line 1
-tmax_last_line
-
-tmax_cleanup
-```
-
-### Example 5: Error Handling
-
-```bash
-source test/ui/lib/api.sh
-
-tmax_init
-tmax_start
-
-# Try to open non-existent file
-tmax_command
-tmax_type "/nonexistent/file.txt"
-tmax_normal
-
-tmax_assert_no_errors
-tmax_summary
-
-tmax_quit
-tmax_cleanup
-```
-
-## Low-Level API
-
-For more control, use core modules directly:
-
-```bash
-source test/ui/lib/api.sh
-
-session_create
-session_create_window "my-window"
-session_set_active_window "my-window"
-
-input_send_command "deno task start"
-query_wait_for_text "Welcome"
-query_capture_output
-
-session_kill_window "my-window"
-session_kill
-```
-
-## Writing Test Scripts
-
-Organize tests as executable scripts using the test framework:
-
-```bash
-#!/bin/bash
-# test/ui/tests/my-test.test.sh
-
-# Source test framework
-source ../lib/test-framework.sh
-
-test_my_feature_logic() {
-  # Setup
-  setup_test_file "test.txt" "content"
-
-  # Test logic
-  tmax_start "test.txt"
-  tmax_type "test"
-  tmax_assert_text "test"
-
-  # Cleanup
-  tmax_quit
-  cleanup_test_file "test.txt"
-}
-
-# Run test with automatic setup/teardown
-run_test "My Feature" test_my_feature_logic
-```
-
-**Key benefits:**
-- `run_test` handles `tmax_init`, `tmax_summary`, and `tmax_cleanup` automatically
-- `setup_test_file` and `cleanup_test_file` manage test files consistently
-- `assert_common_startup` provides standard startup validation
-
-## Debugging Failed Tests
-
-When a test fails:
-
-```bash
-# Enable debug mode
-tmax_debug
-
-# Run your test
-...
-
-# Inspect state
-tmax_state        # Show current state
-tmax_dump         # Dump to file
-tmax_screenshot   # Save screenshot
-
-# Manually inspect
-# (In another terminal): tmux attach -t tmax-ui-tests
-```
-
-## Manual Testing
-
-For interactive testing:
-
-```bash
-source test/ui/lib/api.sh
-
-tmax_init
-tmax_start
-
-# Make changes manually
-# Then use query functions:
-tmax_mode
-tmax_text
-tmax_running
-
-# When done:
-session_attach  # Attach to tmux session
-# Or:
-tmax_cleanup    # Clean up
-```
-
-## Best Practices
-
-### 1. **Always cleanup**
-```bash
-tmax_init
-trap 'tmax_cleanup' EXIT  # Cleanup on exit
-```
-
-### 2. **Use assertions for validation**
-```bash
-tmax_assert_mode "INSERT"
-tmax_assert_text "Hello"
-```
-
-### 3. **Check assertions**
-```bash
-tmax_summary  # Always call at end
-exit $?       # Exit with assertion status
-```
-
-### 4. **Enable debug when developing**
-```bash
-tmax_debug
-# ... run tests ...
-tmax_nodebug  # Disable for production runs
-```
-
-### 5. **Use helper functions for common patterns**
-```bash
-tmax_quick_edit "file.txt" "content"  # Instead of manual steps
-```
-
-## Troubleshooting
-
-### Session already exists
-```bash
-tmux kill-session -t tmax-ui-tests  # Kill manually
-# Or:
-tmax_cleanup  # Use cleanup function
-```
-
-### Editor won't start
-- Check TMAX_PROJECT_ROOT is correct
-- Ensure `deno task start` works manually
-- Enable debug mode: `tmax_debug`
-
-### Tests timing out
-- Increase TMAX_DEFAULT_TIMEOUT
-- Increase TMAX_STARTUP_WAIT
-- Check if editor is actually starting
-
-### Keys not being sent
-- Verify session exists: `tmux list-sessions`
-- Verify window exists: `session_list_windows`
-- Check active window: `session_get_active_window`
-
-## Integration with Claude Code
-
-The test harness is designed for AI assistant usage:
-
-```bash
-# Claude can source and use directly
-source test/ui/lib/api.sh
-
-# Simple, intention-revealing functions
-tmax_start
-tmax_type "Hello"
-tmax_save
-tmax_quit
-
-# Clear feedback
-tmax_mode        # Returns: INSERT
-tmax_running     # Returns: 0 (true)
-
-# Built-in assertions
-tmax_assert_text "Hello"
-tmax_assert_mode "NORMAL"
-```
+## Test Modes
+
+| Mode | Used By | Requires | Purpose |
+|------|---------|----------|---------|
+| `daemon` | Tests 01-03, 05-09, 11-12 | Bun | Editor logic via daemon/client |
+| `daemon-tmux` | Tests 04, 10 | Bun + tmux session | TUI renderer surface |
+
+Default mode is `daemon`. Override with `TMAX_UI_TEST_MODE=daemon-tmux`.
+
+## Test Files
+
+### Daemon-Only Workflow Tests
+| File | Coverage |
+|------|----------|
+| `01_startup.py` | Daemon start, mode, no errors |
+| `02_basic_editing.py` | File load, insert, save, verify |
+| `03_mode_switching.py` | Normal/insert mode transitions |
+| `05_command_mode.py` | Command mode, M-x, invalid commands |
+| `06_navigation.py` | Cursor movement, word/line/boundary navigation |
+| `07_visual_mode.py` | Visual mode enter/exit |
+| `08_buffers_files.py` | Multiple files, buffer switching, file creation |
+| `09_undo_yank_delete.py` | Delete line, undo/redo, text deletion |
+| `11_search_replace.py` | Forward search, no-match behavior |
+| `12_daily_drivers.py` | T-Lisp eval, custom functions, API coverage |
+
+### Daemon-Tmux Renderer Tests
+| File | Coverage |
+|------|----------|
+| `04_daemon_tmux_observability.py` | TUI readiness, render count, frame sync |
+| `10_renderer_layout.py` | Screen fill, status line, render advancement |
+
+### Helper Tests
+| File | Coverage |
+|------|----------|
+| `test_harness_helpers.py` | T-Lisp escaping, expression building, value parsing |
+
+## Harness Architecture
+
+The harness follows strict functional programming:
+
+- **Frozen dataclasses** for `HarnessConfig`, `HarnessState`, `AssertionResult`
+- **`Result[T, E]`** (`Ok`/`Err`) and **`Option[T]`** (`Some`/`Nothing`) tagged unions
+- **Pure functions** — all operations take `(config, window)` and return `Result`
+- **Explicit state threading** — `state = init().unwrap(); state = start(state, file).unwrap()`
+- **No mutable global state**, no classes with methods
+
+## Adding New Tests
+
+1. Create `test/ui/tests/NN_name.py`
+2. Follow the pattern: `init() → start() → assertions → cleanup()`
+3. Use daemon operations (`client.eval_expr`, `operations.*`) for editor control
+4. Use `assert_*` functions for verification
+5. Add to `DAEMON_TESTS` or `DAEMON_TMUX_TESTS` in `run_python_suite.py`
+
+## Legacy Bash Tests
+
+The bash test harness in `test/ui/lib/` is deprecated. Do not add new bash tests. Remaining bash tests in `tests/*.test.sh` are legacy reference only.
+
+## Harness Modules
+
+| Module | Purpose |
+|--------|---------|
+| `tmax_harness/types.py` | Core types: Result, Option, frozen dataclasses |
+| `tmax_harness/client.py` | `tmaxclient` subprocess wrapper |
+| `tmax_harness/config.py` | Config detection and construction |
+| `tmax_harness/editor.py` | Editor lifecycle (start/stop/daemon) |
+| `tmax_harness/operations.py` | Editor operations (modes, text, navigation, search) |
+| `tmax_harness/assertions.py` | Test assertions |
+| `tmax_harness/queries.py` | Daemon and tmux queries, wait loops |
+| `tmax_harness/session.py` | Tmux session/window operations |
+| `tmax_harness/input.py` | Tmux key sending |
+| `tmax_harness/tlisp_escape.py` | Safe T-Lisp expression builders |
+| `tmax_harness/harness.py` | Top-level API composing all modules |
 
 ## File Structure
 
 ```
 test/ui/
-├── README.md              # This file
-├── lib/
-│   ├── api.sh            # Main API (tmax_* functions)
-│   ├── config.sh         # Configuration
-│   ├── debug.sh          # Debug utilities
-│   ├── common.sh         # Common utility functions
-│   └── test-framework.sh # Test framework utilities
-├── core/
-│   ├── session.sh        # Tmux session management
-│   ├── input.sh          # Sending keys/commands
-│   ├── query.sh          # State queries
-│   └── editor.sh         # Editor lifecycle
-├── ops/
-│   ├── editing.sh        # Editing operations
-│   ├── navigation.sh     # Navigation operations
-│   └── files.sh          # File operations
-├── assert/
-│   └── assertions.sh     # Test assertions
+├── README.md                    # This file
+├── pyproject.toml               # uv project config
+├── run_python_suite.py          # Suite runner
+├── tmax_harness/                # Python harness package
+│   ├── __init__.py
+│   ├── types.py
+│   ├── client.py
+│   ├── config.py
+│   ├── editor.py
+│   ├── operations.py
+│   ├── assertions.py
+│   ├── queries.py
+│   ├── session.py
+│   ├── input.py
+│   ├── tlisp_escape.py
+│   └── harness.py
 └── tests/
-    ├── 01-startup.test.sh
-    ├── 02-basic-editing.test.sh
-    ├── 03-mode-switching.test.sh
-    ├── 04-full-height-layout.test.sh
-    ├── 05-command-mode-cursor-focus.test.sh
-    └── ...
+    ├── 01_startup.py
+    ├── 02_basic_editing.py
+    ├── 03_mode_switching.py
+    ├── 04_daemon_tmux_observability.py
+    ├── 05_command_mode.py
+    ├── 06_navigation.py
+    ├── 07_visual_mode.py
+    ├── 08_buffers_files.py
+    ├── 09_undo_yank_delete.py
+    ├── 10_renderer_layout.py
+    ├── 11_search_replace.py
+    ├── 12_daily_drivers.py
+    └── test_harness_helpers.py
 ```
-
-## Contributing
-
-When adding new features:
-
-1. Add low-level implementation in appropriate `core/` or `ops/` module
-2. Add high-level wrapper in `lib/api.sh` with `tmax_` prefix
-3. Add assertions in `assert/assertions.sh` if needed
-4. Update this README with examples
-5. Write test cases in `tests/`
-
-## License
-
-Same as tmax project.

@@ -6,6 +6,7 @@
 import { describe, test, expect } from "bun:test";
 import { FileSystemImpl } from "../../src/core/filesystem.ts";
 import type { FileSystem } from "../../src/core/types.ts";
+import * as nodefs from "fs";
 
 /**
  * Test suite for file system functionality
@@ -48,7 +49,7 @@ describe("FileSystem", () => {
   test("cleanup test file", async () => {
     try {
       // @ts-ignore - Bun compatibility
-      await Deno.remove(testFilePath);
+      await nodefs.promises.unlink(testFilePath);
     } catch {
       // Ignore cleanup errors
     }

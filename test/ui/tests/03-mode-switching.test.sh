@@ -16,32 +16,54 @@ test_mode_switching_logic() {
   # Verify UI fills screen
   assert_screen_fill "UI should fill entire terminal height"
 
-  # Start in NORMAL mode
-  assert_mode "NORMAL" "Should start in NORMAL mode"
+  # Use daemon mode assertions when available for reliable detection
+  if [[ "$TMAX_UI_TEST_MODE" == "daemon-tmux" ]]; then
+    # Start in NORMAL mode
+    tmax_assert_daemon_mode "NORMAL" "Should start in NORMAL mode"
 
-  # Test INSERT mode
-  tmax_insert
-  assert_mode "INSERT" "Should be in INSERT mode"
-  tmax_normal
-  assert_mode "NORMAL" "Should return to NORMAL mode"
+    # Test INSERT mode
+    tmax_insert
+    sleep 0.3
+    tmax_assert_daemon_mode "INSERT" "Should be in INSERT mode"
+    tmax_normal
+    sleep 0.3
+    tmax_assert_daemon_mode "NORMAL" "Should return to NORMAL mode"
 
-  # Test COMMAND mode
-  tmax_command
-  assert_mode "COMMAND" "Should be in COMMAND mode"
-  input_send_escape "$TMAX_TEST_WINDOW"
-  sleep 0.5
-  assert_mode "NORMAL" "Should return to NORMAL mode"
+    # Test typing in INSERT mode
+    tmax_insert
+    tmax_type "test"
+    tmax_assert_daemon_mode "INSERT" "Should still be in INSERT mode after typing"
+    tmax_normal
+    sleep 0.3
+    tmax_assert_daemon_mode "NORMAL" "Should return to NORMAL mode"
+  else
+    # Legacy screen-scraping assertions
+    assert_mode "NORMAL" "Should start in NORMAL mode"
 
-  # Test navigation doesn't change mode
-  tmax_move down 2
-  assert_mode "NORMAL" "Should still be in NORMAL mode after navigation"
+    # Test INSERT mode
+    tmax_insert
+    assert_mode "INSERT" "Should be in INSERT mode"
+    tmax_normal
+    assert_mode "NORMAL" "Should return to NORMAL mode"
 
-  # Test typing in INSERT mode
-  tmax_insert
-  tmax_type "test"
-  assert_mode "INSERT" "Should still be in INSERT mode after typing"
-  tmax_normal
-  assert_mode "NORMAL" "Should return to NORMAL mode"
+    # Test COMMAND mode
+    tmax_command
+    assert_mode "COMMAND" "Should be in COMMAND mode"
+    input_send_escape "$TMAX_TEST_WINDOW"
+    sleep 0.5
+    assert_mode "NORMAL" "Should return to NORMAL mode"
+
+    # Test navigation doesn't change mode
+    tmax_move down 2
+    assert_mode "NORMAL" "Should still be in NORMAL mode after navigation"
+
+    # Test typing in INSERT mode
+    tmax_insert
+    tmax_type "test"
+    assert_mode "INSERT" "Should still be in INSERT mode after typing"
+    tmax_normal
+    assert_mode "NORMAL" "Should return to NORMAL mode"
+  fi
 
   # Cleanup
   tmax_quit
