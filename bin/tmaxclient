@@ -268,6 +268,10 @@ Options:
   --insert-stdin         Insert from stdin
   --script FILE          Execute T-Lisp file
   --server-info          Get server info
+  --status               Get daemon/client/frame status
+  --clients              List connected clients
+  --frames               List connected frames
+  --json                 Print raw JSON for status-like commands
   --messages             Show *Messages* buffer
   --ping                 Check if server running
   -n, --no-wait         Don't wait for buffer to close
@@ -300,6 +304,10 @@ Examples:
   let insertText: string | undefined;
   let scriptFile: string | undefined;
   let serverInfo = args.includes('--server-info');
+  let status = args.includes('--status');
+  let clients = args.includes('--clients');
+  let frames = args.includes('--frames');
+  let jsonOutput = args.includes('--json');
   let showMessages = args.includes('--messages');
   let ping = args.includes('--ping');
   let insertStdin = args.includes('--insert-stdin');
@@ -398,9 +406,27 @@ Examples:
   }
 
   // Handle different commands
-  if (serverInfo) {
-    const info = await client.query('full-state');
-    console.log(JSON.stringify(info, null, 2));
+  if (serverInfo || status) {
+    const info = await client.sendRequest('status', {});
+    if (jsonOutput || serverInfo) {
+      console.log(JSON.stringify(info, null, jsonOutput ? 0 : 2));
+    } else {
+      printStatus(info);
+    }
+  } else if (clients) {
+    const result = await client.sendRequest('clients', {});
+    if (jsonOutput) {
+      console.log(JSON.stringify(result));
+    } else {
+      printClients(result);
+    }
+  } else if (frames) {
+    const result = await client.sendRequest('frames', {});
+    if (jsonOutput) {
+      console.log(JSON.stringify(result));
+    } else {
+      printFrames(result);
+    }
   } else if (showMessages) {
     const result = await client.query('messages');
     if (result && result.messages) {
@@ -477,6 +503,42 @@ async function readStdin(): Promise<string> {
     process.stdin.on('end', () => {
       resolve(data);
     });
+  });
+}
+
+function printStatus(info: any): void {
+  console.log(`tmax ${info.status ?? 'unknown'}`);
+  console.log(`socket: ${info.socketPath ?? '(unknown)'}`);
+  console.log(`uptime: ${Math.floor((info.uptimeMs ?? 0) / 1000)}s`);
+  console.log(`clients: ${info.clientCount ?? 0}`);
+  console.log(`frames: ${info.frameCount ?? 0}`);
+  if (info.editor) {
+    console.log(`mode: ${info.editor.mode}`);
+    console.log(`buffer: ${info.editor.bufferName ?? info.editor.currentFilename ?? '(none)'}`);
+  }
+  if (Array.isArray(info.recentErrors) && info.recentErrors.length > 0) {
+    console.log(`recent errors: ${info.recentErrors.length}`);
+  }
+}
+
+function printClients(clients: any[]): void {
+  if (!Array.isArray(clients) || clients.length === 0) {
+    console.log('No connected clients');
+    return;
+  }
+  clients.forEach((client) => {
+    console.log(`${client.id} ${client.clientType} requests=${client.requestCount} frame=${client.frameId ?? '-'}`);
+  });
+}
+
+function printFrames(frames: any[]): void {
+  if (!Array.isArray(frames) || frames.length === 0) {
+    console.log('No connected frames');
+    return;
+  }
+  frames.forEach((frame) => {
+    const ready = frame.ready ? 'ready' : 'not-ready';
+    console.log(`${frame.id} ${frame.clientType} ${ready} renders=${frame.renderCount} mode=${frame.mode}`);
   });
 }
 

@@ -1,4 +1,4 @@
-#!/usr/bin/env deno run --allow-read --allow-write
+#!/usr/bin/env bun
 
 /**
  * @file repl.ts
@@ -8,9 +8,9 @@
 import { runREPL } from "../src/tlisp/repl.ts";
 
 // Handle Ctrl+C gracefully
-Deno.addSignalListener("SIGINT", () => {
+process.on("SIGINT", () => {
   console.log("\nExiting...");
-  Deno.exit(0);
+  process.exit(0);
 });
 
 // Run the REPL
