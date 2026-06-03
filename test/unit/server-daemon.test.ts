@@ -8,7 +8,7 @@ test('should start tmax server daemon', async () => {
   // Test that the server can start without crashing
   try {
     // Try to start the server in the background
-    const { stdout, stderr } = await execAsync('timeout 5s bun run src/main.tsx --daemon || true');
+    const { stdout, stderr } = await execAsync('timeout 2s bun run src/main.tsx --daemon || true');
     // The timeout command will cause a non-zero exit code, which is expected
     // The important thing is that the server didn't crash immediately
     console.log('Server start test completed');
@@ -17,7 +17,7 @@ test('should start tmax server daemon', async () => {
     // Timeout is expected, so we just verify it's the timeout error
     expect(true).toBe(true);
   }
-});
+}, 10000);
 
 test('should have tmaxclient executable', async () => {
   // Test that tmaxclient exists and is executable

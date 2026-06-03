@@ -2,20 +2,40 @@
 # Configuration for UI Test Harness
 
 # Detect active tmux session
+# Try multiple methods: $TMUX var, tmux display-message, and session listing
+_tmax_detect_session() {
+  # Method 1: inside a tmux pane (most reliable when available)
+  if [[ -n "$TMUX" ]] && command -v tmux &> /dev/null; then
+    tmux display-message -p '#S' 2>/dev/null
+    return
+  fi
+  # Method 2: tmux server running with sessions (works from child processes)
+  if command -v tmux &> /dev/null; then
+    local attached
+    attached=$(tmux list-sessions -F '#{?session_attached,#{session_name},}' 2>/dev/null | grep -v '^$' | head -1)
+    if [[ -n "$attached" ]]; then
+      echo "$attached"
+      return
+    fi
+  fi
+  echo ""
+}
+
 if command -v tmux &> /dev/null; then
-  export TMAX_ACTIVE_SESSION="${TMAX_ACTIVE_SESSION:-$(tmux display-message -p '#S' 2>/dev/null)}"
+  export TMAX_ACTIVE_SESSION="${TMAX_ACTIVE_SESSION:-$(_tmax_detect_session)}"
 else
   export TMAX_ACTIVE_SESSION=""
 fi
 
 # UI testing mode
-# - tmux: full interactive UI testing via tmux panes
+# - daemon-tmux: start daemon, run TUI client in tmux, query via tmaxclient (default, most reliable)
+# - tmux: start editor directly in tmux panes (legacy)
 # - direct: basic non-tmux startup/output checks
-# - auto: choose tmux when available in an active tmux session, else direct
+# - auto: choose daemon-tmux when tmux sessions exist, else direct
 export TMAX_UI_TEST_MODE="${TMAX_UI_TEST_MODE:-auto}"
 if [[ "$TMAX_UI_TEST_MODE" == "auto" ]]; then
-  if command -v tmux &> /dev/null && [[ -n "$TMUX" ]]; then
-    export TMAX_UI_TEST_MODE="tmux"
+  if command -v tmux &> /dev/null && [[ -n "$TMAX_ACTIVE_SESSION" ]]; then
+    export TMAX_UI_TEST_MODE="daemon-tmux"
   else
     export TMAX_UI_TEST_MODE="direct"
   fi
@@ -59,9 +79,16 @@ export TMAX_DIRECT_STATUS_FILE="${TMAX_DIRECT_STATUS_FILE:-$TMAX_TEST_DIR/direct
 export TMAX_DIRECT_TIMEOUT="${TMAX_DIRECT_TIMEOUT:-6}"
 
 # Editor Commands
-# Use React-based UI (ink) with --dev flag for non-TTY environments
 DEFAULT_BUN_BIN="$(command -v bun 2>/dev/null || true)"
 export BUN_BIN="${BUN_BIN:-${DEFAULT_BUN_BIN:-bun}}"
+
+# Daemon/Client Commands (used in daemon-tmux mode)
+export TMAX_DAEMON_CMD="${TMAX_DAEMON_CMD:-$BUN_BIN $TMAX_PROJECT_ROOT/src/server/server.ts}"
+export TMAX_TUI_CMD="${TMAX_TUI_CMD:-$BUN_BIN $TMAX_PROJECT_ROOT/src/client/tui-client.ts}"
+export TMAX_CLIENT_CMD="${TMAX_CLIENT_CMD:-$TMAX_PROJECT_ROOT/bin/tmaxclient}"
+export TMAX_SOCKET="${TMAX_SOCKET:-/tmp/tmax-$(id -u)/server}"
+
+# Legacy direct-start command (used in tmux/direct modes)
 export TMAX_START_CMD="${TMAX_START_CMD:-$BUN_BIN run src/main.tsx --dev}"
 export TMAX_START_FLAGS="${TMAX_START_FLAGS:-}"
 
@@ -84,6 +111,7 @@ export TMAX_COLOR_NC='\033[0m'
 # State
 export TMAX_ACTIVE_WINDOW="${TMAX_ACTIVE_WINDOW:-}"
 export TMAX_EDITOR_PID="${TMAX_EDITOR_PID:-}"
+export TMAX_DAEMON_PID="${TMAX_DAEMON_PID:-}"
 export TMAX_LAST_ACTION="${TMAX_LAST_ACTION:-}"
 
 # Initialize test directory

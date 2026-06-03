@@ -1,0 +1,27 @@
+;; Native T-Lisp checks for SPEC-003 mode behavior.
+
+(deftest mode-features-loaded ()
+  (assert-true (featurep "python-mode"))
+  (assert-true (featurep "line-numbers-mode")))
+
+(deftest generated-minor-mode-command-enable-disable ()
+  (line-numbers-mode t)
+  (assert-true (minor-mode-active-p "line-numbers"))
+  (line-numbers-mode t)
+  (assert-true (minor-mode-active-p "line-numbers"))
+  (line-numbers-mode nil)
+  (assert-false (minor-mode-active-p "line-numbers"))
+  (line-numbers-mode)
+  (assert-true (minor-mode-active-p "line-numbers"))
+  (line-numbers-mode 0)
+  (assert-false (minor-mode-active-p "line-numbers"))
+  (line-numbers-mode 1)
+  (assert-true (minor-mode-active-p "line-numbers"))
+  (line-numbers-mode -1)
+  (assert-false (minor-mode-active-p "line-numbers")))
+
+(deftest callable-hook-form-runs ()
+  (defvar hook-ran nil)
+  (add-hook "native-mode-test-hook" (lambda () (set! hook-ran t)))
+  (run-hooks "native-mode-test-hook")
+  (assert-true hook-ran))

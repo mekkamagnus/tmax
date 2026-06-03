@@ -45,14 +45,20 @@ session_validate() {
     return 1
   fi
 
-  # Check if in tmux session
+  # Check if we have an active session (from config detection)
+  if [[ -n "$TMAX_ACTIVE_SESSION" ]]; then
+    export TMAX_SESSION="$TMAX_ACTIVE_SESSION"
+    log_info "Using tmux session: $TMAX_SESSION"
+    return 0
+  fi
+
+  # Fallback: check if inside a tmux pane
   if [[ -z "$TMUX" ]]; then
-    log_error "Not in a tmux session. UI tests must be run from within tmux."
-    log_error "Start tmux with: tmux new -s my-session"
+    log_error "No tmux session detected. Run from inside tmux or ensure a session exists."
     return 1
   fi
 
-  # Detect and use the active session
+  # Detect and use the active session from $TMUX
   local active_session
   active_session=$(session_get_active 2>/dev/null)
 
@@ -61,7 +67,6 @@ session_validate() {
     return 1
   fi
 
-  # Set session to active session
   export TMAX_SESSION="$active_session"
   log_info "Using active tmux session: $TMAX_SESSION"
 

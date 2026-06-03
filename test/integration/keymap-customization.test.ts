@@ -193,7 +193,7 @@ describe("Keymap Customization E2E", () => {
       editor = new Editor(terminal, filesystem);
       const interpreter = (editor as any).interpreter as TLispInterpreterImpl;
       registerStdlibFunctions(interpreter);
-      interpreter.execute(tmaxrcContent);
+      interpreter.execute(initContent);
 
       // Verify all bindings are registered
       const keymapSync = (editor as any).keymapSync;
