@@ -12,14 +12,19 @@ interface StatusLineProps {
   mode: 'normal' | 'insert' | 'visual' | 'command' | 'mx';
   cursorPosition: Position;
   statusMessage: string;
+  currentMajorMode?: string;
+  activeMinorModeLighters?: string[];
 }
 
 export const StatusLine = ({
   mode,
   cursorPosition,
-  statusMessage
+  statusMessage,
+  currentMajorMode,
+  activeMinorModeLighters = [],
 }: StatusLineProps) => {
   const display = modeDisplay[mode];
+  const modeSuffix = `${currentMajorMode ? ` [${currentMajorMode}]` : ""}${activeMinorModeLighters.length > 0 ? ` (${activeMinorModeLighters.join(" ")})` : ""}`;
 
   return (
     <Box
@@ -33,6 +38,7 @@ export const StatusLine = ({
         <Text color={display.color} bold={true}>
           {display.text}
         </Text>
+        <Text color="cyan">{modeSuffix}</Text>
         <Text color="white"> </Text>
         <Text color="white">{`Line: ${cursorPosition.line + 1}, Col: ${cursorPosition.column + 1}`}</Text>
       </Box>

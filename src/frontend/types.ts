@@ -1,6 +1,6 @@
 /**
  * @file types.ts
- * @description Type definitions for frontend React components and Deno-ink integration
+ * @description Type definitions for frontend React components and Ink integration
  */
 
 import type { Position } from "../core/types.ts";
@@ -32,6 +32,8 @@ export interface StatusLineProps {
   mode: 'normal' | 'insert' | 'visual' | 'command' | 'mx';
   cursorPosition: Position;
   statusMessage: string;
+  currentMajorMode?: string;
+  activeMinorModeLighters?: string[];
 }
 
 /**

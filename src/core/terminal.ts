@@ -403,7 +403,7 @@ export class FunctionalTerminalIOImpl implements FunctionalTerminalIO {
               category: ErrorCategory.CONFIGURATION,
               suggestions: [
                 "Run tmax from a real terminal (not through pipes, redirects, or non-interactive environments)",
-                "If developing with AI coding assistants, use: deno task start --dev",
+                "If developing with AI coding assistants, use: bun run start --dev",
                 "Check if you're in a proper terminal emulator that supports raw mode",
                 "For CI/CD or automated testing, consider headless mode options"
               ]

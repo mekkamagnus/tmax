@@ -7,7 +7,7 @@
 import { TLispInterpreterImpl } from "../tlisp/interpreter.ts";
 import { FileSystemImpl } from "../core/filesystem.ts";
 import { createEditorAPI, TlispEditorState } from "./tlisp-api.ts";
-import type { EditorState, FunctionalTextBuffer, Window } from "../core/types.ts";
+import type { EditorState, FunctionalTextBuffer, Window, HighlightSpan } from "../core/types.ts";
 import { createString, createList, createNil, createNumber } from "../tlisp/values.ts";
 import type { TerminalIO, FileSystem } from "../core/types.ts";
 import { Either } from "../utils/task-either.ts";
@@ -25,6 +25,17 @@ import { createWindowOps } from "./api/window-ops.ts";
 import { log } from "../utils/logger.ts";
 import { KeymapSync } from "./keymap-sync.ts";
 import { createKeymapOps } from "./api/keymap-ops.ts";
+import { resetYankRegisterState } from "./api/yank-ops.ts";
+import { resetDeleteRegisterState } from "./api/delete-ops.ts";
+import { resetUndoRedoState } from "./api/undo-redo-ops.ts";
+import {
+  type BufferModeState,
+  type MinorModeConfig,
+  type AutoModeRule,
+  getOrCreateModeState,
+  applyGlobalMinorModes,
+  normalizeExtension,
+} from "./mode-state.ts";
 
 /**
  * Key mapping for editor commands
@@ -55,6 +66,13 @@ export class Editor {
   private lspClient: LSPClient;  // LSP client for language server integration (US-3.1.1)
   keymapSync: KeymapSync;  // Bridge layer for T-Lisp keymap integration (US-0.4.1)
   private currentInitFile: string = '';  // Path to current init file (SPEC-025)
+  // Buffer-local mode state (SPEC-003)
+  private bufferModeStates: Map<string, BufferModeState> = new Map();
+  private minorModeRegistry: Map<string, MinorModeConfig> = new Map();
+  private globalizedMinorModes: Set<string> = new Set();
+  private autoModeRules: AutoModeRule[] = [];
+  private loadedFeatures: Set<string> = new Set();
+  private loadPaths: string[] = ['src/tlisp/core'];
 
   /**
    * Create a new editor instance
@@ -135,8 +153,13 @@ export class Editor {
     // Initialize API
     editorLog.info('Initializing T-Lisp API', { correlationId: initId });
     this.initializeAPI();
+    resetYankRegisterState();
+    resetDeleteRegisterState();
+    resetUndoRedoState();
 
     this.logMessage('Welcome to tmax');
+
+    this.loadFallbackBindings();
 
     // Note: Key bindings are loaded lazily on first key press via ensureCoreBindingsLoaded()
     editorLog.debug('Key bindings will be loaded on first key press', {
@@ -172,15 +195,7 @@ export class Editor {
       get buffers() {
         return editor.buffers;
       },
-      get cursorLine() { 
-        // Return current window's cursor line if windows exist, otherwise global
-        const windows = editor.state.windows;
-        if (windows && windows.length > 0) {
-          const currentWindow = windows[editor.state.currentWindowIndex ?? 0];
-          if (currentWindow) {
-            return currentWindow.cursorLine;
-          }
-        }
+      get cursorLine() {
         return editor.state.cursorPosition.line; 
       },
       set cursorLine(v: number) { 
@@ -194,15 +209,7 @@ export class Editor {
           }
         }
       },
-      get cursorColumn() { 
-        // Return current window's cursor column if windows exist, otherwise global
-        const windows = editor.state.windows;
-        if (windows && windows.length > 0) {
-          const currentWindow = windows[editor.state.currentWindowIndex ?? 0];
-          if (currentWindow) {
-            return currentWindow.cursorColumn;
-          }
-        }
+      get cursorColumn() {
         return editor.state.cursorPosition.column; 
       },
       set cursorColumn(v: number) { 
@@ -236,12 +243,36 @@ export class Editor {
       set cursorFocus(v: 'buffer' | 'command') { editor.state.cursorFocus = v; },
       get lspDiagnostics() { return editor.state.lspDiagnostics; },
       logMessage: (msg: string) => editor.logMessage(msg),
+      get currentFilename() { return editor.state.currentFilename; },
+      set currentFilename(v: string | undefined) { editor.state.currentFilename = v; },
+      get config() { return editor.state.config; },
+      set config(v: EditorState["config"]) { editor.state.config = v; },
       get operations() {
         return {
           saveFile: (filename?: string) => editor.saveFile(filename),
           openFile: (filename: string) => editor.openFile(filename),
         };
       },
+      // Mode state callbacks for SPEC-003 buffer-local mode state
+      _evalTlisp: (expr: string) => {
+        try {
+          return editor.interpreter.execute(expr);
+        } catch (e) {
+          return Either.left({
+            message: e instanceof Error ? e.message : String(e),
+            type: "EvalError",
+            variant: "RuntimeError",
+          });
+        }
+      },
+      _getCurrentMajorMode: () => editor.getCurrentMajorMode(),
+      _setCurrentMajorMode: (mode: string) => editor.setCurrentMajorMode(mode),
+      _getMinorModeRegistry: () => editor.getMinorModeRegistry(),
+      _getBufferModeStates: () => editor.getBufferModeStates(),
+      _getCurrentBufferKey: () => editor.getCurrentBufferKey(),
+      _getGlobalizedMinorModes: () => editor.getGlobalizedMinorModes(),
+      _getLoadedFeatures: () => editor.getLoadedFeatures(),
+      _getLoadPaths: () => editor.getLoadPaths(),
     };
 
     const api = createEditorAPI(tlispState);
@@ -306,9 +337,7 @@ export class Editor {
 
       // Remove any existing mappings for the same key and mode to handle conflicts
       const existingMappings = this.keyMappings.get(key)!;
-      const filteredMappings = existingMappings.filter(existing =>
-        !(existing.mode === mode || (!existing.mode && !mode))
-      );
+      const filteredMappings = existingMappings.filter(existing => existing.mode !== mode);
 
       // Add the new mapping
       filteredMappings.push(mapping);
@@ -1309,14 +1338,48 @@ export class Editor {
    * @param path - Path to the bindings file
    * @returns true if loaded successfully, false otherwise
    */
-  private async loadBindingsFromFile(path: string): Promise<boolean> {
+  private async loadBindingsFromFile(path: string, silent = false): Promise<boolean> {
+    const executeContent = (content: string): boolean => {
+      const result = this.interpreter.execute(content);
+      if (Either.isLeft(result)) {
+        const sanitizedContent = content.replace(
+          /"\((editor-set-mode) "([^"]+)"\)"/g,
+          '"($1 \\"$2\\")"'
+        );
+        if (sanitizedContent !== content) {
+          const sanitizedResult = this.interpreter.execute(sanitizedContent);
+          if (Either.isRight(sanitizedResult)) {
+            return true;
+          }
+        }
+        throw new Error(result.left.message);
+      }
+      return true;
+    };
+
     try {
       const coreBindingsContent = await this.filesystem.readFile(path);
-      this.interpreter.execute(coreBindingsContent);
-      return true;
+      return executeContent(coreBindingsContent);
     } catch (error) {
+      if (path.startsWith("src/tlisp/core/")) {
+        try {
+          const realFile = Bun.file(path);
+          if (await realFile.exists()) {
+            return executeContent(await realFile.text());
+          }
+        } catch (realError) {
+          const realMessage = realError instanceof Error ? realError.message : String(realError);
+          if (!silent) {
+            console.warn(`Failed to load bindings from ${path}: ${realMessage}`);
+          }
+          return false;
+        }
+      }
+
       const errorMessage = error instanceof Error ? error.message : String(error);
-      console.warn(`Failed to load bindings from ${path}: ${errorMessage}`);
+      if (!silent) {
+        console.warn(`Failed to load bindings from ${path}: ${errorMessage}`);
+      }
       return false;
     }
   }
@@ -1325,17 +1388,44 @@ export class Editor {
    * Load core key bindings from T-Lisp files
    */
   private async loadCoreBindings(): Promise<void> {
-    const bindingFiles = [
+    const requiredBindingFiles = [
       "src/tlisp/core/bindings/normal.tlisp",
       "src/tlisp/core/bindings/insert.tlisp",
       "src/tlisp/core/bindings/visual.tlisp",
       "src/tlisp/core/bindings/command.tlisp",
     ];
 
+    const requiredModeFiles = [
+      // SPEC-035: Major modes
+      "src/tlisp/core/modes/fundamental.tlisp",
+      "src/tlisp/core/modes/typescript-mode.tlisp",
+      "src/tlisp/core/modes/python-mode.tlisp",
+      "src/tlisp/core/modes/lisp-mode.tlisp",
+      "src/tlisp/core/modes/go-mode.tlisp",
+      // SPEC-003: Minor modes
+      "src/tlisp/core/modes/line-numbers-mode.tlisp",
+      "src/tlisp/core/modes/auto-fill-mode.tlisp",
+    ];
+
+    const optionalBindingFiles = [
+      // SPEC-035: Indent rules
+      "src/tlisp/core/indent/typescript.tlisp",
+      "src/tlisp/core/indent/lisp.tlisp",
+      "src/tlisp/core/indent/python.tlisp",
+      "src/tlisp/core/indent/generic.tlisp",
+      // SPEC-035: T-Lisp commands
+      "src/tlisp/core/commands/save.tlisp",
+      "src/tlisp/core/commands/find-file.tlisp",
+      "src/tlisp/core/commands/isearch.tlisp",
+      "src/tlisp/core/commands/replace.tlisp",
+      "src/tlisp/core/commands/indent.tlisp",
+      "src/tlisp/core/commands/dired.tlisp",
+    ];
+
     let allLoaded = true;
     let lastError: string = "";
 
-    for (const path of bindingFiles) {
+    for (const path of requiredBindingFiles) {
       const loaded = await this.loadBindingsFromFile(path);
       if (!loaded) {
         allLoaded = false;
@@ -1347,6 +1437,17 @@ export class Editor {
       console.warn(`Failed to load some core bindings. Last error: ${lastError}`);
       console.warn("Loading minimal fallback key bindings...");
       this.loadFallbackBindings();
+    }
+
+    for (const path of requiredModeFiles) {
+      const loaded = await this.loadBindingsFromFile(path);
+      if (!loaded) {
+        throw new Error(`Failed to load required T-Lisp mode file: ${path}`);
+      }
+    }
+
+    for (const path of optionalBindingFiles) {
+      await this.loadBindingsFromFile(path, true);
     }
 
     this.coreBindingsLoaded = true;
@@ -1603,7 +1704,16 @@ export class Editor {
 
       initLog.debug(`Loading init file: ${initFile}`);
 
-      const initContent = await this.filesystem.readFile(initFile);
+      let initContent: string;
+      try {
+        initContent = await this.filesystem.readFile(initFile);
+      } catch (readError) {
+        if (initFilePath) {
+          throw readError;
+        }
+        initContent = await this.filesystem.readFile("~/.config/tmax/init.tlisp");
+        this.currentInitFile = "~/.config/tmax/init.tlisp";
+      }
       this.interpreter.execute(initContent);
 
       initLog.info('Loaded init file', {
@@ -1898,6 +2008,10 @@ export class Editor {
       const lspStatus = this.lspClient.getStatusMessage();
       this.state.statusMessage = lspStatus ? `Opened ${filename} - ${lspStatus}` : `Opened ${filename}`;
       this.logMessage(`Opened ${filename}`);
+
+      // SPEC-035: Auto-detect and activate major mode
+      this.activateMajorModeForFile(filename);
+      this.recomputeHighlights();
     } catch (error) {
       this.state.statusMessage = `Failed to open ${filename}: ${error instanceof Error ? error.message : String(error)}`;
       this.logMessage(`Failed to open ${filename}: ${error instanceof Error ? error.message : String(error)}`);
@@ -1940,6 +2054,88 @@ export class Editor {
   }
 
   /**
+   * Get the current buffer key for mode state lookup
+   */
+  getCurrentBufferKey(): string {
+    return this.state.currentFilename ?? "*scratch*";
+  }
+
+  /**
+   * Get buffer-local mode state for the current buffer
+   */
+  getCurrentModeState(): BufferModeState {
+    const state = getOrCreateModeState(this.bufferModeStates, this.getCurrentBufferKey());
+    const withGlobals = applyGlobalMinorModes(state, this.globalizedMinorModes);
+    if (withGlobals !== state) Object.assign(state, withGlobals);
+    return state;
+  }
+
+  /**
+   * Set the current buffer's major mode
+   */
+  setCurrentMajorMode(modeName: string): void {
+    const key = this.getCurrentBufferKey();
+    const state = getOrCreateModeState(this.bufferModeStates, key);
+    state.majorMode = modeName;
+  }
+
+  /**
+   * Get the current buffer's major mode
+   */
+  getCurrentMajorMode(): string {
+    return this.getCurrentModeState().majorMode;
+  }
+
+  /**
+   * Register a minor mode configuration
+   */
+  registerMinorMode(config: MinorModeConfig): void {
+    this.minorModeRegistry.set(config.name, config);
+  }
+
+  /**
+   * Get the minor mode registry
+   */
+  getMinorModeRegistry(): Map<string, MinorModeConfig> {
+    return this.minorModeRegistry;
+  }
+
+  /**
+   * Get buffer mode states map
+   */
+  getBufferModeStates(): Map<string, BufferModeState> {
+    return this.bufferModeStates;
+  }
+
+  /**
+   * Get globalized minor modes
+   */
+  getGlobalizedMinorModes(): Set<string> {
+    return this.globalizedMinorModes;
+  }
+
+  /**
+   * Get auto-mode rules
+   */
+  getAutoModeRules(): AutoModeRule[] {
+    return this.autoModeRules;
+  }
+
+  /**
+   * Get loaded features set
+   */
+  getLoadedFeatures(): Set<string> {
+    return this.loadedFeatures;
+  }
+
+  /**
+   * Get load paths
+   */
+  getLoadPaths(): string[] {
+    return this.loadPaths;
+  }
+
+  /**
    * Update viewport to ensure cursor is visible
    * This method is now used by React components to manage viewport
    */
@@ -1952,18 +2148,16 @@ export class Editor {
    * Get editor state for React components
    */
   getEditorState(): EditorState {
+    const modeState = this.getCurrentModeState();
     return {
-      currentBuffer: this.state.currentBuffer,
-      cursorPosition: this.state.cursorPosition,
-      mode: this.state.mode,
-      statusMessage: this.state.statusMessage,
-      viewportTop: this.state.viewportTop,
-      config: this.state.config,
-      commandLine: this.state.commandLine,
-      mxCommand: this.state.mxCommand,
-      currentFilename: this.state.currentFilename,
+      ...this.state,
       buffers: this.buffers as unknown as Map<string, FunctionalTextBuffer>,
       cursorFocus: this.state.cursorFocus ?? 'buffer',
+      currentMajorMode: modeState.majorMode,
+      activeMinorModes: [...modeState.activeMinorModes],
+      activeMinorModeLighters: modeState.activeMinorModes
+        .map((m) => this.minorModeRegistry.get(m)?.lighter ?? "")
+        .filter((l) => l !== ""),
     };
   }
 
@@ -1971,6 +2165,10 @@ export class Editor {
    * Set editor state from React components
    */
   setEditorState(newState: EditorState): void {
+    const previousBufferKey = this.getCurrentBufferKey();
+    const nextBufferKey = newState.currentFilename ?? "*scratch*";
+    const hasExistingModeState = this.bufferModeStates.has(nextBufferKey);
+
     this.state.currentBuffer = newState.currentBuffer;
     this.state.cursorPosition = newState.cursorPosition;
     this.state.mode = newState.mode;
@@ -1978,6 +2176,21 @@ export class Editor {
     this.state.viewportTop = newState.viewportTop;
     this.state.config = newState.config;
     this.state.currentFilename = newState.currentFilename;
+    this.state.commandLine = newState.commandLine ?? this.state.commandLine;
+    this.state.mxCommand = newState.mxCommand ?? this.state.mxCommand;
+    this.state.cursorFocus = newState.cursorFocus ?? this.state.cursorFocus;
+    this.state.buffers = newState.buffers ?? this.state.buffers;
+    if (newState.currentMajorMode || newState.activeMinorModes || newState.activeMinorModeLighters) {
+      if (previousBufferKey !== nextBufferKey && hasExistingModeState) {
+        return;
+      }
+      const modeState = this.getCurrentModeState();
+      if (newState.currentMajorMode) modeState.majorMode = newState.currentMajorMode;
+      if (newState.activeMinorModes) {
+        modeState.activeMinorModes = [...newState.activeMinorModes];
+        modeState.minorModeActivationOrder = [...newState.activeMinorModes];
+      }
+    }
   }
 
   /**
@@ -2026,7 +2239,7 @@ export class Editor {
    * Get current editor state (for testing)
    */
   getState(): EditorState {
-    return this.state;
+    return this.getEditorState();
   }
 
   /**
@@ -2114,5 +2327,57 @@ export class Editor {
     const { clearVisualSelection } = require("./api/visual-ops.ts");
     clearVisualSelection();
     this.state.mode = "normal";
+  }
+
+  /**
+   * Auto-detect and activate major mode based on filename (SPEC-035)
+   */
+  activateMajorModeForFile(filename: string): void {
+    try {
+      this.state.currentFilename = filename;
+      this.executeCommand("(major-mode-auto-detect)");
+    } catch (_) {
+      // No mode matched — keep fundamental mode
+    }
+  }
+
+  /**
+   * Recompute syntax highlight spans for visible viewport (SPEC-035)
+   */
+  recomputeHighlights(): void {
+    if (!this.state.currentBuffer) {
+      this.state.highlightSpans = undefined;
+      return;
+    }
+
+    try {
+      const contentResult = this.state.currentBuffer.getContent();
+      if (Either.isLeft(contentResult)) {
+        this.state.highlightSpans = undefined;
+        return;
+      }
+
+      const lines = contentResult.right.split('\n');
+      const startLine = this.state.viewportTop;
+      const endLine = Math.min(startLine + (this.state.config?.tabSize ?? 50), lines.length);
+
+      // Use the T-Lisp API to highlight visible lines
+      const spans: HighlightSpan[][] = [];
+      for (let i = startLine; i < endLine; i++) {
+        try {
+          const result = this.executeCommand(`(syntax-highlight-line ${i})`);
+          if (result && typeof result === 'object' && result.type === 'list') {
+            spans.push(result.value as HighlightSpan[]);
+          } else {
+            spans.push([]);
+          }
+        } catch (_) {
+          spans.push([]);
+        }
+      }
+      this.state.highlightSpans = spans.length > 0 ? spans : undefined;
+    } catch (_) {
+      this.state.highlightSpans = undefined;
+    }
   }
 }

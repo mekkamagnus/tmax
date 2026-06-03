@@ -94,6 +94,16 @@ export function fuzzyMatch(pattern: string, target: string): FuzzyMatchResult {
     };
   }
 
+  // Try command abbreviation match (like 'buf-s' or 'bs' in 'buffer-save')
+  const abbreviationResult = matchCommandAbbreviation(patternLower, targetLower);
+  if (abbreviationResult.matches) {
+    return {
+      matches: true,
+      score: abbreviationResult.score,
+      positions: abbreviationResult.positions
+    };
+  }
+
   // Try fuzzy match (characters in order, not necessarily consecutive)
   const fuzzyResult = matchFuzzy(patternNormalized, targetNormalized);
   if (fuzzyResult.matches) {
@@ -108,64 +118,91 @@ export function fuzzyMatch(pattern: string, target: string): FuzzyMatchResult {
 }
 
 /**
+ * Match abbreviations against command word boundaries and hyphen-separated parts.
+ */
+function matchCommandAbbreviation(pattern: string, target: string): FuzzyMatchResult {
+  const compactPattern = pattern.replace(/[-\s]/g, "");
+  if (compactPattern.length === 0) {
+    return { matches: false, score: 0, positions: [] };
+  }
+
+  const targetParts = target.split("-");
+
+  if (pattern.includes("-")) {
+    const patternParts = pattern.split("-").filter(part => part.length > 0);
+    if (patternParts.length > targetParts.length) {
+      return { matches: false, score: 0, positions: [] };
+    }
+
+    const positions: number[] = [];
+    let offset = 0;
+    let matchedAllParts = true;
+
+    for (let i = 0; i < patternParts.length; i++) {
+      const partPattern = patternParts[i]!;
+      const targetPart = targetParts[i];
+      if (!targetPart || !targetPart.startsWith(partPattern)) {
+        matchedAllParts = false;
+        break;
+      }
+
+      positions.push(...Array.from({ length: partPattern.length }, (_, index) => offset + index));
+      offset += targetPart.length + 1;
+    }
+
+    if (matchedAllParts) {
+      return {
+        matches: true,
+        score: 820 + (compactPattern.length * 20) - ((target.length - compactPattern.length) * 6),
+        positions
+      };
+    }
+  }
+
+  if (compactPattern.length <= targetParts.length) {
+    const initials = targetParts.map(part => part[0] ?? "").join("");
+    if (initials.startsWith(compactPattern)) {
+      const positions: number[] = [];
+      let offset = 0;
+      for (let i = 0; i < compactPattern.length; i++) {
+        positions.push(offset);
+        offset += targetParts[i]!.length + 1;
+      }
+
+      return {
+        matches: true,
+        score: 780 + (compactPattern.length * 25) - ((target.length - compactPattern.length) * 6),
+        positions
+      };
+    }
+  }
+
+  return { matches: false, score: 0, positions: [] };
+}
+
+/**
  * Match consecutive characters (like 'buf' in 'buffer')
  */
 function matchConsecutive(pattern: string, target: string): FuzzyMatchResult {
-  const positions: number[] = [];
-  let patternIndex = 0;
-  let targetIndex = 0;
-  let consecutiveCount = 0;
-  const matchedLengths: number[] = [];
+  const start = target.indexOf(pattern);
 
-  while (patternIndex < pattern.length && targetIndex < target.length) {
-    if (pattern[patternIndex] === target[targetIndex]) {
-      positions.push(targetIndex);
-
-      // Track how long each matched segment is
-      let segmentLength = 1;
-      let pIdx = patternIndex + 1;
-      let tIdx = targetIndex + 1;
-      while (pIdx < pattern.length && tIdx < target.length && pattern[pIdx] === target[tIdx]) {
-        segmentLength++;
-        pIdx++;
-        tIdx++;
-      }
-      matchedLengths.push(segmentLength);
-
-      patternIndex = pIdx;
-      consecutiveCount++;
-    }
-    targetIndex++;
-  }
-
-  if (patternIndex === pattern.length) {
+  if (start >= 0) {
+    const positions = Array.from({ length: pattern.length }, (_, index) => start + index);
     // Bonus for matching at start of word
-    const startBonus = positions[0] === 0 ? 100 : 0;
+    const startBonus = start === 0 ? 100 : 0;
     // Score based on how much we had to skip
-    const skipPenalty = targetIndex - pattern.length;
+    const skipPenalty = start;
     // Bonus for shorter overall target (prefer shorter matches)
     const lengthBonus = Math.max(0, 100 - (target.length - pattern.length) * 2);
-    // Bonus for longer consecutive matches (prefer solid matches over fragmented)
-    const avgMatchLength = matchedLengths.reduce((a, b) => a + b, 0) / matchedLengths.length;
-    const matchQualityBonus = avgMatchLength * 20;
     // Bonus for matching pattern characters to unique target characters
     const uniquenessBonus = positions.length * 30;
     // Bonus based on how much of the target is covered by the match
     const coverageRatio = pattern.length / target.length;
     const coverageBonus = coverageRatio * 200;
-    // NEW: Bonus for matching characters at word boundaries (after hyphens/spaces)
-    // This helps "buffer-save" score higher than "buffer-switch" when pattern is "bs"
-    let boundaryBonus = 0;
-    for (const pos of positions) {
-      // Check if this position is right after a word boundary (hyphen or space)
-      if (pos > 0 && (target[pos - 1] === '-' || target[pos - 1] === ' ')) {
-        boundaryBonus += 15;
-      }
-    }
 
     return {
       matches: true,
-      score: 500 + startBonus - skipPenalty + (consecutiveCount * 10) + lengthBonus + matchQualityBonus + uniquenessBonus + coverageBonus + boundaryBonus,
+      score: 700 + startBonus - skipPenalty + lengthBonus + uniquenessBonus + coverageBonus,
       positions
     };
   }

@@ -15,7 +15,11 @@ function visibleLength(text: string): number {
 
 export function renderStatusLine(state: EditorState, width: number): string {
   const mode = modeDisplay[state.mode];
-  const left = `${style(mode.text, { fg: mode.color, bold: true })} ${style(
+  const majorMode = state.currentMajorMode ? ` [${state.currentMajorMode}]` : "";
+  const minorModes = state.activeMinorModeLighters && state.activeMinorModeLighters.length > 0
+    ? ` (${state.activeMinorModeLighters.join(" ")})`
+    : "";
+  const left = `${style(mode.text, { fg: mode.color, bold: true })}${style(majorMode, { fg: "cyan" })}${style(minorModes, { fg: "white", dim: true })} ${style(
     `Line: ${state.cursorPosition.line + 1}, Col: ${state.cursorPosition.column + 1}`,
     { fg: "white" },
   )}`;

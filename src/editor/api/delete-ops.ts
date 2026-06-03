@@ -199,6 +199,12 @@ export function createDeleteOps(
       endColumn = endPos.column;
     }
 
+    const lines = text.split('\n');
+    const endLineText = lines[endLine] ?? "";
+    while (endColumn < endLineText.length && /\s/.test(endLineText[endColumn] ?? "")) {
+      endColumn++;
+    }
+
     // Get deleted text for register
     const deletedTextResult = currentBuffer!.getText({
       start: { line: startLine, column: startColumn },

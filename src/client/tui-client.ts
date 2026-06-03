@@ -90,6 +90,7 @@ Requires a running tmax daemon. Start one with:
 
   try {
     await remote.start();
+    await remote.sendEvent("tui-started", { terminalSize: getDims() });
   } catch (error) {
     console.error("Error: Cannot connect to tmax daemon.");
     console.error("Start one with: tmax --daemon");
@@ -99,10 +100,15 @@ Requires a running tmax daemon. Start one with:
 
   enterAltScreen();
 
+  let pollInterval: ReturnType<typeof setInterval> | undefined;
+
   const cleanup = () => {
-    clearInterval(pollInterval);
+    if (pollInterval) clearInterval(pollInterval);
+    void remote.sendEvent("shutdown").catch(() => undefined);
     exitAltScreen();
-    process.stdin.setRawMode(false);
+    if (typeof process.stdin.setRawMode === "function") {
+      process.stdin.setRawMode(false);
+    }
     process.stdin.pause();
   };
 
@@ -112,25 +118,37 @@ Requires a running tmax daemon. Start one with:
 
   // Initial render
   let lastState = remote.getEditorState();
-  render(lastState);
+  try {
+    render(lastState);
+    await remote.sendEvent("first-render", { terminalSize: getDims() });
+
+    if (typeof process.stdin.setRawMode !== "function") {
+      throw new Error("stdin raw mode is unavailable");
+    }
+
+    process.stdin.setRawMode(true);
+    process.stdin.resume();
+    process.stdin.setEncoding("utf8");
+    await remote.sendEvent("raw-mode-ready", { terminalSize: getDims() });
+  } catch (error) {
+    await remote.sendEvent("error", { message: String(error), phase: "startup" }).catch(() => undefined);
+    throw error;
+  }
 
   // Poll for external changes every 200ms
-  const pollInterval = setInterval(async () => {
+  pollInterval = setInterval(async () => {
     try {
       const current = await remote.refreshState();
       if (JSON.stringify(current) !== JSON.stringify(lastState)) {
         lastState = current;
         render(current);
+        await remote.sendEvent("render", { terminalSize: getDims() });
       }
-    } catch {
+    } catch (error) {
+      await remote.sendEvent("error", { message: String(error), phase: "render-poll" }).catch(() => undefined);
       // Daemon unreachable — ignore, will show on next keypress
     }
   }, 200);
-
-  // Key input loop
-  process.stdin.setRawMode(true);
-  process.stdin.resume();
-  process.stdin.setEncoding("utf8");
 
   const escapeMap: Record<string, string> = {
     "\x1b[A": "k",
@@ -148,11 +166,13 @@ Requires a running tmax daemon. Start one with:
       const state = await remote.handleKey(key);
       lastState = state;
       render(state);
+      await remote.sendEvent("render", { terminalSize: getDims() });
     } catch (error) {
       if (error instanceof Error && error.message === "EDITOR_QUIT_SIGNAL") {
         cleanup();
         process.exit(0);
       }
+      await remote.sendEvent("error", { message: String(error), phase: "keypress" }).catch(() => undefined);
       render({ ...remote.getEditorState(), statusMessage: `Error: ${String(error)}` } as EditorState);
     }
   });
@@ -160,6 +180,7 @@ Requires a running tmax daemon. Start one with:
   // Handle terminal resize
   process.stdout.on("resize", () => {
     render(remote.getEditorState());
+    void remote.sendEvent("resize", { terminalSize: getDims() }).catch(() => undefined);
   });
 }
 

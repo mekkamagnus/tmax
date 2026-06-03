@@ -20,6 +20,9 @@ export function editorStateToJson(state: EditorState): Record<string, unknown> {
     commandLine: state.commandLine,
     mxCommand: state.mxCommand,
     currentFilename: state.currentFilename,
+    currentMajorMode: state.currentMajorMode ?? "fundamental",
+    activeMinorModes: state.activeMinorModes ?? [],
+    activeMinorModeLighters: state.activeMinorModeLighters ?? [],
     bufferContent,
   };
 }
@@ -35,6 +38,9 @@ export function jsonToEditorState(json: Record<string, unknown>): EditorState {
     commandLine: json.commandLine as string,
     mxCommand: json.mxCommand as string,
     currentFilename: json.currentFilename as string | undefined,
+    currentMajorMode: (json.currentMajorMode as string | undefined) ?? "fundamental",
+    activeMinorModes: (json.activeMinorModes as string[] | undefined) ?? [],
+    activeMinorModeLighters: (json.activeMinorModeLighters as string[] | undefined) ?? [],
     buffers: new Map(),
     cursorFocus: "buffer",
   };

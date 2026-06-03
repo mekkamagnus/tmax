@@ -31,6 +31,14 @@ import { createEvilIntegrationOps } from "./api/evil-integration.ts";
 import { createLSPDiagnosticsOps } from "./api/lsp-diagnostics.ts";
 import { createPluginOps } from "./api/plugin-ops.ts";
 import { createDocumentationOps } from "./api/documentation.ts";
+import { createHookOps, HookRegistry } from "./api/hook-ops.ts";
+import { createSyntaxOps } from "./api/syntax-ops.ts";
+import { createReplaceOps } from "./api/replace-ops.ts";
+import { createIndentOps } from "./api/indent-ops.ts";
+import { createMajorModeOps } from "./api/major-mode-ops.ts";
+import { createDiredOps } from "./api/dired-ops.ts";
+import { createLoadOps } from "./api/load-ops.ts";
+import { createMinorModeOps } from "./api/minor-mode-ops.ts";
 
 /**
  * T-Lisp function implementation that returns Either for error handling
@@ -67,6 +75,8 @@ export interface TlispEditorState {
   operations?: EditorOperations;  // Optional operations reference
   lspDiagnostics?: import("../core/types.ts").LSPDiagnostic[];  // LSP diagnostics (US-3.1.2)
   logMessage?: (msg: string) => void;  // Log to *Messages* buffer
+  currentFilename?: string;  // Current buffer's filename (SPEC-035 Phase 0a)
+  config?: import("../core/types.ts").EditorConfig;
 }
 
 /**
@@ -86,7 +96,9 @@ export function createEditorAPI(state: TlispEditorState): Map<string, TLispFunct
     () => state.cursorLine,
     (line) => { state.cursorLine = line; },
     () => state.cursorColumn,
-    (column) => { state.cursorColumn = column; }
+    (column) => { state.cursorColumn = column; },
+    () => state.currentFilename,
+    (path: string) => { state.currentFilename = path; }
   );
   for (const [key, value] of bufferOps.entries()) {
     api.set(key, value);
@@ -346,6 +358,162 @@ export function createEditorAPI(state: TlispEditorState): Map<string, TLispFunct
   // Add documentation operations (US-4.2.1)
   const documentationOps = createDocumentationOps(null as any); // Interpreter not needed for current implementation
   for (const [key, value] of documentationOps.entries()) {
+    api.set(key, value);
+  }
+
+  // Add hook operations (SPEC-003: real eval + callable hooks)
+  const hooks: HookRegistry = new Map();
+  const hookOps = createHookOps(hooks, (name: string) => {
+    const fn = (state as any)._evalTlisp;
+    return fn ? fn(`(${name})`) : Either.right(createNil());
+  }, (value: TLispValue) => {
+    if (value.type === "function") {
+      const fn = value.value as TLispFunctionImpl;
+      return fn([]);
+    }
+    if (value.type === "symbol") {
+      const fn = (state as any)._evalTlisp;
+      return fn ? fn(`(${value.value as string})`) : Either.right(createNil());
+    }
+    return Either.right(value);
+  });
+  for (const [key, value] of hookOps.entries()) {
+    api.set(key, value);
+  }
+
+  // Add syntax highlighting operations (SPEC-035)
+  const syntaxOps = createSyntaxOps(
+    () => state.currentBuffer,
+    () => {
+      const buf = state.currentBuffer;
+      if (!buf) return 0;
+      const result = buf.getLineCount();
+      return Either.isLeft(result) ? 0 : result.right;
+    },
+    (line: number) => {
+      const buf = state.currentBuffer;
+      if (!buf) return '';
+      const result = buf.getLine(line);
+      return Either.isLeft(result) ? '' : result.right;
+    }
+  );
+  for (const [key, value] of syntaxOps.entries()) {
+    api.set(key, value);
+  }
+
+  // Add replace operations (SPEC-035)
+  const replaceOps = createReplaceOps(
+    () => state.currentBuffer,
+    (buffer) => { state.currentBuffer = buffer; },
+    () => state.cursorLine,
+    (line) => { state.cursorLine = line; }
+  );
+  for (const [key, value] of replaceOps.entries()) {
+    api.set(key, value);
+  }
+
+  // Add indent operations (SPEC-035)
+  const indentOps = createIndentOps(
+    () => state.currentBuffer,
+    (buffer) => { state.currentBuffer = buffer; },
+    () => state.cursorLine,
+    (line) => { state.cursorLine = line; },
+    () => 4 // tabSize default; TODO: read from config
+  );
+  for (const [key, value] of indentOps.entries()) {
+    api.set(key, value);
+  }
+
+  // Add major mode operations (SPEC-003: buffer-local state + real eval)
+  const majorModeOps = createMajorModeOps(
+    () => state.currentBuffer,
+    () => state.currentFilename,
+    () => false, // bufferModified; TODO: wire to real state
+    (expr: string) => {
+      // Real eval callback will be wired from editor.ts via setInterpreter
+      const fn = (state as any)._evalTlisp;
+      return fn ? fn(expr) : Either.right(createNil());
+    },
+    () => {
+      const fn = (state as any)._getCurrentMajorMode;
+      return fn ? fn() : "fundamental";
+    },
+    (mode: string) => {
+      const fn = (state as any)._setCurrentMajorMode;
+      if (fn) fn(mode);
+    },
+  );
+  for (const [key, value] of majorModeOps.entries()) {
+    api.set(key, value);
+  }
+
+  // Add dired operations (SPEC-035)
+  const diredOps = createDiredOps(
+    () => state.currentBuffer,
+    (buffer) => { state.currentBuffer = buffer; },
+    () => state.cursorLine,
+    state.buffers
+  );
+  for (const [key, value] of diredOps.entries()) {
+    api.set(key, value);
+  }
+
+  // Add load/provide/require operations (SPEC-003)
+  const loadOps = createLoadOps(
+    () => {
+      const fn = (state as any)._getLoadedFeatures;
+      return fn ? fn() : new Set<string>();
+    },
+    () => {
+      const fn = (state as any)._getLoadPaths;
+      return fn ? fn() : ['src/tlisp/core'];
+    },
+    (expr: string) => {
+      const fn = (state as any)._evalTlisp;
+      return fn ? fn(expr) : Either.right(createNil());
+    },
+    async (_path: string) => false,
+  );
+  for (const [key, value] of loadOps.entries()) {
+    api.set(key, value);
+  }
+
+  // Add minor mode operations (SPEC-003)
+  const minorModeOps = createMinorModeOps(
+    () => {
+      const fn = (state as any)._getMinorModeRegistry;
+      return fn ? fn() : new Map();
+    },
+    () => {
+      const fn = (state as any)._getBufferModeStates;
+      return fn ? fn() : new Map();
+    },
+    () => {
+      const fn = (state as any)._getCurrentBufferKey;
+      return fn ? fn() : "*scratch*";
+    },
+    () => {
+      const fn = (state as any)._getGlobalizedMinorModes;
+      return fn ? fn() : new Set<string>();
+    },
+    (expr: string) => {
+      const fn = (state as any)._evalTlisp;
+      return fn ? fn(expr) : Either.right(createNil());
+    },
+    {
+      getConfig: () => state.config ?? {
+        theme: "default",
+        tabSize: 4,
+        autoSave: false,
+        keyBindings: {},
+        maxUndoLevels: 100,
+        showLineNumbers: true,
+        wordWrap: false,
+      },
+      setConfig: (config) => { state.config = config; },
+    },
+  );
+  for (const [key, value] of minorModeOps.entries()) {
     api.set(key, value);
   }
 

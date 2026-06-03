@@ -1,7 +1,7 @@
 /**
  * @file ink-adapter.ts
- * @description Deno-ink adapter that implements FunctionalTerminalIO interface
- * This allows the editor to use React-based UI with Deno-ink while maintaining
+ * @description Ink adapter that implements FunctionalTerminalIO interface
+ * This allows the editor to use React-based UI with Ink while maintaining
  * functional programming patterns through TaskEither.
  */
 
@@ -11,13 +11,13 @@ import { ErrorFactory, TmaxError } from "../../../utils/error-manager.ts";
 import { log } from "../../../utils/logger.ts";
 
 /**
- * InkTerminalIO - Implements FunctionalTerminalIO using Deno-ink
- * This adapter bridges the functional terminal interface with Deno-ink's React-based rendering
+ * InkTerminalIO - Implements FunctionalTerminalIO using Ink
+ * This adapter bridges the functional terminal interface with Ink's React-based rendering
  */
 export class InkTerminalIO implements FunctionalTerminalIO {
   private logger = log.module("InkTerminalIO");
 
-  // Store terminal size - will be updated by Deno-ink when available
+  // Store terminal size - will be updated by Ink when available
   private _size: TerminalSize = { width: 80, height: 24 };
 
   // Track terminal state
@@ -30,7 +30,7 @@ export class InkTerminalIO implements FunctionalTerminalIO {
 
   /**
    * Get terminal dimensions
-   * Note: In Deno-ink, this will be provided by the render function context
+   * Note: In Ink, this will be provided by the render function context
    */
   getSize(): Either<TerminalError, TerminalSize> {
     const fnLogger = this.logger.fn("getSize");
@@ -112,7 +112,7 @@ export class InkTerminalIO implements FunctionalTerminalIO {
 
   /**
    * Clear the terminal screen
-   * In Deno-ink, clearing is handled by React rendering
+   * In Ink, clearing is handled by React rendering
    */
   clear(): TaskEither<TerminalError, void> {
     const fnLogger = this.logger.fn("clear");
@@ -123,7 +123,7 @@ export class InkTerminalIO implements FunctionalTerminalIO {
 
   /**
    * Clear from cursor to end of line
-   * In Deno-ink, this is handled by React rendering
+   * In Ink, this is handled by React rendering
    */
   clearToEndOfLine(): TaskEither<TerminalError, void> {
     const fnLogger = this.logger.fn("clearToEndOfLine");
@@ -134,13 +134,13 @@ export class InkTerminalIO implements FunctionalTerminalIO {
 
   /**
    * Move cursor to position
-   * In Deno-ink, cursor positioning is handled by React components
+   * In Ink, cursor positioning is handled by React components
    */
   moveCursor(position: Position): TaskEither<TerminalError, void> {
     const fnLogger = this.logger.fn("moveCursor");
     const correlationId = fnLogger.startOperation("move_cursor");
 
-    // In Deno-ink, cursor positioning is handled by React components
+    // In Ink, cursor positioning is handled by React components
     // We'll store the position for reference by the UI components
     fnLogger.debug(`Cursor moved to position ${position.line},${position.column}`, {
       operation: "move_cursor",
@@ -152,7 +152,7 @@ export class InkTerminalIO implements FunctionalTerminalIO {
 
   /**
    * Write text at current cursor position
-   * In Deno-ink, writing is handled by React components
+   * In Ink, writing is handled by React components
    */
   write(text: string): TaskEither<TerminalError, void> {
     const fnLogger = this.logger.fn("write");
@@ -164,13 +164,13 @@ export class InkTerminalIO implements FunctionalTerminalIO {
       metadata: { textLength: text.length }
     });
 
-    // In Deno-ink, writing is handled by React components
+    // In Ink, writing is handled by React components
     return TaskEither.right(void 0);
   }
 
   /**
    * Read a single key press
-   * In Deno-ink, we'll use a promise-based approach that resolves when a key is pressed
+   * In Ink, we'll use a promise-based approach that resolves when a key is pressed
    * This will be integrated with React component event handlers
    */
   readKey(): TaskEither<TerminalError, string> {
@@ -181,7 +181,7 @@ export class InkTerminalIO implements FunctionalTerminalIO {
     // This will be connected to React component keyboard event handlers
     return TaskEither.tryCatch(
       async () => {
-        // In Deno-ink, keyboard events are handled differently than in raw mode
+        // In Ink, keyboard events are handled differently than in raw mode
         // We'll create a promise that gets resolved when a key event occurs
         return new Promise<string>((resolve, reject) => {
           // Store the resolver in a way that can be accessed by React components
@@ -222,7 +222,7 @@ export class InkTerminalIO implements FunctionalTerminalIO {
 
   /**
    * Enter raw mode
-   * In Deno-ink, raw mode is handled by the framework
+   * In Ink, raw mode is handled by the framework
    */
   enterRawMode(): TaskEither<TerminalError, void> {
     const fnLogger = this.logger.fn("enterRawMode");
@@ -239,7 +239,7 @@ export class InkTerminalIO implements FunctionalTerminalIO {
 
   /**
    * Exit raw mode
-   * In Deno-ink, raw mode is handled by the framework
+   * In Ink, raw mode is handled by the framework
    */
   exitRawMode(): TaskEither<TerminalError, void> {
     const fnLogger = this.logger.fn("exitRawMode");
@@ -256,7 +256,7 @@ export class InkTerminalIO implements FunctionalTerminalIO {
 
   /**
    * Enter alternate screen buffer
-   * In Deno-ink, this is handled by React rendering
+   * In Ink, this is handled by React rendering
    */
   enterAlternateScreen(): TaskEither<TerminalError, void> {
     const fnLogger = this.logger.fn("enterAlternateScreen");
@@ -273,7 +273,7 @@ export class InkTerminalIO implements FunctionalTerminalIO {
 
   /**
    * Exit alternate screen buffer
-   * In Deno-ink, this is handled by React rendering
+   * In Ink, this is handled by React rendering
    */
   exitAlternateScreen(): TaskEither<TerminalError, void> {
     const fnLogger = this.logger.fn("exitAlternateScreen");
@@ -290,7 +290,7 @@ export class InkTerminalIO implements FunctionalTerminalIO {
 
   /**
    * Hide cursor
-   * In Deno-ink, cursor visibility is controlled by React components
+   * In Ink, cursor visibility is controlled by React components
    */
   hideCursor(): TaskEither<TerminalError, void> {
     const fnLogger = this.logger.fn("hideCursor");
@@ -307,7 +307,7 @@ export class InkTerminalIO implements FunctionalTerminalIO {
 
   /**
    * Show cursor
-   * In Deno-ink, cursor visibility is controlled by React components
+   * In Ink, cursor visibility is controlled by React components
    */
   showCursor(): TaskEither<TerminalError, void> {
     const fnLogger = this.logger.fn("showCursor");

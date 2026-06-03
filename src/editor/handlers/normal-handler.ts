@@ -6,6 +6,7 @@
 import type { Editor } from "../editor.ts";
 import { Either } from "../../utils/task-either.ts";
 import { log } from "../../utils/logger.ts";
+import { pushToHistory, setInitialBuffer } from "../api/undo-redo-ops.ts";
 import {
   scheduleWhichKey,
   deactivateWhichKey,
@@ -82,6 +83,87 @@ export async function handleNormalMode(editor: Editor, key: string, normalizedKe
   // Handle which-key popup (US-1.10.3)
   const keyMappings = (editor as any).keyMappings;
   const currentPrefix = (editor as any).state.whichKeyPrefix || "";
+
+  const consumeCount = (): number => {
+    return (editor as any).consumeCount();
+  };
+
+  const executeCountCommand = (name: string, count: number): void => {
+    if (count <= 0) {
+      return;
+    }
+    (editor as any).executeCommand(`(${name} ${count})`);
+  };
+
+  const executeUndoableCountCommand = (name: string, count: number): void => {
+    if (count <= 0) {
+      return;
+    }
+    const beforeBuffer = (editor as any).state.currentBuffer;
+    (editor as any).executeCommand(`(${name} ${count})`);
+    const afterBuffer = (editor as any).state.currentBuffer;
+    if (beforeBuffer && afterBuffer && beforeBuffer !== afterBuffer) {
+      setInitialBuffer(beforeBuffer);
+      pushToHistory(name, afterBuffer, (editor as any).state.cursorPosition.line, (editor as any).state.cursorPosition.column);
+    }
+  };
+
+  const pendingOperator = (editor as any).pendingNormalOperator as string | undefined;
+  if (pendingOperator) {
+    (editor as any).pendingNormalOperator = undefined;
+    const count = consumeCount();
+
+    if (pendingOperator === "d" && normalizedKey === "d") {
+      executeUndoableCountCommand("delete-line", count);
+      return;
+    }
+    if (pendingOperator === "d" && normalizedKey === "w") {
+      executeUndoableCountCommand("delete-word", count);
+      return;
+    }
+    if (pendingOperator === "y" && normalizedKey === "y") {
+      executeCountCommand("yank-line", count);
+      return;
+    }
+    if (pendingOperator === "y" && normalizedKey === "w") {
+      executeCountCommand("yank-word", count);
+      return;
+    }
+    if (pendingOperator === "y" && normalizedKey === "l") {
+      executeCountCommand("yank-chars", count);
+      return;
+    }
+
+    (editor as any).state.statusMessage = `Unsupported operator: ${pendingOperator}${normalizedKey}`;
+    (editor as any).logMessage(`Unsupported operator: ${pendingOperator}${normalizedKey}`);
+    return;
+  }
+
+  if (normalizedKey === "d" || normalizedKey === "y") {
+    (editor as any).pendingNormalOperator = normalizedKey;
+    (editor as any).state.statusMessage = `${normalizedKey} operator`;
+    return;
+  }
+
+  if (normalizedKey === "x") {
+    executeUndoableCountCommand("buffer-delete", consumeCount());
+    return;
+  }
+
+  if (normalizedKey === "p") {
+    executeCountCommand("paste-after", consumeCount());
+    return;
+  }
+
+  if (normalizedKey === "P") {
+    executeCountCommand("paste-before", consumeCount());
+    return;
+  }
+
+  if (normalizedKey === "b" && (editor as any).isCountActive()) {
+    executeCountCommand("word-previous", Math.max(1, consumeCount() - 1));
+    return;
+  }
 
   // Check if this key could be a prefix for other bindings
   if (isPrefixKey(normalizedKey, keyMappings, "normal")) {

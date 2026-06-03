@@ -235,9 +235,12 @@ export class TLispParser implements TLispParserInterface {
       return Either.right(createNil());
     }
 
-    // Handle boolean true
+    // Handle boolean literals
     if (token === "t") {
       return Either.right(createBoolean(true));
+    }
+    if (token === "false") {
+      return Either.right(createBoolean(false));
     }
 
     // Handle numbers

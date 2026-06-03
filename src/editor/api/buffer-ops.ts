@@ -43,7 +43,11 @@ export function createBufferOps(
   getCursorLine: () => number,
   setCursorLine: (line: number) => void,
   getCursorColumn: () => number,
-  setCursorColumn: (column: number) => void
+  setCursorColumn: (column: number) => void,
+  getCurrentFilename?: () => string | undefined,
+  setCurrentFilename?: (path: string) => void,
+  getBufferModified?: () => boolean,
+  setBufferModified?: (flag: boolean) => void
 ): Map<string, TLispFunctionImpl> {
   const api = new Map<string, TLispFunctionImpl>();
 
@@ -299,10 +303,302 @@ export function createBufferOps(
       return Either.left(typeValidation.left);
     }
 
-    const count = countArg.value as number;
+    const count = Math.max(0, countArg.value as number);
+    if (count === 0) {
+      return Either.right(createString(""));
+    }
 
-    // For now, we'll just return a placeholder since delete logic needs cursor position
-    return Either.right(createString("deleted"));
+    const lineResult = currentBuffer!.getLine(getCursorLine());
+    if (Either.isLeft(lineResult)) {
+      return Either.left(createBufferError('OutOfBounds', `Failed to get line: ${lineResult.left}`));
+    }
+
+    const startColumn = Math.max(0, Math.min(getCursorColumn(), lineResult.right.length));
+    const endColumn = Math.min(startColumn + count, lineResult.right.length);
+    const deletedText = lineResult.right.slice(startColumn, endColumn);
+
+    const deleteResult = currentBuffer!.delete({
+      start: { line: getCursorLine(), column: startColumn },
+      end: { line: getCursorLine(), column: endColumn }
+    });
+
+    if (Either.isLeft(deleteResult)) {
+      return Either.left(createBufferError('InvalidOperation', `Failed to delete: ${deleteResult.left}`));
+    }
+
+    setCurrentBuffer(deleteResult.right);
+    setCursorColumn(startColumn);
+    setBufferModified?.(true);
+
+    return Either.right(createString(deletedText));
+  });
+
+  // Buffer metadata primitives (SPEC-035 Phase 0a)
+
+  api.set("buffer-filename", (args: TLispValue[]): Either<AppError, TLispValue> => {
+    const argsValidation = validateArgsCount(args, 0, "buffer-filename");
+    if (Either.isLeft(argsValidation)) {
+      return Either.left(argsValidation.left);
+    }
+
+    if (!getCurrentFilename) {
+      return Either.right(createNil());
+    }
+
+    const filename = getCurrentFilename();
+    if (filename === undefined) {
+      return Either.right(createNil());
+    }
+
+    return Either.right(createString(filename));
+  });
+
+  api.set("set-buffer-filename", (args: TLispValue[]): Either<AppError, TLispValue> => {
+    const argsValidation = validateArgsCount(args, 1, "set-buffer-filename");
+    if (Either.isLeft(argsValidation)) {
+      return Either.left(argsValidation.left);
+    }
+
+    const pathArg = args[0];
+    const typeValidation = validateArgType(pathArg, "string", 0, "set-buffer-filename");
+    if (Either.isLeft(typeValidation)) {
+      return Either.left(typeValidation.left);
+    }
+
+    if (!setCurrentFilename) {
+      return Either.left(createValidationError(
+        'ConstraintViolation',
+        'set-buffer-filename: filename setter not available',
+        'setCurrentFilename',
+        undefined,
+        'function'
+      ));
+    }
+
+    const path = pathArg.value as string;
+    setCurrentFilename(path);
+    return Either.right(createString(path));
+  });
+
+  api.set("buffer-modified-p", (args: TLispValue[]): Either<AppError, TLispValue> => {
+    const argsValidation = validateArgsCount(args, 0, "buffer-modified-p");
+    if (Either.isLeft(argsValidation)) {
+      return Either.left(argsValidation.left);
+    }
+
+    if (!getBufferModified) {
+      return Either.right(createBoolean(false));
+    }
+
+    return Either.right(createBoolean(getBufferModified()));
+  });
+
+  api.set("set-buffer-modified-p", (args: TLispValue[]): Either<AppError, TLispValue> => {
+    const argsValidation = validateArgsCount(args, 1, "set-buffer-modified-p");
+    if (Either.isLeft(argsValidation)) {
+      return Either.left(argsValidation.left);
+    }
+
+    const flagArg = args[0];
+    const typeValidation = validateArgType(flagArg, "boolean", 0, "set-buffer-modified-p");
+    if (Either.isLeft(typeValidation)) {
+      return Either.left(typeValidation.left);
+    }
+
+    if (!setBufferModified) {
+      return Either.left(createValidationError(
+        'ConstraintViolation',
+        'set-buffer-modified-p: modified setter not available',
+        'setBufferModified',
+        undefined,
+        'function'
+      ));
+    }
+
+    const flag = flagArg.value as boolean;
+    setBufferModified(flag);
+    return Either.right(createNil());
+  });
+
+  api.set("buffer-get-line-indent", (args: TLispValue[]): Either<AppError, TLispValue> => {
+    const argsValidation = validateArgsCount(args, 1, "buffer-get-line-indent");
+    if (Either.isLeft(argsValidation)) {
+      return Either.left(argsValidation.left);
+    }
+
+    const lineArg = args[0];
+    const typeValidation = validateArgType(lineArg, "number", 0, "buffer-get-line-indent");
+    if (Either.isLeft(typeValidation)) {
+      return Either.left(typeValidation.left);
+    }
+
+    const currentBuffer = getCurrentBuffer();
+    const bufferValidation = validateBufferExists(currentBuffer);
+    if (Either.isLeft(bufferValidation)) {
+      return Either.left(bufferValidation.left);
+    }
+
+    const lineNumber = lineArg.value as number;
+    const lineResult = currentBuffer!.getLine(lineNumber);
+    if (Either.isLeft(lineResult)) {
+      return Either.left(createBufferError('OutOfBounds', `Failed to get line: ${lineResult.left}`));
+    }
+
+    const lineContent = lineResult.right;
+    const match = lineContent.match(/^( *)/);
+    const indent = match ? match[1]!.length : 0;
+
+    return Either.right(createNumber(indent));
+  });
+
+  api.set("buffer-set-line-indent", (args: TLispValue[]): Either<AppError, TLispValue> => {
+    const argsValidation = validateArgsCount(args, 2, "buffer-set-line-indent");
+    if (Either.isLeft(argsValidation)) {
+      return Either.left(argsValidation.left);
+    }
+
+    const lineArg = args[0];
+    const lineTypeValidation = validateArgType(lineArg, "number", 0, "buffer-set-line-indent");
+    if (Either.isLeft(lineTypeValidation)) {
+      return Either.left(lineTypeValidation.left);
+    }
+
+    const colArg = args[1];
+    const colTypeValidation = validateArgType(colArg, "number", 1, "buffer-set-line-indent");
+    if (Either.isLeft(colTypeValidation)) {
+      return Either.left(colTypeValidation.left);
+    }
+
+    const currentBuffer = getCurrentBuffer();
+    const bufferValidation = validateBufferExists(currentBuffer);
+    if (Either.isLeft(bufferValidation)) {
+      return Either.left(bufferValidation.left);
+    }
+
+    const lineNumber = lineArg.value as number;
+    const targetColumn = colArg.value as number;
+
+    const lineResult = currentBuffer!.getLine(lineNumber);
+    if (Either.isLeft(lineResult)) {
+      return Either.left(createBufferError('OutOfBounds', `Failed to get line: ${lineResult.left}`));
+    }
+
+    const lineContent = lineResult.right;
+    const match = lineContent.match(/^( *)/);
+    const currentIndent = match ? match[1]!.length : 0;
+
+    if (currentIndent !== targetColumn) {
+      // Delete existing indentation
+      if (currentIndent > 0) {
+        const deleteRange = {
+          start: { line: lineNumber, column: 0 },
+          end: { line: lineNumber, column: currentIndent }
+        };
+        const deleteResult = currentBuffer!.delete(deleteRange);
+        if (Either.isLeft(deleteResult)) {
+          return Either.left(createBufferError('InvalidOperation', `Failed to delete indent: ${deleteResult.left}`));
+        }
+        setCurrentBuffer(deleteResult.right);
+
+        // Insert new indentation
+        const newIndent = " ".repeat(targetColumn);
+        const insertResult = deleteResult.right.insert({ line: lineNumber, column: 0 }, newIndent);
+        if (Either.isLeft(insertResult)) {
+          return Either.left(createBufferError('InvalidOperation', `Failed to insert indent: ${insertResult.left}`));
+        }
+        setCurrentBuffer(insertResult.right);
+      } else {
+        // No existing indent, just insert
+        const newIndent = " ".repeat(targetColumn);
+        const insertResult = currentBuffer!.insert({ line: lineNumber, column: 0 }, newIndent);
+        if (Either.isLeft(insertResult)) {
+          return Either.left(createBufferError('InvalidOperation', `Failed to insert indent: ${insertResult.left}`));
+        }
+        setCurrentBuffer(insertResult.right);
+      }
+    }
+
+    return Either.right(createNil());
+  });
+
+  api.set("buffer-previous-non-blank-line", (args: TLispValue[]): Either<AppError, TLispValue> => {
+    const argsValidation = validateArgsCount(args, 1, "buffer-previous-non-blank-line");
+    if (Either.isLeft(argsValidation)) {
+      return Either.left(argsValidation.left);
+    }
+
+    const lineArg = args[0];
+    const typeValidation = validateArgType(lineArg, "number", 0, "buffer-previous-non-blank-line");
+    if (Either.isLeft(typeValidation)) {
+      return Either.left(typeValidation.left);
+    }
+
+    const currentBuffer = getCurrentBuffer();
+    const bufferValidation = validateBufferExists(currentBuffer);
+    if (Either.isLeft(bufferValidation)) {
+      return Either.left(bufferValidation.left);
+    }
+
+    const startLine = lineArg.value as number;
+
+    for (let i = startLine - 1; i >= 0; i--) {
+      const lineResult = currentBuffer!.getLine(i);
+      if (Either.isLeft(lineResult)) {
+        continue;
+      }
+      if (lineResult.right.trim().length > 0) {
+        return Either.right(createNumber(i));
+      }
+    }
+
+    return Either.right(createNumber(-1));
+  });
+
+  api.set("buffer-line-matches", (args: TLispValue[]): Either<AppError, TLispValue> => {
+    const argsValidation = validateArgsCount(args, 2, "buffer-line-matches");
+    if (Either.isLeft(argsValidation)) {
+      return Either.left(argsValidation.left);
+    }
+
+    const lineArg = args[0];
+    const lineTypeValidation = validateArgType(lineArg, "number", 0, "buffer-line-matches");
+    if (Either.isLeft(lineTypeValidation)) {
+      return Either.left(lineTypeValidation.left);
+    }
+
+    const patternArg = args[1];
+    const patternTypeValidation = validateArgType(patternArg, "string", 1, "buffer-line-matches");
+    if (Either.isLeft(patternTypeValidation)) {
+      return Either.left(patternTypeValidation.left);
+    }
+
+    const currentBuffer = getCurrentBuffer();
+    const bufferValidation = validateBufferExists(currentBuffer);
+    if (Either.isLeft(bufferValidation)) {
+      return Either.left(bufferValidation.left);
+    }
+
+    const lineNumber = lineArg.value as number;
+    const pattern = patternArg.value as string;
+
+    const lineResult = currentBuffer!.getLine(lineNumber);
+    if (Either.isLeft(lineResult)) {
+      return Either.left(createBufferError('OutOfBounds', `Failed to get line: ${lineResult.left}`));
+    }
+
+    try {
+      const regex = new RegExp(pattern);
+      const matches = regex.test(lineResult.right);
+      return Either.right(createBoolean(matches));
+    } catch {
+      return Either.left(createValidationError(
+        'FormatError',
+        `buffer-line-matches: invalid regex pattern: ${pattern}`,
+        'pattern',
+        pattern,
+        'valid regex'
+      ));
+    }
   });
 
   return api;
