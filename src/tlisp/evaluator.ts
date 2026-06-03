@@ -24,7 +24,7 @@ import { Either } from "../utils/task-either";
 import { createValidationError, type EvalError } from "../error/types";
 import { TLispParser } from "./parser.ts";
 import { registerStdlibFunctions } from "./stdlib.ts";
-import { registerTestingFramework } from "./test-framework.ts";
+import { registerTestingFramework, setGlobalSetupBody, setGlobalTeardownBody } from "./test-framework.ts";
 import { registerFunction, markFunctionCovered, isCoverageEnabled } from "./test-coverage.ts";
 
 
@@ -55,6 +55,13 @@ function isTailCall(result: EvalResult): result is TailCall {
  */
 function createTailCall(funcExpr: TLispValue, argExprs: TLispValue[], env: TLispEnvironment): TailCall {
   return { type: "tail-call", funcExpr, argExprs, env };
+}
+
+interface LambdaParameter {
+  name: string;
+  optional: boolean;
+  defaultExpr?: TLispValue;
+  suppliedName?: string;
 }
 
 // Test registry to store defined tests
@@ -164,59 +171,6 @@ export class TLispEvaluator {
   }
 
   /**
-   * Evaluate assert-type special form
-   * @param elements - List elements (excluding 'assert-type')
-   * @param env - Environment
-   * @returns Either with error or success
-   */
-  private evalAssertType(elements: TLispValue[], env: TLispEnvironment): Either<EvalError, TLispValue> {
-    if (elements.length < 3) {
-      return Either.left({
-        type: 'EvalError',
-        variant: 'RuntimeError',
-        message: "assert-type requires exactly 2 arguments: value and type",
-        details: { expected: 2, actual: elements.length - 1 }
-      });
-    }
-
-    const valueArg = elements[1]; // Will be evaluated
-    const typeArg = elements[2]; // NOT evaluated
-
-    if (typeArg.type !== "symbol") {
-      return Either.left({
-        type: 'EvalError',
-        variant: 'TypeError',
-        message: "assert-type second argument must be a symbol (type name)",
-        details: { argType: typeArg.type }
-      });
-    }
-
-    // Evaluate the value
-    const valueResult = this.eval(valueArg, env);
-    if (Either.isLeft(valueResult)) {
-      return valueResult;
-    }
-
-    const expectedType = typeArg.value as string;
-    const actualType = valueResult.right.type;
-
-    if (actualType !== expectedType) {
-      return Either.left({
-        type: 'EvalError',
-        variant: 'RuntimeError',
-        message: `Assertion failed: expected type ${expectedType}, but got ${actualType}`,
-        details: {
-          expected: expectedType,
-          actual: actualType,
-          value: valueToString(valueResult.right)
-        }
-      });
-    }
-
-    return Either.right(createBoolean(true));
-  }
-
-  /**
    * Evaluate a symbol by looking it up in the environment
    * @param symbol - Symbol to evaluate
    * @param env - Environment for lookup
@@ -307,6 +261,10 @@ export class TLispEvaluator {
           return this.evalSuiteSetup(elements, env);
         case "suite-teardown":
           return this.evalSuiteTeardown(elements, env);
+        case "setup":
+          return this.evalSetup(elements);
+        case "teardown":
+          return this.evalTeardown(elements);
         case "deffixture":
           return this.evalDeffixture(elements, env);
         case "use-fixtures":
@@ -508,12 +466,12 @@ export class TLispEvaluator {
    * @returns Either with error or lambda function
    */
   private evalLambda(elements: TLispValue[], env: TLispEnvironment): Either<EvalError, TLispValue> {
-    if (elements.length !== 3 && elements.length !== 4) {
+    if (elements.length < 3) {
       return Either.left({
         type: 'EvalError',
         variant: 'SyntaxError',
         message: "lambda requires 2 or 3 arguments: parameters, [docstring], and body",
-        details: { expected: "3 or 4", actual: elements.length }
+        details: { expected: "at least 3", actual: elements.length }
       });
     }
 
@@ -522,11 +480,19 @@ export class TLispEvaluator {
     let docstring: string | undefined;
     let body: TLispValue;
     
-    if (elements.length === 4) {
-      // 3-arg form: (lambda params docstring body)
+    if (elements[2]?.type === "string" && elements.length > 3) {
+      // (lambda params docstring body...)
       const doc = elements[2];
-      body = elements[3];
+      const bodyExprs = elements.slice(3);
       
+      if (bodyExprs.length === 0) {
+        return Either.left({
+          type: 'EvalError',
+          variant: 'SyntaxError',
+          message: "lambda missing body",
+          details: { actual: elements.length }
+        });
+      }
       if (doc.type !== "string") {
         return Either.left({
           type: 'EvalError',
@@ -536,9 +502,15 @@ export class TLispEvaluator {
         });
       }
       docstring = doc.value as string;
+      body = bodyExprs.length === 1
+        ? bodyExprs[0]
+        : createList([createSymbol("progn"), ...bodyExprs]);
     } else {
-      // 2-arg form: (lambda params body)
-      body = elements[2];
+      // (lambda params body...)
+      const bodyExprs = elements.slice(2);
+      body = bodyExprs.length === 1
+        ? bodyExprs[0]
+        : createList([createSymbol("progn"), ...bodyExprs]);
     }
 
     if (!parameters || !body) {
@@ -560,28 +532,23 @@ export class TLispEvaluator {
     }
 
     const paramList = parameters.value as TLispValue[];
-    for (const param of paramList) {
-      if (param.type !== "symbol") {
-        return Either.left({
-          type: 'EvalError',
-          variant: 'TypeError',
-          message: "lambda parameter must be a symbol",
-          details: { paramType: param.type }
-        });
-      }
-    }
+    const parametersResult = this.parseLambdaParameters(paramList);
+    if (Either.isLeft(parametersResult)) return parametersResult;
+
+    const lambdaParams = parametersResult.right;
+    const requiredParams = lambdaParams.filter((param) => !param.optional);
 
     // Extract parameter names for signature
-    const paramNames = paramList.map(p => p.type === "symbol" ? p.value as string : "?");
+    const paramNames = lambdaParams.map((param) => param.name);
 
     // Create closure with tail-call optimization support
     const lambdaFunction = (args: TLispValue[]): Either<EvalError, TLispValue> => {
-      if (args.length !== paramList.length) {
+      if (args.length < requiredParams.length || args.length > lambdaParams.length) {
         return Either.left({
           type: 'EvalError',
           variant: 'RuntimeError',
-          message: `lambda expects ${paramList.length} arguments, got ${args.length}`,
-          details: { expected: paramList.length, actual: args.length, args }
+          message: `lambda expects ${requiredParams.length}-${lambdaParams.length} arguments, got ${args.length}`,
+          details: { expectedMin: requiredParams.length, expectedMax: lambdaParams.length, actual: args.length, args }
         });
       }
 
@@ -589,19 +556,33 @@ export class TLispEvaluator {
       const callEnv = new TLispEnvironmentImpl(env);
 
       // Bind parameters to arguments
-      for (let i = 0; i < paramList.length; i++) {
-        const param = paramList[i];
-        const arg = args[i];
-        if (!param || !arg) {
+      for (let i = 0; i < lambdaParams.length; i++) {
+        const param = lambdaParams[i];
+        if (!param) {
           return Either.left({
             type: 'EvalError',
             variant: 'RuntimeError',
             message: "lambda parameter or argument missing",
-            details: { paramIndex: i, hasParam: !!param, hasArg: !!arg }
+            details: { paramIndex: i, hasParam: !!param }
           });
         }
-        const paramName = param.value as string;
-        callEnv.define(paramName, arg);
+
+        const supplied = i < args.length;
+        let arg = args[i];
+        if (!supplied) {
+          if (param.defaultExpr) {
+            const defaultResult = this.eval(param.defaultExpr, callEnv);
+            if (Either.isLeft(defaultResult)) return defaultResult;
+            arg = defaultResult.right;
+          } else {
+            arg = createNil();
+          }
+        }
+
+        callEnv.define(param.name, arg ?? createNil());
+        if (param.suppliedName) {
+          callEnv.define(param.suppliedName, createBoolean(supplied));
+        }
       }
 
       // Evaluate body in tail position
@@ -620,6 +601,68 @@ export class TLispEvaluator {
     return Either.right(funcValue);
   }
 
+  private parseLambdaParameters(paramList: TLispValue[]): Either<EvalError, LambdaParameter[]> {
+    const params: LambdaParameter[] = [];
+    let optional = false;
+
+    for (const param of paramList) {
+      if (param.type === "symbol" && (param.value === "&optional" || param.value === "optional")) {
+        optional = true;
+        continue;
+      }
+
+      if (param.type === "symbol") {
+        params.push({
+          name: param.value as string,
+          optional,
+        });
+        continue;
+      }
+
+      if (param.type === "list" && optional) {
+        const parts = param.value as TLispValue[];
+        const name = parts[0];
+        if (!name || name.type !== "symbol" || parts.length > 3) {
+          return Either.left({
+            type: 'EvalError',
+            variant: 'TypeError',
+            message: "lambda optional parameter spec must be (name default supplied-p)",
+            details: { param }
+          });
+        }
+
+        const suppliedName = parts[2];
+        if (suppliedName && suppliedName.type !== "symbol") {
+          return Either.left({
+            type: 'EvalError',
+            variant: 'TypeError',
+            message: "lambda optional supplied-p name must be a symbol",
+            details: { param }
+          });
+        }
+
+        params.push({
+          name: name.value as string,
+          optional: true,
+          defaultExpr: parts[1],
+          suppliedName: suppliedName?.value as string | undefined,
+        });
+        continue;
+      }
+
+      return Either.left({
+        type: 'EvalError',
+        variant: 'TypeError',
+        message: optional
+          ? "lambda optional parameter must be a symbol or (name default supplied-p)"
+          : "lambda parameter must be a symbol",
+        details: { paramType: param.type }
+      });
+    }
+
+    return Either.right(params);
+  }
+
   /**
    * Evaluate defun special form
    * Supports both 3-arg form (name params body) and 4-arg form (name params docstring body)
@@ -628,12 +671,12 @@ export class TLispEvaluator {
    * @returns Either with error or function symbol
    */
   private evalDefun(elements: TLispValue[], env: TLispEnvironment): Either<EvalError, TLispValue> {
-    if (elements.length !== 4 && elements.length !== 5) {
+    if (elements.length < 4) {
       return Either.left({
         type: 'EvalError',
         variant: 'SyntaxError',
         message: "defun requires 3 or 4 arguments: name, parameters, [docstring], and body",
-        details: { expected: "4 or 5", actual: elements.length }
+        details: { expected: "at least 4", actual: elements.length }
       });
     }
 
@@ -643,11 +686,19 @@ export class TLispEvaluator {
     let docstring: TLispValue | undefined;
     let body: TLispValue;
     
-    if (elements.length === 5) {
-      // 4-arg form: (defun name params docstring body)
+    if (elements[3]?.type === "string" && elements.length > 4) {
+      // (defun name params docstring body...)
       docstring = elements[3];
-      body = elements[4];
+      const bodyExprs = elements.slice(4);
       
+      if (bodyExprs.length === 0) {
+        return Either.left({
+          type: 'EvalError',
+          variant: 'SyntaxError',
+          message: "defun missing body",
+          details: { actual: elements.length }
+        });
+      }
       if (docstring.type !== "string") {
         return Either.left({
           type: 'EvalError',
@@ -656,9 +707,15 @@ export class TLispEvaluator {
           details: { docstringType: docstring.type }
         });
       }
+      body = bodyExprs.length === 1
+        ? bodyExprs[0]
+        : createList([createSymbol("progn"), ...bodyExprs]);
     } else {
-      // 3-arg form: (defun name params body)
-      body = elements[3];
+      // (defun name params body...)
+      const bodyExprs = elements.slice(3);
+      body = bodyExprs.length === 1
+        ? bodyExprs[0]
+        : createList([createSymbol("progn"), ...bodyExprs]);
     }
 
     if (!name || !parameters || !body) {
@@ -1498,6 +1555,64 @@ export class TLispEvaluator {
   }
 
   /**
+   * Evaluate setup special form.
+   * Usage: (setup () body...)
+   */
+  private evalSetup(elements: TLispValue[]): Either<EvalError, TLispValue> {
+    if (elements.length < 2) {
+      return Either.left({
+        type: 'EvalError',
+        variant: 'RuntimeError',
+        message: "setup requires at least 1 argument: parameter list",
+        details: { expectedMin: 1, actual: elements.length - 1 }
+      });
+    }
+
+    const paramsArg = elements[1];
+    if (!paramsArg || paramsArg.type !== "list") {
+      return Either.left({
+        type: 'EvalError',
+        variant: 'TypeError',
+        message: "setup first argument must be a list (parameters)",
+        details: { argType: paramsArg?.type }
+      });
+    }
+
+    const body = elements.length === 2 ? [paramsArg] : elements.slice(2);
+    setGlobalSetupBody(body);
+    return Either.right(createBoolean(true));
+  }
+
+  /**
+   * Evaluate teardown special form.
+   * Usage: (teardown () body...)
+   */
+  private evalTeardown(elements: TLispValue[]): Either<EvalError, TLispValue> {
+    if (elements.length < 2) {
+      return Either.left({
+        type: 'EvalError',
+        variant: 'RuntimeError',
+        message: "teardown requires at least 1 argument: parameter list",
+        details: { expectedMin: 1, actual: elements.length - 1 }
+      });
+    }
+
+    const paramsArg = elements[1];
+    if (!paramsArg || paramsArg.type !== "list") {
+      return Either.left({
+        type: 'EvalError',
+        variant: 'TypeError',
+        message: "teardown first argument must be a list (parameters)",
+        details: { argType: paramsArg?.type }
+      });
+    }
+
+    const body = elements.length === 2 ? [paramsArg] : elements.slice(2);
+    setGlobalTeardownBody(body);
+    return Either.right(createBoolean(true));
+  }
+
+  /**
    * Evaluate deffixture special form
    * @param elements - List elements
    * @param env - Environment
@@ -1811,8 +1926,19 @@ export class TLispEvaluator {
       });
     }
 
-    const valueArg = elements[1]; // Will be evaluated
-    const typeArg = elements[2]; // NOT evaluated
+    const valueArg = elements[1];
+    const typeExpr = elements[2];
+
+    let typeArg: TLispValue;
+    if (typeExpr.type === "symbol") {
+      typeArg = typeExpr;
+    } else {
+      const typeResult = this.eval(typeExpr, env);
+      if (Either.isLeft(typeResult)) {
+        return typeResult;
+      }
+      typeArg = typeResult.right;
+    }
 
     if (typeArg.type !== "symbol") {
       return Either.left({
@@ -2119,6 +2245,29 @@ export const createEvaluatorWithBuiltins = (): { evaluator: TLispEvaluator; env:
     return Either.right(createBoolean(a.value === b.value));
   }, "="));
 
+  env.define("equal", createFunction((args: TLispValue[]) => {
+    if (args.length !== 2) {
+      return Either.left({
+        type: 'EvalError',
+        variant: 'RuntimeError',
+        message: "equal requires exactly 2 arguments",
+        details: { expected: 2, actual: args.length }
+      });
+    }
+
+    const stringify = (value: TLispValue): string => {
+      if (value.type === "list") {
+        return `(${(value.value as TLispValue[]).map(stringify).join(" ")})`;
+      }
+      if (value.type === "hashmap") {
+        return JSON.stringify(Array.from((value.value as Map<string, TLispValue>).entries()).map(([k, v]) => [k, stringify(v)]));
+      }
+      return `${value.type}:${String(value.value)}`;
+    };
+
+    return Either.right(createBoolean(stringify(args[0]) === stringify(args[1])));
+  }, "equal"));
+
   env.define("<", createFunction((args: TLispValue[]) => {
     if (args.length !== 2) {
       return Either.left({
@@ -2186,6 +2335,30 @@ export const createEvaluatorWithBuiltins = (): { evaluator: TLispEvaluator; env:
 
     return Either.right(createBoolean((a.value as number) > (b.value as number)));
   }, ">"));
+
+  env.define(">=", createFunction((args: TLispValue[]) => {
+    if (args.length !== 2 || args[0]?.type !== "number" || args[1]?.type !== "number") {
+      return Either.left({
+        type: 'EvalError',
+        variant: 'RuntimeError',
+        message: ">= requires exactly 2 numeric arguments",
+        details: { actual: args.length }
+      });
+    }
+    return Either.right(createBoolean((args[0].value as number) >= (args[1].value as number)));
+  }, ">="));
+
+  env.define("<=", createFunction((args: TLispValue[]) => {
+    if (args.length !== 2 || args[0]?.type !== "number" || args[1]?.type !== "number") {
+      return Either.left({
+        type: 'EvalError',
+        variant: 'RuntimeError',
+        message: "<= requires exactly 2 numeric arguments",
+        details: { actual: args.length }
+      });
+    }
+    return Either.right(createBoolean((args[0].value as number) <= (args[1].value as number)));
+  }, "<="));
   
   // List functions
   env.define("cons", createFunction((args: TLispValue[]) => {
@@ -2481,6 +2654,15 @@ export const createEvaluatorWithBuiltins = (): { evaluator: TLispEvaluator; env:
     }
     return Either.right(createString(result));
   }, "string-append"));
+
+  env.define("concat", createFunction((args: TLispValue[]) => {
+    let result = "";
+    for (const arg of args) {
+      if (arg.type === "nil") continue;
+      result += String(arg.value);
+    }
+    return Either.right(createString(result));
+  }, "concat"));
 
   env.define("string=", createFunction((args: TLispValue[]) => {
     if (args.length !== 2) {
@@ -3374,6 +3556,20 @@ export const createEvaluatorWithBuiltins = (): { evaluator: TLispEvaluator; env:
     return Either.right(createBoolean(!isTruthy(arg)));
   }, "not"));
 
+  env.define("and", createFunction((args: TLispValue[]) => {
+    for (const arg of args) {
+      if (!isTruthy(arg)) return Either.right(createBoolean(false));
+    }
+    return Either.right(args.length === 0 ? createBoolean(true) : args[args.length - 1] ?? createBoolean(true));
+  }, "and"));
+
+  env.define("or", createFunction((args: TLispValue[]) => {
+    for (const arg of args) {
+      if (isTruthy(arg)) return Either.right(arg);
+    }
+    return Either.right(createBoolean(false));
+  }, "or"));
+
   // I/O functions
   env.define("print", createFunction((args: TLispValue[]) => {
     const output = args.map(arg => {
@@ -3413,15 +3609,15 @@ export const createEvaluatorWithBuiltins = (): { evaluator: TLispEvaluator; env:
       env.define(name, createFunction(fn, name));
     },
     globalEnv: env,
-    eval: (expr: TLispValue) => evaluator.eval(expr, env),
-    execute: (source: string) => {
+    eval: (expr: TLispValue, evalEnv: TLispEnvironment = env) => evaluator.eval(expr, evalEnv),
+    execute: (source: string, evalEnv: TLispEnvironment = env) => {
       // Simple execute implementation for the mock
       const parser = new TLispParser();
       const result = parser.parse(source);
       if (Either.isLeft(result)) {
         return result;
       }
-      return evaluator.eval(result.right, env);
+      return evaluator.eval(result.right, evalEnv);
     },
     getTestDefinition: (name: string) => evaluator.getTestDefinition(name),
     getAllTestNames: () => evaluator.getAllTestNames(),

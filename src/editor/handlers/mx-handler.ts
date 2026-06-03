@@ -14,13 +14,33 @@ import { getBestMatch, getFuzzyCompletions } from "../utils/fuzzy-completion.ts"
 function getAvailableCommands(editor: Editor): string[] {
   const interpreter = (editor as any).getInterpreter();
   const globalEnv = interpreter.globalEnv;
+  const hiddenPrimitiveCommands = new Set([
+    "buffer-filename",
+    "buffer-modified-p",
+    "set-buffer-filename",
+    "set-buffer-modified-p",
+    "buffer-get-line-indent",
+    "buffer-set-line-indent",
+    "buffer-previous-non-blank-line",
+    "buffer-line-matches",
+    "write-file-content",
+    "read-file-content",
+    "file-exists-p",
+    "file-modtime",
+    "file-copy",
+    "make-backup-file",
+    "file-remove",
+    "file-mkdir",
+    "read-dir",
+    "file-stat",
+  ]);
 
   // Get all symbols from global environment
   const commands: string[] = [];
   if (globalEnv && globalEnv.bindings) {
     for (const [name, value] of globalEnv.bindings.entries()) {
       // Only include functions, not variables or other types
-      if (value && value.type === "function") {
+      if (value && value.type === "function" && !hiddenPrimitiveCommands.has(name)) {
         commands.push(name);
       }
     }
@@ -70,8 +90,21 @@ export async function handleMxMode(editor: Editor, key: string, normalizedKey: s
       return;
     }
 
+    const completions = getFuzzyCompletions(command, commands);
+
+    if (completions.length === 0) {
+      (editor as any).state.statusMessage = "No match";
+      (editor as any).logMessage("M-x: No fuzzy match");
+      return;
+    }
+
+    const prefixMatches = commands.filter(candidate => candidate.startsWith(command));
+    const shouldShowPrefixMatches = prefixMatches.length > 1;
+
     // Try to find best match
-    const bestMatch = getBestMatch(command, commands);
+    const bestMatch = shouldShowPrefixMatches
+      ? null
+      : completions.length === 1 ? completions[0].command : getBestMatch(command, commands);
 
     if (bestMatch) {
       // Single match - complete it
@@ -80,17 +113,9 @@ export async function handleMxMode(editor: Editor, key: string, normalizedKey: s
       (editor as any).logMessage(`M-x completed: ${bestMatch}`);
     } else {
       // Multiple matches - show them
-      const completions = getFuzzyCompletions(command, commands);
-
-      if (completions.length === 0) {
-        (editor as any).state.statusMessage = "No match";
-        (editor as any).logMessage("M-x: No fuzzy match");
-      } else {
-        // Show up to 5 matches in status message
-        const matchesToShow = completions.slice(0, 5).map(c => c.command).join(", ");
-        const more = completions.length > 5 ? ` (+${completions.length - 5} more)` : "";
-        (editor as any).state.statusMessage = `Matches: ${matchesToShow}${more}`;
-      }
+      const matchesToShow = completions.slice(0, 5).map(c => c.command).join(", ");
+      const more = completions.length > 5 ? ` (+${completions.length - 5} more)` : "";
+      (editor as any).state.statusMessage = `Matches: ${matchesToShow}${more}`;
     }
     return;
   }

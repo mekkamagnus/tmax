@@ -13,6 +13,7 @@ import {
   createNil, 
   createNumber, 
   createString, 
+  createFunction,
   isNil,
   isTruthy,
   valuesEqual,
@@ -52,6 +53,22 @@ let testCounts = { passed: 0, failed: 0, total: 0 };
 // Global setup and teardown functions
 let globalSetupFunction: TLispValue | null = null;
 let globalTeardownFunction: TLispValue | null = null;
+
+/**
+ * Store a global setup body for test execution.
+ * Used by evaluator special forms so setup bodies remain unevaluated.
+ */
+export function setGlobalSetupBody(body: TLispValue[]): void {
+  globalSetupFunction = createList(body);
+}
+
+/**
+ * Store a global teardown body for test execution.
+ * Used by evaluator special forms so teardown bodies remain unevaluated.
+ */
+export function setGlobalTeardownBody(body: TLispValue[]): void {
+  globalTeardownFunction = createList(body);
+}
 
 // Suite-level setup and teardown tracking
 let suiteSetupFunction: TLispValue | null = null;
@@ -110,6 +127,8 @@ export function resetAllTestState(interpreter?: any): void {
  * @param interpreter - The T-Lisp interpreter instance
  */
 export function registerTestingFramework(interpreter: TLispInterpreter): void {
+  resetFixtureState();
+
   /**
    * Define a test function
    * Usage: (deftest test-name () body...)
@@ -205,11 +224,10 @@ export function registerTestingFramework(interpreter: TLispInterpreter): void {
 
       let testPassed = true;
       let errorMessage: string | undefined;
+      const testEnv = interpreter.globalEnv.createChild();
 
       try {
         // Create a child environment for this test to provide isolation
-        const testEnv = interpreter.globalEnv.createChild();
-
         // Check for fixtures in __current_fixtures__
         let currentFixtures: string[] = [];
         try {
@@ -291,10 +309,9 @@ export function registerTestingFramework(interpreter: TLispInterpreter): void {
       } finally {
         // Run teardown if defined (always run regardless of test success/failure)
         if (globalTeardownFunction && globalTeardownFunction.type === "list") {
-          const tearDownExpressions = globalTeardownFunction.value as TLispValue[];
-          for (const expr of tearDownExpressions) {
-            // Use the global environment for teardown to clean up global state
-            const result = interpreter.eval(expr, interpreter.globalEnv);
+        const tearDownExpressions = globalTeardownFunction.value as TLispValue[];
+        for (const expr of tearDownExpressions) {
+            const result = interpreter.eval(expr, testEnv);
             if (Either.isLeft(result)) {
               console.warn(`Teardown for test '${testName}' failed: ${result.left.message || result.left}`);
             }
@@ -654,12 +671,7 @@ export function registerTestingFramework(interpreter: TLispInterpreter): void {
     }
 
     // Store the setup function body (everything after params)
-    const setupBody = args.slice(1);
-
-    // For now, we'll store it globally - in a real implementation we'd want to
-    // associate it with the current test or test suite
-    // Just store the first argument as the setup function
-    globalSetupFunction = createList(setupBody);
+    setGlobalSetupBody(args.slice(1));
 
     return Either.right(createBoolean(true));
   });
@@ -690,10 +702,7 @@ export function registerTestingFramework(interpreter: TLispInterpreter): void {
     }
 
     // Store the teardown function body (everything after params)
-    const tearDownBody = args.slice(1);
-
-    // Store it globally
-    globalTeardownFunction = createList(tearDownBody);
+    setGlobalTeardownBody(args.slice(1));
 
     return Either.right(createBoolean(true));
   });
@@ -1430,7 +1439,7 @@ export function registerTestingFramework(interpreter: TLispInterpreter): void {
             const nestedResult = interpreter.eval(
               { type: "list", value: [
                 { type: "symbol", value: "test-run-suite" },
-                nameArg
+                createString(testName)
               ]},
               interpreter.globalEnv
             );
@@ -1618,29 +1627,15 @@ export function registerTestingFramework(interpreter: TLispInterpreter): void {
       const testEnv = interpreter.globalEnv.createChild();
 
       // Define done callback in test environment
-      interpreter.globalEnv.define("__done_callback__", {
-        type: "function",
-        params: { type: "list", value: [] },
-        body: [],
-        env: testEnv,
-        callback: () => {
-          done();
-          return Either.right(createNil());
-        }
-      });
+      interpreter.globalEnv.define("__done_callback__", createFunction(() => {
+        done();
+        return Either.right(createNil());
+      }, "__done_callback__"));
 
-      // Override 'done' symbol to call the callback
-      const doneSymbol = { type: "symbol", value: "done" };
-      testEnv.define("done", {
-        type: "function",
-        params: { type: "list", value: [] },
-        body: [],
-        env: testEnv,
-        callback: () => {
-          done();
-          return Either.right(createNil());
-        }
-      });
+      testEnv.define("done", createFunction(() => {
+        done();
+        return Either.right(createNil());
+      }, "done"));
 
       try {
         // Execute test body
@@ -1719,17 +1714,11 @@ export function registerTestingFramework(interpreter: TLispInterpreter): void {
       // Create child environment for test
       const testEnv = interpreter.globalEnv.createChild();
 
-      // Define done in test environment as a builtin function
-      interpreter.defineBuiltin("done", () => {
+      // Define done in test environment as a function
+      testEnv.define("done", createFunction(() => {
         done();
         return Either.right(createNil());
-      });
-
-      // Also define it in the test environment for lookup
-      testEnv.define("done", {
-        type: "builtin",
-        name: "done"
-      });
+      }, "done"));
 
       // Execute test body
       try {
@@ -1771,10 +1760,9 @@ export function registerTestingFramework(interpreter: TLispInterpreter): void {
     // Original sync test logic continues...
     let testPassed = true;
     let errorMessage: string | undefined;
+    const testEnv = interpreter.globalEnv.createChild();
 
     try {
-      const testEnv = interpreter.globalEnv.createChild();
-
       // Check for fixtures
       let currentFixtures: string[] = [];
       try {
@@ -1842,7 +1830,7 @@ export function registerTestingFramework(interpreter: TLispInterpreter): void {
       if (globalTeardownFunction && globalTeardownFunction.type === "list") {
         const tearDownExpressions = globalTeardownFunction.value as TLispValue[];
         for (const expr of tearDownExpressions) {
-          const result = interpreter.eval(expr, interpreter.globalEnv);
+          const result = interpreter.eval(expr, testEnv);
           if (Either.isLeft(result)) {
             console.warn(`Teardown for test '${testName}' failed: ${result.left.message || result.left}`);
           }
@@ -1890,16 +1878,10 @@ export function registerTestingFramework(interpreter: TLispInterpreter): void {
           let doneCalled = false;
           const done = () => { doneCalled = true; };
 
-          testEnv.define("done", {
-            type: "function",
-            params: { type: "list", value: [] },
-            body: [],
-            env: testEnv,
-            callback: () => {
-              done();
-              return Either.right(createNil());
-            }
-          });
+          testEnv.define("done", createFunction(() => {
+            done();
+            return Either.right(createNil());
+          }, "done"));
 
           // Execute test body
           for (const expr of testDef.body) {

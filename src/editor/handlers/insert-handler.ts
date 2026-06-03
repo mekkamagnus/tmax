@@ -32,6 +32,13 @@ export async function handleInsertMode(editor: Editor, key: string, normalizedKe
   else if (normalizedKey === "Enter") {
     const escapedNewline = (editor as any).escapeKeyForTLisp("\n");
     (editor as any).executeCommand(`(buffer-insert "${escapedNewline}")`);
+    // Auto-indent: set indent on the new line (cursor is now on it)
+    try {
+      const line = (editor as any).state.cursorPosition?.line ?? (editor as any).tlispState?.cursorLine ?? 0;
+      (editor as any).executeCommand(`(indent-apply-line ${line})`);
+    } catch (_) {
+      // No indent rules set — silently skip
+    }
   }
   // Handle Backspace key in insert mode
   else if (normalizedKey === "Backspace") {

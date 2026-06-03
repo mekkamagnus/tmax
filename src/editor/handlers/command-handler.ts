@@ -49,24 +49,44 @@ export async function handleCommandMode(editor: Editor, key: string, normalizedK
     return; // Don't process this key further
   } else if (normalizedKey === "Enter") {
     // Execute the command line through the T-Lisp key binding system
-    // This ensures proper integration with the T-Lisp interpreter
+    const cmdLine = (editor as any).state.commandLine;
+
+    // SPEC-035: Dispatch special command patterns
     try {
-      (editor as any).executeCommand(`(editor-execute-command-line)`);
+      if (cmdLine === "dired" || cmdLine.startsWith("dired ")) {
+        const dir = cmdLine === "dired" ? "." : cmdLine.slice(6).trim();
+        (editor as any).executeCommand(`(dired "${dir}")`);
+      } else if (/^%s\/(.+)\/(.+)\/([gic]*)$/.test(cmdLine)) {
+        // :%s/find/replace/flags — whole-buffer replace
+        const m = cmdLine.match(/^%s\/(.+)\/(.+)\/([gic]*)$/)!;
+        const escapedFind = m[1]!.replace(/"/g, '\\"');
+        const escapedReplace = m[2]!.replace(/"/g, '\\"');
+        (editor as any).executeCommand(`(query-replace "${escapedFind}" "${escapedReplace}")`);
+      } else if (/^s\/(.+)\/(.*)\/?$/.test(cmdLine)) {
+        // :s/find/replace — current-line replace
+        const m = cmdLine.match(/^s\/(.+)\/(.*)\/?$/)!;
+        const escapedFind = m[1]!.replace(/"/g, '\\"');
+        const escapedReplace = (m[2] || "").replace(/"/g, '\\"');
+        (editor as any).executeCommand(`(replace-find-matches "${escapedFind}")`);
+        (editor as any).executeCommand(`(replace-apply-all)`);
+      } else {
+        (editor as any).executeCommand(`(editor-execute-command-line)`);
+      }
       handlerLog.info('Command executed successfully', {
-        data: { command: (editor as any).state.commandLine }
+        data: { command: cmdLine }
       });
     } catch (error) {
       if (error instanceof Error && (error.message === "EDITOR_QUIT_SIGNAL" || error.message.includes("EDITOR_QUIT_SIGNAL"))) {
         handlerLog.info('Quit signal received from command', {
           data: { signal: error.message }
         });
-        throw new Error("EDITOR_QUIT_SIGNAL"); // Re-throw clean quit signal to main loop
+        throw new Error("EDITOR_QUIT_SIGNAL");
       }
 
       const err = error instanceof Error ? error : new Error(String(error));
       handlerLog.error('Command execution failed', err, {
         operation: 'command-line',
-        data: { command: (editor as any).state.commandLine }
+        data: { command: cmdLine }
       });
 
       (editor as any).state.statusMessage = `Command error: ${error instanceof Error ? error.message : String(error)}`;

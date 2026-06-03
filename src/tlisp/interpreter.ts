@@ -60,20 +60,17 @@ export class TLispInterpreterImpl implements TLispInterpreter {
    * @returns Either with error or execution result (result of last expression for multiple expressions)
    */
   execute(source: string, env?: TLispEnvironment): Either<EvalError, TLispValue> {
-    // Handle multi-expression sources by splitting on lines and executing each
-    const lines = source.split('\n');
+    const forms = this.splitTopLevelForms(source);
     const evalEnv = env || this.globalEnv;
     let lastResult: Either<EvalError, TLispValue> | null = null;
 
-    for (const line of lines) {
-      const trimmedLine = line.trim();
-
-      // Skip empty lines and comments
-      if (trimmedLine === '' || trimmedLine.startsWith(';')) {
+    for (const form of forms) {
+      const trimmedForm = form.trim();
+      if (trimmedForm === "") {
         continue;
       }
 
-      const exprResult = this.parser.parse(trimmedLine);
+      const exprResult = this.parser.parse(trimmedForm);
       if (Either.isLeft(exprResult)) {
         return exprResult; // Return parse error
       }
@@ -98,6 +95,82 @@ export class TLispInterpreterImpl implements TLispInterpreter {
     }
 
     return Either.right(nilResult.right);
+  }
+
+  /**
+   * Split source into top-level forms while preserving multi-line forms.
+   */
+  private splitTopLevelForms(source: string): string[] {
+    const forms: string[] = [];
+    let current = "";
+    let depth = 0;
+    let inString = false;
+    let escaped = false;
+    let inComment = false;
+
+    const pushCurrent = () => {
+      const trimmed = current.trim();
+      if (trimmed) forms.push(trimmed);
+      current = "";
+    };
+
+    for (let i = 0; i < source.length; i++) {
+      const ch = source[i];
+
+      if (inComment) {
+        if (ch === "\n") {
+          inComment = false;
+          if (depth === 0) pushCurrent();
+        }
+        continue;
+      }
+
+      if (inString) {
+        current += ch;
+        if (escaped) {
+          escaped = false;
+        } else if (ch === "\\") {
+          escaped = true;
+        } else if (ch === '"') {
+          inString = false;
+        }
+        continue;
+      }
+
+      if (ch === ";") {
+        inComment = true;
+        continue;
+      }
+
+      if (ch === '"') {
+        inString = true;
+        current += ch;
+        continue;
+      }
+
+      if (ch === "(") {
+        depth++;
+        current += ch;
+        continue;
+      }
+
+      if (ch === ")") {
+        depth--;
+        current += ch;
+        if (depth === 0) pushCurrent();
+        continue;
+      }
+
+      if (depth === 0 && /\s/.test(ch)) {
+        pushCurrent();
+        continue;
+      }
+
+      current += ch;
+    }
+
+    pushCurrent();
+    return forms;
   }
 
   /**
@@ -134,5 +207,22 @@ export class TLispInterpreterImpl implements TLispInterpreter {
   getAllTestNames(): string[] {
     // Access the evaluator's test registry
     return (this.evaluator as any).getAllTestNames?.() || [];
+  }
+
+  /**
+   * Get suite definition by name.
+   * @param name - Name of the suite
+   * @returns Suite definition or undefined if not found
+   */
+  getSuiteDefinition(name: string): unknown {
+    return (this.evaluator as any).getSuiteDefinition?.(name);
+  }
+
+  /**
+   * Get all suite names.
+   * @returns Array of suite names
+   */
+  getAllSuiteNames(): string[] {
+    return (this.evaluator as any).getAllSuiteNames?.() || [];
   }
 }

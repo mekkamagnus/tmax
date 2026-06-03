@@ -175,6 +175,51 @@ export interface WhichKeyBinding {
 }
 
 /**
+ * ANSI style for syntax highlighting
+ */
+export interface ANSIStyle {
+  fg?: string;
+  bg?: string;
+  bold?: boolean;
+  underline?: boolean;
+  dim?: boolean;
+}
+
+/**
+ * Highlight span for rendering (character range + style)
+ */
+export interface HighlightSpan {
+  start: number;
+  end: number;
+  style: ANSIStyle;
+}
+
+/**
+ * Syntax token from tokenizer
+ */
+export interface SyntaxToken {
+  type: string;
+  value: string;
+  line: number;
+  startCol: number;
+  endCol: number;
+}
+
+/**
+ * Syntax rule for the tokenizer
+ */
+export interface SyntaxRule {
+  pattern: RegExp;
+  type: string;
+  priority?: number;
+}
+
+/**
+ * Highlight theme mapping token types to ANSI styles
+ */
+export type HighlightTheme = Record<string, ANSIStyle>;
+
+/**
  * Editor state interface
  */
 export interface EditorState {
@@ -205,6 +250,13 @@ export interface EditorState {
   // Window management (US-3.2.1)
   windows?: Window[];  // Array of windows
   currentWindowIndex?: number;  // Index of currently focused window
+  // Syntax highlighting (SPEC-035)
+  highlightSpans?: HighlightSpan[][];
+  searchMatches?: Range[];
+  currentMajorMode?: string;
+  activeMinorModes?: string[];
+  activeMinorModeLighters?: string[];
+  bufferModified?: boolean;
 }
 
 /**
@@ -259,6 +311,9 @@ export interface Frame {
   statusMessage: string;
   cursorFocus: 'buffer' | 'command';
   lastActivity: Date;
+  currentMajorMode?: string;
+  activeMinorModes?: string[];
+  activeMinorModeLighters?: string[];
 }
 
 /**

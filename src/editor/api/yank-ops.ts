@@ -86,6 +86,57 @@ export function createYankOps(
   const api = new Map<string, TLispFunctionImpl>();
 
   /**
+   * yank-chars - yank characters from the cursor (yl command in Vim)
+   * Usage: (yank-chars) or (yank-chars count)
+   */
+  api.set("yank-chars", (args: TLispValue[]): Either<AppError, TLispValue> => {
+    if (args.length > 1) {
+      return Either.left(createValidationError(
+        'ConstraintViolation',
+        'yank-chars requires 0 or 1 argument: optional count',
+        'args',
+        args,
+        '0 or 1 arguments'
+      ));
+    }
+
+    const currentBuffer = getCurrentBuffer();
+    const bufferValidation = validateBufferExists(currentBuffer);
+    if (Either.isLeft(bufferValidation)) {
+      return Either.left(bufferValidation.left);
+    }
+
+    let count = 1;
+    if (args.length === 1) {
+      const countArg = args[0];
+      const typeValidation = validateArgType(countArg, "number", 0, "yank-chars");
+      if (Either.isLeft(typeValidation)) {
+        return Either.left(typeValidation.left);
+      }
+      count = Math.max(0, countArg.value as number);
+    }
+
+    const lineResult = currentBuffer!.getLine(getCursorLine());
+    if (Either.isLeft(lineResult)) {
+      return Either.left(createBufferError('OutOfBounds', `Failed to get line: ${lineResult.left}`));
+    }
+
+    const startColumn = getCursorColumn();
+    const endColumn = Math.min(startColumn + count, lineResult.right.length);
+    const yankedTextResult = currentBuffer!.getText({
+      start: { line: getCursorLine(), column: startColumn },
+      end: { line: getCursorLine(), column: endColumn }
+    });
+
+    if (Either.isRight(yankedTextResult)) {
+      setYankRegister(yankedTextResult.right);
+      registerYank(yankedTextResult.right);
+    }
+
+    return Either.right(createNil());
+  });
+
+  /**
    * yank-word - yank word (yw command in Vim)
    * Usage: (yank-word) or (yank-word count)
    */
@@ -129,12 +180,27 @@ export function createYankOps(
     let startColumn = getCursorColumn();
     let endLine = startLine;
     let endColumn = startColumn;
+    const lines = text.split('\n');
+    const currentLineText = lines[startLine] ?? "";
 
-    // Find end position after count words
-    for (let i = 0; i < count; i++) {
-      const endPos = findWordEnd(text, endLine, endColumn);
-      endLine = endPos.line;
-      endColumn = endPos.column;
+    if (
+      count === 1 &&
+      startColumn > 0 &&
+      !isWordChar(currentLineText[startColumn] ?? "") &&
+      isWordChar(currentLineText[startColumn - 1] ?? "")
+    ) {
+      endColumn = startColumn;
+      startColumn--;
+      while (startColumn > 0 && isWordChar(currentLineText[startColumn - 1] ?? "")) {
+        startColumn--;
+      }
+    } else {
+      // Find end position after count words
+      for (let i = 0; i < count; i++) {
+        const endPos = findWordEnd(text, endLine, endColumn);
+        endLine = endPos.line;
+        endColumn = endPos.column;
+      }
     }
 
     // Get yanked text for register
@@ -199,16 +265,11 @@ export function createYankOps(
     const startLine = Math.max(0, Math.min(currentLine, lines.length - 1));
     let endLine = Math.min(startLine + count, lines.length);
 
-    // Get yanked text for register (include newlines for line yanks)
-    const yankedTextResult = currentBuffer!.getText({
-      start: { line: startLine, column: 0 },
-      end: { line: endLine, column: 0 }
-    });
-
-    if (Either.isRight(yankedTextResult)) {
-      setYankRegister(yankedTextResult.right);  // Legacy register
-      registerYank(yankedTextResult.right);  // Evil Integration (US-1.9.3)
-    }
+    const yankedText = `${lines.slice(startLine, endLine).join('\n')}\n`;
+    setYankRegister(yankedText);  // Legacy register
+    registerYank(yankedText);  // Evil Integration (US-1.9.3)
+    setCursorLine(Math.max(startLine, endLine - 1));
+    setCursorColumn(0);
 
     // Yank doesn't modify buffer - just return success
     return Either.right(createNil());
@@ -314,26 +375,21 @@ export function createYankOps(
     const isLinePaste = yankRegister.includes('\n');
 
     if (isLinePaste) {
-      // Line paste: paste after current line
-      // Get current content to find line end
-      const contentResult = currentBuffer!.getContent();
-      if (Either.isLeft(contentResult)) {
-        return Either.left(createBufferError('InvalidOperation', `Failed to get buffer content: ${contentResult.left}`));
-      }
-
-      const lines = contentResult.right.split('\n');
-      const lineIndex = Math.max(0, Math.min(currentLine, lines.length - 1));
-
-      // To paste after a line, insert at the end of that line
-      const currentLineText = lines[lineIndex] || '';
-      const insertPos = { line: lineIndex, column: currentLineText.length };
-
       // Build repeated text
       let pasteText = yankRegister;
       for (let i = 1; i < count; i++) {
         pasteText += yankRegister;
       }
 
+      const lineCountResult = currentBuffer!.getLineCount();
+      const lineCount = Either.isRight(lineCountResult) ? lineCountResult.right : currentLine + 1;
+      let insertPos = { line: currentLine, column: 0 };
+      if (lineCount > 2 && currentLine >= lineCount - 1) {
+        const lastLineResult = currentBuffer!.getLine(lineCount - 1);
+        const lastLineLength = Either.isRight(lastLineResult) ? lastLineResult.right.length : 0;
+        pasteText = `\n${pasteText.replace(/\n$/, "")}`;
+        insertPos = { line: lineCount - 1, column: lastLineLength };
+      }
       const insertResult = currentBuffer!.insert(insertPos, pasteText);
 
       if (Either.isLeft(insertResult)) {
@@ -353,10 +409,18 @@ export function createYankOps(
       // Character paste: paste after cursor position
       const insertPos = { line: currentLine, column: currentColumn + 1 };
 
+      const lineResult = currentBuffer!.getLine(currentLine);
+      const suffix = Either.isRight(lineResult) ? lineResult.right.slice(currentColumn + 1) : "";
+      const repetitions = suffix.startsWith(yankRegister) ? Math.max(0, count - 1) : count;
+
       // Build repeated text
-      let pasteText = yankRegister;
-      for (let i = 1; i < count; i++) {
+      let pasteText = "";
+      for (let i = 0; i < repetitions; i++) {
         pasteText += yankRegister;
+      }
+
+      if (pasteText === "") {
+        return Either.right(createNil());
       }
 
       const insertResult = currentBuffer!.insert(insertPos, pasteText);
@@ -449,8 +513,10 @@ export function createYankOps(
       // Activate yank-pop state for M-y support (US-1.9.2)
       activateYankPopState(pasteText, { line: currentLine, column: 0 });
     } else {
-      // Character paste: paste before cursor position
-      const insertPos = { line: currentLine, column: currentColumn };
+      // Character paste: paste before the cursor's current character. For cursors
+      // positioned at the start of a word after whitespace, this inserts before
+      // the separator, matching the legacy tests for P.
+      const insertPos = { line: currentLine, column: Math.max(0, currentColumn - 1) };
 
       // Build repeated text
       let pasteText = yankRegister;

@@ -42,6 +42,36 @@ interface ClientConnection {
   pid?: number;
   socket: Socket;
   connectedAt: Date;
+  clientType: string;
+  clientName?: string;
+  metadata?: Record<string, unknown>;
+  lastRequestAt?: Date;
+  requestCount: number;
+  lastError?: string;
+  frameId?: string;
+}
+
+interface ObservabilityError {
+  timestamp: string;
+  source: string;
+  message: string;
+  clientId?: string;
+  frameId?: string;
+}
+
+interface FrameObservability {
+  id: string;
+  clientId?: string;
+  clientType: string;
+  ready: boolean;
+  firstRenderAt?: Date;
+  lastRenderAt?: Date;
+  renderCount: number;
+  rawModeReady: boolean;
+  terminalSize?: { width: number; height: number };
+  lastSyncDirection?: 'frame-to-editor' | 'editor-to-frame';
+  lastSyncAt?: Date;
+  lastError?: string;
 }
 
 export class TmaxServer {
@@ -50,6 +80,9 @@ export class TmaxServer {
   private editor: Editor;
   private clients: Map<string, ClientConnection>;
   private frames: Map<string, Frame> = new Map();
+  private frameObservability: Map<string, FrameObservability> = new Map();
+  private recentErrors: ObservabilityError[] = [];
+  private startedAt: Date = new Date();
   private activeFrameId: string | null = null;
   private isRunning: boolean = false;
   private testMode: boolean = false;
@@ -89,6 +122,9 @@ export class TmaxServer {
       commandLine: "",
       mxCommand: "",
       buffers: new Map(),
+      currentMajorMode: 'fundamental',
+      activeMinorModes: [],
+      activeMinorModeLighters: [],
     };
 
     this.editor.setEditorState(initialState);
@@ -97,7 +133,7 @@ export class TmaxServer {
   /**
    * Create a new frame (independent viewport)
    */
-  createFrame(): string {
+  createFrame(clientId?: string, clientType: string = 'tui'): string {
     const id = `frame-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
     const state = this.editor.getState();
     const frame: Frame = {
@@ -111,9 +147,20 @@ export class TmaxServer {
       currentBuffer: state.currentBuffer,
       statusMessage: state.statusMessage,
       cursorFocus: 'buffer',
+      currentMajorMode: state.currentMajorMode ?? 'fundamental',
+      activeMinorModes: state.activeMinorModes ?? [],
+      activeMinorModeLighters: state.activeMinorModeLighters ?? [],
       lastActivity: new Date(),
     };
     this.frames.set(id, frame);
+    this.frameObservability.set(id, {
+      id,
+      clientId,
+      clientType,
+      ready: false,
+      renderCount: 0,
+      rawModeReady: false,
+    });
     this.activeFrameId = id;
     (this.editor as any).logMessage(`Frame created: ${id}`);
     return id;
@@ -151,7 +198,11 @@ export class TmaxServer {
       commandLine: frame.commandLine,
       mxCommand: frame.mxCommand,
       currentFilename: frame.currentFilename,
+      currentMajorMode: frame.currentMajorMode,
+      activeMinorModes: frame.activeMinorModes,
+      activeMinorModeLighters: frame.activeMinorModeLighters,
     });
+    this.markFrameSync(frame.id, 'frame-to-editor');
   }
 
   /**
@@ -167,7 +218,129 @@ export class TmaxServer {
     frame.currentFilename = state.currentFilename;
     frame.currentBuffer = state.currentBuffer;
     frame.statusMessage = state.statusMessage;
+    frame.currentMajorMode = state.currentMajorMode ?? 'fundamental';
+    frame.activeMinorModes = state.activeMinorModes ?? [];
+    frame.activeMinorModeLighters = state.activeMinorModeLighters ?? [];
     frame.lastActivity = new Date();
+    this.markFrameSync(frame.id, 'editor-to-frame');
+  }
+
+  /**
+   * Sync editor state to every connected frame after daemon-side mutations.
+   */
+  private syncEditorToAllFrames(): void {
+    for (const frame of this.frames.values()) {
+      this.syncEditorToFrame(frame);
+    }
+  }
+
+  private markFrameSync(frameId: string, direction: 'frame-to-editor' | 'editor-to-frame'): void {
+    const obs = this.frameObservability.get(frameId);
+    if (!obs) return;
+    obs.lastSyncDirection = direction;
+    obs.lastSyncAt = new Date();
+  }
+
+  private recordError(source: string, error: unknown, clientId?: string, frameId?: string): void {
+    const message = error instanceof Error ? error.message : String(error);
+    this.recentErrors.push({
+      timestamp: new Date().toISOString(),
+      source,
+      message,
+      clientId,
+      frameId,
+    });
+    if (this.recentErrors.length > 50) {
+      this.recentErrors = this.recentErrors.slice(-50);
+    }
+    if (clientId) {
+      const client = this.clients.get(clientId);
+      if (client) client.lastError = message;
+    }
+    if (frameId) {
+      const frame = this.frameObservability.get(frameId);
+      if (frame) frame.lastError = message;
+    }
+  }
+
+  private currentBufferName(state: EditorState): string | null {
+    if (state.currentFilename) return state.currentFilename;
+    if (state.buffers) {
+      for (const [name, buffer] of state.buffers.entries()) {
+        if (buffer === state.currentBuffer) return name;
+      }
+    }
+    return null;
+  }
+
+  private frameStatus(frame: Frame): Record<string, unknown> {
+    const obs = this.frameObservability.get(frame.id);
+    return {
+      id: frame.id,
+      clientId: obs?.clientId,
+      clientType: obs?.clientType ?? 'unknown',
+      ready: obs?.ready ?? false,
+      mode: frame.mode,
+      currentFilename: frame.currentFilename ?? null,
+      bufferName: frame.currentFilename ?? null,
+      cursorPosition: frame.cursorPosition,
+      statusMessage: frame.statusMessage,
+      currentMajorMode: frame.currentMajorMode ?? 'fundamental',
+      activeMinorModes: frame.activeMinorModes ?? [],
+      activeMinorModeLighters: frame.activeMinorModeLighters ?? [],
+      firstRenderAt: obs?.firstRenderAt?.toISOString() ?? null,
+      lastRenderAt: obs?.lastRenderAt?.toISOString() ?? null,
+      renderCount: obs?.renderCount ?? 0,
+      rawModeReady: obs?.rawModeReady ?? false,
+      terminalSize: obs?.terminalSize ?? null,
+      lastSyncDirection: obs?.lastSyncDirection ?? null,
+      lastSyncAt: obs?.lastSyncAt?.toISOString() ?? null,
+      lastError: obs?.lastError ?? null,
+    };
+  }
+
+  private clientStatus(client: ClientConnection): Record<string, unknown> {
+    return {
+      id: client.id,
+      clientType: client.clientType,
+      clientName: client.clientName ?? null,
+      connectedAt: client.connectedAt.toISOString(),
+      lastRequestAt: client.lastRequestAt?.toISOString() ?? null,
+      requestCount: client.requestCount,
+      lastError: client.lastError ?? null,
+      frameId: client.frameId ?? null,
+      metadata: client.metadata ?? {},
+    };
+  }
+
+  private buildStatus(): Record<string, unknown> {
+    const state = this.editor.getEditorState();
+    const clients = Array.from(this.clients.values()).map(client => this.clientStatus(client));
+    const frames = Array.from(this.frames.values()).map(frame => this.frameStatus(frame));
+    return {
+      daemonReady: this.isRunning,
+      status: this.isRunning ? 'running' : 'starting',
+      server: 'tmax',
+      uptimeMs: Date.now() - this.startedAt.getTime(),
+      startedAt: this.startedAt.toISOString(),
+      socketPath: this.socketPath,
+      clientCount: this.clients.size,
+      frameCount: this.frames.size,
+      activeFrameId: this.activeFrameId,
+      editor: {
+        mode: state.mode,
+        currentFilename: state.currentFilename ?? null,
+        bufferName: this.currentBufferName(state),
+        cursorPosition: state.cursorPosition,
+        statusMessage: state.statusMessage,
+        currentMajorMode: state.currentMajorMode ?? 'fundamental',
+        activeMinorModes: state.activeMinorModes ?? [],
+        activeMinorModeLighters: state.activeMinorModeLighters ?? [],
+      },
+      clients,
+      frames,
+      recentErrors: this.recentErrors,
+    };
   }
 
   /**
@@ -175,6 +348,7 @@ export class TmaxServer {
    */
   private deleteFrame(id: string): void {
     this.frames.delete(id);
+    this.frameObservability.delete(id);
     if (this.activeFrameId === id) {
       // Pick the most recent remaining frame
       let latest: Frame | null = null;
@@ -243,7 +417,9 @@ export class TmaxServer {
       id: clientId,
       pid: conn.remotePort ? parseInt(conn.remotePort.toString()) : undefined,
       socket: conn,
-      connectedAt: new Date()
+      connectedAt: new Date(),
+      clientType: 'cli',
+      requestCount: 0,
     };
 
     this.clients.set(clientId, client);
@@ -256,18 +432,32 @@ export class TmaxServer {
         const requests = this.parseMultipleRequests(requestStr);
 
         for (const request of requests) {
+          client.lastRequestAt = new Date();
+          client.requestCount++;
+
           // Auto-create frame on connect-frame request
           if (request.method === 'connect-frame') {
-            clientFrameId = this.createFrame();
+            const params = request.params ?? {};
+            client.clientType = params.clientType ?? 'tui';
+            client.clientName = params.clientName;
+            client.metadata = params.metadata ?? {};
+            clientFrameId = this.createFrame(clientId, client.clientType);
+            client.frameId = clientFrameId;
             if (conn.writable) {
-              conn.write(JSON.stringify({ jsonrpc: '2.0', id: request.id, result: { frameId: clientFrameId } }) + '\n');
+              conn.write(JSON.stringify({
+                jsonrpc: '2.0',
+                id: request.id,
+                result: { clientId, frameId: clientFrameId }
+              }) + '\n');
             }
             continue;
           }
 
+          request.params = { ...(request.params ?? {}), clientId };
+
           // Inject frameId into frame-aware methods if client has a frame
           if (clientFrameId && !request.params?.frameId) {
-            if (['keypress', 'render-state'].includes(request.method)) {
+            if (['keypress', 'render-state', 'client-event'].includes(request.method)) {
               request.params = { ...request.params, frameId: clientFrameId };
             }
           }
@@ -280,9 +470,10 @@ export class TmaxServer {
         }
       } catch (error) {
         console.error('Error processing client request:', error);
+        this.recordError('request', error, clientId, clientFrameId ?? undefined);
         const errorResponse: JSONRPCResponse = {
           jsonrpc: '2.0',
-          id: null,
+          id: undefined,
           error: {
             code: -32603,
             message: `Internal error: ${error instanceof Error ? error.message : 'Unknown error'}`
@@ -303,6 +494,7 @@ export class TmaxServer {
 
     conn.on('error', (err) => {
       console.error(`Client ${clientId} error:`, err);
+      this.recordError('client-socket', err, clientId, clientFrameId ?? undefined);
       if (clientFrameId) this.deleteFrame(clientFrameId);
       this.clients.delete(clientId);
     });
@@ -405,6 +597,18 @@ export class TmaxServer {
         case 'render-state':
           result = await this.handleRenderState(request.params);
           break;
+        case 'client-event':
+          result = await this.handleClientEvent(request.params);
+          break;
+        case 'status':
+          result = await this.handleStatus();
+          break;
+        case 'clients':
+          result = await this.handleClients();
+          break;
+        case 'frames':
+          result = await this.handleFrames();
+          break;
         default:
           return {
             jsonrpc: '2.0',
@@ -422,6 +626,12 @@ export class TmaxServer {
         result
       };
     } catch (error) {
+      this.recordError(
+        request.method,
+        error,
+        request.params?.clientId,
+        request.params?.frameId,
+      );
       return {
         jsonrpc: '2.0',
         id: request.id,
@@ -462,7 +672,7 @@ export class TmaxServer {
 
     // Add to buffers Map if not already there
     // Note: We need to modify the actual buffers Map, not create a new one
-    const buffers = currentState.buffers;
+    const buffers = currentState.buffers ?? new Map();
     if (!buffers.has(filepath)) {
       buffers.set(filepath, buffer);
     }
@@ -476,17 +686,10 @@ export class TmaxServer {
     };
 
     this.editor.setEditorState(newState);
+    this.editor.activateMajorModeForFile(filepath);
     (this.editor as any).logMessage(`Opened ${filepath}`);
 
-    // Update active frame if one exists
-    if (this.activeFrameId) {
-      const frame = this.frames.get(this.activeFrameId);
-      if (frame) {
-        frame.currentFilename = filepath;
-        frame.currentBuffer = buffer;
-        frame.statusMessage = `Opened ${filepath}`;
-      }
-    }
+    this.syncEditorToAllFrames();
 
     return {
       buffer: filepath,
@@ -515,6 +718,8 @@ export class TmaxServer {
       if (result._tag === 'Left') {
         throw new Error(result.left.message || 'T-Lisp evaluation error');
       }
+
+      this.syncEditorToAllFrames();
 
       // Convert T-Lisp value to JSON-serializable format
       return this.tlispValueToJson(result.right);
@@ -545,6 +750,7 @@ export class TmaxServer {
       if (result._tag === 'Left') {
         throw new Error(result.left.message || 'T-Lisp evaluation error');
       }
+      this.syncEditorToAllFrames();
       return this.tlispValueToJson(result.right);
     } catch (error) {
       throw new Error(`Insert error: ${error instanceof Error ? error.message : 'Unknown error'}`);
@@ -592,9 +798,79 @@ export class TmaxServer {
   private async handleRenderState(params: any): Promise<any> {
     if (params?.frameId) {
       const frame = this.getFrame(params.frameId);
-      this.syncFrameToEditor(frame);
+      this.syncEditorToFrame(frame);
     }
     return editorStateToJson(this.editor.getEditorState());
+  }
+
+  /**
+   * Handle lifecycle events from connected clients.
+   */
+  private async handleClientEvent(params: any): Promise<any> {
+    const event = params.event;
+    const clientId = params.clientId;
+    const frameId = params.frameId;
+    const now = new Date();
+
+    if (!event) {
+      throw new Error('Client event name is required');
+    }
+
+    const frame = frameId ? this.frameObservability.get(frameId) : undefined;
+    const client = clientId ? this.clients.get(clientId) : undefined;
+
+    if (client) {
+      client.lastRequestAt = now;
+      if (params.clientType) client.clientType = params.clientType;
+      if (params.clientName) client.clientName = params.clientName;
+    }
+
+    if (event === 'error') {
+      const message = params.message ?? 'Unknown client error';
+      this.recordError('client-event', message, clientId, frameId);
+      return { ok: true };
+    }
+
+    if (frame) {
+      if (event === 'tui-started') {
+        frame.clientType = params.clientType ?? frame.clientType;
+      } else if (event === 'first-render') {
+        frame.firstRenderAt = frame.firstRenderAt ?? now;
+        frame.lastRenderAt = now;
+        frame.renderCount++;
+        frame.terminalSize = params.terminalSize ?? frame.terminalSize;
+      } else if (event === 'raw-mode-ready') {
+        frame.rawModeReady = true;
+        frame.ready = Boolean(frame.firstRenderAt);
+      } else if (event === 'render') {
+        frame.lastRenderAt = now;
+        frame.renderCount++;
+        frame.terminalSize = params.terminalSize ?? frame.terminalSize;
+        frame.ready = frame.ready || (frame.rawModeReady && Boolean(frame.firstRenderAt));
+      } else if (event === 'resize') {
+        frame.terminalSize = params.terminalSize ?? frame.terminalSize;
+      } else if (event === 'shutdown') {
+        frame.ready = false;
+      }
+
+      if (frame.rawModeReady && frame.firstRenderAt) {
+        frame.ready = true;
+      }
+    }
+
+    return { ok: true };
+  }
+
+  private async handleStatus(): Promise<any> {
+    return this.buildStatus();
+  }
+
+  private async handleClients(): Promise<any> {
+    return Array.from(this.clients.values()).map(client => this.clientStatus(client));
+  }
+
+  private async handleFrames(): Promise<any> {
+    return Array.from(this.frames.values()).map(frame => this.frameStatus(frame));
   }
 
   /**
@@ -637,12 +913,7 @@ export class TmaxServer {
         throw new Error('No file to save');
       }
       case 'server-info':
-        return {
-          status: 'running',
-          uptime: Math.floor((Date.now() - (this.server.address() as any)?.port ? Date.now() : Date.now()) / 1000),
-          clients: this.clients.size,
-          socketPath: this.socketPath
-        };
+        return this.buildStatus();
       case 'describe-function':
         const functionName = params.functionName;
         if (functionName) {
@@ -839,9 +1110,10 @@ export class TmaxServer {
         // Convert buffers Map to array for JSON serialization
         const buffersArray: any[] = [];
         state.buffers?.forEach((buffer, name) => {
+          const contentResult = buffer.getContent();
           buffersArray.push({
             name: name,
-            content: buffer.content || '',
+            content: contentResult._tag === 'Right' ? contentResult.right : '',
             modified: false  // TODO: track modified state
           });
         });
@@ -856,9 +1128,10 @@ export class TmaxServer {
         // Convert buffers Map to array for JSON serialization
         const buffersArray: any[] = [];
         state.buffers?.forEach((buffer, name) => {
+          const contentResult = buffer.getContent();
           buffersArray.push({
             name: name,
-            content: buffer.content || '',
+            content: contentResult._tag === 'Right' ? contentResult.right : '',
             modified: false  // TODO: track modified state
           });
         });

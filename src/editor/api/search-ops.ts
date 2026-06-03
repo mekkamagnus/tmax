@@ -12,11 +12,18 @@
  * - search-pattern-get: get current search pattern
  * - search-direction-get: get current search direction
  * - search-clear: clear search state
+ * - search-find-all-matches: find all match positions (SPEC-035 isearch)
+ * - search-set-highlight-ranges: set highlight ranges for matches (SPEC-035)
+ * - search-incremental-start: start incremental search (SPEC-035)
+ * - search-incremental-update: update incremental search pattern (SPEC-035)
+ * - search-incremental-backspace: remove last char from isearch (SPEC-035)
+ * - search-incremental-finish: accept current match (SPEC-035)
+ * - search-incremental-cancel: cancel and restore position (SPEC-035)
  */
 
 import type { TLispValue, TLispFunctionImpl } from "../../tlisp/types.ts";
-import { createString, createNil, createSymbol } from "../../tlisp/values.ts";
-import type { FunctionalTextBuffer } from "../../core/types.ts";
+import { createString, createNil, createSymbol, createNumber, createList, createBoolean } from "../../tlisp/values.ts";
+import type { FunctionalTextBuffer, Range } from "../../core/types.ts";
 import { Either } from "../../utils/task-either.ts";
 import { isWordChar } from "./text-utils.ts";
 import {
@@ -35,6 +42,14 @@ import {
  */
 let lastSearchPattern: string = "";
 let lastSearchDirection: "forward" | "backward" = "forward";
+
+/** Incremental search state (SPEC-035) */
+let isearchActive: boolean = false;
+let isearchPattern: string = "";
+let isearchDirection: "forward" | "backward" = "forward";
+let isearchOriginLine: number = 0;
+let isearchOriginColumn: number = 0;
+let isearchHighlightRanges: Range[] = [];
 
 /**
  * Find the next occurrence of a pattern in forward direction
@@ -178,7 +193,8 @@ export function createSearchOps(
   setCursorLine: (line: number) => void,
   getCursorColumn: () => number,
   setCursorColumn: (column: number) => void,
-  setStatusMessage: (message: string) => void
+  setStatusMessage: (message: string) => void,
+  setSearchMatches?: (ranges: Range[]) => void
 ): Map<string, TLispFunctionImpl> {
   const api = new Map<string, TLispFunctionImpl>();
 
@@ -609,6 +625,247 @@ export function createSearchOps(
     setCursorColumn(match.column);
 
     setStatusMessage(`Found: ${word}`);
+    return Either.right(createNil());
+  });
+
+  // ==========================================================================
+  // Incremental search primitives (SPEC-035)
+  // ==========================================================================
+
+  /**
+   * search-find-all-matches - find all occurrences of pattern
+   * Usage: (search-find-all-matches "pattern")
+   * Returns list of (line column) pairs
+   */
+  api.set("search-find-all-matches", (args: TLispValue[]): Either<AppError, TLispValue> => {
+    const argsValidation = validateArgsCount(args, 1, "search-find-all-matches");
+    if (Either.isLeft(argsValidation)) return Either.left(argsValidation.left);
+
+    const patternArg = args[0];
+    if (patternArg.type !== "string") {
+      return Either.left(createValidationError('TypeError', 'Pattern must be a string', 'pattern', patternArg, 'string'));
+    }
+
+    const pattern = patternArg.value as string;
+    if (pattern === "") return Either.right(createList([]));
+
+    const buf = getCurrentBuffer();
+    const bufVal = validateBufferExists(buf);
+    if (Either.isLeft(bufVal)) return Either.left(bufVal.left);
+
+    const contentResult = buf!.getContent();
+    if (Either.isLeft(contentResult)) return Either.left(createBufferError('ReadError', 'Failed to read buffer'));
+
+    const lines = contentResult.right.split('\n');
+    const matches: TLispValue[] = [];
+
+    for (let i = 0; i < lines.length; i++) {
+      let col = 0;
+      while (true) {
+        const idx = lines[i]!.indexOf(pattern, col);
+        if (idx === -1) break;
+        matches.push(createList([createNumber(i), createNumber(idx)]));
+        col = idx + 1;
+      }
+    }
+
+    return Either.right(createList(matches));
+  });
+
+  /**
+   * search-set-highlight-ranges - set search match highlight ranges
+   * Usage: (search-set-highlight-ranges ((line col len) ...))
+   */
+  api.set("search-set-highlight-ranges", (args: TLispValue[]): Either<AppError, TLispValue> => {
+    if (args.length !== 1) {
+      return Either.left(createValidationError('ConstraintViolation', 'search-set-highlight-ranges requires 1 argument', 'args', args.length, 1));
+    }
+
+    const ranges: Range[] = [];
+    const listArg = args[0];
+    if (listArg.type === "list") {
+      for (const item of listArg.value as TLispValue[]) {
+        if (item.type === "list") {
+          const parts = item.value as TLispValue[];
+          if (parts.length >= 3 && parts[0].type === "number" && parts[1].type === "number" && parts[2].type === "number") {
+            ranges.push({
+              start: { line: parts[0].value as number, column: parts[1].value as number },
+              end: { line: parts[0].value as number, column: (parts[1].value as number) + (parts[2].value as number) }
+            });
+          }
+        }
+      }
+    }
+
+    isearchHighlightRanges = ranges;
+    if (setSearchMatches) setSearchMatches(ranges);
+
+    return Either.right(createNil());
+  });
+
+  /**
+   * search-incremental-start - begin incremental search
+   * Usage: (search-incremental-start "forward")
+   */
+  api.set("search-incremental-start", (args: TLispValue[]): Either<AppError, TLispValue> => {
+    const dir = args.length > 0 && args[0].type === "string" ? args[0].value as string : "forward";
+    isearchActive = true;
+    isearchPattern = "";
+    isearchDirection = dir === "backward" ? "backward" : "forward";
+    isearchOriginLine = getCursorLine();
+    isearchOriginColumn = getCursorColumn();
+    isearchHighlightRanges = [];
+    if (setSearchMatches) setSearchMatches([]);
+    setStatusMessage(`I-search${dir === "backward" ? " backward" : ""}: `);
+    return Either.right(createNil());
+  });
+
+  /**
+   * search-incremental-update - append char to isearch pattern
+   * Usage: (search-incremental-update "c")
+   */
+  api.set("search-incremental-update", (args: TLispValue[]): Either<AppError, TLispValue> => {
+    if (!isearchActive) {
+      return Either.left(createValidationError('InvalidOperation', 'No active incremental search', 'isearch', null, 'active search'));
+    }
+
+    const argsValidation = validateArgsCount(args, 1, "search-incremental-update");
+    if (Either.isLeft(argsValidation)) return Either.left(argsValidation.left);
+
+    if (args[0].type !== "string") {
+      return Either.left(createValidationError('TypeError', 'Character must be a string', 'char', args[0], 'string'));
+    }
+
+    isearchPattern += args[0].value as string;
+
+    const buf = getCurrentBuffer();
+    const bufVal = validateBufferExists(buf);
+    if (Either.isLeft(bufVal)) return Either.left(bufVal.left);
+
+    const contentResult = buf!.getContent();
+    if (Either.isLeft(contentResult)) return Either.left(createBufferError('ReadError', 'Failed to read buffer'));
+
+    const text = contentResult.right;
+    const match = isearchDirection === "forward"
+      ? findNextMatch(text, isearchPattern, isearchOriginLine, isearchOriginColumn)
+      : findPreviousMatch(text, isearchPattern, isearchOriginLine, isearchOriginColumn);
+
+    // Build highlight ranges for all matches
+    const lines = text.split('\n');
+    const ranges: Range[] = [];
+    for (let i = 0; i < lines.length; i++) {
+      let col = 0;
+      while (true) {
+        const idx = lines[i]!.indexOf(isearchPattern, col);
+        if (idx === -1) break;
+        ranges.push({
+          start: { line: i, column: idx },
+          end: { line: i, column: idx + isearchPattern.length }
+        });
+        col = idx + 1;
+      }
+    }
+    isearchHighlightRanges = ranges;
+    if (setSearchMatches) setSearchMatches(ranges);
+
+    if (match) {
+      setCursorLine(match.line);
+      setCursorColumn(match.column);
+      setStatusMessage(`I-search${isearchDirection === "backward" ? " backward" : ""}: ${isearchPattern}`);
+    } else {
+      setStatusMessage(`Failing I-search${isearchDirection === "backward" ? " backward" : ""}: ${isearchPattern}`);
+    }
+
+    return Either.right(createBoolean(match !== null));
+  });
+
+  /**
+   * search-incremental-backspace - remove last char from isearch pattern
+   * Usage: (search-incremental-backspace)
+   */
+  api.set("search-incremental-backspace", (_args: TLispValue[]): Either<AppError, TLispValue> => {
+    if (!isearchActive) {
+      return Either.left(createValidationError('InvalidOperation', 'No active incremental search', 'isearch', null, 'active search'));
+    }
+
+    if (isearchPattern.length === 0) {
+      return Either.right(createString(""));
+    }
+
+    isearchPattern = isearchPattern.slice(0, -1);
+
+    if (isearchPattern.length === 0) {
+      setCursorLine(isearchOriginLine);
+      setCursorColumn(isearchOriginColumn);
+      isearchHighlightRanges = [];
+      if (setSearchMatches) setSearchMatches([]);
+      setStatusMessage(`I-search${isearchDirection === "backward" ? " backward" : ""}: `);
+      return Either.right(createString(""));
+    }
+
+    const buf = getCurrentBuffer();
+    const bufVal = validateBufferExists(buf);
+    if (Either.isLeft(bufVal)) return Either.left(bufVal.left);
+
+    const contentResult = buf!.getContent();
+    if (Either.isLeft(contentResult)) return Either.left(createBufferError('ReadError', 'Failed to read buffer'));
+
+    const text = contentResult.right;
+    const match = isearchDirection === "forward"
+      ? findNextMatch(text, isearchPattern, isearchOriginLine, isearchOriginColumn)
+      : findPreviousMatch(text, isearchPattern, isearchOriginLine, isearchOriginColumn);
+
+    const lines = text.split('\n');
+    const ranges: Range[] = [];
+    for (let i = 0; i < lines.length; i++) {
+      let col = 0;
+      while (true) {
+        const idx = lines[i]!.indexOf(isearchPattern, col);
+        if (idx === -1) break;
+        ranges.push({ start: { line: i, column: idx }, end: { line: i, column: idx + isearchPattern.length } });
+        col = idx + 1;
+      }
+    }
+    isearchHighlightRanges = ranges;
+    if (setSearchMatches) setSearchMatches(ranges);
+
+    if (match) {
+      setCursorLine(match.line);
+      setCursorColumn(match.column);
+    }
+    setStatusMessage(`I-search${isearchDirection === "backward" ? " backward" : ""}: ${isearchPattern}`);
+
+    return Either.right(createString(isearchPattern));
+  });
+
+  /**
+   * search-incremental-finish - accept current match and exit isearch
+   * Usage: (search-incremental-finish)
+   */
+  api.set("search-incremental-finish", (_args: TLispValue[]): Either<AppError, TLispValue> => {
+    if (!isearchActive) return Either.right(createNil());
+    isearchActive = false;
+    lastSearchPattern = isearchPattern;
+    lastSearchDirection = isearchDirection;
+    isearchHighlightRanges = [];
+    if (setSearchMatches) setSearchMatches([]);
+    setStatusMessage(isearchPattern ? `Found: ${isearchPattern}` : "Search ended");
+    return Either.right(createNil());
+  });
+
+  /**
+   * search-incremental-cancel - cancel isearch, restore original position
+   * Usage: (search-incremental-cancel)
+   */
+  api.set("search-incremental-cancel", (_args: TLispValue[]): Either<AppError, TLispValue> => {
+    if (!isearchActive) return Either.right(createNil());
+    setCursorLine(isearchOriginLine);
+    setCursorColumn(isearchOriginColumn);
+    isearchActive = false;
+    isearchPattern = "";
+    isearchHighlightRanges = [];
+    if (setSearchMatches) setSearchMatches([]);
+    setStatusMessage("Quit");
     return Either.right(createNil());
   });
 

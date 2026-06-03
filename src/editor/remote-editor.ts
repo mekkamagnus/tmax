@@ -15,6 +15,7 @@ export class RemoteEditor {
   private pending = new Map<number, PendingRequest>();
   private cachedState!: EditorState;
   private _frameId: string | null = null;
+  private _clientId: string | null = null;
 
   constructor(socketPath?: string) {
     this.socketPath = socketPath || `/tmp/tmax-${userInfo().uid}/server`;
@@ -23,7 +24,11 @@ export class RemoteEditor {
   async start(): Promise<void> {
     await this.connect();
     // Register as a new frame
-    const frameResult = await this.sendRequest("connect-frame", {});
+    const frameResult = await this.sendRequest("connect-frame", {
+      clientType: "tui",
+      clientName: "tmax-tui",
+    });
+    this._clientId = frameResult.clientId ?? null;
     this._frameId = frameResult.frameId;
     // Get initial state for our frame
     const stateJson = await this.sendRequest("render-state", { frameId: this._frameId });
@@ -32,6 +37,21 @@ export class RemoteEditor {
 
   get frameId(): string | null {
     return this._frameId;
+  }
+
+  get clientId(): string | null {
+    return this._clientId;
+  }
+
+  async sendEvent(event: string, params: Record<string, unknown> = {}): Promise<void> {
+    await this.sendRequest("client-event", {
+      event,
+      clientId: this._clientId,
+      frameId: this._frameId,
+      clientType: "tui",
+      clientName: "tmax-tui",
+      ...params,
+    });
   }
 
   async handleKey(key: string): Promise<EditorState> {

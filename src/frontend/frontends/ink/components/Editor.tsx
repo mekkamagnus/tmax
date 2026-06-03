@@ -1,6 +1,6 @@
 /**
  * @file Editor.tsx
- * @description Main React Editor component for tmax with Deno-ink
+ * @description Main React Editor component for tmax with Ink
  * This is a DUMB component - ALL business logic is in T-Lisp
  * It only captures input and renders the current state from T-Lisp
  */
@@ -345,6 +345,8 @@ export const Editor = ({ initialEditorState, editor, filename, onStateChange, on
         mode={state.mode}
         cursorPosition={state.cursorPosition}
         statusMessage={state.statusMessage}
+        currentMajorMode={state.currentMajorMode}
+        activeMinorModeLighters={state.activeMinorModeLighters}
       />
     </Box>
   );
