@@ -1,0 +1,41 @@
+;; dired.tlisp — directory editor commands
+(defun dired (&optional path)
+  "Open directory editor."
+  (let ((dir (or path (buffer-filename) ".")))
+    (let ((entries (read-dir dir)))
+      (buffer-create "*Dired*")
+      (buffer-switch "*Dired*")
+      (set-buffer-filename dir)
+      (dired-insert-listing dir entries)
+      (set-buffer-modified-p nil)
+      (message (concat "Dired: " dir)))))
+
+(defun dired-open-file ()
+  "Open file or enter directory under cursor."
+  (let ((entry (dired-parse-current-entry)))
+    (if (dired-is-directory-p entry)
+      (dired (concat (buffer-filename) "/" entry))
+      (find-file (concat (buffer-filename) "/" entry)))))
+
+(defun dired-up-directory ()
+  "Go to parent directory."
+  (let ((parent (file-dirname (buffer-filename))))
+    (when parent (dired parent))))
+
+(defun dired-mark-delete ()
+  "Mark current file for deletion."
+  (dired-toggle-mark "D")
+  (line-next 1))
+
+(defun dired-unmark ()
+  "Remove mark from current file."
+  (dired-toggle-mark nil)
+  (line-next 1))
+
+(defun dired-execute-deletions ()
+  "Delete all marked files."
+  (let ((marked (dired-get-marked)))
+    (dolist (file marked)
+      (file-remove (concat (buffer-filename) "/" file)))
+    (dired-refresh)
+    (message (concat "Deleted " (length marked) " files"))))

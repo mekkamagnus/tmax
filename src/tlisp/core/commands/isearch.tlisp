@@ -1,0 +1,25 @@
+;; isearch.tlisp — incremental search commands
+(defun isearch-forward ()
+  "Start forward incremental search."
+  (search-incremental-start "forward")
+  (minibuffer-set "I-search: "))
+
+(defun isearch-backward ()
+  "Start backward incremental search."
+  (search-incremental-start "backward")
+  (minibuffer-set "I-search backward: "))
+
+(defun isearch-update (char)
+  "Update isearch pattern with new character."
+  (search-incremental-update char)
+  (minibuffer-set (concat "I-search: " (search-pattern-get))))
+
+(defun isearch-exit ()
+  "Accept search and return to normal mode."
+  (search-incremental-finish)
+  (editor-set-mode "normal"))
+
+(defun isearch-cancel ()
+  "Cancel search and return to normal mode."
+  (search-incremental-cancel)
+  (editor-set-mode "normal"))

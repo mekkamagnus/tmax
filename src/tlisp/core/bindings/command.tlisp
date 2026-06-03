@@ -22,6 +22,18 @@
 (key-bind "Enter" "(editor-execute-command-line)" "command")
 
 ;; =================================================================
+;; M-X MODE BINDINGS
+;; =================================================================
+;; Key bindings specific to M-x minibuffer mode
+
+;; Exit M-x mode (Escape or C-g)
+(key-bind "Escape" "(editor-exit-mx-mode)" "mx")
+(key-bind "C-g" "(editor-exit-mx-mode)" "mx")
+
+;; Execute M-x command
+(key-bind "Enter" "(editor-execute-mx-command)" "mx")
+
+;; =================================================================
 ;; APPLICATION CONTROL
 ;; =================================================================
 ;; Global application control commands

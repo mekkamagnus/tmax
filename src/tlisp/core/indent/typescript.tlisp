@@ -1,0 +1,6 @@
+;; typescript.tlisp — TypeScript indent rules
+;; Increase indent after these patterns on previous line
+;; Decrease indent for these patterns on current line
+(indent-set-rules
+  '("\\{$" "\\($?" "\\[$" "=>$" "else$" "catch$" "finally$")
+  '("^\\s*}" "^\\s*\\)" "^\\s*\\]" "^\\s*else" "^\\s*catch" "^\\s*finally"))

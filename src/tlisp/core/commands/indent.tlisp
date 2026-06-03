@@ -1,0 +1,15 @@
+;; indent.tlisp — indentation commands
+(defun indent-current-line ()
+  "Indent current line according to mode rules."
+  (let ((rules (indent-get-rules)))
+    (when rules
+      (let ((col (indent-calculate-column (cursor-line) (car rules) (cadr rules))))
+        (buffer-set-line-indent (cursor-line) col)))))
+
+(defun indent-region (start end)
+  "Re-indent a range of lines."
+  (let ((line start))
+    (while (<= line end)
+      (let ((col (indent-calculate-column line (car (indent-get-rules)) (cadr (indent-get-rules)))))
+        (buffer-set-line-indent line col))
+      (set! line (+ line 1)))))

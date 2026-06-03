@@ -1,0 +1,13 @@
+;; save.tlisp — save-buffer command composed from primitives
+(defun save-buffer (&optional filename)
+  "Save current buffer to its associated file."
+  (let ((path (or filename (buffer-filename))))
+    (unless path
+      (message "Buffer has no associated file")
+      (return-from save-buffer))
+    (when (file-exists-p path)
+      (make-backup-file path))
+    (write-file-content path (buffer-text))
+    (set-buffer-filename path)
+    (set-buffer-modified-p nil)
+    (message (concat "Saved " path))))

@@ -1,0 +1,6 @@
+;; lisp.tlisp — Lisp indent rules
+;; Increase indent after unmatched opening paren
+;; Decrease indent for closing paren
+(indent-set-rules
+  '("\\($" "defun$" "let$" "if$" "when$" "unless$" "progn$" "cond$" "do$")
+  '("^\\s*\\)"))

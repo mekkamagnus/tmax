@@ -1,0 +1,35 @@
+;; line-numbers-mode.tlisp — Line numbers minor mode
+;; Displays line numbers in the gutter when active
+
+(define-minor-mode "line-numbers" "Display line numbers" "Ln" t)
+
+(defun line-numbers-mode (&optional (arg nil arg-supplied-p))
+  "Toggle line-numbers mode.
+With no argument, toggle.
+With t, enable.
+With positive number, enable.
+With 0 or negative number, disable."
+  (if (not arg-supplied-p)
+    (minor-mode-toggle "line-numbers")
+    (if (equal arg t)
+      (minor-mode-set "line-numbers" t)
+      (if (numberp arg)
+        (if (> arg 0)
+          (minor-mode-set "line-numbers" t)
+          (minor-mode-set "line-numbers" nil))
+        (minor-mode-set "line-numbers" nil)))))
+
+(defun global-line-numbers-mode (&optional (arg nil arg-supplied-p))
+  "Toggle line-numbers mode globally across all buffers."
+  (if (not arg-supplied-p)
+    (global-minor-mode-set "line-numbers"
+      (not (global-minor-mode-active-p "line-numbers")))
+    (if (equal arg t)
+      (global-minor-mode-set "line-numbers" t)
+      (if (numberp arg)
+        (if (> arg 0)
+          (global-minor-mode-set "line-numbers" t)
+          (global-minor-mode-set "line-numbers" nil))
+        (global-minor-mode-set "line-numbers" nil)))))
+
+(provide "line-numbers-mode")

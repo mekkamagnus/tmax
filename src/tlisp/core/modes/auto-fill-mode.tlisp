@@ -1,0 +1,35 @@
+;; auto-fill-mode.tlisp — Automatic line wrapping minor mode
+;; Wraps text at fill-column when active
+
+(define-minor-mode "auto-fill" "Automatic line wrapping" "Fill" t)
+
+(defun auto-fill-mode (&optional (arg nil arg-supplied-p))
+  "Toggle auto-fill mode.
+With no argument, toggle.
+With t, enable.
+With positive number, enable.
+With 0 or negative number, disable."
+  (if (not arg-supplied-p)
+    (minor-mode-toggle "auto-fill")
+    (if (equal arg t)
+      (minor-mode-set "auto-fill" t)
+      (if (numberp arg)
+        (if (> arg 0)
+          (minor-mode-set "auto-fill" t)
+          (minor-mode-set "auto-fill" nil))
+        (minor-mode-set "auto-fill" nil)))))
+
+(defun global-auto-fill-mode (&optional (arg nil arg-supplied-p))
+  "Toggle auto-fill mode globally across all buffers."
+  (if (not arg-supplied-p)
+    (global-minor-mode-set "auto-fill"
+      (not (global-minor-mode-active-p "auto-fill")))
+    (if (equal arg t)
+      (global-minor-mode-set "auto-fill" t)
+      (if (numberp arg)
+        (if (> arg 0)
+          (global-minor-mode-set "auto-fill" t)
+          (global-minor-mode-set "auto-fill" nil))
+        (global-minor-mode-set "auto-fill" nil)))))
+
+(provide "auto-fill-mode")
