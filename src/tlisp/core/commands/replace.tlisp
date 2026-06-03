@@ -1,0 +1,28 @@
+;; replace.tlisp — query-replace commands
+(defun query-replace (find replace &optional start end)
+  "Start interactive find/replace."
+  (let ((matches (replace-find-matches find start end)))
+    (when (null matches)
+      (message "No matches found")
+      (return-from query-replace))
+    (replace-state-init find replace matches)
+    (message (concat "Replace " find " with " replace "? (y/n/a/q)"))))
+
+(defun replace-yes ()
+  "Replace current match and advance."
+  (replace-apply-current)
+  (message "Replaced"))
+
+(defun replace-no ()
+  "Skip current match."
+  (replace-skip))
+
+(defun replace-all ()
+  "Replace all remaining matches."
+  (replace-apply-all)
+  (message "All replaced"))
+
+(defun replace-quit ()
+  "Exit replace mode."
+  (replace-exit)
+  (editor-set-mode "normal"))

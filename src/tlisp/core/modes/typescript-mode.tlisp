@@ -1,0 +1,5 @@
+;; typescript-mode.tlisp — TypeScript/TSX major mode
+(major-mode-register "typescript" '(".ts" ".tsx" ".js" ".jsx" ".mjs") "typescript"
+  '("\\{$" "\\($?" "\\[$" "=>$" "else$" "catch$" "finally$")
+  '("^\\s*}" "^\\s*\\)" "^\\s*\\]" "^\\s*else" "^\\s*catch" "^\\s*finally"))
+(provide "typescript-mode")

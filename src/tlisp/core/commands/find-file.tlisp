@@ -1,0 +1,13 @@
+;; find-file.tlisp — find-file command composed from primitives
+(defun find-file (path)
+  "Open a file into a buffer."
+  (let ((content (read-file-content path)))
+    (if content
+      (progn
+        (buffer-create path)
+        (buffer-switch path)
+        (set-buffer-filename path)
+        (buffer-insert content)
+        (set-buffer-modified-p nil)
+        (message (concat "Opened " path)))
+      (message (concat "Could not open " path)))))
