@@ -4,6 +4,7 @@ import type { Frontend } from "../types.ts";
 import { renderBufferLines, getVisibleViewportTop } from "../../render/buffer-lines.ts";
 import { renderCommandInput } from "../../render/command-input.ts";
 import { renderStatusLine } from "../../render/status-line.ts";
+import { renderTabBarAnsi } from "../../render/tab-bar.ts";
 import { Input } from "./input.ts";
 import { Screen } from "./screen.ts";
 
@@ -27,11 +28,16 @@ export class SteepFrontend implements Frontend {
 
     const render = () => {
       const { width, height } = screen.getDims();
-      const bufferHeight = Math.max(1, height - 2);
+      const hasTabBar = (state.tabs?.length ?? 0) > 1;
+      const tabBarHeight = hasTabBar ? 1 : 0;
+      const bufferHeight = Math.max(1, height - 2 - tabBarHeight);
       const lines = renderBufferLines(state, width, bufferHeight);
 
       screen.clear();
-      lines.forEach((line, i) => screen.writeAt(i, 0, line));
+      if (hasTabBar) {
+        screen.writeAt(0, 0, renderTabBarAnsi(state.tabs!, state.currentTabIndex ?? 0, width));
+      }
+      lines.forEach((line, i) => screen.writeAt(i + tabBarHeight, 0, line));
 
       if (state.mode === "command" || state.mode === "mx") {
         screen.writeAt(height - 2, 0, renderCommandInput(state, width));
@@ -42,13 +48,13 @@ export class SteepFrontend implements Frontend {
       const viewportTop = getVisibleViewportTop(state, bufferHeight);
       const cursorRow = Math.max(0, Math.min(bufferHeight - 1, state.cursorPosition.line - viewportTop));
       const cursorCol = Math.max(0, Math.min(width - 1, state.cursorPosition.column));
-      screen.moveTo(cursorRow, cursorCol);
+      screen.moveTo(cursorRow + tabBarHeight, cursorCol);
     };
 
     try {
       await editor.start();
       screen.enterAltScreen();
-      screen.hideCursor();
+      screen.showCursor();
 
       const dims = screen.getDims();
       editor.updateTerminalSize(dims.width, dims.height);

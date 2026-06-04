@@ -94,15 +94,23 @@ export const BufferView = ({
           displayContent = displayContent.substring(0, terminalWidth - 3) + '...';
         }
 
-        // Highlight cursor line if needed
+        // Highlight cursor position with block cursor
         const isCursorLine = lineNumber === cursorPosition.line;
-        const lineText = isCursorLine ? (
-          <Text backgroundColor="white" color="black">
-            {displayContent}
-          </Text>
-        ) : (
-          <Text>{displayContent}</Text>
-        );
+        let lineText;
+        if (isCursorLine) {
+          const col = cursorPosition.column;
+          const before = displayContent.slice(0, col);
+          const ch = displayContent[col];
+          const after = displayContent.slice(col + 1);
+          const cursorChar = ch !== undefined ? ch : " ";
+          lineText = (
+            <Text>
+              {before}<Text backgroundColor="white" color="black">{cursorChar}</Text>{after}
+            </Text>
+          );
+        } else {
+          lineText = <Text>{displayContent}</Text>;
+        }
 
         lines.push(
           <Box key={`line-${lineNumber}`} width="100%">

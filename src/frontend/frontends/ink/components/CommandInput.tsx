@@ -168,7 +168,7 @@ export const CommandInput = ({
       <Box paddingX={1}>
         <Text color="white">{inputValue}</Text>
         {/* Visual cursor representation */}
-        <Text color="white" backgroundColor="white"> </Text>
+        <Text color="black" backgroundColor="white"> </Text>
       </Box>
     </Box>
   );
