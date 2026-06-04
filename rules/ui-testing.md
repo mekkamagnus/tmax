@@ -14,8 +14,8 @@ The Python test harness (`test/ui/tmax_harness/`) uses **strict functional progr
 
 | Mode | Description | Use when |
 |------|-------------|---------|
-| `daemon` | Start daemon, query/control through tmaxclient | Default for editor logic tests |
-| `daemon-tmux` | Start daemon, run TUI in tmux, query via tmaxclient | Renderer tests only |
+| `daemon` | Start an isolated daemon, query/control through tmaxclient | Daemon API integration tests |
+| `daemon-tmux` | Start an isolated daemon and TUI in an isolated tmux session | Renderer E2E tests only |
 | `tmux` | Start editor directly in tmux window | Legacy, no daemon available |
 | `direct` | Start editor in background, capture output | CI or non-tmux environments |
 
@@ -32,8 +32,11 @@ cd test/ui && uv run python tests/02_basic_editing.py
 cd test/ui && uv run python tests/03_mode_switching.py
 cd test/ui && TMAX_UI_TEST_MODE=daemon-tmux uv run python tests/04_daemon_tmux_observability.py
 
-# Run all UI tests
-cd test/ui && uv run python -m pytest tests/  # (future)
+# Run authoritative suite categories
+bun run test:daemon
+bun run test:ui:renderer
+bun run test:ui
+bun run test:ui:helpers
 
 # Override mode
 TMAX_UI_TEST_MODE=direct uv run python tests/01_startup.py
@@ -57,20 +60,21 @@ def test_my_feature() -> tuple[AssertionResult, ...]:
 
     # State threading — each function returns new state
     state = init().unwrap()
-    state = start(state, "test.txt").unwrap()
+    try:
+        state = start(state, "test.txt").unwrap()
 
-    # Assertions return frozen AssertionResult
-    results.append(assert_running(state))
-    results.append(assert_daemon_mode(state.config, "NORMAL"))
+        # Assertions return frozen AssertionResult
+        results.append(assert_running(state))
+        results.append(assert_daemon_mode(state.config, "NORMAL"))
 
-    # Editing operations
-    enter_insert(state.config, state.active_window.unwrap())
-    type_text(state.config, state.active_window.unwrap(), "Hello")
-    enter_normal(state.config, state.active_window.unwrap())
+        # Editing operations
+        enter_insert(state.config, state.active_window.unwrap())
+        type_text(state.config, state.active_window.unwrap(), "Hello")
+        enter_normal(state.config, state.active_window.unwrap())
 
-    # Cleanup
-    cleanup(state)
-    return tuple(results)
+        return tuple(results)
+    finally:
+        cleanup(state)
 
 if __name__ == "__main__":
     results = test_my_feature()
@@ -134,21 +138,21 @@ cleanup(state)                        # Cleanup at end
 
 ### Best Practices
 
-1. Always cleanup on exit — wrap in try/finally
-2. Prefer `daemon` mode for editor logic tests
-3. Use `daemon-tmux` only when asserting renderer behavior
-4. Prefer `assert_daemon_mode` over `assert_mode` in daemon modes
-5. Thread state explicitly — never mutate
-6. Collect results into a list, convert to tuple at return
-7. Use `Result.unwrap_or(state)` to keep state even on failure for cleanup
+1. Always clean up in `finally`.
+2. Use the generated per-run socket, tmux session, and temporary directory.
+3. Never stop, replace, or remove a daemon, tmux resource, or path the run did not create.
+4. Use `daemon` for API/state integration and never make renderer claims there.
+5. Use `daemon-tmux` for renderer behavior; send real keys and inspect captured output.
+6. Treat query failures as failures and report skips/expected failures separately.
+7. Thread state explicitly and collect immutable assertion results.
 
 ### Troubleshooting
 
-- **NEVER kill tmux session without approval** — user may have active work
-- **Session already exists:** Ask user before killing. Use `tmux list-sessions` first
+- **Never kill a shared tmux session or default user daemon.**
+- **Resource already exists:** the harness must refuse to attach or replace it.
 - **Editor won't start:** Check `project_root`, verify daemon starts with `tmax --daemon`
-- **Daemon won't start:** Check socket `/tmp/tmax-$(id -u)/server`, try `tmax --stop` first
-- **TUI won't become ready:** Run `tmaxclient --status --json`, `tmaxclient --frames --json`, and inspect recent errors
+- **Daemon won't start:** inspect the per-run socket under `/tmp/tmax-ui-tests/<run-id>/server`
+- **TUI won't become ready:** query the per-run socket and inspect recent errors
 - **Renderer pane blank:** Check pane command and tmux capture; daemon readiness proves the client connected, tmux capture proves visible rendering
 - **Tests timing out:** Increase `TMAX_DEFAULT_TIMEOUT` or `TMAX_STARTUP_WAIT`
 - **Keys not being sent:** Verify tmux session exists, check active window
@@ -161,6 +165,8 @@ cleanup(state)                        # Cleanup at end
 - Mode switching: `tests/03_mode_switching.py`
 - Daemon/tmux observability: `tests/04_daemon_tmux_observability.py`
 - Mode loading and status metadata: `tests/13_modes.py`
+- Real-key Vim input and insert editing: `tests/14_vim_input.py`
+- Splits, tabs, focus, resizing, and relative line numbers: `tests/15_daily_driver_rendering.py`
 
 ## Legacy Bash Harness (Deprecated)
 
@@ -169,7 +175,6 @@ The bash harness in `test/ui/lib/`, `test/ui/core/`, `test/ui/ops/`, `test/ui/as
 - Uses global env vars (`TMAX_ACTIVE_WINDOW`, `TMAX_EDITOR_PID`) instead of state threading
 - Uses return codes instead of `Result` types
 - Assertions mutate global counters instead of returning immutable results
-- Source API: `source test/ui/lib/api.sh`
-- Run tests: `bash test/ui/tests/01-startup.test.sh`
 
-Do not add new bash tests. All new tests should use the Python harness.
+Do not run the Bash harness as validation or add new Bash tests. All new tests
+must use the isolated Python harness.

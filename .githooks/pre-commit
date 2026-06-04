@@ -1,0 +1,7 @@
+#!/bin/sh
+echo "Running typecheck..."
+bun run typecheck:src
+if [ $? -ne 0 ]; then
+  echo "Type errors found. Fix them before committing."
+  exit 1
+fi

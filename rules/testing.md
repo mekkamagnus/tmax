@@ -6,29 +6,49 @@ scope: test/**/*
 
 Applies to all test files in `test/`.
 
-## Three Test Layers
+## Authoritative Testing Matrix
 
-This project has three distinct test layers:
+Required validation has four explicit boundaries:
 
-| Layer | What it tests | Runner | Location |
-|-------|--------------|--------|----------|
-| **Bun tests** | TypeScript core, editor, interpreter, integration | `bun test` | `test/unit/*.test.ts`, `test/integration/*.test.ts` |
-| **T-Lisp tests** | T-Lisp extensions, key bindings, editor API | `(test-run-all)` via interpreter | Defined inline with `deftest` |
-| **UI tests** | End-to-end terminal interaction | `bash test/ui/tests/*.sh` | `test/ui/tests/*.test.sh` |
+| Gate | What it proves | Command |
+|------|----------------|---------|
+| **Type safety** | Source, tests, and full project satisfy the TypeScript contracts | `bun run typecheck:src`, `bun run typecheck:test`, `bun run typecheck` |
+| **Bun behavior tests** | Deterministic unit and in-process integration behavior | `bun test` |
+| **Daemon integration** | JSON-RPC, T-Lisp commands, and editor state without renderer claims | `bun run test:daemon` |
+| **Renderer E2E** | Real terminal keys produce the expected visible TUI output | `bun run test:ui:renderer` |
 
-### When to use which
+`bun run test:ui` runs both Python suite categories. `bun run test:ui:helpers`
+checks the harness itself. The Bash harness is deprecated and is never an
+authoritative validation command.
 
-- **Bun tests** — TypeScript functions, interpreter internals, terminal I/O, buffer management, error handling in the core
-- **T-Lisp tests** — Editor commands (`cursor-move`, `word-next`, etc.), key bindings, user-facing T-Lisp API, init file behavior, extensions written in T-Lisp
-- **UI tests** — Full editor startup, mode switching, rendering, key handling in real tmux terminal
+T-Lisp `deftest` coverage remains useful for extension behavior and may run
+through the interpreter or Bun tests. It does not replace any required gate.
+
+### Boundary Rules
+
+- Daemon tests may use direct T-Lisp evaluation, but must not claim renderer verification.
+- Renderer tests must send real keys and inspect captured renderer output.
+- Query failures, unavailable assertions, skips, and expected failures must never be counted as passes.
+- Await asynchronous editor startup and use fail-fast typed helpers instead of conditional assertions.
+- Required gates must not weaken compiler settings, suppress errors, or ignore exit codes.
 
 ## Bun Test Rules
 
 ### Commands
 
 ```bash
-# Run all tests
+# Run all deterministic TypeScript tests
 bun test
+
+# Run the required type-safety gates
+bun run typecheck:src
+bun run typecheck:test
+bun run typecheck
+
+# Run Python integration and renderer suites
+bun run test:daemon
+bun run test:ui:renderer
+bun run test:ui
 
 # Run specific test files
 bun test test/unit/tokenizer.test.ts
