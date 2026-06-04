@@ -11,6 +11,7 @@ import { EditorState } from "../../core/types.ts";
 import { FunctionalTextBufferImpl } from "../../core/buffer.ts";
 import { Either } from "../../utils/task-either.ts";
 import { BufferView } from "./BufferView.tsx";
+import { TabBar } from "./TabBar.tsx";
 import { StatusLine } from "./StatusLine.tsx";
 import { CommandInput } from "./CommandInput.tsx";
 import { useEditorState } from "../hooks/useEditorState.ts";
@@ -175,7 +176,7 @@ export const Editor = ({ initialEditorState, editor, filename, onStateChange, on
       // For other errors, show in status
       handleError(error instanceof Error ? error.message : String(error));
     }
-  }, [executeTlisp, exit]);
+  });
 
   // Test mode: Read input from file if configured (for automated testing)
   useEffect(() => {
@@ -271,6 +272,15 @@ export const Editor = ({ initialEditorState, editor, filename, onStateChange, on
         </Box>
       )}
 
+      {/* Tab Bar */}
+      {state.tabs && state.tabs.length > 1 && (
+        <TabBar
+          tabs={state.tabs}
+          currentTabIndex={state.currentTabIndex ?? 0}
+          width={terminalWidth}
+        />
+      )}
+
       {/* Buffer View */}
       <Box flexGrow={1} flexDirection="column">
         <BufferView
@@ -279,7 +289,7 @@ export const Editor = ({ initialEditorState, editor, filename, onStateChange, on
           viewportTop={state.viewportTop}
           onViewportChange={(top) => setState((prev: EditorState) => ({ ...prev, viewportTop: top }))}
           terminalWidth={terminalWidth}
-          terminalHeight={terminalHeight}
+          terminalHeight={terminalHeight - (state.tabs && state.tabs.length > 1 ? 1 : 0)}
         />
       </Box>
 

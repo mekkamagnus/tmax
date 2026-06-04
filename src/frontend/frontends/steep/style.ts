@@ -35,10 +35,11 @@ export function bold(text: string): string {
 
 export function style(
   text: string,
-  options: { fg?: AnsiColor; bg?: AnsiColor; bold?: boolean } = {},
+  options: { fg?: AnsiColor; bg?: AnsiColor; bold?: boolean; dim?: boolean } = {},
 ): string {
   let prefix = "";
   if (options.bold) prefix += "\x1b[1m";
+  if (options.dim) prefix += "\x1b[2m";
   if (options.fg) prefix += `\x1b[38;5;${colorCodes[options.fg]}m`;
   if (options.bg) prefix += `\x1b[48;5;${colorCodes[options.bg]}m`;
 

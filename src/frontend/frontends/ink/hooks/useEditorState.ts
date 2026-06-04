@@ -58,9 +58,9 @@ export const useEditorState = (
   const executeTlisp = useCallback(async (key: string): Promise<EditorState | void> => {
     try {
       // Send key to Editor class, which processes it through T-Lisp
-      const newState = await editor.handleKey(key);
-      setState(newState);
-      return newState;
+      await editor.handleKey(key);
+      setState(editor.getState());
+      return editor.getState();
     } catch (error) {
       // Handle quit signal
       if (error instanceof Error && error.message === "EDITOR_QUIT_SIGNAL") {
