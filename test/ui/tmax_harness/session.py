@@ -35,19 +35,6 @@ def validate(config: HarnessConfig) -> Result[None, HarnessError]:
     if not shutil.which("tmux"):
         return Err(HarnessError("tmux is not installed"))
 
-    # Check session exists
-    result = _tmux("list-sessions")
-    if result.is_err():
-        return Err(HarnessError("No tmux sessions found"))
-
-    sessions = result.unwrap().splitlines()
-    session_names = [s.split(":")[0] for s in sessions]
-    if config.session_name not in session_names:
-        return Err(HarnessError(
-            f"Session '{config.session_name}' not found. "
-            f"Available: {session_names}",
-        ))
-
     return Ok(None)
 
 
@@ -103,7 +90,11 @@ def create_window_with_command(
     if ensure.is_err():
         return Err(ensure.unwrap_err())
 
-    kill_window(config, name)
+    existing = list_windows(config)
+    if existing.is_ok() and name in existing.unwrap():
+        return Err(HarnessError(
+            f"Refusing to replace existing tmux window '{config.session_name}:{name}'",
+        ))
 
     result = _tmux(
         "new-window",

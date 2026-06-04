@@ -6,14 +6,14 @@ import { MockFileSystem } from "../mocks/filesystem.ts";
 describe("Parser multiline test", () => {
   let editor: Editor;
 
-  beforeEach(() => {
+  beforeEach(async () => {
     const mockTerminal = new MockTerminal();
     const mockFileSystem = new MockFileSystem();
     editor = new Editor(mockTerminal, mockFileSystem);
-    editor.start();
+    await editor.start();
   });
 
-  test("multiline deftest", () => {
+  test("multiline deftest", async () => {
     const code = `
 (deftest my-test () (assert-true t))
 `;

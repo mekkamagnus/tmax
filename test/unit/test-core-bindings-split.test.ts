@@ -183,8 +183,8 @@ describe("Core Binding Files Loading", () => {
 
     expect(hMappings).toBeDefined();
     expect(hMappings?.length).toBe(1);
-    expect(hMappings![0].command).toBe("(cursor-move (cursor-line) (- (cursor-column) 1))");
-    expect(hMappings![0].mode).toBe("normal");
+    expect(hMappings![0]!.command).toBe("(cursor-move (cursor-line) (- (cursor-column) 1))");
+    expect(hMappings![0]!.mode).toBe("normal");
   });
 
   test("should load insert mode bindings from insert.tlisp", async () => {
@@ -237,8 +237,8 @@ describe("Core Binding Files Loading", () => {
 
     expect(customMappings).toBeDefined();
     expect(customMappings?.length).toBe(1);
-    expect(customMappings![0].command).toBe("(custom-command)");
-    expect(customMappings![0].mode).toBe("normal");
+    expect(customMappings![0]!.command).toBe("(custom-command)");
+    expect(customMappings![0]!.mode).toBe("normal");
   });
 
   test("should load all four binding files", async () => {

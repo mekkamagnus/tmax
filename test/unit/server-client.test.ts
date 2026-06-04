@@ -1,48 +1,46 @@
-import { test, expect } from 'bun:test';
-import { spawn } from 'child_process';
-import { promisify } from 'util';
-import { exec as execCallback } from 'child_process';
-import { TmaxServer } from '../src/server/server.ts';
+import { expect, test } from "bun:test";
+import { connect } from "net";
+import { TmaxServer } from "../../src/server/server.ts";
 
-const exec = promisify(execCallback);
+async function ping(socketPath: string): Promise<Record<string, unknown>> {
+  return new Promise((resolve, reject) => {
+    const socket = connect(socketPath);
+    const timer = setTimeout(() => {
+      socket.destroy();
+      reject(new Error("Ping timed out"));
+    }, 5000);
 
-// Helper function to check if server is running
-async function isServerRunning(): Promise<boolean> {
-  try {
-    const result = await exec('lsof -U | grep tmax');
-    return result.stdout.includes('server');
-  } catch (error) {
-    return false;
-  }
+    socket.on("connect", () => {
+      socket.write(JSON.stringify({
+        jsonrpc: "2.0",
+        id: 1,
+        method: "ping",
+        params: {},
+      }) + "\n");
+    });
+    socket.on("data", data => {
+      clearTimeout(timer);
+      socket.destroy();
+      resolve(JSON.parse(data.toString().trim()) as Record<string, unknown>);
+    });
+    socket.on("error", error => {
+      clearTimeout(timer);
+      reject(error);
+    });
+  });
 }
 
-test('should start server daemon', async () => {
-  // Skip this test in CI as it requires a running server
-  if (process.env.CI) {
-    return;
+test("starts and accepts clients on an isolated socket", async () => {
+  const socketPath = `/tmp/tmax-server-client-${process.pid}-${Date.now()}.sock`;
+  const server = new TmaxServer(socketPath, true);
+
+  try {
+    await server.start();
+    const response = await ping(socketPath);
+
+    expect(response.error).toBeUndefined();
+    expect(response.result).toBeDefined();
+  } finally {
+    await server.shutdown();
   }
-
-  // Start the server in the background
-  const serverProcess = spawn('bun', ['run', 'src/main.tsx', '--daemon'], {
-    detached: true,
-    stdio: 'pipe'
-  });
-
-  // Give the server some time to start
-  await new Promise(resolve => setTimeout(resolve, 2000));
-
-  // Check if the server is running
-  const running = await isServerRunning();
-  if (running) {
-    // Clean up: kill the server process
-    process.kill(-serverProcess.pid); // negative PID kills the process group
-  }
-
-  expect(running).toBe(true);
-});
-
-test('should connect to server with client', async () => {
-  // This test requires a running server, so we'll skip it in automated tests
-  // In a real scenario, we'd start a server in a test setup
-  expect(true).toBe(true); // Placeholder test
 });

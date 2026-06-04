@@ -1,4 +1,5 @@
 import { describe, test, beforeEach, afterEach } from "bun:test";
+import { expectRight } from "../helpers/editor-fixture.ts";
 import { expect } from "bun:test";
 import { Editor } from "../../src/editor/editor.ts";
 import { MockTerminal } from "../mocks/terminal.ts";
@@ -9,18 +10,18 @@ describe("Debug defvar", () => {
   let mockTerminal: MockTerminal;
   let mockFileSystem: MockFileSystem;
 
-  beforeEach(() => {
+  beforeEach(async () => {
     mockTerminal = new MockTerminal();
     mockFileSystem = new MockFileSystem();
     editor = new Editor(mockTerminal, mockFileSystem);
-    editor.start();
+    await editor.start();
   });
 
   afterEach(() => {
     editor.stop();
   });
 
-  test("defvar in test", () => {
+  test("defvar in test", async () => {
     const interpreter = editor.getInterpreter();
 
     // Define test with defvar
@@ -31,6 +32,6 @@ describe("Debug defvar", () => {
     console.log("Result:", JSON.stringify(result, null, 2));
 
     expect(result._tag).toBe("Right");
-    expect(result.right.value).toBe(true);
+    expect(expectRight(result).value).toBe(true);
   });
 });

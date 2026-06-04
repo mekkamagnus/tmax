@@ -25,9 +25,9 @@ def buffer_insert(text: str) -> str:
     return f"(buffer-insert {string_literal(text)})"
 
 
-def buffer_delete(text: str) -> str:
-    """Build (buffer-delete "escaped text")."""
-    return f"(buffer-delete {string_literal(text)})"
+def buffer_delete(count: int) -> str:
+    """Build (buffer-delete count)."""
+    return f"(buffer-delete {count})"
 
 
 def editor_set_mode(mode: str) -> str:

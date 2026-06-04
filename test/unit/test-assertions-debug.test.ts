@@ -6,18 +6,18 @@ import { MockFileSystem } from "../mocks/filesystem.ts";
 describe("Debug assertions", () => {
   let editor: Editor;
 
-  beforeEach(() => {
+  beforeEach(async () => {
     const mockTerminal = new MockTerminal();
     const mockFileSystem = new MockFileSystem();
     editor = new Editor(mockTerminal, mockFileSystem);
-    editor.start();
+    await editor.start();
   });
 
   afterEach(() => {
     editor.stop();
   });
 
-  test("test each assertion", () => {
+  test("test each assertion", async () => {
     const interpreter = editor.getInterpreter();
 
     interpreter.execute('(deffixture test-data () (defvar my-list (list 1 2 3)) (defvar my-string "hello") (defvar my-num 42))');

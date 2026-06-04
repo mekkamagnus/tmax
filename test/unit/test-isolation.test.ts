@@ -4,6 +4,7 @@
  */
 
 import { describe, test, beforeEach, afterEach } from "bun:test";
+import { expectRight } from "../helpers/editor-fixture.ts";
 import { expect } from "bun:test";
 import { Editor } from "../../src/editor/editor.ts";
 import { MockTerminal } from "../mocks/terminal.ts";
@@ -14,20 +15,20 @@ describe("Test Isolation", () => {
   let mockTerminal: MockTerminal;
   let mockFileSystem: MockFileSystem;
 
-  beforeEach(() => {
+  beforeEach(async () => {
     mockTerminal = new MockTerminal();
     mockFileSystem = new MockFileSystem();
     // Create an empty filesystem for these tests
     editor = new Editor(mockTerminal, mockFileSystem);
     // Start the editor to initialize the interpreter
-    editor.start();
+    await editor.start();
   });
 
   afterEach(() => {
     editor.stop();
   });
 
-  test("variables defined in one test should not exist in another test", () => {
+  test("variables defined in one test should not exist in another test", async () => {
     const interpreter = editor.getInterpreter();
 
     // Define a test that sets a variable
@@ -39,15 +40,15 @@ describe("Test Isolation", () => {
     // Run the first test
     const result1 = interpreter.execute('(test-run "test-with-var")');
     expect(result1._tag).toBe("Right");
-    expect(result1.right.value).toBe(true);
+    expect(expectRight(result1).value).toBe(true);
 
     // Run the second test - this should pass because variables from first test shouldn't leak
     const result2 = interpreter.execute('(test-run "test-without-var")');
     expect(result2._tag).toBe("Right");
-    expect(result2.right.value).toBe(true);
+    expect(expectRight(result2).value).toBe(true);
   });
 
-  test("setup and teardown functions should work", () => {
+  test("setup and teardown functions should work", async () => {
     const interpreter = editor.getInterpreter();
 
     // Define setup and teardown
@@ -60,7 +61,7 @@ describe("Test Isolation", () => {
     // Run the test
     const result = interpreter.execute('(test-run "test-setup-teardown")');
     expect(result._tag).toBe("Right");
-    expect(result.right.value).toBe(true);
+    expect(expectRight(result).value).toBe(true);
 
     // Check that the variable was reset by teardown (though it should be in isolated env)
     // The variable from the test environment shouldn't leak to global
@@ -68,7 +69,7 @@ describe("Test Isolation", () => {
     // This assertion depends on whether the variable leaked or not
   });
 
-  test("failed tests should not affect next test environment", () => {
+  test("failed tests should not affect next test environment", async () => {
     const interpreter = editor.getInterpreter();
 
     // Define a test that fails
@@ -80,11 +81,11 @@ describe("Test Isolation", () => {
     // Run the failing test
     const result1 = interpreter.execute('(test-run "failing-test")');
     expect(result1._tag).toBe("Right");
-    expect(result1.right.value).toBe(false); // Test should fail
+    expect(expectRight(result1).value).toBe(false); // Test should fail
 
     // Run the clean test - this should pass because the failing test shouldn't pollute the environment
     const result2 = interpreter.execute('(test-run "clean-test")');
     expect(result2._tag).toBe("Right");
-    expect(result2.right.value).toBe(true);
+    expect(expectRight(result2).value).toBe(true);
   });
 });

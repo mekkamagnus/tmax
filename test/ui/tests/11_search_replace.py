@@ -27,10 +27,10 @@ def test_search_replace() -> tuple[AssertionResult, ...]:
     state = state_result.unwrap()
 
     content = "alpha beta gamma\nbeta delta epsilon\nzeta beta eta"
-    test_file = f"{state.config.project_root}/search-test.txt"
+    test_file = f"{state.config.test_dir}/search-test.txt"
     create_test_file(test_file, content)
 
-    start_result = start(state, "search-test.txt")
+    start_result = start(state, test_file)
     if start_result.is_err():
         print(f"ERROR: {start_result.unwrap_err().message}")
         delete_test_file(test_file)

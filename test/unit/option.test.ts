@@ -1,5 +1,5 @@
 import { test, describe, expect } from 'bun:test';
-import { Option, Some, None, isSome, isNone } from '../../src/utils/option';
+import { Option, Some, None, isSome, isNone, type OptionWithMethods } from '../../src/utils/option';
 
 describe('Option<T>', () => {
   test('should create Some with a value', () => {
@@ -7,6 +7,7 @@ describe('Option<T>', () => {
     expect(isSome(some)).toBe(true);
     expect(isNone(some)).toBe(false);
     expect(some._tag).toBe('Some');
+    if (!isSome(some)) throw new Error("Expected Some");
     expect(some.value).toBe(42);
   });
 
@@ -76,7 +77,7 @@ describe('Option<T>', () => {
   });
 
   test('getOrElse should return default for None', () => {
-    const none = None;
+    const none = None as OptionWithMethods<number>;
     const result = none.getOrElse(() => 100);
     
     expect(result).toBe(100);

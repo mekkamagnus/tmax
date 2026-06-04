@@ -1,255 +1,77 @@
-/**
- * LSP Diagnostics Tests
- *
- * Tests for Language Server Protocol diagnostics functionality.
- * Validates error indicators, gutter display, and diagnostic listing.
- */
-
-import { describe, test, expect, beforeEach } from "bun:test";
-import { Editor } from "../../src/editor/editor.ts";
-import { MockTerminal } from "../../test/mocks/terminal.ts";
-import { MockFileSystem } from "../../test/mocks/filesystem.ts";
+import { beforeEach, describe, expect, test } from "bun:test";
+import type { LSPDiagnostic } from "../../src/core/types.ts";
 import { LSPClient } from "../../src/lsp/client.ts";
+import { MockFileSystem } from "../mocks/filesystem.ts";
+import { MockTerminal } from "../mocks/terminal.ts";
 
-describe("LSP Diagnostics", () => {
-  let terminal: MockTerminal;
-  let filesystem: MockFileSystem;
-  let editor: Editor;
-  let lspClient: LSPClient;
+function diagnostic(
+  severity: LSPDiagnostic["severity"],
+  line: number = 0,
+  endLine: number = line,
+): LSPDiagnostic {
+  return {
+    range: {
+      start: { line, column: 0 },
+      end: { line: endLine, column: 10 },
+    },
+    severity,
+    message: `Severity ${severity}`,
+    source: "test",
+  };
+}
+
+describe("LSP diagnostics", () => {
+  let client: LSPClient;
 
   beforeEach(() => {
-    terminal = new MockTerminal();
-    filesystem = new MockFileSystem();
-    editor = new Editor(terminal, filesystem);
-    lspClient = new LSPClient();
-
-    // Set up test file
-    filesystem.setFile("/test.ts", `const x: string = 123;\nconsole.log(x);`);
+    client = new LSPClient(new MockTerminal(), new MockFileSystem());
   });
 
-  describe("Error indicators in gutter", () => {
-    test("Error indicators appear in gutter for diagnostics", async () => {
-      // Open file to trigger LSP connection
-      await editor.openFile("/test.ts");
+  test("preserves every diagnostic severity", () => {
+    const diagnostics = [
+      diagnostic(1),
+      diagnostic(2),
+      diagnostic(3),
+      diagnostic(4),
+    ];
 
-      // Simulate LSP diagnostics with errors
-      const diagnostics = [
-        {
-          range: {
-            start: { line: 0, character: 6 },
-            end: { line: 0, character: 19 }
-          },
-          severity: 1, // Error
-          message: "Type 'number' is not assignable to type 'string'"
-        }
-      ];
+    client.updateDiagnostics(diagnostics);
 
-      // Update editor state with diagnostics
-      editor.state.lspDiagnostics = diagnostics;
-
-      // Check that error indicators are present
-      expect(editor.state.lspDiagnostics).toHaveLength(1);
-      expect(editor.state.lspDiagnostics[0].severity).toBe(1);
-    });
-
-    test("Warning indicators appear in gutter for warning diagnostics", async () => {
-      await editor.openFile("/test.ts");
-
-      const diagnostics = [
-        {
-          range: {
-            start: { line: 1, character: 0 },
-            end: { line: 1, character: 11 }
-          },
-          severity: 2, // Warning
-          message: "Unused variable 'x'"
-        }
-      ];
-
-      editor.state.lspDiagnostics = diagnostics;
-
-      expect(editor.state.lspDiagnostics).toHaveLength(1);
-      expect(editor.state.lspDiagnostics[0].severity).toBe(2);
-    });
+    expect(client.getDiagnostics().map((item) => item.severity)).toEqual([1, 2, 3, 4]);
   });
 
-  describe("Diagnostic messages in status line", () => {
-    test("Navigating to error line shows message in status line", async () => {
-      await editor.openFile("/test.ts");
+  test("returns a defensive copy of diagnostics", () => {
+    client.updateDiagnostics([diagnostic(1)]);
 
-      const diagnostics = [
-        {
-          range: {
-            start: { line: 0, character: 6 },
-            end: { line: 0, character: 19 }
-          },
-          severity: 1,
-          message: "Type 'number' is not assignable to type 'string'"
-        }
-      ];
+    const result = client.getDiagnostics();
+    result.push(diagnostic(2));
 
-      editor.state.lspDiagnostics = diagnostics;
-
-      // Move cursor to line with error
-      editor.state.cursorPosition = { line: 0, column: 10 };
-
-      // The status line should show the diagnostic message
-      // This would be shown in the actual UI rendering
-      const diagnosticsOnLine = editor.state.lspDiagnostics.filter(
-        d => d.range.start.line === 0
-      );
-      expect(diagnosticsOnLine).toHaveLength(1);
-      expect(diagnosticsOnLine[0].message).toContain("not assignable");
-    });
-
-    test("Multiple diagnostics on same line show all messages", async () => {
-      await editor.openFile("/test.ts");
-
-      const diagnostics = [
-        {
-          range: {
-            start: { line: 0, character: 6 },
-            end: { line: 0, character: 19 }
-          },
-          severity: 1,
-          message: "Type error"
-        },
-        {
-          range: {
-            start: { line: 0, character: 6 },
-            end: { line: 0, character: 19 }
-          },
-          severity: 2,
-          message: "Unused variable"
-        }
-      ];
-
-      editor.state.lspDiagnostics = diagnostics;
-      editor.state.cursorPosition = { line: 0, column: 10 };
-
-      const diagnosticsOnLine = editor.state.lspDiagnostics.filter(
-        d => d.range.start.line === 0
-      );
-      expect(diagnosticsOnLine).toHaveLength(2);
-    });
+    expect(client.getDiagnostics()).toHaveLength(1);
   });
 
-  describe("Listing diagnostics", () => {
-    test("Listing diagnostics shows all errors and warnings", async () => {
-      await editor.openFile("/test.ts");
+  test("filters diagnostics that overlap a line", () => {
+    client.updateDiagnostics([
+      diagnostic(1, 0),
+      diagnostic(2, 1, 3),
+      diagnostic(3, 4),
+    ]);
 
-      const diagnostics = [
-        {
-          range: {
-            start: { line: 0, character: 6 },
-            end: { line: 0, character: 19 }
-          },
-          severity: 1,
-          message: "Type error on line 1",
-          source: "typescript"
-        },
-        {
-          range: {
-            start: { line: 1, character: 0 },
-            end: { line: 1, character: 11 }
-          },
-          severity: 2,
-          message: "Warning on line 2",
-          source: "typescript"
-        }
-      ];
-
-      editor.state.lspDiagnostics = diagnostics;
-
-      // Should have 2 diagnostics
-      expect(editor.state.lspDiagnostics).toHaveLength(2);
-
-      // Should have both error and warning
-      const severities = editor.state.lspDiagnostics.map(d => d.severity);
-      expect(severities).toContain(1); // Error
-      expect(severities).toContain(2); // Warning
-    });
-
-    test("Empty diagnostics list when no errors", async () => {
-      await editor.openFile("/test.ts");
-
-      editor.state.lspDiagnostics = [];
-
-      expect(editor.state.lspDiagnostics).toHaveLength(0);
-    });
+    expect(client.getDiagnosticsForLine(2).map((item) => item.severity)).toEqual([2]);
+    expect(client.getDiagnosticsForLine(4).map((item) => item.severity)).toEqual([3]);
   });
 
-  describe("Diagnostic severity levels", () => {
-    test("Supports Error severity (1)", async () => {
-      await editor.openFile("/test.ts");
+  test("clears diagnostics", () => {
+    client.updateDiagnostics([diagnostic(1), diagnostic(2)]);
 
-      const diagnostics = [
-        {
-          range: {
-            start: { line: 0, character: 0 },
-            end: { line: 0, character: 1 }
-          },
-          severity: 1,
-          message: "Error"
-        }
-      ];
+    client.clearDiagnostics();
 
-      editor.state.lspDiagnostics = diagnostics;
-      expect(editor.state.lspDiagnostics[0].severity).toBe(1);
-    });
+    expect(client.getDiagnostics()).toEqual([]);
+  });
 
-    test("Supports Warning severity (2)", async () => {
-      await editor.openFile("/test.ts");
+  test("simulates TypeScript diagnostics after opening a supported file", async () => {
+    await client.onFileOpen("/test.ts", "const value: string = 123;");
+    await client.simulateDiagnostics("/test.ts", "const value: string = 123;");
 
-      const diagnostics = [
-        {
-          range: {
-            start: { line: 0, character: 0 },
-            end: { line: 0, character: 1 }
-          },
-          severity: 2,
-          message: "Warning"
-        }
-      ];
-
-      editor.state.lspDiagnostics = diagnostics;
-      expect(editor.state.lspDiagnostics[0].severity).toBe(2);
-    });
-
-    test("Supports Information severity (3)", async () => {
-      await editor.openFile("/test.ts");
-
-      const diagnostics = [
-        {
-          range: {
-            start: { line: 0, character: 0 },
-            end: { line: 0, character: 1 }
-          },
-          severity: 3,
-          message: "Info"
-        }
-      ];
-
-      editor.state.lspDiagnostics = diagnostics;
-      expect(editor.state.lspDiagnostics[0].severity).toBe(3);
-    });
-
-    test("Supports Hint severity (4)", async () => {
-      await editor.openFile("/test.ts");
-
-      const diagnostics = [
-        {
-          range: {
-            start: { line: 0, character: 0 },
-            end: { line: 0, character: 1 }
-          },
-          severity: 4,
-          message: "Hint"
-        }
-      ];
-
-      editor.state.lspDiagnostics = diagnostics;
-      expect(editor.state.lspDiagnostics[0].severity).toBe(4);
-    });
+    expect(client.getDiagnostics().some((item) => item.severity === 1)).toBe(true);
   });
 });

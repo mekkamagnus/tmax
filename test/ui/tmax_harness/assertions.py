@@ -36,17 +36,27 @@ def _tui_frames(status: dict) -> list[dict]:
 def assert_text_visible(config: HarnessConfig, window: str, pattern: str,
                         msg: str = "") -> AssertionResult:
     message = msg or f"Text visible: {pattern}"
-    # Use daemon buffer query in any daemon mode
-    if _is_daemon(config):
-        result = client.buffer_contains(config, pattern)
-        if result.is_ok() and result.unwrap():
-            return AssertionResult(passed=True, message=message)
-        return AssertionResult(passed=False, message=message,
-                              details=Some(f"Pattern not in buffer: {pattern}"))
-    # Fallback: tmux screen scraping
-    if queries.text_visible(config, window, pattern):
+    if config.mode not in ("daemon-tmux", "tmux"):
+        return AssertionResult(
+            passed=False,
+            message=message,
+            details=Some(f"Renderer unavailable in {config.mode} mode"),
+            status="skip",
+        )
+    result = queries.capture_output(config, window)
+    if result.is_err():
+        return AssertionResult(
+            passed=False,
+            message=message,
+            details=Some(result.unwrap_err().message),
+        )
+    if pattern in result.unwrap():
         return AssertionResult(passed=True, message=message)
-    return AssertionResult(passed=False, message=message)
+    return AssertionResult(
+        passed=False,
+        message=message,
+        details=Some(f"Pattern not visible in renderer: {pattern}"),
+    )
 
 
 def assert_mode(config: HarnessConfig, window: str, expected: str,
@@ -88,17 +98,15 @@ def assert_no_errors(config: HarnessConfig, window: str,
                      msg: str = "") -> AssertionResult:
     message = msg or "No errors should be present"
     if _is_daemon(config):
-        # Check daemon buffer for error indicators
-        result = client.get_buffer_text(config)
-        if result.is_ok():
-            text = result.unwrap()
-            if not re.search(r"error|failed|exception", text, re.IGNORECASE):
-                return AssertionResult(passed=True, message=message)
-            return AssertionResult(passed=False, message=message,
-                                  details=Some("Error indicators in buffer"))
-        return AssertionResult(passed=True, message=message,
-                              details=Some("Daemon query failed, assuming no errors"))
-    if not queries.has_errors(config, window):
+        return assert_no_client_errors(config, message)
+    result = queries.capture_output(config, window)
+    if result.is_err():
+        return AssertionResult(
+            passed=False,
+            message=message,
+            details=Some(result.unwrap_err().message),
+        )
+    if not re.search(r"error|failed|exception", result.unwrap(), re.IGNORECASE):
         return AssertionResult(passed=True, message=message)
     return AssertionResult(passed=False, message=message)
 
@@ -122,10 +130,20 @@ def assert_screen_fill(config: HarnessConfig, window: str,
     message = msg or "UI should fill terminal height"
     # Screen fill only applies when a TUI is rendering in tmux
     if config.mode in ("daemon", "direct"):
-        return AssertionResult(passed=True, message=f"{message} (skipped: {config.mode} mode)")
+        return AssertionResult(
+            passed=False,
+            message=message,
+            details=Some(f"Renderer unavailable in {config.mode} mode"),
+            status="skip",
+        )
 
     if not window:
-        return AssertionResult(passed=True, message=f"{message} (skipped: no window)")
+        return AssertionResult(
+            passed=False,
+            message=message,
+            details=Some("No renderer window"),
+            status="skip",
+        )
 
     try:
         proc = subprocess.run(
@@ -194,7 +212,14 @@ def assert_render_count_at_least(config: HarnessConfig, minimum: int,
 
 def assert_no_client_errors(config: HarnessConfig, msg: str = "") -> AssertionResult:
     message = msg or "Daemon clients should have no errors"
-    status = _status(config)
+    status_result = client.status(config)
+    if status_result.is_err():
+        return AssertionResult(
+            passed=False,
+            message=message,
+            details=Some(f"Daemon status query failed: {status_result.unwrap_err().message}"),
+        )
+    status = status_result.unwrap()
     errors = status.get("recentErrors", [])
     if isinstance(errors, list) and len(errors) == 0:
         return AssertionResult(passed=True, message=message)
@@ -390,7 +415,12 @@ def assert_status_line_visible(config: HarnessConfig, window: str,
                                 msg: str = "") -> AssertionResult:
     message = msg or "Status line should be visible in tmux pane"
     if config.mode != "daemon-tmux":
-        return AssertionResult(passed=True, message=f"{message} (skipped: {config.mode})")
+        return AssertionResult(
+            passed=False,
+            message=message,
+            details=Some(f"Renderer unavailable in {config.mode} mode"),
+            status="skip",
+        )
     result = queries.capture_output(config, window)
     if result.is_err():
         return AssertionResult(passed=False, message=message)
@@ -427,6 +457,8 @@ def format_summary(summary: AssertionSummary) -> str:
         f"Total:     {summary.total}",
         f"Passed:    {summary.passed}",
         f"Failed:    {summary.failed}",
+        f"Skipped:   {summary.skipped}",
+        f"XFailed:   {summary.expected_failed}",
     ]
     if summary.failed > 0:
         lines.append("")

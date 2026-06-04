@@ -16,6 +16,12 @@ describe("Lisp-owned command libraries", () => {
       "query-replace",
       "indent-current-line",
       "dired",
+      "vim-dispatch-key",
+      "split-window-below",
+      "split-window-right",
+      "other-window",
+      "delete-window",
+      "relative-line-numbers-mode",
     ]) {
       const value = env.lookup(name);
       expect(value?.type).toBe("function");

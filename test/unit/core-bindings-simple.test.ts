@@ -20,7 +20,7 @@ describe("Core Bindings File Structure", () => {
 
     // Count key-bind function calls (exclude comments)
     const keyBindMatches = content.match(/^\(key-bind/gm);
-    expect(keyBindMatches?.length).toBe(15, "Should contain exactly 15 key-bind calls");
+    expect(keyBindMatches?.length).toBe(15);
   });
 
   test("should contain basic navigation bindings", async () => {
@@ -66,6 +66,6 @@ describe("Core Bindings File Structure", () => {
     // Check for proper parentheses balance (basic validation)
     const openParens = (content.match(/\(/g) || []).length;
     const closeParens = (content.match(/\)/g) || []).length;
-    expect(openParens).toBe(closeParens, "Parentheses should be balanced");
+    expect(openParens).toBe(closeParens);
   });
 });

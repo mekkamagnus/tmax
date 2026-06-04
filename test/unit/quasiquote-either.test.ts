@@ -4,6 +4,7 @@
  */
 
 import { describe, test, expect } from "bun:test";
+import { expectRight } from "../helpers/editor-fixture.ts";
 import { TLispParser } from "../../src/tlisp/parser.ts";
 import { createEvaluatorWithBuiltins } from "../../src/tlisp/evaluator.ts";
 import { createSymbol, createNumber, createList, createNil } from "../../src/tlisp/values.ts";
@@ -20,11 +21,11 @@ describe("T-Lisp Quasiquote with Either", () => {
       console.log("Parse error:", expr.left);
     }
 
-    const result = evaluator.eval(expr.right, env);
+    const result = evaluator.eval(expectRight(expr), env);
 
     expect(Either.isRight(result)).toBe(true);
     if (Either.isRight(result)) {
-      expect(result.right).toEqual(createList([createSymbol("a"), createSymbol("b"), createSymbol("c")]));
+      expect(expectRight(result)).toEqual(createList([createSymbol("a"), createSymbol("b"), createSymbol("c")]));
     }
   });
 
@@ -35,11 +36,11 @@ describe("T-Lisp Quasiquote with Either", () => {
     testEnv.define("x", createNumber(42));
 
     const expr = parser.parse("`(a ,x c)");
-    const result = testEvaluator.eval(expr.right, testEnv);
+    const result = testEvaluator.eval(expectRight(expr), testEnv);
 
     expect(Either.isRight(result)).toBe(true);
     if (Either.isRight(result)) {
-      expect(result.right).toEqual(createList([createSymbol("a"), createNumber(42), createSymbol("c")]));
+      expect(expectRight(result)).toEqual(createList([createSymbol("a"), createNumber(42), createSymbol("c")]));
     }
   });
 
@@ -50,11 +51,11 @@ describe("T-Lisp Quasiquote with Either", () => {
     testEnv.define("lst", createList([createNumber(1), createNumber(2), createNumber(3)]));
 
     const expr = parser.parse("`(a ,@lst d)");
-    const result = testEvaluator.eval(expr.right, testEnv);
+    const result = testEvaluator.eval(expectRight(expr), testEnv);
 
     expect(Either.isRight(result)).toBe(true);
     if (Either.isRight(result)) {
-      expect(result.right).toEqual(createList([
+      expect(expectRight(result)).toEqual(createList([
         createSymbol("a"),
         createNumber(1),
         createNumber(2),
@@ -69,11 +70,11 @@ describe("T-Lisp Quasiquote with Either", () => {
     const { evaluator: testEvaluator, env: testEnv } = createEvaluatorWithBuiltins();
     testEnv.define("y", createNumber(10));
     const expr = parser.parse("``(a ,,y c)");
-    const result = testEvaluator.eval(expr.right, testEnv);
+    const result = testEvaluator.eval(expectRight(expr), testEnv);
 
     expect(Either.isRight(result)).toBe(true);
     if (Either.isRight(result)) {
-      expect(result.right).toEqual(createList([
+      expect(expectRight(result)).toEqual(createList([
         createSymbol("quasiquote"),
         createList([
           createSymbol("a"),

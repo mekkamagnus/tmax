@@ -132,6 +132,7 @@ class HarnessError:
 
 @dataclass(frozen=True)
 class HarnessConfig:
+    run_id: str
     project_root: str
     test_dir: str
     socket_path: str
@@ -169,10 +170,15 @@ class AssertionResult:
     passed: bool
     message: str
     details: Option[str] = Nothing
+    status: str = ""
+
+    @property
+    def outcome(self) -> str:
+        return self.status or ("pass" if self.passed else "fail")
 
     @property
     def failed(self) -> bool:
-        return not self.passed
+        return self.outcome == "fail"
 
 
 @dataclass(frozen=True)
@@ -181,11 +187,19 @@ class AssertionSummary:
 
     @property
     def passed(self) -> int:
-        return sum(1 for r in self.results if r.passed)
+        return sum(1 for r in self.results if r.outcome == "pass")
 
     @property
     def failed(self) -> int:
         return sum(1 for r in self.results if r.failed)
+
+    @property
+    def skipped(self) -> int:
+        return sum(1 for r in self.results if r.outcome == "skip")
+
+    @property
+    def expected_failed(self) -> int:
+        return sum(1 for r in self.results if r.outcome == "xfail")
 
     @property
     def total(self) -> int:

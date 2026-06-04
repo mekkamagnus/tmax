@@ -42,10 +42,10 @@ def test_daemon_tmux_observability() -> tuple[AssertionResult, ...]:
 
     print(f"Mode: {state.config.mode}")
 
-    test_file = f"{state.config.project_root}/observability-test.txt"
+    test_file = f"{state.config.test_dir}/observability-test.txt"
     create_test_file(test_file, "Observed content")
 
-    start_result = start(state, "observability-test.txt")
+    start_result = start(state, test_file)
     if start_result.is_err():
         delete_test_file(test_file)
         err = start_result.unwrap_err()

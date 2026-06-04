@@ -1,4 +1,5 @@
 import { describe, test, expect, beforeEach } from "bun:test";
+import { expectRight } from "../helpers/editor-fixture.ts";
 import { createDiredOps } from "../../src/editor/api/dired-ops.ts";
 import { FunctionalTextBufferImpl } from "../../src/core/buffer.ts";
 import { createString, createList, createSymbol } from "../../src/tlisp/values.ts";
@@ -34,7 +35,7 @@ describe("Dired Operations", () => {
     ]);
     const result = fn([createString("/tmp"), entries]);
     expect(Either.isRight(result)).toBe(true);
-    const text = (result.right as any).value as string;
+    const text = (expectRight(result) as any).value as string;
     expect(text).toContain("/tmp");
   });
 
@@ -52,7 +53,7 @@ describe("Dired Operations", () => {
     const fn = ops.get("dired-parse-current-entry")!;
     const result = fn([]);
     expect(Either.isRight(result)).toBe(true);
-    const val = (result.right as any).value as string;
+    const val = (expectRight(result) as any).value as string;
     expect(val).toContain("file1.ts");
   });
 
@@ -61,7 +62,7 @@ describe("Dired Operations", () => {
     const fn = ops.get("dired-is-directory-p")!;
     const result = fn([createString("src/")]);
     expect(Either.isRight(result)).toBe(true);
-    expect((result.right as any).value).toBe(true);
+    expect((expectRight(result) as any).value).toBe(true);
   });
 
   test("dired-is-directory-p returns false for files", () => {
@@ -69,7 +70,7 @@ describe("Dired Operations", () => {
     const fn = ops.get("dired-is-directory-p")!;
     const result = fn([createString("file.ts")]);
     expect(Either.isRight(result)).toBe(true);
-    expect((result.right as any).value).toBe(false);
+    expect((expectRight(result) as any).value).toBe(false);
   });
 
   test("dired-toggle-mark takes mark argument", () => {

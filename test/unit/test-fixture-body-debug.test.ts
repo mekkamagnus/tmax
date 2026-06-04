@@ -9,11 +9,11 @@ describe("Debug Fixture Body", () => {
   let mockTerminal: MockTerminal;
   let mockFileSystem: MockFileSystem;
 
-  beforeEach(() => {
+  beforeEach(async () => {
     mockTerminal = new MockTerminal();
     mockFileSystem = new MockFileSystem();
     editor = new Editor(mockTerminal, mockFileSystem);
-    editor.start();
+    await editor.start();
     resetFixtureState();
   });
 
@@ -21,7 +21,7 @@ describe("Debug Fixture Body", () => {
     editor.stop();
   });
 
-  test("check if fixture body is stored", () => {
+  test("check if fixture body is stored", async () => {
     const interpreter = editor.getInterpreter();
 
     // Define fixture

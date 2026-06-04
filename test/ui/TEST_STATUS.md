@@ -1,67 +1,25 @@
-# UI Test Suite - Current Status
+# UI Test Suite Status
 
-## Date
-2026-06-02
+Updated: 2026-06-04
 
-## Summary
+The isolated Python harness is authoritative. The Bash harness remains only as
+legacy reference.
 
-The UI test harness supports the daemon/client architecture. Tests can now use `tmaxclient --eval` for reliable state queries instead of fragile tmux screen-scraping.
+| Category | Command | Contract |
+|----------|---------|----------|
+| Daemon API integration | `bun run test:daemon` | Direct JSON-RPC/T-Lisp state checks; no renderer claims |
+| Renderer E2E | `bun run test:ui:renderer` | Real tmux keys plus captured visible output |
+| Full Python suite | `bun run test:ui` | Both categories |
+| Harness helpers | `bun run test:ui:helpers` | Isolation, parsing, and assertion semantics |
 
-## Test Modes
+Each scenario uses a unique socket, tmux session, and temporary root. Cleanup
+only targets resources owned by that run and executes after success, failure,
+or timeout.
 
-| Mode | Status | Description |
-|------|--------|-------------|
-| `daemon-tmux` | Working | Start daemon, TUI in tmux, query via client |
-| `tmux` | Working | Start editor directly in tmux (legacy) |
-| `direct` | Working | Background process with output capture |
+Assertions report pass, fail, skip, and expected failure separately. Daemon
+query failures fail the scenario. Renderer assertions outside a renderer mode
+skip explicitly instead of passing.
 
-## Working Components
-
-### Infrastructure
-- **Daemon/client architecture**: `bin/tmax` starts daemon + TUI, `bin/tmaxclient` for queries
-- **Three test modes**: daemon-tmux (default), tmux, direct
-- **Daemon query functions**: `tmax_daemon_eval`, `tmax_daemon_mode`, `tmax_daemon_text`
-- **Daemon assertions**: `tmax_assert_daemon_mode`, `tmax_assert_daemon_text` (reliable, no screen-scraping)
-- **Tmux integration**: Tests run in visible windows within active tmux session
-- **Modular architecture**: Core, Operations, Assertions, API layers
-
-### Test Scripts
-- `test/ui/tests/01-startup.test.sh` - Application startup with daemon assertions
-- `test/ui/tests/02-basic-editing.test.sh` - Basic editing and file operations
-- `test/ui/tests/03-mode-switching.test.sh` - Mode transitions with daemon mode detection
-
-### T-Lisp Testing Framework
-- Full `deftest`/`test-run`/`test-run-all` lifecycle
-- 12+ assertion functions
-- Fixture system with setup/teardown and scopes (each/once/all)
-- Test suites with `defsuite`/`test-run-suite`
-- Coverage tracking
-- Async test support
-
-## How to Run
-
-```bash
-# From within a tmux session:
-bash test/ui/tests/01-startup.test.sh
-
-# Run all:
-bash test/ui/run-tests.sh
-
-# Override mode:
-TMAX_UI_TEST_MODE=direct bash test/ui/tests/01-startup.test.sh
-```
-
-## Files
-
-### Test Infrastructure
-- `test/ui/lib/config.sh` - Configuration with daemon mode support
-- `test/ui/core/editor.sh` - Editor lifecycle with daemon start/stop
-- `test/ui/core/query.sh` - Query functions with daemon and tmux backends
-- `test/ui/core/session.sh` - Tmux session management
-- `test/ui/core/input.sh` - Key input simulation
-- `test/ui/lib/api.sh` - High-level API including daemon functions
-
-### Documentation
-- `rules/testing.md` - Bun and T-Lisp testing rules
-- `rules/ui-testing.md` - UI testing rules and API reference
-- `test/ui/README.md` - Detailed harness documentation
+Current renderer coverage includes startup observability, layout, real-key Vim
+insert/editing behavior, splits, focus, resizing, tabs, and relative line
+numbers.

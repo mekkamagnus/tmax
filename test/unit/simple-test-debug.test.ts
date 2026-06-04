@@ -9,11 +9,11 @@ import { MockTerminal } from "../mocks/terminal.ts";
 import { MockFileSystem } from "../mocks/filesystem.ts";
 
 describe("Simple Test Debug", () => {
-  test("simple test definition and run", () => {
+  test("simple test definition and run", async () => {
     const mockTerminal = new MockTerminal();
     const mockFileSystem = new MockFileSystem();
     const editor = new Editor(mockTerminal, mockFileSystem);
-    editor.start();
+    await editor.start();
 
     const interpreter = editor.getInterpreter();
 

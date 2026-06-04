@@ -9,11 +9,11 @@ import { MockTerminal } from "../mocks/terminal.ts";
 import { MockFileSystem } from "../mocks/filesystem.ts";
 
 describe("Debug T-Lisp Testing Framework", () => {
-  test("debug deftest function", () => {
+  test("debug deftest function", async () => {
     const mockTerminal = new MockTerminal();
     const mockFileSystem = new MockFileSystem();
     const editor = new Editor(mockTerminal, mockFileSystem);
-    editor.start();
+    await editor.start();
 
     const interpreter = editor.getInterpreter();
 
@@ -27,11 +27,11 @@ describe("Debug T-Lisp Testing Framework", () => {
     editor.stop();
   });
 
-  test("debug assert-true function", () => {
+  test("debug assert-true function", async () => {
     const mockTerminal = new MockTerminal();
     const mockFileSystem = new MockFileSystem();
     const editor = new Editor(mockTerminal, mockFileSystem);
-    editor.start();
+    await editor.start();
 
     const interpreter = editor.getInterpreter();
 

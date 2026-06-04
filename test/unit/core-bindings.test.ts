@@ -16,7 +16,7 @@ describe("Core Bindings T-Lisp File", () => {
   test("should exist and be readable", async () => {
     const content = await readFile("src/tlisp/core-bindings.tlisp", "utf-8");
     expect(typeof content).toBe("string");
-    expect(content.length > 0).toBe(true, "Core bindings file should not be empty");
+    expect(content.length > 0).toBe(true);
   });
 
   test("should contain valid T-Lisp syntax", async () => {
@@ -35,7 +35,7 @@ describe("Core Bindings T-Lisp File", () => {
 
     // Count key-bind function calls
     const keyBindMatches = content.match(/\(key-bind/g);
-    expect(keyBindMatches?.length).toBe(16, "Should contain exactly 16 key-bind calls");
+    expect(keyBindMatches?.length).toBe(16);
   });
 
   test("should contain basic navigation bindings", async () => {
@@ -106,7 +106,7 @@ describe("Core Bindings T-Lisp File", () => {
     const content = await readFile("src/tlisp/core-bindings.tlisp", "utf-8");
 
     // Should not contain double-escaped strings like \\\"
-    expect(content.includes('\\\\"')).toBe(false, "Should not contain TypeScript string escaping");
-    expect(content.includes('\\\\n')).toBe(false, "Should not contain escaped newlines from TypeScript");
+    expect(content.includes('\\\\"')).toBe(false);
+    expect(content.includes('\\\\n')).toBe(false);
   });
 });

@@ -9,6 +9,7 @@
  */
 
 import { describe, test, expect, beforeEach } from 'bun:test';
+import { expectRight, expectTlispList, expectTlispString } from "../helpers/editor-fixture.ts";
 import { TLispInterpreterImpl } from '../../src/tlisp/interpreter';
 import { Editor } from '../../src/editor/editor';
 import { MockTerminal } from '../mocks/terminal.ts';
@@ -20,12 +21,12 @@ describe('Documentation System (US-4.2.1)', () => {
   let filesystem: MockFileSystem;
   let editor: Editor;
 
-  beforeEach(() => {
+  beforeEach(async () => {
     terminal = new MockTerminal();
     filesystem = new MockFileSystem();
     editor = new Editor(terminal, filesystem);
-    editor.start();
-    interpreter = (editor as any).interpreter;
+    await editor.start();
+    interpreter = editor.getInterpreter();
   });
 
   describe('documentation-list command', () => {
@@ -33,13 +34,13 @@ describe('Documentation System (US-4.2.1)', () => {
       const result = await interpreter.execute('(documentation-list)');
 
       expect(result._tag).toBe('Right');
-      expect(result.right.type).toBe('list');
-      expect(result.right.value.length).toBeGreaterThan(0);
+      expect(expectRight(result).type).toBe('list');
+      expect(expectTlispList(expectRight(result)).length).toBeGreaterThan(0);
     });
 
     test('should include core functions like buffer-save', async () => {
       const result = await interpreter.execute('(documentation-list)');
-      const docs = result.right.value;
+      const docs = expectTlispList(expectRight(result));
 
       const bufferSaveDoc = docs.find((d: any) =>
         d.value?.[0]?.type === 'string' && d.value[0].value === 'buffer-save'
@@ -50,12 +51,12 @@ describe('Documentation System (US-4.2.1)', () => {
 
     test('should include function metadata', async () => {
       const result = await interpreter.execute('(documentation-list)');
-      const docs = result.right.value;
+      const docs = expectTlispList(expectRight(result));
 
       // Each doc entry should be a list: [name, category, signature]
-      const firstDoc = docs[0];
+      const firstDoc = docs[0]!;
       expect(firstDoc.type).toBe('list');
-      expect(firstDoc.value.length).toBeGreaterThanOrEqual(2);
+      expect(expectTlispList(firstDoc).length).toBeGreaterThanOrEqual(2);
     });
   });
 
@@ -64,17 +65,17 @@ describe('Documentation System (US-4.2.1)', () => {
       const result = await interpreter.execute('(documentation-search "buffer")');
 
       expect(result._tag).toBe('Right');
-      expect(result.right.type).toBe('list');
-      expect(result.right.value.length).toBeGreaterThan(0);
+      expect(expectRight(result).type).toBe('list');
+      expect(expectTlispList(expectRight(result)).length).toBeGreaterThan(0);
     });
 
     test('should find tutorials and guides by keyword', async () => {
       const result = await interpreter.execute('(documentation-search "key bindings")');
 
       expect(result._tag).toBe('Right');
-      expect(result.right.type).toBe('list');
+      expect(expectRight(result).type).toBe('list');
 
-      const results = result.right.value;
+      const results = expectTlispList(expectRight(result));
       const hasGuide = results.some((r: any) =>
         r.value?.[1]?.type === 'string' && r.value[1].value === 'guide'
       );
@@ -86,15 +87,15 @@ describe('Documentation System (US-4.2.1)', () => {
       const result = await interpreter.execute('(documentation-search "xyz-nonexistent")');
 
       expect(result._tag).toBe('Right');
-      expect(result.right.type).toBe('list');
-      expect(result.right.value).toEqual([]);
+      expect(expectRight(result).type).toBe('list');
+      expect(expectTlispList(expectRight(result))).toEqual([]);
     });
 
     test('should be case-insensitive', async () => {
       const result1 = await interpreter.execute('(documentation-search "Buffer")');
       const result2 = await interpreter.execute('(documentation-search "buffer")');
 
-      expect(result1.right.value.length).toBe(result2.right.value.length);
+      expect(expectTlispList(expectRight(result1)).length).toBe(expectTlispList(expectRight(result2)).length);
     });
   });
 
@@ -103,15 +104,15 @@ describe('Documentation System (US-4.2.1)', () => {
       const result = await interpreter.execute('(documentation-get "buffer-save")');
 
       expect(result._tag).toBe('Right');
-      expect(result.right.type).toBe('string');
-      expect(result.right.value).toContain('buffer-save');
+      expect(expectRight(result).type).toBe('string');
+      expect(expectTlispString(expectRight(result))).toContain('buffer-save');
     });
 
     test('should show function description', async () => {
       const result = await interpreter.execute('(documentation-get "buffer-save")');
 
       expect(result._tag).toBe('Right');
-      const doc = result.right.value;
+      const doc = expectTlispString(expectRight(result));
       // Should contain description text
       expect(doc.length).toBeGreaterThan(10);
     });
@@ -120,7 +121,7 @@ describe('Documentation System (US-4.2.1)', () => {
       const result = await interpreter.execute('(documentation-get "buffer-save")');
 
       expect(result._tag).toBe('Right');
-      const doc = result.right.value;
+      const doc = expectRight(result).value;
       // Examples would be shown in the documentation
     });
 
@@ -128,7 +129,7 @@ describe('Documentation System (US-4.2.1)', () => {
       const result = await interpreter.execute('(documentation-get "buffer-save")');
 
       expect(result._tag).toBe('Right');
-      const doc = result.right.value;
+      const doc = expectRight(result).value;
       // Related functions like buffer-save-as, buffer-write might be listed
     });
 
@@ -136,14 +137,14 @@ describe('Documentation System (US-4.2.1)', () => {
       const result = await interpreter.execute('(documentation-get "nonexistent-function")');
 
       expect(result._tag).toBe('Right');
-      expect(result.right.value).toContain('not found');
+      expect(expectTlispString(expectRight(result))).toContain('not found');
     });
 
     test('should require function name argument', async () => {
       const result = await interpreter.execute('(documentation-get)');
 
       expect(result._tag).toBe('Right');
-      expect(result.right.value).toContain('Error');
+      expect(expectTlispString(expectRight(result))).toContain('Error');
     });
   });
 
@@ -152,13 +153,13 @@ describe('Documentation System (US-4.2.1)', () => {
       const result = await interpreter.execute('(documentation-categories)');
 
       expect(result._tag).toBe('Right');
-      expect(result.right.type).toBe('list');
-      expect(result.right.value.length).toBeGreaterThan(0);
+      expect(expectRight(result).type).toBe('list');
+      expect(expectTlispList(expectRight(result)).length).toBeGreaterThan(0);
     });
 
     test('should include common categories like editor, buffer, keymap', async () => {
       const result = await interpreter.execute('(documentation-categories)');
-      const categories = result.right.value;
+      const categories = expectTlispList(expectRight(result));
 
       const categoryStrings = categories.map((c: any) =>
         c.type === 'string' ? c.value : ''
@@ -174,22 +175,22 @@ describe('Documentation System (US-4.2.1)', () => {
       const result = await interpreter.execute('(documentation-by-category "buffer")');
 
       expect(result._tag).toBe('Right');
-      expect(result.right.type).toBe('list');
+      expect(expectRight(result).type).toBe('list');
     });
 
     test('should handle unknown category gracefully', async () => {
       const result = await interpreter.execute('(documentation-by-category "unknown-category")');
 
       expect(result._tag).toBe('Right');
-      expect(result.right.type).toBe('list');
-      expect(result.right.value).toEqual([]);
+      expect(expectRight(result).type).toBe('list');
+      expect(expectTlispList(expectRight(result))).toEqual([]);
     });
 
     test('should require category argument', async () => {
       const result = await interpreter.execute('(documentation-by-category)');
 
       expect(result._tag).toBe('Right');
-      expect(result.right.value).toContain('Error');
+      expect(expectTlispString(expectRight(result))).toContain('Error');
     });
   });
 });

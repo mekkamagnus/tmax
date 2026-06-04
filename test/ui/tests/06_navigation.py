@@ -30,10 +30,10 @@ def test_navigation() -> tuple[AssertionResult, ...]:
 
     # Create multi-line content
     content = "alpha beta gamma\ndelta epsilon\nzeta eta theta"
-    test_file = f"{state.config.project_root}/nav-test.txt"
+    test_file = f"{state.config.test_dir}/nav-test.txt"
     create_test_file(test_file, content)
 
-    start_result = start(state, "nav-test.txt")
+    start_result = start(state, test_file)
     if start_result.is_err():
         print(f"ERROR: {start_result.unwrap_err().message}")
         delete_test_file(test_file)

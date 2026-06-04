@@ -1,4 +1,5 @@
 import { describe, test, expect, beforeEach } from "bun:test";
+import { expectRight } from "../helpers/editor-fixture.ts";
 import { createReplaceOps } from "../../src/editor/api/replace-ops.ts";
 import { FunctionalTextBufferImpl } from "../../src/core/buffer.ts";
 import { createString, createNumber, createList } from "../../src/tlisp/values.ts";
@@ -27,7 +28,7 @@ describe("Query Replace Operations", () => {
     const fn = ops.get("replace-find-matches")!;
     const result = fn([createString("hello")]);
     expect(Either.isRight(result)).toBe(true);
-    const matches = (result.right as any).value as any[];
+    const matches = (expectRight(result) as any).value as any[];
     expect(matches.length).toBe(3);
     // Each match is (line startCol endCol)
     const first = matches[0].value as any[];
@@ -41,7 +42,7 @@ describe("Query Replace Operations", () => {
     const fn = ops.get("replace-find-matches")!;
     const result = fn([createString("xyz")]);
     expect(Either.isRight(result)).toBe(true);
-    const matches = (result.right as any).value as any[];
+    const matches = (expectRight(result) as any).value as any[];
     expect(matches.length).toBe(0);
   });
 
@@ -57,7 +58,7 @@ describe("Query Replace Operations", () => {
     expect(Either.isRight(result)).toBe(true);
     const content = buffer.getContent();
     if (Either.isRight(content)) {
-      expect(content.right).toContain("HELLO world");
+      expect(expectRight(content)).toContain("HELLO world");
     }
   });
 
@@ -66,7 +67,7 @@ describe("Query Replace Operations", () => {
     // Step 1: find matches
     const findResult = ops.get("replace-find-matches")!([createString("hello")]);
     expect(Either.isRight(findResult)).toBe(true);
-    const matches = findResult.right;
+    const matches = expectRight(findResult);
 
     // Step 2: init state with find, replace, matches
     const initResult = ops.get("replace-state-init")!([createString("hello"), createString("HI"), matches]);
@@ -77,17 +78,17 @@ describe("Query Replace Operations", () => {
     expect(Either.isRight(result)).toBe(true);
     const content = buffer.getContent();
     if (Either.isRight(content)) {
-      expect(content.right).toContain("HI world");
-      expect(content.right).toContain("HI there");
-      expect(content.right).toContain("HI goodbye");
-      expect(content.right).not.toContain("hello");
+      expect(expectRight(content)).toContain("HI world");
+      expect(expectRight(content)).toContain("HI there");
+      expect(expectRight(content)).toContain("HI goodbye");
+      expect(expectRight(content)).not.toContain("hello");
     }
   });
 
   test("replace-exit clears state", () => {
     const ops = getOps();
     const findResult = ops.get("replace-find-matches")!([createString("hello")]);
-    ops.get("replace-state-init")!([createString("hello"), createString("HI"), findResult.right]);
+    ops.get("replace-state-init")!([createString("hello"), createString("HI"), expectRight(findResult)]);
     const result = ops.get("replace-exit")!([]);
     expect(Either.isRight(result)).toBe(true);
   });

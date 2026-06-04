@@ -1,4 +1,5 @@
 import { test, expect } from "bun:test";
+import { expectRight } from "../helpers/editor-fixture.ts";
 import { TLispParser } from "../../src/tlisp/parser";
 import { Either } from "../../src/utils/task-either";
 
@@ -8,8 +9,8 @@ test("should parse valid expressions successfully", () => {
   // After refactoring, this should return Either<ParseError, TLispValue>
   expect(result).toBeDefined();
   expect('right' in result).toBe(true); // Should be a right (success) Either
-  expect(result.right?.type).toBe("number");
-  expect(result.right?.value).toBe(42);
+  expect(expectRight(result)?.type).toBe("number");
+  expect(expectRight(result)?.value).toBe(42);
 });
 
 test("should handle unmatched closing parenthesis error", () => {

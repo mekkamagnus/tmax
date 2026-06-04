@@ -52,9 +52,9 @@ interface TestDependencies {
 describe("Pipeline Pattern Tests", () => {
   test("should compose operations with pipeline builder", async () => {
     const result = await pipe
-      .start(5)
+      .from(TaskEither.right<number, string>(5))
       .map(x => x * 2)
-      .step(x => TaskEither.right<number, never>(x + 3))
+      .step(x => TaskEither.right<number, string>(x + 3))
       .filter(x => x > 10, "TOO_SMALL" as const)
       .map(x => x.toString())
       .run();
@@ -67,7 +67,7 @@ describe("Pipeline Pattern Tests", () => {
 
   test("should handle errors in pipeline", async () => {
     const result = await pipe
-      .start("hello")
+      .from(TaskEither.right<string, string>("hello"))
       .step(() => TaskEither.left<string, string>("ERROR"))
       .map(x => x.toUpperCase())
       .run();
@@ -120,7 +120,7 @@ describe("Pipeline Pattern Tests", () => {
 
 describe("Validation Pattern Tests", () => {
   test("should accumulate validation errors", () => {
-    const nameValidation = ValidationUtils.required(null, "Name is required");
+    const nameValidation = ValidationUtils.required<string>(null, "Name is required");
     const emailValidation = ValidationUtils.required("", "Email is required")
       .flatMap(email => ValidationUtils.nonEmpty(email, "Email cannot be empty"));
     const ageValidation = ValidationUtils.numberInRange(-5, 0, 120, "Age must be 0-120");
@@ -574,7 +574,7 @@ describe("Integration Tests", () => {
 
     // Invalid user data that will fail validation
     const validation = lift2((name: string) => (email: string) => ({ name, email }))
-      (ValidationUtils.required(null, "Name is required"))
+      (ValidationUtils.required<string>(null, "Name is required"))
       (ValidationUtils.email("invalid-email"));
 
     if (validation.isFailure()) {

@@ -5,6 +5,7 @@
  */
 
 import { describe, test, expect, beforeEach, afterEach } from "bun:test";
+import { expectDefined, expectRight, expectTlispList, expectTlispNumber } from "../helpers/editor-fixture.ts";
 import { Editor } from "../../src/editor/editor.ts";
 import { MockTerminal } from "../mocks/terminal.ts";
 import { MockFileSystem } from "../mocks/filesystem.ts";
@@ -15,11 +16,11 @@ describe("T-Lisp Fixture System (US-0.6.2)", () => {
   let mockTerminal: MockTerminal;
   let mockFileSystem: MockFileSystem;
 
-  beforeEach(() => {
+  beforeEach(async () => {
     mockTerminal = new MockTerminal();
     mockFileSystem = new MockFileSystem();
     editor = new Editor(mockTerminal, mockFileSystem);
-    editor.start();
+    await editor.start();
     // Reset all test state for clean isolation
     resetAllTestState(editor.getInterpreter());
   });
@@ -33,54 +34,54 @@ describe("T-Lisp Fixture System (US-0.6.2)", () => {
   }
 
   describe("deffixture - Fixture Definition", () => {
-    test("deffixture defines a simple fixture", () => {
+    test("deffixture defines a simple fixture", async () => {
       const interpreter = getInterpreter();
       const result = interpreter.execute('(deffixture simple-fixture () (defvar x 10))');
 
       expect(result).toBeDefined();
       expect(result._tag).toBe("Right");
-      expect(result.right.type).toBe("symbol");
-      expect(result.right.value).toBe("simple-fixture");
+      expect(expectRight(result).type).toBe("symbol");
+      expect(expectRight(result).value).toBe("simple-fixture");
     });
 
-    test("deffixture returns fixture name", () => {
+    test("deffixture returns fixture name", async () => {
       const interpreter = getInterpreter();
       const result = interpreter.execute('(deffixture my-fixture () (defvar data 42))');
 
       expect(result._tag).toBe("Right");
-      expect(result.right.type).toBe("symbol");
-      expect(result.right.value).toBe("my-fixture");
+      expect(expectRight(result).type).toBe("symbol");
+      expect(expectRight(result).value).toBe("my-fixture");
     });
 
-    test("deffixture with parameters", () => {
+    test("deffixture with parameters", async () => {
       const interpreter = getInterpreter();
       const result = interpreter.execute('(deffixture param-fixture (name value) (defvar name value))');
 
       expect(result._tag).toBe("Right");
-      expect(result.right.type).toBe("symbol");
-      expect(result.right.value).toBe("param-fixture");
+      expect(expectRight(result).type).toBe("symbol");
+      expect(expectRight(result).value).toBe("param-fixture");
     });
 
-    test("deffixture stores setup and teardown code", () => {
+    test("deffixture stores setup and teardown code", async () => {
       const interpreter = getInterpreter();
       const result = interpreter.execute('(deffixture complex-fixture () (setup (defvar setup-called t)) (teardown (defvar teardown-called t)))');
 
       expect(result._tag).toBe("Right");
-      expect(result.right.type).toBe("symbol");
-      expect(result.right.value).toBe("complex-fixture");
+      expect(expectRight(result).type).toBe("symbol");
+      expect(expectRight(result).value).toBe("complex-fixture");
     });
 
-    test("deffixture can return test data", () => {
+    test("deffixture can return test data", async () => {
       const interpreter = getInterpreter();
       const result = interpreter.execute('(deffixture data-fixture () (list 1 2 3))');
 
       expect(result._tag).toBe("Right");
-      expect(result.right.type).toBe("symbol");
+      expect(expectRight(result).type).toBe("symbol");
     });
   });
 
   describe("use-fixtures - Applying Fixtures to Tests", () => {
-    test("use-fixtures applies single fixture to test", () => {
+    test("use-fixtures applies single fixture to test", async () => {
       const interpreter = getInterpreter();
 
       // Define fixture
@@ -93,11 +94,11 @@ describe("T-Lisp Fixture System (US-0.6.2)", () => {
       const result = interpreter.execute('(test-run "test-with-x")');
 
       expect(result._tag).toBe("Right");
-      expect(result.right.type).toBe("boolean");
-      expect(result.right.value).toBe(true);
+      expect(expectRight(result).type).toBe("boolean");
+      expect(expectRight(result).value).toBe(true);
     });
 
-    test("use-fixtures applies multiple fixtures in order", () => {
+    test("use-fixtures applies multiple fixtures in order", async () => {
       const interpreter = getInterpreter();
 
       interpreter.execute('(deffixture setup-first () (defvar first 1))');
@@ -107,11 +108,11 @@ describe("T-Lisp Fixture System (US-0.6.2)", () => {
       const result = interpreter.execute('(test-run "test-with-both")');
 
       expect(result._tag).toBe("Right");
-      expect(result.right.type).toBe("boolean");
-      expect(result.right.value).toBe(true);
+      expect(expectRight(result).type).toBe("boolean");
+      expect(expectRight(result).value).toBe(true);
     });
 
-    test("use-fixtures fixture cleanup executes after test", () => {
+    test("use-fixtures fixture cleanup executes after test", async () => {
       const interpreter = getInterpreter();
 
       interpreter.execute('(deffixture with-teardown () (defvar value 10) (teardown (set! value 0)))');
@@ -120,13 +121,13 @@ describe("T-Lisp Fixture System (US-0.6.2)", () => {
       const result = interpreter.execute('(test-run "test-cleanup")');
 
       expect(result._tag).toBe("Right");
-      expect(result.right.type).toBe("boolean");
-      expect(result.right.value).toBe(true);
+      expect(expectRight(result).type).toBe("boolean");
+      expect(expectRight(result).value).toBe(true);
     });
   });
 
   describe("Fixture Lifecycle Management", () => {
-    test("fixture setup executes before test", () => {
+    test("fixture setup executes before test", async () => {
       const interpreter = getInterpreter();
 
       interpreter.execute('(deffixture with-setup () (defvar setup-ran nil) (setup (set! setup-ran t)))');
@@ -135,11 +136,11 @@ describe("T-Lisp Fixture System (US-0.6.2)", () => {
       const result = interpreter.execute('(test-run "test-setup-executes")');
 
       expect(result._tag).toBe("Right");
-      expect(result.right.type).toBe("boolean");
-      expect(result.right.value).toBe(true);
+      expect(expectRight(result).type).toBe("boolean");
+      expect(expectRight(result).value).toBe(true);
     });
 
-    test("fixture teardown executes after test even on failure", () => {
+    test("fixture teardown executes after test even on failure", async () => {
       const interpreter = getInterpreter();
 
       interpreter.execute('(deffixture with-teardown () (defvar cleaned-up nil) (teardown (set! cleaned-up t)))');
@@ -149,11 +150,11 @@ describe("T-Lisp Fixture System (US-0.6.2)", () => {
 
       // Test should fail
       expect(result._tag).toBe("Right");
-      expect(result.right.type).toBe("boolean");
-      expect(result.right.value).toBe(false);
+      expect(expectRight(result).type).toBe("boolean");
+      expect(expectRight(result).value).toBe(false);
     });
 
-    test("multiple fixtures set up in order", () => {
+    test("multiple fixtures set up in order", async () => {
       const interpreter = getInterpreter();
 
       interpreter.execute('(deffixture fixture-a () (defvar order-a 0) (setup (set! order-a 1)))');
@@ -163,11 +164,11 @@ describe("T-Lisp Fixture System (US-0.6.2)", () => {
       const result = interpreter.execute('(test-run "test-order")');
 
       expect(result._tag).toBe("Right");
-      expect(result.right.type).toBe("boolean");
-      expect(result.right.value).toBe(true);
+      expect(expectRight(result).type).toBe("boolean");
+      expect(expectRight(result).value).toBe(true);
     });
 
-    test("fixtures tear down in reverse order", () => {
+    test("fixtures tear down in reverse order", async () => {
       const interpreter = getInterpreter();
 
       interpreter.execute('(deffixture teardown-a () (defvar a-teardown 0) (teardown (set! a-teardown 1)))');
@@ -177,13 +178,13 @@ describe("T-Lisp Fixture System (US-0.6.2)", () => {
       const result = interpreter.execute('(test-run "test-teardown-order")');
 
       expect(result._tag).toBe("Right");
-      expect(result.right.type).toBe("boolean");
-      expect(result.right.value).toBe(true);
+      expect(expectRight(result).type).toBe("boolean");
+      expect(expectRight(result).value).toBe(true);
     });
   });
 
   describe("Fixture Scope Controls", () => {
-    test("fixture with each scope runs for each test", () => {
+    test("fixture with each scope runs for each test", async () => {
       const interpreter = getInterpreter();
 
       interpreter.execute('(deffixture each-fixture (:scope each) (defvar counter 0) (setup (set! counter (+ counter 1))))');
@@ -193,12 +194,12 @@ describe("T-Lisp Fixture System (US-0.6.2)", () => {
       const result = interpreter.execute('(test-run-all)');
 
       expect(result._tag).toBe("Right");
-      expect(result.right.type).toBe("list");
-      const counts = result.right.value;
-      expect(counts[2].value).toBeGreaterThanOrEqual(2); // At least 2 tests
+      expect(expectRight(result).type).toBe("list");
+      const counts = expectTlispList(expectRight(result));
+      expect(expectTlispNumber(expectDefined(counts[2]))).toBeGreaterThanOrEqual(2); // At least 2 tests
     });
 
-    test("fixture with once scope runs only once", () => {
+    test("fixture with once scope runs only once", async () => {
       const interpreter = getInterpreter();
 
       interpreter.execute('(deffixture once-fixture (:scope once) (defvar ran-once 0) (setup (set! ran-once (+ ran-once 1))))');
@@ -208,10 +209,10 @@ describe("T-Lisp Fixture System (US-0.6.2)", () => {
       const result = interpreter.execute('(test-run-all)');
 
       expect(result._tag).toBe("Right");
-      expect(result.right.type).toBe("list");
+      expect(expectRight(result).type).toBe("list");
     });
 
-    test("fixture with all scope runs before all tests", () => {
+    test("fixture with all scope runs before all tests", async () => {
       const interpreter = getInterpreter();
 
       interpreter.execute('(deffixture all-fixture (:scope all) (defvar all-setup nil) (setup (set! all-setup t)))');
@@ -221,12 +222,12 @@ describe("T-Lisp Fixture System (US-0.6.2)", () => {
       const result = interpreter.execute('(test-run-all)');
 
       expect(result._tag).toBe("Right");
-      expect(result.right.type).toBe("list");
+      expect(expectRight(result).type).toBe("list");
     });
   });
 
   describe("Fixture Error Handling", () => {
-    test("failed fixture setup skips test", () => {
+    test("failed fixture setup skips test", async () => {
       const interpreter = getInterpreter();
 
       // Note: Division by zero might not error in T-Lisp, so we use a different approach
@@ -237,11 +238,11 @@ describe("T-Lisp Fixture System (US-0.6.2)", () => {
 
       // Test should fail because setup failed
       expect(result._tag).toBe("Right");
-      expect(result.right.type).toBe("boolean");
-      expect(result.right.value).toBe(false);
+      expect(expectRight(result).type).toBe("boolean");
+      expect(expectRight(result).value).toBe(false);
     });
 
-    test("fixture teardown failure is logged but doesn't stop test", () => {
+    test("fixture teardown failure is logged but doesn't stop test", async () => {
       const interpreter = getInterpreter();
 
       interpreter.execute('(deffixture failing-teardown () (defvar x 1) (teardown (assert-true nil)))');
@@ -251,13 +252,13 @@ describe("T-Lisp Fixture System (US-0.6.2)", () => {
 
       // Test should pass even though teardown fails
       expect(result._tag).toBe("Right");
-      expect(result.right.type).toBe("boolean");
-      expect(result.right.value).toBe(true);
+      expect(expectRight(result).type).toBe("boolean");
+      expect(expectRight(result).value).toBe(true);
     });
   });
 
   describe("Fixture Return Values", () => {
-    test("fixture can return test data", () => {
+    test("fixture can return test data", async () => {
       const interpreter = getInterpreter();
 
       interpreter.execute('(deffixture data-provider () (list "name" "value"))');
@@ -266,11 +267,11 @@ describe("T-Lisp Fixture System (US-0.6.2)", () => {
       const result = interpreter.execute('(test-run "test-with-fixture-data")');
 
       expect(result._tag).toBe("Right");
-      expect(result.right.type).toBe("boolean");
-      expect(result.right.value).toBe(true);
+      expect(expectRight(result).type).toBe("boolean");
+      expect(expectRight(result).value).toBe(true);
     });
 
-    test("fixture return value accessible in test", () => {
+    test("fixture return value accessible in test", async () => {
       const interpreter = getInterpreter();
 
       interpreter.execute('(deffixture config-fixture () (defvar config-value 42))');
@@ -279,13 +280,13 @@ describe("T-Lisp Fixture System (US-0.6.2)", () => {
       const result = interpreter.execute('(test-run "test-fixture-return-value")');
 
       expect(result._tag).toBe("Right");
-      expect(result.right.type).toBe("boolean");
-      expect(result.right.value).toBe(true);
+      expect(expectRight(result).type).toBe("boolean");
+      expect(expectRight(result).value).toBe(true);
     });
   });
 
   describe("Integration with Existing Test Framework", () => {
-    test("fixtures work with setup/teardown functions", () => {
+    test("fixtures work with setup/teardown functions", async () => {
       const interpreter = getInterpreter();
 
       interpreter.execute('(deffixture integrated-fixture () (defvar from-fixture t))');
@@ -296,11 +297,11 @@ describe("T-Lisp Fixture System (US-0.6.2)", () => {
       const result = interpreter.execute('(test-run "test-integration")');
 
       expect(result._tag).toBe("Right");
-      expect(result.right.type).toBe("boolean");
-      expect(result.right.value).toBe(true);
+      expect(expectRight(result).type).toBe("boolean");
+      expect(expectRight(result).value).toBe(true);
     });
 
-    test("fixtures work with all assertion types", () => {
+    test("fixtures work with all assertion types", async () => {
       const interpreter = getInterpreter();
 
       interpreter.execute('(deffixture test-data () (defvar my-list (list 1 2 3)) (defvar my-string "hello") (defvar my-num 42))');
@@ -309,8 +310,8 @@ describe("T-Lisp Fixture System (US-0.6.2)", () => {
       const result = interpreter.execute('(test-run "test-fixture-assertions")');
 
       expect(result._tag).toBe("Right");
-      expect(result.right.type).toBe("boolean");
-      expect(result.right.value).toBe(true);
+      expect(expectRight(result).type).toBe("boolean");
+      expect(expectRight(result).value).toBe(true);
     });
   });
 });

@@ -10,6 +10,7 @@
  */
 
 import { describe, test, expect, beforeEach } from "bun:test";
+import { expectRight } from "../helpers/editor-fixture.ts";
 import { Either } from "../../src/utils/task-either.ts";
 import { createUndoTreeOps, resetUndoTreeState, setInitialBuffer as setTreeInitialBuffer } from "../../src/editor/api/undo-tree.ts";
 import type { FunctionalTextBuffer } from "../../src/core/types.ts";
@@ -80,7 +81,7 @@ class MockBuffer implements FunctionalTextBuffer {
     if (Either.isLeft(deleteResult)) {
       return deleteResult;
     }
-    return deleteResult.right.insert(range.start, text);
+    return expectRight(deleteResult).insert(range.start, text);
   }
 
   getText(range: { start: { line: number; column: number }; end: { line: number; column: number } }): Either<string, string> {
@@ -165,7 +166,7 @@ describe("Undo Tree Operations", () => {
       expect(Either.isRight(treeResult)).toBe(true);
 
       // Tree should show branches: A→B→C and A→D
-      const tree = treeResult.right;
+      const tree = expectRight(treeResult);
       expect(tree.type).toBe('list');
       expect(tree.value).toHaveProperty('length');
 
@@ -215,7 +216,7 @@ describe("Undo Tree Operations", () => {
       expect(Either.isRight(treeResult)).toBe(true);
 
       // Should have branches: initial→A, initial→B, initial→C
-      const tree = treeResult.right;
+      const tree = expectRight(treeResult);
       const nodes = tree.value as any[];
 
       const findNode = (name: string) => nodes.find((n: any) =>
@@ -259,7 +260,7 @@ describe("Undo Tree Operations", () => {
       // Buffer should be at C state
       const contentResult = currentBuffer!.getContent();
       expect(Either.isRight(contentResult)).toBe(true);
-      expect(contentResult.right).toBe("Edit C\nLine 2\nLine 3");
+      expect(expectRight(contentResult)).toBe("Edit C\nLine 2\nLine 3");
     });
 
     test("switches between branches at branch point", () => {
@@ -288,7 +289,7 @@ describe("Undo Tree Operations", () => {
       // Buffer should be at B state
       let contentResult = currentBuffer!.getContent();
       expect(Either.isRight(contentResult)).toBe(true);
-      expect(contentResult.right).toBe("Edit B\nLine 2\nLine 3");
+      expect(expectRight(contentResult)).toBe("Edit B\nLine 2\nLine 3");
 
       // Navigate to C
       gotoFunc([{ type: 'number', value: 2 }]);
@@ -296,7 +297,7 @@ describe("Undo Tree Operations", () => {
       // Buffer should be at C state
       contentResult = currentBuffer!.getContent();
       expect(Either.isRight(contentResult)).toBe(true);
-      expect(contentResult.right).toBe("Edit C\nLine 2\nLine 3");
+      expect(expectRight(contentResult)).toBe("Edit C\nLine 2\nLine 3");
     });
   });
 
@@ -326,7 +327,7 @@ describe("Undo Tree Operations", () => {
       const treeResult = treeFunc([]);
       expect(Either.isRight(treeResult)).toBe(true);
 
-      const tree = treeResult.right;
+      const tree = expectRight(treeResult);
       expect(tree.type).toBe('list');
 
       // Should show parent-child relationships
@@ -347,7 +348,7 @@ describe("Undo Tree Operations", () => {
       const currentResult = currentFunc([]);
       expect(Either.isRight(currentResult)).toBe(true);
 
-      const current = currentResult.right;
+      const current = expectRight(currentResult);
       expect(current.type).toBe('number');
       expect(current.value).toBe(0); // Should be at index 0 (edit A)
     });
@@ -377,7 +378,7 @@ describe("Undo Tree Operations", () => {
       const branchesResult = branchesFunc([{ type: 'number', value: 0 }]);
       expect(Either.isRight(branchesResult)).toBe(true);
 
-      const branches = branchesResult.right;
+      const branches = expectRight(branchesResult);
       expect(branches.type).toBe('list');
 
       // Should have 2 branches from A: B and D
@@ -405,7 +406,7 @@ describe("Undo Tree Operations", () => {
       const nodesResult = nodesFunc([]);
       expect(Either.isRight(nodesResult)).toBe(true);
 
-      const nodes = nodesResult.right;
+      const nodes = expectRight(nodesResult);
       expect(nodes.type).toBe('number');
       expect(nodes.value).toBe(3); // A, B, C
     });
@@ -427,7 +428,7 @@ describe("Undo Tree Operations", () => {
       // Should have 0 nodes
       const nodesResult = nodesFunc([]);
       expect(Either.isRight(nodesResult)).toBe(true);
-      expect(nodesResult.right.value).toBe(0);
+      expect(expectRight(nodesResult).value).toBe(0);
     });
   });
 
@@ -454,7 +455,7 @@ describe("Undo Tree Operations", () => {
       // Should be at A
       let contentResult = currentBuffer!.getContent();
       expect(Either.isRight(contentResult)).toBe(true);
-      expect(contentResult.right).toBe("Edit A\nLine 2\nLine 3");
+      expect(expectRight(contentResult)).toBe("Edit A\nLine 2\nLine 3");
 
       // Redo
       redoFunc([]);
@@ -462,7 +463,7 @@ describe("Undo Tree Operations", () => {
       // Should be at B
       contentResult = currentBuffer!.getContent();
       expect(Either.isRight(contentResult)).toBe(true);
-      expect(contentResult.right).toBe("Edit B\nLine 2\nLine 3");
+      expect(expectRight(contentResult)).toBe("Edit B\nLine 2\nLine 3");
     });
   });
 });

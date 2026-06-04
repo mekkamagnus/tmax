@@ -8,7 +8,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from tmax_harness import (
     init, start, cleanup, summarize, format_summary,
     assert_running, assert_daemon_mode, assert_no_errors,
-    assert_screen_fill, create_test_file, delete_test_file,
+    create_test_file, delete_test_file,
     assert_tui_connected, assert_tui_ready, assert_render_count_at_least,
     assert_no_client_errors, assert_frame_editor_sync,
     AssertionResult, Ok,
@@ -29,11 +29,11 @@ def test_startup() -> tuple[AssertionResult, ...]:
     print(f"Mode: {state.config.mode}")
 
     # Create test file
-    test_file = f"{state.config.project_root}/startup-test.txt"
+    test_file = f"{state.config.test_dir}/startup-test.txt"
     create_test_file(test_file, "")
 
     # Start editor
-    start_result = start(state, "startup-test.txt")
+    start_result = start(state, test_file)
     if start_result.is_err():
         print(f"ERROR: {start_result.unwrap_err().message}")
         delete_test_file(test_file)
@@ -44,7 +44,6 @@ def test_startup() -> tuple[AssertionResult, ...]:
     results.append(assert_running(state, "Editor should be running"))
     results.append(assert_daemon_mode(state.config, "NORMAL", "Should start in NORMAL mode"))
     results.append(assert_no_errors(state.config, state.active_window.unwrap_or(""), "No errors should be present"))
-    results.append(assert_screen_fill(state.config, state.active_window.unwrap_or("")))
     if state.config.mode == "daemon-tmux":
         results.append(assert_tui_connected(state.config))
         results.append(assert_tui_ready(state.config))

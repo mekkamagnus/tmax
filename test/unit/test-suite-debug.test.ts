@@ -3,11 +3,11 @@ import { Editor } from "../../src/editor/editor.ts";
 import { MockTerminal } from "../mocks/terminal.ts";
 import { MockFileSystem } from "../mocks/filesystem.ts";
 
-test("debug suite setup", () => {
+test("debug suite setup", async () => {
   const mockTerminal = new MockTerminal();
   const mockFileSystem = new MockFileSystem();
   const editor = new Editor(mockTerminal, mockFileSystem);
-  editor.start();
+  await editor.start();
 
   const interpreter = (editor as any).interpreter;
   

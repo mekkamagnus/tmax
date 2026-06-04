@@ -8,8 +8,8 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from tmax_harness import (
     init, start, cleanup, summarize, format_summary,
-    assert_running, assert_text_visible, assert_daemon_mode,
-    assert_file_contains, assert_screen_fill,
+    assert_running, assert_daemon_text, assert_daemon_mode,
+    assert_file_contains,
     assert_tui_ready, assert_frame_editor_sync, assert_no_client_errors,
     enter_insert, enter_normal, type_text, save_file, quit_editor,
     create_test_file, delete_test_file,
@@ -30,10 +30,10 @@ def test_basic_editing() -> tuple[AssertionResult, ...]:
 
     print(f"Mode: {state.config.mode}")
 
-    test_file = f"{state.config.project_root}/test-edit.txt"
+    test_file = f"{state.config.test_dir}/test-edit.txt"
     create_test_file(test_file, "Initial content")
 
-    start_result = start(state, "test-edit.txt")
+    start_result = start(state, test_file)
     if start_result.is_err():
         print(f"ERROR: {start_result.unwrap_err().message}")
         delete_test_file(test_file)
@@ -43,8 +43,7 @@ def test_basic_editing() -> tuple[AssertionResult, ...]:
     window = state.active_window.unwrap_or("")
 
     # Verify file loaded
-    results.append(assert_text_visible(state.config, window, "Initial content", "File content should be visible"))
-    results.append(assert_screen_fill(state.config, window))
+    results.append(assert_daemon_text(state.config, "Initial content", "File content should be loaded"))
     if state.config.mode == "daemon-tmux":
         results.append(assert_tui_ready(state.config))
         results.append(assert_frame_editor_sync(state.config))

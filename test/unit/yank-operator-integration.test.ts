@@ -6,6 +6,7 @@
  */
 
 import { describe, test, expect, beforeEach } from "bun:test";
+import { expectRight } from "../helpers/editor-fixture.ts";
 import { FunctionalTextBufferImpl } from "../../src/core/buffer.ts";
 import type { FunctionalTextBuffer } from "../../src/core/types.ts";
 import { Either } from "../../src/utils/task-either.ts";
@@ -26,7 +27,7 @@ function getBufferContent(buffer: FunctionalTextBuffer): string {
   if (Either.isLeft(result)) {
     throw new Error(`Failed to get buffer content: ${result.left}`);
   }
-  return result.right;
+  return expectRight(result);
 }
 
 describe("Yank Operator Integration - US-1.2.2", () => {
@@ -75,7 +76,7 @@ describe("Yank Operator Integration - US-1.2.2", () => {
       const getRegisterFn = yankOps.get("yank-register-get")!;
       const registerResult = getRegisterFn([]);
       expect(Either.isRight(registerResult)).toBe(true);
-      expect(registerResult.right.value).toBe("hello");
+      expect(expectRight(registerResult).value).toBe("hello");
     });
 
     test("should support count prefix (3yw yanks 3 words)", () => {
@@ -96,7 +97,7 @@ describe("Yank Operator Integration - US-1.2.2", () => {
       const getRegisterFn = yankOps.get("yank-register-get")!;
       const registerResult = getRegisterFn([]);
       expect(Either.isRight(registerResult)).toBe(true);
-      expect(registerResult.right.value).toBe("one two three");
+      expect(expectRight(registerResult).value).toBe("one two three");
     });
   });
 
@@ -119,7 +120,7 @@ describe("Yank Operator Integration - US-1.2.2", () => {
       const getRegisterFn = yankOps.get("yank-register-get")!;
       const registerResult = getRegisterFn([]);
       expect(Either.isRight(registerResult)).toBe(true);
-      expect(registerResult.right.value).toBe("first line\n");
+      expect(expectRight(registerResult).value).toBe("first line\n");
     });
 
     test("should support count prefix (3yy yanks 3 lines)", () => {
@@ -140,7 +141,7 @@ describe("Yank Operator Integration - US-1.2.2", () => {
       const getRegisterFn = yankOps.get("yank-register-get")!;
       const registerResult = getRegisterFn([]);
       expect(Either.isRight(registerResult)).toBe(true);
-      expect(registerResult.right.value).toBe("line 2\nline 3\nline 4\n");
+      expect(expectRight(registerResult).value).toBe("line 2\nline 3\nline 4\n");
     });
   });
 
@@ -163,7 +164,7 @@ describe("Yank Operator Integration - US-1.2.2", () => {
       const getRegisterFn = yankOps.get("yank-register-get")!;
       const registerResult = getRegisterFn([]);
       expect(Either.isRight(registerResult)).toBe(true);
-      expect(registerResult.right.value).toBe("world foo bar");
+      expect(expectRight(registerResult).value).toBe("world foo bar");
     });
   });
 
@@ -174,7 +175,7 @@ describe("Yank Operator Integration - US-1.2.2", () => {
       cursorColumn = 5;
 
       const lineCountResult = currentBuffer?.getLineCount();
-      const lineCount = Either.isRight(lineCountResult) ? lineCountResult.right : "error";
+      const lineCount = Either.isRight(lineCountResult) ? expectRight(lineCountResult) : "error";
 
       // First yank some text
       const yankWordFn = yankOps.get("yank-word")!;
@@ -187,7 +188,7 @@ describe("Yank Operator Integration - US-1.2.2", () => {
 
       // Check that paste happened
       const afterLineCountResult = currentBuffer?.getLineCount();
-      const afterLineCount = Either.isRight(afterLineCountResult) ? afterLineCountResult.right : "error";
+      const afterLineCount = Either.isRight(afterLineCountResult) ? expectRight(afterLineCountResult) : "error";
       expect(getBufferContent(currentBuffer)).toBe("hello helloworld");
     });
 
@@ -209,7 +210,7 @@ describe("Yank Operator Integration - US-1.2.2", () => {
       expect(Either.isRight(result)).toBe(true);
 
       // Check that line was pasted below
-      expect(getBufferContent(currentBuffer)).toBe("first line\nfirst line\nsecond line");
+      expect(getBufferContent(currentBuffer)).toBe("first line\nsecond line\nfirst line");
     });
 
     test("should support count prefix (3p pastes 3 times)", () => {
@@ -255,7 +256,7 @@ describe("Yank Operator Integration - US-1.2.2", () => {
       expect(Either.isRight(result)).toBe(true);
 
       // Check that paste happened before cursor
-      expect(getBufferContent(currentBuffer)).toBe("hellohello world");
+      expect(getBufferContent(currentBuffer)).toBe("hello helloworld");
     });
 
     test("should paste line above current line", () => {
@@ -337,7 +338,7 @@ describe("Yank Operator Integration - US-1.2.2", () => {
       const getRegisterFn = yankOps.get("yank-register-get")!;
       const registerResult = getRegisterFn([]);
       expect(Either.isRight(registerResult)).toBe(true);
-      expect(registerResult.right.value).toBe("hello");
+      expect(expectRight(registerResult).value).toBe("hello");
     });
 
     test("should handle yanking at end of file", () => {

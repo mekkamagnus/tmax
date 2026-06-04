@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import os
+import re
 import shutil
 import subprocess
+import uuid
 from pathlib import Path
 
 from .types import HarnessConfig, Option, Some, Nothing
@@ -69,21 +71,32 @@ def load_config(overrides: dict | None = None) -> HarnessConfig:
     mode = overrides.get("mode_override", detect_mode(session))
 
     project_root = str(Path(__file__).resolve().parents[3])
-    test_dir = overrides.get("test_dir", os.environ.get("TMAX_TEST_DIR", "/tmp/tmax-ui-tests"))
-
-    uid = os.getuid()
-    socket_path = f"/tmp/tmax-{uid}/server"
+    requested_run_id = str(overrides.get(
+        "run_id",
+        os.environ.get("TMAX_UI_RUN_ID", uuid.uuid4().hex[:12]),
+    ))
+    run_id = re.sub(r"[^A-Za-z0-9_-]", "-", requested_run_id)
+    test_root = os.environ.get("TMAX_TEST_ROOT", "/tmp/tmax-ui-tests")
+    test_dir = overrides.get(
+        "test_dir",
+        os.environ.get("TMAX_TEST_DIR", str(Path(test_root) / run_id)),
+    )
+    socket_path = overrides.get(
+        "socket_path",
+        os.environ.get("TMAX_SOCKET", str(Path(test_dir) / "server")),
+    )
 
     bun_bin = shutil.which("bun") or "bun"
     client_cmd = overrides.get("client_cmd", os.environ.get("TMAX_CLIENT_CMD", str(Path(project_root) / "bin" / "tmaxclient")))
     daemon_cmd = overrides.get("daemon_cmd", os.environ.get("TMAX_DAEMON_CMD", f"{bun_bin} {project_root}/src/server/server.ts"))
     tui_cmd = overrides.get("tui_cmd", os.environ.get("TMAX_TUI_CMD", f"{bun_bin} {project_root}/src/client/tui-client.ts"))
 
-    session_name = overrides.get("session_name",
-        os.environ.get("TMAX_SESSION",
-            session.unwrap_or("tmax-ui-tests")))
+    session_name = overrides.get(
+        "session_name",
+        os.environ.get("TMAX_SESSION", f"tmax-ui-{run_id}"),
+    )
     test_window = overrides.get("test_window",
-        os.environ.get("TMAX_TEST_WINDOW", "test-editor"))
+        os.environ.get("TMAX_TEST_WINDOW", "editor"))
 
     key_delay = float(overrides.get("key_delay", os.environ.get("TMAX_KEY_DELAY", "0.1")))
     operation_delay = float(overrides.get("operation_delay", os.environ.get("TMAX_OPERATION_DELAY", "0.5")))
@@ -95,6 +108,7 @@ def load_config(overrides: dict | None = None) -> HarnessConfig:
     Path(test_dir).mkdir(parents=True, exist_ok=True)
 
     return HarnessConfig(
+        run_id=run_id,
         project_root=project_root,
         test_dir=test_dir,
         socket_path=socket_path,

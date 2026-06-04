@@ -20,11 +20,11 @@ describe("Command Documentation Preview (US-1.10.4)", () => {
   let terminal: MockTerminal;
   let filesystem: MockFileSystem;
 
-  beforeEach(() => {
+  beforeEach(async () => {
     terminal = new MockTerminal();
     filesystem = new MockFileSystem();
     editor = new Editor(terminal, filesystem);
-    editor.start();
+    await editor.start();
 
     // Create a test buffer
     editor.createBuffer("test", "hello world");
@@ -50,7 +50,7 @@ describe("Command Documentation Preview (US-1.10.4)", () => {
   describe("Which-Key Documentation Preview", () => {
     test("should show documentation for command with short doc", async () => {
       // Type C-c prefix and wait for which-key
-      await editor.handleKey("\x03", "C-c");
+      await editor.handleKey("\x03");
       await new Promise(resolve => setTimeout(resolve, 1100));
 
       const state = editor.getState();
@@ -68,7 +68,7 @@ describe("Command Documentation Preview (US-1.10.4)", () => {
 
     test("should show 'No documentation available' for command without doc", async () => {
       // Type C-c prefix and wait for which-key
-      await editor.handleKey("\x03", "C-c");
+      await editor.handleKey("\x03");
       await new Promise(resolve => setTimeout(resolve, 1100));
 
       const state = editor.getState();
@@ -87,7 +87,7 @@ describe("Command Documentation Preview (US-1.10.4)", () => {
 
     test("should truncate long documentation with ellipsis", async () => {
       // Type C-c prefix and wait for which-key
-      await editor.handleKey("\x03", "C-c");
+      await editor.handleKey("\x03");
       await new Promise(resolve => setTimeout(resolve, 1100));
 
       const state = editor.getState();
@@ -107,7 +107,7 @@ describe("Command Documentation Preview (US-1.10.4)", () => {
 
     test("should include documentation in which-key status message", async () => {
       // Type C-c prefix and wait for which-key
-      await editor.handleKey("\x03", "C-c");
+      await editor.handleKey("\x03");
       await new Promise(resolve => setTimeout(resolve, 1100));
 
       const state = editor.getState();
@@ -140,7 +140,7 @@ describe("Command Documentation Preview (US-1.10.4)", () => {
       }
     });
 
-    test("should show 'No documentation available' in completion for undocumented functions", () => {
+    test("should show 'No documentation available' in completion for undocumented functions", async () => {
       const interpreter = (editor as any).getInterpreter();
 
       // Get info for function without documentation
@@ -161,7 +161,7 @@ describe("Command Documentation Preview (US-1.10.4)", () => {
       }
     });
 
-    test("should show full documentation on demand", () => {
+    test("should show full documentation on demand", async () => {
       const interpreter = (editor as any).getInterpreter();
 
       // Get full documentation for long-doc function
@@ -187,14 +187,14 @@ describe("Command Documentation Preview (US-1.10.4)", () => {
   describe("Help Buffer Integration", () => {
     test("should open help buffer with C-h when which-key is active", async () => {
       // Type C-c prefix and wait for which-key
-      await editor.handleKey("\x03", "C-c");
+      await editor.handleKey("\x03");
       await new Promise(resolve => setTimeout(resolve, 1100));
 
       const stateBefore = editor.getState();
       expect(stateBefore.whichKeyActive).toBe(true);
 
       // Press C-h to open full documentation
-      await editor.handleKey("\x08", "C-h");
+      await editor.handleKey("\x08");
 
       // Which-key should be closed or help buffer should be shown
       // This test verifies the integration point exists
@@ -203,14 +203,14 @@ describe("Command Documentation Preview (US-1.10.4)", () => {
 
     test("should show complete documentation in help buffer", async () => {
       // Type C-c prefix and wait for which-key
-      await editor.handleKey("\x03", "C-c");
+      await editor.handleKey("\x03");
       await new Promise(resolve => setTimeout(resolve, 1100));
 
       const state = editor.getState();
       const bindings = state.whichKeyBindings || [];
 
       if (bindings.length > 0) {
-        const firstBinding = bindings[0];
+        const firstBinding = bindings[0]!;
         const command = firstBinding.command;
 
         // Get full documentation
@@ -230,7 +230,7 @@ describe("Command Documentation Preview (US-1.10.4)", () => {
   });
 
   describe("Documentation Retrieval API", () => {
-    test("should provide get-command-documentation function", () => {
+    test("should provide get-command-documentation function", async () => {
       const interpreter = (editor as any).getInterpreter();
 
       // Get documentation for a command
@@ -239,7 +239,7 @@ describe("Command Documentation Preview (US-1.10.4)", () => {
       expect(result._tag).toBe("Right");
     });
 
-    test("should return nil for non-existent command", () => {
+    test("should return nil for non-existent command", async () => {
       const interpreter = (editor as any).getInterpreter();
 
       // Get documentation for non-existent command
@@ -251,7 +251,7 @@ describe("Command Documentation Preview (US-1.10.4)", () => {
       expect(result.right.value).toContain("No documentation");
     });
 
-    test("should return documentation string for documented command", () => {
+    test("should return documentation string for documented command", async () => {
       const interpreter = (editor as any).getInterpreter();
 
       // Get documentation for documented command
@@ -265,7 +265,7 @@ describe("Command Documentation Preview (US-1.10.4)", () => {
       }
     });
 
-    test("should return 'No documentation available' for undocumented command", () => {
+    test("should return 'No documentation available' for undocumented command", async () => {
       const interpreter = (editor as any).getInterpreter();
 
       // Get documentation for undocumented command
@@ -281,7 +281,7 @@ describe("Command Documentation Preview (US-1.10.4)", () => {
   });
 
   describe("Documentation Formatting", () => {
-    test("should truncate documentation at 80 characters by default", () => {
+    test("should truncate documentation at 80 characters by default", async () => {
       const interpreter = (editor as any).getInterpreter();
 
       // Get truncated documentation
@@ -296,7 +296,7 @@ describe("Command Documentation Preview (US-1.10.4)", () => {
       }
     });
 
-    test("should allow custom truncation length", () => {
+    test("should allow custom truncation length", async () => {
       const interpreter = (editor as any).getInterpreter();
 
       // Get truncated documentation with custom length
@@ -310,7 +310,7 @@ describe("Command Documentation Preview (US-1.10.4)", () => {
       }
     });
 
-    test("should not truncate short documentation", () => {
+    test("should not truncate short documentation", async () => {
       const interpreter = (editor as any).getInterpreter();
 
       // Get truncated documentation for short doc

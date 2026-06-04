@@ -9,6 +9,7 @@ import { FunctionalFileSystemImpl, FunctionalFileSystemUtils as FileSystemUtils 
 import { FunctionalTerminalIOImpl, FunctionalTerminalUtils as TerminalUtils } from "../../src/core/terminal.ts";
 import { FunctionalTextBufferImpl, FunctionalBufferUtils as BufferUtils } from "../../src/core/buffer.ts";
 import { TypeGuards, Validators } from "../../src/core/types.ts";
+import { createFileSystemError } from "../../src/error/types.ts";
 
 describe("Functional Core Modules", () => {
   test("FileSystem - should handle file operations functionally", async () => {
@@ -291,7 +292,7 @@ describe("Functional Core Modules", () => {
         if (content === originalContent) {
           return fs.writeFile(testPath, updatedContent);
         }
-        return TaskEither.left("Content verification failed");
+        return TaskEither.left(createFileSystemError("WriteError", "Content verification failed", testPath));
       })
       .flatMap(() => fs.readFile(testPath));
 

@@ -6,18 +6,18 @@ import { MockFileSystem } from "../mocks/filesystem.ts";
 describe("Debug defvar simple", () => {
   let editor: Editor;
 
-  beforeEach(() => {
+  beforeEach(async () => {
     const mockTerminal = new MockTerminal();
     const mockFileSystem = new MockFileSystem();
     editor = new Editor(mockTerminal, mockFileSystem);
-    editor.start();
+    await editor.start();
   });
 
   afterEach(() => {
     editor.stop();
   });
 
-  test("check if variable is defined", () => {
+  test("check if variable is defined", async () => {
     const interpreter = editor.getInterpreter();
 
     // Define variable

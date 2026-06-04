@@ -28,10 +28,10 @@ def test_undo_yank_delete() -> tuple[AssertionResult, ...]:
     state = state_result.unwrap()
 
     content = "line one\nline two\nline three"
-    test_file = f"{state.config.project_root}/edit-test.txt"
+    test_file = f"{state.config.test_dir}/edit-test.txt"
     create_test_file(test_file, content)
 
-    start_result = start(state, "edit-test.txt")
+    start_result = start(state, test_file)
     if start_result.is_err():
         print(f"ERROR: {start_result.unwrap_err().message}")
         delete_test_file(test_file)
@@ -102,8 +102,10 @@ def test_undo_yank_delete() -> tuple[AssertionResult, ...]:
             "delete-text should remove MARKER",
         ))
     else:
-        # delete-text may not work through eval
-        results.append(AssertionResult(True, "delete-text not supported via eval (known limitation)"))
+        results.append(AssertionResult(
+            False,
+            f"delete-text should be supported: {r.unwrap_err().message}",
+        ))
 
     # Verify buffer state is consistent
     final = client.get_buffer_text(state.config)
