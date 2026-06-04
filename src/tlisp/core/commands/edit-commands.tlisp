@@ -1,0 +1,91 @@
+;; edit-commands.tlisp -- Single-key Vim edit commands composed in T-Lisp
+
+(defun vim-delete-char (count)
+  "Vim x: delete COUNT characters at point."
+  (progn
+    (undo-begin)
+    (let ((deleted (buffer-delete count)))
+      (progn
+        (set-register "\"" deleted)
+        (undo-commit "x")
+        t))))
+
+(defun vim-change-char (count)
+  "Vim cl: delete COUNT characters and enter insert mode."
+  (progn
+    (vim-delete-char count)
+    (editor-set-mode "insert")
+    t))
+
+(defun vim-delete-to-line-end ()
+  "Vim D: delete to end of current line."
+  (progn
+    (undo-begin)
+    (delete-to-line-end)
+    (undo-commit "D")
+    t))
+
+(defun vim-change-to-line-end ()
+  "Vim C: delete to end of current line and enter insert mode."
+  (progn
+    (undo-begin)
+    (change-to-line-end)
+    (undo-commit "C")
+    t))
+
+(defun vim-yank-to-line-end ()
+  "Vim Y: yank to end of current line."
+  (progn
+    (yank-to-line-end)
+    t))
+
+(defun vim-paste-after (count)
+  "Vim p: paste after cursor COUNT times."
+  (progn
+    (undo-begin)
+    (paste-after count)
+    (undo-commit "p")
+    t))
+
+(defun vim-paste-before (count)
+  "Vim P: paste before cursor COUNT times."
+  (progn
+    (undo-begin)
+    (paste-before count)
+    (undo-commit "P")
+    t))
+
+(defun vim-join-lines ()
+  "Vim J: join current line with the next line."
+  (let ((line (cursor-line)))
+    (if (>= (+ line 1) (buffer-line-count))
+      (progn
+        (editor-set-status "No next line")
+        t)
+      (let ((first (buffer-line line)))
+        (let ((next-line (+ line 1)))
+          (let ((second (buffer-line next-line)))
+            (let ((joined (concat first " " second)))
+              (progn
+                (undo-begin)
+                (buffer-replace-range line 0 next-line (length second) joined)
+                (cursor-move line (length first))
+                (undo-commit "J")
+                t))))))))
+
+(defun visual-change ()
+  "Delete visual selection and enter insert mode."
+  (progn
+    (undo-begin)
+    (visual-delete)
+    (undo-commit "visual-change")
+    (editor-set-mode "insert")
+    t))
+
+(defun visual-swap-anchor ()
+  "Swap visual selection anchor and active endpoint."
+  (progn
+    (visual-swap-endpoints)
+    t))
+
+(provide "edit-commands")

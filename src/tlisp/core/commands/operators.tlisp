@@ -1,0 +1,126 @@
+;; operators.tlisp -- Vim operator-pending state owned by T-Lisp
+
+(defvar vim-pending-operator nil)
+(defvar vim-operator-count 1)
+
+(defun vim-operator-pending-p ()
+  "Return t when an operator is waiting for a motion."
+  (not (null vim-pending-operator)))
+
+(defun vim-begin-operator (operator)
+  "Begin a Vim OPERATOR command."
+  (progn
+    (set! vim-pending-operator operator)
+    (set! vim-operator-count (vim-count-consume))
+    (editor-set-status (concat operator " operator"))
+    t))
+
+(defun vim-reset-operator ()
+  "Clear pending operator state."
+  (progn
+    (set! vim-pending-operator nil)
+    (set! vim-operator-count 1)
+    nil))
+
+(defun vim-operator-total-count ()
+  "Return operator prefix count multiplied by motion count."
+  (* vim-operator-count (vim-count-current)))
+
+(defun vim-delete-line-range (start-line end-line)
+  "Delete full lines from START-LINE through END-LINE."
+  (let ((line-count (buffer-line-count)))
+    (let ((start (min start-line end-line)))
+      (let ((end (max start-line end-line)))
+        (let ((exclusive-end (min (+ end 1) line-count)))
+          (if (>= exclusive-end line-count)
+            (if (> start 0)
+              (let ((previous-line (- start 1)))
+                (let ((previous-length (length (buffer-line previous-line))))
+                  (let ((deleted
+                    (buffer-delete-range
+                      previous-line
+                      previous-length
+                      (- line-count 1)
+                      (length (buffer-line (- line-count 1))))))
+                    (progn
+                      (set-register "\"" (concat (substring deleted 1 (length deleted)) "\n"))
+                      (cursor-move previous-line 0)
+                      deleted))))
+              (let ((deleted
+                (buffer-delete-range start 0 (- line-count 1) (length (buffer-line (- line-count 1))))))
+                (progn
+                  (set-register "\"" (concat deleted "\n"))
+                  deleted)))
+            (let ((deleted (buffer-delete-range start 0 exclusive-end 0)))
+              (progn
+                (set-register "\"" deleted)
+                deleted))))))))
+
+(defun vim-delete-to-last-line ()
+  "Delete from current line through the final line."
+  (progn
+    (vim-delete-line-range (cursor-line) (- (buffer-line-count) 1))
+    t))
+
+(defun vim-delete-to-first-line ()
+  "Delete from the first line through current line."
+  (progn
+    (vim-delete-line-range 0 (cursor-line))
+    t))
+
+(defun vim-change-line-range (count)
+  "Change COUNT full lines, leaving one empty line in insert mode."
+  (let ((start (cursor-line)))
+    (let ((line-count (buffer-line-count)))
+      (let ((exclusive-end (min (+ start count) line-count)))
+        (let ((ends-before-eof (< exclusive-end line-count)))
+          (let ((end-line (if ends-before-eof exclusive-end (- line-count 1))))
+            (let ((end-column (if ends-before-eof 0 (length (buffer-line end-line)))))
+              (let ((deleted (buffer-get-range start 0 end-line end-column)))
+                (progn
+                  (set-register "\"" (if ends-before-eof deleted (concat deleted "\n")))
+                  (buffer-replace-range start 0 end-line end-column (if ends-before-eof "\n" ""))
+                  (cursor-move start 0)
+                  (editor-set-mode "insert")
+                  t)))))))))
+
+(defun vim-operator-apply (motion)
+  "Apply pending operator to MOTION."
+  (let ((operator vim-pending-operator))
+    (let ((count (vim-operator-total-count)))
+      (let ((combo (concat operator motion)))
+        (progn
+          (vim-reset-operator)
+          (vim-count-reset)
+          (if (string= operator "y") nil (undo-begin))
+          (cond
+            ((string= combo "dd") (vim-delete-line-range (cursor-line) (+ (cursor-line) (- count 1))))
+            ((string= combo "dw") (delete-word count))
+            ((string= combo "dl") (vim-delete-char count))
+            ((string= combo "d$") (delete-to-line-end))
+            ((string= combo "dG") (vim-delete-to-last-line))
+            ((string= combo "dgg") (vim-delete-to-first-line))
+            ((string= combo "yy") (yank-line count))
+            ((string= combo "yw") (yank-word count))
+            ((string= combo "yl") (yank-chars count))
+            ((string= combo "y$") (yank-to-line-end))
+            ((string= combo "cc") (vim-change-line-range count))
+            ((string= combo "cw") (change-word count))
+            ((string= combo "cl") (vim-change-char count))
+            ((string= combo "c$") (change-to-line-end))
+            (t (editor-set-status (concat "Unsupported operator: " combo))))
+          (if (string= operator "y") nil (undo-commit combo))
+          t)))))
+
+(defun vim-dispatch-operator-key (key)
+  "Dispatch KEY while an operator is pending."
+  (let ((digit (vim-key-digit-value key)))
+    (if (numberp digit)
+      (progn
+        (vim-count-add-digit digit)
+        t)
+      (if (string= key "g")
+        (vim-begin-prefix "operator-g")
+        (vim-operator-apply key)))))
+
+(provide "operators")
