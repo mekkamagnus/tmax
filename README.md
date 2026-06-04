@@ -279,8 +279,13 @@ bun run repl             # Run T-Lisp REPL
 bun run daemon           # Start daemon only
 
 # Testing
-bun test                 # Run all tests
-bun run test:ui          # Run UI tests
+bun run typecheck:src    # Typecheck production source
+bun run typecheck:test   # Typecheck tests and imported contracts
+bun run typecheck        # Typecheck the full project
+bun test                 # Run Bun unit/integration tests
+bun run test:daemon      # Run daemon API integration tests
+bun run test:ui:renderer # Run real-key renderer E2E tests
+bun run test:ui          # Run both Python suite categories
 ```
 
 ### T-Lisp Examples

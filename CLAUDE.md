@@ -100,9 +100,10 @@ When the user corrects a mistake you made:
 Before reporting any task as complete, verify it actually works:
 
 - Run the tests, execute the script, check the output yourself.
-- For TypeScript: run `bunx tsc --noEmit` and fix every type error.
+- For TypeScript: run `bun run typecheck:src`, `bun run typecheck:test`, and `bun run typecheck`; fix every type error.
 - For builds: run `bun run build` and confirm it succeeds.
-- For terminal UI changes: use `tmux` and the test harness (`test/ui/`) to verify editor behavior.
+- For daemon behavior: run `bun run test:daemon`.
+- For terminal UI changes: run `bun run test:ui:renderer`; renderer tests must send real keys and inspect captured output.
 - If you cannot verify (no test exists, can't run the code), say so explicitly. Don't imply success.
 
 Report outcomes faithfully:

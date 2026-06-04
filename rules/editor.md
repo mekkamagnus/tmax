@@ -6,24 +6,81 @@ scope: src/editor/**/*
 
 Applies to all files in the editor layer (`src/editor/`).
 
-## Architecture
+## Architecture: The C/Lisp Boundary
 
-The editor layer bridges TypeScript core primitives with the T-Lisp engine:
-- **Modal System**: Five modes — normal, insert, visual, command, mx
-- **Key Bindings**: Configurable mappings with mode-specific behavior
-- **Buffer Management**: Multiple buffers with gap buffer implementation
-- **Viewport**: Scrolling and cursor management for large files
-- **Terminal Interface**: Raw mode with ANSI escape sequences
+tmax follows the Emacs architecture split. TypeScript is C. T-Lisp is Lisp.
 
-## Editor API (T-Lisp Functions)
+**TypeScript (C layer) owns display primitives ONLY:**
+- Raw buffer operations: insert char, delete range, get line content
+- Cursor position: get/set line and column
+- Viewport: get/set scroll position
+- Terminal I/O: raw key input, ANSI output
+- Character scanning: find next char, find matching bracket, word boundaries
 
-These are the T-Lisp-callable functions defined in `src/editor/tlisp-api.ts`:
-- **Buffer Operations**: create, switch, insert, delete, text access
-- **Cursor Management**: move, position queries with bounds checking
+**T-Lisp (Lisp layer) owns ALL editor logic:**
+- Key bindings and command definitions
+- Mode management and transitions
+- Operator-pending state machines (d+y+c prefix handling)
+- Count prefix accumulation
+- Two-key sequence dispatch (gg, gt, dd, dw, etc.)
+- Command composition (D = delete-to-line-end, J = join-lines logic)
+- Search, replace, macro, register logic
+- Configuration and extensibility
+
+### The Litmus Test
+
+Before writing TypeScript code in `src/editor/`, ask:
+
+> "Does this code make a decision about what the editor should DO?"
+
+If yes — it belongs in T-Lisp. TypeScript should only answer "where is character X?" or "what is at position Y?"
+
+### Exceptions
+
+The only TypeScript that may contain editor logic:
+- `src/editor/handlers/` — Mode dispatch routing (sends keys to T-Lisp)
+- `src/editor/editor.ts` `defineRaw()` — Thin wrappers that expose state to T-Lisp
+- Performance-critical primitives that T-Lisp cannot express efficiently
+
+If you add logic to a handler, ask: "Could this be a T-Lisp key-binding that calls primitives?"
+
+## File Responsibilities
+
+| Directory | What goes here |
+|-----------|---------------|
+| `src/editor/api/*.ts` | Display primitives (buffer ops, cursor ops, etc.) |
+| `src/editor/handlers/*.ts` | Mode dispatch routing ONLY — no logic |
+| `src/editor/editor.ts` | `defineRaw()` wrappers exposing state to T-Lisp |
+| `src/tlisp/core/bindings/*.tlisp` | Key bindings by mode |
+| `src/tlisp/core/commands/*.tlisp` | Command libraries calling primitives |
+| `src/tlisp/core/modes/*.tlisp` | Minor mode definitions |
+
+## Editor API (T-Lisp-callable Primitives)
+
+Defined in `src/editor/api/*.ts` and registered via `src/editor/editor.ts`:
+- **Buffer Operations**: insert, delete, get line, get content
+- **Cursor Management**: get/set position with bounds checking
 - **Mode Control**: get/set editor modes
-- **Status Management**: status line updates and user feedback
-- **File Operations**: handled through editor commands
-- **M-x System**: Function execution by name
+- **Status Management**: status line updates
+- **Viewport**: get/set scroll position
+
+## Common Tasks
+
+### Adding New Key Bindings
+1. Create a T-Lisp command that composes existing primitives in `src/tlisp/core/commands/`
+2. Add `(key-bind ...)` in `src/tlisp/core/bindings/` or in the same command file
+3. Only add new TypeScript primitives if no existing primitive can express the operation
+
+### Adding New Editor Commands
+1. Check if existing primitives can compose the command in T-Lisp
+2. If a new primitive is truly needed, add it to `src/editor/api/*.ts`
+3. Register it via `defineRaw()` or the ops pattern in `editor.ts`
+4. Write the command logic in T-Lisp, calling the new primitive
+
+### Extending Editor Modes
+1. Define mode behavior in T-Lisp (key bindings, status text, cursor style)
+2. Only add mode dispatch routing in handlers — no logic
+3. Mode state lives in T-Lisp, not TypeScript
 
 ## Operating Modes
 
@@ -38,21 +95,3 @@ The editor has two logging modes:
 - AI-friendly formatting with emojis, colors, structured data
 - Full stack traces and correlation IDs
 - Bypasses TTY checks for non-interactive environments
-
-## Common Tasks
-
-### Adding New T-Lisp Functions
-1. Add function to `src/editor/tlisp-api.ts`
-2. Update interface types if needed
-3. Add tests in `test/unit/editor.test.ts`
-
-### Adding New Key Bindings
-1. Add binding in `src/editor/editor.ts` (`initializeDefaultKeyMappings`)
-2. Create corresponding T-Lisp function if needed
-3. Test key handling behavior
-
-### Extending Editor Modes
-1. Update mode type in `src/editor/tlisp-api.ts`
-2. Add mode-specific key handling
-3. Update status line rendering
-4. Add cursor positioning logic

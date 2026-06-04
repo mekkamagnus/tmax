@@ -1,336 +1,274 @@
 # AGENTS.md
 
-Guide for AI agents (Claude Code, GitHub Copilot, etc.) working on the tmax codebase.
+> **Workflow authority:** [`CLAUDE.md`](./CLAUDE.md) contains the authoritative, up-to-date project workflow. This file mirrors it for non-Claude agents. If the two files differ, follow `CLAUDE.md` and update this mirror.
 
-## Quick Reference for AI Agents
+**tmax** is a terminal-based text editor where a TypeScript core handles terminal I/O, file system, and rendering, while a built-in Lisp dialect (T-Lisp) handles all editor logic — commands, modes, key bindings, and extensibility. Zero external dependencies. Runs on Bun.
 
-### Essential Commands
+Behavioral guidelines to reduce common LLM coding mistakes. Merge with project-specific instructions as needed.
 
-**Testing:**
-```bash
-# Unit tests
-deno task test
+**Tradeoff:** These guidelines bias toward caution over speed. For trivial tasks, use judgment.
 
-# UI tests (tmux-based)
-bash test/ui/tests/01-startup.test.sh
-bash test/ui/tests/02-basic-editing.test.sh
-bash test/ui/tests/03-mode-switching.test.sh
+## 1. Think Before Coding
 
-# Type checking
-deno check src/main.ts
+**Don't assume. Don't hide confusion. Surface tradeoffs.**
+
+Before implementing:
+
+- State your assumptions explicitly. If uncertain, ask.
+- If multiple interpretations exist, present them - don't pick silently.
+- If a simpler approach exists, say so. Push back when warranted.
+- If something is unclear, stop. Name what's confusing. Ask.
+
+## 2. Simplicity First
+
+**Minimum code that solves the problem. Nothing speculative.**
+
+- No features beyond what was asked.
+- No abstractions for single-use code.
+- No "flexibility" or "configurability" that wasn't requested.
+- No error handling for impossible scenarios.
+- If you write 200 lines and it could be 50, rewrite it.
+
+Ask yourself: "Would a senior engineer say this is overcomplicated?" If yes, simplify.
+
+## 3. Surgical Changes
+
+**Touch only what you must. Clean up only your own mess.**
+
+When editing existing code:
+
+- Don't "improve" adjacent code, comments, or formatting.
+- Don't refactor things that aren't broken.
+- Match existing style, even if you'd do it differently.
+- If you notice unrelated dead code, mention it - don't delete it.
+
+When your changes create orphans:
+
+- Remove imports/variables/functions that YOUR changes made unused.
+- Don't remove pre-existing dead code unless asked.
+
+The test: Every changed line should trace directly to the user's request.
+
+## 4. Goal-Driven Execution
+
+**Define success criteria. Loop until verified.**
+
+Transform tasks into verifiable goals:
+
+- "Add validation" → "Write tests for invalid inputs, then make them pass"
+- "Fix the bug" → "Write a test that reproduces it, then make it pass"
+- "Refactor X" → "Ensure tests pass before and after"
+
+For multi-step tasks, state a brief plan:
+
+```
+1. [Step] → verify: [check]
+2. [Step] → verify: [check]
+3. [Step] → verify: [check]
 ```
 
-**Running the Editor:**
-```bash
-# Terminal-based editor (for UI tests)
-deno task start-old [filename]
+Strong success criteria let you loop independently. Weak criteria ("make it work") require constant clarification.
 
-# React-based editor (development)
-deno task start [filename]
+---
 
-# Development mode with verbose logging
-deno task start --dev [filename]
-```
+**These guidelines are working if:** fewer unnecessary changes in diffs, fewer rewrites due to overcomplication, and clarifying questions come before implementation rather than after mistakes.
 
-**REPL:**
-```bash
-deno task repl
-```
+## 5. Installed CLI Tools
 
-### Project Structure
+Prefer these tools when available:
 
+- `rg` for search
+- `jq` for JSON processing
+- `gh` for GitHub interaction
+- `playwright-cli` for browser automation and UI verification
+- `tmux` for long-running terminal work
+- `uv` for Python package and project management
+
+## 6. Learn From Corrections
+
+Persistent lessons live in `./docs/learnings.md` - read it at the start of every task and follow every rule there.
+
+When the user corrects a mistake you made:
+
+1. Apply the correction. 2. Append a rule to `learnings.md` so the same mistake doesn't recur. 3. Show the user the new rule before continuing.
+
+## 7. Further rules
+
+- `rules/` - path-scoped rule files. Each declares its scope on the first line; read the ones that match what you're touching.
+- Directory-level `Claude.md` files (e.g. `src/tlisp/Claude.md`, `src/editor/Claude.md`) declare rules that apply to all files in that directory.
+
+## 8. Verify Before Reporting Complete
+
+Before reporting any task as complete, verify it actually works:
+
+- Run the tests, execute the script, check the output yourself.
+- For TypeScript: run `bun run typecheck:src`, `bun run typecheck:test`, and `bun run typecheck`; fix every type error.
+- For builds: run `bun run build` and confirm it succeeds.
+- For daemon behavior: run `bun run test:daemon`.
+- For terminal UI changes: run `bun run test:ui:renderer`; renderer tests must send real keys and inspect captured output.
+- If you cannot verify (no test exists, can't run the code), say so explicitly. Don't imply success.
+
+Report outcomes faithfully:
+
+- If tests fail, say so with the relevant output. Never claim "all tests pass" when output shows failures.
+- Never suppress, simplify, or skip a failing check (test, lint, type error) to manufacture a green result.
+- Never characterize incomplete or broken work as done.
+- When something did pass or work, state it plainly. Don't hedge confirmed results with disclaimers, and don't re-verify things you already checked.
+
+The goal is an accurate report, not a defensive one.
+
+---
+
+## Project Overview
+
+**tmax** is a comprehensive extensible terminal-based text editor with a TypeScript core running on the Bun runtime. Following the Emacs architecture, TypeScript handles low-level operations (terminal I/O, file system, memory management, display rendering) while T-Lisp (tmax Lisp) handles all higher-level editor functionality including commands, modes, key bindings, and extensibility.
+
+**Current Status: ✅ COMPLETE AND FUNCTIONAL (v0.2.0)**
+
+**Key Features:**
+- **Full-screen modal editing** with alternate screen buffer and viewport management
+- **Complete T-Lisp interpreter** with tail-call optimization and macro system
+- **Five editing modes**: normal, insert, visual, command, and M-x
+- **Vim-like key bindings** with proper hjkl navigation, operators, and text objects
+- **Command interface** with both vim-style (:q, :w) and M-x (SPC ;) commands
+- **Multiple buffer management** with gap buffer implementation
+- **Comprehensive editor API** (100+ T-Lisp functions)
+- **Daemon/client architecture** with Frame-based multi-client support (Emacs-style)
+- **`*Messages*` buffer** for editor event observability
+- **Interchangeable frontends**: TUI (ANSI), Ink (React), Steep
+- **Zero external dependencies**
+
+**Target Users:** Software developers, system administrators, and power users who prefer keyboard-driven terminal workflows with unlimited customization through T-Lisp.
+
+## Architecture Overview
+
+**TypeScript Core Responsibilities:**
+- **Terminal I/O**: Full-screen interface with alternate screen buffer
+- **File system operations**: Async file reading/writing with proper error handling
+- **Memory management**: Efficient buffer operations and cursor tracking
+- **T-Lisp interpreter runtime**: Complete interpreter with tail-call optimization
+- **Buffer management**: Gap buffer implementation for efficient text editing
+- **Viewport management**: Scrolling and cursor positioning for large files
+- **Key handling**: Raw mode input with proper key normalization
+
+**T-Lisp Engine Responsibilities:**
+- **Editor commands**: All functionality exposed through T-Lisp API
+- **Mode management**: Modal editing state and transitions
+- **Key binding definitions**: Configurable key mappings
+- **User interface logic**: Status line, command input, M-x functionality
+- **Configuration management**: `~/.config/tmax/init.tlisp` file loading and execution
+- **Extensibility**: Custom functions, macros, and commands
+
+## Key Components
+
+### T-Lisp Interpreter
+- **Tokenizer**: Lexical analysis with quasiquote support
+- **Parser**: AST generation with proper error handling
+- **Evaluator**: Expression evaluation with lexical scoping and tail-call optimization
+- **Standard Library**: 31 built-in functions (arithmetic, lists, strings, control flow)
+- **Macro System**: Full quasiquote support with compile-time expansion
+- **Environment**: Lexical scoping with environment chains
+
+### Editor Interface
+- **Modal System**: Five modes (normal, insert, visual, command, mx)
+- **Key Bindings**: Configurable mappings with mode-specific behavior
+- **Buffer Management**: Multiple buffers with gap buffer implementation
+- **Viewport**: Scrolling and cursor management for large files
+- **Terminal Interface**: Raw mode with ANSI escape sequences
+
+### Editor API (T-Lisp Functions)
+- **Buffer Operations**: create, switch, insert, delete, text access
+- **Cursor Management**: move, position queries with bounds checking
+- **Mode Control**: get/set editor modes
+- **Status Management**: status line updates and user feedback
+- **File Operations**: handled through editor commands
+- **M-x System**: Function execution by name
+
+## Project Structure
 ```
 tmax/
 ├── src/
-│   ├── core/           # Low-level operations (buffer, filesystem, terminal)
-│   ├── tlisp/          # T-Lisp interpreter (tokenizer, parser, evaluator)
+│   ├── core/           # TypeScript core (terminal, filesystem, buffer)
+│   ├── tlisp/          # T-Lisp interpreter
 │   ├── editor/         # Editor with T-Lisp integration
-│   ├── frontend/       # React-based UI (Deno-ink components)
-│   ├── main.ts         # Terminal-based editor entry point
-│   └── main-ink.ts     # React-based editor entry point
-├── test/
-│   ├── unit/           # Unit tests for core functionality
-│   ├── frontend/       # React component tests
-│   └── ui/             # Tmux-based UI integration tests
-├── specs/              # Architecture Decision Records and specs
-└── prd.json           # Product Requirements (for Ralph Loop)
+│   ├── server/         # Daemon (JSON-RPC 2.0 over Unix socket)
+│   ├── client/         # TUI client (ANSI rendering)
+│   ├── frontend/       # Interchangeable frontends (Ink, Steep)
+│   └── main.tsx        # Application entry point
+├── test/               # Comprehensive test suite
+├── scripts/            # Development scripts (REPL)
+├── examples/           # Configuration examples
+└── bin/                # Launcher scripts (tmax, tmaxclient)
 ```
 
-### Two Editor Implementations
+## Usage Examples
 
-**IMPORTANT:** tmax has TWO separate editor implementations:
+### Basic Editing
+```bash
+# Daemon/client (recommended)
+tmax file.txt            # Auto-start daemon + open file in TUI
+tmax -e '(+ 1 2)'        # Evaluate T-Lisp on daemon
+tmax --stop              # Stop daemon
 
-1. **Terminal-based** (`src/main.ts` → `deno task start-old`)
-   - Uses T-Lisp for all functionality
-   - Used by UI test suite
-   - Has complete save/load functionality
-   - Traditional terminal UI
+# Direct editing
+bun run start file.txt
 
-2. **React-based** (`src/main-ink.ts` → `deno task start`)
-   - Uses Deno-ink React components
-   - Direct buffer manipulation
-   - File saving added (see commits)
-   - Modern React architecture
+# i - enter insert mode
+# Escape - return to normal mode
+# hjkl - navigate
+# q - quit
+# : - enter command mode
+# SPC ; - enter M-x mode
+```
 
-**When implementing features:**
-- Check which editor you're working with
-- UI tests use terminal editor (`start-old`)
-- Consider both editors when making changes
-- Shared code in `src/core/` and `src/tlisp/`
+### T-Lisp Customization
+```lisp
+;; ~/.config/tmax/init.tlisp configuration file
+(defun word-count ()
+  (let ((text (buffer-text)))
+    (length (split-string text " "))))
 
-### Common Tasks
+(key-bind "w" "(cursor-move (+ (cursor-line) 5) (cursor-column))" "normal")
 
-**Adding T-Lisp Functions:**
+(defmacro save-and-quit ()
+  '(progn (quick-save) (editor-quit)))
+```
+
+### M-x Commands
+```
+SPC ;           # Enter M-x mode
+cursor-position # Show cursor position
+editor-mode     # Show current mode
+quit           # Quit editor
+```
+
+## Path-Scoped Rules
+
+Detailed coding rules live in `rules/` — each file declares its scope on the first line. Read the ones that match what you're touching:
+
+| File | Scope |
+|------|-------|
+| `rules/typescript.md` | `src/**/*.ts` — code style, Bun APIs |
+| `rules/functional-programming.md` | `src/**/*.ts` — FP patterns, Task/TaskEither/Result/Option, monads, validation |
+| `rules/tlisp.md` | `src/tlisp/**/*` — interpreter conventions, stdlib, macros |
+| `rules/editor.md` | `src/editor/**/*` — modal system, key bindings, editor API |
+| `rules/testing.md` | `test/**/*` — TDD workflow, bun test commands, test patterns |
+| `rules/ui-testing.md` | `test/ui/**/*` — tmux test harness, API reference, troubleshooting |
+
+## Common Tasks
+
+### Adding New T-Lisp Functions
 1. Add function to `src/editor/tlisp-api.ts`
-2. Update types if needed
-3. Add unit tests in `test/unit/editor.test.ts`
-4. Add UI tests in `test/ui/tests/`
+2. Update interface types if needed
+3. Add tests in `test/unit/editor.test.ts`
 
-**Adding Key Bindings:**
-1. Add binding in `src/editor/editor.ts` or `src/tlisp/core-bindings.tlisp`
-2. Test with UI test suite
-3. Verify in both editors if applicable
+### Adding New Key Bindings
+1. Add binding in `src/editor/editor.ts` (`initializeDefaultKeyMappings`)
+2. Create corresponding T-Lisp function if needed
+3. Test key handling behavior
 
-**Debugging Terminal Issues:**
-1. Use UI test harness: `source test/ui/lib/api.sh`
-2. Enable debug mode: `tmax_debug`
-3. Capture screenshots: `tmax_screenshot debug.txt`
-4. Inspect state: `tmax_state`
-
-**Testing File Operations:**
-```bash
-# Create test file
-echo "test content" > /tmp/test.txt
-
-# Run editor
-deno task start-old /tmp/test.txt
-
-# Manual test: Type iX<Escape>:w<Enter>:q<Enter>
-
-# Verify
-cat /tmp/test.txt
-```
-
-### Architecture Patterns
-
-**Functional Programming:**
-- Use `Task` and `TaskEither` for async operations
-- Return `Result<T, E>` instead of throwing exceptions
-- Immutable data structures
-- Function composition over inheritance
-
-See `functional-patterns-guidelines.md` for detailed patterns.
-
-**T-Lisp Integration:**
-- Editor state bridge: `TlispEditorState` in `src/editor/tlisp-api.ts`
-- Getter/setter pattern for state synchronization
-- All editor operations exposed as T-Lisp functions
-- Key bindings defined in T-Lisp (`core-bindings.tlisp`)
-
-### Testing Workflow
-
-**TDD Approach:**
-1. Write test FIRST (test fails - Red)
-2. Implement feature (test passes - Green)
-3. Refactor code (keep green)
-4. Run ALL tests to ensure no regressions
-
-**UI Test Workflow:**
-```bash
-# 1. Write UI test
-bash -c 'cat > test/ui/tests/my-feature.test.sh << "EOF"
-#!/bin/bash
-source ../lib/api.sh
-test_my_feature() {
-  tmax_init
-  tmax_start
-  # ... test logic ...
-  tmax_summary
-  tmax_cleanup
-}
-test_my_feature
-EOF'
-
-# 2. Make executable
-chmod +x test/ui/tests/my-feature.test.sh
-
-# 3. Run test (should fail)
-bash test/ui/tests/my-feature.test.sh
-
-# 4. Implement feature
-
-# 5. Run test again (should pass)
-bash test/ui/tests/my-feature.test.sh
-
-# 6. Run all UI tests
-for test in test/ui/tests/*.sh; do bash "$test"; done
-```
-
-### Code Style Guidelines
-
-**TypeScript:**
-- Use arrow functions
-- JSDoc comments on all functions
-- Explicit types (no `any` without comment)
-- Functional patterns over classes
-- Immutability over mutation
-
-**T-Lisp:**
-- Use `defun` for functions
-- Use `let` for local bindings
-- Quote forms with `'` or `quote`
-- Comments with `;;`
-- Indent with 2 spaces
-
-### Key Files to Understand
-
-**Core Architecture:**
-- `src/core/types.ts` - Type definitions
-- `src/core/buffer.ts` - Gap buffer implementation
-- `src/tlisp/interpreter.ts` - T-Lisp interpreter
-- `src/editor/tlisp-api.ts` - Editor API bridge
-
-**Editor Implementations:**
-- `src/editor/editor.ts` - Terminal-based editor
-- `src/frontend/components/Editor.tsx` - React-based editor
-
-**Testing:**
-- `test/ui/lib/api.sh` - UI test harness API
-- `test/ui/README.md` - UI test documentation
-- `test/unit/editor.test.ts` - Editor unit tests
-
-### Common Pitfalls
-
-**1. Command Execution in Terminal Editor:**
-- Commands like `:w` must go through key binding system
-- Don't call `executeCommand()` directly from handleKey()
-- Let Enter key fall through to `(editor-execute-command-line)` binding
-
-**2. Buffer State Synchronization:**
-- `TlispEditorState` setter must update both `editor.buffers` and `editor.state.currentBuffer`
-- Always use immutable buffer operations
-- Verify buffer reference equality after operations
-
-**3. Two Editor Confusion:**
-- Check which editor you're testing against
-- UI tests use `deno task start-old`
-- React editor uses `deno task start`
-- Features may need to be implemented twice
-
-**4. Async Operations:**
-- File operations are async - use `await`
-- T-Lisp is synchronous - save operations use `Promise.then()`
-- UI tests need sleep after async operations
-
-**5. Terminal Raw Mode:**
-- Terminal must be in raw mode for single-key input
-- Always restore terminal state on exit
-- Handle SIGINT (Ctrl+C) gracefully
-
-### Debugging Tips
-
-**Enable Verbose Logging:**
-```bash
-# Terminal editor
-deno task start --dev [filename]
-
-# Check for debug output
-# Look for: [DEBUG] prefixed messages
-```
-
-**Tmux Session Inspection:**
-```bash
-# List tmux sessions
-tmux list-sessions
-
-# Attach to test session
-tmux attach -t tmax-ui-tests
-
-# Capture pane output
-tmux capture-pane -t tmax-ui-tests:test-editor -p > output.txt
-```
-
-**State Dumps:**
-```bash
-# From UI test harness
-source test/ui/lib/api.sh
-tmax_init
-tmax_start
-tmax_state > state-dump.txt
-tmax_dump
-```
-
-**Breakpoint Debugging:**
-```typescript
-// Add debug output
-console.error(`[DEBUG] Variable: ${variable}`);
-
-// Or use Deno's built-in debugger
-deno test --allow-run --inspect-brk test/unit/editor.test.ts
-```
-
-### When to Ask for Help
-
-**Clarify These Points:**
-1. Which editor implementation (terminal vs React)?
-2. Is this a core feature or UI enhancement?
-3. Should it work in both editors or just one?
-4. Are there existing tests that need updating?
-5. What's the acceptance criteria?
-
-**Provide Context:**
-- "I'm working on the terminal editor (main.ts)"
-- "This feature needs to be T-Lisp extensible"
-- "UI test coverage is required"
-- "Following functional programming patterns"
-
-### Recent Changes
-
-See these specs for context on recent work:
-- `specs/SPEC-022-fix-character-insertion-bug.md` - Command execution bug fix
-- `specs/SPEC-021-terminal_ui_final_status.md` - Terminal UI completion
-- `specs/SPECS_INDEX.md` - All specs index
-
-### Agent-Specific Tips
-
-**Claude Code:**
-- Can use UI test harness directly: `source test/ui/lib/api.sh`
-- Prefers functional patterns
-- Write tests before implementation (TDD)
-- Use `--dev` flag for verbose logging
-
-**GitHub Copilot:**
-- Suggests code based on context
-- Review suggestions for functional patterns
-- Check against T-Lisp patterns in codebase
-- Verify with test suite
-
-**Other AI Assistants:**
-- Read CLAUDE.md first for project context
-- Check test files for usage patterns
-- Follow functional programming guidelines
-- Run tests before committing changes
-
-### Quick Checklist
-
-Before committing changes:
-- [ ] All unit tests pass (`deno task test`)
-- [ ] Relevant UI tests pass
-- [ ] Type checking passes (`deno check`)
-- [ ] JSDoc comments added/updated
-- [ ] Functional patterns used (no mutations, no Promises)
-- [ ] Both editors tested (if applicable)
-- [ ] No console.log left in production code
-- [ ] Error handling uses Result/TaskEither
-- [ ] Git commit message follows conventions
-
-### Getting Started
-
-1. **Read this file** (AGENTS.md)
-2. **Read CLAUDE.md** for project overview
-3. **Run tests** to verify environment
-4. **Check test/ui/README.md** for UI testing
-5. **Review recent commits** for patterns
-6. **Start with a small task** to understand workflow
-
-Good luck! The tmax codebase is well-structured and heavily tested. Follow the patterns, write tests first, and ask questions when unsure.
+### Extending Editor Modes
+1. Update mode type in `src/editor/tlisp-api.ts`
+2. Add mode-specific key handling
+3. Update status line rendering
+4. Add cursor positioning logic
