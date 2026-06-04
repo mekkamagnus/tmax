@@ -4,6 +4,7 @@
 import { Editor } from "./src/editor/editor.ts";
 import { MockTerminal } from "./test/mocks/terminal.ts";
 import { MockFileSystem } from "./test/mocks/filesystem.ts";
+import { Either } from "./src/utils/task-either.ts";
 
 async function debugKeyBindFunctions() {
   const terminal = new MockTerminal();
@@ -33,7 +34,7 @@ async function debugKeyBindFunctions() {
     console.log("Testing key-bind function...");
     const result = interpreter.execute('(key-bind "C-c C-c" "(some-command)")');
     console.log("key-bind result:", result);
-    console.log("Type:", result?.type);
+    console.log("Type:", Either.isRight(result) ? result.right.type : result.left.type);
     console.log("Value:", (result as any)?.value);
   } catch (error) {
     console.error("Error calling key-bind:", error);
@@ -43,7 +44,7 @@ async function debugKeyBindFunctions() {
     console.log("\nTesting key-unbind function...");
     const result = interpreter.execute('(key-unbind "C-c C-c")');
     console.log("key-unbind result:", result);
-    console.log("Type:", result?.type);
+    console.log("Type:", Either.isRight(result) ? result.right.type : result.left.type);
     console.log("Value:", (result as any)?.value);
   } catch (error) {
     console.error("Error calling key-unbind:", error);
@@ -53,7 +54,7 @@ async function debugKeyBindFunctions() {
     console.log("\nTesting key-bindings function...");
     const result = interpreter.execute('(key-bindings)');
     console.log("key-bindings result:", result);
-    console.log("Type:", result?.type);
+    console.log("Type:", Either.isRight(result) ? result.right.type : result.left.type);
     console.log("Value length:", (result as any)?.value?.length);
   } catch (error) {
     console.error("Error calling key-bindings:", error);
@@ -63,7 +64,7 @@ async function debugKeyBindFunctions() {
     console.log("\nTesting key-binding function...");
     const result = interpreter.execute('(key-binding "h")');
     console.log("key-binding result:", result);
-    console.log("Type:", result?.type);
+    console.log("Type:", Either.isRight(result) ? result.right.type : result.left.type);
   } catch (error) {
     console.error("Error calling key-binding:", error);
   }

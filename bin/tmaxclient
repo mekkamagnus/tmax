@@ -40,6 +40,7 @@ class TmaxClient {
    * Get the default socket path
    */
   private getDefaultSocketPath(): string {
+    if (process.env.TMAX_SOCKET) return process.env.TMAX_SOCKET;
     const uid = process.env.SUDO_UID || userInfo().uid.toString();
     return `/tmp/tmax-${uid}/server`;
   }

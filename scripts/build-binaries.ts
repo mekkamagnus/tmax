@@ -9,7 +9,7 @@
 import { $ } from "bun";
 
 const VERSION = JSON.parse(
-  Bun.file("package.json").text()
+  await Bun.file("package.json").text()
 ).version as string;
 
 // Platform detection

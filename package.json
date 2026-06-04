@@ -10,8 +10,14 @@
     "daemon": "bun src/server/server.ts",
     "repl": "bun run scripts/repl.ts",
     "test": "bun test",
-    "test:ui": "bash test/ui/start-ui-test.sh",
-    "check": "node --import tsx --eval \"import('./src/main.tsx')\" -- --help"
+    "test:daemon": "cd test/ui && uv run python run_python_suite.py daemon",
+    "test:ui": "cd test/ui && uv run python run_python_suite.py",
+    "test:ui:renderer": "cd test/ui && uv run python run_python_suite.py daemon-tmux",
+    "test:ui:helpers": "cd test/ui && uv run python tests/test_harness_helpers.py",
+    "check": "node --import tsx --eval \"import('./src/main.tsx')\" -- --help",
+    "typecheck": "bunx tsc --noEmit",
+    "typecheck:src": "bunx tsc --noEmit --project tsconfig.src.json",
+    "typecheck:test": "bunx tsc --noEmit --project tsconfig.test.json"
   },
   "dependencies": {
     "ink": "^4.4.1",
