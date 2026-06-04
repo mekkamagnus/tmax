@@ -9,6 +9,8 @@ import { RemoteEditor } from "../editor/remote-editor.ts";
 import { renderBufferLines, getVisibleViewportTop } from "../frontend/render/buffer-lines.ts";
 import { renderStatusLine } from "../frontend/render/status-line.ts";
 import { renderCommandInput } from "../frontend/render/command-input.ts";
+import { tokenizeTerminalInput } from "../frontend/render/input.ts";
+import { renderTabBarAnsi } from "../frontend/render/tab-bar.ts";
 import type { EditorState } from "../core/types.ts";
 
 function enterAltScreen() {
@@ -43,11 +45,16 @@ function getDims() {
 
 function render(state: EditorState) {
   const { width, height } = getDims();
-  const bufferHeight = Math.max(1, height - 2);
+  const hasTabBar = (state.tabs?.length ?? 0) > 1;
+  const tabBarHeight = hasTabBar ? 1 : 0;
+  const bufferHeight = Math.max(1, height - 2 - tabBarHeight);
   const lines = renderBufferLines(state, width, bufferHeight);
 
   clearScreen();
-  lines.forEach((line, i) => writeAt(i, 0, line));
+  if (hasTabBar) {
+    writeAt(0, 0, renderTabBarAnsi(state.tabs!, state.currentTabIndex ?? 0, width));
+  }
+  lines.forEach((line, i) => writeAt(i + tabBarHeight, 0, line));
 
   if (state.mode === "command" || state.mode === "mx") {
     writeAt(height - 2, 0, renderCommandInput(state, width));
@@ -58,7 +65,7 @@ function render(state: EditorState) {
   const viewportTop = getVisibleViewportTop(state, bufferHeight);
   const cursorRow = Math.max(0, Math.min(bufferHeight - 1, state.cursorPosition.line - viewportTop));
   const cursorCol = Math.max(0, Math.min(width - 1, state.cursorPosition.column));
-  moveTo(cursorRow, cursorCol);
+  moveTo(cursorRow + tabBarHeight, cursorCol);
 }
 
 async function main() {
@@ -150,23 +157,18 @@ Requires a running tmax daemon. Start one with:
     }
   }, 200);
 
-  const escapeMap: Record<string, string> = {
-    "\x1b[A": "k",
-    "\x1b[B": "j",
-    "\x1b[C": "l",
-    "\x1b[D": "h",
-    "\x1b[3~": "\x7f",
-  };
+  let pendingInput = "";
 
   process.stdin.on("data", async (chunk: string) => {
     try {
-      const mapped = escapeMap[chunk];
-      const key = mapped ?? (chunk === "\r" || chunk === "\n" ? "\n" : chunk === "\x1b" ? "\x1b" : chunk === "\x7f" || chunk === "\b" ? "\x7f" : chunk);
-
-      const state = await remote.handleKey(key);
-      lastState = state;
-      render(state);
-      await remote.sendEvent("render", { terminalSize: getDims() });
+      const tokens = tokenizeTerminalInput(chunk, pendingInput);
+      pendingInput = tokens.pending;
+      for (const key of tokens.keys) {
+        const state = await remote.handleKey(key);
+        lastState = state;
+        render(state);
+        await remote.sendEvent("render", { terminalSize: getDims() });
+      }
     } catch (error) {
       if (error instanceof Error && error.message === "EDITOR_QUIT_SIGNAL") {
         cleanup();

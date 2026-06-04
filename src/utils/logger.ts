@@ -37,6 +37,8 @@ export interface LogContext {
   timestamp?: Date;
   /** Correlation ID for tracing */
   correlationId?: string;
+  /** Arbitrary data payload */
+  data?: unknown;
 }
 
 /**

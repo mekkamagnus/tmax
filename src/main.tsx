@@ -235,7 +235,7 @@ Examples:
     correlationId: startupId,
     data: {
       mode: editor.getState().mode,
-      bufferCount: editor.getState().buffers.size
+      bufferCount: editor.getState().buffers?.size ?? 0
     }
   });
 
@@ -244,7 +244,7 @@ Examples:
 
   // Phase 4: Load file if specified
   if (fileArgs.length > 0) {
-    filename = fileArgs[0];
+    filename = fileArgs[0]!;
 
     // Try to load the file
     try {
@@ -267,7 +267,8 @@ Examples:
           keyBindings: {},
           maxUndoLevels: 100,
           showLineNumbers: true,
-          wordWrap: false
+          wordWrap: false,
+          relativeLineNumbers: false
         },
         currentFilename: filename,
         commandLine: "",
@@ -283,7 +284,7 @@ Examples:
         data: {
           filename,
           bufferSize: content.length,
-          lineCount: initialState.currentBuffer.getLineCount()
+          lineCount: initialState.currentBuffer?.getLineCount() ?? 0
         }
       });
     } catch (error) {
@@ -306,7 +307,8 @@ Examples:
           keyBindings: {},
           maxUndoLevels: 100,
           showLineNumbers: true,
-          wordWrap: false
+          wordWrap: false,
+          relativeLineNumbers: false
         },
         currentFilename: filename,
         commandLine: "",
@@ -342,7 +344,8 @@ Examples:
         keyBindings: {},
         maxUndoLevels: 100,
         showLineNumbers: true,
-        wordWrap: false
+        wordWrap: false,
+        relativeLineNumbers: false
       },
       currentFilename: undefined,
       commandLine: "",
@@ -416,7 +419,7 @@ Examples:
 
     const frontend = new SteepFrontend();
     try {
-      await frontend.run(editor, initialState, filename);
+      await frontend.run(editor, initialState);
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);
       if (!errorMessage.includes('EDITOR_QUIT_SIGNAL')) {

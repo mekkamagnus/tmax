@@ -109,8 +109,8 @@ export class PipelineBuilder<E, A> {
     combiner: (a: A, b: B) => C
   ): PipelineBuilder<E, C> {
     return new PipelineBuilder(
-      TaskEither.parallel([this.current, other.current])
-        .map(([a, b]) => combiner(a, b))
+      TaskEither.parallel([this.current as TaskEither<E, any>, other.current as TaskEither<E, any>])
+        .map(([a, b]) => combiner(a as A, b as B))
     );
   }
   

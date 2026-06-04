@@ -161,6 +161,7 @@ export interface EditorConfig {
   keyBindings: Record<string, string>;
   maxUndoLevels: number;
   showLineNumbers: boolean;
+  relativeLineNumbers: boolean;
   wordWrap: boolean;
 }
 
@@ -250,6 +251,9 @@ export interface EditorState {
   // Window management (US-3.2.1)
   windows?: Window[];  // Array of windows
   currentWindowIndex?: number;  // Index of currently focused window
+  // Tabs (SPEC-004)
+  tabs?: Tab[];  // Array of tabs
+  currentTabIndex?: number;  // Index of active tab
   // Syntax highlighting (SPEC-035)
   highlightSpans?: HighlightSpan[][];
   searchMatches?: Range[];
@@ -284,6 +288,15 @@ export interface Window {
   width?: number;  // Window width in columns (for vertical splits)
   row?: number;  // Window starting row (0-indexed)
   col?: number;  // Window starting column (0-indexed)
+}
+
+/**
+ * Tab interface (SPEC-004)
+ */
+export interface Tab {
+  id: string;
+  label: string;
+  buffer: FunctionalTextBuffer;
 }
 
 /**
@@ -441,6 +454,7 @@ export const Validators = {
       keyBindings: {},
       maxUndoLevels: MAX_UNDO_LEVELS,
       showLineNumbers: true,
+      relativeLineNumbers: false,
       wordWrap: false
     };
 

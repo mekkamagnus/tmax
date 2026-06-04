@@ -277,13 +277,13 @@ export class DebugReporter {
         lines.push(`📋 ${category.toUpperCase()}: ${errors.length} errors`);
         
         // Show most recent error details
-        const latest = errors[errors.length - 1];
+        const latest = errors[errors.length - 1]!;
         lines.push(`   Latest: ${latest.message}`);
         lines.push(`   Module: ${latest.context.module || 'unknown'}`);
         lines.push(`   Time: ${latest.timestamp.toISOString()}`);
-        
+
         if (latest.context.suggestions && latest.context.suggestions.length > 0) {
-          lines.push(`   Suggestion: ${latest.context.suggestions[0]}`);
+          lines.push(`   Suggestion: ${latest.context.suggestions[0]!}`);
         }
         lines.push("");
       });
@@ -341,7 +341,7 @@ export class DebugReporter {
 
     // Performance recommendations
     if (context.performanceMetrics?.slowOperations.length) {
-      recommendations.push(`⚡ Optimize slow operations: ${context.performanceMetrics.slowOperations[0].operation}`);
+      recommendations.push(`⚡ Optimize slow operations: ${context.performanceMetrics.slowOperations[0]!.operation}`);
     }
 
     // TTY recommendations

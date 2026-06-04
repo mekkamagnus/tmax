@@ -82,29 +82,29 @@ const validateSaveRequest = (
   path: string
 ): Validation<SaveError, SaveRequest> => {
   // Buffer validation
-  const bufferValidation = ValidationUtils.required(buffer, "NO_BUFFER" as SaveError);
-  
+  const bufferValidation = ValidationUtils.required(buffer, "NO_BUFFER" as SaveError) as Validation<SaveError, TextBuffer>;
+
   // Filename validation
-  const filenameValidation = ValidationUtils.required(filename, "NO_FILENAME" as SaveError)
-    .flatMap(name => ValidationUtils.nonEmpty(name, "NO_FILENAME" as SaveError));
-  
+  const filenameValidation = (ValidationUtils.required(filename, "NO_FILENAME" as SaveError)
+    .flatMap(name => ValidationUtils.nonEmpty(name, "NO_FILENAME" as SaveError))) as Validation<SaveError, string>;
+
   // Path validation with multiple security checks
-  const pathValidation = ValidationUtils.all(path,
-    (p: string) => p.includes('..') 
+  const pathValidation = ValidationUtils.all<SaveError, string>(path,
+    (p: string) => p.includes('..')
       ? Validation.failure<SaveError, string>("SECURITY_VIOLATION")
       : Validation.success(p),
     (p: string) => p.length > 4096
       ? Validation.failure<SaveError, string>("INVALID_PATH")
       : Validation.success(p),
     (p: string) => /[<>:"|?*\u0000-\u001f]/.test(p)
-      ? Validation.failure<SaveError, string>("INVALID_PATH") 
+      ? Validation.failure<SaveError, string>("INVALID_PATH")
       : Validation.success(p)
   );
-  
+
   // Combine all validations - accumulates ALL errors
   return lift3((buffer: TextBuffer) => (filename: string) => (path: string): SaveRequest => ({
     buffer,
-    filename, 
+    filename,
     path,
     content: buffer.getContent()
   }))(bufferValidation)(filenameValidation)(pathValidation);
@@ -201,47 +201,50 @@ export const saveCurrentBufferPipeline = (filename?: string): ReaderTaskEither<S
     .flatMap(deps => {
       // Find buffer name if not provided
       const resolvedFilename = filename || findBufferName(deps.currentBuffer, deps.buffers) || "untitled.txt";
-      
-      return pipe
-        .start({ buffer: deps.currentBuffer, filename: resolvedFilename, path: resolvedFilename })
-        // Validate all inputs with error accumulation
-        .step(({ buffer, filename, path }) => {
-          const validation = validateSaveRequest(buffer, filename, path);
-          return validation.fold(
-            errors => TaskEither.left<SaveError, SaveRequest>(errors[0]), // Take first error for now
-            request => TaskEither.right<SaveRequest, SaveError>(request)
-          );
-        })
-        // Log start of operation
-        .tap(request => ReaderTaskEither.lift(TaskEither.fromSync(() => 
-          deps.logger.debug(`Starting save: ${request.filename}`)
-        )))
-        // Validate path security
-        .step(request => validatePathReader(request.path).map(() => request).run(deps))
-        // Ensure directory exists
-        .step(request => 
-          EffectOps.provide(fileSystemEffects.ensureDirectory(request.path), deps)
-            .map(() => request)
-        )
-        // Write file with retry logic
-        .step(request => 
-          EffectOps.retry(
-            fileSystemEffects.writeFile(request.path, request.content),
-            3, // Max 3 attempts
-            1000 // 1 second base delay
-          )(deps).map(() => request)
-        )
-        // Log success
-        .tap(request => ReaderTaskEither.lift(TaskEither.fromSync(() => 
-          deps.logger.info(`Successfully saved: ${request.filename}`)
-        )))
-        .map(() => undefined)
-        .recover(error => {
-          // Log error and re-throw
-          deps.logger.error(`Save failed: ${error}`, error);
-          return ReaderTaskEither.left<SaveDependencies, SaveError, void>(error);
-        })
-        .build();
+
+      return ReaderTaskEither.lift<SaveDependencies, SaveError, void>(
+        pipe
+          .from<SaveError, { buffer: TextBuffer | null; filename: string; path: string }>(
+            TaskEither.right({ buffer: deps.currentBuffer, filename: resolvedFilename, path: resolvedFilename })
+          )
+          // Validate all inputs with error accumulation
+          .step(({ buffer, filename, path }) => {
+            const validation = validateSaveRequest(buffer, filename, path);
+            return validation.fold(
+              errors => TaskEither.left<SaveError, SaveRequest>(errors[0]!),
+              request => TaskEither.right<SaveRequest, SaveError>(request)
+            );
+          })
+          // Log start of operation
+          .tap(request => TaskEither.fromSync(() =>
+            deps.logger.debug(`Starting save: ${request.filename}`)
+          ))
+          // Validate path security
+          .step(request => validatePathReader(request.path).map(() => request).run(deps))
+          // Ensure directory exists
+          .step(request =>
+            EffectOps.provide(fileSystemEffects.ensureDirectory(request.path), deps)
+              .map(() => request as SaveRequest)
+          )
+          // Write file with retry logic
+          .step(request =>
+            EffectOps.retry(
+              fileSystemEffects.writeFile(request.path, request.content),
+              3,
+              1000
+            )(deps).map(() => request as SaveRequest)
+          )
+          // Log success
+          .tap(request => TaskEither.fromSync(() =>
+            deps.logger.info(`Successfully saved: ${request.filename}`)
+          ))
+          .map(() => undefined as void)
+          .recover(error => {
+            deps.logger.error(`Save failed: ${error}`, error);
+            return TaskEither.left<SaveError, void>(error);
+          })
+          .build()
+      );
     });
 
 /**
@@ -251,7 +254,7 @@ export const saveWithStateUpdates = (filename?: string): StateTaskEither<EditorS
   StateTaskEither.get<EditorState, SaveError>()
     .flatMap(state => {
       if (!state.currentBuffer) {
-        return StateTaskEither.left("NO_BUFFER");
+        return StateTaskEither.left<EditorState, SaveError, void>("NO_BUFFER");
       }
       
       const resolvedFilename = filename || state.lastSavedPath || "untitled.txt";
@@ -302,11 +305,11 @@ export const saveWithStateUpdates = (filename?: string): StateTaskEither<EditorS
       };
       
       // Use the pipeline save operation
-      return StateTaskEither.lift(
+      return StateTaskEither.lift<EditorState, SaveError, void>(
         saveCurrentBufferPipeline(resolvedFilename).run(deps)
       )
       // Update state after successful save
-      .flatMap(() => StateTaskEither.modify<EditorState, SaveError>(state => 
+      .flatMap(() => StateTaskEither.modify<EditorState, SaveError>(state =>
         // Use lenses for clean immutable updates
         statusMessageLens.set(`Saved ${resolvedFilename}`)(
           lastSavedPathLens.set(resolvedFilename)(
@@ -346,26 +349,20 @@ export const safeFileOperation = (filename: string): ReaderTaskEither<SaveDepend
   ReaderTaskEither.ask<SaveDependencies, SaveError>()
     .flatMap(deps => {
       const backupName = `${filename}.backup`;
-      
-      return effectPipe
-        // Check if original file exists
-        .from(fileSystemEffects.exists(filename))
-        // Create backup if original exists
-        .flatMap(exists => exists 
-          ? effectPipe
-              .from(Effect.tryCatch(
-                deps => deps.filesystem.writeFile(backupName, ""), // Would read original first
-                () => "FILESYSTEM_ERROR" as SaveError
-              ))
-              .tap(() => logEffects.info(`Backup created: ${backupName}`))
-              .build()
-          : Effect.succeed<SaveDependencies, SaveError, void>(undefined)
-        )
-        // Perform the actual save
-        .flatMap(() => saveCurrentBufferPipeline(filename).run(deps))
-        // Clean up backup on success
-        .tap(() => logEffects.debug(`Save completed, backup can be cleaned up`))
-        .build()(deps);
+
+      return ReaderTaskEither.lift<SaveDependencies, SaveError, void>(
+        EffectOps.provide(fileSystemEffects.exists(filename), deps)
+          .flatMap(exists =>
+            exists
+              ? EffectOps.provide(fileSystemEffects.writeFile(backupName, ""), deps)
+                  .map(() => { deps.logger.info(`Backup created: ${backupName}`); })
+              : TaskEither.right<undefined, SaveError>(undefined)
+          )
+          .flatMap(() => saveCurrentBufferPipeline(filename).run(deps))
+          .tap(() => TaskEither.fromSync(() =>
+            deps.logger.debug(`Save completed, backup can be cleaned up`)
+          ))
+      );
     });
 
 /**
@@ -411,9 +408,9 @@ export const saveUtils = {
    * Validate multiple filenames at once
    */
   validateFilenames: (filenames: string[]): Validation<SaveError, string[]> =>
-    Validation.traverse(filenames, filename =>
-      ValidationUtils.nonEmpty(filename, "NO_FILENAME" as SaveError)
-        .flatMap(name => ValidationUtils.securePath(name).mapErrors(() => "SECURITY_VIOLATION" as SaveError))
+    Validation.traverse<SaveError, string, string>(filenames, (filename: string): Validation<SaveError, string> =>
+      (ValidationUtils.nonEmpty(filename, "NO_FILENAME") as Validation<SaveError, string>)
+        .flatMap((name: string) => ValidationUtils.securePath(name).mapErrors(() => ["SECURITY_VIOLATION" as SaveError]))
     )
 };
 
