@@ -1,12 +1,12 @@
 import { Editor } from "./src/editor/editor.ts";
-import { MockTerminal } from "./mocks/terminal.ts";
-import { MockFileSystem } from "./mocks/filesystem.ts";
+import { MockTerminal } from "./test/mocks/terminal.ts";
+import { MockFileSystem } from "./test/mocks/filesystem.ts";
 import { resetFixtureState } from "./src/tlisp/test-framework.ts";
 
 const mockTerminal = new MockTerminal();
 const mockFileSystem = new MockFileSystem();
 const editor = new Editor(mockTerminal, mockFileSystem);
-editor.start();
+await editor.start();
 resetFixtureState();
 
 const interpreter = editor.getInterpreter();

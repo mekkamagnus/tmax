@@ -1,9 +1,9 @@
 /**
  * Simple test to verify that the editor can load the new binding files
  */
-import { Editor } from "../src/editor/editor.ts";
-import { MockTerminal } from "./mocks/terminal.ts";
-import { MockFileSystem } from "./mocks/filesystem.ts";
+import { Editor } from "./src/editor/editor.ts";
+import { MockTerminal } from "./test/mocks/terminal.ts";
+import { MockFileSystem } from "./test/mocks/filesystem.ts";
 
 async function testBindingFiles() {
   const terminal = new MockTerminal();

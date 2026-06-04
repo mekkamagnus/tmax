@@ -13,7 +13,7 @@ DAEMON="$PROJECT_DIR/src/server/server.ts"
 TUI="$PROJECT_DIR/src/client/tui-client.ts"
 CLIENT="$PROJECT_DIR/bin/tmaxclient"
 TMAX_UID="$(id -u)"
-SOCKET="/tmp/tmax-${TMAX_UID}/server"
+SOCKET="${TMAX_SOCKET:-/tmp/tmax-${TMAX_UID}/server}"
 
 usage() {
   cat <<EOF
