@@ -28,7 +28,7 @@ import {
 } from "../../error/types.ts";
 import { killRingSave } from "./kill-ring.ts";
 import { activateYankPopState } from "./yank-pop-ops.ts";
-import { registerYank, resetRegisterState } from "./evil-integration.ts";
+import { getRegister, registerYank, resetRegisterState } from "./evil-integration.ts";
 
 /**
  * Register storage for yanked text (legacy, for backward compatibility)
@@ -108,7 +108,7 @@ export function createYankOps(
 
     let count = 1;
     if (args.length === 1) {
-      const countArg = args[0];
+      const countArg = args[0]!
       const typeValidation = validateArgType(countArg, "number", 0, "yank-chars");
       if (Either.isLeft(typeValidation)) {
         return Either.left(typeValidation.left);
@@ -161,7 +161,7 @@ export function createYankOps(
     // Get count (default to 1)
     let count = 1;
     if (args.length === 1) {
-      const countArg = args[0];
+      const countArg = args[0]!
       const typeValidation = validateArgType(countArg, "number", 0, "yank-word");
       if (Either.isLeft(typeValidation)) {
         return Either.left(typeValidation.left);
@@ -243,7 +243,7 @@ export function createYankOps(
     // Get count (default to 1)
     let count = 1;
     if (args.length === 1) {
-      const countArg = args[0];
+      const countArg = args[0]!
       const typeValidation = validateArgType(countArg, "number", 0, "yank-line");
       if (Either.isLeft(typeValidation)) {
         return Either.left(typeValidation.left);
@@ -353,7 +353,7 @@ export function createYankOps(
     // Get count (default to 1)
     let count = 1;
     if (args.length === 1) {
-      const countArg = args[0];
+      const countArg = args[0]!
       const typeValidation = validateArgType(countArg, "number", 0, "paste-after");
       if (Either.isLeft(typeValidation)) {
         return Either.left(typeValidation.left);
@@ -361,8 +361,10 @@ export function createYankOps(
       count = Math.max(0, countArg.value as number);
     }
 
+    const pasteRegister = getRegister('"') || yankRegister;
+
     // Check if register has content
-    if (yankRegister === "") {
+    if (pasteRegister === "") {
       // Empty register - nothing to paste
       return Either.right(createNil());
     }
@@ -372,23 +374,30 @@ export function createYankOps(
 
 
     // Determine if this is a line paste or character paste
-    const isLinePaste = yankRegister.includes('\n');
+    const isLinePaste = pasteRegister.includes('\n');
 
     if (isLinePaste) {
       // Build repeated text
-      let pasteText = yankRegister;
+      let pasteText = pasteRegister;
       for (let i = 1; i < count; i++) {
-        pasteText += yankRegister;
+        pasteText += pasteRegister;
       }
 
       const lineCountResult = currentBuffer!.getLineCount();
       const lineCount = Either.isRight(lineCountResult) ? lineCountResult.right : currentLine + 1;
-      let insertPos = { line: currentLine, column: 0 };
-      if (lineCount > 2 && currentLine >= lineCount - 1) {
-        const lastLineResult = currentBuffer!.getLine(lineCount - 1);
+      let insertPos = { line: currentLine + 1, column: 0 };
+      let targetLine = currentLine + 1;
+      const currentLineResult = currentBuffer!.getLine(currentLine);
+      const emptyBuffer = lineCount === 1 && Either.isRight(currentLineResult) && currentLineResult.right === "";
+      if (emptyBuffer) {
+        pasteText = pasteText.replace(/\n$/, "");
+        insertPos = { line: 0, column: 0 };
+        targetLine = 0;
+      } else if (currentLine >= lineCount - 1) {
+        const lastLineResult = currentBuffer!.getLine(Math.max(0, lineCount - 1));
         const lastLineLength = Either.isRight(lastLineResult) ? lastLineResult.right.length : 0;
         pasteText = `\n${pasteText.replace(/\n$/, "")}`;
-        insertPos = { line: lineCount - 1, column: lastLineLength };
+        insertPos = { line: Math.max(0, lineCount - 1), column: lastLineLength };
       }
       const insertResult = currentBuffer!.insert(insertPos, pasteText);
 
@@ -400,23 +409,23 @@ export function createYankOps(
       setCurrentBuffer(insertResult.right);
 
       // Move cursor to first non-blank of pasted line
-      setCursorLine(currentLine + 1);
+      setCursorLine(targetLine);
       setCursorColumn(0);
 
       // Activate yank-pop state for M-y support (US-1.9.2)
-      activateYankPopState(pasteText, { line: currentLine + 1, column: 0 });
+      activateYankPopState(pasteText, { line: targetLine, column: 0 });
     } else {
       // Character paste: paste after cursor position
       const insertPos = { line: currentLine, column: currentColumn + 1 };
 
       const lineResult = currentBuffer!.getLine(currentLine);
       const suffix = Either.isRight(lineResult) ? lineResult.right.slice(currentColumn + 1) : "";
-      const repetitions = suffix.startsWith(yankRegister) ? Math.max(0, count - 1) : count;
+      const repetitions = suffix.startsWith(pasteRegister) ? Math.max(0, count - 1) : count;
 
       // Build repeated text
       let pasteText = "";
       for (let i = 0; i < repetitions; i++) {
-        pasteText += yankRegister;
+        pasteText += pasteRegister;
       }
 
       if (pasteText === "") {
@@ -468,7 +477,7 @@ export function createYankOps(
     // Get count (default to 1)
     let count = 1;
     if (args.length === 1) {
-      const countArg = args[0];
+      const countArg = args[0]!
       const typeValidation = validateArgType(countArg, "number", 0, "paste-before");
       if (Either.isLeft(typeValidation)) {
         return Either.left(typeValidation.left);
@@ -476,8 +485,10 @@ export function createYankOps(
       count = Math.max(0, countArg.value as number);
     }
 
+    const pasteRegister = getRegister('"') || yankRegister;
+
     // Check if register has content
-    if (yankRegister === "") {
+    if (pasteRegister === "") {
       // Empty register - nothing to paste
       return Either.right(createNil());
     }
@@ -486,14 +497,14 @@ export function createYankOps(
     const currentColumn = getCursorColumn();
 
     // Determine if this is a line paste or character paste
-    const isLinePaste = yankRegister.includes('\n');
+    const isLinePaste = pasteRegister.includes('\n');
 
     if (isLinePaste) {
       // Line paste: paste before current line (at current line, column 0)
       // Build repeated text
-      let pasteText = yankRegister;
+      let pasteText = pasteRegister;
       for (let i = 1; i < count; i++) {
-        pasteText += yankRegister;
+        pasteText += pasteRegister;
       }
 
       const insertPos = { line: currentLine, column: 0 };
@@ -513,15 +524,13 @@ export function createYankOps(
       // Activate yank-pop state for M-y support (US-1.9.2)
       activateYankPopState(pasteText, { line: currentLine, column: 0 });
     } else {
-      // Character paste: paste before the cursor's current character. For cursors
-      // positioned at the start of a word after whitespace, this inserts before
-      // the separator, matching the legacy tests for P.
-      const insertPos = { line: currentLine, column: Math.max(0, currentColumn - 1) };
+      // Character paste: insert immediately before the cursor's current character.
+      const insertPos = { line: currentLine, column: Math.max(0, currentColumn) };
 
       // Build repeated text
-      let pasteText = yankRegister;
+      let pasteText = pasteRegister;
       for (let i = 1; i < count; i++) {
-        pasteText += yankRegister;
+        pasteText += pasteRegister;
       }
 
       const insertResult = currentBuffer!.insert(insertPos, pasteText);
@@ -578,7 +587,7 @@ export function createYankOps(
       ));
     }
 
-    const textArg = args[0];
+    const textArg = args[0]!
     if (textArg.type !== 'string') {
       return Either.left(createValidationError(
         'TypeError',
@@ -589,7 +598,13 @@ export function createYankOps(
       ));
     }
 
-    setYankRegister(textArg.value);
+    const text = textArg.value as string;
+    setYankRegister(text);
+    if (text === "") {
+      resetRegisterState();
+    } else {
+      registerYank(text);
+    }
     return Either.right(createNil());
   });
 

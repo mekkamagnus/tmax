@@ -61,13 +61,13 @@ export function createCursorOps(
       return Either.left(argsValidation.left);
     }
 
-    const lineArg = args[0];
+    const lineArg = args[0]!
     const lineTypeValidation = validateArgType(lineArg, "number", 0, "cursor-move");
     if (Either.isLeft(lineTypeValidation)) {
       return Either.left(lineTypeValidation.left);
     }
 
-    const columnArg = args[1];
+    const columnArg = args[1]!
     const columnTypeValidation = validateArgType(columnArg, "number", 1, "cursor-move");
     if (Either.isLeft(columnTypeValidation)) {
       return Either.left(columnTypeValidation.left);

@@ -8,8 +8,10 @@ import { TLispInterpreterImpl } from "../tlisp/interpreter.ts";
 import { FileSystemImpl } from "../core/filesystem.ts";
 import { createEditorAPI, TlispEditorState } from "./tlisp-api.ts";
 import type { EditorState, FunctionalTextBuffer, Window, HighlightSpan } from "../core/types.ts";
-import { createString, createList, createNil, createNumber } from "../tlisp/values.ts";
+import { createString, createList, createNil, createNumber, createBoolean } from "../tlisp/values.ts";
 import type { TerminalIO, FileSystem } from "../core/types.ts";
+import type { TLispValue, TLispFunctionImpl } from "../tlisp/types.ts";
+import type { TLispFunction } from "../tlisp/types.ts";
 import { Either } from "../utils/task-either.ts";
 import { FunctionalTextBufferImpl } from "../core/buffer.ts";
 import { handleNormalMode } from "./handlers/normal-handler.ts";
@@ -22,6 +24,7 @@ import * as macroRecording from "./api/macro-recording.ts";
 import { loadMacrosFromFile, saveMacrosToFile } from "./api/macro-persistence.ts";
 import { LSPClient } from "../lsp/client.ts";
 import { createWindowOps } from "./api/window-ops.ts";
+import { createTabOps } from "./api/tab-ops.ts";
 import { log } from "../utils/logger.ts";
 import { KeymapSync } from "./keymap-sync.ts";
 import { createKeymapOps } from "./api/keymap-ops.ts";
@@ -63,6 +66,7 @@ export class Editor {
   private commandHistory: string[] = [];  // Command history for M-x (US-1.10.1)
   private historyIndex: number = 0;  // Current position in command history
   private spacePressed: boolean = false;  // Track space key for SPC ; sequence (US-1.10.1)
+  private windowPrefixPressed: boolean = false;  // Track C-w prefix for window commands (SPEC-004)
   private lspClient: LSPClient;  // LSP client for language server integration (US-3.1.1)
   keymapSync: KeymapSync;  // Bridge layer for T-Lisp keymap integration (US-0.4.1)
   private currentInitFile: string = '';  // Path to current init file (SPEC-025)
@@ -106,6 +110,7 @@ export class Editor {
         keyBindings: {},
         maxUndoLevels: 100,
         showLineNumbers: true,
+        relativeLineNumbers: false,
         wordWrap: false
       },
       commandLine: "",
@@ -123,6 +128,8 @@ export class Editor {
       // Window management (US-3.2.1)
       windows: [],
       currentWindowIndex: 0,
+      tabs: [],
+      currentTabIndex: 0,
     };
 
     editorLog.debug('Editor state initialized', {
@@ -189,6 +196,15 @@ export class Editor {
         if (v && editor.state.currentFilename) {
           // Use the tracked filename to update the correct buffer entry
           editor.buffers.set(editor.state.currentFilename, v as FunctionalTextBufferImpl);
+        }
+        if (v && editor.state.tabs && editor.state.tabs.length > 0) {
+          const currentTabIndex = editor.state.currentTabIndex ?? 0;
+          const currentTab = editor.state.tabs[currentTabIndex];
+          if (currentTab && currentTab.label === editor.state.currentFilename) {
+            editor.state.tabs = editor.state.tabs.map((tab, index) =>
+              index === currentTabIndex ? { ...tab, buffer: v } : tab
+            );
+          }
         }
         editor.state.currentBuffer = v ?? undefined;
       },
@@ -278,26 +294,27 @@ export class Editor {
     const api = createEditorAPI(tlispState);
 
     for (const [name, fn] of api) {
-      // Wrap the Either-returning function to convert to the expected TLispFunctionImpl format
-      const wrappedFn = (args: TLispValue[]) => {
-        const result = fn(args);
-        if (Either.isLeft(result)) {
-          // Check for quit signal and throw it directly without wrapping
-          if (result.left.message === "EDITOR_QUIT_SIGNAL") {
-            throw new Error("EDITOR_QUIT_SIGNAL");
-          }
-          // Convert error to string representation or throw
-          // For now, we'll throw an error to match the expected behavior
-          throw new Error(`T-Lisp API Error: ${result.left.message}`);
-        }
-        return result.right;
-      };
-
-      this.interpreter.defineBuiltin(name, wrappedFn);
+      // fn already returns Either<AppError, TLispValue> (TLispFunctionImpl)
+      this.interpreter.defineBuiltin(name, fn);
     }
 
+    // Helper to define builtins that return raw TLispValues (wrapped in Either.right)
+    const defineRaw = (name: string, fn: (args: TLispValue[]) => TLispValue) => {
+      this.interpreter.defineBuiltin(name, (args) => {
+        try {
+          return Either.right(fn(args));
+        } catch (e) {
+          return Either.left({
+            type: 'EvalError' as const,
+            variant: 'RuntimeError' as const,
+            message: e instanceof Error ? e.message : String(e),
+          });
+        }
+      });
+    };
+
     // Add key mapping functions
-    this.interpreter.defineBuiltin("key-bind", (args) => {
+    defineRaw("key-bind", (args) => {
       if (args.length < 2 || args.length > 3) {
         throw new Error("key-bind requires 2 or 3 arguments: key, command, optional mode");
       }
@@ -347,7 +364,7 @@ export class Editor {
     });
 
     // Add key unbind function
-    this.interpreter.defineBuiltin("key-unbind", (args) => {
+    defineRaw("key-unbind", (args) => {
       if (args.length < 1 || args.length > 2) {
         throw new Error("key-unbind requires 1 or 2 arguments: key, optional mode");
       }
@@ -394,7 +411,7 @@ export class Editor {
     });
 
     // Add function to list all active bindings
-    this.interpreter.defineBuiltin("key-bindings", (args) => {
+    defineRaw("key-bindings", (args) => {
       if (args.length !== 0) {
         throw new Error("key-bindings takes no arguments");
       }
@@ -421,7 +438,7 @@ export class Editor {
     });
 
     // Add function to get specific binding info
-    this.interpreter.defineBuiltin("key-binding", (args) => {
+    defineRaw("key-binding", (args) => {
       if (args.length < 1 || args.length > 2) {
         throw new Error("key-binding requires 1 or 2 arguments: key, optional mode");
       }
@@ -465,7 +482,7 @@ export class Editor {
         return createNil(); // No binding found for specific mode
       } else {
         // Return the first mapping (or the one without mode if available)
-        const mapping = mappings[0]; // Return first available mapping
+        const mapping = mappings[0]!; // Return first available mapping
         return createList([
           createString(mapping.command),
           createString("source"), // Could be extended to show source file
@@ -475,27 +492,27 @@ export class Editor {
     });
 
     // Add command execution function
-    this.interpreter.defineBuiltin("execute-command", (args) => {
+    defineRaw("execute-command", (args) => {
       if (args.length !== 1) {
         throw new Error("execute-command requires exactly 1 argument: command");
       }
 
-      const commandArg = args[0];
+      const commandArg = args[0]!;
       if (!commandArg || commandArg.type !== "string") {
         throw new Error("execute-command requires a string command");
       }
 
       const command = commandArg.value as string;
-      return this.executeCommand(command);
+      return this.executeCommand(command) as TLispValue;
     });
 
     // Add describe-key function (US-1.11.1)
-    this.interpreter.defineBuiltin("describe-key", (args) => {
+    defineRaw("describe-key", (args) => {
       if (args.length < 1 || args.length > 2) {
         throw new Error("describe-key requires 1 or 2 arguments: key, optional mode");
       }
 
-      const keyArg = args[0];
+      const keyArg = args[0]!;
       const modeArg = args[1];
 
       if (!keyArg || keyArg.type !== "string") {
@@ -531,7 +548,7 @@ export class Editor {
         mapping = mappings.find(m => !m.mode);
       }
       if (!mapping) {
-        mapping = mappings[0]; // Fall back to first binding
+        mapping = mappings[0]!; // Fall back to first binding
       }
 
       // Return structured information: [command, key, mode, documentation]
@@ -545,7 +562,7 @@ export class Editor {
 
     // Add describe-key-prompt function (US-1.11.1)
     // Interactive version that prompts user to press a key
-    this.interpreter.defineBuiltin("describe-key-prompt", (args) => {
+    defineRaw("describe-key-prompt", (args) => {
       if (args.length !== 0) {
         throw new Error("describe-key-prompt requires no arguments");
       }
@@ -560,25 +577,18 @@ export class Editor {
     // Register keymap-ops API functions (US-0.4.1)
     const keymapOps = createKeymapOps(this.interpreter, this.keymapSync);
     for (const [name, fn] of keymapOps) {
-      // Wrap the Either-returning function to convert to the expected TLispFunctionImpl format
-      const wrappedFn = (args: TLispValue[]) => {
+      // Wrap fn that returns Either<string, TLispValue> to Either<AppError, TLispValue>
+      this.interpreter.defineBuiltin(name, (args) => {
         const result = fn(args);
         if (Either.isLeft(result)) {
-          // Check for quit signal and throw it directly without wrapping
-          const error = result.left;
-          if (error && typeof error === 'object' && 'message' in error && error.message === "EDITOR_QUIT_SIGNAL") {
-            throw new Error("EDITOR_QUIT_SIGNAL");
-          }
-          throw new Error(`keymap-ops Error: ${result.left}`);
+          return Either.left({ type: 'EvalError', variant: 'RuntimeError', message: result.left });
         }
-        return result.right;
-      };
-
-      this.interpreter.defineBuiltin(name, wrappedFn);
+        return result;
+      });
     }
 
     // Add describe-function function (US-1.11.2)
-    this.interpreter.defineBuiltin("describe-function", (args) => {
+    defineRaw("describe-function", (args) => {
       if (args.length !== 1) {
         throw new Error("describe-function requires exactly 1 argument: function-name");
       }
@@ -601,10 +611,12 @@ export class Editor {
         return createNil(); // Not a function
       }
 
+      const fn = func as TLispFunction;
+
       // Extract function information
-      const name = func.name || functionName;
-      const docstring = func.docstring || "No documentation available";
-      const parameters = func.parameters || [];
+      const name = fn.name || functionName;
+      const docstring = fn.docstring || "No documentation available";
+      const parameters = fn.parameters || [];
 
       // Build signature
       let signature: string;
@@ -621,8 +633,8 @@ export class Editor {
         createString(docstring)
       ];
 
-      if (func.source) {
-        result.push(createString(func.source));
+      if (fn.source) {
+        result.push(createString(fn.source));
       }
 
       return createList(result);
@@ -630,7 +642,7 @@ export class Editor {
 
     // Add describe-function-prompt function (US-1.11.2)
     // Interactive version that prompts user for function name
-    this.interpreter.defineBuiltin("describe-function-prompt", (args) => {
+    defineRaw("describe-function-prompt", (args) => {
       if (args.length !== 0) {
         throw new Error("describe-function-prompt requires no arguments");
       }
@@ -644,7 +656,7 @@ export class Editor {
 
     // Add describe-function-complete function (US-1.11.2)
     // Returns list of function names matching a pattern
-    this.interpreter.defineBuiltin("describe-function-complete", (args) => {
+    defineRaw("describe-function-complete", (args) => {
       if (args.length !== 1) {
         throw new Error("describe-function-complete requires exactly 1 argument: pattern");
       }
@@ -670,7 +682,7 @@ export class Editor {
 
     // Add apropos-command function (US-1.11.3)
     // Search for commands by pattern, returning name, binding, and documentation
-    this.interpreter.defineBuiltin("apropos-command", (args) => {
+    defineRaw("apropos-command", (args) => {
       if (args.length !== 1) {
         throw new Error("apropos-command requires exactly 1 argument: pattern");
       }
@@ -714,7 +726,7 @@ export class Editor {
             }
 
             // Build result: [name, bindings, docstring]
-            const func = value as TLispFunctionImpl;
+            const func = value as TLispFunction;
             const docstring = func.docstring || "No documentation available";
 
             const result: TLispValue[] = [
@@ -733,7 +745,7 @@ export class Editor {
 
     // Add apropos-command-prompt function (US-1.11.3)
     // Interactive version that prompts user for search pattern
-    this.interpreter.defineBuiltin("apropos-command-prompt", (args) => {
+    defineRaw("apropos-command-prompt", (args) => {
       if (args.length !== 0) {
         throw new Error("apropos-command-prompt requires no arguments");
       }
@@ -746,14 +758,14 @@ export class Editor {
     });
 
     // Add count prefix API functions (US-1.3.1)
-    this.interpreter.defineBuiltin("count-get", (args) => {
+    defineRaw("count-get", (args) => {
       if (args.length !== 0) {
         throw new Error("count-get requires no arguments");
       }
       return { type: "number", value: this.getCount() };
     });
 
-    this.interpreter.defineBuiltin("count-set", (args) => {
+    defineRaw("count-set", (args) => {
       if (args.length !== 1) {
         throw new Error("count-set requires exactly 1 argument: count");
       }
@@ -761,7 +773,7 @@ export class Editor {
       if (!countArg || countArg.type !== "number") {
         throw new Error("count-set requires a number");
       }
-      const count = countArg.value;
+      const count = countArg.value as number;
       if (count < 0) {
         throw new Error("count must be >= 0");
       }
@@ -769,7 +781,7 @@ export class Editor {
       return createNil();
     });
 
-    this.interpreter.defineBuiltin("count-reset", (args) => {
+    defineRaw("count-reset", (args) => {
       if (args.length !== 0) {
         throw new Error("count-reset requires no arguments");
       }
@@ -777,7 +789,7 @@ export class Editor {
       return createNil();
     });
 
-    this.interpreter.defineBuiltin("count-active", (args) => {
+    defineRaw("count-active", (args) => {
       if (args.length !== 0) {
         throw new Error("count-active requires no arguments");
       }
@@ -785,7 +797,7 @@ export class Editor {
     });
 
     // Add file operations
-    this.interpreter.defineBuiltin("file-save", (args) => {
+    defineRaw("file-save", (args) => {
       if (args.length !== 0) {
         throw new Error("file-save requires no arguments");
       }
@@ -799,21 +811,21 @@ export class Editor {
     });
 
     // Add minibuffer API functions (US-1.10.1)
-    this.interpreter.defineBuiltin("minibuffer-active", (args) => {
+    defineRaw("minibuffer-active", (args) => {
       if (args.length !== 0) {
         throw new Error("minibuffer-active requires no arguments");
       }
       return { type: "boolean", value: this.state.mode === "mx" };
     });
 
-    this.interpreter.defineBuiltin("minibuffer-get", (args) => {
+    defineRaw("minibuffer-get", (args) => {
       if (args.length !== 0) {
         throw new Error("minibuffer-get requires no arguments");
       }
       return createString(this.state.mxCommand);
     });
 
-    this.interpreter.defineBuiltin("minibuffer-set", (args) => {
+    defineRaw("minibuffer-set", (args) => {
       if (args.length !== 1) {
         throw new Error("minibuffer-set requires exactly 1 argument: text");
       }
@@ -821,11 +833,11 @@ export class Editor {
       if (!textArg || textArg.type !== "string") {
         throw new Error("minibuffer-set requires a string");
       }
-      this.state.mxCommand = textArg.value;
-      return createString(textArg.value);
+      this.state.mxCommand = textArg.value as string;
+      return createString(textArg.value as string);
     });
 
-    this.interpreter.defineBuiltin("minibuffer-clear", (args) => {
+    defineRaw("minibuffer-clear", (args) => {
       if (args.length !== 0) {
         throw new Error("minibuffer-clear requires no arguments");
       }
@@ -833,7 +845,7 @@ export class Editor {
       return createNil();
     });
 
-    this.interpreter.defineBuiltin("minibuffer-history", (args) => {
+    defineRaw("minibuffer-history", (args) => {
       if (args.length !== 0) {
         throw new Error("minibuffer-history requires no arguments");
       }
@@ -841,7 +853,7 @@ export class Editor {
       return createList(historyValues);
     });
 
-    this.interpreter.defineBuiltin("minibuffer-history-add", (args) => {
+    defineRaw("minibuffer-history-add", (args) => {
       if (args.length !== 1) {
         throw new Error("minibuffer-history-add requires exactly 1 argument: command");
       }
@@ -849,7 +861,7 @@ export class Editor {
       if (!commandArg || commandArg.type !== "string") {
         throw new Error("minibuffer-history-add requires a string");
       }
-      const command = commandArg.value;
+      const command = commandArg.value as string;
       // Don't add duplicates of the most recent command
       if (this.commandHistory.length === 0 || this.commandHistory[this.commandHistory.length - 1] !== command) {
         this.commandHistory.push(command);
@@ -859,7 +871,7 @@ export class Editor {
       return createNil();
     });
 
-    this.interpreter.defineBuiltin("minibuffer-history-previous", (args) => {
+    defineRaw("minibuffer-history-previous", (args) => {
       if (args.length !== 0) {
         throw new Error("minibuffer-history-previous requires no arguments");
       }
@@ -870,7 +882,7 @@ export class Editor {
       // Move to previous command in history
       if (this.historyIndex > 0) {
         this.historyIndex--;
-        this.state.mxCommand = this.commandHistory[this.historyIndex];
+        this.state.mxCommand = this.commandHistory[this.historyIndex]!;
       } else {
         // Already at oldest command
         this.state.statusMessage = "Already at oldest command";
@@ -878,7 +890,7 @@ export class Editor {
       return createString(this.state.mxCommand);
     });
 
-    this.interpreter.defineBuiltin("minibuffer-history-next", (args) => {
+    defineRaw("minibuffer-history-next", (args) => {
       if (args.length !== 0) {
         throw new Error("minibuffer-history-next requires no arguments");
       }
@@ -889,7 +901,7 @@ export class Editor {
       // Move to next command in history
       if (this.historyIndex < this.commandHistory.length - 1) {
         this.historyIndex++;
-        this.state.mxCommand = this.commandHistory[this.historyIndex];
+        this.state.mxCommand = this.commandHistory[this.historyIndex]!;
       } else if (this.historyIndex === this.commandHistory.length - 1) {
         // At end of history, clear input
         this.historyIndex = this.commandHistory.length;
@@ -898,7 +910,7 @@ export class Editor {
       return createString(this.state.mxCommand);
     });
 
-    this.interpreter.defineBuiltin("minibuffer-history-reset-index", (args) => {
+    defineRaw("minibuffer-history-reset-index", (args) => {
       if (args.length !== 0) {
         throw new Error("minibuffer-history-reset-index requires no arguments");
       }
@@ -907,7 +919,7 @@ export class Editor {
     });
 
     // Combined function for SPC ; that also resets history index
-    this.interpreter.defineBuiltin("editor-enter-mx-mode", (args) => {
+    defineRaw("editor-enter-mx-mode", (args) => {
       if (args.length !== 0) {
         throw new Error("editor-enter-mx-mode requires no arguments");
       }
@@ -920,8 +932,38 @@ export class Editor {
       return createString("mx");
     });
 
+    // Line number toggles
+    defineRaw("toggle-line-numbers", (args) => {
+      if (args.length !== 0) {
+        throw new Error("toggle-line-numbers requires no arguments");
+      }
+      this.state.config.showLineNumbers = !this.state.config.showLineNumbers;
+      return createBoolean(this.state.config.showLineNumbers);
+    });
+
+    defineRaw("toggle-relative-line-numbers", (args) => {
+      if (args.length !== 0) {
+        throw new Error("toggle-relative-line-numbers requires no arguments");
+      }
+      this.state.config.relativeLineNumbers = !this.state.config.relativeLineNumbers;
+      if (this.state.config.relativeLineNumbers) {
+        this.state.config.showLineNumbers = true;
+      }
+      return createBoolean(this.state.config.relativeLineNumbers);
+    });
+
+    // Window prefix handler: C-w waits for next key (s/v/w/q)
+    defineRaw("editor-window-prefix", (args) => {
+      if (args.length !== 0) {
+        throw new Error("editor-window-prefix requires no arguments");
+      }
+      this.windowPrefixPressed = true;
+      this.state.statusMessage = "C-w";
+      return createString("window-prefix");
+    });
+
     // Which-key API functions (US-1.10.3)
-    this.interpreter.defineBuiltin("which-key-enable", (args) => {
+    defineRaw("which-key-enable", (args) => {
       if (args.length !== 0) {
         throw new Error("which-key-enable requires no arguments");
       }
@@ -929,7 +971,7 @@ export class Editor {
       return createNil();
     });
 
-    this.interpreter.defineBuiltin("which-key-disable", (args) => {
+    defineRaw("which-key-disable", (args) => {
       if (args.length !== 0) {
         throw new Error("which-key-disable requires no arguments");
       }
@@ -940,7 +982,7 @@ export class Editor {
       return createNil();
     });
 
-    this.interpreter.defineBuiltin("which-key-timeout", (args) => {
+    defineRaw("which-key-timeout", (args) => {
       if (args.length !== 1) {
         throw new Error("which-key-timeout requires exactly 1 argument: milliseconds");
       }
@@ -948,7 +990,7 @@ export class Editor {
       if (!timeoutArg || timeoutArg.type !== "number") {
         throw new Error("which-key-timeout requires a number");
       }
-      const timeout = timeoutArg.value;
+      const timeout = timeoutArg.value as number;
       if (timeout < 0) {
         throw new Error("which-key-timeout must be a positive number");
       }
@@ -956,21 +998,21 @@ export class Editor {
       return createNumber(timeout);
     });
 
-    this.interpreter.defineBuiltin("which-key-active", (args) => {
+    defineRaw("which-key-active", (args) => {
       if (args.length !== 0) {
         throw new Error("which-key-active requires no arguments");
       }
       return { type: "boolean", value: this.state.whichKeyActive || false };
     });
 
-    this.interpreter.defineBuiltin("which-key-prefix", (args) => {
+    defineRaw("which-key-prefix", (args) => {
       if (args.length !== 0) {
         throw new Error("which-key-prefix requires no arguments");
       }
       return createString(this.state.whichKeyPrefix || "");
     });
 
-    this.interpreter.defineBuiltin("which-key-bindings", (args) => {
+    defineRaw("which-key-bindings", (args) => {
       if (args.length !== 0) {
         throw new Error("which-key-bindings requires no arguments");
       }
@@ -996,7 +1038,7 @@ export class Editor {
     // ============================================================================
 
     // Get documentation for a command
-    this.interpreter.defineBuiltin("get-command-documentation", (args) => {
+    defineRaw("get-command-documentation", (args) => {
       if (args.length !== 1) {
         throw new Error("get-command-documentation requires exactly 1 argument: command-name");
       }
@@ -1015,16 +1057,18 @@ export class Editor {
         return createString("No documentation available");
       }
 
+      const fnDoc = func as TLispFunction;
+
       // Return docstring if available
-      if (func.docstring) {
-        return createString(func.docstring);
+      if (fnDoc.docstring) {
+        return createString(fnDoc.docstring);
       }
 
       return createString("No documentation available");
     });
 
     // Get truncated documentation for preview pane
-    this.interpreter.defineBuiltin("get-command-documentation-truncated", (args) => {
+    defineRaw("get-command-documentation-truncated", (args) => {
       if (args.length !== 2) {
         throw new Error("get-command-documentation-truncated requires exactly 2 arguments: command-name and max-length");
       }
@@ -1049,8 +1093,10 @@ export class Editor {
         return createString("No documentation available");
       }
 
+      const fnTrunc = func as TLispFunction;
+
       // Get documentation
-      const doc = func.docstring || "No documentation available";
+      const doc = fnTrunc.docstring || "No documentation available";
 
       // Truncate if needed
       if (doc.length <= maxLength) {
@@ -1082,7 +1128,7 @@ export class Editor {
     } = macroRecording;
 
     // macro-record-start: Start recording to a register
-    this.interpreter.defineBuiltin("macro-record-start", (args) => {
+    defineRaw("macro-record-start", (args) => {
       if (args.length !== 1) {
         throw new Error("macro-record-start requires exactly 1 argument: register");
       }
@@ -1090,7 +1136,7 @@ export class Editor {
       if (!registerArg || registerArg.type !== "string") {
         throw new Error("macro-record-start requires a string register");
       }
-      const register = registerArg.value;
+      const register = registerArg.value as string;
 
       const result = startRecording(register);
       if (Either.isLeft(result)) {
@@ -1100,7 +1146,7 @@ export class Editor {
     });
 
     // macro-record-stop: Stop recording and save macro
-    this.interpreter.defineBuiltin("macro-record-stop", (args) => {
+    defineRaw("macro-record-stop", (args) => {
       if (args.length !== 0) {
         throw new Error("macro-record-stop requires no arguments");
       }
@@ -1120,7 +1166,7 @@ export class Editor {
     });
 
     // macro-record-key: Record a key during recording
-    this.interpreter.defineBuiltin("macro-record-key", (args) => {
+    defineRaw("macro-record-key", (args) => {
       if (args.length !== 1) {
         throw new Error("macro-record-key requires exactly 1 argument: key");
       }
@@ -1128,7 +1174,7 @@ export class Editor {
       if (!keyArg || keyArg.type !== "string") {
         throw new Error("macro-record-key requires a string key");
       }
-      const key = keyArg.value;
+      const key = keyArg.value as string;
 
       const result = recordKey(key);
       if (Either.isLeft(result)) {
@@ -1138,7 +1184,7 @@ export class Editor {
     });
 
     // macro-record-active: Check if currently recording
-    this.interpreter.defineBuiltin("macro-record-active", (args) => {
+    defineRaw("macro-record-active", (args) => {
       if (args.length !== 0) {
         throw new Error("macro-record-active requires no arguments");
       }
@@ -1146,7 +1192,7 @@ export class Editor {
     });
 
     // macro-record-register: Get current recording register
-    this.interpreter.defineBuiltin("macro-record-register", (args) => {
+    defineRaw("macro-record-register", (args) => {
       if (args.length !== 0) {
         throw new Error("macro-record-register requires no arguments");
       }
@@ -1158,7 +1204,7 @@ export class Editor {
     });
 
     // macro-list: Get all recorded macros
-    this.interpreter.defineBuiltin("macro-list", (args) => {
+    defineRaw("macro-list", (args) => {
       if (args.length !== 0) {
         throw new Error("macro-list requires no arguments");
       }
@@ -1175,7 +1221,7 @@ export class Editor {
     });
 
     // macro-execute: Execute a recorded macro
-    this.interpreter.defineBuiltin("macro-execute", (args) => {
+    defineRaw("macro-execute", (args) => {
       if (args.length < 1 || args.length > 2) {
         throw new Error("macro-execute requires 1 or 2 arguments: register, optional count");
       }
@@ -1183,7 +1229,7 @@ export class Editor {
       if (!registerArg || registerArg.type !== "string") {
         throw new Error("macro-execute requires a string register");
       }
-      const register = registerArg.value;
+      const register = registerArg.value as string;
 
       // Handle optional count parameter
       let count = 1;
@@ -1192,7 +1238,7 @@ export class Editor {
         if (!countArg || countArg.type !== "number") {
           throw new Error("macro-execute count must be a number");
         }
-        count = countArg.value;
+        count = countArg.value as number;
         if (count < 1) {
           throw new Error("macro-execute count must be >= 1");
         }
@@ -1226,7 +1272,7 @@ export class Editor {
     });
 
     // macro-execute-last: Execute the last executed macro (@@)
-    this.interpreter.defineBuiltin("macro-execute-last", (args) => {
+    defineRaw("macro-execute-last", (args) => {
       if (args.length !== 0) {
         throw new Error("macro-execute-last requires no arguments");
       }
@@ -1256,7 +1302,7 @@ export class Editor {
     });
 
     // macro-last-executed: Get the last executed macro register
-    this.interpreter.defineBuiltin("macro-last-executed", (args) => {
+    defineRaw("macro-last-executed", (args) => {
       if (args.length !== 0) {
         throw new Error("macro-last-executed requires no arguments");
       }
@@ -1268,7 +1314,7 @@ export class Editor {
     });
 
     // macro-clear: Clear all macros
-    this.interpreter.defineBuiltin("macro-clear", (args) => {
+    defineRaw("macro-clear", (args) => {
       if (args.length !== 0) {
         throw new Error("macro-clear requires no arguments");
       }
@@ -1277,7 +1323,7 @@ export class Editor {
     });
 
     // macro-clear-register: Clear a specific macro
-    this.interpreter.defineBuiltin("macro-clear-register", (args) => {
+    defineRaw("macro-clear-register", (args) => {
       if (args.length !== 1) {
         throw new Error("macro-clear-register requires exactly 1 argument: register");
       }
@@ -1285,7 +1331,7 @@ export class Editor {
       if (!registerArg || registerArg.type !== "string") {
         throw new Error("macro-clear-register requires a string register");
       }
-      const register = registerArg.value;
+      const register = registerArg.value as string;
 
       const result = clearMacro(register);
       if (Either.isLeft(result)) {
@@ -1295,7 +1341,7 @@ export class Editor {
     });
 
     // macro-record-reset: Reset macro recording state (for testing)
-    this.interpreter.defineBuiltin("macro-record-reset", (args) => {
+    defineRaw("macro-record-reset", (args) => {
       if (args.length !== 0) {
         throw new Error("macro-record-reset requires no arguments");
       }
@@ -1317,18 +1363,38 @@ export class Editor {
       this.interpreter.defineBuiltin(name, fn);
     }
 
+    // Add tab management operations (SPEC-004)
+    const tabOps = createTabOps(
+      () => this.state.tabs || [],
+      (tabs) => { this.state.tabs = tabs; },
+      () => this.state.currentTabIndex ?? 0,
+      (index) => { this.state.currentTabIndex = index; },
+      (name, content) => {
+        this.createBuffer(name, content);
+        return this.state.currentBuffer;
+      },
+      (tab) => {
+        this.state.currentBuffer = tab.buffer;
+        this.state.currentFilename = tab.label;
+      },
+    );
+
+    for (const [name, fn] of tabOps) {
+      this.interpreter.defineBuiltin(name, fn);
+    }
+
     // Init file operations (SPEC-025)
-    this.interpreter.defineBuiltin("eval-init-file", async (args) => {
-      await this.evalInitFile();
-      return createNil();
+    this.interpreter.defineBuiltin("eval-init-file", (args) => {
+      this.evalInitFile();
+      return Either.right(createNil());
     });
 
-    this.interpreter.defineBuiltin("init-file-path", (args) => {
+    defineRaw("init-file-path", (args) => {
       return createString(this.currentInitFile || "");
     });
 
     // Buffer evaluation (SPEC-025)
-    this.interpreter.defineBuiltin("eval-buffer", (args) => {
+    defineRaw("eval-buffer", (args) => {
       return this.evalBuffer();
     });
   }
@@ -1404,6 +1470,7 @@ export class Editor {
       "src/tlisp/core/modes/go-mode.tlisp",
       // SPEC-003: Minor modes
       "src/tlisp/core/modes/line-numbers-mode.tlisp",
+      "src/tlisp/core/modes/relative-line-numbers-mode.tlisp",
       "src/tlisp/core/modes/auto-fill-mode.tlisp",
     ];
 
@@ -1420,6 +1487,16 @@ export class Editor {
       "src/tlisp/core/commands/replace.tlisp",
       "src/tlisp/core/commands/indent.tlisp",
       "src/tlisp/core/commands/dired.tlisp",
+      // SPEC-004: Window and tab commands
+      "src/tlisp/core/commands/windows.tlisp",
+      "src/tlisp/core/commands/tabs.tlisp",
+      // SPEC-005: Vim dispatcher and motions
+      "src/tlisp/core/commands/vim-counts.tlisp",
+      "src/tlisp/core/commands/insert-entries.tlisp",
+      "src/tlisp/core/commands/edit-commands.tlisp",
+      "src/tlisp/core/commands/operators.tlisp",
+      "src/tlisp/core/commands/motions.tlisp",
+      "src/tlisp/core/commands/vim-dispatch.tlisp",
     ];
 
     let allLoaded = true;
@@ -1506,7 +1583,12 @@ export class Editor {
     /** Errors encountered during loading */
     errors: Array<{ plugin: string; error: string }>;
   }> {
-    const result = {
+    const result: {
+      loaded: string[];
+      skipped: string[];
+      total: number;
+      errors: Array<{ plugin: string; error: string }>;
+    } = {
       loaded: [],
       skipped: [],
       total: 0,
@@ -1652,8 +1734,14 @@ export class Editor {
         (key-bind "Escape" "(editor-exit-mx-mode)" "mx")
         (key-bind "C-g" "(editor-exit-mx-mode)" "mx")
         (key-bind "Enter" "(editor-execute-mx-command)" "mx")
+
+        ;; Window management bindings (SPEC-004)
+        (key-bind "C-w" "(editor-window-prefix)" "normal")
       `;
       this.interpreter.execute(fallbackBindings);
+
+      // Enable line-numbers mode by default
+      try { this.interpreter.execute('(global-line-numbers-mode t)'); } catch { /* ok */ }
     } catch (error) {
       console.error("Critical: Failed to load even fallback bindings:", error);
       this.state.statusMessage = "Critical: No key bindings available";
@@ -1769,23 +1857,28 @@ export class Editor {
       return createNil();
     }
 
-    const bufferContent = this.state.currentBuffer.getContent();
-    evalLog.debug('Evaluating buffer content', { 
-      data: { 
-        bufferName: this.state.currentBuffer.getName(),
-        length: bufferContent.length 
-      } 
+    const bufferContentResult = this.state.currentBuffer.getContent();
+    if (Either.isLeft(bufferContentResult)) {
+      evalLog.error('Failed to get buffer content');
+      return createNil();
+    }
+    const bufferContent = bufferContentResult.right;
+    evalLog.debug('Evaluating buffer content', {
+      data: {
+        length: bufferContent.length
+      }
     });
 
     try {
       const result = this.interpreter.execute(bufferContent);
       evalLog.info('Buffer evaluated successfully');
-      return result;
+      if (Either.isLeft(result)) {
+        return createNil();
+      }
+      return result.right;
     } catch (error) {
       const errorMsg = error instanceof Error ? error.message : String(error);
-      evalLog.error('Error evaluating buffer', { 
-        data: { error: errorMsg } 
-      });
+      evalLog.error('Error evaluating buffer', error instanceof Error ? error : new Error(errorMsg));
       throw error;
     }
   }
@@ -1840,11 +1933,14 @@ export class Editor {
       case "\x10": return "C-p";
       case "\x11": return "C-q";
       case "\x12": return "C-r";
-      case "\x13": return "C-v";
-      case "\x14": return "C-w";
-      case "\x15": return "C-x";
-      case "\x16": return "C-y";
-      case "\x17": return "C-z";
+      case "\x13": return "C-s";
+      case "\x14": return "C-t";
+      case "\x15": return "C-u";
+      case "\x16": return "C-v";
+      case "\x17": return "C-w";
+      case "\x18": return "C-x";
+      case "\x19": return "C-y";
+      case "\x1a": return "C-z";
       case "\x1b": return "Escape";
       case "\x7f": return "Backspace";
       case "\r": return "Enter";
@@ -2221,9 +2317,9 @@ export class Editor {
     // Load saved macros from ~/.config/tmax/macros.tlisp (US-2.4.2)
     await this.loadSavedMacros();
 
-    // Create default buffer if none exists
-    // But check if currentBuffer was already set (e.g., from main.tsx with a file)
-    if (this.buffers.size === 0 && !this.state.currentBuffer) {
+    // Create default buffer if no editable buffer is selected. The messages
+    // buffer is created during logging and must not suppress scratch startup.
+    if (!this.state.currentBuffer) {
       this.createBuffer("*scratch*", "");
     }
   }
@@ -2366,8 +2462,8 @@ export class Editor {
       for (let i = startLine; i < endLine; i++) {
         try {
           const result = this.executeCommand(`(syntax-highlight-line ${i})`);
-          if (result && typeof result === 'object' && result.type === 'list') {
-            spans.push(result.value as HighlightSpan[]);
+          if (result && typeof result === 'object' && (result as any).type === 'list') {
+            spans.push((result as any).value as HighlightSpan[]);
           } else {
             spans.push([]);
           }

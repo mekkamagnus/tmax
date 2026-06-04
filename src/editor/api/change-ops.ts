@@ -83,7 +83,7 @@ export function createChangeOps(
     // Get count (default to 1)
     let count = 1;
     if (args.length === 1) {
-      const countArg = args[0];
+      const countArg = args[0]!
       const typeValidation = validateArgType(countArg, "number", 0, "change-word");
       if (Either.isLeft(typeValidation)) {
         return Either.left(typeValidation.left);
@@ -169,7 +169,7 @@ export function createChangeOps(
     // Get count (default to 1)
     let count = 1;
     if (args.length === 1) {
-      const countArg = args[0];
+      const countArg = args[0]!
       const typeValidation = validateArgType(countArg, "number", 0, "change-line");
       if (Either.isLeft(typeValidation)) {
         return Either.left(typeValidation.left);

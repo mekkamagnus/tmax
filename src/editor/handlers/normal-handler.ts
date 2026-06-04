@@ -1,271 +1,165 @@
 /**
  * @file normal-handler.ts
- * @description Normal mode key handler for the editor
+ * @description Normal mode key router for the editor
  */
 
 import type { Editor } from "../editor.ts";
 import { Either } from "../../utils/task-either.ts";
 import { log } from "../../utils/logger.ts";
-import { pushToHistory, setInitialBuffer } from "../api/undo-redo-ops.ts";
+import { isTruthy } from "../../tlisp/values.ts";
 import {
   scheduleWhichKey,
   deactivateWhichKey,
-  isPrefixKey,
-  findBindingsForPrefix,
   findBindingsForPrefixWithDocs,
   formatWhichKeyBindings,
   isWhichKeyActive
 } from "../utils/which-key.ts";
-import type { WhichKeyBinding } from "../../core/types.ts";
 
 /**
- * Handle key input in normal mode
- * @param editor - Editor instance
- * @param key - Raw key input
- * @param normalizedKey - Normalized key string
- * @returns Promise that resolves when key handling is complete, or rejects with quit signal
+ * Handle key input in normal mode.
+ *
+ * Vim editing semantics are owned by T-Lisp via `vim-dispatch-key`. This
+ * handler only routes normalized keys into T-Lisp and then falls back to the
+ * legacy keymap for non-Vim bindings.
  */
 export async function handleNormalMode(editor: Editor, key: string, normalizedKey: string): Promise<void> {
   const handlerLog = log.module('handlers').fn('handleNormalMode');
-
-  // Log important mode-changing keys
-  if (normalizedKey === ':') {
-    handlerLog.info('Entering command mode', {
-      data: { triggerKey: ':', fromMode: 'normal' }
-    });
-  } else if (normalizedKey === 'i') {
-    handlerLog.info('Entering insert mode', {
-      data: { triggerKey: 'i', fromMode: 'normal' }
-    });
-  } else if (key === 'd') {
-    // Could be single 'd' or start of 'dd'
-    handlerLog.debug('Delete operation initiated', {
-      data: { key, normalizedKey }
-    });
-  }
-
-  // Handle C-g to cancel which-key popup (US-1.10.3)
-  if (normalizedKey === "C-g") {
-    handlerLog.debug('Cancelling which-key popup', {
-      data: { whichKeyWasActive: isWhichKeyActive() }
-    });
-
-    if (isWhichKeyActive()) {
-      deactivateWhichKey();
-      (editor as any).state.whichKeyActive = false;
-      (editor as any).state.whichKeyPrefix = "";
-      (editor as any).state.whichKeyBindings = [];
-      (editor as any).state.statusMessage = "";
-      return;
-    }
-  }
-
-  // Handle digit input for count prefix (US-1.3.1)
-  if (/^[0-9]$/.test(normalizedKey)) {
-    const digit = parseInt(normalizedKey, 10);
-
-    // Accumulate count (multiply existing count by 10 and add digit)
-    // Special case: 0 at start doesn't accumulate (0w should do nothing)
-    const currentCount = (editor as any).countPrefix || 0;
-    if (currentCount === 0 && digit === 0) {
-      // 0 at start - keep count at 0 (will result in no operation when command executes)
-      (editor as any).setCount(0);
-      (editor as any).state.statusMessage = `Count: 0`;
-      (editor as any).logMessage('Count: 0');
-    } else {
-      (editor as any).setCount(currentCount * 10 + digit);
-      (editor as any).state.statusMessage = `Count: ${currentCount * 10 + digit}`;
-      (editor as any).logMessage(`Count: ${currentCount * 10 + digit}`);
-    }
-    return;
-  }
-
-  // Handle which-key popup (US-1.10.3)
+  const state = (editor as any).state;
   const keyMappings = (editor as any).keyMappings;
-  const currentPrefix = (editor as any).state.whichKeyPrefix || "";
+  const currentPrefix = state.whichKeyPrefix || "";
 
-  const consumeCount = (): number => {
-    return (editor as any).consumeCount();
-  };
-
-  const executeCountCommand = (name: string, count: number): void => {
-    if (count <= 0) {
-      return;
-    }
-    (editor as any).executeCommand(`(${name} ${count})`);
-  };
-
-  const executeUndoableCountCommand = (name: string, count: number): void => {
-    if (count <= 0) {
-      return;
-    }
-    const beforeBuffer = (editor as any).state.currentBuffer;
-    (editor as any).executeCommand(`(${name} ${count})`);
-    const afterBuffer = (editor as any).state.currentBuffer;
-    if (beforeBuffer && afterBuffer && beforeBuffer !== afterBuffer) {
-      setInitialBuffer(beforeBuffer);
-      pushToHistory(name, afterBuffer, (editor as any).state.cursorPosition.line, (editor as any).state.cursorPosition.column);
-    }
-  };
-
-  const pendingOperator = (editor as any).pendingNormalOperator as string | undefined;
-  if (pendingOperator) {
-    (editor as any).pendingNormalOperator = undefined;
-    const count = consumeCount();
-
-    if (pendingOperator === "d" && normalizedKey === "d") {
-      executeUndoableCountCommand("delete-line", count);
-      return;
-    }
-    if (pendingOperator === "d" && normalizedKey === "w") {
-      executeUndoableCountCommand("delete-word", count);
-      return;
-    }
-    if (pendingOperator === "y" && normalizedKey === "y") {
-      executeCountCommand("yank-line", count);
-      return;
-    }
-    if (pendingOperator === "y" && normalizedKey === "w") {
-      executeCountCommand("yank-word", count);
-      return;
-    }
-    if (pendingOperator === "y" && normalizedKey === "l") {
-      executeCountCommand("yank-chars", count);
-      return;
-    }
-
-    (editor as any).state.statusMessage = `Unsupported operator: ${pendingOperator}${normalizedKey}`;
-    (editor as any).logMessage(`Unsupported operator: ${pendingOperator}${normalizedKey}`);
+  if (normalizedKey === "C-g" && (isWhichKeyActive() || currentPrefix)) {
+    clearLegacyPrefix(editor);
+    state.statusMessage = "";
     return;
   }
 
-  if (normalizedKey === "d" || normalizedKey === "y") {
-    (editor as any).pendingNormalOperator = normalizedKey;
-    (editor as any).state.statusMessage = `${normalizedKey} operator`;
+  const legacyPrefixActive = (editor as any).spacePressed === true || currentPrefix !== "";
+  const dispatchHandled = legacyPrefixActive
+    ? false
+    : executeVimDispatcher(editor, normalizedKey, handlerLog);
+  if (dispatchHandled) {
     return;
   }
 
-  if (normalizedKey === "x") {
-    executeUndoableCountCommand("buffer-delete", consumeCount());
-    return;
-  }
+  const lookupKey = currentPrefix ? `${currentPrefix} ${normalizedKey}` : normalizedKey;
 
-  if (normalizedKey === "p") {
-    executeCountCommand("paste-after", consumeCount());
-    return;
-  }
-
-  if (normalizedKey === "P") {
-    executeCountCommand("paste-before", consumeCount());
-    return;
-  }
-
-  if (normalizedKey === "b" && (editor as any).isCountActive()) {
-    executeCountCommand("word-previous", Math.max(1, consumeCount() - 1));
-    return;
-  }
-
-  // Check if this key could be a prefix for other bindings
-  if (isPrefixKey(normalizedKey, keyMappings, "normal")) {
-    // Schedule which-key activation
-    const newPrefix = currentPrefix ? `${currentPrefix} ${normalizedKey}` : normalizedKey;
-
-    // Get bindings with documentation (US-1.10.4)
+  if (hasLegacyPrefix(lookupKey, keyMappings)) {
     const interpreter = (editor as any).interpreter;
-    const bindings = findBindingsForPrefixWithDocs(newPrefix, keyMappings, "normal", interpreter);
+    const bindings = findBindingsForPrefixWithDocs(lookupKey, keyMappings, "normal", interpreter);
+    state.whichKeyPrefix = lookupKey;
+    state.whichKeyBindings = bindings;
 
-    scheduleWhichKey(newPrefix, bindings, () => {
-      // Update editor state when which-key activates
-      (editor as any).state.whichKeyActive = true;
-      (editor as any).state.whichKeyPrefix = newPrefix;
-      (editor as any).state.whichKeyBindings = bindings;
+    scheduleWhichKey(lookupKey, bindings, () => {
+      if (state.whichKeyPrefix !== lookupKey) {
+        return;
+      }
+      state.whichKeyActive = true;
 
-      // Format bindings for display with documentation preview
-      const formatted = formatWhichKeyBindings(bindings, newPrefix);
-      (editor as any).state.statusMessage = `Which-key: ${formatted.join(", ")}`;
+      const formatted = formatWhichKeyBindings(bindings, lookupKey);
+      state.statusMessage = `Which-key: ${formatted.join(", ")}`;
     });
-  } else {
-    // Not a prefix key, deactivate which-key
-    deactivateWhichKey();
-    (editor as any).state.whichKeyActive = false;
-    (editor as any).state.whichKeyPrefix = "";
-    (editor as any).state.whichKeyBindings = [];
+    return;
   }
 
-  // Handle regular key mappings in normal mode
-  const mappings = keyMappings.get(normalizedKey);
+  clearLegacyPrefix(editor);
 
+  const mappings = keyMappings.get(lookupKey);
   if (!mappings) {
-    // Unbound key - reset count
-    handlerLog.debug(`Unbound key in normal mode: ${normalizedKey}`, {
-      data: { key, normalizedKey }
+    handlerLog.debug(`Unbound key in normal mode: ${lookupKey}`, {
+      data: { key, normalizedKey, lookupKey }
     });
-    (editor as any).resetCount();
-    (editor as any).state.statusMessage = `Unbound key: ${normalizedKey}`;
-    (editor as any).logMessage(`Unbound key: ${normalizedKey}`);
-  } else {
-    // Find mapping for normal mode
-    const mapping = mappings.find((m: any) => !m.mode || m.mode === "normal");
-    if (!mapping) {
-      handlerLog.debug(`No normal mode mapping for key: ${normalizedKey}`, {
-        data: { key, normalizedKey, availableModes: mappings.map((m: any) => m.mode) }
+    state.statusMessage = `Unbound key: ${lookupKey}`;
+    (editor as any).logMessage(`Unbound key: ${lookupKey}`);
+    return;
+  }
+
+  const mapping = mappings.find((m: any) => !m.mode || m.mode === "normal");
+  if (!mapping) {
+    handlerLog.debug(`No normal mode mapping for key: ${lookupKey}`, {
+      data: { key, normalizedKey, lookupKey, availableModes: mappings.map((m: any) => m.mode) }
+    });
+    state.statusMessage = `Unbound key in normal mode: ${lookupKey}`;
+    (editor as any).logMessage(`Unbound key in normal mode: ${lookupKey}`);
+    return;
+  }
+
+  try {
+    (editor as any).executeCommand(mapping.command);
+  } catch (error) {
+    if (error instanceof Error && (error.message === "EDITOR_QUIT_SIGNAL" || error.message.includes("EDITOR_QUIT_SIGNAL"))) {
+      handlerLog.info('Quit signal received', {
+        data: { signal: error.message }
       });
-      (editor as any).resetCount();
-      (editor as any).state.statusMessage = `Unbound key in normal mode: ${normalizedKey}`;
-      (editor as any).logMessage(`Unbound key in normal mode: ${normalizedKey}`);
-    } else {
-      // Log command execution
-      handlerLog.debug(`Executing command: ${mapping.command}`, {
-        data: {
-          command: mapping.command,
-          key: normalizedKey,
-          count: (editor as any).countPrefix || 1
-        }
-      });
-
-      // Execute the mapped command with count applied
-      try {
-        let command = mapping.command;
-        const count = (editor as any).getCount();
-
-        // Deactivate which-key before executing command (US-1.10.3)
-        deactivateWhichKey();
-        (editor as any).state.whichKeyActive = false;
-        (editor as any).state.whichKeyPrefix = "";
-        (editor as any).state.whichKeyBindings = [];
-
-        // If count is active, repeat the command N times
-        // For count=0, execute once with special handling (Vim behavior: 0w does nothing)
-        if (count > 0) {
-          // Execute command N times
-          for (let i = 0; i < count; i++) {
-            (editor as any).executeCommand(command);
-          }
-          // Reset count after use
-          (editor as any).resetCount();
-        } else {
-          // count is 0 - execute once (commands should handle 0 appropriately)
-          (editor as any).executeCommand(command);
-        }
-      } catch (error) {
-        // Reset count on error
-        (editor as any).resetCount();
-        if (error instanceof Error && (error.message === "EDITOR_QUIT_SIGNAL" || error.message.includes("EDITOR_QUIT_SIGNAL"))) {
-          handlerLog.info('Quit signal received', {
-            data: { signal: error.message }
-          });
-          throw new Error("EDITOR_QUIT_SIGNAL"); // Re-throw clean quit signal to main loop
-        }
-
-        const err = error instanceof Error ? error : new Error(String(error));
-        handlerLog.error('Command execution failed', err, {
-          operation: mapping.command,
-          data: { key: normalizedKey, count: (editor as any).countPrefix || 1 }
-        });
-
-        (editor as any).state.statusMessage = `Command error: ${error instanceof Error ? error.message : String(error)}`;
-        (editor as any).logMessage(`Command error: ${error instanceof Error ? error.message : String(error)}`);
-      }
+      throw new Error("EDITOR_QUIT_SIGNAL");
     }
+
+    const err = error instanceof Error ? error : new Error(String(error));
+    handlerLog.error('Command execution failed', err, {
+      operation: mapping.command,
+      data: { key: lookupKey }
+    });
+    state.statusMessage = `Command error: ${err.message}`;
+    (editor as any).logMessage(`Command error: ${err.message}`);
+  }
+}
+
+function hasLegacyPrefix(key: string, keyMappings: Map<string, any[]>): boolean {
+  for (const [mappedKey, mappings] of keyMappings) {
+    if (
+      mappedKey.startsWith(`${key} `) &&
+      mappings.some((mapping: any) => !mapping.mode || mapping.mode === "normal")
+    ) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function clearLegacyPrefix(editor: Editor): void {
+  deactivateWhichKey();
+  (editor as any).state.whichKeyActive = false;
+  (editor as any).state.whichKeyPrefix = "";
+  (editor as any).state.whichKeyBindings = [];
+}
+
+function executeVimDispatcher(editor: Editor, normalizedKey: string, handlerLog: ReturnType<ReturnType<typeof log.module>["fn"]>): boolean {
+  try {
+    const escapedKey = (editor as any).escapeKeyForTLisp(normalizedKey);
+    const result = (editor as any).executeCommand(`(vim-dispatch-key "${escapedKey}")`);
+
+    if (!result || typeof result !== "object" || !("_tag" in result)) {
+      return false;
+    }
+
+    if (Either.isLeft(result as any)) {
+      const error = (result as any).left;
+      const message = error?.message ? String(error.message) : String(error);
+      if (message.includes("vim-dispatch-key")) {
+        return false;
+      }
+      (editor as any).state.statusMessage = `Vim dispatch error: ${message}`;
+      (editor as any).logMessage(`Vim dispatch error: ${message}`);
+      return true;
+    }
+
+    return isTruthy((result as any).right);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    if (message.includes("vim-dispatch-key")) {
+      return false;
+    }
+
+    if (error instanceof Error && (error.message === "EDITOR_QUIT_SIGNAL" || error.message.includes("EDITOR_QUIT_SIGNAL"))) {
+      throw new Error("EDITOR_QUIT_SIGNAL");
+    }
+
+    handlerLog.error('Vim dispatcher failed', error instanceof Error ? error : new Error(message), {
+      operation: 'vim-dispatch-key',
+      data: { key: normalizedKey }
+    });
+    (editor as any).state.statusMessage = `Vim dispatch error: ${message}`;
+    (editor as any).logMessage(`Vim dispatch error: ${message}`);
+    return true;
   }
 }

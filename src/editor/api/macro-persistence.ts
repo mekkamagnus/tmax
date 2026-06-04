@@ -5,7 +5,7 @@
  */
 
 import type { FileSystem } from "../../core/types.ts";
-import type { TLispValue } from "../../tlisp/values.ts";
+import type { TLispValue } from "../../tlisp/types.ts";
 import { getMacros } from "./macro-recording.ts";
 
 /**
@@ -29,11 +29,11 @@ async function ensureDirectoryExists(fs: FileSystem): Promise<void> {
 
   // Check if directories exist, create if needed
   try {
-    await fs.readdir(tmaxDir);
+    await fs.readdir?.(tmaxDir);
   } catch {
     // Directory doesn't exist, create it
     try {
-      await fs.mkdir(tmaxDir, { recursive: true });
+      await fs.createDir(tmaxDir);
     } catch (error) {
       // Ignore error if directory already exists
     }
@@ -115,16 +115,16 @@ export async function loadMacrosFromFile(fs: FileSystem): Promise<boolean> {
 
     let i = 0;
     while (i < lines.length) {
-      const line = lines[i].trim();
+      const line = lines[i]!.trim();
 
       // Look for defmacro line
       const defmacroMatch = line.match(/\(defmacro\s+macro-([a-z0-9]+)/);
       if (defmacroMatch) {
-        const register = defmacroMatch[1];
+        const register = defmacroMatch[1]!;
 
         // The next line should contain the keys list
         if (i + 1 < lines.length) {
-          const nextLine = lines[i + 1].trim();
+          const nextLine = lines[i + 1]!.trim();
 
           // Extract keys from '("key1" "key2" "key3") format
           // Find the position of '( and extract everything until the final ))

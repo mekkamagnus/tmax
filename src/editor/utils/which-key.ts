@@ -8,8 +8,9 @@
  * Extended with command documentation preview (US-1.10.4)
  */
 
-import type { KeyMapping, WhichKeyBinding } from "../../core/types.ts";
-import type { Interpreter } from "../../tlisp/interpreter.ts";
+import type { WhichKeyBinding, KeyBinding as KeyMapping } from "../../core/types.ts";
+import type { TLispInterpreterImpl } from "../../tlisp/interpreter.ts";
+import type { TLispFunction } from "../../tlisp/types.ts";
 
 /**
  * Default which-key timeout in milliseconds
@@ -215,7 +216,7 @@ export function getWhichKeyTimeout(): number {
  * @param interpreter - The T-Lisp interpreter instance
  * @returns Documentation string or "No documentation available"
  */
-export function getCommandDocumentation(commandName: string, interpreter: Interpreter): string {
+export function getCommandDocumentation(commandName: string, interpreter: TLispInterpreterImpl): string {
   try {
     // Look up the function in the global environment
     const func = interpreter.globalEnv.lookup(commandName);
@@ -225,8 +226,9 @@ export function getCommandDocumentation(commandName: string, interpreter: Interp
     }
 
     // Return docstring if available
-    if (func.docstring) {
-      return func.docstring;
+    const funcValue = func as { docstring?: string };
+    if (funcValue.docstring) {
+      return funcValue.docstring;
     }
 
     return "No documentation available";
@@ -262,7 +264,7 @@ export function findBindingsForPrefixWithDocs(
   prefix: string,
   keyMappings: Map<string, KeyMapping[]>,
   mode: string,
-  interpreter: Interpreter
+  interpreter: TLispInterpreterImpl
 ): WhichKeyBinding[] {
   const bindings: WhichKeyBinding[] = [];
 

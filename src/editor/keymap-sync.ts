@@ -103,7 +103,7 @@ export class KeymapSync {
 
       // Extract command string
       if (commandValue.type === "string") {
-        const command = commandValue.value;
+        const command = commandValue.value as string;
         this.logger.debug(`Found binding: ${key} -> ${command} in mode ${mode}`);
         return command;
       }

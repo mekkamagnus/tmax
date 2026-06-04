@@ -5,9 +5,10 @@
  * Provides comprehensive documentation for T-Lisp functions, tutorials, and guides.
  */
 
-import { TLispValue, createString, createList, createNil } from '../../tlisp/values';
-import { TLispInterpreter } from '../../tlisp/types';
+import { createString, createList, createNil } from '../../tlisp/values';
+import { TLispValue, TLispInterpreter, TLispFunctionImpl } from '../../tlisp/types';
 import { Either } from '../../utils/task-either';
+import type { AppError } from '../../error/types';
 
 /**
  * Documentation entry for a function
@@ -380,12 +381,12 @@ export function formatDocumentation(doc: DocumentationEntry): string {
  */
 export function createDocumentationOps(
   interpreter: TLispInterpreter
-): Map<string, (args: TLispValue[]) => Either<Error, TLispValue>> {
-  const ops = {
+): Map<string, TLispFunctionImpl> {
+  const ops: Record<string, TLispFunctionImpl> = {
     /**
      * (documentation-list) -> List all documented functions
      */
-    'documentation-list': (): Either<Error, TLispValue> => {
+    'documentation-list': (): Either<AppError, TLispValue> => {
       const docs = listDocumentation();
 
       const docLists = docs.map(doc => createList([
@@ -400,21 +401,21 @@ export function createDocumentationOps(
     /**
      * (documentation-search "pattern") -> Search documentation
      */
-    'documentation-search': (args: TLispValue[]): Either<Error, TLispValue> => {
+    'documentation-search': (args: TLispValue[]): Either<AppError, TLispValue> => {
       if (args.length !== 1) {
         return Either.right(createString(
           'Error: documentation-search requires exactly one argument (pattern)'
         ));
       }
 
-      const pattern = args[0];
+      const pattern = args[0]!
       if (pattern.type !== 'string') {
         return Either.right(createString(
           'Error: documentation-search argument must be a string'
         ));
       }
 
-      const docs = searchDocumentation(pattern.value);
+      const docs = searchDocumentation(pattern.value as string);
 
       const docLists = docs.map(doc => createList([
         createString(doc.name),
@@ -428,24 +429,24 @@ export function createDocumentationOps(
     /**
      * (documentation-get "function-name") -> Get detailed documentation
      */
-    'documentation-get': (args: TLispValue[]): Either<Error, TLispValue> => {
+    'documentation-get': (args: TLispValue[]): Either<AppError, TLispValue> => {
       if (args.length !== 1) {
         return Either.right(createString(
           'Error: documentation-get requires exactly one argument (function-name)'
         ));
       }
 
-      const name = args[0];
+      const name = args[0]!
       if (name.type !== 'string') {
         return Either.right(createString(
           'Error: documentation-get argument must be a string'
         ));
       }
 
-      const doc = getDocumentation(name.value);
+      const doc = getDocumentation(name.value as string);
       if (!doc) {
         return Either.right(createString(
-          `Error: Function '${name.value}' not found in documentation`
+          `Error: Function '${name.value as string}' not found in documentation`
         ));
       }
 
@@ -455,7 +456,7 @@ export function createDocumentationOps(
     /**
      * (documentation-categories) -> List all categories
      */
-    'documentation-categories': (): Either<Error, TLispValue> => {
+    'documentation-categories': (): Either<AppError, TLispValue> => {
       const categories = getCategories();
       return Either.right(createList(categories.map(c => createString(c))));
     },
@@ -463,21 +464,21 @@ export function createDocumentationOps(
     /**
      * (documentation-by-category "category") -> List functions by category
      */
-    'documentation-by-category': (args: TLispValue[]): Either<Error, TLispValue> => {
+    'documentation-by-category': (args: TLispValue[]): Either<AppError, TLispValue> => {
       if (args.length !== 1) {
         return Either.right(createString(
           'Error: documentation-by-category requires exactly one argument (category)'
         ));
       }
 
-      const category = args[0];
+      const category = args[0]!
       if (category.type !== 'string') {
         return Either.right(createString(
           'Error: documentation-by-category argument must be a string'
         ));
       }
 
-      const docs = getByCategory(category.value);
+      const docs = getByCategory(category.value as string);
 
       const docLists = docs.map(doc => createList([
         createString(doc.name),

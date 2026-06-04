@@ -52,13 +52,13 @@ export function createFileOps(
       return Either.left(argsValidation.left);
     }
 
-    const pathArg = args[0];
+    const pathArg = args[0]!
     const pathTypeValidation = validateArgType(pathArg, "string", 0, "write-file-content");
     if (Either.isLeft(pathTypeValidation)) {
       return Either.left(pathTypeValidation.left);
     }
 
-    const contentArg = args[1];
+    const contentArg = args[1]!
     const contentTypeValidation = validateArgType(contentArg, "string", 1, "write-file-content");
     if (Either.isLeft(contentTypeValidation)) {
       return Either.left(contentTypeValidation.left);
@@ -86,7 +86,7 @@ export function createFileOps(
       return Either.left(argsValidation.left);
     }
 
-    const pathArg = args[0];
+    const pathArg = args[0]!
     const typeValidation = validateArgType(pathArg, "string", 0, "read-file-content");
     if (Either.isLeft(typeValidation)) {
       return Either.left(typeValidation.left);
@@ -109,7 +109,7 @@ export function createFileOps(
       return Either.left(argsValidation.left);
     }
 
-    const pathArg = args[0];
+    const pathArg = args[0]!
     const typeValidation = validateArgType(pathArg, "string", 0, "file-exists-p");
     if (Either.isLeft(typeValidation)) {
       return Either.left(typeValidation.left);
@@ -125,7 +125,7 @@ export function createFileOps(
       return Either.left(argsValidation.left);
     }
 
-    const pathArg = args[0];
+    const pathArg = args[0]!
     const typeValidation = validateArgType(pathArg, "string", 0, "file-modtime");
     if (Either.isLeft(typeValidation)) {
       return Either.left(typeValidation.left);
@@ -146,7 +146,7 @@ export function createFileOps(
       return Either.left(argsValidation.left);
     }
 
-    const pathArg = args[0];
+    const pathArg = args[0]!
     const typeValidation = validateArgType(pathArg, "string", 0, "file-stat");
     if (Either.isLeft(typeValidation)) {
       return Either.left(typeValidation.left);
@@ -176,13 +176,13 @@ export function createFileOps(
       return Either.left(argsValidation.left);
     }
 
-    const srcArg = args[0];
+    const srcArg = args[0]!
     const srcTypeValidation = validateArgType(srcArg, "string", 0, "file-copy");
     if (Either.isLeft(srcTypeValidation)) {
       return Either.left(srcTypeValidation.left);
     }
 
-    const destArg = args[1];
+    const destArg = args[1]!
     const destTypeValidation = validateArgType(destArg, "string", 1, "file-copy");
     if (Either.isLeft(destTypeValidation)) {
       return Either.left(destTypeValidation.left);
@@ -204,7 +204,7 @@ export function createFileOps(
       return Either.left(argsValidation.left);
     }
 
-    const pathArg = args[0];
+    const pathArg = args[0]!
     const typeValidation = validateArgType(pathArg, "string", 0, "make-backup-file");
     if (Either.isLeft(typeValidation)) {
       return Either.left(typeValidation.left);
@@ -225,7 +225,7 @@ export function createFileOps(
       return Either.left(argsValidation.left);
     }
 
-    const pathArg = args[0];
+    const pathArg = args[0]!
     const typeValidation = validateArgType(pathArg, "string", 0, "file-remove");
     if (Either.isLeft(typeValidation)) {
       return Either.left(typeValidation.left);
@@ -246,7 +246,7 @@ export function createFileOps(
       return Either.left(argsValidation.left);
     }
 
-    const pathArg = args[0];
+    const pathArg = args[0]!
     const typeValidation = validateArgType(pathArg, "string", 0, "file-mkdir");
     if (Either.isLeft(typeValidation)) {
       return Either.left(typeValidation.left);
@@ -269,7 +269,7 @@ export function createFileOps(
       return Either.left(argsValidation.left);
     }
 
-    const pathArg = args[0];
+    const pathArg = args[0]!
     const typeValidation = validateArgType(pathArg, "string", 0, "read-dir");
     if (Either.isLeft(typeValidation)) {
       return Either.left(typeValidation.left);

@@ -143,7 +143,7 @@ export function createKillRingOps(): Map<string, TLispFunctionImpl> {
       ));
     }
 
-    const textArg = args[0];
+    const textArg = args[0]!
     if (textArg.type !== 'string') {
       return Either.left(createValidationError(
         'TypeError',
@@ -154,7 +154,7 @@ export function createKillRingOps(): Map<string, TLispFunctionImpl> {
       ));
     }
 
-    killRingSave(textArg.value);
+    killRingSave(textArg.value as string);
     return Either.right(createNil());
   });
 
@@ -231,7 +231,7 @@ export function createKillRingOps(): Map<string, TLispFunctionImpl> {
       ));
     }
 
-    const maxArg = args[0];
+    const maxArg = args[0]!
     if (maxArg.type !== 'number') {
       return Either.left(createValidationError(
         'TypeError',

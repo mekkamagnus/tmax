@@ -133,9 +133,8 @@ export function undo(
   const currentNode = state.nodes.get(state.currentId);
   if (!currentNode) {
     return Either.left(createBufferError(
-      'InvalidState',
-      `Current node ${state.currentId} not found in tree`,
-      'undo'
+      'InvalidOperation',
+      `Current node ${state.currentId} not found in tree`
     ));
   }
 
@@ -208,9 +207,8 @@ export function redo(
   const currentNode = state.nodes.get(state.currentId);
   if (!currentNode) {
     return Either.left(createBufferError(
-      'InvalidState',
-      `Current node ${state.currentId} not found in tree`,
-      'redo'
+      'InvalidOperation',
+      `Current node ${state.currentId} not found in tree`
     ));
   }
 
@@ -223,9 +221,8 @@ export function redo(
   const childNode = state.nodes.get(childId);
   if (!childNode) {
     return Either.left(createBufferError(
-      'InvalidState',
-      `Child node ${childId} not found in tree`,
-      'redo'
+      'InvalidOperation',
+      `Child node ${childId} not found in tree`
     ));
   }
 
@@ -258,9 +255,8 @@ export function gotoNode(
   const targetNode = state.nodes.get(nodeId);
   if (!targetNode) {
     return Either.left(createBufferError(
-      'NodeNotFound',
-      `Node ${nodeId} not found in tree`,
-      'gotoNode'
+      'OutOfBounds',
+      `Node ${nodeId} not found in tree`
     ));
   }
 
@@ -314,9 +310,8 @@ export function getBranches(nodeId: number): Either<AppError, TLispValue> {
   const node = state.nodes.get(nodeId);
   if (!node) {
     return Either.left(createBufferError(
-      'NodeNotFound',
-      `Node ${nodeId} not found in tree`,
-      'getBranches'
+      'OutOfBounds',
+      `Node ${nodeId} not found in tree`
     ));
   }
 
@@ -366,26 +361,24 @@ export function createUndoTreeOps(
       ));
     }
 
-    const descArg = args[0];
+    const descArg = args[0]!
     if (descArg.type !== 'string') {
       return Either.left(createValidationError(
         'TypeError',
         'undo-tree-push description must be a string',
         'args[0]',
-        descArg,
-        'string'
-      ));
+        descArg
+    ));
     }
 
-    const bufferArg = args[1];
+    const bufferArg = args[1]!
     if (typeof bufferArg !== 'object' || !('buffer' in bufferArg)) {
       return Either.left(createValidationError(
         'TypeError',
         'undo-tree-push buffer must be a FunctionalTextBuffer',
         'args[1]',
-        bufferArg,
-        'FunctionalTextBuffer'
-      ));
+        bufferArg
+    ));
     }
 
     const buffer = (bufferArg as any).buffer as FunctionalTextBuffer;
@@ -401,7 +394,7 @@ export function createUndoTreeOps(
       cursorColumn = args[3]!.value as number;
     }
 
-    const nodeId = pushToTree(descArg.value, buffer, cursorLine, cursorColumn);
+    const nodeId = pushToTree(descArg.value as string, buffer, cursorLine, cursorColumn);
     return Either.right(createNumber(nodeId));
   });
 
@@ -456,15 +449,14 @@ export function createUndoTreeOps(
       ));
     }
 
-    const idArg = args[0];
+    const idArg = args[0]!
     if (idArg.type !== 'number') {
       return Either.left(createValidationError(
         'TypeError',
         'undo-tree-goto node-id must be a number',
         'args[0]',
-        idArg,
-        'number'
-      ));
+        idArg
+    ));
     }
 
     const nodeId = idArg.value as number;
@@ -525,15 +517,14 @@ export function createUndoTreeOps(
       ));
     }
 
-    const idArg = args[0];
+    const idArg = args[0]!
     if (idArg.type !== 'number') {
       return Either.left(createValidationError(
         'TypeError',
         'undo-tree-branches node-id must be a number',
         'args[0]',
-        idArg,
-        'number'
-      ));
+        idArg
+    ));
     }
 
     const nodeId = idArg.value as number;

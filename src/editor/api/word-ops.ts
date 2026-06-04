@@ -320,7 +320,7 @@ export function createWordOps(
     // Get count (default to 1)
     let count = 1;
     if (args.length === 1) {
-      const countArg = args[0];
+      const countArg = args[0]!
       const typeValidation = validateArgType(countArg, "number", 0, "word-next");
       if (Either.isLeft(typeValidation)) {
         return Either.left(typeValidation.left);
@@ -380,7 +380,7 @@ export function createWordOps(
     // Get count (default to 1)
     let count = 1;
     if (args.length === 1) {
-      const countArg = args[0];
+      const countArg = args[0]!
       const typeValidation = validateArgType(countArg, "number", 0, "word-previous");
       if (Either.isLeft(typeValidation)) {
         return Either.left(typeValidation.left);
@@ -440,7 +440,7 @@ export function createWordOps(
     // Get count (default to 1)
     let count = 1;
     if (args.length === 1) {
-      const countArg = args[0];
+      const countArg = args[0]!
       const typeValidation = validateArgType(countArg, "number", 0, "word-end");
       if (Either.isLeft(typeValidation)) {
         return Either.left(typeValidation.left);

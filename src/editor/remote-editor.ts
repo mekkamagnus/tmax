@@ -18,7 +18,7 @@ export class RemoteEditor {
   private _clientId: string | null = null;
 
   constructor(socketPath?: string) {
-    this.socketPath = socketPath || `/tmp/tmax-${userInfo().uid}/server`;
+    this.socketPath = socketPath || process.env.TMAX_SOCKET || `/tmp/tmax-${userInfo().uid}/server`;
   }
 
   async start(): Promise<void> {

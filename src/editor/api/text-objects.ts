@@ -77,7 +77,7 @@ export function deleteInnerWord(
 
   // Get the text to delete
   const lines = content.split("\n");
-  const textToDelete = lines[line].substring(start, end);
+  const textToDelete = lines[line]!.substring(start, end);
 
   // Store in register
   setDeleteRegister(textToDelete);  // Legacy register
@@ -125,12 +125,13 @@ export function deleteAroundWord(
 
   // If at end of line, don't go beyond
   const lines = content.split("\n");
-  if (end > lines[line].length) {
-    end = lines[line].length;
+  const lineText = lines[line] ?? "";
+  if (end > lineText.length) {
+    end = lineText.length;
   }
 
   // Get the text to delete
-  const textToDelete = lines[line].substring(start, end);
+  const textToDelete = lineText.substring(start, end);
 
   // Store in register
   setDeleteRegister(textToDelete);  // Legacy register
@@ -158,11 +159,11 @@ function findMatchingQuote(
     return Either.left("Line out of bounds");
   }
 
-  const currentLine = lines[line];
+  const currentLine = lines[line]!;
 
   // Find opening quote before cursor
   let start = column;
-  while (start >= 0 && currentLine[start] !== quoteChar) {
+  while (start >= 0 && currentLine[start]! !== quoteChar) {
     start--;
   }
 
@@ -172,7 +173,7 @@ function findMatchingQuote(
 
   // Find closing quote after cursor
   let end = column + 1;
-  while (end < currentLine.length && currentLine[end] !== quoteChar) {
+  while (end < currentLine.length && currentLine[end]! !== quoteChar) {
     end++;
   }
 
@@ -207,7 +208,7 @@ export function changeInnerSingleQuote(
 
   // Store content between quotes (not including quotes)
   const lines = content.split("\n");
-  const textToDelete = lines[line].substring(start + 1, end);
+  const textToDelete = lines[line]!.substring(start + 1, end);
   setDeleteRegister(textToDelete);
   killRingSave(textToDelete);  // Also save to kill ring (US-1.9.1)
 
@@ -242,7 +243,7 @@ export function changeAroundSingleQuote(
 
   // Store content including quotes
   const lines = content.split("\n");
-  const textToDelete = lines[line].substring(start, end + 1);
+  const textToDelete = lines[line]!.substring(start, end + 1);
   setDeleteRegister(textToDelete);
   killRingSave(textToDelete);  // Also save to kill ring (US-1.9.1)
 
@@ -277,7 +278,7 @@ export function changeInnerDoubleQuote(
 
   // Store content between quotes
   const lines = content.split("\n");
-  const textToDelete = lines[line].substring(start + 1, end);
+  const textToDelete = lines[line]!.substring(start + 1, end);
   setDeleteRegister(textToDelete);
   killRingSave(textToDelete);  // Also save to kill ring (US-1.9.1)
 
@@ -312,7 +313,7 @@ export function changeAroundDoubleQuote(
 
   // Store content including quotes
   const lines = content.split("\n");
-  const textToDelete = lines[line].substring(start, end + 1);
+  const textToDelete = lines[line]!.substring(start, end + 1);
   setDeleteRegister(textToDelete);
   killRingSave(textToDelete);  // Also save to kill ring (US-1.9.1)
 
@@ -339,15 +340,15 @@ function findMatchingParen(
     return Either.left("Line out of bounds");
   }
 
-  const currentLine = lines[line];
+  const currentLine = lines[line]!;
 
   // Find opening parenthesis before cursor
   let start = column;
   let depth = 0;
   while (start >= 0) {
-    if (currentLine[start] === closeChar) {
+    if (currentLine[start]! === closeChar) {
       depth++;
-    } else if (currentLine[start] === openChar) {
+    } else if (currentLine[start]! === openChar) {
       if (depth === 0) {
         break;
       }
@@ -364,9 +365,9 @@ function findMatchingParen(
   let end = column + 1;
   depth = 0;
   while (end < currentLine.length) {
-    if (currentLine[end] === openChar) {
+    if (currentLine[end]! === openChar) {
       depth++;
-    } else if (currentLine[end] === closeChar) {
+    } else if (currentLine[end]! === closeChar) {
       if (depth === 0) {
         break;
       }
@@ -406,7 +407,7 @@ export function deleteInnerParen(
 
   // Store content between parens
   const lines = content.split("\n");
-  const textToDelete = lines[line].substring(start + 1, end);
+  const textToDelete = lines[line]!.substring(start + 1, end);
   setDeleteRegister(textToDelete);
   killRingSave(textToDelete);  // Also save to kill ring (US-1.9.1)
 
@@ -441,7 +442,7 @@ export function changeInnerParen(
 
   // Store content between parens
   const lines = content.split("\n");
-  const textToDelete = lines[line].substring(start + 1, end);
+  const textToDelete = lines[line]!.substring(start + 1, end);
   setDeleteRegister(textToDelete);
   killRingSave(textToDelete);  // Also save to kill ring (US-1.9.1)
 
@@ -476,7 +477,7 @@ export function deleteInnerBrace(
 
   // Store content between braces
   const lines = content.split("\n");
-  const textToDelete = lines[line].substring(start + 1, end);
+  const textToDelete = lines[line]!.substring(start + 1, end);
   setDeleteRegister(textToDelete);
   killRingSave(textToDelete);  // Also save to kill ring (US-1.9.1)
 
@@ -511,7 +512,7 @@ export function changeInnerBrace(
 
   // Store content between braces
   const lines = content.split("\n");
-  const textToDelete = lines[line].substring(start + 1, end);
+  const textToDelete = lines[line]!.substring(start + 1, end);
   setDeleteRegister(textToDelete);
   killRingSave(textToDelete);  // Also save to kill ring (US-1.9.1)
 
@@ -546,7 +547,7 @@ export function deleteInnerBracket(
 
   // Store content between brackets
   const lines = content.split("\n");
-  const textToDelete = lines[line].substring(start + 1, end);
+  const textToDelete = lines[line]!.substring(start + 1, end);
   setDeleteRegister(textToDelete);
   killRingSave(textToDelete);  // Also save to kill ring (US-1.9.1)
 
@@ -581,7 +582,7 @@ export function deleteInnerAngle(
 
   // Store content between angle brackets
   const lines = content.split("\n");
-  const textToDelete = lines[line].substring(start + 1, end);
+  const textToDelete = lines[line]!.substring(start + 1, end);
   setDeleteRegister(textToDelete);
   killRingSave(textToDelete);  // Also save to kill ring (US-1.9.1)
 
@@ -606,7 +607,7 @@ function findTagBounds(
     return Either.left("Line out of bounds");
   }
 
-  const currentLine = lines[line];
+  const currentLine = lines[line]!;
 
   // Check if we're on a self-closing tag
   const selfClosingRegex = /<(\w+)[^>]*\/>/;
@@ -629,12 +630,12 @@ function findTagBounds(
 
   // Search backwards from cursor for opening tag
   for (let i = column; i >= 0; i--) {
-    if (currentLine[i] === "<") {
+    if (currentLine[i]! === "<") {
       const match = currentLine.substring(i).match(openTagRegex);
       if (match) {
         openTagStart = i;
         openTagEnd = i + match[0].length;
-        tagName = match[1];
+        tagName = match[1]!;
         break;
       }
     }
@@ -652,7 +653,7 @@ function findTagBounds(
     return Either.left(`No closing tag for ${tagName} found`);
   }
 
-  const closeTagStart = openTagEnd + closeMatch.index;
+  const closeTagStart = openTagEnd + closeMatch.index!;
   const closeTagEnd = closeTagStart + closeMatch[0].length;
 
   return Either.right({
@@ -693,7 +694,7 @@ export function deleteInnerTag(
 
   // Store content between tags
   const lines = content.split("\n");
-  const textToDelete = lines[line].substring(start, end);
+  const textToDelete = lines[line]!.substring(start, end);
   setDeleteRegister(textToDelete);
   killRingSave(textToDelete);  // Also save to kill ring (US-1.9.1)
 

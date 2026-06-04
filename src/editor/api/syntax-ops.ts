@@ -78,7 +78,7 @@ export function createSyntaxOps(
       return Either.left(argsValidation.left);
     }
 
-    const nameArg = args[0];
+    const nameArg = args[0]!
     const typeValidation = validateArgType(nameArg, "string", 0, "syntax-set-language");
     if (Either.isLeft(typeValidation)) {
       return Either.left(typeValidation.left);
@@ -165,7 +165,7 @@ export function createSyntaxOps(
       return Either.left(argsValidation.left);
     }
 
-    const lineArg = args[0];
+    const lineArg = args[0]!
     const typeValidation = validateArgType(lineArg, "number", 0, "syntax-tokenize-line");
     if (Either.isLeft(typeValidation)) {
       return Either.left(typeValidation.left);
@@ -248,7 +248,7 @@ export function createSyntaxOps(
       return Either.left(argsValidation.left);
     }
 
-    const lineArg = args[0];
+    const lineArg = args[0]!
     const typeValidation = validateArgType(lineArg, "number", 0, "syntax-highlight-line");
     if (Either.isLeft(typeValidation)) {
       return Either.left(typeValidation.left);

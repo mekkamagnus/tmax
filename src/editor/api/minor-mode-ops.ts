@@ -128,11 +128,11 @@ export function createMinorModeOps(
       ));
     }
 
-    const nameArg = args[0];
+    const nameArg = args[0]!
     const nameValidation = validateArgType(nameArg, "string", 0, "minor-mode-register");
     if (Either.isLeft(nameValidation)) return Either.left(nameValidation.left);
 
-    const descArg = args[1];
+    const descArg = args[1]!
     const descValidation = validateArgType(descArg, "string", 1, "minor-mode-register");
     if (Either.isLeft(descValidation)) return Either.left(descValidation.left);
 
@@ -173,10 +173,10 @@ export function createMinorModeOps(
     const descValidation = validateArgType(args[1], "string", 1, "define-minor-mode");
     if (Either.isLeft(descValidation)) return Either.left(descValidation.left);
 
-    const name = args[0].value as string;
-    const description = args[1].value as string;
+    const name = args[0]!.value as string;
+    const description = args[1]!.value as string;
     const lighter = args[2]?.type === "string" ? args[2].value as string : name;
-    const global = args[3] ? shouldEnable(args[3]) : false;
+    const global = args[3] ? shouldEnable(args[3]!) : false;
 
     getMinorModeRegistry().set(name, {
       name,
@@ -196,11 +196,11 @@ export function createMinorModeOps(
     const argsValidation = validateArgsCount(args, 2, "minor-mode-set-keymap");
     if (Either.isLeft(argsValidation)) return Either.left(argsValidation.left);
 
-    const nameArg = args[0];
+    const nameArg = args[0]!
     const nameValidation = validateArgType(nameArg, "string", 0, "minor-mode-set-keymap");
     if (Either.isLeft(nameValidation)) return Either.left(nameValidation.left);
 
-    const keymapArg = args[1];
+    const keymapArg = args[1]!
     const keymapValidation = validateArgType(keymapArg, "string", 1, "minor-mode-set-keymap");
     if (Either.isLeft(keymapValidation)) return Either.left(keymapValidation.left);
 
@@ -228,7 +228,7 @@ export function createMinorModeOps(
     const argsValidation = validateArgsCount(args, 1, "minor-mode-toggle");
     if (Either.isLeft(argsValidation)) return Either.left(argsValidation.left);
 
-    const nameArg = args[0];
+    const nameArg = args[0]!
     const nameValidation = validateArgType(nameArg, "string", 0, "minor-mode-toggle");
     if (Either.isLeft(nameValidation)) return Either.left(nameValidation.left);
 
@@ -263,7 +263,7 @@ export function createMinorModeOps(
     const argsValidation = validateArgsCount(args, 2, "minor-mode-set");
     if (Either.isLeft(argsValidation)) return Either.left(argsValidation.left);
 
-    const nameArg = args[0];
+    const nameArg = args[0]!
     const nameValidation = validateArgType(nameArg, "string", 0, "minor-mode-set");
     if (Either.isLeft(nameValidation)) return Either.left(nameValidation.left);
 
@@ -279,7 +279,7 @@ export function createMinorModeOps(
       ));
     }
 
-    const enable = shouldEnable(args[1]);
+    const enable = shouldEnable(args[1]!);
 
     const state = currentModeState();
     const isActive = state.activeMinorModes.includes(name);
@@ -304,7 +304,7 @@ export function createMinorModeOps(
     const argsValidation = validateArgsCount(args, 1, "minor-mode-active-p");
     if (Either.isLeft(argsValidation)) return Either.left(argsValidation.left);
 
-    const nameArg = args[0];
+    const nameArg = args[0]!
     const nameValidation = validateArgType(nameArg, "string", 0, "minor-mode-active-p");
     if (Either.isLeft(nameValidation)) return Either.left(nameValidation.left);
 
@@ -337,7 +337,7 @@ export function createMinorModeOps(
     const argsValidation = validateArgsCount(args, 1, "minor-mode-lighter");
     if (Either.isLeft(argsValidation)) return Either.left(argsValidation.left);
 
-    const nameArg = args[0];
+    const nameArg = args[0]!
     const nameValidation = validateArgType(nameArg, "string", 0, "minor-mode-lighter");
     if (Either.isLeft(nameValidation)) return Either.left(nameValidation.left);
 
@@ -363,7 +363,7 @@ export function createMinorModeOps(
     const argsValidation = validateArgsCount(args, 1, "minor-mode-global-p");
     if (Either.isLeft(argsValidation)) return Either.left(argsValidation.left);
 
-    const nameArg = args[0];
+    const nameArg = args[0]!
     const nameValidation = validateArgType(nameArg, "string", 0, "minor-mode-global-p");
     if (Either.isLeft(nameValidation)) return Either.left(nameValidation.left);
 
@@ -378,7 +378,7 @@ export function createMinorModeOps(
     const argsValidation = validateArgsCount(args, 2, "global-minor-mode-set");
     if (Either.isLeft(argsValidation)) return Either.left(argsValidation.left);
 
-    const nameArg = args[0];
+    const nameArg = args[0]!
     const nameValidation = validateArgType(nameArg, "string", 0, "global-minor-mode-set");
     if (Either.isLeft(nameValidation)) return Either.left(nameValidation.left);
 
@@ -394,7 +394,7 @@ export function createMinorModeOps(
       ));
     }
 
-    const enable = shouldEnable(args[1]);
+    const enable = shouldEnable(args[1]!);
 
     const globalModes = getGlobalizedMinorModes();
     const config = registry.get(name)!;
@@ -432,7 +432,7 @@ export function createMinorModeOps(
     const argsValidation = validateArgsCount(args, 1, "global-minor-mode-active-p");
     if (Either.isLeft(argsValidation)) return Either.left(argsValidation.left);
 
-    const nameArg = args[0];
+    const nameArg = args[0]!
     const nameValidation = validateArgType(nameArg, "string", 0, "global-minor-mode-active-p");
     if (Either.isLeft(nameValidation)) return Either.left(nameValidation.left);
 

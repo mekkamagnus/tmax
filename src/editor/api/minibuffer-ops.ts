@@ -83,7 +83,7 @@ export function createMinibufferOps(
       return Either.left(argsValidation.left);
     }
 
-    const textArg = args[0];
+    const textArg = args[0]!
     const typeValidation = validateArgType(textArg, "string", 0, "minibuffer-set");
     if (Either.isLeft(typeValidation)) {
       return Either.left(typeValidation.left);
@@ -131,7 +131,7 @@ export function createMinibufferOps(
       return Either.left(argsValidation.left);
     }
 
-    const commandArg = args[0];
+    const commandArg = args[0]!
     const typeValidation = validateArgType(commandArg, "string", 0, "minibuffer-history-add");
     if (Either.isLeft(typeValidation)) {
       return Either.left(typeValidation.left);
@@ -172,7 +172,7 @@ export function createMinibufferOps(
     if (currentIndex > 0) {
       currentIndex--;
       setHistoryIndex(currentIndex);
-      setMxCommand(history[currentIndex]);
+      setMxCommand(history[currentIndex]!);
     } else {
       // Already at oldest command
       setStatusMessage("Already at oldest command");
@@ -202,7 +202,7 @@ export function createMinibufferOps(
     if (currentIndex < history.length - 1) {
       currentIndex++;
       setHistoryIndex(currentIndex);
-      setMxCommand(history[currentIndex]);
+      setMxCommand(history[currentIndex]!);
     } else if (currentIndex === history.length - 1) {
       // At end of history, clear input
       currentIndex = history.length;

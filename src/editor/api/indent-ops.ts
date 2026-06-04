@@ -88,7 +88,7 @@ export function createIndentOps(
       return Either.left(argsValidation.left);
     }
 
-    const lineArg = args[0];
+    const lineArg = args[0]!
     const lineTypeValidation = validateArgType(lineArg, "number", 0, "indent-calculate-column");
     if (Either.isLeft(lineTypeValidation)) {
       return Either.left(lineTypeValidation.left);
@@ -100,12 +100,12 @@ export function createIndentOps(
       return Either.left(bufferValidation.left);
     }
 
-    const increaseResult = extractStringList(args[1], "increase-patterns", "indent-calculate-column");
+    const increaseResult = extractStringList(args[1]!, "increase-patterns", "indent-calculate-column");
     if (Either.isLeft(increaseResult)) {
       return Either.left(increaseResult.left);
     }
 
-    const decreaseResult = extractStringList(args[2], "decrease-patterns", "indent-calculate-column");
+    const decreaseResult = extractStringList(args[2]!, "decrease-patterns", "indent-calculate-column");
     if (Either.isLeft(decreaseResult)) {
       return Either.left(decreaseResult.left);
     }
@@ -220,12 +220,12 @@ export function createIndentOps(
       return Either.left(bufferValidation.left);
     }
 
-    const increaseResult = extractStringList(args[0], "increase", "indent-set-rules");
+    const increaseResult = extractStringList(args[0]!, "increase", "indent-set-rules");
     if (Either.isLeft(increaseResult)) {
       return Either.left(increaseResult.left);
     }
 
-    const decreaseResult = extractStringList(args[1], "decrease", "indent-set-rules");
+    const decreaseResult = extractStringList(args[1]!, "decrease", "indent-set-rules");
     if (Either.isLeft(decreaseResult)) {
       return Either.left(decreaseResult.left);
     }
@@ -281,7 +281,7 @@ export function createIndentOps(
       return Either.left(argsValidation.left);
     }
 
-    const lineArg = args[0];
+    const lineArg = args[0]!
     const lineTypeValidation = validateArgType(lineArg, "number", 0, "indent-apply-line");
     if (Either.isLeft(lineTypeValidation)) {
       return Either.left(lineTypeValidation.left);
@@ -327,13 +327,13 @@ export function createIndentOps(
       return Either.left(argsValidation.left);
     }
 
-    const startArg = args[0];
+    const startArg = args[0]!
     const startTypeValidation = validateArgType(startArg, "number", 0, "indent-apply-region");
     if (Either.isLeft(startTypeValidation)) {
       return Either.left(startTypeValidation.left);
     }
 
-    const endArg = args[1];
+    const endArg = args[1]!
     const endTypeValidation = validateArgType(endArg, "number", 1, "indent-apply-region");
     if (Either.isLeft(endTypeValidation)) {
       return Either.left(endTypeValidation.left);

@@ -10,6 +10,7 @@ import type { TLispValue, TLispFunctionImpl } from "../../tlisp/types.ts";
 import { createNil, createString, createSymbol } from "../../tlisp/values.ts";
 import type { FunctionalTextBuffer } from "../../core/types.ts";
 import { Either } from "../../utils/task-either.ts";
+import type { AppError } from "../../error/types.ts";
 import {
   deleteInnerWord,
   deleteAroundWord,
@@ -45,16 +46,16 @@ export function createTextObjectsOps(
   ops.set("delete-inner-word", () => {
     const buffer = getCurrentBuffer();
     if (!buffer) {
-      return createNil();
+      return Either.right(createNil());
     }
 
     const result = deleteInnerWord(buffer, getCursorLine(), getCursorColumn());
     if (Either.isLeft(result)) {
-      return createNil();
+      return Either.right(createNil());
     }
 
     setCurrentBuffer(result.right);
-    return createNil();
+    return Either.right(createNil());
   });
 
   /**
@@ -64,16 +65,16 @@ export function createTextObjectsOps(
   ops.set("delete-around-word", () => {
     const buffer = getCurrentBuffer();
     if (!buffer) {
-      return createNil();
+      return Either.right(createNil());
     }
 
     const result = deleteAroundWord(buffer, getCursorLine(), getCursorColumn());
     if (Either.isLeft(result)) {
-      return createNil();
+      return Either.right(createNil());
     }
 
     setCurrentBuffer(result.right);
-    return createNil();
+    return Either.right(createNil());
   });
 
   /**
@@ -83,17 +84,17 @@ export function createTextObjectsOps(
   ops.set("change-inner-single-quote", () => {
     const buffer = getCurrentBuffer();
     if (!buffer) {
-      return createNil();
+      return Either.right(createNil());
     }
 
     const result = changeInnerSingleQuote(buffer, getCursorLine(), getCursorColumn());
     if (Either.isLeft(result)) {
-      return createNil();
+      return Either.right(createNil());
     }
 
     setCurrentBuffer(result.right);
     setMode("insert");
-    return createSymbol("INSERT");
+    return Either.right(createSymbol("INSERT"));
   });
 
   /**
@@ -103,17 +104,17 @@ export function createTextObjectsOps(
   ops.set("change-around-single-quote", () => {
     const buffer = getCurrentBuffer();
     if (!buffer) {
-      return createNil();
+      return Either.right(createNil());
     }
 
     const result = changeAroundSingleQuote(buffer, getCursorLine(), getCursorColumn());
     if (Either.isLeft(result)) {
-      return createNil();
+      return Either.right(createNil());
     }
 
     setCurrentBuffer(result.right);
     setMode("insert");
-    return createSymbol("INSERT");
+    return Either.right(createSymbol("INSERT"));
   });
 
   /**
@@ -123,17 +124,17 @@ export function createTextObjectsOps(
   ops.set("change-inner-double-quote", () => {
     const buffer = getCurrentBuffer();
     if (!buffer) {
-      return createNil();
+      return Either.right(createNil());
     }
 
     const result = changeInnerDoubleQuote(buffer, getCursorLine(), getCursorColumn());
     if (Either.isLeft(result)) {
-      return createNil();
+      return Either.right(createNil());
     }
 
     setCurrentBuffer(result.right);
     setMode("insert");
-    return createSymbol("INSERT");
+    return Either.right(createSymbol("INSERT"));
   });
 
   /**
@@ -143,17 +144,17 @@ export function createTextObjectsOps(
   ops.set("change-around-double-quote", () => {
     const buffer = getCurrentBuffer();
     if (!buffer) {
-      return createNil();
+      return Either.right(createNil());
     }
 
     const result = changeAroundDoubleQuote(buffer, getCursorLine(), getCursorColumn());
     if (Either.isLeft(result)) {
-      return createNil();
+      return Either.right(createNil());
     }
 
     setCurrentBuffer(result.right);
     setMode("insert");
-    return createSymbol("INSERT");
+    return Either.right(createSymbol("INSERT"));
   });
 
   /**
@@ -163,16 +164,16 @@ export function createTextObjectsOps(
   ops.set("delete-inner-paren", () => {
     const buffer = getCurrentBuffer();
     if (!buffer) {
-      return createNil();
+      return Either.right(createNil());
     }
 
     const result = deleteInnerParen(buffer, getCursorLine(), getCursorColumn());
     if (Either.isLeft(result)) {
-      return createNil();
+      return Either.right(createNil());
     }
 
     setCurrentBuffer(result.right);
-    return createNil();
+    return Either.right(createNil());
   });
 
   /**
@@ -182,17 +183,17 @@ export function createTextObjectsOps(
   ops.set("change-inner-paren", () => {
     const buffer = getCurrentBuffer();
     if (!buffer) {
-      return createNil();
+      return Either.right(createNil());
     }
 
     const result = changeInnerParen(buffer, getCursorLine(), getCursorColumn());
     if (Either.isLeft(result)) {
-      return createNil();
+      return Either.right(createNil());
     }
 
     setCurrentBuffer(result.right);
     setMode("insert");
-    return createSymbol("INSERT");
+    return Either.right(createSymbol("INSERT"));
   });
 
   /**
@@ -202,16 +203,16 @@ export function createTextObjectsOps(
   ops.set("delete-inner-brace", () => {
     const buffer = getCurrentBuffer();
     if (!buffer) {
-      return createNil();
+      return Either.right(createNil());
     }
 
     const result = deleteInnerBrace(buffer, getCursorLine(), getCursorColumn());
     if (Either.isLeft(result)) {
-      return createNil();
+      return Either.right(createNil());
     }
 
     setCurrentBuffer(result.right);
-    return createNil();
+    return Either.right(createNil());
   });
 
   /**
@@ -221,17 +222,17 @@ export function createTextObjectsOps(
   ops.set("change-inner-brace", () => {
     const buffer = getCurrentBuffer();
     if (!buffer) {
-      return createNil();
+      return Either.right(createNil());
     }
 
     const result = changeInnerBrace(buffer, getCursorLine(), getCursorColumn());
     if (Either.isLeft(result)) {
-      return createNil();
+      return Either.right(createNil());
     }
 
     setCurrentBuffer(result.right);
     setMode("insert");
-    return createSymbol("INSERT");
+    return Either.right(createSymbol("INSERT"));
   });
 
   /**
@@ -241,16 +242,16 @@ export function createTextObjectsOps(
   ops.set("delete-inner-bracket", () => {
     const buffer = getCurrentBuffer();
     if (!buffer) {
-      return createNil();
+      return Either.right(createNil());
     }
 
     const result = deleteInnerBracket(buffer, getCursorLine(), getCursorColumn());
     if (Either.isLeft(result)) {
-      return createNil();
+      return Either.right(createNil());
     }
 
     setCurrentBuffer(result.right);
-    return createNil();
+    return Either.right(createNil());
   });
 
   /**
@@ -260,16 +261,16 @@ export function createTextObjectsOps(
   ops.set("delete-inner-angle", () => {
     const buffer = getCurrentBuffer();
     if (!buffer) {
-      return createNil();
+      return Either.right(createNil());
     }
 
     const result = deleteInnerAngle(buffer, getCursorLine(), getCursorColumn());
     if (Either.isLeft(result)) {
-      return createNil();
+      return Either.right(createNil());
     }
 
     setCurrentBuffer(result.right);
-    return createNil();
+    return Either.right(createNil());
   });
 
   /**
@@ -279,16 +280,16 @@ export function createTextObjectsOps(
   ops.set("delete-inner-tag", () => {
     const buffer = getCurrentBuffer();
     if (!buffer) {
-      return createNil();
+      return Either.right(createNil());
     }
 
     const result = deleteInnerTag(buffer, getCursorLine(), getCursorColumn());
     if (Either.isLeft(result)) {
-      return createNil();
+      return Either.right(createNil());
     }
 
     setCurrentBuffer(result.right);
-    return createNil();
+    return Either.right(createNil());
   });
 
   return ops;

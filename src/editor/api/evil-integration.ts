@@ -19,7 +19,7 @@
  */
 
 import type { TLispValue, TLispFunctionImpl } from "../../tlisp/types.ts";
-import { createString, createNil, createList, createHashMap } from "../../tlisp/values.ts";
+import { createString, createNil, createList, createHashmap } from "../../tlisp/values.ts";
 import { Either } from "../../utils/task-either.ts";
 import {
   createValidationError,
@@ -235,7 +235,7 @@ export function createEvilIntegrationOps(): Map<string, TLispFunctionImpl> {
       ));
     }
 
-    const registerArg = args[0];
+    const registerArg = args[0]!
     if (registerArg.type !== 'string') {
       return Either.left(createValidationError(
         'TypeError',
@@ -246,7 +246,7 @@ export function createEvilIntegrationOps(): Map<string, TLispFunctionImpl> {
       ));
     }
 
-    const register = registerArg.value;
+    const register = registerArg.value as string;
     const content = getRegister(register);
 
     return Either.right(createString(content));
@@ -267,7 +267,7 @@ export function createEvilIntegrationOps(): Map<string, TLispFunctionImpl> {
       ));
     }
 
-    const registerArg = args[0];
+    const registerArg = args[0]!
     if (registerArg.type !== 'string') {
       return Either.left(createValidationError(
         'TypeError',
@@ -278,7 +278,7 @@ export function createEvilIntegrationOps(): Map<string, TLispFunctionImpl> {
       ));
     }
 
-    const contentArg = args[1];
+    const contentArg = args[1]!
     if (contentArg.type !== 'string') {
       return Either.left(createValidationError(
         'TypeError',
@@ -289,8 +289,8 @@ export function createEvilIntegrationOps(): Map<string, TLispFunctionImpl> {
       ));
     }
 
-    const register = registerArg.value;
-    const content = contentArg.value;
+    const register = registerArg.value as string;
+    const content = contentArg.value as string;
 
     // Check if uppercase (append mode)
     const isAppend = register.length === 1 &&
@@ -317,7 +317,7 @@ export function createEvilIntegrationOps(): Map<string, TLispFunctionImpl> {
       ));
     }
 
-    const registerArg = args[0];
+    const registerArg = args[0]!
     if (registerArg.type !== 'string') {
       return Either.left(createValidationError(
         'TypeError',
@@ -328,7 +328,7 @@ export function createEvilIntegrationOps(): Map<string, TLispFunctionImpl> {
       ));
     }
 
-    const register = registerArg.value;
+    const register = registerArg.value as string;
     const content = getRegister(register);
 
     return Either.right(createString(content));
@@ -349,7 +349,7 @@ export function createEvilIntegrationOps(): Map<string, TLispFunctionImpl> {
       ));
     }
 
-    const registerArg = args[0];
+    const registerArg = args[0]!
     if (registerArg.type !== 'string') {
       return Either.left(createValidationError(
         'TypeError',
@@ -360,7 +360,7 @@ export function createEvilIntegrationOps(): Map<string, TLispFunctionImpl> {
       ));
     }
 
-    const contentArg = args[1];
+    const contentArg = args[1]!
     if (contentArg.type !== 'string') {
       return Either.left(createValidationError(
         'TypeError',
@@ -371,8 +371,8 @@ export function createEvilIntegrationOps(): Map<string, TLispFunctionImpl> {
       ));
     }
 
-    const register = registerArg.value;
-    const content = contentArg.value;
+    const register = registerArg.value as string;
+    const content = contentArg.value as string;
 
     // Check if uppercase (append mode)
     const isAppend = register.length === 1 &&
@@ -399,7 +399,7 @@ export function createEvilIntegrationOps(): Map<string, TLispFunctionImpl> {
       ));
     }
 
-    const registerArg = args[0];
+    const registerArg = args[0]!
     if (registerArg.type !== 'string') {
       return Either.left(createValidationError(
         'TypeError',
@@ -410,7 +410,7 @@ export function createEvilIntegrationOps(): Map<string, TLispFunctionImpl> {
       ));
     }
 
-    const contentArg = args[1];
+    const contentArg = args[1]!
     if (contentArg.type !== 'string') {
       return Either.left(createValidationError(
         'TypeError',
@@ -421,8 +421,8 @@ export function createEvilIntegrationOps(): Map<string, TLispFunctionImpl> {
       ));
     }
 
-    const register = registerArg.value;
-    const content = contentArg.value;
+    const register = registerArg.value as string;
+    const content = contentArg.value as string;
 
     setRegister(register, content);
 
@@ -496,7 +496,7 @@ export function createEvilIntegrationOps(): Map<string, TLispFunctionImpl> {
       ));
     }
 
-    const registerArg = args[0];
+    const registerArg = args[0]!
     if (registerArg.type !== 'string') {
       return Either.left(createValidationError(
         'TypeError',
@@ -507,7 +507,7 @@ export function createEvilIntegrationOps(): Map<string, TLispFunctionImpl> {
       ));
     }
 
-    const register = registerArg.value;
+    const register = registerArg.value as string;
     const content = registerPaste(register);
 
     // Return content (actual pasting is done by caller)

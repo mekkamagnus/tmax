@@ -68,7 +68,7 @@ export function createModeOps(
       return Either.left(argsValidation.left);
     }
 
-    const modeArg = args[0];
+    const modeArg = args[0]!
     const typeValidation = validateArgType(modeArg, "string", 0, "editor-set-mode");
     if (Either.isLeft(typeValidation)) {
       return Either.left(typeValidation.left);
@@ -107,7 +107,7 @@ export function createModeOps(
       return Either.left(argsValidation.left);
     }
 
-    const messageArg = args[0];
+    const messageArg = args[0]!
     const typeValidation = validateArgType(messageArg, "string", 0, "editor-set-status");
     if (Either.isLeft(typeValidation)) {
       return Either.left(typeValidation.left);
@@ -134,7 +134,7 @@ export function createModeOps(
       return Either.left(argsValidation.left);
     }
 
-    const textArg = args[0];
+    const textArg = args[0]!
     const typeValidation = validateArgType(textArg, "string", 0, "editor-set-command-line");
     if (Either.isLeft(typeValidation)) {
       return Either.left(typeValidation.left);

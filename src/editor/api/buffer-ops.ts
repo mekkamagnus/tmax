@@ -57,7 +57,7 @@ export function createBufferOps(
       return Either.left(argsValidation.left);
     }
 
-    const nameArg = args[0];
+    const nameArg = args[0]!
     const typeValidation = validateArgType(nameArg, "string", 0, "buffer-create");
     if (Either.isLeft(typeValidation)) {
       return Either.left(typeValidation.left);
@@ -76,7 +76,7 @@ export function createBufferOps(
       return Either.left(argsValidation.left);
     }
 
-    const nameArg = args[0];
+    const nameArg = args[0]!
     const typeValidation = validateArgType(nameArg, "string", 0, "buffer-switch");
     if (Either.isLeft(typeValidation)) {
       return Either.left(typeValidation.left);
@@ -141,7 +141,7 @@ export function createBufferOps(
 
     // Handle Either<BufferError, string>
     if (Either.isLeft(contentResult)) {
-      return Either.left(contentResult.left);
+      return Either.left({ type: 'BufferError', variant: 'InvalidOperation', message: contentResult.left });
     }
 
     return Either.right(createString(contentResult.right));
@@ -166,7 +166,7 @@ export function createBufferOps(
 
     let lineNumber = 0; // Default to current line if no argument provided
     if (args.length === 1) {
-      const lineArg = args[0];
+      const lineArg = args[0]!
       const typeValidation = validateArgType(lineArg, "number", 0, "buffer-line");
       if (Either.isLeft(typeValidation)) {
         return Either.left(typeValidation.left);
@@ -253,7 +253,7 @@ export function createBufferOps(
       return Either.left(bufferValidation.left);
     }
 
-    const textArg = args[0];
+    const textArg = args[0]!
     const typeValidation = validateArgType(textArg, "string", 0, "buffer-insert");
     if (Either.isLeft(typeValidation)) {
       return Either.left(typeValidation.left);
@@ -297,7 +297,7 @@ export function createBufferOps(
       return Either.left(bufferValidation.left);
     }
 
-    const countArg = args[0];
+    const countArg = args[0]!
     const typeValidation = validateArgType(countArg, "number", 0, "buffer-delete");
     if (Either.isLeft(typeValidation)) {
       return Either.left(typeValidation.left);
@@ -333,6 +333,139 @@ export function createBufferOps(
     return Either.right(createString(deletedText));
   });
 
+  api.set("buffer-insert-at-position", (args: TLispValue[]): Either<AppError, TLispValue> => {
+    const argsValidation = validateArgsCount(args, 3, "buffer-insert-at-position");
+    if (Either.isLeft(argsValidation)) {
+      return Either.left(argsValidation.left);
+    }
+
+    const lineArg = args[0]!
+    const lineValidation = validateArgType(lineArg, "number", 0, "buffer-insert-at-position");
+    if (Either.isLeft(lineValidation)) {
+      return Either.left(lineValidation.left);
+    }
+
+    const colArg = args[1]!
+    const colValidation = validateArgType(colArg, "number", 1, "buffer-insert-at-position");
+    if (Either.isLeft(colValidation)) {
+      return Either.left(colValidation.left);
+    }
+
+    const textArg = args[2]!
+    const textValidation = validateArgType(textArg, "string", 2, "buffer-insert-at-position");
+    if (Either.isLeft(textValidation)) {
+      return Either.left(textValidation.left);
+    }
+
+    const currentBuffer = getCurrentBuffer();
+    const bufferValidation = validateBufferExists(currentBuffer);
+    if (Either.isLeft(bufferValidation)) {
+      return Either.left(bufferValidation.left);
+    }
+
+    const line = Math.max(0, lineArg.value as number);
+    const column = Math.max(0, colArg.value as number);
+    const text = textArg.value as string;
+    const position = { line, column };
+
+    const insertResult = currentBuffer!.insert(position, text);
+    if (Either.isLeft(insertResult)) {
+      return Either.left(createBufferError('InvalidOperation', `Failed to insert text: ${insertResult.left}`));
+    }
+
+    setCurrentBuffer(insertResult.right);
+
+    const insertedLines = text.split("\n");
+    if (insertedLines.length > 1) {
+      setCursorLine(line + insertedLines.length - 1);
+      setCursorColumn(insertedLines[insertedLines.length - 1]!.length);
+    } else {
+      setCursorLine(line);
+      setCursorColumn(column + text.length);
+    }
+    setBufferModified?.(true);
+
+    return Either.right(createString(text));
+  });
+
+  api.set("buffer-get-range", (args: TLispValue[]): Either<AppError, TLispValue> => {
+    const argsValidation = validateArgsCount(args, 4, "buffer-get-range");
+    if (Either.isLeft(argsValidation)) {
+      return Either.left(argsValidation.left);
+    }
+
+    const values: number[] = [];
+    for (let i = 0; i < 4; i++) {
+      const arg = args[i]!
+      const validation = validateArgType(arg, "number", i, "buffer-get-range");
+      if (Either.isLeft(validation)) {
+        return Either.left(validation.left);
+      }
+      values.push(arg.value as number);
+    }
+
+    const currentBuffer = getCurrentBuffer();
+    const bufferValidation = validateBufferExists(currentBuffer);
+    if (Either.isLeft(bufferValidation)) {
+      return Either.left(bufferValidation.left);
+    }
+
+    const textResult = currentBuffer!.getText({
+      start: { line: values[0]!, column: values[1]! },
+      end: { line: values[2]!, column: values[3]! }
+    });
+    if (Either.isLeft(textResult)) {
+      return Either.left(createBufferError('InvalidOperation', `Failed to get range: ${textResult.left}`));
+    }
+
+    return Either.right(createString(textResult.right));
+  });
+
+  api.set("buffer-delete-range", (args: TLispValue[]): Either<AppError, TLispValue> => {
+    const argsValidation = validateArgsCount(args, 4, "buffer-delete-range");
+    if (Either.isLeft(argsValidation)) {
+      return Either.left(argsValidation.left);
+    }
+
+    const values: number[] = [];
+    for (let i = 0; i < 4; i++) {
+      const arg = args[i]!
+      const validation = validateArgType(arg, "number", i, "buffer-delete-range");
+      if (Either.isLeft(validation)) {
+        return Either.left(validation.left);
+      }
+      values.push(arg.value as number);
+    }
+
+    const currentBuffer = getCurrentBuffer();
+    const bufferValidation = validateBufferExists(currentBuffer);
+    if (Either.isLeft(bufferValidation)) {
+      return Either.left(bufferValidation.left);
+    }
+
+    const range = {
+      start: { line: values[0]!, column: values[1]! },
+      end: { line: values[2]!, column: values[3]! }
+    };
+
+    const textResult = currentBuffer!.getText(range);
+    if (Either.isLeft(textResult)) {
+      return Either.left(createBufferError('InvalidOperation', `Failed to get deleted range: ${textResult.left}`));
+    }
+
+    const deleteResult = currentBuffer!.delete(range);
+    if (Either.isLeft(deleteResult)) {
+      return Either.left(createBufferError('InvalidOperation', `Failed to delete range: ${deleteResult.left}`));
+    }
+
+    setCurrentBuffer(deleteResult.right);
+    setCursorLine(range.start.line);
+    setCursorColumn(range.start.column);
+    setBufferModified?.(true);
+
+    return Either.right(createString(textResult.right));
+  });
+
   // Buffer metadata primitives (SPEC-035 Phase 0a)
 
   api.set("buffer-filename", (args: TLispValue[]): Either<AppError, TLispValue> => {
@@ -359,7 +492,7 @@ export function createBufferOps(
       return Either.left(argsValidation.left);
     }
 
-    const pathArg = args[0];
+    const pathArg = args[0]!
     const typeValidation = validateArgType(pathArg, "string", 0, "set-buffer-filename");
     if (Either.isLeft(typeValidation)) {
       return Either.left(typeValidation.left);
@@ -399,7 +532,7 @@ export function createBufferOps(
       return Either.left(argsValidation.left);
     }
 
-    const flagArg = args[0];
+    const flagArg = args[0]!
     const typeValidation = validateArgType(flagArg, "boolean", 0, "set-buffer-modified-p");
     if (Either.isLeft(typeValidation)) {
       return Either.left(typeValidation.left);
@@ -426,7 +559,7 @@ export function createBufferOps(
       return Either.left(argsValidation.left);
     }
 
-    const lineArg = args[0];
+    const lineArg = args[0]!
     const typeValidation = validateArgType(lineArg, "number", 0, "buffer-get-line-indent");
     if (Either.isLeft(typeValidation)) {
       return Either.left(typeValidation.left);
@@ -457,13 +590,13 @@ export function createBufferOps(
       return Either.left(argsValidation.left);
     }
 
-    const lineArg = args[0];
+    const lineArg = args[0]!
     const lineTypeValidation = validateArgType(lineArg, "number", 0, "buffer-set-line-indent");
     if (Either.isLeft(lineTypeValidation)) {
       return Either.left(lineTypeValidation.left);
     }
 
-    const colArg = args[1];
+    const colArg = args[1]!
     const colTypeValidation = validateArgType(colArg, "number", 1, "buffer-set-line-indent");
     if (Either.isLeft(colTypeValidation)) {
       return Either.left(colTypeValidation.left);
@@ -527,7 +660,7 @@ export function createBufferOps(
       return Either.left(argsValidation.left);
     }
 
-    const lineArg = args[0];
+    const lineArg = args[0]!
     const typeValidation = validateArgType(lineArg, "number", 0, "buffer-previous-non-blank-line");
     if (Either.isLeft(typeValidation)) {
       return Either.left(typeValidation.left);
@@ -560,13 +693,13 @@ export function createBufferOps(
       return Either.left(argsValidation.left);
     }
 
-    const lineArg = args[0];
+    const lineArg = args[0]!
     const lineTypeValidation = validateArgType(lineArg, "number", 0, "buffer-line-matches");
     if (Either.isLeft(lineTypeValidation)) {
       return Either.left(lineTypeValidation.left);
     }
 
-    const patternArg = args[1];
+    const patternArg = args[1]!
     const patternTypeValidation = validateArgType(patternArg, "string", 1, "buffer-line-matches");
     if (Either.isLeft(patternTypeValidation)) {
       return Either.left(patternTypeValidation.left);

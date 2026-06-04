@@ -7,6 +7,7 @@
 import type { LSPDiagnostic } from "../../core/types.ts";
 import type { TLispValue, TLispFunctionImpl } from "../../tlisp/types.ts";
 import { createNil, createNumber, createString, createBoolean, createList } from "../../tlisp/values.ts";
+import { Either } from "../../utils/task-either.ts";
 
 /**
  * Create LSP diagnostics API operations for T-Lisp
@@ -24,26 +25,26 @@ export function createLSPDiagnosticsOps(
   const ops = new Map<string, TLispFunctionImpl>();
 
   // (lsp-diagnostics-list) - List all diagnostics
-  ops.set("lsp-diagnostics-list", () => lspDiagnosticsList(getCurrentBuffer));
+  ops.set("lsp-diagnostics-list", () => Either.right(lspDiagnosticsList(getCurrentBuffer)));
 
   // (lsp-diagnostics-for-line <line>) - Get diagnostics for specific line
   ops.set("lsp-diagnostics-for-line", (args) => {
     const lineArg = args[0];
-    const line = lineArg?.type === "number" ? lineArg.value : 0;
-    return lspDiagnosticsForLine(line, getCurrentBuffer);
+    const line = lineArg?.type === "number" ? lineArg.value as number : 0;
+    return Either.right(lspDiagnosticsForLine(line, getCurrentBuffer));
   });
 
   // (lsp-diagnostics-current-line) - Get diagnostics for current cursor line
-  ops.set("lsp-diagnostics-current-line", () => lspDiagnosticsCurrentLine(getCurrentBuffer));
+  ops.set("lsp-diagnostics-current-line", () => Either.right(lspDiagnosticsCurrentLine(getCurrentBuffer)));
 
   // (lsp-diagnostics-count) - Get diagnostic count by severity
-  ops.set("lsp-diagnostics-count", () => lspDiagnosticsCount(getCurrentBuffer));
+  ops.set("lsp-diagnostics-count", () => Either.right(lspDiagnosticsCount(getCurrentBuffer)));
 
   // (lsp-diagnostics-clear) - Clear all diagnostics
-  ops.set("lsp-diagnostics-clear", () => lspDiagnosticsClear(getCurrentBuffer));
+  ops.set("lsp-diagnostics-clear", () => Either.right(lspDiagnosticsClear(getCurrentBuffer)));
 
   // (lsp-diagnostics-has-errors) - Check if there are any errors
-  ops.set("lsp-diagnostics-has-errors", () => lspDiagnosticsHasErrors(getCurrentBuffer));
+  ops.set("lsp-diagnostics-has-errors", () => Either.right(lspDiagnosticsHasErrors(getCurrentBuffer)));
 
   return ops;
 }
@@ -83,7 +84,7 @@ export function lspDiagnosticsList(
         diag.code !== undefined ? createList([createString("code"), createString(String(diag.code))]) : createNil(),
       ].filter(v => {
         // Filter out null values (filter creates proper T-Lisp null check)
-        const nullVal = createNull();
+        const nullVal = createNil();
         return JSON.stringify(v) !== JSON.stringify(nullVal);
       }));
     });
