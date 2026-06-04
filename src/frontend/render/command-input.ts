@@ -6,5 +6,5 @@ export function renderCommandInput(state: EditorState, width: number): string {
   const clipped = input.length >= width ? input.slice(0, Math.max(0, width - 1)) : input;
   const padded = clipped.padEnd(Math.max(0, width - 1), " ");
 
-  return `${style(padded, { fg: "white" })}${style(" ", { fg: "white", bg: "white" })}`;
+  return `${style(padded, { fg: "white" })}${style(" ", { fg: "black", bg: "white" })}`;
 }
