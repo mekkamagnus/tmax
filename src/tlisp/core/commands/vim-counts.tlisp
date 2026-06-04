@@ -1,0 +1,39 @@
+;; vim-counts.tlisp -- Vim count prefix state owned by T-Lisp
+
+(defvar vim-count 0)
+(defvar vim-count-active nil)
+
+(defun vim-count-active-p ()
+  "Return t when a normal-mode count prefix is active."
+  vim-count-active)
+
+(defun vim-count-add-digit (digit)
+  "Add DIGIT to the active Vim count prefix."
+  (progn
+    (set! vim-count (+ (* vim-count 10) digit))
+    (set! vim-count-active t)
+    (count-set vim-count)
+    (editor-set-status (concat "Count: " vim-count))
+    t))
+
+(defun vim-count-current ()
+  "Return the active Vim count, or 1 when no count is active."
+  (if vim-count-active vim-count 1))
+
+(defun vim-count-reset ()
+  "Clear Vim count state."
+  (progn
+    (set! vim-count 0)
+    (set! vim-count-active nil)
+    (count-reset)
+    (editor-set-status "")
+    nil))
+
+(defun vim-count-consume ()
+  "Return the current Vim count and clear it."
+  (let ((count (vim-count-current)))
+    (progn
+      (vim-count-reset)
+      count)))
+
+(provide "vim-counts")

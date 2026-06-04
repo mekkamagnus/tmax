@@ -1,0 +1,30 @@
+;; relative-line-numbers-mode.tlisp — Relative line numbers minor mode
+;; Shows relative line numbers in the gutter (distance from cursor line)
+
+(define-minor-mode "relative-line-numbers" "Show relative line numbers" "Rln" nil)
+
+(defun relative-line-numbers-mode (&optional (arg nil arg-supplied-p))
+  "Toggle relative-line-numbers mode.
+When enabled, also enables line-numbers mode.
+With no argument, toggle.
+With t, enable.
+With positive number, enable.
+With 0 or negative number, disable."
+  (if (not arg-supplied-p)
+    (progn
+      (minor-mode-toggle "relative-line-numbers")
+      (if (minor-mode-active-p "relative-line-numbers")
+        (minor-mode-set "line-numbers" t)))
+    (if (equal arg t)
+      (progn
+        (minor-mode-set "relative-line-numbers" t)
+        (minor-mode-set "line-numbers" t))
+      (if (numberp arg)
+        (if (> arg 0)
+          (progn
+            (minor-mode-set "relative-line-numbers" t)
+            (minor-mode-set "line-numbers" t))
+          (minor-mode-set "relative-line-numbers" nil))
+        (minor-mode-set "relative-line-numbers" nil)))))
+
+(provide "relative-line-numbers-mode")

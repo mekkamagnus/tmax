@@ -40,3 +40,9 @@
 
 ;; Uppercase selected text (U)
 (key-bind "U" "(visual-uppercase)" "visual")
+
+;; Change selected text (c)
+(key-bind "c" "(visual-change)" "visual")
+
+;; Swap visual anchor (o)
+(key-bind "o" "(visual-swap-anchor)" "visual")

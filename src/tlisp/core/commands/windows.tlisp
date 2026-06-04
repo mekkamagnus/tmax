@@ -1,0 +1,21 @@
+;; windows.tlisp — Window management commands
+;; Wraps TypeScript display primitives with editor commands and key bindings
+
+(defun split-window-below ()
+  "Split current window horizontally (top/bottom)."
+  (split-window "horizontal"))
+
+(defun split-window-right ()
+  "Split current window vertically (left/right)."
+  (split-window "vertical"))
+
+(defun other-window ()
+  "Cycle to next window."
+  (window-next))
+
+(defun delete-window ()
+  "Close current window. Does nothing if only one window."
+  (window-close))
+
+;; Key bindings: C-w prefix for window commands
+(key-bind "C-w" "(editor-window-prefix)" "normal")

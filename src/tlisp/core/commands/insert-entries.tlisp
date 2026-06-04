@@ -1,0 +1,78 @@
+;; insert-entries.tlisp -- Vim insert entry commands composed in T-Lisp
+
+(defun vim-line-length (line)
+  "Return the length of LINE."
+  (length (buffer-line line)))
+
+(defun insert-newline ()
+  "Insert a newline at point."
+  (progn
+    (buffer-insert "\n")
+    t))
+
+(defun insert-tab ()
+  "Insert a tab at point."
+  (progn
+    (buffer-insert "\t")
+    t))
+
+(defun insert-backspace ()
+  "Delete the character before point, joining lines at column zero."
+  (let ((line (cursor-line)))
+    (let ((column (cursor-column)))
+      (cond
+        ((> column 0)
+          (progn
+            (buffer-delete-range line (- column 1) line column)
+            t))
+        ((> line 0)
+          (progn
+            (buffer-delete-range (- line 1) (vim-line-length (- line 1)) line 0)
+            t))
+        (t t)))))
+
+(defun insert-append ()
+  "Vim a: enter insert mode after the cursor."
+  (progn
+    (cursor-move (cursor-line) (min (+ (cursor-column) 1) (vim-line-length (cursor-line))))
+    (editor-set-mode "insert")
+    t))
+
+(defun insert-append-line ()
+  "Vim A: enter insert mode at end of current line."
+  (progn
+    (cursor-move (cursor-line) (vim-line-length (cursor-line)))
+    (editor-set-mode "insert")
+    t))
+
+(defun insert-line-start ()
+  "Vim I: enter insert mode at first non-blank column."
+  (progn
+    (line-first-non-blank)
+    (editor-set-mode "insert")
+    t))
+
+(defun open-line-below ()
+  "Vim o: open a blank line below current line and enter insert mode."
+  (let ((line (cursor-line)))
+    (progn
+      (undo-begin)
+      (cursor-move line (vim-line-length line))
+      (buffer-insert "\n")
+      (undo-commit "o")
+      (editor-set-mode "insert")
+      t)))
+
+(defun open-line-above ()
+  "Vim O: open a blank line above current line and enter insert mode."
+  (let ((line (cursor-line)))
+    (progn
+      (undo-begin)
+      (cursor-move line 0)
+      (buffer-insert "\n")
+      (cursor-move line 0)
+      (undo-commit "O")
+      (editor-set-mode "insert")
+      t)))
+
+(provide "insert-entries")

@@ -1,0 +1,187 @@
+;; motions.tlisp -- Vim motions and prefixes owned by T-Lisp
+
+(defvar vim-pending-prefix nil)
+(defvar vim-pending-find-direction nil)
+(defvar vim-pending-find-till false)
+(defvar vim-last-find-char nil)
+(defvar vim-last-find-direction nil)
+(defvar vim-last-find-till false)
+
+(defun vim-prefix-pending-p ()
+  "Return t when a Vim prefix is waiting for another key."
+  (not (null vim-pending-prefix)))
+
+(defun vim-begin-prefix (prefix)
+  "Begin a Vim PREFIX sequence."
+  (progn
+    (set! vim-pending-prefix prefix)
+    t))
+
+(defun vim-reset-prefix ()
+  "Clear pending Vim prefix state."
+  (progn
+    (set! vim-pending-prefix nil)
+    nil))
+
+(defun vim-begin-find (direction till-p)
+  "Begin a Vim find-char command."
+  (progn
+    (set! vim-pending-find-direction direction)
+    (set! vim-pending-find-till till-p)
+    t))
+
+(defun vim-find-pending-p ()
+  "Return t when a find-char command is waiting for a target key."
+  (not (null vim-pending-find-direction)))
+
+(defun vim-reset-find-pending ()
+  "Clear pending find-char state."
+  (progn
+    (set! vim-pending-find-direction nil)
+    (set! vim-pending-find-till false)
+    nil))
+
+(defun vim-opposite-direction (direction)
+  "Return the opposite of DIRECTION."
+  (if (string= direction "forward") "backward" "forward"))
+
+(defun vim-unsupported-prefix (message)
+  "Reset pending Vim state and display MESSAGE."
+  (progn
+    (vim-reset-operator)
+    (vim-count-reset)
+    (editor-set-status message)
+    t))
+
+(defun vim-move-to-position (position)
+  "Move to POSITION when non-nil."
+  (if (null position)
+    (progn
+      (editor-set-status "No target")
+      nil)
+    (progn
+      (cursor-move (nth 0 position) (nth 1 position))
+      t)))
+
+(defun vim-find-target-with (char direction till-p count)
+  "Find CHAR using DIRECTION, TILL-P and COUNT, then move."
+  (let ((position (find-char-position char direction till-p count)))
+    (if (null position)
+      (progn
+        (editor-set-status (concat "Char not found: " char))
+        t)
+      (progn
+        (set! vim-last-find-char char)
+        (set! vim-last-find-direction direction)
+        (set! vim-last-find-till till-p)
+        (vim-move-to-position position)
+        t))))
+
+(defun vim-dispatch-find-target (char)
+  "Consume CHAR as the target for a pending f/t/F/T command."
+  (let ((direction vim-pending-find-direction))
+    (let ((till-p vim-pending-find-till))
+      (let ((count (vim-count-consume)))
+        (progn
+          (vim-reset-find-pending)
+          (vim-find-target-with char direction till-p count))))))
+
+(defun vim-repeat-find ()
+  "Repeat the last Vim find-char command."
+  (if (null vim-last-find-char)
+    (progn
+      (vim-count-reset)
+      (editor-set-status "No previous find")
+      t)
+    (let ((count (vim-count-consume)))
+      (vim-find-target-with
+        vim-last-find-char
+        vim-last-find-direction
+        vim-last-find-till
+        (if vim-last-find-till (+ count 1) count)))))
+
+(defun vim-repeat-find-reverse ()
+  "Repeat the last Vim find-char command in the opposite direction."
+  (if (null vim-last-find-char)
+    (progn
+      (vim-count-reset)
+      (editor-set-status "No previous find")
+      t)
+    (vim-find-target-with vim-last-find-char (vim-opposite-direction vim-last-find-direction) vim-last-find-till (vim-count-consume))))
+
+(defun vim-match-bracket ()
+  "Move to the matching bracket at point."
+  (progn
+    (vim-move-to-position (match-bracket-position))
+    t))
+
+(defun paragraph-previous ()
+  "Move to previous paragraph boundary."
+  (progn
+    (vim-move-to-position (paragraph-boundary-position "backward"))
+    t))
+
+(defun paragraph-next ()
+  "Move to next paragraph boundary."
+  (progn
+    (vim-move-to-position (paragraph-boundary-position "forward"))
+    t))
+
+(defun scroll-cursor-top ()
+  "Align current line to the top of the viewport."
+  (progn
+    (viewport-top-set (cursor-line))
+    t))
+
+(defun scroll-cursor-center ()
+  "Align current line to the center of the viewport."
+  (progn
+    (viewport-top-set (max 0 (- (cursor-line) (floor (/ (terminal-height-get) 2)))))
+    t))
+
+(defun scroll-cursor-bottom ()
+  "Align current line to the bottom of the viewport."
+  (progn
+    (viewport-top-set (max 0 (- (cursor-line) (- (terminal-height-get) 2))))
+    t))
+
+(defun vim-dispatch-prefix-key (key)
+  "Dispatch KEY while a Vim prefix is pending."
+  (let ((prefix vim-pending-prefix))
+    (progn
+      (vim-reset-prefix)
+      (cond
+        ((string= prefix "g")
+          (cond
+            ((string= key "g")
+              (if (vim-count-active-p)
+                (jump-to-line (vim-count-consume))
+                (progn (vim-count-reset) (jump-to-first-line))))
+            ((string= key "t") (progn (vim-count-reset) (tab-next)))
+            ((string= key "T") (progn (vim-count-reset) (tab-prev)))
+            (t (vim-unsupported-prefix (concat "Unsupported prefix: g" key)))))
+        ((string= prefix "z")
+          (cond
+            ((string= key "t") (scroll-cursor-top))
+            ((string= key "z") (scroll-cursor-center))
+            ((string= key "b") (scroll-cursor-bottom))
+            (t (vim-unsupported-prefix (concat "Unsupported prefix: z" key)))))
+        ((string= prefix "C-w")
+          (cond
+            ((string= key "s") (split-window-below))
+            ((string= key "v") (split-window-right))
+            ((string= key "w") (other-window))
+            ((string= key "q") (delete-window))
+            ((string= key "+") (window-resize-height 1))
+            ((string= key "-") (window-resize-height -1))
+            ((string= key ">") (window-resize-width 1))
+            ((string= key "<") (window-resize-width -1))
+            (t (vim-unsupported-prefix (concat "Unsupported prefix: C-w " key)))))
+        ((string= prefix "operator-g")
+          (if (string= key "g")
+            (vim-operator-apply "gg")
+            (vim-unsupported-prefix (concat "Unsupported operator prefix: g" key))))
+        (t (vim-unsupported-prefix (concat "Unsupported prefix: " prefix key))))
+      t)))
+
+(provide "motions")
