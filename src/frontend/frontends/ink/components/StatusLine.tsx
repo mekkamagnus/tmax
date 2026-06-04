@@ -28,10 +28,7 @@ export const StatusLine = ({
 
   return (
     <Box
-      backgroundColor="blue"
-      width="100%"
-      paddingX={1}
-      justifyContent="space-between"
+      {...{ backgroundColor: "blue", width: "100%", paddingX: 1, justifyContent: "space-between" } as any}
     >
       {/* Left side: Mode and cursor position */}
       <Box>

@@ -1,14 +1,32 @@
-import type { EditorState, HighlightSpan } from "../../core/types.ts";
+import type { EditorState, HighlightSpan, Window } from "../../core/types.ts";
 import { Either } from "../../utils/task-either.ts";
 import { style, type AnsiColor } from "../frontends/steep/style.ts";
+import {
+  renderGutterLine,
+  renderEmptyGutter,
+  gutterDisplayWidth,
+  gutterConfigFromState,
+  type GutterConfig,
+} from "./gutter.ts";
+import { computeLayout, renderSeparators, type WindowCell } from "./window-layout.ts";
 
 function getLineCount(state: EditorState): number {
   const result = state.currentBuffer?.getLineCount();
   return result && Either.isRight(result) ? result.right : 0;
 }
 
+function getLineCountForBuffer(buffer: Window["buffer"]): number {
+  const result = buffer.getLineCount();
+  return result && Either.isRight(result) ? result.right : 0;
+}
+
 function getLine(state: EditorState, lineNumber: number): string {
   const result = state.currentBuffer?.getLine(lineNumber);
+  return result && Either.isRight(result) ? result.right : "";
+}
+
+function getLineForBuffer(buffer: Window["buffer"], lineNumber: number): string {
+  const result = buffer.getLine(lineNumber);
   return result && Either.isRight(result) ? result.right : "";
 }
 
@@ -34,14 +52,9 @@ export function getVisibleViewportTop(state: EditorState, height: number): numbe
   return viewportTop;
 }
 
-/**
- * Apply highlight spans to a raw line string, returning a string with ANSI escapes.
- * Spans are applied by splitting the line into segments: unstyled gaps between styled spans.
- */
 function applyHighlights(rawLine: string, spans: HighlightSpan[]): string {
   if (spans.length === 0) return rawLine;
 
-  // Sort spans by start position
   const sorted = [...spans].sort((a, b) => a.start - b.start);
   const parts: string[] = [];
   let pos = 0;
@@ -51,12 +64,10 @@ function applyHighlights(rawLine: string, spans: HighlightSpan[]): string {
     const end = Math.min(span.end, rawLine.length);
     if (start >= end) continue;
 
-    // Unstyled gap before this span
     if (pos < start) {
       parts.push(rawLine.slice(pos, start));
     }
 
-    // Styled segment
     const segment = rawLine.slice(start, end);
     const opts: { fg?: AnsiColor; bg?: AnsiColor; bold?: boolean } = {};
     if (span.style.fg) opts.fg = span.style.fg as AnsiColor;
@@ -67,7 +78,6 @@ function applyHighlights(rawLine: string, spans: HighlightSpan[]): string {
     pos = end;
   }
 
-  // Trailing unstyled portion
   if (pos < rawLine.length) {
     parts.push(rawLine.slice(pos));
   }
@@ -75,9 +85,6 @@ function applyHighlights(rawLine: string, spans: HighlightSpan[]): string {
   return parts.join("");
 }
 
-/**
- * Clamp spans to [0, maxWidth) and merge overlapping spans
- */
 function clampSpans(spans: HighlightSpan[], maxWidth: number): HighlightSpan[] {
   return spans
     .map(span => ({
@@ -88,33 +95,80 @@ function clampSpans(spans: HighlightSpan[], maxWidth: number): HighlightSpan[] {
     .filter(span => span.start < span.end);
 }
 
-/**
- * Pad an ANSI-escaped string to a visible width.
- * Accounts for escape sequences so padding is based on visible character count.
- */
 function padAnsiToWidth(text: string, width: number): string {
-  // Strip ANSI to measure visible length
   const visible = text.replace(/\x1b\[[0-9;]*m/g, "");
   if (visible.length >= width) return text;
   return text + " ".repeat(width - visible.length);
 }
 
-export function renderBufferLines(
-  state: EditorState,
-  width: number,
-  height: number,
-  highlightSpans?: HighlightSpan[][]
+const ANSI_RE = /\x1b\[[0-9;]*m/g;
+
+function renderWithBlockCursor(text: string, cursorCol: number): string {
+  if (cursorCol < 0) return text;
+  const before = text.slice(0, cursorCol);
+  const ch = text[cursorCol]!;
+  const after = text.slice(cursorCol + 1);
+  if (ch !== undefined) {
+    return before + style(ch, { fg: "black", bg: "white" }) + after;
+  }
+  return text + style(" ", { fg: "black", bg: "white" });
+}
+
+function renderWithBlockCursorAnsi(text: string, cursorCol: number): string {
+  if (cursorCol < 0) return text;
+  const stripped = text.replace(ANSI_RE, "");
+  if (cursorCol >= stripped.length) {
+    return text + style(" ", { fg: "black", bg: "white" });
+  }
+  // Walk through text tracking visible position
+  let visiblePos = 0;
+  let i = 0;
+  let splitPoint = 0;
+  while (i < text.length) {
+    if (text[i] === "\x1b") {
+      const end = text.indexOf("m", i);
+      if (end === -1) break;
+      i = end + 1;
+      continue;
+    }
+    if (visiblePos === cursorCol) {
+      splitPoint = i;
+      break;
+    }
+    visiblePos++;
+    i++;
+  }
+  if (visiblePos < cursorCol) {
+    return text + style(" ", { fg: "black", bg: "white" });
+  }
+  const before = text.slice(0, splitPoint);
+  const ch = text[splitPoint]!;
+  const after = text.slice(splitPoint + 1);
+  return before + style(ch, { fg: "black", bg: "white" }) + after;
+}
+
+function renderSingleWindow(
+  buffer: Window["buffer"],
+  cursorLine: number,
+  cursorColumn: number,
+  totalLines: number,
+  viewportTop: number,
+  contentWidth: number,
+  visibleLines: number,
+  gutterCfg: GutterConfig,
+  isFocused: boolean,
+  highlightSpans?: HighlightSpan[][],
 ): string[] {
-  const visibleLines = Math.max(1, height);
-  const viewportTop = getVisibleViewportTop(state, visibleLines);
-  const totalLines = getLineCount(state);
+  const gw = gutterDisplayWidth(totalLines, gutterCfg);
+  const cw = Math.max(1, contentWidth - gw);
   const lines: string[] = [];
 
   if (totalLines === 0) {
-    const emptyLine = fitToWidth("(empty buffer)", width);
-    lines.push(style(emptyLine, { fg: "gray" }));
+    const emptyLine = fitToWidth("(empty buffer)", cw);
+    const gutter = renderEmptyGutter(0, gutterCfg);
+    lines.push(gutter + style(emptyLine, { fg: "gray" }));
     for (let i = 1; i < visibleLines; i++) {
-      lines.push(fitToWidth("~", width));
+      lines.push(renderEmptyGutter(0, gutterCfg) + fitToWidth("~", cw));
     }
     return lines;
   }
@@ -123,38 +177,110 @@ export function renderBufferLines(
     const lineNumber = viewportTop + i;
 
     if (lineNumber >= totalLines) {
-      lines.push(fitToWidth("~", width));
+      lines.push(renderEmptyGutter(totalLines, gutterCfg) + fitToWidth("~", cw));
       continue;
     }
 
-    const rawLine = getLine(state, lineNumber);
+    const isCurrentLine = isFocused && lineNumber === cursorLine;
+    const gutter = renderGutterLine(lineNumber, cursorLine, totalLines, gutterCfg, isCurrentLine);
+    const rawLine = getLineForBuffer(buffer, lineNumber);
 
-    // Apply syntax highlights if available for this line
     const lineSpans = highlightSpans?.[lineNumber];
     if (lineSpans && lineSpans.length > 0) {
-      // Clamp spans to line width, then apply highlights to raw line,
-      // then pad to width (no truncation needed — spans are already clamped).
-      // If the line is longer than width, truncate the raw line first.
-      const truncated = rawLine.length > width
-        ? (width > 3 ? rawLine.slice(0, width - 3) + "..." : rawLine.slice(0, width))
+      const truncated = rawLine.length > cw
+        ? (cw > 3 ? rawLine.slice(0, cw - 3) + "..." : rawLine.slice(0, cw))
         : rawLine;
       const clamped = clampSpans(lineSpans, truncated.length);
       const highlighted = applyHighlights(truncated, clamped);
-      const padded = padAnsiToWidth(highlighted, width);
-      lines.push(
-        lineNumber === state.cursorPosition.line
-          ? style(padded, { fg: "black", bg: "white" })
-          : padded,
-      );
+      const padded = padAnsiToWidth(highlighted, cw);
+      const rendered = isCurrentLine ? renderWithBlockCursorAnsi(padded, cursorColumn) : padded;
+      lines.push(gutter + rendered);
     } else {
-      const lineContent = fitToWidth(rawLine, width);
-      lines.push(
-        lineNumber === state.cursorPosition.line
-          ? style(lineContent, { fg: "black", bg: "white" })
-          : lineContent,
-      );
+      const lineContent = fitToWidth(rawLine, cw);
+      const rendered = isCurrentLine ? renderWithBlockCursor(lineContent, cursorColumn) : lineContent;
+      lines.push(gutter + rendered);
     }
   }
 
   return lines;
+}
+
+export function renderBufferLines(
+  state: EditorState,
+  width: number,
+  height: number,
+  highlightSpans?: HighlightSpan[][]
+): string[] {
+  const windows = state.windows;
+  const currentWindowIndex = state.currentWindowIndex ?? 0;
+
+  // Single-window path (default, most common)
+  if (!windows || windows.length <= 1) {
+    const gutterCfg = gutterConfigFromState(state.activeMinorModes, state.config);
+    return renderSingleWindow(
+      state.currentBuffer!,
+      state.cursorPosition.line,
+      state.cursorPosition.column,
+      getLineCount(state),
+      getVisibleViewportTop(state, height),
+      width,
+      height,
+      gutterCfg,
+      true,
+      highlightSpans,
+    );
+  }
+
+  // Multi-window path
+  const cells = computeLayout(windows, width, height);
+  const seps = renderSeparators(cells, width, height);
+  const gutterCfg = gutterConfigFromState(state.activeMinorModes, state.config);
+
+  // Build a screen-sized output, one string per terminal row
+  const screen: string[] = Array.from({ length: height }, () => " ".repeat(width));
+
+  for (let ci = 0; ci < cells.length; ci++) {
+    const cell = cells[ci]!;
+    const win = windows.find(w => w.id === cell.windowId);
+    if (!win) continue;
+
+    const isFocused = ci === currentWindowIndex;
+    const buf = win.buffer;
+    const totalLines = getLineCountForBuffer(buf);
+    const cursorLine = isFocused ? state.cursorPosition.line : win.cursorLine;
+    const cursorColumn = isFocused ? state.cursorPosition.column : 0;
+    const viewportTop = win.viewportTop;
+
+    const cellLines = renderSingleWindow(
+      buf, cursorLine, cursorColumn, totalLines, viewportTop,
+      cell.width, cell.height, gutterCfg, isFocused, highlightSpans,
+    );
+
+    for (let row = 0; row < cell.height && row < cellLines.length; row++) {
+      const screenRow = cell.y + row;
+      if (screenRow >= height) break;
+      // Place cell content at the right screen position
+      const line = cellLines[row]!;
+      const stripped = line.replace(/\x1b\[[0-9;]*m/g, "");
+      const padded = line + " ".repeat(Math.max(0, cell.width - stripped.length));
+      screen[screenRow] = padded.slice(0, cell.width);
+    }
+  }
+
+  // Overlay separators
+  for (let y = 0; y < height; y++) {
+    if (seps[y] && seps[y]!.trim().length > 0) {
+      // Merge separator characters into the screen row
+      let row = screen[y]!;
+      for (let x = 0; x < width; x++) {
+        const ch = seps[y]![x];
+        if (ch && ch !== " ") {
+          row = row.slice(0, x) + ch + row.slice(x + 1);
+        }
+      }
+      screen[y] = row;
+    }
+  }
+
+  return screen;
 }
