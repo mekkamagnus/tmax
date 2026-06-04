@@ -4,6 +4,7 @@
  */
 
 import { describe, test, beforeEach, afterEach } from "bun:test";
+import { expectDefined, expectRight, expectTlispList, expectTlispNumber } from "../helpers/editor-fixture.ts";
 import { expect } from "bun:test";
 import { Editor } from "../../src/editor/editor.ts";
 import { MockTerminal } from "../mocks/terminal.ts";
@@ -15,13 +16,13 @@ describe("T-Lisp Testing Framework", () => {
   let mockTerminal: MockTerminal;
   let mockFileSystem: MockFileSystem;
 
-  beforeEach(() => {
+  beforeEach(async () => {
     mockTerminal = new MockTerminal();
     mockFileSystem = new MockFileSystem();
     // Create an empty filesystem for these tests
     editor = new Editor(mockTerminal, mockFileSystem);
     // Start the editor to initialize the interpreter
-    editor.start();
+    await editor.start();
     // Reset all test state for clean isolation
     resetAllTestState(editor.getInterpreter());
   });
@@ -30,7 +31,7 @@ describe("T-Lisp Testing Framework", () => {
     editor.stop();
   });
 
-  test("should define a test with deftest", () => {
+  test("should define a test with deftest", async () => {
     const interpreter = editor.getInterpreter();
 
     // Define a simple test
@@ -39,13 +40,13 @@ describe("T-Lisp Testing Framework", () => {
     expect(result).toBeDefined();
     expect(result._tag).toBe("Right");
 
-    const value = result.right;
+    const value = expectRight(result);
     expect(value).toBeDefined();
     expect(value.type).toBe("symbol");
     expect(value.value).toBe("my-test");
   });
 
-  test("should run a test with test-run", () => {
+  test("should run a test with test-run", async () => {
     const interpreter = editor.getInterpreter();
 
     // Define a test that should pass
@@ -57,13 +58,13 @@ describe("T-Lisp Testing Framework", () => {
     expect(result).toBeDefined();
     expect(result._tag).toBe("Right");
 
-    const value = result.right;
+    const value = expectRight(result);
     expect(value).toBeDefined();
     expect(value.type).toBe("boolean");
     expect(value.value).toBe(true);
   });
 
-  test("should run all tests with test-run-all", () => {
+  test("should run all tests with test-run-all", async () => {
     const interpreter = editor.getInterpreter();
 
     // Define multiple tests
@@ -77,20 +78,20 @@ describe("T-Lisp Testing Framework", () => {
     expect(result).toBeDefined();
     expect(result._tag).toBe("Right");
 
-    const value = result.right;
+    const value = expectRight(result);
     expect(value).toBeDefined();
     expect(value.type).toBe("list");
 
-    const results = value.value;
+    const results = expectTlispList(value);
     expect(results.length).toBe(3);
     // The test registry is global, so we might have more tests than just the 3 we defined
     // But we expect at least our 3 tests to pass
-    expect(results[0].value).toBeGreaterThanOrEqual(3); // at least 3 passed
-    expect(results[1].value).toBe(0); // 0 failed
-    expect(results[2].value).toBeGreaterThanOrEqual(3); // at least 3 total
+    expect(expectTlispNumber(expectDefined(results[0]))).toBeGreaterThanOrEqual(3); // at least 3 passed
+    expect(expectTlispNumber(expectDefined(results[1]))).toBe(0); // 0 failed
+    expect(expectTlispNumber(expectDefined(results[2]))).toBeGreaterThanOrEqual(3); // at least 3 total
   });
 
-  test("should handle test failures properly", () => {
+  test("should handle test failures properly", async () => {
     const interpreter = editor.getInterpreter();
 
     // Define a test that should fail
@@ -108,7 +109,7 @@ describe("T-Lisp Testing Framework", () => {
     }
   });
 
-  test("should handle errors in tests", () => {
+  test("should handle errors in tests", async () => {
     const interpreter = editor.getInterpreter();
 
     // Define a test that should raise an error
@@ -120,19 +121,19 @@ describe("T-Lisp Testing Framework", () => {
     expect(result).toBeDefined();
     expect(result._tag).toBe("Right");
 
-    const value = result.right;
+    const value = expectRight(result);
     expect(value).toBeDefined();
     expect(value.type).toBe("boolean");
     expect(value.value).toBe(true);
   });
 
-  test("should support assert-true functionality", () => {
+  test("should support assert-true functionality", async () => {
     const interpreter = editor.getInterpreter();
 
     // Test assert-true with truthy value
     const result1 = interpreter.execute('(assert-true t)');
     expect(result1._tag).toBe("Right");
-    expect(result1.right.value).toBe(true);
+    expect(expectRight(result1).value).toBe(true);
 
     // Test assert-true with falsy value (should throw error)
     try {
@@ -143,13 +144,13 @@ describe("T-Lisp Testing Framework", () => {
     }
   });
 
-  test("should support assert-false functionality", () => {
+  test("should support assert-false functionality", async () => {
     const interpreter = editor.getInterpreter();
 
     // Test assert-false with falsy value
     const result1 = interpreter.execute('(assert-false nil)');
     expect(result1._tag).toBe("Right");
-    expect(result1.right.value).toBe(true);
+    expect(expectRight(result1).value).toBe(true);
 
     // Test assert-false with truthy value (should throw error)
     try {
@@ -160,13 +161,13 @@ describe("T-Lisp Testing Framework", () => {
     }
   });
 
-  test("should support assert-equal functionality", () => {
+  test("should support assert-equal functionality", async () => {
     const interpreter = editor.getInterpreter();
 
     // Test assert-equal with equal values
     const result1 = interpreter.execute('(assert-equal 1 1)');
     expect(result1._tag).toBe("Right");
-    expect(result1.right.value).toBe(true);
+    expect(expectRight(result1).value).toBe(true);
 
     // Test assert-equal with different values (should throw error)
     try {
@@ -177,13 +178,13 @@ describe("T-Lisp Testing Framework", () => {
     }
   });
 
-  test("should support assert-not-equal functionality", () => {
+  test("should support assert-not-equal functionality", async () => {
     const interpreter = editor.getInterpreter();
 
     // Test assert-not-equal with different values
     const result1 = interpreter.execute('(assert-not-equal 1 2)');
     expect(result1._tag).toBe("Right");
-    expect(result1.right.value).toBe(true);
+    expect(expectRight(result1).value).toBe(true);
 
     // Test assert-not-equal with same values (should throw error)
     try {
@@ -194,7 +195,7 @@ describe("T-Lisp Testing Framework", () => {
     }
   });
 
-  test("should support assert-error functionality", () => {
+  test("should support assert-error functionality", async () => {
     const interpreter = editor.getInterpreter();
 
     // Test assert-error with a form that raises an error

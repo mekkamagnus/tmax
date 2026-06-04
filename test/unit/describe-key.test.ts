@@ -7,20 +7,21 @@ import { describe, test, expect, beforeEach } from "bun:test";
 import { Editor } from "../../src/editor/editor.ts";
 import { MockTerminal } from "../mocks/terminal.ts";
 import { MockFileSystem } from "../mocks/filesystem.ts";
+import { expectDefined, expectRight, expectTlispList } from "../helpers/editor-fixture.ts";
 
 describe("US-1.11.1: Describe Key", () => {
   let editor: Editor;
   let terminal: MockTerminal;
   let filesystem: MockFileSystem;
 
-  beforeEach(() => {
+  beforeEach(async () => {
     terminal = new MockTerminal();
     filesystem = new MockFileSystem();
     editor = new Editor(terminal, filesystem);
-    editor.start();
+    await editor.start();
   });
 
-  test("C-h k followed by key shows bound command", () => {
+  test("C-h k followed by key shows bound command", async () => {
     const interpreter = editor.getInterpreter();
 
     // First, bind a test key
@@ -33,11 +34,11 @@ describe("US-1.11.1: Describe Key", () => {
     if (typeof result === "object" && "right" in result) {
       expect(result.right.type).toBe("list");
       if (result.right.type === "list") {
-        const values = result.right.value;
+        const values = expectTlispList(expectRight(result));
         expect(values.length).toBeGreaterThan(0);
 
         // First element should be the command
-        const first = values[0];
+        const first = expectDefined(values[0]);
         expect(first.type).toBe("string");
         if (first.type === "string") {
           expect(first.value).toBe("find-file");
@@ -46,7 +47,7 @@ describe("US-1.11.1: Describe Key", () => {
     }
   });
 
-  test("describe-key for unbound key shows 'Key is unbound'", () => {
+  test("describe-key for unbound key shows 'Key is unbound'", async () => {
     const interpreter = editor.getInterpreter();
     const result = interpreter.execute('(describe-key "C-x C-z" "normal")');
 
@@ -56,7 +57,7 @@ describe("US-1.11.1: Describe Key", () => {
     }
   });
 
-  test("describe-key for C-x C-f shows 'find-file' documentation", () => {
+  test("describe-key for C-x C-f shows 'find-file' documentation", async () => {
     const interpreter = editor.getInterpreter();
 
     // Bind the key
@@ -69,17 +70,17 @@ describe("US-1.11.1: Describe Key", () => {
     if (typeof result === "object" && "right" in result) {
       expect(result.right.type).toBe("list");
       if (result.right.type === "list") {
-        const values = result.right.value;
+        const values = expectTlispList(expectRight(result));
         expect(values.length).toBeGreaterThanOrEqual(2);
 
         // [command, key, mode, documentation?]
-        const command = values[0];
+        const command = expectDefined(values[0]);
         expect(command.type).toBe("string");
         if (command.type === "string") {
           expect(command.value).toBe("find-file");
         }
 
-        const key = values[1];
+        const key = expectDefined(values[1]);
         expect(key.type).toBe("string");
         if (key.type === "string") {
           expect(key.value).toBe("C-x C-f");
@@ -88,7 +89,7 @@ describe("US-1.11.1: Describe Key", () => {
     }
   });
 
-  test("C-g cancels describe-key", () => {
+  test("C-g cancels describe-key", async () => {
     const interpreter = editor.getInterpreter();
 
     // This tests the interactive behavior
@@ -98,10 +99,10 @@ describe("US-1.11.1: Describe Key", () => {
     if (typeof result === "object" && "right" in result) {
       expect(result.right.type).toBe("list");
       if (result.right.type === "list") {
-        const values = result.right.value;
+        const values = expectTlispList(expectRight(result));
         expect(values.length).toBeGreaterThan(0);
 
-        const command = values[0];
+        const command = expectDefined(values[0]);
         expect(command.type).toBe("string");
         if (command.type === "string") {
           // The command is stored with parentheses
@@ -111,7 +112,7 @@ describe("US-1.11.1: Describe Key", () => {
     }
   });
 
-  test("describe-key with default mode uses current editor mode", () => {
+  test("describe-key with default mode uses current editor mode", async () => {
     const interpreter = editor.getInterpreter();
 
     // Test without specifying mode (should use current mode)
@@ -120,10 +121,10 @@ describe("US-1.11.1: Describe Key", () => {
     if (typeof result === "object" && "right" in result) {
       expect(result.right.type).toBe("list");
       if (result.right.type === "list") {
-        const values = result.right.value;
+        const values = expectTlispList(expectRight(result));
         expect(values.length).toBeGreaterThan(0);
 
-        const command = values[0];
+        const command = expectDefined(values[0]);
         expect(command.type).toBe("string");
         if (command.type === "string") {
           // The command is stored with parentheses
@@ -133,7 +134,7 @@ describe("US-1.11.1: Describe Key", () => {
     }
   });
 
-  test("describe-key shows documentation if available", () => {
+  test("describe-key shows documentation if available", async () => {
     const interpreter = editor.getInterpreter();
 
     // First define a function with documentation
@@ -153,12 +154,12 @@ describe("US-1.11.1: Describe Key", () => {
     if (typeof result === "object" && "right" in result) {
       expect(result.right.type).toBe("list");
       if (result.right.type === "list") {
-        const values = result.right.value;
+        const values = expectTlispList(expectRight(result));
         // Should have at least [command, key, mode, documentation]
         expect(values.length).toBeGreaterThanOrEqual(3);
 
         if (values.length >= 4) {
-          const doc = values[3];
+          const doc = expectDefined(values[3]);
           expect(doc.type).toBe("string");
           // TODO: Once docstring support is implemented, this should contain the function documentation
           if (doc.type === "string") {
@@ -169,7 +170,7 @@ describe("US-1.11.1: Describe Key", () => {
     }
   });
 
-  test("describe-key shows 'No documentation available' when missing", () => {
+  test("describe-key shows 'No documentation available' when missing", async () => {
     const interpreter = editor.getInterpreter();
 
     // Bind a key to a command without documentation
@@ -182,12 +183,12 @@ describe("US-1.11.1: Describe Key", () => {
     if (typeof result === "object" && "right" in result) {
       expect(result.right.type).toBe("list");
       if (result.right.type === "list") {
-        const values = result.right.value;
+        const values = expectTlispList(expectRight(result));
         expect(values.length).toBeGreaterThanOrEqual(2);
 
         // If there's a 4th element (documentation), it should indicate no docs
         if (values.length >= 4) {
-          const doc = values[3];
+          const doc = expectDefined(values[3]);
           expect(doc.type).toBe("string");
           if (doc.type === "string") {
             expect(doc.value).toBe("No documentation available");

@@ -9,77 +9,27 @@
  */
 
 import { describe, test, expect, beforeEach } from "bun:test";
+import { expectDefined, expectRight } from "../helpers/editor-fixture.ts";
 import { Editor } from "../../src/editor/editor.ts";
-import { TerminalIO } from "../../src/core/terminal.ts";
-import { FileSystem } from "../../src/core/filesystem.ts";
-import { TLispInterpreterImpl } from "../../src/tlisp/interpreter.ts";
+import type { TLispInterpreterImpl } from "../../src/tlisp/interpreter.ts";
 import { registerStdlibFunctions } from "../../src/tlisp/stdlib.ts";
 import type { TLispValue } from "../../src/tlisp/types.ts";
-import { Either } from "../../src/utils/task-either.ts";
-
-// Mock TerminalIO for testing
-class MockTerminalIO implements TerminalIO {
-  private buffer: string[] = [];
-  cursor = { row: 0, col: 0 };
-
-  write(text: string): void {
-    this.buffer.push(text);
-  }
-
-  clear(): void {
-    this.buffer = [];
-  }
-
-  getSize(): { width: number; height: number } {
-    return { width: 80, height: 24 };
-  }
-
-  moveCursor(row: number, col: number): void {
-    this.cursor = { row, col };
-  }
-
-  // Add other required methods as no-ops
-  enterRawMode(): void {}
-  exitRawMode(): void {}
-  flush(): void {}
-  read(): Promise<string> { return Promise.resolve(""); }
-  query(seq: string): Promise<boolean> { return Promise.resolve(true); }
-}
-
-// Mock FileSystem for testing
-class MockFileSystem implements FileSystem {
-  private files: Map<string, string> = new Map();
-
-  async readFile(path: string): Promise<string> {
-    const content = this.files.get(path);
-    if (content === undefined) {
-      throw new Error(`File not found: ${path}`);
-    }
-    return content;
-  }
-
-  async writeFile(path: string, content: string): Promise<void> {
-    this.files.set(path, content);
-  }
-
-  async fileExists(path: string): Promise<boolean> {
-    return this.files.has(path);
-  }
-}
+import { MockFileSystem } from "../mocks/filesystem.ts";
+import { MockTerminal } from "../mocks/terminal.ts";
 
 describe("Keymap-Editor Integration", () => {
   let editor: Editor;
-  let terminal: MockTerminalIO;
+  let terminal: MockTerminal;
   let filesystem: MockFileSystem;
   let interpreter: TLispInterpreterImpl;
 
   beforeEach(() => {
-    terminal = new MockTerminalIO();
+    terminal = new MockTerminal();
     filesystem = new MockFileSystem();
     editor = new Editor(terminal, filesystem);
 
     // Get the interpreter from the editor
-    interpreter = (editor as any).interpreter as TLispInterpreterImpl;
+    interpreter = editor.getInterpreter();
     registerStdlibFunctions(interpreter);
   });
 
@@ -88,13 +38,13 @@ describe("Keymap-Editor Integration", () => {
       // Create a T-Lisp keymap with a custom binding for 'j'
       interpreter.execute('(defkeymap "*custom-keymap*")');
       const result = interpreter.execute('(keymap-define-key *custom-keymap* "j" "custom-command")');
-      if (result.right) {
-        interpreter.globalEnv.define("*custom-keymap*", result.right);
+      if (expectRight(result)) {
+        interpreter.globalEnv.define("*custom-keymap*", expectRight(result));
       }
 
       // Register the keymap with the editor (this would be done via keymap-set)
-      const keymap = interpreter.globalEnv.lookup("*custom-keymap*");
-      const keymapSync = (editor as any).keymapSync;
+      const keymap = expectDefined(interpreter.globalEnv.lookup("*custom-keymap*"));
+      const keymapSync = editor.keymapSync;
       if (keymapSync) {
         keymapSync.registerTlispKeymap("normal", keymap);
       }
@@ -114,10 +64,10 @@ describe("Keymap-Editor Integration", () => {
     test("Should fallback to TypeScript bindings when T-Lisp keymap has no binding", async () => {
       // Create an empty T-Lisp keymap
       interpreter.execute('(defkeymap "*empty-keymap*")');
-      const keymap = interpreter.globalEnv.lookup("*empty-keymap*");
+      const keymap = expectDefined(interpreter.globalEnv.lookup("*empty-keymap*"));
 
       // Register the keymap
-      const keymapSync = (editor as any).keymapSync;
+      const keymapSync = editor.keymapSync;
       if (keymapSync) {
         keymapSync.registerTlispKeymap("normal", keymap);
 
@@ -135,16 +85,16 @@ describe("Keymap-Editor Integration", () => {
       // Create a keymap with multiple bindings
       interpreter.execute('(defkeymap "*perf-keymap*")');
       let result = interpreter.execute('(keymap-define-key *perf-keymap* "j" "cmd1")');
-      if (result.right) {
-        interpreter.globalEnv.define("*perf-keymap*", result.right);
+      if (expectRight(result)) {
+        interpreter.globalEnv.define("*perf-keymap*", expectRight(result));
       }
       result = interpreter.execute('(keymap-define-key *perf-keymap* "k" "cmd2")');
-      if (result.right) {
-        interpreter.globalEnv.define("*perf-keymap*", result.right);
+      if (expectRight(result)) {
+        interpreter.globalEnv.define("*perf-keymap*", expectRight(result));
       }
 
-      const keymap = interpreter.globalEnv.lookup("*perf-keymap*");
-      const keymapSync = (editor as any).keymapSync;
+      const keymap = expectDefined(interpreter.globalEnv.lookup("*perf-keymap*"));
+      const keymapSync = editor.keymapSync;
 
       if (keymapSync) {
         keymapSync.registerTlispKeymap("normal", keymap);
@@ -164,12 +114,12 @@ describe("Keymap-Editor Integration", () => {
     test("Should support different keymaps for different modes", () => {
       // Create keymaps for different modes
       interpreter.execute('(defkeymap "*normal-keymap*")');
-      const normalKeymap = interpreter.globalEnv.lookup("*normal-keymap*");
+      const normalKeymap = expectDefined(interpreter.globalEnv.lookup("*normal-keymap*"));
 
       interpreter.execute('(defkeymap "*insert-keymap*")');
-      const insertKeymap = interpreter.globalEnv.lookup("*insert-keymap*");
+      const insertKeymap = expectDefined(interpreter.globalEnv.lookup("*insert-keymap*"));
 
-      const keymapSync = (editor as any).keymapSync;
+      const keymapSync = editor.keymapSync;
 
       if (keymapSync) {
         // Register for different modes
@@ -194,7 +144,7 @@ describe("Keymap-Editor Integration", () => {
     });
 
     test("Should handle malformed keymaps gracefully", async () => {
-      const keymapSync = (editor as any).keymapSync;
+      const keymapSync = editor.keymapSync;
 
       if (keymapSync) {
         // Register a non-keymap value

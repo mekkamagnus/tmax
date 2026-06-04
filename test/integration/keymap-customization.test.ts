@@ -10,73 +10,24 @@
  */
 
 import { describe, test, expect, beforeEach, afterEach } from "bun:test";
+import { expectRight, expectTlispList } from "../helpers/editor-fixture.ts";
 import { Editor } from "../../src/editor/editor.ts";
-import { TerminalIO } from "../../src/core/terminal.ts";
-import { FileSystem } from "../../src/core/filesystem.ts";
-import { TLispInterpreterImpl } from "../../src/tlisp/interpreter.ts";
 import { registerStdlibFunctions } from "../../src/tlisp/stdlib.ts";
 import { Either } from "../../src/utils/task-either.ts";
+import { MockFileSystem } from "../mocks/filesystem.ts";
+import { MockTerminal } from "../mocks/terminal.ts";
 import * as fs from 'fs/promises';
 import * as os from 'os';
 import * as path from 'path';
 
-// Mock TerminalIO for testing
-class MockTerminalIO implements TerminalIO {
-  private buffer: string[] = [];
-  cursor = { row: 0, col: 0 };
-
-  write(text: string): void {
-    this.buffer.push(text);
-  }
-
-  clear(): void {
-    this.buffer = [];
-  }
-
-  getSize(): { width: number; height: number } {
-    return { width: 80, height: 24 };
-  }
-
-  moveCursor(row: number, col: number): void {
-    this.cursor = { row, col };
-  }
-
-  enterRawMode(): void {}
-  exitRawMode(): void {}
-  flush(): void {}
-  read(): Promise<string> { return Promise.resolve(""); }
-  query(seq: string): Promise<boolean> { return Promise.resolve(true); }
-}
-
-// Mock FileSystem for testing
-class MockFileSystem implements FileSystem {
-  private files: Map<string, string> = new Map();
-
-  async readFile(path: string): Promise<string> {
-    const content = this.files.get(path);
-    if (content === undefined) {
-      throw new Error(`File not found: ${path}`);
-    }
-    return content;
-  }
-
-  async writeFile(path: string, content: string): Promise<void> {
-    this.files.set(path, content);
-  }
-
-  async fileExists(path: string): Promise<boolean> {
-    return this.files.has(path);
-  }
-}
-
 describe("Keymap Customization E2E", () => {
   let editor: Editor;
-  let terminal: MockTerminalIO;
+  let terminal: MockTerminal;
   let filesystem: MockFileSystem;
   let tempConfigPath: string;
 
   beforeEach(() => {
-    terminal = new MockTerminalIO();
+    terminal = new MockTerminal();
     filesystem = new MockFileSystem();
 
     // Create a temporary config path for testing
@@ -110,7 +61,7 @@ describe("Keymap Customization E2E", () => {
       editor = new Editor(terminal, filesystem);
 
       // Manually execute the init.tlisp content (simulating what loadInitFile does)
-      const interpreter = (editor as any).interpreter as TLispInterpreterImpl;
+      const interpreter = editor.getInterpreter();
       registerStdlibFunctions(interpreter);
       interpreter.execute(initContent);
 
@@ -120,7 +71,7 @@ describe("Keymap Customization E2E", () => {
       expect(keymap?.type).toBe("hashmap");
 
       // Verify the keymap was registered with KeymapSync
-      const keymapSync = (editor as any).keymapSync;
+      const keymapSync = editor.keymapSync;
       expect(keymapSync.hasKeymap("normal")).toBe(true);
 
       // Verify bindings can be looked up
@@ -133,11 +84,11 @@ describe("Keymap Customization E2E", () => {
       editor = new Editor(terminal, filesystem);
 
       // Editor should still initialize without errors
-      const interpreter = (editor as any).interpreter as TLispInterpreterImpl;
+      const interpreter = editor.getInterpreter();
       expect(interpreter).toBeDefined();
 
       // KeymapSync should be initialized but empty
-      const keymapSync = (editor as any).keymapSync;
+      const keymapSync = editor.keymapSync;
       expect(keymapSync.hasKeymap("normal")).toBe(false);
     });
 
@@ -152,7 +103,7 @@ describe("Keymap Customization E2E", () => {
       editor = new Editor(terminal, filesystem);
 
       // Editor should still initialize despite syntax error
-      const interpreter = (editor as any).interpreter as TLispInterpreterImpl;
+      const interpreter = editor.getInterpreter();
       expect(interpreter).toBeDefined();
     });
   });
@@ -169,12 +120,12 @@ describe("Keymap Customization E2E", () => {
       filesystem.writeFile(tempConfigPath, initContent);
 
       editor = new Editor(terminal, filesystem);
-      const interpreter = (editor as any).interpreter as TLispInterpreterImpl;
+      const interpreter = editor.getInterpreter();
       registerStdlibFunctions(interpreter);
       interpreter.execute(initContent);
 
       // Verify custom binding takes precedence
-      const keymapSync = (editor as any).keymapSync;
+      const keymapSync = editor.keymapSync;
       const command = await keymapSync.lookupKeyBinding("normal", "j");
       expect(command).toBe("my-custom-command");
     });
@@ -191,12 +142,12 @@ describe("Keymap Customization E2E", () => {
       filesystem.writeFile(tempConfigPath, initContent);
 
       editor = new Editor(terminal, filesystem);
-      const interpreter = (editor as any).interpreter as TLispInterpreterImpl;
+      const interpreter = editor.getInterpreter();
       registerStdlibFunctions(interpreter);
       interpreter.execute(initContent);
 
       // Verify all bindings are registered
-      const keymapSync = (editor as any).keymapSync;
+      const keymapSync = editor.keymapSync;
       expect(await keymapSync.lookupKeyBinding("normal", "j")).toBe("cmd1");
       expect(await keymapSync.lookupKeyBinding("normal", "k")).toBe("cmd2");
       expect(await keymapSync.lookupKeyBinding("normal", "l")).toBe("cmd3");
@@ -219,12 +170,12 @@ describe("Keymap Customization E2E", () => {
       filesystem.writeFile(tempConfigPath, tmaxrcContent);
 
       editor = new Editor(terminal, filesystem);
-      const interpreter = (editor as any).interpreter as TLispInterpreterImpl;
+      const interpreter = editor.getInterpreter();
       registerStdlibFunctions(interpreter);
       interpreter.execute(tmaxrcContent);
 
       // Verify each mode has its own keymap
-      const keymapSync = (editor as any).keymapSync;
+      const keymapSync = editor.keymapSync;
       expect(await keymapSync.lookupKeyBinding("normal", "j")).toBe("normal-cmd-j");
       expect(await keymapSync.lookupKeyBinding("insert", "j")).toBe("insert-cmd-j");
     });
@@ -233,15 +184,15 @@ describe("Keymap Customization E2E", () => {
   describe("Runtime Keymap Modification", () => {
     test("should allow registering keymaps at runtime via M-x", async () => {
       editor = new Editor(terminal, filesystem);
-      const interpreter = (editor as any).interpreter as TLispInterpreterImpl;
+      const interpreter = editor.getInterpreter();
       registerStdlibFunctions(interpreter);
 
       // Simulate user executing commands via M-x
       // User creates a keymap at runtime
       interpreter.execute('(defkeymap "*runtime-keymap*")');
       let result = interpreter.execute('(keymap-define-key *runtime-keymap* "x" "runtime-cmd")');
-      if (result.right) {
-        interpreter.globalEnv.define("*runtime-keymap*", result.right);
+      if (expectRight(result)) {
+        interpreter.globalEnv.define("*runtime-keymap*", expectRight(result));
       }
 
       // User registers the keymap
@@ -249,10 +200,10 @@ describe("Keymap Customization E2E", () => {
       const keymapSetResult = interpreter.execute('(keymap-set "normal" *runtime-keymap*)');
 
       // Verify it was registered successfully
-      expect(Either.isRight(keymapSetResult) || keymapSetResult.right).toBeDefined();
+      expect(Either.isRight(keymapSetResult) || expectRight(keymapSetResult)).toBeDefined();
 
       // Verify the binding works
-      const keymapSync = (editor as any).keymapSync;
+      const keymapSync = editor.keymapSync;
       const command = await keymapSync.lookupKeyBinding("normal", "x");
       expect(command).toBe("runtime-cmd");
     });
@@ -266,16 +217,16 @@ describe("Keymap Customization E2E", () => {
       filesystem.writeFile(tempConfigPath, tmaxrcContent);
 
       editor = new Editor(terminal, filesystem);
-      const interpreter = (editor as any).interpreter as TLispInterpreterImpl;
+      const interpreter = editor.getInterpreter();
       registerStdlibFunctions(interpreter);
       interpreter.execute(tmaxrcContent);
 
       // Query active keymap
       const result = interpreter.execute('(keymap-active "normal")');
-      expect(Either.isRight(result) || result.right).toBeDefined();
+      expect(Either.isRight(result) || expectRight(result)).toBeDefined();
 
-      if (result.right) {
-        expect(result.right.type).toBe("hashmap");
+      if (expectRight(result)) {
+        expect(expectRight(result).type).toBe("hashmap");
       }
     });
 
@@ -289,20 +240,15 @@ describe("Keymap Customization E2E", () => {
       filesystem.writeFile(tempConfigPath, tmaxrcContent);
 
       editor = new Editor(terminal, filesystem);
-      const interpreter = (editor as any).interpreter as TLispInterpreterImpl;
+      const interpreter = editor.getInterpreter();
       registerStdlibFunctions(interpreter);
       interpreter.execute(tmaxrcContent);
 
       // List keys in keymap
       const result = interpreter.execute('(keymap-keys "normal")');
-      expect(Either.isRight(result) || result.right).toBeDefined();
+      expect(Either.isRight(result) || expectRight(result)).toBeDefined();
 
-      if (result.right) {
-        expect(result.right.type).toBe("list");
-        if (result.right.type === "list") {
-          expect(result.right.value.length).toBe(2);
-        }
-      }
+      expect(expectTlispList(expectRight(result))).toHaveLength(2);
     });
   });
 });

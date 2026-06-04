@@ -7,20 +7,21 @@ import { describe, test, expect, beforeEach } from "bun:test";
 import { Editor } from "../../src/editor/editor.ts";
 import { MockTerminal } from "../mocks/terminal.ts";
 import { MockFileSystem } from "../mocks/filesystem.ts";
+import { expectDefined, expectRight, expectTlispList } from "../helpers/editor-fixture.ts";
 
 describe("US-1.11.2: Describe Function", () => {
   let editor: Editor;
   let terminal: MockTerminal;
   let filesystem: MockFileSystem;
 
-  beforeEach(() => {
+  beforeEach(async () => {
     terminal = new MockTerminal();
     filesystem = new MockFileSystem();
     editor = new Editor(terminal, filesystem);
-    editor.start();
+    await editor.start();
   });
 
-  test("describe-function shows function documentation", () => {
+  test("describe-function shows function documentation", async () => {
     const interpreter = editor.getInterpreter();
 
     // Define a function with documentation (single line for parser compatibility)
@@ -33,23 +34,23 @@ describe("US-1.11.2: Describe Function", () => {
     if (typeof result === "object" && "right" in result) {
       expect(result.right.type).toBe("list");
       if (result.right.type === "list") {
-        const values = result.right.value;
+        const values = expectTlispList(expectRight(result));
         expect(values.length).toBeGreaterThanOrEqual(3);
 
         // [name, signature, docstring, file?]
-        const name = values[0];
+        const name = expectDefined(values[0]);
         expect(name.type).toBe("string");
         if (name.type === "string") {
           expect(name.value).toBe("test-function");
         }
 
-        const signature = values[1];
+        const signature = expectDefined(values[1]);
         expect(signature.type).toBe("string");
         if (signature.type === "string") {
           expect(signature.value).toBe("test-function ()");
         }
 
-        const docstring = values[2];
+        const docstring = expectDefined(values[2]);
         expect(docstring.type).toBe("string");
         if (docstring.type === "string") {
           expect(docstring.value).toBe("This is a test function with documentation.");
@@ -58,7 +59,7 @@ describe("US-1.11.2: Describe Function", () => {
     }
   });
 
-  test("describe-function for unknown function shows error", () => {
+  test("describe-function for unknown function shows error", async () => {
     const interpreter = editor.getInterpreter();
     const result = interpreter.execute('(describe-function "unknown-function")');
 
@@ -68,7 +69,7 @@ describe("US-1.11.2: Describe Function", () => {
     }
   });
 
-  test("describe-function shows 'No documentation available' when missing", () => {
+  test("describe-function shows 'No documentation available' when missing", async () => {
     const interpreter = editor.getInterpreter();
 
     // Define a function without documentation (single line)
@@ -80,12 +81,12 @@ describe("US-1.11.2: Describe Function", () => {
     if (typeof result === "object" && "right" in result) {
       expect(result.right.type).toBe("list");
       if (result.right.type === "list") {
-        const values = result.right.value;
+        const values = expectTlispList(expectRight(result));
         expect(values.length).toBeGreaterThanOrEqual(2);
 
         // Should still return info but with no/empty documentation
         if (values.length >= 3) {
-          const doc = values[2];
+          const doc = expectDefined(values[2]);
           expect(doc.type).toBe("string");
           if (doc.type === "string") {
             expect(doc.value).toBe("No documentation available");
@@ -95,7 +96,7 @@ describe("US-1.11.2: Describe Function", () => {
     }
   });
 
-  test("describe-function shows signature with parameters", () => {
+  test("describe-function shows signature with parameters", async () => {
     const interpreter = editor.getInterpreter();
 
     // Define a function with parameters (single line)
@@ -106,15 +107,15 @@ describe("US-1.11.2: Describe Function", () => {
     if (typeof result === "object" && "right" in result) {
       expect(result.right.type).toBe("list");
       if (result.right.type === "list") {
-        const values = result.right.value;
+        const values = expectTlispList(expectRight(result));
 
-        const signature = values[1];
+        const signature = expectDefined(values[1]);
         expect(signature.type).toBe("string");
         if (signature.type === "string") {
           expect(signature.value).toBe("greet (name greeting)");
         }
 
-        const docstring = values[2];
+        const docstring = expectDefined(values[2]);
         expect(docstring.type).toBe("string");
         if (docstring.type === "string") {
           expect(docstring.value).toBe("Greet someone with a custom greeting.");
@@ -123,7 +124,7 @@ describe("US-1.11.2: Describe Function", () => {
     }
   });
 
-  test("C-h f prompts for function name in minibuffer", () => {
+  test("C-h f prompts for function name in minibuffer", async () => {
     const interpreter = editor.getInterpreter();
 
     // Test that describe-function-prompt exists
@@ -136,7 +137,7 @@ describe("US-1.11.2: Describe Function", () => {
     }
   });
 
-  test("describe-function for built-in function shows docs", () => {
+  test("describe-function for built-in function shows docs", async () => {
     const interpreter = editor.getInterpreter();
 
     // Describe a built-in function
@@ -145,10 +146,10 @@ describe("US-1.11.2: Describe Function", () => {
     if (typeof result === "object" && "right" in result) {
       expect(result.right.type).toBe("list");
       if (result.right.type === "list") {
-        const values = result.right.value;
+        const values = expectTlispList(expectRight(result));
         expect(values.length).toBeGreaterThanOrEqual(2);
 
-        const name = values[0];
+        const name = expectDefined(values[0]);
         expect(name.type).toBe("string");
         if (name.type === "string") {
           expect(name.value).toBe("editor-quit");
@@ -157,7 +158,7 @@ describe("US-1.11.2: Describe Function", () => {
     }
   });
 
-  test("describe-function completion shows matching functions", () => {
+  test("describe-function completion shows matching functions", async () => {
     const interpreter = editor.getInterpreter();
 
     // Define some test functions
@@ -173,7 +174,7 @@ describe("US-1.11.2: Describe Function", () => {
     if (typeof result === "object" && "right" in result) {
       expect(result.right.type).toBe("list");
       if (result.right.type === "list") {
-        const values = result.right.value;
+        const values = expectTlispList(expectRight(result));
         // Should return matching functions
         expect(values.length).toBeGreaterThan(0);
       }

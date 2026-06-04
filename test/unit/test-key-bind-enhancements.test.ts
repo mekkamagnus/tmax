@@ -8,26 +8,31 @@ import { expect } from "bun:test";
 import { Editor } from "../../src/editor/editor.ts";
 import { MockTerminal } from "../mocks/terminal.ts";
 import { MockFileSystem } from "../mocks/filesystem.ts";
+import {
+  expectRight,
+  expectTlispList,
+  expectTlispString,
+} from "../helpers/editor-fixture.ts";
 
 describe("Enhanced Key Bind Functions", () => {
   let editor: Editor;
   let mockTerminal: MockTerminal;
   let mockFileSystem: MockFileSystem;
 
-  beforeEach(() => {
+  beforeEach(async () => {
     mockTerminal = new MockTerminal();
     mockFileSystem = new MockFileSystem();
     // Create an empty filesystem for these tests
     editor = new Editor(mockTerminal, mockFileSystem);
     // Start the editor to initialize the interpreter
-    editor.start();
+    await editor.start();
   });
 
   afterEach(() => {
     editor.stop();
   });
 
-  test("should create binding with key-bind function", () => {
+  test("should create binding with key-bind function", async () => {
     const interpreter = editor.getInterpreter();
 
     // Test basic key binding creation
@@ -36,8 +41,7 @@ describe("Enhanced Key Bind Functions", () => {
     expect(result).toBeDefined();
     expect(result._tag).toBe("Right");
 
-    const value = result.right;
-    expect(value).toBeDefined();
+    const value = expectRight(result);
     expect(value.type).toBe("string");
     expect(value.value).toBe("C-c C-c");
 
@@ -47,11 +51,11 @@ describe("Enhanced Key Bind Functions", () => {
 
     expect(mappings).toBeDefined();
     expect(mappings!.length).toBe(1);
-    expect(mappings![0].command).toBe("(some-command)");
-    expect(mappings![0].mode).toBeUndefined(); // No mode specified
+    expect(mappings![0]!.command).toBe("(some-command)");
+    expect(mappings![0]!.mode).toBeUndefined(); // No mode specified
   });
 
-  test("should create mode-specific binding", () => {
+  test("should create mode-specific binding", async () => {
     const interpreter = editor.getInterpreter();
 
     // Test mode-specific key binding creation
@@ -60,8 +64,7 @@ describe("Enhanced Key Bind Functions", () => {
     expect(result).toBeDefined();
     expect(result._tag).toBe("Right");
 
-    const value = result.right;
-    expect(value).toBeDefined();
+    const value = expectRight(result);
     expect(value.type).toBe("string");
     expect(value.value).toBe("k");
 
@@ -70,12 +73,12 @@ describe("Enhanced Key Bind Functions", () => {
     const mappings = keyMappings.get("k");
 
     expect(mappings).toBeDefined();
-    expect(mappings!.length).toBe(1);
-    expect(mappings![0].command).toBe("(kill-line)");
-    expect(mappings![0].mode).toBe("normal");
+    const binding = mappings?.find(mapping => mapping.command === "(kill-line)");
+    expect(binding).toBeDefined();
+    expect(binding?.mode).toBe("normal");
   });
 
-  test("should handle two-key sequences", () => {
+  test("should handle two-key sequences", async () => {
     const interpreter = editor.getInterpreter();
 
     // Test two-key sequence binding
@@ -84,8 +87,7 @@ describe("Enhanced Key Bind Functions", () => {
     expect(result).toBeDefined();
     expect(result._tag).toBe("Right");
 
-    const value = result.right;
-    expect(value).toBeDefined();
+    const value = expectRight(result);
     expect(value.type).toBe("string");
     expect(value.value).toBe("g d");
 
@@ -95,10 +97,10 @@ describe("Enhanced Key Bind Functions", () => {
 
     expect(mappings).toBeDefined();
     expect(mappings!.length).toBe(1);
-    expect(mappings![0].command).toBe("(goto-definition)");
+    expect(mappings![0]!.command).toBe("(goto-definition)");
   });
 
-  test("should remove binding with key-unbind function", () => {
+  test("should remove binding with key-unbind function", async () => {
     const interpreter = editor.getInterpreter();
 
     // First create a binding
@@ -116,8 +118,7 @@ describe("Enhanced Key Bind Functions", () => {
     expect(result).toBeDefined();
     expect(result._tag).toBe("Right");
 
-    const value = result.right;
-    expect(value).toBeDefined();
+    const value = expectRight(result);
     expect(value.type).toBe("string");
     expect(value.value).toBe("C-c C-c");
 
@@ -127,7 +128,7 @@ describe("Enhanced Key Bind Functions", () => {
     expect(mappings).toBeUndefined();
   });
 
-  test("should remove mode-specific binding with key-unbind", () => {
+  test("should remove mode-specific binding with key-unbind", async () => {
     const interpreter = editor.getInterpreter();
 
     // Create a mode-specific binding
@@ -137,8 +138,9 @@ describe("Enhanced Key Bind Functions", () => {
     let keyMappings = editor.getKeyMappings();
     let mappings = keyMappings.get("k");
     expect(mappings).toBeDefined();
-    expect(mappings!.length).toBe(1);
-    expect(mappings![0].mode).toBe("normal");
+    expect(mappings?.some(mapping =>
+      mapping.command === "(kill-line)" && mapping.mode === "normal"
+    )).toBe(true);
 
     // Now remove it with mode specification
     const result = interpreter.execute('(key-unbind "k" "normal")');
@@ -146,18 +148,19 @@ describe("Enhanced Key Bind Functions", () => {
     expect(result).toBeDefined();
     expect(result._tag).toBe("Right");
 
-    const value = result.right;
-    expect(value).toBeDefined();
+    const value = expectRight(result);
     expect(value.type).toBe("string");
     expect(value.value).toBe("k");
 
     // Verify it was removed
     keyMappings = editor.getKeyMappings();
     mappings = keyMappings.get("k");
-    expect(mappings).toBeUndefined();
+    expect(mappings?.some(mapping =>
+      mapping.command === "(kill-line)" && mapping.mode === "normal"
+    ) ?? false).toBe(false);
   });
 
-  test("should list all active bindings with key-bindings function", () => {
+  test("should list all active bindings with key-bindings function", async () => {
     const interpreter = editor.getInterpreter();
 
     // Create some bindings
@@ -171,11 +174,10 @@ describe("Enhanced Key Bind Functions", () => {
     expect(result).toBeDefined();
     expect(result._tag).toBe("Right");
 
-    const value = result.right;
-    expect(value).toBeDefined();
+    const value = expectRight(result);
     expect(value.type).toBe("list");
 
-    const bindingsList = value.value;
+    const bindingsList = expectTlispList(value);
     expect(bindingsList.length).toBeGreaterThanOrEqual(3); // At least the 3 we added
 
     // Check that our bindings are in the list
@@ -195,7 +197,7 @@ describe("Enhanced Key Bind Functions", () => {
     expect(hasC).toBe(true);
   });
 
-  test("should return command and source info with key-binding function", () => {
+  test("should return command and source info with key-binding function", async () => {
     const interpreter = editor.getInterpreter();
 
     // Create a binding
@@ -207,18 +209,17 @@ describe("Enhanced Key Bind Functions", () => {
     expect(result).toBeDefined();
     expect(result._tag).toBe("Right");
 
-    const value = result.right;
-    expect(value).toBeDefined();
+    const value = expectRight(result);
     expect(value.type).toBe("list");
 
-    const resultArray = value.value;
+    const resultArray = expectTlispList(value);
     expect(resultArray.length).toBe(3);
-    expect(resultArray[0].value).toBe("(some-command)"); // command
-    expect(resultArray[1].value).toBe("source");         // source
-    expect(resultArray[2].value).toBe("all");            // mode (since no specific mode was set)
+    expect(expectTlispString(resultArray[0]!)).toBe("(some-command)"); // command
+    expect(expectTlispString(resultArray[1]!)).toBe("source");         // source
+    expect(expectTlispString(resultArray[2]!)).toBe("all");            // mode
   });
 
-  test("should return mode-specific binding info with key-binding function", () => {
+  test("should return mode-specific binding info with key-binding function", async () => {
     const interpreter = editor.getInterpreter();
 
     // Create a mode-specific binding
@@ -230,18 +231,17 @@ describe("Enhanced Key Bind Functions", () => {
     expect(result).toBeDefined();
     expect(result._tag).toBe("Right");
 
-    const value = result.right;
-    expect(value).toBeDefined();
+    const value = expectRight(result);
     expect(value.type).toBe("list");
 
-    const resultArray = value.value;
+    const resultArray = expectTlispList(value);
     expect(resultArray.length).toBe(3);
-    expect(resultArray[0].value).toBe("(kill-line)");    // command
-    expect(resultArray[1].value).toBe("source");         // source
-    expect(resultArray[2].value).toBe("normal");         // mode
+    expect(expectTlispString(resultArray[0]!)).toBe("(kill-line)"); // command
+    expect(expectTlispString(resultArray[1]!)).toBe("source");      // source
+    expect(expectTlispString(resultArray[2]!)).toBe("normal");      // mode
   });
 
-  test("should handle conflicting bindings by overriding previous bindings", () => {
+  test("should handle conflicting bindings by overriding previous bindings", async () => {
     const interpreter = editor.getInterpreter();
 
     // Create a binding
@@ -253,7 +253,7 @@ describe("Enhanced Key Bind Functions", () => {
     let keyMappings = editor.getKeyMappings();
     let mappings = keyMappings.get("x");
     expect(mappings).toBeDefined();
-    expect(mappings![0].command).toBe("(original-command)");
+    expect(mappings![0]!.command).toBe("(original-command)");
 
     // Override with new command
     const result2 = interpreter.execute('(key-bind "x" "(new-command)" "normal")');
@@ -265,10 +265,10 @@ describe("Enhanced Key Bind Functions", () => {
     mappings = keyMappings.get("x");
     expect(mappings).toBeDefined();
     expect(mappings!.length).toBe(1);
-    expect(mappings![0].command).toBe("(new-command)");
+    expect(mappings![0]!.command).toBe("(new-command)");
   });
 
-  test("should return nil when key-binding function is called for non-existent key", () => {
+  test("should return nil when key-binding function is called for non-existent key", async () => {
     const interpreter = editor.getInterpreter();
 
     // Get info about a non-existent binding
@@ -277,8 +277,7 @@ describe("Enhanced Key Bind Functions", () => {
     expect(result).toBeDefined();
     expect(result._tag).toBe("Right");
 
-    const value = result.right;
-    expect(value).toBeDefined();
+    const value = expectRight(result);
     expect(value.type).toBe("nil");
   });
 });

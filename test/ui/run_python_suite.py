@@ -4,7 +4,8 @@
 import os
 import sys
 import subprocess
-import time
+import shutil
+import uuid
 
 ROOT = os.path.dirname(os.path.abspath(__file__))
 TESTS_DIR = os.path.join(ROOT, "tests")
@@ -28,12 +29,37 @@ DAEMON_TESTS = [
 DAEMON_TMUX_TESTS = [
     "04_daemon_tmux_observability.py",
     "10_renderer_layout.py",
+    "14_vim_input.py",
+    "15_daily_driver_rendering.py",
 ]
+
+
+def cleanup_run(run_id: str) -> None:
+    """Clean only resources carrying this runner-generated test id."""
+    socket_path = os.path.join("/tmp/tmax-ui-tests", run_id, "server")
+    try:
+        subprocess.run(
+            [os.path.join(os.path.dirname(os.path.dirname(ROOT)), "bin", "tmaxclient"),
+             "--socket", socket_path, "--eval", "(editor-quit)"],
+            capture_output=True, text=True, timeout=10,
+        )
+    except (FileNotFoundError, subprocess.TimeoutExpired):
+        pass
+    try:
+        subprocess.run(
+            ["tmux", "kill-session", "-t", f"tmax-ui-{run_id}"],
+            capture_output=True, text=True, timeout=5,
+        )
+    except (FileNotFoundError, subprocess.TimeoutExpired):
+        pass
+    shutil.rmtree(os.path.join("/tmp/tmax-ui-tests", run_id), ignore_errors=True)
 
 
 def run_test(filepath: str, env: dict | None = None) -> tuple[bool, str]:
     """Run a single test file. Returns (passed, output)."""
     run_env = os.environ.copy()
+    run_id = f"{os.getpid()}-{uuid.uuid4().hex[:10]}"
+    run_env["TMAX_UI_RUN_ID"] = run_id
     if env:
         run_env.update(env)
 
@@ -56,37 +82,8 @@ def run_test(filepath: str, env: dict | None = None) -> tuple[bool, str]:
         return proc.returncode == 0, output
     except subprocess.TimeoutExpired:
         return False, "TIMEOUT after 120s"
-
-
-def stop_daemon():
-    """Stop any running tmax daemon."""
-    try:
-        subprocess.run(
-            ["bin/tmax", "--stop"],
-            capture_output=True, timeout=10,
-            cwd=os.path.dirname(ROOT),
-        )
-    except (FileNotFoundError, subprocess.TimeoutExpired):
-        pass
-
-
-def clean_tmux_window():
-    """Kill test-editor windows from the tmax tmux session."""
-    try:
-        result = subprocess.run(
-            ["tmux", "list-windows", "-t", "tmax", "-F", "#{window_index}:#{window_name}"],
-            capture_output=True, text=True, timeout=5,
-        )
-        if result.returncode == 0:
-            for line in result.stdout.splitlines():
-                parts = line.strip().split(":", 1)
-                if len(parts) == 2 and parts[1] == "test-editor":
-                    subprocess.run(
-                        ["tmux", "kill-window", "-t", f"tmax:{parts[0]}"],
-                        capture_output=True, timeout=5,
-                    )
-    except (FileNotFoundError, subprocess.TimeoutExpired):
-        pass
+    finally:
+        cleanup_run(run_id)
 
 
 def main():
@@ -117,8 +114,6 @@ def main():
                 lines = output.strip().splitlines()
                 for line in lines[-5:]:
                     print(f"       {line}")
-            stop_daemon()
-            time.sleep(0.5)
 
     if run_tmux:
         print("\n=== Daemon-Tmux Mode Tests ===\n")
@@ -139,9 +134,6 @@ def main():
                 lines = output.strip().splitlines()
                 for line in lines[-5:]:
                     print(f"       {line}")
-            stop_daemon()
-            clean_tmux_window()
-            time.sleep(0.5)
 
     print(f"\n{'='*40}")
     print(f"Total: {total}  Passed: {passed}  Failed: {len(failed_tests)}")

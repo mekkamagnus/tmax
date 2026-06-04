@@ -16,8 +16,8 @@ from .tlisp_escape import (
 
 
 def _is_daemon(config: HarnessConfig) -> bool:
-    """Check if running in any daemon mode."""
-    return config.mode.startswith("daemon")
+    """Check whether operations should use direct daemon API calls."""
+    return config.mode == "daemon"
 
 
 # ---------------------------------------------------------------------------
@@ -117,9 +117,14 @@ def type_text(config: HarnessConfig, window: str, text: str) -> Result[None, Har
 
 
 def delete_text(config: HarnessConfig, window: str, text: str) -> Result[None, HarnessError]:
-    """Delete text from buffer."""
+    """Delete text immediately before the cursor."""
     if _is_daemon(config):
-        r = client.eval_expr(config, buffer_delete(text))
+        count = len(text)
+        r = client.eval_expr(
+            config,
+            f"(progn (cursor-move (cursor-line) (- (cursor-column) {count})) "
+            f"{buffer_delete(count)})",
+        )
         time.sleep(config.operation_delay)
         return r.map(lambda _: None)
     return Err(HarnessError("delete_text not supported in tmux mode"))
@@ -307,7 +312,7 @@ def open_file(config: HarnessConfig, window: str, path: str) -> Result[None, Har
         try:
             import subprocess
             subprocess.run(
-                [config.client_cmd, path],
+                [config.client_cmd, "--socket", config.socket_path, path],
                 capture_output=True, text=True, timeout=5,
             )
             time.sleep(config.operation_delay)

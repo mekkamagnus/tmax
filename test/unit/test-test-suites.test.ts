@@ -13,11 +13,11 @@ describe("T-Lisp Test Suites (US-0.6.3)", () => {
   let mockTerminal: MockTerminal;
   let mockFileSystem: MockFileSystem;
 
-  beforeEach(() => {
+  beforeEach(async () => {
     mockTerminal = new MockTerminal();
     mockFileSystem = new MockFileSystem();
     editor = new Editor(mockTerminal, mockFileSystem);
-    editor.start();
+    await editor.start();
   });
 
   afterEach(() => {
@@ -30,7 +30,7 @@ describe("T-Lisp Test Suites (US-0.6.3)", () => {
   };
 
   describe("deftest-suite - basic suite definition", () => {
-    test("should define a test suite with description and tests", () => {
+    test("should define a test suite with description and tests", async () => {
       const code = `(deftest-suite "My Test Suite" (deftest test-one () (assert-true t)) (deftest test-two () (assert-equal 1 1)))`;
 
       const result = exec(code);
@@ -46,7 +46,7 @@ describe("T-Lisp Test Suites (US-0.6.3)", () => {
       expect(found).toBe(true);
     });
 
-    test("should return suite name when defined", () => {
+    test("should return suite name when defined", async () => {
       const code = `(deftest-suite "Sample Suite" (deftest t () (assert-true t)))`;
       const result = exec(code);
 
@@ -55,7 +55,7 @@ describe("T-Lisp Test Suites (US-0.6.3)", () => {
       expect(result.right.value).toBe("Sample Suite");
     });
 
-    test("should handle suite with no tests gracefully", () => {
+    test("should handle suite with no tests gracefully", async () => {
       const code = `(deftest-suite "Empty Suite")`;
       const result = exec(code);
 
@@ -68,7 +68,7 @@ describe("T-Lisp Test Suites (US-0.6.3)", () => {
   });
 
   describe("suite-setup - suite-level setup function", () => {
-    test("should define setup that runs once before all tests in suite", () => {
+    test("should define setup that runs once before all tests in suite", async () => {
       const code = `(deftest-suite "Suite With Setup" (suite-setup (defvar suite-setup-ran t)) (deftest test-one () (assert-equal suite-setup-ran t)) (deftest test-two () (assert-equal suite-setup-ran t)))`;
 
       const result = exec(code);
@@ -79,7 +79,7 @@ describe("T-Lisp Test Suites (US-0.6.3)", () => {
       expect(runResult._tag).toBe("Right");
     });
 
-    test("suite-setup should execute only once before all tests", () => {
+    test("suite-setup should execute only once before all tests", async () => {
       exec('(defvar setup-count 0)');
       exec('(deftest-suite "Count Setup" (suite-setup (set! setup-count (+ setup-count 1))) (deftest test-1 () (assert-true t)) (deftest test-2 () (assert-true t)) (deftest test-3 () (assert-true t)))');
       exec('(test-run-suite "Count Setup")');
@@ -92,7 +92,7 @@ describe("T-Lisp Test Suites (US-0.6.3)", () => {
   });
 
   describe("suite-teardown - suite-level teardown function", () => {
-    test("should define teardown that runs once after all tests in suite", () => {
+    test("should define teardown that runs once after all tests in suite", async () => {
       exec('(defvar teardown-ran nil)');
       exec('(deftest-suite "Suite With Teardown" (suite-teardown (set! teardown-ran t)) (deftest test-one () (assert-true t)) (deftest test-two () (assert-true t)))');
       exec('(test-run-suite "Suite With Teardown")');
@@ -102,7 +102,7 @@ describe("T-Lisp Test Suites (US-0.6.3)", () => {
       expect(result.right.value).toBe(true);
     });
 
-    test("suite-teardown should execute only once after all tests", () => {
+    test("suite-teardown should execute only once after all tests", async () => {
       exec('(defvar teardown-count 0)');
       exec('(deftest-suite "Count Teardown" (suite-teardown (set! teardown-count (+ teardown-count 1))) (deftest test-1 () (assert-true t)) (deftest test-2 () (assert-true t)))');
       exec('(test-run-suite "Count Teardown")');
@@ -114,7 +114,7 @@ describe("T-Lisp Test Suites (US-0.6.3)", () => {
   });
 
   describe("test-run-suite - running specific suites", () => {
-    test("should execute all tests in a suite", () => {
+    test("should execute all tests in a suite", async () => {
       const code = `(deftest-suite "Run Suite Test" (deftest test-a () (assert-true t)) (deftest test-b () (assert-equal 1 1)) (deftest test-c () (assert-false nil)))`;
 
       exec(code);
@@ -129,7 +129,7 @@ describe("T-Lisp Test Suites (US-0.6.3)", () => {
       expect(total.value).toBe(3);
     });
 
-    test("should return error when suite not found", () => {
+    test("should return error when suite not found", async () => {
       const result = exec('(test-run-suite "Nonexistent Suite")');
 
       expect(result._tag).toBe("Left");
@@ -137,7 +137,7 @@ describe("T-Lisp Test Suites (US-0.6.3)", () => {
       expect(result.left.message).toContain("not found");
     });
 
-    test("should handle failing tests in suite", () => {
+    test("should handle failing tests in suite", async () => {
       const code = `(deftest-suite "Suite With Failure" (deftest test-pass () (assert-true t)) (deftest test-fail () (assert-true nil)) (deftest test-pass-2 () (assert-true t)))`;
 
       exec(code);
@@ -152,7 +152,7 @@ describe("T-Lisp Test Suites (US-0.6.3)", () => {
   });
 
   describe("nested test suites", () => {
-    test("should support nested suite definitions", () => {
+    test("should support nested suite definitions", async () => {
       // Note: Nested suites with this syntax don't work well due to parsing limitations
       // For now, we just verify that defining multiple suites works
       exec('(deftest-suite "Parent Suite" (deftest test-parent () (assert-true t)))');
@@ -166,7 +166,7 @@ describe("T-Lisp Test Suites (US-0.6.3)", () => {
       expect(total.value).toBeGreaterThanOrEqual(1); // At least parent test
     });
 
-    test("running child suite should only execute child tests", () => {
+    test("running child suite should only execute child tests", async () => {
       const code = `(deftest-suite "Parent" (deftest test-p () (assert-true t)) (deftest-suite "Child" (deftest test-c () (assert-true t))))`;
 
       exec(code);
@@ -180,7 +180,7 @@ describe("T-Lisp Test Suites (US-0.6.3)", () => {
   });
 
   describe("suite descriptions", () => {
-    test("suite descriptions should be visible when listing suites", () => {
+    test("suite descriptions should be visible when listing suites", async () => {
       const code = `(deftest-suite "Suite One" "This is the first test suite" (deftest test-1 () (assert-true t))) (deftest-suite "Suite Two" "This is the second test suite" (deftest test-2 () (assert-true t)))`;
 
       exec(code);
@@ -195,7 +195,7 @@ describe("T-Lisp Test Suites (US-0.6.3)", () => {
   });
 
   describe("combined setup/teardown scenarios", () => {
-    test("suite-setup should run before test setup", () => {
+    test("suite-setup should run before test setup", async () => {
       // Simplified test - just verify suite-setup runs
       const code = `(deftest-suite "Order Test" (suite-setup (defvar x 1)) (deftest test-1 () (assert-true t)))`;
 
@@ -204,7 +204,7 @@ describe("T-Lisp Test Suites (US-0.6.3)", () => {
       expect(result._tag).toBe("Right");
     });
 
-    test("suite-teardown should run after test teardown", () => {
+    test("suite-teardown should run after test teardown", async () => {
       // Simplified test - just verify suite-teardown runs
       const code = `(deftest-suite "Teardown Order" (suite-teardown (defvar y 1)) (deftest test-1 () (assert-true t)))`;
 
@@ -215,7 +215,7 @@ describe("T-Lisp Test Suites (US-0.6.3)", () => {
   });
 
   describe("edge cases", () => {
-    test("should handle suite with only setup/teardown (no tests)", () => {
+    test("should handle suite with only setup/teardown (no tests)", async () => {
       const code = `(deftest-suite "Empty Suite" (suite-setup (defvar x 1)) (suite-teardown (defvar y 2)))`;
 
       exec(code);
@@ -226,7 +226,7 @@ describe("T-Lisp Test Suites (US-0.6.3)", () => {
       expect(total.value).toBe(0);
     });
 
-    test("should handle suite with setup failure", () => {
+    test("should handle suite with setup failure", async () => {
       // Skip this test for now - error handling in suites needs more work
       // The error builtin doesn't exist yet in T-Lisp
       expect(true).toBe(true);
@@ -234,7 +234,7 @@ describe("T-Lisp Test Suites (US-0.6.3)", () => {
   });
 
   describe("integration with existing test framework", () => {
-    test("suite tests should be discoverable by test-run-all", () => {
+    test("suite tests should be discoverable by test-run-all", async () => {
       // For now, just verify that suite tests can be run
       // Full integration with test-run-all requires updating test-run-all
       const code = `(deftest-suite "Integration Suite" (deftest suite-test-1 () (assert-true t)) (deftest suite-test-2 () (assert-true t)))`;
@@ -247,7 +247,7 @@ describe("T-Lisp Test Suites (US-0.6.3)", () => {
       expect(total.value).toBe(2);
     });
 
-    test("suite tests should be runnable individually via test-run", () => {
+    test("suite tests should be runnable individually via test-run", async () => {
       const code = `(deftest-suite "Individual Test" (deftest suite-individual () (assert-true t)))`;
 
       exec(code);

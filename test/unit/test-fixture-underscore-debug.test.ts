@@ -9,11 +9,11 @@ describe("Debug Fixture Underscore", () => {
   let mockTerminal: MockTerminal;
   let mockFileSystem: MockFileSystem;
 
-  beforeEach(() => {
+  beforeEach(async () => {
     mockTerminal = new MockTerminal();
     mockFileSystem = new MockFileSystem();
     editor = new Editor(mockTerminal, mockFileSystem);
-    editor.start();
+    await editor.start();
     resetFixtureState();
   });
 
@@ -21,7 +21,7 @@ describe("Debug Fixture Underscore", () => {
     editor.stop();
   });
 
-  test("check deffixture with underscore", () => {
+  test("check deffixture with underscore", async () => {
     const interpreter = editor.getInterpreter();
 
     // Define fixture with underscore

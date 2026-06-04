@@ -35,10 +35,10 @@ def test_renderer_layout() -> tuple[AssertionResult, ...]:
         return (AssertionResult(True, "Skipped: not daemon-tmux mode"),)
 
     content = "Renderer test line 1\nLine 2 content\nLine 3 here"
-    test_file = f"{state.config.project_root}/renderer-test.txt"
+    test_file = f"{state.config.test_dir}/renderer-test.txt"
     create_test_file(test_file, content)
 
-    start_result = start(state, "renderer-test.txt")
+    start_result = start(state, test_file)
     if start_result.is_err():
         print(f"ERROR: {start_result.unwrap_err().message}")
         delete_test_file(test_file)

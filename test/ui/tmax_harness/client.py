@@ -14,7 +14,7 @@ from .types import (
 
 def _run_client(config: HarnessConfig, *args: str) -> Result[str, HarnessError]:
     """Run tmaxclient with given args, return Result of stdout."""
-    cmd = [config.client_cmd, *args]
+    cmd = [config.client_cmd, "--socket", config.socket_path, *args]
     try:
         proc = subprocess.run(
             cmd, capture_output=True, text=True, timeout=10,
@@ -25,7 +25,7 @@ def _run_client(config: HarnessConfig, *args: str) -> Result[str, HarnessError]:
                 f"tmaxclient exited {proc.returncode}",
                 Some(stderr) if stderr else Nothing,
             ))
-        return Ok(proc.stdout.strip())
+        return Ok(proc.stdout.rstrip("\r\n"))
     except FileNotFoundError:
         return Err(HarnessError(
             f"tmaxclient not found: {config.client_cmd}",
@@ -43,7 +43,7 @@ def ping(config: HarnessConfig) -> bool:
     """Check if the daemon is reachable."""
     try:
         proc = subprocess.run(
-            [config.client_cmd, "--ping"],
+            [config.client_cmd, "--socket", config.socket_path, "--ping"],
             capture_output=True, text=True, timeout=5,
         )
         return proc.returncode == 0

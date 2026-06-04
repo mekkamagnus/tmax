@@ -6,18 +6,18 @@ import { MockFileSystem } from "../mocks/filesystem.ts";
 describe("Debug assert-type error", () => {
   let editor: Editor;
 
-  beforeEach(() => {
+  beforeEach(async () => {
     const mockTerminal = new MockTerminal();
     const mockFileSystem = new MockFileSystem();
     editor = new Editor(mockTerminal, mockFileSystem);
-    editor.start();
+    await editor.start();
   });
 
   afterEach(() => {
     editor.stop();
   });
 
-  test("what error does assert-type give", () => {
+  test("what error does assert-type give", async () => {
     const interpreter = editor.getInterpreter();
 
     // Try the assertion directly

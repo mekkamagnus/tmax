@@ -85,13 +85,18 @@ export class MockFileSystem implements FileSystem {
    * Create directory
    * @param path - Directory path
    */
-  async mkdir(path: string): Promise<void> {
+  async createDir(path: string): Promise<void> {
     this.stats.set(path, {
       isFile: false,
       isDirectory: true,
       size: 0,
       modified: new Date(),
     });
+  }
+
+  /** Backward-compatible alias for older tests. */
+  async mkdir(path: string): Promise<void> {
+    await this.createDir(path);
   }
 
   /**
@@ -107,8 +112,8 @@ export class MockFileSystem implements FileSystem {
     for (const [filePath] of this.files) {
       if (filePath.startsWith(path + "/")) {
         const relativePath = filePath.substring(path.length + 1);
-        const firstSegment = relativePath.includes("/") ? relativePath.split("/")[0] : relativePath;
-        if (!seen.has(firstSegment)) {
+        const firstSegment = relativePath.includes("/") ? relativePath.split("/")[0] ?? "" : relativePath;
+        if (firstSegment && !seen.has(firstSegment)) {
           entries.push(firstSegment);
           seen.add(firstSegment);
         }
@@ -119,7 +124,7 @@ export class MockFileSystem implements FileSystem {
     for (const [dirPath, stats] of this.stats) {
       if (stats.isDirectory && dirPath.startsWith(path + "/")) {
         const relativePath = dirPath.substring(path.length + 1);
-        const firstSegment = relativePath.includes("/") ? relativePath.split("/")[0] : relativePath;
+        const firstSegment = relativePath.includes("/") ? relativePath.split("/")[0] ?? "" : relativePath;
         if (!seen.has(firstSegment) && firstSegment) {
           entries.push(firstSegment);
           seen.add(firstSegment);

@@ -4,6 +4,7 @@
  */
 
 import { describe, test, expect, beforeEach } from "bun:test";
+import { expectRight } from "../helpers/editor-fixture.ts";
 import { FunctionalTextBufferImpl } from "../../src/core/buffer.ts";
 import type { FunctionalTextBuffer } from "../../src/core/types.ts";
 import { Either } from "../../src/utils/task-either.ts";
@@ -34,7 +35,7 @@ function getBufferContent(buffer: FunctionalTextBuffer): string {
   if (Either.isLeft(result)) {
     throw new Error(`Failed to get buffer content: ${result.left}`);
   }
-  return result.right;
+  return expectRight(result);
 }
 
 describe("Text Objects - US-1.8.1", () => {
@@ -49,28 +50,28 @@ describe("Text Objects - US-1.8.1", () => {
       const result = deleteInnerWord(buffer, 0, 4);
 
       expect(Either.isRight(result)).toBe(true);
-      expect(getBufferContent(result.right)).toBe("The  brown fox jumps");
+      expect(getBufferContent(expectRight(result))).toBe("The  brown fox jumps");
     });
 
     test("should delete word leaving trailing space", () => {
       const buffer = createBuffer("word1 word2 word3");
       const result = deleteInnerWord(buffer, 0, 3);
 
-      expect(getBufferContent(result.right)).toBe(" word2 word3");
+      expect(getBufferContent(expectRight(result))).toBe(" word2 word3");
     });
 
     test("should handle single word", () => {
       const buffer = createBuffer("word");
       const result = deleteInnerWord(buffer, 0, 2);
 
-      expect(getBufferContent(result.right)).toBe("");
+      expect(getBufferContent(expectRight(result))).toBe("");
     });
 
     test("should handle punctuation", () => {
       const buffer = createBuffer("hello, world");
       const result = deleteInnerWord(buffer, 0, 3);
 
-      expect(getBufferContent(result.right)).toBe(", world");
+      expect(getBufferContent(expectRight(result))).toBe(", world");
     });
 
     test("should store deleted text in register", () => {
@@ -86,14 +87,14 @@ describe("Text Objects - US-1.8.1", () => {
       const buffer = createBuffer("word1 word2 word3");
       const result = deleteAroundWord(buffer, 0, 3);
 
-      expect(getBufferContent(result.right)).toBe("word2 word3");
+      expect(getBufferContent(expectRight(result))).toBe("word2 word3");
     });
 
     test("should delete word at end of line without trailing space", () => {
       const buffer = createBuffer("word1 word2");
       const result = deleteAroundWord(buffer, 0, 8);
 
-      expect(getBufferContent(result.right)).toBe("word1 ");
+      expect(getBufferContent(expectRight(result))).toBe("word1 ");
     });
 
     test("should handle punctuation with space", () => {
@@ -101,7 +102,7 @@ describe("Text Objects - US-1.8.1", () => {
       const result = deleteAroundWord(buffer, 0, 3);
 
       // Word stops at punctuation, so only "hello" is deleted (comma is not part of word)
-      expect(getBufferContent(result.right)).toBe(", world");
+      expect(getBufferContent(expectRight(result))).toBe(", world");
     });
 
     test("should store deleted text in register", () => {
@@ -118,7 +119,7 @@ describe("Text Objects - US-1.8.1", () => {
       const result = changeInnerSingleQuote(buffer, 0, 6);
 
       expect(Either.isRight(result)).toBe(true);
-      expect(getBufferContent(result.right)).toBe("say '' world");
+      expect(getBufferContent(expectRight(result))).toBe("say '' world");
     });
 
     test("should store deleted text in register", () => {
@@ -134,7 +135,7 @@ describe("Text Objects - US-1.8.1", () => {
       const buffer = createBuffer("say 'hello' world");
       const result = changeAroundSingleQuote(buffer, 0, 6);
 
-      expect(getBufferContent(result.right)).toBe("say  world");
+      expect(getBufferContent(expectRight(result))).toBe("say  world");
     });
 
     test("should store deleted text including quotes in register", () => {
@@ -150,7 +151,7 @@ describe("Text Objects - US-1.8.1", () => {
       const buffer = createBuffer('say "hello" world');
       const result = changeInnerDoubleQuote(buffer, 0, 6);
 
-      expect(getBufferContent(result.right)).toBe('say "" world');
+      expect(getBufferContent(expectRight(result))).toBe('say "" world');
     });
 
     test("should store deleted text in register", () => {
@@ -166,21 +167,21 @@ describe("Text Objects - US-1.8.1", () => {
       const buffer = createBuffer("(hello world)");
       const result = deleteInnerParen(buffer, 0, 3);
 
-      expect(getBufferContent(result.right)).toBe("()");
+      expect(getBufferContent(expectRight(result))).toBe("()");
     });
 
     test("should handle nested parentheses", () => {
       const buffer = createBuffer("((nested))");
       const result = deleteInnerParen(buffer, 0, 3);
 
-      expect(getBufferContent(result.right)).toBe("(())");
+      expect(getBufferContent(expectRight(result))).toBe("(())");
     });
 
     test("should handle parentheses in middle of text", () => {
       const buffer = createBuffer("function(arg1, arg2) call");
       const result = deleteInnerParen(buffer, 0, 10);
 
-      expect(getBufferContent(result.right)).toBe("function() call");
+      expect(getBufferContent(expectRight(result))).toBe("function() call");
     });
 
     test("should store deleted text in register", () => {
@@ -196,7 +197,7 @@ describe("Text Objects - US-1.8.1", () => {
       const buffer = createBuffer("(hello)");
       const result = changeInnerParen(buffer, 0, 3);
 
-      expect(getBufferContent(result.right)).toBe("()");
+      expect(getBufferContent(expectRight(result))).toBe("()");
     });
 
     test("should store deleted text in register", () => {
@@ -212,7 +213,7 @@ describe("Text Objects - US-1.8.1", () => {
       const buffer = createBuffer("{key: value}");
       const result = changeInnerBrace(buffer, 0, 3);
 
-      expect(getBufferContent(result.right)).toBe("{}");
+      expect(getBufferContent(expectRight(result))).toBe("{}");
     });
 
     test("should handle nested braces", () => {
@@ -220,7 +221,7 @@ describe("Text Objects - US-1.8.1", () => {
       const result = changeInnerBrace(buffer, 0, 3);
 
       // Deletes content inside outermost pair of braces
-      expect(getBufferContent(result.right)).toBe("{{}}");
+      expect(getBufferContent(expectRight(result))).toBe("{{}}");
     });
 
     test("should store deleted text in register", () => {
@@ -236,7 +237,7 @@ describe("Text Objects - US-1.8.1", () => {
       const buffer = createBuffer("{hello}");
       const result = deleteInnerBrace(buffer, 0, 2);
 
-      expect(getBufferContent(result.right)).toBe("{}");
+      expect(getBufferContent(expectRight(result))).toBe("{}");
     });
 
     test("should store deleted text in register", () => {
@@ -252,7 +253,7 @@ describe("Text Objects - US-1.8.1", () => {
       const buffer = createBuffer("array[index]");
       const result = deleteInnerBracket(buffer, 0, 7);
 
-      expect(getBufferContent(result.right)).toBe("array[]");
+      expect(getBufferContent(expectRight(result))).toBe("array[]");
     });
 
     test("should store deleted text in register", () => {
@@ -268,7 +269,7 @@ describe("Text Objects - US-1.8.1", () => {
       const buffer = createBuffer("vector<item>");
       const result = deleteInnerAngle(buffer, 0, 8);
 
-      expect(getBufferContent(result.right)).toBe("vector<>");
+      expect(getBufferContent(expectRight(result))).toBe("vector<>");
     });
 
     test("should store deleted text in register", () => {
@@ -284,21 +285,21 @@ describe("Text Objects - US-1.8.1", () => {
       const buffer = createBuffer("<div>content</div>");
       const result = deleteInnerTag(buffer, 0, 6);
 
-      expect(getBufferContent(result.right)).toBe("<div></div>");
+      expect(getBufferContent(expectRight(result))).toBe("<div></div>");
     });
 
     test("should handle nested tags", () => {
       const buffer = createBuffer("<outer><inner>text</inner></outer>");
       const result = deleteInnerTag(buffer, 0, 15);
 
-      expect(getBufferContent(result.right)).toBe("<outer><inner></inner></outer>");
+      expect(getBufferContent(expectRight(result))).toBe("<outer><inner></inner></outer>");
     });
 
     test("should handle self-closing tags", () => {
       const buffer = createBuffer("<img src='test.jpg' />");
       const result = deleteInnerTag(buffer, 0, 6);
 
-      expect(getBufferContent(result.right)).toBe("<img src='test.jpg' />");
+      expect(getBufferContent(expectRight(result))).toBe("<img src='test.jpg' />");
     });
 
     test("should store deleted text in register", () => {
@@ -322,14 +323,14 @@ describe("Text Objects - US-1.8.1", () => {
       const result = deleteInnerWord(buffer, 0, 5);
 
       // Cursor on whitespace finds next word
-      expect(getBufferContent(result.right)).toBe("word1   ");
+      expect(getBufferContent(expectRight(result))).toBe("word1   ");
     });
 
     test("should handle multiple spaces for around word", () => {
       const buffer = createBuffer("word1    word2");
       const result = deleteAroundWord(buffer, 0, 3);
 
-      expect(getBufferContent(result.right)).toBe("word2");
+      expect(getBufferContent(expectRight(result))).toBe("word2");
     });
 
     test("should handle unmatched quotes", () => {

@@ -1,36 +1,39 @@
 # tmax UI Test Suite
 
-Python-based functional test suite for tmax editor. Tests run in `daemon` mode by default (fast, no tmux needed) with `daemon-tmux` mode reserved for TUI renderer tests.
+Python-based functional suite with separate daemon API integration and real-key
+renderer E2E categories. Every scenario gets a unique daemon socket, tmux
+session, and temporary directory.
 
 ## Quick Start
 
 ```bash
 # Run the full suite (daemon + daemon-tmux)
-cd test/ui
-uv run python run_python_suite.py
+bun run test:ui
 
 # Run daemon-only tests
-uv run python run_python_suite.py daemon
+bun run test:daemon
 
 # Run daemon-tmux tests only
-uv run python run_python_suite.py daemon-tmux
+bun run test:ui:renderer
 
 # Run a single test
 uv run python tests/01_startup.py
 TMAX_UI_TEST_MODE=daemon-tmux uv run python tests/10_renderer_layout.py
 
-# Run pure helper unit tests
-uv run python tests/test_harness_helpers.py
+# Run pure harness helper tests
+bun run test:ui:helpers
 ```
 
 ## Test Modes
 
 | Mode | Used By | Requires | Purpose |
 |------|---------|----------|---------|
-| `daemon` | Tests 01-03, 05-09, 11-12 | Bun | Editor logic via daemon/client |
-| `daemon-tmux` | Tests 04, 10 | Bun + tmux session | TUI renderer surface |
+| `daemon` | Tests 01-03, 05-09, 11-13 | Bun | JSON-RPC, T-Lisp commands, editor state |
+| `daemon-tmux` | Tests 04, 10, 14-15 | Bun + tmux | Real keys and captured TUI output |
 
-Default mode is `daemon`. Override with `TMAX_UI_TEST_MODE=daemon-tmux`.
+Daemon tests may use direct T-Lisp evaluation. Renderer tests must send real
+keys and assert captured output. A query failure is a failure; unavailable
+renderer assertions are reported as skips, never passes.
 
 ## Test Files
 
@@ -53,11 +56,13 @@ Default mode is `daemon`. Override with `TMAX_UI_TEST_MODE=daemon-tmux`.
 |------|----------|
 | `04_daemon_tmux_observability.py` | TUI readiness, render count, frame sync |
 | `10_renderer_layout.py` | Screen fill, status line, render advancement |
+| `14_vim_input.py` | Real-key insert editing, controls, motions, and operators |
+| `15_daily_driver_rendering.py` | Splits, tabs, focus, resizing, relative line numbers |
 
 ### Helper Tests
 | File | Coverage |
 |------|----------|
-| `test_harness_helpers.py` | T-Lisp escaping, expression building, value parsing |
+| `test_harness_helpers.py` | Escaping, parsing, isolation, and assertion semantics |
 
 ## Harness Architecture
 
@@ -72,14 +77,15 @@ The harness follows strict functional programming:
 ## Adding New Tests
 
 1. Create `test/ui/tests/NN_name.py`
-2. Follow the pattern: `init() → start() → assertions → cleanup()`
-3. Use daemon operations (`client.eval_expr`, `operations.*`) for editor control
-4. Use `assert_*` functions for verification
+2. Wrap `start()` and assertions in `try/finally` with `cleanup(state)`.
+3. Use daemon operations only in daemon integration tests.
+4. Use real input operations and renderer assertions in daemon-tmux tests.
 5. Add to `DAEMON_TESTS` or `DAEMON_TMUX_TESTS` in `run_python_suite.py`
 
 ## Legacy Bash Tests
 
-The bash test harness in `test/ui/lib/` is deprecated. Do not add new bash tests. Remaining bash tests in `tests/*.test.sh` are legacy reference only.
+The Bash test harness in `test/ui/lib/` is deprecated and is not authoritative.
+Do not add or use Bash tests as release validation.
 
 ## Harness Modules
 
@@ -130,5 +136,8 @@ test/ui/
     ├── 10_renderer_layout.py
     ├── 11_search_replace.py
     ├── 12_daily_drivers.py
+    ├── 13_modes.py
+    ├── 14_vim_input.py
+    ├── 15_daily_driver_rendering.py
     └── test_harness_helpers.py
 ```

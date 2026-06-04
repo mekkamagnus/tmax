@@ -14,7 +14,7 @@ def translate_key(key: str) -> str:
         "Escape": "Escape",
         "Enter": "Enter",
         "Space": "Space",
-        "Backspace": "Backspace",
+        "Backspace": "BSpace",
         "Tab": "Tab",
         "C-[": "Escape",
         "C-m": "Enter",
@@ -38,7 +38,11 @@ def _send_raw(target: str, keys: list[str], literal: bool = False) -> Result[Non
         cmd.append("-l")
     cmd.extend(["-t", target, *keys])
     try:
-        subprocess.run(cmd, capture_output=True, text=True, timeout=5)
+        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=5)
+        if proc.returncode != 0:
+            return Err(HarnessError(
+                f"send-keys failed: {proc.stderr.strip() or proc.stdout.strip()}",
+            ))
         return Ok(None)
     except (subprocess.TimeoutExpired, FileNotFoundError) as e:
         return Err(HarnessError(f"send-keys failed: {e}"))
@@ -49,8 +53,8 @@ def send_key(config: HarnessConfig, window: str, key: str) -> Result[None, Harne
     target = _target(config, window)
     translated = translate_key(key)
     # Use literal mode for regular characters, non-literal for special keys
-    special_keys = {"Escape", "Enter", "Space", "Backspace", "Tab",
-                    "C-f", "C-b", "C-d", "C-u", "C-r", "C-m"}
+    special_keys = {"Escape", "Enter", "Space", "BSpace", "Tab",
+        "C-f", "C-b", "C-d", "C-u", "C-r", "C-m", "C-w", "C-v"}
     if translated in special_keys:
         result = _send_raw(target, [translated])
     else:

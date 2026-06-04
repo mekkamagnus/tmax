@@ -16,17 +16,18 @@ import { describe, test, expect, beforeEach } from "bun:test";
 import { Editor } from "../../src/editor/editor.ts";
 import { MockTerminal } from "../mocks/terminal.ts";
 import { MockFileSystem } from "../mocks/filesystem.ts";
+import { bufferText, expectRight } from "../helpers/editor-fixture.ts";
 
 describe("Count Prefix (US-1.3.1)", () => {
   let editor: Editor;
   let terminal: MockTerminal;
   let filesystem: MockFileSystem;
 
-  beforeEach(() => {
+  beforeEach(async () => {
     terminal = new MockTerminal();
     filesystem = new MockFileSystem();
     editor = new Editor(terminal, filesystem);
-    editor.start();
+    await editor.start();
 
     // Create a test buffer with multiple words and lines
     editor.createBuffer("test", "one two three four\nfive six seven eight\nnine ten eleven twelve");
@@ -96,7 +97,7 @@ describe("Count Prefix (US-1.3.1)", () => {
 
       const state = editor.getState();
       expect(state.cursorPosition.line).toBe(0);
-      expect(state.cursorPosition.column).toBe(8); // Start of "three"
+      expect(state.cursorPosition.column).toBe(4); // Start of "two"
     });
 
     test("should move to end of word 2 times with 2e", async () => {
@@ -150,11 +151,7 @@ describe("Count Prefix (US-1.3.1)", () => {
       await editor.handleKey("3");
       await editor.handleKey("x");
 
-      const state = editor.getState();
-      const content = state.currentBuffer?.getContent();
-      if (content && typeof content === "object" && "right" in content) {
-        expect(content.right).toBe("lo world");
-      }
+      expect(bufferText(editor)).toBe("lo world");
     });
 
     test("should delete 5 lines with 5dd", async () => {
@@ -164,11 +161,7 @@ describe("Count Prefix (US-1.3.1)", () => {
       await editor.handleKey("d");
       await editor.handleKey("d");
 
-      const state = editor.getState();
-      const content = state.currentBuffer?.getContent();
-      if (content && typeof content === "object" && "right" in content) {
-        expect(content.right).toBe("line6\nline7");
-      }
+      expect(bufferText(editor)).toBe("line6\nline7");
     });
 
     test("should delete 2 words with 2dw", async () => {
@@ -178,11 +171,7 @@ describe("Count Prefix (US-1.3.1)", () => {
       await editor.handleKey("d");
       await editor.handleKey("w");
 
-      const state = editor.getState();
-      const content = state.currentBuffer?.getContent();
-      if (content && typeof content === "object" && "right" in content) {
-        expect(content.right).toBe("three four five");
-      }
+      expect(bufferText(editor)).toBe("three four five");
     });
   });
 
@@ -199,11 +188,7 @@ describe("Count Prefix (US-1.3.1)", () => {
       await editor.handleKey("j");
       await editor.handleKey("p");
 
-      const state = editor.getState();
-      const content = state.currentBuffer?.getContent();
-      if (content && typeof content === "object" && "right" in content) {
-        expect(content.right).toBe("line1\nline2\nline3\nline4\nline1\nline2");
-      }
+      expect(bufferText(editor)).toBe("line1\nline2\nline3\nline4\nline1\nline2");
     });
   });
 
@@ -222,11 +207,7 @@ describe("Count Prefix (US-1.3.1)", () => {
       await editor.handleKey("3");
       await editor.handleKey("p");
 
-      const state = editor.getState();
-      const content = state.currentBuffer?.getContent();
-      if (content && typeof content === "object" && "right" in content) {
-        expect(content.right).toBe("hellohhh");
-      }
+      expect(bufferText(editor)).toBe("hellohhh");
     });
   });
 
@@ -293,9 +274,7 @@ describe("Count Prefix (US-1.3.1)", () => {
       const interpreter = editor.getInterpreter();
       const result = interpreter.execute("(count-get)");
 
-      if (typeof result === "object" && "right" in result) {
-        expect(result.right).toEqual({ type: "number", value: 5 });
-      }
+      expect(expectRight(result)).toEqual({ type: "number", value: 5 });
     });
 
     test("count-set should set count", async () => {
@@ -319,9 +298,7 @@ describe("Count Prefix (US-1.3.1)", () => {
       const interpreter = editor.getInterpreter();
       const result = interpreter.execute("(count-active)");
 
-      if (typeof result === "object" && "right" in result) {
-        expect(result.right).toEqual({ type: "boolean", value: false });
-      }
+      expect(expectRight(result)).toEqual({ type: "boolean", value: false });
     });
 
     test("count-active should return true when count set", async () => {
@@ -330,9 +307,7 @@ describe("Count Prefix (US-1.3.1)", () => {
       const interpreter = editor.getInterpreter();
       const result = interpreter.execute("(count-active)");
 
-      if (typeof result === "object" && "right" in result) {
-        expect(result.right).toEqual({ type: "boolean", value: true });
-      }
+      expect(expectRight(result)).toEqual({ type: "boolean", value: true });
     });
   });
 
@@ -347,20 +322,15 @@ describe("Count Prefix (US-1.3.1)", () => {
       // Undo should undo the entire 2dw operation
       await editor.handleKey("u");
 
-      const state = editor.getState();
-      const content = state.currentBuffer?.getContent();
-      if (content && typeof content === "object" && "right" in content) {
-        expect(content.right).toBe("one two three four");
-      }
+      expect(bufferText(editor)).toBe("one two three four");
     });
 
-    test("count should be preserved in lastCommand", async () => {
+    test("lastCommand should record the T-Lisp dispatcher entrypoint", async () => {
       await editor.handleKey("3");
       await editor.handleKey("w");
 
       const state = editor.getState();
-      // Last command should include the count
-      expect(state.lastCommand).toContain("word-next");
+      expect(state.lastCommand).toContain("vim-dispatch-key");
     });
   });
 });

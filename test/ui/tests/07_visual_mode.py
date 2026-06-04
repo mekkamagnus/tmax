@@ -28,10 +28,10 @@ def test_visual_mode() -> tuple[AssertionResult, ...]:
     state = state_result.unwrap()
 
     content = "one two three\nfour five six"
-    test_file = f"{state.config.project_root}/visual-test.txt"
+    test_file = f"{state.config.test_dir}/visual-test.txt"
     create_test_file(test_file, content)
 
-    start_result = start(state, "visual-test.txt")
+    start_result = start(state, test_file)
     if start_result.is_err():
         print(f"ERROR: {start_result.unwrap_err().message}")
         delete_test_file(test_file)

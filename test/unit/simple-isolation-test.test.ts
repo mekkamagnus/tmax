@@ -9,11 +9,11 @@ import { MockTerminal } from "../mocks/terminal.ts";
 import { MockFileSystem } from "../mocks/filesystem.ts";
 
 describe("Simple Isolation Test", () => {
-  test("debug defvar in test environment", () => {
+  test("debug defvar in test environment", async () => {
     const mockTerminal = new MockTerminal();
     const mockFileSystem = new MockFileSystem();
     const editor = new Editor(mockTerminal, mockFileSystem);
-    editor.start();
+    await editor.start();
 
     const interpreter = editor.getInterpreter();
 

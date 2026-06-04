@@ -29,10 +29,10 @@ def test_command_mode() -> tuple[AssertionResult, ...]:
         return (AssertionResult(False, "Harness init failed"),)
     state = state_result.unwrap()
 
-    test_file = f"{state.config.project_root}/cmd-test.txt"
+    test_file = f"{state.config.test_dir}/cmd-test.txt"
     create_test_file(test_file, "hello world")
 
-    start_result = start(state, "cmd-test.txt")
+    start_result = start(state, test_file)
     if start_result.is_err():
         print(f"ERROR: {start_result.unwrap_err().message}")
         delete_test_file(test_file)

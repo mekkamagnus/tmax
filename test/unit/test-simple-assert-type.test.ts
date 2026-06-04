@@ -6,18 +6,18 @@ import { MockFileSystem } from "../mocks/filesystem.ts";
 describe("Simple assert-type", () => {
   let editor: Editor;
 
-  beforeEach(() => {
+  beforeEach(async () => {
     const mockTerminal = new MockTerminal();
     const mockFileSystem = new MockFileSystem();
     editor = new Editor(mockTerminal, mockFileSystem);
-    editor.start();
+    await editor.start();
   });
 
   afterEach(() => {
     editor.stop();
   });
 
-  test("assert-type with literal number", () => {
+  test("assert-type with literal number", async () => {
     const interpreter = editor.getInterpreter();
 
     interpreter.execute('(deftest test-literal () (assert-type 42 number))');
@@ -25,7 +25,7 @@ describe("Simple assert-type", () => {
     console.log("Literal result:", result);
   });
 
-  test("assert-type with variable", () => {
+  test("assert-type with variable", async () => {
     const interpreter = editor.getInterpreter();
 
     interpreter.execute('(deftest test-var () (defvar x 42) (assert-type x number))');

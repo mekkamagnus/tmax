@@ -29,13 +29,13 @@ def test_buffers_files() -> tuple[AssertionResult, ...]:
     state = state_result.unwrap()
 
     # Create test files
-    file_a = f"{state.config.project_root}/buf-a.txt"
-    file_b = f"{state.config.project_root}/buf-b.txt"
+    file_a = f"{state.config.test_dir}/buf-a.txt"
+    file_b = f"{state.config.test_dir}/buf-b.txt"
     create_test_file(file_a, "content A")
     create_test_file(file_b, "content B")
 
     # Start with file A
-    start_result = start(state, "buf-a.txt")
+    start_result = start(state, file_a)
     if start_result.is_err():
         print(f"ERROR: {start_result.unwrap_err().message}")
         delete_test_file(file_a)
@@ -78,7 +78,7 @@ def test_buffers_files() -> tuple[AssertionResult, ...]:
     results.append(assert_file_contains(file_b, "content B", "File B preserved after save"))
 
     # Test creating a new file
-    new_file = f"{state.config.project_root}/new-file.txt"
+    new_file = f"{state.config.test_dir}/new-file.txt"
     open_file(state.config, window, new_file)
     time.sleep(0.5)
     type_text(state.config, window, "brand new")
@@ -88,7 +88,7 @@ def test_buffers_files() -> tuple[AssertionResult, ...]:
     results.append(assert_file_contains(new_file, "brand new", "New file should have inserted text"))
 
     # Test file with spaces in name
-    space_file = f"{state.config.project_root}/file with spaces.txt"
+    space_file = f"{state.config.test_dir}/file with spaces.txt"
     create_test_file(space_file, "spaced content")
     open_file(state.config, window, space_file)
     time.sleep(0.5)

@@ -8,6 +8,7 @@ import { Editor } from "../../src/editor/editor.ts";
 import { MockTerminal } from "../mocks/terminal.ts";
 import { MockFileSystem } from "../mocks/filesystem.ts";
 import { Either } from "../../src/utils/task-either.ts";
+import { bufferText } from "../helpers/editor-fixture.ts";
 
 describe("Editor Implementation", () => {
   let terminal: MockTerminal;
@@ -91,11 +92,7 @@ describe("Editor Implementation", () => {
     interpreter.execute("(cursor-move 0 5)");
     interpreter.execute("(buffer-insert \" world\")");
 
-    const state = editor.getState();
-    const content = state.currentBuffer?.getContent();
-    if (Either.isRight(content)) {
-      expect(content.right).toBe("hello world");
-    }
+    expect(bufferText(editor)).toBe("hello world");
   });
 
   test("should handle text deletion", () => {

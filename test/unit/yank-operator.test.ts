@@ -37,7 +37,7 @@ function getBufferContent(buffer: FunctionalTextBuffer): string {
  * Test helper to insert text at cursor position
  */
 function insertAtCursor(buffer: FunctionalTextBuffer, text: string, position: { line: number; column: number }): FunctionalTextBuffer {
-  const result = buffer.insert(text, position);
+  const result = buffer.insert(position, text);
   if (Either.isLeft(result)) {
     throw new Error(`Failed to insert: ${result.left}`);
   }

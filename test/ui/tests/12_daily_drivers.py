@@ -26,10 +26,10 @@ def test_daily_drivers() -> tuple[AssertionResult, ...]:
         return (AssertionResult(False, "Harness init failed"),)
     state = state_result.unwrap()
 
-    test_file = f"{state.config.project_root}/daily-test.txt"
+    test_file = f"{state.config.test_dir}/daily-test.txt"
     create_test_file(test_file, "test content here")
 
-    start_result = start(state, "daily-test.txt")
+    start_result = start(state, test_file)
     if start_result.is_err():
         print(f"ERROR: {start_result.unwrap_err().message}")
         delete_test_file(test_file)

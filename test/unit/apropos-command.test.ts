@@ -7,20 +7,21 @@ import { describe, test, expect, beforeEach } from "bun:test";
 import { Editor } from "../../src/editor/editor.ts";
 import { MockTerminal } from "../mocks/terminal.ts";
 import { MockFileSystem } from "../mocks/filesystem.ts";
+import { expectDefined, expectRight, expectTlispList } from "../helpers/editor-fixture.ts";
 
 describe("US-1.11.3: Apropos Command", () => {
   let editor: Editor;
   let terminal: MockTerminal;
   let filesystem: MockFileSystem;
 
-  beforeEach(() => {
+  beforeEach(async () => {
     terminal = new MockTerminal();
     filesystem = new MockFileSystem();
     editor = new Editor(terminal, filesystem);
-    editor.start();
+    await editor.start();
   });
 
-  test("apropos-command finds commands by pattern", () => {
+  test("apropos-command finds commands by pattern", async () => {
     const interpreter = editor.getInterpreter();
 
     // Define some test functions with 'save' in the name
@@ -41,7 +42,7 @@ describe("US-1.11.3: Apropos Command", () => {
       if (result._tag === "Right") {
         expect(result.right.type).toBe("list");
         if (result.right.type === "list") {
-          const values = result.right.value;
+          const values = expectTlispList(expectRight(result));
           // Should find all three commands with 'save' in the name
           expect(values.length).toBeGreaterThanOrEqual(3);
 
@@ -49,7 +50,7 @@ describe("US-1.11.3: Apropos Command", () => {
           for (const item of values) {
             expect(item.type).toBe("list");
             if (item.type === "list") {
-              const cmdInfo = item.value;
+              const cmdInfo = expectTlispList(item);
               expect(cmdInfo.length).toBeGreaterThanOrEqual(2);
             }
           }
@@ -58,7 +59,7 @@ describe("US-1.11.3: Apropos Command", () => {
     }
   });
 
-  test("apropos-command with regex pattern matches multiple words", () => {
+  test("apropos-command with regex pattern matches multiple words", async () => {
     const interpreter = editor.getInterpreter();
 
     // Define test functions
@@ -77,7 +78,7 @@ describe("US-1.11.3: Apropos Command", () => {
       if (result._tag === "Right") {
         expect(result.right.type).toBe("list");
         if (result.right.type === "list") {
-          const values = result.right.value;
+          const values = expectTlispList(expectRight(result));
           // Should find commands that match the pattern
           expect(values.length).toBeGreaterThan(0);
         }
@@ -85,7 +86,7 @@ describe("US-1.11.3: Apropos Command", () => {
     }
   });
 
-  test("apropos-command returns command name and binding", () => {
+  test("apropos-command returns command name and binding", async () => {
     const interpreter = editor.getInterpreter();
 
     // Define a test function and bind it
@@ -99,7 +100,7 @@ describe("US-1.11.3: Apropos Command", () => {
       if (result._tag === "Right") {
         expect(result.right.type).toBe("list");
         if (result.right.type === "list") {
-          const values = result.right.value;
+          const values = expectTlispList(expectRight(result));
 
           // Find our command in the results
           const mySaveCmd = values.find((item: any) => {
@@ -112,19 +113,19 @@ describe("US-1.11.3: Apropos Command", () => {
 
           expect(mySaveCmd).toBeDefined();
           if (mySaveCmd && mySaveCmd.type === "list") {
-            const cmdInfo = mySaveCmd.value;
+            const cmdInfo = expectTlispList(mySaveCmd);
             // Should have [name, binding?, docstring]
             expect(cmdInfo.length).toBeGreaterThanOrEqual(2);
 
-            const name = cmdInfo[0];
+            const name = expectDefined(cmdInfo[0]);
             expect(name.type).toBe("string");
             if (name.type === "string") {
               expect(name.value).toBe("my-save-command");
             }
 
             // Binding should be present (includes mode information)
-            if (cmdInfo.length >= 2 && cmdInfo[1].type === "string") {
-              expect(cmdInfo[1].value).toContain("C-c s");
+            if (cmdInfo.length >= 2 && expectDefined(cmdInfo[1]).type === "string") {
+              expect(expectDefined(cmdInfo[1]).value).toContain("C-c s");
             }
           }
         }
@@ -132,7 +133,7 @@ describe("US-1.11.3: Apropos Command", () => {
     }
   });
 
-  test("apropos-command shows 'No commands found' for no matches", () => {
+  test("apropos-command shows 'No commands found' for no matches", async () => {
     const interpreter = editor.getInterpreter();
 
     // Search for non-existent pattern
@@ -143,7 +144,7 @@ describe("US-1.11.3: Apropos Command", () => {
       if (result._tag === "Right") {
         expect(result.right.type).toBe("list");
         if (result.right.type === "list") {
-          const values = result.right.value;
+          const values = expectTlispList(expectRight(result));
           // Should return empty list
           expect(values.length).toBe(0);
         }
@@ -151,7 +152,7 @@ describe("US-1.11.3: Apropos Command", () => {
     }
   });
 
-  test("apropos-command is case-insensitive", () => {
+  test("apropos-command is case-insensitive", async () => {
     const interpreter = editor.getInterpreter();
 
     interpreter.execute('(defun Save-Buffer () "Save buffer." (editor-quit))');
@@ -164,7 +165,7 @@ describe("US-1.11.3: Apropos Command", () => {
       if (result1._tag === "Right") {
         expect(result1.right.type).toBe("list");
         if (result1.right.type === "list") {
-          expect(result1.right.value.length).toBeGreaterThan(0);
+          expect(expectTlispList(expectRight(result1)).length).toBeGreaterThan(0);
         }
       }
     }
@@ -177,7 +178,7 @@ describe("US-1.11.3: Apropos Command", () => {
       if (result2._tag === "Right") {
         expect(result2.right.type).toBe("list");
         if (result2.right.type === "list") {
-          expect(result2.right.value.length).toBeGreaterThan(0);
+          expect(expectTlispList(expectRight(result2)).length).toBeGreaterThan(0);
         }
       }
     }
@@ -190,13 +191,13 @@ describe("US-1.11.3: Apropos Command", () => {
       if (result3._tag === "Right") {
         expect(result3.right.type).toBe("list");
         if (result3.right.type === "list") {
-          expect(result3.right.value.length).toBeGreaterThan(0);
+          expect(expectTlispList(expectRight(result3)).length).toBeGreaterThan(0);
         }
       }
     }
   });
 
-  test("apropos-command includes documentation in results", () => {
+  test("apropos-command includes documentation in results", async () => {
     const interpreter = editor.getInterpreter();
 
     interpreter.execute('(defun documented-command () "This is a documented command." (editor-quit))');
@@ -208,15 +209,15 @@ describe("US-1.11.3: Apropos Command", () => {
       if (result._tag === "Right") {
         expect(result.right.type).toBe("list");
         if (result.right.type === "list") {
-          const values = result.right.value;
+          const values = expectTlispList(expectRight(result));
           expect(values.length).toBeGreaterThan(0);
 
-          const cmd = values[0];
+          const cmd = expectDefined(values[0]);
           if (cmd.type === "list") {
-            const cmdInfo = cmd.value;
+            const cmdInfo = expectTlispList(cmd);
             expect(cmdInfo.length).toBeGreaterThanOrEqual(3);
 
-            const docstring = cmdInfo[2];
+            const docstring = expectDefined(cmdInfo[2]);
             expect(docstring.type).toBe("string");
             if (docstring.type === "string") {
               expect(docstring.value).toBe("This is a documented command.");
@@ -227,7 +228,7 @@ describe("US-1.11.3: Apropos Command", () => {
     }
   });
 
-  test("C-h a prompts for search pattern", () => {
+  test("C-h a prompts for search pattern", async () => {
     const interpreter = editor.getInterpreter();
 
     // Test that apropos-command-prompt exists
@@ -239,7 +240,7 @@ describe("US-1.11.3: Apropos Command", () => {
     }
   });
 
-  test("apropos-command works with built-in functions", () => {
+  test("apropos-command works with built-in functions", async () => {
     const interpreter = editor.getInterpreter();
 
     // Search for built-in functions with 'buffer' in the name
@@ -250,14 +251,14 @@ describe("US-1.11.3: Apropos Command", () => {
       if (result._tag === "Right") {
         expect(result.right.type).toBe("list");
         if (result.right.type === "list") {
-          const values = result.right.value;
+          const values = expectTlispList(expectRight(result));
           // Should find some built-in buffer functions
           expect(values.length).toBeGreaterThan(0);
 
           // Check that results have proper structure
-          const firstResult = values[0];
+          const firstResult = expectDefined(values[0]);
           if (firstResult.type === "list") {
-            expect(firstResult.value.length).toBeGreaterThanOrEqual(2);
+            expect(expectTlispList(firstResult).length).toBeGreaterThanOrEqual(2);
           }
         }
       }

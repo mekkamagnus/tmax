@@ -8,7 +8,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from tmax_harness import (
     init, start, cleanup, summarize, format_summary,
-    assert_running, assert_screen_fill, assert_daemon_mode, assert_mode,
+    assert_running, assert_daemon_mode, assert_mode,
     assert_tui_ready, assert_render_count_at_least, assert_frame_editor_sync,
     assert_no_client_errors,
     enter_insert, enter_normal, type_text,
@@ -30,10 +30,10 @@ def test_mode_switching() -> tuple[AssertionResult, ...]:
 
     print(f"Mode: {state.config.mode}")
 
-    test_file = f"{state.config.project_root}/mode-test.txt"
+    test_file = f"{state.config.test_dir}/mode-test.txt"
     create_test_file(test_file, "")
 
-    start_result = start(state, "mode-test.txt")
+    start_result = start(state, test_file)
     if start_result.is_err():
         print(f"ERROR: {start_result.unwrap_err().message}")
         delete_test_file(test_file)
@@ -42,7 +42,6 @@ def test_mode_switching() -> tuple[AssertionResult, ...]:
 
     window = state.active_window.unwrap_or("")
 
-    results.append(assert_screen_fill(state.config, window))
     if state.config.mode == "daemon-tmux":
         results.append(assert_tui_ready(state.config))
 

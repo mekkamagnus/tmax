@@ -9,11 +9,11 @@ import { MockTerminal } from "../mocks/terminal.ts";
 import { MockFileSystem } from "../mocks/filesystem.ts";
 
 describe("Debug Error Test", () => {
-  test("debug assert-error function", () => {
+  test("debug assert-error function", async () => {
     const mockTerminal = new MockTerminal();
     const mockFileSystem = new MockFileSystem();
     const editor = new Editor(mockTerminal, mockFileSystem);
-    editor.start();
+    await editor.start();
 
     const interpreter = editor.getInterpreter();
 

@@ -6,18 +6,18 @@ import { MockFileSystem } from "../mocks/filesystem.ts";
 describe("Debug assert-type", () => {
   let editor: Editor;
 
-  beforeEach(() => {
+  beforeEach(async () => {
     const mockTerminal = new MockTerminal();
     const mockFileSystem = new MockFileSystem();
     editor = new Editor(mockTerminal, mockFileSystem);
-    editor.start();
+    await editor.start();
   });
 
   afterEach(() => {
     editor.stop();
   });
 
-  test("assert-type with fixture", () => {
+  test("assert-type with fixture", async () => {
     const interpreter = editor.getInterpreter();
 
     // Without fixture

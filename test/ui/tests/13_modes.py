@@ -30,10 +30,10 @@ def test_modes() -> tuple[AssertionResult, ...]:
         return (AssertionResult(False, "Harness init failed"),)
     state = state_result.unwrap()
 
-    test_file = f"{state.config.project_root}/mode-test.py"
+    test_file = f"{state.config.test_dir}/mode-test.py"
     create_test_file(test_file, "print('hello')\n")
 
-    start_result = start(state, "mode-test.py")
+    start_result = start(state, test_file)
     if start_result.is_err():
         delete_test_file(test_file)
         err = start_result.unwrap_err()

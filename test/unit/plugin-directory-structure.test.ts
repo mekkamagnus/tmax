@@ -7,6 +7,7 @@
  */
 
 import { describe, test, expect, beforeEach, afterEach } from 'bun:test';
+import { expectRight } from "../helpers/editor-fixture.ts";
 import { TLispInterpreterImpl } from '../../src/tlisp/interpreter';
 import { Editor } from '../../src/editor/editor';
 import { MockTerminal } from '../mocks/terminal.ts';
@@ -19,12 +20,12 @@ describe('Plugin Directory Structure (US-2.1.1)', () => {
   let editor: Editor;
   let testTlpaDir: string;
 
-  beforeEach(() => {
+  beforeEach(async () => {
     // Create test interpreter and editor
     terminal = new MockTerminal();
     filesystem = new MockFileSystem();
     editor = new Editor(terminal, filesystem);
-    editor.start();
+    await editor.start();
     // Get interpreter from editor
     interpreter = (editor as any).interpreter;
 
@@ -98,8 +99,8 @@ describe('Plugin Directory Structure (US-2.1.1)', () => {
 
       expect(result.loaded).toEqual([]);
       expect(result.errors.length).toBeGreaterThan(0);
-      expect(result.errors[0].plugin).toBe('directory');
-      expect(result.errors[0].error).toContain('does not exist');
+      expect(result.errors[0]!.plugin).toBe('directory');
+      expect(result.errors[0]!.error).toContain('does not exist');
     });
   });
 
@@ -117,7 +118,7 @@ describe('Plugin Directory Structure (US-2.1.1)', () => {
       // Check that the function was defined
       const result = interpreter.execute('(plugin-loaded-func)');
       expect(result._tag).toBe('Right');
-      expect(result.right.value).toBe(true);
+      expect(expectRight(result).value).toBe(true);
     });
 
     test('should make plugin functions available in interpreter', async () => {
@@ -133,7 +134,7 @@ describe('Plugin Directory Structure (US-2.1.1)', () => {
       // Test the function is available and works
       const result = interpreter.execute('(my-plugin-func 5)');
       expect(result._tag).toBe('Right');
-      expect(result.right.value).toBe(6);
+      expect(expectRight(result).value).toBe(6);
     });
 
     test('should handle plugin.tlisp with syntax errors', async () => {
@@ -198,7 +199,7 @@ other-plugin = "1.0.0"
       // plugin.tlisp should have been loaded
       const checkResult = interpreter.execute('(deps-loaded-func)');
       expect(checkResult._tag).toBe('Right');
-      expect(checkResult.right.value).toBe(true);
+      expect(expectRight(checkResult).value).toBe(true);
     });
 
     test('should handle missing plugin.toml gracefully', async () => {
@@ -274,7 +275,7 @@ author = "Test Author"
       const bindingsResult = interpreter.execute('(key-bindings)');
       expect(bindingsResult._tag).toBe('Right');
 
-      const bindings = bindingsResult.right;
+      const bindings = expectRight(bindingsResult);
       // key-bindings returns a list
       expect(bindings.type).toBe('list');
       expect(bindings.value).toBeArray();
@@ -293,7 +294,7 @@ author = "Test Author"
       // Execute the plugin command
       const result = interpreter.execute('(my-plugin-command)');
       expect(result._tag).toBe('Right');
-      expect(result.right.value).toBe(2);
+      expect(expectRight(result).value).toBe(2);
     });
 
     test('multiple plugins do not interfere with each other', async () => {
@@ -318,11 +319,11 @@ author = "Test Author"
       // Both plugin functions should be available
       const resultA = interpreter.execute('(plugin-a-func)');
       expect(resultA._tag).toBe('Right');
-      expect(resultA.right.value).toBe('a');
+      expect(expectRight(resultA).value).toBe('a');
 
       const resultB = interpreter.execute('(plugin-b-func)');
       expect(resultB._tag).toBe('Right');
-      expect(resultB.right.value).toBe('b');
+      expect(expectRight(resultB).value).toBe('b');
     });
 
     test('plugins can depend on each other', async () => {
@@ -354,7 +355,7 @@ base-plugin = "*"
       // The dependent plugin should be able to call base plugin function
       const result = interpreter.execute('(dependent-func)');
       expect(result._tag).toBe('Right');
-      expect(result.right.value).toBe('base');
+      expect(expectRight(result).value).toBe('base');
     });
   });
 });

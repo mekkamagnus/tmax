@@ -30,7 +30,7 @@ describe("Minor Mode Operations", () => {
     const evalTlisp = (expr: string) => {
       // Track hook invocations
       const match = expr.match(/run-hooks "([^"]+)"/);
-      if (match) hooksRun.push(match[1]);
+      if (match?.[1]) hooksRun.push(match[1]);
       return Either.right(createNil());
     };
 

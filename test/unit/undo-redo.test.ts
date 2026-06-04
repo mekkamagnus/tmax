@@ -9,9 +9,11 @@
  */
 
 import { describe, test, expect, beforeEach } from "bun:test";
+import { expectRight } from "../helpers/editor-fixture.ts";
 import { Either } from "../../src/utils/task-either.ts";
 import { createUndoRedoOps, resetUndoRedoState, setInitialBuffer } from "../../src/editor/api/undo-redo-ops.ts";
 import type { FunctionalTextBuffer } from "../../src/core/types.ts";
+import type { TLispValue } from "../../src/tlisp/types.ts";
 
 // Mock buffer implementation for testing
 class MockBuffer implements FunctionalTextBuffer {
@@ -82,7 +84,7 @@ class MockBuffer implements FunctionalTextBuffer {
       return deleteResult;
     }
 
-    return deleteResult.right.insert(range.start, text);
+    return expectRight(deleteResult).insert(range.start, text);
   }
 
   getText(range: { start: { line: number; column: number }; end: { line: number; column: number } }): Either<string, string> {
@@ -167,7 +169,7 @@ describe("Undo/Redo Operations", () => {
       // Buffer should be restored to initial state
       const contentResult = currentBuffer!.getContent();
       expect(Either.isRight(contentResult)).toBe(true);
-      expect(contentResult.right).toBe("Hello world\nLine 2\nLine 3");
+      expect(expectRight(contentResult)).toBe("Hello world\nLine 2\nLine 3");
     });
 
     test("multiple u presses undo edits sequentially", () => {
@@ -193,7 +195,7 @@ describe("Undo/Redo Operations", () => {
       // Should be back to initial state
       const contentResult = currentBuffer!.getContent();
       expect(Either.isRight(contentResult)).toBe(true);
-      expect(contentResult.right).toBe("Hello world\nLine 2\nLine 3");
+      expect(expectRight(contentResult)).toBe("Hello world\nLine 2\nLine 3");
     });
 
     test("undo only undoes last edit (not all)", () => {
@@ -215,7 +217,7 @@ describe("Undo/Redo Operations", () => {
       // Should be at edit1, not initial state
       const contentResult = currentBuffer!.getContent();
       expect(Either.isRight(contentResult)).toBe(true);
-      expect(contentResult.right).toBe("Edit 1\nLine 2\nLine 3");
+      expect(expectRight(contentResult)).toBe("Edit 1\nLine 2\nLine 3");
     });
 
     test("undo to beginning shows message", () => {
@@ -254,7 +256,7 @@ describe("Undo/Redo Operations", () => {
       // Should be back to edit1 state
       const contentResult = currentBuffer!.getContent();
       expect(Either.isRight(contentResult)).toBe(true);
-      expect(contentResult.right).toBe("Edit 1\nLine 2\nLine 3");
+      expect(expectRight(contentResult)).toBe("Edit 1\nLine 2\nLine 3");
     });
 
     test("redo to end shows message", () => {
@@ -324,8 +326,8 @@ describe("Undo/Redo Operations", () => {
       // Check count
       const countResult = countFunc([]);
       expect(Either.isRight(countResult)).toBe(true);
-      expect(countResult.right).toHaveProperty('type', 'number');
-      expect(countResult.right.value).toBe(3);
+      expect(expectRight(countResult)).toHaveProperty('type', 'number');
+      expect(expectRight(countResult).value).toBe(3);
     });
 
     test("clears history correctly", () => {
@@ -344,7 +346,7 @@ describe("Undo/Redo Operations", () => {
       // Check count
       const countResult = countFunc([]);
       expect(Either.isRight(countResult)).toBe(true);
-      expect(countResult.right.value).toBe(0);
+      expect(expectRight(countResult).value).toBe(0);
     });
   });
 
@@ -369,7 +371,7 @@ describe("Undo/Redo Operations", () => {
       // Should be back to empty
       const contentResult = currentBuffer!.getContent();
       expect(Either.isRight(contentResult)).toBe(true);
-      expect(contentResult.right).toBe("");
+      expect(expectRight(contentResult)).toBe("");
     });
 
     test("handles undo with no history", () => {
@@ -382,7 +384,7 @@ describe("Undo/Redo Operations", () => {
       // Buffer should be unchanged
       const contentResult = currentBuffer!.getContent();
       expect(Either.isRight(contentResult)).toBe(true);
-      expect(contentResult.right).toBe("Hello world\nLine 2\nLine 3");
+      expect(expectRight(contentResult)).toBe("Hello world\nLine 2\nLine 3");
     });
 
     test("handles redo with no undone changes", () => {
@@ -403,7 +405,7 @@ describe("Undo/Redo Operations", () => {
       // Buffer should be unchanged (still at edit1)
       const contentResult = currentBuffer!.getContent();
       expect(Either.isRight(contentResult)).toBe(true);
-      expect(contentResult.right).toBe("Edit 1\nLine 2\nLine 3");
+      expect(expectRight(contentResult)).toBe("Edit 1\nLine 2\nLine 3");
     });
   });
 
@@ -432,7 +434,7 @@ describe("Undo/Redo Operations", () => {
       const edit1 = new MockBuffer("Edit 1\nLine 2\nLine 3") as FunctionalTextBuffer;
       pushFunc([
         { type: 'string', value: 'edit1' },
-        { buffer: edit1 },
+        { buffer: edit1 } as unknown as TLispValue,
         { type: 'number', value: 5 },   // cursor line
         { type: 'number', value: 10 }   // cursor column
       ]);

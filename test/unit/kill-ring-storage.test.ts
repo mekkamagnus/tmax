@@ -12,6 +12,7 @@
  */
 
 import { describe, test, expect, beforeEach } from "bun:test";
+import { expectRight, expectTlispList, expectTlispString } from "../helpers/editor-fixture.ts";
 import { TLispInterpreterImpl } from "../../src/tlisp/interpreter.ts";
 import { registerTestingFramework } from "../../src/tlisp/test-framework.ts";
 import type { FunctionalTextBuffer } from "../../src/core/types.ts";
@@ -62,10 +63,9 @@ describe("Kill Ring Storage (US-1.9.1)", () => {
       `);
 
       expect(result._tag).toBe("Right");
-      const killRingList = result.right;
-      expect(killRingList).toHaveProperty("type", "list");
-      expect(killRingList.value).toHaveLength(1);
-      expect(killRingList.value[0]).toEqual({
+      const killRingList = expectTlispList(expectRight(result));
+      expect(killRingList).toHaveLength(1);
+      expect(killRingList[0]).toEqual({
         type: "string",
         value: "first deletion"
       });
@@ -80,19 +80,18 @@ describe("Kill Ring Storage (US-1.9.1)", () => {
       `);
 
       expect(result._tag).toBe("Right");
-      const killRingList = result.right;
-      expect(killRingList).toHaveProperty("type", "list");
-      expect(killRingList.value).toHaveLength(3);
+      const killRingList = expectTlispList(expectRight(result));
+      expect(killRingList).toHaveLength(3);
       // Most recent is first
-      expect(killRingList.value[0]).toEqual({
+      expect(killRingList[0]).toEqual({
         type: "string",
         value: "third"
       });
-      expect(killRingList.value[1]).toEqual({
+      expect(killRingList[1]).toEqual({
         type: "string",
         value: "second"
       });
-      expect(killRingList.value[2]).toEqual({
+      expect(killRingList[2]).toEqual({
         type: "string",
         value: "first"
       });
@@ -110,15 +109,14 @@ describe("Kill Ring Storage (US-1.9.1)", () => {
       `);
 
       expect(result._tag).toBe("Right");
-      const killRingList = result.right;
-      expect(killRingList).toHaveProperty("type", "list");
-      expect(killRingList.value).toHaveLength(5); // Still 5 items
+      const killRingList = expectTlispList(expectRight(result));
+      expect(killRingList).toHaveLength(5); // Still 5 items
       // item1 should be gone
-      const values = killRingList.value.map((item: any) => item.value);
+      const values = killRingList.map((item: any) => item.value);
       expect(values).not.toContain("item1");
       expect(values).toContain("item6");
       expect(values).toContain("item5");
-      expect(killRingList.value[0]).toEqual({
+      expect(killRingList[0]).toEqual({
         type: "string",
         value: "item6"
       });
@@ -136,9 +134,8 @@ describe("Kill Ring Storage (US-1.9.1)", () => {
       `);
 
       expect(result._tag).toBe("Right");
-      const yankedText = result.right;
-      expect(yankedText).toHaveProperty("type", "string");
-      expect(yankedText.value).toBe("text to paste");
+      const yankedText = expectTlispString(expectRight(result));
+            expect(yankedText).toBe("text to paste");
     });
 
     test("(kill-ring-rotate) rotates ring items", () => {
@@ -151,19 +148,18 @@ describe("Kill Ring Storage (US-1.9.1)", () => {
       `);
 
       expect(result._tag).toBe("Right");
-      const killRingList = result.right;
-      expect(killRingList).toHaveProperty("type", "list");
-      expect(killRingList.value).toHaveLength(3);
+      const killRingList = expectTlispList(expectRight(result));
+      expect(killRingList).toHaveLength(3);
       // After rotation, first item moves to end
-      expect(killRingList.value[0]).toEqual({
+      expect(killRingList[0]).toEqual({
         type: "string",
         value: "second"
       });
-      expect(killRingList.value[1]).toEqual({
+      expect(killRingList[1]).toEqual({
         type: "string",
         value: "first"
       });
-      expect(killRingList.value[2]).toEqual({
+      expect(killRingList[2]).toEqual({
         type: "string",
         value: "third"
       });
@@ -178,10 +174,9 @@ describe("Kill Ring Storage (US-1.9.1)", () => {
       `);
 
       expect(result._tag).toBe("Right");
-      const killRingList = result.right;
-      expect(killRingList).toHaveProperty("type", "list");
-      expect(killRingList.value).toHaveLength(3);
-      const values = killRingList.value.map((item: any) => item.value);
+      const killRingList = expectTlispList(expectRight(result));
+      expect(killRingList).toHaveLength(3);
+      const values = killRingList.map((item: any) => item.value);
       expect(values).toEqual(["gamma", "beta", "alpha"]);
     });
 
@@ -191,9 +186,8 @@ describe("Kill Ring Storage (US-1.9.1)", () => {
       `);
 
       expect(result._tag).toBe("Right");
-      const yankedText = result.right;
-      expect(yankedText).toHaveProperty("type", "string");
-      expect(yankedText.value).toBe("");
+      const yankedText = expectTlispString(expectRight(result));
+            expect(yankedText).toBe("");
     });
 
     test("(kill-ring-rotate) with single item does nothing", () => {
@@ -204,9 +198,9 @@ describe("Kill Ring Storage (US-1.9.1)", () => {
       `);
 
       expect(result._tag).toBe("Right");
-      const killRingList = result.right;
-      expect(killRingList.value).toHaveLength(1);
-      expect(killRingList.value[0]).toEqual({
+      const killRingList = expectTlispList(expectRight(result));
+      expect(killRingList).toHaveLength(1);
+      expect(killRingList[0]).toEqual({
         type: "string",
         value: "only item"
       });
@@ -219,8 +213,8 @@ describe("Kill Ring Storage (US-1.9.1)", () => {
       `);
 
       expect(result._tag).toBe("Right");
-      const killRingList = result.right;
-      expect(killRingList.value).toHaveLength(0);
+      const killRingList = expectTlispList(expectRight(result));
+      expect(killRingList).toHaveLength(0);
     });
 
     test("Kill ring max can be customized", () => {
@@ -234,9 +228,9 @@ describe("Kill Ring Storage (US-1.9.1)", () => {
       `);
 
       expect(result._tag).toBe("Right");
-      const killRingList = result.right;
-      expect(killRingList.value).toHaveLength(3);
-      const values = killRingList.value.map((item: any) => item.value);
+      const killRingList = expectTlispList(expectRight(result));
+      expect(killRingList).toHaveLength(3);
+      const values = killRingList.map((item: any) => item.value);
       expect(values).not.toContain("a");
       expect(values).toContain("d");
     });
@@ -251,9 +245,9 @@ describe("Kill Ring Storage (US-1.9.1)", () => {
       `);
 
       expect(result._tag).toBe("Right");
-      const killRingList = result.right;
-      expect(killRingList.value).toHaveLength(1);
-      expect(killRingList.value[0]).toEqual({
+      const killRingList = expectTlispList(expectRight(result));
+      expect(killRingList).toHaveLength(1);
+      expect(killRingList[0]).toEqual({
         type: "string",
         value: "deleted word"
       });
@@ -268,8 +262,8 @@ describe("Kill Ring Storage (US-1.9.1)", () => {
       `);
 
       expect(result._tag).toBe("Right");
-      const yankedText = result.right;
-      expect(yankedText.value).toBe("yanked text");
+      const yankedText = expectTlispString(expectRight(result));
+      expect(yankedText).toBe("yanked text");
     });
 
     test("Multiple yanks populate kill ring", () => {
@@ -281,9 +275,9 @@ describe("Kill Ring Storage (US-1.9.1)", () => {
       `);
 
       expect(result._tag).toBe("Right");
-      const killRingList = result.right;
-      expect(killRingList.value).toHaveLength(3);
-      const values = killRingList.value.map((item: any) => item.value);
+      const killRingList = expectTlispList(expectRight(result));
+      expect(killRingList).toHaveLength(3);
+      const values = killRingList.map((item: any) => item.value);
       expect(values).toEqual(["yank3", "yank2", "yank1"]);
     });
   });

@@ -9,6 +9,7 @@ import type { TLispValue } from "../../src/tlisp/types.ts";
 import { TLispInterpreterImpl } from "../../src/tlisp/interpreter.ts";
 import { registerStdlibFunctions } from "../../src/tlisp/stdlib.ts";
 import { Either } from "../../src/utils/task-either.ts";
+import { expectDefined } from "../helpers/editor-fixture.ts";
 
 describe("Hash-Map Data Structure", () => {
   const interpreter = new TLispInterpreterImpl();
@@ -47,8 +48,7 @@ describe("Hash-Map Data Structure", () => {
     const result = exec("(hashmap \"double\" (* 2 5))");
     expect(result.type).toBe("hashmap");
     if (isHashmap(result)) {
-      const value = result.value.get("double");
-      expect(value).toBeDefined();
+      const value = expectDefined(result.value.get("double"));
       expect(value.type).toBe("number");
       if (value.type === "number") {
         expect(value.value).toBe(10);
@@ -106,8 +106,7 @@ describe("Hash-Map Standard Library Functions", () => {
     expect(result.type).toBe("hashmap");
     if (isHashmap(result)) {
       expect(result.value.size).toBe(1);
-      const value = result.value.get("new");
-      expect(value).toBeDefined();
+      const value = expectDefined(result.value.get("new"));
       expect(value.type).toBe("number");
       if (value.type === "number") {
         expect(value.value).toBe(42);
@@ -122,8 +121,7 @@ describe("Hash-Map Standard Library Functions", () => {
     expect(result.type).toBe("hashmap");
     if (isHashmap(result)) {
       expect(result.value.size).toBe(1);
-      const value = result.value.get("a");
-      expect(value).toBeDefined();
+      const value = expectDefined(result.value.get("a"));
       expect(value.type).toBe("number");
       if (value.type === "number") {
         expect(value.value).toBe(999);
@@ -202,9 +200,9 @@ describe("Editor Keymap Variables", () => {
     interpreter.globalEnv.define("*global-keymap*", emptyKeymap);
 
     // Verify they exist and are hash-maps
-    const normalKeymap = interpreter.globalEnv.lookup("*normal-mode-keymap*");
-    const insertKeymap = interpreter.globalEnv.lookup("*insert-mode-keymap*");
-    const globalKeymap = interpreter.globalEnv.lookup("*global-keymap*");
+    const normalKeymap = expectDefined(interpreter.globalEnv.lookup("*normal-mode-keymap*"));
+    const insertKeymap = expectDefined(interpreter.globalEnv.lookup("*insert-mode-keymap*"));
+    const globalKeymap = expectDefined(interpreter.globalEnv.lookup("*global-keymap*"));
 
     expect(normalKeymap).toBeDefined();
     expect(insertKeymap).toBeDefined();
@@ -235,8 +233,7 @@ describe("Editor Keymap Variables", () => {
 
     // Verify all exist
     for (const name of keymapNames) {
-      const keymap = interpreter.globalEnv.lookup(name);
-      expect(keymap).toBeDefined();
+      const keymap = expectDefined(interpreter.globalEnv.lookup(name));
       expect(keymap.type).toBe("hashmap");
       if (isHashmap(keymap)) {
         expect(keymap.value.size).toBe(0);

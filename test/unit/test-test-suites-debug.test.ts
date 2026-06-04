@@ -8,14 +8,14 @@ describe("Debug test suites", () => {
   let mockTerminal: MockTerminal;
   let mockFileSystem: MockFileSystem;
 
-  beforeEach(() => {
+  beforeEach(async () => {
     mockTerminal = new MockTerminal();
     mockFileSystem = new MockFileSystem();
     editor = new Editor(mockTerminal, mockFileSystem);
-    editor.start();
+    await editor.start();
   });
 
-  test("debug deftest-suite", () => {
+  test("debug deftest-suite", async () => {
     const code = `
       (deftest-suite "My Test Suite"
         (deftest test-one () (assert-true t))

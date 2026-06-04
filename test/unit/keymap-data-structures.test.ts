@@ -15,6 +15,7 @@ import { createHashmap, isHashmap, createNil, createString, createList } from ".
 import { TLispInterpreterImpl } from "../../src/tlisp/interpreter.ts";
 import { registerStdlibFunctions } from "../../src/tlisp/stdlib.ts";
 import { Either } from "../../src/utils/task-either.ts";
+import { expectDefined } from "../helpers/editor-fixture.ts";
 
 describe("T-Lisp Keymap Data Structures - US-0.4.1", () => {
   const interpreter = new TLispInterpreterImpl();
@@ -36,8 +37,7 @@ describe("T-Lisp Keymap Data Structures - US-0.4.1", () => {
     exec('(defkeymap "*test-keymap*")');
     
     // Get the keymap
-    const keymap = interpreter.globalEnv.lookup("*test-keymap*");
-    expect(keymap).toBeDefined();
+    const keymap = expectDefined(interpreter.globalEnv.lookup("*test-keymap*"));
     expect(keymap.type).toBe("hashmap");
     
     // Test keymap-get to retrieve properties
@@ -59,8 +59,7 @@ describe("T-Lisp Keymap Data Structures - US-0.4.1", () => {
     exec('(defkeymap "*my-mode-map*")');
     
     // Verify the keymap exists
-    const keymap = interpreter.globalEnv.lookup("*my-mode-map*");
-    expect(keymap).toBeDefined();
+    const keymap = expectDefined(interpreter.globalEnv.lookup("*my-mode-map*"));
     expect(keymap.type).toBe("hashmap");
     
     // Verify it has the required properties
@@ -80,13 +79,11 @@ describe("T-Lisp Keymap Data Structures - US-0.4.1", () => {
     expect(updatedKeymap.type).toBe("hashmap");
 
     if (isHashmap(updatedKeymap)) {
-      const bindings = updatedKeymap.value.get("bindings");
-      expect(bindings).toBeDefined();
+      const bindings = expectDefined(updatedKeymap.value.get("bindings"));
       expect(bindings.type).toBe("hashmap");
 
       if (isHashmap(bindings)) {
-        const command = bindings.value.get("k");
-        expect(command).toBeDefined();
+        const command = expectDefined(bindings.value.get("k"));
         expect(command.type).toBe("string");
         if (command.type === "string") {
           expect(command.value).toBe("cursor-up");
@@ -119,8 +116,7 @@ describe("T-Lisp Keymap Data Structures - US-0.4.1", () => {
     // Create a keymap
     exec('(defkeymap "*props-test-map*")');
     
-    const keymap = interpreter.globalEnv.lookup("*props-test-map*");
-    expect(keymap).toBeDefined();
+    const keymap = expectDefined(interpreter.globalEnv.lookup("*props-test-map*"));
     expect(keymap.type).toBe("hashmap");
     
     if (isHashmap(keymap)) {
@@ -130,9 +126,9 @@ describe("T-Lisp Keymap Data Structures - US-0.4.1", () => {
       expect(keymap.value.has("bindings")).toBe(true);
       
       // Check their types
-      const mode = keymap.value.get("mode");
-      const parent = keymap.value.get("parent");
-      const bindings = keymap.value.get("bindings");
+      const mode = expectDefined(keymap.value.get("mode"));
+      const parent = expectDefined(keymap.value.get("parent"));
+      const bindings = expectDefined(keymap.value.get("bindings"));
       
       expect(mode.type).toBe("string");
       expect(parent.type).toBe("nil");

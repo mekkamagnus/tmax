@@ -75,7 +75,7 @@ describe("Fuzzy Command Completion (US-1.10.2)", () => {
       
       // Results should be sorted by score (highest first)
       for (let i = 0; i < results.length - 1; i++) {
-        expect(results[i].score).toBeGreaterThanOrEqual(results[i + 1].score);
+        expect(results[i]!.score).toBeGreaterThanOrEqual(results[i + 1]!.score);
       }
     });
 

@@ -4,9 +4,11 @@ from __future__ import annotations
 
 import os
 import json
+import shlex
 import subprocess
 import time
 from dataclasses import replace
+from pathlib import Path
 
 from .types import (
     HarnessConfig, HarnessState, HarnessError, Result, Ok, Err,
@@ -21,13 +23,16 @@ from . import input as inp
 def start_daemon(state: HarnessState) -> Result[HarnessState, HarnessError]:
     """Start the tmax daemon in background. Returns new state with daemon_pid."""
     if client.ping(state.config):
-        return Ok(state)  # Already running
+        return Err(HarnessError(
+            f"Refusing to attach to an existing daemon at {state.config.socket_path}",
+        ))
 
     daemon_parts = state.config.daemon_cmd.split()
     try:
         proc = subprocess.Popen(
             daemon_parts,
             cwd=state.config.project_root,
+            env={**os.environ, "TMAX_SOCKET": state.config.socket_path},
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
         )
@@ -47,6 +52,10 @@ def start_daemon(state: HarnessState) -> Result[HarnessState, HarnessError]:
 
 def stop_daemon(state: HarnessState) -> Result[HarnessState, HarnessError]:
     """Stop the daemon. Returns new state with daemon_pid cleared."""
+    pid_opt = state.daemon_pid
+    if not isinstance(pid_opt, Some):
+        return Ok(state)
+
     if not client.ping(state.config):
         return Ok(replace(state, daemon_pid=Nothing))
 
@@ -55,13 +64,11 @@ def stop_daemon(state: HarnessState) -> Result[HarnessState, HarnessError]:
     time.sleep(0.5)
 
     # Force kill if still running
-    pid_opt = state.daemon_pid
-    if isinstance(pid_opt, Some):
-        try:
-            os.kill(pid_opt.unwrap(), 9)
-        except ProcessLookupError:
-            pass
-        time.sleep(0.3)
+    try:
+        os.kill(pid_opt.unwrap(), 9)
+    except ProcessLookupError:
+        pass
+    time.sleep(0.3)
 
     # Clean up socket
     import pathlib
@@ -132,11 +139,17 @@ def _open_file_via_client(config: HarnessConfig, filepath: str) -> None:
     """Open a file via tmaxclient (uses JSON-RPC open, not eval)."""
     try:
         subprocess.run(
-            [config.client_cmd, filepath],
+            [config.client_cmd, "--socket", config.socket_path, filepath],
             capture_output=True, text=True, timeout=5,
         )
     except (subprocess.TimeoutExpired, FileNotFoundError):
         pass
+
+
+def _resolve_file_path(config: HarnessConfig, filepath: str) -> str:
+    """Resolve relative fixtures from the project root while preserving owned temp paths."""
+    path = Path(filepath)
+    return str(path if path.is_absolute() else Path(config.project_root) / path)
 
 
 def _start_daemon_only(state: HarnessState, file: str) -> Result[HarnessState, HarnessError]:
@@ -148,7 +161,7 @@ def _start_daemon_only(state: HarnessState, file: str) -> Result[HarnessState, H
 
     # Open file if specified
     if file:
-        filepath = f"{state.config.project_root}/{file}"
+        filepath = _resolve_file_path(state.config, file)
         _open_file_via_client(state.config, filepath)
 
     return Ok(state)
@@ -221,7 +234,7 @@ def _start_daemon_tmux(state: HarnessState, file: str) -> Result[HarnessState, H
 
     # Open file if specified (use client CLI open, not eval)
     if file:
-        filepath = f"{state.config.project_root}/{file}"
+        filepath = _resolve_file_path(state.config, file)
         _open_file_via_client(state.config, filepath)
 
     # Create test window and run the TUI as the pane command. This avoids
@@ -229,7 +242,7 @@ def _start_daemon_tmux(state: HarnessState, file: str) -> Result[HarnessState, H
     window_result = session.create_window_with_command(
         state.config,
         state.config.test_window,
-        state.config.tui_cmd,
+        f"{state.config.tui_cmd} --socket {shlex.quote(state.config.socket_path)}",
         state.config.project_root,
     )
     if window_result.is_err():

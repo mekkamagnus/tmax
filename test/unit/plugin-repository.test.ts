@@ -9,6 +9,7 @@
  */
 
 import { describe, test, expect, beforeEach, afterEach } from 'bun:test';
+import { expectRight, expectTlispList, expectTlispString } from "../helpers/editor-fixture.ts";
 import { TLispInterpreterImpl } from '../../src/tlisp/interpreter';
 import { Editor } from '../../src/editor/editor';
 import { MockTerminal } from '../mocks/terminal.ts';
@@ -21,12 +22,12 @@ describe('Plugin Repository (US-4.1.1)', () => {
   let editor: Editor;
   let testTlpaDir: string;
 
-  beforeEach(() => {
+  beforeEach(async () => {
     terminal = new MockTerminal();
     filesystem = new MockFileSystem();
     editor = new Editor(terminal, filesystem);
-    editor.start();
-    interpreter = (editor as any).interpreter;
+    await editor.start();
+    interpreter = editor.getInterpreter();
 
     // Set up test tlpa directory in mock filesystem
     testTlpaDir = '/test/tlpa';
@@ -39,21 +40,18 @@ describe('Plugin Repository (US-4.1.1)', () => {
 
       expect(result._tag).toBe('Right');
 
-      const plugins = result.right;
-      expect(plugins.type).toBe('list');
-      expect(plugins.value).toBeInstanceOf(Array);
-      expect(plugins.value.length).toBeGreaterThan(0);
+      const plugins = expectTlispList(expectRight(result));
+      expect(plugins.length).toBeGreaterThan(0);
     });
 
     test('should include theme-solarized in list', async () => {
       const result = await interpreter.execute('(plugin-list)');
 
       expect(result._tag).toBe('Right');
-      const plugins = result.right;
-      expect(plugins.type).toBe('list');
+      const plugins = expectTlispList(expectRight(result));
 
       // Each plugin is a list: [name, description, author, version, install-command]
-      const solarized = plugins.value.find((p: any) =>
+      const solarized = plugins.find((p: any) =>
         p.value?.[0]?.type === 'string' && p.value[0].value === 'theme-solarized'
       );
       expect(solarized).toBeDefined();
@@ -65,9 +63,9 @@ describe('Plugin Repository (US-4.1.1)', () => {
       const result = await interpreter.execute('(plugin-show "theme-solarized")');
 
       expect(result._tag).toBe('Right');
-      expect(result.right.type).toBe('string');
+      expect(expectRight(result).type).toBe('string');
 
-      const info = result.right.value;
+      const info = expectTlispString(expectRight(result));
       expect(info).toContain('theme-solarized');
       expect(info).toContain('Solarized dark color theme');
     });
@@ -76,7 +74,7 @@ describe('Plugin Repository (US-4.1.1)', () => {
       const result = await interpreter.execute('(plugin-show "nonexistent-plugin")');
 
       expect(result._tag).toBe('Right');
-      expect(result.right.value).toContain('Plugin not found');
+      expect(expectTlispString(expectRight(result))).toContain('Plugin not found');
     });
   });
 
@@ -85,18 +83,15 @@ describe('Plugin Repository (US-4.1.1)', () => {
       const result = await interpreter.execute('(plugin-search "theme")');
 
       expect(result._tag).toBe('Right');
-      const searchResults = result.right;
-      expect(searchResults.type).toBe('list');
-      expect(searchResults.value.length).toBeGreaterThan(0);
+      const searchResults = expectTlispList(expectRight(result));
+      expect(searchResults.length).toBeGreaterThan(0);
     });
 
     test('should return empty list for no matches', async () => {
       const result = await interpreter.execute('(plugin-search "xyz-nonexistent")');
 
       expect(result._tag).toBe('Right');
-      const searchResults = result.right;
-      expect(searchResults.type).toBe('list');
-      expect(searchResults.value).toEqual([]);
+      expect(expectTlispList(expectRight(result))).toEqual([]);
     });
   });
 
@@ -105,7 +100,7 @@ describe('Plugin Repository (US-4.1.1)', () => {
       const result = await interpreter.execute('(plugin-info "theme-solarized")');
 
       expect(result._tag).toBe('Right');
-      const info = result.right;
+      const info = expectRight(result);
       expect(info.type).toBe('list');
     });
 
@@ -113,7 +108,7 @@ describe('Plugin Repository (US-4.1.1)', () => {
       const result = await interpreter.execute('(plugin-info "unknown")');
 
       expect(result._tag).toBe('Right');
-      expect(result.right.type).toBe('nil');
+      expect(expectRight(result).type).toBe('nil');
     });
   });
 });
@@ -128,8 +123,8 @@ describe('Plugin Submission (US-4.1.2)', () => {
     terminal = new MockTerminal();
     filesystem = new MockFileSystem();
     editor = new Editor(terminal, filesystem);
-    editor.start();
-    interpreter = (editor as any).interpreter;
+    await editor.start();
+    interpreter = editor.getInterpreter();
 
     // Clear any existing submissions before each test
     await interpreter.execute('(plugin-clear-submissions)');
@@ -142,29 +137,29 @@ describe('Plugin Submission (US-4.1.2)', () => {
       );
 
       expect(result._tag).toBe('Right');
-      expect(result.right.type).toBe('string');
-      expect(result.right.value).toContain('submitted for review');
+      expect(expectRight(result).type).toBe('string');
+      expect(expectRight(result).value).toContain('submitted for review');
     });
 
     test('should require plugin name', async () => {
       const result = await interpreter.execute('(plugin-submit)');
 
       expect(result._tag).toBe('Right');
-      expect(result.right.value).toContain('Error');
+      expect(expectRight(result).value).toContain('Error');
     });
 
     test('should require description', async () => {
       const result = await interpreter.execute('(plugin-submit "test-plugin")');
 
       expect(result._tag).toBe('Right');
-      expect(result.right.value).toContain('Error');
+      expect(expectRight(result).value).toContain('Error');
     });
 
     test('should require author', async () => {
       const result = await interpreter.execute('(plugin-submit "test-plugin" "description")');
 
       expect(result._tag).toBe('Right');
-      expect(result.right.value).toContain('Error');
+      expect(expectRight(result).value).toContain('Error');
     });
 
     test('should validate plugin name format', async () => {
@@ -173,7 +168,7 @@ describe('Plugin Submission (US-4.1.2)', () => {
       );
 
       expect(result._tag).toBe('Right');
-      expect(result.right.value).toContain('Error');
+      expect(expectRight(result).value).toContain('Error');
     });
 
     test('should check for duplicate plugin names', async () => {
@@ -183,7 +178,7 @@ describe('Plugin Submission (US-4.1.2)', () => {
       );
 
       expect(result._tag).toBe('Right');
-      expect(result.right.value).toContain('already exists');
+      expect(expectRight(result).value).toContain('already exists');
     });
   });
 
@@ -197,16 +192,16 @@ describe('Plugin Submission (US-4.1.2)', () => {
       const result = await interpreter.execute('(plugin-review-list)');
 
       expect(result._tag).toBe('Right');
-      expect(result.right.type).toBe('list');
-      expect(result.right.value.length).toBeGreaterThan(0);
+      expect(expectRight(result).type).toBe('list');
+      expect(expectTlispList(expectRight(result)).length).toBeGreaterThan(0);
     });
 
     test('should show empty list when no submissions', async () => {
       const result = await interpreter.execute('(plugin-review-list)');
 
       expect(result._tag).toBe('Right');
-      expect(result.right.type).toBe('list');
-      expect(result.right.value).toEqual([]);
+      expect(expectRight(result).type).toBe('list');
+      expect(expectRight(result).value).toEqual([]);
     });
   });
 
@@ -220,8 +215,8 @@ describe('Plugin Submission (US-4.1.2)', () => {
       const result = await interpreter.execute('(plugin-approve "approvable-plugin")');
 
       expect(result._tag).toBe('Right');
-      expect(result.right.type).toBe('string');
-      expect(result.right.value).toContain('approved');
+      expect(expectRight(result).type).toBe('string');
+      expect(expectRight(result).value).toContain('approved');
     });
 
     test('should add approved plugin to repository', async () => {
@@ -233,7 +228,7 @@ describe('Plugin Submission (US-4.1.2)', () => {
 
       // Check it appears in plugin-list
       const listResult = await interpreter.execute('(plugin-list)');
-      const plugins = listResult.right.value;
+      const plugins = expectTlispList(expectRight(listResult));
 
       const found = plugins.find((p: any) =>
         p.value?.[0]?.type === 'string' && p.value[0].value === 'new-approved-plugin'
@@ -246,14 +241,14 @@ describe('Plugin Submission (US-4.1.2)', () => {
       const result = await interpreter.execute('(plugin-approve "nonexistent")');
 
       expect(result._tag).toBe('Right');
-      expect(result.right.value).toContain('not found');
+      expect(expectRight(result).value).toContain('not found');
     });
 
     test('should require plugin name argument', async () => {
       const result = await interpreter.execute('(plugin-approve)');
 
       expect(result._tag).toBe('Right');
-      expect(result.right.value).toContain('Error');
+      expect(expectRight(result).value).toContain('Error');
     });
   });
 
@@ -267,8 +262,8 @@ describe('Plugin Submission (US-4.1.2)', () => {
       const result = await interpreter.execute('(plugin-reject "rejectable-plugin" "Quality issues")');
 
       expect(result._tag).toBe('Right');
-      expect(result.right.type).toBe('string');
-      expect(result.right.value).toContain('rejected');
+      expect(expectRight(result).type).toBe('string');
+      expect(expectRight(result).value).toContain('rejected');
     });
 
     test('should not add rejected plugin to repository', async () => {
@@ -280,7 +275,7 @@ describe('Plugin Submission (US-4.1.2)', () => {
 
       // Check it does NOT appear in plugin-list
       const listResult = await interpreter.execute('(plugin-list)');
-      const plugins = listResult.right.value;
+      const plugins = expectTlispList(expectRight(listResult));
 
       const found = plugins.find((p: any) =>
         p.value?.[0]?.type === 'string' && p.value[0].value === 'rejected-plugin'
@@ -297,7 +292,7 @@ describe('Plugin Submission (US-4.1.2)', () => {
       const result = await interpreter.execute('(plugin-reject "test-plugin")');
 
       expect(result._tag).toBe('Right');
-      expect(result.right.value).toContain('Error');
+      expect(expectRight(result).value).toContain('Error');
     });
   });
 
@@ -310,21 +305,21 @@ describe('Plugin Submission (US-4.1.2)', () => {
 
       // Check it's in review list
       const reviewResult = await interpreter.execute('(plugin-review-list)');
-      expect(reviewResult.right.value.length).toBeGreaterThan(0);
+      expect(expectTlispList(expectRight(reviewResult)).length).toBeGreaterThan(0);
 
       // Approve it
       await interpreter.execute('(plugin-approve "state-test-plugin")');
 
       // Should no longer be in review list
       const afterReviewResult = await interpreter.execute('(plugin-review-list)');
-      const stillPending = afterReviewResult.right.value.find(
+      const stillPending = expectTlispList(expectRight(afterReviewResult)).find(
         (p: any) => p.value?.[0]?.value === 'state-test-plugin'
       );
       expect(stillPending).toBeUndefined();
 
       // But should be in main repository
       const listResult = await interpreter.execute('(plugin-list)');
-      const found = listResult.right.value.find((p: any) =>
+      const found = expectTlispList(expectRight(listResult)).find((p: any) =>
         p.value?.[0]?.type === 'string' && p.value[0].value === 'state-test-plugin'
       );
       expect(found).toBeDefined();

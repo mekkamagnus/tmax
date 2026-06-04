@@ -11,6 +11,13 @@
  */
 
 import { describe, test, expect, beforeEach, afterEach } from "bun:test";
+import {
+  expectDefined,
+  expectLeft,
+  expectRight,
+  expectTlispList,
+  expectTlispNumber,
+} from "../helpers/editor-fixture.ts";
 import { Editor } from "../../src/editor/editor.ts";
 import { MockTerminal } from "../mocks/terminal.ts";
 import { MockFileSystem } from "../mocks/filesystem.ts";
@@ -20,11 +27,11 @@ describe("Async Testing Framework (US-0.6.4)", () => {
   let mockTerminal: MockTerminal;
   let mockFileSystem: MockFileSystem;
 
-  beforeEach(() => {
+  beforeEach(async () => {
     mockTerminal = new MockTerminal();
     mockFileSystem = new MockFileSystem();
     editor = new Editor(mockTerminal, mockFileSystem);
-    editor.start();
+    await editor.start();
   });
 
   afterEach(() => {
@@ -32,7 +39,7 @@ describe("Async Testing Framework (US-0.6.4)", () => {
   });
 
   describe("deftest-async", () => {
-    test("defines async test with done callback", () => {
+    test("defines async test with done callback", async () => {
       const interpreter = editor.getInterpreter();
 
       const code = `(deftest-async async-test (done) (done))`;
@@ -41,13 +48,12 @@ describe("Async Testing Framework (US-0.6.4)", () => {
       expect(result._tag).toBe("Right");
 
       // Verify the test is registered with async flag
-      const testDef = interpreter.getTestDefinition("async-test");
-      expect(testDef).toBeDefined();
+      const testDef = expectDefined(interpreter.getTestDefinition("async-test"));
       expect(testDef.name).toBe("async-test");
       expect(testDef.isAsync).toBe(true);
     });
 
-    test("async test calls done when complete", () => {
+    test("async test calls done when complete", async () => {
       const interpreter = editor.getInterpreter();
 
       const code = `(deftest-async done-test (done) (done))`;
@@ -66,7 +72,7 @@ describe("Async Testing Framework (US-0.6.4)", () => {
       expect(runResult._tag).toBe("Right");
     });
 
-    test("async test times out after configured duration", () => {
+    test("async test times out after configured duration", async () => {
       const interpreter = editor.getInterpreter();
 
       // Use single-line forms
@@ -86,7 +92,7 @@ describe("Async Testing Framework (US-0.6.4)", () => {
       expect(runResult._tag).toBe("Right");
     });
 
-    test("async test reports errors properly", () => {
+    test("async test reports errors properly", async () => {
       const interpreter = editor.getInterpreter();
 
       // Use single-line form to avoid execute splitting by lines
@@ -102,12 +108,12 @@ describe("Async Testing Framework (US-0.6.4)", () => {
 
       // Should fail with assertion error
       expect(runResult._tag).toBe("Left");
-      expect(runResult.left.message).toContain("Assertion failed");
+      expect(expectLeft(runResult).message).toContain("Assertion failed");
     });
   });
 
   describe("await", () => {
-    test("awaits promise resolution in async test", () => {
+    test("awaits promise resolution in async test", async () => {
       const interpreter = editor.getInterpreter();
 
       // Use single-line form
@@ -127,7 +133,7 @@ describe("Async Testing Framework (US-0.6.4)", () => {
   });
 
   describe("async-all", () => {
-    test("waits for all async tests to complete", () => {
+    test("waits for all async tests to complete", async () => {
       const interpreter = editor.getInterpreter();
 
       // Use single-line forms
@@ -143,17 +149,17 @@ describe("Async Testing Framework (US-0.6.4)", () => {
 
       // Should run without error and return a list
       expect(runAllResult._tag).toBe("Right");
-      expect(runAllResult.right.type).toBe("list");
+      expect(expectRight(runAllResult).type).toBe("list");
 
       // Check that we got some results (exact count may vary due to shared test registry)
-      const [passed, failed, total] = runAllResult.right.value;
-      expect(passed.value).toBeGreaterThan(0);
-      expect(total.value).toBeGreaterThan(0);
+      const results = expectTlispList(expectRight(runAllResult));
+      expect(expectTlispNumber(expectDefined(results[0]))).toBeGreaterThan(0);
+      expect(expectTlispNumber(expectDefined(results[2]))).toBeGreaterThan(0);
     });
   });
 
   describe("assert-eventually", () => {
-    test("polls for condition until true", () => {
+    test("polls for condition until true", async () => {
       const interpreter = editor.getInterpreter();
 
       // Use single-line form - assert-eventually just checks condition once for now
@@ -171,7 +177,7 @@ describe("Async Testing Framework (US-0.6.4)", () => {
       expect(runResult._tag).toBe("Right");
     });
 
-    test("assert-eventually times out if condition never met", () => {
+    test("assert-eventually times out if condition never met", async () => {
       const interpreter = editor.getInterpreter();
 
       // Use single-line form - condition returns false
@@ -188,12 +194,12 @@ describe("Async Testing Framework (US-0.6.4)", () => {
 
       // Should fail with "not met" error
       expect(runResult._tag).toBe("Left");
-      expect(runResult.left.message).toContain("not met");
+      expect(expectLeft(runResult).message).toContain("not met");
     });
   });
 
   describe("timeout configuration", () => {
-    test("set-async-timeout changes default timeout", () => {
+    test("set-async-timeout changes default timeout", async () => {
       const interpreter = editor.getInterpreter();
 
       const code = `(set-async-timeout 5000)`;
@@ -202,12 +208,11 @@ describe("Async Testing Framework (US-0.6.4)", () => {
       expect(result._tag).toBe("Right");
 
       // Verify timeout was set
-      const timeout = interpreter.globalEnv.lookup("__async_timeout__");
-      expect(timeout).toBeDefined();
-      expect(timeout.value).toBe(5000);
+      const timeout = expectDefined(interpreter.globalEnv.lookup("__async_timeout__"));
+      expect(expectTlispNumber(timeout)).toBe(5000);
     });
 
-    test("get-async-timeout returns current timeout", () => {
+    test("get-async-timeout returns current timeout", async () => {
       const interpreter = editor.getInterpreter();
 
       const code = `
@@ -217,7 +222,7 @@ describe("Async Testing Framework (US-0.6.4)", () => {
       const result = interpreter.execute(code);
 
       expect(result._tag).toBe("Right");
-      expect(result.right.value).toBe(3000);
+      expect(expectRight(result).value).toBe(3000);
     });
   });
 });

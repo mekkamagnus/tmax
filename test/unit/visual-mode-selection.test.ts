@@ -17,6 +17,7 @@ import { MockFileSystem } from "../mocks/filesystem.ts";
 import { Editor } from "../../src/editor/editor.ts";
 import { Either } from "../../src/utils/task-either.ts";
 import { readFileSync } from "fs";
+import { expectRight } from "../helpers/editor-fixture.ts";
 
 describe("Visual Mode Selection - US-1.7.1", () => {
   let terminal: MockTerminal;
@@ -25,7 +26,7 @@ describe("Visual Mode Selection - US-1.7.1", () => {
   let interpreter: any;
 
   // Setup before each test
-  const setup = async (content: string = "Line 1: Hello World\nLine 2: Test Content\nLine 3: Sample Text\nLine 4: Final Line") => {
+  const setup = (content: string = "Line 1: Hello World\nLine 2: Test Content\nLine 3: Sample Text\nLine 4: Final Line") => {
     terminal = new MockTerminal();
     filesystem = new MockFileSystem();
 
@@ -57,7 +58,7 @@ describe("Visual Mode Selection - US-1.7.1", () => {
       setup();
 
       // Act: Press 'v' to enter visual mode
-      await editor.handleKey("v", "v");
+      await editor.handleKey("v");
 
       // Assert: Should be in visual mode
       const state = editor.getState();
@@ -72,7 +73,7 @@ describe("Visual Mode Selection - US-1.7.1", () => {
       interpreter.execute("(cursor-move 0 7)");
 
       // Act: Press 'v' to enter visual mode
-      await editor.handleKey("v", "v");
+      await editor.handleKey("v");
 
       // Assert: Selection should start at cursor position
       const selection = editor.getSelection();
@@ -87,10 +88,10 @@ describe("Visual Mode Selection - US-1.7.1", () => {
       // Arrange
       await setup();
       interpreter.execute("(cursor-move 0 7)");
-      await editor.handleKey("v", "v");
+      await editor.handleKey("v");
 
       // Act: Move cursor right using l key (which triggers visual-update-end via handleKey)
-      await editor.handleKey("l", "l");
+      await editor.handleKey("l");
 
       // Assert: Selection should expand
       const selection = editor.getSelection();
@@ -102,7 +103,7 @@ describe("Visual Mode Selection - US-1.7.1", () => {
       // Arrange
       setup();
       interpreter.execute("(cursor-move 0 0)");
-      await editor.handleKey("v", "v");
+      await editor.handleKey("v");
 
       // Act: Move cursor to line 2, column 10
       interpreter.execute("(cursor-move 1 10)");
@@ -122,7 +123,7 @@ describe("Visual Mode Selection - US-1.7.1", () => {
       setup();
 
       // Act: Press 'V' (Shift+v) to enter line-wise visual mode
-      await editor.handleKey("V", "V");
+      await editor.handleKey("V");
 
       // Assert: Should be in visual mode with line selection
       const state = editor.getState();
@@ -137,7 +138,7 @@ describe("Visual Mode Selection - US-1.7.1", () => {
       interpreter.execute("(cursor-move 1 5)");
 
       // Act: Press 'V'
-      await editor.handleKey("V", "V");
+      await editor.handleKey("V");
 
       // Assert: Entire line should be selected
       const selection = editor.getSelection();
@@ -152,7 +153,7 @@ describe("Visual Mode Selection - US-1.7.1", () => {
       // Arrange
       setup();
       interpreter.execute("(cursor-move 1 0)");
-      await editor.handleKey("V", "V");
+      await editor.handleKey("V");
 
       // Act: Move down to line 3
       interpreter.execute("(cursor-move 3 0)");
@@ -170,7 +171,7 @@ describe("Visual Mode Selection - US-1.7.1", () => {
       setup();
 
       // Act: Press Ctrl+v
-      await editor.handleKey("\x13", "C-v"); // Ctrl+v is ASCII 0x13
+      await editor.handleKey("\x16"); // Ctrl+v is ASCII 0x16
 
       // Assert: Should be in visual mode with block selection
       const state = editor.getState();
@@ -183,7 +184,7 @@ describe("Visual Mode Selection - US-1.7.1", () => {
       // Arrange
       setup();
       interpreter.execute("(cursor-move 0 7)");
-      await editor.handleKey("\x13", "C-v");
+      await editor.handleKey("\x16");
 
       // Act: Move cursor to line 2, column 15
       interpreter.execute("(cursor-move 2 15)");
@@ -203,47 +204,38 @@ describe("Visual Mode Selection - US-1.7.1", () => {
       // Arrange
       setup();
       interpreter.execute("(cursor-move 1 7)");
-      await editor.handleKey("v", "v");
+      await editor.handleKey("v");
       interpreter.execute("(cursor-move 1 14)");
 
       // Act: Press 'd' to delete
-      await editor.handleKey("d", "d");
+      await editor.handleKey("d");
 
       // Assert: Text should be deleted, mode should be normal
       const state = editor.getState();
       expect(state.mode).toBe("normal");
       const buffer = state.currentBuffer;
-      if (buffer) {
-        const lineResult = buffer.getLine(1);
-        expect(Either.isRight(lineResult)).toBe(true);
-        if (Either.isRight(lineResult)) {
-          const line = lineResult.right;
-          expect(line).not.toContain("Test Content");
-        }
-      }
+      expect(buffer).toBeDefined();
+      if (!buffer) throw new Error("Expected current buffer");
+      expect(expectRight(buffer.getLine(1))).not.toContain("Test Content");
     });
 
     test("y yanks selected text without deleting", async () => {
       // Arrange
       await setup();
       interpreter.execute("(cursor-move 1 7)");
-      await editor.handleKey("v", "v");
+      await editor.handleKey("v");
       interpreter.execute("(cursor-move 1 14)");
 
       // Act: Press 'y' to yank
-      await editor.handleKey("y", "y");
+      await editor.handleKey("y");
 
       // Assert: Text should not be deleted, copied to register
       const state = editor.getState();
       expect(state.mode).toBe("normal");
       const buffer = editor.getState().currentBuffer;
-      if (buffer) {
-        const lineResult = buffer.getLine(1);
-        expect(Either.isRight(lineResult)).toBe(true);
-        if (Either.isRight(lineResult)) {
-          expect(lineResult.right).toContain("Test Content");
-        }
-      }
+      expect(buffer).toBeDefined();
+      if (!buffer) throw new Error("Expected current buffer");
+      expect(expectRight(buffer.getLine(1))).toContain("Test Content");
       // Yank register should contain selected text
       // (This would require a getYankRegister function)
     });
@@ -252,42 +244,34 @@ describe("Visual Mode Selection - US-1.7.1", () => {
       // Arrange
       await setup("HELLO WORLD");
       interpreter.execute("(cursor-move 0 0)");
-      await editor.handleKey("v", "v");
+      await editor.handleKey("v");
       interpreter.execute("(cursor-move 0 5)");
 
       // Act: Press 'u' to lowercase
-      await editor.handleKey("u", "u");
+      await editor.handleKey("u");
 
       // Assert: Text should be lowercased
       const buffer = editor.getState().currentBuffer;
-      if (buffer) {
-        const lineResult = buffer.getLine(0);
-        expect(Either.isRight(lineResult)).toBe(true);
-        if (Either.isRight(lineResult)) {
-          expect(lineResult.right.substring(0, 5)).toBe("hello");
-        }
-      }
+      expect(buffer).toBeDefined();
+      if (!buffer) throw new Error("Expected current buffer");
+      expect(expectRight(buffer.getLine(0)).substring(0, 5)).toBe("hello");
     });
 
     test("U uppercases selected text", async () => {
       // Arrange
       await setup("hello world");
       interpreter.execute("(cursor-move 0 0)");
-      await editor.handleKey("v", "v");
+      await editor.handleKey("v");
       interpreter.execute("(cursor-move 0 5)");
 
       // Act: Press 'U' to uppercase
-      await editor.handleKey("U", "U");
+      await editor.handleKey("U");
 
       // Assert: Text should be uppercased
       const buffer = editor.getState().currentBuffer;
-      if (buffer) {
-        const lineResult = buffer.getLine(0);
-        expect(Either.isRight(lineResult)).toBe(true);
-        if (Either.isRight(lineResult)) {
-          expect(lineResult.right.substring(0, 5)).toBe("HELLO");
-        }
-      }
+      expect(buffer).toBeDefined();
+      if (!buffer) throw new Error("Expected current buffer");
+      expect(expectRight(buffer.getLine(0)).substring(0, 5)).toBe("HELLO");
     });
   });
 
@@ -296,13 +280,13 @@ describe("Visual Mode Selection - US-1.7.1", () => {
       // Arrange
       setup();
       interpreter.execute("(cursor-move 0 7)");
-      await editor.handleKey("v", "v");
+      await editor.handleKey("v");
       interpreter.execute("(cursor-move 0 12)");
       const state = editor.getState();
       expect(state.mode).toBe("visual");
 
       // Act: Press Escape
-      await editor.handleKey("Escape", "Escape");
+      await editor.handleKey("Escape");
 
       // Assert: Should be in normal mode, selection cleared
       const newState = editor.getState();
@@ -330,10 +314,10 @@ describe("Visual Mode Selection - US-1.7.1", () => {
       // Arrange
       await setup();
       interpreter.execute("(cursor-move 1 7)");
-      await editor.handleKey("v", "v");
+      await editor.handleKey("v");
 
       // Act: Move with l (right)
-      await editor.handleKey("l", "l");
+      await editor.handleKey("l");
 
       // Assert: Selection should expand
       const selection = editor.getSelection();
@@ -344,7 +328,7 @@ describe("Visual Mode Selection - US-1.7.1", () => {
       // Arrange
       setup();
       interpreter.execute("(cursor-move 0 7)");
-      await editor.handleKey("v", "v");
+      await editor.handleKey("v");
 
       // Act: Press w to move to next word
       const result = interpreter.execute("(word-next)");

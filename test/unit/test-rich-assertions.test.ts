@@ -8,6 +8,7 @@ import { describe, test, expect, beforeEach } from "bun:test";
 import { TLispInterpreterImpl } from "../../src/tlisp/interpreter.ts";
 import { registerTestingFramework } from "../../src/tlisp/test-framework.ts";
 import { Either } from "../../src/utils/task-either.ts";
+import { expectDefined } from "../helpers/editor-fixture.ts";
 
 describe("Rich Assertions - US-0.6.1", () => {
   let interpreter: TLispInterpreterImpl;
@@ -45,7 +46,7 @@ describe("Rich Assertions - US-0.6.1", () => {
       expect(Either.isLeft(result)).toBe(true);
       if (Either.isLeft(result)) {
         expect(result.left.message).toContain("orange");
-        expect(result.left.details).toBeDefined();
+        expect(expectDefined(result.left.details)).toBeDefined();
       }
     });
   });
@@ -77,9 +78,9 @@ describe("Rich Assertions - US-0.6.1", () => {
       const result = interpreter.execute(code);
       expect(Either.isLeft(result)).toBe(true);
       if (Either.isLeft(result)) {
-        expect(result.left.details).toBeDefined();
-        expect(result.left.details.haystack).toBeDefined();
-        expect(result.left.details.needle).toBeDefined();
+        expect(expectDefined(result.left.details)).toBeDefined();
+        expect(expectDefined(result.left.details).haystack).toBeDefined();
+        expect(expectDefined(result.left.details).needle).toBeDefined();
       }
     });
 
@@ -120,9 +121,9 @@ describe("Rich Assertions - US-0.6.1", () => {
       const result = interpreter.execute(code);
       expect(Either.isLeft(result)).toBe(true);
       if (Either.isLeft(result)) {
-        expect(result.left.details).toBeDefined();
-        expect(result.left.details.pattern).toBeDefined();
-        expect(result.left.details.string).toBeDefined();
+        expect(expectDefined(result.left.details)).toBeDefined();
+        expect(expectDefined(result.left.details).pattern).toBeDefined();
+        expect(expectDefined(result.left.details).string).toBeDefined();
       }
     });
 
@@ -204,9 +205,9 @@ describe("Rich Assertions - US-0.6.1", () => {
       const result = interpreter.execute(code);
       expect(Either.isLeft(result)).toBe(true);
       if (Either.isLeft(result)) {
-        expect(result.left.details).toBeDefined();
-        expect(result.left.details.expected).toBe("string");
-        expect(result.left.details.actual).toBe("list");
+        expect(expectDefined(result.left.details)).toBeDefined();
+        expect(expectDefined(result.left.details).expected).toBe("string");
+        expect(expectDefined(result.left.details).actual).toBe("list");
       }
     });
 
@@ -349,10 +350,10 @@ describe("Rich Assertions - US-0.6.1", () => {
       const result = interpreter.execute(code);
       expect(Either.isLeft(result)).toBe(true);
       if (Either.isLeft(result)) {
-        expect(result.left.details).toBeDefined();
-        expect(result.left.details.actual).toBeDefined();
-        expect(result.left.details.expected).toBeDefined();
-        expect(result.left.details.tolerance).toBeDefined();
+        expect(expectDefined(result.left.details)).toBeDefined();
+        expect(expectDefined(result.left.details).actual).toBeDefined();
+        expect(expectDefined(result.left.details).expected).toBeDefined();
+        expect(expectDefined(result.left.details).tolerance).toBeDefined();
       }
     });
 

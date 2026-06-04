@@ -68,7 +68,7 @@ describe("Error Handling and Logging System", () => {
     // Test error history
     const history = errorManager.getErrorHistory();
     expect(history.length).toBe(1);
-    expect(history[0].message).toBe("Test error message");
+    expect(history[0]!.message).toBe("Test error message");
     
     // Test error statistics
     const stats = errorManager.getErrorStats();
@@ -200,13 +200,13 @@ test("DebugReporter - should track operation performance", () => {
     const context = debugReporter.getDebugContext();
     
     expect(context.performanceMetrics).toBeDefined();
-    expect(typeof context.performanceMetrics.operationsPerSecond).toBe("number");
-    expect(typeof context.performanceMetrics.averageResponseTime).toBe("number");
+    expect(typeof context.performanceMetrics!.operationsPerSecond).toBe("number");
+    expect(typeof context.performanceMetrics!.averageResponseTime).toBe("number");
     
     // Should have one active operation
     expect(context.activeOperations.length).toBe(1);
-    expect(context.activeOperations[0].operation).toBe("slow_operation");
-    expect(context.activeOperations[0].correlationId).toBe(correlationId2);
+    expect(context.activeOperations[0]!.operation).toBe("slow_operation");
+    expect(context.activeOperations[0]!.correlationId).toBe(correlationId2);
     
     // Complete the slow operation
     debugReporter.recordOperationComplete(correlationId2);

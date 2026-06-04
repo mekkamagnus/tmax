@@ -21,11 +21,11 @@ describe("Which-Key Popup (US-1.10.3)", () => {
   let terminal: MockTerminal;
   let filesystem: MockFileSystem;
 
-  beforeEach(() => {
+  beforeEach(async () => {
     terminal = new MockTerminal();
     filesystem = new MockFileSystem();
     editor = new Editor(terminal, filesystem);
-    editor.start();
+    await editor.start();
 
     // Create a test buffer
     editor.createBuffer("test", "hello world");
@@ -43,7 +43,7 @@ describe("Which-Key Popup (US-1.10.3)", () => {
   });
 
   describe("Which-Key State Management", () => {
-    test("should track which-key active state", () => {
+    test("should track which-key active state", async () => {
       const state = editor.getState();
 
       // Initially which-key should not be active
@@ -52,7 +52,7 @@ describe("Which-Key Popup (US-1.10.3)", () => {
 
     test("should store key prefix when which-key activates", async () => {
       // Type C-c prefix
-      await editor.handleKey("\x03", "C-c");
+      await editor.handleKey("\x03");
 
       // Wait for which-key timeout (simulated)
       await new Promise(resolve => setTimeout(resolve, 1100));
@@ -64,13 +64,13 @@ describe("Which-Key Popup (US-1.10.3)", () => {
 
     test("should clear which-key state when C-g is pressed", async () => {
       // Type C-c prefix
-      await editor.handleKey("\x03", "C-c");
+      await editor.handleKey("\x03");
 
       // Wait for which-key timeout
       await new Promise(resolve => setTimeout(resolve, 1100));
 
       // Press C-g to cancel
-      await editor.handleKey("\x07", "C-g");
+      await editor.handleKey("\x07");
 
       const state = editor.getState();
       expect(state.whichKeyActive).toBe(false);
@@ -79,8 +79,8 @@ describe("Which-Key Popup (US-1.10.3)", () => {
 
     test("should not activate which-key on quick typing", async () => {
       // Type C-c followed immediately by another key (no pause)
-      await editor.handleKey("\x03", "C-c");
-      await editor.handleKey("c", "c");
+      await editor.handleKey("\x03");
+      await editor.handleKey("c");
 
       // Wait a bit to ensure which-key didn't activate
       await new Promise(resolve => setTimeout(resolve, 200));
@@ -93,7 +93,7 @@ describe("Which-Key Popup (US-1.10.3)", () => {
   describe("Which-Key Bindings Discovery", () => {
     test("should find all bindings for C-c prefix", async () => {
       // Type C-c prefix and wait for which-key
-      await editor.handleKey("\x03", "C-c");
+      await editor.handleKey("\x03");
       await new Promise(resolve => setTimeout(resolve, 1100));
 
       const state = editor.getState();
@@ -111,7 +111,7 @@ describe("Which-Key Popup (US-1.10.3)", () => {
 
     test("should find all bindings for SPC prefix", async () => {
       // Type SPC prefix and wait for which-key
-      await editor.handleKey(" ", "space");
+      await editor.handleKey(" ");
       await new Promise(resolve => setTimeout(resolve, 1100));
 
       const state = editor.getState();
@@ -130,11 +130,11 @@ describe("Which-Key Popup (US-1.10.3)", () => {
 
     test("should show next-level bindings after typing second key", async () => {
       // Type C-c prefix and wait
-      await editor.handleKey("\x03", "C-c");
+      await editor.handleKey("\x03");
       await new Promise(resolve => setTimeout(resolve, 1100));
 
       // Type second key
-      await editor.handleKey("c", "c");
+      await editor.handleKey("c");
       await new Promise(resolve => setTimeout(resolve, 1100));
 
       const state = editor.getState();
@@ -150,7 +150,7 @@ describe("Which-Key Popup (US-1.10.3)", () => {
   describe("Which-Key Popup Display", () => {
     test("should show which-key popup in status message", async () => {
       // Type C-c prefix and wait
-      await editor.handleKey("\x03", "C-c");
+      await editor.handleKey("\x03");
       await new Promise(resolve => setTimeout(resolve, 1100));
 
       const state = editor.getState();
@@ -162,7 +162,7 @@ describe("Which-Key Popup (US-1.10.3)", () => {
 
     test("should show multiple bindings in popup", async () => {
       // Type C-c prefix and wait
-      await editor.handleKey("\x03", "C-c");
+      await editor.handleKey("\x03");
       await new Promise(resolve => setTimeout(resolve, 1100));
 
       const state = editor.getState();
@@ -181,7 +181,7 @@ describe("Which-Key Popup (US-1.10.3)", () => {
       const startTime = Date.now();
 
       // Type C-c prefix
-      await editor.handleKey("\x03", "C-c");
+      await editor.handleKey("\x03");
 
       // Wait for which-key to activate
       while (Date.now() - startTime < 1100) {
@@ -198,13 +198,13 @@ describe("Which-Key Popup (US-1.10.3)", () => {
 
     test("should not activate which-key if next key pressed before timeout", async () => {
       // Type C-c prefix
-      await editor.handleKey("\x03", "C-c");
+      await editor.handleKey("\x03");
 
       // Wait 500ms (less than timeout)
       await new Promise(resolve => setTimeout(resolve, 500));
 
       // Type next key
-      await editor.handleKey("c", "c");
+      await editor.handleKey("c");
 
       // Wait to ensure which-key didn't activate
       await new Promise(resolve => setTimeout(resolve, 600));
@@ -220,7 +220,7 @@ describe("Which-Key Popup (US-1.10.3)", () => {
       expect(editor.getMode()).toBe("normal");
 
       // Type C-c prefix and wait
-      await editor.handleKey("\x03", "C-c");
+      await editor.handleKey("\x03");
       await new Promise(resolve => setTimeout(resolve, 1100));
 
       const state = editor.getState();
@@ -234,17 +234,17 @@ describe("Which-Key Popup (US-1.10.3)", () => {
 
     test("should show different bindings in different modes", async () => {
       // Test in normal mode
-      await editor.handleKey("\x03", "C-c");
+      await editor.handleKey("\x03");
       await new Promise(resolve => setTimeout(resolve, 1100));
 
       const normalState = editor.getState();
       const normalBindings = normalState.whichKeyBindings || [];
 
       // Switch to insert mode
-      await editor.handleKey("i", "i");
+      await editor.handleKey("i");
 
       // Type C-c in insert mode
-      await editor.handleKey("\x03", "C-c");
+      await editor.handleKey("\x03");
       await new Promise(resolve => setTimeout(resolve, 1100));
 
       const insertState = editor.getState();
@@ -257,7 +257,7 @@ describe("Which-Key Popup (US-1.10.3)", () => {
   });
 
   describe("Which-Key API Functions", () => {
-    test("should provide which-key-enable function", () => {
+    test("should provide which-key-enable function", async () => {
       const interpreter = (editor as any).getInterpreter();
 
       // Enable which-key
@@ -266,7 +266,7 @@ describe("Which-Key Popup (US-1.10.3)", () => {
       expect(result._tag).toBe("Right");
     });
 
-    test("should provide which-key-disable function", () => {
+    test("should provide which-key-disable function", async () => {
       const interpreter = (editor as any).getInterpreter();
 
       // Disable which-key
@@ -275,7 +275,7 @@ describe("Which-Key Popup (US-1.10.3)", () => {
       expect(result._tag).toBe("Right");
     });
 
-    test("should provide which-key-timeout function", () => {
+    test("should provide which-key-timeout function", async () => {
       const interpreter = (editor as any).getInterpreter();
 
       // Set timeout
@@ -284,7 +284,7 @@ describe("Which-Key Popup (US-1.10.3)", () => {
       expect(result._tag).toBe("Right");
     });
 
-    test("should provide which-key-active function", () => {
+    test("should provide which-key-active function", async () => {
       const interpreter = (editor as any).getInterpreter();
 
       // Check if which-key is active
@@ -298,7 +298,7 @@ describe("Which-Key Popup (US-1.10.3)", () => {
     test("should execute command when selecting from which-key popup", async () => {
       // This test verifies that pressing a key shown in which-key executes the command
       // Type C-c prefix and wait
-      await editor.handleKey("\x03", "C-c");
+      await editor.handleKey("\x03");
       await new Promise(resolve => setTimeout(resolve, 1100));
 
       const state = editor.getState();
@@ -306,11 +306,11 @@ describe("Which-Key Popup (US-1.10.3)", () => {
 
       if (bindings.length > 0) {
         // Press the first key in the bindings
-        const firstBinding = bindings[0];
+        const firstBinding = bindings[0]!;
         const keyToPress = firstBinding.key.split(" ").pop(); // Get last key in sequence
 
         if (keyToPress) {
-          await editor.handleKey(keyToPress, keyToPress);
+          await editor.handleKey(keyToPress);
 
           // Command should have been executed
           // (specific behavior depends on the binding)
@@ -320,7 +320,7 @@ describe("Which-Key Popup (US-1.10.3)", () => {
 
     test("should clear which-key after executing command", async () => {
       // Type C-c prefix and wait
-      await editor.handleKey("\x03", "C-c");
+      await editor.handleKey("\x03");
       await new Promise(resolve => setTimeout(resolve, 1100));
 
       const state = editor.getState();
@@ -328,11 +328,11 @@ describe("Which-Key Popup (US-1.10.3)", () => {
 
       if (bindings.length > 0) {
         // Press a key to execute command
-        const firstBinding = bindings[0];
+        const firstBinding = bindings[0]!;
         const keyToPress = firstBinding.key.split(" ").pop();
 
         if (keyToPress) {
-          await editor.handleKey(keyToPress, keyToPress);
+          await editor.handleKey(keyToPress);
 
           // Which-key should be cleared
           const newState = editor.getState();

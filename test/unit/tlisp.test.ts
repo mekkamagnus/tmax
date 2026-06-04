@@ -19,6 +19,8 @@ import {
 } from "../../src/tlisp/values.ts";
 import { TLispEnvironmentImpl } from "../../src/tlisp/environment.ts";
 import { TLispInterpreterImpl } from "../../src/tlisp/interpreter.ts";
+import { Either } from "../../src/utils/task-either.ts";
+import { expectDefined } from "../helpers/editor-fixture.ts";
 
 /**
  * Test suite for T-Lisp values
@@ -158,10 +160,9 @@ describe("T-Lisp Interpreter Foundation", () => {
   });
 
   test("should define custom built-ins", () => {
-    interpreter.defineBuiltin("test-fn", (args) => createString("test"));
+    interpreter.defineBuiltin("test-fn", () => Either.right(createString("test")));
     
-    const testFn = interpreter.globalEnv.lookup("test-fn");
-    expect(testFn).toBeDefined();
+    const testFn = expectDefined(interpreter.globalEnv.lookup("test-fn"));
     expect(testFn.type).toBe("function");
   });
 
