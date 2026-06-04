@@ -58,8 +58,10 @@ export class TLispREPL {
         
         // Parse and evaluate the input
         const result = this.evaluate(input);
-        if (result !== undefined) {
-          console.log(valueToString(result));
+        if ('right' in result) {
+          console.log(valueToString(result.right));
+        } else {
+          console.error(`Error: ${result.left.message}`);
         }
       } catch (error) {
         console.error(`Error: ${error instanceof Error ? error.message : String(error)}`);

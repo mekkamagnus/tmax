@@ -138,7 +138,7 @@ export function formatTestResult(result: TestResult): string {
       output += ` ${colorize(`${file}:${line || 0}`, "dim")}`;
     }
 
-    if (error && currentConfig.mode !== "quiet") {
+    if (error) {
       output += `\n    ${colorize(error, "dim")}`;
     }
   }

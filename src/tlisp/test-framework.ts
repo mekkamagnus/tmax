@@ -50,6 +50,9 @@ import {
 let currentTestResults: { testName: string, passed: boolean, error?: string }[] = [];
 let testCounts = { passed: 0, failed: 0, total: 0 };
 
+// Local test registry for tests registered via this framework module
+const globalTestRegistry: Map<string, { body: TLispValue[], name: string }> = new Map();
+
 // Global setup and teardown functions
 let globalSetupFunction: TLispValue | null = null;
 let globalTeardownFunction: TLispValue | null = null;
@@ -352,7 +355,7 @@ export function registerTestingFramework(interpreter: TLispInterpreter): void {
 
       // Run each registered test
       for (let i = 0; i < testNames.length; i++) {
-        const testName = testNames[i];
+        const testName = testNames[i]!;
         const testDef = interpreter.getTestDefinition?.(testName);
         if (!testDef) continue;
 
@@ -548,7 +551,7 @@ export function registerTestingFramework(interpreter: TLispInterpreter): void {
       });
     }
 
-    const value = args[0];
+    const value = args[0]!;
     if (!isTruthy(value)) {
       return Either.left({
         type: 'EvalError',
@@ -576,7 +579,7 @@ export function registerTestingFramework(interpreter: TLispInterpreter): void {
       });
     }
 
-    const value = args[0];
+    const value = args[0]!;
     if (isTruthy(value)) {
       return Either.left({
         type: 'EvalError',
@@ -604,7 +607,7 @@ export function registerTestingFramework(interpreter: TLispInterpreter): void {
       });
     }
 
-    const [expected, actual] = args;
+    const [expected, actual] = args as [TLispValue, TLispValue];
     if (!valuesEqual(expected, actual)) {
       return Either.left({
         type: 'EvalError',
@@ -632,7 +635,7 @@ export function registerTestingFramework(interpreter: TLispInterpreter): void {
       });
     }
 
-    const [expected, actual] = args;
+    const [expected, actual] = args as [TLispValue, TLispValue];
     if (valuesEqual(expected, actual)) {
       return Either.left({
         type: 'EvalError',
@@ -660,7 +663,7 @@ export function registerTestingFramework(interpreter: TLispInterpreter): void {
       });
     }
 
-    const paramsArg = args[0];
+    const paramsArg = args[0]!;
     if (paramsArg.type !== "list") {
       return Either.left({
         type: 'EvalError',
@@ -691,7 +694,7 @@ export function registerTestingFramework(interpreter: TLispInterpreter): void {
       });
     }
 
-    const paramsArg = args[0];
+    const paramsArg = args[0]!;
     if (paramsArg.type !== "list") {
       return Either.left({
         type: 'EvalError',
@@ -723,7 +726,7 @@ export function registerTestingFramework(interpreter: TLispInterpreter): void {
     }
 
     const nameArg = args[0];
-    const valueArg = args[1];
+    const valueArg = args[1]!;
 
     if (!nameArg || nameArg.type !== "symbol") {
       return Either.left({
@@ -758,7 +761,7 @@ export function registerTestingFramework(interpreter: TLispInterpreter): void {
     }
 
     const nameArg = args[0];
-    const valueArg = args[1];
+    const valueArg = args[1]!;
 
     if (!nameArg || nameArg.type !== "symbol") {
       return Either.left({
@@ -802,7 +805,7 @@ export function registerTestingFramework(interpreter: TLispInterpreter): void {
       });
     }
 
-    const [listArg, itemArg] = args;
+    const [listArg, itemArg] = args as [TLispValue, TLispValue];
 
     if (listArg.type !== "list") {
       return Either.left({
@@ -846,7 +849,7 @@ export function registerTestingFramework(interpreter: TLispInterpreter): void {
       });
     }
 
-    const [haystackArg, needleArg] = args;
+    const [haystackArg, needleArg] = args as [TLispValue, TLispValue];
 
     if (haystackArg.type !== "string") {
       return Either.left({
@@ -899,7 +902,7 @@ export function registerTestingFramework(interpreter: TLispInterpreter): void {
       });
     }
 
-    const [patternArg, stringArg] = args;
+    const [patternArg, stringArg] = args as [TLispValue, TLispValue];
 
     if (patternArg.type !== "string") {
       return Either.left({
@@ -963,7 +966,7 @@ export function registerTestingFramework(interpreter: TLispInterpreter): void {
       });
     }
 
-    const [valueArg, typeArg] = args;
+    const [valueArg, typeArg] = args as [TLispValue, TLispValue];
 
     if (typeArg.type !== "symbol") {
       return Either.left({
@@ -1008,7 +1011,7 @@ export function registerTestingFramework(interpreter: TLispInterpreter): void {
       });
     }
 
-    const [valueArg, expectedArg] = args;
+    const [valueArg, expectedArg] = args as [TLispValue, TLispValue];
 
     if (valueArg.type !== "number" || expectedArg.type !== "number") {
       return Either.left({
@@ -1055,7 +1058,7 @@ export function registerTestingFramework(interpreter: TLispInterpreter): void {
       });
     }
 
-    const [valueArg, expectedArg] = args;
+    const [valueArg, expectedArg] = args as [TLispValue, TLispValue];
 
     if (valueArg.type !== "number" || expectedArg.type !== "number") {
       return Either.left({
@@ -1102,7 +1105,7 @@ export function registerTestingFramework(interpreter: TLispInterpreter): void {
       });
     }
 
-    const [actualArg, toleranceArg, expectedArg] = args;
+    const [actualArg, toleranceArg, expectedArg] = args as [TLispValue, TLispValue, TLispValue];
 
     if (actualArg.type !== "number" || toleranceArg.type !== "number" || expectedArg.type !== "number") {
       return Either.left({
@@ -1345,7 +1348,7 @@ export function registerTestingFramework(interpreter: TLispInterpreter): void {
 
     // Run teardown in reverse order
     for (let i = fixturesToRun.length - 1; i >= 0; i--) {
-      const fixture = fixturesToRun[i];
+      const fixture = fixturesToRun[i]!;
       const teardownResult = runFixtureTeardown(fixture, interpreter, interpreter.globalEnv);
       // Log but don't fail on teardown errors
       if (Either.isLeft(teardownResult)) {
@@ -1448,9 +1451,10 @@ export function registerTestingFramework(interpreter: TLispInterpreter): void {
             }
             // Count from nested suite
             if (nestedResult.right.type === "list") {
-              const [passed, failed] = nestedResult.right.value;
-              suitePassed += passed.value || 0;
-              suiteFailed += failed.value || 0;
+              const nestedValues = nestedResult.right.value as TLispValue[];
+              const [passed, failed] = nestedValues as [TLispValue, TLispValue];
+              suitePassed += (passed.value as number) || 0;
+              suiteFailed += (failed.value as number) || 0;
             }
           }
         }
@@ -1514,7 +1518,7 @@ export function registerTestingFramework(interpreter: TLispInterpreter): void {
     const suiteNames = interpreter.getAllSuiteNames?.() || [];
 
     // Create list of suites with their info
-    const suitesInfo = suiteNames.map(name => {
+    const suitesInfo = suiteNames.map((name: string) => {
       const suite = interpreter.getSuiteDefinition?.(name);
       if (!suite) {
         return createString(name);
@@ -1523,7 +1527,7 @@ export function registerTestingFramework(interpreter: TLispInterpreter): void {
       // Return a list with name and description
       return createList([
         createString(suite.name),
-        suite.description ? createString(suite.description) : createNil(),
+        (suite as any).description ? createString((suite as any).description) : createNil(),
         createNumber(suite.tests.length)
       ]);
     });
@@ -1551,7 +1555,7 @@ export function registerTestingFramework(interpreter: TLispInterpreter): void {
       });
     }
 
-    const timeoutArg = args[0];
+    const timeoutArg = args[0]!;
     if (timeoutArg.type !== "number") {
       return Either.left({
         type: 'EvalError',
@@ -1858,7 +1862,7 @@ export function registerTestingFramework(interpreter: TLispInterpreter): void {
       const testNames = interpreter.getAllTestNames?.() || [];
 
       // Filter to only async tests
-      const asyncTestNames = testNames.filter(name => {
+      const asyncTestNames = testNames.filter((name: string) => {
         const testDef = interpreter.getTestDefinition?.(name);
         return testDef?.isAsync === true;
       });
@@ -1934,7 +1938,7 @@ export function registerTestingFramework(interpreter: TLispInterpreter): void {
       });
     }
 
-    const [conditionFn, timeoutArg] = args;
+    const [conditionFn, timeoutArg] = args as [TLispValue, TLispValue];
 
     if (conditionFn.type !== "function") {
       return Either.left({
@@ -2007,7 +2011,7 @@ export function registerTestingFramework(interpreter: TLispInterpreter): void {
 
     // For now, just return the value as-is
     // Real async/await would require Promise integration
-    const value = args[0];
+    const value = args[0]!;
     return Either.right(value);
   });
 
@@ -2028,7 +2032,7 @@ export function registerTestingFramework(interpreter: TLispInterpreter): void {
       });
     }
 
-    const modeArg = args[0];
+    const modeArg = args[0]!;
     if (modeArg.type !== "string") {
       return Either.left({
         type: 'EvalError',
@@ -2066,7 +2070,7 @@ export function registerTestingFramework(interpreter: TLispInterpreter): void {
       });
     }
 
-    const modeArg = args[0];
+    const modeArg = args[0]!;
     if (modeArg.type !== "string") {
       return Either.left({
         type: 'EvalError',
@@ -2105,7 +2109,7 @@ export function registerTestingFramework(interpreter: TLispInterpreter): void {
       });
     }
 
-    const modeArg = args[0];
+    const modeArg = args[0]!;
     if (modeArg.type !== "string") {
       return Either.left({
         type: 'EvalError',
@@ -2143,7 +2147,7 @@ export function registerTestingFramework(interpreter: TLispInterpreter): void {
       });
     }
 
-    const showArg = args[0];
+    const showArg = args[0]!;
     if (showArg.type !== "boolean") {
       return Either.left({
         type: 'EvalError',
@@ -2174,7 +2178,7 @@ export function registerTestingFramework(interpreter: TLispInterpreter): void {
       });
     }
 
-    const enableArg = args[0];
+    const enableArg = args[0]!;
     if (enableArg.type !== "boolean") {
       return Either.left({
         type: 'EvalError',
@@ -2213,7 +2217,7 @@ export function registerTestingFramework(interpreter: TLispInterpreter): void {
       });
     }
 
-    const thresholdArg = args[0];
+    const thresholdArg = args[0]!;
     if (thresholdArg.type !== "number") {
       return Either.left({
         type: 'EvalError',
@@ -2262,7 +2266,7 @@ export function registerTestingFramework(interpreter: TLispInterpreter): void {
       });
     }
 
-    const formatArg = args[0];
+    const formatArg = args[0]!;
     if (formatArg.type !== "string") {
       return Either.left({
         type: 'EvalError',

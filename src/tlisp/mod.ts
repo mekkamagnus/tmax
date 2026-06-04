@@ -3,7 +3,11 @@
  * @description T-Lisp module exports
  */
 
-export * from "./types.ts";
+export {
+  TLispValueType, TLispValue, TLispNil, TLispBoolean, TLispNumber,
+  TLispString, TLispSymbol, TLispList, TLispFunction, TLispFunctionImpl,
+  TLispMacro, TLispMacroImpl, TLispHashmap, TLispEnvironment, TLispInterpreter,
+} from "./types.ts";
 export * from "./values.ts";
 export * from "./environment.ts";
 export * from "./interpreter.ts";

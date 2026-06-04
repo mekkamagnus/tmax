@@ -20,9 +20,20 @@ import {
   createHashmap,
   createList,
   createNil,
+  createNumber,
   createString,
   isHashmap,
+  isTruthy,
+  valueToString,
+  valuesEqual,
 } from "./values.ts";
+import { Either } from "../utils/task-either.ts";
+import type { AppError } from "../error/types.ts";
+
+/** Wrap a raw TLispValue-returning function into a TLispFunctionImpl */
+function raw(fn: (args: TLispValue[]) => TLispValue): (args: TLispValue[]) => Either<AppError, TLispValue> {
+  return (args) => Either.right(fn(args));
+}
 
 /**
  * Register all standard library functions with the T-Lisp interpreter
@@ -43,7 +54,7 @@ export function registerStdlibFunctions(interpreter: TLispInterpreter): void {
    * Returns a new hash-map with the given key-value pairs
    * Requires an even number of arguments
    */
-  interpreter.defineBuiltin("hashmap", (args: TLispValue[]): TLispValue => {
+  interpreter.defineBuiltin("hashmap", raw((args: TLispValue[]) => {
     if (args.length % 2 !== 0) {
       throw new Error("hashmap requires an even number of arguments: key-value pairs");
     }
@@ -51,8 +62,8 @@ export function registerStdlibFunctions(interpreter: TLispInterpreter): void {
     const entries: [string, TLispValue][] = [];
 
     for (let i = 0; i < args.length; i += 2) {
-      const keyArg = args[i];
-      const valueArg = args[i + 1];
+      const keyArg = args[i]!;
+      const valueArg = args[i + 1]!;
 
       if (!keyArg || keyArg.type !== "string") {
         throw new Error(`hashmap keys must be strings, got ${keyArg?.type}`);
@@ -63,14 +74,14 @@ export function registerStdlibFunctions(interpreter: TLispInterpreter): void {
     }
 
     return createHashmap(entries);
-  });
+  }));
 
   /**
    * Get a value from a hash-map by key
    * Usage: (hashmap-get map key)
    * Returns the value if found, nil if not found
    */
-  interpreter.defineBuiltin("hashmap-get", (args: TLispValue[]): TLispValue => {
+  interpreter.defineBuiltin("hashmap-get", raw((args: TLispValue[]) => {
     if (args.length !== 2) {
       throw new Error("hashmap-get requires exactly 2 arguments: map and key");
     }
@@ -92,14 +103,14 @@ export function registerStdlibFunctions(interpreter: TLispInterpreter): void {
 
     // Return nil if key not found (following functional programming principles)
     return value === undefined ? createNil() : value;
-  });
+  }));
 
   /**
    * Set a key-value pair in a hash-map (immutable operation)
    * Usage: (hashmap-set map key value)
    * Returns a new hash-map with the key-value pair set
    */
-  interpreter.defineBuiltin("hashmap-set", (args: TLispValue[]): TLispValue => {
+  interpreter.defineBuiltin("hashmap-set", raw((args: TLispValue[]) => {
     if (args.length !== 3) {
       throw new Error("hashmap-set requires exactly 3 arguments: map, key, and value");
     }
@@ -119,17 +130,17 @@ export function registerStdlibFunctions(interpreter: TLispInterpreter): void {
 
     // Create new Map for immutable operation (functional programming principle)
     const newMap = new Map(oldMap);
-    newMap.set(key, valueArg);
+    newMap.set(key, valueArg!);
 
     return createHashmap(Array.from(newMap.entries()));
-  });
+  }));
 
   /**
    * Get all keys from a hash-map
    * Usage: (hashmap-keys map)
    * Returns a list of all keys as strings
    */
-  interpreter.defineBuiltin("hashmap-keys", (args: TLispValue[]): TLispValue => {
+  interpreter.defineBuiltin("hashmap-keys", raw((args: TLispValue[]) => {
     if (args.length !== 1) {
       throw new Error("hashmap-keys requires exactly 1 argument: map");
     }
@@ -144,14 +155,14 @@ export function registerStdlibFunctions(interpreter: TLispInterpreter): void {
     const keys = Array.from(map.keys()).map((key) => createString(key));
 
     return createList(keys);
-  });
+  }));
 
   /**
    * Get all values from a hash-map
    * Usage: (hashmap-values map)
    * Returns a list of all values
    */
-  interpreter.defineBuiltin("hashmap-values", (args: TLispValue[]): TLispValue => {
+  interpreter.defineBuiltin("hashmap-values", raw((args: TLispValue[]) => {
     if (args.length !== 1) {
       throw new Error("hashmap-values requires exactly 1 argument: map");
     }
@@ -166,14 +177,14 @@ export function registerStdlibFunctions(interpreter: TLispInterpreter): void {
     const values = Array.from(map.values());
 
     return createList(values);
-  });
+  }));
 
   /**
    * Check if a hash-map contains a key
    * Usage: (hashmap-has-key? map key)
    * Returns true if key exists, false otherwise
    */
-  interpreter.defineBuiltin("hashmap-has-key?", (args: TLispValue[]): TLispValue => {
+  interpreter.defineBuiltin("hashmap-has-key?", raw((args: TLispValue[]) => {
     if (args.length !== 2) {
       throw new Error("hashmap-has-key? requires exactly 2 arguments: map and key");
     }
@@ -192,14 +203,14 @@ export function registerStdlibFunctions(interpreter: TLispInterpreter): void {
     const map = mapArg.value;
 
     return createBoolean(map.has(key));
-  });
+  }));
 
   /**
    * Create a new keymap with default properties
    * Usage: (defkeymap name)
    * Defines a new keymap variable with mode, parent, and bindings properties
    */
-  interpreter.defineBuiltin("defkeymap", (args: TLispValue[]): TLispValue => {
+  interpreter.defineBuiltin("defkeymap", raw((args: TLispValue[]) => {
     if (args.length < 1) {
       throw new Error("defkeymap requires at least 1 argument: keymap name");
     }
@@ -221,14 +232,14 @@ export function registerStdlibFunctions(interpreter: TLispInterpreter): void {
     // Define the keymap in the global environment
     interpreter.globalEnv.define(keymapName, keymap);
     return keymap;
-  });
+  }));
 
   /**
    * Get a property from a keymap
    * Usage: (keymap-get keymap property)
    * Returns the value of the specified property from the keymap
    */
-  interpreter.defineBuiltin("keymap-get", (args: TLispValue[]): TLispValue => {
+  interpreter.defineBuiltin("keymap-get", raw((args: TLispValue[]) => {
     if (args.length !== 2) {
       throw new Error("keymap-get requires exactly 2 arguments: keymap and property");
     }
@@ -248,14 +259,14 @@ export function registerStdlibFunctions(interpreter: TLispInterpreter): void {
 
     const value = keymap.get(property);
     return value === undefined ? createNil() : value;
-  });
+  }));
 
   /**
    * Define a key binding in a keymap
    * Usage: (keymap-define-key keymap key command)
    * Adds or updates a key-command binding in the keymap's bindings
    */
-  interpreter.defineBuiltin("keymap-define-key", (args: TLispValue[]): TLispValue => {
+  interpreter.defineBuiltin("keymap-define-key", raw((args: TLispValue[]) => {
     if (args.length !== 3) {
       throw new Error("keymap-define-key requires exactly 3 arguments: keymap, key, command");
     }
@@ -301,14 +312,14 @@ export function registerStdlibFunctions(interpreter: TLispInterpreter): void {
     ]);
 
     return newKeymap;
-  });
+  }));
 
   /**
    * Lookup a command bound to a key in a keymap
    * Usage: (keymap-lookup keymap key)
    * Returns the command bound to the specified key, or nil if not found
    */
-  interpreter.defineBuiltin("keymap-lookup", (args: TLispValue[]): TLispValue => {
+  interpreter.defineBuiltin("keymap-lookup", raw((args: TLispValue[]) => {
     if (args.length !== 2) {
       throw new Error("keymap-lookup requires exactly 2 arguments: keymap and key");
     }
@@ -337,7 +348,7 @@ export function registerStdlibFunctions(interpreter: TLispInterpreter): void {
     const command = bindingsMap.get(key);
 
     return command === undefined ? createNil() : command;
-  });
+  }));
 
   /**
    * Set a variable in the current environment
@@ -345,12 +356,12 @@ export function registerStdlibFunctions(interpreter: TLispInterpreter): void {
    * Sets the variable to the given value and returns the value
    * The variable name can be a string or a symbol
    */
-  interpreter.defineBuiltin("setq", (args: TLispValue[]): TLispValue => {
+  interpreter.defineBuiltin("setq", raw((args: TLispValue[]) => {
     if (args.length !== 2) {
       throw new Error("setq requires exactly 2 arguments: variable name and value");
     }
 
-    const [nameArg, valueArg] = args;
+    const [nameArg, valueArg] = args as [TLispValue, TLispValue];
 
     if (!nameArg) {
       throw new Error("setq first argument cannot be null");
@@ -370,7 +381,7 @@ export function registerStdlibFunctions(interpreter: TLispInterpreter): void {
     interpreter.globalEnv.define(variableName, valueArg);
 
     return valueArg;
-  });
+  }));
 
   // Testing framework variables
   const testRegistry: Map<string, { body: TLispValue[], name: string }> = new Map();
@@ -382,7 +393,7 @@ export function registerStdlibFunctions(interpreter: TLispInterpreter): void {
    * Usage: (deftest test-name () body...)
    * Defines a test that can be run later
    */
-  interpreter.defineBuiltin("deftest", (args: TLispValue[]): TLispValue => {
+  interpreter.defineBuiltin("deftest", raw((args: TLispValue[]) => {
     if (args.length < 2) {
       throw new Error("deftest requires at least 2 arguments: test name and parameter list");
     }
@@ -405,14 +416,14 @@ export function registerStdlibFunctions(interpreter: TLispInterpreter): void {
     testRegistry.set(testName, { body: testBody, name: testName });
 
     return createString(testName);
-  });
+  }));
 
   /**
    * Run a specific test
    * Usage: (test-run test-name)
    * Executes the test and returns the result
    */
-  interpreter.defineBuiltin("test-run", (args: TLispValue[]): TLispValue => {
+  interpreter.defineBuiltin("test-run", raw((args: TLispValue[]) => {
     if (args.length !== 1) {
       throw new Error("test-run requires exactly 1 argument: test name");
     }
@@ -449,14 +460,14 @@ export function registerStdlibFunctions(interpreter: TLispInterpreter): void {
     }
 
     return createBoolean(testPassed);
-  });
+  }));
 
   /**
    * Run all registered tests
    * Usage: (test-run-all)
    * Executes all tests and returns summary statistics
    */
-  interpreter.defineBuiltin("test-run-all", (args: TLispValue[]): TLispValue => {
+  interpreter.defineBuiltin("test-run-all", raw((args: TLispValue[]) => {
     // Reset test results and counts
     currentTestResults = [];
     testCounts.passed = 0;
@@ -495,91 +506,91 @@ export function registerStdlibFunctions(interpreter: TLispInterpreter): void {
       createNumber(testCounts.failed),
       createNumber(testCounts.total)
     ]);
-  });
+  }));
 
   /**
    * Assert that a value is truthy
    * Usage: (assert-true value)
    * Passes when value is truthy, throws error otherwise
    */
-  interpreter.defineBuiltin("assert-true", (args: TLispValue[]): TLispValue => {
+  interpreter.defineBuiltin("assert-true", raw((args: TLispValue[]) => {
     if (args.length !== 1) {
       throw new Error("assert-true requires exactly 1 argument: value");
     }
 
-    const value = args[0];
+    const value = args[0]!;
     if (!isTruthy(value)) {
       throw new Error(`Assertion failed: expected truthy value, got ${valueToString(value)}`);
     }
 
     return createBoolean(true);
-  });
+  }));
 
   /**
    * Assert that a value is falsy
    * Usage: (assert-false value)
    * Passes when value is falsy, throws error otherwise
    */
-  interpreter.defineBuiltin("assert-false", (args: TLispValue[]): TLispValue => {
+  interpreter.defineBuiltin("assert-false", raw((args: TLispValue[]) => {
     if (args.length !== 1) {
       throw new Error("assert-false requires exactly 1 argument: value");
     }
 
-    const value = args[0];
+    const value = args[0]!;
     if (isTruthy(value)) {
       throw new Error(`Assertion failed: expected falsy value, got ${valueToString(value)}`);
     }
 
     return createBoolean(true);
-  });
+  }));
 
   /**
    * Assert that two values are equal
    * Usage: (assert-equal expected actual)
    * Passes when values are equal, throws error otherwise
    */
-  interpreter.defineBuiltin("assert-equal", (args: TLispValue[]): TLispValue => {
+  interpreter.defineBuiltin("assert-equal", raw((args: TLispValue[]) => {
     if (args.length !== 2) {
       throw new Error("assert-equal requires exactly 2 arguments: expected and actual");
     }
 
-    const [expected, actual] = args;
+    const [expected, actual] = args as [TLispValue, TLispValue];
     if (!valuesEqual(expected, actual)) {
       throw new Error(`Assertion failed: expected ${valueToString(expected)}, got ${valueToString(actual)}`);
     }
 
     return createBoolean(true);
-  });
+  }));
 
   /**
    * Assert that two values are not equal
    * Usage: (assert-not-equal expected actual)
    * Passes when values are not equal, throws error otherwise
    */
-  interpreter.defineBuiltin("assert-not-equal", (args: TLispValue[]): TLispValue => {
+  interpreter.defineBuiltin("assert-not-equal", raw((args: TLispValue[]) => {
     if (args.length !== 2) {
       throw new Error("assert-not-equal requires exactly 2 arguments: expected and actual");
     }
 
-    const [expected, actual] = args;
+    const [expected, actual] = args as [TLispValue, TLispValue];
     if (valuesEqual(expected, actual)) {
       throw new Error(`Assertion failed: expected ${valueToString(expected)} to not equal ${valueToString(actual)}`);
     }
 
     return createBoolean(true);
-  });
+  }));
 
   /**
    * Assert that a form raises an error
    * Usage: (assert-error form)
    * Passes when form raises error, throws error if form succeeds
    */
-  interpreter.defineBuiltin("assert-error", (args: TLispValue[]): TLispValue => {
+  interpreter.defineBuiltin("assert-error", raw((args: TLispValue[]) => {
     if (args.length !== 1) {
       throw new Error("assert-error requires exactly 1 argument: form");
     }
 
-    const form = args[0];
+    const form = args[0]!;
 
     try {
       const result = interpreter.eval(form);
@@ -594,5 +605,5 @@ export function registerStdlibFunctions(interpreter: TLispInterpreter): void {
       // Form raised an error as expected
       return createBoolean(true);
     }
-  });
+  }));
 }

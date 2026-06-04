@@ -3,9 +3,9 @@
  * @description T-Lisp interpreter implementation
  */
 
-import type { TLispInterpreter, TLispEnvironment, TLispValue, TLispFunctionImpl } from "./types.ts";
+import type { TLispInterpreter, TLispEnvironment, TLispValue, TLispFunctionImpl, EvalError } from "./types.ts";
 import { TLispParser } from "./parser.ts";
-import { TLispEvaluator, createEvaluatorWithBuiltins, type EvalError } from "./evaluator.ts";
+import { TLispEvaluator, createEvaluatorWithBuiltins } from "./evaluator.ts";
 import { createFunction } from "./values.ts";
 import { Either } from "../utils/task-either.ts";
 import { isCoverageEnabled, registerFunction } from "./test-coverage.ts";
@@ -48,7 +48,7 @@ export class TLispInterpreterImpl implements TLispInterpreter {
    * @param env - Environment for evaluation
    * @returns Evaluated result
    */
-  eval(expr: TLispValue, env?: TLispEnvironment): TLispValue {
+  eval(expr: TLispValue, env?: TLispEnvironment): Either<EvalError, TLispValue> {
     const evalEnv = env || this.globalEnv;
     return this.evaluator.eval(expr, evalEnv);
   }
@@ -72,7 +72,7 @@ export class TLispInterpreterImpl implements TLispInterpreter {
 
       const exprResult = this.parser.parse(trimmedForm);
       if (Either.isLeft(exprResult)) {
-        return exprResult; // Return parse error
+        return Either.left({ type: 'EvalError', variant: 'SyntaxError', message: exprResult.left.message });
       }
 
       const expr = exprResult.right;
@@ -91,7 +91,7 @@ export class TLispInterpreterImpl implements TLispInterpreter {
 
     const nilResult = this.parser.parse("nil");
     if (Either.isLeft(nilResult)) {
-      return nilResult; // Return parse error
+      return Either.left({ type: 'EvalError', variant: 'SyntaxError', message: nilResult.left.message });
     }
 
     return Either.right(nilResult.right);
@@ -115,7 +115,7 @@ export class TLispInterpreterImpl implements TLispInterpreter {
     };
 
     for (let i = 0; i < source.length; i++) {
-      const ch = source[i];
+      const ch = source[i]!;
 
       if (inComment) {
         if (ch === "\n") {
@@ -193,7 +193,7 @@ export class TLispInterpreterImpl implements TLispInterpreter {
    * @param name - Name of the test
    * @returns Test definition or undefined if not found
    */
-  getTestDefinition(name: string): { body: TLispValue[], name: string, params: TLispValue } | undefined {
+  getTestDefinition(name: string): { body: TLispValue[], name: string, params: TLispValue, isAsync?: boolean } | undefined {
     // Access the evaluator's test registry
     // Since the evaluator is private, we need to add a method to access the registry
     // This is a workaround - ideally we'd have a cleaner interface
@@ -214,7 +214,7 @@ export class TLispInterpreterImpl implements TLispInterpreter {
    * @param name - Name of the suite
    * @returns Suite definition or undefined if not found
    */
-  getSuiteDefinition(name: string): unknown {
+  getSuiteDefinition(name: string): { body: TLispValue[], name: string, params: TLispValue, setup?: TLispValue[], teardown?: TLispValue[], tests: string[] } | undefined {
     return (this.evaluator as any).getSuiteDefinition?.(name);
   }
 
