@@ -172,7 +172,24 @@ export class Validation<E, A> {
    * Create a failed validation.
    */
   static failure<E, A = never>(errors: E | E[]): Validation<E, A> {
-    return new Validation(undefined, Array.isArray(errors) ? errors : [errors]);
+    return new Validation(undefined as any, Array.isArray(errors) ? errors : [errors]) as Validation<E, A>;
+  }
+
+  /**
+   * Traverse an array with a validation function, accumulating all errors.
+   */
+  static traverse<E, A, B>(items: A[], f: (item: A) => Validation<E, B>): Validation<E, B[]> {
+    const results: B[] = [];
+    const errors: E[] = [];
+    for (const item of items) {
+      const result = f(item);
+      if (result.isSuccess()) {
+        results.push(result.getValue());
+      } else {
+        errors.push(...result.getErrors());
+      }
+    }
+    return errors.length > 0 ? Validation.failure(errors) : Validation.success(results);
   }
 
   /**
@@ -220,6 +237,22 @@ export class Validation<E, A> {
    */
   flatMap<B>(fn: (value: A) => Validation<E, B>): Validation<E, B> {
     return this.isSuccess() ? fn(this.value as A) : Validation.failure(this.errors);
+  }
+
+  /**
+   * Fold over the validation: handle both success and failure cases.
+   */
+  fold<R>(onFailure: (errors: E[]) => R, onSuccess: (value: A) => R): R {
+    return this.isSuccess() ? onSuccess(this.value as A) : onFailure(this.errors);
+  }
+
+  /**
+   * Map over the error type.
+   */
+  mapErrors<E2>(fn: (errors: E[]) => E2[]): Validation<E2, A> {
+    return this.isSuccess()
+      ? Validation.success(this.value as A)
+      : Validation.failure(fn(this.errors));
   }
 }
 
@@ -294,6 +327,20 @@ export const ValidationUtils = {
     message: string
   ): Validation<string, string> =>
     pattern.test(value) ? Validation.success(value) : Validation.failure(message),
+
+  /**
+   * Validate a value against multiple validators, accumulating all errors.
+   */
+  all: <E, A>(value: A, ...validators: Array<(v: A) => Validation<E, A>>): Validation<E, A> => {
+    const errors: E[] = [];
+    for (const validator of validators) {
+      const result = validator(value);
+      if (result.isFailure()) {
+        errors.push(...result.getErrors());
+      }
+    }
+    return errors.length > 0 ? Validation.failure(errors) : Validation.success(value);
+  },
 };
 
 /**

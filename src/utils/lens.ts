@@ -157,7 +157,7 @@ export class Optional<S, A> {
    */
   static find<T>(predicate: (item: T) => boolean): Optional<T[], T> {
     return new Optional(
-      arr => arr.find(predicate) || null,
+      (arr): T | null => arr.find(predicate) as T | null,
       newValue => arr => {
         const index = arr.findIndex(predicate);
         if (index >= 0) {
@@ -251,12 +251,12 @@ export class Optional<S, A> {
     return new Optional(
       source => {
         const value = this.getter(source);
-        return value !== null && predicate(value) ? value : null;
+        return (value !== null && predicate(value) ? value : null) as A | null;
       },
       this.setter
     );
   }
-  
+
   /**
    * Map over the focused type
    */
@@ -267,7 +267,7 @@ export class Optional<S, A> {
         return value !== null ? f(value) : null;
       },
       // This is simplified - proper implementation would need inverse function
-      (newValue: B) => this.setter as unknown as (value: B) => (source: S) => S
+      (newValue) => (source: S) => this.setter(newValue as unknown as A)(source)
     );
   }
 }
@@ -370,11 +370,11 @@ export class Traversal<S, A> {
   static mapValues<K, V>(): Traversal<Map<K, V>, V> {
     return new Traversal(
       <F>(source: Map<K, V>, f: (value: V) => F): F extends V ? Map<K, V> : F[] => {
-        if (typeof f(Array.from(source.values())[0]) === typeof Array.from(source.values())[0]) {
+        if (typeof f(Array.from(source.values())[0]!) === typeof Array.from(source.values())[0]!) {
           // If F extends V, return modified Map
           const newMap = new Map<K, V>();
           for (const [key, value] of source) {
-            newMap.set(key, f(value) as V);
+            newMap.set(key, f(value) as unknown as V);
           }
           return newMap as F extends V ? Map<K, V> : F[];
         } else {
@@ -411,7 +411,7 @@ export class Traversal<S, A> {
    */
   find(predicate: (value: A) => boolean): Optional<S, A> {
     return new Optional(
-      source => this.getAll(source).find(predicate) || null,
+      (source): A | null => this.getAll(source).find(predicate) as A | null,
       newValue => source => {
         let found = false;
         return this.modify(current => {
@@ -434,12 +434,12 @@ export class Traversal<S, A> {
         const allValues = this.getAll(source);
         const filteredValues = allValues.filter(predicate);
         
-        if (typeof f(filteredValues[0]) === typeof filteredValues[0]) {
+        if (typeof f(filteredValues[0]!) === typeof filteredValues[0]!) {
           // If F extends A, apply transformation and reconstruct
           let index = 0;
           return this.modify(current => {
             if (predicate(current)) {
-              return f(current) as A;
+              return f(current) as unknown as A;
             }
             return current;
           })(source) as F extends A ? S : F[];
@@ -472,7 +472,7 @@ export const optics = {
    * Get a value from source using a lens
    */
   view: <S, A>(lens: Lens<S, A>) => (source: S): A =>
-    lens.get,
+    lens.get(source),
   
   /**
    * Compose multiple lenses
@@ -500,7 +500,7 @@ export const optics = {
   /**
    * Create nested object path lens
    */
-  path: <T, K1 extends keyof T>(k1: K1) => Lens.of(k1),
+  path: <T, K1 extends keyof T>(k1: K1): Lens<T, T[K1]> => Lens.of(k1) as Lens<T, T[K1]>,
   
   /**
    * Helper for Map operations

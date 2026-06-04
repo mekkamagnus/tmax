@@ -116,6 +116,7 @@ export class TmaxServer {
         keyBindings: {},
         maxUndoLevels: 100,
         showLineNumbers: true,
+        relativeLineNumbers: false,
         wordWrap: false
       },
       currentFilename: undefined,
@@ -128,6 +129,7 @@ export class TmaxServer {
     };
 
     this.editor.setEditorState(initialState);
+    this.editor.createBuffer("*scratch*", "");
   }
 
   /**
@@ -364,6 +366,7 @@ export class TmaxServer {
    * Get the default socket path for the server
    */
   private getDefaultSocketPath(): string {
+    if (process.env.TMAX_SOCKET) return process.env.TMAX_SOCKET;
     const uid = process.env.SUDO_UID || userInfo().uid.toString();
     return `/tmp/tmax-${uid}/server`;
   }
@@ -664,25 +667,12 @@ export class TmaxServer {
       content = '';
     }
 
-    // Get current state
+    this.editor.createBuffer(filepath, content);
     const currentState = this.editor.getState();
-
-    // Create or switch to buffer
-    const buffer = FunctionalTextBufferImpl.create(content);
-
-    // Add to buffers Map if not already there
-    // Note: We need to modify the actual buffers Map, not create a new one
-    const buffers = currentState.buffers ?? new Map();
-    if (!buffers.has(filepath)) {
-      buffers.set(filepath, buffer);
-    }
-
     const newState = {
       ...currentState,
-      currentBuffer: buffer,
       currentFilename: filepath,
       statusMessage: `Opened ${filepath}`,
-      buffers: buffers
     };
 
     this.editor.setEditorState(newState);
@@ -1273,7 +1263,7 @@ export class TmaxServer {
 
 // Main entry point when run directly
 if (import.meta.main) {
-  const server = new TmaxServer();
+  const server = new TmaxServer(process.env.TMAX_SOCKET);
   server.start().catch((err) => {
     console.error('Failed to start server:', err);
     process.exit(1);

@@ -147,7 +147,7 @@ export class State<S, A> {
    * Handle errors in state computation
    */
   tryCatch<E>(onError: (error: unknown) => E): State<S, A | E> {
-    return new State(state => {
+    return new State((state): [(A | E), S] => {
       try {
         return this.computation(state);
       } catch (error) {
@@ -496,10 +496,10 @@ export const stateCombiners = {
   ): StateTaskEither<S, E | string, A> => {
     const attempt = (attemptsLeft: number): StateTaskEither<S, E | string, A> => {
       if (attemptsLeft <= 0) {
-        return StateTaskEither.left("Maximum retry attempts exceeded");
+        return StateTaskEither.left("Maximum retry attempts exceeded" as E);
       }
       
-      return operation.orElse(() => attempt(attemptsLeft - 1));
+      return operation.orElse((_error) => attempt(attemptsLeft - 1) as unknown as StateTaskEither<S, E, A>) as StateTaskEither<S, E | string, A>;
     };
     
     return attempt(maxAttempts);

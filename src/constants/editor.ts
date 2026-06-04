@@ -3,9 +3,6 @@
  * @description Constants for editor operations
  */
 
-/** Maximum number of undo levels to keep */
-export const MAX_UNDO_LEVELS = 100;
-
 /** Default editor mode */
 export const DEFAULT_EDITOR_MODE = 'normal';
 

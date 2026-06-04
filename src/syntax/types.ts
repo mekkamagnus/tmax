@@ -4,6 +4,7 @@
  */
 
 export type { SyntaxRule, SyntaxToken, HighlightTheme, ANSIStyle, HighlightSpan } from "../core/types.ts";
+import type { HighlightTheme } from "../core/types.ts";
 
 /**
  * Default dark theme mapping token types to ANSI colors

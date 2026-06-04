@@ -9,7 +9,10 @@ export type Option<T> =
 /**
  * Interface that extends Option with functional methods
  */
-export interface OptionWithMethods<T> extends Option<T> {
+export type OptionWithMethods<T> = (
+  | { _tag: 'Some'; value: T }
+  | { _tag: 'None' }
+) & {
   /**
    * Maps the value inside Some to a new value.
    * If the Option is None, returns None.
@@ -31,7 +34,7 @@ export interface OptionWithMethods<T> extends Option<T> {
    * Gets the value from Some or returns a default value.
    */
   getOrElse(defaultValue: () => T): T;
-}
+};
 
 /**
  * Creates an Option containing a value with methods attached.
@@ -63,7 +66,7 @@ export const Some = <T>(value: T): OptionWithMethods<T> => {
  * Represents the absence of a value with methods attached.
  */
 export const None: OptionWithMethods<never> = {
-  _tag: 'None',
+  _tag: 'None' as const,
   map: function <U>(_f: (value: never) => U): Option<U> {
     return this as any;
   },
@@ -76,7 +79,7 @@ export const None: OptionWithMethods<never> = {
   getOrElse: function (defaultValue: () => never): never {
     return defaultValue();
   }
-};
+} as any;
 
 /**
  * Checks if an Option is Some.
@@ -101,7 +104,7 @@ export const Option = {
    * Returns Some(value) if value is not null or undefined, otherwise None.
    */
   fromNullable: <T>(value: T | null | undefined): Option<T> => {
-    return value == null ? None : Some(value);
+    return value == null ? None as Option<T> : Some(value);
   },
 
   /**
@@ -109,7 +112,7 @@ export const Option = {
    * Returns Some(value) if value is not null, otherwise None.
    */
   fromNull: <T>(value: T | null): Option<T> => {
-    return value === null ? None : Some(value);
+    return value === null ? None as Option<T> : Some(value);
   },
 
   /**
@@ -117,6 +120,6 @@ export const Option = {
    * Returns Some(value) if value is not undefined, otherwise None.
    */
   fromUndefined: <T>(value: T | undefined): Option<T> => {
-    return value === undefined ? None : Some(value);
+    return value === undefined ? None as Option<T> : Some(value);
   }
 };

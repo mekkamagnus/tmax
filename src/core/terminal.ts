@@ -291,9 +291,9 @@ export class FunctionalTerminalIOImpl implements FunctionalTerminalIO {
 
         const buffer = new Uint8Array(64);
 
-        // Read raw key input from stdin
+        // Read raw key input from stdin (Bun API)
         const bytesRead = await new Promise<number>((resolve, reject) => {
-          stdin.readOnce(buffer, (err, bytesRead) => {
+          (stdin as any).readOnce(buffer, (err: any, bytesRead: any) => {
             if (err) {
               reject(err);
             } else {
@@ -341,12 +341,12 @@ export class FunctionalTerminalIOImpl implements FunctionalTerminalIO {
         this.pendingKeys = remainingKeys;
 
         fnLogger.completeOperation("read_key", correlationId, {
-          key: firstKey.replace(//g, '\x1b'),
+          key: firstKey!.replace(/\x1b/g, '\x1b'),
           bytesRead,
           tokenizedCount: tokenizedKeys.length
         });
 
-        return firstKey;
+        return firstKey!;
       },
       (error) => {
         if (error instanceof TmaxError) {
@@ -428,7 +428,7 @@ export class FunctionalTerminalIOImpl implements FunctionalTerminalIO {
           (Bun as any).setRaw(true);
         } else {
           // Fallback for Node.js
-          readline.emitKeypressEvents(stdin, true);
+          readline.emitKeypressEvents(stdin);
           stdin.setRawMode(true);
         }
         this.rawMode = true;
@@ -509,7 +509,7 @@ export class FunctionalTerminalIOImpl implements FunctionalTerminalIO {
         } else {
           // Fallback for Node.js
           stdin.setRawMode(false);
-          readline.emitKeypressEvents(stdin, false);
+          readline.emitKeypressEvents(stdin);
         }
         this.rawMode = false;
         

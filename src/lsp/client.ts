@@ -295,8 +295,8 @@ export class LSPClient {
           if (valueMatch) {
             diagnostics.push({
               range: {
-                start: { line: index, character: line.indexOf(": string") },
-                end: { line: index, character: line.length }
+                start: { line: index, column: line.indexOf(": string") },
+                end: { line: index, column: line.length }
               },
               severity: 1,
               message: `Type 'number' is not assignable to type 'string'`,
@@ -311,8 +311,8 @@ export class LSPClient {
           if (varName && !content.includes(varName, line.indexOf(line) + line.length)) {
             diagnostics.push({
               range: {
-                start: { line: index, character: line.indexOf(varName) },
-                end: { line: index, character: line.indexOf(varName) + varName.length }
+                start: { line: index, column: line.indexOf(varName) },
+                end: { line: index, column: line.indexOf(varName) + varName.length }
               },
               severity: 2,
               message: `'${varName}' is declared but its value is never read`,

@@ -342,7 +342,7 @@ export const readerUtils = {
   /**
    * Cache the result of a Reader computation
    */
-  memoize: <R, A>(reader: Reader<R, A>): Reader<R, A> => {
+  memoize: <R extends object, A>(reader: Reader<R, A>): Reader<R, A> => {
     const cache = new WeakMap<R, A>();
     return Reader.asks(deps => {
       if (cache.has(deps)) {

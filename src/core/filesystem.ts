@@ -159,18 +159,18 @@ export class FunctionalFileSystemImpl implements FunctionalFileSystem {
    */
   atomicSave(path: string, content: string): TaskEither<FileSystemError, { saved: boolean; backupPath?: string }> {
     return this.exists(path)
-      .flatMap((fileExists: boolean) => {
+      .flatMap((fileExists: boolean): TaskEither<FileSystemError, { saved: boolean; backupPath?: string }> => {
         if (!fileExists) {
           // File doesn't exist, just write it
           return this.writeFile(path, content)
-            .map(() => ({ saved: true, backupPath: undefined }));
+            .map(() => ({ saved: true as const, backupPath: undefined }));
         }
 
         // File exists, backup then write
         return this.backup(path)
           .flatMap((backupPath: string) =>
             this.writeFile(path, content)
-              .map(() => ({ saved: true, backupPath }))
+              .map(() => ({ saved: true as const, backupPath }))
           );
       });
   }
@@ -185,7 +185,7 @@ export class FunctionalFileSystemImpl implements FunctionalFileSystem {
         await fs.mkdir(path, { recursive: true });
       },
       (error) => createFileSystemError(
-        'CreateDirError',
+        'WriteError',
         `Failed to create directory ${path}: ${error instanceof Error ? error.message : String(error)}`,
         path,
         { error: error instanceof Error ? error.message : String(error) }
@@ -325,7 +325,7 @@ export class FileSystemImpl implements FileSystem {
   async readFile(path: string): Promise<string> {
     const result = await this.functionalFileSystem.readFile(path).run();
     if (Either.isLeft(result)) {
-      throw new Error(result.left);
+      throw new Error(result.left.message);
     }
     return result.right;
   }
@@ -336,7 +336,7 @@ export class FileSystemImpl implements FileSystem {
   async writeFile(path: string, content: string): Promise<void> {
     const result = await this.functionalFileSystem.writeFile(path, content).run();
     if (Either.isLeft(result)) {
-      throw new Error(result.left);
+      throw new Error(result.left.message);
     }
   }
 
@@ -346,7 +346,7 @@ export class FileSystemImpl implements FileSystem {
   async exists(path: string): Promise<boolean> {
     const result = await this.functionalFileSystem.exists(path).run();
     if (Either.isLeft(result)) {
-      throw new Error(result.left);
+      throw new Error(result.left.message);
     }
     return result.right;
   }
@@ -357,7 +357,7 @@ export class FileSystemImpl implements FileSystem {
   async stat(path: string): Promise<FileStats> {
     const result = await this.functionalFileSystem.stat(path).run();
     if (Either.isLeft(result)) {
-      throw new Error(result.left);
+      throw new Error(result.left.message);
     }
     return result.right;
   }
@@ -368,7 +368,7 @@ export class FileSystemImpl implements FileSystem {
   async createDir(path: string): Promise<void> {
     const result = await this.functionalFileSystem.createDir(path).run();
     if (Either.isLeft(result)) {
-      throw new Error(result.left);
+      throw new Error(result.left.message);
     }
   }
 }
