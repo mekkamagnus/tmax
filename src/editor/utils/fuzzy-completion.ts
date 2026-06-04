@@ -232,9 +232,9 @@ function matchFuzzy(pattern: string, target: string): FuzzyMatchResult {
 
   if (patternIndex === pattern.length) {
     // Calculate score based on compactness of match
-    const spread = positions[positions.length - 1] - positions[0];
+    const spread = positions[positions.length - 1]! - positions[0]!;
     const compactnessBonus = Math.max(0, 100 - spread);
-    const startBonus = positions[0] === 0 ? 50 : 0;
+    const startBonus = positions[0]! === 0 ? 50 : 0;
     
     return {
       matches: true,
@@ -290,12 +290,12 @@ export function getBestMatch(pattern: string, commands: string[]): string | null
   }
 
   if (matches.length === 1) {
-    return matches[0].command;
+    return matches[0]!.command;
   }
 
   // Check if there's a clear winner (score significantly higher than second best)
-  const best = matches[0];
-  const second = matches[1];
+  const best = matches[0]!;
+  const second = matches[1]!;
   // Adaptive threshold: lower for shorter patterns
   // For very short patterns (2 chars), be lenient. For longer, be stricter.
   const scoreThreshold = pattern.length <= 2 ? 5 : 10;
@@ -332,15 +332,15 @@ export function getCommonPrefix(candidates: CompletionCandidate[]): string {
   }
 
   if (candidates.length === 1) {
-    return candidates[0].command;
+    return candidates[0]!.command;
   }
 
-  const first = candidates[0].command;
+  const first = candidates[0]!.command;
   let prefix = "";
   let i = 0;
 
   while (i < first.length) {
-    const char = first[i];
+    const char = first[i]!;
     const allMatch = candidates.every(c => c.command[i] === char);
     
     if (allMatch) {

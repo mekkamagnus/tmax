@@ -13,7 +13,7 @@
  */
 
 import type { TLispValue, TLispFunctionImpl } from "../../tlisp/types.ts";
-import { createNumber, createNil } from "../../tlisp/values.ts";
+import { createList, createNumber, createNil } from "../../tlisp/values.ts";
 import type { FunctionalTextBuffer } from "../../core/types.ts";
 import { Either } from "../../utils/task-either.ts";
 import {
@@ -45,13 +45,6 @@ function getTerminalHeight(): number {
 }
 
 /**
- * Get half page size (half of terminal height)
- */
-function getHalfPageSize(): number {
-  return Math.floor(getTerminalHeight() / 2);
-}
-
-/**
  * Create jump commands API functions
  * @param getCurrentBuffer - Function to get current buffer
  * @param getCursorLine - Function to get cursor line
@@ -65,9 +58,13 @@ export function createJumpOps(
   getCursorLine: () => number,
   setCursorLine: (line: number) => void,
   getCursorColumn: () => number,
-  setCursorColumn: (column: number) => void
+  setCursorColumn: (column: number) => void,
+  getViewportTop?: () => number,
+  setViewportTop?: (top: number) => void,
+  getTerminalHeightFn?: () => number
 ): Map<string, TLispFunctionImpl> {
   const api = new Map<string, TLispFunctionImpl>();
+  const terminalHeight = (): number => getTerminalHeightFn?.() ?? getTerminalHeight();
 
   /**
    * jump-to-first-line - move to first line (gg key in Vim)
@@ -166,7 +163,7 @@ export function createJumpOps(
       return Either.left(argsValidation.left);
     }
 
-    const lineArg = args[0];
+    const lineArg = args[0]!
     const typeValidation = validateArgType(lineArg, "number", 0, "jump-to-line");
     if (Either.isLeft(typeValidation)) {
       return Either.left(typeValidation.left);
@@ -239,7 +236,7 @@ export function createJumpOps(
     const text = contentResult.right;
     const lines = text.split('\n');
     const currentLine = getCursorLine();
-    const pageSize = getTerminalHeight();
+    const pageSize = terminalHeight();
 
     // Move down by page size, but don't exceed last line
     let targetLine = Math.min(currentLine + pageSize, lines.length - 1);
@@ -288,7 +285,7 @@ export function createJumpOps(
     const text = contentResult.right;
     const lines = text.split('\n');
     const currentLine = getCursorLine();
-    const pageSize = getTerminalHeight();
+    const pageSize = terminalHeight();
 
     // Move up by page size, but don't go before first line
     let targetLine = Math.max(currentLine - pageSize, 0);
@@ -337,7 +334,7 @@ export function createJumpOps(
     const text = contentResult.right;
     const lines = text.split('\n');
     const currentLine = getCursorLine();
-    const halfPageSize = getHalfPageSize();
+    const halfPageSize = Math.floor(terminalHeight() / 2);
 
     // Move down by half page size, but don't exceed last line
     let targetLine = Math.min(currentLine + halfPageSize, lines.length - 1);
@@ -386,7 +383,7 @@ export function createJumpOps(
     const text = contentResult.right;
     const lines = text.split('\n');
     const currentLine = getCursorLine();
-    const halfPageSize = getHalfPageSize();
+    const halfPageSize = Math.floor(terminalHeight() / 2);
 
     // Move up by half page size, but don't go before first line
     let targetLine = Math.max(currentLine - halfPageSize, 0);
@@ -402,6 +399,225 @@ export function createJumpOps(
     setCursorColumn(firstNonBlank);
 
     return Either.right(createNil());
+  });
+
+  api.set("find-char-position", (args: TLispValue[]): Either<AppError, TLispValue> => {
+    const argsValidation = validateArgsCount(args, 4, "find-char-position");
+    if (Either.isLeft(argsValidation)) {
+      return Either.left(argsValidation.left);
+    }
+
+    const charArg = args[0]!
+    const charValidation = validateArgType(charArg, "string", 0, "find-char-position");
+    if (Either.isLeft(charValidation)) {
+      return Either.left(charValidation.left);
+    }
+
+    const directionArg = args[1]!
+    const directionValidation = validateArgType(directionArg, "string", 1, "find-char-position");
+    if (Either.isLeft(directionValidation)) {
+      return Either.left(directionValidation.left);
+    }
+
+    const tillArg = args[2]!
+    const tillValidation = validateArgType(tillArg, "boolean", 2, "find-char-position");
+    if (Either.isLeft(tillValidation)) {
+      return Either.left(tillValidation.left);
+    }
+
+    const countArg = args[3]!
+    const countValidation = validateArgType(countArg, "number", 3, "find-char-position");
+    if (Either.isLeft(countValidation)) {
+      return Either.left(countValidation.left);
+    }
+
+    const currentBuffer = getCurrentBuffer();
+    const bufferValidation = validateBufferExists(currentBuffer);
+    if (Either.isLeft(bufferValidation)) {
+      return Either.left(bufferValidation.left);
+    }
+
+    const target = (charArg.value as string)[0];
+    if (!target) {
+      return Either.right(createNil());
+    }
+
+    const direction = directionArg.value as string;
+    const backward = direction === "backward";
+    const till = tillArg.value as boolean;
+    const count = Math.max(1, countArg.value as number);
+    const lineResult = currentBuffer!.getLine(getCursorLine());
+    if (Either.isLeft(lineResult)) {
+      return Either.left(createBufferError('OutOfBounds', `Failed to get line: ${lineResult.left}`));
+    }
+
+    const line = lineResult.right;
+    let seen = 0;
+    let foundColumn = -1;
+    if (backward) {
+      for (let i = Math.min(getCursorColumn() - 1, line.length - 1); i >= 0; i--) {
+        if (line[i] === target) {
+          seen++;
+          if (seen === count) {
+            foundColumn = till ? Math.min(i + 1, line.length) : i;
+            break;
+          }
+        }
+      }
+    } else {
+      for (let i = Math.max(0, getCursorColumn() + 1); i < line.length; i++) {
+        if (line[i] === target) {
+          seen++;
+          if (seen === count) {
+            foundColumn = till ? Math.max(0, i - 1) : i;
+            break;
+          }
+        }
+      }
+    }
+
+    if (foundColumn < 0) {
+      return Either.right(createNil());
+    }
+
+    return Either.right(createList([createNumber(getCursorLine()), createNumber(foundColumn)]));
+  });
+
+  api.set("match-bracket-position", (args: TLispValue[]): Either<AppError, TLispValue> => {
+    const argsValidation = validateArgsCount(args, 0, "match-bracket-position");
+    if (Either.isLeft(argsValidation)) {
+      return Either.left(argsValidation.left);
+    }
+
+    const currentBuffer = getCurrentBuffer();
+    const bufferValidation = validateBufferExists(currentBuffer);
+    if (Either.isLeft(bufferValidation)) {
+      return Either.left(bufferValidation.left);
+    }
+
+    const contentResult = currentBuffer!.getContent();
+    if (Either.isLeft(contentResult)) {
+      return Either.left(createBufferError('InvalidOperation', `Failed to get buffer content: ${contentResult.left}`));
+    }
+
+    const lines = contentResult.right.split("\n");
+    const line = Math.max(0, Math.min(getCursorLine(), lines.length - 1));
+    const column = Math.max(0, getCursorColumn());
+    const currentLine = lines[line] ?? "";
+    const char = currentLine[column];
+    const pairs: Record<string, string> = { "(": ")", "[": "]", "{": "}", ")": "(", "]": "[", "}": "{" };
+    const match = char ? pairs[char] : undefined;
+    if (!char || !match) {
+      return Either.right(createNil());
+    }
+
+    const opening = char === "(" || char === "[" || char === "{";
+    let depth = 0;
+    if (opening) {
+      for (let l = line; l < lines.length; l++) {
+        const text = lines[l] ?? "";
+        const start = l === line ? column : 0;
+        for (let c = start; c < text.length; c++) {
+          const ch = text[c];
+          if (ch === char) depth++;
+          if (ch === match) depth--;
+          if (depth === 0) {
+            return Either.right(createList([createNumber(l), createNumber(c)]));
+          }
+        }
+      }
+    } else {
+      for (let l = line; l >= 0; l--) {
+        const text = lines[l] ?? "";
+        const start = l === line ? column : text.length - 1;
+        for (let c = start; c >= 0; c--) {
+          const ch = text[c];
+          if (ch === char) depth++;
+          if (ch === match) depth--;
+          if (depth === 0) {
+            return Either.right(createList([createNumber(l), createNumber(c)]));
+          }
+        }
+      }
+    }
+
+    return Either.right(createNil());
+  });
+
+  api.set("paragraph-boundary-position", (args: TLispValue[]): Either<AppError, TLispValue> => {
+    const argsValidation = validateArgsCount(args, 1, "paragraph-boundary-position");
+    if (Either.isLeft(argsValidation)) {
+      return Either.left(argsValidation.left);
+    }
+
+    const directionArg = args[0]!
+    const directionValidation = validateArgType(directionArg, "string", 0, "paragraph-boundary-position");
+    if (Either.isLeft(directionValidation)) {
+      return Either.left(directionValidation.left);
+    }
+
+    const currentBuffer = getCurrentBuffer();
+    const bufferValidation = validateBufferExists(currentBuffer);
+    if (Either.isLeft(bufferValidation)) {
+      return Either.left(bufferValidation.left);
+    }
+
+    const contentResult = currentBuffer!.getContent();
+    if (Either.isLeft(contentResult)) {
+      return Either.left(createBufferError('InvalidOperation', `Failed to get buffer content: ${contentResult.left}`));
+    }
+
+    const lines = contentResult.right.split("\n");
+    const direction = directionArg.value as string;
+    if (direction === "backward") {
+      for (let i = getCursorLine() - 1; i >= 0; i--) {
+        if ((lines[i] ?? "").trim() === "") {
+          return Either.right(createList([createNumber(i), createNumber(0)]));
+        }
+      }
+      return Either.right(createList([createNumber(0), createNumber(0)]));
+    }
+
+    for (let i = getCursorLine() + 1; i < lines.length; i++) {
+      if ((lines[i] ?? "").trim() === "") {
+        return Either.right(createList([createNumber(i), createNumber(0)]));
+      }
+    }
+
+    return Either.right(createList([createNumber(Math.max(0, lines.length - 1)), createNumber(0)]));
+  });
+
+  api.set("viewport-top-get", (args: TLispValue[]): Either<AppError, TLispValue> => {
+    const argsValidation = validateArgsCount(args, 0, "viewport-top-get");
+    if (Either.isLeft(argsValidation)) {
+      return Either.left(argsValidation.left);
+    }
+    return Either.right(createNumber(getViewportTop?.() ?? 0));
+  });
+
+  api.set("viewport-top-set", (args: TLispValue[]): Either<AppError, TLispValue> => {
+    const argsValidation = validateArgsCount(args, 1, "viewport-top-set");
+    if (Either.isLeft(argsValidation)) {
+      return Either.left(argsValidation.left);
+    }
+
+    const topArg = args[0]!
+    const topValidation = validateArgType(topArg, "number", 0, "viewport-top-set");
+    if (Either.isLeft(topValidation)) {
+      return Either.left(topValidation.left);
+    }
+
+    const top = Math.max(0, topArg.value as number);
+    setViewportTop?.(top);
+    return Either.right(createNumber(top));
+  });
+
+  api.set("terminal-height-get", (args: TLispValue[]): Either<AppError, TLispValue> => {
+    const argsValidation = validateArgsCount(args, 0, "terminal-height-get");
+    if (Either.isLeft(argsValidation)) {
+      return Either.left(argsValidation.left);
+    }
+    return Either.right(createNumber(terminalHeight()));
   });
 
   return api;

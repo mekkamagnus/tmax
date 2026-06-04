@@ -41,9 +41,9 @@ export function createCountOps(
    * Returns: Current count value (0 if no count active)
    */
   ops.set("count-get", ((args: TLispValue[]): Either<AppError, TLispValue> => {
-    const validation = validateArgsCount(args, 0, 0);
+    const validation = validateArgsCount(args, 0, "count-get");
     if (Either.isLeft(validation)) {
-      return validation;
+      return Either.left(validation.left);
     }
 
     const count = getCount();
@@ -58,20 +58,20 @@ export function createCountOps(
    * Returns: nil
    */
   ops.set("count-set", ((args: TLispValue[]): Either<AppError, TLispValue> => {
-    const validation = validateArgsCount(args, 1, 1);
+    const validation = validateArgsCount(args, 1, "count-set");
     if (Either.isLeft(validation)) {
-      return validation;
+      return Either.left(validation.left);
     }
 
-    const countValidation = validateArgType(args[0], "number");
+    const countValidation = validateArgType(args[0], "number", 0, "count-set");
     if (Either.isLeft(countValidation)) {
-      return countValidation;
+      return Either.left(countValidation.left);
     }
 
     const count = (args[0] as { type: "number"; value: number }).value;
 
     if (count < 0) {
-      return Either.left(createValidationError("Count must be >= 0"));
+      return Either.left(createValidationError("RangeError", "Count must be >= 0", "count", count));
     }
 
     setCount(count);
@@ -84,9 +84,9 @@ export function createCountOps(
    * Returns: nil
    */
   ops.set("count-reset", ((args: TLispValue[]): Either<AppError, TLispValue> => {
-    const validation = validateArgsCount(args, 0, 0);
+    const validation = validateArgsCount(args, 0, "count-reset");
     if (Either.isLeft(validation)) {
-      return validation;
+      return Either.left(validation.left);
     }
 
     resetCount();
@@ -99,9 +99,9 @@ export function createCountOps(
    * Returns: true if count > 0, false otherwise
    */
   ops.set("count-active", ((args: TLispValue[]): Either<AppError, TLispValue> => {
-    const validation = validateArgsCount(args, 0, 0);
+    const validation = validateArgsCount(args, 0, "count-active");
     if (Either.isLeft(validation)) {
-      return validation;
+      return Either.left(validation.left);
     }
 
     const count = getCount();

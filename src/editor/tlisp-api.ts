@@ -77,6 +77,15 @@ export interface TlispEditorState {
   logMessage?: (msg: string) => void;  // Log to *Messages* buffer
   currentFilename?: string;  // Current buffer's filename (SPEC-035 Phase 0a)
   config?: import("../core/types.ts").EditorConfig;
+  _evalTlisp?: (expr: string) => any;
+  _getCurrentMajorMode?: () => string;
+  _setCurrentMajorMode?: (mode: string) => void;
+  _getMinorModeRegistry?: () => Map<string, any>;
+  _getBufferModeStates?: () => Map<string, any>;
+  _getCurrentBufferKey?: () => string;
+  _getGlobalizedMinorModes?: () => Set<string>;
+  _getLoadedFeatures?: () => Set<string>;
+  _getLoadPaths?: () => string[];
 }
 
 /**
@@ -305,7 +314,10 @@ export function createEditorAPI(state: TlispEditorState): Map<string, TLispFunct
     () => state.cursorLine,
     (line) => { state.cursorLine = line; },
     () => state.cursorColumn,
-    (column) => { state.cursorColumn = column; }
+    (column) => { state.cursorColumn = column; },
+    () => state.viewportTop,
+    (top) => { state.viewportTop = top; },
+    () => state.terminal.getSize().height
   );
   for (const [key, value] of jumpOps.entries()) {
     api.set(key, value);
@@ -336,7 +348,7 @@ export function createEditorAPI(state: TlispEditorState): Map<string, TLispFunct
 
   // Add LSP diagnostics operations (US-3.1.2)
   const lspDiagnosticsOps = createLSPDiagnosticsOps(
-    () => ({ state })
+    () => ({ state: { lspDiagnostics: state.lspDiagnostics, cursorPosition: { line: state.cursorLine } } })
   );
   for (const [key, value] of lspDiagnosticsOps.entries()) {
     api.set(key, value);
@@ -508,6 +520,7 @@ export function createEditorAPI(state: TlispEditorState): Map<string, TLispFunct
         keyBindings: {},
         maxUndoLevels: 100,
         showLineNumbers: true,
+        relativeLineNumbers: false,
         wordWrap: false,
       },
       setConfig: (config) => { state.config = config; },
@@ -528,7 +541,7 @@ export function createEditorAPI(state: TlispEditorState): Map<string, TLispFunct
   });
 
   api.set('message', (args: TLispValue[]): Either<AppError, TLispValue> => {
-    if (args.length === 0) return Either.left(createValidationError('message', 'requires at least 1 argument'));
+    if (args.length === 0) return Either.left(createValidationError('FormatError', 'requires at least 1 argument'));
     const text = args.map(a => {
       switch (a.type) {
         case 'string': return a.value;

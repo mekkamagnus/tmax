@@ -75,7 +75,7 @@ export function createReplaceOps(
       ));
     }
 
-    const patternArg = args[0];
+    const patternArg = args[0]!
     const patternTypeValidation = validateArgType(patternArg, "string", 0, "replace-find-matches");
     if (Either.isLeft(patternTypeValidation)) {
       return Either.left(patternTypeValidation.left);
@@ -184,31 +184,31 @@ export function createReplaceOps(
       return Either.left(argsValidation.left);
     }
 
-    const startLineArg = args[0];
+    const startLineArg = args[0]!
     const startLineValidation = validateArgType(startLineArg, "number", 0, "buffer-replace-range");
     if (Either.isLeft(startLineValidation)) {
       return Either.left(startLineValidation.left);
     }
 
-    const startColArg = args[1];
+    const startColArg = args[1]!
     const startColValidation = validateArgType(startColArg, "number", 1, "buffer-replace-range");
     if (Either.isLeft(startColValidation)) {
       return Either.left(startColValidation.left);
     }
 
-    const endLineArg = args[2];
+    const endLineArg = args[2]!
     const endLineValidation = validateArgType(endLineArg, "number", 2, "buffer-replace-range");
     if (Either.isLeft(endLineValidation)) {
       return Either.left(endLineValidation.left);
     }
 
-    const endColArg = args[3];
+    const endColArg = args[3]!
     const endColValidation = validateArgType(endColArg, "number", 3, "buffer-replace-range");
     if (Either.isLeft(endColValidation)) {
       return Either.left(endColValidation.left);
     }
 
-    const newTextArg = args[4];
+    const newTextArg = args[4]!
     const newTextValidation = validateArgType(newTextArg, "string", 4, "buffer-replace-range");
     if (Either.isLeft(newTextValidation)) {
       return Either.left(newTextValidation.left);
@@ -262,19 +262,19 @@ export function createReplaceOps(
       return Either.left(argsValidation.left);
     }
 
-    const findArg = args[0];
+    const findArg = args[0]!
     const findValidation = validateArgType(findArg, "string", 0, "replace-state-init");
     if (Either.isLeft(findValidation)) {
       return Either.left(findValidation.left);
     }
 
-    const replaceArg = args[1];
+    const replaceArg = args[1]!
     const replaceValidation = validateArgType(replaceArg, "string", 1, "replace-state-init");
     if (Either.isLeft(replaceValidation)) {
       return Either.left(replaceValidation.left);
     }
 
-    const matchesArg = args[2];
+    const matchesArg = args[2]!
     if (matchesArg.type !== "list") {
       return Either.left(createValidationError(
         'TypeError',

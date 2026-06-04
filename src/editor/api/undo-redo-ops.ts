@@ -46,6 +46,7 @@ let state: UndoRedoState = {
 
 // Initial buffer state (before any edits)
 let initialBuffer: FunctionalTextBuffer | null = null;
+let pendingBuffer: FunctionalTextBuffer | null = null;
 
 /**
  * Reset undo/redo state (for testing)
@@ -56,6 +57,7 @@ export function resetUndoRedoState(): void {
     currentIndex: -1
   };
   initialBuffer = null;
+  pendingBuffer = null;
 }
 
 /**
@@ -213,6 +215,55 @@ export function createUndoRedoOps(
   const api = new Map<string, TLispFunctionImpl>();
 
   /**
+   * Begin an undoable T-Lisp edit by capturing the current immutable buffer.
+   */
+  api.set("undo-begin", (args: TLispValue[]): Either<AppError, TLispValue> => {
+    if (args.length > 0) {
+      return Either.left(createValidationError(
+        'ConstraintViolation',
+        'undo-begin requires 0 arguments',
+        'args',
+        args,
+        '0 arguments'
+      ));
+    }
+
+    pendingBuffer = getCurrentBuffer();
+    return Either.right(createNil());
+  });
+
+  /**
+   * Commit an undoable T-Lisp edit when the immutable buffer changed.
+   */
+  api.set("undo-commit", (args: TLispValue[]): Either<AppError, TLispValue> => {
+    if (args.length !== 1 || args[0]!.type !== 'string') {
+      return Either.left(createValidationError(
+        'ConstraintViolation',
+        'undo-commit requires 1 string argument: description',
+        'args',
+        args,
+        '1 string argument'
+      ));
+    }
+
+    const currentBuffer = getCurrentBuffer();
+    if (pendingBuffer && currentBuffer && pendingBuffer !== currentBuffer) {
+      if (state.history.length === 0) {
+        setInitialBuffer(pendingBuffer);
+      }
+      pushToHistory(
+        args[0]!.value as string,
+        currentBuffer,
+        getCursorLine(),
+        getCursorColumn()
+      );
+    }
+    pendingBuffer = null;
+
+    return Either.right(createNil());
+  });
+
+  /**
    * undo - undo last edit (u command in Vim)
    * Usage: (undo)
    */
@@ -232,7 +283,7 @@ export function createUndoRedoOps(
 
     // Set status message if there's one
     if (Either.isRight(result) && result.right.type === 'string') {
-      setStatusMessage(result.right.value);
+      setStatusMessage(result.right.value as string);
     }
 
     return result;
@@ -258,7 +309,7 @@ export function createUndoRedoOps(
 
     // Set status message if there's one
     if (Either.isRight(result) && result.right.type === 'string') {
-      setStatusMessage(result.right.value);
+      setStatusMessage(result.right.value as string);
     }
 
     return result;
@@ -281,7 +332,7 @@ export function createUndoRedoOps(
       ));
     }
 
-    const descArg = args[0];
+    const descArg = args[0]!
     if (descArg.type !== 'string') {
       return Either.left(createValidationError(
         'TypeError',
@@ -294,7 +345,7 @@ export function createUndoRedoOps(
 
     // For the buffer argument, we expect it to be passed directly as a FunctionalTextBuffer
     // This is an internal API, so we'll extract it from the special value
-    const bufferArg = args[1];
+    const bufferArg = args[1]!
     if (typeof bufferArg !== 'object' || !('buffer' in bufferArg)) {
       return Either.left(createValidationError(
         'TypeError',
@@ -319,7 +370,7 @@ export function createUndoRedoOps(
       cursorColumn = args[3]!.value as number;
     }
 
-    pushToHistory(descArg.value, buffer, cursorLine, cursorColumn);
+    pushToHistory(descArg.value as string, buffer, cursorLine, cursorColumn);
     return Either.right(createNil());
   });
 

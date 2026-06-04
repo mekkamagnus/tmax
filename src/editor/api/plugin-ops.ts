@@ -5,9 +5,10 @@
  * Provides plugin-list, plugin-show, plugin-install, plugin-search, and plugin-info functions
  */
 
-import { TLispValue, createString, createList, createNil } from '../../tlisp/values';
-import { TLispInterpreter } from '../../tlisp/types';
+import { createString, createList, createNil } from '../../tlisp/values';
+import { TLispValue, TLispInterpreter, TLispFunctionImpl } from '../../tlisp/types';
 import { Either } from '../../utils/task-either';
+import type { AppError } from '../../error/types';
 import {
   listPlugins,
   getPlugin,
@@ -28,12 +29,12 @@ import {
 export function createPluginOps(
   filesystem: any,
   getTlpaDir: () => string
-): Map<string, (args: TLispValue[], interpreter: TLispInterpreter) => Either<Error, TLispValue>> {
-  const ops = {
+): Map<string, TLispFunctionImpl> {
+  const ops: Record<string, TLispFunctionImpl> = {
     /**
      * (plugin-list) -> List all available plugins
      */
-    'plugin-list': (_args: TLispValue[], _interpreter: TLispInterpreter): Either<Error, TLispValue> => {
+    'plugin-list': (_args: TLispValue[]): Either<AppError, TLispValue> => {
       const plugins = listPlugins();
 
       const pluginLists = plugins.map(plugin => createList([
@@ -50,17 +51,17 @@ export function createPluginOps(
     /**
      * (plugin-show "plugin-name") -> Show detailed plugin information
      */
-    'plugin-show': (args: TLispValue[]): Either<Error, TLispValue> => {
+    'plugin-show': (args: TLispValue[]): Either<AppError, TLispValue> => {
       if (args.length !== 1) {
         return Either.right(createString('Error: plugin-show requires exactly one argument (plugin-name)'));
       }
 
-      const pluginName = args[0];
+      const pluginName = args[0]!
       if (pluginName.type !== 'string') {
         return Either.right(createString('Error: plugin-show argument must be a string'));
       }
 
-      const plugin = getPlugin(pluginName.value);
+      const plugin = getPlugin(pluginName.value as string);
       if (!plugin) {
         return Either.right(createString(`Error: Plugin not found: ${pluginName.value}`));
       }
@@ -88,18 +89,18 @@ export function createPluginOps(
     /**
      * (plugin-install "plugin-name") -> Install plugin to tlpa directory
      */
-    'plugin-install': (args: TLispValue[]): Either<Error, TLispValue> => {
+    'plugin-install': (args: TLispValue[]): Either<AppError, TLispValue> => {
       if (args.length !== 1) {
         return Either.right(createString('Error: plugin-install requires exactly one argument (plugin-name)'));
       }
 
-      const pluginName = args[0];
+      const pluginName = args[0]!
       if (pluginName.type !== 'string') {
         return Either.right(createString('Error: plugin-install argument must be a string'));
       }
 
       // Get plugin metadata
-      const plugin = getPlugin(pluginName.value);
+      const plugin = getPlugin(pluginName.value as string);
       if (!plugin) {
         return Either.right(createString(`Error: Plugin not found in repository: ${pluginName.value}`));
       }
@@ -115,17 +116,17 @@ export function createPluginOps(
     /**
      * (plugin-search "pattern") -> Search plugins by pattern
      */
-    'plugin-search': (args: TLispValue[]): Either<Error, TLispValue> => {
+    'plugin-search': (args: TLispValue[]): Either<AppError, TLispValue> => {
       if (args.length !== 1) {
         return Either.right(createString('Error: plugin-search requires exactly one argument (pattern)'));
       }
 
-      const pattern = args[0];
+      const pattern = args[0]!
       if (pattern.type !== 'string') {
         return Either.right(createString('Error: plugin-search argument must be a string'));
       }
 
-      const plugins = searchPlugins(pattern.value);
+      const plugins = searchPlugins(pattern.value as string);
 
       const pluginLists = plugins.map(plugin => createList([
         createString(plugin.name),
@@ -141,17 +142,17 @@ export function createPluginOps(
     /**
      * (plugin-info "plugin-name") -> Get structured plugin information
      */
-    'plugin-info': (args: TLispValue[]): Either<Error, TLispValue> => {
+    'plugin-info': (args: TLispValue[]): Either<AppError, TLispValue> => {
       if (args.length !== 1) {
         return Either.right(createString('Error: plugin-info requires exactly one argument (plugin-name)'));
       }
 
-      const pluginName = args[0];
+      const pluginName = args[0]!
       if (pluginName.type !== 'string') {
         return Either.right(createString('Error: plugin-info argument must be a string'));
       }
 
-      const plugin = getPlugin(pluginName.value);
+      const plugin = getPlugin(pluginName.value as string);
       if (!plugin) {
         return Either.right(createNil());
       }
@@ -171,16 +172,16 @@ export function createPluginOps(
     /**
      * (plugin-submit "name" "description" "author") -> Submit plugin for review
      */
-    'plugin-submit': (args: TLispValue[]): Either<Error, TLispValue> => {
+    'plugin-submit': (args: TLispValue[]): Either<AppError, TLispValue> => {
       if (args.length !== 3) {
         return Either.right(createString(
           'Error: plugin-submit requires three arguments (name, description, author)'
         ));
       }
 
-      const name = args[0];
-      const description = args[1];
-      const author = args[2];
+      const name = args[0]!
+      const description = args[1]!
+      const author = args[2]!
 
       if (name.type !== 'string') {
         return Either.right(createString('Error: plugin-submit name must be a string'));
@@ -194,14 +195,14 @@ export function createPluginOps(
         return Either.right(createString('Error: plugin-submit author must be a string'));
       }
 
-      const result = submitPlugin(name.value, description.value, author.value);
+      const result = submitPlugin(name.value as string, description.value as string, author.value as string);
       return Either.right(createString(result.message));
     },
 
     /**
      * (plugin-review-list) -> List pending plugin submissions
      */
-    'plugin-review-list': (_args: TLispValue[]): Either<Error, TLispValue> => {
+    'plugin-review-list': (_args: TLispValue[]): Either<AppError, TLispValue> => {
       const submissions = getPendingSubmissions();
 
       const submissionLists = submissions.map(submission => createList([
@@ -218,34 +219,34 @@ export function createPluginOps(
     /**
      * (plugin-approve "plugin-name") -> Approve plugin submission
      */
-    'plugin-approve': (args: TLispValue[]): Either<Error, TLispValue> => {
+    'plugin-approve': (args: TLispValue[]): Either<AppError, TLispValue> => {
       if (args.length !== 1) {
         return Either.right(createString(
           'Error: plugin-approve requires exactly one argument (plugin-name)'
         ));
       }
 
-      const pluginName = args[0];
+      const pluginName = args[0]!
       if (pluginName.type !== 'string') {
         return Either.right(createString('Error: plugin-approve argument must be a string'));
       }
 
-      const result = approvePlugin(pluginName.value);
+      const result = approvePlugin(pluginName.value as string);
       return Either.right(createString(result.message));
     },
 
     /**
      * (plugin-reject "plugin-name" "reason") -> Reject plugin submission
      */
-    'plugin-reject': (args: TLispValue[]): Either<Error, TLispValue> => {
+    'plugin-reject': (args: TLispValue[]): Either<AppError, TLispValue> => {
       if (args.length !== 2) {
         return Either.right(createString(
           'Error: plugin-reject requires two arguments (plugin-name, reason)'
         ));
       }
 
-      const pluginName = args[0];
-      const reason = args[1];
+      const pluginName = args[0]!
+      const reason = args[1]!
 
       if (pluginName.type !== 'string') {
         return Either.right(createString('Error: plugin-reject plugin-name must be a string'));
@@ -255,14 +256,14 @@ export function createPluginOps(
         return Either.right(createString('Error: plugin-reject reason must be a string'));
       }
 
-      const result = rejectPlugin(pluginName.value, reason.value);
+      const result = rejectPlugin(pluginName.value as string, reason.value as string);
       return Either.right(createString(result.message));
     },
 
     /**
      * (plugin-clear-submissions) -> Clear all submissions (for testing)
      */
-    'plugin-clear-submissions': (_args: TLispValue[]): Either<Error, TLispValue> => {
+    'plugin-clear-submissions': (_args: TLispValue[]): Either<AppError, TLispValue> => {
       clearSubmissions();
       return Either.right(createString('All submissions cleared'));
     }

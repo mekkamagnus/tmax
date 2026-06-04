@@ -5,7 +5,7 @@
  */
 
 import { Either } from "../../utils/task-either.ts";
-import type { TLispValue } from "../../tlisp/values.ts";
+import type { TLispValue } from "../../tlisp/types.ts";
 
 /**
  * Macro recording state

@@ -74,14 +74,14 @@ export function createHookOps(
       ));
     }
 
-    const hookNameArg = args[0];
+    const hookNameArg = args[0]!
     const hookTypeValidation = validateArgType(hookNameArg, "string", 0, "add-hook");
     if (Either.isLeft(hookTypeValidation)) {
       return Either.left(hookTypeValidation.left);
     }
 
     const hookName = hookNameArg.value as string;
-    const funcArg = args[1];
+    const funcArg = args[1]!
 
     // Accept string function names, symbols, or lambda/function values
     let entry: HookEntry;
@@ -118,8 +118,8 @@ export function createHookOps(
       return Either.left(argsValidation.left);
     }
 
-    const hookNameArg = args[0];
-    const funcArg = args[1];
+    const hookNameArg = args[0]!
+    const funcArg = args[1]!
 
     const hookTypeValidation = validateArgType(hookNameArg, "string", 0, "remove-hook");
     if (Either.isLeft(hookTypeValidation)) {
@@ -151,7 +151,7 @@ export function createHookOps(
       return Either.left(argsValidation.left);
     }
 
-    const hookNameArg = args[0];
+    const hookNameArg = args[0]!
     const typeValidation = validateArgType(hookNameArg, "string", 0, "run-hooks");
     if (Either.isLeft(typeValidation)) {
       return Either.left(typeValidation.left);
@@ -180,7 +180,7 @@ export function createHookOps(
       return Either.left(argsValidation.left);
     }
 
-    const hookNameArg = args[0];
+    const hookNameArg = args[0]!
     const typeValidation = validateArgType(hookNameArg, "string", 0, "hook-list");
     if (Either.isLeft(typeValidation)) {
       return Either.left(typeValidation.left);

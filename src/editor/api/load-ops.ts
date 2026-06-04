@@ -81,7 +81,7 @@ export function createLoadOps(
       return Either.left(argsValidation.left);
     }
 
-    const featureArg = args[0];
+    const featureArg = args[0]!
     const typeValidation = validateArgType(featureArg, "string", 0, "provide");
     if (Either.isLeft(typeValidation)) {
       return Either.left(typeValidation.left);
@@ -100,7 +100,7 @@ export function createLoadOps(
       return Either.left(argsValidation.left);
     }
 
-    const featureArg = args[0];
+    const featureArg = args[0]!
     const typeValidation = validateArgType(featureArg, "string", 0, "featurep");
     if (Either.isLeft(typeValidation)) {
       return Either.left(typeValidation.left);
@@ -122,7 +122,7 @@ export function createLoadOps(
       ));
     }
 
-    const featureArg = args[0];
+    const featureArg = args[0]!
     const typeValidation = validateArgType(featureArg, "string", 0, "require");
     if (Either.isLeft(typeValidation)) {
       return Either.left(typeValidation.left);
@@ -173,7 +173,7 @@ export function createLoadOps(
       return Either.left(argsValidation.left);
     }
 
-    const fileArg = args[0];
+    const fileArg = args[0]!
     const typeValidation = validateArgType(fileArg, "string", 0, "load");
     if (Either.isLeft(typeValidation)) {
       return Either.left(typeValidation.left);
@@ -192,7 +192,7 @@ export function createLoadOps(
       return Either.left(argsValidation.left);
     }
 
-    const dirArg = args[0];
+    const dirArg = args[0]!
     const typeValidation = validateArgType(dirArg, "string", 0, "load-path-add");
     if (Either.isLeft(typeValidation)) {
       return Either.left(typeValidation.left);

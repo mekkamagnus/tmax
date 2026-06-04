@@ -154,7 +154,7 @@ function findPreviousMatch(
     }
     
     if (allMatches.length > 0) {
-      return { line: currentLine, column: allMatches[allMatches.length - 1] };
+      return { line: currentLine, column: allMatches[allMatches.length - 1]! };
     }
 
     // Move to previous line
@@ -221,8 +221,8 @@ export function createSearchOps(
 
     // Get pattern (empty string reuses previous pattern)
     let pattern = "";
-    if (args[0].type === "string") {
-      pattern = args[0].value as string;
+    if (args[0]!.type === "string") {
+      pattern = args[0]!.value as string;
     }
 
     // Reuse previous pattern if empty
@@ -233,7 +233,7 @@ export function createSearchOps(
       lastSearchDirection = "forward";
     } else {
       return Either.left(createValidationError(
-        'InvalidOperation',
+        'ConstraintViolation',
         'No previous search pattern',
         'pattern',
         pattern,
@@ -256,7 +256,7 @@ export function createSearchOps(
     
     if (!match) {
       setStatusMessage(`Pattern '${pattern}' not found`);
-      return Either.left(createBufferError('NotFound', `Pattern '${pattern}' not found`));
+      return Either.left(createBufferError('OutOfBounds', `Pattern '${pattern}' not found`));
     }
 
     // Update cursor position
@@ -290,8 +290,8 @@ export function createSearchOps(
 
     // Get pattern (empty string reuses previous pattern)
     let pattern = "";
-    if (args[0].type === "string") {
-      pattern = args[0].value as string;
+    if (args[0]!.type === "string") {
+      pattern = args[0]!.value as string;
     }
 
     // Reuse previous pattern if empty
@@ -302,7 +302,7 @@ export function createSearchOps(
       lastSearchDirection = "backward";
     } else {
       return Either.left(createValidationError(
-        'InvalidOperation',
+        'ConstraintViolation',
         'No previous search pattern',
         'pattern',
         pattern,
@@ -325,7 +325,7 @@ export function createSearchOps(
     
     if (!match) {
       setStatusMessage(`Pattern '${pattern}' not found`);
-      return Either.left(createBufferError('NotFound', `Pattern '${pattern}' not found`));
+      return Either.left(createBufferError('OutOfBounds', `Pattern '${pattern}' not found`));
     }
 
     // Update cursor position
@@ -353,7 +353,7 @@ export function createSearchOps(
 
     if (lastSearchPattern === "") {
       return Either.left(createValidationError(
-        'InvalidOperation',
+        'ConstraintViolation',
         'No previous search pattern',
         'pattern',
         '',
@@ -386,7 +386,7 @@ export function createSearchOps(
 
     if (lastSearchPattern === "") {
       return Either.left(createValidationError(
-        'InvalidOperation',
+        'ConstraintViolation',
         'No previous search pattern',
         'pattern',
         '',
@@ -558,7 +558,7 @@ export function createSearchOps(
 
     if (!match) {
       setStatusMessage(`Word '${word}' not found`);
-      return Either.left(createBufferError('NotFound', `Word '${word}' not found`));
+      return Either.left(createBufferError('OutOfBounds', `Word '${word}' not found`));
     }
 
     // Update cursor position
@@ -617,7 +617,7 @@ export function createSearchOps(
 
     if (!match) {
       setStatusMessage(`Word '${word}' not found`);
-      return Either.left(createBufferError('NotFound', `Word '${word}' not found`));
+      return Either.left(createBufferError('OutOfBounds', `Word '${word}' not found`));
     }
 
     // Update cursor position
@@ -641,7 +641,7 @@ export function createSearchOps(
     const argsValidation = validateArgsCount(args, 1, "search-find-all-matches");
     if (Either.isLeft(argsValidation)) return Either.left(argsValidation.left);
 
-    const patternArg = args[0];
+    const patternArg = args[0]!
     if (patternArg.type !== "string") {
       return Either.left(createValidationError('TypeError', 'Pattern must be a string', 'pattern', patternArg, 'string'));
     }
@@ -654,7 +654,7 @@ export function createSearchOps(
     if (Either.isLeft(bufVal)) return Either.left(bufVal.left);
 
     const contentResult = buf!.getContent();
-    if (Either.isLeft(contentResult)) return Either.left(createBufferError('ReadError', 'Failed to read buffer'));
+    if (Either.isLeft(contentResult)) return Either.left(createBufferError('Underflow', 'Failed to read buffer'));
 
     const lines = contentResult.right.split('\n');
     const matches: TLispValue[] = [];
@@ -678,19 +678,19 @@ export function createSearchOps(
    */
   api.set("search-set-highlight-ranges", (args: TLispValue[]): Either<AppError, TLispValue> => {
     if (args.length !== 1) {
-      return Either.left(createValidationError('ConstraintViolation', 'search-set-highlight-ranges requires 1 argument', 'args', args.length, 1));
+      return Either.left(createValidationError('ConstraintViolation', 'search-set-highlight-ranges requires 1 argument', 'args', args.length, '1'));
     }
 
     const ranges: Range[] = [];
-    const listArg = args[0];
+    const listArg = args[0]!
     if (listArg.type === "list") {
       for (const item of listArg.value as TLispValue[]) {
         if (item.type === "list") {
           const parts = item.value as TLispValue[];
-          if (parts.length >= 3 && parts[0].type === "number" && parts[1].type === "number" && parts[2].type === "number") {
+          if (parts.length >= 3 && parts[0]!.type === "number" && parts[1]!.type === "number" && parts[2]!.type === "number") {
             ranges.push({
-              start: { line: parts[0].value as number, column: parts[1].value as number },
-              end: { line: parts[0].value as number, column: (parts[1].value as number) + (parts[2].value as number) }
+              start: { line: parts[0]!.value as number, column: parts[1]!.value as number },
+              end: { line: parts[0]!.value as number, column: (parts[1]!.value as number) + (parts[2]!.value as number) }
             });
           }
         }
@@ -708,7 +708,7 @@ export function createSearchOps(
    * Usage: (search-incremental-start "forward")
    */
   api.set("search-incremental-start", (args: TLispValue[]): Either<AppError, TLispValue> => {
-    const dir = args.length > 0 && args[0].type === "string" ? args[0].value as string : "forward";
+    const dir = args.length > 0 && args[0]!.type === "string" ? args[0]!.value as string : "forward";
     isearchActive = true;
     isearchPattern = "";
     isearchDirection = dir === "backward" ? "backward" : "forward";
@@ -726,24 +726,24 @@ export function createSearchOps(
    */
   api.set("search-incremental-update", (args: TLispValue[]): Either<AppError, TLispValue> => {
     if (!isearchActive) {
-      return Either.left(createValidationError('InvalidOperation', 'No active incremental search', 'isearch', null, 'active search'));
+      return Either.left(createValidationError('ConstraintViolation', 'No active incremental search', 'isearch', null, 'active search'));
     }
 
     const argsValidation = validateArgsCount(args, 1, "search-incremental-update");
     if (Either.isLeft(argsValidation)) return Either.left(argsValidation.left);
 
-    if (args[0].type !== "string") {
-      return Either.left(createValidationError('TypeError', 'Character must be a string', 'char', args[0], 'string'));
+    if (args[0]!.type !== "string") {
+      return Either.left(createValidationError('TypeError', 'Character must be a string', 'char', args[0]!, 'string'));
     }
 
-    isearchPattern += args[0].value as string;
+    isearchPattern += args[0]!.value as string;
 
     const buf = getCurrentBuffer();
     const bufVal = validateBufferExists(buf);
     if (Either.isLeft(bufVal)) return Either.left(bufVal.left);
 
     const contentResult = buf!.getContent();
-    if (Either.isLeft(contentResult)) return Either.left(createBufferError('ReadError', 'Failed to read buffer'));
+    if (Either.isLeft(contentResult)) return Either.left(createBufferError('Underflow', 'Failed to read buffer'));
 
     const text = contentResult.right;
     const match = isearchDirection === "forward"
@@ -785,7 +785,7 @@ export function createSearchOps(
    */
   api.set("search-incremental-backspace", (_args: TLispValue[]): Either<AppError, TLispValue> => {
     if (!isearchActive) {
-      return Either.left(createValidationError('InvalidOperation', 'No active incremental search', 'isearch', null, 'active search'));
+      return Either.left(createValidationError('ConstraintViolation', 'No active incremental search', 'isearch', null, 'active search'));
     }
 
     if (isearchPattern.length === 0) {
@@ -808,7 +808,7 @@ export function createSearchOps(
     if (Either.isLeft(bufVal)) return Either.left(bufVal.left);
 
     const contentResult = buf!.getContent();
-    if (Either.isLeft(contentResult)) return Either.left(createBufferError('ReadError', 'Failed to read buffer'));
+    if (Either.isLeft(contentResult)) return Either.left(createBufferError('Underflow', 'Failed to read buffer'));
 
     const text = contentResult.right;
     const match = isearchDirection === "forward"

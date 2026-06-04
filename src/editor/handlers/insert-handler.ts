@@ -30,8 +30,7 @@ export async function handleInsertMode(editor: Editor, key: string, normalizedKe
   }
   // Handle Enter key in insert mode with proper escaping
   else if (normalizedKey === "Enter") {
-    const escapedNewline = (editor as any).escapeKeyForTLisp("\n");
-    (editor as any).executeCommand(`(buffer-insert "${escapedNewline}")`);
+    (editor as any).executeCommand("(insert-newline)");
     // Auto-indent: set indent on the new line (cursor is now on it)
     try {
       const line = (editor as any).state.cursorPosition?.line ?? (editor as any).tlispState?.cursorLine ?? 0;
@@ -45,7 +44,11 @@ export async function handleInsertMode(editor: Editor, key: string, normalizedKe
     handlerLog.debug('Deleting character in insert mode', {
       data: { key: 'Backspace' }
     });
-    (editor as any).executeCommand("(buffer-delete 1)");
+    (editor as any).executeCommand("(insert-backspace)");
+  }
+  // Handle Tab key in insert mode
+  else if (normalizedKey === "Tab") {
+    (editor as any).executeCommand("(insert-tab)");
   }
   // Handle Escape key to return to normal mode
   else if (normalizedKey === "Escape") {

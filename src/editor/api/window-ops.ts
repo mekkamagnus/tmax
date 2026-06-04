@@ -7,6 +7,7 @@ import type { TLispValue, TLispFunctionImpl } from "../../tlisp/types.ts";
 import { createNil, createNumber, createString, createBoolean, createList, createSymbol } from "../../tlisp/values.ts";
 import type { Window } from "../../core/types.ts";
 import { AppError } from "../../error/types.ts";
+import { Either } from "../../utils/task-either.ts";
 
 /**
  * Create window management operations for T-Lisp
@@ -37,7 +38,7 @@ export function createWindowOps(
       throw new Error("split-window requires one argument: split type");
     }
 
-    const splitType = args[0];
+    const splitType = args[0]!
     if (splitType.type !== "string") {
       throw new Error("split-window type must be a string");
     }
@@ -48,7 +49,7 @@ export function createWindowOps(
     }
 
     const windows = getWindows();
-    const currentWindow = windows[getCurrentWindowIndex()];
+    const currentWindow = windows[getCurrentWindowIndex()]!;
     const currentBuffer = getCurrentBuffer();
 
     if (!currentBuffer) {
@@ -92,7 +93,7 @@ export function createWindowOps(
     newWindows.splice(getCurrentWindowIndex() + 1, 0, newWindow);
     setWindows(newWindows);
 
-    return createNil();
+    return Either.right(createNil());
   });
 
   /**
@@ -110,7 +111,7 @@ export function createWindowOps(
     
     setCurrentWindowIndex(nextIndex);
 
-    return createNil();
+    return Either.right(createNil());
   });
 
   /**
@@ -128,7 +129,7 @@ export function createWindowOps(
     
     setCurrentWindowIndex(prevIndex);
 
-    return createNil();
+    return Either.right(createNil());
   });
 
   /**
@@ -144,7 +145,7 @@ export function createWindowOps(
     
     // Don't allow closing the last window
     if (windows.length <= 1) {
-      return createNil();
+      return Either.right(createNil());
     }
 
     const currentIndex = getCurrentWindowIndex();
@@ -158,7 +159,7 @@ export function createWindowOps(
       setCurrentWindowIndex(newWindows.length - 1);
     }
 
-    return createNil();
+    return Either.right(createNil());
   });
 
   /**
@@ -180,7 +181,7 @@ export function createWindowOps(
       ])
     );
 
-    return createList(windowList);
+    return Either.right(createList(windowList));
   });
 
   /**
@@ -192,7 +193,7 @@ export function createWindowOps(
       throw new Error("window-current takes no arguments");
     }
 
-    return createNumber(getCurrentWindowIndex());
+    return Either.right(createNumber(getCurrentWindowIndex()));
   });
 
   /**
@@ -204,7 +205,7 @@ export function createWindowOps(
       throw new Error("window-count takes no arguments");
     }
 
-    return createNumber(getWindows().length);
+    return Either.right(createNumber(getWindows().length));
   });
 
   /**
@@ -216,12 +217,12 @@ export function createWindowOps(
       throw new Error("window-resize-height requires one argument: delta");
     }
 
-    const deltaValue = args[0];
+    const deltaValue = args[0]!
     if (deltaValue.type !== "number") {
       throw new Error("window-resize-height delta must be a number");
     }
 
-    const delta = deltaValue.value;
+    const delta = deltaValue.value as number;
     const windows = getWindows();
     const currentIndex = getCurrentWindowIndex();
     const currentWindow = windows[currentIndex];
@@ -244,7 +245,7 @@ export function createWindowOps(
     };
     setWindows(updatedWindows);
 
-    return createNil();
+    return Either.right(createNil());
   });
 
   /**
@@ -256,12 +257,12 @@ export function createWindowOps(
       throw new Error("window-resize-width requires one argument: delta");
     }
 
-    const deltaValue = args[0];
+    const deltaValue = args[0]!
     if (deltaValue.type !== "number") {
       throw new Error("window-resize-width delta must be a number");
     }
 
-    const delta = deltaValue.value;
+    const delta = deltaValue.value as number;
     const windows = getWindows();
     const currentIndex = getCurrentWindowIndex();
     const currentWindow = windows[currentIndex];
@@ -284,7 +285,7 @@ export function createWindowOps(
     };
     setWindows(updatedWindows);
 
-    return createNil();
+    return Either.right(createNil());
   });
 
   return ops;

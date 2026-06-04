@@ -87,13 +87,13 @@ export function createMajorModeOps(
       ));
     }
 
-    const nameArg = args[0];
+    const nameArg = args[0]!
     const nameValidation = validateArgType(nameArg, "string", 0, "major-mode-register");
     if (Either.isLeft(nameValidation)) {
       return Either.left(nameValidation.left);
     }
 
-    const extArg = args[1];
+    const extArg = args[1]!
     const extValidation = validateArgType(extArg, "list", 1, "major-mode-register");
     if (Either.isLeft(extValidation)) {
       return Either.left(extValidation.left);
@@ -157,7 +157,7 @@ export function createMajorModeOps(
       return Either.left(argsValidation.left);
     }
 
-    const nameArg = args[0];
+    const nameArg = args[0]!
     const typeValidation = validateArgType(nameArg, "string", 0, "major-mode-set");
     if (Either.isLeft(typeValidation)) {
       return Either.left(typeValidation.left);
@@ -275,8 +275,8 @@ export function createMajorModeOps(
     const modeValidation = validateArgType(args[1], "string", 1, "auto-mode-add");
     if (Either.isLeft(modeValidation)) return Either.left(modeValidation.left);
 
-    const pattern = args[0].value as string;
-    const mode = args[1].value as string;
+    const pattern = args[0]!.value as string;
+    const mode = args[1]!.value as string;
     const kind = args[2]?.type === "string" ? args[2].value as string : "extension";
     const rule = kind === "regexp"
       ? createRegexpRule(pattern, mode)
@@ -307,7 +307,7 @@ export function createMajorModeOps(
     const filenameValidation = validateArgType(args[0], "string", 0, "auto-mode-detect");
     if (Either.isLeft(filenameValidation)) return Either.left(filenameValidation.left);
 
-    return Either.right(createString(detectAutoMode(args[0].value as string, autoModeRules) ?? "fundamental"));
+    return Either.right(createString(detectAutoMode(args[0]!.value as string, autoModeRules) ?? "fundamental"));
   });
 
   // (major-mode-hook-add MODE HOOK-FN)
@@ -317,13 +317,13 @@ export function createMajorModeOps(
       return Either.left(argsValidation.left);
     }
 
-    const modeArg = args[0];
+    const modeArg = args[0]!
     const modeValidation = validateArgType(modeArg, "string", 0, "major-mode-hook-add");
     if (Either.isLeft(modeValidation)) {
       return Either.left(modeValidation.left);
     }
 
-    const hookFnArg = args[1];
+    const hookFnArg = args[1]!
     const hookFnValidation = validateArgType(hookFnArg, "string", 1, "major-mode-hook-add");
     if (Either.isLeft(hookFnValidation)) {
       return Either.left(hookFnValidation.left);
@@ -344,7 +344,7 @@ export function createMajorModeOps(
       return Either.left(argsValidation.left);
     }
 
-    const modeArg = args[0];
+    const modeArg = args[0]!
     const typeValidation = validateArgType(modeArg, "string", 0, "major-mode-hook-run");
     if (Either.isLeft(typeValidation)) {
       return Either.left(typeValidation.left);

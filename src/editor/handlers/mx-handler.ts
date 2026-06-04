@@ -104,7 +104,7 @@ export async function handleMxMode(editor: Editor, key: string, normalizedKey: s
     // Try to find best match
     const bestMatch = shouldShowPrefixMatches
       ? null
-      : completions.length === 1 ? completions[0].command : getBestMatch(command, commands);
+      : completions.length === 1 ? completions[0]!.command : getBestMatch(command, commands);
 
     if (bestMatch) {
       // Single match - complete it

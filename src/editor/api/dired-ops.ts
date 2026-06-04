@@ -106,13 +106,13 @@ export function createDiredOps(
       return Either.left(argsValidation.left);
     }
 
-    const pathArg = args[0];
+    const pathArg = args[0]!
     const pathValidation = validateArgType(pathArg, "string", 0, "dired-format-listing");
     if (Either.isLeft(pathValidation)) {
       return Either.left(pathValidation.left);
     }
 
-    const entriesArg = args[1];
+    const entriesArg = args[1]!
     const entriesValidation = validateArgType(entriesArg, "list", 1, "dired-format-listing");
     if (Either.isLeft(entriesValidation)) {
       return Either.left(entriesValidation.left);
@@ -148,13 +148,13 @@ export function createDiredOps(
       return Either.left(argsValidation.left);
     }
 
-    const pathArg = args[0];
+    const pathArg = args[0]!
     const pathValidation = validateArgType(pathArg, "string", 0, "dired-insert-listing");
     if (Either.isLeft(pathValidation)) {
       return Either.left(pathValidation.left);
     }
 
-    const entriesArg = args[1];
+    const entriesArg = args[1]!
     const entriesValidation = validateArgType(entriesArg, "list", 1, "dired-insert-listing");
     if (Either.isLeft(entriesValidation)) {
       return Either.left(entriesValidation.left);
@@ -268,7 +268,7 @@ export function createDiredOps(
       return Either.left(argsValidation.left);
     }
 
-    const entryArg = args[0];
+    const entryArg = args[0]!
     const typeValidation = validateArgType(entryArg, "string", 0, "dired-is-directory-p");
     if (Either.isLeft(typeValidation)) {
       return Either.left(typeValidation.left);
@@ -285,7 +285,7 @@ export function createDiredOps(
       return Either.left(argsValidation.left);
     }
 
-    const markArg = args[0];
+    const markArg = args[0]!
     const typeValidation = validateArgType(markArg, "string", 0, "dired-toggle-mark");
     if (Either.isLeft(typeValidation)) {
       return Either.left(typeValidation.left);

@@ -25,6 +25,7 @@ import {
 } from "../../error/types.ts";
 import { setDeleteRegister } from "./delete-ops.ts";
 import { setYankRegister } from "./yank-ops.ts";
+import { registerDelete } from "./evil-integration.ts";
 
 /**
  * Visual mode selection type
@@ -228,6 +229,43 @@ export function createVisualOps(
   });
 
   /**
+   * Swap the visual selection anchor and active endpoint.
+   */
+  api.set("visual-swap-endpoints", (args: TLispValue[]): Either<AppError, TLispValue> => {
+    const argsValidation = validateArgsCount(args, 0, "visual-swap-endpoints");
+    if (Either.isLeft(argsValidation)) {
+      return Either.left(argsValidation.left);
+    }
+
+    if (getMode() !== "visual" || !visualSelection) {
+      return Either.left(createValidationError(
+        'ConstraintViolation',
+        'Not in visual mode',
+        'mode',
+        getMode(),
+        'visual'
+      ));
+    }
+
+    const previousStart = visualSelection.start;
+    visualSelection = {
+      start: visualSelection.end,
+      end: previousStart,
+      mode: visualSelection.mode
+    };
+    setCursorLine(previousStart.line);
+    setCursorColumn(previousStart.column);
+
+    return Either.right(createList([
+      createNumber(visualSelection.start.line),
+      createNumber(visualSelection.start.column),
+      createNumber(visualSelection.end.line),
+      createNumber(visualSelection.end.column),
+      createString(visualSelection.mode)
+    ]));
+  });
+
+  /**
    * Delete selected text (d in visual mode)
    */
   api.set("visual-delete", (args: TLispValue[]): Either<AppError, TLispValue> => {
@@ -239,15 +277,14 @@ export function createVisualOps(
     const buffer = getBuffer();
     if (!buffer) {
       return Either.left(createBufferError(
-        'NoBuffer',
-        'No current buffer',
-        'buffer'
+        'InvalidOperation',
+        'No current buffer'
       ));
     }
 
     if (!visualSelection) {
       return Either.left(createValidationError(
-        'InvalidState',
+        'ConstraintViolation',
         'Not in visual mode',
         'mode',
         getMode(),
@@ -270,16 +307,17 @@ export function createVisualOps(
     // Get selected text and store in delete register
     const selectedText = buffer.getText({ start, end });
     if (Either.isLeft(selectedText)) {
-      return Either.left(selectedText.left);
+      return Either.left({ type: 'BufferError' as const, variant: 'InvalidOperation' as const, message: selectedText.left });
     }
 
     // Store in delete register
     setDeleteRegister(selectedText.right);
+    registerDelete(selectedText.right, visualSelection.mode === 'line');
 
     // Delete the selected text
     const deleteResult = buffer.delete({ start, end });
     if (Either.isLeft(deleteResult)) {
-      return Either.left(deleteResult.left);
+      return Either.left({ type: 'BufferError' as const, variant: 'InvalidOperation' as const, message: deleteResult.left });
     }
 
     // Update buffer with the new buffer (immutable operation)
@@ -305,15 +343,14 @@ export function createVisualOps(
     const buffer = getBuffer();
     if (!buffer) {
       return Either.left(createBufferError(
-        'NoBuffer',
-        'No current buffer',
-        'buffer'
+        'InvalidOperation',
+        'No current buffer'
       ));
     }
 
     if (!visualSelection) {
       return Either.left(createValidationError(
-        'InvalidState',
+        'ConstraintViolation',
         'Not in visual mode',
         'mode',
         getMode(),
@@ -336,7 +373,7 @@ export function createVisualOps(
     // Get selected text and store in yank register
     const selectedText = buffer.getText({ start, end });
     if (Either.isLeft(selectedText)) {
-      return Either.left(selectedText.left);
+      return Either.left({ type: 'BufferError' as const, variant: 'InvalidOperation' as const, message: selectedText.left });
     }
 
     // Store in yank register
@@ -362,15 +399,14 @@ export function createVisualOps(
     const buffer = getBuffer();
     if (!buffer) {
       return Either.left(createBufferError(
-        'NoBuffer',
-        'No current buffer',
-        'buffer'
+        'InvalidOperation',
+        'No current buffer'
       ));
     }
 
     if (!visualSelection) {
       return Either.left(createValidationError(
-        'InvalidState',
+        'ConstraintViolation',
         'Not in visual mode',
         'mode',
         getMode(),
@@ -393,14 +429,14 @@ export function createVisualOps(
     // Get selected text
     const selectedText = buffer.getText({ start, end });
     if (Either.isLeft(selectedText)) {
-      return Either.left(selectedText.left);
+      return Either.left({ type: 'BufferError' as const, variant: 'InvalidOperation' as const, message: selectedText.left });
     }
 
     // Convert to lowercase and replace
     const lowercased = selectedText.right.toLowerCase();
     const replaceResult = buffer.replace({ start, end }, lowercased);
     if (Either.isLeft(replaceResult)) {
-      return Either.left(replaceResult.left);
+      return Either.left({ type: 'BufferError' as const, variant: 'InvalidOperation' as const, message: replaceResult.left });
     }
 
     // Update buffer with the new buffer (immutable operation)
@@ -426,15 +462,14 @@ export function createVisualOps(
     const buffer = getBuffer();
     if (!buffer) {
       return Either.left(createBufferError(
-        'NoBuffer',
-        'No current buffer',
-        'buffer'
+        'InvalidOperation',
+        'No current buffer'
       ));
     }
 
     if (!visualSelection) {
       return Either.left(createValidationError(
-        'InvalidState',
+        'ConstraintViolation',
         'Not in visual mode',
         'mode',
         getMode(),
@@ -457,14 +492,14 @@ export function createVisualOps(
     // Get selected text
     const selectedText = buffer.getText({ start, end });
     if (Either.isLeft(selectedText)) {
-      return Either.left(selectedText.left);
+      return Either.left({ type: 'BufferError' as const, variant: 'InvalidOperation' as const, message: selectedText.left });
     }
 
     // Convert to uppercase and replace
     const uppercased = selectedText.right.toUpperCase();
     const replaceResult = buffer.replace({ start, end }, uppercased);
     if (Either.isLeft(replaceResult)) {
-      return Either.left(replaceResult.left);
+      return Either.left({ type: 'BufferError' as const, variant: 'InvalidOperation' as const, message: replaceResult.left });
     }
 
     // Update buffer with the new buffer (immutable operation)
