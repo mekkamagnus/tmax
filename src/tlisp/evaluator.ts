@@ -65,7 +65,7 @@ interface LambdaParameter {
 }
 
 // Test registry to store defined tests
-const testRegistry: Map<string, { body: TLispValue[], name: string, params: TLispValue }> = new Map();
+const testRegistry: Map<string, { body: TLispValue[], name: string, params: TLispValue, isAsync?: boolean }> = new Map();
 
 // Suite registry to store test suites
 interface TestSuite {
@@ -122,7 +122,7 @@ export class TLispEvaluator {
         argsResults.push(argResult);
       }
 
-      const args = argsResults.map(r => r.right);
+      const args = argsResults.map(r => (r as { right: TLispValue }).right);
       const callResult = this.evalFunctionCallInternal(func, args, tailCall.env);
 
       if (Either.isLeft(callResult)) {
@@ -503,13 +503,13 @@ export class TLispEvaluator {
       }
       docstring = doc.value as string;
       body = bodyExprs.length === 1
-        ? bodyExprs[0]
+        ? bodyExprs[0]!
         : createList([createSymbol("progn"), ...bodyExprs]);
     } else {
       // (lambda params body...)
       const bodyExprs = elements.slice(2);
       body = bodyExprs.length === 1
-        ? bodyExprs[0]
+        ? bodyExprs[0]!
         : createList([createSymbol("progn"), ...bodyExprs]);
     }
 
@@ -708,13 +708,13 @@ export class TLispEvaluator {
         });
       }
       body = bodyExprs.length === 1
-        ? bodyExprs[0]
+        ? bodyExprs[0]!
         : createList([createSymbol("progn"), ...bodyExprs]);
     } else {
       // (defun name params body...)
       const bodyExprs = elements.slice(3);
       body = bodyExprs.length === 1
-        ? bodyExprs[0]
+        ? bodyExprs[0]!
         : createList([createSymbol("progn"), ...bodyExprs]);
     }
 
@@ -757,11 +757,12 @@ export class TLispEvaluator {
     
     // Add metadata to the function
     if (lambdaFunction.type === "function") {
-      lambdaFunction.name = name.value as string;
+      const fn = lambdaFunction as TLispFunction;
+      fn.name = name.value as string;
       if (docstring && docstring.type === "string") {
-        lambdaFunction.docstring = docstring.value;
+        fn.docstring = docstring.value as string;
       }
-      lambdaFunction.parameters = paramNames;
+      fn.parameters = paramNames;
     }
 
     // Register function for coverage tracking (US-0.6.6)
@@ -1228,7 +1229,7 @@ export class TLispEvaluator {
         argsResults.push(argResult);
       }
 
-      const args = argsResults.map(r => r.right);
+      const args = argsResults.map(r => (r as { right: TLispValue }).right);
 
       // Track function call for coverage (US-0.6.6)
       // Try to get function name from the symbol being called
@@ -1440,8 +1441,8 @@ export class TLispEvaluator {
     let description: string | undefined;
     let contentStart = 2;
 
-    if (elements.length > 2 && elements[2].type === "string") {
-      description = elements[2].value as string;
+    if (elements.length > 2 && elements[2]!.type === "string") {
+      description = elements[2]!.value as string;
       contentStart = 3;
     }
 
@@ -1459,43 +1460,46 @@ export class TLispEvaluator {
 
     // Process suite body
     for (let i = contentStart; i < elements.length; i++) {
-      const element = elements[i];
+      const element = elements[i]!;
 
       // Check for suite-setup
-      if (element.type === "list" && element.value.length > 0) {
-        const first = element.value[0];
-        if (first.type === "symbol" && first.value === "suite-setup") {
-          suite.setup = element.value.slice(1);
-          continue;
-        }
-        if (first.type === "symbol" && first.value === "suite-teardown") {
-          suite.teardown = element.value.slice(1);
-          continue;
-        }
-        if (first.type === "symbol" && first.value === "deftest") {
-          // Execute the deftest to register it in testRegistry
-          const testResult = this.evalDeftest(element.value, env);
-          if (Either.isLeft(testResult)) {
-            // Log error but continue
-            console.warn(`Failed to define test in suite: ${testResult.left.message}`);
-          } else {
-            // Add test to suite's test list
-            const testName = element.value[1];
-            if (testName && testName.type === "symbol") {
-              suite.tests.push(testName.value as string);
+      if (element.type === "list") {
+        const elValues = element.value as TLispValue[];
+        if (elValues.length > 0) {
+          const first = elValues[0]!;
+          if (first.type === "symbol" && first.value === "suite-setup") {
+            suite.setup = elValues.slice(1);
+            continue;
+          }
+          if (first.type === "symbol" && first.value === "suite-teardown") {
+            suite.teardown = elValues.slice(1);
+            continue;
+          }
+          if (first.type === "symbol" && first.value === "deftest") {
+            // Execute the deftest to register it in testRegistry
+            const testResult = this.evalDeftest(elValues, env);
+            if (Either.isLeft(testResult)) {
+              // Log error but continue
+              console.warn(`Failed to define test in suite: ${testResult.left.message}`);
+            } else {
+              // Add test to suite's test list
+              const testName = elValues[1];
+              if (testName && testName.type === "symbol") {
+                suite.tests.push(testName.value as string);
+              }
             }
           }
-        }
-        if (first.type === "symbol" && first.value === "deftest-suite") {
-          // Execute nested suite definition
-          const suiteResult = this.evalDeftestSuite(element.value, env);
-          if (Either.isLeft(suiteResult)) {
-            console.warn(`Failed to define nested suite: ${suiteResult.left.message}`);
-          } else {
-            // Add nested suite to parent's test list
-            const nestedName = element.value[1];
-            if (nestedName && (nestedName.type === "string" || nestedName.type === "symbol")) {
-              suite.tests.push(nestedName.value as string);
+          if (first.type === "symbol" && first.value === "deftest-suite") {
+            // Execute nested suite definition
+            const suiteResult = this.evalDeftestSuite(elValues, env);
+            if (Either.isLeft(suiteResult)) {
+              console.warn(`Failed to define nested suite: ${suiteResult.left.message}`);
+            } else {
+              // Add nested suite to parent's test list
+              const nestedName = elValues[1];
+              if (nestedName && (nestedName.type === "string" || nestedName.type === "symbol")) {
+                suite.tests.push(nestedName.value as string);
+              }
             }
           }
         }
@@ -1666,11 +1670,11 @@ export class TLispEvaluator {
     let bodyStartIndex = 3;
 
     // Check if first body element is a scope keyword list like (:scope each)
-    if (elements.length > 3 && elements[3].type === "list") {
-      const scopeList = elements[3].value as TLispValue[];
+    if (elements.length > 3 && elements[3]!.type === "list") {
+      const scopeList = elements[3]!.value as TLispValue[];
       if (scopeList.length >= 2) {
-        const keyword = scopeList[0];
-        const scopeValue = scopeList[1];
+        const keyword = scopeList[0]!;
+        const scopeValue = scopeList[1]!;
         if (keyword.type === "symbol" && keyword.value === "scope" && scopeValue.type === "symbol") {
           const scopeStr = scopeValue.value as string;
           if (scopeStr === "each" || scopeStr === "once" || scopeStr === "all") {
@@ -1687,11 +1691,11 @@ export class TLispEvaluator {
     let body: TLispValue[] = [];
 
     for (let i = bodyStartIndex; i < elements.length; i++) {
-      const arg = elements[i];
+      const arg = elements[i]!;
       if (arg.type === "list") {
         const listItems = arg.value as TLispValue[];
         if (listItems.length > 0) {
-          const first = listItems[0];
+          const first = listItems[0]!;
           if (first.type === "symbol") {
             if (first.value === "setup") {
               setupBody = listItems.slice(1);
@@ -1755,7 +1759,7 @@ export class TLispEvaluator {
     // Collect fixture names from arguments (elements[0] is 'use-fixtures', elements[1+] are args)
     const fixtureNames: string[] = [];
     for (let i = 1; i < elements.length; i++) {
-      const arg = elements[i];
+      const arg = elements[i]!;
       if (arg.type === "symbol") {
         fixtureNames.push(arg.value as string);
       } else if (arg.type === "string") {
@@ -1807,7 +1811,7 @@ export class TLispEvaluator {
       // Store teardown for later - we'll need a way to track this
       // For now, store in a special variable in the environment
       const teardowns = env.lookup("__fixture_teardowns__") || createList([]);
-      const teardownList = teardowns.type === "list" ? [...teardowns.value] : [];
+      const teardownList: any[] = teardowns.type === "list" ? [...(teardowns.value as TLispValue[])] : [];
       teardownList.push({ fixture: name, teardown: fixtureData.teardownBody || [] });
       env.define("__fixture_teardowns__", createList(teardownList));
     }
@@ -1832,7 +1836,7 @@ export class TLispEvaluator {
     }
 
     const nameArg = elements[1]; // Not evaluated
-    const valueArg = elements[2]; // Will be evaluated
+    const valueArg = elements[2]!; // Will be evaluated
 
     if (!nameArg || nameArg.type !== "symbol") {
       return Either.left({
@@ -1877,7 +1881,7 @@ export class TLispEvaluator {
     }
 
     const nameArg = elements[1]; // Not evaluated
-    const valueArg = elements[2]; // Will be evaluated
+    const valueArg = elements[2]!; // Will be evaluated
 
     if (!nameArg || nameArg.type !== "symbol") {
       return Either.left({
@@ -1926,8 +1930,8 @@ export class TLispEvaluator {
       });
     }
 
-    const valueArg = elements[1];
-    const typeExpr = elements[2];
+    const valueArg = elements[1]!;
+    const typeExpr = elements[2]!;
 
     let typeArg: TLispValue;
     if (typeExpr.type === "symbol") {
@@ -1979,7 +1983,7 @@ export class TLispEvaluator {
    * @param name - Name of the test
    * @returns Test definition or undefined if not found
    */
-  getTestDefinition(name: string): { body: TLispValue[], name: string, params: TLispValue } | undefined {
+  getTestDefinition(name: string): { body: TLispValue[], name: string, params: TLispValue, isAsync?: boolean } | undefined {
     return testRegistry.get(name);
   }
 
@@ -2032,7 +2036,7 @@ export class TLispEvaluator {
       });
     }
 
-    const form = elements[1];
+    const form = elements[1]!;
 
     // Try to evaluate the form
     const result = this.eval(form, env);
@@ -2072,7 +2076,7 @@ export class TLispEvaluator {
     let lastResult: Either<EvalError, EvalResult> = Either.right(createNil());
 
     for (let i = 0; i < bodyExprs.length; i++) {
-      const expr = bodyExprs[i];
+      const expr = bodyExprs[i]!;
 
       // Last expression is in tail position
       const isInTailPosition = inTailPosition && (i === bodyExprs.length - 1);
@@ -2265,7 +2269,7 @@ export const createEvaluatorWithBuiltins = (): { evaluator: TLispEvaluator; env:
       return `${value.type}:${String(value.value)}`;
     };
 
-    return Either.right(createBoolean(stringify(args[0]) === stringify(args[1])));
+    return Either.right(createBoolean(stringify(args[0]!) === stringify(args[1]!)));
   }, "equal"));
 
   env.define("<", createFunction((args: TLispValue[]) => {

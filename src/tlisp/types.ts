@@ -6,7 +6,8 @@
 import { Either } from "../utils/task-either.ts";
 import { ParseError } from "./parser.ts";
 import { TokenizeError } from "./tokenizer.ts";
-import type { EvalError } from "../error/types.ts";
+import type { AppError, EvalError } from "../error/types.ts";
+export type { AppError, EvalError };
 
 /**
  * T-Lisp value types
@@ -81,7 +82,7 @@ export interface TLispList extends TLispValue {
 /**
  * T-Lisp function type
  */
-export type TLispFunctionImpl = (args: TLispValue[]) => Either<EvalError, TLispValue>;
+export type TLispFunctionImpl = (args: TLispValue[]) => Either<AppError, TLispValue>;
 
 /**
  * T-Lisp function value
@@ -135,6 +136,9 @@ export interface TLispEnvironment {
   
   /** Set a variable (must already exist) */
   set(name: string, value: TLispValue): void;
+
+  /** Create a child environment with this as parent */
+  createChild(): TLispEnvironment;
 }
 
 /**
@@ -148,16 +152,25 @@ export interface TLispInterpreter {
   parse(source: string): TLispValue;
 
   /** Evaluate T-Lisp expression */
-  eval(expr: TLispValue, env?: TLispEnvironment): Either<EvalError, TLispValue>;
+  eval(expr: TLispValue, env?: TLispEnvironment): Either<AppError, TLispValue>;
 
   /** Execute T-Lisp source code */
-  execute(source: string, env?: TLispEnvironment): Either<EvalError, TLispValue>;
+  execute(source: string, env?: TLispEnvironment): Either<AppError, TLispValue>;
 
   /** Define a built-in function */
   defineBuiltin(name: string, fn: TLispFunctionImpl): void;
 
   /** Get test definition by name */
-  getTestDefinition?(name: string): { body: TLispValue[], name: string, params: TLispValue } | undefined;
+  getTestDefinition?(name: string): { body: TLispValue[], name: string, params: TLispValue, isAsync?: boolean } | undefined;
+
+  /** Get all registered test names */
+  getAllTestNames?(): string[];
+
+  /** Get all registered suite names */
+  getAllSuiteNames?(): string[];
+
+  /** Get suite definition by name */
+  getSuiteDefinition?(name: string): { body: TLispValue[], name: string, params: TLispValue, setup?: TLispValue[], teardown?: TLispValue[], tests: string[] } | undefined;
 }
 
 /**

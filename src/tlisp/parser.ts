@@ -4,7 +4,7 @@
  */
 
 import type { TLispParser as TLispParserInterface, TLispValue } from "./types.ts";
-import { TLispTokenizer } from "./tokenizer.ts";
+import { TLispTokenizer, type TokenizeError } from "./tokenizer.ts";
 import {
   createNil,
   createBoolean,

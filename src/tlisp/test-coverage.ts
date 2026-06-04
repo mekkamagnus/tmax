@@ -201,7 +201,8 @@ export function markFunctionCovered(name: string): void {
       name,
       callCount: 1,
       covered: true,
-      definedAt: 'unknown'
+      definedAt: 'unknown',
+      isBuiltin: false
     });
   }
 }

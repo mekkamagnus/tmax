@@ -100,7 +100,7 @@ export class TLispEvaluator {
         argsResults.push(argResult);
       }
       
-      const args = argsResults.map(r => r.right);
+      const args = argsResults.map(r => (r as { right: TLispValue }).right);
       const callResult = this.evalFunctionCallInternal(func, args, tailCall.env);
       
       if (Either.isLeft(callResult)) {
@@ -707,7 +707,7 @@ export class TLispEvaluator {
       if (depth === 1) {
         // We're at the top level - evaluate the expression
         // NOTE: This is a simplification - in a full implementation, this would need to return Either
-        return this.eval(unquoteExpr, env).getOrElse(() => createNil()); // Simplified for now
+        return Either.getOrElse(this.eval(unquoteExpr, env), createNil()); // Simplified for now
       } else {
         // We're nested - decrease depth and continue
         return createList([first, this.expandQuasiquote(unquoteExpr, env, depth - 1)]);
@@ -744,7 +744,7 @@ export class TLispEvaluator {
               throw new Error("unquote-splicing missing argument");
             }
             // NOTE: This is a simplification - in a full implementation, this would need to return Either
-            const spliceValue = this.eval(spliceExpr, env).getOrElse(() => createNil()); // Simplified for now
+            const spliceValue = Either.getOrElse(this.eval(spliceExpr, env), createNil()); // Simplified for now
             if (spliceValue.type === "list") {
               const spliceList = spliceValue.value as TLispValue[];
               result.push(...spliceList);
@@ -925,7 +925,7 @@ export class TLispEvaluator {
         argsResults.push(argResult);
       }
       
-      const args = argsResults.map(r => r.right);
+      const args = argsResults.map(r => (r as { right: TLispValue }).right);
       return this.evalFunctionCallInternal(func, args, env);
     }
   }
