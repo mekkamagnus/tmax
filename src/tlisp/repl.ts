@@ -1,183 +1,195 @@
 /**
  * @file repl.ts
- * @description T-Lisp REPL (Read-Eval-Print Loop) implementation
+ * @description Standalone T-Lisp REPL.
  */
 
-import { createInterface, Interface } from 'readline';
-import { TLispParser } from "./parser.ts";
-import { createEvaluatorWithBuiltins } from "./evaluator.ts";
-import { valueToString } from "./values.ts";
-import type { TLispEnvironment } from "./types.ts";
-import { TLispEvaluator } from "./evaluator.ts";
+import { createInterface, type Interface } from "node:readline";
+import { Either } from "../utils/task-either.ts";
+import { createStandaloneInterpreter, type StandaloneProfileOptions } from "./profiles/standalone.ts";
+import type { TLispInterpreterImpl } from "./interpreter.ts";
+import type { TLispValue } from "./types.ts";
+import { createNil, createString, valueToString } from "./values.ts";
 
-/**
- * T-Lisp REPL for interactive development
- */
-export class TLispREPL {
-  private parser: TLispParser;
-  private evaluator: TLispEvaluator;
-  private env: TLispEnvironment;
-  private running: boolean = false;
-  private rl: Interface;
+export interface TLispREPLOptions extends StandaloneProfileOptions {
+  input?: NodeJS.ReadStream;
+  output?: NodeJS.WriteStream;
+}
 
-  /**
-   * Create a new T-Lisp REPL
-   */
-  constructor() {
-    this.parser = new TLispParser();
-    const { evaluator, env } = createEvaluatorWithBuiltins();
-    this.evaluator = evaluator;
-    this.env = env;
-    this.rl = createInterface({
-      input: process.stdin,
-      output: process.stdout
-    });
+export function formBalance(source: string): number {
+  let depth = 0;
+  let inString = false;
+  let escaped = false;
+  let inComment = false;
+
+  for (const ch of source) {
+    if (inComment) {
+      if (ch === "\n") inComment = false;
+      continue;
+    }
+
+    if (inString) {
+      if (escaped) {
+        escaped = false;
+      } else if (ch === "\\") {
+        escaped = true;
+      } else if (ch === '"') {
+        inString = false;
+      }
+      continue;
+    }
+
+    if (ch === ";") {
+      inComment = true;
+      continue;
+    }
+    if (ch === '"') {
+      inString = true;
+      continue;
+    }
+    if (ch === "(") depth++;
+    if (ch === ")") depth--;
   }
 
-  /**
-   * Start the REPL
-   */
+  return depth;
+}
+
+export class TLispREPL {
+  private interpreter: TLispInterpreterImpl;
+  private running = false;
+  private rl: Interface;
+  private output: NodeJS.WriteStream;
+  private recent: TLispValue[] = [createNil(), createNil(), createNil()];
+
+  constructor(options: TLispREPLOptions = {}) {
+    this.output = options.output ?? process.stdout;
+    this.interpreter = createStandaloneInterpreter({
+      ...options,
+      stdout: options.stdout ?? this.output,
+    });
+    this.rl = createInterface({
+      input: options.input ?? process.stdin,
+      output: this.output,
+      historySize: 1000,
+    });
+    this.installReplBindings();
+  }
+
   async start(): Promise<void> {
     this.running = true;
-    console.log("T-Lisp REPL v1.0.0");
-    console.log("Type 'exit' or 'quit' to exit, 'help' for help");
-    console.log("");
+    this.write("T-Lisp REPL\n");
+    this.write("Type 'exit' or 'quit' to exit, 'help' for help\n\n");
 
     while (this.running) {
       try {
-        const input = await this.readInput("tlisp> ");
-        
-        if (!input.trim()) {
-          continue;
-        }
-        
-        // Handle special commands
-        if (this.handleCommand(input.trim())) {
-          continue;
-        }
-        
-        // Parse and evaluate the input
-        const result = this.evaluate(input);
-        if ('right' in result) {
-          console.log(valueToString(result.right));
+        const input = await this.readForm();
+        const trimmed = input.trim();
+        if (trimmed === "") continue;
+        if (this.handleCommand(trimmed)) continue;
+        const result = this.evaluate(trimmed);
+        if (Either.isRight(result)) {
+          this.recordResult(result.right);
+          this.write(`${valueToString(result.right)}\n`);
         } else {
-          console.error(`Error: ${result.left.message}`);
+          this.recordError(result.left.message);
+          this.write(`Error: ${result.left.message}\n`);
         }
       } catch (error) {
-        console.error(`Error: ${error instanceof Error ? error.message : String(error)}`);
+        const message = error instanceof Error ? error.message : String(error);
+        this.recordError(message);
+        this.write(`Error: ${message}\n`);
       }
     }
   }
 
-  /**
-   * Stop the REPL
-   */
   stop(): void {
     this.running = false;
     this.rl.close();
   }
 
-  /**
-   * Evaluate a T-Lisp expression
-   * @param source - Source code to evaluate
-   * @returns Evaluated result
-   */
   evaluate(source: string) {
-    const parseResult = this.parser.parse(source);
-    if ('left' in parseResult) {
-      throw new Error(`Parse error: ${parseResult.left.message}`);
-    }
-    const expr = parseResult.right;
-    return this.evaluator.eval(expr, this.env);
+    return this.interpreter.execute(source);
   }
 
-  /**
-   * Handle special REPL commands
-   * @param input - User input
-   * @returns True if command was handled
-   */
+  private installReplBindings(): void {
+    this.interpreter.globalEnv.define("*1", this.recent[0]!);
+    this.interpreter.globalEnv.define("*2", this.recent[1]!);
+    this.interpreter.globalEnv.define("*3", this.recent[2]!);
+    this.interpreter.globalEnv.define("*e", createNil());
+  }
+
+  private recordResult(value: TLispValue): void {
+    this.recent = [value, this.recent[0]!, this.recent[1]!];
+    this.interpreter.globalEnv.define("*1", this.recent[0]!);
+    this.interpreter.globalEnv.define("*2", this.recent[1]!);
+    this.interpreter.globalEnv.define("*3", this.recent[2]!);
+  }
+
+  private recordError(message: string): void {
+    this.interpreter.globalEnv.define("*e", createString(message));
+  }
+
   private handleCommand(input: string): boolean {
     switch (input.toLowerCase()) {
       case "exit":
       case "quit":
-        console.log("Goodbye!");
         this.stop();
         return true;
-        
       case "help":
         this.showHelp();
         return true;
-        
       case "env":
         this.showEnvironment();
         return true;
-        
       case "clear":
-        console.clear();
+        this.write("\x1Bc");
         return true;
-        
       default:
         return false;
     }
   }
 
-  /**
-   * Show help information
-   */
   private showHelp(): void {
-    console.log("T-Lisp REPL Commands:");
-    console.log("  help    - Show this help message");
-    console.log("  env     - Show current environment bindings");
-    console.log("  clear   - Clear the screen");
-    console.log("  exit    - Exit the REPL");
-    console.log("  quit    - Exit the REPL");
-    console.log("");
-    console.log("T-Lisp Syntax:");
-    console.log("  Numbers: 42, 3.14, -7");
-    console.log("  Strings: \"hello world\"");
-    console.log("  Booleans: t, nil");
-    console.log("  Symbols: x, +, my-var");
-    console.log("  Lists: (1 2 3), (+ 1 2)");
-    console.log("  Quote: '(a b c)");
-    console.log("  Quasiquote: `(a ,x c)");
-    console.log("  Functions: (lambda (x) (* x x))");
-    console.log("  Macros: (defmacro when (cond body) `(if ,cond ,body nil))");
-    console.log("");
+    this.write("T-Lisp REPL Commands:\n");
+    this.write("  help    Show this help message\n");
+    this.write("  env     Show current environment bindings\n");
+    this.write("  clear   Clear the screen\n");
+    this.write("  exit    Exit the REPL\n");
+    this.write("  quit    Exit the REPL\n\n");
+    this.write("REPL bindings: *1, *2, *3 for recent results; *e for the last error\n");
   }
 
-  /**
-   * Show current environment bindings
-   */
   private showEnvironment(): void {
-    console.log("Environment bindings:");
-    if ('bindings' in this.env && this.env.bindings && this.env.bindings.size > 0) {
-      for (const [name, value] of this.env.bindings) {
-        console.log(`  ${name}: ${valueToString(value)}`);
-      }
-    } else {
-      console.log("  (no bindings)");
+    this.write("Environment bindings:\n");
+    for (const [name, value] of this.interpreter.globalEnv.bindings) {
+      this.write(`  ${name}: ${valueToString(value)}\n`);
     }
-    console.log("");
+    this.write("\n");
   }
 
-  /**
-   * Read input from user
-   * @param prompt - Prompt to display
-   * @returns User input
-   */
-  private async readInput(prompt: string): Promise<string> {
+  private async readForm(): Promise<string> {
+    let source = "";
+    let prompt = "tlisp> ";
+
+    while (true) {
+      const line = await this.question(prompt);
+      source += source.length === 0 ? line : `\n${line}`;
+      if (formBalance(source) <= 0) return source;
+      prompt = "....> ";
+    }
+  }
+
+  private question(prompt: string): Promise<string> {
     return new Promise((resolve) => {
-      this.rl.question(prompt, (answer: string) => {
-        resolve(answer.trim());
-      });
+      this.rl.question(prompt, (answer: string) => resolve(answer));
     });
+  }
+
+  private write(text: string): void {
+    this.output.write(text);
   }
 }
 
-/**
- * Run the T-Lisp REPL
- */
-export async function runREPL(): Promise<void> {
-  const repl = new TLispREPL();
+export async function runREPL(options: TLispREPLOptions = {}): Promise<void> {
+  const repl = new TLispREPL(options);
   await repl.start();
 }
