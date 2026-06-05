@@ -22,11 +22,27 @@ describe("Lisp-owned command libraries", () => {
       "other-window",
       "delete-window",
       "relative-line-numbers-mode",
+      "completing-read",
+      "orderless-filter",
+      "marginalia-annotate-candidate",
+      "vertico-publish",
+      "switch-buffer",
+      "execute-extended-command",
     ]) {
       const value = env.lookup(name);
       expect(value?.type).toBe("function");
     }
 
     editor.stop();
+  });
+
+  test("TypeScript minibuffer handler only routes normalized keys to T-Lisp", async () => {
+    const handler = await Bun.file("src/editor/handlers/mx-handler.ts").text();
+
+    expect(handler).toContain("minibuffer-dispatch-key");
+    expect(handler).not.toContain("getFuzzyCompletions");
+    expect(handler).not.toContain("getAvailableCommands");
+    expect(handler).not.toContain("bestMatch");
+    expect(handler).not.toContain("state.mxCommand +=");
   });
 });

@@ -63,6 +63,9 @@ export function editorStateToJson(state: EditorState): Record<string, unknown> {
     currentMajorMode: state.currentMajorMode ?? "fundamental",
     activeMinorModes: state.activeMinorModes ?? [],
     activeMinorModeLighters: state.activeMinorModeLighters ?? [],
+    minibufferState: state.minibufferState,
+    minibufferView: state.minibufferView,
+    cursorFocus: state.cursorFocus ?? "buffer",
     bufferContent: bufferContent(state.currentBuffer),
     windows: state.windows?.map(window => {
       const { buffer, ...rest } = window;
@@ -98,8 +101,10 @@ export function jsonToEditorState(json: Record<string, unknown>): EditorState {
     currentMajorMode: (json.currentMajorMode as string | undefined) ?? "fundamental",
     activeMinorModes: (json.activeMinorModes as string[] | undefined) ?? [],
     activeMinorModeLighters: (json.activeMinorModeLighters as string[] | undefined) ?? [],
+    minibufferState: json.minibufferState as EditorState["minibufferState"],
+    minibufferView: json.minibufferView as EditorState["minibufferView"],
     buffers: new Map(),
-    cursorFocus: "buffer",
+    cursorFocus: json.cursorFocus === "command" ? "command" : "buffer",
     windows,
     currentWindowIndex: (json.currentWindowIndex as number | undefined) ?? 0,
     tabs,

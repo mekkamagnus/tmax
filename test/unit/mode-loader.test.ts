@@ -19,7 +19,7 @@ describe("mode loader", () => {
     });
 
     expect(Either.isRight(result)).toBe(true);
-    expect(evaluated).toContain('(provide "fundamental-mode")');
+    expect(evaluated).toContain('defmodule editor/modes/fundamental');
   });
 
   test("returns an error for missing files", () => {

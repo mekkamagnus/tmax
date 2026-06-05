@@ -1,3 +1,6 @@
+(defmodule editor/commands/edit-commands
+  (export vim-delete-char vim-change-char vim-delete-to-line-end vim-change-to-line-end vim-yank-to-line-end vim-paste-after vim-paste-before vim-join-lines visual-change visual-swap-anchor))
+
 ;; edit-commands.tlisp -- Single-key Vim edit commands composed in T-Lisp
 
 (defun vim-delete-char (count)
@@ -87,5 +90,3 @@
   (progn
     (visual-swap-endpoints)
     t))
-
-(provide "edit-commands")

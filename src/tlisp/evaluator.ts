@@ -3,8 +3,9 @@
  * @description T-Lisp evaluator implementation with functional error handling
  */
 
-import type { TLispValue, TLispEnvironment, TLispFunction, TLispList, TLispMacro } from "./types.ts";
+import type { TLispValue, TLispEnvironment, TLispFunction, TLispList, TLispMacro, ModuleImport } from "./types.ts";
 import { TLispEnvironmentImpl } from "./environment.ts";
+import type { ModuleRegistry, ModuleRecord } from "./module-registry.ts";
 import {
   createNil,
   createBoolean,
@@ -86,6 +87,17 @@ let currentSuite: string | null = null;
  * T-Lisp evaluator for executing T-Lisp expressions
  */
 export class TLispEvaluator {
+  private moduleRegistry: ModuleRegistry | null = null;
+  private builtinsEnv: TLispEnvironment | null = null;
+
+  setModuleRegistry(registry: ModuleRegistry): void {
+    this.moduleRegistry = registry;
+  }
+
+  setBuiltinsEnv(env: TLispEnvironment): void {
+    this.builtinsEnv = env;
+  }
+
   /**
    * Evaluate a T-Lisp expression with tail-call optimization
    * @param expr - Expression to evaluate
@@ -171,13 +183,104 @@ export class TLispEvaluator {
   }
 
   /**
-   * Evaluate a symbol by looking it up in the environment
-   * @param symbol - Symbol to evaluate
-   * @param env - Environment for lookup
-   * @returns Either with error or symbol value
+   * Evaluate a symbol by looking it up in the environment.
+   * Supports qualified names (module/name) via import table resolution.
    */
   private evalSymbol(symbol: TLispValue, env: TLispEnvironment): Either<EvalError, TLispValue> {
     const name = symbol.value as string;
+
+    // Qualified name resolution: module/func or alias/func
+    const slashIdx = name.indexOf("/");
+    if (slashIdx > 0 && this.moduleRegistry) {
+      const alias = name.substring(0, slashIdx);
+      const symName = name.substring(slashIdx + 1);
+
+      // Walk env chain looking for import table with this alias
+      let current: TLispEnvironment | undefined = env;
+      let moduleName: string | undefined;
+      let importedSymbols: Set<string> | undefined;
+
+      while (current) {
+        if (current.moduleImports) {
+          const imp = current.moduleImports.get(alias);
+          if (imp) {
+            moduleName = imp.moduleName;
+            importedSymbols = imp.importedSymbols;
+            break;
+          }
+        }
+        current = current.parent;
+      }
+
+      if (moduleName) {
+        const record = this.moduleRegistry.resolve(moduleName);
+        if (!record || record.state !== "loaded") {
+          return Either.left({
+            type: 'EvalError',
+            variant: 'UndefinedSymbol',
+            message: `Module '${moduleName}' not loaded (referenced as '${alias}')`,
+            details: { symbol: name, module: moduleName }
+          });
+        }
+
+        if (!record.exports.has(symName)) {
+          return Either.left({
+            type: 'EvalError',
+            variant: 'UndefinedSymbol',
+            message: `Symbol '${symName}' not exported from module '${moduleName}'`,
+            details: { symbol: name, module: moduleName, unexported: symName }
+          });
+        }
+
+        const value = record.env.lookup(symName);
+        if (value === undefined) {
+          return Either.left({
+            type: 'EvalError',
+            variant: 'UndefinedSymbol',
+            message: `Exported symbol '${symName}' not found in module '${moduleName}' environment`,
+            details: { symbol: name, module: moduleName }
+          });
+        }
+        return Either.right(value);
+      }
+
+      // Check selective imports — symbol imported unqualified
+      current = env;
+      while (current) {
+        if (current.moduleImports) {
+          for (const imp of current.moduleImports.values()) {
+            if (imp.importedSymbols && imp.importedSymbols.has(name)) {
+              const record = this.moduleRegistry.resolve(imp.moduleName);
+              if (record && record.state === "loaded") {
+                const value = record.env.lookup(name);
+                if (value !== undefined) return Either.right(value);
+              }
+            }
+          }
+        }
+        current = current.parent;
+      }
+    }
+
+    // Selective import resolution for unqualified names
+    if (slashIdx < 0 && this.moduleRegistry) {
+      let current: TLispEnvironment | undefined = env;
+      while (current) {
+        if (current.moduleImports) {
+          for (const imp of current.moduleImports.values()) {
+            if (imp.importedSymbols && imp.importedSymbols.has(name)) {
+              const record = this.moduleRegistry.resolve(imp.moduleName);
+              if (record && record.state === "loaded") {
+                const value = record.env.lookup(name);
+                if (value !== undefined) return Either.right(value);
+              }
+            }
+          }
+        }
+        current = current.parent;
+      }
+    }
+
     const value = env.lookup(name);
 
     if (value === undefined) {
@@ -271,6 +374,10 @@ export class TLispEvaluator {
           return this.evalUseFixtures(elements, env);
         case "defvar":
           return this.evalDefvar(elements, env);
+        case "defmodule":
+          return this.evalDefmodule(elements, env);
+        case "require-module":
+          return this.evalRequireModule(elements, env);
         case "set!":
           return this.evalSetBang(elements, env);
         case "assert-type":
@@ -286,6 +393,274 @@ export class TLispEvaluator {
 
     // Function call - evaluate first element as function
     return this.evalFunctionCall(elements, env, inTailPosition);
+  }
+
+  /**
+   * Evaluate (defmodule name (export ...) (require-module ...) ...body)
+   * Creates an isolated module environment, evaluates body, registers exports.
+   */
+  private evalDefmodule(elements: TLispValue[], env: TLispEnvironment): Either<EvalError, TLispValue> {
+    if (elements.length < 3) {
+      return Either.left({
+        type: 'EvalError',
+        variant: 'SyntaxError',
+        message: "defmodule requires at least a name and body",
+        details: { expected: "3+", actual: elements.length }
+      });
+    }
+
+    const nameExpr = elements[1];
+    if (!nameExpr || nameExpr.type !== "symbol") {
+      return Either.left({
+        type: 'EvalError',
+        variant: 'SyntaxError',
+        message: "defmodule name must be a symbol",
+        details: { nameExpr }
+      });
+    }
+
+    const moduleName = nameExpr.value as string;
+
+    if (!this.moduleRegistry || !this.builtinsEnv) {
+      return Either.left({
+        type: 'EvalError',
+        variant: 'RuntimeError',
+        message: "Module system not initialized",
+        details: { moduleName }
+      });
+    }
+
+    // Check for nested defmodule
+    let currentEnv: TLispEnvironment | undefined = env;
+    while (currentEnv) {
+      if (currentEnv.moduleImports && currentEnv !== this.builtinsEnv) {
+        // Inside a module — check if this env is a module env
+        for (const record of this.moduleRegistry.listModules()) {
+          if (record.env === currentEnv) {
+            return Either.left({
+              type: 'EvalError',
+              variant: 'SyntaxError',
+              message: `Nested defmodule not allowed (already inside module '${record.name}')`,
+              details: { moduleName, parentModule: record.name }
+            });
+          }
+        }
+      }
+      currentEnv = currentEnv.parent;
+    }
+
+    // Check if already registered
+    if (this.moduleRegistry.resolve(moduleName)) {
+      return Either.right(createSymbol(moduleName));
+    }
+
+    // Create module environment as child of builtinsEnv (not globalEnv)
+    const moduleEnv = new TLispEnvironmentImpl(this.builtinsEnv);
+    moduleEnv.moduleImports = new Map();
+
+    // Mark as loading for cycle detection
+    this.moduleRegistry.setLoading(moduleName, moduleEnv, "");
+
+    // Parse body elements: collect exports and evaluate the rest
+    const exports = new Set<string>();
+    const bodyForms: TLispValue[] = [];
+
+    for (let i = 2; i < elements.length; i++) {
+      const elem = elements[i];
+      if (!elem || elem.type !== "list") {
+        bodyForms.push(elem!);
+        continue;
+      }
+
+      const listItems = elem.value as TLispValue[];
+      if (listItems.length === 0) {
+        bodyForms.push(elem);
+        continue;
+      }
+
+      const first = listItems[0];
+      if (first && first.type === "symbol") {
+        const sym = first.value as string;
+
+        if (sym === "export") {
+          // (export name1 name2 ...)
+          for (let j = 1; j < listItems.length; j++) {
+            const exportSym = listItems[j];
+            if (exportSym && exportSym.type === "symbol") {
+              exports.add(exportSym.value as string);
+            }
+          }
+          continue;
+        }
+
+        if (sym === "require-module") {
+          // Evaluate require-module in the module env
+          const reqResult = this.evalRequireModule(listItems, moduleEnv);
+          if (Either.isLeft(reqResult)) return reqResult;
+          continue;
+        }
+      }
+
+      bodyForms.push(elem);
+    }
+
+    // Evaluate body forms in module environment
+    let lastResult: TLispValue = createNil();
+    for (const form of bodyForms) {
+      const result = this.eval(form, moduleEnv);
+      if (Either.isLeft(result)) {
+        this.moduleRegistry.setFailed(moduleName);
+        return result;
+      }
+      lastResult = result.right;
+    }
+
+    // Register module with exports
+    this.moduleRegistry.register(moduleName, moduleEnv, exports, "");
+
+    // Migration bridge: also define exported names into the calling env
+    // so that key-bind expressions and global lookups still find them.
+    // This can be removed once all callers use require-module.
+    for (const exportName of exports) {
+      const value = moduleEnv.lookup(exportName);
+      if (value !== undefined) {
+        env.define(exportName, value);
+      }
+    }
+
+    return Either.right(createSymbol(moduleName));
+  }
+
+  /**
+   * Evaluate (require-module module-name [:as alias | :import [sym1 sym2 ...]])
+   * Loads a module and registers the import in the current scope.
+   */
+  private evalRequireModule(elements: TLispValue[], env: TLispEnvironment): Either<EvalError, TLispValue> {
+    if (elements.length < 2) {
+      return Either.left({
+        type: 'EvalError',
+        variant: 'SyntaxError',
+        message: "require-module requires at least a module name",
+        details: { expected: "2+", actual: elements.length }
+      });
+    }
+
+    const nameExpr = elements[1];
+    if (!nameExpr || (nameExpr.type !== "symbol" && nameExpr.type !== "string")) {
+      return Either.left({
+        type: 'EvalError',
+        variant: 'SyntaxError',
+        message: "require-module name must be a symbol or string",
+        details: { nameExpr }
+      });
+    }
+
+    const moduleName = nameExpr.value as string;
+
+    if (!this.moduleRegistry) {
+      return Either.left({
+        type: 'EvalError',
+        variant: 'RuntimeError',
+        message: "Module system not initialized",
+        details: { moduleName }
+      });
+    }
+
+    // Check for circular dependency
+    const existing = this.moduleRegistry.resolve(moduleName);
+    if (existing && existing.state === "loading") {
+      return Either.left({
+        type: 'EvalError',
+        variant: 'RuntimeError',
+        message: `Circular module dependency detected: '${moduleName}' is currently being loaded`,
+        details: { moduleName }
+      });
+    }
+
+    // Already loaded — just register the import
+    if (!existing || existing.state !== "loaded") {
+      // Module not yet loaded — attempt file resolution
+      const loadResult = this.loadModuleFromDisk(moduleName);
+      if (Either.isLeft(loadResult)) return loadResult;
+    }
+
+    // Parse import style
+    let alias: string;
+    let importedSymbols: Set<string> | undefined;
+
+    // Default alias: last segment of module name
+    const lastSlash = moduleName.lastIndexOf("/");
+    alias = lastSlash >= 0 ? moduleName.substring(lastSlash + 1) : moduleName;
+
+    if (elements.length >= 3) {
+      const flag = elements[2];
+      if (flag && flag.type === "symbol") {
+        const flagStr = flag.value as string;
+
+        if (flagStr === ":as" || flagStr === "as") {
+          // (require-module name :as alias)
+          if (elements.length < 4 || !elements[3] || elements[3].type !== "symbol") {
+            return Either.left({
+              type: 'EvalError',
+              variant: 'SyntaxError',
+              message: "require-module :as requires a symbol alias",
+              details: { elements }
+            });
+          }
+          alias = elements[3].value as string;
+        } else if (flagStr === ":import" || flagStr === "import") {
+          // (require-module name :import [sym1 sym2 ...])
+          if (elements.length < 4 || !elements[3] || elements[3].type !== "list") {
+            return Either.left({
+              type: 'EvalError',
+              variant: 'SyntaxError',
+              message: "require-module :import requires a list of symbols",
+              details: { elements }
+            });
+          }
+          importedSymbols = new Set<string>();
+          const syms = (elements[3].value as TLispValue[]);
+          for (const s of syms) {
+            if (s.type === "symbol") {
+              importedSymbols.add(s.value as string);
+            }
+          }
+        }
+      }
+    }
+
+    // Ensure env has import table
+    if (!env.moduleImports) {
+      env.moduleImports = new Map();
+    }
+    env.moduleImports.set(alias, { moduleName, alias, importedSymbols });
+
+    return Either.right(createNil());
+  }
+
+  /**
+   * Attempt to load a module from disk by resolving its name to a file path.
+   */
+  private loadModuleFromDisk(moduleName: string): Either<EvalError, TLispValue> {
+    // Resolution order: check module loader if registered
+    if (this.moduleLoader) {
+      const result = this.moduleLoader(moduleName);
+      if (result) return result;
+    }
+
+    return Either.left({
+      type: 'EvalError',
+      variant: 'RuntimeError',
+      message: `Module '${moduleName}' not found`,
+      details: { moduleName }
+    });
+  }
+
+  /** External module loader hook — set by the editor to resolve file paths */
+  private moduleLoader: ((name: string) => Either<EvalError, TLispValue> | null) | null = null;
+
+  setModuleLoader(loader: (name: string) => Either<EvalError, TLispValue> | null): void {
+    this.moduleLoader = loader;
   }
 
   /**
@@ -2095,9 +2470,13 @@ export class TLispEvaluator {
  * Create evaluator with built-in functions
  * @returns Evaluator with standard library
  */
-export const createEvaluatorWithBuiltins = (): { evaluator: TLispEvaluator; env: TLispEnvironment } => {
+export const createEvaluatorWithBuiltins = (): { evaluator: TLispEvaluator; builtinsEnv: TLispEnvironment; env: TLispEnvironment } => {
   const evaluator = new TLispEvaluator();
-  const env = new TLispEnvironmentImpl();
+  // builtinsEnv holds stdlib + editor primitives
+  const builtinsEnv = new TLispEnvironmentImpl();
+  // Register all builtins into builtinsEnv using the existing code pattern
+  // env here IS builtinsEnv — all the env.define() calls below register builtins
+  const env = builtinsEnv;
   
   // Arithmetic functions
   env.define("+", createFunction((args: TLispValue[]) => {
@@ -3607,15 +3986,17 @@ export const createEvaluatorWithBuiltins = (): { evaluator: TLispEvaluator; env:
     return Either.right(createNil());
   }, "print"));
 
-  // Register standard library functions
+  // Create the user's globalEnv as an empty child of builtinsEnv
+  const globalEnv = new TLispEnvironmentImpl(builtinsEnv);
+
+  // Register standard library functions into builtinsEnv
   const interpreterMock = {
     defineBuiltin: (name: string, fn: any) => {
-      env.define(name, createFunction(fn, name));
+      builtinsEnv.define(name, createFunction(fn, name));
     },
-    globalEnv: env,
-    eval: (expr: TLispValue, evalEnv: TLispEnvironment = env) => evaluator.eval(expr, evalEnv),
-    execute: (source: string, evalEnv: TLispEnvironment = env) => {
-      // Simple execute implementation for the mock
+    globalEnv, // User globalEnv — test envs chain up to see both globalEnv and builtinsEnv
+    eval: (expr: TLispValue, evalEnv: TLispEnvironment = globalEnv) => evaluator.eval(expr, evalEnv),
+    execute: (source: string, evalEnv: TLispEnvironment = globalEnv) => {
       const parser = new TLispParser();
       const result = parser.parse(source);
       if (Either.isLeft(result)) {
@@ -3633,5 +4014,5 @@ export const createEvaluatorWithBuiltins = (): { evaluator: TLispEvaluator; env:
   // Register testing framework functions
   registerTestingFramework(interpreterMock as any);
 
-  return { evaluator, env };
+  return { evaluator, builtinsEnv, env: globalEnv };
 };

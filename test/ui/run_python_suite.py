@@ -31,6 +31,7 @@ DAEMON_TMUX_TESTS = [
     "10_renderer_layout.py",
     "14_vim_input.py",
     "15_daily_driver_rendering.py",
+    "16_buffer_completion.py",
 ]
 
 

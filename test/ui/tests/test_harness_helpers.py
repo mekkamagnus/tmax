@@ -16,7 +16,7 @@ from tmax_harness.assertions import (
     AssertionResult, assert_no_errors, assert_screen_fill, summarize, format_summary,
 )
 from tmax_harness.config import load_config
-from tmax_harness.input import translate_key
+from tmax_harness.input import escape_literal_key, translate_key
 
 
 def test_escape_tlisp_string() -> tuple[AssertionResult, ...]:
@@ -90,6 +90,10 @@ def test_escape_tlisp_string() -> tuple[AssertionResult, ...]:
     results.append(AssertionResult(
         translate_key("Backspace") == "BSpace",
         "Backspace should use tmux's BSpace key name",
+    ))
+    results.append(AssertionResult(
+        escape_literal_key(";") == r"\;",
+        "Literal semicolon should be escaped for tmux",
     ))
 
     # parse_value

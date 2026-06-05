@@ -29,10 +29,7 @@ export type TLispFunctionWithEither = (args: TLispValue[]) => Either<AppError, T
  * @param setStatusMessage - Function to set current status message
  * @param getCommandLine - Function to get current command line
  * @param setCommandLine - Function to set current command line
- * @param getSpacePressed - Function to get space pressed state
  * @param setSpacePressed - Function to set space pressed state
- * @param getMxCommand - Function to get current M-x command
- * @param setMxCommand - Function to set current M-x command
  * @param getCursorFocus - Function to get cursor focus state
  * @param setCursorFocus - Function to set cursor focus state
  * @returns Map of mode function names to implementations
@@ -44,10 +41,7 @@ export function createModeOps(
   setStatusMessage: (message: string) => void,
   getCommandLine: () => string,
   setCommandLine: (command: string) => void,
-  getSpacePressed: () => boolean,
   setSpacePressed: (pressed: boolean) => void,
-  getMxCommand: () => string,
-  setMxCommand: (command: string) => void,
   getCursorFocus: () => 'buffer' | 'command',
   setCursorFocus: (focus: 'buffer' | 'command') => void
 ): Map<string, TLispFunctionImpl> {
@@ -171,22 +165,7 @@ export function createModeOps(
     return Either.right(createString("normal"));
   });
 
-  api.set("editor-exit-mx-mode", (args: TLispValue[]): Either<AppError, TLispValue> => {
-    const argsValidation = validateArgsCount(args, 0, "editor-exit-mx-mode");
-    if (Either.isLeft(argsValidation)) {
-      return Either.left(argsValidation.left);
-    }
-
-    setMxCommand("");
-    setMode("normal");
-    setSpacePressed(false);
-    setStatusMessage("");
-    setCursorFocus('buffer');
-
-    return Either.right(createString("normal"));
-  });
-
-  // M-x (Emacs-style) functionality
+  // Low-level prefix state used by T-Lisp key semantics.
   api.set("editor-handle-space", (args: TLispValue[]): Either<AppError, TLispValue> => {
     const argsValidation = validateArgsCount(args, 0, "editor-handle-space");
     if (Either.isLeft(argsValidation)) {
@@ -197,30 +176,6 @@ export function createModeOps(
     setStatusMessage("SPC-");
 
     return Either.right(createString("space"));
-  });
-
-  api.set("editor-handle-semicolon", (args: TLispValue[]): Either<AppError, TLispValue> => {
-    const argsValidation = validateArgsCount(args, 0, "editor-handle-semicolon");
-    if (Either.isLeft(argsValidation)) {
-      return Either.left(argsValidation.left);
-    }
-
-    if (getSpacePressed()) {
-      // SPC ; sequence - enter M-x mode
-      setSpacePressed(false);
-      setMxCommand("");
-      setMode("mx");
-      setStatusMessage("");
-      setCursorFocus('command');
-      
-      // Note: History index reset will be handled by the editor
-      // through a separate mechanism (mode change detection)
-    } else {
-      // Just a semicolon in normal mode
-      setStatusMessage("Unbound key: ;");
-    }
-
-    return Either.right(createString("semicolon"));
   });
 
   // Help prefix handler (US-1.11.2)
@@ -235,47 +190,6 @@ export function createModeOps(
     setStatusMessage("Help: (k)ey, (f)unction");
     
     return Either.right(createString("help-prefix"));
-  });
-
-  api.set("editor-execute-mx-command", (args: TLispValue[]): Either<AppError, TLispValue> => {
-    const argsValidation = validateArgsCount(args, 0, "editor-execute-mx-command");
-    if (Either.isLeft(argsValidation)) {
-      return Either.left(argsValidation.left);
-    }
-
-    const command = getMxCommand().trim();
-
-    if (command === "") {
-      // Empty command, just exit
-      setMxCommand("");
-      setMode("normal");
-      setCursorFocus('buffer');
-      return Either.right(createString(""));
-    }
-
-    // Try to execute as T-Lisp function call
-    // Add parentheses if not present to make it a function call
-    const tlispCommand = command.includes("(") ? command : `(${command})`;
-
-    // Note: This would need access to the interpreter instance
-    // For now, we'll handle some built-in commands
-    if (command === "editor-quit" || command === "quit") {
-      // Return quit signal instead of throwing
-      return Either.right(createString("EDITOR_QUIT_SIGNAL"));
-    } else if (command === "buffer-create") {
-      setStatusMessage("buffer-create requires arguments");
-    } else if (command === "editor-mode") {
-      setStatusMessage(`Current mode: ${getMode()}`);
-    } else {
-      setStatusMessage(`Executed: ${command}`);
-    }
-
-    // Clear M-x command and return to normal mode
-    setMxCommand("");
-    setMode("normal");
-    setCursorFocus('buffer');
-
-    return Either.right(createString(command));
   });
 
   // Window prefix handler (US-3.2.2)

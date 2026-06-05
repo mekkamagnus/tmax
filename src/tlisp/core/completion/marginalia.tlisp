@@ -1,0 +1,52 @@
+(defmodule editor/completion/marginalia
+  (export marginalia-register-annotator marginalia-buffer-annotation marginalia-command-annotation marginalia-annotate-candidate marginalia-annotate-candidates))
+
+;; marginalia.tlisp --- Category-aware completion annotations
+
+(defvar marginalia-annotator-registry (hashmap))
+
+(defun marginalia-register-annotator (category function-name)
+  "Use FUNCTION-NAME to annotate CATEGORY candidates."
+  (set! marginalia-annotator-registry
+    (hashmap-set marginalia-annotator-registry category function-name)))
+
+(defun marginalia-buffer-annotation (candidate)
+  "Format factual buffer metadata for CANDIDATE."
+  (let ((details (hashmap-get candidate "metadata")))
+    (concat
+      "  "
+      (if (hashmap-get details "current") "*" " ")
+      (if (hashmap-get details "modified") "+" " ")
+      "  "
+      (hashmap-get details "major-mode")
+      "  "
+      (hashmap-get details "characters")
+      " chars"
+      (if (hashmap-get details "filename")
+        (concat "  " (hashmap-get details "filename"))
+        ""))))
+
+(defun marginalia-command-annotation (candidate)
+  "Format factual command documentation and bindings for CANDIDATE."
+  (let ((details (hashmap-get candidate "metadata")))
+    (let ((bindings (hashmap-get details "bindings")))
+      (concat
+        "  "
+        (if (null bindings) "" (concat "[" (car bindings) "] "))
+        (hashmap-get details "documentation")))))
+
+(defun marginalia-annotate-candidate (category candidate)
+  "Attach CATEGORY annotation text to CANDIDATE."
+  (let ((annotator (hashmap-get marginalia-annotator-registry category)))
+    (if annotator
+      (hashmap-set candidate "annotation" (funcall annotator candidate))
+      (hashmap-set candidate "annotation" ""))))
+
+(defun marginalia-annotate-candidates (category candidates)
+  "Annotate every CATEGORY candidate."
+  (mapcar
+    (lambda (candidate) (marginalia-annotate-candidate category candidate))
+    candidates))
+
+(marginalia-register-annotator "buffer" "marginalia-buffer-annotation")
+(marginalia-register-annotator "command" "marginalia-command-annotation")

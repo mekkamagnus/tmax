@@ -1,3 +1,6 @@
+(defmodule editor/commands/vim-dispatch
+  (export vim-key-digit-value vim-reset-pending vim-dispatch-digit vim-dispatch-single vim-dispatch-key))
+
 ;; vim-dispatch.tlisp -- Central normal-mode Vim key dispatcher
 
 (defun vim-key-digit-value (key)
@@ -101,5 +104,3 @@ Returns t when handled, nil when legacy keymap fallback should run."
       ((vim-operator-pending-p) (vim-dispatch-operator-key key))
       ((numberp digit) (vim-dispatch-digit key))
       (t (vim-dispatch-single key)))))
-
-(provide "vim-dispatch")

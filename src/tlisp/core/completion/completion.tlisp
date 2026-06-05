@@ -1,0 +1,59 @@
+(defmodule editor/completion
+  (export completion-register-style completion-set-category-styles completion-table-dispatch completion-metadata-get completion-styles-for-category completion-apply-styles completion-all-completions completion-try-completion))
+
+;; completion.tlisp --- Generic Lisp-owned completion protocol
+
+(defvar completion-styles (list "orderless"))
+(defvar completion-category-styles (hashmap))
+(defvar completion-style-functions (hashmap))
+
+(defun completion-register-style (name function-name)
+  "Register FUNCTION-NAME as completion style NAME."
+  (set! completion-style-functions
+    (hashmap-set completion-style-functions name function-name)))
+
+(defun completion-set-category-styles (category styles)
+  "Use STYLES for completion CATEGORY."
+  (set! completion-category-styles
+    (hashmap-set completion-category-styles category styles)))
+
+(defun completion-table-dispatch (table input action)
+  "Ask named completion TABLE for ACTION using INPUT."
+  (funcall table input action))
+
+(defun completion-metadata-get (metadata key)
+  "Read KEY from completion METADATA."
+  (if (hashmapp metadata)
+    (hashmap-get metadata key)
+    nil))
+
+(defun completion-styles-for-category (category)
+  "Return configured styles for CATEGORY."
+  (let ((styles (hashmap-get completion-category-styles category)))
+    (if styles styles completion-styles)))
+
+(defun completion-apply-styles (input category candidates)
+  "Apply CATEGORY completion styles to CANDIDATES."
+  (let ((styles (completion-styles-for-category category)))
+    (if (null styles)
+      candidates
+      (let ((style-function (hashmap-get completion-style-functions (car styles))))
+        (if style-function
+          (funcall style-function input candidates)
+          candidates)))))
+
+(defun completion-all-completions (input table predicate)
+  "Return all completions for INPUT from named TABLE."
+  (let ((metadata (completion-table-dispatch table input "metadata")))
+    (let ((category (completion-metadata-get metadata "category")))
+      (let ((candidates (completion-table-dispatch table input "all-completions")))
+        (let ((predicated (if predicate (filter predicate candidates) candidates)))
+          (completion-apply-styles input category
+            (marginalia-annotate-candidates category predicated)))))))
+
+(defun completion-try-completion (input table predicate)
+  "Return the unique completion for INPUT, or INPUT when ambiguous."
+  (let ((candidates (completion-all-completions input table predicate)))
+    (if (= (length candidates) 1)
+      (hashmap-get (car candidates) "value")
+      input)))

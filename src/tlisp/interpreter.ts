@@ -4,11 +4,13 @@
  */
 
 import type { TLispInterpreter, TLispEnvironment, TLispValue, TLispFunctionImpl, EvalError } from "./types.ts";
+import type { EvalError as EvalErrorType } from "../error/types.ts";
 import { TLispParser } from "./parser.ts";
 import { TLispEvaluator, createEvaluatorWithBuiltins } from "./evaluator.ts";
 import { createFunction } from "./values.ts";
 import { Either } from "../utils/task-either.ts";
 import { isCoverageEnabled, registerFunction } from "./test-coverage.ts";
+import { ModuleRegistry } from "./module-registry.ts";
 
 /**
  * T-Lisp interpreter implementation
@@ -16,6 +18,8 @@ import { isCoverageEnabled, registerFunction } from "./test-coverage.ts";
  */
 export class TLispInterpreterImpl implements TLispInterpreter {
   public globalEnv: TLispEnvironment;
+  public builtinsEnv: TLispEnvironment;
+  public moduleRegistry: ModuleRegistry;
   private parser: TLispParser;
   private evaluator: TLispEvaluator;
 
@@ -24,9 +28,13 @@ export class TLispInterpreterImpl implements TLispInterpreter {
    */
   constructor() {
     this.parser = new TLispParser();
-    const { evaluator, env } = createEvaluatorWithBuiltins();
+    const { evaluator, builtinsEnv, env } = createEvaluatorWithBuiltins();
     this.evaluator = evaluator;
+    this.builtinsEnv = builtinsEnv;
     this.globalEnv = env;
+    this.moduleRegistry = new ModuleRegistry();
+    evaluator.setModuleRegistry(this.moduleRegistry);
+    evaluator.setBuiltinsEnv(builtinsEnv);
   }
 
   /**
@@ -180,12 +188,22 @@ export class TLispInterpreterImpl implements TLispInterpreter {
    */
   defineBuiltin(name: string, fn: TLispFunctionImpl): void {
     const func = createFunction(fn, name);
+    // Register into builtinsEnv so modules can see editor primitives
+    this.builtinsEnv.define(name, func);
+    // Also register into globalEnv for backward compat with code that iterates globalEnv.bindings
     this.globalEnv.define(name, func);
 
     // Register builtin function for coverage tracking (US-0.6.6)
     if (isCoverageEnabled()) {
       registerFunction(name, undefined, undefined, true); // Mark as builtin
     }
+  }
+
+  /**
+   * Set the module loader hook for resolving module names to file paths
+   */
+  setModuleLoader(loader: (name: string) => Either<EvalErrorType, TLispValue> | null): void {
+    (this.evaluator as any).setModuleLoader(loader);
   }
 
   /**

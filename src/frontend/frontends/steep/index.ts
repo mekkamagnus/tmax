@@ -7,6 +7,7 @@ import { renderStatusLine } from "../../render/status-line.ts";
 import { renderTabBarAnsi } from "../../render/tab-bar.ts";
 import { Input } from "./input.ts";
 import { Screen } from "./screen.ts";
+import { renderMinibuffer } from "../../render/minibuffer.ts";
 
 export class SteepFrontend implements Frontend {
   async run(editor: EditorClass, initialState: EditorState): Promise<void> {
@@ -30,7 +31,9 @@ export class SteepFrontend implements Frontend {
       const { width, height } = screen.getDims();
       const hasTabBar = (state.tabs?.length ?? 0) > 1;
       const tabBarHeight = hasTabBar ? 1 : 0;
-      const bufferHeight = Math.max(1, height - 2 - tabBarHeight);
+      const minibuffer = state.minibufferView ? renderMinibuffer(state.minibufferView, width) : undefined;
+      const commandHeight = minibuffer?.lines.length ?? ((state.mode === "command" || state.mode === "mx") ? 1 : 0);
+      const bufferHeight = Math.max(1, height - 1 - commandHeight - tabBarHeight);
       const lines = renderBufferLines(state, width, bufferHeight);
 
       screen.clear();
@@ -39,16 +42,23 @@ export class SteepFrontend implements Frontend {
       }
       lines.forEach((line, i) => screen.writeAt(i + tabBarHeight, 0, line));
 
-      if (state.mode === "command" || state.mode === "mx") {
+      if (minibuffer) {
+        const start = height - 1 - minibuffer.lines.length;
+        minibuffer.lines.forEach((line, index) => screen.writeAt(start + index, 0, line));
+      } else if (state.mode === "command" || state.mode === "mx") {
         screen.writeAt(height - 2, 0, renderCommandInput(state, width));
       }
 
       screen.writeAt(height - 1, 0, renderStatusLine(state, width));
 
-      const viewportTop = getVisibleViewportTop(state, bufferHeight);
-      const cursorRow = Math.max(0, Math.min(bufferHeight - 1, state.cursorPosition.line - viewportTop));
-      const cursorCol = Math.max(0, Math.min(width - 1, state.cursorPosition.column));
-      screen.moveTo(cursorRow + tabBarHeight, cursorCol);
+      if (minibuffer) {
+        screen.moveTo(height - 1 - minibuffer.lines.length + minibuffer.cursorRow, minibuffer.cursorColumn);
+      } else {
+        const viewportTop = getVisibleViewportTop(state, bufferHeight);
+        const cursorRow = Math.max(0, Math.min(bufferHeight - 1, state.cursorPosition.line - viewportTop));
+        const cursorCol = Math.max(0, Math.min(width - 1, state.cursorPosition.column));
+        screen.moveTo(cursorRow + tabBarHeight, cursorCol);
+      }
     };
 
     try {

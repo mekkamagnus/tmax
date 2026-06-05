@@ -1,3 +1,6 @@
+(defmodule editor/indent/typescript
+  (export))
+
 ;; typescript.tlisp — TypeScript indent rules
 ;; Increase indent after these patterns on previous line
 ;; Decrease indent for these patterns on current line

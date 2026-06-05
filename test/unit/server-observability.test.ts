@@ -50,16 +50,21 @@ class RpcConnection {
   send(method: string, params: any = {}): Promise<any> {
     const id = this.nextId++;
     return new Promise((resolve, reject) => {
+      let responseBuffer = '';
       const timer = setTimeout(() => {
         this.socket.off('data', onData);
-        reject(new Error('Request timeout'));
+        reject(new Error(`Request timeout: ${method} ${JSON.stringify(params)}`));
       }, 5000);
       const onData = (data: Buffer) => {
-        const response = JSON.parse(data.toString().trim());
-        if (response.id !== id) return;
-        clearTimeout(timer);
-        this.socket.off('data', onData);
-        resolve(response);
+        responseBuffer += data.toString();
+        const newline = responseBuffer.indexOf('\n');
+        if (newline < 0) return;
+        const response = JSON.parse(responseBuffer.slice(0, newline));
+        if (response.id === id) {
+          clearTimeout(timer);
+          this.socket.off('data', onData);
+          resolve(response);
+        }
       };
       this.socket.on('data', onData);
       this.socket.write(request(method, params, id));
@@ -176,6 +181,43 @@ describe('Server observability', () => {
     expect(frame.lastSyncAt).toBeString();
 
     conn.close();
+  });
+
+  test('frames keep independent opaque minibuffer sessions and views', async () => {
+    const first = await RpcConnection.connect(socketPath);
+    const second = await RpcConnection.connect(socketPath);
+    await first.send('connect-frame', { clientType: 'tui', clientName: 'first' });
+    await second.send('connect-frame', { clientType: 'tui', clientName: 'second' });
+
+    await first.send('keypress', { key: ' ' });
+    await first.send('keypress', { key: ';' });
+    await first.send('keypress', { key: 'b' });
+
+    await second.send('keypress', { key: '\x18' });
+    await second.send('keypress', { key: 'b' });
+
+    const firstState = (await first.send('render-state')).result;
+    const secondState = (await second.send('render-state')).result;
+
+    expect(firstState.minibufferView.prompt).toBe('M-x ');
+    expect(firstState.minibufferView.input).toBe('b');
+    expect(secondState.minibufferView.prompt).toBe('Switch to buffer: ');
+    expect(secondState.minibufferView.input).toBe('');
+    expect(firstState.minibufferState).not.toEqual(secondState.minibufferState);
+    expect(firstState.cursorFocus).toBe('command');
+    expect(secondState.cursorFocus).toBe('command');
+
+    await first.send('keypress', { key: 'Escape' });
+    const firstClosed = (await first.send('render-state')).result;
+    const secondStillOpen = (await second.send('render-state')).result;
+
+    expect(firstClosed.cursorFocus).toBe('buffer');
+    expect(firstClosed.minibufferState).toBeUndefined();
+    expect(secondStillOpen.cursorFocus).toBe('command');
+    expect(secondStillOpen.minibufferView.prompt).toBe('Switch to buffer: ');
+
+    first.close();
+    second.close();
   });
 
   test('recent errors are bounded and included in status', async () => {

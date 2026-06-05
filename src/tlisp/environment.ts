@@ -3,7 +3,7 @@
  * @description T-Lisp environment implementation for variable scoping
  */
 
-import type { TLispEnvironment, TLispValue } from "./types.ts";
+import type { TLispEnvironment, TLispValue, ModuleImport } from "./types.ts";
 
 /**
  * T-Lisp environment implementation
@@ -11,6 +11,7 @@ import type { TLispEnvironment, TLispValue } from "./types.ts";
 export class TLispEnvironmentImpl implements TLispEnvironment {
   public parent?: TLispEnvironment;
   public bindings: Map<string, TLispValue>;
+  public moduleImports?: Map<string, ModuleImport>;
 
   /**
    * Create a new T-Lisp environment

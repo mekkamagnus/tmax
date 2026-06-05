@@ -69,6 +69,14 @@ export interface FunctionalTerminalIO {
  * Handles pasted/rapid input chunks and common ANSI escape sequences.
  */
 export const tokenizeTerminalInput = (input: string): string[] => {
+  const semanticSequences: Readonly<Record<string, string>> = {
+    "\x1b[A": "Up",
+    "\x1b[B": "Down",
+    "\x1b[C": "Right",
+    "\x1b[D": "Left",
+    "\x1b[5~": "PageUp",
+    "\x1b[6~": "PageDown",
+  };
   const keys: string[] = [];
   let index = 0;
 
@@ -88,7 +96,7 @@ export const tokenizeTerminalInput = (input: string): string[] => {
     const remaining = input.slice(index);
     const csiMatch = remaining.match(/^\[[0-9;?]*[ -/]*[@-~]/);
     if (csiMatch?.[0]) {
-      keys.push(csiMatch[0]);
+      keys.push(semanticSequences[csiMatch[0]] ?? csiMatch[0]);
       index += csiMatch[0].length;
       continue;
     }

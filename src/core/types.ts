@@ -221,6 +221,44 @@ export interface SyntaxRule {
 export type HighlightTheme = Record<string, ANSIStyle>;
 
 /**
+ * JSON-safe value used for opaque T-Lisp frame transport.
+ */
+export type JsonValue =
+  | null
+  | boolean
+  | number
+  | string
+  | JsonValue[]
+  | { [key: string]: JsonValue };
+
+/**
+ * Styled segment produced by T-Lisp for generic minibuffer rendering.
+ */
+export interface MinibufferRenderSegment {
+  text: string;
+  face?: string;
+}
+
+/**
+ * Render-only row produced by T-Lisp.
+ */
+export interface MinibufferRenderRow {
+  selected: boolean;
+  segments: MinibufferRenderSegment[];
+}
+
+/**
+ * Generic render-only minibuffer view produced by T-Lisp.
+ */
+export interface MinibufferRenderView {
+  prompt: string;
+  input: string;
+  inputPoint: number;
+  rows: MinibufferRenderRow[];
+  message: string;
+}
+
+/**
  * Editor state interface
  */
 export interface EditorState {
@@ -261,6 +299,8 @@ export interface EditorState {
   activeMinorModes?: string[];
   activeMinorModeLighters?: string[];
   bufferModified?: boolean;
+  minibufferState?: JsonValue;
+  minibufferView?: MinibufferRenderView;
 }
 
 /**
@@ -327,6 +367,8 @@ export interface Frame {
   currentMajorMode?: string;
   activeMinorModes?: string[];
   activeMinorModeLighters?: string[];
+  minibufferState?: JsonValue;
+  minibufferView?: MinibufferRenderView;
 }
 
 /**

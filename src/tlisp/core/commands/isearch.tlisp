@@ -1,3 +1,6 @@
+(defmodule editor/commands/isearch
+  (export isearch-forward isearch-backward isearch-update isearch-exit isearch-cancel))
+
 ;; isearch.tlisp — incremental search commands
 (defun isearch-forward ()
   "Start forward incremental search."

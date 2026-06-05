@@ -1,3 +1,6 @@
+(defmodule editor/bindings/command
+  (export))
+
 ;; command.tlisp
 ;; Default key bindings for command mode in tmax editor
 ;;
@@ -27,11 +30,11 @@
 ;; Key bindings specific to M-x minibuffer mode
 
 ;; Exit M-x mode (Escape or C-g)
-(key-bind "Escape" "(editor-exit-mx-mode)" "mx")
-(key-bind "C-g" "(editor-exit-mx-mode)" "mx")
+(key-bind "Escape" "(minibuffer-dispatch-key \"Escape\")" "mx")
+(key-bind "C-g" "(minibuffer-dispatch-key \"C-g\")" "mx")
 
 ;; Execute M-x command
-(key-bind "Enter" "(editor-execute-mx-command)" "mx")
+(key-bind "Enter" "(minibuffer-dispatch-key \"Enter\")" "mx")
 
 ;; =================================================================
 ;; APPLICATION CONTROL

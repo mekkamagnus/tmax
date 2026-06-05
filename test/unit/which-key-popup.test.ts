@@ -38,7 +38,7 @@ describe("Which-Key Popup (US-1.10.3)", () => {
     interpreter.execute('(key-bind "C-c C-w" "save-current-file" "normal")');
 
     // Create SPC bindings for testing (using existing commands)
-    // SPC ; is already bound to editor-enter-mx-mode
+    // SPC ; is already bound to execute-extended-command-maybe
     interpreter.execute('(key-bind "SPC s" "save-current-file" "normal")');
   });
 

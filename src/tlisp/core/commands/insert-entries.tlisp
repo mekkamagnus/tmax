@@ -1,3 +1,6 @@
+(defmodule editor/commands/insert-entries
+  (export vim-line-length insert-newline insert-tab insert-backspace insert-append insert-append-line insert-line-start open-line-below open-line-above))
+
 ;; insert-entries.tlisp -- Vim insert entry commands composed in T-Lisp
 
 (defun vim-line-length (line)
@@ -74,5 +77,3 @@
       (undo-commit "O")
       (editor-set-mode "insert")
       t)))
-
-(provide "insert-entries")

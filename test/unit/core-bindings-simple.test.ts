@@ -20,7 +20,7 @@ describe("Core Bindings File Structure", () => {
 
     // Count key-bind function calls (exclude comments)
     const keyBindMatches = content.match(/^\(key-bind/gm);
-    expect(keyBindMatches?.length).toBe(15);
+    expect(keyBindMatches?.length).toBe(17);
   });
 
   test("should contain basic navigation bindings", async () => {
@@ -52,7 +52,7 @@ describe("Core Bindings File Structure", () => {
     expect(content).toContain('(key-bind " "');  // Space key
     expect(content).toContain('(key-bind ";"');  // Semicolon key
     expect(content).toContain('editor-handle-space');
-    expect(content).toContain('editor-handle-semicolon');
+    expect(content).toContain('execute-extended-command-maybe');
   });
 
   test("should contain proper T-Lisp structure", async () => {

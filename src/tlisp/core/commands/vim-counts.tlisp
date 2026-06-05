@@ -1,3 +1,6 @@
+(defmodule editor/commands/vim-counts
+  (export vim-count-active-p vim-count-add-digit vim-count-current vim-count-reset vim-count-consume))
+
 ;; vim-counts.tlisp -- Vim count prefix state owned by T-Lisp
 
 (defvar vim-count 0)
@@ -35,5 +38,3 @@
     (progn
       (vim-count-reset)
       count)))
-
-(provide "vim-counts")

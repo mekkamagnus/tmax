@@ -270,6 +270,7 @@ export function createBufferOps(
 
     // Update buffer with new immutable buffer
     setCurrentBuffer(insertResult.right);
+    setBufferModified?.(true);
 
     // Advance cursor position after insert
     const newLines = text.split('\n');

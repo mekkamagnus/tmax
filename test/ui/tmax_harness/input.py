@@ -23,8 +23,17 @@ def translate_key(key: str) -> str:
         "C-d": "C-d",
         "C-u": "C-u",
         "C-r": "C-r",
+        "C-g": "C-g",
+        "C-n": "C-n",
+        "C-p": "C-p",
+        "C-x": "C-x",
     }
     return mapping.get(key, key)
+
+
+def escape_literal_key(key: str) -> str:
+    """Escape tmux command separators while preserving the literal key."""
+    return key.replace(";", r"\;")
 
 
 def _target(config: HarnessConfig, window: str) -> str:
@@ -36,7 +45,8 @@ def _send_raw(target: str, keys: list[str], literal: bool = False) -> Result[Non
     cmd = ["tmux", "send-keys"]
     if literal:
         cmd.append("-l")
-    cmd.extend(["-t", target, *keys])
+    tmux_keys = [escape_literal_key(key) for key in keys] if literal else keys
+    cmd.extend(["-t", target, *tmux_keys])
     try:
         proc = subprocess.run(cmd, capture_output=True, text=True, timeout=5)
         if proc.returncode != 0:
@@ -54,7 +64,9 @@ def send_key(config: HarnessConfig, window: str, key: str) -> Result[None, Harne
     translated = translate_key(key)
     # Use literal mode for regular characters, non-literal for special keys
     special_keys = {"Escape", "Enter", "Space", "BSpace", "Tab",
-        "C-f", "C-b", "C-d", "C-u", "C-r", "C-m", "C-w", "C-v"}
+        "C-f", "C-b", "C-d", "C-u", "C-r", "C-g", "C-n", "C-p",
+        "C-m", "C-w", "C-v", "C-x", "Up", "Down", "Left", "Right",
+        "PageUp", "PageDown"}
     if translated in special_keys:
         result = _send_raw(target, [translated])
     else:
