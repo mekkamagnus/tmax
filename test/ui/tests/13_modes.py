@@ -48,15 +48,15 @@ def test_modes() -> tuple[AssertionResult, ...]:
     ))
     results.append(_eval_contains(
         state.config,
-        "(featurep \"python-mode\")",
+        "(module-loaded? \"editor/modes/python\")",
         "true",
-        "python-mode feature should be provided at startup",
+        "python mode module should be loaded at startup",
     ))
     results.append(_eval_contains(
         state.config,
-        "(featurep \"line-numbers-mode\")",
+        "(module-loaded? \"editor/modes/line-numbers\")",
         "true",
-        "line-numbers-mode feature should be provided at startup",
+        "line-numbers module should be loaded at startup",
     ))
     results.append(_eval_contains(
         state.config,
@@ -65,7 +65,7 @@ def test_modes() -> tuple[AssertionResult, ...]:
         "Built-in line-numbers minor mode should be registered",
     ))
 
-    client.eval_expr(state.config, "(line-numbers-mode t)")
+    client.eval_expr(state.config, "(editor/modes/line-numbers/line-numbers-mode t)")
     status_result = client.status(state.config)
     if status_result.is_err():
         results.append(AssertionResult(False, "Daemon status should be available"))

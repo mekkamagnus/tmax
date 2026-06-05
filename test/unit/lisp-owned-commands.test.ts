@@ -7,7 +7,7 @@ describe("Lisp-owned command libraries", () => {
   test("representative command libraries load and define functions", async () => {
     const editor = new Editor(new MockTerminal(), new MockFileSystem());
     await editor.start();
-    const env = editor.getInterpreter().globalEnv;
+    const registry = editor.getInterpreter().moduleRegistry;
 
     for (const name of [
       "save-buffer",
@@ -29,8 +29,9 @@ describe("Lisp-owned command libraries", () => {
       "switch-buffer",
       "execute-extended-command",
     ]) {
-      const value = env.lookup(name);
-      expect(value?.type).toBe("function");
+      const resolved = registry.resolveUniqueExport(name);
+      expect(typeof resolved, name).toBe("object");
+      expect((resolved as { value?: { type?: string } }).value?.type).toBe("function");
     }
 
     editor.stop();

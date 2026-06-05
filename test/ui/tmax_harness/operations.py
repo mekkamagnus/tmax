@@ -84,7 +84,7 @@ def exit_command_mode(config: HarnessConfig, window: str) -> Result[None, Harnes
 def enter_mx_mode(config: HarnessConfig, window: str) -> Result[None, HarnessError]:
     """Enter M-x mode (SPC ;)."""
     if _is_daemon(config):
-        r = client.eval_expr(config, '(execute-extended-command)')
+        r = client.eval_expr(config, '(editor/commands/execute-extended-command/execute-extended-command)')
         time.sleep(config.operation_delay)
         return r.map(lambda _: None)
     inp.send_escape(config, window)
@@ -97,7 +97,7 @@ def enter_mx_mode(config: HarnessConfig, window: str) -> Result[None, HarnessErr
 def exit_mx_mode(config: HarnessConfig, window: str) -> Result[None, HarnessError]:
     """Exit M-x mode."""
     if _is_daemon(config):
-        r = client.eval_expr(config, '(minibuffer-cancel)')
+        r = client.eval_expr(config, '(editor/completion/minibuffer/minibuffer-cancel)')
         time.sleep(config.operation_delay)
         return r.map(lambda _: None)
     return inp.send_escape(config, window)

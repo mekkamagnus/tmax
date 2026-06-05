@@ -25,12 +25,12 @@ describe("T-Lisp completion framework", () => {
               (hashmap "value" "beta" "display" "beta" "annotation" ""))))
         (defun spec-predicate (candidate)
           (string= (hashmap-get candidate "value") "beta"))
-        (completion-all-completions "bet" "spec-table" "spec-predicate"))
+        (editor/completion/completion-all-completions "bet" "spec-table" "spec-predicate"))
     `);
 
     const candidates = result.value as Array<{ value: Map<string, { value: unknown }> }>;
     expect(candidates.map(candidate => candidate.value.get("value")?.value)).toEqual(["beta"]);
-    expect(evaluate(editor, '(completion-metadata-get (completion-table-dispatch "spec-table" "" "metadata") "category")').value)
+    expect(evaluate(editor, '(editor/completion/completion-metadata-get (editor/completion/completion-table-dispatch "spec-table" "" "metadata") "category")').value)
       .toBe("spec");
   });
 
@@ -45,7 +45,7 @@ describe("T-Lisp completion framework", () => {
             (hashmap "category" "spec")
             (list (hashmap "value" "alpha" "display" "alpha" "annotation" ""))))
         (defun spec-accept (value) value)
-        (completing-read "Spec: " "spec-read-table" nil nil "" "spec-history" "spec-accept"))
+        (editor/completion/minibuffer/completing-read "Spec: " "spec-read-table" nil nil "" "spec-history" "spec-accept"))
     `);
 
     const active = editor.getState();
@@ -53,7 +53,7 @@ describe("T-Lisp completion framework", () => {
     expect(active.minibufferState).toBeDefined();
     expect(() => JSON.stringify(active.minibufferState)).not.toThrow();
 
-    evaluate(editor, '(minibuffer-dispatch-key "Escape")');
+    evaluate(editor, '(editor/completion/minibuffer/minibuffer-dispatch-key "Escape")');
     expect(editor.getState().mode).toBe("normal");
     expect(editor.getState().cursorFocus).toBe("buffer");
   });

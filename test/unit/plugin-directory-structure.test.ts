@@ -115,10 +115,12 @@ describe('Plugin Directory Structure (US-2.1.1)', () => {
 
       await editor.loadPluginsFromDirectory(testTlpaDir);
 
-      // Check that the function was defined
-      const result = interpreter.execute('(plugin-loaded-func)');
+      const result = interpreter.execute('(user/plugin/auto-load-test/plugin-loaded-func)');
       expect(result._tag).toBe('Right');
       expect(expectRight(result).value).toBe(true);
+
+      const globalResult = interpreter.execute('(plugin-loaded-func)');
+      expect(globalResult._tag).toBe('Left');
     });
 
     test('should make plugin functions available in interpreter', async () => {
@@ -131,8 +133,7 @@ describe('Plugin Directory Structure (US-2.1.1)', () => {
 
       await editor.loadPluginsFromDirectory(testTlpaDir);
 
-      // Test the function is available and works
-      const result = interpreter.execute('(my-plugin-func 5)');
+      const result = interpreter.execute('(user/plugin/function-test/my-plugin-func 5)');
       expect(result._tag).toBe('Right');
       expect(expectRight(result).value).toBe(6);
     });
@@ -196,8 +197,7 @@ other-plugin = "1.0.0"
       const result = await editor.loadPluginsFromDirectory(testTlpaDir);
 
       expect(result.loaded).toContain('with-deps');
-      // plugin.tlisp should have been loaded
-      const checkResult = interpreter.execute('(deps-loaded-func)');
+      const checkResult = interpreter.execute('(user/plugin/with-deps/deps-loaded-func)');
       expect(checkResult._tag).toBe('Right');
       expect(expectRight(checkResult).value).toBe(true);
     });
@@ -291,8 +291,7 @@ author = "Test Author"
 
       await editor.loadPluginsFromDirectory(testTlpaDir);
 
-      // Execute the plugin command
-      const result = interpreter.execute('(my-plugin-command)');
+      const result = interpreter.execute('(user/plugin/command-plugin/my-plugin-command)');
       expect(result._tag).toBe('Right');
       expect(expectRight(result).value).toBe(2);
     });
@@ -316,14 +315,16 @@ author = "Test Author"
 
       await editor.loadPluginsFromDirectory(testTlpaDir);
 
-      // Both plugin functions should be available
-      const resultA = interpreter.execute('(plugin-a-func)');
+      const resultA = interpreter.execute('(user/plugin/plugin-a/plugin-a-func)');
       expect(resultA._tag).toBe('Right');
       expect(expectRight(resultA).value).toBe('a');
 
-      const resultB = interpreter.execute('(plugin-b-func)');
+      const resultB = interpreter.execute('(user/plugin/plugin-b/plugin-b-func)');
       expect(resultB._tag).toBe('Right');
       expect(expectRight(resultB).value).toBe('b');
+
+      expect(interpreter.execute('(plugin-a-func)')._tag).toBe('Left');
+      expect(interpreter.execute('(plugin-b-func)')._tag).toBe('Left');
     });
 
     test('plugins can depend on each other', async () => {
@@ -352,8 +353,7 @@ base-plugin = "*"
 
       await editor.loadPluginsFromDirectory(testTlpaDir);
 
-      // The dependent plugin should be able to call base plugin function
-      const result = interpreter.execute('(dependent-func)');
+      const result = interpreter.execute('(user/plugin/dependent-plugin/dependent-func)');
       expect(result._tag).toBe('Right');
       expect(expectRight(result).value).toBe('base');
     });
