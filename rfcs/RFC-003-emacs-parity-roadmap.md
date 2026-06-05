@@ -19,7 +19,7 @@ The `init.el` configures ~60 packages spanning editing, org-mode, language suppo
 |---|---|---|
 | Modal editing | evil, evil-collection, evil-commentary, evil-surround, evil-goggles, evil-numbers | Done (normal/insert/visual/command/mx) |
 | Leader keys / which-key | general, which-key | Done |
-| Minibuffer + completion | vertico, corfu, cape, orderless, marginalia | Partial (fuzzy M-x exists; no in-buffer completion) |
+| Minibuffer + completion | vertico, corfu, cape, orderless, marginalia | Minibuffer completion done by [SPEC-006](../specs/SPEC-006-buffer-completion.md); in-buffer completion remains |
 | M-x / eval-expression | built-in | Done |
 | Daemon / client | built-in server | Done |
 | Help system | helpful | Done |
@@ -203,6 +203,8 @@ Current u/C-r provides linear undo/redo. Add:
 
 ### 2.4 In-Buffer Completion
 **Emacs:** corfu, cape, company
+
+[SPEC-006](../specs/SPEC-006-buffer-completion.md) provides the reusable Lisp-owned minibuffer completion foundation used by `C-x b` and M-x. This section remains specifically scoped to Corfu/Cape-style completion inside an editing buffer.
 
 - Completion popup while typing (after configurable delay)
 - Sources: buffer words (dabbrev), file paths, buffer names, T-Lisp functions
