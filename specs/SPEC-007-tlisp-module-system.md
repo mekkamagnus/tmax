@@ -27,7 +27,11 @@ All T-Lisp code evaluates into one flat `globalEnv`. There is no boundary betwee
 
 ## Solution Statement
 
-Implement Guile/Racket-style modules: private-by-default definitions with explicit `(export ...)` lists. Three import styles (qualified, aliased, selective) via `require-module`. Qualified name resolution using `module/name` syntax (no tokenizer changes — `/` is already a valid symbol character). A module registry maps names to environments + export sets. Module environments parent a `builtinsEnv` (stdlib + editor primitives), not the user `globalEnv`, ensuring isolation.
+Implement Guile/Racket-style modules: private-by-default definitions with explicit `(export ...)` lists. Three import styles (qualified, aliased, selective) via `require-module`. Qualified name resolution uses `module/name` syntax (no tokenizer changes — `/` is already a valid symbol character). A module registry maps names to environments + export sets. Module environments parent a `builtinsEnv` (stdlib + editor primitives), not the user `globalEnv`, ensuring isolation.
+
+Module exports must not be copied into `globalEnv`. Public module APIs are reachable through `require-module`, qualified names, explicit selective imports, command registration, and introspection. Any global export bridge recreates flat-namespace collisions and fails this spec.
+
+Legacy feature-loading APIs are removed in the editor runtime as well as the standalone interpreter. `(provide ...)`, `(require ...)`, and `(featurep ...)` must be unavailable. `load-path` APIs may remain only if they are explicitly scoped to raw file evaluation and are not used for module dependency resolution.
 
 ## Relevant Files
 
@@ -42,9 +46,9 @@ Implement Guile/Racket-style modules: private-by-default definitions with explic
 
 ### Editor Integration
 
-- `src/editor/editor.ts` — `loadCoreBindings()` (line 1497): hardcoded 30-file list → 4 entry points. Eight call sites iterate `globalEnv.bindings` directly (command lookup, apropos, function listing). Plugin loading at `loadPluginsFromDirectory()` needs per-plugin module isolation.
+- `src/editor/editor.ts` — `loadCoreBindings()` (line 1497): hardcoded 30-file list → 4 entry points. Eight call sites iterate `globalEnv.bindings` directly (command lookup, apropos, function listing). Plugin loading at `loadPluginsFromDirectory()` needs mandatory per-plugin module isolation, including plain `plugin.tlisp` files with no explicit `defmodule`.
 - `src/editor/tlisp-api.ts` — Wires editor primitives into the T-Lisp environment. Needs rewiring for module ops and builtins env split.
-- `src/editor/api/load-ops.ts` — `provide`, `require`, `featurep` builtins. These get removed; `load-path` resolution gets replaced by module resolution.
+- `src/editor/api/load-ops.ts` — `provide`, `require`, `featurep` builtins. These get removed from all profiles; `load-path` resolution is not the module resolver.
 - `src/editor/api/mode-ops.ts` — May need module-aware command registration.
 
 ### T-Lisp Core Libraries (migration targets — Phase 4)
@@ -67,7 +71,7 @@ Implement Guile/Racket-style modules: private-by-default definitions with explic
 ### New Files
 
 - `src/tlisp/module-registry.ts` — `ModuleRegistry` class: maps module names to `ModuleRecord` (env, exports, source path, loading state)
-- `src/tlisp/module-loader.ts` — Module resolution + loading logic: name→file resolution, `require-module` evaluation, cycle detection
+- `src/tlisp/module-loader.ts` — Shared module resolution + loading logic used by editor and standalone profiles: name→file resolution, traversal rejection, cycle detection, source path tracking
 - `src/editor/api/module-ops.ts` — T-Lisp builtins for module introspection (`module-loaded?`, `module-exports`, `module-list`, `describe-module`, `current-module`, `module-lookup`)
 
 ## Implementation Plan
@@ -95,6 +99,18 @@ Update editor.ts call sites for module-aware lookup. Isolate plugins into module
 Wrap all 30 core T-Lisp files in `defmodule` with explicit exports. Replace all `require`/`provide` with `require-module`. Remove `provide`, `require`, `featurep` builtins. Simplify `loadCoreBindings()` to four entry points (bindings files only).
 
 **Verify:** All existing tests pass. `loadCoreBindings` loads only entry points. Dependency graph is declared, not hardcoded.
+
+### Phase 5: Review Remediation
+
+Close the implementation gaps found during code review:
+
+- Remove any migration bridge that copies module exports into `globalEnv`.
+- Ensure plain plugin files are implicitly wrapped in `defmodule user/plugin/{name}` and do not leak top-level definitions globally.
+- Delete or unregister `provide`, `require`, and `featurep` from the editor runtime.
+- Replace ad hoc editor module loading with the shared `src/tlisp/module-loader.ts`.
+- Replace the remaining hardcoded 30-file core loading list with module entry points and transitive `require-module` dependencies.
+
+**Verify:** Targeted negative checks prove the old flat namespace behavior is gone.
 
 ## Step by Step Tasks
 
@@ -125,12 +141,17 @@ Wrap all 30 core T-Lisp files in `defmodule` with explicit exports. Replace all 
 - Create child environment (parent = builtinsEnv), evaluate body in it
 - Read export list, register module in registry
 - Add `"defmodule"` case in the main `eval()` dispatch
+- Do not define exported names into the caller's environment or `globalEnv`
+- Add a regression test where two modules export the same symbol name and unqualified global lookup does not resolve either export
 - Write unit tests: define module, verify exports, verify internals hidden
 
 ### Step 5: Implement `require-module` builtin (Gap 6)
 
 - Create `src/tlisp/module-loader.ts` with module resolution logic
 - Implement resolution order: registry → core-path → packages-path → user-path → fail
+- Use this shared loader in both editor and standalone profiles; do not keep separate inline resolution policies
+- Reject path traversal module names such as `../secret`
+- Track `sourcePath` on every loaded `ModuleRecord`
 - Implement three import styles in `require-module`:
   - Default qualified: `(require-module editor/motions)` → `motions/paragraph-next`
   - Aliased: `(require-module editor/motions :as mot)` → `mot/paragraph-next`
@@ -154,9 +175,9 @@ Wrap all 30 core T-Lisp files in `defmodule` with explicit exports. Replace all 
 
 ### Step 8: Update editor integration (Gap 8)
 
-- **8a Command lookup** (editor.ts ~line 616): Add flattened command registry. When a module is loaded, its exported functions are registered in a command map. `M-x` lookup checks this map.
-- **8b Function listing/apropos** (editor.ts ~line 686): Iterate all loaded module exports, not just `globalEnv.bindings`
-- **8c Variable listing** (editor.ts ~line 713): Same pattern as 8b
+- **8a Command lookup** (editor.ts ~line 616): Add a module-aware command registry. Commands must be registered explicitly or discovered from loaded module exports without copying exports into `globalEnv`.
+- **8b Function listing/apropos** (editor.ts ~line 686): Iterate all loaded module exports and `globalEnv` user bindings. Module exports with the same short name must retain module origin and must not silently overwrite each other.
+- **8c Variable listing** (editor.ts ~line 713): Same pattern as 8b, but hide private module bindings.
 - **8d `functionp` builtin** (evaluator.ts): Support qualified names
 - **8e `describe-function`** (editor.ts ~line 603): Show module origin in output
 - **8f `apropos-command`** (editor.ts ~line 697): Search across all module exports
@@ -166,8 +187,10 @@ Wrap all 30 core T-Lisp files in `defmodule` with explicit exports. Replace all 
 
 - Modify `loadPluginsFromDirectory()` in `editor.ts`
 - Each plugin's `plugin.tlisp` is evaluated as `(defmodule user/plugin/{name} ...)`
-- If file has `defmodule`, use it; if not, wrap implicitly (export all top-level definitions)
-- Write integration test: two plugins defining `plugin-init` don't collide
+- If file has `defmodule`, evaluate it as written
+- If file has no `defmodule`, wrap it implicitly in `defmodule user/plugin/{name}` and export top-level `defun`, `defvar`, and `defmacro` names
+- Do not evaluate plain plugin files directly into `globalEnv`
+- Write integration test: two plugins defining `plugin-init` both load, neither leaks `plugin-init` globally, and each function remains addressable through its plugin module
 
 ### Step 10: Module-aware error messages (Gap 11)
 
@@ -193,8 +216,19 @@ Wrap all 30 core T-Lisp files in `defmodule` with explicit exports. Replace all 
 - Remove `provide`, `require`, `featurep` from `load-ops.ts`
 - Simplify `loadCoreBindings()` to load only 4 binding entry points — transitive `require-module` handles the rest
 - Update `tlisp-api.ts` to remove wiring for deleted builtins
+- Add a regression check that `rg 'provide|featurep|\\(require ' src/tlisp/core src/editor/api/load-ops.ts src/editor/tlisp-api.ts` finds no live legacy feature-loading API
 
-### Step 13: Run validation
+### Step 13: Remove global export leakage
+
+- Delete any code in `evalDefmodule()` that copies exported symbols into the calling environment
+- Delete any `defineBuiltin()` compatibility write that exists only so `globalEnv.bindings` iteration can see builtins
+- Update editor callers to use explicit module-aware lookup helpers instead of relying on `globalEnv.bindings`
+- Add tests:
+  - Two modules exporting `run` do not make `(run)` callable globally
+  - `(require-module a/one :as one)` and `(one/run)` work
+  - `(require-module b/two :as two)` and `(two/run)` work independently
+
+### Step 14: Run validation
 
 - Run all validation commands listed below
 - Fix any test failures or type errors
@@ -218,8 +252,10 @@ Wrap all 30 core T-Lisp files in `defmodule` with explicit exports. Replace all 
 - **Two-module dependency**: Module A requires Module B, calls `b/func` successfully
 - **Transitive dependency**: A → B → C chain works via `require-module`
 - **Plugin collision**: Two plugins defining the same name load without collision, each in own module
+- **Plugin wrapping**: Plain plugin files without `defmodule` are wrapped into `user/plugin/{name}` and do not leak globals
 - **Editor integration**: `M-x` finds commands across modules, `describe-function` shows module origin, `apropos` searches all exports
 - **Core file loading**: `loadCoreBindings()` with 4 entry points loads all 30 files via transitive deps
+- **Legacy API removal**: `(provide ...)`, `(require ...)`, and `(featurep ...)` fail in an editor instance
 
 ### Edge Cases
 
@@ -231,6 +267,8 @@ Wrap all 30 core T-Lisp files in `defmodule` with explicit exports. Replace all 
 - Module name with multiple `/` segments (`editor/commands/motions`) → split on first `/` only for alias, full name for registry
 - `defmodule` inside another `defmodule` → error (no nested modules)
 - `require-module` inside a function body → lazily loads on first call
+- Two loaded modules export the same short name → no global overwrite; callers must qualify or selectively import in their own scope
+- Plain plugin `plugin-init` names collide locally only if the same plugin module defines duplicates; they must not collide across plugin modules
 
 ## Acceptance Criteria
 
@@ -246,6 +284,9 @@ Wrap all 30 core T-Lisp files in `defmodule` with explicit exports. Replace all 
 10. **All existing tests pass**: Zero regressions
 11. **Typecheck passes**: `bun run typecheck` reports zero errors
 12. **Circular dependency detection**: Loading A→B→A throws clear error, not infinite loop
+13. **No global export bridge**: Exported module symbols are not copied into `globalEnv`; duplicate short export names cannot overwrite each other
+14. **Plain plugins are isolated**: A `plugin.tlisp` without `defmodule` is still loaded inside `user/plugin/{name}`
+15. **Shared loader is authoritative**: Editor and standalone module loading both use `src/tlisp/module-loader.ts` or a shared resolver exported by it
 
 ## Validation Commands
 
@@ -254,6 +295,8 @@ Wrap all 30 core T-Lisp files in `defmodule` with explicit exports. Replace all 
 - `bun test test/integration/` — All integration tests pass (module loading, editor integration)
 - `bun run build` — Build succeeds with module system changes
 - `bun run start --help` — Application starts without errors after migration
+- `bun -e 'import { Editor } from "./src/editor/editor.ts"; import { MockTerminal } from "./test/mocks/terminal.ts"; import { MockFileSystem } from "./test/mocks/filesystem.ts"; const editor = new Editor(new MockTerminal(), new MockFileSystem()); const result = editor.getInterpreter().execute("(featurep \"x\")"); if (result._tag !== "Left") process.exit(1);'` — Legacy `featurep` is not available in editor runtime
+- `bun -e 'import { TLispInterpreterImpl } from "./src/tlisp/interpreter.ts"; const i = new TLispInterpreterImpl(); i.execute("(defmodule a/one (export run) (defun run () \"one\"))"); i.execute("(defmodule b/two (export run) (defun run () \"two\"))"); const r = i.execute("(run)"); if (r._tag !== "Left") process.exit(1);'` — Duplicate module exports do not leak into globals
 
 Module-specific validation:
 - `bun test test/unit/module-registry.test.ts` — Registry unit tests pass
@@ -263,6 +306,8 @@ Module-specific validation:
 - `bun test test/unit/module-introspection.test.ts` — Introspection builtin tests pass
 - `bun test test/integration/module-system.test.ts` — End-to-end module system integration tests pass
 - `bun test test/integration/plugin-isolation.test.ts` — Plugin collision prevention tests pass
+- `rg 'createLoadOps|api\\.set\\("provide"|api\\.set\\("featurep"|api\\.set\\("require"' src/editor src/tlisp` — No legacy feature-loading builtins remain
+- `rg 'env\\.define\\(exportName|globalEnv\\.define\\(name, func\\).*compat|Migration bridge' src/tlisp src/editor` — No global module export bridge remains
 
 ## Notes
 
