@@ -8,7 +8,8 @@
     "dev": "node --watch --import tsx src/main.tsx --dev",
     "tui": "bun src/client/tui-client.ts",
     "daemon": "bun src/server/server.ts",
-    "repl": "bun run scripts/repl.ts",
+    "tlisp": "bun src/tlisp/cli.ts",
+    "repl": "bun src/tlisp/cli.ts",
     "test": "bun test",
     "test:daemon": "cd test/ui && uv run python run_python_suite.py daemon",
     "test:ui": "cd test/ui && uv run python run_python_suite.py",
@@ -17,7 +18,8 @@
     "check": "node --import tsx --eval \"import('./src/main.tsx')\" -- --help",
     "typecheck": "bunx tsc --noEmit",
     "typecheck:src": "bunx tsc --noEmit --project tsconfig.src.json",
-    "typecheck:test": "bunx tsc --noEmit --project tsconfig.test.json"
+    "typecheck:test": "bunx tsc --noEmit --project tsconfig.test.json",
+    "build:tlisp": "bun build --compile ./src/tlisp/cli.ts --outfile dist/tlisp"
   },
   "dependencies": {
     "ink": "^4.4.1",
@@ -34,6 +36,7 @@
     "path": false
   },
   "bin": {
-    "tmax": "./bin/tmax"
+    "tmax": "./bin/tmax",
+    "tlisp": "./bin/tlisp"
   }
 }
