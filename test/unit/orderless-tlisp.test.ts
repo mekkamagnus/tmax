@@ -12,7 +12,7 @@ const execute = (editor: Editor, source: string) => {
 
 const matchedValues = (editor: Editor, input: string): string[] => {
   const result = execute(editor, `
-    (orderless-filter "${input}"
+    (editor/completion/orderless/orderless-filter "${input}"
       (list
         (hashmap "value" "buffer-save" "display" "buffer-save" "annotation" "Save the buffer")
         (hashmap "value" "*Messages*" "display" "*Messages*" "annotation" "Messages special")))
@@ -28,7 +28,7 @@ describe("T-Lisp Orderless", () => {
     await editor.start();
 
     const result = editor.getInterpreter().execute(`
-      (orderless-filter "save buf"
+      (editor/completion/orderless/orderless-filter "save buf"
         (list
           (hashmap "value" "buffer-save" "display" "buffer-save" "annotation" "")
           (hashmap "value" "save-buffer" "display" "save-buffer" "annotation" "")
@@ -60,11 +60,11 @@ describe("T-Lisp Orderless", () => {
     await editor.start();
 
     const display = execute(editor, `
-      (car (orderless-filter "save"
+      (car (editor/completion/orderless/orderless-filter "save"
         (list (hashmap "value" "buffer-save" "display" "buffer-save" "annotation" "Save buffer"))))
     `);
     const annotation = execute(editor, `
-      (car (orderless-filter "&Save"
+      (car (editor/completion/orderless/orderless-filter "&Save"
         (list (hashmap "value" "buffer-save" "display" "buffer-save" "annotation" "Save buffer"))))
     `);
     const displayMap = display.value as Map<string, { value: unknown }>;

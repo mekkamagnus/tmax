@@ -25,23 +25,25 @@ const LISP_OWNED_COMMANDS = [
 describe("T-Lisp architecture boundaries", () => {
   test("loads the complete Vim and daily-driver command inventory", async () => {
     const editor = await createStartedEditor();
-    const env = editor.getInterpreter().globalEnv;
+    const registry = editor.getInterpreter().moduleRegistry;
 
     for (const name of LISP_OWNED_COMMANDS) {
-      expect(env.lookup(name)?.type, name).toBe("function");
+      const resolved = registry.resolveUniqueExport(name);
+      expect(typeof resolved, name).toBe("object");
+      expect((resolved as { value?: { type?: string } }).value?.type, name).toBe("function");
     }
   });
 
   test("executes window, tab, and relative-line-number policy through T-Lisp", async () => {
     const editor = await createStartedEditor("one\ntwo\nthree");
 
-    executeTlisp(editor, "(split-window-below)");
+    executeTlisp(editor, "(editor/commands/windows/split-window-below)");
     expect(editor.getState().windows).toHaveLength(2);
 
     executeTlisp(editor, '(tab-new "second")');
     expect(editor.getState().tabs).toHaveLength(1);
 
-    executeTlisp(editor, "(relative-line-numbers-mode 1)");
+    executeTlisp(editor, "(editor/modes/relative-line-numbers/relative-line-numbers-mode 1)");
     expect(editor.getState().activeMinorModes).toContain("relative-line-numbers");
   });
 

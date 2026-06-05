@@ -86,8 +86,8 @@ describe("Lisp-owned generic minibuffer input", () => {
 
   test("M-p and M-n navigate T-Lisp-owned command history", async () => {
     const interpreter = editor.getInterpreter();
-    interpreter.execute('(minibuffer-history-add "editor-mode")');
-    interpreter.execute('(minibuffer-history-add "save-buffer")');
+    interpreter.execute('(editor/completion/minibuffer/minibuffer-history-add "editor-mode")');
+    interpreter.execute('(editor/completion/minibuffer/minibuffer-history-add "save-buffer")');
 
     await openMx();
     await editor.handleKey("\x1bp");
