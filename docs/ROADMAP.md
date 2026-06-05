@@ -119,7 +119,7 @@ This version provides a fully functional modal editor with daemon/client archite
 - ✅ **Search**: Forward/backward search with word-under-cursor search
 - ✅ **Visual Mode**: Characterwise selection with text object support
 - ✅ **Kill Ring**: Emacs-style clipboard history with yank-pop cycling
-- ✅ **Minibuffer**: M-x with fuzzy completion and command history
+- ✅ **Minibuffer**: Lisp-owned M-x and buffer completion with Orderless matching, Vertico display, Marginalia annotations, and histories
 - ✅ **Which-key**: Popup showing available bindings after prefix keys
 - ✅ **Help System**: describe-key, describe-function, apropos-command
 - ✅ **Macro Recording**: Record, playback, and persist macros
@@ -672,31 +672,25 @@ Priority: HIGH | Impact: Enhanced clipboard with history
 
 **Implementation Note**: All implemented as T-Lisp functions, callable via M-x, keybindings are just shortcuts to these functions.
 
-### 1.10 - Minibuffer Framework with Which-key and Fuzzy Matching ✅ COMPLETE
+### 1.10 - Lisp-Owned Minibuffer Completion and Which-key ✅ COMPLETE
 Priority: HIGH | Impact: Enhanced command experience (Spacemacs/Doom-style)
 
 #### Core Minibuffer
-- [x] Minibuffer UI component (separate input area at bottom)
-- [x] `(minibuffer-read prompt)` - Basic input reading
-- [x] `(minibuffer-read-command prompt)` - With command completion
-- [x] `(minibuffer-read-file prompt)` - With file path completion
-- [x] Command history tracking (up/down arrow)
-- [x] `C-g` - Abort/minibuffer cancel mechanism
-- [x] Integration: M-x mode uses minibuffer
-- [x] Integration: Command mode (`:`) uses minibuffer
+- [x] Generic minibuffer UI and vertical completion view
+- [x] `(read-from-minibuffer ...)` - Raw input sessions
+- [x] `(completing-read ...)` - Named completion tables and accept actions
+- [x] T-Lisp-owned keyed histories
+- [x] `C-g` and Escape - Abort/minibuffer cancel mechanisms
+- [x] Integration: M-x and `C-x b` use the reusable completion framework
+- [ ] File completion and command-mode migration
 
-#### Fuzzy Matching (Spacemacs/Doom-style)
-- [x] Fuzzy matching algorithm for command completion
-  - Type "sw" → matches "save-window", "switch-window", "swap-windows"
-  - Type "buf" → matches "buffer-list", "switch-to-buffer", "kill-buffer"
-  - Type "ff" → matches "find-file"
-- [x] Scoring system for fuzzy matches (prefix matches score higher)
-- [x] Frequency-based ranking (recent/frequent commands appear first)
-- [x] Fuzzy matching for file paths (fuzzy-find-file)
-- [x] Fuzzy matching for buffer names
-- [x] Tab completion as fallback (exact prefix match)
-- [x] `C-s`/`C-r` for incremental search in completion list
-- [x] Tests for fuzzy matching
+#### Orderless, Vertico, and Marginalia Behavior
+- [x] Stable all-components-in-any-order matching for M-x and buffers
+- [x] Smart case and `=`, `^`, `~`, `,`, `!`, and `&` affix styles
+- [x] Vertical candidates, selection, scrolling, counts, and Tab insertion
+- [x] Category-aware command and buffer annotations
+- [x] `C-x b` switches to existing buffers or creates raw input
+- [x] Frame-local serializable minibuffer sessions
 
 #### Which-key System
 - [x] `(which-key-show prefix-key)` - Show available bindings after prefix
@@ -735,10 +729,9 @@ Priority: HIGH | Impact: Enhanced command experience (Spacemacs/Doom-style)
 #### Enhanced M-x Experience
 - [x] `(execute-extended-command)` - Read and execute command
 - [x] M-x binding: `SPC ;` (simple, single binding)
-- [x] Context-aware command suggestions
-- [x] Command categories/groupings in completion
-- [x] Hide internal/undocumented commands (optional)
-- [x] Custom command groups (e.g., user-defined vs built-in)
+- [x] Annotated command candidates and stable Orderless filtering
+- [x] Hide commands without documentation or bindings
+- [ ] Context-aware suggestions and custom command groups
 
 #### Hierarchical Keybinding System (Leader Key)
 - [x] Define leader key hierarchy in T-Lisp:
@@ -766,14 +759,14 @@ Priority: HIGH | Impact: Enhanced command experience (Spacemacs/Doom-style)
 
 #### Tests
 - [x] Minibuffer input/output tests
-- [x] Fuzzy matching algorithm tests (edge cases, scoring)
+- [x] Orderless matching tests (components, affixes, spans, stability)
 - [x] Which-key popup tests (timing, display)
-- [x] Command history tests (persistence, ranking)
-- [x] Integration tests (M-x → which-key → fuzzy match)
+- [x] Command history tests
+- [x] Integration tests for M-x and buffer completion
 
-**Rationale**: Spacemacs and Doom Emacs show that which-key + fuzzy matching are essential for the Emacs experience. M-x without these feels primitive. Which-key provides discoverability, fuzzy matching provides efficiency.
+**Rationale**: Which-key provides discoverability while the reusable Lisp-owned completion stack provides Emacs-style narrowing and selection without score-based auto-selection.
 
-**Implementation Note**: All implemented in T-Lisp. Minibuffer is a T-Lisp UI component. Which-key and fuzzy matching are pure T-Lisp functions. Keybindings are T-Lisp data structures.
+**Implementation Note**: Completion tables, matching, annotations, selection, scrolling, histories, and key semantics are implemented in T-Lisp. TypeScript transports and renders the published view.
 
 ### 1.11 - Help System ✅ COMPLETE
 Priority: MEDIUM | Impact: Discoverability for T-Lisp extensibility

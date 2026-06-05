@@ -86,6 +86,10 @@ For immediate help getting started with tmax:
 2. **Basic Usage**: See [manual/tmax.texi Chapter 3](manual/tmax.texi)
 3. **Configuration**: See [examples/](examples/) directory
 
+## Completion
+
+See [completion.md](completion.md) for the Lisp-owned minibuffer completion contract, the TypeScript/T-Lisp boundary, and customization examples.
+
 ## Reading the Manual
 
 ### Using Info (Recommended)

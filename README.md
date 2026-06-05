@@ -48,7 +48,7 @@ The daemon/client architecture mirrors Emacs (`tmax --daemon` / `tmaxclient`), s
 - ✅ Comprehensive editor API (100+ functions)
 - ✅ Kill ring with yank-pop cycling
 - ✅ Macro recording and playback
-- ✅ Fuzzy command completion in M-x
+- ✅ Vertico/Orderless/Marginalia-style Lisp-owned completion for M-x and `C-x b`
 - ✅ Help system (describe-key, describe-function, apropos-command)
 - ✅ Plugin loading and repository system
 
@@ -159,9 +159,21 @@ bun run dev
 
 ### T-Lisp REPL
 ```bash
-# Run the T-Lisp REPL for testing
-bun run repl
+# Start the standalone T-Lisp REPL
+bun run tlisp
+
+# Evaluate one expression
+bun run tlisp -- -e '(+ 1 2)'
+
+# Run a script without launching the editor
+bin/tlisp script.tlisp
+
+# Build a standalone T-Lisp binary
+bun run build:tlisp
+./dist/tlisp -e '(+ 1 2)'
 ```
+
+The standalone REPL keeps definitions across inputs, supports multiline forms, and provides Clojure-like result bindings: `*1`, `*2`, `*3`, and `*e`. It uses the same interpreter as the editor but loads a standalone runtime profile with stdout/stdin/filesystem primitives and standalone module loading. See `docs/memos/standalone-tlisp-gap-analysis.md` and `docs/memos/standalone-tlisp-options-analysis.md` for the architecture rationale.
 
 ## Configuration
 
@@ -264,9 +276,10 @@ tmax/
 │   ├── ui/             # UI tests (tmux harness)
 │   └── mocks/          # Mock implementations
 ├── scripts/
-│   └── repl.ts         # T-Lisp REPL
+│   └── repl.ts         # T-Lisp REPL compatibility launcher
 └── bin/
     ├── tmax            # Unified CLI (daemon/client)
+    ├── tlisp           # Standalone T-Lisp CLI
     └── tmaxclient      # Daemon client CLI
 ```
 
@@ -275,8 +288,10 @@ tmax/
 # Development
 tmax                     # Start the editor (auto-daemon)
 bun run dev              # Start with auto-reload
-bun run repl             # Run T-Lisp REPL
+bun run tlisp            # Run standalone T-Lisp REPL
+bun run repl             # Compatibility alias for standalone T-Lisp REPL
 bun run daemon           # Start daemon only
+bun run build:tlisp      # Build standalone T-Lisp binary
 
 # Testing
 bun run typecheck:src    # Typecheck production source
