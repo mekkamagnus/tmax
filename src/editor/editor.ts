@@ -5,13 +5,12 @@
  */
 
 import { TLispInterpreterImpl } from "../tlisp/interpreter.ts";
-import { readFileSync } from "fs";
 import { FileSystemImpl } from "../core/filesystem.ts";
 import { createEditorAPI, TlispEditorState } from "./tlisp-api.ts";
 import type { EditorState, FunctionalTextBuffer, Window, HighlightSpan, MinibufferRenderView } from "../core/types.ts";
 import { createString, createList, createNil, createNumber, createBoolean, createHashmap } from "../tlisp/values.ts";
 import type { TerminalIO, FileSystem } from "../core/types.ts";
-import type { TLispValue, TLispFunctionImpl } from "../tlisp/types.ts";
+import type { TLispEnvironment, TLispValue, TLispFunctionImpl } from "../tlisp/types.ts";
 import type { TLispFunction } from "../tlisp/types.ts";
 import { Either } from "../utils/task-either.ts";
 import { FunctionalTextBufferImpl } from "../core/buffer.ts";
@@ -40,6 +39,8 @@ import {
   normalizeExtension,
 } from "./mode-state.ts";
 import { cloneJsonValue, deserializeTlispValue, serializeTlispValue } from "../tlisp/serialization.ts";
+import { createModuleLoader } from "../tlisp/module-loader.ts";
+import type { ModuleExportRecord } from "../tlisp/module-registry.ts";
 
 /**
  * Key mapping for editor commands
@@ -74,7 +75,6 @@ export class Editor {
   private minorModeRegistry: Map<string, MinorModeConfig> = new Map();
   private globalizedMinorModes: Set<string> = new Set();
   private autoModeRules: AutoModeRule[] = [];
-  private loadedFeatures: Set<string> = new Set();
   private loadPaths: string[] = ['src/tlisp/core'];
   private currentModuleName: string | undefined;
   private bufferMetadata: Map<string, { filename?: string; modified: boolean; recency: number }> = new Map();
@@ -150,32 +150,9 @@ export class Editor {
     this.interpreter = new TLispInterpreterImpl();
     editorLog.debug('T-Lisp interpreter created', { correlationId: initId });
 
-    // Set up module loader for require-module resolution
-    this.interpreter.setModuleLoader((moduleName: string) => {
-      // Map module name to file path: editor/commands/save → src/tlisp/core/commands/save.tlisp
-      const parts = moduleName.split("/");
-      if (parts.length < 2) return null;
-      const basePath = parts.slice(1).join("/");
-      const candidates = [
-        `src/tlisp/core/${basePath}.tlisp`,
-        `src/tlisp/core/${basePath}/index.tlisp`,
-      ];
-      for (const candidate of candidates) {
-        try {
-          const content = readFileSync(candidate, "utf8");
-          if (content) {
-            const result = this.interpreter.execute(content);
-            if (Either.isLeft(result)) {
-              return Either.left(result.left);
-            }
-            return Either.right(result.right);
-          }
-        } catch {
-          // File doesn't exist, try next candidate
-        }
-      }
-      return null;
-    });
+    this.interpreter.setModuleLoader(createModuleLoader(this.interpreter, {
+      coreRoot: "src/tlisp/core",
+    }));
 
     this.keyMappings = new Map();
     this.lspClient = new LSPClient(this.terminal, this.filesystem);
@@ -326,7 +303,6 @@ export class Editor {
       _getBufferModeStates: () => editor.getBufferModeStates(),
       _getCurrentBufferKey: () => editor.getCurrentBufferKey(),
       _getGlobalizedMinorModes: () => editor.getGlobalizedMinorModes(),
-      _getLoadedFeatures: () => editor.getLoadedFeatures(),
       _getLoadPaths: () => editor.getLoadPaths(),
       _getModuleRegistry: () => editor.interpreter.moduleRegistry,
       _getCurrentModuleName: () => editor.getCurrentModuleName(),
@@ -643,19 +619,9 @@ export class Editor {
 
       const functionName = nameArg.value as string;
 
-      // Look up the function in the global environment
-      let func = this.interpreter.globalEnv.lookup(functionName);
-      let moduleOrigin: string | undefined;
-
-      // Also check module exports
-      if (!func) {
-        const moduleExports = this.interpreter.moduleRegistry.allExports();
-        const entry = moduleExports.get(functionName);
-        if (entry) {
-          func = entry.value;
-          moduleOrigin = entry.moduleName;
-        }
-      }
+      const resolved = this.resolveCallable(functionName);
+      const func = resolved?.value;
+      const moduleOrigin = resolved?.moduleName;
 
       if (!func) {
         return createNil(); // Function not found
@@ -724,21 +690,22 @@ export class Editor {
 
       const pattern = (patternArg.value as string).toLowerCase();
 
-      // Get all function names from the global environment
       const matchingFunctions: TLispValue[] = [];
       const seen = new Set<string>();
 
-      for (const [name, value] of this.interpreter.globalEnv.bindings) {
+      for (const [name, value] of this.collectVisibleGlobalBindings()) {
         if (value.type === "function" && name.toLowerCase().includes(pattern)) {
           seen.add(name);
           matchingFunctions.push(createString(name));
         }
       }
 
-      // Also search module exports
       const moduleExports = this.interpreter.moduleRegistry.allExports();
       for (const [name, entry] of moduleExports) {
-        if (!seen.has(name) && entry.value.type === "function" && name.toLowerCase().includes(pattern)) {
+        if (!seen.has(name) && entry.value.type === "function" && (
+          name.toLowerCase().includes(pattern) ||
+          entry.exportName.toLowerCase().includes(pattern)
+        )) {
           matchingFunctions.push(createString(name));
         }
       }
@@ -804,12 +771,10 @@ export class Editor {
         }
       };
 
-      // Search through all functions in the global environment
-      for (const [name, value] of this.interpreter.globalEnv.bindings) {
+      for (const [name, value] of this.collectVisibleGlobalBindings()) {
         checkMatch(name, value);
       }
 
-      // Also search module exports
       const moduleExports = this.interpreter.moduleRegistry.allExports();
       for (const [name, entry] of moduleExports) {
         checkMatch(name, entry.value);
@@ -1003,8 +968,7 @@ export class Editor {
       const seen = new Set<string>();
       const results: TLispValue[] = [];
 
-      // Global env functions
-      for (const [name, value] of this.interpreter.globalEnv.bindings.entries()) {
+      for (const [name, value] of this.collectVisibleGlobalBindings().entries()) {
         if (value.type === "function") {
           seen.add(name);
           const fn = value as TLispFunction;
@@ -1041,9 +1005,12 @@ export class Editor {
       if (!/^[A-Za-z0-9_+*/<>=!?$%&~.^:-]+$/.test(name)) {
         throw new Error("Invalid command name");
       }
-      const result = this.interpreter.execute(`(${name})`);
-      if (Either.isLeft(result)) throw new Error(result.left.message);
-      return result.right;
+      const result = this.executeCommand(`(${name})`);
+      if (!result || typeof result !== "object" || !("_tag" in result)) {
+        return createNil();
+      }
+      if (Either.isLeft(result as any)) throw new Error((result as any).left.message);
+      return (result as any).right;
     });
 
     defineRaw("editor-space-prefix-active-p", (args) => {
@@ -1175,8 +1142,7 @@ export class Editor {
 
       const commandName = nameArg.value as string;
 
-      // Look up the function in the global environment
-      const func = this.interpreter.globalEnv.lookup(commandName);
+      const func = this.resolveCallable(commandName)?.value;
 
       if (!func || func.type !== "function") {
         return createString("No documentation available");
@@ -1211,8 +1177,7 @@ export class Editor {
       const commandName = nameArg.value as string;
       const maxLength = lengthArg.value as number;
 
-      // Look up the function in the global environment
-      const func = this.interpreter.globalEnv.lookup(commandName);
+      const func = this.resolveCallable(commandName)?.value;
 
       if (!func || func.type !== "function") {
         return createString("No documentation available");
@@ -1586,52 +1551,6 @@ export class Editor {
       "src/tlisp/core/bindings/command.tlisp",
     ];
 
-    const requiredModeFiles = [
-      // SPEC-035: Major modes
-      "src/tlisp/core/modes/fundamental.tlisp",
-      "src/tlisp/core/modes/typescript-mode.tlisp",
-      "src/tlisp/core/modes/python-mode.tlisp",
-      "src/tlisp/core/modes/lisp-mode.tlisp",
-      "src/tlisp/core/modes/go-mode.tlisp",
-      // SPEC-003: Minor modes
-      "src/tlisp/core/modes/line-numbers-mode.tlisp",
-      "src/tlisp/core/modes/relative-line-numbers-mode.tlisp",
-      "src/tlisp/core/modes/auto-fill-mode.tlisp",
-    ];
-
-    const optionalBindingFiles = [
-      // SPEC-006: Lisp-owned minibuffer completion
-      "src/tlisp/core/completion/completion.tlisp",
-      "src/tlisp/core/completion/orderless.tlisp",
-      "src/tlisp/core/completion/marginalia.tlisp",
-      "src/tlisp/core/completion/vertico.tlisp",
-      "src/tlisp/core/completion/minibuffer.tlisp",
-      "src/tlisp/core/commands/buffers.tlisp",
-      "src/tlisp/core/commands/execute-extended-command.tlisp",
-      // SPEC-035: Indent rules
-      "src/tlisp/core/indent/typescript.tlisp",
-      "src/tlisp/core/indent/lisp.tlisp",
-      "src/tlisp/core/indent/python.tlisp",
-      "src/tlisp/core/indent/generic.tlisp",
-      // SPEC-035: T-Lisp commands
-      "src/tlisp/core/commands/save.tlisp",
-      "src/tlisp/core/commands/find-file.tlisp",
-      "src/tlisp/core/commands/isearch.tlisp",
-      "src/tlisp/core/commands/replace.tlisp",
-      "src/tlisp/core/commands/indent.tlisp",
-      "src/tlisp/core/commands/dired.tlisp",
-      // SPEC-004: Window and tab commands
-      "src/tlisp/core/commands/windows.tlisp",
-      "src/tlisp/core/commands/tabs.tlisp",
-      // SPEC-005: Vim dispatcher and motions
-      "src/tlisp/core/commands/vim-counts.tlisp",
-      "src/tlisp/core/commands/insert-entries.tlisp",
-      "src/tlisp/core/commands/edit-commands.tlisp",
-      "src/tlisp/core/commands/operators.tlisp",
-      "src/tlisp/core/commands/motions.tlisp",
-      "src/tlisp/core/commands/vim-dispatch.tlisp",
-    ];
-
     let allLoaded = true;
     let lastError: string = "";
 
@@ -1649,18 +1568,8 @@ export class Editor {
       this.loadFallbackBindings();
     }
 
-    for (const path of requiredModeFiles) {
-      const loaded = await this.loadBindingsFromFile(path);
-      if (!loaded) {
-        throw new Error(`Failed to load required T-Lisp mode file: ${path}`);
-      }
-    }
-
-    for (const path of optionalBindingFiles) {
-      await this.loadBindingsFromFile(path, true);
-    }
-
     this.coreBindingsLoaded = true;
+    this.executeCommand("(editor/modes/line-numbers/global-line-numbers-mode t)");
   }
 
   /**
@@ -1699,6 +1608,42 @@ export class Editor {
     } catch (error) {
       console.warn("Failed to save macros:", error);
     }
+  }
+
+  private pluginModuleName(pluginName: string): string {
+    const safeName = pluginName
+      .trim()
+      .replace(/[^A-Za-z0-9_-]+/g, "-")
+      .replace(/^-+|-+$/g, "");
+    return `user/plugin/${safeName || "plugin"}`;
+  }
+
+  private pluginHasDefmodule(content: string): boolean {
+    return /^\s*\(\s*defmodule\b/m.test(content);
+  }
+
+  private collectPluginExports(content: string): string[] {
+    const exports = new Set<string>();
+    const pattern = /^\s*\(\s*def(?:un|var|macro)\s+([^\s()]+)/gm;
+    let match: RegExpExecArray | null;
+
+    while ((match = pattern.exec(content)) !== null) {
+      const name = match[1];
+      if (name) exports.add(name);
+    }
+
+    return Array.from(exports);
+  }
+
+  private wrapPluginModule(pluginName: string, content: string): string {
+    if (this.pluginHasDefmodule(content)) {
+      return content;
+    }
+
+    const moduleName = this.pluginModuleName(pluginName);
+    const exports = this.collectPluginExports(content);
+    const exportForm = exports.length > 0 ? `(export ${exports.join(" ")})` : "(export)";
+    return `(defmodule ${moduleName}\n  ${exportForm}\n\n${content}\n)\n`;
   }
 
   /**
@@ -1799,10 +1744,10 @@ export class Editor {
             }
           }
 
-          // Load plugin.tlisp — defmodule isolation only if plugin opts in
+          // Load plugin.tlisp with mandatory module isolation.
           try {
             const pluginContent = await this.filesystem.readFile(pluginFilePath);
-            const execResult = this.interpreter.execute(pluginContent);
+            const execResult = this.interpreter.execute(this.wrapPluginModule(pluginName, pluginContent));
             if (execResult._tag === 'Left') {
               // Parse or execution error
               result.errors.push({
@@ -2022,10 +1967,81 @@ export class Editor {
    * @param command - Command to execute
    * @returns Result of command execution
    */
+  private collectVisibleGlobalBindings(): Map<string, TLispValue> {
+    const result = new Map<string, TLispValue>();
+    let env: TLispEnvironment | undefined = this.interpreter.globalEnv;
+
+    while (env) {
+      for (const [name, value] of env.bindings) {
+        if (!result.has(name)) result.set(name, value);
+      }
+      env = env.parent;
+    }
+
+    return result;
+  }
+
+  private resolveCallable(name: string): { value: TLispValue; moduleName?: string; env?: ModuleExportRecord["env"] } | undefined {
+    const globalValue = this.interpreter.globalEnv.lookup(name);
+    if (globalValue) {
+      return { value: globalValue };
+    }
+
+    const publicExport = this.interpreter.moduleRegistry.resolvePublicName(name);
+    if (publicExport) {
+      return {
+        value: publicExport.value,
+        moduleName: publicExport.moduleName,
+        env: publicExport.env,
+      };
+    }
+
+    if (!name.includes("/")) {
+      const exported = this.interpreter.moduleRegistry.resolveUniqueExport(name);
+      if (exported && exported !== "ambiguous") {
+        return {
+          value: exported.value,
+          moduleName: exported.moduleName,
+          env: exported.env,
+        };
+      }
+    }
+
+    return undefined;
+  }
+
+  private commandHead(command: string): string | undefined {
+    const source = command.trim().startsWith("(") ? command : `(${command})`;
+    try {
+      const expr = this.interpreter.parse(source);
+      if (expr.type !== "list") return undefined;
+      const elements = expr.value as TLispValue[];
+      const head = elements[0];
+      return head?.type === "symbol" ? head.value as string : undefined;
+    } catch {
+      return undefined;
+    }
+  }
+
   private executeCommand(command: string): unknown {
     try {
       this.state.lastCommand = command;
-      return this.interpreter.execute(command);
+      const result = this.interpreter.execute(command);
+      if (Either.isRight(result)) {
+        return result;
+      }
+
+      const source = command.trim().startsWith("(") ? command : `(${command})`;
+      const head = this.commandHead(source);
+      if (!head) return result;
+
+      const callable = this.resolveCallable(head);
+      if (!callable?.env || callable.value.type !== "function") {
+        return result;
+      }
+
+      const expr = this.interpreter.parse(source);
+      return this.interpreter.eval(expr, callable.env);
     } catch (error) {
       if (error instanceof Error && (error.message === "EDITOR_QUIT_SIGNAL" || error.message.includes("EDITOR_QUIT_SIGNAL"))) {
         throw new Error("EDITOR_QUIT_SIGNAL"); // Re-throw clean quit signal
@@ -2354,13 +2370,6 @@ export class Editor {
    */
   getAutoModeRules(): AutoModeRule[] {
     return this.autoModeRules;
-  }
-
-  /**
-   * Get loaded features set
-   */
-  getLoadedFeatures(): Set<string> {
-    return this.loadedFeatures;
   }
 
   /**

@@ -28,11 +28,11 @@ export class TLispInterpreterImpl implements TLispInterpreter {
    */
   constructor() {
     this.parser = new TLispParser();
-    const { evaluator, builtinsEnv, env } = createEvaluatorWithBuiltins();
+    this.moduleRegistry = new ModuleRegistry();
+    const { evaluator, builtinsEnv, env } = createEvaluatorWithBuiltins(this.moduleRegistry);
     this.evaluator = evaluator;
     this.builtinsEnv = builtinsEnv;
     this.globalEnv = env;
-    this.moduleRegistry = new ModuleRegistry();
     evaluator.setModuleRegistry(this.moduleRegistry);
     evaluator.setBuiltinsEnv(builtinsEnv);
   }
@@ -190,8 +190,6 @@ export class TLispInterpreterImpl implements TLispInterpreter {
     const func = createFunction(fn, name);
     // Register into builtinsEnv so modules can see editor primitives
     this.builtinsEnv.define(name, func);
-    // Also register into globalEnv for backward compat with code that iterates globalEnv.bindings
-    this.globalEnv.define(name, func);
 
     // Register builtin function for coverage tracking (US-0.6.6)
     if (isCoverageEnabled()) {

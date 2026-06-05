@@ -1,5 +1,5 @@
 (defmodule editor/commands/indent
-  (export indent-current-line indent-region))
+  (export indent-current-line indent-region)
 
 ;; indent.tlisp — indentation commands
 (defun indent-current-line ()
@@ -16,3 +16,4 @@
       (let ((col (indent-calculate-column line (car (indent-get-rules)) (cadr (indent-get-rules)))))
         (buffer-set-line-indent line col))
       (set! line (+ line 1)))))
+)

@@ -1,5 +1,5 @@
 (defmodule editor/indent/lisp
-  (export))
+  (export)
 
 ;; lisp.tlisp — Lisp indent rules
 ;; Increase indent after unmatched opening paren
@@ -7,3 +7,4 @@
 (indent-set-rules
   '("\\($" "defun$" "let$" "if$" "when$" "unless$" "progn$" "cond$" "do$")
   '("^\\s*\\)"))
+)

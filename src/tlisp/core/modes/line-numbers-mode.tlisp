@@ -1,5 +1,5 @@
 (defmodule editor/modes/line-numbers
-  (export line-numbers-mode global-line-numbers-mode))
+  (export line-numbers-mode global-line-numbers-mode)
 
 ;; line-numbers-mode.tlisp — Line numbers minor mode
 ;; Displays line numbers in the gutter when active
@@ -34,3 +34,4 @@ With 0 or negative number, disable."
           (global-minor-mode-set "line-numbers" t)
           (global-minor-mode-set "line-numbers" nil))
         (global-minor-mode-set "line-numbers" nil)))))
+)

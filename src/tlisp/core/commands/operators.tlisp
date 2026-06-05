@@ -1,5 +1,5 @@
 (defmodule editor/commands/operators
-  (export vim-operator-pending-p vim-begin-operator vim-reset-operator vim-operator-total-count vim-delete-line-range vim-delete-to-last-line vim-delete-to-first-line vim-change-line-range vim-operator-apply vim-dispatch-operator-key))
+  (export vim-operator-pending-p vim-begin-operator vim-reset-operator vim-operator-total-count vim-delete-line-range vim-delete-to-last-line vim-delete-to-first-line vim-change-line-range vim-operator-apply vim-dispatch-operator-key)
 
 ;; operators.tlisp -- Vim operator-pending state owned by T-Lisp
 
@@ -125,3 +125,4 @@
       (if (string= key "g")
         (vim-begin-prefix "operator-g")
         (vim-operator-apply key)))))
+)

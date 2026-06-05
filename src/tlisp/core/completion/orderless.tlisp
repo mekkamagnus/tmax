@@ -1,5 +1,5 @@
 (defmodule editor/completion/orderless
-  (export orderless-nonempty-string-p orderless-smart-case-p orderless-spans-or-nil orderless-literal-spans orderless-regexp-spans orderless-prefix-spans orderless-flex-spans orderless-initialism-spans orderless-component-body orderless-annotation-component-p orderless-negated-component-p orderless-component-target orderless-positive-component-match orderless-component-match orderless-match-components orderless-filter-candidate orderless-filter))
+  (export orderless-nonempty-string-p orderless-smart-case-p orderless-spans-or-nil orderless-literal-spans orderless-regexp-spans orderless-prefix-spans orderless-flex-spans orderless-initialism-spans orderless-component-body orderless-annotation-component-p orderless-negated-component-p orderless-component-target orderless-positive-component-match orderless-component-match orderless-match-components orderless-filter-candidate orderless-filter)
 
 ;; orderless.tlisp --- Component-wise completion matching
 
@@ -112,3 +112,4 @@
           candidates)))))
 
 (completion-register-style "orderless" "orderless-filter")
+)

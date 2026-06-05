@@ -55,6 +55,9 @@ export function createModuleOps(
     if (!record || record.state !== "loaded") {
       return Either.left({ type: 'EvalError', variant: 'RuntimeError', message: `Module '${moduleName}' not loaded`, details: {} });
     }
+    if (!record.exports.has(symName)) {
+      return Either.left({ type: 'EvalError', variant: 'RuntimeError', message: `Symbol '${symName}' is not exported from module '${moduleName}'`, details: {} });
+    }
     const value = record.env.lookup(symName);
     if (value === undefined) {
       return Either.left({ type: 'EvalError', variant: 'RuntimeError', message: `Symbol '${symName}' not found in module '${moduleName}'`, details: {} });

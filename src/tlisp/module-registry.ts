@@ -25,6 +25,14 @@ export interface ModuleRecord {
   state: "loading" | "loaded" | "failed";
 }
 
+export interface ModuleExportRecord {
+  publicName: string;
+  exportName: string;
+  moduleName: string;
+  value: any;
+  env: TLispEnvironment;
+}
+
 /**
  * Module registry — maps module names to environments, export sets, and loading state.
  */
@@ -75,21 +83,91 @@ export class ModuleRegistry {
     }
   }
 
+  setSourcePath(name: string, sourcePath: string): void {
+    const record = this.modules.get(name);
+    if (record) {
+      record.sourcePath = sourcePath;
+    }
+  }
+
   listModules(): ModuleRecord[] {
     return Array.from(this.modules.values());
   }
 
-  allExports(): Map<string, { value: any; moduleName: string }> {
-    const result = new Map<string, { value: any; moduleName: string }>();
-    for (const record of this.modules.values()) {
+  listExports(): ModuleExportRecord[] {
+    const loadedRecords = Array.from(this.modules.values()).filter((record) => record.state === "loaded");
+    const exportCounts = new Map<string, number>();
+
+    for (const record of loadedRecords) {
+      for (const exportName of record.exports) {
+        exportCounts.set(exportName, (exportCounts.get(exportName) ?? 0) + 1);
+      }
+    }
+
+    const result: ModuleExportRecord[] = [];
+    for (const record of loadedRecords) {
       if (record.state !== "loaded") continue;
       for (const exportName of record.exports) {
         const value = record.env.lookup(exportName);
         if (value !== undefined) {
-          result.set(exportName, { value, moduleName: record.name });
+          const duplicated = (exportCounts.get(exportName) ?? 0) > 1;
+          result.push({
+            publicName: duplicated ? `${record.name}/${exportName}` : exportName,
+            exportName,
+            moduleName: record.name,
+            value,
+            env: record.env,
+          });
         }
       }
     }
     return result;
+  }
+
+  allExports(): Map<string, { value: any; moduleName: string; exportName: string; env: TLispEnvironment }> {
+    const result = new Map<string, { value: any; moduleName: string; exportName: string; env: TLispEnvironment }>();
+    for (const entry of this.listExports()) {
+      result.set(entry.publicName, {
+        value: entry.value,
+        moduleName: entry.moduleName,
+        exportName: entry.exportName,
+        env: entry.env,
+      });
+    }
+    return result;
+  }
+
+  resolveUniqueExport(exportName: string): ModuleExportRecord | "ambiguous" | undefined {
+    const matches = this.listExports().filter((entry) => entry.exportName === exportName);
+    if (matches.length === 0) return undefined;
+    if (matches.length > 1) return "ambiguous";
+    return matches[0];
+  }
+
+  resolvePublicName(publicName: string): ModuleExportRecord | undefined {
+    const direct = this.listExports().find((entry) => entry.publicName === publicName);
+    if (direct) return direct;
+
+    const loadedRecords = Array.from(this.modules.values())
+      .filter((record) => record.state === "loaded")
+      .sort((left, right) => right.name.length - left.name.length);
+
+    for (const record of loadedRecords) {
+      const prefix = `${record.name}/`;
+      if (!publicName.startsWith(prefix)) continue;
+      const exportName = publicName.slice(prefix.length);
+      if (!record.exports.has(exportName)) return undefined;
+      const value = record.env.lookup(exportName);
+      if (value === undefined) return undefined;
+      return {
+        publicName,
+        exportName,
+        moduleName: record.name,
+        value,
+        env: record.env,
+      };
+    }
+
+    return undefined;
   }
 }

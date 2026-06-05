@@ -1,5 +1,5 @@
 (defmodule editor/completion/minibuffer
-  (export minibuffer-history-values minibuffer-history minibuffer-history-add-to minibuffer-history-add minibuffer-empty-table minibuffer-selection-clamp minibuffer-scroll-for-selection minibuffer-exact-selection-index minibuffer-replace-session minibuffer-refresh completing-read read-from-minibuffer minibuffer-set-input minibuffer-refresh-after-input minibuffer-insert-character minibuffer-backward-delete-char minibuffer-move-point minibuffer-history-previous minibuffer-history-next minibuffer-close minibuffer-cancel minibuffer-accept minibuffer-dispatch-key))
+  (export minibuffer-history-values minibuffer-history minibuffer-history-add-to minibuffer-history-add minibuffer-empty-table minibuffer-selection-clamp minibuffer-scroll-for-selection minibuffer-exact-selection-index minibuffer-replace-session minibuffer-refresh completing-read read-from-minibuffer minibuffer-set-input minibuffer-refresh-after-input minibuffer-insert-character minibuffer-backward-delete-char minibuffer-move-point minibuffer-history-previous minibuffer-history-next minibuffer-close minibuffer-cancel minibuffer-accept minibuffer-dispatch-key)
 
 ;; minibuffer.tlisp --- Serializable Lisp-owned minibuffer state machine
 
@@ -230,3 +230,4 @@
     ((string= key "Enter") (minibuffer-accept))
     ((or (string= key "C-g") (string= key "Escape")) (minibuffer-cancel))
     (t nil)))
+)

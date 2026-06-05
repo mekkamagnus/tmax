@@ -1,5 +1,5 @@
 (defmodule editor/bindings/visual
-  (export))
+  (export)
 
 ;; visual.tlisp
 ;; Default key bindings for visual mode in tmax editor
@@ -49,3 +49,4 @@
 
 ;; Swap visual anchor (o)
 (key-bind "o" "(visual-swap-anchor)" "visual")
+)

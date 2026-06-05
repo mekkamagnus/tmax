@@ -7,12 +7,12 @@ import type { AppError } from "../../error/types.ts";
 import { Either } from "../../utils/task-either.ts";
 import { registerIOPrimitives, type StandaloneIOOptions } from "../io-ops.ts";
 import { TLispInterpreterImpl } from "../interpreter.ts";
-import { createStandaloneModuleLoader, type StandaloneModuleLoaderOptions } from "../module-loader-standalone.ts";
+import { createModuleLoader, type ModuleLoaderOptions } from "../module-loader.ts";
 import { registerSysPrimitives, type StandaloneSysOptions } from "../sys-ops.ts";
 import type { TLispEnvironment, TLispFunction, TLispInterpreter, TLispValue } from "../types.ts";
 import { createBoolean, createList, createNil, createString, createSymbol, valueToString } from "../values.ts";
 
-export interface StandaloneProfileOptions extends StandaloneIOOptions, StandaloneSysOptions, StandaloneModuleLoaderOptions {
+export interface StandaloneProfileOptions extends StandaloneIOOptions, StandaloneSysOptions, ModuleLoaderOptions {
   registerModuleLoader?: boolean;
 }
 
@@ -106,7 +106,7 @@ export function registerStandaloneProfile(
   registerStandaloneHelpers(interpreter);
 
   if (options.registerModuleLoader ?? true) {
-    interpreter.setModuleLoader(createStandaloneModuleLoader(interpreter, options));
+    interpreter.setModuleLoader(createModuleLoader(interpreter, options));
   }
 
   return interpreter;

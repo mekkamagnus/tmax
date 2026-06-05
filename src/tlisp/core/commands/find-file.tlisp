@@ -1,5 +1,5 @@
 (defmodule editor/commands/find-file
-  (export find-file))
+  (export find-file)
 
 ;; find-file.tlisp — find-file command composed from primitives
 (defun find-file (path)
@@ -14,3 +14,4 @@
         (set-buffer-modified-p nil)
         (message (concat "Opened " path)))
       (message (concat "Could not open " path)))))
+)

@@ -36,7 +36,7 @@ import { createReplaceOps } from "./api/replace-ops.ts";
 import { createIndentOps } from "./api/indent-ops.ts";
 import { createMajorModeOps } from "./api/major-mode-ops.ts";
 import { createDiredOps } from "./api/dired-ops.ts";
-import { createLoadOps } from "./api/load-ops.ts";
+import { createRawLoadOps } from "./api/load-ops.ts";
 import { createMinorModeOps } from "./api/minor-mode-ops.ts";
 import { createModuleOps } from "./api/module-ops.ts";
 
@@ -84,7 +84,6 @@ export interface TlispEditorState {
   _getBufferModeStates?: () => Map<string, any>;
   _getCurrentBufferKey?: () => string;
   _getGlobalizedMinorModes?: () => Set<string>;
-  _getLoadedFeatures?: () => Set<string>;
   _getLoadPaths?: () => string[];
   _getModuleRegistry?: () => any;
   _getCurrentModuleName?: () => string | undefined;
@@ -471,12 +470,8 @@ export function createEditorAPI(state: TlispEditorState): Map<string, TLispFunct
     api.set(key, value);
   }
 
-  // Add load/provide/require operations (SPEC-003)
-  const loadOps = createLoadOps(
-    () => {
-      const fn = (state as any)._getLoadedFeatures;
-      return fn ? fn() : new Set<string>();
-    },
+  // Add raw file loading operations. Feature loading is handled by require-module.
+  const loadOps = createRawLoadOps(
     () => {
       const fn = (state as any)._getLoadPaths;
       return fn ? fn() : ['src/tlisp/core'];
