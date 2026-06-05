@@ -1,0 +1,114 @@
+(defmodule editor/completion/orderless
+  (export orderless-nonempty-string-p orderless-smart-case-p orderless-spans-or-nil orderless-literal-spans orderless-regexp-spans orderless-prefix-spans orderless-flex-spans orderless-initialism-spans orderless-component-body orderless-annotation-component-p orderless-negated-component-p orderless-component-target orderless-positive-component-match orderless-component-match orderless-match-components orderless-filter-candidate orderless-filter))
+
+;; orderless.tlisp --- Component-wise completion matching
+
+(defun orderless-nonempty-string-p (value)
+  (> (length value) 0))
+
+(defun orderless-smart-case-p (component)
+  (not (string= component (string-downcase component))))
+
+(defun orderless-spans-or-nil (spans)
+  (if (null spans) nil spans))
+
+(defun orderless-literal-spans (component target)
+  (orderless-spans-or-nil
+    (literal-match-spans component target (orderless-smart-case-p component))))
+
+(defun orderless-regexp-spans (component target)
+  (orderless-spans-or-nil
+    (string-match-spans component target (orderless-smart-case-p component))))
+
+(defun orderless-prefix-spans (component target)
+  (let ((spans (orderless-literal-spans component target)))
+    (if spans
+      (if (= (car (car spans)) 0) spans nil)
+      nil)))
+
+(defun orderless-flex-spans (component target)
+  (orderless-spans-or-nil
+    (string-flex-spans component target (orderless-smart-case-p component))))
+
+(defun orderless-initialism-spans (component target)
+  (orderless-spans-or-nil
+    (string-initialism-spans component target (orderless-smart-case-p component))))
+
+(defun orderless-component-body (component)
+  (let ((first (string-char-at component 0)))
+    (if (or
+          (string= first "=")
+          (string= first "^")
+          (string= first "~")
+          (string= first ",")
+          (string= first "!")
+          (string= first "&"))
+      (substring component 1 (length component))
+      component)))
+
+(defun orderless-annotation-component-p (component)
+  (string= (string-char-at component 0) "&"))
+
+(defun orderless-negated-component-p (component)
+  (string= (string-char-at component 0) "!"))
+
+(defun orderless-component-target (component candidate)
+  (if (orderless-annotation-component-p component)
+    (hashmap-get candidate "annotation")
+    (hashmap-get candidate "display")))
+
+(defun orderless-positive-component-match (component candidate)
+  (let ((first (string-char-at component 0)))
+    (let ((body (orderless-component-body component)))
+      (let ((target (orderless-component-target component candidate)))
+        (cond
+          ((string= first "=") (orderless-literal-spans body target))
+          ((string= first "^") (orderless-prefix-spans body target))
+          ((string= first "~") (orderless-flex-spans body target))
+          ((string= first ",") (orderless-initialism-spans body target))
+          ((string= first "&") (orderless-regexp-spans body target))
+          (t (orderless-regexp-spans body target)))))))
+
+(defun orderless-component-match (component candidate)
+  (if (orderless-negated-component-p component)
+    (if (orderless-literal-spans
+          (orderless-component-body component)
+          (hashmap-get candidate "display"))
+      nil
+      (list))
+    (orderless-positive-component-match component candidate)))
+
+(defun orderless-match-components (components candidate display-spans annotation-spans)
+  (if (null components)
+    (hashmap-set
+      (hashmap-set candidate "spans" display-spans)
+      "annotation-spans" annotation-spans)
+    (let ((component (car components)))
+      (let ((spans (orderless-component-match component candidate)))
+        (if spans
+          (if (orderless-annotation-component-p component)
+            (orderless-match-components
+              (cdr components) candidate display-spans (append annotation-spans spans))
+            (orderless-match-components
+              (cdr components) candidate (append display-spans spans) annotation-spans))
+          nil)))))
+
+(defun orderless-filter-candidate (components candidate)
+  (orderless-match-components components candidate (list) (list)))
+
+(defun orderless-filter (input candidates)
+  "Filter CANDIDATES by all space-separated INPUT components."
+  (let ((components (filter "orderless-nonempty-string-p" (string-split input " "))))
+    (if (null components)
+      (mapcar
+        (lambda (candidate)
+          (hashmap-set
+            (hashmap-set candidate "spans" (list))
+            "annotation-spans" (list)))
+        candidates)
+      (filter "identity"
+        (mapcar
+          (lambda (candidate) (orderless-filter-candidate components candidate))
+          candidates)))))
+
+(completion-register-style "orderless" "orderless-filter")

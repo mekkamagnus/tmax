@@ -6,12 +6,12 @@ describe("tokenizeTerminalInput", () => {
     expect(tokenizeTerminalInput("iHello")).toEqual(["i", "H", "e", "l", "l", "o"]);
   });
 
-  test("keeps CSI escape sequence as a single key", () => {
-    expect(tokenizeTerminalInput("\x1b[A")).toEqual(["\x1b[A"]);
+  test("preserves semantic arrow-key identity", () => {
+    expect(tokenizeTerminalInput("\x1b[A")).toEqual(["Up"]);
   });
 
   test("handles mixed escape sequence and characters", () => {
-    expect(tokenizeTerminalInput("\x1b[Ai")).toEqual(["\x1b[A", "i"]);
+    expect(tokenizeTerminalInput("\x1b[Ai")).toEqual(["Up", "i"]);
   });
 
   test("keeps alt-modified key as one event", () => {

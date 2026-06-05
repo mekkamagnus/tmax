@@ -1,0 +1,40 @@
+(defmodule editor/commands/buffers
+  (export buffer-detail-more-recent-p buffer-detail-candidate buffer-completion-table switch-buffer-accept switch-buffer))
+
+;; buffers.tlisp --- Interactive buffer completion
+
+(defun buffer-detail-more-recent-p (left right)
+  (> (hashmap-get left "recency") (hashmap-get right "recency")))
+
+(defun buffer-detail-candidate (details)
+  (hashmap
+    "value" (hashmap-get details "name")
+    "display" (hashmap-get details "name")
+    "annotation" ""
+    "metadata" details))
+
+(defun buffer-completion-table (input action)
+  "Completion table for live editor buffers."
+  (if (string= action "metadata")
+    (hashmap "category" "buffer")
+    (mapcar "buffer-detail-candidate"
+      (stable-sort "buffer-detail-more-recent-p" (buffer-list-details)))))
+
+(defun switch-buffer-accept (name)
+  "Switch to existing buffer NAME or create it."
+  (if (member name (buffer-list))
+    (buffer-switch name)
+    (progn
+      (buffer-create name)
+      (buffer-switch name))))
+
+(defun switch-buffer ()
+  "Switch buffers through the generic completion minibuffer."
+  (completing-read
+    "Switch to buffer: "
+    "buffer-completion-table"
+    nil
+    nil
+    ""
+    "buffer-history"
+    "switch-buffer-accept"))

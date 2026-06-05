@@ -1,3 +1,6 @@
+(defmodule editor/commands/replace
+  (export query-replace replace-yes replace-no replace-all replace-quit))
+
 ;; replace.tlisp — query-replace commands
 (defun query-replace (find replace &optional start end)
   "Start interactive find/replace."

@@ -1,3 +1,6 @@
+(defmodule editor/commands/windows
+  (export split-window-below split-window-right other-window delete-window))
+
 ;; windows.tlisp — Window management commands
 ;; Wraps TypeScript display primitives with editor commands and key bindings
 

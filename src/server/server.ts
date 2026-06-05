@@ -17,6 +17,7 @@ import { FunctionalTextBufferImpl } from '../core/buffer.ts';
 import { EditorState, Frame } from '../core/types.ts';
 import { registerTestingFramework } from '../tlisp/test-framework.ts';
 import { editorStateToJson } from './serialize.ts';
+import { cloneJsonValue } from '../tlisp/serialization.ts';
 
 // JSON-RPC 2.0 interfaces
 interface JSONRPCRequest {
@@ -126,6 +127,8 @@ export class TmaxServer {
       currentMajorMode: 'fundamental',
       activeMinorModes: [],
       activeMinorModeLighters: [],
+      minibufferState: undefined,
+      minibufferView: undefined,
     };
 
     this.editor.setEditorState(initialState);
@@ -152,6 +155,8 @@ export class TmaxServer {
       currentMajorMode: state.currentMajorMode ?? 'fundamental',
       activeMinorModes: state.activeMinorModes ?? [],
       activeMinorModeLighters: state.activeMinorModeLighters ?? [],
+      minibufferState: cloneJsonValue(state.minibufferState),
+      minibufferView: state.minibufferView ? structuredClone(state.minibufferView) : undefined,
       lastActivity: new Date(),
     };
     this.frames.set(id, frame);
@@ -203,6 +208,9 @@ export class TmaxServer {
       currentMajorMode: frame.currentMajorMode,
       activeMinorModes: frame.activeMinorModes,
       activeMinorModeLighters: frame.activeMinorModeLighters,
+      minibufferState: cloneJsonValue(frame.minibufferState),
+      minibufferView: frame.minibufferView ? structuredClone(frame.minibufferView) : undefined,
+      cursorFocus: frame.cursorFocus,
     });
     this.markFrameSync(frame.id, 'frame-to-editor');
   }
@@ -223,6 +231,9 @@ export class TmaxServer {
     frame.currentMajorMode = state.currentMajorMode ?? 'fundamental';
     frame.activeMinorModes = state.activeMinorModes ?? [];
     frame.activeMinorModeLighters = state.activeMinorModeLighters ?? [];
+    frame.minibufferState = cloneJsonValue(state.minibufferState);
+    frame.minibufferView = state.minibufferView ? structuredClone(state.minibufferView) : undefined;
+    frame.cursorFocus = state.cursorFocus ?? 'buffer';
     frame.lastActivity = new Date();
     this.markFrameSync(frame.id, 'editor-to-frame');
   }
@@ -232,7 +243,21 @@ export class TmaxServer {
    */
   private syncEditorToAllFrames(): void {
     for (const frame of this.frames.values()) {
+      const activeMinibuffer = frame.minibufferState === undefined ? undefined : {
+        mode: frame.mode,
+        mxCommand: frame.mxCommand,
+        cursorFocus: frame.cursorFocus,
+        state: cloneJsonValue(frame.minibufferState),
+        view: frame.minibufferView ? structuredClone(frame.minibufferView) : undefined,
+      };
       this.syncEditorToFrame(frame);
+      if (activeMinibuffer) {
+        frame.mode = activeMinibuffer.mode;
+        frame.mxCommand = activeMinibuffer.mxCommand;
+        frame.cursorFocus = activeMinibuffer.cursorFocus;
+        frame.minibufferState = activeMinibuffer.state;
+        frame.minibufferView = activeMinibuffer.view;
+      }
     }
   }
 
@@ -788,7 +813,7 @@ export class TmaxServer {
   private async handleRenderState(params: any): Promise<any> {
     if (params?.frameId) {
       const frame = this.getFrame(params.frameId);
-      this.syncEditorToFrame(frame);
+      this.syncFrameToEditor(frame);
     }
     return editorStateToJson(this.editor.getEditorState());
   }
@@ -1097,17 +1122,7 @@ export class TmaxServer {
 
     switch (query) {
       case 'buffers': {
-        // Convert buffers Map to array for JSON serialization
-        const buffersArray: any[] = [];
-        state.buffers?.forEach((buffer, name) => {
-          const contentResult = buffer.getContent();
-          buffersArray.push({
-            name: name,
-            content: contentResult._tag === 'Right' ? contentResult.right : '',
-            modified: false  // TODO: track modified state
-          });
-        });
-        return buffersArray;
+        return this.editor.getBufferDetails();
       }
       case 'variables':
         // Return variables from T-Lisp interpreter
@@ -1115,20 +1130,12 @@ export class TmaxServer {
       case 'keybindings':
         return state.config.keyBindings;
       case 'full-state': {
-        // Convert buffers Map to array for JSON serialization
-        const buffersArray: any[] = [];
-        state.buffers?.forEach((buffer, name) => {
-          const contentResult = buffer.getContent();
-          buffersArray.push({
-            name: name,
-            content: contentResult._tag === 'Right' ? contentResult.right : '',
-            modified: false  // TODO: track modified state
-          });
-        });
+        const bufferDetails = this.editor.getBufferDetails();
+        const currentBuffer = bufferDetails.find(buffer => buffer.current)?.name ?? null;
 
         return {
-          buffers: buffersArray,
-          currentBuffer: state.currentFilename || null,
+          buffers: bufferDetails,
+          currentBuffer,
           mode: state.mode,
           variables: this.getTlispVariables(),
           keybindings: state.config.keyBindings,

@@ -93,7 +93,7 @@ describe("US-1.11.1: Describe Key", () => {
     const interpreter = editor.getInterpreter();
 
     // This tests the interactive behavior
-    // For now, we just verify that C-g is bound to exit-mx-mode
+    // C-g routes through the Lisp-owned minibuffer dispatcher.
     const result = interpreter.execute('(key-binding "C-g" "mx")');
 
     if (typeof result === "object" && "right" in result) {
@@ -106,7 +106,7 @@ describe("US-1.11.1: Describe Key", () => {
         expect(command.type).toBe("string");
         if (command.type === "string") {
           // The command is stored with parentheses
-          expect(command.value).toContain("editor-exit-mx-mode");
+          expect(command.value).toContain("minibuffer-dispatch-key");
         }
       }
     }

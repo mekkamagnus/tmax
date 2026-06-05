@@ -22,8 +22,6 @@ export type TLispFunctionWithEither = (args: TLispValue[]) => Either<AppError, T
  * @param setCommandLine - Function to set current command line
  * @param getMode - Function to get current editor mode
  * @param setMode - Function to set current editor mode
- * @param getMxCommand - Function to get current M-x command
- * @param setMxCommand - Function to set current M-x command
  * @param setCursorFocus - Function to set cursor focus state
  * @returns Map of editor control function names to implementations
  */
@@ -34,8 +32,6 @@ export function createBindingsOps(
   setCommandLine: (command: string) => void,
   getMode: () => "normal" | "insert" | "visual" | "command" | "mx",
   setMode: (mode: "normal" | "insert" | "visual" | "command" | "mx") => void,
-  getMxCommand: () => string,
-  setMxCommand: (command: string) => void,
   setCursorFocus: (focus: 'buffer' | 'command') => void
 ): Map<string, TLispFunctionImpl> {
   const api = new Map<string, TLispFunctionImpl>();

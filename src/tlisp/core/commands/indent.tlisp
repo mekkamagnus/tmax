@@ -1,3 +1,6 @@
+(defmodule editor/commands/indent
+  (export indent-current-line indent-region))
+
 ;; indent.tlisp — indentation commands
 (defun indent-current-line ()
   "Indent current line according to mode rules."

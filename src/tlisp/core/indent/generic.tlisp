@@ -1,3 +1,6 @@
+(defmodule editor/indent/generic
+  (export))
+
 ;; generic.tlisp — Default indent rules
 ;; Simple brace-based indentation
 (indent-set-rules

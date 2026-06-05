@@ -1,5 +1,7 @@
+(defmodule editor/modes/lisp
+  (export))
+
 ;; lisp-mode.tlisp — Lisp/T-Lisp major mode
 (major-mode-register "lisp" '(".tlisp" ".lisp" ".el" ".clj") "lisp"
   '("\\($" "defun$" "let$" "if$" "when$" "unless$" "progn$" "cond$" "do$")
   '("^\\s*\\)"))
-(provide "lisp-mode")

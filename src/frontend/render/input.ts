@@ -4,10 +4,12 @@
 export const splitInputForTlisp = (input: string): string[] => Array.from(input);
 
 const escapeSequenceMap: Readonly<Record<string, string>> = {
-  "\x1b[A": "k",
-  "\x1b[B": "j",
-  "\x1b[C": "l",
-  "\x1b[D": "h",
+  "\x1b[A": "Up",
+  "\x1b[B": "Down",
+  "\x1b[C": "Right",
+  "\x1b[D": "Left",
+  "\x1b[5~": "PageUp",
+  "\x1b[6~": "PageDown",
   "\x1b[3~": "\x7f",
 };
 

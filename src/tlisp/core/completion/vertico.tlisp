@@ -1,0 +1,146 @@
+(defmodule editor/completion/vertico
+  (export vertico-span-less-p vertico-segments-from-spans vertico-annotation-segments-from-spans vertico-candidate-segments vertico-row vertico-selected-candidate vertico-publish vertico-next vertico-previous vertico-page-next vertico-page-previous vertico-insert))
+
+;; vertico.tlisp --- Vertical completion view and navigation
+
+(defvar vertico-count 10)
+
+(defun vertico-span-less-p (left right)
+  (< (car left) (car right)))
+
+(defun vertico-segments-from-spans (text spans point)
+  (if (null spans)
+    (if (< point (length text))
+      (list (hashmap "text" (substring text point (length text)) "face" "candidate"))
+      (list))
+    (let ((span (car spans)))
+      (let ((start (max point (car span))))
+        (let ((end (max start (car (cdr span)))))
+          (append
+            (if (< point start)
+              (list (hashmap "text" (substring text point start) "face" "candidate"))
+              (list))
+            (if (< start end)
+              (list (hashmap "text" (substring text start end) "face" "completion-match"))
+              (list))
+            (vertico-segments-from-spans text (cdr spans) end)))))))
+
+(defun vertico-annotation-segments-from-spans (text spans point)
+  (if (null spans)
+    (if (< point (length text))
+      (list (hashmap "text" (substring text point (length text)) "face" "annotation"))
+      (list))
+    (let ((span (car spans)))
+      (let ((start (max point (car span))))
+        (let ((end (max start (car (cdr span)))))
+          (append
+            (if (< point start)
+              (list (hashmap "text" (substring text point start) "face" "annotation"))
+              (list))
+            (if (< start end)
+              (list (hashmap "text" (substring text start end) "face" "completion-match"))
+              (list))
+            (vertico-annotation-segments-from-spans text (cdr spans) end)))))))
+
+(defun vertico-candidate-segments (candidate)
+  (let ((display (hashmap-get candidate "display")))
+    (let ((annotation (hashmap-get candidate "annotation")))
+      (append
+        (vertico-segments-from-spans
+          display
+          (stable-sort "vertico-span-less-p" (hashmap-get candidate "spans"))
+          0)
+        (if (> (length annotation) 0)
+          (append
+            (list (hashmap "text" "  " "face" "annotation"))
+            (vertico-annotation-segments-from-spans
+              annotation
+              (stable-sort "vertico-span-less-p" (hashmap-get candidate "annotation-spans"))
+              0))
+          (list))))))
+
+(defun vertico-row (candidate selected-value)
+  (hashmap
+    "selected" (string= (hashmap-get candidate "value") selected-value)
+    "segments" (vertico-candidate-segments candidate)))
+
+(defun vertico-selected-candidate ()
+  "Return the selected completion candidate, or nil for the prompt."
+  (let ((session (minibuffer-state-get)))
+    (let ((selected (hashmap-get session "selection")))
+      (let ((matches (hashmap-get session "matches")))
+        (if (and (>= selected 0) (< selected (length matches)))
+          (nth selected matches)
+          nil)))))
+
+(defun vertico-publish ()
+  "Publish the current vertical completion render view."
+  (let ((session (minibuffer-state-get)))
+    (let ((matches (hashmap-get session "matches")))
+      (let ((selected (hashmap-get session "selection")))
+        (let ((scroll (hashmap-get session "scroll")))
+          (let ((visible (list-slice matches scroll
+                           (+ scroll (hashmap-get session "max-visible")))))
+            (let ((selected-candidate (vertico-selected-candidate)))
+              (minibuffer-view-publish
+                (hashmap
+                  "prompt" (hashmap-get session "prompt")
+                  "input" (hashmap-get session "input")
+                  "input-point" (hashmap-get session "input-point")
+                  "rows" (mapcar
+                    (lambda (candidate)
+                      (vertico-row candidate
+                        (if selected-candidate
+                          (hashmap-get selected-candidate "value")
+                          "")))
+                    visible)
+                  "message" (if (= (length matches) 0)
+                    "No match"
+                    (if (< selected 0)
+                      (concat "prompt/" (length matches))
+                      (concat (+ selected 1) "/" (length matches)))))))))))))
+
+(defun vertico-next ()
+  "Select the next completion candidate without wrapping."
+  (let ((session (minibuffer-state-get)))
+    (let ((selected (hashmap-get session "selection")))
+      (let ((count (length (hashmap-get session "matches"))))
+        (if (< selected (- count 1))
+          (minibuffer-replace-session
+            (hashmap-set session "selection" (+ selected 1)))
+          (vertico-publish))))))
+
+(defun vertico-previous ()
+  "Select the previous completion candidate or raw prompt."
+  (let ((session (minibuffer-state-get)))
+    (let ((selected (hashmap-get session "selection")))
+      (if (> selected 0)
+        (minibuffer-replace-session
+          (hashmap-set session "selection" (- selected 1)))
+        (if (and (= selected 0) (hashmap-get session "allow-input"))
+          (minibuffer-replace-session
+            (hashmap-set session "selection" -1))
+          (vertico-publish))))))
+
+(defun vertico-page-next ()
+  (let ((session (minibuffer-state-get)))
+    (let ((selected (hashmap-get session "selection")))
+      (let ((count (length (hashmap-get session "matches"))))
+        (minibuffer-replace-session
+          (hashmap-set session "selection"
+            (min (- count 1) (+ selected (hashmap-get session "max-visible")))))))))
+
+(defun vertico-page-previous ()
+  (let ((session (minibuffer-state-get)))
+    (let ((selected (hashmap-get session "selection")))
+      (minibuffer-replace-session
+        (hashmap-set session "selection"
+          (max (if (hashmap-get session "allow-input") -1 0)
+            (- selected (hashmap-get session "max-visible"))))))))
+
+(defun vertico-insert ()
+  "Insert the selected candidate without accepting it."
+  (let ((candidate (vertico-selected-candidate)))
+    (if candidate
+      (minibuffer-set-input (hashmap-get candidate "value"))
+      nil)))

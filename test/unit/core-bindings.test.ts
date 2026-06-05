@@ -35,7 +35,7 @@ describe("Core Bindings T-Lisp File", () => {
 
     // Count key-bind function calls
     const keyBindMatches = content.match(/\(key-bind/g);
-    expect(keyBindMatches?.length).toBe(16);
+    expect(keyBindMatches?.length).toBe(18);
   });
 
   test("should contain basic navigation bindings", async () => {
@@ -66,7 +66,8 @@ describe("Core Bindings T-Lisp File", () => {
     expect(content).toContain('(key-bind " "');  // Space key
     expect(content).toContain('(key-bind ";"');  // Semicolon key
     expect(content).toContain('(editor-handle-space)');
-    expect(content).toContain('(editor-handle-semicolon)');
+    expect(content).toContain('(execute-extended-command-maybe)');
+    expect(content).toContain('(switch-buffer)');
     expect(content).toContain('"mx"');
   });
 

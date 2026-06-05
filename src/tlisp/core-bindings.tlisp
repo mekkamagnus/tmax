@@ -1,9 +1,12 @@
+(defmodule editor/core-bindings
+  (export))
+
 ;; core-bindings.tlisp
 ;; Default key bindings for tmax editor
-;; 
+;;
 ;; This file contains all default key bindings extracted from TypeScript
 ;; to achieve pure T-Lisp-centric key binding management.
-;; 
+;;
 ;; Maintainer guidance:
 ;; - Each (key-bind) call defines a key, command, and optional mode
 ;; - Commands are T-Lisp expressions that get executed when keys are pressed
@@ -21,7 +24,7 @@
 ;; Move cursor down (j)
 (key-bind "j" "(cursor-move (+ (cursor-line) 1) (cursor-column))" "normal")
 
-;; Move cursor up (k)  
+;; Move cursor up (k)
 (key-bind "k" "(cursor-move (- (cursor-line) 1) (cursor-column))" "normal")
 
 ;; Move cursor right (l)
@@ -72,7 +75,8 @@
 (key-bind " " "(editor-handle-space)" "normal")
 
 ;; Handle semicolon key - second part of SPC ; sequence
-(key-bind ";" "(editor-handle-semicolon)" "normal")
+(key-bind ";" "(execute-extended-command-maybe)" "normal")
+(key-bind "C-x b" "(switch-buffer)" "normal")
 
 ;; =================================================================
 ;; M-X MODE BINDINGS
@@ -80,10 +84,11 @@
 ;; Key bindings specific to M-x mode
 
 ;; Exit M-x mode (Escape)
-(key-bind "Escape" "(editor-exit-mx-mode)" "mx")
+(key-bind "Escape" "(minibuffer-dispatch-key \"Escape\")" "mx")
+(key-bind "C-g" "(minibuffer-dispatch-key \"C-g\")" "mx")
 
 ;; Execute M-x command (Enter)
-(key-bind "Enter" "(editor-execute-mx-command)" "mx")
+(key-bind "Enter" "(minibuffer-dispatch-key \"Enter\")" "mx")
 
 ;; =================================================================
 ;; BASIC EDITING (Insert Mode)

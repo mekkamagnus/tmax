@@ -76,7 +76,7 @@ describe("Core Binding Files Loading", () => {
 (key-bind " " "(editor-handle-space)" "normal")
 
 ;; Handle semicolon key - second part of SPC ; sequence
-(key-bind ";" "(editor-handle-semicolon)" "normal")`);
+(key-bind ";" "(execute-extended-command-maybe)" "normal")`);
 
     mockFileSystem.files.set("src/tlisp/core/bindings/insert.tlisp",
 `;; insert.tlisp

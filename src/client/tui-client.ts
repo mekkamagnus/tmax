@@ -12,6 +12,7 @@ import { renderCommandInput } from "../frontend/render/command-input.ts";
 import { tokenizeTerminalInput } from "../frontend/render/input.ts";
 import { renderTabBarAnsi } from "../frontend/render/tab-bar.ts";
 import type { EditorState } from "../core/types.ts";
+import { renderMinibuffer } from "../frontend/render/minibuffer.ts";
 
 function enterAltScreen() {
   process.stdout.write("\x1b[?1049h");
@@ -47,7 +48,9 @@ function render(state: EditorState) {
   const { width, height } = getDims();
   const hasTabBar = (state.tabs?.length ?? 0) > 1;
   const tabBarHeight = hasTabBar ? 1 : 0;
-  const bufferHeight = Math.max(1, height - 2 - tabBarHeight);
+  const minibuffer = state.minibufferView ? renderMinibuffer(state.minibufferView, width) : undefined;
+  const commandHeight = minibuffer?.lines.length ?? ((state.mode === "command" || state.mode === "mx") ? 1 : 0);
+  const bufferHeight = Math.max(1, height - 1 - commandHeight - tabBarHeight);
   const lines = renderBufferLines(state, width, bufferHeight);
 
   clearScreen();
@@ -56,16 +59,23 @@ function render(state: EditorState) {
   }
   lines.forEach((line, i) => writeAt(i + tabBarHeight, 0, line));
 
-  if (state.mode === "command" || state.mode === "mx") {
+  if (minibuffer) {
+    const start = height - 1 - minibuffer.lines.length;
+    minibuffer.lines.forEach((line, index) => writeAt(start + index, 0, line));
+  } else if (state.mode === "command" || state.mode === "mx") {
     writeAt(height - 2, 0, renderCommandInput(state, width));
   }
 
   writeAt(height - 1, 0, renderStatusLine(state, width));
 
-  const viewportTop = getVisibleViewportTop(state, bufferHeight);
-  const cursorRow = Math.max(0, Math.min(bufferHeight - 1, state.cursorPosition.line - viewportTop));
-  const cursorCol = Math.max(0, Math.min(width - 1, state.cursorPosition.column));
-  moveTo(cursorRow + tabBarHeight, cursorCol);
+  if (minibuffer) {
+    moveTo(height - 1 - minibuffer.lines.length + minibuffer.cursorRow, minibuffer.cursorColumn);
+  } else {
+    const viewportTop = getVisibleViewportTop(state, bufferHeight);
+    const cursorRow = Math.max(0, Math.min(bufferHeight - 1, state.cursorPosition.line - viewportTop));
+    const cursorCol = Math.max(0, Math.min(width - 1, state.cursorPosition.column));
+    moveTo(cursorRow + tabBarHeight, cursorCol);
+  }
 }
 
 async function main() {

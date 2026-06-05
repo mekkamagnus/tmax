@@ -1,3 +1,6 @@
+(defmodule editor/bindings/normal
+  (export))
+
 ;; normal.tlisp
 ;; Default key bindings for normal mode in tmax editor
 ;;
@@ -26,6 +29,12 @@
 
 ;; Move cursor right (l)
 (key-bind "l" "(cursor-move (cursor-line) (+ (cursor-column) 1))" "normal")
+
+;; Preserve semantic arrow-key identity while retaining normal-mode movement.
+(key-bind "Left" "(cursor-move (cursor-line) (- (cursor-column) 1))" "normal")
+(key-bind "Down" "(cursor-move (+ (cursor-line) 1) (cursor-column))" "normal")
+(key-bind "Up" "(cursor-move (- (cursor-line) 1) (cursor-column))" "normal")
+(key-bind "Right" "(cursor-move (cursor-line) (+ (cursor-column) 1))" "normal")
 
 ;; =================================================================
 ;; WORD NAVIGATION (US-1.1.1)
@@ -168,7 +177,10 @@
 (key-bind " " "(editor-handle-space)" "normal")
 
 ;; Handle semicolon key - second part of SPC ; sequence
-(key-bind ";" "(editor-handle-semicolon)" "normal")
+(key-bind ";" "(execute-extended-command-maybe)" "normal")
+
+;; Emacs-style buffer switching.
+(key-bind "C-x b" "(switch-buffer)" "normal")
 
 ;; =================================================================
 ;; HELP SYSTEM (US-1.11.1 - US-1.11.3)

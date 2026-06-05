@@ -1,3 +1,6 @@
+(defmodule editor/bindings/insert
+  (export))
+
 ;; insert.tlisp
 ;; Default key bindings for insert mode in tmax editor
 ;;

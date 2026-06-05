@@ -1,0 +1,68 @@
+import type { MinibufferRenderSegment, MinibufferRenderView } from "../../core/types.ts";
+import { style, type AnsiColor } from "../frontends/steep/style.ts";
+
+export interface RenderedMinibuffer {
+  lines: string[];
+  cursorRow: number;
+  cursorColumn: number;
+}
+
+type MinibufferStyle = {
+  fg?: AnsiColor;
+  bg?: AnsiColor;
+  bold?: boolean;
+  dim?: boolean;
+  underline?: boolean;
+};
+
+const faceStyle = (face: string | undefined, selected: boolean): MinibufferStyle => {
+  const base: MinibufferStyle = selected ? { bg: "blue" } : {};
+  switch (face) {
+    case "completion-match":
+      return { ...base, bold: true, underline: true };
+    case "annotation":
+      return { ...base, dim: true };
+    case "selected":
+      return { ...base, bold: true };
+    default:
+      return base;
+  }
+};
+
+const renderSegments = (
+  segments: MinibufferRenderSegment[],
+  selected: boolean,
+  width: number,
+): string => {
+  let remaining = Math.max(0, width);
+  let output = "";
+  for (const segment of segments) {
+    if (remaining === 0) break;
+    const text = Array.from(segment.text).slice(0, remaining).join("");
+    output += style(text, faceStyle(segment.face, selected));
+    remaining -= Array.from(text).length;
+  }
+  if (remaining > 0) output += style(" ".repeat(remaining), faceStyle(undefined, selected));
+  return output;
+};
+
+/**
+ * Draw a generic render-only minibuffer view produced by T-Lisp.
+ */
+export const renderMinibuffer = (
+  view: MinibufferRenderView,
+  width: number,
+): RenderedMinibuffer => {
+  const safeWidth = Math.max(1, width);
+  const rows = view.rows.map(row => renderSegments(row.segments, row.selected, safeWidth));
+  const promptText = `${view.prompt}${view.input}`;
+  const messageSpace = Math.max(1, safeWidth - promptText.length - view.message.length);
+  const promptLine = `${promptText}${" ".repeat(messageSpace)}${view.message}`;
+  rows.push(style(Array.from(promptLine).slice(0, safeWidth).join("").padEnd(safeWidth, " "), { fg: "white" }));
+
+  return {
+    lines: rows,
+    cursorRow: rows.length - 1,
+    cursorColumn: Math.min(safeWidth - 1, view.prompt.length + view.inputPoint),
+  };
+};

@@ -1,0 +1,232 @@
+(defmodule editor/completion/minibuffer
+  (export minibuffer-history-values minibuffer-history minibuffer-history-add-to minibuffer-history-add minibuffer-empty-table minibuffer-selection-clamp minibuffer-scroll-for-selection minibuffer-exact-selection-index minibuffer-replace-session minibuffer-refresh completing-read read-from-minibuffer minibuffer-set-input minibuffer-refresh-after-input minibuffer-insert-character minibuffer-backward-delete-char minibuffer-move-point minibuffer-history-previous minibuffer-history-next minibuffer-close minibuffer-cancel minibuffer-accept minibuffer-dispatch-key))
+
+;; minibuffer.tlisp --- Serializable Lisp-owned minibuffer state machine
+
+(defvar minibuffer-histories (hashmap "command-history" (list)))
+
+(defun minibuffer-history-values (name)
+  (let ((history (hashmap-get minibuffer-histories name)))
+    (if history history (list))))
+
+(defun minibuffer-history ()
+  "Return execute-extended-command history."
+  (minibuffer-history-values "command-history"))
+
+(defun minibuffer-history-add-to (name value)
+  (set! minibuffer-histories
+    (hashmap-set minibuffer-histories name
+      (append (minibuffer-history-values name) (list value)))))
+
+(defun minibuffer-history-add (value)
+  "Add VALUE to execute-extended-command history."
+  (minibuffer-history-add-to "command-history" value))
+
+(defun minibuffer-empty-table (input action)
+  (if (string= action "metadata")
+    (hashmap "category" "plain")
+    (list)))
+
+(defun minibuffer-selection-clamp (selection count allow-input)
+  (if (= count 0)
+    (if allow-input -1 0)
+    (if (>= selection count)
+      (- count 1)
+      (if (< selection -1) -1 selection))))
+
+(defun minibuffer-scroll-for-selection (selection scroll maximum)
+  (if (< selection 0)
+    0
+    (if (< selection scroll)
+      selection
+      (if (>= selection (+ scroll maximum))
+        (+ (- selection maximum) 1)
+        scroll))))
+
+(defun minibuffer-exact-selection-index (input matches index)
+  (if (null matches)
+    -1
+    (if (string= input (hashmap-get (car matches) "value"))
+      index
+      (minibuffer-exact-selection-index input (cdr matches) (+ index 1)))))
+
+(defun minibuffer-replace-session (session)
+  "Replace the active semantic session and republish it."
+  (let ((selected (hashmap-get session "selection")))
+    (let ((scroll (minibuffer-scroll-for-selection
+                    selected
+                    (hashmap-get session "scroll")
+                    (hashmap-get session "max-visible"))))
+      (let ((updated (hashmap-set session "scroll" scroll)))
+        (progn
+          (minibuffer-state-set updated)
+          (minibuffer-set (hashmap-get updated "input"))
+          (vertico-publish))))))
+
+(defun minibuffer-refresh ()
+  "Refresh candidates and the render view from the active session."
+  (let ((session (minibuffer-state-get)))
+    (let ((matches (completion-all-completions
+                     (hashmap-get session "input")
+                     (hashmap-get session "table")
+                     (hashmap-get session "predicate"))))
+      (let ((exact-selection
+              (minibuffer-exact-selection-index
+                (hashmap-get session "input") matches 0)))
+        (let ((selection (if (>= exact-selection 0)
+                           exact-selection
+                           (minibuffer-selection-clamp
+                             (hashmap-get session "selection")
+                             (length matches)
+                             (hashmap-get session "allow-input")))))
+        (minibuffer-replace-session
+          (hashmap-set
+            (hashmap-set session "matches" matches)
+            "selection" selection)))))))
+
+(defun completing-read (prompt table predicate require-match initial-input history accept-function)
+  "Start a named, serializable completion read."
+  (let ((metadata (completion-table-dispatch table initial-input "metadata")))
+    (let ((session
+            (hashmap
+              "prompt" prompt
+              "input" initial-input
+              "input-point" (length initial-input)
+              "table" table
+              "predicate" predicate
+              "category" (completion-metadata-get metadata "category")
+              "require-match" require-match
+              "allow-input" (not require-match)
+              "history" history
+              "history-index" (length (minibuffer-history-values history))
+              "selection" 0
+              "scroll" 0
+              "max-visible" vertico-count
+              "return-mode" (editor-mode)
+              "return-focus" (editor-cursor-focus)
+              "accept-function" accept-function
+              "matches" (list))))
+      (progn
+        (editor-reset-space-prefix)
+        (editor-set-mode "mx")
+        (editor-set-cursor-focus "command")
+        (minibuffer-state-set session)
+        (minibuffer-refresh)))))
+
+(defun read-from-minibuffer (prompt initial-input history accept-function)
+  "Start a raw-input minibuffer read."
+  (completing-read prompt "minibuffer-empty-table" nil nil initial-input history accept-function))
+
+(defun minibuffer-set-input (input)
+  "Replace active input and refresh candidates."
+  (let ((session (minibuffer-state-get)))
+    (minibuffer-refresh-after-input
+      (hashmap-set
+        (hashmap-set
+          (hashmap-set session "input" input)
+          "input-point" (length input))
+        "selection" 0))))
+
+(defun minibuffer-refresh-after-input (session)
+  (progn
+    (minibuffer-state-set (hashmap-set session "scroll" 0))
+    (minibuffer-refresh)))
+
+(defun minibuffer-insert-character (character)
+  (let ((session (minibuffer-state-get)))
+    (let ((input (hashmap-get session "input")))
+      (let ((point (hashmap-get session "input-point")))
+        (let ((updated (concat
+                        (substring input 0 point)
+                        character
+                        (substring input point (length input)))))
+          (minibuffer-set-input updated))))))
+
+(defun minibuffer-backward-delete-char ()
+  (let ((session (minibuffer-state-get)))
+    (let ((input (hashmap-get session "input")))
+      (let ((point (hashmap-get session "input-point")))
+        (if (> point 0)
+          (let ((updated (concat
+                          (substring input 0 (- point 1))
+                          (substring input point (length input)))))
+            (minibuffer-set-input updated))
+          (vertico-publish))))))
+
+(defun minibuffer-move-point (delta)
+  (let ((session (minibuffer-state-get)))
+    (let ((point (hashmap-get session "input-point")))
+      (let ((input (hashmap-get session "input")))
+        (minibuffer-replace-session
+          (hashmap-set session "input-point"
+            (max 0 (min (length input) (+ point delta)))))))))
+
+(defun minibuffer-history-previous ()
+  (let ((session (minibuffer-state-get)))
+    (let ((history (minibuffer-history-values (hashmap-get session "history"))))
+      (let ((index (hashmap-get session "history-index")))
+        (if (> index 0)
+          (let ((next-index (- index 1)))
+            (progn
+              (minibuffer-state-set (hashmap-set session "history-index" next-index))
+              (minibuffer-set-input (nth next-index history))))
+          (vertico-publish))))))
+
+(defun minibuffer-history-next ()
+  (let ((session (minibuffer-state-get)))
+    (let ((history (minibuffer-history-values (hashmap-get session "history"))))
+      (let ((index (hashmap-get session "history-index")))
+        (if (< index (- (length history) 1))
+          (let ((next-index (+ index 1)))
+            (progn
+              (minibuffer-state-set (hashmap-set session "history-index" next-index))
+              (minibuffer-set-input (nth next-index history))))
+          (progn
+            (minibuffer-state-set (hashmap-set session "history-index" (length history)))
+            (minibuffer-set-input "")))))))
+
+(defun minibuffer-close ()
+  (let ((session (minibuffer-state-get)))
+    (progn
+      (minibuffer-state-clear)
+      (minibuffer-view-clear)
+      (minibuffer-clear)
+      (editor-set-mode (hashmap-get session "return-mode"))
+      (editor-set-cursor-focus (hashmap-get session "return-focus")))))
+
+(defun minibuffer-cancel ()
+  "Cancel the active minibuffer without calling its accept function."
+  (minibuffer-close))
+
+(defun minibuffer-accept ()
+  "Accept selected candidate or permitted raw input."
+  (let ((session (minibuffer-state-get)))
+    (let ((candidate (vertico-selected-candidate)))
+      (let ((value (if candidate
+                     (hashmap-get candidate "value")
+                     (hashmap-get session "input"))))
+        (if (or candidate (hashmap-get session "allow-input"))
+          (let ((accept-function (hashmap-get session "accept-function")))
+            (progn
+              (minibuffer-history-add-to (hashmap-get session "history") value)
+              (minibuffer-close)
+              (funcall accept-function value)))
+          (vertico-publish))))))
+
+(defun minibuffer-dispatch-key (key)
+  "Handle one normalized KEY entirely in T-Lisp."
+  (cond
+    ((string-printable-p key) (minibuffer-insert-character key))
+    ((string= key "Backspace") (minibuffer-backward-delete-char))
+    ((string= key "Left") (minibuffer-move-point -1))
+    ((string= key "Right") (minibuffer-move-point 1))
+    ((or (string= key "C-n") (string= key "Down")) (vertico-next))
+    ((or (string= key "C-p") (string= key "Up")) (vertico-previous))
+    ((string= key "PageDown") (vertico-page-next))
+    ((string= key "PageUp") (vertico-page-previous))
+    ((string= key "Tab") (vertico-insert))
+    ((string= key "M-p") (minibuffer-history-previous))
+    ((string= key "M-n") (minibuffer-history-next))
+    ((string= key "Enter") (minibuffer-accept))
+    ((or (string= key "C-g") (string= key "Escape")) (minibuffer-cancel))
+    (t nil)))

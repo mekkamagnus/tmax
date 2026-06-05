@@ -119,21 +119,33 @@ export interface TLispHashmap extends TLispValue {
 }
 
 /**
+ * Module import metadata within a scope
+ */
+export interface ModuleImport {
+  moduleName: string;
+  alias: string;
+  importedSymbols?: Set<string>;
+}
+
+/**
  * T-Lisp environment for variable bindings
  */
 export interface TLispEnvironment {
   /** Parent environment for lexical scoping */
   parent?: TLispEnvironment;
-  
+
   /** Variable bindings */
   bindings: Map<string, TLispValue>;
-  
+
+  /** Module import table for this scope */
+  moduleImports?: Map<string, ModuleImport>;
+
   /** Look up a variable */
   lookup(name: string): TLispValue | undefined;
-  
+
   /** Define a variable */
   define(name: string, value: TLispValue): void;
-  
+
   /** Set a variable (must already exist) */
   set(name: string, value: TLispValue): void;
 

@@ -1,3 +1,6 @@
+(defmodule editor/indent/lisp
+  (export))
+
 ;; lisp.tlisp — Lisp indent rules
 ;; Increase indent after unmatched opening paren
 ;; Decrease indent for closing paren

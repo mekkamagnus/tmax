@@ -163,7 +163,7 @@ describe("Core Bindings Integration", () => {
     const spaceCommand = '(editor-handle-space)';
     interpreter.execute(spaceCommand);
 
-    const semicolonCommand = '(editor-handle-semicolon)';
+    const semicolonCommand = '(execute-extended-command-maybe)';
     interpreter.execute(semicolonCommand);
 
     // Should execute without throwing errors

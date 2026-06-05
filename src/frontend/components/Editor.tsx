@@ -14,6 +14,7 @@ import { BufferView } from "./BufferView.tsx";
 import { TabBar } from "./TabBar.tsx";
 import { StatusLine } from "./StatusLine.tsx";
 import { CommandInput } from "./CommandInput.tsx";
+import { MinibufferView } from "./MinibufferView.tsx";
 import { useEditorState } from "../hooks/useEditorState.ts";
 import { useTerminalDimensions } from "../hooks/useTerminalDimensions.ts";
 import { splitInputForTlisp } from "../input.ts";
@@ -136,9 +137,8 @@ export const Editor = ({ initialEditorState, editor, filename, onStateChange, on
     }
 
     try {
-      // Command mode input is handled by CommandInput component
-      // When in command/mx mode, let CommandInput handle all input
-      if (stateRef.current.mode === 'command' || stateRef.current.mode === 'mx') {
+      // Legacy command mode input is handled by CommandInput.
+      if (stateRef.current.mode === 'command') {
         return;
       }
 
@@ -157,6 +157,31 @@ export const Editor = ({ initialEditorState, editor, filename, onStateChange, on
       // Backspace key - normalize to backspace for T-Lisp
       if (key.backspace || key.delete) {
         await executeTlisp("\x7f");
+        return;
+      }
+
+      if (key.upArrow) {
+        await executeTlisp("Up");
+        return;
+      }
+      if (key.downArrow) {
+        await executeTlisp("Down");
+        return;
+      }
+      if (key.leftArrow) {
+        await executeTlisp("Left");
+        return;
+      }
+      if (key.rightArrow) {
+        await executeTlisp("Right");
+        return;
+      }
+      if (key.pageUp) {
+        await executeTlisp("PageUp");
+        return;
+      }
+      if (key.pageDown) {
+        await executeTlisp("PageDown");
         return;
       }
 
@@ -289,12 +314,18 @@ export const Editor = ({ initialEditorState, editor, filename, onStateChange, on
           viewportTop={state.viewportTop}
           onViewportChange={(top) => setState((prev: EditorState) => ({ ...prev, viewportTop: top }))}
           terminalWidth={terminalWidth}
-          terminalHeight={terminalHeight - (state.tabs && state.tabs.length > 1 ? 1 : 0)}
+          terminalHeight={terminalHeight
+            - (state.tabs && state.tabs.length > 1 ? 1 : 0)
+            - (state.minibufferView ? state.minibufferView.rows.length + 1 : 0)}
         />
       </Box>
 
-      {/* Command Input (when in command mode) */}
-      {(state.mode === 'command' || state.mode === 'mx') && (
+      {state.mode === 'mx' && state.minibufferView && (
+        <MinibufferView view={state.minibufferView} />
+      )}
+
+      {/* Legacy command-line input */}
+      {state.mode === 'command' && (
         <Box>
           <CommandInput
             mode={state.mode}
@@ -327,9 +358,6 @@ export const Editor = ({ initialEditorState, editor, filename, onStateChange, on
                   } else {
                     handleError(`Unknown command: ${trimmedCommand}`);
                   }
-                } else if (state.mode === 'mx') {
-                  // Handle M-x commands
-                  await editor.start(); // This will trigger the M-x execution
                 }
                 // Explicitly set cursor focus back to buffer after command execution
                 setState((prev: EditorState) => ({ ...prev, cursorFocus: 'buffer' }));

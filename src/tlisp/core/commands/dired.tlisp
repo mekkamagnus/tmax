@@ -1,3 +1,6 @@
+(defmodule editor/commands/dired
+  (export dired dired-open-file dired-up-directory dired-mark-delete dired-unmark dired-execute-deletions))
+
 ;; dired.tlisp — directory editor commands
 (defun dired (&optional path)
   "Open directory editor."

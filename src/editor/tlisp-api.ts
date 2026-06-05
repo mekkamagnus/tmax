@@ -23,7 +23,6 @@ import { createUndoRedoOps } from "./api/undo-redo-ops.ts";
 import { createCountOps } from "./api/count-ops.ts";
 import { createVisualOps, getVisualSelection, setVisualSelection, clearVisualSelection } from "./api/visual-ops.ts";
 import { createTextObjectsOps } from "./api/text-objects-ops.ts";
-import { createMinibufferOps } from "./api/minibuffer-ops.ts";
 import { createJumpOps } from "./api/jump-ops.ts";
 import { createKillRingOps } from "./api/kill-ring.ts";
 import { createYankPopOps } from "./api/yank-pop-ops.ts";
@@ -39,6 +38,7 @@ import { createMajorModeOps } from "./api/major-mode-ops.ts";
 import { createDiredOps } from "./api/dired-ops.ts";
 import { createLoadOps } from "./api/load-ops.ts";
 import { createMinorModeOps } from "./api/minor-mode-ops.ts";
+import { createModuleOps } from "./api/module-ops.ts";
 
 /**
  * T-Lisp function implementation that returns Either for error handling
@@ -86,6 +86,10 @@ export interface TlispEditorState {
   _getGlobalizedMinorModes?: () => Set<string>;
   _getLoadedFeatures?: () => Set<string>;
   _getLoadPaths?: () => string[];
+  _getModuleRegistry?: () => any;
+  _getCurrentModuleName?: () => string | undefined;
+  _getBufferModified?: () => boolean;
+  _setBufferModified?: (modified: boolean) => void;
 }
 
 /**
@@ -107,7 +111,9 @@ export function createEditorAPI(state: TlispEditorState): Map<string, TLispFunct
     () => state.cursorColumn,
     (column) => { state.cursorColumn = column; },
     () => state.currentFilename,
-    (path: string) => { state.currentFilename = path; }
+    (path: string) => { state.currentFilename = path; },
+    () => state._getBufferModified?.() ?? false,
+    (modified: boolean) => state._setBufferModified?.(modified),
   );
   for (const [key, value] of bufferOps.entries()) {
     api.set(key, value);
@@ -140,10 +146,7 @@ export function createEditorAPI(state: TlispEditorState): Map<string, TLispFunct
     (msg) => { state.statusMessage = msg; },
     () => state.commandLine,
     (cmd) => { state.commandLine = cmd; },
-    () => state.spacePressed,
     (pressed) => { state.spacePressed = pressed; },
-    () => state.mxCommand,
-    (cmd) => { state.mxCommand = cmd; },
     () => state.cursorFocus,
     (focus) => { state.cursorFocus = focus; }
   );
@@ -168,8 +171,6 @@ export function createEditorAPI(state: TlispEditorState): Map<string, TLispFunct
     (cmd) => { state.commandLine = cmd; },
     () => state.mode,
     (mode) => { state.mode = mode; },
-    () => state.mxCommand,
-    (cmd) => { state.mxCommand = cmd; },
     (focus) => { state.cursorFocus = focus; }
   );
   for (const [key, value] of bindingsOps.entries()) {
@@ -440,7 +441,7 @@ export function createEditorAPI(state: TlispEditorState): Map<string, TLispFunct
   const majorModeOps = createMajorModeOps(
     () => state.currentBuffer,
     () => state.currentFilename,
-    () => false, // bufferModified; TODO: wire to real state
+    () => state._getBufferModified?.() ?? false,
     (expr: string) => {
       // Real eval callback will be wired from editor.ts via setInterpreter
       const fn = (state as any)._evalTlisp;
@@ -487,6 +488,21 @@ export function createEditorAPI(state: TlispEditorState): Map<string, TLispFunct
     async (_path: string) => false,
   );
   for (const [key, value] of loadOps.entries()) {
+    api.set(key, value);
+  }
+
+  // Add module introspection operations (SPEC-007)
+  const moduleOps = createModuleOps(
+    () => {
+      const fn = (state as any)._getModuleRegistry;
+      return fn ? fn() : { isLoaded: () => false, resolve: () => undefined, listModules: () => [], allExports: () => new Map() } as any;
+    },
+    () => {
+      const fn = (state as any)._getCurrentModuleName;
+      return fn ? fn() : undefined;
+    },
+  );
+  for (const [key, value] of moduleOps.entries()) {
     api.set(key, value);
   }
 

@@ -13,6 +13,7 @@ export class RemoteEditor {
   private socketPath: string;
   private requestId = 0;
   private pending = new Map<number, PendingRequest>();
+  private responseBuffer = "";
   private cachedState!: EditorState;
   private _frameId: string | null = null;
   private _clientId: string | null = null;
@@ -87,19 +88,29 @@ export class RemoteEditor {
   }
 
   private onData(data: Buffer): void {
-    try {
-      const response = JSON.parse(data.toString().trim());
-      const pending = this.pending.get(response.id);
-      if (pending) {
+    this.responseBuffer += data.toString();
+
+    let newline = this.responseBuffer.indexOf("\n");
+    while (newline >= 0) {
+      const line = this.responseBuffer.slice(0, newline).trim();
+      this.responseBuffer = this.responseBuffer.slice(newline + 1);
+      newline = this.responseBuffer.indexOf("\n");
+      if (!line) continue;
+
+      try {
+        const response = JSON.parse(line);
+        const pending = this.pending.get(response.id);
+        if (!pending) continue;
+
         this.pending.delete(response.id);
         if (response.error) {
           pending.reject(new Error(`${response.error.code}: ${response.error.message}`));
         } else {
           pending.resolve(response.result);
         }
+      } catch {
+        // Ignore malformed complete response lines.
       }
-    } catch {
-      // Ignore malformed data
     }
   }
 

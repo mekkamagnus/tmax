@@ -1,3 +1,6 @@
+(defmodule editor/commands/save
+  (export save-buffer))
+
 ;; save.tlisp — save-buffer command composed from primitives
 (defun save-buffer (&optional filename)
   "Save current buffer to its associated file."

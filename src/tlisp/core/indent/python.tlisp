@@ -1,3 +1,6 @@
+(defmodule editor/indent/python
+  (export))
+
 ;; python.tlisp — Python indent rules
 ;; Increase indent after colon at line end
 ;; Decrease for return/break/pass/else/elif at line start

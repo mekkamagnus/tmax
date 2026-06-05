@@ -13,7 +13,7 @@ describe("Steep input tokenizer", () => {
   test("normalizes multiple escape sequences in one chunk", () => {
     const result = tokenizeSteepInput("\x1b[A\x1b[B\x1b[3~");
 
-    expect(result.keys).toEqual(["k", "j", "\x7f"]);
+    expect(result.keys).toEqual(["Up", "Down", "\x7f"]);
     expect(result.pending).toBe("");
   });
 
@@ -23,7 +23,7 @@ describe("Steep input tokenizer", () => {
 
     expect(first.keys).toEqual([]);
     expect(first.pending).toBe("\x1b[");
-    expect(second.keys).toEqual(["k"]);
+    expect(second.keys).toEqual(["Up"]);
     expect(second.pending).toBe("");
   });
 

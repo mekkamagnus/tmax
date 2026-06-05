@@ -5,10 +5,11 @@
  */
 
 import { TLispInterpreterImpl } from "../tlisp/interpreter.ts";
+import { readFileSync } from "fs";
 import { FileSystemImpl } from "../core/filesystem.ts";
 import { createEditorAPI, TlispEditorState } from "./tlisp-api.ts";
-import type { EditorState, FunctionalTextBuffer, Window, HighlightSpan } from "../core/types.ts";
-import { createString, createList, createNil, createNumber, createBoolean } from "../tlisp/values.ts";
+import type { EditorState, FunctionalTextBuffer, Window, HighlightSpan, MinibufferRenderView } from "../core/types.ts";
+import { createString, createList, createNil, createNumber, createBoolean, createHashmap } from "../tlisp/values.ts";
 import type { TerminalIO, FileSystem } from "../core/types.ts";
 import type { TLispValue, TLispFunctionImpl } from "../tlisp/types.ts";
 import type { TLispFunction } from "../tlisp/types.ts";
@@ -19,7 +20,6 @@ import { handleInsertMode } from "./handlers/insert-handler.ts";
 import { handleVisualMode } from "./handlers/visual-handler.ts";
 import { handleCommandMode } from "./handlers/command-handler.ts";
 import { handleMxMode } from "./handlers/mx-handler.ts";
-import { createMinibufferOps } from "./api/minibuffer-ops.ts";
 import * as macroRecording from "./api/macro-recording.ts";
 import { loadMacrosFromFile, saveMacrosToFile } from "./api/macro-persistence.ts";
 import { LSPClient } from "../lsp/client.ts";
@@ -39,6 +39,7 @@ import {
   applyGlobalMinorModes,
   normalizeExtension,
 } from "./mode-state.ts";
+import { cloneJsonValue, deserializeTlispValue, serializeTlispValue } from "../tlisp/serialization.ts";
 
 /**
  * Key mapping for editor commands
@@ -63,8 +64,6 @@ export class Editor {
   private filesystem: FileSystem;
   private countPrefix: number = 0;  // Accumulated count for count prefix commands
   private messages: string[] = [];
-  private commandHistory: string[] = [];  // Command history for M-x (US-1.10.1)
-  private historyIndex: number = 0;  // Current position in command history
   private spacePressed: boolean = false;  // Track space key for SPC ; sequence (US-1.10.1)
   private windowPrefixPressed: boolean = false;  // Track C-w prefix for window commands (SPEC-004)
   private lspClient: LSPClient;  // LSP client for language server integration (US-3.1.1)
@@ -77,6 +76,9 @@ export class Editor {
   private autoModeRules: AutoModeRule[] = [];
   private loadedFeatures: Set<string> = new Set();
   private loadPaths: string[] = ['src/tlisp/core'];
+  private currentModuleName: string | undefined;
+  private bufferMetadata: Map<string, { filename?: string; modified: boolean; recency: number }> = new Map();
+  private bufferRecency: number = 0;
 
   /**
    * Create a new editor instance
@@ -130,6 +132,8 @@ export class Editor {
       currentWindowIndex: 0,
       tabs: [],
       currentTabIndex: 0,
+      minibufferState: undefined,
+      minibufferView: undefined,
     };
 
     editorLog.debug('Editor state initialized', {
@@ -146,11 +150,39 @@ export class Editor {
     this.interpreter = new TLispInterpreterImpl();
     editorLog.debug('T-Lisp interpreter created', { correlationId: initId });
 
+    // Set up module loader for require-module resolution
+    this.interpreter.setModuleLoader((moduleName: string) => {
+      // Map module name to file path: editor/commands/save → src/tlisp/core/commands/save.tlisp
+      const parts = moduleName.split("/");
+      if (parts.length < 2) return null;
+      const basePath = parts.slice(1).join("/");
+      const candidates = [
+        `src/tlisp/core/${basePath}.tlisp`,
+        `src/tlisp/core/${basePath}/index.tlisp`,
+      ];
+      for (const candidate of candidates) {
+        try {
+          const content = readFileSync(candidate, "utf8");
+          if (content) {
+            const result = this.interpreter.execute(content);
+            if (Either.isLeft(result)) {
+              return Either.left(result.left);
+            }
+            return Either.right(result.right);
+          }
+        } catch {
+          // File doesn't exist, try next candidate
+        }
+      }
+      return null;
+    });
+
     this.keyMappings = new Map();
     this.lspClient = new LSPClient(this.terminal, this.filesystem);
 
     // Create *Messages* buffer
     this.buffers.set('*Messages*', FunctionalTextBufferImpl.create(''));
+    this.bufferMetadata.set('*Messages*', { modified: false, recency: this.bufferRecency++ });
 
     // Initialize KeymapSync for T-Lisp keymap integration (US-0.4.1)
     editorLog.info('Initializing KeymapSync', { correlationId: initId });
@@ -192,11 +224,10 @@ export class Editor {
         return editor.state.currentBuffer ?? null;
       },
       set currentBuffer(v: FunctionalTextBuffer | null) {
-        // Update the buffer in the buffers map using tracked filename
-        if (v && editor.state.currentFilename) {
-          // Use the tracked filename to update the correct buffer entry
-          editor.buffers.set(editor.state.currentFilename, v as FunctionalTextBufferImpl);
-        }
+        const previousName = editor.findBufferName(editor.state.currentBuffer);
+        const existingName = editor.findBufferName(v ?? undefined);
+        const bufferName = existingName ?? previousName;
+        if (v && bufferName) editor.buffers.set(bufferName, v as FunctionalTextBufferImpl);
         if (v && editor.state.tabs && editor.state.tabs.length > 0) {
           const currentTabIndex = editor.state.currentTabIndex ?? 0;
           const currentTab = editor.state.tabs[currentTabIndex];
@@ -207,6 +238,10 @@ export class Editor {
           }
         }
         editor.state.currentBuffer = v ?? undefined;
+        if (bufferName) {
+          editor.touchBuffer(bufferName);
+          editor.state.currentFilename = editor.bufferMetadata.get(bufferName)?.filename;
+        }
       },
       get buffers() {
         return editor.buffers;
@@ -260,7 +295,11 @@ export class Editor {
       get lspDiagnostics() { return editor.state.lspDiagnostics; },
       logMessage: (msg: string) => editor.logMessage(msg),
       get currentFilename() { return editor.state.currentFilename; },
-      set currentFilename(v: string | undefined) { editor.state.currentFilename = v; },
+      set currentFilename(v: string | undefined) {
+        editor.state.currentFilename = v;
+        const name = editor.findBufferName(editor.state.currentBuffer);
+        if (name) editor.updateBufferMetadata(name, { filename: v });
+      },
       get config() { return editor.state.config; },
       set config(v: EditorState["config"]) { editor.state.config = v; },
       get operations() {
@@ -289,6 +328,10 @@ export class Editor {
       _getGlobalizedMinorModes: () => editor.getGlobalizedMinorModes(),
       _getLoadedFeatures: () => editor.getLoadedFeatures(),
       _getLoadPaths: () => editor.getLoadPaths(),
+      _getModuleRegistry: () => editor.interpreter.moduleRegistry,
+      _getCurrentModuleName: () => editor.getCurrentModuleName(),
+      _getBufferModified: () => editor.getCurrentBufferModified(),
+      _setBufferModified: (modified: boolean) => editor.setCurrentBufferModified(modified),
     };
 
     const api = createEditorAPI(tlispState);
@@ -601,7 +644,18 @@ export class Editor {
       const functionName = nameArg.value as string;
 
       // Look up the function in the global environment
-      const func = this.interpreter.globalEnv.lookup(functionName);
+      let func = this.interpreter.globalEnv.lookup(functionName);
+      let moduleOrigin: string | undefined;
+
+      // Also check module exports
+      if (!func) {
+        const moduleExports = this.interpreter.moduleRegistry.allExports();
+        const entry = moduleExports.get(functionName);
+        if (entry) {
+          func = entry.value;
+          moduleOrigin = entry.moduleName;
+        }
+      }
 
       if (!func) {
         return createNil(); // Function not found
@@ -620,7 +674,9 @@ export class Editor {
 
       // Build signature
       let signature: string;
-      if (parameters.length > 0) {
+      if (moduleOrigin) {
+        signature = `${name} (${parameters.join(" ")}) — from module ${moduleOrigin}`;
+      } else if (parameters.length > 0) {
         signature = `${name} (${parameters.join(" ")})`;
       } else {
         signature = `${name} ()`;
@@ -670,9 +726,19 @@ export class Editor {
 
       // Get all function names from the global environment
       const matchingFunctions: TLispValue[] = [];
-      
+      const seen = new Set<string>();
+
       for (const [name, value] of this.interpreter.globalEnv.bindings) {
         if (value.type === "function" && name.toLowerCase().includes(pattern)) {
+          seen.add(name);
+          matchingFunctions.push(createString(name));
+        }
+      }
+
+      // Also search module exports
+      const moduleExports = this.interpreter.moduleRegistry.allExports();
+      for (const [name, entry] of moduleExports) {
+        if (!seen.has(name) && entry.value.type === "function" && name.toLowerCase().includes(pattern)) {
           matchingFunctions.push(createString(name));
         }
       }
@@ -696,48 +762,57 @@ export class Editor {
 
       // Find all matching commands
       const matchingCommands: TLispValue[] = [];
+      const seen = new Set<string>();
+
+      // Helper to check if pattern matches and build result
+      const checkMatch = (name: string, value: TLispValue): void => {
+        if (seen.has(name)) return;
+        if (value.type !== "function") return;
+
+        const lowerName = name.toLowerCase();
+        let matches = false;
+        try {
+          const regex = new RegExp(pattern, "i");
+          matches = regex.test(lowerName);
+        } catch {
+          matches = lowerName.includes(pattern);
+        }
+
+        if (matches) {
+          seen.add(name);
+          // Get key bindings for this command
+          const bindings: string[] = [];
+          for (const [key, mappings] of this.keyMappings) {
+            for (const mapping of mappings) {
+              if (mapping.command === name) {
+                const modeStr = mapping.mode ? ` (${mapping.mode})` : "";
+                bindings.push(`${key}${modeStr}`);
+              }
+            }
+          }
+
+          const func = value as TLispFunction;
+          const docstring = func.docstring || "No documentation available";
+
+          const result: TLispValue[] = [
+            createString(name),
+            bindings.length > 0 ? createString(bindings.join(", ")) : createString(""),
+            createString(docstring)
+          ];
+
+          matchingCommands.push(createList(result));
+        }
+      };
 
       // Search through all functions in the global environment
       for (const [name, value] of this.interpreter.globalEnv.bindings) {
-        if (value.type === "function") {
-          const lowerName = name.toLowerCase();
+        checkMatch(name, value);
+      }
 
-          // Check if the pattern matches (supports simple regex patterns)
-          let matches = false;
-          try {
-            // Try to match as regex first
-            const regex = new RegExp(pattern, "i");
-            matches = regex.test(lowerName);
-          } catch {
-            // If invalid regex, fall back to simple substring match
-            matches = lowerName.includes(pattern);
-          }
-
-          if (matches) {
-            // Get key bindings for this command
-            const bindings: string[] = [];
-            for (const [key, mappings] of this.keyMappings) {
-              for (const mapping of mappings) {
-                if (mapping.command === name) {
-                  const modeStr = mapping.mode ? ` (${mapping.mode})` : "";
-                  bindings.push(`${key}${modeStr}`);
-                }
-              }
-            }
-
-            // Build result: [name, bindings, docstring]
-            const func = value as TLispFunction;
-            const docstring = func.docstring || "No documentation available";
-
-            const result: TLispValue[] = [
-              createString(name),
-              bindings.length > 0 ? createString(bindings.join(", ")) : createString(""),
-              createString(docstring)
-            ];
-
-            matchingCommands.push(createList(result));
-          }
-        }
+      // Also search module exports
+      const moduleExports = this.interpreter.moduleRegistry.allExports();
+      for (const [name, entry] of moduleExports) {
+        checkMatch(name, entry.value);
       }
 
       return createList(matchingCommands);
@@ -845,91 +920,141 @@ export class Editor {
       return createNil();
     });
 
-    defineRaw("minibuffer-history", (args) => {
-      if (args.length !== 0) {
-        throw new Error("minibuffer-history requires no arguments");
-      }
-      const historyValues = this.commandHistory.map(cmd => createString(cmd));
-      return createList(historyValues);
+    defineRaw("minibuffer-state-get", (args) => {
+      if (args.length !== 0) throw new Error("minibuffer-state-get requires no arguments");
+      return deserializeTlispValue(this.state.minibufferState);
     });
 
-    defineRaw("minibuffer-history-add", (args) => {
-      if (args.length !== 1) {
-        throw new Error("minibuffer-history-add requires exactly 1 argument: command");
-      }
-      const commandArg = args[0];
-      if (!commandArg || commandArg.type !== "string") {
-        throw new Error("minibuffer-history-add requires a string");
-      }
-      const command = commandArg.value as string;
-      // Don't add duplicates of the most recent command
-      if (this.commandHistory.length === 0 || this.commandHistory[this.commandHistory.length - 1] !== command) {
-        this.commandHistory.push(command);
-      }
-      // Reset history index
-      this.historyIndex = this.commandHistory.length;
+    defineRaw("minibuffer-state-set", (args) => {
+      if (args.length !== 1) throw new Error("minibuffer-state-set requires one argument");
+      this.state.minibufferState = serializeTlispValue(args[0]!);
+      return args[0]!;
+    });
+
+    defineRaw("minibuffer-state-clear", (args) => {
+      if (args.length !== 0) throw new Error("minibuffer-state-clear requires no arguments");
+      this.state.minibufferState = undefined;
       return createNil();
     });
 
-    defineRaw("minibuffer-history-previous", (args) => {
-      if (args.length !== 0) {
-        throw new Error("minibuffer-history-previous requires no arguments");
-      }
-      if (this.commandHistory.length === 0) {
-        this.state.statusMessage = "No command history";
-        return createNil();
-      }
-      // Move to previous command in history
-      if (this.historyIndex > 0) {
-        this.historyIndex--;
-        this.state.mxCommand = this.commandHistory[this.historyIndex]!;
-      } else {
-        // Already at oldest command
-        this.state.statusMessage = "Already at oldest command";
-      }
-      return createString(this.state.mxCommand);
+    defineRaw("minibuffer-view-publish", (args) => {
+      if (args.length !== 1) throw new Error("minibuffer-view-publish requires one view");
+      this.state.minibufferView = this.minibufferViewFromTlisp(args[0]!);
+      return args[0]!;
     });
 
-    defineRaw("minibuffer-history-next", (args) => {
-      if (args.length !== 0) {
-        throw new Error("minibuffer-history-next requires no arguments");
-      }
-      if (this.commandHistory.length === 0) {
-        this.state.statusMessage = "No command history";
-        return createNil();
-      }
-      // Move to next command in history
-      if (this.historyIndex < this.commandHistory.length - 1) {
-        this.historyIndex++;
-        this.state.mxCommand = this.commandHistory[this.historyIndex]!;
-      } else if (this.historyIndex === this.commandHistory.length - 1) {
-        // At end of history, clear input
-        this.historyIndex = this.commandHistory.length;
-        this.state.mxCommand = "";
-      }
-      return createString(this.state.mxCommand);
-    });
-
-    defineRaw("minibuffer-history-reset-index", (args) => {
-      if (args.length !== 0) {
-        throw new Error("minibuffer-history-reset-index requires no arguments");
-      }
-      this.historyIndex = this.commandHistory.length;
+    defineRaw("minibuffer-view-clear", (args) => {
+      if (args.length !== 0) throw new Error("minibuffer-view-clear requires no arguments");
+      this.state.minibufferView = undefined;
       return createNil();
     });
 
-    // Combined function for SPC ; that also resets history index
-    defineRaw("editor-enter-mx-mode", (args) => {
-      if (args.length !== 0) {
-        throw new Error("editor-enter-mx-mode requires no arguments");
+    defineRaw("editor-cursor-focus", (args) => {
+      if (args.length !== 0) throw new Error("editor-cursor-focus requires no arguments");
+      return createString(this.state.cursorFocus ?? "buffer");
+    });
+
+    defineRaw("editor-set-cursor-focus", (args) => {
+      if (args.length !== 1 || args[0]?.type !== "string") {
+        throw new Error("editor-set-cursor-focus requires a string");
       }
+      const focus = args[0].value as string;
+      if (focus !== "buffer" && focus !== "command") throw new Error("Invalid cursor focus");
+      this.state.cursorFocus = focus;
+      return createString(focus);
+    });
+
+    defineRaw("terminal-size", (args) => {
+      if (args.length !== 0) throw new Error("terminal-size requires no arguments");
+      const size = this.terminal.getSize();
+      return createHashmap([
+        ["width", createNumber(size.width)],
+        ["height", createNumber(size.height)],
+      ]);
+    });
+
+    defineRaw("buffer-list-details", (args) => {
+      if (args.length !== 0) throw new Error("buffer-list-details requires no arguments");
+      return createList(this.getBufferDetails().map(details => {
+        return createHashmap([
+          ["name", createString(details.name)],
+          ["filename", details.filename ? createString(details.filename) : createNil()],
+          ["major-mode", createString(details.majorMode)],
+          ["modified", createBoolean(details.modified)],
+          ["characters", createNumber(details.characters)],
+          ["lines", createNumber(details.lines)],
+          ["current", createBoolean(details.current)],
+          ["special", createBoolean(details.special)],
+          ["recency", createNumber(details.recency)],
+        ]);
+      }));
+    });
+
+    defineRaw("callable-command-details", (args) => {
+      if (args.length !== 0) throw new Error("callable-command-details requires no arguments");
+      const bindingsByCommand = new Map<string, string[]>();
+      for (const [key, mappings] of this.keyMappings) {
+        for (const mapping of mappings) {
+          const match = mapping.command.match(/^\(([^\s()]+)\)$/);
+          if (!match?.[1]) continue;
+          bindingsByCommand.set(match[1], [...(bindingsByCommand.get(match[1]) ?? []), key]);
+        }
+      }
+      const seen = new Set<string>();
+      const results: TLispValue[] = [];
+
+      // Global env functions
+      for (const [name, value] of this.interpreter.globalEnv.bindings.entries()) {
+        if (value.type === "function") {
+          seen.add(name);
+          const fn = value as TLispFunction;
+          results.push(createHashmap([
+            ["name", createString(name)],
+            ["documentation", createString((fn.docstring ?? "").split("\n")[0] ?? "")],
+            ["bindings", createList((bindingsByCommand.get(name) ?? []).map(key => createString(key)))],
+          ]));
+        }
+      }
+
+      // Module exports
+      const moduleExports = this.interpreter.moduleRegistry.allExports();
+      for (const [name, entry] of moduleExports) {
+        if (!seen.has(name) && entry.value.type === "function") {
+          const fn = entry.value as TLispFunction;
+          results.push(createHashmap([
+            ["name", createString(name)],
+            ["documentation", createString((fn.docstring ?? "").split("\n")[0] ?? "")],
+            ["bindings", createList((bindingsByCommand.get(name) ?? []).map(key => createString(key)))],
+            ["module", createString(entry.moduleName)],
+          ]));
+        }
+      }
+
+      return createList(results);
+    });
+
+    defineRaw("invoke-command", (args) => {
+      if (args.length !== 1 || args[0]?.type !== "string") {
+        throw new Error("invoke-command requires a command name string");
+      }
+      const name = args[0].value as string;
+      if (!/^[A-Za-z0-9_+*/<>=!?$%&~.^:-]+$/.test(name)) {
+        throw new Error("Invalid command name");
+      }
+      const result = this.interpreter.execute(`(${name})`);
+      if (Either.isLeft(result)) throw new Error(result.left.message);
+      return result.right;
+    });
+
+    defineRaw("editor-space-prefix-active-p", (args) => {
+      if (args.length !== 0) throw new Error("editor-space-prefix-active-p requires no arguments");
+      return createBoolean(this.spacePressed);
+    });
+
+    defineRaw("editor-reset-space-prefix", (args) => {
+      if (args.length !== 0) throw new Error("editor-reset-space-prefix requires no arguments");
       this.spacePressed = false;
-      this.state.mxCommand = "";
-      this.state.mode = "mx";
-      this.state.statusMessage = "";
-      this.state.cursorFocus = 'command';
-      this.historyIndex = this.commandHistory.length; // Reset history index
-      return createString("mx");
+      return createNil();
     });
 
     // Line number toggles
@@ -1475,6 +1600,14 @@ export class Editor {
     ];
 
     const optionalBindingFiles = [
+      // SPEC-006: Lisp-owned minibuffer completion
+      "src/tlisp/core/completion/completion.tlisp",
+      "src/tlisp/core/completion/orderless.tlisp",
+      "src/tlisp/core/completion/marginalia.tlisp",
+      "src/tlisp/core/completion/vertico.tlisp",
+      "src/tlisp/core/completion/minibuffer.tlisp",
+      "src/tlisp/core/commands/buffers.tlisp",
+      "src/tlisp/core/commands/execute-extended-command.tlisp",
       // SPEC-035: Indent rules
       "src/tlisp/core/indent/typescript.tlisp",
       "src/tlisp/core/indent/lisp.tlisp",
@@ -1666,7 +1799,7 @@ export class Editor {
             }
           }
 
-          // Load plugin.tlisp
+          // Load plugin.tlisp — defmodule isolation only if plugin opts in
           try {
             const pluginContent = await this.filesystem.readFile(pluginFilePath);
             const execResult = this.interpreter.execute(pluginContent);
@@ -1730,10 +1863,11 @@ export class Editor {
         
         ;; M-x mode bindings (US-1.10.1)
         (key-bind " " "(editor-handle-space)" "normal")
-        (key-bind ";" "(editor-enter-mx-mode)" "normal")
-        (key-bind "Escape" "(editor-exit-mx-mode)" "mx")
-        (key-bind "C-g" "(editor-exit-mx-mode)" "mx")
-        (key-bind "Enter" "(editor-execute-mx-command)" "mx")
+        (key-bind ";" "(execute-extended-command-maybe)" "normal")
+        (key-bind "C-x b" "(switch-buffer)" "normal")
+        (key-bind "Escape" "(minibuffer-dispatch-key \\"Escape\\")" "mx")
+        (key-bind "C-g" "(minibuffer-dispatch-key \\"C-g\\")" "mx")
+        (key-bind "Enter" "(minibuffer-dispatch-key \\"Enter\\")" "mx")
 
         ;; Window management bindings (SPEC-004)
         (key-bind "C-w" "(editor-window-prefix)" "normal")
@@ -2038,6 +2172,7 @@ export class Editor {
     const line = `[${ts}] ${msg}`;
     this.messages.push(line);
     this.buffers.set('*Messages*', FunctionalTextBufferImpl.create(this.messages.join('\n')));
+    this.updateBufferMetadata('*Messages*', { modified: false });
   }
 
   /**
@@ -2048,6 +2183,7 @@ export class Editor {
   createBuffer(name: string, content: string = ""): void {
     const buffer = FunctionalTextBufferImpl.create(content);
     this.buffers.set(name, buffer);
+    this.updateBufferMetadata(name, { modified: false, recency: this.bufferRecency++ });
 
     // Always set currentBuffer to the newly created buffer
     this.state.currentBuffer = buffer;
@@ -2090,6 +2226,8 @@ export class Editor {
       this.createBuffer(filename, content);
       // Track the filename for save operations
       this.state.currentFilename = filename;
+      const name = this.findBufferName(this.state.currentBuffer);
+      if (name) this.updateBufferMetadata(name, { filename, modified: false });
 
       // Notify LSP client about file open (US-3.1.1)
       await this.lspClient.onFileOpen(filename, content);
@@ -2140,6 +2278,7 @@ export class Editor {
           this.state.currentFilename = filename;
         }
         this.state.statusMessage = `Saved ${saveFilename}`;
+        this.setCurrentBufferModified(false);
         this.logMessage(`Saved ${saveFilename}`);
       } else {
         this.state.statusMessage = `Failed to get content: ${contentResult.left}`;
@@ -2232,6 +2371,13 @@ export class Editor {
   }
 
   /**
+   * Get current module name (for module introspection)
+   */
+  getCurrentModuleName(): string | undefined {
+    return this.currentModuleName;
+  }
+
+  /**
    * Update viewport to ensure cursor is visible
    * This method is now used by React components to manage viewport
    */
@@ -2254,6 +2400,8 @@ export class Editor {
       activeMinorModeLighters: modeState.activeMinorModes
         .map((m) => this.minorModeRegistry.get(m)?.lighter ?? "")
         .filter((l) => l !== ""),
+      minibufferState: cloneJsonValue(this.state.minibufferState),
+      minibufferView: this.state.minibufferView ? structuredClone(this.state.minibufferView) : undefined,
     };
   }
 
@@ -2272,8 +2420,14 @@ export class Editor {
     this.state.viewportTop = newState.viewportTop;
     this.state.config = newState.config;
     this.state.currentFilename = newState.currentFilename;
+    const currentBufferName = this.findBufferName(this.state.currentBuffer);
+    if (currentBufferName && newState.currentFilename !== undefined) {
+      this.updateBufferMetadata(currentBufferName, { filename: newState.currentFilename });
+    }
     this.state.commandLine = newState.commandLine ?? this.state.commandLine;
     this.state.mxCommand = newState.mxCommand ?? this.state.mxCommand;
+    this.state.minibufferState = cloneJsonValue(newState.minibufferState);
+    this.state.minibufferView = newState.minibufferView ? structuredClone(newState.minibufferView) : undefined;
     this.state.cursorFocus = newState.cursorFocus ?? this.state.cursorFocus;
     this.state.buffers = newState.buffers ?? this.state.buffers;
     if (newState.currentMajorMode || newState.activeMinorModes || newState.activeMinorModeLighters) {
@@ -2287,6 +2441,83 @@ export class Editor {
         modeState.minorModeActivationOrder = [...newState.activeMinorModes];
       }
     }
+  }
+
+  private findBufferName(buffer: FunctionalTextBuffer | undefined): string | undefined {
+    if (!buffer) return undefined;
+    for (const [name, candidate] of this.buffers) {
+      if (candidate === buffer) return name;
+    }
+    return undefined;
+  }
+
+  private updateBufferMetadata(
+    name: string,
+    update: Partial<{ filename?: string; modified: boolean; recency: number }>,
+  ): void {
+    const current = this.bufferMetadata.get(name) ?? { modified: false, recency: this.bufferRecency++ };
+    this.bufferMetadata.set(name, { ...current, ...update });
+  }
+
+  private touchBuffer(name: string): void {
+    this.updateBufferMetadata(name, { recency: this.bufferRecency++ });
+  }
+
+  private getCurrentBufferModified(): boolean {
+    const name = this.findBufferName(this.state.currentBuffer);
+    return name ? this.bufferMetadata.get(name)?.modified ?? false : false;
+  }
+
+  private setCurrentBufferModified(modified: boolean): void {
+    const name = this.findBufferName(this.state.currentBuffer);
+    if (name) this.updateBufferMetadata(name, { modified });
+    this.state.bufferModified = modified;
+  }
+
+  private getModeStateForBufferName(name: string): BufferModeState {
+    return getOrCreateModeState(this.bufferModeStates, this.bufferMetadata.get(name)?.filename ?? name);
+  }
+
+  private minibufferViewFromTlisp(value: TLispValue): MinibufferRenderView {
+    if (value.type !== "hashmap") throw new Error("minibuffer view must be a hashmap");
+    const map = value.value as Map<string, TLispValue>;
+    const stringValue = (key: string): string => {
+      const entry = map.get(key);
+      return entry?.type === "string" ? entry.value as string : "";
+    };
+    const rowsValue = map.get("rows");
+    const rows = rowsValue?.type === "list"
+      ? (rowsValue.value as TLispValue[]).flatMap(row => {
+        if (row.type !== "hashmap") return [];
+        const rowMap = row.value as Map<string, TLispValue>;
+        const segmentsValue = rowMap.get("segments");
+        const segments = segmentsValue?.type === "list"
+          ? (segmentsValue.value as TLispValue[]).flatMap(segment => {
+            if (segment.type !== "hashmap") return [];
+            const segmentMap = segment.value as Map<string, TLispValue>;
+            const text = segmentMap.get("text");
+            const face = segmentMap.get("face");
+            if (text?.type !== "string") return [];
+            return [{
+              text: text.value as string,
+              ...(face?.type === "string" ? { face: face.value as string } : {}),
+            }];
+          })
+          : [];
+        return [{
+          selected: rowMap.get("selected")?.type === "boolean" && rowMap.get("selected")?.value === true,
+          segments,
+        }];
+      })
+      : [];
+    const inputPoint = map.get("input-point");
+    return {
+      prompt: stringValue("prompt"),
+      input: stringValue("input"),
+      inputPoint: inputPoint?.type === "number" ? inputPoint.value as number : stringValue("input").length,
+      rows,
+      message: stringValue("message"),
+    };
   }
 
   /**
@@ -2336,6 +2567,42 @@ export class Editor {
    */
   getState(): EditorState {
     return this.getEditorState();
+  }
+
+  /**
+   * Return factual metadata for every live buffer.
+   */
+  getBufferDetails(): Array<{
+    name: string;
+    content: string;
+    filename?: string;
+    majorMode: string;
+    modified: boolean;
+    characters: number;
+    lines: number;
+    current: boolean;
+    special: boolean;
+    recency: number;
+  }> {
+    const currentName = this.findBufferName(this.state.currentBuffer);
+    return Array.from(this.buffers.entries()).map(([name, buffer]) => {
+      const content = buffer.getContent();
+      const text = Either.isRight(content) ? content.right : "";
+      const lineCount = buffer.getLineCount();
+      const metadata = this.bufferMetadata.get(name) ?? { modified: false, recency: 0 };
+      return {
+        name,
+        content: text,
+        ...(metadata.filename ? { filename: metadata.filename } : {}),
+        majorMode: this.getModeStateForBufferName(name).majorMode,
+        modified: metadata.modified,
+        characters: text.length,
+        lines: Either.isRight(lineCount) ? lineCount.right : 0,
+        current: name === currentName,
+        special: name.startsWith("*") && name.endsWith("*"),
+        recency: metadata.recency,
+      };
+    });
   }
 
   /**

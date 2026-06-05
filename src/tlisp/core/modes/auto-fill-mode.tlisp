@@ -1,3 +1,6 @@
+(defmodule editor/modes/auto-fill
+  (export auto-fill-mode global-auto-fill-mode))
+
 ;; auto-fill-mode.tlisp — Automatic line wrapping minor mode
 ;; Wraps text at fill-column when active
 
@@ -31,5 +34,3 @@ With 0 or negative number, disable."
           (global-minor-mode-set "auto-fill" t)
           (global-minor-mode-set "auto-fill" nil))
         (global-minor-mode-set "auto-fill" nil)))))
-
-(provide "auto-fill-mode")

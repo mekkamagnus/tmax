@@ -14,7 +14,7 @@
  * interpreter's global environment, making them available to all T-Lisp code.
  */
 
-import type { TLispInterpreter, TLispValue } from "./types.ts";
+import type { TLispFunctionImpl, TLispInterpreter, TLispValue } from "./types.ts";
 import {
   createBoolean,
   createHashmap,
@@ -48,6 +48,325 @@ function raw(fn: (args: TLispValue[]) => TLispValue): (args: TLispValue[]) => Ei
  * More functions will be added here as the standard library expands.
  */
 export function registerStdlibFunctions(interpreter: TLispInterpreter): void {
+  const resolveCallable = (value: TLispValue): TLispValue => {
+    if (value.type === "symbol" || value.type === "string") {
+      const name = value.value as string;
+      let resolved = interpreter.globalEnv.lookup(name);
+
+      // Try module exports for qualified names
+      if (!resolved && (interpreter as any).moduleRegistry) {
+        const registry = (interpreter as any).moduleRegistry;
+        const slashIdx = name.indexOf("/");
+        if (slashIdx > 0) {
+          const alias = name.substring(0, slashIdx);
+          const symName = name.substring(slashIdx + 1);
+          // Walk imports to find the module
+          let current: any = interpreter.globalEnv;
+          while (current) {
+            if (current.moduleImports) {
+              const imp = current.moduleImports.get(alias);
+              if (imp) {
+                const record = registry.resolve(imp.moduleName);
+                if (record && record.state === "loaded" && record.exports.has(symName)) {
+                  resolved = record.env.lookup(symName);
+                  if (resolved) return resolved;
+                }
+              }
+            }
+            current = current.parent;
+          }
+        }
+        // Check all module exports for unqualified names
+        const allExports = registry.allExports();
+        const entry = allExports.get(name);
+        if (entry) resolved = entry.value;
+      }
+
+      if (!resolved) throw new Error(`Undefined function: ${String(value.value)}`);
+      return resolved;
+    }
+    return value;
+  };
+
+  const call = (callable: TLispValue, args: TLispValue[]): TLispValue => {
+    const resolved = resolveCallable(callable);
+    if (resolved.type !== "function") {
+      throw new Error("Value is not callable");
+    }
+    const result = (resolved.value as TLispFunctionImpl)(args);
+    if (Either.isLeft(result)) {
+      throw new Error(result.left.message);
+    }
+    return result.right;
+  };
+
+  interpreter.defineBuiltin("funcall", raw((args: TLispValue[]) => {
+    if (args.length === 0) throw new Error("funcall requires a function");
+    return call(args[0]!, args.slice(1));
+  }));
+
+  interpreter.defineBuiltin("apply", raw((args: TLispValue[]) => {
+    if (args.length < 2) throw new Error("apply requires a function and argument list");
+    const finalArg = args[args.length - 1]!;
+    if (finalArg.type !== "list") throw new Error("apply final argument must be a list");
+    return call(args[0]!, [...args.slice(1, -1), ...(finalArg.value as TLispValue[])]);
+  }));
+
+  interpreter.defineBuiltin("mapcar", raw((args: TLispValue[]) => {
+    if (args.length !== 2 || args[1]?.type !== "list") {
+      throw new Error("mapcar requires a function and list");
+    }
+    return createList((args[1].value as TLispValue[]).map(value => call(args[0]!, [value])));
+  }));
+
+  interpreter.defineBuiltin("filter", raw((args: TLispValue[]) => {
+    if (args.length !== 2 || args[1]?.type !== "list") {
+      throw new Error("filter requires a predicate and list");
+    }
+    return createList(
+      (args[1].value as TLispValue[]).filter(value => isTruthy(call(args[0]!, [value]))),
+    );
+  }));
+
+  interpreter.defineBuiltin("stable-sort", raw((args: TLispValue[]) => {
+    if (args.length !== 2 || args[1]?.type !== "list") {
+      throw new Error("stable-sort requires a predicate and list");
+    }
+    const values = [...(args[1].value as TLispValue[])];
+    values.sort((left, right) => {
+      if (isTruthy(call(args[0]!, [left, right]))) return -1;
+      if (isTruthy(call(args[0]!, [right, left]))) return 1;
+      return 0;
+    });
+    return createList(values);
+  }));
+
+  interpreter.defineBuiltin("identity", raw((args: TLispValue[]) => {
+    if (args.length !== 1) throw new Error("identity requires one argument");
+    return args[0]!;
+  }));
+
+  interpreter.defineBuiltin("list-slice", raw((args: TLispValue[]) => {
+    if (args.length !== 3 || args[0]?.type !== "list" || args[1]?.type !== "number" || args[2]?.type !== "number") {
+      throw new Error("list-slice requires list, start, and end");
+    }
+    return createList((args[0].value as TLispValue[]).slice(args[1].value as number, args[2].value as number));
+  }));
+
+  interpreter.defineBuiltin("string-split", raw((args: TLispValue[]) => {
+    if (args.length !== 2 || args[0]?.type !== "string" || args[1]?.type !== "string") {
+      throw new Error("string-split requires string and separator");
+    }
+    return createList(
+      (args[0].value as string)
+        .split(args[1].value as string)
+        .map(createString),
+    );
+  }));
+
+  interpreter.defineBuiltin("string-prefix-p", raw((args: TLispValue[]) => {
+    if (args.length !== 2 || args[0]?.type !== "string" || args[1]?.type !== "string") {
+      throw new Error("string-prefix-p requires prefix and string");
+    }
+    return createBoolean((args[1].value as string).startsWith(args[0].value as string));
+  }));
+
+  interpreter.defineBuiltin("string-suffix-p", raw((args: TLispValue[]) => {
+    if (args.length !== 2 || args[0]?.type !== "string" || args[1]?.type !== "string") {
+      throw new Error("string-suffix-p requires suffix and string");
+    }
+    return createBoolean((args[1].value as string).endsWith(args[0].value as string));
+  }));
+
+  interpreter.defineBuiltin("string-contains-p", raw((args: TLispValue[]) => {
+    if (args.length !== 2 || args[0]?.type !== "string" || args[1]?.type !== "string") {
+      throw new Error("string-contains-p requires needle and string");
+    }
+    return createBoolean((args[1].value as string).includes(args[0].value as string));
+  }));
+
+  interpreter.defineBuiltin("string-char-at", raw((args: TLispValue[]) => {
+    if (args.length !== 2 || args[0]?.type !== "string" || args[1]?.type !== "number") {
+      throw new Error("string-char-at requires string and index");
+    }
+    return createString(Array.from(args[0].value as string)[args[1].value as number] ?? "");
+  }));
+
+  interpreter.defineBuiltin("string-printable-p", raw((args: TLispValue[]) => {
+    if (args.length !== 1 || args[0]?.type !== "string") {
+      throw new Error("string-printable-p requires a string");
+    }
+    const value = args[0].value as string;
+    return createBoolean(Array.from(value).length === 1 && value >= " " && value !== "\x7f");
+  }));
+
+  interpreter.defineBuiltin("regexp-quote", raw((args: TLispValue[]) => {
+    if (args.length !== 1 || args[0]?.type !== "string") {
+      throw new Error("regexp-quote requires a string");
+    }
+    return createString((args[0].value as string).replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
+  }));
+
+  interpreter.defineBuiltin("string-match-spans", raw((args: TLispValue[]) => {
+    if (args.length < 2 || args.length > 3 || args[0]?.type !== "string" || args[1]?.type !== "string") {
+      throw new Error("string-match-spans requires pattern, string, and optional case-sensitive flag");
+    }
+    const caseSensitive = args[2]?.type === "boolean" ? args[2].value as boolean : true;
+    try {
+      const regexp = new RegExp(args[0].value as string, caseSensitive ? "gu" : "giu");
+      const spans: TLispValue[] = [];
+      for (const match of (args[1].value as string).matchAll(regexp)) {
+        if (match.index === undefined) continue;
+        const text = match[0] ?? "";
+        spans.push(createList([createNumber(match.index), createNumber(match.index + text.length)]));
+        if (text.length === 0) regexp.lastIndex++;
+      }
+      return createList(spans);
+    } catch {
+      return createList([]);
+    }
+  }));
+
+  interpreter.defineBuiltin("literal-match-spans", raw((args: TLispValue[]) => {
+    if (args.length < 2 || args.length > 3 || args[0]?.type !== "string" || args[1]?.type !== "string") {
+      throw new Error("literal-match-spans requires needle, string, and optional case-sensitive flag");
+    }
+    const caseSensitive = args[2]?.type === "boolean" ? args[2].value as boolean : true;
+    const original = args[1].value as string;
+    const needle = args[0].value as string;
+    const target = caseSensitive ? original : original.toLowerCase();
+    const query = caseSensitive ? needle : needle.toLowerCase();
+    if (query.length === 0) return createList([]);
+    const spans: TLispValue[] = [];
+    let start = 0;
+    while (start <= target.length) {
+      const index = target.indexOf(query, start);
+      if (index < 0) break;
+      spans.push(createList([createNumber(index), createNumber(index + query.length)]));
+      start = index + Math.max(1, query.length);
+    }
+    return createList(spans);
+  }));
+
+  interpreter.defineBuiltin("string-join", raw((args: TLispValue[]) => {
+    if (args.length !== 2 || args[0]?.type !== "string" || args[1]?.type !== "list") {
+      throw new Error("string-join requires separator string and list");
+    }
+    const separator = args[0].value as string;
+    const parts = args[1].value as TLispValue[];
+    return createString(parts.map((part) => part.type === "string" ? part.value as string : valueToString(part)).join(separator));
+  }));
+
+  interpreter.defineBuiltin("string-trim", raw((args: TLispValue[]) => {
+    if (args.length !== 1 || args[0]?.type !== "string") {
+      throw new Error("string-trim requires a string");
+    }
+    return createString((args[0].value as string).trim());
+  }));
+
+  interpreter.defineBuiltin("string-replace", raw((args: TLispValue[]) => {
+    if (args.length !== 3 || args[0]?.type !== "string" || args[1]?.type !== "string" || args[2]?.type !== "string") {
+      throw new Error("string-replace requires string, search, and replacement");
+    }
+    const source = args[0].value as string;
+    const search = args[1].value as string;
+    const replacement = args[2].value as string;
+    return createString(source.split(search).join(replacement));
+  }));
+
+  interpreter.defineBuiltin("number-to-string", raw((args: TLispValue[]) => {
+    if (args.length !== 1 || args[0]?.type !== "number") {
+      throw new Error("number-to-string requires a number");
+    }
+    return createString(String(args[0].value as number));
+  }));
+
+  interpreter.defineBuiltin("string-to-number", raw((args: TLispValue[]) => {
+    if (args.length !== 1 || args[0]?.type !== "string") {
+      throw new Error("string-to-number requires a string");
+    }
+    const value = Number(args[0].value as string);
+    if (Number.isNaN(value)) {
+      throw new Error("string-to-number invalid number");
+    }
+    return createNumber(value);
+  }));
+
+  interpreter.defineBuiltin("nilp", raw((args: TLispValue[]) => {
+    if (args.length !== 1) {
+      throw new Error("nilp requires exactly 1 argument");
+    }
+    return createBoolean(args[0]?.type === "nil");
+  }));
+
+  interpreter.defineBuiltin("string-flex-spans", raw((args: TLispValue[]) => {
+    if (args.length < 2 || args.length > 3 || args[0]?.type !== "string" || args[1]?.type !== "string") {
+      throw new Error("string-flex-spans requires pattern, string, and optional case-sensitive flag");
+    }
+    const caseSensitive = args[2]?.type === "boolean" ? args[2].value as boolean : true;
+    const pattern = caseSensitive ? args[0].value as string : (args[0].value as string).toLowerCase();
+    const target = caseSensitive ? args[1].value as string : (args[1].value as string).toLowerCase();
+    const spans: TLispValue[] = [];
+    let targetIndex = 0;
+    for (const character of pattern) {
+      const index = target.indexOf(character, targetIndex);
+      if (index < 0) return createList([]);
+      spans.push(createList([createNumber(index), createNumber(index + character.length)]));
+      targetIndex = index + character.length;
+    }
+    return createList(spans);
+  }));
+
+  interpreter.defineBuiltin("string-initialism-spans", raw((args: TLispValue[]) => {
+    if (args.length < 2 || args.length > 3 || args[0]?.type !== "string" || args[1]?.type !== "string") {
+      throw new Error("string-initialism-spans requires pattern, string, and optional case-sensitive flag");
+    }
+    const caseSensitive = args[2]?.type === "boolean" ? args[2].value as boolean : true;
+    const pattern = caseSensitive ? args[0].value as string : (args[0].value as string).toLowerCase();
+    const original = args[1].value as string;
+    const target = caseSensitive ? original : original.toLowerCase();
+    const starts = Array.from(target.matchAll(/(^|[-_\s/])([\p{L}\p{N}])/gu))
+      .map(match => (match.index ?? 0) + (match[1]?.length ?? 0));
+    const spans: TLispValue[] = [];
+    let startIndex = 0;
+    for (const character of pattern) {
+      const found = starts.findIndex((position, index) =>
+        index >= startIndex && target.slice(position).startsWith(character)
+      );
+      if (found < 0) return createList([]);
+      const position = starts[found]!;
+      spans.push(createList([createNumber(position), createNumber(position + character.length)]));
+      startIndex = found + 1;
+    }
+    return createList(spans);
+  }));
+
+  interpreter.defineBuiltin("display-width", raw((args: TLispValue[]) => {
+    if (args.length !== 1 || args[0]?.type !== "string") {
+      throw new Error("display-width requires a string");
+    }
+    return createNumber(Array.from(args[0].value as string).length);
+  }));
+
+  interpreter.defineBuiltin("truncate-display", raw((args: TLispValue[]) => {
+    if (args.length !== 2 || args[0]?.type !== "string" || args[1]?.type !== "number") {
+      throw new Error("truncate-display requires string and width");
+    }
+    return createString(Array.from(args[0].value as string).slice(0, Math.max(0, args[1].value as number)).join(""));
+  }));
+
+  interpreter.defineBuiltin("symbol-name", raw((args: TLispValue[]) => {
+    if (args.length !== 1 || (args[0]?.type !== "symbol" && args[0]?.type !== "string")) {
+      throw new Error("symbol-name requires a symbol or string");
+    }
+    return createString(args[0].value as string);
+  }));
+
+  interpreter.defineBuiltin("hashmapp", raw((args: TLispValue[]) => {
+    if (args.length !== 1) throw new Error("hashmapp requires one argument");
+    return createBoolean(args[0]?.type === "hashmap");
+  }));
+
   /**
    * Create a hash-map from key-value pairs
    * Usage: (hashmap key1 value1 key2 value2 ...)

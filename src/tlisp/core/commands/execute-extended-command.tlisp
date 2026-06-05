@@ -1,0 +1,56 @@
+(defmodule editor/commands/execute-extended-command
+  (export command-detail-candidate command-detail-interactive-p command-completion-refresh command-completion-table execute-extended-command-accept execute-extended-command execute-extended-command-maybe))
+
+;; execute-extended-command.tlisp --- M-x through generic completion
+
+(defvar command-completion-candidates (list))
+
+(defun command-detail-candidate (details)
+  (hashmap
+    "value" (hashmap-get details "name")
+    "display" (hashmap-get details "name")
+    "annotation" ""
+    "metadata" details))
+
+(defun command-detail-interactive-p (details)
+  "Return non-nil for commands exposed through the interactive M-x source."
+  (or
+    (> (length (hashmap-get details "documentation")) 0)
+    (not (null (hashmap-get details "bindings")))))
+
+(defun command-completion-refresh ()
+  "Refresh the factual command snapshot used by the active M-x session."
+  (set! command-completion-candidates
+    (mapcar "command-detail-candidate"
+      (filter "command-detail-interactive-p" (callable-command-details)))))
+
+(defun command-completion-table (input action)
+  "Completion table for callable T-Lisp commands."
+  (if (string= action "metadata")
+    (hashmap "category" "command")
+    command-completion-candidates))
+
+(defun execute-extended-command-accept (name)
+  "Invoke named command NAME."
+  (invoke-command name))
+
+(defun execute-extended-command ()
+  "Read and invoke a named command using generic completion."
+  (progn
+    (command-completion-refresh)
+    (completing-read
+      "M-x "
+      "command-completion-table"
+      nil
+      t
+      ""
+      "command-history"
+      "execute-extended-command-accept")))
+
+(defun execute-extended-command-maybe ()
+  "Run M-x only after the configured SPC prefix."
+  (if (editor-space-prefix-active-p)
+    (execute-extended-command)
+    (progn
+      (editor-reset-space-prefix)
+      (editor-set-status "Unbound key: ;"))))
