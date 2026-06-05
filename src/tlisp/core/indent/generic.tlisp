@@ -1,8 +1,9 @@
 (defmodule editor/indent/generic
-  (export))
+  (export)
 
 ;; generic.tlisp — Default indent rules
 ;; Simple brace-based indentation
 (indent-set-rules
   '("\\{$" "\\($" "\\[$")
   '("^\\s*}" "^\\s*\\)" "^\\s*\\]"))
+)

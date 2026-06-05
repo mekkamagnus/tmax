@@ -1,5 +1,5 @@
 (defmodule editor/commands/windows
-  (export split-window-below split-window-right other-window delete-window))
+  (export split-window-below split-window-right other-window delete-window)
 
 ;; windows.tlisp — Window management commands
 ;; Wraps TypeScript display primitives with editor commands and key bindings
@@ -22,3 +22,4 @@
 
 ;; Key bindings: C-w prefix for window commands
 (key-bind "C-w" "(editor-window-prefix)" "normal")
+)

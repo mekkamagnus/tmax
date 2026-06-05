@@ -1,5 +1,5 @@
 (defmodule editor/completion/vertico
-  (export vertico-span-less-p vertico-segments-from-spans vertico-annotation-segments-from-spans vertico-candidate-segments vertico-row vertico-selected-candidate vertico-publish vertico-next vertico-previous vertico-page-next vertico-page-previous vertico-insert))
+  (export vertico-count vertico-span-less-p vertico-segments-from-spans vertico-annotation-segments-from-spans vertico-candidate-segments vertico-row vertico-selected-candidate vertico-publish vertico-next vertico-previous vertico-page-next vertico-page-previous vertico-insert)
 
 ;; vertico.tlisp --- Vertical completion view and navigation
 
@@ -144,3 +144,4 @@
     (if candidate
       (minibuffer-set-input (hashmap-get candidate "value"))
       nil)))
+)

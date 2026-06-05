@@ -1,5 +1,5 @@
 (defmodule editor/commands/execute-extended-command
-  (export command-detail-candidate command-detail-interactive-p command-completion-refresh command-completion-table execute-extended-command-accept execute-extended-command execute-extended-command-maybe))
+  (export command-detail-candidate command-detail-interactive-p command-completion-refresh command-completion-table execute-extended-command-accept execute-extended-command execute-extended-command-maybe)
 
 ;; execute-extended-command.tlisp --- M-x through generic completion
 
@@ -54,3 +54,4 @@
     (progn
       (editor-reset-space-prefix)
       (editor-set-status "Unbound key: ;"))))
+)

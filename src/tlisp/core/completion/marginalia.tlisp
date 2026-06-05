@@ -1,5 +1,5 @@
 (defmodule editor/completion/marginalia
-  (export marginalia-register-annotator marginalia-buffer-annotation marginalia-command-annotation marginalia-annotate-candidate marginalia-annotate-candidates))
+  (export marginalia-register-annotator marginalia-buffer-annotation marginalia-command-annotation marginalia-annotate-candidate marginalia-annotate-candidates)
 
 ;; marginalia.tlisp --- Category-aware completion annotations
 
@@ -50,3 +50,4 @@
 
 (marginalia-register-annotator "buffer" "marginalia-buffer-annotation")
 (marginalia-register-annotator "command" "marginalia-command-annotation")
+)

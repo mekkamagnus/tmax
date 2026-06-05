@@ -19,6 +19,7 @@
     "typecheck": "bunx tsc --noEmit",
     "typecheck:src": "bunx tsc --noEmit --project tsconfig.src.json",
     "typecheck:test": "bunx tsc --noEmit --project tsconfig.test.json",
+    "build": "bun run build:tlisp",
     "build:tlisp": "bun build --compile ./src/tlisp/cli.ts --outfile dist/tlisp"
   },
   "dependencies": {

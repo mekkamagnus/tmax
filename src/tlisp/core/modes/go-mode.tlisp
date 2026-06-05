@@ -1,7 +1,8 @@
 (defmodule editor/modes/go
-  (export))
+  (export)
 
 ;; go-mode.tlisp — Go major mode
 (major-mode-register "go" '(".go") "go"
   '("\\{$" "\\($" "\\[$" "=>$")
   '("^\\s*}" "^\\s*\\)" "^\\s*\\]"))
+)

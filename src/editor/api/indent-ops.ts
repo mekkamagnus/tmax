@@ -217,7 +217,7 @@ export function createIndentOps(
     const currentBuffer = getCurrentBuffer();
     const bufferValidation = validateBufferExists(currentBuffer);
     if (Either.isLeft(bufferValidation)) {
-      return Either.left(bufferValidation.left);
+      return Either.right(createNil());
     }
 
     const increaseResult = extractStringList(args[0]!, "increase", "indent-set-rules");

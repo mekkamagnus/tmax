@@ -1,5 +1,5 @@
 (defmodule editor/modes/relative-line-numbers
-  (export relative-line-numbers-mode))
+  (export relative-line-numbers-mode)
 
 ;; relative-line-numbers-mode.tlisp — Relative line numbers minor mode
 ;; Shows relative line numbers in the gutter (distance from cursor line)
@@ -29,3 +29,4 @@ With 0 or negative number, disable."
             (minor-mode-set "line-numbers" t))
           (minor-mode-set "relative-line-numbers" nil))
         (minor-mode-set "relative-line-numbers" nil)))))
+)

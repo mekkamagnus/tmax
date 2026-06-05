@@ -1,5 +1,5 @@
 (defmodule editor/commands/buffers
-  (export buffer-detail-more-recent-p buffer-detail-candidate buffer-completion-table switch-buffer-accept switch-buffer))
+  (export buffer-detail-more-recent-p buffer-detail-candidate buffer-completion-table switch-buffer-accept switch-buffer)
 
 ;; buffers.tlisp --- Interactive buffer completion
 
@@ -38,3 +38,4 @@
     ""
     "buffer-history"
     "switch-buffer-accept"))
+)

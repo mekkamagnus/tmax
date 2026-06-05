@@ -1,5 +1,5 @@
 (defmodule editor/bindings/command
-  (export))
+  (export)
 
 ;; command.tlisp
 ;; Default key bindings for command mode in tmax editor
@@ -43,3 +43,4 @@
 
 ;; Quit editor from command mode (q)
 (key-bind "q" "(editor-quit)" "command")
+)

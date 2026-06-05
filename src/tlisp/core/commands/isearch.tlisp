@@ -1,5 +1,5 @@
 (defmodule editor/commands/isearch
-  (export isearch-forward isearch-backward isearch-update isearch-exit isearch-cancel))
+  (export isearch-forward isearch-backward isearch-update isearch-exit isearch-cancel)
 
 ;; isearch.tlisp — incremental search commands
 (defun isearch-forward ()
@@ -26,3 +26,4 @@
   "Cancel search and return to normal mode."
   (search-incremental-cancel)
   (editor-set-mode "normal"))
+)

@@ -189,6 +189,13 @@ export class TLispEvaluator {
   private evalSymbol(symbol: TLispValue, env: TLispEnvironment): Either<EvalError, TLispValue> {
     const name = symbol.value as string;
 
+    if (this.moduleRegistry && name.includes("/")) {
+      const publicExport = this.moduleRegistry.resolvePublicName(name);
+      if (publicExport) {
+        return Either.right(publicExport.value);
+      }
+    }
+
     // Qualified name resolution: module/func or alias/func
     const slashIdx = name.indexOf("/");
     if (slashIdx > 0 && this.moduleRegistry) {
@@ -283,6 +290,21 @@ export class TLispEvaluator {
 
     const value = env.lookup(name);
 
+    if (value === undefined && slashIdx < 0 && this.moduleRegistry && this.isModuleEnvironment(env)) {
+      const exported = this.moduleRegistry.resolveUniqueExport(name);
+      if (exported === "ambiguous") {
+        return Either.left({
+          type: 'EvalError',
+          variant: 'UndefinedSymbol',
+          message: `Ambiguous module export: ${name}. Require a module alias or use a full module-qualified name.`,
+          details: { symbol: name }
+        });
+      }
+      if (exported) {
+        return Either.right(exported.value);
+      }
+    }
+
     if (value === undefined) {
       return Either.left({
         type: 'EvalError',
@@ -293,6 +315,38 @@ export class TLispEvaluator {
     }
 
     return Either.right(value);
+  }
+
+  private isModuleEnvironment(env: TLispEnvironment): boolean {
+    return this.currentModuleNameForEnv(env) !== undefined;
+  }
+
+  private currentModuleNameForEnv(env: TLispEnvironment): string | undefined {
+    if (!this.moduleRegistry) return undefined;
+
+    let current: TLispEnvironment | undefined = env;
+    while (current) {
+      for (const record of this.moduleRegistry.listModules()) {
+        if (record.env === current) return record.name;
+      }
+      current = current.parent;
+    }
+
+    return undefined;
+  }
+
+  private evalCurrentModule(elements: TLispValue[], env: TLispEnvironment): Either<EvalError, TLispValue> {
+    if (elements.length !== 1) {
+      return Either.left({
+        type: 'EvalError',
+        variant: 'RuntimeError',
+        message: "current-module takes no arguments",
+        details: { actual: elements.length - 1 }
+      });
+    }
+
+    const moduleName = this.currentModuleNameForEnv(env);
+    return Either.right(moduleName ? createString(moduleName) : createNil());
   }
 
   /**
@@ -378,6 +432,8 @@ export class TLispEvaluator {
           return this.evalDefmodule(elements, env);
         case "require-module":
           return this.evalRequireModule(elements, env);
+        case "current-module":
+          return this.evalCurrentModule(elements, env);
         case "set!":
           return this.evalSetBang(elements, env);
         case "assert-type":
@@ -518,16 +574,6 @@ export class TLispEvaluator {
     // Register module with exports
     this.moduleRegistry.register(moduleName, moduleEnv, exports, "");
 
-    // Migration bridge: also define exported names into the calling env
-    // so that key-bind expressions and global lookups still find them.
-    // This can be removed once all callers use require-module.
-    for (const exportName of exports) {
-      const value = moduleEnv.lookup(exportName);
-      if (value !== undefined) {
-        env.define(exportName, value);
-      }
-    }
-
     return Either.right(createSymbol(moduleName));
   }
 
@@ -584,6 +630,16 @@ export class TLispEvaluator {
       if (Either.isLeft(loadResult)) return loadResult;
     }
 
+    const record = this.moduleRegistry.resolve(moduleName);
+    if (!record || record.state !== "loaded") {
+      return Either.left({
+        type: 'EvalError',
+        variant: 'RuntimeError',
+        message: `Module '${moduleName}' did not finish loading`,
+        details: { moduleName }
+      });
+    }
+
     // Parse import style
     let alias: string;
     let importedSymbols: Set<string> | undefined;
@@ -622,7 +678,16 @@ export class TLispEvaluator {
           const syms = (elements[3].value as TLispValue[]);
           for (const s of syms) {
             if (s.type === "symbol") {
-              importedSymbols.add(s.value as string);
+              const importedName = s.value as string;
+              if (!record.exports.has(importedName)) {
+                return Either.left({
+                  type: 'EvalError',
+                  variant: 'UndefinedSymbol',
+                  message: `Symbol '${importedName}' not exported from module '${moduleName}'`,
+                  details: { moduleName, symbol: importedName }
+                });
+              }
+              importedSymbols.add(importedName);
             }
           }
         }
@@ -2470,7 +2535,7 @@ export class TLispEvaluator {
  * Create evaluator with built-in functions
  * @returns Evaluator with standard library
  */
-export const createEvaluatorWithBuiltins = (): { evaluator: TLispEvaluator; builtinsEnv: TLispEnvironment; env: TLispEnvironment } => {
+export const createEvaluatorWithBuiltins = (moduleRegistry?: ModuleRegistry): { evaluator: TLispEvaluator; builtinsEnv: TLispEnvironment; env: TLispEnvironment } => {
   const evaluator = new TLispEvaluator();
   // builtinsEnv holds stdlib + editor primitives
   const builtinsEnv = new TLispEnvironmentImpl();
@@ -4007,7 +4072,8 @@ export const createEvaluatorWithBuiltins = (): { evaluator: TLispEvaluator; buil
     getTestDefinition: (name: string) => evaluator.getTestDefinition(name),
     getAllTestNames: () => evaluator.getAllTestNames(),
     getSuiteDefinition: (name: string) => evaluator.getSuiteDefinition(name),
-    getAllSuiteNames: () => evaluator.getAllSuiteNames()
+    getAllSuiteNames: () => evaluator.getAllSuiteNames(),
+    moduleRegistry
   } as any;
   registerStdlibFunctions(interpreterMock as any);
 

@@ -1,7 +1,8 @@
 (defmodule editor/modes/python
-  (export))
+  (export)
 
 ;; python-mode.tlisp — Python major mode
 (major-mode-register "python" '(".py" ".pyi") "python"
   '(":$" "else:$" "elif .+:$" "except$" "finally$" "class .+:$" "def .+:$")
   '("^\\s*return" "^\\s*break" "^\\s*pass" "^\\s*else:" "^\\s*elif" "^\\s*except" "^\\s*finally"))
+)

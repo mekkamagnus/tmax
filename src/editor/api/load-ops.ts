@@ -1,26 +1,21 @@
 /**
  * @file load-ops.ts
- * @description Minimal T-Lisp load, provide, require, featurep APIs
+ * @description Minimal raw T-Lisp file loading APIs
  *
- * Provides the groundwork for Emacs-style feature loading:
  * - (load FILE) - Load a T-Lisp file
  * - (load-path-add DIR) - Add a directory to the load path
  * - (load-path-list) - List current load paths
- * - (provide FEATURE) - Mark a feature as loaded
- * - (featurep FEATURE) - Test if a feature has been provided
- * - (require FEATURE &optional FILE) - Load a feature if not yet loaded
  */
 
 import type { TLispValue, TLispFunctionImpl } from "../../tlisp/types.ts";
-import { createNil, createString, createList, createBoolean } from "../../tlisp/values.ts";
+import { createNil, createString, createList } from "../../tlisp/values.ts";
 import { Either } from "../../utils/task-either.ts";
 import { validateArgsCount, validateArgType } from "../../utils/validation.ts";
 import { createValidationError, AppError } from "../../error/types.ts";
 import { existsSync, readFileSync } from "fs";
 import { isAbsolute, join } from "path";
 
-export function createLoadOps(
-  getLoadedFeatures: () => Set<string>,
+export function createRawLoadOps(
   getLoadPaths: () => string[],
   evalTlisp: (expr: string) => Either<any, any>,
   _loadFile: (path: string) => Promise<boolean>,
@@ -73,98 +68,6 @@ export function createLoadOps(
       ));
     }
   };
-
-  // (provide FEATURE)
-  api.set("provide", (args: TLispValue[]): Either<AppError, TLispValue> => {
-    const argsValidation = validateArgsCount(args, 1, "provide");
-    if (Either.isLeft(argsValidation)) {
-      return Either.left(argsValidation.left);
-    }
-
-    const featureArg = args[0]!
-    const typeValidation = validateArgType(featureArg, "string", 0, "provide");
-    if (Either.isLeft(typeValidation)) {
-      return Either.left(typeValidation.left);
-    }
-
-    const feature = featureArg.value as string;
-    getLoadedFeatures().add(feature);
-
-    return Either.right(createString(feature));
-  });
-
-  // (featurep FEATURE)
-  api.set("featurep", (args: TLispValue[]): Either<AppError, TLispValue> => {
-    const argsValidation = validateArgsCount(args, 1, "featurep");
-    if (Either.isLeft(argsValidation)) {
-      return Either.left(argsValidation.left);
-    }
-
-    const featureArg = args[0]!
-    const typeValidation = validateArgType(featureArg, "string", 0, "featurep");
-    if (Either.isLeft(typeValidation)) {
-      return Either.left(typeValidation.left);
-    }
-
-    const feature = featureArg.value as string;
-    return Either.right(createBoolean(getLoadedFeatures().has(feature)));
-  });
-
-  // (require FEATURE &optional FILE)
-  api.set("require", (args: TLispValue[]): Either<AppError, TLispValue> => {
-    if (args.length < 1 || args.length > 2) {
-      return Either.left(createValidationError(
-        'ConstraintViolation',
-        'require requires 1-2 arguments: feature, [file]',
-        'args',
-        args.length,
-        '1-2 arguments'
-      ));
-    }
-
-    const featureArg = args[0]!
-    const typeValidation = validateArgType(featureArg, "string", 0, "require");
-    if (Either.isLeft(typeValidation)) {
-      return Either.left(typeValidation.left);
-    }
-
-    const feature = featureArg.value as string;
-
-    // Already loaded - return nil
-    if (getLoadedFeatures().has(feature)) {
-      return Either.right(createNil());
-    }
-
-    // Determine file path
-    let filePath: string | undefined;
-    if (args.length > 1 && args[1] && args[1].type === "string") {
-      filePath = args[1].value as string;
-    } else {
-      filePath = feature;
-    }
-
-    const before = new Set(getLoadedFeatures());
-    const loadResult = evalFile(filePath);
-    if (Either.isLeft(loadResult)) {
-      return loadResult;
-    }
-
-    if (!getLoadedFeatures().has(feature)) {
-      const features = getLoadedFeatures();
-      for (const loaded of Array.from(features)) {
-        if (!before.has(loaded)) features.delete(loaded);
-      }
-      return Either.left(createValidationError(
-        "ConstraintViolation",
-        `require: feature '${feature}' was not provided by '${filePath}'`,
-        "feature",
-        feature,
-        "file that calls provide for the requested feature"
-      ));
-    }
-
-    return Either.right(createNil());
-  });
 
   // (load FILE)
   api.set("load", (args: TLispValue[]): Either<AppError, TLispValue> => {

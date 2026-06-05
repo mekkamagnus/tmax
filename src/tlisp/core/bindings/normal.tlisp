@@ -1,5 +1,42 @@
 (defmodule editor/bindings/normal
-  (export))
+  (export)
+
+  (require-module editor/modes/fundamental)
+  (require-module editor/modes/typescript)
+  (require-module editor/modes/python)
+  (require-module editor/modes/lisp)
+  (require-module editor/modes/go)
+  (require-module editor/modes/line-numbers)
+  (require-module editor/modes/relative-line-numbers)
+  (require-module editor/modes/auto-fill)
+
+  (require-module editor/indent/typescript)
+  (require-module editor/indent/lisp)
+  (require-module editor/indent/python)
+  (require-module editor/indent/generic)
+
+  (require-module editor/completion)
+  (require-module editor/completion/orderless)
+  (require-module editor/completion/marginalia)
+  (require-module editor/completion/vertico)
+  (require-module editor/completion/minibuffer)
+
+  (require-module editor/commands/vim-counts)
+  (require-module editor/commands/insert-entries)
+  (require-module editor/commands/edit-commands)
+  (require-module editor/commands/operators)
+  (require-module editor/commands/motions)
+  (require-module editor/commands/vim-dispatch)
+  (require-module editor/commands/buffers)
+  (require-module editor/commands/execute-extended-command)
+  (require-module editor/commands/save)
+  (require-module editor/commands/find-file)
+  (require-module editor/commands/isearch)
+  (require-module editor/commands/replace)
+  (require-module editor/commands/indent)
+  (require-module editor/commands/dired)
+  (require-module editor/commands/windows)
+  (require-module editor/commands/tabs)
 
 ;; normal.tlisp
 ;; Default key bindings for normal mode in tmax editor
@@ -198,3 +235,4 @@
 ;; Or use T-Lisp directly:
 ;;   - (describe-key "q" "normal") - shows that q runs editor-quit
 ;;   - (describe-function "editor-quit") - shows function documentation
+)

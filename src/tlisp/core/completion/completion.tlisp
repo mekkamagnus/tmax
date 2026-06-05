@@ -1,5 +1,5 @@
 (defmodule editor/completion
-  (export completion-register-style completion-set-category-styles completion-table-dispatch completion-metadata-get completion-styles-for-category completion-apply-styles completion-all-completions completion-try-completion))
+  (export completion-register-style completion-set-category-styles completion-table-dispatch completion-metadata-get completion-styles-for-category completion-apply-styles completion-all-completions completion-try-completion)
 
 ;; completion.tlisp --- Generic Lisp-owned completion protocol
 
@@ -57,3 +57,4 @@
     (if (= (length candidates) 1)
       (hashmap-get (car candidates) "value")
       input)))
+)

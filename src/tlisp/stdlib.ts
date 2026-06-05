@@ -57,6 +57,13 @@ export function registerStdlibFunctions(interpreter: TLispInterpreter): void {
       if (!resolved && (interpreter as any).moduleRegistry) {
         const registry = (interpreter as any).moduleRegistry;
         const slashIdx = name.indexOf("/");
+        const publicExport = slashIdx > 0 && typeof registry.resolvePublicName === "function"
+          ? registry.resolvePublicName(name)
+          : undefined;
+        if (publicExport) {
+          resolved = publicExport.value;
+        }
+
         if (slashIdx > 0) {
           const alias = name.substring(0, slashIdx);
           const symName = name.substring(slashIdx + 1);
@@ -76,10 +83,11 @@ export function registerStdlibFunctions(interpreter: TLispInterpreter): void {
             current = current.parent;
           }
         }
-        // Check all module exports for unqualified names
-        const allExports = registry.allExports();
-        const entry = allExports.get(name);
-        if (entry) resolved = entry.value;
+        // Check unique module exports for unqualified callback names.
+        if (!resolved && slashIdx < 0 && typeof registry.resolveUniqueExport === "function") {
+          const entry = registry.resolveUniqueExport(name);
+          if (entry && entry !== "ambiguous") resolved = entry.value;
+        }
       }
 
       if (!resolved) throw new Error(`Undefined function: ${String(value.value)}`);

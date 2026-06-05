@@ -1,6 +1,7 @@
 (defmodule editor/modes/fundamental
-  (export))
+  (export)
 
 ;; fundamental.tlisp — Plain text fallback mode
 ;; No syntax highlighting, no indent rules
 (major-mode-register "fundamental" '())
+)

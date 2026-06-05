@@ -1,5 +1,5 @@
 (defmodule editor/commands/dired
-  (export dired dired-open-file dired-up-directory dired-mark-delete dired-unmark dired-execute-deletions))
+  (export dired dired-open-file dired-up-directory dired-mark-delete dired-unmark dired-execute-deletions)
 
 ;; dired.tlisp — directory editor commands
 (defun dired (&optional path)
@@ -42,3 +42,4 @@
       (file-remove (concat (buffer-filename) "/" file)))
     (dired-refresh)
     (message (concat "Deleted " (length marked) " files"))))
+)

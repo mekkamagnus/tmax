@@ -1,5 +1,5 @@
 (defmodule editor/commands/tabs
-  (export))
+  (export)
 
 ;; tabs.tlisp — Tab management key bindings
 ;; Tab operations are TypeScript display primitives (tab-ops.ts).
@@ -7,3 +7,4 @@
 
 (key-bind "gt" "(tab-next)" "normal")
 (key-bind "gT" "(tab-prev)" "normal")
+)

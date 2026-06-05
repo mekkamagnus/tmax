@@ -1,5 +1,5 @@
 (defmodule editor/indent/typescript
-  (export))
+  (export)
 
 ;; typescript.tlisp — TypeScript indent rules
 ;; Increase indent after these patterns on previous line
@@ -7,3 +7,4 @@
 (indent-set-rules
   '("\\{$" "\\($?" "\\[$" "=>$" "else$" "catch$" "finally$")
   '("^\\s*}" "^\\s*\\)" "^\\s*\\]" "^\\s*else" "^\\s*catch" "^\\s*finally"))
+)
