@@ -252,6 +252,7 @@ Detailed coding rules live in `rules/` — each file declares its scope on the f
 | `rules/editor.md` | `src/editor/**/*` — modal system, key bindings, editor API |
 | `rules/testing.md` | `test/**/*` — TDD workflow, bun test commands, test patterns |
 | `rules/ui-testing.md` | `test/ui/**/*` — tmux test harness, API reference, troubleshooting |
+| `rules/daemon-client.md` | `bin/**/*`, `src/server/**/*` — JSON-RPC protocol, sync direction, socket behavior |
 
 ## Common Tasks
 

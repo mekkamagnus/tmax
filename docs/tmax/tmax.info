@@ -124,7 +124,9 @@ the Bun runtime itself.
    • Kill ring with yank-pop cycling, similar to the Emacs kill ring.
    • Built-in help system: ‘describe-key’, ‘describe-function’, and
      ‘apropos-command’.
-   • Which-key popup showing available bindings after prefix keys.
+   • Which-key popup showing available bindings after prefix keys, with
+     M-x and buffer switching completion produced by T-Lisp using
+     Vertico/Orderless/Marginalia-style components.
    • Plugin system with a TLPA (T-Lisp Package Archive) repository.
    • Keyboard macro recording and playback.
    • LSP diagnostics integration.
@@ -211,8 +213,12 @@ The following ‘bun’ scripts are available in the project:
 ‘bun run dev’
      Run the editor in development mode with auto-reload on file
      changes.
+‘bun run tlisp’
+     Start the standalone T-Lisp REPL.
 ‘bun run repl’
-     Start the T-Lisp REPL for interactive experimentation.
+     Compatibility alias for the standalone T-Lisp REPL.
+‘bun run build:tlisp’
+     Build a standalone ‘tlisp’ binary at ‘dist/tlisp’.
 ‘bun run daemon’
      Start the daemon only (no TUI frame).
 ‘bun run tui’
@@ -537,7 +543,10 @@ File: tmax.info,  Node: M-x Mode,  Prev: Command Mode,  Up: Editing Modes
 ============
 
 M-x mode lets you execute T-Lisp functions by name, similar to the Emacs
-‘M-x’ command.  It provides fuzzy command completion.
+‘M-x’ command.  Completion is owned by T-Lisp: command candidates are
+matched with an Orderless-style matcher, displayed with a Vertico-style
+list, and annotated with Marginalia-style metadata such as bindings and
+documentation.
 
    Press ‘SPC ;’ (space followed by semicolon) from normal mode to enter
 M-x mode.
@@ -843,31 +852,35 @@ the search.
 8.2 Replace Operations
 ======================
 
-Replace operations are available through the T-Lisp API:
+Replace operations are exposed as T-Lisp commands:
 
-     ;; Start a replace session
-     (replace-start "old" "new")
+     ;; Start a query replace session
+     (query-replace "old" "new")
 
      ;; Replace the current match and move to next
-     (replace-next)
+     (replace-yes)
 
      ;; Replace all matches
-     (replace-all "old" "new")
+     (replace-all)
 
 8.3 Replace T-Lisp Functions
 ============================
 
-‘(replace-start FIND REPLACE)’
-     Initialize a replace session, finding all occurrences of FIND and
-     preparing to replace them with REPLACE.
-‘(replace-next)’
+‘(query-replace FIND REPLACE)’
+     Initialize an interactive replace session.
+‘(replace-yes)’
      Replace the current match and advance to the next one.
-‘(replace-all FIND REPLACE)’
-     Replace all occurrences of FIND with REPLACE in the current buffer.
-‘(replace-cancel)’
-     Cancel the current replace session.
-‘(replace-status)’
-     Return the current state of the replace session.
+‘(replace-no)’
+     Skip the current match.
+‘(replace-all)’
+     Apply all remaining replacements.
+‘(replace-quit)’
+     Exit the replace session.
+
+   The lower-level editor API also exposes ‘replace-find-matches’,
+‘replace-state-init’, ‘replace-apply-current’, ‘replace-skip’,
+‘replace-apply-all’, ‘replace-exit’, and ‘replace-show-current’ for
+T-Lisp commands that need direct control over replace state.
 
 
 File: tmax.info,  Node: Kill Ring,  Next: Buffer Management,  Prev: Search and Replace,  Up: Top
@@ -893,7 +906,7 @@ a simple clipboard because you can cycle through previous deletions.
 9.2 Kill Ring T-Lisp Functions
 ==============================
 
-‘(kill-ring-add TEXT)’
+‘(kill-ring-save TEXT)’
      Add TEXT to the front of the kill ring.
 ‘(kill-ring-yank)’
      Return the most recent entry from the kill ring.
@@ -902,10 +915,10 @@ a simple clipboard because you can cycle through previous deletions.
      current one.  Use this to cycle through previous deletions.
 ‘(kill-ring-list)’
      Return a list of all entries currently in the kill ring.
-‘(kill-ring-size)’
-     Return the number of entries in the kill ring.
-‘(kill-ring-clear)’
-     Remove all entries from the kill ring.
+‘(set-kill-ring-max SIZE)’
+     Set the maximum number of kill ring entries.
+‘(get-kill-ring-max)’
+     Return the configured maximum kill ring size.
 
 9.3 Yank-Pop
 ============
@@ -983,14 +996,12 @@ tmax creates several special buffers automatically:
      Insert TEXT at the current cursor position.
 ‘(buffer-delete COUNT)’
      Delete COUNT characters starting at the cursor position.
-‘(buffer-save [FILENAME])’
-     Save the current buffer to its associated file, or to FILENAME if
-     provided.
-‘(buffer-save-as FILENAME)’
-     Save the current buffer to a new file and update the buffer's
-     filename association.
-‘(buffer-kill NAME)’
-     Kill (close) the buffer named NAME.
+‘(set-buffer-filename FILENAME)’
+     Associate the current buffer with FILENAME.
+‘(buffer-modified-p)’
+     Return whether the current buffer has unsaved edits.
+‘(set-buffer-modified-p FLAG)’
+     Set the current buffer's modified flag.
 
 10.5 Gap Buffer Implementation
 ==============================
@@ -1029,7 +1040,7 @@ environment, so you have access to the full T-Lisp editor API.
      ;; Custom macros
      (defmacro save-and-quit ()
        '(progn
-          (file-write (buffer-current) (buffer-text))
+          (save-buffer)
           (editor-quit)))
 
      ;; Custom commands
@@ -1347,12 +1358,12 @@ The TLPA repository includes plugins such as:
      Monokai color scheme for tmax.
 ‘lsp-typescript’
      TypeScript language server integration.
-‘lsp-python’
-     Python language server integration.
-‘vim-emulation’
-     Additional Vim compatibility bindings.
-‘auto-pairs’
-     Automatic bracket and quote pairing.
+‘git-integration’
+     Git commands and status integration.
+‘file-tree’
+     File tree sidebar for navigation.
+‘example-plugin’
+     Example plugin demonstrating the plugin API.
 
 12.4 Creating Plugins
 =====================
@@ -1367,9 +1378,7 @@ submit it to the TLPA repository.
      ;; A simple plugin that adds line numbering toggle
 
      (defun toggle-line-numbers ()
-       (let ((current (editor-config "showLineNumbers")))
-         (editor-set-config "showLineNumbers"
-                            (not current))))
+       (line-numbers-mode))
 
      (key-bind "SPC tn" "(toggle-line-numbers)" "normal")
 
@@ -1469,8 +1478,8 @@ If ‘tmax --daemon’ fails:
 If custom key bindings from your init file are not taking effect:
 
    • Check the init file for T-Lisp syntax errors:
-          bun run repl
-          > (load-file "~/.config/tmax/init.tlisp")
+          tmax --init-file /dev/null
+          tmax -e '(eval-init-file)'
    • Reload the init file from within the editor:
           M-x eval-init-file
    • Check the ‘*Messages*’ buffer for error messages:
@@ -1579,8 +1588,9 @@ The T-Lisp editor API is organized into the following modules:
      Cycle through kill ring entries.
 ‘Jump Operations (jump-ops)’
      Jump to specific positions (top, bottom, line number).
-‘Minibuffer Operations (minibuffer-ops)’
-     Minibuffer interaction.
+‘Module Operations (module-ops)’
+     Module registry introspection: loaded modules, exports, lookup, and
+     module descriptions.
 ‘LSP Diagnostics (lsp-diagnostics)’
      Language server protocol diagnostics.
 ‘Plugin Operations (plugin-ops)’
@@ -1642,9 +1652,9 @@ The T-Lisp editor API is organized into the following modules:
 15.4 File Functions
 ===================
 
-‘(file-read FILENAME)’
+‘(read-file-content FILENAME)’
      Read and return the contents of FILENAME.
-‘(file-write FILENAME CONTENT)’
+‘(write-file-content FILENAME CONTENT)’
      Write CONTENT to FILENAME.
 
 15.5 LSP Diagnostics Functions
@@ -1704,22 +1714,29 @@ The T-Lisp interpreter includes a built-in testing framework:
 15.8 T-Lisp REPL
 ================
 
-The T-Lisp REPL (Read-Eval-Print Loop) lets you experiment with T-Lisp
-interactively:
+The standalone ‘tlisp’ CLI provides a REPL, one-shot evaluation, script
+execution, and a Bun-compiled binary target.  It uses the same
+interpreter as the editor with a standalone runtime profile for
+stdout/stdin, filesystem, process, and module-loading primitives.
 
-     bun run repl
+     bun run tlisp
+     bun run tlisp -- -e '(+ 1 2)'
+     bin/tlisp script.tlisp
+     bun run build:tlisp
+     ./dist/tlisp -e '(+ 1 2)'
 
-   In the REPL, you can type T-Lisp expressions and see their results
-immediately:
+   The REPL keeps definitions across inputs, supports multiline forms,
+and provides ‘*1’, ‘*2’, and ‘*3’ for recent results plus ‘*e’ for the
+last error:
 
-     > (+ 1 2 3)
+     tlisp> (+ 1 2 3)
      6
-     > (car '(1 2 3))
+     tlisp> (car '(1 2 3))
      1
-     > (string-append "hello" " " "world")
+     tlisp> (string-append "hello" " " "world")
      "hello world"
-     > (defun square (n) (* n n))
-     > (square 7)
+     tlisp> (defun square (n) (* n n))
+     tlisp> (square 7)
      49
 
    For the complete T-Lisp language and API reference, see the ‘T-Lisp
@@ -1794,7 +1811,7 @@ Index
                                                               (line  13)
 * describe-function:                     Troubleshooting.     (line  68)
 * describe-key:                          Troubleshooting.     (line  68)
-* design philosophy:                     Introduction.        (line  50)
+* design philosophy:                     Introduction.        (line  52)
 * development scripts:                   Installation.        (line  61)
 * editing modes:                         Introduction.        (line  27)
 * editing modes <1>:                     Editing Modes.       (line   6)
@@ -1805,7 +1822,7 @@ Index
 * encoding:                              Troubleshooting.     (line  47)
 * entering command mode:                 Command Mode.        (line   9)
 * entering insert mode:                  Insert Mode.         (line   9)
-* entering M-x mode:                     M-x Mode.            (line   9)
+* entering M-x mode:                     M-x Mode.            (line  12)
 * entering normal mode:                  Normal Mode.         (line  11)
 * eval-buffer:                           Configuration.       (line  64)
 * eval-init-file:                        Configuration.       (line  53)
@@ -1820,13 +1837,13 @@ Index
                                                               (line 112)
 * frontends:                             Introduction.        (line  36)
 * frontends <1>:                         Frontends.           (line   6)
-* gap buffer:                            Buffer Management.   (line  78)
+* gap buffer:                            Buffer Management.   (line  76)
 * git clone:                             Installation.        (line  21)
 * help:                                  Troubleshooting.     (line  68)
 * help system:                           Introduction.        (line  39)
 * i:                                     Insert Mode.         (line   9)
 * if:                                    Configuration.       (line 242)
-* implementation, buffer:                Buffer Management.   (line  78)
+* implementation, buffer:                Buffer Management.   (line  76)
 * incremental search:                    Search and Replace.  (line   9)
 * init file:                             Configuration.       (line   6)
 * init file <1>:                         Configuration.       (line  13)
@@ -1836,7 +1853,7 @@ Index
 * insert mode:                           Insert Mode.         (line   6)
 * insert mode, entering:                 Basic Usage.         (line  27)
 * installation:                          Installation.        (line   6)
-* interactive evaluation:                Command Reference.   (line 178)
+* interactive evaluation:                Command Reference.   (line 179)
 * interchangeable frontends:             Frontends.           (line   6)
 * introduction:                          Introduction.        (line   6)
 * JSON-RPC:                              Daemon/Client Architecture.
@@ -1851,13 +1868,13 @@ Index
 * launcher scripts:                      Installation.        (line  36)
 * let:                                   Configuration.       (line 244)
 * line-wise selection:                   Visual Mode.         (line  13)
-* LSP diagnostics:                       Introduction.        (line  44)
-* M-x examples:                          M-x Mode.            (line  12)
+* LSP diagnostics:                       Introduction.        (line  46)
+* M-x examples:                          M-x Mode.            (line  15)
 * M-x mode:                              M-x Mode.            (line   6)
-* macro recording:                       Introduction.        (line  43)
+* macro recording:                       Introduction.        (line  45)
 * macro recording <1>:                   Configuration.       (line 100)
 * macros, keyboard:                      Configuration.       (line 100)
-* Messages buffer:                       Introduction.        (line  45)
+* Messages buffer:                       Introduction.        (line  47)
 * messages buffer:                       Basic Usage.         (line  72)
 * modal editing:                         Introduction.        (line  25)
 * modes:                                 Editing Modes.       (line   6)
@@ -1878,7 +1895,7 @@ Index
 * PATH:                                  Installation.        (line  36)
 * plugin directory:                      Plugin System.       (line  29)
 * plugin management:                     Plugin System.       (line  13)
-* plugin system:                         Introduction.        (line  42)
+* plugin system:                         Introduction.        (line  44)
 * plugins:                               Plugin System.       (line   6)
 * prefix keys:                           Key Bindings.        (line 165)
 * prerequisites:                         Installation.        (line   9)
@@ -1888,17 +1905,17 @@ Index
                                                               (line  88)
 * q:                                     Configuration.       (line 100)
 * quasiquote:                            Configuration.       (line 260)
+* query-replace:                         Search and Replace.  (line  27)
 * quitting:                              Basic Usage.         (line  31)
 * quote:                                 Configuration.       (line 240)
 * React frontend:                        Frontends.           (line  35)
 * reference:                             Command Reference.   (line   6)
 * REGISTER:                              Configuration.       (line 100)
 * reloading configuration:               Configuration.       (line  53)
-* REPL:                                  Command Reference.   (line 178)
+* REPL:                                  Command Reference.   (line 179)
 * replace:                               Search and Replace.  (line   6)
 * replace <1>:                           Search and Replace.  (line  27)
-* replace-next:                          Search and Replace.  (line  27)
-* replace-start:                         Search and Replace.  (line  27)
+* replace-yes:                           Search and Replace.  (line  27)
 * saving:                                Basic Usage.         (line  29)
 * search:                                Search and Replace.  (line   6)
 * server:                                Daemon/Client Architecture.
@@ -1913,13 +1930,13 @@ Index
 * starting tmax:                         Basic Usage.         (line   9)
 * status line:                           Basic Usage.         (line  53)
 * Steep frontend:                        Frontends.           (line  46)
-* submitting plugins:                    Plugin System.       (line  73)
+* submitting plugins:                    Plugin System.       (line  71)
 * switching buffers:                     Buffer Management.   (line  25)
 * T-Lisp:                                Introduction.        (line  11)
 * T-Lisp interpreter:                    Introduction.        (line  28)
-* T-Lisp testing:                        Command Reference.   (line 150)
+* T-Lisp testing:                        Command Reference.   (line 151)
 * terminal frontend:                     Frontends.           (line  14)
-* testing framework:                     Command Reference.   (line 150)
+* testing framework:                     Command Reference.   (line 151)
 * text objects:                          Operators and Text Objects.
                                                               (line   6)
 * text objects <1>:                      Operators and Text Objects.
@@ -1958,26 +1975,26 @@ Index
 Tag Table:
 Node: Top1309
 Node: Introduction4113
-Node: Installation6728
-Node: Daemon/Client Architecture8718
-Node: Basic Usage12569
-Node: Editing Modes15156
-Node: Normal Mode15583
-Node: Insert Mode16188
-Node: Visual Mode16770
-Node: Command Mode17629
-Node: M-x Mode18145
-Node: Key Bindings18896
-Node: Operators and Text Objects22536
-Node: Search and Replace24858
-Node: Kill Ring26334
-Node: Buffer Management28081
-Node: Configuration30620
-Node: Plugin System37990
-Node: Frontends40302
-Node: Troubleshooting42376
-Node: Command Reference44698
-Node: Index50819
+Node: Installation6851
+Node: Daemon/Client Architecture8987
+Node: Basic Usage12838
+Node: Editing Modes15425
+Node: Normal Mode15852
+Node: Insert Mode16457
+Node: Visual Mode17039
+Node: Command Mode17898
+Node: M-x Mode18414
+Node: Key Bindings19340
+Node: Operators and Text Objects22980
+Node: Search and Replace25302
+Node: Kill Ring26896
+Node: Buffer Management28659
+Node: Configuration31139
+Node: Plugin System38479
+Node: Frontends40679
+Node: Troubleshooting42753
+Node: Command Reference45074
+Node: Index51688
 
 End Tag Table
 

@@ -3,7 +3,7 @@
 @setfilename tmax.info
 @settitle tmax Manual
 @set VERSION 0.2.0
-@set UPDATED 2 June 2026
+@set UPDATED 5 June 2026
 @c %**end of header
 
 @copying
@@ -143,7 +143,9 @@ Built-in help system: @code{describe-key}, @code{describe-function},
 and @code{apropos-command}.
 @item
 @cindex which-key
-Which-key popup showing available bindings after prefix keys.
+Which-key popup showing available bindings after prefix keys, with
+M-x and buffer switching completion produced by T-Lisp using
+Vertico/Orderless/Marginalia-style components.
 @item
 @cindex plugin system
 Plugin system with a TLPA (T-Lisp Package Archive) repository.
@@ -251,8 +253,12 @@ The following @code{bun} scripts are available in the project:
 Run the editor directly (no daemon).  Accepts a filename argument.
 @item bun run dev
 Run the editor in development mode with auto-reload on file changes.
+@item bun run tlisp
+Start the standalone T-Lisp REPL.
 @item bun run repl
-Start the T-Lisp REPL for interactive experimentation.
+Compatibility alias for the standalone T-Lisp REPL.
+@item bun run build:tlisp
+Build a standalone @command{tlisp} binary at @file{dist/tlisp}.
 @item bun run daemon
 Start the daemon only (no TUI frame).
 @item bun run tui
@@ -636,7 +642,10 @@ Press @kbd{Enter} to execute the command.  Press @kbd{Escape} to cancel.
 @cindex @kbd{SPC ;}
 
 M-x mode lets you execute T-Lisp functions by name, similar to the
-Emacs @kbd{M-x} command.  It provides fuzzy command completion.
+Emacs @kbd{M-x} command.  Completion is owned by T-Lisp: command
+candidates are matched with an Orderless-style matcher, displayed with
+a Vertico-style list, and annotated with Marginalia-style metadata such
+as bindings and documentation.
 
 @cindex entering M-x mode
 Press @kbd{SPC ;} (space followed by semicolon) from normal mode to
@@ -979,40 +988,44 @@ line.  Type your search pattern and press @kbd{Enter}.  Press
 @section Replace Operations
 
 @cindex replace
-@cindex @code{replace-start}
-@cindex @code{replace-next}
+@cindex @code{query-replace}
+@cindex @code{replace-yes}
 
-Replace operations are available through the T-Lisp API:
+Replace operations are exposed as T-Lisp commands:
 
 @example
 @group
-;; Start a replace session
-(replace-start "old" "new")
+;; Start a query replace session
+(query-replace "old" "new")
 
 ;; Replace the current match and move to next
-(replace-next)
+(replace-yes)
 
 ;; Replace all matches
-(replace-all "old" "new")
+(replace-all)
 @end group
 @end example
 
 @section Replace T-Lisp Functions
 
 @table @code
-@item (replace-start @var{find} @var{replace})
-Initialize a replace session, finding all occurrences of @var{find} and
-preparing to replace them with @var{replace}.
-@item (replace-next)
+@item (query-replace @var{find} @var{replace})
+Initialize an interactive replace session.
+@item (replace-yes)
 Replace the current match and advance to the next one.
-@item (replace-all @var{find} @var{replace})
-Replace all occurrences of @var{find} with @var{replace} in the
-current buffer.
-@item (replace-cancel)
-Cancel the current replace session.
-@item (replace-status)
-Return the current state of the replace session.
+@item (replace-no)
+Skip the current match.
+@item (replace-all)
+Apply all remaining replacements.
+@item (replace-quit)
+Exit the replace session.
 @end table
+
+The lower-level editor API also exposes @code{replace-find-matches},
+@code{replace-state-init}, @code{replace-apply-current},
+@code{replace-skip}, @code{replace-apply-all}, @code{replace-exit}, and
+@code{replace-show-current} for T-Lisp commands that need direct control
+over replace state.
 
 @c ============================================================
 @node Kill Ring
@@ -1041,7 +1054,7 @@ the oldest entry is discarded.
 @section Kill Ring T-Lisp Functions
 
 @table @code
-@item (kill-ring-add @var{text})
+@item (kill-ring-save @var{text})
 Add @var{text} to the front of the kill ring.
 @item (kill-ring-yank)
 Return the most recent entry from the kill ring.
@@ -1050,10 +1063,10 @@ Rotate the kill ring, making the second-most-recent entry the current
 one.  Use this to cycle through previous deletions.
 @item (kill-ring-list)
 Return a list of all entries currently in the kill ring.
-@item (kill-ring-size)
-Return the number of entries in the kill ring.
-@item (kill-ring-clear)
-Remove all entries from the kill ring.
+@item (set-kill-ring-max @var{size})
+Set the maximum number of kill ring entries.
+@item (get-kill-ring-max)
+Return the configured maximum kill ring size.
 @end table
 
 @section Yank-Pop
@@ -1151,14 +1164,12 @@ Return the number of lines in the current buffer.
 Insert @var{text} at the current cursor position.
 @item (buffer-delete @var{count})
 Delete @var{count} characters starting at the cursor position.
-@item (buffer-save [@var{filename}])
-Save the current buffer to its associated file, or to @var{filename} if
-provided.
-@item (buffer-save-as @var{filename})
-Save the current buffer to a new file and update the buffer's filename
-association.
-@item (buffer-kill @var{name})
-Kill (close) the buffer named @var{name}.
+@item (set-buffer-filename @var{filename})
+Associate the current buffer with @var{filename}.
+@item (buffer-modified-p)
+Return whether the current buffer has unsaved edits.
+@item (set-buffer-modified-p @var{flag})
+Set the current buffer's modified flag.
 @end table
 
 @section Gap Buffer Implementation
@@ -1204,7 +1215,7 @@ Example init file:
 ;; Custom macros
 (defmacro save-and-quit ()
   '(progn
-     (file-write (buffer-current) (buffer-text))
+     (save-buffer)
      (editor-quit)))
 
 ;; Custom commands
@@ -1576,12 +1587,12 @@ Solarized dark color theme for tmax.
 Monokai color scheme for tmax.
 @item lsp-typescript
 TypeScript language server integration.
-@item lsp-python
-Python language server integration.
-@item vim-emulation
-Additional Vim compatibility bindings.
-@item auto-pairs
-Automatic bracket and quote pairing.
+@item git-integration
+Git commands and status integration.
+@item file-tree
+File tree sidebar for navigation.
+@item example-plugin
+Example plugin demonstrating the plugin API.
 @end table
 
 @section Creating Plugins
@@ -1599,9 +1610,7 @@ A plugin is a standard T-Lisp file.  For example:
 ;; A simple plugin that adds line numbering toggle
 
 (defun toggle-line-numbers ()
-  (let ((current (editor-config "showLineNumbers")))
-    (editor-set-config "showLineNumbers"
-                       (not current))))
+  (line-numbers-mode))
 
 (key-bind "SPC tn" "(toggle-line-numbers)" "normal")
 @end group
@@ -1723,8 +1732,8 @@ If custom key bindings from your init file are not taking effect:
 @itemize @bullet
 @item Check the init file for T-Lisp syntax errors:
 @example
-bun run repl
-> (load-file "~/.config/tmax/init.tlisp")
+tmax --init-file /dev/null
+tmax -e '(eval-init-file)'
 @end example
 @item Reload the init file from within the editor:
 @example
@@ -1862,8 +1871,9 @@ Emacs-style kill ring management.
 Cycle through kill ring entries.
 @item Jump Operations (@file{jump-ops})
 Jump to specific positions (top, bottom, line number).
-@item Minibuffer Operations (@file{minibuffer-ops})
-Minibuffer interaction.
+@item Module Operations (@file{module-ops})
+Module registry introspection: loaded modules, exports, lookup, and
+module descriptions.
 @item LSP Diagnostics (@file{lsp-diagnostics})
 Language server protocol diagnostics.
 @item Plugin Operations (@file{plugin-ops})
@@ -1929,9 +1939,9 @@ Quit the editor.
 @section File Functions
 
 @table @code
-@item (file-read @var{filename})
+@item (read-file-content @var{filename})
 Read and return the contents of @var{filename}.
-@item (file-write @var{filename} @var{content})
+@item (write-file-content @var{filename} @var{content})
 Write @var{content} to @var{filename}.
 @end table
 
@@ -1998,26 +2008,34 @@ Define a test suite.
 
 @cindex REPL
 @cindex interactive evaluation
-The T-Lisp REPL (Read-Eval-Print Loop) lets you experiment with T-Lisp
-interactively:
+The standalone @command{tlisp} CLI provides a REPL, one-shot
+evaluation, script execution, and a Bun-compiled binary target.  It
+uses the same interpreter as the editor with a standalone runtime
+profile for stdout/stdin, filesystem, process, and module-loading
+primitives.
 
 @example
-bun run repl
+bun run tlisp
+bun run tlisp -- -e '(+ 1 2)'
+bin/tlisp script.tlisp
+bun run build:tlisp
+./dist/tlisp -e '(+ 1 2)'
 @end example
 
-In the REPL, you can type T-Lisp expressions and see their results
-immediately:
+The REPL keeps definitions across inputs, supports multiline forms, and
+provides @code{*1}, @code{*2}, and @code{*3} for recent results plus
+@code{*e} for the last error:
 
 @example
 @group
-> (+ 1 2 3)
+tlisp> (+ 1 2 3)
 6
-> (car '(1 2 3))
+tlisp> (car '(1 2 3))
 1
-> (string-append "hello" " " "world")
+tlisp> (string-append "hello" " " "world")
 "hello world"
-> (defun square (n) (* n n))
-> (square 7)
+tlisp> (defun square (n) (* n n))
+tlisp> (square 7)
 49
 @end group
 @end example
