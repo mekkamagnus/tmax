@@ -9,7 +9,7 @@
     (find-file-open path)
     (completing-read
       "Find file: "
-      "minibuffer-empty-table"
+      "file-completion-table"
       nil
       nil
       ""

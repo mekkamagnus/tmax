@@ -5,7 +5,7 @@
 
 import * as fs from 'fs';
 import type { TLispValue, TLispFunctionImpl } from "../../tlisp/types.ts";
-import { createNil, createNumber, createString, createBoolean, createList, createSymbol } from "../../tlisp/values.ts";
+import { createNil, createNumber, createString, createBoolean, createList, createSymbol, createHashmap } from "../../tlisp/values.ts";
 import { Either } from "../../utils/task-either.ts";
 import { validateArgsCount, validateArgType } from "../../utils/validation.ts";
 import { AppError } from "../../error/types.ts";
@@ -289,12 +289,12 @@ export function createFileOps(
         } catch {
           // use defaults for entries we can't stat
         }
-        return createList([
-          createSymbol("name"), createString(entry.name),
-          createSymbol("isFile"), createBoolean(entry.isFile()),
-          createSymbol("isDirectory"), createBoolean(entry.isDirectory()),
-          createSymbol("size"), createNumber(size),
-          createSymbol("modified"), createString(modified),
+        return createHashmap([
+          ["name", createString(entry.name)],
+          ["isFile", createBoolean(entry.isFile())],
+          ["isDirectory", createBoolean(entry.isDirectory())],
+          ["size", createNumber(size)],
+          ["modified", createString(modified)],
         ]);
       });
       return Either.right(createList(result));
