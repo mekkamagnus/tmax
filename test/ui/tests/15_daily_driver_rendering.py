@@ -43,7 +43,7 @@ def test_daily_driver_rendering() -> tuple[AssertionResult, ...]:
         window = state.active_window.unwrap()
 
         client.eval_expr(state.config, '(key-bind "R" "(relative-line-numbers-mode 1)" "normal")')
-        inp.send_key(state.config, window, "R")
+        inp.send_key(state.config, "R")
         time.sleep(0.5)
         screen = queries.capture_output(state.config, window).unwrap_or("")
         results.append(AssertionResult(
@@ -51,15 +51,15 @@ def test_daily_driver_rendering() -> tuple[AssertionResult, ...]:
             "Relative line-number gutter should be visible",
         ))
 
-        inp.send_keys(state.config, window, "C-w", "s")
+        inp.send_keys(state.config, "C-w", "s")
         time.sleep(0.5)
         results.append(_eval_equals(state.config, "(window-count)", "2", "C-w s should split"))
         results.append(assert_text_visible(state.config, window, "\u2500", "Horizontal split separator should be visible"))
 
-        inp.send_keys(state.config, window, "C-w", "w")
+        inp.send_keys(state.config, "C-w", "w")
         results.append(_eval_equals(state.config, "(window-current)", "1", "C-w w should switch focus"))
-        inp.send_keys(state.config, window, "C-w", "+")
-        inp.send_keys(state.config, window, "C-w", "q")
+        inp.send_keys(state.config, "C-w", "+")
+        inp.send_keys(state.config, "C-w", "q")
         results.append(_eval_equals(state.config, "(window-count)", "1", "C-w q should close the focused split"))
 
         client.eval_expr(state.config, '(tab-new "one-tab")')
@@ -70,10 +70,10 @@ def test_daily_driver_rendering() -> tuple[AssertionResult, ...]:
         results.append(assert_text_visible(state.config, window, "one-tab", "Tab bar should show the first tab"))
         results.append(assert_text_visible(state.config, window, "two-tab", "Tab bar should show the active tab"))
 
-        inp.send_keys(state.config, window, "g", "T")
+        inp.send_keys(state.config, "g", "T")
         time.sleep(0.5)
         results.append(assert_text_visible(state.config, window, "TAB-ONE", "gT should render the previous tab"))
-        inp.send_keys(state.config, window, "g", "t")
+        inp.send_keys(state.config, "g", "t")
         time.sleep(0.5)
         results.append(assert_text_visible(state.config, window, "TAB-TWO", "gt should render the next tab"))
 

@@ -1,118 +1,83 @@
-"""Key sending functions — take (config, window) not self."""
+"""Key sending functions — drive editor through tmaxclient --key (agent-as-user)."""
 
 from __future__ import annotations
 
-import subprocess
 import time
 
 from .types import HarnessConfig, HarnessError, Result, Ok, Err
+from . import client
 
 
-def translate_key(key: str) -> str:
-    """Pure key translation for tmux send-keys. No IO."""
+def translate_key_for_daemon(key: str) -> str:
+    """Map harness key notation to the raw character tmaxclient --key expects."""
     mapping = {
-        "Escape": "Escape",
-        "Enter": "Enter",
-        "Space": "Space",
-        "Backspace": "BSpace",
-        "Tab": "Tab",
-        "C-[": "Escape",
-        "C-m": "Enter",
-        "C-f": "C-f",
-        "C-b": "C-b",
-        "C-d": "C-d",
-        "C-u": "C-u",
-        "C-r": "C-r",
-        "C-g": "C-g",
-        "C-n": "C-n",
-        "C-p": "C-p",
-        "C-x": "C-x",
+        "Escape": "\x1b",
+        "Enter": "\r",
+        "Space": " ",
+        "Backspace": "\x7f",
+        "Tab": "\t",
+        "BSpace": "\x7f",
+        "C-[": "\x1b",
+        "C-m": "\r",
+        "C-f": "\x06",
+        "C-b": "\x02",
+        "C-d": "\x04",
+        "C-u": "\x15",
+        "C-r": "\x12",
+        "C-g": "\x07",
+        "C-n": "\x0e",
+        "C-p": "\x10",
+        "C-w": "\x17",
+        "C-v": "\x16",
+        "C-x": "\x18",
+        "Up": "\x1b[A",
+        "Down": "\x1b[B",
+        "Left": "\x1b[D",
+        "Right": "\x1b[C",
+        "PageUp": "\x1b[5~",
+        "PageDown": "\x1b[6~",
     }
     return mapping.get(key, key)
 
 
-def escape_literal_key(key: str) -> str:
-    """Escape tmux command separators while preserving the literal key."""
-    return key.replace(";", r"\;")
-
-
-def _target(config: HarnessConfig, window: str) -> str:
-    return f"{config.session_name}:{window}"
-
-
-def _send_raw(target: str, keys: list[str], literal: bool = False) -> Result[None, HarnessError]:
-    """Send keys to tmux target."""
-    cmd = ["tmux", "send-keys"]
-    if literal:
-        cmd.append("-l")
-    tmux_keys = [escape_literal_key(key) for key in keys] if literal else keys
-    cmd.extend(["-t", target, *tmux_keys])
-    try:
-        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=5)
-        if proc.returncode != 0:
-            return Err(HarnessError(
-                f"send-keys failed: {proc.stderr.strip() or proc.stdout.strip()}",
-            ))
-        return Ok(None)
-    except (subprocess.TimeoutExpired, FileNotFoundError) as e:
-        return Err(HarnessError(f"send-keys failed: {e}"))
-
-
-def send_key(config: HarnessConfig, window: str, key: str) -> Result[None, HarnessError]:
-    """Send a single key to window."""
-    target = _target(config, window)
-    translated = translate_key(key)
-    # Use literal mode for regular characters, non-literal for special keys
-    special_keys = {"Escape", "Enter", "Space", "BSpace", "Tab",
-        "C-f", "C-b", "C-d", "C-u", "C-r", "C-g", "C-n", "C-p",
-        "C-m", "C-w", "C-v", "C-x", "Up", "Down", "Left", "Right",
-        "PageUp", "PageDown"}
-    if translated in special_keys:
-        result = _send_raw(target, [translated])
-    else:
-        result = _send_raw(target, [translated], literal=True)
+def send_key(config: HarnessConfig, key: str) -> Result[None, HarnessError]:
+    """Send a single key to the editor via daemon --key."""
+    translated = translate_key_for_daemon(key)
+    result = client.send_key(config, translated)
+    if result.is_err():
+        return Err(result.unwrap_err())
     time.sleep(config.key_delay)
-    return result
+    return Ok(None)
 
 
-def send_keys(config: HarnessConfig, window: str, *keys: str) -> Result[None, HarnessError]:
+def send_keys(config: HarnessConfig, *keys: str) -> Result[None, HarnessError]:
     """Send multiple keys in sequence."""
     for key in keys:
-        r = send_key(config, window, key)
+        r = send_key(config, key)
         if r.is_err():
             return r
     return Ok(None)
 
 
-def send_command(config: HarnessConfig, window: str, cmd: str) -> Result[None, HarnessError]:
-    """Send a shell command (text + Enter)."""
-    target = _target(config, window)
-    result = _send_raw(target, [cmd, "Enter"])
-    time.sleep(config.operation_delay)
-    return result
-
-
-def send_text(config: HarnessConfig, window: str, text: str) -> Result[None, HarnessError]:
-    """Send text literally, character by character."""
-    target = _target(config, window)
+def send_text(config: HarnessConfig, text: str) -> Result[None, HarnessError]:
+    """Send text character by character."""
     for ch in text:
-        r = _send_raw(target, [ch], literal=True)
+        r = send_key(config, ch)
         if r.is_err():
             return r
-        time.sleep(config.key_delay)
     return Ok(None)
 
 
-def send_enter(config: HarnessConfig, window: str) -> Result[None, HarnessError]:
-    return send_key(config, window, "Enter")
+def send_enter(config: HarnessConfig) -> Result[None, HarnessError]:
+    return send_key(config, "Enter")
 
 
-def send_escape(config: HarnessConfig, window: str) -> Result[None, HarnessError]:
-    return send_key(config, window, "Escape")
+def send_escape(config: HarnessConfig) -> Result[None, HarnessError]:
+    return send_key(config, "Escape")
 
 
-def send_vim_command(config: HarnessConfig, window: str, cmd: str) -> Result[None, HarnessError]:
+def send_vim_command(config: HarnessConfig, cmd: str) -> Result[None, HarnessError]:
     """Send a vim-style command (:cmd + Enter)."""
-    send_key(config, window, ":")
-    send_text(config, window, cmd)
-    return send_enter(config, window)
+    send_key(config, ":")
+    send_text(config, cmd)
+    return send_enter(config)

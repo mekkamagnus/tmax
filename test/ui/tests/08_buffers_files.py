@@ -81,6 +81,7 @@ def test_buffers_files() -> tuple[AssertionResult, ...]:
     new_file = f"{state.config.test_dir}/new-file.txt"
     open_file(state.config, window, new_file)
     time.sleep(0.5)
+    enter_insert(state.config, window)
     type_text(state.config, window, "brand new")
     save_file(state.config, window)
     time.sleep(1)

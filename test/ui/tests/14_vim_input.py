@@ -1,4 +1,4 @@
-"""Renderer E2E: send real Vim and insert-mode keys through tmux."""
+"""Renderer E2E: send real Vim and insert-mode keys through daemon --key."""
 
 import os
 import sys
@@ -26,26 +26,25 @@ from tmax_harness import input as inp
 
 def test_vim_input() -> tuple[AssertionResult, ...]:
     results: list[AssertionResult] = []
-    state = init({"mode_override": "daemon-tmux"}).unwrap()
+    state = init({"mode_override": "daemon"}).unwrap()
     test_file = f"{state.config.test_dir}/vim-input-test.txt"
     create_test_file(test_file, "")
 
     try:
         state = start(state, test_file).unwrap()
-        window = state.active_window.unwrap()
 
         results.append(AssertionResult(
-            enter_insert(state.config, window).is_ok(),
+            enter_insert(state.config).is_ok(),
             "Real i key should enter insert mode",
         ))
-        type_text(state.config, window, "A")
-        inp.send_enter(state.config, window)
-        type_text(state.config, window, "B")
-        inp.send_key(state.config, window, "Backspace")
-        inp.send_key(state.config, window, "Tab")
-        type_text(state.config, window, "C")
+        type_text(state.config, text="A")
+        inp.send_enter(state.config)
+        type_text(state.config, text="B")
+        inp.send_key(state.config, "Backspace")
+        inp.send_key(state.config, "Tab")
+        type_text(state.config, text="C")
         results.append(AssertionResult(
-            enter_normal(state.config, window).is_ok(),
+            enter_normal(state.config).is_ok(),
             "Real Escape key should return to normal mode",
         ))
 
@@ -56,7 +55,7 @@ def test_vim_input() -> tuple[AssertionResult, ...]:
             "Enter, Backspace, and Tab should traverse the renderer input path",
         ))
 
-        inp.send_keys(state.config, window, "g", "g", "d", "d")
+        inp.send_keys(state.config, "g", "g", "d", "d")
         results.append(assert_buffer_text_equals(
             state.config,
             "\tC",

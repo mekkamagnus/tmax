@@ -4,3 +4,8 @@ version = "0.1.0"
 description = "Functional Python test harness for tmax terminal editor UI testing"
 requires-python = ">=3.10"
 dependencies = []
+
+[dependency-groups]
+dev = [
+    "pytest>=9.0.3",
+]
