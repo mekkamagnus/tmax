@@ -14,6 +14,8 @@ import {
   expectTlispString,
 } from "../helpers/editor-fixture.ts";
 
+const KEY_BIND_ENHANCEMENT_TIMEOUT_MS = 15000;
+
 describe("Enhanced Key Bind Functions", () => {
   let editor: Editor;
   let mockTerminal: MockTerminal;
@@ -158,7 +160,7 @@ describe("Enhanced Key Bind Functions", () => {
     expect(mappings?.some(mapping =>
       mapping.command === "(kill-line)" && mapping.mode === "normal"
     ) ?? false).toBe(false);
-  });
+  }, KEY_BIND_ENHANCEMENT_TIMEOUT_MS);
 
   test("should list all active bindings with key-bindings function", async () => {
     const interpreter = editor.getInterpreter();

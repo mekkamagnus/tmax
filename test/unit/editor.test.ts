@@ -161,8 +161,11 @@ describe("Editor Implementation", () => {
     // Bind a key - should not throw
     interpreter.execute("(key-bind \"x\" \"(editor-set-status \\\"X pressed\\\")\" \"normal\")");
 
-    // The key binding should be registered
-    expect(true).toBe(true); // Placeholder assertion
+    const mappings = editor.getKeyMappings().get("x") ?? [];
+    expect(mappings.some(mapping =>
+      mapping.mode === "normal" &&
+      mapping.command === '(editor-set-status "X pressed")'
+    )).toBe(true);
   });
 
   test("should handle file operations", () => {

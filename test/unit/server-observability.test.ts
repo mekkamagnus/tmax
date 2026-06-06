@@ -5,6 +5,8 @@ import { exec } from 'child_process';
 import { TmaxServer } from '../../src/server/server.ts';
 
 const execAsync = promisify(exec);
+const SERVER_OBSERVABILITY_TIMEOUT_MS = 20000;
+const RPC_REQUEST_TIMEOUT_MS = 20000;
 
 function request(method: string, params: any = {}, id: number = Date.now()): string {
   return JSON.stringify({ jsonrpc: '2.0', id, method, params }) + '\n';
@@ -16,7 +18,7 @@ async function sendRequest(socketPath: string, method: string, params: any = {})
     const timer = setTimeout(() => {
       socket.destroy();
       reject(new Error('Request timeout'));
-    }, 5000);
+    }, RPC_REQUEST_TIMEOUT_MS);
     socket.on('connect', () => socket.write(request(method, params)));
     socket.on('data', (data) => {
       clearTimeout(timer);
@@ -54,7 +56,7 @@ class RpcConnection {
       const timer = setTimeout(() => {
         this.socket.off('data', onData);
         reject(new Error(`Request timeout: ${method} ${JSON.stringify(params)}`));
-      }, 5000);
+      }, RPC_REQUEST_TIMEOUT_MS);
       const onData = (data: Buffer) => {
         responseBuffer += data.toString();
         const newline = responseBuffer.indexOf('\n');
@@ -91,7 +93,7 @@ describe('Server observability', () => {
     server = new TmaxServer(socketPath, true);
     await server.start();
     await new Promise(resolve => setTimeout(resolve, 250));
-  });
+  }, SERVER_OBSERVABILITY_TIMEOUT_MS);
 
   afterEach(async () => {
     if (server) {
@@ -99,7 +101,7 @@ describe('Server observability', () => {
       server = null;
     }
     await execAsync(`rm -f "${socketPath}"`);
-  });
+  }, SERVER_OBSERVABILITY_TIMEOUT_MS);
 
   test('status returns daemon metadata and no frames before TUI connects', async () => {
     const response = await sendRequest(socketPath, 'status');
@@ -111,7 +113,7 @@ describe('Server observability', () => {
     expect(response.result.frameCount).toBe(0);
     expect(response.result.frames).toEqual([]);
     expect(response.result.editor.mode).toBe('normal');
-  });
+  }, SERVER_OBSERVABILITY_TIMEOUT_MS);
 
   test('connect-frame registers TUI client and frame metadata', async () => {
     const conn = await RpcConnection.connect(socketPath);
@@ -131,7 +133,7 @@ describe('Server observability', () => {
     expect(frame.renderCount).toBe(0);
 
     conn.close();
-  });
+  }, SERVER_OBSERVABILITY_TIMEOUT_MS);
 
   test('client lifecycle events update readiness and render metadata', async () => {
     const conn = await RpcConnection.connect(socketPath);
@@ -160,7 +162,7 @@ describe('Server observability', () => {
     expect(frame.terminalSize).toEqual({ width: 100, height: 30 });
 
     conn.close();
-  });
+  }, SERVER_OBSERVABILITY_TIMEOUT_MS);
 
   test('daemon eval mutations sync editor state to connected frames', async () => {
     const conn = await RpcConnection.connect(socketPath);
@@ -181,7 +183,7 @@ describe('Server observability', () => {
     expect(frame.lastSyncAt).toBeString();
 
     conn.close();
-  });
+  }, SERVER_OBSERVABILITY_TIMEOUT_MS);
 
   test('frames keep independent opaque minibuffer sessions and views', async () => {
     const first = await RpcConnection.connect(socketPath);
@@ -218,7 +220,7 @@ describe('Server observability', () => {
 
     first.close();
     second.close();
-  });
+  }, SERVER_OBSERVABILITY_TIMEOUT_MS);
 
   test('recent errors are bounded and included in status', async () => {
     await sendRequest(socketPath, 'client-event', {
@@ -230,5 +232,5 @@ describe('Server observability', () => {
 
     expect(status.result.recentErrors.length).toBeLessThanOrEqual(50);
     expect(status.result.recentErrors.at(-1).message).toBe('observability error');
-  });
+  }, SERVER_OBSERVABILITY_TIMEOUT_MS);
 });

@@ -203,4 +203,20 @@ describe("T-Lisp Tokenizer", () => {
       ]);
     }
   });
+
+  test("should return Either Left for unterminated string literal", () => {
+    const result = tokenizer.tokenize('("hello');
+    expect(Either.isLeft(result)).toBe(true);
+    if (Either.isLeft(result)) {
+      expect(result.left.message).toContain("Unterminated string literal");
+    }
+  });
+
+  test("should tokenize multiple expressions", () => {
+    const result = tokenizer.tokenize("(+ 1 2) (- 3 4)");
+    expect(Either.isRight(result)).toBe(true);
+    if (Either.isRight(result)) {
+      expect(result.right).toEqual(["(", "+", "1", "2", ")", "(", "-", "3", "4", ")"]);
+    }
+  });
 });

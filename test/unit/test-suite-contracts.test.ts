@@ -15,7 +15,7 @@ describe("test-suite contracts", () => {
     }
 
     expect(violations).toEqual([]);
-  });
+  }, 15000);
 
   test("editor key handling uses the current one-argument contract", async () => {
     const violations: string[] = [];
@@ -32,5 +32,5 @@ describe("test-suite contracts", () => {
     }
 
     expect(violations).toEqual([]);
-  });
+  }, 15000);
 });

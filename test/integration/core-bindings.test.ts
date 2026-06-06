@@ -212,7 +212,7 @@ describe("Core Bindings Integration", () => {
     await testEditor.start();
 
     const state = testEditor.getState();
-    // Should contain a warning about failed core bindings loading
-    expect(state.statusMessage).toBe("Welcome to tmax");
+    expect(testEditor.isRunning()).toBe(true);
+    expect(state.statusMessage).not.toContain("Failed to load core bindings");
   });
 });

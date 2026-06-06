@@ -185,4 +185,32 @@ describe("T-Lisp Parser", () => {
     const list = result.value as any[];
     expect(list[0].value).toBe("+");
   });
+
+  test("should return Either Left for malformed expressions", () => {
+    const malformedInputs = [
+      "())",
+      "((",
+      "(",
+      ")",
+      '"invalid',
+      "'",
+    ];
+
+    for (const input of malformedInputs) {
+      const result = parser.parse(input);
+      expect(Either.isLeft(result)).toBe(true);
+    }
+  });
+
+  test("should parse multiline test definitions", () => {
+    const result = parseResult(`
+      (deftest my-test ()
+        (assert-true t))
+    `);
+
+    expect(result.type).toBe("list");
+    const list = result.value as any[];
+    expect(list[0].value).toBe("deftest");
+    expect(list[1].value).toBe("my-test");
+  });
 });
