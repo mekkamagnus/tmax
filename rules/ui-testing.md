@@ -143,8 +143,10 @@ cleanup(state)                        # Cleanup at end
 3. Never stop, replace, or remove a daemon, tmux resource, or path the run did not create.
 4. Use `daemon` for API/state integration and never make renderer claims there.
 5. Use `daemon-tmux` for renderer behavior; send real keys and inspect captured output.
-6. Treat query failures as failures and report skips/expected failures separately.
-7. Thread state explicitly and collect immutable assertion results.
+6. Drive input through `tmaxclient --key`; tmux is only the renderer surface for `daemon-tmux`.
+7. Before manual tmux debugging, run `bun run tmux:audit` and prefer the existing `tmax` session over creating ad hoc sessions.
+8. Treat query failures as failures and report skips/expected failures separately.
+9. Thread state explicitly and collect immutable assertion results.
 
 ### Troubleshooting
 
@@ -155,8 +157,9 @@ cleanup(state)                        # Cleanup at end
 - **TUI won't become ready:** query the per-run socket and inspect recent errors
 - **Renderer pane blank:** Check pane command and tmux capture; daemon readiness proves the client connected, tmux capture proves visible rendering
 - **Tests timing out:** Increase `TMAX_DEFAULT_TIMEOUT` or `TMAX_STARTUP_WAIT`
-- **Keys not being sent:** Verify tmux session exists, check active window
+- **Keys not being sent:** Verify `tmaxclient --key` reaches the configured socket; then check frame status and recent client errors
 - **Mode detection unreliable:** Use `assert_daemon_mode` instead of `assert_mode`
+- **Too many tmax tmux sessions:** Run `bun run tmux:audit`; stale detached harness shells can be removed with `bun run tmux:cleanup-stale`
 
 ### Current Coverage
 

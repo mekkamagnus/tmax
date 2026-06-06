@@ -18,6 +18,7 @@ dist/
 release/
 *.exe
 tmax-*
+!scripts/tmax-tmux-audit.sh
 tmax.exe
 
 # IDE/Editor files
