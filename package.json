@@ -15,6 +15,8 @@
     "test:ui": "cd test/ui && uv run python run_python_suite.py",
     "test:ui:renderer": "cd test/ui && uv run python run_python_suite.py daemon-tmux",
     "test:ui:helpers": "cd test/ui && uv run python tests/test_harness_helpers.py",
+    "tmux:audit": "bash scripts/tmax-tmux-audit.sh",
+    "tmux:cleanup-stale": "bash scripts/tmax-tmux-audit.sh --cleanup-stale-shells",
     "check": "node --import tsx --eval \"import('./src/main.tsx')\" -- --help",
     "typecheck": "bunx tsc --noEmit",
     "typecheck:src": "bunx tsc --noEmit --project tsconfig.src.json",
