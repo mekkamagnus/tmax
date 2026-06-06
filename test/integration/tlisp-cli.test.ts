@@ -41,7 +41,7 @@ describe("standalone tlisp CLI", () => {
   test("returns nonzero for eval errors", () => {
     const result = run(["bin/tlisp", "-e", "(undefined-symbol)"]);
     expect(result.exitCode).not.toBe(0);
-    expect(text(result.stderr)).toContain("Error:");
+    expect(text(result.stderr)).toContain("TL1001");
   });
 
   test("loads modules from TLISP_PATH", () => {

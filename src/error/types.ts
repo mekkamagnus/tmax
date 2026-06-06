@@ -61,6 +61,7 @@ export type EvalError = {
   variant: 'SyntaxError' | 'RuntimeError' | 'TypeError' | 'ArithmeticError' | 'UndefinedSymbol';
   message: string;
   details?: Record<string, any>;
+  diagnostic?: import("../tlisp/diagnostics.ts").TLispDiagnostic;
 };
 
 /**

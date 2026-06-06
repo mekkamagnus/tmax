@@ -27,6 +27,9 @@ import { TLispParser } from "./parser.ts";
 import { registerStdlibFunctions } from "./stdlib.ts";
 import { registerTestingFramework, setGlobalSetupBody, setGlobalTeardownBody } from "./test-framework.ts";
 import { registerFunction, markFunctionCovered, isCoverageEnabled } from "./test-coverage.ts";
+import { DebugState } from "./debug-state.ts";
+import { createDiagnostic, type TLispDiagnostic } from "./diagnostics.ts";
+import { getSourceSpan } from "./source-metadata.ts";
 
 
 /**
@@ -89,6 +92,7 @@ let currentSuite: string | null = null;
 export class TLispEvaluator {
   private moduleRegistry: ModuleRegistry | null = null;
   private builtinsEnv: TLispEnvironment | null = null;
+  readonly debugState: DebugState = new DebugState();
 
   setModuleRegistry(registry: ModuleRegistry): void {
     this.moduleRegistry = registry;
@@ -96,6 +100,87 @@ export class TLispEvaluator {
 
   setBuiltinsEnv(env: TLispEnvironment): void {
     this.builtinsEnv = env;
+  }
+
+  getDebugState(): DebugState {
+    return this.debugState;
+  }
+
+  /**
+   * Create a diagnostic-backed EvalError.
+   * Captures current stack, sets last diagnostic, and attaches to the error.
+   */
+  private makeError(
+    variant: EvalError['variant'],
+    code: string,
+    message: string,
+    options?: {
+      details?: Record<string, any>;
+      expected?: string;
+      actual?: string;
+      help?: string;
+      primarySpan?: import("./source.ts").SourceSpan;
+      source?: { kind: string; name: string; uri?: string };
+    }
+  ): EvalError {
+    const diagnostic = createDiagnostic({
+      code,
+      message,
+      ...options?.expected ? { expected: options.expected } : {},
+      ...options?.actual ? { actual: options.actual } : {},
+      ...options?.help ? { help: options.help } : {},
+      ...options?.primarySpan ? { primarySpan: options.primarySpan } : {},
+      ...options?.source ? { source: options.source } : {},
+      stack: this.debugState.getStack(),
+    });
+    this.debugState.setLastDiagnostic(diagnostic);
+    return {
+      type: 'EvalError',
+      variant,
+      message,
+      details: options?.details,
+      diagnostic,
+    };
+  }
+
+  private suggestSimilarSymbols(name: string, env: TLispEnvironment): string | undefined {
+    if (name.length < 2) return undefined;
+    const candidates: string[] = [];
+    let current: TLispEnvironment | undefined = env;
+    const seen = new Set<string>();
+    while (current) {
+      for (const key of current.bindings.keys()) {
+        if (!seen.has(key) && key.length >= 2 && !key.startsWith("*")) {
+          seen.add(key);
+          candidates.push(key);
+        }
+      }
+      current = current.parent;
+    }
+    // Simple Levenshtein-like: find names with shared prefix or substring
+    const lower = name.toLowerCase();
+    const suggestions = candidates.filter(c => {
+      const cl = c.toLowerCase();
+      return cl.includes(lower) || lower.includes(cl) || this.editDistance(lower, cl) <= 2;
+    }).slice(0, 3);
+    if (suggestions.length === 0) return `check spelling or use (require-module ...) to import`;
+    return `did you mean ${suggestions.map(s => `'${s}'`).join(', ')}?`;
+  }
+
+  private editDistance(a: string, b: string): number {
+    if (Math.abs(a.length - b.length) > 3) return 999;
+    const m = a.length, n = b.length;
+    const dp: number[][] = Array.from({ length: m + 1 }, () => Array(n + 1).fill(0));
+    for (let i = 0; i <= m; i++) dp[i]![0] = i;
+    for (let j = 0; j <= n; j++) dp[0]![j] = j;
+    for (let i = 1; i <= m; i++) {
+      for (let j = 1; j <= n; j++) {
+        dp[i]![j] = a[i - 1] === b[j - 1]
+          ? dp[i - 1]![j - 1]!
+          : 1 + Math.min(dp[i - 1]![j]!, dp[i]![j - 1]!, dp[i - 1]![j - 1]!);
+      }
+    }
+    return dp[m]![n]!;
   }
 
   /**
@@ -135,7 +220,11 @@ export class TLispEvaluator {
       }
 
       const args = argsResults.map(r => (r as { right: TLispValue }).right);
+
+      const frameName = tailCall.funcExpr.type === "symbol" ? tailCall.funcExpr.value as string : "<anonymous>";
+      this.debugState.pushFrame(frameName, getSourceSpan(tailCall.funcExpr));
       const callResult = this.evalFunctionCallInternal(func, args, tailCall.env);
+      this.debugState.popFrame();
 
       if (Either.isLeft(callResult)) {
         return callResult;
@@ -173,12 +262,9 @@ export class TLispEvaluator {
         return Either.right(expr);
 
       default:
-        return Either.left({
-          type: 'EvalError',
-          variant: 'SyntaxError',
-          message: `Unknown expression type: ${(expr as any).type}`,
-          details: { exprType: (expr as any).type }
-        });
+        return Either.left(this.makeError('SyntaxError', 'TL0001', `Unknown expression type: ${(expr as any).type}`, {
+          details: { exprType: (expr as any).type },
+        }));
     }
   }
 
@@ -222,31 +308,22 @@ export class TLispEvaluator {
       if (moduleName) {
         const record = this.moduleRegistry.resolve(moduleName);
         if (!record || record.state !== "loaded") {
-          return Either.left({
-            type: 'EvalError',
-            variant: 'UndefinedSymbol',
-            message: `Module '${moduleName}' not loaded (referenced as '${alias}')`,
-            details: { symbol: name, module: moduleName }
-          });
+          return Either.left(this.makeError('UndefinedSymbol', 'TL2001', `Module '${moduleName}' not loaded (referenced as '${alias}')`, {
+            details: { symbol: name, module: moduleName },
+          }));
         }
 
         if (!record.exports.has(symName)) {
-          return Either.left({
-            type: 'EvalError',
-            variant: 'UndefinedSymbol',
-            message: `Symbol '${symName}' not exported from module '${moduleName}'`,
-            details: { symbol: name, module: moduleName, unexported: symName }
-          });
+          return Either.left(this.makeError('UndefinedSymbol', 'TL2002', `Symbol '${symName}' not exported from module '${moduleName}'`, {
+            details: { symbol: name, module: moduleName, unexported: symName, exports: [...record.exports] },
+          }));
         }
 
         const value = record.env.lookup(symName);
         if (value === undefined) {
-          return Either.left({
-            type: 'EvalError',
-            variant: 'UndefinedSymbol',
-            message: `Exported symbol '${symName}' not found in module '${moduleName}' environment`,
-            details: { symbol: name, module: moduleName }
-          });
+          return Either.left(this.makeError('UndefinedSymbol', 'TL2002', `Exported symbol '${symName}' not found in module '${moduleName}' environment`, {
+            details: { symbol: name, module: moduleName },
+          }));
         }
         return Either.right(value);
       }
@@ -290,15 +367,12 @@ export class TLispEvaluator {
 
     const value = env.lookup(name);
 
-    if (value === undefined && slashIdx < 0 && this.moduleRegistry && this.isModuleEnvironment(env)) {
+    if (value === undefined && slashIdx < 0 && this.moduleRegistry) {
       const exported = this.moduleRegistry.resolveUniqueExport(name);
       if (exported === "ambiguous") {
-        return Either.left({
-          type: 'EvalError',
-          variant: 'UndefinedSymbol',
-          message: `Ambiguous module export: ${name}. Require a module alias or use a full module-qualified name.`,
-          details: { symbol: name }
-        });
+        return Either.left(this.makeError('UndefinedSymbol', 'TL1001', `Ambiguous module export: ${name}. Require a module alias or use a full module-qualified name.`, {
+          details: { symbol: name },
+        }));
       }
       if (exported) {
         return Either.right(exported.value);
@@ -306,12 +380,12 @@ export class TLispEvaluator {
     }
 
     if (value === undefined) {
-      return Either.left({
-        type: 'EvalError',
-        variant: 'UndefinedSymbol',
-        message: `Undefined symbol: ${name}`,
-        details: { symbol: name }
-      });
+      const helpText = this.suggestSimilarSymbols(name, env);
+      return Either.left(this.makeError('UndefinedSymbol', 'TL1001', `Undefined symbol: ${name}`, {
+        details: { symbol: name },
+        primarySpan: getSourceSpan(symbol),
+        help: helpText,
+      }));
     }
 
     return Either.right(value);
@@ -478,12 +552,9 @@ export class TLispEvaluator {
     const moduleName = nameExpr.value as string;
 
     if (!this.moduleRegistry || !this.builtinsEnv) {
-      return Either.left({
-        type: 'EvalError',
-        variant: 'RuntimeError',
-        message: "Module system not initialized",
-        details: { moduleName }
-      });
+      return Either.left(this.makeError('RuntimeError', 'TL2001', "Module system not initialized", {
+        details: { moduleName },
+      }));
     }
 
     // Check for nested defmodule
@@ -604,23 +675,17 @@ export class TLispEvaluator {
     const moduleName = nameExpr.value as string;
 
     if (!this.moduleRegistry) {
-      return Either.left({
-        type: 'EvalError',
-        variant: 'RuntimeError',
-        message: "Module system not initialized",
-        details: { moduleName }
-      });
+      return Either.left(this.makeError('RuntimeError', 'TL2001', "Module system not initialized", {
+        details: { moduleName },
+      }));
     }
 
     // Check for circular dependency
     const existing = this.moduleRegistry.resolve(moduleName);
     if (existing && existing.state === "loading") {
-      return Either.left({
-        type: 'EvalError',
-        variant: 'RuntimeError',
-        message: `Circular module dependency detected: '${moduleName}' is currently being loaded`,
-        details: { moduleName }
-      });
+      return Either.left(this.makeError('RuntimeError', 'TL2003', `Circular module dependency detected: '${moduleName}' is currently being loaded`, {
+        details: { moduleName },
+      }));
     }
 
     // Already loaded — just register the import
@@ -632,12 +697,9 @@ export class TLispEvaluator {
 
     const record = this.moduleRegistry.resolve(moduleName);
     if (!record || record.state !== "loaded") {
-      return Either.left({
-        type: 'EvalError',
-        variant: 'RuntimeError',
-        message: `Module '${moduleName}' did not finish loading`,
-        details: { moduleName }
-      });
+      return Either.left(this.makeError('RuntimeError', 'TL2001', `Module '${moduleName}' did not finish loading`, {
+        details: { moduleName },
+      }));
     }
 
     // Parse import style
@@ -680,12 +742,9 @@ export class TLispEvaluator {
             if (s.type === "symbol") {
               const importedName = s.value as string;
               if (!record.exports.has(importedName)) {
-                return Either.left({
-                  type: 'EvalError',
-                  variant: 'UndefinedSymbol',
-                  message: `Symbol '${importedName}' not exported from module '${moduleName}'`,
-                  details: { moduleName, symbol: importedName }
-                });
+                return Either.left(this.makeError('UndefinedSymbol', 'TL2002', `Symbol '${importedName}' not exported from module '${moduleName}'`, {
+                  details: { moduleName, symbol: importedName, exports: [...record.exports] },
+                }));
               }
               importedSymbols.add(importedName);
             }
@@ -713,12 +772,9 @@ export class TLispEvaluator {
       if (result) return result;
     }
 
-    return Either.left({
-      type: 'EvalError',
-      variant: 'RuntimeError',
-      message: `Module '${moduleName}' not found`,
-      details: { moduleName }
-    });
+    return Either.left(this.makeError('RuntimeError', 'TL2001', `Module '${moduleName}' not found`, {
+      details: { moduleName },
+    }));
   }
 
   /** External module loader hook — set by the editor to resolve file paths */
@@ -1620,12 +1676,9 @@ export class TLispEvaluator {
   private evalFunctionCall(elements: TLispValue[], env: TLispEnvironment, inTailPosition: boolean = false): Either<EvalError, EvalResult> {
     const funcExpr = elements[0];
     if (!funcExpr) {
-      return Either.left({
-        type: 'EvalError',
-        variant: 'RuntimeError',
-        message: "Function call missing function expression",
-        details: { elements }
-      });
+      return Either.left(this.makeError('RuntimeError', 'TL4001', "Function call missing function expression", {
+        details: { elements },
+      }));
     }
 
     const argExprs = elements.slice(1);
@@ -1678,7 +1731,11 @@ export class TLispEvaluator {
         markFunctionCovered(symbolName);
       }
 
-      return this.evalFunctionCallInternal(func, args, env);
+      const frameName = funcExpr.type === "symbol" ? funcExpr.value as string : "<anonymous>";
+      this.debugState.pushFrame(frameName, getSourceSpan(funcExpr));
+      const callResult = this.evalFunctionCallInternal(func, args, env);
+      this.debugState.popFrame();
+      return callResult;
     }
   }
   
@@ -1691,17 +1748,22 @@ export class TLispEvaluator {
    */
   private evalFunctionCallInternal(func: TLispValue, args: TLispValue[], env: TLispEnvironment): Either<EvalError, EvalResult> {
     if (!func) {
-      return Either.left({
-        type: 'EvalError',
-        variant: 'RuntimeError',
-        message: "Function call missing function",
-        details: { args }
-      });
+      return Either.left(this.makeError('RuntimeError', 'TL4001', "Function call missing function", {
+        details: { args },
+      }));
     }
 
     if (func.type === "function") {
       const functionImpl = func.value as (args: TLispValue[]) => Either<EvalError, TLispValue> | TLispValue;
-      const result = functionImpl(args);
+      let result: Either<EvalError, TLispValue> | TLispValue;
+      try {
+        result = functionImpl(args);
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        return Either.left(this.makeError('RuntimeError', 'TL4001', msg, {
+          details: { error: msg },
+        }));
+      }
 
       // Handle both cases: functions returning Either or TLispValue directly
       // (for backward compatibility with stdlib functions that haven't been migrated)
@@ -1714,20 +1776,16 @@ export class TLispEvaluator {
     }
 
     if (func.type === "macro") {
-      return Either.left({
-        type: 'EvalError',
-        variant: 'RuntimeError',
-        message: "Macro cannot be called as function - this should be handled in evalFunctionCall",
-        details: { args }
-      });
+      return Either.left(this.makeError('RuntimeError', 'TL3001', "Macro cannot be called as function - this should be handled in evalFunctionCall", {
+        details: { args },
+      }));
     }
 
-    return Either.left({
-      type: 'EvalError',
-      variant: 'TypeError',
-      message: `Cannot call non-function: ${func.type}`,
-      details: { funcType: func.type, args }
-    });
+    return Either.left(this.makeError('TypeError', 'TL1002', `Cannot call non-function: ${func.type}`, {
+      details: { funcType: func.type, args },
+      expected: "function",
+      actual: func.type,
+    }));
   }
 
   /**
