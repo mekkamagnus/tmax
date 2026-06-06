@@ -1,9 +1,27 @@
 (defmodule editor/commands/find-file
-  (export find-file)
+  (export find-file-accept find-file)
 
 ;; find-file.tlisp — find-file command composed from primitives
-(defun find-file (path)
-  "Open a file into a buffer."
+
+(defun find-file (&optional path)
+  "Open a file into a buffer. Prompts via minibuffer when called without a path."
+  (if path
+    (find-file-open path)
+    (completing-read
+      "Find file: "
+      "minibuffer-empty-table"
+      nil
+      nil
+      ""
+      "find-file-history"
+      "find-file-accept")))
+
+(defun find-file-accept (path)
+  "Minibuffer accept handler: open the chosen PATH."
+  (find-file-open path))
+
+(defun find-file-open (path)
+  "Open PATH into a buffer."
   (let ((content (read-file-content path)))
     (if content
       (progn
@@ -11,7 +29,12 @@
         (buffer-switch path)
         (set-buffer-filename path)
         (buffer-insert content)
-        (set-buffer-modified-p nil)
+        (set-buffer-modified-p false)
         (message (concat "Opened " path)))
-      (message (concat "Could not open " path)))))
+      (progn
+        (buffer-create path)
+        (buffer-switch path)
+        (set-buffer-filename path)
+        (set-buffer-modified-p false)
+        (message (concat "New file " path))))))
 )
