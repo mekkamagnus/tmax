@@ -1,15 +1,18 @@
 /**
  * @file tokenizer.ts
- * @description T-Lisp tokenizer implementation
+ * @description T-Lisp tokenizer with source span support
  */
 
 import { Either } from "../utils/task-either.ts";
 import { createConfigError, ConfigError } from "../error/types.ts";
+import type { SourceSpan, SourcePosition } from "./source.ts";
 
-/**
- * Tokenize error type for T-Lisp tokenization errors
- */
 export type TokenizeError = ConfigError;
+
+export interface Token {
+  text: string;
+  span: SourceSpan;
+}
 
 /**
  * T-Lisp tokenizer for converting source code into tokens
@@ -17,16 +20,29 @@ export type TokenizeError = ConfigError;
 export class TLispTokenizer {
   private pos: number = 0;
   private source: string = "";
+  private line: number = 0;
+  private column: number = 0;
+  private lineStart: number = 0;
 
   /**
-   * Tokenize T-Lisp source code
-   * @param source - Source code to tokenize
-   * @returns Either with TokenizeError or Array of tokens
+   * Tokenize T-Lisp source code (backward-compatible string API)
    */
   tokenize(source: string): Either<TokenizeError, string[]> {
+    const result = this.tokenizeWithSpans(source, "<unknown>");
+    if (Either.isLeft(result)) return result;
+    return Either.right(result.right.map(t => t.text));
+  }
+
+  /**
+   * Tokenize with source spans for each token
+   */
+  tokenizeWithSpans(source: string, sourceName: string): Either<TokenizeError, Token[]> {
     this.source = source;
     this.pos = 0;
-    const tokens: string[] = [];
+    this.line = 0;
+    this.column = 0;
+    this.lineStart = 0;
+    const tokens: Token[] = [];
 
     while (this.pos < this.source.length) {
       this.skipWhitespace();
@@ -35,7 +51,6 @@ export class TLispTokenizer {
         break;
       }
 
-      // Skip comments
       if (this.peek() === ";") {
         this.skipComment();
         continue;
@@ -43,7 +58,7 @@ export class TLispTokenizer {
 
       const tokenResult = this.readToken();
       if (Either.isLeft(tokenResult)) {
-        return tokenResult; // Propagate error
+        return tokenResult;
       }
 
       const token = tokenResult.right;
@@ -55,214 +70,176 @@ export class TLispTokenizer {
     return Either.right(tokens);
   }
 
-  /**
-   * Skip whitespace characters
-   */
+  private currentPos(): SourcePosition {
+    return { line: this.line, column: this.column, offset: this.pos };
+  }
+
   private skipWhitespace(): void {
     while (this.pos < this.source.length && this.isWhitespace(this.peek())) {
+      if (this.peek() === "\n") {
+        this.line++;
+        this.lineStart = this.pos + 1;
+        this.column = 0;
+      } else {
+        this.column++;
+      }
       this.pos++;
     }
   }
 
-  /**
-   * Skip comment (from ; to end of line)
-   */
   private skipComment(): void {
     while (this.pos < this.source.length && this.peek() !== "\n") {
       this.pos++;
+      this.column++;
     }
   }
 
-  /**
-   * Read the next token
-   * @returns Either with TokenizeError or Token string or null if no token
-   */
-  private readToken(): Either<TokenizeError, string | null> {
+  private readToken(): Either<TokenizeError, Token | null> {
     const char = this.peek();
+    const start = this.currentPos();
 
-    // Parentheses
     if (char === "(" || char === ")") {
-      return Either.right(this.advance().toString());
+      const text = this.advance().toString();
+      return Either.right({ text, span: { start, end: this.currentPos() } });
     }
 
-    // Quote
     if (char === "'") {
-      return Either.right(this.advance().toString());
+      const text = this.advance().toString();
+      return Either.right({ text, span: { start, end: this.currentPos() } });
     }
 
-    // Quasiquote (backquote)
     if (char === "`") {
-      return Either.right(this.advance().toString());
+      const text = this.advance().toString();
+      return Either.right({ text, span: { start, end: this.currentPos() } });
     }
 
-    // Unquote and unquote-splicing
     if (char === ",") {
       if (this.peek(1) === "@") {
-        this.advance(); // consume ','
-        this.advance(); // consume '@'
-        return Either.right(",@");
+        this.advance();
+        this.advance();
+        this.column += 2;
+        return Either.right({ text: ",@", span: { start, end: this.currentPos() } });
       }
-      return Either.right(this.advance().toString());
+      const text = this.advance().toString();
+      return Either.right({ text, span: { start, end: this.currentPos() } });
     }
 
-    // String literals
     if (char === '"') {
-      return this.readString();
+      return this.readString(start);
     }
 
-    // Numbers
     if (this.isDigit(char) || (char === "-" && this.isDigit(this.peek(1)))) {
-      return Either.right(this.readNumber());
+      const text = this.readNumber();
+      return Either.right({ text, span: { start, end: this.currentPos() } });
     }
 
-    // Symbols/atoms
     if (this.isSymbolStart(char)) {
-      return Either.right(this.readSymbol());
+      const text = this.readSymbol();
+      return Either.right({ text, span: { start, end: this.currentPos() } });
     }
 
-    // Unknown character - skip it
     this.pos++;
-    return Either.right(null);
+    this.column++;
+    return Either.left(createConfigError('ParseError',
+      `Unexpected character '${char}' at line ${start.line + 1}, column ${start.column + 1}`));
   }
 
-  /**
-   * Read a string literal
-   * @returns Either with TokenizeError or String token including quotes
-   */
-  private readString(): Either<TokenizeError, string> {
+  private readString(start: SourcePosition): Either<TokenizeError, Token> {
     let result = "";
-    result += this.advance(); // Opening quote
+    result += this.advance();
+    this.column++;
 
     while (this.pos < this.source.length && this.peek() !== '"') {
       if (this.peek() === "\\") {
-        // Handle escape sequences
         this.advance();
+        this.column++;
         if (this.pos < this.source.length) {
           const escaped = this.advance();
+          this.column++;
           switch (escaped) {
-            case "n":
-              result += "\n";
-              break;
-            case "t":
-              result += "\t";
-              break;
-            case "r":
-              result += "\r";
-              break;
-            case "\\":
-              result += "\\";
-              break;
-            case '"':
-              result += '"';
-              break;
-            default:
-              result += escaped;
+            case "n": result += "\n"; break;
+            case "t": result += "\t"; break;
+            case "r": result += "\r"; break;
+            case "\\": result += "\\"; break;
+            case '"': result += '"'; break;
+            default: result += escaped;
           }
         }
       } else {
-        result += this.advance();
+        const ch = this.advance();
+        if (ch === "\n") {
+          this.line++;
+          this.lineStart = this.pos;
+          this.column = 0;
+        } else {
+          this.column++;
+        }
+        result += ch;
       }
     }
 
     if (this.pos < this.source.length) {
-      result += this.advance(); // Closing quote
-      return Either.right(result);
-    } else {
-      return Either.left(createConfigError('ParseError', "Unterminated string literal"));
+      result += this.advance();
+      this.column++;
+      return Either.right({ text: result, span: { start, end: this.currentPos() } });
     }
+
+    return Either.left(createConfigError('ParseError',
+      `Unterminated string literal starting at line ${start.line + 1}, column ${start.column + 1}`));
   }
 
-  /**
-   * Read a number
-   * @returns Number token
-   */
   private readNumber(): string {
     let result = "";
-
     if (this.peek() === "-") {
       result += this.advance();
+      this.column++;
     }
-
     while (this.pos < this.source.length && this.isDigit(this.peek())) {
       result += this.advance();
+      this.column++;
     }
-
-    // Handle decimal point
     if (this.peek() === ".") {
       result += this.advance();
+      this.column++;
       while (this.pos < this.source.length && this.isDigit(this.peek())) {
         result += this.advance();
+        this.column++;
       }
     }
-
     return result;
   }
 
-  /**
-   * Read a symbol/atom
-   * @returns Symbol token
-   */
   private readSymbol(): string {
     let result = "";
-
     while (this.pos < this.source.length && this.isSymbolChar(this.peek())) {
       result += this.advance();
+      this.column++;
     }
-
     return result;
   }
 
-  /**
-   * Peek at character at current position + offset
-   * @param offset - Offset from current position
-   * @returns Character or empty string if out of bounds
-   */
   private peek(offset = 0): string {
     const pos = this.pos + offset;
     return pos < this.source.length ? this.source[pos]! : "";
   }
 
-  /**
-   * Advance position and return current character
-   * @returns Current character
-   */
   private advance(): string {
     return this.source[this.pos++] || "";
   }
 
-  /**
-   * Check if character is whitespace
-   * @param char - Character to check
-   * @returns True if whitespace
-   */
   private isWhitespace(char: string): boolean {
     return /\s/.test(char);
   }
 
-  /**
-   * Check if character is a digit
-   * @param char - Character to check
-   * @returns True if digit
-   */
   private isDigit(char: string): boolean {
     return /\d/.test(char);
   }
 
-  /**
-   * Check if character can start a symbol
-   * @param char - Character to check
-   * @returns True if valid symbol start
-   */
   private isSymbolStart(char: string): boolean {
-    return /[a-zA-Z_+\-*/=<>!?]/.test(char);
+    return /[a-zA-Z_+\-*/=<>!?&#:]/.test(char);
   }
 
-  /**
-   * Check if character can be part of a symbol
-   * @param char - Character to check
-   * @returns True if valid symbol character
-   */
   private isSymbolChar(char: string): boolean {
-    return /[a-zA-Z0-9_+\-*/=<>!?]/.test(char);
+    return /[a-zA-Z0-9_+\-*/=<>!?&#:]/.test(char);
   }
 }

@@ -9,6 +9,7 @@ import { Either } from "../utils/task-either.ts";
 import { createStandaloneInterpreter } from "./profiles/standalone.ts";
 import { runREPL } from "./repl.ts";
 import { valueToString } from "./values.ts";
+import { renderDiagnostic } from "./diagnostic-renderer.ts";
 
 function usage(): string {
   return `Usage: tlisp [options] [script.tlisp]
@@ -46,7 +47,12 @@ function runEval(source: string, printNil = true): number {
   const interpreter = createStandaloneInterpreter({ allowShell: true });
   const result = interpreter.execute(stripShebang(source));
   if (Either.isLeft(result)) {
-    printEvalError(result.left.message);
+    const err = result.left;
+    if (err.diagnostic) {
+      process.stderr.write(`${renderDiagnostic(err.diagnostic)}\n`);
+    } else {
+      printEvalError(err.message);
+    }
     return 1;
   }
   if (printNil || result.right.type !== "nil") {

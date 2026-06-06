@@ -7,10 +7,12 @@ import type { TLispInterpreter, TLispEnvironment, TLispValue, TLispFunctionImpl,
 import type { EvalError as EvalErrorType } from "../error/types.ts";
 import { TLispParser } from "./parser.ts";
 import { TLispEvaluator, createEvaluatorWithBuiltins } from "./evaluator.ts";
-import { createFunction } from "./values.ts";
+import { createFunction, createNil } from "./values.ts";
 import { Either } from "../utils/task-either.ts";
 import { isCoverageEnabled, registerFunction } from "./test-coverage.ts";
 import { ModuleRegistry } from "./module-registry.ts";
+import { diagnosticToJSON } from "./diagnostics.ts";
+import { renderDiagnostic } from "./diagnostic-renderer.ts";
 
 /**
  * T-Lisp interpreter implementation
@@ -35,6 +37,77 @@ export class TLispInterpreterImpl implements TLispInterpreter {
     this.globalEnv = env;
     evaluator.setModuleRegistry(this.moduleRegistry);
     evaluator.setBuiltinsEnv(builtinsEnv);
+    this.registerDebugBuiltins();
+  }
+
+  /**
+   * Get the evaluator's debug state
+   */
+  getDebugState() {
+    return this.evaluator.getDebugState();
+  }
+
+  private registerDebugBuiltins(): void {
+    const debugState = this.evaluator.getDebugState();
+
+    this.defineBuiltin("trace", (args) => {
+      if (args.length !== 1 || args[0]?.type !== "symbol") {
+        return Either.left({ type: 'EvalError', variant: 'TypeError', message: "trace requires a symbol name" });
+      }
+      const name = args[0].value as string;
+      debugState.traceFunction(name);
+      return Either.right({ type: 'string', value: `trace enabled: ${name}` });
+    });
+
+    this.defineBuiltin("untrace", (args) => {
+      if (args.length !== 1 || args[0]?.type !== "symbol") {
+        return Either.left({ type: 'EvalError', variant: 'TypeError', message: "untrace requires a symbol name" });
+      }
+      const name = args[0].value as string;
+      debugState.untraceFunction(name);
+      return Either.right({ type: 'string', value: `trace disabled: ${name}` });
+    });
+
+    this.defineBuiltin("trace-list", (args) => {
+      const names = debugState.getTracedFunctions();
+      return Either.right({
+        type: 'list',
+        value: names.map(n => ({ type: 'string', value: n })),
+      });
+    });
+
+    this.defineBuiltin("tlisp-last-error", (args) => {
+      const d = debugState.getLastDiagnostic();
+      if (!d) return Either.right(createNil());
+      return Either.right({ type: 'string', value: renderDiagnostic(d) });
+    });
+
+    this.defineBuiltin("tlisp-last-error-json", (args) => {
+      const d = debugState.getLastDiagnostic();
+      if (!d) return Either.right(createNil());
+      const json = diagnosticToJSON(d);
+      const entries = Object.entries(json).map(([k, v]) => ({
+        type: 'list' as const,
+        value: [
+          { type: 'string' as const, value: k },
+          typeof v === 'string' ? { type: 'string' as const, value: v } : { type: 'string' as const, value: JSON.stringify(v) },
+        ],
+      }));
+      return Either.right({ type: 'list', value: entries });
+    });
+
+    this.defineBuiltin("tlisp-backtrace", (args) => {
+      const stack = debugState.getStack();
+      if (stack.length === 0) return Either.right(createNil());
+      const frames = stack.map((frame, i) => {
+        const loc = frame.callSpan
+          ? `:${frame.callSpan.start.line + 1}:${frame.callSpan.start.column + 1}`
+          : "";
+        const mod = frame.module ? ` at ${frame.module}` : "";
+        return { type: 'string', value: `${i}: ${frame.function}${mod}${loc}` };
+      });
+      return Either.right({ type: 'list', value: frames });
+    });
   }
 
   /**
@@ -67,118 +140,29 @@ export class TLispInterpreterImpl implements TLispInterpreter {
    * @param env - Environment for execution
    * @returns Either with error or execution result (result of last expression for multiple expressions)
    */
-  execute(source: string, env?: TLispEnvironment): Either<EvalError, TLispValue> {
-    const forms = this.splitTopLevelForms(source);
+  execute(source: string, env?: TLispEnvironment, sourceName?: string): Either<EvalError, TLispValue> {
     const evalEnv = env || this.globalEnv;
+    const programResult = this.parser.parseProgram(source, sourceName);
+    if (Either.isLeft(programResult)) {
+      return Either.left({ type: 'EvalError', variant: 'SyntaxError', message: programResult.left.message });
+    }
+
+    const forms = programResult.right;
+    if (forms.length === 0) {
+      return Either.right(createNil());
+    }
+
     let lastResult: Either<EvalError, TLispValue> | null = null;
 
     for (const form of forms) {
-      const trimmedForm = form.trim();
-      if (trimmedForm === "") {
-        continue;
-      }
-
-      const exprResult = this.parser.parse(trimmedForm);
-      if (Either.isLeft(exprResult)) {
-        return Either.left({ type: 'EvalError', variant: 'SyntaxError', message: exprResult.left.message });
-      }
-
-      const expr = exprResult.right;
-      const evalResult = this.evaluator.eval(expr, evalEnv);
+      const evalResult = this.evaluator.eval(form.value, evalEnv);
       if (Either.isLeft(evalResult)) {
-        return evalResult; // Return evaluation error
+        return evalResult;
       }
-
       lastResult = evalResult;
     }
 
-    // Return the last result, or nil if no expressions were executed
-    if (lastResult) {
-      return lastResult;
-    }
-
-    const nilResult = this.parser.parse("nil");
-    if (Either.isLeft(nilResult)) {
-      return Either.left({ type: 'EvalError', variant: 'SyntaxError', message: nilResult.left.message });
-    }
-
-    return Either.right(nilResult.right);
-  }
-
-  /**
-   * Split source into top-level forms while preserving multi-line forms.
-   */
-  private splitTopLevelForms(source: string): string[] {
-    const forms: string[] = [];
-    let current = "";
-    let depth = 0;
-    let inString = false;
-    let escaped = false;
-    let inComment = false;
-
-    const pushCurrent = () => {
-      const trimmed = current.trim();
-      if (trimmed) forms.push(trimmed);
-      current = "";
-    };
-
-    for (let i = 0; i < source.length; i++) {
-      const ch = source[i]!;
-
-      if (inComment) {
-        if (ch === "\n") {
-          inComment = false;
-          if (depth === 0) pushCurrent();
-        }
-        continue;
-      }
-
-      if (inString) {
-        current += ch;
-        if (escaped) {
-          escaped = false;
-        } else if (ch === "\\") {
-          escaped = true;
-        } else if (ch === '"') {
-          inString = false;
-        }
-        continue;
-      }
-
-      if (ch === ";") {
-        inComment = true;
-        continue;
-      }
-
-      if (ch === '"') {
-        inString = true;
-        current += ch;
-        continue;
-      }
-
-      if (ch === "(") {
-        depth++;
-        current += ch;
-        continue;
-      }
-
-      if (ch === ")") {
-        depth--;
-        current += ch;
-        if (depth === 0) pushCurrent();
-        continue;
-      }
-
-      if (depth === 0 && /\s/.test(ch)) {
-        pushCurrent();
-        continue;
-      }
-
-      current += ch;
-    }
-
-    pushCurrent();
-    return forms;
+    return lastResult || Either.right(createNil());
   }
 
   /**

@@ -167,7 +167,7 @@ export interface TLispInterpreter {
   eval(expr: TLispValue, env?: TLispEnvironment): Either<AppError, TLispValue>;
 
   /** Execute T-Lisp source code */
-  execute(source: string, env?: TLispEnvironment): Either<AppError, TLispValue>;
+  execute(source: string, env?: TLispEnvironment, sourceName?: string): Either<AppError, TLispValue>;
 
   /** Define a built-in function */
   defineBuiltin(name: string, fn: TLispFunctionImpl): void;

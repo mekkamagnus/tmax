@@ -9,6 +9,7 @@ import { createStandaloneInterpreter, type StandaloneProfileOptions } from "./pr
 import type { TLispInterpreterImpl } from "./interpreter.ts";
 import type { TLispValue } from "./types.ts";
 import { createNil, createString, valueToString } from "./values.ts";
+import { renderDiagnostic } from "./diagnostic-renderer.ts";
 
 export interface TLispREPLOptions extends StandaloneProfileOptions {
   input?: NodeJS.ReadStream;
@@ -90,8 +91,14 @@ export class TLispREPL {
           this.recordResult(result.right);
           this.write(`${valueToString(result.right)}\n`);
         } else {
-          this.recordError(result.left.message);
-          this.write(`Error: ${result.left.message}\n`);
+          const err = result.left;
+          if (err.diagnostic) {
+            this.recordError(err.message);
+            this.write(`${renderDiagnostic(err.diagnostic)}\n`);
+          } else {
+            this.recordError(err.message);
+            this.write(`Error: ${err.message}\n`);
+          }
         }
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
