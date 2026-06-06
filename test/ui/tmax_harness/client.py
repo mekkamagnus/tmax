@@ -154,3 +154,23 @@ def frames(config: HarnessConfig) -> Result[list[dict[str, Any]], HarnessError]:
     if isinstance(parsed, list):
         return Ok([item for item in parsed if isinstance(item, dict)])
     return Err(HarnessError("Daemon frames response was not a list"))
+
+
+def send_key(config: HarnessConfig, key: str) -> Result[dict[str, Any], HarnessError]:
+    """Send a single keypress via tmaxclient --key. Returns parsed JSON state."""
+    result = _run_client(config, "--key", key)
+    if result.is_err():
+        return result  # type: ignore[return-value]
+    try:
+        parsed = json.loads(result.unwrap())
+    except json.JSONDecodeError:
+        # Non-JSON response is fine (e.g. just a string), return minimal state
+        return Ok({"raw": result.unwrap()})
+    if isinstance(parsed, dict):
+        return Ok(parsed)
+    return Ok({"raw": result.unwrap()})
+
+
+def stop_daemon(config: HarnessConfig) -> Result[str, HarnessError]:
+    """Stop the daemon via the shutdown RPC method."""
+    return _run_client(config, "--stop")

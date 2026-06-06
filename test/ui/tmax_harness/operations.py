@@ -15,141 +15,83 @@ from .tlisp_escape import (
 )
 
 
-def _is_daemon(config: HarnessConfig) -> bool:
-    """Check whether operations should use direct daemon API calls."""
-    return config.mode == "daemon"
-
-
 # ---------------------------------------------------------------------------
 # Mode operations
 # ---------------------------------------------------------------------------
 
-def enter_insert(config: HarnessConfig, window: str) -> Result[None, HarnessError]:
-    """Enter insert mode."""
-    if _is_daemon(config):
-        r = client.eval_expr(config, editor_set_mode("insert"))
-        time.sleep(config.operation_delay)
-        return r.map(lambda _: None)
-    inp.send_escape(config, window)
+def enter_insert(config: HarnessConfig, window: str = "") -> Result[None, HarnessError]:
+    inp.send_escape(config)
     time.sleep(0.1)
-    r = inp.send_key(config, window, "i")
+    r = inp.send_key(config, "i")
     time.sleep(config.operation_delay)
     return r
 
 
-def enter_normal(config: HarnessConfig, window: str) -> Result[None, HarnessError]:
-    """Enter normal mode."""
-    if _is_daemon(config):
-        r = client.eval_expr(config, editor_set_mode("normal"))
-        time.sleep(config.operation_delay)
-        return r.map(lambda _: None)
-    r = inp.send_escape(config, window)
+def enter_normal(config: HarnessConfig, window: str = "") -> Result[None, HarnessError]:
+    r = inp.send_escape(config)
     time.sleep(config.operation_delay)
     return r
 
 
-def enter_visual(config: HarnessConfig, window: str) -> Result[None, HarnessError]:
-    """Enter visual (char) mode."""
-    if _is_daemon(config):
-        r = client.eval_expr(config, "(visual-enter-char-mode)")
-        time.sleep(config.operation_delay)
-        return r.map(lambda _: None)
-    inp.send_escape(config, window)
-    r = inp.send_key(config, window, "v")
+def enter_visual(config: HarnessConfig, window: str = "") -> Result[None, HarnessError]:
+    inp.send_escape(config)
+    r = inp.send_key(config, "v")
     time.sleep(config.operation_delay)
     return r
 
 
-def enter_command_mode(config: HarnessConfig, window: str) -> Result[None, HarnessError]:
-    """Enter command mode (:)."""
-    if _is_daemon(config):
-        r = client.eval_expr(config, '(editor-enter-command-mode)')
-        time.sleep(config.operation_delay)
-        return r.map(lambda _: None)
-    inp.send_escape(config, window)
-    r = inp.send_key(config, window, ":")
+def enter_command_mode(config: HarnessConfig, window: str = "") -> Result[None, HarnessError]:
+    inp.send_escape(config)
+    r = inp.send_key(config, ":")
     time.sleep(config.operation_delay)
     return r
 
 
-def exit_command_mode(config: HarnessConfig, window: str) -> Result[None, HarnessError]:
-    """Exit command mode (Escape)."""
-    if _is_daemon(config):
-        r = client.eval_expr(config, '(editor-exit-command-mode)')
-        time.sleep(config.operation_delay)
-        return r.map(lambda _: None)
-    return inp.send_escape(config, window)
+def exit_command_mode(config: HarnessConfig, window: str = "") -> Result[None, HarnessError]:
+    return inp.send_escape(config)
 
 
-def enter_mx_mode(config: HarnessConfig, window: str) -> Result[None, HarnessError]:
-    """Enter M-x mode (SPC ;)."""
-    if _is_daemon(config):
-        r = client.eval_expr(config, '(editor/commands/execute-extended-command/execute-extended-command)')
-        time.sleep(config.operation_delay)
-        return r.map(lambda _: None)
-    inp.send_escape(config, window)
-    inp.send_key(config, window, "Space")
-    r = inp.send_key(config, window, ";")
+def enter_mx_mode(config: HarnessConfig, window: str = "") -> Result[None, HarnessError]:
+    inp.send_escape(config)
+    inp.send_key(config, "Space")
+    r = inp.send_key(config, ";")
     time.sleep(config.operation_delay)
     return r
 
 
-def exit_mx_mode(config: HarnessConfig, window: str) -> Result[None, HarnessError]:
-    """Exit M-x mode."""
-    if _is_daemon(config):
-        r = client.eval_expr(config, '(editor/completion/minibuffer/minibuffer-cancel)')
-        time.sleep(config.operation_delay)
-        return r.map(lambda _: None)
-    return inp.send_escape(config, window)
+def exit_mx_mode(config: HarnessConfig, window: str = "") -> Result[None, HarnessError]:
+    return inp.send_escape(config)
 
 
 # ---------------------------------------------------------------------------
 # Text operations
 # ---------------------------------------------------------------------------
 
-def type_text(config: HarnessConfig, window: str, text: str) -> Result[None, HarnessError]:
-    """Type text into buffer."""
-    if _is_daemon(config):
-        r = client.eval_expr(config, buffer_insert(text))
-        time.sleep(config.operation_delay)
-        return r.map(lambda _: None)
-    return inp.send_text(config, window, text)
+def type_text(config: HarnessConfig, window: str = "", text: str = "") -> Result[None, HarnessError]:
+    return inp.send_text(config, text)
 
 
-def delete_text(config: HarnessConfig, window: str, text: str) -> Result[None, HarnessError]:
-    """Delete text immediately before the cursor."""
-    if _is_daemon(config):
-        count = len(text)
-        r = client.eval_expr(
-            config,
-            f"(progn (cursor-move (cursor-line) (- (cursor-column) {count})) "
-            f"{buffer_delete(count)})",
-        )
-        time.sleep(config.operation_delay)
-        return r.map(lambda _: None)
-    return Err(HarnessError("delete_text not supported in tmux mode"))
+def delete_text(config: HarnessConfig, window: str = "", text: str = "") -> Result[None, HarnessError]:
+    count = len(text)
+    r = client.eval_expr(
+        config,
+        f"(progn (cursor-move (cursor-line) (- (cursor-column) {count})) "
+        f"{buffer_delete(count)})",
+    )
+    time.sleep(config.operation_delay)
+    return r.map(lambda _: None)
 
 
-def save_file(config: HarnessConfig, window: str) -> Result[None, HarnessError]:
-    """Save current file."""
-    if _is_daemon(config):
-        r = client.eval_expr(config, '(file-save)')
-        time.sleep(config.operation_delay)
-        return r.map(lambda _: None)
-    enter_normal(config, window)
-    r = inp.send_vim_command(config, window, "w")
+def save_file(config: HarnessConfig, window: str = "") -> Result[None, HarnessError]:
+    enter_normal(config)
+    r = inp.send_vim_command(config, "w")
     time.sleep(config.operation_delay)
     return r
 
 
-def quit_editor(config: HarnessConfig, window: str) -> Result[None, HarnessError]:
-    """Quit editor."""
-    if _is_daemon(config):
-        r = client.eval_expr(config, '(editor-quit)')
-        time.sleep(config.operation_delay)
-        return r.map(lambda _: None)
-    enter_normal(config, window)
-    r = inp.send_vim_command(config, window, "q")
+def quit_editor(config: HarnessConfig, window: str = "") -> Result[None, HarnessError]:
+    enter_normal(config)
+    r = inp.send_vim_command(config, "q")
     time.sleep(config.operation_delay)
     return r
 
@@ -158,190 +100,103 @@ def quit_editor(config: HarnessConfig, window: str) -> Result[None, HarnessError
 # Navigation operations
 # ---------------------------------------------------------------------------
 
-def move_cursor(config: HarnessConfig, window: str, line: int, col: int) -> Result[None, HarnessError]:
-    """Move cursor to absolute position (0-indexed)."""
-    if _is_daemon(config):
-        r = client.eval_expr(config, cursor_move(line, col))
-        time.sleep(config.operation_delay)
-        return r.map(lambda _: None)
-    return Err(HarnessError("Absolute cursor move not supported in tmux mode"))
+def move_cursor(config: HarnessConfig, window: str = "", line: int = 0, col: int = 0) -> Result[None, HarnessError]:
+    r = client.eval_expr(config, cursor_move(line, col))
+    time.sleep(config.operation_delay)
+    return r.map(lambda _: None)
 
 
-def word_next(config: HarnessConfig, window: str) -> Result[None, HarnessError]:
-    """Move to next word."""
-    if _is_daemon(config):
-        r = client.eval_expr(config, "(word-next)")
-        time.sleep(config.operation_delay)
-        return r.map(lambda _: None)
-    return inp.send_key(config, window, "w")
+def word_next(config: HarnessConfig, window: str = "") -> Result[None, HarnessError]:
+    return inp.send_key(config, "w")
 
 
-def word_previous(config: HarnessConfig, window: str) -> Result[None, HarnessError]:
-    """Move to previous word."""
-    if _is_daemon(config):
-        r = client.eval_expr(config, "(word-previous)")
-        time.sleep(config.operation_delay)
-        return r.map(lambda _: None)
-    return inp.send_key(config, window, "b")
+def word_previous(config: HarnessConfig, window: str = "") -> Result[None, HarnessError]:
+    return inp.send_key(config, "b")
 
 
-def line_start(config: HarnessConfig, window: str) -> Result[None, HarnessError]:
-    """Move to start of line."""
-    if _is_daemon(config):
-        r = client.eval_expr(config, "(line-first-column)")
-        time.sleep(config.operation_delay)
-        return r.map(lambda _: None)
-    return inp.send_key(config, window, "0")
+def line_start(config: HarnessConfig, window: str = "") -> Result[None, HarnessError]:
+    return inp.send_key(config, "0")
 
 
-def line_end(config: HarnessConfig, window: str) -> Result[None, HarnessError]:
-    """Move to end of line."""
-    if _is_daemon(config):
-        r = client.eval_expr(config, "(line-last-column)")
-        time.sleep(config.operation_delay)
-        return r.map(lambda _: None)
-    return inp.send_key(config, window, "$")
+def line_end(config: HarnessConfig, window: str = "") -> Result[None, HarnessError]:
+    return inp.send_key(config, "$")
 
 
-def jump_first_line(config: HarnessConfig, window: str) -> Result[None, HarnessError]:
-    """Jump to first line."""
-    if _is_daemon(config):
-        r = client.eval_expr(config, "(jump-to-first-line)")
-        time.sleep(config.operation_delay)
-        return r.map(lambda _: None)
-    return inp.send_key(config, window, "g")
+def jump_first_line(config: HarnessConfig, window: str = "") -> Result[None, HarnessError]:
+    return inp.send_keys(config, "g", "g")
 
 
-def jump_last_line(config: HarnessConfig, window: str) -> Result[None, HarnessError]:
-    """Jump to last line."""
-    if _is_daemon(config):
-        r = client.eval_expr(config, "(jump-to-last-line)")
-        time.sleep(config.operation_delay)
-        return r.map(lambda _: None)
-    return inp.send_key(config, window, "G")
+def jump_last_line(config: HarnessConfig, window: str = "") -> Result[None, HarnessError]:
+    return inp.send_key(config, "G")
 
 
-def page_up(config: HarnessConfig, window: str) -> Result[None, HarnessError]:
-    """Page up."""
-    if _is_daemon(config):
-        r = client.eval_expr(config, "(page-up)")
-        time.sleep(config.operation_delay)
-        return r.map(lambda _: None)
-    return inp.send_key(config, window, "C-b")
+def page_up(config: HarnessConfig, window: str = "") -> Result[None, HarnessError]:
+    return inp.send_key(config, "C-b")
 
 
-def page_down(config: HarnessConfig, window: str) -> Result[None, HarnessError]:
-    """Page down."""
-    if _is_daemon(config):
-        r = client.eval_expr(config, "(page-down)")
-        time.sleep(config.operation_delay)
-        return r.map(lambda _: None)
-    return inp.send_key(config, window, "C-f")
+def page_down(config: HarnessConfig, window: str = "") -> Result[None, HarnessError]:
+    return inp.send_key(config, "C-f")
 
 
-def line_next(config: HarnessConfig, window: str) -> Result[None, HarnessError]:
-    """Move to next line."""
-    if _is_daemon(config):
-        r = client.eval_expr(config, "(line-next)")
-        time.sleep(config.operation_delay)
-        return r.map(lambda _: None)
-    return inp.send_key(config, window, "j")
+def line_next(config: HarnessConfig, window: str = "") -> Result[None, HarnessError]:
+    return inp.send_key(config, "j")
 
 
-def line_previous(config: HarnessConfig, window: str) -> Result[None, HarnessError]:
-    """Move to previous line."""
-    if _is_daemon(config):
-        r = client.eval_expr(config, "(line-previous)")
-        time.sleep(config.operation_delay)
-        return r.map(lambda _: None)
-    return inp.send_key(config, window, "k")
+def line_previous(config: HarnessConfig, window: str = "") -> Result[None, HarnessError]:
+    return inp.send_key(config, "k")
 
 
 # ---------------------------------------------------------------------------
 # Editing operator operations
 # ---------------------------------------------------------------------------
 
-def delete_line(config: HarnessConfig, window: str, line: int) -> Result[None, HarnessError]:
-    """Delete a line by index (0-indexed). Must move to line first."""
-    if _is_daemon(config):
-        client.eval_expr(config, cursor_move(line, 0))
-        r = client.eval_expr(config, "(delete-line)")
-        time.sleep(config.operation_delay)
-        return r.map(lambda _: None)
-    return Err(HarnessError("delete_line not supported in tmux mode"))
+def delete_line(config: HarnessConfig, window: str = "", line: int = 0) -> Result[None, HarnessError]:
+    client.eval_expr(config, cursor_move(line, 0))
+    r = client.eval_expr(config, "(delete-line)")
+    time.sleep(config.operation_delay)
+    return r.map(lambda _: None)
 
 
-def undo(config: HarnessConfig, window: str) -> Result[None, HarnessError]:
-    """Undo last change."""
-    if _is_daemon(config):
-        r = client.eval_expr(config, "(undo)")
-        time.sleep(config.operation_delay)
-        return r.map(lambda _: None)
-    return inp.send_key(config, window, "u")
+def undo(config: HarnessConfig, window: str = "") -> Result[None, HarnessError]:
+    return inp.send_key(config, "u")
 
 
-def redo(config: HarnessConfig, window: str) -> Result[None, HarnessError]:
-    """Redo last undone change."""
-    if _is_daemon(config):
-        r = client.eval_expr(config, "(redo)")
-        time.sleep(config.operation_delay)
-        return r.map(lambda _: None)
-    return inp.send_key(config, window, "C-r")
+def redo(config: HarnessConfig, window: str = "") -> Result[None, HarnessError]:
+    return inp.send_key(config, "C-r")
 
 
 # ---------------------------------------------------------------------------
 # Search operations
 # ---------------------------------------------------------------------------
 
-def search(config: HarnessConfig, window: str, pattern: str) -> Result[None, HarnessError]:
-    """Search forward for pattern. Fails if not found."""
-    if _is_daemon(config):
-        r = client.eval_expr(config, search_forward(pattern))
-        time.sleep(config.operation_delay)
-        return r.map(lambda _: None)
-    return Err(HarnessError("search not supported in tmux mode"))
+def search(config: HarnessConfig, window: str = "", pattern: str = "") -> Result[None, HarnessError]:
+    r = client.eval_expr(config, search_forward(pattern))
+    time.sleep(config.operation_delay)
+    return r.map(lambda _: None)
 
 
 # ---------------------------------------------------------------------------
 # Buffer operations
 # ---------------------------------------------------------------------------
 
-def open_file(config: HarnessConfig, window: str, path: str) -> Result[None, HarnessError]:
-    """Open a file via the daemon."""
-    if _is_daemon(config):
-        try:
-            import subprocess
-            subprocess.run(
-                [config.client_cmd, "--socket", config.socket_path, path],
-                capture_output=True, text=True, timeout=5,
-            )
-            time.sleep(config.operation_delay)
-            return Ok(None)
-        except (subprocess.TimeoutExpired, FileNotFoundError) as e:
-            return Err(HarnessError(f"Failed to open file: {e}"))
-    return Err(HarnessError("open_file via tmux not supported"))
+def open_file(config: HarnessConfig, window: str = "", path: str = "") -> Result[None, HarnessError]:
+    try:
+        import subprocess
+        subprocess.run(
+            [config.client_cmd, "--socket", config.socket_path, path],
+            capture_output=True, text=True, timeout=5,
+        )
+        time.sleep(config.operation_delay)
+        return Ok(None)
+    except (subprocess.TimeoutExpired, FileNotFoundError) as e:
+        return Err(HarnessError(f"Failed to open file: {e}"))
 
 
 # ---------------------------------------------------------------------------
 # Legacy move (kept for backward compatibility)
 # ---------------------------------------------------------------------------
 
-def move(config: HarnessConfig, window: str, direction: str, count: int = 1) -> Result[None, HarnessError]:
-    """Move cursor in direction. Uses daemon API in daemon modes."""
-    direction_ops = {
-        "up": line_previous, "down": line_next,
-        "left": line_previous, "right": line_next,
-    }
-    nav_ops = {
-        "up": line_previous, "down": line_next,
-    }
-    if _is_daemon(config):
-        op = nav_ops.get(direction)
-        if not op:
-            return Err(HarnessError(f"Unknown direction: {direction}"))
-        for _ in range(count):
-            op(config, window)
-        return Ok(None)
+def move(config: HarnessConfig, window: str = "", direction: str = "", count: int = 1) -> Result[None, HarnessError]:
     key_map = {
         "up": "k", "down": "j", "left": "h", "right": "l",
         "u": "k", "d": "j", "h": "h", "l": "l",
@@ -350,9 +205,9 @@ def move(config: HarnessConfig, window: str, direction: str, count: int = 1) -> 
     key = key_map.get(direction)
     if not key:
         return Err(HarnessError(f"Unknown direction: {direction}"))
-    enter_normal(config, window)
+    enter_normal(config)
     for _ in range(count):
-        inp.send_key(config, window, key)
+        inp.send_key(config, key)
         time.sleep(config.key_delay)
     return Ok(None)
 

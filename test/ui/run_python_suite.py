@@ -5,6 +5,7 @@ import os
 import sys
 import subprocess
 import shutil
+import time
 import uuid
 
 ROOT = os.path.dirname(os.path.abspath(__file__))
@@ -23,6 +24,14 @@ DAEMON_TESTS = [
     "11_search_replace.py",
     "12_daily_drivers.py",
     "13_modes.py",
+    "17_count_prefix.py",
+    "18_text_objects.py",
+    "19_yank_ring.py",
+    "20_macro_recording.py",
+    "21_window_splitting.py",
+    "22_config_loading.py",
+    "23_indentation.py",
+    "24_module_loading.py",
 ]
 
 # Daemon-tmux renderer tests
@@ -38,14 +47,26 @@ DAEMON_TMUX_TESTS = [
 def cleanup_run(run_id: str) -> None:
     """Clean only resources carrying this runner-generated test id."""
     socket_path = os.path.join("/tmp/tmax-ui-tests", run_id, "server")
+    client_cmd = os.path.join(os.path.dirname(os.path.dirname(ROOT)), "bin", "tmaxclient")
     try:
         subprocess.run(
-            [os.path.join(os.path.dirname(os.path.dirname(ROOT)), "bin", "tmaxclient"),
-             "--socket", socket_path, "--eval", "(editor-quit)"],
+            [client_cmd, "--socket", socket_path, "--eval", "(editor-quit)"],
             capture_output=True, text=True, timeout=10,
         )
     except (FileNotFoundError, subprocess.TimeoutExpired):
         pass
+    # Wait for daemon to fully stop responding
+    for _ in range(15):  # up to 3 seconds
+        try:
+            result = subprocess.run(
+                [client_cmd, "--socket", socket_path, "--eval", "(+ 1 1)"],
+                capture_output=True, text=True, timeout=2,
+            )
+            if result.returncode != 0:
+                break
+        except (FileNotFoundError, subprocess.TimeoutExpired, ConnectionRefusedError, OSError):
+            break
+        time.sleep(0.2)
     try:
         subprocess.run(
             ["tmux", "kill-session", "-t", f"tmax-ui-{run_id}"],

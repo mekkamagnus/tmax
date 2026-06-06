@@ -59,15 +59,16 @@ def stop_daemon(state: HarnessState) -> Result[HarnessState, HarnessError]:
     if not client.ping(state.config):
         return Ok(replace(state, daemon_pid=Nothing))
 
-    # Graceful shutdown via client
-    client.eval_expr(state.config, "(editor-quit)")
+    # Graceful shutdown via client --stop
+    client.stop_daemon(state.config)
     time.sleep(0.5)
 
     # Force kill if still running
-    try:
-        os.kill(pid_opt.unwrap(), 9)
-    except ProcessLookupError:
-        pass
+    if client.ping(state.config):
+        try:
+            os.kill(pid_opt.unwrap(), 9)
+        except ProcessLookupError:
+            pass
     time.sleep(0.3)
 
     # Clean up socket
@@ -301,16 +302,18 @@ def _start_tmux(state: HarnessState, file: str) -> Result[HarnessState, HarnessE
     if file:
         cmd = f"{cmd} {file}"
 
-    window_result = session.create_window(state.config, state.config.test_window)
+    window_result = session.create_window_with_command(
+        state.config,
+        state.config.test_window,
+        cmd,
+        state.config.project_root,
+    )
     if window_result.is_err():
         return Err(HarnessError(
             "Failed to create test window",
             Some(window_result.unwrap_err().message),
         ))
     session.select_window(state.config, state.config.test_window)
-
-    inp.send_command(state.config, state.config.test_window, f"cd {state.config.project_root}")
-    inp.send_command(state.config, state.config.test_window, cmd)
 
     # Wait for editor to render (check for NORMAL mode indicator in tmux pane)
     tui_ready = _wait_for_tui_content(state.config, state.config.test_window)
@@ -356,7 +359,8 @@ def _stop_tmux(state: HarnessState) -> Result[HarnessState, HarnessError]:
     """Stop legacy tmux mode."""
     window = state.active_window.unwrap_or("")
     if window:
-        inp.send_vim_command(state.config, window, "q")
+        inp.send_escape(state.config)
+        inp.send_vim_command(state.config, "q")
         time.sleep(1)
         session.kill_window(state.config, window)
     return Ok(replace(state, editor_pid=Nothing))
