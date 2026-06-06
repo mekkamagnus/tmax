@@ -1,12 +1,10 @@
 #!/usr/bin/env bun
 /**
  * @file main-bun.tsx
- * @description Main application entry point for tmax editor using Bun + Ink
- * T-Lisp drives ALL editor logic - React is just a thin UI layer
+ * @description Main application entry point for tmax editor
+ * T-Lisp drives ALL editor logic - TypeScript is just a thin I/O layer
  */
 
-import { render } from 'ink';
-import { Editor } from './frontend/components/Editor.tsx';
 import { Editor as EditorClass } from './editor/editor.ts';
 import { TerminalIOImpl } from './core/terminal.ts';
 import { FileSystemImpl } from './core/filesystem.ts';
@@ -15,58 +13,6 @@ import { EditorState } from './core/types.ts';
 import { TmaxServer } from './server/server.ts';
 import { Logger, LogLevel } from './utils/logger.ts';
 import { SteepFrontend } from './frontend/frontends/steep/index.ts';
-
-/**
- * Switch to alternate screen buffer (full screen mode)
- * Skips alternate screen buffer if TMAX_TEST_MODE is set (for UI testing)
- */
-function enterFullScreen() {
-  // Check if we're in test mode (UI testing via tmux)
-  const testMode = process.env.TMAX_TEST_MODE === 'true';
-
-  if (!testMode) {
-    // ANSI escape code to enter alternate screen buffer
-    process.stdout.write('\x1b[?1049h');
-  }
-
-  // Clear screen and move cursor to top-left
-  process.stdout.write('\x1b[2J');
-  process.stdout.write('\x1b[H');
-
-  // Hide cursor
-  process.stdout.write('\x1b[?25l');
-}
-
-/**
- * Exit alternate screen buffer (restore normal screen)
- * Skips alternate screen buffer exit if TMAX_TEST_MODE is set
- */
-function exitFullScreen() {
-  // Show cursor
-  process.stdout.write('\x1b[?25h');
-
-  // Check if we're in test mode
-  const testMode = process.env.TMAX_TEST_MODE === 'true';
-
-  if (!testMode) {
-    // Exit alternate screen buffer
-    process.stdout.write('\x1b[?1049l');
-  }
-}
-
-/**
- * Cleanup handler to ensure terminal is restored on exit
- */
-function setupCleanupHandlers() {
-  const cleanup = () => {
-    exitFullScreen();
-  };
-
-  // Handle various exit signals
-  process.on('SIGINT', cleanup);
-  process.on('SIGTERM', cleanup);
-  process.on('exit', cleanup);
-}
 
 /**
  * Main entry point that:
@@ -158,7 +104,6 @@ Options:
   -v, --version       Show version and exit
   -h, --help          Show this help message
   --daemon            Start server daemon mode
-  --ink               Use Ink/React frontend (default: native Steep frontend)
   --dev, --no-tty     Development mode (skip TTY checks for AI coding assistants)
   --init-file FILE    Use custom init file (default: ~/.config/tmax/init.tlisp)
 
@@ -166,7 +111,6 @@ Examples:
   tmax                    # Start editor with native frontend
   tmax file.txt           # Open file.txt
   tmax --daemon           # Start server daemon
-  tmax --ink file.txt     # Open file.txt with Ink frontend
   tmax --dev              # Start in development mode
   tmax --init-file ./my-config.tlisp  # Use custom init file
     `);
@@ -362,70 +306,19 @@ Examples:
   }
 
   // Phase 5: Initialize UI
-  const useInk = args.includes('--ink');
+  startupLog.info('Phase 5: Initializing Steep native frontend', {
+    correlationId: startupId,
+    metadata: { phase: 'init-ui', frontend: 'steep' }
+  });
 
-  if (useInk) {
-    startupLog.info('Phase 5: Initializing Ink/React UI', {
-      correlationId: startupId,
-      metadata: { phase: 'init-ui', frontend: 'ink' }
-    });
-
-    enterFullScreen();
-    setupCleanupHandlers();
-
-    try {
-      const inkOptions: any = {};
-
-      if (devMode && !process.stdin.isTTY) {
-        const { Duplex } = await import('stream');
-        const mockStdin = new Duplex({
-          read() { /* No-op in dev mode */ },
-          write(_chunk: any, _encoding: any, callback: () => void) { callback(); }
-        });
-        (mockStdin as any).isTTY = true;
-        inkOptions.stdin = mockStdin;
-      }
-
-      const { waitUntilExit } = render(
-        <Editor
-          initialEditorState={initialState}
-          editor={editor}
-          filename={filename}
-          onError={(error: Error) => {
-            console.error("Editor error:", error.message);
-          }}
-        />,
-        inkOptions
-      );
-
-      const totalStartupTime = Date.now() - startTime;
-      startupLog.completeOperation('editor-initialization', startupId, {
-        data: { totalTime: totalStartupTime, frontend: 'ink' }
-      });
-
-      await waitUntilExit();
-      exitFullScreen();
-    } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : String(error);
+  const frontend = new SteepFrontend();
+  try {
+    await frontend.run(editor, initialState);
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    if (!errorMessage.includes('EDITOR_QUIT_SIGNAL')) {
       console.error("Error starting tmax:", errorMessage);
-      exitFullScreen();
       process.exit(1);
-    }
-  } else {
-    startupLog.info('Phase 5: Initializing Steep native frontend', {
-      correlationId: startupId,
-      metadata: { phase: 'init-ui', frontend: 'steep' }
-    });
-
-    const frontend = new SteepFrontend();
-    try {
-      await frontend.run(editor, initialState);
-    } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : String(error);
-      if (!errorMessage.includes('EDITOR_QUIT_SIGNAL')) {
-        console.error("Error starting tmax:", errorMessage);
-        process.exit(1);
-      }
     }
   }
 }
