@@ -48,6 +48,8 @@ for tmax, the extensible terminal-based text editor.
 * Standard Library::          Built-in functions
 * Macro System::              Defining and using macros
 * Tail Call Optimization::    Writing efficient recursive functions
+* Standalone Runtime::        REPL, scripts, I/O, system primitives
+* Module System::             defmodule, require-module, and module lookup
 * Editor API --- Buffer::     Buffer manipulation functions
 * Editor API --- Cursor::     Cursor position and movement
 * Editor API --- Text Editing:: Delete, yank, change, paste
@@ -59,7 +61,7 @@ for tmax, the extensible terminal-based text editor.
 * Editor API --- Modes::      Editor mode operations
 * Editor API --- Files::      File system operations
 * Editor API --- Key Bindings:: Key binding and command execution
-* Editor API --- Minibuffer:: Minibuffer operations
+* Editor API --- Modules::    Module registry introspection
 * Editor API --- Hooks::      Hook system operations
 * Editor API --- Loading::    load, provide, require, and load-path
 * Editor API --- Syntax::     Syntax highlighting operations
@@ -283,6 +285,27 @@ Define a variable in the global environment.
 @end example
 @end deffn
 
+@deffn Special Form defmodule name forms...
+Define a module with an isolated environment.  A module body may include
+@code{(export ...)} to declare its public API and @code{require-module}
+forms to import dependencies.
+@example
+(defmodule std/example
+  (export double)
+  (defun double (n) (* n 2)))
+@end example
+@end deffn
+
+@deffn Special Form require-module module @r{[}:as alias@r{|}:import symbols@r{]}
+Load @var{module} and register an import in the current scope.  With
+@code{:as}, exported names are referenced as @code{alias/name}.  With
+@code{:import}, selected exported names are imported unqualified.
+@example
+(require-module std/strings :as s)
+(s/join "," (list "a" "b"))
+@end example
+@end deffn
+
 @deffn Special Form set! name value
 Set an existing variable's value.
 @example
@@ -415,6 +438,14 @@ Round up to integer.
 Round to nearest integer.
 @end deffn
 
+@deffn Function ceil number
+Standalone compatibility alias for @code{ceiling}.
+@end deffn
+
+@deffn Function pow base exponent
+Standalone compatibility alias for @code{expt}.
+@end deffn
+
 @section Comparison
 
 @deffn Function = a b
@@ -513,6 +544,26 @@ Length of string or list.
 @end example
 @end deffn
 
+@deffn Function list-slice list start end
+Return the portion of @var{list} from @var{start} up to but not
+including @var{end}.
+@end deffn
+
+@deffn Function mapcar function list
+Apply @var{function} to each element of @var{list} and return the
+result list.
+@end deffn
+
+@deffn Function filter predicate list
+Return elements of @var{list} for which @var{predicate} is truthy.
+@end deffn
+
+@deffn Function stable-sort predicate list
+Return a sorted copy of @var{list}.  @var{predicate} receives two
+values and should return true when the first should sort before the
+second.
+@end deffn
+
 @section String Operations
 
 @deffn Function substring str start end
@@ -549,6 +600,71 @@ Convert to uppercase.
 Convert to lowercase.
 @end deffn
 
+@deffn Function string-split str separator
+Split @var{str} by @var{separator} and return a list of strings.
+@end deffn
+
+@deffn Function string-join separator list
+Join @var{list} with @var{separator}.  Non-string values are converted
+with the normal T-Lisp printer.
+@end deffn
+
+@deffn Function string-trim str
+Trim leading and trailing whitespace.
+@end deffn
+
+@deffn Function string-replace str search replacement
+Replace every literal @var{search} occurrence in @var{str}.
+@end deffn
+
+@deffn Function number-to-string number
+Convert @var{number} to a string.
+@end deffn
+
+@deffn Function string-to-number str
+Parse @var{str} as a number.
+@end deffn
+
+@deffn Function string-prefix-p prefix str
+Return true when @var{str} starts with @var{prefix}.
+@end deffn
+
+@deffn Function string-suffix-p suffix str
+Return true when @var{str} ends with @var{suffix}.
+@end deffn
+
+@deffn Function string-contains-p needle str
+Return true when @var{str} contains @var{needle}.
+@end deffn
+
+@deffn Function regexp-quote str
+Escape @var{str} for use as a regular-expression literal.
+@end deffn
+
+@deffn Function string-match-spans pattern str @r{[}case-sensitive@r{]}
+Return match spans for regular-expression @var{pattern}.
+@end deffn
+
+@deffn Function literal-match-spans needle str @r{[}case-sensitive@r{]}
+Return match spans for literal @var{needle}.
+@end deffn
+
+@deffn Function string-flex-spans pattern str @r{[}case-sensitive@r{]}
+Return spans for flexible ordered-character matching.
+@end deffn
+
+@deffn Function string-initialism-spans pattern str @r{[}case-sensitive@r{]}
+Return spans for initialism matching across word starts.
+@end deffn
+
+@deffn Function display-width str
+Return display width used by the current T-Lisp renderer helpers.
+@end deffn
+
+@deffn Function truncate-display str width
+Return @var{str} truncated to @var{width} display cells.
+@end deffn
+
 @section Type Predicates
 
 @deffn Function null expr
@@ -579,6 +695,14 @@ Test if @var{expr} is a list.
 Test if @var{expr} is a function.
 @end deffn
 
+@deffn Function hashmapp expr
+Test if @var{expr} is a hash map.
+@end deffn
+
+@deffn Function nilp expr
+Test if @var{expr} is nil.
+@end deffn
+
 @deffn Function zerop number
 Test if @var{number} is zero.
 @end deffn
@@ -601,6 +725,55 @@ Logical negation. Returns @code{#t} if @var{expr} is falsy.
 
 @deffn Function print args...
 Print arguments to stdout.
+@end deffn
+
+@deffn Function princ arg
+Print @var{arg} without adding a newline.  Available in the standalone
+runtime profile.
+@end deffn
+
+@deffn Function read-line
+Read one line from standard input.  Available in the standalone runtime
+profile.
+@end deffn
+
+@deffn Function read-file path
+Read @var{path} as UTF-8 text.  Available in the standalone runtime
+profile.
+@end deffn
+
+@deffn Function write-file path content
+Write @var{content} to @var{path}.  Available in the standalone runtime
+profile.
+@end deffn
+
+@deffn Function file-exists? path
+Return true when @var{path} exists.  Available in the standalone runtime
+profile.
+@end deffn
+
+@deffn Function directory-files path
+Return directory entries for @var{path}.  Available in the standalone
+runtime profile.
+@end deffn
+
+@section System
+
+@deffn Function getenv name
+Return the environment variable named @var{name}, or nil.
+@end deffn
+
+@deffn Function current-time
+Return the current Unix timestamp in milliseconds.
+@end deffn
+
+@deffn Function exit code
+Exit the standalone CLI with @var{code}.
+@end deffn
+
+@deffn Function shell-command command
+Run @var{command} with the host shell and return stdout.  This primitive
+is opt-in for standalone profile construction and enabled by the CLI.
 @end deffn
 
 @section Hash Maps
@@ -659,6 +832,25 @@ Set variable @var{name} to @var{value} in the global environment.
 @end example
 @end deffn
 
+@section Callable Helpers
+
+@deffn Function funcall function args...
+Call @var{function} with @var{args}.
+@end deffn
+
+@deffn Function apply function args... list
+Call @var{function} with positional @var{args} followed by the elements
+of @var{list}.
+@end deffn
+
+@deffn Function identity value
+Return @var{value}.
+@end deffn
+
+@deffn Function symbol-name symbol
+Return the printed name of @var{symbol}.
+@end deffn
+
 @node Macro System
 @chapter Macro System
 
@@ -710,6 +902,130 @@ A call is in tail position when it is the last thing a function does.
 
 The recursive call to @code{factorial} is in tail position because it is the
 result of the @code{if} expression in the else branch.
+
+@node Standalone Runtime
+@chapter Standalone Runtime
+
+@cindex standalone runtime
+@cindex REPL
+@cindex scripts
+@cindex tlisp command
+
+T-Lisp can run outside the editor through the standalone @command{tlisp}
+CLI.  The standalone runtime uses the same parser, evaluator, macro
+system, and module registry as the editor, but registers a runtime
+profile for command-line work: stdout/stdin, filesystem primitives,
+system primitives, documentation helpers, and standalone module loading.
+
+@section CLI Usage
+
+@example
+@group
+bun run tlisp                  @r{Start the REPL}
+bun run tlisp -- -e '(+ 1 2)'  @r{Evaluate one expression}
+bin/tlisp script.tlisp         @r{Run a script}
+bun run build:tlisp            @r{Compile dist/tlisp with Bun}
+./dist/tlisp -e '(+ 1 2)'
+@end group
+@end example
+
+Script files may begin with a Unix shebang such as:
+
+@example
+#!/usr/bin/env tlisp
+@end example
+
+The CLI strips the shebang before evaluating the file.
+
+@section REPL Behavior
+
+The REPL keeps definitions across inputs, supports multiline forms by
+tracking balanced parentheses, and defines Clojure-like result bindings:
+
+@table @code
+@item *1
+Most recent result.
+@item *2
+Second most recent result.
+@item *3
+Third most recent result.
+@item *e
+Most recent error message, or nil.
+@end table
+
+Special REPL commands are @code{help}, @code{env}, @code{clear},
+@code{exit}, and @code{quit}.
+
+@section Standalone Module Loading
+
+The standalone loader resolves modules in this order:
+
+@enumerate
+@item Embedded standard-library modules such as @code{std/strings}.
+@item Files relative to the current working directory.
+@item Directories listed in @env{TLISP_PATH}.
+@end enumerate
+
+Module names map predictably to @file{.tlisp} paths; for example,
+@code{std/strings} maps to @file{std/strings.tlisp}.  Path traversal in
+module names is rejected.
+
+@node Module System
+@chapter Module System
+
+@cindex modules
+@cindex defmodule
+@cindex require-module
+
+The module system gives T-Lisp files explicit public APIs and scoped
+imports.  It is used by the editor's built-in T-Lisp libraries and by
+the standalone runtime.
+
+@section Defining Modules
+
+Use @code{defmodule} to create a module.  Exported names form the
+module's public API:
+
+@example
+@group
+(defmodule math/tools
+  (export double square)
+
+  (defun double (n) (* n 2))
+  (defun square (n) (* n n)))
+@end group
+@end example
+
+Module bodies run in an isolated environment whose parent is the
+builtins environment.  Exported names are available to callers through
+@code{require-module}.
+
+@section Importing Modules
+
+Use @code{:as} for qualified access:
+
+@example
+(require-module math/tools :as tools)
+(tools/double 10)
+@end example
+
+Use @code{:import} for selected unqualified names:
+
+@example
+(require-module math/tools :import (square))
+(square 5)
+@end example
+
+The parser accepts both the colon syntax shown above and parser-stripped
+forms such as @code{as} and @code{import}; source code should prefer the
+colon form.
+
+@section Module Introspection
+
+Inside the editor, module registry information is exposed through the
+functions documented in @ref{Editor API --- Modules}.  In the standalone
+runtime, @code{loaded-modules}, @code{doc}, and @code{apropos} provide
+basic discovery helpers.
 
 @node Editor API --- Buffer
 @chapter Editor API --- Buffer
@@ -1179,24 +1495,12 @@ Switch to command mode.
 Exit command mode and return to normal mode.
 @end deffn
 
-@deffn Function editor-exit-mx-mode
-Exit M-x mode and return to normal mode.
-@end deffn
-
 @deffn Function editor-handle-space
 Handle space key press (part of SPC ; M-x sequence).
 @end deffn
 
-@deffn Function editor-handle-semicolon
-Handle semicolon key press (completes M-x sequence).
-@end deffn
-
 @deffn Function editor-handle-help-prefix
 Handle @kbd{?} key press (show help).
-@end deffn
-
-@deffn Function editor-execute-mx-command command
-Execute M-x @var{command} by name.
 @end deffn
 
 @deffn Function editor-handle-window-prefix
@@ -1261,45 +1565,40 @@ Quit the editor, optionally saving changes.
 Execute the current command line content as a command.
 @end deffn
 
-@node Editor API --- Minibuffer
-@chapter Editor API --- Minibuffer
+@node Editor API --- Modules
+@chapter Editor API --- Modules
 
-@cindex minibuffer
+@cindex modules
+@cindex module registry
 
-@deffn Function minibuffer-active
-Return @code{#t} if minibuffer is active.
+These functions expose factual module-registry information to T-Lisp.
+They do not resolve packages themselves; loading is handled by
+@code{require-module} and the active module loader.
+
+@deffn Function module-loaded? name
+Return true when module @var{name} is loaded.
 @end deffn
 
-@deffn Function minibuffer-get
-Return current minibuffer content.
+@deffn Function module-exports name
+Return the exported symbol names for module @var{name}, or nil when the
+module is not loaded.
 @end deffn
 
-@deffn Function minibuffer-set text
-Set minibuffer content to @var{text}.
+@deffn Function module-list
+Return loaded module names.
 @end deffn
 
-@deffn Function minibuffer-clear
-Clear minibuffer content.
+@deffn Function module-lookup name symbol
+Return the exported value named @var{symbol} from module @var{name}, or
+nil if the module or symbol is not available.
 @end deffn
 
-@deffn Function minibuffer-history
-Return minibuffer history as list.
+@deffn Function describe-module name
+Return a readable description of module @var{name}, including exports.
 @end deffn
 
-@deffn Function minibuffer-history-add entry
-Add @var{entry} to minibuffer history.
-@end deffn
-
-@deffn Function minibuffer-history-previous
-Navigate to previous history entry.
-@end deffn
-
-@deffn Function minibuffer-history-next
-Navigate to next history entry.
-@end deffn
-
-@deffn Function minibuffer-history-reset-index
-Reset history navigation index.
+@deffn Function current-module
+Return the current module name when evaluation is module-scoped, or nil.
 @end deffn
 
 @node Editor API --- Hooks
@@ -1554,8 +1853,8 @@ Search for available plugins matching @var{query}.
 Return information about plugin @var{name}.
 @end deffn
 
-@deffn Function plugin-submit name url description
-Submit a new plugin to the TLPA repository.
+@deffn Function plugin-submit name description author
+Submit a new plugin to the TLPA repository for review.
 @end deffn
 
 @deffn Function plugin-review-list

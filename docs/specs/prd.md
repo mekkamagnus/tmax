@@ -38,6 +38,7 @@ The implementation delivers a full-screen terminal editor with vim-style key mot
 ✅ Phase 0.4:     Key Binding Refactor (COMPLETE)
 ✅ Phase 0.5:     Testing Infrastructure (COMPLETE)
 ✅ Phase 0.8:     Server/Client Architecture (COMPLETE - basic)
+📋 Phase 0.9:     T-Lisp Diagnostics and Debugging (LD-1 / SPEC-009)
 ✅ Phase 1:       Core Editing Features (COMPLETE)
 ✅ Phase 2:       Extensibility & Plugin System (MOSTLY COMPLETE)
 🚧 Phase 3:       Advanced Features (IN PROGRESS)
@@ -48,9 +49,11 @@ The implementation delivers a full-screen terminal editor with vim-style key mot
 - Phase 0.4: Key binding system refactored to T-Lisp keymaps
 - Phase 0.5: TRT testing framework implemented with deftest, assertions, coverage
 - Phase 0.8: JSON-RPC server/client with AI agent control protocol
+- Phase 0.9: Strong T-Lisp diagnostics and debugging planned from LD-1, with implementation starting from aligned SRS/PRD requirements
 - Phase 1: All core editing features (word/line nav, delete/yank/change, search, jump, visual, text objects, kill ring)
 
 **Current Focus:**
+- Immediate LD-1: Implement [SPEC-009: Strong T-Lisp Diagnostics and Debugging](../../../specs/SPEC-009-tlisp-diagnostics-debugging.md) before T-Lisp package and plugin ecosystem work depends on opaque errors
 - Phase 3: Advanced features (LSP integration, window management, undo tree visualization)
 - Phase 4: Community ecosystem (plugin repository, documentation website)
 
@@ -839,6 +842,192 @@ Advanced features and polish - Delivers enterprise-grade testing framework
 - **Competitive advantage: First AI-native terminal editor**
 
 **See [RFC-002: Server/Client Architecture](../rfcs/RFC-002-server-client-architecture.md) for complete technical specification.**
+
+---
+
+### Phase 0.9: T-Lisp Diagnostics and Debugging (LD-1)
+
+**Status:** 📋 PLANNED
+**Objective:** Implement [SPEC-009: Strong T-Lisp Diagnostics and Debugging](../../../specs/SPEC-009-tlisp-diagnostics-debugging.md) so T-Lisp errors are source-aware, structured, renderable, and useful during REPL, editor, module, plugin, package, and AI-agent workflows.
+
+**Priority Standard:** AI agents must validate user-facing tmax behavior by driving a real daemon/TUI frame through client-exposed key and command APIs. Raw `tmaxclient --eval` is allowed for narrow parser/library checks, but it is not sufficient acceptance validation for editor or package behavior.
+
+**Architecture Priority:** TypeScript is the primitive and transport layer only. It may capture source spans, wrap host primitive failures, serialize diagnostics, move data through daemon/client/frame APIs, and render T-Lisp-produced diagnostic views. T-Lisp owns diagnostic policy and user-facing behavior: error classification, help text, suggestions, trace/untrace, backtrace formatting, diagnostic-list, jump-to-diagnostic, package reload commands, and agent-visible editor command workflows.
+
+**Implementation Start Requirement:**
+- Keep `docs/srs.md`, this PRD, and `specs/SPEC-009-tlisp-diagnostics-debugging.md` aligned before code implementation begins.
+
+#### US-0.9.1: Source-Aware Diagnostics
+**As a** T-Lisp author
+**I want** every parse and evaluation error to include source location and code context
+**So that** I can identify the failing form without manual search
+
+**Acceptance Criteria:**
+- **Given** a tokenizer or parser error
+  **When** it is reported from a file, REPL, CLI eval, init file, or buffer eval
+  **Then** the diagnostic includes source name, line, column, source excerpt, and caret label
+- **Given** evaluation fails
+  **When** the error reaches the user
+  **Then** it includes a stable error code, severity, message, source span when available, help/suggestion text, and T-Lisp stack frames
+- **Given** a module load or export error
+  **When** it is reported
+  **Then** the diagnostic includes module name, searched paths or export context, and related locations when available
+- **Given** a diagnostic or debugging feature is user-facing
+  **When** it can be expressed using existing primitives
+  **Then** it should be implemented in T-Lisp rather than TypeScript
+- **Given** TypeScript adds diagnostics support
+  **When** the change is reviewed
+  **Then** it should expose only low-level primitives, data capture, serialization, daemon/client transport, or rendering hooks required by T-Lisp
+
+#### US-0.9.2: Debugging Workflow
+**As a** T-Lisp user
+**I want** last-error, backtrace, trace, and diagnostic-list commands
+**So that** I can debug without a modal debugger interrupting normal editor flow
+
+**Acceptance Criteria:**
+- **Given** a T-Lisp error occurred
+  **When** I run `tlisp-last-error` or inspect `*e`
+  **Then** I should see the structured diagnostic or a stable hashmap representation
+- **Given** a T-Lisp function is traced
+  **When** it is called
+  **Then** trace output includes function name, arguments, result or error, nesting depth, and source location when known
+- **Given** diagnostics exist in a `.tlisp` buffer
+  **When** I run diagnostic commands
+  **Then** I can list diagnostics, inspect the diagnostic at point, and jump to the diagnostic source
+
+#### US-0.9.3: Agent-as-User Diagnostic Workflow
+**As an** AI agent developing T-Lisp packages or editor behavior
+**I want** to drive a real daemon frame through `tmaxclient` key and command APIs
+**So that** I can test tmax the way a user experiences it, observe structured diagnostics, self-correct, and avoid false confidence from raw eval-only tests
+
+**Acceptance Criteria:**
+- **Given** an agent validates user-facing behavior
+  **When** it runs acceptance checks
+  **Then** it should drive a daemon-backed frame with `tmaxclient --key`, `tmaxclient --keys`, or `tmaxclient --command --json`
+- **Given** key-driven or command-driven execution fails
+  **When** the daemon responds
+  **Then** the JSON-RPC error should include `error.data.diagnostic` with source span, stack, suggestions, request ID, client ID, and frame ID
+- **Given** an error occurs from TUI-originated behavior
+  **When** the agent queries `tmaxclient --diagnostics --json`, `--last-error --json`, or `--backtrace --json`
+  **Then** it should receive structured diagnostic state without scraping terminal output
+- **Given** an agent develops a package such as an org-mode-like extension
+  **When** it claims completion
+  **Then** the package should be loaded, exercised, and verified through the daemon/TUI client path that a user would use
+- **Given** raw `tmaxclient --eval` is used
+  **When** the feature is user-facing
+  **Then** raw eval should be treated only as a narrow parser/library unit check and not as acceptance validation
+
+#### US-0.9.4: Source Spans on T-Lisp Values (GAP 5)
+**As a** T-Lisp user or agent
+**I want** runtime errors to include exact source locations
+**So that** I can locate the failing form without guessing, even in multi-form files, modules, and init files
+
+**Acceptance Criteria:**
+- **Given** a T-Lisp value is parsed from source
+  **When** it is evaluated
+  **Then** it should carry source span metadata (line, column, offset) through a non-enumerable WeakMap side store
+- **Given** a runtime type, arity, or undefined-symbol error occurs
+  **When** the diagnostic is rendered
+  **Then** it should include the primary span from the originating parsed form
+- **Given** `parseProgram(source, sourceName)` is used
+  **When** a multi-form file has an error in the second or later form
+  **Then** the error should report the original file line/column, not a reparsed offset
+- **Given** parsed values carry source metadata
+  **When** existing value equality and serialization tests run
+  **Then** metadata should not change visible value shape or successful evaluation results
+
+#### US-0.9.5: Structured Diagnostics in JSON-RPC Responses (GAP 2)
+**As an** AI agent using daemon eval
+**I want** JSON-RPC eval failures to return structured diagnostic payloads
+**So that** I can programmatically inspect errors for self-correction without losing information at the transport boundary
+
+**Acceptance Criteria:**
+- **Given** a daemon eval fails because of T-Lisp code
+  **When** the JSON-RPC response is returned
+  **Then** it should include `error.data.kind = "tlisp-diagnostic"` and `error.data.diagnostic` with severity, code, message, source, primarySpan, expected, actual, suggestions, and stack
+- **Given** a daemon command or keypress fails because of T-Lisp code
+  **When** the JSON-RPC response is returned
+  **Then** it should use the same structured diagnostic shape
+- **Given** a T-Lisp eval succeeds
+  **When** the response is returned
+  **Then** it should not include any diagnostic payload
+- **Given** `tmaxclient --eval CODE --json` fails
+  **When** the CLI prints output
+  **Then** it should print the full JSON-RPC error object and exit nonzero
+
+#### US-0.9.6: Diagnostic Event History and Querying (GAP 3, 4, 7)
+**As an** AI agent or maintainer
+**I want** to query recent diagnostics filtered by request, client, frame, and time
+**So that** I can trace what happened after a specific action without keeping my own log
+
+**Acceptance Criteria:**
+- **Given** the daemon processes requests
+  **When** a T-Lisp diagnostic is created
+  **Then** it should be stored in a bounded event history with requestId, correlationId, clientId, frameId, operation, bufferName, moduleName, timestamp, and the serialized diagnostic
+- **Given** a JSON-RPC request carries a correlationId
+  **When** the daemon processes it
+  **Then** the correlationId should be echoed in the response and in any diagnostic events generated by that request
+- **Given** a JSON-RPC request does not carry a correlationId
+  **When** the daemon processes it
+  **Then** the daemon should auto-generate one
+- **Given** `tmaxclient --diagnostics --json` is called
+  **When** the daemon responds
+  **Then** it should return the bounded diagnostic event history
+- **Given** `tmaxclient --diagnostics --since-request ID --json` is called
+  **When** the daemon responds
+  **Then** it should return only diagnostics created after that request
+- **Given** `tmaxclient --last-error --json` is called
+  **When** the daemon responds
+  **Then** it should return the most recent structured diagnostic
+- **Given** `tmaxclient --backtrace --json` is called
+  **When** the daemon responds
+  **Then** it should return the latest T-Lisp stack frames
+
+#### US-0.9.7: T-Lisp Backtrace Capture (GAP 6)
+**As a** T-Lisp user or agent
+**I want** logical T-Lisp call frames on every error
+**So that** I can trace the call chain leading to a failure without seeing TypeScript host stack noise
+
+**Acceptance Criteria:**
+- **Given** a T-Lisp function call fails
+  **When** the error is captured
+  **Then** the backtrace should include logical frames for function name, module name, source span, and call-site span
+- **Given** tail-call optimization is active
+  **When** a tail-recursive function fails
+  **Then** the backtrace should remain useful and bounded, not grow unbounded
+- **Given** macro expansion fails
+  **When** the backtrace is rendered
+  **Then** it should show both the expansion site and the call site
+- **Given** a backtrace is rendered
+  **When** it is displayed
+  **Then** it should show T-Lisp frames only, not TypeScript host frames
+
+#### US-0.9.8: Client-Exposed Key and Command Driving (GAP 1)
+**As an** AI agent testing tmax as a user
+**I want** to drive a real daemon frame through `tmaxclient` key and command APIs
+**So that** I can exercise the same input path as a user typing in the TUI
+
+**Acceptance Criteria:**
+- **Given** `tmaxclient --key KEY --json` is called
+  **When** the daemon processes it
+  **Then** it should send a keypress to the active frame and return a structured response with frame mode, cursor position, buffer name, status message, and any diagnostics
+- **Given** `tmaxclient --keys 'i hello<Escape>' --json` is called
+  **When** the daemon processes it
+  **Then** it should replay the key sequence on the active frame and return the same structured response shape
+- **Given** `tmaxclient --command NAME --json` is called
+  **When** the daemon processes it
+  **Then** it should execute the named editor command and return a structured response with state snapshot and diagnostics
+- **Given** a key or command response includes diagnostics
+  **When** the agent reads the response
+  **Then** diagnostics should use the same structured shape as eval error responses
+- **Given** a `--frame` argument is provided
+  **When** the daemon processes the request
+  **Then** the key or command should target the specified frame
+
+**Related Documents:**
+- `docs/memos/elisp-pain-points.md` — LD-1 pain point and T-Lisp implication
+- `specs/SPEC-009-tlisp-diagnostics-debugging.md` — implementation plan and validation matrix
+- `specs/SPEC-009-tlisp-diagnostics-debugging.html` — screen mockups, gap analysis, and phase plan
 
 ---
 
@@ -1807,6 +1996,7 @@ The implementation has achieved core "Emacs with Evil-mode" parity with comprehe
 Phase 0.4 (Key Binding Refactor) ✅ COMPLETE
 Phase 0.5 (Testing Infrastructure) ✅ MVP COMPLETE
 Phase 0.8 (Server/Client Architecture) ✅ BASIC COMPLETE
+Phase 0.9 (T-Lisp Diagnostics and Debugging) 📋 PLANNED
 Phase 1 (Core Editing Features) ✅ COMPLETE
 Phase 2 (Extensibility) ✅ MOSTLY COMPLETE
 Phase 3 (Advanced Features) 🚧 IN PROGRESS ⬅️ CURRENT
@@ -1818,6 +2008,7 @@ Phase 4 (Community Ecosystem) 📋 PLANNED
 2. **Phase 0.5 establishes testing before complexity** - Building tests on incomplete architecture creates technical debt
 3. **Phase 1 adds 20+ new key bindings** - Must have T-Lisp keymaps working first
 4. **Phase 0.8 (parallel) enables AI control** - Independent architecture, enhances all future development
+5. **Phase 0.9 closes LD-1 before ecosystem growth** - Packages and plugins need source-aware diagnostics before failures become hard to debug
 
 ---
 
@@ -1942,6 +2133,43 @@ Phase 4 (Community Ecosystem) 📋 PLANNED
 - Separate socket server and client CLI
 - Enhances all future development (AI can help build Phase 1+ features)
 - Doesn't block Phase 1 (can be integrated incrementally)
+
+---
+
+### Phase 0.9: T-Lisp Diagnostics and Debugging 📋 PLANNED
+
+**Status:** 📋 PLANNED
+**Priority:** IMMEDIATE - Closes LD-1 before package/plugin ecosystem growth
+**Spec:** [SPEC-009: Strong T-Lisp Diagnostics and Debugging](../../../specs/SPEC-009-tlisp-diagnostics-debugging.md)
+
+**Objective:** Replace opaque T-Lisp parse/eval/module errors with source-aware structured diagnostics, consistent rendering, logical T-Lisp stack traces, lightweight debugging commands, and agent-visible JSON diagnostics.
+
+**Priority Standard:** Agents must test user-facing tmax behavior as users do: through a daemon-backed frame driven by client key and command APIs. Raw eval is secondary and cannot be the only acceptance path for editor/package behavior.
+
+**Architecture Priority:** TypeScript stays limited to primitives, metadata capture, serialization, daemon/client transport, and rendering hooks. T-Lisp owns diagnostic semantics, debugging workflows, command behavior, package workflows, and agent-visible editor behavior.
+
+**Planned:**
+- [ ] Source spans for tokenizer, parser, parsed values, and multi-form execution (GAP 5 / US-0.9.4)
+- [ ] Structured `TLispDiagnostic` records with severity, code, labels, notes, help, suggestions, related locations, and stack frames
+- [ ] Rust/Elm-style terminal diagnostic renderer for CLI, REPL, editor eval, init-file loading, daemon eval, and `*Messages*`
+- [ ] Racket-style lightweight debugging helpers: last error, backtrace, trace, untrace, and trace list (GAP 6 / US-0.9.7)
+- [ ] LSP-compatible conversion for `.tlisp` diagnostics in editor buffers
+- [ ] JSON-RPC diagnostic payloads for `tmaxclient --eval --json`, key-driven commands, daemon status, and diagnostic queries (GAP 2 / US-0.9.5)
+- [ ] Bounded diagnostic event history with correlation IDs, request/client/frame linking, and `--diagnostics`, `--last-error`, `--backtrace` CLI flags (GAP 3, 4, 7 / US-0.9.6)
+- [ ] Client-exposed `tmaxclient --key`, `--keys`, and `--command --json` workflows for agent-as-user testing (GAP 1 / US-0.9.8)
+- [ ] T-Lisp-owned diagnostic commands and policies built on top of TypeScript primitive data/transport hooks
+
+**Success Criteria:**
+- 📋 Parse and runtime errors report file or eval source, line, column, source excerpt, and caret label (GAP 5)
+- 📋 Runtime errors include logical T-Lisp frames and omit raw JavaScript stack noise by default (GAP 6)
+- 📋 Module diagnostics include module name, searched paths or export context, and related locations when available
+- 📋 JSON-RPC eval/command/keypress failures preserve structured diagnostic data at the transport boundary (GAP 2)
+- 📋 Daemon stores bounded diagnostic event history linked to request, client, and frame IDs (GAP 3, 4)
+- 📋 `tmaxclient --diagnostics --json`, `--last-error --json`, and `--backtrace --json` expose structured state (GAP 3, 7)
+- 📋 Agent-driven key/command failures return structured diagnostics with request/client/frame context (GAP 1)
+- 📋 Package acceptance checks prove behavior through a daemon/TUI client path, with raw eval limited to parser/library unit checks
+- 📋 User-facing diagnostic/debug behavior lives in T-Lisp unless a missing primitive requires TypeScript support
+- 📋 Existing successful T-Lisp programs continue to evaluate with the same visible values
 
 ---
 

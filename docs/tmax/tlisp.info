@@ -42,6 +42,8 @@ for tmax, the extensible terminal-based text editor.
 * Standard Library::          Built-in functions
 * Macro System::              Defining and using macros
 * Tail Call Optimization::    Writing efficient recursive functions
+* Standalone Runtime::        REPL, scripts, I/O, system primitives
+* Module System::             defmodule, require-module, and module lookup
 * Editor API --- Buffer::     Buffer manipulation functions
 * Editor API --- Cursor::     Cursor position and movement
 * Editor API --- Text Editing:: Delete, yank, change, paste
@@ -53,7 +55,7 @@ for tmax, the extensible terminal-based text editor.
 * Editor API --- Modes::      Editor mode operations
 * Editor API --- Files::      File system operations
 * Editor API --- Key Bindings:: Key binding and command execution
-* Editor API --- Minibuffer:: Minibuffer operations
+* Editor API --- Modules::    Module registry introspection
 * Editor API --- Hooks::      Hook system operations
 * Editor API --- Loading::    load, provide, require, and load-path
 * Editor API --- Syntax::     Syntax highlighting operations
@@ -250,6 +252,21 @@ File: tlisp.info,  Node: Special Forms,  Next: Quasiquote System,  Prev: Evaluat
      Define a variable in the global environment.
           (defvar tab-width 4)
 
+ -- Special: Form defmodule name forms...
+     Define a module with an isolated environment.  A module body may
+     include ‘(export ...)’ to declare its public API and
+     ‘require-module’ forms to import dependencies.
+          (defmodule std/example
+            (export double)
+            (defun double (n) (* n 2)))
+
+ -- Special: Form require-module module [:as alias|:import symbols]
+     Load MODULE and register an import in the current scope.  With
+     ‘:as’, exported names are referenced as ‘alias/name’.  With
+     ‘:import’, selected exported names are imported unqualified.
+          (require-module std/strings :as s)
+          (s/join "," (list "a" "b"))
+
  -- Special: Form set! name value
      Set an existing variable's value.
           (set! tab-width 2)
@@ -338,6 +355,12 @@ File: tlisp.info,  Node: Standard Library,  Next: Macro System,  Prev: Quasiquot
  -- Function: round number
      Round to nearest integer.
 
+ -- Function: ceil number
+     Standalone compatibility alias for ‘ceiling’.
+
+ -- Function: pow base exponent
+     Standalone compatibility alias for ‘expt’.
+
 7.2 Comparison
 ==============
 
@@ -400,6 +423,19 @@ File: tlisp.info,  Node: Standard Library,  Next: Macro System,  Prev: Quasiquot
           (length "hello")  ; => 5
           (length '(1 2 3)) ; => 3
 
+ -- Function: list-slice list start end
+     Return the portion of LIST from START up to but not including END.
+
+ -- Function: mapcar function list
+     Apply FUNCTION to each element of LIST and return the result list.
+
+ -- Function: filter predicate list
+     Return elements of LIST for which PREDICATE is truthy.
+
+ -- Function: stable-sort predicate list
+     Return a sorted copy of LIST.  PREDICATE receives two values and
+     should return true when the first should sort before the second.
+
 7.4 String Operations
 =====================
 
@@ -426,6 +462,55 @@ File: tlisp.info,  Node: Standard Library,  Next: Macro System,  Prev: Quasiquot
  -- Function: string-downcase str
      Convert to lowercase.
 
+ -- Function: string-split str separator
+     Split STR by SEPARATOR and return a list of strings.
+
+ -- Function: string-join separator list
+     Join LIST with SEPARATOR.  Non-string values are converted with the
+     normal T-Lisp printer.
+
+ -- Function: string-trim str
+     Trim leading and trailing whitespace.
+
+ -- Function: string-replace str search replacement
+     Replace every literal SEARCH occurrence in STR.
+
+ -- Function: number-to-string number
+     Convert NUMBER to a string.
+
+ -- Function: string-to-number str
+     Parse STR as a number.
+
+ -- Function: string-prefix-p prefix str
+     Return true when STR starts with PREFIX.
+
+ -- Function: string-suffix-p suffix str
+     Return true when STR ends with SUFFIX.
+
+ -- Function: string-contains-p needle str
+     Return true when STR contains NEEDLE.
+
+ -- Function: regexp-quote str
+     Escape STR for use as a regular-expression literal.
+
+ -- Function: string-match-spans pattern str [case-sensitive]
+     Return match spans for regular-expression PATTERN.
+
+ -- Function: literal-match-spans needle str [case-sensitive]
+     Return match spans for literal NEEDLE.
+
+ -- Function: string-flex-spans pattern str [case-sensitive]
+     Return spans for flexible ordered-character matching.
+
+ -- Function: string-initialism-spans pattern str [case-sensitive]
+     Return spans for initialism matching across word starts.
+
+ -- Function: display-width str
+     Return display width used by the current T-Lisp renderer helpers.
+
+ -- Function: truncate-display str width
+     Return STR truncated to WIDTH display cells.
+
 7.5 Type Predicates
 ===================
 
@@ -450,6 +535,12 @@ File: tlisp.info,  Node: Standard Library,  Next: Macro System,  Prev: Quasiquot
  -- Function: functionp expr
      Test if EXPR is a function.
 
+ -- Function: hashmapp expr
+     Test if EXPR is a hash map.
+
+ -- Function: nilp expr
+     Test if EXPR is nil.
+
  -- Function: zerop number
      Test if NUMBER is zero.
 
@@ -471,7 +562,48 @@ File: tlisp.info,  Node: Standard Library,  Next: Macro System,  Prev: Quasiquot
  -- Function: print args...
      Print arguments to stdout.
 
-7.8 Hash Maps
+ -- Function: princ arg
+     Print ARG without adding a newline.  Available in the standalone
+     runtime profile.
+
+ -- Function: read-line
+     Read one line from standard input.  Available in the standalone
+     runtime profile.
+
+ -- Function: read-file path
+     Read PATH as UTF-8 text.  Available in the standalone runtime
+     profile.
+
+ -- Function: write-file path content
+     Write CONTENT to PATH.  Available in the standalone runtime
+     profile.
+
+ -- Function: file-exists? path
+     Return true when PATH exists.  Available in the standalone runtime
+     profile.
+
+ -- Function: directory-files path
+     Return directory entries for PATH.  Available in the standalone
+     runtime profile.
+
+7.8 System
+==========
+
+ -- Function: getenv name
+     Return the environment variable named NAME, or nil.
+
+ -- Function: current-time
+     Return the current Unix timestamp in milliseconds.
+
+ -- Function: exit code
+     Exit the standalone CLI with CODE.
+
+ -- Function: shell-command command
+     Run COMMAND with the host shell and return stdout.  This primitive
+     is opt-in for standalone profile construction and enabled by the
+     CLI.
+
+7.9 Hash Maps
 =============
 
  -- Function: hashmap key1 value1 key2 value2...
@@ -493,8 +625,8 @@ File: tlisp.info,  Node: Standard Library,  Next: Macro System,  Prev: Quasiquot
  -- Function: hashmap-has-key? map key
      Test if MAP contains KEY.
 
-7.9 Keymaps
-===========
+7.10 Keymaps
+============
 
  -- Function: defkeymap name
      Create and define a new keymap.
@@ -508,12 +640,28 @@ File: tlisp.info,  Node: Standard Library,  Next: Macro System,  Prev: Quasiquot
  -- Function: keymap-lookup keymap key
      Look up binding for KEY in KEYMAP.
 
-7.10 Variables
+7.11 Variables
 ==============
 
  -- Function: setq name value
      Set variable NAME to VALUE in the global environment.
           (setq tab-width 4)
+
+7.12 Callable Helpers
+=====================
+
+ -- Function: funcall function args...
+     Call FUNCTION with ARGS.
+
+ -- Function: apply function args... list
+     Call FUNCTION with positional ARGS followed by the elements of
+     LIST.
+
+ -- Function: identity value
+     Return VALUE.
+
+ -- Function: symbol-name symbol
+     Return the printed name of SYMBOL.
 
 
 File: tlisp.info,  Node: Macro System,  Next: Tail Call Optimization,  Prev: Standard Library,  Up: Top
@@ -540,7 +688,7 @@ arguments and produce new code to be evaluated.
      expansions
 
 
-File: tlisp.info,  Node: Tail Call Optimization,  Next: Editor API --- Buffer,  Prev: Macro System,  Up: Top
+File: tlisp.info,  Node: Tail Call Optimization,  Next: Standalone Runtime,  Prev: Macro System,  Up: Top
 
 9 Tail Call Optimization
 ************************
@@ -564,9 +712,117 @@ does.
 the result of the ‘if’ expression in the else branch.
 
 
-File: tlisp.info,  Node: Editor API --- Buffer,  Next: Editor API --- Cursor,  Prev: Tail Call Optimization,  Up: Top
+File: tlisp.info,  Node: Standalone Runtime,  Next: Module System,  Prev: Tail Call Optimization,  Up: Top
 
-10 Editor API -- Buffer
+10 Standalone Runtime
+*********************
+
+T-Lisp can run outside the editor through the standalone ‘tlisp’ CLI.
+The standalone runtime uses the same parser, evaluator, macro system,
+and module registry as the editor, but registers a runtime profile for
+command-line work: stdout/stdin, filesystem primitives, system
+primitives, documentation helpers, and standalone module loading.
+
+10.1 CLI Usage
+==============
+
+     bun run tlisp                  Start the REPL
+     bun run tlisp -- -e '(+ 1 2)'  Evaluate one expression
+     bin/tlisp script.tlisp         Run a script
+     bun run build:tlisp            Compile dist/tlisp with Bun
+     ./dist/tlisp -e '(+ 1 2)'
+
+   Script files may begin with a Unix shebang such as:
+
+     #!/usr/bin/env tlisp
+
+   The CLI strips the shebang before evaluating the file.
+
+10.2 REPL Behavior
+==================
+
+The REPL keeps definitions across inputs, supports multiline forms by
+tracking balanced parentheses, and defines Clojure-like result bindings:
+
+‘*1’
+     Most recent result.
+‘*2’
+     Second most recent result.
+‘*3’
+     Third most recent result.
+‘*e’
+     Most recent error message, or nil.
+
+   Special REPL commands are ‘help’, ‘env’, ‘clear’, ‘exit’, and ‘quit’.
+
+10.3 Standalone Module Loading
+==============================
+
+The standalone loader resolves modules in this order:
+
+  1. Embedded standard-library modules such as ‘std/strings’.
+  2. Files relative to the current working directory.
+  3. Directories listed in ‘TLISP_PATH’.
+
+   Module names map predictably to ‘.tlisp’ paths; for example,
+‘std/strings’ maps to ‘std/strings.tlisp’.  Path traversal in module
+names is rejected.
+
+
+File: tlisp.info,  Node: Module System,  Next: Editor API --- Buffer,  Prev: Standalone Runtime,  Up: Top
+
+11 Module System
+****************
+
+The module system gives T-Lisp files explicit public APIs and scoped
+imports.  It is used by the editor's built-in T-Lisp libraries and by
+the standalone runtime.
+
+11.1 Defining Modules
+=====================
+
+Use ‘defmodule’ to create a module.  Exported names form the module's
+public API:
+
+     (defmodule math/tools
+       (export double square)
+
+       (defun double (n) (* n 2))
+       (defun square (n) (* n n)))
+
+   Module bodies run in an isolated environment whose parent is the
+builtins environment.  Exported names are available to callers through
+‘require-module’.
+
+11.2 Importing Modules
+======================
+
+Use ‘:as’ for qualified access:
+
+     (require-module math/tools :as tools)
+     (tools/double 10)
+
+   Use ‘:import’ for selected unqualified names:
+
+     (require-module math/tools :import (square))
+     (square 5)
+
+   The parser accepts both the colon syntax shown above and
+parser-stripped forms such as ‘as’ and ‘import’; source code should
+prefer the colon form.
+
+11.3 Module Introspection
+=========================
+
+Inside the editor, module registry information is exposed through the
+functions documented in *note Editor API --- Modules::.  In the
+standalone runtime, ‘loaded-modules’, ‘doc’, and ‘apropos’ provide basic
+discovery helpers.
+
+
+File: tlisp.info,  Node: Editor API --- Buffer,  Next: Editor API --- Cursor,  Prev: Module System,  Up: Top
+
+12 Editor API -- Buffer
 ***********************
 
  -- Function: buffer-create name
@@ -627,7 +883,7 @@ File: tlisp.info,  Node: Editor API --- Buffer,  Next: Editor API --- Cursor,  P
 
 File: tlisp.info,  Node: Editor API --- Cursor,  Next: Editor API --- Text Editing,  Prev: Editor API --- Buffer,  Up: Top
 
-11 Editor API -- Cursor
+13 Editor API -- Cursor
 ***********************
 
  -- Function: cursor-position
@@ -646,10 +902,10 @@ File: tlisp.info,  Node: Editor API --- Cursor,  Next: Editor API --- Text Editi
 
 File: tlisp.info,  Node: Editor API --- Text Editing,  Next: Editor API --- Search,  Prev: Editor API --- Cursor,  Up: Top
 
-12 Editor API -- Text Editing
+14 Editor API -- Text Editing
 *****************************
 
-12.1 Delete Operations
+14.1 Delete Operations
 ======================
 
  -- Function: delete-word count
@@ -667,7 +923,7 @@ File: tlisp.info,  Node: Editor API --- Text Editing,  Next: Editor API --- Sear
  -- Function: delete-register-get
      Get content of the delete register.
 
-12.2 Yank (Copy) Operations
+14.2 Yank (Copy) Operations
 ===========================
 
  -- Function: yank-chars count
@@ -688,7 +944,7 @@ File: tlisp.info,  Node: Editor API --- Text Editing,  Next: Editor API --- Sear
  -- Function: yank-register-set text
      Set yank register to TEXT.
 
-12.3 Paste Operations
+14.3 Paste Operations
 =====================
 
  -- Function: paste-after count
@@ -697,7 +953,7 @@ File: tlisp.info,  Node: Editor API --- Text Editing,  Next: Editor API --- Sear
  -- Function: paste-before count
      Paste before cursor COUNT times (P).
 
-12.4 Change Operations
+14.4 Change Operations
 ======================
 
  -- Function: change-word count
@@ -712,7 +968,7 @@ File: tlisp.info,  Node: Editor API --- Text Editing,  Next: Editor API --- Sear
 
 File: tlisp.info,  Node: Editor API --- Search,  Next: Editor API --- Visual,  Prev: Editor API --- Text Editing,  Up: Top
 
-13 Editor API -- Search
+15 Editor API -- Search
 ***********************
 
  -- Function: search-forward pattern
@@ -766,7 +1022,7 @@ File: tlisp.info,  Node: Editor API --- Search,  Next: Editor API --- Visual,  P
 
 File: tlisp.info,  Node: Editor API --- Visual,  Next: Editor API --- Text Objects,  Prev: Editor API --- Search,  Up: Top
 
-14 Editor API -- Visual
+16 Editor API -- Visual
 ***********************
 
  -- Function: visual-enter-char-mode
@@ -802,7 +1058,7 @@ File: tlisp.info,  Node: Editor API --- Visual,  Next: Editor API --- Text Objec
 
 File: tlisp.info,  Node: Editor API --- Text Objects,  Next: Editor API --- Kill Ring,  Prev: Editor API --- Visual,  Up: Top
 
-15 Editor API -- Text Objects
+17 Editor API -- Text Objects
 *****************************
 
  -- Function: delete-inner-word
@@ -847,7 +1103,7 @@ File: tlisp.info,  Node: Editor API --- Text Objects,  Next: Editor API --- Kill
 
 File: tlisp.info,  Node: Editor API --- Kill Ring,  Next: Editor API --- Undo/Redo,  Prev: Editor API --- Text Objects,  Up: Top
 
-16 Editor API -- Kill Ring
+18 Editor API -- Kill Ring
 **************************
 
  -- Function: kill-ring-save text
@@ -880,7 +1136,7 @@ File: tlisp.info,  Node: Editor API --- Kill Ring,  Next: Editor API --- Undo/Re
 
 File: tlisp.info,  Node: Editor API --- Undo/Redo,  Next: Editor API --- Modes,  Prev: Editor API --- Kill Ring,  Up: Top
 
-17 Editor API -- Undo/Redo
+19 Editor API -- Undo/Redo
 **************************
 
  -- Function: undo
@@ -904,7 +1160,7 @@ File: tlisp.info,  Node: Editor API --- Undo/Redo,  Next: Editor API --- Modes, 
 
 File: tlisp.info,  Node: Editor API --- Modes,  Next: Editor API --- Files,  Prev: Editor API --- Undo/Redo,  Up: Top
 
-18 Editor API -- Modes
+20 Editor API -- Modes
 **********************
 
  -- Function: editor-mode
@@ -933,20 +1189,11 @@ File: tlisp.info,  Node: Editor API --- Modes,  Next: Editor API --- Files,  Pre
  -- Function: editor-exit-command-mode
      Exit command mode and return to normal mode.
 
- -- Function: editor-exit-mx-mode
-     Exit M-x mode and return to normal mode.
-
  -- Function: editor-handle-space
      Handle space key press (part of SPC ; M-x sequence).
 
- -- Function: editor-handle-semicolon
-     Handle semicolon key press (completes M-x sequence).
-
  -- Function: editor-handle-help-prefix
      Handle ‘?’ key press (show help).
-
- -- Function: editor-execute-mx-command command
-     Execute M-x COMMAND by name.
 
  -- Function: editor-handle-window-prefix
      Handle ‘C-x’ key prefix for window commands.
@@ -954,7 +1201,7 @@ File: tlisp.info,  Node: Editor API --- Modes,  Next: Editor API --- Files,  Pre
 
 File: tlisp.info,  Node: Editor API --- Files,  Next: Editor API --- Key Bindings,  Prev: Editor API --- Modes,  Up: Top
 
-19 Editor API -- Files
+21 Editor API -- Files
 **********************
 
  -- Function: write-file-content filename content
@@ -988,9 +1235,9 @@ File: tlisp.info,  Node: Editor API --- Files,  Next: Editor API --- Key Binding
      Read directory contents as list of file objects.
 
 
-File: tlisp.info,  Node: Editor API --- Key Bindings,  Next: Editor API --- Minibuffer,  Prev: Editor API --- Files,  Up: Top
+File: tlisp.info,  Node: Editor API --- Key Bindings,  Next: Editor API --- Modules,  Prev: Editor API --- Files,  Up: Top
 
-20 Editor API -- Key Bindings
+22 Editor API -- Key Bindings
 *****************************
 
  -- Function: editor-quit
@@ -1000,42 +1247,40 @@ File: tlisp.info,  Node: Editor API --- Key Bindings,  Next: Editor API --- Mini
      Execute the current command line content as a command.
 
 
-File: tlisp.info,  Node: Editor API --- Minibuffer,  Next: Editor API --- Hooks,  Prev: Editor API --- Key Bindings,  Up: Top
+File: tlisp.info,  Node: Editor API --- Modules,  Next: Editor API --- Hooks,  Prev: Editor API --- Key Bindings,  Up: Top
 
-21 Editor API -- Minibuffer
-***************************
+23 Editor API -- Modules
+************************
 
- -- Function: minibuffer-active
-     Return ‘#t’ if minibuffer is active.
+These functions expose factual module-registry information to T-Lisp.
+They do not resolve packages themselves; loading is handled by
+‘require-module’ and the active module loader.
 
- -- Function: minibuffer-get
-     Return current minibuffer content.
+ -- Function: module-loaded? name
+     Return true when module NAME is loaded.
 
- -- Function: minibuffer-set text
-     Set minibuffer content to TEXT.
+ -- Function: module-exports name
+     Return the exported symbol names for module NAME, or nil when the
+     module is not loaded.
 
- -- Function: minibuffer-clear
-     Clear minibuffer content.
+ -- Function: module-list
+     Return loaded module names.
 
- -- Function: minibuffer-history
-     Return minibuffer history as list.
+ -- Function: module-lookup name symbol
+     Return the exported value named SYMBOL from module NAME, or nil if
+     the module or symbol is not available.
 
- -- Function: minibuffer-history-add entry
-     Add ENTRY to minibuffer history.
+ -- Function: describe-module name
+     Return a readable description of module NAME, including exports.
 
- -- Function: minibuffer-history-previous
-     Navigate to previous history entry.
-
- -- Function: minibuffer-history-next
-     Navigate to next history entry.
-
- -- Function: minibuffer-history-reset-index
-     Reset history navigation index.
+ -- Function: current-module
+     Return the current module name when evaluation is module-scoped, or
+     nil.
 
 
-File: tlisp.info,  Node: Editor API --- Hooks,  Next: Editor API --- Loading,  Prev: Editor API --- Minibuffer,  Up: Top
+File: tlisp.info,  Node: Editor API --- Hooks,  Next: Editor API --- Loading,  Prev: Editor API --- Modules,  Up: Top
 
-22 Editor API -- Hooks
+24 Editor API -- Hooks
 **********************
 
  -- Function: add-hook hook-name callback
@@ -1057,7 +1302,7 @@ File: tlisp.info,  Node: Editor API --- Hooks,  Next: Editor API --- Loading,  P
 
 File: tlisp.info,  Node: Editor API --- Loading,  Next: Editor API --- Syntax,  Prev: Editor API --- Hooks,  Up: Top
 
-23 Editor API -- Loading
+25 Editor API -- Loading
 ************************
 
  -- Function: load file
@@ -1084,7 +1329,7 @@ File: tlisp.info,  Node: Editor API --- Loading,  Next: Editor API --- Syntax,  
 
 File: tlisp.info,  Node: Editor API --- Syntax,  Next: Editor API --- Major Modes,  Prev: Editor API --- Loading,  Up: Top
 
-24 Editor API -- Syntax Highlighting
+26 Editor API -- Syntax Highlighting
 ************************************
 
  -- Function: syntax-set-language name
@@ -1117,7 +1362,7 @@ File: tlisp.info,  Node: Editor API --- Syntax,  Next: Editor API --- Major Mode
 
 File: tlisp.info,  Node: Editor API --- Major Modes,  Next: Editor API --- Minor Modes,  Prev: Editor API --- Syntax,  Up: Top
 
-25 Editor API -- Major Modes
+27 Editor API -- Major Modes
 ****************************
 
  -- Function: major-mode-register name extensions [syntax-language
@@ -1160,7 +1405,7 @@ File: tlisp.info,  Node: Editor API --- Major Modes,  Next: Editor API --- Minor
 
 File: tlisp.info,  Node: Editor API --- Minor Modes,  Next: Editor API --- Plugins,  Prev: Editor API --- Major Modes,  Up: Top
 
-26 Editor API -- Minor Modes
+28 Editor API -- Minor Modes
 ****************************
 
 Minor modes are buffer-local feature modes.  Active global minor modes
@@ -1221,7 +1466,7 @@ and ‘nil’, zero, or a negative number disables.
 
 File: tlisp.info,  Node: Editor API --- Plugins,  Next: Editor API --- Windows,  Prev: Editor API --- Minor Modes,  Up: Top
 
-27 Editor API -- Plugins
+29 Editor API -- Plugins
 ************************
 
  -- Function: plugin-list
@@ -1239,8 +1484,8 @@ File: tlisp.info,  Node: Editor API --- Plugins,  Next: Editor API --- Windows, 
  -- Function: plugin-info name
      Return information about plugin NAME.
 
- -- Function: plugin-submit name url description
-     Submit a new plugin to the TLPA repository.
+ -- Function: plugin-submit name description author
+     Submit a new plugin to the TLPA repository for review.
 
  -- Function: plugin-review-list
      List plugins awaiting review.
@@ -1257,7 +1502,7 @@ File: tlisp.info,  Node: Editor API --- Plugins,  Next: Editor API --- Windows, 
 
 File: tlisp.info,  Node: Editor API --- Windows,  Next: Editor API --- Registers,  Prev: Editor API --- Plugins,  Up: Top
 
-28 Editor API -- Windows
+30 Editor API -- Windows
 ************************
 
  -- Function: split-window type
@@ -1290,7 +1535,7 @@ File: tlisp.info,  Node: Editor API --- Windows,  Next: Editor API --- Registers
 
 File: tlisp.info,  Node: Editor API --- Registers,  Next: Editor API --- LSP,  Prev: Editor API --- Windows,  Up: Top
 
-29 Editor API -- Registers
+31 Editor API -- Registers
 **************************
 
  -- Function: get-register name
@@ -1317,7 +1562,7 @@ File: tlisp.info,  Node: Editor API --- Registers,  Next: Editor API --- LSP,  P
 
 File: tlisp.info,  Node: Editor API --- LSP,  Next: Editor API --- Navigation,  Prev: Editor API --- Registers,  Up: Top
 
-30 Editor API -- LSP Diagnostics
+32 Editor API -- LSP Diagnostics
 ********************************
 
  -- Function: lsp-diagnostics-list
@@ -1341,10 +1586,10 @@ File: tlisp.info,  Node: Editor API --- LSP,  Next: Editor API --- Navigation,  
 
 File: tlisp.info,  Node: Editor API --- Navigation,  Next: Editor API --- Count Prefix,  Prev: Editor API --- LSP,  Up: Top
 
-31 Editor API -- Navigation
+33 Editor API -- Navigation
 ***************************
 
-31.1 Word Navigation
+33.1 Word Navigation
 ====================
 
  -- Function: word-next
@@ -1356,7 +1601,7 @@ File: tlisp.info,  Node: Editor API --- Navigation,  Next: Editor API --- Count 
  -- Function: word-end
      Move cursor to end of current word.
 
-31.2 Line Navigation
+33.2 Line Navigation
 ====================
 
  -- Function: line-first-column
@@ -1374,7 +1619,7 @@ File: tlisp.info,  Node: Editor API --- Navigation,  Next: Editor API --- Count 
  -- Function: line-next
      Move cursor to next line.
 
-31.3 Jump Navigation
+33.3 Jump Navigation
 ====================
 
  -- Function: jump-to-first-line
@@ -1386,7 +1631,7 @@ File: tlisp.info,  Node: Editor API --- Navigation,  Next: Editor API --- Count 
  -- Function: jump-to-line line
      Jump to LINE number.
 
-31.4 Page Navigation
+33.4 Page Navigation
 ====================
 
  -- Function: page-down
@@ -1404,7 +1649,7 @@ File: tlisp.info,  Node: Editor API --- Navigation,  Next: Editor API --- Count 
 
 File: tlisp.info,  Node: Editor API --- Count Prefix,  Next: Editor API --- Dired,  Prev: Editor API --- Navigation,  Up: Top
 
-32 Editor API -- Count Prefix
+34 Editor API -- Count Prefix
 *****************************
 
  -- Function: count-get
@@ -1422,7 +1667,7 @@ File: tlisp.info,  Node: Editor API --- Count Prefix,  Next: Editor API --- Dire
 
 File: tlisp.info,  Node: Editor API --- Dired,  Next: Editor API --- Replace,  Prev: Editor API --- Count Prefix,  Up: Top
 
-33 Editor API -- Dired
+35 Editor API -- Dired
 **********************
 
  -- Function: dired-format-listing entries
@@ -1449,7 +1694,7 @@ File: tlisp.info,  Node: Editor API --- Dired,  Next: Editor API --- Replace,  P
 
 File: tlisp.info,  Node: Editor API --- Replace,  Next: Editor API --- Indent,  Prev: Editor API --- Dired,  Up: Top
 
-34 Editor API -- Replace
+36 Editor API -- Replace
 ************************
 
  -- Function: replace-find-matches pattern
@@ -1479,7 +1724,7 @@ File: tlisp.info,  Node: Editor API --- Replace,  Next: Editor API --- Indent,  
 
 File: tlisp.info,  Node: Editor API --- Indent,  Next: Editor API --- Miscellaneous,  Prev: Editor API --- Replace,  Up: Top
 
-35 Editor API -- Indent
+37 Editor API -- Indent
 ***********************
 
  -- Function: indent-calculate-column text
@@ -1500,10 +1745,10 @@ File: tlisp.info,  Node: Editor API --- Indent,  Next: Editor API --- Miscellane
 
 File: tlisp.info,  Node: Editor API --- Miscellaneous,  Next: Testing Framework,  Prev: Editor API --- Indent,  Up: Top
 
-36 Editor API -- Miscellaneous
+38 Editor API -- Miscellaneous
 ******************************
 
-36.1 Messages
+38.1 Messages
 =============
 
  -- Function: message args...
@@ -1513,7 +1758,7 @@ File: tlisp.info,  Node: Editor API --- Miscellaneous,  Next: Testing Framework,
  -- Function: messages-buffer
      Return content of the ‘*Messages*’ buffer.
 
-36.2 Documentation
+38.2 Documentation
 ==================
 
  -- Function: documentation-list
@@ -1531,7 +1776,7 @@ File: tlisp.info,  Node: Editor API --- Miscellaneous,  Next: Testing Framework,
  -- Function: documentation-by-category category
      Return documentation topics in CATEGORY.
 
-36.3 Keymap Operations
+38.3 Keymap Operations
 ======================
 
  -- Function: keymap-set keymap key command
@@ -1546,7 +1791,7 @@ File: tlisp.info,  Node: Editor API --- Miscellaneous,  Next: Testing Framework,
 
 File: tlisp.info,  Node: Testing Framework,  Next: Index,  Prev: Editor API --- Miscellaneous,  Up: Top
 
-37 Testing Framework
+39 Testing Framework
 ********************
 
 T-Lisp includes a built-in testing framework for writing and running
@@ -1600,6 +1845,7 @@ Index
 * cursor operations:                     Editor API --- Cursor. (line 6)
 * data types:                            Data Types.            (line 6)
 * defmacro:                              Macro System.          (line 6)
+* defmodule:                             Module System.         (line 6)
 * delete:                                Editor API --- Text Editing.
                                                                 (line 6)
 * diagnostics:                           Editor API --- LSP.    (line 6)
@@ -1633,11 +1879,14 @@ Index
                                                                 (line 6)
 * messages:                              Editor API --- Miscellaneous.
                                                                 (line 6)
-* minibuffer:                            Editor API --- Minibuffer.
-                                                                (line 6)
 * minor modes:                           Editor API --- Minor Modes.
                                                                 (line 6)
 * modes:                                 Editor API --- Modes.  (line 6)
+* module registry:                       Editor API --- Modules.
+                                                                (line 6)
+* modules:                               Module System.         (line 6)
+* modules <1>:                           Editor API --- Modules.
+                                                                (line 6)
 * navigation:                            Editor API --- Navigation.
                                                                 (line 6)
 * page navigation:                       Editor API --- Navigation.
@@ -1655,14 +1904,18 @@ Index
                                                                 (line 6)
 * registers:                             Editor API --- Registers.
                                                                 (line 6)
+* REPL:                                  Standalone Runtime.    (line 6)
 * replace:                               Editor API --- Replace.
                                                                 (line 6)
 * require:                               Editor API --- Loading.
                                                                 (line 6)
+* require-module:                        Module System.         (line 6)
+* scripts:                               Standalone Runtime.    (line 6)
 * search:                                Editor API --- Search. (line 6)
 * special forms:                         Special Forms.         (line 6)
 * splitting:                             Editor API --- Windows.
                                                                 (line 6)
+* standalone runtime:                    Standalone Runtime.    (line 6)
 * standard library:                      Standard Library.      (line 6)
 * syntax highlighting:                   Editor API --- Syntax. (line 6)
 * T-Lisp:                                Introduction.          (line 6)
@@ -1673,6 +1926,7 @@ Index
 * testing:                               Testing Framework.     (line 6)
 * text objects:                          Editor API --- Text Objects.
                                                                 (line 6)
+* tlisp command:                         Standalone Runtime.    (line 6)
 * TLPA:                                  Editor API --- Plugins.
                                                                 (line 6)
 * undo:                                  Editor API --- Undo/Redo.
@@ -1690,44 +1944,46 @@ Index
 
 Tag Table:
 Node: Top497
-Node: Introduction3376
-Node: Lexical Structure4104
-Node: Data Types5142
-Node: Evaluation5869
-Node: Special Forms6458
-Node: Quasiquote System8413
-Node: Standard Library9069
-Node: Macro System14368
-Node: Tail Call Optimization15151
-Node: Editor API --- Buffer15836
-Node: Editor API --- Cursor17581
-Node: Editor API --- Text Editing18143
-Node: Editor API --- Search19772
-Node: Editor API --- Visual21270
-Node: Editor API --- Text Objects22195
-Node: Editor API --- Kill Ring23435
-Node: Editor API --- Undo/Redo24292
-Node: Editor API --- Modes24888
-Node: Editor API --- Files26338
-Node: Editor API --- Key Bindings27270
-Node: Editor API --- Minibuffer27639
-Node: Editor API --- Hooks28508
-Node: Editor API --- Loading29301
-Node: Editor API --- Syntax30216
-Node: Editor API --- Major Modes31155
-Node: Editor API --- Minor Modes32611
-Node: Editor API --- Plugins34834
-Node: Editor API --- Windows35789
-Node: Editor API --- Registers36584
-Node: Editor API --- LSP37383
-Node: Editor API --- Navigation38082
-Node: Editor API --- Count Prefix39420
-Node: Editor API --- Dired39873
-Node: Editor API --- Replace40592
-Node: Editor API --- Indent41412
-Node: Editor API --- Miscellaneous42037
-Node: Testing Framework43234
-Node: Index44162
+Node: Introduction3527
+Node: Lexical Structure4255
+Node: Data Types5293
+Node: Evaluation6020
+Node: Special Forms6609
+Node: Quasiquote System9259
+Node: Standard Library9915
+Node: Macro System19091
+Node: Tail Call Optimization19874
+Node: Standalone Runtime20556
+Node: Module System22376
+Node: Editor API --- Buffer23830
+Node: Editor API --- Cursor25566
+Node: Editor API --- Text Editing26128
+Node: Editor API --- Search27757
+Node: Editor API --- Visual29255
+Node: Editor API --- Text Objects30180
+Node: Editor API --- Kill Ring31420
+Node: Editor API --- Undo/Redo32277
+Node: Editor API --- Modes32873
+Node: Editor API --- Files34062
+Node: Editor API --- Key Bindings34994
+Node: Editor API --- Modules35360
+Node: Editor API --- Hooks36371
+Node: Editor API --- Loading37161
+Node: Editor API --- Syntax38076
+Node: Editor API --- Major Modes39015
+Node: Editor API --- Minor Modes40471
+Node: Editor API --- Plugins42694
+Node: Editor API --- Windows43663
+Node: Editor API --- Registers44458
+Node: Editor API --- LSP45257
+Node: Editor API --- Navigation45956
+Node: Editor API --- Count Prefix47294
+Node: Editor API --- Dired47747
+Node: Editor API --- Replace48466
+Node: Editor API --- Indent49286
+Node: Editor API --- Miscellaneous49911
+Node: Testing Framework51108
+Node: Index52036
 
 End Tag Table
 
