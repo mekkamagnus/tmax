@@ -6,10 +6,8 @@
  */
 
 import { createServer, Server, Socket } from 'net';
-import { homedir, userInfo } from 'os';
-import { join } from 'path';
-import { promisify } from 'util';
-import { exec } from 'child_process';
+import { userInfo } from 'os';
+import { closeSync, existsSync, mkdirSync, openSync, unlinkSync, writeFileSync, readFileSync } from 'fs';
 import { Editor } from '../editor/editor.ts';
 import { TerminalIOImpl } from '../core/terminal.ts';
 import { FileSystemImpl } from '../core/filesystem.ts';
@@ -50,6 +48,7 @@ interface ClientConnection {
   requestCount: number;
   lastError?: string;
   frameId?: string;
+  inputBuffer: string;
 }
 
 interface ObservabilityError {
@@ -77,6 +76,49 @@ interface FrameObservability {
   lastError?: string;
 }
 
+interface LockData {
+  pid: number;
+  socketPath: string;
+  startedAt: string;
+  cwd: string;
+}
+
+function lockPathFor(socketPath: string): string {
+  return socketPath + '.lock';
+}
+
+function isProcessAlive(pid: number): boolean {
+  try { process.kill(pid, 0); return true; } catch { return false; }
+}
+
+function readLock(path: string): LockData | null {
+  try {
+    return JSON.parse(readFileSync(path, 'utf8'));
+  } catch {
+    return null;
+  }
+}
+
+function writeLock(path: string, data: LockData): void {
+  writeFileSync(path, JSON.stringify(data), { mode: 0o644 });
+}
+
+function tryAcquireLock(path: string, data: LockData): boolean {
+  try {
+    const fd = openSync(path, 'wx');
+    writeFileSync(fd, JSON.stringify(data));
+    closeSync(fd);
+    return true;
+  } catch (err: any) {
+    if (err.code === 'EEXIST') return false;
+    throw err;
+  }
+}
+
+function removeFile(path: string): void {
+  try { unlinkSync(path); } catch { /* already gone */ }
+}
+
 export class TmaxServer {
   private server: Server;
   private socketPath: string;
@@ -89,6 +131,9 @@ export class TmaxServer {
   private activeFrameId: string | null = null;
   private isRunning: boolean = false;
   private testMode: boolean = false;
+  private ownsSocket: boolean = false;
+  private ownsLock: boolean = false;
+  private shuttingDown: boolean = false;
 
   constructor(socketPath?: string, testMode: boolean = false) {
     this.socketPath = socketPath || this.getDefaultSocketPath();
@@ -401,6 +446,99 @@ export class TmaxServer {
   }
 
   /**
+   * Check if a live daemon is already listening at our socket path.
+   * Returns true if a live daemon responded to a ping.
+   */
+  private async probeDaemon(): Promise<boolean> {
+    return new Promise((resolve) => {
+      const socket = new Socket();
+      const timer = setTimeout(() => { socket.destroy(); resolve(false); }, 500);
+      socket.connect(this.socketPath, () => {
+        socket.write(JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'ping', params: {} }) + '\n');
+      });
+      socket.on('data', () => { clearTimeout(timer); socket.destroy(); resolve(true); });
+      socket.on('error', () => { clearTimeout(timer); resolve(false); });
+    });
+  }
+
+  /**
+   * Acquire ownership of the socket path.
+   * Uses atomic filesystem lock to prevent startup races.
+   * Throws if a live daemon already owns it.
+   * Removes stale socket/lock files when safe.
+   */
+  private async acquireSocket(): Promise<void> {
+    const lockPath = lockPathFor(this.socketPath);
+
+    // Check for a live daemon at the socket path
+    if (existsSync(this.socketPath)) {
+      if (await this.probeDaemon()) {
+        throw new Error(`Daemon already running at ${this.socketPath}`);
+      }
+      // Stale socket — safe to remove
+      removeFile(this.socketPath);
+    }
+
+    // Atomically acquire the lock. If it fails, check if stale and retry once.
+    const lockData: LockData = {
+      pid: process.pid,
+      socketPath: this.socketPath,
+      startedAt: new Date().toISOString(),
+      cwd: process.cwd(),
+    };
+
+    if (tryAcquireLock(lockPath, lockData)) {
+      this.ownsLock = true;
+      return;
+    }
+
+    // Lock exists — check if stale
+    const existing = readLock(lockPath);
+    if (existing && isProcessAlive(existing.pid) && existing.socketPath === this.socketPath) {
+      throw new Error(`Daemon starting (pid ${existing.pid}) at ${this.socketPath}`);
+    }
+
+    // Stale lock — remove and retry
+    removeFile(lockPath);
+    if (!tryAcquireLock(lockPath, lockData)) {
+      throw new Error(`Cannot acquire lock at ${lockPath}`);
+    }
+    this.ownsLock = true;
+  }
+
+  /**
+   * Convert a Frame into an EditorState suitable for editorStateToJson.
+   * Uses frame-local state (mode, cursor, minibuffer, etc.) and shared
+   * editor display metadata (windows, tabs, buffers).
+   */
+  private frameToEditorState(frame: Frame): EditorState {
+    const shared = this.editor.getState();
+    return {
+      currentBuffer: frame.currentBuffer,
+      cursorPosition: { ...frame.cursorPosition },
+      mode: frame.mode,
+      statusMessage: frame.statusMessage,
+      viewportTop: frame.viewportTop,
+      config: shared.config,
+      commandLine: frame.commandLine,
+      mxCommand: frame.mxCommand,
+      currentFilename: frame.currentFilename,
+      currentMajorMode: frame.currentMajorMode,
+      activeMinorModes: frame.activeMinorModes,
+      activeMinorModeLighters: frame.activeMinorModeLighters,
+      minibufferState: cloneJsonValue(frame.minibufferState),
+      minibufferView: frame.minibufferView ? structuredClone(frame.minibufferView) : undefined,
+      cursorFocus: frame.cursorFocus,
+      // Shared display metadata — not frame-local
+      buffers: shared.buffers,
+      windows: shared.windows,
+      currentWindowIndex: shared.currentWindowIndex,
+      tabs: shared.tabs,
+      currentTabIndex: shared.currentTabIndex,
+    };
+  }
+
+  /**
    * Start the server
    */
   async start(): Promise<void> {
@@ -413,29 +551,34 @@ export class TmaxServer {
 
     // Ensure the socket directory exists
     const socketDir = this.socketPath.substring(0, this.socketPath.lastIndexOf('/'));
-    await this.mkdirp(socketDir);
-    
-    // Handle existing socket file
-    try {
-      await promisify(exec)(`rm -f "${this.socketPath}"`);
-    } catch (err) {
-      // Ignore error if socket doesn't exist
-    }
-    
+    mkdirSync(socketDir, { recursive: true });
+
+    // Acquire socket ownership (fails if live daemon already holds it)
+    await this.acquireSocket();
+
     this.server.on('connection', this.handleConnection.bind(this));
-    this.server.on('error', (err) => {
-      console.error('Server error:', err);
-      process.exit(1);
+
+    // start() resolves only after listen succeeds, rejects on error
+    await new Promise<void>((resolve, reject) => {
+      this.server.on('error', (err) => {
+        if (!this.testMode) {
+          console.error('Server error:', err);
+          process.exit(1);
+        }
+        reject(err);
+      });
+
+      this.server.listen(this.socketPath, () => {
+        console.log(`tmax server listening on ${this.socketPath}`);
+        this.isRunning = true;
+        this.ownsSocket = true;
+        resolve();
+      });
     });
-    
-    this.server.listen(this.socketPath, () => {
-      console.log(`tmax server listening on ${this.socketPath}`);
-      this.isRunning = true;
-    });
-    
+
     // Handle graceful shutdown
-    process.on('SIGTERM', this.shutdown.bind(this));
-    process.on('SIGINT', this.shutdown.bind(this));
+    process.on('SIGTERM', () => this.shutdown());
+    process.on('SIGINT', () => this.shutdown());
   }
 
   /**
@@ -452,18 +595,39 @@ export class TmaxServer {
       connectedAt: new Date(),
       clientType: 'cli',
       requestCount: 0,
+      inputBuffer: '',
     };
 
     this.clients.set(clientId, client);
     console.log(`Client connected: ${clientId}`);
 
-    // Set up connection handlers
+    // Set up connection handlers with per-connection input buffering
     conn.on('data', async (data) => {
-      try {
-        const requestStr = data.toString();
-        const requests = this.parseMultipleRequests(requestStr);
+      client.inputBuffer += data.toString();
 
-        for (const request of requests) {
+      let newline = client.inputBuffer.indexOf('\n');
+      while (newline >= 0) {
+        const line = client.inputBuffer.slice(0, newline).trim();
+        client.inputBuffer = client.inputBuffer.slice(newline + 1);
+        newline = client.inputBuffer.indexOf('\n');
+
+        if (!line) continue;
+
+        let request: JSONRPCRequest;
+        try {
+          request = JSON.parse(line);
+        } catch {
+          if (conn.writable) {
+            conn.write(JSON.stringify({
+              jsonrpc: '2.0',
+              id: null,
+              error: { code: -32700, message: 'Parse error: malformed JSON' }
+            }) + '\n');
+          }
+          continue;
+        }
+
+        try {
           client.lastRequestAt = new Date();
           client.requestCount++;
 
@@ -499,27 +663,27 @@ export class TmaxServer {
           if (conn.writable) {
             conn.write(JSON.stringify(response) + '\n');
           }
-        }
-      } catch (error) {
-        console.error('Error processing client request:', error);
-        this.recordError('request', error, clientId, clientFrameId ?? undefined);
-        const errorResponse: JSONRPCResponse = {
-          jsonrpc: '2.0',
-          id: undefined,
-          error: {
-            code: -32603,
-            message: `Internal error: ${error instanceof Error ? error.message : 'Unknown error'}`,
-            ...(error instanceof Error && (error as any).diagnostic ? {
-              data: {
-                kind: 'tlisp-diagnostic',
-                diagnostic: (error as any).diagnostic,
-              }
-            } : {})
-          }
-        };
+        } catch (error) {
+          console.error('Error processing client request:', error);
+          this.recordError('request', error, clientId, clientFrameId ?? undefined);
+          const errorResponse: JSONRPCResponse = {
+            jsonrpc: '2.0',
+            id: request?.id ?? undefined,
+            error: {
+              code: -32603,
+              message: `Internal error: ${error instanceof Error ? error.message : 'Unknown error'}`,
+              ...(error instanceof Error && (error as any).diagnostic ? {
+                data: {
+                  kind: 'tlisp-diagnostic',
+                  diagnostic: (error as any).diagnostic,
+                }
+              } : {})
+            }
+          };
 
-        if (conn.writable) {
-          conn.write(JSON.stringify(errorResponse) + '\n');
+          if (conn.writable) {
+            conn.write(JSON.stringify(errorResponse) + '\n');
+          }
         }
       }
     });
@@ -536,60 +700,6 @@ export class TmaxServer {
       if (clientFrameId) this.deleteFrame(clientFrameId);
       this.clients.delete(clientId);
     });
-  }
-
-  /**
-   * Parse multiple JSON-RPC requests from a single data chunk
-   */
-  private parseMultipleRequests(data: string): JSONRPCRequest[] {
-    const requests: JSONRPCRequest[] = [];
-    let startPos = 0;
-    let braceCount = 0;
-    let inString = false;
-    let escapeNext = false;
-    
-    for (let i = 0; i < data.length; i++) {
-      const char = data[i];
-      
-      if (escapeNext) {
-        escapeNext = false;
-        continue;
-      }
-      
-      if (char === '\\' && inString) {
-        escapeNext = true;
-        continue;
-      }
-      
-      if (char === '"') {
-        inString = !inString;
-        continue;
-      }
-      
-      if (!inString) {
-        if (char === '{') {
-          if (braceCount === 0) {
-            startPos = i;
-          }
-          braceCount++;
-        } else if (char === '}') {
-          braceCount--;
-          if (braceCount === 0) {
-            try {
-              const requestStr = data.substring(startPos, i + 1);
-              const request = JSON.parse(requestStr.trim());
-              if (request && typeof request === 'object') {
-                requests.push(request);
-              }
-            } catch (e) {
-              console.error('Error parsing JSON request:', e);
-            }
-          }
-        }
-      }
-    }
-    
-    return requests;
   }
 
   /**
@@ -829,14 +939,17 @@ export class TmaxServer {
     }
 
     try {
-      // If frameId provided, sync frame -> editor, handle key, sync back
-      if (params.frameId) {
-        const frame = this.getFrame(params.frameId);
-        this.activeFrameId = params.frameId;
+      // If a frame is available, keypresses should mutate that frame-local
+      // state. tmaxclient --key does not know the TUI frame id, so it targets
+      // the active frame.
+      const frameId = params.frameId ?? this.activeFrameId;
+      if (frameId) {
+        const frame = this.getFrame(frameId);
+        this.activeFrameId = frameId;
         this.syncFrameToEditor(frame);
         await this.editor.handleKey(key);
         this.syncEditorToFrame(frame);
-        return editorStateToJson(this.editor.getEditorState());
+        return editorStateToJson(this.frameToEditorState(frame));
       }
       // No frameId — operate on editor directly, then sync all frames
       await this.editor.handleKey(key);
@@ -854,12 +967,13 @@ export class TmaxServer {
   }
 
   /**
-   * Handle render-state request (frame-scoped)
+   * Handle render-state request (frame-scoped).
+   * READ-only: returns the frame's own state without mutating editor.
    */
   private async handleRenderState(params: any): Promise<any> {
     if (params?.frameId) {
       const frame = this.getFrame(params.frameId);
-      this.syncEditorToFrame(frame);
+      return editorStateToJson(this.frameToEditorState(frame));
     }
     return editorStateToJson(this.editor.getEditorState());
   }
@@ -1252,22 +1366,11 @@ export class TmaxServer {
   }
 
   /**
-   * Create directory recursively
-   */
-  private async mkdirp(dir: string): Promise<void> {
-    const execPromise = promisify(exec);
-    try {
-      await execPromise(`mkdir -p "${dir}"`);
-    } catch (error) {
-      console.error(`Failed to create directory ${dir}:`, error);
-      throw error;
-    }
-  }
-
-  /**
-   * Shutdown the server gracefully
+   * Shutdown the server gracefully. Idempotent.
    */
   async shutdown(): Promise<void> {
+    if (this.shuttingDown) return;
+    this.shuttingDown = true;
     console.log('Shutting down tmax server...');
 
     // Close all client connections
@@ -1282,20 +1385,33 @@ export class TmaxServer {
     this.clients.clear();
 
     // Close the server
-    this.server.close(() => {
-      console.log('tmax server closed');
-      // Only exit process if not in test mode
-      if (!this.testMode) {
-        process.exit(0);
-      }
+    await new Promise<void>((resolve) => {
+      this.server.close(() => {
+        console.log('tmax server closed');
+        resolve();
+      });
+      // Ensure resolve fires even if close doesn't callback
+      setTimeout(resolve, 2000);
     });
 
-    // Force exit after a timeout if server doesn't close (only in non-test mode)
+    // Clean up socket and lock if we own them
+    if (this.ownsSocket) {
+      removeFile(this.socketPath);
+      this.ownsSocket = false;
+    }
+    if (this.ownsLock) {
+      const lockPath = lockPathFor(this.socketPath);
+      const lock = readLock(lockPath);
+      // Only remove if lock still identifies this process
+      if (lock && lock.pid === process.pid && lock.socketPath === this.socketPath) {
+        removeFile(lockPath);
+      }
+      this.ownsLock = false;
+    }
+
+    // Only exit process if not in test mode
     if (!this.testMode) {
-      setTimeout(() => {
-        console.log('Force closing tmax server');
-        process.exit(1);
-      }, 5000);
+      process.exit(0);
     }
   }
 
