@@ -49,7 +49,7 @@ let diredMarkedForDelete: Set<number> = new Set();
 let showHidden: boolean = false;
 
 /**
- * Extract a plist value by key from a T-Lisp plist (alternating symbol/value list)
+ * Extract a value by key from a T-Lisp plist (alternating symbol/value list)
  */
 function plistGet(entries: TLispValue[], key: string): TLispValue | undefined {
   for (let i = 0; i < entries.length - 1; i++) {
@@ -60,14 +60,21 @@ function plistGet(entries: TLispValue[], key: string): TLispValue | undefined {
   return undefined;
 }
 
+type EntryLike = TLispValue[] | Map<string, TLispValue>;
+
+function entryGet(entry: EntryLike, key: string): TLispValue | undefined {
+  if (entry instanceof Map) return entry.get(key);
+  return plistGet(entry, key);
+}
+
 /**
  * Format a single directory entry into a display line
  */
-function formatEntryLine(entry: TLispValue[], marked: boolean): string {
-  const nameVal = plistGet(entry, "name");
-  const isDirVal = plistGet(entry, "isDirectory");
-  const sizeVal = plistGet(entry, "size");
-  const modifiedVal = plistGet(entry, "modified");
+function formatEntryLine(entry: EntryLike, marked: boolean): string {
+  const nameVal = entryGet(entry, "name");
+  const isDirVal = entryGet(entry, "isDirectory");
+  const sizeVal = entryGet(entry, "size");
+  const modifiedVal = entryGet(entry, "modified");
 
   const name = nameVal && nameVal.type === "string" ? nameVal.value as string : "???";
   const isDir = isDirVal && isDirVal.type === "boolean" ? isDirVal.value as boolean : false;
@@ -121,11 +128,12 @@ export function createDiredOps(
     const dirPath = pathArg.value as string;
     const entries = entriesArg.value as TLispValue[];
 
-    // Each entry is a plist (alternating symbol/value list)
-    const entryLists = entries.map((e) => {
-      if (e.type === "list") return e.value as TLispValue[];
-      return [];
-    }).filter((e) => e.length > 0);
+    // Each entry is a hashmap or plist (alternating symbol/value list)
+    const entryValues = entries.map((e): EntryLike | null => {
+      if (e.type === "hashmap") return e.value as Map<string, TLispValue>;
+      if (e.type === "list") return (e.value as TLispValue[]).length > 0 ? e.value as TLispValue[] : null;
+      return null;
+    }).filter((e): e is EntryLike => e !== null);
 
     const lines: string[] = [];
 
@@ -133,9 +141,9 @@ export function createDiredOps(
     lines.push(dirPath);
 
     // Format each entry
-    for (let i = 0; i < entryLists.length; i++) {
+    for (let i = 0; i < entryValues.length; i++) {
       const marked = diredMarkedForDelete.has(i);
-      lines.push(formatEntryLine(entryLists[i]!, marked));
+      lines.push(formatEntryLine(entryValues[i]!, marked));
     }
 
     return Either.right(createString(lines.join("\n")));
@@ -165,14 +173,15 @@ export function createDiredOps(
     diredMarkedForDelete.clear();
 
     const entries = entriesArg.value as TLispValue[];
-    const entryLists = entries.map((e) => {
-      if (e.type === "list") return e.value as TLispValue[];
-      return [];
-    }).filter((e) => e.length > 0);
+    const entryValues = entries.map((e): EntryLike | null => {
+      if (e.type === "hashmap") return e.value as Map<string, TLispValue>;
+      if (e.type === "list") return (e.value as TLispValue[]).length > 0 ? e.value as TLispValue[] : null;
+      return null;
+    }).filter((e): e is EntryLike => e !== null);
 
     const lines: string[] = [dirPath];
-    for (let i = 0; i < entryLists.length; i++) {
-      lines.push(formatEntryLine(entryLists[i]!, false));
+    for (let i = 0; i < entryValues.length; i++) {
+      lines.push(formatEntryLine(entryValues[i]!, false));
     }
 
     const formatted = lines.join("\n");

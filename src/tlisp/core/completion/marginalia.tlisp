@@ -1,5 +1,5 @@
 (defmodule editor/completion/marginalia
-  (export marginalia-register-annotator marginalia-buffer-annotation marginalia-command-annotation marginalia-annotate-candidate marginalia-annotate-candidates)
+  (export marginalia-register-annotator marginalia-buffer-annotation marginalia-command-annotation marginalia-file-annotation marginalia-annotate-candidate marginalia-annotate-candidates)
 
 ;; marginalia.tlisp --- Category-aware completion annotations
 
@@ -35,6 +35,13 @@
         (if (null bindings) "" (concat "[" (car bindings) "] "))
         (hashmap-get details "documentation")))))
 
+(defun marginalia-file-annotation (candidate)
+  "Format file metadata for CANDIDATE."
+  (let ((meta (hashmap-get candidate "metadata")))
+    (if (hashmap-get meta "is-dir")
+      "  dir"
+      (concat "  " (hashmap-get meta "size") " bytes"))))
+
 (defun marginalia-annotate-candidate (category candidate)
   "Attach CATEGORY annotation text to CANDIDATE."
   (let ((annotator (hashmap-get marginalia-annotator-registry category)))
@@ -50,4 +57,5 @@
 
 (marginalia-register-annotator "buffer" "marginalia-buffer-annotation")
 (marginalia-register-annotator "command" "marginalia-command-annotation")
+(marginalia-register-annotator "file" "marginalia-file-annotation")
 )

@@ -91,13 +91,7 @@ describe("File Primitives", () => {
       expect(result.type).toBe("list");
 
       const entries = result.value as any[];
-      const names = entries.map((e: any) => {
-        // Each entry is a list of [symbol name, string value, ...] pairs
-        const values = e.value as any[];
-        // Find the name value (it comes right after the 'name' symbol)
-        const nameIdx = values.findIndex((v: any) => v.type === "symbol" && v.value === "name");
-        return values[nameIdx + 1]?.value;
-      });
+      const names = entries.map((e: any) => e.value.get("name")?.value);
 
       expect(names).toContain("a.txt");
       expect(names).toContain("b.txt");
@@ -131,13 +125,10 @@ describe("File Primitives", () => {
       const entryMap = new Map<string, { isFile: boolean; isDirectory: boolean }>();
 
       for (const entry of entries) {
-        const values = entry.value as any[];
-        const nameIdx = values.findIndex((v: any) => v.type === "symbol" && v.value === "name");
-        const isFileIdx = values.findIndex((v: any) => v.type === "symbol" && v.value === "isFile");
-        const isDirIdx = values.findIndex((v: any) => v.type === "symbol" && v.value === "isDirectory");
-        const name = values[nameIdx + 1]?.value;
-        const isFile = values[isFileIdx + 1]?.value;
-        const isDir = values[isDirIdx + 1]?.value;
+        const map = entry.value as Map<string, any>;
+        const name = map.get("name")?.value;
+        const isFile = map.get("isFile")?.value;
+        const isDir = map.get("isDirectory")?.value;
         entryMap.set(name, { isFile, isDirectory: isDir });
       }
 

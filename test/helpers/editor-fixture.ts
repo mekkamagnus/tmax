@@ -84,6 +84,11 @@ export function executeTlisp(editor: Editor, expression: string): TLispValue {
   return expectRight(editor.getInterpreter().execute(expression), `T-Lisp failed: ${expression}`);
 }
 
+/** Return the visible text for a T-Lisp-owned minibuffer row. */
+export function minibufferRowText(row: { segments: { text: string }[] }): string {
+  return row.segments.map(segment => segment.text).join("");
+}
+
 /** Move the cursor through the public T-Lisp editor boundary. */
 export function moveCursor(editor: Editor, line: number, column: number): void {
   executeTlisp(editor, `(cursor-move ${line} ${column})`);

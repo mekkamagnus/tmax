@@ -1,0 +1,66 @@
+(defmodule editor/completion/file-table
+  (export file-completion-table file-completion-candidate file-completion-split-path file-completion-candidates file-find-last-slash file-entry-matches-p)
+
+;; file-table.tlisp --- Filesystem completion table
+
+(defun file-find-last-slash (path pos)
+  "Find index of last / in PATH, searching backward from POS."
+  (if (< pos 0)
+    -1
+    (if (string= (string-char-at path pos) "/")
+      pos
+      (file-find-last-slash path (- pos 1)))))
+
+(defun file-completion-split-path (input)
+  "Split INPUT into directory and filename-prefix parts."
+  (if (= (length input) 0)
+    (hashmap "dir" "." "prefix" "")
+    (let ((slash (file-find-last-slash input (- (length input) 1))))
+      (if (< slash 0)
+        (hashmap "dir" "." "prefix" input)
+        (hashmap
+          "dir" (if (= slash 0) "/" (substring input 0 slash))
+          "prefix" (substring input (+ slash 1) (length input)))))))
+
+(defun file-completion-candidate (entry dir)
+  "Build a completion candidate from read-dir ENTRY relative to DIR."
+  (let ((name (concat
+                (hashmap-get entry "name")
+                (if (hashmap-get entry "isDirectory") "/" ""))))
+    (let ((full-path (if (string= dir ".")
+                       name
+                       (concat (if (string= dir "/") "" dir) "/" name))))
+      (hashmap
+        "value" full-path
+        "display" full-path
+        "annotation" ""
+        "spans" (list)
+        "metadata" (hashmap
+                     "path" full-path
+                     "is-dir" (hashmap-get entry "isDirectory")
+                     "size" (hashmap-get entry "size"))))))
+
+(defun file-entry-matches-p (prefix entry)
+  "Check if ENTRY name starts with PREFIX."
+  (string-prefix-p prefix (hashmap-get entry "name")))
+
+(defun file-completion-candidates (dir prefix)
+  "Return completion candidates for DIR filtered by PREFIX."
+  (let ((entries (read-dir dir)))
+    (if (null entries)
+      (list)
+      (mapcar
+        (lambda (entry) (file-completion-candidate entry dir))
+        (filter
+          (lambda (entry) (file-entry-matches-p prefix entry))
+          entries)))))
+
+(defun file-completion-table (input action)
+  "Completion table for filesystem entries."
+  (if (string= action "metadata")
+    (hashmap "category" "file")
+    (let ((split (file-completion-split-path input)))
+      (file-completion-candidates
+        (hashmap-get split "dir")
+        (hashmap-get split "prefix")))))
+)
