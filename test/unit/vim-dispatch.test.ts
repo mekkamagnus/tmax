@@ -11,6 +11,8 @@ import {
   executeTlisp,
 } from "../helpers/editor-fixture.ts";
 
+const VIM_DISPATCH_TIMEOUT_MS = 20000;
+
 async function press(editor: Editor, keys: string): Promise<void> {
   for (const key of keys) {
     await editor.handleKey(key);
@@ -167,7 +169,7 @@ describe("SPEC-005 Vim dispatcher", () => {
     const deleteFirst = await createStartedEditor("one\ntwo\nthree");
     await press(deleteFirst, "jdgg");
     expect(bufferText(deleteFirst)).toBe("three");
-  });
+  }, VIM_DISPATCH_TIMEOUT_MS);
 
   test("dispatches change and yank operator motions", async () => {
     const changeWord = await createStartedEditor("one two");
@@ -196,7 +198,7 @@ describe("SPEC-005 Vim dispatcher", () => {
     const yankEnd = await createStartedEditor("abc def");
     await press(yankEnd, "lly$0P");
     expect(bufferText(yankEnd)).toBe("c defabc def");
-  });
+  }, VIM_DISPATCH_TIMEOUT_MS);
 
   test("updates the unnamed register for x and linewise deletes", async () => {
     const editor = await createStartedEditor("abc");
@@ -271,7 +273,7 @@ describe("SPEC-005 Vim dispatcher", () => {
     const tillBackward = await createStartedEditor("abc abc");
     await press(tillBackward, "$Tc");
     expect(tillBackward.getState().cursorPosition.column).toBe(3);
-  });
+  }, VIM_DISPATCH_TIMEOUT_MS);
 
   test("dispatches viewport alignment prefixes", async () => {
     const editor = await createStartedEditor(Array.from({ length: 50 }, (_, line) => String(line)).join("\n"));

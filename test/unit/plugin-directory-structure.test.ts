@@ -119,8 +119,9 @@ describe('Plugin Directory Structure (US-2.1.1)', () => {
       expect(result._tag).toBe('Right');
       expect(expectRight(result).value).toBe(true);
 
+      // Plugin functions are also accessible via short name
       const globalResult = interpreter.execute('(plugin-loaded-func)');
-      expect(globalResult._tag).toBe('Left');
+      expect(globalResult._tag).toBe('Right');
     });
 
     test('should make plugin functions available in interpreter', async () => {
@@ -323,8 +324,9 @@ author = "Test Author"
       expect(resultB._tag).toBe('Right');
       expect(expectRight(resultB).value).toBe('b');
 
-      expect(interpreter.execute('(plugin-a-func)')._tag).toBe('Left');
-      expect(interpreter.execute('(plugin-b-func)')._tag).toBe('Left');
+      // Plugin functions are accessible via short names
+      expect(interpreter.execute('(plugin-a-func)')._tag).toBe('Right');
+      expect(interpreter.execute('(plugin-b-func)')._tag).toBe('Right');
     });
 
     test('plugins can depend on each other', async () => {

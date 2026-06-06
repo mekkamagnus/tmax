@@ -5,29 +5,16 @@ import { promisify } from 'util';
 const execAsync = promisify(exec);
 
 test('should start tmax server daemon', async () => {
-  // Test that the server can start without crashing
-  try {
-    // Try to start the server in the background
-    const { stdout, stderr } = await execAsync('timeout 2s bun run src/main.tsx --daemon || true');
-    // The timeout command will cause a non-zero exit code, which is expected
-    // The important thing is that the server didn't crash immediately
-    console.log('Server start test completed');
-    expect(true).toBe(true); // If we reach here, the server didn't crash immediately
-  } catch (error) {
-    // Timeout is expected, so we just verify it's the timeout error
-    expect(true).toBe(true);
-  }
-}, 10000);
+  const socket = `/tmp/tmax-server-daemon-test-${process.pid}-${Date.now()}.sock`;
+  const { stdout, stderr } = await execAsync(`TMAX_SOCKET=${socket} timeout 8s bun run src/main.tsx --daemon || true`);
+  const output = `${stdout}\n${stderr}`;
+  expect(output).toContain("tmax server listening");
+  expect(output).not.toContain("error:");
+}, 15000);
 
 test('should have tmaxclient executable', async () => {
-  // Test that tmaxclient exists and is executable
-  try {
-    const { stdout } = await execAsync('bin/tmaxclient --help');
-    expect(stdout).toContain('tmaxclient - Client for tmax server');
-  } catch (error) {
-    // If the server isn't running, we expect certain error messages
-    expect(true).toBe(true); // Placeholder
-  }
+  const { stdout } = await execAsync('bin/tmaxclient --help');
+  expect(stdout).toContain('tmaxclient - Client for tmax server');
 });
 
 test('should have updated main.tsx with daemon support', async () => {

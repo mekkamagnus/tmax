@@ -10,10 +10,14 @@
  * - C-h opens full documentation in help buffer
  */
 
-import { describe, test, expect, beforeEach } from "bun:test";
+import { describe, test, expect, beforeEach, afterEach } from "bun:test";
 import { Editor } from "../../src/editor/editor.ts";
 import { MockTerminal } from "../mocks/terminal.ts";
 import { MockFileSystem } from "../mocks/filesystem.ts";
+import { setWhichKeyTimeout } from "../../src/editor/utils/which-key.ts";
+
+const TEST_WHICH_KEY_TIMEOUT = 20;
+const waitForWhichKey = () => new Promise(resolve => setTimeout(resolve, TEST_WHICH_KEY_TIMEOUT + 20));
 
 describe("Command Documentation Preview (US-1.10.4)", () => {
   let editor: Editor;
@@ -24,6 +28,7 @@ describe("Command Documentation Preview (US-1.10.4)", () => {
     terminal = new MockTerminal();
     filesystem = new MockFileSystem();
     editor = new Editor(terminal, filesystem);
+    setWhichKeyTimeout(TEST_WHICH_KEY_TIMEOUT);
     await editor.start();
 
     // Create a test buffer
@@ -47,11 +52,15 @@ describe("Command Documentation Preview (US-1.10.4)", () => {
     interpreter.execute('(key-bind "C-c n" "test-no-doc" "normal")');
   });
 
+  afterEach(() => {
+    setWhichKeyTimeout(1000);
+  });
+
   describe("Which-Key Documentation Preview", () => {
     test("should show documentation for command with short doc", async () => {
       // Type C-c prefix and wait for which-key
       await editor.handleKey("\x03");
-      await new Promise(resolve => setTimeout(resolve, 1100));
+      await waitForWhichKey();
 
       const state = editor.getState();
       const bindings = state.whichKeyBindings || [];
@@ -69,7 +78,7 @@ describe("Command Documentation Preview (US-1.10.4)", () => {
     test("should show 'No documentation available' for command without doc", async () => {
       // Type C-c prefix and wait for which-key
       await editor.handleKey("\x03");
-      await new Promise(resolve => setTimeout(resolve, 1100));
+      await waitForWhichKey();
 
       const state = editor.getState();
       const bindings = state.whichKeyBindings || [];
@@ -88,7 +97,7 @@ describe("Command Documentation Preview (US-1.10.4)", () => {
     test("should truncate long documentation with ellipsis", async () => {
       // Type C-c prefix and wait for which-key
       await editor.handleKey("\x03");
-      await new Promise(resolve => setTimeout(resolve, 1100));
+      await waitForWhichKey();
 
       const state = editor.getState();
       const bindings = state.whichKeyBindings || [];
@@ -108,7 +117,7 @@ describe("Command Documentation Preview (US-1.10.4)", () => {
     test("should include documentation in which-key status message", async () => {
       // Type C-c prefix and wait for which-key
       await editor.handleKey("\x03");
-      await new Promise(resolve => setTimeout(resolve, 1100));
+      await waitForWhichKey();
 
       const state = editor.getState();
 
@@ -188,7 +197,7 @@ describe("Command Documentation Preview (US-1.10.4)", () => {
     test("should open help buffer with C-h when which-key is active", async () => {
       // Type C-c prefix and wait for which-key
       await editor.handleKey("\x03");
-      await new Promise(resolve => setTimeout(resolve, 1100));
+      await waitForWhichKey();
 
       const stateBefore = editor.getState();
       expect(stateBefore.whichKeyActive).toBe(true);
@@ -197,14 +206,13 @@ describe("Command Documentation Preview (US-1.10.4)", () => {
       await editor.handleKey("\x08");
 
       // Which-key should be closed or help buffer should be shown
-      // This test verifies the integration point exists
-      expect(true).toBe(true);
+      expect(editor.getState().whichKeyActive).toBe(false);
     });
 
     test("should show complete documentation in help buffer", async () => {
       // Type C-c prefix and wait for which-key
       await editor.handleKey("\x03");
-      await new Promise(resolve => setTimeout(resolve, 1100));
+      await waitForWhichKey();
 
       const state = editor.getState();
       const bindings = state.whichKeyBindings || [];

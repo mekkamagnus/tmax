@@ -47,7 +47,7 @@ describe("T-Lisp Test Suites (US-0.6.3)", () => {
     });
 
     test("should return suite name when defined", async () => {
-      const code = `(deftest-suite "Sample Suite" (deftest t () (assert-true t)))`;
+      const code = `(deftest-suite "Sample Suite" (deftest sample-test () (assert-true t)))`;
       const result = exec(code);
 
       expect(result._tag).toBe("Right");
@@ -227,9 +227,11 @@ describe("T-Lisp Test Suites (US-0.6.3)", () => {
     });
 
     test("should handle suite with setup failure", async () => {
-      // Skip this test for now - error handling in suites needs more work
-      // The error builtin doesn't exist yet in T-Lisp
-      expect(true).toBe(true);
+      exec('(deftest-suite "Failing Setup" (suite-setup (assert-true nil)) (deftest should-not-pass () (assert-true t)))');
+      const result = exec('(test-run-suite "Failing Setup")');
+
+      expect(result._tag).toBe("Left");
+      expect(result.left.message).toContain("Assertion failed");
     });
   });
 

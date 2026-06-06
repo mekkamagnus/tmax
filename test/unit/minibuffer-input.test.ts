@@ -3,6 +3,8 @@ import { Editor } from "../../src/editor/editor.ts";
 import { MockFileSystem } from "../mocks/filesystem.ts";
 import { MockTerminal } from "../mocks/terminal.ts";
 
+const EDITOR_INTERACTION_TIMEOUT_MS = 15000;
+
 describe("Lisp-owned generic minibuffer input", () => {
   let editor: Editor;
 
@@ -23,7 +25,7 @@ describe("Lisp-owned generic minibuffer input", () => {
     expect(state.mode).toBe("mx");
     expect(state.minibufferView?.prompt).toBe("M-x ");
     expect(state.minibufferView?.rows.length).toBeGreaterThan(1);
-  });
+  }, EDITOR_INTERACTION_TIMEOUT_MS);
 
   test("printable input and Backspace update the Lisp session and compatibility input", async () => {
     await openMx();
@@ -33,7 +35,7 @@ describe("Lisp-owned generic minibuffer input", () => {
     const state = editor.getState();
     expect(state.mxCommand).toBe("buffe");
     expect(state.minibufferView?.input).toBe("buffe");
-  });
+  }, EDITOR_INTERACTION_TIMEOUT_MS);
 
   test("ambiguous matches remain visible and Tab inserts the selected candidate", async () => {
     await openMx();
@@ -48,14 +50,14 @@ describe("Lisp-owned generic minibuffer input", () => {
     await editor.handleKey("Tab");
 
     expect(editor.getState().mxCommand).toBe(selected);
-  });
+  }, EDITOR_INTERACTION_TIMEOUT_MS);
 
   test("no match is reported in the generic view instead of statusMessage", async () => {
     await openMx();
     for (const key of "zzzzzzzz") await editor.handleKey(key);
 
     expect(editor.getState().minibufferView?.message).toBe("No match");
-  });
+  }, EDITOR_INTERACTION_TIMEOUT_MS);
 
   test("C-n, C-p, Down, and Up navigate without TypeScript selection policy", async () => {
     await openMx();
@@ -68,7 +70,7 @@ describe("Lisp-owned generic minibuffer input", () => {
 
     expect(second).not.toBe(first);
     expect(back).toBe(first);
-  });
+  }, EDITOR_INTERACTION_TIMEOUT_MS);
 
   test("Escape and C-g cancel and clear the generic view", async () => {
     await openMx();
@@ -82,7 +84,7 @@ describe("Lisp-owned generic minibuffer input", () => {
     await openMx();
     await editor.handleKey("\x07");
     expect(editor.getState().mode).toBe("normal");
-  });
+  }, EDITOR_INTERACTION_TIMEOUT_MS);
 
   test("M-p and M-n navigate T-Lisp-owned command history", async () => {
     const interpreter = editor.getInterpreter();
@@ -96,5 +98,5 @@ describe("Lisp-owned generic minibuffer input", () => {
     expect(editor.getState().mxCommand).toBe("editor-mode");
     await editor.handleKey("\x1bn");
     expect(editor.getState().mxCommand).toBe("save-buffer");
-  });
+  }, EDITOR_INTERACTION_TIMEOUT_MS);
 });

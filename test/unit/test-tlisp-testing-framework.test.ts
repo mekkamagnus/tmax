@@ -10,6 +10,7 @@ import { Editor } from "../../src/editor/editor.ts";
 import { MockTerminal } from "../mocks/terminal.ts";
 import { MockFileSystem } from "../mocks/filesystem.ts";
 import { resetAllTestState } from "../../src/tlisp/test-framework.ts";
+import { Either } from "../../src/utils/task-either.ts";
 
 describe("T-Lisp Testing Framework", () => {
   let editor: Editor;
@@ -97,16 +98,9 @@ describe("T-Lisp Testing Framework", () => {
     // Define a test that should fail
     interpreter.execute('(deftest failing-test () (assert-equal 1 2))');
 
-    // Run the test - this should still return true from test-run but the test itself fails
-    // Actually, let's test the failure scenario differently
-    try {
-      interpreter.execute('(deftest failing-test-2 () (assert-equal 1 2)) (test-run "failing-test-2")');
-      // If we reach here, the test didn't fail as expected
-      expect(false).toBe(true); // This should not happen
-    } catch (e) {
-      // Expected - the test should fail
-      expect(true).toBe(true);
-    }
+    const result = interpreter.execute('(test-run "failing-test")');
+    expect(result._tag).toBe("Right");
+    expect(expectRight(result).value).toBe(false);
   });
 
   test("should handle errors in tests", async () => {
@@ -135,13 +129,8 @@ describe("T-Lisp Testing Framework", () => {
     expect(result1._tag).toBe("Right");
     expect(expectRight(result1).value).toBe(true);
 
-    // Test assert-true with falsy value (should throw error)
-    try {
-      interpreter.execute('(assert-true nil)');
-      expect(false).toBe(true); // Should not reach here
-    } catch (e) {
-      expect(true).toBe(true); // Expected to throw
-    }
+    const result2 = interpreter.execute('(assert-true nil)');
+    expect(Either.isLeft(result2)).toBe(true);
   });
 
   test("should support assert-false functionality", async () => {
@@ -152,13 +141,8 @@ describe("T-Lisp Testing Framework", () => {
     expect(result1._tag).toBe("Right");
     expect(expectRight(result1).value).toBe(true);
 
-    // Test assert-false with truthy value (should throw error)
-    try {
-      interpreter.execute('(assert-false t)');
-      expect(false).toBe(true); // Should not reach here
-    } catch (e) {
-      expect(true).toBe(true); // Expected to throw
-    }
+    const result2 = interpreter.execute('(assert-false t)');
+    expect(Either.isLeft(result2)).toBe(true);
   });
 
   test("should support assert-equal functionality", async () => {
@@ -169,13 +153,8 @@ describe("T-Lisp Testing Framework", () => {
     expect(result1._tag).toBe("Right");
     expect(expectRight(result1).value).toBe(true);
 
-    // Test assert-equal with different values (should throw error)
-    try {
-      interpreter.execute('(assert-equal 1 2)');
-      expect(false).toBe(true); // Should not reach here
-    } catch (e) {
-      expect(true).toBe(true); // Expected to throw
-    }
+    const result2 = interpreter.execute('(assert-equal 1 2)');
+    expect(Either.isLeft(result2)).toBe(true);
   });
 
   test("should support assert-not-equal functionality", async () => {
@@ -186,26 +165,14 @@ describe("T-Lisp Testing Framework", () => {
     expect(result1._tag).toBe("Right");
     expect(expectRight(result1).value).toBe(true);
 
-    // Test assert-not-equal with same values (should throw error)
-    try {
-      interpreter.execute('(assert-not-equal 1 1)');
-      expect(false).toBe(true); // Should not reach here
-    } catch (e) {
-      expect(true).toBe(true); // Expected to throw
-    }
+    const result2 = interpreter.execute('(assert-not-equal 1 1)');
+    expect(Either.isLeft(result2)).toBe(true);
   });
 
   test("should support assert-error functionality", async () => {
     const interpreter = editor.getInterpreter();
 
-    // Test assert-error with a form that raises an error
-    // Note: We can't easily test this with a real error in this context
-    // So we'll test with a form that doesn't raise an error (should fail the assertion)
-    try {
-      interpreter.execute('(assert-error (+ 1 2))');
-      expect(false).toBe(true); // Should not reach here
-    } catch (e) {
-      expect(true).toBe(true); // Expected to throw since (+ 1 2) doesn't error
-    }
+    const result = interpreter.execute('(assert-error (+ 1 2))');
+    expect(Either.isLeft(result)).toBe(true);
   });
 });
