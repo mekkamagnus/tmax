@@ -79,11 +79,11 @@ class TmaxClient {
     };
 
     return new Promise((resolve, reject) => {
-      // Set up response handler
+      let buffer = '';
       const responseHandler = (data: Buffer) => {
         try {
-          const responseStr = data.toString();
-          const responses = this.parseMultipleResponses(responseStr);
+          buffer += data.toString();
+          const responses = this.parseMultipleResponses(buffer);
 
           for (const response of responses) {
             if (response.id === requestId) {
@@ -248,6 +248,42 @@ class TmaxClient {
 }
 
 /**
+ * Parse a key sequence string into individual key strings.
+ * Supports <Escape>, <Enter>, <Space>, <Tab>, <Backspace>, and single characters.
+ */
+function parseKeySequence(sequence: string): string[] {
+  const keys: string[] = [];
+  let i = 0;
+  while (i < sequence.length) {
+    if (sequence[i] === '<') {
+      const end = sequence.indexOf('>', i);
+      if (end !== -1) {
+        const keyName = sequence.substring(i + 1, end);
+        const keyMap: Record<string, string> = {
+          'Escape': '\x1b',
+          'Enter': '\r',
+          'Space': ' ',
+          'Tab': '\t',
+          'Backspace': '\x7f',
+          'SPC': ' ',
+          'RET': '\r',
+          'ESC': '\x1b',
+          'TAB': '\t',
+          'BS': '\x7f',
+          'DEL': '\x7f',
+        };
+        keys.push(keyMap[keyName] ?? keyName);
+        i = end + 1;
+        continue;
+      }
+    }
+    keys.push(sequence[i]!);
+    i++;
+  }
+  return keys;
+}
+
+/**
  * Main function to handle command line arguments
  */
 async function main(): Promise<void> {
@@ -263,6 +299,13 @@ Usage: tmaxclient [options] [filename]
 Options:
   --tui                  Launch TUI client (full terminal editor)
   --eval CODE            Evaluate T-Lisp code
+  --key KEY              Send a keypress to the active frame
+  --keys SEQUENCE        Replay a key sequence on the active frame
+  --command NAME         Execute an editor command by name
+  --diagnostics          List recent T-Lisp diagnostics
+  --since-request ID     Filter diagnostics to a specific request ID
+  --last-error           Show the last T-Lisp error with full diagnostic
+  --backtrace            Show the T-Lisp backtrace from the last error
   --list-buffers         List all buffers
   --kill-buffer NAME     Kill specific buffer
   --insert TEXT          Insert text at cursor
@@ -272,9 +315,11 @@ Options:
   --status               Get daemon/client/frame status
   --clients              List connected clients
   --frames               List connected frames
+  --frame FRAME_ID       Target a specific frame for key/command operations
   --json                 Print raw JSON for status-like commands
   --messages             Show *Messages* buffer
   --ping                 Check if server running
+  --stop                 Stop the running daemon
   -n, --no-wait         Don't wait for buffer to close
   -c                     Open in new frame/buffer (not implemented yet)
   -nw                   No window mode (not implemented yet, for $EDITOR)
@@ -284,7 +329,11 @@ Options:
 Examples:
   tmaxclient file.txt           # Open file.txt
   tmaxclient --eval '(buffer-list)'  # Evaluate T-Lisp
-  tmaxclient --list-buffers     # List all buffers
+  tmaxclient --key i            # Send 'i' key to active frame (enter insert)
+  tmaxclient --keys 'i hello<Escape>'  # Replay key sequence
+  tmaxclient --command save-buffer    # Run M-x command
+  tmaxclient --diagnostics --json     # List diagnostics as JSON
+  tmaxclient --last-error             # Show last error with code/span/help
   tmaxclient --kill-buffer scratch.tlisp  # Kill specific buffer
   tmaxclient -n file.txt        # Open file without waiting
   tmaxclient -s /tmp/my-socket file.txt  # Use custom socket
@@ -311,8 +360,17 @@ Examples:
   let jsonOutput = args.includes('--json');
   let showMessages = args.includes('--messages');
   let ping = args.includes('--ping');
+  let stopDaemon = args.includes('--stop');
   let insertStdin = args.includes('--insert-stdin');
   let tuiMode = args.includes('--tui');
+  let showDiagnostics = args.includes('--diagnostics');
+  let showLastError = args.includes('--last-error');
+  let showBacktrace = args.includes('--backtrace');
+  let keyArg: string | undefined;
+  let keysArg: string | undefined;
+  let commandArg: string | undefined;
+  let frameTarget: string | undefined;
+  let sinceRequestId: string | number | undefined;
 
   // Parse socket path
   const socketIndex = args.indexOf('-s');
@@ -349,6 +407,37 @@ Examples:
     scriptFile = args[scriptIndex + 1];
   }
 
+  // Parse --key
+  const keyIndex = args.indexOf('--key');
+  if (keyIndex !== -1) {
+    keyArg = args[keyIndex + 1];
+  }
+
+  // Parse --keys
+  const keysIndex = args.indexOf('--keys');
+  if (keysIndex !== -1) {
+    keysArg = args[keysIndex + 1];
+  }
+
+  // Parse --command
+  const commandIndex = args.indexOf('--command');
+  if (commandIndex !== -1) {
+    commandArg = args[commandIndex + 1];
+  }
+
+  // Parse --frame
+  const frameIndex = args.indexOf('--frame');
+  if (frameIndex !== -1) {
+    frameTarget = args[frameIndex + 1];
+  }
+
+  // Parse --since-request
+  const sinceIndex = args.indexOf('--since-request');
+  if (sinceIndex !== -1) {
+    const val = args[sinceIndex + 1];
+    sinceRequestId = val && !val.startsWith('-') ? (Number(val) || val) : undefined;
+  }
+
   // Get non-option arguments (filenames)
   const filenames = args.filter(arg =>
     !arg.startsWith('-') &&
@@ -356,7 +445,11 @@ Examples:
     arg !== killBuffer &&
     arg !== insertText &&
     arg !== scriptFile &&
-    arg !== socketPath
+    arg !== socketPath &&
+    arg !== keyArg &&
+    arg !== keysArg &&
+    arg !== commandArg &&
+    arg !== frameTarget
   );
 
   // Handle TUI mode by spawning the TUI client process
@@ -374,6 +467,21 @@ Examples:
     });
     child.on('exit', (code: number) => process.exit(code));
     return;
+  }
+
+  // Special handling for --stop - send shutdown RPC
+  if (stopDaemon) {
+    const stopClient = new TmaxClient(socketPath);
+    try {
+      await stopClient.connect();
+      await stopClient.sendRequest('shutdown', {});
+      stopClient.close();
+      console.log('Daemon stopped');
+      process.exit(0);
+    } catch (error) {
+      console.error('Daemon not running');
+      process.exit(1);
+    }
   }
 
   // Special handling for ping - don't require server connection
@@ -465,6 +573,122 @@ Examples:
     const scriptContent = fs.readFileSync(scriptFile, 'utf8');
     const result = await client.eval(scriptContent);
     console.log(result);
+  } else if (keyArg) {
+    // Send a single keypress to the active frame
+    const params: any = { key: keyArg };
+    if (frameTarget) params.frameId = frameTarget;
+    try {
+      const result = await client.sendRequest('keypress', params);
+      if (jsonOutput) {
+        console.log(JSON.stringify(result));
+      } else if (result) {
+        console.log(typeof result === 'object' ? JSON.stringify(result) : result);
+      }
+    } catch (error: any) {
+      const errData = error instanceof Error ? error.message : String(error);
+      if (jsonOutput) {
+        console.log(JSON.stringify({ ok: false, error: errData }));
+      } else {
+        console.error(errData);
+      }
+      process.exit(1);
+    }
+  } else if (keysArg) {
+    // Replay a key sequence on the active frame
+    // Parse <Key> notation and individual characters
+    const keys = parseKeySequence(keysArg);
+    for (const key of keys) {
+      const params: any = { key };
+      if (frameTarget) params.frameId = frameTarget;
+      try {
+        await client.sendRequest('keypress', params);
+      } catch (error: any) {
+        const errData = error instanceof Error ? error.message : String(error);
+        if (jsonOutput) {
+          console.log(JSON.stringify({ ok: false, key, error: errData }));
+        } else {
+          console.error(`Error on key '${key}': ${errData}`);
+        }
+        process.exit(1);
+      }
+    }
+    if (jsonOutput) {
+      console.log(JSON.stringify({ ok: true, operation: 'keys', keys }));
+    } else {
+      console.log(`Sent ${keys.length} keys`);
+    }
+  } else if (commandArg) {
+    // Execute an editor command by name
+    const params: any = { command: commandArg };
+    if (frameTarget) params.frameId = frameTarget;
+    try {
+      const result = await client.sendRequest('command', params);
+      if (jsonOutput) {
+        console.log(JSON.stringify({ ok: true, result }));
+      } else if (result !== undefined && result !== null) {
+        console.log(typeof result === 'object' ? JSON.stringify(result) : result);
+      }
+    } catch (error: any) {
+      const errData = error instanceof Error ? error.message : String(error);
+      if (jsonOutput) {
+        console.log(JSON.stringify({ ok: false, error: errData }));
+      } else {
+        console.error(errData);
+      }
+      process.exit(1);
+    }
+  } else if (showDiagnostics) {
+    // Show recent diagnostics from the daemon
+    const info = await client.sendRequest('status', {});
+    let errors = info?.recentErrors ?? [];
+    if (sinceRequestId !== undefined) {
+      errors = errors.filter((e: any) => e.requestId === sinceRequestId);
+    }
+    if (jsonOutput) {
+      console.log(JSON.stringify(errors));
+    } else {
+      if (errors.length === 0) {
+        console.log('No recent diagnostics.');
+      } else {
+        for (const err of errors) {
+          if (err.diagnostic) {
+            console.log(`[${err.diagnostic.code}] ${err.message}`);
+          } else {
+            console.log(err.message);
+          }
+        }
+      }
+    }
+  } else if (showLastError) {
+    // Get last error from T-Lisp interpreter
+    try {
+      const result = await client.eval('(tlisp-last-error)');
+      if (jsonOutput) {
+        console.log(JSON.stringify(result));
+      } else if (result && typeof result === 'string' && result !== '') {
+        console.log(result);
+      } else {
+        console.log('No recent error.');
+      }
+    } catch {
+      console.log('No recent error.');
+    }
+  } else if (showBacktrace) {
+    // Get backtrace from T-Lisp interpreter
+    try {
+      const result = await client.eval('(tlisp-backtrace)');
+      if (jsonOutput) {
+        console.log(JSON.stringify(result));
+      } else if (Array.isArray(result)) {
+        for (const frame of result) {
+          console.log(frame);
+        }
+      } else {
+        console.log('No backtrace available.');
+      }
+    } catch {
+      console.log('No backtrace available.');
+    }
   } else if (evalCode) {
     const result = await client.eval(evalCode);
     if (result !== undefined) {

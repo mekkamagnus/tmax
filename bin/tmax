@@ -61,8 +61,8 @@ ensure_daemon() {
     return 0
   fi
 
-  # Start daemon in background
-  bun "$DAEMON" >/dev/null 2>&1 &
+  # Start daemon in background (from project root so relative paths resolve)
+  (cd "$PROJECT_DIR" && bun "$DAEMON" >/dev/null 2>&1) &
   local daemon_pid=$!
 
   # Wait for socket
@@ -101,13 +101,20 @@ done
 # Handle --stop
 if [ "$STOP" = true ]; then
   if is_running >/dev/null 2>&1; then
-    # Send eval to stop
-    "$CLIENT" --eval '(editor-quit)' 2>/dev/null || true
-    sleep 0.5
-    # Force kill if still running
-    if [ -S "$SOCKET" ]; then
-      rm -f "$SOCKET"
+    "$CLIENT" --stop 2>/dev/null
+    # Verify it actually stopped
+    sleep 1
+    if is_running >/dev/null 2>&1; then
+      echo "Warning: daemon did not stop gracefully, sending SIGTERM" >&2
+      # Find PID from lsof on the socket
+      DAEMON_PID=$(lsof -t -U "$SOCKET" 2>/dev/null | head -1 || true)
+      if [ -n "$DAEMON_PID" ]; then
+        kill -TERM "$DAEMON_PID" 2>/dev/null || true
+        sleep 1
+      fi
     fi
+    # Clean up socket
+    rm -f "$SOCKET" 2>/dev/null || true
     echo "Daemon stopped"
   else
     echo "Daemon not running"
@@ -127,7 +134,7 @@ if [ "$DAEMON_ONLY" = true ]; then
     echo "Daemon already running"
     exit 0
   fi
-  exec bun "$DAEMON"
+  cd "$PROJECT_DIR" && exec bun "$DAEMON"
 fi
 
 # Default: ensure daemon + open TUI frame (with optional file)
