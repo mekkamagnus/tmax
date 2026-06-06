@@ -58,6 +58,8 @@ interface ObservabilityError {
   message: string;
   clientId?: string;
   frameId?: string;
+  requestId?: string | number;
+  diagnostic?: Record<string, any>;
 }
 
 interface FrameObservability {
@@ -268,7 +270,7 @@ export class TmaxServer {
     obs.lastSyncAt = new Date();
   }
 
-  private recordError(source: string, error: unknown, clientId?: string, frameId?: string): void {
+  private recordError(source: string, error: unknown, clientId?: string, frameId?: string, diagnostic?: Record<string, any>, requestId?: string | number): void {
     const message = error instanceof Error ? error.message : String(error);
     this.recentErrors.push({
       timestamp: new Date().toISOString(),
@@ -276,6 +278,8 @@ export class TmaxServer {
       message,
       clientId,
       frameId,
+      requestId,
+      diagnostic,
     });
     if (this.recentErrors.length > 50) {
       this.recentErrors = this.recentErrors.slice(-50);
@@ -504,7 +508,13 @@ export class TmaxServer {
           id: undefined,
           error: {
             code: -32603,
-            message: `Internal error: ${error instanceof Error ? error.message : 'Unknown error'}`
+            message: `Internal error: ${error instanceof Error ? error.message : 'Unknown error'}`,
+            ...(error instanceof Error && (error as any).diagnostic ? {
+              data: {
+                kind: 'tlisp-diagnostic',
+                diagnostic: (error as any).diagnostic,
+              }
+            } : {})
           }
         };
 
@@ -637,6 +647,11 @@ export class TmaxServer {
         case 'frames':
           result = await this.handleFrames();
           break;
+        case 'shutdown':
+          result = { success: true };
+          // Fire-and-forget shutdown so we can respond first
+          setTimeout(() => { this.shutdown(); }, 50);
+          break;
         default:
           return {
             jsonrpc: '2.0',
@@ -654,18 +669,24 @@ export class TmaxServer {
         result
       };
     } catch (error) {
+      const diagnostic = (error instanceof Error && (error as any).diagnostic)
+        ? { kind: 'tlisp-diagnostic', diagnostic: (error as any).diagnostic }
+        : undefined;
       this.recordError(
         request.method,
         error,
         request.params?.clientId,
         request.params?.frameId,
+        diagnostic?.diagnostic,
+        request.id,
       );
       return {
         jsonrpc: '2.0',
         id: request.id,
         error: {
-          code: -32603,
-          message: `Internal error: ${error instanceof Error ? error.message : 'Unknown error'}`
+          code: -32010,
+          message: `${error instanceof Error ? error.message : 'Unknown error'}`,
+          ...(diagnostic ? { data: diagnostic } : {})
         }
       };
     }
@@ -731,7 +752,18 @@ export class TmaxServer {
 
       // Handle Either return type - check _tag property
       if (result._tag === 'Left') {
-        throw new Error(result.left.message || 'T-Lisp evaluation error');
+        const err = result.left as any;
+        // Catch editor-quit signal and trigger graceful shutdown
+        if (err.message === 'EDITOR_QUIT_SIGNAL') {
+          this.syncEditorToAllFrames();
+          setTimeout(() => { this.shutdown(); }, 50);
+          return { quitSignal: true };
+        }
+        const diagnostic = err.diagnostic ? this.diagnosticToJSON(err.diagnostic) : undefined;
+        this.recordError('eval', new Error(err.message), undefined, undefined, diagnostic);
+        const e = new Error(err.message || 'T-Lisp evaluation error');
+        (e as any).diagnostic = diagnostic;
+        throw e;
       }
 
       this.syncEditorToAllFrames();
@@ -739,8 +771,23 @@ export class TmaxServer {
       // Convert T-Lisp value to JSON-serializable format
       return this.tlispValueToJson(result.right);
     } catch (error) {
+      if ((error as any).diagnostic) throw error;
       throw new Error(`T-Lisp evaluation error: ${error instanceof Error ? error.message : 'Unknown error'}`);
     }
+  }
+
+  private diagnosticToJSON(d: any): Record<string, any> {
+    return {
+      severity: d.severity,
+      code: d.code,
+      message: d.message,
+      ...(d.source ? { source: d.source } : {}),
+      ...(d.primarySpan ? { primarySpan: d.primarySpan } : {}),
+      ...(d.expected ? { expected: d.expected } : {}),
+      ...(d.actual ? { actual: d.actual } : {}),
+      ...(d.help ? { help: d.help } : {}),
+      ...(d.stack ? { stack: d.stack } : {}),
+    };
   }
 
   /**
@@ -791,16 +838,15 @@ export class TmaxServer {
         this.syncEditorToFrame(frame);
         return editorStateToJson(this.editor.getEditorState());
       }
-      // No frameId — operate on editor directly (backward compat)
+      // No frameId — operate on editor directly, then sync all frames
       await this.editor.handleKey(key);
+      this.syncEditorToAllFrames();
       return editorStateToJson(this.editor.getEditorState());
     } catch (error) {
       if (error instanceof Error && error.message === 'EDITOR_QUIT_SIGNAL') {
-        if (params.frameId) {
-          const frame = this.getFrame(params.frameId);
-          this.syncEditorToFrame(frame);
-        }
+        this.syncEditorToAllFrames();
         const state = editorStateToJson(this.editor.getEditorState());
+        setTimeout(() => { this.shutdown(); }, 50);
         return { ...state, quitSignal: true };
       }
       throw error;
@@ -813,7 +859,7 @@ export class TmaxServer {
   private async handleRenderState(params: any): Promise<any> {
     if (params?.frameId) {
       const frame = this.getFrame(params.frameId);
-      this.syncFrameToEditor(frame);
+      this.syncEditorToFrame(frame);
     }
     return editorStateToJson(this.editor.getEditorState());
   }
