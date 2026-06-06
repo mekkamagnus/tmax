@@ -38,7 +38,7 @@ EOF
 
 # Check if daemon is alive
 is_running() {
-  "$CLIENT" --ping 2>/dev/null
+  "$CLIENT" -s "$SOCKET" --ping 2>/dev/null
 }
 
 # Wait for daemon to be ready
@@ -47,6 +47,17 @@ wait_for_daemon() {
   while [ $attempts -lt 25 ]; do
     if is_running >/dev/null 2>&1; then
       return 0
+    fi
+    # If a lock exists and the process is alive, another launcher is starting it
+    if [ -f "${SOCKET}.lock" ]; then
+      local lock_pid
+      lock_pid=$(python3 -c "import json,sys; print(json.load(open('${SOCKET}.lock'))['pid'])" 2>/dev/null || echo "")
+      if [ -n "$lock_pid" ] && kill -0 "$lock_pid" 2>/dev/null; then
+        : # wait for the other launcher's daemon to come up
+      else
+        # stale lock from dead process — remove it so we can retry
+        rm -f "${SOCKET}.lock" 2>/dev/null || true
+      fi
     fi
     sleep 0.2
     attempts=$((attempts + 1))
@@ -61,16 +72,28 @@ ensure_daemon() {
     return 0
   fi
 
+  # Capture daemon startup output for diagnostics on failure
+  local daemon_log
+  daemon_log=$(mktemp /tmp/tmax-daemon-start.XXXXXX.log)
+
   # Start daemon in background (from project root so relative paths resolve)
-  (cd "$PROJECT_DIR" && bun "$DAEMON" >/dev/null 2>&1) &
+  (cd "$PROJECT_DIR" && TMAX_SOCKET="$SOCKET" bun "$DAEMON" >"$daemon_log" 2>&1) &
   local daemon_pid=$!
 
   # Wait for socket
   if wait_for_daemon; then
+    rm -f "$daemon_log" 2>/dev/null || true
     return 0
   fi
 
+  # Show recent daemon output to help diagnose the failure
   echo "Error: Failed to start daemon (pid $daemon_pid)" >&2
+  if [ -s "$daemon_log" ]; then
+    echo "--- daemon log ---" >&2
+    tail -20 "$daemon_log" >&2
+    echo "--- end ---" >&2
+  fi
+  rm -f "$daemon_log" 2>/dev/null || true
   return 1
 }
 
@@ -101,7 +124,7 @@ done
 # Handle --stop
 if [ "$STOP" = true ]; then
   if is_running >/dev/null 2>&1; then
-    "$CLIENT" --stop 2>/dev/null
+    "$CLIENT" -s "$SOCKET" --stop 2>/dev/null
     # Verify it actually stopped
     sleep 1
     if is_running >/dev/null 2>&1; then
@@ -113,8 +136,8 @@ if [ "$STOP" = true ]; then
         sleep 1
       fi
     fi
-    # Clean up socket
-    rm -f "$SOCKET" 2>/dev/null || true
+    # Clean up socket and lock
+    rm -f "$SOCKET" "${SOCKET}.lock" 2>/dev/null || true
     echo "Daemon stopped"
   else
     echo "Daemon not running"
@@ -134,7 +157,7 @@ if [ "$DAEMON_ONLY" = true ]; then
     echo "Daemon already running"
     exit 0
   fi
-  cd "$PROJECT_DIR" && exec bun "$DAEMON"
+  cd "$PROJECT_DIR" && TMAX_SOCKET="$SOCKET" exec bun "$DAEMON"
 fi
 
 # Default: ensure daemon + open TUI frame (with optional file)
@@ -142,7 +165,7 @@ ensure_daemon
 
 # Open file if specified
 if [ ${#FILES[@]} -gt 0 ]; then
-  "$CLIENT" "${FILES[0]}" 2>/dev/null
+  "$CLIENT" -s "$SOCKET" "${FILES[0]}" 2>/dev/null
 fi
 
 # Launch TUI client (exec replaces this process)

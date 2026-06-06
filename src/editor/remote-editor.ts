@@ -3,9 +3,12 @@ import { userInfo } from "os";
 import { jsonToEditorState } from "../server/serialize.ts";
 import type { EditorState } from "../core/types.ts";
 
+const REQUEST_TIMEOUT_MS = 30_000;
+
 interface PendingRequest {
   resolve: (value: any) => void;
   reject: (reason: any) => void;
+  timer: ReturnType<typeof setTimeout>;
 }
 
 export class RemoteEditor {
@@ -82,9 +85,20 @@ export class RemoteEditor {
     return new Promise((resolve, reject) => {
       this.socket = new Socket();
       this.socket.on("data", (data: Buffer) => this.onData(data));
+      this.socket.on("close", () => this.rejectAllPending(new Error("Socket closed")));
+      this.socket.on("error", (err) => this.rejectAllPending(err));
       this.socket.connect(this.socketPath, () => resolve());
-      this.socket.on("error", reject);
+      // Reject connect on error before connection established
+      this.socket.once("error", reject);
     });
+  }
+
+  private rejectAllPending(reason: Error): void {
+    for (const [id, pending] of this.pending) {
+      clearTimeout(pending.timer);
+      pending.reject(reason);
+      this.pending.delete(id);
+    }
   }
 
   private onData(data: Buffer): void {
@@ -102,6 +116,7 @@ export class RemoteEditor {
         const pending = this.pending.get(response.id);
         if (!pending) continue;
 
+        clearTimeout(pending.timer);
         this.pending.delete(response.id);
         if (response.error) {
           pending.reject(new Error(`${response.error.code}: ${response.error.message}`));
@@ -122,7 +137,11 @@ export class RemoteEditor {
       }
 
       const id = ++this.requestId;
-      this.pending.set(id, { resolve, reject });
+      const timer = setTimeout(() => {
+        this.pending.delete(id);
+        reject(new Error(`Request timeout: ${method}`));
+      }, REQUEST_TIMEOUT_MS);
+      this.pending.set(id, { resolve, reject, timer });
       this.socket.write(JSON.stringify({ jsonrpc: "2.0", id, method, params }) + "\n");
     });
   }
