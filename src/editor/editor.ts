@@ -13,6 +13,7 @@ import type { TerminalIO, FileSystem } from "../core/types.ts";
 import type { TLispEnvironment, TLispValue, TLispFunctionImpl } from "../tlisp/types.ts";
 import type { TLispFunction } from "../tlisp/types.ts";
 import { Either } from "../utils/task-either.ts";
+import { renderDiagnostic } from "../tlisp/diagnostic-renderer.ts";
 import { FunctionalTextBufferImpl } from "../core/buffer.ts";
 import { handleNormalMode } from "./handlers/normal-handler.ts";
 import { handleInsertMode } from "./handlers/insert-handler.ts";
@@ -75,7 +76,7 @@ export class Editor {
   private minorModeRegistry: Map<string, MinorModeConfig> = new Map();
   private globalizedMinorModes: Set<string> = new Set();
   private autoModeRules: AutoModeRule[] = [];
-  private loadPaths: string[] = ['src/tlisp/core'];
+  private loadPaths: string[] = [`${import.meta.dir}/../tlisp/core`];
   private currentModuleName: string | undefined;
   private bufferMetadata: Map<string, { filename?: string; modified: boolean; recency: number }> = new Map();
   private bufferRecency: number = 0;
@@ -151,7 +152,7 @@ export class Editor {
     editorLog.debug('T-Lisp interpreter created', { correlationId: initId });
 
     this.interpreter.setModuleLoader(createModuleLoader(this.interpreter, {
-      coreRoot: "src/tlisp/core",
+      coreRoot: `${import.meta.dir}/../tlisp/core`,
     }));
 
     this.keyMappings = new Map();
@@ -1517,19 +1518,17 @@ export class Editor {
       const coreBindingsContent = await this.filesystem.readFile(path);
       return executeContent(coreBindingsContent);
     } catch (error) {
-      if (path.startsWith("src/tlisp/core/")) {
-        try {
-          const realFile = Bun.file(path);
-          if (await realFile.exists()) {
-            return executeContent(await realFile.text());
-          }
-        } catch (realError) {
-          const realMessage = realError instanceof Error ? realError.message : String(realError);
-          if (!silent) {
-            console.warn(`Failed to load bindings from ${path}: ${realMessage}`);
-          }
-          return false;
+      try {
+        const realFile = Bun.file(path);
+        if (await realFile.exists()) {
+          return executeContent(await realFile.text());
         }
+      } catch (realError) {
+        const realMessage = realError instanceof Error ? realError.message : String(realError);
+        if (!silent) {
+          console.warn(`Failed to load bindings from ${path}: ${realMessage}`);
+        }
+        return false;
       }
 
       const errorMessage = error instanceof Error ? error.message : String(error);
@@ -1544,11 +1543,12 @@ export class Editor {
    * Load core key bindings from T-Lisp files
    */
   private async loadCoreBindings(): Promise<void> {
+    const bindingsDir = `${import.meta.dir}/../tlisp/core/bindings`;
     const requiredBindingFiles = [
-      "src/tlisp/core/bindings/normal.tlisp",
-      "src/tlisp/core/bindings/insert.tlisp",
-      "src/tlisp/core/bindings/visual.tlisp",
-      "src/tlisp/core/bindings/command.tlisp",
+      `${bindingsDir}/normal.tlisp`,
+      `${bindingsDir}/insert.tlisp`,
+      `${bindingsDir}/visual.tlisp`,
+      `${bindingsDir}/command.tlisp`,
     ];
 
     let allLoaded = true;
@@ -2031,6 +2031,19 @@ export class Editor {
         return result;
       }
 
+      // Handle eval error with diagnostic rendering
+      const err = result.left;
+      if (err.message === 'EDITOR_QUIT_SIGNAL') {
+        throw new Error('EDITOR_QUIT_SIGNAL');
+      }
+      if (err.diagnostic) {
+        this.state.statusMessage = `[${err.diagnostic.code}] ${err.message}`;
+        this.logMessage(renderDiagnostic(err.diagnostic));
+      } else {
+        this.state.statusMessage = err.message;
+        this.logMessage(err.message);
+      }
+
       const source = command.trim().startsWith("(") ? command : `(${command})`;
       const head = this.commandHead(source);
       if (!head) return result;
@@ -2047,6 +2060,7 @@ export class Editor {
         throw new Error("EDITOR_QUIT_SIGNAL"); // Re-throw clean quit signal
       }
       this.state.statusMessage = `Error: ${error instanceof Error ? error.message : String(error)}`;
+      this.logMessage(this.state.statusMessage);
       throw error;
     }
   }
