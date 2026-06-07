@@ -23,7 +23,8 @@
     "typecheck": "bunx tsc --noEmit",
     "typecheck:src": "bunx tsc --noEmit --project tsconfig.src.json",
     "typecheck:test": "bunx tsc --noEmit --project tsconfig.test.json",
-    "build": "bun run build:tlisp",
+    "build": "bun run build:tmax && bun run build:tlisp",
+    "build:tmax": "bun build --compile ./src/main.tsx --outfile dist/tmax",
     "build:tlisp": "bun build --compile ./src/tlisp/cli.ts --outfile dist/tlisp"
   },
   "dependencies": {
