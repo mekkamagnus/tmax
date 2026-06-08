@@ -47,9 +47,18 @@ export function createBufferOps(
   getCurrentFilename?: () => string | undefined,
   setCurrentFilename?: (path: string) => void,
   getBufferModified?: () => boolean,
-  setBufferModified?: (flag: boolean) => void
+  setBufferModified?: (flag: boolean) => void,
+  readonlyBuffers?: Set<string>
 ): Map<string, TLispFunctionImpl> {
   const api = new Map<string, TLispFunctionImpl>();
+  const readonly = readonlyBuffers ?? new Set<string>();
+
+  function isReadonly(): boolean {
+    for (const [name, buf] of buffers) {
+      if (buf === getCurrentBuffer() && readonly.has(name)) return true;
+    }
+    return false;
+  }
 
   api.set("buffer-create", (args: TLispValue[]): Either<AppError, TLispValue> => {
     const argsValidation = validateArgsCount(args, 1, "buffer-create");
@@ -247,6 +256,8 @@ export function createBufferOps(
       return Either.left(argsValidation.left);
     }
 
+    if (isReadonly()) return Either.left(createBufferError('ReadOnly', 'Buffer is read-only'));
+
     const currentBuffer = getCurrentBuffer();
     const bufferValidation = validateBufferExists(currentBuffer);
     if (Either.isLeft(bufferValidation)) {
@@ -291,6 +302,8 @@ export function createBufferOps(
     if (Either.isLeft(argsValidation)) {
       return Either.left(argsValidation.left);
     }
+
+    if (isReadonly()) return Either.left(createBufferError('ReadOnly', 'Buffer is read-only'));
 
     const currentBuffer = getCurrentBuffer();
     const bufferValidation = validateBufferExists(currentBuffer);
@@ -339,6 +352,8 @@ export function createBufferOps(
     if (Either.isLeft(argsValidation)) {
       return Either.left(argsValidation.left);
     }
+
+    if (isReadonly()) return Either.left(createBufferError('ReadOnly', 'Buffer is read-only'));
 
     const lineArg = args[0]!
     const lineValidation = validateArgType(lineArg, "number", 0, "buffer-insert-at-position");
@@ -427,6 +442,8 @@ export function createBufferOps(
     if (Either.isLeft(argsValidation)) {
       return Either.left(argsValidation.left);
     }
+
+    if (isReadonly()) return Either.left(createBufferError('ReadOnly', 'Buffer is read-only'));
 
     const values: number[] = [];
     for (let i = 0; i < 4; i++) {

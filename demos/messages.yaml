@@ -1,0 +1,101 @@
+name: messages
+description: "Demonstrates the *Messages* buffer — severity levels, format strings, level filtering, read-only guard, and ring buffer management."
+speed: 1.0
+
+setup:
+  - action: setup_file
+    var: FILE
+    name: messages-demo.txt
+    content: |
+      line 1
+      line 2
+      line 3
+      line 4
+      line 5
+
+steps:
+  - section: Opening a file
+    narrate: "Opening a temp file — this logs at [info] level"
+    action: open
+    file: "${FILE}"
+    pause: 1.0
+
+  - section: Format strings
+    narrate: "Sending a format-string message with %s and %d"
+    action: eval
+    expr: '(message "Saved %s (%d bytes)" "config.tlisp" 2048)'
+    pause: 0.5
+
+  - narrate: "%s substitution"
+    action: eval
+    expr: '(message "Hello %s" "world")'
+    pause: 0.3
+
+  - narrate: "%d substitution"
+    action: eval
+    expr: '(message "Count: %d items" 42)'
+    pause: 0.3
+
+  - narrate: "%% literal percent"
+    action: eval
+    expr: '(message "100%% complete")'
+    pause: 0.3
+
+  - section: Severity levels
+    narrate: "Logging an explicit warn-level message"
+    action: eval
+    expr: "(log-message ':warn \"Deprecated API called\")"
+    pause: 0.5
+
+  - section: Level filtering
+    narrate: "Sending an unbound key (F1) — logged at debug, hidden at default level"
+    action: key
+    key: "F1"
+    pause: 0.5
+
+  - narrate: "Enabling debug level to see everything"
+    action: eval
+    expr: "(set-message-log-level ':debug)"
+    pause: 0.3
+
+  - narrate: "Sending another unbound key (F2) — now visible at debug level"
+    action: key
+    key: "F2"
+    pause: 0.5
+
+  - narrate: "Restoring default info level"
+    action: eval
+    expr: "(set-message-log-level ':info)"
+    pause: 0.3
+
+  - section: Command context in errors
+    narrate: "Triggering a T-Lisp error — logged with command context"
+    action: eval
+    expr: "(undefined-demo-function)"
+    expect_error: true
+    pause: 0.5
+
+  - section: Read-only guard
+    narrate: "Switching to *Messages* buffer"
+    action: eval
+    expr: '(buffer-switch "*Messages*")'
+    pause: 1.0
+
+  - narrate: "Attempting to insert into read-only buffer (should fail)"
+    action: eval
+    expr: '(buffer-insert "hacked!")'
+    expect_error: true
+    pause: 0.5
+
+  - section: Ring buffer
+    narrate: "Current message-log-max"
+    action: eval
+    expr: "(message-log-max)"
+    pause: 0.3
+
+  - narrate: "Clearing all messages"
+    action: eval
+    expr: "(clear-messages)"
+    pause: 0.5
+
+cleanup: true

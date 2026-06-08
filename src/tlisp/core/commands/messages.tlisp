@@ -1,0 +1,20 @@
+(defmodule editor/commands/messages
+  (export view-messages command-history)
+
+;; messages.tlisp --- *Messages* buffer commands
+
+(defun view-messages ()
+  "Switch to *Messages* buffer and scroll to newest entries."
+  (progn
+    (buffer-switch "*Messages*")
+    (let ((line-count (buffer-line-count)))
+      (if (> line-count 0)
+        (cursor-move (- line-count 1) 0)))))
+
+(defun command-history ()
+  "Return the list of recently executed M-x command names."
+  (minibuffer-history-values "command-history"))
+
+(key-bind "C-h e" "(view-messages)" "normal")
+(provide "messages")
+)

@@ -3,7 +3,7 @@
  */
 export type BufferError = {
   type: 'BufferError';
-  variant: 'Overflow' | 'Underflow' | 'InvalidOperation' | 'OutOfBounds';
+  variant: 'Overflow' | 'Underflow' | 'InvalidOperation' | 'OutOfBounds' | 'ReadOnly';
   message: string;
   details?: Record<string, any>;
 };

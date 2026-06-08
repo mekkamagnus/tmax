@@ -15,6 +15,7 @@ import type { TLispFunction } from "../tlisp/types.ts";
 import { Either } from "../utils/task-either.ts";
 import { renderDiagnostic } from "../tlisp/diagnostic-renderer.ts";
 import { FunctionalTextBufferImpl } from "../core/buffer.ts";
+import { MessageLog, type LogLevel } from "./message-log.ts";
 import { handleNormalMode } from "./handlers/normal-handler.ts";
 import { handleInsertMode } from "./handlers/insert-handler.ts";
 import { handleVisualMode } from "./handlers/visual-handler.ts";
@@ -66,6 +67,7 @@ export class Editor {
   private filesystem: FileSystem;
   private countPrefix: number = 0;  // Accumulated count for count prefix commands
   private messages: string[] = [];
+  private messageLog = new MessageLog();
   private spacePressed: boolean = false;  // Track space key for SPC ; sequence (US-1.10.1)
   private windowPrefixPressed: boolean = false;  // Track C-w prefix for window commands (SPEC-004)
   private lspClient: LSPClient;  // LSP client for language server integration (US-3.1.1)
@@ -174,7 +176,7 @@ export class Editor {
     resetDeleteRegisterState();
     resetUndoRedoState();
 
-    this.logMessage('Welcome to tmax');
+    this.logMessage('Welcome to tmax', 'info');
 
     this.loadFallbackBindings();
 
@@ -271,7 +273,7 @@ export class Editor {
       get cursorFocus() { return editor.state.cursorFocus ?? 'buffer'; },
       set cursorFocus(v: 'buffer' | 'command') { editor.state.cursorFocus = v; },
       get lspDiagnostics() { return editor.state.lspDiagnostics; },
-      logMessage: (msg: string) => editor.logMessage(msg),
+      logMessage: (msg: string, level?: string, command?: string) => editor.logMessage(msg, (level as LogLevel) ?? 'info', command),
       get currentFilename() { return editor.state.currentFilename; },
       set currentFilename(v: string | undefined) {
         editor.state.currentFilename = v;
@@ -309,6 +311,7 @@ export class Editor {
       _getCurrentModuleName: () => editor.getCurrentModuleName(),
       _getBufferModified: () => editor.getCurrentBufferModified(),
       _setBufferModified: (modified: boolean) => editor.setCurrentBufferModified(modified),
+      _getMessageLog: () => editor.messageLog,
     };
 
     const api = createEditorAPI(tlispState);
@@ -2038,10 +2041,10 @@ export class Editor {
       }
       if (err.diagnostic) {
         this.state.statusMessage = `[${err.diagnostic.code}] ${err.message}`;
-        this.logMessage(renderDiagnostic(err.diagnostic));
+        this.logMessage(renderDiagnostic(err.diagnostic), 'error', this.state.lastCommand);
       } else {
         this.state.statusMessage = err.message;
-        this.logMessage(err.message);
+        this.logMessage(err.message, 'error', this.state.lastCommand);
       }
 
       const source = command.trim().startsWith("(") ? command : `(${command})`;
@@ -2060,7 +2063,45 @@ export class Editor {
         throw new Error("EDITOR_QUIT_SIGNAL"); // Re-throw clean quit signal
       }
       this.state.statusMessage = `Error: ${error instanceof Error ? error.message : String(error)}`;
-      this.logMessage(this.state.statusMessage);
+      this.logMessage(this.state.statusMessage, 'error', this.state.lastCommand);
+      throw error;
+    }
+  }
+
+  private async executeCommandAsync(command: string): Promise<unknown> {
+    try {
+      this.state.lastCommand = command;
+      const result = await this.interpreter.executeAsync!(command);
+      if (Either.isRight(result)) {
+        return result;
+      }
+
+      const err = result.left;
+      const source = command.trim().startsWith("(") ? command : `(${command})`;
+      const head = this.commandHead(source);
+      const callable = head ? this.resolveCallable(head) : undefined;
+      if (callable?.env && callable.value.type === "function") {
+        const expr = this.interpreter.parse(source);
+        return this.interpreter.evalAsync!(expr, callable.env);
+      }
+
+      if (err.message === 'EDITOR_QUIT_SIGNAL') {
+        throw new Error('EDITOR_QUIT_SIGNAL');
+      }
+      if (err.diagnostic) {
+        this.state.statusMessage = `[${err.diagnostic.code}] ${err.message}`;
+        this.logMessage(renderDiagnostic(err.diagnostic), 'error', this.state.lastCommand);
+      } else {
+        this.state.statusMessage = err.message;
+        this.logMessage(err.message, 'error', this.state.lastCommand);
+      }
+      return result;
+    } catch (error) {
+      if (error instanceof Error && (error.message === "EDITOR_QUIT_SIGNAL" || error.message.includes("EDITOR_QUIT_SIGNAL"))) {
+        throw new Error("EDITOR_QUIT_SIGNAL");
+      }
+      this.state.statusMessage = `Error: ${error instanceof Error ? error.message : String(error)}`;
+      this.logMessage(this.state.statusMessage, 'error', this.state.lastCommand);
       throw error;
     }
   }
@@ -2196,12 +2237,13 @@ export class Editor {
   /**
    * Log a message to the *Messages* buffer
    */
-  logMessage(msg: string): void {
+  logMessage(msg: string, level: LogLevel = 'info', command?: string): void {
     const now = new Date();
     const ts = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}:${String(now.getSeconds()).padStart(2, '0')}`;
     const line = `[${ts}] ${msg}`;
     this.messages.push(line);
-    this.buffers.set('*Messages*', FunctionalTextBufferImpl.create(this.messages.join('\n')));
+    this.messageLog.log(level, msg, command);
+    this.buffers.set('*Messages*', FunctionalTextBufferImpl.create(this.messageLog.render()));
     this.updateBufferMetadata('*Messages*', { modified: false });
   }
 
@@ -2271,14 +2313,22 @@ export class Editor {
       // Update status message with LSP connection status (US-3.1.1)
       const lspStatus = this.lspClient.getStatusMessage();
       this.state.statusMessage = lspStatus ? `Opened ${filename} - ${lspStatus}` : `Opened ${filename}`;
-      this.logMessage(`Opened ${filename}`);
+      this.logMessage(`Opened ${filename}`, 'info');
 
       // SPEC-035: Auto-detect and activate major mode
       this.activateMajorModeForFile(filename);
+
+      // SPEC-013: Parse AST for code awareness
+      try {
+        this.executeCommand("(ast-parse-buffer)");
+      } catch (_) {
+        // Non-critical: AST features unavailable if parse fails
+      }
+
       this.recomputeHighlights();
     } catch (error) {
       this.state.statusMessage = `Failed to open ${filename}: ${error instanceof Error ? error.message : String(error)}`;
-      this.logMessage(`Failed to open ${filename}: ${error instanceof Error ? error.message : String(error)}`);
+      this.logMessage(`Failed to open ${filename}: ${error instanceof Error ? error.message : String(error)}`, 'error');
     }
   }
 
@@ -2309,7 +2359,7 @@ export class Editor {
         }
         this.state.statusMessage = `Saved ${saveFilename}`;
         this.setCurrentBufferModified(false);
-        this.logMessage(`Saved ${saveFilename}`);
+        this.logMessage(`Saved ${saveFilename}`, 'info');
       } else {
         this.state.statusMessage = `Failed to get content: ${contentResult.left}`;
       }

@@ -6,6 +6,7 @@
 import type { TLispValue, TLispFunctionImpl } from "../tlisp/types.ts";
 import { createNil, createNumber, createString, createBoolean, createList, createSymbol } from "../tlisp/values.ts";
 import type { TerminalIO, FileSystem, FunctionalTextBuffer } from "../core/types.ts";
+import { FunctionalTextBufferImpl } from "../core/buffer.ts";
 import { Either } from "../utils/task-either.ts";
 import { createValidationError, AppError } from "../error/types.ts";
 import { createBufferOps } from "./api/buffer-ops.ts";
@@ -39,6 +40,8 @@ import { createDiredOps } from "./api/dired-ops.ts";
 import { createRawLoadOps } from "./api/load-ops.ts";
 import { createMinorModeOps } from "./api/minor-mode-ops.ts";
 import { createModuleOps } from "./api/module-ops.ts";
+import { createAstOps, getAstCache } from "./api/ast-ops.ts";
+import { createNavigationOps, setAstCacheRef } from "./api/navigation-ops.ts";
 
 /**
  * T-Lisp function implementation that returns Either for error handling
@@ -74,7 +77,8 @@ export interface TlispEditorState {
   cursorFocus: 'buffer' | 'command';  // Track where cursor focus should be
   operations?: EditorOperations;  // Optional operations reference
   lspDiagnostics?: import("../core/types.ts").LSPDiagnostic[];  // LSP diagnostics (US-3.1.2)
-  logMessage?: (msg: string) => void;  // Log to *Messages* buffer
+  logMessage?: (msg: string, level?: string, command?: string) => void;  // Log to *Messages* buffer
+  _getMessageLog?: () => import("./message-log.ts").MessageLog;  // Access MessageLog for level/max queries
   currentFilename?: string;  // Current buffer's filename (SPEC-035 Phase 0a)
   config?: import("../core/types.ts").EditorConfig;
   _evalTlisp?: (expr: string) => any;
@@ -113,6 +117,7 @@ export function createEditorAPI(state: TlispEditorState): Map<string, TLispFunct
     (path: string) => { state.currentFilename = path; },
     () => state._getBufferModified?.() ?? false,
     (modified: boolean) => state._setBufferModified?.(modified),
+    new Set(['*Messages*']),
   );
   for (const [key, value] of bufferOps.entries()) {
     api.set(key, value);
@@ -541,8 +546,76 @@ export function createEditorAPI(state: TlispEditorState): Map<string, TLispFunct
     api.set(key, value);
   }
 
+  // Add AST structural editing operations (SPEC-013)
+  const astOps = createAstOps({
+    getBufferName: () => state.currentFilename ?? "*scratch*",
+    getBufferText: () => {
+      const buf = state.currentBuffer;
+      if (!buf) return "";
+      const content = buf.getContent();
+      return Either.isLeft(content) ? "" : content.right;
+    },
+    getCursorLine: () => state.cursorLine,
+    getCursorColumn: () => state.cursorColumn,
+    getCursorOffset: () => {
+      const buf = state.currentBuffer;
+      if (!buf) return 0;
+      // Compute offset from line + column
+      const content = buf.getContent();
+      if (Either.isLeft(content)) return 0;
+      const text = content.right;
+      let offset = 0;
+      for (let i = 0; i < state.cursorLine; i++) {
+        const nl = text.indexOf("\n", offset);
+        if (nl < 0) break;
+        offset = nl + 1;
+      }
+      return offset + state.cursorColumn;
+    },
+    setStatusMessage: (msg) => { state.statusMessage = msg; },
+  });
+  // Share the REAL AST cache (from ast-ops module scope) with navigation ops
+  setAstCacheRef(getAstCache() as any);
+  for (const [key, value] of astOps.entries()) {
+    api.set(key, value);
+  }
+
+  // Add code navigation operations (SPEC-013)
+  const navigationOps = createNavigationOps({
+    getBufferName: () => state.currentFilename ?? "*scratch*",
+    getBufferText: () => {
+      const buf = state.currentBuffer;
+      if (!buf) return "";
+      const content = buf.getContent();
+      return Either.isLeft(content) ? "" : content.right;
+    },
+    getCursorLine: () => state.cursorLine,
+    getCursorColumn: () => state.cursorColumn,
+    getCursorOffset: () => {
+      const buf = state.currentBuffer;
+      if (!buf) return 0;
+      const content = buf.getContent();
+      if (Either.isLeft(content)) return 0;
+      const text = content.right;
+      let offset = 0;
+      for (let i = 0; i < state.cursorLine; i++) {
+        const nl = text.indexOf("\n", offset);
+        if (nl < 0) break;
+        offset = nl + 1;
+      }
+      return offset + state.cursorColumn;
+    },
+    gotoPosition: (line, column) => {
+      state.cursorLine = line;
+      state.cursorColumn = column;
+    },
+    setStatusMessage: (msg) => { state.statusMessage = msg; },
+  });
+  for (const [key, value] of navigationOps.entries()) {
+    api.set(key, value);
+  }
+
   // Add messages operations
-  const messagesBuf = state.buffers.get('*Messages*');
   api.set('messages-buffer', (_args: TLispValue[]): Either<AppError, TLispValue> => {
     const buf = state.buffers.get('*Messages*');
     if (!buf) return Either.right(createString(''));
@@ -551,19 +624,91 @@ export function createEditorAPI(state: TlispEditorState): Map<string, TLispFunct
     return Either.right(createString(content.right));
   });
 
+  // Format-string helper: %s -> string, %d -> integer, %% -> literal %
+  function formatMessage(fmt: string, fmtArgs: TLispValue[]): string {
+    if (!/%[sd%]/.test(fmt)) return fmt;
+    let i = 0;
+    return fmt.replace(/%([sd%])/g, (_match: string, spec: string): string => {
+      if (spec === '%') return '%';
+      const arg = fmtArgs[i++];
+      if (!arg) return '';
+      if (spec === 'd') return String(Math.floor(Number(arg.type === 'number' ? arg.value : 0)));
+      return arg.type === 'string' ? String(arg.value) : arg.type === 'number' ? String(arg.value) : String(arg.value);
+    });
+  }
+
   api.set('message', (args: TLispValue[]): Either<AppError, TLispValue> => {
     if (args.length === 0) return Either.left(createValidationError('FormatError', 'requires at least 1 argument'));
-    const text = args.map(a => {
-      switch (a.type) {
-        case 'string': return a.value;
-        case 'number': return String(a.value);
-        case 'boolean': return String(a.value);
-        default: return '';
-      }
-    }).join(' ');
+    let text: string;
+    if (args[0]!.type === 'string' && /%[sd%]/.test(String(args[0]!.value))) {
+      text = formatMessage(String(args[0]!.value), args.slice(1));
+    } else {
+      text = args.map(a => {
+        switch (a.type) {
+          case 'string': return String(a.value);
+          case 'number': return String(a.value);
+          case 'boolean': return String(a.value);
+          default: return '';
+        }
+      }).join(' ');
+    }
     state.statusMessage = text;
     if (state.logMessage) state.logMessage(text);
     return Either.right(createString(text));
+  });
+
+  api.set('log-message', (args: TLispValue[]): Either<AppError, TLispValue> => {
+    if (args.length < 2) return Either.left(createValidationError('FormatError', 'log-message requires LEVEL and TEXT'));
+    const levelArg = args[0]!;
+    const rawLevel: string = levelArg.type === 'symbol' ? String(levelArg.value).replace(/^:/, '') : (levelArg.type === 'string' ? String(levelArg.value) : 'info');
+    const text = args.slice(1).map(a => a.type === 'string' ? String(a.value) : String(a.value)).join(' ');
+    const validLevels = ['debug', 'info', 'warn', 'error'];
+    if (!validLevels.includes(rawLevel)) return Either.left(createValidationError('FormatError', `Invalid log level: ${rawLevel}`));
+    if (state.logMessage) state.logMessage(text, rawLevel);
+    if (['info', 'warn', 'error'].includes(rawLevel)) state.statusMessage = text;
+    return Either.right(createString(text));
+  });
+
+  api.set('message-log-level', (_args: TLispValue[]): Either<AppError, TLispValue> => {
+    const log = (state as any)._getMessageLog?.();
+    return Either.right(createString(log?.minLevel ?? 'info'));
+  });
+
+  api.set('set-message-log-level', (args: TLispValue[]): Either<AppError, TLispValue> => {
+    if (args.length < 1) return Either.left(createValidationError('FormatError', 'requires a log level'));
+    const levelArg = args[0]!;
+    const level: string = levelArg.type === 'symbol' ? String(levelArg.value).replace(/^:/, '') : (levelArg.type === 'string' ? String(levelArg.value) : 'info');
+    const validLevels = ['debug', 'info', 'warn', 'error'];
+    if (!validLevels.includes(level)) return Either.left(createValidationError('FormatError', `Invalid log level: ${level}`));
+    const log = (state as any)._getMessageLog?.();
+    if (log) log.minLevel = level as any;
+    return Either.right(createString(level));
+  });
+
+  api.set('message-log-max', (_args: TLispValue[]): Either<AppError, TLispValue> => {
+    const log = (state as any)._getMessageLog?.();
+    return Either.right(createNumber(log?.maxSize ?? 1000));
+  });
+
+  api.set('set-message-log-max', (args: TLispValue[]): Either<AppError, TLispValue> => {
+    if (args.length < 1) return Either.left(createValidationError('FormatError', 'requires a number'));
+    const n: number = args[0]!.type === 'number' ? Number(args[0]!.value) : 0;
+    const log = (state as any)._getMessageLog?.();
+    if (log) log.maxSize = n;
+    return Either.right(createNumber(n));
+  });
+
+  api.set('clear-messages', (_args: TLispValue[]): Either<AppError, TLispValue> => {
+    const log = (state as any)._getMessageLog?.();
+    if (log) {
+      log.clear();
+      state.buffers.set('*Messages*', FunctionalTextBufferImpl.create(''));
+    }
+    return Either.right(createNil());
+  });
+
+  api.set('last-command', (_args: TLispValue[]): Either<AppError, TLispValue> => {
+    return Either.right(createString(state.lastCommand ?? ''));
   });
 
   return api;
