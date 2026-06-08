@@ -90,7 +90,7 @@ export async function handleCommandMode(editor: Editor, key: string, normalizedK
       });
 
       (editor as any).state.statusMessage = `Command error: ${error instanceof Error ? error.message : String(error)}`;
-      (editor as any).logMessage(`Command error: ${error instanceof Error ? error.message : String(error)}`);
+      (editor as any).logMessage(`Command error: ${error instanceof Error ? error.message : String(error)}`, 'error');
     }
 
     // Clear command line and return to normal mode
@@ -105,13 +105,13 @@ export async function handleCommandMode(editor: Editor, key: string, normalizedK
 
     if (!mappings) {
       (editor as any).state.statusMessage = `Unbound key: ${normalizedKey}`;
-      (editor as any).logMessage(`Unbound key: ${normalizedKey}`);
+      (editor as any).logMessage(`Unbound key: ${normalizedKey}`, 'debug');
     } else {
       // Find mapping for command mode
       const mapping = mappings.find((m: any) => !m.mode || m.mode === "command");
       if (!mapping) {
         (editor as any).state.statusMessage = `Unbound key in command mode: ${normalizedKey}`;
-        (editor as any).logMessage(`Unbound key in command mode: ${normalizedKey}`);
+        (editor as any).logMessage(`Unbound key in command mode: ${normalizedKey}`, 'debug');
       } else {
         // Execute the mapped command
         try {
@@ -121,7 +121,7 @@ export async function handleCommandMode(editor: Editor, key: string, normalizedK
             throw new Error("EDITOR_QUIT_SIGNAL"); // Re-throw clean quit signal to main loop
           }
           (editor as any).state.statusMessage = `Command error: ${error instanceof Error ? error.message : String(error)}`;
-          (editor as any).logMessage(`Command error: ${error instanceof Error ? error.message : String(error)}`);
+          (editor as any).logMessage(`Command error: ${error instanceof Error ? error.message : String(error)}`, 'error');
         }
       }
     }

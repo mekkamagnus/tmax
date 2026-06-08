@@ -10,5 +10,5 @@ export async function handleMxMode(editor: Editor, key: string, normalizedKey: s
     ? key
     : normalizedKey;
   const escaped = (editor as any).escapeKeyForTLisp(routedKey);
-  (editor as any).executeCommand(`(minibuffer-dispatch-key "${escaped}")`);
+  await (editor as any).executeCommandAsync(`(minibuffer-dispatch-key "${escaped}")`);
 }
