@@ -54,15 +54,19 @@ export const renderMinibuffer = (
   width: number,
 ): RenderedMinibuffer => {
   const safeWidth = Math.max(1, width);
-  const rows = view.rows.map(row => renderSegments(row.segments, row.selected, safeWidth));
   const promptText = `${view.prompt}${view.input}`;
   const messageSpace = Math.max(1, safeWidth - promptText.length - view.message.length);
   const promptLine = `${promptText}${" ".repeat(messageSpace)}${view.message}`;
-  rows.push(style(Array.from(promptLine).slice(0, safeWidth).join("").padEnd(safeWidth, " "), { fg: "white" }));
+  const lines: string[] = [
+    style(Array.from(promptLine).slice(0, safeWidth).join("").padEnd(safeWidth, " "), { fg: "white" }),
+  ];
+  for (const row of view.rows) {
+    lines.push(renderSegments(row.segments, row.selected, safeWidth));
+  }
 
   return {
-    lines: rows,
-    cursorRow: rows.length - 1,
+    lines,
+    cursorRow: 0,
     cursorColumn: Math.min(safeWidth - 1, view.prompt.length + view.inputPoint),
   };
 };

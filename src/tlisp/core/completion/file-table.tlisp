@@ -63,4 +63,6 @@
       (file-completion-candidates
         (hashmap-get split "dir")
         (hashmap-get split "prefix")))))
+
+(completion-set-category-styles "file" (list "basic" "partial-completion"))
 )
