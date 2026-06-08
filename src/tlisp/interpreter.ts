@@ -3,7 +3,8 @@
  * @description T-Lisp interpreter implementation
  */
 
-import type { TLispInterpreter, TLispEnvironment, TLispValue, TLispFunctionImpl, EvalError } from "./types.ts";
+import type { TLispInterpreter, TLispEnvironment, TLispValue, TLispFunctionImpl, TLispFunctionImplAsync, EvalError } from "./types.ts";
+import { createEvalContext } from "./async.ts";
 import type { EvalError as EvalErrorType } from "../error/types.ts";
 import { TLispParser } from "./parser.ts";
 import { TLispEvaluator, createEvaluatorWithBuiltins } from "./evaluator.ts";
@@ -134,6 +135,11 @@ export class TLispInterpreterImpl implements TLispInterpreter {
     return this.evaluator.eval(expr, evalEnv);
   }
 
+  async evalAsync(expr: TLispValue, env?: TLispEnvironment): Promise<Either<EvalError, TLispValue>> {
+    const evalEnv = env || this.globalEnv;
+    return this.evaluator.evalAsync(expr, evalEnv, createEvalContext());
+  }
+
   /**
    * Execute T-Lisp source code (single expression or multiple expressions)
    * @param source - Source code to execute
@@ -165,6 +171,32 @@ export class TLispInterpreterImpl implements TLispInterpreter {
     return lastResult || Either.right(createNil());
   }
 
+  async executeAsync(source: string, env?: TLispEnvironment, sourceName?: string): Promise<Either<EvalError, TLispValue>> {
+    const evalEnv = env || this.globalEnv;
+    const programResult = this.parser.parseProgram(source, sourceName);
+    if (Either.isLeft(programResult)) {
+      return Either.left({ type: 'EvalError', variant: 'SyntaxError', message: programResult.left.message });
+    }
+
+    const forms = programResult.right;
+    if (forms.length === 0) {
+      return Either.right(createNil());
+    }
+
+    const context = createEvalContext({ sourceName });
+    let lastResult: Either<EvalError, TLispValue> | null = null;
+
+    for (const form of forms) {
+      const evalResult = await this.evaluator.evalAsync(form.value, evalEnv, context);
+      if (Either.isLeft(evalResult)) {
+        return evalResult;
+      }
+      lastResult = evalResult;
+    }
+
+    return lastResult || Either.right(createNil());
+  }
+
   /**
    * Define a built-in function
    * @param name - Function name
@@ -178,6 +210,15 @@ export class TLispInterpreterImpl implements TLispInterpreter {
     // Register builtin function for coverage tracking (US-0.6.6)
     if (isCoverageEnabled()) {
       registerFunction(name, undefined, undefined, true); // Mark as builtin
+    }
+  }
+
+  defineAsyncBuiltin(name: string, fn: TLispFunctionImpl, asyncFn: TLispFunctionImplAsync): void {
+    const func = createFunction(fn, name, asyncFn);
+    this.builtinsEnv.define(name, func);
+
+    if (isCoverageEnabled()) {
+      registerFunction(name, undefined, undefined, true);
     }
   }
 

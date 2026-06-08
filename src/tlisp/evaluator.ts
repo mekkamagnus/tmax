@@ -3,7 +3,7 @@
  * @description T-Lisp evaluator implementation with functional error handling
  */
 
-import type { TLispValue, TLispEnvironment, TLispFunction, TLispList, TLispMacro, ModuleImport } from "./types.ts";
+import type { EvalContext, TLispValue, TLispEnvironment, TLispFunction, TLispList, TLispMacro, ModuleImport } from "./types.ts";
 import { TLispEnvironmentImpl } from "./environment.ts";
 import type { ModuleRegistry, ModuleRecord } from "./module-registry.ts";
 import {
@@ -18,6 +18,7 @@ import {
   isNil,
   isTruthy,
   isMacro,
+  isPromise,
   valuesEqual,
   valueToString
 } from "./values.ts";
@@ -30,6 +31,7 @@ import { registerFunction, markFunctionCovered, isCoverageEnabled } from "./test
 import { DebugState } from "./debug-state.ts";
 import { createDiagnostic, type TLispDiagnostic } from "./diagnostics.ts";
 import { getSourceSpan } from "./source-metadata.ts";
+import { awaitIfPromise, createEvalContext, withAsyncMode } from "./async.ts";
 
 
 /**
@@ -235,6 +237,34 @@ export class TLispEvaluator {
 
     return Either.right(currentResult);
   }
+
+  async evalAsync(expr: TLispValue, env: TLispEnvironment, context: EvalContext = createEvalContext()): Promise<Either<EvalError, TLispValue>> {
+    const result = await this.evalInternalAsync(expr, env, context);
+    if (Either.isLeft(result)) {
+      return result;
+    }
+
+    let currentResult: EvalResult = result.right;
+    while (isTailCall(currentResult)) {
+      const tailCall = currentResult as TailCall;
+      const callResult = await this.evalFunctionCallAsync(
+        [tailCall.funcExpr, ...tailCall.argExprs],
+        tailCall.env,
+        context,
+        false
+      );
+      if (Either.isLeft(callResult)) {
+        return callResult;
+      }
+      currentResult = callResult.right;
+    }
+
+    const resolved = await awaitIfPromise(currentResult);
+    if (Either.isLeft(resolved)) {
+      return Either.left(resolved.left as EvalError);
+    }
+    return Either.right(resolved.right);
+  }
   
   /**
    * Internal evaluation method that can return tail calls
@@ -249,6 +279,7 @@ export class TLispEvaluator {
       case "boolean":
       case "number":
       case "string":
+      case "promise":
         // Self-evaluating literals
         return Either.right(expr);
 
@@ -261,6 +292,31 @@ export class TLispEvaluator {
       case "function":
         return Either.right(expr);
 
+      default:
+        return Either.left(this.makeError('SyntaxError', 'TL0001', `Unknown expression type: ${(expr as any).type}`, {
+          details: { exprType: (expr as any).type },
+        }));
+    }
+  }
+
+  private async evalInternalAsync(
+    expr: TLispValue,
+    env: TLispEnvironment,
+    context: EvalContext,
+    inTailPosition: boolean = false
+  ): Promise<Either<EvalError, EvalResult>> {
+    switch (expr.type) {
+      case "nil":
+      case "boolean":
+      case "number":
+      case "string":
+      case "function":
+      case "promise":
+        return Either.right(expr);
+      case "symbol":
+        return this.evalSymbol(expr, env);
+      case "list":
+        return this.evalListAsync(expr, env, context, inTailPosition);
       default:
         return Either.left(this.makeError('SyntaxError', 'TL0001', `Unknown expression type: ${(expr as any).type}`, {
           details: { exprType: (expr as any).type },
@@ -523,6 +579,90 @@ export class TLispEvaluator {
 
     // Function call - evaluate first element as function
     return this.evalFunctionCall(elements, env, inTailPosition);
+  }
+
+  private async evalListAsync(
+    list: TLispValue,
+    env: TLispEnvironment,
+    context: EvalContext,
+    inTailPosition: boolean = false
+  ): Promise<Either<EvalError, EvalResult>> {
+    const elements = list.value as TLispValue[];
+
+    if (elements.length === 0) {
+      return Either.right(createList([]));
+    }
+
+    const first = elements[0];
+    if (!first) {
+      return Either.left({
+        type: 'EvalError',
+        variant: 'SyntaxError',
+        message: "Empty list cannot be evaluated",
+        details: { elements }
+      });
+    }
+
+    if (first.type === "symbol") {
+      const symbol = first.value as string;
+
+      switch (symbol) {
+        case "quote":
+          return this.evalQuote(elements, env);
+        case "quasiquote":
+          return this.evalQuasiquote(elements, env);
+        case "unquote":
+          return Either.left({
+            type: 'EvalError',
+            variant: 'SyntaxError',
+            message: "unquote can only be used inside quasiquote",
+            details: { symbol }
+          });
+        case "unquote-splicing":
+          return Either.left({
+            type: 'EvalError',
+            variant: 'SyntaxError',
+            message: "unquote-splicing can only be used inside quasiquote",
+            details: { symbol }
+          });
+        case "if":
+          return this.evalIfAsync(elements, env, context, inTailPosition);
+        case "let":
+          return this.evalLetAsync(elements, env, context, inTailPosition, false);
+        case "async-let":
+          return this.evalLetAsync(elements, env, withAsyncMode(context), inTailPosition, true);
+        case "lambda":
+          return this.evalLambda(elements, env);
+        case "defun":
+          return this.evalDefun(elements, env);
+        case "cond":
+          return this.evalCondAsync(elements, env, context, inTailPosition);
+        case "progn":
+          return this.evalPrognAsync(elements, env, context, inTailPosition);
+        case "defmacro":
+        case "deftest":
+        case "deftest-async":
+        case "deftest-suite":
+        case "suite-setup":
+        case "suite-teardown":
+        case "setup":
+        case "teardown":
+        case "deffixture":
+        case "use-fixtures":
+        case "defvar":
+        case "defmodule":
+        case "require-module":
+        case "current-module":
+        case "set!":
+        case "assert-type":
+        case "assert-error":
+          return this.evalList(list, env, inTailPosition);
+        default:
+          return this.evalFunctionCallAsync(elements, env, context, inTailPosition);
+      }
+    }
+
+    return this.evalFunctionCallAsync(elements, env, context, inTailPosition);
   }
 
   /**
@@ -857,6 +997,47 @@ export class TLispEvaluator {
     }
   }
 
+  private async evalIfAsync(
+    elements: TLispValue[],
+    env: TLispEnvironment,
+    context: EvalContext,
+    inTailPosition: boolean = false
+  ): Promise<Either<EvalError, EvalResult>> {
+    if (elements.length !== 4) {
+      return Either.left({
+        type: 'EvalError',
+        variant: 'SyntaxError',
+        message: "if requires exactly 3 arguments: condition, then-expr, else-expr",
+        details: { expected: 4, actual: elements.length }
+      });
+    }
+
+    const conditionExpr = elements[1];
+    const thenExpr = elements[2];
+    const elseExpr = elements[3];
+
+    if (!conditionExpr || !thenExpr || !elseExpr) {
+      return Either.left({
+        type: 'EvalError',
+        variant: 'SyntaxError',
+        message: "if missing required arguments",
+        details: { hasCondition: !!conditionExpr, hasThen: !!thenExpr, hasElse: !!elseExpr }
+      });
+    }
+
+    const conditionResult = await this.evalAsync(conditionExpr, env, context);
+    if (Either.isLeft(conditionResult)) {
+      return conditionResult;
+    }
+
+    return this.evalInternalAsync(
+      isTruthy(conditionResult.right) ? thenExpr : elseExpr,
+      env,
+      context,
+      inTailPosition
+    );
+  }
+
   /**
    * Evaluate let special form
    * @param elements - List elements
@@ -952,6 +1133,101 @@ export class TLispEvaluator {
 
     // Evaluate body in new environment
     return this.evalInternal(body, letEnv, inTailPosition);
+  }
+
+  private async evalLetAsync(
+    elements: TLispValue[],
+    env: TLispEnvironment,
+    context: EvalContext,
+    inTailPosition: boolean = false,
+    allowMultipleBody: boolean = false
+  ): Promise<Either<EvalError, EvalResult>> {
+    if ((!allowMultipleBody && elements.length !== 3) || (allowMultipleBody && elements.length < 3)) {
+      return Either.left({
+        type: 'EvalError',
+        variant: 'SyntaxError',
+        message: `${elements[0]?.type === "symbol" ? elements[0].value : "let"} requires bindings and body`,
+        details: { actual: elements.length }
+      });
+    }
+
+    const bindings = elements[1];
+    if (!bindings) {
+      return Either.left({
+        type: 'EvalError',
+        variant: 'SyntaxError',
+        message: "let missing bindings",
+        details: { hasBindings: false }
+      });
+    }
+
+    if (bindings.type !== "list") {
+      return Either.left({
+        type: 'EvalError',
+        variant: 'TypeError',
+        message: "let bindings must be a list",
+        details: { bindingsType: bindings.type }
+      });
+    }
+
+    const bodyExprs = allowMultipleBody ? elements.slice(2) : [elements[2]!];
+    if (bodyExprs.length === 0 || !bodyExprs[0]) {
+      return Either.left({
+        type: 'EvalError',
+        variant: 'SyntaxError',
+        message: "let missing body",
+        details: { hasBody: false }
+      });
+    }
+
+    const letEnv = new TLispEnvironmentImpl(env);
+    const bindingList = bindings.value as TLispValue[];
+
+    for (const binding of bindingList) {
+      if (binding.type !== "list") {
+        return Either.left({
+          type: 'EvalError',
+          variant: 'TypeError',
+          message: "let binding must be a list",
+          details: { bindingType: binding.type }
+        });
+      }
+
+      const bindingElements = binding.value as TLispValue[];
+      if (bindingElements.length !== 2) {
+        return Either.left({
+          type: 'EvalError',
+          variant: 'SyntaxError',
+          message: "let binding must have exactly 2 elements: name and value",
+          details: { expected: 2, actual: bindingElements.length }
+        });
+      }
+
+      const name = bindingElements[0];
+      const value = bindingElements[1];
+      if (!name || !value || name.type !== "symbol") {
+        return Either.left({
+          type: 'EvalError',
+          variant: 'TypeError',
+          message: "let binding name must be a symbol",
+          details: { nameType: name?.type }
+        });
+      }
+
+      const evaluatedValueResult = await this.evalAsync(value, env, context);
+      if (Either.isLeft(evaluatedValueResult)) {
+        return evaluatedValueResult;
+      }
+
+      const resolved = await awaitIfPromise(evaluatedValueResult.right);
+      if (Either.isLeft(resolved)) {
+        return Either.left(resolved.left as EvalError);
+      }
+
+      letEnv.define(name.value as string, resolved.right);
+    }
+
+    return this.evalPrognAsync([createSymbol("progn"), ...bodyExprs], letEnv, context, inTailPosition);
   }
 
   /**
@@ -1086,7 +1362,51 @@ export class TLispEvaluator {
       return result;
     };
 
-    const funcValue = createFunction(lambdaFunction);
+    const asyncLambdaFunction = async (args: TLispValue[], context: EvalContext): Promise<Either<EvalError, TLispValue>> => {
+      if (args.length < requiredParams.length || args.length > lambdaParams.length) {
+        return Either.left({
+          type: 'EvalError',
+          variant: 'RuntimeError',
+          message: `lambda expects ${requiredParams.length}-${lambdaParams.length} arguments, got ${args.length}`,
+          details: { expectedMin: requiredParams.length, expectedMax: lambdaParams.length, actual: args.length, args }
+        });
+      }
+
+      const callEnv = new TLispEnvironmentImpl(env);
+
+      for (let i = 0; i < lambdaParams.length; i++) {
+        const param = lambdaParams[i];
+        if (!param) {
+          return Either.left({
+            type: 'EvalError',
+            variant: 'RuntimeError',
+            message: "lambda parameter or argument missing",
+            details: { paramIndex: i, hasParam: !!param }
+          });
+        }
+
+        const supplied = i < args.length;
+        let arg = args[i];
+        if (!supplied) {
+          if (param.defaultExpr) {
+            const defaultResult = await this.evalAsync(param.defaultExpr, callEnv, context);
+            if (Either.isLeft(defaultResult)) return defaultResult;
+            arg = defaultResult.right;
+          } else {
+            arg = createNil();
+          }
+        }
+
+        callEnv.define(param.name, arg ?? createNil());
+        if (param.suppliedName) {
+          callEnv.define(param.suppliedName, createBoolean(supplied));
+        }
+      }
+
+      return this.evalAsync(body, callEnv, context);
+    };
+
+    const funcValue = createFunction(lambdaFunction, undefined, asyncLambdaFunction);
     
     // Add metadata to the function
     if (docstring) {
@@ -1349,6 +1669,70 @@ export class TLispEvaluator {
     }
 
     // No condition matched, return nil
+    return Either.right(createNil());
+  }
+
+  private async evalCondAsync(
+    elements: TLispValue[],
+    env: TLispEnvironment,
+    context: EvalContext,
+    inTailPosition: boolean = false
+  ): Promise<Either<EvalError, EvalResult>> {
+    if (elements.length < 2) {
+      return Either.left({
+        type: 'EvalError',
+        variant: 'SyntaxError',
+        message: "cond requires at least 1 clause",
+        details: { expectedMin: 2, actual: elements.length }
+      });
+    }
+
+    for (let i = 1; i < elements.length; i++) {
+      const clause = elements[i];
+      if (!clause || clause.type !== "list") {
+        return Either.left({
+          type: 'EvalError',
+          variant: 'TypeError',
+          message: "cond clause must be a list",
+          details: { clauseType: clause?.type, clauseIndex: i }
+        });
+      }
+
+      const clauseElements = clause.value as TLispValue[];
+      if (clauseElements.length !== 2) {
+        return Either.left({
+          type: 'EvalError',
+          variant: 'SyntaxError',
+          message: "cond clause must have exactly 2 elements: condition and expression",
+          details: { expected: 2, actual: clauseElements.length, clauseIndex: i }
+        });
+      }
+
+      const condition = clauseElements[0];
+      const expression = clauseElements[1];
+      if (!condition || !expression) {
+        return Either.left({
+          type: 'EvalError',
+          variant: 'SyntaxError',
+          message: "cond clause missing condition or expression",
+          details: { clauseIndex: i, hasCondition: !!condition, hasExpression: !!expression }
+        });
+      }
+
+      if (condition.type === "symbol" && condition.value === "t") {
+        return this.evalInternalAsync(expression, env, context, inTailPosition);
+      }
+
+      const conditionResult = await this.evalAsync(condition, env, context);
+      if (Either.isLeft(conditionResult)) {
+        return conditionResult;
+      }
+
+      if (isTruthy(conditionResult.right)) {
+        return this.evalInternalAsync(expression, env, context, inTailPosition);
+      }
+    }
+
     return Either.right(createNil());
   }
 
@@ -1755,7 +2139,7 @@ export class TLispEvaluator {
 
     if (func.type === "function") {
       const functionImpl = func.value as (args: TLispValue[]) => Either<EvalError, TLispValue> | TLispValue;
-      let result: Either<EvalError, TLispValue> | TLispValue;
+      let result: Either<any, TLispValue> | TLispValue;
       try {
         result = functionImpl(args);
       } catch (err) {
@@ -1773,6 +2157,124 @@ export class TLispEvaluator {
 
       // Wrap direct TLispValue returns in Either.right
       return Either.right(result);
+    }
+
+    if (func.type === "macro") {
+      return Either.left(this.makeError('RuntimeError', 'TL3001', "Macro cannot be called as function - this should be handled in evalFunctionCall", {
+        details: { args },
+      }));
+    }
+
+    return Either.left(this.makeError('TypeError', 'TL1002', `Cannot call non-function: ${func.type}`, {
+      details: { funcType: func.type, args },
+      expected: "function",
+      actual: func.type,
+    }));
+  }
+
+  private async evalFunctionCallAsync(
+    elements: TLispValue[],
+    env: TLispEnvironment,
+    context: EvalContext,
+    inTailPosition: boolean = false
+  ): Promise<Either<EvalError, EvalResult>> {
+    const funcExpr = elements[0];
+    if (!funcExpr) {
+      return Either.left(this.makeError('RuntimeError', 'TL4001', "Function call missing function expression", {
+        details: { elements },
+      }));
+    }
+
+    const argExprs = elements.slice(1);
+
+    if (funcExpr.type === "symbol") {
+      const symbolName = funcExpr.value as string;
+      const value = env.lookup(symbolName);
+      if (value && isMacro(value)) {
+        const macroImpl = value.value as (args: TLispValue[]) => Either<EvalError, TLispValue>;
+        const expandedResult = macroImpl(argExprs);
+        if (Either.isLeft(expandedResult)) {
+          return expandedResult;
+        }
+
+        return this.evalInternalAsync(expandedResult.right, env, context, inTailPosition);
+      }
+    }
+
+    const funcResult = await this.evalAsync(funcExpr, env, context);
+    if (Either.isLeft(funcResult)) {
+      return funcResult;
+    }
+
+    const argValues: TLispValue[] = [];
+    for (const expr of argExprs) {
+      const argResult = await this.evalAsync(expr, env, context);
+      if (Either.isLeft(argResult)) {
+        return argResult;
+      }
+
+      const resolved = await awaitIfPromise(argResult.right);
+      if (Either.isLeft(resolved)) {
+        return Either.left(resolved.left as EvalError);
+      }
+      argValues.push(resolved.right);
+    }
+
+    if (isCoverageEnabled() && funcExpr.type === "symbol") {
+      markFunctionCovered(funcExpr.value as string);
+    }
+
+    const frameName = funcExpr.type === "symbol" ? funcExpr.value as string : "<anonymous>";
+    this.debugState.pushFrame(frameName, getSourceSpan(funcExpr));
+    const callResult = await this.evalFunctionCallInternalAsync(funcResult.right, argValues, env, context);
+    this.debugState.popFrame();
+    return callResult;
+  }
+
+  private async evalFunctionCallInternalAsync(
+    func: TLispValue,
+    args: TLispValue[],
+    env: TLispEnvironment,
+    context: EvalContext
+  ): Promise<Either<EvalError, EvalResult>> {
+    if (!func) {
+      return Either.left(this.makeError('RuntimeError', 'TL4001', "Function call missing function", {
+        details: { args },
+      }));
+    }
+
+    if (func.type === "function") {
+      const functionValue = func as TLispFunction;
+      let result: Either<any, TLispValue> | TLispValue;
+      try {
+        if (functionValue.asyncValue) {
+          result = await functionValue.asyncValue(args, context);
+        } else {
+          result = functionValue.value(args, context);
+        }
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        return Either.left(this.makeError('RuntimeError', 'TL4001', msg, {
+          details: { error: msg },
+        }));
+      }
+
+      if (result && typeof result === 'object' && '_tag' in result) {
+        if (Either.isLeft(result as Either<EvalError, TLispValue>)) {
+          return Either.left((result as any).left as EvalError);
+        }
+        const resolved = await awaitIfPromise((result as { right: TLispValue }).right);
+        if (Either.isLeft(resolved)) {
+          return Either.left(resolved.left as EvalError);
+        }
+        return Either.right(resolved.right);
+      }
+
+      const resolved = await awaitIfPromise(result as TLispValue);
+      if (Either.isLeft(resolved)) {
+        return Either.left(resolved.left as EvalError);
+      }
+      return Either.right(resolved.right);
     }
 
     if (func.type === "macro") {
@@ -2586,6 +3088,52 @@ export class TLispEvaluator {
     }
 
     return lastResult;
+  }
+
+  private async evalPrognAsync(
+    elements: TLispValue[],
+    env: TLispEnvironment,
+    context: EvalContext,
+    inTailPosition: boolean = false
+  ): Promise<Either<EvalError, EvalResult>> {
+    const bodyExprs = elements.slice(1);
+
+    if (bodyExprs.length === 0) {
+      return Either.right(createNil());
+    }
+
+    let lastResult: Either<EvalError, EvalResult> = Either.right(createNil());
+
+    for (let i = 0; i < bodyExprs.length; i++) {
+      const expr = bodyExprs[i]!;
+      const isInTailPosition = inTailPosition && (i === bodyExprs.length - 1);
+      lastResult = await this.evalInternalAsync(expr, env, context, isInTailPosition);
+      if (Either.isLeft(lastResult)) {
+        return lastResult;
+      }
+
+      if (i < bodyExprs.length - 1) {
+        if (isTailCall(lastResult.right)) {
+          return lastResult;
+        }
+        const resolved = await awaitIfPromise(lastResult.right);
+        if (Either.isLeft(resolved)) {
+          return Either.left(resolved.left as EvalError);
+        }
+      }
+    }
+
+    if (Either.isLeft(lastResult)) {
+      return lastResult;
+    }
+    if (isTailCall(lastResult.right)) {
+      return lastResult;
+    }
+    const resolved = await awaitIfPromise(lastResult.right);
+    if (Either.isLeft(resolved)) {
+      return Either.left(resolved.left as EvalError);
+    }
+    return Either.right(resolved.right);
   }
 }
 
@@ -4117,8 +4665,12 @@ export const createEvaluatorWithBuiltins = (moduleRegistry?: ModuleRegistry): { 
     defineBuiltin: (name: string, fn: any) => {
       builtinsEnv.define(name, createFunction(fn, name));
     },
+    defineAsyncBuiltin: (name: string, fn: any, asyncFn: any) => {
+      builtinsEnv.define(name, createFunction(fn, name, asyncFn));
+    },
     globalEnv, // User globalEnv — test envs chain up to see both globalEnv and builtinsEnv
     eval: (expr: TLispValue, evalEnv: TLispEnvironment = globalEnv) => evaluator.eval(expr, evalEnv),
+    evalAsync: (expr: TLispValue, evalEnv: TLispEnvironment = globalEnv) => evaluator.evalAsync(expr, evalEnv),
     execute: (source: string, evalEnv: TLispEnvironment = globalEnv) => {
       const parser = new TLispParser();
       const result = parser.parse(source);

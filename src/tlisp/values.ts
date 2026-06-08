@@ -13,9 +13,11 @@ import type {
   TLispList,
   TLispFunction,
   TLispFunctionImpl,
+  TLispFunctionImplAsync,
   TLispMacro,
   TLispMacroImpl,
   TLispHashmap,
+  TLispPromise,
 } from "./types.ts";
 
 /**
@@ -85,12 +87,38 @@ export const createList = (values: TLispValue[]): TLispList => ({
  */
 export const createFunction = (
   fn: TLispFunctionImpl,
-  name?: string
+  name?: string,
+  asyncFn?: TLispFunctionImplAsync
 ): TLispFunction => ({
   type: "function",
   value: fn,
+  asyncValue: asyncFn,
   name,
 });
+
+/**
+ * Create a T-Lisp promise value.
+ */
+export const createPromise = (promise: Promise<TLispValue>): TLispPromise => {
+  const value: TLispPromise = {
+    type: "promise",
+    value: promise,
+    resolved: false,
+  };
+
+  promise.then(
+    (result) => {
+      value.resolved = true;
+      value.result = result;
+    },
+    (error) => {
+      value.resolved = true;
+      value.error = error;
+    }
+  );
+
+  return value;
+};
 
 /**
  * Create a T-Lisp macro value
@@ -147,6 +175,15 @@ export const isMacro = (value: TLispValue): value is TLispMacro => {
 };
 
 /**
+ * Check if value is a promise
+ * @param value - Value to check
+ * @returns True if promise
+ */
+export const isPromise = (value: TLispValue): value is TLispPromise => {
+  return value.type === "promise";
+};
+
+/**
  * Check if value is truthy in T-Lisp
  * @param value - Value to check
  * @returns True if truthy
@@ -187,6 +224,8 @@ export const valueToString = (value: TLispValue): string => {
       return `#<function${(value as TLispFunction).name ? ` ${(value as TLispFunction).name}` : ""}>`;
     case "macro":
       return `#<macro${(value as TLispMacro).name ? ` ${(value as TLispMacro).name}` : ""}>`;
+    case "promise":
+      return `#<promise ${(value as TLispPromise).resolved ? "resolved" : "pending"}>`;
     default:
       return `#<unknown>`;
   }
@@ -225,6 +264,8 @@ export const valuesEqual = (a: TLispValue, b: TLispValue): boolean => {
       return true;
     case "function":
       return a.value === b.value;
+    case "promise":
+      return a === b;
     default:
       return false;
   }
