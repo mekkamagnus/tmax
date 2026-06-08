@@ -1,0 +1,60 @@
+name: buffers
+description: "Demonstrates buffer management — multiple buffers, switching, listing, and *Messages* read-only guard."
+speed: 1.0
+
+setup:
+  - action: setup_file
+    var: FILE_A
+    name: buf-a.txt
+    content: |
+      This is buffer A
+      Line 2 of A
+
+  - action: setup_file
+    var: FILE_B
+    name: buf-b.txt
+    content: |
+      This is buffer B
+      Line 2 of B
+
+steps:
+  - section: Multiple buffers
+    narrate: "Opening first file (buffer A)"
+    action: open
+    file: "${FILE_A}"
+    pause: 1.0
+
+  - narrate: "Opening second file (buffer B)"
+    action: open
+    file: "${FILE_B}"
+    pause: 1.0
+
+  - narrate: "Listing all buffers"
+    action: eval
+    expr: "(buffer-list)"
+    pause: 0.5
+
+  - section: Buffer switching
+    narrate: "Switching back to buffer A"
+    action: eval
+    expr: "(buffer-switch \"${FILE_A}\")"
+    pause: 0.8
+
+  - narrate: "Switching to buffer B"
+    action: eval
+    expr: "(buffer-switch \"${FILE_B}\")"
+    pause: 0.8
+
+  - section: "*Messages* buffer"
+    narrate: "Switching to *Messages*"
+    action: eval
+    expr: '(buffer-switch "*Messages*")'
+    pause: 1.0
+
+  - narrate: "Attempting insert into read-only buffer (should fail)"
+    action: eval
+    expr: '(buffer-insert "hacked!")'
+    expect_error: true
+    pause: 0.5
+
+cleanup: true

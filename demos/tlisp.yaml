@@ -1,0 +1,86 @@
+name: tlisp
+description: "Demonstrates the T-Lisp interpreter — arithmetic, strings, lists, variables, functions, and editor API."
+speed: 1.0
+
+steps:
+  - section: Arithmetic
+    narrate: "Addition: (+ 1 2)"
+    action: eval
+    expr: "(+ 1 2)"
+    pause: 0.3
+
+  - narrate: "Chained arithmetic: (+ (* 3 4) (- 10 5))"
+    action: eval
+    expr: "(+ (* 3 4) (- 10 5))"
+    pause: 0.3
+
+  - section: Strings
+    narrate: "String concatenation"
+    action: eval
+    expr: '(concat "hello" " " "world")'
+    pause: 0.3
+
+  - narrate: "String length"
+    action: eval
+    expr: '(length "tmax")'
+    pause: 0.3
+
+  - section: Lists
+    narrate: "List creation"
+    action: eval
+    expr: "(list 1 2 3)"
+    pause: 0.3
+
+  - narrate: "Mapping over a list"
+    action: eval
+    expr: "(mapcar (lambda (x) (+ x 10)) (list 1 2 3))"
+    pause: 0.3
+
+  - section: Variables and functions
+    narrate: "Defining a variable with setq"
+    action: eval
+    expr: "(setq 'x 42)"
+    pause: 0.3
+
+  - narrate: "Reading the variable"
+    action: eval
+    expr: "x"
+    pause: 0.3
+
+  - narrate: "Defining and calling a function"
+    action: eval
+    expr: "(defun square (n) (* n n))"
+    pause: 0.3
+
+  - action: eval
+    expr: "(square 7)"
+    pause: 0.3
+
+  - narrate: "Let-binding for local scope"
+    action: eval
+    expr: "(let ((a 3) (b 4)) (+ (* a a) (* b b)))"
+    pause: 0.3
+
+  - section: Editor API
+    narrate: "Cursor position"
+    action: eval
+    expr: "(cursor-position)"
+    pause: 0.3
+
+  - narrate: "Editor mode"
+    action: eval
+    expr: "(editor-mode)"
+    pause: 0.3
+
+  - section: Error handling
+    narrate: "Undefined symbol error"
+    action: eval
+    expr: "(this-does-not-exist)"
+    expect_error: true
+    pause: 0.3
+
+  - narrate: "Type error"
+    action: eval
+    expr: '(+ "string" 5)'
+    expect_error: true
+    pause: 0.3
