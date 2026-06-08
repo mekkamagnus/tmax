@@ -23,18 +23,24 @@ export default function Navbar() {
         </a>
         <div className="flex items-center gap-8">
           <a
+            href="#features"
+            className="text-sm text-zinc-400 hover:text-white transition-colors"
+          >
+            Features
+          </a>
+          <a
+            href="/docs"
+            className="text-sm text-zinc-400 hover:text-white transition-colors"
+          >
+            Docs
+          </a>
+          <a
             href="https://github.com/mekkamagnus/tmax"
             target="_blank"
             rel="noopener noreferrer"
             className="text-sm text-zinc-400 hover:text-white transition-colors"
           >
             GitHub
-          </a>
-          <a
-            href="#features"
-            className="text-sm text-zinc-400 hover:text-white transition-colors"
-          >
-            Features
           </a>
           <a
             href="#install"
