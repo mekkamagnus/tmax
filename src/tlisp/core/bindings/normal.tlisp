@@ -17,6 +17,8 @@
 
   (require-module editor/completion)
   (require-module editor/completion/orderless)
+  (require-module editor/completion/basic)
+  (require-module editor/completion/partial-completion)
   (require-module editor/completion/marginalia)
   (require-module editor/completion/file-table)
   (require-module editor/completion/vertico)

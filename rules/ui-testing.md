@@ -148,6 +148,39 @@ cleanup(state)                        # Cleanup at end
 8. Treat query failures as failures and report skips/expected failures separately.
 9. Thread state explicitly and collect immutable assertion results.
 
+### Capture-Based Renderer Testing
+
+The daemon's `capture` RPC renders the current frame server-side, returning ANSI or HTML without needing tmux. This is faster and more reliable than tmux screen-scraping for visual assertions.
+
+**When to use `--capture` vs tmux:**
+- Use `--capture` (ANSI) to assert specific text, ANSI color codes, or status line content is present in rendered output
+- Use `--capture-html` to produce browser-viewable output for manual review or screenshot diffs
+- Use `daemon-tmux` only when you need to verify the actual terminal rendering pipeline (cursor position, scroll, resize)
+
+**Example: asserting the status line via capture:**
+```python
+import json, subprocess
+
+result = subprocess.run(
+    ["bun", "bin/tmaxclient", "-s", socket, "--capture"],
+    capture_output=True, text=True,
+)
+lines = result.stdout.strip().split("\n")
+status_line = lines[-1]  # last line is always the status line
+# Strip ANSI for text assertions
+stripped = re.sub(r'\x1b\[[0-9;]*m', '', status_line)
+assert "--NORMAL--" in stripped
+assert "L1 C1" in stripped
+```
+
+**Example: asserting syntax highlighting colors via capture:**
+```python
+# Check that keywords have the expected 24-bit color code
+assert "38;2;198;120;221" in result.stdout  # purple for keywords
+```
+
+The Bun test suite in `test/unit/daemon-capture-parity.test.ts` exercises this pattern — start daemon, connect frame, open file, capture ANSI/HTML, assert colors.
+
 ### Troubleshooting
 
 - **Never kill a shared tmux session or default user daemon.**

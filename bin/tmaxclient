@@ -190,9 +190,9 @@ class TmaxClient {
   /**
    * Evaluate T-Lisp code
    */
-  async eval(code: string): Promise<any> {
+  async eval(code: string, extraParams?: Record<string, any>): Promise<any> {
     try {
-      return await this.sendRequest('eval', { code });
+      return await this.sendRequest('eval', { code, ...extraParams });
     } catch (error) {
       console.error(`Error evaluating code:`, error);
       process.exit(1);
@@ -306,6 +306,8 @@ Options:
   --since-request ID     Filter diagnostics to a specific request ID
   --last-error           Show the last T-Lisp error with full diagnostic
   --backtrace            Show the T-Lisp backtrace from the last error
+  --capture              Capture current frame as ANSI (colors preserved)
+  --capture-html         Capture current frame as standalone HTML
   --list-buffers         List all buffers
   --kill-buffer NAME     Kill specific buffer
   --insert TEXT          Insert text at cursor
@@ -366,6 +368,8 @@ Examples:
   let showDiagnostics = args.includes('--diagnostics');
   let showLastError = args.includes('--last-error');
   let showBacktrace = args.includes('--backtrace');
+  let captureAnsi = args.includes('--capture');
+  let captureHtml = args.includes('--capture-html');
   let keyArg: string | undefined;
   let keysArg: string | undefined;
   let commandArg: string | undefined;
@@ -539,7 +543,13 @@ Examples:
   } else if (showMessages) {
     const result = await client.query('messages');
     if (result && result.messages) {
-      result.messages.forEach((msg: string) => console.log(msg));
+      result.messages.forEach((msg: any) => {
+        if (typeof msg === 'string') {
+          console.log(msg);
+        } else {
+          console.log(msg);
+        }
+      });
     }
   } else if (listBuffers) {
     const buffers = await client.executeCommand('list-buffers');
@@ -560,12 +570,16 @@ Examples:
     }
   } else if (insertText) {
     // Use the insert method to add text to the buffer
-    const result = await client.sendRequest('insert', { text: insertText });
+    const insertParams: any = { text: insertText };
+    if (frameTarget) insertParams.frameId = frameTarget;
+    const result = await client.sendRequest('insert', insertParams);
     console.log(result);
   } else if (insertStdin) {
     // Read from stdin and insert
     const stdin = await readStdin();
-    const result = await client.sendRequest('insert', { text: stdin });
+    const insertParams: any = { text: stdin };
+    if (frameTarget) insertParams.frameId = frameTarget;
+    const result = await client.sendRequest('insert', insertParams);
     console.log(result);
   } else if (scriptFile) {
     // Read the script file and evaluate it
@@ -689,8 +703,20 @@ Examples:
     } catch {
       console.log('No backtrace available.');
     }
+  } else if (captureAnsi || captureHtml) {
+    const format = captureHtml ? 'html' : 'ansi';
+    const result = await client.sendRequest('capture', { format });
+    if (captureHtml) {
+      process.stdout.write(result.html);
+    } else {
+      for (const line of result.lines) {
+        process.stdout.write(line + '\n');
+      }
+    }
   } else if (evalCode) {
-    const result = await client.eval(evalCode);
+    const evalParams: any = {};
+    if (frameTarget) evalParams.frameId = frameTarget;
+    const result = await client.eval(evalCode, evalParams);
     if (result !== undefined) {
       console.log(typeof result === 'object' ? JSON.stringify(result) : result);
     }

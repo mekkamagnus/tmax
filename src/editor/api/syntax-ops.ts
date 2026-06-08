@@ -32,6 +32,8 @@ import { rules as tsRules } from "../../syntax/languages/typescript.ts";
 import { rules as pyRules } from "../../syntax/languages/python.ts";
 import { rules as lispRules } from "../../syntax/languages/lisp.ts";
 import { rules as goRules } from "../../syntax/languages/go.ts";
+import { rules as cRules } from "../../syntax/languages/c.ts";
+import { rules as clojureRules } from "../../syntax/languages/clojure.ts";
 
 /**
  * Language name -> syntax rules
@@ -45,6 +47,11 @@ const languageRules: Map<string, SyntaxRule[]> = new Map([
   ["lisp", lispRules],
   ["tlisp", lispRules],
   ["go", goRules],
+  ["c", cRules],
+  ["cpp", cRules],
+  ["h", cRules],
+  ["clojure", clojureRules],
+  ["clj", clojureRules],
 ]);
 
 /**
@@ -192,7 +199,8 @@ export function createSyntaxOps(
 
     const rules = languageRules.get(activeLanguage)!;
     const lineText = getLine(lineNum);
-    const tokens = tokenize(lineText, lineNum, rules);
+    const result = tokenize(lineText, lineNum, rules);
+    const tokens = Array.isArray(result) ? result : (result as any).tokens ?? [];
 
     // Convert tokens to T-Lisp lists: (type value line startCol endCol)
     const tokenValues = tokens.map((t: SyntaxToken) =>
@@ -275,7 +283,8 @@ export function createSyntaxOps(
 
     const rules = languageRules.get(activeLanguage)!;
     const lineText = getLine(lineNum);
-    const tokens = tokenize(lineText, lineNum, rules);
+    const result = tokenize(lineText, lineNum, rules);
+    const tokens = Array.isArray(result) ? result : (result as any).tokens ?? [];
     const spans = highlightLine(tokens);
 
     // Convert spans to T-Lisp: (start end style-alist)
