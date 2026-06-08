@@ -8,6 +8,8 @@ import { renderTabBarAnsi } from "../../render/tab-bar.ts";
 import { Input } from "./input.ts";
 import { Screen } from "./screen.ts";
 import { renderMinibuffer } from "../../render/minibuffer.ts";
+import { computeHighlightSpans } from "../../../syntax/highlight-buffer.ts";
+import { Either } from "../../../utils/task-either.ts";
 
 export class SteepFrontend implements Frontend {
   async run(editor: EditorClass, initialState: EditorState): Promise<void> {
@@ -34,7 +36,15 @@ export class SteepFrontend implements Frontend {
       const minibuffer = state.minibufferView ? renderMinibuffer(state.minibufferView, width) : undefined;
       const commandHeight = minibuffer?.lines.length ?? ((state.mode === "command" || state.mode === "mx") ? 1 : 0);
       const bufferHeight = Math.max(1, height - 1 - commandHeight - tabBarHeight);
-      const lines = renderBufferLines(state, width, bufferHeight);
+      const vt = getVisibleViewportTop(state, bufferHeight);
+      const getLine = (ln: number) => {
+        const r = state.currentBuffer?.getLine(ln);
+        return r && Either.isRight(r) ? r.right : "";
+      };
+      const spans = state.currentBuffer
+        ? computeHighlightSpans(getLine, vt, vt + bufferHeight, state.currentFilename)
+        : undefined;
+      const lines = renderBufferLines(state, width, bufferHeight, spans);
 
       screen.clear();
       if (hasTabBar) {
