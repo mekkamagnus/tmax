@@ -37,7 +37,7 @@ export async function handleNormalMode(editor: Editor, key: string, normalizedKe
   const legacyPrefixActive = (editor as any).spacePressed === true || currentPrefix !== "";
   const dispatchHandled = legacyPrefixActive
     ? false
-    : executeVimDispatcher(editor, normalizedKey, handlerLog);
+    : await executeVimDispatcher(editor, normalizedKey, handlerLog);
   if (dispatchHandled) {
     return;
   }
@@ -70,7 +70,7 @@ export async function handleNormalMode(editor: Editor, key: string, normalizedKe
       data: { key, normalizedKey, lookupKey }
     });
     state.statusMessage = `Unbound key: ${lookupKey}`;
-    (editor as any).logMessage(`Unbound key: ${lookupKey}`);
+    (editor as any).logMessage(`Unbound key: ${lookupKey}`, 'debug');
     return;
   }
 
@@ -80,12 +80,12 @@ export async function handleNormalMode(editor: Editor, key: string, normalizedKe
       data: { key, normalizedKey, lookupKey, availableModes: mappings.map((m: any) => m.mode) }
     });
     state.statusMessage = `Unbound key in normal mode: ${lookupKey}`;
-    (editor as any).logMessage(`Unbound key in normal mode: ${lookupKey}`);
+    (editor as any).logMessage(`Unbound key in normal mode: ${lookupKey}`, 'debug');
     return;
   }
 
   try {
-    (editor as any).executeCommand(mapping.command);
+    await (editor as any).executeCommandAsync(mapping.command);
   } catch (error) {
     if (error instanceof Error && (error.message === "EDITOR_QUIT_SIGNAL" || error.message.includes("EDITOR_QUIT_SIGNAL"))) {
       handlerLog.info('Quit signal received', {
@@ -100,7 +100,7 @@ export async function handleNormalMode(editor: Editor, key: string, normalizedKe
       data: { key: lookupKey }
     });
     state.statusMessage = `Command error: ${err.message}`;
-    (editor as any).logMessage(`Command error: ${err.message}`);
+    (editor as any).logMessage(`Command error: ${err.message}`, 'error');
   }
 }
 
@@ -123,10 +123,10 @@ function clearLegacyPrefix(editor: Editor): void {
   (editor as any).state.whichKeyBindings = [];
 }
 
-function executeVimDispatcher(editor: Editor, normalizedKey: string, handlerLog: ReturnType<ReturnType<typeof log.module>["fn"]>): boolean {
+async function executeVimDispatcher(editor: Editor, normalizedKey: string, handlerLog: ReturnType<ReturnType<typeof log.module>["fn"]>): Promise<boolean> {
   try {
     const escapedKey = (editor as any).escapeKeyForTLisp(normalizedKey);
-    const result = (editor as any).executeCommand(`(vim-dispatch-key "${escapedKey}")`);
+    const result = await (editor as any).executeCommandAsync(`(vim-dispatch-key "${escapedKey}")`);
 
     if (!result || typeof result !== "object" || !("_tag" in result)) {
       return false;
@@ -139,7 +139,7 @@ function executeVimDispatcher(editor: Editor, normalizedKey: string, handlerLog:
         return false;
       }
       (editor as any).state.statusMessage = `Vim dispatch error: ${message}`;
-      (editor as any).logMessage(`Vim dispatch error: ${message}`);
+      (editor as any).logMessage(`Vim dispatch error: ${message}`, 'error');
       return true;
     }
 
@@ -159,7 +159,7 @@ function executeVimDispatcher(editor: Editor, normalizedKey: string, handlerLog:
       data: { key: normalizedKey }
     });
     (editor as any).state.statusMessage = `Vim dispatch error: ${message}`;
-    (editor as any).logMessage(`Vim dispatch error: ${message}`);
+    (editor as any).logMessage(`Vim dispatch error: ${message}`, 'error');
     return true;
   }
 }
