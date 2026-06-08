@@ -1,0 +1,73 @@
+name: editing
+description: "Demonstrates basic editing — file open, cursor movement, insert/delete, undo, and save."
+speed: 1.0
+
+setup:
+  - action: setup_file
+    var: FILE
+    name: editing-demo.txt
+    content: |
+      Hello World
+      This is line 2
+      This is line 3
+      This is line 4
+      This is line 5
+
+steps:
+  - section: File operations
+    narrate: "Opening a file with 5 lines"
+    action: open
+    file: "${FILE}"
+    pause: 1.0
+
+  - section: Cursor movement
+    narrate: "Moving to end of file with G"
+    action: key
+    key: "G"
+    pause: 0.8
+
+  - narrate: "Going back to top with gg"
+    action: keys
+    keys: "gg"
+    pause: 0.8
+
+  - narrate: "Moving down 2 lines with jj"
+    action: keys
+    keys: "jj"
+    pause: 0.8
+
+  - section: Insert mode
+    narrate: "Entering insert mode with i"
+    action: key
+    key: "i"
+    pause: 0.5
+
+  - narrate: "Typing 'INSERTED ' at cursor"
+    action: insert
+    text: "INSERTED "
+    pause: 0.5
+
+  - narrate: "Returning to normal mode with Escape"
+    action: key
+    key: "Escape"
+    pause: 0.5
+
+  - section: Delete
+    narrate: "Deleting a character with x"
+    action: key
+    key: "x"
+    pause: 0.5
+
+  - section: Undo
+    narrate: "Undoing with u — the deleted character should return"
+    action: key
+    key: "u"
+    pause: 0.5
+
+  - section: Save
+    narrate: "Saving the file"
+    action: eval
+    expr: "(file-save)"
+    pause: 0.5
+
+cleanup: true
