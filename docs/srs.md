@@ -801,28 +801,43 @@ Five modes: **normal**, **insert**, **visual**, **command**, **M-x**
 ### 3.4 Phase 4: Community
 
 #### US-4.1.1: Plugin Repository
-**As a** user  
-**I want** to discover plugins in a central repository  
-**So that** I can find useful extensions  
+**As a** user
+**I want** to discover plugins in a central repository
+**So that** I can find useful extensions
 
-**Status:** 📋 Planned (`src/editor/api/plugin-repository.ts` — stub exists)
-
-**Acceptance Criteria:**
-- 📋 Given I execute M-x `plugin-list`, when command runs, then I should see available plugins from repository
-- 📋 Given plugin list, when I select a plugin, then I should see description, author, and install command
-- 📋 Given selected plugin, when I choose to install, then it should download to `~/.config/tmax/tlpa/`
-
-#### US-4.1.2: Plugin Submission
-**As a** plugin developer  
-**I want** to submit my plugin to the repository  
-**So that** others can discover and use it  
-
-**Status:** 📋 Planned
+**Status:** 📋 Planned — See [RFC-010: Loom Package Manager](../rfcs/RFC-010-loom-package-manager.md)
 
 **Acceptance Criteria:**
-- 📋 Given I've created a plugin, when I submit to repository, then it should undergo review process
-- 📋 Given submitted plugin, when review passes, then plugin should be published to repository
-- 📋 Given published plugin, when users list plugins, then my plugin should appear in results
+- 📋 Given I execute M-x `list-packages`, when command runs, then I should see available plugins from the Loom registry
+- 📋 Given plugin list, when I select a plugin, then I should see description, author, and version
+- 📋 Given selected plugin, when I press `i` to install and `x` to execute, then it should clone to `~/.config/tmax/packages/`
+- 📋 Given installed plugin, when I add `(require-module "author/plugin")` to init.tlisp, then the plugin loads on startup
+
+#### US-4.1.2: Package Installation (CLI)
+**As a** user
+**I want** to install packages from the command line
+**So that** I can set up tmax quickly in scripts and dotfiles
+
+**Status:** 📋 Planned — See [RFC-010: Loom Package Manager](../rfcs/RFC-010-loom-package-manager.md)
+
+**Acceptance Criteria:**
+- 📋 Given `loom install author/plugin`, when command runs, then package is cloned to `~/.config/tmax/packages/author/plugin/`
+- 📋 Given `loom install github.com/user/tmax-plugin`, when command runs, then package is cloned from the git URL
+- 📋 Given `loom list`, when command runs, then installed packages are shown with name and version
+- 📋 Given `loom update`, when command runs, then all installed packages are updated to latest
+- 📋 Given `loom remove author/plugin`, when command runs, then package directory is deleted
+
+#### US-4.1.3: Package Submission
+**As a** plugin developer
+**I want** to submit my plugin to the Loom registry
+**So that** others can discover and use it
+
+**Status:** 📋 Planned (v2 — post-adoption)
+
+**Acceptance Criteria:**
+- 📋 Given I've created a plugin with `plugin.tlisp` and `(defmodule ... (export ...))`, when I submit a PR to the recipes repo, then it should undergo review
+- 📋 Given submitted recipe, when review passes, then plugin should appear in the package index
+- 📋 Given published plugin, when users run `loom search`, then my plugin should appear in results
 
 #### US-4.2.1: Documentation Website
 **As a** user  

@@ -969,8 +969,8 @@ Priority: LOW | Impact: Large file handling
 ### Extensibility Features
 Priority: LOW | Impact: Plugin ecosystem
 
-- [ ] `package-manager` - Install/manage T-Lisp packages
-- [ ] `lazy-loading` - Load packages on demand
+- [ ] `package-manager` - Install/manage T-Lisp packages (Loom — see [RFC-010](../rfcs/RFC-010-loom-package-manager.md))
+- [ ] `lazy-loading` - Load packages on demand (`use-package` macro)
 - [ ] `package-hooks` - Load/save/activate hooks
 - [ ] `package-config` - Per-package configuration
 - [ ] `package-documentation` - Generate docs from packages
@@ -1152,6 +1152,47 @@ Priority: MEDIUM | Impact: Growth and adoption
 - [ ] Plugin submission and review process
 - [ ] Community contribution guidelines
 - [ ] Plugin showcase and examples
+
+### 4.1a - Loom — T-Lisp Package Manager
+
+**Name:** Loom (weaving packages together)
+**CLI:** `loom` — `loom install`, `loom publish`, `loom search`, `loom update`
+**Registry:** `loom.tmux.mekaelturner.com` (v2)
+
+**Goal:** An Emacs/MELPA-style package manager where browsing, installing, and updating packages happens inside the editor via T-Lisp commands. CLI is a secondary interface.
+
+**Architecture principle:** The package manager is a T-Lisp package itself. Since T-Lisp owns commands, modes, and buffers, the entire UX (package browser, install/update/remove, search) is written in T-Lisp. TypeScript only provides the filesystem and network primitives. This follows the same split as the rest of tmax — T-Lisp owns behavior, TypeScript owns transport.
+
+**Primary interface — in-editor (like `M-x list-packages`):**
+- `M-x list-packages` — opens a `*Packages*` buffer showing available and installed packages (name, version, description, status)
+- `M-x package-install RET name` — fetches and installs a package
+- `M-x package-refresh-contents` — updates the package index from the registry
+- `M-x package-delete RET name` — removes an installed package
+- Packages auto-load on startup via `(require-module "author/package")` in `init.tlisp`
+- `use-package`-style macro for declarative package configuration with lazy loading
+
+**Secondary interface — CLI:**
+- `loom install github.com/user/tmax-plugin-name` — clones to `~/.config/tmax/packages/`
+- `loom list` / `loom update` / `loom remove` — package management from terminal
+- Convenience wrappers around the same T-Lisp functions the editor uses
+
+**v1 — Git-based packages (zero infrastructure):**
+- Packages are git repos containing a `plugin.tlisp` with `(defmodule ...)` and `(export ...)`
+- `loom install` clones to `~/.config/tmax/packages/`
+- `require-module` resolves from local package cache via existing `TLISP_PATH`
+- The module system (`defmodule`/`require-module`/`(export ...)`) already exists
+- Package index is a curated JSON file in the tmax repo (like MELPA's recipe format)
+
+**v2 — Hosted registry (post-adoption):**
+- `loom publish` pushes to a registry at `loom.tmux.mekaelturner.com` (or GitHub-based)
+- Registry indexes packages by exported symbols, docstrings, and metadata
+- `loom search query` / `M-x package-search` searches across all published packages
+- Website `/packages/[name]` auto-generates API docs from exports and docstrings
+- Community submissions via pull request to a package recipe repo (like MELPA)
+
+**Why defer v2:** Hosted infrastructure has ongoing cost. Git-based packages work immediately with the existing module system and need zero backend. A registry only adds value once there's enough adoption to justify the infrastructure.
+
+**See [RFC-010: Loom Package Manager](../rfcs/RFC-010-loom-package-manager.md) for complete specification.**
 
 ### 4.2 - Documentation Portal
 Priority: HIGH | Impact: Accessibility and onboarding
