@@ -1,0 +1,34 @@
+(defmodule editor/completion/basic
+  (export basic-spans basic-filter)
+
+;; basic.tlisp --- Basic prefix completion style (fallback)
+
+(defun basic-spans (input target)
+  (let ((low-input (string-downcase input))
+        (low-target (string-downcase target)))
+    (if (string-prefix-p low-input low-target)
+      (list (list 0 (length input)))
+      nil)))
+
+(defun basic-filter (input candidates)
+  "Filter CANDIDATES by case-insensitive prefix match against INPUT."
+  (if (= (length input) 0)
+    (mapcar
+      (lambda (candidate)
+        (hashmap-set
+          (hashmap-set candidate "spans" (list))
+          "annotation-spans" (list)))
+      candidates)
+    (filter "identity"
+      (mapcar
+        (lambda (candidate)
+          (let ((spans (basic-spans input (hashmap-get candidate "display"))))
+            (if spans
+              (hashmap-set
+                (hashmap-set candidate "spans" spans)
+                "annotation-spans" (list))
+              nil)))
+        candidates))))
+
+(completion-register-style "basic" "basic-filter")
+)
