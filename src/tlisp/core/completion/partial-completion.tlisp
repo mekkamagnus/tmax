@@ -1,0 +1,68 @@
+(defmodule editor/completion/partial-completion
+  (export partial-completion-matches-p partial-completion-spans partial-completion-filter)
+
+;; partial-completion.tlisp --- Partial completion style for file paths
+;;
+;; Matches path-like patterns where each segment's first character
+;; anchors to a directory/file boundary. Example:
+;;   ~/D/p/t matches ~/Documents/projects/tmax
+
+(defun partial-completion-matches-p (segments path-idx path)
+  (if (null segments)
+    t
+    (if (>= path-idx (length path))
+      nil
+      (let ((seg (string-downcase (car segments)))
+            (low-path (string-downcase (substring path path-idx (length path)))))
+        (if (string-prefix-p seg low-path)
+          (let ((next-idx (+ path-idx (length seg))))
+            (partial-completion-matches-p (cdr segments) next-idx path))
+          nil)))))
+
+(defun partial-completion-spans (segments path-idx path spans)
+  (if (null segments)
+    spans
+    (if (>= path-idx (length path))
+      spans
+      (let ((seg (string-downcase (car segments)))
+            (low-path (string-downcase (substring path path-idx (length path)))))
+        (if (string-prefix-p seg low-path)
+          (let ((next-idx (+ path-idx (length seg))))
+            (partial-completion-spans
+              (cdr segments) next-idx path
+              (append spans (list (list path-idx next-idx)))))
+          spans)))))
+
+(defun partial-completion-filter (input candidates)
+  "Filter CANDIDATES by partial-completion against slash-split INPUT."
+  (if (= (length input) 0)
+    (mapcar
+      (lambda (candidate)
+        (hashmap-set
+          (hashmap-set candidate "spans" (list))
+          "annotation-spans" (list)))
+      candidates)
+    (let ((segments (filter
+                      (lambda (s) (> (length s) 0))
+                      (string-split input "/"))))
+      (if (null segments)
+        (mapcar
+          (lambda (candidate)
+            (hashmap-set
+              (hashmap-set candidate "spans" (list))
+              "annotation-spans" (list)))
+          candidates)
+        (filter "identity"
+          (mapcar
+            (lambda (candidate)
+              (let ((path (hashmap-get candidate "display")))
+                (if (partial-completion-matches-p segments 0 path)
+                  (hashmap-set
+                    (hashmap-set candidate
+                      "spans" (partial-completion-spans segments 0 path (list)))
+                    "annotation-spans" (list))
+                  nil)))
+            candidates))))))
+
+(completion-register-style "partial-completion" "partial-completion-filter")
+)
