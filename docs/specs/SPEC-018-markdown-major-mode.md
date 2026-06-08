@@ -1,5 +1,15 @@
 # Feature: Markdown Major Mode
 
+**Vision alignment:** Pillar C (Editor Completeness) — primary. Pillar B (Steep Independence) — fold infrastructure and syntax highlighting are generic, reusable by any Steep application. Pillar A (Purity) — new code uses return-state pattern per RFC-009.
+**Depends on:** [RFC-006](../rfcs/RFC-006-steep-ecosystem.md) ([HTML](../rfcs/RFC-006-steep-ecosystem.html)), [RFC-008](../rfcs/RFC-008-steep-bubbletea-gap-analysis.md) Gap 1, [RFC-009](../rfcs/RFC-009-elm-purity-gap-analysis.md) Phase 1, [glamour-gap-analysis](../memos/glamour-gap-analysis.md).
+
+### Must complete first (with tests passing)
+
+1. **[SPEC-020: Steep Phase 1](./SPEC-020-steep-phase1-matcha-assam.md)** — Matcha + Assam reorganization. Creates `src/steep/` directory, moves styling to Matcha, adds missing ANSI attributes. The markdown tokenizer's syntax highlighting requires Matcha's `italic()`, `underline()`, `strikethrough()`, `inverse()` functions.
+2. **[SPEC-021: Steep Phase 2](./SPEC-021-steep-phase2-oolong.md)** — Oolong markdown renderer. Builds the `src/steep/oolong/` package (parser, AST, renderer, themes, word wrap). The `markdown-preview` command uses Oolong for in-terminal styled preview. If Oolong is not yet complete, preview falls back to shelling out to `glow`.
+
+These are RFC-006 Phases 1 and 2. Their test suites must pass before this spec's implementation begins.
+
 ## Feature Description
 
 A comprehensive major mode for editing Markdown files (.md, .markdown, .mdx) in tmax. The mode provides syntax highlighting, structural navigation, section folding, inline formatting toggles, table formatting, list editing automation, and a rich set of T-Lisp commands — all following the existing major mode architecture and T-Lisp extensibility model.
@@ -136,6 +146,7 @@ Implement the T-Lisp command library that makes markdown mode useful.
 - Add `foldRanges?: Map<number, number>` to `EditorState` in `src/core/types.ts`
 - This map stores collapsed ranges: key = start line (where the fold indicator appears), value = end line (last hidden line)
 - Fold state is per-buffer, tracked in the editor's state management
+- **RFC-009 alignment:** Fold state lives in `EditorState`, not as a module-scoped variable. This follows the RFC-009 Phase 1 principle: all state is in the model. Fold state participates in complete state snapshots — snapshotting `EditorState` captures fold state too.
 
 ### Step 5: Create Fold Operations API
 
@@ -149,6 +160,7 @@ Implement the T-Lisp command library that makes markdown mode useful.
   - `fold-is-collapsed(line)` → boolean
   - `fold-get-ranges()` → list of `{start, end}` pairs
 - Register these as T-Lisp primitives in `tlisp-api.ts`
+- **RFC-009 alignment:** Fold ops use return-state objects, not setter closures. Each function returns `Partial<EditorState>` with the updated `foldRanges` map. The caller (T-Lisp API layer) merges the returned state. This follows RFC-009 Phase 2's target pattern — new code should use the target style from the start.
 
 ### Step 6: Integrate Folding into Render Pipeline
 
@@ -158,6 +170,7 @@ Implement the T-Lisp command library that makes markdown mode useful.
   - At fold-start lines, render a fold indicator: replace the gutter marker with `▶` and append `... [N lines]` after the heading text
   - Adjust `viewportTop` computation so the cursor is never hidden inside a fold (auto-expand fold if cursor lands in one)
 - In the gutter, render `▼` for expanded foldable headings and `▶` for collapsed folds
+- **RFC-008 alignment:** When Assam's View extraction (RFC-008 Gap 1 Phase B) lands, the fold-aware render logic moves into the `view(EditorState) => Frame` function. The `Frame` output already includes `lines[]` — fold filtering happens before lines are emitted. Design the fold rendering so it's a pure function of `EditorState`: given state with foldRanges, produce the filtered lines. No side effects in the render path.
 
 ### Step 7: Create Markdown Command Library
 
@@ -204,7 +217,7 @@ Implement the T-Lisp command library that makes markdown mode useful.
   **Utility:**
   - `markdown-generate-toc` — scan headings and generate TOC with anchor links
   - `markdown-do` — context-aware action at point (fold on heading, follow link, toggle checkbox)
-  - `markdown-preview` — render markdown using `glow` (if available) or ANSI split-pane fallback, displayed in a pager inside the terminal
+  - `markdown-preview` — render markdown using Oolong (RFC-006, `src/steep/oolong/renderer.ts`) for in-terminal styled preview. Falls back to shelling out to `glow` if Oolong is not yet implemented. Displayed in a pager or split pane inside the terminal.
 
 - Add `(provide "markdown-commands")`
 
@@ -337,10 +350,11 @@ Implement the T-Lisp command library that makes markdown mode useful.
 - **Folding is generic infrastructure**, not markdown-specific. The `foldRanges` state and fold operations in TypeScript work for any language. Markdown headings are the first consumer; future modes (TypeScript brace blocks, Lisp defuns) can reuse the same system.
 - **Heading regex is the single source of truth** for navigation, folding, TOC, and syntax highlighting — avoiding the Emacs markdown-mode weakness of maintaining separate regex sets.
 - **Code block highlighting delegates to sub-tokenizers**: Inside fenced code blocks, the markdown tokenizer detects the info string (language identifier) and switches to the corresponding language's rules. This avoids the Emacs performance pitfall of instantiating full sub-modes.
-- **Preview uses `glow` as the primary renderer**: `markdown-preview` (`,P`) shells out to `glow` which renders markdown as styled terminal output with headings, emphasis, code blocks, lists, blockquotes, tables, links, images, and horizontal rules — all in the terminal with full color. Falls back to an ANSI split-pane view if `glow` is not installed. No in-terminal HTML rendering; no browser context switch.
+- **Preview uses Oolong as the primary renderer**: `markdown-preview` (`,P`) uses Oolong (RFC-006, the Steep Glamour equivalent) which renders markdown as styled ANSI terminal output with headings, emphasis, code blocks, lists, blockquotes, tables, links, images, and horizontal rules — all in the terminal with full color. Falls back to shelling out to `glow` if Oolong is not yet implemented. No in-terminal HTML rendering; no browser context switch. Oolong is a Steep package — this preview capability is available to any Steep application, not just tmax.
 - **Smart toggles are the core UX primitive**: Every inline format command follows the same wrap/unwrap/insert-empty pattern. This reduces cognitive load and keybinding count.
 - **The "do" command pattern** (from Emacs markdown-mode) is adopted: `SPC RET` or `,SPC` performs the most useful action for the context — fold on a heading, follow a link, toggle a checkbox, insert a list item.
 - **Mode-specific key bindings** are registered in the mode's activation hook, not globally. This prevents key binding collisions when editing non-markdown files.
+- **New code uses return-state pattern per RFC-009.** The fold operations API returns `Partial<EditorState>` instead of mutating state via setter closures. This is the target pattern for RFC-009 Phase 2. Writing new code in the target style avoids creating additional setter closures that would need to be refactored later. The technical vision says "don't add new mutation patterns."
 
 **Future considerations (out of scope for this spec):**
 
