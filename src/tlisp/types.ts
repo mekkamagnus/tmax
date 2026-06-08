@@ -21,7 +21,8 @@ export type TLispValueType =
   | "list"
   | "function"
   | "macro"
-  | "hashmap";
+  | "hashmap"
+  | "promise";
 
 /**
  * T-Lisp value interface
@@ -82,7 +83,13 @@ export interface TLispList extends TLispValue {
 /**
  * T-Lisp function type
  */
-export type TLispFunctionImpl = (args: TLispValue[]) => Either<AppError, TLispValue>;
+export interface EvalContext {
+  asyncMode: boolean;
+  sourceName?: string;
+}
+
+export type TLispFunctionImpl = (args: TLispValue[], context?: EvalContext) => Either<AppError, TLispValue>;
+export type TLispFunctionImplAsync = (args: TLispValue[], context: EvalContext) => Promise<Either<AppError, TLispValue> | TLispValue>;
 
 /**
  * T-Lisp function value
@@ -90,6 +97,7 @@ export type TLispFunctionImpl = (args: TLispValue[]) => Either<AppError, TLispVa
 export interface TLispFunction extends TLispValue {
   type: "function";
   value: TLispFunctionImpl;
+  asyncValue?: TLispFunctionImplAsync;
   name?: string;
   docstring?: string;
   parameters?: string[];
@@ -116,6 +124,17 @@ export interface TLispMacro extends TLispValue {
 export interface TLispHashmap extends TLispValue {
   type: "hashmap";
   value: Map<string, TLispValue>;
+}
+
+/**
+ * T-Lisp promise value
+ */
+export interface TLispPromise extends TLispValue {
+  type: "promise";
+  value: Promise<TLispValue>;
+  resolved: boolean;
+  result?: TLispValue;
+  error?: AppError;
 }
 
 /**
@@ -166,11 +185,20 @@ export interface TLispInterpreter {
   /** Evaluate T-Lisp expression */
   eval(expr: TLispValue, env?: TLispEnvironment): Either<AppError, TLispValue>;
 
+  /** Evaluate T-Lisp expression asynchronously */
+  evalAsync?(expr: TLispValue, env?: TLispEnvironment): Promise<Either<AppError, TLispValue>>;
+
   /** Execute T-Lisp source code */
   execute(source: string, env?: TLispEnvironment, sourceName?: string): Either<AppError, TLispValue>;
 
+  /** Execute T-Lisp source code asynchronously */
+  executeAsync?(source: string, env?: TLispEnvironment, sourceName?: string): Promise<Either<AppError, TLispValue>>;
+
   /** Define a built-in function */
   defineBuiltin(name: string, fn: TLispFunctionImpl): void;
+
+  /** Define a built-in function with an async implementation */
+  defineAsyncBuiltin?(name: string, fn: TLispFunctionImpl, asyncFn: TLispFunctionImplAsync): void;
 
   /** Get test definition by name */
   getTestDefinition?(name: string): { body: TLispValue[], name: string, params: TLispValue, isAsync?: boolean } | undefined;

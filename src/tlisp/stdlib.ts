@@ -14,21 +14,24 @@
  * interpreter's global environment, making them available to all T-Lisp code.
  */
 
-import type { TLispFunctionImpl, TLispInterpreter, TLispValue } from "./types.ts";
+import type { EvalContext, TLispFunctionImpl, TLispInterpreter, TLispValue } from "./types.ts";
 import {
   createBoolean,
   createHashmap,
   createList,
   createNil,
   createNumber,
+  createPromise,
   createString,
   isHashmap,
+  isPromise,
   isTruthy,
   valueToString,
   valuesEqual,
 } from "./values.ts";
 import { Either } from "../utils/task-either.ts";
 import type { AppError } from "../error/types.ts";
+import { awaitPromiseValue } from "./async.ts";
 
 /** Wrap a raw TLispValue-returning function into a TLispFunctionImpl */
 function raw(fn: (args: TLispValue[]) => TLispValue): (args: TLispValue[]) => Either<AppError, TLispValue> {
@@ -102,11 +105,83 @@ export function registerStdlibFunctions(interpreter: TLispInterpreter): void {
       throw new Error("Value is not callable");
     }
     const result = (resolved.value as TLispFunctionImpl)(args);
-    if (Either.isLeft(result)) {
-      throw new Error(result.left.message);
+    if (result && typeof result === "object" && "_tag" in result) {
+      if (Either.isLeft(result)) {
+        throw new Error(result.left.message);
+      }
+      return result.right;
     }
-    return result.right;
+    return result as TLispValue;
   };
+
+  interpreter.defineBuiltin("promise-resolved-p", (args: TLispValue[]) => {
+    if (args.length !== 1 || !args[0] || !isPromise(args[0])) {
+      return Either.left({ type: "EvalError", variant: "TypeError", message: "promise-resolved-p requires a promise" });
+    }
+    return Either.right(createBoolean(args[0].resolved));
+  });
+
+  interpreter.defineAsyncBuiltin?.(
+    "promise-value",
+    () => Either.left({
+      type: "EvalError",
+      variant: "RuntimeError",
+      message: "promise-value requires async evaluation; use async-let",
+    }),
+    async (args: TLispValue[], context: EvalContext) => {
+      if (!context.asyncMode) {
+        return Either.left({
+          type: "EvalError",
+          variant: "RuntimeError",
+          message: "promise-value requires async evaluation; use async-let",
+        });
+      }
+      if (args.length !== 1 || !args[0] || !isPromise(args[0])) {
+        return Either.left({ type: "EvalError", variant: "TypeError", message: "promise-value requires a promise" });
+      }
+      return awaitPromiseValue(args[0]);
+    }
+  );
+
+  interpreter.defineAsyncBuiltin?.(
+    "promise-then",
+    () => Either.left({
+      type: "EvalError",
+      variant: "RuntimeError",
+      message: "promise-then requires async evaluation; use async-let",
+    }),
+    async (args: TLispValue[], context: EvalContext) => {
+      if (!context.asyncMode) {
+        return Either.left({
+          type: "EvalError",
+          variant: "RuntimeError",
+          message: "promise-then requires async evaluation; use async-let",
+        });
+      }
+      if (args.length !== 2 || !args[0] || !isPromise(args[0]) || !args[1]) {
+        return Either.left({ type: "EvalError", variant: "TypeError", message: "promise-then requires a promise and function" });
+      }
+
+      const callback = resolveCallable(args[1]);
+      if (callback.type !== "function") {
+        return Either.left({ type: "EvalError", variant: "TypeError", message: "promise-then callback must be a function" });
+      }
+
+      return Either.right(createPromise(args[0].value.then(async (value) => {
+        const fn = callback as any;
+        const result = fn.asyncValue
+          ? await fn.asyncValue([value], context)
+          : fn.value([value], context);
+        if (result && typeof result === "object" && "_tag" in result) {
+          if (Either.isLeft(result)) {
+            throw result.left;
+          }
+          return result.right;
+        }
+        return result as TLispValue;
+      })));
+    }
+  );
 
   interpreter.defineBuiltin("funcall", raw((args: TLispValue[]) => {
     if (args.length === 0) throw new Error("funcall requires a function");

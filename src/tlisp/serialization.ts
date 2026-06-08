@@ -16,7 +16,7 @@ import {
 } from "./values.ts";
 
 type SerializedTLispValue = {
-  type: "nil" | "boolean" | "number" | "string" | "symbol" | "list" | "hashmap";
+  type: "nil" | "boolean" | "number" | "string" | "symbol" | "list" | "hashmap" | "promise";
   value: JsonValue;
 };
 
@@ -47,6 +47,7 @@ export const serializeTlispValue = (value: TLispValue): JsonValue => {
       };
     case "function":
     case "macro":
+    case "promise":
       throw new Error(`Cannot serialize T-Lisp ${value.type} value`);
   }
 };
