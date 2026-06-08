@@ -69,10 +69,11 @@ function applyHighlights(rawLine: string, spans: HighlightSpan[]): string {
     }
 
     const segment = rawLine.slice(start, end);
-    const opts: { fg?: AnsiColor; bg?: AnsiColor; bold?: boolean } = {};
+    const opts: { fg?: AnsiColor; bg?: AnsiColor; bold?: boolean; dim?: boolean } = {};
     if (span.style.fg) opts.fg = span.style.fg as AnsiColor;
     if (span.style.bg) opts.bg = span.style.bg as AnsiColor;
     if (span.style.bold) opts.bold = true;
+    if (span.style.dim) opts.dim = true;
     parts.push(style(segment, opts));
 
     pos = end;

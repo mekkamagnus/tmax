@@ -12,34 +12,40 @@ import { rules as pythonRules } from "../../src/syntax/languages/python.ts";
 import { rules as lispRules } from "../../src/syntax/languages/lisp.ts";
 import type { SyntaxToken, HighlightSpan, SyntaxRule } from "../../src/core/types.ts";
 
+/** Stateless tokenize — returns SyntaxToken[] when no ParseState is given. */
+const tokenizeStateless = (line: string, lineNum: number, rules: SyntaxRule[]): SyntaxToken[] => {
+  const result = tokenize(line, lineNum, rules);
+  return Array.isArray(result) ? result : (result as any).tokens ?? [];
+};
+
 describe("Syntax Highlighting", () => {
   // ---------------------------------------------------------------------------
   // TypeScript keyword highlighting
   // ---------------------------------------------------------------------------
   describe("TypeScript keywords", () => {
     test("tokenizes const as keyword", () => {
-      const tokens = tokenize("const x = 1;", 0, typescriptRules);
+      const tokens = tokenizeStateless("const x = 1;", 0, typescriptRules);
       const constToken = tokens.find(t => t.value === "const");
       expect(constToken).toBeDefined();
       expect(constToken!.type).toBe("keyword");
     });
 
     test("tokenizes let as keyword", () => {
-      const tokens = tokenize("let y = 2;", 0, typescriptRules);
+      const tokens = tokenizeStateless("let y = 2;", 0, typescriptRules);
       const letToken = tokens.find(t => t.value === "let");
       expect(letToken).toBeDefined();
       expect(letToken!.type).toBe("keyword");
     });
 
     test("tokenizes function as keyword", () => {
-      const tokens = tokenize("function foo() {}", 0, typescriptRules);
+      const tokens = tokenizeStateless("function foo() {}", 0, typescriptRules);
       const fnToken = tokens.find(t => t.value === "function");
       expect(fnToken).toBeDefined();
       expect(fnToken!.type).toBe("keyword");
     });
 
     test("tokenizes async and await as keywords", () => {
-      const tokens = tokenize("async function run() { await done(); }", 0, typescriptRules);
+      const tokens = tokenizeStateless("async function run() { await done(); }", 0, typescriptRules);
       const asyncToken = tokens.find(t => t.value === "async");
       const awaitToken = tokens.find(t => t.value === "await");
       expect(asyncToken).toBeDefined();
@@ -49,7 +55,7 @@ describe("Syntax Highlighting", () => {
     });
 
     test("tokenizes multiple keywords on one line", () => {
-      const tokens = tokenize("if (x) { return x; }", 0, typescriptRules);
+      const tokens = tokenizeStateless("if (x) { return x; }", 0, typescriptRules);
       const keywords = tokens.filter(t => t.type === "keyword");
       const values = keywords.map(k => k.value);
       expect(values).toContain("if");
@@ -62,28 +68,28 @@ describe("Syntax Highlighting", () => {
   // ---------------------------------------------------------------------------
   describe("String literals", () => {
     test("tokenizes double-quoted strings", () => {
-      const tokens = tokenize('const s = "hello world";', 0, typescriptRules);
+      const tokens = tokenizeStateless('const s = "hello world";', 0, typescriptRules);
       const strToken = tokens.find(t => t.type === "string");
       expect(strToken).toBeDefined();
       expect(strToken!.value).toBe('"hello world"');
     });
 
     test("tokenizes single-quoted strings", () => {
-      const tokens = tokenize("const c = 'x';", 0, typescriptRules);
+      const tokens = tokenizeStateless("const c = 'x';", 0, typescriptRules);
       const strToken = tokens.find(t => t.type === "string");
       expect(strToken).toBeDefined();
       expect(strToken!.value).toBe("'x'");
     });
 
     test("tokenizes template literals", () => {
-      const tokens = tokenize("const t = `hello ${name}`;", 0, typescriptRules);
+      const tokens = tokenizeStateless("const t = `hello ${name}`;", 0, typescriptRules);
       const strToken = tokens.find(t => t.type === "string");
       expect(strToken).toBeDefined();
       expect(strToken!.value).toMatch(/^`.*`$/);
     });
 
     test("handles escaped quotes inside strings", () => {
-      const tokens = tokenize('const s = "say \\"hi\\"";', 0, typescriptRules);
+      const tokens = tokenizeStateless('const s = "say \\"hi\\"";', 0, typescriptRules);
       const strToken = tokens.find(t => t.type === "string");
       expect(strToken).toBeDefined();
       expect(strToken!.value).toContain('\\"');
@@ -95,21 +101,21 @@ describe("Syntax Highlighting", () => {
   // ---------------------------------------------------------------------------
   describe("Comments", () => {
     test("tokenizes line comments", () => {
-      const tokens = tokenize("const x = 1; // comment", 0, typescriptRules);
+      const tokens = tokenizeStateless("const x = 1; // comment", 0, typescriptRules);
       const commentToken = tokens.find(t => t.type === "comment");
       expect(commentToken).toBeDefined();
       expect(commentToken!.value).toBe("// comment");
     });
 
     test("tokenizes inline block comments", () => {
-      const tokens = tokenize("const x = /* inline */ 1;", 0, typescriptRules);
+      const tokens = tokenizeStateless("const x = /* inline */ 1;", 0, typescriptRules);
       const commentToken = tokens.find(t => t.type === "comment");
       expect(commentToken).toBeDefined();
       expect(commentToken!.value).toBe("/* inline */");
     });
 
     test("line comments take priority over partial matches", () => {
-      const tokens = tokenize("// const x = 1;", 0, typescriptRules);
+      const tokens = tokenizeStateless("// const x = 1;", 0, typescriptRules);
       // The whole line should be one comment, not broken into keyword + number
       const commentToken = tokens.find(t => t.type === "comment");
       expect(commentToken).toBeDefined();
@@ -125,28 +131,28 @@ describe("Syntax Highlighting", () => {
   // ---------------------------------------------------------------------------
   describe("Numbers", () => {
     test("tokenizes integer literals", () => {
-      const tokens = tokenize("const x = 42;", 0, typescriptRules);
+      const tokens = tokenizeStateless("const x = 42;", 0, typescriptRules);
       const numToken = tokens.find(t => t.type === "number");
       expect(numToken).toBeDefined();
       expect(numToken!.value).toBe("42");
     });
 
     test("tokenizes hexadecimal literals", () => {
-      const tokens = tokenize("const h = 0xFF;", 0, typescriptRules);
+      const tokens = tokenizeStateless("const h = 0xFF;", 0, typescriptRules);
       const numToken = tokens.find(t => t.type === "number");
       expect(numToken).toBeDefined();
       expect(numToken!.value).toBe("0xFF");
     });
 
     test("tokenizes floating point literals", () => {
-      const tokens = tokenize("const f = 3.14;", 0, typescriptRules);
+      const tokens = tokenizeStateless("const f = 3.14;", 0, typescriptRules);
       const numToken = tokens.find(t => t.type === "number");
       expect(numToken).toBeDefined();
       expect(numToken!.value).toBe("3.14");
     });
 
     test("tokenizes scientific notation", () => {
-      const tokens = tokenize("const s = 1e10;", 0, typescriptRules);
+      const tokens = tokenizeStateless("const s = 1e10;", 0, typescriptRules);
       const numToken = tokens.find(t => t.type === "number");
       expect(numToken).toBeDefined();
       expect(numToken!.value).toBe("1e10");
@@ -158,49 +164,49 @@ describe("Syntax Highlighting", () => {
   // ---------------------------------------------------------------------------
   describe("Python keywords", () => {
     test("tokenizes def as keyword", () => {
-      const tokens = tokenize("def foo():", 0, pythonRules);
+      const tokens = tokenizeStateless("def foo():", 0, pythonRules);
       const defToken = tokens.find(t => t.value === "def");
       expect(defToken).toBeDefined();
       expect(defToken!.type).toBe("keyword");
     });
 
     test("tokenizes class as keyword", () => {
-      const tokens = tokenize("class MyClass:", 0, pythonRules);
+      const tokens = tokenizeStateless("class MyClass:", 0, pythonRules);
       const classToken = tokens.find(t => t.value === "class");
       expect(classToken).toBeDefined();
       expect(classToken!.type).toBe("keyword");
     });
 
     test("tokenizes if as keyword", () => {
-      const tokens = tokenize("if x > 0:", 0, pythonRules);
+      const tokens = tokenizeStateless("if x > 0:", 0, pythonRules);
       const ifToken = tokens.find(t => t.value === "if");
       expect(ifToken).toBeDefined();
       expect(ifToken!.type).toBe("keyword");
     });
 
     test("tokenizes return as keyword", () => {
-      const tokens = tokenize("return x", 0, pythonRules);
+      const tokens = tokenizeStateless("return x", 0, pythonRules);
       const returnToken = tokens.find(t => t.value === "return");
       expect(returnToken).toBeDefined();
       expect(returnToken!.type).toBe("keyword");
     });
 
     test("tokenizes Python comments", () => {
-      const tokens = tokenize("x = 1  # this is a comment", 0, pythonRules);
+      const tokens = tokenizeStateless("x = 1  # this is a comment", 0, pythonRules);
       const commentToken = tokens.find(t => t.type === "comment");
       expect(commentToken).toBeDefined();
       expect(commentToken!.value).toBe("# this is a comment");
     });
 
     test("tokenizes Python None as constant", () => {
-      const tokens = tokenize("x = None", 0, pythonRules);
+      const tokens = tokenizeStateless("x = None", 0, pythonRules);
       const noneToken = tokens.find(t => t.value === "None");
       expect(noneToken).toBeDefined();
       expect(noneToken!.type).toBe("constant");
     });
 
     test("tokenizes Python built-in functions", () => {
-      const tokens = tokenize("len(items)", 0, pythonRules);
+      const tokens = tokenizeStateless("len(items)", 0, pythonRules);
       const builtinToken = tokens.find(t => t.value === "len");
       expect(builtinToken).toBeDefined();
       expect(builtinToken!.type).toBe("builtin");
@@ -212,56 +218,56 @@ describe("Syntax Highlighting", () => {
   // ---------------------------------------------------------------------------
   describe("Lisp keywords", () => {
     test("tokenizes defun as keyword", () => {
-      const tokens = tokenize("(defun foo (x) x)", 0, lispRules);
+      const tokens = tokenizeStateless("(defun foo (x) x)", 0, lispRules);
       const defunToken = tokens.find(t => t.value === "defun");
       expect(defunToken).toBeDefined();
       expect(defunToken!.type).toBe("keyword");
     });
 
     test("tokenizes let as keyword", () => {
-      const tokens = tokenize("(let ((x 1)) x)", 0, lispRules);
+      const tokens = tokenizeStateless("(let ((x 1)) x)", 0, lispRules);
       const letToken = tokens.find(t => t.value === "let");
       expect(letToken).toBeDefined();
       expect(letToken!.type).toBe("keyword");
     });
 
     test("tokenizes if as keyword", () => {
-      const tokens = tokenize("(if t 1 2)", 0, lispRules);
+      const tokens = tokenizeStateless("(if t 1 2)", 0, lispRules);
       const ifToken = tokens.find(t => t.value === "if");
       expect(ifToken).toBeDefined();
       expect(ifToken!.type).toBe("keyword");
     });
 
     test("tokenizes lambda as keyword", () => {
-      const tokens = tokenize("(lambda (x) (+ x 1))", 0, lispRules);
+      const tokens = tokenizeStateless("(lambda (x) (+ x 1))", 0, lispRules);
       const lambdaToken = tokens.find(t => t.value === "lambda");
       expect(lambdaToken).toBeDefined();
       expect(lambdaToken!.type).toBe("keyword");
     });
 
     test("tokenizes Lisp line comments", () => {
-      const tokens = tokenize("; this is a comment", 0, lispRules);
+      const tokens = tokenizeStateless("; this is a comment", 0, lispRules);
       const commentToken = tokens.find(t => t.type === "comment");
       expect(commentToken).toBeDefined();
       expect(commentToken!.value).toBe("; this is a comment");
     });
 
     test("tokenizes parentheses as punctuation", () => {
-      const tokens = tokenize("(+ 1 2)", 0, lispRules);
+      const tokens = tokenizeStateless("(+ 1 2)", 0, lispRules);
       const parens = tokens.filter(t => t.type === "punctuation");
       expect(parens.length).toBe(2);
       expect(parens.map(p => p.value).sort()).toEqual(["(", ")"]);
     });
 
     test("tokenizes nil as boolean", () => {
-      const tokens = tokenize("(if nil 1 2)", 0, lispRules);
+      const tokens = tokenizeStateless("(if nil 1 2)", 0, lispRules);
       const nilToken = tokens.find(t => t.value === "nil");
       expect(nilToken).toBeDefined();
       expect(nilToken!.type).toBe("boolean");
     });
 
     test("tokenizes built-in functions as builtin", () => {
-      const tokens = tokenize("(car xs)", 0, lispRules);
+      const tokens = tokenizeStateless("(car xs)", 0, lispRules);
       const carToken = tokens.find(t => t.value === "car");
       expect(carToken).toBeDefined();
       expect(carToken!.type).toBe("builtin");
@@ -272,26 +278,26 @@ describe("Syntax Highlighting", () => {
   // Default dark theme
   // ---------------------------------------------------------------------------
   describe("Default dark theme", () => {
-    test("maps keyword to magenta bold", () => {
+    test("maps keyword to purple bold", () => {
       expect(defaultDarkTheme.keyword).toBeDefined();
-      expect(defaultDarkTheme.keyword!.fg).toBe("magenta");
+      expect(defaultDarkTheme.keyword!.fg).toBe("#c678dd");
       expect(defaultDarkTheme.keyword!.bold).toBe(true);
     });
 
-    test("maps string to green", () => {
+    test("maps string to green (hex)", () => {
       expect(defaultDarkTheme.string).toBeDefined();
-      expect(defaultDarkTheme.string!.fg).toBe("green");
+      expect(defaultDarkTheme.string!.fg).toBe("#98c379");
     });
 
-    test("maps comment to black dim", () => {
+    test("maps comment to gray dim", () => {
       expect(defaultDarkTheme.comment).toBeDefined();
-      expect(defaultDarkTheme.comment!.fg).toBe("black");
+      expect(defaultDarkTheme.comment!.fg).toBe("#5c6370");
       expect(defaultDarkTheme.comment!.dim).toBe(true);
     });
 
-    test("maps number to yellow", () => {
+    test("maps number to orange (hex)", () => {
       expect(defaultDarkTheme.number).toBeDefined();
-      expect(defaultDarkTheme.number!.fg).toBe("yellow");
+      expect(defaultDarkTheme.number!.fg).toBe("#d19a66");
     });
 
     test("has a default fallback style", () => {
@@ -304,7 +310,7 @@ describe("Syntax Highlighting", () => {
   // ---------------------------------------------------------------------------
   describe("highlightLine", () => {
     test("produces HighlightSpan from tokens", () => {
-      const tokens = tokenize("const x = 1;", 0, typescriptRules);
+      const tokens = tokenizeStateless("const x = 1;", 0, typescriptRules);
       const spans = highlightLine(tokens, defaultDarkTheme);
       expect(spans.length).toBeGreaterThan(0);
       // Check that spans have the expected shape
@@ -318,20 +324,20 @@ describe("Syntax Highlighting", () => {
     });
 
     test("keyword spans get the keyword style from theme", () => {
-      const tokens = tokenize("const x = 1;", 0, typescriptRules);
+      const tokens = tokenizeStateless("const x = 1;", 0, typescriptRules);
       const constToken = tokens.find(t => t.value === "const")!;
       const spans = highlightLine(tokens, defaultDarkTheme);
       const constSpan = spans.find(s => s.start === constToken.startCol && s.end === constToken.endCol);
       expect(constSpan).toBeDefined();
-      expect(constSpan!.style.fg).toBe("magenta");
+      expect(constSpan!.style.fg).toBe("#c678dd");
       expect(constSpan!.style.bold).toBe(true);
     });
 
     test("string spans get the string style from theme", () => {
-      const tokens = tokenize('"hello"', 0, typescriptRules);
+      const tokens = tokenizeStateless('"hello"', 0, typescriptRules);
       const spans = highlightLine(tokens, defaultDarkTheme);
       expect(spans.length).toBe(1);
-      expect(spans[0]!.style.fg).toBe("green");
+      expect(spans[0]!.style.fg).toBe("#98c379");
     });
   });
 
@@ -340,29 +346,29 @@ describe("Syntax Highlighting", () => {
   // ---------------------------------------------------------------------------
   describe("Edge cases", () => {
     test("empty line produces empty tokens", () => {
-      const tokens = tokenize("", 0, typescriptRules);
+      const tokens = tokenizeStateless("", 0, typescriptRules);
       expect(tokens).toEqual([]);
     });
 
     test("empty line produces empty spans", () => {
-      const tokens = tokenize("", 0, typescriptRules);
+      const tokens = tokenizeStateless("", 0, typescriptRules);
       const spans = highlightLine(tokens, defaultDarkTheme);
       expect(spans).toEqual([]);
     });
 
     test("plain text with no matches produces empty tokens", () => {
-      const tokens = tokenize("    ", 0, typescriptRules);
+      const tokens = tokenizeStateless("    ", 0, typescriptRules);
       expect(tokens).toEqual([]);
     });
 
     test("plain text with no matches produces empty spans", () => {
-      const tokens = tokenize("    ", 0, typescriptRules);
+      const tokens = tokenizeStateless("    ", 0, typescriptRules);
       const spans = highlightLine(tokens, defaultDarkTheme);
       expect(spans).toEqual([]);
     });
 
     test("tokens have correct column offsets", () => {
-      const tokens = tokenize("  const", 0, typescriptRules);
+      const tokens = tokenizeStateless("  const", 0, typescriptRules);
       const constToken = tokens.find(t => t.value === "const");
       expect(constToken).toBeDefined();
       expect(constToken!.startCol).toBe(2);
@@ -370,7 +376,7 @@ describe("Syntax Highlighting", () => {
     });
 
     test("tokens have correct line number", () => {
-      const tokens = tokenize("const x = 1;", 5, typescriptRules);
+      const tokens = tokenizeStateless("const x = 1;", 5, typescriptRules);
       for (const token of tokens) {
         expect(token.line).toBe(5);
       }

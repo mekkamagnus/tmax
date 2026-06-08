@@ -1,4 +1,9 @@
-export type AnsiColor =
+/**
+ * @file style.ts
+ * @description ANSI styling with 24-bit (true-color) support
+ */
+
+export type NamedColor =
   | "black"
   | "white"
   | "gray"
@@ -8,7 +13,9 @@ export type AnsiColor =
   | "cyan"
   | "blue";
 
-const colorCodes: Record<AnsiColor, number> = {
+export type AnsiColor = NamedColor | `#${string}`;
+
+const colorCodes: Record<NamedColor, number> = {
   black: 16,
   white: 231,
   gray: 245,
@@ -21,12 +28,33 @@ const colorCodes: Record<AnsiColor, number> = {
 
 export const reset = "\x1b[0m";
 
+export function isHexColor(s: string): s is `#${string}` {
+  return /^#[0-9a-fA-F]{6}$/.test(s);
+}
+
+export function hexToRGB(hex: `#${string}`): [number, number, number] {
+  const r = parseInt(hex.slice(1, 3), 16);
+  const g = parseInt(hex.slice(3, 5), 16);
+  const b = parseInt(hex.slice(5, 7), 16);
+  return [r, g, b];
+}
+
+function isNamedColor(c: AnsiColor): c is NamedColor {
+  return c in colorCodes;
+}
+
 export function fg(text: string, color: AnsiColor): string {
-  return `\x1b[38;5;${colorCodes[color]}m${text}${reset}`;
+  const seq = isNamedColor(color)
+    ? `\x1b[38;5;${colorCodes[color]}m`
+    : (() => { const [r, g, b] = hexToRGB(color); return `\x1b[38;2;${r};${g};${b}m`; })();
+  return `${seq}${text}${reset}`;
 }
 
 export function bg(text: string, color: AnsiColor): string {
-  return `\x1b[48;5;${colorCodes[color]}m${text}${reset}`;
+  const seq = isNamedColor(color)
+    ? `\x1b[48;5;${colorCodes[color]}m`
+    : (() => { const [r, g, b] = hexToRGB(color); return `\x1b[48;2;${r};${g};${b}m`; })();
+  return `${seq}${text}${reset}`;
 }
 
 export function bold(text: string): string {
@@ -40,8 +68,16 @@ export function style(
   let prefix = "";
   if (options.bold) prefix += "\x1b[1m";
   if (options.dim) prefix += "\x1b[2m";
-  if (options.fg) prefix += `\x1b[38;5;${colorCodes[options.fg]}m`;
-  if (options.bg) prefix += `\x1b[48;5;${colorCodes[options.bg]}m`;
+  if (options.fg) {
+    prefix += isNamedColor(options.fg)
+      ? `\x1b[38;5;${colorCodes[options.fg]}m`
+      : (() => { const [r, g, b] = hexToRGB(options.fg); return `\x1b[38;2;${r};${g};${b}m`; })();
+  }
+  if (options.bg) {
+    prefix += isNamedColor(options.bg)
+      ? `\x1b[48;5;${colorCodes[options.bg]}m`
+      : (() => { const [r, g, b] = hexToRGB(options.bg); return `\x1b[48;2;${r};${g};${b}m`; })();
+  }
 
   return prefix ? `${prefix}${text}${reset}` : text;
 }
