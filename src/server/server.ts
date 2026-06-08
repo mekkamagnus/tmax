@@ -16,6 +16,8 @@ import { EditorState, Frame } from '../core/types.ts';
 import { registerTestingFramework } from '../tlisp/test-framework.ts';
 import { editorStateToJson } from './serialize.ts';
 import { cloneJsonValue } from '../tlisp/serialization.ts';
+import { captureFrame } from '../render/capture-frame.ts';
+import { ansiLinesToHtmlDocument } from '../render/ansi-to-html.ts';
 
 // JSON-RPC 2.0 interfaces
 interface JSONRPCRequest {
@@ -216,7 +218,7 @@ export class TmaxServer {
       rawModeReady: false,
     });
     this.activeFrameId = id;
-    (this.editor as any).logMessage(`Frame created: ${id}`);
+    (this.editor as any).logMessage(`Frame created: ${id}`, 'info');
     return id;
   }
 
@@ -236,6 +238,17 @@ export class TmaxServer {
     if (params?.frameId) return this.getFrame(params.frameId);
     if (this.activeFrameId) return this.getFrame(this.activeFrameId);
     throw new Error('No active frame');
+  }
+
+  /**
+   * Non-throwing variant: returns undefined when no frame is active.
+   */
+  private resolveFrameOptional(params: any): Frame | undefined {
+    try {
+      return this.resolveFrame(params);
+    } catch {
+      return undefined;
+    }
   }
 
   /**
@@ -433,7 +446,7 @@ export class TmaxServer {
       }
       this.activeFrameId = latest?.id ?? null;
     }
-    (this.editor as any).logMessage(`Frame deleted: ${id}`);
+    (this.editor as any).logMessage(`Frame deleted: ${id}`, 'info');
   }
 
   /**
@@ -542,7 +555,7 @@ export class TmaxServer {
    * Start the server
    */
   async start(): Promise<void> {
-    (this.editor as any).logMessage('Server started');
+    (this.editor as any).logMessage('Server started', 'info');
 
     // Load core bindings and init file before starting
     await (this.editor as any).ensureCoreBindingsLoaded();
@@ -762,6 +775,9 @@ export class TmaxServer {
           // Fire-and-forget shutdown so we can respond first
           setTimeout(() => { this.shutdown(); }, 50);
           break;
+        case 'capture':
+          result = this.handleCapture(request.params);
+          break;
         default:
           return {
             jsonrpc: '2.0',
@@ -833,8 +849,13 @@ export class TmaxServer {
 
     this.editor.setEditorState(newState);
     this.editor.activateMajorModeForFile(filepath);
-    (this.editor as any).logMessage(`Opened ${filepath}`);
+    (this.editor as any).logMessage(`Opened ${filepath}`, 'info');
 
+    // If a frame is targeted, sync its buffer specifically
+    const frame = this.resolveFrameOptional(params);
+    if (frame) {
+      this.syncEditorToFrame(frame);
+    }
     this.syncEditorToAllFrames();
 
     return {
@@ -855,16 +876,25 @@ export class TmaxServer {
       throw new Error('Code is required for eval');
     }
 
+    const frame = this.resolveFrameOptional(params);
+
     try {
+      if (frame) {
+        this.syncFrameToEditor(frame);
+      }
+
       // Execute the T-Lisp code using the interpreter
       const interpreter = this.editor.getInterpreter();
-      const result = interpreter.execute(code);
+      const result = interpreter.executeAsync
+        ? await interpreter.executeAsync(code)
+        : interpreter.execute(code);
 
       // Handle Either return type - check _tag property
       if (result._tag === 'Left') {
         const err = result.left as any;
         // Catch editor-quit signal and trigger graceful shutdown
         if (err.message === 'EDITOR_QUIT_SIGNAL') {
+          if (frame) this.syncEditorToFrame(frame);
           this.syncEditorToAllFrames();
           setTimeout(() => { this.shutdown(); }, 50);
           return { quitSignal: true };
@@ -876,7 +906,11 @@ export class TmaxServer {
         throw e;
       }
 
-      this.syncEditorToAllFrames();
+      if (frame) {
+        this.syncEditorToFrame(frame);
+      } else {
+        this.syncEditorToAllFrames();
+      }
 
       // Convert T-Lisp value to JSON-serializable format
       return this.tlispValueToJson(result.right);
@@ -910,7 +944,11 @@ export class TmaxServer {
       throw new Error('Text is required for insert');
     }
 
+    const frame = this.resolveFrameOptional(params);
+
     try {
+      if (frame) this.syncFrameToEditor(frame);
+
       const interpreter = this.editor.getInterpreter();
       const escaped = text
         .replace(/\\/g, '\\\\')
@@ -922,7 +960,13 @@ export class TmaxServer {
       if (result._tag === 'Left') {
         throw new Error(result.left.message || 'T-Lisp evaluation error');
       }
-      this.syncEditorToAllFrames();
+
+      if (frame) {
+        this.syncEditorToFrame(frame);
+      } else {
+        this.syncEditorToAllFrames();
+      }
+
       return this.tlispValueToJson(result.right);
     } catch (error) {
       throw new Error(`Insert error: ${error instanceof Error ? error.message : 'Unknown error'}`);
@@ -976,6 +1020,37 @@ export class TmaxServer {
       return editorStateToJson(this.frameToEditorState(frame));
     }
     return editorStateToJson(this.editor.getEditorState());
+  }
+
+  /**
+   * Handle capture request — render current frame and return ANSI or HTML.
+   */
+  private handleCapture(params: any): any {
+    const format = params?.format ?? "ansi";
+
+    // Get terminal size from the active frame, or fall back to 80x24
+    let width = 80;
+    let height = 24;
+
+    const frame = this.resolveFrameOptional(params);
+    if (frame) {
+      const obs = this.frameObservability.get(frame.id);
+      if (obs?.terminalSize) {
+        width = obs.terminalSize.width;
+        height = obs.terminalSize.height;
+      }
+    }
+
+    const state = frame
+      ? this.frameToEditorState(frame)
+      : this.editor.getEditorState();
+
+    const lines = captureFrame(state, width, height);
+
+    if (format === "html") {
+      return { html: ansiLinesToHtmlDocument(lines, width), width, height };
+    }
+    return { lines, width, height };
   }
 
   /**
@@ -1058,7 +1133,7 @@ export class TmaxServer {
       throw new Error('Command is required');
     }
 
-    // For now, we'll handle a few basic commands
+    // Read-only commands don't need frame sync
     switch (command) {
       case 'list-buffers': {
         const buffers = this.editor.getState().buffers;
@@ -1080,9 +1155,13 @@ export class TmaxServer {
         throw new Error('Buffer name required for kill-buffer');
       }
       case 'save-buffer': {
+        const frame = this.resolveFrameOptional(params);
+        if (frame) this.syncFrameToEditor(frame);
+
         const currentFile = this.editor.getState().currentFilename;
         if (currentFile) {
           await this.editor.saveFile(currentFile);
+          if (frame) this.syncEditorToFrame(frame);
           return { success: true, saved: currentFile };
         }
         throw new Error('No file to save');
@@ -1308,8 +1387,13 @@ export class TmaxServer {
         // Query the T-Lisp interpreter for available functions
         return this.getTlispFunctions();
       case 'messages': {
-        const msgs = (this.editor as any).messages as string[];
-        return { messages: msgs };
+        const log = (this.editor as any).messageLog;
+        if (!log) return { messages: [] };
+        const entries = log.getEntries({
+          level: params?.level,
+          last: params?.last,
+        });
+        return { messages: entries };
       }
       case 'function-documentation':
         const functionName = params.functionName;
