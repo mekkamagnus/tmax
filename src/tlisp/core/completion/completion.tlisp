@@ -3,7 +3,7 @@
 
 ;; completion.tlisp --- Generic Lisp-owned completion protocol
 
-(defvar completion-styles (list "orderless"))
+(defvar completion-styles (list "orderless" "basic"))
 (defvar completion-category-styles (hashmap))
 (defvar completion-style-functions (hashmap))
 
@@ -33,13 +33,17 @@
     (if styles styles completion-styles)))
 
 (defun completion-apply-styles (input category candidates)
-  "Apply CATEGORY completion styles to CANDIDATES."
+  "Apply CATEGORY completion styles to CANDIDATES, falling back through style list."
   (let ((styles (completion-styles-for-category category)))
     (if (null styles)
       candidates
       (let ((style-function (hashmap-get completion-style-functions (car styles))))
         (if style-function
-          (funcall style-function input candidates)
+          (let ((result (funcall style-function input candidates)))
+            (if (and (null result) (cdr styles))
+              (let ((fallback (hashmap-get completion-style-functions (car (cdr styles)))))
+                (if fallback (funcall fallback input candidates) candidates))
+              result))
           candidates)))))
 
 (defun completion-all-completions (input table predicate)

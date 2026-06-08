@@ -1,9 +1,10 @@
 (defmodule editor/completion/marginalia
-  (export marginalia-register-annotator marginalia-buffer-annotation marginalia-command-annotation marginalia-file-annotation marginalia-annotate-candidate marginalia-annotate-candidates)
+  (export marginalia-register-annotator marginalia-buffer-annotation marginalia-command-annotation marginalia-file-annotation marginalia-annotate-candidate marginalia-annotate-candidates marginalia-cycle)
 
 ;; marginalia.tlisp --- Category-aware completion annotations
 
 (defvar marginalia-annotator-registry (hashmap))
+(defvar marginalia-current-level 0)
 
 (defun marginalia-register-annotator (category function-name)
   "Use FUNCTION-NAME to annotate CATEGORY candidates."
@@ -13,27 +14,45 @@
 (defun marginalia-buffer-annotation (candidate)
   "Format factual buffer metadata for CANDIDATE."
   (let ((details (hashmap-get candidate "metadata")))
-    (concat
-      "  "
-      (if (hashmap-get details "current") "*" " ")
-      (if (hashmap-get details "modified") "+" " ")
-      "  "
-      (hashmap-get details "major-mode")
-      "  "
-      (hashmap-get details "characters")
-      " chars"
-      (if (hashmap-get details "filename")
-        (concat "  " (hashmap-get details "filename"))
-        ""))))
+    (if (= marginalia-current-level 0)
+      (concat
+        "  "
+        (if (hashmap-get details "current") "*" " ")
+        (if (hashmap-get details "modified") "+" " ")
+        "  "
+        (hashmap-get details "major-mode")
+        "  "
+        (hashmap-get details "characters")
+        " chars"
+        (if (hashmap-get details "filename")
+          (concat "  " (hashmap-get details "filename"))
+          ""))
+      (if (= marginalia-current-level 1)
+        (concat
+          "  "
+          (if (hashmap-get details "current") "*" " ")
+          (if (hashmap-get details "modified") "+" " ")
+          "  "
+          (hashmap-get details "major-mode"))
+        (concat
+          "  "
+          (if (hashmap-get details "current") "*" " ")
+          (if (hashmap-get details "modified") "+" " "))))))
 
 (defun marginalia-command-annotation (candidate)
   "Format factual command documentation and bindings for CANDIDATE."
   (let ((details (hashmap-get candidate "metadata")))
     (let ((bindings (hashmap-get details "bindings")))
-      (concat
-        "  "
-        (if (null bindings) "" (concat "[" (car bindings) "] "))
-        (hashmap-get details "documentation")))))
+      (if (= marginalia-current-level 0)
+        (concat
+          "  "
+          (if (null bindings) "" (concat "[" (car bindings) "] "))
+          (hashmap-get details "documentation"))
+        (if (= marginalia-current-level 1)
+          (concat
+            "  "
+            (if (null bindings) "" (concat "[" (car bindings) "] ")))
+          "  ")))))
 
 (defun marginalia-file-annotation (candidate)
   "Format file metadata for CANDIDATE."
@@ -58,4 +77,10 @@
 (marginalia-register-annotator "buffer" "marginalia-buffer-annotation")
 (marginalia-register-annotator "command" "marginalia-command-annotation")
 (marginalia-register-annotator "file" "marginalia-file-annotation")
+
+(defun marginalia-cycle ()
+  "Cycle annotation detail level and refresh the minibuffer view."
+  (set! marginalia-current-level
+    (mod (+ marginalia-current-level 1) 3))
+  (minibuffer-refresh))
 )

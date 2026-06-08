@@ -227,6 +227,7 @@
     ((string= key "Tab") (vertico-insert))
     ((string= key "M-p") (minibuffer-history-previous))
     ((string= key "M-n") (minibuffer-history-next))
+    ((string= key "M-A") (marginalia-cycle))
     ((string= key "Enter") (minibuffer-accept))
     ((or (string= key "C-g") (string= key "Escape")) (minibuffer-cancel))
     (t nil)))
