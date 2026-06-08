@@ -23,6 +23,8 @@ Options:
   --daemon       Start daemon only (no TUI frame)
   -e EXPR        Evaluate T-Lisp expression (like emacsclient -e)
   --stop         Stop the running daemon
+  --capture      Capture current frame as ANSI (colors preserved)
+  --capture-html Capture current frame as standalone HTML
   -t             Open a new terminal frame
   -h, --help     Show this help message
 
@@ -31,6 +33,8 @@ Examples:
   tmax file.txt         Start daemon + open TUI with file
   tmax --daemon         Start daemon only
   tmax -e '(buffer-text)'  Evaluate T-Lisp
+  tmax --capture        Dump current frame with colors
+  tmax --capture-html > /tmp/frame.html && open /tmp/frame.html
   tmax --stop           Stop daemon
 EOF
   exit 0
@@ -101,15 +105,18 @@ ensure_daemon() {
 DAEMON_ONLY=false
 EVAL_EXPR=""
 STOP=false
+CAPTURE=""
 FILES=()
 
 for arg in "$@"; do
   case "$arg" in
-    --daemon)   DAEMON_ONLY=true ;;
-    -e)         shift_mode=eval ;;
-    --stop)     STOP=true ;;
-    -t)         ;; # -t is default behavior (open terminal frame)
-    -h|--help)  usage ;;
+    --daemon)       DAEMON_ONLY=true ;;
+    -e)             shift_mode=eval ;;
+    --stop)         STOP=true ;;
+    --capture)      CAPTURE=ansi ;;
+    --capture-html) CAPTURE=html ;;
+    -t)             ;; # -t is default behavior (open terminal frame)
+    -h|--help)      usage ;;
     *)
       if [ "${shift_mode:-}" = "eval" ]; then
         EVAL_EXPR="$arg"
@@ -149,6 +156,16 @@ fi
 if [ -n "$EVAL_EXPR" ]; then
   ensure_daemon
   exec "$CLIENT" --eval "$EVAL_EXPR"
+fi
+
+# Handle --capture / --capture-html
+if [ -n "$CAPTURE" ]; then
+  ensure_daemon
+  if [ "$CAPTURE" = "html" ]; then
+    exec "$CLIENT" -s "$SOCKET" --capture-html
+  else
+    exec "$CLIENT" -s "$SOCKET" --capture
+  fi
 fi
 
 # Handle --daemon only

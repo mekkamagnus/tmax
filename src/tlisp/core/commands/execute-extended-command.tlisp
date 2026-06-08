@@ -32,7 +32,9 @@
 
 (defun execute-extended-command-accept (name)
   "Invoke named command NAME."
-  (invoke-command name))
+  (progn
+    (log-message :debug (concat "M-x " name))
+    (invoke-command name)))
 
 (defun execute-extended-command ()
   "Read and invoke a named command using generic completion."

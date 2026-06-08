@@ -24,6 +24,19 @@ authoritative validation command.
 T-Lisp `deftest` coverage remains useful for extension behavior and may run
 through the interpreter or Bun tests. It does not replace any required gate.
 
+### Capture-Based Visual Testing
+
+The daemon's `capture` RPC provides a fifth testing approach: server-side rendering without a terminal. Tests in `test/unit/daemon-capture-parity.test.ts` and `test/unit/render-visual.test.ts` exercise this.
+
+- **ANSI capture** (`--capture`): Returns rendered lines with 24-bit color codes. Assert specific color sequences to verify syntax highlighting, or strip ANSI to assert text content.
+- **HTML capture** (`--capture-html`): Returns a standalone HTML document with One Dark theme. Assert DOM structure, RGB colors, or save for visual review.
+- **Standalone renderer** (`captureFrame()` in `src/render/capture-frame.ts`): Pure function that takes `EditorState` and returns `string[]`. Use in Bun tests without a running daemon.
+
+When to use capture vs other gates:
+- **Capture tests**: assert that specific colors reach rendered output, or that status line/layout is correct
+- **Daemon integration**: assert editor state, T-Lisp evaluation, buffer content — without visual claims
+- **Renderer E2E** (`daemon-tmux`): assert actual terminal behavior (cursor, scroll, resize)
+
 ### Boundary Rules
 
 - Daemon tests may use direct T-Lisp evaluation, but must not claim renderer verification.
