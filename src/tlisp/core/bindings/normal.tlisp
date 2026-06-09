@@ -6,6 +6,7 @@
   (require-module editor/modes/python)
   (require-module editor/modes/lisp)
   (require-module editor/modes/go)
+  (require-module editor/modes/markdown)
   (require-module editor/modes/line-numbers)
   (require-module editor/modes/relative-line-numbers)
   (require-module editor/modes/auto-fill)
@@ -40,6 +41,7 @@
   (require-module editor/commands/dired)
   (require-module editor/commands/windows)
   (require-module editor/commands/tabs)
+  (require-module editor/commands/markdown)
 
 ;; normal.tlisp
 ;; Default key bindings for normal mode in tmax editor
