@@ -1,6 +1,6 @@
 /**
- * @file style.ts
- * @description ANSI styling with 24-bit (true-color) support
+ * @file matcha.ts
+ * @description ANSI styling with 24-bit (true-color) support — Steep's Lip Gloss equivalent
  */
 
 export type NamedColor =
@@ -61,13 +61,46 @@ export function bold(text: string): string {
   return `\x1b[1m${text}\x1b[22m`;
 }
 
+export function dim(text: string): string {
+  return `\x1b[2m${text}\x1b[22m`;
+}
+
+export function italic(text: string): string {
+  return `\x1b[3m${text}\x1b[23m`;
+}
+
+export function underline(text: string): string {
+  return `\x1b[4m${text}\x1b[24m`;
+}
+
+export function strikethrough(text: string): string {
+  return `\x1b[9m${text}\x1b[29m`;
+}
+
+export function inverse(text: string): string {
+  return `\x1b[7m${text}\x1b[27m`;
+}
+
 export function style(
   text: string,
-  options: { fg?: AnsiColor; bg?: AnsiColor; bold?: boolean; dim?: boolean } = {},
+  options: {
+    fg?: AnsiColor;
+    bg?: AnsiColor;
+    bold?: boolean;
+    dim?: boolean;
+    italic?: boolean;
+    underline?: boolean;
+    strikethrough?: boolean;
+    inverse?: boolean;
+  } = {},
 ): string {
   let prefix = "";
   if (options.bold) prefix += "\x1b[1m";
   if (options.dim) prefix += "\x1b[2m";
+  if (options.italic) prefix += "\x1b[3m";
+  if (options.underline) prefix += "\x1b[4m";
+  if (options.strikethrough) prefix += "\x1b[9m";
+  if (options.inverse) prefix += "\x1b[7m";
   if (options.fg) {
     prefix += isNamedColor(options.fg)
       ? `\x1b[38;5;${colorCodes[options.fg]}m`

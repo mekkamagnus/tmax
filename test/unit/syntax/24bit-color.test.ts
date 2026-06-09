@@ -4,7 +4,7 @@
  */
 
 import { describe, test, expect } from "bun:test";
-import { isHexColor, hexToRGB, fg, bg, bold, style, stripAnsi } from "../../../src/frontend/frontends/steep/style.ts";
+import { isHexColor, hexToRGB, fg, bg, bold, style, stripAnsi } from "../../../src/steep/matcha.ts";
 
 describe("24-bit Color Support", () => {
   describe("isHexColor", () => {

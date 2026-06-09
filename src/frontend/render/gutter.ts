@@ -1,4 +1,4 @@
-import { style } from "../frontends/steep/style.ts";
+import { style } from "../../steep/matcha.ts";
 
 export interface GutterConfig {
   showLineNumbers: boolean;
@@ -23,11 +23,29 @@ export function renderGutterLine(
   totalLines: number,
   config: GutterConfig,
   isCurrentLine: boolean,
+  foldState?: "collapsed" | "expandable",
 ): string {
   const width = gutterWidth(totalLines);
 
   if (!config.showLineNumbers) {
+    if (foldState === "collapsed") {
+      return style("\u25B6", { fg: "magenta", dim: true });
+    }
+    if (foldState === "expandable") {
+      return style("\u25BC", { fg: "gray", dim: true });
+    }
     return "";
+  }
+
+  const separator = "\u2502";
+
+  if (foldState === "collapsed") {
+    const marker = "\u25B6" + " ".repeat(width - 2);
+    return style(marker, { fg: "magenta", dim: true }) + separator;
+  }
+  if (foldState === "expandable") {
+    const marker = "\u25BC" + " ".repeat(width - 2);
+    return style(marker, { fg: "gray", dim: true }) + separator;
   }
 
   let text: string;
@@ -43,7 +61,6 @@ export function renderGutterLine(
   }
 
   const padded = text.padStart(width - 1) + " ";
-  const separator = "\u2502";
 
   if (isCurrentLine) {
     return style(padded, { fg: "white", bold: true }) + separator;

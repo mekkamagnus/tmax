@@ -1,0 +1,26 @@
+import type { Theme } from "../renderer.ts";
+
+export const lightTheme: Theme = {
+  document: {},
+  h1: { color: "#a50000", bold: true, margin: 1 },
+  h2: { color: "#7c3aed", bold: true, margin: 1 },
+  h3: { color: "#0369a1", bold: true },
+  h4: { color: "#15803d", bold: true },
+  h5: { color: "#a16207" },
+  h6: { color: "#6b7280" },
+  text: { color: "#1f2937" },
+  strong: { bold: true },
+  emphasis: { italic: true },
+  strikethrough: { strikethrough: true },
+  codespan: { color: "#15803d", background: "#f3f4f6" },
+  codeBlock: { background: "#f3f4f6", margin: 1 },
+  blockquote: { color: "#6b7280", indent: 2, prefix: "│ " },
+  link: { color: "#0369a1", underline: true },
+  image: { color: "#15803d" },
+  orderedList: { indent: 2 },
+  unorderedList: { indent: 2 },
+  taskList: { indent: 2 },
+  table: {},
+  horizontalRule: { color: "#9ca3af" },
+  yamlFrontMatter: { color: "#6b7280" },
+};

@@ -1,5 +1,5 @@
-import { DEFAULT_TERMINAL_COLS, DEFAULT_TERMINAL_ROWS } from "../../../constants/terminal.ts";
-import type { TerminalDims } from "../types.ts";
+import { DEFAULT_TERMINAL_COLS, DEFAULT_TERMINAL_ROWS } from "../constants/terminal.ts";
+import type { TerminalDims } from "../frontend/frontends/types.ts";
 
 export class Screen {
   enterAltScreen() {

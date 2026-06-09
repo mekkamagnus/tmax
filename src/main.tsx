@@ -12,7 +12,7 @@ import { FunctionalTextBufferImpl } from './core/buffer.ts';
 import { EditorState } from './core/types.ts';
 import { TmaxServer } from './server/server.ts';
 import { Logger, LogLevel } from './utils/logger.ts';
-import { SteepFrontend } from './frontend/frontends/steep/index.ts';
+import { SteepFrontend } from './steep/assam.ts';
 
 /**
  * Main entry point that:

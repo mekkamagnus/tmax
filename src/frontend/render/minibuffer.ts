@@ -1,5 +1,5 @@
 import type { MinibufferRenderSegment, MinibufferRenderView } from "../../core/types.ts";
-import { style, type AnsiColor } from "../frontends/steep/style.ts";
+import { style, type AnsiColor } from "../../steep/matcha.ts";
 
 export interface RenderedMinibuffer {
   lines: string[];

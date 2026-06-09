@@ -1,6 +1,6 @@
 import type { EditorState, HighlightSpan, Window } from "../../core/types.ts";
 import { Either } from "../../utils/task-either.ts";
-import { style, type AnsiColor } from "../frontends/steep/style.ts";
+import { style, type AnsiColor } from "../../steep/matcha.ts";
 import {
   renderGutterLine,
   renderEmptyGutter,
@@ -159,6 +159,7 @@ function renderSingleWindow(
   gutterCfg: GutterConfig,
   isFocused: boolean,
   highlightSpans?: HighlightSpan[][],
+  foldRanges?: Map<number, number>,
 ): string[] {
   const gw = gutterDisplayWidth(totalLines, gutterCfg);
   const cw = Math.max(1, contentWidth - gw);
@@ -182,9 +183,37 @@ function renderSingleWindow(
       continue;
     }
 
+    // Check if this line is inside a collapsed fold
+    if (foldRanges) {
+      let inFold = false;
+      for (const [foldStart, foldEnd] of foldRanges) {
+        if (lineNumber > foldStart && lineNumber <= foldEnd) {
+          inFold = true;
+          break;
+        }
+      }
+      if (inFold) continue;
+    }
+
     const isCurrentLine = isFocused && lineNumber === cursorLine;
-    const gutter = renderGutterLine(lineNumber, cursorLine, totalLines, gutterCfg, isCurrentLine);
     const rawLine = getLineForBuffer(buffer, lineNumber);
+
+    // Check if this line is the start of a fold
+    const foldEnd = foldRanges?.get(lineNumber);
+    if (foldEnd !== undefined) {
+      const hiddenCount = foldEnd - lineNumber;
+      const gutter = renderGutterLine(lineNumber, cursorLine, totalLines, gutterCfg, isCurrentLine, "collapsed");
+      const foldIndicator = `... [${hiddenCount} lines]`;
+      const padded = fitToWidth(foldIndicator, cw);
+      lines.push(gutter + style(padded, { dim: true }));
+      continue;
+    }
+
+    // Check if this heading line is expandable (not folded)
+    const isHeading = /^#{1,6}\s/.test(rawLine);
+    const foldState = isHeading && foldRanges ? "expandable" as const : undefined;
+
+    const gutter = renderGutterLine(lineNumber, cursorLine, totalLines, gutterCfg, isCurrentLine, foldState);
 
     const lineSpans = highlightSpans?.[lineNumber];
     if (lineSpans && lineSpans.length > 0) {
@@ -212,6 +241,17 @@ export function renderBufferLines(
   height: number,
   highlightSpans?: HighlightSpan[][]
 ): string[] {
+  // B5: Auto-expand fold if cursor is inside a collapsed region
+  if (state.foldRanges && state.foldRanges.size > 0) {
+    const cursorLine = state.cursorPosition.line;
+    for (const [foldStart, foldEnd] of state.foldRanges) {
+      if (cursorLine > foldStart && cursorLine <= foldEnd) {
+        state.foldRanges.delete(foldStart);
+        break;
+      }
+    }
+  }
+
   const windows = state.windows;
   const currentWindowIndex = state.currentWindowIndex ?? 0;
 
@@ -229,6 +269,7 @@ export function renderBufferLines(
       gutterCfg,
       true,
       highlightSpans,
+      state.foldRanges,
     );
   }
 

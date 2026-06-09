@@ -1,5 +1,5 @@
 import type { EditorState } from "../../core/types.ts";
-import { style, stripAnsi, type AnsiColor } from "../frontends/steep/style.ts";
+import { style, stripAnsi, type AnsiColor } from "../../steep/matcha.ts";
 
 export const modeDisplay: Record<EditorState["mode"], { text: string; color: AnsiColor }> = {
   normal: { text: "--NORMAL--", color: "green" },
