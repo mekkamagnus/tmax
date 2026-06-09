@@ -4,6 +4,7 @@
  */
 
 import type { Editor } from "../editor.ts";
+import { resolveMapping } from "../editor.ts";
 import { Either } from "../../utils/task-either.ts";
 import { log } from "../../utils/logger.ts";
 import { isTruthy } from "../../tlisp/values.ts";
@@ -74,7 +75,8 @@ export async function handleNormalMode(editor: Editor, key: string, normalizedKe
     return;
   }
 
-  const mapping = mappings.find((m: any) => !m.mode || m.mode === "normal");
+  const currentMajorMode = (editor as any).getCurrentMajorMode?.() as string | undefined;
+  const mapping = resolveMapping(mappings, "normal", currentMajorMode);
   if (!mapping) {
     handlerLog.debug(`No normal mode mapping for key: ${lookupKey}`, {
       data: { key, normalizedKey, lookupKey, availableModes: mappings.map((m: any) => m.mode) }

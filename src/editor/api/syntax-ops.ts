@@ -34,6 +34,7 @@ import { rules as lispRules } from "../../syntax/languages/lisp.ts";
 import { rules as goRules } from "../../syntax/languages/go.ts";
 import { rules as cRules } from "../../syntax/languages/c.ts";
 import { rules as clojureRules } from "../../syntax/languages/clojure.ts";
+import { rules as mdRules } from "../../syntax/languages/markdown.ts";
 
 /**
  * Language name -> syntax rules
@@ -52,6 +53,7 @@ const languageRules: Map<string, SyntaxRule[]> = new Map([
   ["h", cRules],
   ["clojure", clojureRules],
   ["clj", clojureRules],
+  ["markdown", mdRules],
 ]);
 
 /**

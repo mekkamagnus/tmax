@@ -51,6 +51,33 @@ export interface KeyMapping {
   key: string;
   command: string;
   mode?: "normal" | "insert" | "visual" | "command" | "mx";
+  majorMode?: string;
+}
+
+/**
+ * Resolve the best key mapping from candidates, considering editor mode
+ * and major mode. Precedence: mode+majorMode > mode > majorMode > global.
+ */
+export function resolveMapping(
+  mappings: KeyMapping[],
+  editorMode: string,
+  currentMajorMode?: string,
+): KeyMapping | undefined {
+  // 1. Exact match: editor mode + major mode
+  if (currentMajorMode) {
+    const exact = mappings.find(m => m.mode === editorMode && m.majorMode === currentMajorMode);
+    if (exact) return exact;
+  }
+  // 2. Editor mode only (no major mode constraint)
+  const modeOnly = mappings.find(m => m.mode === editorMode && !m.majorMode);
+  if (modeOnly) return modeOnly;
+  // 3. Major mode only (no editor mode constraint)
+  if (currentMajorMode) {
+    const majorOnly = mappings.find(m => !m.mode && m.majorMode === currentMajorMode);
+    if (majorOnly) return majorOnly;
+  }
+  // 4. Global (no constraints)
+  return mappings.find(m => !m.mode && !m.majorMode);
 }
 
 /**
@@ -338,13 +365,14 @@ export class Editor {
 
     // Add key mapping functions
     defineRaw("key-bind", (args) => {
-      if (args.length < 2 || args.length > 3) {
-        throw new Error("key-bind requires 2 or 3 arguments: key, command, optional mode");
+      if (args.length < 2 || args.length > 4) {
+        throw new Error("key-bind requires 2-4 arguments: key, command, optional mode, optional major-mode");
       }
 
       const keyArg = args[0];
       const commandArg = args[1];
       const modeArg = args[2];
+      const majorModeArg = args[3];
 
       if (!keyArg || keyArg.type !== "string") {
         throw new Error("key-bind requires a string key");
@@ -369,15 +397,23 @@ export class Editor {
         mode = modeStr as "normal" | "insert" | "visual" | "command" | "mx";
       }
 
-      const mapping: KeyMapping = { key, command, mode };
+      let majorMode: string | undefined;
+      if (majorModeArg) {
+        if (majorModeArg.type !== "string") {
+          throw new Error("key-bind major-mode must be a string");
+        }
+        majorMode = majorModeArg.value as string;
+      }
+
+      const mapping: KeyMapping = { key, command, mode, majorMode };
 
       if (!this.keyMappings.has(key)) {
         this.keyMappings.set(key, []);
       }
 
-      // Remove any existing mappings for the same key and mode to handle conflicts
+      // Remove any existing mappings for the same key, mode, and majorMode to handle conflicts
       const existingMappings = this.keyMappings.get(key)!;
-      const filteredMappings = existingMappings.filter(existing => existing.mode !== mode);
+      const filteredMappings = existingMappings.filter(existing => !(existing.mode === mode && existing.majorMode === majorMode));
 
       // Add the new mapping
       filteredMappings.push(mapping);
@@ -838,6 +874,20 @@ export class Editor {
         throw new Error("count-active requires no arguments");
       }
       return { type: "boolean", value: this.isCountActive() };
+    });
+
+    // Emacs-compatible prefix aliases that delegate to the count system
+    defineRaw("set-prefix", (args) => {
+      if (args.length !== 1) throw new Error("set-prefix requires exactly 1 argument: n");
+      if (args[0]?.type !== "number") throw new Error("set-prefix requires a number");
+      this.setCount(Number(args[0].value));
+      return createNumber(Number(args[0].value));
+    });
+
+    defineRaw("prefix-numeric-value", (_args) => {
+      const count = this.getCount();
+      // Return nil when no prefix is active, otherwise the count value
+      return count > 0 ? createNumber(count) : createNil();
     });
 
     // Add file operations

@@ -4,6 +4,7 @@
  */
 
 import type { Editor } from "../editor.ts";
+import { resolveMapping } from "../editor.ts";
 
 /**
  * Handle key input in visual mode
@@ -22,7 +23,8 @@ export async function handleVisualMode(editor: Editor, key: string, normalizedKe
     (editor as any).logMessage(`Unbound key: ${normalizedKey}`, 'debug');
   } else {
     // Find mapping for visual mode
-    const mapping = mappings.find((m: any) => !m.mode || m.mode === "visual");
+    const currentMajorMode = (editor as any).getCurrentMajorMode?.() as string | undefined;
+    const mapping = resolveMapping(mappings, "visual", currentMajorMode);
     if (!mapping) {
       (editor as any).state.statusMessage = `Unbound key in visual mode: ${normalizedKey}`;
       (editor as any).logMessage(`Unbound key in visual mode: ${normalizedKey}`, 'debug');

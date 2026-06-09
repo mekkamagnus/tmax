@@ -4,6 +4,7 @@
  */
 
 import type { Editor } from "../editor.ts";
+import { resolveMapping } from "../editor.ts";
 import { log } from "../../utils/logger.ts";
 
 /**
@@ -108,7 +109,8 @@ export async function handleCommandMode(editor: Editor, key: string, normalizedK
       (editor as any).logMessage(`Unbound key: ${normalizedKey}`, 'debug');
     } else {
       // Find mapping for command mode
-      const mapping = mappings.find((m: any) => !m.mode || m.mode === "command");
+      const currentMajorMode = (editor as any).getCurrentMajorMode?.() as string | undefined;
+      const mapping = resolveMapping(mappings, "command", currentMajorMode);
       if (!mapping) {
         (editor as any).state.statusMessage = `Unbound key in command mode: ${normalizedKey}`;
         (editor as any).logMessage(`Unbound key in command mode: ${normalizedKey}`, 'debug');
