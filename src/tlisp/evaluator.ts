@@ -480,6 +480,24 @@ export class TLispEvaluator {
   }
 
   /**
+   * Evaluate (provide "module-name")
+   * Registers the current module's public exports under the given feature name.
+   * Currently a no-op that returns nil — the module system already tracks exports
+   * via (export ...). This form exists for convention and forward compatibility.
+   */
+  private evalProvide(elements: TLispValue[], env: TLispEnvironment): Either<EvalError, TLispValue> {
+    if (elements.length < 2) {
+      return Either.left({
+        type: 'EvalError',
+        variant: 'SyntaxError',
+        message: "provide requires a feature name string",
+        details: { expected: "2+", actual: elements.length }
+      });
+    }
+    return Either.right(createNil());
+  }
+
+  /**
    * Evaluate a list expression
    * @param list - List to evaluate
    * @param env - Environment for evaluation
@@ -531,6 +549,7 @@ export class TLispEvaluator {
         case "if":
           return this.evalIf(elements, env, inTailPosition);
         case "let":
+        case "let*":
           return this.evalLet(elements, env, inTailPosition);
         case "lambda":
           return this.evalLambda(elements, env);
@@ -564,6 +583,8 @@ export class TLispEvaluator {
           return this.evalRequireModule(elements, env);
         case "current-module":
           return this.evalCurrentModule(elements, env);
+        case "provide":
+          return this.evalProvide(elements, env);
         case "set!":
           return this.evalSetBang(elements, env);
         case "assert-type":
@@ -572,6 +593,14 @@ export class TLispEvaluator {
           return this.evalAssertError(elements, env);
         case "progn":
           return this.evalProgn(elements, env, inTailPosition);
+        case "while":
+          return this.evalWhile(elements, env);
+        case "dolist":
+          return this.evalDolist(elements, env);
+        case "and":
+          return this.evalAnd(elements, env);
+        case "or":
+          return this.evalOr(elements, env);
         default:
           return this.evalFunctionCall(elements, env, inTailPosition);
       }
@@ -628,6 +657,7 @@ export class TLispEvaluator {
         case "if":
           return this.evalIfAsync(elements, env, context, inTailPosition);
         case "let":
+        case "let*":
           return this.evalLetAsync(elements, env, context, inTailPosition, false);
         case "async-let":
           return this.evalLetAsync(elements, env, withAsyncMode(context), inTailPosition, true);
@@ -639,6 +669,11 @@ export class TLispEvaluator {
           return this.evalCondAsync(elements, env, context, inTailPosition);
         case "progn":
           return this.evalPrognAsync(elements, env, context, inTailPosition);
+        case "while":
+          return this.evalWhileAsync(elements, env, context);
+        case "dolist":
+        case "and":
+        case "or":
         case "defmacro":
         case "deftest":
         case "deftest-async":
@@ -653,7 +688,9 @@ export class TLispEvaluator {
         case "defmodule":
         case "require-module":
         case "current-module":
+        case "provide":
         case "set!":
+        case "while":
         case "assert-type":
         case "assert-error":
           return this.evalList(list, env, inTailPosition);
@@ -961,20 +998,20 @@ export class TLispEvaluator {
    * @returns Either with error or conditional result
    */
   private evalIf(elements: TLispValue[], env: TLispEnvironment, inTailPosition: boolean = false): Either<EvalError, EvalResult> {
-    if (elements.length !== 4) {
+    if (elements.length < 3 || elements.length > 4) {
       return Either.left({
         type: 'EvalError',
         variant: 'SyntaxError',
-        message: "if requires exactly 3 arguments: condition, then-expr, else-expr",
-        details: { expected: 4, actual: elements.length }
+        message: "if requires 2-3 arguments: condition, then-expr, [else-expr]",
+        details: { expected: '3-4', actual: elements.length }
       });
     }
 
     const conditionExpr = elements[1];
     const thenExpr = elements[2];
-    const elseExpr = elements[3];
+    const elseExpr = elements[3] ?? createNil();
 
-    if (!conditionExpr || !thenExpr || !elseExpr) {
+    if (!conditionExpr || !thenExpr) {
       return Either.left({
         type: 'EvalError',
         variant: 'SyntaxError',
@@ -1003,20 +1040,20 @@ export class TLispEvaluator {
     context: EvalContext,
     inTailPosition: boolean = false
   ): Promise<Either<EvalError, EvalResult>> {
-    if (elements.length !== 4) {
+    if (elements.length < 3 || elements.length > 4) {
       return Either.left({
         type: 'EvalError',
         variant: 'SyntaxError',
-        message: "if requires exactly 3 arguments: condition, then-expr, else-expr",
-        details: { expected: 4, actual: elements.length }
+        message: "if requires 2-3 arguments: condition, then-expr, [else-expr]",
+        details: { expected: '3-4', actual: elements.length }
       });
     }
 
     const conditionExpr = elements[1];
     const thenExpr = elements[2];
-    const elseExpr = elements[3];
+    const elseExpr = elements[3] ?? createNil();
 
-    if (!conditionExpr || !thenExpr || !elseExpr) {
+    if (!conditionExpr || !thenExpr) {
       return Either.left({
         type: 'EvalError',
         variant: 'SyntaxError',
@@ -1046,24 +1083,24 @@ export class TLispEvaluator {
    * @returns Either with error or let body result
    */
   private evalLet(elements: TLispValue[], env: TLispEnvironment, inTailPosition: boolean = false): Either<EvalError, EvalResult> {
-    if (elements.length !== 3) {
+    if (elements.length < 3) {
       return Either.left({
         type: 'EvalError',
         variant: 'SyntaxError',
-        message: "let requires exactly 2 arguments: bindings and body",
-        details: { expected: 3, actual: elements.length }
+        message: "let requires bindings and body",
+        details: { expected: "3+", actual: elements.length }
       });
     }
 
+    const isSequential = elements[0]?.type === "symbol" && elements[0]?.value === "let*";
     const bindings = elements[1];
-    const body = elements[2];
 
-    if (!bindings || !body) {
+    if (!bindings) {
       return Either.left({
         type: 'EvalError',
         variant: 'SyntaxError',
-        message: "let missing required arguments",
-        details: { hasBindings: !!bindings, hasBody: !!body }
+        message: "let missing bindings",
+        details: {}
       });
     }
 
@@ -1076,10 +1113,8 @@ export class TLispEvaluator {
       });
     }
 
-    // Create new environment for let bindings
     const letEnv = new TLispEnvironmentImpl(env);
 
-    // Process bindings
     const bindingList = bindings.value as TLispValue[];
     for (const binding of bindingList) {
       if (binding.type !== "list") {
@@ -1122,17 +1157,28 @@ export class TLispEvaluator {
         });
       }
 
-      const evaluatedValueResult = this.eval(value, env);
+      // let* evaluates in the new env (sequential), let evaluates in the outer env (parallel)
+      const evalEnv = isSequential ? letEnv : env;
+      const evaluatedValueResult = this.eval(value, evalEnv);
       if (Either.isLeft(evaluatedValueResult)) {
         return evaluatedValueResult;
       }
 
-      const evaluatedValue = evaluatedValueResult.right;
-      letEnv.define(name.value as string, evaluatedValue);
+      letEnv.define(name.value as string, evaluatedValueResult.right);
     }
 
-    // Evaluate body in new environment
-    return this.evalInternal(body, letEnv, inTailPosition);
+    // Evaluate body forms, return last
+    let lastResult: Either<EvalError, EvalResult> = Either.right(createNil());
+    const bodyForms = elements.slice(2);
+    for (let i = 0; i < bodyForms.length; i++) {
+      const form = bodyForms[i]!;
+      const isLast = i === bodyForms.length - 1;
+      lastResult = isLast
+        ? this.evalInternal(form, letEnv, inTailPosition)
+        : this.eval(form, letEnv);
+      if (Either.isLeft(lastResult)) return lastResult;
+    }
+    return lastResult;
   }
 
   private async evalLetAsync(
@@ -1142,7 +1188,7 @@ export class TLispEvaluator {
     inTailPosition: boolean = false,
     allowMultipleBody: boolean = false
   ): Promise<Either<EvalError, EvalResult>> {
-    if ((!allowMultipleBody && elements.length !== 3) || (allowMultipleBody && elements.length < 3)) {
+    if (elements.length < 3) {
       return Either.left({
         type: 'EvalError',
         variant: 'SyntaxError',
@@ -1151,6 +1197,7 @@ export class TLispEvaluator {
       });
     }
 
+    const isSequential = elements[0]?.type === "symbol" && elements[0]?.value === "let*";
     const bindings = elements[1];
     if (!bindings) {
       return Either.left({
@@ -1170,7 +1217,7 @@ export class TLispEvaluator {
       });
     }
 
-    const bodyExprs = allowMultipleBody ? elements.slice(2) : [elements[2]!];
+    const bodyExprs = elements.slice(2);
     if (bodyExprs.length === 0 || !bodyExprs[0]) {
       return Either.left({
         type: 'EvalError',
@@ -1214,7 +1261,7 @@ export class TLispEvaluator {
         });
       }
 
-      const evaluatedValueResult = await this.evalAsync(value, env, context);
+      const evaluatedValueResult = await this.evalAsync(value, isSequential ? letEnv : env, context);
       if (Either.isLeft(evaluatedValueResult)) {
         return evaluatedValueResult;
       }
@@ -3090,6 +3137,192 @@ export class TLispEvaluator {
     return lastResult;
   }
 
+  private evalWhile(elements: TLispValue[], env: TLispEnvironment): Either<EvalError, EvalResult> {
+    if (elements.length < 3) {
+      return Either.left({
+        type: 'EvalError',
+        variant: 'SyntaxError',
+        message: "while requires test and body",
+        details: { actual: elements.length }
+      });
+    }
+    const testExpr = elements[1]!;
+    const bodyExprs = elements.slice(2);
+    const MAX_ITERATIONS = 100000;
+    let iterations = 0;
+    let lastResult: Either<EvalError, EvalResult> = Either.right(createNil());
+
+    while (true) {
+      if (iterations++ >= MAX_ITERATIONS) {
+        return Either.left({ type: 'EvalError', variant: 'RuntimeError', message: "while loop exceeded maximum iterations", details: {} });
+      }
+      const testResult = this.eval(testExpr, env);
+      if (Either.isLeft(testResult)) return testResult;
+      if (!isTruthy(testResult.right)) break;
+
+      for (const bodyExpr of bodyExprs) {
+        lastResult = this.eval(bodyExpr!, env);
+        if (Either.isLeft(lastResult)) return lastResult;
+      }
+    }
+    return lastResult;
+  }
+
+  private async evalWhileAsync(elements: TLispValue[], env: TLispEnvironment, context: EvalContext): Promise<Either<EvalError, EvalResult>> {
+    if (elements.length < 3) {
+      return Either.left({
+        type: 'EvalError',
+        variant: 'SyntaxError',
+        message: "while requires test and body",
+        details: { actual: elements.length }
+      });
+    }
+    const testExpr = elements[1]!;
+    const bodyExprs = elements.slice(2);
+    const MAX_ITERATIONS = 100000;
+    let iterations = 0;
+    let lastResult: Either<EvalError, EvalResult> = Either.right(createNil());
+
+    while (true) {
+      if (iterations++ >= MAX_ITERATIONS) {
+        return Either.left({ type: 'EvalError', variant: 'RuntimeError', message: "while loop exceeded maximum iterations", details: {} });
+      }
+      const testResult = await this.evalAsync(testExpr, env, context);
+      if (Either.isLeft(testResult)) return testResult;
+      const resolved = await awaitIfPromise(testResult.right);
+      if (Either.isLeft(resolved)) return Either.left(resolved.left as EvalError);
+      if (!isTruthy(resolved.right)) break;
+
+      for (const bodyExpr of bodyExprs) {
+        lastResult = await this.evalAsync(bodyExpr!, env, context);
+        if (Either.isLeft(lastResult)) return lastResult;
+      }
+    }
+    return lastResult;
+  }
+
+  /**
+   * Evaluate (dolist (var list) body...) special form.
+   * Iterates over list, binding each element to var, evaluating body forms.
+   * Returns nil.
+   */
+  private evalDolist(elements: TLispValue[], env: TLispEnvironment): Either<EvalError, EvalResult> {
+    if (elements.length < 2) {
+      return Either.left({
+        type: 'EvalError',
+        variant: 'SyntaxError',
+        message: "dolist requires a binding spec and optional body",
+        details: { actual: elements.length }
+      });
+    }
+
+    const spec = elements[1]!;
+    if (spec.type !== "list") {
+      return Either.left({
+        type: 'EvalError',
+        variant: 'SyntaxError',
+        message: "dolist binding spec must be a list: (var list)",
+        details: { actual: spec.type }
+      });
+    }
+
+    const specParts = spec.value as TLispValue[];
+    if (specParts.length < 2) {
+      return Either.left({
+        type: 'EvalError',
+        variant: 'SyntaxError',
+        message: "dolist binding spec requires (var list)",
+        details: { actual: specParts.length }
+      });
+    }
+
+    const varName = specParts[0]!;
+    if (varName.type !== "symbol") {
+      return Either.left({
+        type: 'EvalError',
+        variant: 'SyntaxError',
+        message: "dolist variable must be a symbol",
+        details: { actual: varName.type }
+      });
+    }
+
+    const listExpr = specParts[1]!;
+    const bodyExprs = elements.slice(2);
+
+    // Evaluate the list expression
+    const listResult = this.eval(listExpr, env);
+    if (Either.isLeft(listResult)) return listResult;
+
+    const listValue = listResult.right;
+    if (listValue.type !== "list") {
+      return Either.left({
+        type: 'EvalError',
+        variant: 'TypeError',
+        message: "dolist requires a list to iterate over",
+        details: { actual: listValue.type }
+      });
+    }
+
+    const items = listValue.value as TLispValue[];
+    const childEnv = new TLispEnvironmentImpl(env);
+    const varStr = varName.value as string;
+
+    for (const item of items) {
+      childEnv.define(varStr, item);
+      for (const bodyExpr of bodyExprs) {
+        const bodyResult = this.eval(bodyExpr!, childEnv);
+        if (Either.isLeft(bodyResult)) return bodyResult;
+      }
+    }
+
+    return Either.right(createNil());
+  }
+
+  /**
+   * Evaluate (and expr1 expr2 ...) with short-circuit evaluation.
+   * Returns the first falsy value, or the last value if all are truthy.
+   * and/or are not in tail position, so we resolve any EvalResult to TLispValue.
+   */
+  private evalAnd(elements: TLispValue[], env: TLispEnvironment): Either<EvalError, EvalResult> {
+    const exprs = elements.slice(1);
+    if (exprs.length === 0) return Either.right(createBoolean(true));
+
+    let lastValue: TLispValue = createBoolean(true);
+    for (const expr of exprs) {
+      const result = this.eval(expr, env);
+      if (Either.isLeft(result)) return result;
+      // EvalResult may be TLispValue or TailCall; conditions are not in tail
+      // position so resolve any TailCall by re-evaluating via evalInternal
+      const value = this.evalInternal(expr!, env, false);
+      if (Either.isLeft(value)) return value;
+      const resolved = value.right as TLispValue;
+      if (!isTruthy(resolved)) return Either.right(resolved);
+      lastValue = resolved;
+    }
+    return Either.right(lastValue);
+  }
+
+  /**
+   * Evaluate (or expr1 expr2 ...) with short-circuit evaluation.
+   * Returns the first truthy value, or the last value if all are falsy.
+   */
+  private evalOr(elements: TLispValue[], env: TLispEnvironment): Either<EvalError, EvalResult> {
+    const exprs = elements.slice(1);
+    if (exprs.length === 0) return Either.right(createNil());
+
+    let lastValue: TLispValue = createNil();
+    for (const expr of exprs) {
+      const result = this.eval(expr, env);
+      if (Either.isLeft(result)) return result;
+      const value = this.evalInternal(expr!, env, false);
+      if (Either.isLeft(value)) return value;
+      const resolved = value.right as TLispValue;
+      if (isTruthy(resolved)) return Either.right(resolved);
+      lastValue = resolved;
+    }
+    return Either.right(lastValue);
+  }
+
   private async evalPrognAsync(
     elements: TLispValue[],
     env: TLispEnvironment,
@@ -3646,12 +3879,12 @@ export const createEvaluatorWithBuiltins = (moduleRegistry?: ModuleRegistry): { 
   }, "length"));
 
   env.define("substring", createFunction((args: TLispValue[]) => {
-    if (args.length !== 3) {
+    if (args.length < 2 || args.length > 3) {
       return Either.left({
         type: 'EvalError',
         variant: 'RuntimeError',
-        message: "substring requires exactly 3 arguments: string, start, end",
-        details: { expected: 3, actual: args.length }
+        message: "substring requires 2-3 arguments: string, start, [end]",
+        details: { expected: '2-3', actual: args.length }
       });
     }
 
@@ -3659,12 +3892,12 @@ export const createEvaluatorWithBuiltins = (moduleRegistry?: ModuleRegistry): { 
     const start = args[1];
     const end = args[2];
 
-    if (!str || !start || !end) {
+    if (!str || !start) {
       return Either.left({
         type: 'EvalError',
         variant: 'RuntimeError',
         message: "substring missing arguments",
-        details: { hasStr: !!str, hasStart: !!start, hasEnd: !!end }
+        details: { hasStr: !!str, hasStart: !!start }
       });
     }
 
@@ -3677,18 +3910,18 @@ export const createEvaluatorWithBuiltins = (moduleRegistry?: ModuleRegistry): { 
       });
     }
 
-    if (start.type !== "number" || end.type !== "number") {
+    if (start.type !== "number" || (end && end.type !== "number")) {
       return Either.left({
         type: 'EvalError',
         variant: 'TypeError',
         message: "substring start and end must be numbers",
-        details: { startType: start.type, endType: end.type }
+        details: { startType: start.type, endType: end?.type }
       });
     }
 
     const s = str.value as string;
     const startIdx = start.value as number;
-    const endIdx = end.value as number;
+    const endIdx = end ? end.value as number : s.length;
 
     return Either.right(createString(s.substring(startIdx, endIdx)));
   }, "substring"));
@@ -4610,19 +4843,8 @@ export const createEvaluatorWithBuiltins = (moduleRegistry?: ModuleRegistry): { 
     return Either.right(createBoolean(!isTruthy(arg)));
   }, "not"));
 
-  env.define("and", createFunction((args: TLispValue[]) => {
-    for (const arg of args) {
-      if (!isTruthy(arg)) return Either.right(createBoolean(false));
-    }
-    return Either.right(args.length === 0 ? createBoolean(true) : args[args.length - 1] ?? createBoolean(true));
-  }, "and"));
-
-  env.define("or", createFunction((args: TLispValue[]) => {
-    for (const arg of args) {
-      if (isTruthy(arg)) return Either.right(arg);
-    }
-    return Either.right(createBoolean(false));
-  }, "or"));
+  // Note: and/or are now special forms (short-circuit evaluation), not functions.
+  // They are handled in evalList via evalAnd/evalOr.
 
   // I/O functions
   env.define("print", createFunction((args: TLispValue[]) => {
