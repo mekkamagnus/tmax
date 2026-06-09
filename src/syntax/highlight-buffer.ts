@@ -14,6 +14,7 @@ import { rules as lispRules } from "./languages/lisp.ts";
 import { rules as goRules } from "./languages/go.ts";
 import { rules as cRules } from "./languages/c.ts";
 import { rules as clojureRules } from "./languages/clojure.ts";
+import { rules as mdRules } from "./languages/markdown.ts";
 
 const languageMap: Map<string, SyntaxRule[]> = new Map([
   ["typescript", tsRules],
@@ -29,6 +30,7 @@ const languageMap: Map<string, SyntaxRule[]> = new Map([
   ["h", cRules],
   ["clojure", clojureRules],
   ["clj", clojureRules],
+  ["markdown", mdRules],
 ]);
 
 const extToLang: Map<string, string> = new Map([
@@ -38,6 +40,7 @@ const extToLang: Map<string, string> = new Map([
   [".go", "go"],
   [".c", "c"], [".h", "h"], [".cpp", "cpp"], [".hpp", "cpp"],
   [".clj", "clojure"], [".cljs", "clojure"], [".cljc", "clojure"],
+  [".md", "markdown"], [".markdown", "markdown"], [".mdx", "markdown"],
 ]);
 
 export function languageFromFilename(filename: string | undefined): string | undefined {

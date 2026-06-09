@@ -19,6 +19,8 @@ export class ParseState {
   heredocDelimiter: string | null = null;
   rawStringDelimiter: string | null = null;
   bracketDepth = 0;
+  inCodeFence = false;
+  codeFenceDelimiter: string | null = null;
 
   clone(): ParseState {
     const s = new ParseState();
@@ -28,6 +30,8 @@ export class ParseState {
     s.heredocDelimiter = this.heredocDelimiter;
     s.rawStringDelimiter = this.rawStringDelimiter;
     s.bracketDepth = this.bracketDepth;
+    s.inCodeFence = this.inCodeFence;
+    s.codeFenceDelimiter = this.codeFenceDelimiter;
     return s;
   }
 
@@ -145,3 +149,4 @@ export const lispTransitions: StateTransitions = {
     return false;
   },
 };
+
