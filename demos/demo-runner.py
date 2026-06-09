@@ -49,9 +49,14 @@ def is_daemon_running(client):
     return rc == 0
 
 
-def ensure_daemon(project_dir):
+def ensure_daemon(project_dir, force_restart=False):
     """Start the tmax daemon in tmux if not already running."""
     client = os.path.join(project_dir, "bin", "tmaxclient")
+
+    if force_restart and is_daemon_running(client):
+        print("  Stopping existing daemon for fresh start...")
+        run_cmd(f"{client} --stop")
+        time.sleep(1)
 
     if is_daemon_running(client):
         print("✓ Daemon already running")
@@ -271,7 +276,7 @@ def execute_step(step, client, variables, speed, dry_run=False):
 # ── Main ──────────────────────────────────────────────────────────────
 
 
-def run_playbook(playbook_path, speed=1.0, no_tui=False, dry_run=False):
+def run_playbook(playbook_path, speed=1.0, no_tui=False, dry_run=False, verify=False):
     """Load and execute a playbook."""
     with open(playbook_path) as f:
         playbook = yaml.safe_load(f)
@@ -280,6 +285,7 @@ def run_playbook(playbook_path, speed=1.0, no_tui=False, dry_run=False):
     description = playbook.get("description", "")
     global_speed = playbook.get("speed", 1.0)
     speed *= global_speed
+    verify_highlight = verify or playbook.get("verify_highlight", False)
 
     print(f"━━━ tmax Demo: {name} ━━━")
     if description:
@@ -290,7 +296,9 @@ def run_playbook(playbook_path, speed=1.0, no_tui=False, dry_run=False):
     client = os.path.join(project_dir, "bin", "tmaxclient")
 
     if not dry_run:
-        if not ensure_daemon(project_dir):
+        # Force daemon restart in speed-0 or verify mode to pick up code changes.
+        force_restart = speed == 0 or verify
+        if not ensure_daemon(project_dir, force_restart=force_restart):
             return False
         if not ensure_tui(project_dir, no_tui=no_tui):
             print("  (continuing without TUI frame)")
@@ -315,6 +323,18 @@ def run_playbook(playbook_path, speed=1.0, no_tui=False, dry_run=False):
         cleanup_step = {"action": "cleanup"}
         execute_step(cleanup_step, client, variables, speed, dry_run)
 
+    # Verify syntax highlighting if requested.
+    if verify_highlight and not dry_run:
+        out, rc = run_cmd(f"{client} --capture", timeout=5)
+        if rc != 0 or not out:
+            print("FAIL: Could not capture screen for verify", file=sys.stderr)
+            return False
+        has_24bit = "\x1b[38;2;" in out or "\x1b[48;2;" in out
+        if not has_24bit:
+            print("FAIL: No syntax highlighting detected in rendered output", file=sys.stderr)
+            return False
+        print("✓ Syntax highlighting verified in rendered output")
+
     print("\n━━━ Demo complete ━━━")
     return True
 
@@ -325,13 +345,14 @@ def main():
     parser.add_argument("--speed", type=float, default=1.0, help="Speed multiplier for pauses (default: 1.0)")
     parser.add_argument("--no-tui", action="store_true", help="Skip TUI frame startup (text-only mode)")
     parser.add_argument("--dry-run", action="store_true", help="Print steps without executing")
+    parser.add_argument("--verify", action="store_true", help="Verify ANSI highlighting in rendered output after demo")
     args = parser.parse_args()
 
     if not os.path.exists(args.playbook):
         print(f"FAIL: playbook not found: {args.playbook}", file=sys.stderr)
         sys.exit(1)
 
-    success = run_playbook(args.playbook, speed=args.speed, no_tui=args.no_tui, dry_run=args.dry_run)
+    success = run_playbook(args.playbook, speed=args.speed, no_tui=args.no_tui, dry_run=args.dry_run, verify=args.verify)
     sys.exit(0 if success else 1)
 
 

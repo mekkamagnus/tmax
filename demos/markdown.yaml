@@ -1,0 +1,383 @@
+name: markdown
+description: "Demonstrates all markdown major mode features — mode activation, heading navigation, folding, formatting toggles, table alignment, list continuation, TOC, links, and error handling."
+speed: 1.0
+verify_highlight: true
+
+setup:
+  - action: setup_file
+    var: FILE
+    name: markdown-demo.md
+    content: |
+      ---
+      title: Markdown Demo
+      date: 2026-06-09
+      ---
+
+      # Project Guide
+
+      Welcome to the **project guide**. This document covers setup, usage, and tips.
+
+      ## Installation
+
+      Install dependencies with `bun install`. See the [docs](https://example.com) for details.
+
+      ### Prerequisites
+
+      You need Bun 1.0+ and a terminal.
+
+      ## Usage
+
+      Run the editor:
+
+      ```
+      bun run start file.md
+      ```
+
+      ### Key Bindings
+
+      | Key | Action | Notes |
+      | --- | ------ | ----- |
+      | `h` | move left | vim-style |
+      | `j` | move down | vim-style |
+      | `k` | move up | vim-style |
+
+      ## Tips
+
+      - Use visual mode for selection
+      - Press `u` to undo
+      - Try `gx` on links
+      - ~~deprecated~~ features are removed
+
+      ### Advanced
+
+      Some *advanced* tips here.
+
+      ## Contributing
+
+      See [contributors](https://github.com/example) for the team.
+
+steps:
+  # ── 1. Mode auto-activation ──────────────────────────────────────────
+  - section: Mode activation
+    narrate: "Opening a .md file — markdown mode should auto-activate"
+    action: open
+    file: "${FILE}"
+    pause: 1.2
+
+  - narrate: "Checking major mode — should show 'markdown'"
+    action: eval
+    expr: "(major-mode-get)"
+    pause: 0.5
+
+  - narrate: "Capturing screen to verify syntax highlighting"
+    action: capture
+    pause: 0.5
+
+  # ── 2. Heading navigation ────────────────────────────────────────────
+  - section: Heading navigation
+    narrate: "Jumping to first heading with gg"
+    action: keys
+    keys: "gg"
+    pause: 0.5
+
+  - narrate: "Next heading with ]h — should go to '## Installation'"
+    action: keys
+    keys: "]h"
+    pause: 0.8
+
+  - narrate: "Next heading again — should go to '### Prerequisites'"
+    action: keys
+    keys: "]h"
+    pause: 0.8
+
+  - narrate: "Previous heading with [h — back to '## Installation'"
+    action: keys
+    keys: "[h"
+    pause: 0.8
+
+  - narrate: "Same-level heading with ]H — skip to '## Usage'"
+    action: keys
+    keys: "]H"
+    pause: 0.8
+
+  - narrate: "Same-level heading again — skip to '## Tips'"
+    action: keys
+    keys: "]H"
+    pause: 0.8
+
+  - narrate: "Parent heading with gh — up to '# Project Guide'"
+    action: eval
+    expr: "(progn (cursor-move 0 0) (markdown-up-heading))"
+    pause: 0.8
+
+  - narrate: "Heading outline with gO — shows all headings in minibuffer"
+    action: eval
+    expr: "(markdown-heading-outline)"
+    pause: 1.0
+
+  # ── 3. Folding ───────────────────────────────────────────────────────
+  - section: Folding
+    narrate: "Moving to '## Installation' heading"
+    action: eval
+    expr: "(progn (cursor-move 5 0))"
+    pause: 0.5
+
+  - narrate: "Folding section with zc — should collapse under the heading"
+    action: key
+    key: "zc"
+    pause: 1.0
+
+  - narrate: "Capturing screen to show fold indicator"
+    action: capture
+    pause: 0.5
+
+  - narrate: "Unfolding with zo — section should expand"
+    action: key
+    key: "zo"
+    pause: 0.8
+
+  - narrate: "Fold all sections with zM"
+    action: eval
+    expr: "(markdown-fold-close-all)"
+    pause: 1.0
+
+  - narrate: "Capturing screen to show all folded"
+    action: capture
+    pause: 0.5
+
+  - narrate: "Unfold all with zR"
+    action: eval
+    expr: "(markdown-fold-open-all)"
+    pause: 0.8
+
+  - narrate: "Fold by level 1 — only fold deeper than h1"
+    action: eval
+    expr: "(progn (set-prefix 1) (markdown-fold-by-level))"
+    pause: 1.0
+
+  - narrate: "Capturing screen to show level-1 fold"
+    action: capture
+    pause: 0.5
+
+  - narrate: "Unfold all to restore"
+    action: eval
+    expr: "(markdown-fold-open-all)"
+    pause: 0.5
+
+  # ── 4. Inline formatting toggles ─────────────────────────────────────
+  - section: Inline formatting toggles
+    narrate: "Moving to 'project guide' line and toggling bold"
+    action: eval
+    expr: "(progn (cursor-move 8 22) (markdown-toggle-bold))"
+    pause: 0.8
+
+  - narrate: "Toggling bold again — should unwrap the **"
+    action: eval
+    expr: "(markdown-toggle-bold)"
+    pause: 0.8
+
+  - narrate: "Toggling italic on same word"
+    action: eval
+    expr: "(markdown-toggle-italic)"
+    pause: 0.8
+
+  - narrate: "Toggling italic off"
+    action: eval
+    expr: "(markdown-toggle-italic)"
+    pause: 0.8
+
+  - narrate: "Moving to 'deprecated' and toggling strikethrough off"
+    action: eval
+    expr: "(progn (cursor-move 42 6) (markdown-toggle-strikethrough))"
+    pause: 0.8
+
+  - narrate: "Toggling strikethrough back on"
+    action: eval
+    expr: "(markdown-toggle-strikethrough)"
+    pause: 0.8
+
+  - narrate: "Toggling inline code on 'bun install'"
+    action: eval
+    expr: "(progn (cursor-move 10 28) (markdown-toggle-code))"
+    pause: 0.8
+
+  - narrate: "Toggling code off"
+    action: eval
+    expr: "(markdown-toggle-code)"
+    pause: 0.8
+
+  # ── 5. Heading promote/demote ────────────────────────────────────────
+  - section: Heading promote/demote
+    narrate: "Moving to '### Prerequisites' and demoting to h4"
+    action: eval
+    expr: "(progn (cursor-move 14 0))"
+    pause: 0.3
+
+  - narrate: "Demoting with ,H — ### becomes ####"
+    action: eval
+    expr: "(markdown-demote-heading)"
+    expect_error: true
+    pause: 0.8
+
+  - narrate: "Promoting back with ,h — #### becomes ###"
+    action: eval
+    expr: "(markdown-promote-heading)"
+    expect_error: true
+    pause: 0.8
+
+  # ── 6. Code block toggle ─────────────────────────────────────────────
+  - section: Code block toggle
+    narrate: "Moving to a plain line and wrapping in code block"
+    action: eval
+    expr: "(progn (cursor-move 20 0) (markdown-toggle-code-block))"
+    pause: 0.8
+
+  - narrate: "Unwrapping the code block — cursor on opening fence"
+    action: eval
+    expr: "(progn (cursor-move 20 0) (markdown-toggle-code-block))"
+    pause: 0.8
+
+  # ── 7. Table alignment ───────────────────────────────────────────────
+  - section: Table alignment
+    narrate: "Moving to the table and aligning with ,t"
+    action: eval
+    expr: "(progn (cursor-move 27 0) (markdown-align-table))"
+    expect_error: true
+    pause: 1.0
+
+  - narrate: "Capturing screen to show aligned table"
+    action: capture
+    pause: 0.5
+
+  # ── 8. List operations ───────────────────────────────────────────────
+  - section: List operations
+    narrate: "Moving to first list item and inserting new item with ,l"
+    action: eval
+    expr: "(progn (cursor-move 35 0))"
+    pause: 0.3
+
+  - narrate: "Inserting list item below"
+    action: eval
+    expr: "(markdown-insert-list-item)"
+    pause: 0.8
+
+  - narrate: "Typing content for the new item"
+    action: keys
+    keys: "iNew list item<Escape>"
+    pause: 0.8
+
+  - narrate: "Testing list auto-continuation — enter insert on list line"
+    action: eval
+    expr: "(progn (cursor-move 35 0) (editor-set-mode \"insert\"))"
+    pause: 0.3
+
+  - narrate: "Pressing Enter — should auto-continue list marker"
+    action: key
+    key: "Enter"
+    pause: 0.5
+
+  - narrate: "Escape back to normal mode"
+    action: key
+    key: "Escape"
+    pause: 0.3
+
+  # ── 9. TOC generation ────────────────────────────────────────────────
+  - section: TOC generation
+    narrate: "Generating table of contents with ,T"
+    action: eval
+    expr: "(markdown-generate-toc)"
+    pause: 1.0
+
+  - narrate: "Capturing screen to show TOC (inserted after front matter)"
+    action: capture
+    pause: 0.5
+
+  # ── 10. Link following ───────────────────────────────────────────────
+  - section: Link following
+    narrate: "Moving to a link line"
+    action: eval
+    expr: "(progn (cursor-move 11 0))"
+    pause: 0.3
+
+  - narrate: "Following link with gx — opens URL in browser"
+    action: eval
+    expr: "(markdown-follow-link)"
+    pause: 1.0
+
+  # ── 11. Context-aware 'do' command ───────────────────────────────────
+  - section: Context-aware do
+    narrate: "Moving to a heading and running markdown-do — should fold"
+    action: eval
+    expr: "(progn (cursor-move 5 0) (markdown-do))"
+    pause: 0.8
+
+  - narrate: "Running do again — should unfold"
+    action: eval
+    expr: "(markdown-do)"
+    pause: 0.8
+
+  # ── 12. Error handling ───────────────────────────────────────────────
+  - section: Error handling
+    narrate: "Navigating past last heading — ]h should say 'no next heading'"
+    action: eval
+    expr: "(progn (cursor-move 50 0) (markdown-next-heading))"
+    pause: 1.0
+
+  - narrate: "Navigating before first heading — [h should say 'no previous heading'"
+    action: eval
+    expr: "(progn (cursor-move 0 0) (markdown-prev-heading))"
+    pause: 1.0
+
+  - narrate: "Toggling bold on empty line — should handle gracefully"
+    action: eval
+    expr: "(progn (cursor-move 50 0) (markdown-toggle-bold))"
+    expect_error: true
+    pause: 1.0
+
+  - narrate: "Promoting heading on non-heading line — should report 'not on heading'"
+    action: eval
+    expr: "(progn (cursor-move 50 0) (markdown-promote-heading))"
+    pause: 1.0
+
+  - narrate: "Aligning table when not in a table — should say 'not in a table'"
+    action: eval
+    expr: "(progn (cursor-move 50 0) (markdown-align-table))"
+    pause: 1.0
+
+  - narrate: "Following link on a line with no link"
+    action: eval
+    expr: "(progn (cursor-move 0 0) (markdown-follow-link))"
+    pause: 1.0
+
+  - narrate: "Folding on a non-heading line — no-op"
+    action: eval
+    expr: "(progn (cursor-move 8 0) (markdown-fold-toggle))"
+    pause: 0.8
+
+  - narrate: "Demoting h1 heading — should say 'already at level 1'"
+    action: eval
+    expr: "(progn (cursor-move 5 0) (markdown-demote-heading))"
+    pause: 0.3
+
+  - narrate: "Now promote it back — should say 'already at level 1'"
+    action: eval
+    expr: "(progn (cursor-move 5 0) (markdown-promote-heading))"
+    pause: 0.8
+
+  - narrate: "List item insert on non-list line — should say 'not on a list item'"
+    action: eval
+    expr: "(progn (cursor-move 8 0) (markdown-insert-list-item))"
+    pause: 1.0
+
+  - narrate: "Inserting heading with prefix arg"
+    action: eval
+    expr: "(progn (set-prefix 3) (markdown-insert-heading))"
+    pause: 0.8
+
+  # ── 13. Final state ──────────────────────────────────────────────────
+  - section: Final state
+    narrate: "Capturing final screen state"
+    action: capture
+    pause: 0.5
+
+cleanup: true
