@@ -14,6 +14,7 @@ export type { ParseState, StateTransitions };
 function getTransitions(language: string): StateTransitions | null {
   if (language === "python") return pythonTransitions;
   if (language === "lisp" || language === "tlisp") return lispTransitions;
+  if (language === "markdown") return null;
   // C-style covers typescript, javascript, tsx, jsx, go, c
   return cStyleTransitions;
 }
@@ -58,6 +59,24 @@ function tokenizeImpl(
   language: string,
 ): TokenizeResult {
   const transitions = language ? getTransitions(language) : null;
+
+  // Markdown: if inside a fenced code block, check for closing delimiter
+  if (state.inCodeFence) {
+    const fenceDelim = state.codeFenceDelimiter ?? "```";
+    const trimmed = line.trimEnd();
+    if (trimmed === fenceDelim || trimmed.startsWith(fenceDelim)) {
+      state.inCodeFence = false;
+      state.codeFenceDelimiter = null;
+      return {
+        tokens: [{ type: "code-delimiter", value: line, line: lineNum, startCol: 0, endCol: line.length }],
+        nextState: state,
+      };
+    }
+    return {
+      tokens: [{ type: "code-block", value: line, line: lineNum, startCol: 0, endCol: line.length }],
+      nextState: state,
+    };
+  }
 
   // If we're inside a block comment, check if it ends on this line
   if (state.inBlockComment) {
@@ -142,6 +161,20 @@ function tokenizeImpl(
       if (bc === "enter") {
         state.inBlockComment = true;
         state.blockCommentDepth = 1;
+      }
+    }
+    // Markdown: detect fenced code block entry
+    if (token.type === "code-delimiter" && language === "markdown") {
+      const delim = token.value.trimEnd();
+      if (delim.startsWith("```") || delim.startsWith("~~~")) {
+        const fenceChar = delim[0]!;
+        let fenceLen = 0;
+        for (const ch of delim) {
+          if (ch === fenceChar) fenceLen++;
+          else break;
+        }
+        state.inCodeFence = true;
+        state.codeFenceDelimiter = fenceChar.repeat(fenceLen);
       }
     }
     if (token.type === "string") {

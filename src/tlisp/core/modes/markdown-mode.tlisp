@@ -1,0 +1,62 @@
+(defmodule editor/modes/markdown
+  (export)
+
+;; markdown-mode.tlisp — Markdown major mode (SPEC-018)
+;; Provides heading navigation, fold operations, and syntax highlighting
+
+(major-mode-register "markdown" '(".md" ".markdown" ".mdx") "markdown"
+  '()   ;; no block-open patterns needed (folding is heading-based)
+  '())  ;; no block-close patterns needed
+
+;; Enable syntax highlighting for markdown
+(syntax-set-language "markdown")
+(syntax-highlight-enable)
+
+;; Mode-specific key bindings — scoped to markdown major mode (4th arg)
+;; Navigation
+(key-bind "]h" "(markdown-next-heading)" "normal" "markdown")
+(key-bind "[h" "(markdown-prev-heading)" "normal" "markdown")
+(key-bind "]H" "(markdown-next-same-level-heading)" "normal" "markdown")
+(key-bind "[H" "(markdown-prev-same-level-heading)" "normal" "markdown")
+(key-bind "gh" "(markdown-up-heading)" "normal" "markdown")
+(key-bind "gO" "(markdown-heading-outline)" "normal" "markdown")
+
+;; Folding
+(key-bind "zc" "(markdown-fold-toggle)" "normal" "markdown")
+(key-bind "zo" "(fold-open (cursor-line))" "normal" "markdown")
+(key-bind "zM" "(markdown-fold-close-all)" "normal" "markdown")
+(key-bind "zR" "(markdown-fold-open-all)" "normal" "markdown")
+(key-bind "z1" "(progn (set-prefix 1) (markdown-fold-by-level))" "normal" "markdown")
+(key-bind "z2" "(progn (set-prefix 2) (markdown-fold-by-level))" "normal" "markdown")
+(key-bind "z3" "(progn (set-prefix 3) (markdown-fold-by-level))" "normal" "markdown")
+(key-bind "z4" "(progn (set-prefix 4) (markdown-fold-by-level))" "normal" "markdown")
+(key-bind "z5" "(progn (set-prefix 5) (markdown-fold-by-level))" "normal" "markdown")
+(key-bind "z6" "(progn (set-prefix 6) (markdown-fold-by-level))" "normal" "markdown")
+(key-bind "<Tab>" "(markdown-visibility-cycle)" "normal" "markdown")
+
+;; Formatting
+(key-bind ",b" "(markdown-toggle-bold)" "normal" "markdown")
+(key-bind ",i" "(markdown-toggle-italic)" "normal" "markdown")
+(key-bind ",s" "(markdown-toggle-strikethrough)" "normal" "markdown")
+(key-bind ",x" "(markdown-toggle-code)" "normal" "markdown")
+(key-bind ",X" "(markdown-toggle-code-block)" "normal" "markdown")
+
+;; Structure
+(key-bind ",h" "(markdown-promote-heading)" "normal" "markdown")
+(key-bind ",H" "(markdown-demote-heading)" "normal" "markdown")
+
+;; Tables
+(key-bind ",t" "(markdown-align-table)" "normal" "markdown")
+
+;; Lists
+(key-bind ",l" "(markdown-insert-list-item)" "normal" "markdown")
+
+;; Links
+(key-bind "gx" "(markdown-follow-link)" "normal" "markdown")
+
+;; Utility
+(key-bind ",T" "(markdown-generate-toc)" "normal" "markdown")
+(key-bind ",P" "(markdown-preview)" "normal" "markdown")
+
+(provide "markdown-mode")
+)
