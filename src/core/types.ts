@@ -301,6 +301,8 @@ export interface EditorState {
   bufferModified?: boolean;
   minibufferState?: JsonValue;
   minibufferView?: MinibufferRenderView;
+  // Fold state (SPEC-018)
+  foldRanges?: Map<number, number>;
 }
 
 /**

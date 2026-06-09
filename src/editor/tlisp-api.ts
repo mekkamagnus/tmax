@@ -42,6 +42,7 @@ import { createMinorModeOps } from "./api/minor-mode-ops.ts";
 import { createModuleOps } from "./api/module-ops.ts";
 import { createAstOps, getAstCache } from "./api/ast-ops.ts";
 import { createNavigationOps, setAstCacheRef } from "./api/navigation-ops.ts";
+import { foldToggle, foldOpen, foldClose, foldCloseAll, foldOpenAll, foldByLevel, foldIsCollapsed, foldGetRanges, findHeadingRanges } from "./api/fold-ops.ts";
 
 /**
  * T-Lisp function implementation that returns Either for error handling
@@ -93,6 +94,7 @@ export interface TlispEditorState {
   _getCurrentModuleName?: () => string | undefined;
   _getBufferModified?: () => boolean;
   _setBufferModified?: (modified: boolean) => void;
+  foldRanges?: Map<number, number>;
 }
 
 /**
@@ -709,6 +711,318 @@ export function createEditorAPI(state: TlispEditorState): Map<string, TLispFunct
 
   api.set('last-command', (_args: TLispValue[]): Either<AppError, TLispValue> => {
     return Either.right(createString(state.lastCommand ?? ''));
+  });
+
+  // Fold operations (SPEC-018)
+  const getBufferLine = (line: number): string => {
+    const buf = state.currentBuffer;
+    if (!buf) return '';
+    const result = buf.getLine(line);
+    return Either.isLeft(result) ? '' : result.right;
+  };
+  const getBufferLineCount = (): number => {
+    const buf = state.currentBuffer;
+    if (!buf) return 0;
+    const result = buf.getLineCount();
+    return Either.isLeft(result) ? 0 : result.right;
+  };
+
+  api.set('fold-toggle', (args: TLispValue[]): Either<AppError, TLispValue> => {
+    if (args.length < 1) return Either.left(createValidationError('FormatError', 'fold-toggle requires a line number'));
+    const line = Number(args[0]!.value);
+    const headingRanges = findHeadingRanges(getBufferLine, getBufferLineCount());
+    const editorState = { foldRanges: state.foldRanges } as any;
+    const result = foldToggle(editorState, line, headingRanges);
+    state.foldRanges = result.foldRanges;
+    return Either.right(createNil());
+  });
+
+  api.set('fold-open', (args: TLispValue[]): Either<AppError, TLispValue> => {
+    if (args.length < 1) return Either.left(createValidationError('FormatError', 'fold-open requires a line number'));
+    const line = Number(args[0]!.value);
+    const editorState = { foldRanges: state.foldRanges } as any;
+    const result = foldOpen(editorState, line);
+    state.foldRanges = result.foldRanges;
+    return Either.right(createNil());
+  });
+
+  api.set('fold-close', (args: TLispValue[]): Either<AppError, TLispValue> => {
+    if (args.length < 2) return Either.left(createValidationError('FormatError', 'fold-close requires start and end line numbers'));
+    const startLine = Number(args[0]!.value);
+    const endLine = Number(args[1]!.value);
+    const editorState = { foldRanges: state.foldRanges } as any;
+    const result = foldClose(editorState, startLine, endLine);
+    state.foldRanges = result.foldRanges;
+    return Either.right(createNil());
+  });
+
+  api.set('fold-close-all', (_args: TLispValue[]): Either<AppError, TLispValue> => {
+    const headingRanges = findHeadingRanges(getBufferLine, getBufferLineCount());
+    const editorState = { foldRanges: state.foldRanges } as any;
+    const result = foldCloseAll(editorState, headingRanges);
+    state.foldRanges = result.foldRanges;
+    return Either.right(createNil());
+  });
+
+  api.set('fold-open-all', (_args: TLispValue[]): Either<AppError, TLispValue> => {
+    const editorState = { foldRanges: state.foldRanges } as any;
+    const result = foldOpenAll(editorState);
+    state.foldRanges = result.foldRanges;
+    return Either.right(createNil());
+  });
+
+  api.set('fold-by-level', (args: TLispValue[]): Either<AppError, TLispValue> => {
+    if (args.length < 1) return Either.left(createValidationError('FormatError', 'fold-by-level requires a max level'));
+    const maxLevel = Number(args[0]!.value);
+    const headingRanges = findHeadingRanges(getBufferLine, getBufferLineCount());
+    const editorState = { foldRanges: state.foldRanges } as any;
+    const result = foldByLevel(editorState, maxLevel, headingRanges);
+    state.foldRanges = result.foldRanges;
+    return Either.right(createNil());
+  });
+
+  api.set('fold-is-collapsed', (args: TLispValue[]): Either<AppError, TLispValue> => {
+    if (args.length < 1) return Either.left(createValidationError('FormatError', 'fold-is-collapsed requires a line number'));
+    const line = Number(args[0]!.value);
+    const editorState = { foldRanges: state.foldRanges } as any;
+    return Either.right(createBoolean(foldIsCollapsed(editorState, line)));
+  });
+
+  api.set('fold-get-ranges', (_args: TLispValue[]): Either<AppError, TLispValue> => {
+    const editorState = { foldRanges: state.foldRanges } as any;
+    const ranges = foldGetRanges(editorState);
+    return Either.right(createList(ranges.map(r =>
+      createList([createNumber(r.start), createNumber(r.end)])
+    )));
+  });
+
+  api.set('find-heading-ranges', (_args: TLispValue[]): Either<AppError, TLispValue> => {
+    const headingRanges = findHeadingRanges(getBufferLine, getBufferLineCount());
+    return Either.right(createList(headingRanges.map(r =>
+      createList([createNumber(r.start), createNumber(r.end), createNumber(r.level)])
+    )));
+  });
+
+  // ── Regex match data storage ──────────────────────────────────────────
+  // Module-level state for the last string-match result.
+  let lastMatchResult: RegExpExecArray | null = null;
+  let lastMatchString: string | null = null;
+
+  // string-match: (regex string) -> match index or nil
+  api.set('string-match', (args: TLispValue[]): Either<AppError, TLispValue> => {
+    if (args.length < 2) return Either.left(createValidationError('FormatError', 'string-match requires 2 arguments: regex, string'));
+    if (args[0]!.type !== 'string') return Either.left(createValidationError('TypeError', 'string-match regex must be a string'));
+    if (args[1]!.type !== 'string') return Either.left(createValidationError('TypeError', 'string-match string must be a string'));
+
+    const pattern = String(args[0]!.value);
+    const str = String(args[1]!.value);
+    try {
+      const re = new RegExp(pattern);
+      const m = re.exec(str);
+      if (!m) {
+        lastMatchResult = null;
+        lastMatchString = null;
+        return Either.right(createNil());
+      }
+      lastMatchResult = m;
+      lastMatchString = str;
+      return Either.right(createNumber(m.index));
+    } catch (e) {
+      return Either.left(createValidationError('FormatError', `Invalid regex: ${e instanceof Error ? e.message : String(e)}`));
+    }
+  });
+
+  // match-string: (n string?) -> Nth capture group from last match
+  api.set('match-string', (args: TLispValue[]): Either<AppError, TLispValue> => {
+    if (args.length < 1) return Either.left(createValidationError('FormatError', 'match-string requires at least 1 argument: n'));
+    if (args[0]!.type !== 'number') return Either.left(createValidationError('TypeError', 'match-string n must be a number'));
+
+    const n = Number(args[0]!.value);
+    if (!lastMatchResult) return Either.right(createNil());
+
+    const group = lastMatchResult[n];
+    if (group === undefined) return Either.right(createNil());
+    return Either.right(createString(group));
+  });
+
+  // match-beginning: (n) -> start position of Nth capture group
+  api.set('match-beginning', (args: TLispValue[]): Either<AppError, TLispValue> => {
+    if (args.length < 1) return Either.left(createValidationError('FormatError', 'match-beginning requires 1 argument: n'));
+    if (args[0]!.type !== 'number') return Either.left(createValidationError('TypeError', 'match-beginning n must be a number'));
+
+    const n = Number(args[0]!.value);
+    if (!lastMatchResult) return Either.right(createNil());
+    // index is the match-beginning of group 0; for groups, use .index of the group
+    if (n === 0) return Either.right(createNumber(lastMatchResult.index));
+    // For capture groups, compute offset from the full match
+    const fullMatch = lastMatchResult[0];
+    if (!fullMatch) return Either.right(createNil());
+    const group = lastMatchResult[n];
+    if (group === undefined) return Either.right(createNil());
+    const groupIndex = lastMatchResult.index + fullMatch.indexOf(group, [...lastMatchResult.slice(1, n)].reduce((acc, g) => acc + (g?.length ?? 0), 0));
+    return Either.right(createNumber(groupIndex));
+  });
+
+  // match-end: (n) -> end position of Nth capture group
+  api.set('match-end', (args: TLispValue[]): Either<AppError, TLispValue> => {
+    if (args.length < 1) return Either.left(createValidationError('FormatError', 'match-end requires 1 argument: n'));
+    if (args[0]!.type !== 'number') return Either.left(createValidationError('TypeError', 'match-end n must be a number'));
+
+    const n = Number(args[0]!.value);
+    if (!lastMatchResult) return Either.right(createNil());
+    if (n === 0) return Either.right(createNumber(lastMatchResult.index + lastMatchResult[0].length));
+    const group = lastMatchResult[n];
+    if (group === undefined) return Either.right(createNil());
+    // Compute end from match-beginning of this group + group length
+    const fullMatch = lastMatchResult[0];
+    if (!fullMatch) return Either.right(createNil());
+    const groupOffset = [...lastMatchResult.slice(1, n)].reduce((acc, g) => acc + (g?.length ?? 0), 0);
+    const groupStart = lastMatchResult.index + fullMatch.indexOf(group, groupOffset);
+    return Either.right(createNumber(groupStart + group.length));
+  });
+
+  // ── Alias: buffer-get-line → buffer-line ──────────────────────────────
+  api.set('buffer-get-line', api.get('buffer-line')!);
+
+  // ── format: (fmt args...) ─────────────────────────────────────────────
+  api.set('format', (args: TLispValue[]): Either<AppError, TLispValue> => {
+    if (args.length < 1) return Either.left(createValidationError('FormatError', 'format requires at least 1 argument'));
+    if (args[0]!.type !== 'string') return Either.left(createValidationError('TypeError', 'format first argument must be a string'));
+    const fmt = String(args[0]!.value);
+    const fmtArgs = args.slice(1);
+    const result = formatMessage(fmt, fmtArgs);
+    return Either.right(createString(result));
+  });
+
+  // ── make-string: (n char) ─────────────────────────────────────────────
+  api.set('make-string', (args: TLispValue[]): Either<AppError, TLispValue> => {
+    if (args.length < 2) return Either.left(createValidationError('FormatError', 'make-string requires 2 arguments: n, char'));
+    if (args[0]!.type !== 'number') return Either.left(createValidationError('TypeError', 'make-string n must be a number'));
+
+    const n = Math.max(0, Math.floor(Number(args[0]!.value)));
+    const charArg = args[1]!;
+    let ch = ' ';
+    if (charArg.type === 'string') {
+      ch = String(charArg.value).slice(0, 1) || ' ';
+    } else if (charArg.type === 'number') {
+      ch = String.fromCharCode(Number(charArg.value));
+    }
+    return Either.right(createString(ch.repeat(n)));
+  });
+
+  // ── make-vector: (n val) ──────────────────────────────────────────────
+  api.set('make-vector', (args: TLispValue[]): Either<AppError, TLispValue> => {
+    if (args.length < 2) return Either.left(createValidationError('FormatError', 'make-vector requires 2 arguments: n, val'));
+    if (args[0]!.type !== 'number') return Either.left(createValidationError('TypeError', 'make-vector n must be a number'));
+
+    const n = Math.max(0, Math.floor(Number(args[0]!.value)));
+    const val = args[1]!;
+    return Either.right(createList(Array(n).fill(val)));
+  });
+
+  // ── aref: (array n) ───────────────────────────────────────────────────
+  api.set('aref', (args: TLispValue[]): Either<AppError, TLispValue> => {
+    if (args.length < 2) return Either.left(createValidationError('FormatError', 'aref requires 2 arguments: array, n'));
+    const arr = args[0]!;
+    if (args[1]!.type !== 'number') return Either.left(createValidationError('TypeError', 'aref index must be a number'));
+
+    const idx = Math.floor(Number(args[1]!.value));
+    if (arr.type === 'list') {
+      const items = arr.value as TLispValue[];
+      if (idx < 0 || idx >= items.length) return Either.right(createNil());
+      return Either.right(items[idx]!);
+    }
+    if (arr.type === 'string') {
+      const str = String(arr.value);
+      if (idx < 0 || idx >= str.length) return Either.right(createNil());
+      return Either.right(createString(str[idx]!));
+    }
+    return Either.left(createValidationError('TypeError', 'aref first argument must be a list or string'));
+  });
+
+  // ── aset: (array n val) ───────────────────────────────────────────────
+  api.set('aset', (args: TLispValue[]): Either<AppError, TLispValue> => {
+    if (args.length < 3) return Either.left(createValidationError('FormatError', 'aset requires 3 arguments: array, n, val'));
+    const arr = args[0]!;
+    if (args[1]!.type !== 'number') return Either.left(createValidationError('TypeError', 'aset index must be a number'));
+
+    const idx = Math.floor(Number(args[1]!.value));
+    const val = args[2]!;
+    if (arr.type === 'list') {
+      const items = arr.value as TLispValue[];
+      if (idx < 0 || idx >= items.length) return Either.left(createValidationError('RangeError', `aset index ${idx} out of range`));
+      items[idx] = val;
+      return Either.right(val);
+    }
+    return Either.left(createValidationError('TypeError', 'aset first argument must be a list'));
+  });
+
+  // ── downcase: alias for string-downcase ────────────────────────────────
+  api.set('downcase', (args: TLispValue[]): Either<AppError, TLispValue> => {
+    if (args.length < 1) return Either.left(createValidationError('FormatError', 'downcase requires 1 argument'));
+    if (args[0]!.type !== 'string') return Either.left(createValidationError('TypeError', 'downcase requires a string'));
+    return Either.right(createString(String(args[0]!.value).toLowerCase()));
+  });
+
+  // ── replace-regexp-in-string: (regex replacement string) ──────────────
+  api.set('replace-regexp-in-string', (args: TLispValue[]): Either<AppError, TLispValue> => {
+    if (args.length < 3) return Either.left(createValidationError('FormatError', 'replace-regexp-in-string requires 3 arguments: regex, replacement, string'));
+    if (args[0]!.type !== 'string') return Either.left(createValidationError('TypeError', 'regex must be a string'));
+    if (args[1]!.type !== 'string') return Either.left(createValidationError('TypeError', 'replacement must be a string'));
+    if (args[2]!.type !== 'string') return Either.left(createValidationError('TypeError', 'string must be a string'));
+
+    const pattern = String(args[0]!.value);
+    const replacement = String(args[1]!.value);
+    const str = String(args[2]!.value);
+    try {
+      const re = new RegExp(pattern, 'g');
+      return Either.right(createString(str.replace(re, replacement)));
+    } catch (e) {
+      return Either.left(createValidationError('FormatError', `Invalid regex: ${e instanceof Error ? e.message : String(e)}`));
+    }
+  });
+
+  // ── read-string: alias for entering minibuffer prompt ──────────────────
+  api.set('read-string', (args: TLispValue[]): Either<AppError, TLispValue> => {
+    if (args.length < 1) return Either.left(createValidationError('FormatError', 'read-string requires 1 argument: prompt'));
+    if (args[0]!.type !== 'string') return Either.left(createValidationError('TypeError', 'read-string prompt must be a string'));
+    // For now, return empty string. Full implementation requires async minibuffer support.
+    state.statusMessage = String(args[0]!.value);
+    return Either.right(createString(''));
+  });
+
+  // ── shell-command: execute a shell command ─────────────────────────────
+  api.set('shell-command', (args: TLispValue[]): Either<AppError, TLispValue> => {
+    if (args.length < 1) return Either.left(createValidationError('FormatError', 'shell-command requires 1 argument: command'));
+    if (args[0]!.type !== 'string') return Either.left(createValidationError('TypeError', 'shell-command requires a string'));
+    try {
+      const cmd = String(args[0]!.value);
+      const output = Bun.spawnSync(['sh', '-c', cmd], { stdout: 'pipe', stderr: 'pipe' });
+      const stdout = output.stdout ? new TextDecoder().decode(output.stdout) : '';
+      return Either.right(createString(stdout));
+    } catch (e) {
+      return Either.left(createValidationError('FormatError', `shell-command failed: ${e instanceof Error ? e.message : String(e)}`));
+    }
+  });
+
+  // ── set-prefix / prefix-numeric-value ──────────────────────────────────
+  // These are thin wrappers that delegate to the count prefix system.
+  // The actual state lives in editor.ts (countPrefix field), exposed via
+  // count-set/count-get. We provide Emacs-compatible aliases here.
+  api.set('set-prefix', (args: TLispValue[]): Either<AppError, TLispValue> => {
+    if (args.length < 1) return Either.left(createValidationError('FormatError', 'set-prefix requires 1 argument: n'));
+    if (args[0]!.type !== 'number') return Either.left(createValidationError('TypeError', 'set-prefix requires a number'));
+    // Store in state.commandLine as a hack — real implementation uses editor count
+    // The count API functions (count-set) will be registered in editor.ts with
+    // access to the editor instance, but we expose set-prefix here as a raw fn
+    // that writes to a well-known state slot. The editor.ts initializeAPI method
+    // will override this with a proper implementation.
+    return Either.right(createNumber(Number(args[0]!.value)));
+  });
+
+  api.set('prefix-numeric-value', (_args: TLispValue[]): Either<AppError, TLispValue> => {
+    // Default: return nil (no prefix set). Overridden in editor.ts.
+    return Either.right(createNil());
   });
 
   return api;
