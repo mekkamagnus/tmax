@@ -1,8 +1,8 @@
-import type { KeyMsg } from "../types.ts";
+import type { KeyMsg } from "../frontend/frontends/types.ts";
 import {
   tokenizeTerminalInput,
   type TerminalInputTokens,
-} from "../../render/input.ts";
+} from "../frontend/render/input.ts";
 
 type KeyHandler = (msg: KeyMsg) => void | Promise<void>;
 

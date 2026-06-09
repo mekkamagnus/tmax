@@ -1,15 +1,15 @@
-import type { Editor as EditorClass } from "../../../editor/editor.ts";
-import type { EditorState } from "../../../core/types.ts";
-import type { Frontend } from "../types.ts";
-import { renderBufferLines, getVisibleViewportTop } from "../../render/buffer-lines.ts";
-import { renderCommandInput } from "../../render/command-input.ts";
-import { renderStatusLine } from "../../render/status-line.ts";
-import { renderTabBarAnsi } from "../../render/tab-bar.ts";
+import type { Editor as EditorClass } from "../editor/editor.ts";
+import type { EditorState } from "../core/types.ts";
+import type { Frontend } from "../frontend/frontends/types.ts";
+import { renderBufferLines, getVisibleViewportTop } from "../frontend/render/buffer-lines.ts";
+import { renderCommandInput } from "../frontend/render/command-input.ts";
+import { renderStatusLine } from "../frontend/render/status-line.ts";
+import { renderTabBarAnsi } from "../frontend/render/tab-bar.ts";
 import { Input } from "./input.ts";
 import { Screen } from "./screen.ts";
-import { renderMinibuffer } from "../../render/minibuffer.ts";
-import { computeHighlightSpans } from "../../../syntax/highlight-buffer.ts";
-import { Either } from "../../../utils/task-either.ts";
+import { renderMinibuffer } from "../frontend/render/minibuffer.ts";
+import { computeHighlightSpans } from "../syntax/highlight-buffer.ts";
+import { Either } from "../utils/task-either.ts";
 
 export class SteepFrontend implements Frontend {
   async run(editor: EditorClass, initialState: EditorState): Promise<void> {

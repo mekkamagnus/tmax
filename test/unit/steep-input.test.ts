@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { tokenizeSteepInput } from "../../src/frontend/frontends/steep/input.ts";
+import { tokenizeSteepInput } from "../../src/steep/input.ts";
 
 describe("Steep input tokenizer", () => {
   test("normalizes controls mixed with printable text", () => {

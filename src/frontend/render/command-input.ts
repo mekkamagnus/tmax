@@ -1,5 +1,5 @@
 import type { EditorState } from "../../core/types.ts";
-import { style } from "../frontends/steep/style.ts";
+import { style } from "../../steep/matcha.ts";
 import { renderMinibuffer } from "./minibuffer.ts";
 
 export function renderCommandInput(state: EditorState, width: number): string {

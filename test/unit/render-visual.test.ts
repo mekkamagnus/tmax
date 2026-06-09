@@ -8,8 +8,8 @@ import { describe, test, expect } from "bun:test";
 import { captureFrame } from "../../src/render/capture-frame.ts";
 import { ansiToHtml, ansiLinesToHtmlDocument } from "../../src/render/ansi-to-html.ts";
 import { defaultDarkTheme } from "../../src/syntax/types.ts";
-import { hexToRGB } from "../../src/frontend/frontends/steep/style.ts";
-import { isHexColor } from "../../src/frontend/frontends/steep/style.ts";
+import { hexToRGB } from "../../src/steep/matcha.ts";
+import { isHexColor } from "../../src/steep/matcha.ts";
 import { FunctionalTextBufferImpl } from "../../src/core/buffer.ts";
 import type { EditorState } from "../../src/core/types.ts";
 

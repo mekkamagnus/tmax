@@ -1,0 +1,26 @@
+import type { Theme } from "../renderer.ts";
+
+export const darkTheme: Theme = {
+  document: {},
+  h1: { color: "#ff79c6", bold: true, margin: 1 },
+  h2: { color: "#bd93f9", bold: true, margin: 1 },
+  h3: { color: "#8be9fd", bold: true },
+  h4: { color: "#50fa7b", bold: true },
+  h5: { color: "#f1fa8c" },
+  h6: { color: "#6272a4" },
+  text: { color: "#f8f8f2" },
+  strong: { bold: true },
+  emphasis: { italic: true },
+  strikethrough: { strikethrough: true },
+  codespan: { color: "#50fa7b", background: "#1e1e2e" },
+  codeBlock: { background: "#1e1e2e", margin: 1 },
+  blockquote: { color: "#6272a4", indent: 2, prefix: "│ " },
+  link: { color: "#8be9fd", underline: true },
+  image: { color: "#50fa7b" },
+  orderedList: { indent: 2 },
+  unorderedList: { indent: 2 },
+  taskList: { indent: 2 },
+  table: {},
+  horizontalRule: { color: "#6272a4" },
+  yamlFrontMatter: { color: "#6272a4" },
+};
