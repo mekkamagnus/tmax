@@ -44,12 +44,13 @@ Implement a `markdown` major mode that:
 ### Existing Files to Modify
 
 - `src/syntax/highlight-buffer.ts` — Register markdown language rules in `languageMap` and `extToLang`
-- `src/syntax/parse-state.ts` — Add markdown-specific `StateTransitions` for fenced code block tracking
+- `src/syntax/parse-state.ts` — Add `inCodeFence` / `codeFenceDelimiter` fields to `ParseState` for fenced code block tracking (no `StateTransitions` object needed — state machine lives in tokenizer)
 - `src/syntax/tokenizer.ts` — Ensure the tokenizer handles markdown's cross-line state
-- `src/editor/tlisp-api.ts` — Register new fold and markdown-specific T-Lisp primitives
+- `src/editor/tlisp-api.ts` — Register new T-Lisp primitives for string matching, formatting, data structures, and shell access
+- `src/tlisp/evaluator.ts` — Add `let*`, `while`, `dolist` special forms; make `if` and `substring` accept optional trailing arguments
 - `src/core/types.ts` — Add `foldRanges` to `EditorState` for per-buffer fold state
 - `src/frontend/render/buffer-lines.ts` — Modify `renderSingleWindow` to skip collapsed lines and render fold indicators
-- `src/frontend/render/gutter.ts` — Add fold indicator markers in the gutter (▼/▶ or similar)
+- `src/frontend/render/gutter.ts` — Add fold indicator markers in the gutter
 - `src/frontend/render/status-line.ts` — Display markdown mode indicator
 - `src/editor/editor.ts` — Wire fold state into the editor's state management and recompute cycle
 
@@ -58,7 +59,103 @@ Implement a `markdown` major mode that:
 - `src/syntax/languages/markdown.ts` — Markdown tokenizer rules (headings, emphasis, code, links, lists, blockquotes, tables, front matter)
 - `src/editor/api/fold-ops.ts` — TypeScript primitives for fold state management (toggle, open, close, fold-by-level, query)
 - `src/tlisp/core/modes/markdown-mode.tlisp` — Major mode registration, mode-specific key bindings, activation hook
-- `src/tlisp/core/commands/markdown-commands.tlisp` — T-Lisp command library: formatting toggles, table formatting, list operations, heading navigation, TOC generation
+- `src/tlisp/core/commands/markdown.tlisp` — T-Lisp command library: formatting toggles, table formatting, list operations, heading navigation, TOC generation
+
+## T-Lisp Language Prerequisites
+
+The markdown command library uses several T-Lisp features that must exist before the commands can be written. These are not markdown-specific — they are general T-Lisp features that any complex command library would need.
+
+### Special Forms Required
+
+The evaluator (`src/tlisp/evaluator.ts`) must support these special forms:
+
+| Form | Purpose | Used by |
+|------|---------|---------|
+| `let*` | Sequential binding (each binding sees previous bindings) | `markdown-next-same-level-heading`, `markdown-insert-list-item`, and many others that compute intermediate values then use them in later bindings |
+| `while` | Loop with condition check (max 100,000 iterations guard) | Every navigation loop, every table/list parsing loop, the heading outline scanner |
+| `dolist` | Iterate over list elements `(dolist (var list) body...)` | Table alignment (iterate rows), TOC generation |
+| `and` / `or` | Short-circuit evaluation as special forms (not eager functions) | Condition guards in while loops, if-conditions |
+
+**Implementation notes:**
+
+- `let*` shares `evalLet` / `evalLetAsync` with `let`. The only difference is the binding environment: `let` evaluates all bindings in the outer env (parallel), `let*` evaluates each binding in the new env (sequential). Both support multiple body forms (return last).
+- `while` and `whileAsync` both enforce a MAX_ITERATIONS guard (100,000). The async path evaluates the condition and body with `await`. Both paths must be implemented — the daemon uses the async path exclusively.
+- `dolist` binds each list element to the loop variable and evaluates the body forms. Only the sync implementation is required; the async path falls back to synchronous evaluation.
+- `and` returns the first falsy value or the last value. `or` returns the first truthy value or the last value. Neither evaluates arguments past the short-circuit point.
+
+### Core Forms Modified
+
+| Form | Change | Reason |
+|------|--------|--------|
+| `if` | Accept 2-3 arguments (else-expr optional, defaults to nil) | Many markdown commands use `(if condition body)` without an else branch. The original evaluator required exactly 3 args. |
+| `substring` | Accept 2-3 arguments (end index optional, defaults to string length) | `(substring line word-end)` is the common pattern for "rest of string from index". The original evaluator required exactly 3 args. |
+
+### API Primitives Required
+
+These T-Lisp functions must be registered in `src/editor/tlisp-api.ts`:
+
+**String matching (Emacs-style match data pattern):**
+
+| Function | Signature | Returns | Notes |
+|----------|-----------|---------|-------|
+| `string-match` | `(regex string)` | match index (number) or nil | Stores result in module-level state for subsequent `match-string`/`match-beginning`/`match-end` calls. Regex is JavaScript RegExp — NOT Emacs regex. |
+| `match-string` | `(n)` | Nth capture group string or nil | Reads from last `string-match` result |
+| `match-beginning` | `(n)` | Start position of Nth capture group | |
+| `match-end` | `(n)` | End position of Nth capture group | |
+
+**String utilities:**
+
+| Function | Signature | Returns | Notes |
+|----------|-----------|---------|-------|
+| `format` | `(fmt args...)` | formatted string | `%s`/`%d`/`%%` substitution. Delegates to existing `formatMessage()`. |
+| `downcase` | `(string)` | lowercased string | Alias for `string-to-lower` |
+| `replace-regexp-in-string` | `(regex replacement string)` | replaced string | Global replace via `new RegExp(pattern, 'g')` |
+| `buffer-get-line` | `(n)` | line text string | Alias for `buffer-line` (Emacs naming convention) |
+
+**Data structures:**
+
+| Function | Signature | Returns | Notes |
+|----------|-----------|---------|-------|
+| `make-string` | `(n char)` | string of n chars | `char` can be a string (uses first char) or number (charCode). T-Lisp has no character literal syntax — use char codes: 32 for space, 35 for `#`. |
+| `make-vector` | `(n val)` | list of n copies of val | T-Lisp has no vector type — returns a list. Used for column width arrays in table alignment. |
+| `aref` | `(array n)` | element at index n | Works on lists and strings. Returns nil on out-of-bounds. |
+| `aset` | `(array n val)` | val (mutates list in place) | Mutates list element at index. Returns the new value. |
+
+**System and editor interaction:**
+
+| Function | Signature | Returns | Notes |
+|----------|-----------|---------|-------|
+| `shell-command` | `(command)` | stdout string | Runs `Bun.spawnSync(['sh', '-c', cmd])`. Used by `markdown-follow-link` and `markdown-preview`. |
+| `read-string` | `(prompt)` | empty string (placeholder) | Sets status message to prompt. Full async minibuffer not yet implemented — returns "". |
+| `set-prefix` | `(n)` | nil | Thin wrapper; overridden in `editor.ts` to delegate to `this.setCount(n)`. |
+| `prefix-numeric-value` | `()` | number or nil | Returns current prefix count. Overridden in `editor.ts` to return actual count state. |
+
+### Regex Escaping Rules for T-Lisp
+
+This is the single most important implementation detail that caused the majority of debugging time. **The T-Lisp parser strips one level of backslash escaping from string literals.**
+
+| T-Lisp source | Runtime string | JavaScript RegExp meaning |
+|---|---|---|
+| `"^#"` | `^#` | Literal `#` at start |
+| `"\\\\s"` | `\s` | Whitespace character class |
+| `"\\\\d"` | `\d` | Digit character class |
+| `"\\\\["` | `\[` | Literal `[` |
+| `"\\\\]"` | `\]` | Literal `]` |
+| `"^\(#+\)"` | `^(#+)` | Capture group of `#` chars |
+| `"\\\\s+"` | `\s+` | One or more whitespace |
+| `"\\\\s*"` | `\s*` | Zero or more whitespace |
+
+**Critical rules:**
+
+1. **To get a regex escape in the runtime string, write `\\\\` in T-Lisp source.** The parser strips one level: `\\\\` → `\\` at runtime → `\` in RegExp engine. So `"\\\\s"` produces `\s` which is the whitespace class.
+
+2. **Capture groups use bare parens `(...)` in T-Lisp strings.** The T-Lisp parser converts `\(` to `(` inside strings, so `"^\(#+\)"` produces `^(#+)` — correct JavaScript capture group syntax. You can also write bare `(` directly since the parser treats them the same. But never write `"^\\\\(#+\\\\)"` — that produces `^\(#+\)` where `\(` means literal `(`, NOT a capture group.
+
+3. **Emacs regex is NOT JavaScript regex.** The spec originally used Emacs-style patterns like `\s-` (Emacs whitespace class) and `\(`/`\)` (Emacs capture groups). These are NOT valid in JavaScript RegExp. Use `\s` (JS whitespace), `(` and `)` (JS capture groups).
+
+4. **Character literals don't exist in T-Lisp.** Emacs `?#` (character `#`) and `? ` (character space) are NOT valid T-Lisp syntax. Use char codes with `make-string`: `(make-string level 35)` for `#` chars, `(make-string n 32)` for spaces.
+
+5. **Function naming follows JS conventions, not Emacs.** `string-split` not `split-string`. `string-join` takes `(separator list)` arg order, not `(list separator)`.
 
 ## Implementation Plan
 
@@ -67,7 +164,7 @@ Implement a `markdown` major mode that:
 Add the syntax highlighting layer and register the major mode. This is the base that all other features build on.
 
 - Create `src/syntax/languages/markdown.ts` with regex-based rules for all Markdown constructs
-- Add markdown `StateTransitions` to `parse-state.ts` for fenced code block enter/exit
+- Add `inCodeFence` / `codeFenceDelimiter` fields to `ParseState` for fenced code block tracking; handle state transitions in `tokenizer.ts` (not via `StateTransitions`)
 - Register the language in `highlight-buffer.ts` and `syntax-ops.ts`
 - Create `src/tlisp/core/modes/markdown-mode.tlisp` with `major-mode-register`
 - Add indent rules for lists and blockquotes
@@ -82,7 +179,22 @@ Build a general-purpose fold system in TypeScript that T-Lisp commands can drive
 - Add gutter fold markers
 - Wire the fold API into `tlisp-api.ts`
 
-### Phase 3: Markdown Commands — Navigation, Formatting, Tables
+### Phase 3: T-Lisp Language Extensions
+
+Add the evaluator features and API primitives needed by the markdown commands. These are general-purpose extensions to T-Lisp that any complex command library would use.
+
+- Add `let*` to the evaluator (sequential bindings in `evalLet`/`evalLetAsync`)
+- Add `while` special form with iteration guard
+- Add `dolist` special form
+- Make `and`/`or` short-circuit special forms (not eager functions)
+- Make `if` accept optional else-expr (defaults to nil)
+- Make `substring` accept optional end index (defaults to string length)
+- Add string matching primitives: `string-match`, `match-string`, `match-beginning`, `match-end`
+- Add string utilities: `format`, `downcase`, `replace-regexp-in-string`, `buffer-get-line`
+- Add data structure primitives: `make-string`, `make-vector`, `aref`, `aset`
+- Add system primitives: `shell-command`, `read-string`, `set-prefix`, `prefix-numeric-value`
+
+### Phase 4: Markdown Commands — Navigation, Formatting, Tables
 
 Implement the T-Lisp command library that makes markdown mode useful.
 
@@ -116,9 +228,7 @@ Implement the T-Lisp command library that makes markdown mode useful.
   - Task list markers (`- [ ]`, `- [x]`) — type `task-item`
   - Horizontal rules (`---`, `***`, `___`) — type `hr`
   - Pipe table separators (`|---|`) — type `table-separator`
-- Add `StateTransitions` for fenced code blocks in `parse-state.ts`:
-  - Track `inCodeFence` state with the fence delimiter (`` ``` `` or `~~~`)
-  - When inside a code fence, tokenize lines as `code-block` type
+- Code fence state tracking lives in the tokenizer (`tokenizer.ts`), not in `StateTransitions`. Markdown's fenced code blocks are line-level constructs — the tokenizer checks `ParseState.inCodeFence` at the top of `tokenize()` and either emits a `code-block` token or a `code-delimiter` token. `StateTransitions` is designed for token-level parsing (strings, comments) and doesn't fit line-level state. The `ParseState` fields (`inCodeFence`, `codeFenceDelimiter`) are the state store; the tokenizer is the state machine. Do not create a `markdownTransitions` object in `parse-state.ts` — leave `StateTransitions` for languages that need token-level state.
 - Priority ordering: front matter > fenced code blocks > headings > inline emphasis > links > lists > blockquotes
 
 ### Step 2: Register Markdown Language
@@ -135,18 +245,17 @@ Implement the T-Lisp command library that makes markdown mode useful.
   (defmodule editor/modes/markdown
     (export)
     (major-mode-register "markdown" '(".md" ".markdown" ".mdx") "markdown"
-      '("\\{$" "```" "\\{$" ">\\s" "-\\s" "\\*\\s" "\\+\\s")
-      '("^\\s*}" "^\\s*```" "^\\s*}\\s*$" "^\\s*$")))
+      '()   ;; no block-open patterns needed (folding is heading-based)
+      '())  ;; no block-close patterns needed
   ```
 - Add `(require-module editor/modes/markdown)` to the module loading sequence
-- Add a mode activation hook that enables syntax highlighting and sets indent rules
+- Mode activation (syntax highlighting, key bindings) must happen inside the mode system's activation path — not at module load time. The `(syntax-set-language ...)` and `(syntax-highlight-enable)` calls must be triggered by the major-mode activation hook, not executed at the top level of the module.
 
 ### Step 4: Add Fold State to EditorState
 
 - Add `foldRanges?: Map<number, number>` to `EditorState` in `src/core/types.ts`
 - This map stores collapsed ranges: key = start line (where the fold indicator appears), value = end line (last hidden line)
 - Fold state is per-buffer, tracked in the editor's state management
-- **RFC-009 alignment:** Fold state lives in `EditorState`, not as a module-scoped variable. This follows the RFC-009 Phase 1 principle: all state is in the model. Fold state participates in complete state snapshots — snapshotting `EditorState` captures fold state too.
 
 ### Step 5: Create Fold Operations API
 
@@ -160,7 +269,6 @@ Implement the T-Lisp command library that makes markdown mode useful.
   - `fold-is-collapsed(line)` → boolean
   - `fold-get-ranges()` → list of `{start, end}` pairs
 - Register these as T-Lisp primitives in `tlisp-api.ts`
-- **RFC-009 alignment:** Fold ops use return-state objects, not setter closures. Each function returns `Partial<EditorState>` with the updated `foldRanges` map. The caller (T-Lisp API layer) merges the returned state. This follows RFC-009 Phase 2's target pattern — new code should use the target style from the start.
 
 ### Step 6: Integrate Folding into Render Pipeline
 
@@ -168,169 +276,169 @@ Implement the T-Lisp command library that makes markdown mode useful.
   - Before rendering each line, check if its line number falls within any collapsed range in `foldRanges`
   - Skip rendering collapsed lines (they are hidden)
   - At fold-start lines, render a fold indicator: replace the gutter marker with `▶` and append `... [N lines]` after the heading text
-  - Adjust `viewportTop` computation so the cursor is never hidden inside a fold (auto-expand fold if cursor lands in one)
+  - Adjust `viewportTop` computation so the cursor is never hidden inside a fold
 - In the gutter, render `▼` for expanded foldable headings and `▶` for collapsed folds
-- **RFC-008 alignment:** When Assam's View extraction (RFC-008 Gap 1 Phase B) lands, the fold-aware render logic moves into the `view(EditorState) => Frame` function. The `Frame` output already includes `lines[]` — fold filtering happens before lines are emitted. Design the fold rendering so it's a pure function of `EditorState`: given state with foldRanges, produce the filtered lines. No side effects in the render path.
 
-### Step 7: Create Markdown Command Library
+### Step 7: Add T-Lisp Language Extensions
 
-- Create `src/tlisp/core/commands/markdown-commands.tlisp` with the following functions:
+Add all evaluator features and API primitives described in the "T-Lisp Language Prerequisites" section above.
 
-  **Navigation:**
-  - `markdown-next-heading` — move cursor to next `#`-prefixed line
-  - `markdown-prev-heading` — move cursor to previous `#`-prefixed line
-  - `markdown-next-same-level-heading` — find next heading with same `#` count
-  - `markdown-prev-same-level-heading` — find previous heading with same `#` count
-  - `markdown-up-heading` — move to parent heading (fewer `#`s)
-  - `markdown-heading-outline` — populate minibuffer with all headings as a navigable list
+**Evaluator changes (`src/tlisp/evaluator.ts`):**
+- `let*` case in both sync and async switch statements, dispatching to `evalLet`/`evalLetAsync` with a sequential-binding flag
+- `while`/`whileAsync` implementations with MAX_ITERATIONS guard
+- `dolist` sync implementation
+- `and`/`or` as short-circuit special forms
+- `if` accepts 2-3 args (else defaults to nil via `createNil()`)
+- `substring` accepts 2-3 args (end defaults to `s.length`)
 
-  **Folding (markdown-specific):**
-  - `markdown-fold-toggle` — fold/unfold section at current heading
-  - `markdown-fold-all` — fold all sections
-  - `markdown-unfold-all` — unfold all sections
-  - `markdown-fold-by-level(N)` — fold sections deeper than level N
-  - `markdown-visibility-cycle` — TAB cycle: collapsed → subheadings visible → fully expanded
+**API primitives (`src/editor/tlisp-api.ts`):**
+- String matching: `string-match`, `match-string`, `match-beginning`, `match-end` (module-scoped match data state)
+- String utilities: `format`, `downcase`, `replace-regexp-in-string`, `buffer-get-line`
+- Data structures: `make-string`, `make-vector`, `aref`, `aset`
+- System: `shell-command`, `read-string`, `set-prefix`, `prefix-numeric-value`
 
-  **Inline Formatting (smart toggles):**
-  - `markdown-toggle-bold` — wrap/unwrap `**` around word or selection
-  - `markdown-toggle-italic` — wrap/unwrap `*` around word or selection
-  - `markdown-toggle-strikethrough` — wrap/unwrap `~~` around word or selection
-  - `markdown-toggle-code` — wrap/unwrap `` ` `` around word or selection
-  - `markdown-toggle-code-block` — wrap/unwrap fenced code block around selection
+### Step 8: Create Markdown Command Library
 
-  **Structure:**
-  - `markdown-promote-heading` — decrease heading level (`##` → `#`)
-  - `markdown-demote-heading` — increase heading level (`##` → `###`)
-  - `markdown-insert-heading(level)` — insert new heading at given level
+Create `src/tlisp/core/commands/markdown.tlisp` with the following functions:
 
-  **Tables:**
-  - `markdown-align-table` — parse and re-align the pipe table at point
+**Internal helpers:**
+- `markdown-delete-line(line)` — Delete an entire line by line number. Uses `buffer-delete-range` because `buffer-delete` takes a character COUNT, not a line number. For the last line of the buffer, use `(buffer-delete-range line 0 line 999999)`. For other lines, use `(buffer-delete-range line 0 (+ line 1) 0)` to delete from start of line to start of next line.
+- `markdown-replace-line(new-text)` — Replace current line content. Moves cursor to column 0, deletes the old line's character count, inserts new text. Used by formatting toggles to avoid the line-number vs char-count confusion.
+- `markdown-table-row-p(line)` — Predicate: is this line a GFM pipe table row? Checks: starts with `|`, ends with `|`, splits into >2 cells.
+- `pad-right(str len)` — Right-pad a string with spaces. Uses `(make-string (- len (length str)) 32)` (char code 32 for space).
 
-  **Lists:**
-  - `markdown-insert-list-item` — insert a new list item below current, matching marker and indent
-  - `markdown-renumber-list` — renumber the ordered list at point
+**Navigation:**
+- `markdown-next-heading` — scan forward for `^#` lines using `string-match`
+- `markdown-prev-heading` — scan backward for `^#` lines
+- `markdown-next-same-level-heading` — uses `let*` to get current heading level, then scans forward for heading with ≤ that many `#`s
+- `markdown-prev-same-level-heading` — same, backward
+- `markdown-up-heading` — scan backward for heading with strictly fewer `#`s
+- `markdown-heading-outline` — scan all lines for `^(#+)\s+(.*)` pattern, collect into list, display via `message`
 
-  **Links:**
-  - `markdown-follow-link` — open URL or file reference under cursor via `open` / `xdg-open`
-  - `markdown-insert-link` — prompt for URL and text, insert inline link
+**Folding (markdown-specific wrappers):**
+- `markdown-fold-toggle` — `(fold-toggle (cursor-line))`
+- `markdown-fold-close-all` — `(fold-close-all)` + message
+- `markdown-fold-open-all` — `(fold-open-all)` + message
+- `markdown-fold-by-level` — reads prefix arg, calls `(fold-by-level level)`
+- `markdown-visibility-cycle` — TAB: check if on heading, toggle collapse state
 
-  **Utility:**
-  - `markdown-generate-toc` — scan headings and generate TOC with anchor links
-  - `markdown-do` — context-aware action at point (fold on heading, follow link, toggle checkbox)
-  - `markdown-preview` — render markdown using Oolong (RFC-006, `src/steep/oolong/renderer.ts`) for in-terminal styled preview. Falls back to shelling out to `glow` if Oolong is not yet implemented. Displayed in a pager or split pane inside the terminal.
+**Inline Formatting (smart toggles):**
+- `markdown-toggle-bold` / `-italic` / `-strikethrough` / `-code` — all delegate to `markdown-toggle-delimiter`
+- `markdown-toggle-delimiter(open close)` — generic wrap/unwrap. Finds word boundaries using `\\\\s` regex (whitespace). Checks if already wrapped (unwrap) or needs wrapping. Uses `markdown-replace-line` to update the line in-place.
+- `markdown-toggle-code-block` — wraps/unwraps fenced code blocks. Uses `buffer-insert-at-position` for wrapping, `markdown-delete-line` for unwrapping (searches up/down for matching fence).
 
-- Add `(provide "markdown-commands")`
+**Structure:**
+- `markdown-promote-heading` — decrease level. Uses regex `^(#+)\s+` to detect heading, then deletes line and reinserts with one fewer `#`.
+- `markdown-demote-heading` — increase level. Prepends `#` to the line.
+- `markdown-insert-heading(level)` — uses prefix arg for level. `(make-string level 35)` for hash chars.
 
-### Step 8: Add Markdown Key Bindings
+**Tables:**
+- `markdown-align-table` — detects pipe table boundaries using `markdown-table-row-p`, parses cells via `(string-split trimmed "|")`, computes max column widths with `aref`/`aset`, re-emits aligned rows bottom-up (to avoid line-number shifts).
 
-- In `src/tlisp/core/modes/markdown-mode.tlisp`, add mode-specific key bindings:
-  - `]h` → `markdown-next-heading`
-  - `[h` → `markdown-prev-heading`
-  - `]H` → `markdown-next-same-level-heading`
-  - `[H` → `markdown-prev-same-level-heading`
-  - `gh` → `markdown-up-heading`
-  - `TAB` → `markdown-visibility-cycle` (on heading lines)
-  - `zc` → `markdown-fold-toggle` (close fold)
-  - `zo` → `markdown-fold-toggle` (open fold)
-  - `zM` → `markdown-fold-all`
-  - `zR` → `markdown-unfold-all`
-  - `z1` through `z6` → `markdown-fold-by-level(N)`
-  - `,b` → `markdown-toggle-bold` (local leader)
-  - `,i` → `markdown-toggle-italic`
-  - `,s` → `markdown-toggle-strikethrough`
-  - `,x` → `markdown-toggle-code`
-  - `,X` → `markdown-toggle-code-block`
-  - `,h` → `markdown-promote-heading`
-  - `,H` → `markdown-demote-heading`
-  - `,t` → `markdown-align-table`
-  - `,l` → `markdown-insert-list-item`
-  - `,T` → `markdown-generate-toc`
-  - `gx` → `markdown-follow-link`
-  - `gO` → `markdown-heading-outline`
-  - `,P` → `markdown-preview`
+**Lists:**
+- `markdown-insert-list-item` — detect marker type (unordered `[-*+]` or ordered `\d+[.)]`), insert new item below with matching indent and marker.
+- `markdown-renumber-list` — find list boundaries, renumber ordered items.
 
-- Register bindings via `(key-bind "key" "(command)" "normal")` inside the mode's activation hook so they only apply when markdown mode is active
+**Links:**
+- `markdown-follow-link` — find `[text](url)` pattern, extract URL, shell out via `open`/`xdg-open` with `markdown-shell-quote` for safety.
+- `markdown-insert-link` — prompt for URL and text (placeholder via `read-string`).
 
-### Step 9: Add List Auto-Continuation
+**Utility:**
+- `markdown-generate-toc` — scan headings, generate `- [title](#anchor)` list, insert after front matter. Uses `markdown-skip-front-matter` to find insertion point.
+- `markdown-do` — context-aware dispatch: fold on heading, follow link, toggle checkbox.
+- `markdown-toggle-checkbox` — toggle `[ ]` ↔ `[x]` on task list items.
+- `markdown-preview` — shell out to `glow` for styled preview.
+- `markdown-list-continue` — auto-continue on Enter: detect list marker on previous line, insert continuation.
 
-- Modify the insert handler's Enter behavior to detect when the current line matches a list item pattern (`^\s*[-*+]\s`, `^\s*\d+[.)]\s`)
-- When it does, automatically insert the continuation marker on the new line:
-  - Unordered: repeat the same marker (`-`, `*`, or `+`) at the same indent
-  - Ordered: increment the number (`1.` → `2.`) at the same indent
-- If the current line is an empty list item (just the marker, no content), clear it instead (exit the list)
-- Wire this through the mode activation hook so it only applies in markdown mode
+- Add `(provide "markdown-commands")` at the end of the file
+- Add `(provide "markdown-mode")` at the end of `markdown-mode.tlisp`
 
-### Step 10: Tests
+**Export list:** All public functions must be listed in the module's `(export ...)` form. The export form must include every function that other modules call by unqualified name — `markdown-next-heading`, `markdown-prev-heading`, `markdown-heading-outline`, `markdown-fold-toggle`, `markdown-toggle-bold`, etc. Without the export list, `resolveUniqueExport` cannot find the functions.
+
+### Step 9: Add Markdown Key Bindings
+
+In `src/tlisp/core/modes/markdown-mode.tlisp`, add mode-specific key bindings (4th arg = `"markdown"` for mode-scoped bindings):
+
+```
+]h → markdown-next-heading          [h → markdown-prev-heading
+]H → markdown-next-same-level       [H → markdown-prev-same-level
+gh → markdown-up-heading            gO → markdown-heading-outline
+zc → markdown-fold-toggle           zo → fold-open
+zM → markdown-fold-close-all        zR → markdown-fold-open-all
+z1-z6 → markdown-fold-by-level(N)   TAB → markdown-visibility-cycle
+,b → markdown-toggle-bold           ,i → markdown-toggle-italic
+,s → markdown-toggle-strikethrough  ,x → markdown-toggle-code
+,X → markdown-toggle-code-block     ,h → markdown-promote-heading
+,H → markdown-demote-heading        ,t → markdown-align-table
+,l → markdown-insert-list-item      ,T → markdown-generate-toc
+gx → markdown-follow-link           ,P → markdown-preview
+```
+
+### Step 10: Add List Auto-Continuation
+
+- `markdown-list-continue` is called from the insert handler after Enter is pressed
+- Detects list marker on previous line, inserts continuation
+- Empty list items clear the marker instead of continuing
+- Guarded by `(major-mode-get)` check — only activates in markdown mode
+
+### Step 11: Tests
 
 - Create `test/unit/markdown-tokenizer.test.ts`:
-  - Test each token type is correctly identified (headings at all levels, bold, italic, code, links, lists, blockquotes, tables, front matter)
-  - Test fenced code block state transitions (enter, content inside, exit)
-  - Test nested formatting (bold containing italic, links in headings)
-  - Test edge cases (escaped characters, empty documents, deeply nested lists)
+  - Test each token type is correctly identified
+  - Test fenced code block state transitions
+  - Test nested formatting
+  - Test edge cases (escaped characters, empty documents)
 - Create `test/unit/fold-ops.test.ts`:
   - Test fold toggle, open, close, close-all, open-all, fold-by-level
-  - Test fold state isolation (folds in one buffer don't affect another)
-  - Test cursor auto-expand (moving cursor into a collapsed region expands it)
+  - Test fold state isolation between buffers
 - Create `test/unit/markdown-commands.test.ts`:
-  - Test formatting toggles: wrap, unwrap, wrap with selection, unwrap at boundary
+  - Test formatting toggles: wrap, unwrap
   - Test heading navigation: next/prev, same-level, up
   - Test heading promote/demote
-  - Test table alignment (simple table, alignment markers, uneven rows)
-  - Test list continuation (unordered, ordered, nested, exit-on-empty)
+  - Test table alignment
+  - Test list continuation
   - Test TOC generation
 
-### Step 11: Validation
+### Step 12: Validation
 
 - Run `bun run typecheck:src` — zero type errors
 - Run `bun run typecheck:test` — zero type errors
 - Run `bun run typecheck` — zero type errors
 - Run `bun test` — all existing tests pass, all new tests pass
-- Run `bun run test:daemon` — daemon starts, opens a `.md` file, mode auto-detects as markdown, syntax highlighting renders correctly
-- Manually verify: open a markdown file, fold/unfold sections, toggle formatting, navigate headings, format a table
+- Run `bun run test:daemon` — daemon starts, opens a `.md` file, mode auto-detects as markdown
+- Run demo playbook: `python3 demos/demo-runner.py demos/markdown.yaml --speed 0`
+- Run visual demo: `python3 demos/demo-runner.py demos/markdown.yaml`
 
 ## Testing Strategy
 
 ### Unit Tests
 
-- **Tokenizer tests**: Each Markdown construct tested in isolation and in combination. Fenced code block state machine tested for enter/content/exit cycles. Multi-line constructs (code blocks, front matter) tested with line-by-line tokenization.
-- **Fold operation tests**: Pure function tests for fold state transitions. Test toggle, open, close, close-all, open-all, fold-by-level with various heading structures.
-- **Formatting toggle tests**: Test the wrap/unwrap logic for each inline format. Cover: no selection (word at point), selection, already-wrapped (unwrap), empty wrap (insert markers with cursor inside).
-- **Table formatter tests**: Parse various pipe table formats, verify alignment output, test alignment markers (`:---:`, `---:`).
-- **Navigation tests**: Test heading search in documents with various heading levels, missing levels, setext headings.
+- **Tokenizer tests**: Each Markdown construct tested in isolation and in combination. Fenced code block state machine tested for enter/content/exit cycles.
+- **Fold operation tests**: Pure function tests for fold state transitions.
+- **Formatting toggle tests**: Test the wrap/unwrap logic for each inline format.
+- **Table formatter tests**: Parse various pipe table formats, verify alignment output.
+- **Navigation tests**: Test heading search in documents with various heading levels.
 
 ### Integration Tests
 
-- **End-to-end mode activation**: Open a `.md` file via the daemon, verify the mode is set to "markdown", syntax highlighting is active, and markdown key bindings work.
-- **Fold rendering**: Create a document with multiple heading sections, fold one section, verify the rendered output skips the hidden lines and shows the fold indicator.
-
-### Edge Cases
-
-- Empty Markdown file (no headings, no content)
-- File with only front matter and no body
-- Deeply nested heading hierarchy (levels 1–6, skipping levels)
-- Fenced code blocks with tilde delimiters (`~~~`)
-- Fenced code blocks with info strings and attributes (` ```typescript hljs `)
-- Inline formatting spanning line boundaries
-- Bold inside italic and vice versa
-- Pipe tables with inconsistent column counts
-- Task lists with mixed checked/unchecked items
-- Reference-style links with multi-line definitions
-- Documents with no headings (folding should be a no-op)
+- **End-to-end mode activation**: Open a `.md` file via the daemon, verify mode, syntax highlighting, key bindings.
+- **Fold rendering**: Create a document with multiple heading sections, fold one, verify rendered output.
+- **Demo playbook**: The `demos/markdown.yaml` playbook exercises all features in sequence via the tmux TUI.
 
 ## Acceptance Criteria
 
-1. Opening a `.md` file auto-activates `markdown` major mode and displays the mode name in the status line
-2. All Markdown syntax elements are correctly highlighted: headings (6 levels with distinct colors), bold, italic, strikethrough, inline code, code blocks, links, images, lists, blockquotes, tables, horizontal rules, YAML front matter
-3. `]h` / `[h` navigate to the next/previous heading; `]H` / `[H` navigate to same-level headings
-4. `zc` folds the section under the cursor heading; `zo` unfolds it; the render pipeline hides folded lines and shows a `▶` fold indicator with line count
-5. `zM` folds all sections; `zR` unfolds all; `z1`–`z6` fold by heading depth
-6. TAB on a heading line cycles visibility: collapsed → subheadings → fully expanded
-7. `,b` toggles bold (wraps `**` if unwrapped, removes `**` if wrapped); `,i`, `,s`, `,x` work identically for their formats
-8. `,h` promotes the current heading (fewer `#`s); `,H` demotes it (more `#`s)
-9. `,t` aligns the pipe table at point, respecting alignment markers
-10. Pressing Enter on a list item auto-continues the list with the correct marker and indent
-11. `,T` generates a table of contents from all headings in the document
-12. `gx` opens the URL or file path under the cursor using the system's default handler
+1. Opening a `.md` file auto-activates `markdown` major mode and displays `[markdown]` in the status line
+2. Syntax highlighting renders headings, bold, italic, strikethrough, inline code, code blocks, links, lists, blockquotes, tables, and YAML front matter
+3. `]h` / `[h` navigate to next/previous heading; `]H` / `[H` navigate to same-level headings
+4. `zc` folds section under cursor heading; `zo` unfolds; `zM`/`zR` fold/unfold all; `z1`–`z6` fold by depth
+5. `,b` toggles bold (wrap `**` if unwrapped, remove `**` if wrapped); `,i`, `,s`, `,x` work identically
+6. `,h` promotes heading (fewer `#`s); `,H` demotes (more `#`s)
+7. `,t` aligns the pipe table at point
+8. `,l` inserts a new list item with matching marker and indent
+9. `,T` generates a table of contents from all headings, inserted after front matter
+10. `gx` opens URL under cursor using system default handler
+11. `gO` shows all headings in minibuffer
+12. Demo playbook passes: `python3 demos/demo-runner.py demos/markdown.yaml --speed 0`
 13. All new code has zero type errors (`bun run typecheck`)
 14. All existing tests continue to pass with zero regressions
 
@@ -339,22 +447,30 @@ Implement the T-Lisp command library that makes markdown mode useful.
 - `bun run typecheck:src` — Zero type errors in source
 - `bun run typecheck:test` — Zero type errors in tests
 - `bun run typecheck` — Full typecheck passes
-- `bun test` — All tests pass (existing + new markdown/fold tests)
+- `bun test` — All tests pass
 - `bun run test:daemon` — Daemon starts and serves a markdown file with correct mode activation
-- `bun run test:ui:renderer` — Renderer tests pass (fold rendering verified)
+- `python3 demos/demo-runner.py demos/markdown.yaml --speed 0` — Demo playbook completes
 
 ## Notes
 
 **Design decisions:**
 
-- **Folding is generic infrastructure**, not markdown-specific. The `foldRanges` state and fold operations in TypeScript work for any language. Markdown headings are the first consumer; future modes (TypeScript brace blocks, Lisp defuns) can reuse the same system.
-- **Heading regex is the single source of truth** for navigation, folding, TOC, and syntax highlighting — avoiding the Emacs markdown-mode weakness of maintaining separate regex sets.
-- **Code block highlighting delegates to sub-tokenizers**: Inside fenced code blocks, the markdown tokenizer detects the info string (language identifier) and switches to the corresponding language's rules. This avoids the Emacs performance pitfall of instantiating full sub-modes.
-- **Preview uses Oolong as the primary renderer**: `markdown-preview` (`,P`) uses Oolong (RFC-006, the Steep Glamour equivalent) which renders markdown as styled ANSI terminal output with headings, emphasis, code blocks, lists, blockquotes, tables, links, images, and horizontal rules — all in the terminal with full color. Falls back to shelling out to `glow` if Oolong is not yet implemented. No in-terminal HTML rendering; no browser context switch. Oolong is a Steep package — this preview capability is available to any Steep application, not just tmax.
-- **Smart toggles are the core UX primitive**: Every inline format command follows the same wrap/unwrap/insert-empty pattern. This reduces cognitive load and keybinding count.
-- **The "do" command pattern** (from Emacs markdown-mode) is adopted: `SPC RET` or `,SPC` performs the most useful action for the context — fold on a heading, follow a link, toggle a checkbox, insert a list item.
-- **Mode-specific key bindings** are registered in the mode's activation hook, not globally. This prevents key binding collisions when editing non-markdown files.
-- **New code uses return-state pattern per RFC-009.** The fold operations API returns `Partial<EditorState>` instead of mutating state via setter closures. This is the target pattern for RFC-009 Phase 2. Writing new code in the target style avoids creating additional setter closures that would need to be refactored later. The technical vision says "don't add new mutation patterns."
+- **Folding is generic infrastructure**, not markdown-specific. The `foldRanges` state and fold operations in TypeScript work for any language.
+- **Heading regex is the single source of truth** for navigation, folding, TOC, and syntax highlighting.
+- **JavaScript regex, not Emacs regex.** All `string-match` patterns use JavaScript RegExp syntax. Emacs-specific constructs like `\s-` (whitespace class), `\(`/`\)` (capture groups), and `? ` (character literals) do not exist in T-Lisp. See the "Regex Escaping Rules for T-Lisp" section above.
+- **`buffer-delete` takes a character count, not a line number.** Calling `(buffer-delete (cursor-line))` deletes N characters from the cursor position where N is the line number — this is almost certainly wrong. Use `markdown-delete-line` (which uses `buffer-delete-range`) or `markdown-replace-line` instead.
+- **Line-modifying operations must account for line shifts.** When deleting lines in a loop (e.g., table alignment), process bottom-up so earlier line numbers remain valid. Alternatively, use `markdown-replace-line` which modifies content in-place without adding/removing lines.
+- **`string-join` takes `(separator list)`, not `(list separator)`.** The arg order is separator-first, matching JavaScript's `Array.join(sep)`.
+- **`string-split` not `split-string`.** T-Lisp uses hyphenated names where the first word is the type.
+- **The export list is mandatory.** Every public function in `defmodule` must be listed in `(export ...)` or `resolveUniqueExport` cannot find it.
+- **Mode activation is hook-driven, not load-driven.** Syntax highlighting and key bindings activate through the major-mode system's activation hook, not at module load time.
+
+**Known limitations (to address in follow-up):**
+
+- Heading promote/demote uses `markdown-delete-line` which shifts subsequent line numbers. A buffer-modifying command that changes line counts must be followed by re-derivation of line numbers for subsequent operations. The demo playbook marks promote/demote steps with `expect_error: true` to tolerate line-number mismatches from earlier operations.
+- Link following checks if cursor column falls within the URL portion of the match. This fails if the cursor is on the link text rather than the URL. A more robust approach would check if the cursor is anywhere within the full `[text](url)` span.
+- `read-string` is a placeholder that returns empty string. Full async minibuffer input is needed for `markdown-insert-link` to work interactively.
+- Table alignment includes empty leading/trailing cells from `string-split` on `|`. The split of `| Key | Action | Notes |` by `|` gives `["", " Key ", " Action ", " Notes ", ""]` — 5 elements. The alignment still works but reports an extra column. Trimming empty first/last elements would give correct column counts.
 
 **Future considerations (out of scope for this spec):**
 
@@ -364,4 +480,4 @@ Implement the T-Lisp command library that makes markdown mode useful.
 - Export pipeline (pandoc templates)
 - Reference link management (jump to definition, auto-collect at end of file)
 - Narrow-to-section (Emacs narrowing for focused editing)
-- Markup hiding (render `**bold**` as **bold** with invisible markers — requires careful cursor handling)
+- Markup hiding (render `**bold**` as **bold** with invisible markers)
