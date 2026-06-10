@@ -177,13 +177,6 @@ if [ "$DAEMON_ONLY" = true ]; then
   cd "$PROJECT_DIR" && TMAX_SOCKET="$SOCKET" exec bun "$DAEMON"
 fi
 
-# Default: ensure daemon + open TUI frame (with optional file)
-ensure_daemon
-
-# Open file if specified
-if [ ${#FILES[@]} -gt 0 ]; then
-  "$CLIENT" -s "$SOCKET" "${FILES[0]}" 2>/dev/null
-fi
-
-# Launch TUI client (exec replaces this process)
-exec bun "$TUI"
+# Default: single-process editor with embedded server
+# (like running emacs — the editor IS the process, socket is in-process)
+cd "$PROJECT_DIR" && exec bun src/main.tsx "${FILES[@]}"

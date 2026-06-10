@@ -137,51 +137,56 @@ export class TmaxServer {
   private ownsLock: boolean = false;
   private shuttingDown: boolean = false;
 
-  constructor(socketPath?: string, testMode: boolean = false) {
+  constructor(socketPath?: string, testMode: boolean = false, editor?: Editor) {
     this.socketPath = socketPath || this.getDefaultSocketPath();
     this.server = createServer();
     this.clients = new Map();
     this.testMode = testMode;
 
-    // Create editor instance with T-Lisp interpreter
-    const terminal = new TerminalIOImpl(true); // dev mode for server
-    const filesystem = new FileSystemImpl();
-    this.editor = new Editor(terminal, filesystem);
+    if (editor) {
+      // Embedded mode: reuse an existing Editor instance
+      this.editor = editor;
+    } else {
+      // Daemon mode: create a fresh Editor instance
+      const terminal = new TerminalIOImpl(true); // dev mode for server
+      const filesystem = new FileSystemImpl();
+      this.editor = new Editor(terminal, filesystem);
 
-    // Load test framework to provide defvar and other testing utilities
-    const interpreter = this.editor.getInterpreter();
-    registerTestingFramework(interpreter);
+      // Load test framework to provide defvar and other testing utilities
+      const interpreter = this.editor.getInterpreter();
+      registerTestingFramework(interpreter);
 
-    // Initialize default state
-    const initialState: EditorState = {
-      currentBuffer: FunctionalTextBufferImpl.create(""),
-      cursorPosition: { line: 0, column: 0 },
-      mode: 'normal' as const,
-      statusMessage: 'Server started',
-      viewportTop: 0,
-      config: {
-        theme: 'default',
-        tabSize: 4,
-        autoSave: false,
-        keyBindings: {},
-        maxUndoLevels: 100,
-        showLineNumbers: true,
-        relativeLineNumbers: false,
-        wordWrap: false
-      },
-      currentFilename: undefined,
-      commandLine: "",
-      mxCommand: "",
-      buffers: new Map(),
-      currentMajorMode: 'fundamental',
-      activeMinorModes: [],
-      activeMinorModeLighters: [],
-      minibufferState: undefined,
-      minibufferView: undefined,
-    };
+      // Initialize default state
+      const initialState: EditorState = {
+        currentBuffer: FunctionalTextBufferImpl.create(""),
+        cursorPosition: { line: 0, column: 0 },
+        mode: 'normal' as const,
+        statusMessage: 'Server started',
+        viewportTop: 0,
+        config: {
+          theme: 'default',
+          tabSize: 4,
+          autoSave: false,
+          keyBindings: {},
+          maxUndoLevels: 100,
+          showLineNumbers: true,
+          relativeLineNumbers: false,
+          wordWrap: false
+        },
+        currentFilename: undefined,
+        commandLine: "",
+        mxCommand: "",
+        buffers: new Map(),
+        currentMajorMode: 'fundamental',
+        activeMinorModes: [],
+        activeMinorModeLighters: [],
+        minibufferState: undefined,
+        minibufferView: undefined,
+      };
 
-    this.editor.setEditorState(initialState);
-    this.editor.createBuffer("*scratch*", "");
+      this.editor.setEditorState(initialState);
+      this.editor.createBuffer("*scratch*", "");
+    }
   }
 
   /**
@@ -530,7 +535,7 @@ export class TmaxServer {
       currentBuffer: frame.currentBuffer,
       cursorPosition: { ...frame.cursorPosition },
       mode: frame.mode,
-      statusMessage: frame.statusMessage,
+      statusMessage: shared.statusMessage,
       viewportTop: frame.viewportTop,
       config: shared.config,
       commandLine: frame.commandLine,
@@ -552,16 +557,21 @@ export class TmaxServer {
   }
 
   /**
-   * Start the server
+   * Initialize editor (load bindings + init file).
+   * Called by start() or directly for embedded use.
    */
-  async start(): Promise<void> {
+  async startEditor(): Promise<void> {
     (this.editor as any).logMessage('Server started', 'info');
 
-    // Load core bindings and init file before starting
     await (this.editor as any).ensureCoreBindingsLoaded();
     await (this.editor as any).loadInitFile(undefined);
-    console.log('Core bindings and init file loaded');
+  }
 
+  /**
+   * Start the socket listener.
+   * Called by start() or non-blocking for embedded use.
+   */
+  async startSocket(): Promise<void> {
     // Ensure the socket directory exists
     const socketDir = this.socketPath.substring(0, this.socketPath.lastIndexOf('/'));
     mkdirSync(socketDir, { recursive: true });
@@ -571,7 +581,6 @@ export class TmaxServer {
 
     this.server.on('connection', this.handleConnection.bind(this));
 
-    // start() resolves only after listen succeeds, rejects on error
     await new Promise<void>((resolve, reject) => {
       this.server.on('error', (err) => {
         if (!this.testMode) {
@@ -592,6 +601,15 @@ export class TmaxServer {
     // Handle graceful shutdown
     process.on('SIGTERM', () => this.shutdown());
     process.on('SIGINT', () => this.shutdown());
+  }
+
+  /**
+   * Start the server (editor + socket). Backward-compatible.
+   */
+  async start(): Promise<void> {
+    await this.startEditor();
+    console.log('Core bindings and init file loaded');
+    await this.startSocket();
   }
 
   /**
