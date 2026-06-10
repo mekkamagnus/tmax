@@ -315,6 +315,12 @@ Examples:
   const server = new TmaxServer(undefined, false, editor);
   try {
     await server.startEditor();
+
+    // Activate major mode for file loaded before core bindings were ready
+    if (filename) {
+      editor.activateMajorModeForFile(filename);
+    }
+
     server.startSocket().catch((err: Error) => {
       // Graceful degradation: editor works without socket if already in use
       startupLog.info('Socket server not started (already in use or unavailable)', {
