@@ -52,7 +52,8 @@
 (key-bind ",l" "(markdown-insert-list-item)" "normal" "markdown")
 
 ;; Links
-(key-bind "gx" "(markdown-follow-link)" "normal" "markdown")
+(key-bind "gx" "(markdown-do)" "normal" "markdown")
+(key-bind "gb" "(markdown-jump-back)" "normal" "markdown")
 
 ;; Utility
 (key-bind ",T" "(markdown-generate-toc)" "normal" "markdown")
