@@ -12,6 +12,8 @@ deno.lock
 package-lock.json
 node_modules/
 bun.lockb
+.next/
+.playwright-cli/
 
 # Compiled binaries
 dist/
