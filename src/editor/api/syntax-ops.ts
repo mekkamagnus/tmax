@@ -25,36 +25,10 @@ import {
   createBufferError,
   AppError,
 } from "../../error/types.ts";
-import type { SyntaxRule, SyntaxToken, HighlightSpan } from "../../core/types.ts";
+import type { SyntaxToken, HighlightSpan } from "../../core/types.ts";
 import { tokenize } from "../../syntax/tokenizer.ts";
 import { highlightLine } from "../../syntax/highlighter.ts";
-import { rules as tsRules } from "../../syntax/languages/typescript.ts";
-import { rules as pyRules } from "../../syntax/languages/python.ts";
-import { rules as lispRules } from "../../syntax/languages/lisp.ts";
-import { rules as goRules } from "../../syntax/languages/go.ts";
-import { rules as cRules } from "../../syntax/languages/c.ts";
-import { rules as clojureRules } from "../../syntax/languages/clojure.ts";
-import { rules as mdRules } from "../../syntax/languages/markdown.ts";
-
-/**
- * Language name -> syntax rules
- */
-const languageRules: Map<string, SyntaxRule[]> = new Map([
-  ["typescript", tsRules],
-  ["javascript", tsRules],
-  ["tsx", tsRules],
-  ["jsx", tsRules],
-  ["python", pyRules],
-  ["lisp", lispRules],
-  ["tlisp", lispRules],
-  ["go", goRules],
-  ["c", cRules],
-  ["cpp", cRules],
-  ["h", cRules],
-  ["clojure", clojureRules],
-  ["clj", clojureRules],
-  ["markdown", mdRules],
-]);
+import { languageMap } from "../../syntax/language-registry.ts";
 
 /**
  * Module-level state for the active language and highlight toggle.
@@ -94,13 +68,13 @@ export function createSyntaxOps(
     }
 
     const name = (nameArg.value as string).toLowerCase();
-    if (!languageRules.has(name)) {
+    if (!languageMap.has(name)) {
       return Either.left(createValidationError(
         "ConstraintViolation",
-        `Unknown language: ${name}. Available: ${Array.from(languageRules.keys()).join(", ")}`,
+        `Unknown language: ${name}. Available: ${Array.from(languageMap.keys()).join(", ")}`,
         "language",
         name,
-        "one of: " + Array.from(languageRules.keys()).join(", ")
+        "one of: " + Array.from(languageMap.keys()).join(", ")
       ));
     }
 
@@ -199,7 +173,7 @@ export function createSyntaxOps(
       ));
     }
 
-    const rules = languageRules.get(activeLanguage)!;
+    const rules = languageMap.get(activeLanguage)!;
     const lineText = getLine(lineNum);
     const result = tokenize(lineText, lineNum, rules);
     const tokens = Array.isArray(result) ? result : (result as any).tokens ?? [];
@@ -283,7 +257,7 @@ export function createSyntaxOps(
       ));
     }
 
-    const rules = languageRules.get(activeLanguage)!;
+    const rules = languageMap.get(activeLanguage)!;
     const lineText = getLine(lineNum);
     const result = tokenize(lineText, lineNum, rules);
     const tokens = Array.isArray(result) ? result : (result as any).tokens ?? [];

@@ -2736,6 +2736,76 @@ export class Editor {
   }
 
   /**
+   * Get the filesystem interface (for server/daemon use)
+   */
+  getFilesystem(): FileSystem {
+    return this.filesystem;
+  }
+
+  /**
+   * Look up a binding by name from the global environment chain.
+   */
+  lookupGlobalBinding(name: string): TLispValue | undefined {
+    return this.interpreter.globalEnv.lookup(name);
+  }
+
+  /**
+   * Get all visible global bindings (walking parent chain).
+   */
+  getAllGlobalBindings(): Map<string, TLispValue> {
+    return this.collectVisibleGlobalBindings();
+  }
+
+  /**
+   * Get names of all defined functions/macros in the global environment.
+   */
+  getGlobalFunctionNames(): string[] {
+    const names: string[] = [];
+    for (const [name, value] of this.collectVisibleGlobalBindings()) {
+      if (value.type === 'function' || value.type === 'macro') {
+        names.push(name);
+      }
+    }
+    return names.sort();
+  }
+
+  /**
+   * Get all variables (using *name* convention) from the global environment.
+   */
+  getGlobalVariables(): Record<string, any> {
+    const variables: Record<string, any> = {};
+    for (const [name, value] of this.collectVisibleGlobalBindings()) {
+      if (name.startsWith('*') && name.endsWith('*')) {
+        // Use the same JSON conversion the server uses
+        // We return raw TLispValues; caller converts as needed
+        variables[name] = value;
+      }
+    }
+    return variables;
+  }
+
+  /**
+   * Ensure core bindings are loaded (for server/daemon use).
+   */
+  async ensureCoreBindingsLoadedPublic(): Promise<void> {
+    await this.ensureCoreBindingsLoaded();
+  }
+
+  /**
+   * Load init file (for server/daemon use).
+   */
+  async loadInitFilePublic(initFilePath?: string): Promise<void> {
+    await this.loadInitFile(initFilePath);
+  }
+
+  /**
+   * Get the message log (for server/daemon use).
+   */
+  getMessageLog(): MessageLog {
+    return this.messageLog;
+  }
+
+  /**
    * Get key mappings (for testing)
    */
   getKeyMappings(): Map<string, KeyMapping[]> {

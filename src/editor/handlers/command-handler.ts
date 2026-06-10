@@ -109,7 +109,7 @@ export async function handleCommandMode(editor: Editor, key: string, normalizedK
       (editor as any).logMessage(`Unbound key: ${normalizedKey}`, 'debug');
     } else {
       // Find mapping for command mode
-      const currentMajorMode = (editor as any).getCurrentMajorMode?.() as string | undefined;
+      const currentMajorMode = editor.getCurrentMajorMode?.() as string | undefined;
       const mapping = resolveMapping(mappings, "command", currentMajorMode);
       if (!mapping) {
         (editor as any).state.statusMessage = `Unbound key in command mode: ${normalizedKey}`;

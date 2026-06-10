@@ -80,7 +80,7 @@ export interface TlispEditorState {
   lspDiagnostics?: import("../core/types.ts").LSPDiagnostic[];  // LSP diagnostics (US-3.1.2)
   logMessage?: (msg: string, level?: string, command?: string) => void;  // Log to *Messages* buffer
   _getMessageLog?: () => import("./message-log.ts").MessageLog;  // Access MessageLog for level/max queries
-  currentFilename?: string;  // Current buffer's filename (SPEC-035 Phase 0a)
+  currentFilename?: string;  // Current buffer's filename
   config?: import("../core/types.ts").EditorConfig;
   _evalTlisp?: (expr: string) => any;
   _getCurrentMajorMode?: () => string;
@@ -107,12 +107,25 @@ export function createEditorAPI(state: TlispEditorState): Map<string, TLispFunct
   const api = new Map<string, TLispFunctionImpl>();
 
   // Add buffer operations
+  const setCursorLine = (line: number) => {
+    state.cursorLine = line;
+    // Auto-expand fold if cursor lands inside a collapsed region
+    if (state.foldRanges && state.foldRanges.size > 0) {
+      for (const [foldStart, foldEnd] of state.foldRanges) {
+        if (line > foldStart && line <= foldEnd) {
+          state.foldRanges.delete(foldStart);
+          break;
+        }
+      }
+    }
+  };
+
   const bufferOps = createBufferOps(
     state.buffers,
     () => state.currentBuffer,
     (buffer) => { state.currentBuffer = buffer; },
     () => state.cursorLine,
-    (line) => { state.cursorLine = line; },
+    setCursorLine,
     () => state.cursorColumn,
     (column) => { state.cursorColumn = column; },
     () => state.currentFilename,
@@ -128,7 +141,7 @@ export function createEditorAPI(state: TlispEditorState): Map<string, TLispFunct
   // Add cursor operations with visual selection update support (US-1.7.1)
   const cursorOps = createCursorOps(
     () => state.cursorLine,
-    (line) => { state.cursorLine = line; },
+    setCursorLine,
     () => state.cursorColumn,
     (column) => { state.cursorColumn = column; },
     () => state.currentBuffer,
@@ -380,7 +393,7 @@ export function createEditorAPI(state: TlispEditorState): Map<string, TLispFunct
     api.set(key, value);
   }
 
-  // Add hook operations (SPEC-003: real eval + callable hooks)
+  // Add hook operations
   const hooks: HookRegistry = new Map();
   const hookOps = createHookOps(hooks, (name: string) => {
     const fn = (state as any)._evalTlisp;
@@ -400,7 +413,7 @@ export function createEditorAPI(state: TlispEditorState): Map<string, TLispFunct
     api.set(key, value);
   }
 
-  // Add syntax highlighting operations (SPEC-035)
+  // Add syntax highlighting operations
   const syntaxOps = createSyntaxOps(
     () => state.currentBuffer,
     () => {
@@ -420,7 +433,7 @@ export function createEditorAPI(state: TlispEditorState): Map<string, TLispFunct
     api.set(key, value);
   }
 
-  // Add replace operations (SPEC-035)
+  // Add replace operations
   const replaceOps = createReplaceOps(
     () => state.currentBuffer,
     (buffer) => { state.currentBuffer = buffer; },
@@ -431,7 +444,7 @@ export function createEditorAPI(state: TlispEditorState): Map<string, TLispFunct
     api.set(key, value);
   }
 
-  // Add indent operations (SPEC-035)
+  // Add indent operations
   const indentOps = createIndentOps(
     () => state.currentBuffer,
     (buffer) => { state.currentBuffer = buffer; },
@@ -443,7 +456,7 @@ export function createEditorAPI(state: TlispEditorState): Map<string, TLispFunct
     api.set(key, value);
   }
 
-  // Add major mode operations (SPEC-003: buffer-local state + real eval)
+  // Add major mode operations
   const majorModeOps = createMajorModeOps(
     () => state.currentBuffer,
     () => state.currentFilename,
@@ -466,7 +479,7 @@ export function createEditorAPI(state: TlispEditorState): Map<string, TLispFunct
     api.set(key, value);
   }
 
-  // Add dired operations (SPEC-035)
+  // Add dired operations
   const diredOps = createDiredOps(
     () => state.currentBuffer,
     (buffer) => { state.currentBuffer = buffer; },
@@ -493,7 +506,7 @@ export function createEditorAPI(state: TlispEditorState): Map<string, TLispFunct
     api.set(key, value);
   }
 
-  // Add module introspection operations (SPEC-007)
+  // Add module introspection operations
   const moduleOps = createModuleOps(
     () => {
       const fn = (state as any)._getModuleRegistry;
@@ -508,7 +521,7 @@ export function createEditorAPI(state: TlispEditorState): Map<string, TLispFunct
     api.set(key, value);
   }
 
-  // Add minor mode operations (SPEC-003)
+  // Add minor mode operations
   const minorModeOps = createMinorModeOps(
     () => {
       const fn = (state as any)._getMinorModeRegistry;
@@ -548,7 +561,7 @@ export function createEditorAPI(state: TlispEditorState): Map<string, TLispFunct
     api.set(key, value);
   }
 
-  // Add AST structural editing operations (SPEC-013)
+  // Add AST structural editing operations
   const astOps = createAstOps({
     getBufferName: () => state.currentFilename ?? "*scratch*",
     getBufferText: () => {
@@ -582,7 +595,7 @@ export function createEditorAPI(state: TlispEditorState): Map<string, TLispFunct
     api.set(key, value);
   }
 
-  // Add code navigation operations (SPEC-013)
+  // Add code navigation operations
   const navigationOps = createNavigationOps({
     getBufferName: () => state.currentFilename ?? "*scratch*",
     getBufferText: () => {
@@ -713,7 +726,7 @@ export function createEditorAPI(state: TlispEditorState): Map<string, TLispFunct
     return Either.right(createString(state.lastCommand ?? ''));
   });
 
-  // Fold operations (SPEC-018)
+  // Fold operations
   const getBufferLine = (line: number): string => {
     const buf = state.currentBuffer;
     if (!buf) return '';
@@ -1005,25 +1018,6 @@ export function createEditorAPI(state: TlispEditorState): Map<string, TLispFunct
     }
   });
 
-  // ── set-prefix / prefix-numeric-value ──────────────────────────────────
-  // These are thin wrappers that delegate to the count prefix system.
-  // The actual state lives in editor.ts (countPrefix field), exposed via
-  // count-set/count-get. We provide Emacs-compatible aliases here.
-  api.set('set-prefix', (args: TLispValue[]): Either<AppError, TLispValue> => {
-    if (args.length < 1) return Either.left(createValidationError('FormatError', 'set-prefix requires 1 argument: n'));
-    if (args[0]!.type !== 'number') return Either.left(createValidationError('TypeError', 'set-prefix requires a number'));
-    // Store in state.commandLine as a hack — real implementation uses editor count
-    // The count API functions (count-set) will be registered in editor.ts with
-    // access to the editor instance, but we expose set-prefix here as a raw fn
-    // that writes to a well-known state slot. The editor.ts initializeAPI method
-    // will override this with a proper implementation.
-    return Either.right(createNumber(Number(args[0]!.value)));
-  });
-
-  api.set('prefix-numeric-value', (_args: TLispValue[]): Either<AppError, TLispValue> => {
-    // Default: return nil (no prefix set). Overridden in editor.ts.
-    return Either.right(createNil());
-  });
 
   return api;
 }

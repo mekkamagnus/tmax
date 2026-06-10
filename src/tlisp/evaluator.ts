@@ -3291,11 +3291,7 @@ export class TLispEvaluator {
     for (const expr of exprs) {
       const result = this.eval(expr, env);
       if (Either.isLeft(result)) return result;
-      // EvalResult may be TLispValue or TailCall; conditions are not in tail
-      // position so resolve any TailCall by re-evaluating via evalInternal
-      const value = this.evalInternal(expr!, env, false);
-      if (Either.isLeft(value)) return value;
-      const resolved = value.right as TLispValue;
+      const resolved = result.right as TLispValue;
       if (!isTruthy(resolved)) return Either.right(resolved);
       lastValue = resolved;
     }
@@ -3314,9 +3310,7 @@ export class TLispEvaluator {
     for (const expr of exprs) {
       const result = this.eval(expr, env);
       if (Either.isLeft(result)) return result;
-      const value = this.evalInternal(expr!, env, false);
-      if (Either.isLeft(value)) return value;
-      const resolved = value.right as TLispValue;
+      const resolved = result.right as TLispValue;
       if (isTruthy(resolved)) return Either.right(resolved);
       lastValue = resolved;
     }

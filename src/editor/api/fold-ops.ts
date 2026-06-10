@@ -1,11 +1,17 @@
 import type { EditorState } from "../../core/types.ts";
 
+const EMPTY_MAP: ReadonlyMap<number, number> = new Map();
+
+function getRanges(state: EditorState): Map<number, number> {
+  return state.foldRanges ?? EMPTY_MAP as Map<number, number>;
+}
+
 export function foldToggle(
   state: EditorState,
   line: number,
   headingRanges: { start: number; end: number }[],
 ): Partial<EditorState> {
-  const ranges = new Map(state.foldRanges ?? new Map());
+  const ranges = new Map(state.foldRanges ?? EMPTY_MAP);
   if (ranges.has(line)) {
     ranges.delete(line);
   } else {
@@ -19,7 +25,7 @@ export function foldOpen(
   state: EditorState,
   line: number,
 ): Partial<EditorState> {
-  const ranges = new Map(state.foldRanges ?? new Map());
+  const ranges = new Map(state.foldRanges ?? EMPTY_MAP);
   ranges.delete(line);
   return { foldRanges: ranges };
 }
@@ -29,7 +35,7 @@ export function foldClose(
   startLine: number,
   endLine: number,
 ): Partial<EditorState> {
-  const ranges = new Map(state.foldRanges ?? new Map());
+  const ranges = new Map(state.foldRanges ?? EMPTY_MAP);
   ranges.set(startLine, endLine);
   return { foldRanges: ranges };
 }
@@ -64,12 +70,12 @@ export function foldByLevel(
 }
 
 export function foldIsCollapsed(state: EditorState, line: number): boolean {
-  return (state.foldRanges ?? new Map()).has(line);
+  return (state.foldRanges ?? EMPTY_MAP).has(line);
 }
 
 export function foldGetRanges(state: EditorState): { start: number; end: number }[] {
   const result: { start: number; end: number }[] = [];
-  const ranges = state.foldRanges ?? new Map();
+  const ranges = state.foldRanges ?? EMPTY_MAP;
   for (const [start, end] of ranges) {
     result.push({ start, end });
   }

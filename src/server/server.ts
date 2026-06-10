@@ -223,7 +223,7 @@ export class TmaxServer {
       rawModeReady: false,
     });
     this.activeFrameId = id;
-    (this.editor as any).logMessage(`Frame created: ${id}`, 'info');
+    this.editor.logMessage(`Frame created: ${id}`, 'info');
     return id;
   }
 
@@ -451,7 +451,7 @@ export class TmaxServer {
       }
       this.activeFrameId = latest?.id ?? null;
     }
-    (this.editor as any).logMessage(`Frame deleted: ${id}`, 'info');
+    this.editor.logMessage(`Frame deleted: ${id}`, 'info');
   }
 
   /**
@@ -561,10 +561,10 @@ export class TmaxServer {
    * Called by start() or directly for embedded use.
    */
   async startEditor(): Promise<void> {
-    (this.editor as any).logMessage('Server started', 'info');
+    this.editor.logMessage('Server started', 'info');
 
-    await (this.editor as any).ensureCoreBindingsLoaded();
-    await (this.editor as any).loadInitFile(undefined);
+    await this.editor.ensureCoreBindingsLoadedPublic();
+    await this.editor.loadInitFilePublic(undefined);
   }
 
   /**
@@ -841,7 +841,6 @@ export class TmaxServer {
    */
   private async handleOpen(params: any): Promise<any> {
     const filepath = params.filepath;
-    const wait = params.wait ?? true;
 
     if (!filepath) {
       throw new Error('Filepath is required');
@@ -850,8 +849,7 @@ export class TmaxServer {
     // Load the file content
     let content = '';
     try {
-      const fs = new FileSystemImpl();
-      content = await fs.readFile(filepath);
+      content = await this.editor.getFilesystem().readFile(filepath);
     } catch (error) {
       // File doesn't exist, create empty buffer
       content = '';
@@ -867,13 +865,8 @@ export class TmaxServer {
 
     this.editor.setEditorState(newState);
     this.editor.activateMajorModeForFile(filepath);
-    (this.editor as any).logMessage(`Opened ${filepath}`, 'info');
+    this.editor.logMessage(`Opened ${filepath}`, 'info');
 
-    // If a frame is targeted, sync its buffer specifically
-    const frame = this.resolveFrameOptional(params);
-    if (frame) {
-      this.syncEditorToFrame(frame);
-    }
     this.syncEditorToAllFrames();
 
     return {
@@ -912,7 +905,6 @@ export class TmaxServer {
         const err = result.left as any;
         // Catch editor-quit signal and trigger graceful shutdown
         if (err.message === 'EDITOR_QUIT_SIGNAL') {
-          if (frame) this.syncEditorToFrame(frame);
           this.syncEditorToAllFrames();
           setTimeout(() => { this.shutdown(); }, 50);
           return { quitSignal: true };
@@ -924,11 +916,7 @@ export class TmaxServer {
         throw e;
       }
 
-      if (frame) {
-        this.syncEditorToFrame(frame);
-      } else {
-        this.syncEditorToAllFrames();
-      }
+      this.syncEditorToAllFrames();
 
       // Convert T-Lisp value to JSON-serializable format
       return this.tlispValueToJson(result.right);
@@ -979,11 +967,7 @@ export class TmaxServer {
         throw new Error(result.left.message || 'T-Lisp evaluation error');
       }
 
-      if (frame) {
-        this.syncEditorToFrame(frame);
-      } else {
-        this.syncEditorToAllFrames();
-      }
+      this.syncEditorToAllFrames();
 
       return this.tlispValueToJson(result.right);
     } catch (error) {
@@ -1162,9 +1146,12 @@ export class TmaxServer {
       case 'kill-buffer': {
         const bufferName = params.bufferName;
         if (bufferName) {
-          const buffers = this.editor.getState().buffers;
-          if (buffers?.has(bufferName)) {
-            buffers.delete(bufferName);
+          const state = this.editor.getState();
+          if (state.buffers?.has(bufferName)) {
+            const newBuffers = new Map(state.buffers);
+            newBuffers.delete(bufferName);
+            this.editor.setEditorState({ ...state, buffers: newBuffers });
+            this.syncEditorToAllFrames();
             return { success: true, killed: bufferName };
           } else {
             return { success: false, error: `Buffer ${bufferName} not found` };
@@ -1219,8 +1206,7 @@ export class TmaxServer {
    * Get documentation for a variable
    */
   private getVariableDocumentation(variableName: string): any {
-    const interpreter = this.editor.getInterpreter();
-    const value = interpreter.globalEnv.lookup(variableName);
+    const value = this.editor.lookupGlobalBinding(variableName);
 
     if (value === undefined) {
       return {
@@ -1255,7 +1241,6 @@ export class TmaxServer {
    * Find commands matching a pattern
    */
   private findCommandsByPattern(pattern: string): any {
-    const interpreter = this.editor.getInterpreter();
     const allFunctions = this.getTlispFunctions();
 
     // Convert pattern to regex (handle * wildcards)
@@ -1339,15 +1324,12 @@ export class TmaxServer {
    */
   private getTlispVariables(): Record<string, any> {
     const variables: Record<string, any> = {};
-    const interpreter = this.editor.getInterpreter();
 
-    // Get all bindings from global environment
-    interpreter.globalEnv.bindings.forEach((value, name) => {
-      // Only include variables (not functions, and use naming convention)
-      if (name.startsWith('*') && name.endsWith('*')) {
-        variables[name] = this.tlispValueToJson(value);
-      }
-    });
+    // Get all variable bindings (using *name* convention)
+    const rawVars = this.editor.getGlobalVariables();
+    for (const [name, value] of Object.entries(rawVars)) {
+      variables[name] = this.tlispValueToJson(value);
+    }
 
     return variables;
   }
@@ -1356,18 +1338,7 @@ export class TmaxServer {
    * Get all functions from T-Lisp environment
    */
   private getTlispFunctions(): string[] {
-    const functions: string[] = [];
-    const interpreter = this.editor.getInterpreter();
-
-    // Get all bindings from global environment
-    interpreter.globalEnv.bindings.forEach((value, name) => {
-      // Include functions and special forms
-      if (value.type === 'function' || value.type === 'macro') {
-        functions.push(name);
-      }
-    });
-
-    return functions.sort();
+    return this.editor.getGlobalFunctionNames();
   }
 
   /**
@@ -1405,7 +1376,7 @@ export class TmaxServer {
         // Query the T-Lisp interpreter for available functions
         return this.getTlispFunctions();
       case 'messages': {
-        const log = (this.editor as any).messageLog;
+        const log = this.editor.getMessageLog();
         if (!log) return { messages: [] };
         const entries = log.getEntries({
           level: params?.level,
@@ -1428,8 +1399,7 @@ export class TmaxServer {
    * Get documentation for a specific function
    */
   private getFunctionDocumentation(functionName: string): any {
-    const interpreter = this.editor.getInterpreter();
-    const value = interpreter.globalEnv.lookup(functionName);
+    const value = this.editor.lookupGlobalBinding(functionName);
 
     if (value === undefined || (value.type !== 'function' && value.type !== 'macro')) {
       return {

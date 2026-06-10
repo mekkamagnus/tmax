@@ -8,15 +8,6 @@ export interface WindowCell {
   height: number;
 }
 
-export interface SplitNode {
-  type: "horizontal" | "vertical";
-  children: LayoutNode[];
-}
-
-export type LayoutNode =
-  | { type: "leaf"; windowId: string }
-  | SplitNode;
-
 export function computeLayout(
   windows: Window[],
   terminalWidth: number,

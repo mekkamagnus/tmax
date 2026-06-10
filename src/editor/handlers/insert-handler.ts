@@ -39,11 +39,14 @@ export async function handleInsertMode(editor: Editor, key: string, normalizedKe
     } catch (_) {
       // No indent rules set — silently skip
     }
-    // List auto-continuation for markdown mode
-    try {
-      (editor as any).executeCommand("(markdown-list-continue)");
-    } catch (_) {
-      // Not in markdown mode or no list context — silently skip
+    // List auto-continuation for markdown mode only
+    const majorMode = (editor as any).getCurrentMajorMode?.() as string | undefined;
+    if (majorMode === "markdown") {
+      try {
+        (editor as any).executeCommand("(markdown-list-continue)");
+      } catch (_) {
+        // No list context — silently skip
+      }
     }
   }
   // Handle Backspace key in insert mode
@@ -73,7 +76,7 @@ export async function handleInsertMode(editor: Editor, key: string, normalizedKe
       (editor as any).logMessage(`Unbound key: ${normalizedKey}`, 'debug');
     } else {
       // Find mapping for insert mode
-      const currentMajorMode = (editor as any).getCurrentMajorMode?.() as string | undefined;
+      const currentMajorMode = editor.getCurrentMajorMode?.() as string | undefined;
       const mapping = resolveMapping(mappings, "insert", currentMajorMode);
       if (!mapping) {
         (editor as any).state.statusMessage = `Unbound key in insert mode: ${normalizedKey}`;

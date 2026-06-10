@@ -10,7 +10,6 @@
 
 import type { WhichKeyBinding, KeyBinding as KeyMapping } from "../../core/types.ts";
 import type { TLispInterpreterImpl } from "../../tlisp/interpreter.ts";
-import type { TLispFunction } from "../../tlisp/types.ts";
 
 /**
  * Default which-key timeout in milliseconds
@@ -29,7 +28,12 @@ interface WhichKeyState {
 }
 
 /**
- * Global which-key state
+ * Module-level which-key state.
+ *
+ * SINGLETON LIMITATION: This state is shared across all editor instances.
+ * Currently the daemon runs one editor per frame, so this works in practice.
+ * If multi-frame support requires per-instance state, refactor to accept
+ * state as a parameter or use a factory pattern.
  */
 let whichKeyState: WhichKeyState = {
   active: false,
@@ -40,17 +44,23 @@ let whichKeyState: WhichKeyState = {
 };
 
 /**
- * Get current which-key state
+ * Reset which-key state to initial values.
+ *
+ * Call this when tearing down an editor/Frame to avoid stale timers leaking
+ * across Frame lifecycles. Accepts an optional timeout override (used by
+ * tests to set a short timeout).
  */
-export function getWhichKeyState(): WhichKeyState {
-  return whichKeyState;
-}
-
-/**
- * Set which-key timeout
- */
-export function setWhichKeyTimeout(timeout: number): void {
-  whichKeyState.timeout = timeout;
+export function resetWhichKeyState(timeout?: number): void {
+  if (whichKeyState.timerId) {
+    clearTimeout(whichKeyState.timerId);
+  }
+  whichKeyState = {
+    active: false,
+    prefix: "",
+    bindings: [],
+    timeout: timeout ?? DEFAULT_WHICH_KEY_TIMEOUT,
+    timerId: null,
+  };
 }
 
 /**
@@ -63,7 +73,7 @@ export function isWhichKeyActive(): boolean {
 /**
  * Activate which-key with given prefix and bindings
  */
-export function activateWhichKey(prefix: string, bindings: WhichKeyBinding[]): void {
+function activateWhichKey(prefix: string, bindings: WhichKeyBinding[]): void {
   whichKeyState.active = true;
   whichKeyState.prefix = prefix;
   whichKeyState.bindings = bindings;
@@ -106,7 +116,7 @@ export function scheduleWhichKey(
 /**
  * Find all key bindings that start with the given prefix
  */
-export function findBindingsForPrefix(
+function findBindingsForPrefix(
   prefix: string,
   keyMappings: Map<string, KeyMapping[]>,
   mode: string
@@ -136,7 +146,7 @@ export function findBindingsForPrefix(
 /**
  * Get the display key for a binding (removes the prefix)
  */
-export function getDisplayKey(fullKey: string, prefix: string): string {
+function getDisplayKey(fullKey: string, prefix: string): string {
   if (fullKey === prefix) {
     return fullKey;
   }
@@ -155,68 +165,12 @@ export function formatWhichKeyBindings(bindings: WhichKeyBinding[], prefix: stri
 }
 
 /**
- * Find next-level bindings after typing another key
- */
-export function findNextLevelBindings(
-  currentPrefix: string,
-  nextKey: string,
-  keyMappings: Map<string, KeyMapping[]>,
-  mode: string
-): WhichKeyBinding[] {
-  const newPrefix = currentPrefix ? `${currentPrefix} ${nextKey}` : nextKey;
-  return findBindingsForPrefix(newPrefix, keyMappings, mode);
-}
-
-/**
- * Check if a key is a prefix for other bindings
- */
-export function isPrefixKey(
-  key: string,
-  keyMappings: Map<string, KeyMapping[]>,
-  mode: string
-): boolean {
-  for (const [mappedKey, mappings] of keyMappings) {
-    // Check if any binding starts with this key (as a prefix)
-    if (mappedKey.startsWith(key + " ") || mappedKey === key) {
-      // Check if there's a binding for current mode
-      const hasModeBinding = mappings.some(m => !m.mode || m.mode === mode);
-      if (hasModeBinding) {
-        return true;
-      }
-    }
-  }
-  return false;
-}
-
-/**
- * Enable which-key functionality
- */
-export function enableWhichKey(): void {
-  whichKeyState.timeout = DEFAULT_WHICH_KEY_TIMEOUT;
-}
-
-/**
- * Disable which-key functionality
- */
-export function disableWhichKey(): void {
-  deactivateWhichKey();
-  whichKeyState.timeout = 0;
-}
-
-/**
- * Get current which-key timeout
- */
-export function getWhichKeyTimeout(): number {
-  return whichKeyState.timeout;
-}
-
-/**
  * Fetch documentation for a command from the T-Lisp interpreter
  * @param commandName - The name of the command/function
  * @param interpreter - The T-Lisp interpreter instance
  * @returns Documentation string or "No documentation available"
  */
-export function getCommandDocumentation(commandName: string, interpreter: TLispInterpreterImpl): string {
+function getCommandDocumentation(commandName: string, interpreter: TLispInterpreterImpl): string {
   try {
     // Look up the function in the global environment
     const func = interpreter.globalEnv.lookup(commandName);
@@ -243,7 +197,7 @@ export function getCommandDocumentation(commandName: string, interpreter: TLispI
  * @param maxLength - Maximum length before truncation
  * @returns Truncated documentation with "..." if needed
  */
-export function truncateDocumentation(documentation: string, maxLength: number = 80): string {
+function truncateDocumentation(documentation: string, maxLength: number = 80): string {
   if (documentation.length <= maxLength) {
     return documentation;
   }

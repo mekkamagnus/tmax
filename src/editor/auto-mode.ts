@@ -13,13 +13,20 @@ export const createRegexpRule = (pattern: string, mode: string): AutoModeRule =>
   mode,
 });
 
+const regexpCache = new Map<string, RegExp>();
+
 export const detectAutoMode = (
   filename: string,
   rules: AutoModeRule[]
 ): string | null => {
   for (const rule of rules) {
     if (rule.isRegexp) {
-      if (new RegExp(rule.pattern).test(filename)) return rule.mode;
+      let re = regexpCache.get(rule.pattern);
+      if (!re) {
+        re = new RegExp(rule.pattern);
+        regexpCache.set(rule.pattern, re);
+      }
+      if (re.test(filename)) return rule.mode;
       continue;
     }
 

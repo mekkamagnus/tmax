@@ -15,7 +15,7 @@ import { describe, test, expect, beforeEach, afterEach } from "bun:test";
 import { Editor } from "../../src/editor/editor.ts";
 import { MockTerminal } from "../mocks/terminal.ts";
 import { MockFileSystem } from "../mocks/filesystem.ts";
-import { setWhichKeyTimeout } from "../../src/editor/utils/which-key.ts";
+import { resetWhichKeyState } from "../../src/editor/utils/which-key.ts";
 
 const TEST_WHICH_KEY_TIMEOUT = 50;
 
@@ -38,7 +38,7 @@ describe("Which-Key Popup (US-1.10.3)", () => {
     terminal = new MockTerminal();
     filesystem = new MockFileSystem();
     editor = new Editor(terminal, filesystem);
-    setWhichKeyTimeout(TEST_WHICH_KEY_TIMEOUT);
+    resetWhichKeyState(TEST_WHICH_KEY_TIMEOUT);
     await editor.start();
 
     // Create a test buffer
@@ -57,7 +57,7 @@ describe("Which-Key Popup (US-1.10.3)", () => {
   });
 
   afterEach(() => {
-    setWhichKeyTimeout(1000);
+    resetWhichKeyState(1000);
   });
 
   describe("Which-Key State Management", () => {
