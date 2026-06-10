@@ -121,7 +121,11 @@ def ensure_tui(project_dir, no_tui=False):
     # Ensure tui window exists.
     out, _ = run_cmd(f"tmux list-windows -t {SESSION} -F '#{{window_name}}' 2>/dev/null")
     if TUI_WINDOW not in out.splitlines():
-        run_cmd(f"tmux new-window -t {SESSION} -n {TUI_WINDOW} -c {project_dir}")
+        # Find a free index for the new window
+        indices_out, _ = run_cmd(f"tmux list-windows -t {SESSION} -F '#{{window_index}}' 2>/dev/null")
+        used = set(int(i) for i in indices_out.splitlines() if i.strip().isdigit())
+        idx = max(used) + 1 if used else 1
+        run_cmd(f"tmux new-window -t {SESSION}:{idx} -n {TUI_WINDOW} -c {project_dir}")
 
     # Start TUI client.
     run_cmd(
@@ -302,6 +306,9 @@ def run_playbook(playbook_path, speed=1.0, no_tui=False, dry_run=False, verify=F
             return False
         if not ensure_tui(project_dir, no_tui=no_tui):
             print("  (continuing without TUI frame)")
+        else:
+            # Switch to the TUI window so the user sees the demo.
+            run_cmd(f"tmux select-window -t {SESSION}:{TUI_WINDOW}")
 
     variables = {}
 

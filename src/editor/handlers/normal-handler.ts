@@ -15,6 +15,7 @@ import {
   formatWhichKeyBindings,
   isWhichKeyActive
 } from "../utils/which-key.ts";
+import type { WhichKeyBinding } from "../../core/types.ts";
 
 /**
  * Handle key input in normal mode.
@@ -35,15 +36,31 @@ export async function handleNormalMode(editor: Editor, key: string, normalizedKe
     return;
   }
 
-  const legacyPrefixActive = (editor as any).spacePressed === true || currentPrefix !== "";
+  const spaceActive = (editor as any).spacePressed === true;
+  const legacyPrefixActive = spaceActive || currentPrefix !== "";
   const dispatchHandled = legacyPrefixActive
     ? false
     : await executeVimDispatcher(editor, normalizedKey, handlerLog);
   if (dispatchHandled) {
+    deactivateWhichKey();
+    state.whichKeyActive = false;
+    const savedLastCommand = state.lastCommand;
+    await maybeScheduleVimPrefixWhichKey(editor, state);
+    // Restore lastCommand so it reflects the user-facing dispatch, not
+    // the internal prefix-pending query from maybeScheduleVimPrefixWhichKey.
+    state.lastCommand = savedLastCommand;
     return;
   }
 
-  const lookupKey = currentPrefix ? `${currentPrefix} ${normalizedKey}` : normalizedKey;
+  let lookupKey: string;
+  if (currentPrefix) {
+    lookupKey = `${currentPrefix} ${normalizedKey}`;
+  } else if (spaceActive) {
+    lookupKey = `SPC ${normalizedKey}`;
+    (editor as any).spacePressed = false;
+  } else {
+    lookupKey = normalizedKey;
+  }
 
   if (hasLegacyPrefix(lookupKey, keyMappings)) {
     const interpreter = (editor as any).interpreter;
@@ -65,7 +82,15 @@ export async function handleNormalMode(editor: Editor, key: string, normalizedKe
 
   clearLegacyPrefix(editor);
 
-  const mappings = keyMappings.get(lookupKey);
+  let mappings = keyMappings.get(lookupKey);
+  // If the combined "SPC <key>" has no binding, fall back to the raw key
+  // so T-Lisp functions like execute-extended-command-maybe can check the
+  // space-prefix flag themselves. Restore spacePressed so the T-Lisp
+  // function can detect it.
+  if (!mappings && lookupKey.startsWith("SPC ") && keyMappings.has(normalizedKey)) {
+    mappings = keyMappings.get(normalizedKey);
+    (editor as any).spacePressed = true;
+  }
   if (!mappings) {
     handlerLog.debug(`Unbound key in normal mode: ${lookupKey}`, {
       data: { key, normalizedKey, lookupKey }
@@ -116,6 +141,46 @@ function hasLegacyPrefix(key: string, keyMappings: Map<string, any[]>): boolean 
     }
   }
   return false;
+}
+
+async function maybeScheduleVimPrefixWhichKey(editor: Editor, state: any): Promise<void> {
+  const execute = (cmd: string) => (editor as any).executeCommandAsync(cmd);
+  const isRight = (r: any) => r && typeof r === "object" && r._tag === "Right";
+
+  const pendingResult = await execute("(vim-prefix-pending-p)");
+  if (!isRight(pendingResult) || !isTruthy((pendingResult as any).right)) return;
+
+  const prefixResult = await execute("(vim-current-prefix)");
+  if (!isRight(prefixResult)) return;
+  const prefix = (prefixResult as any).right;
+  if (!prefix || prefix.type !== "string") return;
+  const prefixStr = prefix.value as string;
+
+  const bindingsResult = await execute(`(vim-prefix-bindings "${(editor as any).escapeKeyForTLisp(prefixStr)}")`);
+  if (!isRight(bindingsResult)) return;
+  const bindingsList = (bindingsResult as any).right;
+  if (!bindingsList || bindingsList.type !== "list") return;
+
+  const bindings: WhichKeyBinding[] = (bindingsList.value as any[]).map((entry: any) => {
+    const items = entry.value as any[];
+    return {
+      key: `${prefixStr} ${items[0].value}`,
+      command: items[1].value as string,
+      mode: "normal",
+    };
+  });
+
+  // Don't set whichKeyPrefix — vim prefix routing is handled by T-Lisp,
+  // not the legacy keymap. Only store bindings for the callback.
+  state.whichKeyBindings = bindings;
+
+  scheduleWhichKey(prefixStr, bindings, () => {
+    if (state.whichKeyPrefix) return;
+    state.whichKeyActive = true;
+    const formatted = formatWhichKeyBindings(bindings, prefixStr);
+    const msg = `Which-key: ${formatted.join(", ")}`;
+    state.statusMessage = msg;
+  });
 }
 
 function clearLegacyPrefix(editor: Editor): void {

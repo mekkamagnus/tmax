@@ -1,5 +1,5 @@
 (defmodule editor/commands/motions
-  (export vim-prefix-pending-p vim-begin-prefix vim-reset-prefix vim-begin-find vim-find-pending-p vim-reset-find-pending vim-opposite-direction vim-unsupported-prefix vim-move-to-position vim-find-target-with vim-dispatch-find-target vim-repeat-find vim-repeat-find-reverse vim-match-bracket paragraph-previous paragraph-next scroll-cursor-top scroll-cursor-center scroll-cursor-bottom vim-dispatch-prefix-key)
+  (export vim-prefix-pending-p vim-begin-prefix vim-reset-prefix vim-begin-find vim-find-pending-p vim-reset-find-pending vim-opposite-direction vim-unsupported-prefix vim-move-to-position vim-find-target-with vim-dispatch-find-target vim-repeat-find vim-repeat-find-reverse vim-match-bracket paragraph-previous paragraph-next scroll-cursor-top scroll-cursor-center scroll-cursor-bottom vim-dispatch-prefix-key vim-current-prefix vim-prefix-bindings)
 
 ;; motions.tlisp -- Vim motions and prefixes owned by T-Lisp
 
@@ -186,4 +186,30 @@
             (vim-unsupported-prefix (concat "Unsupported operator prefix: g" key))))
         (t (vim-unsupported-prefix (concat "Unsupported prefix: " prefix key))))
       t)))
+
+(defun vim-current-prefix ()
+  "Return the current vim prefix string, or nil."
+  vim-pending-prefix)
+
+(defun vim-prefix-bindings (prefix)
+  "Return available bindings for PREFIX as ((key description) ...)."
+  (cond
+    ((string= prefix "z")
+      (list (list "t" "scroll to top")
+            (list "z" "scroll to center")
+            (list "b" "scroll to bottom")))
+    ((string= prefix "g")
+      (list (list "g" "jump to line")
+            (list "t" "next tab")
+            (list "T" "prev tab")))
+    ((string= prefix "C-w")
+      (list (list "s" "split below")
+            (list "v" "split right")
+            (list "w" "other window")
+            (list "q" "delete window")
+            (list "+" "grow height")
+            (list "-" "shrink height")
+            (list ">" "grow width")
+            (list "<" "shrink width")))
+    (t nil)))
 )

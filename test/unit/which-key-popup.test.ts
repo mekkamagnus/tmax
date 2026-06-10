@@ -344,4 +344,70 @@ describe("Which-Key Popup (US-1.10.3)", () => {
       }
     });
   });
+
+  describe("Which-Key for Vim Prefix Keys", () => {
+    test("should activate which-key after typing z and pausing", async () => {
+      await editor.handleKey("z");
+      await waitForWhichKey(editor);
+
+      const state = editor.getState();
+      expect(state.whichKeyActive).toBe(true);
+      // whichKeyPrefix is NOT set for vim prefixes — routing is T-Lisp's job
+      expect(state.whichKeyPrefix).toBe("");
+
+      const bindings = state.whichKeyBindings || [];
+      expect(bindings.length).toBe(3);
+      const keys = bindings.map((b: any) => b.key);
+      expect(keys).toContain("z t");
+      expect(keys).toContain("z z");
+      expect(keys).toContain("z b");
+    });
+
+    test("should skip popup when next key pressed quickly after z", async () => {
+      await editor.handleKey("z");
+      await editor.handleKey("t");
+
+      await waitForWhichKey(editor);
+
+      const state = editor.getState();
+      expect(state.whichKeyActive).toBe(false);
+    });
+
+    test("should activate which-key after typing g and pausing", async () => {
+      await editor.handleKey("g");
+      await waitForWhichKey(editor);
+
+      const state = editor.getState();
+      expect(state.whichKeyActive).toBe(true);
+      expect(state.whichKeyPrefix).toBe("");
+
+      const bindings = state.whichKeyBindings || [];
+      expect(bindings.length).toBe(3);
+    });
+
+    test("should activate which-key after typing C-w and pausing", async () => {
+      await editor.handleKey("\x17");
+      await waitForWhichKey(editor);
+
+      const state = editor.getState();
+      expect(state.whichKeyActive).toBe(true);
+      expect(state.whichKeyPrefix).toBe("");
+
+      const bindings = state.whichKeyBindings || [];
+      expect(bindings.length).toBe(8);
+    });
+
+    test("should cancel vim prefix which-key with C-g", async () => {
+      await editor.handleKey("z");
+      await waitForWhichKey(editor);
+
+      expect(editor.getState().whichKeyActive).toBe(true);
+
+      await editor.handleKey("\x07");
+
+      const state = editor.getState();
+      expect(state.whichKeyActive).toBe(false);
+      expect(state.whichKeyPrefix).toBe("");
+    });
+  });
 });
