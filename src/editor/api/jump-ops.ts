@@ -61,7 +61,10 @@ export function createJumpOps(
   setCursorColumn: (column: number) => void,
   getViewportTop?: () => number,
   setViewportTop?: (top: number) => void,
-  getTerminalHeightFn?: () => number
+  getTerminalHeightFn?: () => number,
+  getViewportLeft?: () => number,
+  setViewportLeft?: (left: number) => void,
+  getTerminalWidthFn?: () => number,
 ): Map<string, TLispFunctionImpl> {
   const api = new Map<string, TLispFunctionImpl>();
   const terminalHeight = (): number => getTerminalHeightFn?.() ?? getTerminalHeight();
@@ -618,6 +621,39 @@ export function createJumpOps(
       return Either.left(argsValidation.left);
     }
     return Either.right(createNumber(terminalHeight()));
+  });
+
+  api.set("viewport-left-get", (args: TLispValue[]): Either<AppError, TLispValue> => {
+    const argsValidation = validateArgsCount(args, 0, "viewport-left-get");
+    if (Either.isLeft(argsValidation)) {
+      return Either.left(argsValidation.left);
+    }
+    return Either.right(createNumber(getViewportLeft?.() ?? 0));
+  });
+
+  api.set("viewport-left-set", (args: TLispValue[]): Either<AppError, TLispValue> => {
+    const argsValidation = validateArgsCount(args, 1, "viewport-left-set");
+    if (Either.isLeft(argsValidation)) {
+      return Either.left(argsValidation.left);
+    }
+
+    const leftArg = args[0]!
+    const leftValidation = validateArgType(leftArg, "number", 0, "viewport-left-set");
+    if (Either.isLeft(leftValidation)) {
+      return Either.left(leftValidation.left);
+    }
+
+    const left = Math.max(0, leftArg.value as number);
+    setViewportLeft?.(left);
+    return Either.right(createNumber(left));
+  });
+
+  api.set("terminal-width-get", (args: TLispValue[]): Either<AppError, TLispValue> => {
+    const argsValidation = validateArgsCount(args, 0, "terminal-width-get");
+    if (Either.isLeft(argsValidation)) {
+      return Either.left(argsValidation.left);
+    }
+    return Either.right(createNumber(getTerminalWidthFn?.() ?? 80));
   });
 
   return api;

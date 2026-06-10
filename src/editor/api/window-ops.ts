@@ -83,6 +83,7 @@ export function createWindowOps(
       cursorLine: currentWindow.cursorLine,
       cursorColumn: currentWindow.cursorColumn,
       viewportTop: currentWindow.viewportTop,
+      viewportLeft: currentWindow.viewportLeft ?? 0,
       splitType: type,
       height: newHeight,
       width: newWidth,

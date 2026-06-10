@@ -1,7 +1,7 @@
 import type { Editor as EditorClass } from "../editor/editor.ts";
 import type { EditorState } from "../core/types.ts";
 import type { Frontend } from "../frontend/frontends/types.ts";
-import { renderBufferLines, getVisibleViewportTop } from "../frontend/render/buffer-lines.ts";
+import { renderBufferLines, getVisibleViewportTop, getCursorScreenOffset } from "../frontend/render/buffer-lines.ts";
 import { renderCommandInput } from "../frontend/render/command-input.ts";
 import { renderStatusLine } from "../frontend/render/status-line.ts";
 import { renderTabBarAnsi } from "../frontend/render/tab-bar.ts";
@@ -64,9 +64,9 @@ export class SteepFrontend implements Frontend {
       if (minibuffer) {
         screen.moveTo(height - 1 - minibuffer.lines.length + minibuffer.cursorRow, minibuffer.cursorColumn);
       } else {
-        const viewportTop = getVisibleViewportTop(state, bufferHeight);
-        const cursorRow = Math.max(0, Math.min(bufferHeight - 1, state.cursorPosition.line - viewportTop));
-        const cursorCol = Math.max(0, Math.min(width - 1, state.cursorPosition.column));
+        const cursor = getCursorScreenOffset(state, bufferHeight, width);
+        const cursorRow = Math.max(0, Math.min(bufferHeight - 1, cursor.row));
+        const cursorCol = Math.max(0, Math.min(width - 1, cursor.col));
         screen.moveTo(cursorRow + tabBarHeight, cursorCol);
       }
     };

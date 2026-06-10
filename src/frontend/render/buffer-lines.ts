@@ -60,6 +60,41 @@ function fitToWidth(text: string, width: number): string {
   return sliceToVisualWidth(text, width - 3) + "...";
 }
 
+function sliceFromVisualOffset(text: string, offset: number): string {
+  let cols = 0;
+  let i = 0;
+  while (i < text.length) {
+    if (cols >= offset) break;
+    const cw = charWidth(text[i]!);
+    if (cols + cw > offset) break;
+    cols += cw;
+    i += text[i]!.length;
+  }
+  return text.slice(i);
+}
+
+function fitToWidthWithScroll(rawLine: string, cw: number, viewportLeft: number): { content: string; continuesRight: boolean } {
+  if (viewportLeft <= 0) {
+    const truncated = fitToWidth(rawLine, cw);
+    const continues = stringWidth(rawLine) > cw;
+    return { content: truncated, continuesRight: continues };
+  }
+
+  const sliced = sliceFromVisualOffset(rawLine, viewportLeft);
+  const sw = stringWidth(sliced);
+  const continuesLeft = true;
+  const continuesRight = sw > cw - 1;
+
+  let displayContent: string;
+  if (sw <= cw - 1) {
+    displayContent = sliced + " ".repeat(cw - 1 - sw);
+  } else {
+    displayContent = sliceToVisualWidth(sliced, cw - 1);
+  }
+
+  return { content: "\u00AB" + displayContent, continuesRight };
+}
+
 export function getVisibleViewportTop(state: EditorState, height: number): number {
   const visibleLines = Math.max(1, height);
   const viewportTop = Math.max(0, state.viewportTop);
@@ -73,6 +108,29 @@ export function getVisibleViewportTop(state: EditorState, height: number): numbe
   }
 
   return viewportTop;
+}
+
+export function getVisibleViewportLeft(state: EditorState, contentWidth: number): number {
+  const cursorColumn = state.cursorPosition.column;
+  const viewportLeft = state.viewportLeft ?? 0;
+
+  if (cursorColumn < viewportLeft) {
+    return Math.max(0, cursorColumn);
+  }
+
+  if (cursorColumn >= viewportLeft + contentWidth) {
+    return Math.max(0, cursorColumn - contentWidth + 1);
+  }
+
+  return viewportLeft;
+}
+
+export function getCursorScreenOffset(state: EditorState, bufferHeight: number, contentWidth: number): { row: number; col: number } {
+  const viewportTop = getVisibleViewportTop(state, bufferHeight);
+  const viewportLeft = getVisibleViewportLeft(state, contentWidth);
+  const row = Math.max(0, Math.min(bufferHeight - 1, state.cursorPosition.line - viewportTop));
+  const col = Math.max(0, state.cursorPosition.column - viewportLeft);
+  return { row, col };
 }
 
 function applyHighlights(rawLine: string, spans: HighlightSpan[]): string {
@@ -194,6 +252,7 @@ function renderSingleWindow(
   cursorColumn: number,
   totalLines: number,
   viewportTop: number,
+  viewportLeft: number,
   contentWidth: number,
   visibleLines: number,
   gutterCfg: GutterConfig,
@@ -256,21 +315,161 @@ function renderSingleWindow(
 
     const gutter = renderGutterLine(lineNumber, cursorLine, totalLines, gutterCfg, isCurrentLine, foldState);
 
+    const effectiveCursorCol = isCurrentLine ? Math.max(0, cursorColumn - viewportLeft) : -1;
+
     const lineSpans = highlightSpans?.[lineNumber];
     if (lineSpans && lineSpans.length > 0) {
-      const truncated = stringWidth(rawLine) > cw
-        ? (cw > 3 ? sliceToVisualWidth(rawLine, cw - 3) + "..." : sliceToVisualWidth(rawLine, cw))
-        : rawLine;
-      const clamped = clampSpans(lineSpans, truncated.length);
-      const highlighted = applyHighlights(truncated, clamped);
-      const padded = padAnsiToWidth(highlighted, cw);
-      const rendered = isCurrentLine ? renderWithBlockCursorAnsi(padded, cursorColumn) : padded;
-      lines.push(gutter + rendered);
+      if (viewportLeft > 0) {
+        const sliced = sliceFromVisualOffset(rawLine, viewportLeft);
+        const sw = stringWidth(sliced);
+        const continuesRight = sw > cw - 1;
+        const truncated = continuesRight
+          ? sliceToVisualWidth(sliced, cw - 2) + "\u00BB"
+          : (sw <= cw - 1 ? sliced + " ".repeat(cw - 1 - sw) : sliceToVisualWidth(sliced, cw - 1));
+        const display = "\u00AB" + truncated;
+        const clamped = clampSpans(lineSpans, rawLine.length);
+        const offset = viewportLeft;
+        const shifted = clamped
+          .map(s => ({ ...s, start: s.start - offset, end: s.end - offset }))
+          .filter(s => s.end > 0 && s.start < display.length)
+          .map(s => ({ ...s, start: Math.max(0, s.start), end: Math.min(s.end, display.length) }));
+        const highlighted = applyHighlights(display, shifted);
+        const padded = padAnsiToWidth(highlighted, cw);
+        const rendered = isCurrentLine ? renderWithBlockCursorAnsi(padded, effectiveCursorCol) : padded;
+        lines.push(gutter + rendered);
+      } else {
+        const truncated = stringWidth(rawLine) > cw
+          ? (cw > 3 ? sliceToVisualWidth(rawLine, cw - 3) + "..." : sliceToVisualWidth(rawLine, cw))
+          : rawLine;
+        const clamped = clampSpans(lineSpans, truncated.length);
+        const highlighted = applyHighlights(truncated, clamped);
+        const padded = padAnsiToWidth(highlighted, cw);
+        const rendered = isCurrentLine ? renderWithBlockCursorAnsi(padded, effectiveCursorCol) : padded;
+        lines.push(gutter + rendered);
+      }
     } else {
-      const lineContent = fitToWidth(rawLine, cw);
-      const rendered = isCurrentLine ? renderWithBlockCursor(lineContent, cursorColumn) : lineContent;
-      lines.push(gutter + rendered);
+      if (viewportLeft > 0) {
+        const sliced = sliceFromVisualOffset(rawLine, viewportLeft);
+        const sw = stringWidth(sliced);
+        const continuesRight = sw > cw - 1;
+        let display: string;
+        if (continuesRight) {
+          display = "\u00AB" + sliceToVisualWidth(sliced, cw - 2) + "\u00BB";
+        } else {
+          display = fitToWidth("\u00AB" + sliced, cw);
+        }
+        const rendered = isCurrentLine ? renderWithBlockCursor(display, effectiveCursorCol) : display;
+        lines.push(gutter + rendered);
+      } else {
+        const lineContent = fitToWidth(rawLine, cw);
+        const rendered = isCurrentLine ? renderWithBlockCursor(lineContent, cursorColumn) : lineContent;
+        lines.push(gutter + rendered);
+      }
     }
+  }
+
+  return lines;
+}
+
+function wrapLine(rawLine: string, width: number): string[] {
+  if (width <= 0) return [""];
+  if (stringWidth(rawLine) <= width) return [rawLine];
+  const rows: string[] = [];
+  let remaining = rawLine;
+  while (stringWidth(remaining) > width) {
+    const chunk = sliceToVisualWidth(remaining, width);
+    rows.push(chunk);
+    remaining = sliceFromVisualOffset(remaining, stringWidth(chunk));
+  }
+  if (remaining.length > 0) rows.push(remaining);
+  return rows.length > 0 ? rows : [""];
+}
+
+function renderSingleWindowWrapped(
+  buffer: Window["buffer"],
+  cursorLine: number,
+  cursorColumn: number,
+  totalLines: number,
+  viewportTop: number,
+  contentWidth: number,
+  visibleLines: number,
+  gutterCfg: GutterConfig,
+  isFocused: boolean,
+  highlightSpans?: HighlightSpan[][],
+  foldRanges?: Map<number, number>,
+): string[] {
+  const gw = gutterDisplayWidth(totalLines, gutterCfg);
+  const cw = Math.max(1, contentWidth - gw);
+  const lines: string[] = [];
+  let screenRow = 0;
+
+  const hiddenLines = new Set<number>();
+  if (foldRanges) {
+    for (const [foldStart, foldEnd] of foldRanges) {
+      for (let ln = foldStart + 1; ln <= foldEnd; ln++) {
+        hiddenLines.add(ln);
+      }
+    }
+  }
+
+  let logicalLine = viewportTop;
+  while (screenRow < visibleLines && logicalLine < totalLines) {
+    if (hiddenLines.has(logicalLine)) { logicalLine++; continue; }
+
+    const isCurrentLine = isFocused && logicalLine === cursorLine;
+    const rawLine = getLineForBuffer(buffer, logicalLine);
+
+    const foldEnd = foldRanges?.get(logicalLine);
+    if (foldEnd !== undefined) {
+      const hiddenCount = foldEnd - logicalLine;
+      const gutter = renderGutterLine(logicalLine, cursorLine, totalLines, gutterCfg, isCurrentLine, "collapsed");
+      const foldIndicator = `... [${hiddenCount} lines]`;
+      const padded = fitToWidth(foldIndicator, cw);
+      lines.push(gutter + style(padded, { dim: true }));
+      screenRow++;
+      logicalLine++;
+      continue;
+    }
+
+    const isHeading = isMarkdownHeading(rawLine);
+    const foldState: FoldState | undefined = isHeading && foldRanges ? "expandable" : undefined;
+
+    const wrappedRows = wrapLine(rawLine, cw);
+
+    // Find which wrapped row the cursor is on
+    let cursorWrapRow = 0;
+    if (isCurrentLine) {
+      let accumWidth = 0;
+      for (let wr = 0; wr < wrappedRows.length; wr++) {
+        const rowWidth = stringWidth(wrappedRows[wr]!);
+        if (cursorColumn < accumWidth + rowWidth) {
+          cursorWrapRow = wr;
+          break;
+        }
+        accumWidth += rowWidth;
+        if (wr === wrappedRows.length - 1) cursorWrapRow = wr;
+      }
+    }
+    const cursorWrapCol = isCurrentLine
+      ? cursorColumn - (cursorWrapRow > 0 ? wrappedRows.slice(0, cursorWrapRow).reduce((s, r) => s + stringWidth(r), 0) : 0)
+      : -1;
+
+    for (let wr = 0; wr < wrappedRows.length && screenRow < visibleLines; wr++) {
+      const gutter = (wr === 0)
+        ? renderGutterLine(logicalLine, cursorLine, totalLines, gutterCfg, isCurrentLine, foldState)
+        : renderEmptyGutter(totalLines, gutterCfg);
+      const rowText = fitToWidth(wrappedRows[wr]!, cw);
+      const onCursorRow = isCurrentLine && wr === cursorWrapRow;
+      const rendered = onCursorRow ? renderWithBlockCursor(rowText, cursorWrapCol) : rowText;
+      lines.push(gutter + rendered);
+      screenRow++;
+    }
+    logicalLine++;
+  }
+
+  while (screenRow < visibleLines) {
+    lines.push(renderEmptyGutter(totalLines, gutterCfg) + fitToWidth("~", cw));
+    screenRow++;
   }
 
   return lines;
@@ -284,16 +483,39 @@ export function renderBufferLines(
 ): string[] {
   const windows = state.windows;
   const currentWindowIndex = state.currentWindowIndex ?? 0;
+  const wordWrap = state.config.wordWrap;
+  const viewportLeft = wordWrap ? 0 : (state.viewportLeft ?? 0);
 
   // Single-window path (default, most common)
   if (!windows || windows.length <= 1) {
     const gutterCfg = gutterConfigFromState(state.activeMinorModes, state.config);
+    const gw = gutterDisplayWidth(getLineCount(state), gutterCfg);
+    const cw = Math.max(1, width - gw);
+    const effectiveViewportLeft = wordWrap ? 0 : getVisibleViewportLeft(state, cw);
+
+    if (wordWrap) {
+      return renderSingleWindowWrapped(
+        state.currentBuffer!,
+        state.cursorPosition.line,
+        state.cursorPosition.column,
+        getLineCount(state),
+        getVisibleViewportTop(state, height),
+        width,
+        height,
+        gutterCfg,
+        true,
+        highlightSpans,
+        state.foldRanges,
+      );
+    }
+
     return renderSingleWindow(
       state.currentBuffer!,
       state.cursorPosition.line,
       state.cursorPosition.column,
       getLineCount(state),
       getVisibleViewportTop(state, height),
+      effectiveViewportLeft,
       width,
       height,
       gutterCfg,
@@ -322,11 +544,17 @@ export function renderBufferLines(
     const cursorLine = isFocused ? state.cursorPosition.line : win.cursorLine;
     const cursorColumn = isFocused ? state.cursorPosition.column : 0;
     const viewportTop = win.viewportTop;
+    const winViewportLeft = wordWrap ? 0 : (win.viewportLeft ?? 0);
 
-    const cellLines = renderSingleWindow(
-      buf, cursorLine, cursorColumn, totalLines, viewportTop,
-      cell.width, cell.height, gutterCfg, isFocused, highlightSpans,
-    );
+    const cellLines = wordWrap
+      ? renderSingleWindowWrapped(
+          buf, cursorLine, cursorColumn, totalLines, viewportTop,
+          cell.width, cell.height, gutterCfg, isFocused, highlightSpans,
+        )
+      : renderSingleWindow(
+          buf, cursorLine, cursorColumn, totalLines, viewportTop,
+          winViewportLeft, cell.width, cell.height, gutterCfg, isFocused, highlightSpans,
+        );
 
     for (let row = 0; row < cell.height && row < cellLines.length; row++) {
       const screenRow = cell.y + row;

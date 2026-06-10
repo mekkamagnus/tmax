@@ -163,6 +163,7 @@ export class TmaxServer {
         mode: 'normal' as const,
         statusMessage: 'Server started',
         viewportTop: 0,
+        viewportLeft: 0,
         config: {
           theme: 'default',
           tabSize: 4,
@@ -199,6 +200,7 @@ export class TmaxServer {
       id,
       cursorPosition: { ...state.cursorPosition },
       viewportTop: state.viewportTop,
+      viewportLeft: state.viewportLeft ?? 0,
       mode: state.mode,
       commandLine: state.commandLine,
       mxCommand: state.mxCommand,
@@ -266,6 +268,7 @@ export class TmaxServer {
       mode: frame.mode,
       statusMessage: frame.statusMessage,
       viewportTop: frame.viewportTop,
+      viewportLeft: frame.viewportLeft,
       config: this.editor.getState().config,
       commandLine: frame.commandLine,
       mxCommand: frame.mxCommand,
@@ -287,6 +290,7 @@ export class TmaxServer {
     const state = this.editor.getState();
     frame.cursorPosition = { ...state.cursorPosition };
     frame.viewportTop = state.viewportTop;
+    frame.viewportLeft = state.viewportLeft ?? 0;
     frame.mode = state.mode;
     frame.commandLine = state.commandLine;
     frame.mxCommand = state.mxCommand;
@@ -537,6 +541,7 @@ export class TmaxServer {
       mode: frame.mode,
       statusMessage: shared.statusMessage,
       viewportTop: frame.viewportTop,
+      viewportLeft: frame.viewportLeft,
       config: shared.config,
       commandLine: frame.commandLine,
       mxCommand: frame.mxCommand,

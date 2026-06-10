@@ -72,6 +72,7 @@ export interface TlispEditorState {
   lastCommand: string;
   statusMessage: string;
   viewportTop: number;  // First line visible in viewport
+  viewportLeft: number;  // First column visible in viewport
   commandLine: string;  // Command line input in command mode
   spacePressed: boolean;  // Track if space was just pressed for SPC ; sequence
   mxCommand: string;  // M-x command input
@@ -337,7 +338,10 @@ export function createEditorAPI(state: TlispEditorState): Map<string, TLispFunct
     (column) => { state.cursorColumn = column; },
     () => state.viewportTop,
     (top) => { state.viewportTop = top; },
-    () => state.terminal.getSize().height
+    () => state.terminal.getSize().height,
+    () => state.viewportLeft ?? 0,
+    (left: number) => { state.viewportLeft = left; },
+    () => state.terminal.getSize().width,
   );
   for (const [key, value] of jumpOps.entries()) {
     api.set(key, value);
