@@ -7,7 +7,6 @@ import type { TLispValue } from "../tlisp/types.ts";
 
 export interface ModeLoadResult {
   path: string;
-  feature?: string;
 }
 
 export const discoverModeFiles = (directory: string): string[] => {

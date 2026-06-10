@@ -1,5 +1,5 @@
 import { describe, test, expect } from "bun:test";
-import type { EditorState } from "../../src/core/types.ts";
+import type { EditorState, SyntaxToken } from "../../src/core/types.ts";
 import {
   foldToggle,
   foldOpen,
@@ -12,6 +12,12 @@ import {
   findHeadingRanges,
 } from "../../src/editor/api/fold-ops.ts";
 import { resolveMapping, type KeyMapping } from "../../src/editor/editor.ts";
+import { rules } from "../../src/syntax/languages/markdown.ts";
+import { tokenize, type TokenizeResult } from "../../src/syntax/tokenizer.ts";
+
+function asTokens(result: SyntaxToken[] | TokenizeResult): SyntaxToken[] {
+  return Array.isArray(result) ? result : result.tokens;
+}
 
 // ── Fold ops (TypeScript pure functions) ──────────────────────────────
 
@@ -310,3 +316,44 @@ describe("resolveMapping — major-mode scoping", () => {
 // - markdown-generate-toc
 // - markdown-toggle-checkbox
 // - markdown-do (context dispatch)
+
+// ── Markdown tokenizer tests (migrated from markdown-fold.test.ts) ──
+
+describe("markdown tokenizer", () => {
+  test("tokenizes ATX headings", () => {
+    const tokens = asTokens(tokenize("# Hello World", 0, rules));
+    const headings = tokens.filter((t: any) => t.type === "heading");
+    expect(headings.length).toBe(1);
+  });
+
+  test("tokenizes code fences", () => {
+    const tokens = asTokens(tokenize("```typescript", 0, rules));
+    const fences = tokens.filter((t: any) => t.type === "code-delimiter");
+    expect(fences.length).toBe(1);
+  });
+
+  test("tokenizes inline formatting", () => {
+    const boldTokens = asTokens(tokenize("This is **bold** text", 0, rules));
+    const italicTokens = asTokens(tokenize("This is *italic* text", 0, rules));
+    expect(boldTokens.filter((t: any) => t.type === "bold").length).toBeGreaterThanOrEqual(1);
+    expect(italicTokens.filter((t: any) => t.type === "italic").length).toBeGreaterThanOrEqual(1);
+  });
+
+  test("tokenizes links", () => {
+    const tokens = asTokens(tokenize("[click here](https://example.com)", 0, rules));
+    const links = tokens.filter((t: any) => t.type === "link");
+    expect(links.length).toBe(1);
+  });
+
+  test("tokenizes list items", () => {
+    const tokens = asTokens(tokenize("- list item", 0, rules));
+    const items = tokens.filter((t: any) => t.type === "list-item");
+    expect(items.length).toBe(1);
+  });
+
+  test("tokenizes blockquotes", () => {
+    const tokens = asTokens(tokenize("> quoted text", 0, rules));
+    const quotes = tokens.filter((t: any) => t.type === "blockquote");
+    expect(quotes.length).toBe(1);
+  });
+});

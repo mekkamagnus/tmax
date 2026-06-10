@@ -259,6 +259,11 @@ export interface MinibufferRenderView {
 }
 
 /**
+ * Fold state for gutter rendering
+ */
+export type FoldState = "collapsed" | "expandable";
+
+/**
  * Editor state interface
  */
 export interface EditorState {
@@ -289,10 +294,10 @@ export interface EditorState {
   // Window management (US-3.2.1)
   windows?: Window[];  // Array of windows
   currentWindowIndex?: number;  // Index of currently focused window
-  // Tabs (SPEC-004)
+  // Tabs
   tabs?: Tab[];  // Array of tabs
   currentTabIndex?: number;  // Index of active tab
-  // Syntax highlighting (SPEC-035)
+  // Syntax highlighting
   highlightSpans?: HighlightSpan[][];
   searchMatches?: Range[];
   currentMajorMode?: string;
@@ -301,7 +306,7 @@ export interface EditorState {
   bufferModified?: boolean;
   minibufferState?: JsonValue;
   minibufferView?: MinibufferRenderView;
-  // Fold state (SPEC-018)
+  // Fold state
   foldRanges?: Map<number, number>;
 }
 
@@ -333,7 +338,7 @@ export interface Window {
 }
 
 /**
- * Tab interface (SPEC-004)
+ * Tab interface
  */
 export interface Tab {
   id: string;
@@ -609,6 +614,6 @@ export interface FileSystem {
   /** List directory contents */
   readdir?(path: string): Promise<string[]>;
 
-  /** Create directory recursively (SPEC-025) */
+  /** Create directory recursively */
   createDir(path: string): Promise<void>;
 }

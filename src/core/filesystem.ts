@@ -194,6 +194,8 @@ export class FunctionalFileSystemImpl implements FunctionalFileSystem {
   }
 }
 
+const _fsImpl = new FunctionalFileSystemImpl();
+
 /**
  * Utility functions for common file operations
  */
@@ -291,8 +293,7 @@ export const FileSystemUtils = {
    * Check if path is a file
    */
   isFile: (path: string): TaskEither<string, boolean> => {
-    const fs = new FunctionalFileSystemImpl();
-    return fs.stat(path)
+    return _fsImpl.stat(path)
       .map(stats => stats.isFile)
       .mapLeft(error => `Failed to check if ${path} is a file: ${error}`);
   },
@@ -301,8 +302,7 @@ export const FileSystemUtils = {
    * Check if path is a directory
    */
   isDirectory: (path: string): TaskEither<string, boolean> => {
-    const fs = new FunctionalFileSystemImpl();
-    return fs.stat(path)
+    return _fsImpl.stat(path)
       .map(stats => stats.isDirectory)
       .mapLeft(error => `Failed to check if ${path} is a directory: ${error}`);
   }

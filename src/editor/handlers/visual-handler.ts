@@ -23,7 +23,7 @@ export async function handleVisualMode(editor: Editor, key: string, normalizedKe
     (editor as any).logMessage(`Unbound key: ${normalizedKey}`, 'debug');
   } else {
     // Find mapping for visual mode
-    const currentMajorMode = (editor as any).getCurrentMajorMode?.() as string | undefined;
+    const currentMajorMode = editor.getCurrentMajorMode?.() as string | undefined;
     const mapping = resolveMapping(mappings, "visual", currentMajorMode);
     if (!mapping) {
       (editor as any).state.statusMessage = `Unbound key in visual mode: ${normalizedKey}`;

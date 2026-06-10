@@ -1,4 +1,5 @@
 import { style } from "../../steep/matcha.ts";
+import type { FoldState } from "../../core/types.ts";
 
 export interface GutterConfig {
   showLineNumbers: boolean;
@@ -23,7 +24,7 @@ export function renderGutterLine(
   totalLines: number,
   config: GutterConfig,
   isCurrentLine: boolean,
-  foldState?: "collapsed" | "expandable",
+  foldState?: FoldState,
 ): string {
   const width = gutterWidth(totalLines);
 

@@ -70,7 +70,6 @@ export class KeymapSync {
     const keymap = this.registeredKeymaps.get(mode);
 
     if (!keymap) {
-      this.logger.debug(`No keymap registered for mode: ${mode}`);
       return null;
     }
 
@@ -87,9 +86,6 @@ export class KeymapSync {
       const bindingsValue = keymap.value.get("bindings");
 
       if (!bindingsValue || !isHashmap(bindingsValue)) {
-        this.logger.debug(`Keymap for mode ${mode} has no valid bindings`, {
-          data: { bindingsType: bindingsValue?.type }
-        });
         return null;
       }
 
@@ -97,15 +93,12 @@ export class KeymapSync {
       const commandValue = bindingsValue.value.get(key);
 
       if (!commandValue) {
-        this.logger.debug(`No binding found for key "${key}" in mode ${mode}`);
         return null;
       }
 
       // Extract command string
       if (commandValue.type === "string") {
-        const command = commandValue.value as string;
-        this.logger.debug(`Found binding: ${key} -> ${command} in mode ${mode}`);
-        return command;
+        return commandValue.value as string;
       }
 
       // Binding exists but is not a string

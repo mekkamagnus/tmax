@@ -100,7 +100,7 @@ export async function handleNormalMode(editor: Editor, key: string, normalizedKe
     return;
   }
 
-  const currentMajorMode = (editor as any).getCurrentMajorMode?.() as string | undefined;
+  const currentMajorMode = editor.getCurrentMajorMode?.() as string | undefined;
   const mapping = resolveMapping(mappings, "normal", currentMajorMode);
   if (!mapping) {
     handlerLog.debug(`No normal mode mapping for key: ${lookupKey}`, {

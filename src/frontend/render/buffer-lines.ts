@@ -1,4 +1,4 @@
-import type { EditorState, HighlightSpan, Window } from "../../core/types.ts";
+import type { EditorState, FoldState, HighlightSpan, Window } from "../../core/types.ts";
 import { Either } from "../../utils/task-either.ts";
 import { style, type AnsiColor } from "../../steep/matcha.ts";
 import {
@@ -126,6 +126,15 @@ function padAnsiToWidth(text: string, width: number): string {
   return text + " ".repeat(width - sw);
 }
 
+function isMarkdownHeading(line: string): boolean {
+  let count = 0;
+  for (let i = 0; i < 7 && i < line.length; i++) {
+    if (line[i] === "#") count++;
+    else break;
+  }
+  return count >= 1 && count <= 6 && line[count] === " ";
+}
+
 const ANSI_RE = /\x1b\[[0-9;]*m/g;
 
 function renderWithBlockCursor(text: string, cursorCol: number): string {
@@ -206,6 +215,16 @@ function renderSingleWindow(
     return lines;
   }
 
+  // Build hidden-line set once before the render loop (Task 4a)
+  const hiddenLines = new Set<number>();
+  if (foldRanges) {
+    for (const [foldStart, foldEnd] of foldRanges) {
+      for (let ln = foldStart + 1; ln <= foldEnd; ln++) {
+        hiddenLines.add(ln);
+      }
+    }
+  }
+
   for (let i = 0; i < visibleLines; i++) {
     const lineNumber = viewportTop + i;
 
@@ -214,17 +233,8 @@ function renderSingleWindow(
       continue;
     }
 
-    // Check if this line is inside a collapsed fold
-    if (foldRanges) {
-      let inFold = false;
-      for (const [foldStart, foldEnd] of foldRanges) {
-        if (lineNumber > foldStart && lineNumber <= foldEnd) {
-          inFold = true;
-          break;
-        }
-      }
-      if (inFold) continue;
-    }
+    // O(1) fold check using pre-built set
+    if (hiddenLines.has(lineNumber)) continue;
 
     const isCurrentLine = isFocused && lineNumber === cursorLine;
     const rawLine = getLineForBuffer(buffer, lineNumber);
@@ -240,9 +250,9 @@ function renderSingleWindow(
       continue;
     }
 
-    // Check if this heading line is expandable (not folded)
-    const isHeading = /^#{1,6}\s/.test(rawLine);
-    const foldState = isHeading && foldRanges ? "expandable" as const : undefined;
+    // Check if this heading line is expandable (manual check, no regex)
+    const isHeading = isMarkdownHeading(rawLine);
+    const foldState: FoldState | undefined = isHeading && foldRanges ? "expandable" : undefined;
 
     const gutter = renderGutterLine(lineNumber, cursorLine, totalLines, gutterCfg, isCurrentLine, foldState);
 
@@ -272,17 +282,6 @@ export function renderBufferLines(
   height: number,
   highlightSpans?: HighlightSpan[][]
 ): string[] {
-  // B5: Auto-expand fold if cursor is inside a collapsed region
-  if (state.foldRanges && state.foldRanges.size > 0) {
-    const cursorLine = state.cursorPosition.line;
-    for (const [foldStart, foldEnd] of state.foldRanges) {
-      if (cursorLine > foldStart && cursorLine <= foldEnd) {
-        state.foldRanges.delete(foldStart);
-        break;
-      }
-    }
-  }
-
   const windows = state.windows;
   const currentWindowIndex = state.currentWindowIndex ?? 0;
 

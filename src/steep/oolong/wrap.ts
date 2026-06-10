@@ -9,21 +9,25 @@ export function wrapAnsi(text: string, width: number, indent: number = 0): strin
   const words = splitWords(text);
   const lines: string[] = [];
   let currentLine = "";
+  let currentLineWidth = 0;
 
   for (const word of words) {
-    const wordVisualWidth = visualWidth(word);
+    const wordWidth = visualWidth(word);
 
-    if (currentLine.length === 0) {
+    if (currentLineWidth === 0) {
       currentLine = word;
-    } else if (visualWidth(currentLine) + 1 + wordVisualWidth <= maxWidth) {
+      currentLineWidth = wordWidth;
+    } else if (currentLineWidth + 1 + wordWidth <= maxWidth) {
       currentLine += " " + word;
+      currentLineWidth += 1 + wordWidth;
     } else {
       lines.push(indentStr + currentLine);
       currentLine = word;
+      currentLineWidth = wordWidth;
     }
   }
 
-  if (currentLine.length > 0) {
+  if (currentLineWidth > 0) {
     lines.push(indentStr + currentLine);
   }
 
