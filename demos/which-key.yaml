@@ -1,0 +1,114 @@
+name: which-key
+description: "Demonstrates which-key popup — type a prefix key, pause, see available bindings."
+speed: 1.0
+
+setup:
+  - action: setup_file
+    var: FILE
+    name: which-key-demo.txt
+    content: |
+      Line one of demo file
+      Line two of demo file
+      Line three of demo file
+      Line four of demo file
+      Line five of demo file
+
+steps:
+  - section: Setup
+    narrate: "Opening a file to demonstrate which-key"
+    action: open
+    file: "${FILE}"
+    pause: 1.0
+
+  - narrate: "Setting which-key timeout to 500ms for snappier demo"
+    action: eval
+    expr: "(which-key-timeout 500)"
+    pause: 0.3
+
+  - section: z prefix (scroll commands)
+    narrate: "Pressing z — wait for which-key popup showing scroll commands"
+    action: key
+    key: "z"
+    pause: 1.5
+
+  - narrate: "Capturing screen — you should see z/t/b bindings in the minibuffer"
+    action: capture
+    pause: 1.5
+
+  - narrate: "Pressing C-g to cancel the which-key popup"
+    action: key
+    key: "C-g"
+    pause: 0.5
+
+  - section: g prefix (goto commands)
+    narrate: "Pressing g — wait for which-key popup showing goto commands"
+    action: key
+    key: "g"
+    pause: 1.5
+
+  - narrate: "Capturing screen — you should see g/t/T bindings in the minibuffer"
+    action: capture
+    pause: 1.5
+
+  - narrate: "Pressing C-g to cancel"
+    action: key
+    key: "C-g"
+    pause: 0.5
+
+  - section: C-w prefix (window commands)
+    narrate: "Pressing C-w — wait for which-key popup showing window commands"
+    action: key
+    key: "C-w"
+    pause: 1.5
+
+  - narrate: "Capturing screen — you should see window management bindings"
+    action: capture
+    pause: 1.5
+
+  - narrate: "Pressing C-g to cancel"
+    action: key
+    key: "C-g"
+    pause: 0.5
+
+  - section: Quick typing skips popup
+    narrate: "Now pressing z then t quickly — popup should NOT appear, scroll executes"
+    action: keys
+    keys: "zt"
+    pause: 1.0
+
+  - narrate: "Capturing screen — cursor line scrolled to top, no popup"
+    action: capture
+    pause: 1.0
+
+  - narrate: "Resetting scroll position"
+    action: keys
+    keys: "zz"
+    pause: 0.5
+
+  - section: Legacy keymap prefix (C-c)
+    narrate: "Setting up a C-c binding to test legacy which-key path"
+    action: eval
+    expr: '(key-bind "C-c c" "cursor-move" "normal")'
+    pause: 0.3
+
+  - narrate: "Pressing C-c — wait for legacy which-key popup"
+    action: key
+    key: "C-c"
+    pause: 1.5
+
+  - narrate: "Capturing screen — legacy which-key bindings"
+    action: capture
+    pause: 1.5
+
+  - narrate: "Pressing C-g to cancel"
+    action: key
+    key: "C-g"
+    pause: 0.5
+
+  - section: Restore defaults
+    narrate: "Restoring default which-key timeout"
+    action: eval
+    expr: "(which-key-timeout 1000)"
+    pause: 0.3
+
+cleanup: true

@@ -74,6 +74,9 @@ function render(state: EditorState) {
     minibuffer.lines.forEach((line, index) => writeAt(start + index, 0, line));
   } else if (state.mode === "command" || state.mode === "mx") {
     writeAt(height - 2, 0, renderCommandInput(state, width));
+  } else if (state.statusMessage) {
+    const msg = state.statusMessage.length > width ? state.statusMessage.slice(0, width - 1) : state.statusMessage;
+    writeAt(height - 2, 0, msg + "\x1b[K");
   }
 
   writeAt(height - 1, 0, renderStatusLine(state, width));

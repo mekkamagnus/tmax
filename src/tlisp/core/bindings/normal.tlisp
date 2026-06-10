@@ -224,6 +224,13 @@
 ;; Emacs-style buffer switching.
 (key-bind "C-x b" "(switch-buffer)" "normal")
 
+;; SPC x prefix (Emacs C-x compatibility via leader key)
+(key-bind "SPC x f" "(find-file)" "normal")
+(key-bind "SPC x s" "(quick-save)" "normal")
+(key-bind "SPC x b" "(switch-buffer)" "normal")
+(key-bind "SPC x u" "(undo)" "normal")
+(key-bind "SPC x C-c" "(editor-quit)" "normal")
+
 ;; =================================================================
 ;; HELP SYSTEM (US-1.11.1 - US-1.11.3)
 ;; =================================================================
