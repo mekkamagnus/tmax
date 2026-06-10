@@ -4,7 +4,7 @@
 
 **Product Name:** tmax
 **Version:** 0.2.0
-**Date:** June 1, 2026
+**Date:** June 10, 2026
 **Status:** ✅ FUNCTIONAL
 
 tmax is a comprehensive extensible terminal-based text editor with a TypeScript core running on the Bun runtime. Following the Emacs architecture, the system has a clear separation of concerns:
@@ -24,13 +24,13 @@ tmax is a comprehensive extensible terminal-based text editor with a TypeScript 
 - **Steep** (default): Elm Architecture with direct ANSI output, zero dependencies
 - **Ink** (`--ink` flag): React/Ink reconciler for declarative component rendering
 
-**Current Development Focus:** Advancing toward full Vim Evil-mode parity with comprehensive editing commands, search/replace, text objects, and Emacs integration features (kill ring, minibuffer, which-key). The dual-frontend architecture (Steep + Ink) provides both zero-dependency performance and React-based extensibility.
+**Current Development Focus:** Closing TypeScript-level editor primitive gaps (Phase 1.5) that block all programming modes from growing beyond registration-only scaffolding. The four programming modes (TypeScript, Python, Go, Lisp) have zero keybindings and zero language-specific commands because the underlying primitives — auto-indent on Enter, electric pairs, show-paren, comment-dwim — don't exist yet. Markdown mode is the only rich mode because it doesn't depend on these primitives.
 
 The implementation delivers a full-screen terminal editor with vim-style key motions as the interface layer, complete Emacs-like extensibility through a T-Lisp interpreter (like Emacs Lisp), interchangeable frontends (Steep for direct ANSI, Ink for React/Ink), and a JSON-RPC server/client architecture for AI agent control.
 
 ## Current Development Status
 
-**🎯 ACTIVE WORK: Phase 3 - Advanced Features**
+**🎯 ACTIVE WORK: Phase 1.5 - Editor Prerequisites (BLOCKING)**
 
 **Critical Path Sequential Development:**
 ```
@@ -40,8 +40,10 @@ The implementation delivers a full-screen terminal editor with vim-style key mot
 ✅ Phase 0.8:     Server/Client Architecture (COMPLETE - basic)
 📋 Phase 0.9:     T-Lisp Diagnostics and Debugging (LD-1 / SPEC-009)
 ✅ Phase 1:       Core Editing Features (COMPLETE)
+🚧 Phase 1.5:     Editor Prerequisites — TypeScript primitives (BLOCKING)
+📋 Phase 1.6:     Programming Mode Deepening (depends on 1.5)
 ✅ Phase 2:       Extensibility & Plugin System (MOSTLY COMPLETE)
-🚧 Phase 3:       Advanced Features (IN PROGRESS)
+📋 Phase 3:       Advanced Features (depends on 1.6)
 📋 Phase 4:       Community & Ecosystem (PLANNED)
 ```
 
@@ -53,9 +55,13 @@ The implementation delivers a full-screen terminal editor with vim-style key mot
 - Phase 1: All core editing features (word/line nav, delete/yank/change, search, jump, visual, text objects, kill ring)
 
 **Current Focus:**
-- Immediate LD-1: Implement [SPEC-009: Strong T-Lisp Diagnostics and Debugging](../../../specs/SPEC-009-tlisp-diagnostics-debugging.md) before T-Lisp package and plugin ecosystem work depends on opaque errors
-- Phase 3: Advanced features (LSP integration, window management, undo tree visualization)
-- Phase 4: Community ecosystem (plugin repository, documentation website)
+- Phase 1.5: Close TypeScript primitive gaps that block all programming modes (auto-indent, electric-pair, show-paren, comment-dwim, indent engine, syntax highlight pipeline)
+- Phase 1.6: Once primitives exist, build mode-specific keymaps and commands for TypeScript, Python, Go, and Lisp modes
+- Phase 2: Extensibility (mostly complete — plugin system, module system, macro recording done; key binding refinements remain)
+- Phase 0.9: LD-1 diagnostics and debugging (SPEC-009)
+
+**Blocking Issue — Mode System Scaffolding:**
+All four programming modes are registration-only shells: syntax highlighting and regex-based indent rules, but zero keybindings, zero language-specific commands, and zero electric features. Markdown mode is the only rich mode (~750 lines of commands, 30 keybindings) because it doesn't depend on the missing TypeScript primitives. See [ROADMAP Phase 1.5](../docs/ROADMAP.md#phase-15-editor-prerequisites-v021--blocking) for the full primitive gap list.
 
 **See:** "Planned Enhancements" section below for complete development sequence.
 

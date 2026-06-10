@@ -95,11 +95,9 @@ To avoid confusion, here are Emacs features we're **not** implementing:
 
 **All implemented as T-Lisp functions, all callable via M-x.**
 
-## Current Status: v0.2.0 - Core Editing Complete ✅
+## Current Status: v0.2.0 - Core Editing Complete, Editor Primitives In Progress
 
-**Status**: Phase 0.8 (Daemon/Client) and Phase 1 (Core Editing) are COMPLETE. Phase 2 (Extensibility) in progress.
-
-This version provides a fully functional modal editor with daemon/client architecture and comprehensive editing capabilities.
+**Status**: Phase 0.8 (Daemon/Client) and Phase 1 (Core Editing) are COMPLETE. Phase 1.5 (Editor Prerequisites) is the blocking next step — TypeScript-level primitives must be closed before programming modes can grow.
 
 ### Completed Features
 - ✅ **Core Editor**: A T-Lisp-based terminal editor with vim-style key bindings (hjkl navigation)
@@ -126,6 +124,22 @@ This version provides a fully functional modal editor with daemon/client archite
 - ✅ **Plugin System**: Plugin loading with directory structure and repository
 - ✅ **Interchangeable Frontends**: TUI (ANSI), Ink (React), Steep
 
+### Mode System Status
+
+| Mode | Type | Registration | Keymap | Commands | Electric | Indent |
+|------|------|-------------|--------|----------|----------|--------|
+| fundamental | Major | ✅ | — | — | — | — |
+| typescript | Major | ✅ `.ts/.tsx/.js/.jsx/.mjs` | ❌ | ❌ | ❌ | regex-only |
+| python | Major | ✅ `.py/.pyi` | ❌ | ❌ | ❌ | regex-only |
+| lisp | Major | ✅ `.tlisp/.lisp/.el/.clj` | ❌ | ❌ | ❌ | regex-only |
+| go | Major | ✅ `.go` | ❌ | ❌ | ❌ | regex-only |
+| markdown | Major | ✅ `.md/.markdown/.mdx` | ✅ 30 bindings | ✅ ~750 lines | ✅ list continue | N/A |
+| line-numbers | Minor | ✅ global | — | ✅ toggle | — | — |
+| relative-line-numbers | Minor | ✅ buffer-local | — | ✅ toggle | — | — |
+| auto-fill | Minor | ✅ global | — | ✅ toggle | — | — |
+
+**Blocking gaps** (Phase 1.5): auto-indent on Enter, electric-pair-mode, show-paren-mode, comment-dwim, indent engine improvements, syntax highlight pipeline wiring.
+
 ### Test Coverage
 - Unit tests: tokenizer, parser, evaluator, editor API
 - Integration tests: file operations, buffer management
@@ -133,7 +147,15 @@ This version provides a fully functional modal editor with daemon/client archite
 
 ---
 
-## Immediate Priority: Extensibility & Plugin Ecosystem (Phase 2)
+## Immediate Priority: Editor Prerequisites (Phase 1.5) — BLOCKING
+
+**Why Phase 1.5 comes first**: All programming modes are scaffolding because TypeScript primitives are missing. Auto-indent on Enter, electric pairs, show-paren, and comment commands must exist before any programming mode can provide meaningful behavior. Phase 2 (extensibility) and Phase 3 (advanced features) depend on these primitives.
+
+**See Phase 1.5 below for the full breakdown.**
+
+---
+
+## Phase 2 Preview: Extensibility & Plugin Ecosystem
 
 ### Phase 0.4: T-Lisp-Centric Key Binding System ✅ COMPLETE
 
@@ -977,39 +999,67 @@ Priority: LOW | Impact: Plugin ecosystem
 
 ---
 
-## Phase 1.5: Enhanced Editing Features (v0.2.1)
+## Phase 1.5: Editor Prerequisites (v0.2.1) — BLOCKING
 
-## Phase 1.5: Enhanced Editing Features (v0.2.1)
+**Focus**: Close TypeScript-level foundation gaps that prevent all programming modes from growing beyond registration-only scaffolding. These primitives must exist before any mode can provide keymaps, electric features, or meaningful indentation.
 
-**Focus**: Advanced features that build on core editing foundation.
+**Why this is blocking**: All four programming modes (TypeScript, Python, Go, Lisp) are stuck at "register + syntax highlight + regex indent" because the TypeScript primitives they need don't exist yet. Every new mode hits the same wall. Markdown mode is the only rich mode because it doesn't depend on these primitives.
 
-### 1.9 - Advanced Text Objects
-Priority: MEDIUM | Impact: Power user features
+### 1.15 - Auto-Indent on Enter
+Priority: CRITICAL | Impact: Foundational — every programming mode needs this
 
-- [ ] Paragraph objects: `cip`, `dip`, `yip`
-- [ ] Block objects: `ci"`, `da'`, `ya{`, `ci(`
-- [ ] Tag objects for XML/HTML: `cit`, `dat`, `yat`
-- [ ] Indent objects: `ai`, `ii` (around/inside indentation)
-- [ ] Tests for all text objects
+- [ ] Wire `indent-current-line` into the Enter key handler in insert mode
+- [ ] Fix `indent-apply-region` no-op in `indent-ops.ts` (loop body never applies)
+- [ ] Tests for auto-indent across all programming modes
 
-### 1.10 - Visual Selection Enhancements
-Priority: MEDIUM | Impact: Improved visual mode
+### 1.16 - Electric Pair Mode
+Priority: HIGH | Impact: Auto-close brackets, quotes, parens
 
-- [ ] Visual text objects: `vi"`, `va'`, `vap`
-- [ ] Visual indent operations
-- [ ] Visual block append/g-insert
+- [ ] `(electric-pair-mode)` minor mode — auto-insert closing delimiter
+- [ ] Supported pairs: `()`, `[]`, `{}`, `""`, `''`, `` ` ` ``
+- [ ] Skip-over when typing closing delimiter that already exists
+- [ ] Backspace deletes paired delimiter
+- [ ] Configurable per major mode via `electric-pair-pairs`
+- [ ] Tests
 
-### 1.11 - Syntax Highlighting Framework
-Priority: LOW | Impact: Improved code readability (can use external tools initially)
+### 1.17 - Show Paren Mode
+Priority: HIGH | Impact: Visual delimiter matching
 
-- [ ] Syntax highlighting engine architecture
-- [ ] Token-based highlighting system
-- [ ] Language definitions for common languages (JavaScript, TypeScript, Python, etc.)
-- [ ] Color scheme system
-- [ ] Performance optimization for large files
-- [ ] User-defined syntax rules via T-Lisp
+- [ ] `(show-paren-mode)` minor mode — highlight matching delimiter
+- [ ] Highlight matching open/close when cursor is adjacent to a delimiter
+- [ ] Highlight mismatched delimiters differently (error color)
+- [ ] Works across lines for multi-line expressions
+- [ ] Tests
 
-### 1.12 - Improved Buffer Management
+### 1.18 - Comment Commands
+Priority: HIGH | Impact: Every programming mode needs comment toggling
+
+- [ ] `(comment-dwim)` — toggle comment on current line or region
+- [ ] `(comment-region start end)` — comment region
+- [ ] `(uncomment-region start end)` — uncomment region
+- [ ] Comment syntax per major mode (`//`, `#`, `;`, `--`, etc.)
+- [ ] Keybinding: `gcc` (toggle line), `gc` (operator + motion), visual mode `gc`
+- [ ] Tests
+
+### 1.19 - Indent Engine Improvements
+Priority: HIGH | Impact: Regex-only indent is a rough heuristic
+
+- [ ] Continuation-line handling (multi-line function calls, expressions)
+- [ ] Context-aware indent depth (not just previous-line regex matching)
+- [ ] `indent-apply-region` must actually apply (currently a no-op)
+- [ ] Python-specific: offside rule, hanging indent, dedent tracking
+- [ ] Lisp-specific: s-expression nesting depth, special-form indentation
+- [ ] Tests per language
+
+### 1.20 - Syntax Highlighting Pipeline
+Priority: MEDIUM | Impact: Highlights computed but never rendered
+
+- [ ] Wire `syntax-apply-highlights` to the render pipeline (currently returns nil)
+- [ ] Highlight spans reach the Steep/Ink renderers
+- [ ] Performance: only re-tokenize changed lines
+- [ ] Tests for rendered output with highlights
+
+### 1.21 - Improved Buffer Management
 Priority: MEDIUM | Impact: Better multi-file workflows
 
 - [ ] Buffer list command (`:ls`)
@@ -1021,48 +1071,114 @@ Priority: MEDIUM | Impact: Better multi-file workflows
 
 ---
 
+## Phase 1.6: Programming Mode Deepening (v0.2.1)
+
+**Focus**: Once TypeScript primitives exist (Phase 1.5), build out programming modes with keymaps, electric features, and language-specific commands.
+
+### 1.22 - Mode-Specific Keymaps
+Priority: HIGH | Impact: Every programming mode has zero keybindings
+
+- [ ] TypeScript mode keymap: format, organize imports, go to definition
+- [ ] Python mode keymap: run script, send to REPL
+- [ ] Lisp mode keymap: eval-defun, eval-buffer, macroexpand
+- [ ] Go mode keymap: gofmt, goimports, test
+- [ ] All mode keymaps integrate with which-key
+
+### 1.23 - Advanced Text Objects
+Priority: MEDIUM | Impact: Power user features
+
+- [ ] Paragraph objects: `cip`, `dip`, `yip`
+- [ ] Block objects: `ci"`, `da'`, `ya{`, `ci(`
+- [ ] Tag objects for XML/HTML: `cit`, `dat`, `yat`
+- [ ] Indent objects: `ai`, `ii` (around/inside indentation)
+- [ ] Tests for all text objects
+
+### 1.24 - Visual Selection Enhancements
+Priority: MEDIUM | Impact: Improved visual mode
+
+- [ ] Visual text objects: `vi"`, `va'`, `vap`
+- [ ] Visual indent operations
+- [ ] Visual block append/g-insert
+
+### 1.25 - Additional Major Modes
+Priority: MEDIUM | Impact: Broader language support
+
+- [ ] `json-mode` — `.json` files, auto-format, folding
+- [ ] `yaml-mode` — `.yaml`/`.yml` files, indentation-sensitive
+- [ ] `css-mode` — `.css`/`.scss` files
+- [ ] `html-mode` — `.html`/`.htm` files, tag matching
+- [ ] `shell-mode` — `.sh`/`.bash`/`.zsh` files
+- [ ] `rust-mode` — `.rs` files
+- [ ] `c-mode` — `.c`/`.h` files
+
+### 1.26 - Special Buffer Modes
+Priority: MEDIUM | Impact: Proper display for editor UI buffers
+
+- [ ] `help-mode` — read-only help buffers with forward/back navigation
+- [ ] `completion-list-mode` — completion candidate display
+- [ ] `special-mode` — read-only base mode for `*Messages*`, `*scratch*`, etc.
+- [ ] `dired-mode` — directory editor (commands exist, mode does not)
+
+### 1.27 - Additional Minor Modes
+Priority: LOW | Impact: Editor quality-of-life
+
+- [ ] `hl-line-mode` — highlight current line
+- [ ] `whitespace-mode` — visualize tabs, trailing spaces, hard newlines
+- [ ] `visual-line-mode` — soft word wrap with word boundaries
+- [ ] `subword-mode` — treat CamelCase segments as words
+- [ ] `rainbow-delimiters-mode` — color-coded nesting depth
+- [ ] `outline-mode` — fold sections by heading level
+
+---
+
 ## Phase 2: Extensibility & Customization (v0.3.0)
 
 **Focus**: Enhance T-Lisp capabilities and plugin ecosystem.
 
 ### 2.1 - Plugin System
 Priority: HIGH | Impact: Unlimited extensibility
+Status: Foundation complete (`src/editor/api/plugin-ops.ts`)
 
-- [ ] Plugin directory structure (`~/.config/tmax/tlpa/`)
-- [ ] Plugin loading and initialization system
+- [x] Plugin directory structure (`~/.config/tmax/tlpa/`)
+- [x] Plugin loading from `plugin.tlisp`
 - [ ] Plugin dependency management
 - [ ] Plugin isolation and sandboxing
-- [ ] Plugin lifecycle hooks (load, enable, disable, unload)
+- [x] Plugin lifecycle hooks (load/unload)
+- [ ] Plugin enable/disable hooks
 - [ ] Plugin API documentation
 
 ### 2.2 - Advanced T-Lisp Features
 Priority: MEDIUM | Impact: More powerful customization
+Status: Module system exists
 
-- [ ] Module system for T-Lisp
+- [x] Module system for T-Lisp (`defmodule`, `require-module`, `export`)
 - [ ] Namespace support
-- [ ] Advanced string manipulation functions
-- [ ] Regular expression integration
-- [ ] File system operations
+- [x] Advanced string manipulation functions
+- [x] Regular expression integration
+- [x] File system operations
 - [ ] Process spawning capabilities
 - [ ] HTTP request support (for plugin ecosystem)
 
 ### 2.3 - Key Binding System Completion
 Priority: HIGH | Impact: Core extensibility feature
+Status: Core system complete, refinements remain
 
-- [ ] Complete Phase 0.4 refactor (see Immediate Priority above)
+- [x] Phase 0.4 refactor — keymaps in T-Lisp
 - [ ] Key binding validation and conflict detection
 - [ ] Key binding documentation and examples
 - [ ] Mode-specific key binding override system
+- [ ] Centralized key resolution for minor/major mode precedence
 
 ### 2.4 - Macro Recording & Playback
 Priority: MEDIUM | Impact: Productivity enhancement
+Status: COMPLETE
 
-- [ ] `q{register}` - Start recording macro
-- [ ] `q` - Stop recording macro
-- [ ] `@{register}` - Play back macro
-- [ ] `@@` - Repeat last macro
-- [ ] Macro editing capabilities
-- [ ] Macro persistence across sessions
+- [x] `q{register}` - Start recording macro
+- [x] `q` - Stop recording macro
+- [x] `@{register}` - Play back macro
+- [x] `@@` - Repeat last macro
+- [x] Macro editing capabilities
+- [x] Macro persistence across sessions
 
 ### 2.5 - Configuration System
 Priority: MEDIUM | Impact: Better user experience
@@ -1326,6 +1442,6 @@ Until v1.0.0, minor versions may include breaking changes as we refine the API.
 
 ---
 
-**Last Updated**: 2026-06-02
+**Last Updated**: 2026-06-10
 
 For the latest updates and discussions, visit the project repository.

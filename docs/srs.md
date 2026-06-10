@@ -2,7 +2,7 @@
 
 **Product:** tmax — T-Lisp Powered Terminal Editor  
 **Version:** 0.2.0  
-**Date:** 2026-06-03  
+**Date:** 2026-06-10  
 
 ---
 
@@ -265,6 +265,87 @@ Five modes: **normal**, **insert**, **visual**, **command**, **M-x**
 ---
 
 ### 3.1 Phase 1: Core Editing
+
+#### US-1.15.1: Auto-Indent on Enter
+**As a** developer
+**I want** the editor to automatically indent the new line when I press Enter
+**So that** I don't have to manually indent every line
+
+**Status:** 📋 Planned
+
+**Acceptance Criteria:**
+- 📋 Given I'm in insert mode in a TypeScript buffer with indent rules, when I press Enter after `{`, then the new line should be indented one level deeper
+- 📋 Given I'm in insert mode, when I press Enter on a line with content after the cursor, then the new line should be indented to the correct level
+- 📋 Given I close a block with `}`, when the line is re-indented, then the closing brace should outdent
+- 📋 Given `indent-apply-region` is called, when it processes lines, then it should actually apply the calculated indentation (currently a no-op in `indent-ops.ts`)
+
+#### US-1.16.1: Electric Pair Mode
+**As a** developer
+**I want** the editor to automatically insert closing delimiters
+**So that** I never have unmatched brackets, quotes, or parentheses
+
+**Status:** 📋 Planned
+
+**Acceptance Criteria:**
+- 📋 Given `electric-pair-mode` is active, when I type `(`, then `)` should be inserted automatically and cursor placed between them
+- 📋 Given `electric-pair-mode` is active, when I type `"` and the next character is already `"`, then the cursor should skip over the existing quote instead of inserting a new pair
+- 📋 Given `electric-pair-mode` is active, when I press Backspace after an auto-inserted pair, then both delimiters should be deleted
+- 📋 Given a major mode defines `electric-pair-pairs`, when the mode activates, then only the configured pairs should be electric
+- 📋 Given `electric-pair-mode` is a minor mode, when I toggle it with `M-x electric-pair-mode`, then it should activate/deactivate per the standard mode toggle semantics
+
+#### US-1.17.1: Show Paren Mode
+**As a** developer
+**I want** matching delimiters visually highlighted
+**So that** I can immediately see mismatched or unmatched brackets
+
+**Status:** 📋 Planned
+
+**Acceptance Criteria:**
+- 📋 Given `show-paren-mode` is active, when the cursor is adjacent to `(`, then the matching `)` should be highlighted
+- 📋 Given `show-paren-mode` is active, when the cursor is adjacent to an unmatched delimiter, then it should be highlighted with an error color
+- 📋 Given `show-paren-mode` is active, when the matching delimiter is off-screen, then some indicator should show direction
+- 📋 Given multi-line expressions, when the matching delimiter is on a different line, then it should still be highlighted
+
+#### US-1.18.1: Comment Commands
+**As a** developer
+**I want** to toggle comments on lines and regions
+**So that** I can quickly comment/uncomment code in any language
+
+**Status:** 📋 Planned
+
+**Acceptance Criteria:**
+- 📋 Given I'm in normal mode in a TypeScript buffer, when I press `gcc`, then the current line should be toggled between commented and uncommented
+- 📋 Given I'm in visual mode with lines selected, when I press `gc`, then the selection should be toggled
+- 📋 Given I'm in a Python buffer, when I toggle comment, then `#` should be used
+- 📋 Given I'm in a Lisp buffer, when I toggle comment, then `;` should be used
+- 📋 Given `(comment-dwim)` is called, when the region is active, then it should comment or uncomment the region
+- 📋 Given `(comment-region start end)`, when called, then the region should be commented with the major mode's comment syntax
+
+#### US-1.19.1: Indent Engine Improvements
+**As a** developer
+**I want** context-aware indentation
+**So that** multi-line expressions, function calls, and nested structures indent correctly
+
+**Status:** 📋 Planned
+
+**Acceptance Criteria:**
+- 📋 Given a multi-line function call in TypeScript, when I press Enter after an opening `(`, then the next line should indent to align with the first argument
+- 📋 Given Python code, when I press Enter after a line ending in `:`, then the next line should indent one level; after `return`, `break`, `pass`, it should dedent
+- 📋 Given Lisp code, when I press Enter inside a `let` or `if` form, then indentation should follow special-form rules, not just previous-line regex
+- 📋 Given `indent-apply-region` is called, when it processes multiple lines, then each line should actually be re-indented (currently the loop body is a no-op)
+
+#### US-1.20.1: Syntax Highlighting Pipeline
+**As a** developer
+**I want** syntax highlighting to be visible in the terminal
+**So that** I can distinguish keywords, strings, comments, and other tokens
+
+**Status:** 🚧 Partially implemented (tokenizer and span computation work, render pipeline wiring incomplete)
+
+**Acceptance Criteria:**
+- 🚧 Given a TypeScript buffer, when `syntax-set-language` is called, then tokens should be computed
+- 📋 Given highlight spans are computed, when the renderer draws the buffer, then spans should be rendered with appropriate ANSI colors
+- 📋 Given `syntax-apply-highlights` is called, when it executes, then it should return highlight spans rather than nil (currently a placeholder)
+- 📋 Given a large file, when only the visible viewport changes, then only affected lines should be re-tokenized
 
 #### US-1.1.1: Word Navigation
 **As a** developer  
@@ -666,9 +747,9 @@ Five modes: **normal**, **insert**, **visual**, **command**, **M-x**
 - 📋 Given representative editing, search, replace, buffer/file/window, help/discovery, and dired workflows are migrated, when tests run, then each category should have at least one Lisp-owned command validated through the interpreter or daemon
 
 #### US-2.0.9: Native T-Lisp Tests for Lisp-Owned Behavior
-**As an** AI harness implementing tmax behavior  
-**I want** Lisp-owned behavior covered by native T-Lisp tests  
-**So that** the Lisp layer has first-class regression coverage instead of relying only on TypeScript unit tests  
+**As an** AI harness implementing tmax behavior
+**I want** Lisp-owned behavior covered by native T-Lisp tests
+**So that** the Lisp layer has first-class regression coverage instead of relying only on TypeScript unit tests
 
 **Status:** ✅ Implemented for mode-system native tests and Python daemon/daemon-tmux coverage
 
@@ -678,6 +759,46 @@ Five modes: **normal**, **insert**, **visual**, **command**, **M-x**
 - ✅ Given the Python UI suite runs, when mode-system coverage exists, then daemon-first mode tests should run by default
 - ✅ Given daemon-tmux is used by mode tests, when assertions are made, then tmux should be limited to renderer/status-line behavior and not general command validation
 - 📋 Given a behavior cannot yet be expressed in native T-Lisp tests, when the spec is implemented, then the gap should be documented and covered by Bun or Python daemon tests
+
+#### US-2.0.10: Programming Mode Keymaps and Commands
+**As a** developer editing code
+**I want** programming modes to provide language-specific keybindings and commands
+**So that** I can use editor features tailored to the language I'm editing
+
+**Status:** 📋 Planned (blocked by Phase 1.5 editor primitives)
+
+**Acceptance Criteria:**
+- 📋 Given I open a `.ts` file, when I press the mode-specific keymap prefix, then I should see language-appropriate bindings in which-key
+- 📋 Given I open a `.tlisp` file, when I evaluate `(eval-defun)`, then the function at cursor should be evaluated
+- 📋 Given I open a `.go` file, when I execute the format command, then `gofmt` should be applied
+- 📋 Given I open a `.py` file, when I execute the run command, then the script should run in a terminal
+- 📋 Given any programming mode is active, when I press `gcc`, then the line should be commented/uncommented with the correct syntax
+
+#### US-2.0.11: Special Buffer Modes
+**As a** tmax user
+**I want** editor UI buffers (help, messages, dired) to have proper major modes
+**So that** they behave consistently with navigation, read-only protection, and mode-specific keybindings
+
+**Status:** 📋 Planned
+
+**Acceptance Criteria:**
+- 📋 Given I open a `*Help*` buffer, when it displays, then `help-mode` should be active with navigation keybindings
+- 📋 Given I open a `*Messages*` buffer, when it displays, then `special-mode` should be active and the buffer should be read-only
+- 📋 Given I open `dired`, when the directory listing displays, then `dired-mode` should be active with file operation keybindings
+- 📋 Given a special buffer is read-only, when I try to edit, then the edit should be rejected with a message
+
+#### US-2.0.12: Additional Minor Modes
+**As a** tmax power user
+**I want** quality-of-life minor modes like hl-line, whitespace, and rainbow-delimiters
+**So that** I can customize my editing experience
+
+**Status:** 📋 Planned
+
+**Acceptance Criteria:**
+- 📋 Given `hl-line-mode` is active, when I move the cursor, then the current line should have a background highlight
+- 📋 Given `whitespace-mode` is active, when I view a buffer, then tabs, trailing spaces, and hard newlines should be visually indicated
+- 📋 Given `rainbow-delimiters-mode` is active, when I view nested parentheses, then each nesting level should use a different color
+- 📋 Given `outline-mode` is active, when I collapse a heading, then all sub-headings should be hidden
 
 #### US-2.1.1: Plugin Directory Structure
 **As a** plugin developer  
