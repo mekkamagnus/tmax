@@ -28,6 +28,7 @@ function deserializeWindow(raw: unknown): Window | null {
     cursorLine: numberOr(record.cursorLine, 0),
     cursorColumn: numberOr(record.cursorColumn, 0),
     viewportTop: numberOr(record.viewportTop, 0),
+    viewportLeft: numberOr(record.viewportLeft, 0),
     ...(splitType ? { splitType } : {}),
     ...(typeof record.height === "number" ? { height: record.height } : {}),
     ...(typeof record.width === "number" ? { width: record.width } : {}),

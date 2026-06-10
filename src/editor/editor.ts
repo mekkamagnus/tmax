@@ -135,6 +135,7 @@ export class Editor {
       mode: "normal",
       statusMessage: "Welcome to tmax",
       viewportTop: 0,
+      viewportLeft: 0,
       config: {
         theme: 'default',
         tabSize: 4,
@@ -291,6 +292,8 @@ export class Editor {
       set statusMessage(v: string) { editor.state.statusMessage = v; },
       get viewportTop() { return editor.state.viewportTop; },
       set viewportTop(v: number) { editor.state.viewportTop = v; },
+      get viewportLeft() { return editor.state.viewportLeft ?? 0; },
+      set viewportLeft(v: number) { editor.state.viewportLeft = v; },
       get commandLine() { return editor.state.commandLine; },
       set commandLine(v: string) { editor.state.commandLine = v; },
       get spacePressed() { return editor.spacePressed; },
@@ -2320,6 +2323,7 @@ export class Editor {
         cursorLine: this.state.cursorPosition.line,
         cursorColumn: this.state.cursorPosition.column,
         viewportTop: this.state.viewportTop,
+        viewportLeft: this.state.viewportLeft ?? 0,
         height: terminalSize.height - 2, // Reserve space for status line and minibuffer
         width: terminalSize.width,
       };
@@ -2541,6 +2545,7 @@ export class Editor {
     this.state.mode = newState.mode;
     this.state.statusMessage = newState.statusMessage;
     this.state.viewportTop = newState.viewportTop;
+    this.state.viewportLeft = newState.viewportLeft ?? 0;
     this.state.config = newState.config;
     this.state.currentFilename = newState.currentFilename;
     const currentBufferName = this.findBufferName(this.state.currentBuffer);

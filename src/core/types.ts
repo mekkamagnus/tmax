@@ -272,6 +272,7 @@ export interface EditorState {
   mode: 'normal' | 'insert' | 'visual' | 'command' | 'mx';
   statusMessage: string;
   viewportTop: number;
+  viewportLeft?: number;
   config: EditorConfig;
   commandLine: string;
   mxCommand: string;
@@ -330,6 +331,7 @@ export interface Window {
   cursorLine: number;  // Cursor line position within window
   cursorColumn: number;  // Cursor column position within window
   viewportTop: number;  // First line visible in window viewport
+  viewportLeft: number;  // First column visible in window viewport
   splitType?: 'horizontal' | 'vertical';  // How this window was created
   height?: number;  // Window height in rows (for horizontal splits)
   width?: number;  // Window width in columns (for vertical splits)
@@ -363,6 +365,7 @@ export interface Frame {
   id: string;
   cursorPosition: Position;
   viewportTop: number;
+  viewportLeft: number;
   mode: EditorState["mode"];
   commandLine: string;
   mxCommand: string;
