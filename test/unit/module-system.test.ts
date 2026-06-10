@@ -71,7 +71,8 @@ describe("T-Lisp module system", () => {
     const interpreter = editor.getInterpreter();
 
     expect(interpreter.execute('(featurep "x")')._tag).toBe("Left");
-    expect(interpreter.execute('(provide "x")')._tag).toBe("Left");
+    // provide is supported as a no-op for forward compatibility
+    expect(interpreter.execute('(provide "x")')._tag).toBe("Right");
     expect(interpreter.execute('(require "x")')._tag).toBe("Left");
   });
 

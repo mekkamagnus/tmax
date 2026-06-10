@@ -109,8 +109,8 @@ describe("T-Lisp Evaluator with Either", () => {
     const { evaluator, env } = createEvaluatorWithBuiltins();
     const parser = new TLispParser();
 
-    // Invalid if expression with wrong number of arguments
-    const expr = parser.parse("(if t 1)"); // Missing else clause
+    // Invalid if expression with no arguments
+    const expr = parser.parse("(if)");
     if (Either.isLeft(expr)) {
       throw new Error(`Parse failed: ${JSON.stringify(expr.left)}`);
     }
