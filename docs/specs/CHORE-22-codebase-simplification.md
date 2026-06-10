@@ -7,9 +7,11 @@ Three automated reviews (code reuse, code quality, efficiency) of the last 10 co
 ## Relevant Files
 
 - `src/tlisp/evaluator.ts` — evalAnd/evalOr double-evaluation bug, evalWhile/evalWhileAsync duplication
+- `src/tlisp/evaluator-refactored.ts` — 2,414-line dead file, zero imports anywhere
 - `src/editor/tlisp-api.ts` — fold API boilerplate, dead stub registrations (set-prefix, prefix-numeric-value)
 - `src/editor/api/fold-ops.ts` — unnecessary Map allocations
 - `src/editor/api/syntax-ops.ts` — duplicated language map
+- `src/editor/api/text-objects.ts.bak` — stale backup file in source tree
 - `src/editor/editor.ts` — duplicate set-prefix/prefix-numeric-value registrations
 - `src/editor/handlers/insert-handler.ts` — ungated markdown-list-continue dispatch
 - `src/editor/handlers/normal-handler.ts` — (editor as any) leaky abstraction
@@ -21,7 +23,8 @@ Three automated reviews (code reuse, code quality, efficiency) of the last 10 co
 - `src/steep/oolong/wrap.ts` — O(N²) stripAnsi in word wrapping
 - `src/core/types.ts` — unnecessary SPEC-reference comments, FoldState type
 - `test/unit/markdown-commands.test.ts` — duplicate fold test coverage
-- `test/unit/markdown-fold.test.ts` — near-subset of markdown-commands.test.ts
+- `test/unit/markdown-fold.test.ts` — partially overlapping with markdown-commands.test.ts (6 unique tokenizer tests)
+- `test/unit/functional-patterns.test.ts.disabled` — dead test file alongside active version
 
 ## Step by Step Tasks
 
@@ -57,7 +60,7 @@ Three automated reviews (code reuse, code quality, efficiency) of the last 10 co
 
 **User Story**: As a developer, I want fold state to live in one place without `as any` casts and manual copy-back.
 
-- The fold API functions in `tlisp-api.ts` construct throwaway `{ foldRanges: state.foldRanges } as any`, call a fold-op, then manually copy `state.foldRanges = result.foldRanges` — repeated 7 times
+- The fold API functions in `tlisp-api.ts` construct throwaway `{ foldRanges: state.foldRanges } as any`, call a fold-op, then manually copy `state.foldRanges = result.foldRanges` — repeated 8 times (fold-toggle, fold-open, fold-close, fold-close-all, fold-open-all, fold-by-level, fold-is-collapsed, fold-get-ranges)
 - Extract a `withFoldState(fn)` helper that handles the inject-call-extract pattern
 - Or: make fold-op functions accept `TlispEditorState` directly and operate on `state.foldRanges` in place, eliminating the intermediate object
 
@@ -78,37 +81,40 @@ Currently three issues on the render hot path in `buffer-lines.ts`:
 
 **4c. State mutation in render** — `renderBufferLines` calls `.delete(foldStart)` on `state.foldRanges` to auto-expand folds. Move this logic to the cursor-movement handler so the render function is side-effect-free.
 
-**4d. Parameter sprawl** — `renderSingleWindow` now has 10 parameters. Introduce a `RenderContext` object grouping `highlightSpans`, `foldRanges`, `gutterCfg`, etc.
+**4d. Parameter sprawl** — `renderSingleWindow` has 11 parameters (10 required + 1 optional). Introduce a `RenderContext` object grouping `highlightSpans`, `foldRanges`, `gutterCfg`, etc.
 
 **Acceptance Criteria**:
 - [ ] Hidden-line set built once, not per-line fold iteration
 - [ ] No regex in per-line heading detection
 - [ ] No state mutation in `renderBufferLines`
-- [ ] `renderSingleWindow` takes a `RenderContext` object, not 10 positional params
+- [ ] `renderSingleWindow` takes a `RenderContext` object, not 11 positional params
 - [ ] `bun test test/unit/render-visual.test.ts` passes
 
 ### Task 5: Remove dead stubs and unnecessary comments
 
 **User Story**: As a developer reading the codebase, I want no dead code or spec-ticket comments that add noise.
 
-- Remove `set-prefix` and `prefix-numeric-value` stub registrations from `tlisp-api.ts` (lines ~661-675) — they are immediately overwritten by the real implementations in `editor.ts`
-- Remove spec-reference comments: `// Fold state (SPEC-018)` in `types.ts`, `// Fold operations (SPEC-018)` in `tlisp-api.ts`, `;; ... (SPEC-018)` in `markdown-mode.tlisp`
-- Remove WHAT-comments in `buffer-lines.ts`: `// Check if this line is inside a collapsed fold`, `// Check if this line is the start of a fold`, etc.
+- Remove `set-prefix` and `prefix-numeric-value` stub registrations from `tlisp-api.ts` (lines ~1012-1026) — they are immediately overwritten by the real implementations in `editor.ts`
+- Remove spec-reference comments: SPEC-004, SPEC-035, SPEC-018, SPEC-025 in `types.ts`; SPEC-003 (×3), SPEC-035 (×5), SPEC-007, SPEC-013 (×2), SPEC-018 in `tlisp-api.ts`
 - Remove `foldIsCollapsed`/`foldGetRanges` unnecessary `new Map()` allocations — use a module-level `EMPTY_MAP` constant
+- Delete `src/tlisp/evaluator-refactored.ts` — 2,414 lines of dead code, zero imports anywhere in the codebase
+- Delete `src/editor/api/text-objects.ts.bak` — stale backup alongside the active file
+- Delete `test/unit/functional-patterns.test.ts.disabled` — dead test file alongside the active version
 
 **Acceptance Criteria**:
 - [ ] No `set-prefix`/`prefix-numeric-value` stubs in `tlisp-api.ts`
 - [ ] No SPEC-ticket reference comments in `src/`
-- [ ] No WHAT-comments in `buffer-lines.ts` fold section
 - [ ] No throwaway `new Map()` in `foldIsCollapsed`/`foldGetRanges`
+- [ ] `evaluator-refactored.ts` deleted
+- [ ] `.bak` and `.disabled` files removed from `src/` and `test/`
 
-### Task 6: Consolidate duplicate test files
+### Task 6: Merge and deduplicate markdown test files
 
 **User Story**: As a developer maintaining tests, I don't want two files testing the same functions.
 
-- `test/unit/markdown-fold.test.ts` is a strict subset of `test/unit/markdown-commands.test.ts` (same `makeState`, same `foldToggle`/`foldOpen`/`foldClose`/`foldCloseAll`/`foldOpenAll`/`foldByLevel`/`foldIsCollapsed`/`foldGetRanges`/`findHeadingRanges` tests)
-- Delete `markdown-fold.test.ts` — its coverage is fully covered by `markdown-commands.test.ts`
-- If `markdown-fold.test.ts` has any unique test case not in `markdown-commands.test.ts`, merge it first
+- `test/unit/markdown-fold.test.ts` has overlapping fold-ops tests with `test/unit/markdown-commands.test.ts`, plus 6 unique tokenizer tests ("tokenizes ATX headings", "tokenizes code fences", "tokenizes inline formatting", "tokenizes links", "tokenizes list items", "tokenizes blockquotes") that test `src/syntax/languages/markdown.ts` and `src/syntax/tokenizer.ts`
+- Merge the 6 unique tokenizer tests into `markdown-commands.test.ts` (or a new `test/unit/markdown-tokenizer.test.ts` if keeping test files focused)
+- Delete `markdown-fold.test.ts` after merge
 
 **Acceptance Criteria**:
 - [ ] `test/unit/markdown-fold.test.ts` deleted
@@ -153,6 +159,8 @@ Currently three issues on the render hot path in `buffer-lines.ts`:
 
 ## Out of Scope
 
-- `evalWhile`/`evalWhileAsync` sync/async duplication — systemic evaluator issue, not from this changeset
+- `evalWhile`/`evalWhileAsync` sync/async duplication — systemic evaluator issue requiring async architecture decision; same pattern as Task 1 but touches the async evaluation path
 - `findHeadingRanges` caching — requires buffer-change invalidation tracking, defer to a performance-focused spec
+- `evaluator.ts` decomposition — at 4,916 lines it's the largest file by 2x; extracting stdlib method dispatch would improve maintainability but is a larger refactoring effort
+- Incremental syntax highlighting — currently re-highlights entire viewport on every keystroke; would require line-state propagation tracking
 - Website/docs changes — content files, not code
