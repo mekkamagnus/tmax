@@ -30,11 +30,34 @@ function getLineForBuffer(buffer: Window["buffer"], lineNumber: number): string 
   return result && Either.isRight(result) ? result.right : "";
 }
 
+function charWidth(ch: string): number {
+  return ch.charCodeAt(0) > 127 ? 2 : 1;
+}
+
+function stringWidth(str: string): number {
+  let w = 0;
+  for (const ch of str) w += charWidth(ch);
+  return w;
+}
+
+function sliceToVisualWidth(text: string, maxCols: number): string {
+  let cols = 0;
+  let i = 0;
+  for (const ch of text) {
+    const cw = charWidth(ch);
+    if (cols + cw > maxCols) break;
+    cols += cw;
+    i += ch.length;
+  }
+  return text.slice(0, i);
+}
+
 function fitToWidth(text: string, width: number): string {
   if (width <= 0) return "";
-  if (text.length <= width) return text.padEnd(width, " ");
-  if (width <= 3) return text.slice(0, width);
-  return `${text.slice(0, width - 3)}...`;
+  const sw = stringWidth(text);
+  if (sw <= width) return text + " ".repeat(width - sw);
+  if (width <= 3) return sliceToVisualWidth(text, width);
+  return sliceToVisualWidth(text, width - 3) + "...";
 }
 
 export function getVisibleViewportTop(state: EditorState, height: number): number {
@@ -98,30 +121,38 @@ function clampSpans(spans: HighlightSpan[], maxWidth: number): HighlightSpan[] {
 
 function padAnsiToWidth(text: string, width: number): string {
   const visible = text.replace(/\x1b\[[0-9;]*m/g, "");
-  if (visible.length >= width) return text;
-  return text + " ".repeat(width - visible.length);
+  const sw = stringWidth(visible);
+  if (sw >= width) return text;
+  return text + " ".repeat(width - sw);
 }
 
 const ANSI_RE = /\x1b\[[0-9;]*m/g;
 
 function renderWithBlockCursor(text: string, cursorCol: number): string {
   if (cursorCol < 0) return text;
-  const before = text.slice(0, cursorCol);
-  const ch = text[cursorCol]!;
-  const after = text.slice(cursorCol + 1);
-  if (ch !== undefined) {
-    return before + style(ch, { fg: "black", bg: "white" }) + after;
+  if (cursorCol >= stringWidth(text)) {
+    return text + style(" ", { fg: "black", bg: "white" });
   }
-  return text + style(" ", { fg: "black", bg: "white" });
+  let visiblePos = 0;
+  let i = 0;
+  while (i < text.length) {
+    if (visiblePos === cursorCol) break;
+    visiblePos += charWidth(text[i]!);
+    i++;
+  }
+  const before = text.slice(0, i);
+  const ch = text[i]!;
+  const after = text.slice(i + 1);
+  return before + style(ch, { fg: "black", bg: "white" }) + after;
 }
 
 function renderWithBlockCursorAnsi(text: string, cursorCol: number): string {
   if (cursorCol < 0) return text;
   const stripped = text.replace(ANSI_RE, "");
-  if (cursorCol >= stripped.length) {
+  if (cursorCol >= stringWidth(stripped)) {
     return text + style(" ", { fg: "black", bg: "white" });
   }
-  // Walk through text tracking visible position
+  // Walk through text tracking visual column position
   let visiblePos = 0;
   let i = 0;
   let splitPoint = 0;
@@ -136,7 +167,7 @@ function renderWithBlockCursorAnsi(text: string, cursorCol: number): string {
       splitPoint = i;
       break;
     }
-    visiblePos++;
+    visiblePos += charWidth(text[i]!);
     i++;
   }
   if (visiblePos < cursorCol) {
@@ -217,8 +248,8 @@ function renderSingleWindow(
 
     const lineSpans = highlightSpans?.[lineNumber];
     if (lineSpans && lineSpans.length > 0) {
-      const truncated = rawLine.length > cw
-        ? (cw > 3 ? rawLine.slice(0, cw - 3) + "..." : rawLine.slice(0, cw))
+      const truncated = stringWidth(rawLine) > cw
+        ? (cw > 3 ? sliceToVisualWidth(rawLine, cw - 3) + "..." : sliceToVisualWidth(rawLine, cw))
         : rawLine;
       const clamped = clampSpans(lineSpans, truncated.length);
       const highlighted = applyHighlights(truncated, clamped);
@@ -304,7 +335,7 @@ export function renderBufferLines(
       // Place cell content at the right screen position
       const line = cellLines[row]!;
       const stripped = line.replace(/\x1b\[[0-9;]*m/g, "");
-      const padded = line + " ".repeat(Math.max(0, cell.width - stripped.length));
+      const padded = line + " ".repeat(Math.max(0, cell.width - stringWidth(stripped)));
       screen[screenRow] = padded.slice(0, cell.width);
     }
   }
