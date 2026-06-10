@@ -311,6 +311,24 @@ Examples:
     metadata: { phase: 'init-ui', frontend: 'steep' }
   });
 
+  // Phase 5a: Start embedded socket server (Emacs-style server-start)
+  const server = new TmaxServer(undefined, false, editor);
+  try {
+    await server.startEditor();
+    server.startSocket().catch((err: Error) => {
+      // Graceful degradation: editor works without socket if already in use
+      startupLog.info('Socket server not started (already in use or unavailable)', {
+        correlationId: startupId,
+        data: { reason: err.message }
+      });
+    });
+  } catch (err) {
+    startupLog.info('Embedded server init skipped', {
+      correlationId: startupId,
+      data: { reason: err instanceof Error ? err.message : String(err) }
+    });
+  }
+
   const frontend = new SteepFrontend();
   try {
     await frontend.run(editor, initialState);
