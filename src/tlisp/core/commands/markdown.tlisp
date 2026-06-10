@@ -10,6 +10,7 @@
     markdown-promote-heading markdown-demote-heading markdown-insert-heading
     markdown-align-table pad-right markdown-insert-list-item markdown-renumber-list
     markdown-shell-quote markdown-follow-link markdown-insert-link
+    markdown-jump-back markdown-link-at-point
     markdown-skip-front-matter markdown-generate-toc
     markdown-do markdown-toggle-checkbox markdown-preview
     markdown-list-continue)
@@ -453,23 +454,34 @@
 
 ;;; ── Link commands ───────────────────────────────────────────────────
 
+(defvar *markdown-link-ring* nil
+  "Position stack for markdown link-back navigation (gb).")
+
 (defun markdown-shell-quote (str)
   "Escape a string for safe interpolation into a single-quoted shell argument."
   (replace-regexp-in-string "'" "'\"'\"'" str))
 
 (defun markdown-follow-link ()
-  "Open URL or file reference under cursor."
+  "Open whatever link is under cursor — URL, file, or anchor."
   (let* ((line (buffer-get-line (cursor-line)))
          (col (cursor-column)))
-    (if (string-match "\\\\[\([^]]*\)\\\\](\([^)]*\))" line)
+    (if (string-match "\\\\[([^\\\\]]*)\\\\]\\\\(([^)]*)\\\\)" line)
         (let ((url (match-string 2 line))
-              (mstart (match-beginning 2))
+              (mstart (match-beginning 0))
               (mend (match-end 2)))
           (if (and (>= col mstart) (<= col mend))
-              (let ((safe-url (markdown-shell-quote url)))
-                (shell-command (format "open '%s' 2>/dev/null || xdg-open '%s' 2>/dev/null" safe-url safe-url))
-                (message "Opening: %s" url))
-              (message "Cursor not on a link URL")))
+              (progn
+                (markdown-push-position)
+                (cond
+                  ((string-match "^#" url)
+                   (markdown-open-anchor url))
+                  ((string-match "^https?://" url)
+                   (let ((safe-url (markdown-shell-quote url)))
+                     (shell-command (format "open '%s' 2>/dev/null || xdg-open '%s' 2>/dev/null" safe-url safe-url))
+                     (message "Opening: %s" url)))
+                  (t
+                   (markdown-open-file-link url))))
+              (message "Cursor not on a link")))
         (message "No link found on this line"))))
 
 (defun markdown-insert-link ()
@@ -481,6 +493,90 @@
           (buffer-insert (format "[%s](%s)" text url))
           (message "Link inserted"))
         (message "Cancelled"))))
+
+(defun markdown-anchor-slug (heading)
+  "Convert heading text to lowercase slug for anchor matching."
+  (replace-regexp-in-string "[^a-z0-9]+" "-" (string-trim (downcase heading))))
+
+(defun markdown-open-anchor (anchor)
+  "Jump to heading matching ANCHOR (without #)."
+  (let ((slug (markdown-anchor-slug (substring anchor 1)))
+        (i 0)
+        (total (buffer-line-count))
+        (found nil))
+    (while (and (< i total) (not found))
+      (let ((text (buffer-get-line i)))
+        (if (string-match "^#+ " text)
+            (let ((heading (substring text (match-end 0))))
+              (if (string= (markdown-anchor-slug heading) slug)
+                  (set! found i)))))
+      (set! i (+ i 1)))
+    (if found
+        (progn (cursor-move found 0) (message "Jumped to heading at line %d" (+ found 1)))
+        (message "No heading matching #%s" slug))))
+
+(defun markdown-dirname (path)
+  "Extract directory portion of PATH."
+  (let ((i (- (length path) 1)))
+    (while (and (> i 0) (not (string= (substring path i (+ i 1)) "/")))
+      (set! i (- i 1)))
+    (if (> i 0)
+        (substring path 0 i)
+        ".")))
+
+(defun markdown-open-file-link (url)
+  "Open a file link URL, which may contain a #fragment."
+  (let ((fragment nil)
+        (path url))
+    (if (string-match "^\([^#]+\)#\(.*\)" url)
+        (progn
+          (set! path (match-string 1 url))
+          (set! fragment (match-string 2 url)))
+        (if (string-match "^#\(.*\)" url)
+            (progn
+              (markdown-open-anchor url)
+              (set! path nil))))
+    (if path
+        (let ((resolved path))
+          (if (not (string-match "^/" path))
+              (let ((dir (markdown-dirname (or (buffer-filename) "."))))
+                (set! resolved (concat dir "/" path))))
+          (find-file-open resolved)
+          (if fragment
+              (markdown-open-anchor (concat "#" fragment)))))))
+
+(defun markdown-push-position ()
+  "Push current position onto the link ring for back-navigation."
+  (let ((entry (list (buffer-current) (cursor-line) (cursor-column)))
+        (ring (or *markdown-link-ring* '())))
+    (set! *markdown-link-ring* (cons entry ring))
+    (if (> (length *markdown-link-ring*) 20)
+        (set! *markdown-link-ring* (reverse (cdr (reverse *markdown-link-ring*)))))))
+
+(defun markdown-jump-back ()
+  "Jump back to previous position before following a markdown link."
+  (if (or (not *markdown-link-ring*) (= (length *markdown-link-ring*) 0))
+      (message "No previous position")
+      (let ((entry (car *markdown-link-ring*)))
+        (set! *markdown-link-ring* (cdr *markdown-link-ring*))
+        (let ((buf (nth 0 entry))
+              (line (nth 1 entry))
+              (col (nth 2 entry)))
+          (buffer-switch buf)
+          (cursor-move line col)
+          (message "Returned to %s:%d:%d" buf (+ line 1) col)))))
+
+(defun markdown-link-at-point ()
+  "Return the URL under cursor or nil."
+  (let* ((line (buffer-get-line (cursor-line)))
+         (col (cursor-column)))
+    (if (string-match "\\\\[([^\\\\]]*)\\\\]\\\\(([^)]*)\\\\)" line)
+        (let ((mstart (match-beginning 0))
+              (mend (match-end 2)))
+          (if (and (>= col mstart) (<= col mend))
+              (match-string 2 line)
+              nil))
+        nil)))
 
 ;;; ── Utility commands ────────────────────────────────────────────────
 
@@ -520,15 +616,13 @@
         (message "No headings found"))))
 
 (defun markdown-do ()
-  "Context-aware action at point."
+  "Context-aware action at point: follow link, fold heading, toggle checkbox."
   (let ((line (buffer-get-line (cursor-line))))
     (cond
+      ((markdown-link-at-point)
+       (markdown-follow-link))
       ((string-match "^#" line)
        (markdown-fold-toggle))
-      ((string-match "\\\\[\([^]]*\)\\\\](\([^)]*\))" line)
-       (markdown-follow-link))
-      ((string-match "^\\\\s*[-*+]\\\\s-\\\\[[ xX]\\\\]" line)
-       (markdown-toggle-checkbox))
       (t
        (message "Nothing to do at point")))))
 

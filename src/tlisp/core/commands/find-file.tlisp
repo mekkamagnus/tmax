@@ -1,5 +1,5 @@
 (defmodule editor/commands/find-file
-  (export find-file-accept find-file)
+  (export find-file-accept find-file find-file-open)
 
 ;; find-file.tlisp — find-file command composed from primitives
 
@@ -27,13 +27,16 @@
       (progn
         (buffer-create path)
         (buffer-switch path)
+        (cursor-move 0 0)
         (set-buffer-filename path)
         (buffer-insert content)
+        (cursor-move 0 0)
         (set-buffer-modified-p false)
         (message (concat "Opened " path)))
       (progn
         (buffer-create path)
         (buffer-switch path)
+        (cursor-move 0 0)
         (set-buffer-filename path)
         (set-buffer-modified-p false)
         (message (concat "New file " path))))))

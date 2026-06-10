@@ -162,6 +162,10 @@
                 (progn (vim-count-reset) (jump-to-first-line))))
             ((string= key "t") (progn (vim-count-reset) (tab-next)))
             ((string= key "T") (progn (vim-count-reset) (tab-prev)))
+            ((string= key "h") (progn (vim-count-reset) (markdown-up-heading)))
+            ((string= key "O") (progn (vim-count-reset) (markdown-heading-outline)))
+            ((string= key "x") (progn (vim-count-reset) (markdown-do)))
+            ((string= key "b") (progn (vim-count-reset) (markdown-jump-back)))
             (t (vim-unsupported-prefix (concat "Unsupported prefix: g" key)))))
         ((string= prefix "z")
           (cond

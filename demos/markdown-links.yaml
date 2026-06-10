@@ -1,0 +1,180 @@
+name: markdown-links
+description: "Demonstrates SPEC-035 wiki-style navigation — cross-file links, anchor jumps, jump-back chain across files."
+speed: 1.0
+
+setup:
+  - action: setup_file
+    var: GS
+    name: getting-started.md
+    content: |
+      # Getting Started
+
+      ## Prerequisites
+
+      You need Bun 1.0+ and a terminal.
+
+      ## Installation
+
+      Clone and install dependencies.
+
+      ## Next Steps
+
+      Read the architecture overview or jump to contributing.
+
+  - action: setup_file
+    var: ARCH
+    name: architecture.md
+    content: |
+      # Architecture
+
+      ## Overview
+
+      Tmax splits responsibilities: TypeScript core for I/O, T-Lisp for editor logic.
+
+      ## Components
+
+      - Terminal I/O
+      - T-Lisp Engine
+      - Buffer Manager
+
+      ## See Also
+
+      Go back to getting started or the index.
+
+  - action: setup_file
+    var: CONTRIB
+    name: contributing.md
+    content: |
+      # Contributing
+
+      ## Setup
+
+      Follow the getting started guide first.
+
+      ## Guidelines
+
+      Fork the repo, create a branch, submit a PR.
+
+      Return to the index.
+
+  - action: setup_file
+    var: INDEX
+    name: index.md
+    content: |
+      # Tmax Wiki
+
+      Welcome to the project wiki.
+
+      - [Getting Started](${GS})
+      - [Architecture](${ARCH})
+      - [Contributing](${CONTRIB})
+
+steps:
+  # ── 1. Open wiki index ───────────────────────────────────────────────
+  - section: Wiki index
+    narrate: "Opening the wiki index page"
+    action: open
+    file: "${INDEX}"
+    pause: 1.2
+
+  - narrate: "Verifying markdown mode"
+    action: eval
+    expr: "(major-mode-get)"
+    pause: 0.5
+
+  # ── 2. Follow file link to getting-started.md ─────────────────────────
+  - section: Cross-file navigation
+    narrate: "Moving cursor onto the Getting Started link"
+    action: eval
+    expr: "(progn (cursor-move 4 4))"
+    pause: 0.5
+
+  - narrate: "Following link with gx — opens getting-started.md in a new buffer"
+    action: eval
+    expr: "(markdown-do)"
+    pause: 1.0
+
+  - narrate: "Capturing screen — should show Getting Started page"
+    action: capture
+    pause: 0.5
+
+  - narrate: "Checking current buffer name"
+    action: eval
+    expr: "(buffer-current)"
+    pause: 0.5
+
+  # ── 3. Jump back to index ─────────────────────────────────────────────
+  - narrate: "Jumping back to index with gb"
+    action: eval
+    expr: "(markdown-jump-back)"
+    pause: 0.8
+
+  # ── 4. Follow link to architecture.md ─────────────────────────────────
+  - narrate: "Following Architecture link from index"
+    action: eval
+    expr: "(progn (cursor-move 5 4) (markdown-do))"
+    pause: 1.0
+
+  - narrate: "Capturing screen — Architecture page"
+    action: capture
+    pause: 0.5
+
+  - narrate: "Checking buffer name"
+    action: eval
+    expr: "(buffer-current)"
+    pause: 0.5
+
+  # ── 5. Follow link to contributing.md ─────────────────────────────────
+  - narrate: "Jumping back to index, then following Contributing link"
+    action: eval
+    expr: "(markdown-jump-back)"
+    pause: 0.5
+
+  - narrate: "Following Contributing link"
+    action: eval
+    expr: "(progn (cursor-move 6 4) (markdown-do))"
+    pause: 1.0
+
+  - narrate: "Capturing screen — Contributing page"
+    action: capture
+    pause: 0.5
+
+  # ── 6. Jump-back chain across all files ───────────────────────────────
+  - section: Cross-file jump-back (gb)
+    narrate: "Jumping back — returns to Index"
+    action: eval
+    expr: "(markdown-jump-back)"
+    pause: 0.8
+
+  - narrate: "Jumping back — returns to Architecture page"
+    action: eval
+    expr: "(markdown-jump-back)"
+    pause: 0.8
+
+  - narrate: "Jumping back — returns to Index (start)"
+    action: eval
+    expr: "(markdown-jump-back)"
+    pause: 0.8
+
+  - narrate: "Capturing final screen — back where we started"
+    action: capture
+    pause: 0.5
+
+  # ── 7. Error handling ─────────────────────────────────────────────────
+  - section: Error handling
+    narrate: "Following link on a heading — markdown-do folds it"
+    action: eval
+    expr: "(progn (cursor-move 0 0) (markdown-do))"
+    pause: 0.8
+
+  - narrate: "Unfolding"
+    action: eval
+    expr: "(markdown-do)"
+    pause: 0.5
+
+  - narrate: "Following link when no link present"
+    action: eval
+    expr: "(progn (cursor-move 2 0) (markdown-follow-link))"
+    pause: 1.0
+
+cleanup: true
