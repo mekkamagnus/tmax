@@ -32,6 +32,7 @@
         (buffer-insert content)
         (cursor-move 0 0)
         (set-buffer-modified-p false)
+        (major-mode-auto-detect)
         (message (concat "Opened " path)))
       (progn
         (buffer-create path)
@@ -39,5 +40,6 @@
         (cursor-move 0 0)
         (set-buffer-filename path)
         (set-buffer-modified-p false)
+        (major-mode-auto-detect)
         (message (concat "New file " path))))))
 )
