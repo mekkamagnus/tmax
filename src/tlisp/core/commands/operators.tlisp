@@ -1,5 +1,5 @@
 (defmodule editor/commands/operators
-  (export vim-operator-pending-p vim-begin-operator vim-reset-operator vim-operator-total-count vim-delete-line-range vim-delete-to-last-line vim-delete-to-first-line vim-change-line-range vim-operator-apply vim-dispatch-operator-key vim-operator-find-pending-p vim-operator-reset-find-pending vim-operator-apply-find)
+  (export vim-operator-pending-p vim-begin-operator vim-reset-operator vim-operator-total-count vim-delete-line-range vim-delete-to-last-line vim-delete-to-first-line vim-change-line-range vim-operator-apply vim-dispatch-operator-key vim-operator-find-pending-p vim-operator-reset-find-pending vim-operator-apply-find vim-text-object-pending-p vim-operator-reset-text-object-pending vim-operator-begin-text-object vim-dispatch-text-object vim-operator-apply-text-object)
 
 ;; operators.tlisp -- Vim operator-pending state owned by T-Lisp
 
@@ -13,6 +13,14 @@
 ;; target resolves.
 (defvar vim-pending-operator-for-find nil)
 (defvar vim-pending-operator-for-find-count 1)
+
+;; Stashed operator state for operator+text-object combos (diw/daw/ci"/...).
+;; Populated by vim-dispatch-operator-key when i/a arrives while an operator
+;; is pending. The handler routes the next key through vim-dispatch-text-object
+;; which calls vim-operator-apply-text-object.
+(defvar vim-pending-operator-for-text-object nil)
+(defvar vim-pending-operator-for-text-object-count 1)
+(defvar vim-text-object-pending nil)
 
 (defun vim-operator-pending-p ()
   "Return t when an operator is waiting for a motion."
@@ -34,6 +42,9 @@
     (set! vim-operator-g-pending nil)
     (set! vim-pending-operator-for-find nil)
     (set! vim-pending-operator-for-find-count 1)
+    (set! vim-pending-operator-for-text-object nil)
+    (set! vim-pending-operator-for-text-object-count 1)
+    (set! vim-text-object-pending nil)
     nil))
 
 (defun vim-operator-find-pending-p ()
@@ -45,6 +56,18 @@
   (progn
     (set! vim-pending-operator-for-find nil)
     (set! vim-pending-operator-for-find-count 1)
+    nil))
+
+(defun vim-text-object-pending-p ()
+  "Return t when a text-object class key (i/a prefix) is being collected."
+  (not (null vim-text-object-pending)))
+
+(defun vim-operator-reset-text-object-pending ()
+  "Clear stashed operator-for-text-object state."
+  (progn
+    (set! vim-pending-operator-for-text-object nil)
+    (set! vim-pending-operator-for-text-object-count 1)
+    (set! vim-text-object-pending nil)
     nil))
 
 (defun vim-operator-find-combo (operator direction till-p)
@@ -113,6 +136,65 @@ char (already consumed). The stashed operator count multiplies it."
                               (t (editor-set-status (concat "Unsupported operator: " combo))))
                             (if (string= operator "y") nil (undo-commit combo))
                             t))))))))))))))
+
+(defun vim-operator-begin-text-object (key)
+  "Stash the pending operator and enter text-object pending state for KEY.
+KEY must be 'i' or 'a'. The operator and its pre-operator count are preserved
+so vim-operator-apply-text-object can resume after the text-object class
+resolves. vim-reset-operator clears the stash, so it must run BEFORE the
+stash is populated."
+  (let ((operator vim-pending-operator))
+    (let ((operator-count vim-operator-count))
+      (progn
+        (vim-reset-operator)
+        (set! vim-pending-operator-for-text-object operator)
+        (set! vim-pending-operator-for-text-object-count operator-count)
+        (set! vim-text-object-pending key)
+        (editor-set-status (concat (concat operator key) " text-object"))
+        t))))
+
+(defun vim-operator-apply-text-object (class-char)
+  "Apply the stashed operator to a text-object class.
+CLASS-CHAR is the vim text-object identifier: w for word, \" ' ( ) { } [ ]
+< > for paired delimiters, t for tag. Mutations are wrapped in
+undo-begin/undo-commit so `u` restores the buffer."
+  (let ((operator vim-pending-operator-for-text-object))
+    (let ((inner-or-around vim-text-object-pending))
+      (let ((combo (concat (concat operator inner-or-around) class-char)))
+        (progn
+          (vim-operator-reset-text-object-pending)
+          (vim-count-reset)
+          (if (string= operator "y") nil (undo-begin))
+          (cond
+            ((string= combo "diw") (delete-inner-word))
+            ((string= combo "daw") (delete-around-word))
+            ((or (string= combo "di)") (string= combo "di(")) (delete-inner-paren))
+            ((or (string= combo "di}") (string= combo "di{")) (delete-inner-brace))
+            ((or (string= combo "di]") (string= combo "di[")) (delete-inner-bracket))
+            ((or (string= combo "di<") (string= combo "di>")) (delete-inner-angle))
+            ((string= combo "dit") (delete-inner-tag))
+            ((string= combo "ci\"") (change-inner-double-quote))
+            ((string= combo "ca\"") (change-around-double-quote))
+            ((string= combo "ci'") (change-inner-single-quote))
+            ((string= combo "ca'") (change-around-single-quote))
+            ((or (string= combo "ci)") (string= combo "ci(")) (change-inner-paren))
+            ((or (string= combo "ci}") (string= combo "ci{")) (change-inner-brace))
+            (t (editor-set-status (concat "Unsupported text-object combo: " combo))))
+          (if (string= operator "y") nil (undo-commit combo))
+          t)))))
+
+(defun vim-dispatch-text-object (class-char)
+  "Consume CLASS-CHAR as the text-object class for a stashed operator.
+Mirrors vim-dispatch-find-target: handler routes here when
+vim-text-object-pending-p is true."
+  (if (vim-operator-pending-p)
+    (progn
+      (vim-reset-operator)
+      (vim-operator-reset-text-object-pending)
+      (vim-count-reset)
+      (editor-set-status "Operator cancelled")
+      t)
+    (vim-operator-apply-text-object class-char)))
 
 (defun vim-operator-total-count ()
   "Return operator prefix count multiplied by motion count."
@@ -227,5 +309,7 @@ char (already consumed). The stashed operator count multiplies it."
             t)
           (if (or (string= key "f") (string= key "t") (string= key "F") (string= key "T"))
             (vim-operator-begin-find key)
-            (vim-operator-apply key)))))))
+            (if (or (string= key "i") (string= key "a"))
+              (vim-operator-begin-text-object key)
+              (vim-operator-apply key))))))))
 )

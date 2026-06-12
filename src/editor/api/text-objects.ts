@@ -210,7 +210,7 @@ export function changeInnerSingleQuote(
   const lines = content.split("\n");
   const textToDelete = lines[line]!.substring(start + 1, end);
   setDeleteRegister(textToDelete);
-  killRingSave(textToDelete);  // Also save to kill ring (US-1.9.1)
+  registerDelete(textToDelete, false);
 
   // Delete content between quotes (not including quotes) and return new buffer
   return buffer.delete({
@@ -245,7 +245,7 @@ export function changeAroundSingleQuote(
   const lines = content.split("\n");
   const textToDelete = lines[line]!.substring(start, end + 1);
   setDeleteRegister(textToDelete);
-  killRingSave(textToDelete);  // Also save to kill ring (US-1.9.1)
+  registerDelete(textToDelete, false);
 
   // Delete including quotes and return new buffer
   return buffer.delete({
@@ -280,7 +280,7 @@ export function changeInnerDoubleQuote(
   const lines = content.split("\n");
   const textToDelete = lines[line]!.substring(start + 1, end);
   setDeleteRegister(textToDelete);
-  killRingSave(textToDelete);  // Also save to kill ring (US-1.9.1)
+  registerDelete(textToDelete, false);
 
   // Delete content between quotes and return new buffer
   return buffer.delete({
@@ -315,7 +315,7 @@ export function changeAroundDoubleQuote(
   const lines = content.split("\n");
   const textToDelete = lines[line]!.substring(start, end + 1);
   setDeleteRegister(textToDelete);
-  killRingSave(textToDelete);  // Also save to kill ring (US-1.9.1)
+  registerDelete(textToDelete, false);
 
   // Delete including quotes and return new buffer
   return buffer.delete({
@@ -409,7 +409,7 @@ export function deleteInnerParen(
   const lines = content.split("\n");
   const textToDelete = lines[line]!.substring(start + 1, end);
   setDeleteRegister(textToDelete);
-  killRingSave(textToDelete);  // Also save to kill ring (US-1.9.1)
+  registerDelete(textToDelete, false);
 
   // Delete content between parens and return new buffer
   return buffer.delete({
@@ -444,7 +444,7 @@ export function changeInnerParen(
   const lines = content.split("\n");
   const textToDelete = lines[line]!.substring(start + 1, end);
   setDeleteRegister(textToDelete);
-  killRingSave(textToDelete);  // Also save to kill ring (US-1.9.1)
+  registerDelete(textToDelete, false);
 
   // Delete content between parens and return new buffer
   return buffer.delete({
@@ -479,7 +479,7 @@ export function deleteInnerBrace(
   const lines = content.split("\n");
   const textToDelete = lines[line]!.substring(start + 1, end);
   setDeleteRegister(textToDelete);
-  killRingSave(textToDelete);  // Also save to kill ring (US-1.9.1)
+  registerDelete(textToDelete, false);
 
   // Delete content between braces and return new buffer
   return buffer.delete({
@@ -514,7 +514,7 @@ export function changeInnerBrace(
   const lines = content.split("\n");
   const textToDelete = lines[line]!.substring(start + 1, end);
   setDeleteRegister(textToDelete);
-  killRingSave(textToDelete);  // Also save to kill ring (US-1.9.1)
+  registerDelete(textToDelete, false);
 
   // Delete content between braces and return new buffer
   return buffer.delete({
@@ -549,7 +549,7 @@ export function deleteInnerBracket(
   const lines = content.split("\n");
   const textToDelete = lines[line]!.substring(start + 1, end);
   setDeleteRegister(textToDelete);
-  killRingSave(textToDelete);  // Also save to kill ring (US-1.9.1)
+  registerDelete(textToDelete, false);
 
   // Delete content between brackets and return new buffer
   return buffer.delete({
@@ -584,7 +584,7 @@ export function deleteInnerAngle(
   const lines = content.split("\n");
   const textToDelete = lines[line]!.substring(start + 1, end);
   setDeleteRegister(textToDelete);
-  killRingSave(textToDelete);  // Also save to kill ring (US-1.9.1)
+  registerDelete(textToDelete, false);
 
   // Delete content between angle brackets and return new buffer
   return buffer.delete({
@@ -696,7 +696,7 @@ export function deleteInnerTag(
   const lines = content.split("\n");
   const textToDelete = lines[line]!.substring(start, end);
   setDeleteRegister(textToDelete);
-  killRingSave(textToDelete);  // Also save to kill ring (US-1.9.1)
+  registerDelete(textToDelete, false);
 
   // Delete content between tags and return new buffer
   return buffer.delete({

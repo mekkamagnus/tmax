@@ -65,11 +65,18 @@ export async function handleNormalMode(editor: Editor, key: string, normalizedKe
   }
 
   // Route to pending state machine (find/operator awaiting next key).
-  // Order matters: find → operator (the operator-g sub-state lives inside
-  // `vim-dispatch-operator-key` and tracks the second `g` of `dgg` itself).
+  // Order matters: find → text-object → operator (the operator-g sub-state
+  // lives inside `vim-dispatch-operator-key` and tracks the second `g` of
+  // `dgg` itself).
   const findPending = isTruthyResult(exec("(vim-find-pending-p)"));
   if (findPending) {
     await executeCommand(editor, `(vim-dispatch-find-target "${escape(normalizedKey)}")`);
+    clearWhichKey(state, wk);
+    return;
+  }
+  const textObjectPending = isTruthyResult(exec("(vim-text-object-pending-p)"));
+  if (textObjectPending) {
+    await executeCommand(editor, `(vim-dispatch-text-object "${escape(normalizedKey)}")`);
     clearWhichKey(state, wk);
     return;
   }
