@@ -1,0 +1,160 @@
+(defmodule editor/keymaps
+  (export normal-keymap insert-keymap visual-keymap command-keymap
+          current-keymap keymap-ref keymap-set-key keymap-set-key-nested
+          keymap-walk-prefix keymap-prefix-p
+          keymap-all-bindings keymap-prefix-bindings keymap-bindings-list)
+
+(defvar normal-keymap nil)
+(defvar insert-keymap nil)
+(defvar visual-keymap nil)
+(defvar command-keymap nil)
+
+(defun keymap-init (mode-name)
+  "Create a fresh keymap hashmap."
+  (hashmap "mode" mode-name
+           "parent" nil
+           "bindings" (hashmap)
+           "prefix-table" (hashmap)))
+
+(defun current-keymap ()
+  "Return the active keymap for the current editor mode."
+  (let ((m (editor-mode)))
+    (cond
+      ((string= m "normal") normal-keymap)
+      ((string= m "insert") insert-keymap)
+      ((string= m "visual") visual-keymap)
+      ((string= m "command") command-keymap)
+      ((string= m "mx") command-keymap)
+      (t nil))))
+
+(defun keymap-ref (kmap key)
+  "Look up KEY in KMAP's bindings. Returns the command string or nil."
+  (if (or (null kmap) (not (hashmapp kmap)))
+    nil
+    (let ((bindings (hashmap-get kmap "bindings")))
+      (if (hashmapp bindings)
+        (hashmap-get bindings key)
+        nil))))
+
+(defun keymap-set-key (kmap key command)
+  "Bind KEY to COMMAND in KMAP. Multi-key sequences (e.g. \"SPC x f\")
+create nested prefix entries in prefix-table."
+  (if (or (null kmap) (not (hashmapp kmap)))
+    nil
+    (progn
+      ;; Handle multi-key sequences: build nested prefix structure
+      (let ((parts (string-split key " ")))
+        (if (> (length parts) 1)
+          (progn
+            (let ((pt (hashmap-get kmap "prefix-table")))
+              (if (not (hashmapp pt))
+                (keymap-mutable-set! kmap "prefix-table" (hashmap))))
+            (keymap-set-key-nested (hashmap-get kmap "prefix-table") parts command))))
+      ;; Always store in flat bindings
+      (let ((bindings (hashmap-get kmap "bindings")))
+        (if (not (hashmapp bindings))
+          (keymap-mutable-set! kmap "bindings" (hashmap)))
+        (keymap-mutable-set! (hashmap-get kmap "bindings") key command))
+      command)))
+
+(defun keymap-set-key-nested (current parts command)
+  "Recursively walk/create nested prefix sub-keymaps for PARTS and store COMMAND at leaf."
+  (if (= (length parts) 1)
+    (keymap-mutable-set! current (car parts) command)
+    (progn
+      (let ((p (car parts)))
+        (if (not (hashmapp (hashmap-get current p)))
+          (keymap-mutable-set! current p (hashmap)))
+        (keymap-set-key-nested (hashmap-get current p) (cdr parts) command)))))
+
+(defun keymap-walk-prefix (pt parts)
+  "Walk nested prefix-table PT following PARTS. Returns the sub-keymap at the end, or nil."
+  (if (or (not (hashmapp pt)) (null parts))
+    nil
+    (if (= (length parts) 1)
+      (let ((sub (hashmap-get pt (car parts))))
+        (if (hashmapp sub) sub nil))
+      (let ((sub (hashmap-get pt (car parts))))
+        (if (hashmapp sub)
+          (keymap-walk-prefix sub (cdr parts))
+          nil)))))
+
+(defun keymap-prefix-p (kmap key)
+  "Return t if KEY is a prefix in KMAP (has sub-bindings in prefix-table)."
+  (if (or (null kmap) (not (hashmapp kmap)))
+    nil
+    (let ((pt (hashmap-get kmap "prefix-table")))
+      (if (hashmapp pt)
+        (hashmapp (keymap-walk-prefix pt (string-split key " ")))
+        nil))))
+
+(defun keymap-bindings-list (kmap)
+  "Return all bindings in KMAP as ((key command) ...)."
+  (if (or (null kmap) (not (hashmapp kmap)))
+    nil
+    (let ((bindings (hashmap-get kmap "bindings")))
+      (if (hashmapp bindings)
+        (let ((keys (hashmap-keys bindings)))
+          (mapcar (lambda (k)
+                    (list k (hashmap-get bindings k)))
+                  keys))
+        nil))))
+
+(defun keymap-prefix-bindings (kmap prefix)
+  "Return sub-bindings for PREFIX from KMAP's prefix-table as ((full-key command) ...).
+Intermediate prefixes show as \"..prefix..\"."
+  (if (or (null kmap) (not (hashmapp kmap)))
+    nil
+    (let ((pt (hashmap-get kmap "prefix-table")))
+      (if (hashmapp pt)
+        (let ((sub (keymap-walk-prefix pt (string-split prefix " "))))
+          (if (hashmapp sub)
+            (let ((keys (hashmap-keys sub)))
+              (mapcar (lambda (k)
+                        (let ((v (hashmap-get sub k)))
+                          (list (concat prefix " " k)
+                                (if (hashmapp v) "..prefix.." v))))
+                      keys))
+            nil))
+        nil))))
+
+(defun keymap-flatten-prefix (sub prefix)
+  "Recursively flatten nested prefix sub-keymap SUB with PREFIX into ((key command) ...)."
+  (if (not (hashmapp sub))
+    nil
+    (let ((keys (hashmap-keys sub)))
+      (apply 'append
+        (mapcar (lambda (k)
+                  (let ((v (hashmap-get sub k))
+                        (full (concat prefix " " k)))
+                    (if (hashmapp v)
+                      (keymap-flatten-prefix v full)
+                      (list (list full v)))))
+                keys)))))
+
+(defun keymap-all-bindings (kmap)
+  "Return all bindings in KMAP, including from prefix-tables, as ((key command) ...)."
+  (if (or (null kmap) (not (hashmapp kmap)))
+    nil
+    (let ((direct (keymap-bindings-list kmap))
+          (pt (hashmap-get kmap "prefix-table")))
+      (if (hashmapp pt)
+        (let ((prefixes (hashmap-keys pt)))
+          (append direct
+                  (apply 'append
+                    (mapcar (lambda (p)
+                              (let ((sub (hashmap-get pt p)))
+                                (if (hashmapp sub)
+                                  (keymap-flatten-prefix sub p)
+                                  nil)))
+                            prefixes))))
+        direct))))
+
+;; Initialize mode keymaps
+(set! normal-keymap (keymap-init "normal"))
+(set! insert-keymap (keymap-init "insert"))
+(set! visual-keymap (keymap-init "visual"))
+(set! command-keymap (keymap-init "command"))
+
+(provide "keymaps")
+)

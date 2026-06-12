@@ -1,0 +1,177 @@
+name: unified-keymap
+description: "Exercises CHORE-23 unified keymap dispatch — count-aware motions, find-char, operators, scroll prefixes, and which-key popups."
+speed: 1.0
+
+setup:
+  - action: setup_file
+    var: FILE
+    name: unified-keymap-demo.txt
+    content: |
+      The quick brown fox jumps over the lazy dog.
+      Line two has different words to navigate.
+      A third line for cursor motion testing.
+      Fourth line here, with extra characters.
+      Fifth line for scroll and viewport testing.
+      Sixth line continues the buffer.
+      Seventh line, getting longer now.
+      Eighth line near the middle of the file.
+      Ninth line for scroll-cursor-bottom.
+      Tenth line marks the halfway point.
+      Line eleven keeps the buffer growing.
+      Line twelve for testing large motions.
+      Line thirteen near the end.
+      Line fourteen almost done.
+      Line fifteen final line of the buffer.
+
+steps:
+  - section: Open file
+    narrate: "Opening a 15-line buffer to exercise the unified keymap"
+    action: open
+    file: "${FILE}"
+    pause: 1.0
+
+  - section: Count-aware hjkl (keymap bindings)
+    narrate: "Pressing ll — count-aware keymap binding consumes vim-count-consume"
+    action: keys
+    keys: "ll"
+    pause: 0.5
+
+  - narrate: "Pressing jj — keymap binding"
+    action: keys
+    keys: "jj"
+    pause: 0.5
+
+  - narrate: "Pressing 5j — count prefix feeds state machine, then j consumes"
+    action: keys
+    keys: "5j"
+    pause: 0.8
+
+  - narrate: "Pressing 0 to reset to column 0 (also resets horizontal viewport)"
+    action: key
+    key: "0"
+    pause: 0.5
+
+  - section: Find-char state machine (while still on line 0 with many 'o's)
+    narrate: "Returning to top with gg so find-char runs on the long line"
+    action: keys
+    keys: "gg"
+    pause: 0.5
+
+  - narrate: "Pressing fo — find next 'o' forward (find state machine)"
+    action: keys
+    keys: "fo"
+    pause: 0.5
+
+  - narrate: "Pressing ; — repeat find, should find next 'o' in 'over'"
+    action: key
+    key: ";"
+    pause: 0.5
+
+  - narrate: "Pressing ; — repeat, finds 'o' in 'dog'"
+    action: key
+    key: ";"
+    pause: 0.5
+
+  - narrate: "Pressing , — reverse find back to previous 'o'"
+    action: key
+    key: ","
+    pause: 0.5
+
+  - section: Word motions (keymap with count)
+    narrate: "Pressing 0 then w — word-next"
+    action: keys
+    keys: "0w"
+    pause: 0.5
+
+  - narrate: "Pressing 3w — count then word motion"
+    action: keys
+    keys: "3w"
+    pause: 0.8
+
+  - narrate: "Pressing b to go back a word"
+    action: key
+    key: "b"
+    pause: 0.5
+
+  - section: Operators (state machine)
+    narrate: "Pressing G to jump to last line, then yy to yank it"
+    action: keys
+    keys: "Gyy"
+    pause: 0.5
+
+  - narrate: "Pressing p to paste the yanked line below"
+    action: key
+    key: "p"
+    pause: 0.5
+
+  - section: Operator+prefix (dgg)
+    narrate: "Pressing gg to return to top before dgg"
+    action: keys
+    keys: "gg"
+    pause: 0.5
+
+  - narrate: "Pressing dgg — delete-to-first-line via operator-g sub-state"
+    action: keys
+    keys: "dgg"
+    pause: 0.8
+
+  - narrate: "Pressing u to undo"
+    action: key
+    key: "u"
+    pause: 0.5
+
+  - section: Which-key popup — z prefix (keymap)
+    narrate: "Pressing z and pausing — which-key popup for z prefix should appear"
+    action: key
+    key: "z"
+    pause: 1.5
+
+  - narrate: "Pressing Escape to cancel the z prefix popup"
+    action: key
+    key: "Escape"
+    pause: 0.5
+
+  - section: Which-key popup — g prefix (keymap)
+    narrate: "Pressing g and pausing — which-key popup for g prefix should appear"
+    action: key
+    key: "g"
+    pause: 1.5
+
+  - narrate: "Pressing Escape to cancel"
+    action: key
+    key: "Escape"
+    pause: 0.5
+
+  - section: Which-key popup — SPC prefix (keymap)
+    narrate: "Pressing SPC and pausing — which-key popup for SPC prefix should appear"
+    action: key
+    key: " "
+    pause: 1.5
+
+  - narrate: "Pressing Escape to cancel"
+    action: key
+    key: "Escape"
+    pause: 0.5
+
+  - section: Scroll prefixes (keymap-bound z sub-keys)
+    narrate: "Pressing G zb — jump to bottom, align cursor to bottom"
+    action: keys
+    keys: "Gzb"
+    pause: 0.8
+
+  - narrate: "Pressing zt — align cursor to top of viewport"
+    action: keys
+    keys: "zt"
+    pause: 0.5
+
+  - narrate: "Pressing zz — align cursor to center"
+    action: keys
+    keys: "zz"
+    pause: 0.5
+
+  - section: Final state
+    narrate: "Capturing the final screen"
+    action: capture
+    pause: 0.5
+
+cleanup: true

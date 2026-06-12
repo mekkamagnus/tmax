@@ -1,0 +1,38 @@
+(defmodule editor/modes/which-key
+  (export which-key-mode global-which-key-mode)
+
+(define-minor-mode "which-key" "Show available key bindings after prefix pause" "WK" t)
+
+(defun which-key-mode (&optional (arg nil arg-supplied-p))
+  "Toggle which-key mode.
+With no argument, toggle.
+With t, enable.
+With positive number, enable.
+With 0 or negative number, disable."
+  (if (not arg-supplied-p)
+    (progn
+      (if (minor-mode-active-p "which-key")
+        (progn (which-key-disable) (minor-mode-set "which-key" nil))
+        (progn (which-key-enable) (minor-mode-set "which-key" t))))
+    (if (equal arg t)
+      (progn (which-key-enable) (minor-mode-set "which-key" t))
+      (if (numberp arg)
+        (if (> arg 0)
+          (progn (which-key-enable) (minor-mode-set "which-key" t))
+          (progn (which-key-disable) (minor-mode-set "which-key" nil)))
+        (progn (which-key-disable) (minor-mode-set "which-key" nil))))))
+
+(defun global-which-key-mode (&optional (arg nil arg-supplied-p))
+  "Toggle which-key mode globally across all buffers."
+  (if (not arg-supplied-p)
+    (let ((new-state (not (global-minor-mode-active-p "which-key"))))
+      (if new-state (which-key-enable) (which-key-disable))
+      (global-minor-mode-set "which-key" new-state))
+    (if (equal arg t)
+      (progn (which-key-enable) (global-minor-mode-set "which-key" t))
+      (if (numberp arg)
+        (if (> arg 0)
+          (progn (which-key-enable) (global-minor-mode-set "which-key" t))
+          (progn (which-key-disable) (global-minor-mode-set "which-key" nil)))
+        (progn (which-key-disable) (global-minor-mode-set "which-key" nil))))))
+)

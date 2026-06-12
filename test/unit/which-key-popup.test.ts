@@ -15,7 +15,6 @@ import { describe, test, expect, beforeEach, afterEach } from "bun:test";
 import { Editor } from "../../src/editor/editor.ts";
 import { MockTerminal } from "../mocks/terminal.ts";
 import { MockFileSystem } from "../mocks/filesystem.ts";
-import { resetWhichKeyState } from "../../src/editor/utils/which-key.ts";
 
 const TEST_WHICH_KEY_TIMEOUT = 50;
 
@@ -38,7 +37,8 @@ describe("Which-Key Popup (US-1.10.3)", () => {
     terminal = new MockTerminal();
     filesystem = new MockFileSystem();
     editor = new Editor(terminal, filesystem);
-    resetWhichKeyState(TEST_WHICH_KEY_TIMEOUT);
+    // Reset per-instance which-key state with short timeout for testing
+    editor.getWhichKeyHandle().reset(TEST_WHICH_KEY_TIMEOUT);
     await editor.start();
 
     // Create a test buffer
@@ -57,7 +57,7 @@ describe("Which-Key Popup (US-1.10.3)", () => {
   });
 
   afterEach(() => {
-    resetWhichKeyState(1000);
+    editor.getWhichKeyHandle().reset(1000);
   });
 
   describe("Which-Key State Management", () => {
@@ -352,11 +352,11 @@ describe("Which-Key Popup (US-1.10.3)", () => {
 
       const state = editor.getState();
       expect(state.whichKeyActive).toBe(true);
-      // whichKeyPrefix is NOT set for vim prefixes — routing is T-Lisp's job
-      expect(state.whichKeyPrefix).toBe("");
+      // Handler owns prefix tracking — keymap-first dispatch sets whichKeyPrefix.
+      expect(state.whichKeyPrefix).toBe("z");
 
       const bindings = state.whichKeyBindings || [];
-      expect(bindings.length).toBe(3);
+      expect(bindings.length).toBe(7);
       const keys = bindings.map((b: any) => b.key);
       expect(keys).toContain("z t");
       expect(keys).toContain("z z");
@@ -379,10 +379,10 @@ describe("Which-Key Popup (US-1.10.3)", () => {
 
       const state = editor.getState();
       expect(state.whichKeyActive).toBe(true);
-      expect(state.whichKeyPrefix).toBe("");
+      expect(state.whichKeyPrefix).toBe("g");
 
       const bindings = state.whichKeyBindings || [];
-      expect(bindings.length).toBe(3);
+      expect(bindings.length).toBe(7);
     });
 
     test("should activate which-key after typing C-w and pausing", async () => {
@@ -391,7 +391,7 @@ describe("Which-Key Popup (US-1.10.3)", () => {
 
       const state = editor.getState();
       expect(state.whichKeyActive).toBe(true);
-      expect(state.whichKeyPrefix).toBe("");
+      expect(state.whichKeyPrefix).toBe("C-w");
 
       const bindings = state.whichKeyBindings || [];
       expect(bindings.length).toBe(8);
@@ -408,6 +408,108 @@ describe("Which-Key Popup (US-1.10.3)", () => {
       const state = editor.getState();
       expect(state.whichKeyActive).toBe(false);
       expect(state.whichKeyPrefix).toBe("");
+    });
+  });
+
+  describe("Which-key C-g regression (BUG-11)", () => {
+    test("C-g after vim prefix which-key resets vim state for next prefix", async () => {
+      // Press z, wait for which-key, then C-g
+      await editor.handleKey("z");
+      await waitForWhichKey(editor);
+      expect(editor.getState().whichKeyActive).toBe(true);
+
+      await editor.handleKey("\x07"); // C-g
+      expect(editor.getState().whichKeyActive).toBe(false);
+
+      // Press g — should start g prefix, NOT show "Unsupported prefix: zg"
+      await editor.handleKey("g");
+      await waitForWhichKey(editor);
+
+      const state = editor.getState();
+      expect(state.whichKeyActive).toBe(true);
+      expect(state.statusMessage).toContain("Which-key:");
+      expect(state.statusMessage).not.toContain("Unsupported prefix");
+    });
+
+    test("C-g before which-key timeout resets vim state for next prefix", async () => {
+      // Press z, then C-g immediately (before timeout)
+      await editor.handleKey("z");
+      await editor.handleKey("\x07"); // C-g immediately
+
+      // Press g — should start g prefix
+      await editor.handleKey("g");
+      await waitForWhichKey(editor);
+
+      const state = editor.getState();
+      expect(state.whichKeyActive).toBe(true);
+      expect(state.statusMessage).not.toContain("Unsupported prefix");
+    });
+
+    test("C-g after g prefix which-key resets vim state for next prefix", async () => {
+      await editor.handleKey("g");
+      await waitForWhichKey(editor);
+      expect(editor.getState().whichKeyActive).toBe(true);
+
+      await editor.handleKey("\x07"); // C-g
+
+      // Press z — should start z prefix, NOT show "Unsupported prefix: gz"
+      await editor.handleKey("z");
+      await waitForWhichKey(editor);
+
+      const state = editor.getState();
+      expect(state.whichKeyActive).toBe(true);
+      expect(state.statusMessage).not.toContain("Unsupported prefix");
+    });
+  });
+
+  describe("Which-key binding completeness (BUG-11)", () => {
+    test("g prefix which-key shows all 7 bindings", async () => {
+      await editor.handleKey("g");
+      await waitForWhichKey(editor);
+
+      const bindings = editor.getState().whichKeyBindings || [];
+      const keys = bindings.map((b: any) => b.key);
+      expect(keys).toContain("g g");
+      expect(keys).toContain("g t");
+      expect(keys).toContain("g T");
+      expect(keys).toContain("g h");
+      expect(keys).toContain("g O");
+      expect(keys).toContain("g x");
+      expect(keys).toContain("g b");
+      expect(bindings.length).toBe(7);
+    });
+
+    test("z prefix which-key shows all 7 bindings", async () => {
+      await editor.handleKey("z");
+      await waitForWhichKey(editor);
+
+      const bindings = editor.getState().whichKeyBindings || [];
+      const keys = bindings.map((b: any) => b.key);
+      expect(keys).toContain("z t");
+      expect(keys).toContain("z z");
+      expect(keys).toContain("z b");
+      expect(keys).toContain("z l");
+      expect(keys).toContain("z h");
+      expect(keys).toContain("z s");
+      expect(keys).toContain("z e");
+      expect(bindings.length).toBe(7);
+    });
+
+    test("C-w prefix which-key shows all 8 bindings", async () => {
+      await editor.handleKey("\x17"); // C-w
+      await waitForWhichKey(editor);
+
+      const bindings = editor.getState().whichKeyBindings || [];
+      const keys = bindings.map((b: any) => b.key);
+      expect(keys).toContain("C-w s");
+      expect(keys).toContain("C-w v");
+      expect(keys).toContain("C-w w");
+      expect(keys).toContain("C-w q");
+      expect(keys).toContain("C-w +");
+      expect(keys).toContain("C-w -");
+      expect(keys).toContain("C-w >");
+      expect(keys).toContain("C-w <");
+      expect(bindings.length).toBe(8);
     });
   });
 });

@@ -1,5 +1,5 @@
 name: which-key
-description: "Demonstrates which-key popup — type a prefix key, pause, see available bindings."
+description: "Demonstrates SPEC-038 which-key: keymap-based dispatch, popup overlay, live T-Lisp keymap queries."
 speed: 1.0
 
 setup:
@@ -12,26 +12,52 @@ setup:
       Line three of demo file
       Line four of demo file
       Line five of demo file
+      Line six of demo file
+      Line seven of demo file
+      Line eight of demo file
+      Line nine of demo file
+      Line ten of demo file
 
 steps:
   - section: Setup
-    narrate: "Opening a file to demonstrate which-key"
+    narrate: "Opening a file to demonstrate SPEC-038 which-key features"
     action: open
     file: "${FILE}"
     pause: 1.0
 
-  - narrate: "Setting which-key timeout to 500ms for snappier demo"
+  - narrate: "Setting which-key timeout to 400ms for snappier demo"
     action: eval
-    expr: "(which-key-timeout 500)"
+    expr: "(which-key-timeout 400)"
     pause: 0.3
 
-  - section: z prefix (scroll commands)
-    narrate: "Pressing z — wait for which-key popup showing scroll commands"
+  - section: Verify T-Lisp keymap data structures (SPEC-038 Phase 2)
+    narrate: "Checking that keymaps are populated — querying normal-keymap bindings for z prefix"
+    action: eval
+    expr: "(keymap-prefix-p normal-keymap \"z\")"
+    pause: 0.3
+
+  - narrate: "Listing all z-prefix bindings from T-Lisp keymap"
+    action: eval
+    expr: "(keymap-prefix-bindings normal-keymap \"z\")"
+    pause: 0.5
+
+  - narrate: "Listing all g-prefix bindings from T-Lisp keymap"
+    action: eval
+    expr: "(keymap-prefix-bindings normal-keymap \"g\")"
+    pause: 0.5
+
+  - narrate: "Listing all C-w prefix bindings from T-Lisp keymap"
+    action: eval
+    expr: "(keymap-prefix-bindings normal-keymap \"C-w\")"
+    pause: 0.5
+
+  - section: Keymap-based dispatch — z prefix
+    narrate: "Pressing z — wait for which-key popup showing scroll commands (from keymap)"
     action: key
     key: "z"
     pause: 1.5
 
-  - narrate: "Capturing screen — you should see z/t/b bindings in the minibuffer"
+  - narrate: "Capturing screen — popup overlay should show z/t/b/l/h/s/e bindings"
     action: capture
     pause: 1.5
 
@@ -40,13 +66,13 @@ steps:
     key: "C-g"
     pause: 0.5
 
-  - section: g prefix (goto commands)
+  - section: Keymap-based dispatch — g prefix
     narrate: "Pressing g — wait for which-key popup showing goto commands"
     action: key
     key: "g"
     pause: 1.5
 
-  - narrate: "Capturing screen — you should see g/t/T bindings in the minibuffer"
+  - narrate: "Capturing screen — popup overlay should show g/t/T/h/O/x/b bindings"
     action: capture
     pause: 1.5
 
@@ -55,13 +81,13 @@ steps:
     key: "C-g"
     pause: 0.5
 
-  - section: C-w prefix (window commands)
+  - section: Keymap-based dispatch — C-w prefix
     narrate: "Pressing C-w — wait for which-key popup showing window commands"
     action: key
     key: "C-w"
     pause: 1.5
 
-  - narrate: "Capturing screen — you should see window management bindings"
+  - narrate: "Capturing screen — popup overlay should show s/v/w/q/+/-/>/<"
     action: capture
     pause: 1.5
 
@@ -70,40 +96,121 @@ steps:
     key: "C-g"
     pause: 0.5
 
-  - section: Quick typing skips popup
-    narrate: "Now pressing z then t quickly — popup should NOT appear, scroll executes"
+  - section: Quick typing skips popup (no pause)
+    narrate: "Pressing z then t quickly — popup should NOT appear, scroll executes via keymap"
     action: keys
     keys: "zt"
     pause: 1.0
 
-  - narrate: "Capturing screen — cursor line scrolled to top, no popup"
+  - narrate: "Capturing screen — line scrolled to top, no popup"
     action: capture
     pause: 1.0
 
-  - narrate: "Resetting scroll position"
+  - narrate: "Centering with zz via keymap dispatch"
     action: keys
     keys: "zz"
     pause: 0.5
 
-  - section: Legacy keymap prefix (C-c)
-    narrate: "Setting up a C-c binding to test legacy which-key path"
+  - section: Execute z commands via keymap
+    narrate: "Pressing zb — scroll line to bottom via keymap lookup"
+    action: keys
+    keys: "zb"
+    pause: 0.5
+
+  - narrate: "Re-centering with zz"
+    action: keys
+    keys: "zz"
+    pause: 0.5
+
+  - section: Execute g commands via keymap
+    narrate: "Pressing gg — jump to first line via keymap lookup"
+    action: keys
+    keys: "gg"
+    pause: 0.5
+
+  - narrate: "Capturing screen — cursor on line 1"
+    action: capture
+    pause: 0.5
+
+  - narrate: "Pressing G — jump to last line"
+    action: key
+    key: "G"
+    pause: 0.5
+
+  - narrate: "Capturing screen — cursor on line 10"
+    action: capture
+    pause: 0.5
+
+  - section: C-w command execution via keymap
+    narrate: "Pressing C-w s — split window below via keymap lookup"
+    action: keys
+    keys: "C-ws"
+    pause: 0.8
+
+  - narrate: "Capturing screen — should show two windows"
+    action: capture
+    pause: 1.0
+
+  - narrate: "Pressing C-w q — close the split"
+    action: keys
+    keys: "C-wq"
+    pause: 0.5
+
+  - section: Live keymap — add binding at runtime (SPEC-038 Phase 3)
+    narrate: "Adding a new g-n binding at runtime via T-Lisp keymap"
     action: eval
-    expr: '(key-bind "C-c c" "cursor-move" "normal")'
+    expr: '(key-bind "g n" "(jump-to-line 5)" "normal")'
     pause: 0.3
 
-  - narrate: "Pressing C-c — wait for legacy which-key popup"
+  - narrate: "Verifying new binding is in keymap immediately"
+    action: eval
+    expr: "(keymap-prefix-bindings normal-keymap \"g\")"
+    pause: 0.5
+
+  - narrate: "Pressing g — which-key should now show the new g n binding"
     action: key
-    key: "C-c"
+    key: "g"
     pause: 1.5
 
-  - narrate: "Capturing screen — legacy which-key bindings"
+  - narrate: "Capturing screen — popup should include 'n : (jump-to-line 5)'"
     action: capture
     pause: 1.5
 
-  - narrate: "Pressing C-g to cancel"
+  - narrate: "Executing the new binding — g then n"
     action: key
     key: "C-g"
+    pause: 0.3
+
+  - narrate: "Quick-typing gn to execute the new binding"
+    action: keys
+    keys: "gn"
     pause: 0.5
+
+  - narrate: "Capturing screen — cursor should be on line 5"
+    action: capture
+    pause: 0.5
+
+  - section: C-g resets vim prefix state (BUG-11 regression test)
+    narrate: "Pressing z, waiting for popup, then C-g"
+    action: key
+    key: "z"
+    pause: 1.0
+
+  - action: key
+    key: "C-g"
+    pause: 0.3
+
+  - narrate: "Now pressing g — should start g prefix cleanly, no 'Unsupported prefix: zg'"
+    action: key
+    key: "g"
+    pause: 1.5
+
+  - action: capture
+    pause: 1.0
+
+  - action: key
+    key: "C-g"
+    pause: 0.3
 
   - section: Restore defaults
     narrate: "Restoring default which-key timeout"

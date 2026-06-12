@@ -13,6 +13,7 @@ import { tokenizeTerminalInput } from "../frontend/render/input.ts";
 import { renderTabBarAnsi } from "../frontend/render/tab-bar.ts";
 import type { EditorState } from "../core/types.ts";
 import { renderMinibuffer } from "../frontend/render/minibuffer.ts";
+import { computeWhichKeyPopup, renderWhichKeyOverlay } from "../frontend/render/which-key-overlay.ts";
 import { computeHighlightSpans } from "../syntax/highlight-buffer.ts";
 import { Either } from "../utils/task-either.ts";
 
@@ -81,6 +82,16 @@ function render(state: EditorState) {
 
   writeAt(height - 1, 0, renderStatusLine(state, width));
 
+  // Which-key popup overlay on bottom of buffer area
+  if (state.whichKeyActive && state.whichKeyBindings && state.whichKeyBindings.length > 0) {
+    const prefix = state.whichKeyPrefix || "";
+    const maxPopupRows = Math.max(1, bufferHeight - 2);
+    const popup = computeWhichKeyPopup(state.whichKeyBindings, prefix, width, maxPopupRows);
+    const overlayLines = renderWhichKeyOverlay(popup, width);
+    const overlayStart = tabBarHeight + bufferHeight - overlayLines.length;
+    overlayLines.forEach((line, i) => writeAt(overlayStart + i, 0, line));
+  }
+
   if (minibuffer) {
     moveTo(height - 1 - minibuffer.lines.length + minibuffer.cursorRow, minibuffer.cursorColumn);
   } else {
@@ -102,6 +113,7 @@ Usage: tmax-tui [options]
 
 Options:
   -s, --socket PATH   Custom socket path
+  --workspace NAME    Connect to workspace
   -h, --help          Show this help message
 
 Requires a running tmax daemon. Start one with:
@@ -111,12 +123,15 @@ Requires a running tmax daemon. Start one with:
   }
 
   let socketPath: string | undefined;
+  let workspaceId: string | undefined;
   const socketIndex = args.indexOf("-s");
   if (socketIndex !== -1) socketPath = args[socketIndex + 1];
   const socketArgIndex = args.indexOf("--socket");
   if (socketArgIndex !== -1) socketPath = args[socketArgIndex + 1];
+  const workspaceIndex = args.indexOf("--workspace");
+  if (workspaceIndex !== -1) workspaceId = args[workspaceIndex + 1];
 
-  const remote = new RemoteEditor(socketPath);
+  const remote = new RemoteEditor(socketPath, workspaceId);
 
   try {
     await remote.start();
