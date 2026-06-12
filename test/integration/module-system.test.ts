@@ -46,13 +46,13 @@ describe("Module system integration", () => {
 
     expect(expectRight(interpreter.execute('(module-loaded? "editor/commands/vim-dispatch")')).value).toBe(true);
 
-    const describe = expectRight(interpreter.execute('(describe-function "vim-dispatch-key")'));
+    const describe = expectRight(interpreter.execute('(describe-function "vim-reset-pending")'));
     const describeValues = describe.value as Array<{ value: unknown }>;
     expect(describeValues[1]?.value).toContain("from module editor/commands/vim-dispatch");
 
-    const apropos = expectRight(interpreter.execute('(apropos-command "vim-dispatch")'));
+    const apropos = expectRight(interpreter.execute('(apropos-command "vim-reset")'));
     const names = (apropos.value as Array<{ value: Array<{ value: unknown }> }>).map((row) => row.value[0]?.value);
-    expect(names).toContain("vim-dispatch-key");
+    expect(names).toContain("vim-reset-pending");
 
     await editor.handleKey(" ");
     await editor.handleKey(";");

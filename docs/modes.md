@@ -143,14 +143,42 @@ Pure data format. No statements, no comments (in strict JSON). Indent = 2 spaces
 
 Whitespace-sensitive indent. CI/CD configs (GitHub Actions, GitLab CI), k8s manifests, tmax demo playbooks. Indent engine must treat leading whitespace as semantic, not cosmetic.
 
-## shell-mode
+## shell-mode (file editing)
 **Status:** ❌ missing · **Spec:** none
 
 | Freq | Complexity | Template | Blockers |
 |------|-----------|----------|----------|
 | high | S | typescript-mode | none |
 
-Bash/zsh. `if`/`fi`, `case`/`esac`, `do`/`done` indent rules. Comments with `#`. Note: this is the *file editing* mode, not an interactive shell — that's a separate Phase 3 feature.
+Bash/zsh. `if`/`fi`, `case`/`esac`, `do`/`done` indent rules. Comments with `#`. This is the *file editing* mode for `.sh`/`.bash`/`.zsh` files. For the interactive terminal emulator, see [shell-mode (interactive)](#shell-mode-interactive) below.
+
+---
+
+## Special Modes
+
+Modes that don't follow the per-buffer major-mode pattern. These are workspace-level or system-level modes.
+
+### shell-mode (interactive)
+**Status:** ❌ missing · **RFC:** [RFC-014A: shell-mode](../rfcs/RFC-014A-shell-mode.md)
+
+Interactive terminal emulator running inside tmax windows. `M-x shell` opens a PTY-backed shell with full ANSI color passthrough. Not a per-buffer major mode — a window type that hosts any terminal application (shells, test runners, REPLs, AI agents).
+
+| Freq | Complexity | Template | Blockers |
+|------|-----------|----------|----------|
+| high | L | scratch | RFC-014 workspace system (window type extension, PTY management) |
+
+**Related:** [shell-mode (file editing)](#shell-mode-file-editing) — syntax highlighting for `.sh` files · [RFC-014: Workspace System](../rfcs/RFC-014-workspace-system.md) · [RFC-014B: project-mode](../rfcs/RFC-014B-project-mode.md) (project root as shell CWD)
+
+### project-mode
+**Status:** ❌ missing · **RFC:** [RFC-014B: project-mode](../rfcs/RFC-014B-project-mode.md)
+
+Workspace-level mode that activates when a project root is detected or bound. Provides project-aware file discovery (`SPC p f`), project-wide search (`SPC p s`), `.tmax.project` config parsing, and workspace-project binding persistence. Not a per-buffer mode — activates at the workspace level.
+
+| Freq | Complexity | Template | Blockers |
+|------|-----------|----------|----------|
+| high | M | scratch | RFC-014 workspace system (workspace-project binding, serialization) |
+
+**Related:** [RFC-014: Workspace System](../rfcs/RFC-014-workspace-system.md) · [RFC-014A: shell-mode](../rfcs/RFC-014A-shell-mode.md) (CWD defaults to project root)
 
 ## toml-mode
 **Status:** ❌ missing · **Spec:** none

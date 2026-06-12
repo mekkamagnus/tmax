@@ -16,7 +16,7 @@ describe("Lisp-owned command libraries", () => {
       "query-replace",
       "indent-current-line",
       "dired",
-      "vim-dispatch-key",
+      "vim-operator-apply",
       "split-window-below",
       "split-window-right",
       "other-window",

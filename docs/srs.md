@@ -630,6 +630,37 @@ Five modes: **normal**, **insert**, **visual**, **command**, **M-x**
 - ✅ Given I enter "save.*buffer", then I should see commands matching both words
 - 📋 Given apropos results, when I select a command, then I should view its documentation
 
+#### US-1.21.1: Horizontal Scrolling
+**As a** developer  
+**I want** to scroll the viewport horizontally using `zl`, `zh`, `zs`, `ze`  
+**So that** I can read and edit long lines that extend past the terminal width
+
+**Status:** ✅ Implemented (`src/frontend/render/buffer-lines.ts`, `src/editor/api/jump-ops.ts`, `src/tlisp/core/commands/motions.tlisp`)
+
+**Acceptance Criteria:**
+- ✅ Given a line longer than the terminal width, when I press `zl`, then the viewport scrolls right by half screen width and `«` appears at the left edge
+- ✅ Given a scrolled viewport, when I press `zh`, then the viewport scrolls left by half screen width (clamped to 0)
+- ✅ Given I press `zs`, then the viewport scrolls so the cursor column is at the left edge
+- ✅ Given I press `ze`, then the viewport scrolls so the cursor column is at the right edge
+- ✅ Given the cursor moves past the right edge of the viewport, when I move the cursor right, then the viewport auto-scrolls to keep the cursor visible
+- ✅ Given the cursor moves past the left edge of the viewport, when I move the cursor left, then the viewport auto-scrolls to keep the cursor visible
+- ✅ Given which-key is active with `z` prefix, when the popup shows, then `l`, `h`, `s`, `e` bindings are listed
+
+#### US-1.21.2: Word Wrap Display
+**As a** developer  
+**I want** to toggle word wrap so long lines display across multiple screen rows  
+**So that** I can read all content without horizontal scrolling
+
+**Status:** ✅ Implemented (`src/frontend/render/buffer-lines.ts`, `src/editor/api/minor-mode-ops.ts`)
+
+**Acceptance Criteria:**
+- ✅ Given `auto-fill-mode` is active, when I view a long line, then it wraps across multiple screen rows instead of truncating
+- ✅ Given word wrap is active, when I press `j`/`k`, then cursor moves by logical line (not screen row)
+- ✅ Given word wrap is active, when the cursor is on a wrapped line, then the cursor renders at the correct screen row and column
+- ✅ Given word wrap is toggled on, then `viewportLeft` is forced to 0 and horizontal scroll is disabled
+- ✅ Given word wrap is toggled off, then long lines truncate with `...` as before (no regression)
+- ✅ Given CJK characters in a long line, when word wrap is active, then characters wrap without splitting mid-character
+
 ---
 
 ### 3.2 Phase 2: Extensibility

@@ -14,6 +14,7 @@ Usage:
 import argparse
 import os
 import re
+import shlex
 import subprocess
 import sys
 import tempfile
@@ -219,25 +220,25 @@ def execute_step(step, client, variables, speed, dry_run=False):
 
     elif action == "key":
         key = template(step["key"], variables)
-        out, rc = run_cmd(f"{client} --key {subprocess.list2cmdline([key])}")
+        out, rc = run_cmd(f"{client} --key {shlex.quote(key)}")
         if rc != 0:
             error_occurred = True
 
     elif action == "keys":
         sequence = template(step["keys"], variables)
-        out, rc = run_cmd(f"{client} --keys {subprocess.list2cmdline([sequence])}")
+        out, rc = run_cmd(f"{client} --keys {shlex.quote(sequence)}")
         if rc != 0:
             error_occurred = True
 
     elif action == "insert":
         text = template(step["text"], variables)
-        out, rc = run_cmd(f"{client} --insert {subprocess.list2cmdline([text])}")
+        out, rc = run_cmd(f"{client} --insert {shlex.quote(text)}")
         if rc != 0:
             error_occurred = True
 
     elif action == "command":
         name = template(step["name"], variables)
-        out, rc = run_cmd(f"{client} --command {subprocess.list2cmdline([name])}")
+        out, rc = run_cmd(f"{client} --command {shlex.quote(name)}")
         if rc != 0:
             error_occurred = True
 

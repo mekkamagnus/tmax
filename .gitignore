@@ -39,6 +39,7 @@ coverage/
 
 # Generated HTML
 *.html
+!docs/rfcs/*.html
 
 # Test output
 test-*.txt

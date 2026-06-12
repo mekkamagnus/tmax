@@ -753,6 +753,31 @@ export function registerStdlibFunctions(interpreter: TLispInterpreter): void {
   }));
 
   /**
+   * Mutate a hashmap in place (for keymap bindings performance)
+   * Usage: (keymap-mutable-set! hashmap key value)
+   * Mutates the hashmap's internal map directly instead of copying
+   */
+  interpreter.defineBuiltin("keymap-mutable-set!", raw((args: TLispValue[]) => {
+    if (args.length !== 3) {
+      throw new Error("keymap-mutable-set! requires exactly 3 arguments: hashmap, key, value");
+    }
+
+    const [hashmapArg, keyArg, valueArg] = args as [TLispValue, TLispValue, TLispValue];
+
+    if (!hashmapArg || !isHashmap(hashmapArg)) {
+      throw new Error("keymap-mutable-set! first argument must be a hashmap");
+    }
+
+    if (!keyArg || keyArg.type !== "string") {
+      throw new Error("keymap-mutable-set! second argument must be a string key");
+    }
+
+    const key = keyArg.value as string;
+    hashmapArg.value.set(key, valueArg);
+    return hashmapArg;
+  }));
+
+  /**
    * Set a variable in the current environment
    * Usage: (setq variable-name value)
    * Sets the variable to the given value and returns the value

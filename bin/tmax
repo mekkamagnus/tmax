@@ -21,6 +21,10 @@ Usage: tmax [options] [file]
 
 Options:
   --daemon       Start daemon only (no TUI frame)
+  -w, --workspace NAME  Open/connect to workspace NAME
+  -w new:NAME    Create workspace NAME, then connect to it
+  --workspaces   List workspaces
+  --workspace-kill NAME  Delete a workspace
   -e EXPR        Evaluate T-Lisp expression (like emacsclient -e)
   --stop         Stop the running daemon
   --capture      Capture current frame as ANSI (colors preserved)
@@ -106,11 +110,18 @@ DAEMON_ONLY=false
 EVAL_EXPR=""
 STOP=false
 CAPTURE=""
+WORKSPACE=""
+WORKSPACES=false
+WORKSPACE_KILL=""
 FILES=()
 
 for arg in "$@"; do
   case "$arg" in
     --daemon)       DAEMON_ONLY=true ;;
+    -w)             shift_mode=workspace ;;
+    --workspace)    shift_mode=workspace ;;
+    --workspaces)   WORKSPACES=true ;;
+    --workspace-kill) shift_mode=workspace_kill ;;
     -e)             shift_mode=eval ;;
     --stop)         STOP=true ;;
     --capture)      CAPTURE=ansi ;;
@@ -121,12 +132,30 @@ for arg in "$@"; do
       if [ "${shift_mode:-}" = "eval" ]; then
         EVAL_EXPR="$arg"
         shift_mode=""
+      elif [ "${shift_mode:-}" = "workspace" ]; then
+        WORKSPACE="$arg"
+        shift_mode=""
+      elif [ "${shift_mode:-}" = "workspace_kill" ]; then
+        WORKSPACE_KILL="$arg"
+        shift_mode=""
       else
         FILES+=("$arg")
       fi
       ;;
   esac
 done
+
+# I6: error on flags that expect an argument but didn't get one
+if [ "${shift_mode:-}" = "workspace" ]; then
+  echo "Error: -w requires a workspace name argument" >&2
+  exit 1
+elif [ "${shift_mode:-}" = "workspace_kill" ]; then
+  echo "Error: --workspace-kill requires a workspace name argument" >&2
+  exit 1
+elif [ "${shift_mode:-}" = "eval" ]; then
+  echo "Error: -e requires an expression argument" >&2
+  exit 1
+fi
 
 # Handle --stop
 if [ "$STOP" = true ]; then
@@ -155,7 +184,22 @@ fi
 # Handle -e (eval only, no TUI)
 if [ -n "$EVAL_EXPR" ]; then
   ensure_daemon
-  exec "$CLIENT" --eval "$EVAL_EXPR"
+  if [ -n "$WORKSPACE" ]; then
+    exec "$CLIENT" --workspace "$WORKSPACE" --eval "$EVAL_EXPR"
+  else
+    exec "$CLIENT" --eval "$EVAL_EXPR"
+  fi
+fi
+
+# Handle workspace management commands
+if [ "$WORKSPACES" = true ]; then
+  ensure_daemon
+  exec "$CLIENT" -s "$SOCKET" --workspaces
+fi
+
+if [ -n "$WORKSPACE_KILL" ]; then
+  ensure_daemon
+  exec "$CLIENT" -s "$SOCKET" --workspace-kill "$WORKSPACE_KILL"
 fi
 
 # Handle --capture / --capture-html
@@ -179,4 +223,26 @@ fi
 
 # Default: single-process editor with embedded server
 # (like running emacs — the editor IS the process, socket is in-process)
+if [ -n "$WORKSPACE" ]; then
+  ensure_daemon
+  if [[ "$WORKSPACE" == new:* ]]; then
+    NEW_WORKSPACE="${WORKSPACE#new:}"
+    if ! "$CLIENT" -s "$SOCKET" --workspace-new "$NEW_WORKSPACE" >/dev/null 2>&1; then
+      echo "Error: Failed to create workspace '$NEW_WORKSPACE'" >&2
+      exit 1
+    fi
+    WORKSPACE="$NEW_WORKSPACE"
+  fi
+  exec "$CLIENT" -s "$SOCKET" --workspace "$WORKSPACE" --tui
+fi
+
+# C6: try last-workspace persistence when no -w flag given
+LAST_WS_FILE="$HOME/.config/tmax/last-workspace"
+if [ -z "$WORKSPACE" ] && [ -f "$LAST_WS_FILE" ] && is_running >/dev/null 2>&1; then
+  LAST_WS=$(cat "$LAST_WS_FILE" 2>/dev/null)
+  if [ -n "$LAST_WS" ]; then
+    exec "$CLIENT" -s "$SOCKET" --workspace "$LAST_WS" --tui
+  fi
+fi
+
 cd "$PROJECT_DIR" && exec bun src/main.tsx "${FILES[@]}"

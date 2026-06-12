@@ -4,6 +4,27 @@ Records of significant architectural decisions. Each ADR describes the context, 
 
 Ordered most-recent first (highest ADR number = most recent decision). Topic groupings preserved within each section.
 
+## Recent — Unified Dispatch, Operator+Find Chaining (ADR 0090-0091)
+
+| File | Decision | Related |
+|------|----------|---------|
+| [ADR-0091-unified-keymap-dispatch.md](ADR-0091-unified-keymap-dispatch.md) | Unified keymap-first normal-mode dispatch | [CHORE-23](../specs/CHORE-23-unify-key-dispatch.md), [ADR-0082](ADR-0082-vim-count-aware-dispatch.md) |
+| [ADR-0090-operator-find-char-chaining.md](ADR-0090-operator-find-char-chaining.md) | Operator + find-char chaining via stash-and-resume | [SPEC-041](../specs/SPEC-041-operator-find-char.md), [ADR-0091](ADR-0091-unified-keymap-dispatch.md) |
+
+## Recent — Workspace, Vim Counts, Markdown, Viewport (ADR 0081-0089)
+
+| File | Decision | Related |
+|------|----------|---------|
+| [ADR-0089-tmax-cli-workspace-management.md](ADR-0089-tmax-cli-workspace-management.md) | tmax CLI workspace management flags | [ADR-0081](ADR-0081-workspace-system.md) |
+| [ADR-0088-demo-runner-posix-shell-escaping.md](ADR-0088-demo-runner-posix-shell-escaping.md) | Demo runner POSIX shell escaping | — |
+| [ADR-0087-keymap-mutable-set.md](ADR-0087-keymap-mutable-set.md) | Keymap mutable set for performance | [ADR-0006](ADR-0006-tlisp-keymap-data-structures.md) |
+| [ADR-0086-which-key-per-instance-state.md](ADR-0086-which-key-per-instance-state.md) | Which-key per-instance state | [ADR-0047](ADR-0047-which-key-popup.md), [ADR-0081](ADR-0081-workspace-system.md) |
+| [ADR-0085-horizontal-viewport-scrolling.md](ADR-0085-horizontal-viewport-scrolling.md) | Horizontal viewport scrolling infrastructure | [SPEC-037](../specs/SPEC-037-horizontal-viewport.md) |
+| [ADR-0084-undo-pre-edit-cursor-restore.md](ADR-0084-undo-pre-edit-cursor-restore.md) | Undo pre-edit cursor restore | [ADR-0025](ADR-0025-undo-redo.md) |
+| [ADR-0083-markdown-mode-commands.md](ADR-0083-markdown-mode-commands.md) | Markdown mode commands and navigation | [ADR-0078](ADR-0078-tlisp-special-forms-extensions.md) |
+| [ADR-0082-vim-count-aware-dispatch.md](ADR-0082-vim-count-aware-dispatch.md) | Vim count-aware key bindings and dispatch | [ADR-0026](ADR-0026-count-prefix.md) |
+| [ADR-0081-workspace-system.md](ADR-0081-workspace-system.md) | Workspace system (SPEC-040) | [ADR-0058](ADR-0058-frame-based-daemon-client.md) |
+
 ## Recent — Architecture, Language, and Packaging (ADR 0077-0079)
 
 | File | Decision | Related |

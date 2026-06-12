@@ -33,7 +33,7 @@ describe("Core Binding Files Loading", () => {
     // Real normal.tlisp registers h for normal mode; visual.tlisp also registers h for visual mode
     const normalH = hMappings?.find(m => m.mode === "normal");
     expect(normalH).toBeDefined();
-    expect(normalH!.command).toBe("(cursor-move (cursor-line) (- (cursor-column) 1))");
+    expect(normalH!.command).toBe("(cursor-move (cursor-line) (- (cursor-column) (vim-count-consume 1)))");
     expect(normalH!.mode).toBe("normal");
   });
 

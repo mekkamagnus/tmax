@@ -81,7 +81,7 @@ describe("T-Lisp module system", () => {
     editor.createBuffer("scratch", "abc\n");
     await editor.start();
 
-    const result = editor.getInterpreter().execute('(describe-function "vim-dispatch-key")');
+    const result = editor.getInterpreter().execute('(describe-function "vim-reset-pending")');
 
     expect(result._tag).toBe("Right");
     if (result._tag === "Left") return;
