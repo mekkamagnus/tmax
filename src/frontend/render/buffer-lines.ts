@@ -491,7 +491,6 @@ export function renderBufferLines(
     const gutterCfg = gutterConfigFromState(state.activeMinorModes, state.config);
     const gw = gutterDisplayWidth(getLineCount(state), gutterCfg);
     const cw = Math.max(1, width - gw);
-    const effectiveViewportLeft = wordWrap ? 0 : getVisibleViewportLeft(state, cw);
 
     if (wordWrap) {
       return renderSingleWindowWrapped(
@@ -515,7 +514,7 @@ export function renderBufferLines(
       state.cursorPosition.column,
       getLineCount(state),
       getVisibleViewportTop(state, height),
-      effectiveViewportLeft,
+      viewportLeft,
       width,
       height,
       gutterCfg,

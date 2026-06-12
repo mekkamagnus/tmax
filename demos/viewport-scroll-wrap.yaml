@@ -1,0 +1,118 @@
+name: viewport-scroll-wrap
+description: "Demonstrates horizontal scrolling (zl/zh/zs/ze) and word wrap display (auto-fill-mode)."
+speed: 1.0
+
+setup:
+  - action: setup_file
+    var: LONGFILE
+    name: long-lines-demo.txt
+    content: |
+      This is a short line.
+      This is a much much much much much much much much much much much much much much much much much much much much much much much much much much much much much much longer line that extends well past 80 columns and demonstrates horizontal scrolling capabilities in tmax.
+      Another short line.
+      Here is another extremely long line of text that goes on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on and on — this one is for wrapping.
+      Short again.
+      The quick brown fox jumped over the lazy dog. The quick brown fox jumped over the lazy dog. The quick brown fox jumped over the lazy dog. The quick brown fox jumped over the lazy dog. The quick brown fox jumped over the lazy dog.
+
+steps:
+  - section: Open file with long lines
+    narrate: "Opening a file with several long lines that exceed terminal width"
+    action: open
+    file: "${LONGFILE}"
+    pause: 1.5
+
+  - narrate: "Notice the long line is truncated with '...' at the right edge"
+    action: capture
+    pause: 1.0
+
+  - section: Horizontal scrolling with z prefix
+    narrate: "Pressing zl to scroll viewport right by half screen"
+    action: keys
+    keys: "zl"
+    pause: 1.0
+
+  - narrate: "The viewport shifts right — notice the « indicator on the left"
+    action: capture
+    pause: 1.0
+
+  - narrate: "Scrolling further right with another zl"
+    action: keys
+    keys: "zl"
+    pause: 1.0
+
+  - narrate: "Now scrolling back left with zh"
+    action: keys
+    keys: "zh"
+    pause: 1.0
+
+  - narrate: "And left again — viewport returns toward start"
+    action: keys
+    keys: "zh"
+    pause: 1.0
+
+  - section: Cursor-aligned scrolling
+    narrate: "Going to line 2 — the longest line"
+    action: keys
+    keys: "2G"
+    pause: 0.5
+
+  - narrate: "Pressing ze to scroll so cursor is at right edge"
+    action: keys
+    keys: "ze"
+    pause: 1.0
+
+  - narrate: "Pressing zs to scroll so cursor is at left edge"
+    action: keys
+    keys: "zs"
+    pause: 1.0
+
+  - section: Which-key discovery
+    narrate: "Pressing z and waiting — which-key shows all z-prefix bindings including l, h, s, e"
+    action: key
+    key: "z"
+    pause: 1.5
+
+  - narrate: "Cancelling with Escape"
+    action: key
+    key: "Escape"
+    pause: 0.5
+
+  - section: Word wrap display
+    narrate: "Going back to the top of the file"
+    action: keys
+    keys: "gg"
+    pause: 0.5
+
+  - narrate: "Enabling auto-fill-mode to activate word wrap display"
+    action: eval
+    expr: "(auto-fill-mode t)"
+    pause: 1.0
+
+  - narrate: "Long lines now wrap across multiple screen rows instead of truncating"
+    action: capture
+    pause: 1.5
+
+  - narrate: "Moving down with j — cursor moves by logical line, skipping wrapped rows"
+    action: key
+    key: "j"
+    pause: 0.5
+
+  - action: key
+    key: "j"
+    pause: 0.5
+
+  - narrate: "Notice the status line shows 'Fill' lighter — word wrap is active"
+    action: capture
+    pause: 1.0
+
+  - section: Toggle wrap off
+    narrate: "Disabling auto-fill-mode — back to truncation with '...'"
+    action: eval
+    expr: "(auto-fill-mode 0)"
+    pause: 1.0
+
+  - narrate: "Long lines truncate again — word wrap off"
+    action: capture
+    pause: 1.0
+
+cleanup: true

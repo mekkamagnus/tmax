@@ -148,7 +148,9 @@ class FunctionalGapBuffer {
    * Convert buffer to string
    */
   toString(): Either<string, string> {
-    return this.substring(0, this.length());
+    const beforeGap = this.buffer.slice(0, this.gapStart).join("");
+    const afterGap = this.buffer.slice(this.gapEnd).join("");
+    return Either.right(beforeGap + afterGap);
   }
 
   /**
@@ -256,7 +258,7 @@ export class FunctionalTextBufferImpl implements FunctionalTextBuffer {
    * Get the entire buffer content
    */
   getContent(): BufferResult<string> {
-    return this.gapBuffer.toString();
+    return Either.right(this.lines.join("\n"));
   }
 
   /**
@@ -527,4 +529,3 @@ export const BufferUtils = {
 
 // Export utils with functional prefix to avoid conflicts
 export { BufferUtils as FunctionalBufferUtils };
-
