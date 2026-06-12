@@ -451,4 +451,151 @@ describe("Undo/Redo Operations", () => {
       expect(savedColumn).toBe(10);
     });
   });
+
+  describe("BUG-13: pre-edit cursor restoration", () => {
+    test("undo restores the pre-edit cursor of the undone edit (cross-edit)", () => {
+      // Simulate the bug repro: edit1 (post-edit cursor at 5,10),
+      // cursor moves to (15,20), edit2 applied (pre-edit cursor was 15,20),
+      // then undo edit2 — cursor should return to (15,20), NOT (5,10).
+      let savedLine = 0;
+      let savedColumn = 0;
+
+      const ops = createUndoRedoOps(
+        () => currentBuffer,
+        (buffer) => { currentBuffer = buffer; },
+        () => savedLine,
+        (line) => { savedLine = line; },
+        () => savedColumn,
+        (col) => { savedColumn = col; },
+        () => currentStatusMessage,
+        (msg) => { currentStatusMessage = msg; }
+      );
+
+      const beginFunc = ops.get("undo-begin")!;
+      const commitFunc = ops.get("undo-commit")!;
+      const undoFunc = ops.get("undo")!;
+
+      // Edit 1: pre-edit cursor at (0,0); mutate buffer; post-edit cursor at (5,10)
+      beginFunc([]);
+      const edit1 = new MockBuffer("Edit 1\nLine 2\nLine 3") as FunctionalTextBuffer;
+      currentBuffer = edit1;
+      savedLine = 5;
+      savedColumn = 10;
+      commitFunc([{ type: 'string', value: 'edit1' }]);
+
+      // Cursor moves to (15,20) between edits (not an edit)
+      savedLine = 15;
+      savedColumn = 20;
+
+      // Edit 2: pre-edit cursor at (15,20); mutate buffer; post-edit cursor at (30,40)
+      beginFunc([]);
+      const edit2 = new MockBuffer("Edit 2\nLine 2\nLine 3") as FunctionalTextBuffer;
+      currentBuffer = edit2;
+      savedLine = 30;
+      savedColumn = 40;
+      commitFunc([{ type: 'string', value: 'edit2' }]);
+
+      // Undo edit2 — cursor should return to where it was before edit2 was applied
+      undoFunc([]);
+
+      expect(savedLine).toBe(15);
+      expect(savedColumn).toBe(20);
+    });
+
+    test("undo restores the initial cursor when undoing the first edit", () => {
+      // Repro: with an empty history, cursor is at (3,7); apply one edit;
+      // post-edit cursor is (5,9); undo — cursor should return to (3,7).
+      let savedLine = 3;
+      let savedColumn = 7;
+
+      const ops = createUndoRedoOps(
+        () => currentBuffer,
+        (buffer) => { currentBuffer = buffer; },
+        () => savedLine,
+        (line) => { savedLine = line; },
+        () => savedColumn,
+        (col) => { savedColumn = col; },
+        () => currentStatusMessage,
+        (msg) => { currentStatusMessage = msg; }
+      );
+
+      const beginFunc = ops.get("undo-begin")!;
+      const commitFunc = ops.get("undo-commit")!;
+      const undoFunc = ops.get("undo")!;
+
+      // Edit 1: pre-edit cursor at (3,7); mutate; post-edit cursor at (5,9)
+      beginFunc([]);
+      const edit1 = new MockBuffer("Edit 1\nLine 2\nLine 3") as FunctionalTextBuffer;
+      currentBuffer = edit1;
+      savedLine = 5;
+      savedColumn = 9;
+      commitFunc([{ type: 'string', value: 'edit1' }]);
+
+      // Undo — cursor should return to the pre-edit position (3,7), NOT post-edit (5,9)
+      undoFunc([]);
+
+      expect(savedLine).toBe(3);
+      expect(savedColumn).toBe(7);
+    });
+  });
+
+  describe("BUG-13 follow-up: stale initialCursorLine after undo→move→edit", () => {
+    test("first-edit undo after a prior undo→cursor-move→new-edit cycle restores the new edit's pre-edit cursor, not the stale initial", () => {
+      // Repro from BUG-13 patch review M-1:
+      //   1. iA<Esc>  → edit1 at (0,0). initialCursorLine seeded to 0.
+      //   2. u        → undo edit1, currentIndex = -1. Cursor returns to (0,0).
+      //   3. j        → cursor moves to (1,0). NOT an edit.
+      //   4. iB<Esc>  → edit2 on line 1. history truncated to [edit2]; first-edit branch fires on next undo.
+      //   5. u        → BUG: stale initialCursorLine (=0) wins → cursor at (0,0).
+      //                 FIX: undoneItem.preCursorLine (=1) wins → cursor at (1,0).
+      let savedLine = 0;
+      let savedColumn = 0;
+
+      const ops = createUndoRedoOps(
+        () => currentBuffer,
+        (buffer) => { currentBuffer = buffer; },
+        () => savedLine,
+        (line) => { savedLine = line; },
+        () => savedColumn,
+        (col) => { savedColumn = col; },
+        () => currentStatusMessage,
+        (msg) => { currentStatusMessage = msg; }
+      );
+
+      const beginFunc = ops.get("undo-begin")!;
+      const commitFunc = ops.get("undo-commit")!;
+      const undoFunc = ops.get("undo")!;
+
+      // Step 1: edit1 at cursor (0,0); post-edit cursor (0,1).
+      beginFunc([]);
+      const edit1 = new MockBuffer("A\nLine 2\nLine 3") as FunctionalTextBuffer;
+      currentBuffer = edit1;
+      savedLine = 0;
+      savedColumn = 1;
+      commitFunc([{ type: 'string', value: 'edit1' }]);
+
+      // Step 2: undo edit1 — cursor returns to (0,0).
+      undoFunc([]);
+      expect(savedLine).toBe(0);
+      expect(savedColumn).toBe(0);
+
+      // Step 3: cursor moves to (1,0) between edits (not an edit).
+      savedLine = 1;
+      savedColumn = 0;
+
+      // Step 4: edit2 with pre-edit cursor (1,0); post-edit cursor (1,1).
+      beginFunc([]);
+      const edit2 = new MockBuffer("A\nB\nLine 3") as FunctionalTextBuffer;
+      currentBuffer = edit2;
+      savedLine = 1;
+      savedColumn = 1;
+      commitFunc([{ type: 'string', value: 'edit2' }]);
+
+      // Step 5: undo edit2 — cursor should return to (1,0), not (0,0).
+      undoFunc([]);
+
+      expect(savedLine).toBe(1);
+      expect(savedColumn).toBe(0);
+    });
+  });
 });

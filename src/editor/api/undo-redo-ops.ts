@@ -26,8 +26,10 @@ import {
 interface HistoryItem {
   description: string;          // Description of the edit (e.g., "delete", "insert")
   buffer: FunctionalTextBuffer;  // Buffer state after the edit
-  cursorLine?: number;           // Cursor line position
-  cursorColumn?: number;         // Cursor column position
+  cursorLine?: number;           // Cursor line position after the edit
+  cursorColumn?: number;         // Cursor column position after the edit
+  preCursorLine?: number;        // Cursor line immediately before the edit
+  preCursorColumn?: number;      // Cursor column immediately before the edit
 }
 
 /**
@@ -46,7 +48,11 @@ let state: UndoRedoState = {
 
 // Initial buffer state (before any edits)
 let initialBuffer: FunctionalTextBuffer | null = null;
+let initialCursorLine: number | undefined = undefined;
+let initialCursorColumn: number | undefined = undefined;
 let pendingBuffer: FunctionalTextBuffer | null = null;
+let pendingCursorLine: number | undefined = undefined;
+let pendingCursorColumn: number | undefined = undefined;
 
 /**
  * Reset undo/redo state (for testing)
@@ -57,7 +63,11 @@ export function resetUndoRedoState(): void {
     currentIndex: -1
   };
   initialBuffer = null;
+  initialCursorLine = undefined;
+  initialCursorColumn = undefined;
   pendingBuffer = null;
+  pendingCursorLine = undefined;
+  pendingCursorColumn = undefined;
 }
 
 /**
@@ -71,14 +81,18 @@ export function getUndoRedoState(): UndoRedoState {
  * Push a new edit to history
  * @param description - Description of the edit
  * @param buffer - Buffer state after the edit
- * @param cursorLine - Optional cursor line position
- * @param cursorColumn - Optional cursor column position
+ * @param cursorLine - Optional cursor line position after the edit
+ * @param cursorColumn - Optional cursor column position after the edit
+ * @param preCursorLine - Optional cursor line immediately before the edit
+ * @param preCursorColumn - Optional cursor column immediately before the edit
  */
 export function pushToHistory(
   description: string,
   buffer: FunctionalTextBuffer,
   cursorLine?: number,
-  cursorColumn?: number
+  cursorColumn?: number,
+  preCursorLine?: number,
+  preCursorColumn?: number
 ): void {
   // If this is the first edit, save initial buffer state
   if (state.history.length === 0 && initialBuffer === null) {
@@ -96,7 +110,9 @@ export function pushToHistory(
     description,
     buffer,
     cursorLine,
-    cursorColumn
+    cursorColumn,
+    preCursorLine,
+    preCursorColumn
   };
 
   state.history.push(item);
@@ -127,33 +143,46 @@ export function undo(
     return Either.right(createString("Already at oldest change"));
   }
 
-  // If we're at the first edit, restore to initial buffer
+  // Snapshot the item being undone before mutating state. Its pre-edit cursor
+  // is where the user was when they triggered the change; that's the cursor
+  // we want to restore on undo.
+  const undoneItem = state.history[state.currentIndex]!;
+
+  // If we're at the first edit, restore to initial buffer + initial cursor.
+  // Prefer the undone item's pre-edit cursor over `initialCursorLine`:
+  // `initialCursorLine` is seeded only on the first ever commit, so after an
+  // undo→cursor-move→new-edit cycle it points at a state that no longer
+  // corresponds to "before this edit". The undone item's pre-edit cursor is
+  // always the position immediately before this edit was applied.
   if (state.currentIndex === 0) {
     if (initialBuffer) {
       setCurrentBuffer(initialBuffer);
     }
-    const item = state.history[0]!;
-    if (setCursorLine && item.cursorLine !== undefined) {
-      setCursorLine(item.cursorLine);
+    const restoreLine = undoneItem.preCursorLine ?? initialCursorLine ?? undoneItem.cursorLine;
+    const restoreColumn = undoneItem.preCursorColumn ?? initialCursorColumn ?? undoneItem.cursorColumn;
+    if (setCursorLine && restoreLine !== undefined && restoreLine !== null) {
+      setCursorLine(restoreLine);
     }
-    if (setCursorColumn && item.cursorColumn !== undefined) {
-      setCursorColumn(item.cursorColumn);
+    if (setCursorColumn && restoreColumn !== undefined && restoreColumn !== null) {
+      setCursorColumn(restoreColumn);
     }
     state.currentIndex = -1;
     return Either.right(createString("Already at oldest change"));
   }
 
-  // Move to previous state
+  // Move to previous state for the buffer; but restore the cursor from
+  // the undone item's pre-edit position (where the user was before the edit).
   state.currentIndex--;
   const item = state.history[state.currentIndex]!;
 
-  // Restore buffer and cursor
   setCurrentBuffer(item.buffer);
-  if (setCursorLine && item.cursorLine !== undefined) {
-    setCursorLine(item.cursorLine);
+  const restoreLine = undoneItem.preCursorLine ?? undoneItem.cursorLine;
+  const restoreColumn = undoneItem.preCursorColumn ?? undoneItem.cursorColumn;
+  if (setCursorLine && restoreLine !== undefined) {
+    setCursorLine(restoreLine);
   }
-  if (setCursorColumn && item.cursorColumn !== undefined) {
-    setCursorColumn(item.cursorColumn);
+  if (setCursorColumn && restoreColumn !== undefined) {
+    setCursorColumn(restoreColumn);
   }
 
   return Either.right(createNil());
@@ -229,6 +258,8 @@ export function createUndoRedoOps(
     }
 
     pendingBuffer = getCurrentBuffer();
+    pendingCursorLine = getCursorLine();
+    pendingCursorColumn = getCursorColumn();
     return Either.right(createNil());
   });
 
@@ -250,15 +281,21 @@ export function createUndoRedoOps(
     if (pendingBuffer && currentBuffer && pendingBuffer !== currentBuffer) {
       if (state.history.length === 0) {
         setInitialBuffer(pendingBuffer);
+        initialCursorLine = pendingCursorLine;
+        initialCursorColumn = pendingCursorColumn;
       }
       pushToHistory(
         args[0]!.value as string,
         currentBuffer,
         getCursorLine(),
-        getCursorColumn()
+        getCursorColumn(),
+        pendingCursorLine ?? undefined,
+        pendingCursorColumn ?? undefined
       );
     }
     pendingBuffer = null;
+    pendingCursorLine = undefined;
+    pendingCursorColumn = undefined;
 
     return Either.right(createNil());
   });
@@ -317,7 +354,7 @@ export function createUndoRedoOps(
 
   /**
    * undo-history-push - push a new edit to history
-   * Usage: (undo-history-push description buffer [cursor-line] [cursor-column])
+   * Usage: (undo-history-push description buffer [cursor-line] [cursor-column] [pre-cursor-line] [pre-cursor-column])
    * This is called internally by edit operations
    */
   api.set("undo-history-push", (args: TLispValue[]): Either<AppError, TLispValue> => {
@@ -325,10 +362,10 @@ export function createUndoRedoOps(
     if (args.length < 2) {
       return Either.left(createValidationError(
         'ConstraintViolation',
-        'undo-history-push requires at least 2 arguments: description, buffer, [cursor-line], [cursor-column]',
+        'undo-history-push requires at least 2 arguments: description, buffer, [cursor-line], [cursor-column], [pre-cursor-line], [pre-cursor-column]',
         'args',
         args,
-        '2-4 arguments'
+        '2-6 arguments'
       ));
     }
 
@@ -358,9 +395,11 @@ export function createUndoRedoOps(
 
     const buffer = (bufferArg as any).buffer as FunctionalTextBuffer;
 
-    // Optional cursor positions
+    // Optional cursor positions (post-edit and pre-edit)
     let cursorLine: number | undefined = undefined;
     let cursorColumn: number | undefined = undefined;
+    let preCursorLine: number | undefined = undefined;
+    let preCursorColumn: number | undefined = undefined;
 
     if (args.length >= 3 && args[2]!.type === 'number') {
       cursorLine = args[2]!.value as number;
@@ -370,7 +409,15 @@ export function createUndoRedoOps(
       cursorColumn = args[3]!.value as number;
     }
 
-    pushToHistory(descArg.value as string, buffer, cursorLine, cursorColumn);
+    if (args.length >= 5 && args[4]!.type === 'number') {
+      preCursorLine = args[4]!.value as number;
+    }
+
+    if (args.length >= 6 && args[5]!.type === 'number') {
+      preCursorColumn = args[5]!.value as number;
+    }
+
+    pushToHistory(descArg.value as string, buffer, cursorLine, cursorColumn, preCursorLine, preCursorColumn);
     return Either.right(createNil());
   });
 
