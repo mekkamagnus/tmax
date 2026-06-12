@@ -44,182 +44,159 @@
   (require-module editor/commands/markdown)
 
 ;; normal.tlisp
-;; Default key bindings for normal mode in tmax editor
-;;
-;; This file contains all default key bindings for normal mode, extracted from TypeScript
-;; to achieve pure T-Lisp-centric key binding management.
-;;
-;; Maintainer guidance:
-;; - Each (key-bind) call defines a key, command, and optional mode
-;; - Commands are T-Lisp expressions that get executed when keys are pressed
-;; - Mode is specified as "normal" for all bindings in this file
-;; - Keep bindings organized by functional groups for readability
+;; Default key bindings for normal mode — single source of truth.
+;; All normal-mode keys are registered here via (key-bind ...).
+;; The handler (normal-handler.ts) does keymap-first dispatch.
 
 ;; =================================================================
-;; BASIC NAVIGATION (Normal Mode)
+;; BASIC NAVIGATION (hjkl with count support)
 ;; =================================================================
-;; Vim-style hjkl movement keys
 
-;; Move cursor left (h)
-(key-bind "h" "(cursor-move (cursor-line) (- (cursor-column) 1))" "normal")
+(key-bind "h" "(cursor-move (cursor-line) (- (cursor-column) (vim-count-consume 1)))" "normal")
+(key-bind "j" "(cursor-move (+ (cursor-line) (vim-count-consume 1)) (cursor-column))" "normal")
+(key-bind "k" "(cursor-move (- (cursor-line) (vim-count-consume 1)) (cursor-column))" "normal")
+(key-bind "l" "(cursor-move (cursor-line) (+ (cursor-column) (vim-count-consume 1)))" "normal")
 
-;; Move cursor down (j)
-(key-bind "j" "(cursor-move (+ (cursor-line) 1) (cursor-column))" "normal")
-
-;; Move cursor up (k)
-(key-bind "k" "(cursor-move (- (cursor-line) 1) (cursor-column))" "normal")
-
-;; Move cursor right (l)
-(key-bind "l" "(cursor-move (cursor-line) (+ (cursor-column) 1))" "normal")
-
-;; Preserve semantic arrow-key identity while retaining normal-mode movement.
 (key-bind "Left" "(cursor-move (cursor-line) (- (cursor-column) 1))" "normal")
 (key-bind "Down" "(cursor-move (+ (cursor-line) 1) (cursor-column))" "normal")
 (key-bind "Up" "(cursor-move (- (cursor-line) 1) (cursor-column))" "normal")
 (key-bind "Right" "(cursor-move (cursor-line) (+ (cursor-column) 1))" "normal")
 
 ;; =================================================================
-;; WORD NAVIGATION (US-1.1.1)
+;; WORD NAVIGATION (count-aware)
 ;; =================================================================
-;; Vim-style word navigation keys
 
-;; Move to start of next word (w)
-(key-bind "w" "(word-next)" "normal")
-
-;; Move to start of previous word (b)
-(key-bind "b" "(word-previous)" "normal")
-
-;; Move to end of current word (e)
-(key-bind "e" "(word-end)" "normal")
+(key-bind "w" "(word-next (vim-count-consume 1))" "normal")
+(key-bind "b" "(word-previous (vim-count-consume 1))" "normal")
+(key-bind "e" "(word-end (vim-count-consume 1))" "normal")
 
 ;; =================================================================
-;; LINE NAVIGATION (US-1.1.2)
+;; LINE NAVIGATION
 ;; =================================================================
-;; Vim-style line navigation keys
 
-;; Move to first column (0)
-(key-bind "0" "(line-first-column)" "normal")
-
-;; Move to last non-empty column ($)
-(key-bind "$" "(line-last-column)" "normal")
-
-;; Move to first non-blank column (_)
-(key-bind "_" "(line-first-non-blank)" "normal")
-
-;; Move to first non-blank of previous line (-)
-(key-bind "-" "(line-previous)" "normal")
-
-;; Move to first non-blank of next line (+)
-(key-bind "+" "(line-next)" "normal")
+;; 0 — first column + reset horizontal viewport (BUG-12)
+(key-bind "0" "(progn (line-first-column) (viewport-left-set 0))" "normal")
+(key-bind "$" "(progn (vim-count-reset) (line-last-column))" "normal")
+(key-bind "_" "(progn (vim-count-reset) (line-first-non-blank))" "normal")
+(key-bind "-" "(line-previous (vim-count-consume 1))" "normal")
+(key-bind "+" "(line-next (vim-count-consume 1))" "normal")
 
 ;; =================================================================
 ;; MODE SWITCHING
 ;; =================================================================
-;; Transition between editor modes
 
-;; Enter insert mode from normal mode (i)
-(key-bind "i" "(editor-set-mode \"insert\")" "normal")
-
-;; Enter command mode from normal mode (:)
+(key-bind "i" "(progn (vim-count-reset) (editor-set-mode \"insert\"))" "normal")
 (key-bind ":" "(editor-enter-command-mode)" "normal")
+
+;; =================================================================
+;; INSERT ENTRY VARIANTS
+;; =================================================================
+
+(key-bind "a" "(progn (vim-count-reset) (insert-append))" "normal")
+(key-bind "A" "(progn (vim-count-reset) (insert-append-line))" "normal")
+(key-bind "I" "(progn (vim-count-reset) (insert-line-start))" "normal")
+(key-bind "o" "(progn (vim-count-reset) (open-line-below))" "normal")
+(key-bind "O" "(progn (vim-count-reset) (open-line-above))" "normal")
+
+;; =================================================================
+;; DELETE / CHANGE / YANK TO LINE END
+;; =================================================================
+
+(key-bind "x" "(vim-delete-char (vim-count-consume 1))" "normal")
+(key-bind "D" "(progn (vim-count-reset) (vim-delete-to-line-end))" "normal")
+(key-bind "C" "(progn (vim-count-reset) (vim-change-to-line-end))" "normal")
+(key-bind "Y" "(progn (vim-count-reset) (vim-yank-to-line-end))" "normal")
+(key-bind "J" "(progn (vim-count-reset) (vim-join-lines))" "normal")
+
+;; =================================================================
+;; PASTE (count-aware)
+;; =================================================================
+
+(key-bind "p" "(vim-paste-after (vim-count-consume 1))" "normal")
+(key-bind "P" "(vim-paste-before (vim-count-consume 1))" "normal")
+
+;; =================================================================
+;; OPERATORS (enter operator-pending state)
+;; =================================================================
+
+(key-bind "d" "(vim-begin-operator \"d\")" "normal")
+(key-bind "y" "(vim-begin-operator \"y\")" "normal")
+(key-bind "c" "(vim-begin-operator \"c\")" "normal")
+
+;; =================================================================
+;; FIND-CHAR (enter find-pending state)
+;; =================================================================
+
+(key-bind "f" "(vim-begin-find \"forward\" false)" "normal")
+(key-bind "t" "(vim-begin-find \"forward\" t)" "normal")
+(key-bind "F" "(vim-begin-find \"backward\" false)" "normal")
+(key-bind "T" "(vim-begin-find \"backward\" t)" "normal")
+(key-bind ";" "(vim-repeat-find)" "normal")
+(key-bind "," "(vim-repeat-find-reverse)" "normal")
+
+;; =================================================================
+;; BRACKET AND PARAGRAPH MOTIONS
+;; =================================================================
+
+(key-bind "%" "(vim-match-bracket)" "normal")
+(key-bind "{" "(paragraph-previous)" "normal")
+(key-bind "}" "(paragraph-next)" "normal")
 
 ;; =================================================================
 ;; APPLICATION CONTROL
 ;; =================================================================
-;; Global application control commands
 
-;; Quit editor from normal mode (q)
 (key-bind "q" "(editor-quit)" "normal")
 
 ;; =================================================================
-;; UNDO/REDO (US-1.2.3)
+;; UNDO/REDO
 ;; =================================================================
-;; Vim-style undo/redo keys
 
-;; Undo last edit (u)
 (key-bind "u" "(undo)" "normal")
-
-;; Redo undone edit (Ctrl+r)
 (key-bind "C-r" "(redo)" "normal")
 
 ;; =================================================================
-;; CHANGE OPERATOR (US-1.4.1)
+;; VISUAL MODE
 ;; =================================================================
-;; Vim-style change operator: c{motion} deletes text and enters insert mode
-;;
-;; Note: Change operator functions are available via M-x:
-;;   - (change-word) - delete word and enter insert mode
-;;   - (change-line) - clear line and enter insert mode
-;;   - (change-to-line-end) - delete to end of line and enter insert mode
-;;
-;; Future enhancement: Implement operator-pending mode for 'c' + motion key sequences
 
-;; =================================================================
-;; VISUAL MODE (US-1.7.1)
-;; =================================================================
-;; Vim-style visual mode for text selection
-
-;; Enter character-wise visual mode (v)
 (key-bind "v" "(visual-enter-char-mode)" "normal")
-
-;; Enter line-wise visual mode (V/Shift+v)
 (key-bind "V" "(visual-enter-line-mode)" "normal")
-
-;; Enter block-wise visual mode (Ctrl+v)
 (key-bind "C-v" "(visual-enter-block-mode)" "normal")
 
 ;; =================================================================
-;; YANK POP (US-1.9.2)
+;; YANK POP
 ;; =================================================================
-;; Emacs-style yank-pop for cycling through kill ring history
 
-;; Yank-pop - replace yanked text with previous kill-ring item (M-y/Alt+y)
 (key-bind "M-y" "(yank-pop)" "normal")
 
 ;; =================================================================
-;; WORD UNDER CURSOR SEARCH (US-1.5.2)
+;; WORD UNDER CURSOR SEARCH
 ;; =================================================================
-;; Vim-style * and # keys search for word under cursor
 
-;; Search for next occurrence of word under cursor (*)
 (key-bind "*" "(word-under-cursor-next)" "normal")
-
-;; Search for previous occurrence of word under cursor (#)
 (key-bind "#" "(word-under-cursor-previous)" "normal")
 
 ;; =================================================================
-;; JUMP COMMANDS (US-1.6.1)
+;; JUMP COMMANDS
 ;; =================================================================
-;; Vim-style jump commands for navigating large files
 
-;; Jump to first line (gg) - needs two g presses, handled via bindings-ops
-;; For now, use M-x to call jump-to-first-line directly
+;; G — count-aware: with count jumps to line N, without count jumps to last line
+(key-bind "G" "(vim-G)" "normal")
 
-;; Jump to last line (G/Shift+g)
-(key-bind "G" "(jump-to-last-line)" "normal")
-
-;; Page down (Ctrl+f)
-(key-bind "C-f" "(page-down)" "normal")
-
-;; Page up (Ctrl+b)
-(key-bind "C-b" "(page-up)" "normal")
-
-;; Half page down (Ctrl+d)
-(key-bind "C-d" "(half-page-down)" "normal")
-
-;; Half page up (Ctrl+u)
-(key-bind "C-u" "(half-page-up)" "normal")
+(key-bind "C-f" "(progn (vim-count-reset) (page-down))" "normal")
+(key-bind "C-b" "(progn (vim-count-reset) (page-up))" "normal")
+(key-bind "C-d" "(progn (vim-count-reset) (half-page-down))" "normal")
+(key-bind "C-u" "(progn (vim-count-reset) (half-page-up))" "normal")
 
 ;; =================================================================
 ;; M-X SYSTEM (Emacs-style)
 ;; =================================================================
-;; Two-key sequence: SPC ; to activate M-x mode
 
 ;; Handle space key - first part of SPC ; sequence
 (key-bind " " "(editor-handle-space)" "normal")
 
-;; Handle semicolon key - second part of SPC ; sequence
-(key-bind ";" "(execute-extended-command-maybe)" "normal")
+;; SPC ; enters M-x mode
+(key-bind "SPC ;" "(execute-extended-command-maybe)" "normal")
 
 ;; Emacs-style buffer switching.
 (key-bind "C-x b" "(switch-buffer)" "normal")
@@ -234,17 +211,7 @@
 ;; =================================================================
 ;; HELP SYSTEM (US-1.11.1 - US-1.11.3)
 ;; =================================================================
-;; Emacs-style help system for discovering commands and key bindings
 
 ;; C-h prefix for help commands
 (key-bind "C-h" "(editor-handle-help-prefix)" "normal")
-
-;; Note: The following help functions are available via M-x:
-;;   - (describe-key-prompt) - Prompts for a key and shows its binding
-;;   - (describe-function-prompt) - Prompts for function name and shows documentation
-;;   - (apropos-command-prompt) - Prompts for pattern and searches commands
-;;
-;; Or use T-Lisp directly:
-;;   - (describe-key "q" "normal") - shows that q runs editor-quit
-;;   - (describe-function "editor-quit") - shows function documentation
 )

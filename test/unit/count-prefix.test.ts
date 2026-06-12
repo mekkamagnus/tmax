@@ -325,12 +325,12 @@ describe("Count Prefix (US-1.3.1)", () => {
       expect(bufferText(editor)).toBe("one two three four");
     });
 
-    test("lastCommand should record the T-Lisp dispatcher entrypoint", async () => {
+    test("lastCommand should record the keymap binding entrypoint", async () => {
       await editor.handleKey("3");
       await editor.handleKey("w");
 
       const state = editor.getState();
-      expect(state.lastCommand).toContain("vim-dispatch-key");
+      expect(state.lastCommand).toContain("word-next");
     });
   });
 });

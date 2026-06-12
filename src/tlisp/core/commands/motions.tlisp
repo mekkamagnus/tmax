@@ -1,30 +1,15 @@
 (defmodule editor/commands/motions
-  (export vim-prefix-pending-p vim-begin-prefix vim-reset-prefix vim-begin-find vim-find-pending-p vim-reset-find-pending vim-opposite-direction vim-unsupported-prefix vim-move-to-position vim-find-target-with vim-dispatch-find-target vim-repeat-find vim-repeat-find-reverse vim-match-bracket paragraph-previous paragraph-next scroll-cursor-top scroll-cursor-center scroll-cursor-bottom vim-dispatch-prefix-key vim-current-prefix vim-prefix-bindings)
+  (export vim-begin-find vim-find-pending-p vim-reset-find-pending vim-opposite-direction vim-move-to-position vim-find-target-with vim-dispatch-find-target vim-repeat-find vim-repeat-find-reverse vim-match-bracket paragraph-previous paragraph-next scroll-cursor-top scroll-cursor-center scroll-cursor-bottom scroll-column-left scroll-column-right scroll-cursor-start scroll-cursor-end vim-gg vim-G)
 
-;; motions.tlisp -- Vim motions and prefixes owned by T-Lisp
+;; motions.tlisp -- Vim motions and find-char state owned by T-Lisp
 
-(defvar vim-pending-prefix nil)
+(require-module editor/keymaps)
+
 (defvar vim-pending-find-direction nil)
 (defvar vim-pending-find-till false)
 (defvar vim-last-find-char nil)
 (defvar vim-last-find-direction nil)
 (defvar vim-last-find-till false)
-
-(defun vim-prefix-pending-p ()
-  "Return t when a Vim prefix is waiting for another key."
-  (not (null vim-pending-prefix)))
-
-(defun vim-begin-prefix (prefix)
-  "Begin a Vim PREFIX sequence."
-  (progn
-    (set! vim-pending-prefix prefix)
-    t))
-
-(defun vim-reset-prefix ()
-  "Clear pending Vim prefix state."
-  (progn
-    (set! vim-pending-prefix nil)
-    nil))
 
 (defun vim-begin-find (direction till-p)
   "Begin a Vim find-char command."
@@ -47,14 +32,6 @@
 (defun vim-opposite-direction (direction)
   "Return the opposite of DIRECTION."
   (if (string= direction "forward") "backward" "forward"))
-
-(defun vim-unsupported-prefix (message)
-  "Reset pending Vim state and display MESSAGE."
-  (progn
-    (vim-reset-operator)
-    (vim-count-reset)
-    (editor-set-status message)
-    t))
 
 (defun vim-move-to-position (position)
   "Move to POSITION when non-nil."
@@ -87,7 +64,9 @@
       (let ((count (vim-count-consume)))
         (progn
           (vim-reset-find-pending)
-          (vim-find-target-with char direction till-p count))))))
+          (if (vim-operator-find-pending-p)
+            (vim-operator-apply-find char direction till-p count)
+            (vim-find-target-with char direction till-p count)))))))
 
 (defun vim-repeat-find ()
   "Repeat the last Vim find-char command."
@@ -148,72 +127,70 @@
     (viewport-top-set (max 0 (- (cursor-line) (- (terminal-height-get) 2))))
     t))
 
-(defun vim-dispatch-prefix-key (key)
-  "Dispatch KEY while a Vim prefix is pending."
-  (let ((prefix vim-pending-prefix))
+(defun scroll-column-left ()
+  "Scroll viewport right by half screen width (content moves left)."
+  (let ((half (floor (/ (terminal-width-get) 2))))
     (progn
-      (vim-reset-prefix)
-      (cond
-        ((string= prefix "g")
-          (cond
-            ((string= key "g")
-              (if (vim-count-active-p)
-                (jump-to-line (vim-count-consume))
-                (progn (vim-count-reset) (jump-to-first-line))))
-            ((string= key "t") (progn (vim-count-reset) (tab-next)))
-            ((string= key "T") (progn (vim-count-reset) (tab-prev)))
-            ((string= key "h") (progn (vim-count-reset) (markdown-up-heading)))
-            ((string= key "O") (progn (vim-count-reset) (markdown-heading-outline)))
-            ((string= key "x") (progn (vim-count-reset) (markdown-do)))
-            ((string= key "b") (progn (vim-count-reset) (markdown-jump-back)))
-            (t (vim-unsupported-prefix (concat "Unsupported prefix: g" key)))))
-        ((string= prefix "z")
-          (cond
-            ((string= key "t") (scroll-cursor-top))
-            ((string= key "z") (scroll-cursor-center))
-            ((string= key "b") (scroll-cursor-bottom))
-            (t (vim-unsupported-prefix (concat "Unsupported prefix: z" key)))))
-        ((string= prefix "C-w")
-          (cond
-            ((string= key "s") (split-window-below))
-            ((string= key "v") (split-window-right))
-            ((string= key "w") (other-window))
-            ((string= key "q") (delete-window))
-            ((string= key "+") (window-resize-height 1))
-            ((string= key "-") (window-resize-height -1))
-            ((string= key ">") (window-resize-width 1))
-            ((string= key "<") (window-resize-width -1))
-            (t (vim-unsupported-prefix (concat "Unsupported prefix: C-w " key)))))
-        ((string= prefix "operator-g")
-          (if (string= key "g")
-            (vim-operator-apply "gg")
-            (vim-unsupported-prefix (concat "Unsupported operator prefix: g" key))))
-        (t (vim-unsupported-prefix (concat "Unsupported prefix: " prefix key))))
+      (viewport-left-set (+ (viewport-left-get) half))
       t)))
 
-(defun vim-current-prefix ()
-  "Return the current vim prefix string, or nil."
-  vim-pending-prefix)
+(defun scroll-column-right ()
+  "Scroll viewport left by half screen width (content moves right)."
+  (let ((half (floor (/ (terminal-width-get) 2))))
+    (progn
+      (viewport-left-set (max 0 (- (viewport-left-get) half)))
+      t)))
 
-(defun vim-prefix-bindings (prefix)
-  "Return available bindings for PREFIX as ((key description) ...)."
-  (cond
-    ((string= prefix "z")
-      (list (list "t" "scroll to top")
-            (list "z" "scroll to center")
-            (list "b" "scroll to bottom")))
-    ((string= prefix "g")
-      (list (list "g" "jump to line")
-            (list "t" "next tab")
-            (list "T" "prev tab")))
-    ((string= prefix "C-w")
-      (list (list "s" "split below")
-            (list "v" "split right")
-            (list "w" "other window")
-            (list "q" "delete window")
-            (list "+" "grow height")
-            (list "-" "shrink height")
-            (list ">" "grow width")
-            (list "<" "shrink width")))
-    (t nil)))
+(defun scroll-cursor-start ()
+  "Set viewport left so cursor column is at the left edge."
+  (progn
+    (viewport-left-set (cursor-column))
+    t))
+
+(defun scroll-cursor-end ()
+  "Set viewport left so cursor column is at the right edge."
+  (let ((col (cursor-column)))
+    (progn
+      (viewport-left-set (max 0 (- col (floor (/ (terminal-width-get) 2)))))
+      t)))
+
+(defun vim-gg ()
+  "Handle gg: with count jump to line N, without jump to first line."
+  (if (vim-count-active-p)
+    (jump-to-line (vim-count-consume))
+    (progn (vim-count-reset) (jump-to-first-line))))
+
+(defun vim-G ()
+  "Handle G: with count jump to line N, without jump to last line."
+  (if (vim-count-active-p)
+    (jump-to-line (vim-count-consume))
+    (progn (vim-count-reset) (jump-to-last-line))))
+
+;; Keymap bindings for vim prefix keys — stored in normal-keymap for
+;; which-key display and keymap-based dispatch.
+
+(key-bind "z t" "(scroll-cursor-top)" "normal")
+(key-bind "z z" "(scroll-cursor-center)" "normal")
+(key-bind "z b" "(scroll-cursor-bottom)" "normal")
+(key-bind "z l" "(scroll-column-left)" "normal")
+(key-bind "z h" "(scroll-column-right)" "normal")
+(key-bind "z s" "(scroll-cursor-start)" "normal")
+(key-bind "z e" "(scroll-cursor-end)" "normal")
+
+(key-bind "g g" "(vim-gg)" "normal")
+(key-bind "g t" "(tab-next)" "normal")
+(key-bind "g T" "(tab-prev)" "normal")
+(key-bind "g h" "(markdown-up-heading)" "normal")
+(key-bind "g O" "(markdown-heading-outline)" "normal")
+(key-bind "g x" "(markdown-do)" "normal")
+(key-bind "g b" "(markdown-jump-back)" "normal")
+
+(key-bind "C-w s" "(split-window-below)" "normal")
+(key-bind "C-w v" "(split-window-right)" "normal")
+(key-bind "C-w w" "(other-window)" "normal")
+(key-bind "C-w q" "(delete-window)" "normal")
+(key-bind "C-w +" "(window-resize-height 1)" "normal")
+(key-bind "C-w -" "(window-resize-height -1)" "normal")
+(key-bind "C-w >" "(window-resize-width 1)" "normal")
+(key-bind "C-w <" "(window-resize-width -1)" "normal")
 )

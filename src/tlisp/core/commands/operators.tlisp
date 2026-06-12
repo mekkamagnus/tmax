@@ -1,10 +1,18 @@
 (defmodule editor/commands/operators
-  (export vim-operator-pending-p vim-begin-operator vim-reset-operator vim-operator-total-count vim-delete-line-range vim-delete-to-last-line vim-delete-to-first-line vim-change-line-range vim-operator-apply vim-dispatch-operator-key)
+  (export vim-operator-pending-p vim-begin-operator vim-reset-operator vim-operator-total-count vim-delete-line-range vim-delete-to-last-line vim-delete-to-first-line vim-change-line-range vim-operator-apply vim-dispatch-operator-key vim-operator-find-pending-p vim-operator-reset-find-pending vim-operator-apply-find)
 
 ;; operators.tlisp -- Vim operator-pending state owned by T-Lisp
 
 (defvar vim-pending-operator nil)
 (defvar vim-operator-count 1)
+(defvar vim-operator-g-pending nil)
+
+;; Stashed operator state for operator+find-char combos (df/dt/dF/dT + y/c).
+;; Populated by vim-dispatch-operator-key when f/t/F/T arrives while an
+;; operator is pending. Consumed by vim-operator-apply-find after the find
+;; target resolves.
+(defvar vim-pending-operator-for-find nil)
+(defvar vim-pending-operator-for-find-count 1)
 
 (defun vim-operator-pending-p ()
   "Return t when an operator is waiting for a motion."
@@ -23,7 +31,88 @@
   (progn
     (set! vim-pending-operator nil)
     (set! vim-operator-count 1)
+    (set! vim-operator-g-pending nil)
+    (set! vim-pending-operator-for-find nil)
+    (set! vim-pending-operator-for-find-count 1)
     nil))
+
+(defun vim-operator-find-pending-p ()
+  "Return t when a find-char motion is being collected for a stashed operator."
+  (not (null vim-pending-operator-for-find)))
+
+(defun vim-operator-reset-find-pending ()
+  "Clear stashed operator-for-find state."
+  (progn
+    (set! vim-pending-operator-for-find nil)
+    (set! vim-pending-operator-for-find-count 1)
+    nil))
+
+(defun vim-operator-find-combo (operator direction till-p)
+  "Build the combo string for undo history (e.g., df, dt, dF, dT)."
+  (let ((suffix
+    (cond
+      ((and (string= direction "forward") (not till-p)) "f")
+      ((and (string= direction "forward") till-p) "t")
+      ((and (string= direction "backward") (not till-p)) "F")
+      ((and (string= direction "backward") till-p) "T"))))
+    (concat operator suffix)))
+
+(defun vim-operator-begin-find (key)
+  "Stash the pending operator and enter find-char pending state for KEY.
+KEY must be one of f/t/F/T. The operator and its pre-operator count are
+preserved in vim-pending-operator-for-find* so vim-operator-apply-find
+can resume after the find target resolves. vim-reset-operator clears the
+stash, so it must run BEFORE the stash is populated."
+  (let ((operator vim-pending-operator))
+    (let ((operator-count vim-operator-count))
+      (let ((forward (or (string= key "f") (string= key "t"))))
+        (let ((till (or (string= key "t") (string= key "T"))))
+          (progn
+            (vim-reset-operator)
+            (set! vim-pending-operator-for-find operator)
+            (set! vim-pending-operator-for-find-count operator-count)
+            (vim-begin-find (if forward "forward" "backward") till)
+            t))))))
+
+(defun vim-operator-apply-find (char direction till-p motion-count)
+  "Apply the stashed operator to a find-char motion.
+CHAR is the find target, DIRECTION/TILL-P describe the find variant,
+and MOTION-COUNT is the count accumulated between operator and find
+char (already consumed). The stashed operator count multiplies it."
+  (let ((operator vim-pending-operator-for-find))
+    (let ((operator-count vim-pending-operator-for-find-count))
+      (let ((total-count (* operator-count motion-count)))
+        (let ((line (cursor-line)))
+          (let ((start-col (cursor-column)))
+            (let ((position (find-char-position char direction till-p total-count)))
+              (progn
+                (vim-operator-reset-find-pending)
+                (vim-count-reset)
+                (if (null position)
+                  (progn
+                    (editor-set-status (concat "Char not found: " char))
+                    t)
+                  (let ((target-col (nth 1 position)))
+                    (let ((low (min start-col target-col)))
+                      (let ((high (+ (max start-col target-col) 1)))
+                        (let ((combo (vim-operator-find-combo operator direction till-p)))
+                          (progn
+                            (if (string= operator "y") nil (undo-begin))
+                            (cond
+                              ((string= operator "d")
+                                (let ((deleted (buffer-delete-range line low line high)))
+                                  (set-register "\"" deleted)))
+                              ((string= operator "y")
+                                (let ((text (buffer-get-range line low line high)))
+                                  (set-register "\"" text)))
+                              ((string= operator "c")
+                                (progn
+                                  (buffer-replace-range line low line high "")
+                                  (cursor-move line low)
+                                  (editor-set-mode "insert")))
+                              (t (editor-set-status (concat "Unsupported operator: " combo))))
+                            (if (string= operator "y") nil (undo-commit combo))
+                            t))))))))))))))
 
 (defun vim-operator-total-count ()
   "Return operator prefix count multiplied by motion count."
@@ -117,12 +206,26 @@
 
 (defun vim-dispatch-operator-key (key)
   "Dispatch KEY while an operator is pending."
-  (let ((digit (vim-key-digit-value key)))
-    (if (numberp digit)
-      (progn
-        (vim-count-add-digit digit)
-        t)
+  (if vim-operator-g-pending
+    (progn
+      (set! vim-operator-g-pending nil)
       (if (string= key "g")
-        (vim-begin-prefix "operator-g")
-        (vim-operator-apply key)))))
+        (vim-operator-apply "gg")
+        (progn
+          (vim-reset-operator)
+          (vim-count-reset)
+          (editor-set-status (concat "Unsupported operator prefix: g" key))
+          t)))
+    (let ((digit (vim-key-digit-value key)))
+      (if (numberp digit)
+        (progn
+          (vim-count-add-digit digit)
+          t)
+        (if (string= key "g")
+          (progn
+            (set! vim-operator-g-pending t)
+            t)
+          (if (or (string= key "f") (string= key "t") (string= key "F") (string= key "T"))
+            (vim-operator-begin-find key)
+            (vim-operator-apply key)))))))
 )

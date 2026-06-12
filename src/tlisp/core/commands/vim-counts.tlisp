@@ -32,10 +32,10 @@
     (editor-set-status "")
     nil))
 
-(defun vim-count-consume ()
-  "Return the current Vim count and clear it."
-  (let ((count (vim-count-current)))
+(defun vim-count-consume (&optional (default 1 default-supplied-p))
+  "Return the current Vim count (or DEFAULT when inactive) and clear count state."
+  (let ((result (if vim-count-active vim-count default)))
     (progn
       (vim-count-reset)
-      count)))
+      result)))
 )

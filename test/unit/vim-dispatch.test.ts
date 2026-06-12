@@ -358,9 +358,11 @@ describe("SPEC-005 Vim dispatcher", () => {
     const normalSource = await Bun.file("src/editor/handlers/normal-handler.ts").text();
     const insertSource = await Bun.file("src/editor/handlers/insert-handler.ts").text();
 
-    expect(normalSource).toContain("vim-dispatch-key");
+    expect(normalSource).toContain("keymap-ref");
+    expect(normalSource).toContain("vim-operator-pending-p");
     expect(normalSource).not.toContain("pendingNormalOperator");
     expect(normalSource).not.toContain("countPrefix");
+    expect(normalSource).not.toContain("vim-dispatch-key");
     expect(insertSource).toContain("insert-backspace");
     expect(insertSource).not.toContain("buffer-delete-range");
   });
