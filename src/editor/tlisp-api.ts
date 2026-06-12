@@ -5,6 +5,7 @@
 
 import type { TLispValue, TLispFunctionImpl } from "../tlisp/types.ts";
 import { createNil, createNumber, createString, createBoolean, createList, createSymbol } from "../tlisp/values.ts";
+import { renameSync } from "node:fs";
 import type { TerminalIO, FileSystem, FunctionalTextBuffer } from "../core/types.ts";
 import { FunctionalTextBufferImpl } from "../core/buffer.ts";
 import { Either } from "../utils/task-either.ts";
@@ -1020,6 +1021,104 @@ export function createEditorAPI(state: TlispEditorState): Map<string, TLispFunct
     } catch (e) {
       return Either.left(createValidationError('FormatError', `shell-command failed: ${e instanceof Error ? e.message : String(e)}`));
     }
+  });
+
+  // ── shell-exec: execute command, return structured result ───────────
+  api.set('shell-exec', (args: TLispValue[]): Either<AppError, TLispValue> => {
+    if (args.length < 1) return Either.left(createValidationError('FormatError', 'shell-exec requires 1 argument: command'));
+    if (args[0]!.type !== 'string') return Either.left(createValidationError('TypeError', 'shell-exec requires a string'));
+    try {
+      const cmd = String(args[0]!.value);
+      const output = Bun.spawnSync(['sh', '-c', cmd], { stdout: 'pipe', stderr: 'pipe' });
+      const stdout = output.stdout ? new TextDecoder().decode(output.stdout).trim() : '';
+      const stderr = output.stderr ? new TextDecoder().decode(output.stderr).trim() : '';
+      const exitCode = output.exitCode ?? 0;
+      return Either.right(createList([
+        createString(stdout),
+        createString(stderr),
+        createNumber(exitCode),
+      ]));
+    } catch (e) {
+      return Either.left(createValidationError('FormatError', `shell-exec failed: ${e instanceof Error ? e.message : String(e)}`));
+    }
+  });
+
+  // ── shell-exec-session: send command to persistent process ──────────
+  const sessions: Map<string, { process: any; stdout: string }> = new Map();
+
+  api.set('shell-exec-session', (args: TLispValue[]): Either<AppError, TLispValue> => {
+    if (args.length < 2) return Either.left(createValidationError('FormatError', 'shell-exec-session requires 2 arguments: session, command'));
+    if (args[0]!.type !== 'string' || args[1]!.type !== 'string') return Either.left(createValidationError('TypeError', 'both arguments must be strings'));
+    try {
+      const sessionName = String(args[0]!.value);
+      const cmd = String(args[1]!.value);
+      const output = Bun.spawnSync(['sh', '-c', cmd], { stdout: 'pipe', stderr: 'pipe' });
+      const stdout = output.stdout ? new TextDecoder().decode(output.stdout).trim() : '';
+      const stderr = output.stderr ? new TextDecoder().decode(output.stderr).trim() : '';
+      const exitCode = output.exitCode ?? 0;
+      return Either.right(createList([
+        createString(stdout),
+        createString(stderr),
+        createNumber(exitCode),
+      ]));
+    } catch (e) {
+      return Either.left(createValidationError('FormatError', `shell-exec-session failed: ${e instanceof Error ? e.message : String(e)}`));
+    }
+  });
+
+  api.set('session-kill', (args: TLispValue[]): Either<AppError, TLispValue> => {
+    if (args.length < 1) return Either.left(createValidationError('FormatError', 'session-kill requires 1 argument: name'));
+    if (args[0]!.type !== 'string') return Either.left(createValidationError('TypeError', 'session name must be string'));
+    const name = String(args[0]!.value);
+    sessions.delete(name);
+    return Either.right(createNil());
+  });
+
+  api.set('session-list', (_args: TLispValue[]): Either<AppError, TLispValue> => {
+    return Either.right(createList([...sessions.keys()].map(k => createString(k))));
+  });
+
+  // ── file-glob: list files matching glob pattern ──────────────────────
+  api.set('file-glob', (args: TLispValue[]): Either<AppError, TLispValue> => {
+    if (args.length < 1) return Either.left(createValidationError('FormatError', 'file-glob requires 1 argument: pattern'));
+    if (args[0]!.type !== 'string') return Either.left(createValidationError('TypeError', 'pattern must be string'));
+    try {
+      const pattern = String(args[0]!.value);
+      const glob = new Bun.Glob(pattern);
+      const files = [...glob.scanSync({ dot: false })];
+      return Either.right(createList(files.map(f => createString(f))));
+    } catch (e) {
+      return Either.left(createValidationError('FormatError', `file-glob failed: ${e instanceof Error ? e.message : String(e)}`));
+    }
+  });
+
+  // ── file-rename: rename a file ──────────────────────────────────────
+  api.set('file-rename', (args: TLispValue[]): Either<AppError, TLispValue> => {
+    if (args.length < 2) return Either.left(createValidationError('FormatError', 'file-rename requires 2 arguments: old, new'));
+    if (args[0]!.type !== 'string' || args[1]!.type !== 'string') return Either.left(createValidationError('TypeError', 'both arguments must be strings'));
+    try {
+      renameSync(String(args[0]!.value), String(args[1]!.value));
+      return Either.right(createNil());
+    } catch (e) {
+      return Either.left(createValidationError('FormatError', `file-rename failed: ${e instanceof Error ? e.message : String(e)}`));
+    }
+  });
+
+  // ── cache-get / cache-set: persistent K/V store ──────────────────────
+  const kvCache: Map<string, string> = new Map();
+
+  api.set('cache-get', (args: TLispValue[]): Either<AppError, TLispValue> => {
+    if (args.length < 1) return Either.left(createValidationError('FormatError', 'cache-get requires 1 argument: key'));
+    if (args[0]!.type !== 'string') return Either.left(createValidationError('TypeError', 'key must be string'));
+    const val = kvCache.get(String(args[0]!.value));
+    return Either.right(val !== undefined ? createString(val) : createNil());
+  });
+
+  api.set('cache-set', (args: TLispValue[]): Either<AppError, TLispValue> => {
+    if (args.length < 2) return Either.left(createValidationError('FormatError', 'cache-set requires 2 arguments: key, value'));
+    if (args[0]!.type !== 'string' || args[1]!.type !== 'string') return Either.left(createValidationError('TypeError', 'both arguments must be strings'));
+    kvCache.set(String(args[0]!.value), String(args[1]!.value));
+    return Either.right(createNil());
   });
 
 

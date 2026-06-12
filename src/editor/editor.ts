@@ -7,7 +7,7 @@
 import { TLispInterpreterImpl } from "../tlisp/interpreter.ts";
 import { FileSystemImpl } from "../core/filesystem.ts";
 import { createEditorAPI, TlispEditorState } from "./tlisp-api.ts";
-import type { EditorState, FunctionalTextBuffer, Window, HighlightSpan, MinibufferRenderView } from "../core/types.ts";
+import type { EditorState, FunctionalTextBuffer, Window, HighlightSpan, MinibufferRenderView, WorkspaceState, BufferMetadata } from "../core/types.ts";
 import { createString, createList, createNil, createNumber, createBoolean, createHashmap } from "../tlisp/values.ts";
 import type { TerminalIO, FileSystem } from "../core/types.ts";
 import type { TLispEnvironment, TLispValue, TLispFunctionImpl } from "../tlisp/types.ts";
@@ -43,6 +43,7 @@ import {
 import { cloneJsonValue, deserializeTlispValue, serializeTlispValue } from "../tlisp/serialization.ts";
 import { createModuleLoader } from "../tlisp/module-loader.ts";
 import type { ModuleExportRecord } from "../tlisp/module-registry.ts";
+import { createWhichKeyState, DEFAULT_WHICH_KEY_TIMEOUT, type WhichKeyHandle } from "./utils/which-key-state.ts";
 
 /**
  * Key mapping for editor commands
@@ -109,6 +110,8 @@ export class Editor {
   private currentModuleName: string | undefined;
   private bufferMetadata: Map<string, { filename?: string; modified: boolean; recency: number }> = new Map();
   private bufferRecency: number = 0;
+  private whichKeyHandle: import("./utils/which-key-state.ts").WhichKeyHandle;
+  private currentWorkspace?: WorkspaceState;
 
   /**
    * Create a new editor instance
@@ -166,6 +169,8 @@ export class Editor {
       minibufferState: undefined,
       minibufferView: undefined,
     };
+
+    this.whichKeyHandle = createWhichKeyState(this.state.whichKeyTimeout ?? DEFAULT_WHICH_KEY_TIMEOUT);
 
     editorLog.debug('Editor state initialized', {
       correlationId: initId,
@@ -241,8 +246,19 @@ export class Editor {
           const currentTab = editor.state.tabs[currentTabIndex];
           if (currentTab && currentTab.label === editor.state.currentFilename) {
             editor.state.tabs = editor.state.tabs.map((tab, index) =>
-              index === currentTabIndex ? { ...tab, buffer: v } : tab
+              index === currentTabIndex ? { ...tab, buffer: v, bufferName } : tab
             );
+          }
+        }
+        // R4-3: update current window buffer and bufferName
+        if (v && bufferName) {
+          const windows = editor.state.windows;
+          if (windows && windows.length > 0) {
+            const currentWindow = windows[editor.state.currentWindowIndex ?? 0];
+            if (currentWindow) {
+              currentWindow.buffer = v as FunctionalTextBufferImpl;
+              currentWindow.bufferName = bufferName;
+            }
           }
         }
         editor.state.currentBuffer = v ?? undefined;
@@ -421,6 +437,12 @@ export class Editor {
       // Add the new mapping
       filteredMappings.push(mapping);
       this.keyMappings.set(key, filteredMappings);
+
+      // Also store in T-Lisp keymap (unified keymap system, SPEC-038)
+      const modeKey = mode || "normal";
+      try {
+        this.interpreter.execute(`(keymap-set-key ${modeKey}-keymap "${this.escapeKeyForTLisp(key)}" "${this.escapeKeyForTLisp(command)}")`);
+      } catch {}
 
       return createString(key);
     });
@@ -1117,6 +1139,7 @@ export class Editor {
         throw new Error("which-key-enable requires no arguments");
       }
       this.state.whichKeyTimeout = this.state.whichKeyTimeout || 1000;
+      this.whichKeyHandle.reset(this.state.whichKeyTimeout);
       return createNil();
     });
 
@@ -1125,6 +1148,7 @@ export class Editor {
         throw new Error("which-key-disable requires no arguments");
       }
       this.state.whichKeyTimeout = 0;
+      this.whichKeyHandle.deactivate();
       this.state.whichKeyActive = false;
       this.state.whichKeyPrefix = "";
       this.state.whichKeyBindings = [];
@@ -1144,6 +1168,7 @@ export class Editor {
         throw new Error("which-key-timeout must be a positive number");
       }
       this.state.whichKeyTimeout = timeout;
+      this.whichKeyHandle.reset(timeout);
       return createNumber(timeout);
     });
 
@@ -1599,6 +1624,11 @@ export class Editor {
    * Load core key bindings from T-Lisp files
    */
   private async loadCoreBindings(): Promise<void> {
+    // Load unified keymap module before bindings (SPEC-038)
+    try {
+      await this.loadBindingsFromFile(`${import.meta.dir}/../tlisp/core/keymaps.tlisp`);
+    } catch {}
+
     const bindingsDir = `${import.meta.dir}/../tlisp/core/bindings`;
     const requiredBindingFiles = [
       `${bindingsDir}/normal.tlisp`,
@@ -2301,6 +2331,175 @@ export class Editor {
   }
 
   /**
+   * Replace editor-local buffers/layout with the given workspace while keeping
+   * daemon-global interpreter, keymaps, and message log intact.
+   */
+  applyWorkspace(workspace: WorkspaceState): void {
+    this.currentWorkspace = workspace;
+
+    // R3-1: Build reverse index from OLD workspace buffers before deep-copy.
+    // After deep-copy, identity checks fail because new instances are created.
+    const oldBufferNames = new Map<FunctionalTextBuffer, string>();
+    for (const [name, buf] of workspace.buffers.entries()) {
+      oldBufferNames.set(buf, name);
+    }
+
+    // Deep-copy buffers so workspace state stays isolated (C1)
+    this.buffers.clear();
+    for (const [name, buffer] of workspace.buffers.entries()) {
+      const contentResult = buffer.getContent();
+      const content = Either.isRight(contentResult) ? contentResult.right : '';
+      this.buffers.set(name, FunctionalTextBufferImpl.create(content));
+    }
+    this.buffers.set('*Messages*', FunctionalTextBufferImpl.create(this.messageLog.render()));
+
+    this.bufferMetadata.clear();
+    for (const [name, metadata] of workspace.bufferMetadata.entries()) {
+      this.bufferMetadata.set(name, {
+        filename: metadata.filename,
+        modified: metadata.modified,
+        recency: this.bufferRecency++,
+      });
+    }
+    this.bufferMetadata.set('*Messages*', { modified: false, recency: this.bufferRecency++ });
+
+    this.bufferModeStates = new Map();
+    for (const [name, modeState] of workspace.bufferModeStates.entries()) {
+      this.bufferModeStates.set(name, {
+        majorMode: modeState.majorMode ?? 'fundamental',
+        activeMinorModes: modeState.minorModes ?? [],
+        minorModeActivationOrder: modeState.minorModes ?? [],
+        minorModeSources: Object.fromEntries((modeState.minorModes ?? []).map(mode => [mode, 'local' as const])),
+        localMinorModeOverrides: {},
+        minorModeSavedConfig: {},
+      });
+    }
+    const bufferName = workspace.currentBufferName ?? '*scratch*';
+    const buffer = this.buffers.get(bufferName) ?? this.buffers.get('*scratch*') ?? FunctionalTextBufferImpl.create('');
+    if (!this.buffers.has(bufferName)) {
+      this.buffers.set(bufferName, buffer);
+      this.updateBufferMetadata(bufferName, { modified: false });
+    }
+
+    this.state.currentBuffer = buffer;
+    this.state.currentFilename = workspace.currentFilename ?? this.bufferMetadata.get(bufferName)?.filename;
+    this.state.cursorPosition = { ...workspace.cursorState };
+    this.state.viewportTop = workspace.viewportState.top;
+    this.state.viewportLeft = workspace.viewportState.left ?? 0;
+    // R3-1: use oldBufferNames reverse index to resolve buffer names,
+    // then look up the new deep-copied instance from this.buffers
+	    const defaultWindow: Window = {
+	      id: 'window-main',
+	      buffer,
+	      bufferName,
+	      cursorLine: this.state.cursorPosition.line,
+	      cursorColumn: this.state.cursorPosition.column,
+	      viewportTop: this.state.viewportTop,
+	      viewportLeft: this.state.viewportLeft ?? 0,
+	      height: this.terminal.getSize().height - 2,
+	      width: this.terminal.getSize().width,
+	    };
+	    const windows = workspace.windows.length > 0
+	      ? workspace.windows.map(w => {
+	        const resolvedName = oldBufferNames.get(w.buffer) ?? '*scratch*';
+	        return { ...w, buffer: this.buffers.get(resolvedName) ?? buffer, bufferName: resolvedName };
+	      })
+	      : [defaultWindow];
+	    const tabs = workspace.tabs?.length > 0
+	      ? workspace.tabs.map(t => {
+	        const resolvedName = oldBufferNames.get(t.buffer) ?? '*scratch*';
+	        return { ...t, buffer: this.buffers.get(resolvedName) ?? buffer, bufferName: resolvedName };
+	      })
+	      : [];
+
+	    this.state.windows = windows;
+	    this.state.currentWindowIndex = 0;
+	    this.state.tabs = tabs;
+	    this.state.currentTabIndex = 0;
+    this.state.buffers = this.buffers;
+    this.state.mode = 'normal'; // I10: reset mode on workspace switch
+
+    // I4: re-detect major mode for the active buffer
+    if (this.state.currentFilename) {
+      this.activateMajorModeForFile(this.state.currentFilename);
+    }
+  }
+
+  /**
+   * Snapshot the editor-local buffers/layout back into workspace-owned state.
+   * N8: returned buffers are live references — consumers that need isolation
+   * must deep-copy (applyWorkspace does this on the receiving end).
+   */
+  exportWorkspace(base?: WorkspaceState): WorkspaceState {
+    const now = new Date().toISOString();
+    const metadata = base?.metadata ?? {
+      id: globalThis.crypto.randomUUID(),
+      name: 'default',
+      createdAt: now,
+      lastAccessed: now,
+      formatVersion: 1,
+    };
+    const buffers = new Map<string, FunctionalTextBuffer>();
+    const bufferMetadata = new Map<string, BufferMetadata>();
+    const bufferModeStates = new Map<string, import("../core/types.ts").BufferModeState>();
+
+    const currentBufferName = this.findBufferName(this.state.currentBuffer) ?? base?.currentBufferName ?? '*scratch*';
+
+    for (const [name, buffer] of this.buffers.entries()) {
+      if (name === '*Messages*') continue;
+      buffers.set(name, buffer);
+      const metadata = this.bufferMetadata.get(name);
+      const modeState = this.bufferModeStates.get(metadata?.filename ?? name);
+      // I5: use live cursor for active buffer, preserved cursor for others
+      const incomingMeta = base?.bufferMetadata?.get(name);
+      const isActiveBuffer = name === currentBufferName;
+      bufferMetadata.set(name, {
+        name,
+        filename: metadata?.filename,
+        modified: metadata?.modified ?? false,
+        cursorLine: isActiveBuffer ? this.state.cursorPosition.line : (incomingMeta?.cursorLine ?? 0),
+        cursorColumn: isActiveBuffer ? this.state.cursorPosition.column : (incomingMeta?.cursorColumn ?? 0),
+      });
+      bufferModeStates.set(name, {
+        majorMode: modeState?.majorMode,
+        minorModes: modeState?.activeMinorModes ?? [],
+        lighters: (modeState?.activeMinorModes ?? [])
+          .map(mode => this.minorModeRegistry.get(mode)?.lighter ?? "")
+          .filter(lighter => lighter !== ""),
+      });
+    }
+
+    if (!buffers.has('*scratch*')) {
+      buffers.set('*scratch*', FunctionalTextBufferImpl.create(''));
+      bufferMetadata.set('*scratch*', {
+        name: '*scratch*',
+        modified: false,
+        cursorLine: 0,
+        cursorColumn: 0,
+      });
+    }
+
+    return {
+      metadata: { ...metadata, lastAccessed: now },
+      buffers,
+      bufferMetadata,
+      bufferModeStates,
+      windows: this.state.windows ?? [],
+      tabs: this.state.tabs ?? [],
+      cursorState: { ...this.state.cursorPosition },
+      viewportState: { top: this.state.viewportTop, left: this.state.viewportLeft ?? 0 },
+      currentBufferName,
+      currentFilename: this.state.currentFilename,
+      currentMajorMode: this.getCurrentMajorMode(),
+      // R4-8: extract directly from mode state instead of cloning full EditorState
+      activeMinorModes: [...this.getCurrentModeState().activeMinorModes],
+      activeMinorModeLighters: this.getCurrentModeState().activeMinorModes
+        .map((m) => this.minorModeRegistry.get(m)?.lighter ?? "")
+        .filter((l) => l !== ""),
+    };
+  }
+
+  /**
    * Create a new buffer
    * @param name - Buffer name
    * @param content - Initial content
@@ -2320,6 +2519,7 @@ export class Editor {
       const initialWindow: Window = {
         id: "window-main",
         buffer: buffer,
+        bufferName: this.findBufferName(buffer),
         cursorLine: this.state.cursorPosition.line,
         cursorColumn: this.state.cursorPosition.column,
         viewportTop: this.state.viewportTop,
@@ -2334,6 +2534,7 @@ export class Editor {
       const currentWindow = this.state.windows[this.state.currentWindowIndex ?? 0];
       if (currentWindow) {
         currentWindow.buffer = buffer;
+        currentWindow.bufferName = this.findBufferName(buffer);
         // Sync window cursor with global cursor position
         currentWindow.cursorLine = this.state.cursorPosition.line;
         currentWindow.cursorColumn = this.state.cursorPosition.column;
@@ -2557,7 +2758,13 @@ export class Editor {
     this.state.minibufferState = cloneJsonValue(newState.minibufferState);
     this.state.minibufferView = newState.minibufferView ? structuredClone(newState.minibufferView) : undefined;
     this.state.cursorFocus = newState.cursorFocus ?? this.state.cursorFocus;
-    this.state.buffers = newState.buffers ?? this.state.buffers;
+    if (newState.buffers && newState.buffers !== this.buffers) {
+      this.buffers.clear();
+      for (const [name, buffer] of newState.buffers.entries()) {
+        this.buffers.set(name, buffer as FunctionalTextBufferImpl);
+      }
+    }
+    this.state.buffers = this.buffers;
     if (newState.currentMajorMode || newState.activeMinorModes || newState.activeMinorModeLighters) {
       if (previousBufferKey !== nextBufferKey && hasExistingModeState) {
         return;
@@ -2577,6 +2784,24 @@ export class Editor {
       if (candidate === buffer) return name;
     }
     return undefined;
+  }
+
+  clearModifiedFlags(): void {
+    for (const [name, meta] of this.bufferMetadata.entries()) {
+      if (meta.modified) {
+        this.bufferMetadata.set(name, { ...meta, modified: false });
+      }
+    }
+  }
+
+  markBuffersModified(names: string[]): void {
+    for (const name of names) {
+      this.updateBufferMetadata(name, { modified: true });
+    }
+    const currentName = this.findBufferName(this.state.currentBuffer);
+    if (currentName && names.includes(currentName)) {
+      this.state.bufferModified = true;
+    }
   }
 
   private updateBufferMetadata(
@@ -2815,6 +3040,13 @@ export class Editor {
    */
   getKeyMappings(): Map<string, KeyMapping[]> {
     return this.keyMappings;
+  }
+
+  /**
+   * Get which-key handle (for per-instance state)
+   */
+  getWhichKeyHandle(): WhichKeyHandle {
+    return this.whichKeyHandle;
   }
 
   /**

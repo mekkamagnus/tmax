@@ -21,6 +21,7 @@ function createState(): TlispEditorState {
     lastCommand: "",
     statusMessage: "",
     viewportTop: 0,
+    viewportLeft: 0,
     commandLine: "",
     spacePressed: false,
     mxCommand: "",

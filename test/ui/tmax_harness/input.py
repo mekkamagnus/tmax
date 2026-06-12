@@ -10,10 +10,13 @@ from . import client
 
 def translate_key_for_daemon(key: str) -> str:
     """Map harness key notation to the raw character tmaxclient --key expects."""
+    if key == " ":
+        return "Space"
+
     mapping = {
         "Escape": "\x1b",
         "Enter": "\r",
-        "Space": " ",
+        "Space": "Space",
         "Backspace": "\x7f",
         "Tab": "\t",
         "BSpace": "\x7f",

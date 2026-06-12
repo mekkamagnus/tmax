@@ -7,7 +7,9 @@
 
 import { Socket } from 'net';
 import { userInfo } from 'os';
-import { spawnSync } from 'child_process';
+import { spawnSync, spawn } from 'child_process';
+import { resolve as pathResolve } from 'path';
+import { readFileSync } from 'fs';
 
 // JSON-RPC 2.0 interfaces
 interface JSONRPCRequest {
@@ -167,13 +169,14 @@ class TmaxClient {
   /**
    * Open a file in the server
    */
-  async openFile(filepath: string, options?: { wait?: boolean }): Promise<void> {
+  async openFile(filepath: string, options?: { wait?: boolean; workspaceId?: string }): Promise<void> {
     const wait = options?.wait ?? true;
 
     try {
       await this.sendRequest('open', {
         filepath,
-        wait
+        wait,
+        ...(options?.workspaceId ? { workspaceId: options.workspaceId } : {})
       });
 
       if (wait) {
@@ -283,6 +286,24 @@ function parseKeySequence(sequence: string): string[] {
   return keys;
 }
 
+function parseSingleKey(key: string): string {
+  const bracketed = key.startsWith('<') && key.endsWith('>') ? key.slice(1, -1) : key;
+  const keyMap: Record<string, string> = {
+    'Escape': '\x1b',
+    'Enter': '\r',
+    'Space': ' ',
+    'Tab': '\t',
+    'Backspace': '\x7f',
+    'SPC': ' ',
+    'RET': '\r',
+    'ESC': '\x1b',
+    'TAB': '\t',
+    'BS': '\x7f',
+    'DEL': '\x7f',
+  };
+  return keyMap[bracketed] ?? key;
+}
+
 /**
  * Main function to handle command line arguments
  */
@@ -317,6 +338,10 @@ Options:
   --status               Get daemon/client/frame status
   --clients              List connected clients
   --frames               List connected frames
+  --workspace NAME       Target/connect to workspace
+  --workspaces           List workspaces
+  --workspace-new NAME   Create workspace
+  --workspace-kill NAME  Delete workspace
   --frame FRAME_ID       Target a specific frame for key/command operations
   --json                 Print raw JSON for status-like commands
   --messages             Show *Messages* buffer
@@ -374,65 +399,136 @@ Examples:
   let keysArg: string | undefined;
   let commandArg: string | undefined;
   let frameTarget: string | undefined;
+  let workspaceTarget: string | undefined;
+  let listWorkspaces = args.includes('--workspaces');
+  let workspaceNew: string | undefined;
+  let workspaceKill: string | undefined;
   let sinceRequestId: string | number | undefined;
 
   // Parse socket path
   const socketIndex = args.indexOf('-s');
   if (socketIndex !== -1) {
     socketPath = args[socketIndex + 1];
+    if (!socketPath || socketPath.startsWith('-')) {
+      console.error('Error: -s requires a socket path argument');
+      process.exit(1);
+    }
   }
 
   const socketArgIndex = args.indexOf('--socket');
   if (socketArgIndex !== -1) {
     socketPath = args[socketArgIndex + 1];
+    if (!socketPath || socketPath.startsWith('-')) {
+      console.error('Error: --socket requires a path argument');
+      process.exit(1);
+    }
   }
 
   // Parse eval code
   const evalIndex = args.indexOf('--eval');
   if (evalIndex !== -1) {
     evalCode = args[evalIndex + 1];
+    if (!evalCode || evalCode.startsWith('-')) {
+      console.error('Error: --eval requires a code argument');
+      process.exit(1);
+    }
   }
 
   // Parse kill buffer
   const killIndex = args.indexOf('--kill-buffer');
   if (killIndex !== -1) {
     killBuffer = args[killIndex + 1];
+    if (!killBuffer || killBuffer.startsWith('-')) {
+      console.error('Error: --kill-buffer requires a buffer name argument');
+      process.exit(1);
+    }
   }
 
   // Parse insert text
   const insertIndex = args.indexOf('--insert');
   if (insertIndex !== -1) {
     insertText = args[insertIndex + 1];
+    if (!insertText || insertText.startsWith('-')) {
+      console.error('Error: --insert requires a text argument');
+      process.exit(1);
+    }
   }
 
   // Parse script file
   const scriptIndex = args.indexOf('--script');
   if (scriptIndex !== -1) {
     scriptFile = args[scriptIndex + 1];
+    if (!scriptFile || scriptFile.startsWith('-')) {
+      console.error('Error: --script requires a file path argument');
+      process.exit(1);
+    }
   }
 
   // Parse --key
   const keyIndex = args.indexOf('--key');
   if (keyIndex !== -1) {
     keyArg = args[keyIndex + 1];
+    if (!keyArg || (keyArg.startsWith('-') && keyArg !== '-')) {
+      console.error('Error: --key requires a key argument');
+      process.exit(1);
+    }
   }
 
   // Parse --keys
   const keysIndex = args.indexOf('--keys');
   if (keysIndex !== -1) {
     keysArg = args[keysIndex + 1];
+    if (!keysArg || keysArg.startsWith('-')) {
+      console.error('Error: --keys requires a key sequence argument');
+      process.exit(1);
+    }
   }
 
   // Parse --command
   const commandIndex = args.indexOf('--command');
   if (commandIndex !== -1) {
     commandArg = args[commandIndex + 1];
+    if (!commandArg || commandArg.startsWith('-')) {
+      console.error('Error: --command requires a command name argument');
+      process.exit(1);
+    }
   }
 
   // Parse --frame
   const frameIndex = args.indexOf('--frame');
   if (frameIndex !== -1) {
     frameTarget = args[frameIndex + 1];
+    if (!frameTarget || frameTarget.startsWith('-')) {
+      console.error('Error: --frame requires a frame ID argument');
+      process.exit(1);
+    }
+  }
+
+  const workspaceIndex = args.indexOf('--workspace');
+  if (workspaceIndex !== -1) {
+    workspaceTarget = args[workspaceIndex + 1];
+    if (!workspaceTarget || workspaceTarget.startsWith('-')) {
+      console.error('Error: --workspace requires a workspace name argument');
+      process.exit(1);
+    }
+  }
+
+  const workspaceNewIndex = args.indexOf('--workspace-new');
+  if (workspaceNewIndex !== -1) {
+    workspaceNew = args[workspaceNewIndex + 1];
+    if (!workspaceNew || workspaceNew.startsWith('-')) {
+      console.error('Error: --workspace-new requires a workspace name argument');
+      process.exit(1);
+    }
+  }
+
+  const workspaceKillIndex = args.indexOf('--workspace-kill');
+  if (workspaceKillIndex !== -1) {
+    workspaceKill = args[workspaceKillIndex + 1];
+    if (!workspaceKill || workspaceKill.startsWith('-')) {
+      console.error('Error: --workspace-kill requires a workspace name argument');
+      process.exit(1);
+    }
   }
 
   // Parse --since-request
@@ -440,6 +536,10 @@ Examples:
   if (sinceIndex !== -1) {
     const val = args[sinceIndex + 1];
     sinceRequestId = val && !val.startsWith('-') ? (Number(val) || val) : undefined;
+    if (!sinceRequestId) {
+      console.error('Error: --since-request requires a request ID argument');
+      process.exit(1);
+    }
   }
 
   // Get non-option arguments (filenames)
@@ -453,17 +553,21 @@ Examples:
     arg !== keyArg &&
     arg !== keysArg &&
     arg !== commandArg &&
-    arg !== frameTarget
+    arg !== frameTarget &&
+    arg !== workspaceTarget &&
+    arg !== workspaceNew &&
+    arg !== workspaceKill
   );
 
   // Handle TUI mode by spawning the TUI client process
   if (tuiMode) {
-    const { spawn } = require('child_process');
-    const path = require('path');
-    const tuiClientPath = path.resolve(__dirname, '..', 'src', 'client', 'tui-client.ts');
+    const tuiClientPath = pathResolve(__dirname, '..', 'src', 'client', 'tui-client.ts');
     const tuiArgs = [];
     if (socketPath) {
       tuiArgs.push('-s', socketPath);
+    }
+    if (workspaceTarget) {
+      tuiArgs.push('--workspace', workspaceTarget);
     }
     const child = spawn('bun', [tuiClientPath, ...tuiArgs], {
       stdio: 'inherit',
@@ -519,7 +623,22 @@ Examples:
   }
 
   // Handle different commands
-  if (serverInfo || status) {
+  if (listWorkspaces) {
+    const result = await client.sendRequest('workspace-list', {});
+    if (jsonOutput) {
+      console.log(JSON.stringify(result));
+    } else {
+      for (const workspace of result) {
+        console.log(`${workspace.active ? '*' : ' '} ${workspace.name}`);
+      }
+    }
+  } else if (workspaceNew) {
+    const result = await client.sendRequest('workspace-new', { name: workspaceNew });
+    console.log(jsonOutput ? JSON.stringify(result) : `Workspace created: ${workspaceNew}`);
+  } else if (workspaceKill) {
+    const result = await client.sendRequest('workspace-kill', { name: workspaceKill });
+    console.log(jsonOutput ? JSON.stringify(result) : `Workspace killed: ${workspaceKill}`);
+  } else if (serverInfo || status) {
     const info = await client.sendRequest('status', {});
     if (jsonOutput || serverInfo) {
       console.log(JSON.stringify(info, null, jsonOutput ? 0 : 2));
@@ -572,6 +691,7 @@ Examples:
     // Use the insert method to add text to the buffer
     const insertParams: any = { text: insertText };
     if (frameTarget) insertParams.frameId = frameTarget;
+    if (workspaceTarget) insertParams.workspaceId = workspaceTarget;
     const result = await client.sendRequest('insert', insertParams);
     console.log(result);
   } else if (insertStdin) {
@@ -579,18 +699,19 @@ Examples:
     const stdin = await readStdin();
     const insertParams: any = { text: stdin };
     if (frameTarget) insertParams.frameId = frameTarget;
+    if (workspaceTarget) insertParams.workspaceId = workspaceTarget;
     const result = await client.sendRequest('insert', insertParams);
     console.log(result);
   } else if (scriptFile) {
     // Read the script file and evaluate it
-    const fs = require('fs');
-    const scriptContent = fs.readFileSync(scriptFile, 'utf8');
+    const scriptContent = readFileSync(scriptFile, 'utf8');
     const result = await client.eval(scriptContent);
     console.log(result);
   } else if (keyArg) {
     // Send a single keypress to the active frame
-    const params: any = { key: keyArg };
+    const params: any = { key: parseSingleKey(keyArg) };
     if (frameTarget) params.frameId = frameTarget;
+    if (workspaceTarget) params.workspaceId = workspaceTarget;
     try {
       const result = await client.sendRequest('keypress', params);
       if (jsonOutput) {
@@ -614,6 +735,7 @@ Examples:
     for (const key of keys) {
       const params: any = { key };
       if (frameTarget) params.frameId = frameTarget;
+      if (workspaceTarget) params.workspaceId = workspaceTarget;
       try {
         await client.sendRequest('keypress', params);
       } catch (error: any) {
@@ -635,6 +757,7 @@ Examples:
     // Execute an editor command by name
     const params: any = { command: commandArg };
     if (frameTarget) params.frameId = frameTarget;
+    if (workspaceTarget) params.workspaceId = workspaceTarget;
     try {
       const result = await client.sendRequest('command', params);
       if (jsonOutput) {
@@ -716,6 +839,7 @@ Examples:
   } else if (evalCode) {
     const evalParams: any = {};
     if (frameTarget) evalParams.frameId = frameTarget;
+    if (workspaceTarget) evalParams.workspaceId = workspaceTarget;
     const result = await client.eval(evalCode, evalParams);
     if (result !== undefined) {
       console.log(typeof result === 'object' ? JSON.stringify(result) : result);
@@ -723,7 +847,7 @@ Examples:
   } else if (filenames.length > 0) {
     // Open files
     for (const filename of filenames) {
-      await client.openFile(filename, { wait: !noWait });
+      await client.openFile(filename, { wait: !noWait, workspaceId: workspaceTarget });
     }
     // Exit with success code after opening files
     process.exit(0);

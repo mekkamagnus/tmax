@@ -1,5 +1,5 @@
 import { FunctionalTextBufferImpl } from "../core/buffer.ts";
-import type { EditorState, Tab, Window } from "../core/types.ts";
+import type { EditorState, Tab, Window, WorkspaceState, WorkspaceData, BufferMetadata, BufferModeState } from "../core/types.ts";
 
 function bufferContent(buffer: EditorState["currentBuffer"]): string {
   if (!buffer) return "";
@@ -25,6 +25,7 @@ function deserializeWindow(raw: unknown): Window | null {
     buffer: FunctionalTextBufferImpl.create(
       typeof record.bufferContent === "string" ? record.bufferContent : "",
     ),
+    bufferName: typeof record.bufferName === "string" ? record.bufferName : undefined,
     cursorLine: numberOr(record.cursorLine, 0),
     cursorColumn: numberOr(record.cursorColumn, 0),
     viewportTop: numberOr(record.viewportTop, 0),
@@ -48,6 +49,7 @@ function deserializeTab(raw: unknown): Tab | null {
     buffer: FunctionalTextBufferImpl.create(
       typeof record.bufferContent === "string" ? record.bufferContent : "",
     ),
+    bufferName: typeof record.bufferName === "string" ? record.bufferName : undefined,
   };
 }
 
@@ -57,6 +59,7 @@ export function editorStateToJson(state: EditorState): Record<string, unknown> {
     mode: state.mode,
     statusMessage: state.statusMessage,
     viewportTop: state.viewportTop,
+    viewportLeft: state.viewportLeft,
     config: state.config,
     commandLine: state.commandLine,
     mxCommand: state.mxCommand,
@@ -95,6 +98,7 @@ export function jsonToEditorState(json: Record<string, unknown>): EditorState {
     mode: json.mode as EditorState["mode"],
     statusMessage: json.statusMessage as string,
     viewportTop: json.viewportTop as number,
+    viewportLeft: (json.viewportLeft as number | undefined) ?? 0,
     config: json.config as EditorState["config"],
     commandLine: json.commandLine as string,
     mxCommand: json.mxCommand as string,
@@ -111,4 +115,232 @@ export function jsonToEditorState(json: Record<string, unknown>): EditorState {
     tabs,
     currentTabIndex: (json.currentTabIndex as number | undefined) ?? 0,
   };
+}
+
+// =============================================================================
+// WORKSPACE SERIALIZATION (RFC-014)
+// =============================================================================
+
+/**
+ * Convert WorkspaceState to WorkspaceData for serialization
+ *
+ * Converts buffer references to string contents and serializes all metadata.
+ */
+export function workspaceToData(workspace: WorkspaceState): WorkspaceData {
+  const buffers: WorkspaceData["buffers"] = [];
+
+  for (const [name, buffer] of workspace.buffers.entries()) {
+    const meta = workspace.bufferMetadata.get(name);
+    const modeState = workspace.bufferModeStates.get(name);
+
+    const contentResult = buffer.getContent();
+    if (contentResult._tag === "Left") {
+      // If we can't get buffer content, use empty string
+      console.error(`Failed to get buffer content for ${name}: ${contentResult.left}`);
+    }
+
+    buffers.push({
+      name,
+      filename: meta?.filename,
+      content: contentResult._tag === "Right" ? contentResult.right : "",
+      modified: meta?.modified ?? false,
+      majorMode: meta?.majorMode,
+      cursorLine: meta?.cursorLine ?? 0,
+      cursorColumn: meta?.cursorColumn ?? 0,
+      minorModes: modeState?.minorModes,
+      lighters: modeState?.lighters
+    });
+  }
+
+  return {
+    metadata: workspace.metadata,
+    buffers,
+    windows: workspace.windows.map(win => {
+      // R3-2: use cached bufferName when available (identity check fails after mutations)
+      let winBufferName = win.bufferName ?? "";
+      if (!winBufferName && win.buffer) {
+        for (const [name, buf] of workspace.buffers.entries()) {
+          if (buf === win.buffer) { winBufferName = name; break; }
+        }
+      }
+      return {
+      id: win.id,
+      bufferName: winBufferName,
+      cursorLine: win.cursorLine,
+      cursorColumn: win.cursorColumn,
+      viewportTop: win.viewportTop,
+      viewportLeft: win.viewportLeft,
+      splitType: win.splitType,
+      height: win.height,
+      width: win.width,
+      row: win.row,
+      col: win.col,
+      scrollback: win.scrollback ? {
+        capacity: win.scrollback.capacity,
+        lines: win.scrollback.lines,
+        size: win.scrollback.size,
+        head: win.scrollback.head,
+        tail: win.scrollback.tail,
+        viewportOffset: win.scrollback.viewportOffset
+      } : undefined
+      };
+    }),
+    tabs: workspace.tabs.map(tab => {
+      let tabBufferName = tab.bufferName ?? "";
+      if (!tabBufferName && tab.buffer) {
+        for (const [name, buf] of workspace.buffers.entries()) {
+          if (buf === tab.buffer) { tabBufferName = name; break; }
+        }
+      }
+      return {
+      id: tab.id,
+      label: tab.label,
+      bufferName: tabBufferName
+      };
+    }),
+    cursorState: workspace.cursorState,
+    viewportState: workspace.viewportState,
+    currentBufferName: workspace.currentBufferName,
+    currentFilename: workspace.currentFilename,
+    currentMajorMode: workspace.currentMajorMode,
+    activeMinorModes: workspace.activeMinorModes,
+    activeMinorModeLighters: workspace.activeMinorModeLighters
+  };
+}
+
+/**
+ * Convert WorkspaceData to WorkspaceState for deserialization
+ *
+ * Reconstructs FunctionalTextBuffer instances from string contents.
+ */
+export function dataToWorkspace(data: WorkspaceData): WorkspaceState {
+  // Reconstruct buffers
+  const buffers = new Map<string, import("../core/types.ts").FunctionalTextBuffer>();
+  const bufferMetadata = new Map<string, BufferMetadata>();
+  const bufferModeStates = new Map<string, BufferModeState>();
+
+  for (const bufferData of data.buffers ?? []) {
+    const buffer = FunctionalTextBufferImpl.create(bufferData.content);
+    buffers.set(bufferData.name, buffer);
+    bufferMetadata.set(bufferData.name, {
+      name: bufferData.name,
+      filename: bufferData.filename,
+      modified: bufferData.modified,
+      majorMode: bufferData.majorMode,
+      cursorLine: bufferData.cursorLine,
+      cursorColumn: bufferData.cursorColumn
+    });
+    bufferModeStates.set(bufferData.name, {
+      majorMode: bufferData.majorMode,
+      minorModes: bufferData.minorModes,
+      lighters: bufferData.lighters
+    });
+  }
+
+  // Ensure *scratch* exists (for old workspaces)
+  if (!buffers.has("*scratch*")) {
+    const scratchBuffer = FunctionalTextBufferImpl.create("");
+    buffers.set("*scratch*", scratchBuffer);
+    bufferMetadata.set("*scratch*", {
+      name: "*scratch*",
+      modified: false,
+      cursorLine: 0,
+      cursorColumn: 0
+    });
+    bufferModeStates.set("*scratch*", {});
+  }
+
+  // Reconstruct windows with buffer references
+  const windows: Window[] = [];
+  for (const winData of data.windows ?? []) {
+    const resolvedName = buffers.has(winData.bufferName) ? winData.bufferName : "*scratch*";
+    // R3-10: warn when buffer reference can't be resolved
+    if (winData.bufferName && !buffers.has(winData.bufferName)) {
+      console.warn(`dataToWorkspace: window "${winData.id}" references unknown buffer "${winData.bufferName}", falling back to *scratch*`);
+    }
+    const buffer = buffers.get(resolvedName)!;
+    const window: Window = {
+      id: winData.id,
+      buffer,
+      bufferName: resolvedName,
+      cursorLine: winData.cursorLine,
+      cursorColumn: winData.cursorColumn,
+      viewportTop: winData.viewportTop,
+      viewportLeft: winData.viewportLeft ?? 0,
+      ...(winData.splitType ? { splitType: winData.splitType } : {}),
+      ...(winData.height !== undefined ? { height: winData.height } : {}),
+      ...(winData.width !== undefined ? { width: winData.width } : {}),
+      ...(winData.row !== undefined ? { row: winData.row } : {}),
+      ...(winData.col !== undefined ? { col: winData.col } : {}),
+      ...(winData.scrollback ? {
+        scrollback: {
+          lines: winData.scrollback.lines,
+          capacity: winData.scrollback.capacity,
+          head: winData.scrollback.head,
+          tail: winData.scrollback.tail,
+          size: winData.scrollback.size,
+          viewportOffset: winData.scrollback.viewportOffset
+        }
+      } : {})
+    };
+    windows.push(window);
+  }
+
+  // Reconstruct tabs with buffer references
+  const tabs: Tab[] = [];
+  for (const tabData of data.tabs ?? []) {
+    const resolvedName = buffers.has(tabData.bufferName) ? tabData.bufferName : "*scratch*";
+    if (tabData.bufferName && !buffers.has(tabData.bufferName)) {
+      console.warn(`dataToWorkspace: tab "${tabData.id}" references unknown buffer "${tabData.bufferName}", falling back to *scratch*`);
+    }
+    const buffer = buffers.get(resolvedName)!;
+    const tab: Tab = {
+      id: tabData.id,
+      label: tabData.label,
+      buffer,
+      bufferName: resolvedName
+    };
+    tabs.push(tab);
+  }
+
+  return {
+    metadata: data.metadata,
+    buffers,
+    bufferMetadata,
+    bufferModeStates,
+    windows,
+    tabs,
+    cursorState: data.cursorState ?? { line: 0, column: 0 },
+    viewportState: data.viewportState ?? { top: 0 },
+    currentBufferName: data.currentBufferName ?? "*scratch*",
+    currentFilename: data.currentFilename,
+    currentMajorMode: data.currentMajorMode,
+    activeMinorModes: data.activeMinorModes,
+    activeMinorModeLighters: data.activeMinorModeLighters
+  };
+}
+
+/**
+ * Deserialize a buffer list from raw JSON data
+ *
+ * Helper function for converting array of buffer data to Map.
+ */
+export function deserializeBufferList(raw: unknown[]): Map<string, ReturnType<typeof FunctionalTextBufferImpl.create>> {
+  const buffers = new Map<string, ReturnType<typeof FunctionalTextBufferImpl.create>>();
+
+  for (const item of raw) {
+    if (!item || typeof item !== "object") continue;
+    const record = item as Record<string, unknown>;
+
+    if (typeof record.name === "string" && typeof record.content === "string") {
+      buffers.set(record.name, FunctionalTextBufferImpl.create(record.content));
+    }
+  }
+
+  // Ensure *scratch* exists
+  if (!buffers.has("*scratch*")) {
+    buffers.set("*scratch*", FunctionalTextBufferImpl.create(""));
+  }
+
+  return buffers;
 }

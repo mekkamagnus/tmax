@@ -1,6 +1,8 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { connect, Socket } from 'net';
-import { existsSync, unlinkSync, writeFileSync } from 'fs';
+import { existsSync, mkdtempSync, rmSync, unlinkSync, writeFileSync } from 'fs';
+import { tmpdir } from 'os';
+import { join } from 'path';
 import { TmaxServer } from '../../src/server/server.ts';
 
 function uniqueSocket(): string {
@@ -90,9 +92,17 @@ class RpcConnection {
 describe('Daemon hardening', () => {
   let server: TmaxServer | null = null;
   let socketPath: string;
+  let homeDir: string;
+  let originalHome: string | undefined;
+  let originalWorkspaceDir: string | undefined;
 
   beforeEach(() => {
     socketPath = uniqueSocket();
+    homeDir = mkdtempSync(join(tmpdir(), 'tmax-harden-home-'));
+    originalHome = process.env.HOME;
+    originalWorkspaceDir = process.env.TMAX_WORKSPACE_DIR;
+    process.env.HOME = homeDir;
+    process.env.TMAX_WORKSPACE_DIR = join(homeDir, '.config', 'tmax', 'workspaces');
   });
 
   afterEach(async () => {
@@ -103,6 +113,11 @@ describe('Daemon hardening', () => {
     // Clean up any remaining files
     try { unlinkSync(socketPath); } catch {}
     try { unlinkSync(socketPath + '.lock'); } catch {}
+    if (originalHome === undefined) delete process.env.HOME;
+    else process.env.HOME = originalHome;
+    if (originalWorkspaceDir === undefined) delete process.env.TMAX_WORKSPACE_DIR;
+    else process.env.TMAX_WORKSPACE_DIR = originalWorkspaceDir;
+    try { rmSync(homeDir, { recursive: true, force: true }); } catch {}
   });
 
   test('starting a second server on the same socket rejects', async () => {

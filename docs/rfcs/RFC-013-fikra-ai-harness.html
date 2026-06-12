@@ -1,0 +1,1978 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>RFC-013: Fikra — AI Harness</title>
+<style>
+  :root {
+    --bg: #0d1117;
+    --surface: #161b22;
+    --border: #30363d;
+    --text: #e6edf3;
+    --text-muted: #8b949e;
+    --accent: #f0883e;
+    --accent-dim: rgba(240, 136, 62, 0.15);
+    --green: #3fb950;
+    --blue: #58a6ff;
+    --purple: #bc8cff;
+    --red: #f85149;
+    --code-bg: #0d1117;
+    --inline-code-bg: rgba(240, 136, 62, 0.1);
+    --terminal-bg: #0c0e14;
+    --terminal-border: #1e2330;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    line-height: 1.7;
+    max-width: 920px;
+    margin: 0 auto;
+    padding: 2rem 2rem 6rem;
+  }
+  a { color: var(--blue); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+
+  .rfc-header {
+    border-bottom: 1px solid var(--border);
+    padding-bottom: 1.5rem;
+    margin-bottom: 2.5rem;
+  }
+  .rfc-header h1 { font-size: 2rem; font-weight: 700; margin-bottom: 0.5rem; }
+  .rfc-header h1 span { color: var(--accent); }
+  .rfc-meta { display: flex; gap: 1.5rem; color: var(--text-muted); font-size: 0.9rem; flex-wrap: wrap; }
+  .rfc-meta .status {
+    background: var(--accent-dim); color: var(--accent); padding: 0.15rem 0.6rem;
+    border-radius: 3px; font-weight: 600; font-size: 0.8rem;
+    text-transform: uppercase; letter-spacing: 0.05em;
+  }
+
+  h2 {
+    font-size: 1.4rem; font-weight: 700; margin-top: 2.5rem; margin-bottom: 1rem;
+    padding-bottom: 0.3rem; border-bottom: 1px solid var(--border);
+  }
+  h3 { font-size: 1.15rem; font-weight: 600; margin-top: 2rem; margin-bottom: 0.75rem; }
+
+  p { margin-bottom: 1rem; }
+  strong { font-weight: 600; }
+  em { color: var(--text-muted); font-style: italic; }
+  ol, ul { margin-bottom: 1rem; padding-left: 1.5rem; }
+  ol li, ul li { margin-bottom: 0.5rem; }
+  ol li::marker { color: var(--accent); font-weight: 600; }
+
+  pre {
+    background: var(--code-bg); border: 1px solid var(--border); border-radius: 6px;
+    padding: 1rem 1.25rem; overflow-x: auto; margin-bottom: 1.25rem;
+    font-size: 0.85rem; line-height: 1.6;
+  }
+  code { font-family: 'SF Mono', 'Fira Code', 'JetBrains Mono', Consolas, monospace; }
+  p code, li code {
+    background: var(--inline-code-bg); color: var(--accent);
+    padding: 0.1rem 0.35rem; border-radius: 3px; font-size: 0.85em;
+  }
+
+  table { width: 100%; border-collapse: collapse; margin-bottom: 1.5rem; font-size: 0.9rem; }
+  th { text-align: left; background: var(--surface); color: var(--accent); font-weight: 600; padding: 0.6rem 0.75rem; border: 1px solid var(--border); white-space: nowrap; }
+  td { padding: 0.5rem 0.75rem; border: 1px solid var(--border); vertical-align: top; }
+  tr:nth-child(even) td { background: rgba(255,255,255,0.02); }
+
+  .callout {
+    background: var(--accent-dim); border-left: 3px solid var(--accent);
+    padding: 0.75rem 1rem; border-radius: 0 4px 4px 0; margin-bottom: 1.25rem; font-size: 0.9rem;
+  }
+  .callout strong { color: var(--accent); }
+
+  .phase {
+    background: var(--surface); border: 1px solid var(--border); border-radius: 8px;
+    padding: 1.25rem 1.5rem; margin-bottom: 1.25rem;
+  }
+  .phase h3 { margin-top: 0; color: var(--accent); }
+  .phase .verify {
+    background: rgba(63, 185, 80, 0.1); border-left: 3px solid var(--green);
+    padding: 0.5rem 0.75rem; border-radius: 0 3px 3px 0; margin-top: 0.75rem;
+    font-size: 0.85rem; color: var(--green);
+  }
+
+  .alt-block {
+    background: var(--surface); border: 1px solid var(--border); border-radius: 6px;
+    padding: 1rem 1.25rem; margin-bottom: 1rem;
+  }
+  .alt-block h4 { font-size: 1rem; color: var(--red); margin-bottom: 0.4rem; }
+  .alt-block p { margin-bottom: 0; color: var(--text-muted); font-size: 0.9rem; }
+
+  .toc {
+    background: var(--surface); border: 1px solid var(--border); border-radius: 8px;
+    padding: 1rem 1.5rem; margin-bottom: 2.5rem;
+  }
+  .toc h3 { margin: 0 0 0.5rem; font-size: 0.9rem; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.05em; }
+  .toc ul { list-style: none; padding: 0; columns: 2; column-gap: 2rem; }
+  .toc li { margin-bottom: 0.25rem; font-size: 0.9rem; }
+  .toc a { color: var(--text-muted); }
+  .toc a:hover { color: var(--accent); }
+
+  /* ==========================================
+     HIGH-FIDELITY TERMINAL MOCKUPS
+     ========================================== */
+
+  .mockup {
+    background: var(--terminal-bg);
+    border: 2px solid var(--terminal-border);
+    border-radius: 10px;
+    overflow: hidden;
+    margin-bottom: 2rem;
+    box-shadow: 0 8px 32px rgba(0,0,0,0.4);
+  }
+  .mockup-title {
+    background: #1a1d27;
+    border-bottom: 1px solid var(--terminal-border);
+    padding: 0.5rem 1rem;
+    font-size: 0.75rem;
+    color: var(--text-muted);
+    font-family: -apple-system, BlinkMacSystemFont, sans-serif;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+  .mockup-title .dots span {
+    display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 6px;
+  }
+  .mockup-title .dots .r { background: #ff5f57; }
+  .mockup-title .dots .y { background: #febc2e; }
+  .mockup-title .dots .g { background: #28c840; }
+
+  .mockup-screen {
+    font-family: 'SF Mono', 'Fira Code', 'JetBrains Mono', 'Cascadia Code', Consolas, monospace;
+    font-size: 13px;
+    line-height: 1.55;
+    padding: 0;
+    color: #c9d1d9;
+    position: relative;
+  }
+
+  /* Tab bar */
+  .tab-bar {
+    background: #12141a;
+    border-bottom: 1px solid var(--terminal-border);
+    padding: 0 0.5rem;
+    display: flex;
+    font-size: 12px;
+    line-height: 2;
+    color: var(--text-muted);
+  }
+  .tab-bar .tab {
+    padding: 0 0.75rem;
+    border-right: 1px solid var(--terminal-border);
+  }
+  .tab-bar .tab.active {
+    background: var(--terminal-bg);
+    color: #e6edf3;
+  }
+  .tab-bar .tab.active::before {
+    content: "";
+    display: inline-block;
+    width: 6px; height: 6px;
+    border-radius: 50%;
+    background: var(--green);
+    margin-right: 6px;
+    vertical-align: middle;
+  }
+
+  /* Buffer content area */
+  .buffer {
+    padding: 0.5rem 0.75rem;
+    min-height: 120px;
+    white-space: pre;
+    overflow-x: auto;
+  }
+  .buffer .ln {
+    color: #3b4252;
+    user-select: none;
+    display: inline-block;
+    width: 3em;
+    text-align: right;
+    margin-right: 1em;
+  }
+  .buffer .cursor-line { background: rgba(240, 136, 62, 0.08); }
+
+  /* Status line (modeline) */
+  .modeline {
+    background: #1a4a8a;
+    color: #e6edf3;
+    padding: 0 0.5rem;
+    font-size: 12px;
+    line-height: 1.8;
+    display: flex;
+    justify-content: space-between;
+    white-space: nowrap;
+    overflow: hidden;
+  }
+  .modeline .mode {
+    font-weight: 700;
+    padding: 0 0.25rem;
+  }
+  .modeline .mode.normal { color: #3fb950; }
+  .modeline .mode.insert { color: #d29922; }
+  .modeline .mode.visual { color: #bc8cff; }
+  .modeline .filename { color: #e6edf3; }
+  .modeline .pos { color: #e6edf3; }
+  .modeline .major { color: #58a6ff; }
+
+  /* Fikra-specific elements */
+  .fikra-badge {
+    display: inline-block;
+    background: rgba(240, 136, 62, 0.2);
+    color: var(--accent);
+    font-size: 11px;
+    padding: 0 0.4rem;
+    border-radius: 3px;
+    margin-left: 0.5rem;
+    font-weight: 600;
+    line-height: 1.8;
+  }
+  .fikra-badge.streaming {
+    background: rgba(88, 166, 255, 0.2);
+    color: var(--blue);
+  }
+
+  /* Split layout */
+  .split-h {
+    display: flex;
+    border-top: 1px solid var(--terminal-border);
+  }
+  .split-pane {
+    flex: 1;
+    overflow: hidden;
+  }
+  .split-pane + .split-pane {
+    border-left: 2px solid var(--accent);
+  }
+
+  /* Chat buffer */
+  .chat-buffer {
+    padding: 0.5rem 0.75rem;
+    min-height: 140px;
+    white-space: pre-wrap;
+    word-break: break-word;
+    font-size: 13px;
+    line-height: 1.55;
+  }
+  .chat-buffer .chat-label {
+    font-weight: 700;
+    margin-right: 0.5rem;
+  }
+  .chat-buffer .chat-label.user { color: var(--green); }
+  .chat-buffer .chat-label.ai { color: var(--blue); }
+  .chat-buffer .chat-label.system { color: var(--text-muted); }
+  .chat-buffer .thinking {
+    color: var(--text-muted);
+    font-style: italic;
+  }
+
+  /* Chat input */
+  .chat-input {
+    border-top: 1px solid var(--terminal-border);
+    padding: 0.4rem 0.75rem;
+    font-size: 13px;
+    color: var(--text-muted);
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+  }
+  .chat-input .prompt { color: var(--accent); font-weight: 700; }
+  .chat-input .input-text { color: #e6edf3; }
+
+  /* Ghost text (inline completion) */
+  .ghost {
+    color: #484f58;
+    text-decoration: underline;
+    text-decoration-style: dotted;
+    text-underline-offset: 2px;
+    text-decoration-color: #484f58;
+  }
+
+  /* Cursor */
+  .cur {
+    background: rgba(240, 136, 62, 0.9);
+    color: #000;
+    animation: blink 1s step-end infinite;
+  }
+  @keyframes blink {
+    50% { background: transparent; color: inherit; }
+  }
+
+  /* Backend selector popup */
+  .popup-overlay {
+    position: relative;
+  }
+  .popup {
+    position: absolute;
+    bottom: 2.5rem;
+    left: 50%;
+    transform: translateX(-50%);
+    background: #1a1d27;
+    border: 1px solid var(--accent);
+    border-radius: 6px;
+    padding: 0.5rem 0;
+    min-width: 280px;
+    box-shadow: 0 4px 16px rgba(0,0,0,0.5);
+    z-index: 10;
+  }
+  .popup .popup-title {
+    color: var(--accent);
+    font-size: 12px;
+    font-weight: 700;
+    padding: 0.25rem 0.75rem;
+    margin-bottom: 0.25rem;
+    border-bottom: 1px solid var(--terminal-border);
+  }
+  .popup .popup-row {
+    padding: 0.2rem 0.75rem;
+    font-size: 12px;
+    line-height: 1.6;
+    display: flex;
+    justify-content: space-between;
+  }
+  .popup .popup-row.selected {
+    background: rgba(240, 136, 62, 0.15);
+  }
+  .popup .popup-row .avail {
+    margin-right: 0.5rem;
+  }
+  .popup .popup-row .avail.yes { color: var(--green); }
+  .popup .popup-row .avail.no { color: var(--text-muted); }
+  .popup .popup-row .proto { color: var(--text-muted); font-size: 11px; }
+
+  /* Which-key style popup */
+  .wk-popup {
+    background: #1a3a6a;
+    color: #e6edf3;
+    padding: 0.5rem 0.75rem;
+    font-size: 12px;
+    line-height: 1.7;
+    border-top: 1px solid var(--accent);
+  }
+  .wk-popup .wk-prefix {
+    color: var(--accent);
+    font-weight: 700;
+    margin-bottom: 0.25rem;
+  }
+  .wk-popup .wk-binding {
+    display: inline-block;
+    min-width: 30%;
+    margin-right: 0.5rem;
+  }
+  .wk-popup .wk-key { color: #58a6ff; font-weight: 600; }
+  .wk-popup .wk-cmd { color: #c9d1d9; }
+  .wk-popup .wk-desc { color: var(--text-muted); }
+
+  /* Mockup caption */
+  .mockup-caption {
+    padding: 0.5rem 1rem;
+    background: #1a1d27;
+    border-top: 1px solid var(--terminal-border);
+    font-size: 0.8rem;
+    color: var(--text-muted);
+    font-family: -apple-system, BlinkMacSystemFont, sans-serif;
+    font-style: italic;
+  }
+
+  /* Syntax highlighting for mockups */
+  .syn-kw { color: #ff7b72; }
+  .syn-str { color: #a5d6ff; }
+  .syn-fn { color: #d2a8ff; }
+  .syn-type { color: #79c0ff; }
+  .syn-cmt { color: #484f58; font-style: italic; }
+  .syn-num { color: #79c0ff; }
+  .syn-lisp-fn { color: #d2a8ff; }
+  .syn-lisp-str { color: #a5d6ff; }
+  .syn-lisp-kw { color: #ff7b72; }
+
+  @media (max-width: 700px) {
+    body { padding: 1rem; }
+    .toc ul { columns: 1; }
+    .rfc-meta { flex-direction: column; gap: 0.5rem; }
+    .split-h { flex-direction: column; }
+    .split-pane + .split-pane { border-left: none; border-top: 2px solid var(--accent); }
+  }
+</style>
+</head>
+<body>
+
+<header class="rfc-header">
+  <h1>RFC-013: <span>Fikra</span> — AI Harness</h1>
+  <div class="rfc-meta">
+    <span><strong>Date:</strong> 2026-06-12</span>
+    <span><strong>Author:</strong> Mekael Turner</span>
+    <span class="status">Proposed</span>
+  </div>
+</header>
+
+<nav class="toc">
+  <h3>Contents</h3>
+  <ul>
+    <li><a href="#summary">Summary</a></li>
+    <li><a href="#name">Name</a></li>
+    <li><a href="#motivation">Motivation</a></li>
+    <li><a href="#design-principles">Design Principles</a></li>
+    <li><a href="#architecture">Architecture</a></li>
+    <li><a href="#backend-adapters">Backend Adapters</a></li>
+    <li><a href="#checkpoint-system">Checkpoint System</a></li>
+    <li><a href="#worktree-isolation">Worktree Isolation</a></li>
+    <li><a href="#system-prompts">System Prompts</a></li>
+    <li><a href="#context-system">Context System</a></li>
+    <li><a href="#t-lisp-api">T-Lisp API</a></li>
+    <li><a href="#ui">UI Mockups</a></li>
+    <li><a href="#chat-key-bindings">Chat &amp; Capture Key Bindings</a></li>
+    <li><a href="#threads-turns">Threads, Turns &amp; Checkpoints</a></li>
+    <li><a href="#key-bindings">Key Bindings</a></li>
+    <li><a href="#configuration">Configuration</a></li>
+    <li><a href="#implementation">Implementation Phases</a></li>
+    <li><a href="#user-stories">User Stories</a></li>
+    <li><a href="#security">Security</a></li>
+    <li><a href="#alternatives">Alternatives Considered</a></li>
+    <li><a href="#open-questions">Open Questions</a></li>
+    <li><a href="#references">References</a></li>
+  </ul>
+</nav>
+
+<!-- ============================================================ -->
+<section id="summary">
+  <h2>Summary</h2>
+  <p>Fikra is an AI coding assistant built into tmax as a first-class minor mode. It provides a unified, fully terminal-based interface to multiple AI backends — Claude Code, OpenAI Codex, Google Gemini, Pi, Ollama, and custom agents — through a pluggable adapter system. Users activate it with <code>SPC a</code>, chat with AI in a dedicated buffer, manage agent sessions as threads, review per-turn diffs with git checkpoints, request inline completions, explain and refactor code, and switch backends mid-conversation — all without leaving the terminal.</p>
+  <p>Fikra combines the best of t3code and zcode. From t3code: a <strong>thread &rarr; turn</strong> model where each conversation is a thread, each AI interaction is a turn, and every turn gets a <strong>git checkpoint</strong> for revert-any-time accountability. From zcode: <strong>project-aware organization</strong> where threads are grouped by project directory, <strong>per-action safety confirmations</strong> (Allow / Reject / Always Allow per action type), and seamless <strong>backend switching mid-conversation</strong>. Three <strong>runtime mode presets</strong> (<code>approval-required</code>, <code>auto-accept-edits</code>, <code>full-access</code>) configure default safety behavior, while individual actions can still be confirmed or auto-trusted granularly. A <strong>plan mode</strong> lets the AI propose before implementing. Unlike those tools, Fikra's threads, turns, and diffs live in tmax buffers — navigable, searchable, and scriptable via T-Lisp.</p>
+  <p>Unlike standalone AI tools, Fikra runs inside a <strong>programmable editor</strong>: T-Lisp can customize prompts, define new AI workflows, compose multi-step agent chains, and hook AI responses into editor commands. The AI doesn't just generate text — it generates T-Lisp that runs against a live interpreter.</p>
+  <div class="callout"><strong>Future extraction.</strong> Fikra is built into tmax now so it ships immediately. Because it is written entirely in T-Lisp, extraction to a <a href="RFC-010-loom-package-manager.md">Loom</a> package is trivial &mdash; the files already follow Loom conventions. Once Loom ships, Fikra will be extracted into <code>tmax/fikra</code> as the first Loom package with zero restructuring.</div>
+</section>
+
+<section id="name">
+  <h2>Name</h2>
+  <p><strong>Fikra</strong> — Swahili for &ldquo;thought&rdquo; or &ldquo;idea&rdquo; (from <em>kufikiri</em>, to think). Works as a mode name (<code>fikra-mode</code>), a T-Lisp namespace (<code>fikra-*</code>), and a buffer name (<code>*Fikra*</code>).</p>
+</section>
+
+<section id="motivation">
+  <h2>Motivation</h2>
+  <p>Three trends converge:</p>
+  <ol>
+    <li><strong>AI coding tools are converging on the same shape.</strong> Claude Code, Codex CLI, Gemini CLI, zcode, t3code — they all do the same thing: gather context, call an API, stream a response, apply edits. The differentiation is increasingly in the wrapper, not the model.</li>
+    <li><strong>None of them live inside a programmable editor.</strong> Every AI coding tool is either a standalone CLI or a forked IDE. None give the user a scripting language to customize the AI interaction itself. Emacs has <code>gptel</code> and <code>claude-code.el</code>, but they're plugins fighting against a C core.</li>
+    <li><strong>tmax already has the infrastructure.</strong> Daemon/client architecture, JSON-RPC protocol, <code>*Messages*</code> observability, buffer management, mode system, T-Lisp extensibility. The pieces are on the board.</li>
+  </ol>
+  <p>The gap analysis in <code>docs/memos/ai-subscription-gap-analysis.md</code> correctly identified that most AI tooling is &ldquo;generic harness work.&rdquo; Fikra embraces that: it <em>is</em> a generic harness, but one where the user can rewrite every part of it in T-Lisp. That's the differentiator — not the AI, but the programmability of the AI.</p>
+
+  <h3>Why Built-In (For Now)</h3>
+  <ol>
+    <li><strong>Ship immediately.</strong> Fikra is useful today. Waiting for Loom adds months of dependency. Building it into tmax means the AI harness ships with the next release.</li>
+    <li><strong>Co-develop the interfaces.</strong> The T-Lisp API, adapter functions, and thread/turn model need real usage to stabilize. A built-in mode gets exercised by every developer immediately, exposing design problems fast.</li>
+    <li><strong>Extraction is trivial.</strong> Fikra lives entirely in <code>src/tlisp/core/fikra/</code> &mdash; pure T-Lisp with no TypeScript. When Loom ships, moving these files into a package is a file copy + <code>loom.toml</code>. No hybrid packaging needed.</li>
+  </ol>
+</section>
+
+<section id="design-principles">
+  <h2>Design Principles</h2>
+  <ol>
+    <li><strong>Adapter, not implementation.</strong> Fikra doesn't implement any AI logic. Each backend is an adapter that translates Fikra's standard protocol into whatever the backend speaks.</li>
+    <li><strong>T-Lisp all the way down.</strong> Every part of Fikra &mdash; adapters, workflows, prompts, context extraction, response post-processing, UI &mdash; is T-Lisp. The TypeScript core provides three generic primitives (<code>make-process</code>, <code>http-request</code>, <code>signal</code>) that any T-Lisp package can use. Fikra adds zero TypeScript to the core.</li>
+    <li><strong>Terminal-native UX.</strong> No GUI. No web views. Chat in a buffer, completions as ghost text, status in the modeline. Every AI tool interaction looks like editing.</li>
+    <li><strong>Backend-agnostic conversations.</strong> Switch backends mid-conversation. Chat with Claude, then ask Gemini to review its answer, then send both responses to Codex for a synthesis.</li>
+    <li><strong>Zero mandatory dependencies.</strong> Fikra is built into tmax but inactive until the user enables it. Backends are discovered at runtime — if <code>claude</code> is on PATH, the Claude Code adapter is available.</li>
+    <li><strong>Streaming-first.</strong> All backends stream tokens into the chat buffer as they arrive. No spinner-then-wall-of-text.</li>
+    <li><strong>Git-based accountability.</strong> Every AI turn gets a git checkpoint. The user can diff, review, and revert any turn. The AI is accountable to the repository.</li>
+  </ol>
+</section>
+
+<section id="architecture">
+  <h2>Architecture</h2>
+
+  <h3>TypeScript Core Prerequisites</h3>
+  <p>Fikra requires three generic primitives added to the TypeScript&rarr;T-Lisp bridge. These are not Fikra-specific &mdash; they benefit any T-Lisp package that needs subprocess or network access:</p>
+  <ol>
+    <li><strong><code>make-process</code></strong> &mdash; spawn a subprocess, stream stdout/stderr line-by-line to a T-Lisp filter function. Supports stdin write, signal/kill, exit status callback.</li>
+    <li><strong><code>http-request</code></strong> &mdash; async HTTP with streaming response body. Returns headers + status to T-Lisp, streams chunks to a filter function.</li>
+    <li><strong><code>signal</code></strong> &mdash; send a signal (SIGTERM, SIGKILL, SIGINT) to a running process.</li>
+  </ol>
+  <p>These are small (~50-100 lines each) additions to the existing T-Lisp runtime in <code>src/editor/tlisp-api.ts</code>. No new TypeScript files.</p>
+
+  <h3>Source Structure (Built-In)</h3>
+  <p>Fikra is entirely T-Lisp. It lives in <code>src/tlisp/core/fikra/</code> and is loaded when <code>fikra-mode</code> is activated. Zero TypeScript files in Fikra itself.</p>
+  <pre><code>src/tlisp/core/fikra/
+├── fikra-mode.tlisp                  ; Minor mode, key bindings, activation
+├── fikra-chat.tlisp                  ; *Fikra* buffer management, input area
+├── fikra-context.tlisp               ; Context extraction (buffer, selection, project)
+├── fikra-workflow.tlisp              ; Workflows: explain, fix, refactor, review, test
+├── fikra-ghost.tlisp                 ; Inline completion rendering
+├── fikra-thread.tlisp                ; Thread/turn state machine, checkpoint manager
+├── fikra-worktree.tlisp              ; Worktree isolation: create, handoff, snapshot, cleanup
+├── fikra-checkpoint.tlisp            ; Checkpoint views, diff buffers, revert
+├── fikra-adapter.tlisp               ; Adapter registry, base protocol functions
+├── fikra-backend-claude.tlisp        ; Claude Code adapter (make-process)
+├── fikra-backend-codex.tlisp         ; Codex CLI adapter (make-process)
+├── fikra-backend-gemini.tlisp        ; Gemini CLI adapter (make-process)
+├── fikra-backend-ollama.tlisp        ; Ollama adapter (http-request)
+├── fikra-backend-pi.tlisp            ; Pi agent adapter (http-request)
+└── fikra-safety.tlisp                ; Per-action confirmations, runtime modes</code></pre>
+
+  <h3>Project &rarr; Thread &rarr; Turn Model</h3>
+  <p>Fikra uses a three-level hierarchy inspired by the best of zcode and t3code.</p>
+
+  <p><strong>Project</strong> — the current working directory (or git repository root). All threads are grouped under their project. The <code>*Fikra-Threads*</code> buffer groups threads by project, like zcode's sidebar. Switching projects scopes the thread list accordingly.</p>
+
+  <p><strong>Thread</strong> — a conversation with a backend. Each project auto-creates a &ldquo;main&rdquo; thread when the user presses <code>SPC a a</code> to open Fikra Chat. Additional threads can be created with <code>SPC a t</code> (<code>fikra-thread-new</code>). Each thread has its own message history, model selection, runtime mode, and git branch. Threads run in <strong>Local mode</strong> (working directory, foreground) or <strong>Worktree mode</strong> (isolated git checkout, background). Multiple threads can exist concurrently within a project, each in its own isolated worktree. Threads can seamlessly switch between Local and Worktree mode via Handoff (<code>SPC a w</code>).</p>
+
+  <p><strong>Turn</strong> — a single interaction within a thread. The user sends a message, the AI responds (possibly making file edits), and a checkpoint is captured. Each turn tracks: status, messages exchanged, tool calls made, and the git checkpoint ref.</p>
+
+  <p><strong>Checkpoint</strong> — a git ref (<code>fikra/&lt;thread-id&gt;/&lt;turn-count&gt;</code>) captured at the boundary of each turn. Before the AI starts, a baseline checkpoint is captured. When the AI finishes, a completion checkpoint is captured. The diff between consecutive checkpoints is the per-turn change set.</p>
+
+  <p>The lifecycle:</p>
+  <ol>
+    <li><strong>Open project</strong> — tmax's working directory defines the project scope</li>
+    <li><strong>Open Fikra Chat</strong> — <code>SPC a a</code> opens the project's main chat thread full-screen (auto-created if first time)</li>
+    <li><strong>Send a turn</strong> — user types a message, AI responds via streaming; tool calls appear inline</li>
+    <li><strong>Navigate files</strong> — file references in AI responses are navigable links; <code>RET</code> opens an editor, <code>SPC a a</code> returns to chat</li>
+    <li><strong>Safety confirmations</strong> — each AI action (file write, command run, network request) triggers a confirmation based on runtime mode and per-action trust settings</li>
+    <li><strong>Checkpoint</strong> — git ref captured automatically at turn boundary</li>
+    <li><strong>Review diff</strong> — <code>SPC a d</code> shows the per-turn diff in <code>*Fikra-Diff*</code>; accept/revert with <code>y</code>/<code>n</code></li>
+    <li><strong>Continue or revert</strong> — next turn continues from the checkpoint; <code>SPC a R</code> reverts to any prior turn</li>
+  </ol>
+
+  <h3>Runtime Modes + Per-Action Confirmations</h3>
+  <p>Runtime modes are <strong>presets</strong> that configure default confirmation behavior. Individual actions can still be confirmed or auto-trusted independently.</p>
+
+  <p><strong>Mode presets:</strong></p>
+  <table>
+    <thead><tr><th>Mode</th><th>File edits</th><th>Commands</th><th>Network</th><th>Use case</th></tr></thead>
+    <tbody>
+      <tr><td><code>approval-required</code></td><td>Confirm each</td><td>Confirm each</td><td>Confirm each</td><td>Default, safe exploration</td></tr>
+      <tr><td><code>auto-accept-edits</code></td><td>Auto</td><td>Confirm each</td><td>Confirm each</td><td>Code-heavy iterations</td></tr>
+      <tr><td><code>full-access</code></td><td>Auto</td><td>Auto</td><td>Confirm each</td><td>Autonomous agent mode</td></tr>
+    </tbody>
+  </table>
+
+  <p>Mode is set per-thread and can be changed mid-conversation with <code>SPC a m</code>.</p>
+
+  <p><strong>Per-action confirmation</strong> &mdash; when an AI action requires approval, a confirmation appears inline:</p>
+  <pre><code>  AI wants to: write to src/editor/handlers/normal-handler.ts
+  [y] Allow  [n] Reject  [a] Always allow file writes</code></pre>
+  <ul>
+    <li><strong>Allow</strong> &mdash; approve this one action only</li>
+    <li><strong>Reject</strong> &mdash; deny this action; the AI adapts its approach</li>
+    <li><strong>Always allow</strong> &mdash; auto-trust this action type for the rest of the thread</li>
+  </ul>
+  <p>Inspired by zcode's action-level safety, combined with t3code's checkpoint-level revert as a safety net. Even if you "always allow" file writes and the AI makes a mistake, you can still revert the entire turn via <code>SPC a R</code>.</p>
+
+  <h3>Plan Mode</h3>
+  <p>A thread can be started in <strong>plan mode</strong> (<code>SPC a p</code>). In plan mode: the AI proposes a markdown plan instead of making edits; the plan appears in the <code>*Fikra*</code> buffer; user approves (<code>y</code>) or requests changes (<code>e</code>); on approval, a new turn starts in implementation mode, referencing the plan.</p>
+
+  <h3>Backend Adapters</h3>
+  <p>Every adapter is a T-Lisp module that implements the adapter protocol through three functions:</p>
+  <pre><code>;; Adapter protocol — each backend must provide these
+(defun fikra-backend-&lt;name&gt;-available-p ()
+  "Return t if this backend is installed and ready.")
+
+(defun fikra-backend-&lt;name&gt;-chat (messages options)
+  "Send MESSAGES to the backend, streaming tokens into *Fikra*.
+MESSAGES is a list of (role . content) pairs.
+OPTIONS is an alist of backend-specific settings.
+Tokens are appended to the current thread's buffer via fikra-token-insert.")
+
+(defun fikra-backend-&lt;name&gt;-abort ()
+  "Abort the current streaming request.")</code></pre>
+  <p>The adapter registry in <code>fikra-adapter.tlisp</code> manages backend discovery and routing:</p>
+  <pre><code>;; Adapter registry
+(defvar fikra-backends '())   ; alist of (name . backend-module)
+
+(defun fikra-register-backend (name module)
+  "Register a backend module under NAME."
+  (push (cons name module) fikra-backends))
+
+(defun fikra-backend-call (method &amp;rest args)
+  "Call METHOD on the current backend with ARGS."
+  (let ((fn (intern (concat "fikra-backend-" (fikra-current-backend) "-" method))))
+    (apply fn args)))</code></pre>
+
+  <h3>Adapter Protocols</h3>
+  <table>
+    <thead><tr><th>Backend</th><th>Protocol</th><th>Discovery</th><th>T-Lisp Primitive</th></tr></thead>
+    <tbody>
+      <tr><td>Claude Code</td><td>CLI subprocess</td><td><code>claude</code> on PATH</td><td><code>make-process</code></td></tr>
+      <tr><td>OpenAI Codex</td><td>CLI subprocess</td><td><code>codex</code> on PATH</td><td><code>make-process</code></td></tr>
+      <tr><td>Google Gemini</td><td>CLI subprocess</td><td><code>gemini</code> on PATH</td><td><code>make-process</code></td></tr>
+      <tr><td>Pi Agent</td><td>Custom (HTTP/WS)</td><td>Configured endpoint</td><td><code>http-request</code></td></tr>
+      <tr><td>Ollama</td><td>HTTP REST</td><td><code>ollama</code> + <code>localhost:11434</code></td><td><code>http-request</code></td></tr>
+      <tr><td>Custom</td><td>HTTP or CLI</td><td>User-configured</td><td>Either</td></tr>
+    </tbody>
+  </table>
+
+  <h3>CLI Adapter Pattern</h3>
+  <p>Most adapters follow the same pattern &mdash; spawn a subprocess, pipe messages in, stream tokens out:</p>
+  <pre><code>;; fikra-backend-claude.tlisp (representative CLI adapter)
+(defun fikra-backend-claude-available-p ()
+  "Return t if claude CLI is on PATH."
+  (not (string= (shell-command-to-string "which claude 2&gt;/dev/null") "")))
+
+(defun fikra-backend-claude-chat (messages options)
+  "Stream chat via claude CLI subprocess."
+  (let* ((args (list "--print" "--output-format" "stream-json"))
+         (proc (make-process
+                 :command (cons "claude" args)
+                 :stdin (json-encode `((messages . ,messages)
+                                       (options . ,options)))
+                 :filter 'fikra-backend-claude-filter
+                 :sentinel 'fikra-backend-claude-sentinel)))
+    (fikra-set-current-process proc)))
+
+(defun fikra-backend-claude-filter (proc output)
+  "Parse streamed JSON lines from claude, insert tokens into *Fikra*."
+  (dolist (line (split-string output "\n"))
+    (when (not (string= line ""))
+      (let* ((json (json-read-from-string line))
+             (type (alist-get 'type json))
+             (content (alist-get 'content json)))
+        (fikra-token-insert type content)))))
+
+(defun fikra-backend-claude-abort ()
+  "Kill the running claude process."
+  (signal (fikra-current-process) 'SIGTERM))</code></pre>
+</section>
+
+<section id="checkpoint-system">
+  <h2>Checkpoint System</h2>
+  <p>Every turn gets two git checkpoints:</p>
+  <ul>
+    <li><strong>Baseline</strong>: captured before the AI starts working (<code>fikra/&lt;thread-id&gt;/&lt;turn&gt;-baseline</code>)</li>
+    <li><strong>Completion</strong>: captured after the AI finishes (<code>fikra/&lt;thread-id&gt;/&lt;turn&gt;</code>)</li>
+  </ul>
+  <p>The diff between consecutive checkpoints gives the per-turn file changes. The diff from thread creation to any checkpoint gives the cumulative changes.</p>
+  <p>Checkpoints are stored as T-Lisp alists in the thread state:</p>
+  <pre><code>((thread-id . "main")
+ (turn-count . 3)
+ (ref . "fikra/main/3")
+ (baseline-ref . "fikra/main/3-baseline")
+ (status . ready)
+ (files . ((("path" . "tlisp-api.ts")
+            ("kind" . modified)
+            ("additions" . 8)
+            ("deletions" . 0))))
+ (completed-at . "2026-06-12T14:32:00Z"))</code></pre>
+  <p>Checkpoint capture uses the existing <code>shell-command-to-string</code> bridge:</p>
+  <pre><code>(defun fikra-checkpoint-capture (thread-id turn-count kind)
+  "Capture a git checkpoint. KIND is 'baseline or 'completion."
+  (let ((ref (format "fikra/%s/%s%s" thread-id turn-count
+                     (if (eq kind 'baseline) "-baseline" ""))))
+    (shell-command-to-string
+      (format "git add -A &amp;&amp; git commit -m 'fikra checkpoint: %s' --allow-empty"))
+    (shell-command-to-string
+      (format "git update-ref refs/heads/%s HEAD" ref))
+    ref))</code></pre>
+  <p>Reverting a checkpoint restores the filesystem to that ref, truncates the thread's message history to that turn, and cleans up stale checkpoint refs.</p>
+
+  <h3 id="worktree-isolation">Worktree Isolation</h3>
+  <p>Each thread operates in one of two modes, inspired by Codex's Local/Worktree runtime model:</p>
+  <ul>
+    <li><strong>Local mode</strong> &mdash; the thread works directly in the project's working directory. This is the default for the first thread. Edits affect the user's actual files immediately.</li>
+    <li><strong>Worktree mode</strong> &mdash; the thread works in an isolated git worktree &mdash; a separate checkout of the repository. Concurrent threads in worktree mode never conflict with each other or with the user's working directory.</li>
+  </ul>
+  <p><strong>Handoff</strong> &mdash; threads can seamlessly switch between Local and Worktree mode mid-session. A thread starts in Local, hands off to Worktree to run in the background, then hands off back to Local to inspect results in the working directory. State is preserved across handoffs: the worktree is snapshotted before removal and restored on re-entry.</p>
+  <pre><code>;; Worktree lifecycle (pure T-Lisp via git CLI)
+
+(defun fikra-worktree-create (thread-id)
+  "Create an isolated worktree for THREAD-ID."
+  (let ((path (format ".tmax/worktrees/%s" thread-id)))
+    (shell-command-to-string
+      (format "git worktree add --detach %s HEAD" path))
+    path))
+
+(defun fikra-worktree-snapshot (thread-id)
+  "Snapshot worktree state before cleanup."
+  (let ((path (format ".tmax/worktrees/%s" thread-id)))
+    (shell-command-to-string
+      (format "cd %s &amp;&amp; git add -A &amp;&amp; git commit -m 'fikra snapshot: %s' --allow-empty"
+              path thread-id))))
+
+(defun fikra-worktree-cleanup (thread-id)
+  "Remove worktree after snapshotting."
+  (let ((path (format ".tmax/worktrees/%s" thread-id)))
+    (fikra-worktree-snapshot thread-id)
+    (shell-command-to-string
+      (format "git worktree remove %s" path))))
+
+(defun fikra-handoff ()
+  "Switch current thread between Local &amp;leftrightarrow; Worktree mode."
+  (if (fikra-thread-worktree-p (fikra-current-thread))
+      (fikra-handoff-to-local (fikra-current-thread))
+    (fikra-handoff-to-worktree (fikra-current-thread))))</code></pre>
+  <p>Worktree properties:</p>
+  <ul>
+    <li><strong>Detached HEAD</strong> by default &mdash; worktrees don't create branches unless the user explicitly asks</li>
+    <li><strong>Disposable</strong> &mdash; worktrees are auto-created per thread and auto-cleaned up when the thread closes or when the count exceeds a configurable limit (default: 10)</li>
+    <li><strong>Snapshot + restore</strong> &mdash; before cleanup, all changes are committed to a snapshot ref. If the user re-opens the thread in worktree mode, the snapshot is restored</li>
+    <li><strong>Stored in <code>.tmax/worktrees/</code></strong> &mdash; not in <code>.git/worktrees/</code>, keeping tmax's worktree management separate from the user's own worktrees</li>
+  </ul>
+</section>
+
+<section id="system-prompts">
+  <h2>System Prompts</h2>
+  <p>Each workflow has a default system prompt (in T-Lisp), overridable by the user:</p>
+  <pre><code>(defvar fikra-explain-prompt
+  "You are a code explainer. Explain the following code clearly and concisely.
+  Focus on: what it does, why, and any non-obvious patterns.")
+
+(defvar fikra-fix-prompt
+  "You are a bug fixer. Analyze the following code and suggest a fix.
+  Explain the bug, then provide the corrected code.")
+
+(defvar fikra-refactor-prompt
+  "You are a code refactorer. Improve the following code for clarity and efficiency.
+  Preserve all existing behavior.")</code></pre>
+</section>
+
+<section id="context-system">
+  <h2>Context System</h2>
+  <p>Context extraction uses existing T-Lisp editor primitives &mdash; no Fikra-specific TypeScript needed.</p>
+  <p><strong>Editor primitives</strong> (already in T-Lisp API):</p>
+  <ul>
+    <li><code>buffer-text</code> &mdash; full buffer text</li>
+    <li><code>buffer-selection</code> &mdash; selected text with line range</li>
+    <li><code>cursor-line</code>, <code>cursor-column</code> &mdash; cursor position</li>
+    <li><code>buffer-file-name</code> &mdash; file path of current buffer</li>
+    <li><code>buffer-mode</code> &mdash; active major mode (language)</li>
+    <li><code>shell-command-to-string</code> &mdash; project file listing (lazy)</li>
+  </ul>
+  <p><strong>Fikra context composition</strong> (user-customizable):</p>
+  <pre><code>(defun fikra-build-context ()
+  "Build context for AI request. Users can override this."
+  (let ((buf (buffer-text))
+        (sel (buffer-selection))
+        (file (buffer-file-name))
+        (mode (buffer-mode)))
+    (concat
+      (when sel (concat "Selected code:\n```\n" sel "\n```\n"))
+      (when file (concat "File: " file " (" mode ")\n"))
+      (when buf (concat "Buffer content:\n```\n" buf "\n```\n")))))</code></pre>
+  <p>Users can override <code>fikra-build-context</code> to include project-specific context, inject documentation, or strip sensitive data.</p>
+</section>
+
+<section id="t-lisp-api">
+  <h2>T-Lisp API</h2>
+  <pre><code>;; Start/stop
+(fikra-start &amp;optional backend)       ; Start fikra-mode, optionally with specific backend
+(fikra-stop)                          ; Stop fikra, close buffers
+
+;; Project awareness
+(fikra-project-current)               ; Get current project root path
+(fikra-project-threads)               ; List threads for current project
+(fikra-project-switch path)           ; Switch to a different project&#39;s threads
+
+;; Thread management
+(fikra-thread-new &amp;optional backend)  ; Create a new thread (new *Fikra* buffer)
+(fikra-thread-list)                   ; List all threads with status (grouped by project)
+(fikra-thread-switch thread-id)       ; Switch to a different thread&#39;s buffer
+(fikra-thread-close thread-id)        ; Close a thread, clean up checkpoints
+(fikra-thread-archive thread-id)      ; Archive a thread (soft delete)
+
+;; Turn management
+(fikra-turn-send message)             ; Send message → starts a new turn
+(fikra-turn-interrupt)                ; Cancel the current in-progress turn
+(fikra-turn-status)                   ; Get current turn status (idle/running/completed/error)
+
+;; Capture buffer (message composition)
+(fikra-capture)                       ; Open capture buffer for message composition
+(fikra-capture-submit)                ; Submit capture buffer contents as a new turn
+(fikra-capture-cancel)                ; Discard capture buffer contents
+
+;; Chat (convenience wrappers around turn-send)
+(fikra-chat message)                  ; Send message to current backend
+(fikra-chat-with-context message)     ; Send message with buffer context
+(fikra-chat-region)                   ; Send selection to chat
+
+;; Checkpoints &amp; diffs
+(fikra-checkpoint-list)               ; List checkpoints for current thread
+(fikra-checkpoint-diff turn-count)    ; Show diff for a specific turn
+(fikra-checkpoint-diff-full)          ; Show cumulative diff from thread start
+(fikra-checkpoint-revert turn-count)  ; Revert filesystem + thread to a checkpoint
+(fikra-accept-edits)                  ; Accept current turn&#39;s edits (in approval mode)
+(fikra-reject-edits)                  ; Reject current turn&#39;s edits, revert to baseline
+
+;; Safety confirmations (per-action)
+(fikra-action-allow)                  ; Allow this one action
+(fikra-action-reject)                 ; Reject this action
+(fikra-action-always-allow action-type) ; Auto-trust this action type for the thread
+
+;; Runtime mode (presets for confirmation behavior)
+(fikra-set-runtime-mode mode)         ; Set mode: approval-required, auto-accept-edits, full-access
+(fikra-runtime-mode)                  ; Get current runtime mode
+
+;; Plan mode
+(fikra-plan-start)                    ; Start a plan-mode turn (AI proposes, doesn&#39;t edit)
+(fikra-plan-approve)                  ; Approve proposed plan, start implementation turn
+(fikra-plan-edit)                     ; Edit the proposed plan before approving
+(fikra-plan-reject)                   ; Reject proposed plan
+
+;; Completions
+(fikra-complete)                      ; Request inline completion at cursor
+(fikra-accept)                        ; Accept ghost text completion
+(fikra-dismiss)                       ; Dismiss ghost text completion
+
+;; Workflows (single-shot — create thread, send turn, show result)
+(fikra-explain)    (fikra-fix)    (fikra-refactor)
+(fikra-review)     (fikra-test)
+
+;; Worktree isolation
+(fikra-handoff)                        ; Switch thread between Local &amp;leftrightarrow; Worktree mode
+(fikra-thread-worktree-p thread-id)    ; Is this thread in a worktree?
+(fikra-worktree-status)                ; Show current thread&#39;s worktree path and status
+
+;; Backend management
+(fikra-set-backend name)              ; Switch to named backend (mid-conversation)
+(fikra-list-backends)                 ; List available backends
+(fikra-register-backend name config)  ; Register custom backend
+
+;; History &amp; config
+(fikra-history)                       ; Show conversation history
+(fikra-clear-history)                 ; Clear conversation history
+(fikra-set-option key value)          ; Set option (model, temperature, etc.)</code></pre>
+
+  <h3>Custom Workflow</h3>
+  <pre><code>(defworkflow fikra-document
+  "Generate documentation for the function at point."
+  :prompt "Generate T-Lisp docstring for the following function."
+  :context '(selection buffer-metadata)
+  :on-response 'fikra-insert-above)</code></pre>
+</section>
+
+<!-- ============================================================ -->
+<!-- UI MOCKUPS -->
+<!-- ============================================================ -->
+
+<section id="ui">
+  <h2>UI</h2>
+
+  <!-- MOCKUP 1: Full-screen Fikra Chat -->
+  <h3>1. Fikra Chat (Full-Screen)</h3>
+  <p>The primary Fikra UX. User presses <code>SPC a a</code> and the <code>*Fikra*</code> buffer opens full-screen as the project's main chat thread. No editor visible &mdash; just the conversation. File references in AI responses are navigable links; pressing <code>RET</code> on one opens an editor buffer. <code>SPC a a</code> returns to the chat.</p>
+
+  <div class="mockup">
+    <div class="mockup-title">
+      <div class="dots"><span class="r"></span><span class="y"></span><span class="g"></span></div>
+      <span>tmax — *Fikra*</span>
+      <span></span>
+    </div>
+    <div class="mockup-screen">
+      <!-- Tab bar -->
+      <div class="tab-bar">
+        <div class="tab active">*Fikra*</div>
+        <div class="tab">editor.ts</div>
+        <div class="tab">*Messages*</div>
+      </div>
+
+      <!-- Chat header -->
+      <div style="padding: 0.25rem 0.75rem; border-bottom: 1px solid var(--terminal-border); font-size: 11px; color: var(--text-muted); display: flex; justify-content: space-between;">
+        <span><span style="color: var(--accent);">tmax</span> &middot; main &middot; claude-sonnet-4-6</span>
+        <span style="color: var(--blue);">&#x25C9; streaming</span>
+      </div>
+
+      <!-- Full-screen chat buffer -->
+      <div class="chat-buffer" style="min-height: 15em;">
+<span class="chat-label user">You:</span> Explain the gap buffer implementation in <span style="color: var(--blue); text-decoration: underline;">src/core/buffer.ts</span>
+
+<span class="chat-label ai">Claude:</span> The gap buffer splits the internal text array into two segments — before the gap and after the gap — with an empty region (the "gap") in between.
+
+Insertions always happen at the gap boundary, making them O(1). When the cursor moves, the gap relocates by copying characters across the boundary, which is O(n) for long jumps but amortized O(1) for typical editing patterns.
+
+The key optimization is that most edits cluster around the cursor, so the gap rarely needs to move far. The buffer maintains three pointers:
+  - <span style="color: var(--text-muted);">gapStart</span> &mdash; first free slot in the gap
+  - <span style="color: var(--text-muted);">gapEnd</span> &mdash; first occupied slot after the gap
+  - <span style="color: var(--text-muted);">data</span> &mdash; the underlying array
+
+Modified files: <span style="color: var(--blue); text-decoration: underline;">src/core/buffer.ts</span></div>
+
+      <!-- Hint bar -->
+      <div style="border-top: 1px solid var(--terminal-border); padding: 0.3rem 0.75rem; display: flex; justify-content: space-between; font-size: 12px;">
+        <span style="color: var(--text-muted);">Press <span style="color: var(--blue); font-weight: 600;">i</span> to compose a message</span>
+        <span style="color: var(--text-muted); font-size: 11px;">j/k: scroll  RET: follow link  q: quit</span>
+      </div>
+
+      <!-- Modeline -->
+      <div class="modeline">
+        <div>
+          <span class="mode normal">--NORMAL--</span>
+          <span class="fikra-badge streaming">fikra:claude&#x25C9;</span>
+        </div>
+        <div>
+          <span class="pos">L1 C1</span>
+          <span class="major"> [fikra-chat]</span>
+        </div>
+      </div>
+    </div>
+    <div class="mockup-caption">Figure 1: Full-screen Fikra Chat for the tmax project (read-only). Claude is streaming a response. File paths are navigable links. Press <code>i</code> to open a capture buffer for composing a message.</div>
+  </div>
+
+  <!-- MOCKUP 1b: Capture Buffer -->
+  <h3>2. Capture Buffer (Message Composition)</h3>
+  <p>Inspired by Emacs' <code>org-capture</code>, Fikra uses a small popup buffer for composing messages. The chat buffer is read-only (conversation + streaming). Press <code>i</code> to pop up a capture buffer, type your message with full editing, then <code>C-c C-c</code> to send or <code>C-c C-k</code> to cancel.</p>
+
+  <div class="mockup">
+    <div class="mockup-title">
+      <div class="dots"><span class="r"></span><span class="y"></span><span class="g"></span></div>
+      <span>tmax — *Fikra*</span>
+      <span></span>
+    </div>
+    <div class="mockup-screen">
+      <div class="tab-bar">
+        <div class="tab active">*Fikra*</div>
+        <div class="tab">*Fikra-Capture*</div>
+      </div>
+
+      <!-- Chat buffer (dimmed behind capture) -->
+      <div class="chat-buffer" style="min-height: 8em; opacity: 0.4; filter: blur(0.5px);">
+<span class="chat-label user">You:</span> Explain the gap buffer implementation
+
+<span class="chat-label ai">Claude:</span> The gap buffer splits the internal text array into two segments &mdash; before the gap and after the gap &mdash; with an empty region (the &ldquo;gap&rdquo;) in between.
+
+Insertions always happen at the gap boundary, making them O(1). When the cursor moves, the gap relocates...</div>
+
+      <!-- Capture buffer overlay -->
+      <div style="background: #1a1d27; border-top: 2px solid var(--accent); border-bottom: 1px solid var(--terminal-border);">
+        <div style="padding: 0.25rem 0.75rem; border-bottom: 1px solid var(--terminal-border); font-size: 11px; color: var(--text-muted); display: flex; justify-content: space-between;">
+          <span><span style="color: var(--accent);">*Fikra-Capture*</span></span>
+          <span><span style="color: var(--green);">C-c C-c</span> send &nbsp; <span style="color: var(--red);">C-c C-k</span> cancel</span>
+        </div>
+        <div class="buffer" style="min-height: 4em; padding: 0.5rem 0.75rem; font-size: 13px; line-height: 1.55; white-space: pre-wrap;">
+How would you optimize gap relocation? Consider
+both the pointer-based approach and a block-copy<span class="cur"> </span></div>
+      </div>
+
+      <!-- Modeline -->
+      <div class="modeline">
+        <div>
+          <span class="mode insert">--INSERT--</span>
+          <span class="fikra-badge">fikra:claude&#x25CF;</span>
+        </div>
+        <div>
+          <span class="pos">L2 C47</span>
+          <span class="major"> [fikra-capture]</span>
+        </div>
+      </div>
+    </div>
+    <div class="mockup-caption">Figure 2: Capture buffer popped up over the chat. The chat buffer is dimmed behind it. User types a multi-line message, then C-c C-c sends it and closes the capture buffer. Mode shows INSERT while composing.</div>
+  </div>
+
+  <!-- MOCKUP 2: Ghost text inline completion -->
+  <h3>3. Ghost Text Inline Completion</h3>
+  <p>User presses <code>SPC a i</code> to request an inline completion. The AI suggests code that appears as dimmed ghost text after the cursor. <code>TAB</code> accepts; any other key dismisses.</p>
+
+  <div class="mockup">
+    <div class="mockup-title">
+      <div class="dots"><span class="r"></span><span class="y"></span><span class="g"></span></div>
+      <span>tmax — buffer.ts</span>
+      <span></span>
+    </div>
+    <div class="mockup-screen">
+      <div class="tab-bar">
+        <div class="tab active">buffer.ts</div>
+        <div class="tab">*Messages*</div>
+      </div>
+      <div class="buffer" style="min-height: 12em;">
+<span class="ln"> 1</span> <span class="syn-cmt">// Gap buffer implementation for efficient text editing</span>
+<span class="ln"> 2</span> <span class="syn-kw">export class</span> <span class="syn-type">GapBuffer</span> {
+<span class="ln"> 3</span>   <span class="syn-kw">private</span> data: <span class="syn-type">string</span>[] = [];
+<span class="ln"> 4</span>   <span class="syn-kw">private</span> gapStart = <span class="syn-num">0</span>;
+<span class="ln"> 5</span>   <span class="syn-kw">private</span> gapEnd = <span class="syn-num">0</span>;
+<span class="ln"> 6</span>
+<span class="ln cursor-line"> 7</span>   <span class="syn-fn">insert</span>(text: <span class="syn-type">string</span>): <span class="syn-type">void</span> <span class="cur">{</span><span class="ghost">  <span class="syn-cmt">// Insert text at cursor position</span>
+<span class="ghost">    <span class="syn-kw">for</span> (<span class="syn-kw">const</span> ch <span class="syn-kw">of</span> text) {
+<span class="ghost">      <span class="syn-kw">if</span> (<span class="syn-kw">this</span>.gapStart >= <span class="syn-kw">this</span>.gapEnd) <span class="syn-kw">this</span>.<span class="syn-fn">growGap</span>();
+<span class="ghost">      <span class="syn-kw">this</span>.data[<span class="syn-kw">this</span>.gapStart++] = ch;
+<span class="ghost">    }
+<span class="ghost">  }</span></span>
+<span class="ln"> 8</span>
+<span class="ln"> 9</span>   <span class="syn-fn">delete</span>(count: <span class="syn-type">number</span>): <span class="syn-type">void</span> {
+<span class="ln">10</span>     <span class="syn-kw">this</span>.gapStart -= count;
+<span class="ln">11</span>   }
+<span class="ln">12</span> }</div>
+      <div class="modeline">
+        <div>
+          <span class="mode normal">--NORMAL--</span>
+          <span class="fikra-badge">fikra:ollama●</span>
+        </div>
+        <div>
+          <span class="pos">L7 C2</span>
+          <span class="major"> [typescript]</span>
+        </div>
+      </div>
+    </div>
+    <div class="mockup-caption">Figure 3: Ghost text inline completion from Ollama (local model). The dimmed code after the cursor is the AI suggestion. TAB accepts, any key dismisses.</div>
+  </div>
+
+  <!-- MOCKUP 3: Fikra explain workflow -->
+  <h3>4. Explain Workflow (<code>SPC a e</code>)</h3>
+  <p>User selects code and presses <code>SPC a e</code> to explain it. Fikra sends the selection to the current backend with the explain system prompt and streams the response into the <code>*Fikra*</code> buffer.</p>
+
+  <div class="mockup">
+    <div class="mockup-title">
+      <div class="dots"><span class="r"></span><span class="y"></span><span class="g"></span></div>
+      <span>tmax — motions.tlisp</span>
+      <span></span>
+    </div>
+    <div class="mockup-screen">
+      <div class="tab-bar">
+        <div class="tab active">motions.tlisp</div>
+        <div class="tab">*Fikra*</div>
+      </div>
+      <div class="buffer" style="min-height: 9em;">
+<span class="ln"> 1</span> (<span class="syn-lisp-kw">defun</span> <span class="syn-lisp-fn">word-forward</span> ()
+<span class="ln cursor-line"> 2</span> <span style="background: rgba(188, 140, 255, 0.15); display: inline;">  (<span class="syn-lisp-kw">let</span> ((col (cursor-column)))</span>
+<span class="ln"> 3</span> <span style="background: rgba(188, 140, 255, 0.15); display: inline;">    (<span class="syn-lisp-kw">while</span> (<span class="syn-lisp-kw">and</span> (&lt; col (line-length))</span>
+<span class="ln"> 4</span> <span style="background: rgba(188, 140, 255, 0.15); display: inline;">               (<span class="syn-lisp-fn">char-whitespace?</span> (char-at col)))</span>
+<span class="ln"> 5</span> <span style="background: rgba(188, 140, 255, 0.15); display: inline;">      (setq col (+ col <span class="syn-num">1</span>)))</span>
+<span class="ln"> 6</span> <span style="background: rgba(188, 140, 255, 0.15); display: inline;">    (<span class="syn-lisp-kw">while</span> (<span class="syn-lisp-kw">and</span> (&lt; col (line-length))</span>
+<span class="ln"> 7</span> <span style="background: rgba(188, 140, 255, 0.15); display: inline;">               (<span class="syn-lisp-kw">not</span> (<span class="syn-lisp-fn">char-whitespace?</span> (char-at col))))</span>
+<span class="ln"> 8</span> <span style="background: rgba(188, 140, 255, 0.15); display: inline;">      (setq col (+ col <span class="syn-num">1</span>)))</span>
+<span class="ln"> 9</span> <span style="background: rgba(188, 140, 255, 0.15); display: inline;">    (cursor-move (cursor-line) col)))</span>
+<span class="ln">10</span>
+<span class="ln">11</span> (<span class="syn-lisp-kw">defun</span> <span class="syn-lisp-fn">word-backward</span> ()
+<span class="ln">12</span>   ...)</div>
+
+      <div style="background: #0f1118; border-top: 2px solid var(--accent);">
+        <div style="padding: 0.25rem 0.75rem; border-bottom: 1px solid var(--terminal-border); font-size: 11px; color: var(--text-muted); display: flex; justify-content: space-between;">
+          <span><span style="color: var(--accent);">*Fikra*</span> — gemini-2.5-pro <span style="color: var(--text-muted); font-size: 10px;">[explain]</span></span>
+          <span style="color: var(--green);">● done</span>
+        </div>
+        <div class="chat-buffer">
+<span class="chat-label system">[explain]</span> <span style="color: var(--text-muted);">motions.tlisp:2-9</span>
+
+<span class="chat-label ai">Gemini:</span> This function <code style="background: rgba(240,136,62,0.1); color: #f0883e; padding: 0 0.25rem; border-radius: 2px;">word-forward</code> moves the cursor to the end of the next word on the current line. It works in two phases:
+
+1. <strong>Skip whitespace</strong> — advances past any spaces/tabs from the current column
+2. <strong>Skip word characters</strong> — advances past non-whitespace characters
+
+It's the classic Vim <code style="background: rgba(240,136,62,0.1); color: #f0883e; padding: 0 0.25rem; border-radius: 2px;">w</code> motion implemented in T-Lisp. Note: this only works within a single line — it doesn't cross line boundaries.</div>
+        <div class="chat-input">
+          <span class="prompt">&gt;</span>
+          <span style="color: var(--text-muted);">_</span>
+        </div>
+      </div>
+
+      <div class="modeline">
+        <div>
+          <span class="mode visual">--VISUAL--</span>
+          <span class="fikra-badge">fikra:gemini●</span>
+        </div>
+        <div>
+          <span class="pos">L2 C2</span>
+          <span class="major"> [tlisp]</span>
+        </div>
+      </div>
+    </div>
+    <div class="mockup-caption">Figure 4: Visual selection (highlighted in purple) sent to Gemini via <code>SPC a e</code> (explain workflow). Response appears in the full-screen *Fikra* chat.</div>
+  </div>
+
+  <!-- MOCKUP 4: Backend selector -->
+  <h3>5. Backend Selector (<code>C-c b</code>)</h3>
+  <p>From within the <code>*Fikra*</code> buffer, <code>C-c b</code> opens a popup listing all configured backends with their availability status. User selects one with <code>RET</code>.</p>
+
+  <div class="mockup">
+    <div class="mockup-title">
+      <div class="dots"><span class="r"></span><span class="y"></span><span class="g"></span></div>
+      <span>tmax — *Fikra*</span>
+      <span></span>
+    </div>
+    <div class="mockup-screen">
+      <div class="tab-bar">
+        <div class="tab">editor.ts</div>
+        <div class="tab active">*Fikra*</div>
+        <div class="tab">*Messages*</div>
+      </div>
+
+      <div class="chat-buffer" style="min-height: 6em; padding-bottom: 0;">
+<span class="chat-label user">You:</span> Refactor the Editor constructor to use dependency injection
+
+<span class="chat-label ai">Claude:</span> I'll refactor the constructor to accept its dependencies as parameters rather than creating them internally. This makes testing easier and decouples the components...</div>
+
+      <!-- Backend selector popup -->
+      <div class="popup-overlay" style="position: relative;">
+        <div class="popup">
+          <div class="popup-title">Fikra Backend</div>
+          <div class="popup-row selected">
+            <span><span class="avail yes">●</span> claude</span>
+            <span class="proto">CLI</span>
+          </div>
+          <div class="popup-row">
+            <span><span class="avail yes">●</span> codex</span>
+            <span class="proto">CLI</span>
+          </div>
+          <div class="popup-row">
+            <span><span class="avail no">○</span> gemini</span>
+            <span class="proto">CLI</span>
+          </div>
+          <div class="popup-row">
+            <span><span class="avail yes">●</span> ollama</span>
+            <span class="proto">HTTP</span>
+          </div>
+          <div class="popup-row">
+            <span><span class="avail no">○</span> pi</span>
+            <span class="proto">HTTP</span>
+          </div>
+        </div>
+        <div style="height: 3rem;"></div>
+      </div>
+
+      <div class="chat-input">
+        <span class="prompt">&gt;</span>
+        <span style="color: var(--text-muted);">_</span>
+      </div>
+
+      <div class="modeline">
+        <div>
+          <span class="mode normal">--NORMAL--</span>
+          <span class="fikra-badge">fikra:claude●</span>
+        </div>
+        <div>
+          <span class="pos">L12 C1</span>
+          <span class="major"> [fikra-chat]</span>
+        </div>
+      </div>
+    </div>
+    <div class="mockup-caption">Figure 5: Backend selector popup (C-c b). ● = available, ○ = not detected on PATH. Highlighted row is the current selection.</div>
+  </div>
+
+  <!-- MOCKUP 5: Fikra leader key (which-key style) -->
+  <h3>6. Fikra Leader Group (<code>SPC a ...</code>)</h3>
+  <p>When the user presses <code>SPC a</code> in normal mode, the which-key popup shows all Fikra commands. This follows the existing tmax which-key overlay pattern.</p>
+
+  <div class="mockup">
+    <div class="mockup-title">
+      <div class="dots"><span class="r"></span><span class="y"></span><span class="g"></span></div>
+      <span>tmax — api.ts</span>
+      <span></span>
+    </div>
+    <div class="mockup-screen">
+      <div class="tab-bar">
+        <div class="tab active">api.ts</div>
+      </div>
+      <div class="buffer" style="min-height: 6em;">
+<span class="ln"> 1</span> <span class="syn-cmt">// T-Lisp API — functions exposed to the interpreter</span>
+<span class="ln"> 2</span> <span class="syn-kw">export function</span> <span class="syn-fn">registerAPI</span>(env: <span class="syn-type">Environment</span>): <span class="syn-type">void</span> {
+<span class="ln cursor-line"> 3</span>   env.<span class="syn-fn">define</span>(<span class="syn-str">"buffer-text"</span>, bufferText);<span class="cur"> </span>
+<span class="ln"> 4</span>   env.<span class="syn-fn">define</span>(<span class="syn-str">"cursor-line"</span>, cursorLine);
+<span class="ln"> 5</span>   env.<span class="syn-fn">define</span>(<span class="syn-str">"cursor-column"</span>, cursorColumn);</div>
+
+      <!-- Which-key popup for SPC a -->
+      <div class="wk-popup">
+        <div class="wk-prefix">SPC a — fikra (AI assistant)</div>
+        <span class="wk-binding"><span class="wk-key">a</span> <span class="wk-cmd">fikra-chat</span> <span class="wk-desc">project chat</span></span>
+        <span class="wk-binding"><span class="wk-key">t</span> <span class="wk-cmd">fikra-thread-new</span> <span class="wk-desc">new thread</span></span>
+        <span class="wk-binding"><span class="wk-key">T</span> <span class="wk-cmd">fikra-thread-list</span> <span class="wk-desc">list threads</span></span>
+        <span class="wk-binding"><span class="wk-key">d</span> <span class="wk-cmd">fikra-checkpoint-diff</span> <span class="wk-desc">turn diff</span></span>
+        <span class="wk-binding"><span class="wk-key">D</span> <span class="wk-cmd">fikra-checkpoint-diff-full</span> <span class="wk-desc">cumulative</span></span>
+        <span class="wk-binding"><span class="wk-key">R</span> <span class="wk-cmd">fikra-checkpoint-revert</span> <span class="wk-desc">revert</span></span>
+        <span class="wk-binding"><span class="wk-key">m</span> <span class="wk-cmd">fikra-set-runtime-mode</span> <span class="wk-desc">set mode</span></span>
+        <span class="wk-binding"><span class="wk-key">p</span> <span class="wk-cmd">fikra-plan-start</span> <span class="wk-desc">plan mode</span></span>
+        <span class="wk-binding"><span class="wk-key">s</span> <span class="wk-cmd">fikra-chat-region</span> <span class="wk-desc">send sel</span></span>
+        <span class="wk-binding"><span class="wk-key">i</span> <span class="wk-cmd">fikra-complete</span> <span class="wk-desc">complete</span></span>
+        <span class="wk-binding"><span class="wk-key">e</span> <span class="wk-cmd">fikra-explain</span> <span class="wk-desc">explain</span></span>
+        <span class="wk-binding"><span class="wk-key">f</span> <span class="wk-cmd">fikra-fix</span> <span class="wk-desc">fix</span></span>
+        <span class="wk-binding"><span class="wk-key">r</span> <span class="wk-cmd">fikra-refactor</span> <span class="wk-desc">refactor</span></span>
+        <span class="wk-binding"><span class="wk-key">g</span> <span class="wk-cmd">fikra-test</span> <span class="wk-desc">gen tests</span></span>
+        <span class="wk-binding"><span class="wk-key">b</span> <span class="wk-cmd">fikra-set-backend</span> <span class="wk-desc">backend</span></span>
+        <span class="wk-binding"><span class="wk-key">w</span> <span class="wk-cmd">fikra-handoff</span> <span class="wk-desc">handoff</span></span>
+        <span class="wk-binding"><span class="wk-key">h</span> <span class="wk-cmd">fikra-history</span> <span class="wk-desc">history</span></span>
+        <span class="wk-binding"><span class="wk-key">q</span> <span class="wk-cmd">fikra-stop</span> <span class="wk-desc">stop</span></span>
+      </div>
+
+      <div class="modeline">
+        <div>
+          <span class="mode normal">--NORMAL--</span>
+          <span class="fikra-badge">fikra:claude●</span>
+        </div>
+        <div>
+          <span class="pos">L3 C35</span>
+          <span class="major"> [typescript]</span>
+        </div>
+      </div>
+    </div>
+    <div class="mockup-caption">Figure 6: Which-key popup for the <code>SPC a</code> leader group. Shows all Fikra commands with keys, function names, and descriptions.</div>
+  </div>
+
+  <!-- MOCKUP 6: Full-screen Fikra chat with code insertion -->
+  <h3>7. Code Insertion from Chat (<code>C-c i</code>)</h3>
+  <p>After the AI generates code in the <code>*Fikra*</code> buffer, the user presses <code>C-c i</code> to insert the last code block into the working buffer at the cursor position. A confirmation prompt appears.</p>
+
+  <div class="mockup">
+    <div class="mockup-title">
+      <div class="dots"><span class="r"></span><span class="y"></span><span class="g"></span></div>
+      <span>tmax — *Fikra*</span>
+      <span></span>
+    </div>
+    <div class="mockup-screen">
+      <div class="tab-bar">
+        <div class="tab">editor.ts</div>
+        <div class="tab active">*Fikra*</div>
+      </div>
+
+      <div class="chat-buffer">
+<span class="chat-label user">You:</span> Generate a gapBuffer class with insert, delete, and text methods
+
+<span class="chat-label ai">Claude:</span> Here's a complete gap buffer implementation:
+
+<span style="background: rgba(88,166,255,0.08); display: block; padding: 0.5rem 0.75rem; border-left: 3px solid #58a6ff; margin: 0.5rem 0; border-radius: 0 4px 4px 0;">
+<span class="syn-kw">export class</span> <span class="syn-type">GapBuffer</span> {
+  <span class="syn-kw">private</span> data: <span class="syn-type">string</span>[] = [];
+  <span class="syn-kw">private</span> gapStart = <span class="syn-num">0</span>;
+  <span class="syn-kw">private</span> gapEnd = <span class="syn-num">0</span>;
+
+  <span class="syn-fn">insert</span>(text: <span class="syn-type">string</span>): <span class="syn-type">void</span> {
+    <span class="syn-kw">for</span> (<span class="syn-kw">const</span> ch <span class="syn-kw">of</span> text) {
+      <span class="syn-kw">if</span> (<span class="syn-kw">this</span>.gapStart >= <span class="syn-kw">this</span>.gapEnd) <span class="syn-kw">this</span>.<span class="syn-fn">growGap</span>();
+      <span class="syn-kw">this</span>.data[<span class="syn-kw">this</span>.gapStart++] = ch;
+    }
+  }
+
+  <span class="syn-fn">text</span>(): <span class="syn-type">string</span> {
+    <span class="syn-kw">return</span> [...<span class="syn-kw">this</span>.data.slice(<span class="syn-num">0</span>, <span class="syn-kw">this</span>.gapStart),
+            ...<span class="syn-kw">this</span>.data.slice(<span class="syn-kw">this</span>.gapEnd)].<span class="syn-fn">join</span>(<span class="syn-str">""</span>);
+  }
+}</span>
+
+<span style="color: var(--text-muted); font-size: 12px;">Insert this code block into editor.ts at cursor? (y/n)</span> <span class="cur" style="padding: 0 3px;">y</span></div>
+
+      <div class="modeline">
+        <div>
+          <span class="mode normal">--NORMAL--</span>
+          <span class="fikra-badge">fikra:claude●</span>
+        </div>
+        <div>
+          <span class="pos">L14 C1</span>
+          <span class="major"> [fikra-chat]</span>
+        </div>
+      </div>
+    </div>
+    <div class="mockup-caption">Figure 7: Code block generated by AI (highlighted in blue). <code>C-c i</code> prompts for confirmation before inserting into the working buffer.</div>
+  </div>
+
+  <!-- MOCKUP 7: Modeline detail -->
+  <h3>8. Modeline States</h3>
+  <p>The tmax modeline extends to show Fikra backend and connection status. These states are visible at a glance:</p>
+
+  <div class="mockup" style="max-width: 600px;">
+    <div class="mockup-screen">
+      <!-- Idle -->
+      <div style="padding: 0.5rem 0.75rem 0; font-size: 11px; color: var(--text-muted);">Idle (connected)</div>
+      <div class="modeline" style="margin: 0.25rem 0.75rem 0.5rem; border-radius: 3px;">
+        <div><span class="mode normal">--NORMAL--</span><span class="fikra-badge">fikra:claude●</span></div>
+        <div><span class="pos">L8 C32</span><span class="major"> [typescript]</span></div>
+      </div>
+
+      <!-- Streaming -->
+      <div style="padding: 0 0.75rem; font-size: 11px; color: var(--text-muted);">Streaming response</div>
+      <div class="modeline" style="margin: 0.25rem 0.75rem 0.5rem; border-radius: 3px;">
+        <div><span class="mode normal">--NORMAL--</span><span class="fikra-badge streaming">fikra:claude◉</span></div>
+        <div><span class="pos">L8 C32</span><span class="major"> [typescript]</span></div>
+      </div>
+
+      <!-- Disconnected -->
+      <div style="padding: 0 0.75rem; font-size: 11px; color: var(--text-muted);">Backend not available</div>
+      <div class="modeline" style="margin: 0.25rem 0.75rem 0.5rem; border-radius: 3px;">
+        <div><span class="mode normal">--NORMAL--</span><span class="fikra-badge" style="background: rgba(139,148,158,0.15); color: #8b949e;">fikra:gemini○</span></div>
+        <div><span class="pos">L8 C32</span><span class="major"> [typescript]</span></div>
+      </div>
+
+      <!-- Error -->
+      <div style="padding: 0 0.75rem; font-size: 11px; color: var(--text-muted);">Error (API failure)</div>
+      <div class="modeline" style="margin: 0.25rem 0.75rem 0.75rem; border-radius: 3px;">
+        <div><span class="mode normal">--NORMAL--</span><span class="fikra-badge" style="background: rgba(248,81,73,0.15); color: #f85149;">fikra:claude✗</span></div>
+        <div><span class="pos">L8 C32</span><span class="major"> [typescript]</span></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- MOCKUP 8: Thread List + Turn Status -->
+  <h3>9. Thread List &amp; Turn Status (<code>SPC a T</code>)</h3>
+  <p>The thread list shows all active threads grouped by project directory. Navigate with <code>j</code>/<code>k</code>, <code>RET</code> to switch to a thread, <code>n</code> to create new, <code>d</code> to archive. Switching projects (opening a different directory) scopes the thread list accordingly.</p>
+
+  <div class="mockup">
+    <div class="mockup-title">
+      <div class="dots"><span class="r"></span><span class="y"></span><span class="g"></span></div>
+      <span>tmax — *Fikra-Threads*</span>
+      <span></span>
+    </div>
+    <div class="mockup-screen">
+      <div class="tab-bar">
+        <div class="tab">editor.ts</div>
+        <div class="tab">*Fikra*</div>
+        <div class="tab active">*Fikra-Threads*</div>
+        <div class="tab">*Fikra-Diff*</div>
+      </div>
+
+      <!-- Thread list buffer -->
+      <div class="buffer" style="min-height: 11em;">
+<span style="color: var(--accent); font-weight: 600;">  tmax</span> <span style="color: var(--text-muted);">(~/projects/tmax)</span>
+<span class="syn-cmt">    Thread  Backend   Mode              Location  Status    Turns</span>
+<span style="color: var(--green);">    ✓ main</span>   claude    approval-required <span style="color: var(--text-muted);">local</span>     <span style="color: var(--green);">● idle</span>     4
+<span class="cursor-line" style="background: rgba(240,136,62,0.08);">  <span style="color: var(--blue);">▸ fix-11</span>  codex    auto-accept       <span style="color: var(--accent);">worktree</span>  <span style="color: var(--blue);">◉ running</span>  2</span>
+
+<span style="color: var(--accent); font-weight: 600;">  gomoku-ai</span> <span style="color: var(--text-muted);">(~/projects/gomoku-ai)</span>
+<span class="syn-cmt">    Thread  Backend   Mode              Location  Status    Turns</span>
+<span style="color: var(--text-muted);">    ○ docs</span>   ollama    approval-required <span style="color: var(--text-muted);">local</span>     <span style="color: var(--green);">● idle</span>     1</div>
+
+      <!-- Thread status bar -->
+      <div style="background: #12141a; border-top: 1px solid var(--terminal-border); padding: 0.3rem 0.75rem; display: flex; align-items: center; gap: 0.75rem; font-size: 12px;">
+        <span style="color: var(--text-muted);">2 projects · 3 threads</span>
+        <div style="flex: 1;"></div>
+        <span style="color: var(--text-muted); font-size: 11px;">RET=switch  n=new  d=archive  q=quit</span>
+      </div>
+
+      <div class="modeline">
+        <div>
+          <span class="mode normal">--NORMAL--</span>
+          <span class="fikra-badge">fikra:claude●</span>
+        </div>
+        <div>
+          <span class="pos">L3 C1</span>
+          <span class="major"> [fikra-threads]</span>
+        </div>
+      </div>
+    </div>
+    <div class="mockup-caption">Figure 9: *Fikra-Threads* buffer listing threads grouped by project directory. The <code>Location</code> column shows <span style="color: var(--accent);">worktree</span> (isolated checkout) or <span style="color: var(--text-muted);">local</span> (working directory). Thread <code>fix-11</code> is actively running in a worktree (blue ◉). Navigate with j/k, RET to switch, SPC a w to handoff.</div>
+  </div>
+
+  <!-- MOCKUP 9: Checkpoint diff review -->
+  <h3>10. Checkpoint Diff Review</h3>
+  <p>After a turn completes, <code>SPC a d</code> opens the <code>*Fikra-Diff*</code> buffer showing the per-turn diff between consecutive git checkpoints. The user reviews and accepts (<code>y</code>) or reverts (<code>n</code>).</p>
+
+  <div class="mockup">
+    <div class="mockup-title">
+      <div class="dots"><span class="r"></span><span class="y"></span><span class="g"></span></div>
+      <span>tmax — *Fikra-Diff*</span>
+      <span></span>
+    </div>
+    <div class="mockup-screen">
+      <div class="tab-bar">
+        <div class="tab">editor.ts</div>
+        <div class="tab">*Fikra*</div>
+        <div class="tab active">*Fikra-Diff*</div>
+      </div>
+
+      <div style="background: #0f1118; border-bottom: 1px solid var(--terminal-border); padding: 0.35rem 0.75rem; font-size: 11px; display: flex; justify-content: space-between;">
+        <span><span style="color: var(--accent);">Thread: main</span> Turn 3 &middot; <span style="color: var(--green);">fikra/main/3</span></span>
+        <span><span style="color: var(--green);">tlisp-api.ts</span> &middot; <span style="color: var(--text-muted);">+8 -0</span></span>
+      </div>
+
+      <div class="buffer" style="min-height: 9em;">
+<span style="color: var(--text-muted);"> @@ -42,6 +42,14 @@ export function registerAPI(env: Environment): void {
+<span style="color: var(--text-muted);">   env.define("buffer-delete", bufferDelete);
+</span><span style="color: var(--green);">+  env.define("editor-undo", editorUndo);</span>
+<span style="color: var(--green);">+  env.define("editor-redo", editorRedo);</span>
+<span style="color: var(--text-muted);">   env.define("cursor-line", cursorLine);
+</span><span style="color: var(--text-muted);">   env.define("cursor-column", cursorColumn);
+</span><span style="color: var(--green);">+}</span>
+<span style="color: var(--green);">+</span>
+<span style="color: var(--green);">+function editorUndo(args: SExpression[]): SExpression {</span>
+<span style="color: var(--green);">+  const editor = getCurrentEditor();</span>
+<span style="color: var(--green);">+  editor.undo();</span>
+<span style="color: var(--green);">+  return symbol("t");</span>
+<span style="color: var(--green);">+}</span>
+<span class="cursor-line" style="background: rgba(240,136,62,0.08);"><span style="color: var(--green);">+</span></span></div>
+
+      <div style="background: #12141a; border-top: 1px solid var(--terminal-border); padding: 0.3rem 0.75rem; display: flex; justify-content: space-between; font-size: 12px;">
+        <span style="color: var(--text-muted);">Accept these changes?</span>
+        <span><span style="color: var(--green); font-weight: 600;">y</span>=accept  <span style="color: var(--red); font-weight: 600;">n</span>=revert  <span style="color: var(--blue);">e</span>=edit  <span style="color: var(--text-muted);">q</span>=quit</span>
+      </div>
+
+      <div class="modeline">
+        <div>
+          <span class="mode normal">--NORMAL--</span>
+          <span class="fikra-badge">fikra:claude●</span>
+        </div>
+        <div>
+          <span class="pos">L10 C1</span>
+          <span class="major"> [fikra-diff]</span>
+        </div>
+      </div>
+    </div>
+    <div class="mockup-caption">Figure 10: *Fikra-Diff* buffer showing the diff between git checkpoints for turn 3. Green lines are additions. The user accepts or reverts with single-key commands.</div>
+  </div>
+</section>
+
+<!-- ============================================================ -->
+
+<section id="chat-key-bindings">
+  <h2>Chat Buffer &amp; Capture Buffer Key Bindings</h2>
+
+  <p>The <code>*Fikra*</code> chat buffer is <strong>read-only</strong> &mdash; it shows the conversation history and streaming AI output. Messages are composed in a capture buffer (<code>i</code> to open).</p>
+
+  <h3>Chat Buffer (<code>*Fikra*</code>)</h3>
+  <table>
+    <thead><tr><th>Key</th><th>Command</th><th>Description</th></tr></thead>
+    <tbody>
+      <tr><td><code>i</code></td><td><code>fikra-capture</code></td><td>Open capture buffer to compose a message</td></tr>
+      <tr><td><code>RET</code></td><td><code>fikra-follow-link</code></td><td>Follow file link under cursor</td></tr>
+      <tr><td><code>j</code> / <code>k</code></td><td>scroll</td><td>Navigate chat history</td></tr>
+      <tr><td><code>C-g</code></td><td><code>fikra-turn-interrupt</code></td><td>Cancel current in-progress turn</td></tr>
+      <tr><td><code>C-c b</code></td><td><code>fikra-set-backend</code></td><td>Switch AI backend</td></tr>
+      <tr><td><code>C-c d</code></td><td><code>fikra-checkpoint-diff</code></td><td>Show diff for last turn</td></tr>
+      <tr><td><code>C-c c</code></td><td><code>fikra-copy-code</code></td><td>Copy last code block</td></tr>
+      <tr><td><code>C-c m</code></td><td><code>fikra-set-runtime-mode</code></td><td>Change runtime mode</td></tr>
+      <tr><td><code>C-c n</code></td><td><code>fikra-thread-new</code></td><td>Create a new thread</td></tr>
+      <tr><td><code>C-c w</code></td><td><code>fikra-handoff</code></td><td>Switch thread Local &amp;leftrightarrow; Worktree</td></tr>
+      <tr><td><code>q</code></td><td><code>fikra-quit</code></td><td>Close chat buffer</td></tr>
+    </tbody>
+  </table>
+
+  <h3>Capture Buffer (<code>*Fikra-Capture*</code>)</h3>
+  <p>A small popup buffer (inspired by Emacs <code>org-capture</code>) for composing messages. Opens with <code>i</code>, closes on submit or cancel.</p>
+  <table>
+    <thead><tr><th>Key</th><th>Command</th><th>Description</th></tr></thead>
+    <tbody>
+      <tr><td><code>C-c C-c</code></td><td><code>fikra-capture-submit</code></td><td>Submit message and close capture buffer</td></tr>
+      <tr><td><code>C-c C-k</code></td><td><code>fikra-capture-cancel</code></td><td>Discard message and close capture buffer</td></tr>
+      <tr><td><code>M-p</code></td><td><code>fikra-history-prev</code></td><td>Previous input from history</td></tr>
+      <tr><td><code>M-n</code></td><td><code>fikra-history-next</code></td><td>Next input from history</td></tr>
+      <tr><td><code>RET</code></td><td>newline</td><td>Insert newline (multi-line messages)</td></tr>
+    </tbody>
+  </table>
+</section>
+
+<!-- ============================================================ -->
+
+<section id="threads-turns">
+  <h2>Threads, Turns &amp; Checkpoints</h2>
+  <p>The project/thread/turn/checkpoint model combines t3code's git-based accountability with zcode's project-aware organization and action-level safety. Every AI action is accountable at two levels: per-action confirmation and per-turn checkpoint revert.</p>
+
+  <h3>Comparison with t3code / zcode</h3>
+  <table>
+    <thead><tr><th>Aspect</th><th>t3code</th><th>zcode</th><th>Fikra</th></tr></thead>
+    <tbody>
+      <tr><td>Organization</td><td>Flat thread list</td><td>Project &rarr; Task grouping</td><td>Project &rarr; Thread grouping</td></tr>
+      <tr><td>Session unit</td><td>Thread</td><td>Task</td><td>Thread</td></tr>
+      <tr><td>Interaction unit</td><td>Turn</td><td>Turn</td><td>Turn</td></tr>
+      <tr><td>Change tracking</td><td>Git checkpoint per turn</td><td>Diff panel</td><td>Git checkpoint per turn</td></tr>
+      <tr><td>Safety</td><td>Runtime modes (3)</td><td>Per-action confirmations</td><td><strong>Both</strong>: runtime mode presets + per-action confirmations</td></tr>
+      <tr><td>Revert</td><td>Checkpoint revert</td><td>Manual</td><td>Checkpoint revert (git-based)</td></tr>
+      <tr><td>Plan mode</td><td>Yes</td><td>Yes</td><td>Yes, T-Lisp customizable</td></tr>
+      <tr><td>Backend switching</td><td>No</td><td>Yes, mid-conversation</td><td>Yes, mid-conversation</td></tr>
+      <tr><td>Worktree isolation</td><td>No</td><td>No</td><td><strong>Yes</strong>: Local/Worktree modes with Handoff</td></tr>
+      <tr><td>Diff view</td><td>Inline diff (GUI)</td><td>Diff panel (GUI)</td><td><code>*Fikra-Diff*</code> buffer</td></tr>
+      <tr><td>Thread list</td><td>Sidebar (GUI)</td><td>Sidebar (GUI)</td><td><code>*Fikra-Threads*</code> buffer</td></tr>
+      <tr><td>Navigation</td><td>Mouse</td><td>Mouse</td><td>Vim-style: <code>j</code>/<code>k</code>, <code>RET</code></td></tr>
+      <tr><td>Extensibility</td><td>None</td><td>None</td><td>T-Lisp: override context, add workflows</td></tr>
+    </tbody>
+  </table>
+
+  <h3>Thread Session States</h3>
+  <p>A thread's session status tracks the current turn:</p>
+  <table>
+    <thead><tr><th>Status</th><th>Indicator</th><th>Meaning</th></tr></thead>
+    <tbody>
+      <tr><td><code>idle</code></td><td style="color: var(--green);">&#x25CF;</td><td>Ready for user input</td></tr>
+      <tr><td><code>running</code></td><td style="color: var(--blue);">&#x25C9;</td><td>Turn in progress, AI is working</td></tr>
+      <tr><td><code>confirming</code></td><td style="color: var(--accent);">?</td><td>AI action awaiting user confirmation (Allow/Reject/Always Allow)</td></tr>
+      <tr><td><code>interrupted</code></td><td style="color: var(--text-muted);">&#x25C8;</td><td>User cancelled the current turn</td></tr>
+      <tr><td><code>error</code></td><td style="color: var(--red);">&#x2717;</td><td>Turn failed with an error</td></tr>
+    </tbody>
+  </table>
+
+  <h3>Checkpoint Diff Buffer Key Bindings</h3>
+  <table>
+    <thead><tr><th>Key</th><th>Command</th><th>Description</th></tr></thead>
+    <tbody>
+      <tr><td><code>y</code></td><td><code>fikra-accept-edits</code></td><td>Accept and keep the checkpoint</td></tr>
+      <tr><td><code>n</code></td><td><code>fikra-reject-edits</code></td><td>Reject, revert to baseline checkpoint</td></tr>
+      <tr><td><code>e</code></td><td>edit</td><td>Open the changed file at the first hunk</td></tr>
+      <tr><td><code>j</code> / <code>k</code></td><td>scroll</td><td>Navigate the diff</td></tr>
+      <tr><td><code>q</code></td><td>quit</td><td>Close diff buffer</td></tr>
+    </tbody>
+  </table>
+</section>
+
+<section id="key-bindings">
+  <h2>Key Bindings (fikra-mode)</h2>
+  <table>
+    <thead><tr><th>Key</th><th>Command</th><th>Description</th></tr></thead>
+    <tbody>
+      <tr><td><code>SPC a a</code></td><td><code>fikra-chat</code></td><td>Open project chat full-screen (auto-created main thread)</td></tr>
+      <tr><td><code>SPC a t</code></td><td><code>fikra-thread-new</code></td><td>Create a new thread</td></tr>
+      <tr><td><code>SPC a T</code></td><td><code>fikra-thread-list</code></td><td>List all threads</td></tr>
+      <tr><td><code>SPC a d</code></td><td><code>fikra-checkpoint-diff</code></td><td>Show diff for last turn</td></tr>
+      <tr><td><code>SPC a D</code></td><td><code>fikra-checkpoint-diff-full</code></td><td>Show cumulative diff</td></tr>
+      <tr><td><code>SPC a R</code></td><td><code>fikra-checkpoint-revert</code></td><td>Revert to a checkpoint</td></tr>
+      <tr><td><code>SPC a m</code></td><td><code>fikra-set-runtime-mode</code></td><td>Change runtime mode</td></tr>
+      <tr><td><code>SPC a p</code></td><td><code>fikra-plan-start</code></td><td>Start plan-mode turn</td></tr>
+      <tr><td><code>SPC a s</code></td><td><code>fikra-chat-region</code></td><td>Send selection to Fikra</td></tr>
+      <tr><td><code>SPC a i</code></td><td><code>fikra-complete</code></td><td>Request inline completion</td></tr>
+      <tr><td><code>SPC a e</code></td><td><code>fikra-explain</code></td><td>Explain code at point</td></tr>
+      <tr><td><code>SPC a f</code></td><td><code>fikra-fix</code></td><td>Suggest fix</td></tr>
+      <tr><td><code>SPC a r</code></td><td><code>fikra-refactor</code></td><td>Refactor code at point</td></tr>
+      <tr><td><code>SPC a g</code></td><td><code>fikra-test</code></td><td>Generate tests</td></tr>
+      <tr><td><code>SPC a b</code></td><td><code>fikra-set-backend</code></td><td>Switch AI backend</td></tr>
+      <tr><td><code>SPC a w</code></td><td><code>fikra-handoff</code></td><td>Switch thread Local &amp;leftrightarrow; Worktree</td></tr>
+      <tr><td><code>SPC a h</code></td><td><code>fikra-history</code></td><td>Browse conversation history</td></tr>
+      <tr><td><code>SPC a q</code></td><td><code>fikra-stop</code></td><td>Stop fikra-mode</td></tr>
+    </tbody>
+  </table>
+</section>
+
+<section id="configuration">
+  <h2>Configuration</h2>
+  <pre><code>;; Default backend
+(setq fikra-default-backend "claude")
+
+;; Default runtime mode
+(setq fikra-default-runtime-mode "approval-required")
+
+;; Default model per backend
+(setq fikra-models
+  '((claude . "claude-sonnet-4-6")
+    (codex . "codex-mini")
+    (gemini . "gemini-2.5-pro")
+    (ollama . "devstral")))
+
+;; Custom system prompt
+(setq fikra-system-prompt
+  "You are a helpful coding assistant inside the tmax editor.
+   The user is editing a file in &lt;LANGUAGE&gt;. Be concise.")
+
+;; Enable fikra-mode globally
+(add-hook 'find-file-hook 'fikra-mode)</code></pre>
+</section>
+
+<section id="implementation">
+  <h2>Implementation Phases</h2>
+
+  <div class="phase">
+    <h3>Phase 0: TypeScript Primitives (2-3 days)</h3>
+    <p>Add three generic primitives to the T-Lisp runtime in <code>src/editor/tlisp-api.ts</code>:</p>
+    <ul>
+      <li><code>make-process</code> &mdash; spawn subprocess with streaming stdout/stderr filter, stdin write, exit sentinel (~80 lines)</li>
+      <li><code>http-request</code> &mdash; async HTTP GET/POST with streaming response body (~80 lines)</li>
+      <li><code>signal</code> &mdash; send signal to a running process handle (~20 lines)</li>
+    </ul>
+    <p>These are not Fikra-specific. Any T-Lisp package can use them (shell-mode, browse-url, etc.).</p>
+    <div class="verify"><strong>Verify:</strong> Write TRT tests for <code>make-process</code> (spawn <code>echo</code>, read output), <code>http-request</code> (hit local server), <code>signal</code> (kill a sleep process).</div>
+  </div>
+
+  <div class="phase">
+    <h3>Phase 1: Core Mode + One Backend (1 week)</h3>
+    <p>All T-Lisp, no new TypeScript:</p>
+    <ul>
+      <li><code>fikra-mode.tlisp</code> &mdash; minor mode, key bindings, activation</li>
+      <li><code>fikra-adapter.tlisp</code> &mdash; adapter registry, protocol functions</li>
+      <li><code>fikra-backend-claude.tlisp</code> &mdash; Claude Code adapter using <code>make-process</code></li>
+      <li><code>fikra-chat.tlisp</code> &mdash; <code>*Fikra*</code> buffer management, streaming insert</li>
+      <li><code>fikra-context.tlisp</code> &mdash; context extraction using existing editor primitives</li>
+      <li><code>fikra-workflow.tlisp</code> &mdash; explain, fix, refactor workflows</li>
+      <li><code>fikra-ghost.tlisp</code> &mdash; ghost text overlay rendering</li>
+      <li><code>fikra-chat</code> + <code>fikra-turn-send</code> working end-to-end with Claude Code</li>
+    </ul>
+    <div class="verify"><strong>Verify:</strong> Open <code>*Fikra*</code> buffer, send message to Claude Code, stream response. Explain workflow on a code selection.</div>
+  </div>
+
+  <div class="phase">
+    <h3>Phase 2: Multi-Backend + Completions (1 week)</h3>
+    <ul>
+      <li><code>fikra-backend-codex.tlisp</code> &mdash; Codex CLI adapter</li>
+      <li><code>fikra-backend-gemini.tlisp</code> &mdash; Gemini CLI adapter</li>
+      <li><code>fikra-backend-ollama.tlisp</code> &mdash; Ollama HTTP adapter using <code>http-request</code></li>
+      <li>Backend selector popup, mid-conversation switching</li>
+      <li>Ghost text completions with TAB accept</li>
+    </ul>
+    <div class="verify"><strong>Verify:</strong> Switch between backends mid-conversation. Ghost text accepted via TAB. Ollama completion with local model.</div>
+  </div>
+
+  <div class="phase">
+    <h3>Phase 3: Threads, Turns, Checkpoints &amp; Worktrees (1-2 weeks)</h3>
+    <ul>
+      <li><code>fikra-thread.tlisp</code> &mdash; thread/turn state machine, checkpoint capture via <code>git</code></li>
+      <li><code>fikra-checkpoint.tlisp</code> &mdash; checkpoint views, diff buffers, revert</li>
+      <li><code>fikra-worktree.tlisp</code> &mdash; worktree isolation: create, handoff, snapshot, cleanup</li>
+      <li><code>fikra-safety.tlisp</code> &mdash; runtime modes, per-action confirmations</li>
+      <li>Git checkpoint capture: baseline before turn, completion after turn</li>
+      <li>Worktree isolation: Local/Worktree thread modes with Handoff between them</li>
+      <li>Disposable worktrees: auto-created per thread, auto-cleaned up, snapshot+restore on removal</li>
+      <li><code>*Fikra-Diff*</code> buffer for reviewing per-turn changes</li>
+      <li><code>*Fikra-Threads*</code> buffer for listing/switching threads, grouped by project, showing Local/Worktree mode</li>
+      <li>Project awareness: thread scoping by working directory, <code>fikra-project-*</code> functions</li>
+      <li>Per-action confirmations: Allow / Reject / Always Allow prompt inline in <code>*Fikra*</code> buffer</li>
+      <li>Per-thread action trust state: &ldquo;always allow&rdquo; decisions persist for the thread lifetime</li>
+      <li>Revert: restore filesystem + truncate thread history to checkpoint</li>
+    </ul>
+    <div class="verify"><strong>Verify:</strong> Create thread, send turns, review per-turn diffs in <code>*Fikra-Diff*</code>, revert a turn, handoff thread between Local and Worktree modes, run concurrent threads in separate worktrees, list threads grouped by project showing mode, switch projects, confirm/reject individual AI actions.</div>
+  </div>
+
+  <div class="phase">
+    <h3>Phase 4: Plan Mode + Extensibility (1 week)</h3>
+    <ul>
+      <li>Plan mode: AI proposes plan, user approves/rejects, implementation turn follows</li>
+      <li><code>fikra-backend-pi.tlisp</code> &mdash; Pi agent adapter</li>
+      <li><code>fikra-register-backend</code> for custom backends</li>
+      <li><code>defworkflow</code> macro, overridable context builder</li>
+      <li>Conversation history persistence</li>
+      <li>Modeline integration with runtime mode indicator</li>
+      <li>Error handling, TRT tests for all T-Lisp functions, documentation</li>
+    </ul>
+    <div class="verify"><strong>Verify:</strong> Plan-mode workflow end-to-end. User-defined backend and workflow in init.tlisp.</div>
+  </div>
+</section>
+
+<!-- ============================================================ -->
+
+<section id="user-stories">
+  <h2>User Stories</h2>
+  <p>User stories organized by implementation phase. Each follows the SRS format with Given/When/Then acceptance criteria.</p>
+
+  <h3>Phase 0: TypeScript Prerequisites</h3>
+
+  <div class="phase">
+    <h4>US-F0.1: Subprocess Execution</h4>
+    <p><strong>As a</strong> T-Lisp package author<br>
+    <strong>I want</strong> to spawn subprocesses with streaming output<br>
+    <strong>So that</strong> I can build CLI integrations entirely in T-Lisp</p>
+    <ul>
+      <li>Given a T-Lisp environment, when I evaluate <code>(make-process :command '("echo" "hello") :filter 'my-filter)</code>, then <code>my-filter</code> should be called with the output</li>
+      <li>Given a running process, when I call <code>(process-write proc "input\n")</code>, then input should be sent to stdin</li>
+      <li>Given a running process, when it exits, then the sentinel function should be called with the exit code</li>
+      <li>Given a running process, when I call <code>(signal proc 'SIGTERM)</code>, then the process should be terminated</li>
+    </ul>
+  </div>
+
+  <div class="phase">
+    <h4>US-F0.2: HTTP Requests</h4>
+    <p><strong>As a</strong> T-Lisp package author<br>
+    <strong>I want</strong> to make async HTTP requests with streaming response bodies<br>
+    <strong>So that</strong> I can integrate with REST APIs entirely in T-Lisp</p>
+    <ul>
+      <li>Given a running HTTP server, when I evaluate <code>(http-request "http://localhost:11434/api/generate" ...)</code>, then the filter should be called with each response chunk</li>
+      <li>Given an HTTP request, when the response completes, then status code and headers should be returned to T-Lisp</li>
+      <li>Given a streaming HTTP response, when the filter processes chunks, then each chunk should be delivered as it arrives</li>
+    </ul>
+  </div>
+
+  <h3>Phase 1: Core Mode + Chat</h3>
+
+  <div class="phase">
+    <h4>US-F1.1: Open Project Chat (Fikra Chat)</h4>
+    <p><strong>As a</strong> developer<br>
+    <strong>I want</strong> to press <code>SPC a</code> and see the Fikra Chat for my project as the full-screen view<br>
+    <strong>So that</strong> the AI conversation is my primary interface &mdash; I only see an editor when I navigate to a file</p>
+    <ul>
+      <li>Given I'm in a project directory, when I press <code>SPC a a</code>, then the <code>*Fikra*</code> buffer should open full-screen as the project's main chat thread (auto-created if it doesn't exist)</li>
+      <li>Given the <code>*Fikra*</code> buffer is full-screen, when the modeline renders, then it should show <code>fikra:&lt;backend&gt;&#x25CF;</code> with the project name</li>
+      <li>Given Fikra Chat is open, when I press <code>SPC a q</code>, then I should return to the previous buffer (the thread is preserved, not destroyed)</li>
+      <li>Given the project has no existing thread, when I open Fikra Chat, then a thread named &ldquo;main&rdquo; should be auto-created for the project directory</li>
+    </ul>
+  </div>
+
+  <div class="phase">
+    <h4>US-F1.2: Chat with AI</h4>
+    <p><strong>As a</strong> developer<br>
+    <strong>I want</strong> to type a message in the full-screen Fikra Chat and get a streaming AI response<br>
+    <strong>So that</strong> I can have a conversation without an editor taking up screen space</p>
+    <ul>
+      <li>Given the <code>*Fikra*</code> buffer is full-screen, when I type a message and press <code>RET</code>, then the message should appear as &ldquo;You: &rdquo; and the AI should stream a response</li>
+      <li>Given the AI is streaming, when tokens arrive, then they should appear character-by-character (no spinner-then-wall-of-text)</li>
+      <li>Given the AI is streaming, when the modeline renders, then it should show <code>fikra:claude&#x25C9;</code></li>
+      <li>Given the AI is streaming, when I press <code>C-g</code>, then the stream should stop immediately</li>
+    </ul>
+  </div>
+
+  <div class="phase">
+    <h4>US-F1.3: Claude Code Adapter</h4>
+    <p><strong>As a</strong> developer<br>
+    <strong>I want</strong> Fikra to use Claude Code CLI as the default backend<br>
+    <strong>So that</strong> I get a production-quality AI backend with zero configuration</p>
+    <ul>
+      <li>Given <code>claude</code> is on PATH, when fikra-mode activates, then the Claude adapter should be detected and set as default</li>
+      <li>Given <code>claude</code> is not on PATH, when fikra-mode activates, then the backend selector should show claude as unavailable (&#x25CB;)</li>
+      <li>Given the Claude adapter is active, when I send a message, then it should spawn a subprocess with <code>--print --output-format stream-json</code> and stream the response</li>
+    </ul>
+  </div>
+
+  <div class="phase">
+    <h4>US-F1.4: Explain Workflow</h4>
+    <p><strong>As a</strong> developer<br>
+    <strong>I want</strong> to send code to Fikra Chat and get an explanation<br>
+    <strong>So that</strong> I can understand unfamiliar code within the chat interface</p>
+    <ul>
+      <li>Given I have a file open in an editor buffer, when I press <code>SPC a e</code>, then the selected code (or entire buffer) should be sent to the project's Fikra Chat and <code>*Fikra*</code> should become full-screen</li>
+      <li>Given the explain workflow is running, when the AI responds, then the response should appear with a <code>[explain]</code> label showing file and line range</li>
+      <li>Given the response mentions a file, when I press <code>RET</code> on the file reference, then an editor buffer for that file should open</li>
+    </ul>
+  </div>
+
+  <div class="phase">
+    <h4>US-F1.5: Context Extraction</h4>
+    <p><strong>As a</strong> developer<br>
+    <strong>I want</strong> Fikra to automatically include relevant editor context<br>
+    <strong>So that</strong> the AI has enough information for accurate responses</p>
+    <ul>
+      <li>Given I'm editing <code>buffer.ts</code> in typescript-mode with lines 5-10 selected, when I send a chat message, then the context should include file name, mode, and selected text</li>
+      <li>Given I've overridden <code>fikra-build-context</code> in my init.tlisp, when I send a chat message, then my custom context should be used</li>
+      <li>Given I'm in the <code>*Fikra*</code> buffer with no editor open, when I send a message, then the context should include the project directory and any files mentioned earlier in the conversation</li>
+    </ul>
+  </div>
+
+  <div class="phase">
+    <h4>US-F1.6: File Navigation from Chat</h4>
+    <p><strong>As a</strong> developer<br>
+    <strong>I want</strong> to navigate from chat to a file mentioned in an AI response<br>
+    <strong>So that</strong> I can review or edit files without manually finding them</p>
+    <ul>
+      <li>Given an AI response references <code>src/editor/api.ts</code>, when the file path appears in the chat, then it should be rendered as a navigable link</li>
+      <li>Given a file link in the chat, when I press <code>RET</code> on it, then an editor buffer for that file should open (replacing the full-screen chat view)</li>
+      <li>Given an editor buffer opened from chat, when I press <code>SPC a a</code>, then I should return to the full-screen Fikra Chat</li>
+      <li>Given the AI edited a file during a turn, when the turn completes, then the affected file paths should appear as navigable links</li>
+    </ul>
+  </div>
+
+  <div class="phase">
+    <h4>US-F1.7: Capture Buffer (Message Composition)</h4>
+    <p><strong>As a</strong> developer<br>
+    <strong>I want</strong> to compose messages in a small popup capture buffer, not inline in the chat<br>
+    <strong>So that</strong> the chat buffer stays read-only while I get a proper editing surface for multi-line messages</p>
+    <ul>
+      <li>Given the <code>*Fikra*</code> chat buffer is open, when I press <code>i</code>, then a capture buffer (<code>*Fikra-Capture*</code>) should pop up as a small overlay with the hint <code>C-c C-c: send C-c C-k: cancel</code></li>
+      <li>Given the capture buffer is open, when I type a multi-line message and press <code>C-c C-c</code>, then the capture buffer should close, the message should be sent as a new turn, and the chat should show the streaming response</li>
+      <li>Given the capture buffer is open, when I press <code>C-c C-k</code>, then the capture buffer should close and nothing should be sent</li>
+      <li>Given the capture buffer is open, when I press <code>M-p</code>, then the previous message from history should be inserted</li>
+      <li>Given the AI is streaming a response, when the capture buffer is not open, then I should not be able to type into the chat buffer (it is read-only)</li>
+    </ul>
+  </div>
+
+  <h3>Phase 2: Multi-Backend + Completions</h3>
+
+  <div class="phase">
+    <h4>US-F2.1: Switch Backends Mid-Conversation</h4>
+    <p><strong>As a</strong> developer<br>
+    <strong>I want</strong> to switch AI backends without losing the conversation<br>
+    <strong>So that</strong> I can ask different models for different tasks</p>
+    <ul>
+      <li>Given I'm chatting with Claude, when I press <code>C-c b</code> and select Gemini, then the next message should be sent to Gemini with full conversation history</li>
+      <li>Given I switch backends, when the backend responds, then the response label should show the new backend name</li>
+      <li>Given a backend is unavailable, when I try to select it, then the selector should prevent selection</li>
+    </ul>
+  </div>
+
+  <div class="phase">
+    <h4>US-F2.2: Ollama Local Backend</h4>
+    <p><strong>As a</strong> developer who prefers local models<br>
+    <strong>I want</strong> to use Ollama as a backend via HTTP<br>
+    <strong>So that</strong> I can use AI without sending code to external services</p>
+    <ul>
+      <li>Given Ollama is running on <code>localhost:11434</code>, when fikra-mode activates, then the Ollama adapter should be detected</li>
+      <li>Given the Ollama adapter is selected, when I send a message, then it should POST to <code>/api/chat</code> and stream the response</li>
+      <li>Given Ollama is not running, when fikra-mode activates, then the Ollama adapter should show as unavailable</li>
+    </ul>
+  </div>
+
+  <div class="phase">
+    <h4>US-F2.3: Inline Completions (Ghost Text)</h4>
+    <p><strong>As a</strong> developer<br>
+    <strong>I want</strong> to press <code>SPC a i</code> in an editor buffer and see a dimmed code suggestion<br>
+    <strong>So that</strong> I can accept or dismiss AI completions inline without switching to chat</p>
+    <ul>
+      <li>Given I'm editing a file buffer opened from Fikra Chat, when I press <code>SPC a i</code>, then ghost text should appear as dimmed characters within 2 seconds</li>
+      <li>Given ghost text is showing, when I press <code>TAB</code>, then the ghost text should be inserted as real text</li>
+      <li>Given ghost text is showing, when I press any other key, then the ghost text should disappear</li>
+    </ul>
+  </div>
+
+  <h3>Phase 3: Threads, Turns, Checkpoints &amp; Worktrees</h3>
+
+  <div class="phase">
+    <h4>US-F3.1: Project Chat and Additional Threads</h4>
+    <p><strong>As a</strong> developer<br>
+    <strong>I want</strong> each project to have a main Fikra Chat (auto-created), with the option to spawn additional threads<br>
+    <strong>So that</strong> the primary flow is seamless while power users can parallelize</p>
+    <ul>
+      <li>Given I open a project directory for the first time, when I press <code>SPC a a</code>, then a &ldquo;main&rdquo; thread should be auto-created and <code>*Fikra*</code> should open full-screen</li>
+      <li>Given the project already has a main thread, when I press <code>SPC a a</code>, then the existing <code>*Fikra*</code> buffer should open full-screen with its conversation history</li>
+      <li>Given the project's main chat is open, when I press <code>SPC a t</code>, then a new additional thread should be created with a generated name (e.g., &ldquo;fix-11&rdquo;)</li>
+      <li>Given multiple threads exist, when I press <code>SPC a T</code>, then <code>*Fikra-Threads*</code> should list all threads grouped by project</li>
+      <li>Given the thread list is open, when I navigate to a thread and press <code>RET</code>, then I should switch to that thread's chat buffer full-screen</li>
+    </ul>
+  </div>
+
+  <div class="phase">
+    <h4>US-F3.2: Git Checkpoint per Turn</h4>
+    <p><strong>As a</strong> developer<br>
+    <strong>I want</strong> every AI turn to create a git checkpoint<br>
+    <strong>So that</strong> I can review and revert any AI change</p>
+    <ul>
+      <li>Given a thread in Local mode, when I send a turn, then baseline and completion checkpoints should be captured</li>
+      <li>Given a turn has completed, when I press <code>SPC a d</code>, then <code>*Fikra-Diff*</code> should show the diff between checkpoints with file stats</li>
+      <li>Given a turn's diff is showing, when I press <code>n</code>, then the filesystem should revert to the baseline checkpoint</li>
+      <li>Given a turn's diff is showing, when I press <code>y</code>, then the checkpoint should be kept</li>
+      <li>Given a thread with 5 turns, when I press <code>SPC a D</code>, then the diff should show cumulative changes from thread start</li>
+    </ul>
+  </div>
+
+  <div class="phase">
+    <h4>US-F3.3: Revert to Any Prior Turn</h4>
+    <p><strong>As a</strong> developer<br>
+    <strong>I want</strong> to revert to any previous turn's checkpoint<br>
+    <strong>So that</strong> I can undo a chain of bad AI changes</p>
+    <ul>
+      <li>Given a thread with turns 1-5, when I press <code>SPC a R</code> and select turn 2, then the filesystem should restore to turn 2's checkpoint and turns 3-5 should be removed from history</li>
+    </ul>
+  </div>
+
+  <div class="phase">
+    <h4>US-F3.4: Per-Action Safety Confirmations</h4>
+    <p><strong>As a</strong> developer<br>
+    <strong>I want</strong> to approve or reject each AI action<br>
+    <strong>So that</strong> the AI can't make changes I haven't reviewed</p>
+    <ul>
+      <li>Given my thread is in <code>approval-required</code> mode, when the AI tries to write a file, then a confirmation should appear: <code>[y] Allow [n] Reject [a] Always allow</code></li>
+      <li>Given I press <code>y</code>, then this one action should proceed</li>
+      <li>Given I press <code>a</code>, then all subsequent file writes should auto-proceed</li>
+      <li>Given I press <code>n</code>, then the AI should adapt its approach</li>
+    </ul>
+  </div>
+
+  <div class="phase">
+    <h4>US-F3.5: Runtime Mode Presets</h4>
+    <p><strong>As a</strong> developer<br>
+    <strong>I want</strong> to set a runtime mode that configures default confirmation behavior<br>
+    <strong>So that</strong> I can trade safety for speed</p>
+    <ul>
+      <li>Given <code>approval-required</code> mode, when the AI writes a file, then I should be asked to confirm</li>
+      <li>Given I select <code>auto-accept-edits</code>, when the AI writes a file, then it should auto-proceed but commands should still require confirmation</li>
+      <li>Given I select <code>full-access</code>, when the AI writes files or runs commands, then both should auto-proceed but network requests should still require confirmation</li>
+      <li>Given any runtime mode, when a checkpoint is captured, then it should be available for revert regardless of auto-accept settings</li>
+    </ul>
+  </div>
+
+  <div class="phase">
+    <h4>US-F3.6: Worktree Isolation</h4>
+    <p><strong>As a</strong> developer<br>
+    <strong>I want</strong> to run an AI thread in an isolated git worktree<br>
+    <strong>So that</strong> concurrent threads don't conflict on the same branch</p>
+    <ul>
+      <li>Given a thread in Local mode, when I press <code>SPC a w</code>, then an isolated worktree should be created in <code>.tmax/worktrees/&lt;thread-id&gt;/</code></li>
+      <li>Given a thread in Worktree mode, when I press <code>SPC a w</code> (handoff to Local), then the worktree should be snapshotted and cleaned up</li>
+      <li>Given a thread in Worktree mode, when I close the thread, then the worktree should be snapshotted and removed</li>
+      <li>Given concurrent threads in Worktree mode, when both write to the same file, then neither should see the other's changes until handoff</li>
+      <li>Given a thread in Worktree mode, when the thread list renders, then the Location column should show <code>worktree</code></li>
+    </ul>
+  </div>
+
+  <div class="phase">
+    <h4>US-F3.7: Project-Aware Chat Auto-Assignment</h4>
+    <p><strong>As a</strong> developer<br>
+    <strong>I want</strong> Fikra Chat to automatically belong to the project I'm working in<br>
+    <strong>So that</strong> opening <code>SPC a a</code> always gives me the right conversation</p>
+    <ul>
+      <li>Given I'm in <code>~/projects/tmax</code>, when I press <code>SPC a a</code>, then the Fikra Chat should be scoped to &ldquo;tmax&rdquo; with its own &ldquo;main&rdquo; thread</li>
+      <li>Given threads in multiple projects, when I press <code>SPC a T</code>, then the list should show project headers with &ldquo;main&rdquo; always present in each project</li>
+      <li>Given I switch to a different project directory, when I press <code>SPC a a</code>, then a new Fikra Chat should open scoped to that project (or the existing one if I've chatted there before)</li>
+    </ul>
+  </div>
+
+  <h3>Phase 4: Plan Mode + Extensibility</h3>
+
+  <div class="phase">
+    <h4>US-F4.1: Plan Mode</h4>
+    <p><strong>As a</strong> developer<br>
+    <strong>I want</strong> to ask the AI to propose a plan before making changes<br>
+    <strong>So that</strong> I can review the approach before committing</p>
+    <ul>
+      <li>Given a thread, when I press <code>SPC a p</code>, then the AI should propose a markdown plan without editing files</li>
+      <li>Given a proposed plan, when I press <code>y</code>, then an implementation turn should start referencing the plan</li>
+      <li>Given a proposed plan, when I press <code>e</code>, then the plan should become editable</li>
+      <li>Given a proposed plan, when I press <code>n</code>, then the plan should be discarded</li>
+    </ul>
+  </div>
+
+  <div class="phase">
+    <h4>US-F4.2: Custom Backend Registration</h4>
+    <p><strong>As a</strong> developer<br>
+    <strong>I want</strong> to register a custom AI backend from my init.tlisp<br>
+    <strong>So that</strong> I can use private or specialized AI services</p>
+    <ul>
+      <li>Given my init.tlisp, when I evaluate <code>(fikra-register-backend ...)</code>, then the backend should appear in the selector</li>
+      <li>Given my custom backend is selected, when I chat, then messages should be sent to the configured URL</li>
+    </ul>
+  </div>
+
+  <div class="phase">
+    <h4>US-F4.3: Custom Workflow Definition</h4>
+    <p><strong>As a</strong> developer<br>
+    <strong>I want</strong> to define custom AI workflows with <code>defworkflow</code><br>
+    <strong>So that</strong> I can create specialized AI interactions for my project</p>
+    <ul>
+      <li>Given my init.tlisp, when I evaluate a <code>defworkflow</code> form, then the workflow should be callable by name</li>
+      <li>Given a custom workflow, when I invoke it, then it should extract the specified context, send with the custom prompt, and apply the response handler</li>
+    </ul>
+  </div>
+</section>
+
+<section id="security">
+  <h2>Security Considerations</h2>
+  <ol>
+    <li><strong>No prompt injection from buffer text.</strong> Buffer content is always user messages. System prompt is T-Lisp-controlled.</li>
+    <li><strong>API keys in environment variables only.</strong> API keys live in environment variables (e.g., <code>ANTHROPIC_API_KEY</code>) or backend-specific config files, not in T-Lisp code. The <code>make-process</code> and <code>http-request</code> primitives pass through environment without exposing it to T-Lisp evaluation.</li>
+    <li><strong>Backend subprocess isolation.</strong> CLI adapters spawn subprocesses via <code>make-process</code>. They can&#39;t access tmax internals &mdash; they receive stdin and return stdout, filtered through T-Lisp.</li>
+    <li><strong>Ghost text is inert.</strong> Completions are plain text overlays until explicitly accepted. No automatic code execution.</li>
+    <li><strong>Opt-in telemetry.</strong> No data is sent anywhere the user didn't configure.</li>
+  </ol>
+</section>
+
+<section id="alternatives">
+  <h2>Alternatives Considered</h2>
+  <div class="alt-block">
+    <h4>Distribute as Loom package from day one</h4>
+    <p>Deferred. Fikra is useful immediately; Loom doesn't exist yet. Because Fikra is pure T-Lisp, extraction to a Loom package is trivial &mdash; the files already follow Loom conventions. The built-in version is structured for clean extraction from <code>src/tlisp/core/fikra/</code>.</p>
+  </div>
+  <div class="alt-block">
+    <h4>Workspace &rarr; Task decomposition model</h4>
+    <p>Rejected after studying t3code's architecture. Real AI coding tools use thread/turn models where the conversation is the unit of work, not decomposed tasks. Plan mode gives the "think first, then do" benefit without a formal task decomposition system.</p>
+  </div>
+  <div class="alt-block">
+    <h4>Checkpoint-only safety or action-only safety</h4>
+    <p>Neither alone is sufficient. Checkpoints without action confirmations mean the AI can make many unwanted changes before you catch them. Action confirmations without checkpoints mean once you approve a bad action, there's no clean undo. Fikra combines both: action-level confirmations prevent bad actions in real time, and checkpoint-level revert provides a safety net.</p>
+  </div>
+  <div class="alt-block">
+    <h4>Build a SaaS AI product (subscription model)</h4>
+    <p>The gap analysis concluded this is 4-6 months of mostly generic work. Fikra ships faster by reusing CLI tools as backends.</p>
+  </div>
+  <div class="alt-block">
+    <h4>Single-backend (Claude only)</h4>
+    <p>Rejected. Multi-backend costs little extra via the adapter interface. Users have different preferences.</p>
+  </div>
+  <div class="alt-block">
+    <h4>API-only (no CLI backends)</h4>
+    <p>Rejected. CLI adapters get 90% of the functionality for 10% of the effort vs. reimplementing via raw API calls.</p>
+  </div>
+  <div class="alt-block">
+    <h4>Emacs gptel-style (Elisp plugin)</h4>
+    <p>Fikra is a first-class mode in an editor designed for it, with a runtime that can validate and execute AI-generated code.</p>
+  </div>
+</section>
+
+<section id="open-questions">
+  <h2>Open Questions</h2>
+  <ul>
+    <li>Should Fikra support tool use / function calling from AI responses? Risk: prompt injection.</li>
+    <li>Should conversation history persist across sessions? Where?</li>
+    <li>Should ghost text completions trigger automatically or only on demand?</li>
+    <li>How to handle backends needing interactive auth (browser OAuth)?</li>
+    <li>Should Fikra work over the daemon protocol for <code>tmaxclient</code> relay?</li>
+  </ul>
+</section>
+
+<section id="references">
+  <h2>References</h2>
+  <ul>
+    <li>RFC-010: Loom — T-Lisp Package Manager</li>
+    <li>ADR-0020: AI Agent Control</li>
+    <li>RFC-002: Server/Client Architecture</li>
+    <li><code>docs/memos/ai-subscription-gap-analysis.md</code></li>
+    <li><code>docs/memos/business-model-overview.md</code></li>
+    <li>Emacs <code>gptel</code> — Emacs AI integration reference</li>
+    <li>Claude Code CLI, Codex CLI, Gemini CLI</li>
+  </ul>
+</section>
+
+</body>
+</html>

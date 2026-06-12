@@ -5,12 +5,10 @@ import {
 } from "../helpers/editor-fixture.ts";
 
 const LISP_OWNED_COMMANDS = [
-  "vim-dispatch-key",
   "vim-count-consume",
   "vim-begin-operator",
   "vim-operator-apply",
-  "vim-begin-prefix",
-  "vim-dispatch-prefix-key",
+  "vim-dispatch-operator-key",
   "vim-delete-char",
   "insert-newline",
   "insert-backspace",
@@ -60,7 +58,8 @@ describe("T-Lisp architecture boundaries", () => {
       "relative-line-numbers-mode",
     ];
 
-    expect(normal).toContain("vim-dispatch-key");
+    expect(normal).toContain("keymap-ref");
+    expect(normal).toContain("vim-operator-pending-p");
     for (const token of forbiddenNormalPolicy) {
       expect(normal, token).not.toContain(token);
     }

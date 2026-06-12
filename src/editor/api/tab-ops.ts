@@ -19,7 +19,7 @@ export function createTabOps(
       : `untitled-${Date.now()}`;
 
     const buffer = createBuffer(name, "") as Tab["buffer"];
-    const tab: Tab = { id: `tab-${Date.now()}`, label: name, buffer };
+    const tab: Tab = { id: `tab-${Date.now()}`, label: name, buffer, bufferName: name };
     const tabs = [...getTabs(), tab];
     setTabs(tabs);
     setCurrentTabIndex(tabs.length - 1);

@@ -7,17 +7,22 @@
 
 import { createServer, Server, Socket } from 'net';
 import { userInfo } from 'os';
-import { closeSync, existsSync, mkdirSync, openSync, unlinkSync, writeFileSync, readFileSync } from 'fs';
+import { closeSync, existsSync, mkdirSync, openSync, unlinkSync, writeFileSync, readFileSync, promises as fsPromises } from 'fs';
+import path from 'path';
 import { Editor } from '../editor/editor.ts';
 import { TerminalIOImpl } from '../core/terminal.ts';
 import { FileSystemImpl } from '../core/filesystem.ts';
 import { FunctionalTextBufferImpl } from '../core/buffer.ts';
-import { EditorState, Frame } from '../core/types.ts';
+import { EditorState, Frame, WorkspaceState } from '../core/types.ts';
+import { WorkspaceManager } from '../core/workspace.ts';
+import { Either } from '../utils/task-either.ts';
 import { registerTestingFramework } from '../tlisp/test-framework.ts';
 import { editorStateToJson } from './serialize.ts';
 import { cloneJsonValue } from '../tlisp/serialization.ts';
 import { captureFrame } from '../render/capture-frame.ts';
 import { ansiLinesToHtmlDocument } from '../render/ansi-to-html.ts';
+import { createBoolean, createHashmap, createList, createNil, createString } from '../tlisp/values.ts';
+import type { TLispValue } from '../tlisp/types.ts';
 
 // JSON-RPC 2.0 interfaces
 interface JSONRPCRequest {
@@ -127,6 +132,9 @@ export class TmaxServer {
   private editor: Editor;
   private clients: Map<string, ClientConnection>;
   private frames: Map<string, Frame> = new Map();
+  private workspaces: Map<string, WorkspaceState> = new Map();
+  private activeWorkspaceId: string = 'default';
+  private workspaceManager: WorkspaceManager;
   private frameObservability: Map<string, FrameObservability> = new Map();
   private recentErrors: ObservabilityError[] = [];
   private startedAt: Date = new Date();
@@ -136,12 +144,27 @@ export class TmaxServer {
   private ownsSocket: boolean = false;
   private ownsLock: boolean = false;
   private shuttingDown: boolean = false;
+	  private autoSaveTimer: ReturnType<typeof setInterval> | null = null;
+	  private debouncedSaveTimers: Map<string, ReturnType<typeof setTimeout>> = new Map();
+	  private lastSaveHashes: Map<string, string> = new Map();
+	  private lastSavedAt: Map<string, number> = new Map();
+	  private autoSaveIntervalMs: number;
+	  private debounceSaveMs: number;
+	  private maxDirtyIntervalMs: number;
+	  private lastWorkspaceFile: string;
 
   constructor(socketPath?: string, testMode: boolean = false, editor?: Editor) {
     this.socketPath = socketPath || this.getDefaultSocketPath();
     this.server = createServer();
     this.clients = new Map();
     this.testMode = testMode;
+	    this.workspaceManager = new WorkspaceManager();
+	    this.autoSaveIntervalMs = Number(process.env.TMAX_WORKSPACE_AUTOSAVE_MS ?? 30_000);
+	    this.debounceSaveMs = Number(process.env.TMAX_WORKSPACE_DEBOUNCE_MS ?? 5_000);
+	    this.maxDirtyIntervalMs = Number(process.env.TMAX_WORKSPACE_MAX_DIRTY_MS ?? 120_000);
+	    this.lastWorkspaceFile = path.join(
+      process.env.HOME ?? '.', '.config', 'tmax', 'last-workspace'
+    );
 
     if (editor) {
       // Embedded mode: reuse an existing Editor instance
@@ -194,6 +217,13 @@ export class TmaxServer {
    * Create a new frame (independent viewport)
    */
   createFrame(clientId?: string, clientType: string = 'tui'): string {
+    return this.createFrameForWorkspace(clientId, clientType, this.activeWorkspaceId);
+  }
+
+  /**
+   * Create a new frame bound to a workspace.
+   */
+  createFrameForWorkspace(clientId?: string, clientType: string = 'tui', workspaceId: string = this.activeWorkspaceId): string {
     const id = `frame-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
     const state = this.editor.getState();
     const frame: Frame = {
@@ -204,9 +234,10 @@ export class TmaxServer {
       mode: state.mode,
       commandLine: state.commandLine,
       mxCommand: state.mxCommand,
-      currentFilename: state.currentFilename,
-      currentBuffer: state.currentBuffer,
-      statusMessage: state.statusMessage,
+	      currentFilename: state.currentFilename,
+	      currentBuffer: state.currentBuffer,
+	      currentBufferName: this.currentBufferName(state) ?? undefined,
+	      statusMessage: state.statusMessage,
       cursorFocus: 'buffer',
       currentMajorMode: state.currentMajorMode ?? 'fundamental',
       activeMinorModes: state.activeMinorModes ?? [],
@@ -214,6 +245,7 @@ export class TmaxServer {
       minibufferState: cloneJsonValue(state.minibufferState),
       minibufferView: state.minibufferView ? structuredClone(state.minibufferView) : undefined,
       lastActivity: new Date(),
+      workspaceId,
     };
     this.frames.set(id, frame);
     this.frameObservability.set(id, {
@@ -227,6 +259,248 @@ export class TmaxServer {
     this.activeFrameId = id;
     this.editor.logMessage(`Frame created: ${id}`, 'info');
     return id;
+  }
+
+  private async initializeWorkspaces(): Promise<void> {
+    const init = await this.workspaceManager.init().run();
+    if (Either.isLeft(init)) {
+      throw new Error(init.left);
+    }
+
+    const list = await this.workspaceManager.list().run();
+    if (Either.isRight(list) && list.right.length > 0) {
+      // N2: prefer last-workspace if available, otherwise most-recently-accessed
+      const lastWorkspace = await this.readLastWorkspace();
+      this.activeWorkspaceId = lastWorkspace && list.right.some(m => m.name === lastWorkspace)
+        ? lastWorkspace
+        : (list.right[0]?.name ?? 'default');
+      const loaded = await this.workspaceManager.load(this.activeWorkspaceId).run();
+      if (Either.isRight(loaded)) {
+        this.workspaces.set(this.activeWorkspaceId, loaded.right);
+        this.logWorkspaceRestoreMessages(loaded.right);
+        this.editor.applyWorkspace(loaded.right);
+        return;
+      }
+    }
+
+    const created = await this.workspaceManager.create('default').run();
+    if (Either.isRight(created)) {
+      this.workspaces.set('default', created.right);
+      this.editor.applyWorkspace(created.right);
+      return;
+    }
+
+    const loaded = await this.workspaceManager.load('default').run();
+    if (Either.isRight(loaded)) {
+      this.workspaces.set('default', loaded.right);
+      this.logWorkspaceRestoreMessages(loaded.right);
+      this.editor.applyWorkspace(loaded.right);
+      return;
+    }
+
+    throw new Error(Either.isLeft(created) ? created.left : 'Failed to initialize default workspace');
+  }
+
+  private async loadWorkspace(name: string): Promise<WorkspaceState> {
+    const existing = this.workspaces.get(name);
+    if (existing) return existing;
+
+    const loaded = await this.workspaceManager.load(name).run();
+    if (Either.isRight(loaded)) {
+      this.workspaces.set(name, loaded.right);
+      this.logWorkspaceRestoreMessages(loaded.right);
+      return loaded.right;
+    }
+
+    const created = await this.workspaceManager.create(name).run();
+    if (Either.isRight(created)) {
+      this.workspaces.set(name, created.right);
+      return created.right;
+    }
+
+    throw new Error(Either.isLeft(loaded) ? loaded.left : created.left);
+  }
+
+  private logWorkspaceRestoreMessages(workspace: WorkspaceState): void {
+    for (const warning of workspace.restoreWarnings ?? []) {
+      this.editor.logMessage(warning, 'warn');
+    }
+  }
+
+  private async activateWorkspace(workspaceId: string): Promise<void> {
+    if (workspaceId === this.activeWorkspaceId && this.workspaces.has(workspaceId)) return;
+    this.captureActiveWorkspace();
+    const workspace = await this.loadWorkspace(workspaceId);
+    this.activeWorkspaceId = workspaceId;
+    this.editor.applyWorkspace(workspace);
+  }
+
+	  private captureActiveWorkspace(): void {
+	    const current = this.workspaces.get(this.activeWorkspaceId);
+	    if (!current) return;
+	    this.workspaces.set(this.activeWorkspaceId, this.editor.exportWorkspace(current));
+	  }
+
+  private clearWorkspaceModifiedFlags(workspace: WorkspaceState): void {
+	    for (const [bufName, meta] of workspace.bufferMetadata.entries()) {
+	      if (meta.modified) {
+	        workspace.bufferMetadata.set(bufName, { ...meta, modified: false });
+	      }
+	    }
+	    if (workspace.metadata.name === this.activeWorkspaceId) {
+	      this.editor.clearModifiedFlags();
+	    }
+	  }
+
+  private cloneWorkspace(workspace: WorkspaceState): WorkspaceState {
+    const buffers = new Map<string, import('../core/types.ts').FunctionalTextBuffer>();
+    for (const [name, buffer] of workspace.buffers.entries()) {
+      const content = buffer.getContent();
+      buffers.set(name, FunctionalTextBufferImpl.create(Either.isRight(content) ? content.right : ''));
+    }
+
+    const resolveBuffer = (bufferName: string | undefined, fallback?: import('../core/types.ts').FunctionalTextBuffer) => {
+      if (bufferName && buffers.has(bufferName)) return buffers.get(bufferName)!;
+      return fallback ?? buffers.get('*scratch*') ?? FunctionalTextBufferImpl.create('');
+    };
+
+    return {
+      metadata: { ...workspace.metadata },
+      buffers,
+      bufferMetadata: new Map(Array.from(workspace.bufferMetadata.entries()).map(([name, metadata]) => [name, { ...metadata }])),
+      bufferModeStates: new Map(Array.from(workspace.bufferModeStates.entries()).map(([name, modeState]) => [name, {
+        majorMode: modeState.majorMode,
+        minorModes: modeState.minorModes ? [...modeState.minorModes] : undefined,
+        lighters: modeState.lighters ? [...modeState.lighters] : undefined,
+      }])),
+      windows: workspace.windows.map(window => ({
+        ...window,
+        buffer: resolveBuffer(window.bufferName),
+        scrollback: window.scrollback ? structuredClone(window.scrollback) : undefined,
+      })),
+      tabs: workspace.tabs.map(tab => ({
+        ...tab,
+        buffer: resolveBuffer(tab.bufferName),
+      })),
+      cursorState: { ...workspace.cursorState },
+      viewportState: { ...workspace.viewportState },
+      currentBufferName: workspace.currentBufferName,
+      currentFilename: workspace.currentFilename,
+      currentMajorMode: workspace.currentMajorMode,
+      activeMinorModes: workspace.activeMinorModes ? [...workspace.activeMinorModes] : undefined,
+      activeMinorModeLighters: workspace.activeMinorModeLighters ? [...workspace.activeMinorModeLighters] : undefined,
+      restoreWarnings: workspace.restoreWarnings ? [...workspace.restoreWarnings] : undefined,
+      restoreConflicts: workspace.restoreConflicts ? [...workspace.restoreConflicts] : undefined,
+    };
+  }
+
+  private async saveWorkspaceSnapshot(workspace: WorkspaceState): Promise<void> {
+    const result = await this.workspaceManager.saveWithContentHash(workspace, { force: true }).run();
+    if (Either.isLeft(result)) throw new Error(result.left);
+    this.lastSaveHashes.set(workspace.metadata.name, result.right.contentHash);
+    this.lastSavedAt.set(workspace.metadata.name, Date.now());
+  }
+
+  private async saveWorkspace(name: string): Promise<void> {
+    const workspace = this.workspaces.get(name);
+    if (!workspace) return;
+    await this.saveWorkspaceSnapshot(workspace);
+  }
+
+  private async saveAllWorkspaces(): Promise<void> {
+    this.captureActiveWorkspace();
+    for (const name of this.workspaces.keys()) {
+      await this.saveWorkspace(name);
+    }
+  }
+
+	  private async saveDirtyWorkspace(name: string): Promise<void> {
+	    if (name === this.activeWorkspaceId) this.captureActiveWorkspace();
+	    const workspace = this.workspaces.get(name);
+	    if (!workspace) return;
+	    const hasDirty = Array.from(workspace.bufferMetadata.values()).some(m => m.modified);
+    const lastHash = this.lastSaveHashes.get(name);
+    const lastSaved = this.lastSavedAt.get(name) ?? 0;
+    const maxDirtyElapsed = Date.now() - lastSaved >= this.maxDirtyIntervalMs;
+    const dirtyBuffers = Array.from(workspace.bufferMetadata.entries())
+      .filter(([, meta]) => meta.modified)
+      .map(([bufferName]) => bufferName);
+    if (hasDirty) this.clearWorkspaceModifiedFlags(workspace);
+    const result = await this.workspaceManager.saveWithContentHash(workspace, {
+      lastHash,
+      force: maxDirtyElapsed,
+    }).run();
+    if (Either.isLeft(result)) {
+	      for (const bufferName of dirtyBuffers) {
+	        const meta = workspace.bufferMetadata.get(bufferName);
+	        if (meta) workspace.bufferMetadata.set(bufferName, { ...meta, modified: true });
+	      }
+	      if (name === this.activeWorkspaceId) {
+	        this.editor.markBuffersModified(dirtyBuffers);
+	      }
+      this.editor.logMessage(`Auto-save failed for workspace "${name}": ${result.left}`, 'error');
+      return;
+    }
+    this.lastSaveHashes.set(name, result.right.contentHash);
+    this.lastSavedAt.set(name, Date.now());
+  }
+
+	  // I1: save only dirty workspaces (called by auto-save timer)
+	  private async saveAllDirtyWorkspaces(): Promise<void> {
+	    this.captureActiveWorkspace();
+	    for (const name of this.workspaces.keys()) {
+	      await this.saveDirtyWorkspace(name);
+	    }
+	  }
+
+	  private scheduleDirtyWorkspaceSave(name: string): void {
+	    const existing = this.debouncedSaveTimers.get(name);
+	    if (existing) clearTimeout(existing);
+	    const timer = setTimeout(async () => {
+	      this.debouncedSaveTimers.delete(name);
+	      await this.saveDirtyWorkspace(name);
+	    }, this.debounceSaveMs);
+	    if (typeof timer === 'object' && 'unref' in timer) timer.unref();
+	    this.debouncedSaveTimers.set(name, timer);
+	  }
+
+  // C6: persist last-active workspace name to disk
+  private async updateLastWorkspace(name: string): Promise<void> {
+    try {
+      const dir = path.dirname(this.lastWorkspaceFile);
+      await fsPromises.mkdir(dir, { recursive: true });
+      await fsPromises.writeFile(this.lastWorkspaceFile, name, 'utf-8');
+    } catch {
+      // Non-critical: last-workspace persistence is best-effort
+    }
+  }
+
+  // C6: read last-active workspace name from disk
+  private async readLastWorkspace(): Promise<string | undefined> {
+    try {
+      const content = await fsPromises.readFile(this.lastWorkspaceFile, 'utf-8');
+      return content.trim() || undefined;
+    } catch {
+      return undefined;
+    }
+  }
+
+  private async activateFrameWorkspace(frame?: Frame, requestedWorkspaceId?: string): Promise<void> {
+    await this.activateWorkspace(requestedWorkspaceId ?? frame?.workspaceId ?? this.activeWorkspaceId);
+  }
+
+  private isWorkspaceOverride(frame: Frame | undefined, requestedWorkspaceId: unknown): requestedWorkspaceId is string {
+    return typeof requestedWorkspaceId === 'string'
+      && requestedWorkspaceId.length > 0
+      && requestedWorkspaceId !== (frame?.workspaceId ?? this.activeWorkspaceId);
+  }
+
+  private async restoreWorkspaceAfterOverride(workspaceOverride: boolean, workspaceId: string, frameId: string | null): Promise<void> {
+    if (!workspaceOverride) return;
+    if (this.activeWorkspaceId !== workspaceId) {
+      await this.activateWorkspace(workspaceId);
+    }
+    this.activeFrameId = frameId;
   }
 
   /**
@@ -262,17 +536,35 @@ export class TmaxServer {
    * Sync frame state TO the editor (before operations that use editor state)
    */
   private syncFrameToEditor(frame: Frame): void {
+    const currentState = this.editor.getState();
+    const resolvedBufferName = frame.currentBufferName && currentState.buffers?.has(frame.currentBufferName)
+      ? frame.currentBufferName
+      : frame.currentBuffer
+        ? Array.from(currentState.buffers?.entries() ?? []).find(([, buffer]) => buffer === frame.currentBuffer)?.[0]
+        : undefined;
+    const resolvedBuffer = resolvedBufferName && currentState.buffers?.has(resolvedBufferName)
+      ? currentState.buffers.get(resolvedBufferName)
+      : currentState.currentBuffer;
+    const workspaceId = frame.workspaceId ?? this.activeWorkspaceId;
+    const workspaceFilename = resolvedBufferName
+      ? this.workspaces.get(workspaceId)?.bufferMetadata.get(resolvedBufferName)?.filename
+      : undefined;
+    const currentStateBufferName = this.currentBufferName(currentState) ?? undefined;
+    const currentStateFilename = resolvedBufferName === currentStateBufferName
+      ? currentState.currentFilename
+      : undefined;
+    const resolvedFilename = frame.currentFilename ?? workspaceFilename ?? currentStateFilename;
     this.editor.setEditorState({
-      currentBuffer: frame.currentBuffer,
+      currentBuffer: resolvedBuffer,
       cursorPosition: { ...frame.cursorPosition },
       mode: frame.mode,
       statusMessage: frame.statusMessage,
       viewportTop: frame.viewportTop,
       viewportLeft: frame.viewportLeft,
-      config: this.editor.getState().config,
+      config: currentState.config,
       commandLine: frame.commandLine,
       mxCommand: frame.mxCommand,
-      currentFilename: frame.currentFilename,
+      currentFilename: resolvedFilename,
       currentMajorMode: frame.currentMajorMode,
       activeMinorModes: frame.activeMinorModes,
       activeMinorModeLighters: frame.activeMinorModeLighters,
@@ -293,10 +585,11 @@ export class TmaxServer {
     frame.viewportLeft = state.viewportLeft ?? 0;
     frame.mode = state.mode;
     frame.commandLine = state.commandLine;
-    frame.mxCommand = state.mxCommand;
-    frame.currentFilename = state.currentFilename;
-    frame.currentBuffer = state.currentBuffer;
-    frame.statusMessage = state.statusMessage;
+	    frame.mxCommand = state.mxCommand;
+	    frame.currentFilename = state.currentFilename;
+	    frame.currentBuffer = state.currentBuffer;
+	    frame.currentBufferName = this.currentBufferName(state) ?? undefined;
+	    frame.statusMessage = state.statusMessage;
     frame.currentMajorMode = state.currentMajorMode ?? 'fundamental';
     frame.activeMinorModes = state.activeMinorModes ?? [];
     frame.activeMinorModeLighters = state.activeMinorModeLighters ?? [];
@@ -312,6 +605,7 @@ export class TmaxServer {
    */
   private syncEditorToAllFrames(): void {
     for (const frame of this.frames.values()) {
+      if ((frame.workspaceId ?? this.activeWorkspaceId) !== this.activeWorkspaceId) continue;
       const activeMinibuffer = frame.minibufferState === undefined ? undefined : {
         mode: frame.mode,
         mxCommand: frame.mxCommand,
@@ -381,6 +675,7 @@ export class TmaxServer {
       mode: frame.mode,
       currentFilename: frame.currentFilename ?? null,
       bufferName: frame.currentFilename ?? null,
+      workspaceId: frame.workspaceId ?? this.activeWorkspaceId,
       cursorPosition: frame.cursorPosition,
       statusMessage: frame.statusMessage,
       currentMajorMode: frame.currentMajorMode ?? 'fundamental',
@@ -425,6 +720,8 @@ export class TmaxServer {
       clientCount: this.clients.size,
       frameCount: this.frames.size,
       activeFrameId: this.activeFrameId,
+      activeWorkspaceId: this.activeWorkspaceId,
+      workspaceCount: this.workspaces.size,
       editor: {
         mode: state.mode,
         currentFilename: state.currentFilename ?? null,
@@ -533,16 +830,25 @@ export class TmaxServer {
    * Uses frame-local state (mode, cursor, minibuffer, etc.) and shared
    * editor display metadata (windows, tabs, buffers).
    */
-  private frameToEditorState(frame: Frame): EditorState {
-    const shared = this.editor.getState();
-    return {
-      currentBuffer: frame.currentBuffer,
-      cursorPosition: { ...frame.cursorPosition },
-      mode: frame.mode,
-      statusMessage: shared.statusMessage,
-      viewportTop: frame.viewportTop,
-      viewportLeft: frame.viewportLeft,
-      config: shared.config,
+	  private frameToEditorState(frame: Frame): EditorState {
+	    const shared = this.editor.getState();
+	    const workspaceId = frame.workspaceId ?? this.activeWorkspaceId;
+	    const workspace = workspaceId === this.activeWorkspaceId
+	      ? undefined
+	      : this.workspaces.get(workspaceId);
+	    const workspaceBuffers = workspace?.buffers;
+	    const bufferName = frame.currentBufferName ?? workspace?.currentBufferName;
+	    const frameBuffer = bufferName && workspaceBuffers?.has(bufferName)
+	      ? workspaceBuffers.get(bufferName)
+	      : frame.currentBuffer;
+	    return {
+	      currentBuffer: frameBuffer,
+	      cursorPosition: { ...frame.cursorPosition },
+	      mode: frame.mode,
+	      statusMessage: frame.statusMessage,
+	      viewportTop: frame.viewportTop,
+	      viewportLeft: frame.viewportLeft,
+	      config: shared.config,
       commandLine: frame.commandLine,
       mxCommand: frame.mxCommand,
       currentFilename: frame.currentFilename,
@@ -552,14 +858,13 @@ export class TmaxServer {
       minibufferState: cloneJsonValue(frame.minibufferState),
       minibufferView: frame.minibufferView ? structuredClone(frame.minibufferView) : undefined,
       cursorFocus: frame.cursorFocus,
-      // Shared display metadata — not frame-local
-      buffers: shared.buffers,
-      windows: shared.windows,
-      currentWindowIndex: shared.currentWindowIndex,
-      tabs: shared.tabs,
-      currentTabIndex: shared.currentTabIndex,
-    };
-  }
+	      buffers: workspaceBuffers ?? shared.buffers,
+	      windows: workspace?.windows ?? shared.windows,
+	      currentWindowIndex: shared.currentWindowIndex,
+	      tabs: workspace?.tabs ?? shared.tabs,
+	      currentTabIndex: shared.currentTabIndex,
+	    };
+	  }
 
   /**
    * Initialize editor (load bindings + init file).
@@ -567,9 +872,86 @@ export class TmaxServer {
    */
   async startEditor(): Promise<void> {
     this.editor.logMessage('Server started', 'info');
+    await this.initializeWorkspaces();
 
     await this.editor.ensureCoreBindingsLoadedPublic();
     await this.editor.loadInitFilePublic(undefined);
+    this.registerWorkspaceBuiltins();
+
+    // I1: auto-save timer — save dirty workspaces every 30s
+	    this.autoSaveTimer = setInterval(async () => {
+	      await this.saveAllDirtyWorkspaces();
+	    }, this.autoSaveIntervalMs);
+    // N5: don't prevent process exit if only the timer remains
+    if (this.autoSaveTimer && typeof this.autoSaveTimer === 'object' && 'unref' in this.autoSaveTimer) {
+      this.autoSaveTimer.unref();
+    }
+  }
+
+  private registerWorkspaceBuiltins(): void {
+    const interpreter = this.editor.getInterpreter();
+    const err = (error: unknown) => Either.left({
+      type: 'EvalError' as const,
+      variant: 'RuntimeError' as const,
+      message: error instanceof Error ? error.message : String(error),
+    });
+    const stringArg = (args: TLispValue[], index: number, name: string): string => {
+      const value = args[index];
+      if (!value || value.type !== 'string') {
+        throw new Error(`${name} argument ${index + 1} must be a string`);
+      }
+      return value.value as string;
+    };
+    const asTlisp = (value: any): TLispValue => {
+      if (value === null || value === undefined) return createNil();
+      if (typeof value === 'string') return createString(value);
+      if (typeof value === 'boolean') return createBoolean(value);
+      if (Array.isArray(value)) return createList(value.map(asTlisp));
+      if (typeof value === 'object') {
+        return createHashmap(Object.entries(value).map(([key, item]) => [key, asTlisp(item)]));
+      }
+      return createString(String(value));
+    };
+    const asyncBuiltin = (
+      name: string,
+      fn: (args: TLispValue[]) => Promise<TLispValue>,
+    ) => {
+      interpreter.defineAsyncBuiltin(
+        name,
+        () => Either.right(createNil()),
+        async (args) => {
+          try {
+            return Either.right(await fn(args));
+          } catch (error) {
+            return err(error);
+          }
+        },
+      );
+    };
+
+    asyncBuiltin('workspace-list', async () => asTlisp(await this.handleWorkspaceList()));
+    asyncBuiltin('workspace-new', async (args) => {
+      return asTlisp(await this.handleWorkspaceNew({ name: stringArg(args, 0, 'workspace-new') }));
+    });
+    asyncBuiltin('workspace-switch', async (args) => {
+      return asTlisp(await this.handleWorkspaceSwitch({ name: stringArg(args, 0, 'workspace-switch') }));
+    });
+    asyncBuiltin('workspace-save', async () => asTlisp(await this.handleWorkspaceSave({})));
+    asyncBuiltin('workspace-load', async (args) => {
+      return asTlisp(await this.handleWorkspaceLoad({ name: stringArg(args, 0, 'workspace-load') }));
+    });
+    asyncBuiltin('workspace-kill', async (args) => {
+      return asTlisp(await this.handleWorkspaceKill({ name: stringArg(args, 0, 'workspace-kill') }));
+    });
+	    asyncBuiltin('workspace-rename', async (args) => {
+	      return asTlisp(await this.handleWorkspaceRename({
+	        oldName: stringArg(args, 0, 'workspace-rename'),
+	        newName: stringArg(args, 1, 'workspace-rename'),
+	      }));
+	    });
+	    asyncBuiltin('workspace-move-window', async (args) => {
+	      return asTlisp(await this.handleWorkspaceMoveWindow({ target: stringArg(args, 0, 'workspace-move-window') }));
+	    });
   }
 
   /**
@@ -673,7 +1055,11 @@ export class TmaxServer {
             client.clientType = params.clientType ?? 'tui';
             client.clientName = params.clientName;
             client.metadata = params.metadata ?? {};
-            clientFrameId = this.createFrame(clientId, client.clientType);
+	            const requestedWorkspace = params.workspaceId ?? params.workspace ?? (await this.readLastWorkspace()) ?? this.activeWorkspaceId;
+	            const explicitWorkspace = typeof params.workspaceId === 'string' || typeof params.workspace === 'string';
+	            await this.activateWorkspace(requestedWorkspace);
+	            if (explicitWorkspace) await this.updateLastWorkspace(requestedWorkspace);
+	            clientFrameId = this.createFrameForWorkspace(clientId, client.clientType, requestedWorkspace);
             client.frameId = clientFrameId;
             if (conn.writable) {
               conn.write(JSON.stringify({
@@ -793,6 +1179,30 @@ export class TmaxServer {
         case 'frames':
           result = await this.handleFrames();
           break;
+        case 'workspace-list':
+          result = await this.handleWorkspaceList();
+          break;
+        case 'workspace-new':
+          result = await this.handleWorkspaceNew(request.params);
+          break;
+        case 'workspace-switch':
+          result = await this.handleWorkspaceSwitch(request.params);
+          break;
+        case 'workspace-save':
+          result = await this.handleWorkspaceSave(request.params);
+          break;
+        case 'workspace-kill':
+          result = await this.handleWorkspaceKill(request.params);
+          break;
+        case 'workspace-rename':
+          result = await this.handleWorkspaceRename(request.params);
+          break;
+	        case 'workspace-load':
+	          result = await this.handleWorkspaceLoad(request.params);
+	          break;
+	        case 'workspace-move-window':
+	          result = await this.handleWorkspaceMoveWindow(request.params);
+	          break;
         case 'shutdown':
           result = { success: true };
           // Fire-and-forget shutdown so we can respond first
@@ -851,35 +1261,48 @@ export class TmaxServer {
       throw new Error('Filepath is required');
     }
 
-    // Load the file content
-    let content = '';
+    const frame = this.resolveFrameOptional(params);
+    const workspaceOverride = this.isWorkspaceOverride(frame, params?.workspaceId);
+    const previousWorkspaceId = this.activeWorkspaceId;
+    const previousFrameId = this.activeFrameId;
+
     try {
-      content = await this.editor.getFilesystem().readFile(filepath);
-    } catch (error) {
-      // File doesn't exist, create empty buffer
-      content = '';
+      await this.activateFrameWorkspace(frame, params?.workspaceId);
+
+      // Load the file content
+      let content = '';
+      try {
+        content = await this.editor.getFilesystem().readFile(filepath);
+      } catch (error) {
+        // File doesn't exist, create empty buffer
+        content = '';
+      }
+
+      this.editor.createBuffer(filepath, content);
+      const currentState = this.editor.getState();
+      const newState = {
+        ...currentState,
+        currentFilename: filepath,
+        statusMessage: `Opened ${filepath}`,
+      };
+
+      this.editor.setEditorState(newState);
+      this.editor.activateMajorModeForFile(filepath);
+	    this.editor.logMessage(`Opened ${filepath}`, 'info');
+
+	    this.captureActiveWorkspace();
+	    this.scheduleDirtyWorkspaceSave(this.activeWorkspaceId);
+	    if (frame && !workspaceOverride) this.syncEditorToFrame(frame); else this.syncEditorToAllFrames();
+
+      return {
+        buffer: filepath,
+        line: 1,
+        column: 1,
+        opened: true
+      };
+    } finally {
+      await this.restoreWorkspaceAfterOverride(workspaceOverride, previousWorkspaceId, previousFrameId);
     }
-
-    this.editor.createBuffer(filepath, content);
-    const currentState = this.editor.getState();
-    const newState = {
-      ...currentState,
-      currentFilename: filepath,
-      statusMessage: `Opened ${filepath}`,
-    };
-
-    this.editor.setEditorState(newState);
-    this.editor.activateMajorModeForFile(filepath);
-    this.editor.logMessage(`Opened ${filepath}`, 'info');
-
-    this.syncEditorToAllFrames();
-
-    return {
-      buffer: filepath,
-      line: 1,
-      column: 1,
-      opened: true
-    };
   }
 
   /**
@@ -893,9 +1316,13 @@ export class TmaxServer {
     }
 
     const frame = this.resolveFrameOptional(params);
+    const workspaceOverride = this.isWorkspaceOverride(frame, params?.workspaceId);
+    const previousWorkspaceId = this.activeWorkspaceId;
+    const previousFrameId = this.activeFrameId;
 
     try {
-      if (frame) {
+      await this.activateFrameWorkspace(frame, params?.workspaceId);
+      if (frame && !workspaceOverride) {
         this.syncFrameToEditor(frame);
       }
 
@@ -921,13 +1348,17 @@ export class TmaxServer {
         throw e;
       }
 
-      this.syncEditorToAllFrames();
+	      this.captureActiveWorkspace();
+	      this.scheduleDirtyWorkspaceSave(this.activeWorkspaceId);
+	      if (frame && !workspaceOverride) this.syncEditorToFrame(frame); else this.syncEditorToAllFrames();
 
       // Convert T-Lisp value to JSON-serializable format
       return this.tlispValueToJson(result.right);
     } catch (error) {
       if ((error as any).diagnostic) throw error;
       throw new Error(`T-Lisp evaluation error: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    } finally {
+      await this.restoreWorkspaceAfterOverride(workspaceOverride, previousWorkspaceId, previousFrameId);
     }
   }
 
@@ -956,9 +1387,13 @@ export class TmaxServer {
     }
 
     const frame = this.resolveFrameOptional(params);
+    const workspaceOverride = this.isWorkspaceOverride(frame, params?.workspaceId);
+    const previousWorkspaceId = this.activeWorkspaceId;
+    const previousFrameId = this.activeFrameId;
 
     try {
-      if (frame) this.syncFrameToEditor(frame);
+      await this.activateFrameWorkspace(frame, params?.workspaceId);
+      if (frame && !workspaceOverride) this.syncFrameToEditor(frame);
 
       const interpreter = this.editor.getInterpreter();
       const escaped = text
@@ -972,11 +1407,15 @@ export class TmaxServer {
         throw new Error(result.left.message || 'T-Lisp evaluation error');
       }
 
-      this.syncEditorToAllFrames();
+	      this.captureActiveWorkspace();
+	      this.scheduleDirtyWorkspaceSave(this.activeWorkspaceId);
+	      if (frame && !workspaceOverride) this.syncEditorToFrame(frame); else this.syncEditorToAllFrames();
 
       return this.tlispValueToJson(result.right);
     } catch (error) {
       throw new Error(`Insert error: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    } finally {
+      await this.restoreWorkspaceAfterOverride(workspaceOverride, previousWorkspaceId, previousFrameId);
     }
   }
 
@@ -996,16 +1435,33 @@ export class TmaxServer {
       const frameId = params.frameId ?? this.activeFrameId;
       if (frameId) {
         const frame = this.getFrame(frameId);
-        this.activeFrameId = frameId;
-        this.syncFrameToEditor(frame);
-        await this.editor.handleKey(key);
-        this.syncEditorToFrame(frame);
-        return editorStateToJson(this.frameToEditorState(frame));
+        const workspaceOverride = this.isWorkspaceOverride(frame, params?.workspaceId);
+        const previousWorkspaceId = this.activeWorkspaceId;
+        const previousFrameId = this.activeFrameId;
+        try {
+          this.activeFrameId = frameId;
+          await this.activateFrameWorkspace(frame, params?.workspaceId);
+          if (!workspaceOverride) this.syncFrameToEditor(frame);
+          await this.editor.handleKey(key);
+	        this.captureActiveWorkspace();
+	        this.scheduleDirtyWorkspaceSave(this.activeWorkspaceId);
+	        if (workspaceOverride) {
+	          this.syncEditorToAllFrames();
+	          return editorStateToJson(this.editor.getEditorState());
+	        }
+	        this.syncEditorToFrame(frame);
+	        return editorStateToJson(this.frameToEditorState(frame));
+        } finally {
+          await this.restoreWorkspaceAfterOverride(workspaceOverride, previousWorkspaceId, previousFrameId);
+        }
       }
       // No frameId — operate on editor directly, then sync all frames
+      await this.activateWorkspace(params?.workspaceId ?? this.activeWorkspaceId);
       await this.editor.handleKey(key);
-      this.syncEditorToAllFrames();
-      return editorStateToJson(this.editor.getEditorState());
+	      this.syncEditorToAllFrames();
+	      this.captureActiveWorkspace();
+	      this.scheduleDirtyWorkspaceSave(this.activeWorkspaceId);
+	      return editorStateToJson(this.editor.getEditorState());
     } catch (error) {
       if (error instanceof Error && error.message === 'EDITOR_QUIT_SIGNAL') {
         this.syncEditorToAllFrames();
@@ -1024,6 +1480,7 @@ export class TmaxServer {
   private async handleRenderState(params: any): Promise<any> {
     if (params?.frameId) {
       const frame = this.getFrame(params.frameId);
+      // Read-only: return frame's own state directly, no workspace activation (C2)
       return editorStateToJson(this.frameToEditorState(frame));
     }
     return editorStateToJson(this.editor.getEditorState());
@@ -1130,8 +1587,269 @@ export class TmaxServer {
     return Array.from(this.frames.values()).map(frame => this.frameStatus(frame));
   }
 
-  /**
-   * Handle editor command request
+	  private workspaceNameFromParams(params: any, key: string = 'name'): string {
+	    const value = params?.[key] ?? params?.workspace ?? params?.workspaceId;
+	    if (typeof value !== 'string' || value.length === 0) {
+	      throw new Error(`Workspace ${key} is required`);
+	    }
+	    return value;
+	  }
+
+	  private workspaceDirtyBuffers(workspace: WorkspaceState): string[] {
+	    return Array.from(workspace.bufferMetadata.entries())
+	      .filter(([, metadata]) => metadata.modified)
+	      .map(([name]) => name);
+	  }
+
+	  private bufferDetailsForWorkspace(workspace: WorkspaceState, currentBufferName?: string): Array<Record<string, unknown>> {
+	    return Array.from(workspace.buffers.entries()).map(([name, buffer]) => {
+	      const content = buffer.getContent();
+	      const text = Either.isRight(content) ? content.right : '';
+	      const lineCount = buffer.getLineCount();
+	      const metadata = workspace.bufferMetadata.get(name);
+	      const modeState = workspace.bufferModeStates.get(name);
+	      return {
+	        name,
+	        content: text,
+	        ...(metadata?.filename ? { filename: metadata.filename } : {}),
+	        majorMode: modeState?.majorMode ?? metadata?.majorMode ?? 'fundamental',
+	        modified: metadata?.modified ?? false,
+	        characters: text.length,
+	        lines: Either.isRight(lineCount) ? lineCount.right : 0,
+	        current: name === currentBufferName,
+	        special: name.startsWith('*') && name.endsWith('*'),
+	        recency: 0,
+	      };
+	    });
+	  }
+
+  private async handleWorkspaceList(): Promise<any> {
+    this.captureActiveWorkspace();
+    const disk = await this.workspaceManager.list().run();
+    if (Either.isLeft(disk)) throw new Error(disk.left);
+    const loadedNames = new Set(this.workspaces.keys());
+    return disk.right.map(metadata => ({
+      name: metadata.name,
+      id: metadata.id,
+      active: metadata.name === this.activeWorkspaceId,
+      loaded: loadedNames.has(metadata.name),
+      lastAccessed: metadata.lastAccessed,
+      projectRoot: metadata.projectRoot ?? null,
+      windowCount: this.workspaces.get(metadata.name)?.windows.length ?? 0,
+    }));
+  }
+
+  private async handleWorkspaceNew(params: any): Promise<any> {
+    const name = this.workspaceNameFromParams(params);
+    const result = await this.workspaceManager.create(name, { projectRoot: params?.projectRoot }).run();
+    if (Either.isLeft(result)) throw new Error(result.left);
+    this.workspaces.set(name, result.right);
+    // R4-6: workspace-new is "create only" per spec — don't updateLastWorkspace
+    return { success: true, name, id: result.right.metadata.id };
+  }
+
+  private async handleWorkspaceSwitch(params: any): Promise<any> {
+    const name = this.workspaceNameFromParams(params);
+    // R4-9: inline the switch logic to avoid double captureActiveWorkspace
+    this.captureActiveWorkspace();
+    await this.saveWorkspace(this.activeWorkspaceId);
+    const workspace = await this.loadWorkspace(name);
+    this.activeWorkspaceId = name;
+    this.editor.applyWorkspace(workspace);
+    await this.updateLastWorkspace(name); // C6
+    if (params?.frameId) {
+      const frame = this.getFrame(params.frameId);
+      frame.workspaceId = name;
+      this.syncEditorToFrame(frame);
+    }
+    return { success: true, activeWorkspaceId: name };
+  }
+
+  private async handleWorkspaceSave(params: any): Promise<any> {
+    const name = params?.name ?? this.activeWorkspaceId;
+    this.captureActiveWorkspace();
+    await this.saveWorkspace(name);
+    return { success: true, name };
+  }
+
+	  private async handleWorkspaceKill(params: any): Promise<any> {
+	    const name = this.workspaceNameFromParams(params);
+	    if (name === this.activeWorkspaceId) {
+	      throw new Error('Cannot kill the active workspace; switch to another workspace first');
+	    }
+	    const workspace = await this.loadWorkspace(name);
+	    const dirtyBuffers = this.workspaceDirtyBuffers(workspace);
+	    if (dirtyBuffers.length > 0 && params?.confirm !== true) {
+	      return {
+	        success: false,
+	        confirmationRequired: true,
+	        name,
+	        dirtyBuffers,
+	        message: `Workspace "${name}" has unsaved buffers`,
+	      };
+	    }
+	    const result = await this.workspaceManager.delete(name).run();
+	    if (Either.isLeft(result)) throw new Error(result.left);
+	    this.workspaces.delete(name);
+    for (const frame of this.frames.values()) {
+      if (frame.workspaceId === name) {
+        frame.workspaceId = this.activeWorkspaceId;
+        this.syncEditorToFrame(frame); // I2: reset frame state from active workspace
+      }
+    }
+    return { success: true, name };
+  }
+
+  private async handleWorkspaceRename(params: any): Promise<any> {
+    const oldName = this.workspaceNameFromParams(params, 'oldName');
+    const newName = this.workspaceNameFromParams(params, 'newName');
+    this.captureActiveWorkspace();
+    const result = await this.workspaceManager.rename(oldName, newName).run();
+    if (Either.isLeft(result)) throw new Error(result.left);
+    const loaded = this.workspaces.get(oldName);
+    if (loaded) {
+      loaded.metadata.name = newName;
+      this.workspaces.delete(oldName);
+      this.workspaces.set(newName, loaded);
+    }
+    if (this.activeWorkspaceId === oldName) this.activeWorkspaceId = newName;
+    for (const frame of this.frames.values()) {
+      if (frame.workspaceId === oldName) frame.workspaceId = newName;
+    }
+    return { success: true, oldName, newName };
+  }
+
+	  private async handleWorkspaceLoad(params: any): Promise<any> {
+	    const name = this.workspaceNameFromParams(params);
+	    const workspace = await this.loadWorkspace(name);
+	    return { success: true, name, id: workspace.metadata.id };
+	  }
+
+	  private async handleWorkspaceMoveWindow(params: any): Promise<any> {
+	    const targetName = params?.target ?? params?.name ?? params?.workspace ?? params?.workspaceId;
+	    if (typeof targetName !== 'string' || targetName.length === 0) {
+	      throw new Error('workspace-move-window target is required');
+	    }
+	    const frame = this.resolveFrameOptional(params);
+	    const sourceWorkspaceId = typeof params?.sourceWorkspaceId === 'string' ? params.sourceWorkspaceId : undefined;
+	    const previousWorkspaceId = this.activeWorkspaceId;
+	    const previousFrameId = this.activeFrameId;
+	    const workspaceOverride = typeof sourceWorkspaceId === 'string'
+	      && sourceWorkspaceId.length > 0
+	      && sourceWorkspaceId !== previousWorkspaceId;
+
+	    try {
+	      await this.activateFrameWorkspace(frame, sourceWorkspaceId);
+	      if (frame && !workspaceOverride) this.syncFrameToEditor(frame);
+
+	      const state = this.editor.getState();
+	      const windows = state.windows ?? [];
+	      const currentWindowIndex = state.currentWindowIndex ?? 0;
+	      const currentWindow = windows[currentWindowIndex];
+	      const buffer = currentWindow?.buffer ?? state.currentBuffer;
+	      const bufferName = currentWindow?.bufferName ?? this.currentBufferName(state);
+	      if (!buffer || !bufferName) {
+	        throw new Error('No current window buffer to move');
+	      }
+	      const contentResult = buffer.getContent();
+	      if (Either.isLeft(contentResult)) {
+	        throw new Error(`Failed to read buffer "${bufferName}": ${contentResult.left}`);
+	      }
+
+	      this.captureActiveWorkspace();
+	      const sourceName = this.activeWorkspaceId;
+	      if (targetName === sourceName) {
+	        return { success: true, source: sourceName, target: targetName, moved: bufferName, noop: true };
+	      }
+	      const source = this.workspaces.get(sourceName);
+	      if (!source) throw new Error(`Workspace "${sourceName}" is not loaded`);
+	      const target = await this.loadWorkspace(targetName);
+	      if (target.buffers.has(bufferName)) {
+	        throw new Error(`Target workspace "${targetName}" already has buffer "${bufferName}"`);
+	      }
+
+	      const stagedSource = this.cloneWorkspace(source);
+	      const stagedTarget = this.cloneWorkspace(target);
+	      const sourceMeta = stagedSource.bufferMetadata.get(bufferName);
+	      const copiedBuffer = FunctionalTextBufferImpl.create(contentResult.right);
+
+	      stagedTarget.buffers.set(bufferName, copiedBuffer);
+	      stagedTarget.bufferMetadata.set(bufferName, {
+	        name: bufferName,
+	        filename: sourceMeta?.filename,
+	        modified: sourceMeta?.modified ?? false,
+	        majorMode: sourceMeta?.majorMode,
+	        cursorLine: currentWindow?.cursorLine ?? state.cursorPosition.line,
+	        cursorColumn: currentWindow?.cursorColumn ?? state.cursorPosition.column,
+	      });
+	      stagedTarget.bufferModeStates.set(bufferName, stagedSource.bufferModeStates.get(bufferName) ?? {});
+	      stagedTarget.windows.push({
+	        id: `window-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+	        buffer: copiedBuffer,
+	        bufferName,
+	        cursorLine: currentWindow?.cursorLine ?? state.cursorPosition.line,
+	        cursorColumn: currentWindow?.cursorColumn ?? state.cursorPosition.column,
+	        viewportTop: currentWindow?.viewportTop ?? state.viewportTop,
+	        viewportLeft: currentWindow?.viewportLeft ?? state.viewportLeft ?? 0,
+	        splitType: currentWindow?.splitType,
+	        height: currentWindow?.height,
+	        width: currentWindow?.width,
+	        row: currentWindow?.row,
+	        col: currentWindow?.col,
+	        scrollback: currentWindow?.scrollback ? structuredClone(currentWindow.scrollback) : undefined,
+	      });
+
+	      stagedSource.windows = stagedSource.windows.filter((window) => window.id !== currentWindow?.id);
+	      const bufferStillReferenced = stagedSource.windows.some((window) => window.bufferName === bufferName)
+	        || stagedSource.tabs.some((tab) => tab.bufferName === bufferName);
+	      if (!bufferStillReferenced) {
+	        stagedSource.buffers.delete(bufferName);
+	        stagedSource.bufferMetadata.delete(bufferName);
+	        stagedSource.bufferModeStates.delete(bufferName);
+	      }
+	      if (stagedSource.windows.length === 0) {
+	        const scratch = stagedSource.buffers.get('*scratch*') ?? FunctionalTextBufferImpl.create('');
+	        stagedSource.buffers.set('*scratch*', scratch);
+	        if (!stagedSource.bufferMetadata.has('*scratch*')) {
+	          stagedSource.bufferMetadata.set('*scratch*', {
+	            name: '*scratch*',
+	            modified: false,
+	            cursorLine: 0,
+	            cursorColumn: 0,
+	          });
+	        }
+	        stagedSource.windows = [{
+	          id: 'window-main',
+	          buffer: scratch,
+	          bufferName: '*scratch*',
+	          cursorLine: 0,
+	          cursorColumn: 0,
+	          viewportTop: 0,
+	          viewportLeft: 0,
+	        }];
+	        stagedSource.currentBufferName = '*scratch*';
+	        stagedSource.currentFilename = undefined;
+	      } else if (stagedSource.currentBufferName === bufferName) {
+	        stagedSource.currentBufferName = stagedSource.windows[0]?.bufferName ?? '*scratch*';
+	        stagedSource.currentFilename = stagedSource.currentBufferName
+	          ? stagedSource.bufferMetadata.get(stagedSource.currentBufferName)?.filename
+	          : undefined;
+	      }
+
+	      await this.saveWorkspaceSnapshot(stagedTarget);
+	      await this.saveWorkspaceSnapshot(stagedSource);
+	      this.workspaces.set(sourceName, stagedSource);
+	      this.workspaces.set(targetName, stagedTarget);
+	      this.editor.applyWorkspace(stagedSource);
+	      if (frame && !workspaceOverride) this.syncEditorToFrame(frame); else this.syncEditorToAllFrames();
+	      return { success: true, source: sourceName, target: targetName, moved: bufferName };
+	    } finally {
+	      await this.restoreWorkspaceAfterOverride(workspaceOverride, previousWorkspaceId, previousFrameId);
+	    }
+		  }
+
+	  /**
+	   * Handle editor command request
    */
   private async handleCommand(params: any): Promise<any> {
     const command = params.command;
@@ -1140,8 +1858,16 @@ export class TmaxServer {
       throw new Error('Command is required');
     }
 
-    // Read-only commands don't need frame sync
-    switch (command) {
+    const frame = this.resolveFrameOptional(params);
+    const workspaceOverride = this.isWorkspaceOverride(frame, params?.workspaceId);
+    const previousWorkspaceId = this.activeWorkspaceId;
+    const previousFrameId = this.activeFrameId;
+
+    try {
+      await this.activateFrameWorkspace(frame, params?.workspaceId);
+
+      // Read-only commands don't need frame sync
+      switch (command) {
       case 'list-buffers': {
         const buffers = this.editor.getState().buffers;
         const names: string[] = [];
@@ -1153,11 +1879,13 @@ export class TmaxServer {
         if (bufferName) {
           const state = this.editor.getState();
           if (state.buffers?.has(bufferName)) {
-            const newBuffers = new Map(state.buffers);
-            newBuffers.delete(bufferName);
-            this.editor.setEditorState({ ...state, buffers: newBuffers });
-            this.syncEditorToAllFrames();
-            return { success: true, killed: bufferName };
+	            const newBuffers = new Map(state.buffers);
+	            newBuffers.delete(bufferName);
+	            this.editor.setEditorState({ ...state, buffers: newBuffers });
+	            this.captureActiveWorkspace();
+	            this.scheduleDirtyWorkspaceSave(this.activeWorkspaceId);
+	            if (frame && !workspaceOverride) this.syncEditorToFrame(frame); else this.syncEditorToAllFrames();
+	            return { success: true, killed: bufferName };
           } else {
             return { success: false, error: `Buffer ${bufferName} not found` };
           }
@@ -1165,13 +1893,13 @@ export class TmaxServer {
         throw new Error('Buffer name required for kill-buffer');
       }
       case 'save-buffer': {
-        const frame = this.resolveFrameOptional(params);
-        if (frame) this.syncFrameToEditor(frame);
+        if (frame && !workspaceOverride) this.syncFrameToEditor(frame);
 
         const currentFile = this.editor.getState().currentFilename;
         if (currentFile) {
           await this.editor.saveFile(currentFile);
-          if (frame) this.syncEditorToFrame(frame);
+          this.captureActiveWorkspace();
+          if (frame && !workspaceOverride) this.syncEditorToFrame(frame); else this.syncEditorToAllFrames();
           return { success: true, saved: currentFile };
         }
         throw new Error('No file to save');
@@ -1204,6 +1932,9 @@ export class TmaxServer {
         throw new Error('Function name required for find-usages command');
       default:
         throw new Error(`Unknown command: ${command}`);
+      }
+    } finally {
+      await this.restoreWorkspaceAfterOverride(workspaceOverride, previousWorkspaceId, previousFrameId);
     }
   }
 
@@ -1349,22 +2080,34 @@ export class TmaxServer {
   /**
    * Handle query request
    */
-  private async handleQuery(params: any): Promise<any> {
-    const query = params.query;
-    const state = this.editor.getState();
+	  private async handleQuery(params: any): Promise<any> {
+	    const query = params.query;
+	    // N4: read-only query — do not mutate editor state via activateFrameWorkspace
+	    const frame = this.resolveFrameOptional(params);
+	    const frameWorkspaceId = frame?.workspaceId;
+	    const frameWorkspace = frameWorkspaceId && frameWorkspaceId !== this.activeWorkspaceId
+	      ? this.workspaces.get(frameWorkspaceId)
+	      : undefined;
+	    const state = frame && frameWorkspace
+	      ? this.frameToEditorState(frame)
+	      : this.editor.getState();
 
-    switch (query) {
-      case 'buffers': {
-        return this.editor.getBufferDetails();
-      }
+	    switch (query) {
+	      case 'buffers': {
+	        return frameWorkspace
+	          ? this.bufferDetailsForWorkspace(frameWorkspace, frame?.currentBufferName ?? frameWorkspace.currentBufferName)
+	          : this.editor.getBufferDetails();
+	      }
       case 'variables':
         // Return variables from T-Lisp interpreter
         return this.getTlispVariables();
       case 'keybindings':
         return state.config.keyBindings;
-      case 'full-state': {
-        const bufferDetails = this.editor.getBufferDetails();
-        const currentBuffer = bufferDetails.find(buffer => buffer.current)?.name ?? null;
+	      case 'full-state': {
+	        const bufferDetails = frameWorkspace
+	          ? this.bufferDetailsForWorkspace(frameWorkspace, frame?.currentBufferName ?? frameWorkspace.currentBufferName)
+	          : this.editor.getBufferDetails();
+	        const currentBuffer = bufferDetails.find(buffer => buffer.current)?.name ?? null;
 
         return {
           buffers: bufferDetails,
@@ -1449,6 +2192,21 @@ export class TmaxServer {
     if (this.shuttingDown) return;
     this.shuttingDown = true;
     console.log('Shutting down tmax server...');
+
+	    if (this.autoSaveTimer) {
+	      clearInterval(this.autoSaveTimer);
+	      this.autoSaveTimer = null;
+	    }
+	    for (const timer of this.debouncedSaveTimers.values()) {
+	      clearTimeout(timer);
+	    }
+	    this.debouncedSaveTimers.clear();
+
+    try {
+      await this.saveAllWorkspaces();
+    } catch (error) {
+      console.error('Error saving workspaces during shutdown:', error);
+    }
 
     // Close all client connections
     for (const [clientId, client] of this.clients) {

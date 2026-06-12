@@ -285,6 +285,7 @@ export interface EditorState {
   whichKeyPrefix?: string;  // Current key prefix being explored
   whichKeyBindings?: WhichKeyBinding[];  // Bindings for current prefix
   whichKeyTimeout?: number;  // Configurable timeout in milliseconds (default 1000)
+  whichKeyPopup?: { prefixLabel: string; rows: { key: string; command: string; description?: string }[][]; height: number } | null;  // Popup overlay data
   // Help system state (US-1.11.1, US-1.11.2, US-1.11.3)
   describeKeyPending?: boolean;  // Waiting for key press to describe
   describeKeyTimeout?: number;  // Timeout for describe-key prompt
@@ -328,6 +329,7 @@ export interface LSPDiagnostic {
 export interface Window {
   id: string;  // Unique window identifier
   buffer: FunctionalTextBuffer;  // Buffer displayed in window
+  bufferName?: string;  // R3-2: cached buffer name (maintained by editor, avoids identity check)
   cursorLine: number;  // Cursor line position within window
   cursorColumn: number;  // Cursor column position within window
   viewportTop: number;  // First line visible in window viewport
@@ -337,6 +339,7 @@ export interface Window {
   width?: number;  // Window width in columns (for vertical splits)
   row?: number;  // Window starting row (0-indexed)
   col?: number;  // Window starting column (0-indexed)
+  scrollback?: ScrollbackBuffer;  // Scrollback buffer for terminal windows (RFC-014)
 }
 
 /**
@@ -346,7 +349,157 @@ export interface Tab {
   id: string;
   label: string;
   buffer: FunctionalTextBuffer;
+  bufferName?: string;  // R3-2: cached buffer name
 }
+
+// =============================================================================
+// WORKSPACE TYPES
+// =============================================================================
+
+/**
+ * Scrollback buffer interface for terminal windows
+ * Stores a ring buffer of lines with search capabilities
+ */
+export interface ScrollbackBuffer {
+  lines: string[];  // Circular buffer of lines
+  capacity: number;  // Maximum number of lines (typically 50,000)
+  head: number;  // Index of the oldest line
+  tail: number;  // Index where next line will be written
+  size: number;  // Current number of lines in buffer
+  viewportOffset: number;  // Current viewport scroll position
+  searchResults?: number[];  // Indices of matching lines from last search
+  searchIndex?: number;  // Current position in search results
+}
+
+/**
+ * Workspace metadata — persisted identification and tracking information
+ */
+export interface WorkspaceMetadata {
+  id: string;  // UUID unique to this workspace
+  name: string;  // Human-readable name matching /^[a-zA-Z0-9_-]{1,64}$/
+  projectRoot?: string;  // Optional path to project root directory
+  createdAt: string;  // ISO 8601 timestamp of workspace creation
+  lastAccessed: string;  // ISO 8601 timestamp of last access
+  formatVersion: number;  // Workspace data format version (for migration)
+}
+
+/**
+ * Buffer metadata for serialization
+ */
+export interface BufferMetadata {
+  name: string;  // Buffer name
+  filename?: string;  // Associated file path, if any
+  modified: boolean;  // Whether buffer has unsaved changes
+  majorMode?: string;  // Active major mode
+  cursorLine: number;  // Saved cursor line position
+  cursorColumn: number;  // Saved cursor column position
+}
+
+/**
+ * Per-buffer mode state for serialization
+ */
+export interface BufferModeState {
+  majorMode?: string;
+  minorModes?: string[];
+  lighters?: string[];
+}
+
+/**
+ * Viewport state for serialization
+ */
+export interface ViewportState {
+  top: number;
+  left?: number;
+}
+
+/**
+ * Complete workspace state — in-memory representation with live buffer objects
+ */
+export interface WorkspaceState {
+  metadata: WorkspaceMetadata;
+  buffers: Map<string, FunctionalTextBuffer>;  // Buffer name → buffer instance
+  bufferMetadata: Map<string, BufferMetadata>;  // Buffer name → metadata
+  bufferModeStates: Map<string, BufferModeState>;  // Buffer name → mode state
+  windows: Window[];  // Array of windows in this workspace
+  tabs: Tab[];  // Array of tabs (reserved for future use)
+  cursorState: Position;  // Current cursor position
+  viewportState: ViewportState;  // Current viewport state
+  currentBufferName?: string;  // Name of currently active buffer
+  currentFilename?: string;  // Filename of currently active buffer
+  currentMajorMode?: string;  // Active major mode
+  activeMinorModes?: string[];  // Active minor modes
+  activeMinorModeLighters?: string[];  // Mode line lighters
+  restoreWarnings?: string[];  // Non-fatal warnings produced while loading workspace state
+  restoreConflicts?: string[];  // File-backed buffers that changed on disk while workspace content was dirty
+}
+
+/**
+ * Workspace data — JSON-serializable form for persistence
+ * Buffer contents are stored as strings, not FunctionalTextBuffer instances
+ */
+export interface WorkspaceData {
+  metadata: WorkspaceMetadata;
+  buffers: Array<{  // Serialized buffer list
+    name: string;
+    filename?: string;
+    content: string;  // Buffer content as plain string
+    modified: boolean;
+    majorMode?: string;
+    cursorLine: number;
+    cursorColumn: number;
+    minorModes?: string[];
+    lighters?: string[];
+  }>;
+  windows: Array<{  // Serialized window list
+    id: string;
+    bufferName: string;  // Reference to buffer by name
+    cursorLine: number;
+    cursorColumn: number;
+    viewportTop: number;
+    viewportLeft: number;
+    splitType?: 'horizontal' | 'vertical';
+    height?: number;
+    width?: number;
+    row?: number;
+    col?: number;
+    scrollback?: {  // Serialized scrollback state
+      capacity: number;
+      lines: string[];
+      size: number;
+      head: number;
+      tail: number;
+      viewportOffset: number;
+    };
+  }>;
+  tabs: Array<{
+    id: string;
+    label: string;
+    bufferName: string;
+  }>;
+  cursorState: Position;
+  viewportState: ViewportState;
+  currentBufferName?: string;
+  currentFilename?: string;
+  currentMajorMode?: string;
+  activeMinorModes?: string[];
+  activeMinorModeLighters?: string[];
+  searchMatches?: Array<{  // Serialized search ranges
+    start: { line: number; column: number };
+    end: { line: number; column: number };
+  }>;
+  foldRanges?: Array<{  // Serialized fold ranges
+    startLine: number;
+    endLine: number;
+  }>;
+  dirtyHash?: string;  // Content hash for dirty state detection
+  lastSaveHash?: string;  // Last saved content hash
+}
+
+/**
+ * Current workspace data format version
+ * Increment when WorkspaceData schema changes incompatibly
+ */
+export const CURRENT_WORKSPACE_FORMAT_VERSION = 1;
 
 /**
  * Key binding interface
@@ -371,6 +524,7 @@ export interface Frame {
   mxCommand: string;
   currentFilename?: string;
   currentBuffer?: FunctionalTextBuffer;
+  currentBufferName?: string;  // Name of the current buffer within the frame workspace
   statusMessage: string;
   cursorFocus: 'buffer' | 'command';
   lastActivity: Date;
@@ -379,6 +533,7 @@ export interface Frame {
   activeMinorModeLighters?: string[];
   minibufferState?: JsonValue;
   minibufferView?: MinibufferRenderView;
+  workspaceId?: string;  // ID of the workspace this frame is bound to (RFC-014)
 }
 
 /**

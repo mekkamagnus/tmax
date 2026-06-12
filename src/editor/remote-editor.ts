@@ -20,9 +20,11 @@ export class RemoteEditor {
   private cachedState!: EditorState;
   private _frameId: string | null = null;
   private _clientId: string | null = null;
+  private workspaceId?: string;
 
-  constructor(socketPath?: string) {
+  constructor(socketPath?: string, workspaceId?: string) {
     this.socketPath = socketPath || process.env.TMAX_SOCKET || `/tmp/tmax-${userInfo().uid}/server`;
+    this.workspaceId = workspaceId;
   }
 
   async start(): Promise<void> {
@@ -31,6 +33,7 @@ export class RemoteEditor {
     const frameResult = await this.sendRequest("connect-frame", {
       clientType: "tui",
       clientName: "tmax-tui",
+      ...(this.workspaceId ? { workspaceId: this.workspaceId } : {}),
     });
     this._clientId = frameResult.clientId ?? null;
     this._frameId = frameResult.frameId;

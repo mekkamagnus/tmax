@@ -81,9 +81,13 @@ def run_test(filepath: str, env: dict | None = None) -> tuple[bool, str]:
     """Run a single test file. Returns (passed, output)."""
     run_env = os.environ.copy()
     run_id = f"{os.getpid()}-{uuid.uuid4().hex[:10]}"
+    run_root = os.path.join("/tmp/tmax-ui-tests", run_id)
     run_env["TMAX_UI_RUN_ID"] = run_id
+    run_env["HOME"] = os.path.join(run_root, "home")
+    run_env["TMAX_WORKSPACE_DIR"] = os.path.join(run_root, "home", ".config", "tmax", "workspaces")
     if env:
         run_env.update(env)
+    os.makedirs(run_env["HOME"], exist_ok=True)
 
     # Clear cached Python modules between tests
     cache_dir = os.path.join(ROOT, "tmax_harness", "__pycache__")

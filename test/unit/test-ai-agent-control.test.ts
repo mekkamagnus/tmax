@@ -29,27 +29,35 @@ function createRequest(method: string, params?: any, id?: string | number): stri
 async function sendRequest(socketPath: string, request: string): Promise<any> {
   return new Promise((resolve, reject) => {
     const socket = connect(socketPath);
+    let buffer = "";
+    const timer = setTimeout(() => {
+      socket.destroy();
+      reject(new Error('Request timeout'));
+    }, AI_AGENT_CONTROL_TIMEOUT_MS);
 
     socket.on('connect', () => {
       socket.write(request);
     });
 
     socket.on('data', (data) => {
-      const response = JSON.parse(data.toString().trim());
+      buffer += data.toString();
+      const newline = buffer.indexOf("\n");
+      if (newline === -1) return;
+
+      const line = buffer.slice(0, newline).trim();
+      if (!line) return;
+
+      clearTimeout(timer);
+      const response = JSON.parse(line);
       socket.destroy();
       resolve(response);
     });
 
     socket.on('error', (err) => {
+      clearTimeout(timer);
       socket.destroy();
       reject(err);
     });
-
-    // These requests start an in-process daemon and may run slower under the full suite.
-    setTimeout(() => {
-      socket.destroy();
-      reject(new Error('Request timeout'));
-    }, AI_AGENT_CONTROL_TIMEOUT_MS);
   });
 }
 

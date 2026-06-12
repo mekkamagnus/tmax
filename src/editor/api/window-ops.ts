@@ -80,6 +80,7 @@ export function createWindowOps(
     const newWindow: Window = {
       id: `window-${Date.now()}`,
       buffer: currentBuffer,
+      bufferName: currentWindow.bufferName,
       cursorLine: currentWindow.cursorLine,
       cursorColumn: currentWindow.cursorColumn,
       viewportTop: currentWindow.viewportTop,

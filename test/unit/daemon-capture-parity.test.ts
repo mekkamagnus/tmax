@@ -10,7 +10,9 @@ import { Socket } from "net";
 import { captureFrame } from "../../src/render/capture-frame.ts";
 import { FunctionalTextBufferImpl } from "../../src/core/buffer.ts";
 import type { EditorState } from "../../src/core/types.ts";
-import { existsSync, unlinkSync } from "fs";
+import { existsSync, mkdtempSync, rmSync, unlinkSync } from "fs";
+import { tmpdir } from "os";
+import { join } from "path";
 
 const SOCKET = `/tmp/tmax-capture-parity-${process.pid}.sock`;
 let daemonProcess: Subprocess | null = null;
@@ -71,14 +73,25 @@ async function waitForSocket(path: string, attempts = 30): Promise<void> {
 
 describe("Daemon capture parity", () => {
   let sock: Socket;
+  let homeDir: string;
+  let previousHome: string | undefined;
+  let previousWorkspaceDir: string | undefined;
 
   beforeAll(async () => {
     // Clean up stale socket
     if (existsSync(SOCKET)) unlinkSync(SOCKET);
+    homeDir = mkdtempSync(join(tmpdir(), "tmax-capture-home-"));
+    previousHome = process.env.HOME;
+    previousWorkspaceDir = process.env.TMAX_WORKSPACE_DIR;
 
     daemonProcess = spawn({
       cmd: ["bun", "src/main.tsx", "--daemon"],
-      env: { ...process.env, TMAX_SOCKET: SOCKET },
+      env: {
+        ...process.env,
+        HOME: homeDir,
+        TMAX_WORKSPACE_DIR: join(homeDir, ".config", "tmax", "workspaces"),
+        TMAX_SOCKET: SOCKET,
+      },
       stdout: "pipe",
       stderr: "pipe",
     });
@@ -94,6 +107,11 @@ describe("Daemon capture parity", () => {
       daemonProcess = null;
     }
     if (existsSync(SOCKET)) unlinkSync(SOCKET);
+    if (previousHome === undefined) delete process.env.HOME;
+    else process.env.HOME = previousHome;
+    if (previousWorkspaceDir === undefined) delete process.env.TMAX_WORKSPACE_DIR;
+    else process.env.TMAX_WORKSPACE_DIR = previousWorkspaceDir;
+    try { rmSync(homeDir, { recursive: true, force: true }); } catch {}
   });
 
   test("daemon capture returns ANSI lines with syntax colors", async () => {

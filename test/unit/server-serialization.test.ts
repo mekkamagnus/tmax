@@ -35,8 +35,8 @@ describe("daemon render-state serialization", () => {
         wordWrap: false,
       },
       windows: [
-        { id: "one", buffer: main, cursorLine: 0, cursorColumn: 0, viewportTop: 0 },
-        { id: "two", buffer: split, cursorLine: 0, cursorColumn: 0, viewportTop: 0, splitType: "horizontal" },
+        { id: "one", buffer: main, cursorLine: 0, cursorColumn: 0, viewportTop: 0, viewportLeft: 0 },
+        { id: "two", buffer: split, cursorLine: 0, cursorColumn: 0, viewportTop: 0, viewportLeft: 0, splitType: "horizontal" },
       ],
       currentWindowIndex: 1,
       tabs: [
@@ -54,5 +54,38 @@ describe("daemon render-state serialization", () => {
     expect(roundTrip.tabs).toHaveLength(2);
     expect(content(roundTrip.tabs?.[1]?.buffer)).toBe("tab");
     expect(roundTrip.currentTabIndex).toBe(1);
+  });
+
+  test("round-trips viewportLeft through serialization", () => {
+    const main = FunctionalTextBufferImpl.create("hello");
+    const state = {
+      currentBuffer: main,
+      cursorPosition: { line: 0, column: 0 },
+      mode: "normal",
+      statusMessage: "",
+      viewportTop: 5,
+      viewportLeft: 40,
+      commandLine: "",
+      mxCommand: "",
+      config: {
+        theme: "default",
+        tabSize: 4,
+        autoSave: false,
+        keyBindings: {},
+        maxUndoLevels: 100,
+        showLineNumbers: true,
+        relativeLineNumbers: false,
+        wordWrap: false,
+      },
+      windows: [],
+      currentWindowIndex: 0,
+      tabs: [],
+      currentTabIndex: 0,
+    } satisfies EditorState;
+
+    const roundTrip = jsonToEditorState(editorStateToJson(state));
+
+    expect(roundTrip.viewportTop).toBe(5);
+    expect(roundTrip.viewportLeft).toBe(40);
   });
 });
