@@ -59,5 +59,50 @@
 (key-bind ",T" "(markdown-generate-toc)" "normal" "markdown")
 (key-bind ",P" "(markdown-preview)" "normal" "markdown")
 
+;; Subtree operations (Phase 1)
+(key-bind ",ks" "(markdown-kill-subtree)" "normal" "markdown")
+(key-bind ",cs" "(markdown-copy-subtree)" "normal" "markdown")
+(key-bind ",ms" "(markdown-move-subtree-up)" "normal" "markdown")
+(key-bind ",mS" "(markdown-move-subtree-down)" "normal" "markdown")
+(key-bind ",ps" "(markdown-promote-subtree)" "normal" "markdown")
+(key-bind ",ds" "(markdown-demote-subtree)" "normal" "markdown")
+
+;; Sparse tree filtering (Phase 1)
+(key-bind ",f" "(progn (markdown-sparse-tree-regex (read-string \"Filter: \")))" "normal" "markdown")
+
+;; Tag navigation (Phase 1)
+(key-bind "]t" "(markdown-next-tag)" "normal" "markdown")
+(key-bind "[t" "(markdown-prev-tag)" "normal" "markdown")
+
+;; Code block execution (Phase 2)
+(key-bind ",e" "(markdown-execute-block)" "normal" "markdown")
+(key-bind ",E" "(markdown-execute-all-blocks)" "normal" "markdown")
+(key-bind ",kc" "(markdown-clear-results)" "normal" "markdown")
+(key-bind ",ks" "(markdown-kill-session (read-string \"Session: \"))" "normal" "markdown")
+
+;; Table formulas (Phase 3)
+(key-bind ",tf" "(markdown-table-eval-formula)" "normal" "markdown")
+(key-bind ",ti" "(markdown-table-insert-formula)" "normal" "markdown")
+
+;; Export (Phase 4)
+(key-bind ",x" "(markdown-export-dispatch)" "normal" "markdown")
+(key-bind ",xh" "(markdown-export-to-html)" "normal" "markdown")
+(key-bind ",xt" "(markdown-export-to-text)" "normal" "markdown")
+(key-bind ",xl" "(markdown-export-to-latex)" "normal" "markdown")
+
+;; Footnote navigation (Phase 5)
+(key-bind "]f" "(markdown-next-footnote)" "normal" "markdown")
+(key-bind "[f" "(markdown-prev-footnote)" "normal" "markdown")
+
+;; Frontmatter (Phase 5)
+(key-bind ",m" "(markdown-frontmatter-show)" "normal" "markdown")
+
+;; Wiki-links and Zettelkasten (Phase 6)
+(key-bind "gb" "(markdown-backlinks)" "normal" "markdown")
+(key-bind ",n" "(markdown-daily-note)" "normal" "markdown")
+(key-bind ",N" "(markdown-new-from-template)" "normal" "markdown")
+(key-bind "]l" "(markdown-next-heading)" "normal" "markdown")
+(key-bind "[l" "(markdown-prev-heading)" "normal" "markdown")
+
 (provide "markdown-mode")
 )

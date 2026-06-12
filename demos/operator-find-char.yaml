@@ -1,0 +1,106 @@
+name: operator-find-char
+description: "Demonstrates SPEC-041 operator+find-char combinations: df/dt/dF/dT and y/c variants."
+speed: 1.0
+
+setup:
+  - action: setup_file
+    var: FILE
+    name: operator-find-char.txt
+    content: |
+      hello world foo bar
+
+steps:
+  - section: Setup — open the demo buffer
+    narrate: "Opening the demo buffer"
+    action: open
+    file: "${FILE}"
+    pause: 0.8
+
+  - section: df<char> — delete forward inclusive
+    narrate: "dfw deletes from cursor through 'w' (inclusive)"
+    action: keys
+    keys: "dfw"
+    pause: 0.8
+
+  - narrate: "Capture the buffer state"
+    action: capture
+    pause: 0.4
+
+  - section: Undo
+    narrate: "Undo the delete with u"
+    action: key
+    key: "u"
+    pause: 0.5
+
+  - section: dt<char> — delete forward exclusive
+    narrate: "dtw deletes up to (but not including) 'w'"
+    action: keys
+    keys: "dtw"
+    pause: 0.8
+
+  - narrate: "Capture the buffer state"
+    action: capture
+    pause: 0.4
+
+  - section: Undo
+    narrate: "Undo"
+    action: key
+    key: "u"
+    pause: 0.5
+
+  - section: yf<char> — yank forward inclusive
+    narrate: "yfw yanks 'hello w' without mutating the buffer"
+    action: keys
+    keys: "yfw"
+    pause: 0.8
+
+  - narrate: "Show the unnamed register via T-Lisp"
+    action: eval
+    expr: '(get-register "\"")'
+    pause: 0.4
+
+  - section: cf<char> — change forward inclusive
+    narrate: "Move back to start, then cfo deletes through first 'o' and enters insert"
+    action: key
+    key: "0"
+    pause: 0.4
+
+    action: keys
+    keys: "cfo"
+    pause: 0.8
+
+  - narrate: "Capture — buffer ends in ' world foo bar', mode is insert"
+    action: capture
+    pause: 0.4
+
+  - narrate: "Escape back to normal mode"
+    action: key
+    key: "Escape"
+    pause: 0.3
+
+  - narrate: "Undo the change"
+    action: key
+    key: "u"
+    pause: 0.4
+
+  - section: Count multiplication
+    narrate: "Move to column 0"
+    action: key
+    key: "0"
+    pause: 0.4
+
+  - narrate: "2dfo deletes through the 2nd 'o' (operator count * motion count)"
+    action: keys
+    keys: "2dfo"
+    pause: 0.8
+
+  - narrate: "Capture the buffer state — 'hello wo' should be gone"
+    action: capture
+    pause: 0.4
+
+  - section: Cleanup
+    narrate: "Closing the demo"
+    action: cleanup
+    pause: 0.3
+
+cleanup: true

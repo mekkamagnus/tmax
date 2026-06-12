@@ -111,6 +111,39 @@ describe("markdown tokenizer — token types", () => {
     expect(tokensOfType("|---|---|", "table-separator")).toBe(1);
     expect(tokensOfType("| :---: | ---: |", "table-separator")).toBe(1);
   });
+
+  // SPEC-039: New token types
+  test("tags: #word in text", () => {
+    expect(tokensOfType("this is #important", "tag")).toBeGreaterThanOrEqual(1);
+  });
+
+  test("tags: not matched in headings", () => {
+    // Heading regex covers full line at priority 90, tag is 43
+    expect(tokensOfType("# Heading", "heading")).toBe(1);
+    expect(tokensOfType("# Heading", "tag")).toBe(0);
+  });
+
+  test("wiki-links: [[link]]", () => {
+    expect(tokensOfType("see [[other-note]]", "wiki-link")).toBeGreaterThanOrEqual(1);
+  });
+
+  test("wiki-links: [[file#heading]]", () => {
+    expect(tokensOfType("see [[notes#intro]]", "wiki-link")).toBeGreaterThanOrEqual(1);
+  });
+
+  test("wiki-link embeds: ![[file]]", () => {
+    expect(tokensOfType("![[other-note]]", "wiki-link-embed")).toBeGreaterThanOrEqual(1);
+  });
+
+  test("wiki-link embeds (67) match before image (65)", () => {
+    const result = tokenizeLine("![[photo.png]]", 0);
+    expect(result.tokens.some(t => t.type === "wiki-link-embed")).toBe(true);
+  });
+
+  test("wiki-links (62) match before standard links (60)", () => {
+    const result = tokenizeLine("[[page]]", 0);
+    expect(result.tokens.some(t => t.type === "wiki-link")).toBe(true);
+  });
 });
 
 describe("markdown tokenizer — fenced code block state", () => {

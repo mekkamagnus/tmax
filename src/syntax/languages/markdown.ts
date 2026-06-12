@@ -23,8 +23,12 @@ export const rules: SyntaxRule[] = [
   { pattern: /^\s*[-*+]\s/gm, type: "list-item", priority: 70 },
   // Ordered list markers
   { pattern: /^\s*\d+[.)]\s/gm, type: "list-item", priority: 70 },
+  // Wiki-link embeds: ![[file]] or ![[file#heading]] (before images and wiki-links)
+  { pattern: /!\[\[[^\]]+\]\]/g, type: "wiki-link-embed", priority: 67 },
   // Images (before links to take priority)
   { pattern: /!\[([^\]]*)\]\([^)]*\)/g, type: "image", priority: 65 },
+  // Wiki-links: [[file]] or [[file#heading]] or [[file#^block]] (before standard links)
+  { pattern: /\[\[[^\]]+\]\]/g, type: "wiki-link", priority: 62 },
   // Links (inline)
   { pattern: /\[([^\]]*)\]\([^)]*\)/g, type: "link", priority: 60 },
   // Links (reference-style)
@@ -39,4 +43,6 @@ export const rules: SyntaxRule[] = [
   { pattern: /~~[^~]+~~/g, type: "strikethrough", priority: 48 },
   // Italic
   { pattern: /(?<!\*)\*[^*]+\*(?!\*)|(?<!_)_[^_]+_(?!_)/g, type: "italic", priority: 45 },
+  // Tags: #word (after heading so heading ## takes priority; matches standalone #tag in text)
+  { pattern: /(?:^|\s)#[a-zA-Z_-][a-zA-Z0-9_-]*/g, type: "tag", priority: 43 },
 ];
