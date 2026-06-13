@@ -438,11 +438,16 @@ export class Editor {
       filteredMappings.push(mapping);
       this.keyMappings.set(key, filteredMappings);
 
-      // Also store in T-Lisp keymap (unified keymap system, SPEC-038)
-      const modeKey = mode || "normal";
-      try {
-        this.interpreter.execute(`(keymap-set-key ${modeKey}-keymap "${this.escapeKeyForTLisp(key)}" "${this.escapeKeyForTLisp(command)}")`);
-      } catch {}
+      // Store in T-Lisp keymap only for global (non-major-mode-scoped) bindings.
+      // Major-mode bindings (e.g. markdown) use a separate dispatch path since
+      // the T-Lisp keymap has no major-mode filtering — registering them would
+      // pollute prefix tables for all buffers.
+      if (!majorMode) {
+        const modeKey = mode || "normal";
+        try {
+          this.interpreter.execute(`(keymap-set-key ${modeKey}-keymap "${this.escapeKeyForTLisp(key)}" "${this.escapeKeyForTLisp(command)}")`);
+        } catch {}
+      }
 
       return createString(key);
     });
