@@ -160,3 +160,53 @@ describe("SPEC-044 Phase 1.A — operator+text-object dispatch (Tier-A)", () => 
     });
   });
 });
+
+describe("SPEC-044 Phase 1.B.1 — quote-delete text objects", () => {
+  describe("di' — delete inner single quote", () => {
+    test("deletes single-quoted contents and yanks to \"", async () => {
+      const editor = await createStartedEditor("say 'hello' today");
+      await press(editor, "fh");
+      await press(editor, "di'");
+      expect(bufferText(editor)).toBe("say '' today");
+      expect(getRegister(editor)).toBe("hello");
+    });
+
+    test("restores text after undo", async () => {
+      const editor = await createStartedEditor("say 'hello' today");
+      await press(editor, "fh");
+      await press(editor, "di'");
+      await press(editor, "u");
+      expect(bufferText(editor)).toBe("say 'hello' today");
+    });
+  });
+
+  describe("da' — delete around single quote", () => {
+    test("deletes single quotes and their contents, yanks to \"", async () => {
+      const editor = await createStartedEditor("say 'hello' today");
+      await press(editor, "fh");
+      await press(editor, "da'");
+      expect(bufferText(editor)).toBe("say  today");
+      expect(getRegister(editor)).toBe("'hello'");
+    });
+  });
+
+  describe("di\" — delete inner double quote", () => {
+    test("deletes double-quoted contents and yanks to \"", async () => {
+      const editor = await createStartedEditor('say "hello" today');
+      await press(editor, "fh");
+      await press(editor, "di\"");
+      expect(bufferText(editor)).toBe('say "" today');
+      expect(getRegister(editor)).toBe("hello");
+    });
+  });
+
+  describe("da\" — delete around double quote", () => {
+    test("deletes double quotes and their contents, yanks to \"", async () => {
+      const editor = await createStartedEditor('say "hello" today');
+      await press(editor, "fh");
+      await press(editor, "da\"");
+      expect(bufferText(editor)).toBe("say  today");
+      expect(getRegister(editor)).toBe('"hello"');
+    });
+  });
+});

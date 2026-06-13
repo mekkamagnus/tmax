@@ -14,6 +14,10 @@ import type { AppError } from "../../error/types.ts";
 import {
   deleteInnerWord,
   deleteAroundWord,
+  deleteInnerSingleQuote,
+  deleteAroundSingleQuote,
+  deleteInnerDoubleQuote,
+  deleteAroundDoubleQuote,
   changeInnerSingleQuote,
   changeAroundSingleQuote,
   changeInnerDoubleQuote,
@@ -69,6 +73,82 @@ export function createTextObjectsOps(
     }
 
     const result = deleteAroundWord(buffer, getCursorLine(), getCursorColumn());
+    if (Either.isLeft(result)) {
+      return Either.right(createNil());
+    }
+
+    setCurrentBuffer(result.right);
+    return Either.right(createNil());
+  });
+
+  /**
+   * Delete inner single quote (di')
+   * T-Lisp: (delete-inner-single-quote)
+   */
+  ops.set("delete-inner-single-quote", () => {
+    const buffer = getCurrentBuffer();
+    if (!buffer) {
+      return Either.right(createNil());
+    }
+
+    const result = deleteInnerSingleQuote(buffer, getCursorLine(), getCursorColumn());
+    if (Either.isLeft(result)) {
+      return Either.right(createNil());
+    }
+
+    setCurrentBuffer(result.right);
+    return Either.right(createNil());
+  });
+
+  /**
+   * Delete around single quote (da')
+   * T-Lisp: (delete-around-single-quote)
+   */
+  ops.set("delete-around-single-quote", () => {
+    const buffer = getCurrentBuffer();
+    if (!buffer) {
+      return Either.right(createNil());
+    }
+
+    const result = deleteAroundSingleQuote(buffer, getCursorLine(), getCursorColumn());
+    if (Either.isLeft(result)) {
+      return Either.right(createNil());
+    }
+
+    setCurrentBuffer(result.right);
+    return Either.right(createNil());
+  });
+
+  /**
+   * Delete inner double quote (di")
+   * T-Lisp: (delete-inner-double-quote)
+   */
+  ops.set("delete-inner-double-quote", () => {
+    const buffer = getCurrentBuffer();
+    if (!buffer) {
+      return Either.right(createNil());
+    }
+
+    const result = deleteInnerDoubleQuote(buffer, getCursorLine(), getCursorColumn());
+    if (Either.isLeft(result)) {
+      return Either.right(createNil());
+    }
+
+    setCurrentBuffer(result.right);
+    return Either.right(createNil());
+  });
+
+  /**
+   * Delete around double quote (da")
+   * T-Lisp: (delete-around-double-quote)
+   */
+  ops.set("delete-around-double-quote", () => {
+    const buffer = getCurrentBuffer();
+    if (!buffer) {
+      return Either.right(createNil());
+    }
+
+    const result = deleteAroundDoubleQuote(buffer, getCursorLine(), getCursorColumn());
     if (Either.isLeft(result)) {
       return Either.right(createNil());
     }

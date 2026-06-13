@@ -188,6 +188,138 @@ function findMatchingQuote(
  * Change inner single quote (ci')
  * Deletes inside single quotes and returns { buffer: newBuffer, mode: "INSERT" }
  */
+export function deleteInnerSingleQuote(
+  buffer: FunctionalTextBuffer,
+  line: number,
+  column: number
+): Either<string, FunctionalTextBuffer> {
+  const contentResult = buffer.getContent();
+  if (Either.isLeft(contentResult)) {
+    return Either.left(contentResult.left);
+  }
+
+  const content = contentResult.right;
+  const matchResult = findMatchingQuote(content, line, column, "'");
+  if (Either.isLeft(matchResult)) {
+    return Either.left(matchResult.left);
+  }
+
+  const { start, end } = matchResult.right;
+
+  const lines = content.split("\n");
+  const textToDelete = lines[line]!.substring(start + 1, end);
+  setDeleteRegister(textToDelete);
+  registerDelete(textToDelete, false);
+
+  return buffer.delete({
+    start: { line, column: start + 1 },
+    end: { line, column: end }
+  });
+}
+
+/**
+ * Delete around single quote (da')
+ * Deletes including single quotes and returns new buffer
+ */
+export function deleteAroundSingleQuote(
+  buffer: FunctionalTextBuffer,
+  line: number,
+  column: number
+): Either<string, FunctionalTextBuffer> {
+  const contentResult = buffer.getContent();
+  if (Either.isLeft(contentResult)) {
+    return Either.left(contentResult.left);
+  }
+
+  const content = contentResult.right;
+  const matchResult = findMatchingQuote(content, line, column, "'");
+  if (Either.isLeft(matchResult)) {
+    return Either.left(matchResult.left);
+  }
+
+  const { start, end } = matchResult.right;
+
+  const lines = content.split("\n");
+  const textToDelete = lines[line]!.substring(start, end + 1);
+  setDeleteRegister(textToDelete);
+  registerDelete(textToDelete, false);
+
+  return buffer.delete({
+    start: { line, column: start },
+    end: { line, column: end + 1 }
+  });
+}
+
+/**
+ * Delete inner double quote (di")
+ * Deletes inside double quotes and returns new buffer
+ */
+export function deleteInnerDoubleQuote(
+  buffer: FunctionalTextBuffer,
+  line: number,
+  column: number
+): Either<string, FunctionalTextBuffer> {
+  const contentResult = buffer.getContent();
+  if (Either.isLeft(contentResult)) {
+    return Either.left(contentResult.left);
+  }
+
+  const content = contentResult.right;
+  const matchResult = findMatchingQuote(content, line, column, '"');
+  if (Either.isLeft(matchResult)) {
+    return Either.left(matchResult.left);
+  }
+
+  const { start, end } = matchResult.right;
+
+  const lines = content.split("\n");
+  const textToDelete = lines[line]!.substring(start + 1, end);
+  setDeleteRegister(textToDelete);
+  registerDelete(textToDelete, false);
+
+  return buffer.delete({
+    start: { line, column: start + 1 },
+    end: { line, column: end }
+  });
+}
+
+/**
+ * Delete around double quote (da")
+ * Deletes including double quotes and returns new buffer
+ */
+export function deleteAroundDoubleQuote(
+  buffer: FunctionalTextBuffer,
+  line: number,
+  column: number
+): Either<string, FunctionalTextBuffer> {
+  const contentResult = buffer.getContent();
+  if (Either.isLeft(contentResult)) {
+    return Either.left(contentResult.left);
+  }
+
+  const content = contentResult.right;
+  const matchResult = findMatchingQuote(content, line, column, '"');
+  if (Either.isLeft(matchResult)) {
+    return Either.left(matchResult.left);
+  }
+
+  const { start, end } = matchResult.right;
+
+  const lines = content.split("\n");
+  const textToDelete = lines[line]!.substring(start, end + 1);
+  setDeleteRegister(textToDelete);
+  registerDelete(textToDelete, false);
+
+  return buffer.delete({
+    start: { line, column: start },
+    end: { line, column: end + 1 }
+  });
+}
+
+/**
+ * Change inner single quote (ci')
+ * Deletes inside single quotes and returns { buffer: newBuffer, mode: "INSERT" }
+ */
 export function changeInnerSingleQuote(
   buffer: FunctionalTextBuffer,
   line: number,
