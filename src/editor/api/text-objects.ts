@@ -145,6 +145,32 @@ export function deleteAroundWord(
 }
 
 /**
+ * Change inner word (ciw)
+ * Deletes the word under the cursor (same range as diw). The ops wrapper
+ * triggers the mode transition to insert — TS primitive is pure delete.
+ */
+export function changeInnerWord(
+  buffer: FunctionalTextBuffer,
+  line: number,
+  column: number
+): Either<string, FunctionalTextBuffer> {
+  return deleteInnerWord(buffer, line, column);
+}
+
+/**
+ * Change around word (caw)
+ * Deletes the word with trailing space (same range as daw). Mode transition
+ * lives in the ops wrapper.
+ */
+export function changeAroundWord(
+  buffer: FunctionalTextBuffer,
+  line: number,
+  column: number
+): Either<string, FunctionalTextBuffer> {
+  return deleteAroundWord(buffer, line, column);
+}
+
+/**
  * Find matching quote for single or double quotes
  */
 function findMatchingQuote(

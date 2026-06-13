@@ -168,6 +168,8 @@ undo-begin/undo-commit so `u` restores the buffer."
           (cond
             ((string= combo "diw") (delete-inner-word))
             ((string= combo "daw") (delete-around-word))
+            ((string= combo "ciw") (change-inner-word))
+            ((string= combo "caw") (change-around-word))
             ((string= combo "di'") (delete-inner-single-quote))
             ((string= combo "da'") (delete-around-single-quote))
             ((string= combo "di\"") (delete-inner-double-quote))

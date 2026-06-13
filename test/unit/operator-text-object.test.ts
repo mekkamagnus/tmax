@@ -210,3 +210,25 @@ describe("SPEC-044 Phase 1.B.1 — quote-delete text objects", () => {
     });
   });
 });
+
+describe("SPEC-044 Phase 1.B.3 — word-change text objects", () => {
+  describe("ciw — change inner word", () => {
+    test("deletes word under cursor, enters insert mode, yanks to \"", async () => {
+      const editor = await createStartedEditor("hello world foo");
+      await press(editor, "ciw");
+      expect(bufferText(editor)).toBe(" world foo");
+      expect(getRegister(editor)).toBe("hello");
+      expect(editor.getState().mode).toBe("insert");
+    });
+  });
+
+  describe("caw — change around word", () => {
+    test("deletes word with trailing space, enters insert mode, yanks to \"", async () => {
+      const editor = await createStartedEditor("word1 word2 word3");
+      await press(editor, "caw");
+      expect(bufferText(editor)).toBe("word2 word3");
+      expect(getRegister(editor)).toBe("word1 ");
+      expect(editor.getState().mode).toBe("insert");
+    });
+  });
+});

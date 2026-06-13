@@ -14,6 +14,8 @@ import type { AppError } from "../../error/types.ts";
 import {
   deleteInnerWord,
   deleteAroundWord,
+  changeInnerWord,
+  changeAroundWord,
   deleteInnerSingleQuote,
   deleteAroundSingleQuote,
   deleteInnerDoubleQuote,
@@ -79,6 +81,46 @@ export function createTextObjectsOps(
 
     setCurrentBuffer(result.right);
     return Either.right(createNil());
+  });
+
+  /**
+   * Change inner word (ciw)
+   * T-Lisp: (change-inner-word)
+   */
+  ops.set("change-inner-word", () => {
+    const buffer = getCurrentBuffer();
+    if (!buffer) {
+      return Either.right(createNil());
+    }
+
+    const result = changeInnerWord(buffer, getCursorLine(), getCursorColumn());
+    if (Either.isLeft(result)) {
+      return Either.right(createNil());
+    }
+
+    setCurrentBuffer(result.right);
+    setMode("insert");
+    return Either.right(createSymbol("INSERT"));
+  });
+
+  /**
+   * Change around word (caw)
+   * T-Lisp: (change-around-word)
+   */
+  ops.set("change-around-word", () => {
+    const buffer = getCurrentBuffer();
+    if (!buffer) {
+      return Either.right(createNil());
+    }
+
+    const result = changeAroundWord(buffer, getCursorLine(), getCursorColumn());
+    if (Either.isLeft(result)) {
+      return Either.right(createNil());
+    }
+
+    setCurrentBuffer(result.right);
+    setMode("insert");
+    return Either.right(createSymbol("INSERT"));
   });
 
   /**
