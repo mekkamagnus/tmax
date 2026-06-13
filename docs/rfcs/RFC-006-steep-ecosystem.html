@@ -1,0 +1,630 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>RFC-006: The Steep Ecosystem — A TypeScript Charmbracelet</title>
+  <style>
+    :root {
+      --bg: #1a1b26;
+      --surface: #24283b;
+      --surface2: #2a2f45;
+      --border: #3b4261;
+      --text: #c0caf5;
+      --text-muted: #565f89;
+      --accent: #7aa2f7;
+      --green: #9ece6a;
+      --red: #f7768e;
+      --yellow: #e0af68;
+      --cyan: #7dcfff;
+      --purple: #bb9af7;
+      --orange: #ff9e64;
+      --code-bg: #1f2335;
+      --steep: #7aa2f7;
+      --assam: #d4a574;
+      --matcha: #9ece6a;
+      --oolong: #e0af68;
+      --boba: #bb9af7;
+      --chai: #ff9e64;
+      --puerh: #f7768e;
+      --sencha: #7dcfff;
+    }
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.7;
+      max-width: 880px;
+      margin: 0 auto;
+      padding: 2rem 1.5rem;
+    }
+    h1 {
+      font-size: 1.6rem;
+      font-weight: 700;
+      color: var(--accent);
+      margin-bottom: 0.25rem;
+    }
+    h1 .subtitle {
+      display: block;
+      font-size: 1rem;
+      font-weight: 400;
+      color: var(--text-muted);
+      margin-top: 0.25rem;
+    }
+    .meta {
+      color: var(--text-muted);
+      font-size: 0.85rem;
+      margin-bottom: 2rem;
+    }
+    .meta span { margin-right: 1.5rem; }
+    .status {
+      display: inline-block;
+      padding: 0.15rem 0.6rem;
+      border-radius: 9999px;
+      font-size: 0.75rem;
+      font-weight: 600;
+      vertical-align: middle;
+    }
+    .status-proposed { background: rgba(122,162,247,0.15); color: var(--accent); }
+    h2 {
+      font-size: 1.2rem;
+      font-weight: 600;
+      color: var(--text);
+      margin-top: 2.5rem;
+      margin-bottom: 0.75rem;
+      padding-bottom: 0.4rem;
+      border-bottom: 1px solid var(--border);
+    }
+    h3 {
+      font-size: 1rem;
+      font-weight: 600;
+      margin-top: 1.5rem;
+      margin-bottom: 0.5rem;
+    }
+    p { margin-bottom: 0.75rem; }
+    pre {
+      background: var(--code-bg);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 1rem;
+      overflow-x: auto;
+      font-family: 'SF Mono', 'Fira Code', 'Cascadia Code', monospace;
+      font-size: 0.78rem;
+      line-height: 1.5;
+      margin: 0.75rem 0;
+    }
+    code {
+      font-family: 'SF Mono', 'Fira Code', 'Cascadia Code', monospace;
+      font-size: 0.85em;
+    }
+    p code, li code {
+      background: var(--code-bg);
+      padding: 0.15rem 0.4rem;
+      border-radius: 4px;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin: 0.75rem 0;
+      font-size: 0.88rem;
+    }
+    th, td {
+      text-align: left;
+      padding: 0.5rem 0.75rem;
+      border-bottom: 1px solid var(--border);
+    }
+    th {
+      color: var(--text-muted);
+      font-weight: 600;
+      font-size: 0.78rem;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+    }
+    ul, ol { padding-left: 1.5rem; margin: 0.5rem 0; }
+    li { margin-bottom: 0.25rem; }
+    strong { color: var(--text); }
+    a { color: var(--accent); text-decoration: none; }
+    a:hover { text-decoration: underline; }
+    hr {
+      border: none;
+      border-top: 1px solid var(--border);
+      margin: 2rem 0;
+    }
+    .toc {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 1rem 1.5rem;
+      margin: 1rem 0 2rem 0;
+    }
+    .toc a {
+      display: block;
+      padding: 0.15rem 0;
+      font-size: 0.9rem;
+    }
+    /* Ecosystem diagram */
+    .ecosystem {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 1rem;
+      margin: 1.5rem 0;
+    }
+    .eco-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 1.2rem;
+      text-align: center;
+      transition: border-color 0.2s;
+    }
+    .eco-card:hover { border-color: var(--text-muted); }
+    .eco-card .tea-name {
+      font-size: 1.15rem;
+      font-weight: 700;
+      margin-bottom: 0.15rem;
+    }
+    .eco-card .charm-equiv {
+      font-size: 0.75rem;
+      color: var(--text-muted);
+      margin-bottom: 0.5rem;
+    }
+    .eco-card .desc {
+      font-size: 0.82rem;
+      color: var(--text);
+      line-height: 1.5;
+    }
+    .eco-card .badge {
+      display: inline-block;
+      font-size: 0.68rem;
+      font-weight: 600;
+      padding: 0.1rem 0.5rem;
+      border-radius: 9999px;
+      margin-top: 0.6rem;
+    }
+    .badge-exists { background: rgba(158,206,106,0.15); color: var(--green); }
+    .badge-extract { background: rgba(224,175,104,0.15); color: var(--yellow); }
+    .badge-planned { background: rgba(122,162,247,0.15); color: var(--accent); }
+    .badge-future { background: rgba(86,95,137,0.2); color: var(--text-muted); }
+    /* Steep color accents */
+    .c-steep { color: var(--steep); }
+    .c-assam { color: var(--assam); }
+    .c-matcha { color: var(--matcha); }
+    .c-oolong { color: var(--oolong); }
+    .c-boba { color: var(--boba); }
+    .c-chai { color: var(--chai); }
+    .c-puerh { color: var(--puerh); }
+    .c-sencha { color: var(--sencha); }
+    .b-steep { border-top: 3px solid var(--steep); }
+    .b-assam { border-top: 3px solid var(--assam); }
+    .b-matcha { border-top: 3px solid var(--matcha); }
+    .b-oolong { border-top: 3px solid var(--oolong); }
+    .b-boba { border-top: 3px solid var(--boba); }
+    .b-chai { border-top: 3px solid var(--chai); }
+    .b-puerh { border-top: 3px solid var(--puerh); }
+    .b-sencha { border-top: 3px solid var(--sencha); }
+    /* Dep graph */
+    .dep-graph {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 1.25rem;
+      margin: 0.75rem 0;
+    }
+    .dep-graph .dg-row {
+      display: flex;
+      align-items: center;
+      padding: 0.2rem 0;
+      font-family: 'SF Mono', monospace;
+      font-size: 0.82rem;
+    }
+    .dep-graph .dg-arrow { color: var(--text-muted); margin: 0 0.5rem; }
+    .dep-graph .dg-label { color: var(--text-muted); font-style: italic; }
+    /* Design decisions */
+    .decision {
+      background: var(--surface);
+      border-left: 3px solid var(--accent);
+      border-radius: 0 6px 6px 0;
+      padding: 0.75rem 1rem;
+      margin: 0.5rem 0;
+    }
+    .decision strong { color: var(--accent); }
+    /* Phase timeline */
+    .phase {
+      display: flex;
+      align-items: flex-start;
+      margin: 1rem 0;
+    }
+    .phase-num {
+      flex-shrink: 0;
+      width: 2.5rem;
+      height: 2.5rem;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-weight: 700;
+      font-size: 0.9rem;
+      margin-right: 1rem;
+    }
+    .phase-1 .phase-num { background: rgba(158,206,106,0.15); color: var(--green); }
+    .phase-2 .phase-num { background: rgba(224,175,104,0.15); color: var(--yellow); }
+    .phase-3 .phase-num { background: rgba(122,162,247,0.15); color: var(--accent); }
+    .phase-4 .phase-num { background: rgba(86,95,137,0.2); color: var(--text-muted); }
+    .phase-body { flex: 1; }
+    .phase-body h3 { margin-top: 0; margin-bottom: 0.25rem; }
+    .phase-body ol, .phase-body ul { margin-top: 0.25rem; }
+    @media (max-width: 700px) {
+      .ecosystem { grid-template-columns: repeat(2, 1fr); }
+    }
+    @media (max-width: 480px) {
+      .ecosystem { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+
+  <h1>RFC-006: The Steep Ecosystem
+    <span class="subtitle">A TypeScript Charmbracelet</span>
+  </h1>
+  <div class="meta">
+    <span class="status status-proposed">PROPOSED</span>
+    <span>Created: 2026-06-08 | Updated: 2026-06-09</span>
+    <span>Depends on: <a href="../memos/glamour-gap-analysis.md">Glamour gap analysis</a> | See also: <a href="RFC-008-steep-bubbletea-gap-analysis.md">RFC-008</a>, <a href="RFC-009-elm-purity-gap-analysis.md">RFC-009</a> | Specs: <a href="../specs/SPEC-020-steep-phase1-matcha-assam.md">SPEC-020</a> (Phase 1), <a href="../specs/SPEC-021-steep-phase2-oolong.md">SPEC-021</a> (Phase 2) | Aligned with: <a href="../technical-vision.md">technical-vision.md</a> — Pillars A (Purity) + B (Steep Independence)</span>
+  </div>
+
+  <nav class="toc">
+    <a href="#abstract">Abstract</a>
+    <a href="#motivation">Motivation</a>
+    <a href="#ecosystem-overview">Ecosystem Overview</a>
+    <a href="#package-map">Package Map</a>
+    <a href="#architecture">Architecture</a>
+    <a href="#detailed-design">Detailed Design</a>
+    <a href="#implementation-plan">Implementation Plan</a>
+    <a href="#design-decisions">Design Decisions</a>
+    <a href="#open-questions">Open Questions</a>
+  </nav>
+
+  <h2 id="abstract">Abstract</h2>
+  <p>Build the <strong>Steep ecosystem</strong> — a complete, zero-dependency TypeScript equivalent of the Charmbracelet library suite. Steep provides every layer needed for rich terminal UI applications: Elm-architecture framework (Assam), ANSI styling and layout (Matcha), markdown rendering (Oolong), UI widgets (Boba), forms/prompts (Chai), and logging (Pu-erh). Each package maps 1:1 to a Charm library and uses a tea-themed name.</p>
+  <p>Steep is both the backbone of tmax's UI and a standalone library that any TypeScript/Bun terminal application could use — just as Charm libraries power thousands of Go TUI tools beyond the Charm team's own products. Per the <a href="../technical-vision.md">technical vision</a>, Steep is a product, not an internal detail. Its API must be generic, its interfaces must be pure, and tmax is its pressure test. Pillar B (Steep Independence) requires that Steep can be extracted and published as a standalone npm package with no tmax-specific code.</p>
+
+  <h2 id="motivation">Motivation</h2>
+  <p>The Charmbracelet ecosystem proved that composable, single-purpose TUI libraries beat monolithic frameworks. Each Charm library does one thing well: Bubble Tea handles the event loop, Lip Gloss handles styling, Glamour handles markdown, Bubbles provides widgets. They compose cleanly because each has a narrow, well-defined responsibility.</p>
+  <p>tmax already follows this pattern internally — <code>style.ts</code> is a nascent Lip Gloss, <code>screen.ts</code> is terminal primitives, the renderer is a nascent Glamour — but the code is scattered, unnamed, and can't be used outside tmax. The Steep ecosystem formalizes these into distinct packages with clean APIs, making them:</p>
+  <ol>
+    <li><strong>Reusable</strong> — any Bun/Node terminal app can <code>import { style } from 'steep/matcha'</code></li>
+    <li><strong>Testable</strong> — each package has isolated unit tests independent of tmax's editor model</li>
+    <li><strong>Composable</strong> — use Matcha alone for simple ANSI output, or Assam + Matcha + Boba for a full TUI</li>
+    <li><strong>Named</strong> — tea-themed names create a memorable, coherent identity</li>
+  </ol>
+
+  <h2 id="ecosystem-overview">Ecosystem Overview</h2>
+
+  <div class="ecosystem">
+    <div class="eco-card b-assam">
+      <div class="tea-name c-assam">Assam</div>
+      <div class="charm-equiv">Bubble Tea</div>
+      <div class="desc">Elm-architecture TUI framework. Event loop, alt screen, key dispatch, render cycle.</div>
+      <span class="badge badge-exists">Exists</span>
+    </div>
+    <div class="eco-card b-matcha">
+      <div class="tea-name c-matcha">Matcha</div>
+      <div class="charm-equiv">Lip Gloss</div>
+      <div class="desc">ANSI styling primitives. 24-bit color, text attributes, layout, borders, padding.</div>
+      <span class="badge badge-extract">Extract from style.ts</span>
+    </div>
+    <div class="eco-card b-oolong">
+      <div class="tea-name c-oolong">Oolong</div>
+      <div class="charm-equiv">Glamour</div>
+      <div class="desc">Markdown → styled ANSI. Stylesheet-driven rendering, word wrap, GFM tables.</div>
+      <span class="badge badge-planned">Planned</span>
+    </div>
+    <div class="eco-card b-boba">
+      <div class="tea-name c-boba">Boba</div>
+      <div class="charm-equiv">Bubbles</div>
+      <div class="desc">UI widgets. List, table, viewport, spinner, progress bar.</div>
+      <span class="badge badge-future">Future</span>
+    </div>
+    <div class="eco-card b-chai">
+      <div class="tea-name c-chai">Chai</div>
+      <div class="charm-equiv">Huh</div>
+      <div class="desc">Interactive forms. Text input, select, confirm, multi-select.</div>
+      <span class="badge badge-future">Future</span>
+    </div>
+    <div class="eco-card b-puerh">
+      <div class="tea-name c-puerh">Pu-erh</div>
+      <div class="charm-equiv">Log</div>
+      <div class="desc">Structured logging. Levels, formatting, <code>*Messages*</code> integration.</div>
+      <span class="badge badge-future">Future</span>
+    </div>
+    <div class="eco-card b-sencha">
+      <div class="tea-name c-sencha">Sencha</div>
+      <div class="charm-equiv">Gum</div>
+      <div class="desc">CLI pretty-printing. Shell-friendly styled output.</div>
+      <span class="badge badge-future">Future</span>
+    </div>
+  </div>
+
+  <h3>Naming rationale</h3>
+  <ul>
+    <li><strong class="c-steep">Steep</strong>: The umbrella name. Tea is steeped — the ecosystem that steeps everything. Like "Charmbracelet" is to Charm.</li>
+    <li><strong class="c-assam">Assam</strong>: The backbone tea — strong, foundational, the base of English Breakfast. A framework is the backbone of every app.</li>
+    <li><strong class="c-matcha">Matcha</strong>: The most visually vivid tea — bright, saturated green. Styling makes things look vibrant.</li>
+    <li><strong class="c-oolong">Oolong</strong>: Partially oxidized — an in-between state of raw markdown and rendered output.</li>
+    <li><strong class="c-boba">Boba</strong>: Literally "bubble tea." Maps directly to Bubbles.</li>
+    <li><strong class="c-chai">Chai</strong>: Interactive blending of spices. Forms/prompts blend inputs together.</li>
+    <li><strong class="c-puerh">Pu-erh</strong>: Aged/fermented tea that keeps history. Logging keeps history.</li>
+    <li><strong class="c-sencha">Sencha</strong>: Everyday accessible tea. Shell tooling should be simple and accessible.</li>
+  </ul>
+
+  <h2 id="package-map">Package Map</h2>
+
+  <table>
+    <thead>
+      <tr>
+        <th>Charm Library</th>
+        <th>Charm Purpose</th>
+        <th>Steep Package</th>
+        <th>Steep Purpose</th>
+        <th>Status</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td>Bubble Tea</td>
+        <td>Elm-architecture TUI framework</td>
+        <td class="c-assam"><strong>Assam</strong></td>
+        <td>Event loop, update/render, alt screen, key input</td>
+        <td><span class="badge badge-exists">Exists</span></td>
+      </tr>
+      <tr>
+        <td>Lip Gloss</td>
+        <td>Terminal styling, layout, borders, padding</td>
+        <td class="c-matcha"><strong>Matcha</strong></td>
+        <td>ANSI styling primitives — 24-bit color, text attributes, layout</td>
+        <td><span class="badge badge-extract">Extract</span></td>
+      </tr>
+      <tr>
+        <td>Glamour</td>
+        <td>Markdown → styled ANSI renderer</td>
+        <td class="c-oolong"><strong>Oolong</strong></td>
+        <td>CommonMark/GFM parser, stylesheet-driven ANSI renderer, word wrap</td>
+        <td><span class="badge badge-planned">Planned</span></td>
+      </tr>
+      <tr>
+        <td>Bubbles</td>
+        <td>Pre-built TUI components</td>
+        <td class="c-boba"><strong>Boba</strong></td>
+        <td>List, table, viewport, spinner, progress bar widgets</td>
+        <td><span class="badge badge-future">Future</span></td>
+      </tr>
+      <tr>
+        <td>Huh</td>
+        <td>Interactive forms and prompts</td>
+        <td class="c-chai"><strong>Chai</strong></td>
+        <td>Text input, select, confirm, multi-select forms</td>
+        <td><span class="badge badge-future">Future</span></td>
+      </tr>
+      <tr>
+        <td>Log</td>
+        <td>Structured logging</td>
+        <td class="c-puerh"><strong>Pu-erh</strong></td>
+        <td>Leveled logging, structured output, <code>*Messages*</code> integration</td>
+        <td><span class="badge badge-future">Future</span></td>
+      </tr>
+      <tr>
+        <td>Gum</td>
+        <td>Shell script TUI glamour</td>
+        <td class="c-sencha"><strong>Sencha</strong></td>
+        <td>CLI pretty-printing, shell-friendly styled output</td>
+        <td><span class="badge badge-future">Future</span></td>
+      </tr>
+    </tbody>
+  </table>
+
+  <h2 id="architecture">Architecture</h2>
+
+  <h3>Dependency graph</h3>
+
+  <div class="dep-graph">
+    <div class="dg-row"><span class="c-text">tmax</span></div>
+    <div class="dg-row">&nbsp;&nbsp;<span class="dg-arrow">└──</span> <span class="c-steep">steep</span> <span class="dg-label">(ecosystem umbrella)</span></div>
+    <div class="dg-row">&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="dg-arrow">└──</span> <span class="c-assam">assam</span> <span class="dg-label">(framework — Elm architecture, event loop)</span></div>
+    <div class="dg-row">&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="dg-arrow">├──</span> <span class="c-matcha">matcha</span> <span class="dg-label">(styling) — assam uses matcha for all ANSI output</span></div>
+    <div class="dg-row">&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="dg-arrow">├──</span> <span class="c-boba">boba</span> <span class="dg-label">(widgets) — boba uses matcha for widget styling</span></div>
+    <div class="dg-row">&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;│&nbsp;&nbsp;&nbsp;&nbsp;<span class="dg-arrow">└──</span> <span class="c-matcha">matcha</span></div>
+    <div class="dg-row">&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="dg-arrow">└──</span> <span class="c-oolong">oolong</span> <span class="dg-label">(markdown) — oolong uses matcha for ANSI rendering</span></div>
+    <div class="dg-row">&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="dg-arrow">└──</span> <span class="c-matcha">matcha</span></div>
+    <div class="dg-row" style="margin-top:0.5rem"><span class="c-chai">chai</span> <span class="dg-label">(forms)</span> <span class="dg-arrow">→</span> <span class="dg-label">depends on assam + matcha</span></div>
+    <div class="dg-row"><span class="c-puerh">pu-erh</span> <span class="dg-label">(logging)</span> <span class="dg-arrow">→</span> <span class="dg-label">depends on matcha</span></div>
+    <div class="dg-row"><span class="c-sencha">sencha</span> <span class="dg-label">(CLI)</span> <span class="dg-arrow">→</span> <span class="dg-label">depends on matcha</span></div>
+  </div>
+
+  <p>Matcha is the foundation — every other package depends on it for ANSI output. Assam is the framework layer that owns the terminal lifecycle. Steep is the umbrella. Higher-level packages (Oolong, Boba, Chai) compose on top.</p>
+
+  <h3>Purity responsibilities</h3>
+  <p>RFC-009 classifies purity gaps into <strong>Steep-layer</strong> (framework must solve, generic for all consumers) and <strong>tmax-layer</strong> (application must solve, tmax-specific). Only one gap is Steep-layer:</p>
+  <table>
+    <thead><tr><th>Gap</th><th>Layer</th><th>Steep responsibility</th></tr></thead>
+    <tbody>
+      <tr><td>Async → Cmd</td><td><strong>Steep-layer</strong></td><td>Assam must provide <code>AsyncCmd</code>, <code>BatchCmd</code>, etc. The Cmd system is framework infrastructure — any Steep app needs it, not just tmax. Blocked until RFC-008 Gap 3 is implemented.</td></tr>
+      <tr><td>Setter closures</td><td>tmax-layer</td><td>Steep's <code>Update</code> contract supports return-state, but the 120 ops functions are tmax code.</td></tr>
+      <tr><td>T-Lisp environment</td><td>tmax-layer</td><td>Persistent environments are a T-Lisp implementation detail. Steep doesn't know about T-Lisp.</td></tr>
+      <tr><td>Module registries</td><td>tmax-layer</td><td>Moving registries into state is tmax's business. Steep requires that all state is in the model.</td></tr>
+    </tbody>
+  </table>
+  <p>This distinction means <strong>Steep's API is already pure by design</strong> — the purity work is in tmax's adapter layer. As RFC-009 phases land, the adapter shifts from wrapping mutation to wrapping state-returning functions. The Steep API (<code>Update</code>, <code>Init</code>, <code>View</code>, <code>Cmd</code>) doesn't change.</p>
+
+  <h3>Package layout</h3>
+<pre><code>src/steep/
+├── assam.ts           # Framework: Elm arch, event loop, alt screen, key dispatch
+├── matcha.ts          # Styling: ANSI colors, attributes, layout
+├── screen.ts          # Terminal primitives: writeAt, moveTo, clear, cursor
+├── input.ts           # Raw key input: read, normalize, dispatch
+├── oolong/            # Markdown renderer
+│   ├── parser.ts
+│   ├── ast.ts
+│   ├── renderer.ts
+│   ├── themes/
+│   │   ├── dark.ts
+│   │   └── light.ts
+│   ├── wrap.ts
+│   └── table.ts
+├── boba/              # Widgets (future)
+├── chai/              # Forms (future)
+├── pu-erh/            # Logging (future)
+└── sencha/            # CLI (future)</code></pre>
+
+  <h3>Integration with tmax</h3>
+  <p>tmax imports Steep packages directly — no npm packages, no indirection. Steep lives inside tmax's source tree as <code>src/steep/</code>, matching Charm's Go module structure.</p>
+<pre><code>import { style, fg, bg, bold, italic } from '../steep/matcha';
+import { renderMarkdown } from '../steep/oolong/renderer';
+import { AssamFrontend } from '../steep/assam';</code></pre>
+
+  <h2 id="detailed-design">Detailed Design</h2>
+
+  <h3><span class="c-matcha">Matcha</span> (Lip Gloss) — Extract from <code>style.ts</code></h3>
+  <p><strong>Current:</strong> <code>src/frontend/frontends/steep/style.ts</code> (88 lines)<br>
+  <strong>New:</strong> <code>src/steep/matcha.ts</code></p>
+
+  <p>Matcha owns all ANSI styling primitives:</p>
+
+  <table>
+    <thead><tr><th>Category</th><th>Functions</th></tr></thead>
+    <tbody>
+      <tr><td>Existing</td><td><code>style()</code>, <code>fg()</code>, <code>bg()</code>, <code>bold()</code>, <code>dim()</code>, <code>stripAnsi()</code>, <code>reset</code>, color types</td></tr>
+      <tr><td>New (gap analysis)</td><td><code>italic()</code>, <code>underline()</code>, <code>strikethrough()</code>, <code>inverse()</code>, updated <code>style()</code> options</td></tr>
+      <tr><td>Future parity</td><td><code>border()</code>, <code>padding()</code>, <code>margin()</code>, <code>width()</code>, <code>height()</code>, <code>alignLeft/Right/Center()</code>, <code>horizontalJoin()</code>, <code>verticalJoin()</code></td></tr>
+    </tbody>
+  </table>
+
+  <h3><span class="c-oolong">Oolong</span> (Glamour) — New Module</h3>
+  <p>A stylesheet-driven markdown renderer per the <a href="../docs/memos/glamour-gap-analysis.md">gap analysis</a>:</p>
+<pre><code>src/steep/oolong/
+├── parser.ts      # CommonMark + GFM recursive-descent parser (~400 lines)
+├── ast.ts         # AST type definitions (~80 lines)
+├── renderer.ts    # Stylesheet-driven ANSI renderer (~350 lines)
+├── themes/
+│   ├── dark.ts    # Dark theme (Glamour-compatible JSON format)
+│   └── light.ts   # Light theme
+├── wrap.ts        # Word-wrap engine with ANSI awareness (~120 lines)
+└── table.ts       # GFM table formatter (~100 lines)</code></pre>
+
+  <p><strong>API:</strong></p>
+<pre><code>import { renderMarkdown } from '../steep/oolong/renderer';
+import { darkTheme } from '../steep/oolong/themes/dark';
+
+const lines = renderMarkdown(markdownText, { width: 80, theme: darkTheme });
+// Returns string[] — one ANSI-encoded line per visual line</code></pre>
+
+  <p>Theme format matches Glamour's JSON stylesheet structure so existing Charm themes (dracula, catppuccin, etc.) work without modification.</p>
+
+  <h3><span class="c-assam">Assam</span> (Bubble Tea) — Reorganize current frontend</h3>
+  <p><strong>Current:</strong> <code>src/frontend/frontends/steep/</code> (index.ts, screen.ts, input.ts)<br>
+  <strong>New:</strong> <code>src/steep/</code> (assam.ts, screen.ts, input.ts)</p>
+  <p>Assam owns terminal lifecycle, event loop, key dispatch, screen abstraction, and the component model (init/update/view). It is the Bubble Tea equivalent within the Steep ecosystem.</p>
+  <p><strong>Cmd system (Steep-layer infrastructure):</strong> Per RFC-009, the Cmd system (<code>AsyncCmd</code>, <code>BatchCmd</code>, etc.) is Steep-layer — it must be generic and available to any Steep application, not just tmax. This is the only purity gap that is Steep's responsibility; all others are tmax-layer. RFC-009 Phase 4 (async → Cmd) is blocked until RFC-008 Gap 3 is implemented. Currently, only 7 <code>await</code> expressions in tmax require this, all for infrequent operations (file save, file load, init).</p>
+
+  <h3>Boba, Chai, Pu-erh, Sencha — Future</h3>
+  <p>No current implementation. Each follows the same pattern: standalone module with clean API, depends on Matcha for styling, integrates with Assam for terminal lifecycle when needed.</p>
+
+  <h2 id="implementation-plan">Implementation Plan</h2>
+
+  <div class="phase phase-1">
+    <div class="phase-num">1</div>
+    <div class="phase-body">
+      <h3>Matcha + Assam reorganization</h3>
+      <p><em>Implementation spec: <a href="../specs/SPEC-020-steep-phase1-matcha-assam.md">SPEC-020</a></em></p>
+      <ol>
+        <li>Create <code>src/steep/</code> directory</li>
+        <li>Move <code>style.ts</code> → <code>src/steep/matcha.ts</code></li>
+        <li>Move <code>screen.ts</code>, <code>input.ts</code> → <code>src/steep/</code></li>
+        <li>Reorganize <code>index.ts</code> → <code>src/steep/assam.ts</code></li>
+        <li>Add missing ANSI attributes (italic, underline, strikethrough, inverse)</li>
+        <li>Update all import sites</li>
+        <li>Verify: <code>bun run typecheck</code> + <code>bun test</code></li>
+      </ol>
+    </div>
+  </div>
+
+  <div class="phase phase-2">
+    <div class="phase-num">2</div>
+    <div class="phase-body">
+      <h3>Oolong implementation</h3>
+      <p><em>Implementation spec: <a href="../specs/SPEC-021-steep-phase2-oolong.md">SPEC-021</a></em></p>
+      <ol>
+        <li>Build Oolong per the gap analysis (~1,050 lines across 5 files)</li>
+        <li>Oolong imports Matcha for ANSI styling</li>
+        <li>Add <code>markdown-preview</code> T-Lisp command</li>
+        <li>Unit tests in <code>test/unit/oolong/</code></li>
+      </ol>
+    </div>
+  </div>
+
+  <div class="phase phase-3">
+    <div class="phase-num">3</div>
+    <div class="phase-body">
+      <h3>Assam framework formalization</h3>
+      <ol>
+        <li>Formalize Elm-architecture API (init/update/view) — RFC-008 Gap 1</li>
+        <li>Document screen and input primitives</li>
+        <li>Extract tmax-specific rendering from Assam core</li>
+        <li><strong>Purity path (RFC-009):</strong> The Assam <code>Update</code> type is designed for pure functions. Currently tmax's adapter wraps <code>editor.handleKey()</code> which mutates state. RFC-009 defines four phases ordered by deliverable value:
+          <ul>
+            <li><strong>Phase 1 (Gap C):</strong> Move module-scoped registries into <code>EditorState</code> — makes <code>getEditorState()</code> a complete snapshot (~1,700 lines). Prerequisite for everything.</li>
+            <li><strong>Phase 2 (Gap A):</strong> Change 120 ops functions from setter closures to return-state objects — enables snapshot testing (~4,300 lines). Combined with Phase 1, delivers <code>assert update(msg, state).model === expected</code>.</li>
+            <li><strong>Phase 3 (Gap B):</strong> Persistent T-Lisp environments — unblocks Loom (RFC-010) package isolation (~5,600 lines). Coordinate with RFC-010 design.</li>
+            <li><strong>Phase 4 (Gap D):</strong> Async → Cmd system — the only Steep-layer gap. Assam provides <code>AsyncCmd</code>, <code>BatchCmd</code> (~2,500 lines). Blocked on RFC-008 Gap 3.</li>
+          </ul>
+          The Assam API doesn't change across these phases — only tmax's adapter internals shift from wrapping mutation to wrapping state-returning functions. Phases 1+2 (~6,000 lines) deliver snapshot testing immediately. Phase 3 is Loom's foundation. Phase 4 awaits the Cmd system.
+        </li>
+      </ol>
+    </div>
+  </div>
+
+  <div class="phase phase-4">
+    <div class="phase-num">4+</div>
+    <div class="phase-body">
+      <h3>Boba, Chai, Pu-erh, Sencha</h3>
+      <p>As needed. Each is a separate module with its own API and tests.</p>
+    </div>
+  </div>
+
+  <h2 id="design-decisions">Design Decisions</h2>
+
+  <div class="decision">
+    <p><strong>Monorepo, not npm packages (for now).</strong> Steep packages live in <code>src/steep/</code> as directories within tmax's source tree. This matches Charm's Go module structure and tmax's zero-dependency policy. The vision says Steep will be its own library — when that happens, each package directory becomes its own npm package with the same API. The internal structure is designed for that extraction.</p>
+  </div>
+  <div class="decision">
+    <p><strong>Flat file for Matcha.</strong> Start as <code>matcha.ts</code>. At ~120 lines (88 current + 4 new attributes), a single file is sufficient. Promote to <code>matcha/index.ts</code> only if Lip Gloss parity features push past ~300 lines.</p>
+  </div>
+  <div class="decision">
+    <p><strong>Directory for Oolong.</strong> Starts as <code>oolong/</code> because the gap analysis identifies ~1,050 lines across 5 files.</p>
+  </div>
+  <div class="decision">
+    <p><strong>Glamour-compatible theme format.</strong> Oolong adopts Glamour's JSON stylesheet format directly, giving instant access to all Charm themes.</p>
+  </div>
+  <div class="decision">
+    <p><strong><code>src/steep/</code> not <code>src/frontend/frontends/steep/</code>.</strong> The current location buries Steep three levels deep. Moving to <code>src/steep/</code> reflects that Steep is a top-level ecosystem umbrella.</p>
+  </div>
+  <div class="decision">
+    <p><strong>Steep is the umbrella, Assam is the framework.</strong> Steep is to the ecosystem what Charmbracelet is to Charm — the org-level name. Assam is the specific framework package, like Bubble Tea within Charmbracelet.</p>
+  </div>
+  <div class="decision">
+    <p><strong>No namespace collision.</strong> All tea names are unique, lowercase, single-word. No overlap with tmax terminology or TypeScript builtins.</p>
+  </div>
+  <div class="decision">
+    <p><strong>Pure API by design, pure internals incrementally.</strong> The Assam API (<code>Update</code>, <code>Init</code>, <code>View</code>, <code>Cmd</code>) is designed for pure functions — no tmax-specific types, no editor assumptions. tmax's current adapter wraps mutating internals, but this is temporary (RFC-009). The API stays the same as purity phases land. Pillar A (purity) and Pillar B (Steep independence) converge here: both require a framework that is pure by design and generic enough to stand alone.</p>
+    <p>RFC-009 confirms the performance overhead is negligible: the buffer layer is already purely functional (proves the pattern works in production), EditorState is 33 shallow references (object spread is &lt;1&mu;s), and V8's generational GC handles short-lived objects efficiently. The real tradeoff is development time (~18,100 lines across 30+ files), not runtime performance.</p>
+  </div>
+
+  <h2 id="open-questions">Open Questions</h2>
+  <ul>
+    <li><strong>Resolved: External importability is the goal.</strong> The technical vision (Pillar B: Steep Independence) answers this. Steep will become its own standalone library. The current monorepo structure is designed for eventual extraction. Each package directory will become its own npm package with the same API.</li>
+    <li><strong>Move <code>applyHighlights()</code> to Matcha?</strong> It wraps text regions with <code>style()</code> calls — a Lip Gloss-like concern. But it's coupled to the editor's <code>HighlightSpan</code> model. Keep in editor layer; extract if Matcha grows layout primitives.</li>
+    <li><strong>Tea names for <code>screen.ts</code> and <code>input.ts</code>?</strong> They're terminal primitives, not styling. Stay as Assam internals for now. Could become "Darjeeling" or similar if they grow.</li>
+  </ul>
+
+</body>
+</html>
