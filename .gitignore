@@ -62,3 +62,6 @@ __pycache__/
 
 # Spec-loop runtime state (autonomous loop progress ledger)
 .spec-loop/
+
+# Patch-review working state (gather bundles + verdicts)
+.patch-reviews/

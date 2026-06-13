@@ -766,3 +766,75 @@ Five-axis code review conducted against the implementation.
 - Daily note when date file already exists (open, don't overwrite)
 - Multiple formula lines on one table
 - `#tag` at start of line vs heading `#` — tokenizer priority ensures heading wins
+
+## Audit findings (patch-review 2026-06-13T20:13:08Z)
+
+**VERDICT: GAPS** — audited tree @ `e7d8741b83c5` (gather bundle under-scoped the commit list; bulk of SPEC-039 shipped in `ac219dc` / `3c4134b` / `73076ce`). Gates: `typecheck:src` PASS, `test:unit` PASS (2279/1skip/0fail), `test:daemon` PASS (19/19). Full verdict at `.patch-reviews/SPEC-039-2026-06-13T20-13-08/verdict.md`.
+
+### Gaps driving the verdict
+
+**1. Named bugs still open (3)**
+- **C2 `shell-exec-session` is a documented stub** (`tlisp-api.ts:1046-1081`) — `sessions` Map never populated; Step 5 session MUSTs (`markdown-kill-session`, `markdown-list-sessions`, shared state) are effectively MISSING. Either implement persistent process management or formally descope + remove the misleading primitives.
+- **`]l`/`[l` bound to heading nav, no wiki-link command exists** (`markdown-mode.tlisp:106-107`) — `markdown-next-wiki-link`/`markdown-prev-wiki-link` are not implemented anywhere, so even re-binding has nothing to target. Criterion Step 11 acceptance "](move to next `[[]]`) MISSING.
+- **`markdown-execute-all-blocks` uses stale `total`** (`markdown.tlisp:1101,1104`) — `(buffer-line-count)` read once before the while loop; later blocks skipped after results insertion shifts line indices. Re-read per iteration.
+
+**2. PARTIAL MUSTs (4)**
+- **Table formulas** (`markdown.tlisp:1129-1239`) — implements only literal-number `+,-,*,/` and `sum(range)`. Missing: `mean`/`min`/`max`/`count`, `%` modulo, `@>$>` shorthand. SPEC acceptance "sum range", "@>$> bottom-right" not satisfied.
+- **`markdown-export-dispatch`** (`markdown.tlisp:1365-1374`) — plain `read-string` prompt, not a which-key popup. SPEC MUST "which-key popup to choose backend" unmet.
+- **Template-variable expansion + templates dir** (`markdown.tlisp:1577-1603`) — `{{date}}` is never substituted in loaded templates (daily-note hardcodes date via `format`, passing by coincidence). `~/.config/tmax/templates/*.md` is never read; only built-in blank/daily/meeting strings exist.
+- **LaTeX backend** (`markdown.tlisp:1324-1363`) — emits bare `\item` lines outside any `\begin{itemize}/\end{itemize}`; SPEC acceptance "compilable `.tex` source" borderline.
+
+**3. Entirely MISSING features (SPEC-acknowledged)**
+- **Step 12 embeds** — `wiki-link-embed` token type exists but no `markdown-follow-embed` command, no inline display, no missing-file message.
+- `markdown-unlinked-mentions`, persistent backlink cache (in-memory Map only, no save-hook), `markdown-move-note`, rename preview.
+
+**4. Test coverage gaps (13 behaviors marked `[x]` with no test)**
+- `markdown-move-subtree-up`/`-down` (sibling swap correctness) — UNCOVERED
+- `markdown-execute-all-blocks` (document order, multi-block) — UNCOVERED (would expose the stale-total bug)
+- `markdown-table-eval-formula` end-to-end (table + tblfm + re-align) — UNCOVERED; `sum(@2$1..@5$1)` range branch UNCOVERED
+- Export backends (HTML / LaTeX / plain text) — all 3 UNCOVERED
+- `markdown-follow-wiki-link` navigation — UNCOVERED (only parser tested)
+- `markdown-backlinks` cross-file — UNCOVERED
+- `markdown-rename-note` (filesystem + link update) — UNCOVERED
+- `markdown-daily-note` creation — UNCOVERED
+- `markdown-frontmatter-set` on file without frontmatter — UNCOVERED
+- `shell-exec` timeout / `exitCode ?? 1` behavior — UNCOVERED
+- Several existing tests use weak `line > 0` assertions (next-tag, prev-tag, next-footnote, prev-footnote)
+- **No UI/renderer test sends any of the new multi-key bindings** (e.g. `g h`, `, k s`) to verify reachability after the `editor.ts:441-449` dispatch-gate change
+
+**5. Edge cases MISSED (6)**
+- `#tag` inside fenced code block — tag regex has no code-block guard (`markdown.ts:47`); SPEC MUST NOT (line 265) violated
+- Export of document with only frontmatter — frontmatter leaks into HTML/LaTeX body (`markdown.tlisp:1260-1363`)
+- Wiki-link to non-existent file — no explicit guard before `find-file-open` (`markdown.tlisp:1528-1541`); SPEC acceptance "shows error, does not crash" unasserted
+- Note rename when new name conflicts with existing file — `file-rename` throws via `renameSync`, no friendly message (`markdown.tlisp:1631-1632`)
+- Template directory does not exist — `markdown-new-from-template` never touches filesystem templates dir
+- `markdown-execute-all-blocks` stale total (see bug 1 above)
+
+### What landed well (e7d8741b83c5 fixed 7 named bugs)
+
+The shipped tree is materially better than the SPEC's Review Findings/Known Bugs sections claim. These are FIXED in the audited tree:
+- **C1** concatenated keystrings → all bindings use space separators (`markdown-mode.tlisp:19-107`)
+- **C3** no timeouts → `timeout: 30_000` on both `Bun.spawnSync` calls (`tlisp-api.ts:1032,1057`)
+- **R1** rename shell injection → uses `(file-rename ...)` (`markdown.tlisp:1632`)
+- **R2** scan-tags column off-by-one → `(+ col ...)` accumulator (`markdown.tlisp:937`)
+- **R3/R5** promote/demote predicate + level-6 cap → `"^#+\\s"` and `(< level 6)` guard (`markdown.tlisp:870,893-897`)
+- **R4** keybinding conflicts → `g b`/`g r`, `, k s`/`, k S`, `, x`/`, x e` all distinct
+- `editor.ts:441-449` dispatch gate correctly keeps major-mode bindings out of the unified T-Lisp keymap while preserving them in `this.keyMappings`
+
+### Assumptions challenged
+
+- SPEC Status line says "26 new tests pass, 2134 total" → actual: 22 tests in `markdown-spec-039.test.ts`, gate reports 2279 pass. Numbers are stale.
+- SPEC "Known Bugs"/"Review Findings" lists C1/C3/R1/R2/R3/R4/R5 as open → all seven are FIXED. SPEC body should be updated.
+- Gather bundle listed only `e7d8741b83c5` as the implementing commit → misleading; it's the patch-review fix commit. Bulk of SPEC-039 shipped in `ac219dc`/`3c4134b`/`73076ce`.
+
+### Recommended next pass (priority order)
+
+1. Fix the 3 remaining named bugs (C2 sessions or descope; `]l`/`[l` + add wiki-link nav commands; `execute-all-blocks` stale total)
+2. Close the 4 PARTIAL MUSTs (table formula functions + `%` + `@>$>`; export-dispatch → which-key; template-variable expansion + templates dir; LaTeX list env)
+3. Either implement or formally descope Step 12 embeds, unlinked-mentions, persistent cache
+4. Add the 13 missing acceptance-criteria tests (esp. export, rename, execute-all-blocks drift)
+5. Add ≥1 renderer test driving a markdown buffer through `, k s` / `g h` to guard the dispatch gate
+
+### Infrastructure note (not a SPEC-039 gap)
+
+`audit.ts gates` looked for daemon scripts at `.zcode/skills/tmax-daemon/scripts/`, which doesn't exist (only `.claude/skills/tmax-daemon/scripts/` does). Daemon-restart/daemon-start gates errored on the missing path; `test:daemon` was re-run manually with the correct path and passed 19/19. The audit script's `DAEMON_SCRIPTS_DIR` resolution should fall back to `.claude/skills/` or symlink `tmax-daemon` into `.zcode/skills/`.
