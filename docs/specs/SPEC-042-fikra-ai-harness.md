@@ -15,7 +15,7 @@
 
 Fikra is a pure T-Lisp AI coding assistant built into tmax as a first-class minor mode. It provides a unified terminal-based interface to multiple AI backends (Claude Code, OpenAI Codex, Google Gemini, Pi, Ollama, custom agents) through a pluggable adapter system. The UX is chat-first: `SPC a a` opens a full-screen, read-only `*Fikra*` chat buffer where messages are composed in an Emacs org-capture-inspired popup buffer. The editor only appears when navigating to file links in AI responses.
 
-Fikra adds zero TypeScript — three generic primitives (`make-process`, `http-request`, `signal`) are added to the existing T-Lisp bridge, then all adapters, workflows, UI, checkpoints, worktree isolation, and safety confirmations are implemented entirely in T-Lisp.
+Fikra adds minimal TypeScript — six generic primitives (`make-process`, `process-write`, `signal`, `http-request`, `json-read-from-string`, `buffer-set-read-only`) are added to the existing T-Lisp bridge via the `create*Ops()` factory pattern. All adapters, workflows, UI, checkpoints, worktree isolation, and safety confirmations are implemented entirely in T-Lisp.
 
 ## User Story
 
@@ -30,7 +30,7 @@ Every AI coding tool (Claude Code, Codex CLI, Gemini CLI) is a standalone CLI or
 ## Solution Statement
 
 Build Fikra as a pure T-Lisp minor mode that:
-1. Adds three generic TypeScript primitives to the T-Lisp bridge (subprocess, HTTP, signal)
+1. Adds six generic TypeScript primitives to the T-Lisp bridge (subprocess, process-write, signal, HTTP, JSON parse, buffer-read-only) via `create*Ops()` factory pattern
 2. Implements all adapters, workflows, and UI in T-Lisp modules under `src/tlisp/core/fikra/`
 3. Uses a chat-first UX with a read-only `*Fikra*` buffer and org-capture-style message composition
 4. Provides git-based checkpoints per turn, worktree isolation per thread, and per-action safety confirmations
@@ -42,12 +42,12 @@ Each implementation phase concludes with a **patch review** that classifies issu
 
 | Area | Governing Doc | Rule |
 |------|--------------|------|
-| C/Lisp boundary | `rules/editor.md` | TypeScript provides only `make-process`, `http-request`, `signal` — three display/I/O primitives. All adapter logic, UI, state machines, workflows, and safety checks are T-Lisp. No Fikra-specific TypeScript. |
+| C/Lisp boundary | `rules/editor.md` | TypeScript provides six I/O primitives: `make-process`, `process-write`, `signal`, `http-request`, `json-read-from-string`, `buffer-set-read-only`. Registered via `create*Ops()` factory pattern merged in `createEditorAPI()`. All adapter logic, UI, state machines, workflows, and safety checks are T-Lisp. No Fikra-specific TypeScript. |
 | T-Lisp ownership | `rules/tlisp.md` | Key bindings, mode transitions, command dispatch, adapter protocol, checkpoint logic — all in `src/tlisp/core/fikra/`. TypeScript may not contain editor decisions. |
 | Minor mode pattern | `src/tlisp/core/modes/line-numbers-mode.tlisp` | Fikra follows the existing `defmodule` / `define-minor-mode` / toggle function pattern. No new minor mode infrastructure. |
 | Module pattern | `src/tlisp/CLAUDE.md` | Each Fikra module uses `(defmodule ...)`, `(export ...)`, `(provide "...")`. Key bindings in the same file or in `fikra-mode.tlisp`. |
 | Testing gates | `rules/testing.md` | Four validation gates: `bun run typecheck`, `bun test`, `bun run test:daemon`, `bun run test:ui:renderer`. All must pass before any phase is considered complete. |
-| Surgical changes | `CLAUDE.md` §3 | Touch only `src/editor/tlisp-api.ts` (add three primitives). Don't refactor adjacent code, don't modify existing ops factories beyond what's needed for registration. |
+| Surgical changes | `CLAUDE.md` §3 | Touch only `src/editor/tlisp-api.ts` (add primitives via ops factory) and `src/editor/api/buffer-ops.ts` (add read-only toggle). Don't refactor adjacent code, don't modify existing ops factories beyond what's needed for registration. |
 | Security | RFC-013 §Security | API keys in environment variables only. Buffer text never injected into system prompts. Per-action confirmations + checkpoint revert = two-level safety. |
 
 ## Relevant Files
@@ -56,9 +56,10 @@ Each implementation phase concludes with a **patch review** that classifies issu
 
 | File | Change | Constraints |
 |------|--------|-------------|
-| `src/editor/tlisp-api.ts` | Add `make-process`, `http-request`, `signal` primitives via `defineRaw()` pattern (~180 lines total) | `rules/editor.md`: primitives answer factual questions (spawn process, send HTTP, send signal). No editor decisions. |
+| `src/editor/tlisp-api.ts` | Add `createProcessOps()` factory returning `Map<string, TLispFunctionImpl>` with `make-process`, `process-write`, `signal`. Add `createHttpOps()` factory with `http-request`. Add `createJsonOps()` factory with `json-read-from-string`. Merge in `createEditorAPI()`. (~250 lines total) | `rules/editor.md`: primitives answer factual questions (spawn process, send HTTP, send signal). No editor decisions. Use `api.set()` pattern matching existing ops factories. |
+| `src/editor/api/buffer-ops.ts` | Add `buffer-set-read-only` primitive to toggle buffer read-only state at runtime | `rules/editor.md`: read-only is a display primitive, not an editor decision |
 | `src/editor/api/minor-mode-ops.ts` | No changes expected — Fikra uses existing `define-minor-mode` / `minor-mode-register` | Verified by `line-numbers-mode.tlisp` working today |
-| `src/editor/api/buffer-ops.ts` | May need `buffer-set-read-only` if not already present | `rules/editor.md`: read-only is a display primitive, not an editor decision |
+| `src/editor/api/buffer-ops.ts` | Add `buffer-set-read-only` primitive (see above) | `rules/editor.md`: read-only is a display primitive, not an editor decision |
 | `src/editor/api/tab-ops.ts` | No changes expected — capture buffer may use existing window primitives | Verify existing `window-split` / `window-delete` suffice |
 
 ### New Files
@@ -78,7 +79,7 @@ Each implementation phase concludes with a **patch review** that classifies issu
 | `src/tlisp/core/fikra/fikra-workflow.tlisp` | Workflows: explain, fix, refactor, review, test, `defworkflow` | System prompts as `defvar`; overridable |
 | `src/tlisp/core/fikra/fikra-ghost.tlisp` | Inline completion ghost text | Uses existing overlay pipeline; no new rendering primitives |
 | `src/tlisp/core/fikra/fikra-thread.tlisp` | Thread/turn state machine, project awareness | Project → Thread → Turn hierarchy |
-| `src/tlisp/core/fikra/fikra-worktree.tlisp` | Worktree isolation: create, handoff, snapshot, cleanup | Git CLI via `shell-command-to-string`; `.tmax/worktrees/` |
+| `src/tlisp/core/fikra/fikra-worktree.tlisp` | Worktree isolation: create, handoff, snapshot, cleanup | Git CLI via `shell-command`; `.tmax/worktrees/` |
 | `src/tlisp/core/fikra/fikra-checkpoint.tlisp` | Checkpoint views, diff buffers, revert | Git refs: `fikra/<thread-id>/<turn-count>` |
 | `src/tlisp/core/fikra/fikra-safety.tlisp` | Runtime modes, per-action confirmations | Three presets + per-action Allow/Reject/Always Allow |
 | `test/unit/fikra-primitives.test.ts` | Bun tests for TS primitives | `rules/testing.md`: Bun test syntax |
@@ -94,13 +95,13 @@ Each implementation phase concludes with a **patch review** that classifies issu
 
 ### Phase 1: Foundation — TypeScript Primitives
 
-Add three generic primitives to the T-Lisp bridge. These are not Fikra-specific — any T-Lisp package can use them.
+Add six generic primitives to the T-Lisp bridge via `create*Ops()` factory pattern merged in `createEditorAPI()`. These are not Fikra-specific — any T-Lisp package can use them.
 
 **Constraint checkpoint:** Before starting, verify:
-- [ ] `src/editor/tlisp-api.ts` registers primitives via `defineRaw()` — confirm this pattern works by reading how existing primitives (e.g., `shell-command-to-string`) are registered
+- [ ] `src/editor/tlisp-api.ts` registers primitives via `api.set()` in `createEditorAPI()` — confirm by reading how existing ops factories (e.g., `createBufferOps`) are merged
 - [ ] `Bun.spawn` API available for subprocess management in the current Bun version
-- [ ] No existing `make-process` or `http-request` function already defined (avoid name collisions)
-- [ ] `buffer-set-read-only` exists in `buffer-ops.ts` — if not, add it as part of this phase
+- [ ] No existing `make-process`, `http-request`, `json-read-from-string`, or `process-write` function already defined (avoid name collisions)
+- [ ] `buffer-ops.ts` has internal `readonlyBuffers: Set<string>` but no runtime toggle — `buffer-set-read-only` must be added
 
 #### Step 1.1: Add `make-process` primitive
 
@@ -119,7 +120,7 @@ Add three generic primitives to the T-Lisp bridge. These are not Fikra-specific 
 - Buffer output until process completion — must stream line-by-line
 - Depend on any Fikra-specific code
 
-**Convention source:** `rules/editor.md` — TypeScript provides display/I/O primitives only. `src/editor/CLAUDE.md` — `defineRaw()` wrappers expose state to T-Lisp.
+**Convention source:** `rules/editor.md` — TypeScript provides display/I/O primitives only. Primitives registered via `api.set()` in ops factories, merged in `createEditorAPI()`.
 
 **Acceptance criteria:**
 - [ ] `(make-process :command '("echo" "hello") :filter 'my-filter)` calls `my-filter` with `"hello\n"`
@@ -128,11 +129,27 @@ Add three generic primitives to the T-Lisp bridge. These are not Fikra-specific 
 - [ ] Process handle is usable by `signal`
 - [ ] File descriptors are cleaned up on process exit
 
-#### Step 1.2: Add `http-request` primitive
+#### Step 1.2: Add `process-write` primitive
+
+**User story:** As a T-Lisp package author, I want to write to a subprocess stdin, so that I can pipe input to CLI tools.
+
+**Description:** Add `process-write` alongside `make-process` in `createProcessOps()`. Takes a process handle and a string, writes to stdin.
+
+**MUST:**
+- Write string data to the process stdin
+- Work with process handles returned by `make-process`
+
+**Convention source:** `rules/editor.md` — I/O primitive.
+
+**Acceptance criteria:**
+- [ ] `(process-write proc "input\n")` sends data to subprocess stdin
+- [ ] Works with process handles returned by `make-process`
+
+#### Step 1.3: Add `http-request` primitive
 
 **User story:** As a T-Lisp package author, I want to make async HTTP requests with streaming response bodies, so that I can integrate with REST APIs entirely in T-Lisp.
 
-**Description:** Add `http-request` to `src/editor/tlisp-api.ts`. Async HTTP GET/POST using Bun's `fetch`. Returns headers + status to T-Lisp, streams response body chunks to a T-Lisp filter function. Keyword arguments: `url`, `:method`, `:headers`, `:body`, `:filter`.
+**Description:** Add `http-request` via `createHttpOps()` factory. Async HTTP GET/POST using Bun's `fetch`. Returns headers + status to T-Lisp, streams response body chunks to a T-Lisp filter function. Keyword arguments: `url`, `:method`, `:headers`, `:body`, `:filter`.
 
 **MUST:**
 - Stream response body chunks to the filter function as they arrive
@@ -150,11 +167,33 @@ Add three generic primitives to the T-Lisp bridge. These are not Fikra-specific 
 - [ ] Status code and headers are returned to T-Lisp on completion
 - [ ] Streaming delivery — each chunk arrives as it's read from the network
 
-#### Step 1.3: Add `signal` primitive
+#### Step 1.4: Add `json-read-from-string` primitive
+
+**User story:** As a T-Lisp package author, I want to parse JSON strings into T-Lisp data structures, so that I can process structured output from CLI tools and HTTP APIs.
+
+**Description:** Add `json-read-from-string` via `createJsonOps()` factory. Parses a JSON string into T-Lisp alists/lists/strings/numbers/booleans/nil. Required by all adapters that parse structured output (Claude's `stream-json`, Ollama's HTTP response).
+
+**MUST:**
+- Parse JSON objects → T-Lisp alists
+- Parse JSON arrays → T-Lisp lists
+- Parse JSON strings, numbers, booleans, null → T-Lisp equivalents
+- Return nil on parse error (don't throw)
+
+**MUST NOT:**
+- Depend on any Fikra-specific code
+
+**Convention source:** `rules/editor.md` — data transformation is a utility primitive.
+
+**Acceptance criteria:**
+- [ ] `(json-read-from-string "{\"type\": \"text\", \"content\": \"hello\"}")` returns `((type . "text") (content . "hello"))`
+- [ ] `(json-read-from-string "[1, 2, 3]")` returns `(1 2 3)`
+- [ ] `(json-read-from-string "invalid")` returns `nil`
+
+#### Step 1.5: Add `signal` primitive
 
 **User story:** As a T-Lisp package author, I want to send signals to running processes, so that I can abort long-running subprocess operations.
 
-**Description:** Add `signal` to `src/editor/tlisp-api.ts`. Takes a process handle (from `make-process`) and a signal name string (`"SIGTERM"`, `"SIGKILL"`, `"SIGINT"`). Sends the signal to the process.
+**Description:** Add `signal` alongside `make-process` in `createProcessOps()`. Takes a process handle (from `make-process`) and a signal name string (`"SIGTERM"`, `"SIGKILL"`, `"SIGINT"`). Sends the signal to the process.
 
 **MUST:**
 - Accept any signal name supported by the platform
@@ -169,16 +208,37 @@ Add three generic primitives to the T-Lisp bridge. These are not Fikra-specific 
 - [ ] `(signal proc "SIGTERM")` terminates a running `sleep` process
 - [ ] Works with process handles returned by `make-process`
 
-#### Step 1.4: Write primitive tests
+#### Step 1.6: Add `buffer-set-read-only` primitive
 
-**User story:** As a maintainer, I want regression tests for the three primitives, so that their behavior cannot silently break.
+**User story:** As a T-Lisp package author, I want to toggle buffer read-only state at runtime, so that I can create buffers that accept programmatic insertion but block keyboard input.
 
-**Description:** Create `test/unit/fikra-primitives.test.ts` covering all three primitives. Use real subprocesses (not mocks) for `make-process` and `signal`. Use a local HTTP server or Bun's test server for `http-request`.
+**Description:** Add `buffer-set-read-only` to `buffer-ops.ts`. Toggles whether a buffer accepts keyboard input. The internal `readonlyBuffers: Set<string>` already guards insert/delete — expose a runtime toggle.
+
+**MUST:**
+- Toggle read-only state for the current buffer
+- Allow programmatic insertion even when read-only (for streaming tokens)
+- Work with existing `readonlyBuffers` mechanism
+
+**Convention source:** `rules/editor.md` — read-only is a display primitive.
+
+**Acceptance criteria:**
+- [ ] `(buffer-set-read-only t)` marks current buffer read-only
+- [ ] `(buffer-set-read-only nil)` marks current buffer writable
+- [ ] Read-only buffer rejects keyboard insert but accepts `buffer-insert` calls
+
+#### Step 1.7: Write primitive tests
+
+**User story:** As a maintainer, I want regression tests for all six primitives, so that their behavior cannot silently break.
+
+**Description:** Create `test/unit/fikra-primitives.test.ts` covering all primitives. Use real subprocesses (not mocks) for `make-process` and `signal`. Use a local HTTP server or Bun's test server for `http-request`.
 
 **MUST:**
 - Test `make-process` spawn, stdin write, stdout streaming, sentinel on exit
+- Test `process-write` sends data to stdin
 - Test `signal` kills a running process
 - Test `http-request` streaming, status code, headers
+- Test `json-read-from-string` parsing (objects, arrays, strings, error cases)
+- Test `buffer-set-read-only` toggle and enforcement
 - Use Bun test syntax (`expect(x).toBe(y)`, not `assertEquals`)
 
 **MUST NOT:**
@@ -189,11 +249,13 @@ Add three generic primitives to the T-Lisp bridge. These are not Fikra-specific 
 
 **Acceptance criteria:**
 - [ ] `make-process` spawn + filter + sentinel test passes
-- [ ] `make-process` stdin write test passes
+- [ ] `process-write` stdin test passes
 - [ ] `signal` kills running process test passes
 - [ ] `http-request` streaming + status + headers test passes
+- [ ] `json-read-from-string` parse test passes
+- [ ] `buffer-set-read-only` toggle test passes
 
-#### Step 1.5: Validate Phase 1
+#### Step 1.8: Validate Phase 1
 
 ```bash
 bun run typecheck:src    # zero type errors
@@ -272,7 +334,7 @@ Build the Fikra minor mode, chat buffer, capture buffer, Claude Code adapter, co
 
 **User story:** As a developer, I want Fikra to use Claude Code CLI as the default backend, so that I get a production-quality AI backend with zero configuration.
 
-**Description:** Create `fikra-backend-claude.tlisp`. Discovers `claude` on PATH via `shell-command-to-string`. Spawns `claude --print --output-format stream-json` via `make-process`. Parses streamed JSON lines and inserts tokens. Self-registers on load.
+**Description:** Create `fikra-backend-claude.tlisp`. Discovers `claude` on PATH via `shell-command`. Spawns `claude --print --output-format stream-json` via `make-process`. Parses streamed JSON lines and inserts tokens. Self-registers on load.
 
 **MUST:**
 - Detect `claude` on PATH at load time
@@ -321,7 +383,7 @@ Build the Fikra minor mode, chat buffer, capture buffer, Claude Code adapter, co
 
 **User story:** As a developer, I want to compose messages in a small popup capture buffer, so that the chat stays read-only while I get a proper editing surface for multi-line messages.
 
-**Description:** Create `fikra-capture.tlisp`. Popup `*Fikra-Capture*` buffer (~5 lines) in INSERT mode. `C-c C-c` submits, `C-c C-k` cancels, `M-p`/`M-n` history, `RET` inserts newline.
+**Description:** Create `fikra-capture.tlisp`. Popup `*Fikra-Capture*` buffer (~5 lines) in INSERT mode, created via `(split-window "horizontal")` to create a small bottom window. `C-c C-c` submits, `C-c C-k` cancels, `M-p`/`M-n` history, `RET` inserts newline.
 
 **MUST:**
 - Capture buffer opens in INSERT mode
@@ -346,10 +408,10 @@ Build the Fikra minor mode, chat buffer, capture buffer, Claude Code adapter, co
 
 **User story:** As a developer, I want Fikra to automatically include relevant editor context, so that the AI has enough information for accurate responses.
 
-**Description:** Create `fikra-context.tlisp`. Composes context from existing primitives: `buffer-text`, `buffer-selection`, `buffer-file-name`, `buffer-mode`. Default composition via `fikra-build-context`, overridable by `setq` in init.tlisp.
+**Description:** Create `fikra-context.tlisp`. Composes context from existing primitives: `buffer-text`, `visual-get-selection` (if visual mode active), `buffer-file-name`, `buffer-mode`. Default composition via `fikra-build-context`, overridable by `setq` in init.tlisp.
 
 **MUST:**
-- Include file name, mode, selection, and buffer text
+- Include file name, mode, visual selection (if active), and buffer text
 - Be overridable via `setq` on `fikra-build-context`
 - Gracefully handle missing context (no file, no selection)
 
@@ -360,7 +422,7 @@ Build the Fikra minor mode, chat buffer, capture buffer, Claude Code adapter, co
 **Convention source:** RFC-013 §Context System, `rules/editor.md` — T-Lisp owns context composition.
 
 **Acceptance criteria:**
-- [ ] `(fikra-build-context)` returns context with file, mode, selection
+- [ ] `(fikra-build-context)` returns context with file, mode, visual selection (if active)
 - [ ] Overriding `fikra-build-context` in init.tlisp replaces default
 - [ ] No file open: context includes project directory only
 
@@ -607,7 +669,7 @@ Thread/turn state machine, git checkpoints, worktree isolation, per-action safet
 **Constraint checkpoint:** Before starting, verify:
 - [ ] Phase 3 validation commands all pass
 - [ ] Multi-backend switching works end-to-end
-- [ ] `shell-command-to-string` can run `git worktree add` and related commands
+- [ ] `shell-command` can run `git worktree add` and related commands
 - [ ] `.tmax/` directory pattern is established (verify with existing codebase)
 
 #### Step 4.1: Create thread/turn state machine
@@ -649,7 +711,7 @@ Thread/turn state machine, git checkpoints, worktree isolation, per-action safet
 - Support cumulative diff from thread start
 
 **MUST NOT:**
-- Use TypeScript for git operations — `shell-command-to-string` runs git CLI
+- Use TypeScript for git operations — `shell-command` runs git CLI
 - Delete checkpoint refs on revert — keep for audit trail
 
 **Convention source:** RFC-013 §Checkpoint System, `rules/tlisp.md` — T-Lisp owns checkpoint logic.
@@ -923,6 +985,7 @@ Execute every command to validate the feature works correctly with zero regressi
 | Patch reviews between phases | Catches architectural drift early; structured issue tracking | No inter-phase review — issues compound across phases |
 | `defvar` for overridable defaults | User can `setq` in init.tlisp without forking code | Hardcoded constants — not customizable |
 | Files in `src/tlisp/core/fikra/` | Standard T-Lisp module location; clean Loom extraction path | `~/.config/tmax/fikra/` — outside module loader path; `src/fikra/` — wrong layer |
+| `.tmax/worktrees/` in project directory (not `~/.config/tmax/`) | Worktrees are git checkouts that must live inside the project tree for `git worktree add` to work; per-project isolation is natural | `~/.config/tmax/worktrees/` — git worktrees cannot be placed outside the repo; `~/.config/tmax/fikra/<project>/` — git CLI can't reference external worktree paths |
 
 **Deferred to follow-up:**
 - Auto-trigger ghost text completions (needs debouncing + local model for latency)
@@ -970,11 +1033,11 @@ Execute every command to validate the feature works correctly with zero regressi
 - **Fix:** Add `json-read-from-string` as a fourth TS primitive in Phase 1 (or as part of Step 1.1). It's a generic utility needed by any adapter that parses structured output. Without it, the Claude adapter cannot parse `stream-json` output. This also blocks Ollama's HTTP response parsing.
 - **Affected sections:** Phase 1 (add Step 1.4 or extend Step 1.1), Step 2.3 MUST list, Step 3.3, Prerequisites
 
-**H3: `shell-command-to-string` does not exist — the primitive is `shell-command`.**
+**H3: `shell-command` does not exist — the primitive is `shell-command`.**
 - **Where:** Step 2.3 (Claude adapter), Step 4.2 (checkpoints), Step 4.3 (worktrees), Edge Cases, Architecture Constraints, RFC-013 code references throughout
-- **Spec says:** References `shell-command-to-string` for PATH detection, git operations, checkpoint capture
-- **Reality:** The primitive is named `shell-command`, not `shell-command-to-string`. It executes a shell command synchronously and returns the output.
-- **Fix:** Replace all `shell-command-to-string` references with `shell-command`. Verify return value semantics match what Fikra expects (the adapter needs to check if `claude` is on PATH by running `which claude` and inspecting the result).
+- **Spec says:** References `shell-command` for PATH detection, git operations, checkpoint capture
+- **Reality:** The primitive is named `shell-command`, not `shell-command`. It executes a shell command synchronously and returns the output.
+- **Fix:** Replace all `shell-command` references with `shell-command`. Verify return value semantics match what Fikra expects (the adapter needs to check if `claude` is on PATH by running `which claude` and inspecting the result).
 - **Affected sections:** Step 2.3 Description, Step 4.2 Convention source note, Step 4.3 Description, Edge Cases, Design Decisions table
 
 ---
@@ -1049,9 +1112,131 @@ Execute every command to validate the feature works correctly with zero regressi
 
 1. **H1:** Replace `defineRaw()` with `api.set()` / ops factory pattern throughout
 2. **H2:** Add `json-read-from-string` as Phase 1 primitive (Step 1.4 or extend 1.1)
-3. **H3:** Replace `shell-command-to-string` with `shell-command` throughout
+3. **H3:** Replace `shell-command` with `shell-command` throughout
 4. **M1:** Promote `buffer-set-read-only` from prerequisite to Phase 1 step
 5. **M2:** Specify context extraction uses `visual-get-selection` or add `buffer-selection` primitive
 6. **M3:** Add `process-write` as explicit Phase 1 deliverable alongside `make-process`
 7. **M4:** Specify capture buffer uses `split-window` or new overlay type
 8. **M5:** Document `.tmax/` directory choice in Design Decisions table
+
+### Phase 1+2 Post-Implementation Review — 2026-06-13
+
+*Code review of implemented TypeScript primitives (Phase 1) and T-Lisp modules (Phase 2). Typecheck passes, 68 tests pass with zero regressions. Review found 5 Critical, 4 Required, 5 Nit, 3 FYI issues.*
+
+---
+
+#### CRITICAL (blocks merge — must fix)
+
+**C1: `alist-get` is not defined anywhere — Claude adapter will fail at runtime.**
+- **Where:** `fikra-backend-claude.tlisp:34-35`
+- **Code:** `(alist-get "type" json)` and `(alist-get "content" json)`
+- **Reality:** `alist-get` is not a T-Lisp stdlib function, not a TypeScript primitive, and not defined in any `.tlisp` file. Additionally, `json-read-from-string` returns objects as lists of two-element lists `("key" value)`, not dotted alist pairs `("key" . value)` — so even if `alist-get` were defined, it would need to handle the list-of-lists format.
+- **Fix:** Add `alist-get` to T-Lisp stdlib. It should accept a key string and a list of two-element lists, returning the value of the first matching pair. Alternatively, rewrite the Claude adapter to use car/cdr directly.
+
+**C2: `intern` and `fboundp` are not defined — adapter registry will fail at runtime.**
+- **Where:** `fikra-adapter.tlisp:26-28`, `fikra-adapter.tlisp:65-66`
+- **Code:** `(intern (concat "fikra-backend-" name "-available-p"))` and `(fboundp fn)`
+- **Reality:** Neither `intern` nor `fboundp` exist in the T-Lisp runtime. The entire dynamic dispatch mechanism (`fikra-backend-available-p`, `fikra-backend-call`) depends on these. `funcall` exists in stdlib, but `intern` and `fboundp` do not.
+- **Fix:** Add `intern` (converts string to symbol) and `fboundp` (checks if symbol is bound to a function) as T-Lisp stdlib functions. These are essential for the adapter pattern.
+
+**C3: `http-request` hardcodes Fikra-specific callback — violates C/Lisp boundary.**
+- **Where:** `tlisp-api.ts:1288`
+- **Code:** `state._evalTlisp(\`(fikra-http-complete ${requestId} ...)\`)`
+- **Reality:** A generic HTTP primitive should not know about `fikra-http-complete`. The Architecture Constraints say "no Fikra-specific TypeScript." The `make-process` primitive correctly uses `:sentinel` keyword for its completion callback — `http-request` should follow the same pattern.
+- **Fix:** Accept a `:complete` or `:sentinel` keyword argument and call that function instead of hardcoding `fikra-http-complete`.
+
+**C4: `split-string` doesn't exist — the builtin is `string-split`.**
+- **Where:** `fikra-backend-claude.tlisp:30`
+- **Code:** `(split-string output "\n")`
+- **Reality:** The T-Lisp stdlib defines `string-split` (in `stdlib.ts:239`), not `split-string`.
+- **Fix:** Replace `split-string` with `string-split` in fikra-backend-claude.tlisp.
+
+**C5: `string-match-p` doesn't exist — only `string-match` is defined.**
+- **Where:** `fikra-chat.tlisp:70-72`
+- **Code:** `(string-match-p "src/[^ \t\n]+" line)`
+- **Reality:** `string-match` exists as a TypeScript primitive (in `tlisp-api.ts`), but `string-match-p` does not. `string-match` returns the match index or nil — it can be used as a predicate since any number is truthy.
+- **Fix:** Replace `string-match-p` with `string-match` in fikra-chat.tlisp. The return value semantics are compatible (number = truthy, nil = falsy).
+
+---
+
+#### REQUIRED (must fix before merge)
+
+**R1: `buffer-mode` doesn't exist — `fikra-build-context` will fail.**
+- **Where:** `fikra-context.tlisp:11`
+- **Code:** `(mode (buffer-mode))`
+- **Reality:** No `buffer-mode` function exists. The mode getter is `editor-mode` (in `mode-ops.ts`).
+- **Fix:** Replace `buffer-mode` with `editor-mode` in fikra-context.tlisp.
+
+**R2: `buffer-current-line-text` doesn't exist — `fikra-follow-link` will fail.**
+- **Where:** `fikra-chat.tlisp:61`
+- **Code:** `(buffer-current-line-text)`
+- **Reality:** No such function exists. Existing primitives: `buffer-line` (takes line number) and `cursor-line` (returns current line number).
+- **Fix:** Replace `(buffer-current-line-text)` with `(buffer-line (cursor-line))`.
+
+**R3: `buffer-exists-p` doesn't exist — `fikra-capture` and `fikra-chat-open` will fail.**
+- **Where:** `fikra-capture.tlisp:22`, `fikra-chat.tlisp:26`
+- **Code:** `(buffer-exists-p fikra-capture-buffer-name)`, `(buffer-exists-p fikra-chat-buffer-name)`
+- **Reality:** No `buffer-exists-p` function exists. `buffer-list` returns all buffer names.
+- **Fix:** Add `buffer-exists-p` to `buffer-ops.ts`, or define a T-Lisp helper that checks `(member name (buffer-list))`.
+
+**R4: Claude adapter extracts wrong JSON field for stream-json format.**
+- **Where:** `fikra-backend-claude.tlisp:35`
+- **Code:** `(alist-get "content" json)`
+- **Reality:** Claude's `--output-format stream-json` produces `{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"hello"}}`. The text content is in `delta.text` (nested), not a top-level `content` field.
+- **Fix:** Extract content from the nested path: get `delta` from the top-level object, then get `text` from delta.
+
+---
+
+#### NIT (minor, optional)
+
+**N1: Global `RET` and `C-g` bindings in `fikra-chat.tlisp:118-119` are not buffer-scoped.**
+- These `(key-bind "RET" ...)` and `(key-bind "C-g" ...)` are registered unconditionally when the module loads, not scoped to the `*Fikra*` buffer. They will override `RET` and `C-g` in all normal-mode buffers.
+- **Fix:** Scope these bindings to when the `*Fikra*` buffer is active (e.g., via buffer-local keymap or conditional check).
+
+**N2: `fikra-extract-file-path` has potentially incorrect regex escaping in T-Lisp strings.**
+- `fikra-chat.tlisp:76-80` uses `[^\s\t\n,;)\"]+` inside T-Lisp string literals. The `\s` escape semantics in T-Lisp strings need verification.
+
+**N3: `fikra-turn-send` lacks visual separator between user message and AI response.**
+- `fikra-chat.tlisp:94` inserts "You: message" but AI response tokens are appended without a prefix. Consider adding "\nAI: " before the first token of each turn.
+
+**N4: `fikra-backends` alist values are always `t` — misleading.**
+- `fikra-adapter.tlisp:22` pushes `(name . t)` on registration, but actual availability is checked dynamically. The `t` value is never read.
+
+**N5: Process table ID counter never wraps.**
+- `nextProcessId` in `tlisp-api.ts:1127` increments indefinitely. Low risk for practical sessions.
+
+---
+
+#### FYI (informational only)
+
+**FYI1: Tests verify file contents, not T-Lisp evaluation.**
+- Both `fikra-mode.test.ts` and `fikra-primitives.test.ts` check file existence and TypeScript primitive behavior. No test evaluates the T-Lisp modules through the interpreter, so the 7+ missing runtime functions were not caught.
+
+**FYI2: `SPC a i` bound to unimplemented `fikra-complete`.**
+- `fikra-mode.tlisp:78` binds `SPC a i` to `fikra-complete` which is a Phase 3 feature (ghost text). Pressing it will produce a "not defined" error until Phase 3.
+
+**FYI3: `fikra-chat-open` loads the Claude adapter on every call.**
+- `fikra-chat.tlisp:33` does `(require-module fikra/backend-claude)` inside `fikra-chat-open`. The module system should handle duplicate loads, but loading typically happens once during `fikra-start`.
+
+---
+
+#### Summary
+
+| Severity | Count | Action |
+|----------|-------|--------|
+| CRITICAL | 5 | Must fix. C1–C2 (missing stdlib), C3 (boundary violation), C4–C5 (wrong function names) |
+| REQUIRED | 4 | Must fix. R1–R3 (missing functions), R4 (wrong JSON path) |
+| NIT | 5 | Optional. N1 (global bindings), N2–N5 (minor) |
+| FYI | 3 | Informational. FYI1 (test coverage gap), FYI2–FYI3 (future considerations) |
+
+#### Required Fixes
+
+1. **C1:** Add `alist-get` to T-Lisp stdlib (or rewrite Claude adapter field extraction)
+2. **C2:** Add `intern` and `fboundp` to T-Lisp stdlib
+3. **C3:** Change `http-request` to accept `:complete` keyword instead of hardcoding `fikra-http-complete`
+4. **C4:** Replace `split-string` with `string-split` in fikra-backend-claude.tlisp
+5. **C5:** Replace `string-match-p` with `string-match` in fikra-chat.tlisp
+6. **R1:** Replace `buffer-mode` with `editor-mode` in fikra-context.tlisp
+7. **R2:** Replace `buffer-current-line-text` with `(buffer-line (cursor-line))` in fikra-chat.tlisp
+8. **R3:** Add `buffer-exists-p` primitive or T-Lisp helper
+9. **R4:** Fix Claude adapter JSON extraction to use nested `delta.text` path

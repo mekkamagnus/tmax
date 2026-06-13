@@ -1,0 +1,82 @@
+(defmodule fikra/mode
+  (export fikra-mode fikra-stop fikra-active-p)
+
+;; Fikra — AI coding assistant minor mode
+;; Activated with SPC a, provides chat-first AI interaction
+
+(define-minor-mode "fikra" "AI coding assistant" "fikra" nil)
+
+(defvar fikra-default-backend "claude"
+  "Default AI backend name.")
+
+(defvar fikra-default-runtime-mode "approval-required"
+  "Default runtime mode for new threads.")
+
+(defvar fikra-mode-active nil
+  "Whether fikra mode is currently active.")
+
+(defun fikra-active-p ()
+  "Return t if fikra mode is active."
+  (if fikra-mode-active t nil))
+
+(defun fikra-mode (&optional (arg nil arg-supplied-p))
+  "Toggle Fikra AI assistant mode.
+With no argument, toggle.
+With t, enable.
+With positive number, enable.
+With 0 or negative number, disable."
+  (if (not arg-supplied-p)
+    (if fikra-mode-active
+      (fikra-stop)
+      (fikra-start))
+    (if (equal arg t)
+      (fikra-start)
+      (if (numberp arg)
+        (if (> arg 0)
+          (fikra-start)
+          (fikra-stop))
+        (fikra-stop)))))
+
+(defun fikra-start (&optional backend)
+  "Start fikra mode, load modules, register backends."
+  (setq fikra-mode-active t)
+  (minor-mode-set "fikra" t)
+  ;; Load fikra modules
+  (require-module fikra/adapter)
+  (require-module fikra/chat)
+  (require-module fikra/capture)
+  (require-module fikra/context)
+  (require-module fikra/workflow)
+  ;; Discover and set default backend
+  (let ((target (if backend backend fikra-default-backend)))
+    (if (fikra-backend-available-p target)
+      (fikra-set-backend target)
+      (progn
+        (message "Fikra: backend %s not available" target)
+        ;; Try any available backend
+        (let ((available (fikra-list-available-backends)))
+          (if available
+            (fikra-set-backend (car available))
+            (message "Fikra: no AI backends found"))))))
+  (message "Fikra mode started (%s)" (fikra-current-backend)))
+
+(defun fikra-stop ()
+  "Stop fikra mode, close buffers."
+  (setq fikra-mode-active nil)
+  (minor-mode-set "fikra" nil)
+  (message "Fikra mode stopped"))
+
+;; ── SPC a key bindings ──────────────────────────────────────────────
+
+(key-bind "SPC a a" "(fikra-chat-open)" "normal")
+(key-bind "SPC a q" "(fikra-stop)" "normal")
+(key-bind "SPC a e" "(fikra-explain)" "normal")
+(key-bind "SPC a f" "(fikra-fix)" "normal")
+(key-bind "SPC a r" "(fikra-refactor)" "normal")
+(key-bind "SPC a g" "(fikra-test)" "normal")
+(key-bind "SPC a s" "(fikra-chat-region)" "normal")
+(key-bind "SPC a i" "(fikra-complete)" "normal")
+(key-bind "SPC a b" "(fikra-set-backend (fikra-backend-prompt))" "normal")
+
+(provide "fikra-mode")
+)

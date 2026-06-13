@@ -1015,7 +1015,7 @@ export function createEditorAPI(state: TlispEditorState): Map<string, TLispFunct
     if (args[0]!.type !== 'string') return Either.left(createValidationError('TypeError', 'shell-command requires a string'));
     try {
       const cmd = String(args[0]!.value);
-      const output = Bun.spawnSync(['sh', '-c', cmd], { stdout: 'pipe', stderr: 'pipe' });
+      const output = Bun.spawnSync(['sh', '-c', cmd], { stdout: 'pipe', stderr: 'pipe', timeout: 30_000 });
       const stdout = output.stdout ? new TextDecoder().decode(output.stdout) : '';
       return Either.right(createString(stdout));
     } catch (e) {
@@ -1029,10 +1029,10 @@ export function createEditorAPI(state: TlispEditorState): Map<string, TLispFunct
     if (args[0]!.type !== 'string') return Either.left(createValidationError('TypeError', 'shell-exec requires a string'));
     try {
       const cmd = String(args[0]!.value);
-      const output = Bun.spawnSync(['sh', '-c', cmd], { stdout: 'pipe', stderr: 'pipe' });
+      const output = Bun.spawnSync(['sh', '-c', cmd], { stdout: 'pipe', stderr: 'pipe', timeout: 30_000 });
       const stdout = output.stdout ? new TextDecoder().decode(output.stdout).trim() : '';
       const stderr = output.stderr ? new TextDecoder().decode(output.stderr).trim() : '';
-      const exitCode = output.exitCode ?? 0;
+      const exitCode = output.exitCode ?? 1;
       return Either.right(createList([
         createString(stdout),
         createString(stderr),
@@ -1043,19 +1043,21 @@ export function createEditorAPI(state: TlispEditorState): Map<string, TLispFunct
     }
   });
 
-  // ── shell-exec-session: send command to persistent process ──────────
+  // ── shell-exec-session: stub — persistent sessions not yet implemented ──
+  // TODO: implement persistent process management (SPEC-039 deferred)
   const sessions: Map<string, { process: any; stdout: string }> = new Map();
 
   api.set('shell-exec-session', (args: TLispValue[]): Either<AppError, TLispValue> => {
     if (args.length < 2) return Either.left(createValidationError('FormatError', 'shell-exec-session requires 2 arguments: session, command'));
     if (args[0]!.type !== 'string' || args[1]!.type !== 'string') return Either.left(createValidationError('TypeError', 'both arguments must be strings'));
     try {
-      const sessionName = String(args[0]!.value);
+      const _sessionName = String(args[0]!.value);
       const cmd = String(args[1]!.value);
-      const output = Bun.spawnSync(['sh', '-c', cmd], { stdout: 'pipe', stderr: 'pipe' });
+      // Stub: spawns a new process each time (no persistent session)
+      const output = Bun.spawnSync(['sh', '-c', cmd], { stdout: 'pipe', stderr: 'pipe', timeout: 30_000 });
       const stdout = output.stdout ? new TextDecoder().decode(output.stdout).trim() : '';
       const stderr = output.stderr ? new TextDecoder().decode(output.stderr).trim() : '';
-      const exitCode = output.exitCode ?? 0;
+      const exitCode = output.exitCode ?? 1;
       return Either.right(createList([
         createString(stdout),
         createString(stderr),
@@ -1119,6 +1121,211 @@ export function createEditorAPI(state: TlispEditorState): Map<string, TLispFunct
     if (args[0]!.type !== 'string' || args[1]!.type !== 'string') return Either.left(createValidationError('TypeError', 'both arguments must be strings'));
     kvCache.set(String(args[0]!.value), String(args[1]!.value));
     return Either.right(createNil());
+  });
+
+  // ── make-process: spawn subprocess with streaming output ─────────────
+  const processTable: Map<number, { process: any; stdin: any }> = new Map();
+  let nextProcessId = 1;
+
+  api.set('make-process', (args: TLispValue[]): Either<AppError, TLispValue> => {
+    // Args: keyword pairs — :command '("echo" "hello") :filter 'my-filter :sentinel 'my-sentinel
+    const kwargs: Record<string, TLispValue> = {};
+    for (let i = 0; i < args.length - 1; i += 2) {
+      const key = args[i];
+      if (key && key.type === 'symbol' && String(key.value).startsWith(':')) {
+        kwargs[String(key.value).slice(1)] = args[i + 1]!;
+      }
+    }
+
+    const commandArg = kwargs['command'];
+    const filterFn = kwargs['filter'];
+    const sentinelFn = kwargs['sentinel'];
+
+    if (!commandArg) return Either.left(createValidationError('FormatError', 'make-process requires :command argument'));
+
+    let command: string[];
+    if (commandArg.type === 'list') {
+      command = (commandArg.value as TLispValue[]).map(a => String(a.value));
+    } else if (commandArg.type === 'string') {
+      command = ['/bin/sh', '-c', String(commandArg.value)];
+    } else {
+      return Either.left(createValidationError('TypeError', ':command must be a list or string'));
+    }
+
+    try {
+      const proc = Bun.spawn(command, {
+        stdout: 'pipe',
+        stderr: 'pipe',
+        stdin: 'pipe',
+      });
+
+      const pid = nextProcessId++;
+      processTable.set(pid, { process: proc, stdin: proc.stdin });
+
+      const filterName = filterFn ? String(filterFn.value) : null;
+      const sentinelName = sentinelFn ? String(sentinelFn.value) : null;
+
+      // Stream stdout to filter function
+      const readable = proc.stdout;
+      (async () => {
+        const decoder = new TextDecoder();
+        const reader = readable.getReader();
+        try {
+          while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            const text = decoder.decode(value, { stream: true });
+            if (filterName && state._evalTlisp) {
+              state._evalTlisp(`(${filterName} ${pid} ${JSON.stringify(text)})`);
+            }
+          }
+        } catch { /* stream closed */ }
+
+        await proc.exited;
+        if (sentinelName && state._evalTlisp) {
+          state._evalTlisp(`(${sentinelName} ${pid} ${proc.exitCode ?? 0})`);
+        }
+        processTable.delete(pid);
+      })();
+
+      return Either.right(createNumber(pid));
+    } catch (e) {
+      return Either.left(createValidationError('FormatError', `make-process failed: ${e instanceof Error ? e.message : String(e)}`));
+    }
+  });
+
+  // ── process-write: write to subprocess stdin ────────────────────────
+  api.set('process-write', (args: TLispValue[]): Either<AppError, TLispValue> => {
+    if (args.length < 2) return Either.left(createValidationError('FormatError', 'process-write requires 2 arguments: pid, data'));
+    if (args[0]!.type !== 'number') return Either.left(createValidationError('TypeError', 'pid must be a number'));
+    if (args[1]!.type !== 'string') return Either.left(createValidationError('TypeError', 'data must be a string'));
+
+    const pid = Number(args[0]!.value);
+    const entry = processTable.get(pid);
+    if (!entry) return Either.left(createValidationError('FormatError', `No process with pid ${pid}`));
+
+    try {
+      entry.stdin.write(String(args[1]!.value));
+      return Either.right(createNil());
+    } catch (e) {
+      return Either.left(createValidationError('FormatError', `process-write failed: ${e instanceof Error ? e.message : String(e)}`));
+    }
+  });
+
+  // ── signal: send signal to running process ──────────────────────────
+  api.set('signal', (args: TLispValue[]): Either<AppError, TLispValue> => {
+    if (args.length < 2) return Either.left(createValidationError('FormatError', 'signal requires 2 arguments: pid, signal-name'));
+    if (args[0]!.type !== 'number') return Either.left(createValidationError('TypeError', 'pid must be a number'));
+    if (args[1]!.type !== 'string') return Either.left(createValidationError('TypeError', 'signal-name must be a string'));
+
+    const pid = Number(args[0]!.value);
+    const sigName = String(args[1]!.value);
+    const entry = processTable.get(pid);
+    if (!entry) return Either.left(createValidationError('FormatError', `No process with pid ${pid}`));
+
+    try {
+      entry.process.kill(sigName as any);
+      return Either.right(createNil());
+    } catch (e) {
+      return Either.left(createValidationError('FormatError', `signal failed: ${e instanceof Error ? e.message : String(e)}`));
+    }
+  });
+
+  // ── http-request: async HTTP with streaming response ────────────────
+  api.set('http-request', (args: TLispValue[]): Either<AppError, TLispValue> => {
+    if (args.length < 1) return Either.left(createValidationError('FormatError', 'http-request requires at least 1 argument: url'));
+    if (args[0]!.type !== 'string') return Either.left(createValidationError('TypeError', 'url must be a string'));
+
+    const url = String(args[0]!.value);
+    const kwargs: Record<string, TLispValue> = {};
+    for (let i = 1; i < args.length - 1; i += 2) {
+      const key = args[i];
+      if (key && key.type === 'symbol' && String(key.value).startsWith(':')) {
+        kwargs[String(key.value).slice(1)] = args[i + 1]!;
+      }
+    }
+
+    const method = kwargs['method'] ? String(kwargs['method'].value) : 'GET';
+    const body = kwargs['body'] ? String(kwargs['body'].value) : undefined;
+    const filterFn = kwargs['filter'] ? String(kwargs['filter'].value) : null;
+    const headersVal = kwargs['headers'];
+
+    const headers: Record<string, string> = {};
+    if (headersVal && headersVal.type === 'list') {
+      for (const pair of (headersVal.value as TLispValue[])) {
+        if (pair.type === 'list') {
+          const elems = pair.value as TLispValue[];
+          if (elems.length === 2) {
+            headers[String(elems[0]!.value)] = String(elems[1]!.value);
+          }
+        }
+      }
+    }
+
+    const requestId = nextProcessId++; // reuse counter for unique IDs
+
+    (async () => {
+      try {
+        const response = await fetch(url, { method, body, headers });
+        const status = response.status;
+        const responseHeaders: Record<string, string> = {};
+        response.headers.forEach((v, k) => { responseHeaders[k] = v; });
+
+        if (response.body) {
+          const reader = response.body.getReader();
+          const decoder = new TextDecoder();
+          while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            const chunk = decoder.decode(value, { stream: true });
+            if (filterFn && state._evalTlisp) {
+              state._evalTlisp(`(${filterFn} ${requestId} ${JSON.stringify(chunk)})`);
+            }
+          }
+        }
+
+        // Return final status/headers
+        if (state._evalTlisp) {
+          const headersStr = JSON.stringify(responseHeaders);
+          state._evalTlisp(`(fikra-http-complete ${requestId} ${status} ${JSON.stringify(headersStr)})`);
+        }
+      } catch (e) {
+        if (state._evalTlisp) {
+          state._evalTlisp(`(fikra-http-complete ${requestId} 0 ${JSON.stringify(e instanceof Error ? e.message : String(e))})`);
+        }
+      }
+    })();
+
+    return Either.right(createNumber(requestId));
+  });
+
+  // ── json-read-from-string: parse JSON into T-Lisp data ──────────────
+  api.set('json-read-from-string', (args: TLispValue[]): Either<AppError, TLispValue> => {
+    if (args.length < 1) return Either.left(createValidationError('FormatError', 'json-read-from-string requires 1 argument: string'));
+    if (args[0]!.type !== 'string') return Either.left(createValidationError('TypeError', 'argument must be a string'));
+
+    function toTlisp(val: any): TLispValue {
+      if (val === null || val === undefined) return createNil();
+      if (typeof val === 'boolean') return createBoolean(val);
+      if (typeof val === 'number') return createNumber(val);
+      if (typeof val === 'string') return createString(val);
+      if (Array.isArray(val)) return createList(val.map(toTlisp));
+      if (typeof val === 'object') {
+        // Convert object to alist: list of (key . value) pairs
+        const pairs = Object.entries(val).map(([k, v]) => {
+          return createList([createString(k), toTlisp(v)]);
+        });
+        return createList(pairs);
+      }
+      return createNil();
+    }
+
+    try {
+      const parsed = JSON.parse(String(args[0]!.value));
+      return Either.right(toTlisp(parsed));
+    } catch {
+      return Either.right(createNil());
+    }
   });
 
 

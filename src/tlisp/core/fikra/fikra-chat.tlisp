@@ -1,0 +1,122 @@
+(defmodule fikra/chat
+  (export fikra-chat-open fikra-chat-close fikra-token-insert fikra-follow-link
+          fikra-turn-send fikra-turn-complete fikra-turn-interrupt fikra-turn-status
+          fikra-quit)
+
+;; Chat buffer management — *Fikra* buffer, streaming, file links
+
+(defvar fikra-turn-status-val 'idle
+  "Current turn status: idle, running, interrupted, error.")
+
+(defvar fikra-chat-buffer-name "*Fikra*"
+  "Name of the Fikra chat buffer.")
+
+(defvar fikra-message-history '()
+  "List of (role . content) message pairs in current thread.")
+
+(defun fikra-turn-status ()
+  "Get current turn status."
+  fikra-turn-status-val)
+
+(defun fikra-chat-open ()
+  "Open the Fikra chat buffer full-screen. Create if not exists."
+  ;; Ensure fikra mode is active
+  (if (not fikra-mode-active) (fikra-start))
+  ;; Create buffer if needed
+  (if (not (buffer-exists-p fikra-chat-buffer-name))
+    (progn
+      (buffer-create fikra-chat-buffer-name)
+      (buffer-set-read-only t)))
+  ;; Switch to chat buffer
+  (buffer-switch fikra-chat-buffer-name)
+  ;; Load claude adapter if not loaded
+  (require-module fikra/backend-claude)
+  ;; Auto-create main thread if needed
+  (if (not (string= fikra-current-backend-name "none"))
+    (editor-set-status (concat "fikra:" fikra-current-backend-name "●")))
+  fikra-chat-buffer-name)
+
+(defun fikra-chat-close ()
+  "Close the Fikra chat buffer view (thread preserved)."
+  (buffer-switch "default"))
+
+(defun fikra-quit ()
+  "Close chat and return to previous buffer."
+  (fikra-chat-close))
+
+(defun fikra-token-insert (type content)
+  "Insert a streaming token into the *Fikra* buffer."
+  (let ((buf (buffer-current)))
+    (if (string= buf fikra-chat-buffer-name)
+      (progn
+        (buffer-set-read-only nil)
+        ;; Move to end of buffer and insert
+        (let ((lines (buffer-line-count)))
+          (cursor-move (max 0 (- lines 1)) 0)
+          (buffer-insert content))
+        (buffer-set-read-only t)))))
+
+(defun fikra-follow-link ()
+  "Follow file link under cursor in *Fikra* buffer."
+  (let ((line (buffer-current-line-text)))
+    (if (fikra-file-path-in-line-p line)
+      (let ((path (fikra-extract-file-path line)))
+        (if path
+          (find-file path)
+          (message "Fikra: invalid file path"))))))
+
+(defun fikra-file-path-in-line-p (line)
+  "Check if LINE contains a file path pattern."
+  (or (string-match-p "src/[^ \t\n]+" line)
+      (string-match-p "test/[^ \t\n]+" line)
+      (string-match-p "[a-zA-Z0-9_-]+\\.[a-z]+\\:[0-9]+" line)))
+
+(defun fikra-extract-file-path (line)
+  "Extract a file path from LINE."
+  (let ((match (string-match "src/[^\s\t\n,;)\"]+" line)))
+    (if match
+      match
+      (let ((match2 (string-match "test/[^\s\t\n,;)\"]+" line)))
+        (if match2 match2 nil)))))
+
+(defun fikra-turn-send (message)
+  "Send MESSAGE as a new turn to the current backend."
+  (if (not fikra-current-backend-name)
+    (message "Fikra: no backend selected")
+    (progn
+      (setq fikra-turn-status-val 'running)
+      ;; Add user message to history
+      (push (cons "user" message) fikra-message-history)
+      ;; Display user message in chat buffer
+      (buffer-set-read-only nil)
+      (let ((lines (buffer-line-count)))
+        (cursor-move (max 0 (- lines 1)) 0)
+        (buffer-insert (concat "\nYou: " message "\n\n"))
+        (buffer-set-read-only t))
+      ;; Update modeline
+      (editor-set-status (concat "fikra:" fikra-current-backend-name "◉"))
+      ;; Call backend
+      (fikra-backend-call "chat" fikra-message-history '()))))
+
+(defun fikra-turn-complete (exit-code)
+  "Called when a turn completes."
+  (if (eq exit-code 0)
+    (setq fikra-turn-status-val 'idle)
+    (setq fikra-turn-status-val 'error))
+  (editor-set-status (concat "fikra:" fikra-current-backend-name
+                        (if (eq exit-code 0) "●" "✗"))))
+
+(defun fikra-turn-interrupt ()
+  "Cancel the current in-progress turn."
+  (fikra-backend-call "abort")
+  (setq fikra-turn-status-val 'interrupted)
+  (editor-set-status (concat "fikra:" fikra-current-backend-name "●"))
+  (message "Fikra: turn interrupted"))
+
+;; Chat buffer key bindings (only active when in *Fikra* buffer)
+;; These are registered in normal mode since fikra captures via 'i'
+(key-bind "RET" "(fikra-follow-link)" "normal")
+(key-bind "C-g" "(fikra-turn-interrupt)" "normal")
+
+(provide "fikra-chat")
+)

@@ -1,0 +1,55 @@
+(defmodule fikra/backend-claude
+  (export fikra-backend-claude-available-p fikra-backend-claude-chat fikra-backend-claude-abort)
+
+;; Claude Code CLI adapter — uses make-process to spawn claude subprocess
+
+(defvar fikra-claude-process nil
+  "Current claude subprocess handle.")
+
+(defun fikra-backend-claude-available-p ()
+  "Return t if claude CLI is on PATH."
+  (let ((result (shell-command "which claude 2>/dev/null")))
+    (not (string= (string-trim result) ""))))
+
+(defun fikra-backend-claude-chat (messages options)
+  "Send MESSAGES to claude CLI, streaming tokens into *Fikra*.
+MESSAGES is a list of (role . content) pairs.
+OPTIONS is an alist of backend-specific settings."
+  (let* ((prompt (if (and messages (cdr messages))
+                   (concat (cdr (car (last messages))) "\n\nContext:\n" (fikra-build-context))
+                   (if messages (cdr (car messages)) "")))
+         (args (list "--print" "--output-format" "stream-json" "-p" prompt)))
+    (setq fikra-claude-process
+      (make-process
+        :command (cons "claude" args)
+        :filter 'fikra-backend-claude-filter
+        :sentinel 'fikra-backend-claude-sentinel))))
+
+(defun fikra-backend-claude-filter (pid output)
+  "Parse streamed output from claude, insert tokens into *Fikra*."
+  (dolist (line (split-string output "\n"))
+    (if (not (string= line ""))
+      (let ((json (json-read-from-string line)))
+        (if (and json (not (eq json nil)))
+          (let ((type-val (alist-get "type" json))
+                (content-val (alist-get "content" json)))
+            (if (and content-val (not (string= content-val "")))
+              (fikra-token-insert (if type-val type-val "text") content-val))))))))
+
+(defun fikra-backend-claude-sentinel (pid exit-code)
+  "Handle claude process exit."
+  (setq fikra-claude-process nil)
+  (fikra-turn-complete exit-code))
+
+(defun fikra-backend-claude-abort ()
+  "Kill the running claude process."
+  (if fikra-claude-process
+    (progn
+      (signal fikra-claude-process "SIGTERM")
+      (setq fikra-claude-process nil))))
+
+;; Self-register
+(fikra-register-backend "claude")
+
+(provide "fikra-backend-claude")
+)

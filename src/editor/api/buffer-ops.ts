@@ -752,5 +752,41 @@ export function createBufferOps(
     }
   });
 
+  // buffer-set-read-only: toggle buffer read-only state at runtime
+  api.set("buffer-set-read-only", (args: TLispValue[]): Either<AppError, TLispValue> => {
+    const argsValidation = validateArgsCount(args, 1, "buffer-set-read-only");
+    if (Either.isLeft(argsValidation)) {
+      return Either.left(argsValidation.left);
+    }
+
+    const flagArg = args[0]!;
+    let flag: boolean;
+    if (flagArg.type === "boolean") {
+      flag = flagArg.value as boolean;
+    } else if (flagArg.type === "nil") {
+      flag = false;
+    } else if (flagArg.type === "symbol" && flagArg.value === "t") {
+      flag = true;
+    } else if (flagArg.type === "number") {
+      flag = (flagArg.value as number) !== 0;
+    } else {
+      return Either.left(createValidationError('TypeError', 'buffer-set-read-only requires a boolean argument', 'flag', String(flagArg.value), 't or nil'));
+    }
+
+    // Find the current buffer name
+    for (const [name, buf] of buffers) {
+      if (buf === getCurrentBuffer()) {
+        if (flag) {
+          readonly.add(name);
+        } else {
+          readonly.delete(name);
+        }
+        return Either.right(createBoolean(flag));
+      }
+    }
+
+    return Either.left(createBufferError('InvalidOperation', 'No current buffer'));
+  });
+
   return api;
 }

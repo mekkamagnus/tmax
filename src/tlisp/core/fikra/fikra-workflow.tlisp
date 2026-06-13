@@ -1,0 +1,87 @@
+(defmodule fikra/workflow
+  (export fikra-explain fikra-fix fikra-refactor fikra-review fikra-test
+          fikra-chat-region fikra-chat-with-context)
+
+;; Workflows — single-shot AI interactions with specialized prompts
+
+(defvar fikra-explain-prompt
+  "You are a code explainer. Explain the following code clearly and concisely.
+Focus on: what it does, why, and any non-obvious patterns."
+  "System prompt for the explain workflow.")
+
+(defvar fikra-fix-prompt
+  "You are a bug fixer. Analyze the following code and suggest a fix.
+Explain the bug, then provide the corrected code."
+  "System prompt for the fix workflow.")
+
+(defvar fikra-refactor-prompt
+  "You are a code refactorer. Improve the following code for clarity and efficiency.
+Preserve all existing behavior."
+  "System prompt for the refactor workflow.")
+
+(defvar fikra-review-prompt
+  "You are a code reviewer. Review the following code for bugs, security issues,
+and style problems. Be specific and actionable."
+  "System prompt for the review workflow.")
+
+(defvar fikra-test-prompt
+  "You are a test writer. Generate comprehensive tests for the following code.
+Cover happy paths, edge cases, and error conditions."
+  "System prompt for the test workflow.")
+
+(defun fikra-explain ()
+  "Send current buffer/selection to Fikra Chat with explain prompt."
+  (fikra-run-workflow "explain" fikra-explain-prompt))
+
+(defun fikra-fix ()
+  "Send current buffer/selection to Fikra Chat with fix prompt."
+  (fikra-run-workflow "fix" fikra-fix-prompt))
+
+(defun fikra-refactor ()
+  "Send current buffer/selection to Fikra Chat with refactor prompt."
+  (fikra-run-workflow "refactor" fikra-refactor-prompt))
+
+(defun fikra-review ()
+  "Send current buffer/selection to Fikra Chat with review prompt."
+  (fikra-run-workflow "review" fikra-review-prompt))
+
+(defun fikra-test ()
+  "Send current buffer/selection to Fikra Chat with test prompt."
+  (fikra-run-workflow "test" fikra-test-prompt))
+
+(defun fikra-run-workflow (name prompt)
+  "Run a named workflow: open chat, send context with prompt."
+  ;; Ensure fikra is active
+  (if (not fikra-mode-active) (fikra-start))
+  ;; Open chat buffer
+  (fikra-chat-open)
+  ;; Insert workflow header
+  (buffer-set-read-only nil)
+  (let ((lines (buffer-line-count)))
+    (cursor-move (max 0 (- lines 1)) 0)
+    (buffer-insert (concat "\n[" name "] " (buffer-filename) "\n\n"))
+    (buffer-set-read-only t))
+  ;; Build and send the message
+  (let ((context (fikra-build-context))
+        (message (concat prompt "\n\n" context)))
+    (fikra-turn-send message)))
+
+(defun fikra-chat-region ()
+  "Send visual selection to Fikra Chat."
+  (if (not fikra-mode-active) (fikra-start))
+  (let ((sel (visual-get-selection)))
+    (if sel
+      (progn
+        (fikra-chat-open)
+        (fikra-turn-send sel))
+      (message "Fikra: no selection — select text first"))))
+
+(defun fikra-chat-with-context (message)
+  "Send MESSAGE with buffer context to current backend."
+  (if (not fikra-mode-active) (fikra-start))
+  (fikra-chat-open)
+  (let ((full-msg (concat message "\n\n" (fikra-build-context))))
+    (fikra-turn-send full-msg)))
+
+(provide "fikra-workflow")
+)

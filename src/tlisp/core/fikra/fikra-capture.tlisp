@@ -1,0 +1,114 @@
+(defmodule fikra/capture
+  (export fikra-capture fikra-capture-submit fikra-capture-cancel
+          fikra-history-prev fikra-history-next)
+
+;; Capture buffer — org-capture inspired popup for composing messages
+
+(defvar fikra-capture-buffer-name "*Fikra-Capture*"
+  "Name of the capture buffer.")
+
+(defvar fikra-input-history '()
+  "List of previously sent messages.")
+
+(defvar fikra-history-index -1
+  "Current position in input history (-1 = not browsing).")
+
+(defun fikra-capture ()
+  "Open capture buffer for composing a message."
+  (if (not fikra-mode-active)
+    (message "Fikra: not active — press SPC a a first")
+    (progn
+      ;; Create capture buffer
+      (if (not (buffer-exists-p fikra-capture-buffer-name))
+        (buffer-create fikra-capture-buffer-name)
+        ;; Clear existing content
+        (progn
+          (buffer-switch fikra-capture-buffer-name)
+          (buffer-set-read-only nil)
+          (let ((count (buffer-line-count)))
+            (if (> count 1)
+              (buffer-delete-range 0 count)))
+          (buffer-set-read-only t)))
+      ;; Split window to show capture buffer
+      (split-window "horizontal")
+      (buffer-switch fikra-capture-buffer-name)
+      ;; Enter insert mode
+      (editor-mode "insert")
+      (setq fikra-history-index -1)
+      (editor-set-status "Fikra Capture — C-c C-c: send  C-c C-k: cancel"))))
+
+(defun fikra-capture-submit ()
+  "Submit capture buffer contents as a new turn."
+  (let* ((buf (buffer-switch "default"))  ; peek at capture buffer name
+         (text (buffer-text)))
+    ;; Switch back to capture to get content
+    (buffer-switch fikra-capture-buffer-name)
+    (setq text (string-trim (buffer-text)))
+    (if (string= text "")
+      (progn
+        (editor-set-status "Empty message — type something first")
+        (buffer-switch fikra-capture-buffer-name))
+      (progn
+        ;; Save to history
+        (push text fikra-input-history)
+        ;; Clear capture buffer
+        (buffer-set-read-only nil)
+        (let ((count (buffer-line-count)))
+          (if (> count 1) (buffer-delete-range 0 count)))
+        ;; Close capture window, return to chat
+        (delete-window)
+        (buffer-switch fikra-chat-buffer-name)
+        (editor-mode "normal")
+        ;; Send the message
+        (fikra-turn-send text)))))
+
+(defun fikra-capture-cancel ()
+  "Discard capture buffer contents and close."
+  ;; Clear capture buffer
+  (buffer-switch fikra-capture-buffer-name)
+  (buffer-set-read-only nil)
+  (let ((count (buffer-line-count)))
+    (if (> count 1) (buffer-delete-range 0 count)))
+  ;; Close window, return to chat
+  (delete-window)
+  (buffer-switch fikra-chat-buffer-name)
+  (editor-mode "normal")
+  (editor-set-status "Fikra: capture cancelled"))
+
+(defun fikra-history-prev ()
+  "Insert previous message from history into capture buffer."
+  (if (= (length fikra-input-history) 0)
+    (editor-set-status "No history")
+    (progn
+      (setq fikra-history-index (min (+ fikra-history-index 1) (- (length fikra-input-history) 1)))
+      (let ((msg (nth fikra-history-index fikra-input-history)))
+        (buffer-set-read-only nil)
+        (let ((count (buffer-line-count)))
+          (if (> count 1) (buffer-delete-range 0 count)))
+        (buffer-insert msg)
+        (buffer-set-read-only t)))))
+
+(defun fikra-history-next ()
+  "Insert next message from history into capture buffer."
+  (if (<= fikra-history-index 0)
+    (progn
+      (setq fikra-history-index -1)
+      (buffer-set-read-only nil)
+      (let ((count (buffer-line-count)))
+        (if (> count 1) (buffer-delete-range 0 count)))
+      (buffer-set-read-only t))
+    (progn
+      (setq fikra-history-index (- fikra-history-index 1))
+      (let ((msg (nth fikra-history-index fikra-input-history)))
+        (buffer-set-read-only nil)
+        (let ((count (buffer-line-count)))
+          (if (> count 1) (buffer-delete-range 0 count)))
+        (buffer-insert msg)
+        (buffer-set-read-only t)))))
+
+;; Capture buffer key bindings
+;; 'i' in *Fikra* opens capture
+;; These bindings apply in normal mode when fikra is active
+
+(provide "fikra-capture")
+)

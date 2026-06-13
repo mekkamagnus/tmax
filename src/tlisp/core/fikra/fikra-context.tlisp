@@ -1,0 +1,26 @@
+(defmodule fikra/context
+  (export fikra-build-context)
+
+;; Context extraction — composes editor context for AI requests
+
+(defun fikra-build-context ()
+  "Build context for AI request. Users can override this via setq."
+  (let ((file (buffer-filename))
+        (sel (if (eq (editor-mode) "visual") (visual-get-selection) nil))
+        (buf (buffer-text))
+        (mode (buffer-mode)))
+    (concat
+      (if file (concat "File: " file) "")
+      (if mode (concat " (" mode ")") "")
+      (if file "\n" "")
+      (if sel (concat "Selected code:\n```\n" sel "\n```\n") "")
+      (if (and buf (> (length buf) 0))
+        (concat "Buffer content:\n```\n"
+                (if (> (length buf) 4000)
+                  (concat (substring buf 0 4000) "\n... [truncated]")
+                  buf)
+                "\n```\n")
+        ""))))
+
+(provide "fikra-context")
+)

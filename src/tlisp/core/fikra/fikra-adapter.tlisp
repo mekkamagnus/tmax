@@ -1,0 +1,81 @@
+(defmodule fikra/adapter
+  (export fikra-register-backend fikra-set-backend fikra-current-backend
+          fikra-list-backends fikra-list-available-backends fikra-backend-available-p
+          fikra-backend-call fikra-backend-prompt)
+
+;; Adapter registry — manages AI backends
+
+(defvar fikra-backends '()
+  "Alist of (name . available-p) for registered backends.")
+
+(defvar fikra-current-backend-name nil
+  "Name of the currently active backend.")
+
+(defun fikra-register-backend (name)
+  "Register a backend by name. The backend must provide:
+   fikra-backend-<name>-available-p
+   fikra-backend-<name>-chat
+   fikra-backend-<name>-abort"
+  (let ((exists (assoc name fikra-backends)))
+    (if (not exists)
+      (push (cons name t) fikra-backends)))
+  name)
+
+(defun fikra-backend-available-p (name)
+  "Check if a backend is installed and ready."
+  (let ((fn (intern (concat "fikra-backend-" name "-available-p"))))
+    (if (fboundp fn)
+      (funcall fn)
+      nil)))
+
+(defun fikra-set-backend (name)
+  "Switch to the named backend."
+  (if (fikra-backend-available-p name)
+    (progn
+      (setq fikra-current-backend-name name)
+      (message "Fikra: backend set to %s" name)
+      name)
+    (progn
+      (message "Fikra: backend %s not available" name)
+      nil)))
+
+(defun fikra-current-backend ()
+  "Get the name of the current backend."
+  (if fikra-current-backend-name
+    fikra-current-backend-name
+    "none"))
+
+(defun fikra-list-backends ()
+  "List all registered backend names."
+  (mapcar car fikra-backends))
+
+(defun fikra-list-available-backends ()
+  "List names of backends that are available (installed and ready)."
+  (let ((result '()))
+    (dolist (entry fikra-backends)
+      (let ((name (car entry)))
+        (if (fikra-backend-available-p name)
+          (push name result))))
+    (reverse result)))
+
+(defun fikra-backend-call (method &rest args)
+  "Call METHOD on the current backend with ARGS."
+  (if (not fikra-current-backend-name)
+    (progn (message "Fikra: no backend selected") nil)
+    (let ((fn (intern (concat "fikra-backend-" fikra-current-backend-name "-" method))))
+      (if (fboundp fn)
+        (apply fn args)
+        (progn (message "Fikra: backend %s has no method %s" fikra-current-backend-name method) nil)))))
+
+(defun fikra-backend-prompt ()
+  "Prompt user to select a backend. Returns the selected name."
+  (let ((available (fikra-list-available-backends)))
+    (if (= (length available) 0)
+      (progn (message "Fikra: no backends available") nil)
+      (if (= (length available) 1)
+        (car available)
+        ;; For now, return first available. Full selector popup in Phase 3.
+        (car available)))))
+
+(provide "fikra-adapter")
+)
