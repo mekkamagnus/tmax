@@ -55,3 +55,10 @@ debug-*.log
 Thumbs.db
 ralph-runs/
 tmp/
+
+# Python bytecode cache
+__pycache__/
+*.pyc
+
+# Spec-loop runtime state (autonomous loop progress ledger)
+.spec-loop/
