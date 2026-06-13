@@ -232,3 +232,26 @@ describe("SPEC-044 Phase 1.B.3 — word-change text objects", () => {
     });
   });
 });
+
+describe("SPEC-044 Phase 1.B.4 — paren around-variants", () => {
+  describe("da) — delete around paren", () => {
+    test("deletes parens and their contents, yanks to \"", async () => {
+      const editor = await createStartedEditor("foo(inner)outer");
+      await press(editor, "fi");
+      await press(editor, "da)");
+      expect(bufferText(editor)).toBe("fooouter");
+      expect(getRegister(editor)).toBe("(inner)");
+    });
+  });
+
+  describe("ca) — change around paren", () => {
+    test("deletes parens and contents, enters insert mode, yanks to \"", async () => {
+      const editor = await createStartedEditor("foo(inner)outer");
+      await press(editor, "fi");
+      await press(editor, "ca)");
+      expect(bufferText(editor)).toBe("fooouter");
+      expect(getRegister(editor)).toBe("(inner)");
+      expect(editor.getState().mode).toBe("insert");
+    });
+  });
+});

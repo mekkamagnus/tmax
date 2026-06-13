@@ -612,6 +612,51 @@ export function changeInnerParen(
 }
 
 /**
+ * Delete around parenthesis (da))
+ * Deletes including parens and returns new buffer
+ */
+export function deleteAroundParen(
+  buffer: FunctionalTextBuffer,
+  line: number,
+  column: number
+): Either<string, FunctionalTextBuffer> {
+  const contentResult = buffer.getContent();
+  if (Either.isLeft(contentResult)) {
+    return Either.left(contentResult.left);
+  }
+
+  const content = contentResult.right;
+  const matchResult = findMatchingParen(content, line, column, "(", ")");
+  if (Either.isLeft(matchResult)) {
+    return Either.left(matchResult.left);
+  }
+
+  const { start, end } = matchResult.right;
+
+  const lines = content.split("\n");
+  const textToDelete = lines[line]!.substring(start, end + 1);
+  setDeleteRegister(textToDelete);
+  registerDelete(textToDelete, false);
+
+  return buffer.delete({
+    start: { line, column: start },
+    end: { line, column: end + 1 }
+  });
+}
+
+/**
+ * Change around parenthesis (ca))
+ * Deletes including parens. Mode transition lives in the ops wrapper.
+ */
+export function changeAroundParen(
+  buffer: FunctionalTextBuffer,
+  line: number,
+  column: number
+): Either<string, FunctionalTextBuffer> {
+  return deleteAroundParen(buffer, line, column);
+}
+
+/**
  * Delete inner brace (di{)
  * Deletes inside braces and returns new buffer
  */

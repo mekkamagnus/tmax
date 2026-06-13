@@ -26,6 +26,8 @@ import {
   changeAroundDoubleQuote,
   deleteInnerParen,
   changeInnerParen,
+  deleteAroundParen,
+  changeAroundParen,
   deleteInnerBrace,
   changeInnerBrace,
   deleteInnerBracket,
@@ -309,6 +311,45 @@ export function createTextObjectsOps(
     }
 
     const result = changeInnerParen(buffer, getCursorLine(), getCursorColumn());
+    if (Either.isLeft(result)) {
+      return Either.right(createNil());
+    }
+
+    setCurrentBuffer(result.right);
+    setMode("insert");
+    return Either.right(createSymbol("INSERT"));
+  });
+
+  /**
+   * Delete around parenthesis (da))
+   * T-Lisp: (delete-around-paren)
+   */
+  ops.set("delete-around-paren", () => {
+    const buffer = getCurrentBuffer();
+    if (!buffer) {
+      return Either.right(createNil());
+    }
+
+    const result = deleteAroundParen(buffer, getCursorLine(), getCursorColumn());
+    if (Either.isLeft(result)) {
+      return Either.right(createNil());
+    }
+
+    setCurrentBuffer(result.right);
+    return Either.right(createNil());
+  });
+
+  /**
+   * Change around parenthesis (ca))
+   * T-Lisp: (change-around-paren)
+   */
+  ops.set("change-around-paren", () => {
+    const buffer = getCurrentBuffer();
+    if (!buffer) {
+      return Either.right(createNil());
+    }
+
+    const result = changeAroundParen(buffer, getCursorLine(), getCursorColumn());
     if (Either.isLeft(result)) {
       return Either.right(createNil());
     }
