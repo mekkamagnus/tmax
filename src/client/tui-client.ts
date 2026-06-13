@@ -13,7 +13,7 @@ import { tokenizeTerminalInput } from "../frontend/render/input.ts";
 import { renderTabBarAnsi } from "../frontend/render/tab-bar.ts";
 import type { EditorState } from "../core/types.ts";
 import { renderMinibuffer } from "../frontend/render/minibuffer.ts";
-import { computeWhichKeyPopup, renderWhichKeyOverlay } from "../frontend/render/which-key-overlay.ts";
+import { renderWhichKeyOverlay } from "../frontend/render/which-key-overlay.ts";
 import { computeHighlightSpans } from "../syntax/highlight-buffer.ts";
 import { Either } from "../utils/task-either.ts";
 
@@ -83,11 +83,8 @@ function render(state: EditorState) {
   writeAt(height - 1, 0, renderStatusLine(state, width));
 
   // Which-key popup overlay on bottom of buffer area
-  if (state.whichKeyActive && state.whichKeyBindings && state.whichKeyBindings.length > 0) {
-    const prefix = state.whichKeyPrefix || "";
-    const maxPopupRows = Math.max(1, bufferHeight - 2);
-    const popup = computeWhichKeyPopup(state.whichKeyBindings, prefix, width, maxPopupRows);
-    const overlayLines = renderWhichKeyOverlay(popup, width);
+  if (state.whichKeyActive && state.whichKeyPopup) {
+    const overlayLines = renderWhichKeyOverlay(state.whichKeyPopup, width);
     const overlayStart = tabBarHeight + bufferHeight - overlayLines.length;
     overlayLines.forEach((line, i) => writeAt(overlayStart + i, 0, line));
   }

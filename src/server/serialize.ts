@@ -81,6 +81,10 @@ export function editorStateToJson(state: EditorState): Record<string, unknown> {
       return { ...rest, bufferContent: bufferContent(buffer) };
     }) ?? [],
     currentTabIndex: state.currentTabIndex ?? 0,
+    whichKeyActive: state.whichKeyActive ?? false,
+    whichKeyPrefix: state.whichKeyPrefix ?? "",
+    whichKeyBindings: state.whichKeyBindings ?? [],
+    whichKeyPopup: state.whichKeyPopup ?? null,
   };
 }
 
@@ -114,6 +118,10 @@ export function jsonToEditorState(json: Record<string, unknown>): EditorState {
     currentWindowIndex: (json.currentWindowIndex as number | undefined) ?? 0,
     tabs,
     currentTabIndex: (json.currentTabIndex as number | undefined) ?? 0,
+    whichKeyActive: (json.whichKeyActive as boolean | undefined) ?? false,
+    whichKeyPrefix: (json.whichKeyPrefix as string | undefined) ?? "",
+    whichKeyBindings: (json.whichKeyBindings as EditorState["whichKeyBindings"]) ?? [],
+    whichKeyPopup: (json.whichKeyPopup as EditorState["whichKeyPopup"]) ?? null,
   };
 }
 

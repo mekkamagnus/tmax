@@ -10,6 +10,7 @@ import { renderStatusLine } from "../frontend/render/status-line.ts";
 import { renderCommandInput } from "../frontend/render/command-input.ts";
 import { renderTabBarAnsi } from "../frontend/render/tab-bar.ts";
 import { renderMinibuffer } from "../frontend/render/minibuffer.ts";
+import { renderWhichKeyOverlay } from "../frontend/render/which-key-overlay.ts";
 import { computeHighlightSpans } from "../syntax/highlight-buffer.ts";
 import { Either } from "../utils/task-either.ts";
 
@@ -53,6 +54,18 @@ export function captureFrame(state: EditorState, width: number, height: number):
   }
 
   screen.push(renderStatusLine(state, width));
+
+  // Which-key popup overlay on bottom of buffer area
+  if (state.whichKeyActive && state.whichKeyPopup) {
+    const overlayLines = renderWhichKeyOverlay(state.whichKeyPopup, width);
+    const overlayStart = tabBarHeight + bufferHeight - overlayLines.length;
+    for (let i = 0; i < overlayLines.length; i++) {
+      const row = overlayStart + i;
+      if (row >= tabBarHeight && row < tabBarHeight + bufferHeight) {
+        screen[row] = overlayLines[i]!;
+      }
+    }
+  }
 
   return screen;
 }

@@ -863,6 +863,10 @@ export class TmaxServer {
 	      currentWindowIndex: shared.currentWindowIndex,
 	      tabs: workspace?.tabs ?? shared.tabs,
 	      currentTabIndex: shared.currentTabIndex,
+		      whichKeyActive: shared.whichKeyActive,
+		      whichKeyPrefix: shared.whichKeyPrefix,
+		      whichKeyBindings: shared.whichKeyBindings,
+		      whichKeyPopup: shared.whichKeyPopup,
 	    };
 	  }
 
