@@ -1043,43 +1043,6 @@ export function createEditorAPI(state: TlispEditorState): Map<string, TLispFunct
     }
   });
 
-  // ── shell-exec-session: stub — persistent sessions not yet implemented ──
-  // TODO: implement persistent process management (SPEC-039 deferred)
-  const sessions: Map<string, { process: any; stdout: string }> = new Map();
-
-  api.set('shell-exec-session', (args: TLispValue[]): Either<AppError, TLispValue> => {
-    if (args.length < 2) return Either.left(createValidationError('FormatError', 'shell-exec-session requires 2 arguments: session, command'));
-    if (args[0]!.type !== 'string' || args[1]!.type !== 'string') return Either.left(createValidationError('TypeError', 'both arguments must be strings'));
-    try {
-      const _sessionName = String(args[0]!.value);
-      const cmd = String(args[1]!.value);
-      // Stub: spawns a new process each time (no persistent session)
-      const output = Bun.spawnSync(['sh', '-c', cmd], { stdout: 'pipe', stderr: 'pipe', timeout: 30_000 });
-      const stdout = output.stdout ? new TextDecoder().decode(output.stdout).trim() : '';
-      const stderr = output.stderr ? new TextDecoder().decode(output.stderr).trim() : '';
-      const exitCode = output.exitCode ?? 1;
-      return Either.right(createList([
-        createString(stdout),
-        createString(stderr),
-        createNumber(exitCode),
-      ]));
-    } catch (e) {
-      return Either.left(createValidationError('FormatError', `shell-exec-session failed: ${e instanceof Error ? e.message : String(e)}`));
-    }
-  });
-
-  api.set('session-kill', (args: TLispValue[]): Either<AppError, TLispValue> => {
-    if (args.length < 1) return Either.left(createValidationError('FormatError', 'session-kill requires 1 argument: name'));
-    if (args[0]!.type !== 'string') return Either.left(createValidationError('TypeError', 'session name must be string'));
-    const name = String(args[0]!.value);
-    sessions.delete(name);
-    return Either.right(createNil());
-  });
-
-  api.set('session-list', (_args: TLispValue[]): Either<AppError, TLispValue> => {
-    return Either.right(createList([...sessions.keys()].map(k => createString(k))));
-  });
-
   // ── file-glob: list files matching glob pattern ──────────────────────
   api.set('file-glob', (args: TLispValue[]): Either<AppError, TLispValue> => {
     if (args.length < 1) return Either.left(createValidationError('FormatError', 'file-glob requires 1 argument: pattern'));
