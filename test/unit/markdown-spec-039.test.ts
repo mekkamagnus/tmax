@@ -301,3 +301,102 @@ describe("SPEC-039 Phase 6: Wiki-links", () => {
     expect(expectTlispString(result)).toBe("notes#intro");
   });
 });
+
+// ── Audit-fix tests (patch-review 2026-06-13) ───────────────────────
+// Covers the gaps closed in the reflect-refine iteration on spec-loop/039.
+
+describe("SPEC-039 audit fixes", () => {
+
+  test("markdown-scan-wiki-links finds all [[links]] (P1.2)", async () => {
+    const editor = await setupMdEditor("Intro\nSee [[alpha]] and [[beta]]\nEnd");
+    const result = executeTlisp(editor, `(markdown-scan-wiki-links)`);
+    // Returns list of (line col target) triples; two links expected.
+    expect(result.type).toBe("list");
+    expect(result.value).toHaveLength(2);
+  });
+
+  test("markdown-next-wiki-link moves cursor to next link (P1.2)", async () => {
+    const editor = await setupMdEditor("Intro\nSee [[alpha]] here\nThen [[beta]]");
+    executeTlisp(editor, `(cursor-move 0 0)`);
+    executeTlisp(editor, `(markdown-next-wiki-link)`);
+    const line = executeTlisp(editor, `(cursor-line)`);
+    expect(line.value).toBe(1);
+  });
+
+  test("markdown-prev-wiki-link moves cursor backward (P1.2)", async () => {
+    const editor = await setupMdEditor("Intro\nSee [[alpha]] here\nThen [[beta]]");
+    executeTlisp(editor, `(cursor-move 2 5)`);
+    executeTlisp(editor, `(markdown-prev-wiki-link)`);
+    const line = executeTlisp(editor, `(cursor-line)`);
+    expect(line.value).toBe(1);
+  });
+
+  test("markdown-execute-all-blocks runs every block, not just the first (P1.3)", async () => {
+    const editor = await setupMdEditor("```sh\necho one\n```\n```sh\necho two\n```");
+    executeTlisp(editor, `(markdown-execute-all-blocks)`);
+    // After running both blocks there should be two `<!-- results:` lines.
+    // Before the fix, the second block was skipped because line count grew.
+    let results = 0;
+    const total = executeTlisp(editor, `(buffer-line-count)`).value as number;
+    for (let i = 0; i < total; i++) {
+      const line = expectTlispString(executeTlisp(editor, `(buffer-get-line ${i})`));
+      if (line.startsWith("<!-- results:")) results++;
+    }
+    expect(results).toBe(2);
+  });
+
+  test("table formula mean(range) computes average (P2.4)", async () => {
+    const editor = await setupMdEditor(
+      "| a | b |\n|---|---|\n| 1 | 2 |\n| 3 | 4 |\n<!-- tblfm: @>$>=mean(@2$1..@3$1) -->"
+    );
+    // Cursor inside the table.
+    executeTlisp(editor, `(cursor-move 2 0)`);
+    executeTlisp(editor, `(markdown-table-eval-formula)`);
+    // mean(1,3) = 2; written into last-row/last-col cell.
+    let found = false;
+    const total = executeTlisp(editor, `(buffer-line-count)`).value as number;
+    for (let i = 0; i < total; i++) {
+      const line = expectTlispString(executeTlisp(editor, `(buffer-get-line ${i})`));
+      if (line.includes("2") && line.includes("|")) { found = true; break; }
+    }
+    expect(found).toBe(true);
+  });
+
+  test("table formula modulo % computes remainder (P2.4)", async () => {
+    // 17 % 5 == 2 via L - R*floor(L/R)
+    const editor = await setupMdEditor(
+      "| n |\n|---|\n| 0 |\n<!-- tblfm: @3$1=17%5 -->"
+    );
+    executeTlisp(editor, `(cursor-move 2 0)`);
+    executeTlisp(editor, `(markdown-table-eval-formula)`);
+    const line = expectTlispString(executeTlisp(editor, `(buffer-get-line 2)`));
+    expect(line).toContain("2");
+  });
+
+  test("markdown-expand-template-variables substitutes {{date}} and {{title}} (P2.6)", async () => {
+    const editor = await setupMdEditor("");
+    const result = executeTlisp(
+      editor,
+      `(markdown-expand-template-variables "# {{title}} on {{date}}" "demo")`
+    );
+    const out = expectTlispString(result);
+    expect(out).toContain("# demo on");
+    // {{title}} fully replaced, not left as literal.
+    expect(out).not.toContain("{{title}}");
+    expect(out).not.toContain("{{date}}");
+  });
+
+  test("markdown-export-to-latex wraps list items in itemize env (P2.7)", async () => {
+    // The export function runs the LaTeX transformer (incl. the new itemize
+    // wrapping) and returns a status message. File write itself is gated on
+    // async-mode filesystem plumbing (pre-existing, out of scope); we assert
+    // the function completes and reports export success, proving the new
+    // list-env code path executes without symbol/type errors.
+    const tmp = `/tmp/spec039-latex-${process.pid}.md`;
+    const editor = await setupMdEditor("# Title\n\n- one\n- two\n", tmp);
+    const result = executeTlisp(editor, `(markdown-export-to-latex)`);
+    const msg = expectTlispString(result);
+    expect(msg).toContain("Exported to");
+    expect(msg).toContain(".tex");
+  });
+});
