@@ -63,5 +63,8 @@ __pycache__/
 # Spec-loop runtime state (autonomous loop progress ledger)
 .spec-loop/
 
+# Spec-loop worktrees (per-SPEC git worktrees, not committed to main)
+.worktrees/
+
 # Patch-review working state (gather bundles + verdicts)
 .patch-reviews/
