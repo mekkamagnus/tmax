@@ -20,16 +20,17 @@
     markdown-sparse-tree-regex markdown-sparse-tree-level
     markdown-next-tag markdown-prev-tag markdown-tag-list markdown-sparse-tree-tag
     markdown-find-code-block markdown-execute-block markdown-clear-results
-    markdown-execute-all-blocks markdown-kill-session markdown-list-sessions
+    markdown-execute-all-blocks
     markdown-table-eval-formula markdown-table-insert-formula
-    markdown-table-formula-parse markdown-table-eval-expr
+    markdown-table-formula-parse markdown-table-eval-expr markdown-table-row-p markdown-table-extract-range markdown-table-reduce
+    markdown-delete-line
     markdown-export-to-html markdown-export-to-text markdown-export-to-latex
     markdown-export-dispatch
     markdown-next-footnote markdown-prev-footnote markdown-follow-include
     markdown-frontmatter-get markdown-frontmatter-set markdown-frontmatter-show
     markdown-follow-wiki-link markdown-insert-link-to-file markdown-backlinks
-    markdown-daily-note markdown-new-from-template markdown-rename-note
-    markdown-wiki-link-at-point markdown-scan-tags
+    markdown-daily-note markdown-new-from-template markdown-rename-note markdown-expand-template-variables
+    markdown-wiki-link-at-point markdown-scan-tags markdown-next-wiki-link markdown-prev-wiki-link markdown-scan-wiki-links
     markdown-current-subtree-range markdown-find-sibling-ranges)
 
 ;; markdown-commands.tlisp — Markdown-specific commands (SPEC-018)
@@ -1098,10 +1099,12 @@ The end includes all child sections."
 
 (defun markdown-execute-all-blocks ()
   "Execute all code blocks in the buffer."
-  (let ((total (buffer-line-count))
-        (i 0)
+  ;; Re-read (buffer-line-count) per iteration: each markdown-execute-block
+  ;; call inserts a `<!-- results: -->` line, shifting later block positions.
+  ;; Reading total once before the loop skipped blocks past the original count.
+  (let ((i 0)
         (count 0))
-    (while (< i total)
+    (while (< i (buffer-line-count))
       (let ((text (buffer-get-line i)))
         (if (string-match "^```\(sh\|bash\|ts\|tsx\|js\|jsx\|py\|python\)" text)
             (progn
@@ -1112,30 +1115,65 @@ The end includes all child sections."
             (set! i (+ i 1)))))
     (message "Executed %d blocks" count)))
 
-(defun markdown-kill-session (name)
-  "Kill a persistent shell session by NAME."
-  (session-kill name)
-  (message "Killed session: %s" name))
-
-(defun markdown-list-sessions ()
-  "List all active shell sessions."
-  (let ((sessions (session-list)))
-    (if (= (length sessions) 0)
-        (message "No active sessions")
-        (message "Sessions: %s" (string-join ", " sessions)))))
-
 ;;; ── Table formulas ────────────────────────────────────────────────────
 
 (defun markdown-table-formula-parse (formula)
-  "Parse @ROW$COL=EXPR formula. Returns (row col expr) or nil."
-  (if (string-match "^@\([0-9]+\)\\\\$\([0-9]+\)=\(.*\)" formula)
-      (list (string-to-number (match-string 1 formula))
-            (string-to-number (match-string 2 formula))
+  "Parse @ROW$COL=EXPR formula. ROW/COL may be numeric or `>` (last).
+Returns (row col expr) where row/col are strings; caller resolves `>`."
+  (if (string-match "^@\([0-9>]+\)\\\\$\([0-9>]+\)=\(.*\)" formula)
+      (list (match-string 1 formula)
+            (match-string 2 formula)
             (match-string 3 formula))
       nil))
 
+(defun markdown-table-extract-range (table r1 c1 r2 c2)
+  "Collect numbers from TABLE across rows r1..r2, cols c1..c2 (0-indexed)."
+  (let ((nums '())
+        (row-idx r1))
+    (while (<= row-idx r2)
+      (let ((row (nth row-idx table)))
+        (if row
+            (let ((j c1))
+              (while (<= j c2)
+                (let ((c (string-trim (nth j row))))
+                  (if (and c (string-match "^[0-9]+$" c))
+                      (set! nums (cons (string-to-number c) nums))))
+                (set! j (+ j 1))))))
+      (set! row-idx (+ row-idx 1)))
+    (reverse nums)))
+
+(defun markdown-table-reduce (fn-name nums)
+  "Apply aggregate FN-NAME to NUMS list. Returns string number or ERR."
+  (if (= (length nums) 0)
+      "ERR"
+      (let ((result 0)
+            (i 0))
+        (if (= fn-name "sum")
+            (progn
+              (set! i 0)
+              (while (< i (length nums))
+                (set! result (+ result (nth i nums)))
+                (set! i (+ i 1))))
+            (if (= fn-name "count")
+                (set! result (length nums))
+                (progn
+                  (set! result (nth 0 nums))
+                  (set! i 1)
+                  (while (< i (length nums))
+                    (let ((v (nth i nums)))
+                      (if (= fn-name "mean")
+                          (set! result (+ result v))
+                          (if (= fn-name "min")
+                              (if (< v result) (set! result v))
+                              (if (= fn-name "max")
+                                  (if (> v result) (set! result v))))))
+                    (set! i (+ i 1)))
+                  (if (= fn-name "mean")
+                      (set! result (/ result (length nums)))))))
+        (number-to-string result))))
+
 (defun markdown-table-eval-expr (expr table)
-  "Evaluate EXPR against TABLE data. Supports arithmetic and cell refs."
+  "Evaluate EXPR against TABLE data. Supports arithmetic, %, cell refs, and range aggregates."
   (let ((trimmed (string-trim expr)))
     (if (string-match "^\([0-9]+\)\\\\+\([0-9]+\)$" trimmed)
         (number-to-string (+ (string-to-number (match-string 1 trimmed))
@@ -1151,29 +1189,41 @@ The end includes all child sections."
                       (if (= divisor 0)
                           "ERR"
                           (number-to-string (/ (string-to-number (match-string 1 trimmed)) divisor))))
-                    (if (string-match "^sum(@\([0-9]+\)\\\\$\([0-9]+\)\\\\.\\\\.@\([0-9]+\)\\\\$\([0-9]+\))$" trimmed)
-                        (let ((r1 (- (string-to-number (match-string 1 trimmed)) 1))
-                              (c1 (- (string-to-number (match-string 2 trimmed)) 1))
-                              (r2 (- (string-to-number (match-string 3 trimmed)) 1))
-                              (c2 (- (string-to-number (match-string 4 trimmed)) 1))
-                              (sum 0)
-                              (row-idx 0))
-                          (set! row-idx r1)
-                          (while (<= row-idx r2)
-                            (let ((row (nth row-idx table)))
-                              (if row
-                                  (let ((cell (string-trim (nth c1 row)))
-                                        (j (+ c1 1)))
-                                    (set! sum (+ sum (string-to-number cell)))
-                                    (while (<= j c2)
-                                      (let ((c (string-trim (nth j row))))
-                                        (set! sum (+ sum (string-to-number c))))
-                                      (set! j (+ j 1))))))
-                            (set! row-idx (+ row-idx 1)))
-                          (number-to-string sum))
-                        (if (string-match "^[0-9]+$" trimmed)
-                            trimmed
-                            "ERR"))))))))
+                    ;; Modulo: L % R  ==  L - R*floor(L/R). T-Lisp has no `%` builtin
+                    ;; and `/` is float division, so floor() is required.
+                    (if (string-match "^\([0-9]+\)\\\\%\([0-9]+\)$" trimmed)
+                        (let ((l (string-to-number (match-string 1 trimmed)))
+                              (r (string-to-number (match-string 2 trimmed))))
+                          (if (= r 0)
+                              "ERR"
+                              (number-to-string (- l (* r (floor (/ l r)))))))
+                        ;; Range aggregates: sum/mean/min/max/count(@r1$c1..@r2$c2)
+                        ;; Escaping matches the heading regex at line 77:
+                        ;;   \( = capture group (single backslash)
+                        ;;   \\$ = literal dollar (double backslash -> \$ in regex)
+                        (let ((agg-fn nil)
+                              (r1 nil) (c1 nil) (r2 nil) (c2 nil))
+                          (if (string-match "^sum(@\([0-9]+\)\\$\([0-9]+\)\\\.\\\.@\([0-9]+\)\\$\([0-9]+\))$" trimmed)
+                              (set! agg-fn "sum"))
+                          (if (string-match "^mean(@\([0-9]+\)\\$\([0-9]+\)\\\.\\\.@\([0-9]+\)\\$\([0-9]+\))$" trimmed)
+                              (set! agg-fn "mean"))
+                          (if (string-match "^min(@\([0-9]+\)\\$\([0-9]+\)\\\.\\\.@\([0-9]+\)\\$\([0-9]+\))$" trimmed)
+                              (set! agg-fn "min"))
+                          (if (string-match "^max(@\([0-9]+\)\\$\([0-9]+\)\\\.\\\.@\([0-9]+\)\\$\([0-9]+\))$" trimmed)
+                              (set! agg-fn "max"))
+                          (if (string-match "^count(@\([0-9]+\)\\$\([0-9]+\)\\\.\\\.@\([0-9]+\)\\$\([0-9]+\))$" trimmed)
+                              (set! agg-fn "count"))
+                          (if agg-fn
+                              (progn
+                                (set! r1 (- (string-to-number (match-string 1 trimmed)) 1))
+                                (set! c1 (- (string-to-number (match-string 2 trimmed)) 1))
+                                (set! r2 (- (string-to-number (match-string 3 trimmed)) 1))
+                                (set! c2 (- (string-to-number (match-string 4 trimmed)) 1))
+                                (markdown-table-reduce agg-fn
+                                  (markdown-table-extract-range table r1 c1 r2 c2)))
+                              (if (string-match "^[0-9]+$" trimmed)
+                                  trimmed
+                                  "ERR"))))))))))
 
 (defun markdown-table-eval-formula ()
   "Evaluate formula comment below current table."
@@ -1201,11 +1251,16 @@ The end includes all child sections."
                       (if (markdown-table-row-p (buffer-get-line j))
                           (set! j (- j 1))
                           (set! table-start (+ j 1))))
+                    ;; Table starts at top of buffer: walk-up exited at j=-1
+                    ;; without ever hitting the else branch.
+                    (if (not table-start) (set! table-start 0))
                     (set! j line)
                     (while (and (< j total) (not table-end))
                       (if (markdown-table-row-p (buffer-get-line j))
                           (set! j (+ j 1))
                           (set! table-end (- j 1))))
+                    ;; Table ends at bottom of buffer: walk-down exited at j=total.
+                    (if (not table-end) (set! table-end (- total 1)))
                     (if (not (and table-start table-end))
                         (message "Not in a table")
                         (let ((table '())
@@ -1216,11 +1271,19 @@ The end includes all child sections."
                               (set! table (cons cells table)))
                             (set! k (+ k 1)))
                           (set! table (reverse table))
-                          (let ((val (markdown-table-eval-expr expr table))
-                                (row-idx (- target-row 1)))
+                          ;; Resolve `>` shorthand to table dimensions.
+                          ;; `@>$>` = last row, last col. Returns 1-indexed.
+                          (let* ((nrows (length table))
+                                 (ncols (length (nth 0 table)))
+                                 (target-row-num
+                                   (if (string= target-row ">") nrows (string-to-number target-row)))
+                                 (target-col-num
+                                   (if (string= target-col ">") ncols (string-to-number target-col)))
+                                 (val (markdown-table-eval-expr expr table))
+                                 (row-idx (- target-row-num 1)))
                             (if (and (>= row-idx 0) (< row-idx (length table)))
                                 (let* ((row (nth row-idx table))
-                                       (col-idx (- target-col 1)))
+                                       (col-idx (- target-col-num 1)))
                                   (if (and (>= col-idx 0) (< col-idx (length row)))
                                       (let* ((new-row nil)
                                              (m 0))
@@ -1235,8 +1298,8 @@ The end includes all child sections."
                                           (markdown-delete-line (+ table-start row-idx))
                                           (buffer-insert-at-position (+ table-start row-idx) 0 new-line)
                                           (message "Formula result: %s" val)))
-                                      (message "Column %d out of range" target-col)))
-                                (message "Row %d out of range" target-row)))))))))))))
+                                      (message "Column %d out of range" target-col-num)))
+                                (message "Row %d out of range" target-row-num)))))))))))))
 
 (defun markdown-table-insert-formula ()
   "Insert a table formula comment below current table."
@@ -1330,6 +1393,7 @@ The end includes all child sections."
               (total (buffer-line-count))
               (lines '())
               (in-code-block nil)
+              (in-list nil)
               (i 0))
           (set! lines (cons "\\documentclass{article}\n\\begin{document}" lines))
           (while (< i total)
@@ -1342,36 +1406,53 @@ The end includes all child sections."
                       (set! lines (cons text lines)))
                   (if (string-match "^```" text)
                       (progn
+                        (if in-list
+                            (progn
+                              (set! lines (cons "\\end{itemize}" lines))
+                              (set! in-list nil)))
                         (set! lines (cons "\\begin{verbatim}" lines))
                         (set! in-code-block t))
                       (if (string-match "^\(#{1,6}\)\\\\s+\(.*\)" text)
                           (let ((level (length (match-string 1 text)))
                                 (title (match-string 2 text)))
+                            (if in-list
+                                (progn
+                                  (set! lines (cons "\\end{itemize}" lines))
+                                  (set! in-list nil)))
                             (if (= level 1)
                                 (set! lines (cons (format "\\section{%s}" title) lines))
                                 (if (= level 2)
                                     (set! lines (cons (format "\\subsection{%s}" title) lines))
                                     (set! lines (cons (format "\\subsubsection{%s}" title) lines)))))
                           (if (string-match "^\\\\s*[-*+]\\\\s+\(.*\)" text)
-                              (set! lines (cons (format "\\item %s" (match-string 1 text)) lines))
-                              (if (> (length (string-trim text)) 0)
-                                  (set! lines (cons text lines))
-                                  nil))))))
+                              (progn
+                                (if (not in-list)
+                                    (progn
+                                      (set! lines (cons "\\begin{itemize}" lines))
+                                      (set! in-list t)))
+                                (set! lines (cons (format "\\item %s" (match-string 1 text)) lines)))
+                              (progn
+                                (if in-list
+                                    (progn
+                                      (set! lines (cons "\\end{itemize}" lines))
+                                      (set! in-list nil)))
+                                (if (> (length (string-trim text)) 0)
+                                    (set! lines (cons text lines))
+                                    nil)))))))
             (set! i (+ i 1)))
+          (if in-list
+              (set! lines (cons "\\end{itemize}" lines)))
           (set! lines (cons "\\end{document}" lines))
           (write-file-content output-path (string-join "\n" (reverse lines)))
           (message "Exported to %s" output-path)))))
 
 (defun markdown-export-dispatch ()
-  "Prompt for export format and export."
-  (let ((fmt (read-string "Export format (html/text/latex): ")))
-    (if (string= fmt "html")
-        (markdown-export-to-html)
-        (if (string= fmt "text")
-            (markdown-export-to-text)
-            (if (string= fmt "latex")
-                (markdown-export-to-latex)
-                (message "Unknown format: %s" fmt))))))
+  "Dispatch markdown export. SPEC-CHANGED (audit P2.5): the which-key popup
+MUST was descoped to a status hint because read-string is a sync stub and
+no completing-read/picker primitive exists in T-Lisp yet. Bind the three
+backends directly (see markdown-mode.tlisp), or call markdown-export-to-html
+/ markdown-export-to-text / markdown-export-to-latex explicitly."
+  (message "Export: call markdown-export-to-html / -text / -latex directly (, x h / , x t / , x l)"))
 
 ;;; ── Footnote navigation ───────────────────────────────────────────────
 
@@ -1505,6 +1586,64 @@ The end includes all child sections."
             (set! search-text (substring search-text (match-end 0))))))
     result))
 
+(defun markdown-scan-wiki-links ()
+  "Scan all lines for [[link]] patterns. Return list of (line col target)."
+  (let ((total (buffer-line-count))
+        (links '())
+        (i 0))
+    (while (< i total)
+      (let ((text (buffer-get-line i))
+            (col 0))
+        (while (string-match "\\\\[\\\\[\([^\\\\]]+\)\\\\]\\\\]" text)
+          (let ((target (match-string 1 text))
+                (link-col (+ col (match-beginning 0) 2)))
+            (set! links (cons (list i link-col target) links))
+            (set! text (substring text (match-end 0)))
+            (set! col (+ col (match-end 0))))))
+      (set! i (+ i 1)))
+    (reverse links)))
+
+(defun markdown-next-wiki-link ()
+  "Move cursor to next [[wiki-link]] after current position."
+  (let ((links (markdown-scan-wiki-links))
+        (cur-line (cursor-line))
+        (cur-col (cursor-column))
+        (found nil)
+        (i 0))
+    (while (and (< i (length links)) (not found))
+      (let ((l-line (nth 0 (nth i links)))
+            (l-col (nth 1 (nth i links))))
+        (if (or (> l-line cur-line)
+                (and (= l-line cur-line) (> l-col cur-col)))
+            (set! found (nth i links))))
+      (set! i (+ i 1)))
+    (if found
+        (progn
+          (cursor-move (nth 0 found) (nth 1 found))
+          (message "Link: [[%s]]" (nth 2 found)))
+        (message "No next wiki-link"))))
+
+(defun markdown-prev-wiki-link ()
+  "Move cursor to previous [[wiki-link]] before current position."
+  (let ((links (markdown-scan-wiki-links))
+        (cur-line (cursor-line))
+        (cur-col (cursor-column))
+        (found nil)
+        (i 0))
+    (set! i (- (length links) 1))
+    (while (and (>= i 0) (not found))
+      (let ((l-line (nth 0 (nth i links)))
+            (l-col (nth 1 (nth i links))))
+        (if (or (< l-line cur-line)
+                (and (= l-line cur-line) (< l-col cur-col)))
+            (set! found (nth i links))))
+      (set! i (- i 1)))
+    (if found
+        (progn
+          (cursor-move (nth 0 found) (nth 1 found))
+          (message "Link: [[%s]]" (nth 2 found)))
+        (message "No previous wiki-link"))))
+
 (defun markdown-follow-wiki-link ()
   "Follow [[wiki-link]] at point."
   (let ((target (markdown-wiki-link-at-point)))
@@ -1582,25 +1721,43 @@ The end includes all child sections."
         (find-file-open path)
         (message "Daily note: %s" path)))))
 
-(defun markdown-new-from-template ()
-  "Create a new note from a template."
-  (let ((name (read-string "Note name: "))
-        (template (read-string "Template (blank/daily/meeting): ")))
-    (if (> (length name) 0)
-        (let ((date-result (shell-command "date +%Y-%m-%d")))
-          (let ((date-str (string-trim date-result))
-                (content ""))
+(defun markdown-expand-template-variables (content title)
+  "Substitute {{date}} and {{title}} placeholders in CONTENT.
+TITLE is the note title (filename without extension). Used by
+markdown-new-from-template after loading a template file."
+  (let ((date-result (shell-command "date +%Y-%m-%d")))
+    (let ((date-str (string-trim date-result))
+          (s content))
+      (set! s (replace-regexp-in-string "{{date}}" date-str s))
+      (set! s (replace-regexp-in-string "{{title}}" title s))
+      s)))
+
+(defun markdown-new-from-template (&optional (template "blank" template-supplied-p))
+  "Create a new note from a template.
+SPEC note (audit P2.6): read-string is a sync stub, so the template name is
+passed via the prefix key: , N for blank, , N d for daily, , N m for meeting.
+Reads ~/.config/tmax/templates/<name>.md if present, else falls back to
+built-in templates. Substitutes {{date}} and {{title}}."
+  (if (not template-supplied-p) (set! template "blank"))
+  (let ((date-result (shell-command "date +%Y-%m-%d")))
+      (let ((date-str (string-trim date-result))
+            (name date-str)
+            (content nil)
+            (template-file (read-file-content (concat "~/.config/tmax/templates/" template ".md"))))
+        (if template-file
+            ;; User-provided template file wins; expand its variables.
+            (set! content (markdown-expand-template-variables template-file name))
+            ;; Built-in fallbacks.
             (if (string= template "daily")
                 (set! content (format "# %s\n\n## Tasks\n\n## Notes\n" date-str))
                 (if (string= template "meeting")
                     (set! content (format "# Meeting: %s\n\n## Attendees\n\n## Agenda\n\n## Notes\n\n## Action Items\n" name))
-                    (set! content (format "# %s\n\n" name))))
-            (let ((path (concat name ".md")))
-              (find-file-open path)
-              (buffer-insert content)
-              (cursor-move 0 0)
-              (message "Created note: %s" path))))
-        (message "Cancelled"))))
+                    (set! content (format "# %s\n\n" name)))))
+        (let ((path (concat name ".md")))
+          (find-file-open path)
+          (buffer-insert content)
+          (cursor-move 0 0)
+          (message "Created note: %s" path)))))
 
 (defun markdown-rename-note ()
   "Rename current note and update all wiki links."

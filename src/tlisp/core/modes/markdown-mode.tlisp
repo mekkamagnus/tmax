@@ -81,7 +81,6 @@
 (key-bind ", e" "(markdown-execute-block)" "normal" "markdown")
 (key-bind ", E" "(markdown-execute-all-blocks)" "normal" "markdown")
 (key-bind ", k c" "(markdown-clear-results)" "normal" "markdown")
-(key-bind ", k S" "(markdown-kill-session (read-string \"Session: \"))" "normal" "markdown")
 
 ;; Table formulas (Phase 3)
 (key-bind ", t f" "(markdown-table-eval-formula)" "normal" "markdown")
@@ -103,8 +102,10 @@
 ;; Wiki-links and Zettelkasten (Phase 6)
 (key-bind ", n" "(markdown-daily-note)" "normal" "markdown")
 (key-bind ", N" "(markdown-new-from-template)" "normal" "markdown")
-(key-bind "] l" "(markdown-next-heading)" "normal" "markdown")
-(key-bind "[ l" "(markdown-prev-heading)" "normal" "markdown")
+(key-bind ", N d" "(markdown-new-from-template \"daily\")" "normal" "markdown")
+(key-bind ", N m" "(markdown-new-from-template \"meeting\")" "normal" "markdown")
+(key-bind "] l" "(markdown-next-wiki-link)" "normal" "markdown")
+(key-bind "[ l" "(markdown-prev-wiki-link)" "normal" "markdown")
 
 (provide "markdown-mode")
 )

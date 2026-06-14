@@ -112,7 +112,7 @@ export function createFileOps(
       return Either.left(typeValidation.left);
     }
 
-    const path = pathArg.value as string;
+    const path = (pathArg.value as string).replace(/^~/, process.env.HOME ?? '~');
     if (isAsyncMode(context)) {
       return Either.right(createPromise(fs.promises.readFile(path, 'utf-8')
         .then((content) => createString(content))
