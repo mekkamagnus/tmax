@@ -37,6 +37,7 @@ Technical proposals for significant features or architectural changes. Each RFC 
 | [RFC-014A-shell-mode.md](RFC-014A-shell-mode.md) | shell-mode — Interactive Terminal Emulator | PTY-backed terminal emulator in tmax windows: ANSI passthrough, scrollback, agent-aware process monitoring | [RFC-014](RFC-014-workspace-system.md), [RFC-014B](RFC-014B-project-mode.md), [RFC-013](RFC-013-fikra-ai-harness.md) |
 | [RFC-014B-project-mode.md](RFC-014B-project-mode.md) | project-mode — Project Awareness | Project root detection, file discovery, project-wide search, workspace-project binding, `.tmax.project` config | [RFC-014](RFC-014-workspace-system.md), [RFC-014A](RFC-014A-shell-mode.md) |
 | [RFC-015-pattern-matching-and-destructuring.md](RFC-015-pattern-matching-and-destructuring.md) | Pattern Matching and Destructuring | `match` and `destructuring-let` as pure T-Lisp macros over the existing value-tag set; `&rest` macro-parameter prerequisite | [elisp-pain-points.md](../memos/elisp-pain-points.md) |
+| [RFC-016-tlisp-common-lisp-parity.md](RFC-016-tlisp-common-lisp-parity.md) | T-Lisp Common Lisp Parity Additions | Tiered CL-parity work: fix undefined `when`/`unless` + `&rest`/`&body` (latent bugs), then `reduce`/`format`/`push`-`pop`-`incf`/`case`/`labels` idioms; records "no Roswell equivalent" scripting stance | [tlisp-vs-common-lisp-gap-analysis.md](../memos/tlisp-vs-common-lisp-gap-analysis.md), [RFC-015](RFC-015-pattern-matching-and-destructuring.md), [RFC-010](RFC-010-loom-package-manager.md) |
 
 ## RFC Lifecycle
 
