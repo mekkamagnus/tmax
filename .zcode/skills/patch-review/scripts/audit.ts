@@ -64,6 +64,20 @@ function applyRootOverride(root: string): void {
   PROGRESS_FILE = path.join(STATE_DIR, "progress.json");
 }
 
+// Resolve a daemon helper script. The tmax-daemon skill ships under
+// .claude/skills/ in the MAIN checkout (not the worktree, not .zcode/skills/),
+// so the fallback must always point at the real main checkout root, derived
+// from the skill's own location — NOT from PROJECT_ROOT (which may be a
+// worktree where .claude/skills/ doesn't exist). Mirrors run.ts's helper.
+const MAIN_CHECKOUT_ROOT: string = path.resolve(SKILL_DIR, "../../..");
+function resolveDaemonScript(name: string): string {
+  const candidates = [
+    path.join(SKILL_DIR, "..", "tmax-daemon", "scripts", name),
+    path.join(MAIN_CHECKOUT_ROOT, ".claude", "skills", "tmax-daemon", "scripts", name),
+  ];
+  return candidates.find((p) => existsSync(p)) ?? candidates[0]!;
+}
+
 type EntryStatus =
   | "not_started"
   | "in_progress"
@@ -334,8 +348,10 @@ async function cmdGates(specArg: string, gatherDir: string): Promise<void> {
   await runGate("typecheck:src", ["bun", "run", "typecheck:src"]);
   await runGate("test:unit", ["bun", "run", "test:unit"]);
   if (daemonTouched) {
-    const stopScript = path.join(DAEMON_SCRIPTS_DIR, "stop_daemon.py");
-    const startScript = path.join(DAEMON_SCRIPTS_DIR, "start_daemon.py");
+    // Resolve daemon scripts via .zcode/skills/ then .claude/skills/ fallback
+    // (same fix as run.ts — tmax-daemon ships under .claude/skills/ today).
+    const stopScript = resolveDaemonScript("stop_daemon.py");
+    const startScript = resolveDaemonScript("start_daemon.py");
     await runGate("daemon-restart", ["uv", "run", stopScript]);
     await runGate("daemon-start", ["uv", "run", startScript, PROJECT_ROOT]);
     await runGate("test:daemon", ["bun", "run", "test:daemon"]);
