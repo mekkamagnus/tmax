@@ -1,0 +1,73 @@
+name: markdown-spec-039
+description: "Demonstrates the new SPEC-039 markdown features shipped on spec-loop/039: wiki-link navigation, table formulas, daily-note template, and LaTeX export — all driven through keybindings."
+speed: 1.0
+
+setup:
+  - action: setup_file
+    var: FILE
+    name: spec-039-demo.md
+    content: |
+      # SPEC-039 Feature Tour
+
+      See [[intro]] for context, then [[setup]] and [[usage]].
+
+      ## Table
+
+      | Item  | Qty | Price |
+      | ----- | --- | ----- |
+      | apple | 3   | 2     |
+      | pear  | 2   | 5     |
+      <!-- tblfm: @5$3=sum(@3$3..@4$3) -->
+
+steps:
+  - section: Open the demo file
+    narrate: "Opening spec-039-demo.md — two wiki-links and a table with a sum formula."
+    action: open
+    file: "${FILE}"
+    pause: 1.0
+
+  - section: Wiki-link navigation (P1.2)
+    narrate: "] l jumps to the next [[wiki-link]] (rebound from heading-nav)."
+    action: keys
+    keys: "]l"
+    pause: 1.0
+
+    narrate: "] l again — second wiki-link."
+    action: keys
+    keys: "]l"
+    pause: 1.0
+
+    narrate: "[ l jumps back to the previous wiki-link."
+    action: keys
+    keys: "[l"
+    pause: 1.0
+
+  - section: Table formula — sum via , t f (P2.4)
+    narrate: "Moving the cursor into the table (down to the apple row)."
+    action: keys
+    keys: "jjjjj"
+    pause: 0.5
+
+    narrate: ", t f evaluates the formula @5$3=sum(@3$3..@4$3) — sums the Price column into row 5."
+    action: keys
+    keys: ",tf"
+    pause: 1.5
+
+  - section: Daily-note template with {{date}} (P2.6)
+    narrate: ", N d creates a daily note from the template — {{date}} is expanded to today."
+    action: keys
+    keys: ",Nd"
+    pause: 1.5
+
+  - section: LaTeX export with itemize wrapping (P2.7)
+    narrate: "Switching back to the demo buffer (C-x b is not bound; use :buffer)."
+    action: keys
+    keys: ":buffer spec-039-demo.md\r"
+    pause: 0.8
+
+    narrate: ", x l exports to LaTeX — list items now wrap in begin/end itemize."
+    action: keys
+    keys: ",xl"
+    pause: 1.5
+
+cleanup: true

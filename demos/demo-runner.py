@@ -31,6 +31,15 @@ def resolve_project_dir():
     return os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 
 
+def resolve_daemon_dir(project_dir):
+    """Where to start the daemon. Override with TMAX_DAEMON_DIR env var
+    (e.g. to run against an unmerged worktree). Defaults to project_dir."""
+    override = os.environ.get("TMAX_DAEMON_DIR")
+    if override:
+        return os.path.abspath(os.path.expanduser(override))
+    return project_dir
+
+
 def run_cmd(cmd, timeout=10):
     """Run a command, return (stdout, returncode)."""
     try:
@@ -53,6 +62,7 @@ def is_daemon_running(client):
 def ensure_daemon(project_dir, force_restart=False):
     """Start the tmax daemon in tmux if not already running."""
     client = os.path.join(project_dir, "bin", "tmaxclient")
+    daemon_dir = resolve_daemon_dir(project_dir)
 
     if force_restart and is_daemon_running(client):
         print("  Stopping existing daemon for fresh start...")
@@ -72,12 +82,12 @@ def ensure_daemon(project_dir, force_restart=False):
     # Ensure daemon window exists.
     out, _ = run_cmd(f"tmux list-windows -t {SESSION} -F '#{{window_name}}' 2>/dev/null")
     if DAEMON_WINDOW not in out.splitlines():
-        run_cmd(f"tmux new-window -t {SESSION} -n {DAEMON_WINDOW} -c {project_dir}")
+        run_cmd(f"tmux new-window -t {SESSION} -n {DAEMON_WINDOW} -c {daemon_dir}")
 
     # Respawn pane with fresh daemon process.
     run_cmd(
         f'tmux respawn-pane -t {SESSION}:{DAEMON_WINDOW} -k '
-        f'"cd {project_dir} && bun src/server/server.ts" 2>/dev/null'
+        f'"cd {daemon_dir} && bun src/server/server.ts" 2>/dev/null'
     )
 
     # Wait for daemon to accept connections (up to 10 seconds).
@@ -281,6 +291,33 @@ def execute_step(step, client, variables, speed, dry_run=False):
 # ── Main ──────────────────────────────────────────────────────────────
 
 
+def lint_playbook(playbook, playbook_path):
+    """Static validation. Hard-fails on patterns that silently break in the
+    live daemon. Returns (ok, messages)."""
+    messages = []
+
+    # eval steps whose expression contains a backslash. The JSON-RPC path
+    # (tmaxclient --eval -> server -> interpreter) re-decodes backslashes,
+    # so regex / string-escape expressions arrive mangled and the feature
+    # silently returns ERR or null. Unit tests bypass this path (they call
+    # the interpreter directly), which is why a feature can pass all tests
+    # yet fail in a demo. The fix is to drive the feature via key/keys
+    # (adding a keybinding first if needed), not to escape harder.
+    for i, step in enumerate(playbook.get("steps", [])):
+        if step.get("action") != "eval":
+            continue
+        expr = step.get("expr", "")
+        if "\\" in expr:
+            messages.append(
+                f"  step {i + 1} (eval): expression contains a backslash, which "
+                f"the JSON-RPC eval path corrupts. Use a keybinding instead "
+                f"(add one first if the feature lacks it). See the 'Prefer keys "
+                f"over eval' section of the demo SKILL.md."
+            )
+
+    return (len(messages) == 0, messages)
+
+
 def run_playbook(playbook_path, speed=1.0, no_tui=False, dry_run=False, verify=False):
     """Load and execute a playbook."""
     with open(playbook_path) as f:
@@ -291,6 +328,17 @@ def run_playbook(playbook_path, speed=1.0, no_tui=False, dry_run=False, verify=F
     global_speed = playbook.get("speed", 1.0)
     speed *= global_speed
     verify_highlight = verify or playbook.get("verify_highlight", False)
+
+    # Static lint — runs before daemon startup so a failing playbook fails fast.
+    # Applies in every mode (visual, --speed 0, --dry-run) so the authoring
+    # agent hits the guard during validation, not during the visual run.
+    lint_ok, lint_messages = lint_playbook(playbook, playbook_path)
+    if not lint_ok:
+        print(f"━━━ tmax Demo: {name} ━━━", file=sys.stderr)
+        print(f"FAIL: playbook failed lint ({len(lint_messages)} issue(s)):", file=sys.stderr)
+        for msg in lint_messages:
+            print(msg, file=sys.stderr)
+        return False
 
     print(f"━━━ tmax Demo: {name} ━━━")
     if description:
