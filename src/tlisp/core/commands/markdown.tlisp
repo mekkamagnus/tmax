@@ -1198,17 +1198,32 @@ Returns (row col expr) where row/col are strings; caller resolves `>`."
                               "ERR"
                               (number-to-string (- l (* r (floor (/ l r)))))))
                         ;; Range aggregates: sum/mean/min/max/count(@r1$c1..@r2$c2)
-                        (if (string-match "^\(sum\|mean\|min\|max\|count\)(@\([0-9]+\)\\\\$\([0-9]+\)\\\\.\\\\.@\([0-9]+\)\\\\$\([0-9]+\))$" trimmed)
-                            (let ((fn-name (match-string 1 trimmed))
-                                  (r1 (- (string-to-number (match-string 2 trimmed)) 1))
-                                  (c1 (- (string-to-number (match-string 3 trimmed)) 1))
-                                  (r2 (- (string-to-number (match-string 4 trimmed)) 1))
-                                  (c2 (- (string-to-number (match-string 5 trimmed)) 1)))
-                              (markdown-table-reduce fn-name
-                                (markdown-table-extract-range table r1 c1 r2 c2)))
-                            (if (string-match "^[0-9]+$" trimmed)
-                                trimmed
-                                "ERR")))))))))
+                        ;; Escaping matches the heading regex at line 77:
+                        ;;   \( = capture group (single backslash)
+                        ;;   \\$ = literal dollar (double backslash -> \$ in regex)
+                        (let ((agg-fn nil)
+                              (r1 nil) (c1 nil) (r2 nil) (c2 nil))
+                          (if (string-match "^sum(@\([0-9]+\)\\$\([0-9]+\)\\\.\\\.@\([0-9]+\)\\$\([0-9]+\))$" trimmed)
+                              (set! agg-fn "sum"))
+                          (if (string-match "^mean(@\([0-9]+\)\\$\([0-9]+\)\\\.\\\.@\([0-9]+\)\\$\([0-9]+\))$" trimmed)
+                              (set! agg-fn "mean"))
+                          (if (string-match "^min(@\([0-9]+\)\\$\([0-9]+\)\\\.\\\.@\([0-9]+\)\\$\([0-9]+\))$" trimmed)
+                              (set! agg-fn "min"))
+                          (if (string-match "^max(@\([0-9]+\)\\$\([0-9]+\)\\\.\\\.@\([0-9]+\)\\$\([0-9]+\))$" trimmed)
+                              (set! agg-fn "max"))
+                          (if (string-match "^count(@\([0-9]+\)\\$\([0-9]+\)\\\.\\\.@\([0-9]+\)\\$\([0-9]+\))$" trimmed)
+                              (set! agg-fn "count"))
+                          (if agg-fn
+                              (progn
+                                (set! r1 (- (string-to-number (match-string 1 trimmed)) 1))
+                                (set! c1 (- (string-to-number (match-string 2 trimmed)) 1))
+                                (set! r2 (- (string-to-number (match-string 3 trimmed)) 1))
+                                (set! c2 (- (string-to-number (match-string 4 trimmed)) 1))
+                                (markdown-table-reduce agg-fn
+                                  (markdown-table-extract-range table r1 c1 r2 c2)))
+                              (if (string-match "^[0-9]+$" trimmed)
+                                  trimmed
+                                  "ERR"))))))))))
 
 (defun markdown-table-eval-formula ()
   "Evaluate formula comment below current table."
