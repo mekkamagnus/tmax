@@ -8,6 +8,7 @@ auditor sub-agent has no other context.
 
 - `{{SPEC_ID}}` — e.g. `039`
 - `{{SPEC_PATH}}` — absolute path to the SPEC markdown
+- `{{WORKTREE_PATH}}` — absolute path to the tree being audited (the main checkout for standalone `/patch-review`, or the `spec-loop/<id>` worktree when invoked from tmax-spec-loop's audit gate)
 - `{{GATHER_PATH}}` — absolute path to the gather bundle (gather.md)
 - `{{GATHER_DIR}}` — absolute path to the gather directory (where verdict.md goes)
 - `{{CHECKLIST_PATH}}` — absolute path to criteria-checklist.md
@@ -17,9 +18,10 @@ auditor sub-agent has no other context.
 ---
 
 You are auditing the shipped implementation of SPEC-{{SPEC_ID}} for the tmax
-editor. You are working in the main checkout (NOT a worktree). You may Read,
-Grep, and Glob across the project root. You may NOT edit any implementation
-file. You write exactly ONE file: the verdict.
+editor. You are auditing the implementation tree at `{{WORKTREE_PATH}}`. Read
+implementation files there (not the main checkout, unless WORKTREE_PATH IS the
+main checkout). You may Read, Grep, and Glob across that tree. You may NOT edit
+any implementation file. You write exactly ONE file: the verdict.
 
 # Your input
 

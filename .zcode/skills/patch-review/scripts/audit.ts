@@ -7,6 +7,12 @@
  *   gates  <SPEC> --gather-dir <path>   — run typecheck + tests, append to bundle
  *   record <SPEC> <done|failed>         — update .spec-loop/progress.json
  *
+ * All subcommands accept an optional --root <path> flag that re-points the
+ * audit at a different project root (e.g. a git worktree on spec-loop/<id>).
+ * When omitted, PROJECT_ROOT defaults to the skill's parent-parent-parent
+ * (the main checkout). Used by tmax-spec-loop's audit gate to audit the
+ * worktree's branch instead of main's git log.
+ *
  * Output protocol (machine-readable lines the model parses):
  *   GATHER_DIR=<path>
  *   GATHER_PATH=<path>/gather.md
@@ -18,7 +24,7 @@
  *   NO IMPLEMENTATION FOUND
  *   RECORDED id=<id> status=<status>
  *
- * Run with: bun .claude/skills/patch-review/scripts/audit.ts <subcommand> [args]
+ * Run with: bun .zcode/skills/patch-review/scripts/audit.ts <subcommand> [args] [--root <path>]
  */
 
 import { $, file, write, Glob } from "bun";
@@ -28,12 +34,18 @@ import path from "node:path";
 
 const SCRIPT_DIR: string = import.meta.dir;
 const SKILL_DIR: string = path.resolve(SCRIPT_DIR, "..");
-const PROJECT_ROOT: string = path.resolve(SKILL_DIR, "../../..");
 
-const SPECS_DIR = path.join(PROJECT_ROOT, "docs/specs");
-const REVIEWS_DIR = path.join(PROJECT_ROOT, ".patch-reviews");
-const STATE_DIR = path.join(PROJECT_ROOT, ".spec-loop");
-const PROGRESS_FILE = path.join(STATE_DIR, "progress.json");
+// Default project root: derived from the skill location (parent of skill dir).
+// Override via --root <path> so the audit can scan a worktree's branch instead
+// of main's git log (used by the tmax-spec-loop audit gate).
+let PROJECT_ROOT: string = path.resolve(SKILL_DIR, "../../..");
+
+// Dir paths derive from PROJECT_ROOT. Declared with let so the --root override
+// (parsed in the dispatch block below) can re-point them at a worktree.
+let SPECS_DIR = path.join(PROJECT_ROOT, "docs/specs");
+let REVIEWS_DIR = path.join(PROJECT_ROOT, ".patch-reviews");
+let STATE_DIR = path.join(PROJECT_ROOT, ".spec-loop");
+let PROGRESS_FILE = path.join(STATE_DIR, "progress.json");
 
 const DAEMON_SCRIPTS_DIR = path.resolve(
   SKILL_DIR,
@@ -41,6 +53,16 @@ const DAEMON_SCRIPTS_DIR = path.resolve(
   "tmax-daemon",
   "scripts",
 );
+
+// Apply a --root override: re-point PROJECT_ROOT and every derived path.
+// Called once from the dispatch block before any subcommand runs.
+function applyRootOverride(root: string): void {
+  PROJECT_ROOT = path.resolve(root);
+  SPECS_DIR = path.join(PROJECT_ROOT, "docs/specs");
+  REVIEWS_DIR = path.join(PROJECT_ROOT, ".patch-reviews");
+  STATE_DIR = path.join(PROJECT_ROOT, ".spec-loop");
+  PROGRESS_FILE = path.join(STATE_DIR, "progress.json");
+}
 
 type EntryStatus =
   | "not_started"
@@ -371,16 +393,28 @@ async function cmdRecord(specArg: string, status: string): Promise<void> {
 // --- Dispatch ---
 
 const sub = process.argv[2] ?? "";
-const args = process.argv.slice(3);
+let args = process.argv.slice(3);
+
+// Parse and strip the optional --root <path> flag. When present, re-point
+// PROJECT_ROOT and derived paths at the given root (e.g. a worktree). This
+// must happen before any subcommand runs so gather/gates/record all see the
+// overridden paths. Missing value is a hard error (avoid silently defaulting).
+const rootIdx = args.indexOf("--root");
+if (rootIdx !== -1) {
+  const rootVal = args[rootIdx + 1];
+  if (!rootVal) die("--root requires a path argument");
+  applyRootOverride(rootVal);
+  args = args.filter((_, i) => i !== rootIdx && i !== rootIdx + 1);
+}
 
 try {
   switch (sub) {
     case "gather":
-      if (!args[0]) die("Usage: gather <SPEC>");
+      if (!args[0]) die("Usage: gather <SPEC> [--root <path>]");
       await cmdGather(args[0]);
       break;
     case "gates": {
-      if (!args[0]) die("Usage: gates <SPEC> --gather-dir <path>");
+      if (!args[0]) die("Usage: gates <SPEC> --gather-dir <path> [--root <path>]");
       const specArg = args[0];
       const dirFlag = args.indexOf("--gather-dir");
       const gatherDir = dirFlag !== -1 ? args[dirFlag + 1] : "";
@@ -388,7 +422,7 @@ try {
       break;
     }
     case "record":
-      if (!args[0] || !args[1]) die("Usage: record <SPEC> <done|failed>");
+      if (!args[0] || !args[1]) die("Usage: record <SPEC> <done|failed> [--root <path>]");
       await cmdRecord(args[0], args[1]);
       break;
     default:
