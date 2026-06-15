@@ -32,7 +32,7 @@
     markdown-daily-note markdown-new-from-template markdown-rename-note markdown-expand-template-variables
     markdown-wiki-link-at-point markdown-scan-tags markdown-next-wiki-link markdown-prev-wiki-link markdown-scan-wiki-links
     markdown-current-subtree-range markdown-find-sibling-ranges
-    markdown-inline-to-html markdown-table-to-latex markdown-find-unlinked-mentions markdown-dirname)
+    markdown-inline-to-html markdown-table-to-latex markdown-find-unlinked-mentions markdown-dirname markdown-embed-target-at-point markdown-follow-embed)
 
 ;; markdown-commands.tlisp — Markdown-specific commands (SPEC-018)
 
@@ -1706,6 +1706,39 @@ backends directly (see markdown-mode.tlisp), or call markdown-export-to-html
             (message "Empty frontmatter")))))
 
 ;;; ── Wiki-links and Zettelkasten ───────────────────────────────────────
+
+(defun markdown-embed-target-at-point ()
+  "Find ![[target]] at cursor position. Return target or nil."
+  (let* ((line (buffer-get-line (cursor-line)))
+         (col (cursor-column))
+         (result nil)
+         (search-text line))
+    (while (and (string-match "!\\\\[\\\\[\([^\\\\]\]+\)\\\\]\\\\]" search-text) (not result))
+      (let ((start (match-beginning 0))
+            (end (match-end 0))
+            (target (match-string 1 search-text)))
+        (if (and (>= col start) (<= col end))
+            (set! result target)
+            (set! search-text (substring search-text (match-end 0))))))
+    result))
+
+(defun markdown-follow-embed ()
+  "Follow ![[embed]] at point — navigate to source file. Bug #5."
+  (let ((target (markdown-embed-target-at-point)))
+    (if (not target)
+        (message "No embed at point")
+        (let ((resolved target))
+          (if (not (string-match "\\." target))
+              (set! resolved (concat target ".md")))
+          (if (not (string-match "^/" resolved))
+              (let ((dir (markdown-dirname (or (buffer-filename) "."))))
+                (set! resolved (concat dir "/" resolved))))
+          (if (file-exists-p resolved)
+              (progn
+                (markdown-push-position)
+                (find-file-open resolved)
+                (message "Following embed: %s" target))
+              (message "Embed source not found: %s" resolved))))))
 
 (defun markdown-wiki-link-at-point ()
   "Find [[target]] at cursor position. Return target or nil."

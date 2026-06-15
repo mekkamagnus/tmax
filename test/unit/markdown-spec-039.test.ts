@@ -525,3 +525,23 @@ describe("SPEC-039 audit round 2: edge cases", () => {
     expect(result.type).not.toBe("left");
   });
 });
+
+describe("SPEC-039 audit round 2: embeds (Bug #5)", () => {
+  test("markdown-embed-target-at-point extracts ![[]] target", async () => {
+    const editor = await setupMdEditor("Embed: ![[other-note]] here\n");
+    executeTlisp(editor, `(cursor-move 0 9)`);
+    const result = executeTlisp(editor, `(markdown-embed-target-at-point)`);
+    const target = expectTlispString(result);
+    expect(target).toBe("other-note");
+  });
+
+  test("markdown-follow-embed on missing file shows error", async () => {
+    const editor = await setupMdEditor("![[does-not-exist]]\n");
+    executeTlisp(editor, `(cursor-move 0 0)`);
+    const result = executeTlisp(editor, `(markdown-follow-embed)`);
+    // Should show an error message, not crash.
+    expect(result.type).not.toBe("left");
+    const msg = expectTlispString(result);
+    expect(msg).toContain("not found");
+  });
+});
