@@ -1418,6 +1418,57 @@ Previously only the first formula line was evaluated."
           (write-file-content output-path (string-join "\n" (reverse lines)))
           (message "Exported to %s" output-path)))))
 
+(defun markdown-table-to-latex (rows)
+  "Convert markdown table ROWS to LaTeX tabular. Bug #3 fix."
+  (let ((data-rows '())
+        (result '())
+        (j 0)
+        (ncols 0))
+    ;; Collect non-separator rows.
+    (set! j 0)
+    (while (< j (length rows))
+      (let ((row (nth j rows)))
+        (if (not (string-match "^[-\s]+$" (string-trim (string-replace row "|" ""))))
+            (set! data-rows (cons row data-rows))))
+      (set! j (+ j 1)))
+    (set! data-rows (reverse data-rows))
+    (if (= (length data-rows) 0)
+        ""
+        (progn
+          ;; Count columns: split first row by |.
+          (let ((first-cells (string-split (string-trim (nth 0 data-rows)) "|")))
+            (set! ncols 0)
+            (let ((c 0))
+              (while (< c (length first-cells))
+                (if (> (length (string-trim (nth c first-cells))) 0)
+                    (set! ncols (+ ncols 1)))
+                (set! c (+ c 1)))))
+          ;; Build column spec: "lll..." for ncols columns.
+          (let ((colspec "")
+                (c 0))
+            (while (< c ncols)
+              (set! colspec (concat colspec "l"))
+              (set! c (+ c 1)))
+            (set! result (cons (concat "\\\\begin{tabular}{" colspec "}") result))
+            ;; Convert each row.
+            (set! j 0)
+            (while (< j (length data-rows))
+              (let* ((row (string-trim (nth j data-rows)))
+                     (cells (string-split row "|"))
+                     (clean '())
+                     (k 0))
+                (set! k 0)
+                (while (< k (length cells))
+                  (let ((cell (string-trim (nth k cells))))
+                    (if (> (length cell) 0)
+                        (set! clean (cons cell clean))))
+                  (set! k (+ k 1)))
+                (set! clean (reverse clean))
+                (set! result (cons (concat (string-join " & " clean) " \\\\\\\\") result)))
+              (set! j (+ j 1)))
+            (set! result (cons "\\\\end{tabular}" result))
+            (string-join "\n" (reverse result)))))))
+
 (defun markdown-export-to-latex ()
   "Export current buffer to LaTeX."
   (let ((filename (buffer-filename)))

@@ -440,3 +440,17 @@ describe("SPEC-039 audit round 2: multiple tblfm lines (Bug #4)", () => {
     expect(row3).toContain("4");  // @3$2 = 2+2
   });
 });
+
+describe("SPEC-039 audit round 2: LaTeX export tabular (Bug #3)", () => {
+  test("markdown-table-to-latex converts a table to tabular environment", async () => {
+    const editor = await setupMdEditor("");
+    // Pass table rows as a list of strings; expect tabular output.
+    const result = executeTlisp(editor,
+      `(markdown-table-to-latex (list "| a | b |" "|---|---|" "| 1 | 2 |"))`);
+    const latex = expectTlispString(result);
+    expect(latex).toContain("\\begin{tabular}");
+    expect(latex).toContain("\\end{tabular}");
+    expect(latex).toContain("a & b");
+    expect(latex).toContain("1 & 2");
+  });
+});
