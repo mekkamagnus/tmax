@@ -2,7 +2,7 @@
 /**
  * @file tmax-spec-loop orchestrator (TypeScript / Bun)
  *
- * Subcommands: dry-run | setup | verify <ID> | record <ID> <status>
+ * Subcommands: dry-run [SPEC_ID] | setup [SPEC_ID] | verify <ID> | record <ID> <status>
  *            | attempt-record <ID> <attempt_num> <gate_failed>
  *            | status | reset <ID> | skip <ID>
  *
@@ -228,8 +228,18 @@ function resolveDaemonScript(name: string): string {
 
 // --- Subcommands ---
 
-async function cmdDryRun(): Promise<void> {
-  const id = await pickNextSpecId();
+async function cmdDryRun(specArg?: string): Promise<void> {
+  // Explicit SPEC ID bypasses the picker (mirrors setup <SPEC_ID>); omitted
+  // arg falls back to pick-next. Useful when you intend to target a specific
+  // SPEC that isn't the picker's first choice (e.g. it's lower-numbered than
+  // another unstarted SPEC).
+  let id: string | null;
+  if (specArg) {
+    id = normalizeSpecArg(specArg);
+    if (!(await specFileForId(id))) die(`SPEC file for ${id} not found in ${SPECS_DIR}.`);
+  } else {
+    id = await pickNextSpecId();
+  }
   if (!id) {
     console.log("NO PICK");
     console.log(`No unstarted SPEC found in ${SPECS_DIR}`);
@@ -475,6 +485,8 @@ async function cmdReset(id: string): Promise<void> {
     worktree: null,
     branch: null,
     commit: null,
+    attempts: 0,
+    attempt_log: [],
     last_error: null,
     completed_at: null,
   }));
@@ -524,7 +536,7 @@ const args = process.argv.slice(3);
 try {
   switch (sub) {
     case "dry-run":
-      await cmdDryRun();
+      await cmdDryRun(args[0]);
       break;
     case "setup":
       await cmdSetup(args[0]);
