@@ -466,3 +466,19 @@ describe("SPEC-039 audit round 2: HTML inline formatting (Bug #2)", () => {
     expect(html).toContain("<code>code</code>");
   });
 });
+
+describe("SPEC-039 audit round 2: unlinked mentions (Bug #6)", () => {
+  test("markdown-find-unlinked-mentions finds plain-text title references", async () => {
+    const editor = await setupMdEditor("");
+    // Given a list of file contents and a title, find files that mention
+    // the title in plain text (not as [[title]] links).
+    const result = executeTlisp(editor,
+      `(markdown-find-unlinked-mentions "MyNote" (list "This mentions MyNote here" "This links [[MyNote]] instead" "No mention at all"))`);
+    const mentions = expectTlispString(result);
+    // Line 0 mentions "MyNote" in plain text -> should be found.
+    // Line 1 links [[MyNote]] -> should NOT be an unlinked mention.
+    // Line 2 has no mention -> should NOT be found.
+    expect(mentions).toContain("Unlinked mentions of MyNote");
+    expect(mentions).not.toContain("No mention");
+  });
+});
