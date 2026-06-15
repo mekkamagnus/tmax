@@ -454,3 +454,15 @@ describe("SPEC-039 audit round 2: LaTeX export tabular (Bug #3)", () => {
     expect(latex).toContain("1 & 2");
   });
 });
+
+describe("SPEC-039 audit round 2: HTML inline formatting (Bug #2)", () => {
+  test("markdown-inline-to-html converts bold/italic/code", async () => {
+    const editor = await setupMdEditor("");
+    const result = executeTlisp(editor,
+      `(markdown-inline-to-html "This is **bold** and *italic* and \`code\`")`);
+    const html = expectTlispString(result);
+    expect(html).toContain("<strong>bold</strong>");
+    expect(html).toContain("<em>italic</em>");
+    expect(html).toContain("<code>code</code>");
+  });
+});

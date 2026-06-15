@@ -1354,6 +1354,21 @@ Previously only the first formula line was evaluated."
 
 ;;; ── Export engine ──────────────────────────────────────────────────────
 
+(defun markdown-inline-to-html (text)
+  "Convert inline markdown formatting to HTML.
+Bug #2: **bold** -> <strong>, *italic* -> <em>, `code` -> <code>."
+  (let ((s text))
+    ;; Inline code first (backticks), so ** inside code isn't converted.
+    (while (string-match "`\([^`]+\\)`" s)
+      (set! s (string-replace s (match-string 0 s) (concat "<code>" (match-string 1 s) "</code>"))))
+    ;; Bold: find ** + content + **.
+    (while (string-match "[*][*]\\([^*]+\\)[*][*]" s)
+      (set! s (string-replace s (match-string 0 s) (concat "<strong>" (match-string 1 s) "</strong>"))))
+    ;; Italic: find * + content + *.
+    (while (string-match "[*]\\([^*]+\\)[*]" s)
+      (set! s (string-replace s (match-string 0 s) (concat "<em>" (match-string 1 s) "</em>"))))
+    s))
+
 (defun markdown-export-to-html ()
   "Export current buffer to HTML."
   (let ((filename (buffer-filename)))
