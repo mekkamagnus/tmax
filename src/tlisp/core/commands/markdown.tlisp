@@ -31,7 +31,8 @@
     markdown-follow-wiki-link markdown-insert-link-to-file markdown-backlinks
     markdown-daily-note markdown-new-from-template markdown-rename-note markdown-expand-template-variables
     markdown-wiki-link-at-point markdown-scan-tags markdown-next-wiki-link markdown-prev-wiki-link markdown-scan-wiki-links
-    markdown-current-subtree-range markdown-find-sibling-ranges)
+    markdown-current-subtree-range markdown-find-sibling-ranges
+    markdown-inline-to-html markdown-table-to-latex markdown-find-unlinked-mentions markdown-dirname)
 
 ;; markdown-commands.tlisp — Markdown-specific commands (SPEC-018)
 
@@ -1806,10 +1807,13 @@ backends directly (see markdown-mode.tlisp), or call markdown-export-to-html
                 (if (not (string-match "^/" resolved))
                     (let ((dir (markdown-dirname (or (buffer-filename) "."))))
                       (set! resolved (concat dir "/" resolved))))
-                (markdown-push-position)
-                (find-file-open resolved)
-                (if heading
-                    (markdown-open-anchor (concat "#" heading))))
+                (if (file-exists-p resolved)
+                    (progn
+                      (markdown-push-position)
+                      (find-file-open resolved)
+                      (if heading
+                          (markdown-open-anchor (concat "#" heading))))
+                    (message "Wiki link target not found: %s" resolved)))
               (if heading
                   (markdown-open-anchor (concat "#" heading))
                   (message "Invalid wiki link: %s" target)))))))
