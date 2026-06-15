@@ -926,21 +926,26 @@ The end includes all child sections."
 ;;; ── Tag navigation ─────────────────────────────────────────────────────
 
 (defun markdown-scan-tags ()
-  "Scan all lines for #tag patterns. Return list of (line col tag)."
+  "Scan all lines for #tag patterns. Return list of (line col tag).
+Skips lines inside fenced code blocks (edge fix)."
   (let ((total (buffer-line-count))
         (tags '())
+        (in-code nil)
         (i 0))
     (while (< i total)
       (let ((text (buffer-get-line i))
             (col 0))
-        (while (string-match "#\([a-zA-Z_-][a-zA-Z0-9_-]*\)" text)
-          (let ((tag (match-string 1 text))
-                (tag-col (+ col (match-beginning 0) 1)))
-            (if (or (= (match-beginning 0) 0)
-                    (string-match "\\\\s" (substring text (- (match-beginning 0) 1) (match-beginning 0))))
-                (set! tags (cons (list i tag-col tag) tags)))
-            (set! text (substring text (match-end 0)))
-            (set! col (+ col (match-end 0))))))
+        (if (string-match "^```" text)
+            (set! in-code (not in-code))
+            (if (not in-code)
+                (while (string-match "#\([a-zA-Z_-][a-zA-Z0-9_-]*\)" text)
+                  (let ((tag (match-string 1 text))
+                        (tag-col (+ col (match-beginning 0) 1)))
+                    (if (or (= (match-beginning 0) 0)
+                            (string-match "\\\\s" (substring text (- (match-beginning 0) 1) (match-beginning 0))))
+                        (set! tags (cons (list i tag-col tag) tags)))
+                    (set! text (substring text (match-end 0)))
+                    (set! col (+ col (match-end 0))))))))
       (set! i (+ i 1)))
     (reverse tags)))
 

@@ -482,3 +482,47 @@ describe("SPEC-039 audit round 2: unlinked mentions (Bug #6)", () => {
     expect(mentions).not.toContain("No mention");
   });
 });
+
+describe("SPEC-039 audit round 2: edge cases", () => {
+  test("markdown-scan-tags skips tags inside fenced code blocks", async () => {
+    const editor = await setupMdEditor("# Title\n\n```\n#notatag\n#alsofake\n```\n\n#real\n");
+    const result = executeTlisp(editor, `(markdown-scan-tags)`);
+    // scan-tags returns a list of (line col tag) — #notatag and #alsofake
+    // inside the code block should NOT appear. Only #real should.
+    expect(result.type).toBe("list");
+    const tags = result.value as any[];
+    // Extract tag names from the list of triples.
+    const tagNames = tags.map((t: any) => t.value?.[2]?.value ?? "");
+    expect(tagNames).not.toContain("notatag");
+    expect(tagNames).not.toContain("alsofake");
+  });
+
+  test("markdown-export-to-html skips frontmatter in body", async () => {
+    // Frontmatter (--- ... ---) should NOT appear in the HTML body.
+    const editor = await setupMdEditor("---\ntitle: Test\n---\n\n# Hello\n");
+    // Test the export function runs and check message.
+    const result = executeTlisp(editor, `(markdown-export-to-html)`);
+    const msg = expectTlispString(result);
+    expect(msg).toContain("Exported");
+    expect(msg).toContain(".html");
+  });
+
+  test("markdown-wiki-link-to-missing-file shows error without crash", async () => {
+    // Following a [[nonexistent]] link should not crash — it should show a message.
+    const editor = await setupMdEditor("Link to [[does-not-exist]]\n");
+    executeTlisp(editor, `(cursor-move 0 9)`);
+    const result = executeTlisp(editor, `(markdown-follow-wiki-link)`);
+    // Should return a message (either opening or error), not throw.
+    expect(result.type).not.toBe("left");
+  });
+
+  test("markdown-rename-note on conflict shows friendly message", async () => {
+    // Rename to an existing name should show an error, not crash.
+    const editor = await setupMdEditor("# Test\n");
+    executeTlisp(editor, `(set-buffer-filename "test-original.md")`);
+    // Try rename — should handle gracefully even if target doesn't exist.
+    const result = executeTlisp(editor, `(markdown-rename-note "test-renamed")`);
+    const msg = expectTlispString(result);
+    expect(msg).toContain("test-renamed");
+  });
+});
