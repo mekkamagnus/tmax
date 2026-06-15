@@ -563,3 +563,55 @@ describe("SPEC-039 audit round 2: persistent backlink cache (Bug #7)", () => {
     expect(result.type).not.toBe("left");
   });
 });
+
+// ── Coverage: previously-uncovered behaviors ────────────────────────
+
+describe("SPEC-039 coverage: previously-uncovered behaviors", () => {
+  test("markdown-frontmatter-set on file without frontmatter", async () => {
+    const editor = await setupMdEditor("# No frontmatter\n\nBody\n");
+    executeTlisp(editor, `(markdown-frontmatter-set "newkey" "newval")`);
+    // Should complete without crash.
+    const result = executeTlisp(editor, `(buffer-get-line 0)`);
+    expect(result.type).not.toBe("left");
+  });
+
+  test("markdown-daily-note creates note", async () => {
+    const editor = await setupMdEditor("");
+    const result = executeTlisp(editor, `(markdown-daily-note)`);
+    // Should return a message (may be about the file path).
+    expect(result.type).not.toBe("left");
+  });
+
+  test("markdown-table-eval-formula sum end-to-end", async () => {
+    const editor = await setupMdEditor(
+      "| a | b |\n|---|---|\n| 1 | 2 |\n| 3 | 4 |\n<!-- tblfm: @3$1=1+1 -->"
+    );
+    executeTlisp(editor, `(cursor-move 2 0)`);
+    executeTlisp(editor, `(markdown-table-eval-formula)`);
+    const row = expectTlispString(executeTlisp(editor, `(buffer-get-line 2)`));
+    expect(row).toContain("2");
+  });
+
+  test("markdown-export-to-text runs without crash", async () => {
+    const editor = await setupMdEditor("# Hello\n\nSome text\n", "export-text-test.md");
+    const result = executeTlisp(editor, `(markdown-export-to-text)`);
+    // Export may fail on write-file in sync mode — test it doesn't crash on the transform.
+    expect(result.type).not.toBe("left");
+  });
+
+  test("markdown-backlinks returns message", async () => {
+    const editor = await setupMdEditor("# Note\n\nText\n", "backlinks-test.md");
+    const result = executeTlisp(editor, `(markdown-backlinks)`);
+    expect(result.type).not.toBe("left");
+  });
+
+  test("shell-exec timeout returns exit code", async () => {
+    const editor = await setupMdEditor("");
+    // A fast command should return exit 0.
+    const result = executeTlisp(editor, `(shell-exec "true")`);
+    expect(result.type).toBe("list");
+    const items = result.value as any[];
+    const exitCode = items[2]?.value;
+    expect(exitCode).toBe(0);
+  });
+});

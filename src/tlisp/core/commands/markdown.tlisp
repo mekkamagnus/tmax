@@ -1463,7 +1463,7 @@ Bug #6: unlinked mentions. Returns a message listing matching texts."
                   (if (string-match "^```" text)
                       (set! in-code-block t)
                       (if (string-match "^#{1,6}\\\\s+\(.*\)" text)
-                          (set! lines (cons (upcase (match-string 1 text)) lines))
+                          (set! lines (cons (match-string 1 text) lines))
                           (set! lines (cons text lines))))))
             (set! i (+ i 1)))
           (write-file-content output-path (string-join "\n" (reverse lines)))
