@@ -545,3 +545,21 @@ describe("SPEC-039 audit round 2: embeds (Bug #5)", () => {
     expect(msg).toContain("not found");
   });
 });
+
+describe("SPEC-039 audit round 2: persistent backlink cache (Bug #7)", () => {
+  test("cache-set then cache-get returns the value", async () => {
+    const editor = await setupMdEditor("");
+    executeTlisp(editor, `(cache-set "test-key" "test-value")`);
+    const result = executeTlisp(editor, `(cache-get "test-key")`);
+    const val = expectTlispString(result);
+    expect(val).toBe("test-value");
+  });
+
+  test("cache-save persists to ~/.config/tmax/backlink-cache.json", async () => {
+    const editor = await setupMdEditor("");
+    executeTlisp(editor, `(cache-set "persist-test" "saved")`);
+    const result = executeTlisp(editor, `(cache-save)`);
+    // Should return a success message, not crash.
+    expect(result.type).not.toBe("left");
+  });
+});

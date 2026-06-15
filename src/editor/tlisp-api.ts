@@ -5,7 +5,7 @@
 
 import type { TLispValue, TLispFunctionImpl } from "../tlisp/types.ts";
 import { createNil, createNumber, createString, createBoolean, createList, createSymbol } from "../tlisp/values.ts";
-import { renameSync } from "node:fs";
+import { renameSync, writeFileSync, readFileSync, existsSync } from "node:fs";
 import type { TerminalIO, FileSystem, FunctionalTextBuffer } from "../core/types.ts";
 import { FunctionalTextBufferImpl } from "../core/buffer.ts";
 import { Either } from "../utils/task-either.ts";
@@ -1084,6 +1084,31 @@ export function createEditorAPI(state: TlispEditorState): Map<string, TLispFunct
     if (args[0]!.type !== 'string' || args[1]!.type !== 'string') return Either.left(createValidationError('TypeError', 'both arguments must be strings'));
     kvCache.set(String(args[0]!.value), String(args[1]!.value));
     return Either.right(createNil());
+  });
+
+  // ── cache-save / cache-load: persist the K/V cache to disk ──────────
+  const cacheFilePath = `${process.env.HOME ?? '~'}/.config/tmax/backlink-cache.json`;
+
+  api.set('cache-save', (_args: TLispValue[]): Either<AppError, TLispValue> => {
+    try {
+      const obj: Record<string, string> = {};
+      kvCache.forEach((v, k) => { obj[k] = v; });
+      writeFileSync(cacheFilePath, JSON.stringify(obj, null, 2));
+      return Either.right(createString('saved'));
+    } catch (e) {
+      return Either.left(createValidationError('FormatError', `cache-save failed: ${e instanceof Error ? e.message : String(e)}`));
+    }
+  });
+
+  api.set('cache-load', (_args: TLispValue[]): Either<AppError, TLispValue> => {
+    try {
+      if (!existsSync(cacheFilePath)) return Either.right(createString('no-cache'));
+      const data = JSON.parse(readFileSync(cacheFilePath, 'utf-8')) as Record<string, string>;
+      Object.entries(data).forEach(([k, v]) => kvCache.set(k, v));
+      return Either.right(createString('loaded'));
+    } catch (e) {
+      return Either.left(createValidationError('FormatError', `cache-load failed: ${e instanceof Error ? e.message : String(e)}`));
+    }
   });
 
   // ── make-process: spawn subprocess with streaming output ─────────────
