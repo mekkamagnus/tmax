@@ -400,3 +400,43 @@ describe("SPEC-039 audit fixes", () => {
     expect(msg).toContain(".tex");
   });
 });
+
+// ── Patch-review audit fixes (round 2) ──────────────────────────────
+// TDD: each test written FIRST, watched fail, then minimal code to pass.
+
+describe("SPEC-039 audit round 2: code-block stderr capture (Bug #1)", () => {
+  test("markdown-execute-block includes stderr in results line", async () => {
+    // A block that writes to stderr should have its stderr captured in the
+    // <!-- results: --> line, not silently dropped.
+    const editor = await setupMdEditor("```sh\necho OUT; echo ERR >&2\n```\n");
+    executeTlisp(editor, `(cursor-move 0 0)`);
+    executeTlisp(editor, `(markdown-execute-block)`);
+    // Find the results line.
+    const total = executeTlisp(editor, `(buffer-line-count)`).value as number;
+    let resultsLine = "";
+    for (let i = 0; i < total; i++) {
+      const line = expectTlispString(executeTlisp(editor, `(buffer-get-line ${i})`));
+      if (line.startsWith("<!-- results:")) { resultsLine = line; break; }
+    }
+    // stdout "OUT" should be present...
+    expect(resultsLine).toContain("OUT");
+    // ...AND stderr "ERR" should be present (this is the bug — currently dropped).
+    expect(resultsLine).toContain("ERR");
+  });
+});
+
+describe("SPEC-039 audit round 2: multiple tblfm lines (Bug #4)", () => {
+  test("markdown-table-eval-formula evaluates ALL tblfm lines", async () => {
+    // A table with two formula lines should have both evaluated.
+    // Bug: only the first formula line was evaluated.
+    const editor = await setupMdEditor(
+      "| a | b |\n|---|---|\n| 0 | 0 |\n<!-- tblfm: @3$1=1+1 -->\n<!-- tblfm: @3$2=2+2 -->"
+    );
+    executeTlisp(editor, `(cursor-move 2 0)`);
+    executeTlisp(editor, `(markdown-table-eval-formula)`);
+    // Both cells should be updated: @3$1=2 and @3$2=4
+    const row3 = expectTlispString(executeTlisp(editor, `(buffer-get-line 2)`));
+    expect(row3).toContain("2");  // @3$1 = 1+1
+    expect(row3).toContain("4");  // @3$2 = 2+2
+  });
+});

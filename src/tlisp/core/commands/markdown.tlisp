@@ -21,7 +21,7 @@
     markdown-next-tag markdown-prev-tag markdown-tag-list markdown-sparse-tree-tag
     markdown-find-code-block markdown-execute-block markdown-clear-results
     markdown-execute-all-blocks
-    markdown-table-eval-formula markdown-table-insert-formula
+    markdown-table-eval-formula markdown-table-eval-formula-impl markdown-table-insert-formula
     markdown-table-formula-parse markdown-table-eval-expr markdown-table-row-p markdown-table-extract-range markdown-table-reduce
     markdown-delete-line
     markdown-export-to-html markdown-export-to-text markdown-export-to-latex
@@ -1065,8 +1065,12 @@ The end includes all child sections."
                     (let ((result (shell-exec cmd))
                           (results-line nil))
                       (let ((stdout (nth 0 result))
+                            (stderr (nth 1 result))
                             (exit-code (nth 2 result)))
-                        (set! results-line (format "<!-- results: %s -->" stdout))
+                        (set! results-line
+                          (if (and stderr (> (length stderr) 0))
+                              (format "<!-- results: %s [stderr: %s] -->" stdout stderr)
+                              (format "<!-- results: %s -->" stdout)))
                         (let ((check-line (+ end 1)))
                           (if (and (< check-line (buffer-line-count))
                                    (string-match "^<!-- results:" (buffer-get-line check-line)))
@@ -1226,7 +1230,37 @@ Returns (row col expr) where row/col are strings; caller resolves `>`."
                                   "ERR"))))))))))
 
 (defun markdown-table-eval-formula ()
-  "Evaluate formula comment below current table."
+  "Evaluate ALL formula comments below current table.
+Bug #4 fix: loop over every tblfm line, calling the impl for each.
+Previously only the first formula line was evaluated."
+  (let ((total (buffer-line-count))
+        (any-formula nil))
+    ;; Check if any tblfm line exists below cursor.
+    (let ((scan (cursor-line)))
+      (while (< scan total)
+        (if (string-match "^<!-- tblfm:" (buffer-get-line scan))
+            (set! any-formula t))
+        (set! scan (+ scan 1))))
+    (if (not any-formula)
+        (message "No formula found below table")
+        (progn
+          (set! any-formula t)
+          (let ((evaluated 0))
+            (while (and any-formula (< evaluated 10))
+              (markdown-table-eval-formula-impl)
+              (set! evaluated (+ evaluated 1))
+              ;; Re-scan for remaining formula lines.
+              (set! any-formula nil)
+              (let ((rescan 0))
+                (set! rescan 0)
+                (while (< rescan (buffer-line-count))
+                  (if (string-match "^<!-- tblfm:" (buffer-get-line rescan))
+                      (set! any-formula t))
+                  (set! rescan (+ rescan 1)))))
+            (message "Evaluated %d formula(s)" evaluated))))))
+
+(defun markdown-table-eval-formula-impl ()
+  "Evaluate the FIRST formula comment below current table. Internal."
   (let ((line (cursor-line))
         (total (buffer-line-count))
         (formula-line nil))
