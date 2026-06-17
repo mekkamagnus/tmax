@@ -1,6 +1,6 @@
 #!/usr/bin/env bun
 /**
- * @file patch-review orchestrator (TypeScript / Bun)
+ * @file tmax-patch-review orchestrator (TypeScript / Bun, functional style)
  *
  * Subcommands:
  *   gather <SPEC>                       — find commits + diff + write gather bundle
@@ -24,59 +24,159 @@
  *   NO IMPLEMENTATION FOUND
  *   RECORDED id=<id> status=<status>
  *
- * Run with: bun .zcode/skills/patch-review/scripts/audit.ts <subcommand> [args] [--root <path>]
+ * Run with: bun .zcode/skills/tmax-patch-review/scripts/audit.ts <subcommand> [args] [--root <path>]
  */
 
 import { $, file, write, Glob } from "bun";
 import { existsSync, mkdirSync } from "node:fs";
 import { appendFile } from "node:fs/promises";
 import path from "node:path";
+import { Either, Left, Right, None, Option, TaskEither } from "./fp.ts";
+
+// ──────────────────────────── Paths ────────────────────────────
+// All paths derive from a parsed Opts record — no module-level mutation.
+// The skill dir is the single anchor; the project root is the optional --root.
 
 const SCRIPT_DIR: string = import.meta.dir;
 const SKILL_DIR: string = path.resolve(SCRIPT_DIR, "..");
 
-// Default project root: derived from the skill location (parent of skill dir).
-// Override via --root <path> so the audit can scan a worktree's branch instead
-// of main's git log (used by the tmax-spec-loop audit gate).
-let PROJECT_ROOT: string = path.resolve(SKILL_DIR, "../../..");
+interface Paths {
+  readonly skillDir: string;
+  readonly projectRoot: string;
+  readonly specsDir: string;
+  readonly reviewsDir: string;
+  readonly stateDir: string;
+  readonly progressFile: string;
+}
 
-// Dir paths derive from PROJECT_ROOT. Declared with let so the --root override
-// (parsed in the dispatch block below) can re-point them at a worktree.
-let SPECS_DIR = path.join(PROJECT_ROOT, "docs/specs");
-let REVIEWS_DIR = path.join(PROJECT_ROOT, ".patch-reviews");
-let STATE_DIR = path.join(PROJECT_ROOT, ".spec-loop");
-let PROGRESS_FILE = path.join(STATE_DIR, "progress.json");
+function makePaths(projectRoot: string): Paths {
+  return {
+    skillDir: SKILL_DIR,
+    projectRoot,
+    specsDir: path.join(projectRoot, "docs/specs"),
+    reviewsDir: path.join(projectRoot, ".patch-reviews"),
+    stateDir: path.join(projectRoot, ".spec-loop"),
+    progressFile: path.join(projectRoot, ".spec-loop/progress.json"),
+  };
+}
 
-const DAEMON_SCRIPTS_DIR = path.resolve(
-  SKILL_DIR,
-  "..",
+// Default project root: parent of the skill dir.
+const DEFAULT_PROJECT_ROOT: string = path.resolve(SKILL_DIR, "../../..");
+
+// The tmax-daemon helper scripts (start/stop_daemon.py) ship ONLY under
+// .claude/skills/tmax-daemon/scripts/ in the main checkout. Resolve once,
+// anchored off the skill's own location (never off PROJECT_ROOT, which may be
+// a worktree where .claude/skills/ does not exist).
+const MAIN_CHECKOUT_ROOT: string = path.resolve(SKILL_DIR, "../../..");
+const DAEMON_SCRIPTS_DIR: string = path.join(
+  MAIN_CHECKOUT_ROOT,
+  ".claude",
+  "skills",
   "tmax-daemon",
   "scripts",
 );
 
-// Apply a --root override: re-point PROJECT_ROOT and every derived path.
-// Called once from the dispatch block before any subcommand runs.
-function applyRootOverride(root: string): void {
-  PROJECT_ROOT = path.resolve(root);
-  SPECS_DIR = path.join(PROJECT_ROOT, "docs/specs");
-  REVIEWS_DIR = path.join(PROJECT_ROOT, ".patch-reviews");
-  STATE_DIR = path.join(PROJECT_ROOT, ".spec-loop");
-  PROGRESS_FILE = path.join(STATE_DIR, "progress.json");
+const daemonScript = (name: string): string => path.join(DAEMON_SCRIPTS_DIR, name);
+
+// ──────────────────────────── CLI parsing ────────────────────────────
+
+interface Opts {
+  readonly sub: string;
+  readonly positional: readonly string[];
+  readonly projectRoot: string;
 }
 
-// Resolve a daemon helper script. The tmax-daemon skill ships under
-// .claude/skills/ in the MAIN checkout (not the worktree, not .zcode/skills/),
-// so the fallback must always point at the real main checkout root, derived
-// from the skill's own location — NOT from PROJECT_ROOT (which may be a
-// worktree where .claude/skills/ doesn't exist). Mirrors run.ts's helper.
-const MAIN_CHECKOUT_ROOT: string = path.resolve(SKILL_DIR, "../../..");
-function resolveDaemonScript(name: string): string {
-  const candidates = [
-    path.join(SKILL_DIR, "..", "tmax-daemon", "scripts", name),
-    path.join(MAIN_CHECKOUT_ROOT, ".claude", "skills", "tmax-daemon", "scripts", name),
-  ];
-  return candidates.find((p) => existsSync(p)) ?? candidates[0]!;
+function parseArgs(argv: readonly string[]): Either<string, Opts> {
+  const sub = argv[2] ?? "";
+  const rest = argv.slice(3);
+  const rootIdx = rest.indexOf("--root");
+  if (rootIdx !== -1) {
+    const rootVal = rest[rootIdx + 1];
+    if (!rootVal) return Left("--root requires a path argument");
+    const positional = rest.filter((_, i) => i !== rootIdx && i !== rootIdx + 1);
+    return Right({ sub, positional, projectRoot: path.resolve(rootVal) });
+  }
+  return Right({ sub, positional: rest, projectRoot: DEFAULT_PROJECT_ROOT });
 }
+
+// ──────────────────────────── Errors / logging ────────────────────────────
+
+const log = (msg: string): void => {
+  process.stderr.write(`[patch-review] ${msg}\n`);
+};
+
+const die = (msg: string): never => {
+  log(`ERROR: ${msg}`);
+  process.exit(1);
+};
+
+// Crash with the Left message if a computation failed; otherwise unwrap Right.
+const dieOnLeft = <L, R>(e: Either<L, R>): R =>
+  Either.fold(
+    e,
+    (l) => die(typeof l === "string" ? l : String(l)),
+    (r) => r,
+  );
+
+const ts = (): string => new Date().toISOString();
+const stampForPath = (): string =>
+  new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
+
+// ──────────────────────────── SPEC argument normalization ────────────────────────────
+
+const normalizeSpecArg = (arg: string): Either<string, string> => {
+  const basename = path.basename(arg);
+  const m = basename.match(/^SPEC-([0-9]{3,})/);
+  if (m) return Right(m[1]);
+  if (/^[0-9]+$/.test(arg)) return Right(arg.padStart(3, "0"));
+  return Left(`Cannot parse SPEC ID from argument: ${arg}`);
+};
+
+const specFileForId =
+  (specsDir: string) =>
+  async (id: string): Promise<Option<string>> => {
+    if (!existsSync(specsDir)) return None;
+    const g = new Glob(`SPEC-${id}*.md`);
+    for await (const rel of g.scan({ cwd: specsDir, onlyFiles: true })) {
+      return Option.fromNullable(path.join(specsDir, rel));
+    }
+    return None;
+  };
+
+const specTitleFromFile = async (filePath: string): Promise<string> =>
+  TaskEither.tryCatch(
+    async () => await file(filePath).text(),
+    () => "",
+  )
+    .map((text) => {
+      const line = text.split("\n").find((l) => l.startsWith("# "));
+      return line ? line.slice(2).slice(0, 200) : "";
+    })
+    .run()
+    .then((e) => Either.getOrElse(e, ""));
+
+// ──────────────────────────── Shell helper ────────────────────────────
+
+interface ShellResult {
+  readonly ok: boolean;
+  readonly exitCode: number;
+  readonly stdout: string;
+  readonly stderr: string;
+}
+
+const sh =
+  (projectRoot: string) =>
+  async (cmd: readonly string[], opts: { cwd?: string } = {}): Promise<ShellResult> => {
+    const r = await $`${cmd}`.cwd(opts.cwd ?? projectRoot).nothrow().quiet();
+    return {
+      ok: r.exitCode === 0,
+      exitCode: r.exitCode,
+      stdout: r.stdout.toString(),
+      stderr: r.stderr.toString(),
+    };
+  };
+
+// ──────────────────────────── Progress store ────────────────────────────
 
 type EntryStatus =
   | "not_started"
@@ -107,171 +207,103 @@ interface Progress {
   entries: ProgressEntry[];
 }
 
-function log(msg: string): void {
-  process.stderr.write(`[patch-review] ${msg}\n`);
-}
+const EMPTY_PROGRESS: Progress = { version: 1, entries: [] };
 
-function die(msg: string): never {
-  log(`ERROR: ${msg}`);
-  process.exit(1);
-}
+const ensureDirs = async (paths: Paths): Promise<void> => {
+  if (!existsSync(paths.reviewsDir)) mkdirSync(paths.reviewsDir, { recursive: true });
+  if (!existsSync(paths.stateDir)) mkdirSync(paths.stateDir, { recursive: true });
+};
 
-function ts(): string {
-  return new Date().toISOString();
-}
-
-function stampForPath(): string {
-  return new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
-}
-
-async function ensureDirs(): Promise<void> {
-  if (!existsSync(REVIEWS_DIR)) mkdirSync(REVIEWS_DIR, { recursive: true });
-  if (!existsSync(STATE_DIR)) mkdirSync(STATE_DIR, { recursive: true });
-}
-
-async function ensureProgressFile(): Promise<void> {
-  if (!existsSync(PROGRESS_FILE)) {
-    const seed: Progress = { version: 1, entries: [] };
-    await write(PROGRESS_FILE, JSON.stringify(seed, null, 2) + "\n");
+const ensureProgressFile = async (paths: Paths): Promise<void> => {
+  if (!existsSync(paths.progressFile)) {
+    await write(paths.progressFile, JSON.stringify(EMPTY_PROGRESS, null, 2) + "\n");
   }
-}
+};
 
-async function readProgress(): Promise<Progress> {
-  try {
-    return JSON.parse(await file(PROGRESS_FILE).text());
-  } catch {
-    return { version: 1, entries: [] };
+const readProgress = async (paths: Paths): Promise<Progress> =>
+  TaskEither.tryCatch(
+    async () => JSON.parse(await file(paths.progressFile).text()) as Progress,
+    (e) => e,
+  )
+    .mapLeft(() => EMPTY_PROGRESS)
+    .run()
+    .then((e) => Either.getOrElse(e, EMPTY_PROGRESS));
+
+const writeProgress = async (paths: Paths, p: Progress): Promise<void> => {
+  await write(paths.progressFile, JSON.stringify(p, null, 2) + "\n");
+};
+
+// Pure upsert: returns a new entries array, leaves the input untouched.
+const upsertEntry = (
+  entries: readonly ProgressEntry[],
+  id: string,
+  now: string,
+  update: (e: ProgressEntry) => ProgressEntry,
+): ProgressEntry[] => {
+  const idx = entries.findIndex((e) => e.spec_id === id);
+  if (idx === -1) {
+    const fresh: ProgressEntry = {
+      spec_id: id,
+      status: "not_started",
+      created_at: now,
+      updated_at: now,
+    };
+    return [...entries, { ...update(fresh), updated_at: now }];
   }
-}
+  return entries.map((e, i) => (i === idx ? { ...update(e), updated_at: now } : e));
+};
 
-async function writeProgress(p: Progress): Promise<void> {
-  await write(PROGRESS_FILE, JSON.stringify(p, null, 2) + "\n");
-}
-
-// --- SPEC argument normalization ---
-
-function normalizeSpecArg(arg: string): string {
-  // Accept "039", "SPEC-039", "docs/specs/SPEC-039-foo.md", etc.
-  const pathBasename = path.basename(arg);
-  const m = pathBasename.match(/^SPEC-([0-9]{3,})/);
-  if (m) return m[1];
-  if (/^[0-9]{3,}$/.test(arg)) return arg.replace(/^0+/, (s) => (s.length > 1 ? s.slice(0, -1) : s)).padStart(3, "0");
-  if (/^[0-9]+$/.test(arg)) return arg.padStart(3, "0");
-  die(`Cannot parse SPEC ID from argument: ${arg}`);
-}
-
-async function specFileForId(id: string): Promise<string | null> {
-  if (!existsSync(SPECS_DIR)) return null;
-  const g = new Glob(`SPEC-${id}*.md`);
-  for await (const rel of g.scan({ cwd: SPECS_DIR, onlyFiles: true })) {
-    return path.join(SPECS_DIR, rel);
-  }
-  return null;
-}
-
-async function specTitleFromFile(filePath: string): Promise<string> {
-  try {
-    const text = await file(filePath).text();
-    for (const line of text.split("\n")) {
-      if (line.startsWith("# ")) return line.slice(2).slice(0, 200);
-    }
-  } catch {
-    // ignore
-  }
-  return "";
-}
-
-// --- Shell helper ---
-
-interface ShellResult {
-  ok: boolean;
-  exitCode: number;
-  stdout: string;
-  stderr: string;
-}
-
-async function sh(cmd: string[], opts: { cwd?: string } = {}): Promise<ShellResult> {
-  const r = await $`${cmd}`.cwd(opts.cwd ?? PROJECT_ROOT).nothrow().quiet();
-  return {
-    ok: r.exitCode === 0,
-    exitCode: r.exitCode,
-    stdout: r.stdout.toString(),
-    stderr: r.stderr.toString(),
-  };
-}
-
-// --- Subcommand: gather ---
+// ──────────────────────────── Subcommand: gather ────────────────────────────
 
 interface CommitInfo {
-  sha: string;
-  subject: string;
-  files: string[];
+  readonly sha: string;
+  readonly subject: string;
+  readonly files: readonly string[];
   stat: string;
 }
 
-async function findImplementingCommits(specId: string): Promise<CommitInfo[]> {
-  // Match SPEC-NNN as a word-boundary token in the SUBJECT line only.
-  // Commit bodies often reference other SPECs ("mirrors SPEC-041 pattern")
-  // which would produce false positives if we grepped the whole message.
+const findImplementingCommits = async (
+  projectRoot: string,
+  specId: string,
+): Promise<CommitInfo[]> => {
+  // Match "SPEC-<id>" in the SUBJECT line only (bodies reference other specs).
   const bareId = specId.replace(/^0+/, "") || "0";
-  // Build a regex that matches "SPEC-<id>" where <id> is the digits with
-  // optional leading zeros, followed by a non-digit boundary.
   const subjRe = new RegExp(`SPEC-0*${bareId}([^0-9]|$)`, "i");
+  const run = sh(projectRoot);
 
-  const r = await sh([
-    "git", "log", "--pretty=format:%H%x09%s", "--name-only",
-  ]);
-  if (!r.ok || !r.stdout.trim()) return [];
+  const logRes = await run(["git", "log", "--pretty=format:%H%x09%s", "--name-only"]);
+  if (!logRes.ok || !logRes.stdout.trim()) return [];
 
-  const commits: CommitInfo[] = [];
-  const blocks = r.stdout.split("\n\n");
-  for (const block of blocks) {
-    const lines = block.split("\n").filter((l) => l.length > 0);
-    if (lines.length === 0) continue;
-    const [shaTab, ...rest] = lines;
-    const sha = (shaTab ?? "").split("\t")[0] ?? "";
-    const subject = (shaTab ?? "").split("\t")[1] ?? "";
-    if (!sha) continue;
-    if (!subjRe.test(subject)) continue;
-    const files = rest.filter((l) => l && !l.startsWith("\t"));
-    commits.push({ sha: sha.slice(0, 12), subject, files, stat: "" });
-  }
+  const commits: CommitInfo[] = logRes.stdout
+    .split("\n\n")
+    .map((block) => block.split("\n").filter((l) => l.length > 0))
+    .filter((lines) => lines.length > 0)
+    .map((lines) => {
+      const head = lines[0] ?? "";
+      const [sha, subject] = head.split("\t");
+      const files = lines.slice(1).filter((l) => l && !l.startsWith("\t"));
+      return { sha: sha ?? "", subject: subject ?? "", files };
+    })
+    .filter((c) => c.sha && subjRe.test(c.subject))
+    .map((c) => ({ ...c, sha: c.sha.slice(0, 12), stat: "" }));
 
-  // For each commit, fetch a one-line --stat summary.
+  // Enrich each commit with a one-line --stat summary.
   for (const c of commits) {
-    const s = await sh(["git", "show", "--stat", "--format=", c.sha]);
+    const s = await run(["git", "show", "--stat", "--format=", c.sha]);
     c.stat = s.stdout.trim();
   }
-
   return commits;
-}
+};
 
-async function cmdGather(specArg: string): Promise<void> {
-  await ensureDirs();
-  const id = normalizeSpecArg(specArg);
-  const specPath = await specFileForId(id);
-  if (!specPath) die(`SPEC file not found for ID ${id} in ${SPECS_DIR}`);
-  const title = await specTitleFromFile(specPath);
-
-  const commits = await findImplementingCommits(id);
-  if (commits.length === 0) {
-    console.log("NO IMPLEMENTATION FOUND");
-    console.log(`No commits found matching "SPEC-${id}" in git log.`);
-    return;
-  }
-
-  const allFiles = new Set<string>();
-  for (const c of commits) for (const f of c.files) allFiles.add(f);
-  const filesArray = Array.from(allFiles).sort();
-  const daemonTouched = filesArray.some(
-    (f) => f.startsWith("src/server/") || f.startsWith("src/tlisp/"),
-  );
-
-  const stamp = stampForPath();
-  const gatherDir = path.join(REVIEWS_DIR, `SPEC-${id}-${stamp}`);
-  if (!existsSync(gatherDir)) mkdirSync(gatherDir, { recursive: true });
-
-  const gatherPath = path.join(gatherDir, "gather.md");
+const renderGatherBundle = (
+  id: string,
+  specPath: string,
+  title: string,
+  commits: readonly CommitInfo[],
+  files: readonly string[],
+  daemonTouched: boolean,
+  diffs: readonly string[],
+): string => {
   const lines: string[] = [];
   lines.push(`# Gather bundle — SPEC-${id}`);
   lines.push(`Generated: ${ts()}`);
@@ -281,12 +313,10 @@ async function cmdGather(specArg: string): Promise<void> {
   lines.push(`- Title: ${title}`);
   lines.push("");
   lines.push("## Implementing commits");
-  for (const c of commits) {
-    lines.push(`- ${c.sha} ${c.subject}`);
-  }
+  for (const c of commits) lines.push(`- ${c.sha} ${c.subject}`);
   lines.push("");
-  lines.push(`## Files changed (${filesArray.length} files)`);
-  for (const f of filesArray) lines.push(`- ${f}`);
+  lines.push(`## Files changed (${files.length} files)`);
+  for (const f of files) lines.push(`- ${f}`);
   lines.push("");
   lines.push(`## Daemon-touched: ${daemonTouched ? "true" : "false"}`);
   lines.push("");
@@ -300,150 +330,166 @@ async function cmdGather(specArg: string): Promise<void> {
   }
   lines.push("## Diff (consolidated, may be large — also readable via git show <sha>)");
   lines.push("```diff");
-  for (const c of commits) {
-    const d = await sh(["git", "show", "--format=", "--no-color", c.sha]);
-    lines.push(d.stdout);
-  }
+  for (const d of diffs) lines.push(d);
   lines.push("```");
+  return lines.join("\n") + "\n";
+};
 
-  await write(gatherPath, lines.join("\n") + "\n");
+const cmdGather = async (paths: Paths, specArg: string): Promise<void> => {
+  const id = dieOnLeft(normalizeSpecArg(specArg));
+  await ensureDirs(paths);
+  const specPath = await specFileForId(paths.specsDir)(id);
+  const resolvedSpec = Option.fold(
+    specPath,
+    () => die(`SPEC file not found for ID ${id} in ${paths.specsDir}`),
+    (p) => p,
+  );
+  const title = await specTitleFromFile(resolvedSpec);
+
+  const commits = await findImplementingCommits(paths.projectRoot, id);
+  if (commits.length === 0) {
+    console.log("NO IMPLEMENTATION FOUND");
+    console.log(`No commits found matching "SPEC-${id}" in git log.`);
+    return;
+  }
+
+  const allFiles = Array.from(new Set(commits.flatMap((c) => c.files))).sort();
+  const daemonTouched = allFiles.some(
+    (f) => f.startsWith("src/server/") || f.startsWith("src/tlisp/"),
+  );
+  const run = sh(paths.projectRoot);
+  const diffs = await TaskEither.sequence(
+    commits.map((c) =>
+      TaskEither.tryCatch(
+        async () => (await run(["git", "show", "--format=", "--no-color", c.sha])).stdout,
+        (e) => e,
+      ),
+    ),
+  )
+    .run()
+    .then((e) =>
+      Either.fold(
+        e,
+        () => die("git show failed"),
+        (xs) => xs,
+      ),
+    );
+
+  const gatherDir = path.join(paths.reviewsDir, `SPEC-${id}-${stampForPath()}`);
+  if (!existsSync(gatherDir)) mkdirSync(gatherDir, { recursive: true });
+  const gatherPath = path.join(gatherDir, "gather.md");
+  await write(
+    gatherPath,
+    renderGatherBundle(id, resolvedSpec, title, commits, allFiles, daemonTouched, diffs),
+  );
 
   console.log(`SPEC_ID=${id}`);
-  console.log(`SPEC_PATH=${specPath}`);
+  console.log(`SPEC_PATH=${resolvedSpec}`);
   console.log(`GATHER_DIR=${gatherDir}`);
   console.log(`GATHER_PATH=${gatherPath}`);
   console.log(`COMMITS=${commits.map((c) => c.sha).join(",")}`);
-  console.log(`FILES_CHANGED=${filesArray.length}`);
+  console.log(`FILES_CHANGED=${allFiles.length}`);
   console.log(`DAEMON_TOUCHED=${daemonTouched ? "true" : "false"}`);
-}
+};
 
-// --- Subcommand: gates ---
+// ──────────────────────────── Subcommand: gates ────────────────────────────
 
-async function cmdGates(specArg: string, gatherDir: string): Promise<void> {
-  const id = normalizeSpecArg(specArg);
+const runGate = (
+  appendTo: string,
+  projectRoot: string,
+  failedRef: { failed: string },
+) => async (label: string, cmd: readonly string[]): Promise<boolean> => {
+  const header = `\n## Gate: ${label}\n\n\`\`\`\n`;
+  const r = await sh(projectRoot)(cmd);
+  const body = r.stdout + r.stderr + (r.ok ? "" : `\n[exit ${r.exitCode}]\n`);
+  await appendFile(appendTo, header + body + "```\n");
+  if (!r.ok) {
+    failedRef.failed = failedRef.failed ? `${failedRef.failed}, ${label}` : label;
+    return false;
+  }
+  return true;
+};
+
+const cmdGates = async (paths: Paths, specArg: string, gatherDir: string): Promise<void> => {
+  const id = dieOnLeft(normalizeSpecArg(specArg));
   if (!gatherDir || !existsSync(gatherDir)) {
     die(`--gather-dir required and must exist: ${gatherDir}`);
   }
   const gatherPath = path.join(gatherDir, "gather.md");
   if (!existsSync(gatherPath)) die(`Gather bundle not found: ${gatherPath}`);
 
-  // Re-derive daemonTouched by reading it from the gather bundle.
+  // Re-derive daemonTouched from the bundle.
   const text = await file(gatherPath).text();
   const dm = text.match(/^## Daemon-touched:\s*(true|false)/m);
   const daemonTouched = dm ? dm[1] === "true" : false;
 
-  let failed = "";
-  const runGate = async (label: string, cmd: string[]): Promise<boolean> => {
-    const header = `\n## Gate: ${label}\n\n\`\`\`\n`;
-    const r = await sh(cmd);
-    const body = r.stdout + r.stderr + (r.ok ? "" : `\n[exit ${r.exitCode}]\n`);
-    await appendFile(gatherPath, header + body + "```\n");
-    if (!r.ok) {
-      failed = failed ? `${failed}, ${label}` : label;
-      return false;
-    }
-    return true;
-  };
+  const failedRef = { failed: "" };
+  const gate = runGate(gatherPath, paths.projectRoot, failedRef);
 
-  await runGate("typecheck:src", ["bun", "run", "typecheck:src"]);
-  await runGate("test:unit", ["bun", "run", "test:unit"]);
+  await gate("typecheck:src", ["bun", "run", "typecheck:src"]);
+  await gate("test:unit", ["bun", "run", "test:unit"]);
   if (daemonTouched) {
-    // Resolve daemon scripts via .zcode/skills/ then .claude/skills/ fallback
-    // (same fix as run.ts — tmax-daemon ships under .claude/skills/ today).
-    const stopScript = resolveDaemonScript("stop_daemon.py");
-    const startScript = resolveDaemonScript("start_daemon.py");
-    await runGate("daemon-restart", ["uv", "run", stopScript]);
-    await runGate("daemon-start", ["uv", "run", startScript, PROJECT_ROOT]);
-    await runGate("test:daemon", ["bun", "run", "test:daemon"]);
+    await gate("daemon-restart", ["uv", "run", daemonScript("stop_daemon.py")]);
+    await gate("daemon-start", ["uv", "run", daemonScript("start_daemon.py"), paths.projectRoot]);
+    await gate("test:daemon", ["bun", "run", "test:daemon"]);
   }
 
-  if (failed) {
-    console.log(`GATES_FAILED: ${failed}`);
+  if (failedRef.failed) {
+    console.log(`GATES_FAILED: ${failedRef.failed}`);
     process.exit(1);
   }
   console.log("GATES_PASS");
-}
+};
 
-// --- Subcommand: record ---
+// ──────────────────────────── Subcommand: record ────────────────────────────
 
-async function writeEntry(
-  id: string,
-  update: (e: ProgressEntry) => ProgressEntry,
-): Promise<void> {
-  await ensureProgressFile();
-  const progress = await readProgress();
-  const now = ts();
-  const idx = progress.entries.findIndex((e) => e.spec_id === id);
-  if (idx === -1) {
-    const fresh: ProgressEntry = {
-      spec_id: id,
-      status: "not_started",
-      created_at: now,
-      updated_at: now,
-    };
-    progress.entries.push({ ...update(fresh), updated_at: now });
-  } else {
-    progress.entries[idx] = { ...update(progress.entries[idx]!), updated_at: now };
-  }
-  await writeProgress(progress);
-}
-
-async function cmdRecord(specArg: string, status: string): Promise<void> {
-  const id = normalizeSpecArg(specArg);
+const cmdRecord = async (paths: Paths, specArg: string, status: string): Promise<void> => {
+  const id = dieOnLeft(normalizeSpecArg(specArg));
   if (status !== "done" && status !== "failed") {
     die(`status must be done or failed, got: ${status}`);
   }
-  await ensureProgressFile();
-  const commit = await sh(["git", "rev-parse", "--short", "HEAD"]);
-  const commitSha = commit.stdout.trim();
-  await writeEntry(id, (e) => ({
-    ...e,
-    status: status as EntryStatus,
-    commit: commitSha,
-    completed_at: ts(),
-    last_error: status === "failed" ? "patch-review found gaps" : null,
-  }));
+  await ensureProgressFile(paths);
+  const headRes = await sh(paths.projectRoot)(["git", "rev-parse", "--short", "HEAD"]);
+  const commitSha = headRes.stdout.trim();
+
+  const now = ts();
+  const progress = await readProgress(paths);
+  const updated: Progress = {
+    ...progress,
+    entries: upsertEntry(progress.entries, id, now, (e) => ({
+      ...e,
+      status: status as EntryStatus,
+      commit: commitSha,
+      completed_at: now,
+      last_error: status === "failed" ? "patch-review found gaps" : null,
+    })),
+  };
+  await writeProgress(paths, updated);
   console.log(`RECORDED id=${id} status=${status} commit=${commitSha}`);
-}
+};
 
-// --- Dispatch ---
+// ──────────────────────────── Dispatch ────────────────────────────
 
-const sub = process.argv[2] ?? "";
-let args = process.argv.slice(3);
-
-// Parse and strip the optional --root <path> flag. When present, re-point
-// PROJECT_ROOT and derived paths at the given root (e.g. a worktree). This
-// must happen before any subcommand runs so gather/gates/record all see the
-// overridden paths. Missing value is a hard error (avoid silently defaulting).
-const rootIdx = args.indexOf("--root");
-if (rootIdx !== -1) {
-  const rootVal = args[rootIdx + 1];
-  if (!rootVal) die("--root requires a path argument");
-  applyRootOverride(rootVal);
-  args = args.filter((_, i) => i !== rootIdx && i !== rootIdx + 1);
-}
-
-try {
-  switch (sub) {
+const dispatch = (opts: Opts): Promise<void> => {
+  const paths = makePaths(opts.projectRoot);
+  const [a0, a1] = opts.positional;
+  switch (opts.sub) {
     case "gather":
-      if (!args[0]) die("Usage: gather <SPEC> [--root <path>]");
-      await cmdGather(args[0]);
-      break;
+      if (!a0) die("Usage: gather <SPEC> [--root <path>]");
+      return cmdGather(paths, a0);
     case "gates": {
-      if (!args[0]) die("Usage: gates <SPEC> --gather-dir <path> [--root <path>]");
-      const specArg = args[0];
-      const dirFlag = args.indexOf("--gather-dir");
-      const gatherDir = dirFlag !== -1 ? args[dirFlag + 1] : "";
-      await cmdGates(specArg, gatherDir ?? "");
-      break;
+      if (!a0) die("Usage: gates <SPEC> --gather-dir <path> [--root <path>]");
+      const dirIdx = opts.positional.indexOf("--gather-dir");
+      const gatherDir = dirIdx !== -1 ? opts.positional[dirIdx + 1] : "";
+      return cmdGates(paths, a0, gatherDir ?? "");
     }
     case "record":
-      if (!args[0] || !args[1]) die("Usage: record <SPEC> <done|failed> [--root <path>]");
-      await cmdRecord(args[0], args[1]);
-      break;
+      if (!a0 || !a1) die("Usage: record <SPEC> <done|failed> [--root <path>]");
+      return cmdRecord(paths, a0, a1);
     default:
-      die(`Unknown subcommand: ${sub}. Try: gather | gates | record`);
+      return die(`Unknown subcommand: ${opts.sub}. Try: gather | gates | record`);
   }
-} catch (err) {
-  die(err instanceof Error ? err.message : String(err));
-}
+};
+
+const opts = dieOnLeft(parseArgs(process.argv));
+await dispatch(opts).catch((e) => die(e instanceof Error ? e.message : String(e)));

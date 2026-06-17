@@ -1,6 +1,6 @@
 ---
 name: tmax-spec-loop
-description: "Pick the next unstarted SPEC, implement it in an isolated git worktree, verify with typecheck + tests + daemon restart, audit against the SPEC's acceptance criteria via patch-review, commit on green, record progress, return. Up to 3 reflect-refine retries per invocation: on verify failure OR audit GAPS the failing gate/excerpt or audit findings are fed back to the sub-agent and re-dispatched. done requires both VERIFY OK and audit VERDICT: PASS and an empty DEFERRED.md. Triggers on: tmax-spec-loop, spec loop, next spec, implement next spec."
+description: "Pick the next unstarted SPEC, implement it in an isolated git worktree, verify with typecheck + tests + daemon restart, audit against the SPEC's acceptance criteria via tmax-patch-review, commit on green, record progress, return. Up to 3 reflect-refine retries per invocation: on verify failure OR audit GAPS the failing gate/excerpt or audit findings are fed back to the sub-agent and re-dispatched. done requires both VERIFY OK and audit VERDICT: PASS and an empty DEFERRED.md. Triggers on: tmax-spec-loop, spec loop, next spec, implement next spec."
 argument-hint: '[next | dry-run | status | reset <SPEC-ID>]'
 allowed-tools: Bash, Read, Write, Edit, Glob, Grep, Agent
 user-invocable: true
@@ -14,7 +14,7 @@ One iteration of an autonomous loop over `docs/specs/SPEC-*.md`. Each invocation
 2. **Worktree** — create `.worktrees/spec-<id>` on branch `spec-loop/<id>`.
 3. **Reflect-refine loop (up to 3 attempts)** — dispatch a Claude Code sub-agent (via Agent tool) with the SPEC content + the standard verification gates. On verify failure, feed the failing gate + excerpt back to the sub-agent and re-dispatch. Same worktree across all retries.
 4. **Verify** — `bun run typecheck`, `bun run test:unit`, and (if `src/server/` was touched) restart the daemon per `docs/learnings.md` and run `bun run test:daemon`.
-5. **Audit gate** — after VERIFY OK, run the patch-review auditor against the worktree's branch. Only `VERDICT: PASS` proceeds to `done`. `GAPS` feeds the audit findings back into the reflect-refine loop (same 3-attempt budget).
+5. **Audit gate** — after VERIFY OK, run the tmax-patch-review auditor against the worktree's branch. Only `VERDICT: PASS` proceeds to `done`. `GAPS` feeds the audit findings back into the reflect-refine loop (same 3-attempt budget).
 6. **Deferred check** — after audit PASS, read `DEFERRED.md` from the worktree. If non-empty, STOP for human approval (no autonomous descopes).
 7. **Record** — write `{spec_id, status, worktree, branch, commit, attempts, attempt_log, files, last_error}` to `.spec-loop/progress.json`.
 8. **Commit on green** — leave the worktree on its branch for review; do NOT merge to main.
@@ -87,10 +87,10 @@ This skill does ONE iteration per invocation. To walk the backlog:
 ## What changed from v1
 
 - **Inner reflect-refine loop (Step 4).** Previously: one dispatch per invocation; on `VERIFY FAILED` the loop exited. Now: up to 3 dispatches per invocation, with the failing gate + excerpt fed back to the sub-agent on retries. Turns the loop from one-shot to self-correcting.
-- **Audit gate (Step 4f).** After VERIFY OK, the patch-review auditor runs against the worktree's branch. Only `VERDICT: PASS` proceeds to `done`. `GAPS` feeds the audit findings (criteria + edge cases) back into the reflect-refine loop — much richer feedback than "tests failed". Requires `audit.ts --root` to scan the worktree's git log, not main's.
+- **Audit gate (Step 4f).** After VERIFY OK, the tmax-patch-review auditor runs against the worktree's branch. Only `VERDICT: PASS` proceeds to `done`. `GAPS` feeds the audit findings (criteria + edge cases) back into the reflect-refine loop — much richer feedback than "tests failed". Requires `audit.ts --root` to scan the worktree's git log, not main's.
 - **Deferred check (Step 4g).** After audit PASS, the orchestrator reads `DEFERRED.md` from the worktree. A non-empty file is a human gate — the orchestrator STOPS and asks whether to approve the deferrals, re-dispatch, or fail. No silent descopes possible.
 - **`attempt-record` subcommand + `attempt_log[]` ledger field.** Per-attempt history for observability; the top-level `attempts` counter is unchanged.
-- **Daemon-script path fallback.** `verify` now resolves `tmax-daemon/scripts/*.py` via `.zcode/skills/` first, then `.claude/skills/` (the latter is where they actually ship today). Fixes the spurious daemon-gate failure we hit during SPEC-039 patch-review.
+- **Daemon-script path fallback.** `verify` now resolves `tmax-daemon/scripts/*.py` via `.zcode/skills/` first, then `.claude/skills/` (the latter is where they actually ship today). Fixes the spurious daemon-gate failure we hit during SPEC-039 tmax-patch-review.
 
 ---
 
@@ -135,7 +135,7 @@ For `ATTEMPT_NUM` starting at 1:
   - If `ATTEMPT_NUM < 3` → increment `ATTEMPT_NUM`, go back to 4a with the verify feedback.
   - If `ATTEMPT_NUM == 3` → go to Step 5 with `status=failed` and `last_error` = the final `FAILED_GATE` + `FAILURE_EXCERPT`.
 
-  **4f — Audit gate (NEW — only reached on VERIFY OK).** Run the patch-review auditor against the worktree's branch. This is the criteria check that gates `done` — tests passing is necessary but not sufficient.
+  **4f — Audit gate (NEW — only reached on VERIFY OK).** Run the tmax-patch-review auditor against the worktree's branch. This is the criteria check that gates `done` — tests passing is necessary but not sufficient. The auditor lives at `.zcode/skills/tmax-patch-review` (referred to below as `<patch-review-skill>`).
 
   1. **Gather.** `bun <patch-review-skill>/scripts/audit.ts gather <SPEC_ID> --root <WORKTREE_PATH>`. Emits `GATHER_DIR=<path>`, `GATHER_PATH=<path>/gather.md`, `COMMITS=<sha1>,...`. If it reports `NO IMPLEMENTATION FOUND`, the implementer didn't put `SPEC-<ID>` in commit subjects — record `status=failed`, `last_error="audit: no implementing commits found (commit subjects must include SPEC-<ID>)"`, go to Step 6.
   2. **Gates (re-run via audit script).** `bun <patch-review-skill>/scripts/audit.ts gates <SPEC_ID> --gather-dir <GATHER_DIR> --root <WORKTREE_PATH>`. Emits `GATES_PASS` or `GATES_FAILED: <which>`. (These gates overlap with the verify step, but the audit bundle records the output for the auditor to reference.)

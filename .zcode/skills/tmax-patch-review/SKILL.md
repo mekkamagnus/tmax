@@ -1,12 +1,12 @@
 ---
-name: patch-review
-description: "Audit a SPEC's shipped implementation against its acceptance criteria. Verifies every criterion is implemented, tests exist and pass, and no edge cases were missed. On PASS, marks the SPEC done in .spec-loop/progress.json. On GAPS, appends an audit-findings section to the SPEC and dispatches to /tmax-spec-loop for rework. Triggers on: patch-review, audit spec, review spec implementation."
+name: tmax-patch-review
+description: "Audit a SPEC's shipped implementation against its acceptance criteria. Verifies every criterion is implemented, tests exist and pass, and no edge cases were missed. On PASS, marks the SPEC done in .spec-loop/progress.json. On GAPS, appends an audit-findings section to the SPEC and dispatches to /tmax-spec-loop for rework. Triggers on: tmax-patch-review, patch-review, audit spec, review spec implementation."
 argument-hint: '<SPEC-ID-or-path> [--dispatch]'
 allowed-tools: Bash, Read, Write, Edit, Glob, Grep, Agent
 user-invocable: true
 ---
 
-# patch-review
+# tmax-patch-review
 
 Audit a SPEC's shipped implementation. One SPEC per invocation.
 
@@ -18,14 +18,14 @@ Given a SPEC ID or path, this skill answers two questions:
 The verdict is binary:
 
 - **PASS** — every criterion implemented, tests exist and pass, gates green, no missed edge cases. Writes a "Verified" note to the SPEC, marks `done` in `.spec-loop/progress.json`.
-- **GAPS** — one or more criteria missing/incorrect, tests missing/failing, or edge cases unhandled. Appends an `## Audit findings (patch-review <timestamp>)` section to the SPEC enumerating each gap, then dispatches the SPEC to `/tmax-spec-loop` for rework (unless `--dispatch` is omitted and the user wants to review first).
+- **GAPS** — one or more criteria missing/incorrect, tests missing/failing, or edge cases unhandled. Appends an `## Audit findings (tmax-patch-review <timestamp>)` section to the SPEC enumerating each gap, then dispatches the SPEC to `/tmax-spec-loop` for rework (unless `--dispatch` is omitted and the user wants to review first).
 
 ## Usage
 
 ```
-/patch-review 039                       # audit SPEC-039, do not auto-dispatch on gaps
-/patch-review docs/specs/SPEC-039-*.md  # same, by path
-/patch-review 039 --dispatch            # audit + auto-dispatch to /tmax-spec-loop if gaps found
+/tmax-patch-review 039                       # audit SPEC-039, do not auto-dispatch on gaps
+/tmax-patch-review docs/specs/SPEC-039-*.md  # same, by path
+/tmax-patch-review 039 --dispatch            # audit + auto-dispatch to /tmax-spec-loop if gaps found
 ```
 
 ## How it works
@@ -48,7 +48,7 @@ The verdict is binary:
 - The SPEC exists in `docs/specs/`.
 - The implementation has been committed (not just working-tree changes). The gather step searches commit messages for `SPEC-<ID>`.
 - `bun` on PATH.
-- Clean working tree on `main` is NOT required — patch-review is read-only on the main checkout. The sub-agent's audits run against `HEAD`.
+- Clean working tree on `main` is NOT required — tmax-patch-review is read-only on the main checkout. The sub-agent's audits run against `HEAD`.
 
 ## Out of scope
 
@@ -105,13 +105,13 @@ Final: <one-paragraph summary>
 
 **Step 4 — Read the verdict.** Use Read on `<GATHER_DIR>/verdict.md`. Parse the `VERDICT:` line.
 
-**Step 5a — On PASS.** Run `bun scripts/audit.ts record <SPEC> done`. Append a `> Verified by patch-review on <date>` line under the SPEC's title (use Edit, not Write). Print the summary to the user.
+**Step 5a — On PASS.** Run `bun scripts/audit.ts record <SPEC> done`. Append a `> Verified by tmax-patch-review on <date>` line under the SPEC's title (use Edit, not Write). Print the summary to the user.
 
-**Step 5b — On GAPS.** Append the verdict's criteria/edge-case findings to the SPEC as an `## Audit findings (patch-review <timestamp>)` section (use Edit). Run `bun scripts/audit.ts record <SPEC> failed`. If `--dispatch` was passed, immediately invoke `/tmax-spec-loop next` (the picker will pick this SPEC because its status is now `failed`/`not_started`). Otherwise, print the gaps to the user and suggest running `/tmax-spec-loop <SPEC>` to rework.
+**Step 5b — On GAPS.** Append the verdict's criteria/edge-case findings to the SPEC as an `## Audit findings (tmax-patch-review <timestamp>)` section (use Edit). Run `bun scripts/audit.ts record <SPEC> failed`. If `--dispatch` was passed, immediately invoke `/tmax-spec-loop next` (the picker will pick this SPEC because its status is now `failed`/`not_started`). Otherwise, print the gaps to the user and suggest running `/tmax-spec-loop <SPEC>` to rework.
 
 **Step 6 — Report.** Print: SPEC ID, verdict (PASS/GAPS), files audited count, commits audited, gates result, and (on GAPS) a numbered list of the gaps with file references.
 
-**LAW — patch-review never edits implementation code.** It only edits SPECs (to append findings) and `.spec-loop/progress.json` (to record status). Fixing code is `/tmax-spec-loop`'s job.
+**LAW — tmax-patch-review never edits implementation code.** It only edits SPECs (to append findings) and `.spec-loop/progress.json` (to record status). Fixing code is `/tmax-spec-loop`'s job.
 
 **LAW — never claim PASS without citing implementation.** Every criterion marked IMPLEMENTED must cite `file:line`. Verdicts with uncited IMPLEMENTED marks are invalid.
 

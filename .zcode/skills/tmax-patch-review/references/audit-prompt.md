@@ -8,7 +8,7 @@ auditor sub-agent has no other context.
 
 - `{{SPEC_ID}}` — e.g. `039`
 - `{{SPEC_PATH}}` — absolute path to the SPEC markdown
-- `{{WORKTREE_PATH}}` — absolute path to the tree being audited (the main checkout for standalone `/patch-review`, or the `spec-loop/<id>` worktree when invoked from tmax-spec-loop's audit gate)
+- `{{WORKTREE_PATH}}` — absolute path to the tree being audited (the main checkout for standalone `/tmax-patch-review`, or the `spec-loop/<id>` worktree when invoked from tmax-spec-loop's audit gate)
 - `{{GATHER_PATH}}` — absolute path to the gather bundle (gather.md)
 - `{{GATHER_DIR}}` — absolute path to the gather directory (where verdict.md goes)
 - `{{CHECKLIST_PATH}}` — absolute path to criteria-checklist.md

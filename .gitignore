@@ -22,6 +22,7 @@ release/
 tmax-*
 !scripts/tmax-tmux-audit.sh
 !.zcode/skills/tmax-spec-loop/
+!.zcode/skills/tmax-patch-review/
 tmax.exe
 
 # IDE/Editor files
