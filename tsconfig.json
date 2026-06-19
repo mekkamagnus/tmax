@@ -20,7 +20,12 @@
     "src/**/*",
     "test/**/*",
     "scripts/**/*",
+    "adws/**/*",
     "*.ts",
     "*.tsx"
+  ],
+  "exclude": [
+    "adws/adw-run-e2e.ts",
+    "adws/adw-right-bracket-h.test.ts"
   ]
 }

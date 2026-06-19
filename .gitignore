@@ -70,3 +70,10 @@ __pycache__/
 
 # Patch-review working state (gather bundles + verdicts)
 .patch-reviews/
+
+# adw-plan agent state (per-run dispatcher + planner logs)
+agents/
+
+# Local environment secrets (never commit — contains API keys/tokens)
+.env
+.env.*
