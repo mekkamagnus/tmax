@@ -54,20 +54,31 @@ lifecycle events: ./agents/{adw-id}/planner/events.jsonl; raw output:
 interface ParsedArgs {
   description: string;
   forcedType?: PlanType;
+  id?: string;
 }
+
+/** 10-char Crockford Base32 ULID-timestamp — the workspace id shape. */
+const ADW_ID_RE = /^[0-9A-HJKMNP-TV-Z]{10}$/;
 
 function parseArgs(argv: string[]): Either<string, ParsedArgs> {
   const flags = new Set<PlanType>();
   let description = "";
-  for (const a of argv) {
+  let id: string | undefined;
+  for (let i = 0; i < argv.length; i++) {
+    const a = argv[i]!;
     if (a === "-h" || a === "--help") return Either.left(`__help__:${USAGE}`);
     else if (a === "--feature" || a === "--bug" || a === "--chore") flags.add(a.slice(2) as PlanType);
-    else if (description === "") description = a;
+    else if (a === "--id") {
+      const val = argv[++i];
+      if (val === undefined) return Either.left("--id requires a value.");
+      if (!ADW_ID_RE.test(val)) return Either.left(`--id must be a 10-char ULID-timestamp id (got "${val}").`);
+      id = val;
+    } else if (description === "") description = a;
     else return Either.left(`Unexpected extra argument: ${a}`);
   }
   if (flags.size > 1) return Either.left("Pass at most one of --feature/--bug/--chore.");
   if (!description) return Either.left(`__usage__:${USAGE}`);
-  return Either.right({ description, forcedType: flags.size === 1 ? [...flags][0] : undefined });
+  return Either.right({ description, forcedType: flags.size === 1 ? [...flags][0] : undefined, id });
 }
 
 // ---------------------------------------------------------------------------
@@ -231,16 +242,48 @@ export interface PlanResult {
  * Progress messages go to stderr (preserved from the CLI behavior); the final
  * "<id> <specPath>" stdout line is the caller's responsibility (main() prints it).
  */
-export function runPlan(description: string, forcedType?: PlanType): Promise<Either<string, PlanResult>> {
+/**
+ * The plan pipeline as a callable function. Classifies a description, dispatches
+ * to the matching skill (/feature|/bug|/chore), and records the run under
+ * agents/{id}/. Returns Either<string, PlanResult> — Left on failure, Right with
+ * the id + specPath (or null if the skill wrote no spec) on success.
+ *
+ * id (optional): a shared workspace id. When passed by an orchestrator, the
+ * planner writes its events under agents/{id}/planner/ but does NOT write
+ * adw-state.json — the orchestrator owns the workspace state. When omitted
+ * (standalone CLI use), the planner mints its own id and writes state itself.
+ *
+ * Progress messages go to stderr (preserved from the CLI behavior); the final
+ * "<id> <specPath>" stdout line is the caller's responsibility (main() prints it).
+ */
+export function runPlan(
+  description: string,
+  forcedType?: PlanType,
+  id?: string,
+): Promise<Either<string, PlanResult>> {
   // Inject the subprocess plumbing into the agent module.
   const deps: AgentDeps = { run, runCapture };
+
+  // ownsState = true when running standalone (no orchestrator driving this
+  // process). The orchestrator sets ADW_ORCHESTRATED=1 when spawning children;
+  // when set, this stage writes events under the shared id but skips writing
+  // adw-state.json — the orchestrator owns the single workspace state.
+  // Keyed off the env var (not the presence of --id) so a human running
+  // `adw-plan.ts --id X "desc"` standalone still gets their own state file.
+  const ownsState = process.env.ADW_ORCHESTRATED !== "1";
+  const runId = id ?? adwId();
 
   // Mutable ref so the error handler can access the id after short-circuit.
   let currentId: string | null = null;
 
+  // When orchestrated (ownsState=false), skip state writes — the orchestrator
+  // owns the single workspace adw-state.json. Return a no-op Right<undefined>.
+  const recordState = (stateId: string, state: Record<string, unknown>): TaskEither<string, void> =>
+    ownsState ? writeState(stateId, state) : TaskEither.right<void, string>(undefined);
+
   const program = TaskEither
     .right<PipelineInput, string>({
-      id: adwId(),
+      id: runId,
       description,
       forcedType,
     })
@@ -249,7 +292,7 @@ export function runPlan(description: string, forcedType?: PlanType): Promise<Eit
     // missing, no agents/ dir is created)
     .flatMap((ctx: PipelineInput) => ensureClaude().map(() => ctx))
     // Step 1: write initial state + start event, then classify
-    .flatMap((ctx: PipelineInput) => writeState(ctx.id, { adw_id: ctx.id, description: ctx.description, forcedType: ctx.forcedType, status: "running" })
+    .flatMap((ctx: PipelineInput) => recordState(ctx.id, { adw_id: ctx.id, description: ctx.description, forcedType: ctx.forcedType, status: "running" })
       .tap(() => appendEvent(ctx.id, "planner", { event: "start", description: ctx.description }))
       .map(() => ctx)
     )
@@ -293,7 +336,7 @@ export function runPlan(description: string, forcedType?: PlanType): Promise<Eit
         spec_path: specPath,
         summary: ctx.outcome.kind === "noop" ? ctx.outcome.summary.slice(0, 400) : undefined,
       });
-      return writeState(ctx.id, { adw_id: ctx.id, description: ctx.description, type: ctx.type, status: "completed" }).map(() => ({
+      return recordState(ctx.id, { adw_id: ctx.id, description: ctx.description, type: ctx.type, status: "completed" }).map(() => ({
         id: ctx.id,
         specPath,
         type: ctx.type,
@@ -305,7 +348,7 @@ export function runPlan(description: string, forcedType?: PlanType): Promise<Eit
     if (Either.isLeft(result)) {
       if (currentId) {
         appendEvent(currentId, "planner", { event: "error", detail: result.left });
-        return writeState(currentId, { adw_id: currentId, description, status: "failed" }).run().then(() =>
+        return recordState(currentId, { adw_id: currentId, description, status: "failed" }).run().then(() =>
           Either.left(result.left),
         );
       }
@@ -332,9 +375,9 @@ function main(): Promise<number> {
     return Promise.resolve(1);
   }
 
-  const { description, forcedType } = parsed.right;
+  const { description, forcedType, id } = parsed.right;
 
-  return runPlan(description, forcedType).then((result) => {
+  return runPlan(description, forcedType, id).then((result) => {
     if (Either.isLeft(result)) {
       process.stderr.write(`Error: ${result.left}\n`);
       return 2;
