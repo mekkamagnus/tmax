@@ -1,0 +1,170 @@
+;; monads.test.tlisp --- trt suite for std/monads (RFC-018 Step 1.5).
+;;
+;; Covers the Option/Either/Result/Validation/State/Reader/sync-Task constructs
+;; and the monad laws (left identity, right identity, associativity) for the
+;; monadic types. Runs under trt via `bin/trt` (the editor/daemon runtime), so
+;; std/monads resolves from src/tlisp/core/monads.tlisp through the module loader.
+
+(require-module std/monads)
+
+;; ── Option ────────────────────────────────────────────────────────────
+(deftest option-some-constructs-and-recognizes ()
+  (should-equal (some 5) (some 5))
+  (should-be-truthy (option-some? (some 5)))
+  (should-be-falsy (option-some? (none))))
+
+(deftest option-none-is-nil-sentinel ()
+  ;; (some nil) collapses to nil so None is unambiguous.
+  (should-equal (none) (some nil))
+  (should-be-falsy (option-some? (some nil))))
+
+(deftest option-map-applies-on-some ()
+  (should-equal (some 11) (option-map (lambda (x) (+ x 1)) (some 10)))
+  (should-equal (none) (option-map (lambda (x) (+ x 1)) (none))))
+
+(deftest option-bind-short-circuits-on-none ()
+  (should-equal (some 20) (option-bind (some 10) (lambda (x) (some (* x 2)))))
+  (should-equal (none) (option-bind (none) (lambda (x) (some (* x 2))))))
+
+(deftest option-or-and-default ()
+  (should-equal (some 1) (option-or (some 1) (some 2)))
+  (should-equal (some 2) (option-or (none) (some 2)))
+  (should-equal 5 (option-default (some 5) 0))
+  (should-equal 0 (option-default (none) 0)))
+
+;; ── Either ────────────────────────────────────────────────────────────
+(deftest either-predicates ()
+  (should-be-truthy (either-right? (either-right 1)))
+  (should-be-falsy (either-right? (either-left 1)))
+  (should-be-truthy (either-left? (either-left "e")))
+  (should-be-falsy (either-left? (either-right 1))))
+
+(deftest either-map-passes-left-through ()
+  (should-equal (either-right 4) (either-map (lambda (x) (* x 2)) (either-right 2)))
+  (should-equal (either-left "bad") (either-map (lambda (x) (* x 2)) (either-left "bad"))))
+
+(deftest either-bind-short-circuits-on-left ()
+  ;; This is the error-threading primitive the adw orchestrator's flatMap/mapLeft maps to.
+  (should-equal (either-right 6) (either-bind (either-right 5) (lambda (x) (either-right (+ x 1)))))
+  (should-equal (either-left "bad") (either-bind (either-left "bad") (lambda (x) (either-right (+ x 1))))))
+
+(deftest either-fold-and-get-or-else ()
+  (should-equal "no" (either-fold (either-left "no") (lambda (e) e) (lambda (v) "yes")))
+  (should-equal "yes" (either-fold (either-right 1) (lambda (e) "no") (lambda (v) "yes")))
+  (should-equal 1 (either-get-or-else (either-right 1) 99))
+  (should-equal 99 (either-get-or-else (either-left "e") 99)))
+
+;; ── Either monad laws ─────────────────────────────────────────────────
+(deftest either-law-left-identity ()
+  ;; bind (right x) f ≡ f x
+  (should-equal
+    (either-bind (either-right 5) (lambda (x) (either-right (* x 2))))
+    (either-right 10)))
+
+(deftest either-law-right-identity ()
+  ;; bind m right ≡ m
+  (should-equal
+    (either-bind (either-right 5) (lambda (x) (either-right x)))
+    (either-right 5)))
+
+(deftest either-law-associativity ()
+  (defvar m (either-right 9))
+  (defvar f (lambda (x) (either-right (+ x 1))))
+  (defvar g (lambda (x) (either-right (* x 10))))
+  ;; bind (bind m f) g ≡ bind m (λx. bind (f x) g)
+  (should-equal
+    (either-bind (either-bind m f) g)
+    (either-bind m (lambda (x) (either-bind (funcall f x) g)))))
+
+;; ── Result (Either relabeled) ─────────────────────────────────────────
+(deftest result-map-and-bind ()
+  (should-equal (ok 4) (result-map (lambda (x) (+ x 1)) (ok 3)))
+  (should-equal (err "e") (result-map (lambda (x) (+ x 1)) (err "e")))
+  (should-equal (ok 4) (result-bind (ok 3) (lambda (x) (ok (+ x 1)))))
+  (should-equal (err "e") (result-bind (err "e") (lambda (x) (ok x)))))
+
+;; ── Validation (applicative, error-accumulating) ──────────────────────
+(deftest validation-success-and-failure-predicates ()
+  (should-be-truthy (vsuccess? (vsuccess 1)))
+  (should-be-truthy (vfailure? (vfailure (list "e")))))
+
+(deftest lift2-accumulates-errors ()
+  ;; Both failures → combined error list (NOT short-circuit).
+  (should-equal (vfailure (list "e1" "e2"))
+    (lift2 (lambda (a) (lambda (b) (+ a b))) (vfailure (list "e1")) (vfailure (list "e2"))))
+  ;; One failure → that failure's errors.
+  (should-equal (vfailure (list "e1"))
+    (lift2 (lambda (a) (lambda (b) (+ a b))) (vfailure (list "e1")) (vsuccess 2)))
+  ;; Both success → applied function.
+  (should-equal (vsuccess 5)
+    (lift2 (lambda (a) (lambda (b) (+ a b))) (vsuccess 2) (vsuccess 3))))
+
+(deftest validation-validate-collects-or-accumulates ()
+  (should-equal (vsuccess (list 1 2 3))
+    (validation-validate (list (vsuccess 1) (vsuccess 2) (vsuccess 3))))
+  (should-equal (vfailure (list "a" "b"))
+    (validation-validate (list (vfailure (list "a")) (vfailure (list "b")))))
+  (should-equal (vfailure (list "a"))
+    (validation-validate (list (vfailure (list "a")) (vsuccess 1))))
+  (should-equal (vsuccess (list)) (validation-validate (list))))
+
+;; ── State ─────────────────────────────────────────────────────────────
+(deftest state-get-put-and-pure ()
+  (should-equal (list 5 5) (state-run (state-get) 5))
+  (should-equal (list nil 7) (state-run (state-put 7) 0))
+  (should-equal (list 42 9) (state-run (state-pure 42) 9)))
+
+(deftest state-modify-updates-state ()
+  (should-equal (list nil 15) (state-run (state-modify (lambda (s) (+ s 10))) 5)))
+
+(deftest state-bind-threads-state ()
+  ;; get then put 5: value is nil (put's value), state becomes 5.
+  (should-equal (list nil 5) (state-run (state-bind (state-get) (lambda (_) (state-put 5))) 0)))
+
+(deftest state-law-right-identity ()
+  ;; bind (pure v) f ≡ f v  (run both under the same initial state).
+  (defvar sa-f (lambda (v) (state-put (+ v 100))))
+  (should-equal
+    (state-run (state-bind (state-pure 5) sa-f) 0)
+    (state-run (funcall sa-f 5) 0)))
+
+;; ── Reader ────────────────────────────────────────────────────────────
+(deftest reader-ask-and-pure ()
+  (should-equal (list 1 2) (reader-run (reader-ask) (list 1 2)))
+  (should-equal 99 (reader-run (reader-pure 99) (list 1 2))))
+
+(deftest reader-ask-with-projects-env ()
+  (should-equal 7 (reader-run (reader-ask-with car) (list 7 8))))
+
+(deftest reader-bind-threads-env ()
+  (should-equal 99 (reader-run (reader-bind (reader-ask) (lambda (env) (reader-pure (car env)))) (list 99))))
+
+(deftest reader-law-right-identity ()
+  (defvar r-f (lambda (v) (reader-pure (+ v 1))))
+  (should-equal
+    (reader-run (reader-bind (reader-pure 5) r-f) (list 1 2))
+    (reader-run (funcall r-f 5) (list 1 2))))
+
+;; ── Task (synchronous, lazy) ──────────────────────────────────────────
+(deftest task-pure-lift-and-run ()
+  (should-equal 42 (task-run (task-pure 42)))
+  (should-equal 7 (task-run (task-lift (lambda () 7)))))
+
+(deftest task-map-is-lazy ()
+  ;; The mapped function is only applied when the task is run.
+  (defvar side-effect-box (list 0))
+  (defvar mapped (task-map (task-pure 5)
+                           (lambda (x) (progn (set! side-effect-box (list (+ (car side-effect-box) 1))) (* x 2)))))
+  ;; Not run yet → side effect has not fired.
+  (should-equal (list 0) side-effect-box)
+  (should-equal 10 (task-run mapped))
+  ;; Running applied the side effect exactly once.
+  (should-equal (list 1) side-effect-box))
+
+(deftest task-bind-composes ()
+  (should-equal 9 (task-run (task-bind (task-pure 3) (lambda (x) (task-pure (* x x)))))))
+
+(deftest task-law-right-identity ()
+  ;; bind (pure v) f ≡ f v
+  (defvar t-f (lambda (v) (task-pure (+ v 1))))
+  (should-equal (task-run (task-bind (task-pure 5) t-f)) (task-run (funcall t-f 5))))

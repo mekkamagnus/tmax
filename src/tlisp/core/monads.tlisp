@@ -1,0 +1,284 @@
+(defmodule std/monads
+  (export
+    ;; Option
+    some none option-some? option-map option-bind option-or option-default
+    ;; Either
+    either-right either-left either-left? either-right? either-map either-bind either-fold either-get-or-else
+    ;; Result (Either relabeled)
+    ok err ok? err? result-map result-bind
+    ;; Validation (applicative, error-accumulating)
+    vsuccess vfailure vsuccess? vfailure? lift2 lift3 validation-validate
+    ;; State
+    state-get state-put state-modify state-pure state-bind state-run
+    ;; Reader
+    reader-ask reader-ask-with reader-pure reader-bind reader-run
+    ;; Task (synchronous lazy thunk)
+    task-pure task-lift task-map task-bind task-run)
+
+;; monads.tlisp --- Pure-functional constructs (Option/Either/Result/Validation/
+;;                  State/Reader/Task) for T-Lisp, built from closures + tagged
+;;                  lists. No new value types, no evaluator changes.
+;;
+;; See RFC-018 Step 1.5. The async Task/TaskEither family composes on top of
+;; `make-promise` (RFC-018 Step 1.4) + `async-let` and is deferred to Tier 3.
+;;
+;; Representation:
+;;   Option    — (some v) | nil            (nil doubles as None)
+;;   Either    — (right v) | (left e)
+;;   Result    — (ok v)    | (err e)       (same shape as Either, separate tags)
+;;   Validation— (ok v)    | (err (e ...)) (err payload is always a list)
+;;   State     — (lambda (s) (list value new-s))
+;;   Reader    — (lambda (env) value)
+;;   Task      — (lambda () value)         (lazy; run via task-run)
+;;
+;; Internal convention: a tagged cell is (TAG payload). The payload is the
+;; cadr — accessed here as (car (cdr x)) because T-Lisp has no cadr builtin.
+
+(defun monads--value (cell)
+  "Return the payload (cadr) of a tagged CELL."
+  (car (cdr cell)))
+
+(defun monads--tag (cell)
+  "Return the tag (car) of a tagged CELL."
+  (car cell))
+
+;; ═══════════════════════════════════════════════════════════════════════
+;; Option
+;; ═══════════════════════════════════════════════════════════════════════
+(defun some (value)
+  "Wrap VALUE in Some. nil (the None sentinel) is never wrapped."
+  (if (null value) nil (list 'some value)))
+
+(defun none ()
+  "The None value."
+  nil)
+
+(defun option-some? (opt)
+  "Return t if OPT is a Some, nil if it is None."
+  (and (not (null opt)) (equal (monads--tag opt) 'some)))
+
+(defun option-map (f opt)
+  "Apply F to the inner value of OPT if Some; None passes through."
+  (if (option-some? opt) (some (funcall f (monads--value opt))) nil))
+
+(defun option-bind (opt f)
+  "Monadic bind: if OPT is Some(v), call (F v) (which must return an Option)."
+  (if (option-some? opt) (funcall f (monads--value opt)) nil))
+
+(defun option-or (opt alt)
+  "Return OPT if Some, otherwise ALT."
+  (if (option-some? opt) opt alt))
+
+(defun option-default (opt default)
+  "Unwrap OPT, falling back to DEFAULT if None."
+  (if (option-some? opt) (monads--value opt) default))
+
+;; ═══════════════════════════════════════════════════════════════════════
+;; Either — explicit error channel with Left short-circuit
+;; ═══════════════════════════════════════════════════════════════════════
+(defun either-right (value)
+  "Construct a Right (success)."
+  (list 'right value))
+
+(defun either-left (error)
+  "Construct a Left (failure)."
+  (list 'left error))
+
+(defun either-left? (e)
+  "Return t if E is a Left."
+  (and (not (null e)) (equal (monads--tag e) 'left)))
+
+(defun either-right? (e)
+  "Return t if E is a Right."
+  (and (not (null e)) (equal (monads--tag e) 'right)))
+
+(defun either-map (f e)
+  "Apply F to a Right value; Left passes through unchanged."
+  (if (either-left? e) e (either-right (funcall f (monads--value e)))))
+
+(defun either-bind (e f)
+  "Monadic bind (>>=): on Right(v) call (F v); on Left, short-circuit."
+  (if (either-left? e) e (funcall f (monads--value e))))
+
+(defun either-fold (e on-left on-right)
+  "Collapse an Either: apply ON-LEFT to a Left's payload or ON-RIGHT to a Right's."
+  (if (either-left? e) (funcall on-left (monads--value e)) (funcall on-right (monads--value e))))
+
+(defun either-get-or-else (e default)
+  "Unwrap a Right, or return DEFAULT for a Left."
+  (if (either-left? e) default (monads--value e)))
+
+;; ═══════════════════════════════════════════════════════════════════════
+;; Result — Either with different tag names (for code that uses both idioms)
+;; ═══════════════════════════════════════════════════════════════════════
+(defun ok (value)
+  "Construct an Ok (success)."
+  (list 'ok value))
+
+(defun err (error)
+  "Construct an Err (failure)."
+  (list 'err error))
+
+(defun ok? (r)
+  "Return t if R is Ok."
+  (and (not (null r)) (equal (monads--tag r) 'ok)))
+
+(defun err? (r)
+  "Return t if R is Err."
+  (and (not (null r)) (equal (monads--tag r) 'err)))
+
+(defun result-map (f r)
+  "Apply F to an Ok value; Err passes through."
+  (if (err? r) r (ok (funcall f (monads--value r)))))
+
+(defun result-bind (r f)
+  "Monadic bind for Result: short-circuits on Err."
+  (if (err? r) r (funcall f (monads--value r))))
+
+;; ═══════════════════════════════════════════════════════════════════════
+;; Validation — applicative, accumulates ALL errors (does not short-circuit)
+;; ═══════════════════════════════════════════════════════════════════════
+;; The Err payload is ALWAYS a list of errors so accumulation is list-append.
+(defun vsuccess (value)
+  "Construct a successful Validation."
+  (list 'ok value))
+
+(defun vfailure (errors)
+  "Construct a failed Validation. ERRORS is a single error or a list (normalized to a list)."
+  (list 'err (if (listp errors) errors (list errors))))
+
+(defun vsuccess? (v)
+  "Return t if V is a successful Validation."
+  (and (not (null v)) (equal (monads--tag v) 'ok)))
+
+(defun vfailure? (v)
+  "Return t if V is a failed Validation."
+  (and (not (null v)) (equal (monads--tag v) 'err)))
+
+(defun lift2 (f a b)
+  "Applicative lift for a curried F over two validations; accumulates errors."
+  (cond
+    ((vfailure? a) (if (vfailure? b)
+                     (vfailure (append (monads--value a) (monads--value b)))
+                     (vfailure (monads--value a))))
+    ((vfailure? b) (vfailure (monads--value b)))
+    (t (vsuccess (funcall (funcall f (monads--value a)) (monads--value b))))))
+
+(defun lift3 (f a b c)
+  "Applicative lift for a curried F across three validations; accumulates errors."
+  (let* ((ab (lift2 f a b)))
+    (if (vfailure? ab)
+      ab
+      (if (vfailure? c)
+        c
+        ;; ab is (ok (f av bv)) a curried function; c is (ok cv). Apply.
+        (let* ((fab (monads--value ab))
+               (cv (monads--value c)))
+          (vsuccess (funcall fab cv)))))))
+
+;; Walk a list of Validations: success yields a list of inner values; any
+;; failure yields the combined error list. Iterative (no named let / reduce).
+;; Note: accumulators are seeded with (list), not nil — T-Lisp's cons rejects
+;; nil as a tail because nil is its own type rather than an empty list.
+(defun validation-validate (validations)
+  "Reduce a list of Validations: success yields inner values; failure yields combined errors."
+  (let* ((vs validations)
+         (acc (list))
+         (failed nil))
+    (while (and (not failed) (not (null vs)))
+      (let* ((current (car vs)))
+        (if (vfailure? current)
+          (set! failed (monads--value current))
+          (progn
+            (set! acc (append acc (list (monads--value current))))
+            (set! vs (cdr vs)))))
+      ;; advance past a failure so the drain loop doesn't re-count it
+      (if (and failed (not (null vs)))
+        (set! vs (cdr vs))))
+    (while (and failed (not (null vs)))
+      (let* ((current (car vs)))
+        (if (vfailure? current)
+          (set! failed (append failed (monads--value current)))))
+      (set! vs (cdr vs)))
+    (if failed (vfailure failed) (vsuccess acc))))
+
+;; ═══════════════════════════════════════════════════════════════════════
+;; State — s -> (value, new-state)
+;; ═══════════════════════════════════════════════════════════════════════
+(defun state-get ()
+  "State action: yield (s s) — reads state as both value and new state."
+  (lambda (s) (list s s)))
+
+(defun state-put (new-s)
+  "State action: replace state with NEW-S, value is nil."
+  (lambda (_s) (list nil new-s)))
+
+(defun state-modify (f)
+  "State action: apply F to the current state and store the result."
+  (lambda (s) (list nil (funcall f s))))
+
+(defun state-pure (value)
+  "Lift a value into State (state unchanged)."
+  (lambda (s) (list value s)))
+
+(defun state-bind (m f)
+  "Monadic bind for State: run M, feed value to F, run result under updated state."
+  (lambda (s)
+    (let* ((result (funcall m s))
+           (value (car result))
+           (s2 (car (cdr result))))
+      (funcall (funcall f value) s2))))
+
+(defun state-run (state-action initial-s)
+  "Execute a State action under INITIAL-S, returning (value new-state)."
+  (funcall state-action initial-s))
+
+;; ═══════════════════════════════════════════════════════════════════════
+;; Reader — env -> value
+;; ═══════════════════════════════════════════════════════════════════════
+(defun reader-ask ()
+  "Reader action: yield the whole environment as the value."
+  (lambda (env) env))
+
+(defun reader-ask-with (f)
+  "Reader action: yield (F env) — project a piece of the environment."
+  (lambda (env) (funcall f env)))
+
+(defun reader-pure (value)
+  "Lift a constant value into the Reader (ignores the environment)."
+  (lambda (_env) value))
+
+(defun reader-bind (r f)
+  "Monadic bind for Reader: run R, feed value to F, run result under same env."
+  (lambda (env)
+    (funcall (funcall f (funcall r env)) env)))
+
+(defun reader-run (reader-action env)
+  "Execute a Reader action under ENV, returning its value."
+  (funcall reader-action env))
+
+;; ═══════════════════════════════════════════════════════════════════════
+;; Task (synchronous, lazy) — a zero-arg thunk; run via task-run
+;; ═══════════════════════════════════════════════════════════════════════
+;; Async Task/TaskEither compose on top of make-promise + async-let (RFC-018
+;; Step 1.4 / Tier 3). The sync flavor below is the lazy-thunk core.
+(defun task-pure (value)
+  "A Task that always yields VALUE when run."
+  (lambda () value))
+
+(defun task-lift (thunk)
+  "Wrap an existing zero-arg THUNK as a Task."
+  thunk)
+
+(defun task-map (task f)
+  "Task whose result is F applied to TASK's result. Lazy: TASK runs only when this runs."
+  (lambda () (funcall f (funcall task))))
+
+(defun task-bind (task f)
+  "Monadic bind for Task: run TASK, feed result to F (returning a Task), run that. Lazy."
+  (lambda () (funcall (funcall f (funcall task)))))
+
+(defun task-run (task)
+  "Force a Task: run it and return its value."
+  (funcall task))
+)

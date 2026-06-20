@@ -52,8 +52,8 @@ export class TLispInterpreterImpl implements TLispInterpreter {
     const debugState = this.evaluator.getDebugState();
 
     this.defineBuiltin("trace", (args) => {
-      if (args.length !== 1 || args[0]?.type !== "symbol") {
-        return Either.left({ type: 'EvalError', variant: 'TypeError', message: "trace requires a symbol name" });
+      if (args.length !== 1 || (args[0]?.type !== "symbol" && args[0]?.type !== "string")) {
+        return Either.left({ type: 'EvalError', variant: 'TypeError', message: "trace requires a symbol or string name" });
       }
       const name = args[0].value as string;
       debugState.traceFunction(name);
@@ -61,8 +61,8 @@ export class TLispInterpreterImpl implements TLispInterpreter {
     });
 
     this.defineBuiltin("untrace", (args) => {
-      if (args.length !== 1 || args[0]?.type !== "symbol") {
-        return Either.left({ type: 'EvalError', variant: 'TypeError', message: "untrace requires a symbol name" });
+      if (args.length !== 1 || (args[0]?.type !== "symbol" && args[0]?.type !== "string")) {
+        return Either.left({ type: 'EvalError', variant: 'TypeError', message: "untrace requires a symbol or string name" });
       }
       const name = args[0].value as string;
       debugState.untraceFunction(name);

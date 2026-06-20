@@ -183,6 +183,50 @@ export function registerStdlibFunctions(interpreter: TLispInterpreter): void {
     }
   );
 
+  // make-promise — produces a T-Lisp promise from a zero-arg thunk. This is the
+  // inverse of the existing consumer surface (promise-value/promise-then):
+  // it lets user T-Lisp code *create* an async value rather than only receive
+  // one from an async builtin. Required for the async Task/TaskEither family.
+  // See RFC-018 Step 1.4.
+  interpreter.defineAsyncBuiltin?.(
+    "make-promise",
+    () => Either.left({
+      type: "EvalError",
+      variant: "RuntimeError",
+      message: "make-promise requires async evaluation; use async-let",
+    }),
+    async (args: TLispValue[], context: EvalContext) => {
+      if (!context.asyncMode) {
+        return Either.left({
+          type: "EvalError",
+          variant: "RuntimeError",
+          message: "make-promise requires async evaluation; use async-let",
+        });
+      }
+      if (args.length !== 1 || !args[0]) {
+        return Either.left({ type: "EvalError", variant: "TypeError", message: "make-promise requires a thunk" });
+      }
+      const thunk = resolveCallable(args[0]);
+      if (thunk.type !== "function") {
+        return Either.left({ type: "EvalError", variant: "TypeError", message: "make-promise thunk must be a function" });
+      }
+      return Either.right(createPromise((async () => {
+        const fn = thunk as any;
+        // A thunk may itself return a promise (chained) or a plain value.
+        const result = fn.asyncValue
+          ? await fn.asyncValue([], context)
+          : fn.value([], context);
+        if (result && typeof result === "object" && "_tag" in result) {
+          if (Either.isLeft(result)) {
+            throw result.left;
+          }
+          return result.right;
+        }
+        return result as TLispValue;
+      })()));
+    }
+  );
+
   interpreter.defineBuiltin("funcall", raw((args: TLispValue[]) => {
     if (args.length === 0) throw new Error("funcall requires a function");
     return call(args[0]!, args.slice(1));
@@ -381,6 +425,17 @@ export function registerStdlibFunctions(interpreter: TLispInterpreter): void {
     }
     return createBoolean(args[0]?.type === "nil");
   }));
+
+  interpreter.defineBuiltin("error", (args: TLispValue[]) => {
+    // Signal an error. Returns Either.left so the surrounding `condition-case` (or the runner)
+    // can recover. The message concatenates all string-able args, matching Emacs `(error ...)`.
+    // This is the failure-signaling primitive the trt assertions build on (SPEC-049).
+    if (args.length === 0) {
+      return Either.left({ type: 'EvalError', variant: 'RuntimeError', message: "error", details: {} });
+    }
+    const message = args.map(a => valueToString(a)).join(" ");
+    return Either.left({ type: 'EvalError', variant: 'RuntimeError', message, details: { signaled: true } });
+  });
 
   interpreter.defineBuiltin("string-flex-spans", raw((args: TLispValue[]) => {
     if (args.length < 2 || args.length > 3 || args[0]?.type !== "string" || args[1]?.type !== "string") {
@@ -808,229 +863,5 @@ export function registerStdlibFunctions(interpreter: TLispInterpreter): void {
     interpreter.globalEnv.define(variableName, valueArg);
 
     return valueArg;
-  }));
-
-  // Testing framework variables
-  const testRegistry: Map<string, { body: TLispValue[], name: string }> = new Map();
-  let currentTestResults: { testName: string, passed: boolean, error?: string }[] = [];
-  let testCounts = { passed: 0, failed: 0, total: 0 };
-
-  /**
-   * Define a test function
-   * Usage: (deftest test-name () body...)
-   * Defines a test that can be run later
-   */
-  interpreter.defineBuiltin("deftest", raw((args: TLispValue[]) => {
-    if (args.length < 2) {
-      throw new Error("deftest requires at least 2 arguments: test name and parameter list");
-    }
-
-    const nameArg = args[0];
-    const paramsArg = args[1];
-
-    if (!nameArg || nameArg.type !== "string") {
-      throw new Error("deftest first argument must be a string (test name)");
-    }
-
-    if (!paramsArg || paramsArg.type !== "list") {
-      throw new Error("deftest second argument must be a list (parameters)");
-    }
-
-    const testName = nameArg.value as string;
-    const testBody = args.slice(2); // Everything after name and params
-
-    // Register the test
-    testRegistry.set(testName, { body: testBody, name: testName });
-
-    return createString(testName);
-  }));
-
-  /**
-   * Run a specific test
-   * Usage: (test-run test-name)
-   * Executes the test and returns the result
-   */
-  interpreter.defineBuiltin("test-run", raw((args: TLispValue[]) => {
-    if (args.length !== 1) {
-      throw new Error("test-run requires exactly 1 argument: test name");
-    }
-
-    const nameArg = args[0];
-    if (!nameArg || nameArg.type !== "string") {
-      throw new Error("test-run requires a string as the argument (test name)");
-    }
-
-    const testName = nameArg.value as string;
-    const testDef = testRegistry.get(testName);
-
-    if (!testDef) {
-      throw new Error(`Test '${testName}' not found`);
-    }
-
-    let testPassed = true;
-    let errorMessage: string | undefined;
-
-    try {
-      // Execute each expression in the test body
-      for (const expr of testDef.body) {
-        const result = interpreter.eval(expr);
-        if (result._tag === 'Left') {
-          throw new Error(`Test '${testName}' failed with error: ${result.left.message || result.left}`);
-        }
-      }
-
-      currentTestResults.push({ testName, passed: true });
-    } catch (error) {
-      testPassed = false;
-      errorMessage = error instanceof Error ? error.message : String(error);
-      currentTestResults.push({ testName, passed: false, error: errorMessage });
-    }
-
-    return createBoolean(testPassed);
-  }));
-
-  /**
-   * Run all registered tests
-   * Usage: (test-run-all)
-   * Executes all tests and returns summary statistics
-   */
-  interpreter.defineBuiltin("test-run-all", raw((args: TLispValue[]) => {
-    // Reset test results and counts
-    currentTestResults = [];
-    testCounts.passed = 0;
-    testCounts.failed = 0;
-    testCounts.total = 0;
-
-    // Run each registered test
-    for (const [testName, testDef] of testRegistry.entries()) {
-      let testPassed = true;
-      let errorMessage: string | undefined;
-
-      try {
-        // Execute each expression in the test body
-        for (const expr of testDef.body) {
-          const result = interpreter.eval(expr);
-          if (result._tag === 'Left') {
-            throw new Error(`Test '${testName}' failed with error: ${result.left.message || result.left}`);
-          }
-        }
-
-        testCounts.passed++;
-        currentTestResults.push({ testName, passed: true });
-      } catch (error) {
-        testPassed = false;
-        errorMessage = error instanceof Error ? error.message : String(error);
-        testCounts.failed++;
-        currentTestResults.push({ testName, passed: false, error: errorMessage });
-      }
-    }
-
-    testCounts.total = testCounts.passed + testCounts.failed;
-
-    // Return a summary as a list: [passed, failed, total]
-    return createList([
-      createNumber(testCounts.passed),
-      createNumber(testCounts.failed),
-      createNumber(testCounts.total)
-    ]);
-  }));
-
-  /**
-   * Assert that a value is truthy
-   * Usage: (assert-true value)
-   * Passes when value is truthy, throws error otherwise
-   */
-  interpreter.defineBuiltin("assert-true", raw((args: TLispValue[]) => {
-    if (args.length !== 1) {
-      throw new Error("assert-true requires exactly 1 argument: value");
-    }
-
-    const value = args[0]!;
-    if (!isTruthy(value)) {
-      throw new Error(`Assertion failed: expected truthy value, got ${valueToString(value)}`);
-    }
-
-    return createBoolean(true);
-  }));
-
-  /**
-   * Assert that a value is falsy
-   * Usage: (assert-false value)
-   * Passes when value is falsy, throws error otherwise
-   */
-  interpreter.defineBuiltin("assert-false", raw((args: TLispValue[]) => {
-    if (args.length !== 1) {
-      throw new Error("assert-false requires exactly 1 argument: value");
-    }
-
-    const value = args[0]!;
-    if (isTruthy(value)) {
-      throw new Error(`Assertion failed: expected falsy value, got ${valueToString(value)}`);
-    }
-
-    return createBoolean(true);
-  }));
-
-  /**
-   * Assert that two values are equal
-   * Usage: (assert-equal expected actual)
-   * Passes when values are equal, throws error otherwise
-   */
-  interpreter.defineBuiltin("assert-equal", raw((args: TLispValue[]) => {
-    if (args.length !== 2) {
-      throw new Error("assert-equal requires exactly 2 arguments: expected and actual");
-    }
-
-    const [expected, actual] = args as [TLispValue, TLispValue];
-    if (!valuesEqual(expected, actual)) {
-      throw new Error(`Assertion failed: expected ${valueToString(expected)}, got ${valueToString(actual)}`);
-    }
-
-    return createBoolean(true);
-  }));
-
-  /**
-   * Assert that two values are not equal
-   * Usage: (assert-not-equal expected actual)
-   * Passes when values are not equal, throws error otherwise
-   */
-  interpreter.defineBuiltin("assert-not-equal", raw((args: TLispValue[]) => {
-    if (args.length !== 2) {
-      throw new Error("assert-not-equal requires exactly 2 arguments: expected and actual");
-    }
-
-    const [expected, actual] = args as [TLispValue, TLispValue];
-    if (valuesEqual(expected, actual)) {
-      throw new Error(`Assertion failed: expected ${valueToString(expected)} to not equal ${valueToString(actual)}`);
-    }
-
-    return createBoolean(true);
-  }));
-
-  /**
-   * Assert that a form raises an error
-   * Usage: (assert-error form)
-   * Passes when form raises error, throws error if form succeeds
-   */
-  interpreter.defineBuiltin("assert-error", raw((args: TLispValue[]) => {
-    if (args.length !== 1) {
-      throw new Error("assert-error requires exactly 1 argument: form");
-    }
-
-    const form = args[0]!;
-
-    try {
-      const result = interpreter.eval(form);
-      if (result._tag === 'Left') {
-        // Form raised an error as expected
-        return createBoolean(true);
-      } else {
-        // Form succeeded when it should have failed
-        throw new Error(`Expected error but form evaluated successfully to ${valueToString(result.right)}`);
-      }
-    } catch (error) {
-      // Form raised an error as expected
-      return createBoolean(true);
-    }
   }));
 }

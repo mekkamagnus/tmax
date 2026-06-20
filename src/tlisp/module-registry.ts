@@ -38,6 +38,7 @@ export interface ModuleExportRecord {
  */
 export class ModuleRegistry {
   private modules: Map<string, ModuleRecord> = new Map();
+  private providedFeatures: Set<string> = new Set();
 
   register(name: string, env: TLispEnvironment, exports: Set<string>, sourcePath: string): void {
     this.modules.set(name, {
@@ -51,6 +52,16 @@ export class ModuleRegistry {
 
   resolve(name: string): ModuleRecord | undefined {
     return this.modules.get(name);
+  }
+
+  /** Register a provided feature (truthful provide/featurep/require — SPEC-003/007). */
+  provideFeature(feature: string): void {
+    this.providedFeatures.add(feature);
+  }
+
+  /** Check whether a feature has been provided. */
+  hasFeature(feature: string): boolean {
+    return this.providedFeatures.has(feature);
   }
 
   isLoaded(name: string): boolean {

@@ -49,8 +49,17 @@ const safeResolve = (base: string, moduleName: string): string | null => {
 };
 
 const coreModulePaths = (coreRoot: string, moduleName: string): string[] => {
-  if (!moduleName.startsWith("editor/")) return [];
-  const relativeName = moduleName.slice("editor/".length);
+  // `editor/` modules resolve under coreRoot (e.g. editor/commands/buffers →
+  // core/commands/buffers.tlisp). `std/` modules resolve the same way so a
+  // single physical file (e.g. core/monads.tlisp) is the source of truth for
+  // both the editor and standalone profiles when run from source.
+  const prefix = moduleName.startsWith("editor/")
+    ? "editor/"
+    : moduleName.startsWith("std/")
+      ? "std/"
+      : null;
+  if (!prefix) return [];
+  const relativeName = moduleName.slice(prefix.length);
   const candidates = [relativeName];
   if (!relativeName.includes("/")) {
     candidates.push(`${relativeName}/${relativeName}`);

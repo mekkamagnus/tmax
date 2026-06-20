@@ -26,7 +26,7 @@ import { Either } from "../utils/task-either";
 import { createValidationError, type EvalError } from "../error/types";
 import { TLispParser } from "./parser.ts";
 import { registerStdlibFunctions } from "./stdlib.ts";
-import { registerTestingFramework, setGlobalSetupBody, setGlobalTeardownBody } from "./test-framework.ts";
+// trt framework is loaded by the daemon/server bootstrap (src/tlisp/trt/bootstrap.ts), not here.
 import { registerFunction, markFunctionCovered, isCoverageEnabled } from "./test-coverage.ts";
 import { DebugState } from "./debug-state.ts";
 import { createDiagnostic, type TLispDiagnostic } from "./diagnostics.ts";
@@ -224,9 +224,16 @@ export class TLispEvaluator {
       const args = argsResults.map(r => (r as { right: TLispValue }).right);
 
       const frameName = tailCall.funcExpr.type === "symbol" ? tailCall.funcExpr.value as string : "<anonymous>";
+      const wasTraced = this.debugState.isTraced(frameName);
+      if (wasTraced) {
+        this.debugState.recordTrace({ depth: this.debugState.getStackDepth(), functionName: frameName, args, span: getSourceSpan(tailCall.funcExpr), direction: "enter" });
+      }
       this.debugState.pushFrame(frameName, getSourceSpan(tailCall.funcExpr));
       const callResult = this.evalFunctionCallInternal(func, args, tailCall.env);
       this.debugState.popFrame();
+      if (wasTraced && Either.isRight(callResult)) {
+        this.debugState.recordTrace({ depth: this.debugState.getStackDepth(), functionName: frameName, args, result: isTailCall(callResult.right) ? undefined : callResult.right, direction: "exit" });
+      }
 
       if (Either.isLeft(callResult)) {
         return callResult;
@@ -480,10 +487,9 @@ export class TLispEvaluator {
   }
 
   /**
-   * Evaluate (provide "module-name")
-   * Registers the current module's public exports under the given feature name.
-   * Currently a no-op that returns nil — the module system already tracks exports
-   * via (export ...). This form exists for convention and forward compatibility.
+   * Evaluate (provide "feature-name")
+   * Registers the feature name so (featurep ...) returns true.
+   * Returns the feature name string. (SPEC-003/007)
    */
   private evalProvide(elements: TLispValue[], env: TLispEnvironment): Either<EvalError, TLispValue> {
     if (elements.length < 2) {
@@ -492,6 +498,81 @@ export class TLispEvaluator {
         variant: 'SyntaxError',
         message: "provide requires a feature name string",
         details: { expected: "2+", actual: elements.length }
+      });
+    }
+    const featureArg = elements[1]!;
+    if (featureArg.type !== "string") {
+      return Either.left({
+        type: 'EvalError',
+        variant: 'TypeError',
+        message: "provide requires a feature name string",
+        details: { expected: "string", actual: featureArg.type }
+      });
+    }
+    const feature = featureArg.value as string;
+    if (this.moduleRegistry) {
+      this.moduleRegistry.provideFeature(feature);
+    }
+    return Either.right(createString(feature));
+  }
+
+  /**
+   * Evaluate (featurep "feature-name")
+   * Returns t if the feature has been provided, nil otherwise. (SPEC-003/007)
+   */
+  private evalFeaturep(elements: TLispValue[], env: TLispEnvironment): Either<EvalError, TLispValue> {
+    if (elements.length < 2) {
+      return Either.left({
+        type: 'EvalError',
+        variant: 'SyntaxError',
+        message: "featurep requires a feature name string",
+        details: { expected: "2+", actual: elements.length }
+      });
+    }
+    const featureArg = elements[1]!;
+    if (featureArg.type !== "string") {
+      return Either.left({
+        type: 'EvalError',
+        variant: 'TypeError',
+        message: "featurep requires a feature name string",
+        details: { expected: "string", actual: featureArg.type }
+      });
+    }
+    const feature = featureArg.value as string;
+    const provided = this.moduleRegistry?.hasFeature(feature) ?? false;
+    return Either.right(provided ? createBoolean(true) : createNil());
+  }
+
+  /**
+   * Evaluate (require "feature-name")
+   * Returns nil if the feature is already provided, errors otherwise. (SPEC-003/007)
+   */
+  private evalRequire(elements: TLispValue[], env: TLispEnvironment): Either<EvalError, TLispValue> {
+    if (elements.length < 2) {
+      return Either.left({
+        type: 'EvalError',
+        variant: 'SyntaxError',
+        message: "require requires a feature name string",
+        details: { expected: "2+", actual: elements.length }
+      });
+    }
+    const featureArg = elements[1]!;
+    if (featureArg.type !== "string") {
+      return Either.left({
+        type: 'EvalError',
+        variant: 'TypeError',
+        message: "require requires a feature name string",
+        details: { expected: "string", actual: featureArg.type }
+      });
+    }
+    const feature = featureArg.value as string;
+    const provided = this.moduleRegistry?.hasFeature(feature) ?? false;
+    if (!provided) {
+      return Either.left({
+        type: 'EvalError',
+        variant: 'UndefinedSymbol',
+        message: `Required feature not available: ${feature}`,
+        details: { feature }
       });
     }
     return Either.right(createNil());
@@ -557,24 +638,6 @@ export class TLispEvaluator {
           return this.evalDefun(elements, env);
         case "cond":
           return this.evalCond(elements, env, inTailPosition);
-        case "deftest":
-          return this.evalDeftest(elements, env);
-        case "deftest-async":
-          return this.evalDeftestAsync(elements, env);
-        case "deftest-suite":
-          return this.evalDeftestSuite(elements, env);
-        case "suite-setup":
-          return this.evalSuiteSetup(elements, env);
-        case "suite-teardown":
-          return this.evalSuiteTeardown(elements, env);
-        case "setup":
-          return this.evalSetup(elements);
-        case "teardown":
-          return this.evalTeardown(elements);
-        case "deffixture":
-          return this.evalDeffixture(elements, env);
-        case "use-fixtures":
-          return this.evalUseFixtures(elements, env);
         case "defvar":
           return this.evalDefvar(elements, env);
         case "defmodule":
@@ -585,12 +648,18 @@ export class TLispEvaluator {
           return this.evalCurrentModule(elements, env);
         case "provide":
           return this.evalProvide(elements, env);
+        case "featurep":
+          return this.evalFeaturep(elements, env);
+        case "require":
+          return this.evalRequire(elements, env);
         case "set!":
           return this.evalSetBang(elements, env);
         case "assert-type":
           return this.evalAssertType(elements, env);
         case "assert-error":
           return this.evalAssertError(elements, env);
+        case "condition-case":
+          return this.evalConditionCase(elements, env, inTailPosition);
         case "progn":
           return this.evalProgn(elements, env, inTailPosition);
         case "while":
@@ -675,24 +744,18 @@ export class TLispEvaluator {
         case "and":
         case "or":
         case "defmacro":
-        case "deftest":
-        case "deftest-async":
-        case "deftest-suite":
-        case "suite-setup":
-        case "suite-teardown":
-        case "setup":
-        case "teardown":
-        case "deffixture":
-        case "use-fixtures":
         case "defvar":
         case "defmodule":
         case "require-module":
         case "current-module":
         case "provide":
+        case "featurep":
+        case "require":
         case "set!":
         case "while":
         case "assert-type":
         case "assert-error":
+        case "condition-case":
           return this.evalList(list, env, inTailPosition);
         default:
           return this.evalFunctionCallAsync(elements, env, context, inTailPosition);
@@ -2045,34 +2108,57 @@ export class TLispEvaluator {
     }
 
     const paramList = parameters.value as TLispValue[];
-    for (const param of paramList) {
+
+    // Detect optional `&rest` for variadic macros: (a b &rest rest).
+    // Params before &rest are required; the rest collect into a list bound to the trailing param.
+    const restIdx = paramList.findIndex(p => p.type === "symbol" && p.value === "&rest");
+    const fixedParams = restIdx >= 0 ? paramList.slice(0, restIdx) : paramList;
+    const restParam = restIdx >= 0 ? paramList[restIdx + 1] : undefined;
+
+    for (const param of fixedParams) {
       if (param.type !== "symbol") {
         return Either.left({
-          type: 'EvalError',
-          variant: 'TypeError',
+          type: 'EvalError', variant: 'TypeError',
           message: "defmacro parameter must be a symbol",
           details: { paramType: param.type }
         });
       }
     }
+    if (restParam && restParam.type !== "symbol") {
+      return Either.left({
+        type: 'EvalError', variant: 'TypeError',
+        message: "defmacro &rest parameter must be a symbol",
+        details: { paramType: restParam.type }
+      });
+    }
 
     // Create macro function
     const macroFunction = (args: TLispValue[]): Either<EvalError, TLispValue> => {
-      if (args.length !== paramList.length) {
+      // Fixed-arity macros (no &rest) require an exact argument count.
+      if (restIdx < 0 && args.length !== fixedParams.length) {
         return Either.left({
           type: 'EvalError',
           variant: 'RuntimeError',
-          message: `macro ${name.value} expects ${paramList.length} arguments, got ${args.length}`,
-          details: { expected: paramList.length, actual: args.length, args }
+          message: `macro ${name.value} expects ${fixedParams.length} arguments, got ${args.length}`,
+          details: { expected: fixedParams.length, actual: args.length, args }
+        });
+      }
+      // Variadic macros (with &rest) require at least the fixed param count.
+      if (restIdx >= 0 && args.length < fixedParams.length) {
+        return Either.left({
+          type: 'EvalError',
+          variant: 'RuntimeError',
+          message: `macro ${name.value} expects at least ${fixedParams.length} arguments, got ${args.length}`,
+          details: { expectedMin: fixedParams.length, actual: args.length, args }
         });
       }
 
       // Create new environment for macro expansion
       const macroEnv = new TLispEnvironmentImpl(env);
 
-      // Bind parameters to arguments (unevaluated)
-      for (let i = 0; i < paramList.length; i++) {
-        const param = paramList[i];
+      // Bind fixed parameters to arguments (unevaluated)
+      for (let i = 0; i < fixedParams.length; i++) {
+        const param = fixedParams[i];
         const arg = args[i];
         if (!param || !arg) {
           return Either.left({
@@ -2084,6 +2170,12 @@ export class TLispEvaluator {
         }
         const paramName = param.value as string;
         macroEnv.define(paramName, arg);
+      }
+
+      // Bind the &rest parameter to the remaining args as a list (unevaluated).
+      if (restParam) {
+        const restArgs = args.slice(fixedParams.length);
+        macroEnv.define(restParam.value as string, createList(restArgs));
       }
 
       // Evaluate body to generate code
@@ -2163,9 +2255,16 @@ export class TLispEvaluator {
       }
 
       const frameName = funcExpr.type === "symbol" ? funcExpr.value as string : "<anonymous>";
+      const wasTraced = this.debugState.isTraced(frameName);
+      if (wasTraced) {
+        this.debugState.recordTrace({ depth: this.debugState.getStackDepth(), functionName: frameName, args, span: getSourceSpan(funcExpr), direction: "enter" });
+      }
       this.debugState.pushFrame(frameName, getSourceSpan(funcExpr));
       const callResult = this.evalFunctionCallInternal(func, args, env);
       this.debugState.popFrame();
+      if (wasTraced && Either.isRight(callResult)) {
+        this.debugState.recordTrace({ depth: this.debugState.getStackDepth(), functionName: frameName, args, result: isTailCall(callResult.right) ? undefined : callResult.right, direction: "exit" });
+      }
       return callResult;
     }
   }
@@ -2272,9 +2371,16 @@ export class TLispEvaluator {
     }
 
     const frameName = funcExpr.type === "symbol" ? funcExpr.value as string : "<anonymous>";
+    const wasTraced = this.debugState.isTraced(frameName);
+    if (wasTraced) {
+      this.debugState.recordTrace({ depth: this.debugState.getStackDepth(), functionName: frameName, args: argValues, span: getSourceSpan(funcExpr), direction: "enter" });
+    }
     this.debugState.pushFrame(frameName, getSourceSpan(funcExpr));
     const callResult = await this.evalFunctionCallInternalAsync(funcResult.right, argValues, env, context);
     this.debugState.popFrame();
+    if (wasTraced && Either.isRight(callResult)) {
+      this.debugState.recordTrace({ depth: this.debugState.getStackDepth(), functionName: frameName, args: argValues, result: isTailCall(callResult.right) ? undefined : callResult.right, direction: "exit" });
+    }
     return callResult;
   }
 
@@ -2630,7 +2736,7 @@ export class TLispEvaluator {
     }
 
     const body = elements.length === 2 ? [paramsArg] : elements.slice(2);
-    setGlobalSetupBody(body);
+    // setup/teardown are deprecated; trt uses fixtures (SPEC-049)
     return Either.right(createBoolean(true));
   }
 
@@ -2659,7 +2765,7 @@ export class TLispEvaluator {
     }
 
     const body = elements.length === 2 ? [paramsArg] : elements.slice(2);
-    setGlobalTeardownBody(body);
+    // setup/teardown are deprecated; trt uses fixtures (SPEC-049)
     return Either.right(createBoolean(true));
   }
 
@@ -3100,6 +3206,121 @@ export class TLispEvaluator {
         details: { result: valueToString(result.right) }
       });
     }
+  }
+
+  /**
+   * Evaluate condition-case special form (Emacs-style error recovery).
+   *
+   * Syntax: (condition-case var body-form (condition-name (handler-var) handler-body...) ...)
+   *
+   * Evaluates body-form. If it signals an error (Either.left), finds the first handler clause
+   * whose condition-name matches — `error` matches every error, `t` is a synonym for `error` —
+   * binds the error message string to handler-var, and evaluates that handler's body. If no
+   * handler matches, the error propagates. If body-form succeeds, its value is returned and no
+   * handler runs.
+   *
+   * This is the primitive the self-hosted trt runner uses to catch a failing test and continue
+   * to the next one (SPEC-049). It is general-purpose, additive infrastructure modeled on Emacs
+   * `condition-case`, not specific to the test framework.
+   *
+   * @param elements - List elements: ['condition-case', var, body-form, handler-clause...]
+   * @param env - Environment
+   * @param inTailPosition - Whether the body is in tail position
+   * @returns Either with error or the body/handler result
+   */
+  private evalConditionCase(elements: TLispValue[], env: TLispEnvironment, inTailPosition: boolean = false): Either<EvalError, EvalResult> {
+    // ['condition-case', var, body-form, handler0, handler1, ...]
+    if (elements.length < 4) {
+      return Either.left({
+        type: 'EvalError',
+        variant: 'SyntaxError',
+        message: "condition-case requires: var, body-form, and at least one handler clause",
+        details: { expected: '>=4', actual: elements.length }
+      });
+    }
+
+    const bodyForm = elements[2];
+    if (!bodyForm) {
+      return Either.left({ type: 'EvalError', variant: 'SyntaxError', message: "condition-case missing body form", details: {} });
+    }
+
+    const handlerClauses = elements.slice(3);
+
+    // Try the body.
+    const bodyResult = this.eval(bodyForm, env);
+
+    if (Either.isRight(bodyResult)) {
+      return bodyResult;
+    }
+
+    // body failed — find a matching handler.
+    const err = bodyResult.left;
+    const errorMessage = (err && typeof err === 'object' && 'message' in err)
+      ? String((err as { message: unknown }).message)
+      : String(err);
+
+    for (const clause of handlerClauses) {
+      if (!clause || clause.type !== "list") {
+        return Either.left({
+          type: 'EvalError',
+          variant: 'SyntaxError',
+          message: "condition-case handler clause must be a list: (condition-name (var) body...)",
+          details: { clauseType: clause?.type }
+        });
+      }
+      const clauseParts = clause.value as TLispValue[];
+      // (condition-name (handler-var) handler-body...)
+      if (clauseParts.length < 2) {
+        return Either.left({
+          type: 'EvalError',
+          variant: 'SyntaxError',
+          message: "condition-case handler clause requires a condition name and a parameter list",
+          details: { clauseLength: clauseParts.length }
+        });
+      }
+
+      const condName = clauseParts[0];
+      const params = clauseParts[1];
+      const handlerBody = clauseParts.slice(2);
+
+      if (!condName || (condName.type !== "symbol" && condName.type !== "string")) {
+        return Either.left({
+          type: 'EvalError', variant: 'SyntaxError',
+          message: "condition-case condition name must be a symbol or string",
+          details: { condType: condName?.type }
+        });
+      }
+      const condValue = String(condName.value);
+
+      // `error` and `t` are universal — they match any error. Otherwise exact match (future:
+      // typed conditions). This is intentionally simple for now.
+      const matches = condValue === "error" || condValue === "t";
+      if (!matches) continue;
+
+      // Bind the error message to the handler var, in a child environment.
+      const handlerEnv = new TLispEnvironmentImpl(env);
+      if (params && params.type === "list") {
+        const paramList = params.value as TLispValue[];
+        for (const p of paramList) {
+          if (p && p.type === "symbol") {
+            handlerEnv.define(p.value as string, createString(errorMessage));
+          }
+        }
+      }
+
+      // Evaluate each handler body expression; return the last.
+      let last: Either<EvalError, EvalResult> = Either.right(createNil());
+      for (const expr of handlerBody) {
+        last = this.eval(expr, handlerEnv);
+        if (Either.isLeft(last)) {
+          return last; // handler itself errored — propagate
+        }
+      }
+      return last;
+    }
+
+    // No handler matched — propagate the original error.
+    return bodyResult;
   }
 
   /**
@@ -4903,8 +5124,6 @@ export const createEvaluatorWithBuiltins = (moduleRegistry?: ModuleRegistry): { 
   } as any;
   registerStdlibFunctions(interpreterMock as any);
 
-  // Register testing framework functions
-  registerTestingFramework(interpreterMock as any);
 
   return { evaluator, builtinsEnv, env: globalEnv };
 };
