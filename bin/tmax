@@ -29,6 +29,8 @@ Options:
   --stop         Stop the running daemon
   --capture      Capture current frame as ANSI (colors preserved)
   --capture-html Capture current frame as standalone HTML
+  --test         Run the trt native test suite (exit 0 pass / 1 fail / 2 no-tests)
+  --json         With --test: emit JSON results (parseable by jq)
   -t             Open a new terminal frame
   -h, --help     Show this help message
 
@@ -113,6 +115,9 @@ CAPTURE=""
 WORKSPACE=""
 WORKSPACES=false
 WORKSPACE_KILL=""
+TEST_MODE=false
+TEST_JSON=false
+TEST_TARGET=""
 FILES=()
 
 for arg in "$@"; do
@@ -126,6 +131,8 @@ for arg in "$@"; do
     --stop)         STOP=true ;;
     --capture)      CAPTURE=ansi ;;
     --capture-html) CAPTURE=html ;;
+    --test)         TEST_MODE=true ;;
+    --json)         TEST_JSON=true ;;
     -t)             ;; # -t is default behavior (open terminal frame)
     -h|--help)      usage ;;
     *)
@@ -138,6 +145,8 @@ for arg in "$@"; do
       elif [ "${shift_mode:-}" = "workspace_kill" ]; then
         WORKSPACE_KILL="$arg"
         shift_mode=""
+      elif [ "$TEST_MODE" = true ] && [ -z "$TEST_TARGET" ]; then
+        TEST_TARGET="$arg"
       else
         FILES+=("$arg")
       fi
@@ -179,6 +188,33 @@ if [ "$STOP" = true ]; then
     echo "Daemon not running"
   fi
   exit 0
+fi
+
+# Handle --test (trt native test runner). Evals (trt-run [target]) on the daemon, prints results
+# (JSON if --json), and exits with the runner's code: 0 all-pass / 1 any-fail / 2 no-tests or error.
+if [ "$TEST_MODE" = true ]; then
+  ensure_daemon
+  if [ -n "$TEST_TARGET" ]; then
+    LOAD_EXPR="(trt-load-file \"$TEST_TARGET\")"
+  else
+    LOAD_EXPR='(trt-load-directory "test/tlisp/")'
+  fi
+  # Run once; then the exit-code eval reads the same result store (no re-run needed).
+  "$CLIENT" -s "$SOCKET" --eval "(progn $LOAD_EXPR (trt-run-all))" >/dev/null 2>&1
+  if [ "$TEST_JSON" = true ]; then
+    REPORT="$("$CLIENT" -s "$SOCKET" --eval '(trt-results-json)' 2>/dev/null)"
+    # The client prints the value; for JSON we want the raw payload.
+    echo "$REPORT"
+  else
+    REPORT="$("$CLIENT" -s "$SOCKET" --eval '(trt-print-report)' 2>/dev/null)"
+    # Strip the surrounding quotes the printer adds to string values.
+    echo "$REPORT" | sed -e 's/^"//' -e 's/"$//'
+  fi
+  EXIT_CODE="$("$CLIENT" -s "$SOCKET" --eval '(trt-exit-code-ts)' 2>/dev/null | tr -dc '0-9')"
+  case "$EXIT_CODE" in
+    0|1|2) exit "$EXIT_CODE" ;;
+    *) exit 2 ;;
+  esac
 fi
 
 # Handle -e (eval only, no TUI)

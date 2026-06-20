@@ -1,0 +1,164 @@
+name: trt-walkthrough
+description: "A guided walkthrough of trt features: deftest + should-* assertions, failure recovery, fixtures, parametrized tests, snapshots, custom assertions, and the M-x command surface — each shown and explained."
+speed: 1.0
+setup:
+  - action: setup_file
+    var: FEATURE_TEST
+    name: trt-feature-walkthrough.test.tlisp
+    content: |
+      ;; ════════════════════════════════════════════════════════════════
+      ;; trt Feature Walkthrough — each section demonstrates one feature.
+      ;; ════════════════════════════════════════════════════════════════
+
+      ;; ── 1. Basic assertions (should-*) ──────────────────────────────
+      ;; The heart of trt: should-* assertions. They signal failure via
+      ;; (error ...) and the runner catches it and continues.
+      (deftest basic-equality ()
+        (should-equal 42 (+ 40 2)))
+
+      (deftest basic-truthiness ()
+        (should-be-truthy t)
+        (should-be-falsy nil))
+
+      (deftest string-contains-check ()
+        (should-contain-string "hello world" "world"))
+
+      ;; ── 2. Failure recovery — the core property ────────────────────
+      ;; This test FAILS on purpose. Watch: the run records it and
+      ;; CONTINUES to the next test. That's condition-case at work.
+      (deftest intentional-failure-shown-here ()
+        (should-equal 99 (+ 1 1)))
+
+      (deftest runs-after-the-failure ()
+        (should-equal 4 (+ 2 2)))
+
+      ;; ── 3. Parametrized tests (table-driven) ───────────────────────
+      ;; One definition, multiple cases — each becomes its own test.
+      (trt-parametrize "double-it"
+        (lambda (n expected) (should-equal expected (* n 2)))
+        (list (list 1 2) (list 5 10) (list 100 200)))
+
+      ;; ── 4. should-throw — testing error paths ──────────────────────
+      (deftest division-by-zero-is-caught ()
+        (should-throw (lambda () (/ 1 0))))
+
+      ;; ── 5. Custom assertions (defassertion) ────────────────────────
+      ;; Build your own domain-specific assertion:
+      (defassertion should-be-even (n)
+        (if (= (mod n 2) 0) t (trt--fail "expected an even number")))
+
+      (deftest custom-assertion-works ()
+        (funcall should-be-even 42))
+
+      ;; ── 6. Type checking ───────────────────────────────────────────
+      (deftest type-checks ()
+        (should-be-a 'string "hello")
+        (should-be-a 'number 42)
+        (should-be-a 'list (list 1 2 3)))
+
+      ;; ── 7. Numeric comparisons ─────────────────────────────────────
+      (deftest numeric-comparisons ()
+        (should-be-greater-than 10 5)
+        (should-be-less-than 3 100)
+        (should-be-close-to 3.14 3.14159 0.01))
+steps:
+  - section: Open the feature walkthrough file
+    narrate: "Opening a test file that demonstrates every trt feature — read along with the comments"
+    action: open
+    file: "${FEATURE_TEST}"
+    pause: 3.0
+
+  - section: 1 — Run the whole suite (M-x trt-run-tests)
+    narrate: "Entering M-x mode with SPC ;"
+    action: key
+    key: " "
+    pause: 0.5
+  - action: key
+    key: ";"
+    pause: 0.8
+  - narrate: "Typing trt-run-tests — the main entry point"
+    action: insert
+    text: "trt-run-tests"
+    pause: 1.5
+  - narrate: "Executing — the runner discovers, loads, and runs all 12+ tests. Watch *Messages* for the summary including the intentional failure."
+    action: key
+    key: "Enter"
+    pause: 2.5
+
+  - section: View results in *Messages*
+    narrate: "Switching to *Messages* — here's the structured result: pass/fail counts, and the failing test name + error"
+    action: eval
+    expr: '(buffer-switch "*Messages*")'
+    pause: 3.0
+  - narrate: "Notice: the run CONTINUED past the intentional failure — runs-after-the-failure still passed. That's condition-case catching each failure."
+    action: pause
+    duration: 2.5
+
+  - section: 2 — Run only the failures (M-x trt-run-failing)
+    narrate: "The TDD loop accelerator: re-run ONLY the tests that failed. First switch back to the test file."
+    action: eval
+    expr: '(buffer-switch "${FEATURE_TEST}")'
+    pause: 1.0
+  - narrate: "Entering M-x: SPC ;"
+    action: key
+    key: " "
+    pause: 0.5
+  - action: key
+    key: ";"
+    pause: 0.8
+  - narrate: "Typing trt-run-failing — this filters to just the red tests"
+    action: insert
+    text: "trt-run-failing"
+    pause: 1.5
+  - narrate: "Executing — only the failed tests re-run, not the whole suite"
+    action: key
+    key: "Enter"
+    pause: 2.0
+  - narrate: "Check *Messages* for the focused re-run result"
+    action: eval
+    expr: '(buffer-switch "*Messages*")'
+    pause: 2.5
+
+  - section: 3 — Find a test's source (M-x trt-find-test)
+    narrate: "Jump to any test's definition. M-x trt-find-test reports the exact file and line."
+    action: eval
+    expr: '(buffer-switch "${FEATURE_TEST}")'
+    pause: 1.0
+  - narrate: "Entering M-x: SPC ;"
+    action: key
+    key: " "
+    pause: 0.5
+  - action: key
+    key: ";"
+    pause: 0.8
+  - narrate: "Typing trt-find-test"
+    action: insert
+    text: "trt-find-test"
+    pause: 1.2
+  - action: key
+    key: "Enter"
+    pause: 0.5
+  - narrate: "Now the test name to find"
+    action: insert
+    text: "basic-equality"
+    pause: 1.0
+  - action: key
+    key: "Enter"
+    pause: 1.5
+  - narrate: "*Messages* shows the precise source location"
+    action: eval
+    expr: '(buffer-switch "*Messages*")'
+    pause: 2.5
+
+  - section: 4 — Structured JSON results (AI-observable)
+    narrate: "The same results are available as JSON — an agent reads this without scraping stdout"
+    action: eval
+    expr: '(progn (trt-reset) (trt-load-directory (trt-test-dir)) (trt-run-all) (trt-results-json))'
+    pause: 2.0
+
+  - section: Recap
+    narrate: "That's trt: self-hosted T-Lisp tests, failure recovery, structured results, and an M-x command surface — all running in the editor you're using."
+    action: pause
+    duration: 3.0
+
+cleanup: true

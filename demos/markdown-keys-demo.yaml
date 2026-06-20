@@ -1,0 +1,214 @@
+name: markdown-keys
+description: "Visual demo of the 20 real-key markdown bindings in the tmux TUI. Each key is driven through the TUI frame so you can watch the cursor move and the status line update live."
+speed: 1.0
+
+setup:
+  - action: setup_file
+    var: FILE
+    name: markdown-keys-demo.md
+    content: |
+      # Top Heading
+
+      Intro paragraph.
+
+      ## Section A
+
+      Some #alpha and #beta tags here.
+
+      A [[wiki-one]] then [[wiki-two]] link.
+
+      ### Subsection A1
+
+      text under subsection
+
+      ## Section B
+
+      | Item | Qty |
+      |-----|-----|
+      | apple | 3 |
+
+      ```js
+      const x = 1;
+      ```
+
+      [^1]: a footnote
+
+      - [ ] todo item
+
+      **bold** word
+
+steps:
+  - section: Open markdown file
+    narrate: "Opening the markdown fixture — note the mode in the status line"
+    action: open
+    file: "${FILE}"
+    pause: 1.2
+
+  - section: Heading navigation
+    narrate: "]h — next heading: jumps from # Top to ## Section A"
+    action: eval
+    expr: "(cursor-move 0 0)"
+    pause: 0.3
+  - action: key
+    key: "]"
+    pause: 0.2
+  - narrate: "... (h completes the ]h sequence)"
+    action: key
+    key: "h"
+    pause: 1.0
+
+  - narrate: "[h — previous heading: back up"
+    action: eval
+    expr: "(cursor-move 10 0)"
+    pause: 0.3
+  - action: keys
+    keys: "[h"
+    pause: 1.0
+
+  - section: Same-level heading navigation
+    narrate: "]H — next same-level heading: Section A → Section B"
+    action: eval
+    expr: "(cursor-move 4 0)"
+    pause: 0.3
+  - action: keys
+    keys: "]H"
+    pause: 1.0
+
+  - narrate: "[H — previous same-level heading"
+    action: eval
+    expr: "(cursor-move 14 0)"
+    pause: 0.3
+  - action: keys
+    keys: "[H"
+    pause: 1.0
+
+  - section: Up to parent heading
+    narrate: "gh — from ### Subsection A1 up to its parent ## Section A"
+    action: eval
+    expr: "(cursor-move 10 0)"
+    pause: 0.3
+  - action: keys
+    keys: "gh"
+    pause: 1.0
+
+  - section: Heading outline
+    narrate: "gO — show the heading outline"
+    action: eval
+    expr: "(cursor-move 0 0)"
+    pause: 0.3
+  - action: keys
+    keys: "gO"
+    pause: 1.2
+
+  - section: Tag navigation
+    narrate: "]t — next tag: jumps to #alpha"
+    action: eval
+    expr: "(cursor-move 0 0)"
+    pause: 0.3
+  - action: keys
+    keys: "]t"
+    pause: 1.0
+
+  - narrate: "[t — previous tag: jumps to #beta"
+    action: eval
+    expr: "(cursor-move 14 0)"
+    pause: 0.3
+  - action: keys
+    keys: "[t"
+    pause: 1.0
+
+  - section: Footnote navigation
+    narrate: "]f — next footnote"
+    action: eval
+    expr: "(cursor-move 0 0)"
+    pause: 0.3
+  - action: keys
+    keys: "]f"
+    pause: 1.0
+
+  - narrate: "[f — at top, no previous footnote"
+    action: eval
+    expr: "(cursor-move 0 0)"
+    pause: 0.3
+  - action: keys
+    keys: "[f"
+    pause: 1.0
+
+  - section: Wiki-link navigation
+    narrate: "]l — next wiki-link: [[wiki-one]]"
+    action: eval
+    expr: "(cursor-move 0 0)"
+    pause: 0.3
+  - action: keys
+    keys: "]l"
+    pause: 1.0
+
+  - narrate: "[l — previous wiki-link: [[wiki-two]]"
+    action: eval
+    expr: "(cursor-move 14 0)"
+    pause: 0.3
+  - action: keys
+    keys: "[l"
+    pause: 1.0
+
+  - section: Context actions
+    narrate: "gx — markdown-do at a plain line (nothing to do)"
+    action: eval
+    expr: "(cursor-move 2 0)"
+    pause: 0.3
+  - action: keys
+    keys: "gx"
+    pause: 1.0
+
+  - narrate: "gr — jump back (no previous position)"
+    action: eval
+    expr: "(cursor-move 0 0)"
+    pause: 0.3
+  - action: keys
+    keys: "gr"
+    pause: 1.0
+
+  - section: Folding
+    narrate: "zM — fold all headings"
+    action: eval
+    expr: "(cursor-move 0 0)"
+    pause: 0.3
+  - action: keys
+    keys: "zM"
+    pause: 1.2
+
+  - narrate: "zR — open all folds"
+    action: keys
+    keys: "zR"
+    pause: 1.2
+
+  - narrate: "z2 — fold headings deeper than level 2"
+    action: keys
+    keys: "z2"
+    pause: 1.2
+
+  - narrate: "zc — toggle fold on Section A"
+    action: eval
+    expr: "(cursor-move 4 0)"
+    pause: 0.3
+  - action: keys
+    keys: "zc"
+    pause: 1.0
+
+  - narrate: "zo — open the fold again"
+    action: keys
+    keys: "zo"
+    pause: 1.0
+
+  - narrate: "<Tab> — visibility cycle on a heading"
+    action: eval
+    expr: "(cursor-move 4 0)"
+    pause: 0.3
+  - action: key
+    key: "<Tab>"
+    pause: 1.2
+
+  - section: Done
+    narrate: "All 20 real-key markdown bindings demonstrated. Quitting."
+    action: pause
+    duration: 1.5

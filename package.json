@@ -25,7 +25,8 @@
     "typecheck:test": "bunx tsc --noEmit --project tsconfig.test.json",
     "build": "bun run build:tmax && bun run build:tlisp",
     "build:tmax": "bun build --compile ./src/main.tsx --outfile dist/tmax",
-    "build:tlisp": "bun build --compile ./src/tlisp/cli.ts --outfile dist/tlisp"
+    "build:tlisp": "bun build --compile ./src/tlisp/cli.ts --outfile dist/tlisp",
+    "test:trt": "bin/trt"
   },
   "dependencies": {
     "ink": "^4.4.1",
@@ -43,6 +44,7 @@
   },
   "bin": {
     "tmax": "./bin/tmax",
-    "tlisp": "./bin/tlisp"
+    "tlisp": "./bin/tlisp",
+    "trt": "./bin/trt"
   }
 }

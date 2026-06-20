@@ -1,0 +1,69 @@
+name: trt
+description: "Demonstrates trt — the self-hosted T-Lisp Runtime Testing framework. Shows deftest, should-* assertions, the runner with failure recovery, structured results, and the M-x trt-run-tests command — all driven through the TUI."
+speed: 1.0
+setup:
+  - action: setup_file
+    var: SELF_TEST
+    name: trt-self-demo.tlisp
+    content: |
+      ;; A sample trt test file — the user sees these tests in the editor.
+      (deftest arithmetic-works ()
+        (should-equal 42 (+ 40 2)))
+
+      (deftest strings-concatenate ()
+        (should-equal "hello world" (concat "hello " "world")))
+
+      (deftest lists-have-length ()
+        (should-have-length (list 1 2 3) 3))
+
+      (deftest failure-is-caught-and-shown ()
+        (should-equal 99 (+ 1 1)))
+
+      (deftest should-throw-detects-errors ()
+        (should-throw (lambda () (error "boom"))))
+
+steps:
+  - section: Open a test file
+    narrate: "Opening a trt test file — deftest, should-* assertions, the native T-Lisp test syntax"
+    action: open
+    file: "${SELF_TEST}"
+    pause: 2.0
+
+  - section: Run the suite via M-x
+    narrate: "Entering M-x command mode with SPC ;"
+    action: key
+    key: " "
+    pause: 0.5
+
+  - narrate: "Pressing ; to enter M-x"
+    action: key
+    key: ";"
+    pause: 0.8
+
+  - narrate: "Typing the command name: trt-run-tests"
+    action: insert
+    text: "trt-run-tests"
+    pause: 1.5
+
+  - narrate: "Executing — the runner discovers, loads, and runs all .test.tlisp files"
+    action: key
+    key: "Enter"
+    pause: 2.0
+
+  - section: View results in *Messages*
+    narrate: "Switching to the *Messages* buffer to see the structured results"
+    action: eval
+    expr: '(buffer-switch "*Messages*")'
+    pause: 1.5
+
+  - narrate: "The runner recorded every test outcome — passes AND failures continue the run"
+    action: pause
+    duration: 2.0
+
+  - section: Structured results are AI-observable
+    narrate: "The same results are available as JSON — no stdout scraping"
+    action: eval
+    expr: '(progn (trt-reset) (trt-load-directory (trt-test-dir)) (trt-run-all) (trt-results-json))'
+    pause: 1.0
+
+cleanup: true

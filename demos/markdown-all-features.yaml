@@ -1,0 +1,115 @@
+name: markdown-all-features
+description: "All SPEC-039 markdown features: mode activation, headings, tags, wiki-links, table formulas, export, templates, embeds — driven via keybindings."
+speed: 1.0
+
+setup:
+  - action: setup_file
+    var: FILE
+    name: markdown-all.md
+    content: |
+      # Markdown Feature Tour
+
+      A tour of all SPEC-039 features.
+
+      ## Tags and Wiki-Links
+
+      See [[intro]] and [[setup]] for details.
+
+      This section has #important and #demo tags.
+
+      ## Table
+
+      | Item  | Qty | Price |
+      | ----- | --- | ----- |
+      | apple | 3   | 2     |
+      | pear  | 2   | 5     |
+      <!-- tblfm: @5$3=sum(@3$3..@4$3) -->
+
+steps:
+  - section: Open file + activate markdown mode
+    narrate: "Opening markdown-all.md — the mode should show 'markdown' in the bottom-right status line."
+    action: open
+    file: "${FILE}"
+    pause: 1.5
+
+  - section: Heading navigation
+    narrate: "Jump to next heading with ]h"
+    action: keys
+    keys: "]h"
+    pause: 1.0
+
+    narrate: "Jump to next heading again"
+    action: keys
+    keys: "]h"
+    pause: 1.0
+
+    narrate: "Previous heading with [h"
+    action: keys
+    keys: "[h"
+    pause: 1.0
+
+  - section: Tag navigation
+    narrate: "Jump to next #tag with ]t"
+    action: keys
+    keys: "]t"
+    pause: 1.0
+
+    narrate: "Next tag again"
+    action: keys
+    keys: "]t"
+    pause: 1.0
+
+    narrate: "Previous tag with [t"
+    action: keys
+    keys: "[t"
+    pause: 1.0
+
+  - section: Wiki-link navigation
+    narrate: "Jump to next [[wiki-link]] with ]l"
+    action: keys
+    keys: "]l"
+    pause: 1.0
+
+    narrate: "Next wiki-link"
+    action: keys
+    keys: "]l"
+    pause: 1.0
+
+    narrate: "Previous wiki-link with [l"
+    action: keys
+    keys: "[l"
+    pause: 1.0
+
+  - section: Table formula
+    narrate: "Move to the table (down several lines)"
+    action: keys
+    keys: "jjjjjjj"
+    pause: 0.5
+
+    narrate: "Evaluate the sum formula with ,tf"
+    action: keys
+    keys: ",tf"
+    pause: 1.5
+
+  - section: Bold toggle
+    narrate: "Toggle bold on a word — move to 'apple' and press ,b"
+    action: keys
+    keys: "k0ww"
+    pause: 0.5
+    action: keys
+    keys: ",b"
+    pause: 1.0
+
+  - section: Export to LaTeX
+    narrate: "Export to LaTeX with ,xl — list items wrap in itemize"
+    action: keys
+    keys: ",xl"
+    pause: 1.5
+
+  - section: Daily note template
+    narrate: "Create a daily note with ,n — {{date}} expands to today"
+    action: keys
+    keys: ",n"
+    pause: 1.5
+
+cleanup: true
