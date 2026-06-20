@@ -1,0 +1,28 @@
+;; async.tlisp --- trt async test support (SPEC-049 Phase 4, RFC 0.5.5 / Imp. #8).
+;;
+;; Async testing in a synchronous interpreter: a deftest-async marks a test that will call (done)
+;; to signal completion. The runner detects the marker and provides a `done` callback. Because the
+;; T-Lisp interpreter is fundamentally synchronous here, this is a deterministic approximation:
+;; the test body runs, and (done) records completion. True timeout protection requires scheduler
+;; hooks; the bridge provides trt-async-await for that where available.
+;;
+;; This covers the common case: tests that spawn async work and call done when finished.
+
+(defvar trt--async-done nil)
+
+(defun trt--done-callback ()
+  "The done callback bound into async test environments. Sets the completion flag."
+  (set! trt--async-done t))
+
+(defmacro deftest-async (name params &rest body)
+  (let ((name-str (if (stringp name) name (symbol-name name))))
+    `(progn
+       (trt-register ,name-str
+         (lambda ()
+           (progn
+             (set! trt--async-done nil)
+             (defvar done (lambda () (set! trt--async-done t)))
+             ,@body
+             (if (not trt--async-done)
+               (trt--fail (string-append "async test " ,name-str " did not call (done)"))))))
+       ,name-str)))

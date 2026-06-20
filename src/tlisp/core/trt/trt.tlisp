@@ -1,0 +1,136 @@
+;; trt.tlisp --- T-Lisp Runtime Testing: self-hosted core framework (SPEC-049)
+;;
+;; This is the native test framework, authored in T-Lisp, run in the T-Lisp runtime.
+;; It implements a test registry, the deftest macro, per-test isolation, a runner that records
+;; structured per-test results (the AI-observable contract), and the result accessors.
+;;
+;; Architecture:
+;;   - The registry is a global hashmap: name -> test-lambda.
+;;   - deftest is a MACRO that registers a lambda wrapping the test body (RFC-001: deftest is a
+;;     macro, body stays unevaluated until run).
+;;   - The runner iterates the registry, running each lambda inside condition-case so a failing
+;;     test is recorded and the run CONTINUES to the next test. This is what makes per-test
+;;     results observable.
+;;   - Structured results are recorded via the TS result store through thin bridge builtins
+;;     (trt-record, trt-results-ts, trt-results-json-ts, trt-reset-store). TS holds only the pure
+;;     data contract; everything else (registry, runner, reporting) is T-Lisp.
+;;
+;; Failure signaling: assertions call (error ...) to signal failure. Genuine crashes also surface
+;; as errors that condition-case catches.
+
+;; ── Module state ──────────────────────────────────────────────────────
+;; The test registry: name (string) -> test lambda. A hashmap, mutated with set!.
+(defvar trt--registry (hashmap))
+;; Ordered list of test names, in registration order. (hashmap-keys is unordered; tests read
+;; better and are more deterministic when run in definition order.)
+(defvar trt--names (list))
+;; Current source file being loaded, for grouping/reporting. Set by trt-load-file (cli.tlisp).
+(defvar trt--current-file nil)
+(defvar trt--current-test-name nil)
+
+(defun trt-current-file () trt--current-file)
+(defun trt-set-current-file (path)
+  "Set the current source file path used when recording results."
+  (set! trt--current-file path))
+
+(defun trt-reset ()
+  "Clear the registry, the name order, and the TS result store. Called at the start of every
+trt-run for isolation: repeated runs in a long-lived daemon must be reproducible (no leaked
+deftest definitions from a prior file)."
+  (progn
+    (set! trt--registry (hashmap))
+    (set! trt--names (list))
+    (if (functionp (quote trt-reset-fixtures)) (trt-reset-fixtures))
+    (if (functionp (quote trt-reset-suites)) (trt-reset-suites))
+    (trt-reset-store)))
+
+(defun trt-register (name body-fn)
+  "Register a test NAME (string) with its BODY-FN (a zero-arg lambda). Maintains insertion order
+in trt--names. Called by the deftest macro expansion; also public so programmatic tests can register."
+  (progn
+    (if (not (hashmap-has-key? trt--registry name))
+      (set! trt--names (append trt--names (list name))))
+    (set! trt--registry (hashmap-set trt--registry name body-fn))
+    name))
+
+(defun trt-test-count ()
+  "Number of currently-registered tests."
+  (length trt--names))
+
+(defun trt-bound-p (name)
+  "True when NAME is bound to a callable function in the global environment."
+  (let ((v (trt-lookup name)))
+    (if v (functionp v) nil)))
+
+;; ── Timing helpers (wrap the current-time builtin, which returns ms) ──
+(defun trt--now-ms ()
+  "Current wall-clock time in milliseconds."
+  (trt-now-ms))
+
+(defun trt--elapsed-ms (start)
+  "Milliseconds elapsed since START (a prior trt--now-ms value)."
+  (- (trt-now-ms) start))
+
+;; ── deftest macro ─────────────────────────────────────────────────────
+;; (deftest name () body...)  expands to  (trt-register "name" (lambda () body...))
+;;
+;; The params list `()' is accepted for Emacs-ERT/defun parity but ignored (tests take no args;
+;; parametrized tests are a separate form, deftest-parametrized, in parametrize.tlisp).
+;; The body may be multiple expressions; the lambda evaluates them in sequence.
+;; deftest: (deftest name () body...) — NAME is a symbol or string, PARAMS is ignored (kept for
+;; ERT/defun parity), BODY is zero or more forms run as the test. The body forms are collected
+;; via &rest and wrapped in progn so a test may contain multiple expressions.
+(defmacro deftest (name params &rest body)
+  (let ((name-str (if (stringp name) name (symbol-name name))))
+    `(progn
+       (trt-register ,name-str (lambda () (progn ,@body)))
+       ,name-str)))
+
+;; ── Single-test execution with isolation + failure recovery ───────────
+(defun trt--run-one (name)
+  "Run one test by NAME. The structured outcome is recorded in the TS store via trt-record. Each
+test runs inside condition-case so a failure is caught and the run continues."
+  (let ((body-fn (hashmap-get trt--registry name))
+        (start (trt--now-ms)))
+    (set! trt--current-test-name name)
+    (if (not body-fn)
+      (trt-record name nil (string-append "trt: test not found: " name) 0 (trt-current-file))
+      (condition-case err
+        (progn
+          (if (functionp (quote trt--fixture-setup)) (trt--fixture-setup))
+          (funcall body-fn)
+          (if (functionp (quote trt--fixture-teardown)) (trt--fixture-teardown))
+          (trt-record name t nil (trt--elapsed-ms start) (trt-current-file)))
+        (error (e)
+          (progn
+            (if (functionp (quote trt--fixture-teardown)) (trt--fixture-teardown))
+            (trt-record name nil e (trt--elapsed-ms start) (trt-current-file))))))))
+
+;; ── Runners ───────────────────────────────────────────────────────────
+(defun trt-run (name)
+  "Run a single named test and return its structured result."
+  (progn
+    (trt--run-one name)
+    (trt-results)))
+
+(defun trt-run-all ()
+  "Run every registered test, in registration order, recording each outcome. A failure does not
+stop the run. Resets the result store first so each run is reproducible (AC: isolation). Returns
+the full structured result (stats + per-test detail) via trt-results."
+  (progn
+    (trt-reset-store)
+    (dolist (name trt--names)
+      (trt--run-one name))
+    (trt-results)))
+
+;; ── Result accessors (the AI-observable contract) ────────────────────
+;; These read the TS result store. Neither performs I/O; both return data an agent can inspect
+;; without scraping stdout. SPEC-049 acceptance criterion #3.
+(defun trt-results ()
+  "Return the structured results of the last run as T-Lisp data: an alist of stats plus a per-test
+list. See SPEC-049 for the shape."
+  (trt-results-ts))
+
+(defun trt-results-json ()
+  "Return the structured results of the last run as a JSON string (stats plus tests array)."
+  (trt-results-json-ts))

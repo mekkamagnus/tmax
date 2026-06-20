@@ -1,0 +1,37 @@
+;; bench.tlisp --- trt benchmarking (SPEC-049 Phase 5, RFC 0.5.9 / Imp. #14).
+;;
+;; Measure how many times a function executes within a time budget. Returns ops/sec. Baselines are
+;; stored in a global hashmap for regression detection.
+
+(defvar trt--baselines (hashmap))
+
+(defun trt-bench (name fn iterations)
+  "Run FN ITERATIONS times, returning a hashmap with name, iterations, total-ms, and ops-per-sec."
+  (let ((start (trt-now-ms)))
+    (let ((i 0))
+      (while (< i iterations)
+        (funcall fn)
+        (set! i (+ i 1))))
+    (let ((total-ms (- (trt-now-ms) start)))
+      (let ((ops-per-sec (if (> total-ms 0)
+                           (/ (* iterations 1000) total-ms)
+                           iterations)))
+        (let ((result (hashmap)))
+          (set! result (hashmap-set result "name" name))
+          (set! result (hashmap-set result "iterations" iterations))
+          (set! result (hashmap-set result "total-ms" total-ms))
+          (set! result (hashmap-set result "ops-per-sec" ops-per-sec))
+          result)))))
+
+(defun trt-bench-save-baseline (name bench-result)
+  "Store BENCH-RESULT as the baseline for NAME."
+  (set! trt--baselines (hashmap-set trt--baselines name bench-result))
+  name)
+
+(defun trt-bench-regression-p (name current-ops)
+  "True when CURRENT-OPS is more than 10% below the stored baseline for NAME (a regression)."
+  (if (hashmap-has-key? trt--baselines name)
+    (let ((baseline (hashmap-get trt--baselines name)))
+      (let ((baseline-ops (hashmap-get baseline "ops-per-sec")))
+        (< current-ops (- baseline-ops (/ baseline-ops 10)))))
+    nil))

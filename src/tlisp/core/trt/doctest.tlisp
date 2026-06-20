@@ -1,0 +1,13 @@
+;; doctest.tlisp --- trt examples-as-tests (SPEC-049 Phase 5, RFC Imp. #11).
+;;
+;; Extract example forms from docstrings and verify each evaluates to its expected result. This is
+;; a minimal implementation: (trt-doctest-check name form expected) evaluates FORM and compares to
+;; EXPECTED, recording the outcome. Full docstring parsing is a future enhancement.
+
+(defun trt-doctest-check (name form expected)
+  "Evaluate FORM (a string of T-Lisp source) and compare its result to EXPECTED. Records pass/fail
+as a test named NAME. This is the building block for examples-as-tests."
+  (trt-register name
+    (lambda ()
+      (let ((actual (trt-eval-source form)))
+        (should-equal expected actual)))))

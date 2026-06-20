@@ -1,0 +1,24 @@
+;; parametrize.tlisp --- trt parametrized tests (SPEC-049 Phase 3, RFC Imp. #6).
+;;
+;; Parametrized tests run the same body with multiple inputs (table-driven). Each case is a
+;; (args . expected-style) pair passed to the body. This expands each case into a separate registered
+;; test so they appear individually in results and can fail independently.
+;;
+;; API: (trt-parametrize name body-fn cases) where CASES is a list of arg-lists. Each case registers
+;; a test named name[i] that calls body-fn with the case's args.
+
+(defun trt--param-case-name (base index)
+  "Build a per-case test name: base[index]."
+  (string-append base "[" (number-to-string index) "]"))
+
+(defun trt-parametrize (name body-fn cases)
+  "Register a parametrized test. NAME is the base name; BODY-FN is a lambda taking the case args;
+CASES is a list of arg-lists. Each case becomes its own test."
+  (let ((index 0))
+    (dolist (case-args cases)
+      (let ((case-name (trt--param-case-name name index)))
+        (trt-register case-name
+          (lambda ()
+            (apply body-fn case-args))))
+      (set! index (+ index 1))))
+  name)

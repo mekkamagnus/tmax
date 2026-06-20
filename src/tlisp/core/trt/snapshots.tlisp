@@ -1,0 +1,40 @@
+;; snapshots.tlisp --- trt snapshot testing (SPEC-049 Phase 4, RFC Imp. #9).
+;;
+;; Snapshot testing captures a value's string form and compares it against a stored baseline. On
+;; first run the snapshot is written (the test passes); on subsequent runs the value must match.
+;; Update mode (trt-snapshot-update set to t) rewrites baselines.
+;;
+;; Snapshots are stored as a global hashmap: test-name -> expected-string. File-based .snap
+;; persistence is a future enhancement; in-memory snapshots cover the core contract.
+
+(defvar trt--snapshots (hashmap))
+(defvar trt-snapshot-update nil)
+
+(defun trt--snapshot-key (test-name)
+  "Namespaced snapshot key."
+  (string-append "snap:" test-name))
+
+(defun trt--render-snapshot (value)
+  "Render a value to its snapshot string form."
+  (trt-value-to-string value))
+
+(defun should-match-snapshot (value)
+  "Pass when VALUE's string form matches the stored snapshot for the current test, or when no
+snapshot exists yet (first run writes it). In update mode, rewrites the baseline."
+  (let ((key (trt--snapshot-key trt--current-test-name))
+        (actual (trt--render-snapshot value)))
+    (cond
+      (trt-snapshot-update
+        (progn (set! trt--snapshots (hashmap-set trt--snapshots key actual)) t))
+      ((not (hashmap-has-key? trt--snapshots key))
+        (progn (set! trt--snapshots (hashmap-set trt--snapshots key actual)) t))
+      (t
+        (let ((expected (hashmap-get trt--snapshots key)))
+          (if (string= expected actual)
+            t
+            (trt--fail (string-append "should-match-snapshot: snapshot mismatch expected: "
+                                      expected " actual: " actual))))))))
+
+(defun trt-reset-snapshots ()
+  "Clear all stored snapshots (called by trt-reset for isolation)."
+  (set! trt--snapshots (hashmap)))

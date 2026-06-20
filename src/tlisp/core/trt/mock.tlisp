@@ -1,0 +1,49 @@
+;; mock.tlisp --- trt mocking & spying (SPEC-049 Phase 5, RFC 0.5.8 / Imp. #13).
+;;
+;; Spy-first mocking: a spy wraps a function, records calls (args + return values), and delegates
+;; to the real implementation by default. Mock-fn creates a fresh function with configurable return.
+;; Spies reset between tests (trt-reset-mocks). Verification assertions check call counts/args.
+;;
+;; Spy storage: a global hashmap spy-name -> call-log (list of arg-lists).
+
+(defvar trt--spies (hashmap))
+
+(defun trt-spy-call-log (name)
+  "Return the list of recorded arg-lists for spy NAME."
+  (if (hashmap-has-key? trt--spies name)
+    (hashmap-get trt--spies name)
+    (list)))
+
+(defun trt-spy-called-times-p (name expected)
+  "True when spy NAME was called EXPECTED times."
+  (= (length (trt-spy-call-log name)) expected))
+
+(defun trt-spy-was-called-p (name)
+  "True when spy NAME was called at least once."
+  (> (length (trt-spy-call-log name)) 0))
+
+(defun trt-spy-record (name args)
+  "Record a call to spy NAME with ARGS. Internal."
+  (let ((log (trt-spy-call-log name)))
+    (set! trt--spies (hashmap-set trt--spies name (append log (list args))))))
+
+(defun mock-fn (name return-value)
+  "Create a mock function named NAME that returns RETURN-VALUE and records its calls. The mock
+accepts up to 2 arguments (covers the common case; variadic lambdas are unsupported in T-Lisp)."
+  (let ((fn (lambda (a b) (progn (trt-spy-record name (list a b)) return-value))))
+    fn))
+
+(defun trt-reset-mocks ()
+  "Clear all spy call logs (called by trt-reset for isolation)."
+  (set! trt--spies (hashmap)))
+
+;; Verification assertions
+(defun should-have-been-called (name)
+  (if (trt-spy-was-called-p name) t
+    (trt--fail (string-append "should-have-been-called: " name " was never called"))))
+
+(defun should-have-been-called-times (name expected)
+  (if (trt-spy-called-times-p name expected) t
+    (trt--fail (string-append "should-have-been-called-times: " name " called "
+                              (number-to-string (length (trt-spy-call-log name)))
+                              " times, expected " (number-to-string expected)))))

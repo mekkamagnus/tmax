@@ -1,0 +1,192 @@
+;; assertions.tlisp --- trt should-* assertion library (SPEC-049, RFC 0.5.2 + 0.6.1)
+;;
+;; All assertions signal failure via `(error "...")' with a clear message. The runner's
+;; `condition-case' (in trt.tlisp) catches that and records the test as failed, then continues.
+;; On success an assertion returns t. This is the failure-signaling discipline the self-hosted
+;; runner depends on: a failed should-* never returns, it raises, and the runner recovers.
+;;
+;; Naming follows RFC-001 / Emacs convention: `should-*' (not `assert-*'). The old TS framework
+;; used assert-*; this is the new native form. (alpha: breaking change is intended.)
+
+(defmodule editor/trt/assertions
+  (export should-equal should-not-equal
+          should-be-truthy should-be-falsy
+          should-throw should-not-throw
+          should-contain should-not-contain
+          should-contain-string should-match
+          should-have-length should-be-empty
+          should-be-greater-than should-be-less-than
+          should-be-close-to
+          should-be-a should-be-nil
+          trt--fail trt--format))
+
+;; ── Internal helpers ──────────────────────────────────────────────────
+(defun trt--fail (message)
+  "Signal a test failure. Always raises via error; never returns."
+  (error message))
+
+;; Render any value into a short string for messages. number-to-string handles numbers;
+;; everything else falls back to a generic form. (There is no `format' builtin, so we compose.)
+(defun trt--format (value)
+  (cond
+    ((stringp value) (string-append "\"" value "\""))
+    ((numberp value) (number-to-string value))
+    ((null value) "nil")
+    ((eq value t) "t")
+    (t "<value>")))
+
+;; ── Basic assertions (RFC 0.5.2) ──────────────────────────────────────
+(defun should-equal (expected actual)
+  "Pass if EXPECTED and ACTUAL are equal (structural equality)."
+  (if (equal expected actual)
+    t
+    (trt--fail (string-append
+                 "should-equal: expected " (trt--format expected)
+                 " but got " (trt--format actual)))))
+
+(defun should-not-equal (expected actual)
+  "Pass if EXPECTED and ACTUAL are NOT equal."
+  (if (not (equal expected actual))
+    t
+    (trt--fail (string-append
+                 "should-not-equal: expected values to differ but both were "
+                 (trt--format expected)))))
+
+(defun should-be-truthy (value)
+  "Pass if VALUE is truthy (not nil)."
+  (if value t
+    (trt--fail "should-be-truthy: expected truthy value but got nil")))
+
+(defun should-be-falsy (value)
+  "Pass if VALUE is falsy (nil)."
+  (if (not value) t
+    (trt--fail (string-append "should-be-falsy: expected nil but got " (trt--format value)))))
+
+(defun should-be-nil (value)
+  "Pass if VALUE is nil."
+  (if (null value) t
+    (trt--fail (string-append "should-be-nil: expected nil but got " (trt--format value)))))
+
+;; should-throw: evaluate BODY-FN (a zero-arg lambda) and pass if it errors.
+;; We cannot pass an unevaluated form here (functions receive evaluated args), so the idiom is
+;; `(should-throw (lambda () (/ 1 0)))'. condition-case does the catching.
+(defun should-throw (body-fn)
+  "Pass if calling BODY-FN (a zero-arg lambda) signals an error."
+  (condition-case err
+    (progn
+      (funcall body-fn)
+      (trt--fail "should-throw: expected an error but none was signaled"))
+    (error (e) t)))
+
+(defun should-not-throw (body-fn)
+  "Pass if calling BODY-FN (a zero-arg lambda) does NOT signal an error."
+  (condition-case err
+    (progn (funcall body-fn) t)
+    (error (e)
+      (trt--fail (string-append "should-not-throw: expected no error but got: " e)))))
+
+;; ── String/collection assertions (RFC 0.6.1) ──────────────────────────
+;; string-contains-p is (NEEDLE HAYSTACK) in this runtime.
+(defun should-contain-string (haystack needle)
+  "Pass if HAYSTACK string contains NEEDLE substring."
+  (if (string-contains-p needle haystack)
+    t
+    (trt--fail (string-append
+                 "should-contain-string: \"" haystack "\" does not contain \"" needle "\""))))
+
+(defun should-not-contain-string (haystack needle)
+  "Pass if HAYSTACK string does NOT contain NEEDLE substring."
+  (if (not (string-contains-p needle haystack))
+    t
+    (trt--fail (string-append
+                 "should-not-contain-string: \"" haystack "\" unexpectedly contains \"" needle "\""))))
+
+(defun should-match (pattern string)
+  "Pass if STRING matches the regex PATTERN. Uses string-match-spans under the hood; a non-nil
+span list means at least one match."
+  (if (string-match-spans pattern string t)
+    t
+    (trt--fail (string-append
+                 "should-match: \"" string "\" does not match /" pattern "/"))))
+
+(defun should-contain (item-list item)
+  "Pass if ITEM-LIST contains ITEM (membership via `member')."
+  (if (member item item-list)
+    t
+    (trt--fail (string-append "should-contain: list does not contain " (trt--format item)))))
+
+(defun should-have-length (seq expected)
+  "Pass if SEQ has length EXPECTED."
+  (let ((actual (length seq)))
+    (if (= actual expected)
+      t
+      (trt--fail (string-append
+                   "should-have-length: expected " (number-to-string expected)
+                   " but got " (number-to-string actual))))))
+
+(defun should-be-empty (seq)
+  "Pass if SEQ has length 0."
+  (if (= (length seq) 0)
+    t
+    (trt--fail "should-be-empty: expected empty sequence")))
+
+;; ── Numeric assertions (RFC 0.6.1) ────────────────────────────────────
+(defun should-be-greater-than (value threshold)
+  "Pass if VALUE > THRESHOLD."
+  (if (> value threshold)
+    t
+    (trt--fail (string-append
+                 "should-be-greater-than: expected " (number-to-string value)
+                 " > " (number-to-string threshold)))))
+
+(defun should-be-less-than (value threshold)
+  "Pass if VALUE < THRESHOLD."
+  (if (< value threshold)
+    t
+    (trt--fail (string-append
+                 "should-be-less-than: expected " (number-to-string value)
+                 " < " (number-to-string threshold)))))
+
+(defun should-be-close-to (actual expected tolerance)
+  "Pass if |ACTUAL - EXPECTED| <= TOLERANCE."
+  (let ((delta (abs (- actual expected))))
+    (if (<= delta tolerance)
+      t
+      (trt--fail (string-append
+                   "should-be-close-to: " (number-to-string actual)
+                   " is not within " (number-to-string tolerance)
+                   " of " (number-to-string expected)
+                   " (delta " (number-to-string delta) ")")))))
+
+;; ── Type assertions (RFC 0.6.1) ───────────────────────────────────────
+(defun should-be-a (type-sym value)
+  "Pass if VALUE is of the predicate type TYPE-SYM. TYPE-SYM is one of:
+string, number, symbol, list, nil, hashmap, function, boolean."
+  (let ((ok
+          (cond
+            ((equal type-sym 'string) (stringp value))
+            ((equal type-sym 'number) (numberp value))
+            ((equal type-sym 'symbol) (symbolp value))
+            ((equal type-sym 'list) (listp value))
+            ((equal type-sym 'nil) (null value))
+            ((equal type-sym 'boolean) (or (equal value t) (null value)))
+            ((equal type-sym 'hashmap) (hashmapp value))
+            ((equal type-sym 'function) (functionp value))
+            (t (trt--fail (string-append
+                            "should-be-a: unknown type " (symbol-name type-sym)))))))
+    (if ok
+      t
+      (trt--fail (string-append
+                   "should-be-a: expected " (symbol-name type-sym)
+                   " but got " (trt--format value))))))
+
+;; ── Custom assertions (RFC 0.6.1 defassertion) ───────────────────────
+;; (defassertion name (args...) body...) defines a custom should-* style assertion. The body
+;; should return t on success or call (trt--fail "...") on failure. It becomes a callable
+;; function named NAME, so users can build domain-specific assertions (e.g. should-be-valid-buffer).
+(defmacro defassertion (name params &rest body)
+  (let ((name-str (if (stringp name) name (symbol-name name))))
+    `(progn
+       (defvar ,name nil)
+       (set! ,name (lambda ,params ,@body))
+       ,name-str)))

@@ -1,0 +1,35 @@
+;; coverage.tlisp --- trt coverage reporting (SPEC-049 Phase 4, RFC 0.5.6 / Imp. #10).
+;;
+;; Coverage tracking for T-Lisp functions. The low-level counters live in the TS coverage
+;; primitives (test-coverage.ts), exposed here as trt-coverage-* bridge builtins. This module wraps
+;; them with a T-Lisp API: enable/disable, report generation, threshold enforcement.
+;;
+;; Note: line/branch coverage require source instrumentation not yet wired; this provides
+;; function coverage (which functions were called during the test run), the foundation.
+
+(defvar trt-coverage-threshold 0)
+
+(defun trt-coverage-on ()
+  "Enable coverage tracking for subsequent test runs."
+  (trt-coverage-enable t))
+
+(defun trt-coverage-off ()
+  "Disable coverage tracking."
+  (trt-coverage-enable nil))
+
+(defun trt-coverage-report-string ()
+  "Return the coverage report as a string."
+  (trt-coverage-format-report))
+
+(defun trt-coverage-percentage-now ()
+  "Return the current coverage percentage (0-100)."
+  (trt-coverage-pct))
+
+(defun trt-coverage-meets-threshold-p ()
+  "True when current coverage percentage meets or exceeds trt-coverage-threshold."
+  (>= (trt-coverage-pct) trt-coverage-threshold))
+
+(defun trt-set-coverage-threshold (n)
+  "Set the minimum coverage percentage required."
+  (set! trt-coverage-threshold n)
+  n)

@@ -1,0 +1,48 @@
+;; suites.tlisp --- trt test suites (SPEC-049 Phase 3, RFC 0.6.3 / Imp. #7).
+;;
+;; Test suites group related tests with optional setup/teardown hooks. A suite is a hashmap record
+;; with a name, a list of test names, and optional before-each/after-each hooks. The runner runs a
+;; suite's tests, applying the hooks around each.
+;;
+;; Suite storage: a global hashmap name -> suite-record.
+
+(defvar trt--suites (hashmap))
+
+(defun trt--suite-record (name tests before-each after-each)
+  "Build a suite record hashmap."
+  (let ((r (hashmap)))
+    (set! r (hashmap-set r "name" name))
+    (set! r (hashmap-set r "tests" tests))
+    (set! r (hashmap-set r "before-each" before-each))
+    (set! r (hashmap-set r "after-each" after-each))
+    r))
+
+(defun trt-register-suite (name test-names before-each after-each)
+  "Register a suite NAME with a list of TEST-NAMES and BEFORE-EACH / AFTER-EACH lambdas."
+  (set! trt--suites (hashmap-set trt--suites name
+                    (trt--suite-record name test-names before-each after-each)))
+  name)
+
+(defun trt-suite-names ()
+  "Return the list of registered suite names."
+  (hashmap-keys trt--suites))
+
+(defun trt-run-suite (name)
+  "Run every test in suite NAME, applying its before-each/after-each hooks around each test. The
+structured result is in the store. Returns (trt-results)."
+  (let ((rec (hashmap-get trt--suites name)))
+    (if (not rec)
+      (trt--fail (string-append "trt-run-suite: no such suite: " name))
+      (let ((tests (hashmap-get rec "tests"))
+            (before-each (hashmap-get rec "before-each"))
+            (after-each (hashmap-get rec "after-each")))
+        (trt-reset-store)
+        (dolist (tname tests)
+          (if before-each (funcall before-each))
+          (trt--run-one tname)
+          (if after-each (funcall after-each)))
+        (trt-results)))))
+
+(defun trt-reset-suites ()
+  "Clear all suites (called by trt-reset for isolation)."
+  (set! trt--suites (hashmap)))

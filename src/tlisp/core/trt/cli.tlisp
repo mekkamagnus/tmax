@@ -1,0 +1,78 @@
+;; cli.tlisp --- trt discovery, loading, and one-shot run (SPEC-049 Phase 2).
+;;
+;; These are the T-Lisp entry points the `trt` CLI (bin/trt → bin/tmax --test) calls:
+;;   (trt-discover [path])     scan a dir for *.test.tlisp, default test/tlisp
+;;   (trt-load-file path)      evaluate one test file (registers its deftests)
+;;   (trt-run [path-or-pattern])  clear → discover/load → run → return structured results
+;;
+;; The actual file I/O uses the existing read-file / directory-files builtins. No new TS I/O
+;; layer is added — this is pure T-Lisp wrapping existing primitives.
+
+;; ── Discovery ────────────────────────────────────────────────────────
+(defun trt--ends-with-p (str suffix)
+  "True when STR ends with SUFFIX."
+  (let ((slen (length str)) (flen (length suffix)))
+    (if (< slen flen)
+      nil
+      (string= (substring str (- slen flen) slen) suffix))))
+
+(defun trt-discover (path)
+  "Return a list of *.test.tlisp files in directory PATH (non-recursive)."
+  (let ((entries (trt-list-directory path))
+        (found (list)))
+    (dolist (entry entries)
+      (if (trt--ends-with-p entry ".test.tlisp")
+        (set! found (append found (list entry)))))
+    found))
+
+;; ── Loading ──────────────────────────────────────────────────────────
+(defun trt--path-join (dir file)
+  "Join DIR and FILE with a single slash separator."
+  (string-append dir "/" file))
+
+(defun trt-load-file (path)
+  "Read and evaluate one test file at PATH, registering its deftests. Sets the current file so
+results record where each test came from. Returns t on success, raises on read/eval error."
+  (progn
+    (trt-set-current-file path)
+    (let ((source (trt-read-file path)))
+      (trt-eval-source source))))
+
+(defun trt-load-directory (path)
+  "Discover and load every *.test.tlisp file in directory PATH. Returns the count loaded."
+  (let ((files (trt-discover path))
+        (count 0))
+    (dolist (file files)
+      (trt-load-file (trt--path-join path file))
+      (set! count (+ count 1)))
+    count))
+
+;; ── One-shot run ─────────────────────────────────────────────────────
+;; trt-run is a macro (not defun) so it can take optional path args without &rest support in
+;; regular functions. Expands to the right load+run form based on whether an arg is present.
+(defmacro trt-run (&rest args)
+  (if (= (length args) 0)
+    '(trt-run-all)
+    (let ((arg (car args)))
+      (cond
+        ((trt--ends-with-p arg ".test.tlisp")
+          `(progn (trt-load-file ,arg) (trt-run-all)))
+        ((trt--ends-with-p arg "/")
+          `(progn (trt-load-directory ,arg) (trt-run-all)))
+        (t
+          '(trt-run-all))))))
+
+;; ── Convenience: run + return JSON (for `trt --json`) ────────────────
+(defmacro trt-run-json (&rest args)
+  `(progn (trt-run ,@args) (trt-results-json)))
+
+;; ── Human-readable report printer (for `trt` without --json) ─────────
+(defun trt-print-report ()
+  "Return a human-readable summary string of the last run. The CLI prints this returned value
+(daemon princ side-effects do not flow to the client stdout, so the report must be the value)."
+  (let ((passed (car (trt-current-stats-ts)))
+        (failed (car (cdr (trt-current-stats-ts))))
+        (total (car (cdr (cdr (trt-current-stats-ts))))))
+    (string-append "trt: " (number-to-string passed) " passed, "
+                   (number-to-string failed) " failed, "
+                   (number-to-string total) " total")))

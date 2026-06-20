@@ -1,0 +1,57 @@
+;; fixtures.tlisp --- trt fixture system (SPEC-049 Phase 3, RFC 0.6.2 / Imp. #1).
+;;
+;; Fixtures are reusable setup/teardown logic with scopes and auto-cleanup. A fixture is defined
+;; with deffixture and applied to tests with use-fixtures. The runner (trt--run-one in trt.tlisp)
+;; consults the active fixture set and runs each fixture's setup before the test body and its
+;; teardown after (even on failure).
+;;
+;; Fixture storage: a global hashmap name -> fixture-record (a hashmap with setup, teardown, scope).
+
+(defvar trt--fixtures (hashmap))
+(defvar trt--active-fixtures (list))
+
+(defun trt--fixture-record (setup teardown scope)
+  "Build a fixture record as a hashmap."
+  (let ((r (hashmap)))
+    (set! r (hashmap-set r "setup" setup))
+    (set! r (hashmap-set r "teardown" teardown))
+    (set! r (hashmap-set r "scope" scope))
+    r))
+
+(defun trt-register-fixture (name setup teardown scope)
+  "Register a fixture NAME with SETUP and TEARDOWN lambdas and a SCOPE ('each or 'once)."
+  (set! trt--fixtures (hashmap-set trt--fixtures name (trt--fixture-record setup teardown scope)))
+  name)
+
+;; deffixture: a macro is hard here because the body needs to be split into setup/teardown. Instead
+;; expose a function form: (deffixture name :setup (lambda...) :teardown (lambda...) :scope 'each).
+;; For the common case, trt-register-fixture is the direct API.
+(defmacro use-fixtures (&rest names)
+  (progn
+    (set! trt--active-fixtures names)
+    t))
+
+(defun trt--fixture-setup ()
+  "Run the setup of every active fixture. Returns t."
+  (dolist (name trt--active-fixtures)
+    (let ((rec (hashmap-get trt--fixtures name)))
+      (if rec
+        (let ((setup (hashmap-get rec "setup")))
+          (if setup (funcall setup)))))))
+
+(defun trt--fixture-teardown ()
+  "Run the teardown of every active fixture, in reverse order. Logs but does not fail on errors."
+  (let ((reversed (reverse trt--active-fixtures)))
+    (dolist (name reversed)
+      (let ((rec (hashmap-get trt--fixtures name)))
+        (if rec
+          (let ((teardown (hashmap-get rec "teardown")))
+            (if teardown
+              (condition-case err
+                (funcall teardown)
+                (error (e) e)))))))))  ; swallow teardown errors
+
+(defun trt-reset-fixtures ()
+  "Clear all fixtures and the active set (called by trt-reset for isolation)."
+  (set! trt--fixtures (hashmap))
+  (set! trt--active-fixtures (list)))
