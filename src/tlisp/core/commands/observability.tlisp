@@ -1,0 +1,37 @@
+(defmodule editor/commands/observability
+  (export view-shell-output view-async-output view-tests)
+
+;; observability.tlisp --- view commands for the SPEC-055 program-run buffers.
+;; Each mirrors view-messages: switch to the buffer and scroll to the newest
+;; entry so the user sees the most recent activity.
+
+(defun view-shell-output ()
+  "Switch to *Shell Output* buffer and scroll to newest entries (SPEC-055)."
+  (progn
+    (buffer-switch "*Shell Output*")
+    (let ((line-count (buffer-line-count)))
+      (if (> line-count 0)
+        (cursor-move (- line-count 1) 0)))))
+
+(defun view-async-output ()
+  "Switch to *Async Output* buffer and scroll to newest entries (SPEC-055)."
+  (progn
+    (buffer-switch "*Async Output*")
+    (let ((line-count (buffer-line-count)))
+      (if (> line-count 0)
+        (cursor-move (- line-count 1) 0)))))
+
+(defun view-tests ()
+  "Switch to *Tests* buffer and scroll to newest entries (SPEC-055)."
+  (progn
+    (buffer-switch "*Tests*")
+    (let ((line-count (buffer-line-count)))
+      (if (> line-count 0)
+        (cursor-move (- line-count 1) 0)))))
+
+;; Key bindings — C-h prefix family, consistent with C-h e (view-messages).
+(key-bind "C-h s" "(view-shell-output)" "normal")
+(key-bind "C-h a" "(view-async-output)" "normal")
+(key-bind "C-h t" "(view-tests)" "normal")
+(provide "observability")
+)

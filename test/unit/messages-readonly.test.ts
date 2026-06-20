@@ -1,0 +1,98 @@
+import { describe, expect, test } from "bun:test";
+import { FunctionalTextBufferImpl } from "../../src/core/buffer";
+import { createEditorAPI, type TlispEditorState } from "../../src/editor/tlisp-api";
+import { createString } from "../../src/tlisp/values";
+import { Either } from "../../src/utils/task-either";
+import { expectDefined, expectRight } from "../helpers/editor-fixture.ts";
+import { MockFileSystem } from "../mocks/filesystem.ts";
+import { MockTerminal } from "../mocks/terminal.ts";
+
+function createState(): TlispEditorState {
+  const scratchBuffer = FunctionalTextBufferImpl.create("");
+  const messagesBuffer = FunctionalTextBufferImpl.create("existing messages\n");
+  return {
+    currentBuffer: messagesBuffer,
+    buffers: new Map([
+      ["default", scratchBuffer],
+      ["*Messages*", messagesBuffer],
+    ]),
+    cursorLine: 0,
+    cursorColumn: 0,
+    terminal: new MockTerminal(),
+    filesystem: new MockFileSystem(),
+    mode: "normal",
+    lastCommand: "",
+    statusMessage: "",
+    viewportTop: 0,
+    viewportLeft: 0,
+    commandLine: "",
+    spacePressed: false,
+    mxCommand: "",
+    cursorFocus: "buffer",
+  };
+}
+
+describe("SPEC-016: *Messages* buffer read-only guard", () => {
+  test("buffer-insert is rejected when *Messages* is current buffer", () => {
+    const state = createState();
+    // currentBuffer is *Messages* in this state
+    const api = createEditorAPI(state);
+    const bufferInsert = expectDefined(api.get("buffer-insert"));
+
+    const result = bufferInsert([createString("injected")]);
+
+    expect(Either.isLeft(result)).toBe(true);
+    if (Either.isLeft(result)) {
+      expect(result.left.type).toBe("BufferError");
+      expect(result.left.message).toContain("read-only");
+    }
+  });
+
+  test("buffer-delete-range is rejected when *Messages* is current buffer", () => {
+    const state = createState();
+    const api = createEditorAPI(state);
+    const bufferDeleteRange = expectDefined(api.get("buffer-delete-range"));
+
+    // args: startLine, startCol, endLine, endCol
+    const result = bufferDeleteRange([
+      { type: "number", value: 0 } as any,
+      { type: "number", value: 0 } as any,
+      { type: "number", value: 0 } as any,
+      { type: "number", value: 5 } as any,
+    ]);
+
+    expect(Either.isLeft(result)).toBe(true);
+    if (Either.isLeft(result)) {
+      expect(result.left.type).toBe("BufferError");
+    }
+  });
+
+  test("buffer-insert works when a writable buffer is current", () => {
+    const state = createState();
+    // Switch to the writable default buffer
+    state.currentBuffer = state.buffers.get("default")!;
+    const api = createEditorAPI(state);
+    const bufferInsert = expectDefined(api.get("buffer-insert"));
+
+    const result = bufferInsert([createString("hello")]);
+
+    expect(Either.isRight(result)).toBe(true);
+  });
+
+  test("buffer-insert-at-position is rejected when *Messages* is current buffer", () => {
+    const state = createState();
+    const api = createEditorAPI(state);
+    const bufferInsertAt = expectDefined(api.get("buffer-insert-at-position"));
+
+    const result = bufferInsertAt([
+      { type: "number", value: 0 } as any,
+      { type: "number", value: 0 } as any,
+      createString("x"),
+    ]);
+
+    expect(Either.isLeft(result)).toBe(true);
+    if (Either.isLeft(result)) {
+      expect(result.left.type).toBe("BufferError");
+    }
+  });
+});

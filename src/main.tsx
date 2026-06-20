@@ -336,6 +336,11 @@ Examples:
   }
 
   const frontend = new SteepFrontend();
+  // Subscribe the frontend to editor state changes so that input arriving over
+  // the socket (tmaxclient --keys) — which mutates the shared editor but
+  // bypasses the SteepFrontend's own stdin render path — still triggers a
+  // repaint. requestRender is a no-op until frontend.run initializes its loop.
+  editor.onStateChange(() => frontend.requestRender(editor));
   try {
     await frontend.run(editor, initialState);
   } catch (error) {

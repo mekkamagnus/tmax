@@ -25,10 +25,14 @@ export function renderStatusLine(state: EditorState, width: number): string {
 
   const majorModeRaw = state.currentMajorMode ?? "fundamental";
   const majorModeShort = majorModeRaw.replace(/-mode$/, "");
+
+  const lighters = state.activeMinorModeLighters ?? [];
+  const lighterStr = lighters.length > 0 ? ` (${lighters.join(" ")})` : "";
+
   const right = style(
     `L${state.cursorPosition.line + 1} C${state.cursorPosition.column + 1}`,
     { fg: "white" },
-  ) + style(` [${majorModeShort}]`, { fg: "cyan" });
+  ) + style(` [${majorModeShort}]${lighterStr}`, { fg: "cyan" });
 
   const leftLen = visibleLength(left);
   const rightLen = visibleLength(right);

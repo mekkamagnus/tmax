@@ -16,7 +16,7 @@ import { FunctionalTextBufferImpl } from '../core/buffer.ts';
 import { EditorState, Frame, WorkspaceState } from '../core/types.ts';
 import { WorkspaceManager } from '../core/workspace.ts';
 import { Either } from '../utils/task-either.ts';
-import { registerTestingFramework } from '../tlisp/test-framework.ts';
+import { loadTrtFrameworkSync } from '../tlisp/trt/bootstrap.ts';
 import { editorStateToJson } from './serialize.ts';
 import { cloneJsonValue } from '../tlisp/serialization.ts';
 import { captureFrame } from '../render/capture-frame.ts';
@@ -175,9 +175,12 @@ export class TmaxServer {
       const filesystem = new FileSystemImpl();
       this.editor = new Editor(terminal, filesystem);
 
-      // Load test framework to provide defvar and other testing utilities
+      // Load the self-hosted trt (T-Lisp Runtime Testing) framework. The framework is authored
+      // in T-Lisp (src/tlisp/core/trt/*.tlisp); this bootstrap registers the bridge builtins and
+      // loads those files into the interpreter (SPEC-049). Sync variant because the constructor
+      // cannot await.
       const interpreter = this.editor.getInterpreter();
-      registerTestingFramework(interpreter);
+      loadTrtFrameworkSync(interpreter);
 
       // Initialize default state
       const initialState: EditorState = {
@@ -257,7 +260,7 @@ export class TmaxServer {
       rawModeReady: false,
     });
     this.activeFrameId = id;
-    this.editor.logMessage(`Frame created: ${id}`, 'info');
+    this.editor.logMessage(`Frame created: ${id}`, 'info', undefined, id);
     return id;
   }
 
@@ -443,6 +446,12 @@ export class TmaxServer {
     }
     this.lastSaveHashes.set(name, result.right.contentHash);
     this.lastSavedAt.set(name, Date.now());
+    // SPEC-055: record successful autosave at debug (silent by default; does
+    // not mirror into *Messages* because debug < warn). Available for
+    // forensics when minLevel is lowered. Failures already log at error.
+    this.editor.logProgram('autosave', {
+      level: 'debug', text: `Auto-saved workspace "${name}"`,
+    });
   }
 
 	  // I1: save only dirty workspaces (called by auto-save timer)
@@ -752,7 +761,7 @@ export class TmaxServer {
       }
       this.activeFrameId = latest?.id ?? null;
     }
-    this.editor.logMessage(`Frame deleted: ${id}`, 'info');
+    this.editor.logMessage(`Frame deleted: ${id}`, 'info', undefined, id);
   }
 
   /**
@@ -1021,7 +1030,9 @@ export class TmaxServer {
     };
 
     this.clients.set(clientId, client);
-    console.log(`Client connected: ${clientId}`);
+    // Record the connection in the *daemon* event buffer (SPEC-047). Falls back
+    // to a no-op in standalone-daemon mode where no editor is attached.
+    this.editor?.logDaemonEvent('client-connected', clientId);
 
     // Set up connection handlers with per-connection input buffering
     conn.on('data', async (data) => {
@@ -1115,7 +1126,7 @@ export class TmaxServer {
     });
 
     conn.on('close', () => {
-      console.log(`Client disconnected: ${clientId}`);
+      this.editor?.logDaemonEvent('client-disconnected', clientId);
       if (clientFrameId) this.deleteFrame(clientFrameId);
       this.clients.delete(clientId);
     });
@@ -1215,6 +1226,9 @@ export class TmaxServer {
         case 'capture':
           result = this.handleCapture(request.params);
           break;
+        case 'save-file':
+          result = await this.handleSaveFile(request.params);
+          break;
         default:
           return {
             jsonrpc: '2.0',
@@ -1256,6 +1270,28 @@ export class TmaxServer {
   }
 
   /**
+   * Handle save-file request: save current buffer to disk.
+   * Accepts optional `filename` param for save-as.
+   */
+  private async handleSaveFile(params: any): Promise<any> {
+    const frame = this.resolveFrameOptional(params);
+    const workspaceOverride = this.isWorkspaceOverride(frame, params?.workspaceId);
+    if (frame && !workspaceOverride) this.syncFrameToEditor(frame);
+
+    const filename = params?.filename ?? this.editor.getState().currentFilename;
+    if (!filename) {
+      throw new Error('No filename to save to (open a file or provide a filename param)');
+    }
+
+    await this.editor.saveFile(filename);
+
+    this.captureActiveWorkspace();
+    if (frame && !workspaceOverride) this.syncEditorToFrame(frame); else this.syncEditorToAllFrames();
+
+    return { success: true, saved: filename };
+  }
+
+  /**
    * Handle file open request
    */
   private async handleOpen(params: any): Promise<any> {
@@ -1292,7 +1328,7 @@ export class TmaxServer {
 
       this.editor.setEditorState(newState);
       this.editor.activateMajorModeForFile(filepath);
-	    this.editor.logMessage(`Opened ${filepath}`, 'info');
+	    this.editor.logMessage(`Opened ${filepath}`, 'info', undefined, this.activeFrameId ?? undefined);
 
 	    this.captureActiveWorkspace();
 	    this.scheduleDirtyWorkspaceSave(this.activeWorkspaceId);
@@ -2128,6 +2164,12 @@ export class TmaxServer {
         // Query the T-Lisp interpreter for available functions
         return this.getTlispFunctions();
       case 'messages': {
+        // SPEC-055: optional `category` filter routes through the unified store
+        // (raw category) when present; otherwise the messages view (mirror rule).
+        if (params?.category) {
+          const store = this.editor.getUnifiedLog();
+          return { messages: store.getEntries({ category: params.category, level: params?.level, last: params?.last }) };
+        }
         const log = this.editor.getMessageLog();
         if (!log) return { messages: [] };
         const entries = log.getEntries({
@@ -2135,6 +2177,17 @@ export class TmaxServer {
           last: params?.last,
         });
         return { messages: entries };
+      }
+      case 'log': {
+        // SPEC-055: unified query across all categories with view/category/level/last filters.
+        const store = this.editor.getUnifiedLog();
+        const entries = store.getEntries({
+          view: params?.view,
+          category: params?.category,
+          level: params?.level,
+          last: params?.last,
+        });
+        return { entries };
       }
       case 'function-documentation':
         const functionName = params.functionName;
@@ -2211,6 +2264,13 @@ export class TmaxServer {
     } catch (error) {
       console.error('Error saving workspaces during shutdown:', error);
     }
+
+    // SPEC-055: flush the observability log on graceful shutdown. Append-per-write
+    // already persists every entry, so this is belt-and-suspenders; it also serves
+    // as the documented hook for a future periodic-flush strategy.
+    try {
+      this.editor.flushLog();
+    } catch { /* best-effort */ }
 
     // Close all client connections
     for (const [clientId, client] of this.clients) {
