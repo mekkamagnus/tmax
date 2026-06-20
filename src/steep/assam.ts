@@ -12,6 +12,19 @@ import { computeHighlightSpans } from "../syntax/highlight-buffer.ts";
 import { Either } from "../utils/task-either.ts";
 
 export class SteepFrontend implements Frontend {
+  // Set once run() initializes its render loop. Allows external callers
+  // (e.g. main.tsx wiring an editor.onStateChange subscription) to request a
+  // re-render from socket-driven input that bypasses local stdin.
+  private renderFromEditor: ((editor: EditorClass) => void) | null = null;
+
+  /**
+   * Re-render from the editor's current state. No-op until run() has started.
+   * Safe to call on every editor state change.
+   */
+  requestRender(editor: EditorClass): void {
+    this.renderFromEditor?.(editor);
+  }
+
   async run(editor: EditorClass, initialState: EditorState): Promise<void> {
     const screen = new Screen();
     const input = new Input();
@@ -69,6 +82,14 @@ export class SteepFrontend implements Frontend {
         const cursorCol = Math.max(0, Math.min(width - 1, cursor.col));
         screen.moveTo(cursorRow + tabBarHeight, cursorCol);
       }
+    };
+
+    // Allow external callers (socket-driven --keys via editor.onStateChange)
+    // to request a repaint. Fetches fresh state from the editor so mutations
+    // from outside the local stdin loop are reflected.
+    this.renderFromEditor = (ed) => {
+      state = ed.getEditorState();
+      render();
     };
 
     try {

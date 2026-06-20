@@ -34,4 +34,6 @@ With 0 or negative number, disable."
           (global-minor-mode-set "line-numbers" t)
           (global-minor-mode-set "line-numbers" nil))
         (global-minor-mode-set "line-numbers" nil)))))
+
+(provide "line-numbers-mode")
 )

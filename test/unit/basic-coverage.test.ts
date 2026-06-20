@@ -9,7 +9,7 @@
 
 import { describe, test, expect, beforeEach } from "bun:test";
 import { TLispInterpreterImpl } from "../../src/tlisp/interpreter.ts";
-import { registerTestingFramework } from "../../src/tlisp/test-framework.ts";
+import { loadTrtFramework } from "../../src/tlisp/trt/bootstrap.ts";
 import {
   resetCoverageState,
   setCoverageEnabled,
@@ -25,9 +25,9 @@ import {
 describe("Basic Coverage (US-0.6.6)", () => {
   let interpreter: TLispInterpreterImpl;
 
-  beforeEach(() => {
+  beforeEach(async () => {
     interpreter = new TLispInterpreterImpl();
-    registerTestingFramework(interpreter);
+    await loadTrtFramework(interpreter);
     resetCoverageState();
     // Enable coverage by default for tests
     setCoverageEnabled(true);

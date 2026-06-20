@@ -66,14 +66,22 @@ describe("T-Lisp module system", () => {
     expect(interpreter.execute('(module-lookup "lookup/privacy" "private")')._tag).toBe("Left");
   });
 
-  test("editor runtime removes legacy feature-loading APIs", () => {
+  test("editor runtime supports truthful provide/featurep/require (SPEC-003/007)", () => {
     const editor = new Editor(new MockTerminal(), new MockFileSystem());
     const interpreter = editor.getInterpreter();
 
-    expect(interpreter.execute('(featurep "x")')._tag).toBe("Left");
-    // provide is supported as a no-op for forward compatibility
+    // featurep returns nil before provide
+    expect(interpreter.execute('(featurep "x")')._tag).toBe("Right");
+    // provide registers the feature
     expect(interpreter.execute('(provide "x")')._tag).toBe("Right");
-    expect(interpreter.execute('(require "x")')._tag).toBe("Left");
+    // featurep returns t after provide
+    const after = interpreter.execute('(featurep "x")');
+    expect(after._tag).toBe("Right");
+    if (after._tag === "Right") expect(after.right.value).toBe(true);
+    // require succeeds for provided feature
+    expect(interpreter.execute('(require "x")')._tag).toBe("Right");
+    // require fails for unprovided feature
+    expect(interpreter.execute('(require "y")')._tag).toBe("Left");
   });
 
   test("editor command metadata includes module origins", async () => {

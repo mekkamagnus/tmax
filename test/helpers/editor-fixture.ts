@@ -3,9 +3,21 @@ import type { TLispValue } from "../../src/tlisp/types.ts";
 import { Either, type Either as EitherValue } from "../../src/utils/task-either.ts";
 import { MockFileSystem } from "../mocks/filesystem.ts";
 import { MockTerminal } from "../mocks/terminal.ts";
+import { mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+
+/** Isolate the SPEC-055 log file per editor instance so tail-load never reads
+ *  the developer's real ~/.config/tmax/messages.log AND never carries entries
+ *  from a prior test in the same file (each editor gets its own empty log). */
+function isolatedLogPath(): string {
+  const dir = mkdtempSync(join(tmpdir(), "tmax-test-log-"));
+  return join(dir, "messages.log");
+}
 
 /** Create an editor whose asynchronous startup has completed. */
 export async function createStartedEditor(content?: string): Promise<Editor> {
+  process.env.TMAX_LOG_PATH = isolatedLogPath();
   const editor = new Editor(new MockTerminal(), new MockFileSystem());
   await editor.start();
   if (content !== undefined) {

@@ -1,6 +1,6 @@
 ---
 name: tmax-patch-review
-description: "Audit a SPEC's shipped implementation against its acceptance criteria. Verifies every criterion is implemented, tests exist and pass, and no edge cases were missed. On PASS, marks the SPEC done in .spec-loop/progress.json. On GAPS, appends an audit-findings section to the SPEC and dispatches to /tmax-spec-loop for rework. Triggers on: tmax-patch-review, patch-review, audit spec, review spec implementation."
+description: "Audit the changes made according to a SPEC — a pre-commit gate that reviews the implementation (committed OR uncommitted working-tree changes) against the SPEC's acceptance criteria before anything is committed, so only completed, reviewed ideas get committed. Verifies every criterion is implemented, tests exist and pass, and no edge cases were missed. On PASS, marks the SPEC done in .spec-loop/progress.json. On GAPS, appends an audit-findings section to the SPEC and dispatches to /tmax-spec-loop for rework. Triggers on: tmax-patch-review, patch-review, audit spec, review spec implementation."
 argument-hint: '<SPEC-ID-or-path> [--dispatch]'
 allowed-tools: Bash, Read, Write, Edit, Glob, Grep, Agent
 user-invocable: true
@@ -8,7 +8,14 @@ user-invocable: true
 
 # tmax-patch-review
 
-Audit a SPEC's shipped implementation. One SPEC per invocation.
+Audit the changes made according to a SPEC — a **pre-commit gate**. One SPEC per invocation.
+
+The review runs *before* the implementation is committed: it inspects the working tree (committed
+history first, then the uncommitted diff and the SPEC's named files) and verifies the work against
+the SPEC's acceptance criteria, so that only completed, reviewed ideas get committed. Not having
+committed yet does **not** stop the audit — uncommitted implementation is the expected input. The
+audit stops only when there are no implementation changes at all (neither committed nor in the
+working tree).
 
 Given a SPEC ID or path, this skill answers two questions:
 
@@ -30,7 +37,7 @@ The verdict is binary:
 
 ## How it works
 
-1. **Gather (mechanical, script-driven).** `bun scripts/audit.ts gather <SPEC>` finds the implementing commit(s), computes the diff, lists files touched + line counts, and writes a gather bundle to `.patch-reviews/<SPEC-ID>-<timestamp>/gather.md`.
+1. **Gather (mechanical, script-driven).** `bun scripts/audit.ts gather <SPEC>` finds the implementing commit(s) first; if none are found, it falls back to the **uncommitted working tree** (staged + unstaged changes and the SPEC's named new files). It computes the diff, lists files touched + line counts, and writes a gather bundle to `.patch-reviews/<SPEC-ID>-<timestamp>/gather.md`. Only when there are no implementation changes at all (neither committed nor in the working tree) does gather report NO IMPLEMENTATION FOUND and stop.
 2. **Run gates (mechanical).** The script runs `bun run typecheck:src`, `bun run test:unit`, and (if `src/server/` or `src/tlisp/` was touched) restarts the daemon and runs `bun run test:daemon`. Output goes into the gather bundle.
 3. **Audit (semantic, sub-agent-driven).** The orchestrator dispatches a sub-agent with the SPEC, the gather bundle, and the rubric in `references/criteria-checklist.md`. The sub-agent walks each acceptance criterion, cites the implementing code (file:line), notes edge cases, and writes a verdict.
 4. **Verdict (orchestrator-driven).** Orchestrator reads the sub-agent's verdict:
@@ -46,9 +53,9 @@ The verdict is binary:
 ## Prerequisites
 
 - The SPEC exists in `docs/specs/`.
-- The implementation has been committed (not just working-tree changes). The gather step searches commit messages for `SPEC-<ID>`.
+- The implementation exists as changes — **either committed or uncommitted in the working tree.** This is a pre-commit gate: uncommitted work is the expected input, not a blocker. The gather step searches commit messages for `SPEC-<ID>` first, then falls back to the uncommitted diff + the SPEC's named files.
 - `bun` on PATH.
-- Clean working tree on `main` is NOT required — tmax-patch-review is read-only on the main checkout. The sub-agent's audits run against `HEAD`.
+- Clean working tree on `main` is NOT required — tmax-patch-review is read-only on the main checkout. The sub-agent's audits run against `HEAD` plus the working-tree diff.
 
 ## Out of scope
 
@@ -65,9 +72,13 @@ The verdict is binary:
 
 ## When NOT to use this skill
 
-- The SPEC isn't implemented yet (use `/tmax-spec-loop`).
+- There are no implementation changes at all (neither committed nor in the working tree) — gather reports NO IMPLEMENTATION FOUND and stops. (Use `/tmax-spec-loop` to implement first.)
 - You want a generic code review (use the `review` skill).
 - You want to verify a single PR rather than a SPEC (use `code-review:code-review`).
+
+> **Pre-commit by design.** This skill is meant to run *before* you commit the implementation,
+> so only completed, reviewed ideas are committed. Uncommitted working-tree changes are the
+> expected input, not a reason to stop.
 
 ---
 
@@ -75,7 +86,7 @@ The verdict is binary:
 
 **Step 0 — Parse args.** Accept `<SPEC-ID-or-path>` (required) and optional `--dispatch` flag. If the SPEC argument is just digits like `039`, normalize to `SPEC-039`. If it's a path, extract the ID from the filename. If neither matches, error out and stop.
 
-**Step 1 — Gather.** Run `bun scripts/audit.ts gather <SPEC>`. This emits `GATHER_DIR=<path>`, `GATHER_PATH=<path>/gather.md`, `COMMITS=<sha1>,<sha2>,...`, `FILES_CHANGED=N`. If the script reports `NO IMPLEMENTATION FOUND`, the SPEC has no implementing commits — report and stop.
+**Step 1 — Gather.** Run `bun scripts/audit.ts gather <SPEC>`. This emits `GATHER_DIR=<path>`, `GATHER_PATH=<path>/gather.md`, `COMMITS=<sha1>,<sha2>,...` (may be empty for uncommitted-only work), `FILES_CHANGED=N`. The gather searches committed history for `SPEC-<ID>` first; if none match, it falls back to the uncommitted working-tree diff + the SPEC's named new files (pre-commit mode). If the script reports `NO IMPLEMENTATION FOUND`, there are no implementation changes at all (neither committed nor uncommitted) — report and stop.
 
 **Step 2 — Run gates (via the same script).** Run `bun scripts/audit.ts gates <SPEC> --gather-dir <path>`. This appends gate results to the gather bundle. Emits `GATES_PASS` or `GATES_FAILED: <which>`.
 

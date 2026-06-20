@@ -23,3 +23,14 @@ This directory contains TypeScript display primitives for the T-Lisp engine.
 Ask: "Am I writing a primitive that answers a factual question about the buffer/cursor, or am I making an editor decision?"
 
 If you're making a decision (what to delete, how to move, which mode to enter), write it in T-Lisp.
+
+### Special (virtual) buffers
+
+Created at editor startup, reserved by name (not user-deletable, not counted as modified file buffers):
+
+- `*scratch*` — default scratch buffer.
+- `*Messages*` — user-facing editor event log (`logMessage`). Editor commands and lifecycle messages a user should see.
+- `*daemon*` — daemon connection lifecycle event log (`logDaemonEvent`, SPEC-047): client connect/disconnect. Quiet by default; observable via `(switch-to-buffer "*daemon*")`. Kept separate from `*Messages*` so connection chatter never pollutes the user-facing log.
+
+Do not conflate `*daemon*` (this daemon's connection events) with `*daemons*` (SPEC-043, a discovery list of running daemon instances — unimplemented).
+

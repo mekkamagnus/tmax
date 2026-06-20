@@ -374,12 +374,12 @@ Can be implemented incrementally as needed:
 - ✅ Performance optimization tools
 
 **Success Criteria:**
-- ✅ Can run TRT tests with `bun run test:trt`
-- ✅ All existing T-Lisp features have TRT test coverage (80%+)
-- ✅ TRT tests pass in CI/CD pipeline
-- ✅ Users can write and run their own TRT tests in `.tmax-trt/`
-- ✅ Test results formatted clearly with pass/fail/error indicators
-- ✅ Watch mode enables rapid TDD workflow
+- ✅ Can run TRT tests with `bun run test:trt` (implemented in SPEC-049; runs the self-hosted trt framework via `bin/trt` → `tmax --test`)
+- ✅ All existing T-Lisp features have TRT test coverage (80%+) (in progress; core framework self-tests + pilot migrations landed)
+- ✅ TRT tests pass in CI/CD pipeline (exit codes 0/1/2)
+- ✅ Users can write and run their own TRT tests in `test/tlisp/` (`.test.tlisp` files, auto-discovered)
+- ✅ Test results formatted clearly with pass/fail/error indicators (human report + `--json`)
+- ✅ Watch mode enables rapid TDD workflow (watch/TDD is a TS-level file-watcher enhancement; framework is T-Lisp)
 
 **Dependencies:**
 - Must complete after Phase 0.4 (key binding refactor) - TRT will test key bindings

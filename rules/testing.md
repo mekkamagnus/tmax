@@ -89,11 +89,69 @@ import { describe, test, expect } from "bun:test";
 - Tests must be isolated and repeatable
 - Use clear, descriptive names for test files and test cases
 
-## T-Lisp Test Rules
+## trt (T-Lisp Runtime Testing) Rules
 
-The T-Lisp testing framework is implemented in `src/tlisp/test-framework.ts` and registered automatically when the interpreter starts. Tests can be run from the REPL, from Bun tests, or via the daemon.
+**trt** is the native, self-hosted test framework (SPEC-049). The framework is authored **in
+T-Lisp** (`src/tlisp/core/trt/*.tlisp`): `deftest` is a macro, assertions are the `should-*`
+library, and the runner uses `condition-case` to catch failures and continue. TS holds only the
+bootstrap loader (`src/tlisp/trt/bootstrap.ts`), the pure result store (`results.ts`), and
+low-level coverage primitives.
 
-### Running T-Lisp Tests
+### Boundary principle (what migrates, what does NOT)
+
+**Hard rule: don't test a TS primitive in the language that depends on it.** A `.test.tlisp`
+harness is parsed/evaluated by the TS tokenizer/parser/evaluator, so testing those in T-Lisp is
+*circular* — a bug would corrupt the harness and mask the failure with false greens. TS primitives
+(tokenizer, parser, evaluator, stdlib, macros, TCO, hashmap, quasiquote) **stay in bun**. Migrate
+only **T-Lisp-authored behavior** (commands, modes, completion, hooks, editor-API-driven logic).
+
+**Diagnostic:** if a bun test imports a TS primitive directly → stays bun. If it only drives
+`interpreter.execute(...)` and re-asserts the T-Lisp result → migration candidate.
+
+### Running trt tests
+
+```bash
+# Run the whole native suite (test/tlisp/*.test.tlisp), exit 0 pass / 1 fail / 2 no-tests
+bun run test:trt
+bin/trt
+tmax --test
+
+# JSON results (parseable by jq) — the AI-observable contract
+bin/trt --json | jq '.stats'
+
+# Single file
+bin/trt test/tlisp/orderless.test.tlisp
+
+# Via daemon eval (structured data, no stdout scraping)
+tmax -e '(progn (trt-load-directory "test/tlisp/") (trt-run-all) (trt-results-json))'
+```
+
+### Writing trt tests
+
+```lisp
+;; test/tlisp/my-feature.test.tlisp
+(deftest my-feature-works ()
+  (should-equal 42 (my-function 41)))
+
+(deftest my-feature-fails-gracefully ()
+  (should-throw (lambda () (my-function -1))))
+```
+
+Assertions use the `should-*` family (RFC-001 / Emacs convention): `should-equal`,
+`should-be-truthy`, `should-be-falsy`, `should-throw`, `should-contain-string`, `should-match`,
+`should-have-length`, `should-be-greater-than`, `should-be-close-to`, `should-be-a`. A failing
+assertion signals via `(error ...)`; the runner's `condition-case` catches it and records the test
+as failed, then continues to the next test.
+
+### trt feature set
+
+Fixtures (`deftest` + `use-fixtures`), suites (`trt-register-suite` / `trt-run-suite`),
+parametrized tests (`trt-parametrize`), async (`deftest-async` + `done`), snapshots
+(`should-match-snapshot`), coverage (`trt-coverage-on` / `trt-coverage-report-string`),
+mocking (`mock-fn` + `should-have-been-called*`), benchmarking (`trt-bench`). See
+`test/tlisp/trt-self.test.tlisp` for examples of each.
+
+
 
 ```bash
 # Via daemon (evaluate test file, then run)

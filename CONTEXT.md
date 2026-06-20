@@ -29,3 +29,11 @@ User configuration lives at `~/.config/tmax/init.tlisp` (not `.tmaxrc`). Loaded 
 ## Editor Architecture
 
 TypeScript core handles terminal I/O, file system, rendering, and runs the T-Lisp interpreter. T-Lisp handles all editor logic: commands, modes, key bindings, extensibility. Zero external dependencies. Runs on Bun.
+
+## ADW (AI Development Workflow)
+
+An **ADW** is a workflow meant to be run and fully executed on its own. It starts from a clean slate, runs to completion, and exits non-zero on any failure — so an AI agent (or CI) can loop it until green. No manual setup of tmux sessions, no pre-started daemon, no human-watched TUI.
+
+Concretely, an ADW test lives under `adws/` and is a TypeScript runner that: stops any stale daemon → spawns its own (`src/server/server.ts`, polled until the socket is responsive) → opens fixtures → drives keys/eval → asserts expected state via T-Lisp queries (`cursor-line`, `major-mode-get`, `which-key-active`, etc.) → tears down. Reference implementations: `adws/adw-right-bracket-h.test.ts` (hardcoded single-binding test), `adws/adw-run-keybinding-tests.ts` (YAML-driven, the ancestor of the generic runner).
+
+**ADW vs Demo** — a *demo* (`demos/demo-runner.py`) is visual: it assumes a live tmux session + TUI frame, narrates for a human, and asserts nothing. An *ADW* is headless, self-contained, and asserts. They share YAML idioms (e.g. `${VAR}` templating) but are different primitives.

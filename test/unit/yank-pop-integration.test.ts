@@ -10,7 +10,7 @@
 
 import { describe, test, expect, beforeEach } from "bun:test";
 import { TLispInterpreterImpl } from "../../src/tlisp/interpreter.ts";
-import { registerTestingFramework } from "../../src/tlisp/test-framework.ts";
+import { loadTrtFramework } from "../../src/tlisp/trt/bootstrap.ts";
 import { FunctionalTextBufferImpl } from "../../src/core/buffer.ts";
 import {
   createKillRingOps,
@@ -35,7 +35,7 @@ describe("Yank Pop Integration (US-1.9.2)", () => {
   let cursorLine = 0;
   let cursorColumn = 0;
 
-  beforeEach(() => {
+  beforeEach(async () => {
     // Reset all state
     resetKillRing();
     resetYankPopState();
@@ -45,7 +45,7 @@ describe("Yank Pop Integration (US-1.9.2)", () => {
     interpreter = new TLispInterpreterImpl();
 
     // Register testing framework
-    registerTestingFramework(interpreter);
+    await loadTrtFramework(interpreter);
 
     // Create mock buffer
     mockBuffer = FunctionalTextBufferImpl.create();

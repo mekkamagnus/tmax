@@ -1,9 +1,37 @@
 # RFC-001: TRT (Tmax Regression Testing) Framework
 
-**Status:** 📋 PROPOSED
+**Status:** ✅ IMPLEMENTED via [SPEC-049](../specs/SPEC-049-trt-runtime-testing.md) — the
+self-hosted T-Lisp framework (deftest macro, should-* assertions, runner with failure recovery,
+structured AI-observable results), the `trt` CLI (`bin/trt` / `tmax --test` / `--json`), and the
+fixture/suite/parametrize/async/snapshot/coverage/mock/bench/doctest feature set are landed and
+covered by `test/tlisp/trt-self.test.tlisp` (34 self-tests). The framework is authored in T-Lisp
+(`src/tlisp/core/trt/*.tlisp`); TS holds only the bootstrap loader, the pure result store, and
+low-level coverage primitives. **trt = T-Lisp Runtime Testing.**
+
 **Created:** 2025-02-03
 **Author:** TRT Design Team
 **Phase:** 0.5 - Testing Infrastructure Enhancement
+
+## Implementation Backlinks
+
+RFC-001 is implemented as **five specs**, each independently shippable. The RFC's
+14 improvements map to specs as follows:
+
+| RFC-001 improvement (tier) | Implementing spec | Status |
+|---|---|---|
+| 0.5.1 Core Framework; 0.5.2 Essential Assertions; 0.5.3 Basic Isolation; 0.6.1 Rich Assertions; 0.6.5 Better CLI Output | [SPEC-049](../specs/SPEC-049-trt-runtime-testing.md) | proposed |
+| 0.6.2 Fixtures (Imp. #1); 0.6.3 Test Suites (Imp. #7); Parametrized Tests (Imp. #6) | [SPEC-050](../specs/SPEC-050-trt-fixtures-suites-parametrized.md) | proposed |
+| 0.6.4 Async Testing (Imp. #8) — **depends on [SPEC-012](../specs/SPEC-012-tlisp-async-primitives.md)**; Snapshot Testing (Imp. #9); 0.6.6 Coverage (Imp. #10) | [SPEC-051](../specs/SPEC-051-trt-async-snapshots-coverage.md) | proposed |
+| 0.5.7 Watch & TDD (Imp. #12); 0.5.8 Mocking (Imp. #13); 0.5.9 Benchmarking (Imp. #14); Examples-as-Tests (Imp. #11) | [SPEC-052](../specs/SPEC-052-trt-watch-tdd-mocking-bench-doctest.md) | proposed |
+| 0.5.4 Test Explorer UI (Imp. #4); Pilot migration of T-Lisp-behavior tests | [SPEC-053](../specs/SPEC-053-trt-test-explorer-pilot-migration.md) | proposed |
+
+> **Path divergence (authoritative).** This RFC originally specified the T-Lisp framework
+> at `src/tlisp/trt/trt.tlisp`. The implementing specs instead place the **T-Lisp**
+> framework under `src/tlisp/core/trt/` (matching the existing `src/tlisp/core/` convention
+> for T-Lisp modules) and reserve `src/tlisp/trt/` for the **TypeScript** thin layer
+> (bootstrap + result store + coverage primitives). This divergence is deliberate and is
+> the authoritative layout; treat the `src/tlisp/trt/trt.tlisp` reference in the Design
+> section below as superseded by `src/tlisp/core/trt/*.tlisp`.
 
 ## Table of Contents
 - [Abstract](#abstract)

@@ -13,7 +13,7 @@
 
 import { describe, test, expect, beforeEach } from "bun:test";
 import { TLispInterpreterImpl } from "../../src/tlisp/interpreter.ts";
-import { registerTestingFramework } from "../../src/tlisp/test-framework.ts";
+import { loadTrtFramework } from "../../src/tlisp/trt/bootstrap.ts";
 import {
   resetKillRing,
   killRingSave,
@@ -30,7 +30,7 @@ import {
 describe("Yank Pop (US-1.9.2)", () => {
   let interpreter: TLispInterpreterImpl;
 
-  beforeEach(() => {
+  beforeEach(async () => {
     // Reset kill ring state
     resetKillRing();
     setYankRegister("");
@@ -39,7 +39,7 @@ describe("Yank Pop (US-1.9.2)", () => {
     interpreter = new TLispInterpreterImpl();
 
     // Register testing framework
-    registerTestingFramework(interpreter);
+    await loadTrtFramework(interpreter);
 
     // Register kill ring functions
     const killRingOps = createKillRingOps();

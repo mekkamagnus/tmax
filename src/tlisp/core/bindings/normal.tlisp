@@ -42,6 +42,7 @@
   (require-module editor/commands/windows)
   (require-module editor/commands/tabs)
   (require-module editor/commands/markdown)
+  (require-module editor/commands/browse-url)
 
 ;; normal.tlisp
 ;; Default key bindings for normal mode — single source of truth.
@@ -214,4 +215,13 @@
 
 ;; C-h prefix for help commands
 (key-bind "C-h" "(editor-handle-help-prefix)" "normal")
+
+;; =================================================================
+;; BROWSE-URL (SPEC-056)
+;; =================================================================
+
+;; gX — open the URL at point in the system browser via browse-url-at-point.
+;; The mode-scoped gx (markdown-do) still handles markdown links and delegates
+;; external targets to browse-url; gX is the direct external-browser dispatch.
+(key-bind "g X" "(browse-url-at-point)" "normal")
 )

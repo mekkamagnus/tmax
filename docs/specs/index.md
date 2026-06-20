@@ -33,6 +33,22 @@ Individual work items organized by type: SPEC (features), BUG (defects), CHORE (
 | [SPEC-010-ui-test-expansion.md](SPEC-010-ui-test-expansion.md) | UI Test Suite Expansion (Tests 17-24) | — |
 | [SPEC-015-render-visual-tests.md](SPEC-015-render-visual-tests.md) | Render Visual Tests | — |
 
+## Active Specs — RFC-001 (trt) Implementation
+
+RFC-001 (TRT framework) is implemented across five sequentially-dependent specs. See
+[RFC-001](../rfcs/RFC-001-trt-framework.md) for the design and the improvement → spec map.
+
+| File | Title | Phase | Related |
+|------|-------|-------|---------|
+| [SPEC-049-trt-runtime-testing.md](SPEC-049-trt-runtime-testing.md) | trt — Self-Hosted Core + AI-Observable Runner | 1 + 2 | [RFC-001](../rfcs/RFC-001-trt-framework.md) |
+| [SPEC-050-trt-fixtures-suites-parametrized.md](SPEC-050-trt-fixtures-suites-parametrized.md) | trt — Fixtures, Suites & Parametrized Tests | 3 | [RFC-001](../rfcs/RFC-001-trt-framework.md), [SPEC-049](SPEC-049-trt-runtime-testing.md) |
+| [SPEC-051-trt-async-snapshots-coverage.md](SPEC-051-trt-async-snapshots-coverage.md) | trt — Async, Snapshots & Coverage | 4 | [RFC-001](../rfcs/RFC-001-trt-framework.md), [SPEC-012](SPEC-012-tlisp-async-primitives.md) |
+| [SPEC-052-trt-watch-tdd-mocking-bench-doctest.md](SPEC-052-trt-watch-tdd-mocking-bench-doctest.md) | trt — Watch/TDD, Mocking, Benchmarking & Doctest | 5 | [RFC-001](../rfcs/RFC-001-trt-framework.md) |
+| [SPEC-053-trt-test-explorer-pilot-migration.md](SPEC-053-trt-test-explorer-pilot-migration.md) | trt — Test Explorer UI & Pilot Migration | 6 | [RFC-001](../rfcs/RFC-001-trt-framework.md), [SPEC-049](SPEC-049-trt-runtime-testing.md) |
+| [SPEC-058-tlisp-adw-portability-primitives.md](SPEC-058-tlisp-adw-portability-primitives.md) | T-Lisp adw-portability primitives (`append-file`, `json-encode`, `command-line-args`) | [RFC-018](../rfcs/RFC-018-tlisp-scripting-primitives.md), [CHORE-31-tlisp-fp-foundations.md](CHORE-31-tlisp-fp-foundations.md) |
+| [SPEC-059-adw-pipeline-loop.md](SPEC-059-adw-pipeline-loop.md) | adw 4-stage pipeline (plan → review → build → patch-review) with build↔patch-review retry loop | [CHORE-30-adw-build.md](CHORE-30-adw-build.md), [SPEC-057-adw-patch-review.md](SPEC-057-adw-patch-review.md) |
+| [SPEC-060-adw-tmux-launcher.md](SPEC-060-adw-tmux-launcher.md) | adw tmux launcher — run adw pipelines in the `tmax` tmux session (survives agent timeouts) | [SPEC-059-adw-pipeline-loop.md](SPEC-059-adw-pipeline-loop.md) |
+
 ## Bug Reports
 
 | File | Title | Related |
@@ -63,6 +79,13 @@ Individual work items organized by type: SPEC (features), BUG (defects), CHORE (
 | [CHORE-18-minibuffer-completion-spec.md](CHORE-18-minibuffer-completion-spec.md) | Consolidate Minibuffer Completion Spec | [ADR-0068](../adrs/ADR-0068-minibuffer-completion-stack.md) |
 | [CHORE-19-frame-aware-rpc.md](CHORE-19-frame-aware-rpc.md) | Frame-Aware RPC Methods | [ADR-0074](../adrs/ADR-0074-frame-aware-rpc-methods.md) |
 | [CHORE-20-status-line-vim-style.md](CHORE-20-status-line-vim-style.md) | Vim-Style Status Line Layout | [ADR-0075](../adrs/ADR-0075-vim-style-status-line.md) |
+| [CHORE-25-adw-plan-dispatcher.md](CHORE-25-adw-plan-dispatcher.md) | adw-plan.ts — description → spec dispatcher (claude-driven) | [CHORE-26-adw-agent-module.md](CHORE-26-adw-agent-module.md) |
+| [CHORE-26-adw-agent-module.md](CHORE-26-adw-agent-module.md) | Extract claude interface into adws-modules/agent.ts | [CHORE-25-adw-plan-dispatcher.md](CHORE-25-adw-plan-dispatcher.md) |
+| [CHORE-27-adw-spec-review.md](CHORE-27-adw-spec-review.md) | adw-spec-review.ts — spec → reviewed spec (codex-driven) | [CHORE-29-adw-logging-refactor.md](CHORE-29-adw-logging-refactor.md) |
+| [CHORE-28-adw-plan-fp-refactor.md](CHORE-28-adw-plan-fp-refactor.md) | adw-plan.ts functional refactor (TaskEither pipeline) | — |
+| [CHORE-29-adw-logging-refactor.md](CHORE-29-adw-logging-refactor.md) | Split adw-state.json into state + per-agent events.jsonl | [CHORE-27-adw-spec-review.md](CHORE-27-adw-spec-review.md) |
+| [CHORE-30-adw-build.md](CHORE-30-adw-build.md) | adw-build.ts — spec → implementation dispatcher (claude-driven) | [CHORE-26-adw-agent-module.md](CHORE-26-adw-agent-module.md) |
+| [CHORE-31-tlisp-fp-foundations.md](CHORE-31-tlisp-fp-foundations.md) | T-Lisp FP foundations — make-promise + core/monads (verification of shipped RFC-018 Tier 1 Steps 1.4/1.5) | [RFC-018](../rfcs/RFC-018-tlisp-scripting-primitives.md), [SPEC-058-tlisp-adw-portability-primitives.md](SPEC-058-tlisp-adw-portability-primitives.md) |
 
 ## Completed Specs (Still in Active Directory)
 

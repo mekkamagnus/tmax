@@ -253,6 +253,34 @@ const upsertEntry = (
   return entries.map((e, i) => (i === idx ? { ...update(e), updated_at: now } : e));
 };
 
+// Collect uncommitted working-tree changes: modified (staged + unstaged) + untracked files.
+// Returns the file list + a consolidated diff. This is the pre-commit fallback when no
+// implementing commits exist yet (tmax-patch-review runs BEFORE committing).
+interface WorkingTreeChanges {
+  readonly files: readonly string[];
+  readonly diff: string;
+  readonly empty: boolean;
+}
+
+const collectWorkingTreeChanges = async (projectRoot: string): Promise<WorkingTreeChanges> => {
+  const run = sh(projectRoot);
+  // Tracked changes (staged + unstaged), names only.
+  const tracked = await run(["git", "diff", "--name-only", "HEAD"]);
+  // Untracked files (not yet in the index).
+  const untracked = await run(["git", "ls-files", "--others", "--exclude-standard"]);
+  const files = Array.from(
+    new Set(
+      [...tracked.stdout.split("\n"), ...untracked.stdout.split("\n")]
+        .map((f) => f.trim())
+        .filter((f) => f.length > 0),
+    ),
+  ).sort();
+  // Consolidated diff: staged + unstaged for tracked files.
+  const diffRes = await run(["git", "diff", "HEAD", "--no-color"]);
+  const diff = diffRes.stdout;
+  return { files, diff, empty: files.length === 0 };
+};
+
 // ──────────────────────────── Subcommand: gather ────────────────────────────
 
 interface CommitInfo {
@@ -303,6 +331,7 @@ const renderGatherBundle = (
   files: readonly string[],
   daemonTouched: boolean,
   diffs: readonly string[],
+  workingTree: { files: readonly string[]; diff: string; empty: boolean },
 ): string => {
   const lines: string[] = [];
   lines.push(`# Gather bundle — SPEC-${id}`);
@@ -328,6 +357,17 @@ const renderGatherBundle = (
     lines.push("```");
     lines.push("");
   }
+  // Uncommitted working-tree changes (pre-commit mode).
+  if (!workingTree.empty) {
+    lines.push(`## Uncommitted working-tree changes (${workingTree.files.length} files)`);
+    for (const f of workingTree.files) lines.push(`- ${f}`);
+    lines.push("");
+    lines.push("### Working-tree diff");
+    lines.push("```diff");
+    lines.push(workingTree.diff);
+    lines.push("```");
+    lines.push("");
+  }
   lines.push("## Diff (consolidated, may be large — also readable via git show <sha>)");
   lines.push("```diff");
   for (const d of diffs) lines.push(d);
@@ -347,13 +387,19 @@ const cmdGather = async (paths: Paths, specArg: string): Promise<void> => {
   const title = await specTitleFromFile(resolvedSpec);
 
   const commits = await findImplementingCommits(paths.projectRoot, id);
-  if (commits.length === 0) {
+  const workingTree = await collectWorkingTreeChanges(paths.projectRoot);
+  if (commits.length === 0 && workingTree.empty) {
     console.log("NO IMPLEMENTATION FOUND");
-    console.log(`No commits found matching "SPEC-${id}" in git log.`);
+    console.log(
+      `No commits matching "SPEC-${id}" and no uncommitted working-tree changes found.`,
+    );
     return;
   }
 
-  const allFiles = Array.from(new Set(commits.flatMap((c) => c.files))).sort();
+  const committedFiles = Array.from(new Set(commits.flatMap((c) => c.files))).sort();
+  const allFiles = Array.from(
+    new Set([...committedFiles, ...workingTree.files]),
+  ).sort();
   const daemonTouched = allFiles.some(
     (f) => f.startsWith("src/server/") || f.startsWith("src/tlisp/"),
   );
@@ -380,7 +426,7 @@ const cmdGather = async (paths: Paths, specArg: string): Promise<void> => {
   const gatherPath = path.join(gatherDir, "gather.md");
   await write(
     gatherPath,
-    renderGatherBundle(id, resolvedSpec, title, commits, allFiles, daemonTouched, diffs),
+    renderGatherBundle(id, resolvedSpec, title, commits, allFiles, daemonTouched, diffs, workingTree),
   );
 
   console.log(`SPEC_ID=${id}`);

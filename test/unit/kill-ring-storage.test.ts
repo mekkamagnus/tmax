@@ -14,7 +14,7 @@
 import { describe, test, expect, beforeEach } from "bun:test";
 import { expectRight, expectTlispList, expectTlispString } from "../helpers/editor-fixture.ts";
 import { TLispInterpreterImpl } from "../../src/tlisp/interpreter.ts";
-import { registerTestingFramework } from "../../src/tlisp/test-framework.ts";
+import { loadTrtFramework } from "../../src/tlisp/trt/bootstrap.ts";
 import type { FunctionalTextBuffer } from "../../src/core/types.ts";
 import { FunctionalTextBufferImpl } from "../../src/core/buffer.ts";
 import { createKillRingOps, resetKillRing } from "../../src/editor/api/kill-ring.ts";
@@ -23,7 +23,7 @@ describe("Kill Ring Storage (US-1.9.1)", () => {
   let interpreter: TLispInterpreterImpl;
   let mockBuffer: FunctionalTextBuffer;
 
-  beforeEach(() => {
+  beforeEach(async () => {
     // Reset kill ring state before each test
     resetKillRing();
 
@@ -31,7 +31,7 @@ describe("Kill Ring Storage (US-1.9.1)", () => {
     interpreter = new TLispInterpreterImpl();
 
     // Register testing framework
-    registerTestingFramework(interpreter);
+    await loadTrtFramework(interpreter);
 
     // Register kill ring functions
     const killRingOps = createKillRingOps();

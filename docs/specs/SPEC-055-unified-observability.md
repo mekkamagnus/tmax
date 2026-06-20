@@ -1,5 +1,7 @@
 # Feature: Unified Observability — One Schema, Many Buffers
 
+> Verified by tmax-patch-review on 2026-06-17. All acceptance criteria implemented with citations; gates green (typecheck all clean, SPEC-055 test gate 124/0, test:daemon 19/0, test:ui:renderer 5/5). Two latent bugs found and fixed during audit: (1) workspace-lifecycle timeout from synchronous appendEntry on the RPC path → fixed via queueMicrotask deferral; (2) `:keyword` kwargs failed in T-Lisp function calls, silently breaking trt run logging → fixed by adding positional-args support to `log-program-run`.
+
 ## Feature Description
 
 Today tmax has three virtual buffers that each observe a slice of editor activity — `*Messages*` (editor events, SPEC-016), `*daemon*` (connection lifecycle, SPEC-047), and the ad-hoc `*Fikra*` — plus five categories of "program run" (synchronous shell commands, async subprocesses, trt test runs, workspace auto-save, daemon lifecycle) whose output is scattered, partial, or lost entirely. This feature unifies all of them under **one `LogEntry` schema** backed by **one ring store**, rendered into **many category-filtered virtual buffers**, and **persisted across daemon restarts** as JSONL.

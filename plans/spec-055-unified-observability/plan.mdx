@@ -1,0 +1,337 @@
+---
+title: "SPEC-055: Unified Observability — One Schema, Many Buffers"
+status: draft
+kind: plan
+---
+
+# Unified Observability for the `*Messages*` surface
+
+Today a user presses a key, sees a message flash in the status line, and
+once it disappears there is no record of what happened. Shell commands
+silently drop their stderr and exit code. Async subprocesses pipe stderr
+but never read it. Test runs report only a summary string while their
+structured results sit in a store the log never sees. After a daemon
+restart, every one of these is gone. This plan fixes all four with one
+unified `LogEntry` schema, one ring store, five category-filtered
+virtual buffers, and JSONL persistence — with a mirror rule that keeps
+`*Messages*` as the one buffer a user can always trust to show failures
+and warnings.
+
+The hard-to-reverse bet is decided up front: **one schema, many
+buffers**. Once the schema and the `messages` view predicate are
+shipped, every call site and every persisted line depends on them. We
+commit to that shape here and scope the first cut to prove it without
+foreclosing the deferred RFC-017 agent-activity log.
+
+## What changes concretely
+
+A user runs `(shell-exec "bun test")` from the editor. Today the
+`exitCode`, `durationMs`, and stderr are captured only in the return
+value and lost to the log. After this plan:
+
+- `*Shell Output*` shows `[2026-06-17 14:32:07] [info] [shell] bun test [exit 1] [340ms]` plus the last ~4 KB of stdout+stderr.
+- Because the exit was non-zero (level `error`), `*Messages*` mirrors that line automatically — the buffer the user already checks shows the failure without being polluted by successful runs.
+- After `tmax --stop` and a restart, the entry is still there: it was appended to `~/.config/tmax/messages.log` as JSONL and tail-loaded into the ring on startup.
+
+Same shape holds for a crashing `make-process`, a failing trt suite, a
+workspace auto-save failure, and the unbound keys in normal mode (today
+the one handler that never logs).
+
+## Objective and done-state
+
+Done means: **no editor event, shell command, subprocess, test run, or
+auto-save can vanish**. Every one lands in a category buffer with full
+context, every `warn`/`error` mirrors into `*Messages*`, and the whole
+history survives a restart. Verified by: unbound key in normal mode
+appears in `*Messages*`; `(shell-exec "false")` mirrors an error;
+`make-process "sh -c 'exit 2'"` records `exitCode: 2`; a failing trt
+run lands in `*Tests*`; killing and restarting the daemon preserves
+the prior session's entries.
+
+## Scope
+
+**In:** unified `LogEntry` schema + single `Log` ring store with
+append-based (lazy) render; replace dual `messageLog`/`daemonLog` rings;
+fill the `normal-handler.ts` logging gap and elevate unbound keys to
+`warn` across all handlers; two-tier `(message)`/`(echo)` split;
+richer entries (`frameId`, full-date timestamps, program-run fields);
+capture `shell-command`/`shell-exec`, `make-process` start+exit+stderr,
+and trt runs; three new virtual buffers (`*Shell Output*`, `*Async
+Output*`, `*Tests*`); JSONL persistence to `~/.config/tmax/messages.log`
+with 5 MB rotation and startup tail-load; daemon `query` and T-Lisp
+`(log-query)`/`(observability-buffer)` API.
+
+**Out (deferred):** full RFC-017 per-RPC agent-activity log (the lazy
+render + category routing here are its stated prerequisites); SPEC-053
+`*Test Explorer*` UI (layers on the `*Tests*` buffer); per-frame log
+level (one global `minLevel` for now).
+
+## Architecture
+
+```diagram
+{
+  "data": {
+    "html": "<div class=\"diagram-panel\" style=\"display:grid;grid-template-columns:1fr 1fr;gap:24px;align-items:start\">\n  <div>\n    <div class=\"diagram-pill\" style=\"background:var(--wf-accent-soft);color:var(--wf-accent);display:inline-block;padding:4px 10px;border-radius:999px;font-size:12px;margin-bottom:10px\">PRODUCERS (one call site each)</div>\n    <div class=\"diagram-card\" style=\"border:1px solid var(--wf-line);border-radius:10px;padding:10px;margin:6px 0;background:var(--wf-card)\">\n      <div style=\"font-weight:600\">editor / autosave</div>\n      <div class=\"diagram-muted\" style=\"color:var(--wf-muted);font-size:12px\">handlers · editor.ts · server.ts:444</div>\n    </div>\n    <div class=\"diagram-card\" style=\"border:1px solid var(--wf-line);border-radius:10px;padding:10px;margin:6px 0;background:var(--wf-card)\">\n      <div style=\"font-weight:600\">daemon (lifecycle)</div>\n      <div class=\"diagram-muted\" style=\"color:var(--wf-muted);font-size:12px\">server.ts:1029,1123</div>\n    </div>\n    <div class=\"diagram-card\" style=\"border:1px solid var(--wf-line);border-radius:10px;padding:10px;margin:6px 0;background:var(--wf-card)\">\n      <div style=\"font-weight:600\">shell</div>\n      <div class=\"diagram-muted\" style=\"color:var(--wf-muted);font-size:12px\">tlisp-api.ts:1024,1038</div>\n    </div>\n    <div class=\"diagram-card\" style=\"border:1px solid var(--wf-line);border-radius:10px;padding:10px;margin:6px 0;background:var(--wf-card)\">\n      <div style=\"font-weight:600\">process</div>\n      <div class=\"diagram-muted\" style=\"color:var(--wf-muted);font-size:12px\">tlisp-api.ts:1129 + sentinel</div>\n    </div>\n    <div class=\"diagram-card\" style=\"border:1px solid var(--wf-line);border-radius:10px;padding:10px;margin:6px 0;background:var(--wf-card)\">\n      <div style=\"font-weight:600\">test</div>\n      <div class=\"diagram-muted\" style=\"color:var(--wf-muted);font-size:12px\">trt-commands.tlisp → results.ts</div>\n    </div>\n  </div>\n  <div>\n    <div class=\"diagram-pill\" style=\"background:var(--wf-accent-soft);color:var(--wf-accent);display:inline-block;padding:4px 10px;border-radius:999px;font-size:12px;margin-bottom:10px\">STORE (single source of truth)</div>\n    <div class=\"diagram-node\" style=\"border:2px solid var(--wf-accent);border-radius:12px;padding:14px;background:var(--wf-paper)\">\n      <div style=\"font-weight:700\">Log (ring, maxSize=1000)</div>\n      <div class=\"diagram-muted\" style=\"color:var(--wf-muted);font-size:12px;margin:4px 0 8px\">LogEntry[] · append-based render · category filter · level filter</div>\n      <div style=\"font-size:12px\">↕ JSONL serialize/deserialize</div>\n    </div>\n    <div class=\"diagram-card\" style=\"border:1px dashed var(--wf-line);border-radius:10px;padding:10px;margin:10px 0;background:var(--wf-card)\">\n      <div style=\"font-weight:600\">~/.config/tmax/messages.log</div>\n      <div class=\"diagram-muted\" style=\"color:var(--wf-muted);font-size:12px\">append-per-write · 5 MB rotation · tail-load on start</div>\n    </div>\n    <div class=\"diagram-pill\" style=\"background:var(--wf-accent-soft);color:var(--wf-accent);display:inline-block;padding:4px 10px;border-radius:999px;font-size:12px;margin:6px 0\">VIEWS (filtered renders)</div>\n    <div style=\"display:grid;grid-template-columns:1fr 1fr;gap:6px;font-size:12px\">\n      <div class=\"diagram-box\" style=\"border:1px solid var(--wf-line);padding:6px;border-radius:6px\">*Messages*</div>\n      <div class=\"diagram-box\" style=\"border:1px solid var(--wf-line);padding:6px;border-radius:6px\">*daemon*</div>\n      <div class=\"diagram-box\" style=\"border:1px solid var(--wf-line);padding:6px;border-radius:6px\">*Shell Output*</div>\n      <div class=\"diagram-box\" style=\"border:1px solid var(--wf-line);padding:6px;border-radius:6px\">*Async Output*</div>\n      <div class=\"diagram-box\" style=\"border:1px solid var(--wf-line);padding:6px;border-radius:6px\">*Tests*</div>\n    </div>\n  </div>\n</div>"
+  }
+}
+```
+
+The five virtual buffers are **views over the same store**, not separate
+rings. The `messages` view is special — it is the union of
+`category ∈ {editor, autosave}` with every `warn`/`error` entry from any
+category (the mirror rule). That rule is what makes the multi-buffer
+split safe: a failed shell command or crashed subprocess surfaces in the
+buffer the user already checks, while its full output lives in its own
+buffer so it cannot drown editor events. Daemon connection events stay
+isolated in `*daemon*` because they are `info` level — they do not
+trigger the mirror.
+
+## The unified schema
+
+```data-model
+LogCategory = 'editor' | 'daemon' | 'shell' | 'process' | 'test' | 'autosave'
+LogLevel    = 'debug' | 'info' | 'warn' | 'error'
+
+LogEntry {
+  ts          Long       // epoch ms — full date, unambiguous across sessions
+  level       LogLevel   // severity; warn|error trigger the messages-view mirror
+  category    LogCategory
+  text        String     // human-readable summary line
+  command     String?    // T-Lisp command name (existing, on errors)
+  frameId     String?    // which client/frame caused it (D2 attribution)
+  exitCode    Int?       // shell/process/test only
+  durationMs  Int?       // shell/process/test only
+  outputTail  String?    // last ~4 KB of stdout+stderr, capped
+  pid         Int?       // make-process only
+}
+```
+
+This is the hard-to-reverse decision. Every producer writes this shape;
+every consumer (buffer view, JSONL line, daemon query, `(log-query)`)
+reads it. Optional fields are absent on entries where they don't apply,
+so the schema scales from a one-line editor message to a full
+program-run record without overloading.
+
+## Routing and the mirror rule
+
+```diagram
+{
+  "data": {
+    "html": "<div class=\"diagram-panel\" style=\"font-family:inherit\">\n  <div style=\"display:grid;grid-template-columns:1.4fr 1fr;gap:18px;align-items:start\">\n    <div class=\"diagram-card\" style=\"border:1px solid var(--wf-line);border-radius:10px;padding:12px;background:var(--wf-card)\">\n      <div style=\"font-weight:700;margin-bottom:6px\">messages view (the mirror rule)</div>\n      <div style=\"font-size:13px;line-height:1.5\">\n        <code>category ∈ &#123;editor, autosave&#125;</code><br/>\n        <span style=\"color:var(--wf-accent);font-weight:600\">UNION</span> <code>level ∈ &#123;warn, error&#125;</code> from <em>any</em> category<br/>\n        <span class=\"diagram-muted\" style=\"color:var(--wf-muted);font-size:12px\">→ unbound keys log at warn so they mirror automatically</span>\n      </div>\n    </div>\n    <div>\n      <div class=\"diagram-box\" style=\"border:1px solid var(--wf-line);padding:8px;border-radius:6px;margin:4px 0;font-size:12px\">daemon → only category=daemon</div>\n      <div class=\"diagram-box\" style=\"border:1px solid var(--wf-line);padding:8px;border-radius:6px;margin:4px 0;font-size:12px\">shell → only category=shell</div>\n      <div class=\"diagram-box\" style=\"border:1px solid var(--wf-line);padding:8px;border-radius:6px;margin:4px 0;font-size:12px\">process → only category=process</div>\n      <div class=\"diagram-box\" style=\"border:1px solid var(--wf-line);padding:8px;border-radius:6px;margin:4px 0;font-size:12px\">test → only category=test</div>\n    </div>\n  </div>\n  <div class=\"diagram-muted\" style=\"color:var(--wf-muted);font-size:12px;margin-top:10px\">Why this is safe: daemon connection events are <code>info</code>, so they never mirror. Only failures and warnings cross into *Messages*. SPEC-047's anti-pollution guarantee holds.</div>\n</div>"
+  }
+}
+```
+
+<callout tone="decision">
+**Mirror rule — alpha-stage high observability.** Every `warn`/`error`
+entry from any category mirrors into `*Messages*`. Unbound keys are
+deliberately elevated from SPEC-016's `debug` to `warn` so they mirror
+automatically — "I pressed a key and nothing happened" is the exact
+confusion this log exists to dispel. This can be relaxed back to `debug`
+post-alpha. The SPEC-047 `*daemon*` split is preserved because
+connection events are `info`, not `warn`/`error`.
+</callout>
+
+## Files
+
+```file-tree
+src/editor/
+  log-entry.ts        # NEW — LogEntry type, LogCategory, renderEntry helpers
+  log-store.ts        # NEW — Log ring: lazy render, views, category filter, JSONL
+  log-persist.ts      # NEW — append + 5 MB rotation + tail-load
+  message-log.ts      # thin alias / folded into log-store (MessageLog kept for compat)
+  editor.ts           # messageLog/daemonLog → single Log; logShellCommand/logProcess/logTestRun/logAutoSave; setEchoOnly
+  tlisp-api.ts        # shell-command/shell-exec/make-process capture; (echo); (log-query); (observability-buffer)
+  handlers/
+    normal-handler.ts # FILL THE GAP: logMessage on unbound keys (warn) + errors
+    command-handler.ts # elevate unbound keys debug → warn (lines 109,116)
+    visual-handler.ts  # elevate unbound keys debug → warn (lines 23,30)
+    insert-handler.ts  # elevate unbound keys debug → warn (lines 76,83)
+src/server/
+  server.ts           # shutdown flush; query messages?category=; query log; autosave category
+src/tlisp/
+  trt/bootstrap.ts    # trt-log-run bridge builtin (reads results.ts store)
+  trt/results.ts      # unchanged store, new reader hook
+  core/commands/
+    observability.tlisp  # NEW — view-shell-output, view-async-output, view-tests, log-query
+    trt-commands.tlisp   # emit (trt-log-run) after each run
+    messages.tlisp       # unchanged (view-messages), C-h e
+~/.config/tmax/
+  messages.log        # NEW at runtime — JSONL, 5 MB, .1 rotation
+test/unit/
+  log-entry.test.ts   # NEW
+  log-store.test.ts   # NEW (lazy render, mirror, JSONL round-trip)
+  log-persist.test.ts # NEW (rotation, corrupt-line resilience)
+  editor.test.ts      # extend: normal-handler logs, setEchoOnly, program capture
+test/tlisp/
+  modes.test.tlisp    # (echo), (log-query), (observability-buffer)
+```
+
+## Roadmap
+
+Four phases, ordered by dependency. Phase 1 is a pure refactor that
+unblocks everything else by fixing the O(n) render blocker; Phase 4
+depends on the schema being settled in Phase 1.
+
+### Phase 1 — Foundation: unified schema + lazy-render store
+
+Replace the dual `messageLog`/`daemonLog` rings with one `Log` store
+and make `render()` O(1) amortized. No new user-facing behavior — every
+existing `*Messages*`/`*daemon*` test must pass unchanged. This phase
+**must land the lazy render** or Phase 3 regresses (it is the stated
+RFC-017 deferral reason).
+
+```diff
+- private messageLog = new MessageLog();
+- private daemonLog = new MessageLog();
++ private log = new Log();
+```
+
+The lazy render is the load-bearing mechanic:
+
+```annotated-code
+{
+  "language": "typescript",
+  "filename": "src/editor/log-store.ts (sketch)",
+  "code": "export class Log {\n  private entries: LogEntry[] = [];\n  private cached: Map<string, string> = new Map();   // view name → rendered text\n  private dirty: Set<string> = new Set();            // views needing recompute\n  private _maxSize = 1000;\n  private _minLevel: LogLevel = 'info';\n\n  log(e: Omit<LogEntry, 'ts'> & { ts?: number }): void {\n    if (this._maxSize === 0) return;\n    if (LEVEL_ORDER[e.level] < LEVEL_ORDER[this._minLevel]) return;\n    const entry: LogEntry = { ts: e.ts ?? Date.now(), ...e };\n    this.entries.push(entry);\n    if (this.entries.length > this._maxSize)\n      this.entries.splice(0, this.entries.length - this._maxSize);\n    this.invalidate(entry);                          // mark affected views dirty\n  }\n\n  private invalidate(e: LogEntry): void {\n    this.dirty.add(e.category);                       // own category view\n    this.dirty.add('messages');                       // *Messages* may mirror\n    if (e.category === 'editor' || e.category === 'autosave')\n      this.dirty.add('messages');                     // (already — explicit)\n  }\n\n  render(view: string): string {\n    if (!this.dirty.has(view)) return this.cached.get(view) ?? '';  // cache hit: O(1)\n    const rows = this.getEntries({ view });\n    const text = rows.map(renderEntry).join('\\n');\n    this.cached.set(view, text);\n    this.dirty.delete(view);\n    return text;\n  }\n}",
+  "annotations": [
+    { "lines": "9-13", "label": "filter + evict", "note": "Same ring semantics as MessageLog — preserves SPEC-016 behavior." },
+    { "lines": "15-20", "label": "invalidate", "note": "The trick: only the entry's own category view + the messages view can change. Daemon connection events (info) dirty only 'daemon' and 'messages', but never add to 'messages' because they fail the level check in getEntries." },
+    { "lines": "22-29", "label": "lazy render", "note": "O(1) on cache hit — the RFC-017 blocker. Per-write cost is the invalidate (two Set adds), not a full rescan." }
+  ]
+}
+```
+
+### Phase 2 — Routing completeness + richer context
+
+Fill the `normal-handler.ts` logging gap (the one handler with zero
+`logMessage` calls — SPEC-016 Phase 2, implemented in 3 of 4 handlers).
+Introduce the two-tier `(message)`/`(echo)` split so deliberately
+transient messages (which-key hints, prompts, `C-w` prefixes) are
+explicitly echo-only instead of vanishing. Elevate unbound keys from
+`debug` to `warn` across all four handlers for the alpha mirror rule.
+
+The T-Lisp routing rule is explicit and matches Emacs:
+
+| Primitive | `statusMessage` | `Log` entry | Use for |
+|---|---|---|---|
+| `(message ...)` | yes | yes (`info`) | real editor messages — file ops, command results, summaries |
+| `(log-message :LEVEL ...)` | yes (info+) | yes (explicit level) | leveled logging from T-Lisp |
+| `(echo ...)` (NEW) | yes | **no** | deliberately transient — which-key hints, prompts, prefixes |
+
+`(message)` keeps its current log+echo behavior (`tlisp-api.ts:686-687`)
+unchanged. `(echo)` is the **new** escape hatch so call sites that today
+set `statusMessage` directly without logging can be classified
+explicitly instead of vanishing. The TS-side counterpart is
+`setEchoOnly(text)` on `Editor`.
+
+### Phase 3 — Program-run capture + new buffers
+
+Wire `shell-command`/`shell-exec`, `make-process` (spawn + exit +
+stderr), and trt runs into the store with their structured fields. Stand
+up the three new virtual buffers as category-filtered renders. The
+mirror rule surfaces failures in `*Messages*` automatically — no
+per-call-site mirror code.
+
+### Phase 4 — Persistence + daemon query + T-Lisp API
+
+Append every entry to `~/.config/tmax/messages.log` as JSONL with 5 MB
+rotation, tail-load the last `maxSize` entries on startup, flush on
+graceful shutdown. Extend `query messages` with `category` and add
+`query log`; add `(log-query :category :level :last)` and
+`(observability-buffer NAME)`.
+
+## Risks
+
+<callout tone="warning">
+**Lazy-render correctness is the whole bet.** If the dirty-set logic
+misses a case (a view that should have been invalidated but wasn't), a
+buffer silently shows stale content. The mirror rule makes this subtle:
+a `shell` `error` entry must dirty `messages` even though its category
+is `shell`. Mitigation: the `invalidate` method always adds `messages`
+to the dirty set, and `getEntries({ view: 'messages' })` applies the
+level/category predicate at read time — the cache key is the view name,
+the cache invalidation is conservative. Unit test asserts cache hit on
+repeat render with no write, and cache miss after a mirrored-category
+write.
+</callout>
+
+<callout tone="warning">
+**`make-process` stderr is currently piped but never read**
+(`tlisp-api.ts:1158`). Adding a second async reader mirroring the stdout
+reader is straightforward but unbounded — a chatty subprocess could fill
+the 4 KB `outputTail` cap instantly and evict earlier editor entries
+from the 1000-entry ring. Mitigation: the cap is on the *entry's stored
+tail*, not the stream; the live stream still flows to the caller's
+`:filter` unchanged. Ring eviction of a process start entry before its
+exit entry is acceptable (both remain individually correct).
+</callout>
+
+<callout>
+**Persistence write strategy.** Append-per-write is crash-safe (no lost
+tail on crash) but adds an fsync-adjacent cost per event. Bun's buffered
+writes keep this acceptable; the shutdown `flush()` is belt-and-suspenders.
+If profiling later shows a hot path, the escape hatch is a periodic
+flush every N ms — documented, not built now.
+</callout>
+
+## Verification
+
+Beyond `bun run typecheck` and `bun test`, the plan changes daemon
+state, file I/O, and cross-session behavior, so the end-to-end smoke
+matters:
+
+1. **Routing gap closed:** in a renderer test, send an unbound key in
+   normal mode → assert `*Messages*` contains `[warn] Unbound key:`.
+2. **Shell capture:** `tmax -e '(shell-exec "false")'` → switch to
+   `*Shell Output*` (entry with `exitCode: 1`, duration, output tail) →
+   switch to `*Messages*` (mirrored `error` line).
+3. **Process capture:** `tmax -e '(make-process :command "sh -c \"exit 2\"")'`,
+   wait → `*Async Output*` has exit entry `exitCode: 2`; `*Messages*`
+   has the mirror.
+4. **Test capture:** M-x `trt-run-tests` against a fixture with one
+   failing test → `*Tests*` has the entry with failing name in
+   `outputTail`; `*Messages*` has the summary.
+5. **Persistence:** run step 2, `tmax --stop`, restart daemon → switch
+   to `*Messages*` → the prior `error` line is still present
+   (tail-loaded). Inspect `~/.config/tmax/messages.log` for the JSONL
+   line.
+6. **Corrupt-line resilience:** append a truncated line to the log file,
+   restart → startup succeeds, the truncated line is skipped.
+
+```checklist
+- [ ] bun run typecheck:src && bun run typecheck:test && bun run typecheck
+- [ ] bun test (incl. new log-entry / log-store / log-persist suites)
+- [ ] bun run build
+- [ ] bun run test:daemon — lifecycle still routes to *daemon*; query messages?category=shell&level=error works
+- [ ] bun run test:ui:renderer — status line + new buffers render; tests send real keys
+- [ ] manual e2e: shell-exec "false" → *Shell Output* + mirrored *Messages*
+- [ ] manual e2e: daemon restart preserves prior entries (tail-load)
+```
+
+## Open Questions
+
+```question-form
+{
+  "title": "Open Questions",
+  "questions": [
+    {
+      "id": "q_persist_strategy",
+      "type": "single",
+      "prompt": "Persistence write strategy: append-per-write is crash-safe but adds a write per event. Is that acceptable for alpha, or do you want a periodic flush (every N ms) now?",
+      "options": [
+        { "label": "Append-per-write (recommended)", "detail": "Crash-safe, simplest, no lost tail. Bun buffered writes keep per-event cost low. Matches the plan as written.", "recommended": true },
+        { "label": "Periodic flush (every 250ms)", "detail": "Batches writes, lower I/O on hot paths, but loses up to 250ms of tail on a hard crash. More moving parts (timer, shutdown flush)." }
+      ]
+    },
+    {
+      "id": "q_view_keys",
+      "type": "freeform",
+      "prompt": "Key bindings for the three new view commands (view-shell-output, view-async-output, view-tests). The existing convention is C-h e for view-messages. Any preference, or should I pick a consistent C-h prefix family (e.g. C-h s / C-h a / C-h t)?",
+      "options": [
+        { "label": "C-h prefix family", "detail": "C-h s (shell), C-h a (async), C-h t (tests). Consistent with C-h e (messages)." }
+      ]
+    }
+  ]
+}
+```

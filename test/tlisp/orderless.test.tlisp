@@ -1,0 +1,24 @@
+;; orderless.test.tlisp --- native trt tests for the orderless completion matcher (SPEC-049 pilot).
+;;
+;; This is a pilot migration: these tests were previously asserted in TypeScript
+;; (test/unit/orderless-tlisp.test.ts) by driving interpreter.execute() from bun. They are pure
+;; T-Lisp-function behavior, so they belong natively in T-Lisp. Per the boundary principle, the
+;; TS primitives (tokenizer/parser) stay in bun; this tests T-Lisp-authored logic.
+;;
+;; NOTE: these tests require the orderless module to be loaded. The trt runner loads core modules
+;; via the daemon; in standalone these functions resolve once the core is loaded.
+
+(deftest orderless-nonempty-string-p-detects-empty ()
+  (should-be-falsy (orderless-nonempty-string-p ""))
+  (should-be-truthy (orderless-nonempty-string-p "x")))
+
+(deftest orderless-spans-or-nil-returns-nil-for-empty ()
+  (should-be-nil (orderless-spans-or-nil (list)))
+  (should-equal (list 1) (orderless-spans-or-nil (list 1))))
+
+(deftest orderless-literal-spans-finds-substring ()
+  (let ((spans (orderless-literal-spans "foo" "foobar")))
+    (should-be-truthy spans)))
+
+(deftest orderless-literal-spans-returns-nil-when-absent ()
+  (should-be-nil (orderless-literal-spans "xyz" "foobar")))

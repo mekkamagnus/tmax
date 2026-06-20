@@ -4,10 +4,11 @@ Records of significant architectural decisions. Each ADR describes the context, 
 
 Ordered most-recent first (highest ADR number = most recent decision). Topic groupings preserved within each section.
 
-## Recent — Unified Dispatch, Operator+Find Chaining (ADR 0090-0091)
+## Recent — Daemon Event Buffer, Unified Dispatch, Operator+Find Chaining (ADR 0090-0093)
 
 | File | Decision | Related |
 |------|----------|---------|
+| [ADR-0093-daemon-event-buffer.md](ADR-0093-daemon-event-buffer.md) | `*daemon*` virtual buffer for daemon connection lifecycle events | [SPEC-047](../specs/SPEC-047-daemon-event-buffer.md), [SPEC-001](../specs/SPEC-001-daemon-tmux-observability.md), [RFC-017](../rfcs/RFC-017-agent-activity-log.md), [ADR-0067](ADR-0067-daemon-tmux-observability.md) |
 | [ADR-0091-unified-keymap-dispatch.md](ADR-0091-unified-keymap-dispatch.md) | Unified keymap-first normal-mode dispatch | [CHORE-23](../specs/CHORE-23-unify-key-dispatch.md), [ADR-0082](ADR-0082-vim-count-aware-dispatch.md) |
 | [ADR-0090-operator-find-char-chaining.md](ADR-0090-operator-find-char-chaining.md) | Operator + find-char chaining via stash-and-resume | [SPEC-041](../specs/SPEC-041-operator-find-char.md), [ADR-0091](ADR-0091-unified-keymap-dispatch.md) |
 
