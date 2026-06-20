@@ -1,0 +1,100 @@
+;; trt-commands.tlisp --- user-facing trt commands invocable via M-x (SPEC-049 demo support).
+
+(defun trt--emit-run-log (label)
+  "SPEC-055: emit a structured test-run entry into *Tests* from the current
+result store. Mirrors to *Messages* on warn/error. LABEL is a prefix like
+\"trt:\" or the test name for single runs. Called by every trt-run-* command.
+Uses POSITIONAL args to log-program-run because T-Lisp's reader treats bare
+:keywords as undefined symbols in arg position."
+  (let ((stats (trt-current-stats-ts)))
+    (let ((passed (car stats))
+          (failed (car (cdr stats)))
+          (total (car (cdr (cdr stats))))
+          (duration (car (cdr (cdr (cdr stats))))))
+      (let ((fail-names (trt-failed-tests)))
+        (log-program-run "test"
+                         (if (> failed 0) "error" (if (> total 0) "info" "warn"))
+                         (string-append label " " (number-to-string passed) " of "
+                                        (number-to-string total) " tests passed")
+                         (if (> failed 0) 1 (if (> total 0) 0 2))
+                         duration
+                         (if (> failed 0)
+                           (string-append "failing:\n" (string-join "\n" fail-names))
+                           ""))))))
+
+(defun trt-run-tests ()
+  "Run the trt test suite and report to *Messages*. Invocable via M-x: trt-run-tests."
+  (condition-case err
+    (progn
+      (trt-reset)
+      (trt-load-directory (trt-test-dir))
+      (trt-run-all)
+      (let ((passed (car (trt-current-stats-ts)))
+            (failed (car (cdr (trt-current-stats-ts))))
+            (total (car (cdr (cdr (trt-current-stats-ts))))))
+        ;; SPEC-055: structured *Tests* entry (mirrors on warn/error).
+        (trt--emit-run-log "trt:")
+        (if (> failed 0)
+          (progn
+            (message (string-append "trt: " (number-to-string passed) " passed, "
+                                    (number-to-string failed) " failed, "
+                                    (number-to-string total) " total"))
+            (message "trt: failing tests:")
+            (dolist (entry (trt-failed-tests))
+              (message (string-append "  FAIL " entry))))
+          (message (string-append "trt: all " (number-to-string total) " tests passed!")))))
+    (error (e) (message (string-append "trt error: " e)))))
+
+(defun trt-run-failing ()
+  "Re-run only the tests that failed in the last run. The core TDD red-green loop accelerator.
+Invocable via M-x: trt-run-failing."
+  (condition-case err
+    (let ((names (trt-failed-names)))
+      (if (= (length names) 0)
+        (message "trt: no failures to re-run")
+        (progn
+          (trt-reset-store)
+          (dolist (name names)
+            (trt--run-one name))
+          (let ((passed (car (trt-current-stats-ts)))
+                (failed (car (cdr (trt-current-stats-ts))))
+                (total (car (cdr (cdr (trt-current-stats-ts))))))
+            ;; SPEC-055: structured *Tests* entry for the re-run.
+            (trt--emit-run-log "trt: re-ran")
+            (message (string-append "trt: re-ran " (number-to-string total) " failing test(s): "
+                                    (number-to-string passed) " now pass, "
+                                    (number-to-string failed) " still fail"))))))
+    (error (e) (message (string-append "trt error: " e)))))
+
+(defun trt-find-test (name)
+  "Report the file and line where the test NAME is defined, searching test/tlisp/*.test.tlisp.
+Invocable via M-x: trt-find-test. Reports a precise source pointer to *Messages*."
+  (condition-case err
+    (let ((found nil)
+          (target (string-append "(deftest " name)))
+      (dolist (file (trt-discover (trt-test-dir)))
+        (let ((lines (string-split (trt-read-file (string-append (trt-test-dir) file)) "\n")))
+          (let ((lineno 0))
+            (dolist (line lines)
+              (set! lineno (+ lineno 1))
+              (if (string-contains-p target line)
+                (progn
+                  (message (string-append "trt: " name " defined at " file ":" (number-to-string lineno)))
+                  (set! found t)))))))
+      (if (not found)
+        (message (string-append "trt: test " name " not found in test/tlisp/"))))
+    (error (e) (message (string-append "trt error: " e)))))
+
+(defun trt-run-test (name)
+  "Run a single named test and report its result to *Messages*. Invocable via M-x: trt-run-test."
+  (condition-case err
+    (progn
+      (trt-reset-store)
+      (trt--run-one name)
+      (let ((stats (trt-current-stats-ts)))
+        ;; SPEC-055: structured *Tests* entry for the single-test run.
+        (trt--emit-run-log (string-append "trt: " name))
+        (if (= (car (cdr stats)) 0)
+          (message (string-append "trt: " name " PASSED"))
+          (message (string-append "trt: " name " FAILED")))))
+    (error (e) (message (string-append "trt error: " e)))))

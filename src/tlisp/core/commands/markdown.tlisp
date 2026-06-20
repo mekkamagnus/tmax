@@ -22,7 +22,7 @@
     markdown-find-code-block markdown-execute-block markdown-clear-results
     markdown-execute-all-blocks
     markdown-table-eval-formula markdown-table-eval-formula-impl markdown-table-insert-formula
-    markdown-table-formula-parse markdown-table-eval-expr markdown-table-row-p markdown-table-extract-range markdown-table-reduce
+    markdown-table-formula-parse markdown-table-eval-expr markdown-table-row-p markdown-table-extract-range markdown-table-reduce markdown-resolve-cell-refs
     markdown-delete-line
     markdown-export-to-html markdown-export-to-text markdown-export-to-latex
     markdown-export-dispatch
@@ -35,6 +35,7 @@
     markdown-inline-to-html markdown-table-to-latex markdown-find-unlinked-mentions markdown-dirname markdown-embed-target-at-point markdown-follow-embed)
 
 ;; markdown-commands.tlisp — Markdown-specific commands (SPEC-018)
+(require-module editor/commands/browse-url)
 
 (defun markdown-delete-line (line)
   "Delete the entire line at LINE number."
@@ -82,7 +83,7 @@
          (total (buffer-line-count)))
     (while (and (< line total)
                 (let ((text (buffer-get-line line)))
-                  (or (not (string-match "^#" text))
+                  (or (not (string-match "^\(#+\)" text))
                       (let ((ll (length (match-string 1))))
                         (> ll level)))))
       (set! line (+ line 1)))
@@ -100,7 +101,7 @@
          (line (- (cursor-line) 1)))
     (while (and (>= line 0)
                 (let ((text (buffer-get-line line)))
-                  (or (not (string-match "^#" text))
+                  (or (not (string-match "^\(#+\)" text))
                       (let ((ll (length (match-string 1))))
                         (> ll level)))))
       (set! line (- line 1)))
@@ -118,7 +119,7 @@
          (line (- (cursor-line) 1)))
     (while (and (>= line 0)
                 (let ((text (buffer-get-line line)))
-                  (or (not (string-match "^#" text))
+                  (or (not (string-match "^\(#+\)" text))
                       (let ((ll (length (match-string 1))))
                         (>= ll level)))))
       (set! line (- line 1)))
@@ -165,8 +166,8 @@
 
 (defun markdown-visibility-cycle ()
   "TAB cycle: collapsed -> subheadings visible -> fully expanded."
-  (let ((line (cursor-line))
-        (text (buffer-get-line line)))
+  (let* ((line (cursor-line))
+         (text (buffer-get-line line)))
     (if (not (string-match "^#" text))
         (message "Not on a heading")
         (if (fold-is-collapsed line)
@@ -495,9 +496,8 @@
                   ((string-match "^#" url)
                    (markdown-open-anchor url))
                   ((string-match "^https?://" url)
-                   (let ((safe-url (markdown-shell-quote url)))
-                     (shell-command (format "open '%s' 2>/dev/null || xdg-open '%s' 2>/dev/null" safe-url safe-url))
-                     (message "Opening: %s" url)))
+                   ;; Delegate external URL dispatch to browse-url for injection-safe argv handling.
+                   (browse-url url))
                   (t
                    (markdown-open-file-link url))))
               (message "Cursor not on a link")))
@@ -1182,9 +1182,34 @@ Returns (row col expr) where row/col are strings; caller resolves `>`."
                       (set! result (/ result (length nums)))))))
         (number-to-string result))))
 
+(defun markdown-resolve-cell-refs (expr table)
+  "Replace @R$C cell references in EXPR with their values from TABLE.
+Returns the expression with all cell refs replaced by numbers.
+TABLE rows are the raw `string-split` on `|` so each row has empty sentinels
+at the start/end; $1 maps to the first non-empty cell, so we strip empties."
+  (let ((s expr))
+    (while (string-match "@\([0-9]+\)[$]\([0-9]+\)" s)
+      (let ((row (- (string-to-number (match-string 1 s)) 1))
+            (col (- (string-to-number (match-string 2 s)) 1))
+            (full-match (match-string 0 s)))
+        (let* ((raw-row (nth row table))
+               (row-data (if raw-row
+                             (filter (lambda (c) (not (string= (string-trim c) "")))
+                                     raw-row)
+                             nil)))
+          (if row-data
+              (let ((cell (nth col row-data)))
+                (if cell
+                    (let ((cell-val (string-trim cell)))
+                      (set! s (string-replace s full-match
+                                              (if (string= cell-val "") "0" cell-val))))
+                    (set! s (string-replace s full-match "0"))))
+              (set! s (string-replace s full-match "0"))))))
+    s))
+
 (defun markdown-table-eval-expr (expr table)
   "Evaluate EXPR against TABLE data. Supports arithmetic, %, cell refs, and range aggregates."
-  (let ((trimmed (string-trim expr)))
+  (let ((trimmed (string-trim (markdown-resolve-cell-refs expr table))))
     (if (string-match "^\([0-9]+\)\\\\+\([0-9]+\)$" trimmed)
         (number-to-string (+ (string-to-number (match-string 1 trimmed))
                              (string-to-number (match-string 2 trimmed))))
@@ -1912,7 +1937,7 @@ Reads ~/.config/tmax/templates/<name>.md if present, else falls back to
 built-in templates. Substitutes {{date}} and {{title}}."
   (if (not template-supplied-p) (set! template "blank"))
   (let ((date-result (shell-command "date +%Y-%m-%d")))
-      (let ((date-str (string-trim date-result))
+      (let* ((date-str (string-trim date-result))
             (name date-str)
             (content nil)
             (template-file (read-file-content (concat "~/.config/tmax/templates/" template ".md"))))

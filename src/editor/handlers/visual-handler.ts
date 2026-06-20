@@ -20,14 +20,14 @@ export async function handleVisualMode(editor: Editor, key: string, normalizedKe
 
   if (!mappings) {
     (editor as any).state.statusMessage = `Unbound key: ${normalizedKey}`;
-    (editor as any).logMessage(`Unbound key: ${normalizedKey}`, 'debug');
+    (editor as any).logMessage(`Unbound key: ${normalizedKey}`, 'warn');
   } else {
     // Find mapping for visual mode
     const currentMajorMode = editor.getCurrentMajorMode?.() as string | undefined;
     const mapping = resolveMapping(mappings, "visual", currentMajorMode);
     if (!mapping) {
       (editor as any).state.statusMessage = `Unbound key in visual mode: ${normalizedKey}`;
-      (editor as any).logMessage(`Unbound key in visual mode: ${normalizedKey}`, 'debug');
+      (editor as any).logMessage(`Unbound key in visual mode: ${normalizedKey}`, 'warn');
     } else {
       // Execute the mapped command
       try {

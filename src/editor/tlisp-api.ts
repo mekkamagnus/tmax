@@ -9,6 +9,7 @@ import { renameSync, writeFileSync, readFileSync, existsSync } from "node:fs";
 import type { TerminalIO, FileSystem, FunctionalTextBuffer } from "../core/types.ts";
 import { FunctionalTextBufferImpl } from "../core/buffer.ts";
 import { Either } from "../utils/task-either.ts";
+import { capTail } from "./log-entry.ts";
 import { createValidationError, AppError } from "../error/types.ts";
 import { createBufferOps } from "./api/buffer-ops.ts";
 import { createCursorOps } from "./api/cursor-ops.ts";
@@ -44,6 +45,7 @@ import { createModuleOps } from "./api/module-ops.ts";
 import { createAstOps, getAstCache } from "./api/ast-ops.ts";
 import { createNavigationOps, setAstCacheRef } from "./api/navigation-ops.ts";
 import { foldToggle, foldOpen, foldClose, foldCloseAll, foldOpenAll, foldByLevel, foldIsCollapsed, foldGetRanges, findHeadingRanges } from "./api/fold-ops.ts";
+import { createBrowseUrlOps, tsOpenExternalOutcome, type BrowseUrlPrimitiveDeps } from "./api/browse-url-ops.ts";
 
 /**
  * T-Lisp function implementation that returns Either for error handling
@@ -80,8 +82,12 @@ export interface TlispEditorState {
   cursorFocus: 'buffer' | 'command';  // Track where cursor focus should be
   operations?: EditorOperations;  // Optional operations reference
   lspDiagnostics?: import("../core/types.ts").LSPDiagnostic[];  // LSP diagnostics (US-3.1.2)
-  logMessage?: (msg: string, level?: string, command?: string) => void;  // Log to *Messages* buffer
-  _getMessageLog?: () => import("./message-log.ts").MessageLog;  // Access MessageLog for level/max queries
+  logMessage?: (msg: string, level?: string, command?: string, frameId?: string) => void;  // Log to *Messages* buffer
+  setEchoOnly?: (text: string) => void;  // Status-line echo WITHOUT logging (SPEC-055)
+  /** Log a program-run event to its category buffer (SPEC-055). Mirrors on warn/error. */
+  logProgram?: (category: 'shell' | 'process' | 'test' | 'autosave', entry: { level: string; text: string; exitCode?: number; durationMs?: number; outputTail?: string; pid?: number; command?: string; frameId?: string }) => void;
+  _getMessageLog?: () => import("./log-store.ts").ViewBoundLog;  // Access Log for level/max queries (SPEC-055)
+  _getUnifiedLog?: () => import("./log-store.ts").Log;  // Cross-category query for (log-query) (SPEC-055)
   currentFilename?: string;  // Current buffer's filename
   config?: import("../core/types.ts").EditorConfig;
   _evalTlisp?: (expr: string) => any;
@@ -134,7 +140,7 @@ export function createEditorAPI(state: TlispEditorState): Map<string, TLispFunct
     (path: string) => { state.currentFilename = path; },
     () => state._getBufferModified?.() ?? false,
     (modified: boolean) => state._setBufferModified?.(modified),
-    new Set(['*Messages*']),
+    new Set(['*Messages*', '*daemon*', '*Shell Output*', '*Async Output*', '*Tests*']),
   );
   for (const [key, value] of bufferOps.entries()) {
     api.set(key, value);
@@ -644,6 +650,17 @@ export function createEditorAPI(state: TlispEditorState): Map<string, TLispFunct
     return Either.right(createString(content.right));
   });
 
+  // SPEC-047: return the *daemon* lifecycle event log text (mirrors
+  // messages-buffer). Lets users/agents read daemon connection events without
+  // buffer switching.
+  api.set('daemon-buffer', (_args: TLispValue[]): Either<AppError, TLispValue> => {
+    const buf = state.buffers.get('*daemon*');
+    if (!buf) return Either.right(createString(''));
+    const content = buf.getContent();
+    if (content._tag === 'Left') return Either.right(createString(''));
+    return Either.right(createString(content.right));
+  });
+
   // Format-string helper: %s -> string, %d -> integer, %% -> literal %
   function formatMessage(fmt: string, fmtArgs: TLispValue[]): string {
     if (!/%[sd%]/.test(fmt)) return fmt;
@@ -674,6 +691,82 @@ export function createEditorAPI(state: TlispEditorState): Map<string, TLispFunct
     }
     state.statusMessage = text;
     if (state.logMessage) state.logMessage(text);
+    return Either.right(createString(text));
+  });
+
+  // ── echo: set the status line WITHOUT logging (SPEC-055 two-tier split) ──
+  // Use for deliberately-transient messages (which-key hints, prompts). The
+  // message is NOT recorded in *Messages* — contrast with (message).
+  api.set('echo', (args: TLispValue[]): Either<AppError, TLispValue> => {
+    if (args.length === 0) return Either.left(createValidationError('FormatError', 'echo requires at least 1 argument'));
+    const text = args.map(a => {
+      switch (a.type) {
+        case 'string': return String(a.value);
+        case 'number': return String(a.value);
+        case 'boolean': return String(a.value);
+        default: return '';
+      }
+    }).join(' ');
+    state.statusMessage = text;
+    // Deliberately do NOT call logMessage — echo-only by design.
+    return Either.right(createString(text));
+  });
+
+  // ── log-program-run: record a structured program/test run (SPEC-055) ────
+  // (log-program-run :category "test" :level "error" :text "..." [:exit N]
+  //                   [:duration D] [:tail "..."] [:pid P] [:frame "id"])
+  // OR positional: (log-program-run "test" "error" "text" [exit] [duration] [tail])
+  // The positional form exists because T-Lisp's reader treats bare :keywords as
+  // undefined symbols in arg position — so T-Lisp callers (e.g. trt-commands)
+  // must use the positional form. Routes to the category buffer and mirrors
+  // warn/error into *Messages*.
+  api.set('log-program-run', (args: TLispValue[]): Either<AppError, TLispValue> => {
+    // Detect positional form: first arg is a string (not a :keyword symbol).
+    const first = args[0];
+    const isPositional = first && first.type === 'string';
+    let category: string, level: string, text: string;
+    let exitCode: number | undefined, durationMs: number | undefined, outputTail: string | undefined;
+    let pid: number | undefined, frameId: string | undefined;
+
+    if (isPositional) {
+      // Positional: category level text [exit] [duration] [tail]
+      category = String(first!.value);
+      level = args[1]?.type === 'string' ? String(args[1]!.value).replace(/^:/, '') : 'info';
+      text = args[2]?.type === 'string' ? String(args[2]!.value) : '';
+      if (args[3]?.type === 'number') exitCode = Number(args[3]!.value);
+      if (args[4]?.type === 'number') durationMs = Number(args[4]!.value);
+      if (args[5]?.type === 'string') outputTail = String(args[5]!.value);
+    } else {
+      // Kwarg form (for TS/programmatic callers that can pass :keywords).
+      const kwargs: Record<string, TLispValue> = {};
+      for (let i = 0; i < args.length - 1; i += 2) {
+        const key = args[i];
+        if (key && key.type === 'symbol' && String(key.value).startsWith(':')) {
+          kwargs[String(key.value).slice(1)] = args[i + 1]!;
+        }
+      }
+      category = kwargs['category'] ? String(kwargs['category'].value) : 'test';
+      level = kwargs['level'] ? String(kwargs['level'].value).replace(/^:/, '') : 'info';
+      text = kwargs['text'] ? String(kwargs['text'].value) : '';
+      if (kwargs['exit']?.type === 'number') exitCode = Number(kwargs['exit'].value);
+      if (kwargs['duration']?.type === 'number') durationMs = Number(kwargs['duration'].value);
+      if (kwargs['tail']?.type === 'string') outputTail = String(kwargs['tail'].value);
+      if (kwargs['pid']?.type === 'number') pid = Number(kwargs['pid'].value);
+      if (kwargs['frame']?.type === 'string') frameId = String(kwargs['frame'].value);
+    }
+
+    const validCats = ['shell', 'process', 'test', 'autosave'];
+    if (!validCats.includes(category)) {
+      return Either.left(createValidationError('FormatError', `log-program-run: invalid category ${category}`));
+    }
+    if (!text) return Either.left(createValidationError('FormatError', 'log-program-run requires text'));
+    const entry: any = { level, text };
+    if (exitCode !== undefined) entry.exitCode = exitCode;
+    if (durationMs !== undefined) entry.durationMs = durationMs;
+    if (outputTail !== undefined) entry.outputTail = outputTail;
+    if (pid !== undefined) entry.pid = pid;
+    if (frameId !== undefined) entry.frameId = frameId;
+    state.logProgram?.(category as any, entry);
     return Either.right(createString(text));
   });
 
@@ -725,6 +818,60 @@ export function createEditorAPI(state: TlispEditorState): Map<string, TLispFunct
       state.buffers.set('*Messages*', FunctionalTextBufferImpl.create(''));
     }
     return Either.right(createNil());
+  });
+
+  // ── log-query: structured query across all categories (SPEC-055) ──────
+  // (log-query [:category "shell"] [:view "messages"] [:level "error"] [:last 10])
+  // Returns a list of plists: ((text "..." level "error" category "shell" ts N ...))
+  api.set('log-query', (args: TLispValue[]): Either<AppError, TLispValue> => {
+    const kwargs: Record<string, TLispValue> = {};
+    for (let i = 0; i < args.length - 1; i += 2) {
+      const key = args[i];
+      if (key && key.type === 'symbol' && String(key.value).startsWith(':')) {
+        kwargs[String(key.value).slice(1)] = args[i + 1]!;
+      }
+    }
+    const store = (state as any)._getUnifiedLog?.();
+    if (!store) return Either.right(createList([]));
+    const entries = store.getEntries({
+      category: kwargs['category'] ? String(kwargs['category'].value) : undefined,
+      view: kwargs['view'] ? String(kwargs['view'].value) : undefined,
+      level: kwargs['level'] ? String(kwargs['level'].value).replace(/^:/, '') : undefined,
+      last: kwargs['last'] && kwargs['last'].type === 'number' ? Number(kwargs['last'].value) : undefined,
+    });
+    const plists = entries.map((e: any) => {
+      const pairs: TLispValue[] = [
+        createString('text'), createString(e.text),
+        createString('level'), createString(e.level),
+        createString('category'), createString(e.category),
+        createString('ts'), createNumber(e.ts),
+      ];
+      if (e.exitCode !== undefined) { pairs.push(createString('exitCode'), createNumber(e.exitCode)); }
+      if (e.durationMs !== undefined) { pairs.push(createString('durationMs'), createNumber(e.durationMs)); }
+      if (e.command) pairs.push(createString('command'), createString(e.command));
+      if (e.frameId) pairs.push(createString('frameId'), createString(e.frameId));
+      return createList(pairs);
+    });
+    return Either.right(createList(plists));
+  });
+
+  // ── observability-buffer: switch to a category buffer by name (SPEC-055) ─
+  // (observability-buffer "shell") → *Shell Output*; "process" → *Async Output*;
+  // "test" → *Tests*; "daemon" → *daemon*; "messages" → *Messages*.
+  api.set('observability-buffer', (args: TLispValue[]): Either<AppError, TLispValue> => {
+    if (args.length < 1 || args[0]!.type !== 'string') {
+      return Either.left(createValidationError('FormatError', 'observability-buffer requires a category name string'));
+    }
+    const cat = String(args[0]!.value);
+    const map: Record<string, string> = {
+      messages: '*Messages*', daemon: '*daemon*',
+      shell: '*Shell Output*', process: '*Async Output*', test: '*Tests*',
+    };
+    const bufName = map[cat];
+    if (!bufName) return Either.left(createValidationError('FormatError', `observability-buffer: unknown category ${cat}`));
+    const switcher = api.get('buffer-switch');
+    if (switcher) return switcher([createString(bufName)]);
+    return Either.right(createString(bufName));
   });
 
   api.set('last-command', (_args: TLispValue[]): Either<AppError, TLispValue> => {
@@ -1015,8 +1162,21 @@ export function createEditorAPI(state: TlispEditorState): Map<string, TLispFunct
     if (args[0]!.type !== 'string') return Either.left(createValidationError('TypeError', 'shell-command requires a string'));
     try {
       const cmd = String(args[0]!.value);
+      const t0 = Date.now();
       const output = Bun.spawnSync(['sh', '-c', cmd], { stdout: 'pipe', stderr: 'pipe', timeout: 30_000 });
       const stdout = output.stdout ? new TextDecoder().decode(output.stdout) : '';
+      // SPEC-055: shell-command used to discard stderr + exit code. Capture
+      // them for the observability log even though the return value stays
+      // stdout-only for backward compatibility.
+      const stderr = output.stderr ? new TextDecoder().decode(output.stderr) : '';
+      const exitCode = output.exitCode ?? 0;
+      state.logProgram?.('shell', {
+        level: exitCode === 0 ? 'info' : 'error',
+        text: cmd,
+        exitCode,
+        durationMs: Date.now() - t0,
+        outputTail: capTail(`${stdout}\n${stderr}`),
+      });
       return Either.right(createString(stdout));
     } catch (e) {
       return Either.left(createValidationError('FormatError', `shell-command failed: ${e instanceof Error ? e.message : String(e)}`));
@@ -1029,10 +1189,18 @@ export function createEditorAPI(state: TlispEditorState): Map<string, TLispFunct
     if (args[0]!.type !== 'string') return Either.left(createValidationError('TypeError', 'shell-exec requires a string'));
     try {
       const cmd = String(args[0]!.value);
+      const t0 = Date.now();
       const output = Bun.spawnSync(['sh', '-c', cmd], { stdout: 'pipe', stderr: 'pipe', timeout: 30_000 });
       const stdout = output.stdout ? new TextDecoder().decode(output.stdout).trim() : '';
       const stderr = output.stderr ? new TextDecoder().decode(output.stderr).trim() : '';
       const exitCode = output.exitCode ?? 1;
+      state.logProgram?.('shell', {
+        level: exitCode === 0 ? 'info' : 'error',
+        text: cmd,
+        exitCode,
+        durationMs: Date.now() - t0,
+        outputTail: capTail(`${stdout}\n${stderr}`),
+      });
       return Either.right(createList([
         createString(stdout),
         createString(stderr),
@@ -1152,26 +1320,56 @@ export function createEditorAPI(state: TlispEditorState): Map<string, TLispFunct
 
       const filterName = filterFn ? String(filterFn.value) : null;
       const sentinelName = sentinelFn ? String(sentinelFn.value) : null;
+      const spawnTime = Date.now();
+      const cmdSummary = command.join(' ');
+      // SPEC-055: record process spawn. outputTail is best-effort — stdout is
+      // owned by the caller's :filter; we accumulate a capped tail for the log.
+      let tailBuf = '';
+      state.logProgram?.('process', {
+        level: 'info', text: `▶ pid ${pid} started: ${cmdSummary}`, pid,
+      });
 
-      // Stream stdout to filter function
+      // Stream stdout to filter function (and accumulate a tail for the log)
       const readable = proc.stdout;
       (async () => {
         const decoder = new TextDecoder();
         const reader = readable.getReader();
+        // SPEC-055: also read stderr (previously piped but never read — a bug).
+        const errReader = proc.stderr?.getReader();
+        const errLoop = (async () => {
+          if (!errReader) return;
+          try {
+            while (true) {
+              const { done, value } = await errReader.read();
+              if (done) break;
+              tailBuf += decoder.decode(value, { stream: true });
+            }
+          } catch { /* stderr closed */ }
+        })();
         try {
           while (true) {
             const { done, value } = await reader.read();
             if (done) break;
             const text = decoder.decode(value, { stream: true });
+            tailBuf += text;
             if (filterName && state._evalTlisp) {
               state._evalTlisp(`(${filterName} ${pid} ${JSON.stringify(text)})`);
             }
           }
         } catch { /* stream closed */ }
+        await errLoop;
 
         await proc.exited;
+        const exitCode = proc.exitCode ?? 0;
+        // SPEC-055: record process exit (error level on non-zero → mirrors).
+        state.logProgram?.('process', {
+          level: exitCode === 0 ? 'info' : 'error',
+          text: `◀ pid ${pid} exited: ${exitCode}`,
+          pid, exitCode, durationMs: Date.now() - spawnTime,
+          outputTail: capTail(tailBuf),
+        });
         if (sentinelName && state._evalTlisp) {
-          state._evalTlisp(`(${sentinelName} ${pid} ${proc.exitCode ?? 0})`);
+          state._evalTlisp(`(${sentinelName} ${pid} ${exitCode})`);
         }
         processTable.delete(pid);
       })();
@@ -1316,6 +1514,34 @@ export function createEditorAPI(state: TlispEditorState): Map<string, TLispFunct
     }
   });
 
+  // ── SPEC-056: browse-url primitives ──────────────────────────────────
+  // ts-open-external: argv-array browser dispatch (injection-safe).
+  // Buffer scanning helpers + fs/git context resolvers live alongside.
+  const browseUrlDeps: BrowseUrlPrimitiveDeps = {
+    getCurrentBuffer: () => state.currentBuffer,
+    getCurrentBufferName: () => state.currentFilename ?? "*scratch*",
+    getCurrentBufferPath: () => state.currentFilename,
+    spawn: (argv: string[]) => {
+      try {
+        const proc = Bun.spawn(argv, { stdout: "ignore", stderr: "ignore", stdin: "ignore" });
+        return { pid: proc.pid };
+      } catch (e) {
+        return { error: e instanceof Error ? e : new Error(String(e)) };
+      }
+    },
+  };
+  for (const [key, value] of createBrowseUrlOps(browseUrlDeps).entries()) {
+    api.set(key, value);
+  }
+  api.set("ts-open-external", (args: TLispValue[]): Either<AppError, TLispValue> => {
+    if (args.length !== 1) {
+      return Either.left(createValidationError("ConstraintViolation", "ts-open-external requires 1 argument: url"));
+    }
+    if (args[0]!.type !== "string") {
+      return Either.left(createValidationError("TypeError", "ts-open-external requires a string url"));
+    }
+    return tsOpenExternalOutcome(String(args[0]!.value), browseUrlDeps);
+  });
 
   return api;
 }

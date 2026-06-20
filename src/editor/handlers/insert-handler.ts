@@ -73,14 +73,14 @@ export async function handleInsertMode(editor: Editor, key: string, normalizedKe
 
     if (!mappings) {
       (editor as any).state.statusMessage = `Unbound key: ${normalizedKey}`;
-      (editor as any).logMessage(`Unbound key: ${normalizedKey}`, 'debug');
+      (editor as any).logMessage(`Unbound key: ${normalizedKey}`, 'warn');
     } else {
       // Find mapping for insert mode
       const currentMajorMode = editor.getCurrentMajorMode?.() as string | undefined;
       const mapping = resolveMapping(mappings, "insert", currentMajorMode);
       if (!mapping) {
         (editor as any).state.statusMessage = `Unbound key in insert mode: ${normalizedKey}`;
-        (editor as any).logMessage(`Unbound key in insert mode: ${normalizedKey}`, 'debug');
+        (editor as any).logMessage(`Unbound key in insert mode: ${normalizedKey}`, 'warn');
       } else {
         // Execute the mapped command
         try {

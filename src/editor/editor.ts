@@ -16,6 +16,9 @@ import { Either } from "../utils/task-either.ts";
 import { renderDiagnostic } from "../tlisp/diagnostic-renderer.ts";
 import { FunctionalTextBufferImpl } from "../core/buffer.ts";
 import { MessageLog, type LogLevel } from "./message-log.ts";
+import { Log, ViewBoundLog } from "./log-store.ts";
+import type { LogEntry, LogCategory } from "./log-entry.ts";
+import { appendEntry, defaultLogPath, tailLoad } from "./log-persist.ts";
 import { handleNormalMode } from "./handlers/normal-handler.ts";
 import { handleInsertMode } from "./handlers/insert-handler.ts";
 import { handleVisualMode } from "./handlers/visual-handler.ts";
@@ -91,11 +94,21 @@ export class Editor {
   private keyMappings: Map<string, KeyMapping[]>;
   private running: boolean = false;
   private coreBindingsLoaded: boolean = false;
+  // Notified after handleKey mutates editor state (e.g. socket-driven
+  // `tmaxclient --keys`), so attached frontends that don't see the local stdin
+  // key can still re-render. See main.tsx subscription.
+  private stateChangeListeners: Array<() => void> = [];
   private terminal: TerminalIO;
   private filesystem: FileSystem;
   private countPrefix: number = 0;  // Accumulated count for count prefix commands
   private messages: string[] = [];
-  private messageLog = new MessageLog();
+  // Unified observability store (SPEC-055). One ring of LogEntry across every
+  // category; the five virtual buffers (*Messages*, *daemon*, *Shell Output*,
+  // *Async Output*, *Tests*) are filtered renders (views) of this same store.
+  // Replaces the previous separate messageLog/daemonLog rings.
+  private log = new Log();
+  /** On-disk JSONL log path (SPEC-055 persistence). */
+  private logPath: string = defaultLogPath();
   private spacePressed: boolean = false;  // Track space key for SPC ; sequence (US-1.10.1)
   private windowPrefixPressed: boolean = false;  // Track C-w prefix for window commands (SPEC-004)
   private lspClient: LSPClient;  // LSP client for language server integration (US-3.1.1)
@@ -197,6 +210,18 @@ export class Editor {
     this.buffers.set('*Messages*', FunctionalTextBufferImpl.create(''));
     this.bufferMetadata.set('*Messages*', { modified: false, recency: this.bufferRecency++ });
 
+    // Create *daemon* buffer — daemon lifecycle event log (SPEC-047). Quiet by
+    // default; observable via (switch-to-buffer "*daemon*").
+    this.buffers.set('*daemon*', FunctionalTextBufferImpl.create(''));
+    this.bufferMetadata.set('*daemon*', { modified: false, recency: this.bufferRecency++ });
+
+    // Create program-run observability buffers (SPEC-055). Each is a filtered
+    // view over the unified Log store; populated lazily by logProgram().
+    for (const name of ['*Shell Output*', '*Async Output*', '*Tests*']) {
+      this.buffers.set(name, FunctionalTextBufferImpl.create(''));
+      this.bufferMetadata.set(name, { modified: false, recency: this.bufferRecency++ });
+    }
+
     // Initialize KeymapSync for T-Lisp keymap integration (US-0.4.1)
     editorLog.info('Initializing KeymapSync', { correlationId: initId });
     this.keymapSync = new KeymapSync(this.interpreter);
@@ -208,6 +233,15 @@ export class Editor {
     resetYankRegisterState();
     resetDeleteRegisterState();
     resetUndoRedoState();
+
+    // SPEC-055: tail-load prior-session entries from the persisted JSONL log
+    // so a fresh daemon shows prior context. A corrupt/missing log never
+    // blocks startup (guard). Loaded BEFORE the welcome message so the welcome
+    // line is the most-recent entry.
+    try {
+      const prior = tailLoad(this.logPath, this.log.maxSize);
+      for (const e of prior) this.log.log(e);
+    } catch { /* persistence is best-effort */ }
 
     this.logMessage('Welcome to tmax', 'info');
 
@@ -319,7 +353,9 @@ export class Editor {
       get cursorFocus() { return editor.state.cursorFocus ?? 'buffer'; },
       set cursorFocus(v: 'buffer' | 'command') { editor.state.cursorFocus = v; },
       get lspDiagnostics() { return editor.state.lspDiagnostics; },
-      logMessage: (msg: string, level?: string, command?: string) => editor.logMessage(msg, (level as LogLevel) ?? 'info', command),
+      logMessage: (msg: string, level?: string, command?: string, frameId?: string) => editor.logMessage(msg, (level as LogLevel) ?? 'info', command, frameId),
+      setEchoOnly: (text: string) => editor.setEchoOnly(text),
+      logProgram: (category: 'shell' | 'process' | 'test' | 'autosave', entry: any) => editor.logProgram(category, entry),
       get currentFilename() { return editor.state.currentFilename; },
       set currentFilename(v: string | undefined) {
         editor.state.currentFilename = v;
@@ -357,7 +393,8 @@ export class Editor {
       _getCurrentModuleName: () => editor.getCurrentModuleName(),
       _getBufferModified: () => editor.getCurrentBufferModified(),
       _setBufferModified: (modified: boolean) => editor.setCurrentBufferModified(modified),
-      _getMessageLog: () => editor.messageLog,
+      _getMessageLog: () => new ViewBoundLog(editor.log, 'messages'),
+      _getUnifiedLog: () => editor.log,
     };
 
     const api = createEditorAPI(tlispState);
@@ -928,7 +965,10 @@ export class Editor {
       
       // Use async saveFile but return synchronously for T-Lisp
       this.saveFile().catch((error) => {
-        this.state.statusMessage = `Save failed: ${error instanceof Error ? error.message : String(error)}`;
+        const msg = `Save failed: ${error instanceof Error ? error.message : String(error)}`;
+        this.state.statusMessage = msg;
+        // SPEC-055: route save errors through the log so they don't vanish.
+        this.logMessage(msg, 'error');
       });
       
       return createString("saving...");
@@ -1106,26 +1146,6 @@ export class Editor {
       if (args.length !== 0) throw new Error("editor-reset-space-prefix requires no arguments");
       this.spacePressed = false;
       return createNil();
-    });
-
-    // Line number toggles
-    defineRaw("toggle-line-numbers", (args) => {
-      if (args.length !== 0) {
-        throw new Error("toggle-line-numbers requires no arguments");
-      }
-      this.state.config.showLineNumbers = !this.state.config.showLineNumbers;
-      return createBoolean(this.state.config.showLineNumbers);
-    });
-
-    defineRaw("toggle-relative-line-numbers", (args) => {
-      if (args.length !== 0) {
-        throw new Error("toggle-relative-line-numbers requires no arguments");
-      }
-      this.state.config.relativeLineNumbers = !this.state.config.relativeLineNumbers;
-      if (this.state.config.relativeLineNumbers) {
-        this.state.config.showLineNumbers = true;
-      }
-      return createBoolean(this.state.config.relativeLineNumbers);
     });
 
     // Window prefix handler: C-w waits for next key (s/v/w/q)
@@ -2320,19 +2340,84 @@ export class Editor {
         data: { statusMessage: this.state.statusMessage, key }
       });
     }
+
+    // Notify attached frontends (e.g. embedded SteepFrontend) so that input
+    // arriving over the socket (tmaxclient --keys), which bypasses the local
+    // stdin render path, still triggers a re-render.
+    this.notifyStateChange();
   }
 
   /**
    * Log a message to the *Messages* buffer
    */
-  logMessage(msg: string, level: LogLevel = 'info', command?: string): void {
+  logMessage(msg: string, level: LogLevel = 'info', command?: string, frameId?: string): void {
     const now = new Date();
     const ts = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}:${String(now.getSeconds()).padStart(2, '0')}`;
     const line = `[${ts}] ${msg}`;
     this.messages.push(line);
-    this.messageLog.log(level, msg, command);
-    this.buffers.set('*Messages*', FunctionalTextBufferImpl.create(this.messageLog.render()));
+    const _e = this.log.log({ level, category: 'editor', text: msg, command, frameId });
+    if (_e) queueMicrotask(() => appendEntry(this.logPath, _e));
+    this.buffers.set('*Messages*', FunctionalTextBufferImpl.create(this.log.render('messages', { fullDate: true })));
     this.updateBufferMetadata('*Messages*', { modified: false });
+  }
+
+  /**
+   * Set the transient status-line message WITHOUT logging it (SPEC-055 two-tier
+   * split). Use for deliberately-ephemeral messages: which-key hints, prompts,
+   * prefixes. Contrast with logMessage, which logs + echoes.
+   */
+  setEchoOnly(text: string): void {
+    this.state.statusMessage = text;
+  }
+
+  /**
+   * Log a daemon lifecycle event to the *daemon* buffer (SPEC-047). Records
+   * the event in the unified store under category='daemon' and refreshes the
+   * *daemon* virtual buffer. Connection events are info level, so they never
+   * mirror into *Messages* (the SPEC-047 anti-pollution guarantee holds).
+   */
+  logDaemonEvent(event: string, detail?: string): void {
+    const text = detail ? `${event} ${detail}` : event;
+    const _de = this.log.log({ level: 'info', category: 'daemon', text });
+    if (_de) queueMicrotask(() => appendEntry(this.logPath, _de));
+    this.buffers.set('*daemon*', FunctionalTextBufferImpl.create(this.log.render('daemon', { fullDate: true })));
+    this.updateBufferMetadata('*daemon*', { modified: false });
+  }
+
+  /**
+   * Log a program-run event (shell/process/test/autosave) to its category
+   * buffer (SPEC-055). The mirror rule automatically surfaces warn/error
+   * entries into *Messages*, so callers do not mirror by hand.
+   */
+  logProgram(category: 'shell' | 'process' | 'test' | 'autosave', entry: Omit<LogEntry, 'ts' | 'category'> & { ts?: number }): void {
+    const _pe = this.log.log({ category, ...entry });
+    if (_pe) queueMicrotask(() => appendEntry(this.logPath, _pe));
+    const view = category as 'shell' | 'process' | 'test';
+    if (view === 'shell' || view === 'process' || view === 'test') {
+      const bufName = view === 'shell' ? '*Shell Output*' : view === 'process' ? '*Async Output*' : '*Tests*';
+      this.buffers.set(bufName, FunctionalTextBufferImpl.create(this.log.render(view, { fullDate: true })));
+      this.updateBufferMetadata(bufName, { modified: false });
+    }
+    // Mirrored failures surface in *Messages* automatically (the messages view
+    // includes every warn/error from any category).
+    this.buffers.set('*Messages*', FunctionalTextBufferImpl.create(this.log.render('messages', { fullDate: true })));
+    this.updateBufferMetadata('*Messages*', { modified: false });
+  }
+
+  /**
+   * Flush the log to disk (SPEC-055). Append-per-write already persists every
+   * entry, so this is belt-and-suspenders for graceful shutdown — currently a
+   * no-op kept as the documented hook for a future periodic-flush strategy.
+   */
+  flushLog(): void {
+    // appendEntry is called per-write, so nothing is buffered to flush here.
+    // Kept as the shutdown hook so a future periodic-flush strategy can drain
+    // a write buffer at this point without changing call sites.
+  }
+
+  /** Accessor for the daemon log (view-bound to *daemon*). Used by tests + future introspection. */
+  getDaemonLog(): ViewBoundLog {
+    return new ViewBoundLog(this.log, 'daemon');
   }
 
   /**
@@ -2356,7 +2441,7 @@ export class Editor {
       const content = Either.isRight(contentResult) ? contentResult.right : '';
       this.buffers.set(name, FunctionalTextBufferImpl.create(content));
     }
-    this.buffers.set('*Messages*', FunctionalTextBufferImpl.create(this.messageLog.render()));
+    this.buffers.set('*Messages*', FunctionalTextBufferImpl.create(this.log.render('messages', { fullDate: true })));
 
     this.bufferMetadata.clear();
     for (const [name, metadata] of workspace.bufferMetadata.entries()) {
@@ -2621,10 +2706,16 @@ export class Editor {
         this.setCurrentBufferModified(false);
         this.logMessage(`Saved ${saveFilename}`, 'info');
       } else {
-        this.state.statusMessage = `Failed to get content: ${contentResult.left}`;
+        const gfMsg = `Failed to get content: ${contentResult.left}`;
+        this.state.statusMessage = gfMsg;
+        // SPEC-055: route save errors through the log so they don't vanish.
+        this.logMessage(gfMsg, 'error');
       }
     } catch (error) {
-      this.state.statusMessage = `Failed to save ${saveFilename}: ${error instanceof Error ? error.message : String(error)}`;
+      const fsMsg = `Failed to save ${saveFilename}: ${error instanceof Error ? error.message : String(error)}`;
+      this.state.statusMessage = fsMsg;
+      // SPEC-055: route save errors through the log so they don't vanish.
+      this.logMessage(fsMsg, 'error');
     }
   }
 
@@ -2717,6 +2808,27 @@ export class Editor {
   updateViewport(): void {
     // This method is kept for compatibility with React components
     // The actual viewport management is now handled by BufferView component
+  }
+
+  /**
+   * Subscribe to editor state changes. The listener is invoked after
+   * handleKey mutates state, so an attached frontend (e.g. the embedded
+   * SteepFrontend in main.tsx) can re-render in response to socket-driven
+   * input (`tmaxclient --keys`) that bypasses its own stdin. Returns an
+   * unsubscribe function.
+   */
+  onStateChange(listener: () => void): () => void {
+    this.stateChangeListeners.push(listener);
+    return () => {
+      this.stateChangeListeners = this.stateChangeListeners.filter(l => l !== listener);
+    };
+  }
+
+  /** Notify subscribers that editor state changed (called at end of handleKey). */
+  private notifyStateChange(): void {
+    for (const listener of this.stateChangeListeners) {
+      try { listener(); } catch { /* a frontend listener must not break input */ }
+    }
   }
 
   /**
@@ -3036,8 +3148,14 @@ export class Editor {
   /**
    * Get the message log (for server/daemon use).
    */
-  getMessageLog(): MessageLog {
-    return this.messageLog;
+  getMessageLog(): ViewBoundLog {
+    return new ViewBoundLog(this.log, 'messages');
+  }
+
+  /** Accessor for the unified Log store (SPEC-055). Used by the daemon query
+   *  path for category/view/level filtering across all categories. */
+  getUnifiedLog(): Log {
+    return this.log;
   }
 
   /**

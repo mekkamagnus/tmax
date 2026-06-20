@@ -298,6 +298,72 @@ const DOCUMENTATION_DATABASE: DocumentationEntry[] = [
     ],
     related: ['buffer-create', 'buffer-switch', 'buffer-list', 'buffer-kill'],
     type: 'tutorial'
+  },
+
+  // Browse-URL (SPEC-056)
+  {
+    name: 'browse-url',
+    category: 'browse',
+    signature: '(browse-url url) → hashmap',
+    description: 'Open URL in the system browser using injection-safe argv dispatch. Honors $BROWSER (colon-separated, URL templated as %s); falls back to `open` on macOS and `xdg-open` elsewhere. Supports http/https/mailto and restricted file: URLs (must be under docs/rfcs/ or docs/specs/). Returns a structured hashmap with ok/error/details.',
+    examples: [
+      '(browse-url "https://example.com")',
+      '(browse-url "RFC-001") ;; resolver expands to file:// URL',
+      ';; success: (hashmap "ok" t "url" "..." "command" "open" "argv" [...] "pid" 1234)',
+      ';; failure: (hashmap "ok" nil "error" "unsupported-scheme" "details" (hashmap "scheme" "ftp" "supported" (list "http" "https" "mailto" "file")))'
+    ],
+    related: ['browse-url-at-point', 'browse-detect-at-point', 'browse-resolve', 'define-url-resolver', 'ts-open-external'],
+    type: 'function'
+  },
+  {
+    name: 'browse-url-at-point',
+    category: 'browse',
+    signature: '(browse-url-at-point) → hashmap',
+    description: 'Detect the URL at the cursor and open it via browse-url. Recognizes bare URLs (https?://...), markdown inline links [text](url), angle-bracket URLs <url>, RFC-NNN/SPEC-NNN docs references, and #NNN GitHub issues. Same-line detection only in MVP. Bound to g X in normal mode.',
+    examples: [
+      'Place cursor on a URL, press gX',
+      ';; returns whatever browse-url returns (success or structured error)',
+      ';; when no URL is found: (hashmap "ok" nil "error" "no-url-at-point" "details" (hashmap "buffer" name "cursor" (list line col)))'
+    ],
+    related: ['browse-url', 'browse-detect-at-point', 'browse-resolve'],
+    type: 'function'
+  },
+  {
+    name: 'browse-detect-at-point',
+    category: 'browse',
+    signature: '(browse-detect-at-point) → hashmap',
+    description: 'Detect the URL at the cursor without opening it. Returns a hashmap with ok, kind (bare|markdown|angle|docs|issue), text, url, and range (list line-start line-end). On failure returns the standard no-url-at-point error shape.',
+    examples: [
+      '(browse-detect-at-point) ;; => (hashmap "ok" t "kind" "markdown" "text" "[a](https://a.com)" "url" "https://a.com" "range" (list 10 0 10 22))',
+      '(browse-detect-at-point) ;; => (hashmap "ok" nil "error" "no-url-at-point" "details" ...)'
+    ],
+    related: ['browse-url-at-point', 'browse-url', 'browse-resolve', 'define-url-resolver'],
+    type: 'function'
+  },
+  {
+    name: 'browse-resolve',
+    category: 'browse',
+    signature: '(browse-resolve reference) → url | hashmap',
+    description: 'Expand a contextual reference into a URL. Handles RFC-NNN/SPEC-NNN (resolved to safe file:// URLs under docs/rfcs or docs/specs) and #NNN (resolved to GitHub issue URLs when a GitHub remote is configured). Returns a URL string on success or a structured error hashmap.',
+    examples: [
+      '(browse-resolve "RFC-001") ;; => "file:///.../docs/rfcs/RFC-001-trt-framework.md"',
+      '(browse-resolve "#42") ;; => "https://github.com/owner/repo/issues/42"',
+      '(browse-resolve "RFC-999") ;; => (hashmap "ok" nil "error" "docs-reference-not-found" ...)'
+    ],
+    related: ['browse-url', 'browse-detect-at-point', 'define-url-resolver', 'browse-doc-reference', 'browse-git-github-remote'],
+    type: 'function'
+  },
+  {
+    name: 'define-url-resolver',
+    category: 'browse',
+    signature: '(define-url-resolver mode fn) → fn',
+    description: 'Register a resolver FN for MODE. FN is called as (fn text buffer range) and should return a URL string, a result hashmap, or nil. Built-in resolvers handle RFC/SPEC docs references and GitHub issues under the "fundamental" mode slot; user resolvers can layer additional contextual expansions per major mode.',
+    examples: [
+      '(define-url-resolver "org-mode" \'my-org--jira-resolver)',
+      '(defun my-org--jira-resolver (text buffer range) (if (string-match "^JIRA-" text) (format "https://jira.example.com/browse/%s" text) nil))'
+    ],
+    related: ['browse-resolve', 'browse-url', 'browse-detect-at-point'],
+    type: 'function'
   }
 ];
 

@@ -21,6 +21,7 @@
  */
 
 import type { Editor } from "../editor.ts";
+import { resolveMapping } from "../editor.ts";
 import { isTruthy } from "../../tlisp/values.ts";
 import type { WhichKeyBinding } from "../../core/types.ts";
 import { computeWhichKeyPopup } from "../../frontend/render/which-key-overlay.ts";
@@ -128,6 +129,18 @@ export async function handleNormalMode(editor: Editor, key: string, normalizedKe
     return;
   }
 
+  // Major-mode prefix check: if lookupKey is the start of a major-mode
+  // multi-key binding (e.g. "]" is a prefix of "] h"), set the prefix and
+  // wait for the next key. Major-mode bindings are not in the T-Lisp keymap,
+  // so they need their own prefix detection here.
+  const majorMode = editor.getCurrentMajorMode();
+  if (majorMode && majorMode !== "fundamental" && isMajorModePrefix(editor, lookupKey, majorMode)) {
+    state.whichKeyPrefix = lookupKey;
+    state.whichKeyBindings = [];
+    state.statusMessage = "";
+    return;
+  }
+
   // Keymap binding lookup → execute command
   const cmdResult = exec(`(keymap-ref (current-keymap) "${escape(lookupKey)}")`);
   const cmdRight = isRight(cmdResult) ? (cmdResult as any).right : null;
@@ -142,6 +155,20 @@ export async function handleNormalMode(editor: Editor, key: string, normalizedKe
     return;
   }
 
+  // Major-mode-scoped bindings (e.g. "] h" in markdown). The T-Lisp mode
+  // keymap above has no major-mode concept, so these live in the editor's
+  // keyMappings table and are resolved here as the dispatch path of last
+  // resort (after global/mode bindings). Precedence: mode+majorMode >
+  // mode > majorMode > global (see resolveMapping).
+  if (majorMode && majorMode !== "fundamental") {
+    const mapping = lookupMajorModeBinding(editor, lookupKey, majorMode);
+    if (mapping) {
+      clearWhichKey(state, wk);
+      await executeCommand(editor, mapping.command);
+      return;
+    }
+  }
+
   // No prefix, no binding — report unbound. If we were in a prefix context,
   // clear which-key state so the abandoned prefix doesn't linger.
   if (currentPrefix || spaceActive) {
@@ -149,11 +176,63 @@ export async function handleNormalMode(editor: Editor, key: string, normalizedKe
     (editor as any).spacePressed = false;
   }
   state.statusMessage = `Unbound key: ${lookupKey}`;
+  // SPEC-055: log at 'warn' (elevated from SPEC-016's 'debug' for alpha
+  // observability) so unbound keys mirror into *Messages*. This fills the
+  // last-handler gap — the other three handlers already log unbound keys.
+  (editor as any).logMessage?.(`Unbound key: ${lookupKey}`, 'warn');
 }
 
 function isTruthyResult(result: any): boolean {
   if (!result || result._tag !== "Right") return false;
   return isTruthy(result.right);
+}
+
+/**
+ * The candidate forms a normalized lookup key can be stored under in
+ * keyMappings. key-bind stores the key verbatim from the .tlisp source, which
+ * uses angle brackets for special keys ("<Tab>"), while the handler normalizes
+ * the incoming byte to the bare name ("Tab"). Try both.
+ */
+function majorModeLookupKeys(lookupKey: string): string[] {
+  const forms = new Set<string>([lookupKey]);
+  if (lookupKey.startsWith("<") && lookupKey.endsWith(">")) {
+    forms.add(lookupKey.slice(1, -1)); // "<Tab>" → "Tab"
+  } else if (/^[A-Z][a-zA-Z]+$/.test(lookupKey) || lookupKey === "SPC") {
+    forms.add(`<${lookupKey}>`); // "Tab" → "<Tab>"
+  }
+  return [...forms];
+}
+
+/**
+ * Resolve a complete major-mode binding for `lookupKey`. Returns the mapping
+ * (precedence via resolveMapping) or undefined.
+ */
+function lookupMajorModeBinding(editor: Editor, lookupKey: string, majorMode: string) {
+  for (const form of majorModeLookupKeys(lookupKey)) {
+    const mappings = editor.getKeyMappings().get(form);
+    if (mappings && mappings.length > 0) {
+      const mapping = resolveMapping(mappings, "normal", majorMode);
+      if (mapping) return mapping;
+    }
+  }
+  return undefined;
+}
+
+/**
+ * True if `lookupKey` is a proper prefix of any multi-key major-mode binding
+ * (e.g. "]" is a prefix of "] h"). A key that is itself a complete binding is
+ * not a prefix — that case is handled by the binding lookup.
+ */
+function isMajorModePrefix(editor: Editor, lookupKey: string, majorMode: string): boolean {
+  if (lookupMajorModeBinding(editor, lookupKey, majorMode)) return false; // complete binding, not a prefix
+  const candidates = majorModeLookupKeys(lookupKey);
+  for (const [key, ms] of editor.getKeyMappings()) {
+    if (!candidates.some(c => key.startsWith(`${c} `))) continue;
+    if (ms.some(m => m.majorMode === majorMode && (m.mode === "normal" || !m.mode))) {
+      return true;
+    }
+  }
+  return false;
 }
 
 function feedDigit(editor: Editor, exec: (cmd: string) => any, key: string): void {
@@ -179,6 +258,8 @@ async function executeCommand(editor: Editor, tLispCmd: string): Promise<void> {
       throw new Error("EDITOR_QUIT_SIGNAL");
     }
     (editor as any).state.statusMessage = `Command error: ${error instanceof Error ? error.message : String(error)}`;
+    // SPEC-055: command errors log at 'error' so they mirror into *Messages*.
+    (editor as any).logMessage?.(`Command error: ${error instanceof Error ? error.message : String(error)}`, 'error');
   }
 }
 

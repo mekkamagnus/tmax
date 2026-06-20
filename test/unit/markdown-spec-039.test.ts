@@ -615,3 +615,26 @@ describe("SPEC-039 coverage: previously-uncovered behaviors", () => {
     expect(exitCode).toBe(0);
   });
 });
+
+describe("SPEC-039: cell-reference arithmetic in table formulas", () => {
+  test("markdown-table-eval-expr resolves cell references like @2$1+@2$2", async () => {
+    const editor = await setupMdEditor("");
+    // Table: row 2 = [3, 5, 0]. Formula @2$3=@2$1+@2$2 should compute 3+5=8.
+    // eval-expr takes (expr table) where table is a list of row-cells.
+    // Table rows (1-indexed): @1=header, @2=data row [3, 5, 0]
+    const result = executeTlisp(editor,
+      `(markdown-table-eval-expr "@2$1+@2$2" (list (list "a" "b" "c") (list "3" "5" "0")))`);
+    const val = expectTlispString(result);
+    expect(val).toBe("8");
+  });
+
+  test("markdown-table-eval-formula end-to-end with cell references", async () => {
+    const editor = await setupMdEditor(
+      "| A | B | Sum |\n|---|---|-----|\n| 3 | 5 | 0   |\n<!-- tblfm: @3$3=@3$1+@3$2 -->"
+    );
+    executeTlisp(editor, `(cursor-move 2 0)`);
+    executeTlisp(editor, `(markdown-table-eval-formula)`);
+    const row = expectTlispString(executeTlisp(editor, `(buffer-get-line 2)`));
+    expect(row).toContain("8");
+  });
+});

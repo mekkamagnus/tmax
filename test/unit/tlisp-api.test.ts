@@ -146,6 +146,35 @@ describe("T-Lisp API", () => {
     expect(state.statusMessage).toBe("bad");
   });
 
+  test("echo sets status WITHOUT logging (SPEC-055 two-tier split)", () => {
+    const state = createStateWithMessages();
+    const api = createEditorAPI(state);
+    const echo = expectDefined(api.get("echo"));
+    const result = expectRight(echo([createString("which-key hint")]));
+    expect(String(result.value)).toBe("which-key hint");
+    expect(state.statusMessage).toBe("which-key hint");
+    // Critical: echo must NOT append to the log (contrast with message).
+    const log = (state as any)._getMessageLog();
+    expect(log.getEntries()).toHaveLength(0);
+  });
+
+  test("message both echoes AND logs (contrast with echo)", () => {
+    const state = createStateWithMessages();
+    const api = createEditorAPI(state);
+    const message = expectDefined(api.get("message"));
+    expectRight(message([createString("logged msg")]));
+    expect(state.statusMessage).toBe("logged msg");
+    const log = (state as any)._getMessageLog();
+    expect(log.getEntries()).toHaveLength(1);
+  });
+
+  test("echo requires at least one argument", () => {
+    const state = createStateWithMessages();
+    const api = createEditorAPI(state);
+    const echo = expectDefined(api.get("echo"));
+    expect(Either.isLeft(echo([]))).toBe(true);
+  });
+
   test("clear-messages empties the log", () => {
     const state = createStateWithMessages();
     state.logMessage!("hello", "info");
