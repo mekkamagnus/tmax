@@ -255,6 +255,32 @@ Detailed coding rules live in `rules/` — each file declares its scope on the f
 | `rules/testing.md` | `test/**/*` — TDD workflow, bun test commands, test patterns |
 | `rules/ui-testing.md` | `test/ui/**/*` — tmux test harness, API reference, troubleshooting |
 
+## adw Pipeline (Agent-Driven Workflow)
+
+The adw pipeline automates the full development cycle: **plan → spec-review → build → patch-review**, with a build↔patch retry loop. Each stage is a TypeScript dispatcher that spawns an LLM CLI (`claude -p` or `codex exec`) as a subprocess. Stages share one workspace id (`agents/{adw-id}/`).
+
+**Architecture:** [ADR-0094](docs/adrs/ADR-0094-adw-pipeline-architecture.md).
+
+### Running a pipeline
+
+```bash
+# Full pipeline in a detached tmux window (always use the launcher for full runs):
+bun adws/adw-launch.ts "add a feature description"
+
+# On an existing spec (skips plan):
+bun adws/adw-launch.ts docs/specs/SPEC-056-browse-url.md
+
+# Resume an interrupted run:
+bun adws/adw-launch.ts --resume <workspace-id>
+```
+
+### Key concepts
+
+- **Workspace id**: one `adw_id` per spec. All stages write under `agents/{id}/`.
+- **tmux launcher**: `adw-launch.ts` runs in the `tmax` tmux session, surviving agent timeouts.
+- **Resume**: `--id <workspace>` auto-detects completed stages and resumes. See [ADR-0094](docs/adrs/ADR-0094-adw-pipeline-architecture.md).
+- **Checkpoint**: state persists after each stage, so resume is always correct.
+
 ## Common Tasks
 
 ### Adding New T-Lisp Functions

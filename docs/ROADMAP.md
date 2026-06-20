@@ -1432,6 +1432,51 @@ Until v1.0.0, minor versions may include breaking changes as we refine the API.
 
 ---
 
+## Development Infrastructure (2026)
+
+### adw Pipeline ✅ COMPLETE
+
+The adw (Agent-Driven Workflow) pipeline automates the full development cycle: **plan → spec-review → build → patch-review**, with a build↔patch retry loop. See [ADR-0094](adrs/ADR-0094-adw-pipeline-architecture.md).
+
+- ✅ Individual dispatchers: `adw-plan.ts`, `adw-spec-review.ts`, `adw-build.ts`, `adw-patch-review.ts`
+- ✅ 3-stage orchestrator (`adw-plan-reviewspec-build.ts`) with resume + spec-anchored discovery
+- ✅ 4-stage pipeline (`adw-plan-review-build-patch.ts`) with build↔patch retry loop (max 3)
+- ✅ tmux launcher (`adw-launch.ts`) — runs pipelines in detached windows
+- ✅ e2e test runner (`adw-run-e2e.ts`) with YAML playbooks
+
+### TRT (tmax Runtime Testing) ✅ COMPLETE
+
+T-Lisp-native test framework replacing the old TS test framework. See [ADR-0097](adrs/ADR-0097-trt-tlisp-native-test-framework.md).
+
+- ✅ 12 T-Lisp modules: assertions, async, bench, coverage, doctest, fixtures, mock, parametrize, snapshots, suites, cli, trt
+- ✅ Minimal TS bootstrap (`src/tlisp/trt/bootstrap.ts`)
+- ✅ Run via `bin/trt` or `bun run test:trt`
+
+### Unified Observability ✅ COMPLETE
+
+`*daemon*` event buffer + log-store for daemon lifecycle events. See [ADR-0096](adrs/ADR-0096-unified-observability-daemon-buffer.md).
+
+- ✅ `src/editor/log-store.ts` — ring buffer with persistence
+- ✅ `*daemon*` virtual buffer + `*Messages*` readonly
+- ✅ T-Lisp query commands (`src/tlisp/core/commands/observability.tlisp`)
+
+### Browse-URL ✅ COMPLETE
+
+URL detection + browser dispatch (`gX`). See [ADR-0095](adrs/ADR-0095-browse-url-detection-dispatch.md).
+
+- ✅ Bare/markdown/angle-bracket/GitHub-issue URL detection
+- ✅ Scheme allowlist + `$BROWSER` parsing + injection-safe `Bun.spawn`
+
+### FP Foundations ✅ COMPLETE
+
+T-Lisp functional programming primitives. See [ADR-0098](adrs/ADR-0098-tlisp-fp-foundations.md).
+
+- ✅ `src/utils/adt.ts` (discriminated unions), `writer.ts` (WriterT monad)
+- ✅ `src/tlisp/core/monads.tlisp` (maybe, either, pipe)
+- ✅ Evaluator/stdlib refactored around cleaner dispatch
+
+---
+
 ## References
 
 - **Main README**: `/README.md`

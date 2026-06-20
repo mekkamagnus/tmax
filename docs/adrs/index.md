@@ -4,6 +4,18 @@ Records of significant architectural decisions. Each ADR describes the context, 
 
 Ordered most-recent first (highest ADR number = most recent decision). Topic groupings preserved within each section.
 
+## Recent — adw Pipeline, Browse-URL, Tooling, FP Foundations (ADR 0094-0100)
+
+| File | Decision | Related |
+|------|----------|---------|
+| [ADR-0100-project-tooling-skills-bin-demos.md](ADR-0100-project-tooling-skills-bin-demos.md) | Project skills, bin launchers, demos, package.json scripts | [ADR-0094](ADR-0094-adw-pipeline-architecture.md), [ADR-0097](ADR-0097-trt-tlisp-native-test-framework.md) |
+| [ADR-0099-expanded-tlisp-api.md](ADR-0099-expanded-tlisp-api.md) | Expanded T-Lisp API — file I/O, string ops, spec authoring primitives | [ADR-0094](ADR-0094-adw-pipeline-architecture.md), [ADR-0095](ADR-0095-browse-url-detection-dispatch.md) |
+| [ADR-0098-tlisp-fp-foundations.md](ADR-0098-tlisp-fp-foundations.md) | T-Lisp FP foundations — adt.ts, writer.ts, monads.tlisp, evaluator/stdlib refactors | [ADR-0094](ADR-0094-adw-pipeline-architecture.md), [ADR-0097](ADR-0097-trt-tlisp-native-test-framework.md) |
+| [ADR-0097-trt-tlisp-native-test-framework.md](ADR-0097-trt-tlisp-native-test-framework.md) | TRT — T-Lisp-native test framework replacing TS test-framework | [ADR-0098](ADR-0098-tlisp-fp-foundations.md), [SPEC-049](../specs/SPEC-049-trt-runtime-testing.md) |
+| [ADR-0096-unified-observability-daemon-buffer.md](ADR-0096-unified-observability-daemon-buffer.md) | Unified observability — `*daemon*` event buffer, log-store, `*Messages*` readonly | [SPEC-055](../specs/SPEC-055-unified-observability.md), [ADR-0093](ADR-0093-daemon-event-buffer.md), [RFC-017](../rfcs/RFC-017-agent-activity-log.md) |
+| [ADR-0095-browse-url-detection-dispatch.md](ADR-0095-browse-url-detection-dispatch.md) | Browse-URL — URL detection + browser dispatch (`gX`) | [SPEC-056](../specs/SPEC-056-browse-url.md), [ADR-0099](ADR-0099-expanded-tlisp-api.md) |
+| [ADR-0094-adw-pipeline-architecture.md](ADR-0094-adw-pipeline-architecture.md) | adw pipeline architecture — 4-stage orchestrator with subprocess composition, shared workspace, resume | [ADR-0098](ADR-0098-tlisp-fp-foundations.md), [SPEC-057](../specs/SPEC-057-adw-patch-review.md), [SPEC-059](../specs/SPEC-059-adw-pipeline-loop.md), [SPEC-060](../specs/SPEC-060-adw-tmux-launcher.md), [RFC-017](../rfcs/RFC-017-agent-activity-log.md) |
+
 ## Recent — Daemon Event Buffer, Unified Dispatch, Operator+Find Chaining (ADR 0090-0093)
 
 | File | Decision | Related |

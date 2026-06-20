@@ -26,7 +26,9 @@
     "build": "bun run build:tmax && bun run build:tlisp",
     "build:tmax": "bun build --compile ./src/main.tsx --outfile dist/tmax",
     "build:tlisp": "bun build --compile ./src/tlisp/cli.ts --outfile dist/tlisp",
-    "test:trt": "bin/trt"
+    "test:trt": "bin/trt",
+    "adw": "bun adws/adw-launch.ts",
+    "adw:resume": "bun adws/adw-launch.ts --resume"
   },
   "dependencies": {
     "ink": "^4.4.1",

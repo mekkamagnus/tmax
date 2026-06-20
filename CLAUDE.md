@@ -254,6 +254,50 @@ Detailed coding rules live in `rules/` — each file declares its scope on the f
 | `rules/ui-testing.md` | `test/ui/**/*` — tmux test harness, API reference, troubleshooting |
 | `rules/daemon-client.md` | `bin/**/*`, `src/server/**/*` — JSON-RPC protocol, sync direction, socket behavior |
 
+## adw Pipeline (Agent-Driven Workflow)
+
+The adw pipeline automates the full development cycle: **plan → spec-review → build → patch-review**, with a build↔patch retry loop. Each stage is a TypeScript dispatcher that spawns an LLM CLI (`claude -p` or `codex exec`) as a subprocess. Stages share one workspace id (`agents/{adw-id}/`) where events, raw output, and state are collected.
+
+**Architecture:** [ADR-0094](docs/adrs/ADR-0094-adw-pipeline-architecture.md). Full details in [the adws/ README](adws/).
+
+### Running a pipeline
+
+```bash
+# Full 4-stage pipeline in a detached tmux window (survives terminal disconnects):
+bun adws/adw-launch.ts "add a feature description"
+
+# On an existing spec (skips plan):
+bun adws/adw-launch.ts docs/specs/SPEC-056-browse-url.md
+
+# Resume an interrupted run:
+bun adws/adw-launch.ts --resume <workspace-id>
+
+# Run a specific stage standalone:
+bun adws/adw-spec-review.ts docs/specs/SPEC-056-browse-url.md
+bun adws/adw-build.ts docs/specs/SPEC-056-browse-url.md
+```
+
+### Key concepts
+
+- **Workspace id**: one `adw_id` per spec. All stages write under `agents/{id}/`. Spec-anchored discovery (`findWorkspaceBySpecPath`) reuses existing workspaces automatically.
+- **tmux launcher**: `adw-launch.ts` runs pipelines in the `tmax` tmux session so they survive agent tool-call timeouts (~10 min ceiling). Always use the launcher for full pipeline runs.
+- **Resume**: `--id <workspace>` auto-detects which stages completed and resumes at the first incomplete one. `--from-stage <stage>` overrides.
+- **Checkpoint**: state is persisted after each stage completes, so resume is always correct.
+- **build↔patch loop**: if patch-review finds gaps, the pipeline re-runs build (up to 3 times) before releasing.
+
+### Pipeline files
+
+| File | Role |
+|------|------|
+| `adws/adw-launch.ts` | tmux launcher CLI (entry point for full runs) |
+| `adws/adw-plan-review-build-patch.ts` | 4-stage orchestrator (plan → review → build → patch-review) |
+| `adws/adw-plan-reviewspec-build.ts` | 3-stage orchestrator (no patch-review) |
+| `adws/adw-plan.ts` | Stage 1: description → spec |
+| `adws/adw-spec-review.ts` | Stage 2: spec → reviewed spec |
+| `adws/adw-build.ts` | Stage 3: spec → implementation |
+| `adws/adw-patch-review.ts` | Stage 4: implementation → audit verdict |
+| `adws/adws-modules/` | LLM interface modules (agent, reviewer, builder, patch-reviewer, workspace, tmux-launcher) |
+
 ## Common Tasks
 
 ### Adding New T-Lisp Functions

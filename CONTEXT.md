@@ -30,10 +30,22 @@ User configuration lives at `~/.config/tmax/init.tlisp` (not `.tmaxrc`). Loaded 
 
 TypeScript core handles terminal I/O, file system, rendering, and runs the T-Lisp interpreter. T-Lisp handles all editor logic: commands, modes, key bindings, extensibility. Zero external dependencies. Runs on Bun.
 
-## ADW (AI Development Workflow)
+## ADW (Agent-Driven Workflow)
 
-An **ADW** is a workflow meant to be run and fully executed on its own. It starts from a clean slate, runs to completion, and exits non-zero on any failure — so an AI agent (or CI) can loop it until green. No manual setup of tmux sessions, no pre-started daemon, no human-watched TUI.
+**adw** is the project's automated development pipeline: **plan → spec-review → build → patch-review**, with a build↔patch retry loop. Each stage is a TypeScript dispatcher (`adws/adw-*.ts`) that spawns an LLM CLI (`claude -p` or `codex exec`) as a subprocess. The pipeline runs in a detached tmux window (`adw-launch.ts`) so it survives agent timeouts.
 
-Concretely, an ADW test lives under `adws/` and is a TypeScript runner that: stops any stale daemon → spawns its own (`src/server/server.ts`, polled until the socket is responsive) → opens fixtures → drives keys/eval → asserts expected state via T-Lisp queries (`cursor-line`, `major-mode-get`, `which-key-active`, etc.) → tears down. Reference implementations: `adws/adw-right-bracket-h.test.ts` (hardcoded single-binding test), `adws/adw-run-keybinding-tests.ts` (YAML-driven, the ancestor of the generic runner).
+**Workspace** — one `adw_id` per spec. All stages write events under `agents/{id}/{agent}/events.jsonl`. The orchestrator owns the sole `agents/{id}/adw-state.json`. Spec-anchored discovery (`findWorkspaceBySpecPath`) reuses existing workspaces automatically when a user runs a dispatcher on a spec without `--id`.
 
-**ADW vs Demo** — a *demo* (`demos/demo-runner.py`) is visual: it assumes a live tmux session + TUI frame, narrates for a human, and asserts nothing. An *ADW* is headless, self-contained, and asserts. They share YAML idioms (e.g. `${VAR}` templating) but are different primitives.
+**Stages:**
+- **plan** (`adw-plan.ts`) — free-text description → spec (via `claude -p /feature|/bug|/chore`)
+- **spec-review** (`adw-spec-review.ts`) — spec → reviewed spec (via `codex exec`, review + upgrade)
+- **build** (`adw-build.ts`) — spec → implementation (via `claude -p /implement`)
+- **patch-review** (`adw-patch-review.ts`) — implementation → audit verdict (gather diff + gates + `claude -p --json-schema`)
+
+**Orchestrators** — `adw-plan-reviewspec-build.ts` (3-stage) and `adw-plan-review-build-patch.ts` (4-stage with retry loop). Both support `--id` resume (auto-detects completed stages), `--from-stage` override, and checkpoint persistence.
+
+**TRT (tmax Runtime Testing)** — the T-Lisp-native test framework (`src/tlisp/core/trt/`), replacing the old TS test framework. Run via `bin/trt` or `bun run test:trt`.
+
+**Observability** — `*daemon*` virtual buffer + log-store (`src/editor/log-store.ts`) for daemon lifecycle events. `*Messages*` is now read-only, backed by the log store.
+
+**ADW vs Demo** — a *demo* (`demos/*.yaml`) is visual: it assumes a live tmux session + TUI frame, narrates for a human, and asserts nothing. An *adw pipeline run* is headless, self-contained, and runs to completion. An *adw e2e test* (`adw-run-e2e.ts`) is a headless test runner that drives the editor via the daemon socket and asserts state.
