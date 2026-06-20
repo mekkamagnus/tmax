@@ -1,0 +1,416 @@
+(defmodule editor/commands/browse-url
+  (export
+    browse-url browse-url-at-point browse-detect-at-point
+    browse-resolve define-url-resolver
+    browse--collect-candidates browse--candidates-on-line
+    browse--bare-url-pattern browse--markdown-link-pattern
+    browse--angle-url-pattern browse--issue-pattern
+    browse--docs-reference-pattern browse--bare-url-trim-right
+    browse--rfc-spec-resolver browse--github-issue-resolver
+    browse--format-no-url-error browse--choose-candidate
+    browse--candidate-contains-point browse--candidate-priority
+    browse--bare-url-candidates browse--markdown-link-candidates
+    browse--angle-url-candidates browse--docs-reference-candidates
+    browse--github-issue-candidates
+    browse--resolvers-for-mode browse--try-resolvers)
+
+;; browse-url.tlisp — SPEC-056 URL detection + external browser dispatch.
+;;
+;; Detection is same-line only in the MVP. All regex candidate extraction uses
+;; the pure `string-match-spans-all` primitive so we never mutate the existing
+;; `string-match` / `match-string` state. Browser dispatch is delegated to the
+;; injection-safe `ts-open-external` primitive (argv array, no shell).
+
+;; ── Patterns ─────────────────────────────────────────────────────────
+
+(defun browse--bare-url-pattern ()
+  "Bare-URL regex used for https?:// detection."
+  "https?://[^\\\\s<>\"']+")
+
+(defun browse--markdown-link-pattern ()
+  "Markdown inline link: [text](url). Captures text and URL."
+  "\\\\[([^\\\\]]+)\\\\]\\\\(([^)\\\\s]+)\\\\)")
+
+(defun browse--angle-url-pattern ()
+  "Angle-bracket URL: <https?://...>. Captures the URL without brackets."
+  "<(https?://[^>\\\\s]+)>")
+
+(defun browse--issue-pattern ()
+  "GitHub issue reference: #123 at a token boundary. Captures the number."
+  "(^|[\\\\s([{,;])#([1-9][0-9]*)\\\\b")
+
+(defun browse--docs-reference-pattern ()
+  "RFC-NNN or SPEC-NNN reference. Captures kind and number."
+  "\\\\b(RFC|SPEC)-([0-9]+)")
+
+(defun browse--bare-url-trim-right (url)
+  "Trim trailing punctuation and unmatched closers from a bare URL match.
+Strip trailing .,;:!? and any unmatched ) ] }. The trimming is right-to-left
+and stops once the URL no longer ends in one of those characters."
+  (let ((s url)
+        (changed t))
+    (while changed
+      (set! changed nil)
+      (if (> (length s) 0)
+          (let ((last (substring s (- (length s) 1) (length s))))
+            (cond
+              ((or (string= last ".") (string= last ",") (string= last ";")
+                   (string= last ":") (string= last "!") (string= last "?"))
+               (progn
+                 (set! s (substring s 0 (- (length s) 1)))
+                 (set! changed t)))
+              ((or (string= last ")") (string= last "]") (string= last "}"))
+               ;; Only trim if there is no matching opener in the URL.
+               ;; Use string-contains-p (substring search) — string-match would
+               ;; treat (, [, { as invalid regexes.
+               (let ((opener (cond
+                                ((string= last ")") "(")
+                                ((string= last "]") "[")
+                                (t "{"))))
+                 (if (not (string-contains-p opener s))
+                     (progn
+                       (set! s (substring s 0 (- (length s) 1)))
+                       (set! changed t)))))))))
+    s))
+
+;; ── Candidate collection ─────────────────────────────────────────────
+;;
+;; Every candidate is a hashmap:
+;;   (hashmap "kind" "bare"|"markdown"|"angle"|"docs"|"issue"
+;;            "text" matched-text
+;;            "url"  resolved-or-raw-url
+;;            "start" start-column "end" end-column)
+;; The start/end pair is a half-open same-line range in absolute 0-based
+;; columns of the current line.
+
+(defun browse--bare-url-candidates (line-text)
+  "Collect bare-URL candidates from LINE-TEXT."
+  (let ((result (string-match-spans-all (browse--bare-url-pattern) line-text)))
+    (if (not (hashmap-get result "ok"))
+        '()
+        (let ((matches (hashmap-get result "matches"))
+              (out '()))
+          (dolist (m matches)
+            (let* ((raw (hashmap-get m "text"))
+                   (start (hashmap-get m "start"))
+                   (end (hashmap-get m "end"))
+                   (trimmed (browse--bare-url-trim-right raw))
+                   (trimmed-len (length trimmed)))
+              ;; Adjust end column when trailing chars were trimmed.
+              (set! out (cons (hashmap
+                                "kind" "bare"
+                                "text" trimmed
+                                "url" trimmed
+                                "start" start
+                                "end" (+ start trimmed-len)) out))))
+          (reverse out)))))
+
+(defun browse--markdown-link-candidates (line-text)
+  "Collect markdown link candidates. The candidate range is the full link,
+the returned URL is the captured target."
+  (let ((result (string-match-spans-all (browse--markdown-link-pattern) line-text)))
+    (if (not (hashmap-get result "ok"))
+        '()
+        (let ((matches (hashmap-get result "matches"))
+              (out '()))
+          (dolist (m matches)
+            (let ((start (hashmap-get m "start"))
+                  (end (hashmap-get m "end"))
+                  (groups (hashmap-get m "groups"))
+                  (url-text nil))
+              ;; group 1 = text, group 2 = URL
+              (if (>= (length groups) 2)
+                  (set! url-text (hashmap-get (nth 1 groups) "text")))
+              (if url-text
+                  (set! out (cons (hashmap
+                                    "kind" "markdown"
+                                    "text" (hashmap-get m "text")
+                                    "url" url-text
+                                    "start" start
+                                    "end" end) out)))))
+          (reverse out)))))
+
+(defun browse--angle-url-candidates (line-text)
+  "Collect angle-bracket URL candidates. Range excludes the angle brackets."
+  (let ((result (string-match-spans-all (browse--angle-url-pattern) line-text)))
+    (if (not (hashmap-get result "ok"))
+        '()
+        (let ((matches (hashmap-get result "matches"))
+              (out '()))
+          (dolist (m matches)
+            (let ((start (hashmap-get m "start"))
+                  (end (hashmap-get m "end"))
+                  (groups (hashmap-get m "groups"))
+                  (url-text nil))
+              (if (>= (length groups) 1)
+                  (set! url-text (hashmap-get (nth 0 groups) "text")))
+              (if url-text
+                  (set! out (cons (hashmap
+                                    "kind" "angle"
+                                    "text" url-text
+                                    "url" url-text
+                                    "start" (+ start 1)
+                                    "end" (- end 1)) out)))))
+          (reverse out)))))
+
+(defun browse--docs-reference-candidates (line-text)
+  "Collect RFC-NNN / SPEC-NNN candidates from LINE-TEXT."
+  (let ((result (string-match-spans-all (browse--docs-reference-pattern) line-text)))
+    (if (not (hashmap-get result "ok"))
+        '()
+        (let ((matches (hashmap-get result "matches"))
+              (out '()))
+          (dolist (m matches)
+            (let ((start (hashmap-get m "start"))
+                  (end (hashmap-get m "end"))
+                  (groups (hashmap-get m "groups"))
+                  (kind nil)
+                  (num nil))
+              (if (>= (length groups) 2)
+                  (progn
+                    (set! kind (hashmap-get (nth 0 groups) "text"))
+                    (set! num (hashmap-get (nth 1 groups) "text"))))
+              (if (and kind num)
+                  (let ((ref (concat kind "-" num)))
+                    (set! out (cons (hashmap
+                                      "kind" "docs"
+                                      "text" ref
+                                      "url" ref
+                                      "start" start
+                                      "end" end) out))))))
+          (reverse out)))))
+
+(defun browse--github-issue-candidates (line-text)
+  "Collect #NNN issue references from LINE-TEXT. The candidate range covers
+the #NNN portion (excluding the leading boundary char)."
+  (let ((result (string-match-spans-all (browse--issue-pattern) line-text)))
+    (if (not (hashmap-get result "ok"))
+        '()
+        (let ((matches (hashmap-get result "matches"))
+              (out '()))
+          (dolist (m matches)
+            (let* ((start (hashmap-get m "start"))
+                   (end (hashmap-get m "end"))
+                   (groups (hashmap-get m "groups"))
+                   (boundary-char (hashmap-get (nth 0 groups) "text"))
+                   ;; boundary-char may be the leading whitespace/punctuation char.
+                   (offset (if (and boundary-char (> (length boundary-char) 0))
+                               (length boundary-char)
+                               0))
+                   (num nil))
+              (if (>= (length groups) 2)
+                  (set! num (hashmap-get (nth 1 groups) "text")))
+              (if num
+                  (let ((issue-start (+ start offset)))
+                    (set! out (cons (hashmap
+                                      "kind" "issue"
+                                      "text" (concat "#" num)
+                                      "url" (concat "#" num)
+                                      "start" issue-start
+                                      "end" end) out))))))
+          (reverse out)))))
+
+(defun browse--collect-candidates (line-text)
+  "Return all URL candidates on LINE-TEXT in priority order."
+  (append (browse--markdown-link-candidates line-text)
+          (browse--angle-url-candidates line-text)
+          (browse--bare-url-candidates line-text)
+          (browse--docs-reference-candidates line-text)
+          (browse--github-issue-candidates line-text)))
+
+(defun browse--candidates-on-line (line)
+  "Lookup LINE in the current buffer and return its candidates."
+  (let ((text (buffer-get-line line)))
+    (if (or (not text) (= (length text) 0))
+        '()
+        (browse--collect-candidates text))))
+
+(defun browse--candidate-contains-point (cand col)
+  "Non-nil when half-open [start, end) contains COL."
+  (let ((start (hashmap-get cand "start"))
+        (end (hashmap-get cand "end")))
+    (and (>= col start) (< col end))))
+
+(defun browse--candidate-priority (cand)
+  "Lower priority number wins. markdown < angle < bare < docs < issue."
+  (let ((kind (hashmap-get cand "kind")))
+    (cond
+      ((string= kind "markdown") 0)
+      ((string= kind "angle") 1)
+      ((string= kind "bare") 2)
+      ((string= kind "docs") 3)
+      ((string= kind "issue") 4)
+      (t 99))))
+
+(defun browse--choose-candidate (candidates col)
+  "Pick the best candidate containing column COL.
+Priority order: kind, then smallest range, then earliest start."
+  (let ((best nil)
+        (best-priority 99)
+        (best-size 0)
+        (best-start 0))
+    (dolist (c candidates)
+      (if (browse--candidate-contains-point c col)
+          (let ((p (browse--candidate-priority c))
+                (size (- (hashmap-get c "end") (hashmap-get c "start")))
+                (start (hashmap-get c "start")))
+            (if (or (not best)
+                    (< p best-priority)
+                    (and (= p best-priority)
+                         (or (< size best-size)
+                             (and (= size best-size) (< start best-start)))))
+                (progn
+                  (set! best c)
+                  (set! best-priority p)
+                  (set! best-size size)
+                  (set! best-start start))))))
+    best))
+
+;; ── Contextual resolvers ─────────────────────────────────────────────
+;;
+;; Resolvers are mode-registered functions (text buffer range) -> url | result.
+;; They expand contextual references like RFC-NNN or #NNN into actual URLs.
+
+(defvar *browse-url-resolvers* (hashmap)
+  "Hashmap of mode-name -> list of resolver functions.")
+
+(defun define-url-resolver (mode fn)
+  "Register resolver FN for MODE. FN is called as (fn text buffer range)
+and should return a URL string, a result hashmap, or nil when it does not
+apply to TEXT. Resolvers registered for \"fundamental\" are always consulted
+in addition to any resolvers registered for the current major mode."
+  (let ((existing (hashmap-get *browse-url-resolvers* mode)))
+    (if existing
+        (set! *browse-url-resolvers*
+              (hashmap-set *browse-url-resolvers* mode (cons fn existing)))
+        (set! *browse-url-resolvers*
+              (hashmap-set *browse-url-resolvers* mode (list fn)))))
+  fn)
+
+(defun browse--rfc-spec-resolver (text buffer range)
+  "Resolve an RFC-NNN / SPEC-NNN reference to a file:// URL under docs/.
+Returns nil when TEXT is not an RFC-NNN / SPEC-NNN reference, so that
+browse-resolve iteration can skip this resolver cleanly."
+  (if (not (string-match "^\\(RFC\\|SPEC\\)-[0-9]+" text))
+      nil
+      (let* ((kind (if (string-match "^RFC" text) "rfc" "spec"))
+             (result (browse-doc-reference text kind)))
+        (if (hashmap-get result "ok")
+            (hashmap-get result "url")
+            (hashmap "ok" nil
+                     "error" "docs-reference-not-found"
+                     "details" (hashmap "reference" text))))))
+
+(defun browse--github-issue-resolver (text buffer range)
+  "Resolve #NNN to a GitHub issue URL when a GitHub remote is available.
+Returns nil when TEXT is not a #NNN reference."
+  (if (not (string-match "^#[0-9]+" text))
+      nil
+      (let ((remote (browse-git-github-remote)))
+        (if (not (hashmap-get remote "ok"))
+            (hashmap "ok" nil
+                     "error" "github-remote-not-found"
+                     "details" (hashmap "reference" text))
+            (let* ((num (substring text 1))
+                   (owner (hashmap-get remote "owner"))
+                   (repo (hashmap-get remote "repo")))
+              (format "https://github.com/%s/%s/issues/%s" owner repo num))))))
+
+;; Register built-in resolvers under the "fundamental" slot so they are
+;; consulted for every buffer. Mode-specific resolvers registered via
+;; define-url-resolver layer on top of these.
+(define-url-resolver "fundamental" 'browse--rfc-spec-resolver)
+(define-url-resolver "fundamental" 'browse--github-issue-resolver)
+
+(defun browse--resolvers-for-mode (mode)
+  "Return the ordered list of resolvers to try for MODE.
+Mode-specific resolvers run first, then the always-on fundamental resolvers."
+  (let ((specific (hashmap-get *browse-url-resolvers* mode))
+        (fundamental (hashmap-get *browse-url-resolvers* "fundamental")))
+    (append (or specific '()) (or fundamental '()))))
+
+(defun browse--try-resolvers (resolvers text buffer range)
+  "Call each resolver in RESOLVERS with (text buffer range) in order.
+Return the first non-nil result; return nil if every resolver declined."
+  (let ((result nil)
+        (i 0)
+        (n (length resolvers)))
+    (while (and (< i n) (not result))
+      (let ((r (funcall (nth i resolvers) text buffer range)))
+        (if r (set! result r))
+        (set! i (+ i 1))))
+    result))
+
+(defun browse-resolve (text)
+  "Expand a contextual reference TEXT into a URL or structured result.
+Tries resolvers registered for the current major mode, then the always-on
+fundamental-mode resolvers (which include the built-in RFC/SPEC and GitHub
+issue resolvers). Returns a URL string on success, a hashmap with
+error/details when a resolver matched but failed, or nil when no resolver
+applied to TEXT."
+  (let* ((mode (major-mode-get))
+         (resolvers (browse--resolvers-for-mode mode))
+         (buffer (or (buffer-current) "*scratch*")))
+    (browse--try-resolvers resolvers text buffer nil)))
+
+;; ── Public commands ──────────────────────────────────────────────────
+
+(defun browse--format-no-url-error (line col)
+  "Standard no-url-at-point error hashmap."
+  (hashmap "ok" nil
+           "error" "no-url-at-point"
+           "details" (hashmap
+                       "buffer" (or (buffer-current) "*scratch*")
+                       "cursor" (list line col))))
+
+(defun browse-detect-at-point ()
+  "Detect the URL at the cursor without opening it.
+Returns a hashmap:
+  (hashmap \"ok\" t \"kind\" k \"text\" t \"url\" u \"range\" (list line start line end))
+  (hashmap \"ok\" nil \"error\" \"no-url-at-point\" \"details\" ...)"
+  (let* ((line (cursor-line))
+         (col (cursor-column))
+         (candidates (browse--candidates-on-line line))
+         (winner (browse--choose-candidate candidates col)))
+    (if (not winner)
+        (browse--format-no-url-error line col)
+        (let* ((kind (hashmap-get winner "kind"))
+               (text (hashmap-get winner "text"))
+               (raw-url (hashmap-get winner "url"))
+               (url raw-url))
+          ;; Expand contextual references.
+          (if (or (string= kind "docs") (string= kind "issue"))
+              (let ((resolved (browse-resolve text)))
+                (if (stringp resolved) (set! url resolved))))
+          (hashmap "ok" t
+                   "kind" kind
+                   "text" text
+                   "url" url
+                   "range" (list line (hashmap-get winner "start")
+                                 line (hashmap-get winner "end")))))))
+
+(defun browse-url (url)
+  "Open URL in the system browser using injection-safe argv dispatch.
+Returns the structured ts-open-external hashmap."
+  (let ((result (ts-open-external url)))
+    (if (hashmap-get result "ok")
+        (progn
+          (message "Browse: %s" url)
+          result)
+        (progn
+          (let ((err (hashmap-get result "error")))
+            (message "Browse failed (%s): %s" err url))
+          result))))
+
+(defun browse-url-at-point ()
+  "Detect and open the URL at point via browse-url."
+  (let ((detection (browse-detect-at-point)))
+    (if (not (hashmap-get detection "ok"))
+        (progn
+          (message "No URL at point")
+          detection)
+        (let ((url (hashmap-get detection "url")))
+          (browse-url url)))))
+
+(provide "browse-url-commands")
+)

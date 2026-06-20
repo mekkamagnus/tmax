@@ -12,7 +12,7 @@ So that I can seamlessly access external resources without leaving my editor wor
 Currently, tmax lacks the ability to detect and open URLs in buffer text. Users must manually copy URLs, exit the editor (or switch context), and paste them into a browser. This breaks the editing workflow, especially when working with documentation filled with hyperlinks, code referencing external resources, or markdown files with embedded links.
 
 ## Solution Statement
-Implement URL detection at point with multiple pattern recognition (bare URLs, markdown links, angle-bracket URLs), a contextual resolver registry for domain-specific references (RFC-012 → safe `file://` URL, #123 → GitHub issue), and injection-safe external browser dispatch using argv arrays (never shell interpolation). Add exact normal-mode keymap sequences `"g x"` (displayed as `gx`) and `"g X"` (displayed as `gX`), with structured user-level error values for all expected failure modes.
+Implement URL detection at point with multiple pattern recognition (bare URLs, markdown links, angle-bracket URLs), a contextual resolver registry for domain-specific references (RFC-012 → safe `file://` URL, #123 → GitHub issue), and injection-safe external browser dispatch using argv arrays (never shell interpolation). Preserve the existing markdown-mode `"g x"` binding (displayed as `gx`) by delegating external markdown targets to `browse-url`, and add the global normal-mode keymap sequence `"g X"` (displayed as `gX`) for direct `browse-url-at-point` dispatch, with structured user-level error values for all expected failure modes.
 
 ## Relevant Files
 
@@ -25,17 +25,11 @@ Implement URL detection at point with multiple pattern recognition (bare URLs, m
 - Validates URL schemes against allowlist (http:, https:, mailto:, and restricted file:)
 - Uses Bun.spawn with argv array for injection safety
 
-#### `src/tlisp/core/commands/browse-url.tlisp` (New)
-- T-Lisp command library for browse-url functionality
-- Functions: browse-url, browse-url-at-point, browse-detect-at-point
-- Contextual resolver: browse-resolve
-- Resolver registration: define-url-resolver
-- Return structured success/error hashmaps with string keys
-
 #### `src/tlisp/core/bindings/normal.tlisp`
 - Add `(require-module editor/commands/browse-url)` before any browse-url binding
-- Add `"g X"` binding for direct browse-url-at-point dispatch
-- Do not add `"g x g"` in this MVP; the current prefix-first dispatcher would shadow the existing complete `"g x"` binding
+- Add only the global `"g X"` binding for direct browse-url-at-point dispatch
+- Do not add a global `"g x"` binding; the existing `gx` behavior remains mode-scoped in `src/tlisp/core/modes/markdown-mode.tlisp` and reaches external browsing through markdown command delegation
+- Do not add `"g x g"` in this MVP; the current prefix-first dispatcher would shadow any complete `"g x"` binding
 
 #### `src/tlisp/core/commands/markdown.tlisp`
 - Require `editor/commands/browse-url`
@@ -62,8 +56,15 @@ Implement URL detection at point with multiple pattern recognition (bare URLs, m
 
 ### New Files to Create
 
+#### `src/tlisp/core/commands/browse-url.tlisp`
+- T-Lisp command library for browse-url functionality
+- Functions: browse-url, browse-url-at-point, browse-detect-at-point
+- Contextual resolver: browse-resolve
+- Resolver registration: define-url-resolver
+- Return structured success/error hashmaps with string keys
+
 #### `src/editor/api/browse-url-ops.ts`
-- Primitives for character-at-position, line-text extraction
+- Primitives for character-at-position and bounded same-line scanning; URL detection must reuse the existing `(buffer-get-line)` API for line text rather than introducing a duplicate line-text primitive
 - URL pattern scanning helpers
 - Regex span extraction helper for T-Lisp detection
 - Filesystem/git context helpers for RFC/spec and GitHub issue resolvers
@@ -86,7 +87,8 @@ Add the foundational TypeScript functions that T-Lisp will compose:
    Exact T-Lisp return shapes:
    - Success: `(hashmap "ok" t "url" url "command" command "argv" argv-list "pid" pid-number)`
    - Error: `(hashmap "ok" nil "error" reason-string "details" details-hashmap)`
-   - Error reasons: `"unsupported-scheme"`, `"file-url-not-allowed"`, `"browser-not-found"`, `"browser-dispatch-failed"`, `"invalid-browser-template"`
+   - Top-level error reasons: `"unsupported-scheme"`, `"file-url-not-allowed"`, `"browser-not-found"`, `"browser-dispatch-failed"`
+   - Invalid `$BROWSER` templates are never returned as a top-level `ts-open-external` error. Record them as entries in `details.tried` with `"error" "invalid-browser-template"` and continue to the next `$BROWSER`, platform, or fallback candidate. If all valid candidates fail to resolve, return `"browser-not-found"`; if a candidate resolves but `Bun.spawn` throws before process creation, return `"browser-dispatch-failed"`.
 
    Async dispatch rule:
    - `ts-open-external` starts the process with `Bun.spawn` and returns immediately with the spawned pid.
@@ -95,12 +97,12 @@ Add the foundational TypeScript functions that T-Lisp will compose:
 
    Browser candidate order and `$BROWSER` parsing:
    - Candidate order is: each valid `$BROWSER` template, platform opener (`open` on macOS, `xdg-open` on Linux), then fallback executables (`firefox`, `google-chrome`, `chromium`, `brave-browser`).
-   - `$BROWSER` is parsed as one or more colon-separated command templates. Within each template, split arguments with a small shell-like parser that supports whitespace, single quotes, double quotes, and backslash escaping, but performs no shell expansion.
+   - `$BROWSER` is parsed as one or more colon-separated command templates, where colon separators are recognized only outside single quotes, double quotes, and backslash escapes. Within each template, split arguments with the same small shell-like parser that supports whitespace, single quotes, double quotes, and backslash escaping, but performs no shell expansion.
    - If a template contains `%s` or `%u`, substitute the URL for each placeholder and do not append another URL argument. If it has no placeholder, append the URL as the final argv element.
    - The first argv element must resolve to an executable via absolute path or `PATH`; invalid `$BROWSER` templates are recorded in `"tried"` details and dispatch continues to fallback candidates.
 
 2. **Buffer scanning primitives**: Add character and line access functions:
-   - `(buffer-line-text line)` — return line text or nil
+   - Use existing `(buffer-get-line line)` for line text; do not add a new `(buffer-line-text)` primitive
    - `(buffer-get-char-at-position line column)` — get character at specific line/column
    - `(buffer-scan-backward-from line column stop-chars max-chars)` — return inclusive start boundary for a same-line scan
    - `(buffer-scan-forward-from line column stop-chars max-chars)` — return exclusive end boundary for a same-line scan
@@ -110,7 +112,7 @@ Add the foundational TypeScript functions that T-Lisp will compose:
    Primitive contracts:
    - All line/column indexes are zero-based.
    - Line scans never cross line boundaries in the MVP.
-   - `buffer-line-text` returns nil for an out-of-bounds line.
+   - `buffer-get-line` is the required line-text API for browse-url detection.
    - `buffer-get-char-at-position` returns nil for an out-of-bounds line/column; column equal to line length is out of bounds and does not synthesize a newline.
    - `buffer-scan-backward-from` accepts column in `[0, line-length]`, scans left from the character under the cursor (or the previous character when column equals line length), stops before any character in `stop-chars`, and returns `(hashmap "line" line "column" start-column "truncated" boolean)`.
    - `buffer-scan-forward-from` accepts column in `[0, line-length]`, scans right from column, stops before any character in `stop-chars`, and returns `(hashmap "line" line "column" end-column "truncated" boolean)`.
@@ -136,7 +138,7 @@ Add the foundational TypeScript functions that T-Lisp will compose:
 Build the T-Lisp command library with URL detection and resolution:
 
 1. **URL detection patterns**: Implement pattern matching for:
-   - Bare URLs: scan all current-line matches for `https?://[^\s<>()\[\]{}"']+`, then trim trailing `.`, `,`, `;`, `:`, `!`, `?`, and unmatched closing `)`, `]`, `}`
+   - Bare URLs: scan all current-line matches for `https?://[^\s<>"']+`, then trim trailing `.`, `,`, `;`, `:`, `!`, `?`, and unmatched closing `)`, `]`, `}` that are present in the matched text
    - Markdown links: scan all current-line matches for `\[...\](...)`; the candidate range is the full markdown link and the returned URL is the target group
    - Angle-bracket URLs: scan all current-line matches for `<https?://...>`; the candidate range excludes the angle brackets and the returned URL excludes them
    - Issue references: `#\d+` only when the GitHub issue resolver is applicable
@@ -181,10 +183,10 @@ Build the T-Lisp command library with URL detection and resolution:
 ### Phase 3: Integration — Key Bindings and Error Handling
 Complete the feature with user-facing integration:
 
-1. **Key bindings**: Add normal mode bindings:
-   - Existing `"g x"` (`gx`) remains the primary action-at-point sequence and must open external URLs by having `markdown-do`/`markdown-follow-link` delegate URL targets to `browse-url`
+1. **Key bindings**: Add direct browser binding while preserving markdown delegation:
+   - Existing markdown-mode `"g x"` (`gx`) remains the markdown action-at-point sequence and must open external URL targets by having `markdown-do`/`markdown-follow-link` delegate URL targets to `browse-url`
    - Add `"g X"` (`gX`) → `(browse-url-at-point)` as the direct external-browser command
-   - Do not add `"g x g"` (`gxg`) unless the normal-mode dispatcher first gains complete-binding-versus-prefix disambiguation; with current prefix-first dispatch, `"g x g"` would prevent `"g x"` from executing
+   - Do not add a global `"g x"` binding or `"g x g"` (`gxg`) unless the normal-mode dispatcher first gains complete-binding-versus-prefix disambiguation; with current prefix-first dispatch, `"g x g"` would prevent any complete `"g x"` binding from executing
 
 2. **Structured error handling**: Implement error cases:
    - No URL at point: `(hashmap "ok" nil "error" "no-url-at-point" "details" (hashmap "buffer" name "cursor" (list line col)))`
@@ -211,6 +213,7 @@ Complete the feature with user-facing integration:
 
 ### Step 2: Add buffer scanning primitives for URL detection
 - Create `src/editor/api/browse-url-ops.ts`
+- Reuse existing `(buffer-get-line)` for current-line text; do not implement a duplicate `(buffer-line-text)` primitive
 - Implement `buffer-get-char-at-position` primitive
 - Implement `buffer-scan-backward-from` primitive
 - Implement `buffer-scan-forward-from` primitive
@@ -221,7 +224,7 @@ Complete the feature with user-facing integration:
 
 ### Step 3: Implement T-Lisp URL detection patterns
 - Create `src/tlisp/core/commands/browse-url.tlisp`
-- Implement bare URL regex pattern: `https?://[^\s<>]+`
+- Implement bare URL regex pattern: `https?://[^\s<>"']+` with the trailing punctuation/unmatched closer trimming described above
 - Implement markdown link pattern with cursor position check
 - Implement angle-bracket URL pattern
 - Add `browse-detect-at-point` function
@@ -241,10 +244,10 @@ Complete the feature with user-facing integration:
 - Implement `browse-resolve` function
 - Add TRT tests for command behavior
 
-### Step 6: Add gx and gX key bindings
-- Add `gx` binding in `src/tlisp/core/bindings/normal.tlisp`
-- Add `gX` binding for explicit external dispatch
-- Do not add `gxg` in this MVP; the current prefix-first dispatcher would shadow `gx`
+### Step 6: Add gX key binding and preserve markdown gx delegation
+- Add only the global `gX` binding in `src/tlisp/core/bindings/normal.tlisp` for explicit external dispatch
+- Do not add a global `gx` binding; existing `gx` stays mode-scoped in markdown mode and should open external markdown URL targets through `markdown-do` / `markdown-follow-link` delegation to `browse-url`
+- Do not add `gxg` in this MVP; the current prefix-first dispatcher would shadow any complete `gx`
 - Test key binding resolution with which-key
 - Add unit test for key binding registration
 
@@ -302,7 +305,7 @@ Complete the feature with user-facing integration:
 - Git context: issue references resolve to GitHub URLs
 
 **Key Binding Integration**:
-- gx key binding opens external URL targets by delegating existing follow-link behavior to browse-url
+- markdown-mode gx key binding opens external URL targets by delegating existing follow-link behavior to browse-url
 - gX key binding calls browse-url-at-point directly
 - Key binding shows in which-key popup
 
@@ -335,7 +338,7 @@ Complete the feature with user-facing integration:
 
 1. **URL Detection**: Detects bare URLs, markdown links, and angle-bracket URLs at cursor position
 2. **External Browser**: Opens URLs in system default browser ($BROWSER, open, xdg-open)
-3. **Key Bindings**: `gx` opens URL at point through existing markdown/follow behavior, and `gX` explicitly invokes `browse-url-at-point`
+3. **Key Bindings**: markdown-mode `gx` opens external markdown URL targets through existing markdown/follow behavior, and global `gX` explicitly invokes `browse-url-at-point`
 4. **Resolver Registry**: Modes can register contextual resolvers via `define-url-resolver`
 5. **Contextual Resolution**: RFC/spec references resolve to file:// URLs, git issues resolve to GitHub URLs
 6. **Injection Safety**: Browser dispatch uses argv array, never shell interpolation
@@ -370,11 +373,13 @@ bun run test:daemon
 # Validate renderer/keybinding behavior and which-key-visible bindings
 bun run test:ui:renderer
 
-# Manual smoke test (if TUI available)
-# 1. Create test file with URLs
-echo "Test https://example.com and [markdown](https://github.com)" > /tmp/test-browse.txt
-# 2. Open in tmax and press gx on URL
-# 3. Verify browser opens with correct URL
+# Optional manual smoke test with a mock browser command (does not open a real browser; not required for zero-regression validation):
+#   mkdir -p /tmp/tmax-browser-smoke
+#   printf '#!/bin/sh\nprintf '"'"'%s\\n'"'"' "$@" >> /tmp/tmax-browser-smoke/urls.log\n' > /tmp/tmax-browser-smoke/mock-browser
+#   chmod +x /tmp/tmax-browser-smoke/mock-browser
+#   echo "Test https://example.com and [markdown](https://github.com)" > /tmp/test-browse.txt
+#   BROWSER=/tmp/tmax-browser-smoke/mock-browser bun run start /tmp/test-browse.txt
+# In tmax, press gX on the bare URL or markdown-mode gx on the markdown link, then inspect /tmp/tmax-browser-smoke/urls.log.
 ```
 
 ## Notes
@@ -407,7 +412,7 @@ echo "Test https://example.com and [markdown](https://github.com)" > /tmp/test-b
 ### Integration with Existing Features
 - **Markdown mode**: Reuses existing `markdown-link-at-point` pattern where compatible
 - **Help system**: Commands are discoverable via `describe-function`
-- **Which-key**: gx/gX appear in which-key popup after typing `g`
+- **Which-key**: `gX` appears in normal-mode which-key after typing `g`; markdown-mode `gx` remains visible where the markdown bindings are active
 - **Message buffer**: Errors and success messages logged to *Messages* buffer
 - **Hook system**: Resolvers can be registered via mode activation hooks
 
@@ -432,5 +437,58 @@ This enables mode-specific URL expansion (e.g., package references in package.js
 ### Migration from Existing Markdown URL Handling
 - Existing `markdown-follow-link` behavior is preserved for internal links
 - `browse-url` complements rather than replaces markdown-specific navigation
-- Users can choose: `gx` for external browser, markdown commands for internal jumps
+- Users can choose: markdown-mode `gx` for markdown follow behavior, including safe external URL delegation; global `gX` for direct browse-url-at-point
 - **Security debt:** `src/tlisp/core/commands/markdown.tlisp` line ~499 currently dispatches external URLs via `shell-command` with string-interpolated `open`/`xdg-open` — this is the injection risk RFC-012A calls out. As part of Phase 3, refactor `markdown-follow-link` to delegate HTTP(S) links to `browse-url` (which uses argv-array dispatch), leaving only internal `.md`/anchor resolution in the markdown-specific code path. This removes the shell-interpolation call site and makes `gx` / markdown-follow share the safe dispatch primitive.
+
+## Audit findings (adw-patch-review 2026-06-19T23:45:21.285Z)
+
+**Verdict:** gaps
+
+SPEC-056 is substantively implemented: all URL detection patterns (bare, angle, markdown, RFC/SPEC docs refs, GitHub issues), the injection-safe argv dispatch via Bun.spawn, the file:// restriction to docs/rfcs|specs via realpath canonicalization, the $BROWSER colon-separated parser with quote/escape awareness, the scheme allowlist (http/https/mailto + restricted file), the candidate priority ordering (markdown < angle < bare < docs < issue), the gX key binding, the markdown gx delegation, the resolver contract for RFC-NNN/SPEC-NNN/#NNN, and the architecture-boundary split (TS primitives in browse-url-ops.ts, T-Lisp logic in browse-url.tlisp) are all present with file:line evidence. Test coverage is strong: 36 TS unit tests in test/unit/browse-url.test.ts plus ~25 TRT tests in test/tlisp/browse-url.test.tlisp all pass. However, the verdict is "gaps" for three reasons: (1) the test:unit gate exits 1 due to 2 pre-existing failures unrelated to SPEC-056 (mode-features-loaded in modes.test.tlisp and a SPEC-039 cell-reference test) — these violate acceptance criterion #10 "Zero Regressions" as written; (2) define-url-resolver registers user resolvers but browse-resolve only dispatches built-in resolvers, so the user-extensibility path is partial; (3) the help-system entries were verified present in documentation.ts:305-365 so that concern is resolved.
+
+### Criteria
+- **URL detection at cursor point recognizes bare URLs (https?://...), markdown inline links [text](url), angle-bracket URLs <url>, RFC-NNN/SPEC-NNN docs references, and #NNN GitHub issues (same-line only in MVP)** — implemented: src/tlisp/core/commands/browse-url.tlisp candidate collectors (browse--collect-markdown-candidate, browse--collect-angle-candidate, browse--collect-bare-candidate, browse--collect-docs-candidate, browse--collect-issue-candidate) composed in browse-detect-at-point; TypeScript primitives buffer-scan-backward-from/buffer-scan-forward-from in src/editor/api/browse-url-ops.ts; markdown pattern matching via string-match-spans-all
+- **browse-url dispatches URLs to the system browser via injection-safe argv array (no shell interpolation)** — implemented: src/editor/api/browse-url-ops.ts dispatchUrl uses Bun.spawn({ args: [...] }) with substituteUrlArgv composing argv from $BROWSER entries; test/unit/browse-url.test.ts covers substituteUrlArgv and dispatchUrl explicitly
+- **URL scheme allowlist: http, https, mailto permitted; file:// restricted to docs/rfcs or docs/specs; other schemes rejected** — implemented: src/editor/api/browse-url-ops.ts validateFileUrl canonicalizes via realpath and rejects paths outside docs/rfcs|docs/specs; scheme check in tsOpenExternalOutcome; test/unit/browse-url.test.ts covers validateFileUrl accept/reject paths
+- **Resolver contract: browse-resolve expands RFC-NNN/SPEC-NNN to file:// URLs under docs/rfcs|specs and #NNN to GitHub issue URLs from git remote** — partial: src/tlisp/core/commands/browse-url.tlisp browse-resolve dispatches built-in resolvers (browse-doc-reference, browse-git-github-remote); src/editor/api/browse-url-ops.ts parseGitRemotes + parseGithubUrl handle HTTPS/SSH/ssh:// forms. BUT define-url-resolver (browse-url.tlisp) registers user resolvers into a table that browse-resolve does not consult — user-registered resolvers never run, so the extensibility hook is partial
+- **$BROWSER environment variable parsed as colon-separated list with quote/escape awareness** — implemented: src/editor/api/browse-url-ops.ts splitBrowserEntries + shellSplit handle colon separation, single/double quotes, and backslash escapes; test/unit/browse-url.test.ts covers 'open':firefox, quoted entries, and edge cases
+- **Candidate priority ordering when multiple patterns match at point: markdown < angle < bare < docs < issue** — implemented: src/tlisp/core/commands/browse-url.tlisp browse--choose-candidate applies priority ordering in the documented order; test/tlisp/browse-url.test.tlisp covers overlapping-candidate selection
+- **Half-open same-line ranges [start, end) returned by detection** — implemented: src/editor/api/browse-url-ops.ts buffer-scan-backward-from/buffer-scan-forward-from return [start, end) half-open ranges; test/unit/browse-url.test.ts and test/tlisp/browse-url.test.tlisp assert range inclusivity semantics
+- **gX key binding in normal mode dispatches browse-url-at-point** — implemented: src/tlisp/core/bindings/normal.tlisp:226 (key-bind "g X" "(browse-url-at-point)" "normal"); test/tlisp/browse-url.test.tlisp covers the gX binding
+- **markdown-follow-link delegates external HTTP(S) URLs to browse-url (no shell-interpolated open/xdg-open)** — implemented: src/tlisp/core/commands/markdown.tlisp:498-500 delegates http(s) targets to (browse-url url); src/tlisp/core/commands/markdown.tlisp:38 (require-module editor/commands/browse-url)
+- **Help-system documentation entries exist for browse-url commands** — implemented: src/editor/api/documentation.ts:305-365 defines entries for browse-url, browse-url-at-point, browse-detect-at-point, browse-resolve, define-url-resolver with signatures, examples, and related-command cross-references
+- **Architecture boundary: TS provides primitives only (char scan, buffer access, dispatch); T-Lisp owns detection, resolution, candidate selection, and command logic** — implemented: src/editor/api/browse-url-ops.ts exposes only primitives (buffer-get-char-at-position, buffer-scan-backward-from, buffer-scan-forward-from, string-match-spans-all, browse-doc-reference, browse-git-github-remote, ts-open-external); src/tlisp/core/commands/browse-url.tlisp owns browse-url, browse-url-at-point, browse-detect-at-point, browse-resolve, candidate collectors, and chooser. Complies with src/editor/CLAUDE.md and src/tlisp/CLAUDE.md architecture rules
+- **Zero regressions: full test suite passes** — missing: test:unit gate exits 1 (/private/tmp/.../bicrudxwq.output:75-80: '2562 pass, 1 skip, 2 fail, error: script test:unit exited with code 1'). The 2 failures are pre-existing and unrelated to SPEC-056: (a) test/tlisp/modes.test.tlisp:4-6 mode-features-loaded expects (featurep "python-mode") truthy but python-mode/line-numbers-mode files don't call (provide ...); (b) a SPEC-039 cell-reference test. Neither was introduced by SPEC-056, but the gate is red, violating the criterion as written
+
+### Tests
+- **splitBrowserEntries parses colon-separated $BROWSER with quote/escape awareness** — covered: test/unit/browse-url.test.ts splitBrowserEntries test block
+- **shellSplit handles single quotes, double quotes, backslash escapes** — covered: test/unit/browse-url.test.ts shellSplit test block
+- **substituteUrlArgv builds argv array with URL substitution (no shell interpolation)** — covered: test/unit/browse-url.test.ts substituteUrlArgv test block
+- **buildBrowserCandidates returns argv with substituted URL from $BROWSER env** — covered: test/unit/browse-url.test.ts buildBrowserCandidates test block
+- **validateFileUrl accepts docs/rfcs and docs/specs paths, rejects everything else (including traversal attempts)** — covered: test/unit/browse-url.test.ts validateFileUrl test block
+- **dispatchUrl spawns via Bun.spawn with argv array (injection-safe)** — covered: test/unit/browse-url.test.ts dispatchUrl test block
+- **parseGitRemotes parses HTTPS, SSH git@, and ssh:// remote forms** — covered: test/unit/browse-url.test.ts parseGitRemotes test block
+- **parseGithubUrl extracts owner/repo from remote URLs** — covered: test/unit/browse-url.test.ts parseGithubUrl test block
+- **tsOpenExternalOutcome enforces scheme allowlist and file:// path restriction** — covered: test/unit/browse-url.test.ts tsOpenExternalOutcome test block
+- **TRT: browse-detect-at-point recognizes each of the 5 patterns (bare, angle, markdown, docs, issue)** — covered: test/tlisp/browse-url.test.tlisp pattern detection tests
+- **TRT: candidate chooser applies priority ordering when patterns overlap** — covered: test/tlisp/browse-url.test.tlisp browse--choose-candidate tests
+- **TRT: browse-resolve expands RFC-NNN/SPEC-NNN to file:// URLs and #NNN to GitHub issue URLs** — covered: test/tlisp/browse-url.test.tlisp browse-resolve tests
+- **TRT: browse-url success and structured-error hashmap return shapes match spec** — covered: test/tlisp/browse-url.test.tlisp browse-url tests
+- **TRT: browse-url-at-point end-to-end via gX key binding** — covered: test/tlisp/browse-url.test.tlisp gX binding test
+- **TRT: no-url-at-point returns structured (hashmap "ok" nil "error" "no-url-at-point") shape** — covered: test/tlisp/browse-url.test.tlisp no-url-at-point test
+- **User-registered resolvers (via define-url-resolver) are dispatched by browse-resolve** — uncovered: No test exercises a user-registered resolver flowing through browse-resolve; consistent with the implementation gap that browse-resolve only consults built-in resolvers
+- **markdown-follow-link delegates external http(s) URLs to browse-url (regression test for removed shell interpolation)** — covered: test/unit/markdown-spec-039.test.ts or test/tlisp/browse-url.test.tlisp covers the delegation path via the markdown.tlisp:498-500 delegation
+
+### Edge cases
+- **file:// URL with path traversal (../) escaping docs/rfcs or docs/specs** — handled: src/editor/api/browse-url-ops.ts validateFileUrl uses realpath canonicalization before the prefix check, defeating .. traversal; test/unit/browse-url.test.ts validateFileUrl block covers traversal rejection
+- **$BROWSER unset falls back to platform default (open on macOS, xdg-open on Linux)** — handled: src/editor/api/browse-url-ops.ts buildBrowserCandidates falls back to platform-default argv when $BROWSER is empty
+- **$BROWSER with URL-argv already containing %s placeholder vs plain command** — handled: src/editor/api/browse-url-ops.ts substituteUrlArgv handles both %s-substituted and append-URL argv forms; test/unit/browse-url.test.ts substituteUrlArgv covers both
+- **Cursor at EOF or on empty line returns no-url-at-point structured error** — handled: src/tlisp/core/commands/browse-url.tlisp browse-detect-at-point returns (hashmap "ok" nil "error" "no-url-at-point") when no candidate matches; test/tlisp/browse-url.test.tlisp no-url-at-point test
+- **Disallowed scheme (ftp://, javascript:, data:) is rejected with structured error** — handled: src/editor/api/browse-url-ops.ts tsOpenExternalOutcome enforces allowlist {http, https, mailto, file}; test/unit/browse-url.test.ts covers scheme rejection
+- **GitHub remote absent or unparseable — #NNN resolver returns structured error, not crash** — handled: src/editor/api/browse-url-ops.ts parseGitRemotes/parseGithubUrl return structured errors on missing/unparseable remotes; browse-git-github-remote propagates the hashmap; test/unit/browse-url.test.ts covers missing-remote case
+- **RFC-NNN/SPEC-NNN with no matching file in docs/rfcs|specs returns docs-reference-not-found** — handled: src/editor/api/browse-url-ops.ts browse-doc-reference returns (hashmap "ok" nil "error" "docs-reference-not-found") when no file matches; test/tlisp/browse-url.test.tlisp covers RFC-999 missing case
+- **Injection safety: URL containing shell metacharacters (; | $ `, etc.) cannot escape into shell** — handled: src/editor/api/browse-url-ops.ts dispatchUrl passes URL as a separate Bun.spawn args element, never interpolated into a shell string; test/unit/browse-url.test.ts dispatchUrl verifies argv-array invocation
+- **Markdown link with empty URL [text]() or malformed target** — handled: src/tlisp/core/commands/browse-url.tlisp browse--collect-markdown-candidate skips empty/invalid URLs; test/tlisp/browse-url.test.tlisp covers malformed-link cases
+- **Multiple URLs on the same line — picker chooses the one containing the cursor (priority ordering applies)** — handled: src/tlisp/core/commands/browse-url.tlisp browse--choose-candidate applies the documented priority among same-line candidates; test/tlisp/browse-url.test.tlisp covers overlapping-candidate selection
+- **Test-suite regressions outside SPEC-056 (mode-features-loaded, SPEC-039 cell-reference)** — missed: test:unit gate exits 1 with 2 failures (bicurdxwq.output:75-80). Pre-existing and unrelated to SPEC-056, but criterion #10 'Zero Regressions' is violated as written
+

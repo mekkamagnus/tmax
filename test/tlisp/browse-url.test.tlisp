@@ -1,0 +1,284 @@
+;; browse-url.test.tlisp --- SPEC-056 native TRT tests.
+;;
+;; Covers the T-Lisp command library at src/tlisp/core/commands/browse-url.tlisp:
+;; pattern functions, candidate collectors, candidate chooser, contextual
+;; resolvers, and the public commands. Uses real editor buffers via
+;; buffer-create / buffer-insert / cursor-move so detection exercises the
+;; (buffer-get-line) path the production code uses.
+;;
+;; The ts-open-external primitive is exercised directly with stub-friendly
+;; inputs (e.g. unsupported schemes) so no real browser is launched.
+
+(require-module editor/commands/browse-url)
+
+;; ── Pattern functions ─────────────────────────────────────────────────
+
+(deftest browse--bare-url-pattern-is-non-empty ()
+  (should-be-truthy (> (length (browse--bare-url-pattern)) 0)))
+
+(deftest browse--markdown-link-pattern-is-non-empty ()
+  (should-be-truthy (> (length (browse--markdown-link-pattern)) 0)))
+
+(deftest browse--angle-url-pattern-is-non-empty ()
+  (should-be-truthy (> (length (browse--angle-url-pattern)) 0)))
+
+(deftest browse--issue-pattern-is-non-empty ()
+  (should-be-truthy (> (length (browse--issue-pattern)) 0)))
+
+(deftest browse--docs-reference-pattern-is-non-empty ()
+  (should-be-truthy (> (length (browse--docs-reference-pattern)) 0)))
+
+;; ── string-match-spans-all primitive ──────────────────────────────────
+
+(deftest string-match-spans-all-bare-url ()
+  (let ((r (string-match-spans-all (browse--bare-url-pattern)
+                                   "visit https://example.com/foo today")))
+    (should-be-truthy (hashmap-get r "ok"))
+    (let ((ms (hashmap-get r "matches")))
+      (should-have-length ms 1)
+      (let ((m (nth 0 ms)))
+        (should-equal "https://example.com/foo" (hashmap-get m "text"))))))
+
+(deftest string-match-spans-all-markdown-link-captures-url ()
+  (let ((r (string-match-spans-all (browse--markdown-link-pattern)
+                                   "see [anthropic](https://anthropic.com)")))
+    (should-be-truthy (hashmap-get r "ok"))
+    (let* ((ms (hashmap-get r "matches"))
+           (m (nth 0 ms))
+           (groups (hashmap-get m "groups")))
+      (should-have-length groups 2)
+      (should-equal "anthropic" (hashmap-get (nth 0 groups) "text"))
+      (should-equal "https://anthropic.com" (hashmap-get (nth 1 groups) "text")))))
+
+(deftest string-match-spans-all-angle-url ()
+  (let ((r (string-match-spans-all (browse--angle-url-pattern)
+                                   "see <https://example.com> here")))
+    (should-be-truthy (hashmap-get r "ok"))
+    (let* ((ms (hashmap-get r "matches"))
+           (m (nth 0 ms))
+           (groups (hashmap-get m "groups")))
+      (should-have-length groups 1)
+      (should-equal "https://example.com" (hashmap-get (nth 0 groups) "text")))))
+
+(deftest string-match-spans-all-docs-reference ()
+  (let ((r (string-match-spans-all (browse--docs-reference-pattern)
+                                   "see RFC-001 and SPEC-056 for details")))
+    (should-be-truthy (hashmap-get r "ok"))
+    (let ((ms (hashmap-get r "matches")))
+      (should-have-length ms 2))))
+
+(deftest string-match-spans-all-issue ()
+  (let ((r (string-match-spans-all (browse--issue-pattern)
+                                   "fix #42 today")))
+    (should-be-truthy (hashmap-get r "ok"))
+    (let* ((ms (hashmap-get r "matches"))
+           (m (nth 0 ms))
+           (groups (hashmap-get m "groups")))
+      (should-have-length groups 2)
+      (should-equal "42" (hashmap-get (nth 1 groups) "text")))))
+
+(deftest string-match-spans-all-invalid-regex-returns-error-hashmap ()
+  (let ((r (string-match-spans-all "(" "abc")))
+    (should-be-falsy (hashmap-get r "ok"))
+    (should-equal "invalid-regex" (hashmap-get r "error"))))
+
+(deftest string-match-spans-all-does-not-mutate-string-match-state ()
+  ;; Run string-match normally, then call spans-all, then verify match-string
+  ;; still returns the original match (spans-all must not have mutated state).
+  (string-match "abc" "xxabcyy")
+  (let ((before (match-string 0 "xxabcyy")))
+    (string-match-spans-all (browse--bare-url-pattern) "https://a.com")
+    (let ((after (match-string 0 "xxabcyy")))
+      (should-equal before after))))
+
+;; ── Candidate collectors ──────────────────────────────────────────────
+
+(deftest browse--bare-url-candidates-trims-trailing-punctuation ()
+  (let* ((cs (browse--bare-url-candidates "see https://example.com."))
+         (c (nth 0 cs)))
+    (should-equal "bare" (hashmap-get c "kind"))
+    (should-equal "https://example.com" (hashmap-get c "url"))))
+
+(deftest browse--markdown-link-candidates-extracts-url ()
+  (let* ((cs (browse--markdown-link-candidates "[a](https://a.com)"))
+         (c (nth 0 cs)))
+    (should-equal "markdown" (hashmap-get c "kind"))
+    (should-equal "https://a.com" (hashmap-get c "url"))))
+
+(deftest browse--angle-url-candidates-excludes-brackets ()
+  (let* ((cs (browse--angle-url-candidates "see <https://a.com> here"))
+         (c (nth 0 cs)))
+    (should-equal "angle" (hashmap-get c "kind"))
+    (should-equal "https://a.com" (hashmap-get c "url"))))
+
+(deftest browse--docs-reference-candidates-extracts-reference ()
+  (let* ((cs (browse--docs-reference-candidates "see RFC-001 here"))
+         (c (nth 0 cs)))
+    (should-equal "docs" (hashmap-get c "kind"))
+    (should-equal "RFC-001" (hashmap-get c "text"))))
+
+(deftest browse--github-issue-candidates-extracts-number ()
+  (let* ((cs (browse--github-issue-candidates "fix #42 today"))
+         (c (nth 0 cs)))
+    (should-equal "issue" (hashmap-get c "kind"))
+    (should-equal "#42" (hashmap-get c "text"))))
+
+(deftest browse--collect-candidates-returns-all-kinds ()
+  (let ((cs (browse--collect-candidates
+             "[md](https://md.com) <https://ang.com> https://bare.com RFC-001 #1")))
+    ;; At least 5 candidates from the line.
+    (should-be-greater-than (length cs) 4)))
+
+;; ── Candidate chooser (priority + smallest range) ─────────────────────
+
+(deftest browse--choose-candidate-prefers-markdown-over-bare ()
+  ;; When both a markdown link and bare URL overlap the cursor column,
+  ;; markdown wins (priority 0 < bare priority 2).
+  (let* ((line "[a](https://a.com) and https://b.com")
+         (cs (browse--collect-candidates line))
+         (winner (browse--choose-candidate cs 4)))
+    (should-be-truthy winner)
+    (should-equal "markdown" (hashmap-get winner "kind"))))
+
+(deftest browse--choose-candidate-returns-nil-when-no-candidate-contains-point ()
+  (let* ((cs (browse--collect-candidates "https://a.com"))
+         (winner (browse--choose-candidate cs 100)))
+    (should-be-falsy winner)))
+
+;; ── Contextual resolvers ──────────────────────────────────────────────
+
+(deftest browse--rfc-spec-resolver-handles-missing-docs ()
+  ;; Resolver should return a hashmap with ok=nil for a non-existent RFC number.
+  (let ((r (browse--rfc-spec-resolver "RFC-99999" nil nil)))
+    (should-be-falsy (hashmap-get r "ok"))
+    (should-equal "docs-reference-not-found" (hashmap-get r "error"))))
+
+(deftest browse--github-issue-resolver-handles-no-remote ()
+  ;; In a non-GitHub directory the resolver returns ok=nil with an error.
+  ;; In a GitHub directory (as in CI), the resolver returns a GitHub URL string.
+  ;; Accept either shape — both prove the resolver ran without crashing.
+  (let ((r (browse--github-issue-resolver "#12345" nil nil)))
+    (if (stringp r)
+        (should-contain-string r "github.com")
+        (progn
+          (should-be-falsy (hashmap-get r "ok"))
+          (should-equal "github-remote-not-found" (hashmap-get r "error"))))))
+
+(deftest browse-resolve-passes-through-error-for-unknown-reference ()
+  (let ((r (browse-resolve "RFC-99999-not-a-real-doc")))
+    (should-be-falsy (hashmap-get r "ok"))))
+
+;; ── User-registered resolvers (define-url-resolver → browse-resolve) ──
+
+(deftest browse-resolve-dispatches-user-registered-resolver ()
+  ;; Register a resolver that fires for a synthetic prefix and verify
+  ;; browse-resolve returns its URL. This closes the audit gap: previously
+  ;; define-url-resolver stored user resolvers but browse-resolve never
+  ;; consulted them.
+  (define-url-resolver "fundamental"
+    (lambda (text buffer range)
+      (if (string-match "^JIRA-[0-9]+" text)
+          (concat "https://jira.example.com/browse/" text)
+          nil)))
+  (let ((r (browse-resolve "JIRA-42")))
+    (should-be-truthy r)
+    (should-equal "https://jira.example.com/browse/JIRA-42" r)))
+
+(deftest browse-resolve-skips-resolver-returning-nil ()
+  ;; A resolver that returns nil for non-matching text must not short-circuit
+  ;; subsequent resolvers. Register one that declines, then verify the
+  ;; built-in docs resolver still runs for an RFC-NNN reference.
+  (define-url-resolver "fundamental"
+    (lambda (text buffer range)
+      nil))
+  ;; The built-in RFC resolver returns a not-found hashmap (truthy) for an
+  ;; unknown RFC number — proving the nil-returning resolver did not abort
+  ;; iteration.
+  (let ((r (browse-resolve "RFC-99991")))
+    (should-be-truthy r)
+    (should-be-falsy (hashmap-get r "ok"))
+    (should-equal "docs-reference-not-found" (hashmap-get r "error"))))
+
+(deftest browse-resolve-returns-nil-when-no-resolver-applies ()
+  ;; Plain text with no resolver firing returns nil.
+  (let ((r (browse-resolve "just-some-plain-text")))
+    (should-be-falsy r)))
+
+;; ── Public commands: detect at point ──────────────────────────────────
+
+(deftest browse-detect-at-point-finds-bare-url-in-test-buffer ()
+  (buffer-create "*browse-test-1*")
+  (buffer-switch "*browse-test-1*")
+  (buffer-insert "see https://example.com/x here")
+  (cursor-move 0 4)
+  (let ((r (browse-detect-at-point)))
+    (should-be-truthy (hashmap-get r "ok"))
+    (should-equal "bare" (hashmap-get r "kind"))
+    (should-equal "https://example.com/x" (hashmap-get r "url"))))
+
+(deftest browse-detect-at-point-finds-markdown-link ()
+  (buffer-create "*browse-test-2*")
+  (buffer-switch "*browse-test-2*")
+  (buffer-insert "[docs](https://docs.foo/bar)")
+  (cursor-move 0 1)
+  (let ((r (browse-detect-at-point)))
+    (should-be-truthy (hashmap-get r "ok"))
+    (should-equal "markdown" (hashmap-get r "kind"))
+    (should-equal "https://docs.foo/bar" (hashmap-get r "url"))))
+
+(deftest browse-detect-at-point-returns-no-url-error-when-cursor-is-off-url ()
+  (buffer-create "*browse-test-3*")
+  (buffer-switch "*browse-test-3*")
+  (buffer-insert "no urls on this line at all")
+  (cursor-move 0 5)
+  (let ((r (browse-detect-at-point)))
+    (should-be-falsy (hashmap-get r "ok"))
+    (should-equal "no-url-at-point" (hashmap-get r "error"))))
+
+(deftest browse-detect-at-point-range-is-half-open-list ()
+  (buffer-create "*browse-test-4*")
+  (buffer-switch "*browse-test-4*")
+  (buffer-insert "ab https://x.com cd")
+  (cursor-move 0 5)
+  (let* ((r (browse-detect-at-point))
+         (range (hashmap-get r "range")))
+    (should-be-truthy (listp range))
+    ;; range is (list line start line end); URL begins at column 3.
+    (should-equal 0 (nth 0 range))
+    (should-equal 3 (nth 1 range))
+    (should-equal 0 (nth 2 range))))
+
+;; ── Public commands: ts-open-external via browse-url ──────────────────
+
+(deftest browse-url-rejects-unsupported-scheme ()
+  (let ((r (browse-url "ftp://example.com")))
+    (should-be-falsy (hashmap-get r "ok"))
+    (should-equal "unsupported-scheme" (hashmap-get r "error"))))
+
+(deftest browse-url-rejects-empty-string ()
+  ;; ts-open-external raises an error for an empty URL (invalid argument),
+  ;; which propagate up through browse-url as a thrown error.
+  (should-throw (lambda () (browse-url ""))))
+
+(deftest ts-open-external-rejects-unsupported-scheme ()
+  (let ((r (ts-open-external "ftp://example.com")))
+    (should-be-falsy (hashmap-get r "ok"))
+    (let ((details (hashmap-get r "details")))
+      (should-equal "ftp" (hashmap-get details "scheme"))
+      ;; `supported' is a T-Lisp list of scheme strings; member returns the
+      ;; tail starting at the match, which is truthy.
+      (should-be-truthy (member "http" (hashmap-get details "supported"))))))
+
+(deftest ts-open-external-rejects-file-url-outside-allowed-roots ()
+  (let ((r (ts-open-external "file:///etc/passwd")))
+    (should-be-falsy (hashmap-get r "ok"))
+    (should-equal "file-url-not-allowed" (hashmap-get r "error"))))
+
+;; ── Key bindings ──────────────────────────────────────────────────────
+
+(deftest browse-url-at-point-bound-to-gX-in-normal-mode ()
+  ;; key-binding returns a vector/list whose first element is the binding body.
+  (let* ((b (key-binding "g X" "normal"))
+         (binding (nth 0 b)))
+    (should-be-truthy binding)
+    (should-contain-string binding "browse-url-at-point")))
