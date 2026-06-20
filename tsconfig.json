@@ -21,11 +21,13 @@
     "test/**/*",
     "scripts/**/*",
     "adws/**/*",
+    "tmax-use/**/*",
     "*.ts",
     "*.tsx"
   ],
   "exclude": [
     "adws/adw-run-e2e.ts",
-    "adws/adw-right-bracket-h.test.ts"
+    "adws/adw-right-bracket-h.test.ts",
+    "tmax-use/baselines/**/*"
   ]
 }

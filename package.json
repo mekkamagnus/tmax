@@ -20,12 +20,14 @@
     "tmux:audit": "bash scripts/tmax-tmux-audit.sh",
     "tmux:cleanup-stale": "bash scripts/tmax-tmux-audit.sh --cleanup-stale-shells",
     "check": "node --import tsx --eval \"import('./src/main.tsx')\" -- --help",
-    "typecheck": "bunx tsc --noEmit",
+    "typecheck": "bun run typecheck:src && bun run typecheck:test && bun run typecheck:tmax-use",
     "typecheck:src": "bunx tsc --noEmit --project tsconfig.src.json",
     "typecheck:test": "bunx tsc --noEmit --project tsconfig.test.json",
-    "build": "bun run build:tmax && bun run build:tlisp",
+    "typecheck:tmax-use": "bunx tsc --noEmit --project tsconfig.tmax-use.json",
+    "build": "bun run build:tmax && bun run build:tlisp && bun run build:tmax-use",
     "build:tmax": "bun build --compile ./src/main.tsx --outfile dist/tmax",
     "build:tlisp": "bun build --compile ./src/tlisp/cli.ts --outfile dist/tlisp",
+    "build:tmax-use": "bun build --compile ./tmax-use/test/cli.ts --outfile dist/tmax-use",
     "test:trt": "bin/trt",
     "adw": "bun adws/adw-launch.ts",
     "adw:resume": "bun adws/adw-launch.ts --resume"
@@ -47,6 +49,7 @@
   "bin": {
     "tmax": "./bin/tmax",
     "tlisp": "./bin/tlisp",
-    "trt": "./bin/trt"
+    "trt": "./bin/trt",
+    "tmax-use": "./bin/tmax-use"
   }
 }

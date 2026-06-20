@@ -1,0 +1,13 @@
+#!/usr/bin/env bash
+# tmax-use — Playwright-style control library + test runner for the tmax daemon
+set -euo pipefail
+
+SCRIPT_PATH="${BASH_SOURCE[0]}"
+if command -v readlink >/dev/null 2>&1; then
+  SCRIPT_PATH="$(readlink -f "$SCRIPT_PATH")"
+fi
+
+SCRIPT_DIR="$(cd "$(dirname "$SCRIPT_PATH")" && pwd)"
+PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
+
+exec bun "$PROJECT_DIR/tmax-use/test/cli.ts" "$@"

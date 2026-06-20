@@ -1,0 +1,118 @@
+name: which-key dispatch
+description: |
+  E2E coverage of SPEC-038 which-key: keymap-based dispatch and the timer-driven
+  popup. MIXED playbook: the static keymap checks are HEADLESS (they query
+  state — fast, no rendering needed); the popup scenarios are HEADED (they press
+  keys through a real tmax TUI and assert on the captured screen — so "playbook
+  passes" means "a fresh tmax shows the popup").
+
+  A step becomes headed automatically when its expect block uses screen_contains
+  or screen_not_contains. You can watch the headed run live:
+    tmux attach -t tmax-adw-<pid>   (printed when the run starts)
+
+  Timing contract (verified against a fresh tmax):
+  - The daemon editor starts in INSERT mode; step 1 switches to normal.
+  - Pressing a prefix key (z/g) sets whichKeyPrefix immediately, then a timer
+    fires after whichKeyTimeout ms to render the popup.
+  - Screen assertions use a longer default settle (300ms) so the TUI repaints
+    and the render poll picks it up before capture.
+
+  NOTE on control keys: in a 'keys' sequence, control keys MUST be bracketed
+  ("<Escape>", not "C-g"). The headed tmux path and the headless daemon path
+  both require this.
+
+setup:
+  - action: setup_file
+    var: FILE
+    name: wk-e2e.txt
+    content: |
+      line one
+      line two
+      line three
+      line four
+      line five
+
+steps:
+  # ── HEADLESS setup: normal mode + snappy timeout ──────────────────────
+  - name: switch to normal mode (daemon defaults to insert)
+    eval: '(editor-set-mode "normal")'
+  - name: snappy timeout so the timer fires within step waits
+    eval: '(which-key-timeout 150)'
+    expect:
+      result_contains: "150"
+
+  # ── HEADLESS: static keymap structure (no rendering needed) ───────────
+  - name: z is a prefix in the normal keymap
+    eval: '(if (keymap-prefix-p normal-keymap "z") "PREFIX-z:YES" "PREFIX-z:NO")'
+    expect:
+      result_contains: "PREFIX-z:YES"
+  - name: g is a prefix
+    eval: '(if (keymap-prefix-p normal-keymap "g") "PREFIX-g:YES" "PREFIX-g:NO")'
+    expect:
+      result_contains: "PREFIX-g:YES"
+
+  # ── HEADED: z popup renders on the real screen ────────────────────────
+  - name: press z in the TUI, popup renders on screen
+    setup_cursor: [0, 0]
+    keys: "z"
+    wait: 350
+    expect:
+      screen_contains: "scroll-cursor-top"
+  - name: "...and the z popup lists the center binding too"
+    expect:
+      screen_contains: "scroll-cursor-center"
+  - name: Escape dismisses the z popup
+    keys: "<Escape>"
+    wait: 250
+    expect:
+      screen_not_contains: "scroll-cursor-top"
+
+  # ── HEADED: g popup renders with different bindings ───────────────────
+  - name: press g in the TUI, popup renders goto bindings
+    keys: "g"
+    wait: 350
+    expect:
+      screen_contains: "vim-gg"
+  - name: Escape dismisses the g popup
+    keys: "<Escape>"
+    wait: 250
+    expect:
+      screen_not_contains: "vim-gg"
+
+  # ── HEADED: quick typing skips the popup (negative visual) ────────────
+  - name: set a long timeout so quick typing cannot trip the timer
+    eval: '(which-key-timeout 5000)'
+  - name: quick-type zt — popup must NOT appear on screen
+    setup_cursor: [0, 0]
+    keys: "zt"
+    wait: 200
+    expect:
+      screen_not_contains: "scroll-cursor-top"
+
+  # ── HEADLESS + HEADED: runtime binding appears live in the popup ──────
+  - name: restore snappy timeout
+    eval: '(which-key-timeout 150)'
+  - name: add a new g n binding at runtime
+    eval: '(key-bind "g n" "(cursor-move 4 0)" "normal")'
+  - name: press g, live g n binding renders on screen
+    setup_cursor: [0, 0]
+    keys: "g"
+    wait: 350
+    expect:
+      screen_contains: "cursor-move"
+  - name: Escape cancels
+    keys: "<Escape>"
+    wait: 200
+
+  # ── HEADED: BUG-11 regression — prefix resets cleanly between z and g ─
+  - name: press z, popup shows z (not zg bleed)
+    keys: "z"
+    wait: 350
+    expect:
+      screen_contains: "scroll-cursor-top"
+  - name: Escape, then restore default timeout
+    keys: "<Escape>"
+    wait: 200
+  - eval: '(which-key-timeout 1000)'
+
+cleanup: true

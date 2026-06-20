@@ -35,10 +35,15 @@ All specification and documentation files are numbered for easy reference.
 - **SPEC-020** - UI Test Status
 - **SPEC-021** - Terminal UI Final Status
 
+### ADW Pipeline & Testing (030-061)
+- **SPEC-048** - Generic E2E ADW Runner (YAML-driven, daemon-based)
+- **SPEC-060** - adw tmux launcher — run pipelines in detached tmux windows
+- **SPEC-061** - tmax-use — Control Library + Visual E2E Test Runner ([visual walkthrough](./SPEC-061-tmax-use.html))
+
 ## Summary
 
-- **Total Specs:** 27
-- **Date:** 2026-02-04
+- **Total Specs:** 28
+- **Date:** 2026-06-20
 - **Status:** All files properly numbered and organized
 
 ## Quick Reference
@@ -47,12 +52,14 @@ To find a spec by topic:
 - **T-Lisp:** SPEC-004, SPEC-005
 - **Save Functionality:** SPEC-006, SPEC-007, SPEC-008
 - **UI Implementation:** SPEC-009, SPEC-017, SPEC-018, SPEC-021
-- **Testing:** SPEC-015, SPEC-019, SPEC-020, SPEC-024, SPEC-026
+- **Testing:** SPEC-015, SPEC-019, SPEC-020, SPEC-024, SPEC-026, SPEC-048, SPEC-061
 - **TypeScript:** SPEC-012, SPEC-016
 - **Keybindings:** SPEC-013, SPEC-014
 - **Chores:** SPEC-011, SPEC-012, SPEC-024, SPEC-025, SPEC-026, SPEC-029
 - **Test Refactoring:** SPEC-024
 - **Configuration:** SPEC-025
+- **ADW Pipeline:** SPEC-048, SPEC-060, SPEC-061
+- **E2E Testing:** SPEC-048, SPEC-061
 
 ## Related ADRs
 

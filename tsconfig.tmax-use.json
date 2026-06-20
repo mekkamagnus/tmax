@@ -1,0 +1,14 @@
+{
+  "extends": "./tsconfig.json",
+  "include": [
+    "tmax-use/src/**/*.ts",
+    "tmax-use/assert/**/*.ts",
+    "tmax-use/test/**/*.ts",
+    "tmax-use/tests/**/*.tmax-use.ts"
+  ],
+  "exclude": [
+    "tmax-use/baselines/**/*",
+    "tmax-use/playbooks/**/*",
+    "**/*.html"
+  ]
+}
