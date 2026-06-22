@@ -4,6 +4,15 @@ Records of significant architectural decisions. Each ADR describes the context, 
 
 Ordered most-recent first (highest ADR number = most recent decision). Topic groupings preserved within each section.
 
+## Recent — adw Test Stage, E2E Consolidation, Test Reliability (ADR 0101-0104)
+
+| File | Decision | Related |
+|------|----------|---------|
+| [ADR-0104-test-stage-wall-clock-timeout.md](ADR-0104-test-stage-wall-clock-timeout.md) | Test-stage wall-clock timeout (20 min) + process-tree kill (`detached` + `kill -pgid`) | [ADR-0101](ADR-0101-adw-test-pipeline-stage.md), [ADR-0103](ADR-0103-server-test-socket-leak-fix.md), SPEC-066 |
+| [ADR-0103-server-test-socket-leak-fix.md](ADR-0103-server-test-socket-leak-fix.md) | Server-test socket-leak fix — `connectWithTimeout` + `forceShutdown` + `afterEach` cleanup (BUG-16) | BUG-16, [ADR-0101](ADR-0101-adw-test-pipeline-stage.md), [ADR-0104](ADR-0104-test-stage-wall-clock-timeout.md) |
+| [ADR-0102-python-ui-harness-removal.md](ADR-0102-python-ui-harness-removal.md) | Python UI harness removed; tmax-use + playbooks is the sole e2e mechanism | SPEC-063, SPEC-061, [ADR-0101](ADR-0101-adw-test-pipeline-stage.md) |
+| [ADR-0101-adw-test-pipeline-stage.md](ADR-0101-adw-test-pipeline-stage.md) | adw-test pipeline stage — 5th stage (plan→review→build→test→patch-review), unit gates e2e, resolve loop | SPEC-063, [ADR-0094](ADR-0094-adw-pipeline-architecture.md), [ADR-0102](ADR-0102-python-ui-harness-removal.md), [ADR-0103](ADR-0103-server-test-socket-leak-fix.md), [ADR-0104](ADR-0104-test-stage-wall-clock-timeout.md) |
+
 ## Recent — adw Pipeline, Browse-URL, Tooling, FP Foundations (ADR 0094-0100)
 
 | File | Decision | Related |
