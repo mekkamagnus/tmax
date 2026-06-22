@@ -2475,7 +2475,7 @@ Items that are explicitly not included in alpha releases:
 - [SPEC-009: Migrate UI to Deno-ink](SPEC-009-migrate-ui-to-deno-ink.md) - Complete migration plan with 12 user stories
 - [SPEC-004: T-Lisp Core Bindings Migration](SPEC-004-tlisp-core-bindings-migration.md) - T-Lisp-centric keybinding architecture
 - [functional-patterns-guidelines.md](../functional-patterns-guidelines.md) - Functional programming patterns used in codebase
-- [UI Test Harness](../test/ui/README.md) - Modular tmux-based UI testing framework with AI-friendly API
+- [tmax-use](../tmax-use/README.md) - TypeScript + YAML e2e test runner (playbooks + TypeScript tests)
 
 ### Appendix B: Technical Architecture
 Current architecture uses React-based terminal UI with ink for declarative component rendering. The completed Bun + ink migration:
@@ -2505,171 +2505,44 @@ Current architecture uses React-based terminal UI with ink for declarative compo
 - Frontend unit tests: 4 hours
 - Error handling and edge cases: 3 hours
 
-### Appendix D: UI Test Harness
+### Appendix D: tmax-use E2E Runner
 
 **Status:** ✅ COMPLETE AND OPERATIONAL
 
-tmax includes a comprehensive, modular UI test harness designed for automated testing via tmux and AI assistant integration. The harness provides a high-level API for controlling editor instances programmatically and validating UI behavior.
+tmax's e2e coverage is provided by **tmax-use** — a TypeScript + YAML test runner that drives the editor through its JSON-RPC daemon using tmux. tmax-use is the sole e2e mechanism in the project (the legacy Python UI harness was removed by SPEC-063).
 
 #### Architecture
 
-The test harness follows a layered architecture designed for modularity and AI assistant usage:
+tmax-use is split across two formats, both run by `bin/tmax-use test`:
 
-**Core Layer** (`test/ui/core/`)
-- `session.sh` - Tmux session management (create, destroy, list windows)
-- `input.sh` - Key/command input (send keys, type text, send commands)
-- `query.sh` - State queries (get mode, check text visibility, cursor position)
-- `editor.sh` - Editor lifecycle (start, stop, restart, reset)
+- **YAML playbooks** (`tmax-use/playbooks/*.yaml`) — declarative scenarios that send keys, eval T-Lisp, and assert against screen/buffer state. The 24 existing playbooks cover startup, cursor movement, editing, modes, files, search, etc.
+- **TypeScript tests** (`tmax-use/tests/*.tmax-use.ts`) — fully programmable tests for cases that need data setup or complex control flow.
 
-**Operations Layer** (`test/ui/ops/`)
-- `editing.sh` - Editing operations (mode changes, typing, deletion, undo/redo)
-- `navigation.sh` - Cursor movement (hjkl, word movement, line navigation, paging)
-- `files.sh` - File operations (save, open, create, read, write)
-
-**Assertion Layer** (`test/ui/assert/`)
-- `assertions.sh` - Test assertions (text visibility, mode checks, file verification)
-
-**API Layer** (`test/ui/lib/`)
-- `api.sh` - Main public API with `tmax_*` functions for AI assistants
-- `config.sh` - Configuration and environment variables
-- `debug.sh` - Debug utilities and logging
+Both formats drive the editor via `tmax-use/src/` (the JSON-RPC client + tmux controller) and assert via the helpers in `tmax-use/assert/`.
 
 #### Key Features
 
-**AI-Friendly Design**
-- All public functions prefixed with `tmax_*` for easy discovery
-- Single-responsibility functions (e.g., `tmax_insert`, `tmax_type`, `tmax_save`)
-- Clear return values: queries return data, commands return status
-- Built-in waiting functions handle timing complexity
+- **Headless-first**: drives the daemon directly via JSON-RPC; tmux is used only when screen assertions are required.
+- **Reporters**: exit code (0/1), JUnit XML, HTML — picked via `--reporter` / `--output`.
+- **Zero Python toolchain**: pure Bun/TypeScript, no `uv` or `pytest`.
 
-**Modular Composition**
-```bash
-# Simple, composable operations
-tmax_start
-tmax_insert
-tmax_type "Hello World"
-tmax_normal
-tmax_save_quit
-```
-
-**Comprehensive Query Interface**
-```bash
-mode=$(tmax_mode)              # Returns: INSERT
-visible=$(tmax_visible "text") # Returns: 0 (true)
-text=$(tmax_text)              # Returns all visible text
-running=$(tmax_running)        # Check if editor alive
-```
-
-**Built-in Assertions**
-```bash
-tmax_assert_text "Hello"       # Assert text visible
-tmax_assert_mode "INSERT"      # Assert current mode
-tmax_assert_no_errors          # Assert no errors present
-tmax_summary                   # Print test results (passed/failed)
-```
-
-**Debug Support**
-- `tmax_debug` - Enable verbose logging of all operations
-- `tmax_state` - Show current editor state
-- `tmax_dump` - Dump state to file for debugging
-- `tmax_screenshot` - Capture tmux window output
-
-#### Usage Examples
-
-**Basic Test**
-```bash
-source test/ui/lib/api.sh
-
-tmax_init
-tmax_start test-file.txt
-
-tmax_type "Hello World"
-tmax_assert_text "Hello World"
-
-tmax_save_quit
-tmax_cleanup
-```
-
-**AI Assistant Integration**
-The harness is designed specifically for AI assistants like Claude Code:
-- Intent-revealing function names (`tmax_type` not `input_send_text`)
-- Automatic state tracking (active window, session management)
-- Graceful error handling with clear error messages
-- Self-documenting: `tmax_list_functions` shows all available commands
-
-**Test Execution**
-```bash
-# Run all UI tests
-bash test/ui/run-tests.sh
-
-# Run individual test
-bash test/ui/tests/01-startup.test.sh
-```
-
-#### File Structure
-```
-test/ui/
-├── README.md              # Full documentation
-├── QUICKSTART.md          # Quick reference for AI assistants
-├── run-tests.sh           # Test runner script
-├── lib/
-│   ├── api.sh            # Main API (tmax_* functions)
-│   ├── config.sh         # Configuration
-│   └── debug.sh          # Debug utilities
-├── core/
-│   ├── session.sh        # Tmux session management
-│   ├── input.sh          # Sending keys/commands
-│   ├── query.sh          # State queries
-│   └── editor.sh         # Editor lifecycle
-├── ops/
-│   ├── editing.sh        # Editing operations
-│   ├── navigation.sh     # Navigation operations
-│   └── files.sh          # File operations
-├── assert/
-│   └── assertions.sh     # Test assertions
-└── tests/
-    ├── 01-startup.test.sh
-    ├── 02-basic-editing.test.sh
-    └── 03-mode-switching.test.sh
-```
-
-#### Benefits for Deno-ink Migration
-
-The UI test harness directly supports the Deno-ink migration (SPEC-009) by:
-
-1. **Enabling Automated Regression Testing**: Every UI change can be tested automatically
-2. **Supporting AI-Assisted Development**: Claude Code can control and test the editor
-3. **Providing Visual Feedback**: Manual inspection via tmux attachment
-4. **Capturing Failures**: Automatic state dumps on test failures
-5. **Modifying Without Breaking Changes**: Tests validate behavior preservation
-
-#### Configuration
-
-Environment variables for customization:
+#### Usage
 
 ```bash
-export TMAX_SESSION="my-test-session"     # Tmux session name
-export TMAX_DEBUG=true                    # Enable debug logging
-export TMAX_DEFAULT_TIMEOUT=15            # Wait timeout
-export TMAX_PROJECT_ROOT="/path/to/tmax"  # Project directory
+# Run every playbook + TypeScript test
+bun run test:tmax-use
+
+# Run one playbook
+bin/tmax-use test tmax-use/playbooks/eval-01-cursor-movement.yaml
+
+# Run with explicit reporter + output dir
+bin/tmax-use test --reporter all --output agents/<id>/tester/e2e-report-it1
 ```
 
 #### Documentation
 
-- **Full Documentation**: `test/ui/README.md` - Comprehensive API reference
-- **Quick Reference**: `test/ui/QUICKSTART.md` - Quick start for AI assistants
-- **Example Tests**: `test/ui/tests/*.test.sh` - Working test examples
-- **API Discovery**: `tmax_list_functions` - Shows all available commands
-
-#### Integration with CI/CD
-
-The test harness supports continuous integration:
-- Non-interactive execution (no TTY required in tmux)
-- Assertion tracking with exit codes
-- Test result summaries (passed/failed counts)
-- Easy integration with test runners
-
-This UI test harness ensures the Deno-ink migration maintains full functional parity with the current implementation while enabling automated, reproducible testing of all editor features.
+- **Runner + playbook schema**: `tmax-use/README.md`, `tmax-use/playbooks/README.md`
+- **Example playbooks**: `tmax-use/playbooks/_smoke.yaml`, `tmax-use/playbooks/eval-01-cursor-movement.yaml`
 
 ### Test Philosophy for T-Lisp First Architecture
 
@@ -2691,8 +2564,9 @@ The test suite is organized into three distinct layers, each testing a different
 - **Tests the bridge between T-Lisp and React**
 - **Example**: Testing `<Editor />` renders mode indicator from state
 
-**3. UI Tests (test/ui/tests/) - Blackbox Integration**
-- Simulate real user typing in terminal via tmux
+**3. E2E Tests (tmax-use/) - Blackbox Integration**
+- YAML playbooks (`tmax-use/playbooks/*.yaml`) and TypeScript tests (`tmax-use/tests/*.tmax-use.ts`)
+- Simulate real user typing in terminal via tmux + JSON-RPC daemon
 - Test ENTIRE system from keyboard to rendered output
 - No access to internals - like a real user
 - **Tests complete system integration**

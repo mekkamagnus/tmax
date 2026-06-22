@@ -57,29 +57,17 @@ RFC-001 (TRT framework) is implemented across five sequentially-dependent specs.
 
 | File | Title | Related |
 |------|-------|---------|
-| [BUG-01-daemon-client-broken-features.md](BUG-01-daemon-client-broken-features.md) | Daemon/Client Broken and Missing Features | [BUG-01-python-harness-result-wrapping.md](BUG-01-python-harness-result-wrapping.md) |
-| [BUG-01-python-harness-result-wrapping.md](BUG-01-python-harness-result-wrapping.md) | Python Harness — Wrong T-Lisp API Names | [BUG-01-daemon-client-broken-features.md](BUG-01-daemon-client-broken-features.md) |
-| [BUG-02-completion-buffer-switch.md](BUG-02-completion-buffer-switch.md) | Frame sync race in handleRenderState | — |
+| [BUG-01-daemon-client-broken-features.md](BUG-01-daemon-client-broken-features.md) | Daemon/Client Broken and Missing Features | — |
 | [BUG-02-multiline-insert-and-tui-stale-state.md](BUG-02-multiline-insert-and-tui-stale-state.md) | Multiline Insert and TUI Stale State | — |
-| [BUG-03-flaky-startup-module-exports.md](BUG-03-flaky-startup-module-exports.md) | Flaky test startup and module exports | — |
-| [BUG-04-vim-normal-insert-modes.md](BUG-04-vim-normal-insert-modes.md) | Vim normal/insert modes broken from wrong directory | — |
 | [BUG-05-demo-skill-visual-tmux.md](BUG-05-demo-skill-visual-tmux.md) | Demo skill outputs text instead of visual TUI | — |
 
 ## Chores
 
 | File | Title | Related |
 |------|-------|---------|
-| [CHORE-09-python-query-layer.md](CHORE-09-python-query-layer.md) | Migrate UI Test Harness from Bash to Python | [CHORE-09-texinfo-docs.md](CHORE-09-texinfo-docs.md) |
-| [CHORE-09-texinfo-docs.md](CHORE-09-texinfo-docs.md) | Create Texinfo Documentation | [CHORE-09-python-query-layer.md](CHORE-09-python-query-layer.md) |
+| [CHORE-09-texinfo-docs.md](CHORE-09-texinfo-docs.md) | Create Texinfo Documentation | — |
 | [CHORE-10-fix-type-errors-harden-ci.md](CHORE-10-fix-type-errors-harden-ci.md) | Fix All Type Errors and Harden CI | — |
-| [CHORE-10-update-testing-suite.md](CHORE-10-update-testing-suite.md) | Update Testing Suite | — |
-| [CHORE-11-fix-cursor-rendering.md](CHORE-11-fix-cursor-rendering.md) | Fix cursor rendering — block cursor | — |
-| [CHORE-12-daemon-start-stop.md](CHORE-12-daemon-start-stop.md) | Harden Daemon Start/Stop Workflow | [CHORE-15-harden-daemon.md](CHORE-15-harden-daemon.md) |
-| [CHORE-13-remove-ink-dead-code.md](CHORE-13-remove-ink-dead-code.md) | Remove Ink frontend and dead code | [ADR-0061](../adrs/ADR-0061-remove-dead-ink-react-frontend.md) |
-| [CHORE-14-tmax-workflow-hardening.md](CHORE-14-tmax-workflow-hardening.md) | tmax Workflow Hardening | [ADR-0065](../adrs/ADR-0065-tmax-tmux-workflow-hardening.md) |
-| [CHORE-15-harden-daemon.md](CHORE-15-harden-daemon.md) | Harden Daemon | [CHORE-12-daemon-start-stop.md](CHORE-12-daemon-start-stop.md) |
 | [CHORE-16-file-completion.md](CHORE-16-file-completion.md) | Wire file completion into find-file | [ADR-0064](../adrs/ADR-0064-interactive-find-file.md) |
-| [CHORE-17-test-suite-cleanup.md](CHORE-17-test-suite-cleanup.md) | Test Suite Cleanup | — |
 | [CHORE-18-minibuffer-completion-spec.md](CHORE-18-minibuffer-completion-spec.md) | Consolidate Minibuffer Completion Spec | [ADR-0068](../adrs/ADR-0068-minibuffer-completion-stack.md) |
 | [CHORE-19-frame-aware-rpc.md](CHORE-19-frame-aware-rpc.md) | Frame-Aware RPC Methods | [ADR-0074](../adrs/ADR-0074-frame-aware-rpc-methods.md) |
 | [CHORE-20-status-line-vim-style.md](CHORE-20-status-line-vim-style.md) | Vim-Style Status Line Layout | [ADR-0075](../adrs/ADR-0075-vim-style-status-line.md) |

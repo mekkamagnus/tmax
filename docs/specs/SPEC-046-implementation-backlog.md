@@ -669,7 +669,7 @@ This is a living backlog — when an item is resolved, mark it `[x]` and add a c
 
 ### 31. BUG-04/14: Runtime portability (Bun-specific APIs) — NOT FIXED
 
-**Source:** `docs/specs/BUG-04-vim-normal-insert-modes.md`, `docs/specs/BUG-14-mode-detection-regression.md`
+**Source:** `docs/specs/archive/BUG-04-vim-normal-insert-modes.md`, `docs/specs/archive/BUG-14-mode-detection-regression.md`
 
 **Gap:** `src/editor/editor.ts` uses `import.meta.dir` (lines 109, 190, 1634, 1637) and `Bun.file(path)` (line 1608). `package.json` start/dev scripts use `node --import tsx` instead of `bun`. The editor cannot run under Node.js.
 
