@@ -1,9 +1,9 @@
 #!/usr/bin/env bun
 /**
- * adw-plan-review-build-patch.ts — 4-stage pipeline orchestrator
- * (plan → review → build → patch-review) with build↔patch-review retry loop.
+ * adw-plan-review-build-patch.ts — 5-stage pipeline orchestrator
+ * (plan → review → build → test → patch-review) with build↔test↔patch retry loop.
  *
- * Takes a free-text description, runs it through the four adw stages in sequence
+ * Takes a free-text description, runs it through the five adw stages in sequence
  * by spawning each child as a subprocess, parses each child's `<id> <...>` stdout
  * line, and feeds the result into the next stage. All children share one
  * workspace id (passed via --id), so every stage writes its events under the same
@@ -20,8 +20,11 @@
  *   2. adw-spec-review.ts   → stdout "<id> <pass|upgraded|unchanged> <spec-path>"
  *                            (always continues — review gaps don't block the build)
  *   3. adw-build.ts         → stdout "<id> <spec-path>"
- *   4. adw-patch-review.ts  → stdout "<id> <pass|gaps> <spec-path>"
- *   ── On GAPS, re-runs build (stage 3) then patch-review again, up to --max-retries.
+ *   4. adw-test.ts          → stdout "<id> <pass|gaps> <spec-path>"
+ *                            (always continues — test gaps are audit input)
+ *   5. adw-patch-review.ts  → stdout "<id> <pass|gaps> <spec-path>"
+ *   ── On GAPS, re-runs build (stage 3) → test (stage 4) → patch-review (stage 5),
+ *      up to --max-retries.
  *
  * One workspace id: the orchestrator mints a single adw-id and passes it to all
  * children via --id (and sets ADW_ORCHESTRATED=1 so they skip writing their own
@@ -38,6 +41,7 @@
  *   agents/{id}/reviewer/events.jsonl      — written by adw-spec-review subprocess
  *   agents/{id}/upgrader/events.jsonl      — written by adw-spec-review (if upgrade runs)
  *   agents/{id}/builder/events.jsonl       — written by adw-build subprocess
+ *   agents/{id}/tester/events.jsonl        — written by adw-test subprocess
  *   agents/{id}/patch-reviewer/events.jsonl — written by adw-patch-review subprocess
  */
 import { spawn } from "child_process";
@@ -46,14 +50,15 @@ import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "path";
 import { Either, TaskEither } from "../src/utils/task-either.ts";
 import type { PlanType } from "./adws-modules/agent.ts";
+import { withHeartbeat } from "./adws-modules/heartbeat.ts";
 
 const PROJECT_ROOT = realpathSync(join(import.meta.dir, ".."));
 const AGENTS_DIR = join(PROJECT_ROOT, "agents");
 
 /** 10-char Crockford Base32 ULID-timestamp — the workspace id shape. */
 const ADW_ID_RE = /^[0-9A-HJKMNP-TV-Z]{10}$/;
-type StageName = "plan" | "review" | "build" | "patch-review";
-const STAGE_ORDER: readonly StageName[] = ["plan", "review", "build", "patch-review"];
+type StageName = "plan" | "review" | "build" | "test" | "patch-review";
+const STAGE_ORDER: readonly StageName[] = ["plan", "review", "build", "test", "patch-review"];
 
 // ---------------------------------------------------------------------------
 // Usage / arg parsing
@@ -61,11 +66,11 @@ const STAGE_ORDER: readonly StageName[] = ["plan", "review", "build", "patch-rev
 
 const USAGE = `Usage: bun adws/adw-plan-review-build-patch.ts [--feature|--bug|--chore] [--model <id>] [--max-retries <N>] "<description>"
        bun adws/adw-plan-review-build-patch.ts [--model <id>] [--max-retries <N>] <spec-path>
-       bun adws/adw-plan-review-build-patch.ts --id <workspace-id> [--from-stage <plan|review|build|patch-review>]
+       bun adws/adw-plan-review-build-patch.ts --id <workspace-id> [--from-stage <plan|review|build|test|patch-review>]
 
-Runs the adw pipeline (plan → spec-review → build → patch-review) and prints
+Runs the adw pipeline (plan → spec-review → build → test → patch-review) and prints
 "<workspace-id> <spec-path>" on success. When patch-review returns GAPS, the
-orchestrator re-runs build then patch-review, up to --max-retries times (default 3).
+orchestrator re-runs build → test → patch-review, up to --max-retries times (default 3).
 After the retry bound, the pipeline releases to completed with
 patch_review_verdict: "gaps" in the state file.
 
@@ -133,8 +138,8 @@ export function parseArgs(argv: string[]): Either<string, OrchestratorArgs> {
     } else if (a === "--from-stage") {
       const val = argv[++i];
       if (val === undefined) return Either.left("--from-stage requires a value.");
-      if (val !== "plan" && val !== "review" && val !== "build" && val !== "patch-review") {
-        return Either.left(`--from-stage must be one of: plan, review, build, patch-review (got "${val}").`);
+      if (val !== "plan" && val !== "review" && val !== "build" && val !== "test" && val !== "patch-review") {
+        return Either.left(`--from-stage must be one of: plan, review, build, test, patch-review (got "${val}").`);
       }
       fromStage = val;
     } else if (a === "--max-retries") {
@@ -282,6 +287,7 @@ export function loadWorkspace(id: string, fromStage?: StageName): Either<string,
     if (agents.includes("planner")) completedStages.push("plan");
     if (agents.includes("reviewer")) completedStages.push("review");
     if (agents.includes("builder")) completedStages.push("build");
+    if (agents.includes("tester")) completedStages.push("test");
     if (agents.includes("patch-reviewer")) completedStages.push("patch-review");
   }
 
@@ -337,6 +343,11 @@ export interface BuildOutcome {
   id: string;
   specPath: string;
 }
+export interface TestOutcome {
+  id: string;
+  verdict: "pass" | "gaps";
+  specPath: string;
+}
 export interface PatchReviewResult {
   id: string;
   verdict: "pass" | "gaps";
@@ -375,6 +386,7 @@ export interface PipelineDeps {
   runPlan: (description: string, forcedType: PlanType | undefined, id: string) => Promise<Either<string, PlanResult>>;
   runSpecReview: (specPath: string, id: string) => Promise<Either<string, SpecReviewResult>>;
   runBuild: (specPath: string, modelOverride: string | undefined, id: string) => Promise<Either<string, BuildOutcome>>;
+  runTest: (specPath: string, modelOverride: string | undefined, id: string) => Promise<Either<string, TestOutcome>>;
   runPatchReview: (specPath: string, modelOverride: string | undefined, id: string) => Promise<Either<string, PatchReviewResult>>;
 }
 
@@ -416,6 +428,22 @@ const realDeps: PipelineDeps = {
     // build stdout: "<id> <spec-path>"
     if (!tokens || tokens.length < 2) return Either.left(`adw-build: unparseable stdout: ${r.stdout.slice(0, 200)}`);
     return Either.right({ id: tokens[0]!, specPath: tokens.slice(1).join(" ") });
+  },
+
+  runTest: async (specPath, modelOverride, id): Promise<Either<string, TestOutcome>> => {
+    const args = [specPath];
+    if (modelOverride) args.push("--model", modelOverride);
+    args.push("--id", id);
+    const r = await spawnStage("adw-test.ts", args);
+    if (r.code !== 0) return Either.left(r.stdout || `adw-test exited with code ${r.code}`);
+    const tokens = tokensOf(r.stdout);
+    // test stdout: "<id> <pass|gaps> <spec-path>"
+    if (!tokens || tokens.length < 3) return Either.left(`adw-test: unparseable stdout: ${r.stdout.slice(0, 200)}`);
+    const verdict = tokens[1];
+    if (verdict !== "pass" && verdict !== "gaps") {
+      return Either.left(`adw-test: unexpected verdict "${verdict}" in stdout`);
+    }
+    return Either.right({ id: tokens[0]!, verdict, specPath: tokens.slice(2).join(" ") });
   },
 
   runPatchReview: async (specPath, modelOverride, id): Promise<Either<string, PatchReviewResult>> => {
@@ -464,6 +492,7 @@ export interface PipelineResult {
     plan: PlanResult;
     review?: SpecReviewResult;
     build?: BuildOutcome;
+    test?: TestOutcome;
     patchReview?: PatchReviewResult;
   };
 }
@@ -532,6 +561,7 @@ export async function runPipeline(
     if (stages.plan) agents.push("planner");
     if (stages.review) agents.push("reviewer", "upgrader");
     if (stages.build) agents.push("builder");
+    if (stages.test) agents.push("tester");
     if (stages.patchReview) agents.push("patch-reviewer");
     const finalState: OrchestratorState = { ...state, agents, completed_stages: completedStages };
     if (specPath) finalState.spec_path = specPath;
@@ -573,8 +603,11 @@ export async function runPipeline(
   // ── Stage 1: plan (skip if spec-path input, already completed, or resuming past it) ──
   const shouldRunPlan = !args.specPath && (!resume || resume.resumeFrom === "plan");
   if (shouldRunPlan) {
-    process.stderr.write("adw-plan-review-build-patch: stage 1/4 — plan\n");
-    const planRes = await deps.runPlan(description, args.forcedType, id);
+    process.stderr.write("adw-plan-review-build-patch: stage 1/5 — plan\n");
+    const planRes = await withHeartbeat(
+      { stage: "plan", teeFile: join(AGENTS_DIR, id, "planner", "raw-output.jsonl") },
+      () => deps.runPlan(description, args.forcedType, id),
+    );
     if (Either.isLeft(planRes)) {
       appendEvent(id, { event: "stage-error", stage: "plan", detail: planRes.left });
       state.failed_stage = "plan";
@@ -594,7 +627,7 @@ export async function runPipeline(
     await checkpoint();
   } else {
     const reason = args.specPath ? "spec path given as input" : "already completed";
-    process.stderr.write(`adw-plan-review-build-patch: stage 1/4 — plan [SKIPPED, ${reason}]\n`);
+    process.stderr.write(`adw-plan-review-build-patch: stage 1/5 — plan [SKIPPED, ${reason}]\n`);
     if (args.specPath) {
       appendEvent(id, { event: "stage-complete", stage: "plan", spec_path: args.specPath, skipped: true, reason: "spec-path input" });
     }
@@ -608,10 +641,13 @@ export async function runPipeline(
   const specPathForLater = specPath;
 
   // ── Stage 2: spec-review (skip if resuming past it) ──────────────────────
-  const shouldRunReview = !resume || (resume.resumeFrom !== "build" && resume.resumeFrom !== "patch-review");
+  const shouldRunReview = !resume || (resume.resumeFrom !== "build" && resume.resumeFrom !== "test" && resume.resumeFrom !== "patch-review");
   if (shouldRunReview) {
-    process.stderr.write("adw-plan-review-build-patch: stage 2/4 — spec-review\n");
-    const reviewRes = await deps.runSpecReview(specPathForLater, id);
+    process.stderr.write("adw-plan-review-build-patch: stage 2/5 — spec-review\n");
+    const reviewRes = await withHeartbeat(
+      { stage: "spec-review", teeFile: join(AGENTS_DIR, id, "reviewer", "raw-output.jsonl") },
+      () => deps.runSpecReview(specPathForLater, id),
+    );
     if (Either.isLeft(reviewRes)) {
       appendEvent(id, { event: "stage-error", stage: "review", detail: reviewRes.left });
       state.failed_stage = "review";
@@ -627,15 +663,18 @@ export async function runPipeline(
     if (!completedStages.includes("review")) completedStages.push("review");
     await checkpoint();
   } else {
-    process.stderr.write(`adw-plan-review-build-patch: stage 2/4 — spec-review [SKIPPED, already completed]\n`);
+    process.stderr.write(`adw-plan-review-build-patch: stage 2/5 — spec-review [SKIPPED, already completed]\n`);
   }
 
-  // ── Stage 3: build (runs unless resuming directly at patch-review) ───────
+  // ── Stage 3: build (runs unless resuming directly at test or patch-review) ───
   const forcedBuildRestart = resume?.forcedFromStage && resume.resumeFrom === "build";
-  const shouldRunInitialBuild = !resume || resume.resumeFrom !== "patch-review";
+  const shouldRunInitialBuild = !resume || (resume.resumeFrom !== "test" && resume.resumeFrom !== "patch-review");
   if (shouldRunInitialBuild) {
-    process.stderr.write("adw-plan-review-build-patch: stage 3/4 — build\n");
-    const buildRes = await deps.runBuild(specPathForLater, args.modelOverride, id);
+    process.stderr.write("adw-plan-review-build-patch: stage 3/5 — build\n");
+    const buildRes = await withHeartbeat(
+      { stage: "build", teeFile: join(AGENTS_DIR, id, "builder", "raw-output.jsonl") },
+      () => deps.runBuild(specPathForLater, args.modelOverride, id),
+    );
     if (Either.isLeft(buildRes)) {
       appendEvent(id, { event: "stage-error", stage: "build", detail: buildRes.left });
       state.failed_stage = "build";
@@ -646,14 +685,55 @@ export async function runPipeline(
     if (!completedStages.includes("build")) completedStages.push("build");
     await checkpoint();
   } else {
-    process.stderr.write(`adw-plan-review-build-patch: stage 3/4 — build [SKIPPED, resuming at patch-review]\n`);
+    process.stderr.write(`adw-plan-review-build-patch: stage 3/5 — build [SKIPPED, resuming at test or patch-review]\n`);
   }
 
-  // ── Stage 4: patch-review + build↔patch loop ─────────────────────────────
-  // After the first build succeeds, run patch-review. On PASS → finalize.
-  // On GAPS → patch-review appended audit findings to the spec; re-run build
-  // then patch-review. Loop at most maxRetries times. After the bound, release
-  // to completed with patch_review_verdict: "gaps".
+  // ── Stage 4: test (runs after build, on initial build AND on every retry build) ──
+  // Inserted between build and patch-review. Runs `bun run test:unit` + `bun run
+  // test:tmax-use` with a resolve-then-rerun loop per track. Test `gaps` does NOT
+  // hard-stop the pipeline — patch-review sees the failing tests in results.json
+  // and factors them into its verdict.
+  const forcedTestRestart = resume?.forcedFromStage && resume.resumeFrom === "test";
+  const shouldRunInitialTest = !resume || (resume.resumeFrom !== "patch-review");
+  if (shouldRunInitialTest) {
+    process.stderr.write("adw-plan-review-build-patch: stage 4/5 — test\n");
+    const testRes = await withHeartbeat(
+      { stage: "test", teeFile: join(AGENTS_DIR, id, "tester", "events.jsonl") },
+      () => deps.runTest(specPathForLater, args.modelOverride, id),
+    );
+    if (Either.isLeft(testRes)) {
+      appendEvent(id, { event: "stage-error", stage: "test", detail: testRes.left });
+      state.failed_stage = "test";
+      return finalize(Either.left(`test stage failed: ${testRes.left}`));
+    }
+    stages.test = testRes.right;
+    appendEvent(id, {
+      event: "stage-complete",
+      stage: "test",
+      verdict: testRes.right.verdict,
+      spec_path: testRes.right.specPath,
+    });
+    if (!completedStages.includes("test")) completedStages.push("test");
+    await checkpoint();
+    if (testRes.right.verdict === "gaps") {
+      process.stderr.write(
+        `adw-plan-review-build-patch: test returned gaps (continuing to patch-review — gaps are audit input)\n`,
+      );
+    }
+  } else {
+    process.stderr.write(`adw-plan-review-build-patch: stage 4/5 — test [SKIPPED, resuming at patch-review]\n`);
+  }
+  // forcedTestRestart is captured for clarity but the resume path above already
+  // reruns test when forcedFromStage is "test". The variable is intentionally
+  // unused downstream to avoid dead state writes; the unused warning is muted
+  // by referencing it once here.
+  void forcedTestRestart;
+
+  // ── Stage 5: patch-review + build→test→patch-review loop ────────────────
+  // After the first build + test succeed (or release with gaps), run patch-review.
+  // On PASS → finalize. On GAPS → patch-review appended audit findings to the
+  // spec; re-run build → test → patch-review. Loop at most maxRetries times.
+  // After the bound, release to completed with patch_review_verdict: "gaps".
   const maxRetries = args.maxRetries ?? 3;
   // On forced --from-stage build, ignore prior loop state: seed at 0.
   let patchIterations = forcedBuildRestart ? 0 : resume?.patchIterations ?? 0;
@@ -668,9 +748,15 @@ export async function runPipeline(
   while (patchIterations < maxRetries) {
     patchIterations++;
     process.stderr.write(
-      `adw-plan-review-build-patch: stage 4/4 — patch-review (iteration ${patchIterations}/${maxRetries})\n`,
+      `adw-plan-review-build-patch: stage 5/5 — patch-review (iteration ${patchIterations}/${maxRetries})\n`,
     );
-    const patchRes = await deps.runPatchReview(specPathForLater, args.modelOverride, id);
+    const patchRes = await withHeartbeat(
+      {
+        stage: `patch-review (iteration ${patchIterations}/${maxRetries})`,
+        teeFile: join(AGENTS_DIR, id, "patch-reviewer", "raw-output.jsonl"),
+      },
+      () => deps.runPatchReview(specPathForLater, args.modelOverride, id),
+    );
     if (Either.isLeft(patchRes)) {
       appendEvent(id, { event: "stage-error", stage: "patch-review", detail: patchRes.left, iteration: patchIterations });
       state.failed_stage = "patch-review";
@@ -703,13 +789,21 @@ export async function runPipeline(
     await writeState(id, state as unknown as Record<string, unknown>).run();
 
     // GAPS — patch-review appended findings to the spec. If we have retries
-    // left, re-run build; the next patch-review will re-audit the fixed code.
+    // left, re-run build → test; the next patch-review will re-audit the fixed
+    // code and see the fresh results.json. Do NOT route retry builds directly
+    // back to patch-review — the build→test→patch invariant must hold.
     if (patchIterations < maxRetries) {
       process.stderr.write(
-        `adw-plan-review-build-patch: patch-review returned gaps (iteration ${patchIterations}); re-running build\n`,
+        `adw-plan-review-build-patch: patch-review returned gaps (iteration ${patchIterations}); re-running build → test\n`,
       );
       appendEvent(id, { event: "loop-retry", from: "patch-review", to: "build", iteration: patchIterations, verdict: "gaps" });
-      const rebuildRes = await deps.runBuild(specPathForLater, args.modelOverride, id);
+      const rebuildRes = await withHeartbeat(
+        {
+          stage: `build (retry ${patchIterations})`,
+          teeFile: join(AGENTS_DIR, id, "builder", "raw-output.jsonl"),
+        },
+        () => deps.runBuild(specPathForLater, args.modelOverride, id),
+      );
       if (Either.isLeft(rebuildRes)) {
         appendEvent(id, { event: "stage-error", stage: "build", detail: rebuildRes.left, iteration: patchIterations, retry: true });
         state.failed_stage = "build";
@@ -723,7 +817,40 @@ export async function runPipeline(
         retry: true,
         spec_path: specPathForLater,
       });
+      // Invalidate prior test completion — the retry build requires a fresh
+      // test run before the next patch-review attempt. Resume must NOT skip
+      // the post-retry-build test rerun.
+      const testIdx = completedStages.indexOf("test");
+      if (testIdx >= 0) completedStages.splice(testIdx, 1);
       state.patch_review_next_action = "patch-review";
+      await writeState(id, state as unknown as Record<string, unknown>).run();
+
+      // Re-run test stage after the retry build.
+      process.stderr.write(
+        `adw-plan-review-build-patch: stage 4/5 — test (retry ${patchIterations})\n`,
+      );
+      const retestRes = await withHeartbeat(
+        {
+          stage: `test (retry ${patchIterations})`,
+          teeFile: join(AGENTS_DIR, id, "tester", "events.jsonl"),
+        },
+        () => deps.runTest(specPathForLater, args.modelOverride, id),
+      );
+      if (Either.isLeft(retestRes)) {
+        appendEvent(id, { event: "stage-error", stage: "test", detail: retestRes.left, iteration: patchIterations, retry: true });
+        state.failed_stage = "test";
+        return finalize(Either.left(`test stage failed (retry ${patchIterations}): ${retestRes.left}`));
+      }
+      stages.test = retestRes.right;
+      appendEvent(id, {
+        event: "stage-complete",
+        stage: "test",
+        verdict: retestRes.right.verdict,
+        iteration: patchIterations,
+        retry: true,
+        spec_path: specPathForLater,
+      });
+      if (!completedStages.includes("test")) completedStages.push("test");
       await writeState(id, state as unknown as Record<string, unknown>).run();
       // Loop continues to the next patch-review iteration.
     }

@@ -10,7 +10,7 @@
  * direct dependency on child_process and is unit-testable with a mock. Mirrors
  * the BuilderDeps / CodexDeps convention from builder.ts / reviewer.ts.
  */
-import { readFileSync, writeFileSync, mkdirSync } from "fs";
+import { readFileSync, writeFileSync, mkdirSync, readdirSync } from "fs";
 import { dirname, join } from "path";
 import { TaskEither, Either } from "../../src/utils/task-either.ts";
 
@@ -64,6 +64,13 @@ export interface GatherBundle {
 export interface GateResults {
   typecheck: GateResult;
   unit: GateResult;
+  /**
+   * Optional tmax-use gate. Populated when `tmax-use/playbooks/` or
+   * `tmax-use/tests/` has any files; otherwise undefined (gate skipped).
+   * Allows the build-agent to verify visual/state behavior via the tmax-use
+   * runner without forcing projects that don't use tmax-use to install it.
+   */
+  tmaxUse?: GateResult;
 }
 
 /** Validated audit verdict from the sub-agent. */
@@ -336,8 +343,30 @@ export function writeGatherBundle(gatherFile: string, markdown: string): TaskEit
 // runGates — typecheck:src + test:unit
 // ---------------------------------------------------------------------------
 
-export function runGates(deps: PatchReviewerDeps, cwd: string): TaskEither<string, GateResults> {
+/** §C2: phase callback for runGates. Fires before each sequential gate command
+ * so the dispatcher can emit one stderr line per gate transition. The callback
+ * is best-effort: a throw inside it is swallowed so observation cannot change
+ * gate execution. */
+export type GatePhaseCallback = (phase: GatePhase, command: string) => void;
+export type GatePhase = "gates:typecheck" | "gates:unit" | "gates:tmax-use";
+
+export interface RunGatesOptions {
+  onPhase?: GatePhaseCallback;
+}
+
+/** Helper that invokes onPhase defensively; never throws. */
+function safePhase(onPhase: GatePhaseCallback | undefined, phase: GatePhase, command: string): void {
+  if (!onPhase) return;
+  try { onPhase(phase, command); } catch { /* observer must not affect gates */ }
+}
+
+export function runGates(
+  deps: PatchReviewerDeps,
+  cwd: string,
+  options: RunGatesOptions = {},
+): TaskEither<string, GateResults> {
   return TaskEither.from(async () => {
+    safePhase(options.onPhase, "gates:typecheck", "bun run typecheck:src");
     const tcRes = await deps.runRaw("bun", ["run", "typecheck:src"], { cwd }).run();
     if (Either.isLeft(tcRes)) {
       return Either.left(`runGates: typecheck spawn failed: ${tcRes.left}`);
@@ -350,6 +379,7 @@ export function runGates(deps: PatchReviewerDeps, cwd: string): TaskEither<strin
       output: (tcRes.right.stdout + tcRes.right.stderr).trim(),
     };
 
+    safePhase(options.onPhase, "gates:unit", "bun run test:unit");
     const unitRes = await deps.runRaw("bun", ["run", "test:unit"], { cwd }).run();
     if (Either.isLeft(unitRes)) {
       return Either.left(`runGates: test:unit spawn failed: ${unitRes.left}`);
@@ -362,8 +392,44 @@ export function runGates(deps: PatchReviewerDeps, cwd: string): TaskEither<strin
       output: (unitRes.right.stdout + unitRes.right.stderr).trim(),
     };
 
-    return Either.right<GateResults, string>({ typecheck, unit });
+    // tmax-use gate: optional, runs only if playbooks or tests exist.
+    let tmaxUse: GateResult | undefined;
+    if (hasTmaxUseTargets(cwd)) {
+      safePhase(options.onPhase, "gates:tmax-use", "bun run test:tmax-use");
+      const tuRes = await deps.runRaw("bun", ["run", "test:tmax-use"], { cwd }).run();
+      if (Either.isLeft(tuRes)) {
+        return Either.left(`runGates: test:tmax-use spawn failed: ${tuRes.left}`);
+      }
+      tmaxUse = {
+        ok: tuRes.right.ok,
+        exitCode: tuRes.right.exitCode,
+        stdout: tuRes.right.stdout,
+        stderr: tuRes.right.stderr,
+        output: (tuRes.right.stdout + tuRes.right.stderr).trim(),
+      };
+    }
+
+    return Either.right<GateResults, string>({ typecheck, unit, tmaxUse });
   });
+}
+
+/** True if `tmax-use/playbooks/` or `tmax-use/tests/` contains any targets. */
+function hasTmaxUseTargets(cwd: string): boolean {
+  try {
+    const targets = [
+      join(cwd, "tmax-use/playbooks"),
+      join(cwd, "tmax-use/tests"),
+    ];
+    for (const dir of targets) {
+      const entries = readdirSync(dir, { withFileTypes: true });
+      if (entries.some((e) => e.isFile() && (e.name.endsWith(".yaml") || e.name.endsWith(".yml") || e.name.endsWith(".tmax-use.ts")))) {
+        return true;
+      }
+    }
+    return false;
+  } catch {
+    return false;
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -385,6 +451,9 @@ export function buildAuditPrompt(
   const gatesSummary = [
     `typecheck:src → ${gates.typecheck.ok ? "PASS" : "FAIL"} (exit ${gates.typecheck.exitCode})`,
     `test:unit → ${gates.unit.ok ? "PASS" : "FAIL"} (exit ${gates.unit.exitCode})`,
+    gates.tmaxUse
+      ? `test:tmax-use → ${gates.tmaxUse.ok ? "PASS" : "FAIL"} (exit ${gates.tmaxUse.exitCode})`
+      : `test:tmax-use → SKIPPED (no tmax-use targets)`,
   ].join("\n");
 
   return `You are auditing a build's implementation against its spec for the tmax terminal editor.

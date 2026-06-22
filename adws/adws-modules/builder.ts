@@ -33,7 +33,7 @@ export interface BuildResult {
 /** Injected subprocess helpers (shape matches run/runCapture in adw-build.ts). */
 export interface BuilderDeps {
   run: (cmd: string, args: string[], opts?: { cwd?: string }) => TaskEither<string, string>;
-  runCapture: (cmd: string, args: string[], opts: { cwd?: string; teeTo: string }) => TaskEither<string, string>;
+  runCapture: (cmd: string, args: string[], opts: { cwd?: string; teeTo: string; liveLabel?: string }) => TaskEither<string, string>;
 }
 
 /**
@@ -110,6 +110,7 @@ export function build(
   specPath: string,
   builderLog: string, // full path: agents/{id}/builder/raw-output.jsonl
   model: string = BUILD_MODEL,
+  liveLabel?: string,
 ): TaskEither<string, BuildResult> {
   // Initialize the raw-output log: ensure dir, truncate file. A failure here is
   // a build failure (can't capture output), surfaced via TaskEither.left.
@@ -127,7 +128,7 @@ export function build(
       // stream-json requires --verbose under --print; verbose logs go to stderr,
       // the streamed JSON events are what we tee to builderLog on stdout.
       ["-p", "--model", model, "--verbose", "--output-format", "stream-json", `/implement ${specPath}`],
-      { cwd, teeTo: builderLog },
+      { cwd, teeTo: builderLog, ...(liveLabel ? { liveLabel } : {}) },
     ).flatMap((stdout) => {
       const skill = parseSkillResult(builderLog, stdout);
       if (skill === null) {

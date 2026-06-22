@@ -30,6 +30,7 @@ import { join } from "path";
 import { Either, TaskEither } from "../src/utils/task-either.ts";
 import { match } from "../src/utils/adt.ts";
 import { type PlanType, type AgentDeps, type ClassifyResult, type DispatchOutcome, classify, dispatch } from "./adws-modules/agent.ts";
+import { formatToolUseLine } from "./adws-modules/live-filter.ts";
 
 const PROJECT_ROOT = realpathSync(join(import.meta.dir, ".."));
 const AGENTS_DIR = join(PROJECT_ROOT, "agents");
@@ -164,7 +165,7 @@ function run(cmd: string, args: string[], opts: RunOpts = {}): TaskEither<string
  * arrives (via sync appendFileSync — acceptable for line-at-a-time small writes
  * that must survive a crash). Returns TaskEither (lazy).
  */
-function runCapture(cmd: string, args: string[], opts: RunOpts & { teeTo: string }): TaskEither<string, string> {
+function runCapture(cmd: string, args: string[], opts: RunOpts & { teeTo: string; liveLabel?: string }): TaskEither<string, string> {
   return TaskEither.from(async () => {
     return await new Promise<Either<string, string>>((resolve) => {
       const child = spawn(cmd, args, {
@@ -184,6 +185,13 @@ function runCapture(cmd: string, args: string[], opts: RunOpts & { teeTo: string
         while ((nl = teeBuf.indexOf("\n")) >= 0) {
           const line = teeBuf.slice(0, nl + 1);
           try { appendFileSync(opts.teeTo, line); } catch { /* ignore */ }
+          // §C: when liveLabel is set, filter and emit tool_use lines to stderr.
+          if (opts.liveLabel) {
+            try {
+              const filtered = formatToolUseLine(opts.liveLabel, line.trimEnd());
+              if (filtered) process.stderr.write(filtered + "\n");
+            } catch { /* best-effort */ }
+          }
           teeBuf = teeBuf.slice(nl + 1);
         }
       });
@@ -195,6 +203,12 @@ function runCapture(cmd: string, args: string[], opts: RunOpts & { teeTo: string
         // Flush trailing partial line
         if (teeBuf.length > 0) {
           try { appendFileSync(opts.teeTo, teeBuf); } catch { /* ignore */ }
+          if (opts.liveLabel) {
+            try {
+              const filtered = formatToolUseLine(opts.liveLabel, teeBuf.trimEnd());
+              if (filtered) process.stderr.write(filtered + "\n");
+            } catch { /* best-effort */ }
+          }
         }
         if (code === 0) resolve(Either.right(stdout.trim()));
         else resolve(Either.left((stderr || stdout).trim() || `${cmd} exited with code ${code}`));
@@ -312,7 +326,9 @@ export function runPlan(
     // Step 2: dispatch to the matching skill
     .flatMap((ctx: Classified) => {
       const plannerLog = join(AGENTS_DIR, ctx.id, "planner", "raw-output.jsonl");
-      return dispatch(deps, PROJECT_ROOT, SPECS_DIR, plannerLog, ctx.type, ctx.description)
+      // §C: live tool-use filtering to stderr — only when orchestrated.
+      const liveLabel = process.env.ADW_ORCHESTRATED === "1" ? "plan" : undefined;
+      return dispatch(deps, PROJECT_ROOT, SPECS_DIR, plannerLog, ctx.type, ctx.description, liveLabel)
         .map((outcome: DispatchOutcome) => {
           const dispatchEvent: { event: "dispatch"; skill: string; status: "ok"; kind: string; detail: string } = match(outcome, {
             created: (v) => ({ event: "dispatch" as const, skill: ctx.type, status: "ok" as const, kind: "created" as const, detail: v.path }),

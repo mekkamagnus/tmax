@@ -23,6 +23,7 @@ import {
   type SpecReviewResult,
   type BuildOutcome,
   type PatchReviewResult,
+  type TestOutcome,
 } from "../../adws/adw-plan-review-build-patch.ts";
 
 // Track created orchestrator-id dirs so we can clean them up.
@@ -73,6 +74,12 @@ const mockPatchGaps = (): PatchReviewResult => ({
   specPath: "/abs/spec.md",
 });
 
+const mockTestPass = (): TestOutcome => ({
+  id: "TESTTEST1",
+  verdict: "pass",
+  specPath: "/abs/spec.md",
+});
+
 /**
  * Build mock deps whose stages return canned values or sequences. The patch
  * and build stages support an array of Eithers — each call pops the next.
@@ -83,6 +90,7 @@ function mockDeps(opts: {
   review?: Either<string, SpecReviewResult>;
   build?: Either<string, BuildOutcome> | Array<Either<string, BuildOutcome>>;
   patch?: Either<string, PatchReviewResult> | Array<Either<string, PatchReviewResult>>;
+  test?: Either<string, TestOutcome> | Array<Either<string, TestOutcome>>;
 } = {}): PipelineDeps & {
   planCalls: Array<{ description: string; forcedType?: string; id: string }>;
   reviewCalls: Array<{ input: string; id: string }>;
@@ -96,6 +104,7 @@ function mockDeps(opts: {
 
   const buildQueue = Array.isArray(opts.build) ? [...opts.build] : null;
   const patchQueue = Array.isArray(opts.patch) ? [...opts.patch] : null;
+  const testQueue = Array.isArray(opts.test) ? [...opts.test] : null;
 
   return {
     planCalls,
@@ -117,6 +126,13 @@ function mockDeps(opts: {
         return next ?? Either.right(mockBuild());
       }
       return opts.build && !Array.isArray(opts.build) ? opts.build : Either.right(mockBuild());
+    },
+    runTest: async () => {
+      if (testQueue) {
+        const next = testQueue.shift();
+        return next ?? Either.right(mockTestPass());
+      }
+      return opts.test && !Array.isArray(opts.test) ? opts.test : Either.right(mockTestPass());
     },
     runPatchReview: async (input, modelOverride, id) => {
       patchCalls.push({ input, modelOverride, id });
@@ -244,8 +260,9 @@ describe("runPipeline — fresh run", () => {
     expect(state.status).toBe("completed");
     expect(state.patch_review_verdict).toBe("pass");
     expect(state.patch_review_iterations).toBe(1);
-    expect(state.completed_stages).toEqual(["plan", "review", "build", "patch-review"]);
+    expect(state.completed_stages).toEqual(["plan", "review", "build", "test", "patch-review"]);
     expect(state.agents).toContain("patch-reviewer");
+    expect(state.agents).toContain("tester");
   });
 });
 
@@ -370,7 +387,7 @@ describe("runPipeline — spec-path input", () => {
     if (Either.isLeft(result)) throw new Error("expected success");
 
     const state = JSON.parse(readFileSync(join(AGENTS_DIR, result.right.id, "adw-state.json"), "utf8"));
-    expect(state.completed_stages).toEqual(["plan", "review", "build", "patch-review"]);
+    expect(state.completed_stages).toEqual(["plan", "review", "build", "test", "patch-review"]);
     expect(state.spec_path).toBe("/abs/SPEC-059.md");
   });
 });

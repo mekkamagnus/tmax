@@ -35,6 +35,52 @@ const PROJECT_ROOT = realpathSync(join(import.meta.dir, ".."));
 const AGENTS_DIR = join(PROJECT_ROOT, "agents");
 const SPECS_DIR = join(PROJECT_ROOT, "docs", "specs");
 
+// §D1: cap (and per-issue truncation) for the verdict line's issue list. The
+// full list is always written to events.jsonl; this cap only governs the
+// console rendering to avoid flooding the tmux window on a badly broken spec.
+const MAX_VERDICT_ISSUES_ON_CONSOLE = 10;
+const MAX_ISSUE_LEN = 200;
+
+/**
+ * §D1: pure formatter for the spec-review verdict line.
+ *
+ * - On `pass`: single line `adw-spec-review: verdict=pass\n` (no bullets).
+ * - On `fail`: header `adw-spec-review: verdict=fail — N issues:\n` followed by
+ *   one `- <issue>` bullet per issue (capped at MAX_VERDICT_ISSUES_ON_CONSOLE),
+ *   with a trailing `... (N more)\n` when the cap truncates the list. Each
+ *   issue is truncated to ~MAX_ISSUE_LEN chars and any embedded newlines are
+ *   collapsed to spaces so a single issue never breaks the bullet structure.
+ *
+ * Robust against malformed input: empty issues on a fail verdict renders
+ * `verdict=fail — 0 issues:` with no bullets; non-string entries are coerced
+ * via String(); long entries are truncated with a trailing `...`.
+ */
+export function formatVerdictLine(verdict: ReviewVerdictPayload): string {
+  if (verdict.verdict === "pass") {
+    return `adw-spec-review: verdict=pass\n`;
+  }
+  const issues = Array.isArray(verdict.issues) ? verdict.issues : [];
+  const total = issues.length;
+  const header = `adw-spec-review: verdict=fail — ${total} issue${total === 1 ? "" : "s"}:\n`;
+  if (total === 0) return header;
+  const shown = issues.slice(0, MAX_VERDICT_ISSUES_ON_CONSOLE);
+  const bullets = shown.map((raw) => {
+    const text = collapseAndTruncateIssue(raw);
+    return `  - ${text}\n`;
+  });
+  const remaining = total - shown.length;
+  const tail = remaining > 0 ? `  ... (${remaining} more)\n` : "";
+  return header + bullets.join("") + tail;
+}
+
+/** Coerce to string, collapse newlines/tabs to single spaces, truncate to MAX_ISSUE_LEN. */
+function collapseAndTruncateIssue(raw: unknown): string {
+  const s = typeof raw === "string" ? raw : String(raw ?? "");
+  const oneLine = s.replace(/[\r\n]+/g, " ").replace(/\s+/g, " ").trim();
+  if (oneLine.length <= MAX_ISSUE_LEN) return oneLine;
+  return oneLine.slice(0, MAX_ISSUE_LEN - 3) + "...";
+}
+
 // ---------------------------------------------------------------------------
 // Usage / arg parsing
 // ---------------------------------------------------------------------------
@@ -361,7 +407,7 @@ export function runSpecReview(
             issue_count: verdict.issues.length,
             issues: verdict.issues,
           });
-          process.stderr.write(`adw-spec-review: verdict=${verdict.verdict} (${verdict.issues.length} issues)\n`);
+          process.stderr.write(formatVerdictLine(verdict));
         })
         .map((verdict: ReviewVerdictPayload) => ({ ...ctx, verdict }));
     })

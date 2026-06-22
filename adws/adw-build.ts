@@ -25,11 +25,12 @@
  *   agents/{build-id}/builder/raw-output.jsonl — claude /implement output (streamed)
  */
 import { spawn } from "child_process";
-import { appendFileSync, existsSync, mkdirSync, readFileSync, realpathSync } from "fs";
+import { appendFileSync, existsSync, mkdirSync, readFileSync, readdirSync, realpathSync } from "fs";
 import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "path";
 import { Either, TaskEither } from "../src/utils/task-either.ts";
 import { BUILD_MODEL, type BuilderDeps, build, ensureAvailable } from "./adws-modules/builder.ts";
+import { formatToolUseLine } from "./adws-modules/live-filter.ts";
 import { findWorkspaceBySpecPath } from "./adws-modules/workspace.ts";
 
 const PROJECT_ROOT = realpathSync(join(import.meta.dir, ".."));
@@ -169,7 +170,7 @@ function run(cmd: string, args: string[], opts: RunOpts = {}): TaskEither<string
  * arrives (via sync appendFileSync — acceptable for line-at-a-point small writes
  * that must survive a crash). Returns TaskEither (lazy).
  */
-function runCapture(cmd: string, args: string[], opts: RunOpts & { teeTo: string }): TaskEither<string, string> {
+function runCapture(cmd: string, args: string[], opts: RunOpts & { teeTo: string; liveLabel?: string }): TaskEither<string, string> {
   return TaskEither.from(async () => {
     return await new Promise<Either<string, string>>((resolve) => {
       const child = spawn(cmd, args, {
@@ -189,6 +190,13 @@ function runCapture(cmd: string, args: string[], opts: RunOpts & { teeTo: string
         while ((nl = teeBuf.indexOf("\n")) >= 0) {
           const line = teeBuf.slice(0, nl + 1);
           try { appendFileSync(opts.teeTo, line); } catch { /* ignore */ }
+          // §C: when liveLabel is set, filter and emit tool_use lines to stderr.
+          if (opts.liveLabel) {
+            try {
+              const filtered = formatToolUseLine(opts.liveLabel, line.trimEnd());
+              if (filtered) process.stderr.write(filtered + "\n");
+            } catch { /* best-effort — never crash on live output */ }
+          }
           teeBuf = teeBuf.slice(nl + 1);
         }
       });
@@ -200,6 +208,12 @@ function runCapture(cmd: string, args: string[], opts: RunOpts & { teeTo: string
         // Flush trailing partial line
         if (teeBuf.length > 0) {
           try { appendFileSync(opts.teeTo, teeBuf); } catch { /* ignore */ }
+          if (opts.liveLabel) {
+            try {
+              const filtered = formatToolUseLine(opts.liveLabel, teeBuf.trimEnd());
+              if (filtered) process.stderr.write(filtered + "\n");
+            } catch { /* best-effort */ }
+          }
         }
         if (code === 0) resolve(Either.right(stdout.trim()));
         else resolve(Either.left((stderr || stdout).trim() || `${cmd} exited with code ${code}`));
@@ -292,6 +306,86 @@ export function captureGitTrace(
     const diffStat = Either.isRight(stat) ? stat.right.slice(0, 400) : undefined;
     return Either.right<GitTrace, string>({ base_sha: sha.right.trim(), diff_stat: diffStat });
   });
+}
+
+// ---------------------------------------------------------------------------
+// Optional tmax-use e2e gate (SPEC-061 AC#11)
+// ---------------------------------------------------------------------------
+
+export interface E2eGateResult {
+  /** True if the gate ran (targets present) and exited 0. False on failure or skip. */
+  ok: boolean;
+  /** True if the gate was skipped because no tmax-use targets exist. */
+  skipped: boolean;
+  exitCode?: number;
+  /** First ~400 chars of combined stdout/stderr, for event traceability. */
+  output?: string;
+  /** Where the HTML report was written (only when the gate ran). */
+  reportDir?: string;
+}
+
+/**
+ * Run `bin/tmax-use test` as an optional e2e gate after a successful build.
+ *
+ * Skips silently when no tmax-use playbooks or tests exist (so this remains
+ * zero-cost for projects that don't use tmax-use). When targets exist, spawns
+ * `bun run test:tmax-use` and captures the exit code + summary output. The HTML
+ * + JUnit reports land under `agents/{id}/e2e-report/` per spec AC#11.
+ *
+ * NEVER fails the build. A non-zero exit is recorded as `ok: false` in the
+ * returned `E2eGateResult` and emitted as an `e2e_gate` event; the caller
+ * (patch-review) is responsible for treating e2e failures as audit inputs.
+ */
+export function runE2eGate(
+  run: (cmd: string, args: string[], opts: RunOpts) => TaskEither<string, string>,
+  cwd: string,
+  reportDir: string,
+): TaskEither<string, E2eGateResult> {
+  return TaskEither.from(async () => {
+    if (!hasTmaxUseTargets(cwd)) {
+      return Either.right<E2eGateResult, string>({ ok: true, skipped: true });
+    }
+    // The runner accepts `--output` for the HTML/JUnit report directory.
+    // `bun run test:tmax-use` is wired in package.json to `bin/tmax-use test`.
+    const res = await run("bun", [
+      "run", "test:tmax-use",
+      "--output", reportDir,
+      "--reporter", "all",
+    ], { cwd }).run();
+    if (Either.isLeft(res)) {
+      // spawn failure (e.g. bun missing) — record as not-ok with the error.
+      return Either.right<E2eGateResult, string>({
+        ok: false, skipped: false, reportDir, output: `spawn failed: ${res.left}`.slice(0, 400),
+      });
+    }
+    // `run` returns trimmed stdout on Right. A non-zero exit is Left (with
+    // stderr||stdout as the error), so a Right here means exit 0.
+    return Either.right<E2eGateResult, string>({
+      ok: true, skipped: false, exitCode: 0, reportDir, output: res.right.slice(0, 400),
+    });
+  }).mapLeft((err) => `runE2eGate: ${err}`);
+}
+
+/**
+ * Detect whether `tmax-use/playbooks/` or `tmax-use/tests/` has any files this
+ * build's e2e gate should exercise. Matches patch-reviewer's selector so the
+ * build agent and the review agent agree on when tmax-use is in scope.
+ */
+export function hasTmaxUseTargets(cwd: string): boolean {
+  try {
+    const dirs = [join(cwd, "tmax-use/playbooks"), join(cwd, "tmax-use/tests")];
+    for (const dir of dirs) {
+      const entries = readdirSync(dir, { withFileTypes: true });
+      if (entries.some((e) =>
+        e.isFile() && (e.name.endsWith(".yaml") || e.name.endsWith(".yml") || e.name.endsWith(".tmax-use.ts")),
+      )) {
+        return true;
+      }
+    }
+    return false;
+  } catch {
+    return false;
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -410,7 +504,9 @@ export function runBuild(
     // keep ctx flowing to Step 3.
     .flatMap((ctx) => {
       const builderLog = join(AGENTS_DIR, ctx.id, "builder", "raw-output.jsonl");
-      return build(deps, PROJECT_ROOT, ctx.specPath, builderLog, ctx.model)
+      // §C: live tool-use filtering to stderr — only when orchestrated.
+      const liveLabel = process.env.ADW_ORCHESTRATED === "1" ? "build" : undefined;
+      return build(deps, PROJECT_ROOT, ctx.specPath, builderLog, ctx.model, liveLabel)
         .tap(() => appendEvent(ctx.id, "builder", {
           event: "dispatch",
           skill: "implement",
@@ -433,7 +529,23 @@ export function runBuild(
         model: ctx.model,
         status: "completed",
         ...(trace.base_sha ? { base_sha: trace.base_sha } : {}),
-      }).map(() => ({ id: ctx.id, specPath: ctx.specPath, ...(trace.base_sha ? { baseSha: trace.base_sha } : {}) }) as BuildOutcome)));
+      }).map(() => ({ id: ctx.id, specPath: ctx.specPath, ...(trace.base_sha ? { baseSha: trace.base_sha } : {}) }) as BuildOutcome))
+    // Step 4 (optional, never fails the build): run tmax-use e2e gate.
+    // Spec AC#11 — adw build agent calls `bin/tmax-use test` and records
+    // exit code + artifacts under agents/{id}/e2e-report/. Skipped silently
+    // when no tmax-use targets exist.
+    .flatMap((outcome) => {
+      const reportDir = join(AGENTS_DIR, outcome.id, "e2e-report");
+      return runE2eGate(run, PROJECT_ROOT, reportDir)
+        .tap((gate) => appendEvent(outcome.id, "builder", {
+          event: "e2e_gate",
+          ...(gate.skipped ? { skipped: true } : { ok: gate.ok }),
+          ...(gate.exitCode !== undefined ? { exit_code: gate.exitCode } : {}),
+          ...(gate.reportDir ? { report_dir: gate.reportDir } : {}),
+          ...(gate.output ? { output: gate.output } : {}),
+        }))
+        .map(() => outcome);
+    }));
 
   // Run the pipeline. On error: if we got past resolution, record an error event
   // + failed state; otherwise just return the Left. This matches the exit-code

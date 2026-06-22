@@ -34,7 +34,7 @@ const CLAUDE_MODEL = "glm-5.2[1m]";
 /** Injected subprocess helpers (shape matches the run/runCapture in adw-plan.ts). */
 export interface AgentDeps {
   run: (cmd: string, args: string[], opts?: { cwd?: string }) => TaskEither<string, string>;
-  runCapture: (cmd: string, args: string[], opts: { cwd?: string; teeTo: string }) => TaskEither<string, string>;
+  runCapture: (cmd: string, args: string[], opts: { cwd?: string; teeTo: string; liveLabel?: string }) => TaskEither<string, string>;
 }
 
 // ---------------------------------------------------------------------------
@@ -211,6 +211,7 @@ export function dispatch(
   plannerLog: string,
   type: PlanType,
   desc: string,
+  liveLabel?: string,
 ): TaskEither<string, DispatchOutcome> {
   const skill = SKILL_BY_TYPE[type];
   const before = snapshotSpecsDir(specsDir);
@@ -224,7 +225,7 @@ export function dispatch(
     // stream-json requires --verbose under --print; verbose logs go to stderr,
     // the streamed JSON events are what we tee to plannerLog on stdout.
     ["-p", "--model", CLAUDE_MODEL, "--verbose", "--output-format", "stream-json", `/${skill} ${desc}`],
-    { cwd, teeTo: plannerLog },
+    { cwd, teeTo: plannerLog, ...(liveLabel ? { liveLabel } : {}) },
   ).flatMap(() => {
     // Skill ran; inspect its self-reported outcome.
     const skillRes = parseSkillResult(plannerLog);
