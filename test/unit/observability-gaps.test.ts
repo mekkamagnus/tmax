@@ -156,8 +156,8 @@ describe("SPEC-055 gap: make-process capture (stderr read + start/exit entries)"
 // ── Daemon query surface (criterion 12) ───────────────────────────────
 // The query handlers live in server.ts; we test them indirectly via the
 // editor's getUnifiedLog (the same store the query reads). A full socket
-// test is in test:daemon; here we verify the store returns the shape the
-// query serializes.
+// test would run via tmax-use; here we verify the store returns the shape
+// the query serializes.
 
 describe("SPEC-055 gap: daemon query store shape", () => {
   test("getEntries({category, level, last}) returns full LogEntry objects", async () => {

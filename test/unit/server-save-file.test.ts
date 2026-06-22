@@ -1,13 +1,10 @@
-import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
-import { connect } from 'net';
-import { promisify } from 'util';
-import { exec } from 'child_process';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, test } from 'bun:test';
+import { connectWithTimeout, forceShutdown, sweepTestSockets } from '../fixtures/server-test-helpers.ts';
 import { mkdtempSync, writeFileSync, readFileSync, rmSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
 import { TmaxServer } from '../../src/server/server.ts';
 
-const execAsync = promisify(exec);
 const RPC_TIMEOUT = 20000;
 
 function rpcEnvelope(method: string, params: any, id: number): string {
@@ -15,13 +12,12 @@ function rpcEnvelope(method: string, params: any, id: number): string {
 }
 
 async function sendRequest(socketPath: string, method: string, params: any = {}): Promise<any> {
+  const socket = await connectWithTimeout(socketPath);
   return new Promise((resolve, reject) => {
-    const socket = connect(socketPath);
     const timer = setTimeout(() => {
       socket.destroy();
       reject(new Error('Request timeout'));
     }, RPC_TIMEOUT);
-    socket.on('connect', () => socket.write(rpcEnvelope(method, params, Date.now())));
     socket.on('data', (data) => {
       clearTimeout(timer);
       socket.destroy();
@@ -32,23 +28,16 @@ async function sendRequest(socketPath: string, method: string, params: any = {})
       socket.destroy();
       reject(error);
     });
+    socket.write(rpcEnvelope(method, params, Date.now()));
   });
 }
 
 async function startServer(): Promise<{ server: TmaxServer; socketPath: string }> {
-  const socketPath = `/tmp/tmax-save-${Date.now()}-${Math.random().toString(36).slice(2)}.sock`;
-  await execAsync(`rm -f "${socketPath}"`);
+  const socketPath = `/tmp/tmax-save-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2)}.sock`;
   const server = new TmaxServer(socketPath, true);
   await server.start();
   await new Promise(resolve => setTimeout(resolve, 250));
   return { server, socketPath };
-}
-
-async function stopServer(server: TmaxServer | null, socketPath: string): Promise<void> {
-  if (server) {
-    await server.shutdown();
-  }
-  await execAsync(`rm -f "${socketPath}"`);
 }
 
 describe('SPEC-032: save-file RPC', () => {
@@ -56,12 +45,20 @@ describe('SPEC-032: save-file RPC', () => {
   let socketPath: string;
   let tempDir: string;
 
+  beforeAll(() => {
+    sweepTestSockets();
+  });
+
+  afterAll(() => {
+    sweepTestSockets();
+  });
+
   beforeEach(() => {
     tempDir = mkdtempSync(join(tmpdir(), 'tmax-save-'));
   });
 
   afterEach(async () => {
-    await stopServer(server, socketPath);
+    await forceShutdown(server);
     server = null;
     rmSync(tempDir, { recursive: true, force: true });
   }, RPC_TIMEOUT);

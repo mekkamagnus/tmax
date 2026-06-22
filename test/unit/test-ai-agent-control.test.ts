@@ -6,13 +6,10 @@
  * execute T-Lisp code, and get help system responses.
  */
 
-import { describe, test, expect, beforeEach } from 'bun:test';
+import { describe, test, expect, beforeAll, beforeEach, afterEach } from 'bun:test';
 import { TmaxServer } from '../../src/server/server.ts';
-import { connect } from 'net';
-import { promisify } from 'util';
-import { exec } from 'child_process';
+import { connectWithTimeout, forceShutdown, sweepTestSockets } from '../fixtures/server-test-helpers.ts';
 
-const execAsync = promisify(exec);
 const AI_AGENT_CONTROL_TIMEOUT_MS = 20000;
 
 // Helper to create a JSON-RPC request
@@ -27,17 +24,15 @@ function createRequest(method: string, params?: any, id?: string | number): stri
 
 // Helper to send a request and get a response
 async function sendRequest(socketPath: string, request: string): Promise<any> {
+  const socket = await connectWithTimeout(socketPath);
   return new Promise((resolve, reject) => {
-    const socket = connect(socketPath);
     let buffer = "";
     const timer = setTimeout(() => {
       socket.destroy();
       reject(new Error('Request timeout'));
     }, AI_AGENT_CONTROL_TIMEOUT_MS);
 
-    socket.on('connect', () => {
-      socket.write(request);
-    });
+    socket.write(request);
 
     socket.on('data', (data) => {
       buffer += data.toString();
@@ -65,17 +60,19 @@ describe('AI Agent Control', () => {
   let server: TmaxServer | null = null;
   let testSocketPath: string;
 
+  beforeAll(() => {
+    sweepTestSockets();
+  });
+
   beforeEach(async () => {
     // Create a unique socket path for each test
-    testSocketPath = `/tmp/tmax-test-${Date.now()}.sock`;
-
-    // Clean up any existing socket
-    try {
-      await execAsync(`rm -f "${testSocketPath}"`);
-    } catch (err) {
-      // Ignore error
-    }
+    testSocketPath = `/tmp/tmax-test-${process.pid}-${Date.now()}.sock`;
   });
+
+  afterEach(async () => {
+    await forceShutdown(server);
+    server = null;
+  }, AI_AGENT_CONTROL_TIMEOUT_MS);
 
   describe('query:full-state', () => {
     test('should return full editor state', async () => {
@@ -119,10 +116,8 @@ describe('AI Agent Control', () => {
       expect(typeof response.result.cursorPosition.line).toBe('number');
       expect(typeof response.result.cursorPosition.column).toBe('number');
 
-      // Cleanup
-      await server.shutdown();
-      server = null;
-    });
+      // Cleanup handled in afterEach
+    }, AI_AGENT_CONTROL_TIMEOUT_MS);
 
     test('should include buffer information in full-state', async () => {
       server = new TmaxServer(testSocketPath, true);
@@ -150,10 +145,8 @@ describe('AI Agent Control', () => {
       expect(response.result.buffers[0]).toHaveProperty('name');
       expect(response.result.buffers[0]).toHaveProperty('modified');
 
-      // Cleanup
-      await server.shutdown();
-      server = null;
-    });
+      // Cleanup handled in afterEach
+    }, AI_AGENT_CONTROL_TIMEOUT_MS);
   });
 
   describe('describe-function', () => {
@@ -189,10 +182,8 @@ describe('AI Agent Control', () => {
       expect(Array.isArray(response.result.examples)).toBe(true);
       expect(Array.isArray(response.result.relatedFunctions)).toBe(true);
 
-      // Cleanup
-      await server.shutdown();
-      server = null;
-    });
+      // Cleanup handled in afterEach
+    }, AI_AGENT_CONTROL_TIMEOUT_MS);
 
     test('should handle unknown function gracefully', async () => {
       server = new TmaxServer(testSocketPath, true);
@@ -217,10 +208,8 @@ describe('AI Agent Control', () => {
       expect(response.result.file).toBe('unknown');
       expect(response.result.line).toBe(0);
 
-      // Cleanup
-      await server.shutdown();
-      server = null;
-    });
+      // Cleanup handled in afterEach
+    }, AI_AGENT_CONTROL_TIMEOUT_MS);
   });
 
   describe('find-usages', () => {
@@ -255,10 +244,8 @@ describe('AI Agent Control', () => {
         expect(usage).toHaveProperty('code');
       }
 
-      // Cleanup
-      await server.shutdown();
-      server = null;
-    });
+      // Cleanup handled in afterEach
+    }, AI_AGENT_CONTROL_TIMEOUT_MS);
   });
 
   describe('apropos-command', () => {
@@ -292,10 +279,8 @@ describe('AI Agent Control', () => {
         expect(match).toHaveProperty('documentation');
       }
 
-      // Cleanup
-      await server.shutdown();
-      server = null;
-    });
+      // Cleanup handled in afterEach
+    }, AI_AGENT_CONTROL_TIMEOUT_MS);
 
     test('should handle regex patterns correctly', async () => {
       server = new TmaxServer(testSocketPath, true);
@@ -318,10 +303,8 @@ describe('AI Agent Control', () => {
       // Should return matches (even if empty array)
       expect(Array.isArray(response.result.matches)).toBe(true);
 
-      // Cleanup
-      await server.shutdown();
-      server = null;
-    });
+      // Cleanup handled in afterEach
+    }, AI_AGENT_CONTROL_TIMEOUT_MS);
   });
 
   describe('describe-variable', () => {
@@ -357,10 +340,8 @@ describe('AI Agent Control', () => {
       expect(response.result.value).toBeDefined();
       expect(typeof response.result.type).toBe('string');
 
-      // Cleanup
-      await server.shutdown();
-      server = null;
-    });
+      // Cleanup handled in afterEach
+    }, AI_AGENT_CONTROL_TIMEOUT_MS);
 
     test('should handle unknown variable gracefully', async () => {
       server = new TmaxServer(testSocketPath, true);
@@ -384,10 +365,8 @@ describe('AI Agent Control', () => {
       expect(response.result.name).toBe('*unknown-variable*');
       expect(response.result.type).toBe('unknown');
 
-      // Cleanup
-      await server.shutdown();
-      server = null;
-    });
+      // Cleanup handled in afterEach
+    }, AI_AGENT_CONTROL_TIMEOUT_MS);
   });
 
   describe('Performance', () => {
@@ -414,10 +393,8 @@ describe('AI Agent Control', () => {
 
       expect(duration).toBeLessThan(5000);
 
-      // Cleanup
-      await server.shutdown();
-      server = null;
-    });
+      // Cleanup handled in afterEach
+    }, AI_AGENT_CONTROL_TIMEOUT_MS);
 
     test('should handle multiple rapid requests within a bounded time', async () => {
       server = new TmaxServer(testSocketPath, true);
@@ -450,10 +427,8 @@ describe('AI Agent Control', () => {
 
       expect(duration).toBeLessThan(5000);
 
-      // Cleanup
-      await server.shutdown();
-      server = null;
-    });
+      // Cleanup handled in afterEach
+    }, AI_AGENT_CONTROL_TIMEOUT_MS);
   });
 
   describe('Error Handling', () => {
@@ -475,10 +450,8 @@ describe('AI Agent Control', () => {
       expect(response.error).toBeDefined();
       expect(response.error.code).not.toBe(-32600); // Not an invalid request error
 
-      // Cleanup
-      await server.shutdown();
-      server = null;
-    });
+      // Cleanup handled in afterEach
+    }, AI_AGENT_CONTROL_TIMEOUT_MS);
 
     test('should return error for missing function name in describe-function', async () => {
       server = new TmaxServer(testSocketPath, true);
@@ -498,10 +471,8 @@ describe('AI Agent Control', () => {
       expect(response.id).toBe(1);
       expect(response.error).toBeDefined();
 
-      // Cleanup
-      await server.shutdown();
-      server = null;
-    });
+      // Cleanup handled in afterEach
+    }, AI_AGENT_CONTROL_TIMEOUT_MS);
 
     test('should return error for missing pattern in apropos-command', async () => {
       server = new TmaxServer(testSocketPath, true);
@@ -521,9 +492,7 @@ describe('AI Agent Control', () => {
       expect(response.id).toBe(1);
       expect(response.error).toBeDefined();
 
-      // Cleanup
-      await server.shutdown();
-      server = null;
-    });
+      // Cleanup handled in afterEach
+    }, AI_AGENT_CONTROL_TIMEOUT_MS);
   });
 });

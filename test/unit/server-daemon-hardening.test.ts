@@ -1,8 +1,9 @@
-import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
-import { connect, Socket } from 'net';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, test } from 'bun:test';
+import { Socket } from 'net';
 import { existsSync, mkdtempSync, rmSync, unlinkSync, writeFileSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
+import { connectWithTimeout, forceShutdown, sweepTestSockets } from '../fixtures/server-test-helpers.ts';
 import { TmaxServer } from '../../src/server/server.ts';
 
 function uniqueSocket(): string {
@@ -21,12 +22,9 @@ class RpcConnection {
     this.socket = socket;
   }
 
-  static connect(socketPath: string): Promise<RpcConnection> {
-    return new Promise((resolve, reject) => {
-      const socket = connect(socketPath);
-      socket.on('connect', () => resolve(new RpcConnection(socket)));
-      socket.on('error', reject);
-    });
+  static async connect(socketPath: string): Promise<RpcConnection> {
+    const socket = await connectWithTimeout(socketPath);
+    return new RpcConnection(socket);
   }
 
   send(method: string, params: any = {}): Promise<any> {
@@ -96,6 +94,14 @@ describe('Daemon hardening', () => {
   let originalHome: string | undefined;
   let originalWorkspaceDir: string | undefined;
 
+  beforeAll(() => {
+    sweepTestSockets();
+  });
+
+  afterAll(() => {
+    sweepTestSockets();
+  });
+
   beforeEach(() => {
     socketPath = uniqueSocket();
     homeDir = mkdtempSync(join(tmpdir(), 'tmax-harden-home-'));
@@ -106,10 +112,8 @@ describe('Daemon hardening', () => {
   });
 
   afterEach(async () => {
-    if (server) {
-      await server.shutdown();
-      server = null;
-    }
+    await forceShutdown(server);
+    server = null;
     // Clean up any remaining files
     try { unlinkSync(socketPath); } catch {}
     try { unlinkSync(socketPath + '.lock'); } catch {}

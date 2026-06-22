@@ -1528,11 +1528,35 @@ export class TmaxServer {
 
   /**
    * Handle capture request — render current frame and return ANSI or HTML.
+   *
+   * Dimension resolution order (per SPEC-061):
+   *   1. Explicit `params.width` / `params.height` (must be positive integers).
+   *   2. Active frame's terminal size (if a frame is resolved).
+   *   3. 80x24 final fallback.
+   *
+   * Non-integer, zero, or negative dimensions are rejected with a JSON-RPC
+   * error so callers cannot accidentally render to a 0×0 frame.
    */
   private handleCapture(params: any): any {
     const format = params?.format ?? "ansi";
 
-    // Get terminal size from the active frame, or fall back to 80x24
+    // Validate explicit dimensions if the caller provided them.
+    const explicitWidth = params?.width;
+    const explicitHeight = params?.height;
+    const isPositiveInt = (v: unknown): v is number =>
+      typeof v === "number" && Number.isInteger(v) && v > 0;
+    if (explicitWidth !== undefined && !isPositiveInt(explicitWidth)) {
+      throw new Error(
+        `capture: width must be a positive integer (got ${JSON.stringify(explicitWidth)})`,
+      );
+    }
+    if (explicitHeight !== undefined && !isPositiveInt(explicitHeight)) {
+      throw new Error(
+        `capture: height must be a positive integer (got ${JSON.stringify(explicitHeight)})`,
+      );
+    }
+
+    // Final fallback: 80x24.
     let width = 80;
     let height = 24;
 
@@ -1544,6 +1568,10 @@ export class TmaxServer {
         height = obs.terminalSize.height;
       }
     }
+
+    // Explicit params win over everything else.
+    if (explicitWidth !== undefined) width = explicitWidth;
+    if (explicitHeight !== undefined) height = explicitHeight;
 
     const state = frame
       ? this.frameToEditorState(frame)

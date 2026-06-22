@@ -13,6 +13,7 @@ import type { EditorState } from "../../src/core/types.ts";
 import { existsSync, mkdtempSync, rmSync, unlinkSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
+import { connectWithTimeout, sweepTestSockets } from "../fixtures/server-test-helpers.ts";
 
 const SOCKET = `/tmp/tmax-capture-parity-${process.pid}.sock`;
 let daemonProcess: Subprocess | null = null;
@@ -56,11 +57,7 @@ function sendRpc(socket: Socket, method: string, params: any): Promise<any> {
 }
 
 function connectSocket(path: string): Promise<Socket> {
-  return new Promise((resolve, reject) => {
-    const sock = new Socket();
-    sock.connect(path, () => resolve(sock));
-    sock.on("error", reject);
-  });
+  return connectWithTimeout(path);
 }
 
 async function waitForSocket(path: string, attempts = 30): Promise<void> {
@@ -80,6 +77,7 @@ describe("Daemon capture parity", () => {
   beforeAll(async () => {
     // Clean up stale socket
     if (existsSync(SOCKET)) unlinkSync(SOCKET);
+    sweepTestSockets();
     homeDir = mkdtempSync(join(tmpdir(), "tmax-capture-home-"));
     previousHome = process.env.HOME;
     previousWorkspaceDir = process.env.TMAX_WORKSPACE_DIR;
@@ -102,11 +100,20 @@ describe("Daemon capture parity", () => {
 
   afterAll(() => {
     sock?.destroy();
-    if (daemonProcess) {
-      daemonProcess.kill();
+    const proc = daemonProcess;
+    if (proc) {
+      try { proc.kill("SIGTERM"); } catch {}
+      // Give the daemon a moment to shut down gracefully, then force-kill
+      // to defend against a wedged process that ignores SIGTERM.
+      setTimeout(() => {
+        try { proc.kill("SIGKILL"); } catch {}
+      }, 500);
       daemonProcess = null;
     }
-    if (existsSync(SOCKET)) unlinkSync(SOCKET);
+    if (existsSync(SOCKET)) {
+      try { unlinkSync(SOCKET); } catch {}
+    }
+    sweepTestSockets();
     if (previousHome === undefined) delete process.env.HOME;
     else process.env.HOME = previousHome;
     if (previousWorkspaceDir === undefined) delete process.env.TMAX_WORKSPACE_DIR;
