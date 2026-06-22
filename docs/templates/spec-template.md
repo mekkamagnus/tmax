@@ -97,8 +97,8 @@ Fill this table **before writing steps.** If a row can't be filled, the spec isn
 - `bun run typecheck:test` — Zero type errors
 - `bun run typecheck` — Zero type errors
 - `bun test` — All tests pass (existing + new)
-- `bun run test:daemon` — Daemon starts and serves correctly
-- `bun run test:ui:renderer` — Renderer tests pass (for UI changes)
+- `bun run test:unit` — Unit tests pass with zero regressions
+- `bun run test:tmax-use` — tmax-use e2e playbooks pass (for user-visible changes)
 
 ## Design Decisions
 

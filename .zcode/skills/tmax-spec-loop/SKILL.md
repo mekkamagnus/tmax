@@ -13,7 +13,7 @@ One iteration of an autonomous loop over `docs/specs/SPEC-*.md`. Each invocation
 1. **Pick** the lowest-numbered SPEC with no progress entry (or `status: skipped`).
 2. **Worktree** — create `.worktrees/spec-<id>` on branch `spec-loop/<id>`.
 3. **Reflect-refine loop (up to 3 attempts)** — dispatch a Claude Code sub-agent (via Agent tool) with the SPEC content + the standard verification gates. On verify failure, feed the failing gate + excerpt back to the sub-agent and re-dispatch. Same worktree across all retries.
-4. **Verify** — `bun run typecheck`, `bun run test:unit`, and (if `src/server/` was touched) restart the daemon per `docs/learnings.md` and run `bun run test:daemon`.
+4. **Verify** — `bun run typecheck` and `bun run test:unit`.
 5. **Audit gate** — after VERIFY OK, run the tmax-patch-review auditor against the worktree's branch. Only `VERDICT: PASS` proceeds to `done`. `GAPS` feeds the audit findings back into the reflect-refine loop (same 3-attempt budget).
 6. **Deferred check** — after audit PASS, read `DEFERRED.md` from the worktree. If non-empty, STOP for human approval (no autonomous descopes).
 7. **Record** — write `{spec_id, status, worktree, branch, commit, attempts, attempt_log, files, last_error}` to `.spec-loop/progress.json`.
@@ -125,7 +125,7 @@ For `ATTEMPT_NUM` starting at 1:
 
   The sub-agent works INSIDE the worktree (cwd = `WORKTREE_PATH`) and commits incrementally on `spec-loop/<id>`.
 
-  **4c — Verify.** Run `bun scripts/run.ts verify <SPEC_ID>`. This runs `typecheck`, `test:unit`, and (conditionally) restarts the daemon + runs `test:daemon`. It emits either:
+  **4c — Verify.** Run `bun scripts/run.ts verify <SPEC_ID>`. This runs `typecheck` and `test:unit`. It emits either:
   - `VERIFY OK` → go to **4f (audit gate)**.
   - `VERIFY FAILED: <reason>` plus `FAILED_GATE=<label>` and `FAILURE_EXCERPT=<last 40 lines, single line, capped 2000 chars>` → go to **4d**.
 

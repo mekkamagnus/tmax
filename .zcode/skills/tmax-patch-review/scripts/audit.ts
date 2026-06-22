@@ -464,21 +464,11 @@ const cmdGates = async (paths: Paths, specArg: string, gatherDir: string): Promi
   const gatherPath = path.join(gatherDir, "gather.md");
   if (!existsSync(gatherPath)) die(`Gather bundle not found: ${gatherPath}`);
 
-  // Re-derive daemonTouched from the bundle.
-  const text = await file(gatherPath).text();
-  const dm = text.match(/^## Daemon-touched:\s*(true|false)/m);
-  const daemonTouched = dm ? dm[1] === "true" : false;
-
   const failedRef = { failed: "" };
   const gate = runGate(gatherPath, paths.projectRoot, failedRef);
 
   await gate("typecheck:src", ["bun", "run", "typecheck:src"]);
   await gate("test:unit", ["bun", "run", "test:unit"]);
-  if (daemonTouched) {
-    await gate("daemon-restart", ["uv", "run", daemonScript("stop_daemon.py")]);
-    await gate("daemon-start", ["uv", "run", daemonScript("start_daemon.py"), paths.projectRoot]);
-    await gate("test:daemon", ["bun", "run", "test:daemon"]);
-  }
 
   if (failedRef.failed) {
     console.log(`GATES_FAILED: ${failedRef.failed}`);

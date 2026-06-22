@@ -57,18 +57,16 @@ many-to-one), judge:
 ### What counts as "a test"
 
 - `test/unit/*.test.ts` for unit-level behavior.
-- `test/ui/*.test.ts` (tmux harness) for terminal-rendering behavior.
-- `test/daemon/*` for JSON-RPC protocol behavior.
+- `tmax-use/playbooks/*.yaml` (tmax-use e2e) for terminal-rendering and user-visible behavior.
 - T-Lisp-level tests in `src/tlisp/core/**/*.tlisp` IF they are wired
   into a test runner that the gate actually executes. Stash-only test
   files that no runner picks up do not count.
 
-### Specific rules (from `rules/testing.md` and `rules/ui-testing.md`)
+### Specific rules (from `rules/testing.md`)
 
-- Visual/rendering fixes must have a UI test that sends real keys and
-  inspects captured output. Unit tests of the renderer do not suffice.
-- Daemon changes must have a daemon test. The gate restarts the daemon
-  before `test:daemon` for this reason.
+- Visual/rendering fixes must have a tmax-use e2e playbook that drives
+  real keys and asserts on observed editor state. Unit tests of the
+  renderer do not suffice.
 - Type errors are not "covered" by typecheck alone — typecheck proves
   the types compile, not that the behavior is right.
 

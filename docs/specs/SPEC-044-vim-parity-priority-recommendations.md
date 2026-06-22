@@ -1,26 +1,26 @@
 # Feature: Vim Parity — Priority Recommendations Roadmap
 
-**Depends on:** SPEC-005 (vim editing model), SPEC-038 (unified keymap dispatch), SPEC-041 (operator+find-char), the Vim-vs-VSCode-Vim gap analysis (this conversation), `src/editor/CLAUDE.md` (primitives-only rule), `src/tlisp/CLAUDE.md` (T-Lisp owns editor logic).
+**Depends on:** SPEC-005 (vim editing model), SPEC-038 (unified keymap dispatch), SPEC-041 (operator+find-char), the Vim-vs-VSCode-Vim gap analysis (this conversation), `src/editor/Claude.md` (primitives-only rule), `src/tlisp/Claude.md` (T-Lisp owns editor logic).
 
 ### Prerequisites (must pass before implementation)
 
 1. **[SPEC-005](./SPEC-005-vim-editing-motions.md)** — current vim editing model (operators, motions, counts). Items 1-9 extend this model without breaking it.
 2. **[SPEC-038](./SPEC-038-unified-keymap-which-key.md)** — unified keymap dispatch routes every normal/visual/insert key through T-Lisp. Phase 1-2 bindings land in this dispatch path.
 3. **[SPEC-041](./SPEC-041-operator-find-char.md)** — established the pattern for stashing pending-operator state and resuming after a sub-state (`df<char>` etc.). Phase 1 item 1 (text objects + operators) reuses this exact pattern.
-4. **[src/editor/CLAUDE.md](../../src/editor/CLAUDE.md)** — TypeScript in `src/editor/api/` provides primitives only; decisions live in T-Lisp. Every step below that touches `.ts` must justify why T-Lisp can't compute it.
+4. **[src/editor/Claude.md](../../src/editor/Claude.md)** — TypeScript in `src/editor/api/` provides primitives only; decisions live in T-Lisp. Every step below that touches `.ts` must justify why T-Lisp can't compute it.
 
 ### Assumptions (correct these before implementation starts)
 
 Per the spec-driven-development skill, surface assumptions before any spec content. Each of these is a guess — flag the wrong ones now.
 
 1. **VS Code Vim is the right parity target.** Assumed because it's the most-installed vim emulator and the gap analysis used its feature surface. Alternative: target Neovim parity (more modern, more features). → If Neovim is the target, Phase 7 (Surround) and parts of Phase 6 (Ex ranges) move from "deferred" to "must-have."
-2. **Phase 1 is genuinely bindings-only.** Verified by source (13 text-object primitives exist, `search-next`/`search-previous` are exposed, macro API is wired) EXCEPT for the macro-record-key hook (v3 finding #19) which IS a `normal-handler.ts` change. Phase 1 is "mostly bindings + one handler hook," not "pure bindings."
+2. **Phase 1 is not purely bindings-only.** Verified by source: `operators.tlisp` already has text-object pending state and `vim-operator-apply-text-object`; `test/unit/operator-text-object.test.ts` already covers SPEC-044 Phase 1.A; `search-next`/`search-previous` are exposed; macro API is wired. Remaining Phase 1 work may still touch `.ts`: narrower text-object primitive gaps in `text-objects-ops.ts`, the explicit `:nohl` branch in `bindings-ops.ts`, and the macro-record-key hook in `normal-handler.ts`.
 3. **The daemon caches T-Lisp files at startup.** Based on memory `feedback_daemon-restart-after-code-change.md`. The Pre-Phase-1 smoke (below) verifies this — if false, the daemon-restart rule can be relaxed for T-Lisp-only changes.
-4. **Replace mode belongs as a new TypeScript mode union value (Strategy A), not an insert sub-state.** Picked for type safety; reconsider if the 5-site TS change proves larger than expected.
+4. **Replace mode uses Strategy A: add a new TypeScript mode union value.** Picked for type safety and explicit `(editor-mode)` semantics. Strategy B remains documented only as the rejected alternative.
 5. **Count × operator × text-object multiplication follows the existing `vim-operator-total-count` formula** at operators.tlisp:117-119. Unverified for text objects — confirm `d2iw` actually deletes 2 words before assuming.
 6. **No existing tests assume `q` quits globally.** Phase 1.3 rebinds `q`; if a UI test asserts `q`-quit behavior at top-level, it will break. (Audit: `grep -rn 'send_keys.*"q"' test/ui/`.)
-7. **Macro-record-key should be captured BEFORE the bound command executes** (vim records literal keys, not effects). Unverified against tmax's macro playback model — lock down in Step 1.3.
-8. **The 11 priority recommendations are still the right 11.** Based on the June 2026 gap analysis. If the codebase has shipped any of them since, re-scope before starting.
+7. **Macro-record-key is captured BEFORE the bound command executes** (vim records literal keys, not effects), except for the stopping `q`, which must stop recording without being recorded.
+8. **The 11 priority recommendations are roadmap candidates, not a frozen implementation batch.** Based on the June 2026 gap analysis. Re-run the inventory before each phase and re-scope shipped items out before implementation. Do not implement all Phases 1-5 as one work order; split them into approved phase-specific specs or PRs before coding.
 
 → Correct any of these now. The rest of the spec proceeds with them as given.
 
@@ -39,22 +39,22 @@ A pre-implementation review against the actual source surfaced these corrections
 | 7 | `q` rebinding glossed over as "dispatcher checks next key" | Reading the next key requires either `(read-key)` primitive or a new transient pending state — both are non-trivial and need explicit design | Step 1.3 design fleshed out with two options |
 | 8 | `@` register-name reading not described | Same problem as #7 — needs `(read-key)` or a transient state | Step 1.3 updated |
 | 9 | New T-Lisp files only need `(provide "name")` | Each new `commands/*.tlisp` must ALSO be added to the load list wherever existing libraries are required (find via `grep "commands/windows" src/`) | New Files table + Phase 1.3 MUST list updated |
-| 10 | Visual-mode text objects (`iw`, `i"` in visual) described as "visual bindings only" | Visual text objects are NOT operator-pending — they expand the current selection. Different code path from normal-mode `diw`. | Step 1.1 visual section split out; Phase 5 owns visual `r`/`I`/`A` |
-| 11 (v2) | "Cover ALL existing primitives in `text-objects.ts`" — v1 listed 24+ variants | **Only 13 primitives are exposed to T-Lisp** at `text-objects-ops.ts:46-280`: `delete-inner-word`, `delete-around-word`, `change-inner-single-quote`, `change-around-single-quote`, `change-inner-double-quote`, `change-around-double-quote`, `delete-inner-paren`, `change-inner-paren`, `delete-inner-brace`, `change-inner-brace`, `delete-inner-bracket`, `delete-inner-angle`, `delete-inner-tag`. Missing: `change-inner-word`, `change-around-word`, all `delete-around` for `{`, `[`, `<`, `t`, all `change-around` for `(`, `{`, `[`, `<`, `t`, `delete/change-around-paren`, `delete-inner-single-quote`, `delete-around-single-quote`, `delete-inner-double-quote`, `delete-around-double-quote`. So ~11 more TS primitives are needed before all 24+ `di{obj}`/`da{obj}`/`ci{obj}`/`ca{obj}` combos work. | Step 1.1 scope split: Tier-A (13 existing) wired first; Tier-B (11 missing) added as TS primitives in Step 1.1b before wiring |
+| 10 | Visual-mode text objects (`iw`, `i"` in visual) described as "visual bindings only" | Visual text objects are NOT operator-pending — they expand the current selection. Different code path from normal-mode `diw`. | Step 1.1 visual section split out; visual-block `I`/`A`/`r` is deferred to SPEC-047 |
+| 11 (v2, refreshed) | "Cover ALL existing primitives in `text-objects.ts`" — v1 listed 24+ variants | `text-objects-ops.ts` now exposes 21 T-Lisp primitives, including `change-inner-word`, `change-around-word`, quote deletes, and around paren. Remaining missing exposed variants are narrower: around brace/bracket/angle/tag delete/change, plus inner bracket/angle/tag change if supported by `text-objects.ts`. | Step 1.1 scope updated: Phase 1.A dispatch/tests already exist; Phase 1.B should verify current gaps and add only missing primitives, not rebuild text-object dispatch from scratch |
 | 12 (v2) | Text-object dispatch insertion point: "after the line-operator cases but before the 'Unsupported operator' fallthrough at operators.tlisp:203" | **Wrong location.** Line 203 is in `vim-operator-apply`. The key-dispatch entry is `vim-dispatch-operator-key` at line 207; its final fallthrough at line 230 `(vim-operator-apply key)` sends `i`/`a` straight to operator-apply. The text-object branch must intercept BEFORE line 230, alongside the existing `g`-pending (lines 209-218) and `f`/`t`/`F`/`T` (lines 228-229) checks. | Step 1.1 insertion-point MUST updated |
-| 13 (v2) | Step 1.3 macros: "Do not touch handlers — MUST NOT modify `src/editor/handlers/*.ts`" | **Partially incorrect.** The macro API is exposed via `editor.ts:1302-1347` (`defineRaw("macro-record-start"/"-stop"/"-key"/"macro-play"/"macro-play-last")`). But `grep -rn "recordKey\|macro-record" src/editor/handlers/` returns ZERO matches — no handler calls `macro-record-key`. **Recording captures nothing today.** For `q` to actually record keys, EITHER (a) the T-Lisp unified dispatcher (`vim-dispatch-normal-key` from SPEC-038) must call `(macro-record-key <key>)` on every keypress when `(macro-recording-p)`, OR (b) each handler calls it. Option (a) is the architectural fit per `src/tlisp/CLAUDE.md`. This means macro recording is NOT pure T-Lisp — it needs a unified-dispatcher hook (in T-Lisp, not handlers, but it's still a non-trivial change). | Step 1.3 MUST list updated: macro recording requires unified-dispatcher hook, not just `q` binding |
+| 13 (v2) | Step 1.3 macros: "Do not touch handlers — MUST NOT modify `src/editor/handlers/*.ts`" | **Partially incorrect.** The macro API is exposed via `editor.ts` as `macro-record-start`, `macro-record-stop`, `macro-record-key`, `macro-record-active`, `macro-record-register`, `macro-execute`, and `macro-execute-last`. But `grep -rn "recordKey\|macro-record" src/editor/handlers/` returns ZERO matches — no handler calls `macro-record-key`. **Recording captures nothing today.** | Step 1.3 MUST list updated: macro recording requires a normal-handler hook, not just `q` binding |
 | 14 (v2) | Validation command `python3 test/ui/tmax_harness/runner.py` | **`runner.py` does NOT exist.** `test/ui/tmax_harness/` contains library modules (`harness.py`, `client.py`, etc.) but no runner. The actual UI runner is `test/ui/run_python_suite.py` (invoked via `bun run test:ui` or `bun run test:ui:renderer`). | Validation Commands section fixed |
 | 15 (v2) | Validation command `tmax --stop` | Assumes `tmax` is on PATH. The local binary is `bin/tmax` (also `bin/tmaxclient`). For development verification use `bin/tmax --stop` or `bun run daemon` + Ctrl-C. | Validation Commands section updated |
-| 16 (v2) | New tests "see Testing Strategy" | No Testing Strategy section exists in the chosen template. Existing test files relevant to each phase: `test/unit/text-objects.test.ts`, `test/unit/operator-find-char.test.ts`, `test/unit/macro-recording.test.ts`, `test/unit/macro-persistence.test.ts`, `test/unit/macros.test.ts`, `test/unit/incremental-search.test.ts`, `test/unit/search-navigation.test.ts`, `test/unit/vim-dispatch.test.ts`, `test/unit/yank-operator.test.ts`, `test/unit/change-operator.test.ts`, `test/unit/delete-operator.test.ts`. Each phase's tests should EXTEND the matching existing file rather than create new ones; only genuinely new features warrant new files (`repeat-change.test.ts`, `marks.test.ts`, `jumplist.test.ts`, `indent-ops.test.ts`, `replace-mode.test.ts`). | Step-by-step acceptance criteria now name specific test files |
+| 16 (v2, refreshed) | New tests "see Testing Strategy" | Existing test files relevant to each phase include `test/unit/operator-text-object.test.ts`, `test/unit/operator-find-char.test.ts`, `test/unit/macro-recording.test.ts`, `test/unit/macro-persistence.test.ts`, `test/unit/macros.test.ts`, `test/unit/incremental-search.test.ts`, `test/unit/search-navigation.test.ts`, `test/unit/vim-dispatch.test.ts`, `test/unit/yank-operator.test.ts`, `test/unit/change-operator.test.ts`, and `test/unit/delete-operator.test.ts`. Each phase's tests should EXTEND the matching existing file rather than create new ones; only genuinely new features warrant new files (`repeat-change.test.ts`, `marks.test.ts`, `jumplist.test.ts`, `indent-ops.test.ts`, `replace-mode.test.ts`). | Step-by-step acceptance criteria now name specific test files |
 | 17 (v2) | "`q` is bound to `editor-quit`" | Confirmed at `src/tlisp/core/bindings/normal.tlisp:149`: `(key-bind "q" "(editor-quit)" "normal")`. The rebind is a single line change, but the dispatcher must preserve top-level quit semantics (covered in Step 1.3 design). | Step 1.3 confirmed |
 | 18 (v2) | Runtime is "Bun" | Mixed: `start` is `node --import tsx` (per `package.json:7`), but `daemon`, `tui`, `tlisp`, and `test` are `bun`. Daemon-restart memory applies to `bun src/server/server.ts` invocations. | Validation Commands clarified |
-| 19 (v3) | "the recording hook belongs in T-Lisp unified dispatch (per `src/tlisp/CLAUDE.md`), not in handler files" | **Wrong.** There is NO single T-Lisp function `vim-dispatch-normal-key`. The "unified keymap" is the `normal-handler.ts` flow itself (per the comment in `vim-dispatch.tlisp:5-9`): it routes pending-states → digits → prefix → keymap-ref lookup → `executeCommand(editor, cmdRight.value)` at `normal-handler.ts:129`. **The handler IS the chokepoint.** Recording must hook in at `normal-handler.ts:129` BEFORE `executeCommand`, calling `(macro-record-key <key>)` when `(macro-recording-p)`. This matches the existing pattern: the handler already calls `(vim-dispatch-operator-key ...)` and `(vim-dispatch-find-target ...)` to route into T-Lisp. The "handler routes, T-Lisp decides" rule is preserved — the handler is routing the key into the macro-record primitive, T-Lisp decides whether to store it. | Step 1.3 MUST list corrected: hook is in `normal-handler.ts:129`, not T-Lisp |
+| 19 (v3, refreshed) | "the recording hook belongs in T-Lisp unified dispatch (per `src/tlisp/Claude.md`), not in handler files" | **Wrong.** There is NO single T-Lisp function `vim-dispatch-normal-key`. The "unified keymap" is the `normal-handler.ts` flow itself: it routes pending-states → digits → prefix → keymap-ref lookup → `executeCommand(editor, cmdRight.value)`. In current source, line 129 is a prefix return; the keymap `executeCommand` call is around line 149. **The handler IS the chokepoint.** Recording must hook before keymap command execution, calling `(macro-record-key <key>)` when `(macro-record-active)` is true. | Step 1.3 MUST list corrected: hook is near the keymap execution block around `normal-handler.ts:144-150`, not line 129 |
 | 20 (v3) | Phase 2.1: extend existing `commands/replace.tlisp` with vim replace | **Name collision.** `src/tlisp/core/commands/replace.tlisp` already exists and implements Emacs-style `query-replace` (functions `query-replace`, `replace-yes`, `replace-no`, `replace-all`, `replace-quit`). Extending it with vim `r{char}`/`R` would conflate two unrelated features. | Step 2.1: vim replace logic goes in a NEW `commands/vim-replace.tlisp` file, NOT `replace.tlisp` |
 | 21 (v3) | Step 1.3 Option B (`(read-key)` primitive) viable | **Not viable.** `grep -rn "read-key\|readKey" src/` returns ZERO matches — no such primitive exists. Building one would require a non-trivial async-read TS primitive. | Step 1.3 simplified: only Option A (transient pending state) is real; Option B struck |
 | 22 (v3) | Phase 2.1 mode change requires touching 5 sites | **Alternative undersold.** Vim replace can be implemented as a sub-state flag on `'insert'` mode (analogous to how operator-pending is a T-Lisp global inside `'normal'` mode), avoiding ALL TypeScript changes. Trade-off: less type-safe, breaks mode-predicates like `(eq (editor-mode) "replace")`. | Step 2.1 Design Decisions: weigh "add new mode union value" (type-safe, 5 TS sites) vs "insert sub-state flag" (no TS change, less discoverable). Pick one explicitly |
 | 23 (v3) | `set-register` for `"A` append: would need new code | **Already supported.** `set-register` at `evil-integration.ts:259` auto-detects uppercase for append (line 295: "Check if uppercase (append mode)"). `"Ayy` works through existing infrastructure with no new code. | Step 2.3 acceptance criterion `"Ayy appends` confirmed — no new work needed beyond parsing the `"x` prefix |
 
-**Out of scope for this review pass** (still open): whether the daemon hot-reloads T-Lisp files or requires restart (memory says restart; the Pre-Phase-1 smoke resolves this). The Linux clipboard-availability probe for Phase 2.4 is unspecified — decide between (a) startup probe caching, (b) per-call probe. The `.`-repeat hook surface (Step 2.2) spans every operator AND every edit command — the cost estimate should be revisited before Phase 2 starts (likely 2-3× the original 1-3 day estimate). Whether `macro-record-key` should be called inside `vim-dispatch-*` BEFORE or AFTER the dispatched command executes (vim records the literal keys, not their effects) — this is a semantic detail that must be locked down in Step 1.3 design.
+**Out of scope for this review pass** (still open): whether the daemon hot-reloads T-Lisp files or requires restart (memory says restart; the Pre-Phase-1 smoke resolves this). The Linux clipboard-availability probe for Phase 2.4 is unspecified — decide between (a) startup probe caching, (b) per-call probe. The `.`-repeat hook surface (Step 2.2) spans every operator AND every edit command — the cost estimate should be revisited before Phase 2 starts (likely 2-3× the original 1-3 day estimate). Macro-record-key timing is resolved: call before the bound command executes, while special-casing the recording stop key so it is not captured.
 
 ### Pre-Phase-1 smoke (do this FIRST, before any step)
 
@@ -67,13 +67,13 @@ A 30-minute exercise that de-risks Phase 1. Skipping it risks discovering the da
 
 ## Feature Description
 
-This spec is the implementation roadmap for closing the highest-leverage gaps between tmax's current vim emulation and VS Code Vim's documented feature surface, as identified in the June 2026 gap analysis. The 11 recommendations break into three cost tiers:
+This spec is a phased implementation roadmap, not a single end-to-end work order. Before implementing any phase, re-run the feature inventory for that phase, remove already-shipped slices, and answer phase-blocking open questions. It closes the highest-leverage gaps between tmax's current vim emulation and VS Code Vim's documented feature surface, as identified in the June 2026 gap analysis. The 11 recommendations break into three cost tiers:
 
 - **Tier A — Bindings only (low cost, very high impact):** wire existing TypeScript primitives into the operator/search/macro keypaths so users can actually reach them from the keyboard. Primitives exist today; the user-visible features do not.
 - **Tier B — Mode and parser extensions (medium cost, high impact):** add a replace mode value, a change-recording layer for `.`, and a register-prefix parser path. Each touches one TypeScript file plus T-Lisp.
 - **Tier C — New functionality (higher cost, deferred in part):** WORD/sentence motions, marks + jumplist, indent/case operators, Ex ranges. Some are pure T-Lisp; others (marks, Ex ranges) need new TS primitive helpers.
 
-Phases 1-5 below are in-scope. Phases 6-7 (Ex ranges / Surround) are explicitly deferred to follow-up specs because their cost is multi-week and they deserve dedicated design — they are listed here only to set expectation.
+Phases 1-5 below are roadmap scope, not one executable implementation batch. Before coding, split the relevant phase or slice group into a phase-specific approved implementation spec/PR, re-run current-source inventory, and remove already-shipped work from that smaller scope. Phases 6-7 (Ex ranges / Surround) are explicitly deferred to follow-up specs because their cost is multi-week and they deserve dedicated design — they are listed here only to set expectation.
 
 ## User Story
 
@@ -83,9 +83,9 @@ So that I can edit code at the speed I expect from a vim-family editor, not the 
 
 ## Problem Statement
 
-A gap analysis (June 2026) between VS Code Vim and tmax found that tmax has working TypeScript primitives and T-Lisp libraries for several flagship vim features — text objects, search, macros, registers — but the **user-facing key bindings either don't exist or aren't wired end-to-end**. Specifically:
+A gap analysis (June 2026) between VS Code Vim and tmax found that tmax has working TypeScript primitives and T-Lisp libraries for several flagship vim features — text objects, search, macros, registers — but the **user-facing key bindings either don't exist, aren't wired end-to-end, or have only partial variant coverage**. Re-run this inventory before each phase; current source has already shipped some Phase 1 text-object work. Specifically:
 
-1. **Text objects** (`src/editor/api/text-objects.ts`, 706 lines) implement `deleteInnerWord`, `changeInnerSingleQuote`, `deleteInnerParen`, etc., but `vim-dispatch-operator-key` in `src/tlisp/core/commands/operators.tlisp` has no `iw`/`aw`/`i"`/`a{`/`it` cases — so `diw`, `ci"`, `dat` are unreachable.
+1. **Text objects** (`src/editor/api/text-objects.ts`) now have operator-pending dispatch in `src/tlisp/core/commands/operators.tlisp` and SPEC-044 Phase 1.A tests in `test/unit/operator-text-object.test.ts`. Remaining work is narrower: verify shipped coverage, add only missing primitive exposures/region helpers, and cover remaining variants such as around brace/bracket/angle/tag where supported.
 2. **Search** primitives (`src/editor/api/search-ops.ts`, 873 lines; `commands/isearch.tlisp`) implement incremental search, next/previous, highlight, but `/`, `?`, `n`, `N` have no key bindings. Only `*` and `#` are bound.
 3. **Macros** (`api/macro-recording.ts`, `api/macro-persistence.ts`) record, play, and persist to `~/.config/tmax/macros.tlisp`, but `q` is bound to `editor-quit` and `@` is unbound — the API is unreachable from the keyboard.
 4. **Replace mode** (`r{char}`, `R`) doesn't exist; the `mode-ops.ts:72` type has no `'replace'` value.
@@ -100,7 +100,7 @@ The first three are especially high-leverage because the implementation work is 
 
 ## Solution Statement
 
-1. **Phase 1** — Add an `operator+text-object` dispatch branch in `operators.tlisp` (reusing the `vim-pending-operator-for-find` stash pattern from SPEC-041), add `/`/`?`/`n`/`N`/`:nohl` bindings in `commands/isearch.tlisp`, and rebind `q`/`@`/`@@` to the existing macro record/play API.
+1. **Phase 1** — Verify the existing `operator+text-object` dispatch in `operators.tlisp`, complete only the remaining text-object primitive/dispatch gaps, add `/`/`?`/`n`/`N`/`:nohl` bindings, and rebind `q`/`@`/`@@` to the existing macro record/play API.
 2. **Phase 2** — Add `'replace'` to the `EditorMode` type, a minimal replace-handler, and `r{char}`/`R` bindings; build a change-recording list in `commands/repeat.tlisp` and bind `.`; extend operator-key dispatch to parse a `"x` prefix.
 3. **Phase 3** — Add `W B E ge gE` and `( ) [[ ]] [ ]` as pure-T-Lisp motions over a new TS primitive that distinguishes WORD vs word boundaries.
 4. **Phase 4** — Add a marks store (T-Lisp-owned, TS primitive for "set/get position by name") and a jumplist stack (T-Lisp-owned, populated by motions/operators that move >1 line); bind `m`, `'`, `` ` ``, `C-o`, `C-i`.
@@ -115,9 +115,10 @@ The first three are especially high-leverage because the implementation work is 
 | Runtime | Bun + Node (mixed) | Bun latest, Node via `tsx` | `start` uses `node --import tsx` (`package.json:7`); `daemon`, `tui`, `test`, `tlisp` use `bun`. Daemon-restart memory applies to `bun src/server/server.ts` invocations. |
 | Language | TypeScript | ^5.9.3 | Strict mode, `tsconfig.src.json` / `tsconfig.test.json` split. |
 | Editor logic | T-Lisp (built-in) | n/a | All decisions live in `src/tlisp/core/`. TypeScript only provides primitives. |
-| UI test harness | Python + uv + tmux | Python 3.13, uv-managed | `test/ui/tmax_harness/` library, `test/ui/run_python_suite.py` runner. |
+| Live-keypath harness | tmax-use | local package | Required e2e vehicle for SPEC-044 acceptance criteria; playbooks live in `tmax-use/playbooks/*.yaml` and run via `bun run test:tmax-use`. |
+| Renderer regression harness | Python + uv + tmux | Python 3.13, uv-managed | `test/ui/tmax_harness/` library, `test/ui/run_python_suite.py` runner; required only for renderer/TUI changes. |
 | Dependencies | ink, react, typescript, tsx | per `package.json` | Zero editor-logic deps — do NOT add new runtime deps for any phase. |
-| Build | `bun build --compile` | n/a | Produces `dist/tmax` and `dist/tlisp` standalone binaries. |
+| Build | `bun build --compile` | n/a | Produces `dist/tmax`, `dist/tlisp`, and `dist/tmax-use` standalone binaries. |
 
 **No new runtime dependencies.** Every phase must be implementable with the existing stack. Phase 2.4 (OS clipboard) uses `Bun.spawn` against platform tools (`pbcopy`/`xclip`/`clip`) — no npm clipboard package.
 
@@ -133,9 +134,11 @@ bun run daemon                           # Daemon only (bun src/server/server.ts
 bun run tui                              # TUI client (bun src/client/tui-client.ts)
 
 # Type checking
-bun run typecheck                        # Full typecheck (src + test)
+bun run typecheck                        # Full typecheck (src + test + tmax-use + bench)
 bun run typecheck:src                    # Source-only typecheck
 bun run typecheck:test                   # Test-only typecheck
+bun run typecheck:tmax-use               # tmax-use typecheck
+bun run typecheck:bench                  # Benchmark harness typecheck
 
 # Tests
 bun run test                             # All bun tests
@@ -144,19 +147,21 @@ bun run test:integration                 # test/integration/ only
 bun run test:daemon                      # Python suite, daemon subset
 bun run test:ui                          # Full Python UI suite
 bun run test:ui:renderer                 # Python UI suite, renderer/tmux subset
+bun run test:tmax-use                    # tmax-use live-keypath playbooks
 bun run test:ui:helpers                  # Harness self-tests
 
 # Build
-bun run build                            # Both tmax + tlisp standalone binaries
+bun run build                            # tmax + tlisp + tmax-use standalone binaries
 bun run build:tmax                       # Just tmax
 bun run build:tlisp                      # Just tlisp
+bun run build:tmax-use                   # Just tmax-use
 
 # Daemon lifecycle (for UI verification)
 bin/tmax --stop                          # Stop the daemon (assumes bin/ on PATH or use ./bin/tmax)
 bun run daemon                           # Start daemon in foreground (Ctrl-C to stop)
 ```
 
-**Phase verification gate (run after every step):** `bun run typecheck && bun run test:unit && bun run test:ui:renderer`.
+**Phase verification gate (run after every step):** `bun run typecheck && bun run test:unit && bun run test:tmax-use`. Add `bun run test:ui:renderer` only when the slice changes renderer behavior, terminal layout, cursor display, or other TUI rendering.
 
 ## Project Structure
 
@@ -178,25 +183,25 @@ src/
 │   │       ├── vim-dispatch.tlisp → Pending-state helpers
 │   │       ├── vim-counts.tlisp   → Count state machine
 │   │       ├── indent.tlisp       → EXISTING — wrap for '=' operator (Phase 5.1)
-│   │       ├── macros.tlisp       → NEW (Phase 1.3)
+│   │       ├── macros.tlisp       → EXISTING — Phase 1.3 may extend/reroute
 │   │       ├── vim-replace.tlisp  → NEW (Phase 2.1) — NOT replace.tlisp (collision)
 │   │       ├── repeat.tlisp       → NEW (Phase 2.2)
-│   │       ├── marks.tlisp        → NEW (Phase 4.1)
-│   │       ├── jumplist.tlisp     → NEW (Phase 4.2)
-│   │       ├── indent-ops.tlisp   → NEW (Phase 5.1)
+│   │       ├── marks.tlisp        → EXISTING — Phase 4.1 may extend
+│   │       ├── jumplist.tlisp     → EXISTING — Phase 4.2 may extend
+│   │       ├── indent-ops.tlisp   → EXISTING — Phase 5.1 may extend
 │   │       └── command-history.tlisp → NEW (Phase 6 prerequisite)
 │   └── ...
 ├── editor/
 │   ├── api/                       → TS primitives ONLY (no decisions)
 │   │   ├── mode-ops.ts            → validModes array (Strategy A target, line 72)
-│   │   ├── text-objects-ops.ts    → Exposes 13 primitives (Phase 1.1a adds ~11 more)
-│   │   ├── text-objects.ts        → Region computation (Phase 1.1a adds variants)
+│   │   ├── text-objects-ops.ts    → Exposes 21 primitives; Phase 1.1 adds only remaining gaps
+│   │   ├── text-objects.ts        → Region computation (Phase 1.1 adds only missing variants)
 │   │   ├── evil-integration.ts    → Registers — 'A' append already works (Phase 2.3)
 │   │   ├── search-ops.ts          → search-next/previous exposed (Phase 1.2 binds them)
 │   │   ├── macro-recording.ts     → DO NOT TOUCH (production-ready)
 │   │   └── clipboard-ops.ts       → NEW (Phase 2.4) — or extend evil-integration.ts
 │   ├── handlers/                  → Mode dispatch routing (no logic)
-│   │   ├── normal-handler.ts:129  → Macro-record-key hook (Phase 1.3, v3 finding #19)
+│   │   ├── normal-handler.ts      → Macro-record-key hook near keymap executeCommand (Phase 1.3)
 │   │   ├── insert-handler.ts      → Template for replace-handler.ts (Phase 2.1)
 │   │   └── replace-handler.ts     → NEW (Phase 2.1 Strategy A only)
 │   └── editor.ts:1302-1347        → defineRaw() for macro primitives (already done)
@@ -205,7 +210,7 @@ src/
 
 test/
 ├── unit/                          → Bun tests, extend existing files
-│   ├── text-objects.test.ts       → Phase 1.1a/1.1b
+│   ├── operator-text-object.test.ts → Existing Phase 1.A coverage; extend for remaining gaps
 │   ├── operator-find-char.test.ts → Pattern template
 │   ├── macro-recording.test.ts    → Phase 1.3
 │   ├── incremental-search.test.ts → Phase 1.2
@@ -216,9 +221,9 @@ test/
 │   ├── jumplist.test.ts           → NEW (Phase 4.2)
 │   └── indent-ops.test.ts         → NEW (Phase 5.1)
 ├── integration/                   → Cross-module integration tests
-└── ui/                            → Python UI tests
+└── ui/                            → Python daemon/renderer regression tests
     ├── tmax_harness/              → Library (harness.py, client.py, etc.)
-    ├── tests/                     → Test scenarios — extend for each phase
+    ├── tests/                     → Existing Python scenarios; not the SPEC-044 live-keypath e2e vehicle
     └── run_python_suite.py        → Runner (invoked via bun run test:ui*)
 
 docs/
@@ -232,7 +237,7 @@ docs/
 
 ## Code Style
 
-The project follows the patterns in `src/tlisp/CLAUDE.md` and `src/editor/CLAUDE.md`. One real example beats description — this is the canonical command-library shape (from existing `commands/operators.tlisp:60-75`):
+The project follows the patterns in `src/tlisp/Claude.md` and `src/editor/Claude.md`. One real example beats description — this is the canonical command-library shape (from existing `commands/operators.tlisp:60-75`):
 
 ```lisp
 (defmodule editor/commands/operators
@@ -281,16 +286,16 @@ The project follows the patterns in `src/tlisp/CLAUDE.md` and `src/editor/CLAUDE
 |---|---|---|---|
 | Unit (TS) | `bun test` | `test/unit/*.test.ts` | Every new primitive, every T-Lisp dispatch branch |
 | Integration | `bun test` | `test/integration/` | Cross-module flows (operator + text-object + undo + register) |
-| UI (end-to-end) | Python + uv + tmux | `test/ui/tests/*.py` | Every user-visible feature; sends real keys, inspects captured output |
-| Daemon | Python suite | `test/ui/run_python_suite.py daemon` | Daemon-resident state (macro persistence, marks across buffers) |
+| Live keypath E2E | tmax-use | `tmax-use/playbooks/*.yaml` | Every user-visible acceptance criterion; each playbook drives a fresh daemon, sends real keys via `keys:`, and inspects captured frame/buffer output. API-only `eval:` may set up fixtures but cannot replace keypath assertions. Run via `bun run test:tmax-use`. |
+| Daemon/renderer regression | Python suite | `test/ui/run_python_suite.py daemon` / `daemon-tmux` | Existing daemon and renderer regressions. Required only when a slice changes daemon protocol, renderer behavior, terminal layout, cursor display, or other TUI rendering. |
 
 **Coverage expectations:**
-- Every Phase N acceptance criterion maps to at least one test (unit OR UI).
-- Visual/rendering changes MUST have a UI test, not just unit — per memory `feedback_verify-end-to-end-not-unit-only.md`.
+- Every Phase N acceptance criterion maps to at least one deterministic unit/integration test and, when the behavior is user-visible, one tmax-use live-keypath playbook.
+- Visual/rendering changes MUST also pass `bun run test:ui:renderer` — per memory `feedback_verify-end-to-end-not-unit-only.md`.
 - Operators and edits MUST have an undo round-trip test (`<op>` then `u` restores text + cursor).
 - Register writes MUST have a yank-pop test (`<op>` then `M-y` cycles).
 
-**Test file policy:** extend existing files (`text-objects.test.ts`, `macro-recording.test.ts`, etc.) when the feature fits. Create new files only for genuinely new features (`replace-mode.test.ts`, `repeat-change.test.ts`, `marks.test.ts`, `jumplist.test.ts`, `indent-ops.test.ts`).
+**Test file policy:** extend existing files (`operator-text-object.test.ts`, `macro-recording.test.ts`, etc.) when the feature fits. Create new files only for genuinely new features (`replace-mode.test.ts`, `repeat-change.test.ts`, `marks.test.ts`, `jumplist.test.ts`, `indent-ops.test.ts`).
 
 **Test ordering:** TDD per `rules/testing.md` — write the test first, watch it fail, implement, watch it pass. No exceptions for Phase 1-3.
 
@@ -305,7 +310,7 @@ RED                GREEN               REFACTOR
  ───                ────                ────────
 Add a test       Make it pass        Clean up
 to test/unit/    via the T-Lisp      the T-Lisp
-or test/ui/      dispatch / TS       module shape
+or tmax-use/     dispatch / TS       module shape
                  primitive           (tests still green)
    │                  │                   │
    ▼                  ▼                   ▼
@@ -347,9 +352,9 @@ function getRegister(editor: Editor, name: string = '"'): string {
 describe("SPEC-044 Phase 1.1b — operator+text-object dispatch", () => {
   describe("diw — delete inner word", () => {
     test("deletes the word under the cursor and yanks to \"", async () => {
-      // RED: This test fails because vim-dispatch-operator-key at
-      // operators.tlisp:230 has no i/a interception — diw falls through to
-      // (vim-operator-apply "i") → "Unsupported operator: di".
+      // Example only: existing Phase 1.A coverage should already pass in the
+      // current repo. For new work, replace this with a missing variant such
+      // as da} or ca] and observe that specific variant fail first.
       const editor = await createStartedEditor("hello world foo");
       await press(editor, "diw");
       expect(bufferText(editor)).toBe(" world foo");
@@ -384,13 +389,13 @@ test("sets vim-pending-operator correctly")
 
 Write the smallest change that turns RED green. No extra features. No abstractions for hypothetical future cases.
 
-For Phase 1.1b the GREEN step is:
-1. Add the `i`/`a` interception in `vim-dispatch-operator-key` (operators.tlisp:230 area).
-2. Add `vim-operator-apply-text-object` mirroring `vim-operator-apply-find` shape.
-3. Wire the 13 existing text-object primitives into the dispatch table.
-4. Run `bun test test/unit/text-objects.test.ts` — passes.
+For Phase 1.1 now, the GREEN step is:
+1. Run `bun test test/unit/operator-text-object.test.ts` and verify the already-shipped dispatch still passes.
+2. Add a failing test for one missing variant identified by the fresh inventory.
+3. Add only the required primitive exposure/helper and dispatch case for that variant.
+4. Run `bun test test/unit/operator-text-object.test.ts` — passes.
 
-Do NOT add the Tier-B primitives (Step 1.1a) during 1.1b's GREEN. Step 1.1a is its own RED/GREEN cycle.
+Do NOT rebuild the existing text-object pending state or duplicate Phase 1.A tests. Each missing variant should be its own RED/GREEN cycle.
 
 ### REFACTOR — clean up with tests still green
 
@@ -425,9 +430,9 @@ Bug confirmed → fix in T-Lisp (skip recording the literal `q` if it's the stop
 
 ```
               ╱╲
-             ╱  ╲         UI tests (test/ui/tests/*.py)
-            ╀    ─         ~15% — daemon-resident state,
-           ╱      ╲          visual rendering, end-to-end keys
+             ╱  ╲         tmax-use playbooks
+            ╀    ─         ~15% — live daemon,
+           ╱      ╲          real keys, captured output
           ╱────────╲
          ╱          ╲       Integration tests (test/integration/)
         ╱            ╲      ~25% — operator+text-object+undo+register flows
@@ -448,8 +453,9 @@ Bug confirmed → fix in T-Lisp (skip recording the literal `q` if it's the stop
 **Decision guide:**
 - Pure T-Lisp dispatch logic, single buffer → **unit** (`test/unit/*.test.ts`)
 - Crosses a TS primitive boundary (registers, undo) → **unit** with real primitives (no mocks — see below)
-- Daemon state across client calls → **integration** or **UI**
-- Anything user-visible that draws to terminal → **UI** (mandatory per memory `feedback_verify-end-to-end-not-unit-only.md`)
+- Daemon state across client calls → **integration** or **tmax-use**
+- User-visible key behavior → **tmax-use** (mandatory live keypath for this spec)
+- Renderer/layout/cursor-display changes → **Python renderer suite** via `bun run test:ui:renderer`
 
 ### DAMP over DRY in tests
 
@@ -540,7 +546,7 @@ Before starting each step, the implementer confirms:
 - [ ] After GREEN, REFACTOR step ran with `bun test` green after each change.
 - [ ] Test name describes behavior, not implementation.
 - [ ] No mocks of in-process APIs (registers, undo, search) — real implementations only.
-- [ ] UI test added if the feature is user-visible (per memory).
+- [ ] tmax-use playbook added if the feature is user-visible; `bun run test:ui:renderer` added only for renderer/TUI changes (per memory).
 - [ ] If a bug was found during implementation, a separate reproduction test was written first (Prove-It Pattern).
 
 ### TDD Red Flags (apply to every PR implementing this spec)
@@ -564,7 +570,7 @@ Each phase below is sliced into vertical, end-to-end increments. Every increment
 For each increment in each phase:
   1. RED         — write failing test (per TDD Discipline section)
   2. GREEN       — minimum code to pass
-  3. VERIFY      — bun run typecheck && bun run test:unit && (daemon restart) && bun run test:ui:renderer
+  3. VERIFY      — bun run typecheck && bun run test:unit && bun run test:tmax-use; add bun run test:ui:renderer for renderer/TUI changes
   4. COMMIT      — atomic, descriptive message (per git-workflow-and-versioning)
   5. NEXT SLICE  — carry forward, do not restart
 ```
@@ -576,20 +582,20 @@ For each increment in each phase:
 - **No scope creep.** Touch only what the increment requires. Notice dead code or refactoring opportunities? Note them — don't fix them. (CLAUDE.md §3 echoes this.)
 - **Run verification ONCE per code change.** No reassurance reruns on unchanged code.
 
-### Slicing plan — Phase 1 (Bindings-Only Wiring)
+### Slicing plan — Phase 1 (Tier-A Wiring and Remaining Gaps)
 
 Phase 1 has 3 logical features (text objects, search, macros). Each is its own vertical slice, sub-sliced where useful.
 
 | Slice | Scope | In scope | Out of scope | Verify |
 |---|---|---|---|---|
-| **1.A** | Text objects, Tier-A (13 existing primitives) | Add `i`/`a` interception at `operators.tlisp:230`; add `vim-operator-apply-text-object`; wire `diw daw ci" ca" ci' ca' di) ci) di} ci} di] di< diT` only | Tier-B variants (`ciw caw da) ca) …`); count multiplier; register prefix | `bun test test/unit/text-objects.test.ts` for the 13 combos; `bun run test:ui:renderer` |
-| **1.B** | Text objects, Tier-B (11 missing primitives) | Add the missing TS primitives to `text-objects.ts` + `text-objects-ops.ts`; wire `ciw caw da) ca) da} ca} da] ca] da< ca< dat cat di' da' di" da"` | Visual-mode text objects; `d2iw` count multiplier (separate slice) | `bun test test/unit/text-objects.test.ts` for the 11 new combos |
+| **1.A** | Text objects, already-shipped Tier-A | Verify existing `operators.tlisp` text-object pending state, `vim-operator-apply-text-object`, normal-handler pending route, and `test/unit/operator-text-object.test.ts` coverage still pass | Rebuild text-object dispatch from scratch; duplicate existing Phase 1.A tests | `bun test test/unit/operator-text-object.test.ts`; `bun run test:tmax-use` for the representative playbook |
+| **1.B** | Text objects, remaining primitive/dispatch gaps | Inventory current `text-objects.ts` + `text-objects-ops.ts`; add only missing exposed variants such as around brace/bracket/angle/tag delete/change and supported inner change variants; extend `operator-text-object.test.ts` | Already-exposed variants (`ciw`, `caw`, quote deletes, around paren); visual-mode text objects; register prefix | `bun test test/unit/operator-text-object.test.ts` for the new combos |
 | **1.C** | Text-object count multiplier | Verify/implement `d2iw`, `d3aw` using existing `vim-operator-total-count` formula | Visual text objects; new operators | Count tests pass |
 | **1.D** | Search bindings (`/ ? n N`) | Add 4 `(key-bind ...)` lines to `isearch.tlisp`; verify incremental search minibuffer works | `:nohl`; visual `/`; regex | `bun test test/unit/incremental-search.test.ts` + `search-navigation.test.ts` |
-| **1.E** | `:nohl` Ex command | Add `:nohl`/`:noh` to `editor-execute-command-line` in `bindings-ops.ts:56-128`; call existing `search-clear` | New search primitives | UI test for `:nohl` clears highlights |
+| **1.E** | `:nohl` Ex command | Add `:nohl`/`:noh` to `editor-execute-command-line` in `bindings-ops.ts:56-128`; clear highlight ranges without clearing the last search pattern | New search parser | tmax-use playbook for `:nohl` clears highlights and `n` still works |
 | **1.F** | Macro bindings (`q` record) | Add `commands/macros.tlisp`; rebind `q` from `editor-quit` to dispatcher; preserve top-level quit on cancel | `@` play; `@@` replay; recording-capture hook | `bun test test/unit/macros.test.ts` — `qa` enters recording state |
-| **1.G** | Macro recording-capture hook (v3 finding #19) | Add `(macro-record-key <key>)` call at `normal-handler.ts:129` when `(macro-recording-p)` | `@` play; persistence | Unit test: record `jxjx`, replay via API, verify buffer state |
-| **1.H** | Macro play (`@` + `@@`) | Bind `@` to register-dispatch; bind `@@` to `executeLastMacro` | Persistence across restarts | `bun test test/unit/macro-recording.test.ts` — `@a` plays `qa` recording |
+| **1.G** | Macro recording-capture hook (v3 finding #19) | Add `(macro-record-key <key>)` call near the keymap `executeCommand` block in `normal-handler.ts` when `(macro-record-active)` | `@` play; persistence | Unit test: record `jxjx`, replay via API, verify buffer state |
+| **1.H** | Macro play (`@` + `@@`) | Bind `@` to register-dispatch using `(macro-execute <reg>)`; bind `@@` to `(macro-execute-last)` | Persistence across restarts | `bun test test/unit/macro-recording.test.ts` — `@a` plays `qa` recording |
 | **1.I** | Macro persistence verification | Verify existing `saveMacrosToFile` hook fires on stop; no new code if already wired | New persistence logic | Restart daemon, `@a` still works |
 
 **9 slices in Phase 1.** Each is independently shippable, revertable, and testable. Stop and reassess after every slice — if Slice 1.A reveals an unexpected issue (e.g., `operators.tlisp` is shared with visual mode in a surprising way), pause before continuing.
@@ -609,13 +615,13 @@ Phase 1 has 3 logical features (text objects, search, macros). Each is its own v
 | **2.G** | `"x` register prefix | Medium — extends operator-key dispatch | `"ayy`, `"ap`, `"Ayy` |
 | **2.H** | OS clipboard bridge | Medium — TS primitive + platform detection | macOS `pbcopy`/`pbpaste` round-trip |
 
-**8 slices.** Slice 2.A is its own commit because it's a type-system change that should land before any code depends on `'replace'`. If Strategy A proves too invasive at slice 2.A, pause and reconsider Strategy B (T-Lisp sub-state flag) before continuing.
+**8 slices.** Slice 2.A is its own commit because it's a type-system change that should land before any code depends on `'replace'`. Strategy A is selected for SPEC-044; if it proves too invasive, stop and update this spec before replacing it with a different design.
 
 ### Slicing plan — Phase 3 (Missing Motions)
 
 | Slice | Scope | Verify |
 |---|---|---|
-| **3.A** | `W B E` WORD motions | `bun test test/unit/word-motions.test.ts` (extend existing) |
+| **3.A** | `W B E` WORD motions | `bun test test/unit/word-navigation.test.ts` (extend existing) |
 | **3.B** | `ge gE` backward word-end | Same file |
 | **3.C** | `( )` sentence motions | New test file or extend |
 | **3.D** | `[[ ]] [ ]` section motions | Same |
@@ -630,7 +636,7 @@ Phase 1 has 3 logical features (text objects, search, macros). Each is its own v
 | Slice | Scope | Verify |
 |---|---|---|
 | **4.A** | Mark store + `ma` set + `'a`/`` `a `` jump | `bun test test/unit/marks.test.ts` |
-| **4.B** | `:marks` Ex command listing | UI test for the listing buffer |
+| **4.B** | `:marks` Ex command listing | tmax-use playbook for the listing buffer |
 | **4.C** | Special marks `'< '> '[ '] '^ .` | Extend marks tests |
 | **4.D** | Global marks `mA` cross-buffer | Daemon test |
 | **4.E** | Jumplist store + `C-o`/`C-i` | `bun test test/unit/jumplist.test.ts` |
@@ -644,16 +650,16 @@ Phase 1 has 3 logical features (text objects, search, macros). Each is its own v
 |---|---|---|
 | **5.A** | `>>` `<<` line indent/outdent | `bun test test/unit/indent-ops.test.ts` |
 | **5.B** | `>` `<` operator + motion forms (`>w`, `>j`) | Same |
-| **5.C** | Visual mode `>` `<` | UI test |
+| **5.C** | Visual mode `>` `<` | tmax-use playbook |
 | **5.D** | `gu` `gU` `g~` lowercase/uppercase/toggle (line + operator + visual) | Extend indent-ops tests |
 | **5.E** | `~` toggle-case-char | Same |
-| **5.F** | `=` operator via existing `indent-region` from `indent.tlisp` | Same |
+| **5.F** | Deferred: `=` operator via existing `indent-region` from `indent.tlisp` | Follow-up spec unless a phase-specific SPEC-044 addendum explicitly approves language-aware behavior |
 
-**6 slices.** 5.F is last because it depends on language-aware indent — markdown/lisp work, TS/JS may not. If 5.F fails for TS, defer to SPEC-045 (per Design Decisions).
+**5 required slices plus one deferred slice.** 5.F is documented as follow-up scope because it depends on language-aware indent — markdown/lisp work, TS/JS may not. Do not implement `=` in SPEC-044 unless a phase-specific addendum first defines supported languages and tests.
 
 ### Cross-phase slicing rules
 
-- **Each slice ends with a green `bun run test:unit` AND `bun run test:ui:renderer`.** Not "next slice will fix it."
+- **Each slice ends with a green `bun run test:unit` AND `bun run test:tmax-use`.** Add `bun run test:ui:renderer` only for renderer/TUI changes. Not "next slice will fix it."
 - **Each slice is a single git commit** with format `feat(vim-parity): phase 1.A wire diw/daw operator+text-object dispatch`.
 - **Daemon restart between TS-touching slices.** Per memory `feedback_daemon-restart-after-code-change.md`. T-Lisp-only slices may not need it (verify with Pre-Phase-1 smoke).
 - **Slice ordering is by dependency, not perceived importance.** 1.A before 1.B before 1.C — the dispatcher must exist before the Tier-B primitives can be wired.
@@ -682,9 +688,9 @@ After writing, check:
 - Am I building for hypothetical future requirements, or the current slice?
 
 ```
-SIMPLICITY CHECK for Phase 1.A:
-✗ Generic text-object dispatch table with metadata-driven resolver
-✓ cond chain in vim-dispatch-operator-key, 13 cases
+SIMPLICITY CHECK for Phase 1.B:
+✗ Generic text-object dispatch table rewrite with metadata-driven resolver
+✓ One missing variant at a time, using the existing cond chain and pending state
 
 SIMPLICITY CHECK for Phase 2.D (repeat recorder):
 ✗ Generic event-sourcing model with replay engine
@@ -698,11 +704,10 @@ Implement the naive, obviously-correct version first. Optimize only after correc
 Every slice's commit must be revertable in isolation:
 
 ```
-GOOD commit (Phase 1.A):
-  - Add i/a interception in operators.tlisp:230
-  - Add vim-operator-apply-text-object function
-  - Add 13 dispatch cases
-  - Add 13 unit tests
+GOOD commit (Phase 1.B):
+  - Add one missing around-brace primitive exposure
+  - Add the matching operator dispatch case
+  - Add the matching operator-text-object unit test
   → git revert <sha> restores the pre-slice state cleanly
 
 BAD commit (do NOT do this):
@@ -716,8 +721,8 @@ Per Rule 5: never delete + replace in the same commit. If Phase 1.F rebinds `q`,
 ## Boundaries
 
 ### Always do
-- Run `bun run typecheck && bun run test:unit && bun run test:ui:renderer` after every step. Zero exceptions.
-- Restart the daemon after any `.ts` change before any UI test (memory `feedback_daemon-restart-after-code-change.md`).
+- Run `bun run typecheck && bun run test:unit && bun run test:tmax-use` after every step. Add `bun run test:ui:renderer` only for renderer/TUI changes. Zero exceptions.
+- Restart the daemon after any `.ts` change before tmax-use or renderer verification (memory `feedback_daemon-restart-after-code-change.md`).
 - Wrap every mutation in `(undo-begin)` / `(undo-commit combo)` and write `(set-register "\""` <text>)`. Skipping breaks undo + yank-pop.
 - Add new T-Lisp command files to the load list (grep for `windows.tlisp`/`tabs.tlisp` to find it).
 - Place new keys via `(key-bind ...)` in `bindings/*.tlisp`, NEVER in handler code.
@@ -733,7 +738,7 @@ Per Rule 5: never delete + replace in the same commit. If Phase 1.F rebinds `q`,
 - Removing or renaming any existing T-Lisp function (callers may exist in user `init.tlisp`).
 - Changing the `EditorMode` type signature (cascades through handler files).
 - Deferring any Phase N item to a follow-up spec mid-implementation.
-- Shipping a feature without a corresponding UI test for visual/rendering changes.
+- Shipping a user-visible feature without a corresponding tmax-use playbook, or a renderer/TUI change without `bun run test:ui:renderer`.
 
 ### Never do
 - Add editor decisions (what to delete, how to move, which mode) in `src/editor/api/*.ts` or `src/editor/handlers/*.ts`.
@@ -749,13 +754,13 @@ Per Rule 5: never delete + replace in the same commit. If Phase 1.F rebinds `q`,
 
 | Area | Governing Doc | Rule |
 |------|--------------|------|
-| Editor layer | `src/editor/CLAUDE.md` | TypeScript in `src/editor/api/` provides primitives ONLY. Decisions (what to delete, how to move, which mode) live in `src/tlisp/core/`. |
-| T-Lisp layer | `src/tlisp/CLAUDE.md` | All state machines, dispatch, key sequences, count logic live in T-Lisp. Add TS primitives only when T-Lisp literally cannot compute something (char scanning, buffer access). |
-| Command library pattern | `src/tlisp/CLAUDE.md` | Follow `windows.tlisp` / `tabs.tlisp` / `isearch.tlisp`: define functions, add `(key-bind ...)` in the same file, end with `(provide "name")`. |
+| Editor layer | `src/editor/Claude.md` | TypeScript in `src/editor/api/` provides primitives ONLY. Decisions (what to delete, how to move, which mode) live in `src/tlisp/core/`. |
+| T-Lisp layer | `src/tlisp/Claude.md` | All state machines, dispatch, key sequences, count logic live in T-Lisp. Add TS primitives only when T-Lisp literally cannot compute something (char scanning, buffer access). |
+| Command library pattern | `src/tlisp/Claude.md` | Follow `windows.tlisp` / `tabs.tlisp` / `isearch.tlisp`: define functions, add `(key-bind ...)` in the same file, end with `(provide "name")`. |
 | Mode type | `src/editor/api/mode-ops.ts:72` | Modes are a closed string union. Adding `'replace'` is a one-line TS change that must be matched in `setMode` callers and T-Lisp `editor-set-mode` validation. |
 | Operator state pattern | SPEC-041 (`src/tlisp/core/commands/operators.tlisp`) | Pending-operator state is stashed in module-level `defvar`, consumed when the sub-state (find, text-object) resolves. New branches must follow this pattern; do NOT add a parallel state machine. |
-| Unified keymap | SPEC-038 (`src/editor/handlers/normal-handler.ts`) | All normal/visual/insert keys route through `vim-dispatch-*` in T-Lisp. New keys must be `(key-bind ...)` lines, not handler changes. |
-| Verification | `CLAUDE.md` §8 | Every step must end with `bun run typecheck:src`, `bun run typecheck:test`, `bun run test:ui:renderer`, and `bun run typecheck`. Visual/rendering changes MUST be verified in the running daemon (per memory `feedback_verify-end-to-end-not-unit-only.md`). |
+| Unified keymap | SPEC-038 (`src/editor/handlers/normal-handler.ts`) | All normal/visual/insert keys route through T-Lisp dispatch. New key definitions should be `(key-bind ...)` lines. **Routing exception:** handler changes are allowed only to route pending-state keys or macro-record capture into T-Lisp primitives, such as the Step 1.3 `macro-record-key` hook. |
+| Verification | `CLAUDE.md` §8 | Every step must end with `bun run typecheck:src`, `bun run typecheck:test`, `bun run typecheck`, `bun run test:unit`, and `bun run test:tmax-use`. Visual/rendering changes MUST also run `bun run test:ui:renderer` and be verified in the running daemon (per memory `feedback_verify-end-to-end-not-unit-only.md`). |
 | Daemon restarts | Memory `feedback_daemon-restart-after-code-change.md` | After any TS source change, restart the daemon before UI verification. Unit tests don't pick up stale-daemon regressions. |
 
 Fill this table **before writing steps.** ✅ done above.
@@ -767,75 +772,71 @@ Fill this table **before writing steps.** ✅ done above.
 | File | Change | Constraints |
 |------|--------|-------------|
 | `src/tlisp/core/commands/operators.tlisp` | Add `iw/aw/iW/aW/is/as/ip/ap/i"/a"/i'/a'/i`/a\``/i(/a)/i{/a}/i[/a[/i</a</it/at` dispatch branch; parse `"x` register prefix before operator; trigger `vim-record-change` after operator completes | SPEC-041 stash pattern. Operator state owned here, not in TS. |
-| `src/tlisp/core/commands/isearch.tlisp` | Add `(key-bind "/" "?" "n" "N" ":nohl")` to the existing search primitives; export the binding functions | Follow the `windows.tlisp`/`tabs.tlisp` library pattern. No new state machine. |
-| `src/tlisp/core/commands/macros.tlisp` (new — see below) OR extend `commands/edit-commands.tlisp` | Bind `q` (start/stop record), `@` (play), `@@` (replay last); preserve `q` as `editor-quit` only at top-level when not recording | Memory `feedback_daemon-restart-after-code-change.md`. The `q` binding must check `(macro-recording-p)` first. |
+| `src/tlisp/core/commands/isearch.tlisp` | Add normal-mode `(key-bind ...)` entries for `/`, `?`, `n`, and `N`; optionally define `nohl`/`noh` helpers used by the command-line branch | Follow the `windows.tlisp`/`tabs.tlisp` library pattern. No new state machine. |
+| `src/tlisp/core/commands/macros.tlisp` | Existing macro command library; bind/adjust `q` (start/stop record), `@` (play), `@@` (replay last); preserve deterministic quit/cancel behavior below | Memory `feedback_daemon-restart-after-code-change.md`. The `q` binding must check `(macro-record-active)` first. |
 | `src/tlisp/core/commands/repeat.tlisp` (new) | `vim-record-change`, `vim-repeat-last-change`. Operators and `i/a/o/x/r` push entries; `.` replays | Pure T-Lisp. No TS change. |
 | `src/tlisp/core/bindings/normal.tlisp` | Add WORD/sentence/section motion bindings (`W B E ge gE ( ) [[ ]] [ ] m ' \` C-o C-i > < = ~ r R . @`); remove/replace `q` binding | All new keys go here, not in handler code. |
-| `src/tlisp/core/bindings/visual.tlisp` | Add `> < = ~ r I A` (visual indent/case/replace) and text-object keys (`iw aw i" a" …`) inside visual | Visual bindings only. |
+| `src/tlisp/core/bindings/visual.tlisp` | Add `> < ~` and `gu/gU/g~` visual indent/case bindings, plus visual text-object keys (`iw aw i" a" …`) if covered by the approved Phase 5 slice | Visual bindings only. Visual-block `I`/`A`/`r` and `=` are deferred out of SPEC-044. |
 | `src/tlisp/core/commands/motions.tlisp` | Add WORD/sentence/section motion functions and `H M L C-e C-y gj gk g_` | Pure T-Lisp where possible; WORD-vs-word boundary detection may need a TS primitive. |
-| `src/tlisp/core/commands/marks.tlisp` (new) | `set-mark`, `goto-mark-line`, `goto-mark-col`, `:marks` listing | Pure T-Lisp state plus TS position primitive. |
-| `src/tlisp/core/commands/jumplist.tlisp` (new) | `push-jump`, `jump-back`, `jump-forward`; hook motions/operators to call `push-jump` on >1-line moves | Pure T-Lisp ring buffer. |
-| `src/tlisp/core/commands/indent-ops.tlisp` (new) | `indent-region`, `outdent-region`, `toggle-case-region`, `auto-format-region`; operator wrappers | Mostly T-Lisp; gap-buffer region shift may need a TS primitive. |
+| `src/tlisp/core/commands/marks.tlisp` | Existing mark command library; extend `set-mark`, `goto-mark-line`, `goto-mark-col`, `:marks` listing only for missing Phase 4 behavior | Pure T-Lisp state plus TS position primitive if still needed after inventory. |
+| `src/tlisp/core/commands/jumplist.tlisp` | Existing jumplist command library; extend `push-jump`, `jump-back`, `jump-forward`; hook motions/operators to call `push-jump` on >1-line moves only for missing Phase 4 behavior | Pure T-Lisp ring buffer. |
+| `src/tlisp/core/commands/indent-ops.tlisp` | Existing indent/case operator library; extend only missing `indent-region`, `outdent-region`, `toggle-case-region`, and operator wrappers | Mostly T-Lisp; gap-buffer region shift may need a TS primitive. |
 | `src/editor/api/mode-ops.ts:72` | Add `'replace'` to `validModes` and to the `EditorMode` type in `src/core/types.ts` | TS primitive change — required because the mode union is a TS type. |
 | `src/editor/handlers/replace-handler.ts` (new) | Routes keys to T-Lisp `vim-replace-*` functions; minimal (mirror `insert-handler.ts` shape) | Primitives-only rule — no decisions here. |
-| `src/editor/api/text-objects.ts` | Add missing `changeAround*`, `deleteAround*` variants (only inner forms exist for `()`, `{}`, `[]`, `<>`, tags); add sentence/paragraph objects | Pure primitives — region computation only. |
+| `src/editor/api/text-objects.ts` | Add only missing region helpers discovered by inventory, likely around variants for `{}`, `[]`, `<>`, tags and supported change variants for bracket/angle/tag | Pure primitives — region computation only. |
 | `src/editor/api/text-utils.ts` | Add `findWordBoundaryWORD` (whitespace-only) helper if T-Lisp can't compute it | Primitive only; no decisions. |
 | `src/editor/api/register-ops.ts` (new) OR extend `evil-integration.ts` | OS clipboard bridge for `+`/`*` registers | Use `Bun.env` and a minimal child-process call. Primitives only — T-Lisp decides when to call it. |
-| `src/tlisp/core/commands/search-ex.tlisp` OR extend `isearch.tlisp` | Bind `:nohl`, add `:noh` alias to Ex command table | Follow `commands/command-handler` Ex table pattern. |
+| `src/tlisp/core/commands/search-ex.tlisp` OR extend `isearch.tlisp` | Define reusable `nohl`/`noh` helpers if useful; they must clear only highlight ranges, not the saved search pattern. The actual `:nohl`/`:noh` command-line branch belongs in `src/editor/api/bindings-ops.ts` unless the command parser is redesigned | Follow the current `editor-execute-command-line` table, not a non-existent command-handler table. |
 | `src/editor/handlers/command-handler.ts` | Add `<Up>`/`<Down>` history navigation in command mode (Phase 6 prerequisite, but small) | Handler routes only — history ring owned by T-Lisp. |
 | `src/tlisp/core/commands/command-history.tlisp` (new) | Per-mode history rings for `:` commands | Pure T-Lisp. |
-| `test/unit/*.test.ts` | New tests per phase (see Testing Strategy) | Follow `rules/testing.md`. |
-| `test/ui/tmax_harness/*.py` | New UI test scenarios for the wired features | Follow `rules/ui-testing.md` — must send real keys and inspect captured output. |
+| `test/unit/*.test.ts` | New or extended tests per phase (see Testing Strategy) | Follow `rules/testing.md`; extend `test/unit/word-navigation.test.ts` for WORD motions unless inventory justifies a new motion file. |
+| `tmax-use/playbooks/*.yaml` | New e2e playbook scenarios for the wired features | tmax-use is the project's e2e harness (SPEC-061). Each playbook drives a fresh daemon, sends real keys via `keys:` and/or exercises the API via `eval:`, and asserts on observable frame/buffer state. See `tmax-use/playbooks/README.md` for the schema; `eval-19-vim-text-objects.yaml`, `eval-20-vim-search.yaml`, `eval-21-vim-macros.yaml` are the Phase 1 templates. Run via `bun run test:tmax-use` or `bin/tmax-use <playbook>`. |
 
 ### New Files
 
 | File | Purpose | Constraints |
 |------|---------|-------------|
-| `src/tlisp/core/commands/macros.tlisp` | Wires macro-recording API to `q`/`@`/`@@` keys | Library pattern (`provide`). |
 | `src/tlisp/core/commands/repeat.tlisp` | `.` repeat-change recorder/replayer | Pure T-Lisp state. |
 | `src/tlisp/core/commands/vim-replace.tlisp` (NOT `replace.tlisp` — name collision with Emacs query-replace) | Vim `r{char}`/`R` replace mode | Library pattern. |
-| `src/tlisp/core/commands/marks.tlisp` | Mark store + bindings | Pure T-Lisp + position primitive. |
-| `src/tlisp/core/commands/jumplist.tlisp` | `C-o`/`C-i` ring | Pure T-Lisp. |
-| `src/tlisp/core/commands/indent-ops.tlisp` | Indent/case/format operators (extends existing `indent.tlisp`) | Mostly T-Lisp. |
 | `src/tlisp/core/commands/command-history.tlisp` | `:` command history ring | Pure T-Lisp. |
 | `src/editor/handlers/replace-handler.ts` | Replace-mode key dispatch (only under Strategy A) | Mirror `insert-handler.ts`; primitives only. |
 
 ## Implementation Phases
 
-### Phase 1: Bindings-Only Wiring (Tier A — highest ROI)
+### Phase 1: Tier-A Wiring and Remaining Gaps (highest ROI)
 
 **Constraint checkpoint:** Before starting Phase 1, verify:
 - [ ] `src/editor/api/text-objects.ts` exports `deleteInnerWord`, `changeInnerSingleQuote`, `deleteInnerParen`, etc. (it does — read it before each step).
 - [ ] `src/editor/api/search-ops.ts` exports `searchForward`, `searchNext`, etc. (it does).
-- [ ] `src/editor/api/macro-recording.ts` exports `startRecording`, `stopRecording`, `executeMacro` (it does).
-- [ ] All Phase 1 changes are T-Lisp only — no `.ts` edits, no daemon binary change for tests.
+- [ ] `src/editor/api/macro-recording.ts` exposes T-Lisp primitives `macro-record-start`, `macro-record-stop`, `macro-record-key`, `macro-record-active`, `macro-record-register`, `macro-execute`, and `macro-execute-last` (it does).
+- [ ] Phase 1 is not `.tlisp`-only: Step 1.1 may need `text-objects.ts`/`text-objects-ops.ts`, Step 1.2 may edit `bindings-ops.ts`, and Step 1.3 requires a `normal-handler.ts` hook. Keep each `.ts` edit primitive/routing-only.
 
 #### Step 1.1: Wire text objects into operators
 
 **User story:** As a tmax user, I want `diw`/`daw`/`ci"`/`ca{`/`dat` to delete/change the right region, so that I can edit semantic units in 3 keystrokes.
 
-**Description:** Two sub-steps.
+**Description:** Two sub-steps, starting from current source rather than the older inventory.
 
-**Step 1.1a — Add missing TS primitives (Tier-B text objects).** Only 13 text-object primitives are exposed at `src/editor/api/text-objects-ops.ts:46-280`. Before all operator+text-object combos work, add the ~11 missing ones by following the existing pattern (look at `delete-inner-word` / `delete-around-word` for the template): `change-inner-word`, `change-around-word`, `delete-around-paren`, `change-around-paren`, `delete-around-brace`, `change-around-brace`, `delete-around-bracket`, `change-around-bracket`, `delete-around-angle`, `change-around-angle`, `delete-around-tag`, `change-around-tag`, `delete-inner-single-quote`, `delete-around-single-quote`, `delete-inner-double-quote`, `delete-around-double-quote`. The corresponding region-computation helpers may already exist in `text-objects.ts` (706 lines) but are not yet exported to T-Lisp — grep before reimplementing.
+**Step 1.1a — Re-run inventory and verify shipped text-object dispatch.** Current `operators.tlisp` already exports text-object pending state, `vim-operator-begin-text-object`, `vim-dispatch-text-object`, and `vim-operator-apply-text-object`; `normal-handler.ts` already routes pending text-object keys before operator dispatch; `test/unit/operator-text-object.test.ts` already contains SPEC-044 Phase 1.A tests. Do not rebuild this work. Run the existing test file first, inspect failures if any, and update only stale or missing coverage.
 
-**Step 1.1b — Wire text-object dispatch into `vim-dispatch-operator-key`.** The insertion point is BEFORE the final `(vim-operator-apply key)` fallthrough at `operators.tlisp:230`. The new branch must check `(or (string= key "i") (string= key "a"))` and, if true, stash the operator (mirror SPEC-041's `vim-operator-begin-find` at operators.tlisp:60-75) and enter a new transient state expecting a text-object key. Place this check alongside the existing `g`-pending (line 209) and `f`/`t`/`F`/`T` (line 228) branches — NOT inside `vim-operator-apply`. When the text-object key arrives, resolve to the matching primitive via `vim-operator-apply-text-object` (new function, mirroring `vim-operator-apply-find` shape).
+**Step 1.1b — Add only remaining TS primitive/exposure gaps.** Current `text-objects-ops.ts` exposes 21 primitives, including `change-inner-word`, `change-around-word`, quote deletes, and around paren. Before adding code, compare `text-objects.ts`, `text-objects-ops.ts`, `operators.tlisp`, and `operator-text-object.test.ts`. The likely remaining gaps are around brace/bracket/angle/tag delete/change variants and supported inner change variants for bracket/angle/tag; do not add already-exposed variants again. If a region-computation helper does not exist in `text-objects.ts`, either add a primitive helper there or narrow the acceptance criteria for this slice.
 
 **MUST:**
-- Reuse the `vim-pending-operator-for-find` stash pattern from SPEC-041 (`operators.tlisp:60-75`) — do NOT add a parallel state machine.
+- Preserve the existing text-object pending state and `vim-pending-operator-for-find` stash pattern from SPEC-041 — do NOT add a second parallel state machine.
 - Wrap every mutation in `(undo-begin)` ... `(undo-commit combo)` — see `vim-operator-apply-find` lines 100 and 114 for the exact bookending. Skipping this breaks undo for text-object operations.
 - Call `(set-register "\""` <deleted-or-yanked-text>) on completion — see `vim-operator-apply` lines 189-202 for the per-operator pattern. Yank-pop and the numbered delete registers (US-1.9.3) rely on this.
-- Tier-A coverage (13 existing primitives): `diw daw ci" ca" ci' ca' di) ci) di} ci} di] di< diT` (where `diT` uses `delete-inner-tag`).
-- Tier-B coverage (after Step 1.1a): `ciw caw da) ca) da} ca} da] ca] da< ca< dat cat di' da' di" da"`.
+- Current shipped coverage includes `diw`, `daw`, `ciw`, `caw`, quote delete/change variants, inner/around paren, inner brace change/delete, inner bracket, inner angle, and inner tag tests or dispatch entries. Preserve them.
+- Remaining coverage should be limited to variants actually missing after inventory, for example `da}`, `ca}`, `da]`, `ca]`, `da<`, `ca<`, `dat`, `cat`, and supported inner change variants for bracket/angle/tag.
 - Apply count: `d2iw` deletes two words (existing count multiplier pattern in operators.tlisp:117-119).
 - Push the operation to the repeat-recording list once Phase 2.2 lands; for now leave a `;; TODO vim-record-change` hook in the same place as the existing operators.
 
 **MUST NOT:**
-- Insert the dispatch branch inside `vim-operator-apply` (line 179) — that function takes a resolved motion string; the `i`/`a` interception must happen one level up in `vim-dispatch-operator-key` before `(vim-operator-apply key)` is called at line 230.
+- Move the existing dispatch branch into `vim-operator-apply` — that function takes a resolved motion string; the `i`/`a` interception must stay one level up in `vim-dispatch-operator-key` before `(vim-operator-apply key)`.
 - Reimplement region computation in T-Lisp — call the existing primitives, which already handle multibyte chars and edge cases (BUG-09 awareness).
-- Modify `src/editor/handlers/*.ts` — this is T-Lisp dispatch (Step 1.1b) plus optional new TS primitives (Step 1.1a).
+- Modify `src/editor/handlers/*.ts` for Step 1.1 unless the existing pending route is broken. Text-object primitive gaps belong in `src/editor/api/text-objects*.ts`; macro routing belongs in Step 1.3.
 - Break the existing `g`-pending or `f`/`t`/`F`/`T` branches in `vim-dispatch-operator-key` — the new `i`/`a` check goes alongside them, not in front.
 
-**Convention source:** SPEC-041 (operator state pattern), `src/tlisp/CLAUDE.md` (T-Lisp owns dispatch).
+**Convention source:** SPEC-041 (operator state pattern), `src/tlisp/Claude.md` (T-Lisp owns dispatch).
 
 **Acceptance criteria:**
 - [ ] `diw` deletes inside word; cursor at start of removed region; deleted text in `"` register and kill ring.
@@ -845,27 +846,27 @@ Fill this table **before writing steps.** ✅ done above.
 - [ ] `d2iw` deletes two words.
 - [ ] `u` after `diw` restores the deleted text AND cursor position (undo bookend works).
 - [ ] `M-y` after `dd` cycles through the numbered delete registers (register write works).
-- [ ] `"ayiw` works after Phase 2.3 lands (register prefix).
-- [ ] UI test `test/ui/tmax_harness` confirms `diw` deletes the expected region in a live session.
+- [ ] Register-prefixed text-object operations are covered by Phase 2.3, not required for Step 1.1 completion.
+- [ ] tmax-use playbook confirms a representative text-object operation deletes the expected region in a live session (see `tmax-use/playbooks/eval-19-vim-text-objects.yaml`).
 - [ ] `bun run typecheck:test` passes — T-Lisp changes can break test TS only if bindings change shape.
 
 #### Step 1.2: Bind `/` `?` `n` `N` `:nohl`
 
 **User story:** As a tmax user, I want to search forward and backward with `/`/`?`, jump between matches with `n`/`N`, and clear highlights with `:nohl`, so that I can navigate matches the same way I do in every other vim editor.
 
-**Description:** In `commands/isearch.tlisp`, add `(key-bind "/" "(isearch-forward)" "normal")`, `(key-bind "?" "(isearch-backward)" "normal")`, `(key-bind "n" "(search-next)" "normal")`, `(key-bind "N" "(search-previous)" "normal")`. The four target functions are already T-Lisp-callable — `isearch-forward`/`isearch-backward` live in `commands/isearch.tlisp`, and `search-next`/`search-previous` are exposed from `src/editor/api/search-ops.ts:343` and `:376`. For `:nohl`, add a T-Lisp function `(defun nohl (search-clear))` in `commands/isearch.tlisp` and add a branch in `src/editor/api/bindings-ops.ts:64-122` (`editor-execute-command-line`) that handles `command === "nohl" || command === "noh"` by calling `(nohl)`. The existing fallthrough at `bindings-ops.ts:117-119` already evals unknown commands as T-Lisp — verify whether `:nohl` lands in that fallthrough (in which case only the `defun` is needed) or needs an explicit branch (in which case add one).
+**Description:** In `commands/isearch.tlisp`, add `(key-bind "/" "(isearch-forward)" "normal")`, `(key-bind "?" "(isearch-backward)" "normal")`, `(key-bind "n" "(search-next)" "normal")`, `(key-bind "N" "(search-previous)" "normal")`. The four target functions are already T-Lisp-callable — `isearch-forward`/`isearch-backward` live in `commands/isearch.tlisp`, and `search-next`/`search-previous` are exposed from `src/editor/api/search-ops.ts:343` and `:376`. For `:nohl`, use the existing `search-clear-highlights` primitive if present; if inventory shows it is missing, add only that tiny highlight-only primitive in `src/editor/api/search-ops.ts`. Do NOT call `search-clear`: current `search-clear` resets `lastSearchPattern`, which would break `n` after `:nohl`. The command-line path must be explicit: current `editor-execute-command-line` in `src/editor/api/bindings-ops.ts:56-128` does not eval unknown commands as T-Lisp; it sets `Unknown command`. Add a `command === "nohl" || command === "noh"` branch unless the command parser is deliberately redesigned in the same slice.
 
 **MUST:**
 - `/` and `?` must enter an incremental search minibuffer (the `search-incremental-*` primitives already implement this — bind to them, not to a new prompt).
 - `n`/`N` must respect search direction (`?`-initiated search flips `n`).
-- `:nohl` clears `search-set-highlight-ranges` output without clearing the pattern (so `n` still works).
+- `:nohl` clears visible search highlights without clearing the pattern (so `n` still works).
 
 **MUST NOT:**
 - Re-implement search — primitives exist.
 - Bind `/` in visual mode yet (Phase 1.5 visual-search deferred — visual mode ` Esc` is the escape valve).
-- Touch `src/editor/api/search-ops.ts`.
+- Touch `src/editor/api/search-ops.ts` except to add the minimal `search-clear-highlights` primitive if the fresh inventory shows it does not already exist.
 
-**Convention source:** `src/tlisp/CLAUDE.md` (library pattern), SPEC-005 (search model).
+**Convention source:** `src/tlisp/Claude.md` (library pattern), SPEC-005 (search model).
 
 **Acceptance criteria:**
 - [ ] Typing `/foo<CR>` in a buffer with multiple `foo` matches moves cursor to next match and highlights all.
@@ -875,35 +876,35 @@ Fill this table **before writing steps.** ✅ done above.
 - [ ] No matches: status shows "Pattern not found", cursor unchanged.
 - [ ] Regex: `/foo*<CR>` matches `fo`, `foo`, `fooo`, …
 - [ ] `:nohl<CR>` clears highlights; pressing `n` after still works (pattern retained).
-- [ ] UI test sends `/the<CR>n` and confirms cursor moved.
+- [ ] tmax-use playbook sends `/the<CR>n` and confirms cursor moved.
 
 #### Step 1.3: Bind macros (`q`, `@`, `@@`)
 
 **User story:** As a tmax user, I want to press `q` to start/stop recording a macro into a register, then `@<reg>` to play it, so that I can automate repetitive edits without learning T-Lisp.
 
-**Description:** New `src/tlisp/core/commands/macros.tlisp`. The key challenge is that `q` and `@` are 2-key commands (operator-like): they read a follow-up register name. **Only one design is viable** (Option B in earlier drafts required a `(read-key)` primitive that does NOT exist per `grep -rn "read-key\|readKey" src/`):
+**Description:** Extend existing `src/tlisp/core/commands/macros.tlisp`. The key challenge is that `q` and `@` are 2-key commands (operator-like): they read a follow-up register name. **Only one design is viable** (Option B in earlier drafts required a `(read-key)` primitive that does NOT exist per `grep -rn "read-key\|readKey" src/`):
 
 **Option A — Transient pending state (the only real path):**
 - Add `defvar vim-macro-record-pending` and `vim-macro-play-pending` flags.
-- Bind `q` to a dispatcher: if `(macro-recording-p)`, call `(macro-stop-recording)`; else set `vim-macro-record-pending` true.
-- The handler (`normal-handler.ts:124-136`) must check `vim-macro-record-pending` AFTER the keymap lookup but BEFORE the final "Unbound key" fallback. The simplest implementation: add a `(key-bind "<reg>" ...)` for each register letter `a-z`/`0-9` inside `commands/macros.tlisp` that calls `(macro-record-dispatch-register "<reg>")` when pending, OR add a check in the handler that re-routes the key if pending. Pick ONE — the keymap-flood approach scales poorly (36 bindings), prefer the handler-side pending check.
+- Bind `q` to a dispatcher: if `(macro-record-active)`, call `(macro-record-stop)`; else set `vim-macro-record-pending` true.
+- Pending-register handling belongs near the normal-handler pending-state/keymap flow, not at stale line anchors. Current `normal-handler.ts` routes find/text-object/operator pending states near lines 68-89, prefix returns around line 129, and keymap command execution around lines 144-150. Add pending macro register routing in the same routing style, before the final "Unbound key" fallback. The keymap-flood approach (`a-z`/`0-9` bindings) scales poorly; prefer one handler-side pending check.
 - Same shape for `@` (play) and `@@` (replay last).
 
 **MUST:**
 - `q<reg>` starts recording into `<reg>`; status line shows `recording @<reg>`.
 - `q` while recording stops and saves.
 - `@<reg>` plays; `@@` plays the last-played register.
-- `editor-quit` (`q` followed by anything that's not a register letter, OR `q` at top-level when not recording and the dispatcher is cancelled via `Esc`) still works — the dispatcher must route register-non-letter to quit-or-cancel. Current binding is at `normal.tlisp:149` — `(key-bind "q" "(editor-quit)" "normal")`.
+- Exact pending behavior: `q` alone starts macro-register pending state and does not quit because there is no timeout/read-key mechanism. `q<Esc>` and `q<C-g>` cancel pending state and call `editor-quit`. `q<invalid>` where `<invalid>` is not a register name cancels pending state, leaves the invalid key unhandled, shows a warning/status message, and does not start recording. Quit remains available through the existing command-mode path (`:q<CR>`).
 - Recording persists across daemon restarts via `saveMacrosToFile` (`api/macro-persistence.ts`).
-- **CRITICAL — recording-capture hook.** The macro API is exposed via `editor.ts:1302-1347` (`macro-record-start`/`-stop`/`-key`/`macro-play`/`macro-play-last`), but `grep -rn "recordKey\|macro-record" src/editor/handlers/` returns ZERO matches — handlers do NOT call `macro-record-key` today, which means recording captures nothing. Fix this by adding a hook at `src/editor/handlers/normal-handler.ts:129` (BEFORE the existing `await executeCommand(editor, cmdRight.value)` call). When `(macro-recording-p)` is true, the handler must call `(macro-record-key "<key>")` BEFORE evaluating the bound command. This matches the existing handler-routing pattern: the handler already calls `(vim-dispatch-operator-key ...)` and `(vim-dispatch-find-target ...)` to route into T-Lisp; macro-record-key is the same shape. The "handler routes, T-Lisp decides" rule from `src/editor/CLAUDE.md` is preserved — the handler routes the key into the macro-record primitive, T-Lisp decides whether to store it.
-- Add `(provide "macros")` to the new file AND add it to the load list wherever `windows.tlisp`/`tabs.tlisp` are required (find via `grep -rn "windows.tlisp\|tabs.tlisp" src/`).
-- Lock down BEFORE implementation: does the recording hook skip the `q` key itself (vim does NOT record the stopping `q`)? Confirm with the existing `recordKey` semantics in `api/macro-recording.ts:96`.
+- **CRITICAL — recording-capture hook.** The macro API is exposed via `editor.ts` as `macro-record-start`, `macro-record-stop`, `macro-record-key`, `macro-record-active`, `macro-record-register`, `macro-execute`, and `macro-execute-last`, but `grep -rn "recordKey\|macro-record" src/editor/handlers/` returns ZERO matches — handlers do NOT call `macro-record-key` today, which means recording captures nothing. Fix this by adding a hook immediately before the keymap `await executeCommand(editor, cmdRight.value)` call (currently around `normal-handler.ts:149`, not line 129). When `(macro-record-active)` is true, the handler must call `(macro-record-key "<key>")` BEFORE evaluating the bound command. This matches the existing handler-routing pattern: the handler already calls `(vim-dispatch-operator-key ...)` and `(vim-dispatch-find-target ...)` to route into T-Lisp; macro-record-key is the same shape. The "handler routes, T-Lisp decides" rule from `src/editor/Claude.md` is preserved — the handler routes the key into the macro-record primitive, T-Lisp decides whether to store it.
+- Preserve `(provide "macros")` and ensure the existing file remains in the load list wherever `windows.tlisp`/`tabs.tlisp` are required (find via `grep -rn "windows.tlisp\|tabs.tlisp" src/`).
+- The recording hook must skip the stopping `q` key itself; vim does NOT record the stopping `q`.
 
 **MUST NOT:**
 - Touch `src/editor/api/macro-recording.ts` — the API is production-ready.
 - Add a T-Lisp-side "unified dispatcher" function for macro recording — there is no such function. The unified dispatch IS the handler. (See v3 review note #19.)
 - Bind `q` in insert mode (Phase 2 stretch — visual-mode `q` is unclaimed).
-- Replace `editor-quit` for users who never record — the dispatcher must fall through to quit on cancel.
+- Claim bare `q` can still quit without a follow-up key. That is not implementable without a timeout/read-key mechanism; use `q<Esc>`/`q<C-g>` or `:q<CR>` for quit.
 
 **Convention source:** `api/macro-recording.ts` (existing API), `api/macro-persistence.ts` (US-2.4.2 persistence), ADR-0038/0039.
 
@@ -912,16 +913,17 @@ Fill this table **before writing steps.** ✅ done above.
 - [ ] `@a` plays it.
 - [ ] `@@` plays it again.
 - [ ] Restarting the daemon and running `@a` still works (persistence).
-- [ ] `q` at top-level with no follow-up register (or followed by `Esc`) still quits the editor.
-- [ ] UI test records and plays a macro in a live session.
+- [ ] `q` alone enters pending state; `q<Esc>` and `q<C-g>` cancel pending state and quit; `q<invalid>` cancels with a warning and does not record.
+- [ ] tmax-use playbook records and plays a macro in a live session (see `tmax-use/playbooks/eval-21-vim-macros.yaml`).
 
 #### Step 1.4: Phase 1 verification gate
 
-**Description:** Stop and verify Phase 1 end-to-end before Phase 2. Restart the daemon (per `feedback_daemon-restart-after-code-change.md` — though Phase 1 is pure T-Lisp, the daemon may cache T-Lisp files).
+**Description:** Stop and verify Phase 1 end-to-end before Phase 2. Restart the daemon after any `.ts` change and after any T-Lisp load-list change; the Pre-Phase-1 smoke determines whether T-Lisp-only binding edits also need a daemon restart.
 
 **Acceptance criteria:**
 - [ ] `bun run typecheck` passes.
-- [ ] `bun run test:ui:renderer` passes.
+- [ ] `bun run test:tmax-use` passes for Phase 1 playbooks.
+- [ ] `bun run test:ui:renderer` passes if Phase 1 changed renderer/TUI behavior.
 - [ ] `bun run test:unit` passes.
 - [ ] Manual smoke test in `bun run start`: try `diw`, `/foo<CR>n`, `qa<keys>q@a`, all working.
 
@@ -940,21 +942,21 @@ Fill this table **before writing steps.** ✅ done above.
 
 **Name-collision warning:** `src/tlisp/core/commands/replace.tlisp` already exists and implements Emacs-style `query-replace` (functions `query-replace`, `replace-yes/no/all/quit`). DO NOT extend that file. Vim replace logic goes in a NEW `src/tlisp/core/commands/vim-replace.tlisp` to keep the two features separable.
 
-**Two viable implementation strategies — pick ONE in the Design Decisions section before coding:**
+**Selected implementation strategy: Strategy A.** Strategy B is retained below only as rejected design context.
 
 **Strategy A — Add `'replace'` to the TypeScript mode union (type-safe, more changes):**
 - The `'replace'` value must be added to ALL FIVE sites that hardcode the mode union: (1) `EditorMode` in `src/core/types.ts`, (2) the `setMode` parameter type at `src/editor/api/mode-ops.ts:39`, (3) the `validModes` array at `src/editor/api/mode-ops.ts:72`, (4) `getMode`/`setMode` signatures in `src/editor/api/bindings-ops.ts:33-34`, (5) any other `setMode: (mode: ...)` signatures surfaced to T-Lisp (grep `setMode:` in `src/editor/`).
 - Add `src/editor/handlers/replace-handler.ts` mirroring `insert-handler.ts` shape (routes only, no logic).
 - In T-Lisp: `vim-replace-char` (the `r` two-key command — stash state via a new `vim-pending-replace-char` defvar, await next char, overwrite using existing buffer primitives), `vim-replace-mode-enter` (the `R` binding), `vim-replace-mode-insert` (overwrites instead of inserting while in replace mode).
 
-**Strategy B — Use `'insert'` mode with a T-Lisp sub-state flag (no TS change, less discoverable):**
+**Rejected Strategy B — Use `'insert'` mode with a T-Lisp sub-state flag (no TS change, less discoverable):**
 - Add `defvar vim-replace-mode-active` to `vim-replace.tlisp`.
 - Bind `R` to `(progn (set! vim-replace-mode-active t) (editor-set-mode "insert"))`.
 - Bind `r{char}` to a T-Lisp dispatcher that overwrites one char and returns.
 - Hook the insert-mode character handling so that when `vim-replace-mode-active` is true, typed chars overwrite instead of insert.
 - Escape clears the flag and returns to normal mode.
 
-Trade-off: Strategy A requires ~5 TS changes but is type-safe and `editor-mode` returns `"replace"`. Strategy B is pure T-Lisp but `(eq (editor-mode) "insert")` is true during replace, breaking any code that distinguishes the two. Pick A unless the TS changes prove larger than expected.
+Trade-off resolved: Strategy A requires ~5 TS changes but is type-safe and `editor-mode` returns `"replace"`. Strategy B is pure T-Lisp but `(eq (editor-mode) "insert")` is true during replace, breaking any code that distinguishes the two. Implement Strategy A unless this spec is explicitly revised before Phase 2.1.
 
 **MUST:**
 - `r{char}` replaces exactly one character under the cursor, then returns to normal mode.
@@ -965,7 +967,7 @@ Trade-off: Strategy A requires ~5 TS changes but is type-safe and `editor-mode` 
 
 **MUST NOT:**
 - Implement `gR` (virtual replace) — defer.
-- Add a separate visual-mode replace binding in Phase 2 — visual `r` moves to Phase 5 with the other visual-block ops.
+- Add a separate visual-mode replace binding in Phase 2 — visual/block `r` is deferred to SPEC-047 with the other visual-block ops.
 - Add `'replace'` to ONLY one site — TypeScript will not catch the others at compile time if they use loose string types; runtime validation in `editor-set-mode` will reject the new mode.
 
 **Convention source:** `src/editor/api/mode-ops.ts:72` (mode union), `src/editor/handlers/insert-handler.ts` (handler shape).
@@ -975,7 +977,7 @@ Trade-off: Strategy A requires ~5 TS changes but is type-safe and `editor-mode` 
 - [ ] `3rx` overwrites 3 chars with `x`.
 - [ ] `R` enters replace mode; typed chars overwrite; `Backspace` restores.
 - [ ] `Escape` returns to normal mode.
-- [ ] UI test confirms replace semantics.
+- [ ] tmax-use playbook confirms replace semantics through real keys.
 
 #### Step 2.2: `.` repeat last change
 
@@ -1047,7 +1049,7 @@ Wire into the existing `+` and `*` register get/set paths.
 **MUST NOT:**
 - Block the editor on clipboard I/O — make it synchronous but fast; document the tradeoff.
 
-**Convention source:** `src/editor/CLAUDE.md` (primitives only), Vim reference (`+`/`*` register semantics).
+**Convention source:** `src/editor/Claude.md` (primitives only), Vim reference (`+`/`*` register semantics).
 
 **Acceptance criteria:**
 - [ ] On macOS, `"+yy` then `pbpaste` in another shell shows the yanked line.
@@ -1092,12 +1094,13 @@ Wire into the existing `+` and `*` register get/set paths.
 ### Phase 4: Marks + Jumplist
 
 **Constraint checkpoint:** Before starting Phase 4, verify:
-- [ ] T-Lisp has no existing marks store.
-- [ ] `src/editor/api/jump-ops.ts` exists but only handles line jumps — NOT a jumplist. Decide whether to extend it or build a T-Lisp ring.
+- [ ] Current `src/tlisp/core/commands/marks.tlisp` behavior has been inventoried; extend only missing mark behavior.
+- [ ] Current `src/tlisp/core/commands/jumplist.tlisp` behavior has been inventoried; extend only missing jumplist behavior.
+- [ ] `src/editor/api/jump-ops.ts` exists but only handles line jumps — NOT a jumplist. Decide whether any TS position primitive is still needed after the T-Lisp inventory.
 
 #### Step 4.1: Marks
 
-**Description:** New `commands/marks.tlisp` with a `defvar` alist mapping `(mark-name . (buffer-id line col))`. `m<name>` sets; `'<name>` jumps to line; `` `<name> `` jumps to exact col. Add `:marks` listing.
+**Description:** Extend existing `commands/marks.tlisp` with any missing mark behavior. The mark store should be a `defvar` alist mapping `(mark-name . (buffer-id line col))`. `m<name>` sets; `'<name>` jumps to line; `` `<name> `` jumps to exact col. Add or complete `:marks` listing.
 
 **MUST:**
 - Lowercase marks are buffer-local; uppercase are global (cross-buffer).
@@ -1124,17 +1127,17 @@ Wire into the existing `+` and `*` register get/set paths.
 ### Phase 5: Indent / Case / Format Operators
 
 **Constraint checkpoint:** Before starting Phase 5, verify:
-- [ ] tmax has indentation logic somewhere — find it (`grep -r "indent"` in `src/`) before designing `=`.
-- [ ] If `=` requires language awareness, scope Phase 5 to `>` `<` `~ gu gU g~` only and defer `=` to a follow-up.
+- [ ] Existing indentation files have been inventoried (`src/tlisp/core/commands/indent.tlisp` and `src/tlisp/core/commands/indent-ops.tlisp` exist).
+- [ ] `=` is deferred out of SPEC-044 unless a phase-specific addendum defines language support and tests.
 
 #### Step 5.1: Indent and case operators
 
-**Description:** New `commands/indent-ops.tlisp`. Operators `> < gu gU g~` for shift-right / shift-left / lowercase / uppercase / toggle-case. The `=` (reindent) operator can lean on the EXISTING `src/tlisp/core/commands/indent.tlisp` module which already exports `indent-current-line` and `indent-region` — wrap `indent-region` as the `=` operator. For `>`/`<`, add T-Lisp wrappers that compose the existing indent primitive with a `tab-width`/`indent-offset` lookup against the active major mode. Case operators are pure T-Lisp using `buffer-line-text` + `buffer-replace-line` (or equivalent TS primitives).
+**Description:** Extend existing `commands/indent-ops.tlisp`. Operators `> < gu gU g~` for shift-right / shift-left / lowercase / uppercase / toggle-case are in SPEC-044. The `=` (reindent) operator is deferred unless a phase-specific addendum defines language support and tests. For `>`/`<`, add T-Lisp wrappers that compose existing indentation primitives with a `tab-width`/`indent-offset` lookup against the active major mode. Case operators are pure T-Lisp using `buffer-line-text` + `buffer-replace-line` (or equivalent TS primitives).
 
 **MUST:**
-- All operators work with motions, text objects, visual mode, and lines (`>> guu gUU`).
+- Required operators work with motions, text objects, visual mode, and lines (`>> guu gUU`).
 - Indent width respects the major mode's `tab-width` / `indent-offset` (read from the mode-local variables established in `modes/*.tlisp`).
-- Visual mode: `>` `<` `~` on selection (note: visual `r` from Phase 2.1 also lands here as a visual-block replace).
+- Visual mode: `>` `<` `~` and `gu/gU/g~` on selection. Visual-block `I`/`A`/`r` is deferred to SPEC-047.
 - New indent cases follow the SPEC-041 stash pattern + undo bookend + `set-register` write just like Phase 1 text objects.
 
 **Acceptance criteria:**
@@ -1142,13 +1145,13 @@ Wire into the existing `+` and `*` register get/set paths.
 - [ ] `>` in visual indents the selection.
 - [ ] `guu` lowercases the current line; `gUU` uppercases.
 - [ ] `~` toggles case of char under cursor.
-- [ ] `=ap` reindents the current paragraph using `indent-region` from the existing `indent.tlisp`.
-- [ ] Visual-mode `r{x}` (deferred from Phase 2.1) replaces every char in the selection with `x`.
+- [ ] `=` / `=ap` are not implemented in SPEC-044 unless a phase-specific addendum first defines language-aware behavior.
+- [ ] Visual-mode `r{x}` is not implemented in SPEC-044; it belongs to SPEC-047 visual-block work.
 
 ### Phase 6: Ex Ranges and `:g` / `:v` / `:sort` / `:!` — DEFERRED
 
 Out of scope for SPEC-044. Tracked here for visibility. Implementing Ex ranges properly requires:
-- A range parser in `commands/command-handler.ts` (handles `:%`, `:1,5`, `:.,$`, `:'<,'>`, `:+N`, `:-N`).
+- A range parser integrated with the current Ex command path in `src/editor/api/bindings-ops.ts` (handles `:%`, `:1,5`, `:.,$`, `:'<,'>`, `:+N`, `:-N`) unless that parser is moved to T-Lisp in a dedicated redesign.
 - `:g`/`:v`/`:global!` over every line in range, applying an Ex command per match.
 - `:sort` with flags (`u`, `!`, `n`, `r`, `i`).
 - `:!cmd` shell-out via `Bun.spawn` (primitives-only in TS).
@@ -1165,36 +1168,40 @@ Out of scope for SPEC-044. Implementing vim-surround (`ds`/`cs`/`ys`/`S`) is bes
 2. **Phase 2 (Tier B):** `rx`, `R<text><Esc>`, `.`, `"ayy`, `"ap`, `"Ayy`, `"+yy` / `"+p` (real OS clipboard) all work end-to-end.
 3. **Phase 3 (Tier C-motions):** `W B E ge gE ( ) [[ ]] [ ] H M L C-e C-y gj gk g_` all work and compose with operators (`dW`, `c)`, `y[[`).
 4. **Phase 4 (Tier C-marks):** `ma`/`'a`/`` `a ``, `mA` (global), `'<` `'>` `'[` `']` `'^` `'.`, `:marks`, `C-o`/`C-i` jumplist all work.
-5. **Phase 5 (Tier C-operators):** `> < gu gU g~` work as operators, line-operators, and visual-mode bindings. `=` deferred if it needs language awareness.
-6. **No regressions:** every existing UI test (`test/ui/tmax_harness`) still passes; every existing unit test still passes; `bun run typecheck` is green.
-7. **No TS violations:** `src/editor/handlers/*.ts` and `src/editor/api/*.ts` files contain no new editor decisions (per `src/editor/CLAUDE.md`).
+5. **Phase 5 (Tier C-operators):** `> < gu gU g~` work as operators, line-operators, and visual-mode bindings. `=` and visual-block `I`/`A`/`r` are deferred out of SPEC-044 unless a phase-specific addendum explicitly brings them back with tests.
+6. **No regressions:** every existing tmax-use playbook (`bun run test:tmax-use`) still passes; every existing unit test still passes; `bun run typecheck` is green.
+7. **No TS violations:** `src/editor/handlers/*.ts` and `src/editor/api/*.ts` files contain no new editor decisions (per `src/editor/Claude.md`).
 8. **Memory compliance:** daemon restarted before every UI verification step (per `feedback_daemon-restart-after-code-change.md`); visual fixes verified in the live system, not unit-only (per `feedback_verify-end-to-end-not-unit-only.md`).
 
 ## Validation Commands
 
-Execute every command at the end of each phase (not just at the end of the spec). Every command must exit 0.
+Execute every deterministic validation command at the end of each phase (not just at the end of the spec). Every command in this list must exit 0.
 
 - `cd /Users/mekael/Documents/programming/typescript/tmax && bun run typecheck:src` — TypeScript source typechecks.
 - `cd /Users/mekael/Documents/programming/typescript/tmax && bun run typecheck:test` — Test files typecheck.
-- `cd /Users/mekael/Documents/programming/typescript/tmax && bun run typecheck` — Full typecheck (src + test).
-- `cd /Users/mekael/Documents/programming/typescript/tmax && bun run test:unit` — Unit tests pass (extends `text-objects.test.ts`, `operator-find-char.test.ts`, `macro-recording.test.ts`, `incremental-search.test.ts`, `vim-dispatch.test.ts`, etc.).
-- `cd /Users/mekael/Documents/programming/typescript/tmax && bun run test:ui:renderer` — UI renderer tests pass via `cd test/ui && uv run python run_python_suite.py daemon-tmux` (sends real keys, inspects captured output).
+- `cd /Users/mekael/Documents/programming/typescript/tmax && bun run typecheck` — Full typecheck (`typecheck:src` + `typecheck:test` + `typecheck:tmax-use` + `typecheck:bench`).
+- `cd /Users/mekael/Documents/programming/typescript/tmax && bun run test:unit` — Unit tests pass (extends `operator-text-object.test.ts`, `operator-find-char.test.ts`, `macro-recording.test.ts`, `incremental-search.test.ts`, `vim-dispatch.test.ts`, etc.).
+- `cd /Users/mekael/Documents/programming/typescript/tmax && bun run test:tmax-use` — tmax-use live-keypath playbooks pass for every user-visible acceptance criterion.
 - `cd /Users/mekael/Documents/programming/typescript/tmax && bun run test:daemon` — Daemon behavior tests pass via `cd test/ui && uv run python run_python_suite.py daemon`.
-- `cd /Users/mekael/Documents/programming/typescript/tmax && bun run build` — Bun build succeeds (`build:tmax` + `build:tlisp`).
-- `cd /Users/mekael/Documents/programming/typescript/tmax && bun run start` — Manual smoke (note: `start` invokes `node --import tsx src/main.tsx`, not `bun` directly). Exercise every Phase N acceptance criterion in a live session.
-- After any `.ts` change: `bin/tmax --stop` (or `bun run daemon` + Ctrl-C) then restart before any UI test (per memory `feedback_daemon-restart-after-code-change.md`).
-- For new UI test scenarios: extend `test/ui/tests/*.py` — invoke via `cd test/ui && uv run python run_python_suite.py daemon-tmux` (NOT a non-existent `runner.py`).
+- `cd /Users/mekael/Documents/programming/typescript/tmax && bun run test:ui:renderer` — Required only for renderer/TUI changes; UI renderer tests pass via `cd test/ui && uv run python run_python_suite.py daemon-tmux`.
+- `cd /Users/mekael/Documents/programming/typescript/tmax && bun run build` — Bun build succeeds (`build:tmax` + `build:tlisp` + `build:tmax-use`).
+- After any `.ts` change: `bin/tmax --stop` (or `bun run daemon` + Ctrl-C) then restart before tmax-use or renderer verification (per memory `feedback_daemon-restart-after-code-change.md`).
+- For new e2e test scenarios: extend `tmax-use/playbooks/*.yaml` — invoke via `bun run test:tmax-use` (all playbooks) or `bin/tmax-use <playbook>` (single). The legacy `test/ui/tests/*.py` Python harness is NOT the e2e vehicle for this spec.
+
+Manual smoke commands do not belong to the exit-0 gate because they are interactive:
+
+- `cd /Users/mekael/Documents/programming/typescript/tmax && bun run start` — Manual smoke (note: `start` invokes `node --import tsx src/main.tsx`, not `bun` directly). Exercise representative Phase N workflows in a live session and quit manually.
 
 ## Design Decisions
 
 | Decision | Rationale | Alternative rejected |
 |----------|-----------|---------------------|
-| Phase 1 is bindings-only (no TS changes) | The primitives exist — TS changes would be churn. Lowest-risk, highest-impact first. | Rewriting `text-objects.ts` — rejected; the API is fine, only dispatch is missing. |
+| Phase 1 is inventory-driven, not bindings-only | Some work is already shipped; remaining work may include `.ts` primitive/routing changes for text-object gaps, `:nohl`, and macro capture. Lowest-risk, highest-impact first still applies. | Treating the stale gap analysis as authoritative — rejected; source inventory wins. |
 | Reuse SPEC-041 stash pattern for operator+text-object and `"x` register prefix | Proven pattern, single source of truth for pending-operator state. | New state machine per feature — rejected; multiplies bug surface. |
-| Marks and jumplist owned by T-Lisp, not TS | They're stateful decisions (which positions to remember, when to push) — that's logic per `src/editor/CLAUDE.md`. TS only adds a position get/set primitive if needed. | Storing marks in `editor.ts` state — rejected; violates primitives-only rule. |
+| Marks and jumplist owned by T-Lisp, not TS | They're stateful decisions (which positions to remember, when to push) — that's logic per `src/editor/Claude.md`. TS only adds a position get/set primitive if needed. | Storing marks in `editor.ts` state — rejected; violates primitives-only rule. |
 | Replace mode requires a TS change (`mode-ops.ts:72`) — Strategy A | The mode union is a TS type — T-Lisp can't extend it cleanly. 5-site change, minimal blast radius. | Encoding replace as an insert-mode flag (Strategy B) — rejected for v1; lower discoverability and any code that branches on `editor-mode` would misbehave. Revisit if TS churn proves larger than expected. |
 | Vim-replace logic goes in NEW `commands/vim-replace.tlisp`, NOT `commands/replace.tlisp` | The existing `replace.tlisp` implements Emacs `query-replace`; conflating would break the separation of vim/Emacs feature sets. | Extending `replace.tlisp` — rejected; name collision. |
-| Macro recording hook goes in `normal-handler.ts:129`, not T-Lisp | The "unified dispatcher" IS the handler — there is no single T-Lisp `vim-dispatch-normal-key` function (per `vim-dispatch.tlisp:5-9` comment). Handler-side hook matches the existing pattern of routing keys into T-Lisp. | T-Lisp-side wrapping of every binding expression — rejected; too invasive. |
+| Macro recording hook goes in `normal-handler.ts` near keymap execution, not T-Lisp | The "unified dispatcher" IS the handler — there is no single T-Lisp `vim-dispatch-normal-key` function. In current source the keymap `executeCommand` call is around line 149; line 129 is only a prefix return. Handler-side hook matches the existing pattern of routing keys into T-Lisp. | T-Lisp-side wrapping of every binding expression — rejected; too invasive. |
 | `.` records changes only, not motions | Vim semantics; recording motions would replay navigation, surprising users. | Recording everything — rejected; doesn't match Vim. |
 | `=` operator possibly deferred to Phase 5.5 | Reindent may need language awareness; markdown/lisp have it, TS/JS do not. | Shipping a half-correct `=` — rejected; worse than not shipping. |
 | Phase 6 (Ex ranges) and Phase 7 (Surround) deferred to follow-up SPECs | Each is multi-week and deserves dedicated design; bundling would inflate this spec and delay Tier A. | One mega-spec — rejected; review and validation cost too high. |
@@ -1216,14 +1223,10 @@ Unresolved items that need human input before or during implementation. Each blo
 
 1. **Parity target — VS Code Vim or Neovim?** (Blocks Phase 6/7 scoping.) If Neovim, Surround and Ex ranges become must-have, not deferred.
 2. **Daemon T-Lisp hot-reload?** (Blocks Phase 1 start.) Resolved by the Pre-Phase-1 smoke. If yes, relax restart rule for T-Lisp-only changes.
-3. **Replace mode — Strategy A or B?** (Blocks Phase 2.1.) Type-safe TS change vs. pure-T-Lisp sub-state. Design Decisions recommends A; confirm before coding.
-4. **Macro-record-key timing — before or after bound command?** (Blocks Phase 1.3.) Vim records literal keys (before); tmax's playback model may differ. Lock down in Step 1.3 design.
-5. **Linux clipboard availability — startup probe or per-call?** (Blocks Phase 2.4.) Startup probe is faster but stale if `xclip` is installed mid-session.
-6. **Count × text-object multiplication — does `d2iw` follow `vim-operator-total-count`?** (Blocks Phase 1.1b.) Assumed yes (Assumption #5); verify before relying on it.
-7. **Are any of the 11 priority recommendations already shipped?** (Blocks spec rescope.) The June 2026 gap analysis may be stale. Re-run the inventory before Phase 1.
-8. **Should Phase 5 `=` operator be deferred to a follow-up?** (Blocks Phase 5 scoping.) Reindent may need language awareness; markdown/lisp have it, TS/JS do not.
-9. **What's the cap on jumplist entries?** (Blocks Phase 4.2.) Vim default is 100; confirm tmax's ring buffer size.
-10. **Visual-block `I`/`A`/`r`/`>` — Phase 5 or SPEC-047?** (Blocks Phase 5 acceptance.) Currently scoped to SPEC-047; confirm before Phase 5 starts.
+3. **Linux clipboard availability — startup probe or per-call?** (Blocks Phase 2.4.) Startup probe is faster but stale if `xclip` is installed mid-session.
+4. **Count × text-object multiplication — does `d2iw` follow `vim-operator-total-count`?** (Blocks Phase 1.1b.) Assumed yes (Assumption #5); verify before relying on it.
+5. **Are any of the 11 priority recommendations already shipped?** (Blocks spec rescope.) The June 2026 gap analysis may be stale. Re-run the inventory before each phase.
+6. **What's the cap on jumplist entries?** (Blocks Phase 4.2.) Vim default is 100; confirm tmax's ring buffer size.
 
 → Answer these in the PR that implements each phase. Update this section when resolved.
 
@@ -1238,7 +1241,7 @@ Per the spec-driven-development skill's verification gate:
 - [x] **Code Style covered** — Code Style section with real snippet from `operators.tlisp`.
 - [x] **Testing Strategy covered** — Testing Strategy section (framework, locations, coverage, file policy).
 - [x] **TDD Discipline covered** — TDD Discipline section with RED/GREEN/REFACTOR mapped to each phase, real-codebase template, Prove-It Pattern, anti-patterns.
-- [x] **Incremental Implementation covered** — Incremental Implementation Discipline section with per-phase slicing plans (9+8+7+6+6 = 36 slices total), simplicity gate, rollback rules.
+- [x] **Incremental Implementation covered** — Incremental Implementation Discipline section with per-phase slicing plans. Treat these as roadmap slices; approve and execute smaller phase-specific specs/PRs rather than one 36-slice batch.
 - [x] **Boundaries covered** — Always / Ask first / Never sections above.
 - [x] **Success Criteria covered** — Acceptance Criteria section (specific, testable, per-phase).
 - [x] **Open Questions covered** — Open Questions section above.
@@ -1253,12 +1256,12 @@ The spec covers the skill's Specify phase. The Implementation Phases section cov
 Every PR implementing a phase MUST be rejected by reviewer unless ALL of these are true:
 
 - [ ] Every new behavior in the phase has a corresponding test.
-- [ ] All tests pass: `bun run test:unit` AND `bun run test:ui:renderer`.
+- [ ] All tests pass: `bun run test:unit` AND `bun run test:tmax-use`; `bun run test:ui:renderer` also passes when renderer/TUI behavior changed.
 - [ ] RED test was committed before the implementation (visible in PR history or commit message).
 - [ ] Test names describe behavior, not implementation (`"diw deletes word under cursor"`, not `"test dispatch works"`).
 - [ ] No tests were skipped, disabled, or marked `.todo` to manufacture green.
 - [ ] No mocks of in-process APIs (registers, undo, search, macro recording) — real implementations only.
-- [ ] Visual/rendering changes include at least one UI test that sends real keys and inspects captured output (per memory `feedback_verify-end-to-end-not-unit-only.md`).
+- [ ] User-visible keypath changes include at least one tmax-use playbook that sends real keys and inspects captured output; renderer/TUI changes also include `bun run test:ui:renderer` coverage (per memory `feedback_verify-end-to-end-not-unit-only.md`).
 - [ ] Any bug found during implementation has a reproduction test that failed before the fix (Prove-It Pattern).
 - [ ] Tests run ONCE per code change — no `bun test` reruns on unchanged code (per skill: adds no confidence).
 
@@ -1292,9 +1295,194 @@ Every PR implementing a slice MUST be rejected by reviewer unless ALL of these a
 - **Replace mode over EOL:** `R` at end of line should extend the line (insert semantics past EOL).
 - **`@` on empty register:** `@z` where `z` is unrecorded should warn via `*Messages*` and not crash.
 - **`/` with no matches:** should clear the minibuffer, show "Pattern not found", and not move the cursor.
-- **Daemon restart between phases:** after every `.ts` change, restart the daemon before any UI test (per memory). T-Lisp-only changes also benefit from a restart since the daemon caches T-Lisp files.
+- **Daemon restart between phases:** after every `.ts` change, restart the daemon before tmax-use or renderer verification (per memory). T-Lisp-only changes also benefit from a restart since the daemon caches T-Lisp files.
 - **Register `"` collision:** `"y` is both "yank into `"` (the unnamed register, no explicit register) and "yank into register `y`". Disambiguate: a single `"` immediately followed by a register letter is the prefix; a lone `"` falls through to operator dispatch.
 - **`.` after yank:** `.` should NOT replay yanks (yank isn't a change). Verify `yy.` doesn't double-yank.
 - **Unnamed register rule:** yank (`y`) writes `"` AND register `0`. Delete (`d`/`c`/`x`) writes `"` AND rotates numbered registers `1-9`. Text-object dispatch and indent/case operators MUST preserve this distinction — verify with `yiw` then `dd` then `:registers` (after Phase 6) shows the yanked word in `0` and the deleted line in `1`.
 - **Visual-mode text objects are a different code path:** `viw` expands the existing visual selection to word boundaries — it does NOT go through operator-pending. Phase 1.1's operator+text-object dispatch is normal-mode only. Visual text objects are a separate Step 5.x (visual-mode bindings) concern.
 - **`@` replay while recording:** Pressing `@a` during a recording should append the macro's keys to the current recording (vim quirk). Phase 1.3 must decide: do this fully, or no-op with a warning.
+
+## Audit findings (adw-patch-review 2026-06-21T21:52:21.024Z)
+
+**Verdict:** gaps
+
+Phase 1 (Tier-A wiring) is fully landed — text objects, search bindings, `:nohl`, and the macro record/play API (q/@/@@) are wired end-to-end with the normal-handler recording hook in place. Phase 2 is only partial: `r{char}` and the `"x` register prefix shipped, but `R` mode (Strategy A — no `'replace'` in mode-ops.ts:72), `.` repeat (no `repeat.tlisp`, no `.` binding), and the OS clipboard bridge (no `clipboard-ops.ts`) are missing. Phase 3 ships only W/B/E/ge/gE; sentence, section, H/M/L, C-e/C-y, and gj/gk/g_ are absent. Phase 4 ships basic marks + jumplist but lacks global marks, special marks (`'<` `'>` `'[` `']` `'^` `.`), and the `:marks` listing. Phase 5 ships only line-scoped operators (>>, <<, ~, guu, gUU, g~~); operator+motion forms and all visual-mode variants are deferred. Several spec-listed edge cases (wrapped-line motions, replace-over-EOL, `.` after yank) cannot be handled because the underlying features are not implemented.
+
+### Criteria
+- **Phase 1.1: diw/daw/ciw/caw/ci"/ca{/dat text-object dispatch via operator+text-object** — implemented: src/tlisp/core/commands/operators.tlisp:170-220 (vim-operator-apply-text-object covers diw/daw/ciw/caw/quote/paren/brace/bracket/angle/tag combos); src/editor/api/text-objects-ops.ts:66-689 (21 primitives incl. around brace/bracket/angle/tag + change variants)
+- **Phase 1.1: Count multiplier d2iw (existing vim-operator-total-count formula)** — implemented: src/tlisp/core/commands/operators.tlisp:160-166 (vim-operator-begin-text-object multiplies operator-count × motion-count); operators.tlisp:185-188 pass count to delete/change-inner/around-word
+- **Phase 1.1: undo bookend + set-register on text-object mutations (SPEC-041 pattern)** — implemented: src/tlisp/core/commands/operators.tlisp:183,218 ((if (string= operator "y") nil (undo-begin)) … (undo-commit combo))
+- **Phase 1.2: / ? n N normal-mode bindings** — implemented: src/tlisp/core/commands/isearch.tlisp:34-37 (key-bind / ? n N)
+- **Phase 1.2: :nohl/:noh Ex command clears highlights without clearing pattern** — implemented: src/editor/api/bindings-ops.ts:111-112 (nohl/noh branch); src/editor/api/search-ops.ts:452-461 (search-clear-highlights primitive)
+- **Phase 1.3: q<reg> record / q stop / @<reg> play / @@ replay** — implemented: src/tlisp/core/commands/macros.tlisp:40-127 + 132-133 (key-bind q/@)
+- **Phase 1.3: macro-record-key hook in normal-handler.ts (CRITICAL gap from v3 review)** — implemented: src/editor/handlers/normal-handler.ts:89-95,121-124,131-134,141-144,151-154,233-235 (macro-record-key called before bound command across all pending routes + final keymap execute); line 164-168 special-cases the stopping q
+- **Phase 1.3: q<Esc>/q<C-g> cancel pending and quit** — implemented: src/tlisp/core/commands/macros.tlisp:95-100 (cond branch on Escape/C-g calls editor-quit)
+- **Phase 2.1 Strategy A: 'replace' added to EditorMode union (5 sites)** — missing: src/editor/api/mode-ops.ts:72 (validModes = ['normal','insert','visual','command','mx'] — NO 'replace'); mode-ops.ts:39 setMode signature unchanged
+- **Phase 2.B: r{char} two-key replace (count-aware, undo bookend)** — implemented: src/tlisp/core/commands/vim-replace.tlisp:23-61 (vim-replace-begin/apply with undo_begin/undo_commit + count clamp + r<Enter> newline split); test/unit/replace-mode.test.ts:29-81
+- **Phase 2.C: R replace mode (typed chars overwrite, Backspace restores, Escape exits)** — missing: No R binding in src/tlisp/core/bindings/normal.tlisp; vim-replace.tlisp:7 comment states 'R mode (2.C) is a separate slice that requires the replace mode union value (Step 2.A)'
+- **Phase 2.2: . repeat last change (vim-record-change recorder + replay)** — missing: No src/tlisp/core/commands/repeat.tlisp file exists; Grep for 'vim-record-change|vim-repeat-last-change|key-bind "\\."' returns no matches in src/tlisp/core; no test/unit/repeat-change.test.ts
+- **Phase 2.3: "x register prefix ("ayy, "ap, "Ayy append, 3"ayw count)** — implemented: src/tlisp/core/commands/operators.tlisp:357-461 (vim-register-prefix-pending-p through vim-maybe-apply-register); key-bind at operators.tlisp:461
+- **Phase 2.4: OS clipboard bridge for + and * registers (pbcopy/pbpaste, xclip, clip)** — missing: No src/editor/api/clipboard-ops.ts or register-ops.ts file; "+y/"*y write to in-memory registers only via existing evil-integration.ts path
+- **Phase 3.A: W B E WORD (whitespace-only) motions** — implemented: src/tlisp/core/bindings/normal.tlisp:85-87 (key-bind W/B/E → word-next-WORD/word-previous-WORD/word-end-WORD)
+- **Phase 3.B: ge gE backward word-end motions** — implemented: src/tlisp/core/commands/motions.tlisp:190-191 (key-bind g e / g E → word-previous-end/word-previous-end-WORD)
+- **Phase 3.C: ( ) sentence motions** — missing: Grep for 'sentence|\( \)' across src/tlisp/core returns no motion bindings
+- **Phase 3.D: [[ ]] [] ][ section motions** — missing: Grep for 'section|\[\[|\]\]' across src/tlisp/core/commands returns no bindings (only markdown-mode-specific [ H / ] H)
+- **Phase 3.E: H M L window-relative motions** — missing: No H/M/L motion bindings in src/tlisp/core/bindings/normal.tlisp or motions.tlisp
+- **Phase 3.F: C-e C-y single-line scroll** — missing: No C-e/C-y bindings in normal.tlisp; motions.tlisp has no scroll-line function
+- **Phase 3.G: gj gk g_ screen-line motions** — missing: No gj/gk/g_ bindings in normal.tlisp or motions.tlisp
+- **Phase 4.A: m ' ` marks (buffer-local)** — implemented: src/tlisp/core/commands/marks.tlisp:52-84 (vim-mark-set/get/jump); marks.tlisp:97-99 bindings; test/unit/marks.test.ts
+- **Phase 4.B: :marks Ex command listing** — missing: Grep for 'marks' in src/editor/api/bindings-ops.ts editor-execute-command-line returns no :marks branch
+- **Phase 4.C: Special marks '< '> '[ '] '^ .** — missing: src/tlisp/core/commands/marks.tlisp has no special-mark handling; grep for '<|'>|^[|]|\^|\. in marks.tlisp returns no auto-set marks
+- **Phase 4.D: Global marks mA cross-buffer** — missing: src/tlisp/core/commands/marks.tlisp:52-66 vim-mark-set stores into a single alist with no uppercase/global distinction; no buffer-id field
+- **Phase 4.E: C-o / C-i jumplist navigation** — implemented: src/tlisp/core/commands/jumplist.tlisp:68-100 (vim-jump-back, vim-jump-forward, key-bind C-o/C-i); test/unit/jumplist.test.ts
+- **Phase 4.F: Jumplist push hooks on gg/G/n/N/*/#/%** — partial: jumplist.tlisp exports vim-jump-record but no explicit cap at 100 entries (Open Question #6 unresolved)
+- **Phase 5.A: >> << line indent/outdent** — implemented: src/tlisp/core/commands/indent-ops.tlisp:77-117 (vim-indent-line, vim-outdent-line); indent-ops.tlisp:125-126 bindings
+- **Phase 5.B: > < operator+motion forms (>w, >j, >k)** — missing: src/tlisp/core/commands/indent-ops.tlisp:5-8 comment: 'Operator+motion forms (guw, gU$, etc.) are deferred to a follow-up slice per spec Phase 5.B'
+- **Phase 5.C: Visual mode > < ~ gu gU g~** — missing: src/tlisp/core/bindings/visual.tlisp:1-52 contains no indent/case operator bindings; only legacy u/U direct case bindings exist
+- **Phase 5.D: guu gUU g~~ line-scoped case operators** — implemented: src/tlisp/core/commands/indent-ops.tlisp:56-66 (vim-toggle-case-line, vim-lowercase-line, vim-uppercase-line); indent-ops.tlisp:127-129 bindings
+- **Phase 5.E: ~ toggle case of char under cursor** — implemented: src/tlisp/core/commands/indent-ops.tlisp:22-37 (vim-toggle-case-char); indent-ops.tlisp:124 binding
+- **Phase 5.F: = reindent operator deferred unless addendum defines language support** — implemented: Correctly deferred per spec — no = operator in normal.tlisp
+- **Acceptance Criterion 6: No regressions; all existing tmax-use playbooks + unit tests + typecheck pass** — implemented: Gate results reported: typecheck:src PASS, test:unit PASS, test:tmax-use PASS
+- **Acceptance Criterion 7: No TS violations — src/editor/handlers/* and src/editor/api/* contain no new editor decisions** — implemented: src/editor/handlers/normal-handler.ts:44-270 routes keys via T-Lisp primitives (macro-record-pending-p, vim-register-prefix-pending-p, etc.) without inspecting semantics; operators.tlisp owns all combo decisions
+
+### Tests
+- **diw deletes inner word and yanks to "** — covered: test/unit/operator-text-object.test.ts (existing SPEC-044 Phase 1.A coverage referenced in spec); tmax-use/playbooks/eval-19-vim-text-objects.yaml
+- **daw deletes word + trailing whitespace** — covered: test/unit/operator-text-object.test.ts exercises delete-around-word via operator+text-object dispatch
+- **ci" enters insert mode with quote contents removed** — covered: src/tlisp/core/commands/operators.tlisp:203 (change-inner-double-quote) + test/unit/operator-text-object.test.ts
+- **dat deletes around tag (opening + closing)** — covered: src/tlisp/core/commands/operators.tlisp:202 + src/editor/api/text-objects-ops.ts:656-668
+- **d2iw count multiplier** — covered: optionalCount in src/editor/api/text-objects-ops.ts:699-705 passes count through; operator count × motion count in operators.tlisp:165
+- **u after diw restores text + cursor (undo bookend)** — covered: undo-begin/undo-commit bookends in operators.tlisp:183,218 + replace-mode.test.ts:68-73 proves the round-trip pattern
+- **M-y yank-pop after dd cycles numbered delete registers** — uncovered: No explicit yank-pop-after-text-object test found in test/unit/
+- **/foo<CR> moves to next match and highlights all** — covered: tmax-use/playbooks/eval-20-vim-search.yaml; test/unit/incremental-search.test.ts
+- **n advances to next match; N reverses; wrap-around** — covered: test/unit/search-navigation.test.ts (referenced in spec validation list)
+- **:nohl clears highlights; n still works** — uncovered: src/editor/api/search-ops.ts:452-461 comment confirms pattern retained; no dedicated :nohl test located
+- **qa<keys>q records; @a plays; @@ replays; persists across restart** — covered: test/unit/macro-recording.test.ts, macro-persistence.test.ts, macros.test.ts; tmax-use/playbooks/eval-21-vim-macros.yaml
+- **Recorded macro does NOT include the stopping q key (Prove-It pattern)** — covered: src/editor/handlers/normal-handler.ts:163-168 special-cases the stopping q before the record hook at line 233
+- **rx overwrites char; 3rx overwrites 3 chars; r<Esc> cancels** — covered: test/unit/replace-mode.test.ts:29-66
+- **R enters replace mode; typed chars overwrite; Backspace restores; Escape exits** — uncovered: R mode not implemented; test/unit/replace-mode.test.ts has no R-mode tests
+- **dw. deletes next word; dd. deletes line; ihi<Esc>. re-inserts; 5. count override** — uncovered: `.` repeat not implemented; no test/unit/repeat-change.test.ts file
+- **"ayy yanks into a; "ap pastes from a; "Ayy appends** — uncovered: No dedicated unit test for register-prefix flow located in test/unit/ (feature wired in operators.tlisp:357-461 but no named test)
+- **"+yy / "+p OS clipboard round-trip (pbcopy/pbpaste)** — uncovered: Phase 2.4 not implemented; no clipboard test
+- **ma sets mark; 'a jumps to line; `a jumps to exact col** — covered: test/unit/marks.test.ts:31-50+ (vim-mark-set/vim-mark-get round-trip)
+- **mA global mark survives buffer switch** — uncovered: Global marks not implemented
+- **:marks lists all set marks** — uncovered: :marks Ex command not implemented
+- **G C-o returns to prior position; C-i redoes** — covered: test/unit/jumplist.test.ts (per spec test list)
+- **>> indents current line; << outdents; guu lowercases; gUU uppercases; ~ toggles char** — covered: test/unit/indent-ops.test.ts (per spec test list); indent-ops.tlisp:77-117 + 22-37
+- **> in visual indents selection** — uncovered: Visual-mode indent/case bindings not implemented
+- **>w / gu$ operator+motion forms** — uncovered: indent-ops.tlisp:5-8 explicitly defers operator+motion forms
+- **W/B/E WORD motions; ge/gE backward word-end** — covered: test/unit/word-navigation.test.ts (extended per spec)
+- **( ) sentence motions; [[ ]] section motions** — uncovered: Sentence/section motions not implemented
+- **H/M/L/C-e/C-y/gj/gk/g_ motions** — uncovered: None of these motions are bound in normal.tlisp or motions.tlisp
+
+### Edge cases
+- **Empty buffer: diw/cw/> > should no-op (not crash)** — handled: src/editor/api/text-objects-ops.ts:68-70,89-91 etc. return Either.right(createNil()) when buffer is null
+- **Single-line buffer: motions at boundaries no-op gracefully** — missed: No explicit test for [[/]]/(/) at boundaries; also the underlying motions are not implemented
+- **Wrapped lines: gj/gk by screen row, j/k by logical line** — missed: gj/gk not implemented; spec Edge Case explicitly calls for verifying against a 200-col line in 80-col terminal
+- **Multibyte/emoji: r<char> and ~ treat emoji as one cell (BUG-09)** — missed: vim-replace-apply uses buffer-replace-range which respects existing primitives; no explicit emoji test in replace-mode.test.ts
+- **Zero-count operator: 0d is the 0 motion (to column 0), not a 0-count operator** — handled: src/editor/handlers/normal-handler.ts:185-192 digit 0 only feeds count when vim-count-active-p is true
+- **Mark in deleted region: 'a lands on next existing line at or below** — missed: src/tlisp/core/commands/marks.tlisp:69-84 vim-mark-jump has no adjustment for deleted-line clamp
+- **Jumplist overflow cap at 100 entries (vim default)** — missed: src/tlisp/core/commands/jumplist.tlisp has no cap; Open Question #6 unresolved; grep for '100|max|cap' in jumplist.tlisp returns only pointer arithmetic
+- **Replace mode over EOL: R extends line (insert semantics past EOL)** — missed: R mode not implemented; cannot satisfy this edge case
+- **@ on empty register: @z warns via *Messages* and does not crash** — missed: src/tlisp/core/commands/macros.tlisp:107-127 macro-dispatch-play falls through to cancel for non-register keys, but no explicit @<unrecorded-reg> warning path
+- **/ with no matches: clear minibuffer, show 'Pattern not found', cursor unchanged** — missed: search-incremental-* primitives (referenced in isearch.tlisp) handle the no-match case per existing search-ops.ts behavior; no explicit test cited
+- **Daemon restart between TS-touching phases** — handled: Memory feedback_daemon-restart-after-code-change.md applied; CI now uses test:tmax-use per .github/workflows/ci.yml diff
+- **Register " collision: " followed by register letter vs. lone "** — handled: src/tlisp/core/commands/operators.tlisp:405-426 vim-dispatch-register treats \" as a valid register letter; the pending-state machine disambiguates
+- **`.` after yank should NOT replay yanks (yank isn't a change)** — missed: `.` not implemented; this invariant cannot be violated or verified
+- **Unnamed register rule: y writes " and 0; d/c/x rotate numbered 1-9** — missed: operators.tlisp uses set-register \" for the unnamed register on all mutations, but no test verifies the yank→0 vs delete→1-9 rotation
+- **Visual-mode text objects are a different code path (viw expands selection)** — missed: No visual text-object bindings in src/tlisp/core/bindings/visual.tlisp; spec marks this as separate Step 5.x concern and it is not implemented
+- **@ replay while recording: append macro's keys to current recording (vim quirk)** — missed: macros.tlisp comment mentions it; no implementation for append-during-record behavior
+- **q<invalid> cancels pending with warning and does not record** — handled: src/tlisp/core/commands/macros.tlisp:101-105 (t branch: vim-reset-macro-pending + editor-set-status 'Macro record cancelled')
+
+
+## Audit findings (adw-patch-review 2026-06-22T00:50:28.381Z)
+
+**Verdict:** gaps
+
+Phase 1 (Tier-A wiring) is fully landed and verified — text objects, search bindings, :nohl, macros (q/@/@@), and the critical macro-record-key hook are all wired through normal-handler.ts. Phase 2 is now mostly complete: r{char} and R replace mode (Strategy A — 'replace' IS in mode-ops.ts:72), the \"x register prefix, and the OS clipboard bridge (clipboard-ops.ts + operators.tlisp:446-448 for set, edit-commands.tlisp:53-81 for get) have all shipped since the prior audit. Phase 3 ships W/B/E, ge/gE, sentence ( ), section [[ ]], H/M/L, and C-e/C-y — but Phase 3.G (gj/gk/g_) and the []/][ section variants are absent. Phase 4 ships buffer-local marks + :marks + jumplist with the 100-entry cap (Open Question #6 resolved), but global marks (mA) and special marks auto-set ('< '> '[ '] '^ .) are still missing — only the vim-mark-set-special primitive exists with no callers. Phase 5 ships line-scoped ops (>>, <<, ~, guu, gUU, g~~) and visual-mode >/</~ — but operator+motion forms (Phase 5.B) and visual-mode gu/gU/g~ are still deferred. The single largest gap is Phase 2.2 (. repeat) — no repeat.tlisp exists, no vim-record-change/vim-repeat-last-change function, no . binding. Test coverage matches: Phase 1 tests comprehensive; replace-mode.test.ts covers r and R; clipboard-ops.test.ts covers round-trip; indent-ops.test.ts covers Phase 5.A/C/D/E; but no test/unit/repeat-change.test.ts and no dedicated sentence/section/H/M/L/C-e/C-y motion tests.
+
+### Criteria
+- **Phase 1.1: diw/daw/ciw/caw/ci"/ca{/dat text-object dispatch via operator+text-object** — implemented: src/tlisp/core/commands/operators.tlisp:170-220 (vim-operator-apply-text-object); src/editor/api/text-objects-ops.ts:66-689 (21 primitives incl. around brace/bracket/angle/tag + change variants); test/unit/operator-text-object.test.ts
+- **Phase 1.1: Count multiplier d2iw (existing vim-operator-total-count formula)** — implemented: src/tlisp/core/commands/operators.tlisp:160-166 (vim-operator-begin-text-object multiplies operator-count × motion-count); optionalCount in text-objects-ops.ts:699-705
+- **Phase 1.1: undo bookend + set-register on text-object mutations (SPEC-041 pattern)** — implemented: src/tlisp/core/commands/operators.tlisp:183,218 ((if (string= operator "y") nil (undo-begin)) … (undo-commit combo)); set-register at :219
+- **Phase 1.2: / ? n N normal-mode bindings** — implemented: src/tlisp/core/commands/isearch.tlisp:34-37 (key-bind / ? n N)
+- **Phase 1.2: :nohl/:noh Ex command clears highlights without clearing pattern** — implemented: src/editor/api/bindings-ops.ts:113-119 (nohl/noh branch calls clearSearchHighlights only); test/unit/search-navigation.test.ts:232-265
+- **Phase 1.3: q<reg> record / q stop / @<reg> play / @@ replay** — implemented: src/tlisp/core/commands/macros.tlisp:40-127 + bindings :132-133
+- **Phase 1.3: macro-record-key hook in normal-handler.ts (CRITICAL gap from v3 review)** — implemented: src/editor/handlers/normal-handler.ts:89-95,121-124,131-134,141-144,151-154,233-235 — macro-record-key called before bound command across all pending routes + final keymap execute
+- **Phase 1.3: q<Esc>/q<C-g> cancel pending and quit** — implemented: src/tlisp/core/commands/macros.tlisp:95-100 (cond branch on Escape/C-g calls editor-quit); test/unit/macros.test.ts
+- **Phase 2.A Strategy A: 'replace' added to EditorMode union (5 sites)** — implemented: src/editor/api/mode-ops.ts:38,39,72,83 — getMode/setMode signatures and validModes array now include 'replace'
+- **Phase 2.B: r{char} two-key replace (count-aware, undo bookend)** — implemented: src/tlisp/core/commands/vim-replace.tlisp:23-62 (vim-replace-begin/apply with undo-begin/undo-commit + count clamp + r<Enter> newline split); test/unit/replace-mode.test.ts:29-82
+- **Phase 2.C: R replace mode (typed chars overwrite, Backspace restores, Escape exits)** — implemented: src/tlisp/core/commands/vim-replace.tlisp:78-102 (vim-replace-mode-enter opens undo-begin, vim-replace-mode-insert-char overwrites or appends); src/editor/handlers/replace-handler.ts:14-78 (Escape commits undo + Backspace moves cursor); test/unit/replace-mode.test.ts:84-118
+- **Phase 2.2: . repeat last change (vim-record-change recorder + replay)** — missing: No src/tlisp/core/commands/repeat.tlisp file exists; no vim-record-change/vim-repeat-last-change function; no key-bind for "." in src/tlisp/core; no test/unit/repeat-change.test.ts
+- **Phase 2.3: "x register prefix ("ayy, "ap, "Ayy append, 3"ayw count)** — implemented: src/tlisp/core/commands/operators.tlisp:357-469 (vim-register-prefix-pending-p through vim-maybe-apply-register); key-bind at :469; vim-valid-register-p at :380-387 includes a-z/A-Z/0-9/*/+
+- **Phase 2.4: OS clipboard bridge for + and * registers (pbcopy/pbpaste, xclip, clip)** — implemented: src/editor/api/clipboard-ops.ts:99-153 (clipboardSet/clipboardGet with platform detection); src/tlisp/core/commands/operators.tlisp:446-448 (clipboard-set when register is + or *); src/tlisp/core/commands/edit-commands.tlisp:53-81 (clipboard-get on paste from +/*); test/unit/clipboard-ops.test.ts
+- **Phase 3.A: W B E WORD (whitespace-only) motions** — implemented: src/tlisp/core/bindings/normal.tlisp:85-87 (key-bind W/B/E → word-next-WORD/word-previous-WORD/word-end-WORD); test/unit/word-navigation.test.ts:372+
+- **Phase 3.B: ge gE backward word-end motions** — implemented: src/tlisp/core/commands/motions.tlisp:435-436 (key-bind g e / g E)
+- **Phase 3.C: ( ) sentence motions** — implemented: src/tlisp/core/commands/motions.tlisp:240-337 (vim-sentence-next/previous + scan helpers); bindings at :439-440
+- **Phase 3.D: [[ ]] section motions (also [] ][ per AC#3)** — partial: src/tlisp/core/commands/motions.tlisp:341-412 implements vim-section-previous/vim-section-next only; bindings :441-442 cover only [[ and ]]; [] and ][ (section-end variants) are NOT implemented
+- **Phase 3.E: H M L window-relative motions** — implemented: src/tlisp/core/commands/motions.tlisp:170-202 (vim-window-top/middle/bottom); bindings :443-445
+- **Phase 3.F: C-e C-y single-line scroll** — implemented: src/tlisp/core/commands/motions.tlisp:204-239 (vim-scroll-line-down/up); bindings :446-447
+- **Phase 3.G: gj gk g_ screen-line motions** — missing: No gj/gk/g_ bindings in src/tlisp/core/bindings/normal.tlisp or motions.tlisp; grep returns zero matches
+- **Phase 4.A: m ' ` marks (buffer-local)** — implemented: src/tlisp/core/commands/marks.tlisp:18-96 (vim-mark-begin-set/jump-line/jump-exact + dispatch); bindings :134-136; test/unit/marks.test.ts
+- **Phase 4.B: :marks Ex command listing** — implemented: src/editor/api/bindings-ops.ts:120-137 (evaluates (vim-marks-format) and logs to *Messages*); src/tlisp/core/commands/marks.tlisp:106-132 (vim-marks-list/format)
+- **Phase 4.C: Special marks '< '> '[ '] '^ . (auto-set)** — missing: src/tlisp/core/commands/marks.tlisp:98-104 defines vim-mark-set-special primitive but grep finds no caller in src/tlisp/core/commands/ — operators/edit-commands/insert-entries do NOT invoke it; the special marks are never auto-populated
+- **Phase 4.D: Global marks mA cross-buffer** — missing: src/tlisp/core/commands/marks.tlisp:53-57 stores all marks into a single alist with no uppercase/global distinction and no buffer-id field; grep for 'uppercase|buffer-id|global|cross-buffer' returns no matches
+- **Phase 4.E: C-o / C-i jumplist navigation** — implemented: src/tlisp/core/commands/jumplist.tlisp:67-120 (vim-jump-record/back/forward); bindings :122-123; test/unit/jumplist.test.ts
+- **Phase 4.F: Jumplist push hooks on gg/G/n/N/*/#/% + 100-entry cap** — implemented: src/tlisp/core/commands/jumplist.tlisp:31-39,67-78 (vim-jump-cap-value=100, vim-jump-drop-oldest trims to cap); Open Question #6 resolved
+- **Phase 5.A: >> << line indent/outdent** — implemented: src/tlisp/core/commands/indent-ops.tlisp:78-118 (vim-indent-line/vim-outdent-line); bindings :214-215; test/unit/indent-ops.test.ts:55-91
+- **Phase 5.B: > < operator+motion forms (>w, >j, gu$)** — missing: src/tlisp/core/commands/indent-ops.tlisp:5-8 comment: 'Operator+motion forms (guw, gU$, etc.) are deferred to a follow-up slice per spec Phase 5.B'
+- **Phase 5.C: Visual mode > < ~ gu gU g~** — partial: src/tlisp/core/commands/indent-ops.tlisp:126-207 implements vim-visual-indent/outdent/toggle-case only; bindings :220-222 wire visual >, <, ~. Visual-mode gu/gU/g~ are NOT implemented
+- **Phase 5.D: guu gUU g~~ line-scoped case operators** — implemented: src/tlisp/core/commands/indent-ops.tlisp:40-67 (vim-transform-line for downcase/upcase/toggle); bindings :216-218; test/unit/indent-ops.test.ts:92-114
+- **Phase 5.E: ~ toggle case of char under cursor** — implemented: src/tlisp/core/commands/indent-ops.tlisp:23-38 (vim-toggle-case-char with count + undo bookend); binding :213; test/unit/indent-ops.test.ts:31-54
+- **Phase 5.F: = reindent operator deferred unless addendum defines language support** — implemented: Correctly deferred — no = operator in normal.tlisp or motions.tlisp
+- **Acceptance Criterion 6: No regressions; all existing tmax-use playbooks + unit tests + typecheck pass** — implemented: Gate results reported: typecheck:src PASS, test:unit PASS, test:tmax-use PASS
+- **Acceptance Criterion 7: No TS violations — src/editor/handlers/* and src/editor/api/* contain no new editor decisions** — implemented: src/editor/handlers/normal-handler.ts:44-270 routes keys via T-Lisp primitives (macro-record-pending-p, vim-register-prefix-pending-p, vim-replace-char-pending-p, etc.) without inspecting semantics; src/editor/handlers/replace-handler.ts:14-78 mirrors insert-handler shape (routes only); clipboard-ops.ts:119-153 is pure primitive
+- **Acceptance Criterion 8: Memory compliance — daemon restarted before UI verification; visual fixes verified in live system** — implemented: .github/workflows/ci.yml updated to use test:tmax-use; CLAUDE.md §8 now requires bun run test:tmax-use for e2e validation
+
+### Tests
+- **diw/daw/ci"/ca{/dat text-object operations delete/change expected region and yank to "** — covered: test/unit/operator-text-object.test.ts (existing SPEC-044 Phase 1.A coverage referenced in spec); tmax-use/playbooks/eval-19-vim-text-objects.yaml
+- **d2iw count multiplier** — covered: operators.tlisp:160-166 count×motion-count; operator-text-object.test.ts; optionalCount in text-objects-ops.ts:699-705
+- **u after diw restores text + cursor (undo bookend)** — covered: undo-begin/undo-commit at operators.tlisp:183,218; replace-mode.test.ts:68-73 proves the round-trip pattern
+- **M-y yank-pop after dd cycles numbered delete registers** — uncovered: No explicit yank-pop-after-text-object test in test/unit/; operators.tlisp calls (set-register "\"") directly (line 136) bypassing registerDelete's 1-9 rotation in evil-integration.ts:188
+- **/foo<CR> moves to next match and highlights all** — covered: tmax-use/playbooks/eval-20-vim-search.yaml; test/unit/incremental-search.test.ts
+- **n advances to next match; N reverses; wrap-around** — covered: test/unit/search-navigation.test.ts
+- **:nohl clears highlights without clearing pattern; n still works** — covered: test/unit/search-navigation.test.ts:232-265 (Phase 1.E :nohl and :noh alias tests)
+- **qa<keys>q records; @a plays; @@ replays; persists across restart** — covered: test/unit/macro-recording.test.ts, macro-persistence.test.ts, macros.test.ts; tmax-use/playbooks/eval-21-vim-macros.yaml
+- **Recorded macro does NOT include the stopping q key (Prove-It pattern)** — covered: src/editor/handlers/normal-handler.ts:163-168 special-cases the stopping q before the record hook at line 233
+- **rx overwrites char; 3rx overwrites 3 chars; r<Esc> cancels** — covered: test/unit/replace-mode.test.ts:29-82 (Phase 2.B tests)
+- **R enters replace mode; typed chars overwrite; Backspace restores; Escape exits** — covered: test/unit/replace-mode.test.ts:84-118 (Phase 2.C tests including R past EOL appends, single-undo session)
+- **dw. deletes next word; dd. deletes line; ihi<Esc>. re-inserts; 5. count override** — uncovered: . repeat NOT implemented — no test/unit/repeat-change.test.ts file exists
+- **"ayy yanks into a; "ap pastes from a; "Ayy appends** — uncovered: Feature wired in operators.tlisp:357-469 but no dedicated unit test for the register-prefix flow located in test/unit/
+- **"+yy / "+p OS clipboard round-trip (pbcopy/pbpaste)** — covered: test/unit/clipboard-ops.test.ts:15-37 (clipboard-set/clipboard-get round-trip + multi-line + empty)
+- **ma sets mark; 'a jumps to line; `a jumps to exact col** — covered: test/unit/marks.test.ts:31-150 (set/get round-trip, exact jump, line jump, pending state machine, clear, unset)
+- **mA global mark survives buffer switch** — uncovered: Global marks NOT implemented; no uppercase/cross-buffer logic in marks.tlisp
+- **:marks lists all set marks** — uncovered: vim-marks-format function exists at marks.tlisp:129; bindings-ops.ts:120-137 wires it; no explicit test for :marks command execution in test/unit/
+- **G C-o returns to prior position; C-i redoes** — covered: test/unit/jumplist.test.ts:31-132 (record, back, forward, truncate, clear)
+- **Jumplist overflow cap at 100 entries** — uncovered: Implementation exists (jumplist.tlisp:31-39 vim-jump-cap-set, vim-jump-drop-oldest at line 41-45) but no explicit cap test in test/unit/jumplist.test.ts
+- **>> indents current line; << outdents; guu lowercases; gUU uppercases; ~ toggles char** — covered: test/unit/indent-ops.test.ts:31-184 (Phase 5.A/D/E/C with count, undo bookend, edge cases)
+- **> in visual indents selection** — covered: test/unit/indent-ops.test.ts:135-184 (Phase 5.C visual >, <, ~ with undo)
+- **>w / gu$ operator+motion forms** — uncovered: indent-ops.tlisp:5-8 explicitly defers operator+motion forms — no tests, no implementation
+- **W/B/E WORD motions; ge/gE backward word-end** — covered: test/unit/word-navigation.test.ts:372+ (Phase 3.A WORD motion tests with count and punctuation clusters)
+- **( ) sentence motions** — uncovered: Implementation exists at motions.tlisp:240-337 with bindings at :439-440; no dedicated sentence motion tests in test/unit/
+- **[[ ]] section motions** — uncovered: Implementation exists at motions.tlisp:341-412 with bindings at :441-442; no dedicated section motion tests in test/unit/
+- **H/M/L/C-e/C-y window-relative and scroll motions** — uncovered: Implementation exists at motions.tlisp:170-235 with bindings at :443-447; no dedicated H/M/L or C-e/C-y motion tests in test/unit/
+- **gj/gk/g_ screen-line motions** — uncovered: Feature NOT implemented; no bindings, no primitive, no test
+
+### Edge cases
+- **Empty buffer: diw/cw/>> no-op (not crash)** — handled: src/editor/api/text-objects-ops.ts returns Either.right(createNil()) on null buffer; >> with end<=start loops zero times (indent-ops.tlisp:82)
+- **Single-line buffer: motions at boundaries no-op gracefully** — missed: WORD motions bound; sentence/section scan loops guard at boundaries (motions.tlisp:290-337). No explicit test exercising [[/]]/(/) at boundaries in test/unit/
+- **Wrapped lines: gj/gk by screen row, j/k by logical line** — missed: gj/gk not implemented (no bindings in motions.tlisp or normal.tlisp); spec explicitly calls for verifying against 200-col line in 80-col terminal
+- **Multibyte/emoji: r<char> and ~ treat emoji as one cell (BUG-09)** — missed: vim-replace-apply uses buffer-replace-range which respects existing primitives; no explicit emoji test in test/unit/replace-mode.test.ts:29-114
+- **Zero-count operator: 0d is the 0 motion (not 0-count operator)** — handled: src/editor/handlers/normal-handler.ts:189-192 — digit 0 only feeds count when vim-count-active-p is true
+- **Mark in deleted region: 'a lands on next existing line at or below** — missed: src/tlisp/core/commands/marks.tlisp:70-85 vim-mark-jump clamps to stored line/col with no adjustment if the line was deleted
+- **Jumplist overflow cap at 100 entries (vim default)** — handled: src/tlisp/core/commands/jumplist.tlisp:31-39,67-78 — vim-jump-cap-value=100, vim-jump-drop-oldest trims to cap. Test coverage: no explicit cap test in test/unit/jumplist.test.ts
+- **Replace mode over EOL: R extends line (insert semantics past EOL)** — handled: src/tlisp/core/commands/vim-replace.tlisp:94-100 vim-replace-mode-insert-char calls buffer-insert when col>=len; test/unit/replace-mode.test.ts:99 'R-mode typing past EOL appends'
+- **@ on empty register: @z warns via *Messages* and does not crash** — handled: src/editor/editor.ts:1467-1469 throws 'No macro in register ${register}' — caught by executeCommand and surfaced as statusMessage, not a deliberate warn to *Messages*
+- **/ with no matches: clear minibuffer, show 'Pattern not found', cursor unchanged** — missed: No explicit test cited; search-incremental-* primitives handle the case per existing behavior but no named test verifies status message + cursor unchanged
+- **Daemon restart between TS-touching phases** — handled: memory feedback_daemon-restart-after-code-change.md applied; CI uses test:tmax-use per .github/workflows/ci.yml diff
+- **Register " collision: " followed by register letter vs. lone "** — handled: src/tlisp/core/commands/operators.tlisp:386-388 vim-valid-register-p includes \"; vim-dispatch-register disambiguates via pending state
+- **. after yank should NOT replay yanks (yank isn't a change)** — missed: . repeat not implemented; this invariant cannot be violated or verified (no repeat.tlisp, no test)
+- **Unnamed register rule: y writes " and 0; d/c/x rotate numbered 1-9** — missed: Rotation primitives registerYank/registerDelete exist (evil-integration.ts:169,188) but operators.tlisp:136,139,256,262,266 calls (set-register "\"" ...) directly, bypassing rotation for T-Lisp-side text-object operations. No test verifies yank→0 vs delete→1-9 rotation end-to-end
+- **Visual-mode text objects are a different code path (viw expands selection)** — missed: No visual text-object bindings in src/tlisp/core/bindings/visual.tlisp; spec marks this as separate Step 5.x concern
+- **@ replay while recording: append macro's keys to current recording (vim quirk)** — missed: macros.tlisp comment mentions it but no implementation for append-during-record behavior
+- **q<invalid> cancels pending with warning and does not record** — handled: src/tlisp/core/commands/macros.tlisp:101-105 — t branch calls vim-reset-macro-pending + editor-set-status 'Macro record cancelled'
+

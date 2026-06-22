@@ -36,7 +36,7 @@ shell command. Do NOT touch the main checkout.
     TypeScript source. UI changes must be verified in the running system,
     not just unit tests.
   - `rules/typescript.md`, `rules/functional-programming.md`, `rules/editor.md`,
-    `rules/tlisp.md`, `rules/testing.md`, `rules/ui-testing.md`,
+    `rules/tlisp.md`, `rules/testing.md`,
     `rules/daemon-client.md` — read the ones that match what you are touching.
   - Directory-level `Claude.md` files under `src/` — same rule.
 
@@ -99,9 +99,7 @@ If the feedback is empty (attempt 1): ignore this section and proceed.
    - `bun run typecheck:src` (zero errors)
    - `bun run typecheck:test` (zero errors) if you touched tests
    - `bun run test:unit` (zero failures)
-   - If you touched `src/server/` or `src/tlisp/`: restart the daemon and run
-     `bun run test:daemon`.
-   - If you touched terminal UI rendering: run `bun run test:ui:renderer`.
+   - `bun run test:tmax-use` (zero failures) if you touched user-visible editor behavior.
 8. **Report back** with: SPEC step completion table, files changed count,
    commit SHAs, verification command outputs (verbatim), and any assumptions
    that turned out to be wrong.
@@ -132,8 +130,7 @@ Final verification:
   - typecheck:src  -> PASS (N files checked)
   - typecheck:test -> PASS (N files checked)
   - test:unit      -> PASS (N tests)
-  - test:daemon    -> PASS (N tests) [only if daemon files touched]
-  - test:ui:renderer -> PASS (N tests) [only if UI rendering touched]
+  - test:tmax-use  -> PASS (N playbooks) [only if user-visible behavior touched]
 
 Assumptions challenged:
   - [original assumption] -> [what you found]

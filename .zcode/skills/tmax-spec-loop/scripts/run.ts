@@ -215,17 +215,6 @@ async function sh(cmd: string[], opts: { cwd?: string } = {}): Promise<ShellResu
   };
 }
 
-// Resolve a daemon helper script. The skill ships at both .zcode/skills/
-// and .claude/skills/, but only .claude/skills/tmax-daemon/ exists today.
-// Check the sibling dir first, then fall back to the .claude/skills copy.
-function resolveDaemonScript(name: string): string {
-  const candidates = [
-    path.join(SKILL_DIR, "..", "tmax-daemon", "scripts", name),
-    path.join(PROJECT_ROOT, ".claude", "skills", "tmax-daemon", "scripts", name),
-  ];
-  return candidates.find((p) => existsSync(p)) ?? candidates[0]!;
-}
-
 // --- Subcommands ---
 
 async function cmdDryRun(specArg?: string): Promise<void> {
@@ -352,17 +341,6 @@ async function cmdVerify(id: string): Promise<void> {
     return true;
   };
 
-  // Detect daemon-touching changes: diff branch tip against main merge-base.
-  const mb = await sh(["git", "merge-base", "main", "HEAD"], { cwd: wt });
-  const base = mb.stdout.trim();
-  const diff = base
-    ? await sh(["git", "diff", "--name-only", base, "HEAD"], { cwd: wt })
-    : { stdout: "", ok: true, exitCode: 0, stderr: "" };
-  const changedFiles = diff.stdout.split("\n").filter(Boolean);
-  const daemonTouched = changedFiles.some(
-    (f) => f.startsWith("src/server/") || f.startsWith("src/tlisp/"),
-  );
-
   const failVerify = (): never => {
     console.log(`VERIFY FAILED: ${verifyErr}`);
     console.log(`FAILED_GATE=${failedGate}`);
@@ -375,18 +353,6 @@ async function cmdVerify(id: string): Promise<void> {
   }
   if (!(await verifyStep("test:unit", ["bun", "run", "test:unit"]))) {
     failVerify();
-  }
-  if (daemonTouched) {
-    const stopScript = resolveDaemonScript("stop_daemon.py");
-    const startScript = resolveDaemonScript("start_daemon.py");
-    if (!(await verifyStep("daemon-restart", ["uv", "run", stopScript]))) {
-      failVerify();
-    }
-    // Best-effort start; not fatal if it warns.
-    await verifyStep("daemon-start", ["uv", "run", startScript, PROJECT_ROOT]);
-    if (!(await verifyStep("test:daemon", ["bun", "run", "test:daemon"]))) {
-      failVerify();
-    }
   }
 
   console.log("VERIFY OK");

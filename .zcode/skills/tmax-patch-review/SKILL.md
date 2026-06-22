@@ -38,7 +38,7 @@ The verdict is binary:
 ## How it works
 
 1. **Gather (mechanical, script-driven).** `bun scripts/audit.ts gather <SPEC>` finds the implementing commit(s) first; if none are found, it falls back to the **uncommitted working tree** (staged + unstaged changes and the SPEC's named new files). It computes the diff, lists files touched + line counts, and writes a gather bundle to `.patch-reviews/<SPEC-ID>-<timestamp>/gather.md`. Only when there are no implementation changes at all (neither committed nor in the working tree) does gather report NO IMPLEMENTATION FOUND and stop.
-2. **Run gates (mechanical).** The script runs `bun run typecheck:src`, `bun run test:unit`, and (if `src/server/` or `src/tlisp/` was touched) restarts the daemon and runs `bun run test:daemon`. Output goes into the gather bundle.
+2. **Run gates (mechanical).** The script runs `bun run typecheck:src` and `bun run test:unit`. Output goes into the gather bundle.
 3. **Audit (semantic, sub-agent-driven).** The orchestrator dispatches a sub-agent with the SPEC, the gather bundle, and the rubric in `references/criteria-checklist.md`. The sub-agent walks each acceptance criterion, cites the implementing code (file:line), notes edge cases, and writes a verdict.
 4. **Verdict (orchestrator-driven).** Orchestrator reads the sub-agent's verdict:
    - **PASS** → writes the verified note, marks `done`, reports to user.

@@ -94,11 +94,31 @@ IMPORTANT: Execute every step in order, top to bottom.
 ## Acceptance Criteria
 <list specific, measurable criteria that must be met for the feature to be considered complete>
 
+## Tests & E2E Playbooks
+
+This feature must be verified by both unit tests and a tmax-use e2e playbook. Author them as part of the implementation.
+
+### Unit tests
+- Identify which `test/unit/*.test.ts` files need new or updated tests for the behavior changed by this work.
+- Each new behavior gets at least one unit test that would fail without the change.
+- Targeted unit tests must pass: `bun run test:unit`.
+
+### tmax-use e2e playbook
+- Read 2–3 existing playbooks in `tmax-use/playbooks/` (e.g. `eval-01-cursor-movement.yaml`, `_smoke.yaml`) and the schema in `tmax-use/playbooks/README.md` before authoring.
+- Create `tmax-use/playbooks/<feature-slug>.yaml` that exercises the user-visible behavior end-to-end: setup file → steps (open/keys/eval) → `expect` assertions (mode, cursor, buffer_contains, screen_contains as appropriate) → `cleanup: true`.
+- The playbook name should be the feature slug, kebab-case. Do not weaken assertions to make a playbook pass; if an assertion is genuinely wrong, say so in the spec's Notes.
+- Run it locally: `bin/tmax-use test tmax-use/playbooks/<feature-slug>.yaml`.
+- If the feature is not user-visible (no editor behavior to drive via keys/eval), state that explicitly and skip the playbook — unit tests alone suffice.
+
+### New Files
+<list every new test file and playbook created above with a one-line purpose. If no playbook is needed, say so.>
+
 ## Validation Commands
 Execute every command to validate the feature works correctly with zero regressions.
 
 <list commands you'll use to validate with 100% confidence the feature is implemented correctly with zero regressions. every command must execute without errors so be specific about what you want to run to validate the feature works as expected. Include commands to test the feature end-to-end.>
-- `cd app/server && uv run pytest` - Run server tests to validate the feature works with zero regressions
+- `bun run test:unit` - Run unit tests with zero regressions.
+- `bun run test:tmax-use` - Run all tmax-use e2e playbooks + tests.
 
 ## Notes
 <optionally list any additional notes, future considerations, or context that are relevant to the feature that will be helpful to the developer>
