@@ -96,11 +96,13 @@ function mockDeps(opts: {
   reviewCalls: Array<{ input: string; id: string }>;
   buildCalls: Array<{ input: string; modelOverride?: string; id: string }>;
   patchCalls: Array<{ input: string; modelOverride?: string; id: string }>;
+  testCalls: Array<{ input: string; modelOverride?: string; id: string; retry?: boolean }>;
 } {
   const planCalls: Array<{ description: string; forcedType?: string; id: string }> = [];
   const reviewCalls: Array<{ input: string; id: string }> = [];
   const buildCalls: Array<{ input: string; modelOverride?: string; id: string }> = [];
   const patchCalls: Array<{ input: string; modelOverride?: string; id: string }> = [];
+  const testCalls: Array<{ input: string; modelOverride?: string; id: string; retry?: boolean }> = [];
 
   const buildQueue = Array.isArray(opts.build) ? [...opts.build] : null;
   const patchQueue = Array.isArray(opts.patch) ? [...opts.patch] : null;
@@ -111,6 +113,7 @@ function mockDeps(opts: {
     reviewCalls,
     buildCalls,
     patchCalls,
+    testCalls,
     runPlan: async (description, forcedType, id) => {
       planCalls.push({ description, forcedType, id });
       return opts.plan ?? Either.right(mockPlan("/abs/spec.md"));
@@ -127,7 +130,11 @@ function mockDeps(opts: {
       }
       return opts.build && !Array.isArray(opts.build) ? opts.build : Either.right(mockBuild());
     },
-    runTest: async () => {
+    runTest: async (input, modelOverride, id) => {
+      // The dispatcher signature is (specPath, modelOverride, id). Track all 3
+      // and mark retry invocations via call-order heuristic (initial test is
+      // the 1st call; subsequent ones are retry reruns after rebuild).
+      testCalls.push({ input, modelOverride, id, retry: testCalls.length > 0 });
       if (testQueue) {
         const next = testQueue.shift();
         return next ?? Either.right(mockTestPass());
@@ -285,12 +292,54 @@ describe("runPipeline — build↔patch-review loop", () => {
     // build called twice (initial + 1 retry), patch called twice.
     expect(deps.buildCalls).toHaveLength(2);
     expect(deps.patchCalls).toHaveLength(2);
+    // test called twice — once after initial build, once after retry build.
+    // The build→test→patch-review invariant requires test to be re-run after
+    // every retry build, not routed directly back to patch-review.
+    expect(deps.testCalls).toHaveLength(2);
+    expect(deps.testCalls[0]!.retry).toBe(false);  // initial test
+    expect(deps.testCalls[1]!.retry).toBe(true);   // post-retry-build test rerun
+    // Sanity: build, test, patch call IDs all share the orchestrator id.
+    const sharedId = deps.buildCalls[0]!.id;
+    expect(deps.testCalls[0]!.id).toBe(sharedId);
+    expect(deps.testCalls[1]!.id).toBe(sharedId);
 
     if (Either.isRight(result)) {
       const state = JSON.parse(readFileSync(join(AGENTS_DIR, result.right.id, "adw-state.json"), "utf8"));
       expect(state.patch_review_verdict).toBe("pass");
       expect(state.patch_review_iterations).toBe(2);
     }
+  });
+
+  test("retry-build → test-rerun → patch-review invariant (direct testCalls assertion)", async () => {
+    // Dedicated test for the AC#11 invariant: after a patch-review `gaps`
+    // retry build, the test stage is re-run before patch-review runs again.
+    // The retry build MUST NOT route directly back to patch-review.
+    const deps = mockDeps({
+      patch: [
+        Either.right(mockPatchGaps()),  // iteration 1: gaps → retry build
+        Either.right(mockPatchGaps()),  // iteration 2: gaps → retry build
+        Either.right(mockPatchPass()),  // iteration 3: pass
+      ],
+    });
+    const result = await runPipeline(deps, baseArgs());
+    trackId(result);
+
+    expect(Either.isRight(result)).toBe(true);
+    // 3 patch-review iterations + 2 retry builds + 1 initial build = 3 build calls.
+    expect(deps.buildCalls).toHaveLength(3);
+    expect(deps.patchCalls).toHaveLength(3);
+    // Critical assertion: test runs once after each build (initial + 2 retries = 3).
+    // The invariant is build → test → patch-review on EVERY pass through the loop.
+    expect(deps.testCalls).toHaveLength(3);
+    expect(deps.testCalls[0]!.retry).toBe(false);  // after initial build
+    expect(deps.testCalls[1]!.retry).toBe(true);   // after 1st retry build
+    expect(deps.testCalls[2]!.retry).toBe(true);   // after 2nd retry build
+    // Verify call ordering: build[0] → test[0] → patch[0] → build[1] → test[1] → patch[1] → ...
+    // We approximate ordering by checking that test calls happen after their
+    // corresponding build calls (buildCalls[N] is recorded before testCalls[N]
+    // since the orchestrator's sequence is awaited).
+    expect(deps.buildCalls[1]!.id).toBe(deps.testCalls[1]!.id);
+    expect(deps.buildCalls[2]!.id).toBe(deps.testCalls[2]!.id);
   });
 
   test("patch-review gaps 3 times → release with patch_review_verdict: gaps", async () => {
