@@ -1,0 +1,134 @@
+(defmodule editor/commands/macros
+  (export macro-handle-q macro-handle-at
+          macro-record-pending-p macro-play-pending-p
+          macro-dispatch-record macro-dispatch-play
+          vim-reset-macro-pending)
+
+;; macros.tlisp -- Vim macro record/play state owned by T-Lisp (SPEC-044 1.F-1.H)
+;;
+;; Two-key commands: q<reg> starts recording, @<reg> plays, @@ replays.
+;; Mirrors the operator-pending pattern in operators.tlisp: a transient
+;; defvar flag (vim-macro-record-pending / vim-macro-play-pending) holds the
+;; "waiting for register" state, and the handler routes the next key through
+;; macro-dispatch-record / macro-dispatch-play.
+;;
+;; Recording capture lives in normal-handler.ts (the "handler routes, T-Lisp
+;; decides" pattern from src/editor/Claude.md): when (macro-record-active) is
+;; true, the handler calls (macro-record-key <key>) immediately before
+;; evaluating the bound command. The stopping q is special-cased in the
+;; handler and routed directly to (macro-record-stop), so it is never recorded.
+
+(defvar vim-macro-record-pending nil)
+(defvar vim-macro-play-pending nil)
+
+(defun macro-record-pending-p ()
+  "Return t when waiting for the register letter of a q<reg> command."
+  (not (null vim-macro-record-pending)))
+
+(defun macro-play-pending-p ()
+  "Return t when waiting for the register letter of an @<reg> command."
+  (not (null vim-macro-play-pending)))
+
+(defun vim-reset-macro-pending ()
+  "Clear both macro pending flags. Used by handler Escape/C-g cancellation
+and by (vim-reset-pending)."
+  (progn
+    (set! vim-macro-record-pending nil)
+    (set! vim-macro-play-pending nil)
+    nil))
+
+(defun macro-handle-q ()
+  "Top-level binding for the q key.
+If recording: stop and save. Otherwise enter macro-record-pending and wait
+for the next key (handled by macro-dispatch-record in normal-handler.ts)."
+  (if (macro-record-active)
+    (progn
+      (let ((register (macro-record-register)))
+        (progn
+          (macro-record-stop)
+          (editor-set-status (concat "Recorded macro into @" register))
+          t)))
+    (progn
+      (set! vim-macro-record-pending t)
+      (editor-set-status "record @register")
+      t)))
+
+(defun macro-handle-at ()
+  "Top-level binding for the @ key. Enter macro-play-pending and wait for the
+register letter (or @ for replay-last)."
+  (progn
+    (set! vim-macro-play-pending t)
+    (editor-set-status "play @register")
+    t))
+
+(defun macro-valid-register-p (key)
+  "Return t if KEY is a valid macro register (a-z or 0-9)."
+  (or
+    (string= key "a") (string= key "b") (string= key "c")
+    (string= key "d") (string= key "e") (string= key "f")
+    (string= key "g") (string= key "h") (string= key "i")
+    (string= key "j") (string= key "k") (string= key "l")
+    (string= key "m") (string= key "n") (string= key "o")
+    (string= key "p") (string= key "q") (string= key "r")
+    (string= key "s") (string= key "t") (string= key "u")
+    (string= key "v") (string= key "w") (string= key "x")
+    (string= key "y") (string= key "z")
+    (string= key "0") (string= key "1") (string= key "2")
+    (string= key "3") (string= key "4") (string= key "5")
+    (string= key "6") (string= key "7") (string= key "8")
+    (string= key "9")))
+
+(defun macro-dispatch-record (key)
+  "Resolve a pending q<reg> command. KEY is the second key press.
+- Register letter (a-z, 0-9): start recording into that register.
+- Escape / C-g: cancel pending and quit the editor (matches SPEC-044 MUST:
+  q<Esc> still quits, preserving the prior top-level q binding semantics).
+- Anything else: cancel pending. The user pressed q followed by something
+  that isn't a register; treat as abandoned input."
+  (cond
+    ((macro-valid-register-p key)
+      (progn
+        (macro-record-start key)
+        (set! vim-macro-record-pending nil)
+        (editor-set-status (concat "recording @" key))
+        t))
+    ((or (string= key "Escape") (string= key "C-g"))
+      (progn
+        (vim-reset-macro-pending)
+        (editor-set-status "")
+        (editor-quit)
+        t))
+    (t
+      (progn
+        (vim-reset-macro-pending)
+        (editor-set-status "Macro record cancelled")
+        t))))
+
+(defun macro-dispatch-play (key)
+  "Resolve a pending @<reg> command. KEY is the second key press.
+- @ : replay the last-played macro via macro-execute-last.
+- Register letter (a-z, 0-9): play that macro via macro-execute.
+- Escape / C-g or non-register: cancel pending without playing."
+  (cond
+    ((string= key "@")
+      (progn
+        (set! vim-macro-play-pending nil)
+        (macro-execute-last)
+        t))
+    ((macro-valid-register-p key)
+      (progn
+        (set! vim-macro-play-pending nil)
+        (macro-execute key)
+        t))
+    (t
+      (progn
+        (vim-reset-macro-pending)
+        (editor-set-status "Macro play cancelled")
+        t))))
+
+;; Bindings — overwrite the legacy (key-bind "q" "(editor-quit)" "normal")
+;; from normal.tlisp:150. Quit is still reachable via q<Esc> (handled in
+;; macro-dispatch-record), :q<CR>, or ZQ.
+(key-bind "q" "(macro-handle-q)" "normal")
+(key-bind "@" "(macro-handle-at)" "normal")
+)

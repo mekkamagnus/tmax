@@ -1,6 +1,8 @@
 (defmodule editor/bindings/visual
   (export)
 
+  (require-module editor/commands/indent-ops)
+
 ;; visual.tlisp
 ;; Default key bindings for visual mode in tmax editor
 ;;
@@ -38,11 +40,11 @@
 ;; Yank (copy) selected text (y)
 (key-bind "y" "(visual-yank)" "visual")
 
-;; Lowercase selected text (u)
-(key-bind "u" "(visual-lowercase)" "visual")
+;; Lowercase selected text (u) — SPEC-044 Phase 5.C T-Lisp implementation
+(key-bind "u" "(vim-visual-lowercase)" "visual")
 
-;; Uppercase selected text (U)
-(key-bind "U" "(visual-uppercase)" "visual")
+;; Uppercase selected text (U) — SPEC-044 Phase 5.C T-Lisp implementation
+(key-bind "U" "(vim-visual-uppercase)" "visual")
 
 ;; Change selected text (c)
 (key-bind "c" "(visual-change)" "visual")

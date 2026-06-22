@@ -8,11 +8,19 @@ import { TLispInterpreterImpl } from "../tlisp/interpreter.ts";
 import { FileSystemImpl } from "../core/filesystem.ts";
 import { createEditorAPI, TlispEditorState } from "./tlisp-api.ts";
 import type { EditorState, FunctionalTextBuffer, Window, HighlightSpan, MinibufferRenderView, WorkspaceState, BufferMetadata } from "../core/types.ts";
-import { createString, createList, createNil, createNumber, createBoolean, createHashmap } from "../tlisp/values.ts";
+import { createString, createList, createNil, createNumber, createBoolean, createHashmap, createPromise } from "../tlisp/values.ts";
 import type { TerminalIO, FileSystem } from "../core/types.ts";
 import type { TLispEnvironment, TLispValue, TLispFunctionImpl } from "../tlisp/types.ts";
 import type { TLispFunction } from "../tlisp/types.ts";
 import { Either } from "../utils/task-either.ts";
+
+/**
+ * Fallback visible-line count used by {@link Editor.recomputeHighlights} when
+ * computing daemon-side syntax spans. The daemon does not track the client's
+ * terminal height (the TUI client computes its own spans), so this default is
+ * used to bound the re-tokenization window.
+ */
+const HIGHLIGHT_RECOMPUTE_VIEWPORT_LINES = 50;
 import { renderDiagnostic } from "../tlisp/diagnostic-renderer.ts";
 import { FunctionalTextBufferImpl } from "../core/buffer.ts";
 import { MessageLog, type LogLevel } from "./message-log.ts";
@@ -24,6 +32,7 @@ import { handleInsertMode } from "./handlers/insert-handler.ts";
 import { handleVisualMode } from "./handlers/visual-handler.ts";
 import { handleCommandMode } from "./handlers/command-handler.ts";
 import { handleMxMode } from "./handlers/mx-handler.ts";
+import { handleReplaceMode } from "./handlers/replace-handler.ts";
 import * as macroRecording from "./api/macro-recording.ts";
 import { loadMacrosFromFile, saveMacrosToFile } from "./api/macro-persistence.ts";
 import { LSPClient } from "../lsp/client.ts";
@@ -54,7 +63,7 @@ import { createWhichKeyState, DEFAULT_WHICH_KEY_TIMEOUT, type WhichKeyHandle } f
 export interface KeyMapping {
   key: string;
   command: string;
-  mode?: "normal" | "insert" | "visual" | "command" | "mx";
+  mode?: "normal" | "insert" | "visual" | "command" | "mx" | "replace";
   majorMode?: string;
 }
 
@@ -335,7 +344,7 @@ export class Editor {
       get terminal() { return editor.terminal; },
       get filesystem() { return editor.filesystem; },
       get mode() { return editor.state.mode; },
-      set mode(v: 'normal' | 'insert' | 'visual' | 'command' | 'mx') { editor.state.mode = v; },
+      set mode(v: 'normal' | 'insert' | 'visual' | 'command' | 'mx' | 'replace') { editor.state.mode = v; },
       get lastCommand() { return ""; },
       set lastCommand(_: string) { },
       get statusMessage() { return editor.state.statusMessage; },
@@ -395,6 +404,8 @@ export class Editor {
       _setBufferModified: (modified: boolean) => editor.setCurrentBufferModified(modified),
       _getMessageLog: () => new ViewBoundLog(editor.log, 'messages'),
       _getUnifiedLog: () => editor.log,
+      get searchMatches() { return editor.state.searchMatches; },
+      set searchMatches(v: import("../core/types.ts").Range[] | undefined) { editor.state.searchMatches = v; },
     };
 
     const api = createEditorAPI(tlispState);
@@ -440,7 +451,7 @@ export class Editor {
 
       const key = keyArg.value as string;
       const command = commandArg.value as string;
-      let mode: "normal" | "insert" | "visual" | "command" | "mx" | undefined;
+      let mode: "normal" | "insert" | "visual" | "command" | "mx" | "replace" | undefined;
 
       if (modeArg) {
         if (modeArg.type !== "string") {
@@ -450,7 +461,7 @@ export class Editor {
         if (!["normal", "insert", "visual", "command", "mx"].includes(modeStr)) {
           throw new Error(`Invalid mode: ${modeStr}`);
         }
-        mode = modeStr as "normal" | "insert" | "visual" | "command" | "mx";
+        mode = modeStr as "normal" | "insert" | "visual" | "command" | "mx" | "replace";
       }
 
       let majorMode: string | undefined;
@@ -503,7 +514,7 @@ export class Editor {
       }
 
       const key = keyArg.value as string;
-      let mode: "normal" | "insert" | "visual" | "command" | "mx" | undefined;
+      let mode: "normal" | "insert" | "visual" | "command" | "mx" | "replace" | undefined;
 
       if (modeArg) {
         if (modeArg.type !== "string") {
@@ -513,7 +524,7 @@ export class Editor {
         if (!["normal", "insert", "visual", "command", "mx"].includes(modeStr)) {
           throw new Error(`Invalid mode: ${modeStr}`);
         }
-        mode = modeStr as "normal" | "insert" | "visual" | "command" | "mx";
+        mode = modeStr as "normal" | "insert" | "visual" | "command" | "mx" | "replace";
       }
 
       if (this.keyMappings.has(key)) {
@@ -577,7 +588,7 @@ export class Editor {
       }
 
       const key = keyArg.value as string;
-      let mode: "normal" | "insert" | "visual" | "command" | "mx" | undefined;
+      let mode: "normal" | "insert" | "visual" | "command" | "mx" | "replace" | undefined;
 
       if (modeArg) {
         if (modeArg.type !== "string") {
@@ -587,7 +598,7 @@ export class Editor {
         if (!["normal", "insert", "visual", "command", "mx"].includes(modeStr)) {
           throw new Error(`Invalid mode: ${modeStr}`);
         }
-        mode = modeStr as "normal" | "insert" | "visual" | "command" | "mx";
+        mode = modeStr as "normal" | "insert" | "visual" | "command" | "mx" | "replace";
       }
 
       const mappings = this.keyMappings.get(key);
@@ -646,7 +657,7 @@ export class Editor {
       }
 
       const key = keyArg.value as string;
-      let mode: "normal" | "insert" | "visual" | "command" | "mx" | undefined;
+      let mode: "normal" | "insert" | "visual" | "command" | "mx" | "replace" | undefined;
 
       if (modeArg) {
         if (modeArg.type !== "string") {
@@ -656,10 +667,10 @@ export class Editor {
         if (!["normal", "insert", "visual", "command", "mx"].includes(modeStr)) {
           throw new Error(`Invalid mode: ${modeStr}`);
         }
-        mode = modeStr as "normal" | "insert" | "visual" | "command" | "mx";
+        mode = modeStr as "normal" | "insert" | "visual" | "command" | "mx" | "replace";
       } else {
         // Use current mode if not specified
-        mode = this.getMode() as "normal" | "insert" | "visual" | "command" | "mx";
+        mode = this.getMode() as "normal" | "insert" | "visual" | "command" | "mx" | "replace";
       }
 
       const mappings = this.keyMappings.get(key);
@@ -1418,6 +1429,10 @@ export class Editor {
     });
 
     // macro-execute: Execute a recorded macro
+    // SPEC-044 Phase 1.H — returns a TLispPromise so the async evaluator
+    // (used by the handler's executeCommandAsync path) awaits each inner
+    // handleKey in order. The previous fire-and-forget loop raced key dispatch
+    // and made @a/@@ no-ops in practice.
     defineRaw("macro-execute", (args) => {
       if (args.length < 1 || args.length > 2) {
         throw new Error("macro-execute requires 1 or 2 arguments: register, optional count");
@@ -1453,19 +1468,23 @@ export class Editor {
         throw new Error(`No macro in register ${register}`);
       }
 
-      // Execute each key the specified number of times
-      for (let i = 0; i < count; i++) {
-        for (const key of keys) {
-          // Execute the key via handleKey
-          // Note: This is a simplified version that executes the key as a command
-          // In a full implementation, we'd need to handle the key properly
-          this.handleKey(key).catch((error) => {
-            this.state.statusMessage = `Macro error: ${error instanceof Error ? error.message : String(error)}`;
-          });
+      // Build a sequential chain that awaits each handleKey in turn. Returning
+      // a TLispPromise lets executeCommandAsync await the full playback before
+      // the handler returns control to the test/user.
+      const promise = (async (): Promise<TLispValue> => {
+        for (let i = 0; i < count; i++) {
+          for (const key of keys) {
+            try {
+              await this.handleKey(key);
+            } catch (error) {
+              this.state.statusMessage = `Macro error: ${error instanceof Error ? error.message : String(error)}`;
+            }
+          }
         }
-      }
+        return createString(register);
+      })();
 
-      return createString(register);
+      return createPromise(promise);
     });
 
     // macro-execute-last: Execute the last executed macro (@@)
@@ -1488,14 +1507,18 @@ export class Editor {
         throw new Error(`No macro in register ${register}`);
       }
 
-      // Execute each key
-      for (const key of keys) {
-        this.handleKey(key).catch((error) => {
-          this.state.statusMessage = `Macro error: ${error instanceof Error ? error.message : String(error)}`;
-        });
-      }
+      const promise = (async (): Promise<TLispValue> => {
+        for (const key of keys) {
+          try {
+            await this.handleKey(key);
+          } catch (error) {
+            this.state.statusMessage = `Macro error: ${error instanceof Error ? error.message : String(error)}`;
+          }
+        }
+        return createString(register);
+      })();
 
-      return createString(register);
+      return createPromise(promise);
     });
 
     // macro-last-executed: Get the last executed macro register
@@ -2315,6 +2338,9 @@ export class Editor {
         break;
       case "mx":
         await handleMxMode(this, key, normalizedKey);
+        break;
+      case "replace":
+        await handleReplaceMode(this, key, normalizedKey);
         break;
       default:
         // Handle unknown mode as normal mode
@@ -3258,7 +3284,13 @@ export class Editor {
   }
 
   /**
-   * Recompute syntax highlight spans for visible viewport (SPEC-035)
+   * Recompute syntax highlight spans for visible viewport (SPEC-035).
+   *
+   * NOTE: As of the BUG-15 audit, `state.highlightSpans` has no production
+   * consumer — the TUI client computes its own spans via `computeHighlightSpans`
+   * in `src/client/tui-client.ts:62-64`. This method is kept correct for any
+   * future consumer; whether to delete it as dead code is an open question
+   * deferred to RFC-019 Tier 1.6 (daemon-side span caching).
    */
   recomputeHighlights(): void {
     if (!this.state.currentBuffer) {
@@ -3275,7 +3307,11 @@ export class Editor {
 
       const lines = contentResult.right.split('\n');
       const startLine = this.state.viewportTop;
-      const endLine = Math.min(startLine + (this.state.config?.tabSize ?? 50), lines.length);
+      // The daemon does not know the client's terminal height (the TUI client
+      // computes its own spans), so fall back to a sensible default line count.
+      // Previously this used `config.tabSize` (default 4) which is unrelated to
+      // viewport height and caused the wrong window to be tokenized.
+      const endLine = Math.min(startLine + HIGHLIGHT_RECOMPUTE_VIEWPORT_LINES, lines.length);
 
       // Use the T-Lisp API to highlight visible lines
       const spans: HighlightSpan[][] = [];

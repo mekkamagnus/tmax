@@ -358,13 +358,133 @@ describe("Word Navigation (US-1.1.1)", () => {
 
     test("should handle underscore in words", () => {
       setup("test_var hello_world");
-      
+
       interpreter.execute("(cursor-move 0 0)");
       interpreter.execute("(word-next)");
-      
+
       // Underscore typically part of word in programming
       const state = editor.getState();
       expect(state.cursorPosition.column).toBeGreaterThan(0);
+    });
+  });
+
+  // ====================================================================
+  // SPEC-044 Phase 3.A — WORD motions (whitespace-delimited)
+  // ====================================================================
+
+  describe("SPEC-044 Phase 3.A — WORD motions (W B E)", () => {
+    test("W jumps over punctuation cluster as one WORD", () => {
+      setup("foo.bar baz");
+
+      interpreter.execute("(cursor-move 0 0)");
+      interpreter.execute("(word-next-WORD)");
+
+      const state = editor.getState();
+      // foo.bar is one WORD; W lands at 'b' of baz (column 8).
+      expect(state.cursorPosition.line).toBe(0);
+      expect(state.cursorPosition.column).toBe(8);
+    });
+
+    test("W crosses line boundary on trailing whitespace", () => {
+      setup("foo\nbar baz");
+
+      interpreter.execute("(cursor-move 0 0)");
+      interpreter.execute("(word-next-WORD)");
+
+      const state = editor.getState();
+      expect(state.cursorPosition.line).toBe(1);
+      expect(state.cursorPosition.column).toBe(0);
+    });
+
+    test("W with count 2 skips two WORDs", () => {
+      setup("one two three four");
+
+      interpreter.execute("(cursor-move 0 0)");
+      interpreter.execute("(word-next-WORD 2)");
+
+      const state = editor.getState();
+      expect(state.cursorPosition.column).toBe(8);
+    });
+
+    test("B jumps to start of previous WORD", () => {
+      setup("foo.bar baz");
+
+      interpreter.execute("(cursor-move 0 8)");
+      interpreter.execute("(word-previous-WORD)");
+
+      const state = editor.getState();
+      expect(state.cursorPosition.column).toBe(0);
+    });
+
+    test("B crosses line boundary backward", () => {
+      setup("foo\nbar");
+
+      interpreter.execute("(cursor-move 1 0)");
+      interpreter.execute("(word-previous-WORD)");
+
+      const state = editor.getState();
+      expect(state.cursorPosition.line).toBe(0);
+      expect(state.cursorPosition.column).toBe(0);
+    });
+
+    test("E lands on last char of current WORD including punctuation", () => {
+      setup("foo.bar baz");
+
+      interpreter.execute("(cursor-move 0 0)");
+      interpreter.execute("(word-end-WORD)");
+
+      const state = editor.getState();
+      // foo.bar is one WORD; E lands on 'r' (column 6).
+      expect(state.cursorPosition.column).toBe(6);
+    });
+
+    test("E skips whitespace to next WORD end", () => {
+      setup("foo.bar baz");
+
+      interpreter.execute("(cursor-move 0 6)");
+      interpreter.execute("(word-end-WORD)");
+
+      const state = editor.getState();
+      expect(state.cursorPosition.column).toBe(10);
+    });
+  });
+
+  // ====================================================================
+  // SPEC-044 Phase 3.B — backward word-end motions (ge, gE)
+  // ====================================================================
+
+  describe("SPEC-044 Phase 3.B — backward word-end (ge gE)", () => {
+    test("ge lands on last char of previous word", () => {
+      setup("hello world");
+
+      interpreter.execute("(cursor-move 0 6)"); // 'w' of world
+      interpreter.execute("(word-previous-end)");
+
+      const state = editor.getState();
+      // Previous word is 'hello'; last char 'o' at column 4.
+      expect(state.cursorPosition.column).toBe(4);
+    });
+
+    test("gE lands on last char of previous WORD", () => {
+      setup("foo.bar baz");
+
+      interpreter.execute("(cursor-move 0 8)"); // 'b' of baz
+      interpreter.execute("(word-previous-end-WORD)");
+
+      const state = editor.getState();
+      // Previous WORD is 'foo.bar'; last char 'r' at column 6.
+      expect(state.cursorPosition.column).toBe(6);
+    });
+
+    test("ge at buffer start stays put", () => {
+      setup("hello");
+
+      interpreter.execute("(cursor-move 0 0)");
+      interpreter.execute("(word-previous-end)");
+
+      const state = editor.getState();
+      expect(state.cursorPosition.line).toBe(0);
+      expect(state.cursorPosition.column).toBe(0);
     });
   });
 });

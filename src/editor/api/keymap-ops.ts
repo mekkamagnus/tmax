@@ -62,7 +62,7 @@ export function createKeymapOps(
     const mode = modeArg.value as string;
 
     // Validate mode value
-    const validModes = ["normal", "insert", "visual", "command", "mx"];
+    const validModes = ["normal", "insert", "visual", "command", "mx", "replace"];
     if (!validModes.includes(mode)) {
       return Either.left(`Invalid mode: ${mode}. Must be one of: ${validModes.join(", ")}`);
     }

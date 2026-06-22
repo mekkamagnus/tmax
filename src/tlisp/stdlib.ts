@@ -401,6 +401,64 @@ export function registerStdlibFunctions(interpreter: TLispInterpreter): void {
     return createString(source.split(search).join(replacement));
   }));
 
+  // SPEC-044 Phase 5.D/E — case conversion builtins for ~, gu, gU, g~.
+  // ASCII-only to match the primitives-only rule: these are pure string
+  // transforms with no editor decisions.
+  interpreter.defineBuiltin("string-upcase", raw((args: TLispValue[]) => {
+    if (args.length !== 1 || args[0]?.type !== "string") {
+      throw new Error("string-upcase requires a string");
+    }
+    return createString((args[0].value as string).toUpperCase());
+  }));
+
+  interpreter.defineBuiltin("string-downcase", raw((args: TLispValue[]) => {
+    if (args.length !== 1 || args[0]?.type !== "string") {
+      throw new Error("string-downcase requires a string");
+    }
+    return createString((args[0].value as string).toLowerCase());
+  }));
+
+  interpreter.defineBuiltin("char-toggle-case", raw((args: TLispValue[]) => {
+    if (args.length !== 1 || args[0]?.type !== "string") {
+      throw new Error("char-toggle-case requires a single-character string");
+    }
+    const s = args[0].value as string;
+    if (s.length === 0) return createString("");
+    const ch = s[0]!;
+    const upper = ch.toUpperCase();
+    const lower = ch.toLowerCase();
+    // Non-letter chars round-trip to themselves.
+    const toggled = (ch === lower && upper !== lower) ? upper : lower;
+    return createString(toggled);
+  }));
+
+  // SPEC-044 Phase 5.D/E — whole-string toggle-case. Avoids per-char
+  // iteration in T-Lisp (which is painful and error-prone).
+  interpreter.defineBuiltin("string-toggle-case", raw((args: TLispValue[]) => {
+    if (args.length !== 1 || args[0]?.type !== "string") {
+      throw new Error("string-toggle-case requires a string");
+    }
+    const s = args[0].value as string;
+    let out = "";
+    for (const ch of s) {
+      const upper = ch.toUpperCase();
+      const lower = ch.toLowerCase();
+      out += (ch === lower && upper !== lower) ? upper : lower;
+    }
+    return createString(out);
+  }));
+
+  // SPEC-044 Phase 5.A — repeat a string N times. Used for indent spaces
+  // so T-Lisp doesn't need a loop to build "    ".
+  interpreter.defineBuiltin("string-repeat", raw((args: TLispValue[]) => {
+    if (args.length !== 2 || args[0]?.type !== "string" || args[1]?.type !== "number") {
+      throw new Error("string-repeat requires a string and a number");
+    }
+    const s = args[0].value as string;
+    const n = Math.max(0, args[1].value as number);
+    return createString(s.repeat(n));
+  }));
+
   interpreter.defineBuiltin("number-to-string", raw((args: TLispValue[]) => {
     if (args.length !== 1 || args[0]?.type !== "number") {
       throw new Error("number-to-string requires a number");

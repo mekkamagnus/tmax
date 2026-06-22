@@ -40,7 +40,233 @@ import {
  * @param char - Character to check
  * @returns true if character is alphanumeric or underscore
  */
-import { isWordChar } from "./text-utils.ts";
+import { isWordChar, isWhitespace } from "./text-utils.ts";
+
+/**
+ * Find the start of the next WORD (W command).
+ * A WORD is a whitespace-delimited token — punctuation joins the
+ * surrounding word characters as one unit.
+ */
+function findNextWORDStart(
+  text: string,
+  line: number,
+  column: number
+): { line: number; column: number } {
+  const lines = text.split('\n');
+  if (lines.length === 0 || (lines.length === 1 && lines[0] === '')) {
+    return { line: 0, column: 0 };
+  }
+
+  let currentLine = Math.max(0, Math.min(line, lines.length - 1));
+  let currentColumn = Math.max(0, column);
+
+  // Skip the current non-whitespace cluster.
+  const currLineText = lines[currentLine]!;
+  while (currentColumn < currLineText.length && !isWhitespace(currLineText[currentColumn]!)) {
+    currentColumn++;
+  }
+
+  // Now skip whitespace, possibly across lines.
+  while (currentLine < lines.length) {
+    const lineText = lines[currentLine]!;
+    while (currentColumn < lineText.length && isWhitespace(lineText[currentColumn]!)) {
+      currentColumn++;
+    }
+    if (currentColumn < lineText.length) {
+      return { line: currentLine, column: currentColumn };
+    }
+    currentLine++;
+    currentColumn = 0;
+  }
+
+  // Land at end of buffer.
+  const lastLine = lines.length - 1;
+  return { line: lastLine, column: Math.max(0, (lines[lastLine]?.length ?? 1) - 1) };
+}
+
+/**
+ * Find the start of the previous WORD (B command).
+ */
+function findPreviousWORDStart(
+  text: string,
+  line: number,
+  column: number
+): { line: number; column: number } {
+  const lines = text.split('\n');
+  if (lines.length === 0 || (lines.length === 1 && lines[0] === '')) {
+    return { line: 0, column: 0 };
+  }
+
+  let currentLine = Math.max(0, Math.min(line, lines.length - 1));
+  let currentColumn = Math.max(0, column);
+
+  // Step back one position; if at start of line, go to end of previous line.
+  if (currentColumn === 0) {
+    if (currentLine === 0) {
+      return { line: 0, column: 0 };
+    }
+    currentLine--;
+    currentColumn = lines[currentLine]!.length;
+  } else {
+    currentColumn--;
+  }
+
+  // Skip whitespace backward.
+  while (true) {
+    const lineText = lines[currentLine]!;
+    while (currentColumn > 0 && isWhitespace(lineText[currentColumn - 1]!)) {
+      currentColumn--;
+    }
+    if (currentColumn > 0) break;
+    // Whole line is whitespace; jump to end of previous line.
+    if (currentLine === 0) {
+      return { line: 0, column: 0 };
+    }
+    currentLine--;
+    currentColumn = lines[currentLine]!.length;
+  }
+
+  // Skip non-whitespace backward to land on the first char of the WORD.
+  const lineText = lines[currentLine]!;
+  while (currentColumn > 0 && !isWhitespace(lineText[currentColumn - 1]!)) {
+    currentColumn--;
+  }
+  return { line: currentLine, column: currentColumn };
+}
+
+/**
+ * Find the end of the current/next WORD (E command).
+ */
+function findWORDEnd(
+  text: string,
+  line: number,
+  column: number
+): { line: number; column: number } {
+  const lines = text.split('\n');
+  if (lines.length === 0 || (lines.length === 1 && lines[0] === '')) {
+    return { line: 0, column: 0 };
+  }
+
+  let currentLine = Math.max(0, Math.min(line, lines.length - 1));
+  let currentColumn = Math.max(0, column);
+
+  // Step forward one position; if at end of line, go to start of next line.
+  const currLineText = lines[currentLine]!;
+  if (currentColumn >= currLineText.length) {
+    if (currentLine >= lines.length - 1) {
+      const lastText = lines[currentLine]!;
+      return { line: currentLine, column: Math.max(0, lastText.length - 1) };
+    }
+    currentLine++;
+    currentColumn = 0;
+  } else {
+    currentColumn++;
+  }
+
+  // Skip whitespace forward, possibly across lines.
+  while (currentLine < lines.length) {
+    const lineText = lines[currentLine]!;
+    while (currentColumn < lineText.length && isWhitespace(lineText[currentColumn]!)) {
+      currentColumn++;
+    }
+    if (currentColumn < lineText.length) break;
+    currentLine++;
+    currentColumn = 0;
+  }
+
+  if (currentLine >= lines.length) {
+    const lastLine = lines.length - 1;
+    return { line: lastLine, column: Math.max(0, (lines[lastLine]?.length ?? 1) - 1) };
+  }
+
+  // Now skip non-whitespace to land on the LAST char of the WORD.
+  const lineText = lines[currentLine]!;
+  while (currentColumn + 1 < lineText.length && !isWhitespace(lineText[currentColumn + 1]!)) {
+    currentColumn++;
+  }
+  return { line: currentLine, column: currentColumn };
+}
+
+/**
+ * Find the end of the previous word (ge command) — punctuation-aware.
+ */
+function findPreviousWordEnd(
+  text: string,
+  line: number,
+  column: number
+): { line: number; column: number } {
+  const lines = text.split('\n');
+  if (lines.length === 0 || (lines.length === 1 && lines[0] === '')) {
+    return { line: 0, column: 0 };
+  }
+
+  let currentLine = Math.max(0, Math.min(line, lines.length - 1));
+  let currentColumn = Math.max(0, column);
+
+  // Step back one position.
+  if (currentColumn === 0) {
+    if (currentLine === 0) return { line: 0, column: 0 };
+    currentLine--;
+    currentColumn = lines[currentLine]!.length;
+  } else {
+    currentColumn--;
+  }
+
+  // Skip non-word chars backward, possibly across lines.
+  while (true) {
+    const lineText = lines[currentLine]!;
+    while (currentColumn > 0 && !isWordChar(lineText[currentColumn - 1]!)) {
+      currentColumn--;
+    }
+    if (currentColumn > 0) break;
+    if (currentLine === 0) return { line: 0, column: 0 };
+    currentLine--;
+    currentColumn = lines[currentLine]!.length;
+  }
+
+  // Land on the last char of the previous word.
+  return { line: currentLine, column: currentColumn - 1 };
+}
+
+/**
+ * Find the end of the previous WORD (gE command) — whitespace-only.
+ */
+function findPreviousWORDEnd(
+  text: string,
+  line: number,
+  column: number
+): { line: number; column: number } {
+  const lines = text.split('\n');
+  if (lines.length === 0 || (lines.length === 1 && lines[0] === '')) {
+    return { line: 0, column: 0 };
+  }
+
+  let currentLine = Math.max(0, Math.min(line, lines.length - 1));
+  let currentColumn = Math.max(0, column);
+
+  if (currentColumn === 0) {
+    if (currentLine === 0) return { line: 0, column: 0 };
+    currentLine--;
+    currentColumn = lines[currentLine]!.length;
+  } else {
+    currentColumn--;
+  }
+
+  // Skip whitespace backward.
+  while (true) {
+    const lineText = lines[currentLine]!;
+    while (currentColumn > 0 && isWhitespace(lineText[currentColumn - 1]!)) {
+      currentColumn--;
+    }
+    if (currentColumn > 0) break;
+    if (currentLine === 0) return { line: 0, column: 0 };
+    currentLine--;
+    currentColumn = lines[currentLine]!.length;
+  }
+
+  // Land on the last char of the previous WORD.
+  return { line: currentLine, column: currentColumn - 1 };
+}
 
 /**
  * Find the start of the next word (w command)
@@ -281,7 +507,7 @@ export function createWordOps(
   setCursorLine: (line: number) => void,
   getCursorColumn: () => number,
   setCursorColumn: (column: number) => void,
-  getMode?: () => "normal" | "insert" | "visual" | "command" | "mx",
+  getMode?: () => "normal" | "insert" | "visual" | "command" | "mx" | "replace",
   updateVisualSelection?: () => void
 ): Map<string, TLispFunctionImpl> {
   const api = new Map<string, TLispFunctionImpl>();
@@ -470,6 +696,267 @@ export function createWordOps(
     setCursorColumn(currentColumn);
 
     // Update visual selection if in visual mode
+    updateVisualSelectionIfNeeded();
+
+    return Either.right(createNil());
+  });
+
+  /**
+   * word-next-WORD - move to start of next WORD (W key in Vim).
+   * A WORD is a whitespace-delimited token (punctuation joins the word).
+   */
+  api.set("word-next-WORD", (args: TLispValue[]): Either<AppError, TLispValue> => {
+    if (args.length > 1) {
+      return Either.left(createValidationError(
+        'ConstraintViolation',
+        'word-next-WORD requires 0 or 1 argument: optional count',
+        'args',
+        args,
+        '0 or 1 arguments'
+      ));
+    }
+
+    const currentBuffer = getCurrentBuffer();
+    const bufferValidation = validateBufferExists(currentBuffer);
+    if (Either.isLeft(bufferValidation)) {
+      return Either.left(bufferValidation.left);
+    }
+
+    let count = 1;
+    if (args.length === 1) {
+      const countArg = args[0]!;
+      const typeValidation = validateArgType(countArg, "number", 0, "word-next-WORD");
+      if (Either.isLeft(typeValidation)) {
+        return Either.left(typeValidation.left);
+      }
+      count = Math.max(0, countArg.value as number);
+    }
+
+    const contentResult = currentBuffer!.getContent();
+    if (Either.isLeft(contentResult)) {
+      return Either.left(createBufferError('InvalidOperation', `Failed to get buffer content: ${contentResult.left}`));
+    }
+
+    const text = contentResult.right;
+    let currentLine = getCursorLine();
+    let currentColumn = getCursorColumn();
+
+    for (let i = 0; i < count; i++) {
+      const nextPos = findNextWORDStart(text, currentLine, currentColumn);
+      currentLine = nextPos.line;
+      currentColumn = nextPos.column;
+    }
+
+    setCursorLine(currentLine);
+    setCursorColumn(currentColumn);
+    updateVisualSelectionIfNeeded();
+
+    return Either.right(createNil());
+  });
+
+  /**
+   * word-previous-WORD - move to start of previous WORD (B key in Vim).
+   */
+  api.set("word-previous-WORD", (args: TLispValue[]): Either<AppError, TLispValue> => {
+    if (args.length > 1) {
+      return Either.left(createValidationError(
+        'ConstraintViolation',
+        'word-previous-WORD requires 0 or 1 argument: optional count',
+        'args',
+        args,
+        '0 or 1 arguments'
+      ));
+    }
+
+    const currentBuffer = getCurrentBuffer();
+    const bufferValidation = validateBufferExists(currentBuffer);
+    if (Either.isLeft(bufferValidation)) {
+      return Either.left(bufferValidation.left);
+    }
+
+    let count = 1;
+    if (args.length === 1) {
+      const countArg = args[0]!;
+      const typeValidation = validateArgType(countArg, "number", 0, "word-previous-WORD");
+      if (Either.isLeft(typeValidation)) {
+        return Either.left(typeValidation.left);
+      }
+      count = Math.max(0, countArg.value as number);
+    }
+
+    const contentResult = currentBuffer!.getContent();
+    if (Either.isLeft(contentResult)) {
+      return Either.left(createBufferError('InvalidOperation', `Failed to get buffer content: ${contentResult.left}`));
+    }
+
+    const text = contentResult.right;
+    let currentLine = getCursorLine();
+    let currentColumn = getCursorColumn();
+
+    for (let i = 0; i < count; i++) {
+      const prevPos = findPreviousWORDStart(text, currentLine, currentColumn);
+      currentLine = prevPos.line;
+      currentColumn = prevPos.column;
+    }
+
+    setCursorLine(currentLine);
+    setCursorColumn(currentColumn);
+    updateVisualSelectionIfNeeded();
+
+    return Either.right(createNil());
+  });
+
+  /**
+   * word-end-WORD - move to end of current/next WORD (E key in Vim).
+   */
+  api.set("word-end-WORD", (args: TLispValue[]): Either<AppError, TLispValue> => {
+    if (args.length > 1) {
+      return Either.left(createValidationError(
+        'ConstraintViolation',
+        'word-end-WORD requires 0 or 1 argument: optional count',
+        'args',
+        args,
+        '0 or 1 arguments'
+      ));
+    }
+
+    const currentBuffer = getCurrentBuffer();
+    const bufferValidation = validateBufferExists(currentBuffer);
+    if (Either.isLeft(bufferValidation)) {
+      return Either.left(bufferValidation.left);
+    }
+
+    let count = 1;
+    if (args.length === 1) {
+      const countArg = args[0]!;
+      const typeValidation = validateArgType(countArg, "number", 0, "word-end-WORD");
+      if (Either.isLeft(typeValidation)) {
+        return Either.left(typeValidation.left);
+      }
+      count = Math.max(0, countArg.value as number);
+    }
+
+    const contentResult = currentBuffer!.getContent();
+    if (Either.isLeft(contentResult)) {
+      return Either.left(createBufferError('InvalidOperation', `Failed to get buffer content: ${contentResult.left}`));
+    }
+
+    const text = contentResult.right;
+    let currentLine = getCursorLine();
+    let currentColumn = getCursorColumn();
+
+    for (let i = 0; i < count; i++) {
+      const endPos = findWORDEnd(text, currentLine, currentColumn);
+      currentLine = endPos.line;
+      currentColumn = endPos.column;
+    }
+
+    setCursorLine(currentLine);
+    setCursorColumn(currentColumn);
+    updateVisualSelectionIfNeeded();
+
+    return Either.right(createNil());
+  });
+
+  /**
+   * word-previous-end - move to end of previous word (ge key in Vim).
+   */
+  api.set("word-previous-end", (args: TLispValue[]): Either<AppError, TLispValue> => {
+    if (args.length > 1) {
+      return Either.left(createValidationError(
+        'ConstraintViolation',
+        'word-previous-end requires 0 or 1 argument: optional count',
+        'args',
+        args,
+        '0 or 1 arguments'
+      ));
+    }
+
+    const currentBuffer = getCurrentBuffer();
+    const bufferValidation = validateBufferExists(currentBuffer);
+    if (Either.isLeft(bufferValidation)) {
+      return Either.left(bufferValidation.left);
+    }
+
+    let count = 1;
+    if (args.length === 1) {
+      const countArg = args[0]!;
+      const typeValidation = validateArgType(countArg, "number", 0, "word-previous-end");
+      if (Either.isLeft(typeValidation)) {
+        return Either.left(typeValidation.left);
+      }
+      count = Math.max(0, countArg.value as number);
+    }
+
+    const contentResult = currentBuffer!.getContent();
+    if (Either.isLeft(contentResult)) {
+      return Either.left(createBufferError('InvalidOperation', `Failed to get buffer content: ${contentResult.left}`));
+    }
+
+    const text = contentResult.right;
+    let currentLine = getCursorLine();
+    let currentColumn = getCursorColumn();
+
+    for (let i = 0; i < count; i++) {
+      const endPos = findPreviousWordEnd(text, currentLine, currentColumn);
+      currentLine = endPos.line;
+      currentColumn = endPos.column;
+    }
+
+    setCursorLine(currentLine);
+    setCursorColumn(currentColumn);
+    updateVisualSelectionIfNeeded();
+
+    return Either.right(createNil());
+  });
+
+  /**
+   * word-previous-end-WORD - move to end of previous WORD (gE key in Vim).
+   */
+  api.set("word-previous-end-WORD", (args: TLispValue[]): Either<AppError, TLispValue> => {
+    if (args.length > 1) {
+      return Either.left(createValidationError(
+        'ConstraintViolation',
+        'word-previous-end-WORD requires 0 or 1 argument: optional count',
+        'args',
+        args,
+        '0 or 1 arguments'
+      ));
+    }
+
+    const currentBuffer = getCurrentBuffer();
+    const bufferValidation = validateBufferExists(currentBuffer);
+    if (Either.isLeft(bufferValidation)) {
+      return Either.left(bufferValidation.left);
+    }
+
+    let count = 1;
+    if (args.length === 1) {
+      const countArg = args[0]!;
+      const typeValidation = validateArgType(countArg, "number", 0, "word-previous-end-WORD");
+      if (Either.isLeft(typeValidation)) {
+        return Either.left(typeValidation.left);
+      }
+      count = Math.max(0, countArg.value as number);
+    }
+
+    const contentResult = currentBuffer!.getContent();
+    if (Either.isLeft(contentResult)) {
+      return Either.left(createBufferError('InvalidOperation', `Failed to get buffer content: ${contentResult.left}`));
+    }
+
+    const text = contentResult.right;
+    let currentLine = getCursorLine();
+    let currentColumn = getCursorColumn();
+
+    for (let i = 0; i < count; i++) {
+      const endPos = findPreviousWORDEnd(text, currentLine, currentColumn);
+      currentLine = endPos.line;
+      currentColumn = endPos.column;
+    }
+
+    setCursorLine(currentLine);
+    setCursorColumn(currentColumn);
     updateVisualSelectionIfNeeded();
 
     return Either.right(createNil());

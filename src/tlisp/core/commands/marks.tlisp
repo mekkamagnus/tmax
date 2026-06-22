@@ -1,0 +1,139 @@
+(defmodule editor/commands/marks
+  (export vim-mark-begin-set vim-mark-begin-jump-line vim-mark-begin-jump-exact
+          vim-mark-pending-p vim-mark-reset-pending
+          vim-mark-set vim-mark-get vim-mark-jump vim-mark-clear
+          vim-dispatch-mark
+          vim-mark-set-special vim-marks-list vim-marks-format)
+
+;; marks.tlisp -- SPEC-044 Phase 4.A: Vim marks (ma, 'a, `a).
+;; Pending-state machine mirrors motions.tlisp find-char pattern:
+;; `m`/`'`/`` ` `` enter pending mode, next key is consumed by
+;; `vim-dispatch-mark` (invoked from normal-handler.ts).
+;; `m` saves (line, col) under the register; `'a` jumps to mark's
+;; line at first-non-blank; `` `a `` jumps to the exact (line, col).
+
+(defvar vim-pending-mark-action nil)
+(defvar vim-marks (list))
+
+(defun vim-mark-begin-set ()
+  "Enter pending state: next key registers a mark at current cursor."
+  (set! vim-pending-mark-action "set"))
+
+(defun vim-mark-begin-jump-line ()
+  "Enter pending state: next key jumps to mark's line, first-non-blank."
+  (set! vim-pending-mark-action "jump-line"))
+
+(defun vim-mark-begin-jump-exact ()
+  "Enter pending state: next key jumps to mark's exact (line, col)."
+  (set! vim-pending-mark-action "jump-exact"))
+
+(defun vim-mark-pending-p ()
+  "Return t when a mark register key is being awaited."
+  (not (null vim-pending-mark-action)))
+
+(defun vim-mark-reset-pending ()
+  "Clear the pending mark action."
+  (set! vim-pending-mark-action nil)
+  nil)
+
+(defun vim-mark-assoc (name alist)
+  "Return the entry (name line col) for NAME in ALIST, or nil."
+  (if (null alist) nil
+    (if (string= (car (car alist)) name)
+        (car alist)
+        (vim-mark-assoc name (cdr alist)))))
+
+(defun vim-mark-remove-assoc (name alist)
+  "Return ALIST with NAME's entry removed."
+  (if (null alist) (list)
+    (if (string= (car (car alist)) name)
+        (cdr alist)
+        (cons (car alist) (vim-mark-remove-assoc name (cdr alist))))))
+
+(defun vim-mark-set (name)
+  "Record current cursor position under mark NAME."
+  (let ((entry (list name (cursor-line) (cursor-column))))
+    (set! vim-marks (cons entry (vim-mark-remove-assoc name vim-marks))))
+  t)
+
+(defun vim-mark-get (name)
+  "Return (line col) list for mark NAME, or nil."
+  (let ((entry (vim-mark-assoc name vim-marks)))
+    (if (null entry) nil
+      (list (nth 1 entry) (nth 2 entry)))))
+
+(defun vim-mark-clear (name)
+  "Remove mark NAME."
+  (set! vim-marks (vim-mark-remove-assoc name vim-marks))
+  t)
+
+(defun vim-mark-jump (name exact)
+  "Jump to mark NAME.  EXACT=t restores column; EXACT=nil uses first-non-blank."
+  (let ((entry (vim-mark-assoc name vim-marks)))
+    (if (null entry)
+      (progn
+        (editor-set-status (concat "Mark not set: " name))
+        nil)
+      (let ((line (nth 1 entry)))
+        (let ((col (nth 2 entry)))
+          (progn
+            (if exact
+              (cursor-move line col)
+              (progn
+                (cursor-move line 0)
+                (line-first-non-blank)))
+            t))))))
+
+(defun vim-dispatch-mark (char)
+  "Consume CHAR as the register for the pending mark operation."
+  (let ((action vim-pending-mark-action))
+    (progn
+      (vim-mark-reset-pending)
+      (cond
+        ((string= action "set")         (vim-mark-set char))
+        ((string= action "jump-line")   (vim-mark-jump char nil))
+        ((string= action "jump-exact")  (vim-mark-jump char t))
+        (t nil)))))
+
+(defun vim-mark-set-special (name line col)
+  "Set a special mark (e.g. \"'<\", \"'[\", \".\") at LINE/COL.
+Used by edit, visual, and insert commands to track last-change and
+selection positions per SPEC-044 Phase 4.C."
+  (let ((entry (list name line col)))
+    (set! vim-marks (cons entry (vim-mark-remove-assoc name vim-marks))))
+  t)
+
+(defun vim-marks-list ()
+  "Return the current marks list, each entry (name line col)."
+  vim-marks)
+
+(defun vim-marks-format-line (entry)
+  "Format a single mark ENTRY as \"  name   line  col\"."
+  (let ((name (nth 0 entry)))
+    (let ((line (nth 1 entry)))
+      (let ((col (nth 2 entry)))
+        (concat
+          (concat (concat "  " name) "   ")
+          (concat (concat (number-to-string line) "  ")
+                  (number-to-string col)))))))
+
+(defun vim-marks-format-rest (alist)
+  "Format each entry in ALIST and join with newlines."
+  (if (null alist) ""
+    (if (null (cdr alist))
+        (vim-marks-format-line (car alist))
+        (concat (vim-marks-format-line (car alist))
+                "\n"
+                (vim-marks-format-rest (cdr alist))))))
+
+(defun vim-marks-format ()
+  "Build a human-readable listing of all set marks for :marks."
+  (let ((header "mark  line  col\n"))
+    (concat header (vim-marks-format-rest vim-marks))))
+
+(key-bind "m"   "(vim-mark-begin-set)"          "normal")
+(key-bind "'"   "(vim-mark-begin-jump-line)"    "normal")
+(key-bind "`"   "(vim-mark-begin-jump-exact)"   "normal")
+
+(provide "marks")
+)

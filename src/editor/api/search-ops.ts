@@ -131,19 +131,7 @@ function findPreviousMatch(
   while (currentLine >= 0) {
     const lineText = lines[currentLine]!;
     
-    // Find last occurrence of pattern before currentColumn
-    let index = -1;
-    for (let i = 0; i < currentColumn; i++) {
-      const foundIndex = lineText.indexOf(pattern, i);
-      if (foundIndex !== -1 && foundIndex < currentColumn) {
-        index = foundIndex;
-        i = foundIndex; // Skip ahead
-      } else {
-        break;
-      }
-    }
-    
-    // Better approach: find all matches and take the last one before currentColumn
+    // Find the last occurrence of pattern before currentColumn
     const allMatches: number[] = [];
     let searchFrom = 0;
     while (true) {
@@ -456,6 +444,29 @@ export function createSearchOps(
     lastSearchPattern = "";
     lastSearchDirection = "forward";
     setStatusMessage("Search cleared");
+
+    return Either.right(createNil());
+  });
+
+  /**
+   * search-clear-highlights - clear visible search highlights only.
+   * Spec: SPEC-044 Phase 1.E. Unlike search-clear, this preserves the last
+   * search pattern and direction so `n`/`N` still jump after :nohl.
+   * Usage: (search-clear-highlights)
+   */
+  api.set("search-clear-highlights", (args: TLispValue[]): Either<AppError, TLispValue> => {
+    if (args.length !== 0) {
+      return Either.left(createValidationError(
+        'ConstraintViolation',
+        'search-clear-highlights requires 0 arguments',
+        'args',
+        args.length,
+        '0 arguments'
+      ));
+    }
+
+    isearchHighlightRanges = [];
+    if (setSearchMatches) setSearchMatches([]);
 
     return Either.right(createNil());
   });

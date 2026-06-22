@@ -255,3 +255,197 @@ describe("SPEC-044 Phase 1.B.4 — paren around-variants", () => {
     });
   });
 });
+
+// SPEC-044 Phase 1.B (continued) — completes the around-brace/bracket/angle/tag
+// matrix. Each pair (delete + change) follows the same shape as the paren
+// around-variants above. Inner change variants for these delimiters land here
+// too because they share the same primitive pattern.
+describe("SPEC-044 Phase 1.B.5 — brace around-variants", () => {
+  describe("da} / da{ — delete around brace", () => {
+    test("deletes braces and their contents, yanks to \"", async () => {
+      const editor = await createStartedEditor("const x = {value};");
+      await press(editor, "fv");
+      await press(editor, "da}");
+      expect(bufferText(editor)).toBe("const x = ;");
+      expect(getRegister(editor)).toBe("{value}");
+    });
+  });
+
+  describe("ca} / ca{ — change around brace", () => {
+    test("deletes braces and contents, enters insert mode, yanks to \"", async () => {
+      const editor = await createStartedEditor("const x = {value};");
+      await press(editor, "fv");
+      await press(editor, "ca}");
+      expect(bufferText(editor)).toBe("const x = ;");
+      expect(getRegister(editor)).toBe("{value}");
+      expect(editor.getState().mode).toBe("insert");
+    });
+  });
+});
+
+describe("SPEC-044 Phase 1.B.6 — bracket inner/around change + around delete", () => {
+  describe("da] / da[ — delete around bracket", () => {
+    test("deletes brackets and their contents, yanks to \"", async () => {
+      const editor = await createStartedEditor("arr[item]");
+      await press(editor, "fi");
+      await press(editor, "da]");
+      expect(bufferText(editor)).toBe("arr");
+      expect(getRegister(editor)).toBe("[item]");
+    });
+  });
+
+  describe("ci] / ci[ — change inner bracket", () => {
+    test("clears bracket contents and enters insert mode", async () => {
+      const editor = await createStartedEditor("arr[item]");
+      await press(editor, "fi");
+      await press(editor, "ci]");
+      expect(bufferText(editor)).toBe("arr[]");
+      expect(getRegister(editor)).toBe("item");
+      expect(editor.getState().mode).toBe("insert");
+    });
+  });
+
+  describe("ca] / ca[ — change around bracket", () => {
+    test("deletes brackets and contents, enters insert mode, yanks to \"", async () => {
+      const editor = await createStartedEditor("arr[item]");
+      await press(editor, "fi");
+      await press(editor, "ca]");
+      expect(bufferText(editor)).toBe("arr");
+      expect(getRegister(editor)).toBe("[item]");
+      expect(editor.getState().mode).toBe("insert");
+    });
+  });
+});
+
+describe("SPEC-044 Phase 1.B.7 — angle inner/around change + around delete", () => {
+  describe("da< / da> — delete around angle", () => {
+    test("deletes angle brackets and their contents, yanks to \"", async () => {
+      const editor = await createStartedEditor("<tag>");
+      await press(editor, "ft");
+      await press(editor, "da<");
+      expect(bufferText(editor)).toBe("");
+      expect(getRegister(editor)).toBe("<tag>");
+    });
+  });
+
+  describe("ci< / ci> — change inner angle", () => {
+    test("clears angle bracket contents and enters insert mode", async () => {
+      const editor = await createStartedEditor("<tag>");
+      await press(editor, "ft");
+      await press(editor, "ci<");
+      expect(bufferText(editor)).toBe("<>");
+      expect(getRegister(editor)).toBe("tag");
+      expect(editor.getState().mode).toBe("insert");
+    });
+  });
+
+  describe("ca< / ca> — change around angle", () => {
+    test("deletes angle brackets and contents, enters insert mode", async () => {
+      const editor = await createStartedEditor("<tag>");
+      await press(editor, "ft");
+      await press(editor, "ca<");
+      expect(bufferText(editor)).toBe("");
+      expect(getRegister(editor)).toBe("<tag>");
+      expect(editor.getState().mode).toBe("insert");
+    });
+  });
+});
+
+describe("SPEC-044 Phase 1.B.8 — tag around delete + inner/around change", () => {
+  describe("dat — delete around tag", () => {
+    test("deletes opening and closing tags and their contents", async () => {
+      const editor = await createStartedEditor("<div>content</div>");
+      await press(editor, "fc");
+      await press(editor, "dat");
+      expect(bufferText(editor)).toBe("");
+    });
+  });
+
+  describe("cit — change inner tag", () => {
+    test("clears tag contents and enters insert mode", async () => {
+      const editor = await createStartedEditor("<div>content</div>");
+      await press(editor, "fc");
+      await press(editor, "cit");
+      expect(bufferText(editor)).toBe("<div></div>");
+      expect(editor.getState().mode).toBe("insert");
+    });
+  });
+
+  describe("cat — change around tag", () => {
+    test("deletes opening+closing tags and contents, enters insert mode", async () => {
+      const editor = await createStartedEditor("<div>content</div>");
+      await press(editor, "fc");
+      await press(editor, "cat");
+      expect(bufferText(editor)).toBe("");
+      expect(editor.getState().mode).toBe("insert");
+    });
+  });
+});
+
+// SPEC-044 Phase 1.C — count multiplier on text objects. Per spec Open
+// Question #6, d2iw must compose the operator count with the text-object
+// motion and delete N consecutive words.vim-operator-total-count formula
+// (operators.tlisp:218-220) is the assumed mechanism.
+describe("SPEC-044 Phase 1.C — count × text-object multiplier", () => {
+  describe("d2iw — delete two inner words", () => {
+    test("deletes two consecutive words without trailing space", async () => {
+      const editor = await createStartedEditor("hello world foo bar");
+      await press(editor, "d2iw");
+      expect(bufferText(editor)).toBe(" foo bar");
+      expect(getRegister(editor)).toBe("hello world");
+    });
+  });
+
+  describe("d3iw — delete three inner words", () => {
+    test("deletes three consecutive words", async () => {
+      const editor = await createStartedEditor("alpha beta gamma delta");
+      await press(editor, "d3iw");
+      expect(bufferText(editor)).toBe(" delta");
+    });
+  });
+});
+
+// SPEC-044 Step 1.1 acceptance: "u after diw restores the deleted text AND
+// cursor position (undo bookend works)." The original diw test asserts only
+// text restoration; these around-variant cases close the cursor-position
+// acceptance gap flagged by the adw-patch-review audit (2026-06-21).
+describe("SPEC-044 Phase 1 — undo restores cursor for around-* variants", () => {
+  test("u after da} restores cursor to the brace region start", async () => {
+    const editor = await createStartedEditor("const x = {value};");
+    await press(editor, "fv");
+    const beforeLine = executeTlisp(editor, "(cursor-line)").value as number;
+    const beforeCol = executeTlisp(editor, "(cursor-column)").value as number;
+    await press(editor, "da}");
+    await press(editor, "u");
+    expect(bufferText(editor)).toBe("const x = {value};");
+    const afterLine = executeTlisp(editor, "(cursor-line)").value as number;
+    const afterCol = executeTlisp(editor, "(cursor-column)").value as number;
+    expect([afterLine, afterCol]).toEqual([beforeLine, beforeCol]);
+  });
+
+  test("u after da] restores cursor to the bracket region start", async () => {
+    const editor = await createStartedEditor("arr[item]");
+    await press(editor, "fi");
+    const beforeLine = executeTlisp(editor, "(cursor-line)").value as number;
+    const beforeCol = executeTlisp(editor, "(cursor-column)").value as number;
+    await press(editor, "da]");
+    await press(editor, "u");
+    expect(bufferText(editor)).toBe("arr[item]");
+    const afterLine = executeTlisp(editor, "(cursor-line)").value as number;
+    const afterCol = executeTlisp(editor, "(cursor-column)").value as number;
+    expect([afterLine, afterCol]).toEqual([beforeLine, beforeCol]);
+  });
+
+  test("u after dat restores cursor to the tag start", async () => {
+    const editor = await createStartedEditor("<div>content</div>");
+    await press(editor, "fc");
+    const beforeLine = executeTlisp(editor, "(cursor-line)").value as number;
+    const beforeCol = executeTlisp(editor, "(cursor-column)").value as number;
+    await press(editor, "dat");
+    await press(editor, "u");
+    expect(bufferText(editor)).toBe("<div>content</div>");
+    const afterLine = executeTlisp(editor, "(cursor-line)").value as number;
+    const afterCol = executeTlisp(editor, "(cursor-column)").value as number;
+    expect([afterLine, afterCol]).toEqual([beforeLine, beforeCol]);
+  });
+});

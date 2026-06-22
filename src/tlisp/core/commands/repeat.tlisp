@@ -1,0 +1,209 @@
+(defmodule editor/commands/repeat
+  (export vim-record-change vim-repeat-last-change vim-last-change-get vim-last-change-set vim-reset-last-change)
+
+;; repeat.tlisp -- SPEC-044 Phase 2.2 (Steps 2.D + 2.E): . repeat last change.
+;; Records (combo count) for each mutating operator/edit-command and replays
+;; via . with optional count override. Phase 2.F (insert-mode text capture for
+;; i…<Esc>.) is intentionally out of scope for this slice: insert sessions are
+;; not recorded, so . after insert falls back to the prior recorded change.
+;;
+;; Replay mirrors the mutation's original undo bookend: a single (undo-begin)
+;; ... (undo-commit combo) wraps the primitive call so `u` after . reverts only
+;; the replay, not the original change. Each replay branch calls a primitive
+;; (or non-bookending helper), NEVER a self-bookending command like
+;; vim-delete-char (which would double-bookend).
+
+(defvar vim-last-change nil)
+
+(defun vim-record-change (combo count)
+  "Record a change for . to replay. COMBO is the operator+motion/text-object
+string (e.g., \"dw\", \"diw\", \"x\", \"rx\"). COUNT is the total multiplied
+count (operator-count × motion-count)."
+  (progn
+    (set! vim-last-change (list combo count))
+    t))
+
+(defun vim-last-change-get ()
+  "Return the last recorded change as (combo count), or nil."
+  vim-last-change)
+
+(defun vim-last-change-set (combo count)
+  "Set the last change explicitly. Used by tests and by replay during
+count override (so 5. then plain . uses 5, not the original count)."
+  (set! vim-last-change (list combo count)))
+
+(defun vim-reset-last-change ()
+  "Clear the last recorded change."
+  (set! vim-last-change nil))
+
+(defun vim-repeat-last-change (count-override)
+  "Replay the last recorded change. If COUNT-OVERRIDE is >0 it substitutes
+for the recorded count (vim semantics for 5.)."
+  (if (null vim-last-change)
+    (progn
+      (editor-set-status "Nothing to repeat")
+      t)
+    (let ((combo (nth 0 vim-last-change)))
+      (let ((recorded-count (nth 1 vim-last-change)))
+        (let ((count
+                (if (and count-override (> count-override 0))
+                  count-override
+                  recorded-count)))
+          (progn
+            (vim-replay-change combo count)
+            ;; A count override becomes the new normal — subsequent plain .
+            ;; replays use the override per vim semantics.
+            (vim-last-change-set combo count)
+            t))))))
+
+(defun vim-replay-change (combo count)
+  "Replay COMBO with COUNT. Wraps the mutation in one undo bookend so `u`
+after `.` reverts only the replay. Find-char operator combos (df/dt/dF/dT
++ y/c) are not yet replayable — they require stashing the find target char,
+which is deferred to a follow-up slice."
+  (progn
+    (undo-begin)
+    (cond
+      ;; Single-key edit commands — use primitives directly to avoid
+      ;; double-bookending the vim-* commands that wrap them.
+      ((string= combo "x")
+        (set-register "\"" (buffer-delete count)))
+      ((string= combo "D")
+        (delete-to-line-end))
+      ((string= combo "C")
+        (progn
+          (change-to-line-end)
+          (editor-set-mode "insert")))
+      ((string= combo "J")
+        (vim-replay-join))
+      ((string= combo "p")
+        (paste-after count))
+      ((string= combo "P")
+        (paste-before count))
+      ((string= combo "~")
+        (vim-replay-tilde count))
+      ;; operator+motion delete
+      ((string= combo "dd")
+        (vim-delete-line-range (cursor-line) (+ (cursor-line) (- count 1))))
+      ((string= combo "dw")
+        (delete-word count))
+      ((string= combo "dl")
+        (set-register "\"" (buffer-delete count)))
+      ((string= combo "d$")
+        (delete-to-line-end))
+      ((string= combo "dG")
+        (vim-delete-to-last-line))
+      ((string= combo "dgg")
+        (vim-delete-to-first-line))
+      ;; operator+motion change
+      ((string= combo "cc")
+        (vim-change-line-range count))
+      ((string= combo "cw")
+        (change-word count))
+      ((string= combo "cl")
+        (progn
+          (set-register "\"" (buffer-delete count))
+          (editor-set-mode "insert")))
+      ((string= combo "c$")
+        (change-to-line-end))
+      ;; text-object word
+      ((string= combo "diw") (delete-inner-word count))
+      ((string= combo "daw") (delete-around-word count))
+      ((string= combo "ciw") (change-inner-word count))
+      ((string= combo "caw") (change-around-word count))
+      ;; text-object quotes
+      ((string= combo "di'") (delete-inner-single-quote))
+      ((string= combo "da'") (delete-around-single-quote))
+      ((string= combo "di\"") (delete-inner-double-quote))
+      ((string= combo "da\"") (delete-around-double-quote))
+      ((string= combo "ci'") (change-inner-single-quote))
+      ((string= combo "ca'") (change-around-single-quote))
+      ((string= combo "ci\"") (change-inner-double-quote))
+      ((string= combo "ca\"") (change-around-double-quote))
+      ;; text-object paren
+      ((or (string= combo "di)") (string= combo "di(")) (delete-inner-paren))
+      ((or (string= combo "da)") (string= combo "da(")) (delete-around-paren))
+      ((or (string= combo "ci)") (string= combo "ci(")) (change-inner-paren))
+      ((or (string= combo "ca)") (string= combo "ca(")) (change-around-paren))
+      ;; text-object brace
+      ((or (string= combo "di}") (string= combo "di{")) (delete-inner-brace))
+      ((or (string= combo "da}") (string= combo "da{")) (delete-around-brace))
+      ((or (string= combo "ci}") (string= combo "ci{")) (change-inner-brace))
+      ((or (string= combo "ca}") (string= combo "ca{")) (change-around-brace))
+      ;; text-object bracket
+      ((or (string= combo "di]") (string= combo "di[")) (delete-inner-bracket))
+      ((or (string= combo "da]") (string= combo "da[")) (delete-around-bracket))
+      ((or (string= combo "ci]") (string= combo "ci[")) (change-inner-bracket))
+      ((or (string= combo "ca]") (string= combo "ca[")) (change-around-bracket))
+      ;; text-object angle
+      ((or (string= combo "di<") (string= combo "di>")) (delete-inner-angle))
+      ((or (string= combo "da<") (string= combo "da>")) (delete-around-angle))
+      ((or (string= combo "ci<") (string= combo "ci>")) (change-inner-angle))
+      ((or (string= combo "ca<") (string= combo "ca>")) (change-around-angle))
+      ;; text-object tag
+      ((string= combo "dit") (delete-inner-tag))
+      ((string= combo "dat") (delete-around-tag))
+      ((string= combo "cit") (change-inner-tag))
+      ((string= combo "cat") (change-around-tag))
+      ;; r{char}: combo is "r" + literal char or special-key name
+      ((vim-replay-r-p combo) (vim-replay-r-inner combo count))
+      ;; Anything else (find-char combos, unknown): surface clearly
+      (t (editor-set-status (concat "Cannot repeat: " combo))))
+    (undo-commit combo)
+    t))
+
+(defun vim-replay-join ()
+  "Replay J: join current line with the next line. Assumes line count > 1
+(the original J would have recorded only if it actually joined)."
+  (let ((line (cursor-line)))
+    (let ((first (buffer-line line)))
+      (let ((next-line (+ line 1)))
+        (let ((second (buffer-line next-line)))
+          (let ((joined (concat first " " second)))
+            (progn
+              (buffer-replace-range line 0 next-line (length second) joined)
+              (cursor-move line (length first)))))))))
+
+(defun vim-replay-tilde (count)
+  "Replay ~: toggle case of COUNT chars and advance cursor."
+  (let ((line (cursor-line)))
+    (let ((col (cursor-column)))
+      (let ((text (buffer-line line)))
+        (let ((len (length text)))
+          (let ((end (min (+ col count) len)))
+            (let ((slice (substring text col end)))
+              (let ((out (string-toggle-case slice)))
+                (progn
+                  (buffer-replace-range line col line end out)
+                  (cursor-move line (min end (max 0 (- len 1)))))))))))))
+
+(defun vim-replay-r-p (combo)
+  "Return t if COMBO is r followed by exactly one char or special-key name."
+  (and (>= (length combo) 2) (string= (substring combo 0 1) "r")))
+
+(defun vim-replay-r-inner (combo count)
+  "Replay r{char} body (no undo bookend — caller wraps). Extract the char
+from COMBO and replace COUNT chars at cursor."
+  (let ((key (substring combo 1 (length combo))))
+    (let ((ch (vim-replace-key-to-char key)))
+      (let ((line (cursor-line)))
+        (let ((col (cursor-column)))
+          (let ((text (buffer-line line)))
+            (let ((len (length text)))
+              (let ((remaining (- len col)))
+                (if (<= remaining 0)
+                  t
+                  (let ((n (min count remaining)))
+                    (let ((end-col (+ col n)))
+                      (let ((replacement (string-repeat ch n)))
+                        (progn
+                          (buffer-replace-range line col line end-col replacement)
+                          (if (string= key "Enter")
+                            (cursor-move (+ line 1) 0)
+                            (cursor-move line (- end-col 1))))))))))))))))
+
+;; . with optional count override: 5. repeats with count 5; plain . uses recorded count.
+(key-bind "." "(vim-repeat-last-change (vim-count-consume 0))" "normal")
+
+(provide "repeat")
+)

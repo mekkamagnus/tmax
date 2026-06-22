@@ -269,7 +269,7 @@ export type FoldState = "collapsed" | "expandable";
 export interface EditorState {
   currentBuffer?: FunctionalTextBuffer;
   cursorPosition: Position;
-  mode: 'normal' | 'insert' | 'visual' | 'command' | 'mx';
+  mode: 'normal' | 'insert' | 'visual' | 'command' | 'mx' | 'replace';
   statusMessage: string;
   viewportTop: number;
   viewportLeft?: number;

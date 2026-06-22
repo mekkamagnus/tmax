@@ -52,7 +52,53 @@ export async function handleNormalMode(editor: Editor, key: string, normalizedKe
   const spaceActive = (editor as any).spacePressed === true;
   const currentPrefix = state.whichKeyPrefix || "";
 
-  // C-g / Escape cancels any pending state and which-key
+  // SPEC-044 Phase 1.F-1.H — macro pending states must be routed BEFORE the
+  // generic Escape/C-g handler. q<Escape> is a quit command per spec MUST,
+  // resolved by macro-dispatch-record calling editor-quit; if the generic
+  // Escape branch ran first it would silently cancel the pending state and
+  // swallow the quit. The dispatcher also handles @<Escape> as cancel.
+  const macroRecordPending = isTruthyResult(exec("(macro-record-pending-p)"));
+  if (macroRecordPending) {
+    await executeCommand(editor, `(macro-dispatch-record "${escape(normalizedKey)}")`);
+    clearWhichKey(state, wk);
+    return;
+  }
+  const macroPlayPending = isTruthyResult(exec("(macro-play-pending-p)"));
+  if (macroPlayPending) {
+    await executeCommand(editor, `(macro-dispatch-play "${escape(normalizedKey)}")`);
+    clearWhichKey(state, wk);
+    return;
+  }
+
+  // SPEC-044 Phase 2.G — "x register-prefix pending. Routed before Escape
+  // so the dispatcher can interpret Escape/C-g as cancel; keymap and digit
+  // branches would otherwise shadow the register letter (e.g. "a is a
+  // valid register but also a binding).
+  const registerPrefixPending = isTruthyResult(exec("(vim-register-prefix-pending-p)"));
+  if (registerPrefixPending) {
+    await executeCommand(editor, `(vim-dispatch-register "${escape(normalizedKey)}")`);
+    clearWhichKey(state, wk);
+    return;
+  }
+
+  // SPEC-044 Phase 2.B — r{char} two-key replace. Routed before Escape so
+  // r<Esc> cancels cleanly; keymap/digit branches would otherwise shadow the
+  // replacement char.
+  const replaceCharPending = isTruthyResult(exec("(vim-replace-char-pending-p)"));
+  if (replaceCharPending) {
+    const macroRecordingInit = isTruthyResult(exec("(macro-record-active)"));
+    if (macroRecordingInit) {
+      try { exec(`(macro-record-key "${escape(normalizedKey)}")`); } catch {}
+    }
+    await executeCommand(editor, `(vim-replace-apply "${escape(normalizedKey)}")`);
+    clearWhichKey(state, wk);
+    return;
+  }
+
+  // C-g / Escape cancels any pending state and which-key. Recording itself
+  // is NOT cancelled — only the stopping q ends a recording (vim semantics).
+  // macro-record-pending was already handled above, so reaching here means
+  // we are either idle or actively recording.
   if (normalizedKey === "C-g" || normalizedKey === "Escape") {
     wk.deactivate();
     state.whichKeyActive = false;
@@ -68,22 +114,55 @@ export async function handleNormalMode(editor: Editor, key: string, normalizedKe
   // Route to pending state machine (find/operator awaiting next key).
   // Order matters: find → text-object → operator (the operator-g sub-state
   // lives inside `vim-dispatch-operator-key` and tracks the second `g` of
-  // `dgg` itself).
+  // `dgg` itself). These states can be active WHILE recording; the recording
+  // hook below still captures their dispatch keys.
   const findPending = isTruthyResult(exec("(vim-find-pending-p)"));
   if (findPending) {
+    const macroRecordingInit = isTruthyResult(exec("(macro-record-active)"));
+    if (macroRecordingInit) {
+      try { exec(`(macro-record-key "${escape(normalizedKey)}")`); } catch {}
+    }
     await executeCommand(editor, `(vim-dispatch-find-target "${escape(normalizedKey)}")`);
+    clearWhichKey(state, wk);
+    return;
+  }
+  const markPending = isTruthyResult(exec("(vim-mark-pending-p)"));
+  if (markPending) {
+    const macroRecordingInit = isTruthyResult(exec("(macro-record-active)"));
+    if (macroRecordingInit) {
+      try { exec(`(macro-record-key "${escape(normalizedKey)}")`); } catch {}
+    }
+    await executeCommand(editor, `(vim-dispatch-mark "${escape(normalizedKey)}")`);
     clearWhichKey(state, wk);
     return;
   }
   const textObjectPending = isTruthyResult(exec("(vim-text-object-pending-p)"));
   if (textObjectPending) {
+    const macroRecordingInit = isTruthyResult(exec("(macro-record-active)"));
+    if (macroRecordingInit) {
+      try { exec(`(macro-record-key "${escape(normalizedKey)}")`); } catch {}
+    }
     await executeCommand(editor, `(vim-dispatch-text-object "${escape(normalizedKey)}")`);
     clearWhichKey(state, wk);
     return;
   }
   const operatorPending = isTruthyResult(exec("(vim-operator-pending-p)"));
   if (operatorPending) {
+    const macroRecordingInit = isTruthyResult(exec("(macro-record-active)"));
+    if (macroRecordingInit) {
+      try { exec(`(macro-record-key "${escape(normalizedKey)}")`); } catch {}
+    }
     await executeCommand(editor, `(vim-dispatch-operator-key "${escape(normalizedKey)}")`);
+    clearWhichKey(state, wk);
+    return;
+  }
+
+  // If recording is active and the user pressed q, route directly to stop so
+  // the stopping q is NOT captured by the recording hook below (vim records
+  // literal keys but not the q that ends the recording).
+  const macroRecording = isTruthyResult(exec("(macro-record-active)"));
+  if (macroRecording && normalizedKey === "q") {
+    await executeCommand(editor, `(macro-record-stop)`);
     clearWhichKey(state, wk);
     return;
   }
@@ -146,6 +225,14 @@ export async function handleNormalMode(editor: Editor, key: string, normalizedKe
   const cmdRight = isRight(cmdResult) ? (cmdResult as any).right : null;
   if (cmdRight && cmdRight.type === "string") {
     clearWhichKey(state, wk);
+    // SPEC-044 Phase 1.G — recording-capture hook. Vim records literal keys,
+    // so we capture the keystroke BEFORE evaluating its bound command. The
+    // stopping q is excluded by the macroRecording && normalizedKey === "q"
+    // early-return above; pending-register keys are excluded because their
+    // routing returns before reaching this block.
+    if (macroRecording) {
+      try { exec(`(macro-record-key "${escape(normalizedKey)}")`); } catch {}
+    }
     await executeCommand(editor, cmdRight.value);
 
     // If the command activated the space prefix, schedule which-key for "SPC"

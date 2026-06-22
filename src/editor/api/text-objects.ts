@@ -20,7 +20,7 @@ import type { FunctionalTextBuffer, Position } from "../../core/types.ts";
 import { Either } from "../../utils/task-either.ts";
 import { killRingSave } from "./kill-ring.ts";
 import { registerDelete } from "./evil-integration.ts";
-import { findWordStart, findWordEndOnLine as findWordEnd, findWordEndWithSpace } from "./text-utils.ts";
+import { isWordChar, isWhitespace, findWordStart, findWordEndOnLine as findWordEnd, findWordEndWithSpace } from "./text-utils.ts";
 
 /**
  * Register storage for deleted text
@@ -44,13 +44,17 @@ export function setDeleteRegister(text: string): void {
 
 /**
  * Delete inner word (diw)
- * Deletes the word under the cursor, leaving trailing spaces
- * Returns the new buffer after deletion
+ * Deletes the word under the cursor, leaving trailing spaces.
+ * COUNT extends the deletion across N consecutive inner words (vim semantics
+ * for `d2iw` — count multiplies the text object, including the whitespace
+ * between words but not the trailing whitespace after the last word).
+ * Returns the new buffer after deletion.
  */
 export function deleteInnerWord(
   buffer: FunctionalTextBuffer,
   line: number,
-  column: number
+  column: number,
+  count: number = 1
 ): Either<string, FunctionalTextBuffer> {
   const contentResult = buffer.getContent();
   if (Either.isLeft(contentResult)) {
@@ -73,11 +77,19 @@ export function deleteInnerWord(
   }
 
   const start = startResult.right;
-  const end = endResult.right;
+  let end = endResult.right;
 
-  // Get the text to delete
+  // Extend end across COUNT-1 additional inner words. The whitespace between
+  // words is included; the whitespace after the final word is not.
   const lines = content.split("\n");
-  const textToDelete = lines[line]!.substring(start, end);
+  const lineText = lines[line]!;
+  const safeCount = Math.max(1, Math.floor(count));
+  for (let i = 1; i < safeCount; i++) {
+    while (end < lineText.length && isWhitespace(lineText[end]!)) end++;
+    while (end < lineText.length && isWordChar(lineText[end]!)) end++;
+  }
+
+  const textToDelete = lineText.substring(start, end);
 
   // Store in register
   setDeleteRegister(textToDelete);  // Legacy register
@@ -92,13 +104,16 @@ export function deleteInnerWord(
 
 /**
  * Delete around word (daw)
- * Deletes the word under the cursor including trailing spaces
- * Returns the new buffer after deletion
+ * Deletes the word under the cursor including trailing spaces.
+ * COUNT extends across N around-word objects (vim `d2aw` includes the
+ * trailing whitespace of the final word).
+ * Returns the new buffer after deletion.
  */
 export function deleteAroundWord(
   buffer: FunctionalTextBuffer,
   line: number,
-  column: number
+  column: number,
+  count: number = 1
 ): Either<string, FunctionalTextBuffer> {
   const contentResult = buffer.getContent();
   if (Either.isLeft(contentResult)) {
@@ -130,6 +145,18 @@ export function deleteAroundWord(
     end = lineText.length;
   }
 
+  // Extend across COUNT-1 additional around-word objects. Each extension
+  // captures one more word plus its trailing whitespace.
+  const safeCount = Math.max(1, Math.floor(count));
+  for (let i = 1; i < safeCount; i++) {
+    while (end < lineText.length && isWhitespace(lineText[end]!)) end++;
+    while (end < lineText.length && isWordChar(lineText[end]!)) end++;
+    while (end < lineText.length && isWhitespace(lineText[end]!)) end++;
+  }
+  if (end > lineText.length) {
+    end = lineText.length;
+  }
+
   // Get the text to delete
   const textToDelete = lineText.substring(start, end);
 
@@ -146,28 +173,31 @@ export function deleteAroundWord(
 
 /**
  * Change inner word (ciw)
- * Deletes the word under the cursor (same range as diw). The ops wrapper
- * triggers the mode transition to insert — TS primitive is pure delete.
+ * Deletes the word under the cursor (same range as diw). COUNT extends the
+ * deletion across N words. The ops wrapper triggers the mode transition to
+ * insert — TS primitive is pure delete.
  */
 export function changeInnerWord(
   buffer: FunctionalTextBuffer,
   line: number,
-  column: number
+  column: number,
+  count: number = 1
 ): Either<string, FunctionalTextBuffer> {
-  return deleteInnerWord(buffer, line, column);
+  return deleteInnerWord(buffer, line, column, count);
 }
 
 /**
  * Change around word (caw)
- * Deletes the word with trailing space (same range as daw). Mode transition
- * lives in the ops wrapper.
+ * Deletes the word with trailing space (same range as daw). COUNT extends the
+ * deletion across N around-words. Mode transition lives in the ops wrapper.
  */
 export function changeAroundWord(
   buffer: FunctionalTextBuffer,
   line: number,
-  column: number
+  column: number,
+  count: number = 1
 ): Either<string, FunctionalTextBuffer> {
-  return deleteAroundWord(buffer, line, column);
+  return deleteAroundWord(buffer, line, column, count);
 }
 
 /**
@@ -727,6 +757,51 @@ export function changeInnerBrace(
 }
 
 /**
+ * Delete around brace (da})
+ * Deletes including braces and returns new buffer
+ */
+export function deleteAroundBrace(
+  buffer: FunctionalTextBuffer,
+  line: number,
+  column: number
+): Either<string, FunctionalTextBuffer> {
+  const contentResult = buffer.getContent();
+  if (Either.isLeft(contentResult)) {
+    return Either.left(contentResult.left);
+  }
+
+  const content = contentResult.right;
+  const matchResult = findMatchingParen(content, line, column, "{", "}");
+  if (Either.isLeft(matchResult)) {
+    return Either.left(matchResult.left);
+  }
+
+  const { start, end } = matchResult.right;
+
+  const lines = content.split("\n");
+  const textToDelete = lines[line]!.substring(start, end + 1);
+  setDeleteRegister(textToDelete);
+  registerDelete(textToDelete, false);
+
+  return buffer.delete({
+    start: { line, column: start },
+    end: { line, column: end + 1 }
+  });
+}
+
+/**
+ * Change around brace (ca})
+ * Deletes including braces. Mode transition lives in the ops wrapper.
+ */
+export function changeAroundBrace(
+  buffer: FunctionalTextBuffer,
+  line: number,
+  column: number
+): Either<string, FunctionalTextBuffer> {
+  return deleteAroundBrace(buffer, line, column);
+}
+
+/**
  * Delete inner bracket (di])
  * Deletes inside square brackets and returns new buffer
  */
@@ -759,6 +834,63 @@ export function deleteInnerBracket(
     start: { line, column: start + 1 },
     end: { line, column: end }
   });
+}
+
+/**
+ * Change inner bracket (ci])
+ * Deletes inside brackets. Mode transition lives in the ops wrapper.
+ */
+export function changeInnerBracket(
+  buffer: FunctionalTextBuffer,
+  line: number,
+  column: number
+): Either<string, FunctionalTextBuffer> {
+  return deleteInnerBracket(buffer, line, column);
+}
+
+/**
+ * Delete around bracket (da])
+ * Deletes including brackets and returns new buffer
+ */
+export function deleteAroundBracket(
+  buffer: FunctionalTextBuffer,
+  line: number,
+  column: number
+): Either<string, FunctionalTextBuffer> {
+  const contentResult = buffer.getContent();
+  if (Either.isLeft(contentResult)) {
+    return Either.left(contentResult.left);
+  }
+
+  const content = contentResult.right;
+  const matchResult = findMatchingParen(content, line, column, "[", "]");
+  if (Either.isLeft(matchResult)) {
+    return Either.left(matchResult.left);
+  }
+
+  const { start, end } = matchResult.right;
+
+  const lines = content.split("\n");
+  const textToDelete = lines[line]!.substring(start, end + 1);
+  setDeleteRegister(textToDelete);
+  registerDelete(textToDelete, false);
+
+  return buffer.delete({
+    start: { line, column: start },
+    end: { line, column: end + 1 }
+  });
+}
+
+/**
+ * Change around bracket (ca])
+ * Deletes including brackets. Mode transition lives in the ops wrapper.
+ */
+export function changeAroundBracket(
+  buffer: FunctionalTextBuffer,
+  line: number,
+  column: number
+): Either<string, FunctionalTextBuffer> {
+  return deleteAroundBracket(buffer, line, column);
 }
 
 /**
@@ -797,13 +929,73 @@ export function deleteInnerAngle(
 }
 
 /**
- * Find HTML/XML tag boundaries at cursor position
+ * Change inner angle bracket (ci<)
+ * Deletes inside angle brackets. Mode transition lives in the ops wrapper.
+ */
+export function changeInnerAngle(
+  buffer: FunctionalTextBuffer,
+  line: number,
+  column: number
+): Either<string, FunctionalTextBuffer> {
+  return deleteInnerAngle(buffer, line, column);
+}
+
+/**
+ * Delete around angle bracket (da<)
+ * Deletes including angle brackets and returns new buffer
+ */
+export function deleteAroundAngle(
+  buffer: FunctionalTextBuffer,
+  line: number,
+  column: number
+): Either<string, FunctionalTextBuffer> {
+  const contentResult = buffer.getContent();
+  if (Either.isLeft(contentResult)) {
+    return Either.left(contentResult.left);
+  }
+
+  const content = contentResult.right;
+  const matchResult = findMatchingParen(content, line, column, "<", ">");
+  if (Either.isLeft(matchResult)) {
+    return Either.left(matchResult.left);
+  }
+
+  const { start, end } = matchResult.right;
+
+  const lines = content.split("\n");
+  const textToDelete = lines[line]!.substring(start, end + 1);
+  setDeleteRegister(textToDelete);
+  registerDelete(textToDelete, false);
+
+  return buffer.delete({
+    start: { line, column: start },
+    end: { line, column: end + 1 }
+  });
+}
+
+/**
+ * Change around angle bracket (ca<)
+ * Deletes including angle brackets. Mode transition lives in the ops wrapper.
+ */
+export function changeAroundAngle(
+  buffer: FunctionalTextBuffer,
+  line: number,
+  column: number
+): Either<string, FunctionalTextBuffer> {
+  return deleteAroundAngle(buffer, line, column);
+}
+
+/**
+ * Find HTML/XML tag boundaries at cursor position.
+ * Returns inner bounds (between tags) for di/cit and outer bounds (including
+ * the tags themselves) for dat/cat. `start`/`end` are inner; `outerStart`/
+ * `outerEnd` are the around positions.
  */
 function findTagBounds(
   content: string,
   line: number,
   column: number
-): Either<string, { start: number; end: number; tagName: string } | null> {
+): Either<string, { start: number; end: number; outerStart: number; outerEnd: number; tagName: string } | null> {
   const lines = content.split("\n");
 
   if (line >= lines.length) {
@@ -862,6 +1054,8 @@ function findTagBounds(
   return Either.right({
     start: openTagEnd,
     end: closeTagStart,
+    outerStart: openTagStart,
+    outerEnd: closeTagEnd,
     tagName
   });
 }
@@ -906,4 +1100,67 @@ export function deleteInnerTag(
     start: { line, column: start },
     end: { line, column: end }
   });
+}
+
+/**
+ * Change inner tag (cit)
+ * Clears tag contents. Mode transition lives in the ops wrapper.
+ */
+export function changeInnerTag(
+  buffer: FunctionalTextBuffer,
+  line: number,
+  column: number
+): Either<string, FunctionalTextBuffer> {
+  return deleteInnerTag(buffer, line, column);
+}
+
+/**
+ * Delete around tag (dat)
+ * Deletes opening tag, contents, and closing tag.
+ */
+export function deleteAroundTag(
+  buffer: FunctionalTextBuffer,
+  line: number,
+  column: number
+): Either<string, FunctionalTextBuffer> {
+  const contentResult = buffer.getContent();
+  if (Either.isLeft(contentResult)) {
+    return Either.left(contentResult.left);
+  }
+
+  const content = contentResult.right;
+  const boundsResult = findTagBounds(content, line, column);
+  if (Either.isLeft(boundsResult)) {
+    return Either.left(boundsResult.left);
+  }
+
+  const bounds = boundsResult.right;
+  if (bounds === null) {
+    return Either.right(buffer);
+  }
+
+  const { outerStart, outerEnd } = bounds;
+
+  const lines = content.split("\n");
+  const textToDelete = lines[line]!.substring(outerStart, outerEnd);
+  setDeleteRegister(textToDelete);
+  registerDelete(textToDelete, false);
+
+  return buffer.delete({
+    start: { line, column: outerStart },
+    end: { line, column: outerEnd }
+  });
+}
+
+/**
+ * Change around tag (cat)
+ * Deletes opening tag, contents, and closing tag.
+ * Mode transition lives in the ops wrapper.
+ */
+export function changeAroundTag(
+  buffer: FunctionalTextBuffer,
+  line: number,
+  column: number
+): Either<string, FunctionalTextBuffer> {
+  return deleteAroundTag(buffer, line, column);
 }

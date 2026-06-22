@@ -26,4 +26,13 @@
   "Cancel search and return to normal mode."
   (search-incremental-cancel)
   (editor-set-mode "normal"))
+
+;; SPEC-044 Phase 1.D — normal-mode search key bindings.
+;; The four target functions are already T-Lisp-callable: isearch-forward
+;; and isearch-backward live above; search-next/search-previous are exposed
+;; from src/editor/api/search-ops.ts.
+(key-bind "/" "(isearch-forward)" "normal")
+(key-bind "?" "(isearch-backward)" "normal")
+(key-bind "n" "(search-next)" "normal")
+(key-bind "N" "(search-previous)" "normal")
 )

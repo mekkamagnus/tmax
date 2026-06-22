@@ -127,8 +127,10 @@ describe("US-1.11.1: Describe Key", () => {
         const command = expectDefined(values[0]);
         expect(command.type).toBe("string");
         if (command.type === "string") {
-          // The command is stored with parentheses
-          expect(command.value).toContain("editor-quit");
+          // SPEC-044 Phase 1.F rebound bare `q` from editor-quit to the
+          // macro record dispatcher. editor-quit is still reachable via
+          // q<Escape>, :q<CR>, or ZQ.
+          expect(command.value).toContain("macro-handle-q");
         }
       }
     }

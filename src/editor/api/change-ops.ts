@@ -53,7 +53,7 @@ export function createChangeOps(
   setCursorLine: (line: number) => void,
   getCursorColumn: () => number,
   setCursorColumn: (column: number) => void,
-  setMode: (mode: "normal" | "insert" | "visual" | "command" | "mx") => void,
+  setMode: (mode: "normal" | "insert" | "visual" | "command" | "mx" | "replace") => void,
   setDeleteRegister: (text: string) => void
 ): Map<string, TLispFunctionImpl> {
   const api = new Map<string, TLispFunctionImpl>();

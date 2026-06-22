@@ -37,12 +37,18 @@
   (require-module editor/commands/find-file)
   (require-module editor/commands/isearch)
   (require-module editor/commands/replace)
+  (require-module editor/commands/vim-replace)
   (require-module editor/commands/indent)
+  (require-module editor/commands/indent-ops)
+  (require-module editor/commands/marks)
+  (require-module editor/commands/jumplist)
   (require-module editor/commands/dired)
   (require-module editor/commands/windows)
   (require-module editor/commands/tabs)
   (require-module editor/commands/markdown)
   (require-module editor/commands/browse-url)
+  (require-module editor/commands/macros)
+  (require-module editor/commands/repeat)
 
 ;; normal.tlisp
 ;; Default key bindings for normal mode — single source of truth.
@@ -70,6 +76,16 @@
 (key-bind "w" "(word-next (vim-count-consume 1))" "normal")
 (key-bind "b" "(word-previous (vim-count-consume 1))" "normal")
 (key-bind "e" "(word-end (vim-count-consume 1))" "normal")
+
+;; =================================================================
+;; WORD (whitespace-delimited) NAVIGATION — SPEC-044 Phase 3.A/3.B
+;; W/B/E jump over punctuation clusters as one WORD; ge/gE move to
+;; the last char of the previous word/WORD backward.
+;; =================================================================
+
+(key-bind "W" "(word-next-WORD (vim-count-consume 1))" "normal")
+(key-bind "B" "(word-previous-WORD (vim-count-consume 1))" "normal")
+(key-bind "E" "(word-end-WORD (vim-count-consume 1))" "normal")
 
 ;; =================================================================
 ;; LINE NAVIGATION
@@ -147,7 +163,9 @@
 ;; APPLICATION CONTROL
 ;; =================================================================
 
-(key-bind "q" "(editor-quit)" "normal")
+;; q is bound by commands/macros.tlisp (SPEC-044 Phase 1.F).
+;; The dispatcher handles q<reg> recording, q (stop recording), and
+;; q<Esc> (cancel pending and quit). Quit is also reachable via :q<CR>.
 
 ;; =================================================================
 ;; UNDO/REDO

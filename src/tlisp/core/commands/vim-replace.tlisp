@@ -1,0 +1,106 @@
+(defmodule editor/commands/vim-replace
+  (export vim-replace-char-pending-p vim-replace-begin vim-replace-apply vim-replace-reset
+          vim-replace-mode-enter vim-replace-mode-insert-char vim-replace-key-to-char)
+
+;; vim-replace.tlisp -- SPEC-044 Phase 2.B: r{char} two-key replace command.
+;; Pure T-Lisp using the same pending-state pattern as macros/register-prefix.
+;; The handler routes the next key via vim-replace-char-pending-p. R mode (2.C)
+;; is a separate slice that requires the 'replace' mode union value (Step 2.A).
+
+(defvar vim-pending-replace-char nil)
+(defvar vim-replace-char-count 1)
+
+(defun vim-replace-char-pending-p ()
+  "Return t when waiting for the replacement char after r."
+  (not (null vim-pending-replace-char)))
+
+(defun vim-replace-reset ()
+  "Clear replace-char pending state and reset count."
+  (progn
+    (set! vim-pending-replace-char nil)
+    (set! vim-replace-char-count 1)
+    t))
+
+(defun vim-replace-begin ()
+  "Vim r: stash count, enter pending state. The next char is consumed by
+vim-replace-apply via the handler's pending-state route."
+  (progn
+    (set! vim-replace-char-count (vim-count-consume 1))
+    (vim-count-reset)
+    (set! vim-pending-replace-char t)
+    (editor-set-status "r")
+    t))
+
+(defun vim-replace-apply (key)
+  "Apply r{char}: replace COUNT chars at cursor with KEY. Cursor lands on
+the last replaced char. Cancel on Escape/C-g. Clamp COUNT to the remaining
+chars on the line. r<Enter> splits the line (vim semantics)."
+  (progn
+    (let ((requested-count vim-replace-char-count))
+      (vim-replace-reset)
+      (if (or (string= key "Escape") (string= key "C-g"))
+        (progn (editor-set-status "") t)
+        (let ((ch (vim-replace-key-to-char key)))
+          (let ((line (cursor-line)))
+            (let ((col (cursor-column)))
+              (let ((text (buffer-line line)))
+                (let ((len (length text)))
+                  (let ((remaining (- len col)))
+                    (if (<= remaining 0)
+                      (progn (editor-set-status "") t)
+                      (let ((n (min requested-count remaining)))
+                        (let ((end-col (+ col n)))
+                          (let ((replacement (string-repeat ch n)))
+                            (progn
+                              (undo-begin)
+                              (buffer-replace-range line col line end-col replacement)
+                              (if (string= key "Enter")
+                                (cursor-move (+ line 1) 0)
+                                (cursor-move line (- end-col 1)))
+                              (undo-commit (concat "r" key))
+                              (vim-record-change (concat "r" key) n)
+                              (editor-set-status "")
+                              t)))))))))))))))
+
+(defun vim-replace-key-to-char (key)
+  "Translate special key names (Enter, Tab, Space) into their literal chars.
+Single-char keys pass through unchanged."
+  (cond
+    ((string= key "Enter") "\n")
+    ((string= key "Tab") "\t")
+    ((string= key "Space") " ")
+    (t key)))
+
+(key-bind "r" "(vim-replace-begin)" "normal")
+
+;; SPEC-044 Phase 2.C — R replace mode.
+;; R overwrites the char at cursor and advances; at EOL it appends.
+;; Undo is a single combo for the whole R session.
+(defun vim-replace-mode-enter ()
+  "R: enter replace mode. Single undo bookend opened here; each typed
+char is one replacement, the bookend closes on Escape."
+  (progn
+    (vim-count-reset)
+    (undo-begin)
+    (editor-set-mode "replace")
+    t))
+
+(defun vim-replace-mode-insert-char (ch)
+  "Handle one printable char in R mode. Overwrite if the cursor is not
+at EOL; otherwise insert (append). Cursor advances one column."
+  (let ((line (cursor-line)))
+    (let ((col (cursor-column)))
+      (let ((text (buffer-line line)))
+        (let ((len (length text)))
+          (if (>= col len)
+            (progn
+              (buffer-insert ch)
+              (cursor-move line (+ col 1)))
+            (progn
+              (buffer-replace-range line col line (+ col 1) ch)
+              (cursor-move line (+ col 1)))))))))
+
+(key-bind "R" "(vim-replace-mode-enter)" "normal")
+
+(provide "vim-replace")
+)

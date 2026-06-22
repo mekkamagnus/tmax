@@ -362,7 +362,7 @@ function renderSingleWindow(
         lines.push(gutter + rendered);
       } else {
         const lineContent = fitToWidth(rawLine, cw);
-        const rendered = isCurrentLine ? renderWithBlockCursor(lineContent, cursorColumn) : lineContent;
+        const rendered = isCurrentLine ? renderWithBlockCursor(lineContent, effectiveCursorCol) : lineContent;
         lines.push(gutter + rendered);
       }
     }

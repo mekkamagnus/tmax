@@ -1,5 +1,5 @@
 (defmodule editor/commands/operators
-  (export vim-operator-pending-p vim-begin-operator vim-reset-operator vim-operator-total-count vim-delete-line-range vim-delete-to-last-line vim-delete-to-first-line vim-change-line-range vim-operator-apply vim-dispatch-operator-key vim-operator-find-pending-p vim-operator-reset-find-pending vim-operator-apply-find vim-text-object-pending-p vim-operator-reset-text-object-pending vim-operator-begin-text-object vim-dispatch-text-object vim-operator-apply-text-object)
+  (export vim-operator-pending-p vim-begin-operator vim-reset-operator vim-operator-total-count vim-delete-line-range vim-delete-to-last-line vim-delete-to-first-line vim-change-line-range vim-operator-apply vim-dispatch-operator-key vim-operator-find-pending-p vim-operator-reset-find-pending vim-operator-apply-find vim-text-object-pending-p vim-operator-reset-text-object-pending vim-operator-begin-text-object vim-dispatch-text-object vim-operator-apply-text-object vim-register-prefix-pending-p vim-begin-register-prefix vim-dispatch-register vim-reset-register-prefix vim-valid-register-p vim-maybe-apply-register vim-consume-pending-register vim-pending-register)
 
 ;; operators.tlisp -- Vim operator-pending state owned by T-Lisp
 
@@ -21,6 +21,15 @@
 (defvar vim-pending-operator-for-text-object nil)
 (defvar vim-pending-operator-for-text-object-count 1)
 (defvar vim-text-object-pending nil)
+
+;; SPEC-044 Phase 2.G — "x register-prefix state. When the user presses ",
+;; vim-register-prefix-pending flips to t; the handler routes the next key
+;; through vim-dispatch-register, which stashes the register letter into
+;; vim-pending-register. The next operator or paste consumes (and clears)
+;; the stash via vim-maybe-apply-register. Pattern mirrors the macro and
+;; text-object pending states.
+(defvar vim-register-prefix-pending nil)
+(defvar vim-pending-register nil)
 
 (defun vim-operator-pending-p ()
   "Return t when an operator is waiting for a motion."
@@ -135,61 +144,81 @@ char (already consumed). The stashed operator count multiplies it."
                                   (editor-set-mode "insert")))
                               (t (editor-set-status (concat "Unsupported operator: " combo))))
                             (if (string= operator "y") nil (undo-commit combo))
+                            (vim-maybe-apply-register)
                             t))))))))))))))
 
 (defun vim-operator-begin-text-object (key)
   "Stash the pending operator and enter text-object pending state for KEY.
-KEY must be 'i' or 'a'. The operator and its pre-operator count are preserved
-so vim-operator-apply-text-object can resume after the text-object class
-resolves. vim-reset-operator clears the stash, so it must run BEFORE the
-stash is populated."
+KEY must be 'i' or 'a'. The operator count and the in-flight motion count
+(the digits between operator and i/a, e.g. the 2 in d2iw) are multiplied
+and preserved so vim-operator-apply-text-object can resume after the
+text-object class resolves. vim-reset-operator clears operator state, so
+it must run BEFORE the stash is populated; vim-count-reset clears the
+motion count after it has been captured."
   (let ((operator vim-pending-operator))
     (let ((operator-count vim-operator-count))
-      (progn
-        (vim-reset-operator)
-        (set! vim-pending-operator-for-text-object operator)
-        (set! vim-pending-operator-for-text-object-count operator-count)
-        (set! vim-text-object-pending key)
-        (editor-set-status (concat (concat operator key) " text-object"))
-        t))))
+      (let ((motion-count (vim-count-current)))
+        (progn
+          (vim-reset-operator)
+          (vim-count-reset)
+          (set! vim-pending-operator-for-text-object operator)
+          (set! vim-pending-operator-for-text-object-count (* operator-count motion-count))
+          (set! vim-text-object-pending key)
+          (editor-set-status (concat (concat operator key) " text-object"))
+          t)))))
 
 (defun vim-operator-apply-text-object (class-char)
   "Apply the stashed operator to a text-object class.
 CLASS-CHAR is the vim text-object identifier: w for word, \" ' ( ) { } [ ]
 < > for paired delimiters, t for tag. Mutations are wrapped in
-undo-begin/undo-commit so `u` restores the buffer."
+undo-begin/undo-commit so `u` restores the buffer. Word text-objects
+honor the stashed count so d2iw / c3aw compose per vim semantics."
   (let ((operator vim-pending-operator-for-text-object))
     (let ((inner-or-around vim-text-object-pending))
-      (let ((combo (concat (concat operator inner-or-around) class-char)))
-        (progn
-          (vim-operator-reset-text-object-pending)
-          (vim-count-reset)
-          (if (string= operator "y") nil (undo-begin))
-          (cond
-            ((string= combo "diw") (delete-inner-word))
-            ((string= combo "daw") (delete-around-word))
-            ((string= combo "ciw") (change-inner-word))
-            ((string= combo "caw") (change-around-word))
-            ((string= combo "di'") (delete-inner-single-quote))
-            ((string= combo "da'") (delete-around-single-quote))
-            ((string= combo "di\"") (delete-inner-double-quote))
-            ((string= combo "da\"") (delete-around-double-quote))
-            ((or (string= combo "di)") (string= combo "di(")) (delete-inner-paren))
-            ((or (string= combo "da)") (string= combo "da(")) (delete-around-paren))
-            ((or (string= combo "di}") (string= combo "di{")) (delete-inner-brace))
-            ((or (string= combo "di]") (string= combo "di[")) (delete-inner-bracket))
-            ((or (string= combo "di<") (string= combo "di>")) (delete-inner-angle))
-            ((string= combo "dit") (delete-inner-tag))
-            ((string= combo "ci\"") (change-inner-double-quote))
-            ((string= combo "ca\"") (change-around-double-quote))
-            ((string= combo "ci'") (change-inner-single-quote))
-            ((string= combo "ca'") (change-around-single-quote))
-            ((or (string= combo "ci)") (string= combo "ci(")) (change-inner-paren))
-            ((or (string= combo "ca)") (string= combo "ca(")) (change-around-paren))
-            ((or (string= combo "ci}") (string= combo "ci{")) (change-inner-brace))
-            (t (editor-set-status (concat "Unsupported text-object combo: " combo))))
-          (if (string= operator "y") nil (undo-commit combo))
-          t)))))
+      (let ((count vim-pending-operator-for-text-object-count))
+        (let ((combo (concat (concat operator inner-or-around) class-char)))
+          (progn
+            (vim-operator-reset-text-object-pending)
+            (vim-count-reset)
+            (if (string= operator "y") nil (undo-begin))
+            (cond
+              ((string= combo "diw") (delete-inner-word count))
+              ((string= combo "daw") (delete-around-word count))
+              ((string= combo "ciw") (change-inner-word count))
+              ((string= combo "caw") (change-around-word count))
+              ((string= combo "di'") (delete-inner-single-quote))
+              ((string= combo "da'") (delete-around-single-quote))
+              ((string= combo "di\"") (delete-inner-double-quote))
+              ((string= combo "da\"") (delete-around-double-quote))
+              ((or (string= combo "di)") (string= combo "di(")) (delete-inner-paren))
+              ((or (string= combo "da)") (string= combo "da(")) (delete-around-paren))
+              ((or (string= combo "di}") (string= combo "di{")) (delete-inner-brace))
+              ((or (string= combo "da}") (string= combo "da{")) (delete-around-brace))
+              ((or (string= combo "di]") (string= combo "di[")) (delete-inner-bracket))
+              ((or (string= combo "da]") (string= combo "da[")) (delete-around-bracket))
+              ((or (string= combo "di<") (string= combo "di>")) (delete-inner-angle))
+              ((or (string= combo "da<") (string= combo "da>")) (delete-around-angle))
+              ((string= combo "dit") (delete-inner-tag))
+              ((string= combo "dat") (delete-around-tag))
+              ((string= combo "ci\"") (change-inner-double-quote))
+              ((string= combo "ca\"") (change-around-double-quote))
+              ((string= combo "ci'") (change-inner-single-quote))
+              ((string= combo "ca'") (change-around-single-quote))
+              ((or (string= combo "ci)") (string= combo "ci(")) (change-inner-paren))
+              ((or (string= combo "ca)") (string= combo "ca(")) (change-around-paren))
+              ((or (string= combo "ci}") (string= combo "ci{")) (change-inner-brace))
+              ((or (string= combo "ca}") (string= combo "ca{")) (change-around-brace))
+              ((or (string= combo "ci]") (string= combo "ci[")) (change-inner-bracket))
+              ((or (string= combo "ca]") (string= combo "ca[")) (change-around-bracket))
+              ((or (string= combo "ci<") (string= combo "ci>")) (change-inner-angle))
+              ((or (string= combo "ca<") (string= combo "ca>")) (change-around-angle))
+              ((string= combo "cit") (change-inner-tag))
+              ((string= combo "cat") (change-around-tag))
+              (t (editor-set-status (concat "Unsupported text-object combo: " combo))))
+            (if (string= operator "y") nil (undo-commit combo))
+            (if (string= operator "y") nil (vim-record-change combo count))
+            (vim-maybe-apply-register)
+            t))))))
 
 (defun vim-dispatch-text-object (class-char)
   "Consume CLASS-CHAR as the text-object class for a stashed operator.
@@ -292,6 +321,8 @@ vim-text-object-pending-p is true."
             ((string= combo "c$") (change-to-line-end))
             (t (editor-set-status (concat "Unsupported operator: " combo))))
           (if (string= operator "y") nil (undo-commit combo))
+          (if (string= operator "y") nil (vim-record-change combo count))
+          (vim-maybe-apply-register)
           t)))))
 
 (defun vim-dispatch-operator-key (key)
@@ -320,4 +351,122 @@ vim-text-object-pending-p is true."
             (if (or (string= key "i") (string= key "a"))
               (vim-operator-begin-text-object key)
               (vim-operator-apply key))))))))
+
+;; SPEC-044 Phase 2.G — "x register-prefix parser. The next key after " is
+;; the register letter (a-zA-Z0-9 or " * +); we stash it in
+;; vim-pending-register and let the following operator or paste consume it.
+;; Cancelled by Escape/C-g or any non-register key.
+(defun vim-register-prefix-pending-p ()
+  "Return t when waiting for the register letter of a \"x prefix."
+  (not (null vim-register-prefix-pending)))
+
+(defun vim-valid-register-p (key)
+  "Return t if KEY names a valid register: a-z, A-Z, 0-9, \", *, +."
+  (or
+    (string= key "a") (string= key "b") (string= key "c")
+    (string= key "d") (string= key "e") (string= key "f")
+    (string= key "g") (string= key "h") (string= key "i")
+    (string= key "j") (string= key "k") (string= key "l")
+    (string= key "m") (string= key "n") (string= key "o")
+    (string= key "p") (string= key "q") (string= key "r")
+    (string= key "s") (string= key "t") (string= key "u")
+    (string= key "v") (string= key "w") (string= key "x")
+    (string= key "y") (string= key "z")
+    (string= key "A") (string= key "B") (string= key "C")
+    (string= key "D") (string= key "E") (string= key "F")
+    (string= key "G") (string= key "H") (string= key "I")
+    (string= key "J") (string= key "K") (string= key "L")
+    (string= key "M") (string= key "N") (string= key "O")
+    (string= key "P") (string= key "Q") (string= key "R")
+    (string= key "S") (string= key "T") (string= key "U")
+    (string= key "V") (string= key "W") (string= key "X")
+    (string= key "Y") (string= key "Z")
+    (string= key "0") (string= key "1") (string= key "2")
+    (string= key "3") (string= key "4") (string= key "5")
+    (string= key "6") (string= key "7") (string= key "8")
+    (string= key "9")
+    (string= key "\"") (string= key "*") (string= key "+")))
+
+(defun vim-begin-register-prefix ()
+  "Begin a \"x register prefix. Sets pending state; the handler routes the
+next key through vim-dispatch-register. Count state is preserved so
+3\"ayw continues to work — vim-count-current is still set when the y
+operator begins."
+  (progn
+    (set! vim-register-prefix-pending t)
+    (editor-set-status "register @\"")
+    t))
+
+(defun vim-reset-register-prefix ()
+  "Clear register-prefix pending state and the stashed register."
+  (progn
+    (set! vim-register-prefix-pending nil)
+    (set! vim-pending-register nil)
+    nil))
+
+(defun vim-dispatch-register (key)
+  "Resolve a pending \"x prefix. KEY is the second key press.
+- Register letter (a-zA-Z0-9, \", *, +): stash into vim-pending-register.
+- Escape / C-g: cancel pending.
+- Anything else: cancel pending without stashing."
+  (cond
+    ((vim-valid-register-p key)
+      (progn
+        (set! vim-pending-register key)
+        (set! vim-register-prefix-pending nil)
+        (editor-set-status (concat "register: " key))
+        t))
+    ((or (string= key "Escape") (string= key "C-g"))
+      (progn
+        (vim-reset-register-prefix)
+        (editor-set-status "")
+        t))
+    (t
+      (progn
+        (vim-reset-register-prefix)
+        (editor-set-status "Register prefix cancelled")
+        t))))
+
+(defun vim-maybe-apply-register ()
+  "If vim-pending-register is set, mirror the unnamed register's contents
+into it (so \"ayy writes to a, \"Ayy appends because set-register detects
+uppercase). Clear the stash after applying. Called by vim-operator-apply,
+vim-operator-apply-find, and vim-operator-apply-text-object after their
+mutations complete. Yank is the only operator that meaningfully writes a
+register, but invoking this after every operator is harmless and keeps
+the stash lifecycle uniform.
+
+SPEC-044 Phase 2.4: for + or * registers, also push the text to the OS
+clipboard via the clipboard-set primitive (no-op if tool unavailable)."
+  (if vim-pending-register
+    (let ((register vim-pending-register))
+      (progn
+        (set! vim-pending-register nil)
+        (let ((text (get-register "\"")))
+          (progn
+            (set-register register text)
+            (if (or (string= register "+") (string= register "*"))
+              (clipboard-set text)
+              nil))
+          t)))
+    nil))
+
+(defun vim-consume-pending-register ()
+  "Return the pending register letter (a-z, A-Z, 0-9, \", *, +) and clear
+the stash; nil when no register prefix is active. Used by paste commands
+in edit-commands.tlisp (a different module, which cannot reference
+vim-pending-register directly because defvar is module-scoped). The
+register-prefix stash-then-consume lifecycle mirrors how the operator
+path uses vim-maybe-apply-register."
+  (if vim-pending-register
+    (let ((register vim-pending-register))
+      (progn
+        (set! vim-pending-register nil)
+        register))
+    nil))
+
+;; Bind the register prefix in normal mode. Visual-mode prefix lands in a
+;; follow-up slice per spec Phase 2.3 (visual register is the same pattern
+;; but routes through visual-handler).
+(key-bind "\"" "(vim-begin-register-prefix)" "normal")
 )

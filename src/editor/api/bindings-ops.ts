@@ -30,9 +30,12 @@ export function createBindingsOps(
   setStatusMessage: (message: string) => void,
   getCommandLine: () => string,
   setCommandLine: (command: string) => void,
-  getMode: () => "normal" | "insert" | "visual" | "command" | "mx",
-  setMode: (mode: "normal" | "insert" | "visual" | "command" | "mx") => void,
-  setCursorFocus: (focus: 'buffer' | 'command') => void
+  getMode: () => "normal" | "insert" | "visual" | "command" | "mx" | "replace",
+  setMode: (mode: "normal" | "insert" | "visual" | "command" | "mx" | "replace") => void,
+  setCursorFocus: (focus: 'buffer' | 'command') => void,
+  clearSearchHighlights?: () => void,
+  evalTlisp?: (expr: string) => any,
+  logMessage?: (msg: string, level?: string) => void
 ): Map<string, TLispFunctionImpl> {
   const api = new Map<string, TLispFunctionImpl>();
 
@@ -106,6 +109,31 @@ export function createBindingsOps(
         } as EvalError);
       } else {
         setStatusMessage("Save and quit functionality not available");
+      }
+    } else if (command === "nohl" || command === "noh") {
+      // SPEC-044 Phase 1.E — :nohl/:noh clears visible search highlights
+      // without resetting lastSearchPattern, so n/N still jump after.
+      if (clearSearchHighlights) {
+        clearSearchHighlights();
+      }
+      setStatusMessage("");
+    } else if (command === "marks") {
+      // SPEC-044 Phase 4.B — :marks lists every set mark.
+      // T-Lisp owns the mark store; we eval (vim-marks-format) and log it.
+      let formatted = "";
+      if (evalTlisp) {
+        try {
+          const result = evalTlisp("(vim-marks-format)");
+          if (result && result._tag === "Right" && result.right?.type === "string") {
+            formatted = result.right.value as string;
+          }
+        } catch {}
+      }
+      if (logMessage && formatted) {
+        logMessage(`:marks\n${formatted}`, 'info');
+        setStatusMessage(":marks — see *Messages* buffer");
+      } else {
+        setStatusMessage(":marks — no marks set");
       }
     } else if (command.startsWith("e ") || command.startsWith("edit ")) {
       // TODO: Implement file opening

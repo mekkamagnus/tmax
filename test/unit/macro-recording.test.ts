@@ -244,18 +244,21 @@ describe("Macro Recording (US-2.4.1)", () => {
       expect(macros.get("a")).toEqual(["j", "j"]);
     });
 
-    test("@@ should execute last executed macro", () => {
+    test("@@ should execute last executed macro", async () => {
       // Record macro a
       editor.getInterpreter().execute('(macro-record-start "a")');
       editor.getInterpreter().execute('(macro-record-key "j")');
       editor.getInterpreter().execute('(macro-record-stop)');
 
-      // Execute macro a to set it as last macro
-      const execResult1 = editor.getInterpreter().execute('(macro-execute "a")');
+      // Execute macro a to set it as last macro. SPEC-044 Phase 1.H made
+      // macro-execute return a TLispPromise so the async evaluator (used by
+      // the handler) can await each inner handleKey. Use executeAsync here
+      // to resolve the promise and observe the underlying string return.
+      const execResult1 = await editor.getInterpreter().executeAsync('(macro-execute "a")');
       expect(execResult1._tag).toBe("Right");
 
       // Execute last macro with @@
-      const execResult2 = editor.getInterpreter().execute('(macro-execute-last)');
+      const execResult2 = await editor.getInterpreter().executeAsync('(macro-execute-last)');
       expect(execResult2._tag).toBe("Right");
 
       // Verify that macro a was executed again

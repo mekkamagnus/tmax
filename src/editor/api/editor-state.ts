@@ -1,6 +1,6 @@
 import type { TerminalIO, FileSystem, FunctionalTextBuffer, LSPDiagnostic, Window } from "../../core/types.ts";
 
-export type EditorMode = "normal" | "insert" | "visual" | "command" | "mx";
+export type EditorMode = "normal" | "insert" | "visual" | "command" | "mx" | "replace";
 
 export interface EditorStateAccess {
   cursor: {

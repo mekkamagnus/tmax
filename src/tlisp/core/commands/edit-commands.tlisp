@@ -11,6 +11,7 @@
       (progn
         (set-register "\"" deleted)
         (undo-commit "x")
+        (vim-record-change "x" count)
         t))))
 
 (defun vim-change-char (count)
@@ -26,6 +27,7 @@
     (undo-begin)
     (delete-to-line-end)
     (undo-commit "D")
+    (vim-record-change "D" 1)
     t))
 
 (defun vim-change-to-line-end ()
@@ -34,6 +36,7 @@
     (undo-begin)
     (change-to-line-end)
     (undo-commit "C")
+    (vim-record-change "C" 1)
     t))
 
 (defun vim-yank-to-line-end ()
@@ -43,19 +46,49 @@
     t))
 
 (defun vim-paste-after (count)
-  "Vim p: paste after cursor COUNT times."
+  "Vim p: paste after cursor COUNT times. If a register prefix is active
+(the user typed \"x before p), temporarily swap the unnamed register with
+the named register's contents so the paste reads from the right place,
+then restore. vim-consume-pending-register clears the stash; it lives in
+operators.tlisp because vim-pending-register is module-scoped there.
+
+SPEC-044 Phase 2.4: for + or * registers, pull from the OS clipboard
+(clipboard-get primitive) instead of the in-memory register."
   (progn
     (undo-begin)
-    (paste-after count)
+    (let ((register (vim-consume-pending-register)))
+      (if register
+        (let ((saved (get-register "\"")))
+          (progn
+            (set-register "\""
+              (if (or (string= register "+") (string= register "*"))
+                (clipboard-get)
+                (get-register register)))
+            (paste-after count)
+            (set-register "\"" saved)))
+        (paste-after count)))
     (undo-commit "p")
+    (vim-record-change "p" count)
     t))
 
 (defun vim-paste-before (count)
-  "Vim P: paste before cursor COUNT times."
+  "Vim P: paste before cursor COUNT times. See vim-paste-after for the
+register-prefix swap-and-restore logic."
   (progn
     (undo-begin)
-    (paste-before count)
+    (let ((register (vim-consume-pending-register)))
+      (if register
+        (let ((saved (get-register "\"")))
+          (progn
+            (set-register "\""
+              (if (or (string= register "+") (string= register "*"))
+                (clipboard-get)
+                (get-register register)))
+            (paste-before count)
+            (set-register "\"" saved)))
+        (paste-before count)))
     (undo-commit "P")
+    (vim-record-change "P" count)
     t))
 
 (defun vim-join-lines ()
@@ -74,6 +107,7 @@
                 (buffer-replace-range line 0 next-line (length second) joined)
                 (cursor-move line (length first))
                 (undo-commit "J")
+                (vim-record-change "J" 1)
                 t))))))))
 
 (defun visual-change ()

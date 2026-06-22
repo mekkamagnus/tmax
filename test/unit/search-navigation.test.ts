@@ -185,7 +185,7 @@ describe("Search Navigation (US-1.5.1)", () => {
   describe("match highlighting", () => {
     test("search pattern is stored for highlighting", async () => {
       await editor.getInterpreter().execute('(search-forward "pattern")');
-      
+
       // Pattern should be available for highlighting
       const result = await editor.getInterpreter().execute('(search-pattern-get)');
       expect(result._tag).toBe("Right");
@@ -198,6 +198,77 @@ describe("Search Navigation (US-1.5.1)", () => {
       // Pattern should be cleared
       const result = await editor.getInterpreter().execute('(search-pattern-get)');
       expect(result._tag).toBe("Right");
+    });
+  });
+
+  // SPEC-044 Phase 1.D — verify /, ?, n, N are reachable from the keyboard.
+  // The T-Lisp functions exist; these tests confirm the (key-bind ...) lines
+  // route the keys to them through the normal-mode handler.
+  describe("SPEC-044 Phase 1.D — search key bindings", () => {
+    test("pressing n after search-forward advances to next match", async () => {
+      moveCursor(editor, 0, 0);
+      await editor.getInterpreter().execute('(search-forward "pattern")');
+      const firstLine = editor.getState().cursorPosition.line;
+
+      await editor.handleKey("n");
+
+      expect(editor.getState().cursorPosition.line).toBeGreaterThan(firstLine);
+    });
+
+    test("pressing N after search-forward returns to previous match", async () => {
+      moveCursor(editor, 0, 0);
+      await editor.getInterpreter().execute('(search-forward "pattern")');
+      const firstLine = editor.getState().cursorPosition.line;
+      await editor.handleKey("n");
+      const secondLine = editor.getState().cursorPosition.line;
+
+      await editor.handleKey("N");
+
+      expect(editor.getState().cursorPosition.line).toBe(firstLine);
+      expect(secondLine).toBeGreaterThan(firstLine);
+    });
+  });
+
+  // SPEC-044 Phase 1.E — :nohl clears visible highlights but keeps the last
+  // search pattern so `n` still works.
+  describe("SPEC-044 Phase 1.E — :nohl Ex command", () => {
+    test(":nohl clears searchMatches without clearing the search pattern", async () => {
+      moveCursor(editor, 0, 0);
+      await editor.getInterpreter().execute('(search-forward "pattern")');
+
+      // Populate highlights via the incremental-search path so state.searchMatches is non-empty.
+      await editor.getInterpreter().execute('(search-incremental-start "forward")');
+      await editor.getInterpreter().execute('(search-incremental-update "p")');
+      const matchesDuringSearch = editor.getState().searchMatches ?? [];
+      expect(matchesDuringSearch.length).toBeGreaterThan(0);
+
+      // Issue :nohl through the command-line path.
+      await editor.getInterpreter().execute('(editor-set-command-line "nohl")');
+      await editor.getInterpreter().execute('(editor-execute-command-line)');
+
+      // Highlights must be cleared.
+      const matchesAfter = editor.getState().searchMatches ?? [];
+      expect(matchesAfter.length).toBe(0);
+
+      // Pattern must survive :nohl so n/N still jump.
+      const patternAfter = await editor.getInterpreter().execute('(search-pattern-get)');
+      expect(patternAfter._tag).toBe("Right");
+      const patternValue = (patternAfter as { _tag: "Right"; right: { type: string; value: string } }).right;
+      expect(patternValue.type).toBe("string");
+      expect(patternValue.value).toBe("pattern");
+    });
+
+    test(":noh (alias) is accepted and preserves the pattern", async () => {
+      moveCursor(editor, 0, 0);
+      await editor.getInterpreter().execute('(search-forward "pattern")');
+
+      await editor.getInterpreter().execute('(editor-set-command-line "noh")');
+      await editor.getInterpreter().execute('(editor-execute-command-line)');
+
+      const patternAfter = await editor.getInterpreter().execute('(search-pattern-get)');
+      expect(patternAfter._tag).toBe("Right");
+      const patternValue = (patternAfter as { _tag: "Right"; right: { type: string; value: string } }).right;
+      expect(patternValue.value).toBe("pattern");
     });
   });
 });

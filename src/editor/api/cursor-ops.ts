@@ -41,7 +41,7 @@ export function createCursorOps(
   getCursorColumn: () => number,
   setCursorColumn: (column: number) => void,
   getCurrentBuffer: () => FunctionalTextBuffer | null,
-  getMode?: () => "normal" | "insert" | "visual" | "command" | "mx",
+  getMode?: () => "normal" | "insert" | "visual" | "command" | "mx" | "replace",
   updateVisualSelection?: () => void
 ): Map<string, TLispFunctionImpl> {
   const api = new Map<string, TLispFunctionImpl>();

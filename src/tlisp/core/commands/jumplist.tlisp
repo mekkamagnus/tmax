@@ -1,0 +1,126 @@
+(defmodule editor/commands/jumplist
+  (export vim-jump-record vim-jump-back vim-jump-forward
+          vim-jump-list vim-jump-index vim-jump-clear
+          vim-jump-cap vim-jump-cap-set)
+
+;; jumplist.tlisp -- SPEC-044 Phase 4.E: C-o / C-i jumplist navigation.
+;;
+;; Vim keeps a per-window jump stack and a current pointer.  Every time
+;; the user performs a "jump" (gg, G, %, etc.), the pre-jump cursor is
+;; pushed onto the stack and the pointer is moved past the end.  C-o
+;; walks backward through the stack; C-i walks forward.
+;;
+;; This module exposes the data + navigation; the recording hook is
+;; invoked from the jump commands themselves (or via advice) so the
+;; jumplist tracks real jumps.  Test entry points are the public
+;; commands `vim-jump-record`, `vim-jump-back`, `vim-jump-forward`.
+;;
+;; Storage layout:
+;;   vim-jumplist      — list of (line col) pairs, oldest first.
+;;   vim-jump-pointer  — index INTO vim-jumplist; -1 means "no position".
+;;                       When a new jump is recorded, any "forward"
+;;                       tail is dropped and the new entry is appended,
+;;                       then pointer points at it.
+;;
+;; SPEC-044 Phase 4.F — jumplist cap (vim default 100, Open Question #6).
+;; When the list grows past the cap, the OLDEST entries drop so the list
+;; stays at exactly cap size, and the pointer is clamped to the new max.
+
+(defvar vim-jumplist (list))
+(defvar vim-jump-pointer -1)
+(defvar vim-jump-cap-value 100)
+
+(defun vim-jump-cap ()
+  "Return the current jumplist capacity (vim default 100)."
+  vim-jump-cap-value)
+
+(defun vim-jump-cap-set (n)
+  "Set the jumplist capacity to N entries. Useful for tests."
+  (set! vim-jump-cap-value n))
+
+(defun vim-jump-drop-oldest (alist keep)
+  "Return ALIST with the oldest entries dropped so it has at most KEEP items."
+  (let ((total (length alist)))
+    (if (<= total keep) alist
+      (vim-jump-drop-oldest (cdr alist) keep))))
+
+(defun vim-jump-list ()
+  "Return the current jumplist (oldest first)."
+  vim-jumplist)
+
+(defun vim-jump-index ()
+  "Return the current jumplist pointer (-1 if empty)."
+  vim-jump-pointer)
+
+(defun vim-jump-clear ()
+  "Reset the jumplist to empty."
+  (set! vim-jumplist (list))
+  (set! vim-jump-pointer -1)
+  nil)
+
+(defun vim-jump-truncate-after (index alist)
+  "Return ALIST with entries past INDEX removed (keeps 0..index inclusive)."
+  (if (<= index -1) (list)
+    (if (null alist) (list)
+      (cons (car alist) (vim-jump-truncate-after (- index 1) (cdr alist))))))
+
+(defun vim-jump-record ()
+  "Push current cursor onto the jumplist and advance the pointer.
+Call BEFORE performing a jump so the pre-jump position is preserved.
+SPEC-044 Phase 4.F — when the list exceeds vim-jump-cap, the oldest
+entries drop and the pointer is clamped to the new max index."
+  (let ((entry (list (cursor-line) (cursor-column))))
+    (let ((trimmed (vim-jump-truncate-after vim-jump-pointer vim-jumplist)))
+      (let ((appended (vim-jump-append-entry trimmed entry)))
+        (let ((capped (vim-jump-drop-oldest appended (vim-jump-cap))))
+          (set! vim-jumplist capped)
+          (set! vim-jump-pointer (- (length capped) 1))))))
+  t)
+
+(defun vim-jump-append-entry (alist entry)
+  "Return ALIST with ENTRY appended at the end."
+  (if (null alist) (list entry)
+    (cons (car alist) (vim-jump-append-entry (cdr alist) entry))))
+
+(defun vim-jump-nth (index alist)
+  "Return entry at INDEX in ALIST, or nil if out of range."
+  (if (null alist) nil
+    (if (<= index 0) (car alist)
+      (vim-jump-nth (- index 1) (cdr alist)))))
+
+(defun vim-jump-back ()
+  "C-o: move to the previous entry in the jumplist."
+  (if (<= vim-jump-pointer 0)
+    (progn
+      (editor-set-status "No older jump position")
+      nil)
+    (let ((new-pointer (- vim-jump-pointer 1)))
+      (let ((target (vim-jump-nth new-pointer vim-jumplist)))
+        (if (null target)
+          (progn (editor-set-status "No older jump position") nil)
+          (progn
+            (set! vim-jump-pointer new-pointer)
+            (cursor-move (nth 0 target) (nth 1 target))
+            t))))))
+
+(defun vim-jump-forward ()
+  "C-i: move to the next entry in the jumplist."
+  (let ((max-index (- (length vim-jumplist) 1)))
+    (if (>= vim-jump-pointer max-index)
+      (progn
+        (editor-set-status "No newer jump position")
+        nil)
+      (let ((new-pointer (+ vim-jump-pointer 1)))
+        (let ((target (vim-jump-nth new-pointer vim-jumplist)))
+          (if (null target)
+            (progn (editor-set-status "No newer jump position") nil)
+            (progn
+              (set! vim-jump-pointer new-pointer)
+              (cursor-move (nth 0 target) (nth 1 target))
+              t)))))))
+
+(key-bind "C-o" "(vim-jump-back)" "normal")
+(key-bind "C-i" "(vim-jump-forward)" "normal")
+
+(provide "jumplist")
+)

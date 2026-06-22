@@ -30,6 +30,7 @@ import { createJumpOps } from "./api/jump-ops.ts";
 import { createKillRingOps } from "./api/kill-ring.ts";
 import { createYankPopOps } from "./api/yank-pop-ops.ts";
 import { createEvilIntegrationOps } from "./api/evil-integration.ts";
+import { createClipboardOps } from "./api/clipboard-ops.ts";
 import { createLSPDiagnosticsOps } from "./api/lsp-diagnostics.ts";
 import { createPluginOps } from "./api/plugin-ops.ts";
 import { createDocumentationOps } from "./api/documentation.ts";
@@ -71,7 +72,7 @@ export interface TlispEditorState {
   cursorColumn: number;
   terminal: TerminalIO;
   filesystem: FileSystem;
-  mode: "normal" | "insert" | "visual" | "command" | "mx";
+  mode: "normal" | "insert" | "visual" | "command" | "mx" | "replace";
   lastCommand: string;
   statusMessage: string;
   viewportTop: number;  // First line visible in viewport
@@ -103,6 +104,7 @@ export interface TlispEditorState {
   _getBufferModified?: () => boolean;
   _setBufferModified?: (modified: boolean) => void;
   foldRanges?: Map<number, number>;
+  searchMatches?: import("../core/types.ts").Range[];
 }
 
 /**
@@ -190,7 +192,26 @@ export function createEditorAPI(state: TlispEditorState): Map<string, TLispFunct
     api.set(key, value);
   }
 
+  // Add search operations (before bindings so :nohl can call into search state)
+  const searchOps = createSearchOps(
+    () => state.currentBuffer,
+    () => state.cursorLine,
+    (line) => { state.cursorLine = line; },
+    () => state.cursorColumn,
+    (column) => { state.cursorColumn = column; },
+    (message) => { state.statusMessage = message; },
+    (ranges) => { state.searchMatches = ranges; }
+  );
+  for (const [key, value] of searchOps.entries()) {
+    api.set(key, value);
+  }
+
   // Add bindings operations
+  const clearSearchHighlights = () => {
+    state.searchMatches = [];
+    const fn = searchOps.get("search-clear-highlights");
+    if (fn) fn([]);
+  };
   const bindingsOps = createBindingsOps(
     () => state.operations,
     (msg) => { state.statusMessage = msg; },
@@ -198,7 +219,10 @@ export function createEditorAPI(state: TlispEditorState): Map<string, TLispFunct
     (cmd) => { state.commandLine = cmd; },
     () => state.mode,
     (mode) => { state.mode = mode; },
-    (focus) => { state.cursorFocus = focus; }
+    (focus) => { state.cursorFocus = focus; },
+    clearSearchHighlights,
+    (state as any)._evalTlisp,
+    (msg: string, level?: string) => { state.logMessage?.(msg, level); }
   );
   for (const [key, value] of bindingsOps.entries()) {
     api.set(key, value);
@@ -291,19 +315,6 @@ export function createEditorAPI(state: TlispEditorState): Map<string, TLispFunct
     api.set(key, value);
   }
 
-  // Add search operations
-  const searchOps = createSearchOps(
-    () => state.currentBuffer,
-    () => state.cursorLine,
-    (line) => { state.cursorLine = line; },
-    () => state.cursorColumn,
-    (column) => { state.cursorColumn = column; },
-    (message) => { state.statusMessage = message; }
-  );
-  for (const [key, value] of searchOps.entries()) {
-    api.set(key, value);
-  }
-
   // Add count prefix operations
   // Note: These are integrated differently as they need editor instance access
   // The actual registration happens in editor.ts's initializeAPI method
@@ -363,6 +374,12 @@ export function createEditorAPI(state: TlispEditorState): Map<string, TLispFunct
   // Add evil integration operations (US-1.9.3)
   const evilIntegrationOps = createEvilIntegrationOps();
   for (const [key, value] of evilIntegrationOps.entries()) {
+    api.set(key, value);
+  }
+
+  // Add OS clipboard primitives (SPEC-044 Phase 2.4)
+  const clipboardOps = createClipboardOps();
+  for (const [key, value] of clipboardOps.entries()) {
     api.set(key, value);
   }
 

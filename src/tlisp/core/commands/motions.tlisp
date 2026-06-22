@@ -1,5 +1,5 @@
 (defmodule editor/commands/motions
-  (export vim-begin-find vim-find-pending-p vim-reset-find-pending vim-opposite-direction vim-move-to-position vim-find-target-with vim-dispatch-find-target vim-repeat-find vim-repeat-find-reverse vim-match-bracket paragraph-previous paragraph-next scroll-cursor-top scroll-cursor-center scroll-cursor-bottom scroll-column-left scroll-column-right scroll-cursor-start scroll-cursor-end vim-gg vim-G)
+  (export vim-begin-find vim-find-pending-p vim-reset-find-pending vim-opposite-direction vim-move-to-position vim-find-target-with vim-dispatch-find-target vim-repeat-find vim-repeat-find-reverse vim-match-bracket paragraph-previous paragraph-next scroll-cursor-top scroll-cursor-center scroll-cursor-bottom scroll-column-left scroll-column-right scroll-cursor-start scroll-cursor-end vim-gg vim-G vim-window-top vim-window-middle vim-window-bottom vim-scroll-line-down vim-scroll-line-up vim-sentence-next vim-sentence-previous vim-section-next vim-section-previous vim-section-end-next vim-section-end-previous)
 
 ;; motions.tlisp -- Vim motions and find-char state owned by T-Lisp
 
@@ -166,6 +166,308 @@
     (jump-to-line (vim-count-consume))
     (progn (vim-count-reset) (jump-to-last-line))))
 
+;; =====================================================================
+;; SPEC-044 Phase 3.E — H/M/L window-relative motions.
+;; H = top of viewport, M = middle, L = bottom. With count N, H goes to
+;; N lines from top; L goes to N lines from bottom (vim semantics).
+;; =====================================================================
+
+(defun vim-window-top (count)
+  "H: move to line viewport-top + COUNT (default 1) — vim's H."
+  (let ((offset (if (and count (> count 0)) (- count 1) 0)))
+    (progn
+      (vim-count-reset)
+      (cursor-move (+ (viewport-top-get) offset) 0)
+      (line-first-non-blank)
+      t)))
+
+(defun vim-window-middle ()
+  "M: move to the middle line of the viewport."
+  (progn
+    (vim-count-reset)
+    (let ((mid (+ (viewport-top-get) (floor (/ (terminal-height-get) 2)))))
+      (cursor-move (min mid (- (buffer-line-count) 1)) 0)
+      (line-first-non-blank)
+      t)))
+
+(defun vim-window-bottom (count)
+  "L: move to line viewport-top + height - 1 - COUNT (default 0)."
+  (let ((offset (if (and count (> count 0)) count 0)))
+    (progn
+      (vim-count-reset)
+      (let ((target (+ (viewport-top-get) (- (terminal-height-get) 1) (- offset))))
+        (cursor-move (max (viewport-top-get) (min target (- (buffer-line-count) 1))) 0)
+        (line-first-non-blank)
+        t))))
+
+;; =====================================================================
+;; SPEC-044 Phase 3.F — C-e/C-y single-line scroll.
+;; C-e scrolls viewport down one line (cursor stays, until it would
+;; leave the viewport, then it tags along). C-y scrolls up.
+;; =====================================================================
+
+(defun vim-scroll-line-down (count)
+  "C-e: scroll viewport down by COUNT lines (default 1)."
+  (let ((n (if (and count (> count 0)) count 1)))
+    (progn
+      (vim-count-reset)
+      (let ((new-top (+ (viewport-top-get) n)))
+        (let ((clamped-top (min new-top (- (buffer-line-count) 1))))
+          (progn
+            (viewport-top-set (max 0 clamped-top))
+            (let ((cursor-line (cursor-line)))
+              (if (< cursor-line (viewport-top-get))
+                  (cursor-move (viewport-top-get) (cursor-column))
+                  t))
+            t))))))
+
+(defun vim-scroll-line-up (count)
+  "C-y: scroll viewport up by COUNT lines (default 1)."
+  (let ((n (if (and count (> count 0)) count 1)))
+    (progn
+      (vim-count-reset)
+      (let ((new-top (- (viewport-top-get) n)))
+        (progn
+          (viewport-top-set (max 0 new-top))
+          (let ((bottom (- (+ (viewport-top-get) (terminal-height-get)) 1)))
+            (let ((cursor-line (cursor-line)))
+              (if (> cursor-line bottom)
+                  (cursor-move bottom (cursor-column))
+                  t))
+            t))))))
+
+;; =====================================================================
+;; SPEC-044 Phase 3.C — sentence motions ( ) .
+;; Sentence boundary = paragraph boundary OR [.!?] followed by whitespace.
+;; Counts move N sentences forward/backward.
+;; =====================================================================
+
+(defun vim-sentence-previous (count)
+  "( — move backward COUNT sentences (default 1)."
+  (let ((n (if (and count (> count 0)) count 1)))
+    (progn
+      (vim-count-reset)
+      (let ((line (cursor-line)))
+        (let ((col (cursor-column)))
+          (let ((target (vim-sentence-scan-backward line col n)))
+            (if (null target) t
+              (cursor-move (nth 0 target) (nth 1 target))))))
+      t)))
+
+(defun vim-sentence-next (count)
+  ") — move forward COUNT sentences (default 1)."
+  (let ((n (if (and count (> count 0)) count 1)))
+    (progn
+      (vim-count-reset)
+      (let ((line (cursor-line)))
+        (let ((col (cursor-column)))
+          (let ((target (vim-sentence-scan-forward line col n)))
+            (if (null target) t
+              (cursor-move (nth 0 target) (nth 1 target))))))
+      t)))
+
+(defun vim-sentence-scan-forward (line col count)
+  "Find the (line col) of the next COUNT-th sentence boundary from LINE/COL.
+Returns nil at EOF."
+  (if (<= count 0) (list line col)
+    (let ((next (vim-sentence-next-boundary line col)))
+      (if (null next) nil
+        (vim-sentence-scan-forward (nth 0 next) (nth 1 next) (- count 1))))))
+
+(defun vim-sentence-scan-backward (line col count)
+  "Find the (line col) of the COUNT-th previous sentence boundary."
+  (if (<= count 0) (list line col)
+    (let ((prev (vim-sentence-previous-boundary line col)))
+      (if (null prev) nil
+        (vim-sentence-scan-backward (nth 0 prev) (nth 1 prev) (- count 1))))))
+
+(defun vim-sentence-next-boundary (line col)
+  "Scan forward from LINE/COL for the next sentence boundary char.
+A boundary is one of . ! ? followed by whitespace or EOL. Lands on the
+char AFTER the boundary. Returns nil if none."
+  (vim-sentence-scan-forward-char line (+ col 1)))
+
+(defun vim-sentence-scan-forward-char (line col)
+  "Inner scan helper: scan forward looking for boundary at LINE/COL."
+  (let ((line-count (buffer-line-count)))
+    (if (>= line line-count) nil
+      (let ((text (buffer-line line)))
+        (let ((len (length text)))
+          (if (>= col len)
+            (vim-sentence-scan-forward-char (+ line 1) 0)
+            (let ((ch (string-char-at text col)))
+              (if (or (string= ch ".") (string= ch "!") (string= ch "?"))
+                (let ((after-col (+ col 1)))
+                  (if (>= after-col len)
+                    (list (+ line 1) 0)
+                    (let ((after (string-char-at text after-col)))
+                      (if (or (string= after " ") (string= after "\t"))
+                        (list line (+ after-col 1))
+                        (vim-sentence-scan-forward-char line after-col)))))
+                (vim-sentence-scan-forward-char line (+ col 1))))))))))
+
+(defun vim-sentence-previous-boundary (line col)
+  "Scan backward from LINE/COL for the previous sentence boundary."
+  (vim-sentence-scan-backward-char line (- col 1)))
+
+(defun vim-sentence-scan-backward-char (line col)
+  "Inner scan helper: scan backward looking for boundary at LINE/COL."
+  (if (< line 0) nil
+    (let ((text (buffer-line line)))
+      (let ((len (length text)))
+        (if (< col 0)
+          (if (= line 0) nil
+            (let ((prev-line (- line 1)))
+              (vim-sentence-scan-backward-char prev-line (- (length (buffer-line prev-line)) 1))))
+          (let ((ch (string-char-at text col)))
+            (if (or (string= ch ".") (string= ch "!") (string= ch "?"))
+              (if (= col 0)
+                (if (= line 0) nil
+                  (let ((prev-line (- line 1)))
+                    (let ((prev-len (length (buffer-line prev-line))))
+                      (if (> prev-len 0)
+                        (let ((after (string-char-at (buffer-line prev-line) (- prev-len 1))))
+                          (if (or (string= after " ") (string= after "\t"))
+                            (list prev-line (- prev-len 1))
+                            (list line 0)))
+                        (list prev-line 0)))))
+                (let ((before (string-char-at text (- col 1))))
+                  (if (or (string= before " ") (string= before "\t"))
+                    (list line (- col 1))
+                    (vim-sentence-scan-backward-char line (- col 1)))))
+              (vim-sentence-scan-backward-char line (- col 1)))))))))
+
+;; =====================================================================
+;; SPEC-044 Phase 3.D — section motions [[ ]] [] ][.
+;; Section boundary = '{' at column 0 (C-style) OR form-feed (\f, ^L).
+;; [[ = previous section start, ]] = next section start,
+;; [] = previous section end, ][ = next section end. For simplicity we
+;; treat them as the same boundary type; vim distinguishes them by
+;; cursor landing AFTER the brace vs at the brace.
+;; =====================================================================
+
+(defun vim-section-previous (count)
+  "[[: move backward to the previous section boundary (default 1)."
+  (let ((n (if (and count (> count 0)) count 1)))
+    (progn
+      (vim-count-reset)
+      (let ((target-line (vim-section-scan-backward (cursor-line) n)))
+        (if (null target-line) t
+          (progn
+            (cursor-move target-line 0)
+            (line-first-non-blank)
+            t))))))
+
+(defun vim-section-next (count)
+  "]]: move forward to the next section boundary (default 1)."
+  (let ((n (if (and count (> count 0)) count 1)))
+    (progn
+      (vim-count-reset)
+      (let ((target-line (vim-section-scan-forward (cursor-line) n)))
+        (if (null target-line) t
+          (progn
+            (cursor-move target-line 0)
+            (line-first-non-blank)
+            t))))))
+
+(defun vim-section-line-boundary-p (line)
+  "Return t if LINE starts with { at column 0 or contains a form-feed."
+  (if (or (< line 0) (>= line (buffer-line-count))) nil
+    (let ((text (buffer-line line)))
+      (let ((len (length text)))
+        (if (= len 0) nil
+          (let ((ch (string-char-at text 0)))
+            (or (string= ch "{")
+                (vim-line-contains-formfeed text 0 len))))))))
+
+(defun vim-section-line-end-boundary-p (line)
+  "Return t if LINE starts with } at column 0 (C-style section end)."
+  (if (or (< line 0) (>= line (buffer-line-count))) nil
+    (let ((text (buffer-line line)))
+      (let ((len (length text)))
+        (if (= len 0) nil
+          (let ((ch (string-char-at text 0)))
+            (string= ch "}")))))))
+
+(defun vim-section-end-previous (count)
+  "[]: move backward to the previous section-end boundary (} at col 0)."
+  (let ((n (if (and count (> count 0)) count 1)))
+    (progn
+      (vim-count-reset)
+      (let ((target-line (vim-section-end-scan-backward (cursor-line) n)))
+        (if (null target-line) t
+          (progn
+            (cursor-move target-line 0)
+            (line-first-non-blank)
+            t))))))
+
+(defun vim-section-end-next (count)
+  "][: move forward to the next section-end boundary (} at col 0)."
+  (let ((n (if (and count (> count 0)) count 1)))
+    (progn
+      (vim-count-reset)
+      (let ((target-line (vim-section-end-scan-forward (cursor-line) n)))
+        (if (null target-line) t
+          (progn
+            (cursor-move target-line 0)
+            (line-first-non-blank)
+            t))))))
+
+(defun vim-section-end-scan-backward (line count)
+  "Return the line of the COUNT-th previous section-end boundary, or nil."
+  (if (<= count 0) line
+    (vim-section-end-scan-backward-inner (- line 1) count)))
+
+(defun vim-section-end-scan-backward-inner (line count)
+  (if (< line 0) nil
+    (if (vim-section-line-end-boundary-p line)
+      (if (<= count 1) line
+        (vim-section-end-scan-backward-inner (- line 1) (- count 1)))
+      (vim-section-end-scan-backward-inner (- line 1) count))))
+
+(defun vim-section-end-scan-forward (line count)
+  "Return the line of the COUNT-th next section-end boundary, or nil."
+  (if (<= count 0) line
+    (vim-section-end-scan-forward-inner (+ line 1) count)))
+
+(defun vim-section-end-scan-forward-inner (line count)
+  (if (>= line (buffer-line-count)) nil
+    (if (vim-section-line-end-boundary-p line)
+      (if (<= count 1) line
+        (vim-section-end-scan-forward-inner (+ line 1) (- count 1)))
+      (vim-section-end-scan-forward-inner (+ line 1) count))))
+
+(defun vim-line-contains-formfeed (text idx len)
+  "Return t if TEXT contains a \\f (formfeed, ^L) char between IDX and LEN."
+  (if (>= idx len) nil
+    (if (string= (string-char-at text idx) "\f")
+      t
+      (vim-line-contains-formfeed text (+ idx 1) len))))
+
+(defun vim-section-scan-backward (line count)
+  "Return the line of the COUNT-th previous section boundary, or nil."
+  (if (<= count 0) line
+    (vim-section-scan-backward-inner (- line 1) count)))
+
+(defun vim-section-scan-backward-inner (line count)
+  (if (< line 0) nil
+    (if (vim-section-line-boundary-p line)
+      (if (<= count 1) line
+        (vim-section-scan-backward-inner (- line 1) (- count 1)))
+      (vim-section-scan-backward-inner (- line 1) count))))
+
+(defun vim-section-scan-forward (line count)
+  "Return the line of the COUNT-th next section boundary, or nil."
+  (if (<= count 0) line
+    (vim-section-scan-forward-inner (+ line 1) count)))
+
+(defun vim-section-scan-forward-inner (line count)
+  (if (>= line (buffer-line-count)) nil
+    (if (vim-section-line-boundary-p line)
+      (if (<= count 1) line
+        (vim-section-scan-forward-inner (+ line 1) (- count 1)))
+      (vim-section-scan-forward-inner (+ line 1) count))))
+
 ;; Keymap bindings for vim prefix keys — stored in normal-keymap for
 ;; which-key display and keymap-based dispatch.
 
@@ -184,6 +486,27 @@
 (key-bind "g O" "(markdown-heading-outline)" "normal")
 (key-bind "g x" "(markdown-do)" "normal")
 (key-bind "g b" "(markdown-jump-back)" "normal")
+
+;; SPEC-044 Phase 3.B — backward word-end motions.
+;; ge lands on the last char of the previous word; gE on the previous WORD.
+(key-bind "g e" "(word-previous-end (vim-count-consume 1))" "normal")
+(key-bind "g E" "(word-previous-end-WORD (vim-count-consume 1))" "normal")
+
+;; SPEC-044 Phase 3.G — g_ last non-blank char on line.
+(key-bind "g _" "(line-last-column)" "normal")
+
+;; SPEC-044 Phase 3.C/D/E/F — sentence/section/window motions.
+(key-bind "(" "(vim-sentence-previous (vim-count-consume 1))" "normal")
+(key-bind ")" "(vim-sentence-next (vim-count-consume 1))" "normal")
+(key-bind "[ [" "(vim-section-previous (vim-count-consume 1))" "normal")
+(key-bind "] ]" "(vim-section-next (vim-count-consume 1))" "normal")
+(key-bind "[ ]" "(vim-section-end-previous (vim-count-consume 1))" "normal")
+(key-bind "] [" "(vim-section-end-next (vim-count-consume 1))" "normal")
+(key-bind "H" "(vim-window-top (vim-count-consume 1))" "normal")
+(key-bind "M" "(vim-window-middle)" "normal")
+(key-bind "L" "(vim-window-bottom (vim-count-consume 1))" "normal")
+(key-bind "C-e" "(vim-scroll-line-down (vim-count-consume 1))" "normal")
+(key-bind "C-y" "(vim-scroll-line-up (vim-count-consume 1))" "normal")
 
 (key-bind "C-w s" "(split-window-below)" "normal")
 (key-bind "C-w v" "(split-window-right)" "normal")

@@ -24,7 +24,9 @@
     (t nil)))
 
 (defun vim-reset-pending ()
-  "Reset all pending Vim normal-mode state."
+  "Reset all pending Vim normal-mode state. Does NOT clear macro recording
+or macro pending — those have distinct Escape semantics (q<Esc> quits via
+macro-dispatch-record, recording is only stopped by pressing q again)."
   (progn
     (vim-count-reset)
     (vim-reset-operator)

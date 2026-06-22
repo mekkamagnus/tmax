@@ -87,8 +87,8 @@ export function createVisualOps(
   getCursorColumn: () => number,
   setCursorLine: (line: number) => void,
   setCursorColumn: (column: number) => void,
-  getMode: () => "normal" | "insert" | "visual" | "command" | "mx",
-  setMode: (mode: "normal" | "insert" | "visual" | "command" | "mx") => void,
+  getMode: () => "normal" | "insert" | "visual" | "command" | "mx" | "replace",
+  setMode: (mode: "normal" | "insert" | "visual" | "command" | "mx" | "replace") => void,
   setStatusMessage: (message: string) => void
 ): Map<string, TLispFunctionImpl> {
   const api = new Map<string, TLispFunctionImpl>();

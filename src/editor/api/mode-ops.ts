@@ -35,8 +35,8 @@ export type TLispFunctionWithEither = (args: TLispValue[]) => Either<AppError, T
  * @returns Map of mode function names to implementations
  */
 export function createModeOps(
-  getMode: () => "normal" | "insert" | "visual" | "command" | "mx",
-  setMode: (mode: "normal" | "insert" | "visual" | "command" | "mx") => void,
+  getMode: () => "normal" | "insert" | "visual" | "command" | "mx" | "replace",
+  setMode: (mode: "normal" | "insert" | "visual" | "command" | "mx" | "replace") => void,
   getStatusMessage: () => string,
   setStatusMessage: (message: string) => void,
   getCommandLine: () => string,
@@ -69,7 +69,7 @@ export function createModeOps(
     }
 
     const mode = modeArg.value as string;
-    const validModes = ['normal', 'insert', 'visual', 'command', 'mx'];
+    const validModes = ['normal', 'insert', 'visual', 'command', 'mx', 'replace'];
     if (!validModes.includes(mode)) {
       return Either.left(createValidationError(
         'ConstraintViolation',
@@ -80,7 +80,7 @@ export function createModeOps(
       ));
     }
 
-    setMode(mode as "normal" | "insert" | "visual" | "command" | "mx");
+    setMode(mode as "normal" | "insert" | "visual" | "command" | "mx" | "replace");
 
     return Either.right(createString(mode));
   });

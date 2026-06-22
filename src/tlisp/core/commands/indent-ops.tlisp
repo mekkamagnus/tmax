@@ -1,0 +1,276 @@
+(defmodule editor/commands/indent-ops
+  (export vim-toggle-case-char vim-toggle-case-line vim-lowercase-line vim-uppercase-line vim-indent-line vim-outdent-line vim-shiftwidth-get vim-shiftwidth-set
+          vim-visual-indent vim-visual-outdent vim-visual-toggle-case vim-visual-lowercase vim-visual-uppercase)
+
+;; indent-ops.tlisp -- SPEC-044 Phase 5: indent + case operators.
+;; Line-scoped only (>>, <<, ~, guu, gUU, g~~). Operator+motion forms
+;; (guw, gU$, etc.) are deferred to a follow-up slice per spec Phase 5.B.
+;; All mutations wrap in (undo-begin)/(undo-commit combo) so `u` restores
+;; the buffer per the SPEC-044 pattern in operators.tlisp.
+
+;; Default shiftwidth. tmax has no `:set` infrastructure yet (SPEC-049),
+;; so this is a module-scoped variable. Picked 2 to match the common default.
+(defvar vim-shiftwidth 2)
+
+(defun vim-shiftwidth-get ()
+  "Return the current shiftwidth (spaces per indent level)."
+  vim-shiftwidth)
+
+(defun vim-shiftwidth-set (n)
+  "Set the shiftwidth to N spaces (for testing or init.tlisp configuration)."
+  (set! vim-shiftwidth n))
+
+(defun vim-toggle-case-char (count)
+  "Toggle the case of COUNT characters starting at the cursor, then
+advance the cursor by COUNT (vim semantics for ~)."
+  (let ((line (cursor-line)))
+    (let ((col (cursor-column)))
+      (let ((text (buffer-line line)))
+        (let ((len (length text)))
+          (let ((end (min (+ col count) len)))
+            (let ((slice (substring text col end)))
+              (let ((out (string-toggle-case slice)))
+                (progn
+                  (undo-begin)
+                  (buffer-replace-range line col line end out)
+                  (cursor-move line (min end (max 0 (- len 1))))
+                  (undo-commit "~")
+                  (vim-record-change "~" count)
+                  t)))))))))
+
+(defun vim-transform-line (transform-name combo)
+  "Apply TRANSFORM-NAME (one of \"upcase\", \"downcase\", \"toggle\") to the
+whole current line and replace it in place. COMBO is the undo-commit label."
+  (let ((line (cursor-line)))
+    (let ((text (buffer-line line)))
+      (let ((out
+              (cond
+                ((string= transform-name "upcase") (string-upcase text))
+                ((string= transform-name "downcase") (string-downcase text))
+                ((string= transform-name "toggle") (string-toggle-case text))
+                (t text))))
+        (progn
+          (undo-begin)
+          (buffer-replace-range line 0 line (length text) out)
+          (undo-commit combo)
+          t)))))
+
+(defun vim-toggle-case-line ()
+  "Toggle case of every char in the current line (g~~)."
+  (vim-transform-line "toggle" "g~~"))
+
+(defun vim-lowercase-line ()
+  "Lowercase the current line (guu)."
+  (vim-transform-line "downcase" "guu"))
+
+(defun vim-uppercase-line ()
+  "Uppercase the current line (gUU)."
+  (vim-transform-line "upcase" "gUU"))
+
+(defun vim-line-current-indent (text)
+  "Return the leading-space count of TEXT."
+  (let ((idx 0))
+    (progn
+      (while (and (< idx (length text))
+                  (string= (string-char-at text idx) " "))
+        (set! idx (+ idx 1)))
+      idx)))
+
+(defun vim-indent-line (count)
+  "Indent COUNT lines starting at cursor by one shiftwidth (>>)."
+  (let ((start (cursor-line)))
+    (let ((total (buffer-line-count)))
+      (let ((end (min (+ start count) total)))
+        (let ((sw (vim-shiftwidth-get)))
+          (let ((line start))
+            (progn
+              (undo-begin)
+              (while (< line end)
+                (let ((text (buffer-line line)))
+                  (let ((curr (vim-line-current-indent text)))
+                    (let ((target (+ curr sw)))
+                      (let ((prefix (string-repeat " " target)))
+                        (let ((tail (substring text curr (length text))))
+                          (buffer-replace-range line 0 line (length text) (concat prefix tail)))))))
+                (set! line (+ line 1)))
+              (cursor-move start 0)
+              (undo-commit ">>")
+              t)))))))
+
+(defun vim-outdent-line (count)
+  "Outdent COUNT lines starting at cursor by one shiftwidth (<<)."
+  (let ((start (cursor-line)))
+    (let ((total (buffer-line-count)))
+      (let ((end (min (+ start count) total)))
+        (let ((sw (vim-shiftwidth-get)))
+          (let ((line start))
+            (progn
+              (undo-begin)
+              (while (< line end)
+                (let ((text (buffer-line line)))
+                  (let ((curr (vim-line-current-indent text)))
+                    (let ((target (max 0 (- curr sw))))
+                      (let ((prefix (string-repeat " " target)))
+                        (let ((tail (substring text curr (length text))))
+                          (buffer-replace-range line 0 line (length text) (concat prefix tail)))))))
+                (set! line (+ line 1)))
+              (cursor-move start 0)
+              (undo-commit "<<")
+              t)))))))
+
+;; =====================================================================
+;; Visual-mode variants (SPEC-044 Phase 5.C)
+;; >, <, ~ in visual mode apply indent/outdent/toggle-case to each line
+;; spanned by the selection, then exit visual mode (vim semantics).
+;; =====================================================================
+
+(defun vim-visual-indent ()
+  "Indent each line in the visual selection by one shiftwidth (>)."
+  (let ((sel (visual-get-selection)))
+    (if (not sel)
+      (message "visual-indent: no selection")
+      (let ((sl (nth 0 sel)))
+        (let ((el (nth 2 sel)))
+          (let ((start (min sl el)))
+            (let ((end (max sl el)))
+              (let ((sw (vim-shiftwidth-get)))
+                (let ((line start))
+                  (progn
+                    (undo-begin)
+                    (while (<= line end)
+                      (let ((text (buffer-line line)))
+                        (let ((curr (vim-line-current-indent text)))
+                          (let ((target (+ curr sw)))
+                            (let ((prefix (string-repeat " " target)))
+                              (let ((tail (substring text curr (length text))))
+                                (buffer-replace-range line 0 line (length text) (concat prefix tail)))))))
+                      (set! line (+ line 1)))
+                    (cursor-move start 0)
+                    (visual-exit)
+                    (undo-commit ">")
+                    t))))))))))
+
+(defun vim-visual-outdent ()
+  "Outdent each line in the visual selection by one shiftwidth (<)."
+  (let ((sel (visual-get-selection)))
+    (if (not sel)
+      (message "visual-outdent: no selection")
+      (let ((sl (nth 0 sel)))
+        (let ((el (nth 2 sel)))
+          (let ((start (min sl el)))
+            (let ((end (max sl el)))
+              (let ((sw (vim-shiftwidth-get)))
+                (let ((line start))
+                  (progn
+                    (undo-begin)
+                    (while (<= line end)
+                      (let ((text (buffer-line line)))
+                        (let ((curr (vim-line-current-indent text)))
+                          (let ((target (max 0 (- curr sw))))
+                            (let ((prefix (string-repeat " " target)))
+                              (let ((tail (substring text curr (length text))))
+                                (buffer-replace-range line 0 line (length text) (concat prefix tail)))))))
+                      (set! line (+ line 1)))
+                    (cursor-move start 0)
+                    (visual-exit)
+                    (undo-commit "<")
+                    t))))))))))
+
+(defun vim-visual-toggle-case ()
+  "Toggle case of every char in the visual selection (~)."
+  (let ((sel (visual-get-selection)))
+    (if (not sel)
+      (message "visual-toggle-case: no selection")
+      (let ((sl (nth 0 sel)))
+        (let ((sc (nth 1 sel)))
+          (let ((el (nth 2 sel)))
+            (let ((ec (nth 3 sel)))
+              (let ((lstart (min sl el)))
+                (let ((lend (max sl el)))
+                  (progn
+                    (undo-begin)
+                    (let ((line lstart))
+                      (while (<= line lend)
+                        (let ((text (buffer-line line)))
+                          (let ((len (length text)))
+                            (let ((cs (if (= line lstart) (min sc len) 0)))
+                              (let ((ce (if (= line lend)
+                                          (min (+ ec 1) len)
+                                          len)))
+                                (if (< cs ce)
+                                  (let ((slice (substring text cs ce)))
+                                    (let ((out (string-toggle-case slice)))
+                                      (buffer-replace-range line cs line ce out))))))))
+                        (set! line (+ line 1))))
+                    (cursor-move lstart sc)
+                    (visual-exit)
+                    (undo-commit "~")
+                    t))))))))))
+
+(defun vim-visual-transform (transform-name combo)
+  "Apply TRANSFORM-NAME (one of \"upcase\", \"downcase\", \"toggle\") to every
+char in the visual selection. COMBO is the undo-commit label."
+  (let ((sel (visual-get-selection)))
+    (if (not sel)
+      (message (concat combo ": no selection"))
+      (let ((sl (nth 0 sel)))
+        (let ((sc (nth 1 sel)))
+          (let ((el (nth 2 sel)))
+            (let ((ec (nth 3 sel)))
+              (let ((lstart (min sl el)))
+                (let ((lend (max sl el)))
+                  (progn
+                    (undo-begin)
+                    (let ((line lstart))
+                      (while (<= line lend)
+                        (let ((text (buffer-line line)))
+                          (let ((len (length text)))
+                            (let ((cs (if (= line lstart) (min sc len) 0)))
+                              (let ((ce (if (= line lend)
+                                          (min (+ ec 1) len)
+                                          len)))
+                                (if (< cs ce)
+                                  (let ((slice (substring text cs ce)))
+                                    (let ((out
+                                            (cond
+                                              ((string= transform-name "upcase") (string-upcase slice))
+                                              ((string= transform-name "downcase") (string-downcase slice))
+                                              ((string= transform-name "toggle") (string-toggle-case slice))
+                                              (t slice))))
+                                      (buffer-replace-range line cs line ce out))))))))
+                        (set! line (+ line 1))))
+                    (cursor-move lstart sc)
+                    (visual-exit)
+                    (undo-commit combo)
+                    t))))))))))
+
+(defun vim-visual-lowercase ()
+  "Lowercase every char in the visual selection (gu in visual mode)."
+  (vim-visual-transform "downcase" "gu"))
+
+(defun vim-visual-uppercase ()
+  "Uppercase every char in the visual selection (gU in visual mode)."
+  (vim-visual-transform "upcase" "gU"))
+
+;; =====================================================================
+;; Key bindings
+;; =====================================================================
+
+(key-bind "~" "(vim-toggle-case-char (vim-count-consume 1))" "normal")
+(key-bind "> >" "(vim-indent-line (vim-count-consume 1))" "normal")
+(key-bind "< <" "(vim-outdent-line (vim-count-consume 1))" "normal")
+(key-bind "g ~ ~" "(vim-toggle-case-line)" "normal")
+(key-bind "g u u" "(vim-lowercase-line)" "normal")
+(key-bind "g U U" "(vim-uppercase-line)" "normal")
+
+(key-bind ">" "(vim-visual-indent)" "visual")
+(key-bind "<" "(vim-visual-outdent)" "visual")
+(key-bind "~" "(vim-visual-toggle-case)" "visual")
+;; In visual mode, u/U/~ apply case transforms (vim semantics).
+;; The visual handler dispatches single-key bindings, so we use the
+;; single-key forms (g u / g U work in normal mode via the leader path).
+(key-bind "u" "(vim-visual-lowercase)" "visual")
+(key-bind "U" "(vim-visual-uppercase)" "visual")
+
+(provide "indent-ops")
+)
