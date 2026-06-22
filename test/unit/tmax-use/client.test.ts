@@ -46,17 +46,59 @@ describe('TmaxClient — eval', () => {
 });
 
 describe('TmaxClient — keys', () => {
-  test('keys sends --keys flag with byte sequence', async () => {
-    const calls: string[][] = [];
+  test('keys sends each value as its own JSON-RPC keypress call', async () => {
+    const calls: Array<{ method: string; params: Record<string, unknown> }> = [];
     const client = makeStub({
-      runClient: (args) => {
-        calls.push([...args]);
-        return rightT('');
+      request: (method, params) => {
+        calls.push({ method, params });
+        return rightT({});
       },
     });
-    const r = await client.keys('\x1b').run();
+    const r = await client.keys(['i', 'h', 'i', '\x1b']).run();
     expect(Either.isRight(r)).toBe(true);
-    expect(calls[0]).toEqual(['--keys', '\x1b']);
+    expect(calls).toEqual([
+      { method: 'keypress', params: { key: 'i' } },
+      { method: 'keypress', params: { key: 'h' } },
+      { method: 'keypress', params: { key: 'i' } },
+      { method: 'keypress', params: { key: '\x1b' } },
+    ]);
+  });
+
+  test('keys sends semantic Up name (NOT ANSI sequence)', async () => {
+    const calls: Array<{ method: string; params: Record<string, unknown> }> = [];
+    const client = makeStub({
+      request: (method, params) => {
+        calls.push({ method, params });
+        return rightT({});
+      },
+    });
+    await client.keys(['Up']).run();
+    expect(calls).toEqual([{ method: 'keypress', params: { key: 'Up' } }]);
+  });
+
+  test('keys short-circuits on first error', async () => {
+    const calls: Array<{ method: string; params: Record<string, unknown> }> = [];
+    const client = makeStub({
+      request: (method, params) => {
+        calls.push({ method, params });
+        return params.key === 'boom'
+          ? leftT(TmaxUseError.keySendFailed('rejected'))
+          : rightT({});
+      },
+    });
+    const r = await client.keys(['i', 'boom', 'x']).run();
+    expect(Either.isLeft(r)).toBe(true);
+    expect(calls.length).toBe(2);
+  });
+
+  test('keys empty list is a no-op Right', async () => {
+    const client = makeStub({
+      request: () => {
+        throw new Error('should not be called');
+      },
+    });
+    const r = await client.keys([]).run();
+    expect(Either.isRight(r)).toBe(true);
   });
 });
 

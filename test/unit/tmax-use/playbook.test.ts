@@ -60,8 +60,9 @@ describe('parsePlaybook — valid inputs', () => {
       const pb = r.right;
       expect(pb.name).toBe('markdown');
       expect(pb.mode).toBe('markdown');
-      expect(pb.width).toBe(100);
-      expect(pb.height).toBe(30);
+      // Top-level width/height accepted as back-compat alias of terminal.width/height.
+      expect(pb.terminal?.width).toBe(100);
+      expect(pb.terminal?.height).toBe(30);
       expect(pb.setup?.[0]?.var).toBe('FILE');
       const step = pb.steps[0]!;
       expect(step.name).toBe('open');
@@ -72,6 +73,62 @@ describe('parsePlaybook — valid inputs', () => {
       expect(expect_.mode).toBe('normal');
       expect(expect_.line_text_matches).toBe('^a');
     }
+  });
+
+  test('terminal: { width, height } mapping is accepted', () => {
+    const yaml = `
+name: t
+terminal:
+  width: 120
+  height: 40
+steps:
+  - keys: x
+`;
+    const r = parsePlaybook(yaml);
+    expect(Either.isRight(r)).toBe(true);
+    if (Either.isRight(r)) {
+      expect(r.right.terminal?.width).toBe(120);
+      expect(r.right.terminal?.height).toBe(40);
+    }
+  });
+
+  test('open step action is accepted (mutually exclusive with keys/eval)', () => {
+    const yaml = `
+name: t
+steps:
+  - open: /tmp/foo.txt
+`;
+    const r = parsePlaybook(yaml);
+    expect(Either.isRight(r)).toBe(true);
+    if (Either.isRight(r)) {
+      expect(r.right.steps[0]!.open).toBe('/tmp/foo.txt');
+    }
+  });
+
+  test('open + keys in same step rejected as mutually exclusive', () => {
+    const yaml = `
+name: t
+steps:
+  - open: /tmp/foo.txt
+    keys: i
+`;
+    const r = parsePlaybook(yaml);
+    expect(Either.isLeft(r)).toBe(true);
+    if (Either.isLeft(r) && r.left._tag === 'PlaybookParseFailed') {
+      expect(r.left.issues.some((e: string) => e.includes('mutually exclusive'))).toBe(true);
+    }
+  });
+
+  test('unknown terminal key rejected', () => {
+    const yaml = `
+name: t
+terminal:
+  cols: 80
+steps:
+  - keys: x
+`;
+    const r = parsePlaybook(yaml);
+    expect(Either.isLeft(r)).toBe(true);
   });
 
   test('setup is optional', () => {

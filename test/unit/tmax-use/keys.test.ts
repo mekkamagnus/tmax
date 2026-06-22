@@ -4,12 +4,12 @@
  */
 import { describe, test, expect } from 'bun:test';
 import {
-  parseKeys, headlessBytes, tmuxDispatch, compileHeadless,
+  parseKeys, headlessBytes, headlessValues, tmuxDispatch, compileHeadless,
   type KeyToken, type TmuxKey,
 } from '../../../tmax-use/src/keys.ts';
 import { Either } from '../../../src/utils/task-either.ts';
 
-function compile(seq: string): string {
+function compile(seq: string): readonly string[] {
   const r = compileHeadless(seq);
   if (Either.isLeft(r)) throw new Error(`parse failed: ${seq}`);
   return r.right;
@@ -67,33 +67,33 @@ describe('parseKeys — control keys', () => {
   });
 
   test('<C-a> compiles to byte 0x01', () => {
-    expect(compile('<C-a>')).toBe('\x01');
+    expect(compile('<C-a>')).toEqual(['\x01']);
   });
 
   test('<C-c> compiles to byte 0x03 (ETX)', () => {
-    expect(compile('<C-c>')).toBe('\x03');
+    expect(compile('<C-c>')).toEqual(['\x03']);
   });
 
   test('<C-m> compiles to CR (alias for Enter)', () => {
-    expect(compile('<C-m>')).toBe('\r');
+    expect(compile('<C-m>')).toEqual(['\r']);
   });
 
   test('<C-i> compiles to TAB (alias for Tab)', () => {
-    expect(compile('<C-i>')).toBe('\t');
+    expect(compile('<C-i>')).toEqual(['\t']);
   });
 
   test('<C-[> compiles to ESC', () => {
-    expect(compile('<C-[>')).toBe('\x1b');
+    expect(compile('<C-[>')).toEqual(['\x1b']);
   });
 
   test('<C-z> compiles to 0x1a', () => {
-    expect(compile('<C-z>')).toBe('\x1a');
+    expect(compile('<C-z>')).toEqual(['\x1a']);
   });
 });
 
 describe('parseKeys — meta keys', () => {
   test('<M-x> compiles to ESC + x', () => {
-    expect(compile('<M-x>')).toBe('\x1bx');
+    expect(compile('<M-x>')).toEqual(['\x1b', 'x']);
   });
 
   test('<M-a> through <M-z> all recognized', () => {
@@ -103,7 +103,7 @@ describe('parseKeys — meta keys', () => {
   });
 
   test('<M-X> (uppercase) preserves case', () => {
-    expect(compile('<M-X>')).toBe('\x1bX');
+    expect(compile('<M-X>')).toEqual(['\x1b', 'X']);
   });
 });
 
@@ -115,7 +115,7 @@ describe('parseKeys — shift letters', () => {
   });
 
   test('<S-a> compiles to uppercase "A"', () => {
-    expect(compile('<S-a>')).toBe('A');
+    expect(compile('<S-a>')).toEqual(['A']);
   });
 });
 
@@ -159,27 +159,27 @@ describe('parseKeys — error cases', () => {
 
 describe('compileHeadless — integration', () => {
   test(':w<Enter> produces correct bytes', () => {
-    expect(compile(':w<Enter>')).toBe(':w\r');
+    expect(compile(':w<Enter>')).toEqual([':', 'w', '\r']);
   });
 
   test('hjkl navigation produces plain letters', () => {
-    expect(compile('hjkl')).toBe('hjkl');
+    expect(compile('hjkl')).toEqual(['h', 'j', 'k', 'l']);
   });
 
   test('<Esc> produces 0x1b', () => {
-    expect(compile('<Esc>')).toBe('\x1b');
+    expect(compile('<Esc>')).toEqual(['\x1b']);
   });
 
   test('<Enter> produces carriage return', () => {
-    expect(compile('<Enter>')).toBe('\r');
+    expect(compile('<Enter>')).toEqual(['\r']);
   });
 
   test('<Tab> produces tab', () => {
-    expect(compile('<Tab>')).toBe('\t');
+    expect(compile('<Tab>')).toEqual(['\t']);
   });
 
   test('<BS> produces DEL', () => {
-    expect(compile('<BS>')).toBe('\x7f');
+    expect(compile('<BS>')).toEqual(['\x7f']);
   });
 });
 
@@ -214,7 +214,46 @@ describe('tmuxDispatch', () => {
   });
 });
 
-describe('headlessBytes', () => {
+describe('headlessValues', () => {
+  test('flattens tokens into one keypress value per token', () => {
+    const ts = tokens(':w<Enter>');
+    expect(headlessValues(ts)).toEqual([':', 'w', '\r']);
+  });
+
+  test('<Space> produces " "', () => {
+    expect(headlessValues(tokens('<Space>'))).toEqual([' ']);
+  });
+
+  test('<Up> produces semantic name "Up" (not ANSI)', () => {
+    expect(headlessValues(tokens('<Up>'))).toEqual(['Up']);
+  });
+
+  test('<Down> produces semantic name "Down"', () => {
+    expect(headlessValues(tokens('<Down>'))).toEqual(['Down']);
+  });
+
+  test('<Left>/<Right> produce semantic names', () => {
+    expect(headlessValues(tokens('<Left>'))).toEqual(['Left']);
+    expect(headlessValues(tokens('<Right>'))).toEqual(['Right']);
+  });
+
+  test('<S-Tab> produces semantic "S-Tab"', () => {
+    expect(headlessValues(tokens('<S-Tab>'))).toEqual(['S-Tab']);
+  });
+
+  test('<S-Up>/<S-Down>/<S-Left>/<S-Right> produce semantic S- names', () => {
+    expect(headlessValues(tokens('<S-Up>'))).toEqual(['S-Up']);
+    expect(headlessValues(tokens('<S-Down>'))).toEqual(['S-Down']);
+    expect(headlessValues(tokens('<S-Left>'))).toEqual(['S-Left']);
+    expect(headlessValues(tokens('<S-Right>'))).toEqual(['S-Right']);
+  });
+
+  test('<M-x> splits into ESC + x (two keypress values)', () => {
+    expect(headlessValues(tokens('<M-x>'))).toEqual(['\x1b', 'x']);
+  });
+});
+
+describe('headlessBytes (legacy join)', () => {
   test('flattens tokens into a single byte string', () => {
     const ts = tokens(':w<Enter>');
     expect(headlessBytes(ts)).toBe(':w\r');
@@ -224,11 +263,12 @@ describe('headlessBytes', () => {
     expect(headlessBytes(tokens('<Space>'))).toBe(' ');
   });
 
-  test('<Up> produces ANSI Up sequence', () => {
-    expect(headlessBytes(tokens('<Up>'))).toBe('\x1b[A');
+  test('<Up> produces semantic name (not ANSI)', () => {
+    // Single token, single name — joined string equals the name.
+    expect(headlessBytes(tokens('<Up>'))).toBe('Up');
   });
 
-  test('<S-Tab> produces ANSI Shift-Tab sequence', () => {
-    expect(headlessBytes(tokens('<S-Tab>'))).toBe('\x1b[Z');
+  test('<S-Tab> produces semantic name (not ANSI)', () => {
+    expect(headlessBytes(tokens('<S-Tab>'))).toBe('S-Tab');
   });
 });

@@ -57,18 +57,48 @@ describe('Frame — file operations', () => {
 });
 
 describe('Frame — keys', () => {
-  test('keys parses <Esc> to byte sequence', async () => {
-    let sentBytes = '';
+  test('keys parses <Esc> into a JSON-RPC keypress call with the ESC byte', async () => {
+    const calls: Array<{ method: string; params: Record<string, unknown> }> = [];
     const deps: TmaxClientDeps = {
-      runClient: (args) => {
-        if (args[0] === '--keys') sentBytes = args[1] ?? '';
-        return rightT('');
+      runClient: () => rightT(''),
+      request: (method, params) => {
+        calls.push({ method, params });
+        return rightT({});
       },
-      request: () => rightT({}),
     };
     const frame = new Frame(createStubClient(deps), 'f');
     await frame.keys('<Esc>').run();
-    expect(sentBytes).toBe('\x1b');
+    expect(calls).toEqual([{ method: 'keypress', params: { key: '\x1b' } }]);
+  });
+
+  test('keys parses <Up> into a JSON-RPC keypress call with the semantic "Up" name', async () => {
+    const calls: Array<{ method: string; params: Record<string, unknown> }> = [];
+    const deps: TmaxClientDeps = {
+      runClient: () => rightT(''),
+      request: (method, params) => {
+        calls.push({ method, params });
+        return rightT({});
+      },
+    };
+    const frame = new Frame(createStubClient(deps), 'f');
+    await frame.keys('<Up>').run();
+    expect(calls).toEqual([{ method: 'keypress', params: { key: 'Up' } }]);
+  });
+
+  test('keys sends one keypress per parsed token', async () => {
+    const calls: Array<{ method: string; params: Record<string, unknown> }> = [];
+    const deps: TmaxClientDeps = {
+      runClient: () => rightT(''),
+      request: (method, params) => {
+        calls.push({ method, params });
+        return rightT({});
+      },
+    };
+    const frame = new Frame(createStubClient(deps), 'f');
+    await frame.keys('ihello<Esc>').run();
+    expect(calls.length).toBe(7);
+    expect(calls[0]).toEqual({ method: 'keypress', params: { key: 'i' } });
+    expect(calls.at(-1)).toEqual({ method: 'keypress', params: { key: '\x1b' } });
   });
 
   test('keys with invalid sequence fails', async () => {

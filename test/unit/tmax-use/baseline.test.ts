@@ -155,12 +155,26 @@ describe('matchBaseline — lifecycle', () => {
     }
   });
 
-  test('missing baseline + CI → fail', async () => {
+  test('missing baseline + CI → Right({ passed: false, failureKind: "BaselineMissing" })', async () => {
     const path = join(tmpDir, 'missing.html');
     const r = await matchBaseline('FIRST', path, { failOnMissing: true }).run();
-    expect(Either.isLeft(r)).toBe(true);
-    if (Either.isLeft(r)) {
-      expect(r.left._tag).toBe('BaselineMissing');
+    expect(Either.isRight(r)).toBe(true);
+    if (Either.isRight(r)) {
+      expect(r.right.passed).toBe(false);
+      expect(r.right.failureKind).toBe('BaselineMissing');
+      // Spec: must not write the baseline in CI.
+      expect(existsSync(path)).toBe(false);
+    }
+  });
+
+  test('mismatch → Right({ passed: false, failureKind: "BaselineMismatch" })', async () => {
+    const path = join(tmpDir, 'mismatch-kind.html');
+    writeFileSync(path, '<span>hi</span>');
+    const r = await matchBaseline('<span>bye</span>', path).run();
+    expect(Either.isRight(r)).toBe(true);
+    if (Either.isRight(r)) {
+      expect(r.right.passed).toBe(false);
+      expect(r.right.failureKind).toBe('BaselineMismatch');
     }
   });
 

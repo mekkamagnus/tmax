@@ -125,3 +125,53 @@ describe('captureHtml — decode', () => {
     expect(Either.isLeft(r)).toBe(true);
   });
 });
+
+describe('capture dimension forwarding', () => {
+  test('captureFrame forwards opts.width/height to the request params', async () => {
+    const calls: Array<{ method: string; params: Record<string, unknown> }> = [];
+    const client: CaptureClient = {
+      request: (method, params) => {
+        calls.push({ method, params });
+        return rightT({ lines: ['x'], width: params.width ?? 80, height: params.height ?? 24 });
+      },
+    };
+    await captureFrame(client, { width: 100, height: 40 }).run();
+    expect(calls[0]).toEqual({ method: 'capture', params: { format: 'ansi', width: 100, height: 40 } });
+  });
+
+  test('captureHtml forwards opts.width/height to the request params', async () => {
+    const calls: Array<{ method: string; params: Record<string, unknown> }> = [];
+    const client: CaptureClient = {
+      request: (method, params) => {
+        calls.push({ method, params });
+        return rightT({ html: '<html></html>', width: params.width ?? 80, height: params.height ?? 24 });
+      },
+    };
+    await captureHtml(client, { width: 120, height: 50 }).run();
+    expect(calls[0]).toEqual({ method: 'capture', params: { format: 'html', width: 120, height: 50 } });
+  });
+
+  test('captureFrame without opts sends only format (lets server fall back)', async () => {
+    const calls: Array<{ method: string; params: Record<string, unknown> }> = [];
+    const client: CaptureClient = {
+      request: (method, params) => {
+        calls.push({ method, params });
+        return rightT({ lines: ['x'], width: 80, height: 24 });
+      },
+    };
+    await captureFrame(client).run();
+    expect(calls[0]).toEqual({ method: 'capture', params: { format: 'ansi' } });
+  });
+
+  test('captureFrame forwards only one dimension when only one is set', async () => {
+    const calls: Array<{ method: string; params: Record<string, unknown> }> = [];
+    const client: CaptureClient = {
+      request: (method, params) => {
+        calls.push({ method, params });
+        return rightT({ lines: ['x'], width: params.width ?? 80, height: 24 });
+      },
+    };
+    await captureFrame(client, { width: 100 }).run();
+    expect(calls[0]).toEqual({ method: 'capture', params: { format: 'ansi', width: 100 } });
+  });
+});

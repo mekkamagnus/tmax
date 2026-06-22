@@ -56,6 +56,20 @@ describe('terminal reporter — renderTest', () => {
     }));
     expect(lines.length).toBeGreaterThan(0);
   });
+
+  test('failed step with frame renders a box border', () => {
+    const lines = renderTest(fakeTest({
+      passed: false,
+      steps: [fakeStep({
+        name: 's1', passed: false, details: ['bad'],
+        frame: { lines: ['hello world', 'second line'], width: 80, height: 24 },
+      })],
+    }));
+    const joined = lines.join('\n');
+    expect(joined).toContain('┌');
+    expect(joined).toContain('└');
+    expect(joined).toContain('hello world');
+  });
 });
 
 describe('terminal reporter — renderSuite', () => {
@@ -138,10 +152,24 @@ describe('JUnit reporter', () => {
       passed: 1, failed: 0,
     }));
     expect(xml).toContain('<?xml');
-    expect(xml).toContain('<testsuites>');
+    expect(xml).toContain('<testsuites');
     expect(xml).toContain('<testsuite');
     expect(xml).toContain('tests="1"');
     expect(xml).toContain('failures="0"');
+  });
+
+  test('per-step testcase emitted for stepped results', () => {
+    const xml = renderJUnit(fakeSuite({
+      results: [fakeTest({
+        name: 'pb', source: '/p/pb.yaml',
+        steps: [fakeStep({ name: 's1', passed: true }), fakeStep({ name: 's2', passed: false, details: ['boom'] })],
+      })],
+      passed: 0, failed: 1,
+    }));
+    expect(xml).toContain('name="s1"');
+    expect(xml).toContain('name="s2"');
+    expect(xml).toContain('<failure');
+    expect(xml).toContain('boom');
   });
 
   test('failure emits <failure> element', () => {
@@ -162,7 +190,7 @@ describe('JUnit reporter', () => {
       if ('right' in r) {
         expect(existsSync(r.right)).toBe(true);
         const content = readFileSync(r.right, 'utf-8');
-        expect(content).toContain('<testsuites>');
+        expect(content).toContain('<testsuites');
       }
     } finally {
       rmSync(dir, { recursive: true, force: true });
