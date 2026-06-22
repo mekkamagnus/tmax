@@ -8,18 +8,13 @@ Applies to all test files in `test/`.
 
 ## Authoritative Testing Matrix
 
-Required validation has four explicit boundaries:
+Required validation has three explicit boundaries:
 
 | Gate | What it proves | Command |
 |------|----------------|---------|
 | **Type safety** | Source, tests, and full project satisfy the TypeScript contracts | `bun run typecheck:src`, `bun run typecheck:test`, `bun run typecheck` |
-| **Bun behavior tests** | Deterministic unit and in-process integration behavior | `bun test` |
-| **Daemon integration** | JSON-RPC, T-Lisp commands, and editor state without renderer claims | `bun run test:daemon` |
-| **Renderer E2E** | Real terminal keys produce the expected visible TUI output | `bun run test:ui:renderer` |
-
-`bun run test:ui` runs both Python suite categories. `bun run test:ui:helpers`
-checks the harness itself. The Bash harness is deprecated and is never an
-authoritative validation command.
+| **Bun behavior tests** | Deterministic unit and in-process integration behavior | `bun test`, `bun run test:unit` |
+| **tmax-use e2e** | Real keys drive real editor behavior through playbooks | `bun run test:tmax-use` |
 
 T-Lisp `deftest` coverage remains useful for extension behavior and may run
 through the interpreter or Bun tests. It does not replace any required gate.
@@ -34,13 +29,11 @@ The daemon's `capture` RPC provides a fifth testing approach: server-side render
 
 When to use capture vs other gates:
 - **Capture tests**: assert that specific colors reach rendered output, or that status line/layout is correct
-- **Daemon integration**: assert editor state, T-Lisp evaluation, buffer content — without visual claims
-- **Renderer E2E** (`daemon-tmux`): assert actual terminal behavior (cursor, scroll, resize)
+- **tmax-use e2e**: assert actual terminal behavior (cursor, scroll, mode transitions, user-visible state)
 
 ### Boundary Rules
 
-- Daemon tests may use direct T-Lisp evaluation, but must not claim renderer verification.
-- Renderer tests must send real keys and inspect captured renderer output.
+- tmax-use e2e tests must send real keys and inspect captured renderer / editor state.
 - Query failures, unavailable assertions, skips, and expected failures must never be counted as passes.
 - Await asynchronous editor startup and use fail-fast typed helpers instead of conditional assertions.
 - Required gates must not weaken compiler settings, suppress errors, or ignore exit codes.
@@ -58,10 +51,8 @@ bun run typecheck:src
 bun run typecheck:test
 bun run typecheck
 
-# Run Python integration and renderer suites
-bun run test:daemon
-bun run test:ui:renderer
-bun run test:ui
+# Run tmax-use e2e
+bun run test:tmax-use
 
 # Run specific test files
 bun test test/unit/tokenizer.test.ts

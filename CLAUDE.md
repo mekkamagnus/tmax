@@ -80,7 +80,6 @@ Prefer these tools when available:
 - `gh` for GitHub interaction
 - `playwright-cli` for browser automation and UI verification
 - `tmux` for long-running terminal work
-- `uv` for Python package and project management
 
 ## 6. Learn From Corrections
 
@@ -102,8 +101,7 @@ Before reporting any task as complete, verify it actually works:
 - Run the tests, execute the script, check the output yourself.
 - For TypeScript: run `bun run typecheck:src`, `bun run typecheck:test`, and `bun run typecheck`; fix every type error.
 - For builds: run `bun run build` and confirm it succeeds.
-- For daemon behavior: run `bun run test:daemon`.
-- For terminal UI changes: run `bun run test:ui:renderer`; renderer tests must send real keys and inspect captured output.
+- For e2e validation: run `bun run test:tmax-use` (tmax-use playbooks + TypeScript e2e tests).
 - If you cannot verify (no test exists, can't run the code), say so explicitly. Don't imply success.
 
 Report outcomes faithfully:
@@ -251,19 +249,18 @@ Detailed coding rules live in `rules/` — each file declares its scope on the f
 | `rules/tlisp.md` | `src/tlisp/**/*` — interpreter conventions, stdlib, macros |
 | `rules/editor.md` | `src/editor/**/*` — modal system, key bindings, editor API |
 | `rules/testing.md` | `test/**/*` — TDD workflow, bun test commands, test patterns |
-| `rules/ui-testing.md` | `test/ui/**/*` — tmux test harness, API reference, troubleshooting |
 | `rules/daemon-client.md` | `bin/**/*`, `src/server/**/*` — JSON-RPC protocol, sync direction, socket behavior |
 
 ## adw Pipeline (Agent-Driven Workflow)
 
-The adw pipeline automates the full development cycle: **plan → spec-review → build → patch-review**, with a build↔patch retry loop. Each stage is a TypeScript dispatcher that spawns an LLM CLI (`claude -p` or `codex exec`) as a subprocess. Stages share one workspace id (`agents/{adw-id}/`) where events, raw output, and state are collected.
+The adw pipeline automates the full development cycle: **plan → spec-review → build → test → patch-review**, with a build↔test↔patch retry loop. Each stage is a TypeScript dispatcher that spawns an LLM CLI (`claude -p` or `codex exec`) as a subprocess. Stages share one workspace id (`agents/{adw-id}/`) where events, raw output, and state are collected.
 
 **Architecture:** [ADR-0094](docs/adrs/ADR-0094-adw-pipeline-architecture.md). Full details in [the adws/ README](adws/).
 
 ### Running a pipeline
 
 ```bash
-# Full 4-stage pipeline in a detached tmux window (survives terminal disconnects):
+# Full 5-stage pipeline in a detached tmux window (survives terminal disconnects):
 bun adws/adw-launch.ts "add a feature description"
 
 # On an existing spec (skips plan):
@@ -290,12 +287,13 @@ bun adws/adw-build.ts docs/specs/SPEC-056-browse-url.md
 | File | Role |
 |------|------|
 | `adws/adw-launch.ts` | tmux launcher CLI (entry point for full runs) |
-| `adws/adw-plan-review-build-patch.ts` | 4-stage orchestrator (plan → review → build → patch-review) |
+| `adws/adw-plan-review-build-patch.ts` | 5-stage orchestrator (plan → review → build → test → patch-review) |
 | `adws/adw-plan-reviewspec-build.ts` | 3-stage orchestrator (no patch-review) |
 | `adws/adw-plan.ts` | Stage 1: description → spec |
 | `adws/adw-spec-review.ts` | Stage 2: spec → reviewed spec |
 | `adws/adw-build.ts` | Stage 3: spec → implementation |
-| `adws/adw-patch-review.ts` | Stage 4: implementation → audit verdict |
+| `adws/adw-test.ts` | Stage 4: implementation → test results (unit + tmax-use e2e) |
+| `adws/adw-patch-review.ts` | Stage 5: implementation → audit verdict |
 | `adws/adws-modules/` | LLM interface modules (agent, reviewer, builder, patch-reviewer, workspace, tmux-launcher) |
 
 ## Common Tasks

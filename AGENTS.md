@@ -82,7 +82,6 @@ Prefer these tools when available:
 - `gh` for GitHub interaction
 - `playwright-cli` for browser automation and UI verification
 - `tmux` for long-running terminal work
-- `uv` for Python package and project management
 
 ## 6. Learn From Corrections
 
@@ -104,8 +103,7 @@ Before reporting any task as complete, verify it actually works:
 - Run the tests, execute the script, check the output yourself.
 - For TypeScript: run `bun run typecheck:src`, `bun run typecheck:test`, and `bun run typecheck`; fix every type error.
 - For builds: run `bun run build` and confirm it succeeds.
-- For daemon behavior: run `bun run test:daemon`.
-- For terminal UI changes: run `bun run test:ui:renderer`; renderer tests must send real keys and inspect captured output.
+- For e2e validation: run `bun run test:tmax-use` (tmax-use playbooks + TypeScript e2e tests).
 - If you cannot verify (no test exists, can't run the code), say so explicitly. Don't imply success.
 
 Report outcomes faithfully:
@@ -253,11 +251,10 @@ Detailed coding rules live in `rules/` — each file declares its scope on the f
 | `rules/tlisp.md` | `src/tlisp/**/*` — interpreter conventions, stdlib, macros |
 | `rules/editor.md` | `src/editor/**/*` — modal system, key bindings, editor API |
 | `rules/testing.md` | `test/**/*` — TDD workflow, bun test commands, test patterns |
-| `rules/ui-testing.md` | `test/ui/**/*` — tmux test harness, API reference, troubleshooting |
 
 ## adw Pipeline (Agent-Driven Workflow)
 
-The adw pipeline automates the full development cycle: **plan → spec-review → build → patch-review**, with a build↔patch retry loop. Each stage is a TypeScript dispatcher that spawns an LLM CLI (`claude -p` or `codex exec`) as a subprocess. Stages share one workspace id (`agents/{adw-id}/`).
+The adw pipeline automates the full development cycle: **plan → spec-review → build → test → patch-review**, with a build↔test↔patch retry loop. Each stage is a TypeScript dispatcher that spawns an LLM CLI (`claude -p` or `codex exec`) as a subprocess. Stages share one workspace id (`agents/{adw-id}/`).
 
 **Architecture:** [ADR-0094](docs/adrs/ADR-0094-adw-pipeline-architecture.md).
 

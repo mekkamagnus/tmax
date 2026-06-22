@@ -273,7 +273,7 @@ tmax/
 │   └── main.tsx        # Application entry point
 ├── test/
 │   ├── unit/           # Unit tests
-│   ├── ui/             # UI tests (tmux harness)
+│   ├── integration/    # Integration tests
 │   └── mocks/          # Mock implementations
 ├── scripts/
 │   └── repl.ts         # T-Lisp REPL compatibility launcher
@@ -298,9 +298,8 @@ bun run typecheck:src    # Typecheck production source
 bun run typecheck:test   # Typecheck tests and imported contracts
 bun run typecheck        # Typecheck the full project
 bun test                 # Run Bun unit/integration tests
-bun run test:daemon      # Run daemon API integration tests
-bun run test:ui:renderer # Run real-key renderer E2E tests
-bun run test:ui          # Run both Python suite categories
+bun run test:unit        # Run Bun unit tests only
+bun run test:tmax-use    # Run tmax-use e2e playbooks + tests
 ```
 
 ### T-Lisp Examples
