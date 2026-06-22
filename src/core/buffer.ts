@@ -165,7 +165,12 @@ class FunctionalGapBuffer {
       return Either.right(this);
     }
 
-    const newBuffer = [...this.buffer];
+    // §1.3 (RFC-019): use slice() rather than spread — same immutable snapshot
+    // semantics (new instance owns a distinct backing array; older instances
+    // keep their original array), but avoids the iterator-protocol overhead of
+    // [...this.buffer]. Still O(buffer capacity); the per-cell mutation below
+    // only touches the moved region.
+    const newBuffer = this.buffer.slice();
     let newGapStart = this.gapStart;
     let newGapEnd = this.gapEnd;
 
@@ -221,8 +226,11 @@ class FunctionalGapBuffer {
       return Either.left("Gap is too small for insertion");
     }
 
-    const newBuffer = [...this.buffer];
-    
+    // §1.3 (RFC-019): slice() rather than spread — same snapshot semantics,
+    // lower overhead. Still O(buffer capacity); only the inserted cells are
+    // then mutated in place on the owned copy.
+    const newBuffer = this.buffer.slice();
+
     // Insert characters into gap
     for (let i = 0; i < text.length; i++) {
       newBuffer[this.gapStart + i] = text[i];
@@ -242,7 +250,11 @@ class FunctionalGapBuffer {
 export class FunctionalTextBufferImpl implements FunctionalTextBuffer {
   constructor(
     private readonly gapBuffer: FunctionalGapBuffer,
-    private readonly lines: ReadonlyArray<string>
+    private readonly lines: ReadonlyArray<string>,
+    // §1.2 (RFC-019): prefix sums of line offsets. `cumulativeLineOffsets[L]`
+    // is the byte offset of the start of line L in the flattened buffer text.
+    // Makes `positionToOffset` O(1) instead of O(L).
+    private readonly cumulativeLineOffsets: ReadonlyArray<number>
   ) {}
 
   /**
@@ -251,7 +263,22 @@ export class FunctionalTextBufferImpl implements FunctionalTextBuffer {
   static create(content = ""): FunctionalTextBufferImpl {
     const gapBuffer = FunctionalGapBuffer.create(content);
     const lines = FunctionalTextBufferImpl.splitLines(content);
-    return new FunctionalTextBufferImpl(gapBuffer, lines);
+    const offsets = FunctionalTextBufferImpl.computeOffsets(lines);
+    return new FunctionalTextBufferImpl(gapBuffer, lines, offsets);
+  }
+
+  /**
+   * Compute cumulative line offsets from a lines array. Single source of truth
+   * for the prefix-sum: offsets[L] = sum of (lines[i].length + 1) for i < L.
+   */
+  private static computeOffsets(lines: ReadonlyArray<string>): number[] {
+    const offsets = new Array<number>(lines.length);
+    let running = 0;
+    for (let i = 0; i < lines.length; i++) {
+      offsets[i] = running;
+      running += lines[i]!.length + 1; // +1 for the newline separator
+    }
+    return offsets;
   }
 
   /**
@@ -280,6 +307,13 @@ export class FunctionalTextBufferImpl implements FunctionalTextBuffer {
 
   /**
    * Insert text at position (returns new buffer)
+   *
+   * §1.1 (RFC-019): the previous implementation called `toString()` on the
+   * whole gap buffer and re-split it on every edit. That rebuilt the entire
+   * `lines` array even for a 1-char keystroke. The new path computes the
+   * edited `lines` array incrementally: it rebuilds only the affected line
+   * range and reuses the unchanged prefix/suffix by reference, then refreshes
+   * `cumulativeLineOffsets` only from the first edited line onward.
    */
   insert(position: Position, text: string): BufferResult<FunctionalTextBuffer> {
     const offsetResult = this.positionToOffset(position);
@@ -292,17 +326,56 @@ export class FunctionalTextBufferImpl implements FunctionalTextBuffer {
       return Either.left(`Insert failed: ${newGapBuffer.left}`);
     }
 
-    const contentResult = newGapBuffer.right.toString();
-    if (Either.isLeft(contentResult)) {
-      return contentResult;
+    if (text.length === 0) {
+      // No content change — keep offsets and lines identical, just hand back
+      // a buffer that shares them with this instance.
+      return Either.right(new FunctionalTextBufferImpl(
+        newGapBuffer.right,
+        this.lines,
+        this.cumulativeLineOffsets
+      ));
     }
 
-    const newLines = FunctionalTextBufferImpl.splitLines(contentResult.right);
-    return Either.right(new FunctionalTextBufferImpl(newGapBuffer.right, newLines));
+    // Rebuild only line `position.line`. The original line is split at the
+    // clamped column; the inserted text fills the gap between prefix/suffix.
+    const originalLine = this.lines[position.line] ?? "";
+    const clampedColumn = Math.min(position.column, originalLine.length);
+    const prefix = originalLine.slice(0, clampedColumn);
+    const suffix = originalLine.slice(clampedColumn);
+
+    const segments = FunctionalTextBufferImpl.splitLines(text);
+    let rebuilt: string[];
+    if (segments.length === 1) {
+      // Single-line insert: just one line is replaced.
+      rebuilt = [prefix + segments[0]! + suffix];
+    } else {
+      // Multi-line insert: K newlines produce K+1 affected lines. The first
+      // segment carries the original prefix; the last carries the suffix;
+      // any middle segments are whole lines.
+      rebuilt = new Array<string>(segments.length);
+      rebuilt[0] = prefix + segments[0]!;
+      for (let i = 1; i < segments.length - 1; i++) {
+        rebuilt[i] = segments[i]!;
+      }
+      rebuilt[segments.length - 1] = segments[segments.length - 1]! + suffix;
+    }
+
+    const { lines: newLines, offsets: newOffsets } = FunctionalTextBufferImpl.spliceLines(
+      this.lines,
+      this.cumulativeLineOffsets,
+      position.line,
+      position.line,
+      rebuilt
+    );
+    return Either.right(new FunctionalTextBufferImpl(newGapBuffer.right, newLines, newOffsets));
   }
 
   /**
    * Delete text in range (returns new buffer)
+   *
+   * §1.1 (RFC-019): same incremental-derivation strategy as `insert`. Only the
+   * line range spanned by [range.start, range.end] is rebuilt; the prefix and
+   * suffix line arrays are reused by reference.
    */
   delete(range: Range): BufferResult<FunctionalTextBuffer> {
     const startOffsetResult = this.positionToOffset(range.start);
@@ -321,13 +394,89 @@ export class FunctionalTextBufferImpl implements FunctionalTextBuffer {
       return Either.left(`Delete failed: ${newGapBuffer.left}`);
     }
 
-    const contentResult = newGapBuffer.right.toString();
-    if (Either.isLeft(contentResult)) {
-      return contentResult;
+    // Zero-length deletes leave the line/offset caches unchanged. The gap
+    // buffer still produced a new immutable instance, so wrap it with the
+    // existing cache. `length <= 0` (negative length arises from invalid
+    // ranges; the gap buffer already no-ops on those).
+    if (length <= 0) {
+      return Either.right(new FunctionalTextBufferImpl(
+        newGapBuffer.right,
+        this.lines,
+        this.cumulativeLineOffsets
+      ));
     }
 
-    const newLines = FunctionalTextBufferImpl.splitLines(contentResult.right);
-    return Either.right(new FunctionalTextBufferImpl(newGapBuffer.right, newLines));
+    const startLineIdx = range.start.line;
+    const endLineIdx = range.end.line;
+    const startLineText = this.lines[startLineIdx] ?? "";
+    const startColumn = Math.min(range.start.column, startLineText.length);
+
+    let rebuilt: string[];
+    if (startLineIdx === endLineIdx) {
+      // Same-line delete: drop [startColumn, endColumn) from the line.
+      const endColumn = Math.min(range.end.column, startLineText.length);
+      rebuilt = [startLineText.slice(0, startColumn) + startLineText.slice(endColumn)];
+    } else {
+      // Multi-line delete: collapse lines [startLineIdx, endLineIdx] into a
+      // single line formed by joining the start-line prefix with the end-line
+      // suffix. Intermediate lines are dropped entirely.
+      const endLineText = this.lines[endLineIdx] ?? "";
+      const endColumn = Math.min(range.end.column, endLineText.length);
+      const prefix = startLineText.slice(0, startColumn);
+      const suffix = endLineText.slice(endColumn);
+      rebuilt = [prefix + suffix];
+    }
+
+    const { lines: newLines, offsets: newOffsets } = FunctionalTextBufferImpl.spliceLines(
+      this.lines,
+      this.cumulativeLineOffsets,
+      startLineIdx,
+      endLineIdx,
+      rebuilt
+    );
+    return Either.right(new FunctionalTextBufferImpl(newGapBuffer.right, newLines, newOffsets));
+  }
+
+  /**
+   * Splice a range of lines with new content, then refresh the prefix-sum
+   * offsets from the first edited line onward. Used by both `insert` and
+   * `delete`. Lines before `startReplace` are reused by reference; lines after
+   * `endReplace` (inclusive) are reused by reference too. Only the edited
+   * range is rebuilt, and only offsets from `startReplace` onward are
+   * recomputed.
+   */
+  private static spliceLines(
+    oldLines: ReadonlyArray<string>,
+    oldOffsets: ReadonlyArray<number>,
+    startReplace: number,
+    endReplace: number,
+    newMiddle: readonly string[]
+  ): { lines: string[]; offsets: number[] } {
+    const prefixCount = startReplace;
+    const suffixCount = oldLines.length - (endReplace + 1);
+    const newLineCount = prefixCount + newMiddle.length + suffixCount;
+
+    const lines = new Array<string>(newLineCount);
+    for (let i = 0; i < prefixCount; i++) lines[i] = oldLines[i]!;
+    for (let i = 0; i < newMiddle.length; i++) lines[prefixCount + i] = newMiddle[i]!;
+    for (let i = 0; i < suffixCount; i++) lines[prefixCount + newMiddle.length + i] = oldLines[endReplace + 1 + i]!;
+
+    // Offsets: copy the unchanged prefix, then recompute every offset from
+    // `startReplace` onward using the new lines array. The running
+    // accumulator starts at 0 for line 0, or at `lastPrefixOffset +
+    // lastPrefixLine.length + 1` for buffers with a non-empty prefix.
+    const offsets = new Array<number>(newLineCount);
+    let running = 0;
+    if (prefixCount > 0) {
+      for (let i = 0; i < prefixCount; i++) offsets[i] = oldOffsets[i]!;
+      const lastPrefixIdx = prefixCount - 1;
+      running = offsets[lastPrefixIdx]! + lines[lastPrefixIdx]!.length + 1;
+    }
+    for (let i = prefixCount; i < newLineCount; i++) {
+      offsets[i] = running;
+      running += lines[i]!.length + 1;
+    }
+    return { lines, offsets };
   }
 
   /**
@@ -379,7 +528,7 @@ export class FunctionalTextBufferImpl implements FunctionalTextBuffer {
   }
 
   /**
-   * Convert position to buffer offset
+   * Convert position to buffer offset. O(1) via the cumulative-line-offset cache.
    */
   private positionToOffset(position: Position): BufferResult<number> {
     if (position.line < 0 || position.line >= this.lines.length) {
@@ -390,19 +539,12 @@ export class FunctionalTextBufferImpl implements FunctionalTextBuffer {
       return Either.left(`Column ${position.column} cannot be negative`);
     }
 
-    let offset = 0;
-    
-    // Add characters from previous lines
-    for (let i = 0; i < position.line; i++) {
-      offset += this.lines[i]!.length + 1; // +1 for newline
-    }
-    
-    // Add characters from current line
+    // §1.2 (RFC-019): prefix-sum lookup replaces the linear walk. The column
+    // clamp behaviour is preserved exactly: columns past end-of-line resolve
+    // to the line end, matching the previous implementation.
     const currentLine = this.lines[position.line]!;
     const column = Math.min(position.column, currentLine.length);
-    offset += column;
-    
-    return Either.right(offset);
+    return Either.right(this.cumulativeLineOffsets[position.line]! + column);
   }
 
   /**
