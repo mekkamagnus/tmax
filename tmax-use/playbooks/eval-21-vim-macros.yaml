@@ -1,0 +1,120 @@
+name: eval-21-vim-macros
+description: |
+  SPEC-044 Phase 1.F/G/H e2e: macro record + playback in a live daemon
+  session. Records a "dd" (delete-line) macro into register a via the
+  macro-record-* API, plays it back via macro-execute, and verifies the
+  buffer mutated. Also exercises @@ (macro-execute-last) and the state
+  machine (macro-record-active / macro-record-register).
+
+  The eval-18 playbook covers the record state machine in isolation; this
+  playbook covers the playback effect on the buffer (the AC#1 requirement:
+  "records and plays a macro in a live session"). The qa/@a keypath is
+  known to crash the daemon through tmux dispatch (see eval-18 description),
+  so the macro API is driven via eval here.
+
+setup:
+  - action: setup_file
+    var: FILE
+    name: eval-21-macros.txt
+    content: |
+      keep line one
+      delete line two
+      keep line three
+      delete line four
+      keep line five
+
+steps:
+  - name: switch to normal mode
+    eval: '(editor-set-mode "normal")'
+    expect:
+      mode: normal
+
+  - name: open the test file
+    eval: '(find-file "${FILE}")'
+    expect:
+      buffer_contains: "delete line two"
+
+  - name: five content lines plus trailing empty initially
+    eval: '(buffer-line-count)'
+    expect:
+      result_contains: '6'
+
+  # -- reset macro state --
+  - name: reset macro state
+    eval: '(macro-record-reset)'
+  - name: not recording initially
+    eval: '(macro-record-active)'
+    expect:
+      result_contains: 'false'
+
+  # -- record dd (delete line) into register a --
+  - name: start recording into register a
+    eval: '(macro-record-start "a")'
+    expect:
+      result_contains: 'a'
+  - name: now recording
+    eval: '(macro-record-active)'
+    expect:
+      result_contains: 'true'
+  - name: register is a
+    eval: '(macro-record-register)'
+    expect:
+      result_contains: 'a'
+
+  - name: record key d
+    eval: '(macro-record-key "d")'
+    expect:
+      result_contains: 'd'
+  - name: record second d
+    eval: '(macro-record-key "d")'
+    expect:
+      result_contains: 'd'
+
+  # NOTE: the recording hook in normal-handler.ts calls (macro-record-key)
+  # before dispatching the bound command. Driving macro-record-key via eval
+  # only captures the key into the macro — it does NOT execute it. So the
+  # buffer is unchanged during recording. The recorded dd takes effect when
+  # the macro is played back.
+  - name: buffer unchanged during recording (still 6 lines)
+    eval: '(buffer-line-count)'
+    expect:
+      result_contains: '6'
+
+  - name: stop recording (returns register)
+    eval: '(macro-record-stop)'
+    expect:
+      result_contains: 'a'
+  - name: no longer recording
+    eval: '(macro-record-active)'
+    expect:
+      result_contains: 'false'
+  - name: macro a holds two d keys
+    eval: '(macro-list)'
+    expect:
+      result_contains: 'd'
+
+  # -- play back @a: deletes line 0 (keep line one) --
+  - name: play macro a
+    eval: '(macro-execute "a")'
+  - name: line count dropped to 5 after @a
+    eval: '(buffer-line-count)'
+    expect:
+      result_contains: '5'
+  - name: line 0 is now delete line two
+    eval: '(buffer-line 0)'
+    expect:
+      result_contains: 'delete line two'
+
+  # -- @@ (macro-execute-last): deletes line 0 again --
+  - name: play last macro via @@
+    eval: '(macro-execute-last)'
+  - name: line count dropped to 4 after @@
+    eval: '(buffer-line-count)'
+    expect:
+      result_contains: '4'
+  - name: line 0 is now keep line three
+    eval: '(buffer-line 0)'
+    expect:
+      result_contains: 'keep line three'
+
+cleanup: true

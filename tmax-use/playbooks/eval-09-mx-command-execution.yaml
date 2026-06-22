@@ -1,0 +1,69 @@
+name: eval-09-mx-command-execution
+description: |
+  M-x mode: enter mx mode, verify mode, execute commands via eval, verify
+  results. Tests the M-x command execution interface.
+
+setup:
+  - action: setup_file
+    var: FILE
+    name: eval-09-mx.txt
+    content: |
+      hello from mx test
+      second line
+
+steps:
+  - name: switch to normal mode
+    eval: '(editor-set-mode "normal")'
+    expect:
+      mode: normal
+
+  - name: open the test file
+    eval: '(find-file "${FILE}")'
+    expect:
+      buffer_contains: "hello from mx test"
+
+  # -- mode: mx --
+  - name: enter mx mode via eval
+    eval: '(editor-set-mode "mx")'
+    expect:
+      mode: mx
+
+  # -- exit mx mode --
+  - name: exit to normal mode
+    eval: '(editor-set-mode "normal")'
+    expect:
+      mode: normal
+
+  # -- execute common commands via eval --
+  - name: cursor-position returns JSON array
+    eval: '(cursor-position)'
+    expect:
+      result_contains: '['
+
+  - name: buffer-line-count returns number
+    eval: '(buffer-line-count)'
+    expect:
+      result_contains: '3'
+
+  - name: buffer-current returns string
+    eval: '(buffer-current)'
+    expect:
+      result_contains: 'eval-09'
+
+  - name: editor-mode returns normal
+    eval: '(editor-mode)'
+    expect:
+      result_contains: 'normal'
+
+  # -- format and message --
+  - name: format string
+    eval: '(format "test-%d-%s" 42 "ok")'
+    expect:
+      result_contains: 'test-42-ok'
+
+  - name: message sets status
+    eval: '(message "mx-test-message")'
+    expect:
+      result_contains: 'mx-test-message'
+
+cleanup: true

@@ -32,6 +32,23 @@ function formatDuration(ms: number): string {
   return `${(ms / 1000).toFixed(2)}s`;
 }
 
+/** Render a captured frame as a bordered box (for failure output). */
+function renderFrameBox(frame: { lines: readonly string[]; width: number; height: number }, indent = ''): string[] {
+  const inner = frame.lines.filter((l) => l.length > 0);
+  if (inner.length === 0) return [];
+  const maxLen = Math.min(Math.max(...inner.map((l) => stripAnsi(l).length), 0) + 2, 120);
+  const top = `${indent}┌${'─'.repeat(maxLen)}┐`;
+  const bot = `${indent}└${'─'.repeat(maxLen)}┘`;
+  const mid = inner.map((l) => `${indent}│ ${l.padEnd(maxLen - 2).slice(0, maxLen - 2)} │`);
+  return [colorize('dim', top), ...mid, colorize('dim', bot)];
+}
+
+/** Strip ANSI escape sequences for length measurement. */
+function stripAnsi(s: string): string {
+  // eslint-disable-next-line no-control-regex
+  return s.replace(/\x1b\[[0-9;]*m/g, '');
+}
+
 /** Render a single test result. */
 export function renderTest(result: TestResult, indent = ''): string[] {
   const lines: string[] = [];
@@ -42,9 +59,11 @@ export function renderTest(result: TestResult, indent = ''): string[] {
 
   for (const step of result.steps) {
     if (step.passed) continue;
-    const stepStatus = colorize('red', '  ');
     const detail = step.details.length > 0 ? step.details[0] : '(no detail)';
-    lines.push(`${indent}${stepStatus}${step.name}: ${detail}`);
+    lines.push(`${indent}  ${colorize('red', '✗')} ${step.name}: ${detail}`);
+    if (step.frame) {
+      lines.push(...renderFrameBox(step.frame, `${indent}    `));
+    }
   }
 
   if (result.failureMessage && result.steps.length === 0) {
@@ -73,4 +92,4 @@ export function printTermReporter(suite: SuiteResult): void {
 }
 
 // Test-only exports.
-export const __termReporterInternals = { renderTest, renderSuite, formatDuration, colorize };
+export const __termReporterInternals = { renderTest, renderSuite, formatDuration, colorize, renderFrameBox, stripAnsi };

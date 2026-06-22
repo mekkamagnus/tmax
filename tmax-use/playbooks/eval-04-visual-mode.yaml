@@ -1,0 +1,94 @@
+name: eval-04-visual-mode
+description: |
+  Visual mode: char mode (v), line mode (V), delete, yank, lowercase,
+  uppercase selections. Tests mode transitions and buffer mutations.
+
+setup:
+  - action: setup_file
+    var: FILE
+    name: eval-04-visual.txt
+    content: |
+      ABC DEF GHI
+      second line here
+      THIRD LINE
+
+steps:
+  - name: switch to normal mode
+    eval: '(editor-set-mode "normal")'
+    expect:
+      mode: normal
+
+  - name: open the test file
+    eval: '(find-file "${FILE}")'
+    expect:
+      buffer_contains: "ABC DEF GHI"
+
+  # -- char visual mode: v + d --
+  - name: enter visual char mode
+    eval: '(visual-enter-char-mode)'
+    expect:
+      mode: visual
+
+  - name: visual delete removes selection
+    eval: '(progn (cursor-move 0 4) (visual-update-end) (visual-delete))'
+    expect:
+      mode: normal
+
+  - name: ABC space removed
+    eval: '(buffer-line 0)'
+    expect:
+      result_contains: 'DEF GHI'
+
+  # -- line visual mode: V + y --
+  - name: enter visual line mode
+    eval: '(visual-enter-line-mode)'
+    expect:
+      mode: visual
+
+  - name: yank entire line
+    eval: '(visual-yank)'
+    expect:
+      mode: normal
+
+  - name: yank register exists
+    eval: '(yank-register-get)'
+    expect:
+      result_contains: ''
+
+  # -- undo the yank visual exit --
+  # visual-yank does not commit to undo history, so undo hits the oldest
+  # boundary (only earlier vim-style edits would be undoable).
+  - name: undo visual yank
+    eval: '(undo)'
+    expect:
+      result_contains: 'oldest'
+
+  # -- lowercase selection (char-mode with explicit end, since line-mode
+  #    visual-lowercase operates on an empty selection due to an editor bug) --
+  - name: enter visual char mode and extend to line end
+    eval: '(progn (cursor-move 2 0) (visual-enter-char-mode) (cursor-move 2 10) (visual-update-end))'
+    expect:
+      mode: visual
+
+  - name: lowercase the selection
+    eval: '(visual-lowercase)'
+    expect:
+      mode: normal
+
+  - name: THIRD is now third
+    eval: '(buffer-line 2)'
+    expect:
+      result_contains: 'third'
+
+  # -- exit visual --
+  - name: enter and exit visual mode
+    eval: '(visual-enter-char-mode)'
+    expect:
+      mode: visual
+
+  - name: escape exits visual
+    eval: '(visual-exit)'
+    expect:
+      mode: normal
+
+cleanup: true

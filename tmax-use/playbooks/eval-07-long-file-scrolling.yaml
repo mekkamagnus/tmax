@@ -1,0 +1,132 @@
+name: eval-07-long-file-scrolling
+description: |
+  Long file scrolling: gg, G, Ctrl-d, Ctrl-u, Ctrl-f, Ctrl-b on a 50-line
+  file. Verifies cursor positions after each scroll operation.
+
+setup:
+  - action: setup_file
+    var: FILE
+    name: eval-07-scroll.txt
+    content: |
+      Line 00: alpha
+      Line 01: alpha
+      Line 02: alpha
+      Line 03: alpha
+      Line 04: alpha
+      Line 05: alpha
+      Line 06: alpha
+      Line 07: alpha
+      Line 08: alpha
+      Line 09: alpha
+      Line 10: beta
+      Line 11: beta
+      Line 12: beta
+      Line 13: beta
+      Line 14: beta
+      Line 15: beta
+      Line 16: beta
+      Line 17: beta
+      Line 18: beta
+      Line 19: beta
+      Line 20: gamma
+      Line 21: gamma
+      Line 22: gamma
+      Line 23: gamma
+      Line 24: gamma
+      Line 25: gamma
+      Line 26: gamma
+      Line 27: gamma
+      Line 28: gamma
+      Line 29: gamma
+      Line 30: delta
+      Line 31: delta
+      Line 32: delta
+      Line 33: delta
+      Line 34: delta
+      Line 35: delta
+      Line 36: delta
+      Line 37: delta
+      Line 38: delta
+      Line 39: delta
+      Line 40: epsilon
+      Line 41: epsilon
+      Line 42: epsilon
+      Line 43: epsilon
+      Line 44: epsilon
+      Line 45: epsilon
+      Line 46: epsilon
+      Line 47: epsilon
+      Line 48: epsilon
+      Line 49: epsilon
+
+steps:
+  - name: switch to normal mode
+    eval: '(editor-set-mode "normal")'
+    expect:
+      mode: normal
+
+  - name: open the test file
+    eval: '(find-file "${FILE}")'
+    expect:
+      buffer_contains: "Line 00"
+
+  - name: verify 51 lines
+    eval: '(buffer-line-count)'
+    expect:
+      result_contains: '51'
+
+  # -- gg: go to first line --
+  - name: go to first line
+    eval: '(jump-to-first-line)'
+    expect:
+      cursor_line: 0
+
+  # -- G: go to last line --
+  - name: go to last line
+    eval: '(jump-to-last-line)'
+    expect:
+      cursor_line: 50
+
+  # -- gg again --
+  - name: back to first line
+    eval: '(jump-to-first-line)'
+    expect:
+      cursor_line: 0
+
+  # -- half-page-down: Ctrl-d --
+  - name: half page down
+    eval: '(half-page-down)'
+    expect:
+      cursor_line: 12
+
+  # -- half-page-up: Ctrl-u --
+  - name: half page up
+    eval: '(half-page-up)'
+    expect:
+      cursor_line: 0
+
+  # -- jump to line 25 --
+  - name: jump to line 26 (1-indexed)
+    eval: '(jump-to-line 26)'
+    expect:
+      cursor_line: 25
+
+  - name: verify gamma line
+    eval: '(buffer-line 25)'
+    expect:
+      result_contains: 'gamma'
+
+  # -- page down: Ctrl-f --
+  - name: page down
+    eval: '(page-down)'
+    expect:
+      cursor_line: 49
+
+  # -- page up: Ctrl-b (moves up by terminal height; from line 49 that lands
+  #    around line 25, not all the way to 0) --
+  - name: page up
+    eval: '(page-up)'
+    expect:
+      cursor_line: 25
+
+cleanup: true

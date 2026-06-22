@@ -1,0 +1,80 @@
+name: eval-15-boundary-navigation
+description: |
+  Boundary navigation: gg/G to first/last line, 0/$ to first/last column.
+  Verifies exact cursor positions from every edge of the buffer.
+
+setup:
+  - action: setup_file
+    var: FILE
+    name: eval-15-bounds.txt
+    content: |
+      AAAA
+      BBBB
+      CCCC
+      DDDD
+      EEEE
+
+steps:
+  - name: switch to normal mode
+    eval: '(editor-set-mode "normal")'
+    expect:
+      mode: normal
+
+  - name: open the test file
+    eval: '(find-file "${FILE}")'
+    expect:
+      buffer_contains: "AAAA"
+
+  - name: verify 5 lines
+    eval: '(buffer-line-count)'
+    expect:
+      result_contains: '6'
+
+  # -- gg: first line --
+  - name: gg from middle
+    eval: '(progn (cursor-move 2 2) (jump-to-first-line))'
+    expect:
+      cursor_line: 0
+
+  # -- G: last line --
+  - name: G from first line
+    eval: '(progn (cursor-move 0 0) (jump-to-last-line))'
+    expect:
+      cursor_line: 5
+
+  # -- 0: first column --
+  - name: 0 from end of line
+    eval: '(progn (cursor-move 0 3) (line-first-column) (cursor-column))'
+    expect:
+      result_contains: '0'
+
+  # -- $: last column --
+  - name: dollar on 4-char line
+    eval: '(progn (cursor-move 0 0) (line-last-column) (cursor-column))'
+    expect:
+      result_contains: '3'
+
+  # -- first-non-blank: _ --
+  - name: underscore on plain line
+    eval: '(progn (cursor-move 0 0) (line-first-non-blank) (cursor-column))'
+    expect:
+      result_contains: '0'
+
+  # -- move to specific positions and verify --
+  - name: jump to line 3 (1-indexed)
+    eval: '(jump-to-line 3)'
+    expect:
+      cursor_line: 2
+
+  - name: verify CCCC on line 2
+    eval: '(buffer-line 2)'
+    expect:
+      result_contains: 'CCCC'
+
+  # -- word-end at boundary --
+  - name: word-end at start of line
+    eval: '(progn (cursor-move 0 0) (word-end) (cursor-column))'
+    expect:
+      result_contains: '3'
+
+cleanup: true

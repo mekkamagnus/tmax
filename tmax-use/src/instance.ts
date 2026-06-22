@@ -144,14 +144,15 @@ export class TmaxInstance {
     return preCleanup
       .flatMap(() => fullDeps.spawnDaemon(spec))
       .flatMap((child) => {
-        // 4. Poll the socket file (50 × 100ms = 5s).
+        // 4. Poll the socket file (30 × 100ms = 3s). Matches the proven pattern
+        //    in adws/adw-run-e2e.ts and stopDaemonReal below.
         const socketReady: TaskEither<TmaxUseError, void> = TaskEitherUtils.retry(
           () => TaskEither.from(async () =>
             existsSync(socketPath)
               ? rightE<void>(undefined)
               : leftE<void>(TmaxUseError.daemonNotResponsive(socketPath, 'socket not yet present')),
           ),
-          50,
+          30,
           100,
         );
         // 5. Poll eval responsiveness (20 × 100ms = 2s).
@@ -192,8 +193,8 @@ export class TmaxInstance {
   }
 
   /** Create a `Frame` bound to this instance's daemon socket. */
-  frame(name?: string): Frame {
-    return new Frame(this.client, name);
+  frame(name?: string, opts?: { width?: number; height?: number; waitIterations?: number }): Frame {
+    return new Frame(this.client, name, opts);
   }
 
   /** Tear down the daemon (only if we spawned it). Idempotent. */

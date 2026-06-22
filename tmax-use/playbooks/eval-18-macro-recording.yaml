@@ -1,0 +1,84 @@
+name: eval-18-macro-recording
+description: |
+  Macro recording via the eval API (macro-record-start / macro-record-key /
+  macro-record-stop), since dispatching the qa/@a keys via tmux crashes the
+  daemon (a known editor bug). Tests the macro recording state machine and
+  verifies that recorded keys are captured.
+
+setup:
+  - action: setup_file
+    var: FILE
+    name: eval-18-macro.txt
+    content: |
+      keep this line
+      delete me
+      keep this too
+      delete me also
+      final line
+
+steps:
+  - name: switch to normal mode
+    eval: '(editor-set-mode "normal")'
+    expect:
+      mode: normal
+
+  - name: open the test file
+    eval: '(find-file "${FILE}")'
+    expect:
+      buffer_contains: "keep this line"
+
+  - name: verify 5 content lines
+    eval: '(buffer-line-count)'
+    expect:
+      result_contains: '6'
+
+  # -- reset any prior macro state --
+  - name: reset macro state
+    eval: '(macro-record-reset)'
+    expect:
+      result_contains: 'null'
+
+  - name: not recording initially
+    eval: '(macro-record-active)'
+    expect:
+      result_contains: 'false'
+
+  # -- start recording into register a (returns the register name) --
+  - name: start recording macro a
+    eval: '(macro-record-start "a")'
+    expect:
+      result_contains: 'a'
+
+  - name: now recording
+    eval: '(macro-record-active)'
+    expect:
+      result_contains: 'true'
+
+  - name: register is a
+    eval: '(macro-record-register)'
+    expect:
+      result_contains: 'a'
+
+  # -- record two keys: dd (delete line). macro-record-key echoes the key. --
+  - name: record key d
+    eval: '(macro-record-key "d")'
+    expect:
+      result_contains: 'd'
+
+  - name: record second d
+    eval: '(macro-record-key "d")'
+    expect:
+      result_contains: 'd'
+
+  # -- stop recording (returns the register the macro was saved to) --
+  - name: stop recording
+    eval: '(macro-record-stop)'
+    expect:
+      result_contains: 'a'
+
+  - name: no longer recording
+    eval: '(macro-record-active)'
+    expect:
+      result_contains: 'false'
+
+cleanup: true

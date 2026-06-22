@@ -1,0 +1,90 @@
+name: eval-20-vim-search
+description: |
+  SPEC-044 Phase 1.D/E e2e: search functionality in a live daemon session.
+
+  Exercises the search T-Lisp API (search-incremental-start/update/finish,
+  search-next, search-previous, search-clear-highlights) and the bound n / N
+  / :nohl keys. Cursor landing is verified by reading the current line's
+  content via (buffer-get-line (cursor-line)) — robust against the cursor's
+  exact column, which varies with partial-match stepping.
+
+  Fixture deliberately uses search terms that are NOT substrings of any
+  other word (no "theta"-style collisions) so match advancement is
+  unambiguous.
+
+  NOTE on keyboard coverage: the "/" binding correctly invokes
+  (isearch-forward), but the editor's key handler does NOT route subsequent
+  keys to (isearch-update) while isearch is active, so typing the pattern
+  via keys (/the<Enter>) does not work end-to-end yet. That is a real
+  Phase 1.D gap. The search mechanics are driven via the eval API here
+  (the fully-wired path); n, N, and :nohl are exercised via real keys.
+
+setup:
+  - action: setup_file
+    var: FILE
+    name: eval-20-search.txt
+    content: |
+      apple banana cherry
+      date elderberry fig
+      TARGET quick brown fox
+      grape honeydew kiwi
+      TARGET lazy dog
+
+steps:
+  - name: switch to normal mode
+    eval: '(editor-set-mode "normal")'
+    expect:
+      mode: normal
+
+  - name: open the test file
+    eval: '(find-file "${FILE}")'
+    expect:
+      buffer_contains: "apple banana cherry"
+
+  # -- forward incremental search via the API: build "TARGET" char by char --
+  - name: start forward isearch
+    eval: '(search-incremental-start "forward")'
+  - name: type TARGET
+    eval: '(search-incremental-update "TARGET")'
+  - name: finish search
+    eval: '(search-incremental-finish)'
+  - name: cursor landed on first TARGET line
+    eval: '(buffer-get-line (cursor-line))'
+    expect:
+      result_contains: 'TARGET quick brown fox'
+
+  # -- n key: advance to next match via the bound key --
+  - name: press n to advance
+    keys: "n"
+  - name: cursor on second TARGET line
+    eval: '(buffer-get-line (cursor-line))'
+    expect:
+      result_contains: 'TARGET lazy dog'
+
+  # -- N key: retreat to previous match via the bound key --
+  - name: press N to retreat
+    keys: "N"
+  - name: cursor back on first TARGET line
+    eval: '(buffer-get-line (cursor-line))'
+    expect:
+      result_contains: 'TARGET quick brown fox'
+
+  # -- :nohl clears search highlights without clearing the pattern --
+  - name: :nohl clears highlights
+    keys: ":nohl<Enter>"
+
+  # -- after :nohl, the pattern is retained (SPEC-044 Phase 1.E MUST) --
+  - name: search pattern survives :nohl
+    eval: '(search-pattern-get)'
+    expect:
+      result_contains: 'TARGET'
+
+  # -- after :nohl, n still advances using the retained pattern --
+  - name: press n after nohl, still advances
+    keys: "n"
+  - name: cursor on second TARGET line post-nohl
+    eval: '(buffer-get-line (cursor-line))'
+    expect:
+      result_contains: 'TARGET lazy dog'
+
+cleanup: true

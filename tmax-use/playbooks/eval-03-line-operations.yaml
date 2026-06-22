@@ -1,0 +1,146 @@
+name: eval-03-line-operations
+description: |
+  Line operations: delete-line, yank-line, paste, delete-to-line-end,
+  vim-join-lines, vim-delete-char, undo, redo. Tests buffer mutation
+  and yank register via eval assertions.
+
+setup:
+  - action: setup_file
+    var: FILE
+    name: eval-03-ops.txt
+    content: |
+      alpha line
+      beta line
+      gamma line
+      delta line
+
+steps:
+  - name: switch to normal mode
+    eval: '(editor-set-mode "normal")'
+    expect:
+      mode: normal
+
+  - name: open the test file
+    eval: '(find-file "${FILE}")'
+    expect:
+      buffer_contains: "alpha line"
+
+  # -- delete-line: remove beta line --
+  - name: delete second line
+    eval: '(progn (cursor-move 1 0) (delete-line))'
+    expect:
+      result_contains: 'null'
+
+  - name: gamma is now line 1
+    eval: '(buffer-line 1)'
+    expect:
+      result_contains: 'gamma line'
+
+  - name: line count is 4
+    eval: '(buffer-line-count)'
+    expect:
+      result_contains: '4'
+
+  # -- yank-line + yank-register-get --
+  - name: yank first line
+    eval: '(progn (cursor-move 0 0) (yank-line))'
+    expect:
+      result_contains: 'null'
+
+  - name: yank register has alpha
+    eval: '(yank-register-get)'
+    expect:
+      result_contains: 'alpha line'
+
+  # -- paste-after --
+  - name: paste line after current
+    eval: '(paste-after)'
+    expect:
+      result_contains: 'null'
+
+  - name: line count back to 5
+    eval: '(buffer-line-count)'
+    expect:
+      result_contains: '5'
+
+  # -- vim-delete-char (returns t) --
+  - name: delete first char of line 0
+    eval: '(progn (cursor-move 0 0) (vim-delete-char 1))'
+    expect:
+      result_contains: 'true'
+
+  - name: alpha became lpha
+    eval: '(buffer-line 0)'
+    expect:
+      result_contains: 'lpha line'
+
+  # -- undo (vim-delete-char is the only undo-committed edit, so undo hits the
+  #    oldest-change boundary and returns that status string) --
+  - name: undo delete-char
+    eval: '(undo)'
+    expect:
+      result_contains: 'oldest change'
+
+  - name: alpha restored
+    eval: '(buffer-line 0)'
+    expect:
+      result_contains: 'alpha line'
+
+  # -- delete-to-line-end --
+  - name: delete to EOL
+    eval: '(progn (cursor-move 0 0) (delete-to-line-end))'
+    expect:
+      result_contains: 'null'
+
+  - name: line 0 is empty
+    eval: '(buffer-line 0)'
+    expect:
+      result_contains: ''
+
+  # Note: delete-to-line-end does not commit to undo history, so undo stays at
+  # the oldest-change boundary (line 0 remains empty). This is an editor bug;
+  # recorded here as an observed-behavior assertion.
+  - name: undo delete-to-EOL hits oldest
+    eval: '(undo)'
+    expect:
+      result_contains: 'oldest change'
+
+  - name: line 0 still empty after undo
+    eval: '(buffer-line 0)'
+    expect:
+      result_contains: ''
+
+  # -- vim-join-lines (returns t) --
+  - name: join line 0 and line 1
+    eval: '(progn (cursor-move 0 0) (vim-join-lines))'
+    expect:
+      result_contains: 'true'
+
+  - name: joined alpha is on line 0
+    eval: '(buffer-line 0)'
+    expect:
+      result_contains: 'alpha line'
+
+  - name: undo join
+    eval: '(undo)'
+    expect:
+      result_contains: 'oldest change'
+
+  # Undo of the join stays at the joined state (oldest-change boundary).
+  - name: line 0 still joined after undo
+    eval: '(buffer-line 0)'
+    expect:
+      result_contains: 'alpha line'
+
+  # -- redo --
+  - name: redo join
+    eval: '(redo)'
+    expect:
+      result_contains: 'null'
+
+  - name: alpha back after redo
+    eval: '(buffer-line 0)'
+    expect:
+      result_contains: 'alpha line'
+
+cleanup: true

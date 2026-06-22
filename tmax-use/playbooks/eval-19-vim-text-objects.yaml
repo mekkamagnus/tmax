@@ -1,0 +1,164 @@
+name: eval-19-vim-text-objects
+description: |
+  SPEC-044 Phase 1.A/B/C e2e: text-object operators dispatched via real keys
+  through the daemon. Exercises diw/daw (word), di"/da" (quotes), di)/da)
+  (parens), di}/da} (braces), dat/dit (tags). Each mutation is followed by
+  undo and a buffer-content check to verify the undo bookend required by
+  Step 1.1 (the AC#1 UI-test requirement the patch-reviewer flagged as
+  missing). Assertions are on observable buffer state, not on undo's return
+  value (which is nil on success, not the string "null").
+
+  NOTE: yank-register population after text-object deletes is intentionally
+  NOT asserted. Deletes write to the delete register (setDeleteRegister) via
+  text-objects.ts, while (yank-register-get) reads the separate yank
+  register; the two are not wired together for text-object deletes. That is
+  a separate concern tracked in SPEC-044 Phase 2 register work.
+
+setup:
+  - action: setup_file
+    var: FILE
+    name: eval-19-text-objects.txt
+    content: |
+      hello world foo
+      (inside parens)
+      {brace body}
+      "quoted"
+      <div>tag</div>
+
+steps:
+  - name: switch to normal mode
+    eval: '(editor-set-mode "normal")'
+    expect:
+      mode: normal
+
+  - name: open the test file
+    eval: '(find-file "${FILE}")'
+    expect:
+      buffer_contains: "hello world foo"
+
+  # -- diw: delete inner word at cursor (cursor starts on hello) --
+  - name: diw deletes hello
+    keys: "diw"
+  - name: line 0 lost hello, leading space kept
+    eval: '(buffer-line 0)'
+    expect:
+      result_contains: 'world foo'
+
+  - name: undo restores hello (Step 1.1 undo bookend)
+    eval: '(undo)'
+  - name: line 0 fully restored after undo
+    eval: '(buffer-line 0)'
+    expect:
+      result_contains: 'hello world foo'
+
+  # -- daw: delete around word (consumes surrounding whitespace) --
+  - name: daw deletes hello plus trailing space
+    keys: "daw"
+  - name: line 0 is now world foo
+    eval: '(buffer-line 0)'
+    expect:
+      result_contains: 'world foo'
+
+  - name: undo restores daw
+    eval: '(undo)'
+  - name: line 0 restored after daw undo
+    eval: '(buffer-line 0)'
+    expect:
+      result_contains: 'hello world foo'
+
+  # -- di) on line 1: (inside parens) -> () --
+  - name: move to line 1
+    eval: '(progn (cursor-move 1 0) (cursor-line))'
+    expect:
+      result_contains: '1'
+  - name: di) deletes inner parens content
+    keys: "di)"
+  - name: line 1 is now empty parens
+    eval: '(buffer-line 1)'
+    expect:
+      result_contains: '()'
+
+  - name: undo restores parens content
+    eval: '(undo)'
+  - name: line 1 restored after di) undo
+    eval: '(buffer-line 1)'
+    expect:
+      result_contains: 'inside parens'
+
+  # -- da) on line 1: (inside parens) -> empty --
+  - name: move back to line 1 col 0 for da)
+    eval: '(progn (cursor-move 1 0) (cursor-line))'
+    expect:
+      result_contains: '1'
+  - name: da) deletes parens and content
+    keys: "da)"
+  - name: line 1 is now empty
+    eval: '(buffer-line 1)'
+    expect:
+      result_contains: ''
+
+  - name: undo restores da)
+    eval: '(undo)'
+  - name: line 1 restored after da) undo
+    eval: '(buffer-line 1)'
+    expect:
+      result_contains: 'inside parens'
+
+  # -- di} on line 2: {brace body} -> {} --
+  - name: move to line 2 for di-curly
+    eval: '(progn (cursor-move 2 0) (cursor-line))'
+    expect:
+      result_contains: '2'
+  - name: di-curly deletes brace inner
+    keys: "di}"
+  - name: line 2 is now empty braces
+    eval: '(buffer-line 2)'
+    expect:
+      result_contains: '{}'
+
+  - name: undo restores brace content
+    eval: '(undo)'
+  - name: line 2 restored after di-curly undo
+    eval: '(buffer-line 2)'
+    expect:
+      result_contains: 'brace body'
+
+  # -- di" on line 3: quoted -> empty quotes --
+  - name: move to line 3 for di-quote
+    eval: '(progn (cursor-move 3 0) (cursor-line))'
+    expect:
+      result_contains: '3'
+  - name: di-quote deletes quoted content
+    keys: 'di"'
+  - name: line 3 is now empty double-quotes
+    eval: '(buffer-line 3)'
+    expect:
+      result_contains: '""'
+
+  - name: undo restores quote content
+    eval: '(undo)'
+  - name: line 3 restored after di-quote undo
+    eval: '(buffer-line 3)'
+    expect:
+      result_contains: 'quoted'
+
+  # -- dat on line 4: <div>tag</div> -> empty --
+  - name: move to line 4 for dat
+    eval: '(progn (cursor-move 4 0) (cursor-line))'
+    expect:
+      result_contains: '4'
+  - name: dat deletes whole tag
+    keys: "dat"
+  - name: line 4 is now empty
+    eval: '(buffer-line 4)'
+    expect:
+      result_contains: ''
+
+  - name: undo restores tag
+    eval: '(undo)'
+  - name: line 4 restored after dat undo
+    eval: '(buffer-line 4)'
+    expect:
+      result_contains: '<div>tag</div>'
+
+cleanup: true

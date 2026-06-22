@@ -8,19 +8,28 @@
  * falls back to a normalized line-by-line HTML text diff and reports the
  * fallback in the diff.
  *
- * Baseline lifecycle:
+ * Baseline lifecycle (all paths return `Right<BaselineResult>` so the runner
+ * records assertion failures separately from execution errors):
  *   - Local first run (CI unset, no `--update-baselines`): write the captured
- *     HTML as the new baseline, return `{ created: true }`.
- *   - CI first run (CI set, no `--update-baselines`): fail with BaselineMissing.
+ *     HTML as the new baseline, return `{ passed: true, created: true }`.
+ *   - CI first run (CI set, no `--update-baselines`): return
+ *     `{ passed: false, failureKind: 'BaselineMissing' }` without writing.
  *   - `--update-baselines`: overwrite the baseline file unconditionally and
- *     return `{ updated: true }`. Intended for explicit refresh runs whose
- *     resulting files are reviewed and committed.
- *   - Subsequent runs: compare and return mismatch with a readable diff.
+ *     return `{ passed: true, updated: true }`. Intended for explicit refresh
+ *     runs whose resulting files are reviewed and committed.
+ *   - Subsequent runs: compare; mismatch returns
+ *     `{ passed: false, failureKind: 'BaselineMismatch', diff }`.
+ *
+ * Filesystem, capture, or malformed-baseline conditions that prevent comparison
+ * return `Left<TmaxUseError>` so the runner records them as execution errors.
  */
 
 import { promises as fs, existsSync } from 'fs';
 import { TaskEither, Either } from '../../src/utils/task-either.ts';
 import { TmaxUseError, rightT, leftT, rightE, leftE } from '../src/errors.ts';
+
+/** When `passed: false`, identifies the kind of assertion failure for the runner. */
+export type BaselineFailureKind = 'BaselineMissing' | 'BaselineMismatch';
 
 export interface BaselineResult {
   readonly passed: boolean;
@@ -28,6 +37,8 @@ export interface BaselineResult {
   readonly updated: boolean;
   readonly baselinePath: string;
   readonly diff: string;
+  /** Present only when `passed: false` — tells the runner which kind of failure to record. */
+  readonly failureKind?: BaselineFailureKind;
 }
 
 export interface BaselineOptions {
@@ -44,12 +55,9 @@ function isCi(): boolean {
 /**
  * Compare captured HTML against the baseline file at `baselinePath`.
  *
- * Resolution order:
- *   1. If `update`, write captured HTML and return `{ updated: true }`.
- *   2. If baseline does not exist:
- *      - If `failOnMissing` (or CI), fail with BaselineMissing.
- *      - Else write captured HTML and return `{ created: true }`.
- *   3. Otherwise compare; on mismatch return BaselineMismatch with the diff.
+ * Returns `Right<BaselineResult>` for both pass and assertion-fail outcomes so
+ * the runner can collect them as assertion results. `Left<TmaxUseError>` is
+ * reserved for operational problems (filesystem, malformed baseline, capture).
  */
 export function matchBaseline(
   html: string,
@@ -69,10 +77,17 @@ export function matchBaseline(
     }));
   }
 
-  // 2. Missing baseline: create locally or fail in CI.
+  // 2. Missing baseline: create locally, or return a Right-side failure in CI.
   if (!existsSync(baselinePath)) {
     if (failOnMissing) {
-      return leftT<BaselineResult>(TmaxUseError.baselineMissing(baselinePath));
+      return rightT<BaselineResult>({
+        passed: false,
+        created: false,
+        updated: false,
+        baselinePath,
+        diff: `(baseline missing: ${baselinePath}; run with --update-baselines to create)`,
+        failureKind: 'BaselineMissing',
+      });
     }
     return writeBaseline(baselinePath, html).map(() => ({
       passed: true,
@@ -96,6 +111,7 @@ export function matchBaseline(
       updated: false,
       baselinePath,
       diff: cmp.diff,
+      failureKind: 'BaselineMismatch',
     });
   });
 }

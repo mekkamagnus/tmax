@@ -14,6 +14,7 @@ import { TaskEither } from '../../src/utils/task-either.ts';
 import { TmaxUseError, rightT } from '../src/errors.ts';
 import { SuiteResult, TestResult, StepResult } from './runner.ts';
 import { CaptureResult } from '../src/frame.ts';
+import { ansiToHtml } from '../../src/render/ansi-to-html.ts';
 
 const CSS = `
   body { font-family: -apple-system, BlinkMacSystemFont, sans-serif; margin: 0; padding: 24px; color: #222; }
@@ -55,9 +56,9 @@ function renderStep(step: StepResult, frameIndex: number): string {
   return `<div class="step"><span class="step-icon ${klass}">${icon}</span><div style="flex:1;"><div class="step-name">${escapeHtml(step.name)}</div>${details}${frame}</div></div>`;
 }
 
-/** Render captured ANSI lines as plain monospaced text. */
+/** Render captured ANSI lines via ansiToHtml so colors/styles survive. */
 function renderFrameLines(frame: CaptureResult): string {
-  return escapeHtml(frame.lines.join('\n'));
+  return frame.lines.map((l) => ansiToHtml(l)).join('<br>');
 }
 
 /** Render one test as HTML. */

@@ -1,0 +1,59 @@
+name: eval-10-command-mode
+description: |
+  Command mode (colon mode): enter via editor-enter-command-mode, exit via
+  editor-exit-command-mode. Tests mode transitions.
+
+setup:
+  - action: setup_file
+    var: FILE
+    name: eval-10-cmd.txt
+    content: |
+      command mode test
+      second line
+
+steps:
+  - name: switch to normal mode
+    eval: '(editor-set-mode "normal")'
+    expect:
+      mode: normal
+
+  - name: open the test file
+    eval: '(find-file "${FILE}")'
+    expect:
+      buffer_contains: "command mode test"
+
+  # -- enter command mode --
+  - name: enter command mode
+    eval: '(editor-enter-command-mode)'
+    expect:
+      mode: command
+
+  # -- exit command mode --
+  - name: exit command mode
+    eval: '(editor-exit-command-mode)'
+    expect:
+      mode: normal
+
+  # -- roundtrip: set mode directly --
+  - name: set command mode directly
+    eval: '(editor-set-mode "command")'
+    expect:
+      mode: command
+
+  - name: set normal mode directly
+    eval: '(editor-set-mode "normal")'
+    expect:
+      mode: normal
+
+  # -- verify editor-status in command mode --
+  - name: enter command mode and set status
+    eval: '(progn (editor-enter-command-mode) (editor-set-status "cmd-test"))'
+    expect:
+      result_contains: 'cmd-test'
+
+  - name: exit back to normal
+    eval: '(editor-exit-command-mode)'
+    expect:
+      mode: normal
+
+cleanup: true

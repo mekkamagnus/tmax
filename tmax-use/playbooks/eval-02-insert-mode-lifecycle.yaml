@@ -1,0 +1,124 @@
+name: eval-02-insert-mode-lifecycle
+description: |
+  Insert mode lifecycle: enter via i/a/A/o/O/I, type text, verify mode
+  transitions and buffer content, escape back to normal.
+
+setup:
+  - action: setup_file
+    var: FILE
+    name: eval-02-insert.txt
+    content: |
+      hello world
+      second line
+
+steps:
+  - name: switch to normal mode
+    eval: '(editor-set-mode "normal")'
+    expect:
+      mode: normal
+
+  - name: open the test file
+    eval: '(find-file "${FILE}")'
+    expect:
+      buffer_contains: "hello world"
+
+  # -- i: enter insert at cursor --
+  - name: position cursor at column 5
+    eval: '(cursor-move 0 5)'
+
+  - name: enter insert mode with i
+    keys: "i"
+    expect:
+      mode: insert
+      cursor_column: 5
+
+  - name: type text in insert mode
+    keys: "BEFORE"
+    wait: 100
+    expect:
+      buffer_contains: "helloBEFORE world"
+
+  - name: escape back to normal
+    keys: "<Escape>"
+    expect:
+      mode: normal
+
+  # -- a: insert after cursor --
+  - name: position cursor at start
+    eval: '(cursor-move 0 0)'
+
+  - name: enter insert after cursor with a
+    keys: "a"
+    expect:
+      mode: insert
+
+  - name: type after cursor
+    keys: "XX"
+    wait: 100
+    expect:
+      buffer_contains: "hXXelloBEFORE world"
+
+  - name: escape back
+    keys: "<Escape>"
+    expect:
+      mode: normal
+
+  # -- o: open line below --
+  - name: position cursor at 0,0
+    eval: '(cursor-move 0 0)'
+
+  - name: open line below with o
+    keys: "o"
+    expect:
+      mode: insert
+
+  - name: type on new line
+    keys: "new line"
+    wait: 100
+    expect:
+      buffer_contains: "new line"
+
+  - name: escape back
+    keys: "<Escape>"
+    expect:
+      mode: normal
+
+  # -- O: open line above --
+  - name: open line above with O
+    keys: "O"
+    expect:
+      mode: insert
+
+  - name: type on line above
+    keys: "top line"
+    wait: 100
+    expect:
+      buffer_contains: "top line"
+
+  - name: escape back
+    keys: "<Escape>"
+    expect:
+      mode: normal
+
+  # -- A: insert at end of line --
+  # After the o/O inserts above, "second line" has shifted down to line 3.
+  - name: position cursor at line 3
+    eval: '(cursor-move 3 0)'
+
+  - name: insert at line end with A
+    keys: "A"
+    expect:
+      mode: insert
+
+  - name: append at line end
+    keys: " END"
+    wait: 100
+    expect:
+      buffer_contains: "second line END"
+
+  - name: escape back
+    keys: "<Escape>"
+    expect:
+      mode: normal
+
+cleanup: true

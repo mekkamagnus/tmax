@@ -7,6 +7,14 @@
  * `--capture` / `--capture-html` flags print only the rendered artifact (ANSI
  * lines or HTML doc), discarding `width` and `height` — useless for assertions
  * that need stable dimensions.
+ *
+ * Dimension plumbing (SPEC-061 Step 4):
+ *   - explicit `frame.capture({ width, height })` args
+ *   - then runner/playbook/CLI options
+ *   - then server fallback (active-frame terminalSize → 80x24)
+ *
+ * The runner must pass configured dimensions on every headless capture,
+ * including assertion captures and failure artifacts.
  */
 
 import { TaskEither, Either } from '../../src/utils/task-either.ts';
@@ -25,6 +33,12 @@ export interface HtmlResult {
   readonly html: string;
   readonly width: number;
   readonly height: number;
+}
+
+/** Optional dimensions passed through to the daemon's `capture` RPC. */
+export interface CaptureOptions {
+  readonly width?: number;
+  readonly height?: number;
 }
 
 /**
@@ -90,17 +104,30 @@ function decodeHtml(raw: unknown): Either<TmaxUseError, HtmlResult> {
   return rightE({ html: html.right, width: width.right, height: height.right });
 }
 
-/** Call the daemon's `capture` method with `{ format: 'ansi' }`. */
-export function captureFrame(client: CaptureClient): TaskEither<TmaxUseError, CaptureResult> {
-  return client.request('capture', { format: 'ansi' }).flatMap((raw) => {
+/** Build the params object for a `capture` JSON-RPC call, including dimensions when provided. */
+function captureParams(format: 'ansi' | 'html', opts?: CaptureOptions): Record<string, unknown> {
+  const params: Record<string, unknown> = { format };
+  if (opts?.width !== undefined) params.width = opts.width;
+  if (opts?.height !== undefined) params.height = opts.height;
+  return params;
+}
+
+/**
+ * Call the daemon's `capture` method with `{ format: 'ansi' }`. When `opts`
+ * provides positive `width` and `height`, they are forwarded to the daemon so
+ * it renders at exactly those dimensions instead of falling back to the
+ * active-frame size or 80x24.
+ */
+export function captureFrame(client: CaptureClient, opts?: CaptureOptions): TaskEither<TmaxUseError, CaptureResult> {
+  return client.request('capture', captureParams('ansi', opts)).flatMap((raw) => {
     const decoded = decodeCapture(raw);
     return Either.isLeft(decoded) ? leftT<CaptureResult>(decoded.left) : rightT(decoded.right);
   });
 }
 
-/** Call the daemon's `capture` method with `{ format: 'html' }`. */
-export function captureHtml(client: CaptureClient): TaskEither<TmaxUseError, HtmlResult> {
-  return client.request('capture', { format: 'html' }).flatMap((raw) => {
+/** Call the daemon's `capture` method with `{ format: 'html' }`. Dimensions forwarded when provided. */
+export function captureHtml(client: CaptureClient, opts?: CaptureOptions): TaskEither<TmaxUseError, HtmlResult> {
+  return client.request('capture', captureParams('html', opts)).flatMap((raw) => {
     const decoded = decodeHtml(raw);
     return Either.isLeft(decoded) ? leftT<HtmlResult>(decoded.left) : rightT(decoded.right);
   });

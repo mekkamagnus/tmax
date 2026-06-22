@@ -14,7 +14,7 @@ import { Socket } from 'net';
 import { spawn, type ChildProcessWithoutNullStreams } from 'child_process';
 import { existsSync } from 'fs';
 import { TaskEither, Either } from '../../src/utils/task-either.ts';
-import { TmaxUseError } from './errors.ts';
+import { TmaxUseError, rightE, leftE } from './errors.ts';
 
 /** Injectable subprocess dependency so unit tests can mock the CLI. */
 export interface TmaxClientDeps {
@@ -229,11 +229,24 @@ export class TmaxClient {
   }
 
   /**
-   * Send a parsed key sequence (the bytes the daemon expects, NOT the source
-   * syntax). Use `parseKeys` first to translate `<Esc>` etc.
+   * Send a sequence of keypress values to the daemon. Each value is one
+   * JSON-RPC `keypress` call so multi-character semantic names (`Up`,
+   * `S-Up`, …) reach the editor intact — the CLI's `--keys` consumer
+   * splits multi-byte sequences into per-byte keypresses, which breaks
+   * arrow keys entirely.
+   *
+   * Use `parseKeys()` + `headlessValues()` (or `compileHeadless()`) to turn a
+   * source sequence like `i hello<Escape>` into the values list.
    */
-  keys(byteSequence: string): TaskEither<TmaxUseError, void> {
-    return this.deps.runClient(['--keys', byteSequence]).map(() => undefined);
+  keys(values: readonly string[]): TaskEither<TmaxUseError, void> {
+    if (values.length === 0) return TaskEither.right<void, TmaxUseError>(undefined);
+    return TaskEither.from(async () => {
+      for (const value of values) {
+        const r = await this.deps.request('keypress', { key: value }).run();
+        if (Either.isLeft(r)) return leftE<void>(r.left);
+      }
+      return rightE<void>(undefined);
+    });
   }
 
   /** Open a file by positional argument (CLI parity). */

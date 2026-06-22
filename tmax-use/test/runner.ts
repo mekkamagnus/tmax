@@ -32,6 +32,13 @@ import {
 } from '../assert/text.ts';
 import { assertScreenContains, assertScreenNotContains } from '../assert/screen.ts';
 import { matchBaseline } from '../assert/baseline.ts';
+import { PromiseFrame } from './promise-frame.ts';
+import { parseKeys, tmuxDispatch, TmuxKey } from '../src/keys.ts';
+import {
+  resolveHeadedMode, startHeadedSession, killHeadedSession, cleanupHeadedSession, sendKeys as tmuxSendKeys,
+  capturePane as tmuxCapturePane, paneDimensions as tmuxPaneDimensions,
+  waitForAttachedFrame, type TmuxSession,
+} from './headed.ts';
 
 export interface StepResult {
   readonly name: string;
@@ -39,6 +46,14 @@ export interface StepResult {
   readonly details: readonly string[];
   readonly frame?: CaptureResult;
   readonly durationMs: number;
+  /**
+   * True when the step's key dispatch went through the headless JSON-RPC
+   * `keypress` path (i.e. NOT through tmux `send-keys`). Spec Step 12a
+   * requires this marker so reports can distinguish UI-fidelity (headed)
+   * steps from protocol-level (non-headed) steps. Undefined on steps that
+   * did no key dispatch (e.g. eval/open/assert-only).
+   */
+  readonly nonHeadedDispatch?: boolean;
 }
 
 export interface TestResult {
@@ -60,12 +75,14 @@ export interface SuiteResult {
 export interface RunnerOptions {
   /** Socket path for the daemon (default: project-default per-instance). */
   readonly socketPath?: string;
-  /** Width passed to the daemon for capture (default 94). */
+  /** Width passed to the daemon for capture (default 80). */
   readonly width?: number;
-  /** Height passed to the daemon for capture (default 29). */
+  /** Height passed to the daemon for capture (default 24). */
   readonly height?: number;
   /** Headed (tmux) mode: spawn a real TUI per playbook that has headed steps. */
   readonly headed?: boolean;
+  /** `--headed=strict`: fail if tmux is unavailable rather than falling back to headless. */
+  readonly headedStrict?: boolean;
   /** Force headless: refuse to spawn tmux (CI default). */
   readonly headless?: boolean;
   /** Update baselines instead of comparing. */
@@ -76,10 +93,16 @@ export interface RunnerOptions {
   readonly baselinesDir?: string;
   /** Project root for daemon + setup files. */
   readonly projectRoot?: string;
+  /**
+   * Existing tmux session name. When set, headed mode creates a new window
+   * inside this session instead of a standalone detached session. The window
+   * is killed after the test; the session is left intact.
+   */
+  readonly session?: string;
 }
 
-const DEFAULT_WIDTH = 94;
-const DEFAULT_HEIGHT = 29;
+const DEFAULT_WIDTH = 80;
+const DEFAULT_HEIGHT = 24;
 
 /** Default project root (resolved from this file's location). */
 const DEFAULT_PROJECT_ROOT = pathResolve(new URL('..', import.meta.url).pathname, '..');
@@ -118,6 +141,24 @@ interface PlaybookContext {
   instance: TmaxInstance;
   frame: Frame;
   artifacts: CaptureResult[];
+  width: number;
+  height: number;
+  /**
+   * Active tmux session if a headed mode was launched for this playbook.
+   * When defined, `headed: true` steps dispatch keys via tmux `send-keys`
+   * and capture via `tmux capture-pane` for UI fidelity. When undefined,
+   * all steps fall back to protocol-level JSON-RPC dispatch.
+   */
+  headedSession?: TmuxSession;
+  /** When true, all steps use headed dispatch (not just those with `headed: true`). */
+  forceHeaded?: boolean;
+}
+
+/** Resolve capture dimensions for a playbook: playbook.terminal → CLI/runner defaults → 80x24. */
+function resolveDimensions(playbook: Playbook | undefined, opts: RunnerOptions): { width: number; height: number } {
+  const width = playbook?.terminal?.width ?? opts.width ?? DEFAULT_WIDTH;
+  const height = playbook?.terminal?.height ?? opts.height ?? DEFAULT_HEIGHT;
+  return { width, height };
 }
 
 /** Resolve ${VAR} references in a string. */
@@ -162,39 +203,126 @@ function effectiveWait(step: PlaybookStep, branch: 'keys' | 'eval'): number {
 }
 
 /**
+ * Dispatch a key sequence to a tmux pane using `send-keys`. Consecutive
+ * same-kind tokens (named vs. literal) are batched into a single tmux call to
+ * minimize subprocess overhead. Named tokens go as `send-keys N1 N2 …`; literal
+ * runs go as `send-keys -l "..."` to preserve case and special chars.
+ */
+function dispatchHeadedKeys(session: TmuxSession, sequence: string): TaskEither<TmaxUseError, void> {
+  const parsed = parseKeys(sequence);
+  if (Either.isLeft(parsed)) return TaskEither.left(parsed.left);
+  const tokens = tmuxDispatch(parsed.right);
+  // Group consecutive same-kind tokens to minimize tmux invocations.
+  const groups: TmuxKey[][] = [];
+  for (const t of tokens) {
+    const last = groups[groups.length - 1];
+    if (last && last[0]!.kind === t.kind) last.push(t);
+    else groups.push([t]);
+  }
+  let chain: TaskEither<TmaxUseError, void> = rightT<void>(undefined);
+  for (const g of groups) {
+    chain = chain.flatMap(() => {
+      if (g[0]!.kind === 'named') {
+        return tmuxSendKeys(session, g.map((t) => t.value).join(' '));
+      }
+      // Literal: join the literal values and send via -l so case/specials survive.
+      const text = g.map((t) => t.value).join('');
+      return tmuxSendKeys(session, text, true);
+    });
+  }
+  return chain;
+}
+
+/**
+ * Capture a frame from a tmux pane. Returns the visible pane content as ANSI
+ * lines plus the live pane dimensions. Used for `headed: true` steps where the
+ * TUI is the rendering surface (vs. the headless capture RPC for non-headed
+ * steps).
+ */
+function captureHeadedFrame(session: TmuxSession): TaskEither<TmaxUseError, CaptureResult> {
+  return tmuxPaneDimensions(session).flatMap((dims) =>
+    tmuxCapturePane(session, { ansi: true }).map((out) => {
+      // capture-pane -p prints one pane line per output line. Trim the trailing
+      // newline but preserve internal blank lines (the editor may render them).
+      const lines = out.endsWith('\n') ? out.slice(0, -1).split('\n') : out.split('\n');
+      return { lines, width: dims.width, height: dims.height } as CaptureResult;
+    }),
+  );
+}
+
+/** Capture a frame appropriate to the step's dispatch mode. */
+function captureForStep(ctx: PlaybookContext, headed: boolean): TaskEither<TmaxUseError, CaptureResult | undefined> {
+  if (headed && ctx.headedSession) {
+    return captureHeadedFrame(ctx.headedSession).flatMap((r) => {
+      ctx.artifacts.push(r);
+      return rightT<CaptureResult | undefined>(r);
+    }).mapLeft((): TmaxUseError => TmaxUseError.captureFailed('could not capture headed frame for report (continuing)'));
+  }
+  return captureStepFrame(ctx);
+}
+
+/**
  * Execute one step. Captures a frame after the action for the reporter.
  * Returns either Right(StepResult) or Left(error) — the latter aborts the
  * playbook (a transport failure, not just an assertion failure).
+ *
+ * Dispatch selection: if the step has `headed: true` and a tmux session is
+ * active in `ctx`, keys are sent via `tmux send-keys` for UI fidelity.
+ * Otherwise, keys go through the headless JSON-RPC `keypress` path and the
+ * StepResult carries `nonHeadedDispatch: true` per spec Step 12a.
  */
 function runStep(step: PlaybookStep, index: number, ctx: PlaybookContext): TaskEither<TmaxUseError, StepResult> {
   const label = step.name ?? `step ${index + 1}`;
   const start = Date.now();
   const details: string[] = [];
   let evalResult = '';
+  // A step is "headed" only when both the step opts in AND the runner has an
+  // active tmux session for this playbook. Otherwise it falls back to the
+  // protocol-level dispatch path (and is marked non-headed in the result).
+  const useHeadedDispatch = !!ctx.headedSession && (!!step.headed || !!ctx.forceHeaded);
 
   return applySetupCursor(step, ctx).flatMap(() => {
-    // Action: keys XOR eval.
-    if (step.keys && step.eval) {
+    // Action: open XOR keys XOR eval.
+    const actionFields = (['open', 'keys', 'eval'] as const).filter((k) => step[k] !== undefined);
+    if (actionFields.length > 1) {
       return rightT<StepResult>({
         name: label, passed: false,
-        details: ['step has both keys and eval — they are mutually exclusive'],
+        details: [`step has multiple actions (${actionFields.join(', ')}) — they are mutually exclusive`],
         durationMs: Date.now() - start,
       });
     }
-    const action: TaskEither<TmaxUseError, void> = step.keys
-      ? ctx.frame.keys(resolveVars(step.keys, ctx)).flatMap(() => TaskEitherUtils.delay(effectiveWait(step, 'keys')) as unknown as TaskEither<TmaxUseError, void>)
-      : step.eval
-        ? ctx.frame.eval(resolveVars(step.eval, ctx)).flatMap((r) => {
-            evalResult = r;
-            return TaskEitherUtils.delay(effectiveWait(step, 'eval')) as unknown as TaskEither<TmaxUseError, void>;
-          })
-        : rightT<void>(undefined);
+    // Build the action task. `keys` chooses headed vs. headless dispatch; open
+    // and eval always go through the daemon (open is a buffer op; eval is
+    // T-Lisp and has no UI-fidelity analog).
+    let action: TaskEither<TmaxUseError, void>;
+    let dispatchedNonHeaded = false;
+    if (step.open) {
+      action = ctx.frame.openFile(resolveVars(step.open, ctx)).flatMap(() => TaskEitherUtils.delay(effectiveWait(step, 'eval')) as unknown as TaskEither<TmaxUseError, void>);
+    } else if (step.keys) {
+      if (useHeadedDispatch) {
+        action = dispatchHeadedKeys(ctx.headedSession!, resolveVars(step.keys, ctx)).flatMap(() => TaskEitherUtils.delay(effectiveWait(step, 'keys')) as unknown as TaskEither<TmaxUseError, void>);
+      } else {
+        // Step opted out of headed (or no session active) — protocol-level
+        // dispatch. Flag for the StepResult marker.
+        dispatchedNonHeaded = true;
+        action = ctx.frame.keys(resolveVars(step.keys, ctx)).flatMap(() => TaskEitherUtils.delay(effectiveWait(step, 'keys')) as unknown as TaskEither<TmaxUseError, void>);
+      }
+    } else if (step.eval) {
+      action = ctx.frame.eval(resolveVars(step.eval, ctx)).flatMap((r) => {
+        evalResult = r;
+        return TaskEitherUtils.delay(effectiveWait(step, 'eval')) as unknown as TaskEither<TmaxUseError, void>;
+      });
+    } else {
+      action = rightT<void>(undefined);
+    }
 
     return action.flatMap(() => {
       // If no expect block, this is a pure action step.
       if (!step.expect || Object.keys(step.expect).length === 0) {
-        return captureStepFrame(ctx).map((frame) => ({
-          name: label, passed: true, details, frame, durationMs: Date.now() - start,
+        return captureForStep(ctx, useHeadedDispatch).map((frame) => ({
+          name: label, passed: true, details, frame,
+          ...(dispatchedNonHeaded ? { nonHeadedDispatch: true } : {}),
+          durationMs: Date.now() - start,
         } as StepResult));
       }
       // Run assertions.
@@ -204,17 +332,19 @@ function runStep(step: PlaybookStep, index: number, ctx: PlaybookContext): TaskE
           details.push(o.detail);
           if (!o.pass) passed = false;
         }
-        return captureStepFrame(ctx).map((frame) => ({
-          name: label, passed, details, frame, durationMs: Date.now() - start,
+        return captureForStep(ctx, useHeadedDispatch).map((frame) => ({
+          name: label, passed, details, frame,
+          ...(dispatchedNonHeaded ? { nonHeadedDispatch: true } : {}),
+          durationMs: Date.now() - start,
         } as StepResult));
       });
     });
   });
 }
 
-/** Capture a frame for the reporter (best-effort — never fail a step on capture). */
+/** Capture a frame for the reporter (best-effort — never fail a step on capture). Forwards dimensions. */
 function captureStepFrame(ctx: PlaybookContext): TaskEither<TmaxUseError, CaptureResult | undefined> {
-  return ctx.frame.capture().flatMap((r) => {
+  return ctx.frame.capture({ width: ctx.width, height: ctx.height }).flatMap((r) => {
     ctx.artifacts.push(r);
     return rightT<CaptureResult | undefined>(r);
   }).mapLeft((): TmaxUseError => TmaxUseError.captureFailed('could not capture frame for report (continuing)'));
@@ -336,7 +466,8 @@ function runPlaybookTE(playbookPath: string, opts: RunnerOptions): TaskEither<Tm
     const launched = await TmaxInstance.launch(instanceOpts).run();
     if (Either.isLeft(launched)) return Either.left<TmaxUseError, TestResult>(launched.left);
     const instance = launched.right;
-    const frame = instance.frame(playbook.name);
+    const { width, height } = resolveDimensions(playbook, opts);
+    const frame = instance.frame(playbook.name, { width, height });
 
     const ctx: PlaybookContext = {
       playbook,
@@ -346,10 +477,14 @@ function runPlaybookTE(playbookPath: string, opts: RunnerOptions): TaskEither<Tm
       instance,
       frame,
       artifacts: [],
+      width,
+      height,
     };
 
     const stepResults: StepResult[] = [];
     let failureMessage: string | undefined;
+    let headedSession: TmuxSession | undefined;
+    let headedSessionIsExisting = false;
 
     try {
       // 2. Write setup files.
@@ -360,8 +495,59 @@ function runPlaybookTE(playbookPath: string, opts: RunnerOptions): TaskEither<Tm
       const open = await openFirstSetupFile(ctx).run();
       if (Either.isLeft(open)) return Either.left<TmaxUseError, TestResult>(open.left);
 
+      // 3a. If headed mode is requested AND any step opts in, launch a tmux
+      //     session bound to the daemon socket. The session is shared by all
+      //     headed steps in this playbook and torn down in `finally`.
+      //     When --session is specified, all steps are promoted to headed.
+      const wantsHeaded = !!opts.headed && (opts.session || playbook.steps.some((s) => s.headed));
+      if (wantsHeaded) {
+        const decision = resolveHeadedMode(true, opts.headedStrict ?? false);
+        if (decision.kind === 'fail') {
+          failureMessage = `--headed failed: ${decision.reason}`;
+        } else if (decision.kind === 'skip') {
+          process.stderr.write(`tmax-use: skipping headed steps for ${playbook.name} — ${decision.reason}\n`);
+        } else if (decision.kind === 'fallback') {
+          process.stderr.write(`tmax-use: warning for ${playbook.name} — ${decision.reason}; running headed steps headlessly\n`);
+        } else {
+          // launch: spawn tmux session (or window in existing session), then
+          // wait for the TUI client to attach.
+          const isExisting = !!opts.session;
+          const sessionName = isExisting ? opts.session! : `tmax-use-${process.pid}-${Date.now()}`;
+          const windowName = isExisting ? `tmax-use-${Date.now()}` : 'tmax';
+          const started = await startHeadedSession({
+            sessionName,
+            windowName,
+            socketPath: instance.socketPath,
+            width,
+            height,
+            existingSession: isExisting ? opts.session : undefined,
+          }).run();
+          if (Either.isLeft(started)) {
+            failureMessage = `headed session failed to start: ${describeTmaxUseError(started.left)}`;
+          } else {
+            headedSession = started.right;
+            ctx.headedSession = headedSession;
+            ctx.forceHeaded = !!opts.session;
+            // Wait for the TUI client to attach to the daemon so subsequent
+            // `tmux send-keys` calls land on a real rendering surface.
+            const attached = await waitForAttachedFrame(instance.socketPath, 30).run();
+            if (Either.isLeft(attached)) {
+              // Don't fail the whole playbook — just warn and continue. The
+              // pane still has a shell; the next capture will surface empty
+              // frames which the test author can interpret.
+              process.stderr.write(
+                `tmax-use: warning — TUI client did not attach within timeout (${describeTmaxUseError(attached.left)}); headed captures may be empty\n`,
+              );
+            }
+            // Track whether we're in an existing session so cleanup uses
+            // kill-window instead of kill-session.
+            headedSessionIsExisting = isExisting;
+          }
+        }
+      }
+
       // 4. (Optional) major-mode verification.
-      if (playbook.mode) {
+      if (!failureMessage && playbook.mode) {
         const m = await frame.majorMode().run();
         if (Either.isLeft(m) || m.right !== playbook.mode) {
           failureMessage = `expected mode ${JSON.stringify(playbook.mode)}, got ${Either.isRight(m) ? JSON.stringify(m.right) : 'error'}`;
@@ -386,6 +572,12 @@ function runPlaybookTE(playbookPath: string, opts: RunnerOptions): TaskEither<Tm
         }
       }
     } finally {
+      // Tear down tmux session first so the TUI client exits cleanly, then
+      // kill the daemon. Best-effort: an error here must not mask the real
+      // failure message above.
+      if (headedSession) {
+        try { await cleanupHeadedSession(headedSession, headedSessionIsExisting).run(); } catch { /* fine */ }
+      }
       await cleanup(ctx).run();
       await instance.close().run();
     }
@@ -413,7 +605,8 @@ export interface RegisteredTest {
 
 export interface TmaxUseTestContext {
   readonly instance: TmaxInstance;
-  readonly frame: Frame;
+  /** Promise-based frame fixture — user tests `await frame.keys(...)` etc. */
+  readonly frame: PromiseFrame;
   readonly tmpDir: string;
   readonly artifactsDir: string;
 }
@@ -481,7 +674,9 @@ export async function runTestFile(testPath: string, opts: RunnerOptions): Promis
     };
   }
   const instance = launched.right;
-  const frame = instance.frame(testPath);
+  const width = opts.width ?? DEFAULT_WIDTH;
+  const height = opts.height ?? DEFAULT_HEIGHT;
+  const frame = instance.frame(testPath, { width, height });
   const tmpDir = opts.outputDir ? join(opts.outputDir, `tmp-${runId}`) : `/tmp/tmax-use-${runId}`;
   const artifactsDir = opts.outputDir ? join(opts.outputDir, `artifacts-${runId}`) : `/tmp/tmax-use-artifacts-${runId}`;
   try {
@@ -494,7 +689,7 @@ export async function runTestFile(testPath: string, opts: RunnerOptions): Promis
 
   for (const t of local) {
     const stepStart = Date.now();
-    const ctx: TmaxUseTestContext = { instance, frame, tmpDir, artifactsDir };
+    const ctx: TmaxUseTestContext = { instance, frame: new PromiseFrame(frame), tmpDir, artifactsDir };
     try {
       await t.fn(ctx);
       stepResults.push({ name: t.name, passed: true, details: [], durationMs: Date.now() - stepStart });
@@ -586,6 +781,29 @@ function dedupe<T>(xs: readonly T[]): T[] {
 /** Run every playbook + test file sequentially. */
 export async function runAll(patterns: readonly string[], opts: RunnerOptions): Promise<SuiteResult> {
   const start = Date.now();
+
+  // Headed availability decision: fail / skip / fallback / launch.
+  if (opts.headed) {
+    const decision = resolveHeadedMode(true, opts.headedStrict ?? false);
+    if (decision.kind === 'fail') {
+      return {
+        results: [{
+          name: '<headed-mode>', source: '<headed-mode>', passed: false, steps: [],
+          failureMessage: `--headed failed: ${decision.reason}`, durationMs: 0,
+        }],
+        passed: 0, failed: 1, durationMs: Date.now() - start,
+      };
+    }
+    if (decision.kind === 'skip') {
+      process.stderr.write(`tmax-use: skipping headed tests in CI — ${decision.reason}\n`);
+      return { results: [], passed: 0, failed: 0, durationMs: Date.now() - start };
+    }
+    if (decision.kind === 'fallback') {
+      process.stderr.write(`tmax-use: warning — ${decision.reason}; falling back to headless\n`);
+      opts = { ...opts, headed: false };
+    }
+  }
+
   const { playbooks, tests } = await discoverTargets(patterns, opts);
   const results: TestResult[] = [];
 

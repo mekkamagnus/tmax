@@ -1,0 +1,64 @@
+name: eval-13-long-lines
+description: |
+  Long lines: open a file with a 200+ character line, verify buffer content,
+  line count, and that cursor can navigate to high column positions.
+
+setup:
+  - action: setup_file
+    var: FILE
+    name: eval-13-longline.txt
+    content: |
+      01234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789
+      short line
+      END
+
+steps:
+  - name: switch to normal mode
+    eval: '(editor-set-mode "normal")'
+    expect:
+      mode: normal
+
+  - name: open the test file
+    eval: '(find-file "${FILE}")'
+    expect:
+      buffer_contains: "0123456789"
+
+  - name: verify 3 lines
+    eval: '(buffer-line-count)'
+    expect:
+      result_contains: '4'
+
+  # -- verify line start and end --
+  - name: line 0 starts with 0
+    eval: '(buffer-line 0)'
+    expect:
+      result_contains: '0123456789'
+
+  - name: line 0 ends with 9
+    eval: '(buffer-line 0)'
+    expect:
+      result_contains: '789'
+
+  - name: line 2 is END
+    eval: '(buffer-line 2)'
+    expect:
+      result_contains: 'END'
+
+  # -- cursor to high column --
+  - name: move to column 150
+    eval: '(cursor-move 0 150)'
+    expect:
+      cursor_column: 150
+
+  - name: move to column 0
+    eval: '(cursor-move 0 0)'
+    expect:
+      cursor_column: 0
+
+  # -- dollar goes to last col of long line --
+  - name: dollar on long line
+    eval: '(progn (cursor-move 0 0) (line-last-column) (cursor-column))'
+    expect:
+      result_contains: '229'
+
+cleanup: true

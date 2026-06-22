@@ -1,0 +1,76 @@
+name: eval-05-multi-buffer
+description: |
+  Multi-buffer workflow: open two files, switch between them using find-file,
+  verify active buffer and buffer list via eval assertions.
+
+setup:
+  - action: setup_file
+    var: FILE1
+    name: eval-05-alpha.txt
+    content: |
+      alpha content here
+      more alpha
+  - action: setup_file
+    var: FILE2
+    name: eval-05-beta.txt
+    content: |
+      beta content here
+      more beta
+
+steps:
+  - name: switch to normal mode
+    eval: '(editor-set-mode "normal")'
+    expect:
+      mode: normal
+
+  - name: open first file
+    eval: '(find-file "${FILE1}")'
+    expect:
+      buffer_contains: "alpha content"
+
+  - name: verify current buffer has alpha
+    eval: '(buffer-current)'
+    expect:
+      result_contains: "alpha"
+
+  - name: open second file
+    eval: '(find-file "${FILE2}")'
+    expect:
+      buffer_contains: "beta content"
+
+  - name: verify current buffer has beta
+    eval: '(buffer-current)'
+    expect:
+      result_contains: "beta"
+
+  - name: buffer list has alpha
+    eval: '(buffer-list)'
+    expect:
+      result_contains: "alpha"
+
+  - name: buffer list has beta
+    eval: '(buffer-list)'
+    expect:
+      result_contains: "beta"
+
+  - name: switch back to first file via find-file
+    eval: '(find-file "${FILE1}")'
+    expect:
+      buffer_contains: "alpha content"
+
+  - name: current buffer is alpha again
+    eval: '(buffer-current)'
+    expect:
+      result_contains: "alpha"
+
+  - name: switch back to second file via find-file
+    eval: '(find-file "${FILE2}")'
+    expect:
+      buffer_contains: "beta content"
+
+  - name: current buffer is beta again
+    eval: '(buffer-current)'
+    expect:
+      result_contains: "beta"
+
+cleanup: true

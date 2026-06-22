@@ -1,0 +1,151 @@
+name: eval-01-cursor-movement
+description: |
+  Cursor movement marathon: h/j/k/l, w/b/e, 0/$, gg/G, _, -/+, f{char}, %.
+  Verifies cursor_line and cursor_column after each move on a known 5-line file.
+
+setup:
+  - action: setup_file
+    var: FILE
+    name: eval-01-cursor.txt
+    content: |
+      First line of text here
+      Second line with more words
+      Third line has (parens) here
+      Fourth
+      Last line end
+
+steps:
+  - name: switch to normal mode
+    eval: '(editor-set-mode "normal")'
+    expect:
+      mode: normal
+
+  - name: open the test file
+    eval: '(find-file "${FILE}")'
+    expect:
+      buffer_contains: "First line"
+
+  # -- h/j/k/l basic moves --
+  - name: position cursor at 0,0
+    eval: '(cursor-move 0 0)'
+    expect:
+      cursor_line: 0
+      cursor_column: 0
+
+  - name: move right 5 with l
+    keys: "lllll"
+    expect:
+      cursor_line: 0
+      cursor_column: 5
+
+  - name: position cursor at 0,5
+    eval: '(cursor-move 0 5)'
+    expect:
+      cursor_line: 0
+      cursor_column: 5
+
+  - name: move down with j
+    keys: "j"
+    expect:
+      cursor_line: 1
+      cursor_column: 5
+
+  - name: move up with k
+    keys: "k"
+    expect:
+      cursor_line: 0
+      cursor_column: 5
+
+  - name: move left with h
+    keys: "hh"
+    expect:
+      cursor_line: 0
+      cursor_column: 3
+
+  # -- word movement w/b/e --
+  - name: position cursor at 0,0
+    eval: '(cursor-move 0 0)'
+    expect:
+      cursor_column: 0
+
+  - name: word-forward w
+    keys: "w"
+    expect:
+      cursor_line: 0
+      cursor_column: 6
+
+  - name: word-forward again
+    keys: "w"
+    expect:
+      cursor_column: 11
+
+  - name: word-backward b
+    keys: "b"
+    expect:
+      cursor_column: 6
+
+  - name: word-end e
+    keys: "e"
+    expect:
+      cursor_column: 9
+
+  # -- line bounds 0/$ --
+  - name: go to line start with 0
+    keys: "0"
+    expect:
+      cursor_column: 0
+
+  - name: go to line end with dollar
+    keys: "$"
+    expect:
+      cursor_column: 22
+
+  # -- first-non-blank _ --
+  - name: go to first non-blank with underscore
+    keys: "_"
+    expect:
+      cursor_column: 0
+
+  # -- file bounds gg/G (trailing newline adds an empty last line, so G lands
+  #    on line 5, not the last content line 4) --
+  - name: go to last line with G
+    keys: "G"
+    expect:
+      cursor_line: 5
+
+  - name: go to first line with gg
+    keys: "gg"
+    expect:
+      cursor_line: 0
+
+  # -- line navigation -/+ --
+  - name: position cursor at 0,0
+    eval: '(cursor-move 0 0)'
+
+  - name: line-next with plus
+    keys: "+"
+    expect:
+      cursor_line: 1
+
+  - name: line-previous with minus
+    keys: "-"
+    expect:
+      cursor_line: 0
+
+  # -- match bracket % --
+  - name: position cursor at line 2
+    eval: '(cursor-move 2 0)'
+
+  - name: find open paren
+    keys: "f("
+    expect:
+      cursor_line: 2
+      cursor_column: 15
+
+  - name: match bracket with percent
+    keys: "%"
+    expect:
+      cursor_line: 2
+      cursor_column: 22
+
+cleanup: true

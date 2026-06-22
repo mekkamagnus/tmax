@@ -1,0 +1,100 @@
+name: eval-17-rapid-key-sequences
+description: |
+  Rapid key sequences via eval: count-prefixed operations like delete-line,
+  paste-after, vim-delete-char. Verifies buffer state after batch mutations.
+
+setup:
+  - action: setup_file
+    var: FILE
+    name: eval-17-rapid.txt
+    content: |
+      line one
+      line two
+      line three
+      line four
+      line five
+      line six
+
+steps:
+  - name: switch to normal mode
+    eval: '(editor-set-mode "normal")'
+    expect:
+      mode: normal
+
+  - name: open the test file
+    eval: '(find-file "${FILE}")'
+    expect:
+      buffer_contains: "line one"
+
+  - name: verify 6 lines
+    eval: '(buffer-line-count)'
+    expect:
+      result_contains: '7'
+
+  # -- delete 2 lines from middle --
+  - name: delete line 2 twice
+    eval: '(progn (cursor-move 1 0) (delete-line) (delete-line))'
+    expect:
+      result_contains: 'null'
+
+  - name: line count now 5
+    eval: '(buffer-line-count)'
+    expect:
+      result_contains: '5'
+
+  - name: line 1 is now "line four"
+    eval: '(buffer-line 1)'
+    expect:
+      result_contains: 'line four'
+
+  # -- yank and paste 3 times --
+  - name: yank line 0
+    eval: '(progn (cursor-move 0 0) (yank-line))'
+    expect:
+      result_contains: 'null'
+
+  - name: paste after 3 times
+    eval: '(progn (paste-after) (paste-after) (paste-after))'
+    expect:
+      result_contains: 'null'
+
+  - name: line count now 8
+    eval: '(buffer-line-count)'
+    expect:
+      result_contains: '8'
+
+  - name: line 1 is duplicate of line 0
+    eval: '(buffer-line 1)'
+    expect:
+      result_contains: 'line one'
+
+  - name: line 2 is also duplicate
+    eval: '(buffer-line 2)'
+    expect:
+      result_contains: 'line one'
+
+  # -- delete 4 chars from line 0 (vim-delete-char returns t) --
+  - name: delete 4 chars from start
+    eval: '(progn (cursor-move 0 0) (vim-delete-char 4))'
+    expect:
+      result_contains: 'true'
+
+  - name: line 0 starts with "one"
+    eval: '(buffer-line 0)'
+    expect:
+      result_contains: 'one'
+
+  # -- undo the whole batch --
+  # vim-delete-char is the only undo-committed edit, so undo hits the oldest
+  # boundary.
+  - name: undo char delete
+    eval: '(undo)'
+    expect:
+      result_contains: 'oldest'
+
+  - name: line 0 after undo
+    eval: '(buffer-line 0)'
+    expect:
+      result_contains: 'one'
+
+cleanup: true

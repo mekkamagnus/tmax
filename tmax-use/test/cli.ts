@@ -15,6 +15,7 @@
  *   --output <dir>          Where to write reports + artifacts (default: ./tmax-use-out).
  *   --baselines <dir>       Where to read/write baselines (default: ./tmax-use/baselines).
  *   --socket <path>         Reuse a specific daemon socket.
+ *   --session <name>        Create headed window in existing tmux session.
  *   --reporter <term|html|junit|all>  Reporter to enable (default: all).
  *   --no-term               Suppress terminal output.
  *   --help, -h              Show help.
@@ -34,12 +35,15 @@ import { TaskEither, Either } from '../../src/utils/task-either.ts';
 
 interface CliArgs {
   patterns: string[];
-  headed: boolean;
+  headed: boolean | 'strict';
   headless: boolean;
   updateBaselines: boolean;
   outputDir: string;
   baselinesDir: string;
   socketPath?: string;
+  session?: string;
+  width?: number;
+  height?: number;
   reporters: Set<'term' | 'html' | 'junit'>;
   showTerm: boolean;
 }
@@ -47,12 +51,15 @@ interface CliArgs {
 function parseArgs(argv: readonly string[]): CliArgs | { error: string } {
   const patterns: string[] = [];
   const reporters = new Set<'term' | 'html' | 'junit'>(['term', 'html', 'junit']);
-  let headed = false;
+  let headed: boolean | 'strict' = false;
   let headless = false;
   let updateBaselines = false;
   let outputDir = './tmax-use-out';
   let baselinesDir = './tmax-use/baselines';
   let socketPath: string | undefined;
+  let session: string | undefined;
+  let width: number | undefined;
+  let height: number | undefined;
   let showTerm = true;
 
   for (let i = 0; i < argv.length; i++) {
@@ -68,6 +75,9 @@ function parseArgs(argv: readonly string[]): CliArgs | { error: string } {
         break;
       case '--headed':
         headed = true;
+        break;
+      case '--headed=strict':
+        headed = 'strict';
         break;
       case '--headless':
         headless = true;
@@ -89,6 +99,26 @@ function parseArgs(argv: readonly string[]): CliArgs | { error: string } {
         socketPath = argv[++i] ?? '';
         if (!socketPath) return { error: '--socket requires a value' };
         break;
+      case '--session':
+        session = argv[++i] ?? '';
+        if (!session) return { error: '--session requires a value' };
+        break;
+      case '--width': {
+        const v = argv[++i];
+        if (v === undefined) return { error: '--width requires a value' };
+        const n = Number.parseInt(v, 10);
+        if (!Number.isInteger(n) || n <= 0) return { error: `--width must be a positive integer (got ${v})` };
+        width = n;
+        break;
+      }
+      case '--height': {
+        const v = argv[++i];
+        if (v === undefined) return { error: '--height requires a value' };
+        const n = Number.parseInt(v, 10);
+        if (!Number.isInteger(n) || n <= 0) return { error: `--height must be a positive integer (got ${v})` };
+        height = n;
+        break;
+      }
       case '--no-term':
         showTerm = false;
         break;
@@ -118,7 +148,7 @@ function parseArgs(argv: readonly string[]): CliArgs | { error: string } {
 
   return {
     patterns, headed, headless, updateBaselines,
-    outputDir, baselinesDir, socketPath, reporters, showTerm,
+    outputDir, baselinesDir, socketPath, session, width, height, reporters, showTerm,
   };
 }
 
@@ -130,11 +160,15 @@ runs them under fresh tmax daemons.
 
 Options:
   --headed                Force headed (tmux) mode for opted-in steps.
+  --headed=strict         Force headed mode; fail if tmux is unavailable.
   --headless              Force headless mode (default; CI-friendly).
   --update-baselines      Overwrite baselines instead of comparing.
   --output <dir>          Where to write reports + artifacts (default: ./tmax-use-out).
   --baselines <dir>       Where to read/write baselines (default: ./tmax-use/baselines).
   --socket <path>         Reuse a specific daemon socket.
+  --session <name>        Create headed window in existing tmux session.
+  --width <n>             Default capture width (headless; default 80).
+  --height <n>            Default capture height (headless; default 24).
   --reporter <term|html|junit|all>  Reporter to enable (default: all).
   --no-term               Suppress terminal output.
   -h, --help              Show this help.
@@ -168,12 +202,16 @@ async function main(): Promise<number> {
   }
 
   const opts: RunnerOptions = {
-    headed: parsed.headed,
+    headed: parsed.headed === true,
+    headedStrict: parsed.headed === 'strict',
     headless: parsed.headless,
     updateBaselines: parsed.updateBaselines,
     outputDir: isAbsolute(parsed.outputDir) ? parsed.outputDir : resolve(process.cwd(), parsed.outputDir),
     baselinesDir: isAbsolute(parsed.baselinesDir) ? parsed.baselinesDir : resolve(process.cwd(), parsed.baselinesDir),
     socketPath: parsed.socketPath,
+    session: parsed.session,
+    width: parsed.width,
+    height: parsed.height,
   };
 
   const suite = await runAll(parsed.patterns, opts);

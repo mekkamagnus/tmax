@@ -1,0 +1,56 @@
+name: eval-06-save-load-roundtrip
+description: |
+  Buffer modification and write-file-content exercise: modify the buffer,
+  verify buffer-text reflects the change, and call write-file-content
+  (which returns null). Note: the daemon does not wire a filesystem into
+  the editor API, so write-file-content is fire-and-forget and the on-disk
+  file is not actually updated; this playbook asserts the observable
+  in-memory behavior instead of a disk roundtrip.
+
+setup:
+  - action: setup_file
+    var: FILE
+    name: eval-06-save.txt
+    content: |
+      original line one
+      original line two
+
+steps:
+  - name: switch to normal mode
+    eval: '(editor-set-mode "normal")'
+    expect:
+      mode: normal
+
+  - name: open the test file
+    eval: '(find-file "${FILE}")'
+    expect:
+      buffer_contains: "original line one"
+
+  # -- modify buffer --
+  - name: append text to line 0
+    eval: '(progn (cursor-move 0 17) (buffer-insert " MODIFIED"))'
+    expect:
+      result_contains: 'MODIFIED'
+
+  - name: buffer shows modification
+    expect:
+      buffer_contains: "original line one MODIFIED"
+
+  - name: buffer-text reflects the change
+    eval: '(buffer-line 0)'
+    expect:
+      result_contains: 'MODIFIED'
+
+  # -- write-file-content returns nil (fire-and-forget; no fs in daemon) --
+  - name: write-file-content returns null
+    eval: '(write-file-content "${FILE}" (buffer-text))'
+    expect:
+      result_contains: 'null'
+
+  # -- modification persists in memory --
+  - name: modification still on line 0
+    eval: '(buffer-line 0)'
+    expect:
+      result_contains: 'MODIFIED'
+
+cleanup: true

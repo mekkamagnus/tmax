@@ -1,0 +1,61 @@
+name: eval-11-syntax-highlighting
+description: |
+  Syntax highlighting smoke test: open a .ts file with known keywords,
+  verify buffer loads correctly and contains all keywords. Tests file loading
+  and content integrity for source files.
+
+setup:
+  - action: setup_file
+    var: FILE
+    name: eval-11-test.ts
+    content: |
+      function greet(name: string): string {
+        const msg = "Hello, " + name;
+        if (name.length > 0) {
+          return msg;
+        }
+        return "World";
+      }
+      export default greet;
+
+steps:
+  - name: switch to normal mode
+    eval: '(editor-set-mode "normal")'
+    expect:
+      mode: normal
+
+  - name: open the ts file
+    eval: '(find-file "${FILE}")'
+    expect:
+      buffer_contains: "function greet"
+
+  # -- verify all keywords loaded --
+  - name: const keyword present
+    expect:
+      buffer_contains: "const msg"
+
+  - name: if keyword present
+    expect:
+      buffer_contains: "if (name"
+
+  - name: return keyword present
+    expect:
+      buffer_contains: "return msg"
+
+  - name: export keyword present
+    expect:
+      buffer_contains: "export default"
+
+  # -- verify line count --
+  - name: file has 9 lines
+    eval: '(buffer-line-count)'
+    expect:
+      result_contains: '9'
+
+  # -- verify buffer-name contains .ts --
+  - name: buffer has ts extension
+    eval: '(buffer-current)'
+    expect:
+      result_contains: 'eval-11-test'
+
+cleanup: true

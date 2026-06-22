@@ -1,0 +1,60 @@
+name: eval-14-empty-buffer
+description: |
+  Empty buffer verification: create a new buffer, switch to it, verify it is
+  empty. Tests buffer-create and buffer-switch on a clean slate.
+
+setup: []
+
+steps:
+  - name: switch to normal mode
+    eval: '(editor-set-mode "normal")'
+    expect:
+      mode: normal
+
+  # -- create a fresh buffer --
+  - name: create an empty buffer
+    eval: '(buffer-create "empty-test")'
+    expect:
+      result_contains: 'empty-test'
+
+  - name: switch to it
+    eval: '(buffer-switch "empty-test")'
+    expect:
+      result_contains: 'empty-test'
+
+  - name: verify current buffer
+    eval: '(buffer-current)'
+    expect:
+      result_contains: 'empty-test'
+
+  # -- verify buffer state --
+  - name: position cursor at origin
+    eval: '(cursor-move 0 0)'
+
+  - name: verify cursor line
+    eval: '(cursor-line)'
+    expect:
+      result_contains: '0'
+
+  - name: verify cursor column
+    eval: '(cursor-column)'
+    expect:
+      result_contains: '0'
+
+  - name: line count is 1
+    eval: '(buffer-line-count)'
+    expect:
+      result_contains: '1'
+
+  # -- movement is clamped --
+  - name: try to move up from line 0
+    eval: '(progn (cursor-move 0 0) (line-previous))'
+    expect:
+      cursor_line: 0
+
+  - name: try to move left from column 0
+    eval: '(cursor-move 0 0)'
+    expect:
+      cursor_column: 0
+
+cleanup: true

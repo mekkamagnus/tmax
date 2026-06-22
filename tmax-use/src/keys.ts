@@ -1,13 +1,20 @@
 /**
  * @file keys.ts
- * @description Translate `<Esc>`, `<Enter>`, `<C-a>`, `<M-x>` … into tmaxclient-compatible
- *   key sequences for the headless daemon path and into `tmux send-keys` dispatch
- *   tokens for the headed path.
+ * @description Translate `<Esc>`, `<Enter>`, `<C-a>`, `<M-x>` … into
+ *   protocol-compatible key tokens for the headless daemon path and into
+ *   `tmux send-keys` dispatch tokens for the headed path.
  *
  * Two parallel tables, one per dispatch backend:
  *
- *   - HEADLESS: each token becomes the literal byte sequence the daemon's
- *     `keypress` JSON-RPC method expects (e.g. `<Esc>` → `\x1b`).
+ *   - HEADLESS: each token becomes the value the daemon's `keypress`
+ *     JSON-RPC method expects. The server passes the value straight to
+ *     `editor.handleKey()`, which normalizes single control bytes and
+ *     semantic key names but does NOT tokenize ANSI CSI sequences — so
+ *     arrow keys MUST be sent as their semantic names (`Up`, `Down`,
+ *     `Left`, `Right`), not `\x1b[A`. The CLI's `--keys` consumer
+ *     (`bin/tmaxclient` `parseKeySequence`) splits multi-byte sequences
+ *     into per-byte keypresses, so the control library sends each token
+ *     as its own JSON-RPC `keypress` call rather than concatenating.
  *   - HEADED:   each token becomes a `tmux send-keys` argument (e.g.
  *     `<Esc>` → `Escape`); plain literals are sent via `send-keys -l`.
  *
@@ -23,7 +30,12 @@ import { TmaxUseError } from './errors.ts';
 export interface KeyToken {
   /** The raw source slice, e.g. `<C-a>`, `i`, `<S-Up>`. */
   readonly source: string;
-  /** Byte sequence to send via the daemon `keypress` RPC (headless). */
+  /**
+   * Value to send via the daemon `keypress` RPC (headless). Either a
+   * single-character control byte/literal (`\x1b`, `i`, …) or a semantic
+   * name (`Up`, `Down`, `Left`, `Right`, `S-Up`, `S-Tab`, …) that the
+   * editor already binds.
+   */
   readonly headless: string;
   /** `tmux send-keys` argument for headed dispatch (without `-l`). Plain literals use the `literal` field. */
   readonly tmuxName?: string;
@@ -65,7 +77,38 @@ export function parseKeys(sequence: string): Either<TmaxUseError, KeyToken[]> {
   return Either.right(tokens);
 }
 
-/** Flatten parsed tokens into the byte string the daemon `--keys` consumer expects. */
+/**
+ * Flatten parsed tokens into the list of key values the daemon `keypress`
+ * JSON-RPC method expects. Each entry is sent as a separate keypress call so
+ * multi-character values (e.g. `Up`, `S-Up`) are not split into per-byte
+ * requests by `bin/tmaxclient`'s `parseKeySequence`.
+ *
+ * Meta letters (`<M-x>` → `\x1bx`) are split into TWO values — the ESC byte
+ * then the bare letter — because the daemon dispatches each `keypress` value
+ * as a separate input event. Sending `\x1bx` as one value would be parsed as
+ * a single control sequence by the editor.
+ */
+export function headlessValues(tokens: readonly KeyToken[]): readonly string[] {
+  const out: string[] = [];
+  for (const t of tokens) {
+    if (t.headless.length === 2 && t.headless[0] === ESC) {
+      out.push(ESC, t.headless[1]!);
+    } else {
+      out.push(t.headless);
+    }
+  }
+  return out;
+}
+
+/**
+ * @deprecated Use {@link headlessValues} and dispatch each value as its own
+ *   JSON-RPC `keypress` call. Concatenated byte strings only work for
+ *   single-byte tokens (letters, control bytes); semantic key names
+ *   (`Up`, `Down`, `S-Up`, …) MUST be sent individually.
+ *
+ * Kept for tests that assert byte-level compilation of single-character
+ * sequences (`<C-a>` → `\x01`, `<Esc>` → `\x1b`, plain text).
+ */
 export function headlessBytes(tokens: readonly KeyToken[]): string {
   return tokens.map((t) => t.headless).join('');
 }
@@ -109,10 +152,12 @@ const HEADLESS_NAMED: Record<string, string> = {
   DEL: '\x7f',
   Space: ' ',
   SPC: ' ',
-  Up: `${ESC}[A`,
-  Down: `${ESC}[B`,
-  Right: `${ESC}[C`,
-  Left: `${ESC}[D`,
+  // Semantic names — `editor.handleKey()` does not tokenize ANSI CSI sequences,
+  // so arrows MUST be sent by name. Bindings live in src/tlisp/core/bindings/.
+  Up: 'Up',
+  Down: 'Down',
+  Right: 'Right',
+  Left: 'Left',
 };
 
 const TMUX_NAMED: Record<string, string> = {
@@ -135,14 +180,15 @@ const TMUX_NAMED: Record<string, string> = {
   Left: 'Left',
 };
 
-// Shifted arrow / tab sequences — headless ANSI + tmux names share the same key
-// surface in both tables.
+// Shifted arrow / tab sequences. Headless emits the semantic name the editor
+// binds (`S-Up`, `S-Down`, `S-Left`, `S-Right`, `S-Tab`); tmux emits the
+// corresponding `send-keys` token.
 const SHIFT_HEADLESS: Record<string, string> = {
-  Up: `${ESC}[1;2A`,
-  Down: `${ESC}[1;2B`,
-  Right: `${ESC}[1;2C`,
-  Left: `${ESC}[1;2D`,
-  Tab: `${ESC}[Z`,
+  Up: 'S-Up',
+  Down: 'S-Down',
+  Right: 'S-Right',
+  Left: 'S-Left',
+  Tab: 'S-Tab',
 };
 
 const SHIFT_TMUX: Record<string, string> = {
@@ -237,9 +283,13 @@ function parseSpecial(name: string, offset: number, full: string): Either<TmaxUs
   return Either.right({ source, headless: name, tmuxLiteral: name, offset });
 }
 
-/** Convenience: parse + flatten to the headless byte string. Throws on parse error. */
-export function compileHeadless(sequence: string): Either<TmaxUseError, string> {
+/**
+ * Convenience: parse + flatten to the list of headless keypress values. Each
+ * returned string is one `keypress` JSON-RPC call. Use this for protocol-level
+ * dispatch (single source of truth for what the daemon receives).
+ */
+export function compileHeadless(sequence: string): Either<TmaxUseError, readonly string[]> {
   const parsed = parseKeys(sequence);
   if (Either.isLeft(parsed)) return Either.left(parsed.left);
-  return Either.right(headlessBytes(parsed.right));
+  return Either.right(headlessValues(parsed.right));
 }

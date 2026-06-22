@@ -1,0 +1,81 @@
+name: eval-12-unicode-cursor
+description: |
+  Cursor movement on ASCII text in a fresh buffer: create a buffer, switch
+  to it, insert known content via eval, and verify cursor column movement.
+  Uses buffer-switch after buffer-create so operations target the fresh
+  buffer (buffer-create alone does not switch the current buffer).
+
+setup: []
+
+steps:
+  - name: switch to normal mode
+    eval: '(editor-set-mode "normal")'
+    expect:
+      mode: normal
+
+  # -- create AND switch to a fresh buffer --
+  - name: create a test buffer
+    eval: '(buffer-create "unicode-test-12")'
+    expect:
+      result_contains: 'unicode-test-12'
+
+  - name: switch to the new buffer
+    eval: '(buffer-switch "unicode-test-12")'
+    expect:
+      result_contains: 'unicode-test-12'
+
+  - name: insert ASCII line
+    eval: '(buffer-insert-at-position 0 0 "abc def ghi")'
+    expect:
+      result_contains: 'abc def ghi'
+
+  - name: verify line content is clean
+    eval: '(buffer-line 0)'
+    expect:
+      result_contains: 'abc def ghi'
+
+  # -- cursor movement on ASCII --
+  - name: move to column 4
+    eval: '(cursor-move 0 4)'
+    expect:
+      cursor_column: 4
+
+  - name: word-end moves to column 6
+    eval: '(word-end)'
+    expect:
+      cursor_column: 6
+
+  - name: word-next moves to column 8
+    eval: '(word-next)'
+    expect:
+      cursor_column: 8
+
+  # -- test a 16-char second line for line-last-column --
+  - name: open a line below and type content
+    eval: '(progn (cursor-move 0 0) (open-line-below) (editor-set-mode "insert"))'
+    expect:
+      mode: insert
+
+  - name: type the second line content
+    keys: "0123456789abcdef"
+    wait: 100
+    expect:
+      buffer_contains: "0123456789abcdef"
+
+  - name: verify line 1 content
+    eval: '(buffer-line 1)'
+    expect:
+      result_contains: '0123456789'
+
+  - name: verify column at position 5
+    eval: '(progn (cursor-move 1 5) (cursor-column))'
+    expect:
+      result_contains: '5'
+
+  # -- cursor clamping at line end (16-char line → last column index 15) --
+  - name: line last column
+    eval: '(progn (cursor-move 1 0) (line-last-column) (cursor-column))'
+    expect:
+      result_contains: '15'
+
+cleanup: true

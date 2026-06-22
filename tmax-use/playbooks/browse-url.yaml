@@ -1,0 +1,131 @@
+name: browse-url -- URL detection + external browser dispatch
+description: |
+  E2E coverage of SPEC-056 browse-url: detection of bare URLs, markdown links,
+  angle-bracket URLs, RFC/SPEC references, and GitHub issue refs, plus the gX
+  key binding and browse-url-at-point / browse-detect-at-point commands.
+
+  All steps are headless (eval-based state queries + headless capture). No tmux
+  needed. Browse-url dispatch (opening a real browser) is tested via detection
+  and mock-safe T-Lisp evaluation, not actual external opens.
+
+  NOTE: tmaxclient --eval returns JSON for hashmap results. Simple values
+  (strings, numbers) are printed as bare T-Lisp output (no quotes).
+
+setup:
+  - action: setup_file
+    var: URLFILE
+    name: browse-url-e2e.txt
+    content: |
+      Check out https://example.com/path for details.
+      RFC-094 is about pipeline architecture.
+      See [tmax repo](https://github.com/mekael/tmax) for source.
+      Another ref: <https://docs.bun.sh/bundler/loaders>
+      Issue #42 needs attention.
+      Bare URL with trailing punct: https://example.com.
+      No URL on this plain line.
+
+steps:
+  # -- Setup: switch to normal mode ----------------------------------------
+  - name: switch to normal mode (daemon defaults to insert)
+    eval: '(editor-set-mode "normal")'
+    expect:
+      mode: normal
+
+  - name: open the test file
+    eval: '(find-file "${URLFILE}")'
+    expect:
+      buffer_contains: "Check out"
+
+  # -- Detection: bare URL -------------------------------------------------
+  - name: move cursor to bare URL
+    eval: '(cursor-move 0 25)'
+  - name: browse-detect-at-point finds the bare URL
+    eval: '(browse-detect-at-point)'
+    expect:
+      result_contains: '"ok":true'
+  - name: the detected kind is bare
+    eval: '(hashmap-get (browse-detect-at-point) "kind")'
+    expect:
+      result_contains: 'bare'
+
+  # -- Detection: RFC reference --------------------------------------------
+  - name: move cursor to RFC-094 reference
+    eval: '(cursor-move 1 0)'
+  - name: detect RFC reference
+    eval: '(browse-detect-at-point)'
+    expect:
+      result_contains: '"ok":true'
+  - name: the detected kind is docs
+    eval: '(hashmap-get (browse-detect-at-point) "kind")'
+    expect:
+      result_contains: 'docs'
+
+  # -- Detection: markdown link ---------------------------------------------
+  - name: move cursor to markdown link text
+    eval: '(cursor-move 2 8)'
+  - name: detect markdown link
+    eval: '(browse-detect-at-point)'
+    expect:
+      result_contains: '"ok":true'
+  - name: the detected kind is markdown
+    eval: '(hashmap-get (browse-detect-at-point) "kind")'
+    expect:
+      result_contains: 'markdown'
+
+  # -- Detection: angle-bracket URL -----------------------------------------
+  - name: move cursor to angle-bracket URL
+    eval: '(cursor-move 3 15)'
+  - name: detect angle-bracket URL
+    eval: '(browse-detect-at-point)'
+    expect:
+      result_contains: '"ok":true'
+  - name: the detected kind is angle
+    eval: '(hashmap-get (browse-detect-at-point) "kind")'
+    expect:
+      result_contains: 'angle'
+
+  # -- Detection: GitHub issue reference ------------------------------------
+  - name: move cursor to #42
+    eval: '(cursor-move 4 6)'
+  - name: detect GitHub issue reference
+    eval: '(browse-detect-at-point)'
+    expect:
+      result_contains: '"ok":true'
+  - name: the detected kind is issue
+    eval: '(hashmap-get (browse-detect-at-point) "kind")'
+    expect:
+      result_contains: 'issue'
+
+  # -- Negative: no URL on plain line ----------------------------------------
+  - name: move cursor to plain line (no URL)
+    eval: '(cursor-move 6 5)'
+  - name: detect returns no-url-at-point error
+    eval: '(browse-detect-at-point)'
+    expect:
+      result_contains: '"no-url-at-point"'
+
+  # -- Trailing punctuation trimmed from bare URL ---------------------------
+  - name: move cursor to bare URL with trailing period
+    eval: '(cursor-move 5 35)'
+  - name: detect bare URL (period should be trimmed)
+    eval: '(browse-detect-at-point)'
+    expect:
+      result_contains: '"ok":true'
+  - name: the trimmed URL ends with example.com not example.com.
+    eval: '(hashmap-get (browse-detect-at-point) "url")'
+    expect:
+      result_contains: 'https://example.com'
+
+  # -- Key binding: gX is in normal keymap ---------------------------------
+  - name: verify g is a prefix in normal keymap
+    eval: '(if (keymap-prefix-p normal-keymap "g") "g-is-prefix:YES" "g-is-prefix:NO")'
+    expect:
+      result_contains: "g-is-prefix:YES"
+
+  # -- Module loaded -------------------------------------------------------
+  - name: verify browse-url module is loaded
+    eval: '(browse-detect-at-point)'
+    expect:
+      result_contains: '"ok":true'
+
+cleanup: true

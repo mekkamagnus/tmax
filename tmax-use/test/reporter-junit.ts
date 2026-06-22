@@ -3,8 +3,10 @@
  * @description JUnit XML reporter — writes `junit.xml` in the de-facto JUnit
  *   schema that CI systems (GitHub Actions, Jenkins, CircleCI) consume.
  *
- * Each `TestResult` becomes a `<testcase>` under a single `<testsuite>`.
- * Per-step failures are folded into the testcase's `<failure>` body.
+ * Each TestResult (a playbook or `*.tmax-use.ts` file) becomes a `<testsuite>`,
+ * and each StepResult (a step inside that playbook, or an individual `test()`
+ * inside a `*.tmax-use.ts` file) becomes a `<testcase>`. This matches the
+ * JUnit expectation that suites group related cases.
  *
  * Schema reference: https://llg.cubic.org/docs/junit/ (compatible subset).
  */
@@ -13,36 +15,45 @@ import { promises as fs } from 'fs';
 import { join } from 'path';
 import { TaskEither } from '../../src/utils/task-either.ts';
 import { TmaxUseError } from '../src/errors.ts';
-import { SuiteResult, TestResult } from './runner.ts';
+import { SuiteResult, TestResult, StepResult } from './runner.ts';
 
-/** Render a single testcase element. */
-function renderTestCase(test: TestResult): string {
-  const classname = test.source.replace(/[^a-zA-Z0-9._-]/g, '.');
-  const name = escapeXml(test.name || test.source);
-  const time = (test.durationMs / 1000).toFixed(3);
-  if (test.passed) {
-    return `    <testcase classname="${escapeXml(classname)}" name="${name}" time="${time}"/>`;
+/** Render a single `<testcase>` element from a step. */
+function renderStepTestCase(step: StepResult, classname: string): string {
+  const name = escapeXml(step.name || 'step');
+  const time = (step.durationMs / 1000).toFixed(3);
+  if (step.passed) {
+    return `      <testcase classname="${escapeXml(classname)}" name="${name}" time="${time}"/>`;
   }
-  const failedSteps = test.steps.filter((s) => !s.passed);
-  const failureMsg = test.failureMessage
-    ?? failedSteps.map((s) => `${s.name}: ${s.details.join('; ')}`).join('\n')
-    ?? '(unknown failure)';
-  return `    <testcase classname="${escapeXml(classname)}" name="${name}" time="${time}">
-      <failure message="${escapeXml(failureMsg.split('\n')[0] ?? 'test failed')}">${escapeXml(failureMsg)}</failure>
-    </testcase>`;
+  const failureMsg = step.details.length > 0 ? step.details.join('\n') : '(no detail)';
+  const firstLine = failureMsg.split('\n')[0] ?? 'step failed';
+  return `      <testcase classname="${escapeXml(classname)}" name="${name}" time="${time}">
+        <failure message="${escapeXml(firstLine)}">${escapeXml(failureMsg)}</failure>
+      </testcase>`;
+}
+
+/** Render a single `<testsuite>` from a test result (playbook or .tmax-use.ts). */
+function renderTestSuite(test: TestResult): string {
+  const classname = test.source.replace(/[^a-zA-Z0-9._-]/g, '.');
+  const steps = test.steps.length > 0
+    ? test.steps
+    : [{ name: test.name, passed: test.passed, details: test.failureMessage ? [test.failureMessage] : [], durationMs: test.durationMs }];
+  const failures = steps.filter((s) => !s.passed).length;
+  const time = (test.durationMs / 1000).toFixed(3);
+  const cases = steps.map((s) => renderStepTestCase(s, classname)).join('\n');
+  return `    <testsuite name="${escapeXml(test.name || test.source)}" tests="${steps.length}" failures="${failures}" errors="0" skipped="0" time="${time}">
+${cases}
+    </testsuite>`;
 }
 
 /** Render the full suite as a JUnit XML document. */
 export function renderJUnit(suite: SuiteResult, suiteName = 'tmax-use'): string {
-  const total = suite.results.length;
+  const total = suite.results.reduce((acc, t) => acc + Math.max(t.steps.length, 1), 0);
   const failures = suite.failed;
   const time = (suite.durationMs / 1000).toFixed(3);
-  const cases = suite.results.map(renderTestCase).join('\n');
+  const suites = suite.results.map(renderTestSuite).join('\n');
   return `<?xml version="1.0" encoding="UTF-8"?>
-<testsuites>
-  <testsuite name="${escapeXml(suiteName)}" tests="${total}" failures="${failures}" errors="0" skipped="0" time="${time}">
-${cases}
-  </testsuite>
+<testsuites name="${escapeXml(suiteName)}" tests="${total}" failures="${failures}" errors="0" skipped="0" time="${time}">
+${suites}
 </testsuites>
 `;
 }
@@ -73,4 +84,4 @@ function escapeXml(s: string): string {
 }
 
 // Test-only exports.
-export const __junitReporterInternals = { renderTestCase, renderJUnit, escapeXml };
+export const __junitReporterInternals = { renderStepTestCase, renderTestSuite, renderJUnit, escapeXml };

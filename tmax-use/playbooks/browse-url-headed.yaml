@@ -1,0 +1,136 @@
+name: browse-url headed -- visual TUI verification
+description: |
+  Headed E2E coverage of SPEC-056 browse-url: exercises browse-url-at-point
+  through the real TUI via tmux. Steps use key sequences and screen assertions
+  so the test proves the rendered output, not just state.
+
+  Requires tmux. Steps with screen_contains/screen_not_contains are
+  automatically promoted to headed mode. Watch live:
+    tmux attach -t tmax-adw-<pid>
+
+setup:
+  - action: setup_file
+    var: URLFILE
+    name: browse-url-headed.txt
+    content: |
+      Check out https://example.com/path for details.
+      RFC-094 is about pipeline architecture.
+      See [tmax repo](https://github.com/mekael/tmax) for source.
+      Another ref: <https://docs.bun.sh/bundler/loaders>
+      Issue #42 needs attention.
+      Bare URL with trailing punct: https://example.com.
+      No URL on this plain line.
+
+steps:
+  # -- Setup: switch to normal mode and open file -------------------------
+  - name: switch to normal mode
+    eval: '(editor-set-mode "normal")'
+    expect:
+      mode: normal
+
+  - name: open the test file
+    eval: '(find-file "${URLFILE}")'
+    expect:
+      buffer_contains: "Check out"
+
+  # -- Headed: verify file content renders on screen ---------------------
+  - name: bare URL is visible on the rendered screen
+    setup_cursor: [0, 0]
+    wait: 300
+    expect:
+      screen_contains: "https://example.com/path"
+
+  # -- Headed: RFC reference visible on screen ----------------------------
+  - name: RFC-094 reference is visible on screen
+    setup_cursor: [1, 0]
+    wait: 300
+    expect:
+      screen_contains: "RFC-094"
+
+  # -- Headed: markdown link visible on screen ---------------------------
+  - name: markdown link text is visible on screen
+    setup_cursor: [2, 0]
+    wait: 300
+    expect:
+      screen_contains: "[tmax repo]"
+
+  # -- Headed: angle-bracket URL visible on screen ----------------------
+  - name: angle-bracket URL is visible on screen
+    setup_cursor: [3, 0]
+    wait: 300
+    expect:
+      screen_contains: "docs.bun.sh"
+
+  # -- Headed: issue reference visible on screen -------------------------
+  - name: issue reference is visible on screen
+    setup_cursor: [4, 0]
+    wait: 300
+    expect:
+      screen_contains: "#42"
+
+  # -- Headed: navigate with h/j/k/l and verify cursor -------------------
+  - name: press jj to move down two lines
+    keys: "jj"
+    wait: 300
+    expect:
+      cursor_line: 6
+  - name: press 0 to go to beginning of line
+    keys: "0"
+    wait: 150
+    expect:
+      cursor_line: 6
+      cursor_column: 0
+
+  # -- Headed: status line shows correct buffer name ---------------------
+  - name: status line contains buffer name
+    expect:
+      screen_contains: "browse-url-headed.t"
+
+  # -- Headed: normal mode indicator visible on screen -------------------
+  - name: NORMAL mode indicator is shown
+    expect:
+      screen_contains: "NORMAL"
+
+  # -- Headed: switch to insert mode, type text, verify rendering -------
+  - name: enter insert mode
+    keys: "i"
+    wait: 200
+  - name: mode switched to insert
+    expect:
+      mode: insert
+
+  - name: type some text
+    keys: "BROWSE-TEST"
+    wait: 300
+  - name: typed text is visible on screen
+    expect:
+      screen_contains: "BROWSE-TEST"
+
+  - name: escape back to normal
+    keys: "<Escape>"
+    wait: 200
+    expect:
+      mode: normal
+
+  # -- Headed: g prefix triggers which-key (visual regression) ------------
+  - name: press g to open which-key popup
+    keys: "g"
+    wait: 1200
+    expect:
+      screen_contains: "browse-url-at-point"
+
+  - name: Escape dismisses the popup
+    keys: "<Escape>"
+    wait: 250
+    expect:
+      screen_not_contains: "browse-url-at-point"
+
+  # -- Headed: negative - plain line has no URL --------------------------
+  - name: move to plain line
+    keys: "6G"
+    wait: 300
+  - name: plain line text visible
+    expect:
+      screen_contains: "No URL on this plain line"
+
+cleanup: true

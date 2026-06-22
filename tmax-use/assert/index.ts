@@ -124,10 +124,7 @@ export class ExpectBuilder {
         const result = r.right;
         results.push(result);
         if (!resultPassed(result)) {
-          const failureMessage = isAssertionResult(result)
-            ? result.message
-            : `baseline mismatch (${result.baselinePath}):\n${result.diff}`;
-          return leftE<ExpectResult[]>(TmaxUseError.assertionFailed(failureMessage));
+          return leftE<ExpectResult[]>(TmaxUseError.assertionFailed(describeFailure(result)));
         }
       }
       return rightE<ExpectResult[]>(results);
@@ -148,6 +145,13 @@ export class ExpectBuilder {
 function resultPassed(r: ExpectResult): boolean {
   if ('passed' in r) return r.passed;
   return true;
+}
+
+/** Format a baseline/assertion failure for the AssertionFailed error message. */
+function describeFailure(r: ExpectResult): string {
+  if (isAssertionResult(r)) return r.message;
+  if (r.failureKind === 'BaselineMissing') return `baseline missing: ${r.baselinePath}`;
+  return `baseline mismatch (${r.baselinePath}):\n${r.diff}`;
 }
 
 /**

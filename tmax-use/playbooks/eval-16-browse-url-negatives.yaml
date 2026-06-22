@@ -1,0 +1,58 @@
+name: eval-16-browse-url-negatives
+description: |
+  Browse-url negative cases: a file with no URLs, partial URLs, and plain text.
+  browse-detect-at-point should return "no-url-at-point" at every position.
+
+setup:
+  - action: setup_file
+    var: FILE
+    name: eval-16-no-urls.txt
+    content: |
+      just some plain text
+      partial http without domain
+      nothing to see here
+      email@not-url.com
+      ftp://old.protocol
+
+steps:
+  - name: switch to normal mode
+    eval: '(editor-set-mode "normal")'
+    expect:
+      mode: normal
+
+  - name: open the test file
+    eval: '(find-file "${FILE}")'
+    expect:
+      buffer_contains: "plain text"
+
+  - name: detect at start of line 0
+    eval: '(progn (cursor-move 0 0) (browse-detect-at-point))'
+    expect:
+      result_contains: '"no-url-at-point"'
+
+  - name: detect at middle of line 0
+    eval: '(progn (cursor-move 0 8) (browse-detect-at-point))'
+    expect:
+      result_contains: '"no-url-at-point"'
+
+  - name: detect on "http" fragment
+    eval: '(progn (cursor-move 1 8) (browse-detect-at-point))'
+    expect:
+      result_contains: '"no-url-at-point"'
+
+  - name: detect at start of line 2
+    eval: '(progn (cursor-move 2 0) (browse-detect-at-point))'
+    expect:
+      result_contains: '"no-url-at-point"'
+
+  - name: detect on email-like text
+    eval: '(progn (cursor-move 3 0) (browse-detect-at-point))'
+    expect:
+      result_contains: '"no-url-at-point"'
+
+  - name: detect at end of buffer
+    eval: '(progn (cursor-move 4 18) (browse-detect-at-point))'
+    expect:
+      result_contains: '"no-url-at-point"'
+
+cleanup: true

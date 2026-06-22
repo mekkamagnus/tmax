@@ -1,0 +1,68 @@
+name: eval-08-which-key-deep-dive
+description: |
+  Which-key prefix detection and command execution. Tests that keymap prefixes
+  (g, SPC, z) are recognized and that commands under them can be executed
+  via eval. Since which-key popups are client-side rendering, this tests
+  the prefix infrastructure and command dispatch.
+
+setup:
+  - action: setup_file
+    var: FILE
+    name: eval-08-prefix.txt
+    content: |
+      test line with https://example.com embedded
+      plain line
+
+steps:
+  - name: switch to normal mode
+    eval: '(editor-set-mode "normal")'
+    expect:
+      mode: normal
+
+  - name: open the test file
+    eval: '(find-file "${FILE}")'
+    expect:
+      buffer_contains: "test line"
+
+  # -- g prefix exists --
+  - name: g is a keymap prefix
+    eval: '(keymap-prefix-p (current-keymap) "g")'
+    expect:
+      result_contains: 'true'
+
+  # -- SPC prefix exists --
+  - name: SPC is a keymap prefix
+    eval: '(keymap-prefix-p (current-keymap) "SPC")'
+    expect:
+      result_contains: 'true'
+
+  # -- z prefix exists --
+  - name: z is a keymap prefix
+    eval: '(keymap-prefix-p (current-keymap) "z")'
+    expect:
+      result_contains: 'true'
+
+  # -- x is NOT a prefix --
+  - name: x is not a prefix
+    eval: '(keymap-prefix-p (current-keymap) "x")'
+    expect:
+      result_contains: 'false'
+
+  # -- browse-url-at-point can be called directly --
+  - name: move to URL position
+    eval: '(cursor-move 0 15)'
+    expect:
+      cursor_column: 15
+
+  - name: detect URL at point
+    eval: '(browse-detect-at-point)'
+    expect:
+      result_contains: '"ok"'
+
+  # -- editor-set-status works --
+  - name: set status message
+    eval: '(editor-set-status "test-status-123")'
+    expect:
+      result_contains: 'test-status-123'
+
+cleanup: true

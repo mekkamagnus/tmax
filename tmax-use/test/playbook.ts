@@ -6,16 +6,19 @@
  *   name: string
  *   description?: string
  *   mode?: string  (major mode to verify after setup file opens)
- *   width?: number (terminal width for capture; defaults to 94)
- *   height?: number (terminal height for capture; defaults to 29)
+ *   terminal?: { width?: number, height?: number }  (capture dimensions)
  *   setup?: { action: 'setup_file', var?: string, name: string, content: string }[]
  *   steps: PlaybookStep[]
  *   cleanup?: boolean (default true)
  *
+ * (Back-compat: top-level `width` and `height` are still accepted as a
+ * deprecated alias of `terminal.width` / `terminal.height`.)
+ *
  * Step:
  *   name?: string
+ *   open?: string        (open a file at this step; alternative to setup_file)
  *   keys?: string
- *   eval?: string  (mutually exclusive with keys)
+ *   eval?: string        (mutually exclusive with keys/open)
  *   setup_cursor?: [line, col]
  *   wait?: number (ms)
  *   headed?: boolean
@@ -49,6 +52,7 @@ export type PlaybookAssert = {
 
 export interface PlaybookStep {
   readonly name?: string;
+  readonly open?: string;
   readonly keys?: string;
   readonly eval?: string;
   readonly setup_cursor?: readonly [number, number];
@@ -64,12 +68,16 @@ export interface PlaybookSetup {
   readonly content: string;
 }
 
+export interface PlaybookTerminal {
+  readonly width?: number;
+  readonly height?: number;
+}
+
 export interface Playbook {
   readonly name: string;
   readonly description?: string;
   readonly mode?: string;
-  readonly width?: number;
-  readonly height?: number;
+  readonly terminal?: PlaybookTerminal;
   readonly setup?: readonly PlaybookSetup[];
   readonly steps: readonly PlaybookStep[];
   readonly cleanup?: boolean;
@@ -81,9 +89,11 @@ const ASSERT_KEYS = new Set<keyof PlaybookAssert>([
   'screen_contains', 'screen_not_contains',
 ]);
 
-const STEP_KEYS = new Set<string>(['name', 'keys', 'eval', 'setup_cursor', 'wait', 'headed', 'expect']);
+const STEP_KEYS = new Set<string>(['name', 'open', 'keys', 'eval', 'setup_cursor', 'wait', 'headed', 'expect']);
 
 const SETUP_KEYS = new Set<string>(['action', 'var', 'name', 'content']);
+
+const TERMINAL_KEYS = new Set<string>(['width', 'height']);
 
 function isObject(v: unknown): v is Record<string, unknown> {
   return typeof v === 'object' && v !== null && !Array.isArray(v);
@@ -156,6 +166,7 @@ function validateStep(raw: unknown, index: number): Validation<string, PlaybookS
   const errors: string[] = [];
   if (unexpected.length > 0) errors.push(`${label}: unknown keys: ${unexpected.join(', ')}`);
   if (raw.name !== undefined && !isString(raw.name)) errors.push(`${label}: name must be a string`);
+  if (raw.open !== undefined && !isString(raw.open)) errors.push(`${label}: open must be a string (file path)`);
   if (raw.keys !== undefined && !isString(raw.keys)) errors.push(`${label}: keys must be a string`);
   if (raw.eval !== undefined) {
     if (!isString(raw.eval)) {
@@ -165,8 +176,10 @@ function validateStep(raw: unknown, index: number): Validation<string, PlaybookS
       errors.push(`${label}: eval contains a backslash — drive this feature via keys instead (JSON-RPC eval mangles backslashes)`);
     }
   }
-  if (raw.keys !== undefined && raw.eval !== undefined) {
-    errors.push(`${label}: keys and eval are mutually exclusive`);
+  // open/keys/eval are mutually exclusive action fields.
+  const actionFields = ['open', 'keys', 'eval'].filter((k) => raw[k] !== undefined);
+  if (actionFields.length > 1) {
+    errors.push(`${label}: ${actionFields.join(', ')} are mutually exclusive (pick one action per step)`);
   }
   if (raw.wait !== undefined && !isNumber(raw.wait)) errors.push(`${label}: wait must be a number`);
   if (raw.headed !== undefined && !isBool(raw.headed)) errors.push(`${label}: headed must be a boolean`);
@@ -182,6 +195,7 @@ function validateStep(raw: unknown, index: number): Validation<string, PlaybookS
   if (errors.length > 0) return Validation.failure(errors);
   const result: PlaybookStep = {
     name: isString(raw.name) ? raw.name : undefined,
+    open: isString(raw.open) ? raw.open : undefined,
     keys: isString(raw.keys) ? raw.keys : undefined,
     eval: isString(raw.eval) ? raw.eval : undefined,
     setup_cursor: Array.isArray(raw.setup_cursor) && raw.setup_cursor.length === 2
@@ -194,13 +208,31 @@ function validateStep(raw: unknown, index: number): Validation<string, PlaybookS
   return Validation.success(result);
 }
 
+/** Validate the `terminal` block. */
+function validateTerminal(raw: unknown): Validation<string, PlaybookTerminal> {
+  if (!isObject(raw)) {
+    return Validation.failure(['playbook: terminal must be a mapping']);
+  }
+  const unexpected = unexpectedKeys(raw, TERMINAL_KEYS);
+  const errors: string[] = [];
+  if (unexpected.length > 0) errors.push(`playbook: unknown terminal keys: ${unexpected.join(', ')}`);
+  if (raw.width !== undefined && !isNumber(raw.width)) errors.push('playbook: terminal.width must be a number');
+  if (raw.height !== undefined && !isNumber(raw.height)) errors.push('playbook: terminal.height must be a number');
+  if (errors.length > 0) return Validation.failure(errors);
+  return Validation.success({
+    width: isNumber(raw.width) ? raw.width : undefined,
+    height: isNumber(raw.height) ? raw.height : undefined,
+  });
+}
+
 /** Validate the whole playbook shape. */
 export function validatePlaybook(raw: unknown): Validation<string, Playbook> {
   if (!isObject(raw)) {
     return Validation.failure(['playbook: must be a mapping at the top level']);
   }
   const errors: string[] = [];
-  const allowedTop = new Set(['name', 'description', 'mode', 'width', 'height', 'setup', 'steps', 'cleanup']);
+  // Top-level allowed keys. `width`/`height` are accepted as a back-compat alias.
+  const allowedTop = new Set(['name', 'description', 'mode', 'terminal', 'width', 'height', 'setup', 'steps', 'cleanup']);
   const unexpected = unexpectedKeys(raw, allowedTop);
   if (unexpected.length > 0) errors.push(`playbook: unknown top-level keys: ${unexpected.join(', ')}`);
   if (!isString(raw.name)) errors.push('playbook: name must be a string');
@@ -208,6 +240,12 @@ export function validatePlaybook(raw: unknown): Validation<string, Playbook> {
   if (raw.mode !== undefined && !isString(raw.mode)) errors.push('playbook: mode must be a string');
   if (raw.width !== undefined && !isNumber(raw.width)) errors.push('playbook: width must be a number');
   if (raw.height !== undefined && !isNumber(raw.height)) errors.push('playbook: height must be a number');
+  let terminal: PlaybookTerminal | undefined;
+  if (raw.terminal !== undefined) {
+    const t = validateTerminal(raw.terminal);
+    if (t.isFailure()) errors.push(...t.getErrors());
+    else terminal = t.getValue();
+  }
   if (raw.cleanup !== undefined && !isBool(raw.cleanup)) errors.push('playbook: cleanup must be a boolean');
   if (!Array.isArray(raw.steps) || raw.steps.length === 0) {
     errors.push('playbook: steps must be a non-empty array');
@@ -230,12 +268,16 @@ export function validatePlaybook(raw: unknown): Validation<string, Playbook> {
     }
   }
   if (errors.length > 0) return Validation.failure(errors);
+  // Back-compat: top-level width/height folds into terminal when terminal is absent.
+  const resolvedTerminal: PlaybookTerminal | undefined = terminal
+    ?? ((isNumber(raw.width) || isNumber(raw.height))
+      ? { width: isNumber(raw.width) ? raw.width : undefined, height: isNumber(raw.height) ? raw.height : undefined }
+      : undefined);
   const validated: Playbook = {
     name: raw.name as string,
     description: isString(raw.description) ? raw.description : undefined,
     mode: isString(raw.mode) ? raw.mode : undefined,
-    width: isNumber(raw.width) ? raw.width : undefined,
-    height: isNumber(raw.height) ? raw.height : undefined,
+    terminal: resolvedTerminal,
     setup: Array.isArray(raw.setup) ? (raw.setup as PlaybookSetup[]) : undefined,
     steps: raw.steps as PlaybookStep[],
     cleanup: isBool(raw.cleanup) ? raw.cleanup : undefined,

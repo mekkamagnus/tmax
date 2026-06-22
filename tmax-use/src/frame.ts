@@ -18,10 +18,10 @@ import { TmaxUseError, leftT, rightT, rightE } from './errors.ts';
 import { TmaxClient } from './client.ts';
 import * as keyParser from './keys.ts';
 import * as captureMod from './capture.ts';
-import type { CaptureClient, CaptureResult, HtmlResult } from './capture.ts';
+import type { CaptureClient, CaptureResult, HtmlResult, CaptureOptions } from './capture.ts';
 
 // Re-export types so consumers can `import type { CaptureResult } from "../src/frame"`.
-export type { CaptureResult, HtmlResult } from './capture.ts';
+export type { CaptureResult, HtmlResult, CaptureOptions } from './capture.ts';
 
 export interface CursorPosition {
   readonly line: number;
@@ -33,6 +33,9 @@ export interface FrameOptions {
   readonly name?: string;
   /** Maximum wait iterations for `waitFor*` helpers (each iteration is ~100ms). */
   readonly waitIterations?: number;
+  /** Default capture dimensions; per-call `opts` overrides. */
+  readonly width?: number;
+  readonly height?: number;
 }
 
 const DEFAULT_WAIT_ITERATIONS = 50; // 50 × 100ms = 5s default.
@@ -44,6 +47,8 @@ const DEFAULT_WAIT_ITERATIONS = 50; // 50 × 100ms = 5s default.
 export class Frame {
   readonly name: string;
   private readonly waitIterations: number;
+  private readonly defaultWidth: number | undefined;
+  private readonly defaultHeight: number | undefined;
 
   constructor(
     private readonly client: TmaxClient,
@@ -53,10 +58,22 @@ export class Frame {
     if (typeof nameOrOpts === 'string') {
       this.name = nameOrOpts;
       this.waitIterations = maybeOpts?.waitIterations ?? DEFAULT_WAIT_ITERATIONS;
+      this.defaultWidth = maybeOpts?.width;
+      this.defaultHeight = maybeOpts?.height;
     } else {
       this.name = nameOrOpts?.name ?? 'frame';
       this.waitIterations = nameOrOpts?.waitIterations ?? DEFAULT_WAIT_ITERATIONS;
+      this.defaultWidth = nameOrOpts?.width;
+      this.defaultHeight = nameOrOpts?.height;
     }
+  }
+
+  /** Resolve capture opts by merging frame defaults with per-call overrides. */
+  private captureOpts(opts?: CaptureOptions): CaptureOptions {
+    return {
+      width: opts?.width ?? this.defaultWidth,
+      height: opts?.height ?? this.defaultHeight,
+    };
   }
 
   // --- File ops -----------------------------------------------------------
@@ -74,16 +91,19 @@ export class Frame {
   // --- Input --------------------------------------------------------------
 
   /**
-   * Parse and send a key sequence. Special syntax is translated via `parseKeys`
-   * (`<Esc>`, `<C-a>`, `<M-x>`, …). The parsed tokens are flattened into the
-   * byte string the daemon's `keypress` RPC expects.
+   * Parse and send a key sequence. Special syntax is translated via
+   * `parseKeys` (`<Esc>`, `<C-a>`, `<M-x>`, …). Each parsed token is sent
+   * as its own `keypress` JSON-RPC call so semantic names like `Up`,
+   * `Down`, `Left`, `Right`, `S-Up` reach the editor intact (the CLI's
+   * `--keys` consumer would split multi-byte sequences into per-byte
+   * keypresses and break arrow bindings).
    */
   keys(sequence: string): TaskEither<TmaxUseError, void> {
     return TaskEither.from(async () => {
       const compiled = keyParser.compileHeadless(sequence);
       if (Either.isLeft(compiled)) return compiled;
       return rightE(compiled.right);
-    }).flatMap((bytes) => this.client.keys(bytes));
+    }).flatMap((values) => this.client.keys(values));
   }
 
   /**
@@ -143,18 +163,18 @@ export class Frame {
   // --- Capture ------------------------------------------------------------
 
   /** Capture the rendered frame as ANSI lines + dimensions. */
-  capture(): TaskEither<TmaxUseError, CaptureResult> {
-    return captureMod.captureFrame(this.client as unknown as CaptureClient);
+  capture(opts?: CaptureOptions): TaskEither<TmaxUseError, CaptureResult> {
+    return captureMod.captureFrame(this.client as unknown as CaptureClient, this.captureOpts(opts));
   }
 
   /** Capture the rendered frame as a standalone HTML document + dimensions. */
-  captureHtml(): TaskEither<TmaxUseError, HtmlResult> {
-    return captureMod.captureHtml(this.client as unknown as CaptureClient);
+  captureHtml(opts?: CaptureOptions): TaskEither<TmaxUseError, HtmlResult> {
+    return captureMod.captureHtml(this.client as unknown as CaptureClient, this.captureOpts(opts));
   }
 
   /** Capture plain (ANSI-stripped) lines for substring matching. */
-  capturePlain(): TaskEither<TmaxUseError, string[]> {
-    return captureMod.captureFrame(this.client as unknown as CaptureClient).map((r) =>
+  capturePlain(opts?: CaptureOptions): TaskEither<TmaxUseError, string[]> {
+    return captureMod.captureFrame(this.client as unknown as CaptureClient, this.captureOpts(opts)).map((r) =>
       captureMod.capturePlain(r.lines),
     );
   }
