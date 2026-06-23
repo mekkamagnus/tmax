@@ -10,8 +10,8 @@
  * a mock. Mirrors the AgentDeps pattern in ./agent.ts.
  */
 import { TaskEither } from "../../src/utils/task-either.ts";
-import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "fs";
-import { dirname } from "path";
+import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from "fs";
+import { dirname, join } from "path";
 
 export type ReviewVerdict = "pass" | "fail";
 
@@ -47,13 +47,40 @@ export function codexEnv(): Record<string, string> {
 export const CODEX_MODEL = "gpt-5.5";
 
 /**
- * Resolve the codex binary path. Prefers the known absolute install path; if
- * that's absent, returns bare "codex" (resolved by PATH at exec time). The
- * caller's ensureCodex() guard validates that the resolved path actually runs.
+ * Resolve the codex binary path. Scans candidate install locations (every nvm
+ * node version dir, newest version first), then falls back to bare "codex"
+ * (resolved by PATH at exec time). The caller's ensureCodex() guard validates
+ * that the resolved path actually runs.
+ *
+ * Why scan instead of pinning one path: codex is installed per-nvm-version, so
+ * a single hardcoded path silently breaks on `nvm uninstall`/upgrade. Scanning
+ * the version dirs makes resolution robust to version churn.
  */
 export function resolveCodex(): string {
-  const KNOWN = "/Users/mekael/.nvm/versions/node/v24.13.1/bin/codex";
-  if (existsSync(KNOWN)) return KNOWN;
+  const nvmNodeDir = "/Users/mekael/.nvm/versions/node";
+  const candidates: string[] = [];
+  if (existsSync(nvmNodeDir)) {
+    let versions: string[] = [];
+    try {
+      versions = readdirSync(nvmNodeDir).filter((d) => /^v?\d/.test(d));
+    } catch { /* unreadable nvm dir — fall through to PATH */ }
+    // Sort descending by the numeric value of the version so the newest
+    // available codex wins. "v24.13.1" → [24,13,1].
+    const byVersion = (v: string): number[] =>
+      v.replace(/^v/, "").split(".").map((n) => Number.parseInt(n, 10) || 0);
+    versions.sort((a, b) => {
+      const va = byVersion(a), vb = byVersion(b);
+      for (let i = 0; i < Math.max(va.length, vb.length); i++) {
+        const d = (vb[i] ?? 0) - (va[i] ?? 0);
+        if (d !== 0) return d;
+      }
+      return 0;
+    });
+    for (const v of versions) candidates.push(join(nvmNodeDir, v, "bin", "codex"));
+  }
+  for (const c of candidates) {
+    if (existsSync(c)) return c;
+  }
   return "codex";
 }
 

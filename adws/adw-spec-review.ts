@@ -292,8 +292,8 @@ function ensureCodex(): TaskEither<string, void> {
   return run(CODEX, ["--version"])
     .map(() => undefined)
     .mapLeft(() =>
-      `The \`codex\` CLI was not runnable at "${CODEX}". Install OpenAI Codex CLI (v0.137+) and retry. ` +
-      `Expected at /Users/mekael/.nvm/versions/node/v24.13.1/bin/codex or on PATH.`,
+      `The \`codex\` CLI was not runnable at "${CODEX}". Install OpenAI Codex CLI (v0.137+) and retry ` +
+      `(it is resolved by scanning ~/.nvm/versions/node/*/bin/codex, newest first, then PATH).`,
     );
 }
 

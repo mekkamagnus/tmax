@@ -88,7 +88,7 @@ agents/<id>/
 - `tmux` installed and the `tmax` tmux session available.
 - `bun` on PATH.
 - `claude` CLI on PATH (used by plan stage).
-- `codex` CLI on PATH (used by spec-review stage).
+- `codex` CLI (used by spec-review stage). NOT required on PATH — it is resolved by `resolveCodex()` in `adws-modules/reviewer.ts`, which scans `~/.nvm/versions/node/*/bin/codex` (newest version first) and only then falls back to PATH. **Do not preflight codex with `command -v codex`** — that produces a false negative. Trust the pipeline's own `ensureCodex()` guard, which runs the resolved binary's `--version` and reports the actual path on failure.
 
 ## See also
 
