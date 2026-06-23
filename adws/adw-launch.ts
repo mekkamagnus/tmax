@@ -57,6 +57,10 @@ Launches an adw pipeline script in a new tmux window inside the \`tmax\` session
 (created if missing). The window survives terminal disconnects and agent session
 timeouts — long-running pipelines (30–90 min) complete without being killed.
 
+By default the launcher ALSO starts or reuses a long-lived watchdog window
+(\`adw-watchdog\`) in the same session that monitors all adw workspaces for
+silent stalls/crashes (SPEC-066).
+
 Launcher flags (consumed before pass-through starts):
 
   -s, --session <name>    tmux session name (default: tmax). Created if missing.
@@ -67,6 +71,8 @@ Launcher flags (consumed before pass-through starts):
   -f, --foreground        run in the current terminal (no tmux).
       --resume <id>       convenience alias: append \`--id <id>\` to target args
                           (the orchestrators resume with --id; --resume is not forwarded).
+      --no-watchdog       skip launching/reusing the adw-watchdog window.
+      --dry-run           print the orchestrator command and watchdog plan, then exit.
 
 Pass-through: from the first non-flag positional, the first unknown flag, or
 anything after \`--\`, every remaining argv value is forwarded to the target
@@ -83,6 +89,8 @@ Examples:
   bun adws/adw-launch.ts --foreground "<description>"
   bun adws/adw-launch.ts --script adw-spec-review.ts <spec>
   bun adws/adw-launch.ts --chore "logging cleanup"
+  bun adws/adw-launch.ts --no-watchdog "<description>"
+  bun adws/adw-launch.ts --dry-run "<description>"
   bun adws/adw-launch.ts -- --marker /tmp/x --signal ready "hello world"`;
 
 // ---------------------------------------------------------------------------
@@ -95,6 +103,13 @@ export interface ParsedArgs {
   window?: string;
   foreground: boolean;
   resume?: string;
+  /** Skip launching/reusing the adw-watchdog tmux window (default: watchdog
+   * OFF — the watchdog auto-resumes ALL stale workspaces including old/abandoned
+   * ones, which causes unintended pipeline runs. Enable explicitly with
+   * --watchdog once SPEC-066's resume-allowlist lands. */
+  noWatchdog: boolean;
+  /** Dry-run mode: print the orchestrator command + watchdog plan, then exit. */
+  dryRun: boolean;
   /** Forwarded verbatim to the target script. */
   scriptArgs: string[];
 }
@@ -111,6 +126,8 @@ export function parseArgs(argv: string[]): Either<string, ParsedArgs> {
   let windowName: string | undefined;
   let foreground = false;
   let resume: string | undefined;
+  let noWatchdog = true;
+  let dryRun = false;
   const scriptArgs: string[] = [];
   let passthrough = false;
 
@@ -145,6 +162,12 @@ export function parseArgs(argv: string[]): Either<string, ParsedArgs> {
       const val = argv[++i];
       if (val === undefined) return Either.left(`--resume requires a value.`);
       resume = val;
+    } else if (a === "--no-watchdog") {
+      noWatchdog = true;
+    } else if (a === "--watchdog") {
+      noWatchdog = false;
+    } else if (a === "--dry-run") {
+      dryRun = true;
     } else {
       // Unknown flag OR positional → start pass-through from this arg.
       passthrough = true;
@@ -161,7 +184,16 @@ export function parseArgs(argv: string[]): Either<string, ParsedArgs> {
     return Either.left(`__usage__:${USAGE}`);
   }
 
-  return Either.right({ session, script, window: windowName, foreground, resume, scriptArgs });
+  return Either.right({
+    session,
+    script,
+    window: windowName,
+    foreground,
+    resume,
+    noWatchdog,
+    dryRun,
+    scriptArgs,
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -308,6 +340,115 @@ function runTmux(
   });
 }
 
+// ---------------------------------------------------------------------------
+// Watchdog launch/reuse (SPEC-066 Layer 2)
+// ---------------------------------------------------------------------------
+
+const WATCHDOG_WINDOW = "adw-watchdog";
+const WATCHDOG_SCRIPT = "adw-watchdog.ts";
+
+/**
+ * Detect whether a watchdog is already running for the given tmux session.
+ * Returns "running" if `tmux has-window` finds `adw-watchdog`, "process" if a
+ * stray `bun adws/adw-watchdog.ts` process is alive (e.g. session was renamed),
+ * or null if neither. Pure over the injected probe functions; production uses
+ * real tmux + real pgrep.
+ *
+ * pgrep fallback: `tmux list-windows` could miss a watchdog in another session
+ * (e.g. the user renamed the session); a stray watchdog process is still useful
+ * and should not be duplicated.
+ */
+export function detectWatchdog(
+  tmuxHasWindow: (session: string, window: string) => boolean,
+  isWatchdogProcessAlive: () => boolean,
+  session: string,
+): "window" | "process" | null {
+  if (tmuxHasWindow(session, WATCHDOG_WINDOW)) return "window";
+  if (isWatchdogProcessAlive()) return "process";
+  return null;
+}
+
+function tmuxHasWindowProduction(session: string, window: string): boolean {
+  // `tmux list-windows -t <session> -F '#{window_name}'` exits 0 with the
+  // window list, including the target window if present.
+  try {
+    const result = Bun.spawnSync({
+      cmd: ["tmux", "list-windows", "-t", session, "-F", "#{window_name}"],
+      cwd: PROJECT_ROOT,
+      stdio: ["ignore", "pipe", "ignore"],
+    });
+    if (result.exitCode !== 0) return false;
+    const stdout = result.stdout?.toString("utf8") ?? "";
+    return stdout.split("\n").includes(window);
+  } catch {
+    return false;
+  }
+}
+
+function isWatchdogProcessAliveProduction(): boolean {
+  // `pgrep -f adw-watchdog.ts` exits 0 if any matching process is running.
+  try {
+    const result = Bun.spawnSync({
+      cmd: ["pgrep", "-f", "adws/adw-watchdog.ts"],
+      cwd: PROJECT_ROOT,
+      stdio: ["ignore", "pipe", "ignore"],
+    });
+    return result.exitCode === 0;
+  } catch {
+    return false;
+  }
+}
+
+function launchWatchdog(
+  deps: TmuxLauncherDeps,
+  session: string,
+): Promise<{ ok: boolean; error?: string }> {
+  const scriptPath = resolveScriptPath(WATCHDOG_SCRIPT);
+  const cmd = buildTmuxCommand(PROJECT_ROOT, scriptPath, ["--poll-ms", "60000", "--stale-ms", "600000"]);
+  return launchInWindow(deps, { session, windowName: WATCHDOG_WINDOW, command: cmd })
+    .run()
+    .then((result) =>
+      Either.isRight(result)
+        ? { ok: true }
+        : { ok: false, error: result.left },
+    );
+}
+
+async function ensureWatchdog(
+  deps: TmuxLauncherDeps,
+  session: string,
+  dryRun: boolean,
+): Promise<number> {
+  // Dry-run: report what would happen, no side effects.
+  if (dryRun) {
+    const existing = detectWatchdog(tmuxHasWindowProduction, isWatchdogProcessAliveProduction, session);
+    if (existing) {
+      process.stderr.write(
+        `[dry-run] Watchdog already running (${existing}) in window \`${WATCHDOG_WINDOW}\` — would reuse.\n`,
+      );
+    } else {
+      process.stderr.write(
+        `[dry-run] Watchdog launched in window \`${WATCHDOG_WINDOW}\` (planned; not started in dry-run)\n`,
+      );
+    }
+    return 0;
+  }
+
+  const existing = detectWatchdog(tmuxHasWindowProduction, isWatchdogProcessAliveProduction, session);
+  if (existing) {
+    process.stderr.write(`Watchdog already running in window \`${WATCHDOG_WINDOW}\` (${existing}).\n`);
+    return 0;
+  }
+
+  const r = await launchWatchdog(deps, session);
+  if (!r.ok) {
+    process.stderr.write(`Warning: failed to launch watchdog: ${r.error}\n`);
+    return 1;
+  }
+  process.stderr.write(`Watchdog launched in window \`${WATCHDOG_WINDOW}\`.\n`);
+  return 0;
+}
+
 function main(): Promise<number> {
   const parsed = parseArgs(process.argv.slice(2));
 
@@ -324,7 +465,15 @@ function main(): Promise<number> {
     return Promise.resolve(1);
   }
 
-  const { session, script, window: windowName, foreground, scriptArgs } = parsed.right;
+  const {
+    session,
+    script,
+    window: windowName,
+    foreground,
+    noWatchdog,
+    dryRun,
+    scriptArgs,
+  } = parsed.right;
   const scriptPath = resolveScriptPath(script);
   if (!existsSync(scriptPath)) {
     const available = listAvailableScripts();
@@ -336,12 +485,33 @@ function main(): Promise<number> {
   }
 
   const window = windowName ?? defaultWindowName();
+
+  // Dry-run: print orchestrator command + watchdog plan, then exit.
+  if (dryRun) {
+    const cmd = foreground
+      ? buildForegroundArgv(scriptPath, scriptArgs).join(" ")
+      : `tmux new-window -t ${session}: -n ${window} -- ${buildTmuxCommand(PROJECT_ROOT, scriptPath, scriptArgs)}`;
+    process.stderr.write(`[dry-run] Orchestrator command:\n  ${cmd}\n`);
+    if (!noWatchdog && !foreground) {
+      return ensureWatchdog({ run }, session, true);
+    }
+    if (noWatchdog) process.stderr.write(`[dry-run] Watchdog: skipped (--no-watchdog)\n`);
+    if (foreground) process.stderr.write(`[dry-run] Watchdog: skipped (--foreground)\n`);
+    return Promise.resolve(0);
+  }
+
   if (foreground) {
     return runForeground(scriptPath, scriptArgs);
   }
 
   const deps: TmuxLauncherDeps = { run };
-  return runTmux(deps, session, window, scriptPath, scriptArgs);
+  return runTmux(deps, session, window, scriptPath, scriptArgs).then(async (orchestratorExit) => {
+    if (orchestratorExit !== 0) return orchestratorExit;
+    if (noWatchdog) return orchestratorExit;
+    // Long-lived watchdog — best-effort launch; failures don't fail the launcher.
+    await ensureWatchdog(deps, session, false);
+    return orchestratorExit;
+  });
 }
 
 // Only auto-run when invoked directly (not when imported by a test).
