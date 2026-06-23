@@ -73,7 +73,7 @@ export async function withHeartbeat<T>(
 }
 
 /** Read file size in bytes, or `null` if absent/unreadable. */
-function tryStatSize(path: string): number | null {
+export function tryStatSize(path: string): number | null {
   try { return statSync(path).size; } catch { return null; }
 }
 
