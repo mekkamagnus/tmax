@@ -260,10 +260,39 @@ function runCapture(cmd: string, args: string[], opts: RunOpts & { teeTo: string
         cwd: opts.cwd,
         env: opts.env ? { ...process.env, ...opts.env } : process.env,
         stdio: ["ignore", "pipe", "pipe"],
+        detached: true,
       });
       let stdout = "";
       let stderr = "";
       let teeBuf = "";
+      let settled = false;
+      let procClosed = false;
+      let stdoutEnded = false;
+      let stderrEnded = false;
+      let exitCode = -1;
+
+      const trySettle = () => {
+        if (settled) return;
+        if (!procClosed || !stdoutEnded || !stderrEnded) return;
+        settled = true;
+        clearTimeout(timer);
+        if (teeBuf.length > 0) {
+          try { appendFileSync(opts.teeTo, teeBuf); } catch { /* ignore */ }
+        }
+        if (exitCode === 0) resolve(Either.right(stdout.trim()));
+        else resolve(Either.left((stderr || stdout).trim() || `${cmd} exited with code ${exitCode}`));
+      };
+
+      const timer = setTimeout(() => {
+        if (settled) return;
+        settled = true;
+        try { process.kill(-child.pid!, "SIGKILL"); } catch { try { child.kill("SIGKILL"); } catch { /* already gone */ } }
+        if (teeBuf.length > 0) {
+          try { appendFileSync(opts.teeTo, teeBuf); } catch { /* ignore */ }
+        }
+        resolve(Either.left(`${cmd} ${args.join(" ")} timed out after ${STAGE_RUN_TIMEOUT_MS}ms`));
+      }, STAGE_RUN_TIMEOUT_MS);
+
       child.stdout.on("data", (chunk: Buffer | string) => {
         const s = typeof chunk === "string" ? chunk : chunk.toString("utf8");
         stdout += s;
@@ -275,16 +304,22 @@ function runCapture(cmd: string, args: string[], opts: RunOpts & { teeTo: string
           teeBuf = teeBuf.slice(nl + 1);
         }
       });
+      child.stdout.on("end", () => { stdoutEnded = true; trySettle(); });
       child.stderr.on("data", (chunk: Buffer | string) => {
         stderr += typeof chunk === "string" ? chunk : chunk.toString("utf8");
       });
-      child.on("error", (e) => resolve(Either.left(`failed to spawn ${cmd}: ${e.message}`)));
+      child.stderr.on("end", () => { stderrEnded = true; trySettle(); });
+      child.on("error", (e) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        resolve(Either.left(`failed to spawn ${cmd}: ${e.message}`));
+      });
       child.on("close", (code) => {
-        if (teeBuf.length > 0) {
-          try { appendFileSync(opts.teeTo, teeBuf); } catch { /* ignore */ }
-        }
-        if (code === 0) resolve(Either.right(stdout.trim()));
-        else resolve(Either.left((stderr || stdout).trim() || `${cmd} exited with code ${code}`));
+        if (settled) return;
+        procClosed = true;
+        exitCode = code ?? -1;
+        trySettle();
       });
     });
   });
