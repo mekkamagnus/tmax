@@ -1,15 +1,15 @@
 /**
  * @file adw-pipeline.test.ts
  * @description Deterministic unit tests for adws/adw-plan-reviewspec-build.ts.
- * No live `claude`, no live `codex`, no real `agents/` mutation beyond temp
- * state files written by runPipeline (which uses the real AGENTS_DIR — these
- * tests create throwaway orchestrator-id dirs that are cleaned up after).
+ * No live `claude`, no live `codex`, no real `agents/` mutation. All state I/O
+ * is redirected to a per-test temp dir via the orchestrator's `agentsDir`
+ * injection seam (BUG-17 / ADR-0105).
  *
  * All three stages are mocked via PipelineDeps — the tests assert the
  * orchestrator's stage-chaining, abort, continue, and error-recording behavior.
  */
 import { describe, test, expect, beforeEach, afterEach } from "bun:test";
-import { mkdtempSync, rmSync, existsSync, readFileSync, mkdirSync, writeFileSync } from "fs";
+import { mkdtempSync, rmSync, existsSync, readFileSync, mkdirSync, writeFileSync, readdirSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
 import { Either } from "../../src/utils/task-either.ts";
@@ -23,20 +23,23 @@ import {
   type BuildOutcome,
 } from "../../adws/adw-plan-reviewspec-build.ts";
 
-// Track created orchestrator-id dirs so we can clean them up.
-const createdIds: string[] = [];
-const AGENTS_DIR = join(process.cwd(), "agents");
+// Per-test temp dir — runPipeline writes all state here via the agentsDir seam.
+// The real repo agents/ dir is snapshotted in beforeEach/afterEach to assert
+// no test pollution (BUG-17 regression guard).
+let AGENTS_DIR = "";
+const REAL_AGENTS_DIR = join(process.cwd(), "agents");
+let realAgentsSnapshot: string[] = [];
 
 beforeEach(() => {
-  createdIds.length = 0;
+  AGENTS_DIR = mkdtempSync(join(tmpdir(), "adw-pipeline-test-"));
+  realAgentsSnapshot = existsSync(REAL_AGENTS_DIR) ? readdirSync(REAL_AGENTS_DIR) : [];
 });
 
 afterEach(() => {
-  // Best-effort cleanup of any agents/{id}/ dirs created during the test.
-  for (const id of createdIds) {
-    const dir = join(AGENTS_DIR, id);
-    if (existsSync(dir)) rmSync(dir, { recursive: true, force: true });
-  }
+  rmSync(AGENTS_DIR, { recursive: true, force: true });
+  // BUG-17 regression guard: real agents/ must be unchanged after every test.
+  const after = existsSync(REAL_AGENTS_DIR) ? readdirSync(REAL_AGENTS_DIR) : [];
+  expect(new Set(after)).toEqual(new Set(realAgentsSnapshot));
 });
 
 /** Build a mock PlanResult (orchestrator's lean view — no `type` field). */
@@ -91,13 +94,6 @@ function mockDeps(opts: {
       return opts.build ?? Either.right(mockBuild());
     },
   };
-}
-
-/** Track the orchestrator id from a result for cleanup. */
-function trackId(result: Either<string, { id: string }>): void {
-  if (Either.isRight(result)) createdIds.push(result.right.id);
-  // On failure, the id is embedded in the agents/ dir — we can't easily recover
-  // it, so we rely on the afterEach being best-effort. The dirs are tiny.
 }
 
 const baseArgs = (overrides: Partial<OrchestratorArgs> = {}): OrchestratorArgs => ({
@@ -245,8 +241,7 @@ describe("parseArgs — spec-path input", () => {
 describe("runPipeline — spec-path input", () => {
   test("skips plan and goes straight to review → build", async () => {
     const deps = mockDeps();
-    const result = await runPipeline(deps, { description: "", specPath: "/abs/SPEC-059.md" });
-    trackId(result);
+    const result = await runPipeline(deps, { description: "", specPath: "/abs/SPEC-059.md" }, AGENTS_DIR);
 
     expect(Either.isRight(result)).toBe(true);
     // plan NOT called (skipped); review + build called with the spec path.
@@ -257,8 +252,7 @@ describe("runPipeline — spec-path input", () => {
 
   test("records plan as completed (skipped) in the final state", async () => {
     const deps = mockDeps();
-    const result = await runPipeline(deps, { description: "", specPath: "/abs/SPEC-059.md" });
-    trackId(result);
+    const result = await runPipeline(deps, { description: "", specPath: "/abs/SPEC-059.md" }, AGENTS_DIR);
     if (Either.isLeft(result)) throw new Error("expected success");
 
     const state = JSON.parse(readFileSync(join(AGENTS_DIR, result.right.id, "adw-state.json"), "utf8"));
@@ -274,8 +268,7 @@ describe("runPipeline — spec-path input", () => {
 describe("runPipeline — success", () => {
   test("runs all three stages in order, returns Right with the surviving specPath", async () => {
     const deps = mockDeps();
-    const result = await runPipeline(deps, baseArgs());
-    trackId(result);
+    const result = await runPipeline(deps, baseArgs(), AGENTS_DIR);
 
     expect(Either.isRight(result)).toBe(true);
     if (Either.isRight(result)) {
@@ -297,8 +290,7 @@ describe("runPipeline — success", () => {
 
   test("forwards forcedType to plan and modelOverride to build", async () => {
     const deps = mockDeps();
-    const result = await runPipeline(deps, baseArgs({ forcedType: "chore", modelOverride: "glm-4.7" }));
-    trackId(result);
+    const result = await runPipeline(deps, baseArgs({ forcedType: "chore", modelOverride: "glm-4.7" }), AGENTS_DIR);
 
     expect(Either.isRight(result)).toBe(true);
     expect(deps.planCalls[0]!.forcedType).toBe("chore");
@@ -307,8 +299,7 @@ describe("runPipeline — success", () => {
 
   test("writes completed workspace state with the agents that ran", async () => {
     const deps = mockDeps();
-    const result = await runPipeline(deps, baseArgs());
-    trackId(result);
+    const result = await runPipeline(deps, baseArgs(), AGENTS_DIR);
     if (Either.isLeft(result)) throw new Error("expected success");
 
     const statePath = join(AGENTS_DIR, result.right.id, "adw-state.json");
@@ -326,8 +317,7 @@ describe("runPipeline — success", () => {
 describe("runPipeline — plan stage", () => {
   test("aborts when plan produces no spec (noop), before calling review or build", async () => {
     const deps = mockDeps({ plan: Either.right(mockPlan(null)) });
-    const result = await runPipeline(deps, baseArgs());
-    trackId(result);
+    const result = await runPipeline(deps, baseArgs(), AGENTS_DIR);
 
     expect(Either.isLeft(result)).toBe(true);
     if (Either.isLeft(result)) expect(result.left).toContain("produced no spec");
@@ -338,8 +328,7 @@ describe("runPipeline — plan stage", () => {
 
   test("aborts and records failed_stage when plan returns Left", async () => {
     const deps = mockDeps({ plan: Either.left("claude not found") });
-    const result = await runPipeline(deps, baseArgs());
-    trackId(result);
+    const result = await runPipeline(deps, baseArgs(), AGENTS_DIR);
 
     expect(Either.isLeft(result)).toBe(true);
     if (Either.isLeft(result)) expect(result.left).toContain("plan stage failed");
@@ -355,32 +344,28 @@ describe("runPipeline — plan stage", () => {
 describe("runPipeline — review stage (continue on gaps)", () => {
   test("proceeds to build when review returns 'pass'", async () => {
     const deps = mockDeps({ review: Either.right(mockReview("pass")) });
-    const result = await runPipeline(deps, baseArgs());
-    trackId(result);
+    const result = await runPipeline(deps, baseArgs(), AGENTS_DIR);
     expect(Either.isRight(result)).toBe(true);
     expect(deps.buildCalls).toHaveLength(1);
   });
 
   test("proceeds to build when review returns 'upgraded' (gaps found, spec fixed)", async () => {
     const deps = mockDeps({ review: Either.right(mockReview("upgraded")) });
-    const result = await runPipeline(deps, baseArgs());
-    trackId(result);
+    const result = await runPipeline(deps, baseArgs(), AGENTS_DIR);
     expect(Either.isRight(result)).toBe(true);
     expect(deps.buildCalls).toHaveLength(1);
   });
 
   test("proceeds to build when review returns 'unchanged'", async () => {
     const deps = mockDeps({ review: Either.right(mockReview("unchanged")) });
-    const result = await runPipeline(deps, baseArgs());
-    trackId(result);
+    const result = await runPipeline(deps, baseArgs(), AGENTS_DIR);
     expect(Either.isRight(result)).toBe(true);
     expect(deps.buildCalls).toHaveLength(1);
   });
 
   test("aborts and records failed_stage when review returns Left (hard failure)", async () => {
     const deps = mockDeps({ review: Either.left("codex crashed") });
-    const result = await runPipeline(deps, baseArgs());
-    trackId(result);
+    const result = await runPipeline(deps, baseArgs(), AGENTS_DIR);
 
     expect(Either.isLeft(result)).toBe(true);
     if (Either.isLeft(result)) expect(result.left).toContain("spec-review stage failed");
@@ -395,8 +380,7 @@ describe("runPipeline — review stage (continue on gaps)", () => {
 describe("runPipeline — build stage", () => {
   test("aborts and records failed_stage when build returns Left", async () => {
     const deps = mockDeps({ build: Either.left("implement skill failed") });
-    const result = await runPipeline(deps, baseArgs());
-    trackId(result);
+    const result = await runPipeline(deps, baseArgs(), AGENTS_DIR);
 
     expect(Either.isLeft(result)).toBe(true);
     if (Either.isLeft(result)) expect(result.left).toContain("build stage failed");
@@ -404,8 +388,7 @@ describe("runPipeline — build stage", () => {
 
   test("failed state records which stage failed", async () => {
     const deps = mockDeps({ build: Either.left("implement skill failed") });
-    const result = await runPipeline(deps, baseArgs());
-    trackId(result);
+    const result = await runPipeline(deps, baseArgs(), AGENTS_DIR);
     if (Either.isRight(result)) throw new Error("expected failure");
 
     // The orchestrator id is embedded in the agents/ dir; find it by scanning
@@ -477,7 +460,6 @@ function seedWorkspaceState(
   state: Record<string, unknown>,
   orchestratorEvents?: string[],
 ): void {
-  createdIds.push(id);
   const dir = join(AGENTS_DIR, id);
   mkdirSync(dir, { recursive: true });
   writeFileSync(join(dir, "adw-state.json"), JSON.stringify(state, null, 2) + "\n");
@@ -508,7 +490,7 @@ describe("runPipeline — resume (auto-detect)", () => {
       agents: ["planner"],
     });
     const deps = mockDeps();
-    const result = await runPipeline(deps, { description: "", id: wsId });
+    const result = await runPipeline(deps, { description: "", id: wsId }, AGENTS_DIR);
 
     expect(Either.isRight(result)).toBe(true);
     // plan NOT called (skipped); review + build called with the recovered spec path.
@@ -528,7 +510,7 @@ describe("runPipeline — resume (auto-detect)", () => {
       agents: ["planner", "reviewer", "upgrader"],
     });
     const deps = mockDeps();
-    const result = await runPipeline(deps, { description: "", id: wsId });
+    const result = await runPipeline(deps, { description: "", id: wsId }, AGENTS_DIR);
 
     expect(Either.isRight(result)).toBe(true);
     expect(deps.planCalls).toHaveLength(0);
@@ -547,7 +529,7 @@ describe("runPipeline — resume (auto-detect)", () => {
       agents: ["planner"],
     });
     const deps = mockDeps();
-    const result = await runPipeline(deps, { description: "", id: wsId });
+    const result = await runPipeline(deps, { description: "", id: wsId }, AGENTS_DIR);
     if (Either.isLeft(result)) throw new Error("expected success");
 
     const state = JSON.parse(readFileSync(join(AGENTS_DIR, wsId, "adw-state.json"), "utf8"));
@@ -578,7 +560,7 @@ describe("runPipeline — resume (events fallback for specPath)", () => {
       ],
     );
     const deps = mockDeps();
-    const result = await runPipeline(deps, { description: "", id: wsId });
+    const result = await runPipeline(deps, { description: "", id: wsId }, AGENTS_DIR);
 
     expect(Either.isRight(result)).toBe(true);
     // plan skipped (inferred from agents), review+build use the recovered path.
@@ -600,7 +582,7 @@ describe("runPipeline — resume (--from-stage override)", () => {
       agents: ["planner", "reviewer", "upgrader"],
     });
     const deps = mockDeps();
-    const result = await runPipeline(deps, { description: "", id: wsId, fromStage: "plan" });
+    const result = await runPipeline(deps, { description: "", id: wsId, fromStage: "plan" }, AGENTS_DIR);
 
     expect(Either.isRight(result)).toBe(true);
     // plan IS re-called (override), then review, then build.
@@ -617,7 +599,7 @@ describe("runPipeline — resume (--from-stage override)", () => {
       // no completed_stages, no agents — nothing completed, but override forces build
     });
     const deps = mockDeps();
-    const result = await runPipeline(deps, { description: "", id: wsId, fromStage: "build" });
+    const result = await runPipeline(deps, { description: "", id: wsId, fromStage: "build" }, AGENTS_DIR);
 
     expect(Either.isRight(result)).toBe(true);
     expect(deps.planCalls).toHaveLength(0);
@@ -629,8 +611,7 @@ describe("runPipeline — resume (--from-stage override)", () => {
 describe("runPipeline — resume (validation errors)", () => {
   test("--id for a nonexistent workspace → Left", async () => {
     const deps = mockDeps();
-    const result = await runPipeline(deps, { description: "", id: "01TESTWS99" });
-    createdIds.push("01TESTWS99"); // in case any dir was created
+    const result = await runPipeline(deps, { description: "", id: "01TESTWS99" }, AGENTS_DIR);
     expect(Either.isLeft(result)).toBe(true);
     if (Either.isLeft(result)) expect(result.left).toContain("nothing to resume");
   });
@@ -645,7 +626,7 @@ describe("runPipeline — resume (validation errors)", () => {
       spec_path: "/spec.md",
     });
     const deps = mockDeps();
-    const result = await runPipeline(deps, { description: "", id: wsId });
+    const result = await runPipeline(deps, { description: "", id: wsId }, AGENTS_DIR);
     expect(Either.isLeft(result)).toBe(true);
     if (Either.isLeft(result)) expect(result.left).toContain("already completed");
   });
@@ -676,8 +657,7 @@ describe("runPipeline — checkpoint (inter-stage state persistence)", () => {
         return Either.left("intentional build failure for test");
       },
     };
-    const result = await runPipeline(deps, baseArgs());
-    trackId(result);
+    const result = await runPipeline(deps, baseArgs(), AGENTS_DIR);
 
     expect(stateAtBuildTime).not.toBeNull();
     const state = stateAtBuildTime as unknown as Record<string, unknown>;

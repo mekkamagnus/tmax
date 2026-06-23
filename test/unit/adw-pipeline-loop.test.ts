@@ -1,17 +1,18 @@
 /**
  * @file adw-pipeline-loop.test.ts
  * @description Deterministic unit tests for adws/adw-plan-review-build-patch.ts.
- * No live `claude`, no live `codex`, no real `agents/` mutation beyond temp
- * state files written by runPipeline (which uses the real AGENTS_DIR — these
- * tests create throwaway orchestrator-id dirs that are cleaned up after).
+ * No live `claude`, no live `codex`, no real `agents/` mutation. All state I/O
+ * is redirected to a per-test temp dir via the orchestrator's `agentsDir`
+ * injection seam (BUG-17 / ADR-0105).
  *
- * All four stages are mocked via PipelineDeps — the tests assert the
+ * All five stages are mocked via PipelineDeps — the tests assert the
  * orchestrator's stage-chaining, patch-review loop, retry counting, gap-release,
  * resume-mid-loop, and error-recording behavior.
  */
 import { describe, test, expect, beforeEach, afterEach } from "bun:test";
-import { rmSync, existsSync, readFileSync, mkdirSync, writeFileSync } from "fs";
+import { mkdtempSync, rmSync, existsSync, readFileSync, mkdirSync, writeFileSync, readdirSync } from "fs";
 import { join } from "path";
+import { tmpdir } from "os";
 import { Either } from "../../src/utils/task-either.ts";
 import {
   parseArgs,
@@ -26,20 +27,23 @@ import {
   type TestOutcome,
 } from "../../adws/adw-plan-review-build-patch.ts";
 
-// Track created orchestrator-id dirs so we can clean them up.
-const createdIds: string[] = [];
-const AGENTS_DIR = join(process.cwd(), "agents");
+// Per-test temp dir — runPipeline writes all state here via the agentsDir seam.
+// The real repo agents/ dir is snapshotted in beforeEach/afterEach to assert
+// no test pollution (BUG-17 regression guard).
+let AGENTS_DIR = "";
+const REAL_AGENTS_DIR = join(process.cwd(), "agents");
+let realAgentsSnapshot: string[] = [];
 
 beforeEach(() => {
-  createdIds.length = 0;
+  AGENTS_DIR = mkdtempSync(join(tmpdir(), "adw-pipeline-loop-test-"));
+  realAgentsSnapshot = existsSync(REAL_AGENTS_DIR) ? readdirSync(REAL_AGENTS_DIR) : [];
 });
 
 afterEach(() => {
-  // Best-effort cleanup of any agents/{id}/ dirs created during the test.
-  for (const id of createdIds) {
-    const dir = join(AGENTS_DIR, id);
-    if (existsSync(dir)) rmSync(dir, { recursive: true, force: true });
-  }
+  rmSync(AGENTS_DIR, { recursive: true, force: true });
+  // BUG-17 regression guard: real agents/ must be unchanged after every test.
+  const after = existsSync(REAL_AGENTS_DIR) ? readdirSync(REAL_AGENTS_DIR) : [];
+  expect(new Set(after)).toEqual(new Set(realAgentsSnapshot));
 });
 
 // ---------------------------------------------------------------------------
@@ -152,11 +156,6 @@ function mockDeps(opts: {
   };
 }
 
-/** Track the orchestrator id from a result for cleanup. */
-function trackId(result: Either<string, { id: string }>): void {
-  if (Either.isRight(result)) createdIds.push(result.right.id);
-}
-
 const baseArgs = (overrides: Partial<OrchestratorArgs> = {}): OrchestratorArgs => ({
   description: "add a feature",
   ...overrides,
@@ -241,8 +240,7 @@ describe("parseArgs", () => {
 describe("runPipeline — fresh run", () => {
   test("full 4-stage success: plan → review → build → patch-review(pass)", async () => {
     const deps = mockDeps({ patch: Either.right(mockPatchPass()) });
-    const result = await runPipeline(deps, baseArgs());
-    trackId(result);
+    const result = await runPipeline(deps, baseArgs(), AGENTS_DIR);
 
     expect(Either.isRight(result)).toBe(true);
     // All 4 deps called exactly once.
@@ -259,8 +257,7 @@ describe("runPipeline — fresh run", () => {
 
   test("final state has patch_review_verdict: pass, patch_review_iterations: 1", async () => {
     const deps = mockDeps({ patch: Either.right(mockPatchPass()) });
-    const result = await runPipeline(deps, baseArgs());
-    trackId(result);
+    const result = await runPipeline(deps, baseArgs(), AGENTS_DIR);
     if (Either.isLeft(result)) throw new Error("expected success");
 
     const state = JSON.parse(readFileSync(join(AGENTS_DIR, result.right.id, "adw-state.json"), "utf8"));
@@ -285,8 +282,7 @@ describe("runPipeline — build↔patch-review loop", () => {
         Either.right(mockPatchPass()),  // iteration 2: pass
       ],
     });
-    const result = await runPipeline(deps, baseArgs());
-    trackId(result);
+    const result = await runPipeline(deps, baseArgs(), AGENTS_DIR);
 
     expect(Either.isRight(result)).toBe(true);
     // build called twice (initial + 1 retry), patch called twice.
@@ -321,8 +317,7 @@ describe("runPipeline — build↔patch-review loop", () => {
         Either.right(mockPatchPass()),  // iteration 3: pass
       ],
     });
-    const result = await runPipeline(deps, baseArgs());
-    trackId(result);
+    const result = await runPipeline(deps, baseArgs(), AGENTS_DIR);
 
     expect(Either.isRight(result)).toBe(true);
     // 3 patch-review iterations + 2 retry builds + 1 initial build = 3 build calls.
@@ -350,8 +345,7 @@ describe("runPipeline — build↔patch-review loop", () => {
         Either.right(mockPatchGaps()),
       ],
     });
-    const result = await runPipeline(deps, baseArgs());
-    trackId(result);
+    const result = await runPipeline(deps, baseArgs(), AGENTS_DIR);
 
     expect(Either.isRight(result)).toBe(true);
     // 3 patch-review calls + initial build + 2 rebuilds = 3 build calls.
@@ -370,8 +364,7 @@ describe("runPipeline — build↔patch-review loop", () => {
     const deps = mockDeps({
       patch: [Either.right(mockPatchGaps())],
     });
-    const result = await runPipeline(deps, baseArgs({ maxRetries: 1 }));
-    trackId(result);
+    const result = await runPipeline(deps, baseArgs({ maxRetries: 1 }), AGENTS_DIR);
 
     expect(Either.isRight(result)).toBe(true);
     // Only 1 patch-review call, 1 build call (initial). No retry build.
@@ -389,8 +382,7 @@ describe("runPipeline — build↔patch-review loop", () => {
     const deps = mockDeps({
       patch: Either.left("claude not found"),
     });
-    const result = await runPipeline(deps, baseArgs());
-    trackId(result);
+    const result = await runPipeline(deps, baseArgs(), AGENTS_DIR);
 
     expect(Either.isLeft(result)).toBe(true);
     if (Either.isLeft(result)) expect(result.left).toContain("patch-review stage failed");
@@ -404,8 +396,7 @@ describe("runPipeline — build↔patch-review loop", () => {
         Either.left("implement failed on retry"),
       ],
     });
-    const result = await runPipeline(deps, baseArgs());
-    trackId(result);
+    const result = await runPipeline(deps, baseArgs(), AGENTS_DIR);
 
     expect(Either.isLeft(result)).toBe(true);
     if (Either.isLeft(result)) expect(result.left).toContain("build stage failed (retry 1)");
@@ -419,8 +410,7 @@ describe("runPipeline — build↔patch-review loop", () => {
 describe("runPipeline — spec-path input", () => {
   test("skips plan and goes straight to review → build → patch-review", async () => {
     const deps = mockDeps({ patch: Either.right(mockPatchPass()) });
-    const result = await runPipeline(deps, { description: "", specPath: "/abs/SPEC-059.md" });
-    trackId(result);
+    const result = await runPipeline(deps, { description: "", specPath: "/abs/SPEC-059.md" }, AGENTS_DIR);
 
     expect(Either.isRight(result)).toBe(true);
     expect(deps.planCalls).toHaveLength(0);
@@ -431,8 +421,7 @@ describe("runPipeline — spec-path input", () => {
 
   test("final state for spec-path input includes completed_stages with all 4 stages", async () => {
     const deps = mockDeps({ patch: Either.right(mockPatchPass()) });
-    const result = await runPipeline(deps, { description: "", specPath: "/abs/SPEC-059.md" });
-    trackId(result);
+    const result = await runPipeline(deps, { description: "", specPath: "/abs/SPEC-059.md" }, AGENTS_DIR);
     if (Either.isLeft(result)) throw new Error("expected success");
 
     const state = JSON.parse(readFileSync(join(AGENTS_DIR, result.right.id, "adw-state.json"), "utf8"));
@@ -450,7 +439,6 @@ function seedWorkspaceState(
   id: string,
   state: Record<string, unknown>,
 ): void {
-  createdIds.push(id);
   const dir = join(AGENTS_DIR, id);
   mkdirSync(dir, { recursive: true });
   writeFileSync(join(dir, "adw-state.json"), JSON.stringify(state, null, 2) + "\n");
@@ -468,7 +456,7 @@ describe("runPipeline — resume at patch-review", () => {
       agents: ["planner", "reviewer", "upgrader", "builder"],
     });
     const deps = mockDeps({ patch: Either.right(mockPatchPass()) });
-    const result = await runPipeline(deps, { description: "", id: wsId });
+    const result = await runPipeline(deps, { description: "", id: wsId }, AGENTS_DIR);
 
     expect(Either.isRight(result)).toBe(true);
     expect(deps.planCalls).toHaveLength(0);
@@ -497,7 +485,7 @@ describe("runPipeline — resume mid-loop after GAPS before rebuild", () => {
         Either.right(mockPatchPass()),  // iteration 2: pass (after the rebuild)
       ],
     });
-    const result = await runPipeline(deps, { description: "", id: wsId });
+    const result = await runPipeline(deps, { description: "", id: wsId }, AGENTS_DIR);
 
     expect(Either.isRight(result)).toBe(true);
     // plan/review NOT called.
@@ -536,7 +524,7 @@ describe("runPipeline — resume mid-loop after rebuild before patch-review", ()
         Either.right(mockPatchPass()),  // iteration 2: pass
       ],
     });
-    const result = await runPipeline(deps, { description: "", id: wsId });
+    const result = await runPipeline(deps, { description: "", id: wsId }, AGENTS_DIR);
 
     expect(Either.isRight(result)).toBe(true);
     // plan/review/build NOT called — patch-review is next.
@@ -572,7 +560,7 @@ describe("runPipeline — forced --from-stage build with prior loop state", () =
         Either.right(mockPatchPass()),  // iteration 1 (fresh): pass
       ],
     });
-    const result = await runPipeline(deps, { description: "", id: wsId, fromStage: "build" });
+    const result = await runPipeline(deps, { description: "", id: wsId, fromStage: "build" }, AGENTS_DIR);
 
     expect(Either.isRight(result)).toBe(true);
     // Build runs before patch-review (forced restart).
@@ -600,7 +588,7 @@ describe("runPipeline — forced --from-stage patch-review", () => {
       agents: ["planner", "reviewer", "upgrader", "builder"],
     });
     const deps = mockDeps({ patch: Either.right(mockPatchPass()) });
-    const result = await runPipeline(deps, { description: "", id: wsId, fromStage: "patch-review" });
+    const result = await runPipeline(deps, { description: "", id: wsId, fromStage: "patch-review" }, AGENTS_DIR);
 
     expect(Either.isRight(result)).toBe(true);
     expect(deps.planCalls).toHaveLength(0);
@@ -617,8 +605,7 @@ describe("runPipeline — forced --from-stage patch-review", () => {
 describe("runPipeline — resume validation", () => {
   test("--id for a nonexistent workspace → Left", async () => {
     const deps = mockDeps();
-    const result = await runPipeline(deps, { description: "", id: "01TESTWS99" });
-    createdIds.push("01TESTWS99");
+    const result = await runPipeline(deps, { description: "", id: "01TESTWS99" }, AGENTS_DIR);
     expect(Either.isLeft(result)).toBe(true);
     if (Either.isLeft(result)) expect(result.left).toContain("nothing to resume");
   });
@@ -633,7 +620,7 @@ describe("runPipeline — resume validation", () => {
       spec_path: "/spec.md",
     });
     const deps = mockDeps();
-    const result = await runPipeline(deps, { description: "", id: wsId });
+    const result = await runPipeline(deps, { description: "", id: wsId }, AGENTS_DIR);
     expect(Either.isLeft(result)).toBe(true);
     if (Either.isLeft(result)) expect(result.left).toContain("already completed");
   });
@@ -653,7 +640,7 @@ describe("loadWorkspace", () => {
       spec_path: "/spec.md",
       agents: ["planner", "reviewer", "upgrader", "builder", "patch-reviewer"],
     });
-    const result = loadWorkspace(wsId);
+    const result = loadWorkspace(wsId, undefined, AGENTS_DIR);
     expect(Either.isRight(result)).toBe(true);
     if (Either.isRight(result)) {
       expect(result.right.completedStages).toContain("patch-review");
@@ -673,7 +660,7 @@ describe("loadWorkspace", () => {
       patch_review_verdict: "gaps",
       patch_review_next_action: "build",
     });
-    const result = loadWorkspace(wsId);
+    const result = loadWorkspace(wsId, undefined, AGENTS_DIR);
     expect(Either.isRight(result)).toBe(true);
     if (Either.isRight(result)) {
       expect(result.right.resumeFrom).toBe("build");
@@ -695,7 +682,7 @@ describe("loadWorkspace", () => {
       patch_review_verdict: "gaps",
       patch_review_next_action: "patch-review",
     });
-    const result = loadWorkspace(wsId);
+    const result = loadWorkspace(wsId, undefined, AGENTS_DIR);
     expect(Either.isRight(result)).toBe(true);
     if (Either.isRight(result)) {
       expect(result.right.resumeFrom).toBe("patch-review");
@@ -714,7 +701,7 @@ describe("loadWorkspace", () => {
       agents: ["planner", "reviewer", "upgrader", "builder"],
       patch_review_next_action: "patch-review",
     });
-    const result = loadWorkspace(wsId, "build");
+    const result = loadWorkspace(wsId, "build", AGENTS_DIR);
     expect(Either.isRight(result)).toBe(true);
     if (Either.isRight(result)) {
       expect(result.right.forcedFromStage).toBe(true);
