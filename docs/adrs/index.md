@@ -4,10 +4,11 @@ Records of significant architectural decisions. Each ADR describes the context, 
 
 Ordered most-recent first (highest ADR number = most recent decision). Topic groupings preserved within each section.
 
-## Recent — Test Isolation, adw Test Stage, E2E Consolidation (ADR 0105, 0101-0104)
+## Recent — Watchdog Safety Hold, Test Isolation, adw Test Stage (ADR 0106, 0105, 0101-0104)
 
 | File | Decision | Related |
 |------|----------|---------|
+| [ADR-0106-watchdog-resume-all-gap-disabled-default.md](ADR-0106-watchdog-resume-all-gap-disabled-default.md) | Watchdog auto-launch disabled by default (`--watchdog` to opt in) — resume-all design gap blindly re-ran abandoned specs | SPEC-066, [ADR-0101](ADR-0101-adw-test-pipeline-stage.md) |
 | [ADR-0105-test-isolation-policy.md](ADR-0105-test-isolation-policy.md) | Unit tests must use per-test temp dirs, never the real `agents/` (or any production) directory | BUG-17, [ADR-0103](ADR-0103-server-test-socket-leak-fix.md), [ADR-0101](ADR-0101-adw-test-pipeline-stage.md) |
 | [ADR-0104-test-stage-wall-clock-timeout.md](ADR-0104-test-stage-wall-clock-timeout.md) | Test-stage wall-clock timeout (20 min) + process-tree kill (`detached` + `kill -pgid`) | [ADR-0101](ADR-0101-adw-test-pipeline-stage.md), [ADR-0103](ADR-0103-server-test-socket-leak-fix.md), SPEC-066 |
 | [ADR-0103-server-test-socket-leak-fix.md](ADR-0103-server-test-socket-leak-fix.md) | Server-test socket-leak fix — `connectWithTimeout` + `forceShutdown` + `afterEach` cleanup (BUG-16) | BUG-16, [ADR-0101](ADR-0101-adw-test-pipeline-stage.md), [ADR-0104](ADR-0104-test-stage-wall-clock-timeout.md) |
