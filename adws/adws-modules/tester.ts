@@ -124,19 +124,28 @@ export function parseBunTestOutput(stdout: string, stderr: string): ParsedBunSum
     return { passed, failed, failures: failures.length > 0 ? failures : (failed > 0 ? [] : []) };
   }
 
-  // Fall back to counting check/cross markers.
+  // Fall back to counting (pass)/(fail) markers. Bun v1.x uses these text
+  // markers per-test, not the ✓/✗ unicode symbols older versions used.
+  const passMarkerCount = (combined.match(/\(pass\)/g) ?? []).length;
+  const failMarkerCount = (combined.match(/\(fail\)/g) ?? []).length;
+  // Also check legacy ✓/✗ symbols for older bun versions.
   const checkCount = (combined.match(/✓/g) ?? []).length;
   const crossCount = (combined.match(/✗/g) ?? []).length;
-  if (checkMatchSummary(combined)) {
-    return { passed: checkCount, failed: crossCount, failures };
+  const totalPass = passMarkerCount + checkCount;
+  const totalFail = failMarkerCount + crossCount;
+  if (totalPass > 0 || totalFail > 0) {
+    return { passed: totalPass, failed: totalFail, failures };
+  }
+
+  // Last resort: look for "Ran N tests" — at least tells us tests ran.
+  const ranMatch = combined.match(/Ran (\d+) tests/);
+  if (ranMatch) {
+    const ran = parseInt(ranMatch[1]!, 10);
+    // We know tests ran but couldn't parse pass/fail breakdown — if there were
+    // failures, extractBunFailures found them; otherwise assume all passed.
+    return { passed: ran - failures.length, failed: failures.length, failures };
   }
   return { passed: 0, failed: 0, failures: [] };
-}
-
-function checkMatchSummary(s: string): boolean {
-  // Only use ✓/✗ counts when the output clearly looks like a test runner dump
-  // (has either symbol) — avoids spurious counts on malformed/empty output.
-  return /✓|✗/.test(s);
 }
 
 /** Extract individual failure entries from `bun test` output. */

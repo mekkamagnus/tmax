@@ -190,6 +190,34 @@ function runRaw(cmd: string, args: string[], opts: RunOpts = {}): TaskEither<str
       let stdout = "";
       let stderr = "";
       let settled = false;
+      let procClosed = false;
+      let stdoutEnded = false;
+      let stderrEnded = false;
+      let exitCode = -1;
+
+      /** Resolve only after the process has closed AND both stdout/stderr
+       * streams have fully drained. The `close` event fires when the process
+       * exits, but the piped stdout/stderr Readable streams may still have
+       * buffered `data` events pending — resolving on `close` alone loses the
+       * tail (including bun's summary line "N pass / M fail"), which caused the
+       * parseBunTestOutput bug where passed=5/failed=0 despite exit_code=1. */
+      const trySettle = () => {
+        if (settled) return;
+        if (!procClosed) return;
+        // For pipes that never emit 'end' (rare), procClosed is enough if the
+        // stream emitted no 'data' at all. Require stdout/stderr 'end' when
+        // the streams exist.
+        if (!stdoutEnded || !stderrEnded) return;
+        settled = true;
+        clearTimeout(timer);
+        resolve(Either.right({
+          ok: exitCode === 0,
+          exitCode,
+          stdout,
+          stderr,
+        }));
+      };
+
       const timer = setTimeout(() => {
         if (settled) return;
         settled = true;
@@ -204,9 +232,11 @@ function runRaw(cmd: string, args: string[], opts: RunOpts = {}): TaskEither<str
       child.stdout.on("data", (chunk: Buffer | string) => {
         stdout += typeof chunk === "string" ? chunk : chunk.toString("utf8");
       });
+      child.stdout.on("end", () => { stdoutEnded = true; trySettle(); });
       child.stderr.on("data", (chunk: Buffer | string) => {
         stderr += typeof chunk === "string" ? chunk : chunk.toString("utf8");
       });
+      child.stderr.on("end", () => { stderrEnded = true; trySettle(); });
       child.on("error", (e) => {
         if (settled) return;
         settled = true;
@@ -215,15 +245,9 @@ function runRaw(cmd: string, args: string[], opts: RunOpts = {}): TaskEither<str
       });
       child.on("close", (code) => {
         if (settled) return;
-        settled = true;
-        clearTimeout(timer);
-        const exitCode = code ?? -1;
-        resolve(Either.right({
-          ok: exitCode === 0,
-          exitCode,
-          stdout,
-          stderr,
-        }));
+        procClosed = true;
+        exitCode = code ?? -1;
+        trySettle();
       });
     });
   });
