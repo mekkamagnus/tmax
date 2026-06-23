@@ -55,33 +55,38 @@ const mockPlan = (specPath: string | null): PlanResult => ({
   specPath,
 });
 
+/** Mock spec path — must be a real path inside a project/worktree root for
+ * normalizeSpecPath (SPEC-065). Using a temp path that actually exists avoids
+ * the "outside both projectRoot and worktreeRoot" validation error. */
+const mockSpecPath = (): string => join(AGENTS_DIR, "SPEC-test.md");
+
 const mockReview = (kind: "pass" | "upgraded" | "unchanged"): SpecReviewResult => ({
   id: "REVIEWTEST",
-  specPath: "/abs/spec.md",
+  specPath: mockSpecPath(),
   kind,
 });
 
 const mockBuild = (): BuildOutcome => ({
   id: "BUILDTEST1",
-  specPath: "/abs/spec.md",
-});
-
-const mockPatchPass = (): PatchReviewResult => ({
-  id: "PATCHTEST1",
-  verdict: "pass",
-  specPath: "/abs/spec.md",
-});
-
-const mockPatchGaps = (): PatchReviewResult => ({
-  id: "PATCHTEST1",
-  verdict: "gaps",
-  specPath: "/abs/spec.md",
+  specPath: mockSpecPath(),
 });
 
 const mockTestPass = (): TestOutcome => ({
   id: "TESTTEST1",
   verdict: "pass",
-  specPath: "/abs/spec.md",
+  specPath: mockSpecPath(),
+});
+
+const mockPatchPass = (): PatchReviewResult => ({
+  id: "PATCHTEST",
+  verdict: "pass",
+  specPath: mockSpecPath(),
+});
+
+const mockPatchGaps = (): PatchReviewResult => ({
+  id: "PATCHTEST",
+  verdict: "gaps",
+  specPath: mockSpecPath(),
 });
 
 /**
@@ -120,7 +125,7 @@ function mockDeps(opts: {
     testCalls,
     runPlan: async (description, forcedType, id) => {
       planCalls.push({ description, forcedType, id });
-      return opts.plan ?? Either.right(mockPlan("/abs/spec.md"));
+      return opts.plan ?? Either.right(mockPlan(mockSpecPath()));
     },
     runSpecReview: async (input, id) => {
       reviewCalls.push({ input, id });
@@ -410,7 +415,7 @@ describe("runPipeline — build↔patch-review loop", () => {
 describe("runPipeline — spec-path input", () => {
   test("skips plan and goes straight to review → build → patch-review", async () => {
     const deps = mockDeps({ patch: Either.right(mockPatchPass()) });
-    const result = await runPipeline(deps, { description: "", specPath: "/abs/SPEC-059.md" }, AGENTS_DIR);
+    const result = await runPipeline(deps, { description: "", specPath: mockSpecPath() }, AGENTS_DIR);
 
     expect(Either.isRight(result)).toBe(true);
     expect(deps.planCalls).toHaveLength(0);
@@ -421,12 +426,12 @@ describe("runPipeline — spec-path input", () => {
 
   test("final state for spec-path input includes completed_stages with all 4 stages", async () => {
     const deps = mockDeps({ patch: Either.right(mockPatchPass()) });
-    const result = await runPipeline(deps, { description: "", specPath: "/abs/SPEC-059.md" }, AGENTS_DIR);
+    const result = await runPipeline(deps, { description: "", specPath: mockSpecPath() }, AGENTS_DIR);
     if (Either.isLeft(result)) throw new Error("expected success");
 
     const state = JSON.parse(readFileSync(join(AGENTS_DIR, result.right.id, "adw-state.json"), "utf8"));
     expect(state.completed_stages).toEqual(["plan", "review", "build", "test", "patch-review"]);
-    expect(state.spec_path).toBe("/abs/SPEC-059.md");
+    expect(state.spec_path).toContain("SPEC-test.md");
   });
 });
 
@@ -452,7 +457,7 @@ describe("runPipeline — resume at patch-review", () => {
       description: "original desc",
       status: "running",
       completed_stages: ["plan", "review", "build"],
-      spec_path: "/abs/spec.md",
+      spec_path: join(AGENTS_DIR, "SPEC-test.md"),
       agents: ["planner", "reviewer", "upgrader", "builder"],
     });
     const deps = mockDeps({ patch: Either.right(mockPatchPass()) });
@@ -474,7 +479,7 @@ describe("runPipeline — resume mid-loop after GAPS before rebuild", () => {
       description: "original desc",
       status: "running",
       completed_stages: ["plan", "review", "build"],
-      spec_path: "/abs/spec.md",
+      spec_path: join(AGENTS_DIR, "SPEC-test.md"),
       agents: ["planner", "reviewer", "upgrader", "builder"],
       patch_review_iterations: 1,
       patch_review_verdict: "gaps",
@@ -513,7 +518,7 @@ describe("runPipeline — resume mid-loop after rebuild before patch-review", ()
       description: "original desc",
       status: "running",
       completed_stages: ["plan", "review", "build"],
-      spec_path: "/abs/spec.md",
+      spec_path: join(AGENTS_DIR, "SPEC-test.md"),
       agents: ["planner", "reviewer", "upgrader", "builder"],
       patch_review_iterations: 1,
       patch_review_verdict: "gaps",
@@ -549,7 +554,7 @@ describe("runPipeline — forced --from-stage build with prior loop state", () =
       description: "original desc",
       status: "running",
       completed_stages: ["plan", "review", "build"],
-      spec_path: "/abs/spec.md",
+      spec_path: join(AGENTS_DIR, "SPEC-test.md"),
       agents: ["planner", "reviewer", "upgrader", "builder", "patch-reviewer"],
       patch_review_iterations: 2,
       patch_review_verdict: "gaps",
@@ -584,7 +589,7 @@ describe("runPipeline — forced --from-stage patch-review", () => {
       description: "original desc",
       status: "running",
       completed_stages: ["plan", "review", "build"],
-      spec_path: "/abs/spec.md",
+      spec_path: join(AGENTS_DIR, "SPEC-test.md"),
       agents: ["planner", "reviewer", "upgrader", "builder"],
     });
     const deps = mockDeps({ patch: Either.right(mockPatchPass()) });

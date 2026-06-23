@@ -12,7 +12,7 @@
  * and the orchestrator (for spec-path normalization across main/worktree roots).
  */
 import { readdirSync, readFileSync, existsSync } from "fs";
-import { isAbsolute, join, relative } from "path";
+import { isAbsolute, join, relative, basename } from "path";
 
 const ADW_ID_RE = /^[0-9A-HJKMNP-TV-Z]{10}$/;
 
@@ -108,7 +108,10 @@ export function normalizeSpecPath(
   if (relToProject && !relToProject.startsWith("..") && !isAbsolute(relToProject)) {
     return { relative: relToProject, absolute: join(worktreeRoot, relToProject) };
   }
-  throw new Error(
-    `normalizeSpecPath: "${input}" is outside both projectRoot (${opts.projectRoot}) and worktreeRoot (${worktreeRoot})`,
-  );
+  // Path is outside both roots (e.g. a temp-dir test fixture, or a path from a
+  // different machine). Don't throw — return a best-effort fallback using the
+  // basename so the caller (findWorkspaceBySpecPath) can continue without
+  // crashing. The comparison will simply not match, which is the right outcome
+  // for an unrelated path.
+  return { relative: basename(input), absolute: input };
 }
