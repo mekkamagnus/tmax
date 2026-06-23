@@ -4,10 +4,11 @@ Records of significant architectural decisions. Each ADR describes the context, 
 
 Ordered most-recent first (highest ADR number = most recent decision). Topic groupings preserved within each section.
 
-## Recent — adw Test Stage, E2E Consolidation, Test Reliability (ADR 0101-0104)
+## Recent — Test Isolation, adw Test Stage, E2E Consolidation (ADR 0105, 0101-0104)
 
 | File | Decision | Related |
 |------|----------|---------|
+| [ADR-0105-test-isolation-policy.md](ADR-0105-test-isolation-policy.md) | Unit tests must use per-test temp dirs, never the real `agents/` (or any production) directory | BUG-17, [ADR-0103](ADR-0103-server-test-socket-leak-fix.md), [ADR-0101](ADR-0101-adw-test-pipeline-stage.md) |
 | [ADR-0104-test-stage-wall-clock-timeout.md](ADR-0104-test-stage-wall-clock-timeout.md) | Test-stage wall-clock timeout (20 min) + process-tree kill (`detached` + `kill -pgid`) | [ADR-0101](ADR-0101-adw-test-pipeline-stage.md), [ADR-0103](ADR-0103-server-test-socket-leak-fix.md), SPEC-066 |
 | [ADR-0103-server-test-socket-leak-fix.md](ADR-0103-server-test-socket-leak-fix.md) | Server-test socket-leak fix — `connectWithTimeout` + `forceShutdown` + `afterEach` cleanup (BUG-16) | BUG-16, [ADR-0101](ADR-0101-adw-test-pipeline-stage.md), [ADR-0104](ADR-0104-test-stage-wall-clock-timeout.md) |
 | [ADR-0102-python-ui-harness-removal.md](ADR-0102-python-ui-harness-removal.md) | Python UI harness removed; tmax-use + playbooks is the sole e2e mechanism | SPEC-063, SPEC-061, [ADR-0101](ADR-0101-adw-test-pipeline-stage.md) |
@@ -80,7 +81,7 @@ Ordered most-recent first (highest ADR number = most recent decision). Topic gro
 
 | File | Decision | Related |
 |------|----------|---------|
-| [ADR-0065-tmax-tmux-workflow-hardening.md](ADR-0065-tmax-tmux-workflow-hardening.md) | tmax tmux workflow hardening | [CHORE-14](../specs/CHORE-14-tmax-workflow-hardening.md) |
+| [ADR-0065-tmax-tmux-workflow-hardening.md](ADR-0065-tmax-tmux-workflow-hardening.md) | tmax tmux workflow hardening | [CHORE-14](../specs/archive/CHORE-14-tmax-workflow-hardening.md) |
 | [ADR-0064-interactive-find-file.md](ADR-0064-interactive-find-file.md) | Interactive find-file command | [CHORE-16](../specs/CHORE-16-file-completion.md) |
 | [ADR-0063-cwd-independent-source-paths.md](ADR-0063-cwd-independent-source-paths.md) | CWD-independent source paths | — |
 | [ADR-0062-daemon-client-cli-improvements.md](ADR-0062-daemon-client-cli-improvements.md) | Daemon/Client CLI improvements | — |

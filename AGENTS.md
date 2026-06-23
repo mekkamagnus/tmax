@@ -269,7 +269,12 @@ bun adws/adw-launch.ts docs/specs/SPEC-056-browse-url.md
 
 # Resume an interrupted run:
 bun adws/adw-launch.ts --resume <workspace-id>
+
+# Planning only (plan → spec-review, stops with status: planned):
+bun adws/adw-launch.ts --script adw-plan-reviewspec.ts "add a feature description"
 ```
+
+`/adw-plan "<description>"` (or `adw-launch.ts --script adw-plan-reviewspec.ts`) runs only plan → spec-review and leaves a resumable (`status: planned`) workspace. Build it with either `/adw-implement --resume <id>` or `/adw-implement docs/specs/SPEC-###.md` — both skip straight to build via spec-anchored discovery.
 
 ### Key concepts
 

@@ -41,10 +41,12 @@ All specification and documentation files are numbered for easy reference.
 - **SPEC-061** - tmax-use — Control Library + Visual E2E Test Runner ([visual walkthrough](./SPEC-061-tmax-use.html))
 - **SPEC-062** - adw Pipeline Observability — Live Console Visibility (RFC-020 §C + §B)
 - **SPEC-063** - adw-test pipeline stage + remove Python UI harness
+- **SPEC-064** - /adw-plan — planning-only adw skill (plan → spec-review → revised spec; resume with /adw-implement --resume <id> or /adw-implement docs/specs/SPEC-###.md)
+- **SPEC-066** - adw-watchdog — two-layer stall detection and auto-resume
 
 ## Summary
 
-- **Total Specs:** 30
+- **Total Specs:** 31
 - **Date:** 2026-06-21
 - **Status:** All files properly numbered and organized
 
@@ -54,13 +56,13 @@ To find a spec by topic:
 - **T-Lisp:** SPEC-004, SPEC-005
 - **Save Functionality:** SPEC-006, SPEC-007, SPEC-008
 - **UI Implementation:** SPEC-009, SPEC-017, SPEC-018, SPEC-021
-- **Testing:** SPEC-015, SPEC-019, SPEC-020, SPEC-024, SPEC-026, SPEC-048, SPEC-061, SPEC-063
+- **Testing:** SPEC-015, SPEC-019, SPEC-020, SPEC-024, SPEC-026, SPEC-048, SPEC-061, SPEC-063, SPEC-066
 - **TypeScript:** SPEC-012, SPEC-016
 - **Keybindings:** SPEC-013, SPEC-014
 - **Chores:** SPEC-011, SPEC-012, SPEC-024, SPEC-025, SPEC-026, SPEC-029
 - **Test Refactoring:** SPEC-024
 - **Configuration:** SPEC-025
-- **ADW Pipeline:** SPEC-048, SPEC-060, SPEC-061, SPEC-062, SPEC-063
+- **ADW Pipeline:** SPEC-048, SPEC-060, SPEC-061, SPEC-062, SPEC-063, SPEC-064, SPEC-066
 - **E2E Testing:** SPEC-048, SPEC-061
 
 ## Related ADRs
