@@ -422,10 +422,15 @@ export function runPatchReviewWithDeps(
     diffBase: resolvedInput.right.diffBase,
   };
 
+  // SPEC-065: ADW_WORKTREE is the orchestrator's per-run sibling worktree path.
+  // Gather/audit/gates run inside the worktree when orchestrated; standalone
+  // falls back to PROJECT_ROOT and behaves exactly as before.
+  const cwd = process.env.ADW_WORKTREE ?? PROJECT_ROOT;
+
   const program = TaskEither
     .right<Resolved, string>(currentReview)
     // Step 0: dependency guard — claude on PATH.
-    .flatMap((s) => ensureAvailable(deps, PROJECT_ROOT).map(() => s))
+    .flatMap((s) => ensureAvailable(deps, cwd).map(() => s))
     // Step 1: write initial state + start event.
     .flatMap((ctx) => recordState(ctx.id, {
       adw_id: ctx.id,
@@ -446,7 +451,7 @@ export function runPatchReviewWithDeps(
     // Step 2: gather context (spec + diff + untracked).
     .flatMap((ctx) => {
       writePhase(`[patch-review] gather (git diff + ls-files)\n`);
-      return gatherContext(deps, PROJECT_ROOT, ctx.specPath, ctx.diffBase)
+      return gatherContext(deps, cwd, ctx.specPath, ctx.diffBase)
         .tap((gather: GatherBundle) => appendEvent(ctx.id, "patch-reviewer", {
           event: "gather",
           spec_path: ctx.specPath,
@@ -460,7 +465,7 @@ export function runPatchReviewWithDeps(
     // stderr line per gate transition so the operator can see the iteration
     // progressing through typecheck → unit → (optional) tmax-use, which are
     // the longest silent stretches (each gate emits no stream-json).
-    .flatMap((ctx: Resolved & { gather: GatherBundle }) => runGates(deps, PROJECT_ROOT, {
+    .flatMap((ctx: Resolved & { gather: GatherBundle }) => runGates(deps, cwd, {
       onPhase: (phase, command) => writePhase(`[patch-review] ${phase} (${command})\n`),
     })
       .tap((gates: GateResults) => appendEvent(ctx.id, "patch-reviewer", {
@@ -486,7 +491,7 @@ export function runPatchReviewWithDeps(
       const auditorLog = join(AGENTS_DIR, ctx.id, "patch-reviewer", "raw-output.jsonl");
       const verdictFile = join(AGENTS_DIR, ctx.id, "patch-reviewer", "verdict.json");
       writePhase(`[patch-review] audit (claude /audit against spec + diff)\n`);
-      return audit(deps, PROJECT_ROOT, ctx.specPath, ctx.gather, ctx.gates, auditorLog, verdictFile, ctx.model)
+      return audit(deps, cwd, ctx.specPath, ctx.gather, ctx.gates, auditorLog, verdictFile, ctx.model)
         .tap(() => appendEvent(ctx.id, "patch-reviewer", {
           event: "audit",
           status: "ok",

@@ -370,6 +370,13 @@ export function runSpecReview(
   const recordState = (stateId: string, state: Record<string, unknown>): TaskEither<string, void> =>
     ownsState ? writeState(stateId, state) : TaskEither.right<void, string>(undefined);
 
+  // SPEC-065: ADW_WORKTREE is the orchestrator's per-run sibling worktree path.
+  // Fresh orchestrator setup intentionally does NOT set ADW_WORKTREE for the
+  // spec-review stage (so review edits land on main), so this hoist is a
+  // no-op there. The fallback preserves standalone behavior and supports any
+  // future reviewed-in-worktree resume path.
+  const cwd = process.env.ADW_WORKTREE ?? PROJECT_ROOT;
+
   const program = TaskEither
     .right<PipelineInput, string>({
       id: runId,
@@ -398,7 +405,7 @@ export function runSpecReview(
     .flatMap((ctx: PipelineInput) => {
       const reviewerLog = join(AGENTS_DIR, ctx.id, "reviewer", "raw-output.jsonl");
       const verdictFile = join(AGENTS_DIR, ctx.id, "reviewer", "verdict.json");
-      return reviewSpec(deps, PROJECT_ROOT, ctx.specPath, reviewerLog, verdictFile)
+      return reviewSpec(deps, cwd, ctx.specPath, reviewerLog, verdictFile)
         .tap((verdict: ReviewVerdictPayload) => {
           appendEvent(ctx.id, "reviewer", {
             event: "review",
@@ -436,7 +443,7 @@ export function runSpecReview(
       // Verdict is "fail" — proceed to upgrade (Pass 2).
       const upgraderLog = join(AGENTS_DIR, ctx.id, "upgrader", "raw-output.jsonl");
       appendEvent(ctx.id, "upgrader", { event: "start", spec_path: ctx.specPath });
-      return upgradeSpec(deps, PROJECT_ROOT, ctx.specPath, ctx.verdict, upgraderLog)
+      return upgradeSpec(deps, cwd, ctx.specPath, ctx.verdict, upgraderLog)
         .tap((result) => {
           const status = result.changed ? "upgraded" : "unchanged";
           appendEvent(ctx.id, "upgrader", {

@@ -395,10 +395,15 @@ export function runTestWithDeps(
     source: resolvedInput.right.source,
   };
 
+  // SPEC-065: ADW_WORKTREE is the orchestrator's per-run sibling worktree path.
+  // Test commands run inside the worktree when orchestrated; standalone falls
+  // back to PROJECT_ROOT and behaves exactly as before.
+  const cwd = process.env.ADW_WORKTREE ?? PROJECT_ROOT;
+
   const program = TaskEither
     .right<Resolved, string>(currentRun)
     // Step 0: dependency guard — claude on PATH.
-    .flatMap((s) => ensureAvailable(deps, PROJECT_ROOT).map(() => s))
+    .flatMap((s) => ensureAvailable(deps, cwd).map(() => s))
     // Step 1: write initial state + start event.
     .flatMap((ctx) => recordState(ctx.id, {
       adw_id: ctx.id,
@@ -417,7 +422,7 @@ export function runTestWithDeps(
     // Step 2: unit track.
     .flatMap((ctx) => {
       writePhase(`[test] unit (iteration 1/${1 + 2})\n`);
-      return runUnitTrack(deps, PROJECT_ROOT, AGENTS_DIR, ctx.id, ctx.model, {
+      return runUnitTrack(deps, cwd, AGENTS_DIR, ctx.id, ctx.model, {
         onIteration: (it, max) => writePhase(`[test] unit (iteration ${it}/${max})\n`),
         onResolve: (name, it) => {
           appendEvent(ctx.id, { event: "unit_resolve", iteration: it, failure: name });
@@ -456,7 +461,7 @@ export function runTestWithDeps(
           }) as TestOutcome));
       }
       writePhase(`[test] e2e (iteration 1/${1 + 2})\n`);
-      return runE2eTrack(deps, PROJECT_ROOT, AGENTS_DIR, ctx.id, ctx.model, {
+      return runE2eTrack(deps, cwd, AGENTS_DIR, ctx.id, ctx.model, {
         onIteration: (it, max) => writePhase(`[test] e2e (iteration ${it}/${max})\n`),
         onResolve: (name, it) => {
           appendEvent(ctx.id, { event: "e2e_resolve", iteration: it, failure: name });

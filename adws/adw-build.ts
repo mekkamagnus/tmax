@@ -481,10 +481,17 @@ export function runBuild(
     source,
   };
 
+  // SPEC-065: when orchestrated inside a worktree, ADW_WORKTREE points at the
+  // per-run sibling worktree path. The execution cwd (claude dispatch, e2e
+  // gate, git capture) is the worktree, while state/events/agents/ remain on
+  // PROJECT_ROOT. Standalone (no env var) falls back to PROJECT_ROOT — i.e.
+  // behaves exactly as before.
+  const cwd = process.env.ADW_WORKTREE ?? PROJECT_ROOT;
+
   const program = TaskEither
     .right<Resolved, string>(currentBuild)
     // Step 0: dependency guard — claude on PATH.
-    .flatMap((ctx) => ensureAvailable(deps, PROJECT_ROOT).map(() => ctx))
+    .flatMap((ctx) => ensureAvailable(deps, cwd).map(() => ctx))
     // Step 1: write initial state + start event.
     .flatMap((ctx) => recordState(ctx.id, {
       adw_id: ctx.id,
@@ -506,7 +513,7 @@ export function runBuild(
       const builderLog = join(AGENTS_DIR, ctx.id, "builder", "raw-output.jsonl");
       // §C: live tool-use filtering to stderr — only when orchestrated.
       const liveLabel = process.env.ADW_ORCHESTRATED === "1" ? "build" : undefined;
-      return build(deps, PROJECT_ROOT, ctx.specPath, builderLog, ctx.model, liveLabel)
+      return build(deps, cwd, ctx.specPath, builderLog, ctx.model, liveLabel)
         .tap(() => appendEvent(ctx.id, "builder", {
           event: "dispatch",
           skill: "implement",
@@ -516,7 +523,7 @@ export function runBuild(
         .map(() => ctx);
     })
     // Step 3: best-effort git capture, then record result + finalize state.
-    .flatMap((ctx) => captureGitTrace(run, PROJECT_ROOT)
+    .flatMap((ctx) => captureGitTrace(run, cwd)
       .tap((trace) => appendEvent(ctx.id, "builder", {
         event: "result",
         ...(trace.base_sha ? { base_sha: trace.base_sha } : {}),
@@ -536,7 +543,7 @@ export function runBuild(
     // when no tmax-use targets exist.
     .flatMap((outcome) => {
       const reportDir = join(AGENTS_DIR, outcome.id, "e2e-report");
-      return runE2eGate(run, PROJECT_ROOT, reportDir)
+      return runE2eGate(run, cwd, reportDir)
         .tap((gate) => appendEvent(outcome.id, "builder", {
           event: "e2e_gate",
           ...(gate.skipped ? { skipped: true } : { ok: gate.ok }),

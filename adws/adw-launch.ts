@@ -73,6 +73,15 @@ Launcher flags (consumed before pass-through starts):
                           (the orchestrators resume with --id; --resume is not forwarded).
       --no-watchdog       skip launching/reusing the adw-watchdog window.
       --dry-run           print the orchestrator command and watchdog plan, then exit.
+                          With --remote, runs local --setup-only and prints
+                          ADW_REMOTE_DRY_RUN with the planned push/dispatch commands.
+      --remote <host>     SPEC-065: offload the pipeline to an SSH host. Runs
+                          local --setup-only (plan/review/spec-commit/worktree),
+                          pushes adw/<id> to git remote adw-<host>, seeds the
+                          remote agents/<id>/ state over SSH, and runs
+                          \`adw-launch.ts --resume <id>\` there in tmux. The host
+                          must be in ~/.ssh/config and the repo must be cloned
+                          at $ADW_REMOTE_REPO_PATH (default ~/tmax).
 
 Pass-through: from the first non-flag positional, the first unknown flag, or
 anything after \`--\`, every remaining argv value is forwarded to the target
@@ -91,6 +100,8 @@ Examples:
   bun adws/adw-launch.ts --chore "logging cleanup"
   bun adws/adw-launch.ts --no-watchdog "<description>"
   bun adws/adw-launch.ts --dry-run "<description>"
+  bun adws/adw-launch.ts --remote mekkapi "<description>"
+  bun adws/adw-launch.ts --remote mekkapi --dry-run "<description>"
   bun adws/adw-launch.ts -- --marker /tmp/x --signal ready "hello world"`;
 
 // ---------------------------------------------------------------------------
@@ -108,8 +119,14 @@ export interface ParsedArgs {
    * ones, which causes unintended pipeline runs. Enable explicitly with
    * --watchdog once SPEC-066's resume-allowlist lands. */
   noWatchdog: boolean;
-  /** Dry-run mode: print the orchestrator command + watchdog plan, then exit. */
+  /** Dry-run mode: print the orchestrator command + watchdog plan, then exit.
+   * With --remote, switches to remote dry-run: runs local --setup-only and
+   * prints ADW_REMOTE_DRY_RUN with the planned push/dispatch commands. */
   dryRun: boolean;
+  /** SPEC-065 remote dispatch host (from ~/.ssh/config). When set, the launcher
+   * runs local --setup-only, pushes adw/<id> to git remote adw-<host>, copies
+   * state to the remote, and SSHes the resumed command. */
+  remote?: string;
   /** Forwarded verbatim to the target script. */
   scriptArgs: string[];
 }
@@ -128,6 +145,7 @@ export function parseArgs(argv: string[]): Either<string, ParsedArgs> {
   let resume: string | undefined;
   let noWatchdog = true;
   let dryRun = false;
+  let remote: string | undefined;
   const scriptArgs: string[] = [];
   let passthrough = false;
 
@@ -168,6 +186,10 @@ export function parseArgs(argv: string[]): Either<string, ParsedArgs> {
       noWatchdog = false;
     } else if (a === "--dry-run") {
       dryRun = true;
+    } else if (a === "--remote") {
+      const val = argv[++i];
+      if (val === undefined) return Either.left(`--remote requires a value (an SSH host from ~/.ssh/config).`);
+      remote = val;
     } else {
       // Unknown flag OR positional → start pass-through from this arg.
       passthrough = true;
@@ -179,7 +201,9 @@ export function parseArgs(argv: string[]): Either<string, ParsedArgs> {
     scriptArgs.unshift("--id", resume);
   }
 
-  // No target args, no resume → nothing to launch.
+  // --remote requires --dry-run OR a positional description/spec. The remote
+  // flow always reuses the same scriptArgs (description or --id), so this is
+  // the same "nothing to launch" guard as standalone.
   if (scriptArgs.length === 0) {
     return Either.left(`__usage__:${USAGE}`);
   }
@@ -192,6 +216,7 @@ export function parseArgs(argv: string[]): Either<string, ParsedArgs> {
     resume,
     noWatchdog,
     dryRun,
+    remote,
     scriptArgs,
   });
 }
@@ -292,6 +317,190 @@ function run(cmd: string, args: string[], opts: RunOpts = {}): TaskEither<string
       });
     });
   });
+}
+
+// ---------------------------------------------------------------------------
+// Remote dispatch (SPEC-065)
+// ---------------------------------------------------------------------------
+
+import {
+  defaultRemoteRepoPath,
+  dispatchCommand,
+  ensureGitRemote,
+  fetchBackInstruction,
+  pushToRemote,
+  remoteNameForHost,
+} from "./adws-modules/remote.ts";
+
+/** Shape of the ADW_SETUP_RESULT JSON printed by --setup-only. */
+interface SetupResult {
+  id: string;
+  spec_path: string;
+  branch: string;
+  worktree_path: string;
+  state_path: string;
+}
+
+/**
+ * Parse the final `ADW_SETUP_RESULT <json>` line from the orchestrator's stdout.
+ * Returns the parsed JSON or Left with a clear error. Tolerates human logs that
+ * precede the contract line.
+ */
+export function parseSetupResult(stdout: string): Either<string, SetupResult> {
+  const lines = stdout.split("\n");
+  for (let i = lines.length - 1; i >= 0; i--) {
+    const line = lines[i]!;
+    const idx = line.indexOf("ADW_SETUP_RESULT");
+    if (idx >= 0) {
+      const json = line.slice(idx + "ADW_SETUP_RESULT".length).trim();
+      try {
+        const parsed = JSON.parse(json) as SetupResult;
+        if (!parsed.id || !parsed.branch || !parsed.worktree_path) {
+          return Either.left(`ADW_SETUP_RESULT JSON missing required fields: ${json}`);
+        }
+        return Either.right(parsed);
+      } catch (e) {
+        return Either.left(`ADW_SETUP_RESULT JSON parse failed: ${(e as Error).message} (line: ${json})`);
+      }
+    }
+  }
+  return Either.left(`orchestrator --setup-only did not print an ADW_SETUP_RESULT line (stdout: ${stdout.slice(-300)})`);
+}
+
+/**
+ * Run the local orchestrator with --setup-only appended to scriptArgs, capturing
+ * stdout. Returns the parsed ADW_SETUP_RESULT or exits 1 on failure. Used by
+ * --remote to seed the remote dispatch.
+ *
+ * The orchestrator runs in foreground mode (no tmux) because we need its stdout.
+ */
+function runLocalSetupOnly(scriptPath: string, scriptArgs: string[]): Promise<{ code: number; stdout: string; stderr: string }> {
+  const argv = [...buildForegroundArgv(scriptPath, scriptArgs), "--setup-only"];
+  return new Promise((resolve) => {
+    try {
+      const child = Bun.spawn(argv, {
+        cwd: PROJECT_ROOT,
+        stdio: ["ignore", "pipe", "pipe"],
+      });
+      let stdout = "";
+      let stderr = "";
+      const stdoutReader = child.stdout?.getReader();
+      const stderrReader = child.stderr?.getReader();
+      const readAll = async (reader: ReadableStreamDefaultReader<Uint8Array> | undefined, sink: (s: string) => void) => {
+        if (!reader) return;
+        try {
+          while (true) {
+            const { done, value } = await reader.read();
+            if (done) return;
+            sink(typeof value === "string" ? value : new TextDecoder().decode(value));
+          }
+        } catch { /* best-effort */ }
+      };
+      Promise.all([readAll(stdoutReader, (s) => stdout += s), readAll(stderrReader, (s) => stderr += s)])
+        .then(() => child.exited)
+        .then((code) => resolve({ code, stdout, stderr }));
+    } catch (e) {
+      resolve({ code: 1, stdout: "", stderr: `failed to spawn ${argv.join(" ")}: ${(e as Error).message}` });
+    }
+  });
+}
+
+/**
+ * SPEC-065 remote dispatch flow:
+ *   1. Run local --setup-only, parse ADW_SETUP_RESULT.
+ *   2. Resolve remoteRepoPath from ADW_REMOTE_REPO_PATH or default.
+ *   3. (dry-run) Print ADW_REMOTE_DRY_RUN with planned commands; no network.
+ *   4. (live) ensureGitRemote, pushToRemote, dispatchToRemote, print fetch-back.
+ *
+ * Returns exit code. Errors surface on stderr with a clear message.
+ */
+async function runRemote(host: string, dryRun: boolean, scriptPath: string, scriptArgs: string[]): Promise<number> {
+  const setup = await runLocalSetupOnly(scriptPath, scriptArgs);
+  if (setup.code !== 0) {
+    process.stderr.write(`Error: local --setup-only failed (exit ${setup.code}).\n${setup.stderr}\n`);
+    return setup.code;
+  }
+  // Surface any stderr that the orchestrator wrote (e.g. stage progress) so
+  // the operator sees something while waiting for the contract line.
+  if (setup.stderr) process.stderr.write(setup.stderr);
+  const parsed = parseSetupResult(setup.stdout);
+  if (Either.isLeft(parsed)) {
+    process.stderr.write(`Error: ${parsed.left}\n`);
+    return 1;
+  }
+  const result = parsed.right;
+  const remoteRepoPath = defaultRemoteRepoPath(host);
+  const remoteName = remoteNameForHost(host);
+  const remoteUrl = `${host}:${remoteRepoPath}`;
+  const pushCmd = `git push ${remoteName} ${result.branch}`;
+  const sshCmd = `ssh ${host} '${dispatchCommand(result.id, remoteRepoPath)}'`;
+  const fetchBack = fetchBackInstruction(remoteName, result.branch, result.id);
+
+  if (dryRun) {
+    const payload = {
+      id: result.id,
+      host,
+      remote_name: remoteName,
+      remote_url: remoteUrl,
+      remote_repo_path: remoteRepoPath,
+      branch: result.branch,
+      spec_path: result.spec_path,
+      worktree_path: result.worktree_path,
+      state_path: result.state_path,
+      commands: {
+        ensure_git_remote: `git remote add ${remoteName} ${remoteUrl} (if missing)`,
+        push: pushCmd,
+        seed_state: `scp -r agents/${result.id} ${host}:${remoteRepoPath}/agents/`,
+        dispatch: sshCmd,
+        fetch_back: fetchBack,
+      },
+    };
+    process.stdout.write(`ADW_REMOTE_DRY_RUN ${JSON.stringify(payload)}\n`);
+    return 0;
+  }
+
+  // Live: ensure remote, push, dispatch.
+  const remoteDeps = { run };
+  const ensure = await ensureGitRemote(remoteDeps, host, remoteRepoPath, PROJECT_ROOT).run();
+  if (Either.isLeft(ensure)) {
+    process.stderr.write(`Error: ensureGitRemote failed: ${ensure.left}\n`);
+    return 1;
+  }
+  process.stderr.write(`Remote '${remoteName}' → ${ensure.right.url} (${ensure.right.created ? "created" : "exists"}).\n`);
+
+  const push = await pushToRemote(remoteDeps, remoteName, result.branch, PROJECT_ROOT).run();
+  if (Either.isLeft(push)) {
+    process.stderr.write(`Error: push failed: ${push.left}\n`);
+    return 1;
+  }
+  process.stderr.write(`Pushed ${result.branch} to ${remoteName}.\n`);
+
+  // Seed the remote agents/<id>/ state over SSH (rsync to keep it simple).
+  // agents/ is gitignored, so branch push doesn't sync it.
+  const seedArgs = [
+    "-azv",
+    "--delete",
+    join(PROJECT_ROOT, "agents", result.id) + "/",
+    `${host}:${remoteRepoPath}/agents/${result.id}/`,
+  ];
+  process.stderr.write(`Seeding remote state: rsync ${seedArgs.join(" ")}\n`);
+  const seed = await run("rsync", seedArgs, { cwd: PROJECT_ROOT }).run();
+  if (Either.isLeft(seed)) {
+    process.stderr.write(`Error: rsync seed failed: ${seed.left}\n`);
+    return 1;
+  }
+
+  // Dispatch — runs adw-launch.ts --resume <id> on the remote, which handles
+  // its own tmux session there.
+  const dispatch = await run("ssh", [host, dispatchCommand(result.id, remoteRepoPath)], {}).run();
+  if (Either.isLeft(dispatch)) {
+    process.stderr.write(`Error: remote dispatch failed: ${dispatch.left}\n`);
+    return 1;
+  }
+  process.stderr.write(`Remote dispatched:\n  ${dispatch.right}\n`);
+  process.stdout.write(`Remote run started on ${host} for ${result.id}.\n`);
+  process.stdout.write(`Fetch back with:\n  ${fetchBack}\n`);
+  return 0;
 }
 
 // ---------------------------------------------------------------------------
@@ -472,6 +681,7 @@ function main(): Promise<number> {
     foreground,
     noWatchdog,
     dryRun,
+    remote,
     scriptArgs,
   } = parsed.right;
   const scriptPath = resolveScriptPath(script);
@@ -482,6 +692,13 @@ function main(): Promise<number> {
       : `No scripts found under adws/.`;
     process.stderr.write(`Error: script not found: ${script}\n(resolved to ${scriptPath})\n${listing}\n`);
     return Promise.resolve(1);
+  }
+
+  // SPEC-065: --remote routes to the remote-dispatch flow, which runs local
+  // --setup-only first then (dry-run) prints ADW_REMOTE_DRY_RUN or (live)
+  // pushes + dispatches. Never enters tmux on this machine.
+  if (remote) {
+    return runRemote(remote, dryRun, scriptPath, scriptArgs);
   }
 
   const window = windowName ?? defaultWindowName();

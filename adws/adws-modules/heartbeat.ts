@@ -33,6 +33,23 @@ export interface HeartbeatOptions {
   intervalMs?: number;
   write?: (s: string) => void;
   clock?: HeartbeatClock;
+  /**
+   * Structured-beat callback (SPEC-065): invoked on every beat with the same
+   * payload that was rendered to stderr. Used by the orchestrator to append
+   * `{ event: "heartbeat", stage, elapsed_ms, tee_file?, tee_delta_bytes? }`
+   * lines to `orchestrator/events.jsonl` so the status dashboard can derive
+   * working/idle state without parsing stderr. Best-effort: exceptions are
+   * swallowed so a failing event sink never crashes the stage.
+   */
+  onBeat?: (payload: HeartbeatPayload) => void;
+}
+
+/** Structured payload emitted on each heartbeat. */
+export interface HeartbeatPayload {
+  stage: string;
+  elapsed_ms: number;
+  tee_file?: string;
+  tee_delta_bytes?: number;
 }
 
 /**
@@ -54,15 +71,27 @@ export async function withHeartbeat<T>(
     const elapsedMs = clock.now() - startMs;
     let line: string;
     const nowSize = opts.teeFile ? tryStatSize(opts.teeFile) : null;
+    let delta: number | undefined;
     if (nowSize !== null) {
       const prevSize = lastSize ?? nowSize;
-      const delta = nowSize - prevSize;
+      delta = nowSize - prevSize;
       lastSize = nowSize;
       line = `[adw] ${opts.stage} running — ${fmtElapsed(elapsedMs)} elapsed, ${basename(opts.teeFile!)} +${fmtBytes(delta)} since last beat\n`;
     } else {
       line = `[adw] ${opts.stage} running — ${fmtElapsed(elapsedMs)} elapsed\n`;
     }
     try { write(line); } catch { /* best-effort — never crash on heartbeat */ }
+    if (opts.onBeat) {
+      try {
+        const payload: HeartbeatPayload = {
+          stage: opts.stage,
+          elapsed_ms: elapsedMs,
+          ...(opts.teeFile ? { tee_file: opts.teeFile } : {}),
+          ...(delta !== undefined ? { tee_delta_bytes: delta } : {}),
+        };
+        opts.onBeat(payload);
+      } catch { /* best-effort — never crash on beat */ }
+    }
   }, intervalMs);
 
   try {
