@@ -82,4 +82,5 @@ agents/<id>/
 
 - `adw-launch.ts` — tmux launcher (ADR-0094)
 - `adw-plan-review-build-patch.ts` — 4-stage orchestrator
+- `/adw-plan` — planning-only entry point (plan → spec-review). Resume its workspace here with `/adw-implement --resume <id>` OR `/adw-implement docs/specs/SPEC-###.md` to skip straight to build.
 - `.zcode/skills/tmax-spec-loop` — alternative: worktree-based spec implementation loop
