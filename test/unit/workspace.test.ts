@@ -56,11 +56,11 @@ describe("findWorkspaceBySpecPath", () => {
     expect(result).toBe("01TESTCC03");
   });
 
-  test("matches on exact spec_path string equality (no partial match)", () => {
+  test("matches normalized basename fallback without partial match", () => {
     seed("01TESTWS01", { adw_id: "01TESTWS01", spec_path: "/abs/SPEC-001.md" });
     expect(findWorkspaceBySpecPath(join(tmp, "agents"), "/abs/SPEC-001.md")).toBe("01TESTWS01");
     expect(findWorkspaceBySpecPath(join(tmp, "agents"), "/abs/SPEC-001")).toBeNull();
-    expect(findWorkspaceBySpecPath(join(tmp, "agents"), "SPEC-001.md")).toBeNull();
+    expect(findWorkspaceBySpecPath(join(tmp, "agents"), "SPEC-001.md")).toBe("01TESTWS01");
   });
 
   test("skips dirs that don't match the 10-char ULID shape", () => {

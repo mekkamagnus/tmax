@@ -245,6 +245,25 @@ export interface ResolvedInput {
   diffBase?: string;
 }
 
+interface WorkspaceHints {
+  baseSha?: string;
+  worktreePath?: string;
+}
+
+function readWorkspaceHints(id: string): WorkspaceHints {
+  const stateFile = join(AGENTS_DIR, id, "adw-state.json");
+  if (!existsSync(stateFile)) return {};
+  try {
+    const state = JSON.parse(readFileSync(stateFile, "utf8")) as Record<string, unknown>;
+    return {
+      baseSha: typeof state.base_sha === "string" ? state.base_sha : undefined,
+      worktreePath: typeof state.worktree_path === "string" ? state.worktree_path : undefined,
+    };
+  } catch {
+    return {};
+  }
+}
+
 export function resolveInputFrom(input: string, agentsDir: string, specsDir: string): Either<string, ResolvedInput> {
   const base = input.split("/").pop() ?? input;
   if (/^(SPEC|BUG|CHORE)-/.test(base)) {
@@ -337,6 +356,7 @@ interface Resolved extends Seed {
   specPath: string;
   source: "path" | "adw-id";
   diffBase?: string;
+  worktreePath?: string;
 }
 
 /** Result of a successful patch-review run. */
@@ -384,6 +404,7 @@ export function runPatchReviewWithDeps(
   // Discovery reuses the most recent existing workspace for this spec so logs
   // collect in one place. Skipped when orchestrated (orchestrator passes --id).
   const isAdwId = ADW_ID_RE.test(input);
+  const hints = options.id ? readWorkspaceHints(options.id) : isAdwId ? readWorkspaceHints(input) : {};
   let runId: string;
   if (options.id) {
     runId = options.id;
@@ -419,13 +440,14 @@ export function runPatchReviewWithDeps(
     idOverride: options.id,
     specPath: resolvedInput.right.specPath,
     source: resolvedInput.right.source,
-    diffBase: resolvedInput.right.diffBase,
+    diffBase: resolvedInput.right.diffBase ?? hints.baseSha,
+    worktreePath: hints.worktreePath,
   };
 
   // SPEC-065: ADW_WORKTREE is the orchestrator's per-run sibling worktree path.
   // Gather/audit/gates run inside the worktree when orchestrated; standalone
   // falls back to PROJECT_ROOT and behaves exactly as before.
-  const cwd = process.env.ADW_WORKTREE ?? PROJECT_ROOT;
+  const cwd = process.env.ADW_WORKTREE ?? currentReview.worktreePath ?? PROJECT_ROOT;
 
   const program = TaskEither
     .right<Resolved, string>(currentReview)
@@ -451,7 +473,7 @@ export function runPatchReviewWithDeps(
     // Step 2: gather context (spec + diff + untracked).
     .flatMap((ctx) => {
       writePhase(`[patch-review] gather (git diff + ls-files)\n`);
-      return gatherContext(deps, cwd, ctx.specPath, ctx.diffBase)
+      return gatherContext(deps, cwd, ctx.specPath, ctx.diffBase, { worktreePath: ctx.worktreePath })
         .tap((gather: GatherBundle) => appendEvent(ctx.id, "patch-reviewer", {
           event: "gather",
           spec_path: ctx.specPath,

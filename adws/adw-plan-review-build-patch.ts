@@ -274,6 +274,8 @@ interface WorkspaceState {
   error?: string;
   /** SPEC-065: absolute path to the sibling worktree (under worktree root). */
   worktree_path?: string;
+  /** SPEC-065: main HEAD used as the implementation branch diff base. */
+  base_sha?: string;
   /** SPEC-065: branch name `adw/<id>`. */
   branch?: string;
   /** SPEC-065: implementation commit SHA after a successful build (or null when worktree was clean). */
@@ -293,6 +295,7 @@ export interface ResumeContext {
   patchIterations?: number; // seed the loop counter on resume
   patchNextAction?: "build" | "patch-review"; // exact pending loop action
   forcedFromStage?: boolean; // true when --from-stage supplied explicitly
+  baseSha?: string;
 }
 
 /** Read agents/{id}/adw-state.json; Left if missing or unparseable. */
@@ -390,6 +393,9 @@ export function loadWorkspace(id: string, fromStage?: StageName, agentsDir: stri
   }
   if (state.patch_review_next_action === "build" || state.patch_review_next_action === "patch-review") {
     result.patchNextAction = state.patch_review_next_action;
+  }
+  if (typeof state.base_sha === "string") {
+    result.baseSha = state.base_sha;
   }
 
   return Either.right(result);
@@ -647,6 +653,8 @@ interface OrchestratorState {
   error?: string;
   /** SPEC-065: absolute path to the sibling worktree (under worktree root). */
   worktree_path?: string;
+  /** SPEC-065: main HEAD used as the implementation branch diff base. */
+  base_sha?: string;
   /** SPEC-065: branch name `adw/<id>`. */
   branch?: string;
   /** SPEC-065: implementation commit SHA after a successful build (or null when worktree was clean). */
@@ -770,6 +778,7 @@ export async function runPipeline(
     completed_stages: completedStages,
     branch,
     worktree_path: worktreePath,
+    ...(resume?.baseSha ? { base_sha: resume.baseSha } : {}),
     ...(specPath ? { spec_path: specPath } : {}),
   };
 
@@ -926,6 +935,14 @@ export async function runPipeline(
         spec_path: specRel,
         ...(commitRes.right.sha ? { sha: commitRes.right.sha } : {}),
       }, agentsDir);
+
+      const headRes = typeof worktreeDeps.gitRun === "function"
+        ? await worktreeDeps.gitRun("git", ["rev-parse", "HEAD"], { cwd: PROJECT_ROOT }).run()
+        : Either.right(commitRes.right.sha ?? "");
+      if (Either.isRight(headRes) && headRes.right.trim()) {
+        state.base_sha = headRes.right.trim();
+        appendEvent(id, { event: "base-sha-recorded", base_sha: state.base_sha }, agentsDir);
+      }
 
       // Create the worktree. Idempotent: a second call with the same path
       // returns a clear Left (caught below). Resume with an existing

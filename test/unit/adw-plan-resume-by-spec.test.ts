@@ -18,7 +18,7 @@ import { describe, test, expect, beforeEach, afterEach } from "bun:test";
 import { mkdtempSync, rmSync, existsSync, readFileSync, mkdirSync, writeFileSync, readdirSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
-import { Either } from "../../src/utils/task-either.ts";
+import { Either, TaskEither } from "../../src/utils/task-either.ts";
 import {
   parseArgs,
   runPipeline,
@@ -60,6 +60,21 @@ const mockReview = (kind: "pass" | "upgraded" | "unchanged"): SpecReviewResult =
 const mockBuild = (): BuildOutcome => ({ id: "BUILDTEST1", specPath: "/abs/spec.md" });
 const mockTestPass = (): TestOutcome => ({ id: "TESTTEST1", verdict: "pass", specPath: "/abs/spec.md" });
 const mockPatchPass = (): PatchReviewResult => ({ id: "PATCHTEST1", verdict: "pass", specPath: "/abs/spec.md" });
+
+/**
+ * Mock worktree deps — no-op implementations that don't touch real git.
+ * detectWorktree returns false (pretend we're in the main checkout) so the
+ * orchestrator doesn't refuse to create a worktree inside the test's temp dir.
+ * All other ops return Right with no real effect.
+ */
+const mockWorktreeDeps = {
+  withPlanningLock: async (_rootPath: string, fn: () => Promise<unknown>) => fn(),
+  commitSpecToMain: () => TaskEither.from(async () => Either.right({ committed: false })),
+  commitWorktreeChanges: () => TaskEither.from(async () => Either.right({ committed: false })),
+  createWorktree: () => TaskEither.from(async () => Either.right("")),
+  removeWorktree: () => TaskEither.from(async () => Either.right(undefined)),
+  detectWorktree: () => TaskEither.from(async () => Either.right(false)),
+};
 
 function mockDeps(): PipelineDeps & {
   planCalls: Array<{ description: string; forcedType?: string; id: string }>;
@@ -153,7 +168,7 @@ describe("runPipeline — spec-path discovery reuses a 'planned' workspace at bu
       agents: ["planner", "reviewer", "upgrader"],
     });
     const deps = mockDeps();
-    const result = await runPipeline(deps, { description: "", specPath: SPEC }, AGENTS_DIR);
+    const result = await runPipeline(deps, { description: "", specPath: SPEC }, AGENTS_DIR, mockWorktreeDeps);
 
     expect(Either.isRight(result)).toBe(true);
     // plan + review NOT called (skipped via resume); build IS called.
@@ -180,7 +195,7 @@ describe("runPipeline — spec-path discovery reuses a 'planned' workspace at bu
       spec_path: SPEC,
     });
     const deps = mockDeps();
-    const result = await runPipeline(deps, { description: "", specPath: SPEC }, AGENTS_DIR);
+    const result = await runPipeline(deps, { description: "", specPath: SPEC }, AGENTS_DIR, mockWorktreeDeps);
     if (Either.isLeft(result)) throw new Error("expected success");
 
     // The resume event in events.jsonl records the workspace id reused.
@@ -204,7 +219,7 @@ describe("runPipeline — spec-path discovery with non-resumable or absent works
       spec_path: SPEC,
     });
     const deps = mockDeps();
-    const result = await runPipeline(deps, { description: "", specPath: SPEC }, AGENTS_DIR);
+    const result = await runPipeline(deps, { description: "", specPath: SPEC }, AGENTS_DIR, mockWorktreeDeps);
 
     expect(Either.isRight(result)).toBe(true);
     // Fresh id minted — NOT the seeded id.
@@ -220,7 +235,7 @@ describe("runPipeline — spec-path discovery with non-resumable or absent works
   test("spec-path input with no prior workspace → fresh mint", async () => {
     const SPEC = "docs/specs/SPEC-996.md";
     const deps = mockDeps();
-    const result = await runPipeline(deps, { description: "", specPath: SPEC }, AGENTS_DIR);
+    const result = await runPipeline(deps, { description: "", specPath: SPEC }, AGENTS_DIR, mockWorktreeDeps);
 
     expect(Either.isRight(result)).toBe(true);
     expect(deps.planCalls).toHaveLength(0); // plan still skipped (spec path given)
@@ -241,7 +256,7 @@ describe("runPipeline — spec-path discovery with non-resumable or absent works
       spec_path: SPEC,
     });
     const deps = mockDeps();
-    const result = await runPipeline(deps, { description: "", specPath: SPEC }, AGENTS_DIR);
+    const result = await runPipeline(deps, { description: "", specPath: SPEC }, AGENTS_DIR, mockWorktreeDeps);
 
     expect(Either.isRight(result)).toBe(true);
     if (Either.isRight(result)) {
@@ -278,6 +293,7 @@ describe("runPipeline — discovery precedence", () => {
       deps,
       { description: "", id: explicitId, specPath: SPEC },
       AGENTS_DIR,
+      mockWorktreeDeps,
     );
 
     expect(Either.isRight(result)).toBe(true);
@@ -307,7 +323,7 @@ describe("runPipeline — discovery precedence", () => {
       spec_path: SPEC,
     });
     const deps = mockDeps();
-    const result = await runPipeline(deps, { description: "", specPath: SPEC }, AGENTS_DIR);
+    const result = await runPipeline(deps, { description: "", specPath: SPEC }, AGENTS_DIR, mockWorktreeDeps);
 
     expect(Either.isRight(result)).toBe(true);
     if (Either.isRight(result)) {
@@ -328,7 +344,7 @@ describe("runPipeline — discovery precedence", () => {
       spec_path: SPEC,
     });
     const deps = mockDeps();
-    const result = await runPipeline(deps, { description: "a fresh description" }, AGENTS_DIR);
+    const result = await runPipeline(deps, { description: "a fresh description" }, AGENTS_DIR, mockWorktreeDeps);
 
     expect(Either.isRight(result)).toBe(true);
     if (Either.isRight(result)) {
@@ -357,6 +373,7 @@ describe("runPipeline — --from-stage + spec-path discovery", () => {
       deps,
       { description: "", specPath: SPEC, fromStage: "review" },
       AGENTS_DIR,
+      mockWorktreeDeps,
     );
 
     expect(Either.isRight(result)).toBe(true);

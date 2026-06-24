@@ -60,6 +60,11 @@ export interface GatherBundle {
   gitWarning?: string;
 }
 
+export interface GatherContextOptions {
+  /** Set when the caller resolved the workspace state's worktree_path. */
+  worktreePath?: string;
+}
+
 /** Gate results for typecheck and unit tests. */
 export interface GateResults {
   typecheck: GateResult;
@@ -176,6 +181,7 @@ export function gatherContext(
   cwd: string,
   specPath: string,
   diffBase?: string,
+  opts: GatherContextOptions = {},
 ): TaskEither<string, GatherBundle> {
   // Read the spec file (sync read inside tryCatch).
   const specContentTE = TaskEither.tryCatch(
@@ -184,33 +190,72 @@ export function gatherContext(
   );
 
   return specContentTE.flatMap((specContent) => {
-    const base = diffBase ?? "HEAD";
-    const warning = diffBase ? undefined : "no build base_sha; diff may include pre-existing dirty changes";
-
     // Run git diff and git ls-files in parallel via TaskEither.parallel-like manual compose.
-    // We need: git diff <base> --no-color, git diff --name-only <base>, git ls-files --others --exclude-standard -z
+    // We need: git diff, git diff --name-only, git ls-files --others --exclude-standard -z
     return TaskEither.from(async () => {
+      const inWorktree = Boolean(process.env.ADW_WORKTREE || opts.worktreePath);
+      let resolvedDiffBase = diffBase;
+      let gitWarning = inWorktree || diffBase
+        ? undefined
+        : "no build base_sha; diff may include pre-existing dirty changes";
+      const addWarning = (message: string): void => {
+        gitWarning = `${gitWarning ? `${gitWarning}; ` : ""}${message}`;
+      };
+
+      if (inWorktree && !resolvedDiffBase) {
+        const mergeBaseRes = await deps.runRaw("git", ["merge-base", "main", "HEAD"], { cwd }).run();
+        if (Either.isLeft(mergeBaseRes)) {
+          return Either.left(`gather: git merge-base failed to spawn: ${mergeBaseRes.left}`);
+        }
+        if (mergeBaseRes.right.ok) {
+          const mergeBase = mergeBaseRes.right.stdout.trim();
+          if (mergeBase) {
+            resolvedDiffBase = mergeBase;
+            addWarning("no build base_sha; using git merge-base main HEAD");
+          } else {
+            addWarning("git merge-base main HEAD produced no output");
+          }
+        } else {
+          addWarning(`git merge-base main HEAD exited ${mergeBaseRes.right.exitCode}`);
+        }
+      }
+
+      let diffArgs: string[];
+      let nameArgs: string[];
+      if (inWorktree && resolvedDiffBase) {
+        const range = `${resolvedDiffBase}..HEAD`;
+        diffArgs = ["diff", range, "--no-color"];
+        nameArgs = ["diff", "--name-only", range];
+      } else {
+        const base = resolvedDiffBase ?? "HEAD";
+        if (inWorktree && !resolvedDiffBase) {
+          addWarning("no worktree diff base; falling back to git diff HEAD");
+        }
+        diffArgs = ["diff", base, "--no-color"];
+        nameArgs = ["diff", "--name-only", base];
+      }
+
       // Gather tracked diff
-      const diffRes = await deps.runRaw("git", ["diff", base, "--no-color"], { cwd }).run();
+      const diffRes = await deps.runRaw("git", diffArgs, { cwd }).run();
       if (Either.isLeft(diffRes)) {
         return Either.left(`gather: git diff failed to spawn: ${diffRes.left}`);
       }
       const diffResult = diffRes.right;
       let diff = diffResult.stdout;
-      let gitWarning = warning;
       if (!diffResult.ok) {
         diff = "";
-        gitWarning = gitWarning ?? "";
-        gitWarning = `${gitWarning}${gitWarning ? "; " : ""}git diff exited ${diffResult.exitCode}`;
+        addWarning(`git diff exited ${diffResult.exitCode}`);
       }
 
       // Gather changed file names
-      const namesRes = await deps.runRaw("git", ["diff", "--name-only", base], { cwd }).run();
+      const namesRes = await deps.runRaw("git", nameArgs, { cwd }).run();
       let filesChanged: string[] = [];
       if (Either.isRight(namesRes) && namesRes.right.ok) {
         filesChanged = namesRes.right.stdout.split("\n").map((s) => s.trim()).filter((s) => s.length > 0);
       } else if (Either.isLeft(namesRes)) {
         return Either.left(`gather: git diff --name-only failed to spawn: ${namesRes.left}`);
+      } else {
+        addWarning(`git diff --name-only exited ${namesRes.right.exitCode}`);
       }
 
       // Gather untracked files
@@ -232,7 +277,7 @@ export function gatherContext(
         diff,
         untrackedDiff,
         filesChanged,
-        diffBase,
+        diffBase: resolvedDiffBase,
         gitWarning,
       });
     });
@@ -297,6 +342,9 @@ export function renderGatherBundle(
   }
   lines.push(`## Files changed (${gather.filesChanged.length} files)`);
   for (const f of gather.filesChanged) lines.push(`- ${f}`);
+  if (gather.filesChanged.length === 0 && !gather.diff && !gather.untrackedDiff) {
+    lines.push(`- No changes detected.`);
+  }
   lines.push(``);
   lines.push(`## Tracked diff`);
   lines.push(`\`\`\`diff`);
