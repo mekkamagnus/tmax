@@ -13,7 +13,7 @@ import { describe, test, expect, beforeEach, afterEach } from "bun:test";
 import { mkdtempSync, rmSync, existsSync, readFileSync, mkdirSync, writeFileSync, readdirSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
-import { Either } from "../../src/utils/task-either.ts";
+import { Either, TaskEither } from "../../src/utils/task-either.ts";
 import {
   parseArgs,
   runPipeline,
@@ -88,6 +88,21 @@ const mockPatchGaps = (): PatchReviewResult => ({
   verdict: "gaps",
   specPath: mockSpecPath(),
 });
+
+/**
+ * Mock worktree deps — no-op implementations that don't touch real git.
+ * detectWorktree returns false (pretend we're in the main checkout) so the
+ * orchestrator doesn't refuse to create a worktree inside the test's temp dir.
+ * All other ops return Right with no real effect.
+ */
+const mockWorktreeDeps = {
+  withPlanningLock: async (_rootPath: string, fn: () => Promise<unknown>) => fn(),
+  commitSpecToMain: () => TaskEither.from(async () => Either.right({ committed: false })),
+  commitWorktreeChanges: () => TaskEither.from(async () => Either.right({ committed: false })),
+  createWorktree: () => TaskEither.from(async () => Either.right("")),
+  removeWorktree: () => TaskEither.from(async () => Either.right(undefined)),
+  detectWorktree: () => TaskEither.from(async () => Either.right(false)),
+};
 
 /**
  * Build mock deps whose stages return canned values or sequences. The patch
@@ -245,7 +260,7 @@ describe("parseArgs", () => {
 describe("runPipeline — fresh run", () => {
   test("full 4-stage success: plan → review → build → patch-review(pass)", async () => {
     const deps = mockDeps({ patch: Either.right(mockPatchPass()) });
-    const result = await runPipeline(deps, baseArgs(), AGENTS_DIR);
+    const result = await runPipeline(deps, baseArgs(), AGENTS_DIR, mockWorktreeDeps);
 
     expect(Either.isRight(result)).toBe(true);
     // All 4 deps called exactly once.
@@ -262,7 +277,7 @@ describe("runPipeline — fresh run", () => {
 
   test("final state has patch_review_verdict: pass, patch_review_iterations: 1", async () => {
     const deps = mockDeps({ patch: Either.right(mockPatchPass()) });
-    const result = await runPipeline(deps, baseArgs(), AGENTS_DIR);
+    const result = await runPipeline(deps, baseArgs(), AGENTS_DIR, mockWorktreeDeps);
     if (Either.isLeft(result)) throw new Error("expected success");
 
     const state = JSON.parse(readFileSync(join(AGENTS_DIR, result.right.id, "adw-state.json"), "utf8"));
@@ -287,7 +302,7 @@ describe("runPipeline — build↔patch-review loop", () => {
         Either.right(mockPatchPass()),  // iteration 2: pass
       ],
     });
-    const result = await runPipeline(deps, baseArgs(), AGENTS_DIR);
+    const result = await runPipeline(deps, baseArgs(), AGENTS_DIR, mockWorktreeDeps);
 
     expect(Either.isRight(result)).toBe(true);
     // build called twice (initial + 1 retry), patch called twice.
@@ -322,7 +337,7 @@ describe("runPipeline — build↔patch-review loop", () => {
         Either.right(mockPatchPass()),  // iteration 3: pass
       ],
     });
-    const result = await runPipeline(deps, baseArgs(), AGENTS_DIR);
+    const result = await runPipeline(deps, baseArgs(), AGENTS_DIR, mockWorktreeDeps);
 
     expect(Either.isRight(result)).toBe(true);
     // 3 patch-review iterations + 2 retry builds + 1 initial build = 3 build calls.
@@ -350,7 +365,7 @@ describe("runPipeline — build↔patch-review loop", () => {
         Either.right(mockPatchGaps()),
       ],
     });
-    const result = await runPipeline(deps, baseArgs(), AGENTS_DIR);
+    const result = await runPipeline(deps, baseArgs(), AGENTS_DIR, mockWorktreeDeps);
 
     expect(Either.isRight(result)).toBe(true);
     // 3 patch-review calls + initial build + 2 rebuilds = 3 build calls.
@@ -369,7 +384,7 @@ describe("runPipeline — build↔patch-review loop", () => {
     const deps = mockDeps({
       patch: [Either.right(mockPatchGaps())],
     });
-    const result = await runPipeline(deps, baseArgs({ maxRetries: 1 }), AGENTS_DIR);
+    const result = await runPipeline(deps, baseArgs({ maxRetries: 1 }), AGENTS_DIR, mockWorktreeDeps);
 
     expect(Either.isRight(result)).toBe(true);
     // Only 1 patch-review call, 1 build call (initial). No retry build.
@@ -387,7 +402,7 @@ describe("runPipeline — build↔patch-review loop", () => {
     const deps = mockDeps({
       patch: Either.left("claude not found"),
     });
-    const result = await runPipeline(deps, baseArgs(), AGENTS_DIR);
+    const result = await runPipeline(deps, baseArgs(), AGENTS_DIR, mockWorktreeDeps);
 
     expect(Either.isLeft(result)).toBe(true);
     if (Either.isLeft(result)) expect(result.left).toContain("patch-review stage failed");
@@ -401,7 +416,7 @@ describe("runPipeline — build↔patch-review loop", () => {
         Either.left("implement failed on retry"),
       ],
     });
-    const result = await runPipeline(deps, baseArgs(), AGENTS_DIR);
+    const result = await runPipeline(deps, baseArgs(), AGENTS_DIR, mockWorktreeDeps);
 
     expect(Either.isLeft(result)).toBe(true);
     if (Either.isLeft(result)) expect(result.left).toContain("build stage failed (retry 1)");
@@ -415,7 +430,7 @@ describe("runPipeline — build↔patch-review loop", () => {
 describe("runPipeline — spec-path input", () => {
   test("skips plan and goes straight to review → build → patch-review", async () => {
     const deps = mockDeps({ patch: Either.right(mockPatchPass()) });
-    const result = await runPipeline(deps, { description: "", specPath: mockSpecPath() }, AGENTS_DIR);
+    const result = await runPipeline(deps, { description: "", specPath: mockSpecPath() }, AGENTS_DIR, mockWorktreeDeps);
 
     expect(Either.isRight(result)).toBe(true);
     expect(deps.planCalls).toHaveLength(0);
@@ -426,7 +441,7 @@ describe("runPipeline — spec-path input", () => {
 
   test("final state for spec-path input includes completed_stages with all 4 stages", async () => {
     const deps = mockDeps({ patch: Either.right(mockPatchPass()) });
-    const result = await runPipeline(deps, { description: "", specPath: mockSpecPath() }, AGENTS_DIR);
+    const result = await runPipeline(deps, { description: "", specPath: mockSpecPath() }, AGENTS_DIR, mockWorktreeDeps);
     if (Either.isLeft(result)) throw new Error("expected success");
 
     const state = JSON.parse(readFileSync(join(AGENTS_DIR, result.right.id, "adw-state.json"), "utf8"));
@@ -461,7 +476,7 @@ describe("runPipeline — resume at patch-review", () => {
       agents: ["planner", "reviewer", "upgrader", "builder"],
     });
     const deps = mockDeps({ patch: Either.right(mockPatchPass()) });
-    const result = await runPipeline(deps, { description: "", id: wsId }, AGENTS_DIR);
+    const result = await runPipeline(deps, { description: "", id: wsId }, AGENTS_DIR, mockWorktreeDeps);
 
     expect(Either.isRight(result)).toBe(true);
     expect(deps.planCalls).toHaveLength(0);
@@ -490,7 +505,7 @@ describe("runPipeline — resume mid-loop after GAPS before rebuild", () => {
         Either.right(mockPatchPass()),  // iteration 2: pass (after the rebuild)
       ],
     });
-    const result = await runPipeline(deps, { description: "", id: wsId }, AGENTS_DIR);
+    const result = await runPipeline(deps, { description: "", id: wsId }, AGENTS_DIR, mockWorktreeDeps);
 
     expect(Either.isRight(result)).toBe(true);
     // plan/review NOT called.
@@ -529,7 +544,7 @@ describe("runPipeline — resume mid-loop after rebuild before patch-review", ()
         Either.right(mockPatchPass()),  // iteration 2: pass
       ],
     });
-    const result = await runPipeline(deps, { description: "", id: wsId }, AGENTS_DIR);
+    const result = await runPipeline(deps, { description: "", id: wsId }, AGENTS_DIR, mockWorktreeDeps);
 
     expect(Either.isRight(result)).toBe(true);
     // plan/review/build NOT called — patch-review is next.
@@ -565,7 +580,7 @@ describe("runPipeline — forced --from-stage build with prior loop state", () =
         Either.right(mockPatchPass()),  // iteration 1 (fresh): pass
       ],
     });
-    const result = await runPipeline(deps, { description: "", id: wsId, fromStage: "build" }, AGENTS_DIR);
+    const result = await runPipeline(deps, { description: "", id: wsId, fromStage: "build" }, AGENTS_DIR, mockWorktreeDeps);
 
     expect(Either.isRight(result)).toBe(true);
     // Build runs before patch-review (forced restart).
@@ -593,7 +608,7 @@ describe("runPipeline — forced --from-stage patch-review", () => {
       agents: ["planner", "reviewer", "upgrader", "builder"],
     });
     const deps = mockDeps({ patch: Either.right(mockPatchPass()) });
-    const result = await runPipeline(deps, { description: "", id: wsId, fromStage: "patch-review" }, AGENTS_DIR);
+    const result = await runPipeline(deps, { description: "", id: wsId, fromStage: "patch-review" }, AGENTS_DIR, mockWorktreeDeps);
 
     expect(Either.isRight(result)).toBe(true);
     expect(deps.planCalls).toHaveLength(0);
@@ -610,7 +625,7 @@ describe("runPipeline — forced --from-stage patch-review", () => {
 describe("runPipeline — resume validation", () => {
   test("--id for a nonexistent workspace → Left", async () => {
     const deps = mockDeps();
-    const result = await runPipeline(deps, { description: "", id: "01TESTWS99" }, AGENTS_DIR);
+    const result = await runPipeline(deps, { description: "", id: "01TESTWS99" }, AGENTS_DIR, mockWorktreeDeps);
     expect(Either.isLeft(result)).toBe(true);
     if (Either.isLeft(result)) expect(result.left).toContain("nothing to resume");
   });
@@ -625,7 +640,7 @@ describe("runPipeline — resume validation", () => {
       spec_path: "/spec.md",
     });
     const deps = mockDeps();
-    const result = await runPipeline(deps, { description: "", id: wsId }, AGENTS_DIR);
+    const result = await runPipeline(deps, { description: "", id: wsId }, AGENTS_DIR, mockWorktreeDeps);
     expect(Either.isLeft(result)).toBe(true);
     if (Either.isLeft(result)) expect(result.left).toContain("already completed");
   });
@@ -645,7 +660,7 @@ describe("loadWorkspace", () => {
       spec_path: "/spec.md",
       agents: ["planner", "reviewer", "upgrader", "builder", "patch-reviewer"],
     });
-    const result = loadWorkspace(wsId, undefined, AGENTS_DIR);
+    const result = loadWorkspace(wsId, undefined, AGENTS_DIR, mockWorktreeDeps);
     expect(Either.isRight(result)).toBe(true);
     if (Either.isRight(result)) {
       expect(result.right.completedStages).toContain("patch-review");
@@ -665,7 +680,7 @@ describe("loadWorkspace", () => {
       patch_review_verdict: "gaps",
       patch_review_next_action: "build",
     });
-    const result = loadWorkspace(wsId, undefined, AGENTS_DIR);
+    const result = loadWorkspace(wsId, undefined, AGENTS_DIR, mockWorktreeDeps);
     expect(Either.isRight(result)).toBe(true);
     if (Either.isRight(result)) {
       expect(result.right.resumeFrom).toBe("build");
@@ -687,7 +702,7 @@ describe("loadWorkspace", () => {
       patch_review_verdict: "gaps",
       patch_review_next_action: "patch-review",
     });
-    const result = loadWorkspace(wsId, undefined, AGENTS_DIR);
+    const result = loadWorkspace(wsId, undefined, AGENTS_DIR, mockWorktreeDeps);
     expect(Either.isRight(result)).toBe(true);
     if (Either.isRight(result)) {
       expect(result.right.resumeFrom).toBe("patch-review");
@@ -706,7 +721,7 @@ describe("loadWorkspace", () => {
       agents: ["planner", "reviewer", "upgrader", "builder"],
       patch_review_next_action: "patch-review",
     });
-    const result = loadWorkspace(wsId, "build", AGENTS_DIR);
+    const result = loadWorkspace(wsId, "build", AGENTS_DIR, mockWorktreeDeps);
     expect(Either.isRight(result)).toBe(true);
     if (Either.isRight(result)) {
       expect(result.right.forcedFromStage).toBe(true);
