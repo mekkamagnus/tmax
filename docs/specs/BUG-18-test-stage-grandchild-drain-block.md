@@ -1,16 +1,121 @@
-# Bug: Test stage grandchild drain block — `bun run` wrapper prevents stdout/stderr `end` events
+# Bug: Test stage parser + resolve-loop — intermediate summaries + per-failure resolve explosion
+
+## Status
+
+**Partially fixed.** Codex fixed the parser bug (intermediate summary line matching) in the first pass. A **new problem** was exposed: the resolve loop dispatches one `claude -p` per failure per cycle, and with the parser now correctly finding 15+ failures per suite run, the test stage runs for **68+ minutes** (12+ resolve subprocesses across 3 cycles). This update adds the new problem for codex's second pass.
 
 ## Bug Description
 
-The adw test stage (`adws/adws-modules/tester.ts`) runs the unit suite via `deps.runRaw("bun", ["run", "test:unit"], { cwd })`. The `bun run` wrapper spawns `bun test --timeout 30000 test/unit/` as a **grandchild** process. With `detached: true` on the spawn (required for process-group kill on timeout), the grandchild keeps the process group alive after the test suite finishes. Node's `close` event fires for the parent `bun run` process, but the piped `stdout`/`stderr` Readable streams **never emit `end`** because the grandchild holds the underlying file descriptors open.
+### Original bug (FIXED by codex)
 
-The drain-safe `trySettle` in `runRaw` waits for `procClosed && stdoutEnded && stderrEnded` before resolving. Since `stdoutEnded` and `stderrEnded` never fire, `trySettle` never runs, and the `STAGE_RUN_TIMEOUT_MS` (20 min) timer eventually fires instead — resolving with whatever partial `stdout`/`stderr` was accumulated in the first few seconds (the first few `(pass)` markers, but not the summary line `3000 pass / 0 fail` at the end).
+~~The adw test stage ran the unit suite via `bun run test:unit`, creating a grandchild that blocked stream draining.~~
 
-The parser then sees `passed=5, failed=0` (5 stray `(pass)` markers from the partial output), the resolve loop finds nothing to fix (0 failures), re-runs 3 times, and returns `verdict: gaps`. This wasted ~6 hours of pipeline time across multiple SPEC-065 runs.
+**The real root cause** (found by codex): Bun emits **intermediate summary lines** (`N pass / M fail`) after each test file completes during the full suite run. The parser's regex `(\d+)\s+pass` matched the **first** intermediate summary (5 pass from an early file), not the **last** (the final total). The output was always fully captured — the bug was purely in the parser grabbing the wrong line.
 
-**Expected:** `runRaw` captures the full suite output including the summary line; the parser reports `passed=~3000, failed=0`; the test stage returns `verdict: pass`.
+**Codex's fix:** `lastBunSummaryCount()` finds the LAST match, not the first. Plus `extractBunFailures()` improvements for `(fail)` markers, file headers, timing suffixes, and deduplication. 41/41 tests pass.
 
-**Actual:** `runRaw` resolves via timeout with partial output; the parser reports `passed=5, failed=0`; the test stage returns `verdict: gaps` after 3 wasted iterations.
+### New problem (NOT fixed — exposed by the parser fix)
+
+With the parser now correctly extracting 15+ failures per suite run, the resolve loop in `runUnitTrack` (tester.ts lines 367-393) **dispatches one `claude -p` resolve per failure, per cycle**:
+
+```ts
+// Line 369: for each failure, dispatch a separate resolve
+for (const failure of parsed.failures) {
+  callbacks.onResolve?.(failure.name, cycle + 1);
+  await resolveUnitTest(deps, cwd, agentsDir, id, failure, model, cycle + 1).run();
+}
+```
+
+With 15 failures and `MAX_UNIT_ITERATIONS = 2` (3 cycles total):
+- Cycle 1: suite runs (~13 min) → finds 15 failures → dispatches 15 resolves (~60 min)
+- Cycle 2: suite re-runs (~13 min) → finds remaining failures → dispatches more resolves (~40 min)
+- Cycle 3: suite re-runs (~13 min) → dispatches more resolves (~40 min)
+
+**Total: ~180 min (3 hours)** for a test stage that should take ~40 min max. Observed: 68 min with 12 resolves before being killed — the stage was nowhere near done.
+
+**Expected:** The test stage completes in a bounded time (~30-40 min max), with the resolve loop either fixing failures or giving up after a reasonable budget.
+
+**Actual:** The test stage runs for hours, dispatching dozens of sequential `claude -p` subprocesses, each taking ~4 min, because it resolves failures one-at-a-time-per-cycle with no overall wall-clock or resolve-count budget.
+
+## Problem Statement
+
+The resolve loop's iteration cap (`MAX_UNIT_ITERATIONS = 2`) bounds the number of **suite re-runs** (3 total) but does NOT bound:
+1. **Total resolve subprocesses** — 15 failures × 3 cycles = up to 45 `claude -p` calls
+2. **Total wall time** — no overall timeout on the track; each resolve + suite run adds ~17 min
+3. **Resolve parallelism** — all resolves are sequential (`await` in a for-loop), so 15 resolves = 60 min of serial waiting
+
+The loop needs either:
+- A **batch resolve** (one `claude -p` call that gets ALL failures at once, not one per failure), OR
+- A **resolve-count cap** (e.g. max 5 resolves per cycle), OR
+- A **wall-clock budget** (e.g. if the track has run > 30 min, stop resolving and return gaps), OR
+- All three
+
+## Solution Statement
+
+**Batch resolve:** Instead of dispatching one `claude -p` per failure (lines 369-381), collect all failures into a single resolve prompt and dispatch ONE `claude -p` call per cycle. This reduces 15 resolves × 4 min = 60 min to 1 resolve × 5 min = 5 min per cycle. The resolve prompt already includes the failure name + error message — just concatenate all of them.
+
+Additionally, add a **wall-clock budget** per track (default 30 min): if `Date.now() - start > budget`, stop resolving and return `gaps` with whatever the last parse showed. This prevents unbounded growth even if batch resolve introduces new failures.
+
+## Steps to Reproduce
+
+1. Have a codebase where the full unit suite has 10+ failing tests
+2. Run `bun adws/adw-test.ts <spec> --id <id>` (or the test stage via the orchestrator)
+3. Observe: the test stage dispatches one `claude -p` per failure per cycle
+4. With 15 failures: 15 resolves in cycle 1 (~60 min), then suite re-run (~13 min), then more resolves
+5. Total wall time: hours, not minutes
+
+## Root Cause Analysis
+
+The resolve loop was designed when the parser returned 0-1 failures (because the parser bug meant `failed=0` even when there were real failures). With the parser now correctly finding 15+ failures, the per-failure resolve design becomes pathological. The fix is to batch all failures into a single resolve call — the `claude -p` model can handle a prompt with 15 failure descriptions (each ~200 chars = 3KB total, well within context limits).
+
+## Relevant Files
+
+### Existing Files to Modify
+
+- **`adws/adws-modules/tester.ts`** — `runUnitTrack` lines 367-393: replace the per-failure for-loop with a single batched `resolveUnitTest` call that concatenates all failures. Also add a wall-clock budget check.
+- **`resolveUnitTest`** — update to accept an array of `TestFailure` instead of a single one, and build a prompt that lists all failures.
+
+## Step by Step Tasks
+
+### Task 1: Batch the unit-track resolve
+
+**User Story**: As a pipeline operator, I want the test stage to resolve all failures in one `claude -p` call per cycle, so the stage completes in minutes, not hours.
+
+- In `runUnitTrack`, replace the per-failure for-loop (lines 369-381) with a single call to a new `resolveUnitTests` (plural) that takes `parsed.failures` as an array.
+- `resolveUnitTests` builds a prompt: "The following unit tests are failing. Fix the root cause for each. Failures:\n" + all failure names + messages.
+- Dispatch ONE `claude -p` via `deps.runCapture`, tee to `agents/{id}/tester/unit-resolve-it{N}.jsonl`.
+- Same for the e2e track (`runE2eTrack`).
+
+**Acceptance Criteria**:
+- [ ] Exactly ONE `claude -p` resolve per cycle (not one per failure)
+- [ ] With 15 failures, cycle 1 takes ~5 min (1 resolve), not ~60 min (15 resolves)
+- [ ] The resolve prompt includes all failure names + messages
+
+### Task 2: Add a wall-clock budget per track
+
+**User Story**: As a pipeline operator, I want the test stage to give up after a bounded time, so it can't run for hours.
+
+- Add `TRACK_BUDGET_MS = 30 * 60 * 1000` (30 min) constant.
+- In `runUnitTrack` and `runE2eTrack`, before each resolve cycle: check `Date.now() - start > TRACK_BUDGET_MS`. If exceeded, break the loop and return the last `TrackResult` with `ok: false`.
+
+**Acceptance Criteria**:
+- [ ] If the track has run > 30 min, it stops resolving and returns `gaps`
+- [ ] The `results.json` records the actual elapsed time
+
+### Task 3: Update unit tests
+
+- Update `test/unit/adw-test.test.ts` mock tests to verify batch resolve: `runCapture` is called once per cycle (not once per failure).
+- Add a test for the wall-clock budget: mock a slow clock that exceeds the budget after 1 cycle.
+
+**Acceptance Criteria**:
+- [ ] Mock tests verify 1 resolve call per cycle (not N)
+- [ ] Budget test verifies the loop stops early
+
+## Validation Commands
+
+- `bun run typecheck:src` — zero errors.
+- `bun test test/unit/adw-test.test.ts` — all pass (including new batch/budget tests).
+- Manual: run `bun adws/adw-test.ts <spec>` on a codebase with 10+ failing tests and verify the stage completes in < 10 min (1 batch resolve per cycle, not 10+ serial resolves).
 
 ## Problem Statement
 
