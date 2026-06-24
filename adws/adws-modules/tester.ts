@@ -116,11 +116,13 @@ export function parseBunTestOutput(stdout: string, stderr: string): ParsedBunSum
   const failures = extractBunFailures(combined);
 
   // Try to parse the explicit summary first. Bun emits "<N> pass" / "<M> fail".
-  const passMatch = combined.match(/(\d+)\s+pass\b/);
-  const failMatch = combined.match(/(\d+)\s+fail\b/);
-  if (passMatch || failMatch) {
-    const passed = passMatch ? parseInt(passMatch[1]!, 10) : 0;
-    const failed = failMatch ? parseInt(failMatch[1]!, 10) : 0;
+  // Large suites can include intermediate cumulative summaries before the final
+  // one, so use the last summary values in the captured output.
+  const passedSummary = lastBunSummaryCount(combined, "pass");
+  const failedSummary = lastBunSummaryCount(combined, "fail");
+  if (passedSummary !== null || failedSummary !== null) {
+    const passed = passedSummary ?? 0;
+    const failed = failedSummary ?? 0;
     return { passed, failed, failures: failures.length > 0 ? failures : (failed > 0 ? [] : []) };
   }
 
@@ -148,9 +150,16 @@ export function parseBunTestOutput(stdout: string, stderr: string): ParsedBunSum
   return { passed: 0, failed: 0, failures: [] };
 }
 
+function lastBunSummaryCount(combined: string, label: "pass" | "fail"): number | null {
+  const matches = [...combined.matchAll(new RegExp(`(\\d+)\\s+${label}\\b`, "g"))];
+  const last = matches[matches.length - 1];
+  return last ? parseInt(last[1]!, 10) : null;
+}
+
 /** Extract individual failure entries from `bun test` output. */
 function extractBunFailures(combined: string): TestFailure[] {
   const failures: TestFailure[] = [];
+  const failureIndexes = new Map<string, number>();
   const lines = combined.split("\n");
 
   // Bun emits a header like "(test name)" or "file.test.ts:" before each ✗.
@@ -160,14 +169,17 @@ function extractBunFailures(combined: string): TestFailure[] {
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i]!;
     // Track the most recent file path reference (bun prints it in parentheses).
-    const fileMatch = line.match(/\(([^()]+\.test\.ts)\)/);
-    if (fileMatch) {
-      currentFile = fileMatch[1]!;
+    const parenFileMatch = line.match(/\(([^()]+\.test\.ts)\)/);
+    const headerFileMatch = line.match(/^\s*([^()\s][^:]*\.test\.ts):\s*$/);
+    if (parenFileMatch) {
+      currentFile = parenFileMatch[1]!;
+    } else if (headerFileMatch) {
+      currentFile = headerFileMatch[1]!;
     }
 
-    const failMatch = line.match(/^\s*✗\s*(.+)$/);
+    const failMatch = line.match(/^\s*(?:✗|\(fail\))\s*(.+)$/);
     if (!failMatch) continue;
-    const testName = failMatch[1]!.trim();
+    const testName = failMatch[1]!.trim().replace(/\s+\[\d+(?:\.\d+)?ms\]$/, "");
     const name = currentFile ? `${currentFile} > ${testName}` : testName;
 
     // Capture the indented error block that follows.
@@ -175,7 +187,7 @@ function extractBunFailures(combined: string): TestFailure[] {
     for (let j = i + 1; j < lines.length; j++) {
       const next = lines[j]!;
       // Stop on the next test marker or the summary.
-      if (/^\s*✓|^\s*✗|^\s*\d+\s+(pass|fail)\b/.test(next)) break;
+      if (/^\s*(?:✓|✗|\(pass\)|\(fail\))|^\s*\d+\s+(pass|fail)\b|^\s*[^()\s][^:]*\.test\.ts:\s*$/.test(next)) break;
       if (next.trim() === "") {
         // Allow one blank line within the error block; two blank lines end it.
         if (messageLines.length > 0 && messageLines[messageLines.length - 1] === "") break;
@@ -185,7 +197,13 @@ function extractBunFailures(combined: string): TestFailure[] {
       messageLines.push(next);
     }
     const message = messageLines.join("\n").trim().slice(0, MAX_FAILURE_CHARS);
-    failures.push({ name, message });
+    const existingIndex = failureIndexes.get(name);
+    if (existingIndex === undefined) {
+      failureIndexes.set(name, failures.length);
+      failures.push({ name, message });
+    } else if (message && failures[existingIndex]!.message.length === 0) {
+      failures[existingIndex] = { name, message };
+    }
   }
   return failures;
 }

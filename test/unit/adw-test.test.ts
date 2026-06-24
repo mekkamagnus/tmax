@@ -264,6 +264,28 @@ error: expected 2 got 1
     expect(r.failures[0]!.message).toContain("expected 2 got 1");
   });
 
+  test("uses the final summary when Bun emits intermediate stderr summaries", () => {
+    const stderr = `bun test v1.3.9
+ 5 pass
+ 0 fail
+
+test/unit/server-observability.test.ts:
+(fail) Server observability > connect-frame registers metadata [367.27ms]
+(fail) Server observability > recent errors are bounded [303.56ms]
+(fail) Server observability > connect-frame registers metadata [367.27ms]
+
+ 3122 pass
+ 1 skip
+ 60 fail
+ 8386 expect() calls
+Ran 3183 tests across 207 files. [127.50s]`;
+    const r = parseBunTestOutput("", stderr);
+    expect(r.passed).toBe(3122);
+    expect(r.failed).toBe(60);
+    expect(r.failures.length).toBe(2);
+    expect(r.failures[0]!.name).toBe("test/unit/server-observability.test.ts > Server observability > connect-frame registers metadata");
+  });
+
   test("falls back to ✓/✗ counts when no summary", () => {
     const stdout = "✓ test one\n✓ test two\n✗ test three";
     const r = parseBunTestOutput(stdout, "");
