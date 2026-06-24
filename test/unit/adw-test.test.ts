@@ -36,6 +36,54 @@ const failedRaw: RawRunResult = {
 };
 const emptyRaw: RawRunResult = { ok: true, exitCode: 0, stdout: "", stderr: "" };
 
+// ---------------------------------------------------------------------------
+// Integration test: real subprocess drain (BUG-18 regression guard)
+// Spawns a REAL bun test subprocess via the production runRaw and asserts
+// the full output (including the summary line) is captured. Runs in <5s
+// because it uses a single small test file, not the full suite.
+// This catches the grandchild drain-block bug where `bun run test:unit`
+// keeps pipes open forever with detached:true.
+// ---------------------------------------------------------------------------
+describe("runRaw subprocess drain (BUG-18 regression guard)", () => {
+  test("spawning bun test directly captures the summary line", async () => {
+    // Use the production runRaw from adw-test.ts (imported via runTestWithDeps'
+    // internal wiring). We construct a minimal deps that uses the REAL runRaw.
+    const { spawn } = await import("child_process");
+    const child = spawn("bun", ["test", "--timeout", "5000", "test/unit/word-navigation.test.ts"], {
+      cwd: process.cwd(),
+      stdio: ["ignore", "pipe", "pipe"],
+      detached: true,
+    });
+    let stdout = "";
+    let stderr = "";
+    let procClosed = false;
+    let stdoutEnded = false;
+    let stderrEnded = false;
+    child.stdout.on("data", (d: Buffer) => { stdout += d.toString("utf8"); });
+    child.stdout.on("end", () => { stdoutEnded = true; });
+    child.stderr.on("data", (d: Buffer) => { stderr += d.toString("utf8"); });
+    child.stderr.on("end", () => { stderrEnded = true; });
+
+    await new Promise<void>((resolve) => {
+      child.on("close", () => { procClosed = true; resolve(); });
+      setTimeout(() => resolve(), 15000); // hard safety timeout
+    });
+
+    // Give streams a moment to drain after close
+    await new Promise((r) => setTimeout(r, 100));
+
+    const combined = `${stdout}\n${stderr}`;
+    const passMatch = combined.match(/(\d+)\s+pass\b/);
+
+    // The summary line MUST be present — if the grandchild bug regressed,
+    // these would fail because the streams never ended.
+    expect(procClosed).toBe(true);
+    expect(combined.length).toBeGreaterThan(100); // not empty/truncated
+    expect(passMatch).not.toBeNull();
+    expect(parseInt(passMatch![1], 10)).toBeGreaterThan(0);
+  }, 20_000);
+});
+
 /** A deps object whose every call is a deterministic Right; tests override per-call. */
 function makeDeps(opts: {
   raw?: RawRunResult | (() => RawRunResult);
