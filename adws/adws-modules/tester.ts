@@ -316,7 +316,14 @@ export function runUnitTrack(
       iterations++;
       callbacks.onIteration?.(iterations, maxSuiteRuns);
 
-      const res = await deps.runRaw("bun", ["run", "test:unit"], { cwd }).run();
+      // Spawn 'bun test' directly, NOT 'bun run test:unit'. The 'bun run' wrapper
+      // spawns 'bun test' as a grandchild; with detached:true, the grandchild keeps
+      // the process group alive after the test finishes, so Node's stdout/stderr
+      // streams never emit 'end' and the drain-safe trySettle never fires. The
+      // 20-min STAGE_RUN_TIMEOUT_MS timer then resolves with partial output (the
+      // first few KB, not the summary line), producing passed=5/failed=0.
+      // Spawning 'bun test' directly avoids the grandchild entirely.
+      const res = await deps.runRaw("bun", ["test", "--timeout", "30000", "test/unit/"], { cwd }).run();
       if (Either.isLeft(res)) {
         return Either.left(`runUnitTrack: bun spawn failed: ${res.left}`);
       }
@@ -483,8 +490,11 @@ export function runE2eTrack(
       callbacks.onIteration?.(iterations, maxSuiteRuns);
 
       const reportDir = join(agentsDir, id, "tester", `e2e-report-it${iterations}`);
-      const res = await deps.runRaw("bun", [
-        "run", "test:tmax-use",
+      // Spawn 'bin/tmax-use test' directly, NOT 'bun run test:tmax-use'. Same
+      // grandchild issue as the unit track — 'bun run' spawns a grandchild that
+      // keeps the process group alive with detached:true, preventing drain.
+      const res = await deps.runRaw("bin/tmax-use", [
+        "test",
         "--output", reportDir,
         "--reporter", "all",
       ], { cwd }).run();

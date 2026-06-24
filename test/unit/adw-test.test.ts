@@ -595,11 +595,10 @@ describe("runTestWithDeps (end-to-end, mocked deps)", () => {
     return {
       run: () => TaskEither.right<string>("claude 1.0"),
       runRaw: (cmd, args) => {
-        // Differentiate by the test script name: tester.ts dispatches
-        // `bun run test:unit` for the unit track and `bun run test:tmax-use`
-        // for the e2e track.
-        const script = args?.[1] ?? "";
-        if (cmd === "bun" && script === "test:tmax-use") {
+        // Differentiate by the command: tester.ts dispatches
+        // `bun test --timeout 30000 test/unit/` for the unit track and
+        // `bin/tmax-use test` for the e2e track.
+        if (cmd === "bin/tmax-use" || (cmd === "bun" && args?.[1] === "test:tmax-use")) {
           return TaskEither.from(async () => Either.right<RawRunResult, string>({
             ok: false,
             exitCode: 1,
