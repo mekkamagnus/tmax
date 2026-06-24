@@ -23,6 +23,9 @@ export const TEST_MODEL = "glm-5.1";
 export const MAX_UNIT_ITERATIONS = 2;
 export const MAX_E2E_ITERATIONS = 2;
 
+/** Max wall-clock time per track before resolving stops and gaps are returned. */
+export const TRACK_BUDGET_MS = 30 * 60 * 1000;
+
 /** Max output size retained per iteration (chars). */
 const MAX_OUTPUT_CHARS = 20_000;
 /** Max failure message size retained (chars). */
@@ -303,7 +306,7 @@ export interface TrackCallbacks {
 }
 
 /**
- * Run the unit track: `bun run test:unit` with a resolve-then-rerun loop.
+ * Run the unit track with a resolve-then-rerun loop.
  *
  * The suite runs once initially, then up to MAX_UNIT_ITERATIONS more times after
  * resolve attempts (total ≤ 1 + MAX_UNIT_ITERATIONS). A failing track returns
@@ -331,6 +334,18 @@ export function runUnitTrack(
 
     const maxSuiteRuns = 1 + MAX_UNIT_ITERATIONS;
     for (let cycle = 0; cycle < maxSuiteRuns; cycle++) {
+      if (cycle > 0 && Date.now() - start > TRACK_BUDGET_MS) {
+        return Either.right<TrackResult, string>({
+          ok: false,
+          exitCode: last.exitCode,
+          passed: last.passed,
+          failed: last.failed,
+          durationMs: Date.now() - start,
+          iterations,
+          failures: last.failures,
+          output: last.output,
+        });
+      }
       iterations++;
       callbacks.onIteration?.(iterations, maxSuiteRuns);
 
@@ -364,33 +379,38 @@ export function runUnitTrack(
         });
       }
 
-      // If we have resolve attempts left, dispatch a resolver per failure.
       if (cycle < MAX_UNIT_ITERATIONS) {
-        for (const failure of parsed.failures) {
-          callbacks.onResolve?.(failure.name, cycle + 1);
-          // Best-effort: never let a single resolve failure abort the loop.
-          try {
-            const resolveRes = await resolveUnitTest(deps, cwd, agentsDir, id, failure, model, cycle + 1).run();
-            if (Either.isLeft(resolveRes)) {
-              // Swallow — best-effort. The next suite run will see if the
-              // failure persists.
-            }
-          } catch {
-            // ignore — loop continues
-          }
+        if (Date.now() - start > TRACK_BUDGET_MS) {
+          return Either.right<TrackResult, string>({
+            ok: false,
+            exitCode: raw.exitCode,
+            passed: parsed.passed,
+            failed: parsed.failed,
+            durationMs: Date.now() - start,
+            iterations,
+            failures: parsed.failures,
+            output,
+          });
         }
+
         // If parse found no failures but the suite still failed, dispatch a
         // single generic resolver with the raw output.
-        if (parsed.failures.length === 0) {
-          const genericFailure: TestFailure = {
+        const failures = parsed.failures.length > 0
+          ? parsed.failures
+          : [{
             name: "unit-suite",
             message: output.slice(0, MAX_FAILURE_CHARS),
-          };
-          callbacks.onResolve?.(genericFailure.name, cycle + 1);
-          try {
-            await resolveUnitTest(deps, cwd, agentsDir, id, genericFailure, model, cycle + 1).run();
-          } catch { /* best-effort */ }
-        }
+          }];
+        const resolveName = failures.length === 1 ? failures[0]!.name : `unit-suite (${failures.length} failures)`;
+        callbacks.onResolve?.(resolveName, cycle + 1);
+        // Best-effort: never let a resolve failure abort the loop.
+        try {
+          const resolveRes = await resolveUnitTests(deps, cwd, agentsDir, id, failures, model, cycle + 1).run();
+          if (Either.isLeft(resolveRes)) {
+            // Swallow — best-effort. The next suite run will see if the
+            // failures persist.
+          }
+        } catch { /* best-effort */ }
         continue;
       }
 
@@ -422,25 +442,30 @@ export function runUnitTrack(
 }
 
 /**
- * Resolve a single failing unit test via `claude -p`. Focused prompt — fix this
- * one test, don't touch unrelated files. Best-effort: returns Left on dispatch
- * failure but the caller never propagates Left from resolve.
+ * Resolve failing unit tests via one `claude -p` dispatch per cycle. Best-effort:
+ * returns Left on dispatch failure but the caller never propagates Left from
+ * resolve.
  */
-export function resolveUnitTest(
+export function resolveUnitTests(
   deps: TesterDeps,
   cwd: string,
   agentsDir: string,
   id: string,
-  failure: TestFailure,
+  failures: TestFailure[],
   model: string = TEST_MODEL,
   iteration: number = 1,
 ): TaskEither<string, void> {
-  const sanitized = sanitizeName(failure.name);
+  const sanitized = sanitizeName(failures.length === 1 ? failures[0]!.name : `${failures.length}-failures`);
   const teeTo = join(agentsDir, id, "tester", `unit-resolve-it${iteration}-${sanitized}.jsonl`);
-  const prompt = `The following unit test is failing. Fix the root cause (the code under test, not the test, unless the test itself is wrong). Failing test: \`${failure.name}\`. Error output:
+  const failureList = failures.map((failure, index) => `${index + 1}. ${failure.name}
 \`\`\`
 ${failure.message}
-\`\`\`
+\`\`\``).join("\n\n");
+  const prompt = `The following unit tests are failing. Fix the root cause for each (the code under test, not the tests, unless a test itself is wrong).
+
+Failures:
+${failureList}
+
 Do not touch unrelated files.`;
 
   return TaskEither.from(async () => {
@@ -466,7 +491,7 @@ Do not touch unrelated files.`;
 // ---------------------------------------------------------------------------
 
 /**
- * Run the e2e track: `bun run test:tmax-use` with resolve-then-rerun loop.
+ * Run the e2e track with a resolve-then-rerun loop.
  * Skipped (sentinel pass) when no tmax-use targets exist.
  */
 export function runE2eTrack(
@@ -504,6 +529,19 @@ export function runE2eTrack(
 
     const maxSuiteRuns = 1 + MAX_E2E_ITERATIONS;
     for (let cycle = 0; cycle < maxSuiteRuns; cycle++) {
+      if (cycle > 0 && Date.now() - start > TRACK_BUDGET_MS) {
+        return Either.right<TrackResult, string>({
+          ok: false,
+          exitCode: last.exitCode,
+          passed: last.passed,
+          failed: last.failed,
+          durationMs: Date.now() - start,
+          iterations,
+          failures: last.failures,
+          output: last.output,
+          ...(last.reportDir ? { reportDir: last.reportDir } : {}),
+        });
+      }
       iterations++;
       callbacks.onIteration?.(iterations, maxSuiteRuns);
 
@@ -540,9 +578,26 @@ export function runE2eTrack(
       }
 
       if (cycle < MAX_E2E_ITERATIONS) {
+        if (Date.now() - start > TRACK_BUDGET_MS) {
+          return Either.right<TrackResult, string>({
+            ok: false,
+            exitCode: raw.exitCode,
+            passed: parsed.passed,
+            failed: parsed.failed,
+            durationMs: Date.now() - start,
+            iterations,
+            failures,
+            output,
+            reportDir,
+          });
+        }
+
+        const resolveFailures = failures.length > 0
+          ? failures
+          : [{ name: "tmax-use e2e", message: output.slice(0, MAX_FAILURE_CHARS) }];
         callbacks.onResolve?.("tmax-use e2e", cycle + 1);
         try {
-          const resolveRes = await resolveE2eTest(deps, cwd, agentsDir, id, reportDir, output, model, cycle + 1).run();
+          const resolveRes = await resolveE2eTests(deps, cwd, agentsDir, id, reportDir, resolveFailures, output, model, cycle + 1).run();
           if (Either.isLeft(resolveRes)) { /* best-effort */ }
         } catch { /* best-effort */ }
         continue;
@@ -576,20 +631,31 @@ export function runE2eTrack(
 }
 
 /**
- * Resolve a failing e2e playbook run via `claude -p`. Best-effort, never throws.
+ * Resolve failing e2e playbook runs via one `claude -p` dispatch per cycle.
+ * Best-effort, never throws.
  */
-export function resolveE2eTest(
+export function resolveE2eTests(
   deps: TesterDeps,
   cwd: string,
   agentsDir: string,
   id: string,
   reportDir: string,
+  failures: TestFailure[],
   outputExcerpt: string,
   model: string = TEST_MODEL,
   iteration: number = 1,
 ): TaskEither<string, void> {
   const teeTo = join(agentsDir, id, "tester", `e2e-resolve-it${iteration}.jsonl`);
-  const prompt = `The tmax-use e2e run failed. Review the report at \`${reportDir}\` and the failing playbook/test output below. Fix the root cause (the editor code or the playbook — do not weaken assertions unless the assertion is genuinely wrong). Output:
+  const failureList = failures.map((failure, index) => `${index + 1}. ${failure.name}
+\`\`\`
+${failure.message}
+\`\`\``).join("\n\n");
+  const prompt = `The following tmax-use e2e tests are failing. Review the report at \`${reportDir}\` and fix the root cause for each (the editor code or the playbook — do not weaken assertions unless the assertion is genuinely wrong).
+
+Failures:
+${failureList}
+
+Full output excerpt:
 \`\`\`
 ${outputExcerpt.slice(0, MAX_FAILURE_CHARS)}
 \`\`\``;

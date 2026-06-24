@@ -16,6 +16,7 @@ import { parseArgs, resolveInputFrom, runTestWithDeps } from "../../adws/adw-tes
 import {
   MAX_UNIT_ITERATIONS,
   MAX_E2E_ITERATIONS,
+  TRACK_BUDGET_MS,
   type RawRunResult,
   type TrackResult,
   type TesterDeps,
@@ -32,6 +33,24 @@ const failedRaw: RawRunResult = {
   ok: false,
   exitCode: 1,
   stdout: "(test/unit/foo.test.ts)\n✗ fails\n\n1 pass\n1 fail",
+  stderr: "",
+};
+const multiFailedRaw: RawRunResult = {
+  ok: false,
+  exitCode: 1,
+  stdout: `(test/unit/foo.test.ts)
+(fail) suite > first failure
+error: first boom
+
+(fail) suite > second failure
+error: second boom
+
+test/unit/bar.test.ts:
+(fail) other suite > third failure
+error: third boom
+
+10 pass
+3 fail`,
   stderr: "",
 };
 const emptyRaw: RawRunResult = { ok: true, exitCode: 0, stdout: "", stderr: "" };
@@ -80,7 +99,7 @@ describe("runRaw subprocess drain (BUG-18 regression guard)", () => {
     expect(procClosed).toBe(true);
     expect(combined.length).toBeGreaterThan(100); // not empty/truncated
     expect(passMatch).not.toBeNull();
-    expect(parseInt(passMatch![1], 10)).toBeGreaterThan(0);
+    expect(parseInt(passMatch![1]!, 10)).toBeGreaterThan(0);
   }, 20_000);
 });
 
@@ -88,7 +107,7 @@ describe("runRaw subprocess drain (BUG-18 regression guard)", () => {
 function makeDeps(opts: {
   raw?: RawRunResult | (() => RawRunResult);
   onRaw?: (calls: number) => void;
-  onCapture?: (calls: number) => void;
+  onCapture?: (calls: number, cmd: string, args: string[], captureOpts: { cwd?: string; teeTo: string; liveLabel?: string }) => void;
 }): TesterDeps {
   let rawCalls = 0;
   let captureCalls = 0;
@@ -100,9 +119,9 @@ function makeDeps(opts: {
       const value = typeof opts.raw === "function" ? opts.raw() : (opts.raw ?? okRaw);
       return TaskEither.from(async () => Either.right<RawRunResult, string>(value));
     },
-    runCapture: () => {
+    runCapture: (cmd, args, captureOpts) => {
       captureCalls++;
-      opts.onCapture?.(captureCalls);
+      opts.onCapture?.(captureCalls, cmd, args, captureOpts);
       return TaskEither.right<string>("");
     },
   };
@@ -427,7 +446,7 @@ describe("runUnitTrack", () => {
       expect(r.right.failed).toBe(1);
     }
     expect(rawCalls).toBe(1 + MAX_UNIT_ITERATIONS);
-    expect(captureCalls).toBeGreaterThan(0); // at least one resolve attempt
+    expect(captureCalls).toBe(MAX_UNIT_ITERATIONS); // one batched resolve per failed cycle
   });
 
   test("spawn failure → Left (propagates as stage error)", async () => {
@@ -457,6 +476,66 @@ describe("runUnitTrack", () => {
     }
     expect(rawCalls).toBe(2);
     expect(captureCalls).toBe(1); // one resolve dispatched for the parsed failure
+  });
+
+  test("batches all parsed unit failures into one resolve per cycle", async () => {
+    let rawCalls = 0;
+    const captureCalls: Array<{ cmd: string; args: string[]; teeTo: string }> = [];
+    const deps = makeDeps({
+      raw: multiFailedRaw,
+      onRaw: (n) => { rawCalls = n; },
+      onCapture: (_n, cmd, args, captureOpts) => {
+        captureCalls.push({ cmd, args, teeTo: captureOpts.teeTo });
+      },
+    });
+    const r = await runUnitTrack(deps, "/tmp", "/tmp/agents", "TEST", "m", {}).run();
+    expect(Either.isRight(r)).toBe(true);
+    if (Either.isRight(r)) {
+      expect(r.right.ok).toBe(false);
+      expect(r.right.iterations).toBe(1 + MAX_UNIT_ITERATIONS);
+      expect(r.right.failed).toBe(3);
+    }
+    expect(rawCalls).toBe(1 + MAX_UNIT_ITERATIONS);
+    expect(captureCalls.length).toBe(MAX_UNIT_ITERATIONS);
+    expect(captureCalls[0]!.cmd).toBe("claude");
+    expect(captureCalls[0]!.teeTo).toContain("unit-resolve-it1-3-failures.jsonl");
+    const prompt = captureCalls[0]!.args[captureCalls[0]!.args.length - 1]!;
+    expect(prompt).toContain("first failure");
+    expect(prompt).toContain("first boom");
+    expect(prompt).toContain("second failure");
+    expect(prompt).toContain("second boom");
+    expect(prompt).toContain("third failure");
+    expect(prompt).toContain("third boom");
+  });
+
+  test("stops resolving unit failures when the track budget is exhausted", async () => {
+    const originalNow = Date.now;
+    let nowCalls = 0;
+    Date.now = () => {
+      nowCalls++;
+      return nowCalls === 1 ? 0 : TRACK_BUDGET_MS + nowCalls;
+    };
+    try {
+      let rawCalls = 0;
+      let captureCalls = 0;
+      const deps = makeDeps({
+        raw: multiFailedRaw,
+        onRaw: (n) => { rawCalls = n; },
+        onCapture: (n) => { captureCalls = n; },
+      });
+      const r = await runUnitTrack(deps, "/tmp", "/tmp/agents", "TEST", "m", {}).run();
+      expect(Either.isRight(r)).toBe(true);
+      if (Either.isRight(r)) {
+        expect(r.right.ok).toBe(false);
+        expect(r.right.iterations).toBe(1);
+        expect(r.right.failed).toBe(3);
+        expect(r.right.durationMs).toBeGreaterThan(TRACK_BUDGET_MS);
+      }
+      expect(rawCalls).toBe(1);
+      expect(captureCalls).toBe(0);
+    } finally {
+      Date.now = originalNow;
+    }
   });
 
   test("runCapture Left does not abort the resolve loop (try/catch keeps it alive)", async () => {
@@ -556,9 +635,11 @@ describe("runE2eTrack", () => {
     mkdirSync(join(tmp, "tmax-use/playbooks"), { recursive: true });
     writeFileSync(join(tmp, "tmax-use/playbooks/_smoke.yaml"), "name: smoke\n");
     let rawCalls = 0;
+    let captureCalls = 0;
     const deps = makeDeps({
       raw: () => ({ ok: false, exitCode: 1, stdout: "boom", stderr: "" }),
       onRaw: (n) => { rawCalls = n; },
+      onCapture: (n) => { captureCalls = n; },
     });
     const r = await runE2eTrack(deps, tmp, join(tmp, "agents"), "TEST", "m", {}).run();
     expect(Either.isRight(r)).toBe(true);
@@ -567,7 +648,41 @@ describe("runE2eTrack", () => {
       expect(r.right.iterations).toBe(1 + MAX_E2E_ITERATIONS);
     }
     expect(rawCalls).toBe(1 + MAX_E2E_ITERATIONS);
+    expect(captureCalls).toBe(MAX_E2E_ITERATIONS);
     rmSync(tmp, { recursive: true, force: true });
+  });
+
+  test("stops resolving e2e failures when the track budget is exhausted", async () => {
+    const tmp = mkdtempSync(join(tmpdir(), "targets-budget-"));
+    mkdirSync(join(tmp, "tmax-use/playbooks"), { recursive: true });
+    writeFileSync(join(tmp, "tmax-use/playbooks/_smoke.yaml"), "name: smoke\n");
+    const originalNow = Date.now;
+    let nowCalls = 0;
+    Date.now = () => {
+      nowCalls++;
+      return nowCalls === 1 ? 0 : TRACK_BUDGET_MS + nowCalls;
+    };
+    try {
+      let rawCalls = 0;
+      let captureCalls = 0;
+      const deps = makeDeps({
+        raw: () => ({ ok: false, exitCode: 1, stdout: "e2e boom", stderr: "" }),
+        onRaw: (n) => { rawCalls = n; },
+        onCapture: (n) => { captureCalls = n; },
+      });
+      const r = await runE2eTrack(deps, tmp, join(tmp, "agents"), "TEST", "m", {}).run();
+      expect(Either.isRight(r)).toBe(true);
+      if (Either.isRight(r)) {
+        expect(r.right.ok).toBe(false);
+        expect(r.right.iterations).toBe(1);
+        expect(r.right.durationMs).toBeGreaterThan(TRACK_BUDGET_MS);
+      }
+      expect(rawCalls).toBe(1);
+      expect(captureCalls).toBe(0);
+    } finally {
+      Date.now = originalNow;
+      rmSync(tmp, { recursive: true, force: true });
+    }
   });
 
   test("runCapture Left does not abort the e2e resolve loop", async () => {
