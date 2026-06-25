@@ -2,7 +2,10 @@
 
 ## Status
 
-**Partially fixed.** Codex fixed the parser bug (intermediate summary line matching) in the first pass. A **new problem** was exposed: the resolve loop dispatches one `claude -p` per failure per cycle, and with the parser now correctly finding 15+ failures per suite run, the test stage runs for **68+ minutes** (12+ resolve subprocesses across 3 cycles). This update adds the new problem for codex's second pass.
+**Partially fixed.** Three sub-bugs found and fixed across multiple passes:
+1. ✅ **Parser** (codex pass 1): `lastBunSummaryCount()` — grabs the LAST summary line, not the first. Bun emits intermediate summaries after each test file.
+2. ✅ **Batch resolve + budget** (codex pass 2): One `claude -p` per cycle (not one per failure) + 30-min wall-clock budget.
+3. ❌ **Patch-review gate crash** (NEW — not yet fixed): The SAME `bun run test:unit` grandchild drain-block bug exists in `patch-reviewer.ts:431` and `adw-patch-review.ts`'s `runRaw` (which has zero drain-safe markers). Patch-review's gates run `bun run test:unit` → grandchild blocks stream drain → gates never complete → patch-review crashes with exit code 1 every run (7 times across 2 days). This update adds the patch-review fix for a third pass.
 
 ## Bug Description
 
@@ -189,14 +192,36 @@ Use these files to fix the bug:
 **Acceptance Criteria**:
 - [ ] `bun test test/unit/adw-test.test.ts` — 39/39 pass.
 
-### Task 4: Validate
+### Task 4: Fix patch-review gate runner — same grandchild drain-block (NEW)
 
-- Run typecheck + adw-test tests. All pass.
+**User Story**: As a pipeline operator, I want patch-review to run its gates (typecheck + unit suite) without crashing, so it can produce a PASS/GAPS verdict.
+
+- In `adws/adws-modules/patch-reviewer.ts` line 431: change `deps.runRaw("bun", ["run", "test:unit"], { cwd })` to `deps.runRaw("bun", ["test", "--timeout", "30000", "test/unit/"], { cwd })`. Same fix as the test stage — spawn `bun test` directly, not `bun run test:unit`.
+- In `adws/adws-modules/patch-reviewer.ts` line 448: change the tmax-use gate similarly if it uses `bun run test:tmax-use`.
+- In `adws/adw-patch-review.ts`: the local `runRaw` function (line 169) has **zero drain-safe markers** (`trySettle`, `stdoutEnded`, `stderrEnded` all absent). Apply the same drain-safe pattern as `adw-test.ts`'s `runRaw`: track `procClosed + stdoutEnded + stderrEnded`, resolve only when all three are true. Also add the `STAGE_RUN_TIMEOUT_MS` wall-clock timeout + `detached: true` + process-group SIGKILL on expiry.
+- Same fix for `adw-patch-review.ts`'s `runCapture` if it exists and has the same pattern.
+
+**Acceptance Criteria**:
+- [ ] `patch-reviewer.ts` line 431 spawns `bun test --timeout 30000 test/unit/` directly (not `bun run test:unit`).
+- [ ] `adw-patch-review.ts`'s `runRaw` has the drain-safe `trySettle` pattern (procClosed + stdoutEnded + stderrEnded).
+- [ ] `adw-patch-review.ts`'s `runRaw` has `detached: true` + wall-clock timeout + process-group SIGKILL.
+- [ ] Patch-review does NOT crash with exit code 1 when running gates.
+
+### Task 5: Validate
+
+- Run typecheck + all affected test files. All pass.
+
+**Acceptance Criteria**:
+- [ ] `bun run typecheck:src` — zero errors.
+- [ ] `bun test test/unit/adw-test.test.ts` — all pass.
+- [ ] `bun test test/unit/adw-patch-review-gates-phase.test.ts` — all pass (if this test exercises the gate runner).
 
 ## Validation Commands
 
 - `bun run typecheck:src` — zero errors.
-- `bun test test/unit/adw-test.test.ts` — 39/39 pass (was 38/39 before mock fix).
+- `bun test test/unit/adw-test.test.ts` — all pass.
+- `bun test test/unit/adw-patch-review-gates-phase.test.ts` — all pass.
+- Manual: resume SPEC-065 at patch-review and verify it does NOT crash with exit code 1. `gather.md` must be written.
 
 ## Notes
 
