@@ -46,6 +46,7 @@ import {
   writeResults,
 } from "./adws-modules/tester.ts";
 import { findWorkspaceBySpecPath } from "./adws-modules/workspace.ts";
+import { withClaude529Retry } from "./claude-529-retry.ts";
 
 const PROJECT_ROOT = realpathSync(join(import.meta.dir, ".."));
 const AGENTS_DIR = join(PROJECT_ROOT, "agents");
@@ -413,7 +414,18 @@ export function runTestWithDeps(
   input: string,
   options: TestOptions,
 ): Promise<Either<string, TestOutcome>> {
-  const deps: TesterDeps = options.deps ?? { run, runRaw, runCapture };
+  const writePhase = (line: string): void => {
+    try { process.stderr.write(line); } catch { /* best-effort */ }
+  };
+  const baseDeps: TesterDeps = options.deps ?? { run, runRaw, runCapture };
+  const deps: TesterDeps = {
+    ...baseDeps,
+    runCapture: withClaude529Retry(baseDeps.runCapture, {
+      onRetry: ({ attempt, maxRetries, delayMs }) => {
+        writePhase(`[test] claude 529 rate_limit; retry ${attempt}/${maxRetries} in ${Math.round(delayMs / 1000)}s\n`);
+      },
+    }),
+  };
 
   const ownsState = process.env.ADW_ORCHESTRATED !== "1";
 
@@ -440,10 +452,6 @@ export function runTestWithDeps(
 
   const recordState = (stateId: string, state: Record<string, unknown>): TaskEither<string, void> =>
     ownsState ? writeState(stateId, state) : TaskEither.right<void, string>(undefined);
-
-  const writePhase = (line: string): void => {
-    try { process.stderr.write(line); } catch { /* best-effort */ }
-  };
 
   const currentRun: Resolved = {
     id: runId,

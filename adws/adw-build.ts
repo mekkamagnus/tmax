@@ -32,6 +32,7 @@ import { Either, TaskEither } from "../src/utils/task-either.ts";
 import { BUILD_MODEL, type BuilderDeps, build, ensureAvailable } from "./adws-modules/builder.ts";
 import { formatToolUseLine } from "./adws-modules/live-filter.ts";
 import { findWorkspaceBySpecPath } from "./adws-modules/workspace.ts";
+import { withClaude529Retry } from "./claude-529-retry.ts";
 
 const PROJECT_ROOT = realpathSync(join(import.meta.dir, ".."));
 const AGENTS_DIR = join(PROJECT_ROOT, "agents");
@@ -430,7 +431,16 @@ export function runBuild(
   id?: string,
 ): Promise<Either<string, BuildOutcome>> {
   // Inject the subprocess plumbing into the builder module.
-  const deps: BuilderDeps = { run, runCapture };
+  const deps: BuilderDeps = {
+    run,
+    runCapture: withClaude529Retry(runCapture, {
+      onRetry: ({ attempt, maxRetries, delayMs }) => {
+        try {
+          process.stderr.write(`[build] claude 529 rate_limit; retry ${attempt}/${maxRetries} in ${Math.round(delayMs / 1000)}s\n`);
+        } catch { /* best-effort */ }
+      },
+    }),
+  };
 
   // ownsState = true when running standalone (no orchestrator driving this
   // process). The orchestrator sets ADW_ORCHESTRATED=1 when spawning children;

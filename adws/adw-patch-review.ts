@@ -47,6 +47,7 @@ import {
   audit,
 } from "./adws-modules/patch-reviewer.ts";
 import { findWorkspaceBySpecPath } from "./adws-modules/workspace.ts";
+import { withClaude529Retry } from "./claude-529-retry.ts";
 
 const PROJECT_ROOT = realpathSync(join(import.meta.dir, ".."));
 const AGENTS_DIR = join(PROJECT_ROOT, "agents");
@@ -429,7 +430,18 @@ export function runPatchReviewWithDeps(
   input: string,
   options: PatchReviewOptions,
 ): Promise<Either<string, PatchReviewOutcome>> {
-  const deps: PatchReviewerDeps = options.deps ?? { run, runRaw, runCapture };
+  const writePhase = (line: string): void => {
+    try { process.stderr.write(line); } catch { /* best-effort */ }
+  };
+  const baseDeps: PatchReviewerDeps = options.deps ?? { run, runRaw, runCapture };
+  const deps: PatchReviewerDeps = {
+    ...baseDeps,
+    runCapture: withClaude529Retry(baseDeps.runCapture, {
+      onRetry: ({ attempt, maxRetries, delayMs }) => {
+        writePhase(`[patch-review] claude 529 rate_limit; retry ${attempt}/${maxRetries} in ${Math.round(delayMs / 1000)}s\n`);
+      },
+    }),
+  };
 
   const ownsState = process.env.ADW_ORCHESTRATED !== "1";
 
@@ -468,9 +480,6 @@ export function runPatchReviewWithDeps(
   // iteration. The orchestrator inherits the child's stderr, so these lines
   // appear in the tmux window the operator is watching without any orchestrator
   // change.
-  const writePhase = (line: string): void => {
-    try { process.stderr.write(line); } catch { /* best-effort */ }
-  };
 
   // currentReview is set immediately since resolution already happened above.
   const currentReview: Resolved = {
