@@ -51,7 +51,7 @@ import { dirname, join } from "path";
 import { Either, TaskEither } from "../src/utils/task-either.ts";
 import type { PlanType } from "./adws-modules/agent.ts";
 import { withHeartbeat } from "./adws-modules/heartbeat.ts";
-import { withStallWatch, DEFAULT_STALL_MS } from "./adws-modules/stall-detector.ts";
+import { findWorkspaceBySpecPath } from "./adws-modules/workspace.ts";
 import { findWorkspaceBySpecPath, normalizeSpecPath } from "./adws-modules/workspace.ts";
 import {
   commitSpecToMain,
@@ -454,24 +454,18 @@ export interface PatchReviewResult {
 
 /**
  * Spawn a child stage, inherit stderr, capture stdout. The child runs as a
- * detached process-group leader so Layer-1 stall detection can SIGKILL the
- * whole tree (`claude -p` + sub-agents) without orphans. Returns
+ * detached process-group leader so SIGKILL reaches the whole tree
+ * (`claude -p` + sub-agents) without orphans. Returns
  * [exitCode, stdout, stderr].
- *
- * Layer 1 (SPEC-066): wrap the wait in `withStallWatch`. If the child's raw
- * tee file (`raw-output.jsonl` under agents/<id>/<stage-dir>/) shows < 64B
- * growth for `stallMs` (default 5 min), the child's process group is SIGKILLed
- * and the close handler surfaces a non-zero exit (137). The orchestrator's
- * existing retry/error path then handles it — no new error path needed.
  *
  * SPEC-065: when `worktreePath` is set, the child receives `ADW_WORKTREE=<path>`
  * in its env so its execution `cwd` resolves to the worktree (not PROJECT_ROOT).
  * Plan and spec-review during fresh setup do NOT receive ADW_WORKTREE — they
  * mutate the main spec that will be committed before the worktree is created.
  *
- * `teeFile` is the raw-output path the child's `claude -p` will write to. For
- * stages without a raw-output stream (currently none), pass null to skip the
- * stall watch.
+ * `teeFile` is the raw-output path the child's `claude -p` will write to.
+ * Currently unused for process management (stall-detector removed); kept for
+ * future use. Pass null if the stage has no raw-output stream.
  */
 function spawnStage(
   script: string,
@@ -499,23 +493,8 @@ function spawnStage(
     child.on("close", (code) => resolve({ code: code ?? 1, stdout: stdout.trim(), stderr: "" }));
   });
 
-  // No tee file (or spawn failed synchronously without a pid) → no stall watch.
-  if (!teeFile || child.pid === undefined) return childDone;
-
-  return withStallWatch(
-    {
-      childPid: child.pid,
-      teeFile,
-      stallMs: DEFAULT_STALL_MS,
-      onStall: ({ pid, stalledForMs }) => {
-        process.stderr.write(
-          `[adw] stall-detector: ${script} tee file ${teeFile} showed no growth for ` +
-          `${Math.floor(stalledForMs / 1000)}s — SIGKILLing process group ${pid}\n`,
-        );
-      },
-    },
-    () => childDone,
-  );
+  // No tee file → just await the child.
+  return childDone;
 }
 
 /** Parse the last non-empty stdout line as space-separated tokens. */
@@ -608,7 +587,7 @@ function makeRealDeps(opts: { getWorktreePath: () => string | undefined }): Pipe
       const args = [specPath];
       if (modelOverride) args.push("--model", modelOverride);
       args.push("--id", id);
-      // Layer-1 stall-watch is skipped for the test stage (teeFile=null) — see comment below.
+      // Test stage has no raw-output tee file (stall-detector removed).
       const r = await spawnStage("adw-test.ts", args, null, getWt());
       if (r.code !== 0) return Either.left(r.stdout || `adw-test exited with code ${r.code}`);
       const tokens = tokensOf(r.stdout);
