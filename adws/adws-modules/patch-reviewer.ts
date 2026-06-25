@@ -63,6 +63,8 @@ export interface GatherBundle {
 export interface GatherContextOptions {
   /** Set when the caller resolved the workspace state's worktree_path. */
   worktreePath?: string;
+  /** Orchestrator event log for legacy workspaces whose state lacks base_sha. */
+  orchestratorEventsFile?: string;
 }
 
 /** Gate results for typecheck and unit tests. */
@@ -176,6 +178,39 @@ export function ensureAvailable(deps: PatchReviewerDeps, cwd: string): TaskEithe
 // gatherContext — collect spec, diff, untracked files
 // ---------------------------------------------------------------------------
 
+const GIT_SHA_RE = /^[0-9a-f]{7,40}$/i;
+
+function cleanGitSha(value: unknown): string | undefined {
+  if (typeof value !== "string") return undefined;
+  const sha = value.trim();
+  return GIT_SHA_RE.test(sha) ? sha : undefined;
+}
+
+function recoverDiffBaseFromEvents(eventsFile: string | undefined): string | undefined {
+  if (!eventsFile) return undefined;
+  try {
+    const lines = readFileSync(eventsFile, "utf8").split("\n").filter((line) => line.trim());
+    for (const line of lines) {
+      try {
+        const event = JSON.parse(line) as Record<string, unknown>;
+        if (event.event === "base-sha-recorded") {
+          const base = cleanGitSha(event.base_sha);
+          if (base) return base;
+        }
+        if (event.event === "worktree-created") {
+          const base = cleanGitSha(event.from_sha);
+          if (base) return base;
+        }
+      } catch {
+        // Ignore malformed event lines; later well-formed lines may still help.
+      }
+    }
+  } catch {
+    // Missing event logs are expected for standalone patch-review runs.
+  }
+  return undefined;
+}
+
 export function gatherContext(
   deps: PatchReviewerDeps,
   cwd: string,
@@ -203,20 +238,29 @@ export function gatherContext(
       };
 
       if (inWorktree && !resolvedDiffBase) {
-        const mergeBaseRes = await deps.runRaw("git", ["merge-base", "main", "HEAD"], { cwd }).run();
-        if (Either.isLeft(mergeBaseRes)) {
-          return Either.left(`gather: git merge-base failed to spawn: ${mergeBaseRes.left}`);
-        }
-        if (mergeBaseRes.right.ok) {
-          const mergeBase = mergeBaseRes.right.stdout.trim();
-          if (mergeBase) {
-            resolvedDiffBase = mergeBase;
-            addWarning("no build base_sha; using git merge-base main HEAD");
-          } else {
-            addWarning("git merge-base main HEAD produced no output");
-          }
+        const eventBase = recoverDiffBaseFromEvents(opts.orchestratorEventsFile);
+        if (eventBase) {
+          resolvedDiffBase = eventBase;
+          addWarning("no build base_sha; using recorded worktree creation base");
         } else {
-          addWarning(`git merge-base main HEAD exited ${mergeBaseRes.right.exitCode}`);
+          const reflogRes = await deps.runRaw("git", ["reflog", "--format=%H", "--reverse", "HEAD"], { cwd }).run();
+          if (Either.isLeft(reflogRes)) {
+            return Either.left(`gather: git reflog failed to spawn: ${reflogRes.left}`);
+          }
+          if (reflogRes.right.ok) {
+            const reflogBase = reflogRes.right.stdout
+              .split("\n")
+              .map((line) => cleanGitSha(line))
+              .find((sha): sha is string => Boolean(sha));
+            if (reflogBase) {
+              resolvedDiffBase = reflogBase;
+              addWarning("no recorded base_sha; using earliest worktree HEAD reflog entry");
+            } else {
+              addWarning("git reflog HEAD produced no usable base");
+            }
+          } else {
+            addWarning(`git reflog HEAD exited ${reflogRes.right.exitCode}`);
+          }
         }
       }
 

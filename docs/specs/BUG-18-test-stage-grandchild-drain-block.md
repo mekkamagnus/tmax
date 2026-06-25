@@ -1,134 +1,117 @@
-# Bug: Test stage parser + resolve-loop — intermediate summaries + per-failure resolve explosion
+# Bug: Patch-review gate grandchild drain block
 
 ## Status
 
-**Partially fixed.** Three sub-bugs found and fixed across multiple passes:
-1. ✅ **Parser** (codex pass 1): `lastBunSummaryCount()` — grabs the LAST summary line, not the first. Bun emits intermediate summaries after each test file.
-2. ✅ **Batch resolve + budget** (codex pass 2): One `claude -p` per cycle (not one per failure) + 30-min wall-clock budget.
-3. ❌ **Patch-review gate crash** (NEW — not yet fixed): The SAME `bun run test:unit` grandchild drain-block bug exists in `patch-reviewer.ts:431` and `adw-patch-review.ts`'s `runRaw` (which has zero drain-safe markers). Patch-review's gates run `bun run test:unit` → grandchild blocks stream drain → gates never complete → patch-review crashes with exit code 1 every run (7 times across 2 days). This update adds the patch-review fix for a third pass.
+**Partially fixed.** Earlier test-stage bugs are already fixed and are context-only for this spec:
+1. ✅ **Parser**: `lastBunSummaryCount()` grabs the LAST summary line, not the first. Bun emits intermediate summaries after each test file.
+2. ✅ **Batch resolve + budget**: `adws/adws-modules/tester.ts` now uses `resolveUnitTests` / `resolveE2eTests` and `TRACK_BUDGET_MS` instead of a per-failure resolve loop.
+3. ✅ **Test-stage direct commands**: `adws/adws-modules/tester.ts` now runs `bun test --timeout 30000 test/unit/` and `bin/tmax-use test` directly.
+4. ❌ **Remaining scope: patch-review gate crash**: `adws/adws-modules/patch-reviewer.ts` still runs patch-review gates through `bun run test:unit` and `bun run test:tmax-use`, and `adws/adw-patch-review.ts` still has non-drain-safe `runRaw` / `runCapture` helpers. This spec now covers only the remaining patch-review gate/runRaw work.
 
 ## Bug Description
 
-### Original bug (FIXED by codex)
+### Prior fixed bugs (context only)
 
-~~The adw test stage ran the unit suite via `bun run test:unit`, creating a grandchild that blocked stream draining.~~
+These were separate earlier bugs in the same area. Do not reimplement them as part of this spec:
 
-**The real root cause** (found by codex): Bun emits **intermediate summary lines** (`N pass / M fail`) after each test file completes during the full suite run. The parser's regex `(\d+)\s+pass` matched the **first** intermediate summary (5 pass from an early file), not the **last** (the final total). The output was always fully captured — the bug was purely in the parser grabbing the wrong line.
+- The test-stage parser selected Bun's first intermediate summary instead of the final summary. That parser bug was fixed by `lastBunSummaryCount()`.
+- The test-stage resolve loop dispatched one `claude -p` per failure. That was fixed by batching failures through `resolveUnitTests` / `resolveE2eTests` in `adws/adws-modules/tester.ts`.
+- The test-stage runner used `bun run test:unit` / `bun run test:tmax-use`. That was fixed by spawning `bun test --timeout 30000 test/unit/` and `bin/tmax-use test` directly in `adws/adws-modules/tester.ts`.
 
-**Codex's fix:** `lastBunSummaryCount()` finds the LAST match, not the first. Plus `extractBunFailures()` improvements for `(fail)` markers, file headers, timing suffixes, and deduplication. 41/41 tests pass.
+### Current bug (remaining)
 
-### New problem (NOT fixed — exposed by the parser fix)
+Patch-review still has the grandchild drain-block bug:
+- `adws/adws-modules/patch-reviewer.ts` runs the unit gate as `bun run test:unit`.
+- `adws/adws-modules/patch-reviewer.ts` runs the optional tmax-use gate as `bun run test:tmax-use`.
+- `adws/adw-patch-review.ts` `runRaw` resolves on `close` without waiting for stdout/stderr `end`.
+- `adws/adw-patch-review.ts` `runCapture` has the same close-first settlement shape while teeing stdout.
 
-With the parser now correctly extracting 15+ failures per suite run, the resolve loop in `runUnitTrack` (tester.ts lines 367-393) **dispatches one `claude -p` resolve per failure, per cycle**:
-
-```ts
-// Line 369: for each failure, dispatch a separate resolve
-for (const failure of parsed.failures) {
-  callbacks.onResolve?.(failure.name, cycle + 1);
-  await resolveUnitTest(deps, cwd, agentsDir, id, failure, model, cycle + 1).run();
-}
-```
-
-With 15 failures and `MAX_UNIT_ITERATIONS = 2` (3 cycles total):
-- Cycle 1: suite runs (~13 min) → finds 15 failures → dispatches 15 resolves (~60 min)
-- Cycle 2: suite re-runs (~13 min) → finds remaining failures → dispatches more resolves (~40 min)
-- Cycle 3: suite re-runs (~13 min) → dispatches more resolves (~40 min)
-
-**Total: ~180 min (3 hours)** for a test stage that should take ~40 min max. Observed: 68 min with 12 resolves before being killed — the stage was nowhere near done.
-
-**Expected:** The test stage completes in a bounded time (~30-40 min max), with the resolve loop either fixing failures or giving up after a reasonable budget.
-
-**Actual:** The test stage runs for hours, dispatching dozens of sequential `claude -p` subprocesses, each taking ~4 min, because it resolves failures one-at-a-time-per-cycle with no overall wall-clock or resolve-count budget.
+When a gate uses `bun run <script>` with process-group timeout handling, Bun's task runner creates an extra process layer. The direct child can close before all inherited stdio pipe writers have produced EOF, so close-first helpers can settle with truncated output or hang until timeout. Patch-review must use the same direct-command and drain-safe subprocess behavior that the test stage now uses.
 
 ## Problem Statement
 
-The resolve loop's iteration cap (`MAX_UNIT_ITERATIONS = 2`) bounds the number of **suite re-runs** (3 total) but does NOT bound:
-1. **Total resolve subprocesses** — 15 failures × 3 cycles = up to 45 `claude -p` calls
-2. **Total wall time** — no overall timeout on the track; each resolve + suite run adds ~17 min
-3. **Resolve parallelism** — all resolves are sequential (`await` in a for-loop), so 15 resolves = 60 min of serial waiting
+Patch-review's gate runner still spawns `bun run` wrappers for commands that already have direct equivalents. The patch-review dispatcher also lacks the drain-safe subprocess settlement used by `adws/adw-test.ts`.
 
-The loop needs either:
-- A **batch resolve** (one `claude -p` call that gets ALL failures at once, not one per failure), OR
-- A **resolve-count cap** (e.g. max 5 resolves per cycle), OR
-- A **wall-clock budget** (e.g. if the track has run > 30 min, stop resolving and return gaps), OR
-- All three
+The remaining bug is not the parser bug and not the old test-stage resolve explosion. Those are prior fixed bugs. The current bug is: patch-review gates can hang, timeout, or report incomplete output because the gate commands and dispatcher subprocess helpers do not yet match the fixed test-stage behavior.
 
 ## Solution Statement
 
-**Batch resolve:** Instead of dispatching one `claude -p` per failure (lines 369-381), collect all failures into a single resolve prompt and dispatch ONE `claude -p` call per cycle. This reduces 15 resolves × 4 min = 60 min to 1 resolve × 5 min = 5 min per cycle. The resolve prompt already includes the failure name + error message — just concatenate all of them.
+Use direct gate commands in `patch-reviewer.ts` and copy the drain-safe subprocess behavior from `adws/adw-test.ts` into `adws/adw-patch-review.ts`.
 
-Additionally, add a **wall-clock budget** per track (default 30 min): if `Date.now() - start > budget`, stop resolving and return `gaps` with whatever the last parse showed. This prevents unbounded growth even if batch resolve introduces new failures.
+Patch-review should keep `bun run typecheck:src` because it has no direct replacement specified here. It should change only the unit and tmax-use test gates:
+- unit: `bun test --timeout 30000 test/unit/`
+- tmax-use: `bin/tmax-use test`
 
 ## Steps to Reproduce
 
-1. Have a codebase where the full unit suite has 10+ failing tests
-2. Run `bun adws/adw-test.ts <spec> --id <id>` (or the test stage via the orchestrator)
-3. Observe: the test stage dispatches one `claude -p` per failure per cycle
-4. With 15 failures: 15 resolves in cycle 1 (~60 min), then suite re-run (~13 min), then more resolves
-5. Total wall time: hours, not minutes
+1. In `adws/adws-modules/patch-reviewer.ts`, leave the current gate commands unchanged.
+2. Run patch-review on a workspace that reaches the gate phase: `bun adws/adw-patch-review.ts --id <existing-build-workspace-id> docs/specs/BUG-18-test-stage-grandchild-drain-block.md`.
+3. Observe that patch-review gates invoke `bun run test:unit` and, when tmax-use targets exist, `bun run test:tmax-use`.
+4. With the current `adws/adw-patch-review.ts` close-first `runRaw`, gate output can be truncated or timeout instead of cleanly settling after stdout/stderr drain.
 
 ## Root Cause Analysis
 
-The resolve loop was designed when the parser returned 0-1 failures (because the parser bug meant `failed=0` even when there were real failures). With the parser now correctly finding 15+ failures, the per-failure resolve design becomes pathological. The fix is to batch all failures into a single resolve call — the `claude -p` model can handle a prompt with 15 failure descriptions (each ~200 chars = 3KB total, well within context limits).
+The patch-review path did not receive the same fixes as the test stage. The test-stage fixes are in `adws/adws-modules/tester.ts` and `adws/adw-test.ts`; the patch-review equivalents are still stale.
+
+The current root cause is the combination of:
+1. `patch-reviewer.ts` unit and tmax-use gates spawning `bun run` wrappers instead of direct commands.
+2. `adw-patch-review.ts` subprocess helpers resolving on child `close` without requiring `stdout` and `stderr` `end`.
+3. Missing timeout/process-group cleanup in `adw-patch-review.ts`, so hung descendants are not killed consistently.
 
 ## Relevant Files
 
 ### Existing Files to Modify
 
-- **`adws/adws-modules/tester.ts`** — `runUnitTrack` lines 367-393: replace the per-failure for-loop with a single batched `resolveUnitTest` call that concatenates all failures. Also add a wall-clock budget check.
-- **`resolveUnitTest`** — update to accept an array of `TestFailure` instead of a single one, and build a prompt that lists all failures.
+- **`adws/adws-modules/tester.ts`** — context only. Already uses `resolveUnitTests`, `resolveE2eTests`, `TRACK_BUDGET_MS`, `bun test --timeout 30000 test/unit/`, and `bin/tmax-use test`. Do not edit for this spec unless a test expectation forces a small compatibility change.
+- **`adws/adws-modules/patch-reviewer.ts`** — change patch-review gate commands and user-facing `safePhase` labels for unit and tmax-use gates.
+- **`adws/adw-patch-review.ts`** — update local `runRaw` and `runCapture` to match the drain-safe settlement, timeout, `detached: true`, and process-group kill behavior already implemented in `adws/adw-test.ts`.
+- **`test/unit/adw-patch-review-gates-phase.test.ts`** — update gate command and phase-label expectations for the direct patch-review gate commands.
+- **`test/unit/adw-test.test.ts`** — context only unless existing assertions fail due to shared helper behavior. Do not add more batch/budget coverage here; that coverage already exists.
 
 ## Step by Step Tasks
 
-### Task 1: Batch the unit-track resolve
+### Task 1: Context-only — test-stage batch resolve already fixed
 
-**User Story**: As a pipeline operator, I want the test stage to resolve all failures in one `claude -p` call per cycle, so the stage completes in minutes, not hours.
+**User Story**: As a pipeline operator, I want the test-stage history documented without redoing already implemented work.
 
-- In `runUnitTrack`, replace the per-failure for-loop (lines 369-381) with a single call to a new `resolveUnitTests` (plural) that takes `parsed.failures` as an array.
-- `resolveUnitTests` builds a prompt: "The following unit tests are failing. Fix the root cause for each. Failures:\n" + all failure names + messages.
-- Dispatch ONE `claude -p` via `deps.runCapture`, tee to `agents/{id}/tester/unit-resolve-it{N}.jsonl`.
-- Same for the e2e track (`runE2eTrack`).
+- No implementation task. Current `adws/adws-modules/tester.ts` contains `resolveUnitTests` and `resolveE2eTests`.
+- `resolveUnitTests` is a function in `adws/adws-modules/tester.ts`, not a file.
 
 **Acceptance Criteria**:
-- [ ] Exactly ONE `claude -p` resolve per cycle (not one per failure)
-- [ ] With 15 failures, cycle 1 takes ~5 min (1 resolve), not ~60 min (15 resolves)
-- [ ] The resolve prompt includes all failure names + messages
+- [ ] No new implementation work is added for test-stage batch resolve.
+- [ ] References name `adws/adws-modules/tester.ts` and `resolveUnitTests` accurately.
 
-### Task 2: Add a wall-clock budget per track
+### Task 2: Context-only — test-stage wall-clock budget already fixed
 
-**User Story**: As a pipeline operator, I want the test stage to give up after a bounded time, so it can't run for hours.
+**User Story**: As a pipeline operator, I want the test-stage budget history documented without redoing already implemented work.
 
-- Add `TRACK_BUDGET_MS = 30 * 60 * 1000` (30 min) constant.
-- In `runUnitTrack` and `runE2eTrack`, before each resolve cycle: check `Date.now() - start > TRACK_BUDGET_MS`. If exceeded, break the loop and return the last `TrackResult` with `ok: false`.
+- No implementation task. Current `adws/adws-modules/tester.ts` exports `TRACK_BUDGET_MS`.
 
 **Acceptance Criteria**:
-- [ ] If the track has run > 30 min, it stops resolving and returns `gaps`
-- [ ] The `results.json` records the actual elapsed time
+- [ ] No new implementation work is added for test-stage budget handling.
 
-### Task 3: Update unit tests
+### Task 3: Context-only — test-stage tests already fixed
 
-- Update `test/unit/adw-test.test.ts` mock tests to verify batch resolve: `runCapture` is called once per cycle (not once per failure).
-- Add a test for the wall-clock budget: mock a slow clock that exceeds the budget after 1 cycle.
+- No implementation task unless a current test fails while making the patch-review changes.
+- Do not hardcode stale pass counts such as `39/39` or `41/41`.
 
 **Acceptance Criteria**:
-- [ ] Mock tests verify 1 resolve call per cycle (not N)
-- [ ] Budget test verifies the loop stops early
+- [ ] `bun test test/unit/adw-test.test.ts` passes if run.
 
 ## Validation Commands
 
 - `bun run typecheck:src` — zero errors.
-- `bun test test/unit/adw-test.test.ts` — all pass (including new batch/budget tests).
-- Manual: run `bun adws/adw-test.ts <spec>` on a codebase with 10+ failing tests and verify the stage completes in < 10 min (1 batch resolve per cycle, not 10+ serial resolves).
+- `bun test test/unit/adw-test.test.ts` — all pass.
 
 ## Problem Statement
 
-The `bun run <script>` wrapper creates a process tree (`bun run` → `bun test`) that, with `detached: true`, keeps the stdio pipes open after the grandchild finishes. This defeats the drain-safe `runRaw` pattern, which correctly waits for stream `end` events but those events never fire. The result is a 20-minute timeout that resolves with truncated output, producing a false `gaps` verdict and wasting hours of resolve-loop time.
+The `bun run <script>` wrapper creates a process tree (`bun run` → `bun test`) that, with `detached: true`, can keep stdio pipes open after the direct child closes. In patch-review, the current `runRaw` / `runCapture` helpers also settle on `close` before stdout/stderr `end`. The result is either incomplete gate output or a timeout-driven failure path instead of a clean patch-review PASS/GAPS verdict.
 
 ## Solution Statement
 
-**Spawn `bun test` directly instead of `bun run test:unit`.** The `bun run` wrapper is the sole cause of the grandchild — removing it eliminates the orphaned process group entirely. `bun test --timeout 30000 test/unit/` is a single process: it exits, streams drain, `close` + `end` events fire, `trySettle` runs, and the full output (including the summary line) is captured.
+**Spawn `bun test` directly instead of `bun run test:unit` in patch-review gates.** The `bun run` wrapper creates an avoidable extra process layer. `bun test --timeout 30000 test/unit/` is a single direct test process: it exits, streams drain, `close` + `end` events fire, `trySettle` runs, and the full output is captured.
 
-Same fix for the e2e track: `bin/tmax-use test` directly instead of `bun run test:tmax-use`.
+Same fix for the patch-review tmax-use gate: `bin/tmax-use test` directly instead of `bun run test:tmax-use`.
 
 ## Steps to Reproduce
 
@@ -156,55 +139,68 @@ Use these files to fix the bug:
 
 ### Existing Files to Modify
 
-- **`adws/adws-modules/tester.ts`** — Two changes:
-  - Line 319: `deps.runRaw("bun", ["run", "test:unit"], ...)` → `deps.runRaw("bun", ["test", "--timeout", "30000", "test/unit/"], ...)`
-  - Line 493-497: `deps.runRaw("bun", ["run", "test:tmax-use", ...], ...)` → `deps.runRaw("bin/tmax-use", ["test", ...], ...)`
-- **`test/unit/adw-test.test.ts`** — Update the mock in `passUnitFailE2eDeps` to match the new e2e command (`bin/tmax-use` instead of `bun run test:tmax-use`).
+- **`adws/adws-modules/patch-reviewer.ts`** — Two command changes:
+  - Unit gate: `deps.runRaw("bun", ["run", "test:unit"], ...)` → `deps.runRaw("bun", ["test", "--timeout", "30000", "test/unit/"], ...)`
+  - Optional tmax-use gate: `deps.runRaw("bun", ["run", "test:tmax-use"], ...)` → `deps.runRaw("bin/tmax-use", ["test"], ...)`
+  - Update matching `safePhase` labels to `bun test --timeout 30000 test/unit/` and `bin/tmax-use test`. Keep the typecheck label as `bun run typecheck:src`.
+- **`adws/adw-patch-review.ts`** — Copy/adapt the current `STAGE_RUN_TIMEOUT_MS`, `detached: true`, `trySettle`, and process-group SIGKILL behavior from `adws/adw-test.ts` into local `runRaw` and `runCapture`.
+- **`test/unit/adw-patch-review-gates-phase.test.ts`** — Update expected `runRaw` calls and phase command strings for the direct unit and tmax-use gate commands.
 
 ## Step by Step Tasks
 
-### Task 1: Fix the unit track command
+### Task 1: Fix the patch-review unit gate command
 
-**User Story**: As a pipeline operator, I want the test stage to capture full suite output so the parser reports accurate pass/fail counts.
+**User Story**: As a pipeline operator, I want patch-review to capture full unit-gate output so its gate verdict is based on complete data.
 
-- In `tester.ts`, change the unit-track `runRaw` call from `"bun", ["run", "test:unit"]` to `"bun", ["test", "--timeout", "30000", "test/unit/"]`.
+- In `patch-reviewer.ts`, change the unit gate `runRaw` call from `"bun", ["run", "test:unit"]` to `"bun", ["test", "--timeout", "30000", "test/unit/"]`.
+- Change the corresponding `safePhase` command label from `bun run test:unit` to `bun test --timeout 30000 test/unit/`.
 
 **Acceptance Criteria**:
-- [ ] `tester.ts` line 319 spawns `bun test` directly, not `bun run test:unit`.
+- [ ] `patch-reviewer.ts` spawns `bun test --timeout 30000 test/unit/` directly, not `bun run test:unit`.
+- [ ] `patch-reviewer.ts` emits the matching direct command in the `gates:unit` phase label.
 - [ ] Comment explains why (grandchild drain block).
 
-### Task 2: Fix the e2e track command
+### Task 2: Fix the patch-review tmax-use gate command
 
-**User Story**: As a pipeline operator, I want the e2e track to drain properly too.
+**User Story**: As a pipeline operator, I want the patch-review tmax-use gate to drain properly too.
 
-- In `tester.ts`, change the e2e-track `runRaw` call from `"bun", ["run", "test:tmax-use", ...]` to `"bin/tmax-use", ["test", ...]`.
+- In `patch-reviewer.ts`, change the optional tmax-use gate `runRaw` call from `"bun", ["run", "test:tmax-use"]` to `"bin/tmax-use", ["test"]`.
+- Change the corresponding `safePhase` command label from `bun run test:tmax-use` to `bin/tmax-use test`.
 
 **Acceptance Criteria**:
-- [ ] `tester.ts` line 493 spawns `bin/tmax-use test` directly.
+- [ ] `patch-reviewer.ts` spawns `bin/tmax-use test` directly.
+- [ ] `patch-reviewer.ts` emits the matching direct command in the `gates:tmax-use` phase label.
 - [ ] Comment explains the same grandchild issue.
 
-### Task 3: Fix the unit test mock
+### Task 3: Update patch-review gate tests
 
-**User Story**: As a developer, I want the mocked e2e test to still work after the command change.
+**User Story**: As a developer, I want the patch-review gate tests to assert the actual commands and phase labels.
 
-- In `test/unit/adw-test.test.ts`, update `passUnitFailE2eDeps` to match `cmd === "bin/tmax-use"` instead of `cmd === "bun" && script === "test:tmax-use"`.
+- In `test/unit/adw-patch-review-gates-phase.test.ts`, update unit gate call expectations from `["run", "test:unit"]` to `["test", "--timeout", "30000", "test/unit/"]`.
+- In `test/unit/adw-patch-review-gates-phase.test.ts`, update tmax-use gate call expectations from `cmd === "bun"` / `["run", "test:tmax-use"]` to `cmd === "bin/tmax-use"` / `["test"]`.
+- Update phase-label expectations from `bun run test:unit` and `bun run test:tmax-use` to `bun test --timeout 30000 test/unit/` and `bin/tmax-use test`.
 
 **Acceptance Criteria**:
-- [ ] `bun test test/unit/adw-test.test.ts` — 39/39 pass.
+- [ ] `bun test test/unit/adw-patch-review-gates-phase.test.ts` passes.
+- [ ] The test explicitly covers both `runRaw` call args and user-facing phase command strings.
 
-### Task 4: Fix patch-review gate runner — same grandchild drain-block (NEW)
+### Task 4: Fix patch-review dispatcher subprocess helpers
 
 **User Story**: As a pipeline operator, I want patch-review to run its gates (typecheck + unit suite) without crashing, so it can produce a PASS/GAPS verdict.
 
-- In `adws/adws-modules/patch-reviewer.ts` line 431: change `deps.runRaw("bun", ["run", "test:unit"], { cwd })` to `deps.runRaw("bun", ["test", "--timeout", "30000", "test/unit/"], { cwd })`. Same fix as the test stage — spawn `bun test` directly, not `bun run test:unit`.
-- In `adws/adws-modules/patch-reviewer.ts` line 448: change the tmax-use gate similarly if it uses `bun run test:tmax-use`.
-- In `adws/adw-patch-review.ts`: the local `runRaw` function (line 169) has **zero drain-safe markers** (`trySettle`, `stdoutEnded`, `stderrEnded` all absent). Apply the same drain-safe pattern as `adw-test.ts`'s `runRaw`: track `procClosed + stdoutEnded + stderrEnded`, resolve only when all three are true. Also add the `STAGE_RUN_TIMEOUT_MS` wall-clock timeout + `detached: true` + process-group SIGKILL on expiry.
-- Same fix for `adw-patch-review.ts`'s `runCapture` if it exists and has the same pattern.
+- In `adws/adw-patch-review.ts`, add a `STAGE_RUN_TIMEOUT_MS` constant equivalent to the one in `adws/adw-test.ts`: use `Number(process.env.ADW_PATCH_REVIEW_STAGE_TIMEOUT_MS)` when positive, otherwise default to `1_200_000`.
+- In `runRaw`, spawn with `detached: true` and track `settled`, `procClosed`, `stdoutEnded`, `stderrEnded`, and `exitCode`.
+- In `runRaw`, settle only when `procClosed && stdoutEnded && stderrEnded`; clear the timer before resolving.
+- In `runRaw`, on timeout, set `settled`, kill `-child.pid` with `SIGKILL` and fall back to `child.kill("SIGKILL")`, then resolve `Right({ ok: false, exitCode: -1, stdout, stderr: stderr + timeout message })`.
+- In `runRaw`, on `error`, guard with `settled`, clear the timer, and resolve `Left(...)`; on `close`, guard with `settled`, set `procClosed` and `exitCode`, then call `trySettle`.
+- In `runCapture`, apply the same `detached: true`, timeout, process-group kill, and `procClosed && stdoutEnded && stderrEnded` settlement behavior as `adw-test.ts`.
+- In `runCapture`, preserve current behavior: return `Right(stdout.trim())` only on exit code 0; return `Left((stderr || stdout).trim() || ...)` on nonzero exit; tee stdout lines to `opts.teeTo` as data arrives.
+- In `runCapture`, flush any partial `teeBuf` both on normal settlement and timeout before resolving. On timeout, return `Left` with a message containing the command and timeout.
 
 **Acceptance Criteria**:
-- [ ] `patch-reviewer.ts` line 431 spawns `bun test --timeout 30000 test/unit/` directly (not `bun run test:unit`).
-- [ ] `adw-patch-review.ts`'s `runRaw` has the drain-safe `trySettle` pattern (procClosed + stdoutEnded + stderrEnded).
-- [ ] `adw-patch-review.ts`'s `runRaw` has `detached: true` + wall-clock timeout + process-group SIGKILL.
+- [ ] `adw-patch-review.ts`'s `runRaw` and `runCapture` both have the drain-safe `trySettle` pattern (`procClosed + stdoutEnded + stderrEnded`).
+- [ ] `adw-patch-review.ts`'s `runRaw` and `runCapture` both have `detached: true` + wall-clock timeout + process-group SIGKILL.
+- [ ] `runCapture` flushes partial tee output before resolving on both normal completion and timeout.
 - [ ] Patch-review does NOT crash with exit code 1 when running gates.
 
 ### Task 5: Validate
@@ -213,19 +209,21 @@ Use these files to fix the bug:
 
 **Acceptance Criteria**:
 - [ ] `bun run typecheck:src` — zero errors.
+- [ ] `bun test test/unit/adw-patch-review-gates-phase.test.ts` — all pass.
 - [ ] `bun test test/unit/adw-test.test.ts` — all pass.
-- [ ] `bun test test/unit/adw-patch-review-gates-phase.test.ts` — all pass (if this test exercises the gate runner).
 
 ## Validation Commands
 
 - `bun run typecheck:src` — zero errors.
-- `bun test test/unit/adw-test.test.ts` — all pass.
 - `bun test test/unit/adw-patch-review-gates-phase.test.ts` — all pass.
-- Manual: resume SPEC-065 at patch-review and verify it does NOT crash with exit code 1. `gather.md` must be written.
+- `bun test test/unit/adw-test.test.ts` — all pass.
+- Optional manual validation, requires an existing completed build workspace id whose `agents/<id>/adw-state.json` points at this spec or another build-ready spec:
+  - `bun adws/adw-patch-review.ts --id <existing-build-workspace-id> docs/specs/BUG-18-test-stage-grandchild-drain-block.md`
+  - Verify the gate phase reaches unit tests without using `bun run test:unit`, patch-review does not crash with exit code 1, and `agents/<existing-build-workspace-id>/patch-reviewer/gather.md` is written.
 
 ## Notes
 
-- **This is the real root cause of the entire `passed=5` saga.** The prior fixes (drain-safe `runRaw`, `(pass)`/`(fail)` parser, `runCapture` timeout) were all correct and necessary, but they were defeated by the grandchild holding the pipes open. The drain-safe pattern was waiting for `end` events that would never come — not because of a drain race, but because the grandchild kept the pipe FD alive.
+- **Scope note:** This spec is no longer the implementation spec for the parser, batch-resolve, budget, or test-stage direct-command fixes. Those are prior fixed bugs. The remaining implementation work is patch-review gate direct commands plus patch-review dispatcher drain-safe subprocess handling.
 - **The stale-worktree issue compounded this.** Even after the drain-safe + parser fixes were committed to main, the pipeline ran inside a worktree that was 7 commits behind main, so the fixes were invisible. But even with the worktree updated, the grandchild issue would have persisted — it's a fundamentally different bug from the drain race.
 - **Why `detached: true` is still needed.** The `detached` flag is required for `process.kill(-pid, "SIGKILL")` (process-group kill on timeout) to work — it kills the whole tree, not just the direct child. Without `detached`, a hung grandchild would survive the timeout kill. The fix is to eliminate the grandchild (spawn directly), not to remove `detached`.
-- **Verified without running the full suite.** The Node.js reproduction script confirmed: `spawn("bun", ["run", "test:unit"], { detached: true })` → streams never end; `spawn("bun", ["test", ...], { detached: true })` → streams end promptly. 39/39 unit tests pass.
+- **Verified without running the full suite.** The Node.js reproduction script confirmed: `spawn("bun", ["run", "test:unit"], { detached: true })` can leave streams undrained; `spawn("bun", ["test", ...], { detached: true })` drains promptly. Keep validation phrased as "all pass" unless the exact current test count is verified immediately before editing the spec.

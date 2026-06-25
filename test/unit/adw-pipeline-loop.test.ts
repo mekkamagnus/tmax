@@ -288,6 +288,27 @@ describe("runPipeline — fresh run", () => {
     expect(state.agents).toContain("patch-reviewer");
     expect(state.agents).toContain("tester");
   });
+
+  test("records base_sha before worktree creation and includes from_sha on event", async () => {
+    const deps = mockDeps({ patch: Either.right(mockPatchPass()) });
+    const baseSha = "abc123def456";
+    const worktreeDeps = {
+      ...mockWorktreeDeps,
+      gitRun: () => TaskEither.from(async () => Either.right(baseSha)),
+    };
+    const result = await runPipeline(deps, baseArgs(), AGENTS_DIR, worktreeDeps);
+    if (Either.isLeft(result)) throw new Error(result.left);
+
+    const state = JSON.parse(readFileSync(join(AGENTS_DIR, result.right.id, "adw-state.json"), "utf8"));
+    expect(state.base_sha).toBe(baseSha);
+
+    const events = readFileSync(join(AGENTS_DIR, result.right.id, "orchestrator", "events.jsonl"), "utf8")
+      .split("\n")
+      .filter((line) => line.trim())
+      .map((line) => JSON.parse(line));
+    expect(events.some((event) => event.event === "base-sha-recorded" && event.base_sha === baseSha)).toBe(true);
+    expect(events.some((event) => event.event === "worktree-created" && event.from_sha === baseSha)).toBe(true);
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -727,5 +748,29 @@ describe("loadWorkspace", () => {
       expect(result.right.forcedFromStage).toBe(true);
       expect(result.right.resumeFrom).toBe("build");
     }
+  });
+
+  test("recovers baseSha from worktree-created event when state is missing base_sha", () => {
+    const wsId = "01TESTWS14";
+    const baseSha = "def456abc123";
+    seedWorkspaceState(wsId, {
+      adw_id: wsId,
+      description: "original desc",
+      status: "running",
+      completed_stages: ["plan", "review", "build"],
+      spec_path: "/spec.md",
+      agents: ["planner", "reviewer", "upgrader", "builder"],
+    });
+    mkdirSync(join(AGENTS_DIR, wsId, "orchestrator"), { recursive: true });
+    writeFileSync(join(AGENTS_DIR, wsId, "orchestrator", "events.jsonl"), JSON.stringify({
+      event: "worktree-created",
+      from_sha: baseSha,
+      path: "/repo.01TESTWS14",
+      branch: `adw/${wsId}`,
+    }) + "\n");
+
+    const result = loadWorkspace(wsId, undefined, AGENTS_DIR);
+    expect(Either.isRight(result)).toBe(true);
+    if (Either.isRight(result)) expect(result.right.baseSha).toBe(baseSha);
   });
 });

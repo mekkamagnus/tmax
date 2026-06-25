@@ -18,6 +18,7 @@ import {
   parseVerdict,
   parseClaudeStreamVerdict,
   renderGatherBundle,
+  gatherContext,
   buildAuditPrompt,
   ensureAvailable,
   type PatchReviewerDeps,
@@ -373,6 +374,98 @@ describe("parseClaudeStreamVerdict", () => {
 });
 
 // ---------------------------------------------------------------------------
+// gatherContext
+// ---------------------------------------------------------------------------
+
+describe("gatherContext", () => {
+  test("uses worktree-created from_sha when state base_sha is missing", async () => {
+    const specPath = join(tmp, "SPEC-001.md");
+    writeFileSync(specPath, "# Spec\n");
+    const eventsFile = join(tmp, "orchestrator", "events.jsonl");
+    mkdirSync(join(tmp, "orchestrator"), { recursive: true });
+    writeFileSync(eventsFile, JSON.stringify({
+      event: "worktree-created",
+      from_sha: "abc123def456",
+      path: tmp,
+      branch: "adw/test",
+    }) + "\n");
+
+    const calls: string[][] = [];
+    const deps = mockDeps({
+      runRaw: (_cmd, args) => {
+        calls.push(args);
+        const key = args.join(" ");
+        if (key === "diff abc123def456..HEAD --no-color") {
+          return TaskEither.right({ ok: true, exitCode: 0, stdout: "diff --git a/src/x.ts b/src/x.ts\n+hello", stderr: "" });
+        }
+        if (key === "diff --name-only abc123def456..HEAD") {
+          return TaskEither.right({ ok: true, exitCode: 0, stdout: "src/x.ts\n", stderr: "" });
+        }
+        if (key === "ls-files --others --exclude-standard -z") {
+          return TaskEither.right({ ok: true, exitCode: 0, stdout: "", stderr: "" });
+        }
+        return TaskEither.right({ ok: false, exitCode: 1, stdout: "", stderr: `unexpected ${key}` });
+      },
+    });
+
+    const result = await gatherContext(deps, tmp, specPath, undefined, {
+      worktreePath: tmp,
+      orchestratorEventsFile: eventsFile,
+    }).run();
+
+    expect(Either.isRight(result)).toBe(true);
+    if (Either.isRight(result)) {
+      expect(result.right.diffBase).toBe("abc123def456");
+      expect(result.right.filesChanged).toEqual(["src/x.ts"]);
+      expect(result.right.diff).toContain("+hello");
+    }
+    expect(calls.some((args) => args[0] === "merge-base")).toBe(false);
+    expect(calls.some((args) => args[0] === "reflog")).toBe(false);
+  });
+
+  test("falls back to earliest worktree HEAD reflog entry for legacy workspaces", async () => {
+    const specPath = join(tmp, "SPEC-002.md");
+    writeFileSync(specPath, "# Spec\n");
+    const reflogBase = "bc8aa67000000000000000000000000000000000";
+    const calls: string[][] = [];
+    const deps = mockDeps({
+      runRaw: (_cmd, args) => {
+        calls.push(args);
+        const key = args.join(" ");
+        if (key === "reflog --format=%H --reverse HEAD") {
+          return TaskEither.right({
+            ok: true,
+            exitCode: 0,
+            stdout: `${reflogBase}\ndeb2a47000000000000000000000000000000000\n`,
+            stderr: "",
+          });
+        }
+        if (key === `diff ${reflogBase}..HEAD --no-color`) {
+          return TaskEither.right({ ok: true, exitCode: 0, stdout: "diff --git a/src/y.ts b/src/y.ts\n+world", stderr: "" });
+        }
+        if (key === `diff --name-only ${reflogBase}..HEAD`) {
+          return TaskEither.right({ ok: true, exitCode: 0, stdout: "src/y.ts\n", stderr: "" });
+        }
+        if (key === "ls-files --others --exclude-standard -z") {
+          return TaskEither.right({ ok: true, exitCode: 0, stdout: "", stderr: "" });
+        }
+        return TaskEither.right({ ok: false, exitCode: 1, stdout: "", stderr: `unexpected ${key}` });
+      },
+    });
+
+    const result = await gatherContext(deps, tmp, specPath, undefined, { worktreePath: tmp }).run();
+
+    expect(Either.isRight(result)).toBe(true);
+    if (Either.isRight(result)) {
+      expect(result.right.diffBase).toBe(reflogBase);
+      expect(result.right.filesChanged).toEqual(["src/y.ts"]);
+      expect(result.right.gitWarning).toContain("earliest worktree HEAD reflog");
+    }
+    expect(calls.some((args) => args[0] === "merge-base")).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
 // renderGatherBundle
 // ---------------------------------------------------------------------------
 
@@ -404,6 +497,18 @@ describe("renderGatherBundle", () => {
     };
     const md = renderGatherBundle("/path/to/spec.md", gather);
     expect(md).toContain("no build base_sha");
+  });
+
+  test("writes a useful marker when no changes are detected", () => {
+    const gather: GatherBundle = {
+      specContent: "# Spec",
+      diff: "",
+      untrackedDiff: "",
+      filesChanged: [],
+    };
+    const md = renderGatherBundle("/path/to/spec.md", gather);
+    expect(md).toContain("No changes detected");
+    expect(md).toContain("(no tracked changes)");
   });
 
   test("includes untracked diff section", () => {

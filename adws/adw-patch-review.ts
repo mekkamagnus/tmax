@@ -284,19 +284,22 @@ export interface ResolvedInput {
 interface WorkspaceHints {
   baseSha?: string;
   worktreePath?: string;
+  orchestratorEventsFile?: string;
 }
 
 function readWorkspaceHints(id: string): WorkspaceHints {
   const stateFile = join(AGENTS_DIR, id, "adw-state.json");
-  if (!existsSync(stateFile)) return {};
+  const orchestratorEventsFile = join(AGENTS_DIR, id, "orchestrator", "events.jsonl");
+  if (!existsSync(stateFile)) return { orchestratorEventsFile };
   try {
     const state = JSON.parse(readFileSync(stateFile, "utf8")) as Record<string, unknown>;
     return {
       baseSha: typeof state.base_sha === "string" ? state.base_sha : undefined,
       worktreePath: typeof state.worktree_path === "string" ? state.worktree_path : undefined,
+      orchestratorEventsFile,
     };
   } catch {
-    return {};
+    return { orchestratorEventsFile };
   }
 }
 
@@ -393,6 +396,7 @@ interface Resolved extends Seed {
   source: "path" | "adw-id";
   diffBase?: string;
   worktreePath?: string;
+  orchestratorEventsFile?: string;
 }
 
 /** Result of a successful patch-review run. */
@@ -478,6 +482,7 @@ export function runPatchReviewWithDeps(
     source: resolvedInput.right.source,
     diffBase: resolvedInput.right.diffBase ?? hints.baseSha,
     worktreePath: hints.worktreePath,
+    orchestratorEventsFile: hints.orchestratorEventsFile,
   };
 
   // SPEC-065: ADW_WORKTREE is the orchestrator's per-run sibling worktree path.
@@ -509,21 +514,30 @@ export function runPatchReviewWithDeps(
     // Step 2: gather context (spec + diff + untracked).
     .flatMap((ctx) => {
       writePhase(`[patch-review] gather (git diff + ls-files)\n`);
-      return gatherContext(deps, cwd, ctx.specPath, ctx.diffBase, { worktreePath: ctx.worktreePath })
+      const gatherFile = join(AGENTS_DIR, ctx.id, "patch-reviewer", "gather.md");
+      return gatherContext(deps, cwd, ctx.specPath, ctx.diffBase, {
+        worktreePath: ctx.worktreePath,
+        orchestratorEventsFile: ctx.orchestratorEventsFile,
+      })
         .tap((gather: GatherBundle) => appendEvent(ctx.id, "patch-reviewer", {
           event: "gather",
           spec_path: ctx.specPath,
-          diff_base: ctx.diffBase ?? null,
+          diff_base: gather.diffBase ?? ctx.diffBase ?? null,
           files_changed: gather.filesChanged,
           ...(gather.gitWarning ? { git_warning: gather.gitWarning } : {}),
         }))
-        .map((gather: GatherBundle) => ({ ...ctx, gather }));
+        .flatMap((gather: GatherBundle) => writeGatherBundle(gatherFile, renderGatherBundle(ctx.specPath, gather))
+          .tap(() => appendEvent(ctx.id, "patch-reviewer", {
+            event: "gather_written",
+            path: `agents/${ctx.id}/patch-reviewer/gather.md`,
+          }))
+          .map(() => ({ ...ctx, gather, gatherFile })));
     })
     // Step 3: run gates (typecheck + tests). §C2: phase callback emits one
     // stderr line per gate transition so the operator can see the iteration
     // progressing through typecheck → unit → (optional) tmax-use, which are
     // the longest silent stretches (each gate emits no stream-json).
-    .flatMap((ctx: Resolved & { gather: GatherBundle }) => runGates(deps, cwd, {
+    .flatMap((ctx: Resolved & { gather: GatherBundle; gatherFile: string }) => runGates(deps, cwd, {
       onPhase: (phase, command) => writePhase(`[patch-review] ${phase} (${command})\n`),
     })
       .tap((gates: GateResults) => appendEvent(ctx.id, "patch-reviewer", {
@@ -533,16 +547,15 @@ export function runPatchReviewWithDeps(
         unit: { ok: gates.unit.ok, exit_code: gates.unit.exitCode },
       }))
       .map((gates: GateResults) => ({ ...ctx, gates })))
-    // Step 4: render + write gather bundle.
-    .flatMap((ctx: Resolved & { gather: GatherBundle; gates: GateResults }) => {
-      const gatherFile = join(AGENTS_DIR, ctx.id, "patch-reviewer", "gather.md");
+    // Step 4: update gather bundle with gate output.
+    .flatMap((ctx: Resolved & { gather: GatherBundle; gatherFile: string; gates: GateResults }) => {
       const markdown = renderGatherBundle(ctx.specPath, ctx.gather, ctx.gates);
-      return writeGatherBundle(gatherFile, markdown)
+      return writeGatherBundle(ctx.gatherFile, markdown)
         .tap(() => appendEvent(ctx.id, "patch-reviewer", {
-          event: "gather_written",
+          event: "gather_updated",
           path: `agents/${ctx.id}/patch-reviewer/gather.md`,
         }))
-        .map(() => ({ ...ctx, gatherFile }));
+        .map(() => ctx);
     })
     // Step 5: audit — dispatch claude -p.
     .flatMap((ctx: Resolved & { gather: GatherBundle; gates: GateResults; gatherFile: string }) => {

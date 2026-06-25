@@ -326,6 +326,28 @@ function recoverSpecPathFromEvents(id: string, agentsDir: string = AGENTS_DIR): 
   return null;
 }
 
+const GIT_SHA_RE = /^[0-9a-f]{7,40}$/i;
+
+function recoverBaseShaFromEvents(id: string, agentsDir: string = AGENTS_DIR): string | null {
+  const eventsFile = join(agentsDir, id, "orchestrator", "events.jsonl");
+  if (!existsSync(eventsFile)) return null;
+  const lines = readFileSync(eventsFile, "utf8").split("\n").filter((l) => l.trim());
+  for (const line of lines) {
+    try {
+      const d = JSON.parse(line) as Record<string, unknown>;
+      if (d.event === "base-sha-recorded" && typeof d.base_sha === "string" && GIT_SHA_RE.test(d.base_sha.trim())) {
+        return d.base_sha.trim();
+      }
+      if (d.event === "worktree-created" && typeof d.from_sha === "string" && GIT_SHA_RE.test(d.from_sha.trim())) {
+        return d.from_sha.trim();
+      }
+    } catch {
+      // malformed line — skip
+    }
+  }
+  return null;
+}
+
 /**
  * Load an existing workspace and determine where to resume.
  * - `fromStage` overrides auto-detection (forces starting at that stage).
@@ -394,9 +416,8 @@ export function loadWorkspace(id: string, fromStage?: StageName, agentsDir: stri
   if (state.patch_review_next_action === "build" || state.patch_review_next_action === "patch-review") {
     result.patchNextAction = state.patch_review_next_action;
   }
-  if (typeof state.base_sha === "string") {
-    result.baseSha = state.base_sha;
-  }
+  const baseSha = typeof state.base_sha === "string" ? state.base_sha : recoverBaseShaFromEvents(id, agentsDir);
+  if (baseSha) result.baseSha = baseSha;
 
   return Either.right(result);
 }
@@ -936,11 +957,18 @@ export async function runPipeline(
         ...(commitRes.right.sha ? { sha: commitRes.right.sha } : {}),
       }, agentsDir);
 
-      const headRes = typeof worktreeDeps.gitRun === "function"
-        ? await worktreeDeps.gitRun("git", ["rev-parse", "HEAD"], { cwd: PROJECT_ROOT }).run()
-        : Either.right(commitRes.right.sha ?? "");
-      if (Either.isRight(headRes) && headRes.right.trim()) {
+      if (typeof worktreeDeps.gitRun === "function") {
+        const headRes = await worktreeDeps.gitRun("git", ["rev-parse", "HEAD"], { cwd: PROJECT_ROOT }).run();
+        if (Either.isLeft(headRes) || !headRes.right.trim()) {
+          const detail = Either.isLeft(headRes) ? headRes.left : "git rev-parse HEAD produced no output";
+          appendEvent(id, { event: "base-sha-error", detail }, agentsDir);
+          state.failed_stage = "review";
+          return Either.left(`base_sha capture failed before worktree creation: ${detail}`);
+        }
         state.base_sha = headRes.right.trim();
+        appendEvent(id, { event: "base-sha-recorded", base_sha: state.base_sha }, agentsDir);
+      } else if (commitRes.right.sha) {
+        state.base_sha = commitRes.right.sha;
         appendEvent(id, { event: "base-sha-recorded", base_sha: state.base_sha }, agentsDir);
       }
 
@@ -951,7 +979,13 @@ export async function runPipeline(
       if (Either.isLeft(createRes)) {
         // If the worktree already exists (interrupted prior run), accept it.
         if (existsSync(worktreePath)) {
-          appendEvent(id, { event: "worktree-reused", path: worktreePath, branch, reason: createRes.left }, agentsDir);
+          appendEvent(id, {
+            event: "worktree-reused",
+            path: worktreePath,
+            branch,
+            reason: createRes.left,
+            ...(state.base_sha ? { from_sha: state.base_sha } : {}),
+          }, agentsDir);
           currentWorktreePath = worktreePath;
         } else {
           appendEvent(id, { event: "worktree-error", detail: createRes.left }, agentsDir);
@@ -959,7 +993,12 @@ export async function runPipeline(
           return Either.left(`worktree creation failed: ${createRes.left}`);
         }
       } else {
-        appendEvent(id, { event: "worktree-created", path: worktreePath, branch }, agentsDir);
+        appendEvent(id, {
+          event: "worktree-created",
+          path: worktreePath,
+          branch,
+          ...(state.base_sha ? { from_sha: state.base_sha } : {}),
+        }, agentsDir);
         currentWorktreePath = worktreePath;
       }
       state.worktree_path = currentWorktreePath;
@@ -988,7 +1027,13 @@ export async function runPipeline(
     // test/patch-review children get ADW_WORKTREE.
     if (existsSync(worktreePath)) {
       currentWorktreePath = worktreePath;
-      appendEvent(id, { event: "worktree-reused", path: worktreePath, branch, reason: "resume" }, agentsDir);
+      appendEvent(id, {
+        event: "worktree-reused",
+        path: worktreePath,
+        branch,
+        reason: "resume",
+        ...(state.base_sha ? { from_sha: state.base_sha } : {}),
+      }, agentsDir);
     } else {
       // Worktree was deleted between runs — recreate from the recorded branch.
       const createRes = await worktreeDeps.createWorktree(PROJECT_ROOT, branch, worktreePath).run();
@@ -997,7 +1042,12 @@ export async function runPipeline(
         return finalize(Either.left(`resume worktree recreation failed: ${createRes.left}`));
       }
       currentWorktreePath = worktreePath;
-      appendEvent(id, { event: "worktree-recreated", path: worktreePath, branch }, agentsDir);
+      appendEvent(id, {
+        event: "worktree-recreated",
+        path: worktreePath,
+        branch,
+        ...(state.base_sha ? { from_sha: state.base_sha } : {}),
+      }, agentsDir);
     }
     state.worktree_path = currentWorktreePath;
     state.branch = branch;
