@@ -2,11 +2,20 @@
 
 ## Status
 
-**Partially fixed.** Earlier test-stage bugs are already fixed and are context-only for this spec:
+**Mostly fixed.** Earlier test-stage bugs are already fixed and are context-only for this spec:
 1. ✅ **Parser**: `lastBunSummaryCount()` grabs the LAST summary line, not the first. Bun emits intermediate summaries after each test file.
 2. ✅ **Batch resolve + budget**: `adws/adws-modules/tester.ts` now uses `resolveUnitTests` / `resolveE2eTests` and `TRACK_BUDGET_MS` instead of a per-failure resolve loop.
 3. ✅ **Test-stage direct commands**: `adws/adws-modules/tester.ts` now runs `bun test --timeout 30000 test/unit/` and `bin/tmax-use test` directly.
-4. ❌ **Remaining scope: patch-review gate crash**: `adws/adws-modules/patch-reviewer.ts` still runs patch-review gates through `bun run test:unit` and `bun run test:tmax-use`, and `adws/adw-patch-review.ts` still has non-drain-safe `runRaw` / `runCapture` helpers. This spec now covers only the remaining patch-review gate/runRaw work.
+4. ✅ **Patch-review direct commands**: `adws/adws-modules/patch-reviewer.ts` now runs `bun test --timeout 30000 test/unit/` and `bin/tmax-use test` directly (was `bun run test:unit`).
+5. ✅ **Patch-review drain-safe runRaw/runCapture**: `adws/adw-patch-review.ts` now has the drain-safe `trySettle` pattern + wall-clock timeout + `detached: true`.
+6. ✅ **Stall-detector removed**: The stall-detector that false-killed patch-review during long gate runs has been removed entirely.
+7. ❌ **Remaining: API 529 rate limit on concurrent patch-review**: Two pipelines (SPEC-065 + BUG-20) running patch-review simultaneously hit `claude -p`'s 529 rate_limit error after 10 retries. The `adw-patch-review.ts` dispatcher treats this as exit code 2 (infra error) and fails the stage. The dispatcher should retry the audit `claude -p` call on 529 (with exponential backoff) before giving up.
+
+**Context — two specs that were being worked on when this was found:**
+- **SPEC-065** (worktree isolation): passed plan→review→build→test (3189 pass / 0 fail). Failed at patch-review due to 529.
+- **BUG-20** (worktree duplication): passed plan→review→build→test (3149 pass / 1 fail). Failed at patch-review due to 529.
+
+Neither spec is "finished" — both are blocked at patch-review by the 529. Once the retry-on-529 fix lands, both should be resumable at patch-review.
 
 ## Bug Description
 
