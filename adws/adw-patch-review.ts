@@ -206,7 +206,7 @@ function runRaw(cmd: string, args: string[], opts: RunOpts = {}): TaskEither<str
       child.stdout.on("end", () => { stdoutEnded = true; trySettle(); });
       child.stderr.on("data", (chunk: Buffer | string) => { stderr += typeof chunk === "string" ? chunk : chunk.toString("utf8"); });
       child.stderr.on("end", () => { stderrEnded = true; trySettle(); });
-      child.on("error", (e) => { if (!settled) { settled = true; clearTimeout(timer); resolve(Either.left(`failed to spawn ${cmd}: ${e.message}`)); } });
+      child.on("error", (e) => { if (!settled) { settled = true; resolve(Either.left(`failed to spawn ${cmd}: ${e.message}`)); } });
       child.on("close", (code) => { if (!settled) { procClosed = true; exitCode = code ?? -1; trySettle(); } });
     });
   });
@@ -230,23 +230,20 @@ function runCapture(cmd: string, args: string[], opts: RunOpts & { teeTo: string
       let stderrEnded = false;
       let exitCode = -1;
 
+      // No wall-clock timeout on runCapture — the audit call (claude -p)
+      // legitimately runs 20-40 min on a large spec + diff. The timeout
+      // was killing it mid-audit. Protection against hangs comes from:
+      // 1. claude -p's own internal timeout + retries
+      // 2. The 529 retry wrapper (withClaude529Retry)
+      // 3. The drain-safe pattern (process must close + streams must end)
       const trySettle = () => {
         if (settled) return;
         if (!procClosed || !stdoutEnded || !stderrEnded) return;
         settled = true;
-        clearTimeout(timer);
         if (teeBuf.length > 0) { try { appendFileSync(opts.teeTo, teeBuf); } catch { /* ignore */ } }
         if (exitCode === 0) resolve(Either.right(stdout.trim()));
         else resolve(Either.left((stderr || stdout).trim() || `${cmd} exited with code ${exitCode}`));
       };
-
-      const timer = setTimeout(() => {
-        if (settled) return;
-        settled = true;
-        try { process.kill(-child.pid!, "SIGKILL"); } catch { try { child.kill("SIGKILL"); } catch { /* gone */ } }
-        if (teeBuf.length > 0) { try { appendFileSync(opts.teeTo, teeBuf); } catch { /* ignore */ } }
-        resolve(Either.left(`${cmd} timed out after 1200000ms`));
-      }, 1_200_000);
 
       child.stdout.on("data", (chunk: Buffer | string) => {
         const s = typeof chunk === "string" ? chunk : chunk.toString("utf8");
@@ -264,7 +261,7 @@ function runCapture(cmd: string, args: string[], opts: RunOpts & { teeTo: string
         stderr += typeof chunk === "string" ? chunk : chunk.toString("utf8");
       });
       child.stderr.on("end", () => { stderrEnded = true; trySettle(); });
-      child.on("error", (e) => { if (!settled) { settled = true; clearTimeout(timer); resolve(Either.left(`failed to spawn ${cmd}: ${e.message}`)); } });
+      child.on("error", (e) => { if (!settled) { settled = true; resolve(Either.left(`failed to spawn ${cmd}: ${e.message}`)); } });
       child.on("close", (code) => { if (!settled) { procClosed = true; exitCode = code ?? -1; trySettle(); } });
     });
   });
