@@ -427,8 +427,11 @@ export function runGates(
       output: (tcRes.right.stdout + tcRes.right.stderr).trim(),
     };
 
-    safePhase(options.onPhase, "gates:unit", "bun run test:unit");
-    const unitRes = await deps.runRaw("bun", ["run", "test:unit"], { cwd }).run();
+    safePhase(options.onPhase, "gates:unit", "bun test test/unit/");
+    // Spawn 'bun test' directly, NOT 'bun run test:unit'. Same grandchild
+    // drain-block fix as BUG-18 in tester.ts — 'bun run' creates a grandchild
+    // that keeps pipes open with detached:true, preventing stream 'end'.
+    const unitRes = await deps.runRaw("bun", ["test", "--timeout", "30000", "test/unit/"], { cwd }).run();
     if (Either.isLeft(unitRes)) {
       return Either.left(`runGates: test:unit spawn failed: ${unitRes.left}`);
     }
@@ -443,8 +446,10 @@ export function runGates(
     // tmax-use gate: optional, runs only if playbooks or tests exist.
     let tmaxUse: GateResult | undefined;
     if (hasTmaxUseTargets(cwd)) {
-      safePhase(options.onPhase, "gates:tmax-use", "bun run test:tmax-use");
-      const tuRes = await deps.runRaw("bun", ["run", "test:tmax-use"], { cwd }).run();
+      safePhase(options.onPhase, "gates:tmax-use", "bin/tmax-use test");
+      // Spawn bin/tmax-use directly, NOT 'bun run test:tmax-use'. Same grandchild
+      // drain-block fix as BUG-18.
+      const tuRes = await deps.runRaw("bin/tmax-use", ["test"], { cwd }).run();
       if (Either.isLeft(tuRes)) {
         return Either.left(`runGates: test:tmax-use spawn failed: ${tuRes.left}`);
       }

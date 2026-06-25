@@ -173,25 +173,40 @@ function runRaw(cmd: string, args: string[], opts: RunOpts = {}): TaskEither<str
         cwd: opts.cwd,
         env: opts.env ? { ...process.env, ...opts.env } : process.env,
         stdio: ["ignore", "pipe", "pipe"],
+        detached: true,
       });
       let stdout = "";
       let stderr = "";
-      child.stdout.on("data", (chunk: Buffer | string) => {
-        stdout += typeof chunk === "string" ? chunk : chunk.toString("utf8");
-      });
-      child.stderr.on("data", (chunk: Buffer | string) => {
-        stderr += typeof chunk === "string" ? chunk : chunk.toString("utf8");
-      });
-      child.on("error", (e) => resolve(Either.left(`failed to spawn ${cmd}: ${e.message}`)));
-      child.on("close", (code) => {
-        const exitCode = code ?? -1;
-        resolve(Either.right({
-          ok: exitCode === 0,
-          exitCode,
-          stdout,
-          stderr,
-        }));
-      });
+      let settled = false;
+      let procClosed = false;
+      let stdoutEnded = false;
+      let stderrEnded = false;
+      let exitCode = -1;
+
+      // Drain-safe: resolve only after process closes AND both streams end.
+      // BUG-18: without this, 'bun run test:unit' grandchild keeps pipes open
+      // and the close event fires before stream data is fully drained.
+      const trySettle = () => {
+        if (settled) return;
+        if (!procClosed || !stdoutEnded || !stderrEnded) return;
+        settled = true;
+        clearTimeout(timer);
+        resolve(Either.right({ ok: exitCode === 0, exitCode, stdout, stderr }));
+      };
+
+      const timer = setTimeout(() => {
+        if (settled) return;
+        settled = true;
+        try { process.kill(-child.pid!, "SIGKILL"); } catch { try { child.kill("SIGKILL"); } catch { /* gone */ } }
+        resolve(Either.right({ ok: false, exitCode: -1, stdout, stderr }));
+      }, 1_200_000);
+
+      child.stdout.on("data", (chunk: Buffer | string) => { stdout += typeof chunk === "string" ? chunk : chunk.toString("utf8"); });
+      child.stdout.on("end", () => { stdoutEnded = true; trySettle(); });
+      child.stderr.on("data", (chunk: Buffer | string) => { stderr += typeof chunk === "string" ? chunk : chunk.toString("utf8"); });
+      child.stderr.on("end", () => { stderrEnded = true; trySettle(); });
+      child.on("error", (e) => { if (!settled) { settled = true; clearTimeout(timer); resolve(Either.left(`failed to spawn ${cmd}: ${e.message}`)); } });
+      child.on("close", (code) => { if (!settled) { procClosed = true; exitCode = code ?? -1; trySettle(); } });
     });
   });
 }
@@ -203,10 +218,35 @@ function runCapture(cmd: string, args: string[], opts: RunOpts & { teeTo: string
         cwd: opts.cwd,
         env: opts.env ? { ...process.env, ...opts.env } : process.env,
         stdio: ["ignore", "pipe", "pipe"],
+        detached: true,
       });
       let stdout = "";
       let stderr = "";
       let teeBuf = "";
+      let settled = false;
+      let procClosed = false;
+      let stdoutEnded = false;
+      let stderrEnded = false;
+      let exitCode = -1;
+
+      const trySettle = () => {
+        if (settled) return;
+        if (!procClosed || !stdoutEnded || !stderrEnded) return;
+        settled = true;
+        clearTimeout(timer);
+        if (teeBuf.length > 0) { try { appendFileSync(opts.teeTo, teeBuf); } catch { /* ignore */ } }
+        if (exitCode === 0) resolve(Either.right(stdout.trim()));
+        else resolve(Either.left((stderr || stdout).trim() || `${cmd} exited with code ${exitCode}`));
+      };
+
+      const timer = setTimeout(() => {
+        if (settled) return;
+        settled = true;
+        try { process.kill(-child.pid!, "SIGKILL"); } catch { try { child.kill("SIGKILL"); } catch { /* gone */ } }
+        if (teeBuf.length > 0) { try { appendFileSync(opts.teeTo, teeBuf); } catch { /* ignore */ } }
+        resolve(Either.left(`${cmd} timed out after 1200000ms`));
+      }, 1_200_000);
+
       child.stdout.on("data", (chunk: Buffer | string) => {
         const s = typeof chunk === "string" ? chunk : chunk.toString("utf8");
         stdout += s;
@@ -218,17 +258,13 @@ function runCapture(cmd: string, args: string[], opts: RunOpts & { teeTo: string
           teeBuf = teeBuf.slice(nl + 1);
         }
       });
+      child.stdout.on("end", () => { stdoutEnded = true; trySettle(); });
       child.stderr.on("data", (chunk: Buffer | string) => {
         stderr += typeof chunk === "string" ? chunk : chunk.toString("utf8");
       });
-      child.on("error", (e) => resolve(Either.left(`failed to spawn ${cmd}: ${e.message}`)));
-      child.on("close", (code) => {
-        if (teeBuf.length > 0) {
-          try { appendFileSync(opts.teeTo, teeBuf); } catch { /* ignore */ }
-        }
-        if (code === 0) resolve(Either.right(stdout.trim()));
-        else resolve(Either.left((stderr || stdout).trim() || `${cmd} exited with code ${code}`));
-      });
+      child.stderr.on("end", () => { stderrEnded = true; trySettle(); });
+      child.on("error", (e) => { if (!settled) { settled = true; clearTimeout(timer); resolve(Either.left(`failed to spawn ${cmd}: ${e.message}`)); } });
+      child.on("close", (code) => { if (!settled) { procClosed = true; exitCode = code ?? -1; trySettle(); } });
     });
   });
 }

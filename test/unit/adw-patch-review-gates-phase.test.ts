@@ -85,12 +85,12 @@ describe("runGates onPhase callback (§C2)", () => {
     // Exactly two gates ran; no tmax-use.
     expect(calls.length).toBe(2);
     expect(calls[0]!.args).toEqual(["run", "typecheck:src"]);
-    expect(calls[1]!.args).toEqual(["run", "test:unit"]);
+    expect(calls[1]!.args).toEqual(["test", "--timeout", "30000", "test/unit/"]);
 
     // Phases fired in order with the documented commands.
     expect(phases.map((p) => p.phase)).toEqual(["gates:typecheck", "gates:unit"]);
     expect(phases[0]!.command).toBe("bun run typecheck:src");
-    expect(phases[1]!.command).toBe("bun run test:unit");
+    expect(phases[1]!.command).toBe("bun test test/unit/");
 
     // Each phase fired BEFORE its runRaw: typecheck phase at 0 prior calls,
     // unit phase at 1 prior call (typecheck already ran).
@@ -115,7 +115,7 @@ describe("runGates onPhase callback (§C2)", () => {
     expect(Either.isRight(result)).toBe(true);
     // All three gates ran.
     expect(calls.length).toBe(3);
-    expect(calls[2]!.args).toEqual(["run", "test:tmax-use"]);
+    expect(calls[2]!.args).toEqual(["test"]);
 
     expect(phases.map((p) => p.phase)).toEqual([
       "gates:typecheck",
