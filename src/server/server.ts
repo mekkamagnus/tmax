@@ -820,13 +820,22 @@ export class TmaxServer {
       return;
     }
 
-    // Lock exists — check if stale
+    // Lock exists — check if stale. We only reach here when the socket file is
+    // absent (a live, serving daemon would have thrown at the probe above). So a
+    // lock whose holder is "alive" but has no socket is a hung/zombie daemon
+    // that lost its socket — reclaim it rather than deadlocking startup.
     const existing = readLock(lockPath);
-    if (existing && isProcessAlive(existing.pid) && existing.socketPath === this.socketPath) {
+    if (
+      existing &&
+      isProcessAlive(existing.pid) &&
+      existing.socketPath === this.socketPath &&
+      existsSync(this.socketPath) &&
+      await this.probeDaemon()
+    ) {
       throw new Error(`Daemon starting (pid ${existing.pid}) at ${this.socketPath}`);
     }
 
-    // Stale lock — remove and retry
+    // Stale lock (dead PID, wrong path, or live-but-not-serving) — remove and retry.
     removeFile(lockPath);
     if (!tryAcquireLock(lockPath, lockData)) {
       throw new Error(`Cannot acquire lock at ${lockPath}`);
