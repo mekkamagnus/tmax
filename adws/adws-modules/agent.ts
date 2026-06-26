@@ -22,13 +22,8 @@ export interface ClassifyResult {
 }
 
 const CLAUDE = "claude";
-// Intended target model: the higher-capability sonnet-tier model on this gateway.
-// Explicitly pinned (not left to default resolution) because z.ai's default-model
-// discovery can hang silently. NOTE: as of the troubleshooting session on
-// 2026-06-17, `glm-5.2[1m]` itself hangs on api.z.ai (returns nothing, never
-// exits) while `glm-4.7` and `glm-4.5-air` work. This is the *intended* end-state
-// model; until the gateway/model is healthy, live invocations of `claude` will
-// stall. See the "Model availability risk" note in CHORE-26-adw-agent-module.md.
+
+// Default plan model (classify + dispatch).
 const CLAUDE_MODEL = "glm-5.2[1m]";
 
 /** Injected subprocess helpers (shape matches the run/runCapture in adw-plan.ts). */
@@ -224,7 +219,7 @@ export function dispatch(
     CLAUDE,
     // stream-json requires --verbose under --print; verbose logs go to stderr,
     // the streamed JSON events are what we tee to plannerLog on stdout.
-    ["-p", "--model", CLAUDE_MODEL, "--verbose", "--output-format", "stream-json", `/${skill} ${desc}`],
+    ["-p", "--model", CLAUDE_MODEL, "--dangerously-skip-permissions", "--verbose", "--output-format", "stream-json", `/${skill} ${desc}`],
     { cwd, teeTo: plannerLog, ...(liveLabel ? { liveLabel } : {}) },
   ).flatMap(() => {
     // Skill ran; inspect its self-reported outcome.

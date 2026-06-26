@@ -16,10 +16,8 @@ import { TaskEither, Either } from "../../src/utils/task-either.ts";
 
 const CLAUDE = "claude";
 
-// Default audit model. Matches BUILD_MODEL's rationale (stability over 5.2's
-// larger window; burns rate limit slower). Override per-run with
-// `adw-patch-review.ts --model <id>`.
-export const PATCH_REVIEW_MODEL = "glm-5.1";
+// Default audit model. Override per-run with `adw-patch-review.ts --model <id>`.
+export const PATCH_REVIEW_MODEL = "glm-5.2[1m]";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -793,6 +791,7 @@ export function audit(
       [
         "-p",
         "--model", model,
+        "--dangerously-skip-permissions",
         "--verbose",
         "--output-format", "stream-json",
         "--json-schema", schemaJson,

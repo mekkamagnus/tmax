@@ -15,15 +15,8 @@ import { TaskEither } from "../../src/utils/task-either.ts";
 
 const CLAUDE = "claude";
 
-// Default implement model. Deliberately NOT glm-5.2[1m] (which adw-plan.ts uses):
-// 5.2 confirmed hangs silently on api.z.ai as of 2026-06-17, and implementation
-// runs are long (10–30+ min) where a hang is catastrophic (partial edits, no
-// clean resume point). 5.1 is the 200K-context variant expected to be stable
-// but NOT re-verified since 2026-06-17 — see D1 in CHORE-30-adw-build.md. It also
-// burns the Coding Plan rate limit slower than 5.2 (smaller context per call).
-// Override per-run with `adw-build.ts --model <id>` for the rare huge-spec case
-// that genuinely needs 5.2's 1M context.
-export const BUILD_MODEL = "glm-5.1";
+// Default implement model. Override per-run with `adw-build.ts --model <id>`.
+export const BUILD_MODEL = "glm-5.2[1m]";
 
 /** Result of a successful build: the path to the streamed claude output. */
 export interface BuildResult {
@@ -127,7 +120,9 @@ export function build(
       CLAUDE,
       // stream-json requires --verbose under --print; verbose logs go to stderr,
       // the streamed JSON events are what we tee to builderLog on stdout.
-      ["-p", "--model", model, "--verbose", "--output-format", "stream-json", `/implement ${specPath}`],
+      // --dangerously-skip-permissions is needed because builds run inside sibling
+      // worktrees (tmax.<id>/) which lack the main repo's .claude/settings.json.
+      ["-p", "--model", model, "--dangerously-skip-permissions", "--verbose", "--output-format", "stream-json", `/implement ${specPath}`],
       { cwd, teeTo: builderLog, ...(liveLabel ? { liveLabel } : {}) },
     ).flatMap((stdout) => {
       const skill = parseSkillResult(builderLog, stdout);
