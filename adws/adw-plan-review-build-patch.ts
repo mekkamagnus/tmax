@@ -45,25 +45,27 @@
  *   agents/{id}/patch-reviewer/events.jsonl — written by adw-patch-review subprocess
  */
 import { spawn } from "child_process";
-import { appendFileSync, existsSync, mkdirSync, readFileSync, realpathSync } from "fs";
+import { appendFileSync, existsSync, mkdirSync, readFileSync, realpathSync, statSync } from "fs";
 import { mkdir, writeFile } from "node:fs/promises";
-import { dirname, join } from "path";
+import { join } from "path";
 import { Either, TaskEither } from "../src/utils/task-either.ts";
 import type { PlanType } from "./adws-modules/agent.ts";
 import { withHeartbeat } from "./adws-modules/heartbeat.ts";
-import { findWorkspaceBySpecPath } from "./adws-modules/workspace.ts";
 import { findWorkspaceBySpecPath, normalizeSpecPath } from "./adws-modules/workspace.ts";
 import {
   commitSpecToMain,
   commitWorktreeChanges,
   createWorktree,
+  createWorktreeFromBase,
   defaultGitRun,
   detectWorktree,
   mergeBranchToMain,
   removeWorktree as removeWorktreeModule,
   siblingWorktreePath,
+  validateWorktree,
   withPlanningLock,
   type WorktreeDeps,
+  type WorktreeValidation,
 } from "./adws-modules/worktree.ts";
 
 const PROJECT_ROOT = realpathSync(join(import.meta.dir, ".."));
@@ -296,6 +298,10 @@ export interface ResumeContext {
   patchNextAction?: "build" | "patch-review"; // exact pending loop action
   forcedFromStage?: boolean; // true when --from-stage supplied explicitly
   baseSha?: string;
+  /** BUG-20: recorded worktree path (state.worktree_path) — single source of truth for resume reuse. */
+  worktreePath?: string;
+  /** BUG-20: recorded branch (state.branch, normally adw/<id>) — validated before reuse. */
+  branch?: string;
 }
 
 /** Read agents/{id}/adw-state.json; Left if missing or unparseable. */
@@ -419,6 +425,16 @@ export function loadWorkspace(id: string, fromStage?: StageName, agentsDir: stri
   const baseSha = typeof state.base_sha === "string" ? state.base_sha : recoverBaseShaFromEvents(id, agentsDir);
   if (baseSha) result.baseSha = baseSha;
 
+  // BUG-20: carry the recorded worktree path + branch into runPipeline as the
+  // single source of truth for resume reuse (instead of re-deriving a
+  // deterministic sibling path and trusting existsSync alone).
+  if (typeof state.worktree_path === "string" && state.worktree_path) {
+    result.worktreePath = state.worktree_path;
+  }
+  if (typeof state.branch === "string" && state.branch) {
+    result.branch = state.branch;
+  }
+
   return Either.right(result);
 }
 
@@ -528,6 +544,10 @@ export interface OrchestratorWorktreeDeps extends WorktreeDeps {
   commitSpecToMain: (rootPath: string, specRelPath: string, message: string) => TaskEither<string, { committed: boolean; sha?: string }>;
   commitWorktreeChanges: (worktreePath: string, message: string) => TaskEither<string, { committed: boolean; sha?: string }>;
   createWorktree: (rootPath: string, branch: string, worktreePath: string) => TaskEither<string, string>;
+  /** BUG-20: create a worktree from a recorded base SHA, reusing an existing branch. */
+  createWorktreeFromBase: (rootPath: string, branch: string, worktreePath: string, baseSha: string) => TaskEither<string, string>;
+  /** BUG-20: validate a recorded worktree path is this repo's worktree on the expected branch. */
+  validateWorktree: (rootPath: string, worktreePath: string, expectedBranch: string) => TaskEither<string, WorktreeValidation>;
   removeWorktree: (worktreePath: string) => TaskEither<string, void>;
   mergeBranchToMain: (rootPath: string, branch: string, message: string) => TaskEither<string, { sha: string }>;
   detectWorktree: (rootPath: string) => TaskEither<string, boolean>;
@@ -625,6 +645,10 @@ const realWorktreeDeps: OrchestratorWorktreeDeps = {
     commitWorktreeChanges({ gitRun: defaultGitRun }, worktreePath, message),
   createWorktree: (rootPath, branch, worktreePath) =>
     createWorktree({ gitRun: defaultGitRun }, rootPath, branch, worktreePath),
+  createWorktreeFromBase: (rootPath, branch, worktreePath, baseSha) =>
+    createWorktreeFromBase({ gitRun: defaultGitRun }, rootPath, branch, worktreePath, baseSha),
+  validateWorktree: (rootPath, worktreePath, expectedBranch) =>
+    validateWorktree({ gitRun: defaultGitRun }, rootPath, worktreePath, expectedBranch),
   removeWorktree: (worktreePath) => removeWorktreeModule({ gitRun: defaultGitRun }, worktreePath),
   mergeBranchToMain: (rootPath, branch, message) =>
     mergeBranchToMain({ gitRun: defaultGitRun }, rootPath, branch, message),
@@ -763,11 +787,13 @@ export async function runPipeline(
     stages.build = { id, specPath };
   }
 
-  // ── SPEC-065: Worktree path resolution ───────────────────────────────────
+  // ── SPEC-065 / BUG-20: Worktree path resolution ──────────────────────────
   // Sibling layout: <repo>.<id>/ beside the repo (Worktrunk/wt convention).
-  // Resume reuses the existing worktree (or recreates from state.branch).
-  const branch = `adw/${id}`;
-  const worktreePath = siblingWorktreePath(PROJECT_ROOT, id);
+  // BUG-20: on resume, prefer the RECORDED worktree path + branch (single
+  // source of truth) over a re-derived deterministic path. Fresh runs still
+  // derive the sibling path + adw/<id> branch.
+  const branch = resume?.branch ?? `adw/${id}`;
+  const worktreePath = resume?.worktreePath ?? siblingWorktreePath(PROJECT_ROOT, id);
 
   const state: OrchestratorState = {
     adw_id: id,
@@ -1002,31 +1028,60 @@ export async function runPipeline(
       return finalize(setupResult);
     }
   } else {
-    // Resume past plan+review: still need to set the worktree path so build/
-    // test/patch-review children get ADW_WORKTREE.
-    if (existsSync(worktreePath)) {
-      currentWorktreePath = worktreePath;
+    // BUG-20: Resume past plan+review. Validate the recorded worktree is a real
+    // worktree of this repo on the expected branch — do NOT trust existsSync
+    // alone (it returns true for arbitrary dirs / stale paths / wrong branches).
+    const validateRes = await worktreeDeps.validateWorktree(PROJECT_ROOT, worktreePath, branch).run();
+    if (Either.isLeft(validateRes)) {
+      appendEvent(id, { event: "worktree-error", detail: `resume validate failed: ${validateRes.left}` }, agentsDir);
+      state.failed_stage = resume?.resumeFrom ?? "build";
+      return finalize(Either.left(`resume worktree validation failed: ${validateRes.left}`));
+    }
+    const validation = validateRes.right;
+    if (validation.ok) {
+      // Valid recorded worktree — reuse it. Do NOT call createWorktree.
+      currentWorktreePath = validation.path;
       appendEvent(id, {
         event: "worktree-reused",
-        path: worktreePath,
-        branch,
+        path: validation.path,
+        branch: validation.branch,
         reason: "resume",
         ...(state.base_sha ? { from_sha: state.base_sha } : {}),
       }, agentsDir);
-    } else {
-      // Worktree was deleted between runs — recreate from the recorded branch.
-      const createRes = await worktreeDeps.createWorktree(PROJECT_ROOT, branch, worktreePath).run();
+    } else if (validation.reason === "missing") {
+      // Recorded path is gone — recreate from the recorded base SHA (NOT HEAD),
+      // reusing an existing branch without deleting/recreating it.
+      const baseSha = state.base_sha ?? resume?.baseSha;
+      if (!baseSha) {
+        appendEvent(id, { event: "worktree-error", detail: "resume recreate needs a recorded base_sha, none found" }, agentsDir);
+        state.failed_stage = resume?.resumeFrom ?? "build";
+        return finalize(Either.left("resume worktree recreation failed: no recorded base_sha to recreate from"));
+      }
+      const createRes = await worktreeDeps.createWorktreeFromBase(PROJECT_ROOT, branch, worktreePath, baseSha).run();
       if (Either.isLeft(createRes)) {
         appendEvent(id, { event: "worktree-error", detail: `resume recreate failed: ${createRes.left}` }, agentsDir);
+        state.failed_stage = resume?.resumeFrom ?? "build";
         return finalize(Either.left(`resume worktree recreation failed: ${createRes.left}`));
       }
       currentWorktreePath = worktreePath;
       appendEvent(id, {
-        event: "worktree-recreated",
+        event: "worktree-created",
         path: worktreePath,
         branch,
-        ...(state.base_sha ? { from_sha: state.base_sha } : {}),
+        from_sha: baseSha,
+        reason: "resume-recreate",
       }, agentsDir);
+    } else {
+      // Arbitrary dir / wrong repo / wrong branch — refuse to reuse or overwrite.
+      // This is the central BUG-20 fix: fail loudly instead of silently reusing.
+      const detail = validation.reason === "not-a-worktree"
+        ? `recorded path is not a git worktree: ${validation.path}`
+        : validation.reason === "wrong-repo"
+          ? `recorded worktree belongs to a different repo (toplevel=${validation.toplevel})`
+          : `recorded worktree is on branch '${validation.branch}' but expected '${validation.expected}'`;
+      appendEvent(id, { event: "worktree-error", detail, reason: validation.reason, path: validation.path }, agentsDir);
+      state.failed_stage = resume?.resumeFrom ?? "build";
+      return finalize(Either.left(`resume refused: ${detail}`));
     }
     state.worktree_path = currentWorktreePath;
     state.branch = branch;

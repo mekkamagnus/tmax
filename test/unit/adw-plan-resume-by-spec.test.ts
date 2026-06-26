@@ -29,6 +29,7 @@ import {
   type BuildOutcome,
   type PatchReviewResult,
   type TestOutcome,
+  type OrchestratorWorktreeDeps,
 } from "../../adws/adw-plan-review-build-patch.ts";
 
 let AGENTS_DIR = "";
@@ -67,13 +68,20 @@ const mockPatchPass = (): PatchReviewResult => ({ id: "PATCHTEST1", verdict: "pa
  * orchestrator doesn't refuse to create a worktree inside the test's temp dir.
  * All other ops return Right with no real effect.
  */
-const mockWorktreeDeps = {
-  withPlanningLock: async (_rootPath: string, fn: () => Promise<unknown>) => fn(),
+const mockWorktreeDeps: OrchestratorWorktreeDeps = {
+  // Generic signature matches OrchestratorWorktreeDeps.withPlanningLock<T>.
+  withPlanningLock: async <T>(_rootPath: string, fn: () => Promise<T>): Promise<T> => fn(),
   commitSpecToMain: () => TaskEither.from(async () => Either.right({ committed: false })),
   commitWorktreeChanges: () => TaskEither.from(async () => Either.right({ committed: false })),
   createWorktree: () => TaskEither.from(async () => Either.right("")),
+  createWorktreeFromBase: () => TaskEither.from(async () => Either.right("")),
+  validateWorktree: () => TaskEither.from(async () => Either.right({ ok: true, path: "/mock/worktree", branch: "adw/test" })),
   removeWorktree: () => TaskEither.from(async () => Either.right(undefined)),
   detectWorktree: () => TaskEither.from(async () => Either.right(false)),
+  // OrchestratorWorktreeDeps extends WorktreeDeps. gitRun returns a plausible
+  // SHA so the fresh-setup base_sha capture records a value.
+  gitRun: () => TaskEither.from(async () => Either.right("deadbeef")),
+  mergeBranchToMain: () => TaskEither.from(async () => Either.right({ sha: "deadbeef" })),
 };
 
 function mockDeps(): PipelineDeps & {

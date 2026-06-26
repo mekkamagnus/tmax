@@ -156,6 +156,124 @@ export function createWorktree(
     .map(() => worktreePath);
 }
 
+/**
+ * Check whether a local branch exists: `git show-ref --verify --quiet refs/heads/<branch>`.
+ * Exit 0 (Right) → branch exists; non-zero (Left) → it does not. The Left is not
+ * an error here — callers treat it as "branch does not exist" — so this is a
+ * thin predicate; callers ignore the Left payload.
+ */
+export function branchExists(deps: WorktreeDeps, rootPath: string, branch: string): TaskEither<string, boolean> {
+  return TaskEither.from(async () => {
+    const res = await deps.gitRun("git", ["show-ref", "--verify", "--quiet", `refs/heads/${branch}`], { cwd: rootPath }).run();
+    // Exit 0 (Right) → branch exists; non-zero (Left) → does not. The Left is
+    // not an error here (callers want a boolean), so normalize both to Right.
+    return Either.isRight(res) ? Either.right(true) : Either.right(false);
+  });
+}
+
+/**
+ * BUG-20: create a worktree from a recorded base SHA (not HEAD), reusing an
+ * existing branch when it already exists.
+ *
+ * - Branch does NOT exist → `git worktree add -b <branch> <path> <baseSha>`
+ *   (creates the branch at baseSha and checks it out in the new worktree).
+ * - Branch already exists → `git worktree add <path> <branch>` (checks out the
+ *   existing branch into the new worktree) WITHOUT deleting or recreating it.
+ *
+ * The caller is responsible for verifying that an existing branch's name matches
+ * the recorded `state.branch` before calling this — see validateWorktree. This
+ * helper never deletes or force-recreates a branch.
+ *
+ * Returns Right(worktreePath) on success; Left on git failure or a path conflict.
+ */
+export function createWorktreeFromBase(
+  deps: WorktreeDeps,
+  rootPath: string,
+  branch: string,
+  worktreePath: string,
+  baseSha: string,
+): TaskEither<string, string> {
+  return TaskEither.from(async () => {
+    const exists = await branchExists(deps, rootPath, branch).run();
+    const branchAlreadyExists = Either.isRight(exists) && exists.right;
+    const args = branchAlreadyExists
+      ? ["worktree", "add", worktreePath, branch]
+      : ["worktree", "add", "-b", branch, worktreePath, baseSha];
+    const res = await deps.gitRun("git", args, { cwd: rootPath }).run();
+    if (Either.isLeft(res)) {
+      return Either.left(`createWorktreeFromBase(${branch} → ${worktreePath} @ ${baseSha}): ${res.left}`);
+    }
+    return Either.right(worktreePath);
+  });
+}
+
+/** Outcome of validateWorktree — distinguishes the spec's three cases. */
+export type WorktreeValidation =
+  | { ok: true; path: string; branch: string }
+  | { ok: false; reason: "missing" }
+  | { ok: false; reason: "not-a-worktree"; path: string }
+  | { ok: false; reason: "wrong-repo"; path: string; toplevel: string }
+  | { ok: false; reason: "wrong-branch"; path: string; branch: string | undefined; expected: string };
+
+/**
+ * BUG-20: validate a recorded worktree path against this repo and expected
+ * branch — WITHOUT treating an arbitrary existing directory as reusable.
+ *
+ * Uses `git worktree list --porcelain` (the spec-required primitive): the path
+ * must appear in the porcelain output (it is a real worktree, not an arbitrary
+ * dir), must resolve to the same common repo as rootPath (rev-parse
+ * --git-common-dir comparison), and must be checked out on `expectedBranch`.
+ *
+ * - path missing on disk → `{ ok: false, reason: "missing" }` (caller recreates
+ *   via createWorktreeFromBase).
+ * - path exists but is not a registered worktree → `not-a-worktree`.
+ * - path is a worktree but belongs to a different repo → `wrong-repo`.
+ * - path is a worktree of this repo but on the wrong branch → `wrong-branch`.
+ * - all checks pass → `{ ok: true, path, branch }`.
+ */
+export function validateWorktree(
+  deps: WorktreeDeps,
+  rootPath: string,
+  worktreePath: string,
+  expectedBranch: string,
+): TaskEither<string, WorktreeValidation> {
+  return TaskEither.from(async (): Promise<Either<string, WorktreeValidation>> => {
+    // Missing on disk → recreate.
+    if (!existsSync(worktreePath)) {
+      return Either.right<WorktreeValidation, string>({ ok: false, reason: "missing" });
+    }
+    const list = await listWorktrees(deps, rootPath).run();
+    if (Either.isLeft(list)) {
+      return Either.left<string, WorktreeValidation>(`validateWorktree: git worktree list failed: ${list.left}`);
+    }
+    // Normalize both sides via realpathSync so sibling `<repo>.<id>/` paths and
+    // the porcelain path compare equal regardless of symlink resolution.
+    const normalizedTarget = safeRealpath(worktreePath, rootPath);
+    const entry = list.right.find((e) => safeRealpath(e.path, rootPath) === normalizedTarget);
+    if (!entry) {
+      // Path exists on disk but is not a registered worktree — arbitrary dir.
+      return Either.right<WorktreeValidation, string>({ ok: false, reason: "not-a-worktree", path: worktreePath });
+    }
+    // Repo-identity check: porcelain `branch` is a ref like `refs/heads/adw/<id>`.
+    // The porcelain list was produced against rootPath, so any entry it returns
+    // already belongs to the same common repo — but verify defensively via
+    // --git-common-dir in case of a nested-repo edge case.
+    const entryToplevel = await runSafe(deps.gitRun("git", ["rev-parse", "--git-common-dir"], { cwd: entry.path }));
+    const rootToplevel = await runSafe(deps.gitRun("git", ["rev-parse", "--git-common-dir"], { cwd: rootPath }));
+    if (entryToplevel && rootToplevel && safeRealpath(entryToplevel, entry.path) !== safeRealpath(rootToplevel, rootPath)) {
+      return Either.right<WorktreeValidation, string>({ ok: false, reason: "wrong-repo", path: worktreePath, toplevel: entryToplevel });
+    }
+    // Branch check: porcelain `branch` is `refs/heads/<name>`; compare the suffix.
+    const actualBranch = entry.branch ? entry.branch.replace(/^refs\/heads\//, "") : undefined;
+    if (actualBranch !== expectedBranch) {
+      return Either.right<WorktreeValidation, string>({
+        ok: false, reason: "wrong-branch", path: worktreePath, branch: actualBranch, expected: expectedBranch,
+      });
+    }
+    return Either.right<WorktreeValidation, string>({ ok: true, path: worktreePath, branch: actualBranch });
+  });
+}
+
 // ---------------------------------------------------------------------------
 // removeWorktree
 // ---------------------------------------------------------------------------

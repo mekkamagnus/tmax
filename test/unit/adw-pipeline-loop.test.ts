@@ -25,6 +25,7 @@ import {
   type BuildOutcome,
   type PatchReviewResult,
   type TestOutcome,
+  type OrchestratorWorktreeDeps,
 } from "../../adws/adw-plan-review-build-patch.ts";
 
 // Per-test temp dir — runPipeline writes all state here via the agentsDir seam.
@@ -95,14 +96,64 @@ const mockPatchGaps = (): PatchReviewResult => ({
  * orchestrator doesn't refuse to create a worktree inside the test's temp dir.
  * All other ops return Right with no real effect.
  */
-const mockWorktreeDeps = {
-  withPlanningLock: async (_rootPath: string, fn: () => Promise<unknown>) => fn(),
+const mockWorktreeDeps: OrchestratorWorktreeDeps = {
+  // Generic signature matches OrchestratorWorktreeDeps.withPlanningLock<T>.
+  withPlanningLock: async <T>(_rootPath: string, fn: () => Promise<T>): Promise<T> => fn(),
   commitSpecToMain: () => TaskEither.from(async () => Either.right({ committed: false })),
   commitWorktreeChanges: () => TaskEither.from(async () => Either.right({ committed: false })),
   createWorktree: () => TaskEither.from(async () => Either.right("")),
+  createWorktreeFromBase: () => TaskEither.from(async () => Either.right("")),
+  // BUG-20: default to "valid reusable worktree" so existing resume tests
+  // (which don't seed a real worktree) exercise the reuse path unchanged.
+  validateWorktree: () => TaskEither.from(async () => Either.right({ ok: true, path: "/mock/worktree", branch: "adw/test" })),
   removeWorktree: () => TaskEither.from(async () => Either.right(undefined)),
   detectWorktree: () => TaskEither.from(async () => Either.right(false)),
+  // OrchestratorWorktreeDeps extends WorktreeDeps. gitRun returns a plausible
+  // SHA so the fresh-setup base_sha capture (guarded by `typeof === "function"`)
+  // records a value rather than failing on empty output.
+  gitRun: () => TaskEither.from(async () => Either.right("deadbeef")),
+  mergeBranchToMain: () => TaskEither.from(async () => Either.right({ sha: "deadbeef" })),
 };
+
+/**
+ * BUG-20: build worktree deps whose validation + recreation are controllable,
+ * and which RECORD calls (so tests assert createWorktreeFromBase is/isn't
+ * invoked). The validate outcome decides whether resume reuses, recreates, or
+ * refuses.
+ */
+function mockWorktreeDepsConfigurable(opts: {
+  validate?: { ok: true; path: string; branch: string }
+    | { ok: false; reason: "missing" }
+    | { ok: false; reason: "not-a-worktree"; path: string }
+    | { ok: false; reason: "wrong-repo"; path: string; toplevel: string }
+    | { ok: false; reason: "wrong-branch"; path: string; branch: string | undefined; expected: string };
+  recreate?: Either<string, string>;
+} = {}): OrchestratorWorktreeDeps & {
+  recreateCalls: Array<{ branch: string; worktreePath: string; baseSha: string }>;
+} {
+  const recreateCalls: Array<{ branch: string; worktreePath: string; baseSha: string }> = [];
+  const validate = opts.validate ?? { ok: true as const, path: "/mock/worktree", branch: "adw/test" };
+  const recreate = opts.recreate ?? Either.right("/mock/worktree");
+  return {
+    // Generic signature matches OrchestratorWorktreeDeps.withPlanningLock<T>.
+    withPlanningLock: async <T>(_rootPath: string, fn: () => Promise<T>): Promise<T> => fn(),
+    commitSpecToMain: () => TaskEither.from(async () => Either.right({ committed: false })),
+    commitWorktreeChanges: () => TaskEither.from(async () => Either.right({ committed: false })),
+    createWorktree: () => TaskEither.from(async () => Either.right("")),
+    createWorktreeFromBase: (_rootPath: string, branch: string, worktreePath: string, baseSha: string) => {
+      recreateCalls.push({ branch, worktreePath, baseSha });
+      return TaskEither.from(async () => recreate);
+    },
+    validateWorktree: () => TaskEither.from(async () => Either.right(validate)),
+    removeWorktree: () => TaskEither.from(async () => Either.right(undefined)),
+    detectWorktree: () => TaskEither.from(async () => Either.right(false)),
+    // OrchestratorWorktreeDeps extends WorktreeDeps. gitRun returns a plausible
+    // SHA so the fresh-setup base_sha capture records a value.
+    gitRun: () => TaskEither.from(async () => Either.right("deadbeef")),
+    mergeBranchToMain: () => TaskEither.from(async () => Either.right({ sha: "deadbeef" })),
+    recreateCalls,
+  };
+}
 
 /**
  * Build mock deps whose stages return canned values or sequences. The patch
@@ -681,7 +732,7 @@ describe("loadWorkspace", () => {
       spec_path: "/spec.md",
       agents: ["planner", "reviewer", "upgrader", "builder", "patch-reviewer"],
     });
-    const result = loadWorkspace(wsId, undefined, AGENTS_DIR, mockWorktreeDeps);
+    const result = loadWorkspace(wsId, undefined, AGENTS_DIR);
     expect(Either.isRight(result)).toBe(true);
     if (Either.isRight(result)) {
       expect(result.right.completedStages).toContain("patch-review");
@@ -701,7 +752,7 @@ describe("loadWorkspace", () => {
       patch_review_verdict: "gaps",
       patch_review_next_action: "build",
     });
-    const result = loadWorkspace(wsId, undefined, AGENTS_DIR, mockWorktreeDeps);
+    const result = loadWorkspace(wsId, undefined, AGENTS_DIR);
     expect(Either.isRight(result)).toBe(true);
     if (Either.isRight(result)) {
       expect(result.right.resumeFrom).toBe("build");
@@ -723,7 +774,7 @@ describe("loadWorkspace", () => {
       patch_review_verdict: "gaps",
       patch_review_next_action: "patch-review",
     });
-    const result = loadWorkspace(wsId, undefined, AGENTS_DIR, mockWorktreeDeps);
+    const result = loadWorkspace(wsId, undefined, AGENTS_DIR);
     expect(Either.isRight(result)).toBe(true);
     if (Either.isRight(result)) {
       expect(result.right.resumeFrom).toBe("patch-review");
@@ -742,7 +793,7 @@ describe("loadWorkspace", () => {
       agents: ["planner", "reviewer", "upgrader", "builder"],
       patch_review_next_action: "patch-review",
     });
-    const result = loadWorkspace(wsId, "build", AGENTS_DIR, mockWorktreeDeps);
+    const result = loadWorkspace(wsId, "build", AGENTS_DIR);
     expect(Either.isRight(result)).toBe(true);
     if (Either.isRight(result)) {
       expect(result.right.forcedFromStage).toBe(true);
@@ -772,5 +823,152 @@ describe("loadWorkspace", () => {
     const result = loadWorkspace(wsId, undefined, AGENTS_DIR);
     expect(Either.isRight(result)).toBe(true);
     if (Either.isRight(result)) expect(result.right.baseSha).toBe(baseSha);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// BUG-20: worktree duplication on resume — validation, reuse, recreate, refuse.
+// These tests seed state with worktree_path/branch/base_sha and assert the
+// resume path validates the recorded worktree instead of trusting existsSync.
+// ---------------------------------------------------------------------------
+
+const RECORDED_WT = "/repo.01BUG020";
+const RECORDED_BRANCH = "adw/01BUG020";
+const RECORDED_BASE = "abc1234";
+
+/** Seed a workspace that has completed plan+review+build and recorded a worktree. */
+function seedResumeWorkspace(id: string, extra: Record<string, unknown> = {}): void {
+  seedWorkspaceState(id, {
+    adw_id: id,
+    description: "BUG-20 resume scenario",
+    status: "running",
+    completed_stages: ["plan", "review", "build"],
+    spec_path: join(AGENTS_DIR, "SPEC-bug20.md"),
+    agents: ["planner", "reviewer", "upgrader", "builder"],
+    worktree_path: RECORDED_WT,
+    branch: RECORDED_BRANCH,
+    base_sha: RECORDED_BASE,
+    ...extra,
+  });
+}
+
+describe("BUG-20 — resume reuses a valid recorded worktree", () => {
+  test("valid worktree: createWorktreeFromBase NOT called, worktree-reused emitted", async () => {
+    const wsId = "01BUG020A";
+    seedResumeWorkspace(wsId);
+    const deps = mockDeps({ patch: Either.right(mockPatchPass()) });
+    const wtDeps = mockWorktreeDepsConfigurable({
+      validate: { ok: true, path: RECORDED_WT, branch: RECORDED_BRANCH },
+    });
+    const result = await runPipeline(deps, { description: "", id: wsId }, AGENTS_DIR, wtDeps);
+
+    expect(Either.isRight(result)).toBe(true);
+    // Recreation must NOT happen when the worktree is valid.
+    expect(wtDeps.recreateCalls).toHaveLength(0);
+    // plan/review/build skipped (already completed); only patch-review runs.
+    expect(deps.patchCalls).toHaveLength(1);
+
+    // worktree-reused event recorded with the recorded path + branch.
+    const events = readFileSync(join(AGENTS_DIR, wsId, "orchestrator", "events.jsonl"), "utf8")
+      .split("\n").filter((l) => l.trim());
+    const reused = events.map((l) => JSON.parse(l)).find((e) => e.event === "worktree-reused");
+    expect(reused).toBeDefined();
+    expect(reused.path).toBe(RECORDED_WT);
+    expect(reused.branch).toBe(RECORDED_BRANCH);
+  });
+
+  test("ResumeContext carries the recorded worktree_path + branch into runPipeline", () => {
+    const wsId = "01BUG020B";
+    seedResumeWorkspace(wsId);
+    const loaded = loadWorkspace(wsId, undefined, AGENTS_DIR);
+    expect(Either.isRight(loaded)).toBe(true);
+    if (Either.isRight(loaded)) {
+      expect(loaded.right.worktreePath).toBe(RECORDED_WT);
+      expect(loaded.right.branch).toBe(RECORDED_BRANCH);
+      expect(loaded.right.baseSha).toBe(RECORDED_BASE);
+    }
+  });
+});
+
+describe("BUG-20 — resume recreates a missing recorded worktree from base_sha", () => {
+  test("validation reports missing: recreate uses recorded base_sha + branch", async () => {
+    const wsId = "01BUG020C";
+    seedResumeWorkspace(wsId);
+    const deps = mockDeps({ patch: Either.right(mockPatchPass()) });
+    const wtDeps = mockWorktreeDepsConfigurable({
+      validate: { ok: false, reason: "missing" },
+      recreate: Either.right(RECORDED_WT),
+    });
+    const result = await runPipeline(deps, { description: "", id: wsId }, AGENTS_DIR, wtDeps);
+
+    expect(Either.isRight(result)).toBe(true);
+    // Recreation happened exactly once, with the recorded base_sha (NOT HEAD).
+    expect(wtDeps.recreateCalls).toHaveLength(1);
+    expect(wtDeps.recreateCalls[0]!.baseSha).toBe(RECORDED_BASE);
+    expect(wtDeps.recreateCalls[0]!.branch).toBe(RECORDED_BRANCH);
+
+    // Event is worktree-created (NOT worktree-recreated) per spec contract.
+    const events = readFileSync(join(AGENTS_DIR, wsId, "orchestrator", "events.jsonl"), "utf8")
+      .split("\n").filter((l) => l.trim());
+    const created = events.map((l) => JSON.parse(l)).find((e) => e.event === "worktree-created");
+    expect(created).toBeDefined();
+    expect(created.from_sha).toBe(RECORDED_BASE);
+    // No worktree-reused event should fire on the recreate path.
+    expect(events.map((l) => JSON.parse(l)).some((e) => e.event === "worktree-reused")).toBe(false);
+  });
+
+  test("missing worktree + no recorded base_sha: fails with a clear error", async () => {
+    const wsId = "01BUG020D";
+    // Seed WITHOUT base_sha — recreation cannot proceed.
+    seedResumeWorkspace(wsId, { base_sha: undefined });
+    const deps = mockDeps({ patch: Either.right(mockPatchPass()) });
+    const wtDeps = mockWorktreeDepsConfigurable({
+      validate: { ok: false, reason: "missing" },
+    });
+    const result = await runPipeline(deps, { description: "", id: wsId }, AGENTS_DIR, wtDeps);
+
+    expect(Either.isLeft(result)).toBe(true);
+    if (Either.isLeft(result)) {
+      expect(result.left).toContain("no recorded base_sha");
+    }
+    expect(wtDeps.recreateCalls).toHaveLength(0);
+  });
+});
+
+describe("BUG-20 — resume refuses an invalid recorded worktree", () => {
+  test("wrong branch: fails loudly, does not reuse or overwrite", async () => {
+    const wsId = "01BUG020E";
+    seedResumeWorkspace(wsId);
+    const deps = mockDeps({ patch: Either.right(mockPatchPass()) });
+    const wtDeps = mockWorktreeDepsConfigurable({
+      validate: { ok: false, reason: "wrong-branch", path: RECORDED_WT, branch: "adw/someone-else", expected: RECORDED_BRANCH },
+    });
+    const result = await runPipeline(deps, { description: "", id: wsId }, AGENTS_DIR, wtDeps);
+
+    expect(Either.isLeft(result)).toBe(true);
+    if (Either.isLeft(result)) {
+      // The error names the wrong branch and the expected one (refuse loudly).
+      expect(result.left).toContain("adw/someone-else");
+      expect(result.left).toContain(RECORDED_BRANCH);
+    }
+    // No recreation, no patch-review — refused before either runs.
+    expect(wtDeps.recreateCalls).toHaveLength(0);
+    expect(deps.patchCalls).toHaveLength(0);
+  });
+
+  test("arbitrary dir (not-a-worktree): fails, does not silently reuse", async () => {
+    const wsId = "01BUG020F";
+    seedResumeWorkspace(wsId);
+    const deps = mockDeps({ patch: Either.right(mockPatchPass()) });
+    const wtDeps = mockWorktreeDepsConfigurable({
+      validate: { ok: false, reason: "not-a-worktree", path: RECORDED_WT },
+    });
+    const result = await runPipeline(deps, { description: "", id: wsId }, AGENTS_DIR, wtDeps);
+
+    expect(Either.isLeft(result)).toBe(true);
+    if (Either.isLeft(result)) {
+      expect(result.left).toContain("not a git worktree");
+    }
+    expect(wtDeps.recreateCalls).toHaveLength(0);
   });
 });
