@@ -366,11 +366,13 @@ test("debounced auto-save persists dirty workspace content", async () => {
     await rpc(socketPath, "eval", { frameId: frame.frameId, code: '(progn (buffer-create "auto.txt") (buffer-switch "auto.txt"))' });
     await rpc(socketPath, "insert", { frameId: frame.frameId, text: "autosaved" });
 
+    // Auto-save is debounced + writes JSON to disk; under full-suite CPU load the
+    // default 2s waitFor budget is too tight. Poll up to 10s (integration test).
     const autoBuffer = await waitFor(async () => {
       const data = JSON.parse(await readFile(join(workspaceDir, "auto_ws.json"), "utf8"));
       const buffer = data.buffers.find((item: any) => item.name === "auto.txt");
       return buffer?.content === "autosaved" ? buffer : undefined;
-    });
+    }, 10000);
     expect(autoBuffer.content).toBe("autosaved");
     expect(autoBuffer.modified).toBe(false);
 

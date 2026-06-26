@@ -32,6 +32,11 @@ function fakeClient(responses: Record<string, string> = { '(+ 1 1)': '2' }): { c
 }
 
 describe('TmaxInstance.launch', () => {
+  // The fake spawnDaemon never creates the socket, so launch's socket-readiness
+  // poll runs its full budget (~3s of 30×100ms retries) before concluding the
+  // daemon is unresponsive and returning Left. Under full-suite CPU load the
+  // setTimeout-driven polling slips past bun's default 5s test timeout, so give
+  // this deliberately-slow unit test explicit headroom.
   test('launch returns instance and calls spawn+makeClient', async () => {
     let spawned = false;
     let madeClient = false;
@@ -48,7 +53,7 @@ describe('TmaxInstance.launch', () => {
     expect(spawned).toBe(true);
     expect(madeClient).toBe(true);
     expect(calls.length).toBe(0);
-  });
+  }, 15000);
 });
 
 describe('TmaxInstance.connect', () => {

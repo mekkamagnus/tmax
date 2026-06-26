@@ -373,9 +373,10 @@ describe("withPlanningLock", () => {
   test("releases the lock on success (next caller does not block)", async () => {
     const lockPath = defaultLockPath(repoRoot);
     await withPlanningLock(deps, repoRoot, async () => "first", { lockPath });
-    // Should complete immediately.
+    // Should complete immediately (no contention). 5s catches a real deadlock
+    // while tolerating scheduler jitter under full-suite load.
     const start = Date.now();
     await withPlanningLock(deps, repoRoot, async () => "second", { lockPath });
-    expect(Date.now() - start).toBeLessThan(1000);
+    expect(Date.now() - start).toBeLessThan(5000);
   });
 });

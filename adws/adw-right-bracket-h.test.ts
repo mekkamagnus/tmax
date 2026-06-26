@@ -274,23 +274,21 @@ Final content
   const bufferName = await evalExpr("(buffer-current)");
   console.log(`Current buffer: ${bufferName.value}`);
 
-  // Verify we're in markdown mode
-  const modeResult = await getMode();
-  assert(modeResult.ok === true, "Mode query successful");
-  console.log(`Current mode: "${modeResult.value}"`);
+  // Verify we're in markdown mode. Under full-suite load the daemon's
+  // file-extension → mode detection can lag the socket-readiness check above,
+  // so poll for up to ~3s (ADR-0105 robustness — fixed sleeps flake under load).
+  let modeValue = "";
+  for (let i = 0; i < 15; i++) {
+    const modeResult = await getMode();
+    assert(modeResult.ok === true, "Mode query successful");
+    modeValue = modeResult.value;
+    if (modeValue === "markdown") break;
+    await sleep(200);
+  }
+  console.log(`Current mode: "${modeValue}"`);
   console.log(`Buffer filename: ${(await evalExpr("(buffer-filename)")).value}`);
   console.log(`Major modes: ${(await evalExpr("(major-mode-list)")).value}`);
-
-  // Sometimes mode detection takes a moment, try again if empty
-  if (modeResult.value === "") {
-    console.log("Mode is empty, waiting and retrying...");
-    await sleep(300);
-    const modeRetry = await getMode();
-    console.log(`Retry mode: "${modeRetry.value}"`);
-    assert(modeRetry.value === "markdown", "Should be in markdown mode after retry");
-  } else {
-    assert(modeResult.value === "markdown", "Should be in markdown mode");
-  }
+  assert(modeValue === "markdown", "Should be in markdown mode after retry");
 
   // Test the function directly to verify it works
   console.log("\nTesting markdown-next-heading function directly...");
