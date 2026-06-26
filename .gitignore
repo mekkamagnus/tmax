@@ -69,12 +69,19 @@ __pycache__/
 
 # Spec-loop worktrees (per-SPEC git worktrees, not committed to main)
 .worktrees/
+# adw sibling worktrees (SPEC-065): created beside the repo as <repo>.<adw-id>/,
+# outside this dir, so they don't need gitignoring. This catches any accidentally
+# created inside (e.g. during testing).
+.worktrees/**/
 
 # Patch-review working state (gather bundles + verdicts)
 .patch-reviews/
 
 # adw-plan agent state (per-run dispatcher + planner logs)
 agents/
+
+# Codex CLI local state (skills cache — tooling cruft, not project config)
+.codex/
 
 # Local environment secrets (never commit — contains API keys/tokens)
 .env

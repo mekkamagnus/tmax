@@ -258,6 +258,8 @@ The adw pipeline automates the full development cycle: **plan â†’ spec-review â†
 
 **Architecture:** [ADR-0094](docs/adrs/ADR-0094-adw-pipeline-architecture.md).
 
+**Worktree isolation (SPEC-065):** Fresh runs serialize plan + spec-review + spec-commit in the main checkout via a planning lock, then create a **sibling worktree** at `<repo>.<adw-id>/` on branch `adw/<adw-id>`. Build/test/patch-review execute inside that worktree (via `ADW_WORKTREE`), so concurrent pipelines never collide. Resume **validates** the recorded worktree (real `git worktree list --porcelain` check, not `existsSync`) and reuses or recreates it from the recorded `base_sha` (BUG-20). Sibling worktrees live beside the repo, outside the working dir; `.gitignore` documents the convention. Specs: [SPEC-065](docs/specs/SPEC-065-adw-worktree-isolation.md), [BUG-20](docs/specs/BUG-20-worktree-duplication-on-resume.md).
+
 ### Running a pipeline
 
 ```bash
