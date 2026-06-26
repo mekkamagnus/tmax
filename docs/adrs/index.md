@@ -4,10 +4,14 @@ Records of significant architectural decisions. Each ADR describes the context, 
 
 Ordered most-recent first (highest ADR number = most recent decision). Topic groupings preserved within each section.
 
-## Recent — Watchdog Safety Hold, Test Isolation, adw Test Stage (ADR 0106, 0105, 0101-0104)
+## Recent — Resume-Worktree Validation, Server Stale-Lock Reclaim, Compile Gate (ADR 0110, 0109, 0108, 0107, 0106, 0105, 0101-0104)
 
 | File | Decision | Related |
 |------|----------|---------|
+| [ADR-0110-server-reclaim-stale-but-served-lock.md](ADR-0110-server-reclaim-stale-but-served-lock.md) | Server reclaims a live-but-not-serving daemon lock (probeDaemon + socket-exists, not pid-alive alone) | [ADR-0103](ADR-0103-server-test-socket-leak-fix.md), BUG-16 |
+| [ADR-0109-adw-resume-worktree-validation.md](ADR-0109-adw-resume-worktree-validation.md) | adw resume validates the recorded worktree via `git worktree list --porcelain` (not `existsSync`), refuses wrong-repo/wrong-branch, recreates from recorded `base_sha` | BUG-20, [SPEC-065](../specs/SPEC-065-adw-worktree-isolation.md), [ADR-0094](ADR-0094-adw-pipeline-architecture.md), [ADR-0108](ADR-0108-adw-compile-gate-and-feedback-integrity.md), BUG-18 |
+| [ADR-0108-adw-compile-gate-and-feedback-integrity.md](ADR-0108-adw-compile-gate-and-feedback-integrity.md) | adw compile gate (`typecheck` in build) + hard-fail tier for import-time failures + feedback-channel integrity check | [ADR-0094](ADR-0094-adw-pipeline-architecture.md), [ADR-0101](ADR-0101-adw-test-pipeline-stage.md), [ADR-0104](ADR-0104-test-stage-wall-clock-timeout.md), SPEC-065, BUG-20, BUG-18 |
+| [ADR-0107-api-529-rate-limit-retry.md](ADR-0107-api-529-rate-limit-retry.md) | Dispatcher-level 529 retry with exponential backoff (30s/60s/120s) on LLM gateway overload | BUG-18, [SPEC-065](../specs/SPEC-065-adw-worktree-isolation.md), [RFC-021](../rfcs/RFC-021-remote-adw-dispatch.md) |
 | [ADR-0106-watchdog-resume-all-gap-disabled-default.md](ADR-0106-watchdog-resume-all-gap-disabled-default.md) | Watchdog auto-launch disabled by default (`--watchdog` to opt in) — resume-all design gap blindly re-ran abandoned specs | SPEC-066, [ADR-0101](ADR-0101-adw-test-pipeline-stage.md) |
 | [ADR-0105-test-isolation-policy.md](ADR-0105-test-isolation-policy.md) | Unit tests must use per-test temp dirs, never the real `agents/` (or any production) directory | BUG-17, [ADR-0103](ADR-0103-server-test-socket-leak-fix.md), [ADR-0101](ADR-0101-adw-test-pipeline-stage.md) |
 | [ADR-0104-test-stage-wall-clock-timeout.md](ADR-0104-test-stage-wall-clock-timeout.md) | Test-stage wall-clock timeout (20 min) + process-tree kill (`detached` + `kill -pgid`) | [ADR-0101](ADR-0101-adw-test-pipeline-stage.md), [ADR-0103](ADR-0103-server-test-socket-leak-fix.md), SPEC-066 |

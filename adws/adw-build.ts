@@ -368,6 +368,48 @@ export function runE2eGate(
 }
 
 /**
+ * Result of the typecheck compile gate (ADR-0108 (a)).
+ *
+ * Unlike the e2e gate, this one is NOT optional — a non-zero `typecheck:src`
+ * exit fails the build stage directly (Left in the program chain), because a
+ * non-compiling implementation cannot be audited or tested meaningfully.
+ */
+export interface TypecheckGateResult {
+  /** True iff `typecheck:src` exited 0. */
+  ok: boolean;
+  /** First ~400 chars of combined stdout/stderr on failure (empty on success). */
+  output: string;
+}
+
+/**
+ * ADR-0108 (a): run `bun run typecheck:src` as a build-stage gate, AFTER the
+ * implement dispatch and BEFORE recording success.
+ *
+ * The gate is scoped to `:src` (source only) — not the full `typecheck` — so
+ * pre-existing test-only type errors don't block implementation builds. A
+ * non-zero exit maps to `{ ok: false, output }`; the caller fails the build on
+ * `ok: false` rather than deferring to the test stage.
+ *
+ * Dependency-injected (`run`) so it is unit-testable like `runE2eGate`, without
+ * spawning a real `tsc`.
+ */
+export function runTypecheckGate(
+  run: (cmd: string, args: string[], opts: RunOpts) => TaskEither<string, string>,
+  cwd: string,
+): TaskEither<string, TypecheckGateResult> {
+  return TaskEither.from(async () => {
+    const res = await run("bun", ["run", "typecheck:src"], { cwd }).run();
+    // `run` returns trimmed stdout on Right (exit 0); Left on non-zero (with
+    // stderr||stdout as the error). Normalize both to a Right<TypecheckGateResult>
+    // — the gate's outcome is data; the caller decides whether to fail.
+    if (Either.isLeft(res)) {
+      return Either.right<TypecheckGateResult, string>({ ok: false, output: res.left.slice(0, 400) });
+    }
+    return Either.right<TypecheckGateResult, string>({ ok: true, output: "" });
+  }).mapLeft((err) => `runTypecheckGate: ${err}`);
+}
+
+/**
  * Detect whether `tmax-use/playbooks/` or `tmax-use/tests/` has any files this
  * build's e2e gate should exercise. Matches patch-reviewer's selector so the
  * build agent and the review agent agree on when tmax-use is in scope.
@@ -532,6 +574,21 @@ export function runBuild(
         }))
         .map(() => ctx);
     })
+    // Step 2.5 (ADR-0108 (a)): typecheck compile gate. The implement dispatch
+    // may have produced non-compiling code (e.g. a duplicate import). Run
+    // `typecheck:src` now — a failure fails the build directly (Left), so the
+    // defect is caught in seconds at the stage that produced it, rather than
+    // surfacing as opaque test timeouts later.
+    .flatMap((ctx) => runTypecheckGate(run, cwd)
+      .tap((gate) => appendEvent(ctx.id, "builder", {
+        event: "typecheck_gate",
+        ok: gate.ok,
+        ...(gate.ok ? {} : { output: gate.output }),
+      }))
+      .flatMap((gate): TaskEither<string, Resolved> => gate.ok
+        ? TaskEither.right<Resolved, string>(ctx)
+        : TaskEither.left<string, Resolved>(`typecheck gate failed: ${gate.output}`))
+      .mapLeft((err) => `build stage failed at typecheck gate: ${err}`))
     // Step 3: best-effort git capture, then record result + finalize state.
     .flatMap((ctx) => captureGitTrace(run, cwd)
       .tap((trace) => appendEvent(ctx.id, "builder", {

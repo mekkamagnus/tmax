@@ -16,8 +16,8 @@ import { Either, TaskEither } from "../../src/utils/task-either.ts";
 
 const CLAUDE = "claude";
 
-/** Default model for the resolve dispatcher. Matches BUILD_MODEL / PATCH_REVIEW_MODEL (stability). */
-export const TEST_MODEL = "glm-5.1";
+// Default model for the resolve dispatcher. Override per-run with `adw-test.ts --model <id>`.
+export const TEST_MODEL = "glm-5.2[1m]";
 
 /** Max resolve-then-rerun iterations per track (suite runs at most 1 + MAX_*_ITERATIONS times). */
 export const MAX_UNIT_ITERATIONS = 2;
@@ -58,6 +58,32 @@ export interface TestFailure {
   message: string;
 }
 
+/**
+ * ADR-0108 (b): signatures that indicate a module-load / import-time failure
+ * (the SUT cannot be imported), as opposed to an assertion or timeout failure.
+ * Anchored to the actual `bun test` output format seen in the SPEC-065 run:
+ * `error TS2300: Duplicate identifier`, `Cannot find module`, etc.
+ */
+const IMPORT_TIME_PATTERNS: readonly RegExp[] = [
+  /Duplicate identifier/i,
+  /Cannot find module/i,
+  /Could not resolve/i,
+  /is not defined/i,
+  /error TS2\d{3}:/i, // TS2xxx = duplicate-identifier / cannot-find / cannot-resolve family
+  /SyntaxError/i,
+  /error during module loading/i,
+  /Cannot use import statement/i,
+];
+
+/**
+ * ADR-0108 (b): classify whether any failure is module-load / import-time class.
+ * Returns true if ANY failure's message matches an import-time signature. Pure
+ * and exported so it is unit-testable without spawning a subprocess.
+ */
+export function isImportTimeFailure(failures: TestFailure[]): boolean {
+  return failures.some((f) => IMPORT_TIME_PATTERNS.some((re) => re.test(f.message)));
+}
+
 /** Result of a single track (unit or e2e). */
 export interface TrackResult {
   /** True iff exit 0 and parsed pass count > 0 with zero fails (or sentinel skip). */
@@ -74,6 +100,14 @@ export interface TrackResult {
   output: string;
   /** E2E track only: tmax-use --output dir. */
   reportDir?: string;
+  /**
+   * ADR-0108 (b): true when the failures are module-load / import-time class
+   * (the SUT cannot be imported). Such failures are NOT retryable through the
+   * resolve loop — rerunning a test whose module won't import just reproduces
+   * the crash — so the unit track short-circuits and the stage verdict becomes
+   * `compile-fail` (hard, non-retryable) instead of `gaps`.
+   */
+  compileFail?: boolean;
 }
 
 /** Full result bundle for the test stage. */
@@ -83,7 +117,13 @@ export interface TestStageResult {
   e2e?: TrackResult;
   /** True when e2e did not run because unit failed. */
   e2eSkipped: boolean;
-  verdict: "pass" | "gaps";
+  /**
+   * `pass` = unit + e2e green. `gaps` = retryable audit input (assertion /
+   * timeout / e2e failure). `compile-fail` (ADR-0108 (b)) = non-retryable
+   * module-load / import-time failure — the orchestrator finalizes as failed
+   * rather than looping.
+   */
+  verdict: "pass" | "gaps" | "compile-fail";
 }
 
 // ---------------------------------------------------------------------------
@@ -379,6 +419,25 @@ export function runUnitTrack(
         });
       }
 
+      // ADR-0108 (b): import-time failure short-circuit. A module that cannot be
+      // imported cannot be fixed by the resolve dispatch re-running the same
+      // test (rerunning reproduces the crash) — it needs a code edit, which is
+      // the build stage's job. Skip the resolve loop and surface compileFail so
+      // the stage verdict becomes the non-retryable `compile-fail`.
+      if (parsed.failed > 0 && isImportTimeFailure(parsed.failures)) {
+        return Either.right<TrackResult, string>({
+          ok: false,
+          compileFail: true,
+          exitCode: raw.exitCode,
+          passed: parsed.passed,
+          failed: parsed.failed,
+          durationMs: Date.now() - start,
+          iterations,
+          failures: parsed.failures,
+          output,
+        });
+      }
+
       if (cycle < MAX_UNIT_ITERATIONS) {
         if (Date.now() - start > TRACK_BUDGET_MS) {
           return Either.right<TrackResult, string>({
@@ -474,7 +533,7 @@ Do not touch unrelated files.`;
     } catch { /* best-effort */ }
     const res = await deps.runCapture(
       CLAUDE,
-      ["-p", "--model", model, "--verbose", "--output-format", "stream-json", prompt],
+      ["-p", "--model", model, "--dangerously-skip-permissions", "--verbose", "--output-format", "stream-json", prompt],
       { cwd, teeTo },
     ).run();
     // Best-effort: never return Left (the loop continues regardless). We map
@@ -666,7 +725,7 @@ ${outputExcerpt.slice(0, MAX_FAILURE_CHARS)}
     } catch { /* best-effort */ }
     const res = await deps.runCapture(
       CLAUDE,
-      ["-p", "--model", model, "--verbose", "--output-format", "stream-json", prompt],
+      ["-p", "--model", model, "--dangerously-skip-permissions", "--verbose", "--output-format", "stream-json", prompt],
       { cwd, teeTo },
     ).run();
     // Best-effort — never propagate Left.
@@ -705,7 +764,12 @@ export function buildTestStageResult(
 ): TestStageResult {
   // `pass` iff unit passed and (e2e passed OR e2e skipped-due-to-no-targets).
   const e2ePassed = e2e === undefined ? e2eSkipped : e2e.ok;
-  const verdict: "pass" | "gaps" = unit.ok && e2ePassed ? "pass" : "gaps";
+  // ADR-0108 (b): an import-time / module-load failure is a hard, non-retryable
+  // outcome — it takes precedence over the generic `gaps` verdict so the
+  // orchestrator finalizes as failed instead of looping on a non-compiling SUT.
+  const verdict: "pass" | "gaps" | "compile-fail" = unit.compileFail
+    ? "compile-fail"
+    : (unit.ok && e2ePassed ? "pass" : "gaps");
   return { unit, ...(e2e !== undefined ? { e2e } : {}), e2eSkipped, verdict };
 }
 

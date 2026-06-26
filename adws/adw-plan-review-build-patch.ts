@@ -459,7 +459,8 @@ export interface BuildOutcome {
 }
 export interface TestOutcome {
   id: string;
-  verdict: "pass" | "gaps";
+  /** ADR-0108 (b): `compile-fail` is a hard, non-retryable module-load outcome. */
+  verdict: "pass" | "gaps" | "compile-fail";
   specPath: string;
 }
 export interface PatchReviewResult {
@@ -1166,6 +1167,20 @@ export async function runPipeline(
       process.stderr.write(
         `adw-plan-review-build-patch: test returned gaps (continuing to patch-review — gaps are audit input)\n`,
       );
+    } else if (testRes.right.verdict === "compile-fail") {
+      // ADR-0108 (b): a module-load / import-time failure is a build/compile
+      // defect, not retryable through the loop. Re-running the test whose SUT
+      // won't import reproduces the crash, and patch-review can't fix code.
+      // Finalize as failed so the build stage (which can edit code) re-runs.
+      appendEvent(id, {
+        event: "compile-fail",
+        stage: "test",
+        detail: "module import failed — this is a build/compile defect, not retryable",
+      }, agentsDir);
+      state.failed_stage = "test";
+      return finalize(Either.left(
+        "test stage: module import failed — this is a build/compile defect, not retryable",
+      ));
     }
   } else {
     process.stderr.write(`adw-plan-review-build-patch: stage 4/5 — test [SKIPPED, resuming at patch-review]\n`);
@@ -1191,6 +1206,20 @@ export async function runPipeline(
     delete state.patch_review_verdict;
     delete state.patch_review_next_action;
   }
+
+  // ADR-0108 (c): feedback-channel integrity. The retry loop learns what to
+  // fix ONLY when patch-review appends findings to the spec. Capture the spec's
+  // fingerprint (mtimeMs + size) after the initial build; before each rebuild,
+  // compare to detect whether patch-review actually delivered feedback. If it
+  // returned gaps but changed nothing, the reviewer likely crashed — refuse to
+  // re-run build blind rather than burning iterations reproducing the defect.
+  const specFingerprint = (p: string): { mtimeMs: number; size: number } | null => {
+    try {
+      const st = statSync(p);
+      return { mtimeMs: st.mtimeMs, size: st.size };
+    } catch { return null; }
+  };
+  let lastSpecFingerprint = specFingerprint(specPathForLater);
 
   while (patchIterations < maxRetries) {
     patchIterations++;
@@ -1278,6 +1307,31 @@ export async function runPipeline(
         `adw-plan-review-build-patch: patch-review returned gaps (iteration ${patchIterations}); re-running build → test\n`,
       );
       appendEvent(id, { event: "loop-retry", from: "patch-review", to: "build", iteration: patchIterations, verdict: "gaps" }, agentsDir);
+
+      // ADR-0108 (c): feedback-channel integrity check. patch-review must have
+      // modified the spec for the rebuild to have anything new to act on. If the
+      // spec is unchanged (same mtimeMs + size) since the last build dispatch,
+      // the reviewer likely crashed and appended nothing — refuse to re-run
+      // build blind instead of looping on an identical defect.
+      const currentFingerprint = specFingerprint(specPathForLater);
+      const specUnchanged = lastSpecFingerprint !== null
+        && currentFingerprint !== null
+        && currentFingerprint.mtimeMs === lastSpecFingerprint.mtimeMs
+        && currentFingerprint.size === lastSpecFingerprint.size;
+      if (specUnchanged) {
+        appendEvent(id, {
+          event: "feedback-stalled",
+          spec_path: specPathForLater,
+          iteration: patchIterations,
+          detail: "patch-review returned gaps but did not modify the spec — refusing to re-run build blind",
+        }, agentsDir);
+        state.failed_stage = "patch-review";
+        return finalize(Either.left(
+          "feedback stalled: patch-review returned gaps but did not modify the spec — refusing to re-run build blind",
+        ));
+      }
+      lastSpecFingerprint = currentFingerprint;
+
       const rebuildRes = await withHeartbeat(
         {
           stage: `build (retry ${patchIterations})`,
