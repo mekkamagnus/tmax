@@ -278,7 +278,7 @@ describe("listRemoteStatuses", () => {
     let callCount = 0;
     const { deps, calls } = makeFakeRun((rec) => {
       callCount++;
-      if (rec.args[0] === "mekkapi" && rec.args[1].includes("find ")) {
+      if (rec.args[0] === "mekkapi" && rec.args[1]?.includes("find ")) {
         return Either.right(findOutput);
       }
       // Per-id query: return a state + event for each.
