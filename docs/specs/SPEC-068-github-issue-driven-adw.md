@@ -44,7 +44,7 @@ Four parts:
 
 Both paths converge on the same label scheme, the same `github.ts` module, and the same `issue_number` field in `adw-state.json`. The trigger-cron treats skill-created issues identically to human-submitted ones.
 
-**4. Issue-tracked state.** Each adw workspace records the originating `issue_number` and `issue_url` in `adw-state.json`. For GitHub-submitted issues, triage also writes a persistent issue-to-spec mapping before approval: `adw-triggers/issue-map.json` maps the issue number to the spec path and, once a workspace exists, the workspace id. This closes the handoff between direct `classify()`/`dispatch()` spec creation and the later approval launch. The spec filename includes the issue number (`SPEC-###-issue-<number>-<slug>.md`) when created from an issue (or a generated tracking issue). The trigger posts structured comments on the issue at every state transition.
+**4. Issue-tracked state.** Each adw workspace records the originating `issue_number` and `issue_url` in `adw-state.json`. For GitHub-submitted issues, triage also writes a persistent issue-to-spec mapping before approval: `adw-triggers/issue-map.json` maps the issue number to the spec path and, once a workspace exists, the workspace id. This closes the handoff between direct `classify()`/`dispatch()` spec creation and the later approval launch. The generated spec filename includes the issue number and preserves the existing work-type prefix chosen by `agent.ts`/`dispatch()` (`SPEC-###-issue-<number>-<slug>.md`, `BUG-##-issue-<number>-<slug>.md`, or `CHORE-##-issue-<number>-<slug>.md`). The trigger posts structured comments on the issue at every state transition.
 
 The label state machine is the same regardless of entry point:
 
@@ -80,7 +80,7 @@ The label state machine is the same regardless of entry point:
 |---|----------|--------|-----------|
 | 1 | State tracking | **Labels only** | Every state is a label (`adw:triage`, `adw:ready-for-review`, `adw:approved`, `adw:building`, `adw:done`, `adw:failed`). Queryable via `gh issue list --label`. Clean, visible in GitHub UI. |
 | 2 | Delivery mechanism | **Cron poll** | `trigger-cron.ts` polls every 60s. Follows the `adw-watchdog.ts` pattern. No server needed. 30-60s lag is acceptable for a build pipeline. |
-| 3 | Spec naming | **Issue in filename** | `SPEC-068-issue-42-better-search.md`. Issue number baked into the filename — unambiguous link. Spec number is sequential as normal. |
+| 3 | Spec naming | **Issue in filename, work-type prefix preserved** | `SPEC-068-issue-42-better-search.md`, `BUG-21-issue-42-crash-on-save.md`, or `CHORE-31-issue-42-cleanup.md`. Issue number is baked into the filename, while the `SPEC`/`BUG`/`CHORE` prefix and numbering stay consistent with the existing feature/bug/chore dispatch split. |
 | 4 | Approval flow | **Label `adw:approved`** | Human adds the label. Trigger checks for `adw:ready-for-review` + `adw:approved`. Simple, unambiguous, no parsing. |
 | 5 | Progress output | **Issue comments only** | All stage transitions, build results, and PR links posted as comments on the issue. Single thread of truth. |
 | 6 | Module split | **Separate github.ts + git-ops.ts** | `github.ts` = GitHub API layer (issues, PRs, comments, labels via `gh`). `git-ops.ts` = git operations (branches, commits, push, merge). `worktree.ts` functions move into `git-ops.ts`. |
@@ -108,8 +108,9 @@ Use these files to implement the feature:
 - **`adws/adw-plan-reviewspec.ts`** — Add optional `issue_number?: number` and `issue_url?: string` fields to both `WorkspaceState` and `OrchestratorState`, and initialize them from env vars in the initial state. This is the orchestrator actually used by `/adw-plan`.
 - **`adws/adw-plan-reviewspec-build.ts`** — Add the same issue metadata fields to both state interfaces and state initialization for the intermediate plan→review→build orchestrator.
 - **`adws/adw-plan-review-build-patch.ts`** — Add the same issue metadata fields to both state interfaces and state initialization for the full build orchestrator used by `/adw-implement`.
-- **`.codex/skills/adw-plan/SKILL.md`** and **`.zcode/skills/adw-plan/SKILL.md`** — Update both skill mirrors. `.codex/skills` is the Codex-invoked tree in this repo; `.zcode/skills` is the mirror used by the zcode tooling. Both must stay in sync. Add a pre-launch step that creates a GitHub tracking issue before launching the pipeline. The issue is created with `adw:building` (auto-approved — skips the triage and approval gates). The issue number and URL are passed to the launcher via env vars (`ADW_ISSUE_NUMBER`, `ADW_ISSUE_URL`) so the orchestrator records them in state. A `--no-issue` flag opts out for offline usage.
-- **`.codex/skills/adw-implement/SKILL.md`** and **`.zcode/skills/adw-implement/SKILL.md`** — Same modification as `adw-plan`: create a GitHub tracking issue before launching, auto-add `adw:building`, pass issue metadata via env vars, support `--no-issue`.
+- **`.zcode/skills/adw-plan/SKILL.md`** — Update the tracked skill source. `.codex/skills` is gitignored local Codex runtime/cache state in this checkout and must not be part of committed acceptance criteria. Add a pre-launch step that creates a GitHub tracking issue before launching the pipeline. The issue is created with `adw:building` (auto-approved — skips the triage and approval gates). The issue number and URL are passed to the launcher via env vars (`ADW_ISSUE_NUMBER`, `ADW_ISSUE_URL`) so the orchestrator records them in state. A `--no-issue` flag opts out for offline usage.
+- **`.zcode/skills/adw-implement/SKILL.md`** — Same modification as `adw-plan`: create a GitHub tracking issue before launching, auto-add `adw:building`, pass issue metadata via env vars, support `--no-issue`.
+- **`.gitignore`** — Add ignore rules for trigger runtime state/log artifacts (`adw-triggers/issue-map.json` and `adw-triggers/runs/`) while allowing a committed directory placeholder if needed.
 
 ### New Files
 
@@ -117,8 +118,7 @@ Use these files to implement the feature:
 - **`adws/adws-modules/git-ops.ts`** — Consolidated git operations module. Moves all functions from `worktree.ts` here, plus adds: `pushBranch`, `createPRForIssue` (combines push + GitHub PR creation + issue link).
 - **`adws/adw-create-tracking-issue.ts`** — Small CLI wrapper used by Markdown skills. It detects `owner/repo`, creates the GitHub tracking issue via `github.ts`, then prints shell-safe `ADW_ISSUE_NUMBER=...` and `ADW_ISSUE_URL=...` assignments or JSON. Skills invoke this wrapper instead of trying to call TypeScript functions directly.
 - **`adw-triggers/trigger-cron.ts`** — Long-lived poll daemon. Watches GitHub issues, drives the label state machine, creates specs, launches pipelines, posts progress, creates PRs. Follows the `adw-watchdog.ts` dispatcher structure.
-- **`adw-triggers/issue-map.json`** — Persistent trigger-owned mapping from GitHub issue number to spec path and optional workspace id. Created/updated by `trigger-cron.ts`; safe to recreate from specs plus workspace state if missing, but the trigger writes it to make approval deterministic.
-- **`adw-triggers/runs/<issue-number>-<timestamp>/planner/raw-output.jsonl`** — Trigger-owned planner log directory used when issue triage calls `dispatch()`. This is not an adw workspace; it only satisfies `dispatch()`'s planner-log requirement and preserves issue-only triage output for debugging before a real `agents/<id>/` workspace exists.
+- **`adw-triggers/.gitkeep`** — Optional committed placeholder so the ignored trigger state directory exists in fresh checkouts. Do not commit `issue-map.json` or `runs/` contents.
 - **`test/unit/github.test.ts`** — Unit tests for the GitHub module (issue parsing, comment formatting, label operations) against a fake `run`.
 - **`test/unit/git-ops.test.ts`** — Unit tests for the git-ops module (consolidated from existing `worktree.test.ts` plus new PR-push operations).
 - **`test/unit/trigger-cron.test.ts`** — Unit tests for the trigger's state machine (issue triage, approval detection, pipeline launch guard, progress reporting).
@@ -321,6 +321,13 @@ IMPORTANT: Execute every step in order, top to bottom.
 - Implement `resolveBaseBranch(deps, owner, repo, explicitBase?)`: if `explicitBase` is provided, return it; otherwise run `gh repo view <owner>/<repo> --json defaultBranchRef` once at startup and read `defaultBranchRef.name`; use `main` only as a documented warning fallback if the query fails.
 - Call `ensureLabels(deps, owner, repo)` once at startup unless `--dry-run` is set. In `--dry-run`, call `listLabels` and print which ADW labels would be created, but do not create them.
 - Maintain `activeLaunches: Map<number, ChildProcess>` and `pendingApprovals: number[]`. With the default `--max-concurrent 1`, launch at most one pipeline at a time. Higher values are accepted only if explicitly passed and must still honor the map/queue guard.
+- Update `.gitignore` so trigger runtime state is not committed:
+  ```gitignore
+  # adw GitHub trigger runtime state and planner logs
+  adw-triggers/issue-map.json
+  adw-triggers/runs/
+  ```
+  If the implementation needs `adw-triggers/` to exist in fresh checkouts, commit only `adw-triggers/.gitkeep`.
 
 ### Step 9: Cron trigger — issue triage (opened → spec creation)
 
@@ -334,16 +341,16 @@ IMPORTANT: Execute every step in order, top to bottom.
   3. Call `classify()` from `agent.ts` with the issue title + body.
   4. Create a trigger planner log path: `adw-triggers/runs/<issue-number>-<timestamp>/planner/raw-output.jsonl`.
   5. Call `dispatch()` from `agent.ts` with that planner log path to create the spec (or edit an existing one). Include an issue-context prefix in the description passed to `dispatch()`:
-     `GitHub issue #<number>: <title>\n\n<body>\n\nThe resulting spec file must be named SPEC-###-issue-<number>-<slug>.md.`
-     This prompt instruction is advisory only; the trigger must still normalize the returned path after `dispatch()` because `dispatch()` does not accept a filename or issue number.
+     `GitHub issue #<number>: <title>\n\n<body>\n\nThe resulting spec file must include issue-<number>-<slug> and preserve the classified work-type prefix (SPEC, BUG, or CHORE).`
+     The resulting spec file must include `issue-<number>-<slug>` and must preserve the work-type prefix chosen by classification (`SPEC`, `BUG`, or `CHORE`). This prompt instruction is advisory only; the trigger must still normalize the returned path after `dispatch()` because `dispatch()` does not accept a filename or issue number.
   6. Handle every `DispatchOutcome` variant explicitly:
-     - `created`: use `outcome.path` as the candidate spec path, then rename it to `docs/specs/SPEC-###-issue-<number>-<slug>.md` if it does not already match. Preserve the existing `SPEC-###` number from the created file when possible; otherwise allocate the next sequential number.
-     - `modified`: use `outcome.path` as the candidate spec path, then rename it to `docs/specs/SPEC-###-issue-<number>-<slug>.md` if it does not already match. This makes approval deterministic even when the skill edited an existing spec. The issue map records the final renamed path.
+     - `created`: use `outcome.path` as the candidate spec path, then rename it to `docs/specs/<PREFIX>-<number>-issue-<number>-<slug>.md` if it does not already match. Preserve the existing prefix and number from the created file when possible (`SPEC-###`, `BUG-##`, or `CHORE-##`); otherwise allocate the next sequential number for that prefix.
+     - `modified`: use `outcome.path` as the candidate spec path, then rename it to `docs/specs/<PREFIX>-<number>-issue-<number>-<slug>.md` if it does not already match. Preserve the existing prefix and number from the modified file; do not convert `BUG` or `CHORE` files to `SPEC`. This makes approval deterministic even when the skill edited an existing spec. The issue map records the final renamed path.
      - `noop`: treat as triage failure for GitHub automation because there is no spec path to approve. Remove `adw:triage`, comment with the noop summary and the planner log path, do not add `adw:ready-for-review`, and do not write an issue-map entry.
   7. On created/modified success: persist `adw-triggers/issue-map.json` with `{ "<issueNumber>": { "issue_number": <number>, "issue_url": <url>, "spec_path": "<repo-relative-spec-path>" } }`. This is the durable handoff from triage to approval because direct `classify()`/`dispatch()` does not create an `agents/<id>/adw-state.json` workspace.
   8. Remove `adw:triage`, add `adw:ready-for-review`, comment with the spec path and a link to the spec file.
   9. On classify/dispatch/rename failure: remove `adw:triage`, comment with the error and planner log path when available, do NOT add `adw:ready-for-review` and do NOT write an issue-map entry (human must investigate).
-- The spec filename follows the pattern `SPEC-###-issue-<number>-<slug>.md` where `###` is the next sequential spec number and `<slug>` is derived from the issue title.
+- The issue-derived filename follows the existing work-type split: feature work uses `SPEC-###-issue-<number>-<slug>.md`, bug work uses `BUG-##-issue-<number>-<slug>.md`, and chore work uses `CHORE-##-issue-<number>-<slug>.md`. Number allocation is prefix-specific and uses the same next-number logic as the existing feature/bug/chore planning flow.
 - Workspace state is created later, when approval launches `adw-launch.ts`. At launch, pass `ADW_ISSUE_NUMBER`, `ADW_ISSUE_URL`, and the mapped spec path so the orchestrator records the issue metadata in `adw-state.json`.
 
 ### Step 10: Cron trigger — approval gate (ready-for-review + approved → pipeline launch)
@@ -355,7 +362,18 @@ IMPORTANT: Execute every step in order, top to bottom.
   3. Remove `adw:approved` and `adw:ready-for-review` labels.
   4. Add `adw:building` label.
   5. Comment: `🤖 **[ADW]** Pipeline launched — building spec [SPEC-XXX](path)...`
-  6. Spawn `ADW_ISSUE_NUMBER=<number> ADW_ISSUE_URL=<url> bun adws/adw-launch.ts --foreground <spec-path>` as a subprocess. The trigger does not delegate to tmux, but it must also not block the poll loop while waiting. Store the child process in `activeLaunches` keyed by issue number, register an exit handler that removes the entry, and return to the next scan.
+  6. Spawn `bun adws/adw-launch.ts --foreground <spec-path>` as a subprocess with explicit environment options, not shell-style env assignments in argv and not a shell requirement. The contract is:
+     ```ts
+     Bun.spawn({
+       cmd: ["bun", "adws/adw-launch.ts", "--foreground", specPath],
+       env: {
+         ...process.env,
+         ADW_ISSUE_NUMBER: String(issue.number),
+         ADW_ISSUE_URL: issue.url,
+       },
+     });
+     ```
+     The trigger does not delegate to tmux, but it must also not block the poll loop while waiting. Store the child process in `activeLaunches` keyed by issue number, register an exit handler that removes the entry, and return to the next scan.
   7. Once the spawned orchestrator has created `agents/<id>/adw-state.json`, call `findWorkspaceByIssueNumber(agentsDir, issueNumber)` and update the issue-map entry with `workspace_id: "<id>"`. This mapping is an optimization for progress reporting; if it is missing after a restart, the progress scan can rediscover it.
   8. On pipeline success (exit 0): do not rely only on the exit handler; let the progress scan read the final workspace status and apply the terminal label/comment behavior below.
   9. On pipeline failure (exit non-zero): remove `adw:building`, add `adw:failed`, comment with the error: `❌ **[ADW]** Build failed — <error summary>`.
@@ -368,7 +386,7 @@ IMPORTANT: Execute every step in order, top to bottom.
 - For each building issue, read `adw-triggers/issue-map.json` for `workspace_id`; if absent, call `findWorkspaceByIssueNumber(agentsDir, issueNumber)`. Once found, persist `workspace_id` back into the issue-map entry. Then read `agents/<id>/adw-state.json` and `orchestrator/events.jsonl`.
 - If the workspace status changed since the last comment (e.g., stage transition from build to test), post a progress comment: `🤖 **[ADW]** Stage update: build → test...`
 - Track the last reported stage in a local map (in-memory, resets on restart — acceptable because duplicate comments are harmless).
-- If the workspace status is `completed`, remove `adw:building`, add `adw:done`, create a PR via `createPRForIssue` using the configured base branch, and comment with the PR link: `✅ **[ADW]** Build complete — PR: #<pr-number>`.
+- If the workspace status is `completed`, first refresh the issue via `getIssue`. If the issue is closed, remove `adw:building`, add `adw:done`, record `terminal_status: "completed"` in the issue map, comment with the completion summary, and skip PR creation. If the issue is still open, read `branch` and `implementation_commit` from `agents/<id>/adw-state.json`; pass the recorded `branch` to `createPRForIssue` with the configured base branch and comment with the PR link: `✅ **[ADW]** Build complete — PR: #<pr-number>`. If `branch` is missing or `implementation_commit` is `undefined`, do not guess a branch or create a PR; leave the issue without `adw:done`, add `adw:failed`, and comment with a clear state-corruption error for human recovery. If `implementation_commit` is `null`, treat the completed run as having no implementation changes: remove `adw:building`, add `adw:done`, comment that no PR was created because there was no implementation commit, and record terminal completion in the issue map.
 - If the workspace status is `planned`, treat it as a successful terminal state for `/adw-plan` tracking issues only: remove `adw:building`, add `adw:ready-for-review`, and comment with the planned spec path. Do not create a PR for `planned`.
 - If the workspace status is `failed`, remove `adw:building`, add `adw:failed`, and comment with the error summary.
 - Terminal handling is idempotent: before swapping labels or creating a PR, check whether the issue already has `adw:done`, `adw:failed`, or a recorded `pr_url` in the issue map. This avoids duplicate PRs/comments after trigger restarts.
@@ -382,8 +400,8 @@ IMPORTANT: Execute every step in order, top to bottom.
   - `writeIssueMap(mapPath, map)`: writes JSON atomically enough for this single-process trigger (temp file then rename).
   - `findSpecPathForIssue(issueNumber)`: read the map first, then fallback to scanning `docs/specs/*issue-<number>-*.md`.
 - Extend issue-map entries with optional terminal metadata: `pr_url?: string`, `pr_number?: number`, `terminal_status?: "planned" | "completed" | "failed"`.
-- Implement `buildSpecFilename(issueNumber, issueTitle, existingSpecPath?)`: `SPEC-<number>-issue-<issueNumber>-<slug>.md`. If `existingSpecPath` starts with `SPEC-###-`, preserve that number; otherwise call the same spec-numbering logic used by the plan stage. Slug is kebab-cased from the issue title, truncated to 50 chars.
-- Implement `normalizeIssueSpecPath(issueNumber, issueTitle, dispatchOutcome)`: accepts only `created` and `modified` outcomes, renames the candidate spec to the `SPEC-###-issue-<number>-<slug>.md` pattern when needed, and returns the final repo-relative path. For `noop`, return a typed failure with the noop summary.
+- Implement `buildIssueSpecFilename(issueNumber, issueTitle, existingSpecPath?)`: `<PREFIX>-<number>-issue-<issueNumber>-<slug>.md`. If `existingSpecPath` starts with `SPEC-###-`, `BUG-##-`, or `CHORE-##-`, preserve that prefix and number; otherwise use the classification result to choose the prefix and call the same prefix-specific numbering logic used by the plan stage. Slug is kebab-cased from the issue title, truncated to 50 chars.
+- Implement `normalizeIssueSpecPath(issueNumber, issueTitle, dispatchOutcome)`: accepts only `created` and `modified` outcomes, renames the candidate spec to the prefix-preserving issue filename pattern when needed, and returns the final repo-relative path. For `noop`, return a typed failure with the noop summary.
 - Implement `buildComment(parts)`: format structured adw comments with emoji prefix and markdown sections.
 
 ### Step 13: Cron trigger — poll loop and main
@@ -402,7 +420,7 @@ IMPORTANT: Execute every step in order, top to bottom.
 - Test cases:
   - **Triage scan:** unlabeled issue → `adw:triage` added → classify + dispatch called → `adw:ready-for-review` added.
   - **Triage mapping:** successful triage writes `adw-triggers/issue-map.json` with issue number, URL, and spec path before approval.
-  - **Dispatch outcomes:** `created` and `modified` outcomes are normalized/renamed to `SPEC-###-issue-<number>-<slug>.md`; `noop` removes `adw:triage`, posts the noop summary, and writes no issue-map entry.
+  - **Dispatch outcomes:** `created` and `modified` outcomes are normalized/renamed to the prefix-preserving issue filename pattern (`SPEC`, `BUG`, or `CHORE`); `noop` removes `adw:triage`, posts the noop summary, and writes no issue-map entry.
   - **Triage planner logs:** dispatch receives a planner log under `adw-triggers/runs/<issue>-<timestamp>/planner/raw-output.jsonl`.
   - **Triage failure:** classify fails → `adw:triage` removed, error comment posted, no `adw:ready-for-review`.
   - **Approval scan:** issue with both `adw:ready-for-review` + `adw:approved` → spec path resolved from issue-map, labels removed, `adw:building` added, pipeline launched with `ADW_ISSUE_NUMBER` and `ADW_ISSUE_URL`.
@@ -410,11 +428,13 @@ IMPORTANT: Execute every step in order, top to bottom.
   - **Approval missing mapping:** approved issue with no issue-map entry and no spec fallback gets an explanatory comment and is not launched.
   - **Building guard:** issue with `adw:building` → skipped by triage and approval scans.
   - **Progress scan:** workspace discovered by `findWorkspaceByIssueNumber`, issue-map updated with workspace id, workspace transitions stages → progress comment posted only on change.
-  - **Pipeline success:** exit 0 → `adw:building` removed, `adw:done` added, PR created, comment with PR link.
+  - **Pipeline success:** exit 0 for an open issue with recorded `branch` and non-null `implementation_commit` → `adw:building` removed, `adw:done` added, PR created with the recorded branch, comment with PR link.
+  - **Closed issue completion:** completed workspace for a closed issue → result comment posted, `adw:done` recorded, and no PR created.
+  - **PR creation guard:** completed workspace with missing `branch` or `implementation_commit === undefined` in `adw-state.json` → no PR created, `adw:failed` applied, and an explanatory comment posted. Completed workspace with `implementation_commit === null` → no PR created, `adw:done` applied, and a no-implementation-changes comment posted.
   - **Plan-only success:** workspace status `planned` → `adw:building` removed, `adw:ready-for-review` added, spec path commented, and no PR created.
   - **Pipeline failure:** exit non-zero → `adw:building` removed, `adw:failed` added, error comment posted.
   - **findWorkspaceByIssueNumber:** finds workspace by issue_number field, returns null when not found.
-  - **buildSpecFilename:** correct slug generation, truncation, special chars sanitized.
+  - **buildIssueSpecFilename:** correct prefix preservation, prefix-specific numbering, slug generation, truncation, special chars sanitized.
   - **parseArgs:** `--repo`, `--poll-ms`, `--agents-root`, `--base`, `--max-concurrent`, `--once`, `--dry-run`, defaults.
   - **Base branch resolution:** explicit `--base` wins; omitted `--base` resolves the repo default once at startup; fallback to `main` is warning-only.
   - **Label provisioning:** startup creates missing ADW labels, skips existing labels, and fails clearly if label creation fails; dry-run reports missing labels without creating them.
@@ -458,7 +478,7 @@ IMPORTANT: Execute every step in order, top to bottom.
 
 ### Step 17: Skill modification — `/adw-plan` creates a GitHub tracking issue
 
-- Modify both `.codex/skills/adw-plan/SKILL.md` and `.zcode/skills/adw-plan/SKILL.md` with identical behavior. `.codex/skills` is the authoritative tree for Codex-invoked skills in this repo; `.zcode/skills` is a mirror and must be updated in the same patch.
+- Modify `.zcode/skills/adw-plan/SKILL.md`, the tracked skill source. Do not force-add `.codex/skills/adw-plan/SKILL.md`: `.codex/` is gitignored local Codex runtime/cache state. If local tooling regenerates or syncs `.codex/skills` from `.zcode/skills`, that regeneration is allowed for local use but is not a committed acceptance criterion.
 - Add a pre-launch step:
   - **Before Step 2** (the tmux launch), add a new step:
     1. If `--no-issue` is in the arguments, skip issue creation.
@@ -473,13 +493,13 @@ IMPORTANT: Execute every step in order, top to bottom.
        - `body` includes the pipeline type (`plan → spec-review`), the argument, and a timestamp
        - Labels: `["adw:building"]` (auto-approved — skips triage and approval gates)
     5. Parse the returned issue `number` and `url`.
-    6. Pass these as env vars to the launcher: `ADW_ISSUE_NUMBER=<number> ADW_ISSUE_URL=<url> bun adws/adw-launch.ts --script adw-plan-reviewspec.ts $ARGUMENTS`
+    6. Pass these as environment variables to the launcher process when issue creation succeeds. Shell-style assignment is acceptable inside the Markdown skill's shell command, but the parsed values must be exported as environment variables rather than passed as launcher argv.
   - Update Step 2's bash command to include the env vars when issue creation succeeded.
   - Update Step 3's report to include the GitHub issue link: `GitHub issue: <url>`
 
 ### Step 18: Skill modification — `/adw-implement` creates a GitHub tracking issue
 
-- Modify both `.codex/skills/adw-implement/SKILL.md` and `.zcode/skills/adw-implement/SKILL.md` with the same pattern as Step 17:
+- Modify `.zcode/skills/adw-implement/SKILL.md` with the same pattern as Step 17. Do not force-add `.codex/skills/adw-implement/SKILL.md`; it remains gitignored local Codex runtime/cache state unless generated locally by tooling:
   - Same pre-launch step: detect repo, create issue with `adw:building` label, parse result.
   - Invoke the wrapper as:
     ```bash
@@ -542,8 +562,8 @@ IMPORTANT: Execute every step in order, top to bottom.
 - **Pipeline subprocess hangs:** The trigger launches the pipeline as an asynchronous foreground child process and continues polling other issues. If the child hangs, progress reporting can continue from workspace state, but the issue may remain `adw:building` until the orchestrator/watchdog reports failure or a trigger-level wall-clock timeout is added.
 - **Trigger restart while pipeline is running:** The `adw:building` label persists on the issue. On restart, the progress scan finds the building issue, rediscovers the workspace via `findWorkspaceByIssueNumber`, updates the issue map if needed, and monitors its workspace state. The already-running pipeline is NOT re-launched because the trigger only launches when it transitions `ready-for-review` + `approved` to `building`.
 - **Multiple issues approved simultaneously:** The trigger processes them sequentially (one pipeline at a time). The approval scan queues issues; the triage scan skips them while building. Future work: parallel pipeline dispatch.
-- **Spec number collision:** The next spec number is determined by scanning `docs/specs/` for existing files — the same logic the plan stage uses. No collision possible.
-- **Issue closed before build completes:** The trigger should check issue state before posting results. If the issue is closed, post the result anyway (it's still useful context) but skip PR creation (closed issues can't be linked to open PRs cleanly).
+- **Spec number collision:** The next feature/bug/chore number is determined by scanning `docs/specs/` for existing files with the same prefix — the same prefix-specific logic the plan stage uses. No collision possible.
+- **Issue closed before build completes:** The trigger checks issue state before PR creation. If the issue is closed, post the result anyway, remove `adw:building`, add `adw:done`, record terminal completion in the issue map, and skip PR creation.
 - **`gh` not available when skill creates issue:** If the skill can't create the issue (gh missing, auth expired, network error), log a warning and proceed without issue metadata. The pipeline still runs — issue creation is best-effort, not blocking.
 - **Skill `/adw-plan` completes successfully:** The issue has `adw:building` while the plan/review run is active. When the workspace status becomes `planned`, the progress scan swaps it to `adw:ready-for-review` and comments with the spec path. No PR is created for plan-only completion.
 - **Skill creates issue but pipeline fails immediately:** The issue has `adw:building` and never gets a successful build result. The trigger's progress scan detects the `failed` workspace state and swaps the label to `adw:failed` with an error comment. No orphaned `adw:building` issues persist.
@@ -557,23 +577,25 @@ IMPORTANT: Execute every step in order, top to bottom.
 4. **`trigger-cron.ts` exists** with the dispatcher structure (USAGE, parseArgs, main, `import.meta.main`) and the `--repo`, `--poll-ms`, `--agents-root`, `--base`, `--max-concurrent`, `--once`, and `--dry-run` flags.
 5. **Labels are provisioned:** startup ensures all ADW labels exist before applying labels or creating labeled issues. Dry-run reports missing labels without creating them.
 6. **Base branch ownership is single-source:** trigger startup resolves the base branch once via `resolveBaseBranch`; `createPRForIssue` requires an explicit `base` parameter and performs no default-branch lookup.
-7. **Triage creates a spec from an issue:** an open issue with none of the ADW labels is found by local filtering, gets `adw:triage`, then `adw:ready-for-review`, a spec file is created or renamed to `SPEC-###-issue-<number>-<slug>.md`, `adw-triggers/issue-map.json` records the issue-to-spec mapping, and the issue gets a comment with the spec path.
+7. **Triage creates a spec from an issue:** an open issue with none of the ADW labels is found by local filtering, gets `adw:triage`, then `adw:ready-for-review`, a spec file is created or renamed to the prefix-preserving issue filename pattern (`SPEC-###-issue-<number>-<slug>.md`, `BUG-##-issue-<number>-<slug>.md`, or `CHORE-##-issue-<number>-<slug>.md`), `adw-triggers/issue-map.json` records the issue-to-spec mapping, and the issue gets a comment with the spec path.
 8. **Triage handles all dispatch outcomes:** `created` and `modified` outcomes produce a normalized spec path and mapping; `noop` removes `adw:triage`, comments with the noop summary and planner log path, and writes no approval mapping.
 9. **Triage logs are trigger-owned:** issue-only triage passes `dispatch()` a planner log path under `adw-triggers/runs/<issue>-<timestamp>/planner/raw-output.jsonl`.
-10. **Approval launches the pipeline:** an issue with both `adw:ready-for-review` + `adw:approved` resolves its spec path from the issue map, gets labels swapped to `adw:building`, the adw pipeline is launched asynchronously with `ADW_ISSUE_NUMBER` and `ADW_ISSUE_URL`, and the issue gets a comment.
+10. **Approval launches the pipeline:** an issue with both `adw:ready-for-review` + `adw:approved` resolves its spec path from the issue map, gets labels swapped to `adw:building`, the adw pipeline is launched asynchronously with `Bun.spawn`/`spawn` env options containing `ADW_ISSUE_NUMBER` and `ADW_ISSUE_URL` (not shell assignments passed as argv), and the issue gets a comment.
 11. **Approval is queued by default:** with default `--max-concurrent 1`, only one pipeline is active at a time; additional approved issues remain labeled `adw:ready-for-review` + `adw:approved` until capacity is available.
 12. **Building guard prevents re-triggering:** issues with `adw:building` are skipped by both triage and approval scans. The state file is read for progress reporting.
-13. **Full pipeline success creates a PR:** when workspace status becomes `completed`, `adw:building` is swapped to `adw:done`, a PR is created against the resolved explicit base branch and linked to the issue, and the issue gets a comment with the PR link.
-14. **Plan-only success does not get stuck:** when workspace status becomes `planned`, `adw:building` is swapped to `adw:ready-for-review`, the issue gets a comment with the spec path, and no PR is created.
-15. **Pipeline failure reports the error:** on non-zero exit or workspace status `failed`, `adw:building` is swapped to `adw:failed`, and the issue gets an error comment.
-16. **`--once` and `--dry-run` are deterministic:** `--once` runs one real scan and exits. `--once --dry-run` runs one no-side-effects scan, prints intended actions, and exits 0 with no labels modified or created, no specs created, no issue-map writes, no pipelines launched, and no comments posted.
-17. **Workspace state has `issue_number` and `issue_url`:** `WorkspaceState` and `OrchestratorState` in `adw-plan-reviewspec.ts`, `adw-plan-reviewspec-build.ts`, and `adw-plan-review-build-patch.ts` include these fields, and the initial state records them when set by the trigger or the skills (via `ADW_ISSUE_NUMBER` / `ADW_ISSUE_URL` env vars). Existing orchestrator behavior is unchanged when env vars are absent.
-18. **`adw-create-tracking-issue.ts` is validated directly:** supports `--help`, `--repo`, origin parsing, `--format shell|json`, label forwarding, best-effort failure fallback, and `--no-issue`.
-19. **`/adw-plan` creates a GitHub tracking issue:** when invoked without `--no-issue`, both `.codex` and `.zcode` skill mirrors create a GitHub issue with `adw:building` label through the executable wrapper before launching the pipeline. The issue number and URL are passed to the orchestrator and recorded in state.
-20. **`/adw-implement` creates a GitHub tracking issue:** same behavior as `/adw-plan` — both skill mirrors create an issue with `adw:building` label through the executable wrapper before launching, records issue metadata in state.
-21. **Skill-created issues are auto-approved:** issues created by the skills have `adw:building` directly (no `adw:triage` or `adw:approved` phase). The trigger's triage and approval scans skip these issues; the progress scan monitors them.
-22. **`--no-issue` flag opts out:** when `--no-issue` is passed to `/adw-plan` or `/adw-implement`, no GitHub issue is created and the pipeline launches without issue metadata. Useful for offline usage or when GitHub tracking is not needed.
-23. **Typecheck/build/tests pass:** `bun run typecheck:src`, `bun run typecheck:test`, `bun run typecheck`, `bun run build`, `bun run test:unit` all exit 0. All new tests pass, no regressions.
+13. **Full pipeline success creates a PR for open issues only:** when workspace status becomes `completed` and the issue is still open, `adw:building` is swapped to `adw:done`, a PR is created against the resolved explicit base branch using the `branch` recorded in `adw-state.json`, the PR is linked to the issue, and the issue gets a comment with the PR link. If the issue is closed, the trigger posts the completion comment and records `adw:done` but does not create a PR.
+14. **PR creation never guesses state after restart:** progress reporting reads `branch` and `implementation_commit` from `agents/<id>/adw-state.json` before calling `createPRForIssue`. Missing `branch` or `implementation_commit === undefined` is treated as a failure requiring human recovery; no fallback branch is guessed and no PR is created. `implementation_commit === null` is handled explicitly as a completed run with no implementation changes, so no PR is created and the issue receives a no-implementation-changes comment.
+15. **Plan-only success does not get stuck:** when workspace status becomes `planned`, `adw:building` is swapped to `adw:ready-for-review`, the issue gets a comment with the spec path, and no PR is created.
+16. **Pipeline failure reports the error:** on non-zero exit or workspace status `failed`, `adw:building` is swapped to `adw:failed`, and the issue gets an error comment.
+17. **`--once` and `--dry-run` are deterministic:** `--once` runs one real scan and exits. `--once --dry-run` runs one no-side-effects scan, prints intended actions, and exits 0 with no labels modified or created, no specs created, no issue-map writes, no pipelines launched, and no comments posted.
+18. **Trigger runtime state is ignored:** `.gitignore` ignores `adw-triggers/issue-map.json` and `adw-triggers/runs/`. These runtime artifacts are not committed; if the directory must exist, only `adw-triggers/.gitkeep` is committed.
+19. **Workspace state has `issue_number` and `issue_url`:** `WorkspaceState` and `OrchestratorState` in `adw-plan-reviewspec.ts`, `adw-plan-reviewspec-build.ts`, and `adw-plan-review-build-patch.ts` include these fields, and the initial state records them when set by the trigger or the skills (via `ADW_ISSUE_NUMBER` / `ADW_ISSUE_URL` env vars). Existing orchestrator behavior is unchanged when env vars are absent.
+20. **`adw-create-tracking-issue.ts` is validated directly:** supports `--help`, `--repo`, origin parsing, `--format shell|json`, label forwarding, best-effort failure fallback, and `--no-issue`.
+21. **`/adw-plan` creates a GitHub tracking issue:** when invoked without `--no-issue`, the tracked `.zcode` skill source creates a GitHub issue with `adw:building` label through the executable wrapper before launching the pipeline. The issue number and URL are passed to the orchestrator and recorded in state. `.codex/skills` is gitignored local runtime/cache state and is not force-added or required for committed acceptance.
+22. **`/adw-implement` creates a GitHub tracking issue:** same behavior as `/adw-plan` — the tracked `.zcode` skill source creates an issue with `adw:building` label through the executable wrapper before launching, records issue metadata in state. `.codex/skills` remains excluded from committed acceptance.
+23. **Skill-created issues are auto-approved:** issues created by the skills have `adw:building` directly (no `adw:triage` or `adw:approved` phase). The trigger's triage and approval scans skip these issues; the progress scan monitors them.
+24. **`--no-issue` flag opts out:** when `--no-issue` is passed to `/adw-plan` or `/adw-implement`, no GitHub issue is created and the pipeline launches without issue metadata. Useful for offline usage or when GitHub tracking is not needed.
+25. **Typecheck/build/tests pass:** `bun run typecheck:src`, `bun run typecheck:test`, `bun run typecheck`, `bun run build`, `bun run test:unit` all exit 0. All new tests pass, no regressions.
 
 ## Validation Commands
 Execute every command to validate the feature works correctly with zero regressions.
