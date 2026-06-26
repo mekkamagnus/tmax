@@ -14,7 +14,8 @@
     "checkJs": false,
     "noEmit": true,
     "jsx": "react-jsxdev",
-    "jsxImportSource": "react"
+    "jsxImportSource": "react",
+    "types": ["node", "bun"]
   },
   "include": [
     "src/**/*",
