@@ -15,6 +15,9 @@ import {
   createValidationError,
   AppError
 } from "../../error/types.ts";
+import { State, stateUtils } from "../../utils/state.ts";
+import type { EditorModel } from "../functional/model.ts";
+import { runEditorState, type EditorModelAccess } from "./state-context.ts";
 
 /**
  * T-Lisp function implementation that returns Either for error handling
@@ -35,8 +38,7 @@ export type TLispFunctionWithEither = (args: TLispValue[]) => Either<AppError, T
  * @returns Map of mode function names to implementations
  */
 export function createModeOps(
-  getMode: () => "normal" | "insert" | "visual" | "command" | "mx" | "replace",
-  setMode: (mode: "normal" | "insert" | "visual" | "command" | "mx" | "replace") => void,
+  modelAccess: EditorModelAccess,
   getStatusMessage: () => string,
   setStatusMessage: (message: string) => void,
   getCommandLine: () => string,
@@ -45,6 +47,14 @@ export function createModeOps(
   getCursorFocus: () => 'buffer' | 'command',
   setCursorFocus: (focus: 'buffer' | 'command') => void
 ): Map<string, TLispFunctionImpl> {
+  // CHORE-39 Phase 4: mode read/write now flow through the State monad against
+  // EditorModel, replacing the old getMode/setMode callbacks. The body below
+  // still calls getMode()/setMode but those are now State-backed.
+  type EditorMode = EditorModel["mode"];
+  const getMode = (): EditorMode => runEditorState(modelAccess, State.gets<EditorModel, EditorMode>(m => m.mode));
+  const setMode = (mode: EditorMode): void => {
+    runEditorState(modelAccess, stateUtils.updateProperty<EditorModel, "mode">("mode", mode));
+  };
   const api = new Map<string, TLispFunctionImpl>();
 
   api.set("editor-mode", (args: TLispValue[]): Either<AppError, TLispValue> => {

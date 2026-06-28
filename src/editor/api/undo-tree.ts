@@ -381,7 +381,7 @@ export function createUndoTreeOps(
     ));
     }
 
-    const buffer = (bufferArg as any).buffer as FunctionalTextBuffer;
+    const buffer = (bufferArg as { buffer: FunctionalTextBuffer }).buffer;
 
     let cursorLine: number | undefined = undefined;
     let cursorColumn: number | undefined = undefined;

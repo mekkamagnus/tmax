@@ -2,12 +2,12 @@ import type { EditorState } from "../../core/types.ts";
 
 const EMPTY_MAP: ReadonlyMap<number, number> = new Map();
 
-function getRanges(state: EditorState): Map<number, number> {
+function getRanges(state: Pick<EditorState, "foldRanges">): Map<number, number> {
   return state.foldRanges ?? EMPTY_MAP as Map<number, number>;
 }
 
 export function foldToggle(
-  state: EditorState,
+  state: Pick<EditorState, "foldRanges">,
   line: number,
   headingRanges: { start: number; end: number }[],
 ): Partial<EditorState> {
@@ -22,7 +22,7 @@ export function foldToggle(
 }
 
 export function foldOpen(
-  state: EditorState,
+  state: Pick<EditorState, "foldRanges">,
   line: number,
 ): Partial<EditorState> {
   const ranges = new Map(state.foldRanges ?? EMPTY_MAP);
@@ -31,7 +31,7 @@ export function foldOpen(
 }
 
 export function foldClose(
-  state: EditorState,
+  state: Pick<EditorState, "foldRanges">,
   startLine: number,
   endLine: number,
 ): Partial<EditorState> {
@@ -41,7 +41,7 @@ export function foldClose(
 }
 
 export function foldCloseAll(
-  state: EditorState,
+  state: Pick<EditorState, "foldRanges">,
   headingRanges: { start: number; end: number }[],
 ): Partial<EditorState> {
   const ranges = new Map();
@@ -52,13 +52,13 @@ export function foldCloseAll(
 }
 
 export function foldOpenAll(
-  state: EditorState,
+  state: Pick<EditorState, "foldRanges">,
 ): Partial<EditorState> {
   return { foldRanges: new Map() };
 }
 
 export function foldByLevel(
-  state: EditorState,
+  state: Pick<EditorState, "foldRanges">,
   maxLevel: number,
   headingRanges: { start: number; end: number; level: number }[],
 ): Partial<EditorState> {
@@ -69,11 +69,11 @@ export function foldByLevel(
   return { foldRanges: ranges };
 }
 
-export function foldIsCollapsed(state: EditorState, line: number): boolean {
+export function foldIsCollapsed(state: Pick<EditorState, "foldRanges">, line: number): boolean {
   return (state.foldRanges ?? EMPTY_MAP).has(line);
 }
 
-export function foldGetRanges(state: EditorState): { start: number; end: number }[] {
+export function foldGetRanges(state: Pick<EditorState, "foldRanges">): { start: number; end: number }[] {
   const result: { start: number; end: number }[] = [];
   const ranges = state.foldRanges ?? EMPTY_MAP;
   for (const [start, end] of ranges) {

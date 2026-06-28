@@ -15,37 +15,37 @@ import { resolveMapping } from "../editor.ts";
  */
 export async function handleVisualMode(editor: Editor, key: string, normalizedKey: string): Promise<void> {
   // Handle regular key mappings in visual mode
-  const keyMappings = (editor as any).keyMappings; // Access private property
-  const mappings = keyMappings.get(normalizedKey);
+  const mappings = editor.getKeyMappings().get(normalizedKey);
 
   if (!mappings) {
-    (editor as any).state.statusMessage = `Unbound key: ${normalizedKey}`;
-    (editor as any).logMessage(`Unbound key: ${normalizedKey}`, 'warn');
+    editor.getModel().statusMessage = `Unbound key: ${normalizedKey}`;
+    editor.logMessage(`Unbound key: ${normalizedKey}`, 'warn');
   } else {
     // Find mapping for visual mode
-    const currentMajorMode = editor.getCurrentMajorMode?.() as string | undefined;
+    const currentMajorMode = editor.getCurrentMajorMode();
     const mapping = resolveMapping(mappings, "visual", currentMajorMode);
     if (!mapping) {
-      (editor as any).state.statusMessage = `Unbound key in visual mode: ${normalizedKey}`;
-      (editor as any).logMessage(`Unbound key in visual mode: ${normalizedKey}`, 'warn');
+      editor.getModel().statusMessage = `Unbound key in visual mode: ${normalizedKey}`;
+      editor.logMessage(`Unbound key in visual mode: ${normalizedKey}`, 'warn');
     } else {
       // Execute the mapped command
       try {
-        (editor as any).executeCommand(mapping.command);
+        editor.executeCommand(mapping.command);
 
         // Update visual selection end position after command execution
         // This allows cursor movement to expand the selection
-        const interpreter = (editor as any).interpreter;
+        const interpreter = editor.getInterpreter();
         if (interpreter) {
-          const result = interpreter.execute("(visual-update-end)");
+          interpreter.execute("(visual-update-end)");
           // Ignore errors - visual-update-end only works if in visual mode
         }
       } catch (error) {
         if (error instanceof Error && (error.message === "EDITOR_QUIT_SIGNAL" || error.message.includes("EDITOR_QUIT_SIGNAL"))) {
           throw new Error("EDITOR_QUIT_SIGNAL"); // Re-throw clean quit signal to main loop
         }
-        (editor as any).state.statusMessage = `Command error: ${error instanceof Error ? error.message : String(error)}`;
-        (editor as any).logMessage(`Command error: ${error instanceof Error ? error.message : String(error)}`, 'error');
+        const errorMsg = error instanceof Error ? error.message : String(error);
+        editor.getModel().statusMessage = `Command error: ${errorMsg}`;
+        editor.logMessage(`Command error: ${errorMsg}`, 'error');
       }
     }
   }

@@ -19,60 +19,60 @@ export async function handleReplaceMode(editor: Editor, key: string, normalizedK
       data: { triggerKey: 'Escape', fromMode: 'replace' }
     });
     try {
-      (editor as any).executeCommand("(undo-commit \"R\")");
+      editor.executeCommand("(undo-commit \"R\")");
     } catch (_) {
       // No active undo session — silently skip
     }
-    (editor as any).state.mode = "normal";
-    (editor as any).resetCount();
+    editor.getModel().mode = "normal";
+    editor.resetCount();
     return;
   }
 
   if (key.length === 1 && key >= " " && key <= "~") {
-    const escapedKey = (editor as any).escapeKeyForTLisp(key);
-    (editor as any).executeCommand(`(vim-replace-mode-insert-char "${escapedKey}")`);
+    const escapedKey = editor.escapeKeyForTLisp(key);
+    editor.executeCommand(`(vim-replace-mode-insert-char "${escapedKey}")`);
     return;
   }
 
   if (normalizedKey === "Enter") {
-    (editor as any).executeCommand("(insert-newline)");
+    editor.executeCommand("(insert-newline)");
     return;
   }
 
   if (normalizedKey === "Backspace") {
-    (editor as any).executeCommand("(cursor-move (cursor-line) (max 0 (- (cursor-column) 1)))");
+    editor.executeCommand("(cursor-move (cursor-line) (max 0 (- (cursor-column) 1)))");
     return;
   }
 
   if (normalizedKey === "Tab") {
-    (editor as any).executeCommand("(insert-tab)");
+    editor.executeCommand("(insert-tab)");
     return;
   }
 
-  const keyMappings = (editor as any).keyMappings;
-  const mappings = keyMappings.get(normalizedKey);
+  const mappings = editor.getKeyMappings().get(normalizedKey);
 
   if (!mappings) {
-    (editor as any).state.statusMessage = `Unbound key: ${normalizedKey}`;
-    (editor as any).logMessage(`Unbound key: ${normalizedKey}`, 'warn');
+    editor.getModel().statusMessage = `Unbound key: ${normalizedKey}`;
+    editor.logMessage(`Unbound key: ${normalizedKey}`, 'warn');
     return;
   }
 
-  const currentMajorMode = editor.getCurrentMajorMode?.() as string | undefined;
+  const currentMajorMode = editor.getCurrentMajorMode();
   const mapping = resolveMapping(mappings, "replace", currentMajorMode);
   if (!mapping) {
-    (editor as any).state.statusMessage = `Unbound key in replace mode: ${normalizedKey}`;
-    (editor as any).logMessage(`Unbound key in replace mode: ${normalizedKey}`, 'warn');
+    editor.getModel().statusMessage = `Unbound key in replace mode: ${normalizedKey}`;
+    editor.logMessage(`Unbound key in replace mode: ${normalizedKey}`, 'warn');
     return;
   }
 
   try {
-    (editor as any).executeCommand(mapping.command);
+    editor.executeCommand(mapping.command);
   } catch (error) {
     if (error instanceof Error && (error.message === "EDITOR_QUIT_SIGNAL" || error.message.includes("EDITOR_QUIT_SIGNAL"))) {
       throw new Error("EDITOR_QUIT_SIGNAL");
     }
-    (editor as any).state.statusMessage = `Command error: ${error instanceof Error ? error.message : String(error)}`;
-    (editor as any).logMessage(`Command error: ${error instanceof Error ? error.message : String(error)}`, 'error');
+    const errorMsg = error instanceof Error ? error.message : String(error);
+    editor.getModel().statusMessage = `Command error: ${errorMsg}`;
+    editor.logMessage(`Command error: ${errorMsg}`, 'error');
   }
 }

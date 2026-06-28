@@ -446,7 +446,7 @@ export function formatDocumentation(doc: DocumentationEntry): string {
  * Create documentation operations for T-Lisp API
  */
 export function createDocumentationOps(
-  interpreter: TLispInterpreter
+  interpreter?: TLispInterpreter | null
 ): Map<string, TLispFunctionImpl> {
   const ops: Record<string, TLispFunctionImpl> = {
     /**

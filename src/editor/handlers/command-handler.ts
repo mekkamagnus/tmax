@@ -30,7 +30,7 @@ export async function handleCommandMode(editor: Editor, key: string, normalizedK
 
   // Log Enter key to execute command
   if (normalizedKey === "Enter") {
-    const commandLine = (editor as any).state.commandLine;
+    const commandLine = editor.getModel().commandLine;
     handlerLog.info('Executing command line', {
       data: { command: commandLine }
     });
@@ -38,40 +38,42 @@ export async function handleCommandMode(editor: Editor, key: string, normalizedK
 
   if (key.length === 1 && key >= " " && key <= "~") {
     // Add character to command line
-    (editor as any).state.commandLine += key;
+    editor.getModel().commandLine += key;
     return; // Don't process this key further
   } else if (normalizedKey === "Backspace") {
     // Remove last character from command line
-    (editor as any).state.commandLine = (editor as any).state.commandLine.slice(0, -1);
+    const model = editor.getModel();
+    model.commandLine = model.commandLine.slice(0, -1);
     return; // Don't process this key further
   } else if (normalizedKey === "Escape") {
-    (editor as any).state.mode = "normal";
-    (editor as any).state.commandLine = "";
+    const model = editor.getModel();
+    model.mode = "normal";
+    model.commandLine = "";
     return; // Don't process this key further
   } else if (normalizedKey === "Enter") {
     // Execute the command line through the T-Lisp key binding system
-    const cmdLine = (editor as any).state.commandLine;
+    const cmdLine = editor.getModel().commandLine;
 
     // SPEC-035: Dispatch special command patterns
     try {
       if (cmdLine === "dired" || cmdLine.startsWith("dired ")) {
         const dir = cmdLine === "dired" ? "." : cmdLine.slice(6).trim();
-        (editor as any).executeCommand(`(dired "${dir}")`);
+        editor.executeCommand(`(dired "${dir}")`);
       } else if (/^%s\/(.+)\/(.+)\/([gic]*)$/.test(cmdLine)) {
         // :%s/find/replace/flags — whole-buffer replace
         const m = cmdLine.match(/^%s\/(.+)\/(.+)\/([gic]*)$/)!;
         const escapedFind = m[1]!.replace(/"/g, '\\"');
         const escapedReplace = m[2]!.replace(/"/g, '\\"');
-        (editor as any).executeCommand(`(query-replace "${escapedFind}" "${escapedReplace}")`);
+        editor.executeCommand(`(query-replace "${escapedFind}" "${escapedReplace}")`);
       } else if (/^s\/(.+)\/(.*)\/?$/.test(cmdLine)) {
         // :s/find/replace — current-line replace
         const m = cmdLine.match(/^s\/(.+)\/(.*)\/?$/)!;
         const escapedFind = m[1]!.replace(/"/g, '\\"');
         const escapedReplace = (m[2] || "").replace(/"/g, '\\"');
-        (editor as any).executeCommand(`(replace-find-matches "${escapedFind}")`);
-        (editor as any).executeCommand(`(replace-apply-all)`);
+        editor.executeCommand(`(replace-find-matches "${escapedFind}")`);
+        editor.executeCommand(`(replace-apply-all)`);
       } else {
-        (editor as any).executeCommand(`(editor-execute-command-line)`);
+        editor.executeCommand(`(editor-execute-command-line)`);
       }
       handlerLog.info('Command executed successfully', {
         data: { command: cmdLine }
@@ -90,40 +92,42 @@ export async function handleCommandMode(editor: Editor, key: string, normalizedK
         data: { command: cmdLine }
       });
 
-      (editor as any).state.statusMessage = `Command error: ${error instanceof Error ? error.message : String(error)}`;
-      (editor as any).logMessage(`Command error: ${error instanceof Error ? error.message : String(error)}`, 'error');
+      const errorMsg = error instanceof Error ? error.message : String(error);
+      editor.getModel().statusMessage = `Command error: ${errorMsg}`;
+      editor.logMessage(`Command error: ${errorMsg}`, 'error');
     }
 
     // Clear command line and return to normal mode
-    (editor as any).state.commandLine = "";
-    (editor as any).state.mode = "normal";
+    const model = editor.getModel();
+    model.commandLine = "";
+    model.mode = "normal";
     return; // Don't process this key further
   }
   // For other keys, fall through to key binding system
   else {
-    const keyMappings = (editor as any).keyMappings; // Access private property
-    const mappings = keyMappings.get(normalizedKey);
+    const mappings = editor.getKeyMappings().get(normalizedKey);
 
     if (!mappings) {
-      (editor as any).state.statusMessage = `Unbound key: ${normalizedKey}`;
-      (editor as any).logMessage(`Unbound key: ${normalizedKey}`, 'warn');
+      editor.getModel().statusMessage = `Unbound key: ${normalizedKey}`;
+      editor.logMessage(`Unbound key: ${normalizedKey}`, 'warn');
     } else {
       // Find mapping for command mode
-      const currentMajorMode = editor.getCurrentMajorMode?.() as string | undefined;
+      const currentMajorMode = editor.getCurrentMajorMode();
       const mapping = resolveMapping(mappings, "command", currentMajorMode);
       if (!mapping) {
-        (editor as any).state.statusMessage = `Unbound key in command mode: ${normalizedKey}`;
-        (editor as any).logMessage(`Unbound key in command mode: ${normalizedKey}`, 'warn');
+        editor.getModel().statusMessage = `Unbound key in command mode: ${normalizedKey}`;
+        editor.logMessage(`Unbound key in command mode: ${normalizedKey}`, 'warn');
       } else {
         // Execute the mapped command
         try {
-          (editor as any).executeCommand(mapping.command);
+          editor.executeCommand(mapping.command);
         } catch (error) {
           if (error instanceof Error && (error.message === "EDITOR_QUIT_SIGNAL" || error.message.includes("EDITOR_QUIT_SIGNAL"))) {
             throw new Error("EDITOR_QUIT_SIGNAL"); // Re-throw clean quit signal to main loop
           }
-          (editor as any).state.statusMessage = `Command error: ${error instanceof Error ? error.message : String(error)}`;
-          (editor as any).logMessage(`Command error: ${error instanceof Error ? error.message : String(error)}`, 'error');
+          const errorMsg = error instanceof Error ? error.message : String(error);
+          editor.getModel().statusMessage = `Command error: ${errorMsg}`;
+          editor.logMessage(`Command error: ${errorMsg}`, 'error');
         }
       }
     }

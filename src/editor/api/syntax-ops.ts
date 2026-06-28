@@ -176,7 +176,7 @@ export function createSyntaxOps(
     const rules = languageMap.get(activeLanguage)!;
     const lineText = getLine(lineNum);
     const result = tokenize(lineText, lineNum, rules);
-    const tokens = Array.isArray(result) ? result : (result as any).tokens ?? [];
+    const tokens = Array.isArray(result) ? result : (result as { tokens?: SyntaxToken[] }).tokens ?? [];
 
     // Convert tokens to T-Lisp lists: (type value line startCol endCol)
     const tokenValues = tokens.map((t: SyntaxToken) =>
@@ -260,7 +260,7 @@ export function createSyntaxOps(
     const rules = languageMap.get(activeLanguage)!;
     const lineText = getLine(lineNum);
     const result = tokenize(lineText, lineNum, rules);
-    const tokens = Array.isArray(result) ? result : (result as any).tokens ?? [];
+    const tokens = Array.isArray(result) ? result : (result as { tokens?: SyntaxToken[] }).tokens ?? [];
     const spans = highlightLine(tokens);
 
     // Convert spans to T-Lisp: (start end style-alist)

@@ -261,7 +261,7 @@ export function dispatchUrl(rawUrl: string, deps: DispatchDeps): DispatchOutcome
   } catch {
     scheme = "";
   }
-  if (!URL_SCHEME_ALLOWLIST.includes(scheme as any)) {
+  if (!(URL_SCHEME_ALLOWLIST as readonly string[]).includes(scheme)) {
     return { ok: false, reason: "unsupported-scheme", scheme: scheme || "", supported: [...URL_SCHEME_ALLOWLIST] };
   }
 

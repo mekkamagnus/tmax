@@ -9,6 +9,6 @@ export async function handleMxMode(editor: Editor, key: string, normalizedKey: s
   const routedKey = key.length === 1 && key >= " " && key !== "\x7f"
     ? key
     : normalizedKey;
-  const escaped = (editor as any).escapeKeyForTLisp(routedKey);
-  await (editor as any).executeCommandAsync(`(minibuffer-dispatch-key "${escaped}")`);
+  const escaped = editor.escapeKeyForTLisp(routedKey);
+  await editor.executeCommandAsync(`(minibuffer-dispatch-key "${escaped}")`);
 }

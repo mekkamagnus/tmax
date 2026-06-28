@@ -393,7 +393,7 @@ export function createUndoRedoOps(
       ));
     }
 
-    const buffer = (bufferArg as any).buffer as FunctionalTextBuffer;
+    const buffer = (bufferArg as { buffer: FunctionalTextBuffer }).buffer;
 
     // Optional cursor positions (post-edit and pre-edit)
     let cursorLine: number | undefined = undefined;

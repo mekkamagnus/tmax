@@ -42,14 +42,14 @@ function prefixLabel(prefix: string): string {
 }
 
 export async function handleNormalMode(editor: Editor, key: string, normalizedKey: string): Promise<void> {
-  const state = (editor as any).state;
+  const state = editor.getModel();
   const wk = editor.getWhichKeyHandle();
-  const interp = (editor as any).getInterpreter();
-  const exec = (cmd: string) => interp.execute(cmd);
-  const escape = (s: string) => (editor as any).escapeKeyForTLisp(s);
+  const interp = editor.getInterpreter();
+  const exec = (cmd: string): any => interp.execute(cmd);
+  const escape = (s: string) => editor.escapeKeyForTLisp(s);
   const isRight = (r: any) => r && typeof r === "object" && r._tag === "Right";
 
-  const spaceActive = (editor as any).spacePressed === true;
+  const spaceActive = editor.spacePressed === true;
   const currentPrefix = state.whichKeyPrefix || "";
 
   // SPEC-044 Phase 1.F-1.H — macro pending states must be routed BEFORE the
@@ -70,7 +70,7 @@ export async function handleNormalMode(editor: Editor, key: string, normalizedKe
     return;
   }
 
-  // SPEC-044 Phase 2.G — "x register-prefix pending. Routed before Escape
+  // SPEC-044 Phase 2.G — " register-prefix pending. Routed before Escape
   // so the dispatcher can interpret Escape/C-g as cancel; keymap and digit
   // branches would otherwise shadow the register letter (e.g. "a is a
   // valid register but also a binding).
@@ -105,7 +105,7 @@ export async function handleNormalMode(editor: Editor, key: string, normalizedKe
     state.whichKeyPrefix = "";
     state.whichKeyBindings = [];
     state.whichKeyPopup = null;
-    (editor as any).spacePressed = false;
+    editor.spacePressed = false;
     try { exec("(vim-reset-pending)"); } catch {}
     state.statusMessage = "";
     return;
@@ -173,7 +173,7 @@ export async function handleNormalMode(editor: Editor, key: string, normalizedKe
     lookupKey = `${currentPrefix} ${normalizedKey}`;
   } else if (spaceActive) {
     lookupKey = `SPC ${normalizedKey}`;
-    (editor as any).spacePressed = false;
+    editor.spacePressed = false;
   } else {
     lookupKey = normalizedKey;
   }
@@ -194,14 +194,14 @@ export async function handleNormalMode(editor: Editor, key: string, normalizedKe
 
   // Keymap prefix check → schedule which-key, set prefix
   const prefixResult = exec(`(keymap-prefix-p (current-keymap) "${escape(lookupKey)}")`);
-  if (isRight(prefixResult) && isTruthy((prefixResult as any).right)) {
+  if (isRight(prefixResult) && isTruthy(prefixResult.right)) {
     const bindings = tLispPrefixBindings(exec, escape, lookupKey);
     state.whichKeyPrefix = lookupKey;
     state.whichKeyBindings = bindings;
     wk.schedule(lookupKey, bindings, () => {
       if (state.whichKeyPrefix !== lookupKey) return;
       state.whichKeyActive = true;
-      const size = (editor as any).terminal.getSize();
+      const size = editor.getTerminal().getSize();
       state.whichKeyPopup = computeWhichKeyPopup(bindings, lookupKey, size.width, Math.max(1, size.height - 4), prefixLabel(lookupKey));
       state.statusMessage = `Which-key: ${bindings.map(b => `${b.key.substring(lookupKey.length + 1)} : ${b.command}`).join(", ")}`;
     });
@@ -222,7 +222,7 @@ export async function handleNormalMode(editor: Editor, key: string, normalizedKe
 
   // Keymap binding lookup → execute command
   const cmdResult = exec(`(keymap-ref (current-keymap) "${escape(lookupKey)}")`);
-  const cmdRight = isRight(cmdResult) ? (cmdResult as any).right : null;
+  const cmdRight = isRight(cmdResult) ? cmdResult.right : null;
   if (cmdRight && cmdRight.type === "string") {
     clearWhichKey(state, wk);
     // SPEC-044 Phase 1.G — recording-capture hook. Vim records literal keys,
@@ -236,7 +236,7 @@ export async function handleNormalMode(editor: Editor, key: string, normalizedKe
     await executeCommand(editor, cmdRight.value);
 
     // If the command activated the space prefix, schedule which-key for "SPC"
-    if ((editor as any).spacePressed === true) {
+    if (editor.spacePressed === true) {
       schedulePrefixPopup(editor, state, wk, exec, escape, "SPC");
     }
     return;
@@ -260,13 +260,13 @@ export async function handleNormalMode(editor: Editor, key: string, normalizedKe
   // clear which-key state so the abandoned prefix doesn't linger.
   if (currentPrefix || spaceActive) {
     clearWhichKey(state, wk);
-    (editor as any).spacePressed = false;
+    editor.spacePressed = false;
   }
   state.statusMessage = `Unbound key: ${lookupKey}`;
   // SPEC-055: log at 'warn' (elevated from SPEC-016's 'debug' for alpha
   // observability) so unbound keys mirror into *Messages*. This fills the
   // last-handler gap — the other three handlers already log unbound keys.
-  (editor as any).logMessage?.(`Unbound key: ${lookupKey}`, 'warn');
+  editor.logMessage(`Unbound key: ${lookupKey}`, 'warn');
 }
 
 function isTruthyResult(result: any): boolean {
@@ -323,7 +323,7 @@ function isMajorModePrefix(editor: Editor, lookupKey: string, majorMode: string)
 }
 
 function feedDigit(editor: Editor, exec: (cmd: string) => any, key: string): void {
-  const digitResult = exec(`(vim-key-digit-value "${(editor as any).escapeKeyForTLisp(key)}")`);
+  const digitResult = exec(`(vim-key-digit-value "${editor.escapeKeyForTLisp(key)}")`);
   if (digitResult && digitResult._tag === "Right" && digitResult.right?.type === "number") {
     exec(`(vim-count-add-digit ${digitResult.right.value})`);
   }
@@ -339,14 +339,15 @@ function clearWhichKey(state: any, wk: any): void {
 
 async function executeCommand(editor: Editor, tLispCmd: string): Promise<void> {
   try {
-    await (editor as any).executeCommandAsync(tLispCmd);
+    await editor.executeCommandAsync(tLispCmd);
   } catch (error) {
     if (error instanceof Error && error.message.includes("EDITOR_QUIT_SIGNAL")) {
       throw new Error("EDITOR_QUIT_SIGNAL");
     }
-    (editor as any).state.statusMessage = `Command error: ${error instanceof Error ? error.message : String(error)}`;
+    const errorMsg = error instanceof Error ? error.message : String(error);
+    editor.getModel().statusMessage = `Command error: ${errorMsg}`;
     // SPEC-055: command errors log at 'error' so they mirror into *Messages*.
-    (editor as any).logMessage?.(`Command error: ${error instanceof Error ? error.message : String(error)}`, 'error');
+    editor.logMessage(`Command error: ${errorMsg}`, 'error');
   }
 }
 
@@ -361,7 +362,7 @@ function schedulePrefixPopup(
   wk.schedule(prefix, bindings, () => {
     if (state.whichKeyPrefix !== prefix) return;
     state.whichKeyActive = true;
-    const size = (editor as any).terminal.getSize();
+    const size = editor.getTerminal().getSize();
     state.whichKeyPopup = computeWhichKeyPopup(bindings, prefix, size.width, Math.max(1, size.height - 4), prefixLabel(prefix));
     state.statusMessage = `Which-key: ${bindings.map(b => `${b.key.substring(prefix.length + 1)} : ${b.command}`).join(", ")}`;
   });
@@ -370,8 +371,8 @@ function schedulePrefixPopup(
 function tLispPrefixBindings(exec: (cmd: string) => any, escape: (s: string) => string, prefix: string): WhichKeyBinding[] {
   const result = exec(`(keymap-prefix-bindings (current-keymap) "${escape(prefix)}")`);
   if (!result || result._tag !== "Right" || !result.right || result.right.type !== "list") return [];
-  return (result.right.value as any[]).map((entry: any) => {
-    const items = entry.value as any[];
-    return { key: items[0].value, command: items[1].value as string, mode: "normal" };
+  return (result.right.value as { value: { value: string }[] }[]).map((entry) => {
+    const items = entry.value;
+    return { key: items[0]!.value, command: items[1]!.value as string, mode: "normal" };
   });
 }

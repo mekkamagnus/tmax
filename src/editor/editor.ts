@@ -56,6 +56,10 @@ import { cloneJsonValue, deserializeTlispValue, serializeTlispValue } from "../t
 import { createModuleLoader } from "../tlisp/module-loader.ts";
 import type { ModuleExportRecord } from "../tlisp/module-registry.ts";
 import { createWhichKeyState, DEFAULT_WHICH_KEY_TIMEOUT, type WhichKeyHandle } from "./utils/which-key-state.ts";
+import type { EditorModel, Msg, Cmd, EditorRuntime } from "./functional/index.ts";
+import { initialModel, modelToEditorState, editorStateToModelPatch, update, runCmd } from "./functional/index.ts";
+import type { AppError } from "../error/types.ts";
+import { createValidationError } from "../error/types.ts";
 
 /**
  * Key mapping for editor commands
@@ -97,7 +101,7 @@ export function resolveMapping(
  * Core editor implementation
  */
 export class Editor {
-  private state: EditorState;
+  private model: EditorModel;
   private buffers: Map<string, FunctionalTextBufferImpl> = new Map();
   private interpreter: TLispInterpreterImpl;
   private keyMappings: Map<string, KeyMapping[]>;
@@ -118,7 +122,7 @@ export class Editor {
   private log = new Log();
   /** On-disk JSONL log path (SPEC-055 persistence). */
   private logPath: string = defaultLogPath();
-  private spacePressed: boolean = false;  // Track space key for SPC ; sequence (US-1.10.1)
+  spacePressed: boolean = false;  // Track space key for SPC ; sequence (US-1.10.1)
   private windowPrefixPressed: boolean = false;  // Track C-w prefix for window commands (SPEC-004)
   private lspClient: LSPClient;  // LSP client for language server integration (US-3.1.1)
   keymapSync: KeymapSync;  // Bridge layer for T-Lisp keymap integration (US-0.4.1)
@@ -155,7 +159,7 @@ export class Editor {
       this.currentInitFile = initFilePath;
     }
 
-    this.state = {
+    this.model = {
       cursorPosition: { line: 0, column: 0 },
       mode: "normal",
       statusMessage: "Welcome to tmax",
@@ -192,14 +196,14 @@ export class Editor {
       minibufferView: undefined,
     };
 
-    this.whichKeyHandle = createWhichKeyState(this.state.whichKeyTimeout ?? DEFAULT_WHICH_KEY_TIMEOUT);
+    this.whichKeyHandle = createWhichKeyState(this.model.whichKeyTimeout ?? DEFAULT_WHICH_KEY_TIMEOUT);
 
     editorLog.debug('Editor state initialized', {
       correlationId: initId,
       data: {
-        mode: this.state.mode,
-        theme: this.state.config.theme,
-        tabSize: this.state.config.tabSize
+        mode: this.model.mode,
+        theme: this.model.config.theme,
+        tabSize: this.model.config.tabSize
       }
     });
 
@@ -263,7 +267,7 @@ export class Editor {
 
     editorLog.completeOperation('editor-construction', initId, {
       data: {
-        mode: this.state.mode,
+        mode: this.model.mode,
         apiInitialized: true
       }
     });
@@ -277,65 +281,65 @@ export class Editor {
     const editor = this;
     const tlispState: TlispEditorState = {
       get currentBuffer() {
-        return editor.state.currentBuffer ?? null;
+        return editor.model.currentBuffer ?? null;
       },
       set currentBuffer(v: FunctionalTextBuffer | null) {
-        const previousName = editor.findBufferName(editor.state.currentBuffer);
+        const previousName = editor.findBufferName(editor.model.currentBuffer);
         const existingName = editor.findBufferName(v ?? undefined);
         const bufferName = existingName ?? previousName;
         if (v && bufferName) editor.buffers.set(bufferName, v as FunctionalTextBufferImpl);
-        if (v && editor.state.tabs && editor.state.tabs.length > 0) {
-          const currentTabIndex = editor.state.currentTabIndex ?? 0;
-          const currentTab = editor.state.tabs[currentTabIndex];
-          if (currentTab && currentTab.label === editor.state.currentFilename) {
-            editor.state.tabs = editor.state.tabs.map((tab, index) =>
+        if (v && editor.model.tabs && editor.model.tabs.length > 0) {
+          const currentTabIndex = editor.model.currentTabIndex ?? 0;
+          const currentTab = editor.model.tabs[currentTabIndex];
+          if (currentTab && currentTab.label === editor.model.currentFilename) {
+            editor.model.tabs = editor.model.tabs.map((tab, index) =>
               index === currentTabIndex ? { ...tab, buffer: v, bufferName } : tab
             );
           }
         }
         // R4-3: update current window buffer and bufferName
         if (v && bufferName) {
-          const windows = editor.state.windows;
+          const windows = editor.model.windows;
           if (windows && windows.length > 0) {
-            const currentWindow = windows[editor.state.currentWindowIndex ?? 0];
+            const currentWindow = windows[editor.model.currentWindowIndex ?? 0];
             if (currentWindow) {
               currentWindow.buffer = v as FunctionalTextBufferImpl;
               currentWindow.bufferName = bufferName;
             }
           }
         }
-        editor.state.currentBuffer = v ?? undefined;
+        editor.model.currentBuffer = v ?? undefined;
         if (bufferName) {
           editor.touchBuffer(bufferName);
-          editor.state.currentFilename = editor.bufferMetadata.get(bufferName)?.filename;
+          editor.model.currentFilename = editor.bufferMetadata.get(bufferName)?.filename;
         }
       },
       get buffers() {
         return editor.buffers;
       },
       get cursorLine() {
-        return editor.state.cursorPosition.line; 
+        return editor.model.cursorPosition.line; 
       },
       set cursorLine(v: number) { 
         // Update both global and current window cursor position (US-3.2.1)
-        editor.state.cursorPosition.line = v;
-        const windows = editor.state.windows;
+        editor.model.cursorPosition.line = v;
+        const windows = editor.model.windows;
         if (windows && windows.length > 0) {
-          const currentWindow = windows[editor.state.currentWindowIndex ?? 0];
+          const currentWindow = windows[editor.model.currentWindowIndex ?? 0];
           if (currentWindow) {
             currentWindow.cursorLine = v;
           }
         }
       },
       get cursorColumn() {
-        return editor.state.cursorPosition.column; 
+        return editor.model.cursorPosition.column; 
       },
       set cursorColumn(v: number) { 
         // Update both global and current window cursor position (US-3.2.1)
-        editor.state.cursorPosition.column = v;
-        const windows = editor.state.windows;
+        editor.model.cursorPosition.column = v;
+        const windows = editor.model.windows;
         if (windows && windows.length > 0) {
-          const currentWindow = windows[editor.state.currentWindowIndex ?? 0];
+          const currentWindow = windows[editor.model.currentWindowIndex ?? 0];
           if (currentWindow) {
             currentWindow.cursorColumn = v;
           }
@@ -343,36 +347,36 @@ export class Editor {
       },
       get terminal() { return editor.terminal; },
       get filesystem() { return editor.filesystem; },
-      get mode() { return editor.state.mode; },
-      set mode(v: 'normal' | 'insert' | 'visual' | 'command' | 'mx' | 'replace') { editor.state.mode = v; },
+      get mode() { return editor.model.mode; },
+      set mode(v: 'normal' | 'insert' | 'visual' | 'command' | 'mx' | 'replace') { editor.model.mode = v; },
       get lastCommand() { return ""; },
       set lastCommand(_: string) { },
-      get statusMessage() { return editor.state.statusMessage; },
-      set statusMessage(v: string) { editor.state.statusMessage = v; },
-      get viewportTop() { return editor.state.viewportTop; },
-      set viewportTop(v: number) { editor.state.viewportTop = v; },
-      get viewportLeft() { return editor.state.viewportLeft ?? 0; },
-      set viewportLeft(v: number) { editor.state.viewportLeft = v; },
-      get commandLine() { return editor.state.commandLine; },
-      set commandLine(v: string) { editor.state.commandLine = v; },
+      get statusMessage() { return editor.model.statusMessage; },
+      set statusMessage(v: string) { editor.model.statusMessage = v; },
+      get viewportTop() { return editor.model.viewportTop; },
+      set viewportTop(v: number) { editor.model.viewportTop = v; },
+      get viewportLeft() { return editor.model.viewportLeft ?? 0; },
+      set viewportLeft(v: number) { editor.model.viewportLeft = v; },
+      get commandLine() { return editor.model.commandLine; },
+      set commandLine(v: string) { editor.model.commandLine = v; },
       get spacePressed() { return editor.spacePressed; },
       set spacePressed(v: boolean) { editor.spacePressed = v; },
-      get mxCommand() { return editor.state.mxCommand; },
-      set mxCommand(v: string) { editor.state.mxCommand = v; },
-      get cursorFocus() { return editor.state.cursorFocus ?? 'buffer'; },
-      set cursorFocus(v: 'buffer' | 'command') { editor.state.cursorFocus = v; },
-      get lspDiagnostics() { return editor.state.lspDiagnostics; },
+      get mxCommand() { return editor.model.mxCommand; },
+      set mxCommand(v: string) { editor.model.mxCommand = v; },
+      get cursorFocus() { return editor.model.cursorFocus ?? 'buffer'; },
+      set cursorFocus(v: 'buffer' | 'command') { editor.model.cursorFocus = v; },
+      get lspDiagnostics() { return editor.model.lspDiagnostics; },
       logMessage: (msg: string, level?: string, command?: string, frameId?: string) => editor.logMessage(msg, (level as LogLevel) ?? 'info', command, frameId),
       setEchoOnly: (text: string) => editor.setEchoOnly(text),
       logProgram: (category: 'shell' | 'process' | 'test' | 'autosave', entry: any) => editor.logProgram(category, entry),
-      get currentFilename() { return editor.state.currentFilename; },
+      get currentFilename() { return editor.model.currentFilename; },
       set currentFilename(v: string | undefined) {
-        editor.state.currentFilename = v;
-        const name = editor.findBufferName(editor.state.currentBuffer);
+        editor.model.currentFilename = v;
+        const name = editor.findBufferName(editor.model.currentBuffer);
         if (name) editor.updateBufferMetadata(name, { filename: v });
       },
-      get config() { return editor.state.config; },
-      set config(v: EditorState["config"]) { editor.state.config = v; },
+      get config() { return editor.model.config; },
+      set config(v: EditorState["config"]) { editor.model.config = v; },
       get operations() {
         return {
           saveFile: (filename?: string) => editor.saveFile(filename),
@@ -404,8 +408,10 @@ export class Editor {
       _setBufferModified: (modified: boolean) => editor.setCurrentBufferModified(modified),
       _getMessageLog: () => new ViewBoundLog(editor.log, 'messages'),
       _getUnifiedLog: () => editor.log,
-      get searchMatches() { return editor.state.searchMatches; },
-      set searchMatches(v: import("../core/types.ts").Range[] | undefined) { editor.state.searchMatches = v; },
+      get searchMatches() { return editor.model.searchMatches; },
+      set searchMatches(v: import("../core/types.ts").Range[] | undefined) { editor.model.searchMatches = v; },
+      getModel: () => editor.model,
+      applyModel: (m) => { editor.model = m; },
     };
 
     const api = createEditorAPI(tlispState);
@@ -705,8 +711,8 @@ export class Editor {
       }
 
       // Set a flag to indicate we're waiting for a key to describe
-      this.state.describeKeyPending = true;
-      this.state.statusMessage = "Describe key: press a key";
+      this.model.describeKeyPending = true;
+      this.model.statusMessage = "Describe key: press a key";
 
       return createString("waiting for key");
     });
@@ -788,8 +794,8 @@ export class Editor {
       }
 
       // Set a flag to indicate we're waiting for a function name to describe
-      this.state.describeFunctionPending = true;
-      this.state.statusMessage = "Describe function: ";
+      this.model.describeFunctionPending = true;
+      this.model.statusMessage = "Describe function: ";
 
       return createString("waiting for function name");
     });
@@ -909,8 +915,8 @@ export class Editor {
       }
 
       // Set a flag to indicate we're waiting for a search pattern
-      this.state.aproposCommandPending = true;
-      this.state.statusMessage = "Apropos command: ";
+      this.model.aproposCommandPending = true;
+      this.model.statusMessage = "Apropos command: ";
 
       return createString("waiting for search pattern");
     });
@@ -977,7 +983,7 @@ export class Editor {
       // Use async saveFile but return synchronously for T-Lisp
       this.saveFile().catch((error) => {
         const msg = `Save failed: ${error instanceof Error ? error.message : String(error)}`;
-        this.state.statusMessage = msg;
+        this.model.statusMessage = msg;
         // SPEC-055: route save errors through the log so they don't vanish.
         this.logMessage(msg, 'error');
       });
@@ -990,14 +996,14 @@ export class Editor {
       if (args.length !== 0) {
         throw new Error("minibuffer-active requires no arguments");
       }
-      return { type: "boolean", value: this.state.mode === "mx" };
+      return { type: "boolean", value: this.model.mode === "mx" };
     });
 
     defineRaw("minibuffer-get", (args) => {
       if (args.length !== 0) {
         throw new Error("minibuffer-get requires no arguments");
       }
-      return createString(this.state.mxCommand);
+      return createString(this.model.mxCommand);
     });
 
     defineRaw("minibuffer-set", (args) => {
@@ -1008,7 +1014,7 @@ export class Editor {
       if (!textArg || textArg.type !== "string") {
         throw new Error("minibuffer-set requires a string");
       }
-      this.state.mxCommand = textArg.value as string;
+      this.model.mxCommand = textArg.value as string;
       return createString(textArg.value as string);
     });
 
@@ -1016,42 +1022,42 @@ export class Editor {
       if (args.length !== 0) {
         throw new Error("minibuffer-clear requires no arguments");
       }
-      this.state.mxCommand = "";
+      this.model.mxCommand = "";
       return createNil();
     });
 
     defineRaw("minibuffer-state-get", (args) => {
       if (args.length !== 0) throw new Error("minibuffer-state-get requires no arguments");
-      return deserializeTlispValue(this.state.minibufferState);
+      return deserializeTlispValue(this.model.minibufferState);
     });
 
     defineRaw("minibuffer-state-set", (args) => {
       if (args.length !== 1) throw new Error("minibuffer-state-set requires one argument");
-      this.state.minibufferState = serializeTlispValue(args[0]!);
+      this.model.minibufferState = serializeTlispValue(args[0]!);
       return args[0]!;
     });
 
     defineRaw("minibuffer-state-clear", (args) => {
       if (args.length !== 0) throw new Error("minibuffer-state-clear requires no arguments");
-      this.state.minibufferState = undefined;
+      this.model.minibufferState = undefined;
       return createNil();
     });
 
     defineRaw("minibuffer-view-publish", (args) => {
       if (args.length !== 1) throw new Error("minibuffer-view-publish requires one view");
-      this.state.minibufferView = this.minibufferViewFromTlisp(args[0]!);
+      this.model.minibufferView = this.minibufferViewFromTlisp(args[0]!);
       return args[0]!;
     });
 
     defineRaw("minibuffer-view-clear", (args) => {
       if (args.length !== 0) throw new Error("minibuffer-view-clear requires no arguments");
-      this.state.minibufferView = undefined;
+      this.model.minibufferView = undefined;
       return createNil();
     });
 
     defineRaw("editor-cursor-focus", (args) => {
       if (args.length !== 0) throw new Error("editor-cursor-focus requires no arguments");
-      return createString(this.state.cursorFocus ?? "buffer");
+      return createString(this.model.cursorFocus ?? "buffer");
     });
 
     defineRaw("editor-set-cursor-focus", (args) => {
@@ -1060,7 +1066,7 @@ export class Editor {
       }
       const focus = args[0].value as string;
       if (focus !== "buffer" && focus !== "command") throw new Error("Invalid cursor focus");
-      this.state.cursorFocus = focus;
+      this.model.cursorFocus = focus;
       return createString(focus);
     });
 
@@ -1144,8 +1150,9 @@ export class Editor {
       if (!result || typeof result !== "object" || !("_tag" in result)) {
         return createNil();
       }
-      if (Either.isLeft(result as any)) throw new Error((result as any).left.message);
-      return (result as any).right;
+      const eitherResult = result as Either<{ message: string }, TLispValue>;
+      if (Either.isLeft(eitherResult)) throw new Error(eitherResult.left.message);
+      return eitherResult.right;
     });
 
     defineRaw("editor-space-prefix-active-p", (args) => {
@@ -1165,7 +1172,7 @@ export class Editor {
         throw new Error("editor-window-prefix requires no arguments");
       }
       this.windowPrefixPressed = true;
-      this.state.statusMessage = "C-w";
+      this.model.statusMessage = "C-w";
       return createString("window-prefix");
     });
 
@@ -1174,8 +1181,8 @@ export class Editor {
       if (args.length !== 0) {
         throw new Error("which-key-enable requires no arguments");
       }
-      this.state.whichKeyTimeout = this.state.whichKeyTimeout || 1000;
-      this.whichKeyHandle.reset(this.state.whichKeyTimeout);
+      this.model.whichKeyTimeout = this.model.whichKeyTimeout || 1000;
+      this.whichKeyHandle.reset(this.model.whichKeyTimeout);
       return createNil();
     });
 
@@ -1183,11 +1190,11 @@ export class Editor {
       if (args.length !== 0) {
         throw new Error("which-key-disable requires no arguments");
       }
-      this.state.whichKeyTimeout = 0;
+      this.model.whichKeyTimeout = 0;
       this.whichKeyHandle.deactivate();
-      this.state.whichKeyActive = false;
-      this.state.whichKeyPrefix = "";
-      this.state.whichKeyBindings = [];
+      this.model.whichKeyActive = false;
+      this.model.whichKeyPrefix = "";
+      this.model.whichKeyBindings = [];
       return createNil();
     });
 
@@ -1203,7 +1210,7 @@ export class Editor {
       if (timeout < 0) {
         throw new Error("which-key-timeout must be a positive number");
       }
-      this.state.whichKeyTimeout = timeout;
+      this.model.whichKeyTimeout = timeout;
       this.whichKeyHandle.reset(timeout);
       return createNumber(timeout);
     });
@@ -1212,21 +1219,21 @@ export class Editor {
       if (args.length !== 0) {
         throw new Error("which-key-active requires no arguments");
       }
-      return { type: "boolean", value: this.state.whichKeyActive || false };
+      return { type: "boolean", value: this.model.whichKeyActive || false };
     });
 
     defineRaw("which-key-prefix", (args) => {
       if (args.length !== 0) {
         throw new Error("which-key-prefix requires no arguments");
       }
-      return createString(this.state.whichKeyPrefix || "");
+      return createString(this.model.whichKeyPrefix || "");
     });
 
     defineRaw("which-key-bindings", (args) => {
       if (args.length !== 0) {
         throw new Error("which-key-bindings requires no arguments");
       }
-      const bindings = this.state.whichKeyBindings || [];
+      const bindings = this.model.whichKeyBindings || [];
       const bindingValues = bindings.map((binding: any) => {
         const result = [
           createString(binding.key),
@@ -1477,7 +1484,7 @@ export class Editor {
             try {
               await this.handleKey(key);
             } catch (error) {
-              this.state.statusMessage = `Macro error: ${error instanceof Error ? error.message : String(error)}`;
+              this.model.statusMessage = `Macro error: ${error instanceof Error ? error.message : String(error)}`;
             }
           }
         }
@@ -1512,7 +1519,7 @@ export class Editor {
           try {
             await this.handleKey(key);
           } catch (error) {
-            this.state.statusMessage = `Macro error: ${error instanceof Error ? error.message : String(error)}`;
+            this.model.statusMessage = `Macro error: ${error instanceof Error ? error.message : String(error)}`;
           }
         }
         return createString(register);
@@ -1571,11 +1578,11 @@ export class Editor {
 
     // Add window management operations (US-3.2.1)
     const windowOps = createWindowOps(
-      () => this.state.windows || [],
-      (windows) => { this.state.windows = windows; },
-      () => this.state.currentWindowIndex ?? 0,
-      (index) => { this.state.currentWindowIndex = index; },
-      () => this.state.currentBuffer,
+      () => this.model.windows || [],
+      (windows) => { this.model.windows = windows; },
+      () => this.model.currentWindowIndex ?? 0,
+      (index) => { this.model.currentWindowIndex = index; },
+      () => this.model.currentBuffer,
       () => this.terminal.getSize()
     );
 
@@ -1585,17 +1592,17 @@ export class Editor {
 
     // Add tab management operations (SPEC-004)
     const tabOps = createTabOps(
-      () => this.state.tabs || [],
-      (tabs) => { this.state.tabs = tabs; },
-      () => this.state.currentTabIndex ?? 0,
-      (index) => { this.state.currentTabIndex = index; },
+      () => this.model.tabs || [],
+      (tabs) => { this.model.tabs = tabs; },
+      () => this.model.currentTabIndex ?? 0,
+      (index) => { this.model.currentTabIndex = index; },
       (name, content) => {
         this.createBuffer(name, content);
-        return this.state.currentBuffer;
+        return this.model.currentBuffer;
       },
       (tab) => {
-        this.state.currentBuffer = tab.buffer;
-        this.state.currentFilename = tab.label;
+        this.model.currentBuffer = tab.buffer;
+        this.model.currentFilename = tab.label;
       },
     );
 
@@ -1722,7 +1729,7 @@ export class Editor {
     try {
       const loaded = await loadMacrosFromFile(this.filesystem);
       if (loaded) {
-        this.state.statusMessage = "Macros loaded from ~/.config/tmax/macros.tlisp";
+        this.model.statusMessage = "Macros loaded from ~/.config/tmax/macros.tlisp";
       }
       // If file doesn't exist, that's fine - it's the first run
     } catch (error) {
@@ -1737,7 +1744,7 @@ export class Editor {
     try {
       const saved = await saveMacrosToFile(this.filesystem);
       if (saved) {
-        this.state.statusMessage = "Macros saved to ~/.config/tmax/macros.tlisp";
+        this.model.statusMessage = "Macros saved to ~/.config/tmax/macros.tlisp";
       }
     } catch (error) {
       console.warn("Failed to save macros:", error);
@@ -1957,7 +1964,7 @@ export class Editor {
       try { this.interpreter.execute('(global-line-numbers-mode t)'); } catch { /* ok */ }
     } catch (error) {
       console.error("Critical: Failed to load even fallback bindings:", error);
-      this.state.statusMessage = "Critical: No key bindings available";
+      this.model.statusMessage = "Critical: No key bindings available";
     }
   }
 
@@ -2065,12 +2072,12 @@ export class Editor {
   evalBuffer(): TLispValue {
     const evalLog = log.module('editor').fn('evalBuffer');
     
-    if (!this.state.currentBuffer) {
+    if (!this.model.currentBuffer) {
       evalLog.warn('No buffer to evaluate');
       return createNil();
     }
 
-    const bufferContentResult = this.state.currentBuffer.getContent();
+    const bufferContentResult = this.model.currentBuffer.getContent();
     if (Either.isLeft(bufferContentResult)) {
       evalLog.error('Failed to get buffer content');
       return createNil();
@@ -2157,9 +2164,9 @@ export class Editor {
     }
   }
 
-  private executeCommand(command: string): unknown {
+  executeCommand(command: string): unknown {
     try {
-      this.state.lastCommand = command;
+      this.model.lastCommand = command;
       const result = this.interpreter.execute(command);
       if (Either.isRight(result)) {
         return result;
@@ -2171,11 +2178,11 @@ export class Editor {
         throw new Error('EDITOR_QUIT_SIGNAL');
       }
       if (err.diagnostic) {
-        this.state.statusMessage = `[${err.diagnostic.code}] ${err.message}`;
-        this.logMessage(renderDiagnostic(err.diagnostic), 'error', this.state.lastCommand);
+        this.model.statusMessage = `[${err.diagnostic.code}] ${err.message}`;
+        this.logMessage(renderDiagnostic(err.diagnostic), 'error', this.model.lastCommand);
       } else {
-        this.state.statusMessage = err.message;
-        this.logMessage(err.message, 'error', this.state.lastCommand);
+        this.model.statusMessage = err.message;
+        this.logMessage(err.message, 'error', this.model.lastCommand);
       }
 
       const source = command.trim().startsWith("(") ? command : `(${command})`;
@@ -2193,15 +2200,15 @@ export class Editor {
       if (error instanceof Error && (error.message === "EDITOR_QUIT_SIGNAL" || error.message.includes("EDITOR_QUIT_SIGNAL"))) {
         throw new Error("EDITOR_QUIT_SIGNAL"); // Re-throw clean quit signal
       }
-      this.state.statusMessage = `Error: ${error instanceof Error ? error.message : String(error)}`;
-      this.logMessage(this.state.statusMessage, 'error', this.state.lastCommand);
+      this.model.statusMessage = `Error: ${error instanceof Error ? error.message : String(error)}`;
+      this.logMessage(this.model.statusMessage, 'error', this.model.lastCommand);
       throw error;
     }
   }
 
-  private async executeCommandAsync(command: string): Promise<unknown> {
+  async executeCommandAsync(command: string): Promise<unknown> {
     try {
-      this.state.lastCommand = command;
+      this.model.lastCommand = command;
       const result = await this.interpreter.executeAsync!(command);
       if (Either.isRight(result)) {
         return result;
@@ -2220,19 +2227,19 @@ export class Editor {
         throw new Error('EDITOR_QUIT_SIGNAL');
       }
       if (err.diagnostic) {
-        this.state.statusMessage = `[${err.diagnostic.code}] ${err.message}`;
-        this.logMessage(renderDiagnostic(err.diagnostic), 'error', this.state.lastCommand);
+        this.model.statusMessage = `[${err.diagnostic.code}] ${err.message}`;
+        this.logMessage(renderDiagnostic(err.diagnostic), 'error', this.model.lastCommand);
       } else {
-        this.state.statusMessage = err.message;
-        this.logMessage(err.message, 'error', this.state.lastCommand);
+        this.model.statusMessage = err.message;
+        this.logMessage(err.message, 'error', this.model.lastCommand);
       }
       return result;
     } catch (error) {
       if (error instanceof Error && (error.message === "EDITOR_QUIT_SIGNAL" || error.message.includes("EDITOR_QUIT_SIGNAL"))) {
         throw new Error("EDITOR_QUIT_SIGNAL");
       }
-      this.state.statusMessage = `Error: ${error instanceof Error ? error.message : String(error)}`;
-      this.logMessage(this.state.statusMessage, 'error', this.state.lastCommand);
+      this.model.statusMessage = `Error: ${error instanceof Error ? error.message : String(error)}`;
+      this.logMessage(this.model.statusMessage, 'error', this.model.lastCommand);
       throw error;
     }
   }
@@ -2289,7 +2296,7 @@ export class Editor {
   /**
    * Escape special characters for safe inclusion in T-Lisp string literals
    */
-  private escapeKeyForTLisp(key: string): string {
+  escapeKeyForTLisp(key: string): string {
     // Escape special characters for T-Lisp string literals
     return key
       .replace(/\\/g, "\\\\")  // Escape backslashes first
@@ -2307,13 +2314,13 @@ export class Editor {
     const keyLog = log.module('editor').fn('handleKey');
 
     // Log key press in DEBUG mode (can be very verbose)
-    const previousMode = this.state.mode;
+    const previousMode = this.model.mode;
     keyLog.debug(`Key pressed: ${key}`, {
       data: {
         key,
         normalizedKey: this.normalizeKey(key),
         currentMode: previousMode,
-        cursorPosition: this.state.cursorPosition
+        cursorPosition: this.model.cursorPosition
       }
     });
 
@@ -2323,7 +2330,7 @@ export class Editor {
     const normalizedKey = this.normalizeKey(key);
 
     // Dispatch to mode-specific handlers
-    switch (this.state.mode) {
+    switch (this.model.mode) {
       case "normal":
         await handleNormalMode(this, key, normalizedKey);
         break;
@@ -2349,21 +2356,21 @@ export class Editor {
     }
 
     // Log mode changes (INFO level)
-    if (previousMode !== this.state.mode) {
-      keyLog.info(`Mode changed: ${previousMode} → ${this.state.mode}`, {
+    if (previousMode !== this.model.mode) {
+      keyLog.info(`Mode changed: ${previousMode} → ${this.model.mode}`, {
         data: {
           previousMode,
-          newMode: this.state.mode,
+          newMode: this.model.mode,
           triggerKey: key
         }
       });
     }
 
     // Log errors
-    if (this.state.statusMessage?.includes('Error')) {
+    if (this.model.statusMessage?.includes('Error')) {
       keyLog.error('Editor error occurred', undefined, {
         operation: 'handleKeyPress',
-        data: { statusMessage: this.state.statusMessage, key }
+        data: { statusMessage: this.model.statusMessage, key }
       });
     }
 
@@ -2393,7 +2400,7 @@ export class Editor {
    * prefixes. Contrast with logMessage, which logs + echoes.
    */
   setEchoOnly(text: string): void {
-    this.state.statusMessage = text;
+    this.model.statusMessage = text;
   }
 
   /**
@@ -2497,21 +2504,21 @@ export class Editor {
       this.updateBufferMetadata(bufferName, { modified: false });
     }
 
-    this.state.currentBuffer = buffer;
-    this.state.currentFilename = workspace.currentFilename ?? this.bufferMetadata.get(bufferName)?.filename;
-    this.state.cursorPosition = { ...workspace.cursorState };
-    this.state.viewportTop = workspace.viewportState.top;
-    this.state.viewportLeft = workspace.viewportState.left ?? 0;
+    this.model.currentBuffer = buffer;
+    this.model.currentFilename = workspace.currentFilename ?? this.bufferMetadata.get(bufferName)?.filename;
+    this.model.cursorPosition = { ...workspace.cursorState };
+    this.model.viewportTop = workspace.viewportState.top;
+    this.model.viewportLeft = workspace.viewportState.left ?? 0;
     // R3-1: use oldBufferNames reverse index to resolve buffer names,
     // then look up the new deep-copied instance from this.buffers
 	    const defaultWindow: Window = {
 	      id: 'window-main',
 	      buffer,
 	      bufferName,
-	      cursorLine: this.state.cursorPosition.line,
-	      cursorColumn: this.state.cursorPosition.column,
-	      viewportTop: this.state.viewportTop,
-	      viewportLeft: this.state.viewportLeft ?? 0,
+	      cursorLine: this.model.cursorPosition.line,
+	      cursorColumn: this.model.cursorPosition.column,
+	      viewportTop: this.model.viewportTop,
+	      viewportLeft: this.model.viewportLeft ?? 0,
 	      height: this.terminal.getSize().height - 2,
 	      width: this.terminal.getSize().width,
 	    };
@@ -2528,16 +2535,16 @@ export class Editor {
 	      })
 	      : [];
 
-	    this.state.windows = windows;
-	    this.state.currentWindowIndex = 0;
-	    this.state.tabs = tabs;
-	    this.state.currentTabIndex = 0;
-    this.state.buffers = this.buffers;
-    this.state.mode = 'normal'; // I10: reset mode on workspace switch
+	    this.model.windows = windows;
+	    this.model.currentWindowIndex = 0;
+	    this.model.tabs = tabs;
+	    this.model.currentTabIndex = 0;
+    this.model.buffers = this.buffers;
+    this.model.mode = 'normal'; // I10: reset mode on workspace switch
 
     // I4: re-detect major mode for the active buffer
-    if (this.state.currentFilename) {
-      this.activateMajorModeForFile(this.state.currentFilename);
+    if (this.model.currentFilename) {
+      this.activateMajorModeForFile(this.model.currentFilename);
     }
   }
 
@@ -2559,7 +2566,7 @@ export class Editor {
     const bufferMetadata = new Map<string, BufferMetadata>();
     const bufferModeStates = new Map<string, import("../core/types.ts").BufferModeState>();
 
-    const currentBufferName = this.findBufferName(this.state.currentBuffer) ?? base?.currentBufferName ?? '*scratch*';
+    const currentBufferName = this.findBufferName(this.model.currentBuffer) ?? base?.currentBufferName ?? '*scratch*';
 
     for (const [name, buffer] of this.buffers.entries()) {
       if (name === '*Messages*') continue;
@@ -2573,8 +2580,8 @@ export class Editor {
         name,
         filename: metadata?.filename,
         modified: metadata?.modified ?? false,
-        cursorLine: isActiveBuffer ? this.state.cursorPosition.line : (incomingMeta?.cursorLine ?? 0),
-        cursorColumn: isActiveBuffer ? this.state.cursorPosition.column : (incomingMeta?.cursorColumn ?? 0),
+        cursorLine: isActiveBuffer ? this.model.cursorPosition.line : (incomingMeta?.cursorLine ?? 0),
+        cursorColumn: isActiveBuffer ? this.model.cursorPosition.column : (incomingMeta?.cursorColumn ?? 0),
       });
       bufferModeStates.set(name, {
         majorMode: modeState?.majorMode,
@@ -2600,12 +2607,12 @@ export class Editor {
       buffers,
       bufferMetadata,
       bufferModeStates,
-      windows: this.state.windows ?? [],
-      tabs: this.state.tabs ?? [],
-      cursorState: { ...this.state.cursorPosition },
-      viewportState: { top: this.state.viewportTop, left: this.state.viewportLeft ?? 0 },
+      windows: this.model.windows ?? [],
+      tabs: this.model.tabs ?? [],
+      cursorState: { ...this.model.cursorPosition },
+      viewportState: { top: this.model.viewportTop, left: this.model.viewportLeft ?? 0 },
       currentBufferName,
-      currentFilename: this.state.currentFilename,
+      currentFilename: this.model.currentFilename,
       currentMajorMode: this.getCurrentMajorMode(),
       // R4-8: extract directly from mode state instead of cloning full EditorState
       activeMinorModes: [...this.getCurrentModeState().activeMinorModes],
@@ -2626,35 +2633,35 @@ export class Editor {
     this.updateBufferMetadata(name, { modified: false, recency: this.bufferRecency++ });
 
     // Always set currentBuffer to the newly created buffer
-    this.state.currentBuffer = buffer;
+    this.model.currentBuffer = buffer;
 
     // Initialize first window if this is the first buffer (US-3.2.1)
-    if (!this.state.windows || this.state.windows.length === 0) {
+    if (!this.model.windows || this.model.windows.length === 0) {
       // Get terminal size for window dimensions (US-3.2.2)
       const terminalSize = this.terminal.getSize();
       const initialWindow: Window = {
         id: "window-main",
         buffer: buffer,
         bufferName: this.findBufferName(buffer),
-        cursorLine: this.state.cursorPosition.line,
-        cursorColumn: this.state.cursorPosition.column,
-        viewportTop: this.state.viewportTop,
-        viewportLeft: this.state.viewportLeft ?? 0,
+        cursorLine: this.model.cursorPosition.line,
+        cursorColumn: this.model.cursorPosition.column,
+        viewportTop: this.model.viewportTop,
+        viewportLeft: this.model.viewportLeft ?? 0,
         height: terminalSize.height - 2, // Reserve space for status line and minibuffer
         width: terminalSize.width,
       };
-      this.state.windows = [initialWindow];
-      this.state.currentWindowIndex = 0;
+      this.model.windows = [initialWindow];
+      this.model.currentWindowIndex = 0;
     } else {
       // Update current window's buffer
-      const currentWindow = this.state.windows[this.state.currentWindowIndex ?? 0];
+      const currentWindow = this.model.windows[this.model.currentWindowIndex ?? 0];
       if (currentWindow) {
         currentWindow.buffer = buffer;
         currentWindow.bufferName = this.findBufferName(buffer);
         // Sync window cursor with global cursor position
-        currentWindow.cursorLine = this.state.cursorPosition.line;
-        currentWindow.cursorColumn = this.state.cursorPosition.column;
-        currentWindow.viewportTop = this.state.viewportTop;
+        currentWindow.cursorLine = this.model.cursorPosition.line;
+        currentWindow.cursorColumn = this.model.cursorPosition.column;
+        currentWindow.viewportTop = this.model.viewportTop;
       }
     }
   }
@@ -2668,8 +2675,8 @@ export class Editor {
       const content = await this.filesystem.readFile(filename);
       this.createBuffer(filename, content);
       // Track the filename for save operations
-      this.state.currentFilename = filename;
-      const name = this.findBufferName(this.state.currentBuffer);
+      this.model.currentFilename = filename;
+      const name = this.findBufferName(this.model.currentBuffer);
       if (name) this.updateBufferMetadata(name, { filename, modified: false });
 
       // Notify LSP client about file open (US-3.1.1)
@@ -2679,11 +2686,11 @@ export class Editor {
       await this.lspClient.simulateDiagnostics(filename, content);
 
       // Update editor state with diagnostics (US-3.1.2)
-      this.state.lspDiagnostics = this.lspClient.getDiagnostics();
+      this.model.lspDiagnostics = this.lspClient.getDiagnostics();
 
       // Update status message with LSP connection status (US-3.1.1)
       const lspStatus = this.lspClient.getStatusMessage();
-      this.state.statusMessage = lspStatus ? `Opened ${filename} - ${lspStatus}` : `Opened ${filename}`;
+      this.model.statusMessage = lspStatus ? `Opened ${filename} - ${lspStatus}` : `Opened ${filename}`;
       this.logMessage(`Opened ${filename}`, 'info');
 
       // SPEC-035: Auto-detect and activate major mode
@@ -2698,7 +2705,7 @@ export class Editor {
 
       this.recomputeHighlights();
     } catch (error) {
-      this.state.statusMessage = `Failed to open ${filename}: ${error instanceof Error ? error.message : String(error)}`;
+      this.model.statusMessage = `Failed to open ${filename}: ${error instanceof Error ? error.message : String(error)}`;
       this.logMessage(`Failed to open ${filename}: ${error instanceof Error ? error.message : String(error)}`, 'error');
     }
   }
@@ -2708,38 +2715,38 @@ export class Editor {
    * @param filename - Optional filename to save to (overrides current filename)
    */
   async saveFile(filename?: string): Promise<void> {
-    if (!this.state.currentBuffer) {
-      this.state.statusMessage = "No buffer to save";
+    if (!this.model.currentBuffer) {
+      this.model.statusMessage = "No buffer to save";
       return;
     }
 
     // Use provided filename or fall back to tracked filename
-    const saveFilename = filename || this.state.currentFilename;
+    const saveFilename = filename || this.model.currentFilename;
     if (!saveFilename) {
-      this.state.statusMessage = "Buffer has no associated file";
+      this.model.statusMessage = "Buffer has no associated file";
       return;
     }
 
     try {
-      const contentResult = this.state.currentBuffer.getContent();
+      const contentResult = this.model.currentBuffer.getContent();
       if (Either.isRight(contentResult)) {
         await this.filesystem.writeFile(saveFilename, contentResult.right);
         // Update tracked filename if a new one was provided
-        if (filename && !this.state.currentFilename) {
-          this.state.currentFilename = filename;
+        if (filename && !this.model.currentFilename) {
+          this.model.currentFilename = filename;
         }
-        this.state.statusMessage = `Saved ${saveFilename}`;
+        this.model.statusMessage = `Saved ${saveFilename}`;
         this.setCurrentBufferModified(false);
         this.logMessage(`Saved ${saveFilename}`, 'info');
       } else {
         const gfMsg = `Failed to get content: ${contentResult.left}`;
-        this.state.statusMessage = gfMsg;
+        this.model.statusMessage = gfMsg;
         // SPEC-055: route save errors through the log so they don't vanish.
         this.logMessage(gfMsg, 'error');
       }
     } catch (error) {
       const fsMsg = `Failed to save ${saveFilename}: ${error instanceof Error ? error.message : String(error)}`;
-      this.state.statusMessage = fsMsg;
+      this.model.statusMessage = fsMsg;
       // SPEC-055: route save errors through the log so they don't vanish.
       this.logMessage(fsMsg, 'error');
     }
@@ -2749,7 +2756,7 @@ export class Editor {
    * Get the current buffer key for mode state lookup
    */
   getCurrentBufferKey(): string {
-    return this.state.currentFilename ?? "*scratch*";
+    return this.model.currentFilename ?? "*scratch*";
   }
 
   /**
@@ -2857,22 +2864,136 @@ export class Editor {
     }
   }
 
+  // ── Functional core bridge (CHORE-39) ───────────────────────────────
+  // The editor's deterministic state lives in `this.model` (EditorModel).
+  // `applyUpdate` dispatches a Msg through the pure `update` reducer, commits
+  // the result, enqueues any returned Cmds, and fires state-change listeners
+  // exactly once for that committed change. The command drain runs queued
+  // Cmds asynchronously and feeds follow-up Msgs back through `applyUpdate`.
+
+  private cmdQueue: Cmd[] = [];
+  private cmdDraining = false;
+
+  /** Canonical typed read access to the editor model. */
+  getModel(): EditorModel {
+    return this.model;
+  }
+
+  /** Typed access to the terminal (used by handlers). */
+  getTerminal(): TerminalIO {
+    return this.terminal;
+  }
+
+  /**
+   * Dispatch a Msg through the pure reducer, commit the resulting model,
+   * enqueue any returned Cmds, and fire state-change listeners once.
+   * Returns the committed model synchronously.
+   */
+  applyUpdate(msg: Msg): EditorModel {
+    const result = update(this.model, msg);
+    this.model = result.model;
+    if (result.cmds.length > 0) {
+      for (const cmd of result.cmds) this.cmdQueue.push(cmd);
+      void this.drainCommands();
+    }
+    this.notifyStateChange();
+    return this.model;
+  }
+
+  /** Enqueue a Cmd directly (e.g. from a handler) and kick the drain. */
+  enqueueCmd(cmd: Cmd): void {
+    this.cmdQueue.push(cmd);
+    void this.drainCommands();
+  }
+
+  /** Drain queued Cmds sequentially; follow-up Msgs commit via applyUpdate. */
+  private async drainCommands(): Promise<void> {
+    if (this.cmdDraining) return;
+    this.cmdDraining = true;
+    try {
+      while (this.cmdQueue.length > 0) {
+        const cmd = this.cmdQueue.shift()!;
+        const result = await runCmd(cmd, this.getRuntime()).run();
+        if (result._tag === "Left") {
+          this.applyUpdate({ type: "CmdFailed", commandTag: cmd.tag, commandId: cmd.commandId, error: result.left });
+        } else {
+          for (const followUp of result.right) {
+            this.applyUpdate(followUp);
+          }
+        }
+      }
+    } finally {
+      this.cmdDraining = false;
+    }
+  }
+
+  /** The EditorRuntime capability surface used by Cmd runners. */
+  getRuntime(): EditorRuntime {
+    const self = this;
+    return {
+      evalTlisp: (expr: string): Either<AppError, TLispValue> => {
+        try {
+          return Either.right<TLispValue, AppError>(self.executeCommand(expr) as TLispValue);
+        } catch (error) {
+          return Either.left<AppError, TLispValue>(self.toAppError(error));
+        }
+      },
+      evalTlispAsync: async (expr: string): Promise<Either<AppError, TLispValue>> => {
+        try {
+          const value = await self.executeCommandAsync(expr);
+          return Either.right<TLispValue, AppError>(value as TLispValue);
+        } catch (error) {
+          return Either.left<AppError, TLispValue>(self.toAppError(error));
+        }
+      },
+      readFile: async (path: string): Promise<Either<AppError, string>> => {
+        try {
+          const content = await self.filesystem.readFile(path);
+          return Either.right<string, AppError>(content);
+        } catch (error) {
+          return Either.left<AppError, string>(self.toAppError(error));
+        }
+      },
+      writeFile: async (path: string, content: string): Promise<Either<AppError, void>> => {
+        try {
+          await self.filesystem.writeFile(path, content);
+          return Either.right<void, AppError>(undefined);
+        } catch (error) {
+          return Either.left<AppError, void>(self.toAppError(error));
+        }
+      },
+      logMessage: (message, level) => { self.logMessage(message, level); },
+      logProgram: (_category, entry) => { self.logMessage(entry.text); },
+      toAppError: (error: unknown) => self.toAppError(error),
+    };
+  }
+
+  /** Coerce a thrown value into a typed AppError. */
+  private toAppError(error: unknown): AppError {
+    if (error && typeof error === "object" && "type" in error && typeof (error as { type?: unknown }).type === "string") {
+      return error as AppError;
+    }
+    return createValidationError("ConstraintViolation", error instanceof Error ? error.message : String(error));
+  }
+
   /**
    * Get editor state for React components
    */
   getEditorState(): EditorState {
     const modeState = this.getCurrentModeState();
+    // modelToEditorState clones mutable collections so callers cannot mutate
+    // internal model state through retained references.
+    const base = modelToEditorState(this.model);
     return {
-      ...this.state,
-      buffers: this.buffers as unknown as Map<string, FunctionalTextBuffer>,
-      cursorFocus: this.state.cursorFocus ?? 'buffer',
+      ...base,
+      cursorFocus: this.model.cursorFocus ?? 'buffer',
       currentMajorMode: modeState.majorMode,
       activeMinorModes: [...modeState.activeMinorModes],
       activeMinorModeLighters: modeState.activeMinorModes
         .map((m) => this.minorModeRegistry.get(m)?.lighter ?? "")
         .filter((l) => l !== ""),
-      minibufferState: cloneJsonValue(this.state.minibufferState),
-      minibufferView: this.state.minibufferView ? structuredClone(this.state.minibufferView) : undefined,
+      minibufferState: cloneJsonValue(this.model.minibufferState),
+      minibufferView: this.model.minibufferView ? structuredClone(this.model.minibufferView) : undefined,
     };
   }
 
@@ -2884,30 +3005,30 @@ export class Editor {
     const nextBufferKey = newState.currentFilename ?? "*scratch*";
     const hasExistingModeState = this.bufferModeStates.has(nextBufferKey);
 
-    this.state.currentBuffer = newState.currentBuffer;
-    this.state.cursorPosition = newState.cursorPosition;
-    this.state.mode = newState.mode;
-    this.state.statusMessage = newState.statusMessage;
-    this.state.viewportTop = newState.viewportTop;
-    this.state.viewportLeft = newState.viewportLeft ?? 0;
-    this.state.config = newState.config;
-    this.state.currentFilename = newState.currentFilename;
-    const currentBufferName = this.findBufferName(this.state.currentBuffer);
+    this.model.currentBuffer = newState.currentBuffer;
+    this.model.cursorPosition = newState.cursorPosition;
+    this.model.mode = newState.mode;
+    this.model.statusMessage = newState.statusMessage;
+    this.model.viewportTop = newState.viewportTop;
+    this.model.viewportLeft = newState.viewportLeft ?? 0;
+    this.model.config = newState.config;
+    this.model.currentFilename = newState.currentFilename;
+    const currentBufferName = this.findBufferName(this.model.currentBuffer);
     if (currentBufferName && newState.currentFilename !== undefined) {
       this.updateBufferMetadata(currentBufferName, { filename: newState.currentFilename });
     }
-    this.state.commandLine = newState.commandLine ?? this.state.commandLine;
-    this.state.mxCommand = newState.mxCommand ?? this.state.mxCommand;
-    this.state.minibufferState = cloneJsonValue(newState.minibufferState);
-    this.state.minibufferView = newState.minibufferView ? structuredClone(newState.minibufferView) : undefined;
-    this.state.cursorFocus = newState.cursorFocus ?? this.state.cursorFocus;
+    this.model.commandLine = newState.commandLine ?? this.model.commandLine;
+    this.model.mxCommand = newState.mxCommand ?? this.model.mxCommand;
+    this.model.minibufferState = cloneJsonValue(newState.minibufferState);
+    this.model.minibufferView = newState.minibufferView ? structuredClone(newState.minibufferView) : undefined;
+    this.model.cursorFocus = newState.cursorFocus ?? this.model.cursorFocus;
     if (newState.buffers && newState.buffers !== this.buffers) {
       this.buffers.clear();
       for (const [name, buffer] of newState.buffers.entries()) {
         this.buffers.set(name, buffer as FunctionalTextBufferImpl);
       }
     }
-    this.state.buffers = this.buffers;
+    this.model.buffers = this.buffers;
     if (newState.currentMajorMode || newState.activeMinorModes || newState.activeMinorModeLighters) {
       if (previousBufferKey !== nextBufferKey && hasExistingModeState) {
         return;
@@ -2941,9 +3062,9 @@ export class Editor {
     for (const name of names) {
       this.updateBufferMetadata(name, { modified: true });
     }
-    const currentName = this.findBufferName(this.state.currentBuffer);
+    const currentName = this.findBufferName(this.model.currentBuffer);
     if (currentName && names.includes(currentName)) {
-      this.state.bufferModified = true;
+      this.model.bufferModified = true;
     }
   }
 
@@ -2960,14 +3081,14 @@ export class Editor {
   }
 
   private getCurrentBufferModified(): boolean {
-    const name = this.findBufferName(this.state.currentBuffer);
+    const name = this.findBufferName(this.model.currentBuffer);
     return name ? this.bufferMetadata.get(name)?.modified ?? false : false;
   }
 
   private setCurrentBufferModified(modified: boolean): void {
-    const name = this.findBufferName(this.state.currentBuffer);
+    const name = this.findBufferName(this.model.currentBuffer);
     if (name) this.updateBufferMetadata(name, { modified });
-    this.state.bufferModified = modified;
+    this.model.bufferModified = modified;
   }
 
   private getModeStateForBufferName(name: string): BufferModeState {
@@ -3023,7 +3144,7 @@ export class Editor {
    */
   updateTerminalSize(width: number, height: number): void {
     // Check if terminal has updateSize method (InkTerminalIO does)
-    const terminalIO = this.terminal as any;
+    const terminalIO = this.terminal as { updateSize?: (width: number, height: number) => void };
     if (typeof terminalIO.updateSize === 'function') {
       terminalIO.updateSize(width, height);
     }
@@ -3046,7 +3167,7 @@ export class Editor {
 
     // Create default buffer if no editable buffer is selected. The messages
     // buffer is created during logging and must not suppress scratch startup.
-    if (!this.state.currentBuffer) {
+    if (!this.model.currentBuffer) {
       this.createBuffer("*scratch*", "");
     }
   }
@@ -3080,7 +3201,7 @@ export class Editor {
     special: boolean;
     recency: number;
   }> {
-    const currentName = this.findBufferName(this.state.currentBuffer);
+    const currentName = this.findBufferName(this.model.currentBuffer);
     return Array.from(this.buffers.entries()).map(([name, buffer]) => {
       const content = buffer.getContent();
       const text = Either.isRight(content) ? content.right : "";
@@ -3209,7 +3330,7 @@ export class Editor {
    * Get current editor mode
    */
   getMode(): string {
-    return this.state.mode;
+    return this.model.mode;
   }
 
   /**
@@ -3268,7 +3389,7 @@ export class Editor {
   clearSelection(): void {
     const { clearVisualSelection } = require("./api/visual-ops.ts");
     clearVisualSelection();
-    this.state.mode = "normal";
+    this.model.mode = "normal";
   }
 
   /**
@@ -3276,7 +3397,7 @@ export class Editor {
    */
   activateMajorModeForFile(filename: string): void {
     try {
-      this.state.currentFilename = filename;
+      this.model.currentFilename = filename;
       this.executeCommand("(major-mode-auto-detect)");
     } catch (_) {
       // No mode matched — keep fundamental mode
@@ -3293,20 +3414,20 @@ export class Editor {
    * deferred to RFC-019 Tier 1.6 (daemon-side span caching).
    */
   recomputeHighlights(): void {
-    if (!this.state.currentBuffer) {
-      this.state.highlightSpans = undefined;
+    if (!this.model.currentBuffer) {
+      this.model.highlightSpans = undefined;
       return;
     }
 
     try {
-      const contentResult = this.state.currentBuffer.getContent();
+      const contentResult = this.model.currentBuffer.getContent();
       if (Either.isLeft(contentResult)) {
-        this.state.highlightSpans = undefined;
+        this.model.highlightSpans = undefined;
         return;
       }
 
       const lines = contentResult.right.split('\n');
-      const startLine = this.state.viewportTop;
+      const startLine = this.model.viewportTop;
       // The daemon does not know the client's terminal height (the TUI client
       // computes its own spans), so fall back to a sensible default line count.
       // Previously this used `config.tabSize` (default 4) which is unrelated to
@@ -3317,9 +3438,9 @@ export class Editor {
       const spans: HighlightSpan[][] = [];
       for (let i = startLine; i < endLine; i++) {
         try {
-          const result = this.executeCommand(`(syntax-highlight-line ${i})`);
-          if (result && typeof result === 'object' && (result as any).type === 'list') {
-            spans.push((result as any).value as HighlightSpan[]);
+          const result = this.executeCommand(`(syntax-highlight-line ${i})`) as { type: string; value: unknown } | null | undefined;
+          if (result && typeof result === 'object' && result.type === 'list') {
+            spans.push(result.value as HighlightSpan[]);
           } else {
             spans.push([]);
           }
@@ -3327,9 +3448,9 @@ export class Editor {
           spans.push([]);
         }
       }
-      this.state.highlightSpans = spans.length > 0 ? spans : undefined;
+      this.model.highlightSpans = spans.length > 0 ? spans : undefined;
     } catch (_) {
-      this.state.highlightSpans = undefined;
+      this.model.highlightSpans = undefined;
     }
   }
 }

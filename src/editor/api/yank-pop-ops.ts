@@ -18,6 +18,7 @@ import {
 } from "../../utils/validation.ts";
 import {
   createBufferError,
+  createValidationError,
   AppError
 } from "../../error/types.ts";
 import {
@@ -193,15 +194,7 @@ export function createYankPopOps(
    */
   api.set("yank-pop", (args: TLispValue[]): Either<AppError, TLispValue> => {
     if (args.length !== 0) {
-      return Either.left({
-        _tag: 'Left',
-        left: {
-          type: 'ValidationError',
-          tag: 'ConstraintViolation',
-          message: 'yank-pop requires 0 arguments',
-          details: { args, expected: '0 arguments' }
-        }
-      } as any);
+      return Either.left(createValidationError('ConstraintViolation', 'yank-pop requires 0 arguments', 'args', args, '0 arguments'));
     }
 
     const currentBuffer = getCurrentBuffer();
@@ -230,15 +223,7 @@ export function createYankPopOps(
    */
   api.set("yank-pop-active", (args: TLispValue[]): Either<AppError, TLispValue> => {
     if (args.length !== 0) {
-      return Either.left({
-        _tag: 'Left',
-        left: {
-          type: 'ValidationError',
-          tag: 'ConstraintViolation',
-          message: 'yank-pop-active requires 0 arguments',
-          details: { args, expected: '0 arguments' }
-        }
-      } as any);
+      return Either.left(createValidationError('ConstraintViolation', 'yank-pop-active requires 0 arguments', 'args', args, '0 arguments'));
     }
 
     const state = getYankPopState();
@@ -254,15 +239,7 @@ export function createYankPopOps(
    */
   api.set("yank-pop-reset", (args: TLispValue[]): Either<AppError, TLispValue> => {
     if (args.length !== 0) {
-      return Either.left({
-        _tag: 'Left',
-        left: {
-          type: 'ValidationError',
-          tag: 'ConstraintViolation',
-          message: 'yank-pop-reset requires 0 arguments',
-          details: { args, expected: '0 arguments' }
-        }
-      } as any);
+      return Either.left(createValidationError('ConstraintViolation', 'yank-pop-reset requires 0 arguments', 'args', args, '0 arguments'));
     }
 
     resetYankPopState();

@@ -10,6 +10,11 @@ import type { TerminalIO, FileSystem, FunctionalTextBuffer } from "../core/types
 import { FunctionalTextBufferImpl } from "../core/buffer.ts";
 import { Either } from "../utils/task-either.ts";
 import { capTail } from "./log-entry.ts";
+import type { LogCategory, LogView } from "./log-entry.ts";
+import type { LogLevel } from "./message-log.ts";
+import { stateUtils } from "../utils/state.ts";
+import type { EditorModel } from "./functional/model.ts";
+import { runEditorState, type EditorModelAccess } from "./api/state-context.ts";
 import { createValidationError, AppError } from "../error/types.ts";
 import { createBufferOps } from "./api/buffer-ops.ts";
 import { createCursorOps } from "./api/cursor-ops.ts";
@@ -105,6 +110,9 @@ export interface TlispEditorState {
   _setBufferModified?: (modified: boolean) => void;
   foldRanges?: Map<number, number>;
   searchMatches?: import("../core/types.ts").Range[];
+  /** CHORE-39 Phase 4: live model access for State-monad API primitives. */
+  getModel?: () => import("./functional/model.ts").EditorModel;
+  applyModel?: (m: import("./functional/model.ts").EditorModel) => void;
 }
 
 /**
@@ -115,6 +123,19 @@ export interface TlispEditorState {
 export function createEditorAPI(state: TlispEditorState): Map<string, TLispFunctionImpl> {
   // Create combined API by merging all module APIs
   const api = new Map<string, TLispFunctionImpl>();
+
+  // CHORE-39 Phase 4: live model access for State-monad API primitives.
+  // Factories migrated to State<EditorModel> (mode-ops, …) receive this handle
+  // instead of closing over mutable state callbacks.
+  const modelAccess: EditorModelAccess = {
+    getModel: () => state.getModel!(),
+    applyModel: (m) => { state.applyModel!(m); },
+  };
+  // Genuine State-monad read of the current mode (used by factories that still
+  // take a getMode callback, e.g. cursor-ops). Runs stateUtils.getProperty
+  // against EditorModel and commits the (unchanged) snapshot.
+  const getModeViaState = (): EditorModel["mode"] =>
+    runEditorState(modelAccess, stateUtils.getProperty<EditorModel, "mode">("mode"));
 
   // Add buffer operations
   const setCursorLine = (line: number) => {
@@ -155,7 +176,7 @@ export function createEditorAPI(state: TlispEditorState): Map<string, TLispFunct
     () => state.cursorColumn,
     (column) => { state.cursorColumn = column; },
     () => state.currentBuffer,
-    () => state.mode, // getMode - for visual selection updates
+    getModeViaState, // getMode - for visual selection updates (State-monad read)
     () => { // updateVisualSelection callback
       const selection = getVisualSelection();
       if (selection) {
@@ -169,8 +190,7 @@ export function createEditorAPI(state: TlispEditorState): Map<string, TLispFunct
 
   // Add mode operations
   const modeOps = createModeOps(
-    () => state.mode,
-    (mode) => { state.mode = mode; },
+    modelAccess,
     () => state.statusMessage,
     (msg) => { state.statusMessage = msg; },
     () => state.commandLine,
@@ -221,7 +241,7 @@ export function createEditorAPI(state: TlispEditorState): Map<string, TLispFunct
     (mode) => { state.mode = mode; },
     (focus) => { state.cursorFocus = focus; },
     clearSearchHighlights,
-    (state as any)._evalTlisp,
+    state._evalTlisp,
     (msg: string, level?: string) => { state.logMessage?.(msg, level); }
   );
   for (const [key, value] of bindingsOps.entries()) {
@@ -416,7 +436,7 @@ export function createEditorAPI(state: TlispEditorState): Map<string, TLispFunct
   }
 
   // Add documentation operations (US-4.2.1)
-  const documentationOps = createDocumentationOps(null as any); // Interpreter not needed for current implementation
+  const documentationOps = createDocumentationOps(null); // Interpreter not needed for current implementation
   for (const [key, value] of documentationOps.entries()) {
     api.set(key, value);
   }
@@ -424,7 +444,7 @@ export function createEditorAPI(state: TlispEditorState): Map<string, TLispFunct
   // Add hook operations
   const hooks: HookRegistry = new Map();
   const hookOps = createHookOps(hooks, (name: string) => {
-    const fn = (state as any)._evalTlisp;
+    const fn = state._evalTlisp;
     return fn ? fn(`(${name})`) : Either.right(createNil());
   }, (value: TLispValue) => {
     if (value.type === "function") {
@@ -432,7 +452,7 @@ export function createEditorAPI(state: TlispEditorState): Map<string, TLispFunct
       return fn([]);
     }
     if (value.type === "symbol") {
-      const fn = (state as any)._evalTlisp;
+      const fn = state._evalTlisp;
       return fn ? fn(`(${value.value as string})`) : Either.right(createNil());
     }
     return Either.right(value);
@@ -491,15 +511,15 @@ export function createEditorAPI(state: TlispEditorState): Map<string, TLispFunct
     () => state._getBufferModified?.() ?? false,
     (expr: string) => {
       // Real eval callback will be wired from editor.ts via setInterpreter
-      const fn = (state as any)._evalTlisp;
+      const fn = state._evalTlisp;
       return fn ? fn(expr) : Either.right(createNil());
     },
     () => {
-      const fn = (state as any)._getCurrentMajorMode;
+      const fn = state._getCurrentMajorMode;
       return fn ? fn() : "fundamental";
     },
     (mode: string) => {
-      const fn = (state as any)._setCurrentMajorMode;
+      const fn = state._setCurrentMajorMode;
       if (fn) fn(mode);
     },
   );
@@ -521,11 +541,11 @@ export function createEditorAPI(state: TlispEditorState): Map<string, TLispFunct
   // Add raw file loading operations. Feature loading is handled by require-module.
   const loadOps = createRawLoadOps(
     () => {
-      const fn = (state as any)._getLoadPaths;
+      const fn = state._getLoadPaths;
       return fn ? fn() : ['src/tlisp/core'];
     },
     (expr: string) => {
-      const fn = (state as any)._evalTlisp;
+      const fn = state._evalTlisp;
       return fn ? fn(expr) : Either.right(createNil());
     },
     async (_path: string) => false,
@@ -537,11 +557,11 @@ export function createEditorAPI(state: TlispEditorState): Map<string, TLispFunct
   // Add module introspection operations
   const moduleOps = createModuleOps(
     () => {
-      const fn = (state as any)._getModuleRegistry;
-      return fn ? fn() : { isLoaded: () => false, resolve: () => undefined, listModules: () => [], allExports: () => new Map() } as any;
+      const fn = state._getModuleRegistry;
+      return fn ? fn() : { isLoaded: () => false, resolve: () => undefined, listModules: () => [], allExports: () => new Map() };
     },
     () => {
-      const fn = (state as any)._getCurrentModuleName;
+      const fn = state._getCurrentModuleName;
       return fn ? fn() : undefined;
     },
   );
@@ -552,23 +572,23 @@ export function createEditorAPI(state: TlispEditorState): Map<string, TLispFunct
   // Add minor mode operations
   const minorModeOps = createMinorModeOps(
     () => {
-      const fn = (state as any)._getMinorModeRegistry;
+      const fn = state._getMinorModeRegistry;
       return fn ? fn() : new Map();
     },
     () => {
-      const fn = (state as any)._getBufferModeStates;
+      const fn = state._getBufferModeStates;
       return fn ? fn() : new Map();
     },
     () => {
-      const fn = (state as any)._getCurrentBufferKey;
+      const fn = state._getCurrentBufferKey;
       return fn ? fn() : "*scratch*";
     },
     () => {
-      const fn = (state as any)._getGlobalizedMinorModes;
+      const fn = state._getGlobalizedMinorModes;
       return fn ? fn() : new Set<string>();
     },
     (expr: string) => {
-      const fn = (state as any)._evalTlisp;
+      const fn = state._evalTlisp;
       return fn ? fn(expr) : Either.right(createNil());
     },
     {
@@ -618,7 +638,7 @@ export function createEditorAPI(state: TlispEditorState): Map<string, TLispFunct
     setStatusMessage: (msg) => { state.statusMessage = msg; },
   });
   // Share the REAL AST cache (from ast-ops module scope) with navigation ops
-  setAstCacheRef(getAstCache() as any);
+  setAstCacheRef(getAstCache());
   for (const [key, value] of astOps.entries()) {
     api.set(key, value);
   }
@@ -783,7 +803,7 @@ export function createEditorAPI(state: TlispEditorState): Map<string, TLispFunct
     if (outputTail !== undefined) entry.outputTail = outputTail;
     if (pid !== undefined) entry.pid = pid;
     if (frameId !== undefined) entry.frameId = frameId;
-    state.logProgram?.(category as any, entry);
+    state.logProgram?.(category as "shell" | "process" | "test" | "autosave", entry);
     return Either.right(createString(text));
   });
 
@@ -800,7 +820,7 @@ export function createEditorAPI(state: TlispEditorState): Map<string, TLispFunct
   });
 
   api.set('message-log-level', (_args: TLispValue[]): Either<AppError, TLispValue> => {
-    const log = (state as any)._getMessageLog?.();
+    const log = state._getMessageLog?.();
     return Either.right(createString(log?.minLevel ?? 'info'));
   });
 
@@ -810,26 +830,26 @@ export function createEditorAPI(state: TlispEditorState): Map<string, TLispFunct
     const level: string = levelArg.type === 'symbol' ? String(levelArg.value).replace(/^:/, '') : (levelArg.type === 'string' ? String(levelArg.value) : 'info');
     const validLevels = ['debug', 'info', 'warn', 'error'];
     if (!validLevels.includes(level)) return Either.left(createValidationError('FormatError', `Invalid log level: ${level}`));
-    const log = (state as any)._getMessageLog?.();
-    if (log) log.minLevel = level as any;
+    const log = state._getMessageLog?.();
+    if (log) log.minLevel = level as LogLevel;
     return Either.right(createString(level));
   });
 
   api.set('message-log-max', (_args: TLispValue[]): Either<AppError, TLispValue> => {
-    const log = (state as any)._getMessageLog?.();
+    const log = state._getMessageLog?.();
     return Either.right(createNumber(log?.maxSize ?? 1000));
   });
 
   api.set('set-message-log-max', (args: TLispValue[]): Either<AppError, TLispValue> => {
     if (args.length < 1) return Either.left(createValidationError('FormatError', 'requires a number'));
     const n: number = args[0]!.type === 'number' ? Number(args[0]!.value) : 0;
-    const log = (state as any)._getMessageLog?.();
+    const log = state._getMessageLog?.();
     if (log) log.maxSize = n;
     return Either.right(createNumber(n));
   });
 
   api.set('clear-messages', (_args: TLispValue[]): Either<AppError, TLispValue> => {
-    const log = (state as any)._getMessageLog?.();
+    const log = state._getMessageLog?.();
     if (log) {
       log.clear();
       state.buffers.set('*Messages*', FunctionalTextBufferImpl.create(''));
@@ -848,12 +868,12 @@ export function createEditorAPI(state: TlispEditorState): Map<string, TLispFunct
         kwargs[String(key.value).slice(1)] = args[i + 1]!;
       }
     }
-    const store = (state as any)._getUnifiedLog?.();
+    const store = state._getUnifiedLog?.();
     if (!store) return Either.right(createList([]));
     const entries = store.getEntries({
-      category: kwargs['category'] ? String(kwargs['category'].value) : undefined,
-      view: kwargs['view'] ? String(kwargs['view'].value) : undefined,
-      level: kwargs['level'] ? String(kwargs['level'].value).replace(/^:/, '') : undefined,
+      category: kwargs['category'] ? String(kwargs['category'].value) as LogCategory : undefined,
+      view: kwargs['view'] ? String(kwargs['view'].value) as LogView : undefined,
+      level: kwargs['level'] ? String(kwargs['level'].value).replace(/^:/, '') as LogLevel : undefined,
       last: kwargs['last'] && kwargs['last'].type === 'number' ? Number(kwargs['last'].value) : undefined,
     });
     const plists = entries.map((e: any) => {
@@ -913,7 +933,7 @@ export function createEditorAPI(state: TlispEditorState): Map<string, TLispFunct
     if (args.length < 1) return Either.left(createValidationError('FormatError', 'fold-toggle requires a line number'));
     const line = Number(args[0]!.value);
     const headingRanges = findHeadingRanges(getBufferLine, getBufferLineCount());
-    const editorState = { foldRanges: state.foldRanges } as any;
+    const editorState = { foldRanges: state.foldRanges };
     const result = foldToggle(editorState, line, headingRanges);
     state.foldRanges = result.foldRanges;
     return Either.right(createNil());
@@ -922,7 +942,7 @@ export function createEditorAPI(state: TlispEditorState): Map<string, TLispFunct
   api.set('fold-open', (args: TLispValue[]): Either<AppError, TLispValue> => {
     if (args.length < 1) return Either.left(createValidationError('FormatError', 'fold-open requires a line number'));
     const line = Number(args[0]!.value);
-    const editorState = { foldRanges: state.foldRanges } as any;
+    const editorState = { foldRanges: state.foldRanges };
     const result = foldOpen(editorState, line);
     state.foldRanges = result.foldRanges;
     return Either.right(createNil());
@@ -932,7 +952,7 @@ export function createEditorAPI(state: TlispEditorState): Map<string, TLispFunct
     if (args.length < 2) return Either.left(createValidationError('FormatError', 'fold-close requires start and end line numbers'));
     const startLine = Number(args[0]!.value);
     const endLine = Number(args[1]!.value);
-    const editorState = { foldRanges: state.foldRanges } as any;
+    const editorState = { foldRanges: state.foldRanges };
     const result = foldClose(editorState, startLine, endLine);
     state.foldRanges = result.foldRanges;
     return Either.right(createNil());
@@ -940,14 +960,14 @@ export function createEditorAPI(state: TlispEditorState): Map<string, TLispFunct
 
   api.set('fold-close-all', (_args: TLispValue[]): Either<AppError, TLispValue> => {
     const headingRanges = findHeadingRanges(getBufferLine, getBufferLineCount());
-    const editorState = { foldRanges: state.foldRanges } as any;
+    const editorState = { foldRanges: state.foldRanges };
     const result = foldCloseAll(editorState, headingRanges);
     state.foldRanges = result.foldRanges;
     return Either.right(createNil());
   });
 
   api.set('fold-open-all', (_args: TLispValue[]): Either<AppError, TLispValue> => {
-    const editorState = { foldRanges: state.foldRanges } as any;
+    const editorState = { foldRanges: state.foldRanges };
     const result = foldOpenAll(editorState);
     state.foldRanges = result.foldRanges;
     return Either.right(createNil());
@@ -957,7 +977,7 @@ export function createEditorAPI(state: TlispEditorState): Map<string, TLispFunct
     if (args.length < 1) return Either.left(createValidationError('FormatError', 'fold-by-level requires a max level'));
     const maxLevel = Number(args[0]!.value);
     const headingRanges = findHeadingRanges(getBufferLine, getBufferLineCount());
-    const editorState = { foldRanges: state.foldRanges } as any;
+    const editorState = { foldRanges: state.foldRanges };
     const result = foldByLevel(editorState, maxLevel, headingRanges);
     state.foldRanges = result.foldRanges;
     return Either.right(createNil());
@@ -966,12 +986,12 @@ export function createEditorAPI(state: TlispEditorState): Map<string, TLispFunct
   api.set('fold-is-collapsed', (args: TLispValue[]): Either<AppError, TLispValue> => {
     if (args.length < 1) return Either.left(createValidationError('FormatError', 'fold-is-collapsed requires a line number'));
     const line = Number(args[0]!.value);
-    const editorState = { foldRanges: state.foldRanges } as any;
+    const editorState = { foldRanges: state.foldRanges };
     return Either.right(createBoolean(foldIsCollapsed(editorState, line)));
   });
 
   api.set('fold-get-ranges', (_args: TLispValue[]): Either<AppError, TLispValue> => {
-    const editorState = { foldRanges: state.foldRanges } as any;
+    const editorState = { foldRanges: state.foldRanges };
     const ranges = foldGetRanges(editorState);
     return Either.right(createList(ranges.map(r =>
       createList([createNumber(r.start), createNumber(r.end)])
@@ -1427,7 +1447,7 @@ export function createEditorAPI(state: TlispEditorState): Map<string, TLispFunct
     if (!entry) return Either.left(createValidationError('FormatError', `No process with pid ${pid}`));
 
     try {
-      entry.process.kill(sigName as any);
+      entry.process.kill(sigName as NodeJS.Signals);
       return Either.right(createNil());
     } catch (e) {
       return Either.left(createValidationError('FormatError', `signal failed: ${e instanceof Error ? e.message : String(e)}`));
