@@ -27,6 +27,13 @@ tmax-*
 !bin/tmax-use
 tmax.exe
 
+# Bun incremental-build artifacts (hex-hash temp binaries — never commit)
+.*.bun-build
+
+# Design/mockup research images (local-only, not source)
+.mockup-research/
+docs/mockups/
+
 # IDE/Editor files
 .vscode/
 .idea/

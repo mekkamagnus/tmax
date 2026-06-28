@@ -4,6 +4,13 @@ Records of significant architectural decisions. Each ADR describes the context, 
 
 Ordered most-recent first (highest ADR number = most recent decision). Topic groupings preserved within each section.
 
+## Recent — Editor Functional Rewrite, adw Goal Mode (ADR 0112, 0111)
+
+| File | Decision | Related |
+|------|----------|---------|
+| [ADR-0112-adw-build-goal-mode.md](ADR-0112-adw-build-goal-mode.md) | adw build `/goal` mode — in-session iteration loop with two-layer (inner Claude / outer orchestrator) retry model; BUG-23 typecheck-gate skip on `goal-exhausted` | CHORE-40, BUG-23, [ADR-0108](ADR-0108-adw-compile-gate-and-feedback-integrity.md), [ADR-0094](ADR-0094-adw-pipeline-architecture.md), RFC-023 |
+| [ADR-0111-editor-functional-elm-architecture.md](ADR-0111-editor-functional-elm-architecture.md) | Editor functional rewrite — Elm Architecture (`EditorModel` / `update` / `Cmd`) threading state through the `State<S,A>` monad; strangler-pattern 7-phase migration | CHORE-39, [ADR-0098](ADR-0098-tlisp-fp-foundations.md), rules/functional-programming.md |
+
 ## Recent — Resume-Worktree Validation, Server Stale-Lock Reclaim, Compile Gate (ADR 0110, 0109, 0108, 0107, 0106, 0105, 0101-0104)
 
 | File | Decision | Related |
