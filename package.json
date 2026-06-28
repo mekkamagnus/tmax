@@ -11,7 +11,7 @@
     "tlisp": "bun src/tlisp/cli.ts",
     "repl": "bun src/tlisp/cli.ts",
     "test": "bun test --timeout 30000",
-    "test:unit": "bun test --timeout 30000 test/unit/",
+    "test:unit": "bun scripts/run-unit-tests.ts",
     "test:integration": "bun test --timeout 30000 test/integration/",
     "test:tmax-use": "bin/tmax-use test",
     "tmux:audit": "bash scripts/tmax-tmux-audit.sh",

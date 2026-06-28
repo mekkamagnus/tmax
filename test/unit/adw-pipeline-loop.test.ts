@@ -169,13 +169,13 @@ function mockDeps(opts: {
 } = {}): PipelineDeps & {
   planCalls: Array<{ description: string; forcedType?: string; id: string }>;
   reviewCalls: Array<{ input: string; id: string }>;
-  buildCalls: Array<{ input: string; modelOverride?: string; id: string }>;
+  buildCalls: Array<{ input: string; modelOverride?: string; id: string; goalCondition?: string }>;
   patchCalls: Array<{ input: string; modelOverride?: string; id: string }>;
   testCalls: Array<{ input: string; modelOverride?: string; id: string; retry?: boolean }>;
 } {
   const planCalls: Array<{ description: string; forcedType?: string; id: string }> = [];
   const reviewCalls: Array<{ input: string; id: string }> = [];
-  const buildCalls: Array<{ input: string; modelOverride?: string; id: string }> = [];
+  const buildCalls: Array<{ input: string; modelOverride?: string; id: string; goalCondition?: string }> = [];
   const patchCalls: Array<{ input: string; modelOverride?: string; id: string }> = [];
   const testCalls: Array<{ input: string; modelOverride?: string; id: string; retry?: boolean }> = [];
 
@@ -197,8 +197,8 @@ function mockDeps(opts: {
       reviewCalls.push({ input, id });
       return opts.review ?? Either.right(mockReview("pass"));
     },
-    runBuild: async (input, modelOverride, id) => {
-      buildCalls.push({ input, modelOverride, id });
+    runBuild: async (input, modelOverride, id, goalCondition) => {
+      buildCalls.push({ input, modelOverride, id, goalCondition });
       if (buildQueue) {
         const next = buildQueue.shift();
         return next ?? Either.right(mockBuild());
@@ -917,9 +917,10 @@ describe("BUG-20 — resume recreates a missing recorded worktree from base_sha"
     expect(events.map((l) => JSON.parse(l)).some((e) => e.event === "worktree-reused")).toBe(false);
   });
 
-  test("missing worktree + no recorded base_sha: fails with a clear error", async () => {
+  test("missing worktree + no recorded base_sha: captures HEAD and recreates (BUG-20 fix)", async () => {
     const wsId = "01BUG020D";
-    // Seed WITHOUT base_sha — recreation cannot proceed.
+    // Seed WITHOUT base_sha — the BUG-20 fix captures HEAD on resume rather
+    // than failing, since plan+review are already complete.
     seedResumeWorkspace(wsId, { base_sha: undefined });
     const deps = mockDeps({ patch: Either.right(mockPatchPass()) });
     const wtDeps = mockWorktreeDepsConfigurable({
@@ -927,11 +928,16 @@ describe("BUG-20 — resume recreates a missing recorded worktree from base_sha"
     });
     const result = await runPipeline(deps, { description: "", id: wsId }, AGENTS_DIR, wtDeps);
 
-    expect(Either.isLeft(result)).toBe(true);
-    if (Either.isLeft(result)) {
-      expect(result.left).toContain("no recorded base_sha");
-    }
-    expect(wtDeps.recreateCalls).toHaveLength(0);
+    // BUG-20 fix: recreation proceeds using the freshly-captured HEAD SHA.
+    expect(Either.isRight(result)).toBe(true);
+    expect(wtDeps.recreateCalls).toHaveLength(1);
+    expect(wtDeps.recreateCalls[0]!.baseSha).toBe("deadbeef"); // mock gitRun returns this.
+    // A base-sha-recorded event with reason resume-fresh-capture was emitted.
+    const events = readFileSync(join(AGENTS_DIR, wsId, "orchestrator", "events.jsonl"), "utf8")
+      .split("\n").filter((l) => l.trim());
+    const captured = events.map((l) => JSON.parse(l)).find((e) => e.event === "base-sha-recorded");
+    expect(captured).toBeDefined();
+    expect(captured.reason).toBe("resume-fresh-capture");
   });
 });
 
@@ -970,5 +976,106 @@ describe("BUG-20 — resume refuses an invalid recorded worktree", () => {
       expect(result.left).toContain("not a git worktree");
     }
     expect(wtDeps.recreateCalls).toHaveLength(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// CHORE-40: orchestrator goal-exhausted reaction
+// ---------------------------------------------------------------------------
+
+describe("CHORE-40 — orchestrator goal-exhausted reaction", () => {
+  /** Seed a spec file at mockSpecPath with the given goal frontmatter. */
+  function seedGoalSpec(goal: string | undefined): void {
+    const content = goal === undefined
+      ? "# Spec\n\nNo goal."
+      : `---\ngoal: "${goal}"\n---\n\n# Spec`;
+    writeFileSync(mockSpecPath(), content);
+  }
+
+  /** A build outcome that reports goal-exhausted. */
+  function mockBuildGoalExhausted(): BuildOutcome {
+    return { id: "BUILDTEST1", specPath: mockSpecPath(), goalStatus: "goal-exhausted", goalCondition: "the goal", goalTurns: 50 };
+  }
+
+  test("orchestrator reads goalStatus from build outcome (no sidecar needed with injected deps)", async () => {
+    seedGoalSpec("tests pass");
+    const deps = mockDeps({
+      build: Either.right(mockBuildGoalExhausted()),
+      patch: Either.right(mockPatchGaps()),
+    });
+    // Limit retries so the loop terminates after one gaps iteration.
+    const result = await runPipeline(deps, { description: "", specPath: mockSpecPath() }, AGENTS_DIR, mockWorktreeDeps);
+    // The pipeline completes (goal-exhausted is recorded but not fatal on its own;
+    // patch-review drives the verdict). The first build carried the goal.
+    expect(deps.buildCalls.length).toBeGreaterThanOrEqual(1);
+    expect(deps.buildCalls[0]!.goalCondition).toBe("tests pass");
+  });
+
+  test("orchestrator narrows goal scope after goal-exhausted on retry", async () => {
+    seedGoalSpec("tests pass");
+    // Initial build: goal-met (clean). Then patch-review gaps → retry build
+    // returns goal-exhausted → next retry should narrow.
+    // Custom patch mock mutates the spec file between iterations so the
+    // feedback-stalled check (spec fingerprint unchanged) doesn't block retries.
+    let patchCallCount = 0;
+    const deps = mockDeps({
+      build: [
+        Either.right(mockBuild()), // initial build: goal-met
+        Either.right(mockBuildGoalExhausted()), // retry 1: exhausted
+        Either.right(mockBuild()), // retry 2: should be narrowed goal
+      ],
+      test: Either.right(mockTestPass()),
+    });
+    deps.runPatchReview = async (input) => {
+      patchCallCount++;
+      // Touch the spec so its mtime/size changes — avoids feedback-stalled.
+      writeFileSync(input, readFileSync(input, "utf8") + `\n<!-- patch ${patchCallCount} -->\n`);
+      return Either.right(mockPatchGaps());
+    };
+    await runPipeline(deps, baseArgs({ specPath: mockSpecPath() }), AGENTS_DIR, mockWorktreeDeps);
+    expect(deps.buildCalls.length).toBeGreaterThanOrEqual(3);
+    // Retry 2's goal should start with the narrowing prefix (set after retry 1's exhausted).
+    const retryGoal = deps.buildCalls[2]!.goalCondition;
+    expect(retryGoal).toBeDefined();
+    expect(retryGoal!.startsWith("Continue from the current repository state")).toBe(true);
+  });
+
+  test("orchestrator falls back to plain /implement after two consecutive goal-exhausted on retries", async () => {
+    seedGoalSpec("tests pass");
+    let patchCallCount = 0;
+    const deps = mockDeps({
+      build: [
+        Either.right(mockBuild()), // initial build: clean
+        Either.right(mockBuildGoalExhausted()), // retry 1: exhausted (count=1)
+        Either.right(mockBuildGoalExhausted()), // retry 2: exhausted (count=2)
+        Either.right(mockBuild()), // retry 3: should be plain /implement (no goal)
+      ],
+      test: Either.right(mockTestPass()),
+    });
+    deps.runPatchReview = async (input) => {
+      patchCallCount++;
+      writeFileSync(input, readFileSync(input, "utf8") + `\n<!-- patch ${patchCallCount} -->\n`);
+      return Either.right(mockPatchGaps());
+    };
+    await runPipeline(deps, baseArgs({ specPath: mockSpecPath(), maxRetries: 4 }), AGENTS_DIR, mockWorktreeDeps);
+    // After two consecutive exhausted with no progress, the third retry gets no goal.
+    expect(deps.buildCalls.length).toBeGreaterThanOrEqual(4);
+    expect(deps.buildCalls[3]!.goalCondition).toBeUndefined();
+  });
+
+  test("goal-frontmatter-error fails the pipeline on malformed frontmatter", async () => {
+    // Malformed: unquoted ': ' in goal value.
+    writeFileSync(mockSpecPath(), "---\ngoal: run: thing\n---\n\n# Spec");
+    const deps = mockDeps({ patch: Either.right(mockPatchPass()) });
+    const result = await runPipeline(deps, { description: "", specPath: mockSpecPath() }, AGENTS_DIR, mockWorktreeDeps);
+    expect(Either.isLeft(result)).toBe(true);
+    if (Either.isLeft(result)) expect(result.left).toContain("goal frontmatter error");
+  });
+
+  test("no goal in spec → build dispatched without goalCondition", async () => {
+    seedGoalSpec(undefined);
+    const deps = mockDeps({ patch: Either.right(mockPatchPass()) });
+    await runPipeline(deps, { description: "", specPath: mockSpecPath() }, AGENTS_DIR, mockWorktreeDeps);
+    expect(deps.buildCalls[0]!.goalCondition).toBeUndefined();
   });
 });

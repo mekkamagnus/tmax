@@ -71,6 +71,12 @@ export function connectWithTimeout(socketPath: string, timeoutMs = DEFAULT_CONNE
  *
  * Use in afterEach so cleanup runs even when a test assertion throws or times
  * out (bun still runs afterEach in those cases; an inline try/finally would not).
+ *
+ * BUG-16: `server.shutdown()` awaits `server.close()` which can wedge when
+ * active client connections refuse to drain (common under the cumulative load
+ * of a full unit-suite run). We cap shutdown() at 3s — if it hasn't resolved by
+ * then, we stop waiting, unlink the socket anyway, and let the process move on.
+ * This prevents one slow server teardown from hanging the whole suite.
  */
 export async function forceShutdown(server: TmaxServer | null): Promise<void> {
   if (!server) return;
@@ -82,12 +88,27 @@ export async function forceShutdown(server: TmaxServer | null): Promise<void> {
     // best-effort: if we can't even read the path, skip the post-shutdown unlink
   }
 
-  try {
-    await server.shutdown();
-  } catch (error) {
-    // Swallow: rely on the post-shutdown unlink below as the safety net.
-    console.error('Best-effort server.shutdown() threw:', error);
-  }
+  // Race shutdown against a hard cap so a wedged close() can't block us.
+  const SHUTDOWN_CAP_MS = 3000;
+  let resolved = false;
+  await Promise.race([
+    (async () => {
+      try {
+        await server.shutdown();
+      } catch (error) {
+        // Swallow: rely on the post-shutdown unlink below as the safety net.
+        console.error('Best-effort server.shutdown() threw:', error);
+      } finally {
+        resolved = true;
+      }
+    })(),
+    new Promise<void>((r) => setTimeout(() => {
+      if (!resolved) {
+        console.error(`forceShutdown: server.shutdown() exceeded ${SHUTDOWN_CAP_MS}ms cap — abandoning wait (BUG-16)`);
+      }
+      r();
+    }, SHUTDOWN_CAP_MS)),
+  ]);
 
   if (socketPath) {
     try {

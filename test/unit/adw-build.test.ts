@@ -13,6 +13,7 @@ import {
   parseArgs,
   resolveInputFrom,
   captureGitTrace,
+  shouldSkipTypecheckGate,
   type RunOpts,
 } from "../../adws/adw-build.ts";
 
@@ -74,6 +75,38 @@ describe("parseArgs", () => {
     const r = parseArgs(["docs/specs/SPEC-001-x.md", "extra"]);
     expect(Either.isLeft(r)).toBe(true);
     if (Either.isLeft(r)) expect(r.left).toContain("Unexpected extra argument");
+  });
+
+  test("accepts --goal with a value", () => {
+    const r = parseArgs(["--goal", "bun run test:unit passes", "docs/specs/SPEC-001-x.md"]);
+    expect(Either.isRight(r)).toBe(true);
+    if (Either.isRight(r)) {
+      expect(r.right.goal).toBe("bun run test:unit passes");
+      expect(r.right.input).toBe("docs/specs/SPEC-001-x.md");
+    }
+  });
+
+  test("--goal without a value → Left", () => {
+    // --goal as the last arg consumes nothing → requires-a-value error.
+    const r = parseArgs(["docs/specs/SPEC-001-x.md", "--goal"]);
+    expect(Either.isLeft(r)).toBe(true);
+    if (Either.isLeft(r)) expect(r.left).toContain("--goal requires a value");
+  });
+
+  test("--goal omitted → goal undefined", () => {
+    const r = parseArgs(["docs/specs/SPEC-001-x.md"]);
+    expect(Either.isRight(r)).toBe(true);
+    if (Either.isRight(r)) expect(r.right.goal).toBeUndefined();
+  });
+
+  test("--goal combines with --model and --id", () => {
+    const r = parseArgs(["--model", "glm-4.7", "--goal", "done", "--id", "01ABCD0000", "docs/specs/SPEC-001-x.md"]);
+    expect(Either.isRight(r)).toBe(true);
+    if (Either.isRight(r)) {
+      expect(r.right.model).toBe("glm-4.7");
+      expect(r.right.goal).toBe("done");
+      expect(r.right.id).toBe("01ABCD0000");
+    }
   });
 });
 
@@ -205,3 +238,31 @@ describe("captureGitTrace", () => {
 // runBuild's integration with it is verified structurally by typecheck (the
 // import resolves, the call site typechecks) and was observed working live
 // during the resume demo (stderr: "reusing workspace 01KVF905BH for ...").
+
+// ---------------------------------------------------------------------------
+// BUG-23: typecheck gate skips on goal-exhausted
+// ---------------------------------------------------------------------------
+
+describe("shouldSkipTypecheckGate (BUG-23)", () => {
+  test("gate passed → never skip", () => {
+    expect(shouldSkipTypecheckGate(true, "goal-exhausted")).toBe(false);
+    expect(shouldSkipTypecheckGate(true, "goal-met")).toBe(false);
+    expect(shouldSkipTypecheckGate(true, undefined)).toBe(false);
+  });
+
+  test("gate failed + goal-exhausted → skip (partial work proceeds to patch-review)", () => {
+    expect(shouldSkipTypecheckGate(false, "goal-exhausted")).toBe(true);
+  });
+
+  test("gate failed + goal-met → hard-fail (Claude claimed success but doesn't compile)", () => {
+    expect(shouldSkipTypecheckGate(false, "goal-met")).toBe(false);
+  });
+
+  test("gate failed + goal-error → hard-fail (crash, not partial work)", () => {
+    expect(shouldSkipTypecheckGate(false, "goal-error")).toBe(false);
+  });
+
+  test("gate failed + no goal (classic /implement) → hard-fail (ADR-0108 (a))", () => {
+    expect(shouldSkipTypecheckGate(false, undefined)).toBe(false);
+  });
+});

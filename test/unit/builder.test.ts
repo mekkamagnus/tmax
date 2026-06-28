@@ -13,7 +13,13 @@ import { Either, TaskEither } from "../../src/utils/task-either.ts";
 import {
   BUILD_MODEL,
   build,
+  buildImplementPrompt,
   ensureAvailable,
+  GOAL_EXHAUSTED_MARKER,
+  GOAL_TURN_LIMIT,
+  matchGoalExhaustion,
+  matchGoalUnavailable,
+  parseClaudeVersion,
   parseSkillResult,
   type BuilderDeps,
 } from "../../adws/adws-modules/builder.ts";
@@ -202,5 +208,199 @@ describe("build", () => {
     const result = await build(deps, tmp, "/abs/spec.md", join(tmp, "b", "raw-output.jsonl")).run();
     expect(Either.isLeft(result)).toBe(true);
     if (Either.isLeft(result)) expect(result.left).toContain("code 124");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// CHORE-40: buildImplementPrompt + goal-mode helpers
+// ---------------------------------------------------------------------------
+
+describe("buildImplementPrompt", () => {
+  test("without a goal returns plain /implement", () => {
+    expect(buildImplementPrompt("/abs/spec.md")).toBe("/implement /abs/spec.md");
+  });
+
+  test("with a goal returns /goal prompt containing /implement directive", () => {
+    const prompt = buildImplementPrompt("/abs/spec.md", "bun run test:unit passes");
+    expect(prompt.startsWith("/goal ")).toBe(true);
+    expect(prompt).toContain("Run the /implement skill");
+    // spec path is JSON-stringified inside the prose directive.
+    expect(prompt).toContain(JSON.stringify("/abs/spec.md"));
+    expect(prompt).toContain("bun run test:unit passes");
+  });
+
+  test("goal prompt includes the turn limit and exhaustion marker", () => {
+    const prompt = buildImplementPrompt("/abs/spec.md", "done");
+    expect(prompt).toContain(`${GOAL_TURN_LIMIT} goal turns`);
+    expect(prompt).toContain(GOAL_EXHAUSTED_MARKER);
+  });
+
+  test("goal prompt preserves quotes and multiline goals", () => {
+    const trickyGoal = 'a "quoted" goal\nwith /slash and #hash';
+    const prompt = buildImplementPrompt("/abs/spec.md", trickyGoal);
+    // The full tricky goal is embedded verbatim in the single prompt string.
+    expect(prompt).toContain(trickyGoal);
+  });
+});
+
+describe("parseClaudeVersion", () => {
+  test("parses 'Claude Code v2.1.139'", () => {
+    expect(parseClaudeVersion("Claude Code v2.1.139")).toEqual([2, 1, 139]);
+  });
+  test("parses bare '2.1.195'", () => {
+    expect(parseClaudeVersion("2.1.195 (Claude Code)")).toEqual([2, 1, 195]);
+  });
+  test("returns null when no semver present", () => {
+    expect(parseClaudeVersion("unknown")).toBeNull();
+  });
+});
+
+describe("matchGoalUnavailable / matchGoalExhaustion", () => {
+  test("matches Unknown command: /goal", () => {
+    expect(matchGoalUnavailable("Error: Unknown command: /goal")).toBe("Unknown command: /goal");
+  });
+  test("matches hooks are disabled", () => {
+    expect(matchGoalUnavailable("fatal: hooks are disabled in config")).toBe("hooks are disabled");
+  });
+  test("returns null when no unavailability substring", () => {
+    expect(matchGoalUnavailable("some other error")).toBeNull();
+  });
+  test("matches context window exhaustion", () => {
+    expect(matchGoalExhaustion("exceeded context window")).toBe("context window");
+  });
+  test("matches 529 rate limit exhaustion", () => {
+    // Returns the first matching substring; both "529" and "rate limit" are
+    // valid exhaustion signals.
+    const matched = matchGoalExhaustion("HTTP 529 rate limit");
+    expect(matched === "529" || matched === "rate limit").toBe(true);
+  });
+  test("returns null when no exhaustion substring", () => {
+    expect(matchGoalExhaustion("permission denied")).toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// CHORE-40: build() goal-mode classification
+// ---------------------------------------------------------------------------
+
+/** Build a stream-json stdout with a final result event. */
+function streamWithResult(resultString: string, opts: { costUsd?: number; assistantCount?: number; extraLines?: string[] } = {}): string {
+  const lines: string[] = [];
+  for (let i = 0; i < (opts.assistantCount ?? 3); i++) {
+    lines.push(JSON.stringify({ type: "assistant", message: { role: "assistant", content: [] } }));
+  }
+  if (opts.extraLines) lines.push(...opts.extraLines);
+  lines.push(JSON.stringify({
+    type: "result",
+    subtype: "success",
+    is_error: false,
+    result: resultString,
+    ...(opts.costUsd !== undefined ? { total_cost_usd: opts.costUsd } : {}),
+  }));
+  return lines.join("\n");
+}
+
+describe("build goal-mode classification", () => {
+  test("goal-met when result event has no exhausted marker", async () => {
+    const deps = fakeDeps({
+      runResult: Either.right("Claude Code v2.1.195"),
+      runCaptureResult: Either.right(streamWithResult("Goal completed successfully.", { costUsd: 0.28, assistantCount: 7 })),
+    });
+    const result = await build(deps, tmp, "/abs/spec.md", join(tmp, "b", "raw-output.jsonl"), BUILD_MODEL, undefined, "the goal").run();
+    expect(Either.isRight(result)).toBe(true);
+    if (Either.isRight(result)) {
+      expect(result.right.goalStatus).toBe("goal-met");
+      expect(result.right.goalCostUsd).toBeCloseTo(0.28);
+      expect(result.right.goalTurns).toBe(7);
+    }
+  });
+
+  test("goal-exhausted when result event contains exhausted marker", async () => {
+    const deps = fakeDeps({
+      runResult: Either.right("Claude Code v2.1.195"),
+      runCaptureResult: Either.right(streamWithResult(
+        `Could not satisfy. ${GOAL_EXHAUSTED_MARKER}\nRemaining: nothing`,
+        { costUsd: 0.37, assistantCount: 20 },
+      )),
+    });
+    const result = await build(deps, tmp, "/abs/spec.md", join(tmp, "b", "raw-output.jsonl"), BUILD_MODEL, undefined, "the goal").run();
+    expect(Either.isRight(result)).toBe(true);
+    if (Either.isRight(result)) {
+      expect(result.right.goalStatus).toBe("goal-exhausted");
+      expect(result.right.goalTurns).toBe(20);
+    }
+  });
+
+  test("marker in prompt echo (user message) does NOT cause false goal-exhausted", async () => {
+    // The marker appears in an early user message but the final result event
+    // does NOT contain it — this is the smoke-test-proven false-positive guard.
+    const echoLine = JSON.stringify({
+      type: "user",
+      message: { role: "user", content: `/goal ... ${GOAL_EXHAUSTED_MARKER} ...` },
+    });
+    const deps = fakeDeps({
+      runResult: Either.right("Claude Code v2.1.195"),
+      runCaptureResult: Either.right(streamWithResult("Goal met.", { extraLines: [echoLine] })),
+    });
+    const result = await build(deps, tmp, "/abs/spec.md", join(tmp, "b", "raw-output.jsonl"), BUILD_MODEL, undefined, "the goal").run();
+    expect(Either.isRight(result)).toBe(true);
+    if (Either.isRight(result)) expect(result.right.goalStatus).toBe("goal-met");
+  });
+
+  test("goal-error on nonzero exit with no recognized exhaustion signal", async () => {
+    const deps = fakeDeps({
+      runResult: Either.right("Claude Code v2.1.195"),
+      runCaptureResult: Either.left("claude exited with code 1: permission denied"),
+    });
+    const result = await build(deps, tmp, "/abs/spec.md", join(tmp, "b", "raw-output.jsonl"), BUILD_MODEL, undefined, "the goal").run();
+    expect(Either.isLeft(result)).toBe(true);
+    if (Either.isLeft(result)) expect(result.left).toContain("goal-error");
+  });
+
+  test("goal-exhausted on nonzero exit with context-window substring", async () => {
+    const deps = fakeDeps({
+      runResult: Either.right("Claude Code v2.1.195"),
+      runCaptureResult: Either.left("claude exited with code 1: exceeded context window"),
+    });
+    const result = await build(deps, tmp, "/abs/spec.md", join(tmp, "b", "raw-output.jsonl"), BUILD_MODEL, undefined, "the goal").run();
+    expect(Either.isLeft(result)).toBe(true);
+    if (Either.isLeft(result)) expect(result.left).toContain("goal-exhausted");
+  });
+
+  test("goal mode does not pass --max-turns", async () => {
+    const calls: Array<{ cmd: string; args: string[]; teeTo: string }> = [];
+    const deps = fakeDeps({
+      runResult: Either.right("Claude Code v2.1.195"),
+      runCaptureResult: Either.right(streamWithResult("done")),
+      runCaptureCalls: calls,
+    });
+    await build(deps, tmp, "/abs/spec.md", join(tmp, "b", "raw-output.jsonl"), BUILD_MODEL, undefined, "the goal").run();
+    expect(calls[0]!.args).not.toContain("--max-turns");
+    expect(calls[0]!.args.some((a) => a.startsWith("/goal "))).toBe(true);
+  });
+
+  test("version guard rejects claude older than 2.1.139 for goal mode", async () => {
+    const deps = fakeDeps({
+      runResult: Either.right("Claude Code v2.1.37"),
+      runCaptureResult: Either.right(streamWithResult("done")),
+    });
+    const result = await build(deps, tmp, "/abs/spec.md", join(tmp, "b", "raw-output.jsonl"), BUILD_MODEL, undefined, "the goal").run();
+    expect(Either.isLeft(result)).toBe(true);
+    if (Either.isLeft(result)) expect(result.left).toContain("older than 2.1.139");
+  });
+
+  test("non-goal build is unaffected (no version guard, no goalStatus)", async () => {
+    const calls: Array<{ cmd: string; args: string[]; teeTo: string }> = [];
+    const deps = fakeDeps({
+      runResult: Either.right("claude 1.0.0"),
+      runCaptureResult: Either.right(SUCCESS_RESULT_LINE),
+      runCaptureCalls: calls,
+    });
+    const result = await build(deps, tmp, "/abs/spec.md", join(tmp, "b", "raw-output.jsonl")).run();
+    expect(Either.isRight(result)).toBe(true);
+    if (Either.isRight(result)) expect(result.right.goalStatus).toBeUndefined();
+    // No extra --version probe for non-goal builds.
+    expect(deps.runCalls).toEqual([]);
+    expect(calls[0]!.args.some((a) => a.startsWith("/goal "))).toBe(false);
   });
 });

@@ -44,7 +44,7 @@
  *   agents/{id}/tester/events.jsonl        — written by adw-test subprocess
  *   agents/{id}/patch-reviewer/events.jsonl — written by adw-patch-review subprocess
  */
-import { spawn } from "child_process";
+import { spawn, execSync } from "child_process";
 import { appendFileSync, existsSync, mkdirSync, readFileSync, realpathSync, statSync } from "fs";
 import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "path";
@@ -67,6 +67,8 @@ import {
   type WorktreeDeps,
   type WorktreeValidation,
 } from "./adws-modules/worktree.ts";
+import { parseGoalFromSpec, SpecFrontmatterError } from "./adws-modules/spec-frontmatter.ts";
+import type { GoalStatus } from "./adws-modules/builder.ts";
 
 const PROJECT_ROOT = realpathSync(join(import.meta.dir, ".."));
 const AGENTS_DIR = join(PROJECT_ROOT, "agents");
@@ -456,6 +458,16 @@ export interface SpecReviewResult {
 export interface BuildOutcome {
   id: string;
   specPath: string;
+  /** CHORE-40: goal-mode classification, only when goal mode was active. */
+  goalStatus?: GoalStatus;
+  /** CHORE-40: effective goal condition, when goal mode was active. */
+  goalCondition?: string;
+  /** CHORE-40: total cost in USD parsed from the result event. */
+  goalCostUsd?: number;
+  /** CHORE-40: assistant-message count (proxy for goal turns). */
+  goalTurns?: number;
+  /** CHORE-40: short reason on goal-exhausted / goal-error. */
+  goalErrorReason?: string;
 }
 export interface TestOutcome {
   id: string;
@@ -521,6 +533,118 @@ function tokensOf(stdout: string): string[] | null {
   return lines[lines.length - 1]!.trim().split(/\s+/);
 }
 
+/**
+ * CHORE-40: merge goal fields from the build-outcome.json sidecar into the
+ * BuildOutcome. The stdout contract is unchanged (`<id> <specPath>`); the
+ * goal classification crosses the subprocess boundary via the sidecar.
+ *
+ * If goal mode was active but the sidecar is missing, mark goal-error so the
+ * orchestrator does not silently accept an unverified goal build.
+ */
+function mergeGoalSidecar(outcome: BuildOutcome, id: string, goalCondition: string | undefined): void {
+  if (!goalCondition) return; // non-goal build: nothing to merge.
+  const sidecarPath = join(AGENTS_DIR, id, "build-outcome.json");
+  let payload: { goalStatus?: GoalStatus; goalCostUsd?: number; goalTurns?: number; errorReason?: string } | null = null;
+  try {
+    if (existsSync(sidecarPath)) {
+      // Sidecar is appended per run; read the last JSON line.
+      const content = readFileSync(sidecarPath, "utf8");
+      const lines = content.split("\n").filter((l) => l.trim());
+      const last = lines[lines.length - 1];
+      if (last) payload = JSON.parse(last);
+    }
+  } catch {
+    // fall through — payload stays null, treated as missing below.
+  }
+  if (!payload) {
+    outcome.goalStatus = "goal-error";
+    outcome.goalCondition = goalCondition;
+    outcome.goalErrorReason = "goal-outcome-missing (sidecar absent)";
+    return;
+  }
+  outcome.goalStatus = payload.goalStatus;
+  outcome.goalCondition = goalCondition;
+  if (payload.goalCostUsd !== undefined) outcome.goalCostUsd = payload.goalCostUsd;
+  if (payload.goalTurns !== undefined) outcome.goalTurns = payload.goalTurns;
+  if (payload.errorReason) outcome.goalErrorReason = payload.errorReason;
+}
+
+/**
+ * CHORE-40: deterministic progress snapshot for the goal-exhausted fallback.
+ * A retry "made progress" if any of these values improved/changed in the
+ * expected direction since the prior snapshot. We never infer progress from
+ * prose (e.g. "Phases 1-N done").
+ */
+interface RetryProgressSnapshot {
+  /** `git diff --stat --summary` fingerprint of the worktree (or empty if no worktree). */
+  diffFingerprint: string;
+  /** Verdict of the last test run, if any. */
+  testVerdict?: string;
+  /** Verdict of the last patch-review run, if any. */
+  patchReviewVerdict?: string;
+}
+
+/**
+ * Capture a progress snapshot from the current worktree diff + last stage
+ * outcomes. Uses the real git binary (best-effort — a git failure yields an
+ * empty fingerprint, which still compares deterministically).
+ */
+function captureProgressSnapshot(
+  worktreePath: string | undefined,
+  stages: PipelineResult["stages"],
+): RetryProgressSnapshot {
+  let diffFingerprint = "";
+  if (worktreePath) {
+    try {
+      diffFingerprint = execSync(
+        "git diff --stat --summary HEAD",
+        { cwd: worktreePath, encoding: "utf8", timeout: 5000, stdio: ["ignore", "pipe", "ignore"] },
+      ).trim();
+    } catch {
+      diffFingerprint = ""; // best-effort
+    }
+  }
+  return {
+    diffFingerprint,
+    ...(stages.test?.verdict ? { testVerdict: stages.test.verdict } : {}),
+    ...(stages.patchReview?.verdict ? { patchReviewVerdict: stages.patchReview.verdict } : {}),
+  };
+}
+
+/**
+ * Did the pipeline make forward progress since `prev`? Progress means any of:
+ * the diff fingerprint changed (new edits), the test verdict improved (gaps →
+ * pass), or the patch-review verdict improved. A null `prev` (first snapshot)
+ * counts as progress.
+ */
+function madeProgressSince(
+  prev: RetryProgressSnapshot | null,
+  worktreePath: string | undefined,
+  stages: PipelineResult["stages"],
+): boolean {
+  if (prev === null) return true;
+  const curr = captureProgressSnapshot(worktreePath, stages);
+  if (curr.diffFingerprint !== prev.diffFingerprint) return true;
+  if (curr.testVerdict !== prev.testVerdict) return true;
+  if (curr.patchReviewVerdict !== prev.patchReviewVerdict) return true;
+  return false;
+}
+
+/**
+ * Record a goal-exhausted event for observability. Includes the iteration and
+ * the goal condition so operators can see how the goal evolved across retries.
+ */
+function recordGoalExhausted(build: BuildOutcome, iteration: number, agentsDir: string): void {
+  appendEvent(build.id, {
+    event: "goal-exhausted",
+    iteration,
+    goal_condition: build.goalCondition,
+    ...(build.goalTurns !== undefined ? { goal_turns: build.goalTurns } : {}),
+    ...(build.goalCostUsd !== undefined ? { goal_cost_usd: build.goalCostUsd } : {}),
+    ...(build.goalErrorReason ? { reason: build.goalErrorReason } : {}),
+  }, agentsDir);
+}
+
 // ---------------------------------------------------------------------------
 // Injectable stage functions (so tests can mock them without spawning subprocesses)
 // ---------------------------------------------------------------------------
@@ -528,7 +652,7 @@ function tokensOf(stdout: string): string[] | null {
 export interface PipelineDeps {
   runPlan: (description: string, forcedType: PlanType | undefined, id: string) => Promise<Either<string, PlanResult>>;
   runSpecReview: (specPath: string, id: string) => Promise<Either<string, SpecReviewResult>>;
-  runBuild: (specPath: string, modelOverride: string | undefined, id: string) => Promise<Either<string, BuildOutcome>>;
+  runBuild: (specPath: string, modelOverride: string | undefined, id: string, goalCondition?: string) => Promise<Either<string, BuildOutcome>>;
   runTest: (specPath: string, modelOverride: string | undefined, id: string) => Promise<Either<string, TestOutcome>>;
   runPatchReview: (specPath: string, modelOverride: string | undefined, id: string) => Promise<Either<string, PatchReviewResult>>;
 }
@@ -593,16 +717,22 @@ function makeRealDeps(opts: { getWorktreePath: () => string | undefined }): Pipe
       }
       return Either.right({ id: tokens[0]!, specPath: tokens.slice(2).join(" "), kind });
     },
-    runBuild: async (specPath, modelOverride, id): Promise<Either<string, BuildOutcome>> => {
+    runBuild: async (specPath, modelOverride, id, goalCondition): Promise<Either<string, BuildOutcome>> => {
       const args = [specPath];
       if (modelOverride) args.push("--model", modelOverride);
+      // CHORE-40: pass the goal condition through. The subprocess resolves the
+      // effective goal (--goal override > frontmatter) and writes build-outcome.json.
+      if (goalCondition) args.push("--goal", goalCondition);
       args.push("--id", id);
       // Build runs in the worktree when ADW_WORKTREE is set.
       const r = await spawnStage("adw-build.ts", args, join(AGENTS_DIR, id, "builder", "raw-output.jsonl"), getWt());
       if (r.code !== 0) return Either.left(r.stdout || `adw-build exited with code ${r.code}`);
       const tokens = tokensOf(r.stdout);
       if (!tokens || tokens.length < 2) return Either.left(`adw-build: unparseable stdout: ${r.stdout.slice(0, 200)}`);
-      return Either.right({ id: tokens[0]!, specPath: tokens.slice(1).join(" ") });
+      const outcome: BuildOutcome = { id: tokens[0]!, specPath: tokens.slice(1).join(" ") };
+      // CHORE-40: merge goal fields from the build-outcome.json sidecar.
+      mergeGoalSidecar(outcome, id, goalCondition);
+      return Either.right(outcome);
     },
     runTest: async (specPath, modelOverride, id): Promise<Either<string, TestOutcome>> => {
       const args = [specPath];
@@ -1052,11 +1182,22 @@ export async function runPipeline(
     } else if (validation.reason === "missing") {
       // Recorded path is gone — recreate from the recorded base SHA (NOT HEAD),
       // reusing an existing branch without deleting/recreating it.
-      const baseSha = state.base_sha ?? resume?.baseSha;
+      // BUG-20 fix: when no base_sha was recorded (e.g. workspace was created
+      // by the planning-only orchestrator which never creates a worktree), capture
+      // HEAD now as the base. This is safe because plan+review are already
+      // complete and there's no prior worktree to preserve.
+      let baseSha = state.base_sha ?? resume?.baseSha;
       if (!baseSha) {
-        appendEvent(id, { event: "worktree-error", detail: "resume recreate needs a recorded base_sha, none found" }, agentsDir);
-        state.failed_stage = resume?.resumeFrom ?? "build";
-        return finalize(Either.left("resume worktree recreation failed: no recorded base_sha to recreate from"));
+        const headRes = await worktreeDeps.gitRun("git", ["rev-parse", "HEAD"], { cwd: PROJECT_ROOT }).run();
+        if (Either.isLeft(headRes) || !headRes.right.trim()) {
+          const detail = Either.isLeft(headRes) ? headRes.left : "git rev-parse HEAD produced no output";
+          appendEvent(id, { event: "worktree-error", detail: `base_sha capture failed on resume: ${detail}` }, agentsDir);
+          state.failed_stage = resume?.resumeFrom ?? "build";
+          return finalize(Either.left(`resume worktree creation failed: could not capture base SHA (${detail})`));
+        }
+        baseSha = headRes.right.trim();
+        state.base_sha = baseSha;
+        appendEvent(id, { event: "base-sha-recorded", base_sha: baseSha, reason: "resume-fresh-capture" }, agentsDir);
       }
       const createRes = await worktreeDeps.createWorktreeFromBase(PROJECT_ROOT, branch, worktreePath, baseSha).run();
       if (Either.isLeft(createRes)) {
@@ -1106,6 +1247,29 @@ export async function runPipeline(
   // specPath is non-null from here on (setupPhases returned Right only when it was set).
   const specPathForLater = specPath!;
 
+  // ── CHORE-40: resolve the goal from spec frontmatter (once, before build) ──
+  // Frontmatter parse errors are spec-authoring failures — fail the pipeline
+  // rather than dispatching a non-goal build (the goal is part of the spec's
+  // contract). `baseGoal` is the original; `effectiveGoal` carries narrowing
+  // prefixes after goal-exhausted retries.
+  let baseGoal: string | undefined;
+  let effectiveGoal: string | undefined;
+  try {
+    baseGoal = parseGoalFromSpec(specPathForLater);
+    effectiveGoal = baseGoal;
+  } catch (e) {
+    if (e instanceof SpecFrontmatterError) {
+      appendEvent(id, { event: "goal-frontmatter-error", detail: e.message }, agentsDir);
+      state.failed_stage = "build";
+      return finalize(Either.left(`goal frontmatter error: ${e.message}`));
+    }
+    throw e;
+  }
+  // Goal-exhaustion tracking: consecutive exhausted retries with no progress
+  // trigger a fallback to plain /implement (no goal).
+  let consecutiveGoalExhausted = 0;
+  let lastProgressSnapshot: RetryProgressSnapshot | null = null;
+
   // ── Stage 3: build (runs unless resuming directly at test or patch-review) ───
   const forcedBuildRestart = resume?.forcedFromStage && resume.resumeFrom === "build";
   const shouldRunInitialBuild = !resume || (resume.resumeFrom !== "test" && resume.resumeFrom !== "patch-review");
@@ -1117,7 +1281,7 @@ export async function runPipeline(
         teeFile: join(agentsDir, id, "builder", "raw-output.jsonl"),
         onBeat: (p) => appendEvent(id, { event: "heartbeat", ...p }, agentsDir),
       },
-      () => deps.runBuild(specPathForLater, args.modelOverride, id),
+      () => deps.runBuild(specPathForLater, args.modelOverride, id, effectiveGoal),
     );
     if (Either.isLeft(buildRes)) {
       appendEvent(id, { event: "stage-error", stage: "build", detail: buildRes.left }, agentsDir);
@@ -1125,6 +1289,14 @@ export async function runPipeline(
       return finalize(Either.left(`build stage failed: ${buildRes.left}`));
     }
     stages.build = buildRes.right;
+    // CHORE-40: react to goal-exhausted on the initial build. Record the event;
+    // the narrowing + fallback logic lives in the retry path below (it shares
+    // the goalExhausted handling with retry builds).
+    if (buildRes.right.goalStatus === "goal-exhausted") {
+      recordGoalExhausted(buildRes.right, 0, agentsDir);
+      consecutiveGoalExhausted = 1;
+      lastProgressSnapshot = captureProgressSnapshot(currentWorktreePath, stages);
+    }
     appendEvent(id, { event: "stage-complete", stage: "build", spec_path: buildRes.right.specPath }, agentsDir);
     if (!completedStages.includes("build")) completedStages.push("build");
     await checkpoint();
@@ -1332,13 +1504,32 @@ export async function runPipeline(
       }
       lastSpecFingerprint = currentFingerprint;
 
+      // CHORE-40: determine the effective goal for this retry build. After a
+      // goal-exhausted, narrow the goal so Claude re-orients from the current
+      // repo state rather than re-discovering. After two consecutive
+      // goal-exhausted with no progress, fall back to plain /implement.
+      let retryGoal: string | undefined;
+      if (baseGoal && consecutiveGoalExhausted >= 2 && !madeProgressSince(lastProgressSnapshot, currentWorktreePath, stages)) {
+        appendEvent(id, {
+          event: "goal-fallback",
+          iteration: patchIterations,
+          reason: "two consecutive goal-exhausted with no progress — falling back to plain /implement",
+        }, agentsDir);
+        retryGoal = undefined; // plain /implement, no goal.
+      } else if (baseGoal && consecutiveGoalExhausted >= 1) {
+        retryGoal = `Continue from the current repository state. Inspect the existing diff and validation output first; do not redo completed edits. ${baseGoal}`;
+        effectiveGoal = retryGoal;
+      } else {
+        retryGoal = effectiveGoal;
+      }
+
       const rebuildRes = await withHeartbeat(
         {
           stage: `build (retry ${patchIterations})`,
           teeFile: join(agentsDir, id, "builder", "raw-output.jsonl"),
           onBeat: (p) => appendEvent(id, { event: "heartbeat", ...p }, agentsDir),
         },
-        () => deps.runBuild(specPathForLater, args.modelOverride, id),
+        () => deps.runBuild(specPathForLater, args.modelOverride, id, retryGoal),
       );
       if (Either.isLeft(rebuildRes)) {
         appendEvent(id, { event: "stage-error", stage: "build", detail: rebuildRes.left, iteration: patchIterations, retry: true }, agentsDir);
@@ -1346,6 +1537,19 @@ export async function runPipeline(
         return finalize(Either.left(`build stage failed (retry ${patchIterations}): ${rebuildRes.left}`));
       }
       stages.build = rebuildRes.right;
+      // CHORE-40: react to goal-exhausted on retry builds.
+      if (rebuildRes.right.goalStatus === "goal-exhausted") {
+        const madeProgress = madeProgressSince(lastProgressSnapshot, currentWorktreePath, stages);
+        recordGoalExhausted(rebuildRes.right, patchIterations, agentsDir);
+        if (madeProgress) {
+          consecutiveGoalExhausted = 1; // reset — there was forward movement.
+        } else {
+          consecutiveGoalExhausted++;
+        }
+        lastProgressSnapshot = captureProgressSnapshot(currentWorktreePath, stages);
+      } else if (rebuildRes.right.goalStatus === "goal-met") {
+        consecutiveGoalExhausted = 0; // reset on a clean goal-met.
+      }
       appendEvent(id, {
         event: "stage-complete",
         stage: "build",

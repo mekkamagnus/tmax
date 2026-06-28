@@ -35,3 +35,47 @@ Persistent surprises that cost real debugging time. Check these before assuming 
 7. **`async-let` only works under the async evaluator** (`executeAsync`). The standalone CLI's top level uses sync `execute`, so a top-level `async-let` form reports "Undefined symbol: async-let". Test async behavior through `interpreter.executeAsync!` (see `test/unit/tlisp-async.test.ts`), not the CLI.
 
 **Rule:** when writing `.tlisp`, verify against the actual interpreter early (a `(require-module …)` + a few `(print …)` forms via `bun run src/tlisp/cli.ts`) rather than assuming Common-Lisp semantics. T-Lisp is Emacs-ish but has sharp edges above.
+
+## Workflow: Never delete a worktree that has uncommitted implementation files
+
+When a build stage fails at a **gate** (typecheck, e2e) but claude's `/implement` dispatch **succeeded**, the worktree contains ~50 minutes of uncommitted implementation work. Deleting the worktree (`git worktree remove --force` + `rm -rf agents/<id>`) throws all of it away. The orchestrator will re-dispatch claude on resume, forcing a full re-implementation.
+
+**Before cleanup, check:** `git -C <worktree> status --short` — if it shows new/modified files, the dispatch succeeded and the implementation exists. Either:
+- **Fix the gate issue and resume** without removing the worktree (claude re-dispatches but the files are already there)
+- **Cherry-pick or copy the files** to a temp branch before cleanup
+
+**Gate failures vs. dispatch failures:** A gate failure (typecheck, e2e) means the implementation is good but the environment/dependencies have issues — this is fixable without re-implementation. A dispatch failure (claude exited non-zero, rate limit, timeout with no files written) means there's nothing to preserve.
+
+**Rule:** `git -C <worktree> status --short` before any `worktree remove`. If files exist, preserve them.
+
+## Pipeline: Ensure @types/node is an explicit devDependency
+
+The typecheck gate runs `bunx tsc --noEmit --project tsconfig.src.json` in the **worktree**, which has its own `node_modules/` (populated by `bun install` at worktree creation). If `@types/node` is only a transitive dependency (pulled in by `@types/bun`), tsc fails with `Cannot find name 'process'` across all `src/` files — even though the main checkout works fine (its `node_modules/` has the transitive dep).
+
+**Fix:** Add `"@types/node"` explicitly to `devDependencies` in `package.json` and add `"types": ["node", "bun"]` to `tsconfig.json`. This ensures every worktree gets `@types/node` via `bun install`.
+
+**Rule:** Any type used by `src/` code must be an explicit devDependency, not just a transitive one.
+
+## Pipeline: Uncommitted changes don't propagate to worktrees
+
+Worktrees are created from the committed HEAD (`base_sha`), not the working tree. If you edit files in the main checkout (model defaults, permissions flags, tsconfig fixes) but don't commit them, the worktree gets the old code. This causes confusing failures where "I just fixed this" doesn't take effect.
+
+**Rule:** Commit fixes to main before launching a pipeline that creates worktrees. Verify with `git diff HEAD -- <file>` that changes are committed.
+
+## Pipeline: `/goal` mode works but Claude ignores the worktree cwd (SPEC-065 regression)
+
+CHORE-40 added `/goal` mode to the build stage. The CHORE-39 re-run (workspace `01KW4T4HZ6`) proved `/goal` delivers ~3× the work of the previous 3-session run: 451 goal turns, 83 minutes, $22.53, 3 commits delivering Phases 2–4. The mechanism works as designed — Claude iterates within one session, running typecheck/tests between phases, then emits `ADW_GOAL_EXHAUSTED` with a summary.
+
+**But:** Claude committed its work to `main` in the main repo, NOT to the worktree's `adw/<id>` branch. The worktree was empty. Root cause: Claude's working-directory awareness hardcodes `cd /Users/.../tmax` (the main repo) on every Bash command — 80 commands cd'd to main, only 12 referenced the worktree path. The `ADW_WORKTREE` env var sets the spawn cwd correctly, but Claude's own `cd` overrides it on every command.
+
+**Rule:** Worktree isolation via cwd is insufficient for `/goal` mode. Claude must be told (in the prompt) that its working directory is the worktree, OR the build stage must detect commits-on-wrong-branch and refuse/cherry-pick. This is BUG-22 (to be filed): "Claude `/goal` mode commits to main instead of worktree branch."
+
+## Pipeline: `goal-exhausted` then post-build typecheck gate = hard failure
+
+When `/goal` exits exhausted (goal not met), the orchestrator runs a post-build typecheck gate. If the tree isn't fully green at that point (Claude's self-reported "green" was optimistic), the gate fails with exit code 2 and the pipeline dies before patch-review can run. This defeats the two-layer model: the outer loop never gets a chance to retry.
+
+**Rule:** `goal-exhausted` should NOT trigger the hard typecheck gate. The gate should run only on `goal-met`. On `goal-exhausted`, skip straight to patch-review (which produces the `gaps` verdict that drives the retry loop). This is BUG-23 (to be filed).
+
+## Testing: `0w` count-prefix regression is a test-isolation issue
+
+The CHORE-39 refactor (`this.state` → `this.model`) introduced a state-leak between tests: `0w` passes in isolation but fails when run with siblings in `count-prefix.test.ts`. The digit logic is unchanged; the leak is in how editor state resets between tests. When refactoring editor internals, run the FULL test file (not just the targeted test) to catch cross-test state leaks.

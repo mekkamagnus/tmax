@@ -29,9 +29,10 @@ import { appendFileSync, existsSync, mkdirSync, readFileSync, readdirSync, realp
 import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "path";
 import { Either, TaskEither } from "../src/utils/task-either.ts";
-import { BUILD_MODEL, type BuilderDeps, build, ensureAvailable } from "./adws-modules/builder.ts";
+import { BUILD_MODEL, GOAL_EXHAUSTED_MARKER, GOAL_TURN_LIMIT, type BuilderDeps, type BuildResult, type GoalStatus, build, ensureAvailable } from "./adws-modules/builder.ts";
 import { formatToolUseLine } from "./adws-modules/live-filter.ts";
 import { findWorkspaceBySpecPath } from "./adws-modules/workspace.ts";
+import { parseGoalFromSpec, SpecFrontmatterError } from "./adws-modules/spec-frontmatter.ts";
 import { withClaude529Retry } from "./claude-529-retry.ts";
 
 const PROJECT_ROOT = realpathSync(join(import.meta.dir, ".."));
@@ -42,18 +43,21 @@ const SPECS_DIR = join(PROJECT_ROOT, "docs", "specs");
 // Usage / arg parsing
 // ---------------------------------------------------------------------------
 
-const USAGE = `Usage: bun adws/adw-build.ts [--model <id>] <spec-path-or-adw-id>
+const USAGE = `Usage: bun adws/adw-build.ts [--model <id>] [--goal <condition>] <spec-path-or-adw-id>
 
 Dispatches \`claude -p /implement\` against a spec and records the run. Prints
 "<build-id> <spec-path>" on success.
 
-  --model <id>   Override the default implement model (${BUILD_MODEL}). Use this
-                 for the rare spec that needs a larger context window, or as a
-                 fallback if the default model is unhealthy on the gateway.
-  <spec-path>    A docs/specs/{SPEC,BUG,CHORE}-*.md path.
-  <adw-id>       A 10-char ULID-timestamp id from a prior adw-plan or
-                 adw-spec-review run; resolves to that run's spec_path (via
-                 agents/<adw-id>/adw-state.json).
+  --model <id>        Override the default implement model (${BUILD_MODEL}). Use this
+                      for the rare spec that needs a larger context window, or as a
+                      fallback if the default model is unhealthy on the gateway.
+  --goal <condition>  CHORE-40: enable /goal mode. Claude runs /implement then keeps
+                      working until <condition> is satisfied, within one session.
+                      Overrides any goal in the spec's YAML frontmatter.
+  <spec-path>         A docs/specs/{SPEC,BUG,CHORE}-*.md path.
+  <adw-id>             A 10-char ULID-timestamp id from a prior adw-plan or
+                      adw-spec-review run; resolves to that run's spec_path (via
+                      agents/<adw-id>/adw-state.json).
 
 State: ./agents/{build-id}/adw-state.json; build events:
 ./agents/{build-id}/builder/events.jsonl; claude output:
@@ -63,12 +67,14 @@ export interface ParsedArgs {
   input: string;
   model?: string;
   id?: string;
+  goal?: string;
 }
 
 export function parseArgs(argv: string[]): Either<string, ParsedArgs> {
   let input = "";
   let model: string | undefined;
   let id: string | undefined;
+  let goal: string | undefined;
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i]!;
     if (a === "-h" || a === "--help") return Either.left(`__help__:${USAGE}`);
@@ -81,11 +87,15 @@ export function parseArgs(argv: string[]): Either<string, ParsedArgs> {
       if (val === undefined) return Either.left("--id requires a value.");
       if (!ADW_ID_RE.test(val)) return Either.left(`--id must be a 10-char ULID-timestamp id (got "${val}").`);
       id = val;
+    } else if (a === "--goal") {
+      const val = argv[++i];
+      if (val === undefined) return Either.left("--goal requires a value.");
+      goal = val;
     } else if (input === "") input = a;
     else return Either.left(`Unexpected extra argument: ${a}`);
   }
   if (!input) return Either.left(`__usage__:${USAGE}`);
-  return Either.right({ input, model, id });
+  return Either.right({ input, model, id, goal });
 }
 
 // ---------------------------------------------------------------------------
@@ -326,6 +336,24 @@ export interface E2eGateResult {
 }
 
 /**
+ * BUG-23: decide whether the typecheck gate should hard-fail the build or be
+ * skipped. Pure function (no I/O) so it's unit-testable independently of the
+ * runBuild program chain.
+ *
+ * - gate.ok === true → never skip (gate passed, nothing to decide)
+ * - goal-exhausted → skip (partial work proceeds to patch-review per BUG-23)
+ * - everything else (classic /implement, goal-met, goal-error) → hard-fail
+ *   (ADR-0108 (a): non-compiling code cannot be audited)
+ */
+export function shouldSkipTypecheckGate(
+  gateOk: boolean,
+  goalStatus: GoalStatus | undefined,
+): boolean {
+  if (gateOk) return false;
+  return goalStatus === "goal-exhausted";
+}
+
+/**
  * Run `bin/tmax-use test` as an optional e2e gate after a successful build.
  *
  * Skips silently when no tmax-use playbooks or tests exist (so this remains
@@ -449,6 +477,8 @@ interface Seed {
 interface Resolved extends Seed {
   specPath: string;
   source: "path" | "adw-id";
+  /** CHORE-40: effective goal condition (from --goal or frontmatter), if any. */
+  goalCondition?: string;
 }
 
 /** Result of a successful build run. (Named BuildOutcome to avoid collision with builder.ts's BuildResult.) */
@@ -456,6 +486,16 @@ export interface BuildOutcome {
   id: string;
   specPath: string;
   baseSha?: string;
+  /** CHORE-40: goal-mode classification, only when goal mode was active. */
+  goalStatus?: GoalStatus;
+  /** CHORE-40: effective goal condition, when goal mode was active. */
+  goalCondition?: string;
+  /** CHORE-40: total cost in USD parsed from the result event. */
+  goalCostUsd?: number;
+  /** CHORE-40: assistant-message count (proxy for goal turns). */
+  goalTurns?: number;
+  /** CHORE-40: short reason on goal-exhausted / goal-error. */
+  goalErrorReason?: string;
 }
 
 /**
@@ -471,6 +511,7 @@ export function runBuild(
   input: string,
   modelOverride?: string,
   id?: string,
+  goalOverride?: string,
 ): Promise<Either<string, BuildOutcome>> {
   // Inject the subprocess plumbing into the builder module.
   const deps: BuilderDeps = {
@@ -500,6 +541,29 @@ export function runBuild(
   if (Either.isLeft(resolvedInput)) return Promise.resolve(resolvedInput);
   const specPath = resolvedInput.right.specPath;
   const source = resolvedInput.right.source;
+
+  // ── CHORE-40: resolve goal (--goal override > frontmatter > none) ─────────
+  // Frontmatter parse errors are spec-authoring failures: fail loudly rather
+  // than silently disabling goal mode. Only probe frontmatter when no explicit
+  // override was given.
+  let goalCondition: string | undefined;
+  if (goalOverride !== undefined) {
+    goalCondition = goalOverride;
+  } else {
+    try {
+      goalCondition = parseGoalFromSpec(specPath);
+    } catch (e) {
+      if (e instanceof SpecFrontmatterError) {
+        // Malformed frontmatter — fail before any agents/ dir is created. The
+        // caller (main) surfaces this as a usage error (exit 1).
+        return Promise.resolve(Either.left(e.message));
+      }
+      throw e;
+    }
+  }
+  if (goalCondition) {
+    process.stderr.write(`adw-build: goal mode enabled — "${goalCondition.slice(0, 100)}"\n`);
+  }
 
   // ── Resolve the workspace id ─────────────────────────────────────────────
   // Priority: explicit --id > discovered workspace > fresh mint.
@@ -531,6 +595,7 @@ export function runBuild(
     model: modelOverride ?? BUILD_MODEL,
     specPath,
     source,
+    ...(goalCondition ? { goalCondition } : {}),
   };
 
   // SPEC-065: when orchestrated inside a worktree, ADW_WORKTREE points at the
@@ -539,6 +604,11 @@ export function runBuild(
   // PROJECT_ROOT. Standalone (no env var) falls back to PROJECT_ROOT — i.e.
   // behaves exactly as before.
   const cwd = process.env.ADW_WORKTREE ?? PROJECT_ROOT;
+
+  // CHORE-40: captured goal result from the build dispatch, used to write the
+  // build-outcome.json sidecar and apply the cost guardrail. Set by Step 2's
+  // .tap callback when goal mode was active.
+  let lastGoalResult: BuildResult | undefined;
 
   const program = TaskEither
     .right<Resolved, string>(currentBuild)
@@ -560,34 +630,67 @@ export function runBuild(
       }))
       .map(() => ctx))
     // Step 2: dispatch to /implement. .tap for the event side effect, .map to
-    // keep ctx flowing to Step 3.
+    // keep ctx flowing to Step 3. CHORE-40: capture the BuildResult's goal
+    // fields for the build-outcome.json sidecar.
     .flatMap((ctx) => {
       const builderLog = join(AGENTS_DIR, ctx.id, "builder", "raw-output.jsonl");
       // §C: live tool-use filtering to stderr — only when orchestrated.
       const liveLabel = process.env.ADW_ORCHESTRATED === "1" ? "build" : undefined;
-      return build(deps, cwd, ctx.specPath, builderLog, ctx.model, liveLabel)
-        .tap(() => appendEvent(ctx.id, "builder", {
-          event: "dispatch",
-          skill: "implement",
-          status: "ok",
-          exit_code: 0,
-        }))
+      return build(deps, cwd, ctx.specPath, builderLog, ctx.model, liveLabel, ctx.goalCondition)
+        .tap((br) => {
+          // CHORE-40: capture goal outcome for sidecar + cost guardrail.
+          if (br.goalStatus) lastGoalResult = br;
+          appendEvent(ctx.id, "builder", {
+            event: "dispatch",
+            skill: "implement",
+            status: "ok",
+            exit_code: 0,
+            ...(br.goalStatus ? { goal_status: br.goalStatus } : {}),
+            ...(br.goalTurns !== undefined ? { goal_turns: br.goalTurns } : {}),
+          });
+        })
         .map(() => ctx);
     })
-    // Step 2.5 (ADR-0108 (a)): typecheck compile gate. The implement dispatch
-    // may have produced non-compiling code (e.g. a duplicate import). Run
-    // `typecheck:src` now — a failure fails the build directly (Left), so the
-    // defect is caught in seconds at the stage that produced it, rather than
-    // surfacing as opaque test timeouts later.
+    // Step 2.5 (ADR-0108 (a) + BUG-23): typecheck compile gate. The implement
+    // dispatch may have produced non-compiling code (e.g. a duplicate import).
+    // Run `typecheck:src` now.
+    //
+    // ADR-0108 (a): for a classic /implement dispatch (or a goal-met build), a
+    // non-zero exit fails the build directly (Left), so the defect is caught in
+    // seconds at the stage that produced it, rather than surfacing as opaque
+    // test timeouts later. A non-compiling implementation cannot be audited or
+    // tested meaningfully.
+    //
+    // BUG-23: when the build ran in /goal mode AND exited goal-exhausted, the
+    // tree is EXPECTED to be partially-refactored — Claude ran out of turns
+    // mid-iteration on a large spec. A typecheck failure here does not mean
+    // "structurally broken, retrying is pointless"; it means "Claude didn't
+    // finish." The partial work is exactly what the two-layer model was built
+    // to handle: patch-review audits it, produces gaps, and the next build's
+    // narrowed goal picks up where Claude left off. So on goal-exhausted we
+    // downgrade the gate failure to a warning event and continue to Step 3,
+    // letting the orchestrator's patch-review stage drive the retry loop.
     .flatMap((ctx) => runTypecheckGate(run, cwd)
       .tap((gate) => appendEvent(ctx.id, "builder", {
         event: "typecheck_gate",
         ok: gate.ok,
         ...(gate.ok ? {} : { output: gate.output }),
       }))
-      .flatMap((gate): TaskEither<string, Resolved> => gate.ok
-        ? TaskEither.right<Resolved, string>(ctx)
-        : TaskEither.left<string, Resolved>(`typecheck gate failed: ${gate.output}`))
+      .flatMap((gate): TaskEither<string, Resolved> => {
+        if (shouldSkipTypecheckGate(gate.ok, lastGoalResult?.goalStatus)) {
+          appendEvent(ctx.id, "builder", {
+            event: "typecheck_gate_skipped",
+            reason: "goal-exhausted — partial work proceeds to patch-review (BUG-23)",
+            output: gate.output,
+          });
+          process.stderr.write(
+            `adw-build: typecheck gate failed but goal-exhausted — proceeding to patch-review (BUG-23)\n`,
+          );
+          return TaskEither.right<Resolved, string>(ctx);
+        }
+        if (gate.ok) return TaskEither.right<Resolved, string>(ctx);
+        return TaskEither.left<string, Resolved>(`typecheck gate failed: ${gate.output}`);
+      })
       .mapLeft((err) => `build stage failed at typecheck gate: ${err}`))
     // Step 3: best-effort git capture, then record result + finalize state.
     .flatMap((ctx) => captureGitTrace(run, cwd)
@@ -603,7 +706,33 @@ export function runBuild(
         model: ctx.model,
         status: "completed",
         ...(trace.base_sha ? { base_sha: trace.base_sha } : {}),
-      }).map(() => ({ id: ctx.id, specPath: ctx.specPath, ...(trace.base_sha ? { baseSha: trace.base_sha } : {}) }) as BuildOutcome))
+      }).map(() => {
+        // CHORE-40: build the outcome, merging goal fields from the captured
+        // BuildResult when goal mode was active.
+        const outcome: BuildOutcome = {
+          id: ctx.id,
+          specPath: ctx.specPath,
+          ...(trace.base_sha ? { baseSha: trace.base_sha } : {}),
+        };
+        if (lastGoalResult && ctx.goalCondition) {
+          const status = resolveGoalStatusOnSuccess(lastGoalResult);
+          outcome.goalStatus = status;
+          outcome.goalCondition = ctx.goalCondition;
+          if (lastGoalResult.goalCostUsd !== undefined) outcome.goalCostUsd = lastGoalResult.goalCostUsd;
+          if (lastGoalResult.goalTurns !== undefined) outcome.goalTurns = lastGoalResult.goalTurns;
+          outcome.goalErrorReason = status === "goal-exhausted"
+            ? (lastGoalResult.goalStatus === "goal-exhausted" ? `${GOAL_EXHAUSTED_MARKER} present in result event` : undefined)
+            : undefined;
+          writeGoalSidecar(ctx.id, ctx.specPath, outcome);
+          applyCostGuardrail(outcome);
+          process.stderr.write(
+            `adw-build: goal ${status}` +
+            (lastGoalResult.goalCostUsd !== undefined ? ` cost $${lastGoalResult.goalCostUsd.toFixed(2)}` : "") +
+            ` (turn limit ${GOAL_TURN_LIMIT})\n`,
+          );
+        }
+        return outcome;
+      }))
     // Step 4 (optional, never fails the build): run tmax-use e2e gate.
     // Spec AC#11 — adw build agent calls `bin/tmax-use test` and records
     // exit code + artifacts under agents/{id}/e2e-report/. Skipped silently
@@ -642,6 +771,71 @@ export function runBuild(
   });
 }
 
+// ---------------------------------------------------------------------------
+// CHORE-40: goal-mode sidecar + cost guardrail helpers
+// ---------------------------------------------------------------------------
+
+/**
+ * On a successful build (exit 0 + skill success), the BuildResult.goalStatus
+ * was classified inside builder.ts. Surface it directly; default to goal-met
+ * only if classification somehow left it unset (defensive — prefer exhausted
+ * per the spec's ambiguity rule when truly unknown, but here the skill
+ * succeeded so the build itself is fine).
+ */
+function resolveGoalStatusOnSuccess(br: BuildResult): GoalStatus {
+  return br.goalStatus ?? "goal-met";
+}
+
+/**
+ * Write agents/<id>/build-outcome.json with the goal-mode outcome. The
+ * orchestrator reads this sidecar to react to goal-exhausted without changing
+ * the machine-readable stdout contract (`<id> <specPath>`). Best-effort — a
+ * write failure logs a warning but does not fail the build.
+ */
+function writeGoalSidecar(id: string, specPath: string, outcome: BuildOutcome): void {
+  const sidecarPath = join(AGENTS_DIR, id, "build-outcome.json");
+  const payload = {
+    id,
+    specPath,
+    goalStatus: outcome.goalStatus ?? null,
+    goalCondition: outcome.goalCondition ?? null,
+    goalExhaustedMarker: GOAL_EXHAUSTED_MARKER,
+    goalCostUsd: outcome.goalCostUsd ?? 0,
+    goalTurns: outcome.goalTurns ?? 0,
+    ...(outcome.goalErrorReason ? { errorReason: outcome.goalErrorReason } : {}),
+  };
+  try {
+    mkdirSync(join(AGENTS_DIR, id), { recursive: true });
+    appendFileSync(sidecarPath, JSON.stringify(payload) + "\n");
+  } catch (e) {
+    process.stderr.write(`adw-build: warning: could not write build-outcome.json sidecar: ${(e as Error).message}\n`);
+  }
+}
+
+/**
+ * Apply the MAX_GOAL_COST_USD between-attempt guardrail. Noninteractive claude
+ * has no graceful early-stop channel, so the cap is enforced after the run
+ * completes: if the observed cost exceeds the cap, downgrade the outcome to
+ * goal-exhausted with errorReason goal-cost-exceeded so the orchestrator does
+ * not start another goal-mode retry. Mutates `outcome` in place.
+ */
+function applyCostGuardrail(outcome: BuildOutcome): void {
+  const capStr = process.env.MAX_GOAL_COST_USD;
+  if (!capStr) return;
+  const cap = parseFloat(capStr);
+  if (!Number.isFinite(cap)) return;
+  if (outcome.goalCostUsd !== undefined && outcome.goalCostUsd > cap) {
+    appendEvent(outcome.id, "builder", {
+      event: "goal-cost-observed",
+      cost_usd: outcome.goalCostUsd,
+      cap,
+      exceeded: true,
+    });
+    outcome.goalStatus = "goal-exhausted";
+    outcome.goalErrorReason = `goal-cost-exceeded (observed $${outcome.goalCostUsd.toFixed(2)} > cap $${cap.toFixed(2)})`;
+  }
+}
+
 function main(): Promise<number> {
   const parsed = parseArgs(process.argv.slice(2));
 
@@ -659,7 +853,7 @@ function main(): Promise<number> {
     return Promise.resolve(1);
   }
 
-  return runBuild(parsed.right.input, parsed.right.model, parsed.right.id).then((result) => {
+  return runBuild(parsed.right.input, parsed.right.model, parsed.right.id, parsed.right.goal).then((result) => {
     if (Either.isLeft(result)) {
       process.stderr.write(`Error: ${result.left}\n`);
       return 2;

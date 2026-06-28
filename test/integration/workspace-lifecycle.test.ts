@@ -10,7 +10,11 @@ let workspaceDir = "";
 let homeDir = "";
 let previousWorkspaceDir: string | undefined;
 let previousHome: string | undefined;
-const WORKSPACE_TEST_TIMEOUT_MS = 15_000;
+// Integration tests start real TmaxServer instances with socket I/O and wait on
+// debounced auto-save writes. Under full-suite CPU load these need headroom well
+// beyond the 10s unit default — 30s matches the bun test default and gives 2x
+// margin over the observed worst case (~17s on a loaded machine).
+const WORKSPACE_TEST_TIMEOUT_MS = 30_000;
 
 beforeEach(async () => {
   previousWorkspaceDir = process.env.TMAX_WORKSPACE_DIR;
