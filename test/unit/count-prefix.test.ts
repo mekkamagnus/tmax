@@ -212,15 +212,18 @@ describe("Count Prefix (US-1.3.1)", () => {
   });
 
   describe("Edge Cases", () => {
-    test("should not move cursor with 0w", async () => {
-      const initialState = editor.getState();
-
+    // "0" is the go-to-column-0 motion (not a count-setter), then "w" advances one
+    // word. The old assertion (cursor unchanged) only passed before CHORE-39 because
+    // getState() returned a mutable alias that followed the cursor in place; the
+    // immutable snapshot now exposes the real behaviour.
+    test("0w: 0 moves to column 0, w advances to the next word", async () => {
+      editor.createBuffer("test", "one two three four");
       await editor.handleKey("0");
       await editor.handleKey("w");
 
       const state = editor.getState();
-      expect(state.cursorPosition.line).toBe(initialState.cursorPosition.line);
-      expect(state.cursorPosition.column).toBe(initialState.cursorPosition.column);
+      expect(state.cursorPosition.line).toBe(0);
+      expect(state.cursorPosition.column).toBe(4); // start of "two"
     });
 
     test("should not move cursor with 00", async () => {
