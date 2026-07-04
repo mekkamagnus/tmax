@@ -159,7 +159,7 @@ describe("build", () => {
     // runCapture got the expected invocation.
     expect(calls).toHaveLength(1);
     expect(calls[0]!.cmd).toBe("claude");
-    expect(calls[0]!.args).toContain("/implement /abs/spec.md");
+    expect(calls[0]!.args.some((a: string) => a.includes("/implement /abs/spec.md"))).toBe(true);
     expect(calls[0]!.teeTo).toBe(builderLog);
   });
 
@@ -216,8 +216,11 @@ describe("build", () => {
 // ---------------------------------------------------------------------------
 
 describe("buildImplementPrompt", () => {
-  test("without a goal returns plain /implement", () => {
-    expect(buildImplementPrompt("/abs/spec.md")).toBe("/implement /abs/spec.md");
+  test("without a goal returns /implement with worktree directive (BUG-22)", () => {
+    const prompt = buildImplementPrompt("/abs/spec.md");
+    expect(prompt).toContain("/implement /abs/spec.md");
+    expect(prompt).toContain("worktree");
+    expect(prompt).toContain("NEVER");
   });
 
   test("with a goal returns /goal prompt containing /implement directive", () => {

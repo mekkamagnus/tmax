@@ -118,9 +118,25 @@ export function parseSkillResult(builderLog: string, stdout: string): SkillResul
  * Exported so tests can verify prompt construction without spawning Claude.
  */
 export function buildImplementPrompt(specPath: string, goalCondition?: string): string {
-  if (!goalCondition) return `/implement ${specPath}`;
+  // BUG-22: Claude hardcodes `cd <main-repo>` in Bash commands, ignoring the
+  // spawn cwd (the worktree). The worktree directive below tells Claude to
+  // work relative to its current directory and never cd to a hardcoded path.
+  // This is prepended to BOTH the goal and non-goal prompts so all build
+  // dispatches benefit.
+  const worktreeDirective = [
+    "IMPORTANT: You are running inside an adw worktree.",
+    "Your current working directory IS the worktree root — do all file edits,",
+    "git operations, and validation commands here. NEVER run",
+    "`cd /Users/mekael/Documents/programming/typescript/tmax` or any other",
+    "hardcoded path. If you need to reference the repo root, use `pwd` or",
+    "relative paths from the current directory.",
+    "",
+  ].join("\n");
+
+  if (!goalCondition) return `${worktreeDirective}\n/implement ${specPath}`;
 
   const condition = [
+    worktreeDirective,
     `Run the /implement skill for this exact spec path: ${JSON.stringify(specPath)}.`,
     "",
     "Then continue working until this completion condition is satisfied:",
