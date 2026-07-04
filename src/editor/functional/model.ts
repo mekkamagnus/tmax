@@ -3,40 +3,147 @@
  * @description EditorModel — the deterministic, pure-data core of the editor
  * (Elm Architecture "model" layer).
  *
- * EditorModel is intentionally SEPARATE from the public `EditorState` type
- * (src/core/types.ts). The public `EditorState` is handed to callers through
- * `getState()` / `getEditorState()` and its mutable collections
- * (e.g. `Map<string, FunctionalTextBuffer>`) must NOT be shared with internal
- * state. EditorModel is the editor's own internal working state; it is
- * projected/cloned to the public `EditorState` shape at the boundary by
- * `modelToEditorState`, so callers can never mutate internal state by
- * retaining references.
+ * EditorModel is a STANDALONE immutable interface — it deliberately does NOT
+ * `extend` the public `EditorState` type (src/core/types.ts). The public
+ * `EditorState` is handed to callers through `getState()` / `getEditorState()`
+ * and its mutable collections (`Map<string, FunctionalTextBuffer>`, etc.) and
+ * non-readonly fields must NOT leak into the editor's internal state. Extending
+ * `EditorState` would make this immutability contract unsound, because every
+ * inherited field would stay mutable. Instead, EditorModel re-declares each
+ * field it needs with `readonly` and immutable collection variants
+ * (`ReadonlyMap` / `readonly T[]`).
  *
- * EditorModel mirrors the EditorState field shape (the deterministic fields
- * that live in the editor's state object). Deterministic editor-internal
- * fields that the State-monad API primitives need (countPrefix, …) are added
- * here as they are migrated (CHORE-39 Phase 4). Other editor-internal fields
- * that are NOT part of the public state object and not yet migrated
- * (keyMappings, bufferModeStates, etc.) remain as separate private fields on
- * the Editor runtime. Immutability/isolation is enforced at the reducer
- * boundary (`update` returns fresh objects via spreads) and the public
- * boundary (`modelToEditorState` clones mutable collections on egress).
+ * EditorModel is the editor's own internal working state; it is projected /
+ * cloned to the public `EditorState` shape at the boundary by
+ * `modelToEditorState`, so callers can never mutate internal state by retaining
+ * references. Immutability is enforced at the type level (every field is
+ * `readonly`), at the reducer boundary (`update` returns fresh objects via
+ * spreads), and at the public boundary (`modelToEditorState` clones mutable
+ * collections on egress).
  */
 
-import type { EditorState } from "../../core/types.ts";
+import type {
+  EditorConfig,
+  EditorState,
+  FunctionalTextBuffer,
+  HighlightSpan,
+  JsonValue,
+  LSPDiagnostic,
+  MinibufferRenderView,
+  Position,
+  Range,
+  Tab,
+  WhichKeyBinding,
+  Window,
+} from "../../core/types.ts";
 
 /**
- * Internal editor model — structurally mirrors the public EditorState but is
- * a distinct nominal type used inside the editor.
+ * Editor mode union (mirrors the `mode` field on the public `EditorState`).
+ * Declared here so EditorModel is fully standalone and does not `extend`
+ * EditorState.
  */
-export interface EditorModel extends EditorState {
-  /** Vim-style count prefix accumulator (CHORE-39 Phase 4 model extension). */
-  countPrefix: number;
-  /** T-Lisp load-paths (CHORE-39 Phase 4 model extension). */
-  loadPaths: string[];
-  /** Currently-loaded module name (CHORE-39 Phase 4 model extension). */
-  currentModuleName: string | undefined;
+type EditorMode = 'normal' | 'insert' | 'visual' | 'command' | 'mx' | 'replace';
+
+/**
+ * Internal editor model — a standalone, fully-readonly interface. It does NOT
+ * extend the public `EditorState`; each field is re-declared here with `readonly`
+ * and (for collections) immutable `ReadonlyMap` / `readonly T[]` variants.
+ * Sources of truth: the public `EditorState` shape plus the three model-only
+ * extensions below.
+ */
+export interface EditorModel {
+  // Scalar / object fields (mirror EditorState, all readonly)
+  /** Currently-focused buffer. */
+  readonly currentBuffer?: FunctionalTextBuffer;
+  /** Buffer cursor position (line, column). */
+  readonly cursorPosition: Position;
+  /** Active editor mode. */
+  readonly mode: EditorMode;
+  /** Status-line message. */
+  readonly statusMessage: string;
+  /** Viewport vertical scroll offset. */
+  readonly viewportTop: number;
+  /** Viewport horizontal scroll offset. */
+  readonly viewportLeft?: number;
+  /** Editor configuration. */
+  readonly config: EditorConfig;
+  /** Current `:` command-line input. */
+  readonly commandLine: string;
+  /** Current M-x command input. */
+  readonly mxCommand: string;
+  /** Last executed command. */
+  readonly lastCommand?: string;
+  /** Filename associated with the current buffer. */
+  readonly currentFilename?: string;
+  /** Where cursor focus should be rendered. */
+  readonly cursorFocus?: 'buffer' | 'command';
+  /** Whether the which-key popup is currently displayed. */
+  readonly whichKeyActive?: boolean;
+  /** Current which-key prefix being explored. */
+  readonly whichKeyPrefix?: string;
+  /** Bindings for the current which-key prefix. */
+  readonly whichKeyBindings?: readonly WhichKeyBinding[];
+  /** Configurable which-key timeout in milliseconds (default 1000). */
+  readonly whichKeyTimeout?: number;
+  /** Which-key popup overlay data (mutable shape mirrors `EditorState`). */
+  readonly whichKeyPopup?: { prefixLabel: string; rows: { key: string; command: string; description?: string }[][]; height: number } | null;
+  /** Waiting for a key press to describe. */
+  readonly describeKeyPending?: boolean;
+  /** Timeout for the describe-key prompt. */
+  readonly describeKeyTimeout?: number;
+  /** Waiting for a function name to describe. */
+  readonly describeFunctionPending?: boolean;
+  /** Waiting for a search pattern for apropos. */
+  readonly aproposCommandPending?: boolean;
+  /** Diagnostics from the language server. */
+  readonly lspDiagnostics?: readonly LSPDiagnostic[];
+  /** Index of the currently focused window. */
+  readonly currentWindowIndex?: number;
+  /** Index of the active tab. */
+  readonly currentTabIndex?: number;
+  /** Active major mode name. */
+  readonly currentMajorMode?: string;
+  /** Active minor mode names. */
+  readonly activeMinorModes?: readonly string[];
+  /** Active minor mode lighter strings. */
+  readonly activeMinorModeLighters?: readonly string[];
+  /** Whether the current buffer has unsaved changes. */
+  readonly bufferModified?: boolean;
+  /** Serialized minibuffer state. */
+  readonly minibufferState?: JsonValue;
+  /** Minibuffer render view model. */
+  readonly minibufferView?: MinibufferRenderView;
+
+  // Collection fields → immutable variants (ReadonlyMap / readonly T[])
+  /** Named buffers (immutable map). */
+  readonly buffers?: ReadonlyMap<string, FunctionalTextBuffer>;
+  /** Open windows (immutable array). */
+  readonly windows?: readonly Window[];
+  /** Open tabs (immutable array). */
+  readonly tabs?: readonly Tab[];
+  /** Per-line syntax-highlight spans (immutable array of arrays). */
+  readonly highlightSpans?: readonly (readonly HighlightSpan[])[];
+  /** Current search match ranges (immutable array). */
+  readonly searchMatches?: readonly Range[];
+  /** Collapsed fold ranges keyed by start line (immutable map). */
+  readonly foldRanges?: ReadonlyMap<number, number>;
+
+  // Model-only extensions (CHORE-39 Phase 4) — also readonly / immutable
+  /** Vim-style count prefix accumulator. */
+  readonly countPrefix: number;
+  /** T-Lisp load-paths. */
+  readonly loadPaths: readonly string[];
+  /** Currently-loaded module name. */
+  readonly currentModuleName: string | undefined;
 }
+
+/**
+ * A writable view of a model patch, used while building an ingress patch
+ * (`editorStateToModelPatch`) before it is returned as `Partial<EditorModel>`.
+ * `Partial<EditorModel>` preserves `readonly`, so accumulating fields via
+ * assignment requires stripping `readonly` locally.
+ */
+type WritableModelPatch = { -readonly [K in keyof EditorModel]?: EditorModel[K] };
 
 /**
  * Build an initial model mirroring the Editor constructor's deterministic
@@ -139,7 +246,7 @@ export function modelToEditorState(model: EditorModel): EditorState {
  * `setEditorState(external)`.
  */
 export function editorStateToModelPatch(external: EditorState): Partial<EditorModel> {
-  const patch: Partial<EditorModel> = {
+  const patch: WritableModelPatch = {
     cursorPosition: { ...external.cursorPosition },
     mode: external.mode,
     statusMessage: external.statusMessage,

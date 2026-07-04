@@ -32,7 +32,7 @@ function patch(model: EditorModel, fields: Partial<EditorModel>): EditorModel {
 }
 
 /** Immutable map entry upsert: returns a fresh Map. */
-function withMapEntry<K, V>(map: Map<K, V>, key: K, value: V): Map<K, V> {
+function withMapEntry<K, V>(map: ReadonlyMap<K, V>, key: K, value: V): Map<K, V> {
   const next = new Map(map);
   next.set(key, value);
   return next;

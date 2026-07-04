@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, test } from "bun:test";
 import type { LSPDiagnostic } from "../../src/core/types.ts";
 import { createLSPDiagnosticsOps } from "../../src/editor/api/lsp-diagnostics.ts";
 import type { EditorModelAccess } from "../../src/editor/api/state-context.ts";
+import type { EditorModel } from "../../src/editor/functional/model.ts";
 import { initialModel } from "../../src/editor/functional/model.ts";
 import { TLispInterpreterImpl } from "../../src/tlisp/interpreter.ts";
 import { expectRight, expectTlispList } from "../helpers/editor-fixture.ts";
@@ -32,9 +33,11 @@ describe("LSP Diagnostics T-Lisp API", () => {
     ];
     // CHORE-39 Phase 4: lsp-diagnostics ops now read/write EditorModel via the
     // State monad. Test harness mirrors the editor runtime's model access.
-    let model = initialModel();
-    model.lspDiagnostics = diagnostics;
-    model.cursorPosition = { line: 0, column: 0 };
+    let model: EditorModel = {
+      ...initialModel(),
+      lspDiagnostics: diagnostics,
+      cursorPosition: { line: 0, column: 0 },
+    };
     const access: EditorModelAccess = {
       getModel: () => model,
       applyModel: (m) => { model = m; },

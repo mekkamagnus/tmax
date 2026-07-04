@@ -28,7 +28,7 @@ export function createWindowOps(
 ): Map<string, TLispFunctionImpl> {
   // CHORE-39 Phase 4: window/index/buffer reads flow through the State monad
   // against EditorModel; writes + terminal-size accessor stay on callbacks.
-  const getWindows = (): Window[] => runModel(access, readModelField("windows")) ?? [];
+  const getWindows = (): Window[] => [...(runModel(access, readModelField("windows")) ?? [])];
   const getCurrentWindowIndex = (): number => runModel(access, readModelField("currentWindowIndex")) ?? 0;
   const getCurrentBuffer = (): import("../../core/types.ts").FunctionalTextBuffer | undefined =>
     runModel(access, readModelField("currentBuffer"));

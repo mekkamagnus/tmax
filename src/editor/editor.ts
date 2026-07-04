@@ -294,9 +294,11 @@ export class Editor {
           const currentTabIndex = editor.model.currentTabIndex ?? 0;
           const currentTab = editor.model.tabs[currentTabIndex];
           if (currentTab && currentTab.label === editor.model.currentFilename) {
-            editor.model.tabs = editor.model.tabs.map((tab, index) =>
-              index === currentTabIndex ? { ...tab, buffer: v, bufferName } : tab
-            );
+            editor.patchModel({
+              tabs: editor.model.tabs.map((tab, index) =>
+                index === currentTabIndex ? { ...tab, buffer: v, bufferName } : tab
+              ),
+            });
           }
         }
         // R4-3: update current window buffer and bufferName
@@ -310,10 +312,10 @@ export class Editor {
             }
           }
         }
-        editor.model.currentBuffer = v ?? undefined;
+        editor.patchModel({ currentBuffer: v ?? undefined });
         if (bufferName) {
           editor.touchBuffer(bufferName);
-          editor.model.currentFilename = editor.bufferMetadata.get(bufferName)?.filename;
+          editor.patchModel({ currentFilename: editor.bufferMetadata.get(bufferName)?.filename });
         }
       },
       get buffers() {
@@ -350,35 +352,35 @@ export class Editor {
       get terminal() { return editor.terminal; },
       get filesystem() { return editor.filesystem; },
       get mode() { return editor.model.mode; },
-      set mode(v: 'normal' | 'insert' | 'visual' | 'command' | 'mx' | 'replace') { editor.model.mode = v; },
+      set mode(v: 'normal' | 'insert' | 'visual' | 'command' | 'mx' | 'replace') { editor.patchModel({ mode: v }); },
       get lastCommand() { return ""; },
       set lastCommand(_: string) { },
       get statusMessage() { return editor.model.statusMessage; },
-      set statusMessage(v: string) { editor.model.statusMessage = v; },
+      set statusMessage(v: string) { editor.patchModel({ statusMessage: v }); },
       get viewportTop() { return editor.model.viewportTop; },
-      set viewportTop(v: number) { editor.model.viewportTop = v; },
+      set viewportTop(v: number) { editor.patchModel({ viewportTop: v }); },
       get viewportLeft() { return editor.model.viewportLeft ?? 0; },
-      set viewportLeft(v: number) { editor.model.viewportLeft = v; },
+      set viewportLeft(v: number) { editor.patchModel({ viewportLeft: v }); },
       get commandLine() { return editor.model.commandLine; },
-      set commandLine(v: string) { editor.model.commandLine = v; },
+      set commandLine(v: string) { editor.patchModel({ commandLine: v }); },
       get spacePressed() { return editor.spacePressed; },
       set spacePressed(v: boolean) { editor.spacePressed = v; },
       get mxCommand() { return editor.model.mxCommand; },
-      set mxCommand(v: string) { editor.model.mxCommand = v; },
+      set mxCommand(v: string) { editor.patchModel({ mxCommand: v }); },
       get cursorFocus() { return editor.model.cursorFocus ?? 'buffer'; },
-      set cursorFocus(v: 'buffer' | 'command') { editor.model.cursorFocus = v; },
-      get lspDiagnostics() { return editor.model.lspDiagnostics; },
+      set cursorFocus(v: 'buffer' | 'command') { editor.patchModel({ cursorFocus: v }); },
+      get lspDiagnostics() { return editor.model.lspDiagnostics ? [...editor.model.lspDiagnostics] : undefined; },
       logMessage: (msg: string, level?: string, command?: string, frameId?: string) => editor.logMessage(msg, (level as LogLevel) ?? 'info', command, frameId),
       setEchoOnly: (text: string) => editor.setEchoOnly(text),
       logProgram: (category: 'shell' | 'process' | 'test' | 'autosave', entry: any) => editor.logProgram(category, entry),
       get currentFilename() { return editor.model.currentFilename; },
       set currentFilename(v: string | undefined) {
-        editor.model.currentFilename = v;
+        editor.patchModel({ currentFilename: v });
         const name = editor.findBufferName(editor.model.currentBuffer);
         if (name) editor.updateBufferMetadata(name, { filename: v });
       },
       get config() { return editor.model.config; },
-      set config(v: EditorState["config"]) { editor.model.config = v; },
+      set config(v: EditorState["config"]) { editor.patchModel({ config: v }); },
       get operations() {
         return {
           saveFile: (filename?: string) => editor.saveFile(filename),
@@ -410,8 +412,8 @@ export class Editor {
       _setBufferModified: (modified: boolean) => editor.setCurrentBufferModified(modified),
       _getMessageLog: () => new ViewBoundLog(editor.log, 'messages'),
       _getUnifiedLog: () => editor.log,
-      get searchMatches() { return editor.model.searchMatches; },
-      set searchMatches(v: import("../core/types.ts").Range[] | undefined) { editor.model.searchMatches = v; },
+      get searchMatches() { return editor.model.searchMatches ? [...editor.model.searchMatches] : undefined; },
+      set searchMatches(v: import("../core/types.ts").Range[] | undefined) { editor.patchModel({ searchMatches: v }); },
       getModel: () => editor.model,
       applyModel: (m) => { editor.model = m; },
     };
@@ -713,8 +715,8 @@ export class Editor {
       }
 
       // Set a flag to indicate we're waiting for a key to describe
-      this.model.describeKeyPending = true;
-      this.model.statusMessage = "Describe key: press a key";
+      this.model = { ...this.model, describeKeyPending: true };
+      this.model = { ...this.model, statusMessage: "Describe key: press a key" };
 
       return createString("waiting for key");
     });
@@ -796,8 +798,8 @@ export class Editor {
       }
 
       // Set a flag to indicate we're waiting for a function name to describe
-      this.model.describeFunctionPending = true;
-      this.model.statusMessage = "Describe function: ";
+      this.model = { ...this.model, describeFunctionPending: true };
+      this.model = { ...this.model, statusMessage: "Describe function: " };
 
       return createString("waiting for function name");
     });
@@ -917,8 +919,8 @@ export class Editor {
       }
 
       // Set a flag to indicate we're waiting for a search pattern
-      this.model.aproposCommandPending = true;
-      this.model.statusMessage = "Apropos command: ";
+      this.model = { ...this.model, aproposCommandPending: true };
+      this.model = { ...this.model, statusMessage: "Apropos command: " };
 
       return createString("waiting for search pattern");
     });
@@ -985,7 +987,7 @@ export class Editor {
       // Use async saveFile but return synchronously for T-Lisp
       this.saveFile().catch((error) => {
         const msg = `Save failed: ${error instanceof Error ? error.message : String(error)}`;
-        this.model.statusMessage = msg;
+        this.model = { ...this.model, statusMessage: msg };
         // SPEC-055: route save errors through the log so they don't vanish.
         this.logMessage(msg, 'error');
       });
@@ -1016,7 +1018,7 @@ export class Editor {
       if (!textArg || textArg.type !== "string") {
         throw new Error("minibuffer-set requires a string");
       }
-      this.model.mxCommand = textArg.value as string;
+      this.model = { ...this.model, mxCommand: textArg.value as string };
       return createString(textArg.value as string);
     });
 
@@ -1024,7 +1026,7 @@ export class Editor {
       if (args.length !== 0) {
         throw new Error("minibuffer-clear requires no arguments");
       }
-      this.model.mxCommand = "";
+      this.model = { ...this.model, mxCommand: "" };
       return createNil();
     });
 
@@ -1035,25 +1037,25 @@ export class Editor {
 
     defineRaw("minibuffer-state-set", (args) => {
       if (args.length !== 1) throw new Error("minibuffer-state-set requires one argument");
-      this.model.minibufferState = serializeTlispValue(args[0]!);
+      this.model = { ...this.model, minibufferState: serializeTlispValue(args[0]!) };
       return args[0]!;
     });
 
     defineRaw("minibuffer-state-clear", (args) => {
       if (args.length !== 0) throw new Error("minibuffer-state-clear requires no arguments");
-      this.model.minibufferState = undefined;
+      this.model = { ...this.model, minibufferState: undefined };
       return createNil();
     });
 
     defineRaw("minibuffer-view-publish", (args) => {
       if (args.length !== 1) throw new Error("minibuffer-view-publish requires one view");
-      this.model.minibufferView = this.minibufferViewFromTlisp(args[0]!);
+      this.model = { ...this.model, minibufferView: this.minibufferViewFromTlisp(args[0]!) };
       return args[0]!;
     });
 
     defineRaw("minibuffer-view-clear", (args) => {
       if (args.length !== 0) throw new Error("minibuffer-view-clear requires no arguments");
-      this.model.minibufferView = undefined;
+      this.model = { ...this.model, minibufferView: undefined };
       return createNil();
     });
 
@@ -1068,7 +1070,7 @@ export class Editor {
       }
       const focus = args[0].value as string;
       if (focus !== "buffer" && focus !== "command") throw new Error("Invalid cursor focus");
-      this.model.cursorFocus = focus;
+      this.model = { ...this.model, cursorFocus: focus };
       return createString(focus);
     });
 
@@ -1174,7 +1176,7 @@ export class Editor {
         throw new Error("editor-window-prefix requires no arguments");
       }
       this.windowPrefixPressed = true;
-      this.model.statusMessage = "C-w";
+      this.model = { ...this.model, statusMessage: "C-w" };
       return createString("window-prefix");
     });
 
@@ -1183,7 +1185,7 @@ export class Editor {
       if (args.length !== 0) {
         throw new Error("which-key-enable requires no arguments");
       }
-      this.model.whichKeyTimeout = this.model.whichKeyTimeout || 1000;
+      this.model = { ...this.model, whichKeyTimeout: this.model.whichKeyTimeout || 1000 };
       this.whichKeyHandle.reset(this.model.whichKeyTimeout);
       return createNil();
     });
@@ -1192,11 +1194,11 @@ export class Editor {
       if (args.length !== 0) {
         throw new Error("which-key-disable requires no arguments");
       }
-      this.model.whichKeyTimeout = 0;
+      this.model = { ...this.model, whichKeyTimeout: 0 };
       this.whichKeyHandle.deactivate();
-      this.model.whichKeyActive = false;
-      this.model.whichKeyPrefix = "";
-      this.model.whichKeyBindings = [];
+      this.model = { ...this.model, whichKeyActive: false };
+      this.model = { ...this.model, whichKeyPrefix: "" };
+      this.model = { ...this.model, whichKeyBindings: [] };
       return createNil();
     });
 
@@ -1212,7 +1214,7 @@ export class Editor {
       if (timeout < 0) {
         throw new Error("which-key-timeout must be a positive number");
       }
-      this.model.whichKeyTimeout = timeout;
+      this.model = { ...this.model, whichKeyTimeout: timeout };
       this.whichKeyHandle.reset(timeout);
       return createNumber(timeout);
     });
@@ -1486,7 +1488,7 @@ export class Editor {
             try {
               await this.handleKey(key);
             } catch (error) {
-              this.model.statusMessage = `Macro error: ${error instanceof Error ? error.message : String(error)}`;
+              this.model = { ...this.model, statusMessage: `Macro error: ${error instanceof Error ? error.message : String(error)}` };
             }
           }
         }
@@ -1521,7 +1523,7 @@ export class Editor {
           try {
             await this.handleKey(key);
           } catch (error) {
-            this.model.statusMessage = `Macro error: ${error instanceof Error ? error.message : String(error)}`;
+            this.model = { ...this.model, statusMessage: `Macro error: ${error instanceof Error ? error.message : String(error)}` };
           }
         }
         return createString(register);
@@ -1581,8 +1583,8 @@ export class Editor {
     // Add window management operations (US-3.2.1)
     const windowOps = createWindowOps(
       { getModel: () => this.model, applyModel: (m) => { this.applyModel(m); } },
-      (windows) => { this.model.windows = windows; },
-      (index) => { this.model.currentWindowIndex = index; },
+      (windows) => { this.model = { ...this.model, windows: windows }; },
+      (index) => { this.model = { ...this.model, currentWindowIndex: index }; },
       () => this.terminal.getSize()
     );
 
@@ -1593,15 +1595,15 @@ export class Editor {
     // Add tab management operations (SPEC-004)
     const tabOps = createTabOps(
       { getModel: () => this.model, applyModel: (m) => { this.applyModel(m); } },
-      (tabs) => { this.model.tabs = tabs; },
-      (index) => { this.model.currentTabIndex = index; },
+      (tabs) => { this.model = { ...this.model, tabs: tabs }; },
+      (index) => { this.model = { ...this.model, currentTabIndex: index }; },
       (name, content) => {
         this.createBuffer(name, content);
         return this.model.currentBuffer;
       },
       (tab) => {
-        this.model.currentBuffer = tab.buffer;
-        this.model.currentFilename = tab.label;
+        this.model = { ...this.model, currentBuffer: tab.buffer };
+        this.model = { ...this.model, currentFilename: tab.label };
       },
     );
 
@@ -1728,7 +1730,7 @@ export class Editor {
     try {
       const loaded = await loadMacrosFromFile(this.filesystem);
       if (loaded) {
-        this.model.statusMessage = "Macros loaded from ~/.config/tmax/macros.tlisp";
+        this.model = { ...this.model, statusMessage: "Macros loaded from ~/.config/tmax/macros.tlisp" };
       }
       // If file doesn't exist, that's fine - it's the first run
     } catch (error) {
@@ -1743,7 +1745,7 @@ export class Editor {
     try {
       const saved = await saveMacrosToFile(this.filesystem);
       if (saved) {
-        this.model.statusMessage = "Macros saved to ~/.config/tmax/macros.tlisp";
+        this.model = { ...this.model, statusMessage: "Macros saved to ~/.config/tmax/macros.tlisp" };
       }
     } catch (error) {
       console.warn("Failed to save macros:", error);
@@ -1963,7 +1965,7 @@ export class Editor {
       try { this.interpreter.execute('(global-line-numbers-mode t)'); } catch { /* ok */ }
     } catch (error) {
       console.error("Critical: Failed to load even fallback bindings:", error);
-      this.model.statusMessage = "Critical: No key bindings available";
+      this.model = { ...this.model, statusMessage: "Critical: No key bindings available" };
     }
   }
 
@@ -2165,7 +2167,7 @@ export class Editor {
 
   executeCommand(command: string): unknown {
     try {
-      this.model.lastCommand = command;
+      this.model = { ...this.model, lastCommand: command };
       const result = this.interpreter.execute(command);
       if (Either.isRight(result)) {
         return result;
@@ -2177,10 +2179,10 @@ export class Editor {
         throw new Error('EDITOR_QUIT_SIGNAL');
       }
       if (err.diagnostic) {
-        this.model.statusMessage = `[${err.diagnostic.code}] ${err.message}`;
+        this.model = { ...this.model, statusMessage: `[${err.diagnostic.code}] ${err.message}` };
         this.logMessage(renderDiagnostic(err.diagnostic), 'error', this.model.lastCommand);
       } else {
-        this.model.statusMessage = err.message;
+        this.model = { ...this.model, statusMessage: err.message };
         this.logMessage(err.message, 'error', this.model.lastCommand);
       }
 
@@ -2199,7 +2201,7 @@ export class Editor {
       if (error instanceof Error && (error.message === "EDITOR_QUIT_SIGNAL" || error.message.includes("EDITOR_QUIT_SIGNAL"))) {
         throw new Error("EDITOR_QUIT_SIGNAL"); // Re-throw clean quit signal
       }
-      this.model.statusMessage = `Error: ${error instanceof Error ? error.message : String(error)}`;
+      this.model = { ...this.model, statusMessage: `Error: ${error instanceof Error ? error.message : String(error)}` };
       this.logMessage(this.model.statusMessage, 'error', this.model.lastCommand);
       throw error;
     }
@@ -2207,7 +2209,7 @@ export class Editor {
 
   async executeCommandAsync(command: string): Promise<unknown> {
     try {
-      this.model.lastCommand = command;
+      this.model = { ...this.model, lastCommand: command };
       const result = await this.interpreter.executeAsync!(command);
       if (Either.isRight(result)) {
         return result;
@@ -2226,10 +2228,10 @@ export class Editor {
         throw new Error('EDITOR_QUIT_SIGNAL');
       }
       if (err.diagnostic) {
-        this.model.statusMessage = `[${err.diagnostic.code}] ${err.message}`;
+        this.model = { ...this.model, statusMessage: `[${err.diagnostic.code}] ${err.message}` };
         this.logMessage(renderDiagnostic(err.diagnostic), 'error', this.model.lastCommand);
       } else {
-        this.model.statusMessage = err.message;
+        this.model = { ...this.model, statusMessage: err.message };
         this.logMessage(err.message, 'error', this.model.lastCommand);
       }
       return result;
@@ -2237,7 +2239,7 @@ export class Editor {
       if (error instanceof Error && (error.message === "EDITOR_QUIT_SIGNAL" || error.message.includes("EDITOR_QUIT_SIGNAL"))) {
         throw new Error("EDITOR_QUIT_SIGNAL");
       }
-      this.model.statusMessage = `Error: ${error instanceof Error ? error.message : String(error)}`;
+      this.model = { ...this.model, statusMessage: `Error: ${error instanceof Error ? error.message : String(error)}` };
       this.logMessage(this.model.statusMessage, 'error', this.model.lastCommand);
       throw error;
     }
@@ -2399,7 +2401,7 @@ export class Editor {
    * prefixes. Contrast with logMessage, which logs + echoes.
    */
   setEchoOnly(text: string): void {
-    this.model.statusMessage = text;
+    this.model = { ...this.model, statusMessage: text };
   }
 
   /**
@@ -2503,11 +2505,11 @@ export class Editor {
       this.updateBufferMetadata(bufferName, { modified: false });
     }
 
-    this.model.currentBuffer = buffer;
-    this.model.currentFilename = workspace.currentFilename ?? this.bufferMetadata.get(bufferName)?.filename;
-    this.model.cursorPosition = { ...workspace.cursorState };
-    this.model.viewportTop = workspace.viewportState.top;
-    this.model.viewportLeft = workspace.viewportState.left ?? 0;
+    this.model = { ...this.model, currentBuffer: buffer };
+    this.model = { ...this.model, currentFilename: workspace.currentFilename ?? this.bufferMetadata.get(bufferName)?.filename };
+    this.model = { ...this.model, cursorPosition: { ...workspace.cursorState } };
+    this.model = { ...this.model, viewportTop: workspace.viewportState.top };
+    this.model = { ...this.model, viewportLeft: workspace.viewportState.left ?? 0 };
     // R3-1: use oldBufferNames reverse index to resolve buffer names,
     // then look up the new deep-copied instance from this.buffers
 	    const defaultWindow: Window = {
@@ -2534,12 +2536,12 @@ export class Editor {
 	      })
 	      : [];
 
-	    this.model.windows = windows;
-	    this.model.currentWindowIndex = 0;
-	    this.model.tabs = tabs;
-	    this.model.currentTabIndex = 0;
-    this.model.buffers = this.buffers;
-    this.model.mode = 'normal'; // I10: reset mode on workspace switch
+	    this.model = { ...this.model, windows: windows };
+	    this.model = { ...this.model, currentWindowIndex: 0 };
+	    this.model = { ...this.model, tabs: tabs };
+	    this.model = { ...this.model, currentTabIndex: 0 };
+    this.model = { ...this.model, buffers: this.buffers };
+    this.model = { ...this.model, mode: 'normal' }; // I10: reset mode on workspace switch
 
     // I4: re-detect major mode for the active buffer
     if (this.model.currentFilename) {
@@ -2606,8 +2608,8 @@ export class Editor {
       buffers,
       bufferMetadata,
       bufferModeStates,
-      windows: this.model.windows ?? [],
-      tabs: this.model.tabs ?? [],
+      windows: [...(this.model.windows ?? [])],
+      tabs: [...(this.model.tabs ?? [])],
       cursorState: { ...this.model.cursorPosition },
       viewportState: { top: this.model.viewportTop, left: this.model.viewportLeft ?? 0 },
       currentBufferName,
@@ -2632,7 +2634,7 @@ export class Editor {
     this.updateBufferMetadata(name, { modified: false, recency: this.bufferRecency++ });
 
     // Always set currentBuffer to the newly created buffer
-    this.model.currentBuffer = buffer;
+    this.model = { ...this.model, currentBuffer: buffer };
 
     // Initialize first window if this is the first buffer (US-3.2.1)
     if (!this.model.windows || this.model.windows.length === 0) {
@@ -2649,8 +2651,8 @@ export class Editor {
         height: terminalSize.height - 2, // Reserve space for status line and minibuffer
         width: terminalSize.width,
       };
-      this.model.windows = [initialWindow];
-      this.model.currentWindowIndex = 0;
+      this.model = { ...this.model, windows: [initialWindow] };
+      this.model = { ...this.model, currentWindowIndex: 0 };
     } else {
       // Update current window's buffer
       const currentWindow = this.model.windows[this.model.currentWindowIndex ?? 0];
@@ -2674,7 +2676,7 @@ export class Editor {
       const content = await this.filesystem.readFile(filename);
       this.createBuffer(filename, content);
       // Track the filename for save operations
-      this.model.currentFilename = filename;
+      this.model = { ...this.model, currentFilename: filename };
       const name = this.findBufferName(this.model.currentBuffer);
       if (name) this.updateBufferMetadata(name, { filename, modified: false });
 
@@ -2685,11 +2687,11 @@ export class Editor {
       await this.lspClient.simulateDiagnostics(filename, content);
 
       // Update editor state with diagnostics (US-3.1.2)
-      this.model.lspDiagnostics = this.lspClient.getDiagnostics();
+      this.model = { ...this.model, lspDiagnostics: this.lspClient.getDiagnostics() };
 
       // Update status message with LSP connection status (US-3.1.1)
       const lspStatus = this.lspClient.getStatusMessage();
-      this.model.statusMessage = lspStatus ? `Opened ${filename} - ${lspStatus}` : `Opened ${filename}`;
+      this.model = { ...this.model, statusMessage: lspStatus ? `Opened ${filename} - ${lspStatus}` : `Opened ${filename}` };
       this.logMessage(`Opened ${filename}`, 'info');
 
       // SPEC-035: Auto-detect and activate major mode
@@ -2704,7 +2706,7 @@ export class Editor {
 
       this.recomputeHighlights();
     } catch (error) {
-      this.model.statusMessage = `Failed to open ${filename}: ${error instanceof Error ? error.message : String(error)}`;
+      this.model = { ...this.model, statusMessage: `Failed to open ${filename}: ${error instanceof Error ? error.message : String(error)}` };
       this.logMessage(`Failed to open ${filename}: ${error instanceof Error ? error.message : String(error)}`, 'error');
     }
   }
@@ -2715,14 +2717,14 @@ export class Editor {
    */
   async saveFile(filename?: string): Promise<void> {
     if (!this.model.currentBuffer) {
-      this.model.statusMessage = "No buffer to save";
+      this.model = { ...this.model, statusMessage: "No buffer to save" };
       return;
     }
 
     // Use provided filename or fall back to tracked filename
     const saveFilename = filename || this.model.currentFilename;
     if (!saveFilename) {
-      this.model.statusMessage = "Buffer has no associated file";
+      this.model = { ...this.model, statusMessage: "Buffer has no associated file" };
       return;
     }
 
@@ -2732,20 +2734,20 @@ export class Editor {
         await this.filesystem.writeFile(saveFilename, contentResult.right);
         // Update tracked filename if a new one was provided
         if (filename && !this.model.currentFilename) {
-          this.model.currentFilename = filename;
+          this.model = { ...this.model, currentFilename: filename };
         }
-        this.model.statusMessage = `Saved ${saveFilename}`;
+        this.model = { ...this.model, statusMessage: `Saved ${saveFilename}` };
         this.setCurrentBufferModified(false);
         this.logMessage(`Saved ${saveFilename}`, 'info');
       } else {
         const gfMsg = `Failed to get content: ${contentResult.left}`;
-        this.model.statusMessage = gfMsg;
+        this.model = { ...this.model, statusMessage: gfMsg };
         // SPEC-055: route save errors through the log so they don't vanish.
         this.logMessage(gfMsg, 'error');
       }
     } catch (error) {
       const fsMsg = `Failed to save ${saveFilename}: ${error instanceof Error ? error.message : String(error)}`;
-      this.model.statusMessage = fsMsg;
+      this.model = { ...this.model, statusMessage: fsMsg };
       // SPEC-055: route save errors through the log so they don't vanish.
       this.logMessage(fsMsg, 'error');
     }
@@ -2823,7 +2825,7 @@ export class Editor {
    * Get load paths
    */
   getLoadPaths(): string[] {
-    return this.model.loadPaths;
+    return [...this.model.loadPaths];
   }
 
   /**
@@ -2885,6 +2887,17 @@ export class Editor {
    */
   applyModel(model: EditorModel): void {
     this.model = model;
+  }
+
+  /**
+   * Commit a partial patch to the model via an immutable object spread
+   * (CHORE-41). Type-safe equivalent of the legacy `this.model.X = Y`
+   * mutation now that every EditorModel field is `readonly`. Preserves the
+   * prior direct-mutation behavior without routing through the reducer
+   * (CHORE-43 will move call sites to applyUpdate).
+   */
+  patchModel(patch: Partial<EditorModel>): void {
+    this.model = { ...this.model, ...patch };
   }
 
   /** Typed access to the terminal (used by handlers). */
@@ -3013,30 +3026,30 @@ export class Editor {
     const nextBufferKey = newState.currentFilename ?? "*scratch*";
     const hasExistingModeState = this.bufferModeStates.has(nextBufferKey);
 
-    this.model.currentBuffer = newState.currentBuffer;
-    this.model.cursorPosition = newState.cursorPosition;
-    this.model.mode = newState.mode;
-    this.model.statusMessage = newState.statusMessage;
-    this.model.viewportTop = newState.viewportTop;
-    this.model.viewportLeft = newState.viewportLeft ?? 0;
-    this.model.config = newState.config;
-    this.model.currentFilename = newState.currentFilename;
+    this.model = { ...this.model, currentBuffer: newState.currentBuffer };
+    this.model = { ...this.model, cursorPosition: newState.cursorPosition };
+    this.model = { ...this.model, mode: newState.mode };
+    this.model = { ...this.model, statusMessage: newState.statusMessage };
+    this.model = { ...this.model, viewportTop: newState.viewportTop };
+    this.model = { ...this.model, viewportLeft: newState.viewportLeft ?? 0 };
+    this.model = { ...this.model, config: newState.config };
+    this.model = { ...this.model, currentFilename: newState.currentFilename };
     const currentBufferName = this.findBufferName(this.model.currentBuffer);
     if (currentBufferName && newState.currentFilename !== undefined) {
       this.updateBufferMetadata(currentBufferName, { filename: newState.currentFilename });
     }
-    this.model.commandLine = newState.commandLine ?? this.model.commandLine;
-    this.model.mxCommand = newState.mxCommand ?? this.model.mxCommand;
-    this.model.minibufferState = cloneJsonValue(newState.minibufferState);
-    this.model.minibufferView = newState.minibufferView ? structuredClone(newState.minibufferView) : undefined;
-    this.model.cursorFocus = newState.cursorFocus ?? this.model.cursorFocus;
+    this.model = { ...this.model, commandLine: newState.commandLine ?? this.model.commandLine };
+    this.model = { ...this.model, mxCommand: newState.mxCommand ?? this.model.mxCommand };
+    this.model = { ...this.model, minibufferState: cloneJsonValue(newState.minibufferState) };
+    this.model = { ...this.model, minibufferView: newState.minibufferView ? structuredClone(newState.minibufferView) : undefined };
+    this.model = { ...this.model, cursorFocus: newState.cursorFocus ?? this.model.cursorFocus };
     if (newState.buffers && newState.buffers !== this.buffers) {
       this.buffers.clear();
       for (const [name, buffer] of newState.buffers.entries()) {
         this.buffers.set(name, buffer as FunctionalTextBufferImpl);
       }
     }
-    this.model.buffers = this.buffers;
+    this.model = { ...this.model, buffers: this.buffers };
     if (newState.currentMajorMode || newState.activeMinorModes || newState.activeMinorModeLighters) {
       if (previousBufferKey !== nextBufferKey && hasExistingModeState) {
         return;
@@ -3072,7 +3085,7 @@ export class Editor {
     }
     const currentName = this.findBufferName(this.model.currentBuffer);
     if (currentName && names.includes(currentName)) {
-      this.model.bufferModified = true;
+      this.model = { ...this.model, bufferModified: true };
     }
   }
 
@@ -3096,7 +3109,7 @@ export class Editor {
   private setCurrentBufferModified(modified: boolean): void {
     const name = this.findBufferName(this.model.currentBuffer);
     if (name) this.updateBufferMetadata(name, { modified });
-    this.model.bufferModified = modified;
+    this.model = { ...this.model, bufferModified: modified };
   }
 
   private getModeStateForBufferName(name: string): BufferModeState {
@@ -3354,14 +3367,14 @@ export class Editor {
    * @param count - Count value to set
    */
   setCount(count: number): void {
-    this.model.countPrefix = Math.max(0, count);
+    this.model = { ...this.model, countPrefix: Math.max(0, count) };
   }
 
   /**
    * Reset count prefix to 0
    */
   resetCount(): void {
-    this.model.countPrefix = 0;
+    this.model = { ...this.model, countPrefix: 0 };
   }
 
   /**
@@ -3378,7 +3391,7 @@ export class Editor {
    */
   consumeCount(): number {
     const count = this.model.countPrefix > 0 ? this.model.countPrefix : 1;
-    this.model.countPrefix = 0;
+    this.model = { ...this.model, countPrefix: 0 };
     return count;
   }
 
@@ -3397,7 +3410,7 @@ export class Editor {
   clearSelection(): void {
     const { clearVisualSelection } = require("./api/visual-ops.ts");
     clearVisualSelection();
-    this.model.mode = "normal";
+    this.model = { ...this.model, mode: "normal" };
   }
 
   /**
@@ -3405,7 +3418,7 @@ export class Editor {
    */
   activateMajorModeForFile(filename: string): void {
     try {
-      this.model.currentFilename = filename;
+      this.model = { ...this.model, currentFilename: filename };
       this.executeCommand("(major-mode-auto-detect)");
     } catch (_) {
       // No mode matched — keep fundamental mode
@@ -3423,14 +3436,14 @@ export class Editor {
    */
   recomputeHighlights(): void {
     if (!this.model.currentBuffer) {
-      this.model.highlightSpans = undefined;
+      this.model = { ...this.model, highlightSpans: undefined };
       return;
     }
 
     try {
       const contentResult = this.model.currentBuffer.getContent();
       if (Either.isLeft(contentResult)) {
-        this.model.highlightSpans = undefined;
+        this.model = { ...this.model, highlightSpans: undefined };
         return;
       }
 
@@ -3456,9 +3469,9 @@ export class Editor {
           spans.push([]);
         }
       }
-      this.model.highlightSpans = spans.length > 0 ? spans : undefined;
+      this.model = { ...this.model, highlightSpans: spans.length > 0 ? spans : undefined };
     } catch (_) {
-      this.model.highlightSpans = undefined;
+      this.model = { ...this.model, highlightSpans: undefined };
     }
   }
 }

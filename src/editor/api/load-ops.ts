@@ -23,7 +23,7 @@ export function createRawLoadOps(
 ): Map<string, TLispFunctionImpl> {
   // CHORE-39 Phase 4: load-paths read flows through the State monad against
   // EditorModel (loadPaths now lives on the model).
-  const getLoadPaths = (): string[] => runModel(access, readModelField("loadPaths"));
+  const getLoadPaths = (): string[] => [...(runModel(access, readModelField("loadPaths")) ?? [])];
   const api = new Map<string, TLispFunctionImpl>();
 
   const resolveCandidate = (file: string): string | undefined => {

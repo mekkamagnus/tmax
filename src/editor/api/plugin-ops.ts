@@ -17,7 +17,7 @@ import type { EditorModel } from '../functional/model';
  * scope plugin discovery. Pure model read.
  */
 export const loadPathsState = (): State<EditorModel, string[]> =>
-  State.gets((m: EditorModel) => m.loadPaths);
+  State.gets((m: EditorModel) => [...m.loadPaths]);
 import {
   listPlugins,
   getPlugin,

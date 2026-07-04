@@ -12,8 +12,8 @@ import type { EditorModel } from "../functional/model.ts";
 
 const EMPTY_MAP: ReadonlyMap<number, number> = new Map();
 
-function getRanges(model: Pick<EditorModel, "foldRanges">): Map<number, number> {
-  return model.foldRanges ?? EMPTY_MAP as Map<number, number>;
+function getRanges(model: Pick<EditorModel, "foldRanges">): ReadonlyMap<number, number> {
+  return model.foldRanges ?? EMPTY_MAP;
 }
 
 export function foldToggle(

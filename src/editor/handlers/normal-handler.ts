@@ -101,13 +101,9 @@ export async function handleNormalMode(editor: Editor, key: string, normalizedKe
   // we are either idle or actively recording.
   if (normalizedKey === "C-g" || normalizedKey === "Escape") {
     wk.deactivate();
-    state.whichKeyActive = false;
-    state.whichKeyPrefix = "";
-    state.whichKeyBindings = [];
-    state.whichKeyPopup = null;
+    editor.patchModel({ whichKeyActive: false, whichKeyPrefix: "", whichKeyBindings: [], whichKeyPopup: null, statusMessage: "" });
     editor.spacePressed = false;
     try { exec("(vim-reset-pending)"); } catch {}
-    state.statusMessage = "";
     return;
   }
 
@@ -196,14 +192,15 @@ export async function handleNormalMode(editor: Editor, key: string, normalizedKe
   const prefixResult = exec(`(keymap-prefix-p (current-keymap) "${escape(lookupKey)}")`);
   if (isRight(prefixResult) && isTruthy(prefixResult.right)) {
     const bindings = tLispPrefixBindings(exec, escape, lookupKey);
-    state.whichKeyPrefix = lookupKey;
-    state.whichKeyBindings = bindings;
+    editor.patchModel({ whichKeyPrefix: lookupKey, whichKeyBindings: bindings });
     wk.schedule(lookupKey, bindings, () => {
-      if (state.whichKeyPrefix !== lookupKey) return;
-      state.whichKeyActive = true;
+      if (editor.getModel().whichKeyPrefix !== lookupKey) return;
       const size = editor.getTerminal().getSize();
-      state.whichKeyPopup = computeWhichKeyPopup(bindings, lookupKey, size.width, Math.max(1, size.height - 4), prefixLabel(lookupKey));
-      state.statusMessage = `Which-key: ${bindings.map(b => `${b.key.substring(lookupKey.length + 1)} : ${b.command}`).join(", ")}`;
+      editor.patchModel({
+        whichKeyActive: true,
+        whichKeyPopup: computeWhichKeyPopup(bindings, lookupKey, size.width, Math.max(1, size.height - 4), prefixLabel(lookupKey)),
+        statusMessage: `Which-key: ${bindings.map(b => `${b.key.substring(lookupKey.length + 1)} : ${b.command}`).join(", ")}`,
+      });
     });
     return;
   }
@@ -214,9 +211,7 @@ export async function handleNormalMode(editor: Editor, key: string, normalizedKe
   // so they need their own prefix detection here.
   const majorMode = editor.getCurrentMajorMode();
   if (majorMode && majorMode !== "fundamental" && isMajorModePrefix(editor, lookupKey, majorMode)) {
-    state.whichKeyPrefix = lookupKey;
-    state.whichKeyBindings = [];
-    state.statusMessage = "";
+    editor.patchModel({ whichKeyPrefix: lookupKey, whichKeyBindings: [], statusMessage: "" });
     return;
   }
 
@@ -262,7 +257,7 @@ export async function handleNormalMode(editor: Editor, key: string, normalizedKe
     clearWhichKey(state, wk);
     editor.spacePressed = false;
   }
-  state.statusMessage = `Unbound key: ${lookupKey}`;
+  editor.patchModel({ statusMessage: `Unbound key: ${lookupKey}` });
   // SPEC-055: log at 'warn' (elevated from SPEC-016's 'debug' for alpha
   // observability) so unbound keys mirror into *Messages*. This fills the
   // last-handler gap — the other three handlers already log unbound keys.
@@ -345,7 +340,7 @@ async function executeCommand(editor: Editor, tLispCmd: string): Promise<void> {
       throw new Error("EDITOR_QUIT_SIGNAL");
     }
     const errorMsg = error instanceof Error ? error.message : String(error);
-    editor.getModel().statusMessage = `Command error: ${errorMsg}`;
+    editor.patchModel({ statusMessage: `Command error: ${errorMsg}` });
     // SPEC-055: command errors log at 'error' so they mirror into *Messages*.
     editor.logMessage(`Command error: ${errorMsg}`, 'error');
   }

@@ -13,7 +13,7 @@ export function createTabOps(
 ): Map<string, TLispFunctionImpl> {
   // CHORE-39 Phase 4: tab/index reads flow through the State monad against
   // EditorModel; writes + buffer creation/switching stay on callbacks.
-  const getTabs = (): Tab[] => runModel(access, readModelField("tabs")) ?? [];
+  const getTabs = (): Tab[] => [...(runModel(access, readModelField("tabs")) ?? [])];
   const getCurrentTabIndex = (): number => runModel(access, readModelField("currentTabIndex")) ?? 0;
   const ops = new Map<string, TLispFunctionImpl>();
 

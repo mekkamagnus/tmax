@@ -25,7 +25,7 @@ export function createLSPDiagnosticsOps(
   const ops = new Map<string, TLispFunctionImpl>();
 
   const getDiagnostics = (): LSPDiagnostic[] =>
-    runModel(access, readModelField("lspDiagnostics")) ?? [];
+    [...(runModel(access, readModelField("lspDiagnostics")) ?? [])];
   const getCurrentLine = (): number =>
     runModel(access, readModelField("cursorPosition")).line;
   const clearDiagnostics = (): void => {

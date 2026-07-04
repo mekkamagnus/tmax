@@ -134,25 +134,24 @@ export function createEditorAPI(state: TlispEditorState): Map<string, TLispFunct
   // project its fields into a fresh EditorModel on each read and write commits
   // back, so State-monad factories behave correctly in both contexts.
   const liveModel = !!(state.getModel && state.applyModel);
-  const compatModelFromState = (): EditorModel => {
-    const m = initialModel();
-    m.cursorPosition = { line: state.cursorLine ?? 0, column: state.cursorColumn ?? 0 };
-    m.mode = state.mode;
-    m.statusMessage = state.statusMessage;
-    m.viewportTop = state.viewportTop;
-    m.commandLine = state.commandLine;
-    m.mxCommand = state.mxCommand;
-    m.cursorFocus = state.cursorFocus;
-    m.lastCommand = state.lastCommand;
-    m.currentFilename = state.currentFilename;
-    m.currentBuffer = state.currentBuffer ?? undefined;
-    m.buffers = state.buffers;
-    m.lspDiagnostics = state.lspDiagnostics;
-    m.foldRanges = state.foldRanges;
-    m.searchMatches = state.searchMatches;
-    if (state.config) m.config = state.config;
-    return m;
-  };
+  const compatModelFromState = (): EditorModel => ({
+    ...initialModel(),
+    cursorPosition: { line: state.cursorLine ?? 0, column: state.cursorColumn ?? 0 },
+    mode: state.mode,
+    statusMessage: state.statusMessage,
+    viewportTop: state.viewportTop,
+    commandLine: state.commandLine,
+    mxCommand: state.mxCommand,
+    cursorFocus: state.cursorFocus,
+    lastCommand: state.lastCommand,
+    currentFilename: state.currentFilename,
+    currentBuffer: state.currentBuffer ?? undefined,
+    buffers: state.buffers,
+    lspDiagnostics: state.lspDiagnostics,
+    foldRanges: state.foldRanges,
+    searchMatches: state.searchMatches,
+    ...(state.config ? { config: state.config } : {}),
+  });
   const compatModelToState = (m: EditorModel): void => {
     state.cursorLine = m.cursorPosition.line;
     state.cursorColumn = m.cursorPosition.column;
@@ -165,10 +164,10 @@ export function createEditorAPI(state: TlispEditorState): Map<string, TLispFunct
     state.lastCommand = m.lastCommand ?? "";
     state.currentFilename = m.currentFilename;
     state.currentBuffer = m.currentBuffer ?? null;
-    state.buffers = m.buffers ?? state.buffers;
-    state.lspDiagnostics = m.lspDiagnostics;
-    state.foldRanges = m.foldRanges;
-    state.searchMatches = m.searchMatches;
+    state.buffers = m.buffers ? new Map(m.buffers) : state.buffers;
+    state.lspDiagnostics = m.lspDiagnostics ? [...m.lspDiagnostics] : undefined;
+    state.foldRanges = m.foldRanges ? new Map(m.foldRanges) : undefined;
+    state.searchMatches = m.searchMatches ? [...m.searchMatches] : undefined;
   };
   const modelAccess: EditorModelAccess = liveModel
     ? { getModel: () => state.getModel!(), applyModel: (m) => { state.applyModel!(m); } }
@@ -941,7 +940,7 @@ export function createEditorAPI(state: TlispEditorState): Map<string, TLispFunct
     const headingRanges = findHeadingRanges(getBufferLine, getBufferLineCount());
     const editorState = { foldRanges: state.foldRanges };
     const result = foldToggle(editorState, line, headingRanges);
-    state.foldRanges = result.foldRanges;
+    state.foldRanges = result.foldRanges ? new Map(result.foldRanges) : undefined;
     return Either.right(createNil());
   });
 
@@ -950,7 +949,7 @@ export function createEditorAPI(state: TlispEditorState): Map<string, TLispFunct
     const line = Number(args[0]!.value);
     const editorState = { foldRanges: state.foldRanges };
     const result = foldOpen(editorState, line);
-    state.foldRanges = result.foldRanges;
+    state.foldRanges = result.foldRanges ? new Map(result.foldRanges) : undefined;
     return Either.right(createNil());
   });
 
@@ -960,7 +959,7 @@ export function createEditorAPI(state: TlispEditorState): Map<string, TLispFunct
     const endLine = Number(args[1]!.value);
     const editorState = { foldRanges: state.foldRanges };
     const result = foldClose(editorState, startLine, endLine);
-    state.foldRanges = result.foldRanges;
+    state.foldRanges = result.foldRanges ? new Map(result.foldRanges) : undefined;
     return Either.right(createNil());
   });
 
@@ -968,14 +967,14 @@ export function createEditorAPI(state: TlispEditorState): Map<string, TLispFunct
     const headingRanges = findHeadingRanges(getBufferLine, getBufferLineCount());
     const editorState = { foldRanges: state.foldRanges };
     const result = foldCloseAll(editorState, headingRanges);
-    state.foldRanges = result.foldRanges;
+    state.foldRanges = result.foldRanges ? new Map(result.foldRanges) : undefined;
     return Either.right(createNil());
   });
 
   api.set('fold-open-all', (_args: TLispValue[]): Either<AppError, TLispValue> => {
     const editorState = { foldRanges: state.foldRanges };
     const result = foldOpenAll(editorState);
-    state.foldRanges = result.foldRanges;
+    state.foldRanges = result.foldRanges ? new Map(result.foldRanges) : undefined;
     return Either.right(createNil());
   });
 
@@ -985,7 +984,7 @@ export function createEditorAPI(state: TlispEditorState): Map<string, TLispFunct
     const headingRanges = findHeadingRanges(getBufferLine, getBufferLineCount());
     const editorState = { foldRanges: state.foldRanges };
     const result = foldByLevel(editorState, maxLevel, headingRanges);
-    state.foldRanges = result.foldRanges;
+    state.foldRanges = result.foldRanges ? new Map(result.foldRanges) : undefined;
     return Either.right(createNil());
   });
 

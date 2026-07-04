@@ -38,17 +38,15 @@ export async function handleCommandMode(editor: Editor, key: string, normalizedK
 
   if (key.length === 1 && key >= " " && key <= "~") {
     // Add character to command line
-    editor.getModel().commandLine += key;
+    editor.patchModel({ commandLine: editor.getModel().commandLine + key });
     return; // Don't process this key further
   } else if (normalizedKey === "Backspace") {
     // Remove last character from command line
     const model = editor.getModel();
-    model.commandLine = model.commandLine.slice(0, -1);
+    editor.patchModel({ commandLine: model.commandLine.slice(0, -1) });
     return; // Don't process this key further
   } else if (normalizedKey === "Escape") {
-    const model = editor.getModel();
-    model.mode = "normal";
-    model.commandLine = "";
+    editor.patchModel({ mode: "normal", commandLine: "" });
     return; // Don't process this key further
   } else if (normalizedKey === "Enter") {
     // Execute the command line through the T-Lisp key binding system
@@ -93,14 +91,12 @@ export async function handleCommandMode(editor: Editor, key: string, normalizedK
       });
 
       const errorMsg = error instanceof Error ? error.message : String(error);
-      editor.getModel().statusMessage = `Command error: ${errorMsg}`;
+      editor.patchModel({ statusMessage: `Command error: ${errorMsg}` });
       editor.logMessage(`Command error: ${errorMsg}`, 'error');
     }
 
     // Clear command line and return to normal mode
-    const model = editor.getModel();
-    model.commandLine = "";
-    model.mode = "normal";
+    editor.patchModel({ commandLine: "", mode: "normal" });
     return; // Don't process this key further
   }
   // For other keys, fall through to key binding system
@@ -108,14 +104,14 @@ export async function handleCommandMode(editor: Editor, key: string, normalizedK
     const mappings = editor.getKeyMappings().get(normalizedKey);
 
     if (!mappings) {
-      editor.getModel().statusMessage = `Unbound key: ${normalizedKey}`;
+      editor.patchModel({ statusMessage: `Unbound key: ${normalizedKey}` });
       editor.logMessage(`Unbound key: ${normalizedKey}`, 'warn');
     } else {
       // Find mapping for command mode
       const currentMajorMode = editor.getCurrentMajorMode();
       const mapping = resolveMapping(mappings, "command", currentMajorMode);
       if (!mapping) {
-        editor.getModel().statusMessage = `Unbound key in command mode: ${normalizedKey}`;
+        editor.patchModel({ statusMessage: `Unbound key in command mode: ${normalizedKey}` });
         editor.logMessage(`Unbound key in command mode: ${normalizedKey}`, 'warn');
       } else {
         // Execute the mapped command
@@ -126,7 +122,7 @@ export async function handleCommandMode(editor: Editor, key: string, normalizedK
             throw new Error("EDITOR_QUIT_SIGNAL"); // Re-throw clean quit signal to main loop
           }
           const errorMsg = error instanceof Error ? error.message : String(error);
-          editor.getModel().statusMessage = `Command error: ${errorMsg}`;
+          editor.patchModel({ statusMessage: `Command error: ${errorMsg}` });
           editor.logMessage(`Command error: ${errorMsg}`, 'error');
         }
       }

@@ -23,7 +23,7 @@ export async function handleReplaceMode(editor: Editor, key: string, normalizedK
     } catch (_) {
       // No active undo session — silently skip
     }
-    editor.getModel().mode = "normal";
+    editor.patchModel({ mode: "normal" });
     editor.resetCount();
     return;
   }
@@ -52,7 +52,7 @@ export async function handleReplaceMode(editor: Editor, key: string, normalizedK
   const mappings = editor.getKeyMappings().get(normalizedKey);
 
   if (!mappings) {
-    editor.getModel().statusMessage = `Unbound key: ${normalizedKey}`;
+    editor.patchModel({ statusMessage: `Unbound key: ${normalizedKey}` });
     editor.logMessage(`Unbound key: ${normalizedKey}`, 'warn');
     return;
   }
@@ -60,7 +60,7 @@ export async function handleReplaceMode(editor: Editor, key: string, normalizedK
   const currentMajorMode = editor.getCurrentMajorMode();
   const mapping = resolveMapping(mappings, "replace", currentMajorMode);
   if (!mapping) {
-    editor.getModel().statusMessage = `Unbound key in replace mode: ${normalizedKey}`;
+    editor.patchModel({ statusMessage: `Unbound key in replace mode: ${normalizedKey}` });
     editor.logMessage(`Unbound key in replace mode: ${normalizedKey}`, 'warn');
     return;
   }
@@ -72,7 +72,7 @@ export async function handleReplaceMode(editor: Editor, key: string, normalizedK
       throw new Error("EDITOR_QUIT_SIGNAL");
     }
     const errorMsg = error instanceof Error ? error.message : String(error);
-    editor.getModel().statusMessage = `Command error: ${errorMsg}`;
+    editor.patchModel({ statusMessage: `Command error: ${errorMsg}` });
     editor.logMessage(`Command error: ${errorMsg}`, 'error');
   }
 }
