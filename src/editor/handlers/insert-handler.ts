@@ -62,7 +62,7 @@ export async function handleInsertMode(editor: Editor, key: string, normalizedKe
   }
   // Handle Escape key to return to normal mode
   else if (normalizedKey === "Escape") {
-    editor.patchModel({ mode: "normal" });
+    editor.applyUpdate({ type: "SetMode", mode: "normal" });
     // Reset count prefix when switching modes (US-1.3.1)
     editor.resetCount();
   }
@@ -71,14 +71,14 @@ export async function handleInsertMode(editor: Editor, key: string, normalizedKe
     const mappings = editor.getKeyMappings().get(normalizedKey);
 
     if (!mappings) {
-      editor.patchModel({ statusMessage: `Unbound key: ${normalizedKey}` });
+      editor.applyUpdate({ type: "SetStatusMessage", message: `Unbound key: ${normalizedKey}` });
       editor.logMessage(`Unbound key: ${normalizedKey}`, 'warn');
     } else {
       // Find mapping for insert mode
       const currentMajorMode = editor.getCurrentMajorMode();
       const mapping = resolveMapping(mappings, "insert", currentMajorMode);
       if (!mapping) {
-        editor.patchModel({ statusMessage: `Unbound key in insert mode: ${normalizedKey}` });
+        editor.applyUpdate({ type: "SetStatusMessage", message: `Unbound key in insert mode: ${normalizedKey}` });
         editor.logMessage(`Unbound key in insert mode: ${normalizedKey}`, 'warn');
       } else {
         // Execute the mapped command
@@ -89,7 +89,7 @@ export async function handleInsertMode(editor: Editor, key: string, normalizedKe
             throw new Error("EDITOR_QUIT_SIGNAL"); // Re-throw clean quit signal to main loop
           }
           const errorMsg = error instanceof Error ? error.message : String(error);
-          editor.patchModel({ statusMessage: `Command error: ${errorMsg}` });
+          editor.applyUpdate({ type: "SetStatusMessage", message: `Command error: ${errorMsg}` });
           editor.logMessage(`Command error: ${errorMsg}`, 'error');
         }
       }

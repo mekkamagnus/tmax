@@ -18,14 +18,14 @@ export async function handleVisualMode(editor: Editor, key: string, normalizedKe
   const mappings = editor.getKeyMappings().get(normalizedKey);
 
   if (!mappings) {
-    editor.patchModel({ statusMessage: `Unbound key: ${normalizedKey}` });
+    editor.applyUpdate({ type: "SetStatusMessage", message: `Unbound key: ${normalizedKey}` });
     editor.logMessage(`Unbound key: ${normalizedKey}`, 'warn');
   } else {
     // Find mapping for visual mode
     const currentMajorMode = editor.getCurrentMajorMode();
     const mapping = resolveMapping(mappings, "visual", currentMajorMode);
     if (!mapping) {
-      editor.patchModel({ statusMessage: `Unbound key in visual mode: ${normalizedKey}` });
+      editor.applyUpdate({ type: "SetStatusMessage", message: `Unbound key in visual mode: ${normalizedKey}` });
       editor.logMessage(`Unbound key in visual mode: ${normalizedKey}`, 'warn');
     } else {
       // Execute the mapped command
@@ -44,7 +44,7 @@ export async function handleVisualMode(editor: Editor, key: string, normalizedKe
           throw new Error("EDITOR_QUIT_SIGNAL"); // Re-throw clean quit signal to main loop
         }
         const errorMsg = error instanceof Error ? error.message : String(error);
-        editor.patchModel({ statusMessage: `Command error: ${errorMsg}` });
+        editor.applyUpdate({ type: "SetStatusMessage", message: `Command error: ${errorMsg}` });
         editor.logMessage(`Command error: ${errorMsg}`, 'error');
       }
     }

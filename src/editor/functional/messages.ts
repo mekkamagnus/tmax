@@ -69,6 +69,7 @@ export type Msg =
   | { readonly type: "SetWhichKeyPrefix"; readonly prefix: string }
   | { readonly type: "SetWhichKeyBindings"; readonly bindings: readonly WhichKeyBinding[] }
   | { readonly type: "SetWhichKeyTimeout"; readonly timeout: number }
+  | { readonly type: "SetWhichKeyPopup"; readonly popup: EditorModel["whichKeyPopup"] }
   // LSP / diagnostics
   | { readonly type: "SetLspDiagnostics"; readonly diagnostics: readonly LSPDiagnostic[] }
   // Windows / tabs
@@ -77,7 +78,7 @@ export type Msg =
   | { readonly type: "SetTabs"; readonly tabs: readonly Tab[] }
   | { readonly type: "SetCurrentTabIndex"; readonly index: number }
   // Syntax / search / folds
-  | { readonly type: "SetHighlightSpans"; readonly spans: readonly HighlightSpan[][] }
+  | { readonly type: "SetHighlightSpans"; readonly spans: readonly HighlightSpan[][] | undefined }
   | { readonly type: "SetSearchMatches"; readonly matches: readonly Range[] | undefined }
   | { readonly type: "SetFoldRanges"; readonly ranges: Map<number, number> }
   // Help system

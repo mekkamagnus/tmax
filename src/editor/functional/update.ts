@@ -96,6 +96,8 @@ export function update(model: EditorModel, msg: Msg): UpdateResult {
       return { model: patch(model, { whichKeyBindings: [...msg.bindings] }), cmds: noCmds };
     case "SetWhichKeyTimeout":
       return { model: patch(model, { whichKeyTimeout: msg.timeout }), cmds: noCmds };
+    case "SetWhichKeyPopup":
+      return { model: patch(model, { whichKeyPopup: msg.popup }), cmds: noCmds };
 
     case "SetLspDiagnostics":
       return { model: patch(model, { lspDiagnostics: [...msg.diagnostics] }), cmds: noCmds };
@@ -110,7 +112,7 @@ export function update(model: EditorModel, msg: Msg): UpdateResult {
       return { model: patch(model, { currentTabIndex: msg.index }), cmds: noCmds };
 
     case "SetHighlightSpans":
-      return { model: patch(model, { highlightSpans: msg.spans.map((s: HighlightSpan[]) => [...s]) }), cmds: noCmds };
+      return { model: patch(model, { highlightSpans: msg.spans ? msg.spans.map((s: HighlightSpan[]) => [...s]) : undefined }), cmds: noCmds };
     case "SetSearchMatches":
       return { model: patch(model, { searchMatches: msg.matches ? [...msg.matches] : undefined }), cmds: noCmds };
     case "SetFoldRanges":

@@ -60,13 +60,13 @@ export async function handleNormalMode(editor: Editor, key: string, normalizedKe
   const macroRecordPending = isTruthyResult(exec("(macro-record-pending-p)"));
   if (macroRecordPending) {
     await executeCommand(editor, `(macro-dispatch-record "${escape(normalizedKey)}")`);
-    clearWhichKey(state, wk);
+    clearWhichKey(editor, wk);
     return;
   }
   const macroPlayPending = isTruthyResult(exec("(macro-play-pending-p)"));
   if (macroPlayPending) {
     await executeCommand(editor, `(macro-dispatch-play "${escape(normalizedKey)}")`);
-    clearWhichKey(state, wk);
+    clearWhichKey(editor, wk);
     return;
   }
 
@@ -77,7 +77,7 @@ export async function handleNormalMode(editor: Editor, key: string, normalizedKe
   const registerPrefixPending = isTruthyResult(exec("(vim-register-prefix-pending-p)"));
   if (registerPrefixPending) {
     await executeCommand(editor, `(vim-dispatch-register "${escape(normalizedKey)}")`);
-    clearWhichKey(state, wk);
+    clearWhichKey(editor, wk);
     return;
   }
 
@@ -91,7 +91,7 @@ export async function handleNormalMode(editor: Editor, key: string, normalizedKe
       try { exec(`(macro-record-key "${escape(normalizedKey)}")`); } catch {}
     }
     await executeCommand(editor, `(vim-replace-apply "${escape(normalizedKey)}")`);
-    clearWhichKey(state, wk);
+    clearWhichKey(editor, wk);
     return;
   }
 
@@ -101,7 +101,11 @@ export async function handleNormalMode(editor: Editor, key: string, normalizedKe
   // we are either idle or actively recording.
   if (normalizedKey === "C-g" || normalizedKey === "Escape") {
     wk.deactivate();
-    editor.patchModel({ whichKeyActive: false, whichKeyPrefix: "", whichKeyBindings: [], whichKeyPopup: null, statusMessage: "" });
+    editor.applyUpdate({ type: "SetWhichKeyActive", active: false });
+    editor.applyUpdate({ type: "SetWhichKeyPrefix", prefix: "" });
+    editor.applyUpdate({ type: "SetWhichKeyBindings", bindings: [] });
+    editor.applyUpdate({ type: "SetWhichKeyPopup", popup: null });
+    editor.applyUpdate({ type: "SetStatusMessage", message: "" });
     editor.spacePressed = false;
     try { exec("(vim-reset-pending)"); } catch {}
     return;
@@ -119,7 +123,7 @@ export async function handleNormalMode(editor: Editor, key: string, normalizedKe
       try { exec(`(macro-record-key "${escape(normalizedKey)}")`); } catch {}
     }
     await executeCommand(editor, `(vim-dispatch-find-target "${escape(normalizedKey)}")`);
-    clearWhichKey(state, wk);
+    clearWhichKey(editor, wk);
     return;
   }
   const markPending = isTruthyResult(exec("(vim-mark-pending-p)"));
@@ -129,7 +133,7 @@ export async function handleNormalMode(editor: Editor, key: string, normalizedKe
       try { exec(`(macro-record-key "${escape(normalizedKey)}")`); } catch {}
     }
     await executeCommand(editor, `(vim-dispatch-mark "${escape(normalizedKey)}")`);
-    clearWhichKey(state, wk);
+    clearWhichKey(editor, wk);
     return;
   }
   const textObjectPending = isTruthyResult(exec("(vim-text-object-pending-p)"));
@@ -139,7 +143,7 @@ export async function handleNormalMode(editor: Editor, key: string, normalizedKe
       try { exec(`(macro-record-key "${escape(normalizedKey)}")`); } catch {}
     }
     await executeCommand(editor, `(vim-dispatch-text-object "${escape(normalizedKey)}")`);
-    clearWhichKey(state, wk);
+    clearWhichKey(editor, wk);
     return;
   }
   const operatorPending = isTruthyResult(exec("(vim-operator-pending-p)"));
@@ -149,7 +153,7 @@ export async function handleNormalMode(editor: Editor, key: string, normalizedKe
       try { exec(`(macro-record-key "${escape(normalizedKey)}")`); } catch {}
     }
     await executeCommand(editor, `(vim-dispatch-operator-key "${escape(normalizedKey)}")`);
-    clearWhichKey(state, wk);
+    clearWhichKey(editor, wk);
     return;
   }
 
@@ -159,7 +163,7 @@ export async function handleNormalMode(editor: Editor, key: string, normalizedKe
   const macroRecording = isTruthyResult(exec("(macro-record-active)"));
   if (macroRecording && normalizedKey === "q") {
     await executeCommand(editor, `(macro-record-stop)`);
-    clearWhichKey(state, wk);
+    clearWhichKey(editor, wk);
     return;
   }
 
@@ -192,15 +196,14 @@ export async function handleNormalMode(editor: Editor, key: string, normalizedKe
   const prefixResult = exec(`(keymap-prefix-p (current-keymap) "${escape(lookupKey)}")`);
   if (isRight(prefixResult) && isTruthy(prefixResult.right)) {
     const bindings = tLispPrefixBindings(exec, escape, lookupKey);
-    editor.patchModel({ whichKeyPrefix: lookupKey, whichKeyBindings: bindings });
+    editor.applyUpdate({ type: "SetWhichKeyPrefix", prefix: lookupKey });
+    editor.applyUpdate({ type: "SetWhichKeyBindings", bindings });
     wk.schedule(lookupKey, bindings, () => {
       if (editor.getModel().whichKeyPrefix !== lookupKey) return;
       const size = editor.getTerminal().getSize();
-      editor.patchModel({
-        whichKeyActive: true,
-        whichKeyPopup: computeWhichKeyPopup(bindings, lookupKey, size.width, Math.max(1, size.height - 4), prefixLabel(lookupKey)),
-        statusMessage: `Which-key: ${bindings.map(b => `${b.key.substring(lookupKey.length + 1)} : ${b.command}`).join(", ")}`,
-      });
+      editor.applyUpdate({ type: "SetWhichKeyActive", active: true });
+      editor.applyUpdate({ type: "SetWhichKeyPopup", popup: computeWhichKeyPopup(bindings, lookupKey, size.width, Math.max(1, size.height - 4), prefixLabel(lookupKey)) });
+      editor.applyUpdate({ type: "SetStatusMessage", message: `Which-key: ${bindings.map(b => `${b.key.substring(lookupKey.length + 1)} : ${b.command}`).join(", ")}` });
     });
     return;
   }
@@ -211,7 +214,9 @@ export async function handleNormalMode(editor: Editor, key: string, normalizedKe
   // so they need their own prefix detection here.
   const majorMode = editor.getCurrentMajorMode();
   if (majorMode && majorMode !== "fundamental" && isMajorModePrefix(editor, lookupKey, majorMode)) {
-    editor.patchModel({ whichKeyPrefix: lookupKey, whichKeyBindings: [], statusMessage: "" });
+    editor.applyUpdate({ type: "SetWhichKeyPrefix", prefix: lookupKey });
+    editor.applyUpdate({ type: "SetWhichKeyBindings", bindings: [] });
+    editor.applyUpdate({ type: "SetStatusMessage", message: "" });
     return;
   }
 
@@ -219,7 +224,7 @@ export async function handleNormalMode(editor: Editor, key: string, normalizedKe
   const cmdResult = exec(`(keymap-ref (current-keymap) "${escape(lookupKey)}")`);
   const cmdRight = isRight(cmdResult) ? cmdResult.right : null;
   if (cmdRight && cmdRight.type === "string") {
-    clearWhichKey(state, wk);
+    clearWhichKey(editor, wk);
     // SPEC-044 Phase 1.G — recording-capture hook. Vim records literal keys,
     // so we capture the keystroke BEFORE evaluating its bound command. The
     // stopping q is excluded by the macroRecording && normalizedKey === "q"
@@ -232,7 +237,7 @@ export async function handleNormalMode(editor: Editor, key: string, normalizedKe
 
     // If the command activated the space prefix, schedule which-key for "SPC"
     if (editor.spacePressed === true) {
-      schedulePrefixPopup(editor, state, wk, exec, escape, "SPC");
+      schedulePrefixPopup(editor, wk, exec, escape, "SPC");
     }
     return;
   }
@@ -245,7 +250,7 @@ export async function handleNormalMode(editor: Editor, key: string, normalizedKe
   if (majorMode && majorMode !== "fundamental") {
     const mapping = lookupMajorModeBinding(editor, lookupKey, majorMode);
     if (mapping) {
-      clearWhichKey(state, wk);
+      clearWhichKey(editor, wk);
       await executeCommand(editor, mapping.command);
       return;
     }
@@ -254,10 +259,10 @@ export async function handleNormalMode(editor: Editor, key: string, normalizedKe
   // No prefix, no binding — report unbound. If we were in a prefix context,
   // clear which-key state so the abandoned prefix doesn't linger.
   if (currentPrefix || spaceActive) {
-    clearWhichKey(state, wk);
+    clearWhichKey(editor, wk);
     editor.spacePressed = false;
   }
-  editor.patchModel({ statusMessage: `Unbound key: ${lookupKey}` });
+  editor.applyUpdate({ type: "SetStatusMessage", message: `Unbound key: ${lookupKey}` });
   // SPEC-055: log at 'warn' (elevated from SPEC-016's 'debug' for alpha
   // observability) so unbound keys mirror into *Messages*. This fills the
   // last-handler gap — the other three handlers already log unbound keys.
@@ -324,12 +329,12 @@ function feedDigit(editor: Editor, exec: (cmd: string) => any, key: string): voi
   }
 }
 
-function clearWhichKey(state: any, wk: any): void {
+function clearWhichKey(editor: Editor, wk: any): void {
   wk.deactivate();
-  state.whichKeyActive = false;
-  state.whichKeyPrefix = "";
-  state.whichKeyBindings = [];
-  state.whichKeyPopup = null;
+  editor.applyUpdate({ type: "SetWhichKeyActive", active: false });
+  editor.applyUpdate({ type: "SetWhichKeyPrefix", prefix: "" });
+  editor.applyUpdate({ type: "SetWhichKeyBindings", bindings: [] });
+  editor.applyUpdate({ type: "SetWhichKeyPopup", popup: null });
 }
 
 async function executeCommand(editor: Editor, tLispCmd: string): Promise<void> {
@@ -340,26 +345,26 @@ async function executeCommand(editor: Editor, tLispCmd: string): Promise<void> {
       throw new Error("EDITOR_QUIT_SIGNAL");
     }
     const errorMsg = error instanceof Error ? error.message : String(error);
-    editor.patchModel({ statusMessage: `Command error: ${errorMsg}` });
+    editor.applyUpdate({ type: "SetStatusMessage", message: `Command error: ${errorMsg}` });
     // SPEC-055: command errors log at 'error' so they mirror into *Messages*.
     editor.logMessage(`Command error: ${errorMsg}`, 'error');
   }
 }
 
 function schedulePrefixPopup(
-  editor: Editor, state: any, wk: any,
+  editor: Editor, wk: any,
   exec: (cmd: string) => any, escape: (s: string) => string, prefix: string
 ): void {
   const bindings = tLispPrefixBindings(exec, escape, prefix);
   if (bindings.length === 0) return;
-  state.whichKeyPrefix = prefix;
-  state.whichKeyBindings = bindings;
+  editor.applyUpdate({ type: "SetWhichKeyPrefix", prefix });
+  editor.applyUpdate({ type: "SetWhichKeyBindings", bindings });
   wk.schedule(prefix, bindings, () => {
-    if (state.whichKeyPrefix !== prefix) return;
-    state.whichKeyActive = true;
+    if (editor.getModel().whichKeyPrefix !== prefix) return;
     const size = editor.getTerminal().getSize();
-    state.whichKeyPopup = computeWhichKeyPopup(bindings, prefix, size.width, Math.max(1, size.height - 4), prefixLabel(prefix));
-    state.statusMessage = `Which-key: ${bindings.map(b => `${b.key.substring(prefix.length + 1)} : ${b.command}`).join(", ")}`;
+    editor.applyUpdate({ type: "SetWhichKeyActive", active: true });
+    editor.applyUpdate({ type: "SetWhichKeyPopup", popup: computeWhichKeyPopup(bindings, prefix, size.width, Math.max(1, size.height - 4), prefixLabel(prefix)) });
+    editor.applyUpdate({ type: "SetStatusMessage", message: `Which-key: ${bindings.map(b => `${b.key.substring(prefix.length + 1)} : ${b.command}`).join(", ")}` });
   });
 }
 
