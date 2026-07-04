@@ -134,6 +134,41 @@ export function update(model: EditorModel, msg: Msg): UpdateResult {
     case "SetEditorStateExternal":
       return { model: patch(model, { ...msg.patch }), cmds: noCmds };
 
+    // ── Effect follow-ups (CHORE-42): pure model commits after runCmd ──
+    // The Editor's openFile/saveFile success paths own buffer/metadata/window
+    // setup because they mutate the shared `this.buffers` map — the reducer
+    // must not disconnect it by returning a fresh Map. These cases only record
+    // transient status / modified-flag state; the Editor reconciles the rest.
+    case "OpenFileSucceeded":
+      return { model: patch(model, { statusMessage: `Loaded ${msg.filename}` }), cmds: noCmds };
+    case "OpenFileFailed":
+      return { model: patch(model, { statusMessage: `Failed to open ${msg.filename}: ${describeError(msg.error)}` }), cmds: noCmds };
+    case "SaveFileSucceeded":
+      return { model: patch(model, { bufferModified: false, statusMessage: `Saved ${msg.filename}` }), cmds: noCmds };
+    case "SaveFileFailed":
+      return { model: patch(model, { statusMessage: `Failed to save ${msg.filename}: ${describeError(msg.error)}` }), cmds: noCmds };
+    case "EvalTlispSucceeded":
+      return { model, cmds: noCmds };
+    case "EvalTlispFailed":
+      return { model: patch(model, { statusMessage: `Eval failed: ${describeError(msg.error)}` }), cmds: noCmds };
+    case "BackgroundCommandFailed":
+      return { model: patch(model, { statusMessage: `Background command failed: ${describeError(msg.error)}` }), cmds: noCmds };
+
+    // ── Effect initiators (CHORE-42): the reducer emits a real Cmd per Msg.
+    // The drain runs each via `runCmd` and dispatches the follow-up Msg above.
+    case "OpenFile":
+      return { model, cmds: [{ tag: "OpenFile", commandId: msg.commandId, owner: msg.owner, filename: msg.filename }] };
+    case "SaveFile":
+      return { model, cmds: [{ tag: "SaveFile", commandId: msg.commandId, owner: msg.owner, filename: msg.filename, content: msg.content }] };
+    case "EvalTlisp":
+      return { model, cmds: [{ tag: "EvalTlisp", commandId: msg.commandId, owner: msg.owner, expr: msg.expr }] };
+    case "EvalTlispAsync":
+      return { model, cmds: [{ tag: "EvalTlispAsync", commandId: msg.commandId, owner: msg.owner, expr: msg.expr }] };
+    case "LogMessage":
+      return { model, cmds: [{ tag: "LogMessage", commandId: msg.commandId, owner: msg.owner, message: msg.message, level: msg.level }] };
+    case "LogProgram":
+      return { model, cmds: [{ tag: "LogProgram", commandId: msg.commandId, owner: msg.owner, category: msg.category, entry: msg.entry }] };
+
     case "CmdFailed": {
       const message = `${msg.commandTag} failed: ${describeError(msg.error)}`;
       return {

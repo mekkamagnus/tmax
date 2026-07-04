@@ -214,8 +214,14 @@
 ;; Handle space key - first part of SPC ; sequence
 (key-bind " " "(editor-handle-space)" "normal")
 
-;; SPC ; enters M-x mode
-(key-bind "SPC ;" "(execute-extended-command-maybe)" "normal")
+;; SPC ; enters M-x mode. Bind the direct entry (not the `-maybe` variant):
+;; the normal-mode handler consumes `spacePressed` when it builds the "SPC ;"
+;; lookup key (normal-handler.ts spaceActive branch), so by the time the bound
+;; command runs `spacePressed` is already false. `execute-extended-command-maybe`
+;; re-checks `spacePressed` and would therefore fall through to "Unbound key: ;".
+;; The "SPC ;" binding is already SPC-prefixed, so it must enter M-x
+;; unconditionally; `-maybe` is retained for the bare-";" fallback path.
+(key-bind "SPC ;" "(execute-extended-command)" "normal")
 
 ;; Emacs-style buffer switching.
 (key-bind "C-x b" "(switch-buffer)" "normal")

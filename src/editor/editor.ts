@@ -98,6 +98,16 @@ export function resolveMapping(
 }
 
 /**
+ * Outcome the drain reports to an awaiting public method (CHORE-42).
+ * `content` is populated for `OpenFile`, `result` for `EvalTlisp`; effect-level
+ * failure carries the typed `AppError` so the caller can mirror prior log
+ * behavior without rejecting the public method.
+ */
+type CommandOutcome =
+  | { readonly status: "succeeded"; readonly content?: string; readonly result?: TLispValue }
+  | { readonly status: "failed"; readonly error: AppError };
+
+/**
  * Core editor implementation
  */
 export class Editor {
@@ -2668,51 +2678,63 @@ export class Editor {
   }
 
   /**
-   * Open a file
+   * Open a file (CHORE-42: the read is dispatched as an owner-`'openFile'`
+   * `OpenFile` Cmd through the live effect layer; the public contract is
+   * unchanged — a failed read updates status/logs, leaves the previous buffer
+   * intact, and resolves rather than rejects).
    * @param filename - File to open
    */
   async openFile(filename: string): Promise<void> {
-    try {
-      const content = await this.filesystem.readFile(filename);
-      this.createBuffer(filename, content);
-      // Track the filename for save operations
-      this.model = { ...this.model, currentFilename: filename };
-      const name = this.findBufferName(this.model.currentBuffer);
-      if (name) this.updateBufferMetadata(name, { filename, modified: false });
-
-      // Notify LSP client about file open (US-3.1.1)
-      await this.lspClient.onFileOpen(filename, content);
-
-      // Simulate diagnostics from language server (US-3.1.2)
-      await this.lspClient.simulateDiagnostics(filename, content);
-
-      // Update editor state with diagnostics (US-3.1.2)
-      this.model = { ...this.model, lspDiagnostics: this.lspClient.getDiagnostics() };
-
-      // Update status message with LSP connection status (US-3.1.1)
-      const lspStatus = this.lspClient.getStatusMessage();
-      this.model = { ...this.model, statusMessage: lspStatus ? `Opened ${filename} - ${lspStatus}` : `Opened ${filename}` };
-      this.logMessage(`Opened ${filename}`, 'info');
-
-      // SPEC-035: Auto-detect and activate major mode
-      this.activateMajorModeForFile(filename);
-
-      // SPEC-013: Parse AST for code awareness
-      try {
-        this.executeCommand("(ast-parse-buffer)");
-      } catch (_) {
-        // Non-critical: AST features unavailable if parse fails
-      }
-
-      this.recomputeHighlights();
-    } catch (error) {
-      this.model = { ...this.model, statusMessage: `Failed to open ${filename}: ${error instanceof Error ? error.message : String(error)}` };
-      this.logMessage(`Failed to open ${filename}: ${error instanceof Error ? error.message : String(error)}`, 'error');
+    const commandId = globalThis.crypto.randomUUID();
+    const completion = this.trackCommand(commandId);
+    this.applyUpdate({ type: "OpenFile", commandId, owner: "openFile", filename });
+    const outcome = await completion;
+    if (outcome.status === "failed") {
+      // OpenFileFailed reducer already recorded the failure status; mirror the
+      // prior log behavior (impure) and leave the previous buffer intact.
+      this.logMessage(`Failed to open ${filename}: ${outcome.error.message}`, 'error');
+      return;
     }
+    const content = outcome.content ?? "";
+    this.createBuffer(filename, content);
+    // Track the filename for save operations
+    this.model = { ...this.model, currentFilename: filename };
+    const name = this.findBufferName(this.model.currentBuffer);
+    if (name) this.updateBufferMetadata(name, { filename, modified: false });
+
+    // Notify LSP client about file open (US-3.1.1)
+    await this.lspClient.onFileOpen(filename, content);
+
+    // Simulate diagnostics from language server (US-3.1.2)
+    await this.lspClient.simulateDiagnostics(filename, content);
+
+    // Update editor state with diagnostics (US-3.1.2)
+    this.model = { ...this.model, lspDiagnostics: this.lspClient.getDiagnostics() };
+
+    // Update status message with LSP connection status (US-3.1.1)
+    const lspStatus = this.lspClient.getStatusMessage();
+    this.model = { ...this.model, statusMessage: lspStatus ? `Opened ${filename} - ${lspStatus}` : `Opened ${filename}` };
+    this.logMessage(`Opened ${filename}`, 'info');
+
+    // SPEC-035: Auto-detect and activate major mode
+    this.activateMajorModeForFile(filename);
+
+    // SPEC-013: Parse AST for code awareness
+    try {
+      this.executeCommand("(ast-parse-buffer)");
+    } catch (_) {
+      // Non-critical: AST features unavailable if parse fails
+    }
+
+    this.recomputeHighlights();
   }
 
   /**
-   * Save current buffer
+   * Save current buffer (CHORE-42: the write is dispatched as an
+   * owner-`'saveFile'` `SaveFile` Cmd through the live effect layer; the
+   * public contract is unchanged — non-write early returns stay non-write, and
+   * a failed write updates status/logs, keeps the modified flag set, and
+   * resolves rather than rejects).
    * @param filename - Optional filename to save to (overrides current filename)
    */
   async saveFile(filename?: string): Promise<void> {
@@ -2728,29 +2750,34 @@ export class Editor {
       return;
     }
 
-    try {
-      const contentResult = this.model.currentBuffer.getContent();
-      if (Either.isRight(contentResult)) {
-        await this.filesystem.writeFile(saveFilename, contentResult.right);
-        // Update tracked filename if a new one was provided
-        if (filename && !this.model.currentFilename) {
-          this.model = { ...this.model, currentFilename: filename };
-        }
-        this.model = { ...this.model, statusMessage: `Saved ${saveFilename}` };
-        this.setCurrentBufferModified(false);
-        this.logMessage(`Saved ${saveFilename}`, 'info');
-      } else {
-        const gfMsg = `Failed to get content: ${contentResult.left}`;
-        this.model = { ...this.model, statusMessage: gfMsg };
-        // SPEC-055: route save errors through the log so they don't vanish.
-        this.logMessage(gfMsg, 'error');
-      }
-    } catch (error) {
-      const fsMsg = `Failed to save ${saveFilename}: ${error instanceof Error ? error.message : String(error)}`;
-      this.model = { ...this.model, statusMessage: fsMsg };
+    // Capture content before dispatch — the SaveFile Cmd requires it, and the
+    // buffer must not change between read and write.
+    const contentResult = this.model.currentBuffer.getContent();
+    if (Either.isLeft(contentResult)) {
+      const gfMsg = `Failed to get content: ${contentResult.left}`;
+      this.model = { ...this.model, statusMessage: gfMsg };
       // SPEC-055: route save errors through the log so they don't vanish.
-      this.logMessage(fsMsg, 'error');
+      this.logMessage(gfMsg, 'error');
+      return;
     }
+
+    const commandId = globalThis.crypto.randomUUID();
+    const completion = this.trackCommand(commandId);
+    this.applyUpdate({ type: "SaveFile", commandId, owner: "saveFile", filename: saveFilename, content: contentResult.right });
+    const outcome = await completion;
+    if (outcome.status === "failed") {
+      // SaveFileFailed reducer already recorded the failure status; mirror the
+      // prior log behavior and keep the modified flag set.
+      this.logMessage(`Failed to save ${saveFilename}: ${outcome.error.message}`, 'error');
+      return;
+    }
+    // Success: SaveFileSucceeded reducer set status "Saved X" + cleared the
+    // model modified flag. Reconcile Editor-side tracking + metadata.
+    if (filename && !this.model.currentFilename) {
+      this.model = { ...this.model, currentFilename: filename };
+    }
+    this.setCurrentBufferModified(false);
+    this.logMessage(`Saved ${saveFilename}`, 'info');
   }
 
   /**
@@ -2874,6 +2901,14 @@ export class Editor {
 
   private cmdQueue: Cmd[] = [];
   private cmdDraining = false;
+  /**
+   * Per-command-id ownership waiters (CHORE-42). Each awaiting public method
+   * (openFile/saveFile) registers a waiter before dispatching its initiating
+   * Msg; the drain settles it from the follow-up Msg so the method can resume.
+   * A failed background log write has no waiter and therefore can never reject
+   * an unrelated public method.
+   */
+  private commandWaiters = new Map<string, { resolve: (outcome: CommandOutcome) => void }>();
 
   /** Canonical typed read access to the editor model. */
   getModel(): EditorModel {
@@ -2907,16 +2942,14 @@ export class Editor {
 
   /**
    * Dispatch a Msg through the pure reducer, commit the resulting model,
-   * enqueue any returned Cmds, and fire state-change listeners once.
-   * Returns the committed model synchronously.
+   * enqueue any returned Cmds (via {@link enqueueCmd}, so the live effect
+   * layer is the single ingress to the drain), and fire state-change
+   * listeners once. Returns the committed model synchronously.
    */
   applyUpdate(msg: Msg): EditorModel {
     const result = update(this.model, msg);
     this.model = result.model;
-    if (result.cmds.length > 0) {
-      for (const cmd of result.cmds) this.cmdQueue.push(cmd);
-      void this.drainCommands();
-    }
+    for (const cmd of result.cmds) this.enqueueCmd(cmd);
     this.notifyStateChange();
     return this.model;
   }
@@ -2925,6 +2958,42 @@ export class Editor {
   enqueueCmd(cmd: Cmd): void {
     this.cmdQueue.push(cmd);
     void this.drainCommands();
+  }
+
+  /**
+   * Register an ownership waiter so a public method can `await` the drain's
+   * settlement for `commandId`. Must be called BEFORE dispatching the
+   * initiating Msg so the waiter is present when the drain settles it.
+   */
+  private trackCommand(commandId: string): Promise<CommandOutcome> {
+    return new Promise<CommandOutcome>(resolve => {
+      this.commandWaiters.set(commandId, { resolve });
+    });
+  }
+
+  /**
+   * Map a settled Cmd's `runCmd` result to the outcome the awaiting owner
+   * sees. Effect-level success/failure is read from the follow-up Msgs (a
+   * handled filesystem error is a `*Failed` Msg, not a Left); a drain-level
+   * `Left` is a failure carrying the `AppError`.
+   */
+  private classifyCommand(result: Either<AppError, readonly Msg[]>): CommandOutcome {
+    if (result._tag === "Left") {
+      return { status: "failed", error: result.left };
+    }
+    for (const m of result.right) {
+      switch (m.type) {
+        case "OpenFileSucceeded": return { status: "succeeded", content: m.content };
+        case "OpenFileFailed": return { status: "failed", error: m.error };
+        case "SaveFileSucceeded": return { status: "succeeded" };
+        case "SaveFileFailed": return { status: "failed", error: m.error };
+        case "EvalTlispSucceeded": return { status: "succeeded", result: m.result };
+        case "EvalTlispFailed": return { status: "failed", error: m.error };
+        case "BackgroundCommandFailed": return { status: "failed", error: m.error };
+        default: break;
+      }
+    }
+    return { status: "succeeded" };
   }
 
   /** Drain queued Cmds sequentially; follow-up Msgs commit via applyUpdate. */
@@ -2941,6 +3010,12 @@ export class Editor {
           for (const followUp of result.right) {
             this.applyUpdate(followUp);
           }
+        }
+        // Settle the awaiting owner (if any) for this command id.
+        const waiter = this.commandWaiters.get(cmd.commandId);
+        if (waiter) {
+          this.commandWaiters.delete(cmd.commandId);
+          waiter.resolve(this.classifyCommand(result));
         }
       }
     } finally {

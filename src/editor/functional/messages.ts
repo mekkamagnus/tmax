@@ -25,7 +25,17 @@ import type {
   EditorConfig,
 } from "../../core/types.ts";
 import type { AppError } from "../../error/types.ts";
+import type { TLispValue } from "../../tlisp/types.ts";
 import type { EditorModel } from "./model.ts";
+
+/**
+ * Correlation owner for an enqueued {@link Cmd}. The drain settles the
+ * awaiting owner per command id so a failed background log write can never
+ * reject an unrelated `openFile`/`saveFile`. Defined here (not in `cmd.ts`)
+ * so `messages.ts` and `cmd.ts` share one owner union without an import cycle
+ * (`cmd.ts` already imports `Msg` from here).
+ */
+export type CommandOwner = "openFile" | "saveFile" | "handler" | "background";
 
 export type Msg =
   // Mode
@@ -81,5 +91,25 @@ export type Msg =
   | { readonly type: "SetConfig"; readonly config: EditorConfig }
   // External (setEditorState)
   | { readonly type: "SetEditorStateExternal"; readonly patch: Partial<EditorModel> }
-  // Command failure (dispatched by the command drain)
+  // ── Effect layer (CHORE-42) ──────────────────────────────────────────
+  // Initiating Msgs: the reducer returns a real Cmd for each of these (the
+  // drain runs it via `runCmd`). Each carries a stable `commandId` + `owner`
+  // so the awaiting public method can correlate on completion.
+  | { readonly type: "OpenFile"; readonly commandId: string; readonly owner: CommandOwner; readonly filename: string }
+  | { readonly type: "SaveFile"; readonly commandId: string; readonly owner: CommandOwner; readonly filename: string; readonly content: string }
+  | { readonly type: "EvalTlisp"; readonly commandId: string; readonly owner: CommandOwner; readonly expr: string }
+  | { readonly type: "EvalTlispAsync"; readonly commandId: string; readonly owner: CommandOwner; readonly expr: string }
+  | { readonly type: "LogMessage"; readonly commandId: string; readonly owner: CommandOwner; readonly message: string; readonly level?: "info" | "warn" | "error" }
+  | { readonly type: "LogProgram"; readonly commandId: string; readonly owner: CommandOwner; readonly category: string; readonly entry: { readonly text: string; readonly stream?: "stdout" | "stderr" } }
+  // Follow-up Msgs: dispatched by the drain after `runCmd` settles. These are
+  // pure model commits (the IO already happened in the Cmd). `Left(error)` is
+  // reserved for drain-level failures; an effect-level failure is a Msg.
+  | { readonly type: "OpenFileSucceeded"; readonly commandId: string; readonly filename: string; readonly content: string }
+  | { readonly type: "OpenFileFailed"; readonly commandId: string; readonly filename: string; readonly error: AppError }
+  | { readonly type: "SaveFileSucceeded"; readonly commandId: string; readonly filename: string }
+  | { readonly type: "SaveFileFailed"; readonly commandId: string; readonly filename: string; readonly error: AppError }
+  | { readonly type: "EvalTlispSucceeded"; readonly commandId: string; readonly result: TLispValue }
+  | { readonly type: "EvalTlispFailed"; readonly commandId: string; readonly expr: string; readonly error: AppError }
+  | { readonly type: "BackgroundCommandFailed"; readonly commandId: string; readonly error: AppError }
+  // Command failure (dispatched by the command drain for drain-level Left)
   | { readonly type: "CmdFailed"; readonly commandTag: string; readonly commandId: string; readonly error: AppError };

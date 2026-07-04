@@ -17,10 +17,12 @@
 
 import { TaskEither } from "../../utils/task-either.ts";
 import type { AppError } from "../../error/types.ts";
-import type { Msg } from "./messages.ts";
+import type { Msg, CommandOwner } from "./messages.ts";
+// Re-export so the barrel (`index.ts`) can continue to surface CommandOwner
+// from this module; the canonical definition lives in `messages.ts` to keep
+// the owner union shared without an import cycle.
+export type { CommandOwner } from "./messages.ts";
 import type { EditorRuntime } from "./runtime.ts";
-
-export type CommandOwner = "openFile" | "saveFile" | "handler" | "background";
 
 interface CmdBase {
   readonly commandId: string;
@@ -37,45 +39,61 @@ export type Cmd<M extends Msg = Msg> =
 
 /**
  * Execute a Cmd against the runtime, yielding follow-up Msgs (possibly empty).
- * Returns `Left<AppError>` on failure; the drain converts that into `CmdFailed`.
+ *
+ * Effect-level success/failure is reported as a follow-up Msg (e.g.
+ * `SaveFileSucceeded` / `SaveFileFailed`) carrying the originating
+ * `commandId`. `Left<AppError>` is reserved for drain-level failures (the
+ * drain then dispatches `CmdFailed`); a handled filesystem error is a Right
+ * containing a `*Failed` Msg so the awaiting owner can settle without a
+ * rejection.
  */
 export function runCmd(cmd: Cmd, runtime: EditorRuntime): TaskEither<AppError, readonly Msg[]> {
   switch (cmd.tag) {
     case "SaveFile":
       return TaskEither.from(async () => {
         const result = await runtime.writeFile(cmd.filename, cmd.content);
-        if (result._tag === "Left") return result;
-        const msgs: Msg[] = [
-          { type: "SetStatusMessage", message: `Saved ${cmd.filename}` },
-          { type: "SetBufferModified", modified: false },
-        ];
-        return { _tag: "Right" as const, right: msgs };
+        if (result._tag === "Left") {
+          return { _tag: "Right" as const, right: [{ type: "SaveFileFailed", commandId: cmd.commandId, filename: cmd.filename, error: result.left }] as Msg[] };
+        }
+        return { _tag: "Right" as const, right: [{ type: "SaveFileSucceeded", commandId: cmd.commandId, filename: cmd.filename }] as Msg[] };
       });
     case "OpenFile":
       return TaskEither.from(async () => {
         const result = await runtime.readFile(cmd.filename);
-        if (result._tag === "Left") return result;
-        return { _tag: "Right" as const, right: [{ type: "SetStatusMessage", message: `Loaded ${cmd.filename}` }] as Msg[] };
+        if (result._tag === "Left") {
+          return { _tag: "Right" as const, right: [{ type: "OpenFileFailed", commandId: cmd.commandId, filename: cmd.filename, error: result.left }] as Msg[] };
+        }
+        return { _tag: "Right" as const, right: [{ type: "OpenFileSucceeded", commandId: cmd.commandId, filename: cmd.filename, content: result.right }] as Msg[] };
       });
     case "EvalTlisp": {
       const result = runtime.evalTlisp(cmd.expr);
       if (result._tag === "Left") {
-        return TaskEither.left<AppError, readonly Msg[]>(result.left);
+        return TaskEither.right<readonly Msg[], AppError>([{ type: "EvalTlispFailed", commandId: cmd.commandId, expr: cmd.expr, error: result.left }]);
       }
-      return TaskEither.right<readonly Msg[], AppError>([]);
+      return TaskEither.right<readonly Msg[], AppError>([{ type: "EvalTlispSucceeded", commandId: cmd.commandId, result: result.right }]);
     }
     case "EvalTlispAsync":
       return TaskEither.from(async () => {
         const result = await runtime.evalTlispAsync(cmd.expr);
-        if (result._tag === "Left") return result;
-        return { _tag: "Right" as const, right: [] as Msg[] };
+        if (result._tag === "Left") {
+          return { _tag: "Right" as const, right: [{ type: "EvalTlispFailed", commandId: cmd.commandId, expr: cmd.expr, error: result.left }] as Msg[] };
+        }
+        return { _tag: "Right" as const, right: [{ type: "EvalTlispSucceeded", commandId: cmd.commandId, result: result.right }] as Msg[] };
       });
     case "LogMessage":
-      runtime.logMessage(cmd.message, cmd.level);
-      return TaskEither.right<readonly Msg[], AppError>([]);
+      try {
+        runtime.logMessage(cmd.message, cmd.level);
+        return TaskEither.right<readonly Msg[], AppError>([]);
+      } catch (e) {
+        return TaskEither.right<readonly Msg[], AppError>([{ type: "BackgroundCommandFailed", commandId: cmd.commandId, error: runtime.toAppError(e) }]);
+      }
     case "LogProgram":
-      runtime.logProgram(cmd.category, cmd.entry);
-      return TaskEither.right<readonly Msg[], AppError>([]);
+      try {
+        runtime.logProgram(cmd.category, cmd.entry);
+        return TaskEither.right<readonly Msg[], AppError>([]);
+      } catch (e) {
+        return TaskEither.right<readonly Msg[], AppError>([{ type: "BackgroundCommandFailed", commandId: cmd.commandId, error: runtime.toAppError(e) }]);
+      }
     default: {
       // Exhaustiveness guard
       const _exhaustive: never = cmd;
