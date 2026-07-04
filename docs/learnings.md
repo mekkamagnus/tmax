@@ -79,3 +79,11 @@ When `/goal` exits exhausted (goal not met), the orchestrator runs a post-build 
 ## Testing: `0w` count-prefix regression is a test-isolation issue
 
 The CHORE-39 refactor (`this.state` → `this.model`) introduced a state-leak between tests: `0w` passes in isolation but fails when run with siblings in `count-prefix.test.ts`. The digit logic is unchanged; the leak is in how editor state resets between tests. When refactoring editor internals, run the FULL test file (not just the targeted test) to catch cross-test state leaks.
+
+## Pipeline: BUG-22 — Claude hardcodes `cd <main-repo>`, ignoring the worktree spawn cwd
+
+**Rule:** The adw build stage spawns Claude with `cwd: <worktree>`, but Claude's Bash tool calls contain `cd /Users/.../tmax` (the main repo), overriding the spawn cwd. Every build's edits land in the main repo, not the worktree branch — losing the diff for patch-review and requiring manual recovery. Fix: `buildImplementPrompt()` prepends a worktree directive to the prompt text instructing Claude to work relative to its current directory and never `cd` to a hardcoded path. This is a prompt-level fix because the spawn cwd is correct; Claude just ignores it. When recovering work after a pipeline run, check BOTH the worktree AND the main repo working tree.
+
+## Pipeline: BUG-16 — test:unit cumulative hang is deeper than shutdown cleanup
+
+**Rule:** The `server-daemon-hardening.test.ts` and `server-observability.test.ts` files hang the full `test:unit` suite. Attempted fixes (destroyAllConnections in shutdown, removeAllListeners, SIGTERM removal, forceShutdown on rejected second servers) either didn't resolve the hang or introduced regressions (removeAllListeners wiped error handlers; SIGTERM removal was too aggressive). The leak is NOT just the shutdown path — it involves half-open sockets from rejected second-server starts AND possibly editor-internal timers. The `run-unit-tests.ts` wrapper force-kills after the summary line, but when a test hangs mid-suite (no summary appears), the wrapper waits for its hard timeout. Do NOT attempt to fix BUG-16 with broad `removeAllListeners` or `process.removeAllListeners` calls — they break legitimate handlers. The fix needs per-handle identification via `process._getActiveHandles()` in the specific hanging tests.
