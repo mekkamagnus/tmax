@@ -1,5 +1,5 @@
 ---
-goal: "bun run typecheck passes, AND bash -lc 'rg -n \"extends EditorState\" src/editor/functional/model.ts && echo FOUND || true' prints no FOUND line, AND bash -lc 'count=$(rg -c \"^  [a-zA-Z].*:\" src/editor/functional/model.ts | head -1); echo $count' shows model fields, AND bun test test/unit/editor-state-boundary.test.ts passes, AND bun test test/unit/editor-functional-bridge.test.ts passes'
+goal: "bun run typecheck passes, AND bun -e 'const text=await Bun.file(\"src/editor/functional/model.ts\").text(); const m=text.match(/export interface EditorModel([^\\{]*)\\{([\\s\\S]*?)\\n\\}/); if(!m) throw new Error(\"EditorModel interface not found\"); if(/extends\\s+EditorState/.test(m[1])) throw new Error(\"EditorModel still extends EditorState\"); const bad=m[2].split(\"\\n\").map(l=>l.trim()).filter(l=>l && !l.startsWith(\"/**\") && !l.startsWith(\"*\") && !l.startsWith(\"//\") && /^[A-Za-z_$][\\w$?]*:/.test(l)); if(bad.length) throw new Error(\"Non-readonly EditorModel fields: \"+bad.join(\", \"));' passes, AND bun test test/unit/editor-state-boundary.test.ts passes, AND bun test test/unit/editor.test.ts passes"
 ---
 
 # Chore: Make EditorModel truly immutable — separate from EditorState
@@ -18,20 +18,20 @@ export interface EditorModel extends EditorState {  // ← spec calls this "unso
 
 The spec explicitly states: *"Making `EditorModel extends EditorState` would make the immutable contract unsound"* because the public `EditorState` type exposes mutable collections (`Map<string, FunctionalTextBuffer>`, etc.) and non-readonly fields. By extending it, `EditorModel` inherits all those mutable fields. This is why `this.model.currentFilename = filename` compiles in editor.ts:2677 — the fields aren't readonly.
 
-This chore makes `EditorModel` a standalone immutable interface with all fields `readonly` and all collections typed as `ReadonlyMap` / `ReadonlySet` / `readonly T[]`.
+This chore makes `EditorModel` a standalone immutable interface with all fields `readonly` and all in-scope collections typed as `ReadonlyMap` / `readonly T[]`.
 
 ### The problem, concretely
 
 1. **`EditorModel extends EditorState`** — inherits ~30 mutable fields from the public `EditorState` type. The immutability contract is unsound.
 2. **Non-readonly fields** — `countPrefix`, `loadPaths`, `currentModuleName` (the only fields declared directly on EditorModel) are not `readonly`.
-3. **Mutable collection types** — `buffers` stays `Map<string, FunctionalTextBuffer>` (mutable), not `ReadonlyMap`. Same for `foldRanges`, `keyMappings`, `bufferModeStates`, `minorModeRegistry`. `globalizedMinorModes` is a mutable `Set`, not `ReadonlySet`.
+3. **Mutable collection types** — `buffers` stays `Map<string, FunctionalTextBuffer>` (mutable), not `ReadonlyMap`. Same for actual `EditorState` collection fields such as `foldRanges`, `windows`, `tabs`, `highlightSpans`, `searchMatches`, `whichKeyBindings`, and mode/diagnostic arrays.
 4. **Direct mutation compiles** — because fields are mutable, `this.model.X = Y` compiles at 91 sites in editor.ts, defeating the reducer-driven contract.
 
 ### The target
 
 - `EditorModel` is a standalone interface (no `extends EditorState`). It re-declares every field it needs with `readonly` and immutable collection types.
 - All fields are `readonly`.
-- Collection fields use `ReadonlyMap`, `ReadonlySet`, `readonly T[]`.
+- Collection fields use `ReadonlyMap` / `readonly T[]`.
 - `modelToEditorState(model)` projects from the immutable model to the mutable public `EditorState` (already exists — keep it working).
 - `editorStateToModelPatch(external)` copies mutable public collections into immutable model collections on ingress (already exists — keep it working).
 - `initialModel()` returns a properly-typed immutable record.
@@ -43,30 +43,30 @@ This chore makes `EditorModel` a standalone immutable interface with all fields 
 - `src/editor/editor.ts` — may need minor adjustments if it relies on `EditorModel` being assignable to `EditorState` directly (it shouldn't, since `getEditorState()` projects via `modelToEditorState`).
 - `src/editor/functional/update.ts` — the reducer returns fresh models via object spreads; confirm it still typechecks after the readonly change.
 - `test/unit/editor-state-boundary.test.ts` — must pass unchanged.
-- `test/unit/editor-functional-bridge.test.ts` — must pass unchanged.
+- `test/unit/editor.test.ts` — existing editor integration/unit coverage must still pass.
 
 ## Step by Step Tasks
 
 ### Step 1: Redesign EditorModel as a standalone immutable interface
 
 - Remove `extends EditorState` from `EditorModel`.
-- Re-declare every field currently inherited from `EditorState` as a direct field on `EditorModel`, with `readonly` modifier:
-  - Scalar fields: `readonly cursorPosition`, `readonly mode`, `readonly statusMessage`, `readonly config`, `readonly commandLine`, `readonly minibuffer`, `readonly currentBuffer`, `readonly currentFilename`, `readonly currentBufferKey`, `readonly selection`, `readonly minibufferCursor`, `readonly minibufferFocus`, `readonly countPrefix` (already there), `readonly spacePressed`, `readonly windowPrefixPressed`, `readonly whichKeyActive`, `readonly whichKeyPrefix`, `readonly whichKeyTimeout`, `readonly whichKeyBindings`, `readonly lspDiagnostics`, `readonly messages`, `readonly currentWorkspace`, `readonly currentInitFile`, `readonly currentModuleName` (already there), `readonly loadPaths` (already there, make readonly + `readonly string[]`).
+- Re-declare every field currently inherited from `src/core/types.ts` `EditorState` as a direct field on `EditorModel`, with `readonly` modifiers. Use the current `EditorState` interface as the source of truth:
+  - Scalar/object fields: `currentBuffer`, `cursorPosition`, `mode`, `statusMessage`, `viewportTop`, `viewportLeft`, `config`, `commandLine`, `mxCommand`, `lastCommand`, `currentFilename`, `cursorFocus`, `whichKeyActive`, `whichKeyPrefix`, `whichKeyTimeout`, `whichKeyPopup`, `describeKeyPending`, `describeKeyTimeout`, `describeFunctionPending`, `aproposCommandPending`, `currentWindowIndex`, `currentTabIndex`, `currentMajorMode`, `bufferModified`, `minibufferState`, `minibufferView`.
   - Collection fields → immutable variants:
-    - `readonly buffers: ReadonlyMap<string, FunctionalTextBuffer>`
-    - `readonly foldRanges: ReadonlyMap<string, readonly [number, number][]>` (or the existing type, made readonly)
-    - `readonly keyMappings: ReadonlyMap<string, any>` (or the existing KeyMappings type, made readonly at the top level)
-    - `readonly bufferModeStates: ReadonlyMap<string, BufferModeState>`
-    - `readonly minorModeRegistry: ReadonlyMap<string, MinorMode>`
-    - `readonly globalizedMinorModes: ReadonlySet<string>`
-    - `readonly windows: readonly Window[]`
-    - `readonly tabs: readonly Tab[]`
-    - `readonly activeMinorModes: readonly string[]`
-    - `readonly highlightSpans: readonly (readonly Span[])[]` (or the existing type)
-    - `readonly bufferMetadata`, `readonly bufferRecency` → `ReadonlyMap` variants
-    - `readonly autoModeRules: readonly AutoModeRule[]`
+    - `readonly buffers?: ReadonlyMap<string, FunctionalTextBuffer>`
+    - `readonly whichKeyBindings?: readonly WhichKeyBinding[]`
+    - `readonly lspDiagnostics?: readonly LSPDiagnostic[]`
+    - `readonly windows?: readonly Window[]`
+    - `readonly tabs?: readonly Tab[]`
+    - `readonly highlightSpans?: readonly (readonly HighlightSpan[])[]`
+    - `readonly searchMatches?: readonly Range[]`
+    - `readonly activeMinorModes?: readonly string[]`
+    - `readonly activeMinorModeLighters?: readonly string[]`
+    - `readonly foldRanges?: ReadonlyMap<number, number>`
+- Keep the current model-only fields, also readonly/immutable: `readonly countPrefix: number`, `readonly loadPaths: readonly string[]`, and `readonly currentModuleName: string | undefined`.
+- Do not migrate private `Editor` runtime fields in this chore. Fields such as `keyMappings`, `bufferModeStates`, `minorModeRegistry`, `globalizedMinorModes`, `autoModeRules`, `bufferMetadata`, and `currentWorkspace` stay as separate private `Editor` fields unless/until a later chore explicitly moves them into the model.
 - Explicitly EXCLUDE impure runtime fields (already documented): `terminal`, `filesystem`, `interpreter`, `lspClient`, `keymapSync`, `whichKeyHandle`, `log`, `logPath`, `running`, `coreBindingsLoaded`. These stay off the model.
-- Use the existing field list in `model.ts` as the source of truth — do NOT add or remove fields, only change their types to readonly/immutable and remove the `extends`.
+- Do NOT add or remove model state beyond the current `EditorState` fields plus the three current model-only fields above; only change their types to readonly/immutable and remove the `extends`.
 
 ### Step 2: Fix any compile errors from the readonly change
 
@@ -86,8 +86,9 @@ This chore makes `EditorModel` a standalone immutable interface with all fields 
 - `cd /Users/mekael/Documents/programming/typescript/tmax && bun run typecheck:test` — tests compile against the new types.
 - `cd /Users/mekael/Documents/programming/typescript/tmax && bun run typecheck` — full project typecheck.
 - `cd /Users/mekael/Documents/programming/typescript/tmax && bun test test/unit/editor-state-boundary.test.ts` — boundary isolation tests pass (6/6).
-- `cd /Users/mekael/Documents/programming/typescript/tmax && bun test test/unit/editor-functional-bridge.test.ts` — bridge tests pass.
+- `cd /Users/mekael/Documents/programming/typescript/tmax && bun test test/unit/editor.test.ts` — existing editor integration/unit coverage still passes.
 - `cd /Users/mekael/Documents/programming/typescript/tmax && bash -lc 'rg -n "extends EditorState" src/editor/functional/model.ts; test $? -eq 1'` — exit 0 (grep finds nothing, `rg` exits 1, test succeeds). Proves the `extends` is gone.
+- `cd /Users/mekael/Documents/programming/typescript/tmax && bun -e 'const text=await Bun.file("src/editor/functional/model.ts").text(); const m=text.match(/export interface EditorModel([^\\{]*)\\{([\\s\\S]*?)\\n\\}/); if(!m) throw new Error("EditorModel interface not found"); if(/extends\\s+EditorState/.test(m[1])) throw new Error("EditorModel still extends EditorState"); const bad=m[2].split("\\n").map(l=>l.trim()).filter(l=>l && !l.startsWith("/**") && !l.startsWith("*") && !l.startsWith("//") && /^[A-Za-z_$][\\w$?]*:/.test(l)); if(bad.length) throw new Error("Non-readonly EditorModel fields: "+bad.join(", "));'` — deterministic assertion that `EditorModel` does not extend `EditorState` and every direct field is declared `readonly`.
 - `cd /Users/mekael/Documents/programming/typescript/tmax && bun run build` — compiles into standalone binaries.
 
 ## Notes
