@@ -26,6 +26,7 @@ import {
   AppError,
 } from "../../error/types.ts";
 import type { SyntaxToken, HighlightSpan } from "../../core/types.ts";
+import { runModel, readModelField, type EditorModelAccess } from "./state-context.ts";
 import { tokenize } from "../../syntax/tokenizer.ts";
 import { highlightLine } from "../../syntax/highlighter.ts";
 import { languageMap } from "../../syntax/language-registry.ts";
@@ -45,10 +46,13 @@ let storedSpans: HighlightSpan[][] = [];
  * @returns Map of syntax function names to implementations
  */
 export function createSyntaxOps(
-  getCurrentBuffer: () => unknown,
+  access: EditorModelAccess,
   getLineCount: () => number,
   getLine: (line: number) => string
 ): Map<string, TLispFunctionImpl> {
+  // CHORE-39 Phase 4: current-buffer read flows through the State monad against
+  // EditorModel; line count/line text stay on the supplied derived callbacks.
+  const getCurrentBuffer = (): unknown => runModel(access, readModelField("currentBuffer"));
   const api = new Map<string, TLispFunctionImpl>();
 
   /**

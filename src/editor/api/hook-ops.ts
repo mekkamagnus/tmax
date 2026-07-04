@@ -12,6 +12,15 @@
 import type { TLispValue, TLispFunctionImpl } from "../../tlisp/types.ts";
 import { createNil, createList, createString, createBoolean } from "../../tlisp/values.ts";
 import { Either } from "../../utils/task-either.ts";
+import { State } from "../../utils/state.ts";
+import type { EditorModel } from "../functional/model.ts";
+
+/**
+ * CHORE-39 Phase 4: `State<EditorModel>` reader — the active editor mode, used
+ * to dispatch mode-specific hooks. Pure model read.
+ */
+export const currentModeState = (): State<EditorModel, EditorModel["mode"]> =>
+  State.gets((m: EditorModel) => m.mode);
 import { validateArgsCount, validateArgType } from "../../utils/validation.ts";
 import { createValidationError, AppError } from "../../error/types.ts";
 

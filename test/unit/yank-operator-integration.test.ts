@@ -11,6 +11,7 @@ import { FunctionalTextBufferImpl } from "../../src/core/buffer.ts";
 import type { FunctionalTextBuffer } from "../../src/core/types.ts";
 import { Either } from "../../src/utils/task-either.ts";
 import { createYankOps } from "../../src/editor/api/yank-ops.ts";
+import { initialModel } from "../../src/editor/functional/model.ts";
 
 /**
  * Test helper to create a buffer with content
@@ -41,13 +42,18 @@ describe("Yank Operator Integration - US-1.2.2", () => {
     cursorLine = 0;
     cursorColumn = 0;
 
-    // Create yank operations with mock state
+    // Create yank operations with mock state (CHORE-39 Phase 4: EditorModelAccess)
     yankOps = createYankOps(
-      () => currentBuffer,
+      {
+        getModel: () => ({ ...initialModel(), currentBuffer: currentBuffer ?? undefined, cursorPosition: { line: cursorLine, column: cursorColumn } }),
+        applyModel: (m) => {
+          if (m.currentBuffer) currentBuffer = m.currentBuffer;
+          cursorLine = m.cursorPosition.line;
+          cursorColumn = m.cursorPosition.column;
+        },
+      },
       (buf) => { currentBuffer = buf; },
-      () => cursorLine,
       (line) => { cursorLine = line; },
-      () => cursorColumn,
       (col) => { cursorColumn = col; }
     );
 

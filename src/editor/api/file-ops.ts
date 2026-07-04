@@ -10,6 +10,7 @@ import { Either } from "../../utils/task-either.ts";
 import { validateArgsCount, validateArgType } from "../../utils/validation.ts";
 import { AppError } from "../../error/types.ts";
 import { isAsyncMode } from "../../tlisp/async.ts";
+import { runModel, setModelField, type EditorModelAccess } from "./state-context.ts";
 
 /**
  * Filesystem interface for async operations (write-file-content).
@@ -50,10 +51,18 @@ export function createFileOps(
   operations: { saveFile?: () => Promise<void>; openFile?: (filename: string) => Promise<void> } | undefined,
   setStatusMessage: (message: string) => void,
   filesystem?: FileOpsFilesystem,
-  logMessage?: (msg: string) => void
+  logMessage?: (msg: string) => void,
+  /** CHORE-39 Phase 4: when provided, status writes use the State monad against EditorModel. */
+  access?: EditorModelAccess,
 ): Map<string, TLispFunctionImpl> {
   const api = new Map<string, TLispFunctionImpl>();
   const log = logMessage ?? ((_msg: string) => {});
+  // CHORE-39 Phase 4: prefer State-monad status-message write when access is
+  // supplied (real editor); fall back to the supplied callback otherwise.
+  const setStatus = (message: string): void => {
+    if (access) runModel(access, setModelField("statusMessage", message));
+    else setStatusMessage(message);
+  };
 
   // --- Async fire-and-forget ---
 
@@ -92,7 +101,7 @@ export function createFileOps(
         .then(() => log(`Wrote ${path}`))
         .catch((e) => log(`Write error: ${e instanceof Error ? e.message : String(e)}`));
     } else {
-      setStatusMessage("write-file-content: no filesystem available");
+      setStatus("write-file-content: no filesystem available");
     }
 
     return Either.right(createNil());

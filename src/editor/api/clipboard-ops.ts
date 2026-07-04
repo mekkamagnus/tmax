@@ -18,6 +18,20 @@ import { createString, createNil } from "../../tlisp/values.ts";
 import { Either } from "../../utils/task-either.ts";
 import { validateArgsCount, validateArgType } from "../../utils/validation.ts";
 import { createValidationError, AppError } from "../../error/types.ts";
+import { State } from "../../utils/state.ts";
+import type { EditorModel } from "../functional/model.ts";
+
+/**
+ * CHORE-39 Phase 4: `State<EditorModel, string>` reader — the text of the
+ * current buffer line at the cursor, i.e. what a clipboard copy/paste operates
+ * on. Pure model read; the actual OS-clipboard write happens via `clipboardSet`.
+ */
+export const currentLineTextState = (): State<EditorModel, string> =>
+  State.gets((m: EditorModel): string => {
+    if (!m.currentBuffer) return "";
+    const result = m.currentBuffer.getLine(m.cursorPosition.line);
+    return Either.isLeft(result) ? "" : result.right;
+  });
 
 type Platform = "darwin" | "linux" | "win32" | "other";
 

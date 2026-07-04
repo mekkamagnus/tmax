@@ -21,6 +21,7 @@ import * as path from 'path';
 import type { TLispValue, TLispFunctionImpl } from "../../tlisp/types.ts";
 import { createNil, createNumber, createString, createBoolean, createList } from "../../tlisp/values.ts";
 import type { FunctionalTextBuffer } from "../../core/types.ts";
+import { runModel, readModelField, type EditorModelAccess } from "./state-context.ts";
 import { Either } from "../../utils/task-either.ts";
 import {
   validateArgsCount,
@@ -99,11 +100,15 @@ function formatEntryLine(entry: EntryLike, marked: boolean): string {
  * @returns Map of dired function names to implementations
  */
 export function createDiredOps(
-  getCurrentBuffer: () => FunctionalTextBuffer | null,
+  access: EditorModelAccess,
   setCurrentBuffer: (buffer: FunctionalTextBuffer) => void,
-  getCursorLine: () => number,
   buffers: Map<string, FunctionalTextBuffer>
 ): Map<string, TLispFunctionImpl> {
+  // CHORE-39 Phase 4: cursor/buffer reads flow through the State monad against
+  // EditorModel; writes stay on the supplied setter to preserve side effects.
+  const getCursorLine = (): number => runModel(access, readModelField("cursorPosition")).line;
+  const getCurrentBuffer = (): FunctionalTextBuffer | null =>
+    runModel(access, readModelField("currentBuffer")) ?? null;
   const api = new Map<string, TLispFunctionImpl>();
 
   // (dired-format-listing PATH ENTRIES)

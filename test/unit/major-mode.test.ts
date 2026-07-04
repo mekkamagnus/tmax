@@ -3,6 +3,7 @@ import { createMajorModeOps } from "../../src/editor/api/major-mode-ops.ts";
 import { FunctionalTextBufferImpl } from "../../src/core/buffer.ts";
 import { createString, createList, createNil, createNumber } from "../../src/tlisp/values.ts";
 import { Either } from "../../src/utils/task-either.ts";
+import { initialModel } from "../../src/editor/functional/model.ts";
 
 describe("Major Modes", () => {
   let buffer: FunctionalTextBufferImpl;
@@ -16,10 +17,12 @@ describe("Major Modes", () => {
   });
 
   function getOps() {
+    // CHORE-39 Phase 4: major-mode-ops reads buffer/filename/modified via EditorModelAccess.
     return createMajorModeOps(
-      () => buffer,
-      () => currentFilename,
-      () => false, // bufferModified
+      {
+        getModel: () => ({ ...initialModel(), currentBuffer: buffer, currentFilename, bufferModified: false }),
+        applyModel: (m) => { if (m.currentBuffer) buffer = m.currentBuffer as FunctionalTextBufferImpl; },
+      },
       (expr: string) => {
         tlispEvalLog.push(expr);
         return Either.right({ type: "nil", value: null });

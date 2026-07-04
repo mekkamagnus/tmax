@@ -17,6 +17,7 @@
 import type { TLispValue, TLispFunctionImpl } from "../../tlisp/types.ts";
 import { createString, createNil, createList } from "../../tlisp/values.ts";
 import { Either } from "../../utils/task-either.ts";
+import { stateUtils } from "../../utils/state.ts";
 import {
   createValidationError,
   AppError
@@ -49,10 +50,9 @@ let killRingState: KillRingState = {
  * Useful for testing and cleanup
  */
 export function resetKillRing(): void {
-  killRingState = {
-    items: [],
-    maxSize: DEFAULT_KILL_RING_MAX
-  };
+  // CHORE-39 Phase 4: reset via the State monad (stateUtils.reset).
+  const [, next] = stateUtils.reset<KillRingState>({ items: [], maxSize: DEFAULT_KILL_RING_MAX }).run(killRingState);
+  killRingState = next;
 }
 
 /**

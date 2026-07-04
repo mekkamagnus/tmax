@@ -6,6 +6,7 @@
 import type { TLispValue, TLispFunctionImpl } from "../../tlisp/types.ts";
 import { createNil, createNumber, createString, createBoolean, createList, createSymbol } from "../../tlisp/values.ts";
 import type { Window } from "../../core/types.ts";
+import { runModel, readModelField, type EditorModelAccess } from "./state-context.ts";
 import { AppError } from "../../error/types.ts";
 import { Either } from "../../utils/task-either.ts";
 
@@ -20,13 +21,17 @@ import { Either } from "../../utils/task-either.ts";
  * @returns Map of window operation names to implementations
  */
 export function createWindowOps(
-  getWindows: () => Window[],
+  access: EditorModelAccess,
   setWindows: (windows: Window[]) => void,
-  getCurrentWindowIndex: () => number,
   setCurrentWindowIndex: (index: number) => void,
-  getCurrentBuffer: () => import("../../core/types.ts").FunctionalTextBuffer | undefined,
   getTerminalSize: () => { width: number; height: number }
 ): Map<string, TLispFunctionImpl> {
+  // CHORE-39 Phase 4: window/index/buffer reads flow through the State monad
+  // against EditorModel; writes + terminal-size accessor stay on callbacks.
+  const getWindows = (): Window[] => runModel(access, readModelField("windows")) ?? [];
+  const getCurrentWindowIndex = (): number => runModel(access, readModelField("currentWindowIndex")) ?? 0;
+  const getCurrentBuffer = (): import("../../core/types.ts").FunctionalTextBuffer | undefined =>
+    runModel(access, readModelField("currentBuffer"));
   const ops = new Map<string, TLispFunctionImpl>();
 
   /**

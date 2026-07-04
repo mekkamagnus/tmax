@@ -24,6 +24,7 @@
 import type { TLispValue, TLispFunctionImpl } from "../../tlisp/types.ts";
 import { createString, createNil, createSymbol, createNumber, createList, createBoolean } from "../../tlisp/values.ts";
 import type { FunctionalTextBuffer, Range } from "../../core/types.ts";
+import { runModel, readModelField, type EditorModelAccess } from "./state-context.ts";
 import { Either } from "../../utils/task-either.ts";
 import { isWordChar } from "./text-utils.ts";
 import {
@@ -176,14 +177,18 @@ function findPreviousMatch(
  * @returns Map of search function names to implementations
  */
 export function createSearchOps(
-  getCurrentBuffer: () => FunctionalTextBuffer | null,
-  getCursorLine: () => number,
+  access: EditorModelAccess,
   setCursorLine: (line: number) => void,
-  getCursorColumn: () => number,
   setCursorColumn: (column: number) => void,
   setStatusMessage: (message: string) => void,
   setSearchMatches?: (ranges: Range[]) => void
 ): Map<string, TLispFunctionImpl> {
+  // CHORE-39 Phase 4: cursor/buffer reads flow through the State monad against
+  // EditorModel; writes stay on the supplied setters to preserve side effects.
+  const getCursorLine = (): number => runModel(access, readModelField("cursorPosition")).line;
+  const getCursorColumn = (): number => runModel(access, readModelField("cursorPosition")).column;
+  const getCurrentBuffer = (): FunctionalTextBuffer | null =>
+    runModel(access, readModelField("currentBuffer")) ?? null;
   const api = new Map<string, TLispFunctionImpl>();
 
   /**

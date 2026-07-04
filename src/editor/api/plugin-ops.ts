@@ -9,6 +9,15 @@ import { createString, createList, createNil } from '../../tlisp/values';
 import { TLispValue, TLispInterpreter, TLispFunctionImpl } from '../../tlisp/types';
 import { Either } from '../../utils/task-either';
 import type { AppError } from '../../error/types';
+import { State } from '../../utils/state';
+import type { EditorModel } from '../functional/model';
+
+/**
+ * CHORE-39 Phase 4: `State<EditorModel>` reader — the editor load-paths, which
+ * scope plugin discovery. Pure model read.
+ */
+export const loadPathsState = (): State<EditorModel, string[]> =>
+  State.gets((m: EditorModel) => m.loadPaths);
 import {
   listPlugins,
   getPlugin,

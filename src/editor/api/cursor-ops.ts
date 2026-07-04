@@ -6,6 +6,8 @@
 import type { TLispValue, TLispFunctionImpl } from "../../tlisp/types.ts";
 import { createNil, createNumber, createString, createBoolean, createList, createSymbol } from "../../tlisp/values.ts";
 import type { FunctionalTextBuffer } from "../../core/types.ts";
+import type { EditorModel } from "../functional/model.ts";
+import { runModel, readModelField, type EditorModelAccess } from "./state-context.ts";
 import { Either } from "../../utils/task-either.ts";
 import {
   validateArgsCount,
@@ -36,14 +38,20 @@ export type TLispFunctionWithEither = (args: TLispValue[]) => Either<AppError, T
  * @returns Map of cursor function names to implementations
  */
 export function createCursorOps(
-  getCursorLine: () => number,
+  access: EditorModelAccess,
   setCursorLine: (line: number) => void,
-  getCursorColumn: () => number,
   setCursorColumn: (column: number) => void,
-  getCurrentBuffer: () => FunctionalTextBuffer | null,
-  getMode?: () => "normal" | "insert" | "visual" | "command" | "mx" | "replace",
+  getMode?: () => EditorModel["mode"],
   updateVisualSelection?: () => void
 ): Map<string, TLispFunctionImpl> {
+  // CHORE-39 Phase 4: cursor/buffer reads flow through the State monad against
+  // EditorModel (equivalent to the bridge getters, which proxy
+  // model.cursorPosition / model.currentBuffer). Cursor writes stay on the
+  // supplied setters so window-tracking/fold side effects are preserved.
+  const getCursorLine = (): number => runModel(access, readModelField("cursorPosition")).line;
+  const getCursorColumn = (): number => runModel(access, readModelField("cursorPosition")).column;
+  const getCurrentBuffer = (): FunctionalTextBuffer | null =>
+    runModel(access, readModelField("currentBuffer")) ?? null;
   const api = new Map<string, TLispFunctionImpl>();
 
   api.set("cursor-position", (args: TLispValue[]): Either<AppError, TLispValue> => {

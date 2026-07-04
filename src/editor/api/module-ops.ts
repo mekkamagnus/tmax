@@ -8,11 +8,15 @@ import { createBoolean, createList, createString, createNil } from "../../tlisp/
 import { Either } from "../../utils/task-either.ts";
 import type { AppError } from "../../error/types.ts";
 import type { ModuleRegistry } from "../../tlisp/module-registry.ts";
+import { runModel, readModelField, type EditorModelAccess } from "./state-context.ts";
 
 export function createModuleOps(
+  access: EditorModelAccess,
   getRegistry: () => ModuleRegistry,
-  getCurrentModuleName: () => string | undefined,
 ): Map<string, TLispFunctionImpl> {
+  // CHORE-39 Phase 4: current-module-name read flows through the State monad
+  // against EditorModel (currentModuleName now lives on the model).
+  const getCurrentModuleName = (): string | undefined => runModel(access, readModelField("currentModuleName"));
   const api = new Map<string, TLispFunctionImpl>();
 
   // (module-loaded? "editor/motions")

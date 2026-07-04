@@ -6,6 +6,7 @@
 import type { TLispValue, TLispFunctionImpl } from "../../tlisp/types.ts";
 import { createNil, createNumber, createString, createBoolean, createList, createSymbol } from "../../tlisp/values.ts";
 import { Either } from "../../utils/task-either.ts";
+import { runModel, readModelField, type EditorModelAccess } from "./state-context.ts";
 import { validateArgsCount } from "../../utils/validation.ts";
 import { createValidationError, AppError, EvalError } from "../../error/types.ts";
 
@@ -26,9 +27,9 @@ export type TLispFunctionWithEither = (args: TLispValue[]) => Either<AppError, T
  * @returns Map of editor control function names to implementations
  */
 export function createBindingsOps(
+  access: EditorModelAccess,
   getOperations: () => ({ saveFile?: (filename?: string) => Promise<void>; openFile?: (filename: string) => Promise<void> } | undefined),
   setStatusMessage: (message: string) => void,
-  getCommandLine: () => string,
   setCommandLine: (command: string) => void,
   getMode: () => "normal" | "insert" | "visual" | "command" | "mx" | "replace",
   setMode: (mode: "normal" | "insert" | "visual" | "command" | "mx" | "replace") => void,
@@ -37,6 +38,9 @@ export function createBindingsOps(
   evalTlisp?: (expr: string) => any,
   logMessage?: (msg: string, level?: string) => void
 ): Map<string, TLispFunctionImpl> {
+  // CHORE-39 Phase 4: command-line read flows through the State monad against
+  // EditorModel; writes stay on the supplied setters to preserve side effects.
+  const getCommandLine = (): string => runModel(access, readModelField("commandLine"));
   const api = new Map<string, TLispFunctionImpl>();
 
   // Editor control functions

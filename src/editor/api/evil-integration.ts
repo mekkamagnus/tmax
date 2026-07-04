@@ -21,6 +21,7 @@
 import type { TLispValue, TLispFunctionImpl } from "../../tlisp/types.ts";
 import { createString, createNil, createList, createHashmap } from "../../tlisp/values.ts";
 import { Either } from "../../utils/task-either.ts";
+import { stateUtils } from "../../utils/state.ts";
 import {
   createValidationError,
   AppError
@@ -65,7 +66,9 @@ let unnamedRegister: string = "";
  * Useful for testing and cleanup
  */
 export function resetRegisterState(): void {
-  registerStorage = new Array(REGISTER_COUNT).fill("");
+  // CHORE-39 Phase 4: reset register storage via the State monad (stateUtils.reset).
+  const [, next] = stateUtils.reset<string[]>(new Array(REGISTER_COUNT).fill("")).run(registerStorage);
+  registerStorage = next;
   unnamedRegister = "";
 }
 

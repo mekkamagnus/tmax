@@ -21,6 +21,8 @@ import { Either } from "../../utils/task-either.ts";
 import { killRingSave } from "./kill-ring.ts";
 import { registerDelete } from "./evil-integration.ts";
 import { isWordChar, isWhitespace, findWordStart, findWordEndOnLine as findWordEnd, findWordEndWithSpace } from "./text-utils.ts";
+import { State } from "../../utils/state.ts";
+import type { EditorModel } from "../functional/model.ts";
 
 /**
  * Register storage for deleted text
@@ -41,6 +43,25 @@ export function getDeleteRegister(): string {
 export function setDeleteRegister(text: string): void {
   deleteRegister = text;
 }
+
+/**
+ * CHORE-39 Phase 4: `State<EditorModel, void>` wrappers that run the pure
+ * text-object helpers against the model's current buffer + cursor and commit
+ * the resulting buffer immutably. Callers run them via `runModel(access, …)`.
+ * If there is no current buffer or the helper fails, the model is unchanged.
+ */
+const withCurrentBuffer = (
+  fn: (buffer: FunctionalTextBuffer, line: number, column: number) => Either<string, FunctionalTextBuffer>,
+): State<EditorModel, void> =>
+  State.modify((m: EditorModel): EditorModel => {
+    if (!m.currentBuffer) return m;
+    const result = fn(m.currentBuffer, m.cursorPosition.line, m.cursorPosition.column);
+    if (Either.isLeft(result)) return m;
+    return { ...m, currentBuffer: result.right } as EditorModel;
+  });
+
+export const deleteInnerWordState = (count: number = 1): State<EditorModel, void> =>
+  withCurrentBuffer((buf, line, column) => deleteInnerWord(buf, line, column, count));
 
 /**
  * Delete inner word (diw)

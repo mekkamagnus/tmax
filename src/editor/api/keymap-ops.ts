@@ -23,6 +23,15 @@ import type { TLispInterpreter, TLispValue } from "../../tlisp/types.ts";
 import { createString, createList, createNil, isHashmap } from "../../tlisp/values.ts";
 import type { KeymapSync } from "../keymap-sync.ts";
 import { Either } from "../../utils/task-either.ts";
+import { State } from "../../utils/state.ts";
+import type { EditorModel } from "../functional/model.ts";
+
+/**
+ * CHORE-39 Phase 4: `State<EditorModel>` reader — the active editor mode, which
+ * selects the keymap that keymap-ops registers/looks up. Pure model read.
+ */
+export const currentModeState = (): State<EditorModel, EditorModel["mode"]> =>
+  State.gets((m: EditorModel) => m.mode);
 import { log } from "../../utils/logger.ts";
 
 const logger = log.module('keymap-ops');

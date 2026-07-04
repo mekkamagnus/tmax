@@ -4,6 +4,7 @@ import { createDiredOps } from "../../src/editor/api/dired-ops.ts";
 import { FunctionalTextBufferImpl } from "../../src/core/buffer.ts";
 import { createString, createList, createSymbol } from "../../src/tlisp/values.ts";
 import { Either } from "../../src/utils/task-either.ts";
+import { initialModel } from "../../src/editor/functional/model.ts";
 
 describe("Dired Operations", () => {
   let buffer: FunctionalTextBufferImpl;
@@ -17,10 +18,16 @@ describe("Dired Operations", () => {
   });
 
   function getOps() {
+    // CHORE-39 Phase 4: dired-ops reads cursor/buffer via EditorModelAccess.
     return createDiredOps(
-      () => buffer,
+      {
+        getModel: () => ({ ...initialModel(), currentBuffer: buffer, cursorPosition: { line: cursorLine, column: 0 } }),
+        applyModel: (m) => {
+          if (m.currentBuffer) buffer = m.currentBuffer as FunctionalTextBufferImpl;
+          cursorLine = m.cursorPosition.line;
+        },
+      },
       (b) => { buffer = b as FunctionalTextBufferImpl; },
-      () => cursorLine,
       buffers
     );
   }

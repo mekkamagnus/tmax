@@ -19,6 +19,7 @@
 import type { TLispValue, TLispFunctionImpl } from "../../tlisp/types.ts";
 import { createNil, createNumber, createString, createBoolean, createList, createHashmap } from "../../tlisp/values.ts";
 import type { FunctionalTextBuffer } from "../../core/types.ts";
+import { runModel, readModelField, type EditorModelAccess } from "./state-context.ts";
 import { Either } from "../../utils/task-either.ts";
 import { createValidationError, AppError } from "../../error/types.ts";
 import { existsSync, readFileSync, realpathSync, statSync, readdirSync } from "node:fs";
@@ -313,6 +314,8 @@ export function dispatchUrl(rawUrl: string, deps: DispatchDeps): DispatchOutcome
  * Dependencies the browse-url primitives need from the editor.
  */
 export interface BrowseUrlPrimitiveDeps {
+  /** CHORE-39 Phase 4: when provided, buffer/path reads use the State monad against EditorModel. */
+  access?: EditorModelAccess;
   getCurrentBuffer: () => FunctionalTextBuffer | null;
   getCurrentBufferName: () => string;
   getCurrentBufferPath: () => string | undefined;
@@ -449,6 +452,12 @@ function getBufferLineText(buf: FunctionalTextBuffer | null, line: number): stri
  * scanning, regex span extraction, and filesystem/git context helpers.
  */
 export function createBrowseUrlOps(deps: BrowseUrlPrimitiveDeps): Map<string, TLispFunctionImpl> {
+  // CHORE-39 Phase 4: prefer State-monad buffer/path reads when access is
+  // supplied (real editor runtime); fall back to the legacy getters otherwise.
+  const getCurrentBuffer = (): FunctionalTextBuffer | null =>
+    deps.access ? (runModel(deps.access, readModelField("currentBuffer")) ?? null) : deps.getCurrentBuffer();
+  const getCurrentBufferPath = (): string | undefined =>
+    deps.access ? runModel(deps.access, readModelField("currentFilename")) : deps.getCurrentBufferPath();
   const api = new Map<string, TLispFunctionImpl>();
 
   // (buffer-get-char-at-position line column) → char-string | nil
@@ -461,7 +470,7 @@ export function createBrowseUrlOps(deps: BrowseUrlPrimitiveDeps): Map<string, TL
     }
     const line = Math.floor(Number(args[0]!.value));
     const column = Math.floor(Number(args[1]!.value));
-    const text = getBufferLineText(deps.getCurrentBuffer(), line);
+    const text = getBufferLineText(getCurrentBuffer(), line);
     if (text === null) return Either.right(createNil());
     // column === text.length is out of bounds per spec (do not synthesize newline).
     if (column < 0 || column >= text.length) return Either.right(createNil());
@@ -486,7 +495,7 @@ export function createBrowseUrlOps(deps: BrowseUrlPrimitiveDeps): Map<string, TL
     if (maxChars <= 0) {
       return Either.left(createValidationError("ConstraintViolation", "buffer-scan-backward-from max-chars must be positive"));
     }
-    const text = getBufferLineText(deps.getCurrentBuffer(), line);
+    const text = getBufferLineText(getCurrentBuffer(), line);
     if (text === null) {
       return Either.right(createHashmap([["line", createNumber(line)], ["column", createNumber(column)], ["truncated", createBoolean(false)]]));
     }
@@ -537,7 +546,7 @@ export function createBrowseUrlOps(deps: BrowseUrlPrimitiveDeps): Map<string, TL
     if (maxChars <= 0) {
       return Either.left(createValidationError("ConstraintViolation", "buffer-scan-forward-from max-chars must be positive"));
     }
-    const text = getBufferLineText(deps.getCurrentBuffer(), line);
+    const text = getBufferLineText(getCurrentBuffer(), line);
     if (text === null) {
       return Either.right(createHashmap([["line", createNumber(line)], ["column", createNumber(column)], ["truncated", createBoolean(false)]]));
     }
@@ -750,7 +759,7 @@ export function createBrowseUrlOps(deps: BrowseUrlPrimitiveDeps): Map<string, TL
   //   |  (hashmap "ok" nil "error" "github-remote-not-found" "details" ...)
   api.set("browse-git-github-remote", (_args: TLispValue[]): Either<AppError, TLispValue> => {
     const bufferName = deps.getCurrentBufferName();
-    const bufferPath = deps.getCurrentBufferPath();
+    const bufferPath = getCurrentBufferPath();
     const startDir = bufferPath ?? (deps.cwd ?? (() => process.cwd()))();
     // Walk up to find a .git file or directory.
     let dir = isAbsolute(startDir) ? pathResolve(startDir) : pathResolve((deps.cwd ?? (() => process.cwd()))(), startDir);

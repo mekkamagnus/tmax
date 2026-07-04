@@ -15,6 +15,7 @@
 import type { TLispValue, TLispFunctionImpl } from "../../tlisp/types.ts";
 import { createList, createNumber, createNil } from "../../tlisp/values.ts";
 import type { FunctionalTextBuffer } from "../../core/types.ts";
+import { runModel, readModelField, type EditorModelAccess } from "./state-context.ts";
 import { Either } from "../../utils/task-either.ts";
 import {
   validateArgsCount,
@@ -54,18 +55,22 @@ function getTerminalHeight(): number {
  * @returns Map of jump command function names to implementations
  */
 export function createJumpOps(
-  getCurrentBuffer: () => FunctionalTextBuffer | null,
-  getCursorLine: () => number,
+  access: EditorModelAccess,
   setCursorLine: (line: number) => void,
-  getCursorColumn: () => number,
   setCursorColumn: (column: number) => void,
-  getViewportTop?: () => number,
   setViewportTop?: (top: number) => void,
   getTerminalHeightFn?: () => number,
-  getViewportLeft?: () => number,
   setViewportLeft?: (left: number) => void,
   getTerminalWidthFn?: () => number,
 ): Map<string, TLispFunctionImpl> {
+  // CHORE-39 Phase 4: cursor/buffer/viewport reads flow through the State monad
+  // against EditorModel; writes + terminal-size accessors stay on callbacks.
+  const getCursorLine = (): number => runModel(access, readModelField("cursorPosition")).line;
+  const getCursorColumn = (): number => runModel(access, readModelField("cursorPosition")).column;
+  const getCurrentBuffer = (): FunctionalTextBuffer | null =>
+    runModel(access, readModelField("currentBuffer")) ?? null;
+  const getViewportTop = (): number => runModel(access, readModelField("viewportTop"));
+  const getViewportLeft = (): number => runModel(access, readModelField("viewportLeft")) ?? 0;
   const api = new Map<string, TLispFunctionImpl>();
   const terminalHeight = (): number => getTerminalHeightFn?.() ?? getTerminalHeight();
 

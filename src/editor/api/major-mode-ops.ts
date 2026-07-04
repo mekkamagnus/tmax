@@ -18,6 +18,7 @@
 import type { TLispValue, TLispFunctionImpl } from "../../tlisp/types.ts";
 import { createNil, createString, createList } from "../../tlisp/values.ts";
 import type { FunctionalTextBuffer } from "../../core/types.ts";
+import { runModel, readModelField, type EditorModelAccess } from "./state-context.ts";
 import { Either } from "../../utils/task-either.ts";
 import {
   validateArgsCount,
@@ -57,13 +58,17 @@ export function getAutoModeRules(): AutoModeRule[] {
  * Create major mode operations API functions
  */
 export function createMajorModeOps(
-  getCurrentBuffer: () => FunctionalTextBuffer | null,
-  getCurrentFilename: () => string | undefined,
-  getBufferModified: () => boolean,
+  access: EditorModelAccess,
   evalTlisp: (expr: string) => Either<any, any>,
   getCurrentMajorMode?: () => string,
   setCurrentMajorMode?: (mode: string) => void,
 ): Map<string, TLispFunctionImpl> {
+  // CHORE-39 Phase 4: buffer/filename/modified reads flow through the State
+  // monad against EditorModel; mode read/write + eval stay on callbacks.
+  const getCurrentBuffer = (): FunctionalTextBuffer | null =>
+    runModel(access, readModelField("currentBuffer")) ?? null;
+  const getCurrentFilename = (): string | undefined => runModel(access, readModelField("currentFilename"));
+  const getBufferModified = (): boolean => runModel(access, readModelField("bufferModified")) ?? false;
   const api = new Map<string, TLispFunctionImpl>();
   const readCurrentMode = (): string =>
     getCurrentMajorMode ? getCurrentMajorMode() : fallbackCurrentMode;

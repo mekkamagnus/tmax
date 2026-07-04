@@ -5,6 +5,7 @@
  */
 
 import { Either } from "../../utils/task-either.ts";
+import { stateUtils } from "../../utils/state.ts";
 import type { TLispValue } from "../../tlisp/types.ts";
 
 /**
@@ -33,13 +34,16 @@ let macroState: MacroRecordingState = {
  * Reset macro recording state (for testing)
  */
 export function resetMacroRecordingState(): void {
-  macroState = {
+  // CHORE-39 Phase 4: reset via the State monad (stateUtils.reset).
+  const initial: MacroRecordingState = {
     isRecording: false,
     currentRegister: null,
     recordedKeys: [],
     macros: new Map(),
     lastExecutedMacro: null,
   };
+  const [, next] = stateUtils.reset<MacroRecordingState>(initial).run(macroState);
+  macroState = next;
 }
 
 /**

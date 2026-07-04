@@ -9,6 +9,19 @@
 /**
  * Plugin metadata from repository
  */
+import { State } from "../../utils/state.ts";
+import type { EditorModel } from "../functional/model.ts";
+
+/**
+ * CHORE-39 Phase 4: `State<EditorModel>` reader — the editor load-paths, which
+ * scope plugin repository discovery/installation. Pure model read.
+ */
+export const loadPathsState = (): State<EditorModel, string[]> =>
+  State.gets((m: EditorModel) => m.loadPaths);
+
+/**
+ * Plugin metadata from repository
+ */
 export interface PluginMetadata {
   /** Unique plugin identifier */
   name: string;

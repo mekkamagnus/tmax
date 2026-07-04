@@ -3,21 +3,29 @@ import { createIndentOps } from "../../src/editor/api/indent-ops.ts";
 import { FunctionalTextBufferImpl } from "../../src/core/buffer.ts";
 import { createString, createNumber, createList, createNil } from "../../src/tlisp/values.ts";
 import { Either } from "../../src/utils/task-either.ts";
+import { initialModel } from "../../src/editor/functional/model.ts";
 
 describe("Auto Indent", () => {
   let buffer: FunctionalTextBufferImpl;
   let cursorLine: number;
 
   beforeEach(() => {
-    buffer = FunctionalTextBufferImpl.create("function foo() {\n  return 1;\n}\n\nconst x = 2;");
+    buffer = FunctionalTextBufferImpl.create("function foo() {\n  return 1;\n}\n\nconst x = 2.");
     cursorLine = 0;
   });
 
   function getOps() {
+    // CHORE-39 Phase 4: indent-ops reads cursor/buffer via EditorModelAccess.
+    // getModel re-derives from the test's mutable vars; applyModel writes back.
     return createIndentOps(
-      () => buffer,
+      {
+        getModel: () => ({ ...initialModel(), currentBuffer: buffer, cursorPosition: { line: cursorLine, column: 0 } }),
+        applyModel: (m) => {
+          if (m.currentBuffer) buffer = m.currentBuffer as FunctionalTextBufferImpl;
+          cursorLine = m.cursorPosition.line;
+        },
+      },
       (b) => { buffer = b as FunctionalTextBufferImpl; },
-      () => cursorLine,
       (l) => { cursorLine = l; },
       () => 4 // tabSize
     );

@@ -13,6 +13,7 @@
 import type { TLispValue, TLispFunctionImpl } from "../../tlisp/types.ts";
 import { createNumber, createString, createNil, createList } from "../../tlisp/values.ts";
 import type { FunctionalTextBuffer, Position } from "../../core/types.ts";
+import { runModel, readModelField, type EditorModelAccess } from "./state-context.ts";
 import { Either } from "../../utils/task-either.ts";
 import {
   validateArgsCount,
@@ -81,16 +82,22 @@ export function clearVisualSelection(): void {
  * @returns Map of visual mode function names to implementations
  */
 export function createVisualOps(
-  getBuffer: () => FunctionalTextBuffer | null,
+  access: EditorModelAccess,
   setBuffer: (buffer: FunctionalTextBuffer | null) => void,
-  getCursorLine: () => number,
-  getCursorColumn: () => number,
   setCursorLine: (line: number) => void,
   setCursorColumn: (column: number) => void,
-  getMode: () => "normal" | "insert" | "visual" | "command" | "mx" | "replace",
   setMode: (mode: "normal" | "insert" | "visual" | "command" | "mx" | "replace") => void,
   setStatusMessage: (message: string) => void
 ): Map<string, TLispFunctionImpl> {
+  // CHORE-39 Phase 4: buffer/cursor/mode reads flow through the State monad
+  // against EditorModel; writes stay on the supplied setters to preserve side
+  // effects.
+  const getCursorLine = (): number => runModel(access, readModelField("cursorPosition")).line;
+  const getCursorColumn = (): number => runModel(access, readModelField("cursorPosition")).column;
+  const getBuffer = (): FunctionalTextBuffer | null =>
+    runModel(access, readModelField("currentBuffer")) ?? null;
+  const getMode = (): "normal" | "insert" | "visual" | "command" | "mx" | "replace" =>
+    runModel(access, readModelField("mode"));
   const api = new Map<string, TLispFunctionImpl>();
 
   /**

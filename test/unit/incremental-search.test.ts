@@ -12,6 +12,7 @@ import { createSearchOps } from "../../src/editor/api/search-ops.ts";
 import { FunctionalTextBufferImpl } from "../../src/core/buffer.ts";
 import { Either } from "../../src/utils/task-either.ts";
 import { createString, createNil } from "../../src/tlisp/values.ts";
+import { initialModel } from "../../src/editor/functional/model.ts";
 
 describe("Incremental Search", () => {
   let buffer: FunctionalTextBufferImpl;
@@ -33,10 +34,15 @@ describe("Incremental Search", () => {
     searchMatches = [];
 
     ops = createSearchOps(
-      () => buffer,
-      () => cursorLine,
+      {
+        getModel: () => ({ ...initialModel(), currentBuffer: buffer, cursorPosition: { line: cursorLine, column: cursorColumn } }),
+        applyModel: (m) => {
+          if (m.currentBuffer) buffer = m.currentBuffer as FunctionalTextBufferImpl;
+          cursorLine = m.cursorPosition.line;
+          cursorColumn = m.cursorPosition.column;
+        },
+      },
       (l: number) => { cursorLine = l; },
-      () => cursorColumn,
       (c: number) => { cursorColumn = c; },
       (m: string) => { statusMessage = m; },
       (ranges: unknown[]) => { searchMatches = ranges; }
@@ -106,10 +112,11 @@ describe("Incremental Search", () => {
 
     test("returns error when no buffer is available", () => {
       const noBufOps = createSearchOps(
-        () => null,
-        () => cursorLine,
+        {
+          getModel: () => ({ ...initialModel(), currentBuffer: undefined, cursorPosition: { line: cursorLine, column: cursorColumn } }),
+          applyModel: () => { /* no-op for read-only no-buffer case */ },
+        },
         (l: number) => { cursorLine = l; },
-        () => cursorColumn,
         (c: number) => { cursorColumn = c; },
         (m: string) => { statusMessage = m; },
         (ranges: unknown[]) => { searchMatches = ranges; }

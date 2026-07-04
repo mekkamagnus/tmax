@@ -113,7 +113,6 @@ export class Editor {
   private stateChangeListeners: Array<() => void> = [];
   private terminal: TerminalIO;
   private filesystem: FileSystem;
-  private countPrefix: number = 0;  // Accumulated count for count prefix commands
   private messages: string[] = [];
   // Unified observability store (SPEC-055). One ring of LogEntry across every
   // category; the five virtual buffers (*Messages*, *daemon*, *Shell Output*,
@@ -132,8 +131,8 @@ export class Editor {
   private minorModeRegistry: Map<string, MinorModeConfig> = new Map();
   private globalizedMinorModes: Set<string> = new Set();
   private autoModeRules: AutoModeRule[] = [];
-  private loadPaths: string[] = [`${import.meta.dir}/../tlisp/core`];
-  private currentModuleName: string | undefined;
+  // loadPaths now lives on this.model (CHORE-39 Phase 4).
+  // currentModuleName now lives on this.model (CHORE-39 Phase 4).
   private bufferMetadata: Map<string, { filename?: string; modified: boolean; recency: number }> = new Map();
   private bufferRecency: number = 0;
   private whichKeyHandle: import("./utils/which-key-state.ts").WhichKeyHandle;
@@ -194,6 +193,9 @@ export class Editor {
       currentTabIndex: 0,
       minibufferState: undefined,
       minibufferView: undefined,
+      countPrefix: 0,
+      loadPaths: [`${import.meta.dir}/../tlisp/core`],
+      currentModuleName: undefined,
     };
 
     this.whichKeyHandle = createWhichKeyState(this.model.whichKeyTimeout ?? DEFAULT_WHICH_KEY_TIMEOUT);
@@ -1578,11 +1580,9 @@ export class Editor {
 
     // Add window management operations (US-3.2.1)
     const windowOps = createWindowOps(
-      () => this.model.windows || [],
+      { getModel: () => this.model, applyModel: (m) => { this.applyModel(m); } },
       (windows) => { this.model.windows = windows; },
-      () => this.model.currentWindowIndex ?? 0,
       (index) => { this.model.currentWindowIndex = index; },
-      () => this.model.currentBuffer,
       () => this.terminal.getSize()
     );
 
@@ -1592,9 +1592,8 @@ export class Editor {
 
     // Add tab management operations (SPEC-004)
     const tabOps = createTabOps(
-      () => this.model.tabs || [],
+      { getModel: () => this.model, applyModel: (m) => { this.applyModel(m); } },
       (tabs) => { this.model.tabs = tabs; },
-      () => this.model.currentTabIndex ?? 0,
       (index) => { this.model.currentTabIndex = index; },
       (name, content) => {
         this.createBuffer(name, content);
@@ -2824,14 +2823,14 @@ export class Editor {
    * Get load paths
    */
   getLoadPaths(): string[] {
-    return this.loadPaths;
+    return this.model.loadPaths;
   }
 
   /**
    * Get current module name (for module introspection)
    */
   getCurrentModuleName(): string | undefined {
-    return this.currentModuleName;
+    return this.model.currentModuleName;
   }
 
   /**
@@ -2877,6 +2876,15 @@ export class Editor {
   /** Canonical typed read access to the editor model. */
   getModel(): EditorModel {
     return this.model;
+  }
+
+  /**
+   * Commit a fresh model produced by a State-monad computation (CHORE-39
+   * Phase 4). Used by API primitives that run `State<EditorModel, A>` against
+   * the live model via `runModel`.
+   */
+  applyModel(model: EditorModel): void {
+    this.model = model;
   }
 
   /** Typed access to the terminal (used by handlers). */
@@ -3338,7 +3346,7 @@ export class Editor {
    * @returns Current count (0 if no count active)
    */
   getCount(): number {
-    return this.countPrefix;
+    return this.model.countPrefix;
   }
 
   /**
@@ -3346,14 +3354,14 @@ export class Editor {
    * @param count - Count value to set
    */
   setCount(count: number): void {
-    this.countPrefix = Math.max(0, count);
+    this.model.countPrefix = Math.max(0, count);
   }
 
   /**
    * Reset count prefix to 0
    */
   resetCount(): void {
-    this.countPrefix = 0;
+    this.model.countPrefix = 0;
   }
 
   /**
@@ -3361,7 +3369,7 @@ export class Editor {
    * @returns true if count is active
    */
   isCountActive(): boolean {
-    return this.countPrefix > 0;
+    return this.model.countPrefix > 0;
   }
 
   /**
@@ -3369,8 +3377,8 @@ export class Editor {
    * @returns Current count (defaults to 1 if no count set)
    */
   consumeCount(): number {
-    const count = this.countPrefix > 0 ? this.countPrefix : 1;
-    this.countPrefix = 0;
+    const count = this.model.countPrefix > 0 ? this.model.countPrefix : 1;
+    this.model.countPrefix = 0;
     return count;
   }
 

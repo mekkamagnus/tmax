@@ -14,12 +14,16 @@ import { validateArgsCount, validateArgType } from "../../utils/validation.ts";
 import { createValidationError, AppError } from "../../error/types.ts";
 import { existsSync, readFileSync } from "fs";
 import { isAbsolute, join } from "path";
+import { runModel, readModelField, type EditorModelAccess } from "./state-context.ts";
 
 export function createRawLoadOps(
-  getLoadPaths: () => string[],
+  access: EditorModelAccess,
   evalTlisp: (expr: string) => Either<any, any>,
   _loadFile: (path: string) => Promise<boolean>,
 ): Map<string, TLispFunctionImpl> {
+  // CHORE-39 Phase 4: load-paths read flows through the State monad against
+  // EditorModel (loadPaths now lives on the model).
+  const getLoadPaths = (): string[] => runModel(access, readModelField("loadPaths"));
   const api = new Map<string, TLispFunctionImpl>();
 
   const resolveCandidate = (file: string): string | undefined => {

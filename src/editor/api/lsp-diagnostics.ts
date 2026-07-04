@@ -1,229 +1,151 @@
 /**
  * @file lsp-diagnostics.ts
  * @description LSP diagnostics API functions for tmax editor
- * Provides T-Lisp API for listing and managing language server diagnostics
+ * Provides T-Lisp API for listing and managing language server diagnostics.
+ *
+ * CHORE-39 Phase 4: diagnostics live on EditorModel (lspDiagnostics,
+ * cursorPosition). This factory reads/writes them through the State monad
+ * (runModel + readModelField/setModelField) instead of closing over a mutable
+ * state callback.
  */
 
 import type { LSPDiagnostic } from "../../core/types.ts";
 import type { TLispValue, TLispFunctionImpl } from "../../tlisp/types.ts";
-import { createNil, createNumber, createString, createBoolean, createList } from "../../tlisp/values.ts";
+import { createNumber, createString, createBoolean, createList } from "../../tlisp/values.ts";
 import { Either } from "../../utils/task-either.ts";
+import { runModel, readModelField, setModelField, type EditorModelAccess } from "./state-context.ts";
 
 /**
- * Create LSP diagnostics API operations for T-Lisp
- * @param getCurrentBuffer - Callback to get current editor state
- * @returns Map of function names to implementations
+ * Create LSP diagnostics API operations for T-Lisp.
+ * Reads/writes diagnostics through EditorModel via the State monad.
  */
 export function createLSPDiagnosticsOps(
-  getCurrentBuffer: () => {
-    state: {
-      lspDiagnostics?: LSPDiagnostic[];
-      cursorPosition: { line: number };
-    }
-  }
+  access: EditorModelAccess
 ): Map<string, TLispFunctionImpl> {
   const ops = new Map<string, TLispFunctionImpl>();
 
+  const getDiagnostics = (): LSPDiagnostic[] =>
+    runModel(access, readModelField("lspDiagnostics")) ?? [];
+  const getCurrentLine = (): number =>
+    runModel(access, readModelField("cursorPosition")).line;
+  const clearDiagnostics = (): void => {
+    runModel(access, setModelField("lspDiagnostics", []));
+  };
+
   // (lsp-diagnostics-list) - List all diagnostics
-  ops.set("lsp-diagnostics-list", () => Either.right(lspDiagnosticsList(getCurrentBuffer)));
+  ops.set("lsp-diagnostics-list", () => Either.right(lspDiagnosticsList(getDiagnostics())));
 
   // (lsp-diagnostics-for-line <line>) - Get diagnostics for specific line
   ops.set("lsp-diagnostics-for-line", (args) => {
     const lineArg = args[0];
     const line = lineArg?.type === "number" ? lineArg.value as number : 0;
-    return Either.right(lspDiagnosticsForLine(line, getCurrentBuffer));
+    return Either.right(lspDiagnosticsForLine(line, getDiagnostics()));
   });
 
   // (lsp-diagnostics-current-line) - Get diagnostics for current cursor line
-  ops.set("lsp-diagnostics-current-line", () => Either.right(lspDiagnosticsCurrentLine(getCurrentBuffer)));
+  ops.set("lsp-diagnostics-current-line", () =>
+    Either.right(lspDiagnosticsForLine(getCurrentLine(), getDiagnostics())));
 
   // (lsp-diagnostics-count) - Get diagnostic count by severity
-  ops.set("lsp-diagnostics-count", () => Either.right(lspDiagnosticsCount(getCurrentBuffer)));
+  ops.set("lsp-diagnostics-count", () => Either.right(lspDiagnosticsCount(getDiagnostics())));
 
   // (lsp-diagnostics-clear) - Clear all diagnostics
-  ops.set("lsp-diagnostics-clear", () => Either.right(lspDiagnosticsClear(getCurrentBuffer)));
+  ops.set("lsp-diagnostics-clear", () => {
+    clearDiagnostics();
+    return Either.right(createBoolean(true));
+  });
 
   // (lsp-diagnostics-has-errors) - Check if there are any errors
-  ops.set("lsp-diagnostics-has-errors", () => Either.right(lspDiagnosticsHasErrors(getCurrentBuffer)));
+  ops.set("lsp-diagnostics-has-errors", () =>
+    Either.right(createBoolean(lspDiagnosticsHasErrors(getDiagnostics()))));
 
   return ops;
 }
 
 /**
- * Get all diagnostics from LSP client
- * @param getCurrentBuffer - Callback to get current buffer
- * @returns List of diagnostics or empty list
+ * Get all diagnostics as a T-Lisp list of alists.
+ * Pure helper — operates on a diagnostics array snapshot.
  */
-export function lspDiagnosticsList(
-  getCurrentBuffer: () => { state: { lspDiagnostics?: LSPDiagnostic[] } }
-): TLispValue {
-  try {
-    const editor = getCurrentBuffer();
-    const diagnostics = editor.state.lspDiagnostics || [];
+export function lspDiagnosticsList(diagnostics: LSPDiagnostic[]): TLispValue {
+  if (diagnostics.length === 0) {
+    return createList([]);
+  }
 
-    if (diagnostics.length === 0) {
-      return createList([]);
-    }
-
-    // Convert diagnostics to T-Lisp list of alists
-    const diagnosticLists = diagnostics.map(diag => {
-      return createList([
-        createList([createString("range"), createList([
-          createList([createString("start"), createList([
-            createNumber(diag.range.start.line),
-            createNumber(diag.range.start.column)
-          ])]),
-          createList([createString("end"), createList([
-            createNumber(diag.range.end.line),
-            createNumber(diag.range.end.column)
-          ])]),
+  const diagnosticLists = diagnostics.map(diag => {
+    const entries: TLispValue[] = [
+      createList([createString("range"), createList([
+        createList([createString("start"), createList([
+          createNumber(diag.range.start.line),
+          createNumber(diag.range.start.column)
         ])]),
-        createList([createString("severity"), createNumber(diag.severity)]),
-        createList([createString("message"), createString(diag.message)]),
-        diag.source ? createList([createString("source"), createString(diag.source)]) : createNil(),
-        diag.code !== undefined ? createList([createString("code"), createString(String(diag.code))]) : createNil(),
-      ].filter(v => {
-        // Filter out null values (filter creates proper T-Lisp null check)
-        const nullVal = createNil();
-        return JSON.stringify(v) !== JSON.stringify(nullVal);
-      }));
-    });
+        createList([createString("end"), createList([
+          createNumber(diag.range.end.line),
+          createNumber(diag.range.end.column)
+        ])]),
+      ])]),
+      createList([createString("severity"), createNumber(diag.severity)]),
+      createList([createString("message"), createString(diag.message)]),
+    ];
+    if (diag.source) entries.push(createList([createString("source"), createString(diag.source)]));
+    if (diag.code !== undefined) entries.push(createList([createString("code"), createString(String(diag.code))]));
+    return createList(entries);
+  });
 
-    return createList(diagnosticLists);
-  } catch (error) {
-    return createList([]);
-  }
+  return createList(diagnosticLists);
 }
 
 /**
- * Get diagnostics for a specific line
+ * Get diagnostics for a specific line. Pure helper.
  * @param line - Line number (0-based)
- * @param getCurrentBuffer - Callback to get current buffer
- * @returns List of diagnostics on that line
  */
-export function lspDiagnosticsForLine(
-  line: number,
-  getCurrentBuffer: () => { state: { lspDiagnostics?: LSPDiagnostic[]; cursorPosition: { line: number } } }
-): TLispValue {
-  try {
-    const editor = getCurrentBuffer();
-    const diagnostics = editor.state.lspDiagnostics || [];
+export function lspDiagnosticsForLine(line: number, diagnostics: LSPDiagnostic[]): TLispValue {
+  const lineDiagnostics = diagnostics.filter(
+    d => d.range.start.line <= line && d.range.end.line >= line
+  );
 
-    // Filter diagnostics that affect this line
-    const lineDiagnostics = diagnostics.filter(
-      d => d.range.start.line <= line && d.range.end.line >= line
-    );
-
-    if (lineDiagnostics.length === 0) {
-      return createList([]);
-    }
-
-    // Convert to T-Lisp list format
-    const diagnosticLists = lineDiagnostics.map(diag => {
-      return createList([
-        createList([createString("severity"), createNumber(diag.severity)]),
-        createList([createString("message"), createString(diag.message)]),
-        diag.source ? createList([createString("source"), createString(diag.source)]) : createNil(),
-      ].filter(v => {
-        const nilVal = createNil();
-        return JSON.stringify(v) !== JSON.stringify(nilVal);
-      }));
-    });
-
-    return createList(diagnosticLists);
-  } catch (error) {
+  if (lineDiagnostics.length === 0) {
     return createList([]);
   }
+
+  const diagnosticLists = lineDiagnostics.map(diag => {
+    const entries: TLispValue[] = [
+      createList([createString("severity"), createNumber(diag.severity)]),
+      createList([createString("message"), createString(diag.message)]),
+    ];
+    if (diag.source) entries.push(createList([createString("source"), createString(diag.source)]));
+    return createList(entries);
+  });
+
+  return createList(diagnosticLists);
 }
 
 /**
- * Get diagnostics for current cursor line
- * @param getCurrentBuffer - Callback to get current buffer
- * @returns List of diagnostics on current line
- */
-export function lspDiagnosticsCurrentLine(
-  getCurrentBuffer: () => { state: { lspDiagnostics?: LSPDiagnostic[]; cursorPosition: { line: number } } }
-): TLispValue {
-  try {
-    const editor = getCurrentBuffer();
-    const currentLine = editor.state.cursorPosition.line;
-    return lspDiagnosticsForLine(currentLine, getCurrentBuffer);
-  } catch (error) {
-    return createList([]);
-  }
-}
-
-/**
- * Get diagnostic count by severity
- * @param getCurrentBuffer - Callback to get current buffer
+ * Get diagnostic count by severity. Pure helper.
  * @returns Alist with counts for each severity level
  */
-export function lspDiagnosticsCount(
-  getCurrentBuffer: () => { state: { lspDiagnostics?: LSPDiagnostic[] } }
-): TLispValue {
-  try {
-    const editor = getCurrentBuffer();
-    const diagnostics = editor.state.lspDiagnostics || [];
-
-    let errors = 0, warnings = 0, info = 0, hints = 0;
-    for (const d of diagnostics) {
-      if (d.severity === 1) errors++;
-      else if (d.severity === 2) warnings++;
-      else if (d.severity === 3) info++;
-      else if (d.severity === 4) hints++;
-    }
-
-    return createList([
-      createList([createString("errors"), createNumber(errors)]),
-      createList([createString("warnings"), createNumber(warnings)]),
-      createList([createString("info"), createNumber(info)]),
-      createList([createString("hints"), createNumber(hints)]),
-      createList([createString("total"), createNumber(diagnostics.length)]),
-    ]);
-  } catch (error) {
-    return createList([
-      createList([createString("errors"), createNumber(0)]),
-      createList([createString("warnings"), createNumber(0)]),
-      createList([createString("info"), createNumber(0)]),
-      createList([createString("hints"), createNumber(0)]),
-      createList([createString("total"), createNumber(0)]),
-    ]);
+export function lspDiagnosticsCount(diagnostics: LSPDiagnostic[]): TLispValue {
+  let errors = 0, warnings = 0, info = 0, hints = 0;
+  for (const d of diagnostics) {
+    if (d.severity === 1) errors++;
+    else if (d.severity === 2) warnings++;
+    else if (d.severity === 3) info++;
+    else if (d.severity === 4) hints++;
   }
+
+  return createList([
+    createList([createString("errors"), createNumber(errors)]),
+    createList([createString("warnings"), createNumber(warnings)]),
+    createList([createString("info"), createNumber(info)]),
+    createList([createString("hints"), createNumber(hints)]),
+    createList([createString("total"), createNumber(diagnostics.length)]),
+  ]);
 }
 
 /**
- * Clear all diagnostics
- * @param getCurrentBuffer - Callback to get current buffer
- * @returns true on success
+ * Check if there are any error-severity diagnostics. Pure helper.
  */
-export function lspDiagnosticsClear(
-  getCurrentBuffer: () => { state: { lspDiagnostics?: LSPDiagnostic[] } }
-): TLispValue {
-  try {
-    const editor = getCurrentBuffer();
-    editor.state.lspDiagnostics = [];
-    return createBoolean(true);
-  } catch (error) {
-    return createBoolean(false);
-  }
-}
-
-/**
- * Check if there are any diagnostics
- * @param getCurrentBuffer - Callback to get current buffer
- * @returns true if there are diagnostics
- */
-export function lspDiagnosticsHasErrors(
-  getCurrentBuffer: () => { state: { lspDiagnostics?: LSPDiagnostic[] } }
-): TLispValue {
-  try {
-    const editor = getCurrentBuffer();
-    const diagnostics = editor.state.lspDiagnostics || [];
-    const hasErrors = diagnostics.some(d => d.severity === 1);
-    return createBoolean(hasErrors);
-  } catch (error) {
-    return createBoolean(false);
-  }
+export function lspDiagnosticsHasErrors(diagnostics: LSPDiagnostic[]): boolean {
+  return diagnostics.some(d => d.severity === 1);
 }
 
 /**

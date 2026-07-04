@@ -10,7 +10,7 @@
  * helpers the factories use to read and update the editor model immutably.
  *
  * The editor runtime (Editor.applyUpdate) is the single committer of model
- * changes; `runEditorState` runs a computation against a model snapshot and
+ * changes; `runModel` runs a computation against a model snapshot and
  * commits the resulting model back through the access handle.
  */
 
@@ -43,7 +43,7 @@ export const setModelField = stateUtils.updateProperty;
  * Run a `State<EditorModel, A>` against the current model and commit the
  * resulting model. Returns the computation's value.
  */
-export function runEditorState<A>(access: EditorModelAccess, computation: State<EditorModel, A>): A {
+export function runModel<A>(access: EditorModelAccess, computation: State<EditorModel, A>): A {
   const [value, nextModel] = computation.run(access.getModel());
   access.applyModel(nextModel);
   return value;

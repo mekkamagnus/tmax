@@ -1,16 +1,20 @@
 import type { TLispValue, TLispFunctionImpl } from "../../tlisp/types.ts";
 import { createNil, createNumber, createString, createList } from "../../tlisp/values.ts";
 import type { Tab } from "../../core/types.ts";
+import { runModel, readModelField, type EditorModelAccess } from "./state-context.ts";
 import { Either } from "../../utils/task-either.ts";
 
 export function createTabOps(
-  getTabs: () => Tab[],
+  access: EditorModelAccess,
   setTabs: (tabs: Tab[]) => void,
-  getCurrentTabIndex: () => number,
   setCurrentTabIndex: (index: number) => void,
   createBuffer: (name: string, content: string) => unknown,
   switchToBuffer: (tab: Tab) => void,
 ): Map<string, TLispFunctionImpl> {
+  // CHORE-39 Phase 4: tab/index reads flow through the State monad against
+  // EditorModel; writes + buffer creation/switching stay on callbacks.
+  const getTabs = (): Tab[] => runModel(access, readModelField("tabs")) ?? [];
+  const getCurrentTabIndex = (): number => runModel(access, readModelField("currentTabIndex")) ?? 0;
   const ops = new Map<string, TLispFunctionImpl>();
 
   ops.set("tab-new", (args: TLispValue[]) => {

@@ -14,6 +14,7 @@ import type { TLispValue, TLispFunctionImpl } from "../../tlisp/types.ts";
 import { createNumber, createString, createNil } from "../../tlisp/values.ts";
 import type { FunctionalTextBuffer } from "../../core/types.ts";
 import { Either } from "../../utils/task-either.ts";
+import { stateUtils } from "../../utils/state.ts";
 import {
   createBufferError,
   createValidationError,
@@ -25,7 +26,7 @@ import {
  */
 interface HistoryItem {
   description: string;          // Description of the edit (e.g., "delete", "insert")
-  buffer: FunctionalTextBuffer;  // Buffer state after the edit
+  buffer: FunctionalTextBuffer;  // Buffer undoState after the edit
   cursorLine?: number;           // Cursor line position after the edit
   cursorColumn?: number;         // Cursor column position after the edit
   preCursorLine?: number;        // Cursor line immediately before the edit
@@ -33,20 +34,20 @@ interface HistoryItem {
 }
 
 /**
- * Undo/redo state management
+ * Undo/redo undoState management
  */
 interface UndoRedoState {
   history: HistoryItem[];        // All edits in history
-  currentIndex: number;          // Current position in history (-1 = at initial state)
+  currentIndex: number;          // Current position in history (-1 = at initial undoState)
 }
 
-// Global undo/redo state
-let state: UndoRedoState = {
+// Global undo/redo undoState
+let undoState: UndoRedoState = {
   history: [],
   currentIndex: -1
 };
 
-// Initial buffer state (before any edits)
+// Initial buffer undoState (before any edits)
 let initialBuffer: FunctionalTextBuffer | null = null;
 let initialCursorLine: number | undefined = undefined;
 let initialCursorColumn: number | undefined = undefined;
@@ -55,13 +56,16 @@ let pendingCursorLine: number | undefined = undefined;
 let pendingCursorColumn: number | undefined = undefined;
 
 /**
- * Reset undo/redo state (for testing)
+ * Reset undo/redo undoState (for testing)
  */
 export function resetUndoRedoState(): void {
-  state = {
-    history: [],
-    currentIndex: -1
-  };
+  // CHORE-39 Phase 4: reset the history singleton via State-monad immutable
+  // updates (stateUtils.updateProperty) — commits a fresh UndoRedoState.
+  const resetHistory = stateUtils.updateProperty<UndoRedoState, "history">("history", []);
+  const resetIndex = stateUtils.updateProperty<UndoRedoState, "currentIndex">("currentIndex", -1);
+  const [, afterHistory] = resetHistory.run(undoState);
+  const [, next] = resetIndex.run(afterHistory);
+  undoState = next;
   initialBuffer = null;
   initialCursorLine = undefined;
   initialCursorColumn = undefined;
@@ -71,16 +75,16 @@ export function resetUndoRedoState(): void {
 }
 
 /**
- * Get current undo/redo state
+ * Get current undo/redo undoState
  */
 export function getUndoRedoState(): UndoRedoState {
-  return state;
+  return undoState;
 }
 
 /**
  * Push a new edit to history
  * @param description - Description of the edit
- * @param buffer - Buffer state after the edit
+ * @param buffer - Buffer undoState after the edit
  * @param cursorLine - Optional cursor line position after the edit
  * @param cursorColumn - Optional cursor column position after the edit
  * @param preCursorLine - Optional cursor line immediately before the edit
@@ -94,15 +98,15 @@ export function pushToHistory(
   preCursorLine?: number,
   preCursorColumn?: number
 ): void {
-  // If this is the first edit, save initial buffer state
-  if (state.history.length === 0 && initialBuffer === null) {
+  // If this is the first edit, save initial buffer undoState
+  if (undoState.history.length === 0 && initialBuffer === null) {
     // We need to get the initial buffer before the first edit
     // This will be set by the caller
   }
 
   // If we're not at the end of history, truncate future history (branch clearing)
-  if (state.currentIndex < state.history.length - 1) {
-    state.history = state.history.slice(0, state.currentIndex + 1);
+  if (undoState.currentIndex < undoState.history.length - 1) {
+    undoState.history = undoState.history.slice(0, undoState.currentIndex + 1);
   }
 
   // Add new edit to history
@@ -115,12 +119,12 @@ export function pushToHistory(
     preCursorColumn
   };
 
-  state.history.push(item);
-  state.currentIndex = state.history.length - 1;
+  undoState.history.push(item);
+  undoState.currentIndex = undoState.history.length - 1;
 }
 
 /**
- * Set initial buffer state
+ * Set initial buffer undoState
  */
 export function setInitialBuffer(buffer: FunctionalTextBuffer): void {
   initialBuffer = buffer;
@@ -139,22 +143,22 @@ export function undo(
   setCursorColumn?: (column: number) => void
 ): Either<AppError, TLispValue> {
   // Check if we can undo
-  if (state.currentIndex < 0) {
+  if (undoState.currentIndex < 0) {
     return Either.right(createString("Already at oldest change"));
   }
 
-  // Snapshot the item being undone before mutating state. Its pre-edit cursor
+  // Snapshot the item being undone before mutating undoState. Its pre-edit cursor
   // is where the user was when they triggered the change; that's the cursor
   // we want to restore on undo.
-  const undoneItem = state.history[state.currentIndex]!;
+  const undoneItem = undoState.history[undoState.currentIndex]!;
 
   // If we're at the first edit, restore to initial buffer + initial cursor.
   // Prefer the undone item's pre-edit cursor over `initialCursorLine`:
   // `initialCursorLine` is seeded only on the first ever commit, so after an
-  // undo→cursor-move→new-edit cycle it points at a state that no longer
+  // undo→cursor-move→new-edit cycle it points at a undoState that no longer
   // corresponds to "before this edit". The undone item's pre-edit cursor is
   // always the position immediately before this edit was applied.
-  if (state.currentIndex === 0) {
+  if (undoState.currentIndex === 0) {
     if (initialBuffer) {
       setCurrentBuffer(initialBuffer);
     }
@@ -166,14 +170,14 @@ export function undo(
     if (setCursorColumn && restoreColumn !== undefined && restoreColumn !== null) {
       setCursorColumn(restoreColumn);
     }
-    state.currentIndex = -1;
+    undoState.currentIndex = -1;
     return Either.right(createString("Already at oldest change"));
   }
 
-  // Move to previous state for the buffer; but restore the cursor from
+  // Move to previous undoState for the buffer; but restore the cursor from
   // the undone item's pre-edit position (where the user was before the edit).
-  state.currentIndex--;
-  const item = state.history[state.currentIndex]!;
+  undoState.currentIndex--;
+  const item = undoState.history[undoState.currentIndex]!;
 
   setCurrentBuffer(item.buffer);
   const restoreLine = undoneItem.preCursorLine ?? undoneItem.cursorLine;
@@ -201,13 +205,13 @@ export function redo(
   setCursorColumn?: (column: number) => void
 ): Either<AppError, TLispValue> {
   // Check if we can redo
-  if (state.currentIndex >= state.history.length - 1) {
+  if (undoState.currentIndex >= undoState.history.length - 1) {
     return Either.right(createString("Already at newest change"));
   }
 
-  // Move to next state
-  state.currentIndex++;
-  const item = state.history[state.currentIndex]!;
+  // Move to next undoState
+  undoState.currentIndex++;
+  const item = undoState.history[undoState.currentIndex]!;
 
   // Restore buffer and cursor
   setCurrentBuffer(item.buffer);
@@ -279,7 +283,7 @@ export function createUndoRedoOps(
 
     const currentBuffer = getCurrentBuffer();
     if (pendingBuffer && currentBuffer && pendingBuffer !== currentBuffer) {
-      if (state.history.length === 0) {
+      if (undoState.history.length === 0) {
         setInitialBuffer(pendingBuffer);
         initialCursorLine = pendingCursorLine;
         initialCursorColumn = pendingCursorColumn;
@@ -457,7 +461,7 @@ export function createUndoRedoOps(
       ));
     }
 
-    return Either.right(createNumber(state.history.length));
+    return Either.right(createNumber(undoState.history.length));
   });
 
   /**

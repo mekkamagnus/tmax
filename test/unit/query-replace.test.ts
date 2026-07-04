@@ -4,6 +4,7 @@ import { createReplaceOps } from "../../src/editor/api/replace-ops.ts";
 import { FunctionalTextBufferImpl } from "../../src/core/buffer.ts";
 import { createString, createNumber, createList } from "../../src/tlisp/values.ts";
 import { Either } from "../../src/utils/task-either.ts";
+import { initialModel } from "../../src/editor/functional/model.ts";
 
 describe("Query Replace Operations", () => {
   let buffer: FunctionalTextBufferImpl;
@@ -15,10 +16,16 @@ describe("Query Replace Operations", () => {
   });
 
   function getOps() {
+    // CHORE-39 Phase 4: replace-ops reads cursor/buffer via EditorModelAccess.
     return createReplaceOps(
-      () => buffer,
+      {
+        getModel: () => ({ ...initialModel(), currentBuffer: buffer, cursorPosition: { line: cursorLine, column: 0 } }),
+        applyModel: (m) => {
+          if (m.currentBuffer) buffer = m.currentBuffer as FunctionalTextBufferImpl;
+          cursorLine = m.cursorPosition.line;
+        },
+      },
       (b) => { buffer = b as FunctionalTextBufferImpl; },
-      () => cursorLine,
       (l) => { cursorLine = l; }
     );
   }

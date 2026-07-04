@@ -8,6 +8,7 @@ import { createBufferOps } from "../../src/editor/api/buffer-ops.ts";
 import { FunctionalTextBufferImpl } from "../../src/core/buffer.ts";
 import { Either } from "../../src/utils/task-either.ts";
 import { createString, createNumber, createBoolean } from "../../src/tlisp/values.ts";
+import { initialModel } from "../../src/editor/functional/model.ts";
 
 describe("Buffer Metadata Operations", () => {
   // Shared mutable state simulating editor state
@@ -25,17 +26,17 @@ describe("Buffer Metadata Operations", () => {
   }
 
   function getOps() {
+    // CHORE-39 Phase 4: buffer-ops reads cursor/buffer/filename/modified via EditorModelAccess.
     return createBufferOps(
+      {
+        getModel: () => ({ ...initialModel(), currentBuffer: currentBuffer ?? undefined, cursorPosition: { line: 0, column: 0 }, currentFilename, bufferModified }),
+        applyModel: (m) => { if (m.currentBuffer) currentBuffer = m.currentBuffer as FunctionalTextBufferImpl; },
+      },
       buffers,
-      () => currentBuffer,
       (buf) => { currentBuffer = buf as FunctionalTextBufferImpl; },
-      () => 0,
       (_l) => {},
-      () => 0,
       (_c) => {},
-      () => currentFilename,
       (f) => { currentFilename = f; },
-      () => bufferModified,
       (flag) => { bufferModified = flag; }
     );
   }

@@ -22,7 +22,8 @@ import { AppError, createValidationError, createConfigError } from "../../error/
 import type { ASTNode } from "../../syntax/ast/types.ts";
 import { resetNodeIdCounter } from "../../syntax/ast/types.ts";
 import { getNodeAtPosition, getEnclosingFunction, getEnclosingBlock, getText, flatten, nextSibling, prevSibling } from "../../syntax/ast/tree-ops.ts";
-import type { SymbolTable } from "../../syntax/ast/scope.ts";
+import { SymbolTable } from "../../syntax/ast/scope.ts";
+import { runModel, readModelField, type EditorModelAccess } from "./state-context.ts";
 import { getParserForLanguage, getParserForFile, getScopeBuilder, getLanguageForFile } from "../../syntax/ast/registry.ts";
 import { serializeForAI } from "../../syntax/ast/serializer.ts";
 import { ParseTreeCache, sourceHash, invalidate, evictCache } from "../../syntax/ast/incremental.ts";
@@ -43,6 +44,8 @@ export function getAstCache(): Map<string, CachedAST> {
 }
 
 export interface AstOpsDeps {
+  /** CHORE-39 Phase 4: when provided, cursor reads use the State monad against EditorModel. */
+  access?: EditorModelAccess;
   getBufferName: () => string;
   getBufferText: () => string;
   getCursorLine: () => number;
@@ -52,6 +55,12 @@ export interface AstOpsDeps {
 }
 
 export function createAstOps(deps: AstOpsDeps): Map<string, TLispFunctionImpl> {
+  // CHORE-39 Phase 4: prefer State-monad cursor reads when access is supplied
+  // (real editor runtime); fall back to deps callbacks otherwise (legacy tests).
+  const getCursorLine = (): number =>
+    deps.access ? runModel(deps.access, readModelField("cursorPosition")).line : deps.getCursorLine();
+  const getCursorColumn = (): number =>
+    deps.access ? runModel(deps.access, readModelField("cursorPosition")).column : deps.getCursorColumn();
   const api = new Map<string, TLispFunctionImpl>();
 
   /**
@@ -101,7 +110,7 @@ export function createAstOps(deps: AstOpsDeps): Map<string, TLispFunctionImpl> {
 
     const tree = result.right;
     const scopeBuilder = getScopeBuilder(lang);
-    const symbolTable = scopeBuilder ? scopeBuilder(tree) : new EmptySymbolTable(tree) as unknown as SymbolTable;
+    const symbolTable = scopeBuilder ? scopeBuilder(tree) : new SymbolTable(tree);
 
     astCache.set(name, { tree, symbolTable, sourceHash: hash });
 
@@ -121,8 +130,8 @@ export function createAstOps(deps: AstOpsDeps): Map<string, TLispFunctionImpl> {
     if (!cached) return Either.right(createNil());
 
     const node = getNodeAtPosition(cached.tree, {
-      line: deps.getCursorLine(),
-      column: deps.getCursorColumn(),
+      line: getCursorLine(),
+      column: getCursorColumn(),
       offset: deps.getCursorOffset(),
     });
 
@@ -170,8 +179,8 @@ export function createAstOps(deps: AstOpsDeps): Map<string, TLispFunctionImpl> {
     if (!cached) return Either.right(createNil());
 
     const node = getNodeAtPosition(cached.tree, {
-      line: deps.getCursorLine(),
-      column: deps.getCursorColumn(),
+      line: getCursorLine(),
+      column: getCursorColumn(),
       offset: deps.getCursorOffset(),
     });
 
@@ -195,8 +204,8 @@ export function createAstOps(deps: AstOpsDeps): Map<string, TLispFunctionImpl> {
     if (!cached) return Either.right(createNil());
 
     const node = getNodeAtPosition(cached.tree, {
-      line: deps.getCursorLine(),
-      column: deps.getCursorColumn(),
+      line: getCursorLine(),
+      column: getCursorColumn(),
       offset: deps.getCursorOffset(),
     });
     if (!node) return Either.right(createNil());
@@ -219,8 +228,8 @@ export function createAstOps(deps: AstOpsDeps): Map<string, TLispFunctionImpl> {
     if (!cached) return Either.right(createNil());
 
     const node = getNodeAtPosition(cached.tree, {
-      line: deps.getCursorLine(),
-      column: deps.getCursorColumn(),
+      line: getCursorLine(),
+      column: getCursorColumn(),
       offset: deps.getCursorOffset(),
     });
     if (!node) return Either.right(createNil());
@@ -243,8 +252,8 @@ export function createAstOps(deps: AstOpsDeps): Map<string, TLispFunctionImpl> {
     if (!cached) return Either.right(createNil());
 
     const node = getNodeAtPosition(cached.tree, {
-      line: deps.getCursorLine(),
-      column: deps.getCursorColumn(),
+      line: getCursorLine(),
+      column: getCursorColumn(),
       offset: deps.getCursorOffset(),
     });
     if (!node) return Either.right(createNil());
@@ -264,8 +273,8 @@ export function createAstOps(deps: AstOpsDeps): Map<string, TLispFunctionImpl> {
     if (!cached) return Either.right(createNil());
 
     const node = getNodeAtPosition(cached.tree, {
-      line: deps.getCursorLine(),
-      column: deps.getCursorColumn(),
+      line: getCursorLine(),
+      column: getCursorColumn(),
       offset: deps.getCursorOffset(),
     });
     if (!node) return Either.right(createNil());
@@ -287,8 +296,8 @@ export function createAstOps(deps: AstOpsDeps): Map<string, TLispFunctionImpl> {
     if (!cached) return Either.right(createNil());
 
     const node = getNodeAtPosition(cached.tree, {
-      line: deps.getCursorLine(),
-      column: deps.getCursorColumn(),
+      line: getCursorLine(),
+      column: getCursorColumn(),
       offset: deps.getCursorOffset(),
     });
     if (!node?.parent) return Either.right(createNil());
@@ -308,8 +317,8 @@ export function createAstOps(deps: AstOpsDeps): Map<string, TLispFunctionImpl> {
     if (!cached) return Either.right(createNil());
 
     const node = getNodeAtPosition(cached.tree, {
-      line: deps.getCursorLine(),
-      column: deps.getCursorColumn(),
+      line: getCursorLine(),
+      column: getCursorColumn(),
       offset: deps.getCursorOffset(),
     });
     if (!node?.parent) return Either.right(createNil());
@@ -333,8 +342,8 @@ export function createAstOps(deps: AstOpsDeps): Map<string, TLispFunctionImpl> {
     if (!cached) return Either.right(createNil());
 
     const node = getNodeAtPosition(cached.tree, {
-      line: deps.getCursorLine(),
-      column: deps.getCursorColumn(),
+      line: getCursorLine(),
+      column: getCursorColumn(),
       offset: deps.getCursorOffset(),
     });
     if (!node) return Either.right(createNil());
@@ -354,8 +363,8 @@ export function createAstOps(deps: AstOpsDeps): Map<string, TLispFunctionImpl> {
     if (!cached) return Either.right(createNil());
 
     const node = getNodeAtPosition(cached.tree, {
-      line: deps.getCursorLine(),
-      column: deps.getCursorColumn(),
+      line: getCursorLine(),
+      column: getCursorColumn(),
       offset: deps.getCursorOffset(),
     });
     if (!node) return Either.right(createNil());
@@ -378,8 +387,8 @@ export function createAstOps(deps: AstOpsDeps): Map<string, TLispFunctionImpl> {
     if (!cached) return Either.right(createNil());
 
     const node = getNodeAtPosition(cached.tree, {
-      line: deps.getCursorLine(),
-      column: deps.getCursorColumn(),
+      line: getCursorLine(),
+      column: getCursorColumn(),
       offset: deps.getCursorOffset(),
     });
     if (!node) return Either.right(createNil());
@@ -532,18 +541,4 @@ function lineStartOffset(source: string, line: number): number {
     offset = nl + 1;
   }
   return offset;
-}
-
-/** Minimal SymbolTable stand-in when no scope builder is available. */
-class EmptySymbolTable {
-  scopes: import("../../syntax/ast/scope.ts").Scope[] = [];
-  symbols: Map<string, import("../../syntax/ast/scope.ts").Symbol[]> = new Map();
-  root: import("../../syntax/ast/scope.ts").Scope;
-  constructor(rootNode: ASTNode) {
-    this.root = {
-      id: 0, name: "empty", parent: null,
-      bindings: new Map(),
-      node: rootNode,
-    };
-  }
 }

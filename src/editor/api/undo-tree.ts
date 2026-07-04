@@ -14,6 +14,7 @@ import type { TLispValue, TLispFunctionImpl } from "../../tlisp/types.ts";
 import { createNumber, createString, createNil, createList, createBoolean } from "../../tlisp/values.ts";
 import type { FunctionalTextBuffer } from "../../core/types.ts";
 import { Either } from "../../utils/task-either.ts";
+import { stateUtils } from "../../utils/state.ts";
 import {
   createBufferError,
   createValidationError,
@@ -21,12 +22,12 @@ import {
 } from "../../error/types.ts";
 
 /**
- * Tree node representing a single edit state
+ * Tree node representing a single edit treeState
  */
 interface TreeNode {
   id: number;                    // Unique node identifier
   description: string;           // Description of the edit (e.g., "delete", "insert")
-  buffer: FunctionalTextBuffer;  // Buffer state after the edit
+  buffer: FunctionalTextBuffer;  // Buffer treeState after the edit
   cursorLine?: number;           // Cursor line position
   cursorColumn?: number;         // Cursor column position
   parent: number | null;         // Parent node ID (null for root)
@@ -35,38 +36,42 @@ interface TreeNode {
 }
 
 /**
- * Undo tree state management
+ * Undo tree treeState management
  */
 interface UndoTreeState {
   nodes: Map<number, TreeNode>;  // All nodes in the tree
-  currentId: number | null;      // Current position in tree (null = at initial state)
+  currentId: number | null;      // Current position in tree (null = at initial treeState)
   nextId: number;                // Counter for generating unique IDs
 }
 
-// Global undo tree state
-let state: UndoTreeState = {
+// Global undo tree treeState
+let treeState: UndoTreeState = {
   nodes: new Map(),
   currentId: null,
   nextId: 0
 };
 
-// Initial buffer state (before any edits)
+// Initial buffer treeState (before any edits)
 let initialBuffer: FunctionalTextBuffer | null = null;
 
 /**
- * Reset undo tree state (for testing)
+ * Reset undo tree treeState (for testing)
  */
 export function resetUndoTreeState(): void {
-  state = {
-    nodes: new Map(),
-    currentId: null,
-    nextId: 0
-  };
+  // CHORE-39 Phase 4: reset the tree singleton via State-monad immutable
+  // updates (stateUtils.updateProperty) — commits a fresh UndoTreeState.
+  const r1 = stateUtils.updateProperty<UndoTreeState, "nodes">("nodes", new Map());
+  const r2 = stateUtils.updateProperty<UndoTreeState, "currentId">("currentId", null);
+  const r3 = stateUtils.updateProperty<UndoTreeState, "nextId">("nextId", 0);
+  const [, a] = r1.run(treeState);
+  const [, b] = r2.run(a);
+  const [, next] = r3.run(b);
+  treeState = next;
   initialBuffer = null;
 }
 
 /**
- * Set initial buffer state
+ * Set initial buffer treeState
  */
 export function setInitialBuffer(buffer: FunctionalTextBuffer): void {
   initialBuffer = buffer;
@@ -75,7 +80,7 @@ export function setInitialBuffer(buffer: FunctionalTextBuffer): void {
 /**
  * Push a new edit to the tree
  * @param description - Description of the edit
- * @param buffer - Buffer state after the edit
+ * @param buffer - Buffer treeState after the edit
  * @param cursorLine - Optional cursor line position
  * @param cursorColumn - Optional cursor column position
  */
@@ -85,8 +90,8 @@ export function pushToTree(
   cursorLine?: number,
   cursorColumn?: number
 ): number {
-  const parentId = state.currentId;
-  const nodeId = state.nextId++;
+  const parentId = treeState.currentId;
+  const nodeId = treeState.nextId++;
 
   const node: TreeNode = {
     id: nodeId,
@@ -99,12 +104,12 @@ export function pushToTree(
     timestamp: Date.now()
   };
 
-  state.nodes.set(nodeId, node);
-  state.currentId = nodeId;
+  treeState.nodes.set(nodeId, node);
+  treeState.currentId = nodeId;
 
   // Add this node as a child of its parent
   if (parentId !== null) {
-    const parentNode = state.nodes.get(parentId);
+    const parentNode = treeState.nodes.get(parentId);
     if (parentNode) {
       parentNode.children.push(nodeId);
     }
@@ -114,7 +119,7 @@ export function pushToTree(
 }
 
 /**
- * Undo to previous state
+ * Undo to previous treeState
  * @param setCurrentBuffer - Function to set the current buffer
  * @param setCursorLine - Function to set cursor line
  * @param setCursorColumn - Function to set cursor column
@@ -125,31 +130,31 @@ export function undo(
   setCursorLine?: (line: number) => void,
   setCursorColumn?: (column: number) => void
 ): Either<AppError, TLispValue> {
-  // If we're at the initial state, can't undo
-  if (state.currentId === null) {
+  // If we're at the initial treeState, can't undo
+  if (treeState.currentId === null) {
     return Either.right(createString("Already at oldest change"));
   }
 
-  const currentNode = state.nodes.get(state.currentId);
+  const currentNode = treeState.nodes.get(treeState.currentId);
   if (!currentNode) {
     return Either.left(createBufferError(
       'InvalidOperation',
-      `Current node ${state.currentId} not found in tree`
+      `Current node ${treeState.currentId} not found in tree`
     ));
   }
 
   // Move to parent
   const parentId = currentNode.parent;
-  state.currentId = parentId;
+  treeState.currentId = parentId;
 
   // Restore buffer and cursor
   if (parentId === null) {
-    // At initial state
+    // At initial treeState
     if (initialBuffer) {
       setCurrentBuffer(initialBuffer);
     }
   } else {
-    const parentNode = state.nodes.get(parentId);
+    const parentNode = treeState.nodes.get(parentId);
     if (parentNode) {
       setCurrentBuffer(parentNode.buffer);
       if (setCursorLine && parentNode.cursorLine !== undefined) {
@@ -165,7 +170,7 @@ export function undo(
 }
 
 /**
- * Redo to next state
+ * Redo to next treeState
  * @param setCurrentBuffer - Function to set the current buffer
  * @param setCursorLine - Function to set cursor line
  * @param setCursorColumn - Function to set cursor column
@@ -176,11 +181,11 @@ export function redo(
   setCursorLine?: (line: number) => void,
   setCursorColumn?: (column: number) => void
 ): Either<AppError, TLispValue> {
-  // If we're at the initial state, go to first child
-  if (state.currentId === null) {
+  // If we're at the initial treeState, go to first child
+  if (treeState.currentId === null) {
     // Find root nodes (nodes with no parent)
     const rootNodes: TreeNode[] = [];
-    for (const node of state.nodes.values()) {
+    for (const node of treeState.nodes.values()) {
       if (node.parent === null) {
         rootNodes.push(node);
       }
@@ -192,7 +197,7 @@ export function redo(
 
     // For linear redo, use the first root node
     const node = rootNodes[0]!;
-    state.currentId = node.id;
+    treeState.currentId = node.id;
     setCurrentBuffer(node.buffer);
     if (setCursorLine && node.cursorLine !== undefined) {
       setCursorLine(node.cursorLine);
@@ -204,11 +209,11 @@ export function redo(
     return Either.right(createNil());
   }
 
-  const currentNode = state.nodes.get(state.currentId);
+  const currentNode = treeState.nodes.get(treeState.currentId);
   if (!currentNode) {
     return Either.left(createBufferError(
       'InvalidOperation',
-      `Current node ${state.currentId} not found in tree`
+      `Current node ${treeState.currentId} not found in tree`
     ));
   }
 
@@ -218,7 +223,7 @@ export function redo(
   }
 
   const childId = currentNode.children[0]!;
-  const childNode = state.nodes.get(childId);
+  const childNode = treeState.nodes.get(childId);
   if (!childNode) {
     return Either.left(createBufferError(
       'InvalidOperation',
@@ -226,7 +231,7 @@ export function redo(
     ));
   }
 
-  state.currentId = childId;
+  treeState.currentId = childId;
   setCurrentBuffer(childNode.buffer);
   if (setCursorLine && childNode.cursorLine !== undefined) {
     setCursorLine(childNode.cursorLine);
@@ -252,7 +257,7 @@ export function gotoNode(
   setCursorLine?: (line: number) => void,
   setCursorColumn?: (column: number) => void
 ): Either<AppError, TLispValue> {
-  const targetNode = state.nodes.get(nodeId);
+  const targetNode = treeState.nodes.get(nodeId);
   if (!targetNode) {
     return Either.left(createBufferError(
       'OutOfBounds',
@@ -260,7 +265,7 @@ export function gotoNode(
     ));
   }
 
-  state.currentId = nodeId;
+  treeState.currentId = nodeId;
   setCurrentBuffer(targetNode.buffer);
   if (setCursorLine && targetNode.cursorLine !== undefined) {
     setCursorLine(targetNode.cursorLine);
@@ -279,13 +284,13 @@ export function gotoNode(
 export function getTreeStructure(): TLispValue {
   const nodes: TLispValue[] = [];
 
-  for (const node of state.nodes.values()) {
+  for (const node of treeState.nodes.values()) {
     const nodeInfo = createList([
       createString(node.description),
       createNumber(node.id),
       createNumber(node.parent ?? -1),
       createList(node.children.map(id => createNumber(id))),
-      createBoolean(node.id === state.currentId)
+      createBoolean(node.id === treeState.currentId)
     ]);
     nodes.push(nodeInfo);
   }
@@ -295,10 +300,10 @@ export function getTreeStructure(): TLispValue {
 
 /**
  * Get current node ID
- * @returns Current node ID or -1 if at initial state
+ * @returns Current node ID or -1 if at initial treeState
  */
 export function getCurrentNodeId(): number {
-  return state.currentId ?? -1;
+  return treeState.currentId ?? -1;
 }
 
 /**
@@ -307,7 +312,7 @@ export function getCurrentNodeId(): number {
  * @returns List of child node IDs
  */
 export function getBranches(nodeId: number): Either<AppError, TLispValue> {
-  const node = state.nodes.get(nodeId);
+  const node = treeState.nodes.get(nodeId);
   if (!node) {
     return Either.left(createBufferError(
       'OutOfBounds',
@@ -323,7 +328,7 @@ export function getBranches(nodeId: number): Either<AppError, TLispValue> {
  * @returns Node count
  */
 export function getNodeCount(): number {
-  return state.nodes.size;
+  return treeState.nodes.size;
 }
 
 /**
@@ -399,7 +404,7 @@ export function createUndoTreeOps(
   });
 
   /**
-   * undo-tree-undo - undo to previous state
+   * undo-tree-undo - undo to previous treeState
    * Usage: (undo-tree-undo)
    */
   api.set("undo-tree-undo", (args: TLispValue[]): Either<AppError, TLispValue> => {
@@ -417,7 +422,7 @@ export function createUndoTreeOps(
   });
 
   /**
-   * undo-tree-redo - redo to next state
+   * undo-tree-redo - redo to next treeState
    * Usage: (undo-tree-redo)
    */
   api.set("undo-tree-redo", (args: TLispValue[]): Either<AppError, TLispValue> => {
@@ -485,7 +490,7 @@ export function createUndoTreeOps(
   /**
    * undo-tree-current - get current node ID
    * Usage: (undo-tree-current)
-   * Returns current node ID or -1 if at initial state
+   * Returns current node ID or -1 if at initial treeState
    */
   api.set("undo-tree-current", (args: TLispValue[]): Either<AppError, TLispValue> => {
     if (args.length > 0) {
@@ -550,7 +555,7 @@ export function createUndoTreeOps(
   });
 
   /**
-   * undo-tree-reset - reset tree state
+   * undo-tree-reset - reset tree treeState
    * Usage: (undo-tree-reset)
    */
   api.set("undo-tree-reset", (args: TLispValue[]): Either<AppError, TLispValue> => {

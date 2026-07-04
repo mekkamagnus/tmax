@@ -7,6 +7,7 @@ import type { TLispValue, TLispFunctionImpl } from "../../tlisp/types.ts";
 import { createNil, createNumber, createString, createBoolean, createList, createSymbol } from "../../tlisp/values.ts";
 import { FunctionalTextBufferImpl } from "../../core/buffer.ts";
 import type { FunctionalTextBuffer } from "../../core/types.ts";
+import { runModel, readModelField, type EditorModelAccess } from "./state-context.ts";
 import { Either } from "../../utils/task-either.ts";
 import {
   validateArgsCount,
@@ -37,19 +38,24 @@ export type TLispFunctionWithEither = (args: TLispValue[]) => Either<AppError, T
  * @returns Map of buffer function names to implementations
  */
 export function createBufferOps(
+  access: EditorModelAccess,
   buffers: Map<string, FunctionalTextBuffer>,
-  getCurrentBuffer: () => FunctionalTextBuffer | null,
   setCurrentBuffer: (buffer: FunctionalTextBuffer) => void,
-  getCursorLine: () => number,
   setCursorLine: (line: number) => void,
-  getCursorColumn: () => number,
   setCursorColumn: (column: number) => void,
-  getCurrentFilename?: () => string | undefined,
   setCurrentFilename?: (path: string) => void,
-  getBufferModified?: () => boolean,
   setBufferModified?: (flag: boolean) => void,
   readonlyBuffers?: Set<string>
 ): Map<string, TLispFunctionImpl> {
+  // CHORE-39 Phase 4: cursor/buffer/filename/modified reads flow through the
+  // State monad against EditorModel; writes stay on the supplied setters to
+  // preserve side effects.
+  const getCursorLine = (): number => runModel(access, readModelField("cursorPosition")).line;
+  const getCursorColumn = (): number => runModel(access, readModelField("cursorPosition")).column;
+  const getCurrentBuffer = (): FunctionalTextBuffer | null =>
+    runModel(access, readModelField("currentBuffer")) ?? null;
+  const getCurrentFilename = (): string | undefined => runModel(access, readModelField("currentFilename"));
+  const getBufferModified = (): boolean => runModel(access, readModelField("bufferModified")) ?? false;
   const api = new Map<string, TLispFunctionImpl>();
   const readonly = readonlyBuffers ?? new Set<string>();
 

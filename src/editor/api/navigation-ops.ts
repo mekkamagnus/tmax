@@ -17,6 +17,7 @@ import { Either } from "../../utils/task-either.ts";
 import { validateArgsCount, validateArgType } from "../../utils/validation.ts";
 import { AppError, createValidationError } from "../../error/types.ts";
 import type { Symbol as ASTSymbol, SymbolTable } from "../../syntax/ast/scope.ts";
+import { runModel, readModelField, type EditorModelAccess } from "./state-context.ts";
 import { findDefinition, findReferences, findScopeAtPosition, getSymbolsInScope, getDocumentSymbols } from "../../syntax/ast/navigation.ts";
 import { getNodeAtPosition } from "../../syntax/ast/tree-ops.ts";
 
@@ -34,6 +35,8 @@ export function setAstCacheRef(cache: Map<string, CachedAST>): void {
 }
 
 export interface NavigationOpsDeps {
+  /** CHORE-39 Phase 4: when provided, cursor reads use the State monad against EditorModel. */
+  access?: EditorModelAccess;
   getBufferName: () => string;
   getBufferText: () => string;
   getCursorLine: () => number;
@@ -44,6 +47,13 @@ export interface NavigationOpsDeps {
 }
 
 export function createNavigationOps(deps: NavigationOpsDeps): Map<string, TLispFunctionImpl> {
+  // CHORE-39 Phase 4: prefer State-monad cursor reads when access is supplied
+  // (real editor runtime); fall back to the deps callbacks otherwise (legacy
+  // test harnesses that override getCursorLine/getCursorColumn per-test).
+  const getCursorLine = (): number =>
+    deps.access ? runModel(deps.access, readModelField("cursorPosition")).line : deps.getCursorLine();
+  const getCursorColumn = (): number =>
+    deps.access ? runModel(deps.access, readModelField("cursorPosition")).column : deps.getCursorColumn();
   const api = new Map<string, TLispFunctionImpl>();
 
   function getAST(): CachedAST | null {
@@ -65,8 +75,8 @@ export function createNavigationOps(deps: NavigationOpsDeps): Map<string, TLispF
     }
 
     const position = {
-      line: deps.getCursorLine(),
-      column: deps.getCursorColumn(),
+      line: getCursorLine(),
+      column: getCursorColumn(),
       offset: deps.getCursorOffset(),
     };
 
@@ -102,8 +112,8 @@ export function createNavigationOps(deps: NavigationOpsDeps): Map<string, TLispF
       symbolName = args[0]!.value as string;
     } else {
       const node = getNodeAtPosition(cached.tree, {
-        line: deps.getCursorLine(),
-        column: deps.getCursorColumn(),
+        line: getCursorLine(),
+        column: getCursorColumn(),
         offset: deps.getCursorOffset(),
       });
       if (!node?.label) {
@@ -162,8 +172,8 @@ export function createNavigationOps(deps: NavigationOpsDeps): Map<string, TLispF
     if (!cached) return Either.right(createNil());
 
     const position = {
-      line: deps.getCursorLine(),
-      column: deps.getCursorColumn(),
+      line: getCursorLine(),
+      column: getCursorColumn(),
       offset: deps.getCursorOffset(),
     };
 
@@ -197,8 +207,8 @@ export function createNavigationOps(deps: NavigationOpsDeps): Map<string, TLispF
     if (!cached) return Either.right(createNil());
 
     const position = {
-      line: deps.getCursorLine(),
-      column: deps.getCursorColumn(),
+      line: getCursorLine(),
+      column: getCursorColumn(),
       offset: deps.getCursorOffset(),
     };
 
@@ -229,8 +239,8 @@ export function createNavigationOps(deps: NavigationOpsDeps): Map<string, TLispF
     if (!cached) return Either.right(createNil());
 
     const position = {
-      line: deps.getCursorLine(),
-      column: deps.getCursorColumn(),
+      line: getCursorLine(),
+      column: getCursorColumn(),
       offset: deps.getCursorOffset(),
     };
 

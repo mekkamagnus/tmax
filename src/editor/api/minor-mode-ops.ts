@@ -24,6 +24,7 @@
 import type { TLispValue, TLispFunctionImpl } from "../../tlisp/types.ts";
 import { createNil, createString, createList, createBoolean } from "../../tlisp/values.ts";
 import { Either } from "../../utils/task-either.ts";
+import { runModel, readModelField, setModelField, type EditorModelAccess } from "./state-context.ts";
 import { validateArgsCount, validateArgType } from "../../utils/validation.ts";
 import { createValidationError, AppError } from "../../error/types.ts";
 import type { EditorConfig } from "../../core/types.ts";
@@ -46,7 +47,18 @@ export function createMinorModeOps(
     getConfig: () => EditorConfig;
     setConfig: (config: EditorConfig) => void;
   },
+  /** CHORE-39 Phase 4: when provided, config reads/writes use the State monad against EditorModel. */
+  access?: EditorModelAccess,
 ): Map<string, TLispFunctionImpl> {
+  // CHORE-39 Phase 4: prefer State-monad config access when access is supplied
+  // (real editor runtime); fall back to configAccess otherwise (legacy tests).
+  const hasConfigAccess = !!(access || configAccess);
+  const getConfig = (): EditorConfig =>
+    access ? runModel(access, readModelField("config")) : configAccess!.getConfig();
+  const setConfig = (c: EditorConfig): void => {
+    if (access) runModel(access, setModelField("config", c));
+    else configAccess!.setConfig(c);
+  };
   const api = new Map<string, TLispFunctionImpl>();
 
   // Helper to get current buffer's mode state
@@ -68,24 +80,24 @@ export function createMinorModeOps(
     name: string,
     enable: boolean
   ): void => {
-    if (!configAccess) return;
+    if (!hasConfigAccess) return;
     if (name !== "line-numbers" && name !== "auto-fill") return;
 
     const key = name === "line-numbers" ? "showLineNumbers" : "wordWrap";
-    const config = configAccess.getConfig();
+    const config = getConfig();
     const saved = state.minorModeSavedConfig[name] ?? {};
 
     if (enable) {
       if (!(key in saved)) {
         state.minorModeSavedConfig[name] = { ...saved, [key]: Boolean(config[key]) };
       }
-      configAccess.setConfig({ ...config, [key]: true });
+      setConfig({ ...config, [key]: true });
       return;
     }
 
     const previous = state.minorModeSavedConfig[name]?.[key];
     if (previous !== undefined) {
-      configAccess.setConfig({ ...config, [key]: previous });
+      setConfig({ ...config, [key]: previous });
       const nextSaved = { ...state.minorModeSavedConfig[name] };
       delete nextSaved[key];
       if (Object.keys(nextSaved).length === 0) {
@@ -94,7 +106,7 @@ export function createMinorModeOps(
         state.minorModeSavedConfig[name] = nextSaved;
       }
     } else {
-      configAccess.setConfig({ ...config, [key]: false });
+      setConfig({ ...config, [key]: false });
     }
   };
 

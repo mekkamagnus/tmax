@@ -6,6 +6,7 @@
 import type { TLispValue, TLispFunctionImpl } from "../../tlisp/types.ts";
 import { createNil, createNumber, createString, createList } from "../../tlisp/values.ts";
 import type { FunctionalTextBuffer } from "../../core/types.ts";
+import { runModel, readModelField, type EditorModelAccess } from "./state-context.ts";
 import { Either } from "../../utils/task-either.ts";
 import {
   validateArgsCount,
@@ -65,12 +66,16 @@ function extractStringList(listVal: TLispValue, argName: string, funcName: strin
  * @returns Map of indent function names to implementations
  */
 export function createIndentOps(
-  getCurrentBuffer: () => FunctionalTextBuffer | null,
+  access: EditorModelAccess,
   setCurrentBuffer: (buffer: FunctionalTextBuffer) => void,
-  getCursorLine: () => number,
   setCursorLine: (line: number) => void,
   getTabSize: () => number
 ): Map<string, TLispFunctionImpl> {
+  // CHORE-39 Phase 4: cursor/buffer reads flow through the State monad against
+  // EditorModel; writes stay on the supplied setters to preserve side effects.
+  const getCursorLine = (): number => runModel(access, readModelField("cursorPosition")).line;
+  const getCurrentBuffer = (): FunctionalTextBuffer | null =>
+    runModel(access, readModelField("currentBuffer")) ?? null;
   const api = new Map<string, TLispFunctionImpl>();
 
   /**

@@ -17,7 +17,7 @@ import {
 } from "../../error/types.ts";
 import { State, stateUtils } from "../../utils/state.ts";
 import type { EditorModel } from "../functional/model.ts";
-import { runEditorState, type EditorModelAccess } from "./state-context.ts";
+import { runModel, type EditorModelAccess } from "./state-context.ts";
 
 /**
  * T-Lisp function implementation that returns Either for error handling
@@ -51,9 +51,9 @@ export function createModeOps(
   // EditorModel, replacing the old getMode/setMode callbacks. The body below
   // still calls getMode()/setMode but those are now State-backed.
   type EditorMode = EditorModel["mode"];
-  const getMode = (): EditorMode => runEditorState(modelAccess, State.gets<EditorModel, EditorMode>(m => m.mode));
+  const getMode = (): EditorMode => runModel(modelAccess, State.gets<EditorModel, EditorMode>(m => m.mode));
   const setMode = (mode: EditorMode): void => {
-    runEditorState(modelAccess, stateUtils.updateProperty<EditorModel, "mode">("mode", mode));
+    runModel(modelAccess, stateUtils.updateProperty<EditorModel, "mode">("mode", mode));
   };
   const api = new Map<string, TLispFunctionImpl>();
 

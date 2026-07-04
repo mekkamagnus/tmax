@@ -7,6 +7,15 @@
 import type { FileSystem } from "../../core/types.ts";
 import type { TLispValue } from "../../tlisp/types.ts";
 import { getMacros } from "./macro-recording.ts";
+import { State } from "../../utils/state.ts";
+import type { EditorModel } from "../functional/model.ts";
+
+/**
+ * CHORE-39 Phase 4: `State<EditorModel>` reader — the current buffer's
+ * filename, used to locate the macro persistence file. Pure model read.
+ */
+export const currentFilenameState = (): State<EditorModel, string | undefined> =>
+  State.gets((m: EditorModel) => m.currentFilename);
 
 /**
  * Get the path to the macros file

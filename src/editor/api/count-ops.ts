@@ -20,19 +20,23 @@ import {
   createValidationError,
   AppError
 } from "../../error/types.ts";
+import { runModel, readModelField, setModelField, type EditorModelAccess } from "./state-context.ts";
 
 /**
- * Create count prefix operations for T-Lisp API
- * @param getCount - Function to get current count
- * @param setCount - Function to set count value
- * @param resetCount - Function to reset count to 0
- * @returns Map of count operation functions
+ * Create count prefix operations for T-Lisp API.
+ * CHORE-39 Phase 4: count now lives on EditorModel (`countPrefix`); this
+ * factory reads/writes it through the State monad against the live model.
  */
 export function createCountOps(
-  getCount: () => number,
-  setCount: (count: number) => void,
-  resetCount: () => void
+  access: EditorModelAccess
 ): Map<string, TLispFunctionImpl> {
+  const getCount = (): number => runModel(access, readModelField("countPrefix"));
+  const setCount = (count: number): void => {
+    runModel(access, setModelField("countPrefix", Math.max(0, count)));
+  };
+  const resetCount = (): void => {
+    runModel(access, setModelField("countPrefix", 0));
+  };
   const ops = new Map<string, TLispFunctionImpl>();
 
   /**

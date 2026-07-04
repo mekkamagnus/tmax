@@ -20,6 +20,7 @@ import {
   createYankOps,
   setYankRegister
 } from "../../src/editor/api/yank-ops.ts";
+import { initialModel } from "../../src/editor/functional/model.ts";
 import {
   createYankPopOps,
   resetYankPopState,
@@ -61,13 +62,18 @@ describe("Yank Pop Integration (US-1.9.2)", () => {
       interpreter.defineBuiltin(name, func);
     }
 
-    // Register yank operations
+    // Register yank operations (CHORE-39 Phase 4: EditorModelAccess)
     const yankOps = createYankOps(
-      () => currentBuffer,
+      {
+        getModel: () => ({ ...initialModel(), currentBuffer: currentBuffer ?? undefined, cursorPosition: { line: cursorLine, column: cursorColumn } }),
+        applyModel: (m) => {
+          if (m.currentBuffer) currentBuffer = m.currentBuffer as FunctionalTextBufferImpl;
+          cursorLine = m.cursorPosition.line;
+          cursorColumn = m.cursorPosition.column;
+        },
+      },
       (buf) => { currentBuffer = buf as FunctionalTextBufferImpl; },
-      () => cursorLine,
       (line) => { cursorLine = line; },
-      () => cursorColumn,
       (col) => { cursorColumn = col; }
     );
     for (const [name, func] of yankOps.entries()) {
@@ -76,10 +82,15 @@ describe("Yank Pop Integration (US-1.9.2)", () => {
 
     // Register yank-pop operations
     const yankPopOps = createYankPopOps(
-      () => currentBuffer,
-      (buf) => { currentBuffer = buf as FunctionalTextBufferImpl; },
-      () => cursorLine,
-      () => cursorColumn
+      {
+        getModel: () => ({ ...initialModel(), currentBuffer: currentBuffer ?? undefined, cursorPosition: { line: cursorLine, column: cursorColumn } }),
+        applyModel: (m) => {
+          if (m.currentBuffer) currentBuffer = m.currentBuffer as FunctionalTextBufferImpl;
+          cursorLine = m.cursorPosition.line;
+          cursorColumn = m.cursorPosition.column;
+        },
+      },
+      (buf) => { currentBuffer = buf as FunctionalTextBufferImpl; }
     );
     for (const [name, func] of yankPopOps.entries()) {
       interpreter.defineBuiltin(name, func);
@@ -163,10 +174,15 @@ describe("Yank Pop Integration (US-1.9.2)", () => {
     test("yank-pop-reset should reset yank-pop state", () => {
       // Activate yank-pop state
       const yankPopOps = createYankPopOps(
-        () => currentBuffer,
-        (buf) => { currentBuffer = buf as FunctionalTextBufferImpl; },
-        () => cursorLine,
-        () => cursorColumn
+        {
+          getModel: () => ({ ...initialModel(), currentBuffer: currentBuffer ?? undefined, cursorPosition: { line: cursorLine, column: cursorColumn } }),
+          applyModel: (m) => {
+            if (m.currentBuffer) currentBuffer = m.currentBuffer as FunctionalTextBufferImpl;
+            cursorLine = m.cursorPosition.line;
+            cursorColumn = m.cursorPosition.column;
+          },
+        },
+        (buf) => { currentBuffer = buf as FunctionalTextBufferImpl; }
       );
 
       // Manually activate state (simulating paste operation)

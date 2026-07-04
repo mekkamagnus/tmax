@@ -13,13 +13,14 @@
  * retaining references.
  *
  * EditorModel mirrors the EditorState field shape (the deterministic fields
- * that live in the editor's state object). Other editor-internal fields that
- * are NOT part of the public state object (keyMappings, bufferModeStates,
- * countPrefix, etc.) remain as separate private fields on the Editor runtime
- * and are intentionally not duplicated here. Immutability/isolation is
- * enforced at the reducer boundary (`update` returns fresh objects via
- * spreads) and the public boundary (`modelToEditorState` clones mutable
- * collections on egress).
+ * that live in the editor's state object). Deterministic editor-internal
+ * fields that the State-monad API primitives need (countPrefix, …) are added
+ * here as they are migrated (CHORE-39 Phase 4). Other editor-internal fields
+ * that are NOT part of the public state object and not yet migrated
+ * (keyMappings, bufferModeStates, etc.) remain as separate private fields on
+ * the Editor runtime. Immutability/isolation is enforced at the reducer
+ * boundary (`update` returns fresh objects via spreads) and the public
+ * boundary (`modelToEditorState` clones mutable collections on egress).
  */
 
 import type { EditorState } from "../../core/types.ts";
@@ -28,7 +29,14 @@ import type { EditorState } from "../../core/types.ts";
  * Internal editor model — structurally mirrors the public EditorState but is
  * a distinct nominal type used inside the editor.
  */
-export interface EditorModel extends EditorState {}
+export interface EditorModel extends EditorState {
+  /** Vim-style count prefix accumulator (CHORE-39 Phase 4 model extension). */
+  countPrefix: number;
+  /** T-Lisp load-paths (CHORE-39 Phase 4 model extension). */
+  loadPaths: string[];
+  /** Currently-loaded module name (CHORE-39 Phase 4 model extension). */
+  currentModuleName: string | undefined;
+}
 
 /**
  * Build an initial model mirroring the Editor constructor's deterministic
@@ -68,6 +76,9 @@ export function initialModel(options?: { readonly initFilePath?: string }): Edit
     currentTabIndex: 0,
     highlightSpans: [],
     foldRanges: new Map(),
+    countPrefix: 0,
+    loadPaths: [],
+    currentModuleName: undefined,
   };
 }
 

@@ -12,6 +12,7 @@
 import type { TLispValue, TLispFunctionImpl } from "../../tlisp/types.ts";
 import { createString, createNil } from "../../tlisp/values.ts";
 import type { FunctionalTextBuffer, Position } from "../../core/types.ts";
+import { runModel, readModelField, type EditorModelAccess } from "./state-context.ts";
 import { Either } from "../../utils/task-either.ts";
 import {
   validateBufferExists
@@ -178,11 +179,15 @@ function calculateEndPosition(startPos: Position, pastedText: string): Position 
  * @returns Map of yank pop function names to implementations
  */
 export function createYankPopOps(
-  getCurrentBuffer: () => FunctionalTextBuffer | null,
-  setCurrentBuffer: (buffer: FunctionalTextBuffer) => void,
-  getCursorLine: () => number,
-  getCursorColumn: () => number
+  access: EditorModelAccess,
+  setCurrentBuffer: (buffer: FunctionalTextBuffer) => void
 ): Map<string, TLispFunctionImpl> {
+  // CHORE-39 Phase 4: cursor/buffer reads flow through the State monad against
+  // EditorModel; writes stay on the supplied setter to preserve side effects.
+  const getCursorLine = (): number => runModel(access, readModelField("cursorPosition")).line;
+  const getCursorColumn = (): number => runModel(access, readModelField("cursorPosition")).column;
+  const getCurrentBuffer = (): FunctionalTextBuffer | null =>
+    runModel(access, readModelField("currentBuffer")) ?? null;
   const api = new Map<string, TLispFunctionImpl>();
 
   /**

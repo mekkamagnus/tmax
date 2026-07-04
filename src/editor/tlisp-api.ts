@@ -13,8 +13,8 @@ import { capTail } from "./log-entry.ts";
 import type { LogCategory, LogView } from "./log-entry.ts";
 import type { LogLevel } from "./message-log.ts";
 import { stateUtils } from "../utils/state.ts";
-import type { EditorModel } from "./functional/model.ts";
-import { runEditorState, type EditorModelAccess } from "./api/state-context.ts";
+import { initialModel, type EditorModel } from "./functional/model.ts";
+import { runModel, type EditorModelAccess } from "./api/state-context.ts";
 import { createValidationError, AppError } from "../error/types.ts";
 import { createBufferOps } from "./api/buffer-ops.ts";
 import { createCursorOps } from "./api/cursor-ops.ts";
@@ -125,17 +125,59 @@ export function createEditorAPI(state: TlispEditorState): Map<string, TLispFunct
   const api = new Map<string, TLispFunctionImpl>();
 
   // CHORE-39 Phase 4: live model access for State-monad API primitives.
-  // Factories migrated to State<EditorModel> (mode-ops, …) receive this handle
-  // instead of closing over mutable state callbacks.
-  const modelAccess: EditorModelAccess = {
-    getModel: () => state.getModel!(),
-    applyModel: (m) => { state.applyModel!(m); },
+  // Factories migrated to State<EditorModel> (mode-ops, lsp-diagnostics, …)
+  // receive this handle instead of closing over mutable state callbacks.
+  //
+  // Compatibility adapter (spec Phase 2): when the supplied state is a real
+  // Editor runtime (getModel/applyModel present), use the live model. When it
+  // is a minimal legacy TlispEditorState (direct createEditorAPI test harness),
+  // project its fields into a fresh EditorModel on each read and write commits
+  // back, so State-monad factories behave correctly in both contexts.
+  const liveModel = !!(state.getModel && state.applyModel);
+  const compatModelFromState = (): EditorModel => {
+    const m = initialModel();
+    m.cursorPosition = { line: state.cursorLine ?? 0, column: state.cursorColumn ?? 0 };
+    m.mode = state.mode;
+    m.statusMessage = state.statusMessage;
+    m.viewportTop = state.viewportTop;
+    m.commandLine = state.commandLine;
+    m.mxCommand = state.mxCommand;
+    m.cursorFocus = state.cursorFocus;
+    m.lastCommand = state.lastCommand;
+    m.currentFilename = state.currentFilename;
+    m.currentBuffer = state.currentBuffer ?? undefined;
+    m.buffers = state.buffers;
+    m.lspDiagnostics = state.lspDiagnostics;
+    m.foldRanges = state.foldRanges;
+    m.searchMatches = state.searchMatches;
+    if (state.config) m.config = state.config;
+    return m;
   };
+  const compatModelToState = (m: EditorModel): void => {
+    state.cursorLine = m.cursorPosition.line;
+    state.cursorColumn = m.cursorPosition.column;
+    state.mode = m.mode;
+    state.statusMessage = m.statusMessage;
+    state.viewportTop = m.viewportTop;
+    state.commandLine = m.commandLine;
+    state.mxCommand = m.mxCommand;
+    state.cursorFocus = m.cursorFocus ?? "buffer";
+    state.lastCommand = m.lastCommand ?? "";
+    state.currentFilename = m.currentFilename;
+    state.currentBuffer = m.currentBuffer ?? null;
+    state.buffers = m.buffers ?? state.buffers;
+    state.lspDiagnostics = m.lspDiagnostics;
+    state.foldRanges = m.foldRanges;
+    state.searchMatches = m.searchMatches;
+  };
+  const modelAccess: EditorModelAccess = liveModel
+    ? { getModel: () => state.getModel!(), applyModel: (m) => { state.applyModel!(m); } }
+    : { getModel: () => compatModelFromState(), applyModel: (m) => { compatModelToState(m); } };
   // Genuine State-monad read of the current mode (used by factories that still
   // take a getMode callback, e.g. cursor-ops). Runs stateUtils.getProperty
   // against EditorModel and commits the (unchanged) snapshot.
   const getModeViaState = (): EditorModel["mode"] =>
-    runEditorState(modelAccess, stateUtils.getProperty<EditorModel, "mode">("mode"));
+    runModel(modelAccess, stateUtils.getProperty<EditorModel, "mode">("mode"));
 
   // Add buffer operations
   const setCursorLine = (line: number) => {
@@ -152,16 +194,12 @@ export function createEditorAPI(state: TlispEditorState): Map<string, TLispFunct
   };
 
   const bufferOps = createBufferOps(
+    modelAccess,
     state.buffers,
-    () => state.currentBuffer,
     (buffer) => { state.currentBuffer = buffer; },
-    () => state.cursorLine,
     setCursorLine,
-    () => state.cursorColumn,
     (column) => { state.cursorColumn = column; },
-    () => state.currentFilename,
     (path: string) => { state.currentFilename = path; },
-    () => state._getBufferModified?.() ?? false,
     (modified: boolean) => state._setBufferModified?.(modified),
     new Set(['*Messages*', '*daemon*', '*Shell Output*', '*Async Output*', '*Tests*']),
   );
@@ -171,12 +209,10 @@ export function createEditorAPI(state: TlispEditorState): Map<string, TLispFunct
 
   // Add cursor operations with visual selection update support (US-1.7.1)
   const cursorOps = createCursorOps(
-    () => state.cursorLine,
+    modelAccess,
     setCursorLine,
-    () => state.cursorColumn,
     (column) => { state.cursorColumn = column; },
-    () => state.currentBuffer,
-    getModeViaState, // getMode - for visual selection updates (State-monad read)
+    getModeViaState, // getMode - State-monad read (cursor-ops reads cursor/buffer via access)
     () => { // updateVisualSelection callback
       const selection = getVisualSelection();
       if (selection) {
@@ -206,7 +242,10 @@ export function createEditorAPI(state: TlispEditorState): Map<string, TLispFunct
   // Add file operations
   const fileOps = createFileOps(
     state.operations,
-    (msg) => { state.statusMessage = msg; }
+    (msg) => { state.statusMessage = msg; },
+    undefined,
+    undefined,
+    modelAccess,
   );
   for (const [key, value] of fileOps.entries()) {
     api.set(key, value);
@@ -214,10 +253,8 @@ export function createEditorAPI(state: TlispEditorState): Map<string, TLispFunct
 
   // Add search operations (before bindings so :nohl can call into search state)
   const searchOps = createSearchOps(
-    () => state.currentBuffer,
-    () => state.cursorLine,
+    modelAccess,
     (line) => { state.cursorLine = line; },
-    () => state.cursorColumn,
     (column) => { state.cursorColumn = column; },
     (message) => { state.statusMessage = message; },
     (ranges) => { state.searchMatches = ranges; }
@@ -233,9 +270,9 @@ export function createEditorAPI(state: TlispEditorState): Map<string, TLispFunct
     if (fn) fn([]);
   };
   const bindingsOps = createBindingsOps(
+    modelAccess,
     () => state.operations,
     (msg) => { state.statusMessage = msg; },
-    () => state.commandLine,
     (cmd) => { state.commandLine = cmd; },
     () => state.mode,
     (mode) => { state.mode = mode; },
@@ -250,10 +287,8 @@ export function createEditorAPI(state: TlispEditorState): Map<string, TLispFunct
 
   // Add word navigation operations
   const wordOps = createWordOps(
-    () => state.currentBuffer,
-    () => state.cursorLine,
+    modelAccess,
     (line) => { state.cursorLine = line; },
-    () => state.cursorColumn,
     (column) => { state.cursorColumn = column; },
     () => state.mode, // getMode
     () => { // updateVisualSelection
@@ -269,10 +304,8 @@ export function createEditorAPI(state: TlispEditorState): Map<string, TLispFunct
 
   // Add line navigation operations
   const lineOps = createLineOps(
-    () => state.currentBuffer,
-    () => state.cursorLine,
+    modelAccess,
     (line) => { state.cursorLine = line; },
-    () => state.cursorColumn,
     (column) => { state.cursorColumn = column; }
   );
   for (const [key, value] of lineOps.entries()) {
@@ -281,11 +314,9 @@ export function createEditorAPI(state: TlispEditorState): Map<string, TLispFunct
 
   // Add delete operator operations
   const deleteOps = createDeleteOps(
-    () => state.currentBuffer,
+    modelAccess,
     (buffer) => { state.currentBuffer = buffer; },
-    () => state.cursorLine,
     (line) => { state.cursorLine = line; },
-    () => state.cursorColumn,
     (column) => { state.cursorColumn = column; }
   );
   for (const [key, value] of deleteOps.entries()) {
@@ -294,11 +325,9 @@ export function createEditorAPI(state: TlispEditorState): Map<string, TLispFunct
 
   // Add yank operator operations
   const yankOps = createYankOps(
-    () => state.currentBuffer,
+    modelAccess,
     (buffer) => { state.currentBuffer = buffer; },
-    () => state.cursorLine,
     (line) => { state.cursorLine = line; },
-    () => state.cursorColumn,
     (column) => { state.cursorColumn = column; }
   );
   for (const [key, value] of yankOps.entries()) {
@@ -307,11 +336,9 @@ export function createEditorAPI(state: TlispEditorState): Map<string, TLispFunct
 
   // Add change operator operations
   const changeOps = createChangeOps(
-    () => state.currentBuffer,
+    modelAccess,
     (buffer) => { state.currentBuffer = buffer; },
-    () => state.cursorLine,
     (line) => { state.cursorLine = line; },
-    () => state.cursorColumn,
     (column) => { state.cursorColumn = column; },
     (mode) => { state.mode = mode; },
     setDeleteRegister
@@ -341,13 +368,10 @@ export function createEditorAPI(state: TlispEditorState): Map<string, TLispFunct
 
   // Add visual mode operations
   const visualOps = createVisualOps(
-    () => state.currentBuffer,
+    modelAccess,
     (buffer) => { state.currentBuffer = buffer; },
-    () => state.cursorLine,
-    () => state.cursorColumn,
     (line) => { state.cursorLine = line; },
     (column) => { state.cursorColumn = column; },
-    () => state.mode,
     (mode) => { state.mode = mode; },
     (msg) => { state.statusMessage = msg; }
   );
@@ -357,10 +381,8 @@ export function createEditorAPI(state: TlispEditorState): Map<string, TLispFunct
 
   // Add text object operations
   const textObjectsOps = createTextObjectsOps(
-    () => state.currentBuffer,
+    modelAccess,
     (buffer) => { state.currentBuffer = buffer; },
-    () => state.cursorLine,
-    () => state.cursorColumn,
     (mode) => { state.mode = mode; }
   );
   for (const [key, value] of textObjectsOps.entries()) {
@@ -369,15 +391,11 @@ export function createEditorAPI(state: TlispEditorState): Map<string, TLispFunct
 
   // Add jump operations (US-1.6.1)
   const jumpOps = createJumpOps(
-    () => state.currentBuffer,
-    () => state.cursorLine,
+    modelAccess,
     (line) => { state.cursorLine = line; },
-    () => state.cursorColumn,
     (column) => { state.cursorColumn = column; },
-    () => state.viewportTop,
     (top) => { state.viewportTop = top; },
     () => state.terminal.getSize().height,
-    () => state.viewportLeft ?? 0,
     (left: number) => { state.viewportLeft = left; },
     () => state.terminal.getSize().width,
   );
@@ -405,19 +423,15 @@ export function createEditorAPI(state: TlispEditorState): Map<string, TLispFunct
 
   // Add yank-pop operations (US-1.9.2)
   const yankPopOps = createYankPopOps(
-    () => state.currentBuffer,
-    (buffer) => { state.currentBuffer = buffer; },
-    () => state.cursorLine,
-    () => state.cursorColumn
+    modelAccess,
+    (buffer) => { state.currentBuffer = buffer; }
   );
   for (const [key, value] of yankPopOps.entries()) {
     api.set(key, value);
   }
 
   // Add LSP diagnostics operations (US-3.1.2)
-  const lspDiagnosticsOps = createLSPDiagnosticsOps(
-    () => ({ state: { lspDiagnostics: state.lspDiagnostics, cursorPosition: { line: state.cursorLine } } })
-  );
+  const lspDiagnosticsOps = createLSPDiagnosticsOps(modelAccess);
   for (const [key, value] of lspDiagnosticsOps.entries()) {
     api.set(key, value);
   }
@@ -463,7 +477,7 @@ export function createEditorAPI(state: TlispEditorState): Map<string, TLispFunct
 
   // Add syntax highlighting operations
   const syntaxOps = createSyntaxOps(
-    () => state.currentBuffer,
+    modelAccess,
     () => {
       const buf = state.currentBuffer;
       if (!buf) return 0;
@@ -483,9 +497,8 @@ export function createEditorAPI(state: TlispEditorState): Map<string, TLispFunct
 
   // Add replace operations
   const replaceOps = createReplaceOps(
-    () => state.currentBuffer,
+    modelAccess,
     (buffer) => { state.currentBuffer = buffer; },
-    () => state.cursorLine,
     (line) => { state.cursorLine = line; }
   );
   for (const [key, value] of replaceOps.entries()) {
@@ -494,9 +507,8 @@ export function createEditorAPI(state: TlispEditorState): Map<string, TLispFunct
 
   // Add indent operations
   const indentOps = createIndentOps(
-    () => state.currentBuffer,
+    modelAccess,
     (buffer) => { state.currentBuffer = buffer; },
-    () => state.cursorLine,
     (line) => { state.cursorLine = line; },
     () => 4 // tabSize default; TODO: read from config
   );
@@ -506,9 +518,7 @@ export function createEditorAPI(state: TlispEditorState): Map<string, TLispFunct
 
   // Add major mode operations
   const majorModeOps = createMajorModeOps(
-    () => state.currentBuffer,
-    () => state.currentFilename,
-    () => state._getBufferModified?.() ?? false,
+    modelAccess,
     (expr: string) => {
       // Real eval callback will be wired from editor.ts via setInterpreter
       const fn = state._evalTlisp;
@@ -529,9 +539,8 @@ export function createEditorAPI(state: TlispEditorState): Map<string, TLispFunct
 
   // Add dired operations
   const diredOps = createDiredOps(
-    () => state.currentBuffer,
+    modelAccess,
     (buffer) => { state.currentBuffer = buffer; },
-    () => state.cursorLine,
     state.buffers
   );
   for (const [key, value] of diredOps.entries()) {
@@ -540,10 +549,7 @@ export function createEditorAPI(state: TlispEditorState): Map<string, TLispFunct
 
   // Add raw file loading operations. Feature loading is handled by require-module.
   const loadOps = createRawLoadOps(
-    () => {
-      const fn = state._getLoadPaths;
-      return fn ? fn() : ['src/tlisp/core'];
-    },
+    modelAccess,
     (expr: string) => {
       const fn = state._evalTlisp;
       return fn ? fn(expr) : Either.right(createNil());
@@ -556,13 +562,10 @@ export function createEditorAPI(state: TlispEditorState): Map<string, TLispFunct
 
   // Add module introspection operations
   const moduleOps = createModuleOps(
+    modelAccess,
     () => {
       const fn = state._getModuleRegistry;
       return fn ? fn() : { isLoaded: () => false, resolve: () => undefined, listModules: () => [], allExports: () => new Map() };
-    },
-    () => {
-      const fn = state._getCurrentModuleName;
-      return fn ? fn() : undefined;
     },
   );
   for (const [key, value] of moduleOps.entries()) {
@@ -604,6 +607,7 @@ export function createEditorAPI(state: TlispEditorState): Map<string, TLispFunct
       },
       setConfig: (config) => { state.config = config; },
     },
+    modelAccess,
   );
   for (const [key, value] of minorModeOps.entries()) {
     api.set(key, value);
@@ -611,6 +615,7 @@ export function createEditorAPI(state: TlispEditorState): Map<string, TLispFunct
 
   // Add AST structural editing operations
   const astOps = createAstOps({
+    access: modelAccess,
     getBufferName: () => state.currentFilename ?? "*scratch*",
     getBufferText: () => {
       const buf = state.currentBuffer;
@@ -645,6 +650,7 @@ export function createEditorAPI(state: TlispEditorState): Map<string, TLispFunct
 
   // Add code navigation operations
   const navigationOps = createNavigationOps({
+    access: modelAccess,
     getBufferName: () => state.currentFilename ?? "*scratch*",
     getBufferText: () => {
       const buf = state.currentBuffer;
@@ -1555,6 +1561,7 @@ export function createEditorAPI(state: TlispEditorState): Map<string, TLispFunct
   // ts-open-external: argv-array browser dispatch (injection-safe).
   // Buffer scanning helpers + fs/git context resolvers live alongside.
   const browseUrlDeps: BrowseUrlPrimitiveDeps = {
+    access: modelAccess,
     getCurrentBuffer: () => state.currentBuffer,
     getCurrentBufferName: () => state.currentFilename ?? "*scratch*",
     getCurrentBufferPath: () => state.currentFilename,
@@ -1590,9 +1597,9 @@ export function createEditorAPI(state: TlispEditorState): Map<string, TLispFunct
  * @returns Map of count operation functions
  */
 export function createCountAPI(editor: any): Map<string, TLispFunctionImpl> {
-  return createCountOps(
-    () => editor.getCount(),
-    (count: number) => editor.setCount(count),
-    () => editor.resetCount()
-  );
+  const access: EditorModelAccess = {
+    getModel: () => editor.getModel(),
+    applyModel: (m) => { editor.applyModel(m); },
+  };
+  return createCountOps(access);
 }
