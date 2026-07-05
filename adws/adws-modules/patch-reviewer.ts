@@ -473,17 +473,37 @@ export function runGates(
     // Spawn 'bun test' directly, NOT 'bun run test:unit'. Same grandchild
     // drain-block fix as BUG-18 in tester.ts — 'bun run' creates a grandchild
     // that keeps pipes open with detached:true, preventing stream 'end'.
-    const unitRes = await deps.runRaw("bun", ["test", "--timeout", "30000", "test/unit/"], { cwd }).run();
-    if (Either.isLeft(unitRes)) {
-      return Either.left(`runGates: test:unit spawn failed: ${unitRes.left}`);
+    // BUG-16: race against a 10-min wall-clock timeout. The full suite can
+    // hang due to the cumulative server-test handle leak; without this cap the
+    // patch-review gate blocks indefinitely.
+    const UNIT_GATE_TIMEOUT_MS = 600_000;
+    let unit: GateResult;
+    try {
+      const unitResult = await Promise.race([
+        deps.runRaw("bun", ["test", "--timeout", "30000", "test/unit/"], { cwd }).run(),
+        new Promise<never>((_, reject) =>
+          setTimeout(() => reject(new Error(`BUG-16 timeout`)), UNIT_GATE_TIMEOUT_MS),
+        ),
+      ]);
+      if (Either.isLeft(unitResult)) {
+        return Either.left(`runGates: test:unit spawn failed: ${unitResult.left}`);
+      }
+      unit = {
+        ok: unitResult.right.ok,
+        exitCode: unitResult.right.exitCode,
+        stdout: unitResult.right.stdout,
+        stderr: unitResult.right.stderr,
+        output: (unitResult.right.stdout + unitResult.right.stderr).trim(),
+      };
+    } catch (e) {
+      unit = {
+        ok: false,
+        exitCode: -1,
+        stdout: "",
+        stderr: e instanceof Error ? e.message : String(e),
+        output: `BUG-16: test:unit gate timed out after ${UNIT_GATE_TIMEOUT_MS / 1000}s`,
+      };
     }
-    const unit: GateResult = {
-      ok: unitRes.right.ok,
-      exitCode: unitRes.right.exitCode,
-      stdout: unitRes.right.stdout,
-      stderr: unitRes.right.stderr,
-      output: (unitRes.right.stdout + unitRes.right.stderr).trim(),
-    };
 
     // tmax-use gate: optional, runs only if playbooks or tests exist.
     let tmaxUse: GateResult | undefined;
