@@ -321,3 +321,43 @@ The core bug fix is structurally complete and verified: test/fixtures/server-tes
 - **Bun fires 'error' synchronously during connect syscall before listeners attach** — handled: test/fixtures/server-test-helpers.ts:60-64 — listeners attached BEFORE socket.connect(socketPath) is called, with explanatory comment. Defensive against missed synchronous error emission.
 - **Wall-time budget of 180s (Task 3 AC)** — missed: Observed 777.42s on this machine — 4.3× the budget. Prior audit observed 823.62s. Suite has grown from 169 to 201 files / 3020 tests since the spec was written, partly explaining the growth, but the explicit AC `Total suite wall-time is under 180s` is not met.
 
+## Re-investigation findings (2026-07-05 — during CHORE-41/42/43 pipeline runs)
+
+The suite started hanging again during adw `/goal` runs on CHORE-41/42/43. The original fix (connectWithTimeout + afterEach + forceShutdown) is still in place, but two server-test files now hang the suite: **`server-daemon-hardening.test.ts`** and **`server-observability.test.ts`**. This is a **regression of the original BUG-16** — the prior audits showed the suite completing (777–823s, exit 0), but the CHORE-39 codebase changes (the `this.state` → `this.model` rewrite, CHORE-41 immutability, CHORE-42 Cmd layer) appear to have re-exposed or shifted the leak.
+
+### Key finding 1: The hang is an EXIT-STALL, not a mid-test block
+
+The tests **all pass** (4/4 in `server-daemon-hardening.test.ts`, each ~4s). "Shutting down tmax server..." / "tmax server closed" prints for every test. But the **process never exits** — 0% CPU, blocked on a lingering handle. This matches the original BUG-16 signature (exit-stall, not a mid-test hang). The difference: the original fix's `run-unit-tests.ts` wrapper force-kills after the summary line, masking the exit-stall for the full suite. But when Claude's `/goal` session runs `bun run test:unit` and a server-test file hangs, the wrapper never reaches the summary.
+
+### Key finding 2: `process._getActiveHandles()` shows ZERO handles in an isolated repro
+
+Built a minimal repro: create server, start, create second server on same socket (rejects), forceShutdown both, then check `_getActiveHandles()`. Result: **0 handles, 0 requests, process exits cleanly.** This means the `shutdown()` path + `forceShutdown(second)` fix IS correct in isolation. The leak in the actual test file comes from a **different vector** — likely the cumulative state of the CHORE-39 refactor (the editor's internal timers, the new `applyUpdate`/`enqueueCmd`/`drainCommands` machinery from CHORE-42, or the model-to-state sync bridge).
+
+### Key finding 3: The leak vector is rejected second-server instances (partially)
+
+`server-daemon-hardening.test.ts` lines 131–132 create `const second = new TmaxServer(socketPath, true)` then expect `second.start()` to reject. The `TmaxServer` constructor (server.ts:158) calls `this.server = createServer()` — creating a `net.Server` handle **before** `start()`. When `start()` rejects (address in use), that handle is never cleaned up because `forceShutdown` is only called on the first `server`, not on `second`. Adding `await forceShutdown(second)` after the rejected `start()` fixed the first test's leak, but the process still hangs — other tests in the file have similar patterns or the leak is in the editor/timer layer.
+
+### Attempted fixes and why they were reverted
+
+| Fix attempted | Result | Why reverted |
+|---|---|---|
+| `forceShutdown(second)` after rejected `start()` | Fixed test 1's leak; process still hangs | Kept in the test file |
+| `server.destroyAllConnections()` in `shutdown()` (Node 18.2+) | Didn't resolve the hang alone | Kept briefly, then reverted with the broader server.ts changes |
+| `this.server.removeAllListeners()` in `shutdown()` | **Broke tests** — removed the `'error'` listener that catches "address in use", so `second.start()` resolved instead of rejecting | Reverted — too aggressive |
+| `process.removeAllListeners('SIGTERM'/'SIGINT')` in test mode | Too aggressive — removes signal handlers from ALL code, not just this server's | Reverted |
+| `run-unit-tests.ts` hard timeout 20min → 8min | Reduces wasted time but doesn't fix the leak | Reverted (cosmetic) |
+
+All `server.ts` production changes were reverted to avoid the regressions. Only the `forceShutdown(second)` test cleanup and the `learnings.md` documentation were kept.
+
+### Recommendation for the real fix
+
+The leak is NOT in the `shutdown()` path (proven by the isolated repro). It's in the **cumulative state** of the editor/runtime across multiple server instances within a single test file. The fix needs:
+
+1. **Per-handle identification**: add `console.error(process._getActiveHandles().map(h => h?.constructor?.name))` to the `afterAll` or `afterEach` of `server-daemon-hardening.test.ts` and `server-observability.test.ts` to see exactly which handle type survives shutdown. Run the individual file and inspect stderr after the summary.
+2. **Likely culprit: editor-internal timers**. The CHORE-39 rewrite (CHORE-42's `enqueueCmd`/`drainCommands`) may have added timers or intervals that aren't cleared in `shutdown()`. Check `src/editor/editor.ts` for `setInterval`/`setTimeout` calls that aren't `.unref()`'d or cleared in `stop()`.
+3. **The `run-unit-tests.ts` wrapper already handles the exit-stall case** (force-kill after summary line). The problem is only when a test hangs MID-SUITE before the summary appears. If the per-handle investigation reveals the leaking handle, clearing it in `afterEach` will prevent the mid-suite hang entirely.
+
+### What this means for the adw pipeline
+
+The BUG-16 hang blocks every `/goal` session whose goal condition includes `bun run test:unit passes`. This affected all three CHORE-41/42/43 runs — each spent 30+ min fighting the test:unit hang before either exhausting or being killed. The workaround (committing Claude's work directly after verifying typecheck + build + targeted tests) works but defeats the pipeline's automated verification. **BUG-16 must be properly fixed (via per-handle identification) before the pipeline can complete a spec end-to-end.**
+
