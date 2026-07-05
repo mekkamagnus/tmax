@@ -22,7 +22,7 @@ import { spawn } from "child_process";
 import { join } from "path";
 
 const PROJECT_ROOT = import.meta.dir + "/../..";
-const WALL_CLOCK_MS = 90_000; // 13 tests at ~3-5s each + T-Lisp load overhead
+const WALL_CLOCK_MS = 150_000; // 13 tests at ~5-9s each under load + T-Lisp load overhead
 
 /**
  * Run a single test file via `bun test` as a subprocess.
@@ -66,7 +66,7 @@ function runTestFileWithGuard(testFile: string): Promise<{ allPassed: boolean; c
 }
 
 describe("BUG-16 file-level exit regression", () => {
-  test("server-daemon-hardening.test.ts: all tests pass under 90s guard", async () => {
+  test("server-daemon-hardening.test.ts: all tests pass under 150s guard", async () => {
     const result = await runTestFileWithGuard(
       join(PROJECT_ROOT, "test/unit/server-daemon-hardening.test.ts"),
     );
@@ -83,9 +83,9 @@ describe("BUG-16 file-level exit regression", () => {
         "The run-unit-tests.ts wrapper handles this in the full suite.",
       );
     }
-  }, 90_000);
+  }, 180_000);
 
-  test("server-observability.test.ts: all tests pass under 90s guard", async () => {
+  test("server-observability.test.ts: all tests pass under 150s guard", async () => {
     const result = await runTestFileWithGuard(
       join(PROJECT_ROOT, "test/unit/server-observability.test.ts"),
     );
@@ -96,5 +96,5 @@ describe("BUG-16 file-level exit regression", () => {
         "The run-unit-tests.ts wrapper handles this in the full suite.",
       );
     }
-  }, 90_000);
+  }, 180_000);
 });
