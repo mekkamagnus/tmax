@@ -476,7 +476,7 @@ export function runGates(
     // BUG-16: race against a 10-min wall-clock timeout. The full suite can
     // hang due to the cumulative server-test handle leak; without this cap the
     // patch-review gate blocks indefinitely.
-    const UNIT_GATE_TIMEOUT_MS = 600_000;
+    const UNIT_GATE_TIMEOUT_MS = 180_000; // 3 min — BUG-16 cap
     let unit: GateResult;
     try {
       const unitResult = await Promise.race([
@@ -511,17 +511,34 @@ export function runGates(
       safePhase(options.onPhase, "gates:tmax-use", "bin/tmax-use test");
       // Spawn bin/tmax-use directly, NOT 'bun run test:tmax-use'. Same grandchild
       // drain-block fix as BUG-18.
-      const tuRes = await deps.runRaw("bin/tmax-use", ["test"], { cwd }).run();
-      if (Either.isLeft(tuRes)) {
-        return Either.left(`runGates: test:tmax-use spawn failed: ${tuRes.left}`);
+      // BUG-16: race against a 3-min wall-clock timeout.
+      const TMAXUSE_GATE_TIMEOUT_MS = 180_000;
+      try {
+        const tuRes = await Promise.race([
+          deps.runRaw("bin/tmax-use", ["test"], { cwd }).run(),
+          new Promise<never>((_, reject) =>
+            setTimeout(() => reject(new Error("BUG-16 tmax-use timeout")), TMAXUSE_GATE_TIMEOUT_MS),
+          ),
+        ]);
+        if (Either.isLeft(tuRes)) {
+          return Either.left(`runGates: test:tmax-use spawn failed: ${tuRes.left}`);
+        }
+        tmaxUse = {
+          ok: tuRes.right.ok,
+          exitCode: tuRes.right.exitCode,
+          stdout: tuRes.right.stdout,
+          stderr: tuRes.right.stderr,
+          output: (tuRes.right.stdout + tuRes.right.stderr).trim(),
+        };
+      } catch (e) {
+        tmaxUse = {
+          ok: false,
+          exitCode: -1,
+          stdout: "",
+          stderr: e instanceof Error ? e.message : String(e),
+          output: `BUG-16: test:tmax-use gate timed out after ${TMAXUSE_GATE_TIMEOUT_MS / 1000}s`,
+        };
       }
-      tmaxUse = {
-        ok: tuRes.right.ok,
-        exitCode: tuRes.right.exitCode,
-        stdout: tuRes.right.stdout,
-        stderr: tuRes.right.stderr,
-        output: (tuRes.right.stdout + tuRes.right.stderr).trim(),
-      };
     }
 
     return Either.right<GateResults, string>({ typecheck, unit, tmaxUse });
