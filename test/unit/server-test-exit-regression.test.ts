@@ -72,17 +72,10 @@ describe("BUG-16 file-level exit regression", () => {
     );
     // All tests must pass — no failures allowed.
     expect(result.allPassed).toBe(true);
-    // The process should ideally exit cleanly. If it doesn't (exit-stall from
-    // a lingering handle), that's the BUG-16 signature — acceptable as long as
-    // all tests passed. Log a warning but don't fail the regression test,
-    // since the run-unit-tests.ts wrapper handles the exit-stall in the full
-    // suite via force-kill after the summary line.
-    if (!result.cleanExit) {
-      console.warn(
-        "BUG-16: server-daemon-hardening.test.ts had an exit-stall (all tests passed but process didn't exit). " +
-        "The run-unit-tests.ts wrapper handles this in the full suite.",
-      );
-    }
+    // The process must exit cleanly under the guard — no exit-stall tolerated.
+    // This is the core BUG-16 regression check: a lingering handle that prevents
+    // process exit is a BUG-16 defect even if all assertions pass.
+    expect(result.cleanExit).toBe(true);
   }, 180_000);
 
   test("server-observability.test.ts: all tests pass under 150s guard", async () => {
@@ -90,11 +83,6 @@ describe("BUG-16 file-level exit regression", () => {
       join(PROJECT_ROOT, "test/unit/server-observability.test.ts"),
     );
     expect(result.allPassed).toBe(true);
-    if (!result.cleanExit) {
-      console.warn(
-        "BUG-16: server-observability.test.ts had an exit-stall (all tests passed but process didn't exit). " +
-        "The run-unit-tests.ts wrapper handles this in the full suite.",
-      );
-    }
+    expect(result.cleanExit).toBe(true);
   }, 180_000);
 });
