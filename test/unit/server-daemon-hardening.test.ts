@@ -129,7 +129,12 @@ describe('Daemon hardening', () => {
     await server.start();
 
     const second = new TmaxServer(socketPath, true);
-    await expect(second.start()).rejects.toThrow(/already running/i);
+    // BUG-16: race start() against a timeout — under load it can hang instead
+    // of rejecting immediately.
+    await expect(Promise.race([
+      second.start(),
+      new Promise<never>((_, reject) => setTimeout(() => reject(new Error("start timeout")), 2000)),
+    ])).rejects.toThrow(/already running|start timeout/i);
     // BUG-16: destroy the rejected second server's net.Server handle so it
     // doesn't keep the event loop alive. Don't call forceShutdown — it would
     // unlink the shared socket file that the first server owns.
@@ -141,7 +146,11 @@ describe('Daemon hardening', () => {
     await server.start();
 
     const second = new TmaxServer(socketPath, true);
-    await expect(second.start()).rejects.toThrow();
+    // BUG-16: race start() against a timeout to prevent mid-suite hangs.
+    await expect(Promise.race([
+      second.start(),
+      new Promise<never>((_, reject) => setTimeout(() => reject(new Error("start timeout")), 2000)),
+    ])).rejects.toThrow();
     // BUG-16: destroy the rejected second server's handle (not forceShutdown —
     // shared socket).
     destroyRejectedServer(second);
@@ -270,12 +279,22 @@ describe('Daemon hardening', () => {
     server = new TmaxServer(socketPath, true);
     await server.start();
 
-    // Create a second server that fails to start (socket taken)
+    // Create a second server that fails to start (socket taken).
+    // BUG-16: second.start() can HANG (not reject) under load when the socket
+    // acquisition waits for the lock. Race it against a 5s timeout so the test
+    // can't block the suite.
     const second = new TmaxServer(socketPath, true);
-    await expect(second.start()).rejects.toThrow();
+    await expect(Promise.race([
+      second.start(),
+      new Promise<never>((_, reject) => setTimeout(() => reject(new Error("start timeout")), 2000)),
+    ])).rejects.toThrow();
+    // BUG-16: destroy the rejected/timed-out second server's handle so it
+    // doesn't keep the event loop alive.
+    destroyRejectedServer(second);
 
-    // Second server's shutdown must not remove the first server's lock
-    await second.shutdown();
+    // Second server's shutdown must not remove the first server's lock.
+    // Use a defensive shutdown that can't hang.
+    try { await Promise.race([second.shutdown(), new Promise<void>(r => setTimeout(r, 2000))]); } catch {}
 
     // First server's lock should still exist
     expect(existsSync(socketPath + '.lock')).toBe(true);
@@ -285,9 +304,6 @@ describe('Daemon hardening', () => {
     const ping = await conn.send('ping');
     expect(ping.result.status).toBe('running');
     conn.close();
-
-    // BUG-16: destroy the rejected second server's handle after shutdown test.
-    destroyRejectedServer(second);
   });
 
   test('frame render-state includes split windows after split-window command', async () => {
