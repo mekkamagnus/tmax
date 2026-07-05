@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { connectWithTimeout, forceShutdown, sweepTestSockets } from '../fixtures/server-test-helpers.ts';
+import { connectWithTimeout, forceShutdown, sweepTestSockets, destroyRejectedServer } from '../fixtures/server-test-helpers.ts';
 
 describe('server-test-helpers', () => {
   describe('connectWithTimeout', () => {
@@ -18,6 +18,24 @@ describe('server-test-helpers', () => {
   describe('forceShutdown', () => {
     test('forceShutdown(null) resolves without throwing', async () => {
       await expect(forceShutdown(null)).resolves.toBeUndefined();
+    });
+  });
+
+  describe('destroyRejectedServer (BUG-16)', () => {
+    test('destroyRejectedServer(null) does not throw', () => {
+      expect(() => destroyRejectedServer(null)).not.toThrow();
+    });
+
+    test('destroyRejectedServer does not throw for a minimal server shape', () => {
+      // A fake object with the expected shape — close/unref should be called
+      // without error. The real use is on a rejected TmaxServer whose start()
+      // failed; here we just verify the helper is safe to call.
+      let closed = false;
+      let unrefed = false;
+      const fake: unknown = { server: { close: () => { closed = true; }, unref: () => { unrefed = true; } } };
+      destroyRejectedServer(fake);
+      expect(closed).toBe(true);
+      expect(unrefed).toBe(true);
     });
   });
 

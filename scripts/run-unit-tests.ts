@@ -24,16 +24,24 @@ import { spawn } from "child_process";
 // tests (server startup, socket RPC, debounced auto-save) take far longer than
 // their isolated runtime. 60s gives headroom without masking genuine hangs.
 const PER_TEST_TIMEOUT_MS = 60_000;
-// Ceiling for the whole suite: ~1900 tests; with 60s per-test headroom the
-// realistic worst case is ~12-15 min, so 20 min is a safe "genuinely hung" line.
+// Ceiling for the whole suite: ~3000 tests across ~200 files. Under load the
+// suite takes ~13-15 min; 20 min catches a genuinely hung process.
 const HARD_TIMEOUT_MS = 1_200_000;
+// BUG-16: inactivity timer — if the child produces NO output for this long, a
+// test is blocked mid-suite (not an exit-stall, which happens after the summary).
+// Server tests under load can have 30-60s gaps between output lines during slow
+// socket setup; 120s catches a genuine block without false-positives.
+const INACTIVITY_TIMEOUT_MS = 120_000;
 
-const args = ["test", "--timeout", String(PER_TEST_TIMEOUT_MS), "test/unit/", ...process.argv.slice(2)];
+// Allow the caller to pass a specific test path; default to the full unit dir.
+const testTarget = process.argv.slice(2).find((a) => !a.startsWith("-")) ?? "test/unit/";
+const args = ["test", "--timeout", String(PER_TEST_TIMEOUT_MS), testTarget, ...process.argv.slice(2).filter((a) => a.startsWith("-"))];
 const child = spawn("bun", args, { stdio: ["ignore", "pipe", "pipe"] });
 
 let stdout = "";
 let stderr = "";
 let sawSummary = false;
+let lastActivityMs = Date.now();
 
 // Stream output through so the caller sees live progress.
 child.stdout.on("data", (chunk: Buffer) => {
@@ -46,11 +54,14 @@ child.stdout.on("data", (chunk: Buffer) => {
   if (!sawSummary && /\bRan \d+ tests? across \d+ files?\b/.test(text)) {
     sawSummary = true;
   }
+  // Reset the inactivity timer on every output chunk.
+  lastActivityMs = Date.now();
 });
 child.stderr.on("data", (chunk: Buffer) => {
   const text = chunk.toString();
   stderr += text;
   process.stderr.write(text);
+  lastActivityMs = Date.now();
 });
 
 // Hard ceiling: if no summary ever appears, a test is genuinely hanging — fail.
@@ -73,7 +84,18 @@ child.on("exit", (code) => {
 
 // Once the summary has printed, the tests are done; if the child hasn't exited
 // on its own within a short grace window, force-kill it (BUG-16 exit-stall).
+// Also check for mid-suite inactivity (BUG-16 mid-test block).
 const graceTimer = setInterval(() => {
+  // BUG-16 mid-test block: if no output for INACTIVITY_TIMEOUT_MS and we
+  // haven't seen the summary, a test is blocked. Kill and fail loudly.
+  if (!sawSummary && Date.now() - lastActivityMs > INACTIVITY_TIMEOUT_MS) {
+    process.stderr.write(
+      `\nrun-unit-tests: no output for ${Math.round(INACTIVITY_TIMEOUT_MS / 1000)}s and no summary — mid-suite hang (BUG-16). Failing.\n`,
+    );
+    child.kill("SIGKILL");
+    process.exit(1);
+  }
+
   if (sawSummary) {
     // Give bun a moment to flush + exit naturally; if still alive, force it.
     setTimeout(() => {

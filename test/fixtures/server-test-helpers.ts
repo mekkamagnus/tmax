@@ -122,6 +122,29 @@ export async function forceShutdown(server: TmaxServer | null): Promise<void> {
 }
 
 /**
+ * BUG-16: Destroy a rejected second-server's net.Server handle WITHOUT
+ * removing the shared socket file. When two TmaxServer instances share the
+ * same socketPath and the second's start() rejects (address in use), the
+ * second's constructor still created a net.Server handle that can keep the
+ * event loop alive. Calling forceShutdown(second) would be wrong — it unlinks
+ * the socket file that the FIRST server owns. This helper destroys only the
+ * rejected server's handle, leaving the live server's socket intact.
+ */
+export function destroyRejectedServer(server: unknown): void {
+  if (!server) return;
+  try {
+    // Access the private net.Server via a defensive cast. We intentionally do
+    // NOT call shutdown() (which removes the shared socket). Just close + unref
+    // the handle so the process can exit.
+    const s = server as { server?: { close: () => void; unref: () => void } };
+    s.server?.close();
+    s.server?.unref();
+  } catch {
+    // best-effort — if the shape is wrong, nothing we can do.
+  }
+}
+
+/**
  * Best-effort sweep of orphaned tmax server-test socket files in /tmp.
  * Intended as a one-shot safety net in a global beforeAll/afterAll — it does
  * NOT replace per-test forceShutdown, just defends against historical

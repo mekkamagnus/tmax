@@ -3,7 +3,7 @@ import { Socket } from 'net';
 import { existsSync, mkdtempSync, rmSync, unlinkSync, writeFileSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
-import { connectWithTimeout, forceShutdown, sweepTestSockets } from '../fixtures/server-test-helpers.ts';
+import { connectWithTimeout, forceShutdown, sweepTestSockets, destroyRejectedServer } from '../fixtures/server-test-helpers.ts';
 import { TmaxServer } from '../../src/server/server.ts';
 
 function uniqueSocket(): string {
@@ -130,6 +130,10 @@ describe('Daemon hardening', () => {
 
     const second = new TmaxServer(socketPath, true);
     await expect(second.start()).rejects.toThrow(/already running/i);
+    // BUG-16: destroy the rejected second server's net.Server handle so it
+    // doesn't keep the event loop alive. Don't call forceShutdown — it would
+    // unlink the shared socket file that the first server owns.
+    destroyRejectedServer(second);
   });
 
   test('starting a second server does not steal the first daemon socket', async () => {
@@ -138,6 +142,9 @@ describe('Daemon hardening', () => {
 
     const second = new TmaxServer(socketPath, true);
     await expect(second.start()).rejects.toThrow();
+    // BUG-16: destroy the rejected second server's handle (not forceShutdown —
+    // shared socket).
+    destroyRejectedServer(second);
 
     // First daemon should still respond to pings
     const conn = await RpcConnection.connect(socketPath);
@@ -278,6 +285,9 @@ describe('Daemon hardening', () => {
     const ping = await conn.send('ping');
     expect(ping.result.status).toBe('running');
     conn.close();
+
+    // BUG-16: destroy the rejected second server's handle after shutdown test.
+    destroyRejectedServer(second);
   });
 
   test('frame render-state includes split windows after split-window command', async () => {
