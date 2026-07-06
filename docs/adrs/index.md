@@ -4,6 +4,12 @@ Records of significant architectural decisions. Each ADR describes the context, 
 
 Ordered most-recent first (highest ADR number = most recent decision). Topic groupings preserved within each section.
 
+## Recent — TUI Rendering, Display, and Interaction Hardening (ADR 0115)
+
+| File | Decision | Related |
+|------|----------|---------|
+| [ADR-0115-tui-rendering-display-interaction-hardening.md](ADR-0115-tui-rendering-display-interaction-hardening.md) | BUG-05 through BUG-12 fixes (wide-char rendering, markdown highlighting, mode auto-detect, which-key vim prefixes, viewport reset, multi-part keymaps, visual demo) + SPEC-067 vim parity (bind every core vim normal-mode key) | BUG-05, BUG-06, BUG-07, BUG-09, BUG-10, BUG-11, BUG-12, SPEC-067, [ADR-0076](ADR-0076-syntax-highlighting-in-render-pipeline.md), [ADR-0086](ADR-0086-which-key-per-instance-state.md), [ADR-0091](ADR-0091-unified-keymap-dispatch.md) |
+
 ## Recent — Functional Core Deepening, Test Infrastructure Hardening (ADR 0114, 0113)
 
 | File | Decision | Related |
