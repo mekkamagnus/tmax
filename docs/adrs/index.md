@@ -4,6 +4,13 @@ Records of significant architectural decisions. Each ADR describes the context, 
 
 Ordered most-recent first (highest ADR number = most recent decision). Topic groupings preserved within each section.
 
+## Recent — Functional Core Deepening, Test Infrastructure Hardening (ADR 0114, 0113)
+
+| File | Decision | Related |
+|------|----------|---------|
+| [ADR-0114-editor-functional-core-deepening.md](ADR-0114-editor-functional-core-deepening.md) | CHORE-41/42/43 — immutable EditorModel (readonly fields, ReadonlyMap), live Cmd/effect layer (enqueueCmd + drain), 91 mutations routed through applyUpdate reducer | CHORE-41, CHORE-42, CHORE-43, [ADR-0111](ADR-0111-editor-functional-elm-architecture.md) |
+| [ADR-0113-adw-test-infrastructure-hardening.md](ADR-0113-adw-test-infrastructure-hardening.md) | BUG-16 server-test lifecycle fix (destroyRejectedServer, inactivity timer, adw-* test exclusion), BUG-22 worktree directive, 529 retry budget expansion (8 retries/28 min), patch-reviewer gate timeouts | BUG-16, BUG-22, BUG-18, CHORE-40, [ADR-0107](ADR-0107-api-529-rate-limit-retry.md), [ADR-0112](ADR-0112-adw-build-goal-mode.md) |
+
 ## Recent — Editor Functional Rewrite, adw Goal Mode (ADR 0112, 0111)
 
 | File | Decision | Related |
