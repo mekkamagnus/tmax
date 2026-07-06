@@ -476,11 +476,14 @@ export function runGates(
     // BUG-16: race against a 10-min wall-clock timeout. The full suite can
     // hang due to the cumulative server-test handle leak; without this cap the
     // patch-review gate blocks indefinitely.
-    const UNIT_GATE_TIMEOUT_MS = 180_000; // 3 min — BUG-16 cap
+    const UNIT_GATE_TIMEOUT_MS = 1_200_000; // 20 min — the suite takes ~900s
     let unit: GateResult;
     try {
+      // BUG-16: use 'bun run test:unit' (the wrapper) which excludes adw-* LLM
+      // integration tests. Bare 'bun test test/unit/' includes those 14 files
+      // which spawn real claude/codex subprocesses and hang under load.
       const unitResult = await Promise.race([
-        deps.runRaw("bun", ["test", "--timeout", "30000", "test/unit/"], { cwd }).run(),
+        deps.runRaw("bun", ["run", "test:unit"], { cwd }).run(),
         new Promise<never>((_, reject) =>
           setTimeout(() => reject(new Error(`BUG-16 timeout`)), UNIT_GATE_TIMEOUT_MS),
         ),

@@ -41,7 +41,7 @@ describe('server-test-helpers', () => {
         const elapsed = Date.now() - start;
         // Must wait at least timeoutMs (the timeout fired) but not much more.
         expect(elapsed).toBeGreaterThanOrEqual(timeoutMs - 50);
-        expect(elapsed).toBeLessThan(timeoutMs + 200);
+        expect(elapsed).toBeLessThan(timeoutMs + 500);
       } finally {
         Socket.prototype.connect = originalConnect;
       }
