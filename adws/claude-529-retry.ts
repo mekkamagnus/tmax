@@ -1,7 +1,7 @@
 import { readFileSync, statSync } from "fs";
 import { Either, TaskEither } from "../src/utils/task-either.ts";
 
-export const CLAUDE_529_BACKOFF_MS = [30_000, 60_000, 120_000] as const;
+export const CLAUDE_529_BACKOFF_MS = [30_000, 60_000, 120_000, 240_000, 300_000, 300_000, 300_000, 300_000] as const;
 
 export interface Claude529RetryEvent {
   attempt: number;
