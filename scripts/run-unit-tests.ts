@@ -33,9 +33,28 @@ const HARD_TIMEOUT_MS = 1_200_000;
 // socket setup; 120s catches a genuine block without false-positives.
 const INACTIVITY_TIMEOUT_MS = 120_000;
 
-// Allow the caller to pass a specific test path; default to the full unit dir.
-const testTarget = process.argv.slice(2).find((a) => !a.startsWith("-")) ?? "test/unit/";
-const args = ["test", "--timeout", String(PER_TEST_TIMEOUT_MS), testTarget, ...process.argv.slice(2).filter((a) => a.startsWith("-"))];
+// Allow the caller to pass a specific test path; default to the full unit dir
+// EXCLUDING adw-* tests (they spawn real LLM subprocesses and belong in
+// test:integration, not test:unit — they block the suite under concurrent
+// pipeline load; see BUG-16 scope-closure docs).
+import { readdirSync } from "fs";
+import { join } from "path";
+
+function buildTestArgs(): string[] {
+  const explicitTarget = process.argv.slice(2).find((a) => !a.startsWith("-"));
+  const flags = process.argv.slice(2).filter((a) => a.startsWith("-"));
+  if (explicitTarget) {
+    return ["test", "--timeout", String(PER_TEST_TIMEOUT_MS), explicitTarget, ...flags];
+  }
+  // Default: all test/unit/*.test.ts EXCEPT adw-* (LLM-subprocess integration tests)
+  const unitDir = join(import.meta.dir, "..", "test", "unit");
+  const allFiles = readdirSync(unitDir)
+    .filter((f) => f.endsWith(".test.ts") && !f.startsWith("adw-"))
+    .map((f) => join("test/unit", f));
+  return ["test", "--timeout", String(PER_TEST_TIMEOUT_MS), ...allFiles, ...flags];
+}
+
+const args = buildTestArgs();
 const child = spawn("bun", args, { stdio: ["ignore", "pipe", "pipe"] });
 
 let stdout = "";
