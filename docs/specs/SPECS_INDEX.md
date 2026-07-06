@@ -1,5 +1,7 @@
 # Specs Index
 
+> ⚠️ **DEPRECATED** — superseded by [index.md](index.md). No longer maintained; frozen around SPEC-066 and lists only a fraction of the current specs (no generator script exists). Kept for history.
+
 All specification and documentation files are numbered for easy reference.
 
 ## Complete List (25 Specs)

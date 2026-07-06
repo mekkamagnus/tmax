@@ -7,7 +7,7 @@ Individual work items organized by type: SPEC (features), BUG (defects), CHORE (
 | File | Description | Related |
 |------|-------------|---------|
 | [prd.md](prd.md) | Product Requirements Document — features, phases, architecture priorities | [ROADMAP.md](../ROADMAP.md), [srs.md](../srs.md), [technical-vision.md](../technical-vision.md) |
-| [SPECS_INDEX.md](SPECS_INDEX.md) | Legacy index of all spec files (auto-generated) | — |
+| [SPECS_INDEX.md](SPECS_INDEX.md) | ⚠️ DEPRECATED — see index.md above. Hand-maintained, frozen at SPEC-066; kept for history | — |
 
 ## Active Specs (Features)
 
@@ -60,17 +60,40 @@ RFC-001 (TRT framework) is implemented across five sequentially-dependent specs.
 | [BUG-01-daemon-client-broken-features.md](BUG-01-daemon-client-broken-features.md) | Daemon/Client Broken and Missing Features | — |
 | [BUG-02-multiline-insert-and-tui-stale-state.md](BUG-02-multiline-insert-and-tui-stale-state.md) | Multiline Insert and TUI Stale State | — |
 | [BUG-05-demo-skill-visual-tmux.md](BUG-05-demo-skill-visual-tmux.md) | Demo skill outputs text instead of visual TUI | — |
+| [BUG-06-markdown-syntax-highlighting.md](BUG-06-markdown-syntax-highlighting.md) | No markdown-mode syntax highlighting | [ADR-0115](../adrs/ADR-0115-tui-rendering-display-interaction-hardening.md) |
+| [BUG-07-which-key-popup.md](BUG-07-which-key-popup.md) | Which-key popup missing for vim prefix keys (z, g, C-w) | [ADR-0115](../adrs/ADR-0115-tui-rendering-display-interaction-hardening.md) |
+| [BUG-08-test-failures-cleanup.md](BUG-08-test-failures-cleanup.md) | 12 pre-existing test failures | — |
+| [BUG-09-emoji-wide-char-rendering.md](BUG-09-emoji-wide-char-rendering.md) | Emoji/wide characters break line-render alignment | [ADR-0115](../adrs/ADR-0115-tui-rendering-display-interaction-hardening.md) |
+| [BUG-10-markdown-mode-not-detected.md](BUG-10-markdown-mode-not-detected.md) | Markdown files show [fundamental] instead of [markdown] | [ADR-0115](../adrs/ADR-0115-tui-rendering-display-interaction-hardening.md) |
+| [BUG-11-which-key-not-working.md](BUG-11-which-key-not-working.md) | Which-key C-g cancellation breaks subsequent vim prefixes | [ADR-0115](../adrs/ADR-0115-tui-rendering-display-interaction-hardening.md) |
+| [BUG-12-zero-key-viewport-scroll.md](BUG-12-zero-key-viewport-scroll.md) | `0` key doesn't reset viewport after horizontal scroll | [ADR-0115](../adrs/ADR-0115-tui-rendering-display-interaction-hardening.md) |
+| [BUG-13-undo-cursor-restore.md](BUG-13-undo-cursor-restore.md) | Undo does not restore pre-edit cursor position | [ADR-0084](../adrs/ADR-0084-undo-pre-edit-cursor-restore.md) |
+| [BUG-16-unit-suite-server-socket-leak.md](BUG-16-unit-suite-server-socket-leak.md) | Unit suite hangs from cumulative socket/server leaks | [ADR-0113](../adrs/ADR-0113-adw-test-infrastructure-hardening.md) |
+| [BUG-17-pipeline-test-agents-dir-leak.md](BUG-17-pipeline-test-agents-dir-leak.md) | adw-pipeline unit tests pollute the real agents/ directory | [ADR-0105](../adrs/ADR-0105-test-isolation-policy.md) |
+| [BUG-18-test-stage-grandchild-drain-block.md](BUG-18-test-stage-grandchild-drain-block.md) | Patch-review gate grandchild drain block | [ADR-0107](../adrs/ADR-0107-api-529-rate-limit-retry.md), [ADR-0108](../adrs/ADR-0108-adw-compile-gate-and-feedback-integrity.md) |
+| [BUG-19-spec065-test-failures-patch-review-crash.md](BUG-19-spec065-test-failures-patch-review-crash.md) | SPEC-065 — 10 remaining test failures + patch-review crash on empty gather | — |
+| [BUG-20-worktree-duplication-on-resume.md](BUG-20-worktree-duplication-on-resume.md) | Worktree isolation creates duplicate worktrees on every resume | [ADR-0109](../adrs/ADR-0109-adw-resume-worktree-validation.md) |
+| [BUG-21-adw-test-typecheck-errors.md](BUG-21-adw-test-typecheck-errors.md) | Pre-existing `typecheck:test` errors block the full suite | — |
 
 ## Chores
 
 | File | Title | Related |
 |------|-------|---------|
+| [CHORE-01-architectural-deepening.md](CHORE-01-architectural-deepening.md) | Architectural Deepening — 5 refactoring candidates | — |
+| [CHORE-02-interchangeable-frontend.md](CHORE-02-interchangeable-frontend.md) | Interchangeable Frontend Framework (Ink + Steep) | [ADR-0059](../adrs/ADR-0059-interchangeable-frontends.md) |
+| [CHORE-03-simplify-review-findings.md](CHORE-03-simplify-review-findings.md) | Consolidate Duplicated Utilities and Fix Code Review Findings | — |
+| [CHORE-04-system-improvements.md](CHORE-04-system-improvements.md) | System Improvements — test fix, logging, keymap migration, editor split, save | — |
+| [CHORE-05-steep-frontend-daemon-wiring.md](CHORE-05-steep-frontend-daemon-wiring.md) | Wire Up Steep Frontend (Primary) + Daemon/Client TUI Bindings | [ADR-0059](../adrs/ADR-0059-interchangeable-frontends.md) |
 | [CHORE-09-texinfo-docs.md](CHORE-09-texinfo-docs.md) | Create Texinfo Documentation | — |
 | [CHORE-10-fix-type-errors-harden-ci.md](CHORE-10-fix-type-errors-harden-ci.md) | Fix All Type Errors and Harden CI | — |
 | [CHORE-16-file-completion.md](CHORE-16-file-completion.md) | Wire file completion into find-file | [ADR-0064](../adrs/ADR-0064-interactive-find-file.md) |
 | [CHORE-18-minibuffer-completion-spec.md](CHORE-18-minibuffer-completion-spec.md) | Consolidate Minibuffer Completion Spec | [ADR-0068](../adrs/ADR-0068-minibuffer-completion-stack.md) |
 | [CHORE-19-frame-aware-rpc.md](CHORE-19-frame-aware-rpc.md) | Frame-Aware RPC Methods | [ADR-0074](../adrs/ADR-0074-frame-aware-rpc-methods.md) |
 | [CHORE-20-status-line-vim-style.md](CHORE-20-status-line-vim-style.md) | Vim-Style Status Line Layout | [ADR-0075](../adrs/ADR-0075-vim-style-status-line.md) |
+| [CHORE-21-render-verification-hardening.md](CHORE-21-render-verification-hardening.md) | Render Verification Hardening | — |
+| [CHORE-22-codebase-simplification.md](CHORE-22-codebase-simplification.md) | Codebase Simplification Pass | — |
+| [CHORE-23-unify-key-dispatch.md](CHORE-23-unify-key-dispatch.md) | Unify Key Dispatch — Keymap-First Architecture | [ADR-0091](../adrs/ADR-0091-unified-keymap-dispatch.md) |
+| [CHORE-24-which-key-ui-upgrade.md](CHORE-24-which-key-ui-upgrade.md) | Upgrade Which-Key Popup UI to RFC-013 Design Standard | [RFC-013](../rfcs/RFC-013-fikra-ai-harness.md) |
 | [CHORE-25-adw-plan-dispatcher.md](CHORE-25-adw-plan-dispatcher.md) | adw-plan.ts — description → spec dispatcher (claude-driven) | [CHORE-26-adw-agent-module.md](CHORE-26-adw-agent-module.md) |
 | [CHORE-26-adw-agent-module.md](CHORE-26-adw-agent-module.md) | Extract claude interface into adws-modules/agent.ts | [CHORE-25-adw-plan-dispatcher.md](CHORE-25-adw-plan-dispatcher.md) |
 | [CHORE-27-adw-spec-review.md](CHORE-27-adw-spec-review.md) | adw-spec-review.ts — spec → reviewed spec (codex-driven) | [CHORE-29-adw-logging-refactor.md](CHORE-29-adw-logging-refactor.md) |
@@ -78,6 +101,18 @@ RFC-001 (TRT framework) is implemented across five sequentially-dependent specs.
 | [CHORE-29-adw-logging-refactor.md](CHORE-29-adw-logging-refactor.md) | Split adw-state.json into state + per-agent events.jsonl | [CHORE-27-adw-spec-review.md](CHORE-27-adw-spec-review.md) |
 | [CHORE-30-adw-build.md](CHORE-30-adw-build.md) | adw-build.ts — spec → implementation dispatcher (claude-driven) | [CHORE-26-adw-agent-module.md](CHORE-26-adw-agent-module.md) |
 | [CHORE-31-tlisp-fp-foundations.md](CHORE-31-tlisp-fp-foundations.md) | T-Lisp FP foundations — make-promise + core/monads (verification of shipped RFC-018 Tier 1 Steps 1.4/1.5) | [RFC-018](../rfcs/RFC-018-tlisp-scripting-primitives.md), [SPEC-058-tlisp-adw-portability-primitives.md](SPEC-058-tlisp-adw-portability-primitives.md) |
+| [CHORE-32-remove-legacy-provide-featurep-require.md](CHORE-32-remove-legacy-provide-featurep-require.md) | Remove legacy provide/featurep/require (SPEC-003, SPEC-007) | — |
+| [CHORE-33-perf-benchmark-harness.md](CHORE-33-perf-benchmark-harness.md) | Performance Benchmark Harness (RFC-019 Phase 0) | [RFC-019](../rfcs/RFC-019-performance-audit.md) |
+| [CHORE-34-perf-phase1-buffer-fixes.md](CHORE-34-perf-phase1-buffer-fixes.md) | Performance Phase 1 — Buffer Incremental-Update Layer (RFC-019 §1.1–1.3) | [RFC-019](../rfcs/RFC-019-performance-audit.md) |
+| [CHORE-35-tmax-use-dogfood-slice.md](CHORE-35-tmax-use-dogfood-slice.md) | tmax-use dogfood slice — cross-repo modal edit → save → disk assertion | — |
+| [CHORE-36-glm-api-status.md](CHORE-36-glm-api-status.md) | z.ai/glm API status checker script | — |
+| [CHORE-37-adw-spec065-bug20-fix-and-cleanup.md](CHORE-37-adw-spec065-bug20-fix-and-cleanup.md) | SPEC-065 blocker fix, BUG-20 re-run, and worktree/doc cleanup | [SPEC-065](SPEC-065-adw-worktree-isolation.md) |
+| [CHORE-38-adw-compile-gate-feedback-integrity.md](CHORE-38-adw-compile-gate-feedback-integrity.md) | adw compile gate + hard-fail tier + feedback-channel integrity | [ADR-0108](../adrs/ADR-0108-adw-compile-gate-and-feedback-integrity.md) |
+| [CHORE-39-functional-editor-rewrite.md](CHORE-39-functional-editor-rewrite.md) | Functional editor rewrite — Elm Architecture + State monad | [ADR-0111](../adrs/ADR-0111-editor-functional-elm-architecture.md), [ADR-0114](../adrs/ADR-0114-editor-functional-core-deepening.md) |
+| [CHORE-40-adw-build-goal-mode.md](CHORE-40-adw-build-goal-mode.md) | adw build stage `/goal` mode — continuous implementation loop | [ADR-0112](../adrs/ADR-0112-adw-build-goal-mode.md) |
+| [CHORE-41-editor-model-immutable.md](CHORE-41-editor-model-immutable.md) | Make EditorModel truly immutable — separate from EditorState | [ADR-0114](../adrs/ADR-0114-editor-functional-core-deepening.md) |
+| [CHORE-42-editor-cmd-layer-live.md](CHORE-42-editor-cmd-layer-live.md) | Make the Cmd/effect layer live — dispatch effects from update() | [ADR-0114](../adrs/ADR-0114-editor-functional-core-deepening.md) |
+| [CHORE-43-editor-reducer-routing.md](CHORE-43-editor-reducer-routing.md) | Route editor mutations through the reducer — applyUpdate everywhere | [ADR-0114](../adrs/ADR-0114-editor-functional-core-deepening.md) |
 
 ## Completed Specs (Still in Active Directory)
 

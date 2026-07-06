@@ -28,3 +28,10 @@ Long-form analysis documents exploring tradeoffs, options, and design decisions 
 | [standalone-tlisp-options-analysis.md](standalone-tlisp-options-analysis.md) | Options for standalone T-Lisp distribution | [standalone-tlisp-gap-analysis.md](standalone-tlisp-gap-analysis.md) |
 | [syntax-highlighting-ast-analysis.md](syntax-highlighting-ast-analysis.md) | Analysis of AST-based syntax highlighting approach | [SPEC-013](../specs/SPEC-013-native-ast-engine.md), [ADR-0076](../adrs/ADR-0076-syntax-highlighting-in-render-pipeline.md) |
 | [elm-purity-tradeoff-analysis.md](elm-purity-tradeoff-analysis.md) | Tradeoff analysis for Elm purity: performance, coordination cost, benefit weighting | [RFC-009](../rfcs/RFC-009-elm-purity-gap-analysis.md), [technical-vision.md](../technical-vision.md) |
+| [parallel-ai-agents-worktree-overview.md](parallel-ai-agents-worktree-overview.md) | Overview of parallel AI agent worktree workflow | [ADR-0094](../adrs/ADR-0094-adw-pipeline-architecture.md) |
+
+## Retrospectives
+
+| File | Description | Related |
+|------|-------------|---------|
+| [2026-07-06-pipeline-reliability-lessons.md](2026-07-06-pipeline-reliability-lessons.md) | Lessons from the July 2026 session: infrastructure bugs, non-deterministic hangs, validation gate gaming, 529 rate limits, test isolation, agent git safety | BUG-16, BUG-22, CHORE-39, CHORE-40, [ADR-0113](../adrs/ADR-0113-adw-test-infrastructure-hardening.md), [ADR-0114](../adrs/ADR-0114-editor-functional-core-deepening.md) |
