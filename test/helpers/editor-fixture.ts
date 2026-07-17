@@ -10,7 +10,7 @@ import type { EditorAPIContext } from "../../src/editor/runtime/editor-api-conte
 import type { FunctionalTextBuffer } from "../../src/core/types.ts";
 import { FunctionalTextBufferImpl } from "../../src/core/buffer.ts";
 import { initialModel } from "../../src/editor/functional/model.ts";
-import { createEditorSession } from "../../src/editor/functional/domain-state.ts";
+import { createEditorSession, createEditorSessionState } from "../../src/editor/functional/domain-state.ts";
 import { createEditorRuntimeCaches } from "../../src/editor/runtime/caches.ts";
 
 /**
@@ -35,7 +35,7 @@ export function createTestAPIContext(overrides: Partial<EditorAPIContext> = {}):
     spacePressed: false,
     mxCommand: "",
     cursorFocus: "buffer" as const,
-    session: createEditorSession(),
+    session: createEditorSession(createEditorSessionState()),
     caches: createEditorRuntimeCaches(),
   };
   const ctx: EditorAPIContext = { ...base, ...overrides } as EditorAPIContext;

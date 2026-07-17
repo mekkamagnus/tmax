@@ -89,10 +89,9 @@ export function createDiredOps(
   setCurrentBuffer: (buffer: FunctionalTextBuffer) => void,
   buffers: Map<string, FunctionalTextBuffer>
 ): Map<string, TLispFunctionImpl> {
-  // CHORE-44 Change 1: per-editor Dired state (was module-global).
-  let diredPath: string = "";
-  let diredMarkedForDelete: Set<number> = new Set();
-  let showHidden: boolean = false;
+  // CHORE-44 Change 1: per-editor Dired state lives on the model-held
+  // `access.getModel().session.dired` object; mutated in place.
+  const s = access.getModel().session.dired;
 
   // CHORE-39 Phase 4: cursor/buffer reads flow through the State monad against
   // EditorModel; writes stay on the supplied setter to preserve side effects.
@@ -137,7 +136,7 @@ export function createDiredOps(
 
     // Format each entry
     for (let i = 0; i < entryValues.length; i++) {
-      const marked = diredMarkedForDelete.has(i);
+      const marked = s.markedForDelete.has(i);
       lines.push(formatEntryLine(entryValues[i]!, marked));
     }
 
@@ -164,8 +163,8 @@ export function createDiredOps(
     }
 
     const dirPath = pathArg.value as string;
-    diredPath = dirPath;
-    diredMarkedForDelete.clear();
+    s.path = dirPath;
+    s.markedForDelete.clear();
 
     const entries = entriesArg.value as TLispValue[];
     const entryValues = entries.map((e): EntryLike | null => {
@@ -305,9 +304,9 @@ export function createDiredOps(
     const line = getCursorLine();
 
     if (mark === "D") {
-      diredMarkedForDelete.add(line);
+      s.markedForDelete.add(line);
     } else {
-      diredMarkedForDelete.delete(line);
+      s.markedForDelete.delete(line);
     }
 
     // Modify the line in the buffer to show/hide the "D" prefix
@@ -405,26 +404,26 @@ export function createDiredOps(
       return Either.left(argsValidation.left);
     }
 
-    if (!diredPath) {
+    if (!s.path) {
       return Either.left(createValidationError(
         'ConstraintViolation',
         'dired-refresh: no directory path set',
-        'diredPath',
-        diredPath,
+        's.path',
+        s.path,
         'non-empty directory path'
       ));
     }
 
     // Re-read the directory using sync fs calls (matching file-ops.ts pattern)
     try {
-      const entries = fs.readdirSync(diredPath, { withFileTypes: true });
+      const entries = fs.readdirSync(s.path, { withFileTypes: true });
       const result: TLispValue[] = entries
         .filter((entry) => {
-          if (!showHidden && entry.name.startsWith(".")) return false;
+          if (!s.showHidden && entry.name.startsWith(".")) return false;
           return true;
         })
         .map((entry) => {
-          const entryPath = path.join(diredPath, entry.name);
+          const entryPath = path.join(s.path, entry.name);
           let size = 0;
           let modified = "";
           try {
@@ -444,8 +443,8 @@ export function createDiredOps(
         });
 
       // Build the formatted listing
-      diredMarkedForDelete.clear();
-      const lines: string[] = [diredPath];
+      s.markedForDelete.clear();
+      const lines: string[] = [s.path];
       for (const entryList of result) {
         const entryArr = entryList.value as TLispValue[];
         lines.push(formatEntryLine(entryArr, false));
@@ -497,9 +496,9 @@ export function createDiredOps(
     } catch {
       return Either.left(createValidationError(
         'ConstraintViolation',
-        `dired-refresh: failed to read directory '${diredPath}'`,
-        'diredPath',
-        diredPath,
+        `dired-refresh: failed to read directory '${s.path}'`,
+        's.path',
+        s.path,
         'readable directory'
       ));
     }

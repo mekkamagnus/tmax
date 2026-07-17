@@ -60,7 +60,7 @@ Status meanings:
 | Step/change | Status | Completed checkpoint | Required pickup point |
 |---|---|---|---|
 | Step 0 | **COMPLETE** | `.chore44-baseline/` holds all inventories (editor methods, Markdown fns, static + runtime API names, RPC methods, ADW state keys, ADW event types, CLI exit codes). `test/unit/chore44-baseline-inventory.test.ts` asserts each as a frozen expected set (6 tests green). | — |
-| Change 1 | **PARTIAL** | Per-editor `EditorSession` and `EditorRuntimeCaches` exist; listed API modules have no top-level mutable `let`; basic register/kill-ring/macro/visual/cache isolation tests pass. | Move all deterministic session state into readonly `EditorModel` domain fields and reducer/state transitions; expand two-editor isolation coverage to every listed state group. |
+| Change 1 | **COMPLETE** | All session state groups (kill ring, registers, delete/yank, yank-pop, visual, macros, search, dired, syntax, replace, undo/redo, major-mode) live on `EditorModel.session: EditorSessionState`; `EditorSession` is an accessor over model state; `major-mode-ops` module-globals deleted (real isolation bug fixed); isolation test covers every group two-editor. | — |
 | Change 2 | **PARTIAL** | `EditorAPIContext` exists; `TlispEditorState`, compatibility projection functions, and underscored hook names are gone; typed-context tests exist. | Remove the renamed mutable bridge fields and direct `ctx.* =` state mutations. Make `access`/`State`/`Msg`/`Cmd` the only deterministic state path. |
 | Change 3 | **PARTIAL** | Logging, plugin, binding-file, and workspace algorithms have collaborators with delegation tests. | Extract the command queue/drain/correlation implementation and the remaining core/fallback/init binding policy. Complete bootstrap consolidation and test every collaborator with fakes. |
 | Change 4 | **PARTIAL** | Sync/async parity and evaluator-instance tests exist; `if`/`let` validation is shared; async dispatch uses one recognition set for delegated forms; core test registries are instance fields. | Extract every required validator and the named module/test/function-call/special-form modules; move remaining evaluator-owned mutable coverage/debug state per instance; keep the evaluator as a thin facade/trampoline. |
@@ -206,20 +206,19 @@ Gate evidence: `bun test test/unit/chore44-baseline-inventory.test.ts` → 6 pas
 
 Two concurrently running `Editor` instances must be completely independent. Mutating registers, kill ring, undo, search, visual selection, macros, Dired state, syntax state, replace state, mode registry, or caches in one editor must not affect the other editor or a later test.
 
-#### Current checkpoint status — PARTIAL (2026-07-17)
+#### Current checkpoint status — COMPLETE (2026-07-17)
 
-Completed:
+All deterministic session state now lives as a readonly nested `EditorModel.session: EditorSessionState` field (initialized by `initialModel()` via `createEditorSessionState()`), and `EditorSession` is a thin accessor layer bound over that model-held state — it owns no separate mutable truth (AC1.6). Every state group named in `Implementation requirements` is covered:
 
-- Added `src/editor/functional/domain-state.ts` with per-editor bound operations for the kill ring, registers, yank-pop, visual selection, and macros.
-- Added `src/editor/runtime/caches.ts`; AST/navigation caches are constructed once per editor and excluded from workspace serialization.
-- Removed top-level mutable `let` state from the modules named by AC1.1.
-- Added `editor-instance-isolation.test.ts` with passing checks for registers, kill ring, macros, visual selection, editor construction/stopping, and AST cache isolation.
+- `EditorSessionState` (new, in `domain-state.ts`) holds the mutable state objects for kill ring, registers, delete/yank registers, yank-pop, visual, macros, search, dired, syntax, replace, undo/redo, and major mode.
+- `createEditorSession(state)` binds the existing `bind*` ops over the model-supplied `state` (no longer creates state). The `model.session` reference is stable across reducer spreads, so bound ops remain valid for the editor's lifetime.
+- Factories migrated to read/write `access.getModel().session.<group>` in place: `search-ops`, `dired-ops`, `syntax-ops`, `replace-ops`, `major-mode-ops`, and `undo-redo-ops` (now receives the state object as its first param).
+- **Real isolation bug fixed:** `major-mode-ops.ts` module-globals (`modeRegistry`, `autoModeRules`, `fallback`) and their `getMajorModeRegistry`/`getAutoModeRules` exporters are deleted; the registry/rules now live on `model.session.majorMode`. `editor.ts`'s redundant `private autoModeRules` removed; `getAutoModeRules()` delegates to the model. (`undo-tree.ts` is confirmed unwired — only its own test consumes it — so left unchanged.)
+- `model.session` is NOT projected into the public `EditorState` (`modelToEditorState`/`editorStateToModelPatch` exclude it), so it is not serialized into workspace JSON (AC1.4 preserved).
 
-Remaining:
+AC1.7 coverage: `editor-instance-isolation.test.ts` now has two-editor cases for registers, kill ring, yank-pop, undo, search/isearch, visual, macros, dired, syntax, replace, major-mode (the module-global-leak regression test), and AST caches. Two `major-mode.test.ts` cases that previously asserted the *buggy* module-global sharing were rewritten to assert per-instance isolation (the correct Change 1 invariant).
 
-- `EditorSession` currently owns mutable closures outside `EditorModel`. Move registers, kill ring, yank-pop, visual, macros, undo, search, Dired, syntax, replace, and editor-specific mode state into readonly nested `EditorModel` fields initialized by `initialModel()` and changed through model transitions.
-- Expand `editor-instance-isolation.test.ts` so two live editors independently exercise every state group named in the objective. Existing single-editor regression files do not prove two-editor isolation.
-- Remove/reset any remaining factory-local state that bypasses `EditorModelAccess`, except explicitly derived non-serializable caches.
+Gate evidence (2026-07-17): exact spec targeted gate `bun test editor-instance-isolation count-prefix macro-recording register-prefix incremental-search undo-redo undo-tree visual-mode-selection dired ast-ops` → **193 pass / 0 fail**; `bun run typecheck` exit 0; `git diff --check` clean; `chore44-baseline-inventory.test.ts` 7/7 (no API names changed).
 
 #### Implementation requirements
 

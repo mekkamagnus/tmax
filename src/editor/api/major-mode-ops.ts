@@ -34,24 +34,13 @@ import { createExtensionRule, createRegexpRule, detectAutoMode } from "../auto-m
 import type { AutoModeRule } from "../mode-state.ts";
 
 /**
- * Registry of all known major modes (shared across all buffers)
+ * CHORE-44 Change 1: the major-mode registry and auto-mode rules are
+ * per-editor model state (lives at `model.session.majorMode`). The previous
+ * module-globals meant registering a custom mode on one editor leaked into
+ * every other editor — a real isolation bug fixed here. The `fundamental`
+ * default is seeded by `createEditorSessionState()` in
+ * `functional/domain-state.ts`.
  */
-const modeRegistry: Map<string, MajorModeConfig> = new Map();
-const autoModeRules: AutoModeRule[] = [];
-
-// Register the default fundamental mode
-modeRegistry.set("fundamental", { name: "fundamental", extensions: [] });
-
-/**
- * Export the registry for mode-loader access
- */
-export function getMajorModeRegistry(): Map<string, MajorModeConfig> {
-  return modeRegistry;
-}
-
-export function getAutoModeRules(): AutoModeRule[] {
-  return autoModeRules;
-}
 
 /**
  * Create major mode operations API functions
@@ -62,22 +51,23 @@ export function createMajorModeOps(
   getCurrentMajorMode?: () => string,
   setCurrentMajorMode?: (mode: string) => void,
 ): Map<string, TLispFunctionImpl> {
+  // CHORE-44 Change 1: per-editor major-mode state (registry, auto-mode
+  // rules, fallback) lives on the model-held `mm` object; mutated in place.
+  const mm = access.getModel().session.majorMode;
   // CHORE-39 Phase 4: buffer/filename/modified reads flow through the State
   // monad against EditorModel; mode read/write + eval stay on callbacks.
   const getCurrentBuffer = (): FunctionalTextBuffer | null =>
     runModel(access, readModelField("currentBuffer")) ?? null;
   const getCurrentFilename = (): string | undefined => runModel(access, readModelField("currentFilename"));
   const getBufferModified = (): boolean => runModel(access, readModelField("bufferModified")) ?? false;
-  // CHORE-44 Change 1: per-editor fallback major mode (was module-global).
-  let fallbackCurrentMode = "fundamental";
   const api = new Map<string, TLispFunctionImpl>();
   const readCurrentMode = (): string =>
-    getCurrentMajorMode ? getCurrentMajorMode() : fallbackCurrentMode;
+    getCurrentMajorMode ? getCurrentMajorMode() : mm.fallback;
   const writeCurrentMode = (mode: string): void => {
     if (setCurrentMajorMode) {
       setCurrentMajorMode(mode);
     } else {
-      fallbackCurrentMode = mode;
+      mm.fallback = mode;
     }
   };
 
@@ -146,10 +136,10 @@ export function createMajorModeOps(
         .filter((s) => s !== "");
     }
 
-    modeRegistry.set(name, config);
+    mm.registry.set(name, config);
     for (const extension of extensions) {
-      if (!autoModeRules.some((rule) => !rule.isRegexp && rule.pattern === extension && rule.mode === name)) {
-        autoModeRules.push(createExtensionRule(extension, name));
+      if (!mm.autoModeRules.some((rule) => !rule.isRegexp && rule.pattern === extension && rule.mode === name)) {
+        mm.autoModeRules.push(createExtensionRule(extension, name));
       }
     }
 
@@ -170,7 +160,7 @@ export function createMajorModeOps(
     }
 
     const modeName = nameArg.value as string;
-    const config = modeRegistry.get(modeName);
+    const config = mm.registry.get(modeName);
     if (!config) {
       return Either.left(createValidationError(
         'ConstraintViolation',
@@ -220,7 +210,7 @@ export function createMajorModeOps(
       return Either.left(argsValidation.left);
     }
 
-    const modeNames = Array.from(modeRegistry.keys()).map((name) => createString(name));
+    const modeNames = Array.from(mm.registry.keys()).map((name) => createString(name));
     return Either.right(createList(modeNames));
   });
 
@@ -236,9 +226,9 @@ export function createMajorModeOps(
       return Either.right(createString("fundamental"));
     }
 
-    const detected = detectAutoMode(filename, autoModeRules);
+    const detected = detectAutoMode(filename, mm.autoModeRules);
     if (detected) {
-      const config = modeRegistry.get(detected);
+      const config = mm.registry.get(detected);
       if (config) {
         writeCurrentMode(config.name);
 
@@ -288,7 +278,7 @@ export function createMajorModeOps(
       ? createRegexpRule(pattern, mode)
       : createExtensionRule(pattern, mode);
 
-    autoModeRules.push(rule);
+    mm.autoModeRules.push(rule);
     return Either.right(createNil());
   });
 
@@ -297,7 +287,7 @@ export function createMajorModeOps(
     const argsValidation = validateArgsCount(args, 0, "auto-mode-list");
     if (Either.isLeft(argsValidation)) return Either.left(argsValidation.left);
 
-    return Either.right(createList(autoModeRules.map((rule) =>
+    return Either.right(createList(mm.autoModeRules.map((rule) =>
       createList([
         createString(rule.pattern),
         createString(rule.mode),
@@ -313,7 +303,7 @@ export function createMajorModeOps(
     const filenameValidation = validateArgType(args[0], "string", 0, "auto-mode-detect");
     if (Either.isLeft(filenameValidation)) return Either.left(filenameValidation.left);
 
-    return Either.right(createString(detectAutoMode(args[0]!.value as string, autoModeRules) ?? "fundamental"));
+    return Either.right(createString(detectAutoMode(args[0]!.value as string, mm.autoModeRules) ?? "fundamental"));
   });
 
   // (major-mode-hook-add MODE HOOK-FN)

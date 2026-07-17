@@ -169,15 +169,9 @@ export function createSearchOps(
   setStatusMessage: (message: string) => void,
   setSearchMatches?: (ranges: Range[]) => void
 ): Map<string, TLispFunctionImpl> {
-  // CHORE-44 Change 1: per-editor search state (was module-global).
-  let lastSearchPattern: string = "";
-  let lastSearchDirection: "forward" | "backward" = "forward";
-  let isearchActive: boolean = false;
-  let isearchPattern: string = "";
-  let isearchDirection: "forward" | "backward" = "forward";
-  let isearchOriginLine: number = 0;
-  let isearchOriginColumn: number = 0;
-  let isearchHighlightRanges: Range[] = [];
+  // CHORE-44 Change 1: per-editor search state lives on the model-held
+  // `access.getModel().session.search` object; mutated in place.
+  const s = access.getModel().session.search;
 
   // CHORE-39 Phase 4: cursor/buffer reads flow through the State monad against
   // EditorModel; writes stay on the supplied setters to preserve side effects.
@@ -215,11 +209,11 @@ export function createSearchOps(
     }
 
     // Reuse previous pattern if empty
-    if (pattern === "" && lastSearchPattern !== "") {
-      pattern = lastSearchPattern;
+    if (pattern === "" && s.lastSearchPattern !== "") {
+      pattern = s.lastSearchPattern;
     } else if (pattern !== "") {
-      lastSearchPattern = pattern;
-      lastSearchDirection = "forward";
+      s.lastSearchPattern = pattern;
+      s.lastSearchDirection = "forward";
     } else {
       return Either.left(createValidationError(
         'ConstraintViolation',
@@ -284,11 +278,11 @@ export function createSearchOps(
     }
 
     // Reuse previous pattern if empty
-    if (pattern === "" && lastSearchPattern !== "") {
-      pattern = lastSearchPattern;
+    if (pattern === "" && s.lastSearchPattern !== "") {
+      pattern = s.lastSearchPattern;
     } else if (pattern !== "") {
-      lastSearchPattern = pattern;
-      lastSearchDirection = "backward";
+      s.lastSearchPattern = pattern;
+      s.lastSearchDirection = "backward";
     } else {
       return Either.left(createValidationError(
         'ConstraintViolation',
@@ -340,7 +334,7 @@ export function createSearchOps(
       ));
     }
 
-    if (lastSearchPattern === "") {
+    if (s.lastSearchPattern === "") {
       return Either.left(createValidationError(
         'ConstraintViolation',
         'No previous search pattern',
@@ -351,10 +345,10 @@ export function createSearchOps(
     }
 
     // Repeat search in same direction
-    if (lastSearchDirection === "forward") {
-      return api.get("search-forward")!([createString(lastSearchPattern)]);
+    if (s.lastSearchDirection === "forward") {
+      return api.get("search-forward")!([createString(s.lastSearchPattern)]);
     } else {
-      return api.get("search-backward")!([createString(lastSearchPattern)]);
+      return api.get("search-backward")!([createString(s.lastSearchPattern)]);
     }
   });
 
@@ -373,7 +367,7 @@ export function createSearchOps(
       ));
     }
 
-    if (lastSearchPattern === "") {
+    if (s.lastSearchPattern === "") {
       return Either.left(createValidationError(
         'ConstraintViolation',
         'No previous search pattern',
@@ -384,10 +378,10 @@ export function createSearchOps(
     }
 
     // Repeat search in opposite direction
-    if (lastSearchDirection === "forward") {
-      return api.get("search-backward")!([createString(lastSearchPattern)]);
+    if (s.lastSearchDirection === "forward") {
+      return api.get("search-backward")!([createString(s.lastSearchPattern)]);
     } else {
-      return api.get("search-forward")!([createString(lastSearchPattern)]);
+      return api.get("search-forward")!([createString(s.lastSearchPattern)]);
     }
   });
 
@@ -406,7 +400,7 @@ export function createSearchOps(
       ));
     }
 
-    return Either.right(createString(lastSearchPattern));
+    return Either.right(createString(s.lastSearchPattern));
   });
 
   /**
@@ -424,7 +418,7 @@ export function createSearchOps(
       ));
     }
 
-    return Either.right(createSymbol(lastSearchDirection));
+    return Either.right(createSymbol(s.lastSearchDirection));
   });
 
   /**
@@ -442,8 +436,8 @@ export function createSearchOps(
       ));
     }
 
-    lastSearchPattern = "";
-    lastSearchDirection = "forward";
+    s.lastSearchPattern = "";
+    s.lastSearchDirection = "forward";
     setStatusMessage("Search cleared");
 
     return Either.right(createNil());
@@ -466,7 +460,7 @@ export function createSearchOps(
       ));
     }
 
-    isearchHighlightRanges = [];
+    s.isearchHighlightRanges = [];
     if (setSearchMatches) setSearchMatches([]);
 
     return Either.right(createNil());
@@ -562,8 +556,8 @@ export function createSearchOps(
     }
 
     // Set search pattern and direction
-    lastSearchPattern = word;
-    lastSearchDirection = "forward";
+    s.lastSearchPattern = word;
+    s.lastSearchDirection = "forward";
 
     // Find next match
     const match = findNextMatch(text, word, currentLine, currentColumn);
@@ -621,8 +615,8 @@ export function createSearchOps(
     }
 
     // Set search pattern and direction
-    lastSearchPattern = word;
-    lastSearchDirection = "backward";
+    s.lastSearchPattern = word;
+    s.lastSearchDirection = "backward";
 
     // Find previous match
     const match = findPreviousMatch(text, word, currentLine, currentColumn);
@@ -709,7 +703,7 @@ export function createSearchOps(
       }
     }
 
-    isearchHighlightRanges = ranges;
+    s.isearchHighlightRanges = ranges;
     if (setSearchMatches) setSearchMatches(ranges);
 
     return Either.right(createNil());
@@ -721,12 +715,12 @@ export function createSearchOps(
    */
   api.set("search-incremental-start", (args: TLispValue[]): Either<AppError, TLispValue> => {
     const dir = args.length > 0 && args[0]!.type === "string" ? args[0]!.value as string : "forward";
-    isearchActive = true;
-    isearchPattern = "";
-    isearchDirection = dir === "backward" ? "backward" : "forward";
-    isearchOriginLine = getCursorLine();
-    isearchOriginColumn = getCursorColumn();
-    isearchHighlightRanges = [];
+    s.isearchActive = true;
+    s.isearchPattern = "";
+    s.isearchDirection = dir === "backward" ? "backward" : "forward";
+    s.isearchOriginLine = getCursorLine();
+    s.isearchOriginColumn = getCursorColumn();
+    s.isearchHighlightRanges = [];
     if (setSearchMatches) setSearchMatches([]);
     setStatusMessage(`I-search${dir === "backward" ? " backward" : ""}: `);
     return Either.right(createNil());
@@ -737,7 +731,7 @@ export function createSearchOps(
    * Usage: (search-incremental-update "c")
    */
   api.set("search-incremental-update", (args: TLispValue[]): Either<AppError, TLispValue> => {
-    if (!isearchActive) {
+    if (!s.isearchActive) {
       return Either.left(createValidationError('ConstraintViolation', 'No active incremental search', 'isearch', null, 'active search'));
     }
 
@@ -748,7 +742,7 @@ export function createSearchOps(
       return Either.left(createValidationError('TypeError', 'Character must be a string', 'char', args[0]!, 'string'));
     }
 
-    isearchPattern += args[0]!.value as string;
+    s.isearchPattern += args[0]!.value as string;
 
     const buf = getCurrentBuffer();
     const bufVal = validateBufferExists(buf);
@@ -758,9 +752,9 @@ export function createSearchOps(
     if (Either.isLeft(contentResult)) return Either.left(createBufferError('Underflow', 'Failed to read buffer'));
 
     const text = contentResult.right;
-    const match = isearchDirection === "forward"
-      ? findNextMatch(text, isearchPattern, isearchOriginLine, isearchOriginColumn)
-      : findPreviousMatch(text, isearchPattern, isearchOriginLine, isearchOriginColumn);
+    const match = s.isearchDirection === "forward"
+      ? findNextMatch(text, s.isearchPattern, s.isearchOriginLine, s.isearchOriginColumn)
+      : findPreviousMatch(text, s.isearchPattern, s.isearchOriginLine, s.isearchOriginColumn);
 
     // Build highlight ranges for all matches
     const lines = text.split('\n');
@@ -768,24 +762,24 @@ export function createSearchOps(
     for (let i = 0; i < lines.length; i++) {
       let col = 0;
       while (true) {
-        const idx = lines[i]!.indexOf(isearchPattern, col);
+        const idx = lines[i]!.indexOf(s.isearchPattern, col);
         if (idx === -1) break;
         ranges.push({
           start: { line: i, column: idx },
-          end: { line: i, column: idx + isearchPattern.length }
+          end: { line: i, column: idx + s.isearchPattern.length }
         });
         col = idx + 1;
       }
     }
-    isearchHighlightRanges = ranges;
+    s.isearchHighlightRanges = ranges;
     if (setSearchMatches) setSearchMatches(ranges);
 
     if (match) {
       setCursorLine(match.line);
       setCursorColumn(match.column);
-      setStatusMessage(`I-search${isearchDirection === "backward" ? " backward" : ""}: ${isearchPattern}`);
+      setStatusMessage(`I-search${s.isearchDirection === "backward" ? " backward" : ""}: ${s.isearchPattern}`);
     } else {
-      setStatusMessage(`Failing I-search${isearchDirection === "backward" ? " backward" : ""}: ${isearchPattern}`);
+      setStatusMessage(`Failing I-search${s.isearchDirection === "backward" ? " backward" : ""}: ${s.isearchPattern}`);
     }
 
     return Either.right(createBoolean(match !== null));
@@ -796,22 +790,22 @@ export function createSearchOps(
    * Usage: (search-incremental-backspace)
    */
   api.set("search-incremental-backspace", (_args: TLispValue[]): Either<AppError, TLispValue> => {
-    if (!isearchActive) {
+    if (!s.isearchActive) {
       return Either.left(createValidationError('ConstraintViolation', 'No active incremental search', 'isearch', null, 'active search'));
     }
 
-    if (isearchPattern.length === 0) {
+    if (s.isearchPattern.length === 0) {
       return Either.right(createString(""));
     }
 
-    isearchPattern = isearchPattern.slice(0, -1);
+    s.isearchPattern = s.isearchPattern.slice(0, -1);
 
-    if (isearchPattern.length === 0) {
-      setCursorLine(isearchOriginLine);
-      setCursorColumn(isearchOriginColumn);
-      isearchHighlightRanges = [];
+    if (s.isearchPattern.length === 0) {
+      setCursorLine(s.isearchOriginLine);
+      setCursorColumn(s.isearchOriginColumn);
+      s.isearchHighlightRanges = [];
       if (setSearchMatches) setSearchMatches([]);
-      setStatusMessage(`I-search${isearchDirection === "backward" ? " backward" : ""}: `);
+      setStatusMessage(`I-search${s.isearchDirection === "backward" ? " backward" : ""}: `);
       return Either.right(createString(""));
     }
 
@@ -823,31 +817,31 @@ export function createSearchOps(
     if (Either.isLeft(contentResult)) return Either.left(createBufferError('Underflow', 'Failed to read buffer'));
 
     const text = contentResult.right;
-    const match = isearchDirection === "forward"
-      ? findNextMatch(text, isearchPattern, isearchOriginLine, isearchOriginColumn)
-      : findPreviousMatch(text, isearchPattern, isearchOriginLine, isearchOriginColumn);
+    const match = s.isearchDirection === "forward"
+      ? findNextMatch(text, s.isearchPattern, s.isearchOriginLine, s.isearchOriginColumn)
+      : findPreviousMatch(text, s.isearchPattern, s.isearchOriginLine, s.isearchOriginColumn);
 
     const lines = text.split('\n');
     const ranges: Range[] = [];
     for (let i = 0; i < lines.length; i++) {
       let col = 0;
       while (true) {
-        const idx = lines[i]!.indexOf(isearchPattern, col);
+        const idx = lines[i]!.indexOf(s.isearchPattern, col);
         if (idx === -1) break;
-        ranges.push({ start: { line: i, column: idx }, end: { line: i, column: idx + isearchPattern.length } });
+        ranges.push({ start: { line: i, column: idx }, end: { line: i, column: idx + s.isearchPattern.length } });
         col = idx + 1;
       }
     }
-    isearchHighlightRanges = ranges;
+    s.isearchHighlightRanges = ranges;
     if (setSearchMatches) setSearchMatches(ranges);
 
     if (match) {
       setCursorLine(match.line);
       setCursorColumn(match.column);
     }
-    setStatusMessage(`I-search${isearchDirection === "backward" ? " backward" : ""}: ${isearchPattern}`);
+    setStatusMessage(`I-search${s.isearchDirection === "backward" ? " backward" : ""}: ${s.isearchPattern}`);
 
-    return Either.right(createString(isearchPattern));
+    return Either.right(createString(s.isearchPattern));
   });
 
   /**
@@ -855,13 +849,13 @@ export function createSearchOps(
    * Usage: (search-incremental-finish)
    */
   api.set("search-incremental-finish", (_args: TLispValue[]): Either<AppError, TLispValue> => {
-    if (!isearchActive) return Either.right(createNil());
-    isearchActive = false;
-    lastSearchPattern = isearchPattern;
-    lastSearchDirection = isearchDirection;
-    isearchHighlightRanges = [];
+    if (!s.isearchActive) return Either.right(createNil());
+    s.isearchActive = false;
+    s.lastSearchPattern = s.isearchPattern;
+    s.lastSearchDirection = s.isearchDirection;
+    s.isearchHighlightRanges = [];
     if (setSearchMatches) setSearchMatches([]);
-    setStatusMessage(isearchPattern ? `Found: ${isearchPattern}` : "Search ended");
+    setStatusMessage(s.isearchPattern ? `Found: ${s.isearchPattern}` : "Search ended");
     return Either.right(createNil());
   });
 
@@ -870,12 +864,12 @@ export function createSearchOps(
    * Usage: (search-incremental-cancel)
    */
   api.set("search-incremental-cancel", (_args: TLispValue[]): Either<AppError, TLispValue> => {
-    if (!isearchActive) return Either.right(createNil());
-    setCursorLine(isearchOriginLine);
-    setCursorColumn(isearchOriginColumn);
-    isearchActive = false;
-    isearchPattern = "";
-    isearchHighlightRanges = [];
+    if (!s.isearchActive) return Either.right(createNil());
+    setCursorLine(s.isearchOriginLine);
+    setCursorColumn(s.isearchOriginColumn);
+    s.isearchActive = false;
+    s.isearchPattern = "";
+    s.isearchHighlightRanges = [];
     if (setSearchMatches) setSearchMatches([]);
     setStatusMessage("Quit");
     return Either.right(createNil());

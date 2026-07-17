@@ -496,36 +496,46 @@ describe("Major Modes", () => {
     });
   });
 
-  // --- Module-level state persistence ---
+  // --- Per-instance state isolation (CHORE-44 Change 1) ---
+  // The major-mode registry used to be module-global, which meant registering
+  // a custom mode on one editor leaked into every other editor. Change 1 moved
+  // the registry onto `model.session.majorMode`; each `getOps()` call below
+  // builds a fresh `initialModel()` and therefore a fresh registry. These
+  // tests now assert the correct invariant: registrations and mode sets made
+  // in one ops instance do NOT appear in another.
 
-  describe("module-level state", () => {
-    test("registrations persist across getOps calls (shared module state)", () => {
-      // Register in first ops instance
+  describe("per-instance state isolation", () => {
+    test("registrations do NOT leak across getOps calls (per-editor registry)", () => {
+      // Register in first ops instance.
       const ops1 = getOps();
       const registerFn = ops1.get("major-mode-register")!;
       registerFn([createString("persistent-mode"), createList([createString("pm")])]);
 
-      // Create a new ops instance
+      // A second ops instance gets a fresh registry; the custom mode must not
+      // be visible there.
       const ops2 = getOps();
       const listFn = ops2.get("major-mode-list")!;
       const result = listFn([]);
       const names = ((result as any).right.value as Array<{ type: string; value: string }>)
         .map((v) => v.value);
-      expect(names).toContain("persistent-mode");
+      expect(names).not.toContain("persistent-mode");
+      // fundamental is seeded by initialModel() → createEditorSessionState().
+      expect(names).toContain("fundamental");
     });
 
-    test("mode set in one ops instance is visible in another", () => {
-      // Register and set in first instance
+    test("mode set in one ops instance is NOT visible in another", () => {
+      // Register and set in first instance.
       const ops1 = getOps();
       ops1.get("major-mode-register")!(
         [createString("shared-test"), createList([createString("st")])]
       );
       ops1.get("major-mode-set")!([createString("shared-test")]);
 
-      // Check in second instance
+      // A second ops instance has its own fallback ("fundamental") and its own
+      // registry; "shared-test" was never registered there.
       const ops2 = getOps();
       const result = ops2.get("major-mode-get")!([]);
-      expect((result as any).right.value).toBe("shared-test");
+      expect((result as any).right.value).toBe("fundamental");
     });
   });
 });

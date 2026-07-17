@@ -36,6 +36,8 @@ import type {
   WhichKeyBinding,
   Window,
 } from "../../core/types.ts";
+import type { EditorSessionState } from "./domain-state.ts";
+import { createEditorSessionState } from "./domain-state.ts";
 
 /**
  * Editor mode union (mirrors the `mode` field on the public `EditorState`).
@@ -135,6 +137,16 @@ export interface EditorModel {
   readonly loadPaths: readonly string[];
   /** Currently-loaded module name. */
   readonly currentModuleName: string | undefined;
+
+  // CHORE-44 Change 1: per-editor deterministic session state. Readonly
+  // reference to a mutable nested container (kill ring, registers, yank-pop,
+  // visual, macros, search, dired, syntax, replace, undo/redo, major-mode).
+  // Reducer spreads preserve this reference for the editor's lifetime so the
+  // ops can mutate the nested objects in place (the same pattern
+  // `ctx.buffers`/`ctx.foldRanges` already use). NOT projected into the
+  // public EditorState or ingress patch — session state stays model-internal
+  // and is never serialized into workspace JSON.
+  readonly session: EditorSessionState;
 }
 
 /**
@@ -186,6 +198,7 @@ export function initialModel(options?: { readonly initFilePath?: string }): Edit
     countPrefix: 0,
     loadPaths: [],
     currentModuleName: undefined,
+    session: createEditorSessionState(),
   };
 }
 

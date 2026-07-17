@@ -22,9 +22,11 @@ import {
 } from "../../error/types.ts";
 
 /**
- * History item representing a single edit
+ * History item representing a single edit. Exported so the model-held
+ * {@link UndoRedoDomainState} (see `functional/domain-state.ts`) can name
+ * the same shape.
  */
-interface HistoryItem {
+export interface HistoryItem {
   description: string;          // Description of the edit (e.g., "delete", "insert")
   buffer: FunctionalTextBuffer;  // Buffer undoState after the edit
   cursorLine?: number;           // Cursor line position after the edit
@@ -34,14 +36,50 @@ interface HistoryItem {
 }
 
 /**
- * Undo/redo undoState management
+ * Undo/redo undoState management. Exported for the same reason as
+ * {@link HistoryItem}.
  */
-interface UndoRedoState {
+export interface UndoRedoState {
   history: HistoryItem[];        // All edits in history
   currentIndex: number;          // Current position in history (-1 = at initial undoState)
 }
 
+/**
+ * Full per-editor undo/redo state group (CHORE-44 Change 1). Bundles
+ * {@link UndoRedoState} with the loose initial/pending buffer+cursor scalars
+ * the factory previously held as separate `let`s. Lives at
+ * `model.session.undoRedo` and is mutated in place by the ops below.
+ */
+export interface UndoRedoDomainState {
+  history: HistoryItem[];
+  currentIndex: number;
+  initialBuffer: FunctionalTextBuffer | null;
+  initialCursorLine: number | undefined;
+  initialCursorColumn: number | undefined;
+  pendingBuffer: FunctionalTextBuffer | null;
+  pendingCursorLine: number | undefined;
+  pendingCursorColumn: number | undefined;
+}
+
+/**
+ * Construct a fresh, independent undo/redo state group. Used by
+ * `createEditorSessionState()` and by direct tests of the undo factory.
+ */
+export function createUndoRedoDomainState(): UndoRedoDomainState {
+  return {
+    history: [],
+    currentIndex: -1,
+    initialBuffer: null,
+    initialCursorLine: undefined,
+    initialCursorColumn: undefined,
+    pendingBuffer: null,
+    pendingCursorLine: undefined,
+    pendingCursorColumn: undefined,
+  };
+}
+
 export function createUndoRedoOps(
+  undoState: UndoRedoDomainState,
   getCurrentBuffer: () => FunctionalTextBuffer | null,
   setCurrentBuffer: (buffer: FunctionalTextBuffer) => void,
   getCursorLine: () => number,
@@ -51,20 +89,9 @@ export function createUndoRedoOps(
   getStatusMessage: () => string,
   setStatusMessage: (msg: string) => void
 ): { api: Map<string, TLispFunctionImpl>; reset: () => void; setInitialBuffer: (buffer: FunctionalTextBuffer) => void } {
-  // CHORE-44 Change 1: per-editor undo/redo state (was module-global). The
-  // history helpers below are inner functions closing over this state.
-  let undoState: UndoRedoState = {
-    history: [],
-    currentIndex: -1
-  };
-
-  // Initial buffer undoState (before any edits)
-  let initialBuffer: FunctionalTextBuffer | null = null;
-  let initialCursorLine: number | undefined = undefined;
-  let initialCursorColumn: number | undefined = undefined;
-  let pendingBuffer: FunctionalTextBuffer | null = null;
-  let pendingCursorLine: number | undefined = undefined;
-  let pendingCursorColumn: number | undefined = undefined;
+  // CHORE-44 Change 1: per-editor undo/redo state lives on the model-held
+  // `undoState` parameter (model.session.undoRedo). The history helpers below
+  // close over and mutate that object in place; no module-global state.
 
 /**
  * Reset undo/redo undoState (for testing)
@@ -74,22 +101,23 @@ function resetUndoRedoState(): void {
   // updates (stateUtils.updateProperty) — commits a fresh UndoRedoState.
   const resetHistory = stateUtils.updateProperty<UndoRedoState, "history">("history", []);
   const resetIndex = stateUtils.updateProperty<UndoRedoState, "currentIndex">("currentIndex", -1);
-  const [, afterHistory] = resetHistory.run(undoState);
+  const [, afterHistory] = resetHistory.run({ history: undoState.history, currentIndex: undoState.currentIndex });
   const [, next] = resetIndex.run(afterHistory);
-  undoState = next;
-  initialBuffer = null;
-  initialCursorLine = undefined;
-  initialCursorColumn = undefined;
-  pendingBuffer = null;
-  pendingCursorLine = undefined;
-  pendingCursorColumn = undefined;
+  undoState.history = next.history;
+  undoState.currentIndex = next.currentIndex;
+  undoState.initialBuffer = null;
+  undoState.initialCursorLine = undefined;
+  undoState.initialCursorColumn = undefined;
+  undoState.pendingBuffer = null;
+  undoState.pendingCursorLine = undefined;
+  undoState.pendingCursorColumn = undefined;
 }
 
 /**
  * Get current undo/redo undoState
  */
 function getUndoRedoState(): UndoRedoState {
-  return undoState;
+  return { history: undoState.history, currentIndex: undoState.currentIndex };
 }
 
 /**
@@ -110,7 +138,7 @@ function pushToHistory(
   preCursorColumn?: number
 ): void {
   // If this is the first edit, save initial buffer undoState
-  if (undoState.history.length === 0 && initialBuffer === null) {
+  if (undoState.history.length === 0 && undoState.initialBuffer === null) {
     // We need to get the initial buffer before the first edit
     // This will be set by the caller
   }
@@ -138,7 +166,7 @@ function pushToHistory(
  * Set initial buffer undoState
  */
 function setInitialBuffer(buffer: FunctionalTextBuffer): void {
-  initialBuffer = buffer;
+  undoState.initialBuffer = buffer;
 }
 
 /**
@@ -170,11 +198,11 @@ function undo(
   // corresponds to "before this edit". The undone item's pre-edit cursor is
   // always the position immediately before this edit was applied.
   if (undoState.currentIndex === 0) {
-    if (initialBuffer) {
-      setCurrentBuffer(initialBuffer);
+    if (undoState.initialBuffer) {
+      setCurrentBuffer(undoState.initialBuffer);
     }
-    const restoreLine = undoneItem.preCursorLine ?? initialCursorLine ?? undoneItem.cursorLine;
-    const restoreColumn = undoneItem.preCursorColumn ?? initialCursorColumn ?? undoneItem.cursorColumn;
+    const restoreLine = undoneItem.preCursorLine ?? undoState.initialCursorLine ?? undoneItem.cursorLine;
+    const restoreColumn = undoneItem.preCursorColumn ?? undoState.initialCursorColumn ?? undoneItem.cursorColumn;
     if (setCursorLine && restoreLine !== undefined && restoreLine !== null) {
       setCursorLine(restoreLine);
     }
@@ -262,9 +290,9 @@ function redo(
       ));
     }
 
-    pendingBuffer = getCurrentBuffer();
-    pendingCursorLine = getCursorLine();
-    pendingCursorColumn = getCursorColumn();
+    undoState.pendingBuffer = getCurrentBuffer();
+    undoState.pendingCursorLine = getCursorLine();
+    undoState.pendingCursorColumn = getCursorColumn();
     return Either.right(createNil());
   });
 
@@ -283,24 +311,24 @@ function redo(
     }
 
     const currentBuffer = getCurrentBuffer();
-    if (pendingBuffer && currentBuffer && pendingBuffer !== currentBuffer) {
+    if (undoState.pendingBuffer && currentBuffer && undoState.pendingBuffer !== currentBuffer) {
       if (undoState.history.length === 0) {
-        setInitialBuffer(pendingBuffer);
-        initialCursorLine = pendingCursorLine;
-        initialCursorColumn = pendingCursorColumn;
+        setInitialBuffer(undoState.pendingBuffer);
+        undoState.initialCursorLine = undoState.pendingCursorLine;
+        undoState.initialCursorColumn = undoState.pendingCursorColumn;
       }
       pushToHistory(
         args[0]!.value as string,
         currentBuffer,
         getCursorLine(),
         getCursorColumn(),
-        pendingCursorLine ?? undefined,
-        pendingCursorColumn ?? undefined
+        undoState.pendingCursorLine ?? undefined,
+        undoState.pendingCursorColumn ?? undefined
       );
     }
-    pendingBuffer = null;
-    pendingCursorLine = undefined;
-    pendingCursorColumn = undefined;
+    undoState.pendingBuffer = null;
+    undoState.pendingCursorLine = undefined;
+    undoState.pendingCursorColumn = undefined;
 
     return Either.right(createNil());
   });

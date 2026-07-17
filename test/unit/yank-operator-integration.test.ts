@@ -12,7 +12,7 @@ import type { FunctionalTextBuffer } from "../../src/core/types.ts";
 import { Either } from "../../src/utils/task-either.ts";
 import { createYankOps } from "../../src/editor/api/yank-ops.ts";
 import { initialModel } from "../../src/editor/functional/model.ts";
-import { createEditorSession } from "../../src/editor/functional/domain-state.ts";
+import { createEditorSession, createEditorSessionState } from "../../src/editor/functional/domain-state.ts";
 
 /**
  * Test helper to create a buffer with content
@@ -54,7 +54,7 @@ describe("Yank Operator Integration - US-1.2.2", () => {
           cursorColumn = m.cursorPosition.column;
         },
       },
-      createEditorSession(),
+      createEditorSession(createEditorSessionState()),
       (buf) => { currentBuffer = buf; },
       (line) => { cursorLine = line; },
       (col) => { cursorColumn = col; }

@@ -264,6 +264,7 @@ export function createEditorAPI(ctx: EditorAPIContext): Map<string, TLispFunctio
 
   // Add undo/redo operations
   const undoRedoOps = createUndoRedoOps(
+    modelAccess.getModel().session.undoRedo,
     () => ctx.currentBuffer,
     (buffer) => { ctx.currentBuffer = buffer; },
     () => ctx.cursorLine,

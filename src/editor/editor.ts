@@ -45,7 +45,7 @@ import { createTabOps } from "./api/tab-ops.ts";
 import { log } from "../utils/logger.ts";
 import { KeymapSync } from "./keymap-sync.ts";
 import { createKeymapOps } from "./api/keymap-ops.ts";
-import { createEditorSession } from "./functional/domain-state.ts";
+import { createEditorSession, createEditorSessionState } from "./functional/domain-state.ts";
 import type { EditorSession } from "./functional/domain-state.ts";
 import {
   type BufferModeState,
@@ -87,9 +87,11 @@ type CommandOutcome =
  */
 export class Editor {
   private model: EditorModel;
-  // CHORE-44 Change 1: per-editor session state (kill ring, registers, visual,
-  // macros, …) — one instance per editor so concurrent editors are independent.
-  private session: EditorSession = createEditorSession();
+  // CHORE-44 Change 1: per-editor session accessors (kill ring, registers,
+  // visual, macros, …) bound over `this.model.session`. Set in the constructor
+  // immediately after `this.model` is assigned so concurrent editors are
+  // independent and `EditorModel` is the single state container.
+  private session!: EditorSession;
   // CHORE-44 Change 1: per-editor AST/parse caches (not shared, not serialized).
   private caches: EditorRuntimeCaches = createEditorRuntimeCaches();
   private buffers: Map<string, FunctionalTextBufferImpl> = new Map();
@@ -121,7 +123,8 @@ export class Editor {
   private bufferModeStates: Map<string, BufferModeState> = new Map();
   private minorModeRegistry: Map<string, MinorModeConfig> = new Map();
   private globalizedMinorModes: Set<string> = new Set();
-  private autoModeRules: AutoModeRule[] = [];
+  // CHORE-44 Change 1: auto-mode rules now live on `this.model.session.majorMode.autoModeRules`
+  // (per-editor, killing the prior module-global leak). The getter below delegates.
   // loadPaths now lives on this.model (CHORE-39 Phase 4).
   // currentModuleName now lives on this.model (CHORE-39 Phase 4).
   private bufferMetadata: Map<string, { filename?: string; modified: boolean; recency: number }> = new Map();
@@ -187,7 +190,17 @@ export class Editor {
       countPrefix: 0,
       loadPaths: [`${import.meta.dir}/../tlisp/core`],
       currentModuleName: undefined,
+      // CHORE-44 Change 1: per-editor session state — construct first so the
+      // session field is initialized before any API factory reads it. The model
+      // is the single state container; the session layer is a thin accessor.
+      session: createEditorSessionState(),
     };
+
+    // CHORE-44 Change 1: bind the session accessors over the model-held state.
+    // Must happen after `this.model` is assigned (above) and before
+    // `initializeAPI()` (below) so the API factories close over the live
+    // model-held session object.
+    this.session = createEditorSession(this.model.session);
 
     this.whichKeyHandle = createWhichKeyState(this.model.whichKeyTimeout ?? DEFAULT_WHICH_KEY_TIMEOUT);
 
@@ -2542,10 +2555,12 @@ export class Editor {
   }
 
   /**
-   * Get auto-mode rules
+   * Get auto-mode rules. CHORE-44 Change 1: delegates to the model-held
+   * per-editor auto-mode rules (`model.session.majorMode.autoModeRules`),
+   * which `major-mode-register`/`auto-mode-add` mutate in place.
    */
   getAutoModeRules(): AutoModeRule[] {
-    return this.autoModeRules;
+    return this.model.session.majorMode.autoModeRules;
   }
 
   /**

@@ -20,9 +20,11 @@ import {
 } from "../../error/types.ts";
 
 /**
- * Replace session state
+ * Replace session state. Exported so the model-held
+ * {@link EditorSessionState.replace} field (see `functional/domain-state.ts`)
+ * can name the same shape.
  */
-interface ReplaceState {
+export interface ReplaceState {
   findPattern: string;
   replaceText: string;
   matches: { line: number; startCol: number; endCol: number }[];
@@ -44,15 +46,9 @@ export function createReplaceOps(
   setCurrentBuffer: (buffer: FunctionalTextBuffer) => void,
   setCursorLine: (line: number) => void
 ): Map<string, TLispFunctionImpl> {
-  // CHORE-44 Change 1: per-editor replace session state (was module-global).
-  let replaceState: ReplaceState = {
-    findPattern: "",
-    replaceText: "",
-    matches: [],
-    currentIndex: 0,
-    count: 0,
-    active: false
-  };
+  // CHORE-44 Change 1: per-editor replace session state lives on the
+  // model-held `access.getModel().session.replace` object; mutated in place.
+  const replaceState = access.getModel().session.replace;
   // CHORE-39 Phase 4: cursor/buffer reads flow through the State monad against
   // EditorModel; writes stay on the supplied setters to preserve side effects.
   const getCursorLine = (): number => runModel(access, readModelField("cursorPosition")).line;
@@ -329,14 +325,12 @@ export function createReplaceOps(
       });
     }
 
-    replaceState = {
-      findPattern: findArg.value as string,
-      replaceText: replaceArg.value as string,
-      matches: parsedMatches,
-      currentIndex: 0,
-      count: 0,
-      active: true
-    };
+    replaceState.findPattern = findArg.value as string;
+    replaceState.replaceText = replaceArg.value as string;
+    replaceState.matches = parsedMatches;
+    replaceState.currentIndex = 0;
+    replaceState.count = 0;
+    replaceState.active = true;
 
     return Either.right(createNil());
   });
@@ -482,14 +476,12 @@ export function createReplaceOps(
 
     const finalCount = replaceState.count;
 
-    replaceState = {
-      findPattern: "",
-      replaceText: "",
-      matches: [],
-      currentIndex: 0,
-      count: 0,
-      active: false
-    };
+    replaceState.findPattern = "";
+    replaceState.replaceText = "";
+    replaceState.matches = [];
+    replaceState.currentIndex = 0;
+    replaceState.count = 0;
+    replaceState.active = false;
 
     return Either.right(createNumber(finalCount));
   });

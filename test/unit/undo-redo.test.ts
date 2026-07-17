@@ -11,7 +11,7 @@
 import { describe, test, expect, beforeEach } from "bun:test";
 import { expectRight } from "../helpers/editor-fixture.ts";
 import { Either } from "../../src/utils/task-either.ts";
-import { createUndoRedoOps } from "../../src/editor/api/undo-redo-ops.ts";
+import { createUndoRedoOps, createUndoRedoDomainState } from "../../src/editor/api/undo-redo-ops.ts";
 import type { FunctionalTextBuffer } from "../../src/core/types.ts";
 import type { TLispValue } from "../../src/tlisp/types.ts";
 
@@ -137,6 +137,7 @@ describe("Undo/Redo Operations", () => {
     currentStatusMessage = "";
 
     const undoRedoCore = createUndoRedoOps(
+      createUndoRedoDomainState(),
       () => currentBuffer,
       (buffer) => { currentBuffer = buffer; },
       () => 0,  // cursorLine
@@ -421,6 +422,7 @@ describe("Undo/Redo Operations", () => {
       let savedColumn = 10;
 
       const { api: ops } = createUndoRedoOps(
+      createUndoRedoDomainState(),
         () => currentBuffer,
         (buffer) => { currentBuffer = buffer; },
         () => savedLine,
@@ -467,6 +469,7 @@ describe("Undo/Redo Operations", () => {
       let savedColumn = 0;
 
       const { api: ops } = createUndoRedoOps(
+      createUndoRedoDomainState(),
         () => currentBuffer,
         (buffer) => { currentBuffer = buffer; },
         () => savedLine,
@@ -515,6 +518,7 @@ describe("Undo/Redo Operations", () => {
       let savedColumn = 7;
 
       const { api: ops } = createUndoRedoOps(
+      createUndoRedoDomainState(),
         () => currentBuffer,
         (buffer) => { currentBuffer = buffer; },
         () => savedLine,
@@ -558,6 +562,7 @@ describe("Undo/Redo Operations", () => {
       let savedColumn = 0;
 
       const { api: ops } = createUndoRedoOps(
+      createUndoRedoDomainState(),
         () => currentBuffer,
         (buffer) => { currentBuffer = buffer; },
         () => savedLine,

@@ -19,7 +19,7 @@ import {
   createYankOps
 } from "../../src/editor/api/yank-ops.ts";
 import { initialModel } from "../../src/editor/functional/model.ts";
-import { createEditorSession } from "../../src/editor/functional/domain-state.ts";
+import { createEditorSession, createEditorSessionState } from "../../src/editor/functional/domain-state.ts";
 import {
   createYankPopOps
 } from "../../src/editor/api/yank-pop-ops.ts";
@@ -35,7 +35,7 @@ describe("Yank Pop Integration (US-1.9.2)", () => {
 
   // CHORE-44 Change 1: shared per-editor session for kill ring / yank-pop /
   // yank register, with legacy-name wrappers so the body is unchanged.
-  const session = createEditorSession();
+  const session = createEditorSession(createEditorSessionState());
   const resetKillRing = () => session.killRing.reset();
   const resetYankPopState = () => session.yankPop.reset();
   const setYankRegister = (text: string) => session.yankRegister.set(text);

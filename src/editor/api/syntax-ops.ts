@@ -43,10 +43,9 @@ export function createSyntaxOps(
   getLineCount: () => number,
   getLine: (line: number) => string
 ): Map<string, TLispFunctionImpl> {
-  // CHORE-44 Change 1: per-editor syntax state (was module-global).
-  let activeLanguage: string = "";
-  let highlightEnabled: boolean = false;
-  let storedSpans: HighlightSpan[][] = [];
+  // CHORE-44 Change 1: per-editor syntax state lives on the model-held
+  // `access.getModel().session.syntax` object; mutated in place.
+  const s = access.getModel().session.syntax;
   // CHORE-39 Phase 4: current-buffer read flows through the State monad against
   // EditorModel; line count/line text stay on the supplied derived callbacks.
   const getCurrentBuffer = (): unknown => runModel(access, readModelField("currentBuffer"));
@@ -79,8 +78,8 @@ export function createSyntaxOps(
       ));
     }
 
-    activeLanguage = name;
-    return Either.right(createString(activeLanguage));
+    s.activeLanguage = name;
+    return Either.right(createString(s.activeLanguage));
   });
 
   /**
@@ -93,7 +92,7 @@ export function createSyntaxOps(
       return Either.left(argsValidation.left);
     }
 
-    return Either.right(createString(activeLanguage));
+    return Either.right(createString(s.activeLanguage));
   });
 
   /**
@@ -106,7 +105,7 @@ export function createSyntaxOps(
       return Either.left(argsValidation.left);
     }
 
-    highlightEnabled = true;
+    s.highlightEnabled = true;
     return Either.right(createNil());
   });
 
@@ -120,7 +119,7 @@ export function createSyntaxOps(
       return Either.left(argsValidation.left);
     }
 
-    highlightEnabled = false;
+    s.highlightEnabled = false;
     return Either.right(createNil());
   });
 
@@ -134,8 +133,8 @@ export function createSyntaxOps(
       return Either.left(argsValidation.left);
     }
 
-    highlightEnabled = !highlightEnabled;
-    return Either.right(createBoolean(highlightEnabled));
+    s.highlightEnabled = !s.highlightEnabled;
+    return Either.right(createBoolean(s.highlightEnabled));
   });
 
   /**
@@ -155,7 +154,7 @@ export function createSyntaxOps(
       return Either.left(typeValidation.left);
     }
 
-    if (!activeLanguage) {
+    if (!s.activeLanguage) {
       return Either.left(createValidationError(
         "ConstraintViolation",
         "No language set. Use (syntax-set-language \"name\") first.",
@@ -174,7 +173,7 @@ export function createSyntaxOps(
       ));
     }
 
-    const rules = languageMap.get(activeLanguage)!;
+    const rules = languageMap.get(s.activeLanguage)!;
     const lineText = getLine(lineNum);
     const result = tokenize(lineText, lineNum, rules);
     const tokens = Array.isArray(result) ? result : (result as { tokens?: SyntaxToken[] }).tokens ?? [];
@@ -218,7 +217,7 @@ export function createSyntaxOps(
       return Either.left(argsValidation.left);
     }
 
-    storedSpans = [];
+    s.storedSpans = [];
     return Either.right(createNil());
   });
 
@@ -239,7 +238,7 @@ export function createSyntaxOps(
       return Either.left(typeValidation.left);
     }
 
-    if (!activeLanguage) {
+    if (!s.activeLanguage) {
       return Either.left(createValidationError(
         "ConstraintViolation",
         "No language set. Use (syntax-set-language \"name\") first.",
@@ -258,7 +257,7 @@ export function createSyntaxOps(
       ));
     }
 
-    const rules = languageMap.get(activeLanguage)!;
+    const rules = languageMap.get(s.activeLanguage)!;
     const lineText = getLine(lineNum);
     const result = tokenize(lineText, lineNum, rules);
     const tokens = Array.isArray(result) ? result : (result as { tokens?: SyntaxToken[] }).tokens ?? [];
