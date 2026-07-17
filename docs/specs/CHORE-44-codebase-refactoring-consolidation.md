@@ -66,7 +66,8 @@ Status meanings:
 | Change 4 | **COMPLETE** | evaluator.ts 5021→4005 lines; form-shapes validators for all named forms (AC4.1); single `special-form-dispatch.ts` classification (AC4.2); `module-forms.ts`/`test-forms.ts`/`function-calls.ts` extracted, evaluator delegates (AC4.7); per-instance `CoverageState` (AC4.8); TCO/async/macros/modules/trt/trace verified intact (full evaluator gate 154/0). | — |
 | Change 5 | **COMPLETE** | Exact named result types for 18/23 methods + named `JsonObject` for 5 genuinely-dynamic serialized-state results (no `unknown`, param catch-all removed — AC5.7); router owns version/lookup/`-32602`/error-mapping (AC5.8); 4 domain handler files + `ServerContext`, server.ts 2353→1614 lines (AC5.9); declarative `SYNC_POLICY` + `server-frame-sync.test.ts` proving AC5.3–5.5; `server-rpc-router.test.ts`. Server gate 84/0 (no hangs). | — |
 | Change 6 | **COMPLETE** | `:%s`/`:s`/`:dired` parsing → T-Lisp `command-line.tlisp` dispatcher; markdown list-continuation + indent → T-Lisp `post-newline.tlisp` hook; handlers are pure routers (AC6.2/6.3); `architecture-boundaries.test.ts` scans all 6 handlers (AC6.6). Found+fixed a Change 4 `set!` dispatch typo (a476392) that had broken 40 editor tests. Gate 209/0. | — |
-| Changes 7–12 | **NOT STARTED** | No numbered change has its principal implementation/test files. | Resume in order only after Changes 1–6 meet their completion gates. |
+| Change 7 | **COMPLETE** | `registry.ts` (`EditorAPIContribution` + `registerContributions` with typed duplicate rejection); `createEditorAPI` composes 43 contributions declaratively (no copy loops — AC7.3); ast+navigation share `ctx.caches` (AC7.4); inventory stays exactly 350 (AC7.1); `editor-api-registry.test.ts` (12 tests). Gate 67/0 + broad 173/0. | — |
+| Changes 8–12 | **NOT STARTED** | No numbered change has its principal implementation/test files. | Resume in order only after Change 7. |
 | Steps 13–14 | **NOT STARTED** | Existing unrelated Vim/Markdown playbooks remain available. | Create the cross-cutting CHORE-44 playbook only after Changes 1–12 are complete, then run the full validation matrix. |
 
 ### Definition of complete for every numbered change
@@ -519,9 +520,17 @@ Completion gate: AC6.1–AC6.6, the complete targeted test list, and `bun run te
 
 Make the T-Lisp primitive inventory explicit, deterministic, typed, and collision-safe. `tlisp-api.ts` should describe contributions, not manually copy every Map entry and rebuild the same dependency callbacks.
 
-#### Current checkpoint status — NOT STARTED (2026-07-17)
+#### Current checkpoint status — COMPLETE (2026-07-17)
 
-`src/editor/api/registry.ts` and `test/unit/editor-api-registry.test.ts` do not exist. Do not count the shared API context or per-editor caches from Changes 1–2 as Change 7 completion; begin only after Change 6 is complete.
+NEW `src/editor/api/registry.ts` defines `EditorAPIContribution` (`name` + `factory(ctx) => Map<string, TLispFunctionImpl>`) and `registerContributions(ctx, contributions): Either<AppError, Map<…>>` — merges in declared order into a fresh Map; a cross-contribution duplicate primitive returns a typed `Left` (`ConstraintViolation`, constraint `unique-primitive-name-across-contributions`) naming BOTH contributions + the primitive. `createEditorAPI(ctx)` now builds 43 contributions and delegates to `registerContributions` (throws on `Left` so a composition bug can't ship silently). Each contribution's factory extracts its own deps from `ctx`; `create*Ops` signatures/behavior are unchanged. The `buffer-get-line`→`buffer-line` alias lives inside the `buffer` contribution (legitimate same-impl, two names within one Map — doesn't trip cross-contribution detection). `http-request` now owns its own per-editor id counter (was shared with subprocess; still unique per-editor).
+
+- **AC7.1** — inventory stays exactly 350 names (`.chore44-baseline/api-names-static.txt`); `chore44-baseline-inventory.test.ts` green.
+- **AC7.2** — duplicate rejection returns the typed failure naming both contributions.
+- **AC7.3** — `tlisp-api.ts` has zero `for (const [key,value] of …entries()) api.set(…)` copy loops (verified by static scan).
+- **AC7.4** — ast + navigation contributions both read `ctx.caches` (same reference); proven by a spy test.
+- **AC7.5** — two `createEditorAPI(createTestAPIContext())` calls share no state.
+
+NEW `test/unit/editor-api-registry.test.ts` (12 tests) covers all five ACs. Gate evidence (2026-07-17): Change 7 targeted gate (`editor-api-registry`, `tlisp-api`, `architecture-boundaries`, `lsp-diagnostics-tlisp-api`, `fikra-primitives`) → **67 pass / 0 fail**; broad editor regression (count-prefix, vim-dispatch, minibuffer-input, macro-recording, markdown-commands, dired, visual-mode-selection, editor, query-replace) → **173 pass / 0 fail**; `bun run typecheck` exit 0; `git diff --check` clean.
 
 #### Implementation requirements
 
