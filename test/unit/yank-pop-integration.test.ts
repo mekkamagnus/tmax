@@ -13,18 +13,15 @@ import { TLispInterpreterImpl } from "../../src/tlisp/interpreter.ts";
 import { loadTrtFramework } from "../../src/tlisp/trt/bootstrap.ts";
 import { FunctionalTextBufferImpl } from "../../src/core/buffer.ts";
 import {
-  createKillRingOps,
-  resetKillRing
+  createKillRingOps
 } from "../../src/editor/api/kill-ring.ts";
 import {
-  createYankOps,
-  setYankRegister
+  createYankOps
 } from "../../src/editor/api/yank-ops.ts";
 import { initialModel } from "../../src/editor/functional/model.ts";
+import { createEditorSession } from "../../src/editor/functional/domain-state.ts";
 import {
-  createYankPopOps,
-  resetYankPopState,
-  getYankPopState
+  createYankPopOps
 } from "../../src/editor/api/yank-pop-ops.ts";
 
 describe("Yank Pop Integration (US-1.9.2)", () => {
@@ -35,6 +32,14 @@ describe("Yank Pop Integration (US-1.9.2)", () => {
   let currentBuffer: FunctionalTextBufferImpl | null = null;
   let cursorLine = 0;
   let cursorColumn = 0;
+
+  // CHORE-44 Change 1: shared per-editor session for kill ring / yank-pop /
+  // yank register, with legacy-name wrappers so the body is unchanged.
+  const session = createEditorSession();
+  const resetKillRing = () => session.killRing.reset();
+  const resetYankPopState = () => session.yankPop.reset();
+  const setYankRegister = (text: string) => session.yankRegister.set(text);
+  const getYankPopState = () => ({ active: session.yankPop.isActive() });
 
   beforeEach(async () => {
     // Reset all state
@@ -56,22 +61,25 @@ describe("Yank Pop Integration (US-1.9.2)", () => {
     cursorLine = 0;
     cursorColumn = 0;
 
-    // Register kill ring functions
-    const killRingOps = createKillRingOps();
+    const access = {
+      getModel: () => ({ ...initialModel(), currentBuffer: currentBuffer ?? undefined, cursorPosition: { line: cursorLine, column: cursorColumn } }),
+      applyModel: (m: ReturnType<typeof initialModel>) => {
+        if (m.currentBuffer) currentBuffer = m.currentBuffer as FunctionalTextBufferImpl;
+        cursorLine = m.cursorPosition.line;
+        cursorColumn = m.cursorPosition.column;
+      },
+    };
+
+    // Register kill ring functions (bound to this session's kill ring)
+    const killRingOps = createKillRingOps(session.killRing);
     for (const [name, func] of killRingOps.entries()) {
       interpreter.defineBuiltin(name, func);
     }
 
     // Register yank operations (CHORE-39 Phase 4: EditorModelAccess)
     const yankOps = createYankOps(
-      {
-        getModel: () => ({ ...initialModel(), currentBuffer: currentBuffer ?? undefined, cursorPosition: { line: cursorLine, column: cursorColumn } }),
-        applyModel: (m) => {
-          if (m.currentBuffer) currentBuffer = m.currentBuffer as FunctionalTextBufferImpl;
-          cursorLine = m.cursorPosition.line;
-          cursorColumn = m.cursorPosition.column;
-        },
-      },
+      access,
+      session,
       (buf) => { currentBuffer = buf as FunctionalTextBufferImpl; },
       (line) => { cursorLine = line; },
       (col) => { cursorColumn = col; }
@@ -82,14 +90,8 @@ describe("Yank Pop Integration (US-1.9.2)", () => {
 
     // Register yank-pop operations
     const yankPopOps = createYankPopOps(
-      {
-        getModel: () => ({ ...initialModel(), currentBuffer: currentBuffer ?? undefined, cursorPosition: { line: cursorLine, column: cursorColumn } }),
-        applyModel: (m) => {
-          if (m.currentBuffer) currentBuffer = m.currentBuffer as FunctionalTextBufferImpl;
-          cursorLine = m.cursorPosition.line;
-          cursorColumn = m.cursorPosition.column;
-        },
-      },
+      access,
+      session.yankPop,
       (buf) => { currentBuffer = buf as FunctionalTextBufferImpl; }
     );
     for (const [name, func] of yankPopOps.entries()) {
@@ -182,6 +184,7 @@ describe("Yank Pop Integration (US-1.9.2)", () => {
             cursorColumn = m.cursorPosition.column;
           },
         },
+        session.yankPop,
         (buf) => { currentBuffer = buf as FunctionalTextBufferImpl; }
       );
 

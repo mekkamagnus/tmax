@@ -7,11 +7,11 @@
  * Escape returns to normal mode.
  */
 
-import type { Editor } from "../editor.ts";
-import { resolveMapping } from "../editor.ts";
+import type { EditorDispatchPort } from "./editor-dispatch-port.ts";
+import { resolveMapping } from "../key-resolution.ts";
 import { log } from "../../utils/logger.ts";
 
-export async function handleReplaceMode(editor: Editor, key: string, normalizedKey: string): Promise<void> {
+export async function handleReplaceMode(editor: EditorDispatchPort, key: string, normalizedKey: string): Promise<void> {
   const handlerLog = log.module('handlers').fn('handleReplaceMode');
 
   if (normalizedKey === "Escape") {

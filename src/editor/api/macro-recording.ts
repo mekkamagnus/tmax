@@ -1,262 +1,135 @@
 /**
  * @file macro-recording.ts
  * @description Vim-style keyboard macro recording functionality (US-2.4.1)
- * Supports qa (start recording), q (stop recording), @a (execute macro), @@ (execute last)
+ *
+ * CHORE-44 Change 1: macro recording state is per-editor. Each `Editor` owns a
+ * `MacroState` (via `createMacroState` + `bindMacros`); the bound `MacroOps` are
+ * used by the editor.ts macro T-Lisp primitives and macro-persistence. No
+ * module-global mutable state remains.
  */
 
 import { Either } from "../../utils/task-either.ts";
-import { stateUtils } from "../../utils/state.ts";
-import type { TLispValue } from "../../tlisp/types.ts";
 
 /**
  * Macro recording state
  */
-interface MacroRecordingState {
+export interface MacroState {
   isRecording: boolean;
   currentRegister: string | null;
   recordedKeys: string[];
   macros: Map<string, string[]>;  // Register -> list of keys
-  lastExecutedMacro: string | null;  // Last executed macro register
+  lastExecutedMacro: string | null;
 }
 
 /**
- * Global macro recording state
+ * Construct a fresh, independent macro recording state.
  */
-let macroState: MacroRecordingState = {
-  isRecording: false,
-  currentRegister: null,
-  recordedKeys: [],
-  macros: new Map(),
-  lastExecutedMacro: null,
-};
-
-/**
- * Reset macro recording state (for testing)
- */
-export function resetMacroRecordingState(): void {
-  // CHORE-39 Phase 4: reset via the State monad (stateUtils.reset).
-  const initial: MacroRecordingState = {
+export function createMacroState(): MacroState {
+  return {
     isRecording: false,
     currentRegister: null,
     recordedKeys: [],
     macros: new Map(),
     lastExecutedMacro: null,
   };
-  const [, next] = stateUtils.reset<MacroRecordingState>(initial).run(macroState);
-  macroState = next;
 }
 
 /**
- * Start recording a macro to a register
- * @param register - The register to record to (a-z, 0-9)
- * @returns Either error or success value
+ * Bound macro operations over one (per-editor) state instance.
  */
-export function startRecording(register: string): Either<string, string> {
-  // Validate register
-  if (!isValidRegister(register)) {
-    return Either.left(`Invalid register: ${register}`);
-  }
-
-  // Check if already recording
-  if (macroState.isRecording) {
-    return Either.left(`Already recording to register ${macroState.currentRegister}`);
-  }
-
-  // Start recording
-  macroState.isRecording = true;
-  macroState.currentRegister = register;
-  macroState.recordedKeys = [];
-
-  return Either.right(register);
+export interface MacroOps {
+  start(register: string): Either<string, string>;
+  stop(): Either<string, string>;
+  record(key: string): Either<string, string>;
+  isActive(): boolean;
+  currentRegister(): string | null;
+  all(): Map<string, string[]>;
+  get(register: string): Either<string, string[]>;
+  execute(register: string): Either<string, string>;
+  executeLast(): Either<string, string>;
+  lastExecuted(): string | null;
+  clearAll(): void;
+  clear(register: string): Either<string, string>;
+  set(register: string, keys: string[]): Either<string, string>;
+  recordedKeys(): string[];
+  setLastExecuted(register: string): void;
+  reset(): void;
 }
 
-/**
- * Stop recording and save the macro
- * @returns Either error or success value
- */
-export function stopRecording(): Either<string, string> {
-  // Check if recording
-  if (!macroState.isRecording) {
-    return Either.left("Not recording");
-  }
-
-  // Save the macro
-  const register = macroState.currentRegister!;
-  macroState.macros.set(register, [...macroState.recordedKeys]);
-
-  // Reset recording state
-  macroState.isRecording = false;
-  macroState.currentRegister = null;
-  macroState.recordedKeys = [];
-
-  return Either.right(register);
-}
-
-/**
- * Record a key during macro recording
- * @param key - The key to record
- * @returns Either error or success value
- */
-export function recordKey(key: string): Either<string, string> {
-  // Check if recording
-  if (!macroState.isRecording) {
-    return Either.left("Not recording");
-  }
-
-  // Record the key
-  macroState.recordedKeys.push(key);
-
-  return Either.right(key);
-}
-
-/**
- * Check if currently recording
- * @returns True if recording, false otherwise
- */
-export function isRecording(): boolean {
-  return macroState.isRecording;
-}
-
-/**
- * Get the current recording register
- * @returns The current register or null
- */
-export function getCurrentRegister(): string | null {
-  return macroState.currentRegister;
-}
-
-/**
- * Get all recorded macros
- * @returns Map of register to keys
- */
-export function getMacros(): Map<string, string[]> {
-  return new Map(macroState.macros);
-}
-
-/**
- * Get a specific macro
- * @param register - The register to get
- * @returns Either error or the macro keys
- */
-export function getMacro(register: string): Either<string, string[]> {
-  if (!macroState.macros.has(register)) {
-    return Either.left(`No macro in register ${register}`);
-  }
-
-  return Either.right(macroState.macros.get(register)!);
-}
-
-/**
- * Execute a macro
- * @param register - The register to execute
- * @returns Either error or success
- */
-export function executeMacro(register: string): Either<string, string> {
-  // Validate register
-  if (!isValidRegister(register)) {
-    return Either.left(`Invalid register: ${register}`);
-  }
-
-  // Get the macro
-  const macroResult = getMacro(register);
-  if (Either.isLeft(macroResult)) {
-    return Either.left(`No macro in register ${register}`);
-  }
-
-  // Set as last executed
-  macroState.lastExecutedMacro = register;
-
-  return Either.right(register);
-}
-
-/**
- * Execute the last executed macro
- * @returns Either error or the register executed
- */
-export function executeLastMacro(): Either<string, string> {
-  if (!macroState.lastExecutedMacro) {
-    return Either.left("No last macro to execute");
-  }
-
-  return executeMacro(macroState.lastExecutedMacro);
-}
-
-/**
- * Get the last executed macro register
- * @returns The last executed macro register or null
- */
-export function getLastExecutedMacro(): string | null {
-  return macroState.lastExecutedMacro;
-}
-
-/**
- * Clear all macros
- */
-export function clearAllMacros(): void {
-  macroState.macros.clear();
-  macroState.lastExecutedMacro = null;
-}
-
-/**
- * Clear a specific macro
- * @param register - The register to clear
- * @returns Either error or success
- */
-export function clearMacro(register: string): Either<string, string> {
-  if (!macroState.macros.has(register)) {
-    return Either.left(`No macro in register ${register}`);
-  }
-
-  macroState.macros.delete(register);
-
-  // Clear last executed if it was this macro
-  if (macroState.lastExecutedMacro === register) {
-    macroState.lastExecutedMacro = null;
-  }
-
-  return Either.right(register);
-}
-
-/**
- * Check if a register name is valid
- * @param register - The register name to check
- * @returns True if valid, false otherwise
- */
 function isValidRegister(register: string): boolean {
-  // Valid registers: a-z and 0-9
   return /^[a-z0-9]$/.test(register);
 }
 
-/**
- * Get the recorded keys for the current recording (for testing)
- * @returns The current recorded keys
- */
-export function getRecordedKeys(): string[] {
-  return [...macroState.recordedKeys];
-}
-
-/**
- * Set the last executed macro (for testing)
- * @param register - The register to set as last executed
- */
-export function setLastExecutedMacro(register: string): void {
-  macroState.lastExecutedMacro = register;
-}
-
-/**
- * Set a macro directly (for loading from file)
- * @param register - The register to set
- * @param keys - The keys to store
- * @returns Either error or success
- */
-export function setMacro(register: string, keys: string[]): Either<string, string> {
-  // Validate register
-  if (!isValidRegister(register)) {
-    return Either.left(`Invalid register: ${register}`);
-  }
-
-  // Set the macro
-  macroState.macros.set(register, keys);
-
-  return Either.right(register);
+export function bindMacros(state: MacroState): MacroOps {
+  return {
+    start: (register: string): Either<string, string> => {
+      if (!isValidRegister(register)) return Either.left(`Invalid register: ${register}`);
+      if (state.isRecording) return Either.left(`Already recording to register ${state.currentRegister}`);
+      state.isRecording = true;
+      state.currentRegister = register;
+      state.recordedKeys = [];
+      return Either.right(register);
+    },
+    stop: (): Either<string, string> => {
+      if (!state.isRecording) return Either.left("Not recording");
+      const register = state.currentRegister!;
+      state.macros.set(register, [...state.recordedKeys]);
+      state.isRecording = false;
+      state.currentRegister = null;
+      state.recordedKeys = [];
+      return Either.right(register);
+    },
+    record: (key: string): Either<string, string> => {
+      if (!state.isRecording) return Either.left("Not recording");
+      state.recordedKeys.push(key);
+      return Either.right(key);
+    },
+    isActive: (): boolean => state.isRecording,
+    currentRegister: (): string | null => state.currentRegister,
+    all: (): Map<string, string[]> => new Map(state.macros),
+    get: (register: string): Either<string, string[]> => {
+      if (!state.macros.has(register)) return Either.left(`No macro in register ${register}`);
+      return Either.right(state.macros.get(register)!);
+    },
+    execute: (register: string): Either<string, string> => {
+      if (!isValidRegister(register)) return Either.left(`Invalid register: ${register}`);
+      if (!state.macros.has(register)) return Either.left(`No macro in register ${register}`);
+      state.lastExecutedMacro = register;
+      return Either.right(register);
+    },
+    executeLast: (): Either<string, string> => {
+      if (!state.lastExecutedMacro) return Either.left("No last macro to execute");
+      // Reuse execute() but it reads lastExecutedMacro after we capture it.
+      const reg = state.lastExecutedMacro;
+      if (!state.macros.has(reg)) return Either.left(`No macro in register ${reg}`);
+      return Either.right(reg);
+    },
+    lastExecuted: (): string | null => state.lastExecutedMacro,
+    clearAll: (): void => {
+      state.macros.clear();
+      state.lastExecutedMacro = null;
+    },
+    clear: (register: string): Either<string, string> => {
+      if (!state.macros.has(register)) return Either.left(`No macro in register ${register}`);
+      state.macros.delete(register);
+      if (state.lastExecutedMacro === register) state.lastExecutedMacro = null;
+      return Either.right(register);
+    },
+    set: (register: string, keys: string[]): Either<string, string> => {
+      if (!isValidRegister(register)) return Either.left(`Invalid register: ${register}`);
+      state.macros.set(register, keys);
+      return Either.right(register);
+    },
+    recordedKeys: (): string[] => [...state.recordedKeys],
+    setLastExecuted: (register: string): void => {
+      state.lastExecutedMacro = register;
+    },
+    reset: (): void => {
+      state.isRecording = false;
+      state.currentRegister = null;
+      state.recordedKeys = [];
+      state.macros = new Map();
+      state.lastExecutedMacro = null;
+    },
+  };
 }

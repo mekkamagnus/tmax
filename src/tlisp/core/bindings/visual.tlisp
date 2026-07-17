@@ -51,4 +51,11 @@
 
 ;; Swap visual anchor (o)
 (key-bind "o" "(visual-swap-anchor)" "visual")
+
+;; Text-object selection (SPEC-069 Phase 3) — i/a stash the inner/around
+;; choice; the next key (the class char) is routed by visual-handler to
+;; visual-dispatch-text-object, which re-anchors the selection to the
+;; text-object region (viw/vaw/vi"/va().
+(key-bind "i" "(visual-begin-text-object \"i\")" "visual")
+(key-bind "a" "(visual-begin-text-object \"a\")" "visual")
 )

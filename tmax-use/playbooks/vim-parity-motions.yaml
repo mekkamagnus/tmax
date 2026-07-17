@@ -1,0 +1,283 @@
+name: vim-parity-motions
+description: |
+  SPEC-067 Track 3 — motion-parity e2e. Drives every core vim normal-mode
+  MOTION through the real daemon/client keypress path and asserts cursor
+  position after each: h/j/k/l, w/b/e, 0/$/_, gg/G, f/t/F, %, H/M/L, and
+  C-o (jumplist back). Uses `keys:` exclusively so the binding → dispatch →
+  command path is exercised end-to-end.
+
+  NOTE on C-i: vim's jumplist-forward key is C-i, but a terminal cannot
+  distinguish C-i from Tab (both are byte 0x09; the daemon normalizes 0x09 →
+  "Tab", not "C-i"). So C-i is unreachable over real terminal input and is
+  covered only by the unit test (test/unit/jumplist.test.ts). C-o (0x0f) is
+  distinct and is exercised here.
+
+setup:
+  - action: setup_file
+    var: FILE
+    name: vim-parity-motions.txt
+    content: |
+      aa bb cc
+      dd ee ff
+      (gg hh)
+      line 03
+      line 04
+      line 05
+      line 06
+      line 07
+      line 08
+      line 09
+      line 10
+      line 11
+      line 12
+      line 13
+      line 14
+      line 15
+      line 16
+      line 17
+      line 18
+      line 19
+      line 20
+      line 21
+      line 22
+      line 23
+      line 24
+      line 25
+      line 26
+      line 27
+      line 28
+      line 29
+
+terminal:
+  height: 24
+  width: 80
+
+steps:
+  - name: switch to normal mode
+    eval: '(editor-set-mode "normal")'
+    expect:
+      mode: normal
+
+  - name: open the test file
+    eval: '(find-file "${FILE}")'
+    expect:
+      buffer_contains: "aa bb cc"
+
+  # -- h/j/k/l --
+  - name: position at 0,0
+    eval: '(cursor-move 0 0)'
+    expect:
+      cursor_line: 0
+      cursor_column: 0
+
+  - name: l moves right
+    keys: "l"
+    expect:
+      cursor_line: 0
+      cursor_column: 1
+
+  - name: j moves down
+    keys: "j"
+    expect:
+      cursor_line: 1
+      cursor_column: 1
+
+  - name: k moves up
+    keys: "k"
+    expect:
+      cursor_line: 0
+      cursor_column: 1
+
+  - name: h moves left
+    keys: "h"
+    expect:
+      cursor_line: 0
+      cursor_column: 0
+
+  # -- w/b/e on "aa bb cc" --
+  - name: w to next word (bb)
+    keys: "w"
+    expect:
+      cursor_line: 0
+      cursor_column: 3
+
+  - name: w to next word (cc)
+    keys: "w"
+    expect:
+      cursor_column: 6
+
+  - name: b back a word (bb)
+    keys: "b"
+    expect:
+      cursor_column: 3
+
+  - name: e to end of word (bb ends at col 4)
+    keys: "e"
+    expect:
+      cursor_column: 4
+
+  # -- 0/$/_ --
+  - name: 0 to first column
+    keys: "0"
+    expect:
+      cursor_column: 0
+
+  - name: reposition for dollar
+    eval: '(cursor-move 0 0)'
+    expect:
+      cursor_line: 0
+      cursor_column: 0
+
+  - name: $ to last column (cc ends at col 7)
+    keys: "$"
+    expect:
+      cursor_column: 7
+
+  - name: _ to first non-blank
+    keys: "_"
+    expect:
+      cursor_column: 0
+
+  # -- gg / G --
+  - name: reposition mid-file
+    eval: '(cursor-move 5 0)'
+    expect:
+      cursor_line: 5
+      cursor_column: 0
+
+  - name: gg to first line
+    keys: "gg"
+    expect:
+      cursor_line: 0
+
+  - name: G to last line (trailing newline -> empty line 30)
+    keys: "G"
+    expect:
+      cursor_line: 30
+
+  - name: reposition at top for count G
+    eval: '(cursor-move 0 0)'
+    expect:
+      cursor_line: 0
+      cursor_column: 0
+
+  - name: count G (5G -> vim line 5 = index 4)
+    keys: "5G"
+    expect:
+      cursor_line: 4
+
+  # -- f / t / F (find-char) on "(gg hh)" line 2 --
+  - name: position on line 2
+    eval: '(cursor-move 2 0)'
+    expect:
+      cursor_line: 2
+      cursor_column: 0
+
+  - name: f finds first h forward (col 4)
+    keys: "fh"
+    expect:
+      cursor_line: 2
+      cursor_column: 4
+
+  - name: reposition for till
+    eval: '(cursor-move 2 0)'
+    expect:
+      cursor_line: 2
+      cursor_column: 0
+
+  - name: t stops one before h (col 3)
+    keys: "th"
+    expect:
+      cursor_line: 2
+      cursor_column: 3
+
+  - name: reposition at close paren col 6
+    eval: '(cursor-move 2 6)'
+    expect:
+      cursor_line: 2
+      cursor_column: 6
+
+  - name: F finds h backward (col 5)
+    keys: "Fh"
+    expect:
+      cursor_line: 2
+      cursor_column: 5
+
+  # -- % match bracket --
+  - name: position on open paren
+    eval: '(cursor-move 2 0)'
+    expect:
+      cursor_line: 2
+      cursor_column: 0
+
+  - name: percent jumps to matching close paren (col 6)
+    keys: "%"
+    expect:
+      cursor_line: 2
+      cursor_column: 6
+
+  # -- H / M / L (viewport height 24, viewport-top 0) --
+  - name: reposition at top-left (reset viewport so H/M/L are deterministic)
+    eval: '(progn (cursor-move 0 0) (viewport-top-set 0))'
+    expect:
+      cursor_line: 0
+      cursor_column: 0
+
+  - name: H to top of viewport (line 0)
+    keys: "H"
+    expect:
+      cursor_line: 0
+
+  - name: reposition at top for M (viewport reset)
+    eval: '(progn (cursor-move 0 0) (viewport-top-set 0))'
+    expect:
+      cursor_line: 0
+      cursor_column: 0
+
+  - name: M to middle of viewport (line 12)
+    keys: "M"
+    expect:
+      cursor_line: 12
+
+  - name: reposition at top for L (viewport reset)
+    eval: '(progn (cursor-move 0 0) (viewport-top-set 0))'
+    expect:
+      cursor_line: 0
+      cursor_column: 0
+
+  - name: L to bottom region of viewport (line 22)
+    keys: "L"
+    expect:
+      cursor_line: 22
+
+  # -- C-o jumplist back (positions seeded via vim-jump-record; tmax jumps do
+  #    not auto-record, which is out of scope for this spec) --
+  - name: seed + record jump at line 0
+    eval: '(progn (cursor-move 0 0) (vim-jump-record))'
+    expect:
+      cursor_line: 0
+      cursor_column: 0
+
+  - name: seed + record jump at line 10
+    eval: '(progn (cursor-move 10 0) (vim-jump-record))'
+    expect:
+      cursor_line: 10
+      cursor_column: 0
+
+  - name: seed + record jump at line 20
+    eval: '(progn (cursor-move 20 0) (vim-jump-record))'
+    expect:
+      cursor_line: 20
+      cursor_column: 0
+
+  - name: C-o jumps back to line 10
+    keys: "<C-o>"
+    expect:
+      cursor_line: 10
+
+  - name: C-o jumps back to line 0
+    keys: "<C-o>"
+    expect:
+      cursor_line: 0
+
+cleanup: true

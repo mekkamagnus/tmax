@@ -1,5 +1,5 @@
 (defmodule editor/commands/operators
-  (export vim-operator-pending-p vim-begin-operator vim-reset-operator vim-operator-total-count vim-delete-line-range vim-delete-to-last-line vim-delete-to-first-line vim-change-line-range vim-operator-apply vim-dispatch-operator-key vim-operator-find-pending-p vim-operator-reset-find-pending vim-operator-apply-find vim-text-object-pending-p vim-operator-reset-text-object-pending vim-operator-begin-text-object vim-dispatch-text-object vim-operator-apply-text-object vim-register-prefix-pending-p vim-begin-register-prefix vim-dispatch-register vim-reset-register-prefix vim-valid-register-p vim-maybe-apply-register vim-consume-pending-register vim-pending-register)
+  (export vim-operator-pending-p vim-begin-operator vim-reset-operator vim-operator-total-count vim-delete-line-range vim-delete-to-last-line vim-delete-to-first-line vim-change-line-range vim-operator-apply vim-dispatch-operator-key vim-operator-find-pending-p vim-operator-reset-find-pending vim-operator-apply-find vim-text-object-pending-p vim-operator-reset-text-object-pending vim-operator-begin-text-object vim-dispatch-text-object vim-operator-apply-text-object vim-register-prefix-pending-p vim-begin-register-prefix vim-dispatch-register vim-reset-register-prefix vim-valid-register-p vim-maybe-apply-register vim-consume-pending-register vim-pending-register vim-apply-region vim-motion-region vim-operator-apply-motion visual-text-object-pending-p visual-reset-text-object-pending visual-begin-text-object visual-dispatch-text-object)
 
 ;; operators.tlisp -- Vim operator-pending state owned by T-Lisp
 
@@ -170,55 +170,74 @@ motion count after it has been captured."
 (defun vim-operator-apply-text-object (class-char)
   "Apply the stashed operator to a text-object class.
 CLASS-CHAR is the vim text-object identifier: w for word, \" ' ( ) { } [ ]
-< > for paired delimiters, t for tag. Mutations are wrapped in
-undo-begin/undo-commit so `u` restores the buffer. Word text-objects
-honor the stashed count so d2iw / c3aw compose per vim semantics."
+< > for paired delimiters, t for tag. SPEC-069 Phase 2: instead of a
+hardcoded cond over combo strings, the region is computed once via
+text-object-region (which reuses the same find* helpers as the legacy
+delete/change functions) and handed to vim-apply-region — so d/c behave
+identically to before and y now yanks (yiw/yaw/yi\"/ya)/yit) without its
+own branches. Mutations are wrapped in undo-begin/undo-commit so `u`
+restores the buffer. Word text-objects honor the stashed count so d2iw /
+y3aw compose per vim semantics."
   (let ((operator vim-pending-operator-for-text-object))
     (let ((inner-or-around vim-text-object-pending))
       (let ((count vim-pending-operator-for-text-object-count))
         (let ((combo (concat (concat operator inner-or-around) class-char)))
+          (let ((region (text-object-region class-char inner-or-around count)))
+            (progn
+              (vim-operator-reset-text-object-pending)
+              (vim-count-reset)
+              (if (null region)
+                (editor-set-status (concat "Unsupported text-object combo: " combo))
+                (progn
+                  (if (string= operator "y") nil (undo-begin))
+                  (vim-apply-region
+                    operator
+                    (nth 0 region) (nth 1 region) (nth 2 region) (nth 3 region) (nth 4 region))
+                  (if (string= operator "y") nil (undo-commit combo))
+                  (if (string= operator "y") nil (vim-record-change combo count))))
+              (vim-maybe-apply-register)
+              t)))))))
+
+;; SPEC-069 Phase 3 — visual text-objects (viw/vaw/vi"/va().
+;; Mirrors the operator text-object pending pattern: pressing i/a in visual
+;; mode stashes the inner/around choice; visual-handler routes the next key
+;; (the class char) to visual-dispatch-text-object, which computes the region
+;; via the shared text-object-region primitive and re-anchors the visual
+;; selection to it. No new TS primitive — it composes cursor-move,
+;; visual-enter-char-mode, and visual-update-end.
+(defvar visual-text-object-pending nil)
+
+(defun visual-text-object-pending-p ()
+  "Return t when a visual text-object class key is being collected."
+  (not (null visual-text-object-pending)))
+
+(defun visual-reset-text-object-pending ()
+  "Clear the visual text-object pending state."
+  (progn (set! visual-text-object-pending nil) nil))
+
+(defun visual-begin-text-object (inner-or-around)
+  "Stash INNER-OR-AROUND (\"i\"/\"a\") and wait for the text-object class key."
+  (progn
+    (set! visual-text-object-pending inner-or-around)
+    (editor-set-status (concat "visual " inner-or-around))
+    t))
+
+(defun visual-dispatch-text-object (class-char)
+  "Re-anchor the visual selection to the text-object region for CLASS-CHAR.
+Computes the region from the current cursor via text-object-region, re-enters
+char-wise visual at the region start, then extends the selection end to the
+region end. Unsupported classes clear the pending state and report a status."
+  (let ((inner-or-around visual-text-object-pending))
+    (let ((region (text-object-region class-char inner-or-around (vim-count-consume 1))))
+      (progn
+        (visual-reset-text-object-pending)
+        (if (null region)
+          (editor-set-status (concat "Unsupported visual text-object: " class-char))
           (progn
-            (vim-operator-reset-text-object-pending)
-            (vim-count-reset)
-            (if (string= operator "y") nil (undo-begin))
-            (cond
-              ((string= combo "diw") (delete-inner-word count))
-              ((string= combo "daw") (delete-around-word count))
-              ((string= combo "ciw") (change-inner-word count))
-              ((string= combo "caw") (change-around-word count))
-              ((string= combo "di'") (delete-inner-single-quote))
-              ((string= combo "da'") (delete-around-single-quote))
-              ((string= combo "di\"") (delete-inner-double-quote))
-              ((string= combo "da\"") (delete-around-double-quote))
-              ((or (string= combo "di)") (string= combo "di(")) (delete-inner-paren))
-              ((or (string= combo "da)") (string= combo "da(")) (delete-around-paren))
-              ((or (string= combo "di}") (string= combo "di{")) (delete-inner-brace))
-              ((or (string= combo "da}") (string= combo "da{")) (delete-around-brace))
-              ((or (string= combo "di]") (string= combo "di[")) (delete-inner-bracket))
-              ((or (string= combo "da]") (string= combo "da[")) (delete-around-bracket))
-              ((or (string= combo "di<") (string= combo "di>")) (delete-inner-angle))
-              ((or (string= combo "da<") (string= combo "da>")) (delete-around-angle))
-              ((string= combo "dit") (delete-inner-tag))
-              ((string= combo "dat") (delete-around-tag))
-              ((string= combo "ci\"") (change-inner-double-quote))
-              ((string= combo "ca\"") (change-around-double-quote))
-              ((string= combo "ci'") (change-inner-single-quote))
-              ((string= combo "ca'") (change-around-single-quote))
-              ((or (string= combo "ci)") (string= combo "ci(")) (change-inner-paren))
-              ((or (string= combo "ca)") (string= combo "ca(")) (change-around-paren))
-              ((or (string= combo "ci}") (string= combo "ci{")) (change-inner-brace))
-              ((or (string= combo "ca}") (string= combo "ca{")) (change-around-brace))
-              ((or (string= combo "ci]") (string= combo "ci[")) (change-inner-bracket))
-              ((or (string= combo "ca]") (string= combo "ca[")) (change-around-bracket))
-              ((or (string= combo "ci<") (string= combo "ci>")) (change-inner-angle))
-              ((or (string= combo "ca<") (string= combo "ca>")) (change-around-angle))
-              ((string= combo "cit") (change-inner-tag))
-              ((string= combo "cat") (change-around-tag))
-              (t (editor-set-status (concat "Unsupported text-object combo: " combo))))
-            (if (string= operator "y") nil (undo-commit combo))
-            (if (string= operator "y") nil (vim-record-change combo count))
-            (vim-maybe-apply-register)
-            t))))))
+            (cursor-move (nth 0 region) (nth 1 region))
+            (visual-enter-char-mode)
+            (cursor-move (nth 2 region) (nth 3 region))
+            (visual-update-end)))))))
 
 (defun vim-dispatch-text-object (class-char)
   "Consume CLASS-CHAR as the text-object class for a stashed operator.
@@ -295,6 +314,147 @@ vim-text-object-pending-p is true."
                   (editor-set-mode "insert")
                   t)))))))))
 
+;; ===========================================================================
+;; SPEC-069 — generic operator × motion composition.
+;;
+;; vim-operator-apply (below) keeps its explicit combo allowlist as the fast
+;; path: dw/dd/cc/d$/dG/dgg and their c/y counterparts encode special
+;; semantics (notably dw/cw trailing-whitespace handling) and stay
+;; byte-identical. Its FALLBACK (the `t` branch) used to just report
+;; "Unsupported operator" for anything else; it now computes the region an
+;; arbitrary motion describes and applies the operator generically —
+;; mirroring vim-operator-apply-find, which already does this for
+;; df/dt/dF/dT (+ y/c).
+;;
+;; No new TS primitive is needed: we capture the cursor before/after running
+;; the existing motion primitive (word-end, word-next-WORD, vim-match-bracket,
+;; paragraph-next, cursor-move, …) and classify each motion as
+;;   char-exclusive  (b B h 0 ^ _ W)   region [min,max)
+;;   char-inclusive  (e E % $)         region [min,max]  (end col bumped +1)
+;;   linewise        (j k { } G gg)    whole lines [lo,hi]
+;; buffer-get-range/delete-range/replace-range take a half-open [(start),(end))
+;; range, so "inclusive" is just +1 on the end column. The caller
+;; (vim-operator-apply) owns undo-begin/undo-commit and register mirroring;
+;; these helpers only mutate the buffer and fix cursor/mode.
+;; ===========================================================================
+
+(defun vim-region-pos-before-p (al ac bl bc)
+  "Return t when (AL,AC) is strictly before (BL,BC) in buffer order."
+  (or (< al bl) (and (= al bl) (< ac bc))))
+
+(defun vim-region-inclusive (al ac bl bc)
+  "Char-wise region covering BOTH endpoints, returned as (sl sc el ec \"char\")
+with an EXCLUSIVE end (ec bumped by +1). For e/E/%/$ — the landing char is
+included. The trailing \"char\" tag tells vim-apply-region which apply path
+to take (mirrors vim-region-line's \"line\" tag)."
+  (cond
+    ((vim-region-pos-before-p al ac bl bc) (list al ac bl (+ bc 1) "char"))
+    ((vim-region-pos-before-p bl bc al ac) (list bl bc al (+ ac 1) "char"))
+    (t (list al ac bl (+ bc 1) "char"))))
+
+(defun vim-region-exclusive (al ac bl bc)
+  "Char-wise region [min,max) returned as (sl sc el ec \"char\") with an
+EXCLUSIVE end at the forward-most position. For b/B/h/0/^/_/W — the
+destination char is excluded. A motion that did not move yields an empty
+region (sl sc sl sc \"char\")."
+  (cond
+    ((vim-region-pos-before-p al ac bl bc) (list al ac bl bc "char"))
+    ((vim-region-pos-before-p bl bc al ac) (list bl bc al ac "char"))
+    (t (list al ac al ac "char"))))
+
+(defun vim-region-line (line-a line-b)
+  "Linewise region (lo 0 hi 0 \"line\") spanning whole lines lo..hi inclusive."
+  (if (<= line-a line-b)
+    (list line-a 0 line-b 0 "line")
+    (list line-b 0 line-a 0 "line")))
+
+(defun vim-motion-region (motion count)
+  "Run MOTION (with COUNT) from the current cursor and return the buffer region
+it spans as (start-line start-col end-line end-col wise), where the end is an
+EXCLUSIVE upper bound and wise is \"char\" or \"line\". Returns nil for motions
+the fallback does not handle. Captures cursor before/after running the motion
+primitive; the motion's cursor side effect is cosmetic and overwritten by the
+operator's own cursor positioning."
+  (let* ((sl (cursor-line))
+         (sc (cursor-column)))
+    (cond
+      ;; forward char-inclusive — landing char included
+      ((string= motion "e")  (progn (word-end count)           (vim-region-inclusive sl sc (cursor-line) (cursor-column))))
+      ((string= motion "E")  (progn (word-end-WORD count)      (vim-region-inclusive sl sc (cursor-line) (cursor-column))))
+      ((string= motion "%")  (progn (vim-match-bracket)        (vim-region-inclusive sl sc (cursor-line) (cursor-column))))
+      ((string= motion "$")  (progn (line-last-column)         (vim-region-inclusive sl sc (cursor-line) (cursor-column))))
+      ;; char-exclusive — destination char excluded
+      ((string= motion "W")  (progn (word-next-WORD count)     (vim-region-exclusive sl sc (cursor-line) (cursor-column))))
+      ((string= motion "b")  (progn (word-previous count)      (vim-region-exclusive sl sc (cursor-line) (cursor-column))))
+      ((string= motion "B")  (progn (word-previous-WORD count) (vim-region-exclusive sl sc (cursor-line) (cursor-column))))
+      ((string= motion "h")  (progn (cursor-move sl (- sc count)) (vim-region-exclusive sl sc (cursor-line) (cursor-column))))
+      ((string= motion "0")  (progn (line-first-column)        (vim-region-exclusive sl sc (cursor-line) (cursor-column))))
+      ((string= motion "^")  (progn (line-first-non-blank)     (vim-region-exclusive sl sc (cursor-line) (cursor-column))))
+      ((string= motion "_")  (progn (line-first-non-blank)     (vim-region-exclusive sl sc (cursor-line) (cursor-column))))
+      ;; linewise — whole lines lo..hi inclusive
+      ((string= motion "j")  (progn (cursor-move (+ sl count) sc) (vim-region-line sl (cursor-line))))
+      ((string= motion "k")  (progn (cursor-move (- sl count) sc) (vim-region-line sl (cursor-line))))
+      ((string= motion "}")  (progn (paragraph-next)           (vim-region-line sl (cursor-line))))
+      ((string= motion "{")  (progn (paragraph-previous)       (vim-region-line sl (cursor-line))))
+      ((string= motion "G")  (progn (vim-G)                    (vim-region-line sl (cursor-line))))
+      ((string= motion "gg") (progn (vim-gg)                   (vim-region-line sl (cursor-line))))
+      (t nil))))
+
+(defun vim-apply-char (operator sl sc el ec)
+  "Apply d/y/c to a char-wise half-open region [(SL,SC) .. (EL,EC)). Register
+\"\" receives the region text. d deletes (cursor→start), y leaves the buffer
+untouched (cursor→start), c deletes + enters insert mode (cursor→start).
+buffer-delete-range returns the deleted text, so d/c capture the register
+from its return value; y is read-only and uses buffer-get-range."
+  (cond
+    ((string= operator "d")
+      (progn
+        (set-register "\"" (buffer-delete-range sl sc el ec))
+        (cursor-move sl sc)))
+    ((string= operator "c")
+      (progn
+        (set-register "\"" (buffer-delete-range sl sc el ec))
+        (cursor-move sl sc)
+        (editor-set-mode "insert")))
+    ((string= operator "y")
+      (progn
+        (set-register "\"" (buffer-get-range sl sc el ec))
+        (cursor-move sl sc)))))
+
+(defun vim-apply-line (operator lo hi)
+  "Apply d/y/c linewise to whole lines LO..HI inclusive. Reuses the proven
+vim-delete-line-range / vim-change-line-range / yank-line primitives so the
+EOF edge cases (register trailing newline, cursor placement) match existing
+dd/cc/yy behavior exactly."
+  (let ((count (+ (- hi lo) 1)))
+    (progn
+      (cursor-move lo 0)
+      (cond
+        ((string= operator "d") (vim-delete-line-range lo hi))
+        ((string= operator "y") (progn (yank-line count) (cursor-move lo 0)))
+        ((string= operator "c") (vim-change-line-range count))))))
+
+(defun vim-apply-region (operator sl sc el ec wise)
+  "Apply OPERATOR (d/y/c) to the region [(SL,SC) .. (EL,EC)) (EXCLUSIVE end).
+WISE is \"char\" or \"line\". The caller owns undo-begin/undo-commit and
+register mirroring; this performs only the mutation + cursor/mode."
+  (if (string= wise "line")
+    (vim-apply-line operator sl el)
+    (vim-apply-char operator sl sc el ec)))
+
+(defun vim-operator-apply-motion (operator motion count)
+  "SPEC-069 fallback driver: run MOTION, derive its region, apply OPERATOR.
+Returns t when MOTION is supported (region found), nil otherwise so the caller
+can report \"Unsupported operator\"."
+  (let ((region (vim-motion-region motion count)))
+    (if (null region)
+      nil
+      (progn
+        (vim-apply-region
+          operator
+          (nth 0 region) (nth 1 region) (nth 2 region) (nth 3 region) (nth 4 region))
+        t))))
+
 (defun vim-operator-apply (motion)
   "Apply pending operator to MOTION."
   (let ((operator vim-pending-operator))
@@ -319,7 +479,10 @@ vim-text-object-pending-p is true."
             ((string= combo "cw") (change-word count))
             ((string= combo "cl") (vim-change-char count))
             ((string= combo "c$") (change-to-line-end))
-            (t (editor-set-status (concat "Unsupported operator: " combo))))
+            (t
+              (if (vim-operator-apply-motion operator motion count)
+                nil
+                (editor-set-status (concat "Unsupported operator: " combo)))))
           (if (string= operator "y") nil (undo-commit combo))
           (if (string= operator "y") nil (vim-record-change combo count))
           (vim-maybe-apply-register)
@@ -338,7 +501,8 @@ vim-text-object-pending-p is true."
           (editor-set-status (concat "Unsupported operator prefix: g" key))
           t)))
     (let ((digit (vim-key-digit-value key)))
-      (if (numberp digit)
+      (if (and (numberp digit)
+               (or (not (string= key "0")) (vim-count-active-p)))
         (progn
           (vim-count-add-digit digit)
           t)

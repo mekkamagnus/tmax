@@ -3,7 +3,8 @@
           vim-mark-pending-p vim-mark-reset-pending
           vim-mark-set vim-mark-get vim-mark-jump vim-mark-clear
           vim-dispatch-mark
-          vim-mark-set-special vim-marks-list vim-marks-format)
+          vim-mark-set-special vim-marks-list vim-marks-format
+          vim-insert-remember-position vim-gi)
 
 ;; marks.tlisp -- SPEC-044 Phase 4.A: Vim marks (ma, 'a, `a).
 ;; Pending-state machine mirrors motions.tlisp find-char pattern:
@@ -131,9 +132,36 @@ selection positions per SPEC-044 Phase 4.C."
   (let ((header "mark  line  col\n"))
     (concat header (vim-marks-format-rest vim-marks))))
 
+;; =====================================================================
+;; SPEC-067 — gi: go to last insert position and re-enter insert mode.
+;; The "^" special mark records the cursor position when insert mode was last
+;; exited. vim-insert-remember-position is invoked from the insert-mode Escape
+;; handler (handlers/insert-handler.ts) so the mark tracks every insert
+;; session, including those started by operators (c) and o/O/a/A/i/I.
+;; =====================================================================
+
+(defun vim-insert-remember-position ()
+  "Record the current cursor as the \"^\" (last-insert) mark.
+Called by the TS insert-mode Escape handler on every exit from insert mode."
+  (vim-mark-set-special "^" (cursor-line) (cursor-column)))
+
+(defun vim-gi ()
+  "gi: move to the last insert position (^ mark) and re-enter insert mode.
+If no insert position has been recorded yet, stays put and still enters
+insert mode (matches vim behavior on a fresh buffer)."
+  (let ((pos (vim-mark-get "^")))
+    (progn
+      (vim-count-reset)
+      (if (null pos)
+        (editor-set-status "No previous insert position")
+        (cursor-move (nth 0 pos) (nth 1 pos)))
+      (editor-set-mode "insert")
+      t)))
+
 (key-bind "m"   "(vim-mark-begin-set)"          "normal")
 (key-bind "'"   "(vim-mark-begin-jump-line)"    "normal")
 (key-bind "`"   "(vim-mark-begin-jump-exact)"   "normal")
+(key-bind "g i" "(vim-gi)"                      "normal")
 
 (provide "marks")
 )

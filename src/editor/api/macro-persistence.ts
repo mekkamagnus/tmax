@@ -5,8 +5,7 @@
  */
 
 import type { FileSystem } from "../../core/types.ts";
-import type { TLispValue } from "../../tlisp/types.ts";
-import { getMacros } from "./macro-recording.ts";
+import type { MacroOps } from "./macro-recording.ts";
 import { State } from "../../utils/state.ts";
 import type { EditorModel } from "../functional/model.ts";
 
@@ -54,13 +53,13 @@ async function ensureDirectoryExists(fs: FileSystem): Promise<void> {
  * @param fs - Filesystem instance
  * @returns Promise that resolves to true if successful, false otherwise
  */
-export async function saveMacrosToFile(fs: FileSystem): Promise<boolean> {
+export async function saveMacrosToFile(fs: FileSystem, macros: MacroOps): Promise<boolean> {
   try {
     // Ensure directory exists
     await ensureDirectoryExists(fs);
 
-    // Get all recorded macros
-    const macros = getMacros();
+    // Get all recorded macros (per-editor)
+    const macroMap = macros.all();
 
     // Build T-Lisp code for each macro
     const lines: string[] = [
@@ -70,7 +69,7 @@ export async function saveMacrosToFile(fs: FileSystem): Promise<boolean> {
       ""
     ];
 
-    for (const [register, keys] of macros.entries()) {
+    for (const [register, keys] of macroMap.entries()) {
       // Create defmacro form: (defmacro macro-<register> '(key1 key2 key3))
       const macroName = `macro-${register}`;
       const keysList = keys.map(k => `"${k}"`).join(" ");
@@ -97,7 +96,7 @@ export async function saveMacrosToFile(fs: FileSystem): Promise<boolean> {
  * @param fs - Filesystem instance
  * @returns Promise that resolves to true if successful, false if file doesn't exist or error
  */
-export async function loadMacrosFromFile(fs: FileSystem): Promise<boolean> {
+export async function loadMacrosFromFile(fs: FileSystem, macros: MacroOps): Promise<boolean> {
   try {
     const filePath = getMacrosFilePath();
 
@@ -115,9 +114,6 @@ export async function loadMacrosFromFile(fs: FileSystem): Promise<boolean> {
     // (defmacro macro-a
     //   '("key1" "key2" "key3"))
     // We need to match this multi-line format
-
-    // Import the setMacro function
-    const { setMacro } = await import("./macro-recording.ts");
 
     // Split by lines and look for defmacro patterns
     const lines = content.split("\n");
@@ -156,8 +152,8 @@ export async function loadMacrosFromFile(fs: FileSystem): Promise<boolean> {
                 }
               }
 
-              // Set the macro
-              setMacro(register, keys);
+              // Set the macro (per-editor)
+              macros.set(register, keys);
             }
           }
         }

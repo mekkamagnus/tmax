@@ -32,13 +32,6 @@ import { highlightLine } from "../../syntax/highlighter.ts";
 import { languageMap } from "../../syntax/language-registry.ts";
 
 /**
- * Module-level state for the active language and highlight toggle.
- */
-let activeLanguage: string = "";
-let highlightEnabled: boolean = false;
-let storedSpans: HighlightSpan[][] = [];
-
-/**
  * Create syntax highlighting API functions.
  * @param getCurrentBuffer - Function to get current buffer
  * @param getLineCount - Function to get buffer line count
@@ -50,6 +43,10 @@ export function createSyntaxOps(
   getLineCount: () => number,
   getLine: (line: number) => string
 ): Map<string, TLispFunctionImpl> {
+  // CHORE-44 Change 1: per-editor syntax state (was module-global).
+  let activeLanguage: string = "";
+  let highlightEnabled: boolean = false;
+  let storedSpans: HighlightSpan[][] = [];
   // CHORE-39 Phase 4: current-buffer read flows through the State monad against
   // EditorModel; line count/line text stay on the supplied derived callbacks.
   const getCurrentBuffer = (): unknown => runModel(access, readModelField("currentBuffer"));

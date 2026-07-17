@@ -1,32 +1,17 @@
 import { describe, expect, test } from "bun:test";
 import { FunctionalTextBufferImpl } from "../../src/core/buffer";
-import { createEditorAPI, type TlispEditorState } from "../../src/editor/tlisp-api";
+import { createEditorAPI } from "../../src/editor/tlisp-api";
 import { Either } from "../../src/utils/task-either";
-import { expectDefined, expectRight } from "../helpers/editor-fixture.ts";
-import { MockFileSystem } from "../mocks/filesystem.ts";
-import { MockTerminal } from "../mocks/terminal.ts";
+import { expectDefined, expectRight, createTestAPIContext } from "../helpers/editor-fixture.ts";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
-function createState(): TlispEditorState {
+function createState() {
   const currentBuffer = FunctionalTextBufferImpl.create("");
-  return {
+  return createTestAPIContext({
     currentBuffer,
     buffers: new Map([["default", currentBuffer]]),
-    cursorLine: 0,
-    cursorColumn: 0,
-    terminal: new MockTerminal(),
-    filesystem: new MockFileSystem(),
-    mode: "normal",
-    lastCommand: "",
-    statusMessage: "",
-    viewportTop: 0,
-    viewportLeft: 0,
-    commandLine: "",
-    spacePressed: false,
-    mxCommand: "",
-    cursorFocus: "buffer",
-  };
+  });
 }
 
 describe("Fikra Phase 2 — T-Lisp Modules", () => {

@@ -11,6 +11,13 @@ import { closeSync, existsSync, mkdirSync, openSync, unlinkSync, writeFileSync, 
 import path from 'path';
 import { Editor } from '../editor/editor.ts';
 import { TerminalIOImpl } from '../core/terminal.ts';
+import { dispatchRpc, RpcError, type RpcHandlers } from './rpc/router.ts';
+import type {
+  JsonValue, FrameTarget, OpenParams, EvalParams, CommandParams, QueryParams, InsertParams,
+  KeypressParams, RenderStateParams, ClientEventParams, SaveFileParams, CaptureParams,
+  WorkspaceNewParams, WorkspaceSwitchParams, WorkspaceSaveParams, WorkspaceKillParams,
+  WorkspaceRenameParams, WorkspaceLoadParams, WorkspaceMoveWindowParams,
+} from './rpc/types.ts';
 import { FileSystemImpl } from '../core/filesystem.ts';
 import { FunctionalTextBufferImpl } from '../core/buffer.ts';
 import { EditorState, Frame, WorkspaceState } from '../core/types.ts';
@@ -524,7 +531,7 @@ export class TmaxServer {
   /**
    * Resolve frame from params or fall back to active frame
    */
-  private resolveFrame(params: any): Frame {
+  private resolveFrame(params: FrameTarget): Frame {
     if (params?.frameId) return this.getFrame(params.frameId);
     if (this.activeFrameId) return this.getFrame(this.activeFrameId);
     throw new Error('No active frame');
@@ -533,7 +540,7 @@ export class TmaxServer {
   /**
    * Non-throwing variant: returns undefined when no frame is active.
    */
-  private resolveFrameOptional(params: any): Frame | undefined {
+  private resolveFrameOptional(params: FrameTarget): Frame | undefined {
     try {
       return this.resolveFrame(params);
     } catch {
@@ -1151,6 +1158,39 @@ export class TmaxServer {
   /**
    * Process a JSON-RPC request
    */
+  /**
+   * Build the typed RPC handler table (CHORE-44 Change 5 AC5.2). Each method
+   * (declared in RpcMethodMap) maps to its handler; the router dispatches
+   * against this table instead of a monolithic switch.
+   */
+  private rpcHandlers(): RpcHandlers {
+    return {
+      open: (p) => this.handleOpen(p),
+      eval: (p) => this.handleEval(p),
+      command: (p) => this.handleCommand(p),
+      query: (p) => this.handleQuery(p),
+      insert: (p) => this.handleInsert(p),
+      keypress: (p) => this.handleKeypress(p),
+      'render-state': (p) => this.handleRenderState(p),
+      'client-event': (p) => this.handleClientEvent(p),
+      'save-file': (p) => this.handleSaveFile(p),
+      capture: (p) => this.handleCapture(p),
+      ping: () => this.handlePing(),
+      status: () => this.handleStatus(),
+      clients: () => this.handleClients(),
+      frames: () => this.handleFrames(),
+      shutdown: () => { setTimeout(() => { void this.shutdown(); }, 50); return { ok: true as const }; },
+      'workspace-list': () => this.handleWorkspaceList(),
+      'workspace-new': (p) => this.handleWorkspaceNew(p),
+      'workspace-switch': (p) => this.handleWorkspaceSwitch(p),
+      'workspace-save': (p) => this.handleWorkspaceSave(p),
+      'workspace-kill': (p) => this.handleWorkspaceKill(p),
+      'workspace-rename': (p) => this.handleWorkspaceRename(p),
+      'workspace-load': (p) => this.handleWorkspaceLoad(p),
+      'workspace-move-window': (p) => this.handleWorkspaceMoveWindow(p),
+    };
+  }
+
   private async processRequest(request: JSONRPCRequest): Promise<JSONRPCResponse> {
     if (request.jsonrpc !== '2.0') {
       return {
@@ -1164,89 +1204,26 @@ export class TmaxServer {
     }
 
     try {
-      let result: any;
-
-      switch (request.method) {
-        case 'open':
-          result = await this.handleOpen(request.params);
-          break;
-        case 'eval':
-          result = await this.handleEval(request.params);
-          break;
-        case 'command':
-          result = await this.handleCommand(request.params);
-          break;
-        case 'query':
-          result = await this.handleQuery(request.params);
-          break;
-        case 'ping':
-          result = await this.handlePing();
-          break;
-        case 'insert':
-          result = await this.handleInsert(request.params);
-          break;
-        case 'keypress':
-          result = await this.handleKeypress(request.params);
-          break;
-        case 'render-state':
-          result = await this.handleRenderState(request.params);
-          break;
-        case 'client-event':
-          result = await this.handleClientEvent(request.params);
-          break;
-        case 'status':
-          result = await this.handleStatus();
-          break;
-        case 'clients':
-          result = await this.handleClients();
-          break;
-        case 'frames':
-          result = await this.handleFrames();
-          break;
-        case 'workspace-list':
-          result = await this.handleWorkspaceList();
-          break;
-        case 'workspace-new':
-          result = await this.handleWorkspaceNew(request.params);
-          break;
-        case 'workspace-switch':
-          result = await this.handleWorkspaceSwitch(request.params);
-          break;
-        case 'workspace-save':
-          result = await this.handleWorkspaceSave(request.params);
-          break;
-        case 'workspace-kill':
-          result = await this.handleWorkspaceKill(request.params);
-          break;
-        case 'workspace-rename':
-          result = await this.handleWorkspaceRename(request.params);
-          break;
-	        case 'workspace-load':
-	          result = await this.handleWorkspaceLoad(request.params);
-	          break;
-	        case 'workspace-move-window':
-	          result = await this.handleWorkspaceMoveWindow(request.params);
-	          break;
-        case 'shutdown':
-          result = { success: true };
-          // Fire-and-forget shutdown so we can respond first
-          setTimeout(() => { this.shutdown(); }, 50);
-          break;
-        case 'capture':
-          result = this.handleCapture(request.params);
-          break;
-        case 'save-file':
-          result = await this.handleSaveFile(request.params);
-          break;
-        default:
+      // CHORE-44 Change 5 AC5.2: typed router dispatch replaces the monolithic
+      // switch(request.method). Unknown methods throw RpcError(-32601) → mapped
+      // here to the -32601 response; other thrown errors fall to the catch
+      // below (existing -32010 internal-failure contract, incl. T-Lisp diagnostics).
+      let result;
+      try {
+        result = await dispatchRpc(this.rpcHandlers(), request.method, request.params);
+      } catch (routeError) {
+        if (routeError instanceof RpcError) {
           return {
             jsonrpc: '2.0',
             id: request.id,
             error: {
-              code: -32601,
-              message: `Method not found: ${request.method}`
-            }
+              code: routeError.code,
+              message: routeError.message,
+              ...(routeError.data !== undefined ? { data: routeError.data } : {}),
+            },
           };
+        }
+        throw routeError;
       }
 
       return {
@@ -1282,7 +1259,7 @@ export class TmaxServer {
    * Handle save-file request: save current buffer to disk.
    * Accepts optional `filename` param for save-as.
    */
-  private async handleSaveFile(params: any): Promise<any> {
+  private async handleSaveFile(params: SaveFileParams): Promise<unknown> {
     const frame = this.resolveFrameOptional(params);
     const workspaceOverride = this.isWorkspaceOverride(frame, params?.workspaceId);
     if (frame && !workspaceOverride) this.syncFrameToEditor(frame);
@@ -1303,7 +1280,7 @@ export class TmaxServer {
   /**
    * Handle file open request
    */
-  private async handleOpen(params: any): Promise<any> {
+  private async handleOpen(params: OpenParams): Promise<unknown> {
     const filepath = params.filepath;
 
     if (!filepath) {
@@ -1357,7 +1334,7 @@ export class TmaxServer {
   /**
    * Handle T-Lisp evaluation request
    */
-  private async handleEval(params: any): Promise<any> {
+  private async handleEval(params: EvalParams): Promise<unknown> {
     const code = params.code;
 
     if (!code) {
@@ -1428,7 +1405,7 @@ export class TmaxServer {
   /**
    * Handle insert request
    */
-  private async handleInsert(params: any): Promise<any> {
+  private async handleInsert(params: InsertParams): Promise<unknown> {
     const text = params.text;
 
     if (!text) {
@@ -1471,7 +1448,7 @@ export class TmaxServer {
   /**
    * Handle keypress from TUI client
    */
-  private async handleKeypress(params: any): Promise<any> {
+  private async handleKeypress(params: KeypressParams): Promise<unknown> {
     const key = params.key;
     if (!key) {
       throw new Error('Key is required for keypress');
@@ -1526,7 +1503,7 @@ export class TmaxServer {
    * Handle render-state request (frame-scoped).
    * READ-only: returns the frame's own state without mutating editor.
    */
-  private async handleRenderState(params: any): Promise<any> {
+  private async handleRenderState(params: RenderStateParams): Promise<unknown> {
     if (params?.frameId) {
       const frame = this.getFrame(params.frameId);
       // Read-only: return frame's own state directly, no workspace activation (C2)
@@ -1546,7 +1523,7 @@ export class TmaxServer {
    * Non-integer, zero, or negative dimensions are rejected with a JSON-RPC
    * error so callers cannot accidentally render to a 0×0 frame.
    */
-  private handleCapture(params: any): any {
+  private handleCapture(params: CaptureParams): unknown {
     const format = params?.format ?? "ansi";
 
     // Validate explicit dimensions if the caller provided them.
@@ -1597,7 +1574,7 @@ export class TmaxServer {
   /**
    * Handle lifecycle events from connected clients.
    */
-  private async handleClientEvent(params: any): Promise<any> {
+  private async handleClientEvent(params: ClientEventParams): Promise<unknown> {
     const event = params.event;
     const clientId = params.clientId;
     const frameId = params.frameId;
@@ -1652,19 +1629,19 @@ export class TmaxServer {
     return { ok: true };
   }
 
-  private async handleStatus(): Promise<any> {
+  private async handleStatus(): Promise<unknown> {
     return this.buildStatus();
   }
 
-  private async handleClients(): Promise<any> {
+  private async handleClients(): Promise<unknown> {
     return Array.from(this.clients.values()).map(client => this.clientStatus(client));
   }
 
-  private async handleFrames(): Promise<any> {
+  private async handleFrames(): Promise<unknown> {
     return Array.from(this.frames.values()).map(frame => this.frameStatus(frame));
   }
 
-	  private workspaceNameFromParams(params: any, key: string = 'name'): string {
+	  private workspaceNameFromParams(params: FrameTarget, key: string = 'name'): string {
 	    const value = params?.[key] ?? params?.workspace ?? params?.workspaceId;
 	    if (typeof value !== 'string' || value.length === 0) {
 	      throw new Error(`Workspace ${key} is required`);
@@ -1700,7 +1677,7 @@ export class TmaxServer {
 	    });
 	  }
 
-  private async handleWorkspaceList(): Promise<any> {
+  private async handleWorkspaceList(): Promise<unknown> {
     this.captureActiveWorkspace();
     const disk = await this.workspaceManager.list().run();
     if (Either.isLeft(disk)) throw new Error(disk.left);
@@ -1716,7 +1693,7 @@ export class TmaxServer {
     }));
   }
 
-  private async handleWorkspaceNew(params: any): Promise<any> {
+  private async handleWorkspaceNew(params: WorkspaceNewParams): Promise<unknown> {
     const name = this.workspaceNameFromParams(params);
     const result = await this.workspaceManager.create(name, { projectRoot: params?.projectRoot }).run();
     if (Either.isLeft(result)) throw new Error(result.left);
@@ -1725,7 +1702,7 @@ export class TmaxServer {
     return { success: true, name, id: result.right.metadata.id };
   }
 
-  private async handleWorkspaceSwitch(params: any): Promise<any> {
+  private async handleWorkspaceSwitch(params: WorkspaceSwitchParams): Promise<unknown> {
     const name = this.workspaceNameFromParams(params);
     // R4-9: inline the switch logic to avoid double captureActiveWorkspace
     this.captureActiveWorkspace();
@@ -1742,14 +1719,14 @@ export class TmaxServer {
     return { success: true, activeWorkspaceId: name };
   }
 
-  private async handleWorkspaceSave(params: any): Promise<any> {
+  private async handleWorkspaceSave(params: WorkspaceSaveParams): Promise<unknown> {
     const name = params?.name ?? this.activeWorkspaceId;
     this.captureActiveWorkspace();
     await this.saveWorkspace(name);
     return { success: true, name };
   }
 
-	  private async handleWorkspaceKill(params: any): Promise<any> {
+	  private async handleWorkspaceKill(params: WorkspaceKillParams): Promise<unknown> {
 	    const name = this.workspaceNameFromParams(params);
 	    if (name === this.activeWorkspaceId) {
 	      throw new Error('Cannot kill the active workspace; switch to another workspace first');
@@ -1777,7 +1754,7 @@ export class TmaxServer {
     return { success: true, name };
   }
 
-  private async handleWorkspaceRename(params: any): Promise<any> {
+  private async handleWorkspaceRename(params: WorkspaceRenameParams): Promise<unknown> {
     const oldName = this.workspaceNameFromParams(params, 'oldName');
     const newName = this.workspaceNameFromParams(params, 'newName');
     this.captureActiveWorkspace();
@@ -1796,13 +1773,13 @@ export class TmaxServer {
     return { success: true, oldName, newName };
   }
 
-	  private async handleWorkspaceLoad(params: any): Promise<any> {
+	  private async handleWorkspaceLoad(params: WorkspaceLoadParams): Promise<unknown> {
 	    const name = this.workspaceNameFromParams(params);
 	    const workspace = await this.loadWorkspace(name);
 	    return { success: true, name, id: workspace.metadata.id };
 	  }
 
-	  private async handleWorkspaceMoveWindow(params: any): Promise<any> {
+	  private async handleWorkspaceMoveWindow(params: WorkspaceMoveWindowParams): Promise<unknown> {
 	    const targetName = params?.target ?? params?.name ?? params?.workspace ?? params?.workspaceId;
 	    if (typeof targetName !== 'string' || targetName.length === 0) {
 	      throw new Error('workspace-move-window target is required');
@@ -1928,7 +1905,7 @@ export class TmaxServer {
 	  /**
 	   * Handle editor command request
    */
-  private async handleCommand(params: any): Promise<any> {
+  private async handleCommand(params: CommandParams): Promise<unknown> {
     const command = params.command;
 
     if (!command) {
@@ -2157,7 +2134,7 @@ export class TmaxServer {
   /**
    * Handle query request
    */
-	  private async handleQuery(params: any): Promise<any> {
+	  private async handleQuery(params: QueryParams): Promise<unknown> {
 	    const query = params.query;
 	    // N4: read-only query — do not mutate editor state via activateFrameWorkspace
 	    const frame = this.resolveFrameOptional(params);
@@ -2271,7 +2248,7 @@ export class TmaxServer {
   /**
    * Handle ping request
    */
-  private async handlePing(): Promise<any> {
+  private async handlePing(): Promise<unknown> {
     return {
       status: 'running',
       server: 'tmax',

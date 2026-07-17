@@ -52,6 +52,8 @@ RFC-001 (TRT framework) is implemented across five sequentially-dependent specs.
 | [SPEC-058-tlisp-adw-portability-primitives.md](SPEC-058-tlisp-adw-portability-primitives.md) | T-Lisp adw-portability primitives (`append-file`, `json-encode`, `command-line-args`) | [RFC-018](../rfcs/RFC-018-tlisp-scripting-primitives.md), [CHORE-31-tlisp-fp-foundations.md](CHORE-31-tlisp-fp-foundations.md) |
 | [SPEC-059-adw-pipeline-loop.md](SPEC-059-adw-pipeline-loop.md) | adw 4-stage pipeline (plan → review → build → patch-review) with build↔patch-review retry loop | [CHORE-30-adw-build.md](CHORE-30-adw-build.md), [SPEC-057-adw-patch-review.md](SPEC-057-adw-patch-review.md) |
 | [SPEC-060-adw-tmux-launcher.md](SPEC-060-adw-tmux-launcher.md) | adw tmux launcher — run adw pipelines in the `tmax` tmux session (survives agent timeouts) | [SPEC-059-adw-pipeline-loop.md](SPEC-059-adw-pipeline-loop.md) |
+| [SPEC-067-vim-parity-implementation.md](SPEC-067-vim-parity-implementation.md) | Vim parity — bind + unit-test (real keypresses) + tmax-use e2e every core normal-mode key (supersedes SPEC-044) | [SPEC-044](SPEC-044-vim-parity-priority-recommendations.md), [SPEC-005](SPEC-005-vim-editing-motions.md) |
+| [SPEC-069-vim-operator-motion-parity.md](SPEC-069-vim-operator-motion-parity.md) | Vim operator × motion composition parity — general operator-apply fallback (fixes `vim-operator-apply` allowlist) + yank text-objects (`yiw`/`yi"`/…) + `s`/`S` + visual text-objects (builds on SPEC-067) | [SPEC-067](SPEC-067-vim-parity-implementation.md) |
 
 ## Bug Reports
 
@@ -68,12 +70,14 @@ RFC-001 (TRT framework) is implemented across five sequentially-dependent specs.
 | [BUG-11-which-key-not-working.md](BUG-11-which-key-not-working.md) | Which-key C-g cancellation breaks subsequent vim prefixes | [ADR-0115](../adrs/ADR-0115-tui-rendering-display-interaction-hardening.md) |
 | [BUG-12-zero-key-viewport-scroll.md](BUG-12-zero-key-viewport-scroll.md) | `0` key doesn't reset viewport after horizontal scroll | [ADR-0115](../adrs/ADR-0115-tui-rendering-display-interaction-hardening.md) |
 | [BUG-13-undo-cursor-restore.md](BUG-13-undo-cursor-restore.md) | Undo does not restore pre-edit cursor position | [ADR-0084](../adrs/ADR-0084-undo-pre-edit-cursor-restore.md) |
-| [BUG-16-unit-suite-server-socket-leak.md](BUG-16-unit-suite-server-socket-leak.md) | Unit suite hangs from cumulative socket/server leaks | [ADR-0113](../adrs/ADR-0113-adw-test-infrastructure-hardening.md) |
+| [BUG-16-unit-suite-server-socket-leak.md](BUG-16-unit-suite-server-socket-leak.md) | Unit suite hangs from cumulative socket/server leaks | [ADR-0113](../adrs/ADR-0113-adw-test-infrastructure-hardening.md), [ADR-0116](../adrs/ADR-0116-bug16-wrapper-inactivity-timer-false-positive.md) |
 | [BUG-17-pipeline-test-agents-dir-leak.md](BUG-17-pipeline-test-agents-dir-leak.md) | adw-pipeline unit tests pollute the real agents/ directory | [ADR-0105](../adrs/ADR-0105-test-isolation-policy.md) |
 | [BUG-18-test-stage-grandchild-drain-block.md](BUG-18-test-stage-grandchild-drain-block.md) | Patch-review gate grandchild drain block | [ADR-0107](../adrs/ADR-0107-api-529-rate-limit-retry.md), [ADR-0108](../adrs/ADR-0108-adw-compile-gate-and-feedback-integrity.md) |
 | [BUG-19-spec065-test-failures-patch-review-crash.md](BUG-19-spec065-test-failures-patch-review-crash.md) | SPEC-065 — 10 remaining test failures + patch-review crash on empty gather | — |
 | [BUG-20-worktree-duplication-on-resume.md](BUG-20-worktree-duplication-on-resume.md) | Worktree isolation creates duplicate worktrees on every resume | [ADR-0109](../adrs/ADR-0109-adw-resume-worktree-validation.md) |
 | [BUG-21-adw-test-typecheck-errors.md](BUG-21-adw-test-typecheck-errors.md) | Pre-existing `typecheck:test` errors block the full suite | — |
+| [BUG-22-headed-tui-input-order.md](BUG-22-headed-tui-input-order.md) | Headed TUI input chunks execute out of order | — |
+| [BUG-23-visual-line-select.md](BUG-23-visual-line-select.md) | `V` (visual line mode) does not highlight or select a full line | [SPEC-067](SPEC-067-vim-parity-implementation.md) |
 
 ## Chores
 

@@ -6,14 +6,13 @@
  * routing, and the recording-capture hook near the keymap executeCommand.
  */
 
-import { describe, expect, test, beforeEach } from "bun:test";
+import { describe, expect, test } from "bun:test";
 import { Editor } from "../../src/editor/editor.ts";
 import {
   bufferText,
   createStartedEditor,
   executeTlisp,
 } from "../helpers/editor-fixture.ts";
-import { resetMacroRecordingState } from "../../src/editor/api/macro-recording.ts";
 
 async function press(editor: Editor, keys: string): Promise<void> {
   for (const key of keys) {
@@ -21,11 +20,8 @@ async function press(editor: Editor, keys: string): Promise<void> {
   }
 }
 
-// Macro recording state lives in a module-level singleton (api/macro-recording.ts),
-// so tests must reset it between cases or recordings leak across the suite.
-beforeEach(() => {
-  resetMacroRecordingState();
-});
+// CHORE-44 Change 1: macro recording state is per-editor (each createStartedEditor
+// builds a fresh session), so no module-global reset is needed between cases.
 
 function isRecording(editor: Editor): boolean {
   const value = executeTlisp(editor, "(macro-record-active)");

@@ -1,32 +1,18 @@
 import { describe, expect, test } from "bun:test";
 import { FunctionalTextBufferImpl } from "../../src/core/buffer";
-import { createEditorAPI, type TlispEditorState } from "../../src/editor/tlisp-api";
+import { createEditorAPI } from "../../src/editor/tlisp-api";
 import { createNumber, createString, createSymbol } from "../../src/tlisp/values";
 import { Either } from "../../src/utils/task-either";
-import { expectDefined, expectRight } from "../helpers/editor-fixture.ts";
-import { MockFileSystem } from "../mocks/filesystem.ts";
-import { MockTerminal } from "../mocks/terminal.ts";
-import { MessageLog } from "../../src/editor/message-log.ts";
+import { expectDefined, expectRight, createTestAPIContext } from "../helpers/editor-fixture.ts";
+import { MessageLog, type LogLevel } from "../../src/editor/message-log.ts";
+import { Log, ViewBoundLog } from "../../src/editor/log-store.ts";
 
-function createState(): TlispEditorState {
+function createState() {
   const currentBuffer = FunctionalTextBufferImpl.create("");
-  return {
+  return createTestAPIContext({
     currentBuffer,
     buffers: new Map([["default", currentBuffer]]),
-    cursorLine: 0,
-    cursorColumn: 0,
-    terminal: new MockTerminal(),
-    filesystem: new MockFileSystem(),
-    mode: "normal",
-    lastCommand: "",
-    statusMessage: "",
-    viewportTop: 0,
-    viewportLeft: 0,
-    commandLine: "",
-    spacePressed: false,
-    mxCommand: "",
-    cursorFocus: "buffer",
-  };
+  });
 }
 
 describe("T-Lisp API", () => {
@@ -76,15 +62,19 @@ describe("T-Lisp API", () => {
 
   // --- Messages API tests ---
 
-  function createStateWithMessages(): TlispEditorState {
+  function createStateWithMessages() {
     const state = createState();
     state.buffers.set('*Messages*', FunctionalTextBufferImpl.create(''));
-    const messageLog = new MessageLog();
+    // CHORE-44 Change 2: logMessage and getMessageLog share one Log store so the
+    // SPEC-055 query/max/level primitives observe what (message)/(log-message)
+    // record (MessageLog is retained only for the legacy render-based path).
+    void new MessageLog();
+    const store = new Log();
     state.logMessage = (msg: string, level?: string, command?: string) => {
-      messageLog.log((level as any) ?? 'info', msg, command);
-      state.buffers.set('*Messages*', FunctionalTextBufferImpl.create(messageLog.render()));
+      store.log({ level: (level ?? 'info') as LogLevel, text: msg, command, category: 'editor' });
+      state.buffers.set('*Messages*', FunctionalTextBufferImpl.create(store.render('messages')));
     };
-    (state as any)._getMessageLog = () => messageLog;
+    state.getMessageLog = () => new ViewBoundLog(store, 'messages');
     return state;
   }
 
@@ -154,7 +144,7 @@ describe("T-Lisp API", () => {
     expect(String(result.value)).toBe("which-key hint");
     expect(state.statusMessage).toBe("which-key hint");
     // Critical: echo must NOT append to the log (contrast with message).
-    const log = (state as any)._getMessageLog();
+    const log = state.getMessageLog!();
     expect(log.getEntries()).toHaveLength(0);
   });
 
@@ -164,7 +154,7 @@ describe("T-Lisp API", () => {
     const message = expectDefined(api.get("message"));
     expectRight(message([createString("logged msg")]));
     expect(state.statusMessage).toBe("logged msg");
-    const log = (state as any)._getMessageLog();
+    const log = state.getMessageLog!();
     expect(log.getEntries()).toHaveLength(1);
   });
 
@@ -181,7 +171,7 @@ describe("T-Lisp API", () => {
     const api = createEditorAPI(state);
     const clear = expectDefined(api.get("clear-messages"));
     clear([]);
-    const log = (state as any)._getMessageLog();
+    const log = state.getMessageLog!();
     expect(log.getEntries()).toHaveLength(0);
   });
 
@@ -198,7 +188,7 @@ describe("T-Lisp API", () => {
     const api = createEditorAPI(state);
     const setLevel = expectDefined(api.get("set-message-log-level"));
     expectRight(setLevel([createSymbol(":warn")]));
-    const log = (state as any)._getMessageLog();
+    const log = state.getMessageLog!();
     expect(log.minLevel).toBe("warn");
   });
 
@@ -215,7 +205,7 @@ describe("T-Lisp API", () => {
     const api = createEditorAPI(state);
     const setMax = expectDefined(api.get("set-message-log-max"));
     expectRight(setMax([createNumber(500)]));
-    const log = (state as any)._getMessageLog();
+    const log = state.getMessageLog!();
     expect(log.maxSize).toBe(500);
   });
 

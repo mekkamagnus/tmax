@@ -39,20 +39,6 @@ import {
 } from "../../error/types.ts";
 
 /**
- * Search state tracking
- */
-let lastSearchPattern: string = "";
-let lastSearchDirection: "forward" | "backward" = "forward";
-
-/** Incremental search state (SPEC-035) */
-let isearchActive: boolean = false;
-let isearchPattern: string = "";
-let isearchDirection: "forward" | "backward" = "forward";
-let isearchOriginLine: number = 0;
-let isearchOriginColumn: number = 0;
-let isearchHighlightRanges: Range[] = [];
-
-/**
  * Find the next occurrence of a pattern in forward direction
  * @param text - Full text content
  * @param pattern - Pattern to search for
@@ -183,6 +169,16 @@ export function createSearchOps(
   setStatusMessage: (message: string) => void,
   setSearchMatches?: (ranges: Range[]) => void
 ): Map<string, TLispFunctionImpl> {
+  // CHORE-44 Change 1: per-editor search state (was module-global).
+  let lastSearchPattern: string = "";
+  let lastSearchDirection: "forward" | "backward" = "forward";
+  let isearchActive: boolean = false;
+  let isearchPattern: string = "";
+  let isearchDirection: "forward" | "backward" = "forward";
+  let isearchOriginLine: number = 0;
+  let isearchOriginColumn: number = 0;
+  let isearchHighlightRanges: Range[] = [];
+
   // CHORE-39 Phase 4: cursor/buffer reads flow through the State monad against
   // EditorModel; writes stay on the supplied setters to preserve side effects.
   const getCursorLine = (): number => runModel(access, readModelField("cursorPosition")).line;

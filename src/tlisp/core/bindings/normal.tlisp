@@ -126,6 +126,15 @@
 (key-bind "J" "(progn (vim-count-reset) (vim-join-lines))" "normal")
 
 ;; =================================================================
+;; SUBSTITUTE (SPEC-069 Phase 3)
+;; =================================================================
+;; s deletes COUNT chars (yanking to ") and enters insert; vim-delete-char
+;; already populates the unnamed register. S clears COUNT lines and enters
+;; insert — identical to cc.
+(key-bind "s" "(progn (vim-delete-char (vim-count-consume 1)) (editor-set-mode \"insert\"))" "normal")
+(key-bind "S" "(vim-change-line-range (vim-count-consume 1))" "normal")
+
+;; =================================================================
 ;; PASTE (count-aware)
 ;; =================================================================
 
@@ -207,6 +216,10 @@
 (key-bind "C-d" "(progn (vim-count-reset) (half-page-down))" "normal")
 (key-bind "C-u" "(progn (vim-count-reset) (half-page-up))" "normal")
 
+;; SPEC-067 — numeric increment/decrement (count-aware: 5C-a adds 5).
+(key-bind "C-a" "(vim-increment-number (vim-count-consume 1))" "normal")
+(key-bind "C-x" "(vim-decrement-number (vim-count-consume 1))" "normal")
+
 ;; =================================================================
 ;; M-X SYSTEM (Emacs-style)
 ;; =================================================================
@@ -224,7 +237,9 @@
 (key-bind "SPC ;" "(execute-extended-command)" "normal")
 
 ;; Emacs-style buffer switching.
-(key-bind "C-x b" "(switch-buffer)" "normal")
+;; SPEC-067 note: "C-x b" (switch-buffer) was removed here so "C-x" is free
+;; for its vim meaning — decrement-number. switch-buffer stays reachable via
+;; "SPC x b" (below) and M-x. See docs/specs/SPEC-067-vim-parity-implementation.md.
 
 ;; SPC x prefix (Emacs C-x compatibility via leader key)
 (key-bind "SPC x f" "(find-file)" "normal")

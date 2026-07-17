@@ -1,5 +1,5 @@
 (defmodule editor/commands/edit-commands
-  (export vim-delete-char vim-change-char vim-delete-to-line-end vim-change-to-line-end vim-yank-to-line-end vim-paste-after vim-paste-before vim-join-lines visual-change visual-swap-anchor)
+  (export vim-delete-char vim-change-char vim-delete-to-line-end vim-change-to-line-end vim-yank-to-line-end vim-paste-after vim-paste-before vim-join-lines visual-change visual-swap-anchor vim-change-number vim-increment-number vim-decrement-number)
 
 ;; edit-commands.tlisp -- Single-key Vim edit commands composed in T-Lisp
 
@@ -124,4 +124,45 @@ register-prefix swap-and-restore logic."
   (progn
     (visual-swap-endpoints)
     t))
+
+;; =====================================================================
+;; SPEC-067 — numeric increment/decrement (C-a / C-x).
+;; The number scan (find the decimal at/after cursor on this line, with a
+;; leading '-' only when it is a true sign) is a factual character scan done
+;; by the scan-number-on-line primitive. The decision — apply count, replace,
+;; land cursor on the last digit — is editor logic owned here.
+;; =====================================================================
+
+(defun vim-change-number (delta)
+  "Find the number at/after cursor on this line, add DELTA, replace it in
+place. Cursor lands on the last digit of the new number (vim semantics).
+No number on the line is a no-op. Shared by C-a (delta=+count) and
+C-x (delta=-count)."
+  (let ((info (scan-number-on-line (cursor-line) (cursor-column))))
+    (if (null info)
+      (progn
+        (vim-count-reset)
+        (editor-set-status "No number on line")
+        t)
+      (let ((start (nth 0 info)))
+        (let ((end (nth 1 info)))
+          (let ((text (nth 2 info)))
+            (let ((line (cursor-line)))
+              (let ((new-text (number-to-string (+ (string-to-number text) delta))))
+                (progn
+                  (vim-count-reset)
+                  (undo-begin)
+                  (buffer-replace-range line start line end new-text)
+                  (cursor-move line (+ start (- (length new-text) 1)))
+                  (undo-commit "C-a")
+                  (vim-record-change "C-a" 1)
+                  t)))))))))
+
+(defun vim-increment-number (count)
+  "C-a: increment the number at/after cursor by COUNT (default 1)."
+  (vim-change-number count))
+
+(defun vim-decrement-number (count)
+  "C-x: decrement the number at/after cursor by COUNT (default 1)."
+  (vim-change-number (- count)))
 )

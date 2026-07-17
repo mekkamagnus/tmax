@@ -44,20 +44,29 @@ interface UndoTreeState {
   nextId: number;                // Counter for generating unique IDs
 }
 
-// Global undo tree treeState
-let treeState: UndoTreeState = {
-  nodes: new Map(),
-  currentId: null,
-  nextId: 0
-};
+export function createUndoTreeOps(
+  getCurrentBuffer: () => FunctionalTextBuffer | null,
+  setCurrentBuffer: (buffer: FunctionalTextBuffer) => void,
+  getCursorLine: () => number,
+  setCursorLine: (line: number) => void,
+  getCursorColumn: () => number,
+  setCursorColumn: (column: number) => void
+): { api: Map<string, TLispFunctionImpl>; reset: () => void; setInitialBuffer: (buffer: FunctionalTextBuffer) => void } {
+  // CHORE-44 Change 1: per-editor undo-tree state (was module-global). The
+  // helpers below are inner functions closing over this state.
+  let treeState: UndoTreeState = {
+    nodes: new Map(),
+    currentId: null,
+    nextId: 0
+  };
 
-// Initial buffer treeState (before any edits)
-let initialBuffer: FunctionalTextBuffer | null = null;
+  // Initial buffer treeState (before any edits)
+  let initialBuffer: FunctionalTextBuffer | null = null;
 
 /**
  * Reset undo tree treeState (for testing)
  */
-export function resetUndoTreeState(): void {
+function resetUndoTreeState(): void {
   // CHORE-39 Phase 4: reset the tree singleton via State-monad immutable
   // updates (stateUtils.updateProperty) — commits a fresh UndoTreeState.
   const r1 = stateUtils.updateProperty<UndoTreeState, "nodes">("nodes", new Map());
@@ -73,7 +82,7 @@ export function resetUndoTreeState(): void {
 /**
  * Set initial buffer treeState
  */
-export function setInitialBuffer(buffer: FunctionalTextBuffer): void {
+function setInitialBuffer(buffer: FunctionalTextBuffer): void {
   initialBuffer = buffer;
 }
 
@@ -84,7 +93,7 @@ export function setInitialBuffer(buffer: FunctionalTextBuffer): void {
  * @param cursorLine - Optional cursor line position
  * @param cursorColumn - Optional cursor column position
  */
-export function pushToTree(
+function pushToTree(
   description: string,
   buffer: FunctionalTextBuffer,
   cursorLine?: number,
@@ -125,7 +134,7 @@ export function pushToTree(
  * @param setCursorColumn - Function to set cursor column
  * @returns Either error or success with status message
  */
-export function undo(
+function undo(
   setCurrentBuffer: (buffer: FunctionalTextBuffer) => void,
   setCursorLine?: (line: number) => void,
   setCursorColumn?: (column: number) => void
@@ -176,7 +185,7 @@ export function undo(
  * @param setCursorColumn - Function to set cursor column
  * @returns Either error or success with status message
  */
-export function redo(
+function redo(
   setCurrentBuffer: (buffer: FunctionalTextBuffer) => void,
   setCursorLine?: (line: number) => void,
   setCursorColumn?: (column: number) => void
@@ -251,7 +260,7 @@ export function redo(
  * @param setCursorColumn - Function to set cursor column
  * @returns Either error or success
  */
-export function gotoNode(
+function gotoNode(
   nodeId: number,
   setCurrentBuffer: (buffer: FunctionalTextBuffer) => void,
   setCursorLine?: (line: number) => void,
@@ -281,7 +290,7 @@ export function gotoNode(
  * Get tree structure for visualization
  * @returns Tree structure as nested list
  */
-export function getTreeStructure(): TLispValue {
+function getTreeStructure(): TLispValue {
   const nodes: TLispValue[] = [];
 
   for (const node of treeState.nodes.values()) {
@@ -302,7 +311,7 @@ export function getTreeStructure(): TLispValue {
  * Get current node ID
  * @returns Current node ID or -1 if at initial treeState
  */
-export function getCurrentNodeId(): number {
+function getCurrentNodeId(): number {
   return treeState.currentId ?? -1;
 }
 
@@ -311,7 +320,7 @@ export function getCurrentNodeId(): number {
  * @param nodeId - Node ID
  * @returns List of child node IDs
  */
-export function getBranches(nodeId: number): Either<AppError, TLispValue> {
+function getBranches(nodeId: number): Either<AppError, TLispValue> {
   const node = treeState.nodes.get(nodeId);
   if (!node) {
     return Either.left(createBufferError(
@@ -327,7 +336,7 @@ export function getBranches(nodeId: number): Either<AppError, TLispValue> {
  * Get total number of nodes in tree
  * @returns Node count
  */
-export function getNodeCount(): number {
+function getNodeCount(): number {
   return treeState.nodes.size;
 }
 
@@ -341,14 +350,6 @@ export function getNodeCount(): number {
  * @param setCursorColumn - Function to set cursor column
  * @returns Map of undo tree function names to implementations
  */
-export function createUndoTreeOps(
-  getCurrentBuffer: () => FunctionalTextBuffer | null,
-  setCurrentBuffer: (buffer: FunctionalTextBuffer) => void,
-  getCursorLine: () => number,
-  setCursorLine: (line: number) => void,
-  getCursorColumn: () => number,
-  setCursorColumn: (column: number) => void
-): Map<string, TLispFunctionImpl> {
   const api = new Map<string, TLispFunctionImpl>();
 
   /**
@@ -573,5 +574,5 @@ export function createUndoTreeOps(
     return Either.right(createNil());
   });
 
-  return api;
+  return { api, reset: resetUndoTreeState, setInitialBuffer };
 }

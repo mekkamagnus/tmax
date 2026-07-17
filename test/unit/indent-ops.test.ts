@@ -187,3 +187,40 @@ describe("SPEC-044 Phase 5 — indent + case operators", () => {
     });
   });
 });
+
+// SPEC-067 — verify the indent BINDINGS route >> / << / 2>> through the
+// normal-mode handler (the eval tests above call vim-indent-line directly).
+describe("SPEC-067 — indent keypress bindings", () => {
+  async function press(editor: Editor, keys: string): Promise<void> {
+    for (const key of keys) {
+      await editor.handleKey(key);
+    }
+  }
+
+  function bufferText(editor: Editor): string {
+    const result = editor.getInterpreter().execute("(buffer-text)") as any;
+    if (result?._tag === "Right") return result.right.value;
+    throw new Error("buffer-text failed");
+  }
+
+  test(">> indents the current line by shiftwidth", async () => {
+    const editor = await createStartedEditor("hello");
+    editor.getInterpreter().execute("(cursor-move 0 0)");
+    await press(editor, ">>");
+    expect(bufferText(editor)).toBe("  hello");
+  });
+
+  test("<< outdents the current line by shiftwidth", async () => {
+    const editor = await createStartedEditor("    hello");
+    editor.getInterpreter().execute("(cursor-move 0 0)");
+    await press(editor, "<<");
+    expect(bufferText(editor)).toBe("  hello");
+  });
+
+  test("2>> indents two lines via count-prefix (SPEC-067 AC #3)", async () => {
+    const editor = await createStartedEditor("one\ntwo\nthree");
+    editor.getInterpreter().execute("(cursor-move 0 0)");
+    await press(editor, "2>>");
+    expect(bufferText(editor)).toBe("  one\n  two\nthree");
+  });
+});

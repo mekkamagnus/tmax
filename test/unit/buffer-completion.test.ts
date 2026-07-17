@@ -2,13 +2,15 @@ import { describe, expect, test } from "bun:test";
 import { createStartedEditor, executeTlisp } from "../helpers/editor-fixture.ts";
 
 describe("Lisp-owned buffer completion", () => {
-  test("C-x b opens a generic annotated completion view", async () => {
+  test("switch-buffer opens a generic annotated completion view", async () => {
     const editor = await createStartedEditor();
     editor.createBuffer("alpha", "one");
     editor.createBuffer("*Messages*", "messages");
 
-    await editor.handleKey("\x18");
-    await editor.handleKey("b");
+    // SPEC-067: switch-buffer is driven via its command directly (the "C-x b"
+    // key was freed so "C-x" can mean decrement; switch-buffer remains on
+    // "SPC x b" and M-x). The completion view behavior under test is unchanged.
+    executeTlisp(editor, "(switch-buffer)");
 
     const state = editor.getEditorState();
     expect(state.mode).toBe("mx");
@@ -23,15 +25,19 @@ describe("Lisp-owned buffer completion", () => {
     editor.createBuffer("alpha", "one");
     editor.createBuffer("beta", "two");
 
-    await editor.handleKey("\x18");
-    await editor.handleKey("b");
+    // SPEC-067: switch-buffer is driven via its command directly (the "C-x b"
+    // key was freed so "C-x" can mean decrement; switch-buffer remains on
+    // "SPC x b" and M-x). The completion view behavior under test is unchanged.
+    executeTlisp(editor, "(switch-buffer)");
     for (const key of "alpha") await editor.handleKey(key);
     await editor.handleKey("Enter");
 
     expect(executeTlisp(editor, "(buffer-current)").value).toBe("alpha");
 
-    await editor.handleKey("\x18");
-    await editor.handleKey("b");
+    // SPEC-067: switch-buffer is driven via its command directly (the "C-x b"
+    // key was freed so "C-x" can mean decrement; switch-buffer remains on
+    // "SPC x b" and M-x). The completion view behavior under test is unchanged.
+    executeTlisp(editor, "(switch-buffer)");
     for (const key of "brand-new") await editor.handleKey(key);
     await editor.handleKey("Enter");
 
@@ -44,8 +50,10 @@ describe("Lisp-owned buffer completion", () => {
     editor.createBuffer("alpha", "one");
     executeTlisp(editor, '(buffer-insert " changed")');
 
-    await editor.handleKey("\x18");
-    await editor.handleKey("b");
+    // SPEC-067: switch-buffer is driven via its command directly (the "C-x b"
+    // key was freed so "C-x" can mean decrement; switch-buffer remains on
+    // "SPC x b" and M-x). The completion view behavior under test is unchanged.
+    executeTlisp(editor, "(switch-buffer)");
     expect(editor.getState().minibufferView?.rows.some(row =>
       row.segments.some(segment => segment.text.includes("+"))
     )).toBe(true);

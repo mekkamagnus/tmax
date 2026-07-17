@@ -4,6 +4,12 @@ Records of significant architectural decisions. Each ADR describes the context, 
 
 Ordered most-recent first (highest ADR number = most recent decision). Topic groupings preserved within each section.
 
+## Recent — BUG-16 Root-Cause Reclassification (ADR 0116)
+
+| File | Decision | Related |
+|------|----------|---------|
+| [ADR-0116-bug16-wrapper-inactivity-timer-false-positive.md](ADR-0116-bug16-wrapper-inactivity-timer-false-positive.md) | BUG-16 "hang" was never a hang — the wrapper's 120s inactivity timer false-fired on the bursty default reporter; fix = `--dots`. Reclassifies ADR-0113's "load-dependent stall"; ADR-0103 lifecycle fixes stand | BUG-16, [ADR-0103](ADR-0103-server-test-socket-leak-fix.md), [ADR-0113](ADR-0113-adw-test-infrastructure-hardening.md), [ADR-0107](ADR-0107-api-529-rate-limit-retry.md) |
+
 ## Recent — TUI Rendering, Display, and Interaction Hardening (ADR 0115)
 
 | File | Decision | Related |

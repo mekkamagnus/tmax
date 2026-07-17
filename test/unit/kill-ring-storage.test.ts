@@ -17,11 +17,15 @@ import { TLispInterpreterImpl } from "../../src/tlisp/interpreter.ts";
 import { loadTrtFramework } from "../../src/tlisp/trt/bootstrap.ts";
 import type { FunctionalTextBuffer } from "../../src/core/types.ts";
 import { FunctionalTextBufferImpl } from "../../src/core/buffer.ts";
-import { createKillRingOps, resetKillRing } from "../../src/editor/api/kill-ring.ts";
+import { createKillRingOps, bindKillRing, createKillRingState } from "../../src/editor/api/kill-ring.ts";
 
 describe("Kill Ring Storage (US-1.9.1)", () => {
   let interpreter: TLispInterpreterImpl;
   let mockBuffer: FunctionalTextBuffer;
+
+  // CHORE-44 Change 1: kill ring is per-editor. Bind one instance for the test.
+  const killRing = bindKillRing(createKillRingState());
+  const resetKillRing = () => killRing.reset();
 
   beforeEach(async () => {
     // Reset kill ring state before each test
@@ -33,8 +37,8 @@ describe("Kill Ring Storage (US-1.9.1)", () => {
     // Register testing framework
     await loadTrtFramework(interpreter);
 
-    // Register kill ring functions
-    const killRingOps = createKillRingOps();
+    // Register kill ring functions (bound to this test's kill ring)
+    const killRingOps = createKillRingOps(killRing);
     for (const [name, func] of killRingOps.entries()) {
       interpreter.defineBuiltin(name, func);
     }

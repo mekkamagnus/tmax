@@ -37,7 +37,6 @@ import type { AutoModeRule } from "../mode-state.ts";
  * Registry of all known major modes (shared across all buffers)
  */
 const modeRegistry: Map<string, MajorModeConfig> = new Map();
-let fallbackCurrentMode = "fundamental";
 const autoModeRules: AutoModeRule[] = [];
 
 // Register the default fundamental mode
@@ -69,6 +68,8 @@ export function createMajorModeOps(
     runModel(access, readModelField("currentBuffer")) ?? null;
   const getCurrentFilename = (): string | undefined => runModel(access, readModelField("currentFilename"));
   const getBufferModified = (): boolean => runModel(access, readModelField("bufferModified")) ?? false;
+  // CHORE-44 Change 1: per-editor fallback major mode (was module-global).
+  let fallbackCurrentMode = "fundamental";
   const api = new Map<string, TLispFunctionImpl>();
   const readCurrentMode = (): string =>
     getCurrentMajorMode ? getCurrentMajorMode() : fallbackCurrentMode;

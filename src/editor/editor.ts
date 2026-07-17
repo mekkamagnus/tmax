@@ -6,7 +6,10 @@
 
 import { TLispInterpreterImpl } from "../tlisp/interpreter.ts";
 import { FileSystemImpl } from "../core/filesystem.ts";
-import { createEditorAPI, TlispEditorState } from "./tlisp-api.ts";
+import { createEditorAPI } from "./tlisp-api.ts";
+import type { EditorAPIContext } from "./runtime/editor-api-context.ts";
+import { createEditorRuntimeCaches } from "./runtime/caches.ts";
+import type { EditorRuntimeCaches } from "./runtime/caches.ts";
 import type { EditorState, FunctionalTextBuffer, Window, HighlightSpan, MinibufferRenderView, WorkspaceState, BufferMetadata } from "../core/types.ts";
 import { createString, createList, createNil, createNumber, createBoolean, createHashmap, createPromise } from "../tlisp/values.ts";
 import type { TerminalIO, FileSystem } from "../core/types.ts";
@@ -25,25 +28,25 @@ import { renderDiagnostic } from "../tlisp/diagnostic-renderer.ts";
 import { FunctionalTextBufferImpl } from "../core/buffer.ts";
 import { MessageLog, type LogLevel } from "./message-log.ts";
 import { Log, ViewBoundLog } from "./log-store.ts";
+import { LoggingRuntime } from "./runtime/logging-runtime.ts";
+import { PluginRuntime, type PluginLoadResult } from "./runtime/plugin-runtime.ts";
+import { BindingRuntime } from "./runtime/binding-runtime.ts";
+import { WorkspaceRuntime } from "./runtime/workspace-runtime.ts";
 import type { LogEntry, LogCategory } from "./log-entry.ts";
-import { appendEntry, defaultLogPath, tailLoad } from "./log-persist.ts";
 import { handleNormalMode } from "./handlers/normal-handler.ts";
 import { handleInsertMode } from "./handlers/insert-handler.ts";
 import { handleVisualMode } from "./handlers/visual-handler.ts";
 import { handleCommandMode } from "./handlers/command-handler.ts";
 import { handleMxMode } from "./handlers/mx-handler.ts";
 import { handleReplaceMode } from "./handlers/replace-handler.ts";
-import * as macroRecording from "./api/macro-recording.ts";
-import { loadMacrosFromFile, saveMacrosToFile } from "./api/macro-persistence.ts";
 import { LSPClient } from "../lsp/client.ts";
 import { createWindowOps } from "./api/window-ops.ts";
 import { createTabOps } from "./api/tab-ops.ts";
 import { log } from "../utils/logger.ts";
 import { KeymapSync } from "./keymap-sync.ts";
 import { createKeymapOps } from "./api/keymap-ops.ts";
-import { resetYankRegisterState } from "./api/yank-ops.ts";
-import { resetDeleteRegisterState } from "./api/delete-ops.ts";
-import { resetUndoRedoState } from "./api/undo-redo-ops.ts";
+import { createEditorSession } from "./functional/domain-state.ts";
+import type { EditorSession } from "./functional/domain-state.ts";
 import {
   type BufferModeState,
   type MinorModeConfig,
@@ -64,38 +67,10 @@ import { createValidationError } from "../error/types.ts";
 /**
  * Key mapping for editor commands
  */
-export interface KeyMapping {
-  key: string;
-  command: string;
-  mode?: "normal" | "insert" | "visual" | "command" | "mx" | "replace";
-  majorMode?: string;
-}
-
-/**
- * Resolve the best key mapping from candidates, considering editor mode
- * and major mode. Precedence: mode+majorMode > mode > majorMode > global.
- */
-export function resolveMapping(
-  mappings: KeyMapping[],
-  editorMode: string,
-  currentMajorMode?: string,
-): KeyMapping | undefined {
-  // 1. Exact match: editor mode + major mode
-  if (currentMajorMode) {
-    const exact = mappings.find(m => m.mode === editorMode && m.majorMode === currentMajorMode);
-    if (exact) return exact;
-  }
-  // 2. Editor mode only (no major mode constraint)
-  const modeOnly = mappings.find(m => m.mode === editorMode && !m.majorMode);
-  if (modeOnly) return modeOnly;
-  // 3. Major mode only (no editor mode constraint)
-  if (currentMajorMode) {
-    const majorOnly = mappings.find(m => !m.mode && m.majorMode === currentMajorMode);
-    if (majorOnly) return majorOnly;
-  }
-  // 4. Global (no constraints)
-  return mappings.find(m => !m.mode && !m.majorMode);
-}
+// CHORE-44 Change 6: KeyMapping + resolveMapping moved to key-resolution.ts (AC6.1).
+export type { KeyMapping } from "./key-resolution.ts";
+export { resolveMapping } from "./key-resolution.ts";
+import type { KeyMapping } from "./key-resolution.ts";
 
 /**
  * Outcome the drain reports to an awaiting public method (CHORE-42).
@@ -112,6 +87,11 @@ type CommandOutcome =
  */
 export class Editor {
   private model: EditorModel;
+  // CHORE-44 Change 1: per-editor session state (kill ring, registers, visual,
+  // macros, …) — one instance per editor so concurrent editors are independent.
+  private session: EditorSession = createEditorSession();
+  // CHORE-44 Change 1: per-editor AST/parse caches (not shared, not serialized).
+  private caches: EditorRuntimeCaches = createEditorRuntimeCaches();
   private buffers: Map<string, FunctionalTextBufferImpl> = new Map();
   private interpreter: TLispInterpreterImpl;
   private keyMappings: Map<string, KeyMapping[]>;
@@ -123,14 +103,15 @@ export class Editor {
   private stateChangeListeners: Array<() => void> = [];
   private terminal: TerminalIO;
   private filesystem: FileSystem;
-  private messages: string[] = [];
-  // Unified observability store (SPEC-055). One ring of LogEntry across every
-  // category; the five virtual buffers (*Messages*, *daemon*, *Shell Output*,
-  // *Async Output*, *Tests*) are filtered renders (views) of this same store.
-  // Replaces the previous separate messageLog/daemonLog rings.
-  private log = new Log();
-  /** On-disk JSONL log path (SPEC-055 persistence). */
-  private logPath: string = defaultLogPath();
+  // CHORE-44 Change 3: logging (unified Log store + log path + message ring +
+  // log→buffer rendering) is delegated to the LoggingRuntime collaborator.
+  private logging: LoggingRuntime;
+  // CHORE-44 Change 3: plugin parsing/loading + macro persistence delegated.
+  private pluginRuntime: PluginRuntime = new PluginRuntime();
+  // CHORE-44 Change 3: binding-file loading delegated.
+  private bindingRuntime: BindingRuntime = new BindingRuntime();
+  // CHORE-44 Change 3: workspace serialization/reconciliation delegated.
+  private workspaceRuntime: WorkspaceRuntime = new WorkspaceRuntime();
   spacePressed: boolean = false;  // Track space key for SPC ; sequence (US-1.10.1)
   private windowPrefixPressed: boolean = false;  // Track C-w prefix for window commands (SPEC-004)
   private lspClient: LSPClient;  // LSP client for language server integration (US-3.1.1)
@@ -255,17 +236,23 @@ export class Editor {
     // Initialize API
     editorLog.info('Initializing T-Lisp API', { correlationId: initId });
     this.initializeAPI();
-    resetYankRegisterState();
-    resetDeleteRegisterState();
-    resetUndoRedoState();
+    // CHORE-44 Change 1: register/undo state is per-editor (fresh per session),
+    // so the former module-global resets at construction are no longer needed.
+
+    // CHORE-44 Change 3: construct the logging collaborator (owns the unified
+    // Log store, log path, and log→buffer rendering). Buffer side-effects come
+    // back through these callbacks so buffer management stays with the Editor.
+    this.logging = new LoggingRuntime({
+      setBuffer: (name, text) => { this.buffers.set(name, FunctionalTextBufferImpl.create(text)); },
+      updateBufferMetadata: (name, meta) => { this.updateBufferMetadata(name, meta); },
+    });
 
     // SPEC-055: tail-load prior-session entries from the persisted JSONL log
     // so a fresh daemon shows prior context. A corrupt/missing log never
     // blocks startup (guard). Loaded BEFORE the welcome message so the welcome
     // line is the most-recent entry.
     try {
-      const prior = tailLoad(this.logPath, this.log.maxSize);
-      for (const e of prior) this.log.log(e);
+      this.logging.loadPrior();
     } catch { /* persistence is best-effort */ }
 
     this.logMessage('Welcome to tmax', 'info');
@@ -291,7 +278,7 @@ export class Editor {
   private initializeAPI(): void {
     // Create a tlisp-api compatible state object
     const editor = this;
-    const tlispState: TlispEditorState = {
+    const tlispState: EditorAPIContext = {
       get currentBuffer() {
         return editor.model.currentBuffer ?? null;
       },
@@ -399,7 +386,7 @@ export class Editor {
         };
       },
       // Mode state callbacks for SPEC-003 buffer-local mode state
-      _evalTlisp: (expr: string) => {
+      evalTlisp: (expr: string) => {
         try {
           return editor.interpreter.execute(expr);
         } catch (e) {
@@ -410,23 +397,27 @@ export class Editor {
           });
         }
       },
-      _getCurrentMajorMode: () => editor.getCurrentMajorMode(),
-      _setCurrentMajorMode: (mode: string) => editor.setCurrentMajorMode(mode),
-      _getMinorModeRegistry: () => editor.getMinorModeRegistry(),
-      _getBufferModeStates: () => editor.getBufferModeStates(),
-      _getCurrentBufferKey: () => editor.getCurrentBufferKey(),
-      _getGlobalizedMinorModes: () => editor.getGlobalizedMinorModes(),
-      _getLoadPaths: () => editor.getLoadPaths(),
-      _getModuleRegistry: () => editor.interpreter.moduleRegistry,
-      _getCurrentModuleName: () => editor.getCurrentModuleName(),
-      _getBufferModified: () => editor.getCurrentBufferModified(),
-      _setBufferModified: (modified: boolean) => editor.setCurrentBufferModified(modified),
-      _getMessageLog: () => new ViewBoundLog(editor.log, 'messages'),
-      _getUnifiedLog: () => editor.log,
+      getCurrentMajorMode: () => editor.getCurrentMajorMode(),
+      setCurrentMajorMode: (mode: string) => editor.setCurrentMajorMode(mode),
+      getMinorModeRegistry: () => editor.getMinorModeRegistry(),
+      getBufferModeStates: () => editor.getBufferModeStates(),
+      getCurrentBufferKey: () => editor.getCurrentBufferKey(),
+      getGlobalizedMinorModes: () => editor.getGlobalizedMinorModes(),
+      getLoadPaths: () => editor.getLoadPaths(),
+      getModuleRegistry: () => editor.interpreter.moduleRegistry,
+      getCurrentModuleName: () => editor.getCurrentModuleName(),
+      getBufferModified: () => editor.getCurrentBufferModified(),
+      setBufferModified: (modified: boolean) => editor.setCurrentBufferModified(modified),
+      getMessageLog: () => editor.logging.getMessageLog(),
+      getUnifiedLog: () => editor.logging.getUnifiedLog(),
       get searchMatches() { return editor.model.searchMatches ? [...editor.model.searchMatches] : undefined; },
       set searchMatches(v: import("../core/types.ts").Range[] | undefined) { editor.applyUpdate({ type: "SetSearchMatches", matches: v }); },
-      getModel: () => editor.model,
-      applyModel: (m) => { editor.model = m; },
+      access: {
+        getModel: () => editor.model,
+        applyModel: (m) => { editor.model = m; },
+      },
+      session: editor.session,
+      caches: editor.caches,
     };
 
     const api = createEditorAPI(tlispState);
@@ -1342,21 +1333,23 @@ export class Editor {
     // MACRO RECORDING FUNCTIONS (US-2.4.1)
     // ============================================================================
 
-    // Use imported macro recording functions
+    // CHORE-44 Change 1: per-editor macro state (was module-global). Bind the
+    // session's macro ops to the legacy local names so the wrappers below are
+    // unchanged.
     const {
-      startRecording,
-      stopRecording,
-      recordKey,
-      isRecording,
-      getCurrentRegister,
-      getMacros,
-      executeMacro,
-      executeLastMacro,
-      getLastExecutedMacro,
-      clearAllMacros,
-      clearMacro,
-      resetMacroRecordingState,
-    } = macroRecording;
+      start: startRecording,
+      stop: stopRecording,
+      record: recordKey,
+      isActive: isRecording,
+      currentRegister: getCurrentRegister,
+      all: getMacros,
+      execute: executeMacro,
+      executeLast: executeLastMacro,
+      lastExecuted: getLastExecutedMacro,
+      clearAll: clearAllMacros,
+      clear: clearMacro,
+      reset: resetMacroRecordingState,
+    } = this.session.macros;
 
     // macro-record-start: Start recording to a register
     defineRaw("macro-record-start", (args) => {
@@ -1645,47 +1638,7 @@ export class Editor {
    * @returns true if loaded successfully, false otherwise
    */
   private async loadBindingsFromFile(path: string, silent = false): Promise<boolean> {
-    const executeContent = (content: string): boolean => {
-      const result = this.interpreter.execute(content);
-      if (Either.isLeft(result)) {
-        const sanitizedContent = content.replace(
-          /"\((editor-set-mode) "([^"]+)"\)"/g,
-          '"($1 \\"$2\\")"'
-        );
-        if (sanitizedContent !== content) {
-          const sanitizedResult = this.interpreter.execute(sanitizedContent);
-          if (Either.isRight(sanitizedResult)) {
-            return true;
-          }
-        }
-        throw new Error(result.left.message);
-      }
-      return true;
-    };
-
-    try {
-      const coreBindingsContent = await this.filesystem.readFile(path);
-      return executeContent(coreBindingsContent);
-    } catch (error) {
-      try {
-        const realFile = Bun.file(path);
-        if (await realFile.exists()) {
-          return executeContent(await realFile.text());
-        }
-      } catch (realError) {
-        const realMessage = realError instanceof Error ? realError.message : String(realError);
-        if (!silent) {
-          console.warn(`Failed to load bindings from ${path}: ${realMessage}`);
-        }
-        return false;
-      }
-
-      const errorMessage = error instanceof Error ? error.message : String(error);
-      if (!silent) {
-        console.warn(`Failed to load bindings from ${path}: ${errorMessage}`);
-      }
-      return false;
-    }
+    return this.bindingRuntime.loadBindingsFromFile(path, this.filesystem, (code) => this.interpreter.execute(code), silent);
   }
 
   /**
@@ -1740,7 +1693,7 @@ export class Editor {
    */
   private async loadSavedMacros(): Promise<void> {
     try {
-      const loaded = await loadMacrosFromFile(this.filesystem);
+      const loaded = await this.pluginRuntime.loadMacros(this.filesystem, this.session.macros);
       if (loaded) {
         this.applyUpdate({ type: "SetStatusMessage", message: "Macros loaded from ~/.config/tmax/macros.tlisp" });
       }
@@ -1755,7 +1708,7 @@ export class Editor {
    */
   async saveMacros(): Promise<void> {
     try {
-      const saved = await saveMacrosToFile(this.filesystem);
+      const saved = await this.pluginRuntime.saveMacros(this.filesystem, this.session.macros);
       if (saved) {
         this.applyUpdate({ type: "SetStatusMessage", message: "Macros saved to ~/.config/tmax/macros.tlisp" });
       }
@@ -1764,181 +1717,13 @@ export class Editor {
     }
   }
 
-  private pluginModuleName(pluginName: string): string {
-    const safeName = pluginName
-      .trim()
-      .replace(/[^A-Za-z0-9_-]+/g, "-")
-      .replace(/^-+|-+$/g, "");
-    return `user/plugin/${safeName || "plugin"}`;
-  }
-
-  private pluginHasDefmodule(content: string): boolean {
-    return /^\s*\(\s*defmodule\b/m.test(content);
-  }
-
-  private collectPluginExports(content: string): string[] {
-    const exports = new Set<string>();
-    const pattern = /^\s*\(\s*def(?:un|var|macro)\s+([^\s()]+)/gm;
-    let match: RegExpExecArray | null;
-
-    while ((match = pattern.exec(content)) !== null) {
-      const name = match[1];
-      if (name) exports.add(name);
-    }
-
-    return Array.from(exports);
-  }
-
-  private wrapPluginModule(pluginName: string, content: string): string {
-    if (this.pluginHasDefmodule(content)) {
-      return content;
-    }
-
-    const moduleName = this.pluginModuleName(pluginName);
-    const exports = this.collectPluginExports(content);
-    const exportForm = exports.length > 0 ? `(export ${exports.join(" ")})` : "(export)";
-    return `(defmodule ${moduleName}\n  ${exportForm}\n\n${content}\n)\n`;
-  }
-
   /**
-   * Load plugins from a directory (US-2.1.1)
-   * @param pluginDir - Path to directory containing plugin subdirectories
-   * @returns Result of plugin loading operation
+   * Load plugins from a directory (US-2.1.1). Delegates parsing + loading to
+   * the PluginRuntime collaborator (CHORE-44 Change 3: no plugin file parsing
+   * in Editor).
    */
-  async loadPluginsFromDirectory(pluginDir: string): Promise<{
-    /** Successfully loaded plugins */
-    loaded: string[];
-    /** Skipped plugins (no plugin.tlisp) */
-    skipped: string[];
-    /** Total plugins discovered */
-    total: number;
-    /** Errors encountered during loading */
-    errors: Array<{ plugin: string; error: string }>;
-  }> {
-    const result: {
-      loaded: string[];
-      skipped: string[];
-      total: number;
-      errors: Array<{ plugin: string; error: string }>;
-    } = {
-      loaded: [],
-      skipped: [],
-      total: 0,
-      errors: []
-    };
-
-    try {
-      // Check if plugin directory exists
-      const dirExists = await this.filesystem.exists(pluginDir);
-      if (!dirExists) {
-        result.errors.push({
-          plugin: 'directory',
-          error: `Plugin directory does not exist: ${pluginDir}`
-        });
-        return result;
-      }
-
-      // Read directory contents
-      // Try to use filesystem.readdir if available (for mock filesystem), otherwise fall back to fs
-      let entryNames: string[];
-      if (this.filesystem.readdir) {
-        const allEntries = await this.filesystem.readdir(pluginDir);
-        // For mock filesystem, we need to filter to only directories
-        // We'll check if each entry has a directory stat
-        const dirEntries: string[] = [];
-        for (const entry of allEntries) {
-          const entryPath = `${pluginDir}/${entry}`;
-          try {
-            const stat = await this.filesystem.stat(entryPath);
-            if (stat.isDirectory) {
-              dirEntries.push(entry);
-            }
-          } catch (e) {
-            // Stat failed, assume it's not a directory
-          }
-        }
-        entryNames = dirEntries;
-      } else {
-        // Use real fs module
-        const entriesWithTypes = await (await import('fs/promises')).readdir(pluginDir, { withFileTypes: true });
-        entryNames = entriesWithTypes
-          .filter((entry: any) => entry.isDirectory())
-          .map((entry: any) => entry.name);
-      }
-
-      result.total = entryNames.length;
-
-      // Load each plugin
-      for (const pluginName of entryNames) {
-        const pluginPath = `${pluginDir}/${pluginName}`;
-
-        try {
-          // Check if plugin.tlisp exists
-          const pluginFilePath = `${pluginPath}/plugin.tlisp`;
-          const pluginFileExists = await this.filesystem.exists(pluginFilePath);
-
-          if (!pluginFileExists) {
-            result.skipped.push(pluginName);
-            continue;
-          }
-
-          // Load plugin.toml if it exists
-          const tomlPath = `${pluginPath}/plugin.toml`;
-          const tomlExists = await this.filesystem.exists(tomlPath);
-
-          if (tomlExists) {
-            try {
-              const tomlContent = await this.filesystem.readFile(tomlPath);
-              // Parse TOML metadata (basic parsing for now)
-              // TODO: Implement full TOML parsing in future iteration
-              console.log(`Loading plugin metadata from: ${tomlPath}`);
-            } catch (error) {
-              // Don't fail plugin loading if toml has issues
-              console.warn(`Warning: Failed to load plugin.toml for ${pluginName}: ${error}`);
-            }
-          }
-
-          // Load plugin.tlisp with mandatory module isolation.
-          try {
-            const pluginContent = await this.filesystem.readFile(pluginFilePath);
-            const execResult = this.interpreter.execute(this.wrapPluginModule(pluginName, pluginContent));
-            if (execResult._tag === 'Left') {
-              // Parse or execution error
-              result.errors.push({
-                plugin: pluginName,
-                error: execResult.left.message
-              });
-              console.error(`Failed to load plugin ${pluginName}: ${execResult.left.message}`);
-            } else {
-              result.loaded.push(pluginName);
-              console.log(`Loaded plugin: ${pluginName}`);
-            }
-          } catch (error) {
-            result.errors.push({
-              plugin: pluginName,
-              error: error instanceof Error ? error.message : String(error)
-            });
-          }
-
-        } catch (error) {
-          const errorMessage = error instanceof Error ? error.message : String(error);
-          result.errors.push({
-            plugin: pluginName,
-            error: errorMessage
-          });
-          console.error(`Failed to load plugin ${pluginName}: ${errorMessage}`);
-        }
-      }
-
-    } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : String(error);
-      result.errors.push({
-        plugin: 'directory',
-        error: `Failed to read plugin directory: ${errorMessage}`
-      });
-    }
-
-    return result;
+  async loadPluginsFromDirectory(pluginDir: string): Promise<PluginLoadResult> {
+    return this.pluginRuntime.loadPluginsFromDirectory(pluginDir, this.filesystem, (code) => this.interpreter.execute(code));
   }
 
   /**
@@ -2397,14 +2182,7 @@ export class Editor {
    * Log a message to the *Messages* buffer
    */
   logMessage(msg: string, level: LogLevel = 'info', command?: string, frameId?: string): void {
-    const now = new Date();
-    const ts = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}:${String(now.getSeconds()).padStart(2, '0')}`;
-    const line = `[${ts}] ${msg}`;
-    this.messages.push(line);
-    const _e = this.log.log({ level, category: 'editor', text: msg, command, frameId });
-    if (_e) queueMicrotask(() => appendEntry(this.logPath, _e));
-    this.buffers.set('*Messages*', FunctionalTextBufferImpl.create(this.log.render('messages', { fullDate: true })));
-    this.updateBufferMetadata('*Messages*', { modified: false });
+    this.logging.logMessage(msg, level, command, frameId);
   }
 
   /**
@@ -2423,11 +2201,7 @@ export class Editor {
    * mirror into *Messages* (the SPEC-047 anti-pollution guarantee holds).
    */
   logDaemonEvent(event: string, detail?: string): void {
-    const text = detail ? `${event} ${detail}` : event;
-    const _de = this.log.log({ level: 'info', category: 'daemon', text });
-    if (_de) queueMicrotask(() => appendEntry(this.logPath, _de));
-    this.buffers.set('*daemon*', FunctionalTextBufferImpl.create(this.log.render('daemon', { fullDate: true })));
-    this.updateBufferMetadata('*daemon*', { modified: false });
+    this.logging.logDaemonEvent(event, detail);
   }
 
   /**
@@ -2436,18 +2210,7 @@ export class Editor {
    * entries into *Messages*, so callers do not mirror by hand.
    */
   logProgram(category: 'shell' | 'process' | 'test' | 'autosave', entry: Omit<LogEntry, 'ts' | 'category'> & { ts?: number }): void {
-    const _pe = this.log.log({ category, ...entry });
-    if (_pe) queueMicrotask(() => appendEntry(this.logPath, _pe));
-    const view = category as 'shell' | 'process' | 'test';
-    if (view === 'shell' || view === 'process' || view === 'test') {
-      const bufName = view === 'shell' ? '*Shell Output*' : view === 'process' ? '*Async Output*' : '*Tests*';
-      this.buffers.set(bufName, FunctionalTextBufferImpl.create(this.log.render(view, { fullDate: true })));
-      this.updateBufferMetadata(bufName, { modified: false });
-    }
-    // Mirrored failures surface in *Messages* automatically (the messages view
-    // includes every warn/error from any category).
-    this.buffers.set('*Messages*', FunctionalTextBufferImpl.create(this.log.render('messages', { fullDate: true })));
-    this.updateBufferMetadata('*Messages*', { modified: false });
+    this.logging.logProgram(category, entry);
   }
 
   /**
@@ -2456,14 +2219,12 @@ export class Editor {
    * no-op kept as the documented hook for a future periodic-flush strategy.
    */
   flushLog(): void {
-    // appendEntry is called per-write, so nothing is buffered to flush here.
-    // Kept as the shutdown hook so a future periodic-flush strategy can drain
-    // a write buffer at this point without changing call sites.
+    this.logging.flushLog();
   }
 
   /** Accessor for the daemon log (view-bound to *daemon*). Used by tests + future introspection. */
   getDaemonLog(): ViewBoundLog {
-    return new ViewBoundLog(this.log, 'daemon');
+    return this.logging.getDaemonLog();
   }
 
   /**
@@ -2480,36 +2241,21 @@ export class Editor {
       oldBufferNames.set(buf, name);
     }
 
-    // Deep-copy buffers so workspace state stays isolated (C1)
+    // CHORE-44 Change 3: the reconcile algorithm (deep-copy buffers + rebuild
+    // metadata/mode-state maps) lives in WorkspaceRuntime (AC3.4). Mutate the
+    // existing buffers/bufferMetadata maps in place (other refs hold them).
+    const reconciled = this.workspaceRuntime.reconcileWorkspace(
+      workspace,
+      this.bufferRecency,
+      this.logging.log.render('messages', { fullDate: true }),
+    );
     this.buffers.clear();
-    for (const [name, buffer] of workspace.buffers.entries()) {
-      const contentResult = buffer.getContent();
-      const content = Either.isRight(contentResult) ? contentResult.right : '';
-      this.buffers.set(name, FunctionalTextBufferImpl.create(content));
-    }
-    this.buffers.set('*Messages*', FunctionalTextBufferImpl.create(this.log.render('messages', { fullDate: true })));
-
+    for (const [name, buf] of reconciled.buffers) this.buffers.set(name, buf);
     this.bufferMetadata.clear();
-    for (const [name, metadata] of workspace.bufferMetadata.entries()) {
-      this.bufferMetadata.set(name, {
-        filename: metadata.filename,
-        modified: metadata.modified,
-        recency: this.bufferRecency++,
-      });
-    }
-    this.bufferMetadata.set('*Messages*', { modified: false, recency: this.bufferRecency++ });
+    for (const [name, meta] of reconciled.bufferMetadata) this.bufferMetadata.set(name, meta);
+    this.bufferModeStates = reconciled.bufferModeStates;
+    this.bufferRecency = reconciled.nextRecency;
 
-    this.bufferModeStates = new Map();
-    for (const [name, modeState] of workspace.bufferModeStates.entries()) {
-      this.bufferModeStates.set(name, {
-        majorMode: modeState.majorMode ?? 'fundamental',
-        activeMinorModes: modeState.minorModes ?? [],
-        minorModeActivationOrder: modeState.minorModes ?? [],
-        minorModeSources: Object.fromEntries((modeState.minorModes ?? []).map(mode => [mode, 'local' as const])),
-        localMinorModeOverrides: {},
-        minorModeSavedConfig: {},
-      });
-    }
     const bufferName = workspace.currentBufferName ?? '*scratch*';
     const buffer = this.buffers.get(bufferName) ?? this.buffers.get('*scratch*') ?? FunctionalTextBufferImpl.create('');
     if (!this.buffers.has(bufferName)) {
@@ -2570,72 +2316,21 @@ export class Editor {
    * must deep-copy (applyWorkspace does this on the receiving end).
    */
   exportWorkspace(base?: WorkspaceState): WorkspaceState {
-    const now = new Date().toISOString();
-    const metadata = base?.metadata ?? {
-      id: globalThis.crypto.randomUUID(),
-      name: 'default',
-      createdAt: now,
-      lastAccessed: now,
-      formatVersion: 1,
-    };
-    const buffers = new Map<string, FunctionalTextBuffer>();
-    const bufferMetadata = new Map<string, BufferMetadata>();
-    const bufferModeStates = new Map<string, import("../core/types.ts").BufferModeState>();
-
+    // CHORE-44 Change 3: the workspace serialization algorithm lives in the
+    // WorkspaceRuntime collaborator (AC3.4); Editor supplies a state snapshot.
     const currentBufferName = this.findBufferName(this.model.currentBuffer) ?? base?.currentBufferName ?? '*scratch*';
-
-    for (const [name, buffer] of this.buffers.entries()) {
-      if (name === '*Messages*') continue;
-      buffers.set(name, buffer);
-      const metadata = this.bufferMetadata.get(name);
-      const modeState = this.bufferModeStates.get(metadata?.filename ?? name);
-      // I5: use live cursor for active buffer, preserved cursor for others
-      const incomingMeta = base?.bufferMetadata?.get(name);
-      const isActiveBuffer = name === currentBufferName;
-      bufferMetadata.set(name, {
-        name,
-        filename: metadata?.filename,
-        modified: metadata?.modified ?? false,
-        cursorLine: isActiveBuffer ? this.model.cursorPosition.line : (incomingMeta?.cursorLine ?? 0),
-        cursorColumn: isActiveBuffer ? this.model.cursorPosition.column : (incomingMeta?.cursorColumn ?? 0),
-      });
-      bufferModeStates.set(name, {
-        majorMode: modeState?.majorMode,
-        minorModes: modeState?.activeMinorModes ?? [],
-        lighters: (modeState?.activeMinorModes ?? [])
-          .map(mode => this.minorModeRegistry.get(mode)?.lighter ?? "")
-          .filter(lighter => lighter !== ""),
-      });
-    }
-
-    if (!buffers.has('*scratch*')) {
-      buffers.set('*scratch*', FunctionalTextBufferImpl.create(''));
-      bufferMetadata.set('*scratch*', {
-        name: '*scratch*',
-        modified: false,
-        cursorLine: 0,
-        cursorColumn: 0,
-      });
-    }
-
-    return {
-      metadata: { ...metadata, lastAccessed: now },
-      buffers,
-      bufferMetadata,
-      bufferModeStates,
-      windows: [...(this.model.windows ?? [])],
-      tabs: [...(this.model.tabs ?? [])],
-      cursorState: { ...this.model.cursorPosition },
-      viewportState: { top: this.model.viewportTop, left: this.model.viewportLeft ?? 0 },
+    const activeMinorModes = this.getCurrentModeState().activeMinorModes;
+    return this.workspaceRuntime.serializeWorkspace({
+      buffers: this.buffers,
+      bufferMetadata: this.bufferMetadata,
+      bufferModeStates: this.bufferModeStates,
+      minorModeRegistry: this.minorModeRegistry,
+      model: this.model,
       currentBufferName,
-      currentFilename: this.model.currentFilename,
       currentMajorMode: this.getCurrentMajorMode(),
-      // R4-8: extract directly from mode state instead of cloning full EditorState
-      activeMinorModes: [...this.getCurrentModeState().activeMinorModes],
-      activeMinorModeLighters: this.getCurrentModeState().activeMinorModes
-        .map((m) => this.minorModeRegistry.get(m)?.lighter ?? "")
-        .filter((l) => l !== ""),
-    };
+      activeMinorModes,
+      base,
+    });
   }
 
   /**
@@ -3398,13 +3093,13 @@ export class Editor {
    * Get the message log (for server/daemon use).
    */
   getMessageLog(): ViewBoundLog {
-    return new ViewBoundLog(this.log, 'messages');
+    return this.logging.getMessageLog();
   }
 
   /** Accessor for the unified Log store (SPEC-055). Used by the daemon query
    *  path for category/view/level filtering across all categories. */
   getUnifiedLog(): Log {
-    return this.log;
+    return this.logging.getUnifiedLog();
   }
 
   /**
@@ -3481,16 +3176,14 @@ export class Editor {
    * @returns Visual selection or null if not in visual mode
    */
   getSelection(): any {
-    const { getVisualSelection } = require("./api/visual-ops.ts");
-    return getVisualSelection();
+    return this.session.visual.get();
   }
 
   /**
    * Clear visual selection and exit visual mode
    */
   clearSelection(): void {
-    const { clearVisualSelection } = require("./api/visual-ops.ts");
-    clearVisualSelection();
+    this.session.visual.clear();
     this.applyUpdate({ type: "SetMode", mode: "normal" });
   }
 

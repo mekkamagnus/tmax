@@ -41,24 +41,35 @@ interface UndoRedoState {
   currentIndex: number;          // Current position in history (-1 = at initial undoState)
 }
 
-// Global undo/redo undoState
-let undoState: UndoRedoState = {
-  history: [],
-  currentIndex: -1
-};
+export function createUndoRedoOps(
+  getCurrentBuffer: () => FunctionalTextBuffer | null,
+  setCurrentBuffer: (buffer: FunctionalTextBuffer) => void,
+  getCursorLine: () => number,
+  setCursorLine: (line: number) => void,
+  getCursorColumn: () => number,
+  setCursorColumn: (column: number) => void,
+  getStatusMessage: () => string,
+  setStatusMessage: (msg: string) => void
+): { api: Map<string, TLispFunctionImpl>; reset: () => void; setInitialBuffer: (buffer: FunctionalTextBuffer) => void } {
+  // CHORE-44 Change 1: per-editor undo/redo state (was module-global). The
+  // history helpers below are inner functions closing over this state.
+  let undoState: UndoRedoState = {
+    history: [],
+    currentIndex: -1
+  };
 
-// Initial buffer undoState (before any edits)
-let initialBuffer: FunctionalTextBuffer | null = null;
-let initialCursorLine: number | undefined = undefined;
-let initialCursorColumn: number | undefined = undefined;
-let pendingBuffer: FunctionalTextBuffer | null = null;
-let pendingCursorLine: number | undefined = undefined;
-let pendingCursorColumn: number | undefined = undefined;
+  // Initial buffer undoState (before any edits)
+  let initialBuffer: FunctionalTextBuffer | null = null;
+  let initialCursorLine: number | undefined = undefined;
+  let initialCursorColumn: number | undefined = undefined;
+  let pendingBuffer: FunctionalTextBuffer | null = null;
+  let pendingCursorLine: number | undefined = undefined;
+  let pendingCursorColumn: number | undefined = undefined;
 
 /**
  * Reset undo/redo undoState (for testing)
  */
-export function resetUndoRedoState(): void {
+function resetUndoRedoState(): void {
   // CHORE-39 Phase 4: reset the history singleton via State-monad immutable
   // updates (stateUtils.updateProperty) — commits a fresh UndoRedoState.
   const resetHistory = stateUtils.updateProperty<UndoRedoState, "history">("history", []);
@@ -77,7 +88,7 @@ export function resetUndoRedoState(): void {
 /**
  * Get current undo/redo undoState
  */
-export function getUndoRedoState(): UndoRedoState {
+function getUndoRedoState(): UndoRedoState {
   return undoState;
 }
 
@@ -90,7 +101,7 @@ export function getUndoRedoState(): UndoRedoState {
  * @param preCursorLine - Optional cursor line immediately before the edit
  * @param preCursorColumn - Optional cursor column immediately before the edit
  */
-export function pushToHistory(
+function pushToHistory(
   description: string,
   buffer: FunctionalTextBuffer,
   cursorLine?: number,
@@ -126,7 +137,7 @@ export function pushToHistory(
 /**
  * Set initial buffer undoState
  */
-export function setInitialBuffer(buffer: FunctionalTextBuffer): void {
+function setInitialBuffer(buffer: FunctionalTextBuffer): void {
   initialBuffer = buffer;
 }
 
@@ -137,7 +148,7 @@ export function setInitialBuffer(buffer: FunctionalTextBuffer): void {
  * @param setCursorColumn - Function to set cursor column
  * @returns Either error or success with status message
  */
-export function undo(
+function undo(
   setCurrentBuffer: (buffer: FunctionalTextBuffer) => void,
   setCursorLine?: (line: number) => void,
   setCursorColumn?: (column: number) => void
@@ -199,7 +210,7 @@ export function undo(
  * @param setCursorColumn - Function to set cursor column
  * @returns Either error or success with status message
  */
-export function redo(
+function redo(
   setCurrentBuffer: (buffer: FunctionalTextBuffer) => void,
   setCursorLine?: (line: number) => void,
   setCursorColumn?: (column: number) => void
@@ -235,16 +246,6 @@ export function redo(
  * @param setCursorColumn - Function to set cursor column
  * @returns Map of undo/redo function names to implementations
  */
-export function createUndoRedoOps(
-  getCurrentBuffer: () => FunctionalTextBuffer | null,
-  setCurrentBuffer: (buffer: FunctionalTextBuffer) => void,
-  getCursorLine: () => number,
-  setCursorLine: (line: number) => void,
-  getCursorColumn: () => number,
-  setCursorColumn: (column: number) => void,
-  getStatusMessage: () => string,
-  setStatusMessage: (msg: string) => void
-): Map<string, TLispFunctionImpl> {
   const api = new Map<string, TLispFunctionImpl>();
 
   /**
@@ -484,5 +485,5 @@ export function createUndoRedoOps(
     return Either.right(createString(message));
   });
 
-  return api;
+  return { api, reset: resetUndoRedoState, setInitialBuffer };
 }

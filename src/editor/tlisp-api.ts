@@ -13,7 +13,7 @@ import { capTail } from "./log-entry.ts";
 import type { LogCategory, LogView } from "./log-entry.ts";
 import type { LogLevel } from "./message-log.ts";
 import { stateUtils } from "../utils/state.ts";
-import { initialModel, type EditorModel } from "./functional/model.ts";
+import { type EditorModel } from "./functional/model.ts";
 import { runModel, type EditorModelAccess } from "./api/state-context.ts";
 import { createValidationError, AppError } from "../error/types.ts";
 import { createBufferOps } from "./api/buffer-ops.ts";
@@ -23,13 +23,13 @@ import { createFileOps } from "./api/file-ops.ts";
 import { createBindingsOps } from "./api/bindings-ops.ts";
 import { createWordOps } from "./api/word-ops.ts";
 import { createLineOps } from "./api/line-ops.ts";
-import { createDeleteOps, setDeleteRegister } from "./api/delete-ops.ts";
+import { createDeleteOps } from "./api/delete-ops.ts";
 import { createSearchOps } from "./api/search-ops.ts";
 import { createYankOps } from "./api/yank-ops.ts";
 import { createChangeOps } from "./api/change-ops.ts";
 import { createUndoRedoOps } from "./api/undo-redo-ops.ts";
 import { createCountOps } from "./api/count-ops.ts";
-import { createVisualOps, getVisualSelection, setVisualSelection, clearVisualSelection } from "./api/visual-ops.ts";
+import { createVisualOps } from "./api/visual-ops.ts";
 import { createTextObjectsOps } from "./api/text-objects-ops.ts";
 import { createJumpOps } from "./api/jump-ops.ts";
 import { createKillRingOps } from "./api/kill-ring.ts";
@@ -48,8 +48,10 @@ import { createDiredOps } from "./api/dired-ops.ts";
 import { createRawLoadOps } from "./api/load-ops.ts";
 import { createMinorModeOps } from "./api/minor-mode-ops.ts";
 import { createModuleOps } from "./api/module-ops.ts";
-import { createAstOps, getAstCache } from "./api/ast-ops.ts";
-import { createNavigationOps, setAstCacheRef } from "./api/navigation-ops.ts";
+import { ModuleRegistry } from "../tlisp/module-registry.ts";
+import { createAstOps } from "./api/ast-ops.ts";
+import { createNavigationOps } from "./api/navigation-ops.ts";
+import type { EditorAPIContext } from "./runtime/editor-api-context.ts";
 import { foldToggle, foldOpen, foldClose, foldCloseAll, foldOpenAll, foldByLevel, foldIsCollapsed, foldGetRanges, findHeadingRanges } from "./api/fold-ops.ts";
 import { createBrowseUrlOps, tsOpenExternalOutcome, type BrowseUrlPrimitiveDeps } from "./api/browse-url-ops.ts";
 
@@ -66,112 +68,24 @@ export interface EditorOperations {
   openFile: (filename: string) => Promise<void>;
 }
 
-/**
- * Editor state that can be accessed from T-Lisp
- * Note: This is a bridge interface for T-Lisp API, different from core EditorState
- */
-export interface TlispEditorState {
-  currentBuffer: FunctionalTextBuffer | null;
-  buffers: Map<string, FunctionalTextBuffer>;
-  cursorLine: number;
-  cursorColumn: number;
-  terminal: TerminalIO;
-  filesystem: FileSystem;
-  mode: "normal" | "insert" | "visual" | "command" | "mx" | "replace";
-  lastCommand: string;
-  statusMessage: string;
-  viewportTop: number;  // First line visible in viewport
-  viewportLeft: number;  // First column visible in viewport
-  commandLine: string;  // Command line input in command mode
-  spacePressed: boolean;  // Track if space was just pressed for SPC ; sequence
-  mxCommand: string;  // M-x command input
-  cursorFocus: 'buffer' | 'command';  // Track where cursor focus should be
-  operations?: EditorOperations;  // Optional operations reference
-  lspDiagnostics?: import("../core/types.ts").LSPDiagnostic[];  // LSP diagnostics (US-3.1.2)
-  logMessage?: (msg: string, level?: string, command?: string, frameId?: string) => void;  // Log to *Messages* buffer
-  setEchoOnly?: (text: string) => void;  // Status-line echo WITHOUT logging (SPEC-055)
-  /** Log a program-run event to its category buffer (SPEC-055). Mirrors on warn/error. */
-  logProgram?: (category: 'shell' | 'process' | 'test' | 'autosave', entry: { level: string; text: string; exitCode?: number; durationMs?: number; outputTail?: string; pid?: number; command?: string; frameId?: string }) => void;
-  _getMessageLog?: () => import("./log-store.ts").ViewBoundLog;  // Access Log for level/max queries (SPEC-055)
-  _getUnifiedLog?: () => import("./log-store.ts").Log;  // Cross-category query for (log-query) (SPEC-055)
-  currentFilename?: string;  // Current buffer's filename
-  config?: import("../core/types.ts").EditorConfig;
-  _evalTlisp?: (expr: string) => any;
-  _getCurrentMajorMode?: () => string;
-  _setCurrentMajorMode?: (mode: string) => void;
-  _getMinorModeRegistry?: () => Map<string, any>;
-  _getBufferModeStates?: () => Map<string, any>;
-  _getCurrentBufferKey?: () => string;
-  _getGlobalizedMinorModes?: () => Set<string>;
-  _getLoadPaths?: () => string[];
-  _getModuleRegistry?: () => any;
-  _getCurrentModuleName?: () => string | undefined;
-  _getBufferModified?: () => boolean;
-  _setBufferModified?: (modified: boolean) => void;
-  foldRanges?: Map<number, number>;
-  searchMatches?: import("../core/types.ts").Range[];
-  /** CHORE-39 Phase 4: live model access for State-monad API primitives. */
-  getModel?: () => import("./functional/model.ts").EditorModel;
-  applyModel?: (m: import("./functional/model.ts").EditorModel) => void;
-}
 
 /**
  * Create T-Lisp editor API functions
- * @param state - T-Lisp editor state bridge
+ * @param ctx - typed editor API context (CHORE-44 Change 2: replaces the legacy
+ *              editor-state bridge + compat projection + underscored hooks)
  * @returns Map of function names to implementations
  */
-export function createEditorAPI(state: TlispEditorState): Map<string, TLispFunctionImpl> {
+export function createEditorAPI(ctx: EditorAPIContext): Map<string, TLispFunctionImpl> {
   // Create combined API by merging all module APIs
   const api = new Map<string, TLispFunctionImpl>();
 
-  // CHORE-39 Phase 4: live model access for State-monad API primitives.
-  // Factories migrated to State<EditorModel> (mode-ops, lsp-diagnostics, …)
-  // receive this handle instead of closing over mutable state callbacks.
-  //
-  // Compatibility adapter (spec Phase 2): when the supplied state is a real
-  // Editor runtime (getModel/applyModel present), use the live model. When it
-  // is a minimal legacy TlispEditorState (direct createEditorAPI test harness),
-  // project its fields into a fresh EditorModel on each read and write commits
-  // back, so State-monad factories behave correctly in both contexts.
-  const liveModel = !!(state.getModel && state.applyModel);
-  const compatModelFromState = (): EditorModel => ({
-    ...initialModel(),
-    cursorPosition: { line: state.cursorLine ?? 0, column: state.cursorColumn ?? 0 },
-    mode: state.mode,
-    statusMessage: state.statusMessage,
-    viewportTop: state.viewportTop,
-    commandLine: state.commandLine,
-    mxCommand: state.mxCommand,
-    cursorFocus: state.cursorFocus,
-    lastCommand: state.lastCommand,
-    currentFilename: state.currentFilename,
-    currentBuffer: state.currentBuffer ?? undefined,
-    buffers: state.buffers,
-    lspDiagnostics: state.lspDiagnostics,
-    foldRanges: state.foldRanges,
-    searchMatches: state.searchMatches,
-    ...(state.config ? { config: state.config } : {}),
-  });
-  const compatModelToState = (m: EditorModel): void => {
-    state.cursorLine = m.cursorPosition.line;
-    state.cursorColumn = m.cursorPosition.column;
-    state.mode = m.mode;
-    state.statusMessage = m.statusMessage;
-    state.viewportTop = m.viewportTop;
-    state.commandLine = m.commandLine;
-    state.mxCommand = m.mxCommand;
-    state.cursorFocus = m.cursorFocus ?? "buffer";
-    state.lastCommand = m.lastCommand ?? "";
-    state.currentFilename = m.currentFilename;
-    state.currentBuffer = m.currentBuffer ?? null;
-    state.buffers = m.buffers ? new Map(m.buffers) : state.buffers;
-    state.lspDiagnostics = m.lspDiagnostics ? [...m.lspDiagnostics] : undefined;
-    state.foldRanges = m.foldRanges ? new Map(m.foldRanges) : undefined;
-    state.searchMatches = m.searchMatches ? [...m.searchMatches] : undefined;
-  };
-  const modelAccess: EditorModelAccess = liveModel
-    ? { getModel: () => state.getModel!(), applyModel: (m) => { state.applyModel!(m); } }
-    : { getModel: () => compatModelFromState(), applyModel: (m) => { compatModelToState(m); } };
+  // CHORE-44 Change 2: the typed EditorAPIContext supplies the model access,
+  // per-editor session, and per-editor caches directly — no legacy compat
+  // projection, no underscored hooks. Factories migrated to State<EditorModel>
+  // receive `modelAccess`; the others receive `session` / `caches` slices.
+  const modelAccess: EditorModelAccess = ctx.access;
+  const session = ctx.session;
+  const caches = ctx.caches;
   // Genuine State-monad read of the current mode (used by factories that still
   // take a getMode callback, e.g. cursor-ops). Runs stateUtils.getProperty
   // against EditorModel and commits the (unchanged) snapshot.
@@ -180,12 +94,12 @@ export function createEditorAPI(state: TlispEditorState): Map<string, TLispFunct
 
   // Add buffer operations
   const setCursorLine = (line: number) => {
-    state.cursorLine = line;
+    ctx.cursorLine = line;
     // Auto-expand fold if cursor lands inside a collapsed region
-    if (state.foldRanges && state.foldRanges.size > 0) {
-      for (const [foldStart, foldEnd] of state.foldRanges) {
+    if (ctx.foldRanges && ctx.foldRanges.size > 0) {
+      for (const [foldStart, foldEnd] of ctx.foldRanges) {
         if (line > foldStart && line <= foldEnd) {
-          state.foldRanges.delete(foldStart);
+          ctx.foldRanges.delete(foldStart);
           break;
         }
       }
@@ -194,12 +108,12 @@ export function createEditorAPI(state: TlispEditorState): Map<string, TLispFunct
 
   const bufferOps = createBufferOps(
     modelAccess,
-    state.buffers,
-    (buffer) => { state.currentBuffer = buffer; },
+    ctx.buffers,
+    (buffer) => { ctx.currentBuffer = buffer; },
     setCursorLine,
-    (column) => { state.cursorColumn = column; },
-    (path: string) => { state.currentFilename = path; },
-    (modified: boolean) => state._setBufferModified?.(modified),
+    (column) => { ctx.cursorColumn = column; },
+    (path: string) => { ctx.currentFilename = path; },
+    (modified: boolean) => ctx.setBufferModified?.(modified),
     new Set(['*Messages*', '*daemon*', '*Shell Output*', '*Async Output*', '*Tests*']),
   );
   for (const [key, value] of bufferOps.entries()) {
@@ -210,12 +124,12 @@ export function createEditorAPI(state: TlispEditorState): Map<string, TLispFunct
   const cursorOps = createCursorOps(
     modelAccess,
     setCursorLine,
-    (column) => { state.cursorColumn = column; },
+    (column) => { ctx.cursorColumn = column; },
     getModeViaState, // getMode - State-monad read (cursor-ops reads cursor/buffer via access)
     () => { // updateVisualSelection callback
-      const selection = getVisualSelection();
+      const selection = session.visual.get();
       if (selection) {
-        selection.end = { line: state.cursorLine, column: state.cursorColumn };
+        selection.end = { line: ctx.cursorLine, column: ctx.cursorColumn };
       }
     }
   );
@@ -226,13 +140,13 @@ export function createEditorAPI(state: TlispEditorState): Map<string, TLispFunct
   // Add mode operations
   const modeOps = createModeOps(
     modelAccess,
-    () => state.statusMessage,
-    (msg) => { state.statusMessage = msg; },
-    () => state.commandLine,
-    (cmd) => { state.commandLine = cmd; },
-    (pressed) => { state.spacePressed = pressed; },
-    () => state.cursorFocus,
-    (focus) => { state.cursorFocus = focus; }
+    () => ctx.statusMessage,
+    (msg) => { ctx.statusMessage = msg; },
+    () => ctx.commandLine,
+    (cmd) => { ctx.commandLine = cmd; },
+    (pressed) => { ctx.spacePressed = pressed; },
+    () => ctx.cursorFocus,
+    (focus) => { ctx.cursorFocus = focus; }
   );
   for (const [key, value] of modeOps.entries()) {
     api.set(key, value);
@@ -240,8 +154,8 @@ export function createEditorAPI(state: TlispEditorState): Map<string, TLispFunct
 
   // Add file operations
   const fileOps = createFileOps(
-    state.operations,
-    (msg) => { state.statusMessage = msg; },
+    ctx.operations,
+    (msg) => { ctx.statusMessage = msg; },
     undefined,
     undefined,
     modelAccess,
@@ -253,10 +167,10 @@ export function createEditorAPI(state: TlispEditorState): Map<string, TLispFunct
   // Add search operations (before bindings so :nohl can call into search state)
   const searchOps = createSearchOps(
     modelAccess,
-    (line) => { state.cursorLine = line; },
-    (column) => { state.cursorColumn = column; },
-    (message) => { state.statusMessage = message; },
-    (ranges) => { state.searchMatches = ranges; }
+    (line) => { ctx.cursorLine = line; },
+    (column) => { ctx.cursorColumn = column; },
+    (message) => { ctx.statusMessage = message; },
+    (ranges) => { ctx.searchMatches = ranges; }
   );
   for (const [key, value] of searchOps.entries()) {
     api.set(key, value);
@@ -264,21 +178,21 @@ export function createEditorAPI(state: TlispEditorState): Map<string, TLispFunct
 
   // Add bindings operations
   const clearSearchHighlights = () => {
-    state.searchMatches = [];
+    ctx.searchMatches = [];
     const fn = searchOps.get("search-clear-highlights");
     if (fn) fn([]);
   };
   const bindingsOps = createBindingsOps(
     modelAccess,
-    () => state.operations,
-    (msg) => { state.statusMessage = msg; },
-    (cmd) => { state.commandLine = cmd; },
-    () => state.mode,
-    (mode) => { state.mode = mode; },
-    (focus) => { state.cursorFocus = focus; },
+    () => ctx.operations,
+    (msg) => { ctx.statusMessage = msg; },
+    (cmd) => { ctx.commandLine = cmd; },
+    () => ctx.mode,
+    (mode) => { ctx.mode = mode; },
+    (focus) => { ctx.cursorFocus = focus; },
     clearSearchHighlights,
-    state._evalTlisp,
-    (msg: string, level?: string) => { state.logMessage?.(msg, level); }
+    ctx.evalTlisp,
+    (msg: string, level?: string) => { ctx.logMessage?.(msg, level); }
   );
   for (const [key, value] of bindingsOps.entries()) {
     api.set(key, value);
@@ -287,13 +201,13 @@ export function createEditorAPI(state: TlispEditorState): Map<string, TLispFunct
   // Add word navigation operations
   const wordOps = createWordOps(
     modelAccess,
-    (line) => { state.cursorLine = line; },
-    (column) => { state.cursorColumn = column; },
-    () => state.mode, // getMode
+    (line) => { ctx.cursorLine = line; },
+    (column) => { ctx.cursorColumn = column; },
+    () => ctx.mode, // getMode
     () => { // updateVisualSelection
-      const selection = getVisualSelection();
+      const selection = session.visual.get();
       if (selection) {
-        selection.end = { line: state.cursorLine, column: state.cursorColumn };
+        selection.end = { line: ctx.cursorLine, column: ctx.cursorColumn };
       }
     }
   );
@@ -304,8 +218,8 @@ export function createEditorAPI(state: TlispEditorState): Map<string, TLispFunct
   // Add line navigation operations
   const lineOps = createLineOps(
     modelAccess,
-    (line) => { state.cursorLine = line; },
-    (column) => { state.cursorColumn = column; }
+    (line) => { ctx.cursorLine = line; },
+    (column) => { ctx.cursorColumn = column; }
   );
   for (const [key, value] of lineOps.entries()) {
     api.set(key, value);
@@ -314,9 +228,10 @@ export function createEditorAPI(state: TlispEditorState): Map<string, TLispFunct
   // Add delete operator operations
   const deleteOps = createDeleteOps(
     modelAccess,
-    (buffer) => { state.currentBuffer = buffer; },
-    (line) => { state.cursorLine = line; },
-    (column) => { state.cursorColumn = column; }
+    session,
+    (buffer) => { ctx.currentBuffer = buffer; },
+    (line) => { ctx.cursorLine = line; },
+    (column) => { ctx.cursorColumn = column; }
   );
   for (const [key, value] of deleteOps.entries()) {
     api.set(key, value);
@@ -325,9 +240,10 @@ export function createEditorAPI(state: TlispEditorState): Map<string, TLispFunct
   // Add yank operator operations
   const yankOps = createYankOps(
     modelAccess,
-    (buffer) => { state.currentBuffer = buffer; },
-    (line) => { state.cursorLine = line; },
-    (column) => { state.cursorColumn = column; }
+    session,
+    (buffer) => { ctx.currentBuffer = buffer; },
+    (line) => { ctx.cursorLine = line; },
+    (column) => { ctx.cursorColumn = column; }
   );
   for (const [key, value] of yankOps.entries()) {
     api.set(key, value);
@@ -336,11 +252,11 @@ export function createEditorAPI(state: TlispEditorState): Map<string, TLispFunct
   // Add change operator operations
   const changeOps = createChangeOps(
     modelAccess,
-    (buffer) => { state.currentBuffer = buffer; },
-    (line) => { state.cursorLine = line; },
-    (column) => { state.cursorColumn = column; },
-    (mode) => { state.mode = mode; },
-    setDeleteRegister
+    (buffer) => { ctx.currentBuffer = buffer; },
+    (line) => { ctx.cursorLine = line; },
+    (column) => { ctx.cursorColumn = column; },
+    (mode) => { ctx.mode = mode; },
+    session
   );
   for (const [key, value] of changeOps.entries()) {
     api.set(key, value);
@@ -348,16 +264,16 @@ export function createEditorAPI(state: TlispEditorState): Map<string, TLispFunct
 
   // Add undo/redo operations
   const undoRedoOps = createUndoRedoOps(
-    () => state.currentBuffer,
-    (buffer) => { state.currentBuffer = buffer; },
-    () => state.cursorLine,
-    (line) => { state.cursorLine = line; },
-    () => state.cursorColumn,
-    (column) => { state.cursorColumn = column; },
-    () => state.statusMessage,
-    (msg) => { state.statusMessage = msg; }
+    () => ctx.currentBuffer,
+    (buffer) => { ctx.currentBuffer = buffer; },
+    () => ctx.cursorLine,
+    (line) => { ctx.cursorLine = line; },
+    () => ctx.cursorColumn,
+    (column) => { ctx.cursorColumn = column; },
+    () => ctx.statusMessage,
+    (msg) => { ctx.statusMessage = msg; }
   );
-  for (const [key, value] of undoRedoOps.entries()) {
+  for (const [key, value] of undoRedoOps.api.entries()) {
     api.set(key, value);
   }
 
@@ -368,11 +284,12 @@ export function createEditorAPI(state: TlispEditorState): Map<string, TLispFunct
   // Add visual mode operations
   const visualOps = createVisualOps(
     modelAccess,
-    (buffer) => { state.currentBuffer = buffer; },
-    (line) => { state.cursorLine = line; },
-    (column) => { state.cursorColumn = column; },
-    (mode) => { state.mode = mode; },
-    (msg) => { state.statusMessage = msg; }
+    session,
+    (buffer) => { ctx.currentBuffer = buffer; },
+    (line) => { ctx.cursorLine = line; },
+    (column) => { ctx.cursorColumn = column; },
+    (mode) => { ctx.mode = mode; },
+    (msg) => { ctx.statusMessage = msg; }
   );
   for (const [key, value] of visualOps.entries()) {
     api.set(key, value);
@@ -381,8 +298,9 @@ export function createEditorAPI(state: TlispEditorState): Map<string, TLispFunct
   // Add text object operations
   const textObjectsOps = createTextObjectsOps(
     modelAccess,
-    (buffer) => { state.currentBuffer = buffer; },
-    (mode) => { state.mode = mode; }
+    session,
+    (buffer) => { ctx.currentBuffer = buffer; },
+    (mode) => { ctx.mode = mode; }
   );
   for (const [key, value] of textObjectsOps.entries()) {
     api.set(key, value);
@@ -391,25 +309,25 @@ export function createEditorAPI(state: TlispEditorState): Map<string, TLispFunct
   // Add jump operations (US-1.6.1)
   const jumpOps = createJumpOps(
     modelAccess,
-    (line) => { state.cursorLine = line; },
-    (column) => { state.cursorColumn = column; },
-    (top) => { state.viewportTop = top; },
-    () => state.terminal.getSize().height,
-    (left: number) => { state.viewportLeft = left; },
-    () => state.terminal.getSize().width,
+    (line) => { ctx.cursorLine = line; },
+    (column) => { ctx.cursorColumn = column; },
+    (top) => { ctx.viewportTop = top; },
+    () => ctx.terminal.getSize().height,
+    (left: number) => { ctx.viewportLeft = left; },
+    () => ctx.terminal.getSize().width,
   );
   for (const [key, value] of jumpOps.entries()) {
     api.set(key, value);
   }
 
   // Add kill ring operations (US-1.9.1)
-  const killRingOps = createKillRingOps();
+  const killRingOps = createKillRingOps(session.killRing);
   for (const [key, value] of killRingOps.entries()) {
     api.set(key, value);
   }
 
   // Add evil integration operations (US-1.9.3)
-  const evilIntegrationOps = createEvilIntegrationOps();
+  const evilIntegrationOps = createEvilIntegrationOps(session.registers);
   for (const [key, value] of evilIntegrationOps.entries()) {
     api.set(key, value);
   }
@@ -423,7 +341,8 @@ export function createEditorAPI(state: TlispEditorState): Map<string, TLispFunct
   // Add yank-pop operations (US-1.9.2)
   const yankPopOps = createYankPopOps(
     modelAccess,
-    (buffer) => { state.currentBuffer = buffer; }
+    session.yankPop,
+    (buffer) => { ctx.currentBuffer = buffer; }
   );
   for (const [key, value] of yankPopOps.entries()) {
     api.set(key, value);
@@ -437,7 +356,7 @@ export function createEditorAPI(state: TlispEditorState): Map<string, TLispFunct
 
   // Add plugin repository operations (US-4.1.1)
   const pluginOps = createPluginOps(
-    state.filesystem,
+    ctx.filesystem,
     () => {
       // Get TLPA directory from environment or use default
       const homeDir = process.env.HOME || '/tmp';
@@ -457,7 +376,7 @@ export function createEditorAPI(state: TlispEditorState): Map<string, TLispFunct
   // Add hook operations
   const hooks: HookRegistry = new Map();
   const hookOps = createHookOps(hooks, (name: string) => {
-    const fn = state._evalTlisp;
+    const fn = ctx.evalTlisp;
     return fn ? fn(`(${name})`) : Either.right(createNil());
   }, (value: TLispValue) => {
     if (value.type === "function") {
@@ -465,7 +384,7 @@ export function createEditorAPI(state: TlispEditorState): Map<string, TLispFunct
       return fn([]);
     }
     if (value.type === "symbol") {
-      const fn = state._evalTlisp;
+      const fn = ctx.evalTlisp;
       return fn ? fn(`(${value.value as string})`) : Either.right(createNil());
     }
     return Either.right(value);
@@ -478,13 +397,13 @@ export function createEditorAPI(state: TlispEditorState): Map<string, TLispFunct
   const syntaxOps = createSyntaxOps(
     modelAccess,
     () => {
-      const buf = state.currentBuffer;
+      const buf = ctx.currentBuffer;
       if (!buf) return 0;
       const result = buf.getLineCount();
       return Either.isLeft(result) ? 0 : result.right;
     },
     (line: number) => {
-      const buf = state.currentBuffer;
+      const buf = ctx.currentBuffer;
       if (!buf) return '';
       const result = buf.getLine(line);
       return Either.isLeft(result) ? '' : result.right;
@@ -497,8 +416,8 @@ export function createEditorAPI(state: TlispEditorState): Map<string, TLispFunct
   // Add replace operations
   const replaceOps = createReplaceOps(
     modelAccess,
-    (buffer) => { state.currentBuffer = buffer; },
-    (line) => { state.cursorLine = line; }
+    (buffer) => { ctx.currentBuffer = buffer; },
+    (line) => { ctx.cursorLine = line; }
   );
   for (const [key, value] of replaceOps.entries()) {
     api.set(key, value);
@@ -507,8 +426,8 @@ export function createEditorAPI(state: TlispEditorState): Map<string, TLispFunct
   // Add indent operations
   const indentOps = createIndentOps(
     modelAccess,
-    (buffer) => { state.currentBuffer = buffer; },
-    (line) => { state.cursorLine = line; },
+    (buffer) => { ctx.currentBuffer = buffer; },
+    (line) => { ctx.cursorLine = line; },
     () => 4 // tabSize default; TODO: read from config
   );
   for (const [key, value] of indentOps.entries()) {
@@ -520,15 +439,15 @@ export function createEditorAPI(state: TlispEditorState): Map<string, TLispFunct
     modelAccess,
     (expr: string) => {
       // Real eval callback will be wired from editor.ts via setInterpreter
-      const fn = state._evalTlisp;
+      const fn = ctx.evalTlisp;
       return fn ? fn(expr) : Either.right(createNil());
     },
     () => {
-      const fn = state._getCurrentMajorMode;
+      const fn = ctx.getCurrentMajorMode;
       return fn ? fn() : "fundamental";
     },
     (mode: string) => {
-      const fn = state._setCurrentMajorMode;
+      const fn = ctx.setCurrentMajorMode;
       if (fn) fn(mode);
     },
   );
@@ -539,8 +458,8 @@ export function createEditorAPI(state: TlispEditorState): Map<string, TLispFunct
   // Add dired operations
   const diredOps = createDiredOps(
     modelAccess,
-    (buffer) => { state.currentBuffer = buffer; },
-    state.buffers
+    (buffer) => { ctx.currentBuffer = buffer; },
+    ctx.buffers
   );
   for (const [key, value] of diredOps.entries()) {
     api.set(key, value);
@@ -550,7 +469,7 @@ export function createEditorAPI(state: TlispEditorState): Map<string, TLispFunct
   const loadOps = createRawLoadOps(
     modelAccess,
     (expr: string) => {
-      const fn = state._evalTlisp;
+      const fn = ctx.evalTlisp;
       return fn ? fn(expr) : Either.right(createNil());
     },
     async (_path: string) => false,
@@ -563,8 +482,8 @@ export function createEditorAPI(state: TlispEditorState): Map<string, TLispFunct
   const moduleOps = createModuleOps(
     modelAccess,
     () => {
-      const fn = state._getModuleRegistry;
-      return fn ? fn() : { isLoaded: () => false, resolve: () => undefined, listModules: () => [], allExports: () => new Map() };
+      const fn = ctx.getModuleRegistry;
+      return fn ? fn() : new ModuleRegistry();
     },
   );
   for (const [key, value] of moduleOps.entries()) {
@@ -574,27 +493,27 @@ export function createEditorAPI(state: TlispEditorState): Map<string, TLispFunct
   // Add minor mode operations
   const minorModeOps = createMinorModeOps(
     () => {
-      const fn = state._getMinorModeRegistry;
+      const fn = ctx.getMinorModeRegistry;
       return fn ? fn() : new Map();
     },
     () => {
-      const fn = state._getBufferModeStates;
+      const fn = ctx.getBufferModeStates;
       return fn ? fn() : new Map();
     },
     () => {
-      const fn = state._getCurrentBufferKey;
+      const fn = ctx.getCurrentBufferKey;
       return fn ? fn() : "*scratch*";
     },
     () => {
-      const fn = state._getGlobalizedMinorModes;
+      const fn = ctx.getGlobalizedMinorModes;
       return fn ? fn() : new Set<string>();
     },
     (expr: string) => {
-      const fn = state._evalTlisp;
+      const fn = ctx.evalTlisp;
       return fn ? fn(expr) : Either.right(createNil());
     },
     {
-      getConfig: () => state.config ?? {
+      getConfig: () => ctx.config ?? {
         theme: "default",
         tabSize: 4,
         autoSave: false,
@@ -604,7 +523,7 @@ export function createEditorAPI(state: TlispEditorState): Map<string, TLispFunct
         relativeLineNumbers: false,
         wordWrap: false,
       },
-      setConfig: (config) => { state.config = config; },
+      setConfig: (config) => { ctx.config = config; },
     },
     modelAccess,
   );
@@ -613,36 +532,38 @@ export function createEditorAPI(state: TlispEditorState): Map<string, TLispFunct
   }
 
   // Add AST structural editing operations
+  // CHORE-44 Change 1: one per-editor cache instance shared by ast + navigation
+  // ops, so two concurrent editors do not share AST/parse caches (AC1.4).
+  // (CHORE-44 Change 2: `caches` now comes from ctx.caches above.)
   const astOps = createAstOps({
     access: modelAccess,
-    getBufferName: () => state.currentFilename ?? "*scratch*",
+    caches,
+    getBufferName: () => ctx.currentFilename ?? "*scratch*",
     getBufferText: () => {
-      const buf = state.currentBuffer;
+      const buf = ctx.currentBuffer;
       if (!buf) return "";
       const content = buf.getContent();
       return Either.isLeft(content) ? "" : content.right;
     },
-    getCursorLine: () => state.cursorLine,
-    getCursorColumn: () => state.cursorColumn,
+    getCursorLine: () => ctx.cursorLine,
+    getCursorColumn: () => ctx.cursorColumn,
     getCursorOffset: () => {
-      const buf = state.currentBuffer;
+      const buf = ctx.currentBuffer;
       if (!buf) return 0;
       // Compute offset from line + column
       const content = buf.getContent();
       if (Either.isLeft(content)) return 0;
       const text = content.right;
       let offset = 0;
-      for (let i = 0; i < state.cursorLine; i++) {
+      for (let i = 0; i < ctx.cursorLine; i++) {
         const nl = text.indexOf("\n", offset);
         if (nl < 0) break;
         offset = nl + 1;
       }
-      return offset + state.cursorColumn;
+      return offset + ctx.cursorColumn;
     },
-    setStatusMessage: (msg) => { state.statusMessage = msg; },
+    setStatusMessage: (msg) => { ctx.statusMessage = msg; },
   });
-  // Share the REAL AST cache (from ast-ops module scope) with navigation ops
-  setAstCacheRef(getAstCache());
   for (const [key, value] of astOps.entries()) {
     api.set(key, value);
   }
@@ -650,34 +571,35 @@ export function createEditorAPI(state: TlispEditorState): Map<string, TLispFunct
   // Add code navigation operations
   const navigationOps = createNavigationOps({
     access: modelAccess,
-    getBufferName: () => state.currentFilename ?? "*scratch*",
+    caches,
+    getBufferName: () => ctx.currentFilename ?? "*scratch*",
     getBufferText: () => {
-      const buf = state.currentBuffer;
+      const buf = ctx.currentBuffer;
       if (!buf) return "";
       const content = buf.getContent();
       return Either.isLeft(content) ? "" : content.right;
     },
-    getCursorLine: () => state.cursorLine,
-    getCursorColumn: () => state.cursorColumn,
+    getCursorLine: () => ctx.cursorLine,
+    getCursorColumn: () => ctx.cursorColumn,
     getCursorOffset: () => {
-      const buf = state.currentBuffer;
+      const buf = ctx.currentBuffer;
       if (!buf) return 0;
       const content = buf.getContent();
       if (Either.isLeft(content)) return 0;
       const text = content.right;
       let offset = 0;
-      for (let i = 0; i < state.cursorLine; i++) {
+      for (let i = 0; i < ctx.cursorLine; i++) {
         const nl = text.indexOf("\n", offset);
         if (nl < 0) break;
         offset = nl + 1;
       }
-      return offset + state.cursorColumn;
+      return offset + ctx.cursorColumn;
     },
     gotoPosition: (line, column) => {
-      state.cursorLine = line;
-      state.cursorColumn = column;
+      ctx.cursorLine = line;
+      ctx.cursorColumn = column;
     },
-    setStatusMessage: (msg) => { state.statusMessage = msg; },
+    setStatusMessage: (msg) => { ctx.statusMessage = msg; },
   });
   for (const [key, value] of navigationOps.entries()) {
     api.set(key, value);
@@ -685,7 +607,7 @@ export function createEditorAPI(state: TlispEditorState): Map<string, TLispFunct
 
   // Add messages operations
   api.set('messages-buffer', (_args: TLispValue[]): Either<AppError, TLispValue> => {
-    const buf = state.buffers.get('*Messages*');
+    const buf = ctx.buffers.get('*Messages*');
     if (!buf) return Either.right(createString(''));
     const content = buf.getContent();
     if (content._tag === 'Left') return Either.right(createString(''));
@@ -696,7 +618,7 @@ export function createEditorAPI(state: TlispEditorState): Map<string, TLispFunct
   // messages-buffer). Lets users/agents read daemon connection events without
   // buffer switching.
   api.set('daemon-buffer', (_args: TLispValue[]): Either<AppError, TLispValue> => {
-    const buf = state.buffers.get('*daemon*');
+    const buf = ctx.buffers.get('*daemon*');
     if (!buf) return Either.right(createString(''));
     const content = buf.getContent();
     if (content._tag === 'Left') return Either.right(createString(''));
@@ -731,8 +653,8 @@ export function createEditorAPI(state: TlispEditorState): Map<string, TLispFunct
         }
       }).join(' ');
     }
-    state.statusMessage = text;
-    if (state.logMessage) state.logMessage(text);
+    ctx.statusMessage = text;
+    if (ctx.logMessage) ctx.logMessage(text);
     return Either.right(createString(text));
   });
 
@@ -749,7 +671,7 @@ export function createEditorAPI(state: TlispEditorState): Map<string, TLispFunct
         default: return '';
       }
     }).join(' ');
-    state.statusMessage = text;
+    ctx.statusMessage = text;
     // Deliberately do NOT call logMessage — echo-only by design.
     return Either.right(createString(text));
   });
@@ -808,7 +730,7 @@ export function createEditorAPI(state: TlispEditorState): Map<string, TLispFunct
     if (outputTail !== undefined) entry.outputTail = outputTail;
     if (pid !== undefined) entry.pid = pid;
     if (frameId !== undefined) entry.frameId = frameId;
-    state.logProgram?.(category as "shell" | "process" | "test" | "autosave", entry);
+    ctx.logProgram?.(category as "shell" | "process" | "test" | "autosave", entry);
     return Either.right(createString(text));
   });
 
@@ -819,13 +741,13 @@ export function createEditorAPI(state: TlispEditorState): Map<string, TLispFunct
     const text = args.slice(1).map(a => a.type === 'string' ? String(a.value) : String(a.value)).join(' ');
     const validLevels = ['debug', 'info', 'warn', 'error'];
     if (!validLevels.includes(rawLevel)) return Either.left(createValidationError('FormatError', `Invalid log level: ${rawLevel}`));
-    if (state.logMessage) state.logMessage(text, rawLevel);
-    if (['info', 'warn', 'error'].includes(rawLevel)) state.statusMessage = text;
+    if (ctx.logMessage) ctx.logMessage(text, rawLevel);
+    if (['info', 'warn', 'error'].includes(rawLevel)) ctx.statusMessage = text;
     return Either.right(createString(text));
   });
 
   api.set('message-log-level', (_args: TLispValue[]): Either<AppError, TLispValue> => {
-    const log = state._getMessageLog?.();
+    const log = ctx.getMessageLog?.();
     return Either.right(createString(log?.minLevel ?? 'info'));
   });
 
@@ -835,29 +757,29 @@ export function createEditorAPI(state: TlispEditorState): Map<string, TLispFunct
     const level: string = levelArg.type === 'symbol' ? String(levelArg.value).replace(/^:/, '') : (levelArg.type === 'string' ? String(levelArg.value) : 'info');
     const validLevels = ['debug', 'info', 'warn', 'error'];
     if (!validLevels.includes(level)) return Either.left(createValidationError('FormatError', `Invalid log level: ${level}`));
-    const log = state._getMessageLog?.();
+    const log = ctx.getMessageLog?.();
     if (log) log.minLevel = level as LogLevel;
     return Either.right(createString(level));
   });
 
   api.set('message-log-max', (_args: TLispValue[]): Either<AppError, TLispValue> => {
-    const log = state._getMessageLog?.();
+    const log = ctx.getMessageLog?.();
     return Either.right(createNumber(log?.maxSize ?? 1000));
   });
 
   api.set('set-message-log-max', (args: TLispValue[]): Either<AppError, TLispValue> => {
     if (args.length < 1) return Either.left(createValidationError('FormatError', 'requires a number'));
     const n: number = args[0]!.type === 'number' ? Number(args[0]!.value) : 0;
-    const log = state._getMessageLog?.();
+    const log = ctx.getMessageLog?.();
     if (log) log.maxSize = n;
     return Either.right(createNumber(n));
   });
 
   api.set('clear-messages', (_args: TLispValue[]): Either<AppError, TLispValue> => {
-    const log = state._getMessageLog?.();
+    const log = ctx.getMessageLog?.();
     if (log) {
       log.clear();
-      state.buffers.set('*Messages*', FunctionalTextBufferImpl.create(''));
+      ctx.buffers.set('*Messages*', FunctionalTextBufferImpl.create(''));
     }
     return Either.right(createNil());
   });
@@ -873,7 +795,7 @@ export function createEditorAPI(state: TlispEditorState): Map<string, TLispFunct
         kwargs[String(key.value).slice(1)] = args[i + 1]!;
       }
     }
-    const store = state._getUnifiedLog?.();
+    const store = ctx.getUnifiedLog?.();
     if (!store) return Either.right(createList([]));
     const entries = store.getEntries({
       category: kwargs['category'] ? String(kwargs['category'].value) as LogCategory : undefined,
@@ -917,18 +839,18 @@ export function createEditorAPI(state: TlispEditorState): Map<string, TLispFunct
   });
 
   api.set('last-command', (_args: TLispValue[]): Either<AppError, TLispValue> => {
-    return Either.right(createString(state.lastCommand ?? ''));
+    return Either.right(createString(ctx.lastCommand ?? ''));
   });
 
   // Fold operations
   const getBufferLine = (line: number): string => {
-    const buf = state.currentBuffer;
+    const buf = ctx.currentBuffer;
     if (!buf) return '';
     const result = buf.getLine(line);
     return Either.isLeft(result) ? '' : result.right;
   };
   const getBufferLineCount = (): number => {
-    const buf = state.currentBuffer;
+    const buf = ctx.currentBuffer;
     if (!buf) return 0;
     const result = buf.getLineCount();
     return Either.isLeft(result) ? 0 : result.right;
@@ -938,18 +860,18 @@ export function createEditorAPI(state: TlispEditorState): Map<string, TLispFunct
     if (args.length < 1) return Either.left(createValidationError('FormatError', 'fold-toggle requires a line number'));
     const line = Number(args[0]!.value);
     const headingRanges = findHeadingRanges(getBufferLine, getBufferLineCount());
-    const editorState = { foldRanges: state.foldRanges };
+    const editorState = { foldRanges: ctx.foldRanges };
     const result = foldToggle(editorState, line, headingRanges);
-    state.foldRanges = result.foldRanges ? new Map(result.foldRanges) : undefined;
+    ctx.foldRanges = result.foldRanges ? new Map(result.foldRanges) : undefined;
     return Either.right(createNil());
   });
 
   api.set('fold-open', (args: TLispValue[]): Either<AppError, TLispValue> => {
     if (args.length < 1) return Either.left(createValidationError('FormatError', 'fold-open requires a line number'));
     const line = Number(args[0]!.value);
-    const editorState = { foldRanges: state.foldRanges };
+    const editorState = { foldRanges: ctx.foldRanges };
     const result = foldOpen(editorState, line);
-    state.foldRanges = result.foldRanges ? new Map(result.foldRanges) : undefined;
+    ctx.foldRanges = result.foldRanges ? new Map(result.foldRanges) : undefined;
     return Either.right(createNil());
   });
 
@@ -957,24 +879,24 @@ export function createEditorAPI(state: TlispEditorState): Map<string, TLispFunct
     if (args.length < 2) return Either.left(createValidationError('FormatError', 'fold-close requires start and end line numbers'));
     const startLine = Number(args[0]!.value);
     const endLine = Number(args[1]!.value);
-    const editorState = { foldRanges: state.foldRanges };
+    const editorState = { foldRanges: ctx.foldRanges };
     const result = foldClose(editorState, startLine, endLine);
-    state.foldRanges = result.foldRanges ? new Map(result.foldRanges) : undefined;
+    ctx.foldRanges = result.foldRanges ? new Map(result.foldRanges) : undefined;
     return Either.right(createNil());
   });
 
   api.set('fold-close-all', (_args: TLispValue[]): Either<AppError, TLispValue> => {
     const headingRanges = findHeadingRanges(getBufferLine, getBufferLineCount());
-    const editorState = { foldRanges: state.foldRanges };
+    const editorState = { foldRanges: ctx.foldRanges };
     const result = foldCloseAll(editorState, headingRanges);
-    state.foldRanges = result.foldRanges ? new Map(result.foldRanges) : undefined;
+    ctx.foldRanges = result.foldRanges ? new Map(result.foldRanges) : undefined;
     return Either.right(createNil());
   });
 
   api.set('fold-open-all', (_args: TLispValue[]): Either<AppError, TLispValue> => {
-    const editorState = { foldRanges: state.foldRanges };
+    const editorState = { foldRanges: ctx.foldRanges };
     const result = foldOpenAll(editorState);
-    state.foldRanges = result.foldRanges ? new Map(result.foldRanges) : undefined;
+    ctx.foldRanges = result.foldRanges ? new Map(result.foldRanges) : undefined;
     return Either.right(createNil());
   });
 
@@ -982,21 +904,21 @@ export function createEditorAPI(state: TlispEditorState): Map<string, TLispFunct
     if (args.length < 1) return Either.left(createValidationError('FormatError', 'fold-by-level requires a max level'));
     const maxLevel = Number(args[0]!.value);
     const headingRanges = findHeadingRanges(getBufferLine, getBufferLineCount());
-    const editorState = { foldRanges: state.foldRanges };
+    const editorState = { foldRanges: ctx.foldRanges };
     const result = foldByLevel(editorState, maxLevel, headingRanges);
-    state.foldRanges = result.foldRanges ? new Map(result.foldRanges) : undefined;
+    ctx.foldRanges = result.foldRanges ? new Map(result.foldRanges) : undefined;
     return Either.right(createNil());
   });
 
   api.set('fold-is-collapsed', (args: TLispValue[]): Either<AppError, TLispValue> => {
     if (args.length < 1) return Either.left(createValidationError('FormatError', 'fold-is-collapsed requires a line number'));
     const line = Number(args[0]!.value);
-    const editorState = { foldRanges: state.foldRanges };
+    const editorState = { foldRanges: ctx.foldRanges };
     return Either.right(createBoolean(foldIsCollapsed(editorState, line)));
   });
 
   api.set('fold-get-ranges', (_args: TLispValue[]): Either<AppError, TLispValue> => {
-    const editorState = { foldRanges: state.foldRanges };
+    const editorState = { foldRanges: ctx.foldRanges };
     const ranges = foldGetRanges(editorState);
     return Either.right(createList(ranges.map(r =>
       createList([createNumber(r.start), createNumber(r.end)])
@@ -1194,7 +1116,7 @@ export function createEditorAPI(state: TlispEditorState): Map<string, TLispFunct
     if (args.length < 1) return Either.left(createValidationError('FormatError', 'read-string requires 1 argument: prompt'));
     if (args[0]!.type !== 'string') return Either.left(createValidationError('TypeError', 'read-string prompt must be a string'));
     // For now, return empty string. Full implementation requires async minibuffer support.
-    state.statusMessage = String(args[0]!.value);
+    ctx.statusMessage = String(args[0]!.value);
     return Either.right(createString(''));
   });
 
@@ -1212,7 +1134,7 @@ export function createEditorAPI(state: TlispEditorState): Map<string, TLispFunct
       // stdout-only for backward compatibility.
       const stderr = output.stderr ? new TextDecoder().decode(output.stderr) : '';
       const exitCode = output.exitCode ?? 0;
-      state.logProgram?.('shell', {
+      ctx.logProgram?.('shell', {
         level: exitCode === 0 ? 'info' : 'error',
         text: cmd,
         exitCode,
@@ -1236,7 +1158,7 @@ export function createEditorAPI(state: TlispEditorState): Map<string, TLispFunct
       const stdout = output.stdout ? new TextDecoder().decode(output.stdout).trim() : '';
       const stderr = output.stderr ? new TextDecoder().decode(output.stderr).trim() : '';
       const exitCode = output.exitCode ?? 1;
-      state.logProgram?.('shell', {
+      ctx.logProgram?.('shell', {
         level: exitCode === 0 ? 'info' : 'error',
         text: cmd,
         exitCode,
@@ -1367,7 +1289,7 @@ export function createEditorAPI(state: TlispEditorState): Map<string, TLispFunct
       // SPEC-055: record process spawn. outputTail is best-effort — stdout is
       // owned by the caller's :filter; we accumulate a capped tail for the log.
       let tailBuf = '';
-      state.logProgram?.('process', {
+      ctx.logProgram?.('process', {
         level: 'info', text: `▶ pid ${pid} started: ${cmdSummary}`, pid,
       });
 
@@ -1394,8 +1316,8 @@ export function createEditorAPI(state: TlispEditorState): Map<string, TLispFunct
             if (done) break;
             const text = decoder.decode(value, { stream: true });
             tailBuf += text;
-            if (filterName && state._evalTlisp) {
-              state._evalTlisp(`(${filterName} ${pid} ${JSON.stringify(text)})`);
+            if (filterName && ctx.evalTlisp) {
+              ctx.evalTlisp(`(${filterName} ${pid} ${JSON.stringify(text)})`);
             }
           }
         } catch { /* stream closed */ }
@@ -1404,14 +1326,14 @@ export function createEditorAPI(state: TlispEditorState): Map<string, TLispFunct
         await proc.exited;
         const exitCode = proc.exitCode ?? 0;
         // SPEC-055: record process exit (error level on non-zero → mirrors).
-        state.logProgram?.('process', {
+        ctx.logProgram?.('process', {
           level: exitCode === 0 ? 'info' : 'error',
           text: `◀ pid ${pid} exited: ${exitCode}`,
           pid, exitCode, durationMs: Date.now() - spawnTime,
           outputTail: capTail(tailBuf),
         });
-        if (sentinelName && state._evalTlisp) {
-          state._evalTlisp(`(${sentinelName} ${pid} ${exitCode})`);
+        if (sentinelName && ctx.evalTlisp) {
+          ctx.evalTlisp(`(${sentinelName} ${pid} ${exitCode})`);
         }
         processTable.delete(pid);
       })();
@@ -1506,20 +1428,20 @@ export function createEditorAPI(state: TlispEditorState): Map<string, TLispFunct
             const { done, value } = await reader.read();
             if (done) break;
             const chunk = decoder.decode(value, { stream: true });
-            if (filterFn && state._evalTlisp) {
-              state._evalTlisp(`(${filterFn} ${requestId} ${JSON.stringify(chunk)})`);
+            if (filterFn && ctx.evalTlisp) {
+              ctx.evalTlisp(`(${filterFn} ${requestId} ${JSON.stringify(chunk)})`);
             }
           }
         }
 
         // Return final status/headers
-        if (state._evalTlisp) {
+        if (ctx.evalTlisp) {
           const headersStr = JSON.stringify(responseHeaders);
-          state._evalTlisp(`(fikra-http-complete ${requestId} ${status} ${JSON.stringify(headersStr)})`);
+          ctx.evalTlisp(`(fikra-http-complete ${requestId} ${status} ${JSON.stringify(headersStr)})`);
         }
       } catch (e) {
-        if (state._evalTlisp) {
-          state._evalTlisp(`(fikra-http-complete ${requestId} 0 ${JSON.stringify(e instanceof Error ? e.message : String(e))})`);
+        if (ctx.evalTlisp) {
+          ctx.evalTlisp(`(fikra-http-complete ${requestId} 0 ${JSON.stringify(e instanceof Error ? e.message : String(e))})`);
         }
       }
     })();
@@ -1561,9 +1483,9 @@ export function createEditorAPI(state: TlispEditorState): Map<string, TLispFunct
   // Buffer scanning helpers + fs/git context resolvers live alongside.
   const browseUrlDeps: BrowseUrlPrimitiveDeps = {
     access: modelAccess,
-    getCurrentBuffer: () => state.currentBuffer,
-    getCurrentBufferName: () => state.currentFilename ?? "*scratch*",
-    getCurrentBufferPath: () => state.currentFilename,
+    getCurrentBuffer: () => ctx.currentBuffer,
+    getCurrentBufferName: () => ctx.currentFilename ?? "*scratch*",
+    getCurrentBufferPath: () => ctx.currentFilename,
     spawn: (argv: string[]) => {
       try {
         const proc = Bun.spawn(argv, { stdout: "ignore", stderr: "ignore", stdin: "ignore" });

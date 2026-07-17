@@ -103,7 +103,10 @@ describe('SPEC-044 Phase 2.G — "x register-prefix parser', () => {
     test('"<Escape> cancels without affecting subsequent operations', async () => {
       const editor = await createStartedEditor("hello\nworld");
       await press(editor, '"');
-      await press(editor, "Escape");
+      // Escape must be sent as a single key; press() iterates chars, and the
+      // 's' in "Escape" now triggers the substitute binding (SPEC-069), which
+      // would diverge from the intended cancel.
+      await editor.handleKey("Escape");
       // After cancel, a plain yy must yank to the default register.
       await press(editor, "yy");
       expect(getRegister(editor, '"')).toBe("hello\n");

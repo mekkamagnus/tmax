@@ -26,26 +26,14 @@ import { SymbolTable } from "../../syntax/ast/scope.ts";
 import { runModel, readModelField, type EditorModelAccess } from "./state-context.ts";
 import { getParserForLanguage, getParserForFile, getScopeBuilder, getLanguageForFile } from "../../syntax/ast/registry.ts";
 import { serializeForAI } from "../../syntax/ast/serializer.ts";
-import { ParseTreeCache, sourceHash, invalidate, evictCache } from "../../syntax/ast/incremental.ts";
-
-/** Cache: bufferName → { tree, symbolTable, sourceHash } */
-interface CachedAST {
-  tree: ASTNode;
-  symbolTable: SymbolTable;
-  sourceHash: number;
-}
-
-const astCache = new Map<string, CachedAST>();
-const parseTreeCache: ParseTreeCache = new Map();
-
-/** Expose the module-level cache so other modules can share it. */
-export function getAstCache(): Map<string, CachedAST> {
-  return astCache;
-}
+import { sourceHash, invalidate, evictCache } from "../../syntax/ast/incremental.ts";
+import type { EditorRuntimeCaches, CachedAST } from "../runtime/caches.ts";
 
 export interface AstOpsDeps {
   /** CHORE-39 Phase 4: when provided, cursor reads use the State monad against EditorModel. */
   access?: EditorModelAccess;
+  /** CHORE-44 Change 1: per-editor AST/parse caches (not shared, not serialized). */
+  caches: EditorRuntimeCaches;
   getBufferName: () => string;
   getBufferText: () => string;
   getCursorLine: () => number;
@@ -61,6 +49,10 @@ export function createAstOps(deps: AstOpsDeps): Map<string, TLispFunctionImpl> {
     deps.access ? runModel(deps.access, readModelField("cursorPosition")).line : deps.getCursorLine();
   const getCursorColumn = (): number =>
     deps.access ? runModel(deps.access, readModelField("cursorPosition")).column : deps.getCursorColumn();
+  // CHORE-44 Change 1: AST cache is per-editor (deps.caches), never module-global.
+  const astCache = deps.caches.ast;
+  const parseTreeCache = deps.caches.parseTree;
+  const getCachedAST = (name: string): CachedAST | null => astCache.get(name) ?? null;
   const api = new Map<string, TLispFunctionImpl>();
 
   /**
@@ -493,10 +485,6 @@ export function createAstOps(deps: AstOpsDeps): Map<string, TLispFunctionImpl> {
   });
 
   return api;
-}
-
-function getCachedAST(name: string): CachedAST | null {
-  return astCache.get(name) ?? null;
 }
 
 function nodeToValue(node: ASTNode, source: string): TLispValue {

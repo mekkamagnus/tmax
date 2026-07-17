@@ -27,38 +27,7 @@ import {
   createBufferError,
   AppError
 } from "../../error/types.ts";
-import { killRingSave } from "./kill-ring.ts";
-import { registerDelete, resetRegisterState } from "./evil-integration.ts";
-
-/**
- * Register storage for deleted text (legacy, for backward compatibility)
- * @deprecated Use registerDelete from evil-integration.ts instead
- */
-let deleteRegister: string = "";
-
-/**
- * Get the current content of the delete register
- * @deprecated Use getRegister('"') from evil-integration.ts instead
- */
-export function getDeleteRegister(): string {
-  return deleteRegister;
-}
-
-/**
- * Set the delete register content
- * @deprecated Use registerDelete from evil-integration.ts instead
- */
-export function setDeleteRegister(text: string): void {
-  deleteRegister = text;
-}
-
-/**
- * Reset delete register state (for testing)
- */
-export function resetDeleteRegisterState(): void {
-  deleteRegister = "";
-  resetRegisterState();
-}
+import type { EditorSession } from "../functional/domain-state.ts";
 
 /**
  * Check if a character is a word character
@@ -140,6 +109,7 @@ function findSentenceEnd(
  */
 export function createDeleteOps(
   access: EditorModelAccess,
+  session: EditorSession,
   setCurrentBuffer: (buffer: FunctionalTextBuffer) => void,
   setCursorLine: (line: number) => void,
   setCursorColumn: (column: number) => void
@@ -217,8 +187,8 @@ export function createDeleteOps(
     });
 
     if (Either.isRight(deletedTextResult)) {
-      setDeleteRegister(deletedTextResult.right);  // Legacy register
-      registerDelete(deletedTextResult.right, false);  // Evil Integration (US-1.9.3)
+      session.deleteRegister.set(deletedTextResult.right);  // Legacy register
+      session.registers.del(deletedTextResult.right, false);  // Evil Integration (US-1.9.3)
     }
 
     // Perform deletion
@@ -286,8 +256,8 @@ export function createDeleteOps(
     });
 
     if (Either.isRight(deletedTextResult)) {
-      setDeleteRegister(deletedTextResult.right);  // Legacy register
-      registerDelete(deletedTextResult.right, false);  // Evil Integration (US-1.9.3)
+      session.deleteRegister.set(deletedTextResult.right);  // Legacy register
+      session.registers.del(deletedTextResult.right, false);  // Evil Integration (US-1.9.3)
     }
 
     // Perform deletion
@@ -364,8 +334,8 @@ export function createDeleteOps(
     });
 
     if (Either.isRight(deletedTextResult)) {
-      setDeleteRegister(deletedTextResult.right);  // Legacy register
-      registerDelete(deletedTextResult.right, true);  // Evil Integration - line delete (US-1.9.3)
+      session.deleteRegister.set(deletedTextResult.right);  // Legacy register
+      session.registers.del(deletedTextResult.right, true);  // Evil Integration - line delete (US-1.9.3)
     }
 
     // Perform deletion
@@ -441,8 +411,8 @@ export function createDeleteOps(
     });
 
     if (Either.isRight(deletedTextResult)) {
-      setDeleteRegister(deletedTextResult.right);  // Legacy register
-      registerDelete(deletedTextResult.right, false);  // Evil Integration (US-1.9.3)
+      session.deleteRegister.set(deletedTextResult.right);  // Legacy register
+      session.registers.del(deletedTextResult.right, false);  // Evil Integration (US-1.9.3)
     }
 
     // Perform deletion
@@ -481,7 +451,7 @@ export function createDeleteOps(
       ));
     }
 
-    return Either.right(createString(deleteRegister));
+    return Either.right(createString(session.deleteRegister.get()));
   });
 
   return api;

@@ -51,7 +51,14 @@ function buildTestArgs(): string[] {
   const allFiles = readdirSync(unitDir)
     .filter((f) => f.endsWith(".test.ts") && !f.startsWith("adw-"))
     .map((f) => join("test/unit", f));
-  return ["test", "--timeout", String(PER_TEST_TIMEOUT_MS), ...allFiles, ...flags];
+  // --dots emits one character per completed test, giving a steady output
+  // stream. The default reporter is bursty (file-level results); under the
+  // ~800s full suite a slow file cluster can create a >120s stdout gap even
+  // while tests are passing, which would falsely trip the mid-suite-hang
+  // inactivity timer below. With --dots + the per-test timeout, the longest
+  // plausible output gap is ~PER_TEST_TIMEOUT_MS, comfortably under 120s, so
+  // the inactivity timer still catches a genuine hang.
+  return ["test", "--dots", "--timeout", String(PER_TEST_TIMEOUT_MS), ...allFiles, ...flags];
 }
 
 const args = buildTestArgs();

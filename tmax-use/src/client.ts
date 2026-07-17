@@ -225,7 +225,12 @@ export class TmaxClient {
    * daemon's T-Lisp interpreter is the trusted control surface for the editor.
    */
   eval(expr: string): TaskEither<TmaxUseError, string> {
-    return this.deps.runClient(['--eval', expr]).map((s) => s.trim());
+    // Strip only the trailing newline(s) that `console.log` in `bin/tmaxclient`
+    // appends when printing the result. A full `.trim()` here would silently
+    // strip leading/trailing whitespace that is legitimately part of the value
+    // — e.g. a buffer line that starts with a space after `de` (" world foo").
+    // That turned a correct editor result into a false test failure (SPEC-069).
+    return this.deps.runClient(['--eval', expr]).map((s) => s.replace(/[\r\n]+$/, ''));
   }
 
   /**

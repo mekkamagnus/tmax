@@ -23,6 +23,7 @@ import {
   valueToString
 } from "./values.ts";
 import { Either } from "../utils/task-either";
+import { validateIf, validateLet } from "./evaluator/form-shapes.ts";
 import { createValidationError, type EvalError } from "../error/types";
 import { TLispParser } from "./parser.ts";
 import { registerStdlibFunctions } from "./stdlib.ts";
@@ -70,10 +71,8 @@ interface LambdaParameter {
   suppliedName?: string;
 }
 
-// Test registry to store defined tests
-const testRegistry: Map<string, { body: TLispValue[], name: string, params: TLispValue, isAsync?: boolean }> = new Map();
-
-// Suite registry to store test suites
+// Suite registry shape (CHORE-44 Change 4 AC4.3: the registries themselves are
+// instance-owned on TLispEvaluator so two evaluators don't share test/suite state)
 interface TestSuite {
   name: string;
   description?: string;
@@ -83,10 +82,20 @@ interface TestSuite {
   parent?: string; // For nested suites
 }
 
-const suiteRegistry: Map<string, TestSuite> = new Map();
-
-// Track current suite being defined
-let currentSuite: string | null = null;
+/**
+ * The authoritative set of T-Lisp special forms (CHORE-44 Change 4 AC4.2).
+ * Both evaluation paths consult this single classification instead of each
+ * maintaining an independent full switch table. `async-let` is intentionally
+ * absent — it is an async-only form (sync `execute` rejects it; AC4.5).
+ */
+const SPECIAL_FORMS: ReadonlySet<string> = new Set([
+  "quote", "quasiquote", "unquote", "unquote-splicing",
+  "defmacro", "if", "let", "let*", "lambda", "defun", "cond",
+  "defvar", "defmodule", "require-module", "current-module",
+  "provide", "featurep", "require", "set!",
+  "assert-type", "assert-error", "condition-case",
+  "progn", "while", "dolist", "and", "or",
+]);
 
 /**
  * T-Lisp evaluator for executing T-Lisp expressions
@@ -94,6 +103,10 @@ let currentSuite: string | null = null;
 export class TLispEvaluator {
   private moduleRegistry: ModuleRegistry | null = null;
   private builtinsEnv: TLispEnvironment | null = null;
+  // CHORE-44 Change 4 AC4.3: per-instance test/suite registries (were module globals).
+  private testRegistry: Map<string, { body: TLispValue[], name: string, params: TLispValue, isAsync?: boolean }> = new Map();
+  private suiteRegistry: Map<string, TestSuite> = new Map();
+  private currentSuite: string | null = null;
   readonly debugState: DebugState = new DebugState();
 
   setModuleRegistry(registry: ModuleRegistry): void {
@@ -704,25 +717,12 @@ export class TLispEvaluator {
     if (first.type === "symbol") {
       const symbol = first.value as string;
 
+      // CHORE-44 Change 4 AC4.2: only the forms with genuine async execution
+      // semantics need dedicated async handlers. Every other special form has
+      // identical sync/async behavior, so it delegates to the synchronous
+      // `evalList` (the authoritative special-form switch) via the shared
+      // SPECIAL_FORMS classification — no duplicated full switch table here.
       switch (symbol) {
-        case "quote":
-          return this.evalQuote(elements, env);
-        case "quasiquote":
-          return this.evalQuasiquote(elements, env);
-        case "unquote":
-          return Either.left({
-            type: 'EvalError',
-            variant: 'SyntaxError',
-            message: "unquote can only be used inside quasiquote",
-            details: { symbol }
-          });
-        case "unquote-splicing":
-          return Either.left({
-            type: 'EvalError',
-            variant: 'SyntaxError',
-            message: "unquote-splicing can only be used inside quasiquote",
-            details: { symbol }
-          });
         case "if":
           return this.evalIfAsync(elements, env, context, inTailPosition);
         case "let":
@@ -730,34 +730,18 @@ export class TLispEvaluator {
           return this.evalLetAsync(elements, env, context, inTailPosition, false);
         case "async-let":
           return this.evalLetAsync(elements, env, withAsyncMode(context), inTailPosition, true);
-        case "lambda":
-          return this.evalLambda(elements, env);
-        case "defun":
-          return this.evalDefun(elements, env);
         case "cond":
           return this.evalCondAsync(elements, env, context, inTailPosition);
         case "progn":
           return this.evalPrognAsync(elements, env, context, inTailPosition);
         case "while":
           return this.evalWhileAsync(elements, env, context);
-        case "dolist":
-        case "and":
-        case "or":
-        case "defmacro":
-        case "defvar":
-        case "defmodule":
-        case "require-module":
-        case "current-module":
-        case "provide":
-        case "featurep":
-        case "require":
-        case "set!":
-        case "while":
-        case "assert-type":
-        case "assert-error":
-        case "condition-case":
-          return this.evalList(list, env, inTailPosition);
         default:
+          // Special forms without async variants share the synchronous handler.
+          if (SPECIAL_FORMS.has(symbol)) {
+            return this.evalList(list, env, inTailPosition);
+          }
+          // Otherwise it's a function call — evaluate via the async path.
           return this.evalFunctionCallAsync(elements, env, context, inTailPosition);
       }
     }
@@ -1061,27 +1045,10 @@ export class TLispEvaluator {
    * @returns Either with error or conditional result
    */
   private evalIf(elements: TLispValue[], env: TLispEnvironment, inTailPosition: boolean = false): Either<EvalError, EvalResult> {
-    if (elements.length < 3 || elements.length > 4) {
-      return Either.left({
-        type: 'EvalError',
-        variant: 'SyntaxError',
-        message: "if requires 2-3 arguments: condition, then-expr, [else-expr]",
-        details: { expected: '3-4', actual: elements.length }
-      });
-    }
-
-    const conditionExpr = elements[1];
-    const thenExpr = elements[2];
-    const elseExpr = elements[3] ?? createNil();
-
-    if (!conditionExpr || !thenExpr) {
-      return Either.left({
-        type: 'EvalError',
-        variant: 'SyntaxError',
-        message: "if missing required arguments",
-        details: { hasCondition: !!conditionExpr, hasThen: !!thenExpr, hasElse: !!elseExpr }
-      });
-    }
+    // CHORE-44 Change 4 AC4.1: shared form-shape validator (sync + async).
+    const shape = validateIf(elements);
+    if (Either.isLeft(shape)) return Either.left(shape.left);
+    const { condition: conditionExpr, then: thenExpr, else: elseExpr } = shape.right;
 
     const conditionResult = this.eval(conditionExpr, env);
     if (Either.isLeft(conditionResult)) {
@@ -1103,27 +1070,10 @@ export class TLispEvaluator {
     context: EvalContext,
     inTailPosition: boolean = false
   ): Promise<Either<EvalError, EvalResult>> {
-    if (elements.length < 3 || elements.length > 4) {
-      return Either.left({
-        type: 'EvalError',
-        variant: 'SyntaxError',
-        message: "if requires 2-3 arguments: condition, then-expr, [else-expr]",
-        details: { expected: '3-4', actual: elements.length }
-      });
-    }
-
-    const conditionExpr = elements[1];
-    const thenExpr = elements[2];
-    const elseExpr = elements[3] ?? createNil();
-
-    if (!conditionExpr || !thenExpr) {
-      return Either.left({
-        type: 'EvalError',
-        variant: 'SyntaxError',
-        message: "if missing required arguments",
-        details: { hasCondition: !!conditionExpr, hasThen: !!thenExpr, hasElse: !!elseExpr }
-      });
-    }
+    // CHORE-44 Change 4 AC4.1: shared form-shape validator (sync + async).
+    const shape = validateIf(elements);
+    if (Either.isLeft(shape)) return Promise.resolve(Either.left(shape.left));
+    const { condition: conditionExpr, then: thenExpr, else: elseExpr } = shape.right;
 
     const conditionResult = await this.evalAsync(conditionExpr, env, context);
     if (Either.isLeft(conditionResult)) {
@@ -1146,35 +1096,10 @@ export class TLispEvaluator {
    * @returns Either with error or let body result
    */
   private evalLet(elements: TLispValue[], env: TLispEnvironment, inTailPosition: boolean = false): Either<EvalError, EvalResult> {
-    if (elements.length < 3) {
-      return Either.left({
-        type: 'EvalError',
-        variant: 'SyntaxError',
-        message: "let requires bindings and body",
-        details: { expected: "3+", actual: elements.length }
-      });
-    }
-
-    const isSequential = elements[0]?.type === "symbol" && elements[0]?.value === "let*";
-    const bindings = elements[1];
-
-    if (!bindings) {
-      return Either.left({
-        type: 'EvalError',
-        variant: 'SyntaxError',
-        message: "let missing bindings",
-        details: {}
-      });
-    }
-
-    if (bindings.type !== "list") {
-      return Either.left({
-        type: 'EvalError',
-        variant: 'TypeError',
-        message: "let bindings must be a list",
-        details: { bindingsType: bindings.type }
-      });
-    }
+    // CHORE-44 Change 4 AC4.1: shared upfront structure validator (sync + async).
+    const letShape = validateLet(elements);
+    if (Either.isLeft(letShape)) return Either.left(letShape.left);
+    const { isSequential, bindings } = letShape.right;
 
     const letEnv = new TLispEnvironmentImpl(env);
 
@@ -1251,44 +1176,11 @@ export class TLispEvaluator {
     inTailPosition: boolean = false,
     allowMultipleBody: boolean = false
   ): Promise<Either<EvalError, EvalResult>> {
-    if (elements.length < 3) {
-      return Either.left({
-        type: 'EvalError',
-        variant: 'SyntaxError',
-        message: `${elements[0]?.type === "symbol" ? elements[0].value : "let"} requires bindings and body`,
-        details: { actual: elements.length }
-      });
-    }
-
-    const isSequential = elements[0]?.type === "symbol" && elements[0]?.value === "let*";
-    const bindings = elements[1];
-    if (!bindings) {
-      return Either.left({
-        type: 'EvalError',
-        variant: 'SyntaxError',
-        message: "let missing bindings",
-        details: { hasBindings: false }
-      });
-    }
-
-    if (bindings.type !== "list") {
-      return Either.left({
-        type: 'EvalError',
-        variant: 'TypeError',
-        message: "let bindings must be a list",
-        details: { bindingsType: bindings.type }
-      });
-    }
-
-    const bodyExprs = elements.slice(2);
-    if (bodyExprs.length === 0 || !bodyExprs[0]) {
-      return Either.left({
-        type: 'EvalError',
-        variant: 'SyntaxError',
-        message: "let missing body",
-        details: { hasBody: false }
-      });
-    }
+    // CHORE-44 Change 4 AC4.1: shared upfront structure validator (sync + async).
+    const letShape = validateLet(elements);
+    if (Either.isLeft(letShape)) return Promise.resolve(Either.left(letShape.left));
+    const { isSequential, bindings, body: bodyExprs } = letShape.right;
+    void allowMultipleBody;
 
     const letEnv = new TLispEnvironmentImpl(env);
     const bindingList = bindings.value as TLispValue[];
@@ -2497,7 +2389,7 @@ export class TLispEvaluator {
     const testBody = elements.slice(3);
 
     // Store test in the registry
-    testRegistry.set(testName, { body: testBody, name: testName, params: parameters });
+    this.testRegistry.set(testName, { body: testBody, name: testName, params: parameters });
 
     // Return the test name as a symbol to indicate success
     return Either.right(name);
@@ -2556,7 +2448,7 @@ export class TLispEvaluator {
     const testBody = elements.slice(3);
 
     // Store test in the registry with async flag
-    testRegistry.set(testName, { body: testBody, name: testName, params: parameters, isAsync: true });
+    this.testRegistry.set(testName, { body: testBody, name: testName, params: parameters, isAsync: true });
 
     // Return the test name as a symbol to indicate success
     return Either.right(name);
@@ -2604,12 +2496,12 @@ export class TLispEvaluator {
       name: suiteName,
       description,
       tests: [],
-      parent: currentSuite || undefined
+      parent: this.currentSuite || undefined
     };
 
     // Set as current suite for nested definitions
-    const previousSuite = currentSuite;
-    currentSuite = suiteName;
+    const previousSuite = this.currentSuite;
+    this.currentSuite = suiteName;
 
     // Process suite body
     for (let i = contentStart; i < elements.length; i++) {
@@ -2629,7 +2521,7 @@ export class TLispEvaluator {
             continue;
           }
           if (first.type === "symbol" && first.value === "deftest") {
-            // Execute the deftest to register it in testRegistry
+            // Execute the deftest to register it in this.testRegistry
             const testResult = this.evalDeftest(elValues, env);
             if (Either.isLeft(testResult)) {
               // Log error but continue
@@ -2660,10 +2552,10 @@ export class TLispEvaluator {
     }
 
     // Restore previous suite
-    currentSuite = previousSuite;
+    this.currentSuite = previousSuite;
 
     // Register suite
-    suiteRegistry.set(suiteName, suite);
+    this.suiteRegistry.set(suiteName, suite);
 
     // Return suite name
     return Either.right(createString(suiteName));
@@ -2676,7 +2568,7 @@ export class TLispEvaluator {
    * @returns Either with error or success
    */
   private evalSuiteSetup(elements: TLispValue[], env: TLispEnvironment): Either<EvalError, TLispValue> {
-    if (!currentSuite) {
+    if (!this.currentSuite) {
       return Either.left({
         type: 'EvalError',
         variant: 'SyntaxError',
@@ -2697,7 +2589,7 @@ export class TLispEvaluator {
    * @returns Either with error or success
    */
   private evalSuiteTeardown(elements: TLispValue[], env: TLispEnvironment): Either<EvalError, TLispValue> {
-    if (!currentSuite) {
+    if (!this.currentSuite) {
       return Either.left({
         type: 'EvalError',
         variant: 'SyntaxError',
@@ -3137,15 +3029,15 @@ export class TLispEvaluator {
    * @returns Test definition or undefined if not found
    */
   getTestDefinition(name: string): { body: TLispValue[], name: string, params: TLispValue, isAsync?: boolean } | undefined {
-    return testRegistry.get(name);
+    return this.testRegistry.get(name);
   }
 
   /**
    * Clear all test and suite registries
    */
   clearTestRegistries(): void {
-    testRegistry.clear();
-    suiteRegistry.clear();
+    this.testRegistry.clear();
+    this.suiteRegistry.clear();
   }
 
   /**
@@ -3153,7 +3045,7 @@ export class TLispEvaluator {
    * @returns Array of test names
    */
   getAllTestNames(): string[] {
-    return Array.from(testRegistry.keys());
+    return Array.from(this.testRegistry.keys());
   }
 
   /**
@@ -3162,7 +3054,7 @@ export class TLispEvaluator {
    * @returns Suite definition or undefined if not found
    */
   getSuiteDefinition(name: string): TestSuite | undefined {
-    return suiteRegistry.get(name);
+    return this.suiteRegistry.get(name);
   }
 
   /**
@@ -3170,7 +3062,7 @@ export class TLispEvaluator {
    * @returns Array of suite names
    */
   getAllSuiteNames(): string[] {
-    return Array.from(suiteRegistry.keys());
+    return Array.from(this.suiteRegistry.keys());
   }
 
   /**

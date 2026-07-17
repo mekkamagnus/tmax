@@ -8,7 +8,20 @@ import { expectRight } from "../helpers/editor-fixture.ts";
 import { FunctionalTextBufferImpl } from "../../src/core/buffer.ts";
 import type { FunctionalTextBuffer } from "../../src/core/types.ts";
 import { Either } from "../../src/utils/task-either.ts";
-import {
+import { createTextObjectsHelpers } from "../../src/editor/api/text-objects.ts";
+
+// CHORE-44 Change 1: text-object helpers are bound per-editor to a
+// register-delete callback. The test captures deleted text into a local cell
+// and re-exposes the legacy get/set-delete-register helpers so the assertions
+// below are unchanged.
+let deleteRegister = "";
+function getDeleteRegister(): string {
+  return deleteRegister;
+}
+function setDeleteRegister(text: string): void {
+  deleteRegister = text;
+}
+const {
   deleteInnerWord,
   deleteAroundWord,
   changeInnerSingleQuote,
@@ -22,9 +35,7 @@ import {
   deleteInnerBracket,
   deleteInnerAngle,
   deleteInnerTag,
-  getDeleteRegister,
-  setDeleteRegister
-} from "../../src/editor/api/text-objects.ts";
+} = createTextObjectsHelpers({ registerDelete: (text: string) => { deleteRegister = text; }, setDeleteRegister: (text: string) => { deleteRegister = text; } });
 
 function createBuffer(content: string): FunctionalTextBuffer {
   return FunctionalTextBufferImpl.create(content);

@@ -12,7 +12,7 @@
 import { describe, test, expect, beforeEach } from "bun:test";
 import { expectRight } from "../helpers/editor-fixture.ts";
 import { Either } from "../../src/utils/task-either.ts";
-import { createUndoTreeOps, resetUndoTreeState, setInitialBuffer as setTreeInitialBuffer } from "../../src/editor/api/undo-tree.ts";
+import { createUndoTreeOps } from "../../src/editor/api/undo-tree.ts";
 import type { FunctionalTextBuffer } from "../../src/core/types.ts";
 
 // Mock buffer implementation for testing
@@ -121,13 +121,15 @@ class MockBuffer implements FunctionalTextBuffer {
 describe("Undo Tree Operations", () => {
   let currentBuffer: FunctionalTextBuffer | null;
   let undoTreeOps: Map<string, (args: any[]) => Either<any, any>>;
+  // CHORE-44 Change 1: undo-tree state is per-editor; reset/setInitialBuffer
+  // come from the factory result (bound to this editor's tree).
+  let resetUndoTreeState: () => void;
+  let setTreeInitialBuffer: (buffer: FunctionalTextBuffer) => void;
 
   beforeEach(() => {
-    // Reset state before each test
-    resetUndoTreeState();
     currentBuffer = new MockBuffer("Initial content\nLine 2\nLine 3") as FunctionalTextBuffer;
 
-    undoTreeOps = createUndoTreeOps(
+    const undoTreeCore = createUndoTreeOps(
       () => currentBuffer,
       (buffer) => { currentBuffer = buffer; },
       () => 0,  // cursorLine
@@ -135,6 +137,10 @@ describe("Undo Tree Operations", () => {
       () => 0,  // cursorColumn
       (col) => {}  // setCursorColumn
     );
+    undoTreeOps = undoTreeCore.api;
+    resetUndoTreeState = undoTreeCore.reset;
+    setTreeInitialBuffer = undoTreeCore.setInitialBuffer;
+    resetUndoTreeState();
   });
 
   describe("Branch creation", () => {

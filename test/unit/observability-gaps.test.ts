@@ -5,27 +5,20 @@
  * real shell-exec/make-process capture paths, save-error logging, trt multi-command emission.
  */
 import { describe, test, expect } from "bun:test";
-import { createEditorAPI, type TlispEditorState } from "../../src/editor/tlisp-api";
+import { createEditorAPI } from "../../src/editor/tlisp-api";
 import { FunctionalTextBufferImpl } from "../../src/core/buffer";
 import { createString } from "../../src/tlisp/values";
 import { Either } from "../../src/utils/task-either";
-import { expectDefined, expectRight, createStartedEditor, executeTlisp } from "../helpers/editor-fixture.ts";
-import { MockFileSystem } from "../mocks/filesystem.ts";
-import { MockTerminal } from "../mocks/terminal.ts";
+import { expectDefined, expectRight, createStartedEditor, executeTlisp, createTestAPIContext } from "../helpers/editor-fixture.ts";
 
 // ── Read-only guard on the 4 new buffers (criterion 2) ────────────────
 
-function createStateWithBuffer(name: string): TlispEditorState {
+function createStateWithBuffer(name: string) {
   const buf = FunctionalTextBufferImpl.create("content\n");
-  return {
+  return createTestAPIContext({
     currentBuffer: buf,
     buffers: new Map([["default", FunctionalTextBufferImpl.create("")], [name, buf]]),
-    cursorLine: 0, cursorColumn: 0,
-    terminal: new MockTerminal(), filesystem: new MockFileSystem(),
-    mode: "normal", lastCommand: "", statusMessage: "",
-    viewportTop: 0, viewportLeft: 0, commandLine: "",
-    spacePressed: false, mxCommand: "", cursorFocus: "buffer",
-  };
+  });
 }
 
 describe("SPEC-055 gap: read-only guard on the 4 new buffers", () => {

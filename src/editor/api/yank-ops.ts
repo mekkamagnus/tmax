@@ -27,39 +27,7 @@ import {
   createBufferError,
   AppError
 } from "../../error/types.ts";
-import { killRingSave } from "./kill-ring.ts";
-import { activateYankPopState } from "./yank-pop-ops.ts";
-import { getRegister, registerYank, resetRegisterState } from "./evil-integration.ts";
-
-/**
- * Register storage for yanked text (legacy, for backward compatibility)
- * @deprecated Use registerYank from evil-integration.ts instead
- */
-let yankRegister: string = "";
-
-/**
- * Get the current content of the yank register
- * @deprecated Use getRegister('0') from evil-integration.ts instead
- */
-export function getYankRegister(): string {
-  return yankRegister;
-}
-
-/**
- * Set the yank register content
- * @deprecated Use registerYank from evil-integration.ts instead
- */
-export function setYankRegister(text: string): void {
-  yankRegister = text;
-}
-
-/**
- * Reset yank register state (for testing)
- */
-export function resetYankRegisterState(): void {
-  yankRegister = "";
-  resetRegisterState();
-}
+import type { EditorSession } from "../functional/domain-state.ts";
 
 /**
  * Check if a character is a word character
@@ -78,6 +46,7 @@ import { isWordChar, findWordEnd } from "./text-utils.ts";
  */
 export function createYankOps(
   access: EditorModelAccess,
+  session: EditorSession,
   setCurrentBuffer: (buffer: FunctionalTextBuffer) => void,
   setCursorLine: (line: number) => void,
   setCursorColumn: (column: number) => void
@@ -134,8 +103,8 @@ export function createYankOps(
     });
 
     if (Either.isRight(yankedTextResult)) {
-      setYankRegister(yankedTextResult.right);
-      registerYank(yankedTextResult.right);
+      session.yankRegister.set(yankedTextResult.right);
+      session.registers.yank(yankedTextResult.right);
     }
 
     return Either.right(createNil());
@@ -215,8 +184,8 @@ export function createYankOps(
     });
 
     if (Either.isRight(yankedTextResult)) {
-      setYankRegister(yankedTextResult.right);  // Legacy register
-      registerYank(yankedTextResult.right);  // Evil Integration (US-1.9.3)
+      session.yankRegister.set(yankedTextResult.right);  // Legacy register
+      session.registers.yank(yankedTextResult.right);  // Evil Integration (US-1.9.3)
     }
 
     // Yank doesn't modify buffer - just return success
@@ -271,8 +240,8 @@ export function createYankOps(
     let endLine = Math.min(startLine + count, lines.length);
 
     const yankedText = `${lines.slice(startLine, endLine).join('\n')}\n`;
-    setYankRegister(yankedText);  // Legacy register
-    registerYank(yankedText);  // Evil Integration (US-1.9.3)
+    session.yankRegister.set(yankedText);  // Legacy register
+    session.registers.yank(yankedText);  // Evil Integration (US-1.9.3)
     setCursorLine(Math.max(startLine, endLine - 1));
     setCursorColumn(0);
 
@@ -325,8 +294,8 @@ export function createYankOps(
     });
 
     if (Either.isRight(yankedTextResult)) {
-      setYankRegister(yankedTextResult.right);  // Legacy register
-      registerYank(yankedTextResult.right);  // Evil Integration (US-1.9.3)
+      session.yankRegister.set(yankedTextResult.right);  // Legacy register
+      session.registers.yank(yankedTextResult.right);  // Evil Integration (US-1.9.3)
     }
 
     // Yank doesn't modify buffer - just return success
@@ -366,7 +335,7 @@ export function createYankOps(
       count = Math.max(0, countArg.value as number);
     }
 
-    const pasteRegister = getRegister('"') || yankRegister;
+    const pasteRegister = session.registers.get('"') || session.yankRegister.get();
 
     // Check if register has content
     if (pasteRegister === "") {
@@ -418,7 +387,7 @@ export function createYankOps(
       setCursorColumn(0);
 
       // Activate yank-pop state for M-y support (US-1.9.2)
-      activateYankPopState(pasteText, { line: targetLine, column: 0 });
+      session.yankPop.activate(pasteText, { line: targetLine, column: 0 });
     } else {
       // Character paste: paste after cursor position
       const insertPos = { line: currentLine, column: currentColumn + 1 };
@@ -451,7 +420,7 @@ export function createYankOps(
       setCursorColumn(currentColumn + 1);
 
       // Activate yank-pop state for M-y support (US-1.9.2)
-      activateYankPopState(pasteText, insertPos);
+      session.yankPop.activate(pasteText, insertPos);
     }
 
     return Either.right(createNil());
@@ -490,7 +459,7 @@ export function createYankOps(
       count = Math.max(0, countArg.value as number);
     }
 
-    const pasteRegister = getRegister('"') || yankRegister;
+    const pasteRegister = session.registers.get('"') || session.yankRegister.get();
 
     // Check if register has content
     if (pasteRegister === "") {
@@ -527,7 +496,7 @@ export function createYankOps(
       setCursorColumn(0);
 
       // Activate yank-pop state for M-y support (US-1.9.2)
-      activateYankPopState(pasteText, { line: currentLine, column: 0 });
+      session.yankPop.activate(pasteText, { line: currentLine, column: 0 });
     } else {
       // Character paste: insert immediately before the cursor's current character.
       const insertPos = { line: currentLine, column: Math.max(0, currentColumn) };
@@ -552,7 +521,7 @@ export function createYankOps(
       setCursorColumn(currentColumn);
 
       // Activate yank-pop state for M-y support (US-1.9.2)
-      activateYankPopState(pasteText, insertPos);
+      session.yankPop.activate(pasteText, insertPos);
     }
 
     return Either.right(createNil());
@@ -574,7 +543,7 @@ export function createYankOps(
       ));
     }
 
-    return Either.right({ type: 'string', value: yankRegister });
+    return Either.right({ type: 'string', value: session.yankRegister.get() });
   });
 
   /**
@@ -604,11 +573,11 @@ export function createYankOps(
     }
 
     const text = textArg.value as string;
-    setYankRegister(text);
+    session.yankRegister.set(text);
     if (text === "") {
-      resetRegisterState();
+      session.registers.reset();
     } else {
-      registerYank(text);
+      session.registers.yank(text);
     }
     return Either.right(createNil());
   });

@@ -6,7 +6,7 @@
 
 import { describe, test, expect, beforeEach, afterEach } from "bun:test";
 import { MockFileSystem } from "../mocks/filesystem.ts";
-import { resetMacroRecordingState, getMacros, getMacro, startRecording, stopRecording, recordKey } from "../../src/editor/api/macro-recording.ts";
+import { bindMacros, createMacroState, type MacroOps } from "../../src/editor/api/macro-recording.ts";
 import { saveMacrosToFile, loadMacrosFromFile, getMacrosFilePath } from "../../src/editor/api/macro-persistence.ts";
 
 // Save original HOME env var
@@ -14,6 +14,16 @@ const originalHome = process.env.HOME;
 
 describe("Macro Persistence (US-2.4.2)", () => {
   let mockFs: MockFileSystem;
+
+  // CHORE-44 Change 1: macro state is per-editor. Bind one MacroOps instance and
+  // re-expose the legacy free-function names so the test body is unchanged.
+  const macros: MacroOps = bindMacros(createMacroState());
+  const resetMacroRecordingState = () => macros.reset();
+  const getMacros = () => macros.all();
+  const getMacro = (register: string) => macros.get(register);
+  const startRecording = (register: string) => macros.start(register);
+  const stopRecording = () => macros.stop();
+  const recordKey = (key: string) => macros.record(key);
 
   beforeEach(() => {
     // Set HOME to test directory
@@ -68,7 +78,7 @@ describe("Macro Persistence (US-2.4.2)", () => {
       stopRecording();
 
       // Save to file
-      const result = await saveMacrosToFile(mockFs);
+      const result = await saveMacrosToFile(mockFs, macros);
       expect(result).toBe(true);
 
       // Check file was created
@@ -93,7 +103,7 @@ describe("Macro Persistence (US-2.4.2)", () => {
       stopRecording();
 
       // Save to file
-      const result = await saveMacrosToFile(mockFs);
+      const result = await saveMacrosToFile(mockFs, macros);
       expect(result).toBe(true);
 
       // Check file contains proper T-Lisp macro definition
@@ -120,7 +130,7 @@ describe("Macro Persistence (US-2.4.2)", () => {
       stopRecording();
 
       // Save should create directory
-      const result = await saveMacrosToFile(mockFs);
+      const result = await saveMacrosToFile(mockFs, macros);
       expect(result).toBe(true);
 
       // Check directory was created
@@ -142,7 +152,7 @@ describe("Macro Persistence (US-2.4.2)", () => {
       stopRecording();
 
       // Save should overwrite
-      const result = await saveMacrosToFile(mockFs);
+      const result = await saveMacrosToFile(mockFs, macros);
       expect(result).toBe(true);
 
       // Check file was overwritten
@@ -155,7 +165,7 @@ describe("Macro Persistence (US-2.4.2)", () => {
       // Don't record any macros
 
       // Save should handle empty state
-      const result = await saveMacrosToFile(mockFs);
+      const result = await saveMacrosToFile(mockFs, macros);
       expect(result).toBe(true);
 
       // Check file was created with empty content
@@ -179,7 +189,7 @@ describe("Macro Persistence (US-2.4.2)", () => {
       mockFs.setFile("/Users/test/.config/tmax/macros.tlisp", macroFileContent);
 
       // Load macros
-      const result = await loadMacrosFromFile(mockFs);
+      const result = await loadMacrosFromFile(mockFs, macros);
       expect(result).toBe(true);
 
       // Check macros were loaded
@@ -199,7 +209,7 @@ describe("Macro Persistence (US-2.4.2)", () => {
       // Don't create the file
 
       // Load should return false (no error, just no file)
-      const result = await loadMacrosFromFile(mockFs);
+      const result = await loadMacrosFromFile(mockFs, macros);
       expect(result).toBe(false);
     });
 
@@ -208,12 +218,12 @@ describe("Macro Persistence (US-2.4.2)", () => {
       mockFs.setFile("/Users/test/.config/tmax/macros.tlisp", "(defmacro macro-a 'broken");
 
       // Load should handle error gracefully by skipping malformed entries
-      const result = await loadMacrosFromFile(mockFs);
+      const result = await loadMacrosFromFile(mockFs, macros);
       expect(result).toBe(true); // Returns true because file was read successfully
 
       // Macros should be empty since the entry was malformed
-      const macros = getMacros();
-      expect(macros.size).toBe(0);
+      const macrosMap = getMacros();
+      expect(macrosMap.size).toBe(0);
     });
 
     test("appends to existing macros in memory", async () => {
@@ -232,7 +242,7 @@ describe("Macro Persistence (US-2.4.2)", () => {
       mockFs.setFile("/Users/test/.config/tmax/macros.tlisp", macroFileContent);
 
       // Load macros
-      const result = await loadMacrosFromFile(mockFs);
+      const result = await loadMacrosFromFile(mockFs, macros);
       expect(result).toBe(true);
 
       // Check both macros exist
@@ -265,7 +275,7 @@ describe("Macro Persistence (US-2.4.2)", () => {
       mockFs.setFile("/Users/test/.config/tmax/macros.tlisp", macroFileContent);
 
       // Load macros
-      const result = await loadMacrosFromFile(mockFs);
+      const result = await loadMacrosFromFile(mockFs, macros);
       expect(result).toBe(true);
 
       // Check macros were loaded
@@ -312,7 +322,7 @@ describe("Macro Persistence (US-2.4.2)", () => {
       stopRecording();
 
       // Save to file
-      const saveResult = await saveMacrosToFile(mockFs);
+      const saveResult = await saveMacrosToFile(mockFs, macros);
       expect(saveResult).toBe(true);
 
       // Clear macro state
@@ -323,7 +333,7 @@ describe("Macro Persistence (US-2.4.2)", () => {
       expect(macrosBeforeLoad.size).toBe(0);
 
       // Load from file
-      const loadResult = await loadMacrosFromFile(mockFs);
+      const loadResult = await loadMacrosFromFile(mockFs, macros);
       expect(loadResult).toBe(true);
 
       // Verify all macros were restored
@@ -349,7 +359,7 @@ describe("Macro Persistence (US-2.4.2)", () => {
       mockFs.setFile("/Users/test/.config/tmax/macros.tlisp", initialContent);
 
       // Load macros
-      await loadMacrosFromFile(mockFs);
+      await loadMacrosFromFile(mockFs, macros);
 
       // Verify original macro
       const macroA = getMacro("a");
@@ -365,7 +375,7 @@ describe("Macro Persistence (US-2.4.2)", () => {
 
       // Clear and reload
       resetMacroRecordingState();
-      await loadMacrosFromFile(mockFs);
+      await loadMacrosFromFile(mockFs, macros);
 
       // Verify macro was updated
       const macroANew = getMacro("a");
@@ -389,9 +399,9 @@ describe("Macro Persistence (US-2.4.2)", () => {
       stopRecording();
 
       // Save and load
-      await saveMacrosToFile(mockFs);
+      await saveMacrosToFile(mockFs, macros);
       resetMacroRecordingState();
-      await loadMacrosFromFile(mockFs);
+      await loadMacrosFromFile(mockFs, macros);
 
       // Verify special keys were preserved
       const macroZ = getMacro("z");
@@ -414,9 +424,9 @@ describe("Macro Persistence (US-2.4.2)", () => {
       stopRecording();
 
       // Save and load
-      await saveMacrosToFile(mockFs);
+      await saveMacrosToFile(mockFs, macros);
       resetMacroRecordingState();
-      await loadMacrosFromFile(mockFs);
+      await loadMacrosFromFile(mockFs, macros);
 
       // Verify all keys were preserved
       const macroL = getMacro("l");
@@ -446,9 +456,9 @@ describe("Macro Persistence (US-2.4.2)", () => {
       stopRecording();
 
       // Save and load
-      await saveMacrosToFile(mockFs);
+      await saveMacrosToFile(mockFs, macros);
       resetMacroRecordingState();
-      await loadMacrosFromFile(mockFs);
+      await loadMacrosFromFile(mockFs, macros);
 
       // Verify numeric register macros were preserved
       const macro1 = getMacro("1");

@@ -18,31 +18,25 @@
 
 import type { FunctionalTextBuffer, Position } from "../../core/types.ts";
 import { Either } from "../../utils/task-either.ts";
-import { killRingSave } from "./kill-ring.ts";
-import { registerDelete } from "./evil-integration.ts";
+import type { RegisterDeleteFn } from "./evil-integration.ts";
 import { isWordChar, isWhitespace, findWordStart, findWordEndOnLine as findWordEnd, findWordEndWithSpace } from "./text-utils.ts";
 import { State } from "../../utils/state.ts";
 import type { EditorModel } from "../functional/model.ts";
 
-/**
- * Register storage for deleted text
- * Shared with delete-ops.ts
- */
-let deleteRegister: string = "";
-
-/**
- * Get the current content of the delete register
- */
-export function getDeleteRegister(): string {
-  return deleteRegister;
+export interface TextObjectsOpts {
+  /** Per-editor register-delete callback (records deleted text + kill ring). */
+  registerDelete: RegisterDeleteFn;
+  /** Per-editor legacy delete-register setter. */
+  setDeleteRegister: (text: string) => void;
 }
 
 /**
- * Set the delete register content
+ * CHORE-44 Change 1: text-object helpers close over the per-editor
+ * `registerDelete` callback. `createTextObjectsHelpers` binds them once per
+ * editor; importers destructure the returned object (call syntax unchanged).
  */
-export function setDeleteRegister(text: string): void {
-  deleteRegister = text;
-}
+export function createTextObjectsHelpers(opts: TextObjectsOpts) {
+  const { registerDelete, setDeleteRegister } = opts;
 
 /**
  * CHORE-39 Phase 4: `State<EditorModel, void>` wrappers that run the pure
@@ -60,7 +54,7 @@ const withCurrentBuffer = (
     return { ...m, currentBuffer: result.right } as EditorModel;
   });
 
-export const deleteInnerWordState = (count: number = 1): State<EditorModel, void> =>
+const deleteInnerWordState = (count: number = 1): State<EditorModel, void> =>
   withCurrentBuffer((buf, line, column) => deleteInnerWord(buf, line, column, count));
 
 /**
@@ -71,7 +65,7 @@ export const deleteInnerWordState = (count: number = 1): State<EditorModel, void
  * between words but not the trailing whitespace after the last word).
  * Returns the new buffer after deletion.
  */
-export function deleteInnerWord(
+function deleteInnerWord(
   buffer: FunctionalTextBuffer,
   line: number,
   column: number,
@@ -130,7 +124,7 @@ export function deleteInnerWord(
  * trailing whitespace of the final word).
  * Returns the new buffer after deletion.
  */
-export function deleteAroundWord(
+function deleteAroundWord(
   buffer: FunctionalTextBuffer,
   line: number,
   column: number,
@@ -198,7 +192,7 @@ export function deleteAroundWord(
  * deletion across N words. The ops wrapper triggers the mode transition to
  * insert — TS primitive is pure delete.
  */
-export function changeInnerWord(
+function changeInnerWord(
   buffer: FunctionalTextBuffer,
   line: number,
   column: number,
@@ -212,7 +206,7 @@ export function changeInnerWord(
  * Deletes the word with trailing space (same range as daw). COUNT extends the
  * deletion across N around-words. Mode transition lives in the ops wrapper.
  */
-export function changeAroundWord(
+function changeAroundWord(
   buffer: FunctionalTextBuffer,
   line: number,
   column: number,
@@ -265,7 +259,7 @@ function findMatchingQuote(
  * Change inner single quote (ci')
  * Deletes inside single quotes and returns { buffer: newBuffer, mode: "INSERT" }
  */
-export function deleteInnerSingleQuote(
+function deleteInnerSingleQuote(
   buffer: FunctionalTextBuffer,
   line: number,
   column: number
@@ -298,7 +292,7 @@ export function deleteInnerSingleQuote(
  * Delete around single quote (da')
  * Deletes including single quotes and returns new buffer
  */
-export function deleteAroundSingleQuote(
+function deleteAroundSingleQuote(
   buffer: FunctionalTextBuffer,
   line: number,
   column: number
@@ -331,7 +325,7 @@ export function deleteAroundSingleQuote(
  * Delete inner double quote (di")
  * Deletes inside double quotes and returns new buffer
  */
-export function deleteInnerDoubleQuote(
+function deleteInnerDoubleQuote(
   buffer: FunctionalTextBuffer,
   line: number,
   column: number
@@ -364,7 +358,7 @@ export function deleteInnerDoubleQuote(
  * Delete around double quote (da")
  * Deletes including double quotes and returns new buffer
  */
-export function deleteAroundDoubleQuote(
+function deleteAroundDoubleQuote(
   buffer: FunctionalTextBuffer,
   line: number,
   column: number
@@ -397,7 +391,7 @@ export function deleteAroundDoubleQuote(
  * Change inner single quote (ci')
  * Deletes inside single quotes and returns { buffer: newBuffer, mode: "INSERT" }
  */
-export function changeInnerSingleQuote(
+function changeInnerSingleQuote(
   buffer: FunctionalTextBuffer,
   line: number,
   column: number
@@ -432,7 +426,7 @@ export function changeInnerSingleQuote(
  * Change around single quote (ca')
  * Deletes including single quotes and returns new buffer
  */
-export function changeAroundSingleQuote(
+function changeAroundSingleQuote(
   buffer: FunctionalTextBuffer,
   line: number,
   column: number
@@ -467,7 +461,7 @@ export function changeAroundSingleQuote(
  * Change inner double quote (ci")
  * Deletes inside double quotes and returns new buffer
  */
-export function changeInnerDoubleQuote(
+function changeInnerDoubleQuote(
   buffer: FunctionalTextBuffer,
   line: number,
   column: number
@@ -502,7 +496,7 @@ export function changeInnerDoubleQuote(
  * Change around double quote (ca")
  * Deletes including double quotes and returns new buffer
  */
-export function changeAroundDoubleQuote(
+function changeAroundDoubleQuote(
   buffer: FunctionalTextBuffer,
   line: number,
   column: number
@@ -596,7 +590,7 @@ function findMatchingParen(
  * Delete inner parenthesis (di))
  * Deletes inside parentheses and returns new buffer
  */
-export function deleteInnerParen(
+function deleteInnerParen(
   buffer: FunctionalTextBuffer,
   line: number,
   column: number
@@ -631,7 +625,7 @@ export function deleteInnerParen(
  * Change inner parenthesis (ci))
  * Deletes inside parentheses and returns new buffer
  */
-export function changeInnerParen(
+function changeInnerParen(
   buffer: FunctionalTextBuffer,
   line: number,
   column: number
@@ -666,7 +660,7 @@ export function changeInnerParen(
  * Delete around parenthesis (da))
  * Deletes including parens and returns new buffer
  */
-export function deleteAroundParen(
+function deleteAroundParen(
   buffer: FunctionalTextBuffer,
   line: number,
   column: number
@@ -699,7 +693,7 @@ export function deleteAroundParen(
  * Change around parenthesis (ca))
  * Deletes including parens. Mode transition lives in the ops wrapper.
  */
-export function changeAroundParen(
+function changeAroundParen(
   buffer: FunctionalTextBuffer,
   line: number,
   column: number
@@ -711,7 +705,7 @@ export function changeAroundParen(
  * Delete inner brace (di{)
  * Deletes inside braces and returns new buffer
  */
-export function deleteInnerBrace(
+function deleteInnerBrace(
   buffer: FunctionalTextBuffer,
   line: number,
   column: number
@@ -746,7 +740,7 @@ export function deleteInnerBrace(
  * Change inner brace (ci{)
  * Deletes inside braces and returns new buffer
  */
-export function changeInnerBrace(
+function changeInnerBrace(
   buffer: FunctionalTextBuffer,
   line: number,
   column: number
@@ -781,7 +775,7 @@ export function changeInnerBrace(
  * Delete around brace (da})
  * Deletes including braces and returns new buffer
  */
-export function deleteAroundBrace(
+function deleteAroundBrace(
   buffer: FunctionalTextBuffer,
   line: number,
   column: number
@@ -814,7 +808,7 @@ export function deleteAroundBrace(
  * Change around brace (ca})
  * Deletes including braces. Mode transition lives in the ops wrapper.
  */
-export function changeAroundBrace(
+function changeAroundBrace(
   buffer: FunctionalTextBuffer,
   line: number,
   column: number
@@ -826,7 +820,7 @@ export function changeAroundBrace(
  * Delete inner bracket (di])
  * Deletes inside square brackets and returns new buffer
  */
-export function deleteInnerBracket(
+function deleteInnerBracket(
   buffer: FunctionalTextBuffer,
   line: number,
   column: number
@@ -861,7 +855,7 @@ export function deleteInnerBracket(
  * Change inner bracket (ci])
  * Deletes inside brackets. Mode transition lives in the ops wrapper.
  */
-export function changeInnerBracket(
+function changeInnerBracket(
   buffer: FunctionalTextBuffer,
   line: number,
   column: number
@@ -873,7 +867,7 @@ export function changeInnerBracket(
  * Delete around bracket (da])
  * Deletes including brackets and returns new buffer
  */
-export function deleteAroundBracket(
+function deleteAroundBracket(
   buffer: FunctionalTextBuffer,
   line: number,
   column: number
@@ -906,7 +900,7 @@ export function deleteAroundBracket(
  * Change around bracket (ca])
  * Deletes including brackets. Mode transition lives in the ops wrapper.
  */
-export function changeAroundBracket(
+function changeAroundBracket(
   buffer: FunctionalTextBuffer,
   line: number,
   column: number
@@ -918,7 +912,7 @@ export function changeAroundBracket(
  * Delete inner angle bracket (di<)
  * Deletes inside angle brackets and returns new buffer
  */
-export function deleteInnerAngle(
+function deleteInnerAngle(
   buffer: FunctionalTextBuffer,
   line: number,
   column: number
@@ -953,7 +947,7 @@ export function deleteInnerAngle(
  * Change inner angle bracket (ci<)
  * Deletes inside angle brackets. Mode transition lives in the ops wrapper.
  */
-export function changeInnerAngle(
+function changeInnerAngle(
   buffer: FunctionalTextBuffer,
   line: number,
   column: number
@@ -965,7 +959,7 @@ export function changeInnerAngle(
  * Delete around angle bracket (da<)
  * Deletes including angle brackets and returns new buffer
  */
-export function deleteAroundAngle(
+function deleteAroundAngle(
   buffer: FunctionalTextBuffer,
   line: number,
   column: number
@@ -998,7 +992,7 @@ export function deleteAroundAngle(
  * Change around angle bracket (ca<)
  * Deletes including angle brackets. Mode transition lives in the ops wrapper.
  */
-export function changeAroundAngle(
+function changeAroundAngle(
   buffer: FunctionalTextBuffer,
   line: number,
   column: number
@@ -1085,7 +1079,7 @@ function findTagBounds(
  * Delete inner tag (dit)
  * Deletes inside HTML/XML tags and returns new buffer
  */
-export function deleteInnerTag(
+function deleteInnerTag(
   buffer: FunctionalTextBuffer,
   line: number,
   column: number
@@ -1127,7 +1121,7 @@ export function deleteInnerTag(
  * Change inner tag (cit)
  * Clears tag contents. Mode transition lives in the ops wrapper.
  */
-export function changeInnerTag(
+function changeInnerTag(
   buffer: FunctionalTextBuffer,
   line: number,
   column: number
@@ -1139,7 +1133,7 @@ export function changeInnerTag(
  * Delete around tag (dat)
  * Deletes opening tag, contents, and closing tag.
  */
-export function deleteAroundTag(
+function deleteAroundTag(
   buffer: FunctionalTextBuffer,
   line: number,
   column: number
@@ -1178,10 +1172,175 @@ export function deleteAroundTag(
  * Deletes opening tag, contents, and closing tag.
  * Mode transition lives in the ops wrapper.
  */
-export function changeAroundTag(
+function changeAroundTag(
   buffer: FunctionalTextBuffer,
   line: number,
   column: number
 ): Either<string, FunctionalTextBuffer> {
   return deleteAroundTag(buffer, line, column);
+}
+
+/**
+ * Compute a Vim text-object region WITHOUT mutating the buffer (SPEC-069
+ * Phase 2). Reuses the same find* helpers — and the same count-extension
+ * loops — as delete/change inner/around word, so the region handed to
+ * vim-apply-region is byte-identical to what the legacy per-class functions
+ * delete. This unifies operator×text-object dispatch in operators.tlisp:
+ * d/c behave exactly as before and y now yanks (yiw/yaw/yi"/ya)/yit).
+ *
+ * CLASS-CHAR selects the object: w (word), " ' (quotes), ( ) { } [ ] < >
+ * (paired delimiters), t (tag). INNER picks the inner ("i") vs around ("a")
+ * variant. COUNT extends word text-objects across N objects (d2iw / y3aw),
+ * matching deleteInnerWord/deleteAroundWord; paired-delimiter and tag objects
+ * ignore it (their legacy functions take no count).
+ *
+ * Returns the half-open region [(start) .. (end)) plus `wise` of "char"
+ * (every current text-object is char-wise). On failure returns Left so the
+ * caller can surface "Unsupported text-object combo".
+ */
+function textObjectRegion(
+  buffer: FunctionalTextBuffer,
+  line: number,
+  column: number,
+  classChar: string,
+  inner: string,
+  count: number = 1
+): Either<string, { start: Position; end: Position; wise: "char" | "line" }> {
+  const contentResult = buffer.getContent();
+  if (Either.isLeft(contentResult)) {
+    return Either.left(contentResult.left);
+  }
+  const content = contentResult.right;
+  const isInner = inner !== "a";
+  const safeCount = Math.max(1, Math.floor(count));
+
+  // Word text-object (w) — mirrors deleteInnerWord / deleteAroundWord exactly.
+  if (classChar === "w") {
+    if (content.length === 0) {
+      return Either.left("Buffer is empty");
+    }
+    const startResult = findWordStart(content, line, column);
+    if (Either.isLeft(startResult)) {
+      return Either.left(startResult.left);
+    }
+    const endFinder = isInner ? findWordEnd : findWordEndWithSpace;
+    const endResult = endFinder(content, line, column);
+    if (Either.isLeft(endResult)) {
+      return Either.left(endResult.left);
+    }
+    const start = startResult.right;
+    let end = endResult.right;
+    const lines = content.split("\n");
+    const lineText = lines[line] ?? "";
+    if (!isInner && end > lineText.length) {
+      end = lineText.length;
+    }
+    for (let i = 1; i < safeCount; i++) {
+      while (end < lineText.length && isWhitespace(lineText[end]!)) end++;
+      while (end < lineText.length && isWordChar(lineText[end]!)) end++;
+      if (!isInner) {
+        while (end < lineText.length && isWhitespace(lineText[end]!)) end++;
+      }
+    }
+    if (!isInner && end > lineText.length) {
+      end = lineText.length;
+    }
+    return Either.right({
+      start: { line, column: start },
+      end: { line, column: end },
+      wise: "char",
+    });
+  }
+
+  // Quote text-objects (" ') — inner = (start+1, end), around = (start, end+1).
+  if (classChar === '"' || classChar === "'") {
+    const match = findMatchingQuote(content, line, column, classChar);
+    if (Either.isLeft(match)) {
+      return Either.left(match.left);
+    }
+    const { start, end } = match.right;
+    return Either.right({
+      start: { line, column: isInner ? start + 1 : start },
+      end: { line, column: isInner ? end : end + 1 },
+      wise: "char",
+    });
+  }
+
+  // Paired-delimiter text-objects ( ) { } [ ] < > — same inner/around split.
+  const pairs: Record<string, [string, string]> = {
+    "(": ["(", ")"], ")": ["(", ")"],
+    "{": ["{", "}"], "}": ["{", "}"],
+    "[": ["[", "]"], "]": ["[", "]"],
+    "<": ["<", ">"], ">": ["<", ">"],
+  };
+  const pair = pairs[classChar];
+  if (pair) {
+    const match = findMatchingParen(content, line, column, pair[0]!, pair[1]!);
+    if (Either.isLeft(match)) {
+      return Either.left(match.left);
+    }
+    const { start, end } = match.right;
+    return Either.right({
+      start: { line, column: isInner ? start + 1 : start },
+      end: { line, column: isInner ? end : end + 1 },
+      wise: "char",
+    });
+  }
+
+  // Tag text-object (t) — inner = content between tags, around = whole element.
+  if (classChar === "t") {
+    const match = findTagBounds(content, line, column);
+    if (Either.isLeft(match)) {
+      return Either.left(match.left);
+    }
+    if (match.right === null) {
+      return Either.left("Self-closing tag has no content");
+    }
+    const { start, end, outerStart, outerEnd } = match.right;
+    return Either.right({
+      start: { line, column: isInner ? start : outerStart },
+      end: { line, column: isInner ? end : outerEnd },
+      wise: "char",
+    });
+  }
+
+  return Either.left(`Unknown text-object class: ${classChar}`);
+}
+
+  return {
+    deleteInnerWord,
+    deleteAroundWord,
+    changeInnerWord,
+    changeAroundWord,
+    deleteInnerSingleQuote,
+    deleteAroundSingleQuote,
+    deleteInnerDoubleQuote,
+    deleteAroundDoubleQuote,
+    changeInnerSingleQuote,
+    changeAroundSingleQuote,
+    changeInnerDoubleQuote,
+    changeAroundDoubleQuote,
+    deleteInnerParen,
+    changeInnerParen,
+    deleteAroundParen,
+    changeAroundParen,
+    deleteInnerBrace,
+    changeInnerBrace,
+    deleteAroundBrace,
+    changeAroundBrace,
+    deleteInnerBracket,
+    changeInnerBracket,
+    deleteAroundBracket,
+    changeAroundBracket,
+    deleteInnerAngle,
+    changeInnerAngle,
+    deleteAroundAngle,
+    changeAroundAngle,
+    deleteInnerTag,
+    changeInnerTag,
+    deleteAroundTag,
+    changeAroundTag,
+    textObjectRegion,
+    deleteInnerWordState,
+  };
 }

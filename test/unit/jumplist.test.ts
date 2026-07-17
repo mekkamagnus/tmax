@@ -142,3 +142,41 @@ describe("SPEC-044 Phase 4.E — jumplist (C-o / C-i)", () => {
     expect(text).toBe("hello\nworld");
   });
 });
+
+// SPEC-067 — verify the jumplist BINDINGS route C-o / C-i through the
+// normal-mode handler. Jump positions are seeded via (vim-jump-record) because
+// jump motions do not auto-record in tmax (auto-recording is out of scope for
+// this spec — Track 1 only binds + tests the existing jumplist commands).
+describe("SPEC-067 — jumplist keypress bindings", () => {
+  async function press(editor: Editor, keys: string): Promise<void> {
+    for (const key of keys) {
+      await editor.handleKey(key);
+    }
+  }
+
+  function cursor(editor: Editor): [number, number] {
+    const pos = rightValue(editor.getInterpreter().execute("(cursor-position)") as any).value as V[];
+    return [Number(pos[0]!.value), Number(pos[1]!.value)];
+  }
+
+  test("C-o jumps back to the previous recorded position", async () => {
+    const editor = await createStartedEditor("aaa\nbbb\nccc");
+    editor.getInterpreter().execute("(cursor-move 0 0)");
+    editor.getInterpreter().execute("(vim-jump-record)");
+    editor.getInterpreter().execute("(cursor-move 2 2)");
+    editor.getInterpreter().execute("(vim-jump-record)");
+    await editor.handleKey("C-o");
+    expect(cursor(editor)).toEqual([0, 0]);
+  });
+
+  test("C-i jumps forward after a C-o", async () => {
+    const editor = await createStartedEditor("aaa\nbbb\nccc");
+    editor.getInterpreter().execute("(cursor-move 0 0)");
+    editor.getInterpreter().execute("(vim-jump-record)");
+    editor.getInterpreter().execute("(cursor-move 2 2)");
+    editor.getInterpreter().execute("(vim-jump-record)");
+    await editor.handleKey("C-o");
+    await editor.handleKey("C-i");
+    expect(cursor(editor)).toEqual([2, 2]);
+  });
+});

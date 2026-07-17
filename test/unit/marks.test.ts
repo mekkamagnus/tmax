@@ -156,3 +156,41 @@ describe("SPEC-044 Phase 4.A — Vim marks", () => {
     expect(bufferText(editor)).toBe("hello\nworld");
   });
 });
+
+// SPEC-067 — verify the marks BINDINGS route ma / `a / 'a through the
+// normal-mode handler (the eval-based tests above call vim-mark-* directly).
+describe("SPEC-067 — marks keypress bindings", () => {
+  async function press(editor: Editor, keys: string): Promise<void> {
+    for (const key of keys) {
+      await editor.handleKey(key);
+    }
+  }
+
+  function line(editor: Editor): number {
+    return Number(rightValue(editor.getInterpreter().execute("(cursor-line)") as any).value);
+  }
+
+  function col(editor: Editor): number {
+    return Number(rightValue(editor.getInterpreter().execute("(cursor-column)") as any).value);
+  }
+
+  test("ma sets a mark and `a jumps back to the exact position", async () => {
+    const editor = await createStartedEditor("hello\nworld\nfoo");
+    editor.getInterpreter().execute("(cursor-move 2 2)");
+    await press(editor, "ma");
+    editor.getInterpreter().execute("(cursor-move 0 0)");
+    await press(editor, "`a");
+    expect(line(editor)).toBe(2);
+    expect(col(editor)).toBe(2);
+  });
+
+  test("'a jumps to the mark's line at first non-blank", async () => {
+    const editor = await createStartedEditor("hello\n  world\nfoo");
+    editor.getInterpreter().execute("(cursor-move 1 4)");
+    await press(editor, "ma");
+    editor.getInterpreter().execute("(cursor-move 0 0)");
+    await press(editor, "'a");
+    expect(line(editor)).toBe(1);
+    expect(col(editor)).toBe(2); // first non-blank of "  world"
+  });
+});

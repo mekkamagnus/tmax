@@ -5,6 +5,7 @@
 
 import { describe, test, expect, beforeEach } from "bun:test";
 import { createAstOps, type AstOpsDeps } from "../../src/editor/api/ast-ops.ts";
+import { createEditorRuntimeCaches } from "../../src/editor/runtime/caches.ts";
 import { createString, createNumber } from "../../src/tlisp/values.ts";
 import type { TLispValue as TV } from "../../src/tlisp/types.ts";
 import { Either, type Either as EitherType } from "../../src/utils/task-either.ts";
@@ -17,6 +18,7 @@ function unwrap(result: EitherType<AppError, TV>): TV {
 
 function makeDeps(overrides: Partial<AstOpsDeps> = {}): AstOpsDeps {
   return {
+    caches: createEditorRuntimeCaches(),
     getBufferName: () => "test.tlisp",
     getBufferText: () => "(defun greet (name) (print name))",
     getCursorLine: () => 0,

@@ -15,14 +15,8 @@ import { describe, test, expect, beforeEach } from "bun:test";
 import { FunctionalTextBufferImpl } from "../../src/core/buffer.ts";
 import type { FunctionalTextBuffer } from "../../src/core/types.ts";
 import { Either } from "../../src/utils/task-either.ts";
-import { resetKillRing, killRingList } from "../../src/editor/api/kill-ring.ts";
+import { createEditorSession } from "../../src/editor/functional/domain-state.ts";
 import {
-  resetRegisterState,
-  getRegister,
-  setRegister,
-  registerYank,
-  registerDelete,
-  registerPaste,
   getRegisterIndex,
   REGISTER_NAMED_START,
   REGISTER_NAMED_END
@@ -30,6 +24,18 @@ import {
 
 describe("US-1.9.3 - Evil Integration", () => {
   let buffer: FunctionalTextBuffer;
+
+  // CHORE-44 Change 1: registers + kill ring are per-editor session state. Bind
+  // one session and re-expose the legacy free-function names as wrappers.
+  const session = createEditorSession();
+  const resetKillRing = () => session.killRing.reset();
+  const killRingList = () => session.killRing.list();
+  const resetRegisterState = () => session.registers.reset();
+  const getRegister = (r: string) => session.registers.get(r);
+  const setRegister = (r: string, c: string, a?: boolean) => session.registers.set(r, c, a);
+  const registerYank = (t: string) => session.registers.yank(t);
+  const registerDelete = (t: string, isLine?: boolean) => session.registers.del(t, isLine);
+  const registerPaste = (r: string) => session.registers.paste(r);
 
   beforeEach(() => {
     // Reset all register state

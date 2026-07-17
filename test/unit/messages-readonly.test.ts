@@ -1,35 +1,20 @@
 import { describe, expect, test } from "bun:test";
 import { FunctionalTextBufferImpl } from "../../src/core/buffer";
-import { createEditorAPI, type TlispEditorState } from "../../src/editor/tlisp-api";
+import { createEditorAPI } from "../../src/editor/tlisp-api";
 import { createString } from "../../src/tlisp/values";
 import { Either } from "../../src/utils/task-either";
-import { expectDefined, expectRight } from "../helpers/editor-fixture.ts";
-import { MockFileSystem } from "../mocks/filesystem.ts";
-import { MockTerminal } from "../mocks/terminal.ts";
+import { expectDefined, expectRight, createTestAPIContext } from "../helpers/editor-fixture.ts";
 
-function createState(): TlispEditorState {
+function createState() {
   const scratchBuffer = FunctionalTextBufferImpl.create("");
   const messagesBuffer = FunctionalTextBufferImpl.create("existing messages\n");
-  return {
+  return createTestAPIContext({
     currentBuffer: messagesBuffer,
     buffers: new Map([
       ["default", scratchBuffer],
       ["*Messages*", messagesBuffer],
     ]),
-    cursorLine: 0,
-    cursorColumn: 0,
-    terminal: new MockTerminal(),
-    filesystem: new MockFileSystem(),
-    mode: "normal",
-    lastCommand: "",
-    statusMessage: "",
-    viewportTop: 0,
-    viewportLeft: 0,
-    commandLine: "",
-    spacePressed: false,
-    mxCommand: "",
-    cursorFocus: "buffer",
-  };
+  });
 }
 
 describe("SPEC-016: *Messages* buffer read-only guard", () => {

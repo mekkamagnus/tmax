@@ -11,7 +11,7 @@
 import { describe, test, expect, beforeEach } from "bun:test";
 import { expectRight } from "../helpers/editor-fixture.ts";
 import { Either } from "../../src/utils/task-either.ts";
-import { createUndoRedoOps, resetUndoRedoState, setInitialBuffer } from "../../src/editor/api/undo-redo-ops.ts";
+import { createUndoRedoOps } from "../../src/editor/api/undo-redo-ops.ts";
 import type { FunctionalTextBuffer } from "../../src/core/types.ts";
 import type { TLispValue } from "../../src/tlisp/types.ts";
 
@@ -127,14 +127,16 @@ describe("Undo/Redo Operations", () => {
   let currentBuffer: FunctionalTextBuffer | null;
   let undoRedoOps: Map<string, (args: any[]) => Either<any, any>>;
   let currentStatusMessage: string;
+  // CHORE-44 Change 1: undo state is per-editor; reset/setInitialBuffer come
+  // from the factory result (bound to this editor's history).
+  let resetUndoRedoState: () => void;
+  let setInitialBuffer: (buffer: FunctionalTextBuffer) => void;
 
   beforeEach(() => {
-    // Reset state before each test
-    resetUndoRedoState();
     currentBuffer = new MockBuffer("Hello world\nLine 2\nLine 3") as FunctionalTextBuffer;
     currentStatusMessage = "";
 
-    undoRedoOps = createUndoRedoOps(
+    const undoRedoCore = createUndoRedoOps(
       () => currentBuffer,
       (buffer) => { currentBuffer = buffer; },
       () => 0,  // cursorLine
@@ -144,6 +146,10 @@ describe("Undo/Redo Operations", () => {
       () => currentStatusMessage,  // statusMessage
       (msg) => { currentStatusMessage = msg; }  // setStatusMessage
     );
+    undoRedoOps = undoRedoCore.api;
+    resetUndoRedoState = undoRedoCore.reset;
+    setInitialBuffer = undoRedoCore.setInitialBuffer;
+    resetUndoRedoState();
   });
 
   describe("Basic undo functionality", () => {
@@ -414,7 +420,7 @@ describe("Undo/Redo Operations", () => {
       let savedLine = 5;
       let savedColumn = 10;
 
-      const ops = createUndoRedoOps(
+      const { api: ops } = createUndoRedoOps(
         () => currentBuffer,
         (buffer) => { currentBuffer = buffer; },
         () => savedLine,
@@ -460,7 +466,7 @@ describe("Undo/Redo Operations", () => {
       let savedLine = 0;
       let savedColumn = 0;
 
-      const ops = createUndoRedoOps(
+      const { api: ops } = createUndoRedoOps(
         () => currentBuffer,
         (buffer) => { currentBuffer = buffer; },
         () => savedLine,
@@ -508,7 +514,7 @@ describe("Undo/Redo Operations", () => {
       let savedLine = 3;
       let savedColumn = 7;
 
-      const ops = createUndoRedoOps(
+      const { api: ops } = createUndoRedoOps(
         () => currentBuffer,
         (buffer) => { currentBuffer = buffer; },
         () => savedLine,
@@ -551,7 +557,7 @@ describe("Undo/Redo Operations", () => {
       let savedLine = 0;
       let savedColumn = 0;
 
-      const ops = createUndoRedoOps(
+      const { api: ops } = createUndoRedoOps(
         () => currentBuffer,
         (buffer) => { currentBuffer = buffer; },
         () => savedLine,

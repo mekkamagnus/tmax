@@ -35,21 +35,6 @@ import {
 } from "../../error/types.ts";
 
 /**
- * Current directory path being displayed
- */
-let diredPath: string = "";
-
-/**
- * Set of line numbers marked for deletion
- */
-let diredMarkedForDelete: Set<number> = new Set();
-
-/**
- * Whether hidden files are shown
- */
-let showHidden: boolean = false;
-
-/**
  * Extract a value by key from a T-Lisp plist (alternating symbol/value list)
  */
 function plistGet(entries: TLispValue[], key: string): TLispValue | undefined {
@@ -104,6 +89,11 @@ export function createDiredOps(
   setCurrentBuffer: (buffer: FunctionalTextBuffer) => void,
   buffers: Map<string, FunctionalTextBuffer>
 ): Map<string, TLispFunctionImpl> {
+  // CHORE-44 Change 1: per-editor Dired state (was module-global).
+  let diredPath: string = "";
+  let diredMarkedForDelete: Set<number> = new Set();
+  let showHidden: boolean = false;
+
   // CHORE-39 Phase 4: cursor/buffer reads flow through the State monad against
   // EditorModel; writes stay on the supplied setter to preserve side effects.
   const getCursorLine = (): number => runModel(access, readModelField("cursorPosition")).line;

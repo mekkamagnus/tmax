@@ -22,17 +22,12 @@ import {
   createValidationError,
   AppError
 } from "../../error/types.ts";
-import {
-  killRingRotate,
-  killRingYank,
-  resetKillRing
-} from "./kill-ring.ts";
-import { getYankRegister } from "./yank-ops.ts";
+import type { KillRingOps } from "./kill-ring.ts";
 
 /**
  * Yank pop state for tracking paste operations
  */
-interface YankPopState {
+export interface YankPopState {
   active: boolean;           // True if last command was a paste
   pastedText: string;        // The text that was pasted
   pastePosition: Position;   // Where the paste occurred
@@ -40,214 +35,133 @@ interface YankPopState {
 }
 
 /**
- * Global yank pop state
- * Reset after any non-paste command
+ * Construct a fresh, independent yank-pop state.
  */
-let yankPopState: YankPopState = {
-  active: false,
-  pastedText: "",
-  pastePosition: { line: 0, column: 0 },
-  pastedLength: 0
-};
-
-/**
- * Reset yank pop state
- * Called after any non-paste command
- */
-export function resetYankPopState(): void {
-  yankPopState = {
+export function createYankPopState(): YankPopState {
+  return {
     active: false,
     pastedText: "",
     pastePosition: { line: 0, column: 0 },
-    pastedLength: 0
+    pastedLength: 0,
   };
 }
 
 /**
- * Get the current yank pop state
+ * Bound yank-pop operations over one (per-editor) state instance, wired to the
+ * same editor's kill ring.
  */
-export function getYankPopState(): YankPopState {
-  return { ...yankPopState };
+export interface YankPopOps {
+  activate(pastedText: string, pastePosition: Position): void;
+  reset(): void;
+  isActive(): boolean;
+  pastedText(): string;
+  perform(currentBuffer: FunctionalTextBuffer, setCurrentBuffer: (buffer: FunctionalTextBuffer) => void): Either<AppError, null>;
 }
 
 /**
- * Set yank pop state as active after a paste operation
- * @param pastedText - The text that was pasted
- * @param pastePosition - Where the paste occurred
- */
-export function activateYankPopState(pastedText: string, pastePosition: Position): void {
-  yankPopState = {
-    active: true,
-    pastedText,
-    pastePosition,
-    pastedLength: pastedText.length
-  };
-}
-
-/**
- * Perform yank-pop operation
- * Replaces the last pasted text with the next item from the kill ring
- * Only works if yank-pop state is active (last command was a paste)
- *
- * @param currentBuffer - Current buffer
- * @param setCurrentBuffer - Function to set current buffer
- * @returns Either error or nil
- */
-export function performYankPop(
-  currentBuffer: FunctionalTextBuffer,
-  setCurrentBuffer: (buffer: FunctionalTextBuffer) => void
-): Either<AppError, null> {
-  // Check if yank-pop is active (last command was a paste)
-  if (!yankPopState.active) {
-    return Either.right(null); // Do nothing if no recent paste
-  }
-
-  // Rotate kill ring to get next item
-  killRingRotate();
-  const nextItem = killRingYank();
-
-  // If kill ring is empty, do nothing
-  if (nextItem === "") {
-    return Either.right(null);
-  }
-
-  // Delete the previously pasted text
-  const startPos = yankPopState.pastePosition;
-  const endPos = calculateEndPosition(startPos, yankPopState.pastedText);
-
-  const deleteResult = currentBuffer.delete({
-    start: startPos,
-    end: endPos
-  });
-
-  if (Either.isLeft(deleteResult)) {
-    return Either.left(createBufferError(
-      'InvalidOperation',
-      `Failed to delete previous paste: ${deleteResult.left}`
-    ));
-  }
-
-  let buffer = deleteResult.right;
-
-  // Insert the new text from kill ring
-  const insertResult = buffer.insert(startPos, nextItem);
-
-  if (Either.isLeft(insertResult)) {
-    return Either.left(createBufferError(
-      'InvalidOperation',
-      `Failed to insert new text: ${insertResult.left}`
-    ));
-  }
-
-  // Update buffer
-  setCurrentBuffer(insertResult.right);
-
-  // Update yank pop state with new pasted text
-  yankPopState.pastedText = nextItem;
-  yankPopState.pastedLength = nextItem.length;
-
-  return Either.right(null);
-}
-
-/**
- * Calculate end position based on start position and pasted text
- * Handles multi-line pastes correctly
+ * Calculate end position based on start position and pasted text.
+ * Handles multi-line pastes correctly.
  */
 function calculateEndPosition(startPos: Position, pastedText: string): Position {
   const lines = pastedText.split('\n');
-
   if (lines.length === 1) {
-    // Single line paste
-    return {
-      line: startPos.line,
-      column: startPos.column + pastedText.length
-    };
-  } else {
-    // Multi-line paste
-    // End position is at the end of the last line
-    // Column is the length of the last line
-    // Line is start line + number of newlines
-    return {
-      line: startPos.line + lines.length - 1,
-      column: lines[lines.length - 1]!.length
-    };
+    return { line: startPos.line, column: startPos.column + pastedText.length };
   }
+  return {
+    line: startPos.line + lines.length - 1,
+    column: lines[lines.length - 1]!.length,
+  };
+}
+
+export function bindYankPop(state: YankPopState, killRing: KillRingOps): YankPopOps {
+  return {
+    activate: (pastedText: string, pastePosition: Position): void => {
+      state.active = true;
+      state.pastedText = pastedText;
+      state.pastePosition = pastePosition;
+      state.pastedLength = pastedText.length;
+    },
+    reset: (): void => {
+      state.active = false;
+      state.pastedText = "";
+      state.pastePosition = { line: 0, column: 0 };
+      state.pastedLength = 0;
+    },
+    isActive: (): boolean => state.active,
+    pastedText: (): string => state.pastedText,
+    perform: (
+      currentBuffer: FunctionalTextBuffer,
+      setCurrentBuffer: (buffer: FunctionalTextBuffer) => void
+    ): Either<AppError, null> => {
+      if (!state.active) {
+        return Either.right(null);
+      }
+      killRing.rotate();
+      const nextItem = killRing.yank();
+      if (nextItem === "") {
+        return Either.right(null);
+      }
+      const startPos = state.pastePosition;
+      const endPos = calculateEndPosition(startPos, state.pastedText);
+      const deleteResult = currentBuffer.delete({ start: startPos, end: endPos });
+      if (Either.isLeft(deleteResult)) {
+        return Either.left(createBufferError('InvalidOperation', `Failed to delete previous paste: ${deleteResult.left}`));
+      }
+      const buffer = deleteResult.right;
+      const insertResult = buffer.insert(startPos, nextItem);
+      if (Either.isLeft(insertResult)) {
+        return Either.left(createBufferError('InvalidOperation', `Failed to insert new text: ${insertResult.left}`));
+      }
+      setCurrentBuffer(insertResult.right);
+      state.pastedText = nextItem;
+      state.pastedLength = nextItem.length;
+      return Either.right(null);
+    },
+  };
 }
 
 /**
- * Create yank pop API functions for T-Lisp
- * @returns Map of yank pop function names to implementations
+ * Create yank pop API functions for T-Lisp, bound to one editor's yank-pop state.
  */
 export function createYankPopOps(
   access: EditorModelAccess,
+  ops: YankPopOps,
   setCurrentBuffer: (buffer: FunctionalTextBuffer) => void
 ): Map<string, TLispFunctionImpl> {
-  // CHORE-39 Phase 4: cursor/buffer reads flow through the State monad against
+  // CHORE-39 Phase 4: current-buffer read flows through the State monad against
   // EditorModel; writes stay on the supplied setter to preserve side effects.
-  const getCursorLine = (): number => runModel(access, readModelField("cursorPosition")).line;
-  const getCursorColumn = (): number => runModel(access, readModelField("cursorPosition")).column;
   const getCurrentBuffer = (): FunctionalTextBuffer | null =>
     runModel(access, readModelField("currentBuffer")) ?? null;
   const api = new Map<string, TLispFunctionImpl>();
 
-  /**
-   * yank-pop - Replace yanked text with previous kill-ring item (M-y)
-   * Usage: (yank-pop)
-   *
-   * Only works immediately after a paste operation.
-   * Replaces the last pasted text with the next item from the kill ring.
-   */
   api.set("yank-pop", (args: TLispValue[]): Either<AppError, TLispValue> => {
     if (args.length !== 0) {
       return Either.left(createValidationError('ConstraintViolation', 'yank-pop requires 0 arguments', 'args', args, '0 arguments'));
     }
-
     const currentBuffer = getCurrentBuffer();
     const bufferValidation = validateBufferExists(currentBuffer);
     if (Either.isLeft(bufferValidation)) {
       return Either.left(bufferValidation.left);
     }
-
-    // Perform yank-pop
-    const result = performYankPop(currentBuffer!, setCurrentBuffer);
-
+    const result = ops.perform(currentBuffer!, setCurrentBuffer);
     if (Either.isLeft(result)) {
       return Either.left(result.left);
     }
-
-    // Return the new text from kill ring
-    const yankedText = getYankPopState().pastedText;
-    return Either.right(createString(yankedText));
+    return Either.right(createString(ops.pastedText()));
   });
 
-  /**
-   * yank-pop-active - Check if yank-pop is active
-   * Usage: (yank-pop-active)
-   *
-   * Returns true if the last command was a paste operation.
-   */
   api.set("yank-pop-active", (args: TLispValue[]): Either<AppError, TLispValue> => {
     if (args.length !== 0) {
       return Either.left(createValidationError('ConstraintViolation', 'yank-pop-active requires 0 arguments', 'args', args, '0 arguments'));
     }
-
-    const state = getYankPopState();
-    return Either.right({ type: 'boolean', value: state.active });
+    return Either.right({ type: 'boolean', value: ops.isActive() });
   });
 
-  /**
-   * yank-pop-reset - Reset yank-pop state
-   * Usage: (yank-pop-reset)
-   *
-   * Normally called automatically after non-paste commands.
-   * Can be called manually to cancel yank-pop.
-   */
   api.set("yank-pop-reset", (args: TLispValue[]): Either<AppError, TLispValue> => {
     if (args.length !== 0) {
       return Either.left(createValidationError('ConstraintViolation', 'yank-pop-reset requires 0 arguments', 'args', args, '0 arguments'));
     }
-
-    resetYankPopState();
+    ops.reset();
     return Either.right(createNil());
   });
 

@@ -63,6 +63,93 @@ export function createCursorOps(
     return Either.right(createList([createNumber(getCursorLine()), createNumber(getCursorColumn())]));
   });
 
+  /**
+   * scan-number-on-line - SPEC-067 factual scan for vim C-a/C-x.
+   * Finds the decimal number at or after COL on LINE. If the cursor sits on a
+   * digit, the whole digit run containing it is used; otherwise scans forward.
+   * A leading '-' counts as part of the number only when preceded by a
+   * non-digit (so "-5" is negative, but "5-3"'s '-' does not invert the 3).
+   * This is character-scanning on a line (a TS primitive per the editor C/Lisp
+   * split); the +/-count decision and replacement live in T-Lisp.
+   * Usage: (scan-number-on-line LINE COL) → (start-col end-col-excl text) | nil
+   */
+  api.set("scan-number-on-line", (args: TLispValue[]): Either<AppError, TLispValue> => {
+    const argsValidation = validateArgsCount(args, 2, "scan-number-on-line");
+    if (Either.isLeft(argsValidation)) {
+      return Either.left(argsValidation.left);
+    }
+
+    const lineArg = args[0]!;
+    const lineTypeValidation = validateArgType(lineArg, "number", 0, "scan-number-on-line");
+    if (Either.isLeft(lineTypeValidation)) {
+      return Either.left(lineTypeValidation.left);
+    }
+    const colArg = args[1]!;
+    const colTypeValidation = validateArgType(colArg, "number", 1, "scan-number-on-line");
+    if (Either.isLeft(colTypeValidation)) {
+      return Either.left(colTypeValidation.left);
+    }
+
+    const line = lineArg.value as number;
+    const col = colArg.value as number;
+    const currentBuffer = getCurrentBuffer();
+    const bufferValidation = validateBufferExists(currentBuffer);
+    if (Either.isLeft(bufferValidation)) {
+      return Either.left(bufferValidation.left);
+    }
+
+    const contentResult = currentBuffer!.getContent();
+    if (Either.isLeft(contentResult)) {
+      return Either.left(createBufferError('InvalidOperation', `Failed to get buffer content: ${contentResult.left}`));
+    }
+
+    const lines = contentResult.right.split('\n');
+    if (line < 0 || line >= lines.length) {
+      return Either.right(createNil());
+    }
+
+    const text = lines[line]!;
+    const isDigit = (c: string | undefined): boolean => !!c && c >= '0' && c <= '9';
+
+    let i = col;
+    if (i < 0) i = 0;
+    if (!isDigit(text[i])) {
+      // Cursor not on a digit — scan forward for the first digit.
+      while (i < text.length && !isDigit(text[i])) {
+        i++;
+      }
+      if (i >= text.length) {
+        return Either.right(createNil()); // no number on the rest of the line
+      }
+    } else {
+      // Cursor on a digit — back up to the first digit of this run.
+      while (i > 0 && isDigit(text[i - 1]!)) {
+        i--;
+      }
+    }
+
+    const digitStart = i;
+    let end = digitStart;
+    while (end < text.length && isDigit(text[end])) {
+      end++;
+    }
+
+    // A leading '-' belongs to the number only when preceded by a non-digit.
+    let start = digitStart;
+    if (digitStart > 0 && text[digitStart - 1] === '-') {
+      const prev = digitStart - 2 >= 0 ? text[digitStart - 2]! : '';
+      if (!isDigit(prev)) {
+        start = digitStart - 1;
+      }
+    }
+
+    return Either.right(createList([
+      createNumber(start),
+      createNumber(end),
+      createString(text.slice(start, end))
+    ]));
+  });
+
   api.set("cursor-move", (args: TLispValue[]): Either<AppError, TLispValue> => {
     const argsValidation = validateArgsCount(args, 2, "cursor-move");
     if (Either.isLeft(argsValidation)) {

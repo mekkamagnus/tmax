@@ -24,9 +24,7 @@ import {
   createBufferError,
   AppError
 } from "../../error/types.ts";
-import { setDeleteRegister } from "./delete-ops.ts";
-import { setYankRegister } from "./yank-ops.ts";
-import { registerDelete } from "./evil-integration.ts";
+import type { EditorSession } from "../functional/domain-state.ts";
 
 /**
  * Visual mode selection type
@@ -43,29 +41,26 @@ export interface VisualSelection {
 }
 
 /**
- * Visual mode state (module-level)
+ * Per-editor visual selection accessor holder (CHORE-44 Change 1). The factory
+ * installs get/set/clear closures over its local selection so external readers
+ * (`session.visual`) observe the live per-editor value without module globals.
  */
-let visualSelection: VisualSelection | null = null;
-
-/**
- * Get the current visual selection
- */
-export function getVisualSelection(): VisualSelection | null {
-  return visualSelection;
+export interface VisualOps {
+  get: () => VisualSelection | null;
+  set: (selection: VisualSelection | null) => void;
+  clear: () => void;
 }
 
 /**
- * Set the visual selection
+ * Construct a fresh visual accessor holder (null selection).
  */
-export function setVisualSelection(selection: VisualSelection | null): void {
-  visualSelection = selection;
-}
-
-/**
- * Clear the visual selection
- */
-export function clearVisualSelection(): void {
-  visualSelection = null;
+export function createVisualState(): VisualOps {
+  let selection: VisualSelection | null = null;
+  return {
+    get: () => selection,
+    set: (s: VisualSelection | null) => { selection = s; },
+    clear: () => { selection = null; },
+  };
 }
 
 /**
@@ -83,6 +78,7 @@ export function clearVisualSelection(): void {
  */
 export function createVisualOps(
   access: EditorModelAccess,
+  session: EditorSession,
   setBuffer: (buffer: FunctionalTextBuffer | null) => void,
   setCursorLine: (line: number) => void,
   setCursorColumn: (column: number) => void,
@@ -98,6 +94,13 @@ export function createVisualOps(
     runModel(access, readModelField("currentBuffer")) ?? null;
   const getMode = (): "normal" | "insert" | "visual" | "command" | "mx" | "replace" =>
     runModel(access, readModelField("mode"));
+  // CHORE-44 Change 1: per-editor visual selection (was module-global). The
+  // factory owns the selection locally; session.visual accessors are routed
+  // through it so external readers see the live value.
+  let visualSelection: VisualSelection | null = session.visual.get();
+  session.visual.get = () => visualSelection;
+  session.visual.set = (selection: VisualSelection | null) => { visualSelection = selection; };
+  session.visual.clear = () => { visualSelection = null; };
   const api = new Map<string, TLispFunctionImpl>();
 
   /**
@@ -318,8 +321,8 @@ export function createVisualOps(
     }
 
     // Store in delete register
-    setDeleteRegister(selectedText.right);
-    registerDelete(selectedText.right, visualSelection.mode === 'line');
+    session.deleteRegister.set(selectedText.right);
+    session.registers.del(selectedText.right, visualSelection.mode === 'line');
 
     // Delete the selected text
     const deleteResult = buffer.delete({ start, end });
@@ -384,7 +387,12 @@ export function createVisualOps(
     }
 
     // Store in yank register
-    setYankRegister(selectedText.right);
+    session.yankRegister.set(selectedText.right);
+    // Also populate the unnamed " register so (get-register ") and paste see
+    // the yanked text — mirrors visual-delete's registerDelete and vim semantics
+    // (every yank updates "). Without this, visual text-object yanks (viw y)
+    // were invisible to the canonical register read.
+    session.registers.set('"', selectedText.right);
 
     // Exit visual mode (without deleting)
     visualSelection = null;

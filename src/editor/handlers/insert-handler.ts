@@ -3,8 +3,8 @@
  * @description Insert mode key handler for the editor
  */
 
-import type { Editor } from "../editor.ts";
-import { resolveMapping } from "../editor.ts";
+import type { EditorDispatchPort } from "./editor-dispatch-port.ts";
+import { resolveMapping } from "../key-resolution.ts";
 import { log } from "../../utils/logger.ts";
 
 /**
@@ -14,7 +14,7 @@ import { log } from "../../utils/logger.ts";
  * @param normalizedKey - Normalized key string
  * @returns Promise that resolves when key handling is complete
  */
-export async function handleInsertMode(editor: Editor, key: string, normalizedKey: string): Promise<void> {
+export async function handleInsertMode(editor: EditorDispatchPort, key: string, normalizedKey: string): Promise<void> {
   const handlerLog = log.module('handlers').fn('handleInsertMode');
 
   // Log Escape key to return to normal mode
@@ -34,7 +34,7 @@ export async function handleInsertMode(editor: Editor, key: string, normalizedKe
     editor.executeCommand("(insert-newline)");
     // Auto-indent: set indent on the new line (cursor is now on it)
     try {
-      const line = editor.getModel().cursorPosition?.line ?? 0;
+      const line = (editor.getModel() as { cursorPosition?: { line: number } }).cursorPosition?.line ?? 0;
       editor.executeCommand(`(indent-apply-line ${line})`);
     } catch (_) {
       // No indent rules set — silently skip
@@ -62,6 +62,10 @@ export async function handleInsertMode(editor: Editor, key: string, normalizedKe
   }
   // Handle Escape key to return to normal mode
   else if (normalizedKey === "Escape") {
+    // SPEC-067: record last insert position as the "^" mark for `gi`.
+    // Done before SetMode while the cursor is still at the insert point.
+    // Wrapped so a recording failure can never break the return to normal.
+    try { editor.executeCommand("(vim-insert-remember-position)"); } catch (_) { /* mark recording is best-effort */ }
     editor.applyUpdate({ type: "SetMode", mode: "normal" });
     // Reset count prefix when switching modes (US-1.3.1)
     editor.resetCount();

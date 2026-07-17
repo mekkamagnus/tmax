@@ -6,6 +6,65 @@ import { MockTerminal } from "../mocks/terminal.ts";
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import type { EditorAPIContext } from "../../src/editor/runtime/editor-api-context.ts";
+import type { FunctionalTextBuffer } from "../../src/core/types.ts";
+import { FunctionalTextBufferImpl } from "../../src/core/buffer.ts";
+import { initialModel } from "../../src/editor/functional/model.ts";
+import { createEditorSession } from "../../src/editor/functional/domain-state.ts";
+import { createEditorRuntimeCaches } from "../../src/editor/runtime/caches.ts";
+
+/**
+ * CHORE-44 Change 2 — build a real `EditorAPIContext` for direct `createEditorAPI`
+ * unit tests. The model access projects the bridge fields (the former compat
+ * path, now in test infra only, never production). Overrides merge on top.
+ */
+export function createTestAPIContext(overrides: Partial<EditorAPIContext> = {}): EditorAPIContext {
+  const base = {
+    currentBuffer: FunctionalTextBufferImpl.create("") as FunctionalTextBuffer,
+    buffers: new Map<string, FunctionalTextBuffer>(),
+    cursorLine: 0,
+    cursorColumn: 0,
+    terminal: new MockTerminal(),
+    filesystem: new MockFileSystem(),
+    mode: "normal" as const,
+    lastCommand: "",
+    statusMessage: "",
+    viewportTop: 0,
+    viewportLeft: 0,
+    commandLine: "",
+    spacePressed: false,
+    mxCommand: "",
+    cursorFocus: "buffer" as const,
+    session: createEditorSession(),
+    caches: createEditorRuntimeCaches(),
+  };
+  const ctx: EditorAPIContext = { ...base, ...overrides } as EditorAPIContext;
+  ctx.access = {
+    getModel: () => ({
+      ...initialModel(),
+      currentBuffer: ctx.currentBuffer ?? undefined,
+      buffers: ctx.buffers,
+      cursorPosition: { line: ctx.cursorLine, column: ctx.cursorColumn },
+      mode: ctx.mode,
+      statusMessage: ctx.statusMessage,
+      commandLine: ctx.commandLine,
+      mxCommand: ctx.mxCommand,
+      cursorFocus: ctx.cursorFocus,
+      lastCommand: ctx.lastCommand,
+      currentFilename: ctx.currentFilename,
+      viewportTop: ctx.viewportTop,
+      viewportLeft: ctx.viewportLeft,
+    }),
+    applyModel: (m) => {
+      ctx.cursorLine = m.cursorPosition.line;
+      ctx.cursorColumn = m.cursorPosition.column;
+      ctx.mode = m.mode;
+      ctx.statusMessage = m.statusMessage;
+      if (m.currentBuffer !== undefined) ctx.currentBuffer = m.currentBuffer;
+    },
+  };
+  return ctx;
+}
 
 /** Isolate the SPEC-055 log file per editor instance so tail-load never reads
  *  the developer's real ~/.config/tmax/messages.log AND never carries entries

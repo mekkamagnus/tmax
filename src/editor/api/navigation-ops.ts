@@ -16,27 +16,17 @@ import {
 import { Either } from "../../utils/task-either.ts";
 import { validateArgsCount, validateArgType } from "../../utils/validation.ts";
 import { AppError, createValidationError } from "../../error/types.ts";
-import type { Symbol as ASTSymbol, SymbolTable } from "../../syntax/ast/scope.ts";
+import type { Symbol as ASTSymbol } from "../../syntax/ast/scope.ts";
 import { runModel, readModelField, type EditorModelAccess } from "./state-context.ts";
 import { findDefinition, findReferences, findScopeAtPosition, getSymbolsInScope, getDocumentSymbols } from "../../syntax/ast/navigation.ts";
 import { getNodeAtPosition } from "../../syntax/ast/tree-ops.ts";
-
-interface CachedAST {
-  tree: import("../../syntax/ast/types.ts").ASTNode;
-  symbolTable: SymbolTable;
-  sourceHash: number;
-}
-
-/** Shared reference to the AST cache from ast-ops.ts */
-let _astCacheRef: Map<string, CachedAST> | null = null;
-
-export function setAstCacheRef(cache: Map<string, CachedAST>): void {
-  _astCacheRef = cache;
-}
+import type { EditorRuntimeCaches, CachedAST } from "../runtime/caches.ts";
 
 export interface NavigationOpsDeps {
   /** CHORE-39 Phase 4: when provided, cursor reads use the State monad against EditorModel. */
   access?: EditorModelAccess;
+  /** CHORE-44 Change 1: per-editor AST cache shared with ast-ops (not module-global). */
+  caches: EditorRuntimeCaches;
   getBufferName: () => string;
   getBufferText: () => string;
   getCursorLine: () => number;
@@ -57,7 +47,7 @@ export function createNavigationOps(deps: NavigationOpsDeps): Map<string, TLispF
   const api = new Map<string, TLispFunctionImpl>();
 
   function getAST(): CachedAST | null {
-    return _astCacheRef?.get(deps.getBufferName()) ?? null;
+    return deps.caches.ast.get(deps.getBufferName()) ?? null;
   }
 
   /**

@@ -27,8 +27,7 @@ import {
   createBufferError,
   AppError
 } from "../../error/types.ts";
-import { killRingSave } from "./kill-ring.ts";
-import { registerDelete } from "./evil-integration.ts";
+import type { EditorSession } from "../functional/domain-state.ts";
 
 /**
  * Check if a character is a word character
@@ -53,7 +52,7 @@ export function createChangeOps(
   setCursorLine: (line: number) => void,
   setCursorColumn: (column: number) => void,
   setMode: (mode: "normal" | "insert" | "visual" | "command" | "mx" | "replace") => void,
-  setDeleteRegister: (text: string) => void
+  session: EditorSession
 ): Map<string, TLispFunctionImpl> {
   // CHORE-39 Phase 4: cursor/buffer reads flow through the State monad against
   // EditorModel; writes stay on the supplied setters to preserve side effects.
@@ -122,8 +121,8 @@ export function createChangeOps(
     });
 
     if (Either.isRight(deletedTextResult)) {
-      setDeleteRegister(deletedTextResult.right);  // Legacy register
-      registerDelete(deletedTextResult.right, false);  // Evil Integration (US-1.9.3)
+      session.deleteRegister.set(deletedTextResult.right);  // Legacy register
+      session.registers.del(deletedTextResult.right, false);  // Evil Integration (US-1.9.3)
     }
 
     // Perform deletion
@@ -203,8 +202,8 @@ export function createChangeOps(
     });
 
     if (Either.isRight(deletedTextResult)) {
-      setDeleteRegister(deletedTextResult.right);  // Legacy register
-      registerDelete(deletedTextResult.right, false);  // Evil Integration (US-1.9.3)
+      session.deleteRegister.set(deletedTextResult.right);  // Legacy register
+      session.registers.del(deletedTextResult.right, false);  // Evil Integration (US-1.9.3)
     }
 
     // Perform deletion
@@ -275,8 +274,8 @@ export function createChangeOps(
     });
 
     if (Either.isRight(deletedTextResult)) {
-      setDeleteRegister(deletedTextResult.right);  // Legacy register
-      registerDelete(deletedTextResult.right, false);  // Evil Integration (US-1.9.3)
+      session.deleteRegister.set(deletedTextResult.right);  // Legacy register
+      session.registers.del(deletedTextResult.right, false);  // Evil Integration (US-1.9.3)
     }
 
     // Perform deletion

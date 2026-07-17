@@ -1,0 +1,295 @@
+name: vim-parity-advanced
+description: |
+  SPEC-067 Track 3 — advanced-parity e2e. Drives vim "advanced" features
+  through the real daemon/client keypress path and asserts the result of
+  every step: marks (ma / `a), macros (qa … q / @a), search (* / n / N / #),
+  scroll (zt / zz / zb, asserted via viewport-top-get), and the three visual
+  modes (v / V / C-v) with operators.
+
+  Uses `keys:` exclusively so the binding → dispatch → command path is
+  exercised end-to-end. Positions are seeded per-step via `setup_cursor`
+  (a (cursor-move) primitive) so the tested key stays a real keypress.
+
+  Known visual limitations (out of scope for this spec, tracked separately):
+  visual-line delete and visual-block delete have pre-existing half-open /
+  no-op quirks, so the line case asserts yank (non-destructive) and the
+  block case asserts toggle-case (~), which produces a clean rectangular
+  change (both selected rows toggled, cursor returns to the block start).
+
+setup:
+  - action: setup_file
+    var: FILE_MARKS
+    name: adv-marks.txt
+    content: |
+      alpha
+      beta
+      gamma
+      delta
+      epsilon
+  - action: setup_file
+    var: FILE_MACRO
+    name: adv-macro.txt
+    content: |
+      AAAA
+      BBBB
+      CCCC
+      DDDD
+  - action: setup_file
+    var: FILE_SEARCH
+    name: adv-search.txt
+    content: |
+      start
+      foo
+      bar
+      foo
+      baz
+      foo
+  - action: setup_file
+    var: FILE_SCROLL
+    name: adv-scroll.txt
+    content: |
+      L00
+      L01
+      L02
+      L03
+      L04
+      L05
+      L06
+      L07
+      L08
+      L09
+      L10
+      L11
+      L12
+      L13
+      L14
+      L15
+      L16
+      L17
+      L18
+      L19
+      L20
+      L21
+      L22
+      L23
+      L24
+      L25
+      L26
+      L27
+      L28
+      L29
+      L30
+      L31
+      L32
+      L33
+      L34
+      L35
+      L36
+      L37
+      L38
+      L39
+  - action: setup_file
+    var: FILE_VIS_CHAR
+    name: adv-vis-char.txt
+    content: |
+      row111
+      row222
+  - action: setup_file
+    var: FILE_VIS_LINE
+    name: adv-vis-line.txt
+    content: |
+      XXXX
+      YYYY
+      ZZZZ
+  - action: setup_file
+    var: FILE_VIS_BLOCK
+    name: adv-vis-block.txt
+    content: |
+      abcd
+      efgh
+      ijkl
+
+terminal:
+  height: 24
+  width: 80
+
+steps:
+  - name: switch to normal mode
+    eval: '(editor-set-mode "normal")'
+    expect:
+      mode: normal
+
+  # ===================== MARKS (ma / `a) =====================
+  - name: MARKS open marks file
+    eval: '(find-file "${FILE_MARKS}")'
+    expect:
+      buffer_contains: "alpha"
+
+  - name: MARKS position at line 1 col 2
+    eval: '(cursor-move 1 2)'
+    expect:
+      cursor_line: 1
+      cursor_column: 2
+
+  - name: MARKS ma sets mark a (cursor stays put)
+    keys: "ma"
+    expect:
+      cursor_line: 1
+      cursor_column: 2
+
+  - name: MARKS move away to line 3
+    eval: '(cursor-move 3 0)'
+    expect:
+      cursor_line: 3
+
+  - name: MARKS backtick-a jumps back to the mark
+    keys: "`a"
+    expect:
+      cursor_line: 1
+      cursor_column: 2
+
+  # ===================== MACROS (qa … q / @a) =====================
+  - name: MACRO open macro file
+    eval: '(find-file "${FILE_MACRO}")'
+    expect:
+      buffer_contains: "AAAA"
+
+  - name: MACRO position at 0 0
+    eval: '(cursor-move 0 0)'
+    expect:
+      cursor_line: 0
+
+  - name: MACRO qa starts recording to register a (cursor stays)
+    keys: "qa"
+    expect:
+      cursor_line: 0
+
+  - name: MACRO record rX (replace col0 with X) then j (down)
+    keys: "rXj"
+    expect:
+      cursor_line: 1
+      buffer_contains: "XAAA"
+
+  - name: MACRO q stops recording
+    keys: "q"
+    expect:
+      cursor_line: 1
+
+  - name: MACRO at-a replays the recording (replaces line 1, moves down)
+    keys: "@a"
+    expect:
+      cursor_line: 2
+      buffer_contains: "XBBB"
+
+  # ===================== SEARCH (* / n / N / #) =====================
+  - name: SEARCH open search file
+    eval: '(find-file "${FILE_SEARCH}")'
+    expect:
+      buffer_contains: "baz"
+
+  - name: SEARCH position on first foo (line 1)
+    eval: '(cursor-move 1 0)'
+    expect:
+      cursor_line: 1
+
+  - name: SEARCH star finds next occurrence of word (line 3)
+    keys: "*"
+    expect:
+      cursor_line: 3
+
+  - name: SEARCH n finds next match (line 5)
+    keys: "n"
+    expect:
+      cursor_line: 5
+
+  - name: SEARCH N reverses to previous match (line 3)
+    keys: "N"
+    expect:
+      cursor_line: 3
+
+  - name: SEARCH hash searches word backward (line 1)
+    keys: "#"
+    expect:
+      cursor_line: 1
+
+  # ===================== SCROLL (zt / zz / zb) =====================
+  # height 24, cursor line 32 -> zt:top=32  zz:top=20  zb:top=10
+  - name: SCROLL open scroll file (40 lines)
+    eval: '(find-file "${FILE_SCROLL}")'
+    expect:
+      buffer_contains: "L32"
+
+  - name: SCROLL zt does not move the cursor
+    keys: "zt"
+    setup_cursor: [32, 0]
+    expect:
+      cursor_line: 32
+
+  - name: SCROLL viewport-top is 32 after zt
+    eval: '(viewport-top-get)'
+    expect:
+      result_contains: "32"
+
+  - name: SCROLL zz does not move the cursor
+    keys: "zz"
+    setup_cursor: [32, 0]
+    expect:
+      cursor_line: 32
+
+  - name: SCROLL viewport-top is 20 after zz
+    eval: '(viewport-top-get)'
+    expect:
+      result_contains: "20"
+
+  - name: SCROLL zb does not move the cursor
+    keys: "zb"
+    setup_cursor: [32, 0]
+    expect:
+      cursor_line: 32
+
+  - name: SCROLL viewport-top is 10 after zb
+    eval: '(viewport-top-get)'
+    expect:
+      result_contains: "10"
+
+  # ===================== VISUAL (v / V / C-v) =====================
+  - name: VISUAL char open file
+    eval: '(find-file "${FILE_VIS_CHAR}")'
+    expect:
+      buffer_contains: "row111"
+
+  - name: VISUAL char v + ll + d deletes cols 3-4 (row1)
+    keys: "vlld"
+    setup_cursor: [0, 3]
+    expect:
+      cursor_line: 0
+      line_text: "row1"
+      mode: normal
+
+  - name: VISUAL line open file
+    eval: '(find-file "${FILE_VIS_LINE}")'
+    expect:
+      buffer_contains: "XXXX"
+
+  - name: VISUAL line V + j + y yanks and returns to normal (buffer intact)
+    keys: "Vjy"
+    setup_cursor: [0, 0]
+    expect:
+      mode: normal
+      cursor_line: 1
+      buffer_contains: "XXXX"
+
+  - name: VISUAL block open file
+    eval: '(find-file "${FILE_VIS_BLOCK}")'
+    expect:
+      buffer_contains: "abcd"
+
+  - name: VISUAL block C-v + j + ~ toggles the rectangle (ABCD + Efgh)
+    keys: "<C-v>j~"
+    setup_cursor: [0, 0]
+    expect:
+      cursor_line: 0
+      buffer_contains: "ABCD"
+      buffer_contains: "Efgh"
+
+cleanup: true

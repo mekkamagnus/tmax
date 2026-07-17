@@ -3,8 +3,8 @@
  * @description Command mode key handler for the editor
  */
 
-import type { Editor } from "../editor.ts";
-import { resolveMapping } from "../editor.ts";
+import type { EditorDispatchPort } from "./editor-dispatch-port.ts";
+import { resolveMapping } from "../key-resolution.ts";
 import { log } from "../../utils/logger.ts";
 
 /**
@@ -14,7 +14,7 @@ import { log } from "../../utils/logger.ts";
  * @param normalizedKey - Normalized key string
  * @returns Promise that resolves when key handling is complete, or rejects with quit signal
  */
-export async function handleCommandMode(editor: Editor, key: string, normalizedKey: string): Promise<void> {
+export async function handleCommandMode(editor: EditorDispatchPort, key: string, normalizedKey: string): Promise<void> {
   const handlerLog = log.module('handlers').fn('handleCommandMode');
 
   // Log Escape key to return to normal mode

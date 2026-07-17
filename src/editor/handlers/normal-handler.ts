@@ -20,8 +20,8 @@
  * All bindings, state machines, and logic live in T-Lisp.
  */
 
-import type { Editor } from "../editor.ts";
-import { resolveMapping } from "../editor.ts";
+import type { EditorDispatchPort } from "./editor-dispatch-port.ts";
+import { resolveMapping } from "../key-resolution.ts";
 import { isTruthy } from "../../tlisp/values.ts";
 import type { WhichKeyBinding } from "../../core/types.ts";
 import { computeWhichKeyPopup } from "../../frontend/render/which-key-overlay.ts";
@@ -41,7 +41,7 @@ function prefixLabel(prefix: string): string {
   return prefix;
 }
 
-export async function handleNormalMode(editor: Editor, key: string, normalizedKey: string): Promise<void> {
+export async function handleNormalMode(editor: EditorDispatchPort, key: string, normalizedKey: string): Promise<void> {
   const state = editor.getModel();
   const wk = editor.getWhichKeyHandle();
   const interp = editor.getInterpreter();
@@ -100,7 +100,7 @@ export async function handleNormalMode(editor: Editor, key: string, normalizedKe
   // macro-record-pending was already handled above, so reaching here means
   // we are either idle or actively recording.
   if (normalizedKey === "C-g" || normalizedKey === "Escape") {
-    wk.deactivate();
+    wk?.deactivate();
     editor.applyUpdate({ type: "SetWhichKeyActive", active: false });
     editor.applyUpdate({ type: "SetWhichKeyPrefix", prefix: "" });
     editor.applyUpdate({ type: "SetWhichKeyBindings", bindings: [] });
@@ -198,7 +198,7 @@ export async function handleNormalMode(editor: Editor, key: string, normalizedKe
     const bindings = tLispPrefixBindings(exec, escape, lookupKey);
     editor.applyUpdate({ type: "SetWhichKeyPrefix", prefix: lookupKey });
     editor.applyUpdate({ type: "SetWhichKeyBindings", bindings });
-    wk.schedule(lookupKey, bindings, () => {
+    wk?.schedule(lookupKey, bindings, () => {
       if (editor.getModel().whichKeyPrefix !== lookupKey) return;
       const size = editor.getTerminal().getSize();
       editor.applyUpdate({ type: "SetWhichKeyActive", active: true });
@@ -294,7 +294,7 @@ function majorModeLookupKeys(lookupKey: string): string[] {
  * Resolve a complete major-mode binding for `lookupKey`. Returns the mapping
  * (precedence via resolveMapping) or undefined.
  */
-function lookupMajorModeBinding(editor: Editor, lookupKey: string, majorMode: string) {
+function lookupMajorModeBinding(editor: EditorDispatchPort, lookupKey: string, majorMode: string) {
   for (const form of majorModeLookupKeys(lookupKey)) {
     const mappings = editor.getKeyMappings().get(form);
     if (mappings && mappings.length > 0) {
@@ -310,7 +310,7 @@ function lookupMajorModeBinding(editor: Editor, lookupKey: string, majorMode: st
  * (e.g. "]" is a prefix of "] h"). A key that is itself a complete binding is
  * not a prefix — that case is handled by the binding lookup.
  */
-function isMajorModePrefix(editor: Editor, lookupKey: string, majorMode: string): boolean {
+function isMajorModePrefix(editor: EditorDispatchPort, lookupKey: string, majorMode: string): boolean {
   if (lookupMajorModeBinding(editor, lookupKey, majorMode)) return false; // complete binding, not a prefix
   const candidates = majorModeLookupKeys(lookupKey);
   for (const [key, ms] of editor.getKeyMappings()) {
@@ -322,22 +322,22 @@ function isMajorModePrefix(editor: Editor, lookupKey: string, majorMode: string)
   return false;
 }
 
-function feedDigit(editor: Editor, exec: (cmd: string) => any, key: string): void {
+function feedDigit(editor: EditorDispatchPort, exec: (cmd: string) => any, key: string): void {
   const digitResult = exec(`(vim-key-digit-value "${editor.escapeKeyForTLisp(key)}")`);
   if (digitResult && digitResult._tag === "Right" && digitResult.right?.type === "number") {
     exec(`(vim-count-add-digit ${digitResult.right.value})`);
   }
 }
 
-function clearWhichKey(editor: Editor, wk: any): void {
-  wk.deactivate();
+function clearWhichKey(editor: EditorDispatchPort, wk: any): void {
+  wk?.deactivate();
   editor.applyUpdate({ type: "SetWhichKeyActive", active: false });
   editor.applyUpdate({ type: "SetWhichKeyPrefix", prefix: "" });
   editor.applyUpdate({ type: "SetWhichKeyBindings", bindings: [] });
   editor.applyUpdate({ type: "SetWhichKeyPopup", popup: null });
 }
 
-async function executeCommand(editor: Editor, tLispCmd: string): Promise<void> {
+async function executeCommand(editor: EditorDispatchPort, tLispCmd: string): Promise<void> {
   try {
     await editor.executeCommandAsync(tLispCmd);
   } catch (error) {
@@ -352,14 +352,14 @@ async function executeCommand(editor: Editor, tLispCmd: string): Promise<void> {
 }
 
 function schedulePrefixPopup(
-  editor: Editor, wk: any,
+  editor: EditorDispatchPort, wk: any,
   exec: (cmd: string) => any, escape: (s: string) => string, prefix: string
 ): void {
   const bindings = tLispPrefixBindings(exec, escape, prefix);
   if (bindings.length === 0) return;
   editor.applyUpdate({ type: "SetWhichKeyPrefix", prefix });
   editor.applyUpdate({ type: "SetWhichKeyBindings", bindings });
-  wk.schedule(prefix, bindings, () => {
+  wk?.schedule(prefix, bindings, () => {
     if (editor.getModel().whichKeyPrefix !== prefix) return;
     const size = editor.getTerminal().getSize();
     editor.applyUpdate({ type: "SetWhichKeyActive", active: true });

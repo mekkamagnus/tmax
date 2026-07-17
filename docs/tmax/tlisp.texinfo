@@ -70,13 +70,17 @@ for tmax, the extensible terminal-based text editor.
 * Editor API --- Plugins::    Plugin system operations
 * Editor API --- Windows::    Window management operations
 * Editor API --- Registers::  Register operations
-* Editor API --- LSP::        LSP diagnostics operations
+* Editor API --- LSP::        LSP diagnostics and code navigation
 * Editor API --- Navigation:: Word, line, jump, page navigation
 * Editor API --- Count Prefix:: Count prefix operations
 * Editor API --- Dired::      Directory editor operations
 * Editor API --- Replace::    Replace operations
 * Editor API --- Indent::     Indentation operations
 * Editor API --- Miscellaneous:: message, messages-buffer, documentation
+* Editor API --- AST::         Syntax-tree navigation and selection
+* Editor API --- Clipboard::   OS clipboard access
+* Editor API --- Terminal & Viewport:: Terminal size and viewport scroll
+* Editor API --- Browse URL::  Docs reference and Git remote lookup
 * Testing Framework::         T-Lisp testing functions
 * Index::                     Function and concept index
 @end menu
@@ -645,6 +649,10 @@ Escape @var{str} for use as a regular-expression literal.
 Return match spans for regular-expression @var{pattern}.
 @end deffn
 
+@deffn Function string-match-spans-all pattern str
+Return @emph{all} match spans (with capture groups) for a global regular-expression @var{pattern} against @var{str}, as a pure query that does not mutate editor match state.  Returns @code{(ok t matches)} on success, or @code{(ok nil error details)} for an invalid regex.
+@end deffn
+
 @deffn Function literal-match-spans needle str @r{[}case-sensitive@r{]}
 Return match spans for literal @var{needle}.
 @end deffn
@@ -1105,6 +1113,34 @@ Find previous non-blank line number from @var{lineNum}. Returns -1 if none.
 Test if line @var{lineNum} matches regex @var{pattern}.
 @end deffn
 
+@deffn Function buffer-get-range start-line start-column end-line end-column
+Return the text within the given range without modifying the buffer.
+@end deffn
+
+@deffn Function buffer-delete-range start-line start-column end-line end-column
+Delete the text within the given range, move the cursor to the range start, and return the deleted text.
+@end deffn
+
+@deffn Function buffer-insert-at-position line column text
+Insert @var{text} at the given @var{line} and @var{column} (unlike @code{buffer-insert}, this does not use the cursor position) and advance the cursor past the inserted text.  Returns the inserted text.
+@end deffn
+
+@deffn Function buffer-get-char-at-position line column
+Return the single character at @var{line} and @var{column}, or nil when out of bounds.
+@end deffn
+
+@deffn Function buffer-scan-forward-from line column stop-chars max-chars
+Scan right from @var{column} on @var{line} and return the exclusive end of the run of characters not in @var{stop-chars}, as @code{(line column truncated)}.  @var{max-chars} bounds the scan.
+@end deffn
+
+@deffn Function buffer-scan-backward-from line column stop-chars max-chars
+Scan left from @var{column} on @var{line} and return the inclusive start of the run of characters not in @var{stop-chars}, as @code{(line column truncated)}.  @var{max-chars} bounds the scan.
+@end deffn
+
+@deffn Function buffer-set-read-only flag
+Set the current buffer's read-only state using @var{flag} (boolean, @code{t}/nil, or non-zero number) and return the new boolean state.
+@end deffn
+
 @node Editor API --- Cursor
 @chapter Editor API --- Cursor
 
@@ -1127,6 +1163,10 @@ Return current cursor line number (0-indexed).
 
 @deffn Function cursor-column
 Return current cursor column number (0-indexed).
+@end deffn
+
+@deffn Function scan-number-on-line line column
+Find the decimal number at or after @var{column} on @var{line}, expanding back to the start of the digit run and including a leading @code{-} only when preceded by a non-digit.  Returns @code{(start-col end-col-exclusive text)}, or nil when no number is found.
 @end deffn
 
 @node Editor API --- Text Editing
@@ -1251,6 +1291,10 @@ Return search direction (@code{"forward"} or @code{"backward"}).
 Clear search highlighting.
 @end deffn
 
+@deffn Function search-clear-highlights
+Clear visible search highlights only, preserving the last pattern and direction so @code{search-next}/@code{search-previous} still work (this backs the @code{:nohl} command).  Returns nil.
+@end deffn
+
 @deffn Function search-find-all-matches pattern
 Find all matches for @var{pattern} in buffer.
 @end deffn
@@ -1323,6 +1367,10 @@ Convert visual selection to lowercase.
 
 @deffn Function visual-uppercase
 Convert visual selection to uppercase.
+@end deffn
+
+@deffn Function visual-swap-endpoints
+Swap the anchor and active endpoint of the current visual selection and move the cursor to the new active end.  Returns @code{(start-line start-col end-line end-col mode)}.  Errors when not in visual mode.
 @end deffn
 
 @node Editor API --- Text Objects
@@ -1949,10 +1997,13 @@ Paste content from register @var{name}.
 @end deffn
 
 @node Editor API --- LSP
-@chapter Editor API --- LSP Diagnostics
+@chapter Editor API --- LSP
 
 @cindex LSP
 @cindex diagnostics
+@cindex code navigation
+
+@section Diagnostics
 
 @deffn Function lsp-diagnostics-list
 Return all LSP diagnostics for current buffer.
@@ -1976,6 +2027,34 @@ Clear all LSP diagnostics.
 
 @deffn Function lsp-diagnostics-has-errors
 Return @code{#t} if any error-level diagnostics exist.
+@end deffn
+
+@section Code Navigation
+
+The following functions operate on the buffer's parsed AST (@pxref{Editor API --- AST}) to provide outline, go-to-definition, and find-references style navigation.  Each returns nil when no AST is available for the buffer.
+
+@deffn Function document-symbols
+Return all top-level symbols from the document's AST symbol table, as a list of @code{(name kind line column)} hashmaps, or nil.
+@end deffn
+
+@deffn Function symbol-at-cursor
+Look up the symbol at the cursor in the scope chain.  Returns @code{(name kind line column)}, or nil.
+@end deffn
+
+@deffn Function symbols-in-scope
+Return all symbols visible from the cursor's scope, as a list of @code{(name kind line)} hashmaps, or nil.
+@end deffn
+
+@deffn Function scope-at-cursor
+Return information about the innermost scope at the cursor as @code{(name id bindingCount parentName)}, or nil.
+@end deffn
+
+@deffn Function go-to-definition
+Jump the cursor to the definition of the symbol at the cursor.  Returns the symbol name on success, or nil if not found or no AST is available.
+@end deffn
+
+@deffn Function find-references @r{[}symbol-name@r{]}
+Find all references to the symbol at the cursor, or to @var{symbol-name} when given.  Returns a list of @code{(line column endLine endColumn)} hashmaps, or nil.
 @end deffn
 
 @node Editor API --- Navigation
@@ -2051,6 +2130,22 @@ Move down half a page.
 
 @deffn Function half-page-up
 Move up half a page.
+@end deffn
+
+@section Position Queries
+
+These compute a position and return it as a @code{(line column)} list without moving the cursor (nil when no target is found).
+
+@deffn Function find-char-position char direction till count
+Find the column of the @var{count}-th occurrence of @var{char} on the current line, searching @code{"forward"} or @code{"backward"}.  When @var{till} is true the position stops just before the character, otherwise on it.  Returns @code{(line column)} or nil.
+@end deffn
+
+@deffn Function match-bracket-position
+Find the matching bracket for the bracket at the cursor (handles @code{()[]@{@}}).  Returns @code{(line column)} or nil when the cursor is not on a bracket.
+@end deffn
+
+@deffn Function paragraph-boundary-position direction
+Find the next (@code{"forward"}) or previous (@code{"backward"}) blank line as a paragraph boundary.  Returns @code{(line column)}.
 @end deffn
 
 @node Editor API --- Count Prefix
@@ -2224,6 +2319,150 @@ Return list of all bound keys in @var{keymap}.
 
 @deffn Function keymap-active
 Return currently active keymap.
+@end deffn
+
+@node Editor API --- AST
+@chapter Editor API --- AST
+
+@cindex AST
+@cindex syntax tree
+
+These functions expose the buffer's parsed syntax tree (built by @code{ast-parse-buffer}) for structural navigation and selection.  A @dfn{node} is a hashmap with keys @code{kind} (symbol), @code{startLine}/@code{startCol}/@code{startOffset}/@code{endLine}/@code{endCol}/@code{endOffset} (numbers), and @code{childCount} (number), plus optional @code{label} (string) and @code{parentKind} (symbol).  Functions that find no node return nil.
+
+@deffn Function ast-parse-buffer @r{[}lang@r{]}
+Parse the current buffer into an AST for @var{lang}, inferring the language from the filename when @var{lang} is omitted, and cache the result.  Returns a handle string such as @code{ast:<buffer>} (or @code{cached-ast:<buffer>} on a cache hit).
+@end deffn
+
+@deffn Function ast-invalidate
+Clear the AST and parse-tree cache for the current buffer.  Returns nil.
+@end deffn
+
+@deffn Function ast-root-kinds
+Return the kinds of all top-level nodes in the current AST, as a list of symbols.
+@end deffn
+
+@deffn Function ast-count-nodes
+Return the total number of nodes in the cached AST (0 when no AST exists).
+@end deffn
+
+@deffn Function ast-node-at-cursor
+Return the AST node at the current cursor position, or nil.
+@end deffn
+
+@deffn Function ast-node-at-pos line column
+Return the AST node at @var{line} and @var{column}, or nil.
+@end deffn
+
+@deffn Function ast-node-kind
+Return the kind (symbol) of the node at the cursor, or nil.
+@end deffn
+
+@deffn Function ast-node-text
+Return the source text of the node at the cursor, or nil.
+@end deffn
+
+@deffn Function ast-node-children
+Return the children of the node at the cursor, as a list of nodes.
+@end deffn
+
+@deffn Function ast-parent
+Return the parent of the node at the cursor, or nil.
+@end deffn
+
+@deffn Function ast-next-sibling
+Return the next sibling of the node at the cursor, or nil.
+@end deffn
+
+@deffn Function ast-prev-sibling
+Return the previous sibling of the node at the cursor, or nil.
+@end deffn
+
+@deffn Function ast-enclosing-block
+Return the enclosing block node around the cursor, or nil.
+@end deffn
+
+@deffn Function ast-enclosing-function
+Return the enclosing function node around the cursor, or nil.
+@end deffn
+
+@deffn Function ast-goto-node offset
+Translate a byte @var{offset} into the buffer into a buffer position.  Returns a hashmap with @code{line} and @code{column} number keys.
+@end deffn
+
+@deffn Function ast-select-node
+Return the @code{(start-offset end-offset)} range of the node at the cursor, or nil.
+@end deffn
+
+@deffn Function ast-select-parent
+Return the @code{(start-offset end-offset)} range of the parent of the node at the cursor (used to expand a selection outward), or nil.
+@end deffn
+
+@deffn Function ast-to-json
+Serialize the current buffer's AST together with scope and cursor context to a JSON string (for AI tooling), or nil when no AST is available.
+@end deffn
+
+@node Editor API --- Clipboard
+@chapter Editor API --- Clipboard
+
+@cindex clipboard
+@cindex OS clipboard
+
+Direct access to the operating-system clipboard.  This is distinct from the @ref{Editor API --- Kill Ring}, which is tmax's in-editor deletion history.
+
+@deffn Function clipboard-available?
+Return @code{#t} when an OS clipboard tool is available on this platform.
+@end deffn
+
+@deffn Function clipboard-get
+Return the text currently on the OS clipboard, or @code{""} when unavailable or empty.
+@end deffn
+
+@deffn Function clipboard-set text
+Write @var{text} to the OS clipboard.  Returns nil on success, or an error when no clipboard tool is available.
+@end deffn
+
+@node Editor API --- Terminal & Viewport
+@chapter Editor API --- Terminal & Viewport
+
+@cindex terminal size
+@cindex viewport
+
+@deffn Function terminal-height-get
+Return the terminal height in lines (used for page-size calculations).
+@end deffn
+
+@deffn Function terminal-width-get
+Return the terminal width in columns (defaults to 80 when unavailable).
+@end deffn
+
+@deffn Function viewport-top-get
+Return the current viewport top line.
+@end deffn
+
+@deffn Function viewport-top-set top
+Set the viewport top line to @var{top} (clamped to @code{>= 0}) and return the new value.
+@end deffn
+
+@deffn Function viewport-left-get
+Return the current viewport left column (horizontal scroll).
+@end deffn
+
+@deffn Function viewport-left-set left
+Set the viewport left column to @var{left} (clamped to @code{>= 0}) and return the new value.
+@end deffn
+
+@node Editor API --- Browse URL
+@chapter Editor API --- Browse URL
+
+@cindex browse-url
+@cindex GitHub remote
+
+@deffn Function browse-doc-reference reference kind
+Resolve a documentation @var{reference} of @var{kind} (@code{"rfc"} or @code{"spec"}) to its canonical file path under @file{docs/rfcs}/@file{docs/specs}.  Returns @code{(ok t path url)} on success, or @code{(ok nil error details)} on failure.
+@end deffn
+
+@deffn Function browse-git-github-remote
+Walk up from the current buffer's file to find a @file{.git} directory and parse the GitHub remote (origin, upstream, or first match) from its config.  Returns @code{(ok t owner repo remote url worktree)}, or @code{(ok nil error details)}.
 @end deffn
 
 @node Testing Framework

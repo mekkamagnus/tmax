@@ -2,22 +2,16 @@
  * @file kill-ring.ts
  * @description Kill ring storage for Emacs-style yank/delete operations (US-1.9.1)
  *
- * Implements Emacs-style kill ring:
- * - Deleted text added to front of kill-ring
- * - New deletions push older items back
- * - Ring size limit (default 5) removes oldest when full
- * - p pastes item from front of kill-ring
- * - (kill-ring-rotate) rotates ring items
- * - (kill-ring-list) shows all items
- *
- * The kill ring is a circular buffer that stores multiple text entries
- * for convenient pasting and cycling through previous deletions/yanks.
+ * CHORE-44 Change 1: the kill ring is per-editor session state. Each `Editor`
+ * owns a `KillRingState` instance (via `createKillRingState` + `bindKillRing`);
+ * the bound `KillRingOps` are shared with delete/yank/text-object/yank-pop ops
+ * so two concurrent editors keep independent kill rings (AC1.2). No module-global
+ * mutable state remains.
  */
 
 import type { TLispValue, TLispFunctionImpl } from "../../tlisp/types.ts";
 import { createString, createNil, createList } from "../../tlisp/values.ts";
 import { Either } from "../../utils/task-either.ts";
-import { stateUtils } from "../../utils/state.ts";
 import {
   createValidationError,
   AppError
@@ -29,240 +23,129 @@ import {
 const DEFAULT_KILL_RING_MAX = 5;
 
 /**
- * Kill ring state
- * Implements a circular buffer with rotation support
+ * Kill ring state — a circular buffer with rotation support.
  */
-interface KillRingState {
+export interface KillRingState {
   items: string[];      // Array of strings, newest at index 0
   maxSize: number;      // Maximum number of items to store
 }
 
 /**
- * Global kill ring state
+ * Construct a fresh, independent kill ring state.
  */
-let killRingState: KillRingState = {
-  items: [],
-  maxSize: DEFAULT_KILL_RING_MAX
-};
-
-/**
- * Reset the kill ring to initial state
- * Useful for testing and cleanup
- */
-export function resetKillRing(): void {
-  // CHORE-39 Phase 4: reset via the State monad (stateUtils.reset).
-  const [, next] = stateUtils.reset<KillRingState>({ items: [], maxSize: DEFAULT_KILL_RING_MAX }).run(killRingState);
-  killRingState = next;
+export function createKillRingState(maxSize: number = DEFAULT_KILL_RING_MAX): KillRingState {
+  return { items: [], maxSize };
 }
 
 /**
- * Add a new item to the front of the kill ring
- * If the ring is full, the oldest item is removed
+ * Bound kill ring operations over one (per-editor) state instance.
  */
-export function killRingSave(text: string): void {
-  // Add new item to front
-  killRingState.items.unshift(text);
-
-  // Remove oldest items if we exceed max size
-  while (killRingState.items.length > killRingState.maxSize) {
-    killRingState.items.pop();
-  }
+export interface KillRingOps {
+  save(text: string): void;
+  yank(): string;
+  rotate(): void;
+  list(): string[];
+  setMax(max: number): void;
+  getMax(): number;
+  reset(): void;
 }
 
 /**
- * Get the most recent item from the kill ring (front of ring)
- * Returns empty string if kill ring is empty
+ * Bind kill ring operations to a specific (per-editor) state instance.
  */
-export function killRingYank(): string {
-  if (killRingState.items.length === 0) {
-    return "";
-  }
-  return killRingState.items[0]!;
+export function bindKillRing(state: KillRingState): KillRingOps {
+  return {
+    save: (text: string): void => {
+      state.items.unshift(text);
+      while (state.items.length > state.maxSize) {
+        state.items.pop();
+      }
+    },
+    yank: (): string => {
+      if (state.items.length === 0) {
+        return "";
+      }
+      return state.items[0]!;
+    },
+    rotate: (): void => {
+      if (state.items.length <= 1) {
+        return;
+      }
+      const frontItem = state.items.shift()!;
+      state.items.push(frontItem);
+    },
+    list: (): string[] => [...state.items],
+    setMax: (max: number): void => {
+      state.maxSize = Math.max(1, max);
+      while (state.items.length > state.maxSize) {
+        state.items.pop();
+      }
+    },
+    getMax: (): number => state.maxSize,
+    reset: (): void => {
+      state.items = [];
+      state.maxSize = DEFAULT_KILL_RING_MAX;
+    },
+  };
 }
 
 /**
- * Rotate the kill ring: move front item to back
- * This enables cycling through kill ring history with M-y
+ * Create kill ring API functions for T-Lisp, bound to one editor's kill ring.
  */
-export function killRingRotate(): void {
-  if (killRingState.items.length <= 1) {
-    return; // Nothing to rotate
-  }
-
-  // Move first item to end
-  const frontItem = killRingState.items.shift()!;
-  killRingState.items.push(frontItem);
-}
-
-/**
- * Get all items in the kill ring
- * Returns a copy of the items array (newest first)
- */
-export function killRingList(): string[] {
-  return [...killRingState.items];
-}
-
-/**
- * Set the maximum size of the kill ring
- */
-export function setKillRingMax(max: number): void {
-  killRingState.maxSize = Math.max(1, max); // Ensure at least 1
-
-  // Trim existing items if needed
-  while (killRingState.items.length > killRingState.maxSize) {
-    killRingState.items.pop();
-  }
-}
-
-/**
- * Get the current maximum size of the kill ring
- */
-export function getKillRingMax(): number {
-  return killRingState.maxSize;
-}
-
-/**
- * Create kill ring API functions for T-Lisp
- * @returns Map of kill ring function names to implementations
- */
-export function createKillRingOps(): Map<string, TLispFunctionImpl> {
+export function createKillRingOps(ops: KillRingOps): Map<string, TLispFunctionImpl> {
   const api = new Map<string, TLispFunctionImpl>();
 
-  /**
-   * kill-ring-save - save text to kill ring
-   * Usage: (kill-ring-save "text")
-   */
   api.set("kill-ring-save", (args: TLispValue[]): Either<AppError, TLispValue> => {
     if (args.length !== 1) {
-      return Either.left(createValidationError(
-        'ConstraintViolation',
-        'kill-ring-save requires 1 argument: text to save',
-        'args',
-        args,
-        '1 argument'
-      ));
+      return Either.left(createValidationError('ConstraintViolation', 'kill-ring-save requires 1 argument: text to save', 'args', args, '1 argument'));
     }
-
     const textArg = args[0]!
     if (textArg.type !== 'string') {
-      return Either.left(createValidationError(
-        'TypeError',
-        'kill-ring-save argument must be a string',
-        'args[0]',
-        textArg,
-        'string'
-      ));
+      return Either.left(createValidationError('TypeError', 'kill-ring-save argument must be a string', 'args[0]', textArg, 'string'));
     }
-
-    killRingSave(textArg.value as string);
+    ops.save(textArg.value as string);
     return Either.right(createNil());
   });
 
-  /**
-   * kill-ring-yank - get most recent item from kill ring
-   * Usage: (kill-ring-yank)
-   */
   api.set("kill-ring-yank", (args: TLispValue[]): Either<AppError, TLispValue> => {
     if (args.length !== 0) {
-      return Either.left(createValidationError(
-        'ConstraintViolation',
-        'kill-ring-yank requires 0 arguments',
-        'args',
-        args,
-        '0 arguments'
-      ));
+      return Either.left(createValidationError('ConstraintViolation', 'kill-ring-yank requires 0 arguments', 'args', args, '0 arguments'));
     }
-
-    const text = killRingYank();
-    return Either.right(createString(text));
+    return Either.right(createString(ops.yank()));
   });
 
-  /**
-   * kill-ring-rotate - rotate kill ring items
-   * Usage: (kill-ring-rotate)
-   */
   api.set("kill-ring-rotate", (args: TLispValue[]): Either<AppError, TLispValue> => {
     if (args.length !== 0) {
-      return Either.left(createValidationError(
-        'ConstraintViolation',
-        'kill-ring-rotate requires 0 arguments',
-        'args',
-        args,
-        '0 arguments'
-      ));
+      return Either.left(createValidationError('ConstraintViolation', 'kill-ring-rotate requires 0 arguments', 'args', args, '0 arguments'));
     }
-
-    killRingRotate();
+    ops.rotate();
     return Either.right(createNil());
   });
 
-  /**
-   * kill-ring-list - list all items in kill ring
-   * Usage: (kill-ring-list)
-   */
   api.set("kill-ring-list", (args: TLispValue[]): Either<AppError, TLispValue> => {
     if (args.length !== 0) {
-      return Either.left(createValidationError(
-        'ConstraintViolation',
-        'kill-ring-list requires 0 arguments',
-        'args',
-        args,
-        '0 arguments'
-      ));
+      return Either.left(createValidationError('ConstraintViolation', 'kill-ring-list requires 0 arguments', 'args', args, '0 arguments'));
     }
-
-    const items = killRingList();
-    const tlispItems = items.map(item => createString(item));
-    return Either.right(createList(tlispItems));
+    return Either.right(createList(ops.list().map(item => createString(item))));
   });
 
-  /**
-   * set-kill-ring-max - set maximum size of kill ring
-   * Usage: (set-kill-ring-max 10)
-   */
   api.set("set-kill-ring-max", (args: TLispValue[]): Either<AppError, TLispValue> => {
     if (args.length !== 1) {
-      return Either.left(createValidationError(
-        'ConstraintViolation',
-        'set-kill-ring-max requires 1 argument: max size',
-        'args',
-        args,
-        '1 argument'
-      ));
+      return Either.left(createValidationError('ConstraintViolation', 'set-kill-ring-max requires 1 argument: max size', 'args', args, '1 argument'));
     }
-
     const maxArg = args[0]!
     if (maxArg.type !== 'number') {
-      return Either.left(createValidationError(
-        'TypeError',
-        'set-kill-ring-max argument must be a number',
-        'args[0]',
-        maxArg,
-        'number'
-      ));
+      return Either.left(createValidationError('TypeError', 'set-kill-ring-max argument must be a number', 'args[0]', maxArg, 'number'));
     }
-
-    const max = Math.max(1, maxArg.value as number); // Ensure at least 1
-    setKillRingMax(max);
+    ops.setMax(Math.max(1, maxArg.value as number));
     return Either.right(createNil());
   });
 
-  /**
-   * get-kill-ring-max - get current maximum size of kill ring
-   * Usage: (get-kill-ring-max)
-   */
   api.set("get-kill-ring-max", (args: TLispValue[]): Either<AppError, TLispValue> => {
     if (args.length !== 0) {
-      return Either.left(createValidationError(
-        'ConstraintViolation',
-        'get-kill-ring-max requires 0 arguments',
-        'args',
-        args,
-        '0 arguments'
-      ));
+      return Either.left(createValidationError('ConstraintViolation', 'get-kill-ring-max requires 0 arguments', 'args', args, '0 arguments'));
     }
-
-    return Either.right({ type: 'number', value: getKillRingMax() });
+    return Either.right({ type: 'number', value: ops.getMax() });
   });
 
   return api;

@@ -4,8 +4,8 @@
  */
 
 import { describe, test, expect, beforeEach } from "bun:test";
-import { createNavigationOps, setAstCacheRef, type NavigationOpsDeps } from "../../src/editor/api/navigation-ops.ts";
-import { createAstOps } from "../../src/editor/api/ast-ops.ts";
+import { createNavigationOps, type NavigationOpsDeps } from "../../src/editor/api/navigation-ops.ts";
+import { createEditorRuntimeCaches } from "../../src/editor/runtime/caches.ts";
 import { createString, createNumber } from "../../src/tlisp/values.ts";
 import type { TLispValue } from "../../src/tlisp/types.ts";
 import { Either, type Either as EitherType } from "../../src/utils/task-either.ts";
@@ -18,6 +18,7 @@ function unwrap(result: EitherType<AppError, TLispValue>): TLispValue {
 
 function makeDeps(overrides: Partial<NavigationOpsDeps> = {}): NavigationOpsDeps {
   return {
+    caches: createEditorRuntimeCaches(),
     getBufferName: () => "test.tlisp",
     getBufferText: () => "(defun greet (name) (print name))",
     getCursorLine: () => 0,
@@ -33,8 +34,8 @@ describe("Navigation Ops T-Lisp API", () => {
   let api: Map<string, (...args: any[]) => any>;
 
   beforeEach(() => {
-    // Reset to isolated empty cache for each test
-    setAstCacheRef(new Map());
+    // CHORE-44 Change 1: each makeDeps() builds a fresh per-editor cache, so
+    // tests are isolated without a module-global cache reset.
     api = createNavigationOps(makeDeps());
   });
 

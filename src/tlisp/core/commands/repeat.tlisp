@@ -147,6 +147,15 @@ which is deferred to a follow-up slice."
       ((string= combo "cat") (change-around-tag))
       ;; r{char}: combo is "r" + literal char or special-key name
       ((vim-replay-r-p combo) (vim-replay-r-inner combo count))
+      ;; SPEC-069 — generic operator×motion (de, db, dj, d}, …): replay via the
+      ;; same generic region path the live dispatch uses. Operator = combo[0],
+      ;; motion = combo[1..]. The test both mutates and returns t when the motion
+      ;; is supported, so the cond stops here; unsupported motions (find-char
+      ;; df/dt/dF/dT) fall through to "Cannot repeat". No double undo-bookend:
+      ;; vim-operator-apply-motion does not bookend; vim-replay-change wraps the
+      ;; whole body in one undo-begin/undo-commit.
+      ((vim-operator-apply-motion (substring combo 0 1) (substring combo 1 (length combo)) count)
+        nil)
       ;; Anything else (find-char combos, unknown): surface clearly
       (t (editor-set-status (concat "Cannot repeat: " combo))))
     (undo-commit combo)

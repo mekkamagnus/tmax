@@ -6,6 +6,7 @@
 
 import { describe, test, expect, beforeEach } from "bun:test";
 import {
+  createStartedEditor,
   expectDefined,
   expectRight,
   expectTlispBoolean,
@@ -476,5 +477,34 @@ describe("Macro Recording (US-2.4.1)", () => {
       expect(macros.has("a")).toBe(true);
       expect(macros.get("a")).toEqual(["t", "e", "s", "t"]);
     });
+  });
+});
+
+// SPEC-067 — verify the macro BINDINGS route qa...q / @a through the
+// normal-mode handler. The tests above exercise the macro machinery via the
+// eval API; these drive the real q / @ keypress path end-to-end. The handler
+// special-cases the stopping q (macros.tlisp comment lines 18-19) so it is
+// recorded as neither a key nor a nested stop.
+describe("SPEC-067 — macro keypress bindings", () => {
+  async function press(editor: Editor, keys: string): Promise<void> {
+    for (const key of keys) {
+      await editor.handleKey(key);
+    }
+  }
+
+  function bufferText(editor: Editor): string {
+    const result = editor.getInterpreter().execute("(buffer-text)") as any;
+    if (result?._tag === "Right") return result.right.value;
+    throw new Error("buffer-text failed");
+  }
+
+  test("qa records, q stops, @a replays via real keypresses", async () => {
+    const editor = await createStartedEditor("abcd\nabcd");
+    await press(editor, "qa"); // start recording into register a
+    await press(editor, "x");  // delete 'a' on line 0 (recorded + executed)
+    await press(editor, "q");  // stop recording -> macro a = ["x"]
+    await press(editor, "j");  // move down to line 1
+    await press(editor, "@a"); // replay -> delete 'a' on line 1
+    expect(bufferText(editor)).toBe("bcd\nbcd");
   });
 });

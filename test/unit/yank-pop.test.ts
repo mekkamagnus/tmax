@@ -15,20 +15,26 @@ import { describe, test, expect, beforeEach } from "bun:test";
 import { TLispInterpreterImpl } from "../../src/tlisp/interpreter.ts";
 import { loadTrtFramework } from "../../src/tlisp/trt/bootstrap.ts";
 import {
-  resetKillRing,
-  killRingSave,
-  killRingYank,
-  killRingRotate,
-  killRingList,
+  bindKillRing,
+  createKillRingState,
   createKillRingOps
 } from "../../src/editor/api/kill-ring.ts";
-import {
-  getYankRegister,
-  setYankRegister
-} from "../../src/editor/api/yank-ops.ts";
 
 describe("Yank Pop (US-1.9.2)", () => {
   let interpreter: TLispInterpreterImpl;
+
+  // CHORE-44 Change 1: kill ring is per-editor session state. Bind one instance
+  // for the test and re-expose the legacy free-function names as wrappers so
+  // the assertions below are unchanged.
+  const killRing = bindKillRing(createKillRingState());
+  const killRingSave = (text: string) => killRing.save(text);
+  const killRingYank = () => killRing.yank();
+  const killRingRotate = () => killRing.rotate();
+  const killRingList = () => killRing.list();
+  const resetKillRing = () => killRing.reset();
+  let yankRegister = "";
+  const getYankRegister = () => yankRegister;
+  const setYankRegister = (text: string) => { yankRegister = text; };
 
   beforeEach(async () => {
     // Reset kill ring state
@@ -41,8 +47,8 @@ describe("Yank Pop (US-1.9.2)", () => {
     // Register testing framework
     await loadTrtFramework(interpreter);
 
-    // Register kill ring functions
-    const killRingOps = createKillRingOps();
+    // Register kill ring functions (bound to this test's kill ring)
+    const killRingOps = createKillRingOps(killRing);
     for (const [name, func] of killRingOps.entries()) {
       interpreter.defineBuiltin(name, func);
     }

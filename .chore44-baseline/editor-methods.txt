@@ -1,0 +1,153 @@
+1010:    defineRaw("minibuffer-active", (args) => {
+1017:    defineRaw("minibuffer-get", (args) => {
+1024:    defineRaw("minibuffer-set", (args) => {
+1036:    defineRaw("minibuffer-clear", (args) => {
+1044:    defineRaw("minibuffer-state-get", (args) => {
+1049:    defineRaw("minibuffer-state-set", (args) => {
+1055:    defineRaw("minibuffer-state-clear", (args) => {
+1061:    defineRaw("minibuffer-view-publish", (args) => {
+1067:    defineRaw("minibuffer-view-clear", (args) => {
+1073:    defineRaw("editor-cursor-focus", (args) => {
+1078:    defineRaw("editor-set-cursor-focus", (args) => {
+1088:    defineRaw("terminal-size", (args) => {
+1097:    defineRaw("buffer-list-details", (args) => {
+1114:    defineRaw("callable-command-details", (args) => {
+1156:    defineRaw("invoke-command", (args) => {
+1173:    defineRaw("editor-space-prefix-active-p", (args) => {
+1178:    defineRaw("editor-reset-space-prefix", (args) => {
+1185:    defineRaw("editor-window-prefix", (args) => {
+1195:    defineRaw("which-key-enable", (args) => {
+1205:    defineRaw("which-key-disable", (args) => {
+1217:    defineRaw("which-key-timeout", (args) => {
+1234:    defineRaw("which-key-active", (args) => {
+1241:    defineRaw("which-key-prefix", (args) => {
+1248:    defineRaw("which-key-bindings", (args) => {
+1255:          createString(binding.key),
+1256:          createString(binding.command),
+1274:    defineRaw("get-command-documentation", (args) => {
+1303:    defineRaw("get-command-documentation-truncated", (args) => {
+1362:    defineRaw("macro-record-start", (args) => {
+1380:    defineRaw("macro-record-stop", (args) => {
+1400:    defineRaw("macro-record-key", (args) => {
+1418:    defineRaw("macro-record-active", (args) => {
+1426:    defineRaw("macro-record-register", (args) => {
+1438:    defineRaw("macro-list", (args) => {
+1447:          createString(register),
+1448:          createList(keyValues),
+1459:    defineRaw("macro-execute", (args) => {
+1514:    defineRaw("macro-execute-last", (args) => {
+1548:    defineRaw("macro-last-executed", (args) => {
+1560:    defineRaw("macro-clear", (args) => {
+1564:      clearAllMacros();
+1569:    defineRaw("macro-clear-register", (args) => {
+157:  constructor(terminal: TerminalIO, filesystem: FileSystem, initFilePath?: string) {
+1587:    defineRaw("macro-record-reset", (args) => {
+1591:      resetMacroRecordingState();
+1632:    defineRaw("init-file-path", (args) => {
+1637:    defineRaw("eval-buffer", (args) => {
+1756:  async saveMacros(): Promise<void> {
+1808:  async loadPluginsFromDirectory(pluginDir: string): Promise<{
+2070:  async evalInitFile(): Promise<void> {
+2085:  evalBuffer(): TLispValue {
+2180:  executeCommand(command: string): unknown {
+2222:  async executeCommandAsync(command: string): Promise<unknown> {
+2312:  escapeKeyForTLisp(key: string): string {
+2326:  async handleKey(key: string): Promise<void> {
+2399:  logMessage(msg: string, level: LogLevel = 'info', command?: string, frameId?: string): void {
+2415:  setEchoOnly(text: string): void {
+2425:  logDaemonEvent(event: string, detail?: string): void {
+2438:  logProgram(category: 'shell' | 'process' | 'test' | 'autosave', entry: Omit<LogEntry, 'ts' | 'category'> & { ts?: number }): void {
+2458:  flushLog(): void {
+2465:  getDaemonLog(): ViewBoundLog {
+2473:  applyWorkspace(workspace: WorkspaceState): void {
+2572:  exportWorkspace(base?: WorkspaceState): WorkspaceState {
+258:    resetYankRegisterState();
+259:    resetDeleteRegisterState();
+260:    resetUndoRedoState();
+2646:  createBuffer(name: string, content: string = ""): void {
+2692:  async openFile(filename: string): Promise<void> {
+2745:  async saveFile(filename?: string): Promise<void> {
+2791:  getCurrentBufferKey(): string {
+2798:  getCurrentModeState(): BufferModeState {
+2808:  setCurrentMajorMode(modeName: string): void {
+2817:  getCurrentMajorMode(): string {
+2824:  registerMinorMode(config: MinorModeConfig): void {
+2831:  getMinorModeRegistry(): Map<string, MinorModeConfig> {
+2838:  getBufferModeStates(): Map<string, BufferModeState> {
+2845:  getGlobalizedMinorModes(): Set<string> {
+2852:  getAutoModeRules(): AutoModeRule[] {
+2859:  getLoadPaths(): string[] {
+2866:  getCurrentModuleName(): string | undefined {
+2874:  updateViewport(): void {
+2886:  onStateChange(listener: () => void): () => void {
+2919:  getModel(): EditorModel {
+2928:  applyModel(model: EditorModel): void {
+2933:  getTerminal(): TerminalIO {
+2943:  applyUpdate(msg: Msg): EditorModel {
+2952:  enqueueCmd(cmd: Cmd): void {
+3021:  getRuntime(): EditorRuntime {
+3072:  getEditorState(): EditorState {
+3093:  setEditorState(newState: EditorState): void {
+3155:  clearModifiedFlags(): void {
+3163:  markBuffersModified(names: string[]): void {
+3247:  updateTerminalSize(width: number, height: number): void {
+3260:  async start(): Promise<void> {
+3280:  stop(): void {
+3287:  getState(): EditorState {
+3294:  getBufferDetails(): Array<{
+3330:  getInterpreter(): TLispInterpreterImpl {
+3337:  getFilesystem(): FileSystem {
+3344:  lookupGlobalBinding(name: string): TLispValue | undefined {
+3351:  getAllGlobalBindings(): Map<string, TLispValue> {
+3358:  getGlobalFunctionNames(): string[] {
+3371:  getGlobalVariables(): Record<string, any> {
+3386:  async ensureCoreBindingsLoadedPublic(): Promise<void> {
+3393:  async loadInitFilePublic(initFilePath?: string): Promise<void> {
+3400:  getMessageLog(): ViewBoundLog {
+3406:  getUnifiedLog(): Log {
+3413:  getKeyMappings(): Map<string, KeyMapping[]> {
+3420:  getWhichKeyHandle(): WhichKeyHandle {
+3427:  isRunning(): boolean {
+3434:  getMode(): string {
+3442:  getCount(): number {
+3450:  setCount(count: number): void {
+3457:  resetCount(): void {
+3465:  isCountActive(): boolean {
+3473:  consumeCount(): number {
+3483:  getSelection(): any {
+3491:  clearSelection(): void {
+3493:    clearVisualSelection();
+3500:  activateMajorModeForFile(filename: string): void {
+3518:  recomputeHighlights(): void {
+455:    defineRaw("key-bind", (args) => {
+525:    defineRaw("key-unbind", (args) => {
+572:    defineRaw("key-bindings", (args) => {
+583:            createString(mapping.key),
+584:            createString(mapping.command)
+599:    defineRaw("key-binding", (args) => {
+635:            createString(specificMapping.command),
+637:            createString(mode)
+645:          createString(mapping.command),
+647:          createString(mapping.mode || "all")
+653:    defineRaw("execute-command", (args) => {
+668:    defineRaw("describe-key", (args) => {
+714:        createString(mapping.command),
+715:        createString(key),
+716:        createString(mapping.mode || mode || "all"),
+723:    defineRaw("describe-key-prompt", (args) => {
+792:        createString(name),
+793:        createString(signature),
+794:        createString(docstring)
+857:    defineRaw("apropos-command", (args) => {
+904:            createString(name),
+906:            createString(docstring)
+914:        checkMatch(name, value);
+919:        checkMatch(name, entry.value);
+927:    defineRaw("apropos-command-prompt", (args) => {
+940:    defineRaw("count-get", (args) => {
+947:    defineRaw("count-set", (args) => {
+963:    defineRaw("count-reset", (args) => {
+971:    defineRaw("count-active", (args) => {
+979:    defineRaw("set-prefix", (args) => {
+986:    defineRaw("prefix-numeric-value", (_args) => {
+993:    defineRaw("file-save", (args) => {

@@ -18,8 +18,11 @@ describe("T-Lisp Vertico and Marginalia", () => {
       editor.createBuffer(`buffer-${index}`, "content");
     }
 
-    await editor.handleKey("\x18");
-    await editor.handleKey("b");
+    // SPEC-067: switch-buffer is driven via its command directly (the "C-x b"
+    // key was freed so "C-x" can mean vim decrement-number; switch-buffer
+    // remains reachable via "SPC x b" and M-x). Matches buffer-completion.test.ts.
+    const open = editor.getInterpreter().execute("(switch-buffer)");
+    if (Either.isLeft(open)) throw new Error(open.left.message);
 
     const initial = editor.getState().minibufferView;
     expect(initial?.rows.length).toBe(10);

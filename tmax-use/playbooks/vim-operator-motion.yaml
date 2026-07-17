@@ -1,0 +1,133 @@
+name: vim-operator-motion
+description: |
+  SPEC-069 e2e: drives the new generic operator×motion + text-object + visual
+  paths through the real daemon/client stack via `keys:` steps. Exercises de,
+  db, dj (linewise), d% (inclusive bracket match), yiw + yi" (yank text-objects,
+  buffer must be unchanged), s with a typed replacement (substitute), and 2db
+  (count composition). Each combo reloads the fixture and returns to normal
+  mode first so every scenario starts from the same known state. Every step
+  has an expect. Registers are asserted indirectly (no backslashes allowed in
+  eval) via the buffer/cursor/mode after each operation.
+
+setup:
+  - action: setup_file
+    var: FILE
+    name: vim-operator-motion.txt
+    content: |
+      hello world foo
+      (bar) baz
+      say "hi" pal
+      aa bb cc dd
+
+      second paragraph
+
+steps:
+  # ---- de: forward char-inclusive word-end ----
+  - name: reload for de
+    eval: '(progn (find-file "${FILE}") (editor-set-mode "normal"))'
+    expect:
+      buffer_contains: "hello world foo"
+  - name: de deletes through end of first word
+    setup_cursor: [0, 0]
+    keys: "de"
+    wait: 80
+    expect:
+      line_text: " world foo"
+      cursor_line: 0
+      cursor_column: 0
+
+  # ---- db: backward char-exclusive ----
+  - name: reload for db
+    eval: '(progn (find-file "${FILE}") (editor-set-mode "normal"))'
+    expect:
+      buffer_contains: "hello world foo"
+  - name: db deletes back to previous word start
+    setup_cursor: [0, 6]
+    keys: "db"
+    wait: 80
+    expect:
+      line_text: "world foo"
+      cursor_column: 0
+
+  # ---- dj: linewise (two whole lines) ----
+  - name: reload for dj
+    eval: '(progn (find-file "${FILE}") (editor-set-mode "normal"))'
+    expect:
+      buffer_contains: "hello world foo"
+  - name: dj deletes current + next line
+    setup_cursor: [0, 0]
+    keys: "dj"
+    wait: 80
+    expect:
+      line_text: 'say "hi" pal'
+      cursor_line: 0
+
+  # ---- d%: inclusive bracket match ----
+  - name: reload for d%
+    eval: '(progn (find-file "${FILE}") (editor-set-mode "normal"))'
+    expect:
+      buffer_contains: "(bar) baz"
+  - name: d% deletes through matching paren
+    setup_cursor: [1, 0]
+    keys: "d%"
+    wait: 80
+    expect:
+      line_text: " baz"
+      cursor_line: 1
+
+  # ---- yiw: yank inner word (buffer unchanged) ----
+  - name: reload for yiw
+    eval: '(progn (find-file "${FILE}") (editor-set-mode "normal"))'
+    expect:
+      buffer_contains: "hello world foo"
+  - name: yiw yanks the word without mutating
+    setup_cursor: [0, 0]
+    keys: "yiw"
+    wait: 80
+    expect:
+      line_text: "hello world foo"
+      cursor_column: 0
+
+  # ---- yi": yank inner double-quote (buffer unchanged) ----
+  - name: reload for yi"
+    eval: '(progn (find-file "${FILE}") (editor-set-mode "normal"))'
+    expect:
+      buffer_contains: 'say "hi" pal'
+  - name: yi" yanks inside the quotes without mutating
+    setup_cursor: [2, 5]
+    keys: 'yi"'
+    wait: 80
+    expect:
+      line_text: 'say "hi" pal'
+      cursor_line: 2
+      cursor_column: 5
+
+  # ---- s: substitute char + typed replacement ----
+  - name: reload for s
+    eval: '(progn (find-file "${FILE}") (editor-set-mode "normal"))'
+    expect:
+      buffer_contains: "hello world foo"
+  - name: s deletes one char and enters insert; type X
+    setup_cursor: [0, 0]
+    keys: "sX"
+    wait: 80
+    expect:
+      line_text: "Xello world foo"
+      cursor_column: 1
+      mode: insert
+
+  # ---- 2db: count composition (operator count × backward motion) ----
+  - name: reload for 2db
+    eval: '(progn (find-file "${FILE}") (editor-set-mode "normal"))'
+    expect:
+      buffer_contains: "aa bb cc dd"
+  - name: 2db deletes back two words
+    setup_cursor: [3, 6]
+    keys: "2db"
+    wait: 80
+    expect:
+      line_text: "cc dd"
+      cursor_line: 3
+      cursor_column: 0
+
+cleanup: true

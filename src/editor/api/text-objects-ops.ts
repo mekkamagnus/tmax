@@ -7,51 +7,20 @@
  */
 
 import type { TLispValue, TLispFunctionImpl } from "../../tlisp/types.ts";
-import { createNil, createString, createSymbol } from "../../tlisp/values.ts";
+import { createNil, createString, createSymbol, createList, createNumber } from "../../tlisp/values.ts";
 import type { FunctionalTextBuffer } from "../../core/types.ts";
 import { runModel, readModelField, type EditorModelAccess } from "./state-context.ts";
 import { Either } from "../../utils/task-either.ts";
 import type { AppError } from "../../error/types.ts";
-import {
-  deleteInnerWord,
-  deleteAroundWord,
-  changeInnerWord,
-  changeAroundWord,
-  deleteInnerSingleQuote,
-  deleteAroundSingleQuote,
-  deleteInnerDoubleQuote,
-  deleteAroundDoubleQuote,
-  changeInnerSingleQuote,
-  changeAroundSingleQuote,
-  changeInnerDoubleQuote,
-  changeAroundDoubleQuote,
-  deleteInnerParen,
-  changeInnerParen,
-  deleteAroundParen,
-  changeAroundParen,
-  deleteInnerBrace,
-  changeInnerBrace,
-  deleteAroundBrace,
-  changeAroundBrace,
-  deleteInnerBracket,
-  changeInnerBracket,
-  deleteAroundBracket,
-  changeAroundBracket,
-  deleteInnerAngle,
-  changeInnerAngle,
-  deleteAroundAngle,
-  changeAroundAngle,
-  deleteInnerTag,
-  changeInnerTag,
-  deleteAroundTag,
-  changeAroundTag
-} from "./text-objects.ts";
+import { createTextObjectsHelpers } from "./text-objects.ts";
+import type { EditorSession } from "../functional/domain-state.ts";
 
 /**
  * Create text object operations for T-Lisp API
  */
 export function createTextObjectsOps(
   access: EditorModelAccess,
+  session: EditorSession,
   setCurrentBuffer: (buffer: FunctionalTextBuffer) => void,
   setMode: (mode: "normal" | "insert" | "visual" | "command" | "mx" | "replace") => void
 ): Map<string, TLispFunctionImpl> {
@@ -61,6 +30,44 @@ export function createTextObjectsOps(
   const getCursorColumn = (): number => runModel(access, readModelField("cursorPosition")).column;
   const getCurrentBuffer = (): FunctionalTextBuffer | null =>
     runModel(access, readModelField("currentBuffer")) ?? null;
+  // CHORE-44 Change 1: bind text-object helpers to this editor's register-delete.
+  // Existing call sites below are unchanged (destructured names match the prior
+  // module-level imports).
+  const {
+    deleteInnerWord,
+    deleteAroundWord,
+    changeInnerWord,
+    changeAroundWord,
+    deleteInnerSingleQuote,
+    deleteAroundSingleQuote,
+    deleteInnerDoubleQuote,
+    deleteAroundDoubleQuote,
+    changeInnerSingleQuote,
+    changeAroundSingleQuote,
+    changeInnerDoubleQuote,
+    changeAroundDoubleQuote,
+    deleteInnerParen,
+    changeInnerParen,
+    deleteAroundParen,
+    changeAroundParen,
+    deleteInnerBrace,
+    changeInnerBrace,
+    deleteAroundBrace,
+    changeAroundBrace,
+    deleteInnerBracket,
+    changeInnerBracket,
+    deleteAroundBracket,
+    changeAroundBracket,
+    deleteInnerAngle,
+    changeInnerAngle,
+    deleteAroundAngle,
+    changeAroundAngle,
+    deleteInnerTag,
+    changeInnerTag,
+    deleteAroundTag,
+    changeAroundTag,
+    textObjectRegion,
+  } = createTextObjectsHelpers({ registerDelete: session.registers.del, setDeleteRegister: session.deleteRegister.set });
   const ops = new Map<string, TLispFunctionImpl>();
 
   /**
@@ -691,6 +698,45 @@ export function createTextObjectsOps(
     setCurrentBuffer(result.right);
     setMode("insert");
     return Either.right(createSymbol("INSERT"));
+  });
+
+  /**
+   * Text-object region (SPEC-069 Phase 2)
+   * T-Lisp: (text-object-region class-char inner-or-around [count])
+   * Returns (start-line start-col end-line end-col wise) or nil. Computes the
+   * region via the same find* helpers as the delete/change functions so
+   * operators.tlisp can dispatch d/y/c generically (vim-apply-region) and yank
+   * text-objects (yiw/yaw/yi"/ya)/yit) work without a per-combo branch.
+   */
+  ops.set("text-object-region", (args: TLispValue[]) => {
+    const buffer = getCurrentBuffer();
+    if (!buffer) {
+      return Either.right(createNil());
+    }
+    const classChar = args[0] && args[0]!.type === "string" ? (args[0]!.value as string) : "";
+    const innerOrAround = args[1] && args[1]!.type === "string" ? (args[1]!.value as string) : "i";
+    const count = optionalCount(args.slice(2));
+    const result = textObjectRegion(
+      buffer,
+      getCursorLine(),
+      getCursorColumn(),
+      classChar,
+      innerOrAround,
+      count
+    );
+    if (Either.isLeft(result)) {
+      return Either.right(createNil());
+    }
+    const { start, end, wise } = result.right;
+    return Either.right(
+      createList([
+        createNumber(start.line),
+        createNumber(start.column),
+        createNumber(end.line),
+        createNumber(end.column),
+        createString(wise),
+      ])
+    );
   });
 
   return ops;

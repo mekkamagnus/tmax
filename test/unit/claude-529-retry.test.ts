@@ -76,7 +76,7 @@ describe("withClaude529Retry", () => {
     expect(delays).toEqual([30_000, 60_000]);
   });
 
-  test("fails only after the initial attempt plus all three 529 retries", async () => {
+  test("fails only after the initial attempt plus all configured 529 retries", async () => {
     let calls = 0;
     const delays: number[] = [];
     const wrapped = withClaude529Retry(
@@ -92,7 +92,7 @@ describe("withClaude529Retry", () => {
     expect(Either.isLeft(result)).toBe(true);
     if (Either.isLeft(result)) {
       expect(result.left).toContain("529");
-      expect(result.left).toContain("3 retries");
+      expect(result.left).toContain(`${CLAUDE_529_BACKOFF_MS.length} retries`);
     }
     expect(calls).toBe(1 + CLAUDE_529_BACKOFF_MS.length);
     expect(delays).toEqual([...CLAUDE_529_BACKOFF_MS]);

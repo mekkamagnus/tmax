@@ -31,15 +31,6 @@ interface ReplaceState {
   active: boolean;
 }
 
-let replaceState: ReplaceState = {
-  findPattern: "",
-  replaceText: "",
-  matches: [],
-  currentIndex: 0,
-  count: 0,
-  active: false
-};
-
 /**
  * Create replace operation API functions
  * @param getCurrentBuffer - Function to get current buffer
@@ -53,6 +44,15 @@ export function createReplaceOps(
   setCurrentBuffer: (buffer: FunctionalTextBuffer) => void,
   setCursorLine: (line: number) => void
 ): Map<string, TLispFunctionImpl> {
+  // CHORE-44 Change 1: per-editor replace session state (was module-global).
+  let replaceState: ReplaceState = {
+    findPattern: "",
+    replaceText: "",
+    matches: [],
+    currentIndex: 0,
+    count: 0,
+    active: false
+  };
   // CHORE-39 Phase 4: cursor/buffer reads flow through the State monad against
   // EditorModel; writes stay on the supplied setters to preserve side effects.
   const getCursorLine = (): number => runModel(access, readModelField("cursorPosition")).line;
