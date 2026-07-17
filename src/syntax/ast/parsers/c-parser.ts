@@ -5,9 +5,16 @@
 
 import { Either } from "../../../utils/task-either.ts";
 import { createConfigError } from "../../../error/types.ts";
-import type { SourceSpan, SourcePosition } from "../../../tlisp/source.ts";
+import type { SourceSpan } from "../../../tlisp/source.ts";
 import type { ASTNode, ParseError, EditDescriptor, LanguageParser } from "../types.ts";
-import { createNode } from "../types.ts";
+// CHORE-44 Change 11 AC11.4 — shared parser mechanics (position math only).
+import {
+  positionAt,
+  spanFrom,
+  emptySpanAt as sharedEmptySpanAt,
+} from "./shared/source-position.ts";
+import { bindNodeFactory } from "./shared/node-factory.ts";
+import { TokenStream } from "./shared/token-stream.ts";
 
 // ---------------------------------------------------------------------------
 // Token types
@@ -31,29 +38,18 @@ interface Token {
 }
 
 // ---------------------------------------------------------------------------
-// Helpers — source offset → SourcePosition
+// Helpers — source offset → SourcePosition.
+// CHORE-44 Change 11 AC11.4: the offset→(line,column) math now lives in
+// `shared/source-position.ts`; local `pos`/`span`/`emptySpanAt` are thin
+// curried wrappers so existing call sites stay byte-for-byte unchanged.
 // ---------------------------------------------------------------------------
 
-const pos = (offset: number, lineMap: number[]): SourcePosition => {
-  let lo = 0;
-  let hi = lineMap.length - 1;
-  while (lo < hi) {
-    const mid = (lo + hi + 1) >> 1;
-    if (lineMap[mid]! <= offset) lo = mid;
-    else hi = mid - 1;
-  }
-  return { line: lo, column: offset - lineMap[lo]!, offset };
-};
+const pos = (offset: number, lineMap: number[]) => positionAt(offset, lineMap);
+const span = (s: number, e: number, lm: number[]) => spanFrom(s, e, lm);
+const emptySpanAt = (offset: number, lm: number[]) => sharedEmptySpanAt(offset, lm);
 
-const span = (s: number, e: number, lm: number[]): SourceSpan => ({
-  start: pos(s, lm),
-  end: pos(e, lm),
-});
-
-const emptySpanAt = (offset: number, lm: number[]): SourceSpan => ({
-  start: pos(offset, lm),
-  end: pos(offset, lm),
-});
+// CHORE-44 Change 11 AC11.4: language-bound node factory (bakes in "c").
+const C_FACTORY = bindNodeFactory("c");
 
 // ---------------------------------------------------------------------------
 // C type-system keywords (for type-annotation parsing)
@@ -247,6 +243,15 @@ class CParser {
   private tokens: Token[];
   private pos: number = 0;
   private lineMap: number[];
+  /**
+   * Shared lookahead/advance/match mechanics (CHORE-44 Change 11 AC11.4).
+   * The private `peek/advance/at/match/expect/atKind/isEof` methods below
+   * delegate to this stream so behavior is unchanged; only the mechanic
+   * moved to `shared/token-stream.ts`. `this.pos` is mirrored from the
+   * stream's cursor after each advancing call so existing lookahead sites
+   * (`this.tokens[this.pos + 1]`) continue to work identically.
+   */
+  private stream: TokenStream<Token>;
 
   constructor(source: string, name: string) {
     this.source = source;
@@ -259,47 +264,51 @@ class CParser {
       if (source[i] === "\n") lm.push(i + 1);
     }
     this.lineMap = lm;
+
+    this.stream = new TokenStream<Token>(this.tokens, {
+      isEof: (t) => t.kind === "eof",
+    });
   }
 
-  // -- Token accessors -----------------------------------------------------
+  // -- Token accessors (delegate to shared TokenStream) ---------------------
 
   private peek(): Token {
-    return this.tokens[this.pos] ?? this.tokens[this.tokens.length - 1]!;
+    return this.stream.peek();
   }
 
   private peekText(): string {
-    return this.peek().text;
+    return this.stream.peekText();
   }
 
   private advance(): Token {
-    const tok = this.tokens[this.pos]!;
-    if (this.pos < this.tokens.length - 1) this.pos++;
+    const tok = this.stream.advance();
+    this.pos = this.stream.position;
     return tok;
   }
 
   private expect(text: string): Token {
-    const tok = this.peek();
-    if (tok.text !== text) {
-      throw new Error(`Expected '${text}' but got '${tok.text}' at offset ${tok.start}`);
-    }
-    return this.advance();
+    return this.stream.expect(
+      text,
+      (actual) => new Error(`Expected '${text}' but got '${actual.text}' at offset ${actual.start}`),
+    );
   }
 
   private match(text: string): Token | null {
-    if (this.peekText() === text) return this.advance();
-    return null;
+    const m = this.stream.match(text);
+    if (m) this.pos = this.stream.position;
+    return m;
   }
 
   private at(text: string): boolean {
-    return this.peekText() === text;
+    return this.stream.at(text);
   }
 
   private atKind(kind: TokenKind): boolean {
-    return this.peek().kind === kind;
+    return this.stream.atKind(kind);
   }
 
   private isEof(): boolean {
-    return this.peek().kind === "eof";
+    return this.stream.atEnd();
   }
 
   // -- Node helpers --------------------------------------------------------
@@ -313,7 +322,7 @@ class CParser {
   }
 
   private node(kind: string, startOff: number, endOff: number, children: ASTNode[] = [], label?: string): ASTNode {
-    return createNode(kind, this.s(startOff, endOff), "c", children, label);
+    return C_FACTORY.node(kind, this.s(startOff, endOff), children, label);
   }
 
   // -- Error recovery ------------------------------------------------------

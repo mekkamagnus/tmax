@@ -70,7 +70,8 @@ Status meanings:
 | Change 8 | **COMPLETE** | `dispatcher-runtime.ts` (one impl of adwId/appendEvent/writeState/subprocess) + `pipeline.ts` (StageDescriptor + runLinearPipeline); 8 scripts → thin adapters (−789 lines); 3 pipeline configs declarative (AC8.2); `adw-dispatcher-runtime.test.ts` (39 tests). test:adw 420/1 (1 pre-existing from `682c5e3`, not chore-caused); module gate 176/0. | — |
 | Change 9 | **COMPLETE** | `src/core/contracts/{primitives,buffer,terminal,filesystem,editor,workspace}.ts` canonical; `types.ts` 777→80-line barrel; `FunctionalTextBuffer→TextBuffer`, `FunctionalTextBufferImpl→TextBufferImpl`; `FunctionalTerminalIO`/`FunctionalFileSystem` removed (zero `Functional*` matches anywhere — AC9.2); `core-contracts.test.ts`. Gate 88/0 + broad 172/0 + bench 9/9 + typecheck 0. (ink-adapter.ts + save-operations.ts deleted — forced by interface removal; Change 10 still has deps/main.tsx work.) | — |
 | Change 10 | **COMPLETE** | `main.tsx`→`main.ts`; `dependencies:{}` (ink/react/tsx/typescript removed); React jsx settings gone; zero `.tsx`; version from package.json; one bootstrap model path; dead files (frontend/types.ts, utils/writer.ts) deleted; README updated; `legacy-scaffolding-removed.test.ts`. build 3 binaries OK, `--version` parity, gate 46/0. | — |
-| Changes 11–12 | **NOT STARTED** | No numbered change has its principal implementation/test files. | Resume in order only after Change 10. |
+| Change 11 | **COMPLETE** | `markdown.tlisp` → 0-defun aggregator; 7 feature modules (navigation/formatting/tables/links/execution/export/knowledge), 96 public fns unchanged (AC11.1/11.2); NEW `parsers/shared/{source-position,token-stream,node-factory}.ts` (mechanics only, AC11.6); all 4 native parsers migrated (AC11.4) with identical ASTs (AC11.5); `markdown-module-boundaries.test.ts` + `parser-shared-foundation.test.ts`. Gate 241/0; markdown.yaml passes; trt 101/4 (4 pre-existing). | — |
+| Change 12 | **NOT STARTED** | No principal implementation/test files. | Resume in order only after Change 11. |
 | Steps 13–14 | **NOT STARTED** | Existing unrelated Vim/Markdown playbooks remain available. | Create the cross-cutting CHORE-44 playbook only after Changes 1–12 are complete, then run the full validation matrix. |
 
 ### Definition of complete for every numbered change
@@ -706,9 +707,16 @@ Gate evidence (2026-07-18): Change 10 gate + broad regression (legacy-scaffoldin
 
 Break the two largest language-oriented maintenance areas into cohesive files without changing Markdown public commands/key bindings or AST output. Extract only repeated parser mechanics; keep language grammars independent and dependency-free.
 
-#### Current checkpoint status — NOT STARTED (2026-07-17)
+#### Current checkpoint status — COMPLETE (2026-07-18, independently verified)
 
-The Markdown feature-module directory, shared parser foundation, and both boundary/parity tests do not exist. Existing unrelated Markdown/Vim edits and playbooks are baseline behavior to preserve, not Change 11 progress.
+**Part A — Markdown split.** `src/tlisp/core/commands/markdown.tlisp` is now a 0-`defun` aggregator (`require-module` of all 7 feature modules + `(provide "markdown-commands")`). The 7 modules under `src/tlisp/core/commands/markdown/`: `navigation` (19 defuns), `formatting` (25), `tables` (12), `links` (12), `execution` (4), `export` (6), `knowledge` (19) — each public `markdown-*` function in exactly one module (AC11.2). The 96-function public inventory is unchanged (AC11.1); the 58 `markdown-mode.tlisp` bindings are unchanged.
+
+**Part B — shared parser mechanics.** NEW `src/syntax/ast/parsers/shared/{source-position,token-stream,node-factory}.ts` (308 lines, MECHANICS only — `buildLineMap`/`positionAt`/`spanFrom`/`TokenStream`/`makePosition`/`makeSpan`/`errorNode`/`bindNodeFactory`; no token enums, no grammar rules, no combinators — AC11.6). All 4 native parsers migrated (AC11.4): c-parser uses source-position + token-stream + node-factory; go-parser uses node-factory (its lexer is the stream); python-parser uses source-position + node-factory; typescript-parser uses source-position + node-factory. (Only c-parser adopts `TokenStream` — Go's lexer is already a stream and TypeScript relies on negative-lookahead `peek(-1)` the generic stream doesn't model; the spec's "where applicable" qualifier covers this, and AST parity [AC11.5] was chosen over forcing an ill-fitting stream.)
+
+- **AC11.3/AC11.5** — all Markdown + parser tests pass; parsing fixtures produce IDENTICAL serialized ASTs/spans/labels/errors (5 per-language parity snapshots in the new foundation test).
+- NEW `test/unit/markdown-module-boundaries.test.ts` (module loading, unique export ownership, public inventory, no duplicate definitions) + `test/unit/syntax/parser-shared-foundation.test.ts` (36 tests: token-stream edge cases, source-position incl. Unicode/newlines, node parent links, 5 language parity snapshots).
+
+Gate evidence (2026-07-18): full Change 11 gate (5 markdown + 4 parser + foundation + 4 AST tests) → **241 pass / 0 fail**; `bin/tmax-use test tmax-use/playbooks/markdown.yaml` → **1 passed**; `bun run test:trt` → 101/4 (the 4 are the pre-existing `browse-detect-at-point-*`, identical to baseline, unrelated); `bun run typecheck` exit 0; `git diff --check` clean; `chore44-baseline-inventory` green.
 
 #### Implementation requirements — Markdown
 

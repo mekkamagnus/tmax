@@ -10,6 +10,13 @@ import { createConfigError, type ConfigError } from "../../../error/types.ts";
 import type { SourceSpan, SourcePosition } from "../../../tlisp/source.ts";
 import type { ASTNode, EditDescriptor, LanguageParser, ParseError } from "../types.ts";
 import { createNode } from "../types.ts";
+import { errorNode as sharedErrorNode } from "./shared/node-factory.ts";
+// CHORE-44 Change 11 AC11.4 — shared parser mechanics (position math only).
+import {
+  buildLineMap,
+  positionAt,
+  spanFrom,
+} from "./shared/source-position.ts";
 
 // ── Token types ────────────────────────────────────────────────────────────
 
@@ -39,22 +46,27 @@ interface Token {
 
 const LANGUAGE = "python";
 
-function pos(offset: number, src: string): SourcePosition {
-  let line = 0;
-  let col = 0;
-  for (let i = 0; i < offset && i < src.length; i++) {
-    if (src[i] === "\n") {
-      line++;
-      col = 0;
-    } else {
-      col++;
-    }
+// CHORE-44 Change 11 AC11.4: offset→(line,column) math now lives in
+// shared/source-position.ts. The original `pos` walked the source fresh on
+// every call (O(n) per position); we now build the line-start map once per
+// source string and binary-search it. Output is byte-for-byte identical —
+// both implementations count `\n` occurrences up to `offset`.
+const lineMapCache = new Map<string, number[]>();
+function lineMapFor(src: string): number[] {
+  let lm = lineMapCache.get(src);
+  if (lm === undefined) {
+    lm = buildLineMap(src);
+    lineMapCache.set(src, lm);
   }
-  return { line, column: col, offset };
+  return lm;
+}
+
+function pos(offset: number, src: string): SourcePosition {
+  return positionAt(offset, lineMapFor(src));
 }
 
 function span(start: number, end: number, src: string): SourceSpan {
-  return { start: pos(start, src), end: pos(end, src) };
+  return spanFrom(start, end, lineMapFor(src));
 }
 
 function tokSpan(tok: Token, src: string): SourceSpan {
@@ -368,7 +380,7 @@ class Parser {
     while (!this.at(TK.EOF) && !this.at(TK.NEWLINE)) {
       this.advance();
     }
-    return createNode("error", tokSpan(startTok, this.src), LANGUAGE, [], msg);
+    return sharedErrorNode(tokSpan(startTok, this.src), LANGUAGE, msg);
   }
 
   // ── Top-level ─────────────────────────────────────────────────────

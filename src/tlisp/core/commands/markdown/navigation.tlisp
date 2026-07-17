@@ -1,0 +1,295 @@
+(defmodule editor/commands/markdown/navigation
+  (export markdown-next-heading markdown-prev-heading
+    markdown-next-same-level-heading markdown-prev-same-level-heading
+    markdown-up-heading markdown-heading-outline
+    markdown-fold-toggle markdown-fold-close-all markdown-fold-open-all
+    markdown-fold-by-level markdown-visibility-cycle
+    markdown-next-tag markdown-prev-tag markdown-scan-tags markdown-tag-list
+    markdown-next-footnote markdown-prev-footnote
+    markdown-push-position markdown-jump-back)
+
+;; markdown/navigation.tlisp — heading, fold, tag, footnote, and position navigation.
+;; CHORE-44 Change 11: split from markdown.tlisp (move only — no logic changes).
+
+;;; ── Heading navigation ──────────────────────────────────────────────
+
+(defun markdown-next-heading ()
+  "Move cursor to next heading line."
+  (let ((line (+ (cursor-line) 1))
+        (total (buffer-line-count)))
+    (while (and (< line total)
+                (not (string-match "^#" (buffer-get-line line))))
+      (set! line (+ line 1)))
+    (if (< line total)
+        (progn (cursor-move line 0)
+               (message "Heading at line %d" (+ line 1)))
+        (message "No next heading"))))
+
+(defun markdown-prev-heading ()
+  "Move cursor to previous heading line."
+  (let ((line (- (cursor-line) 1)))
+    (while (and (>= line 0)
+                (not (string-match "^#" (buffer-get-line line))))
+      (set! line (- line 1)))
+    (if (>= line 0)
+        (progn (cursor-move line 0)
+               (message "Heading at line %d" (+ line 1)))
+        (message "No previous heading"))))
+
+(defun markdown-next-same-level-heading ()
+  "Move to next heading of same or higher level."
+  (let* ((current (buffer-get-line (cursor-line)))
+         (level (if (string-match "^\(#+\)" current)
+                    (length (match-string 1))
+                    0))
+         (line (+ (cursor-line) 1))
+         (total (buffer-line-count)))
+    (while (and (< line total)
+                (let ((text (buffer-get-line line)))
+                  (or (not (string-match "^\(#+\)" text))
+                      (let ((ll (length (match-string 1))))
+                        (> ll level)))))
+      (set! line (+ line 1)))
+    (if (< line total)
+        (progn (cursor-move line 0)
+               (message "Heading at line %d" (+ line 1)))
+        (message "No next heading at level %d" level))))
+
+(defun markdown-prev-same-level-heading ()
+  "Move to previous heading of same or higher level."
+  (let* ((current (buffer-get-line (cursor-line)))
+         (level (if (string-match "^\(#+\)" current)
+                    (length (match-string 1))
+                    0))
+         (line (- (cursor-line) 1)))
+    (while (and (>= line 0)
+                (let ((text (buffer-get-line line)))
+                  (or (not (string-match "^\(#+\)" text))
+                      (let ((ll (length (match-string 1))))
+                        (> ll level)))))
+      (set! line (- line 1)))
+    (if (>= line 0)
+        (progn (cursor-move line 0)
+               (message "Heading at line %d" (+ line 1)))
+        (message "No previous heading at level %d" level))))
+
+(defun markdown-up-heading ()
+  "Move to parent heading (fewer #s)."
+  (let* ((current (buffer-get-line (cursor-line)))
+         (level (if (string-match "^\(#+\)" current)
+                    (length (match-string 1))
+                    0))
+         (line (- (cursor-line) 1)))
+    (while (and (>= line 0)
+                (let ((text (buffer-get-line line)))
+                  (or (not (string-match "^\(#+\)" text))
+                      (let ((ll (length (match-string 1))))
+                        (>= ll level)))))
+      (set! line (- line 1)))
+    (if (>= line 0)
+        (progn (cursor-move line 0)
+               (message "Parent heading at line %d" (+ line 1)))
+        (message "No parent heading"))))
+
+(defun markdown-heading-outline ()
+  "Show all headings in the minibuffer."
+  (let ((lines '())
+        (total (buffer-line-count))
+        (i 0))
+    (while (< i total)
+      (let ((text (buffer-get-line i)))
+        (if (string-match "^\(#+\)\\\\s+\(.*\)" text)
+            (set! lines (cons (format "%d: %s" (+ i 1) text) lines))))
+      (set! i (+ i 1)))
+    (if (> (length lines) 0)
+        (message "Headings: %s" (string-join " | " (reverse lines)))
+        (message "No headings found"))))
+
+;;; ── Fold commands ───────────────────────────────────────────────────
+
+(defun markdown-fold-toggle ()
+  "Toggle fold at current heading."
+  (fold-toggle (cursor-line)))
+
+(defun markdown-fold-close-all ()
+  "Close all headings."
+  (fold-close-all)
+  (message "All headings folded"))
+
+(defun markdown-fold-open-all ()
+  "Open all folds."
+  (fold-open-all)
+  (message "All folds opened"))
+
+(defun markdown-fold-by-level ()
+  "Fold headings deeper than level N. Reads count prefix."
+  (let ((level (or (prefix-numeric-value) 1)))
+    (fold-by-level level)
+    (message "Folded headings deeper than level %d" level)))
+
+(defun markdown-visibility-cycle ()
+  "TAB cycle: collapsed -> subheadings visible -> fully expanded."
+  (let* ((line (cursor-line))
+         (text (buffer-get-line line)))
+    (if (not (string-match "^#" text))
+        (message "Not on a heading")
+        (if (fold-is-collapsed line)
+            (progn (fold-open line)
+                   (message "Subheadings visible"))
+            (progn (fold-toggle line)
+                   (message "Collapsed"))))))
+
+;;; ── Tag navigation ─────────────────────────────────────────────────────
+
+(defun markdown-scan-tags ()
+  "Scan all lines for #tag patterns. Return list of (line col tag).
+Skips lines inside fenced code blocks (edge fix)."
+  (let ((total (buffer-line-count))
+        (tags '())
+        (in-code nil)
+        (i 0))
+    (while (< i total)
+      (let ((text (buffer-get-line i))
+            (col 0))
+        (if (string-match "^```" text)
+            (set! in-code (not in-code))
+            (if (not in-code)
+                (while (string-match "#\([a-zA-Z_-][a-zA-Z0-9_-]*\)" text)
+                  (let ((tag (match-string 1 text))
+                        (tag-col (+ col (match-beginning 0) 1)))
+                    (if (or (= (match-beginning 0) 0)
+                            (string-match "\\\\s" (substring text (- (match-beginning 0) 1) (match-beginning 0))))
+                        (set! tags (cons (list i tag-col tag) tags)))
+                    (set! text (substring text (match-end 0)))
+                    (set! col (+ col (match-end 0))))))))
+      (set! i (+ i 1)))
+    (reverse tags)))
+
+(defun markdown-next-tag ()
+  "Move cursor to next tag after current position."
+  (let ((tags (markdown-scan-tags))
+        (cur-line (cursor-line))
+        (cur-col (cursor-column))
+        (found nil)
+        (i 0))
+    (while (and (< i (length tags)) (not found))
+      (let ((t-line (nth 0 (nth i tags)))
+            (t-col (nth 1 (nth i tags))))
+        (if (or (> t-line cur-line)
+                (and (= t-line cur-line) (> t-col cur-col)))
+            (set! found (nth i tags))))
+      (set! i (+ i 1)))
+    (if found
+        (progn
+          (cursor-move (nth 0 found) (nth 1 found))
+          (message "Tag: #%s" (nth 2 found)))
+        (message "No next tag"))))
+
+(defun markdown-prev-tag ()
+  "Move cursor to previous tag before current position."
+  (let ((tags (markdown-scan-tags))
+        (cur-line (cursor-line))
+        (cur-col (cursor-column))
+        (found nil)
+        (i 0))
+    (set! i (- (length tags) 1))
+    (while (and (>= i 0) (not found))
+      (let ((t-line (nth 0 (nth i tags)))
+            (t-col (nth 1 (nth i tags))))
+        (if (or (< t-line cur-line)
+                (and (= t-line cur-line) (< t-col cur-col)))
+            (set! found (nth i tags))))
+      (set! i (- i 1)))
+    (if found
+        (progn
+          (cursor-move (nth 0 found) (nth 1 found))
+          (message "Tag: #%s" (nth 2 found)))
+        (message "No previous tag"))))
+
+(defun markdown-tag-list ()
+  "List all unique tags in the buffer."
+  (let ((tags (markdown-scan-tags))
+        (unique '())
+        (i 0))
+    (while (< i (length tags))
+      (let ((tag (nth 2 (nth i tags)))
+            (already nil)
+            (j 0))
+        (while (and (< j (length unique)) (not already))
+          (if (string= (nth j unique) tag)
+              (set! already t))
+          (set! j (+ j 1)))
+        (if (not already)
+            (set! unique (cons tag unique))))
+      (set! i (+ i 1)))
+    (message "Tags: %s" (string-join " " (reverse unique)))))
+
+;;; ── Footnote navigation ───────────────────────────────────────────────
+
+(defun markdown-next-footnote ()
+  "Move to next footnote reference."
+  (let ((line (cursor-line))
+        (col (cursor-column))
+        (total (buffer-line-count))
+        (found nil))
+    (while (and (< line total) (not found))
+      (let ((text (buffer-get-line line))
+            (search-col (if (= line (cursor-line)) (+ col 1) 0)))
+        (if (string-match "\\\\[\\\\^[a-zA-Z0-9_]+\\\\]" (substring text search-col))
+            (progn
+              (set! found t)
+              (cursor-move line (+ search-col (match-beginning 0))))
+            (set! line (+ line 1)))))
+    (if (not found)
+        (message "No next footnote"))))
+
+(defun markdown-prev-footnote ()
+  "Move to previous footnote reference."
+  (let ((line (cursor-line))
+        (col (cursor-column))
+        (found nil))
+    (while (and (>= line 0) (not found))
+      (let ((text (buffer-get-line line)))
+        (let ((last-match nil)
+              (search-text (if (= line (cursor-line))
+                               (substring text 0 col)
+                               text)))
+          (while (string-match "\\\\[\\\\^[a-zA-Z0-9_]+\\\\]" search-text)
+            (set! last-match (match-beginning 0))
+            (set! search-text (substring search-text (match-end 0))))
+          (if last-match
+              (progn
+                (set! found t)
+                (cursor-move line last-match))
+              (set! line (- line 1))))))
+    (if (not found)
+        (message "No previous footnote"))))
+
+;;; ── Position stack (link-back navigation) ──────────────────────────────
+
+(defvar *markdown-link-ring* nil
+  "Position stack for markdown link-back navigation (gb).")
+
+(defun markdown-push-position ()
+  "Push current position onto the link ring for back-navigation."
+  (let ((entry (list (buffer-current) (cursor-line) (cursor-column)))
+        (ring (or *markdown-link-ring* '())))
+    (set! *markdown-link-ring* (cons entry ring))
+    (if (> (length *markdown-link-ring*) 20)
+        (set! *markdown-link-ring* (reverse (cdr (reverse *markdown-link-ring*)))))))
+
+(defun markdown-jump-back ()
+  "Jump back to previous position before following a markdown link."
+  (if (or (not *markdown-link-ring*) (= (length *markdown-link-ring*) 0))
+      (message "No previous position")
+      (let ((entry (car *markdown-link-ring*)))
+        (set! *markdown-link-ring* (cdr *markdown-link-ring*))
+        (let ((buf (nth 0 entry))
+              (line (nth 1 entry))
+              (col (nth 2 entry)))
+          (buffer-switch buf)
+          (cursor-move line col)
+          (message "Returned to %s:%d:%d" buf (+ line 1) col)))))
+
+(provide "markdown-commands/navigation")
+)

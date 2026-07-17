@@ -1,0 +1,487 @@
+(defmodule editor/commands/markdown/formatting
+  (export markdown-toggle-bold markdown-toggle-italic markdown-toggle-strikethrough
+    markdown-toggle-code markdown-toggle-delimiter markdown-toggle-code-block
+    markdown-toggle-checkbox
+    markdown-promote-heading markdown-demote-heading markdown-insert-heading
+    markdown-insert-list-item markdown-renumber-list markdown-list-continue
+    markdown-demote-subtree markdown-promote-subtree
+    markdown-move-subtree-up markdown-move-subtree-down
+    markdown-copy-subtree markdown-kill-subtree
+    markdown-current-subtree-range markdown-get-subtree-text markdown-find-sibling-ranges
+    markdown-replace-line markdown-delete-line markdown-do)
+
+;; markdown/formatting.tlisp — inline toggles, headings, lists, checkboxes, subtree ops.
+;; CHORE-44 Change 11: split from markdown.tlisp (move only — no logic changes).
+
+(defun markdown-delete-line (line)
+  "Delete the entire line at LINE number."
+  (let ((total (buffer-line-count)))
+    (if (>= line total)
+        nil
+        (if (= line (- total 1))
+            (buffer-delete-range line 0 line 999999)
+            (buffer-delete-range line 0 (+ line 1) 0)))))
+(defun markdown-toggle-bold ()
+  "Toggle **bold** around word at point."
+  (markdown-toggle-delimiter "**" "**"))
+
+(defun markdown-toggle-italic ()
+  "Toggle *italic* around word at point."
+  (markdown-toggle-delimiter "*" "*"))
+
+(defun markdown-toggle-strikethrough ()
+  "Toggle ~~strikethrough~~ around word at point."
+  (markdown-toggle-delimiter "~~" "~~"))
+
+(defun markdown-toggle-code ()
+  "Toggle `code` around word at point."
+  (markdown-toggle-delimiter "`" "`"))
+(defun markdown-replace-line (new-text)
+  "Replace current line content with NEW-TEXT."
+  (let* ((ln (cursor-line))
+         (old (buffer-get-line ln))
+         (len (length old)))
+    (cursor-move ln 0)
+    (buffer-delete len)
+    (buffer-insert new-text)))
+(defun markdown-toggle-delimiter (open close)
+  "Generic wrap/unwrap helper for inline formatting."
+  (let* ((line (buffer-get-line (cursor-line)))
+         (col (cursor-column))
+         (llen (length line))
+         ;; Try to find the word at point
+         (word-start col)
+         (word-end col))
+    ;; Extend word-start backward
+    (while (and (> word-start 0)
+                (not (string-match "\\\\s" (substring line (- word-start 1) word-start))))
+      (set! word-start (- word-start 1)))
+    ;; Extend word-end forward
+    (while (and (< word-end llen)
+                (not (string-match "\\\\s" (substring line word-end (+ word-end 1)))))
+      (set! word-end (+ word-end 1)))
+    ;; Check if already wrapped
+    (if (and (>= word-start (length open))
+             (>= (+ word-end (length close)) llen)
+             (string= (substring line (- word-start (length open)) word-start) open)
+             (string= (substring line word-end (+ word-end (length close))) close))
+        ;; Unwrap: remove delimiters
+        (let ((before (substring line 0 (- word-start (length open))))
+              (content (substring line word-start word-end))
+              (after (substring line (+ word-end (length close)))))
+          (markdown-replace-line (concat before content after))
+          (cursor-move (cursor-line) (- word-start (length open))))
+        ;; Wrap: add delimiters
+        (if (< word-end word-start)
+            (progn
+              (markdown-replace-line (concat (substring line 0 col) open close (substring line col)))
+              (cursor-move (cursor-line) (+ col (length open))))
+            (progn
+              (markdown-replace-line (concat (substring line 0 word-start) open
+                                     (substring line word-start word-end)
+                                     close
+                                     (substring line word-end)))
+              (cursor-move (cursor-line) (+ word-start (length open))))))))
+(defun markdown-toggle-code-block ()
+  "Wrap/unwrap fenced code block around current line or selection."
+  (let ((line (buffer-get-line (cursor-line))))
+    (if (string-match "^```" line)
+        ;; Unwrap: find the matching fence and remove both
+        (let* ((start (cursor-line))
+               (total (buffer-line-count))
+               (i (+ start 1))
+               (found-end nil))
+          (while (and (< i total) (not found-end))
+            (let ((l (buffer-get-line i)))
+              (if (string-match "^```" l)
+                  (set! found-end i)
+                  (set! i (+ i 1)))))
+          (if found-end
+              (progn
+                (markdown-delete-line found-end)
+                (markdown-delete-line start)
+                (cursor-move start 0)
+                (message "Removed code block"))
+              ;; Maybe the open fence is above — search upward
+              (let ((j (- start 1)))
+                (while (and (>= j 0) (not (string-match "^```" (buffer-get-line j))))
+                  (set! j (- j 1)))
+                (if (>= j 0)
+                    (progn
+                      (markdown-delete-line start)
+                      (markdown-delete-line j)
+                      (cursor-move j 0)
+                      (message "Removed code block"))
+                    (message "No matching fence found")))))
+        ;; Wrap: add fences around current line
+        (progn
+          (buffer-insert-at-position (cursor-line) 0 "```\n")
+          (cursor-move (+ (cursor-line) 1) 0)
+          (let ((next-line (+ (cursor-line) 1)))
+            (buffer-insert-at-position next-line 0 "```\n")
+            (message "Wrapped in code block"))))))
+(defun markdown-promote-heading ()
+  "Decrease heading level (## -> #)."
+  (let ((line (buffer-get-line (cursor-line))))
+    (if (string-match "^\(#+\)\\\\s+" line)
+        (let* ((hashes (match-string 1))
+               (len (length hashes)))
+          (if (> len 1)
+              (progn
+                (markdown-delete-line (cursor-line))
+                (buffer-insert (concat (substring hashes 0 (- len 1)) (substring line len)))
+                (message "Promoted to level %d" (- len 1)))
+              (message "Already at level 1")))
+        (message "Not on a heading"))))
+
+(defun markdown-demote-heading ()
+  "Increase heading level (## -> ###)."
+  (let ((line (buffer-get-line (cursor-line))))
+    (if (string-match "^\(#+\)\\\\s+" line)
+        (let ((len (length (match-string 1))))
+          (if (< len 6)
+              (progn
+                (markdown-delete-line (cursor-line))
+                (buffer-insert (concat "#" line))
+                (message "Demoted to level %d" (+ len 1)))
+              (message "Already at level 6")))
+        (message "Not on a heading"))))
+(defun markdown-insert-heading ()
+  "Insert a new heading at the given level (reads prefix arg)."
+  (let ((level (or (prefix-numeric-value) 2)))
+    (if (> level 6) (set! level 6))
+    (if (< level 1) (set! level 1))
+    (let ((hashes (make-string level 35)))
+      (buffer-insert (format "%s \n" hashes))
+      (cursor-move (+ (cursor-line) 1) (+ level 1))
+      (message "Inserted level %d heading" level))))
+(defun markdown-insert-list-item ()
+  "Insert a new list item below current, matching marker and indent."
+  (let* ((line (buffer-get-line (cursor-line)))
+         (indent 0))
+    ;; Detect indent
+    (while (and (< indent (length line))
+                (string-match "\\\\s" (substring line indent (+ indent 1))))
+      (set! indent (+ indent 1)))
+    ;; Detect marker type
+    (let ((rest (substring line indent)))
+      (cond
+        ((string-match "^\([-*+]\)\\\\s+" rest)
+         (let* ((marker (match-string 1 rest))
+                (after-marker (substring rest (+ (length marker) 1))))
+           (if (string= after-marker "")
+               (progn (markdown-delete-line (cursor-line))
+                      (buffer-insert (make-string indent 32))
+                      (cursor-move (cursor-line) indent))
+               (progn
+                 (cursor-move (+ (cursor-line) 1) 0)
+                 (buffer-insert (format "%s%s " (make-string indent 32) marker))
+                 (cursor-move (+ (cursor-line) 1) (+ indent (length marker) 1))))))
+        ((string-match "^\(\\\\d+\)[.)]\\\\s+" rest)
+         (let* ((num (string-to-number (match-string 1 rest)))
+                (sep (if (string-match "^\\\\d+\(\\\\.\)" rest) "." ")"))
+                (after-marker (substring rest (+ (length (match-string 0 rest))))))
+           (if (string= after-marker "")
+               (progn (markdown-delete-line (cursor-line))
+                      (buffer-insert (make-string indent 32))
+                      (cursor-move (cursor-line) indent))
+               (progn
+                 (cursor-move (+ (cursor-line) 1) 0)
+                 (buffer-insert (format "%s%d%s " (make-string indent 32) (+ num 1) sep))
+                 (cursor-move (+ (cursor-line) 1) (+ indent (length (format "%d" (+ num 1))) 1))))))
+        (t
+         (message "Not on a list item"))))))
+(defun markdown-renumber-list ()
+  "Renumber the ordered list at point."
+  (let ((line (cursor-line))
+        (text (buffer-get-line (cursor-line))))
+    (if (not (string-match "^\\\\s*\(\\\\d+\)[.)]" text))
+        (message "Not on an ordered list item")
+        (let* ((indent 0)
+               (start line))
+          (while (and (< indent (length text))
+                      (string-match "\\\\s" (substring text indent (+ indent 1))))
+            (set! indent (+ indent 1)))
+          ;; Find start of list
+          (while (and (> start 0)
+                      (string-match (format "^\\\\s-{0,%d}\\\\d+[.)]" indent)
+                                    (buffer-get-line (- start 1))))
+            (set! start (- start 1)))
+          ;; Find end of list
+          (let ((end line)
+                (total (buffer-line-count)))
+            (while (and (< (+ end 1) total)
+                        (string-match (format "^\\\\s-{0,%d}\\\\d+[.)]" indent)
+                                      (buffer-get-line (+ end 1))))
+              (set! end (+ end 1))))
+          ;; Renumber
+          (let ((i start)
+                (n 1))
+            (while (<= i end)
+              (let* ((l (buffer-get-line i))
+                     (sep (if (string-match "^\\\\s*\\\\d+\)" l) ")" ".")))
+                (if (string-match "^\(\\\\s*\)\\\\d+\([.)]\)\\\\s+" l)
+                    (progn
+                      (markdown-delete-line i)
+                      (buffer-insert-at-position i 0
+                        (format "%s%d%s %s"
+                                (match-string 1 l) n (match-string 2 l)
+                                (substring l (match-end 0))))))
+                (set! i (+ i 1))
+                (set! n (+ n 1)))))
+          (message "Renumbered %d items" (+ (- end start) 1))))))
+(defun markdown-do ()
+  "Context-aware action at point: follow link, fold heading, toggle checkbox."
+  (let ((line (buffer-get-line (cursor-line))))
+    (cond
+      ((markdown-link-at-point)
+       (markdown-follow-link))
+      ((string-match "^#" line)
+       (markdown-fold-toggle))
+      (t
+       (message "Nothing to do at point")))))
+
+(defun markdown-toggle-checkbox ()
+  "Toggle checkbox state on current line."
+  (let ((line (buffer-get-line (cursor-line))))
+    (if (string-match "^\(\\\\s*[-*+]\\\\s-\)\\\\[ \\\\]" line)
+        (progn
+          (markdown-delete-line (cursor-line))
+          (buffer-insert (concat (match-string 1 line) "[x]")))
+        (if (string-match "^\(\\\\s*[-*+]\\\\s-\)\\\\[x\\\\]" line)
+            (progn
+              (markdown-delete-line (cursor-line))
+              (buffer-insert (concat (match-string 1 line) "[ ]")))
+            (message "Not a checkbox")))))
+(defun markdown-list-continue ()
+  "Auto-continue list on Enter. Called after newline is inserted.
+Checks previous line for list marker and inserts continuation.
+If previous line was an empty list item, clears it instead."
+  (if (not (string= (major-mode-get) "markdown"))
+      nil
+      (let ((prev-line (- (cursor-line) 1))
+            (cur-line (cursor-line)))
+        (if (< prev-line 0)
+            nil
+            (let ((text (buffer-get-line prev-line)))
+              (cond
+                ;; Unordered list: empty item (just marker + space) → clear it
+                ((string-match "^\(\\\\s*\)\([-*+]\)\\\\s+$" text)
+                 (markdown-delete-line prev-line)
+                 (buffer-insert-at-position prev-line 0 (make-string (length (match-string 1)) 32))
+                 (cursor-move prev-line (length (match-string 1)))
+                 t)
+                ;; Unordered list: has content → insert next marker
+                ((string-match "^\(\\\\s*\)\([-*+]\)\\\\s-" text)
+                 (let* ((indent (match-string 1))
+                        (marker (match-string 2)))
+                   (buffer-insert (format "%s%s " indent marker))
+                   (cursor-move cur-line (+ (length indent) (length marker) 1))
+                   t))
+                ;; Ordered list: empty item → clear it
+                ((string-match "^\(\\\\s*\)\(\\\\d+\)\([.)]\)\\\\s+$" text)
+                 (markdown-delete-line prev-line)
+                 (buffer-insert-at-position prev-line 0 (make-string (length (match-string 1)) 32))
+                 (cursor-move prev-line (length (match-string 1)))
+                 t)
+                ;; Ordered list: has content → increment number
+                ((string-match "^\(\\\\s*\)\(\\\\d+\)\([.)]\)\\\\s-" text)
+                 (let* ((indent (match-string 1))
+                        (num (string-to-number (match-string 2)))
+                        (sep (match-string 3)))
+                   (buffer-insert (format "%s%d%s " indent (+ num 1) sep))
+                   (cursor-move cur-line (+ (length indent) (length (format "%d" (+ num 1))) 1))
+                   t)
+                (t nil))))))))
+(defun markdown-current-subtree-range ()
+  "Return (start end level) for the heading at cursor-line, or nil.
+The end includes all child sections."
+  (let ((ranges (find-heading-ranges))
+        (found-range nil)
+        (i 0))
+    (while (and (< i (length ranges)) (not found-range))
+      (let ((r (nth i ranges)))
+        (if (= (nth 0 r) (cursor-line))
+            (set! found-range r)))
+      (set! i (+ i 1)))
+    (if (not found-range)
+        nil
+        (let ((start (nth 0 found-range))
+              (end (nth 1 found-range))
+              (level (nth 2 found-range)))
+          (set! i 0)
+          (while (< i (length ranges))
+            (let ((r (nth i ranges)))
+              (if (and (>= (nth 0 r) start)
+                       (> (nth 2 r) level)
+                       (> (nth 1 r) end))
+                  (set! end (nth 1 r))))
+            (set! i (+ i 1)))
+          (list start end level)))))
+
+(defun markdown-get-subtree-text (start end)
+  "Collect text from line START to END (inclusive)."
+  (let ((lines '())
+        (i start))
+    (while (<= i end)
+      (set! lines (cons (buffer-get-line i) lines))
+      (set! i (+ i 1)))
+    (string-join "\n" (reverse lines))))
+
+(defun markdown-kill-subtree ()
+  "Kill the subtree at current heading (heading + children)."
+  (let ((range (markdown-current-subtree-range)))
+    (if (not range)
+        (message "Not on a heading")
+        (let ((start (nth 0 range))
+              (end (nth 1 range)))
+          (let ((text (markdown-get-subtree-text start end)))
+            (kill-ring-save text)
+            (let ((i end))
+              (while (>= i start)
+                (markdown-delete-line i)
+                (set! i (- i 1))))
+            (cursor-move start 0)
+            (message "Killed subtree at line %d" (+ start 1)))))))
+
+(defun markdown-copy-subtree ()
+  "Copy the subtree at current heading to kill ring."
+  (let ((range (markdown-current-subtree-range)))
+    (if (not range)
+        (message "Not on a heading")
+        (let ((start (nth 0 range))
+              (end (nth 1 range)))
+          (let ((text (markdown-get-subtree-text start end)))
+            (kill-ring-save text)
+            (message "Copied subtree at line %d" (+ start 1)))))))
+
+(defun markdown-find-sibling-ranges ()
+  "Find all sibling heading ranges at the same level as current heading."
+  (let ((ranges (find-heading-ranges))
+        (cur-range (markdown-current-subtree-range))
+        (siblings '()))
+    (if (not cur-range)
+        '()
+        (let ((cur-level (nth 2 cur-range))
+              (i 0))
+          (while (< i (length ranges))
+            (let ((r (nth i ranges)))
+              (if (= (nth 2 r) cur-level)
+                  (set! siblings (cons (list (nth 0 r) (nth 1 r)) siblings))))
+            (set! i (+ i 1)))
+          (reverse siblings)))))
+(defun markdown-move-subtree-up ()
+  "Move current subtree up, swapping with previous sibling."
+  (let ((siblings (markdown-find-sibling-ranges)))
+    (if (or (not siblings) (< (length siblings) 2))
+        (message "No sibling to swap with")
+        (let ((found-idx nil)
+              (i 0))
+          (while (and (< i (length siblings)) (not found-idx))
+            (if (= (nth 0 (nth i siblings)) (cursor-line))
+                (set! found-idx i))
+            (set! i (+ i 1)))
+          (if (or (not found-idx) (= found-idx 0))
+              (message "No previous sibling")
+              (let* ((cur (nth found-idx siblings))
+                     (prev (nth (- found-idx 1) siblings))
+                     (cur-start (nth 0 cur))
+                     (cur-end (nth 1 cur))
+                     (prev-start (nth 0 prev))
+                     (prev-end (nth 1 prev))
+                     (cur-text (markdown-get-subtree-text cur-start cur-end))
+                     (prev-text (markdown-get-subtree-text prev-start prev-end)))
+                (let ((j cur-end))
+                  (while (>= j cur-start)
+                    (markdown-delete-line j)
+                    (set! j (- j 1))))
+                (let ((j prev-end))
+                  (while (>= j prev-start)
+                    (markdown-delete-line j)
+                    (set! j (- j 1))))
+                (buffer-insert-at-position prev-start 0 cur-text)
+                (buffer-insert-at-position (+ prev-start (length (string-split "\n" cur-text))) 0 prev-text)
+                (cursor-move prev-start 0)
+                (message "Moved subtree up")))))))
+
+(defun markdown-move-subtree-down ()
+  "Move current subtree down, swapping with next sibling."
+  (let ((siblings (markdown-find-sibling-ranges)))
+    (if (or (not siblings) (< (length siblings) 2))
+        (message "No sibling to swap with")
+        (let ((found-idx nil)
+              (i 0))
+          (while (and (< i (length siblings)) (not found-idx))
+            (if (= (nth 0 (nth i siblings)) (cursor-line))
+                (set! found-idx i))
+            (set! i (+ i 1)))
+          (if (or (not found-idx) (>= (+ found-idx 1) (length siblings)))
+              (message "No next sibling")
+              (let* ((cur (nth found-idx siblings))
+                     (nxt (nth (+ found-idx 1) siblings))
+                     (cur-start (nth 0 cur))
+                     (cur-end (nth 1 cur))
+                     (nxt-start (nth 0 nxt))
+                     (nxt-end (nth 1 nxt))
+                     (cur-text (markdown-get-subtree-text cur-start cur-end))
+                     (nxt-text (markdown-get-subtree-text nxt-start nxt-end)))
+                (let ((j nxt-end))
+                  (while (>= j nxt-start)
+                    (markdown-delete-line j)
+                    (set! j (- j 1))))
+                (let ((j cur-end))
+                  (while (>= j cur-start)
+                    (markdown-delete-line j)
+                    (set! j (- j 1))))
+                (buffer-insert-at-position cur-start 0 nxt-text)
+                (buffer-insert-at-position (+ cur-start (length (string-split "\n" nxt-text))) 0 cur-text)
+                (cursor-move (+ cur-start (length (string-split "\n" nxt-text))) 0)
+                (message "Moved subtree down")))))))
+(defun markdown-promote-subtree ()
+  "Promote all headings in subtree (reduce heading level by 1)."
+  (let ((range (markdown-current-subtree-range)))
+    (if (not range)
+        (message "Not on a heading")
+        (let ((start (nth 0 range))
+              (end (nth 1 range))
+              (i 0))
+          (set! i start)
+          (while (<= i end)
+            (let ((text (buffer-get-line i)))
+              (if (and (string-match "^#+\\\\s" text) (> (length text) 1))
+                  (let ((level 0))
+                    (while (and (< level (length text)) (string= (substring text level (+ level 1)) "#"))
+                      (set! level (+ level 1)))
+                    (if (> level 1)
+                        (progn
+                          (cursor-move i 0)
+                          (buffer-delete (length text))
+                          (buffer-insert (concat (substring text 0 (- level 1)) (substring text level))))))))
+            (set! i (+ i 1)))
+          (message "Promoted subtree")))))
+
+(defun markdown-demote-subtree ()
+  "Demote all headings in subtree (increase heading level by 1)."
+  (let ((range (markdown-current-subtree-range)))
+    (if (not range)
+        (message "Not on a heading")
+        (let ((start (nth 0 range))
+              (end (nth 1 range))
+              (i 0))
+          (set! i start)
+          (while (<= i end)
+            (let ((text (buffer-get-line i)))
+              (if (and (string-match "^#+\\\\s" text)
+                       (let ((level 0))
+                         (while (and (< level (length text)) (string= (substring text level (+ level 1)) "#"))
+                           (set! level (+ level 1)))
+                         (< level 6)))
+                  (progn
+                    (cursor-move i 0)
+                    (buffer-delete (length text))
+                    (buffer-insert (concat "#" text)))))
+            (set! i (+ i 1)))
+          (message "Demoted subtree")))))
+
+(provide "markdown-commands/formatting")
+)

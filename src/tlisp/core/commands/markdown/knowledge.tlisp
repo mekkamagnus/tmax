@@ -1,0 +1,387 @@
+(defmodule editor/commands/markdown/knowledge
+  (export markdown-frontmatter-get markdown-frontmatter-set markdown-frontmatter-show
+    markdown-skip-front-matter markdown-generate-toc
+    markdown-expand-template-variables markdown-new-from-template
+    markdown-scan-wiki-links markdown-next-wiki-link markdown-prev-wiki-link
+    markdown-wiki-link-at-point markdown-follow-wiki-link
+    markdown-find-unlinked-mentions markdown-backlinks
+    markdown-daily-note markdown-rename-note
+    markdown-sparse-tree-regex markdown-sparse-tree-level markdown-sparse-tree-tag)
+
+;; markdown/knowledge.tlisp — frontmatter, wiki links, backlinks, templates,
+;; daily notes, renaming, and sparse-tree filtering.
+;; CHORE-44 Change 11: split from markdown.tlisp (move only — no logic changes).
+;; Cross-module calls (markdown-open-anchor, markdown-dirname, markdown-push-position,
+;; markdown-scan-tags, find-heading-ranges) resolve via the unique-export fallback.
+
+(defun markdown-skip-front-matter ()
+  "Return the line number after YAML front matter, or 0 if none."
+  (if (and (> (buffer-line-count) 0) (string= (buffer-get-line 0) "---"))
+      (let ((i 1)
+            (total (buffer-line-count)))
+        (while (and (< i total) (not (string= (buffer-get-line i) "---")))
+          (set! i (+ i 1)))
+        (if (< i total)
+            (+ i 1)
+            0))
+      0))
+
+(defun markdown-generate-toc ()
+  "Generate a table of contents from all headings."
+  (let ((toc-lines '())
+        (total (buffer-line-count))
+        (i 0))
+    (while (< i total)
+      (let ((text (buffer-get-line i)))
+        (if (string-match "^\(#+\)\\\\s+\(.*\)" text)
+            (let* ((level (length (match-string 1 text)))
+                   (title (match-string 2 text))
+                   (anchor (downcase (replace-regexp-in-string "[^a-z0-9]+" "-" (string-trim title))))
+                   (indent (make-string (* (- level 1) 2) 32))
+                   (link (format "%s- [%s](#%s)" indent title anchor)))
+              (set! toc-lines (cons link toc-lines)))))
+      (set! i (+ i 1)))
+    (if (> (length toc-lines) 0)
+        (let ((insert-line (markdown-skip-front-matter)))
+          (cursor-move insert-line 0)
+          (buffer-insert (string-join "\n" (reverse toc-lines)))
+          (buffer-insert "\n")
+          (message "Generated TOC with %d entries" (length toc-lines)))
+        (message "No headings found"))))
+
+;;; ── Sparse tree filtering ─────────────────────────────────────────────
+
+(defun markdown-sparse-tree-regex (regex)
+  "Fold all headings, then open only those matching REGEX."
+  (fold-close-all)
+  (let ((ranges (find-heading-ranges))
+        (i 0))
+    (while (< i (length ranges))
+      (let ((r (nth i ranges)))
+        (let ((heading-line (buffer-get-line (nth 0 r))))
+          (if (string-match regex heading-line)
+              (fold-open (nth 0 r)))))
+      (set! i (+ i 1)))
+    (message "Sparse tree: matching %s" regex)))
+
+(defun markdown-sparse-tree-level (max-level)
+  "Show headings up to MAX-LEVEL, fold deeper ones."
+  (fold-by-level max-level)
+  (message "Showing headings up to level %d" max-level))
+
+(defun markdown-sparse-tree-tag (tag)
+  "Show sparse tree filtered by TAG."
+  (markdown-sparse-tree-regex (concat "#" tag)))
+
+;;; ── YAML frontmatter ──────────────────────────────────────────────────
+
+(defun markdown-frontmatter-get (key)
+  "Get a value from YAML frontmatter by KEY."
+  (if (and (> (buffer-line-count) 0) (string= (buffer-get-line 0) "---"))
+      (let ((i 1)
+            (total (buffer-line-count))
+            (found nil))
+        (while (and (< i total) (not found))
+          (let ((text (buffer-get-line i)))
+            (if (string= text "---")
+                (set! found 'done)
+                (if (string-match (concat "^" key ":\\\\s+\(.*\)") text)
+                    (set! found (match-string 1 text)))))
+          (set! i (+ i 1)))
+        (if (and found (not (equal found 'done)))
+            found
+            nil))
+      nil))
+
+(defun markdown-frontmatter-set (key value)
+  "Set a KEY to VALUE in YAML frontmatter. Creates frontmatter if needed."
+  (if (not (string= (buffer-get-line 0) "---"))
+      (progn
+        (buffer-insert-at-position 0 0 (concat "---\n" key ": " value "\n---\n"))
+        (message "Created frontmatter with %s" key))
+      (let ((i 1)
+            (updated nil)
+            (close-line nil))
+        (while (and (< i (buffer-line-count)) (not close-line))
+          (let ((text (buffer-get-line i)))
+            (if (string= text "---")
+                (set! close-line i)
+                (if (string-match (concat "^" key ":\\\\s+.*") text)
+                    (progn
+                      (cursor-move i 0)
+                      (buffer-delete (length text))
+                      (buffer-insert (concat key ": " value))
+                      (set! updated t)
+                      (set! i (+ i 1))))))
+          (set! i (+ i 1)))
+        (if (not updated)
+            (if close-line
+                (progn
+                  (cursor-move close-line 0)
+                  (buffer-insert (concat key ": " value "\n")))
+                (message "No closing frontmatter delimiter found"))
+            (message "Updated %s" key)))))
+
+(defun markdown-frontmatter-show ()
+  "Display all frontmatter key-value pairs."
+  (if (not (string= (buffer-get-line 0) "---"))
+      (message "No frontmatter")
+      (let ((i 1)
+            (total (buffer-line-count))
+            (pairs '()))
+        (while (and (< i total) (not (string= (buffer-get-line i) "---")))
+          (let ((text (buffer-get-line i)))
+            (if (string-match "^\([a-zA-Z_-]+\):\\\\s+\(.*\)" text)
+                (set! pairs (cons (concat (match-string 1 text) ": " (match-string 2 text)) pairs))))
+          (set! i (+ i 1)))
+        (if (> (length pairs) 0)
+            (message "Frontmatter: %s" (string-join " | " (reverse pairs)))
+            (message "Empty frontmatter")))))
+
+;;; ── Wiki-links and Zettelkasten ───────────────────────────────────────
+
+(defun markdown-wiki-link-at-point ()
+  "Find [[target]] at cursor position. Return target or nil."
+  (let* ((line (buffer-get-line (cursor-line)))
+         (col (cursor-column))
+         (result nil)
+         (search-text line))
+    (while (and (string-match "\\\\[\\\\[\([^\\\\]]+\)\\\\]\\\\]" search-text) (not result))
+      (let ((start (match-beginning 0))
+            (end (match-end 0))
+            (target (match-string 1 search-text)))
+        (if (and (>= col start) (<= col end))
+            (set! result target)
+            (set! search-text (substring search-text (match-end 0))))))
+    result))
+
+(defun markdown-scan-wiki-links ()
+  "Scan all lines for [[link]] patterns. Return list of (line col target)."
+  (let ((total (buffer-line-count))
+        (links '())
+        (i 0))
+    (while (< i total)
+      (let ((text (buffer-get-line i))
+            (col 0))
+        (while (string-match "\\\\[\\\\[\([^\\\\]]+\)\\\\]\\\\]" text)
+          (let ((target (match-string 1 text))
+                (link-col (+ col (match-beginning 0) 2)))
+            (set! links (cons (list i link-col target) links))
+            (set! text (substring text (match-end 0)))
+            (set! col (+ col (match-end 0))))))
+      (set! i (+ i 1)))
+    (reverse links)))
+
+(defun markdown-next-wiki-link ()
+  "Move cursor to next [[wiki-link]] after current position."
+  (let ((links (markdown-scan-wiki-links))
+        (cur-line (cursor-line))
+        (cur-col (cursor-column))
+        (found nil)
+        (i 0))
+    (while (and (< i (length links)) (not found))
+      (let ((l-line (nth 0 (nth i links)))
+            (l-col (nth 1 (nth i links))))
+        (if (or (> l-line cur-line)
+                (and (= l-line cur-line) (> l-col cur-col)))
+            (set! found (nth i links))))
+      (set! i (+ i 1)))
+    (if found
+        (progn
+          (cursor-move (nth 0 found) (nth 1 found))
+          (message "Link: [[%s]]" (nth 2 found)))
+        (message "No next wiki-link"))))
+
+(defun markdown-prev-wiki-link ()
+  "Move cursor to previous [[wiki-link]] before current position."
+  (let ((links (markdown-scan-wiki-links))
+        (cur-line (cursor-line))
+        (cur-col (cursor-column))
+        (found nil)
+        (i 0))
+    (set! i (- (length links) 1))
+    (while (and (>= i 0) (not found))
+      (let ((l-line (nth 0 (nth i links)))
+            (l-col (nth 1 (nth i links))))
+        (if (or (< l-line cur-line)
+                (and (= l-line cur-line) (< l-col cur-col)))
+            (set! found (nth i links))))
+      (set! i (- i 1)))
+    (if found
+        (progn
+          (cursor-move (nth 0 found) (nth 1 found))
+          (message "Link: [[%s]]" (nth 2 found)))
+        (message "No previous wiki-link"))))
+
+(defun markdown-follow-wiki-link ()
+  "Follow [[wiki-link]] at point."
+  (let ((target (markdown-wiki-link-at-point)))
+    (if (not target)
+        (message "No wiki link at point")
+        (let ((heading nil)
+              (block-ref nil)
+              (file-path target))
+          (if (string-match "^\([^#]+\)#\\^\(.*\)" target)
+              (progn
+                (set! file-path (match-string 1 target))
+                (set! block-ref (match-string 2 target)))
+              (if (string-match "^\([^#]+\)#\(.*\)" target)
+                  (progn
+                    (set! file-path (match-string 1 target))
+                    (set! heading (match-string 2 target)))
+                  (if (string-match "^#\(.*\)" target)
+                      (progn
+                        (set! file-path nil)
+                        (set! heading (match-string 1 target))))))
+          (if file-path
+              (let ((resolved file-path))
+                (if (not (string-match "\\." file-path))
+                    (set! resolved (concat file-path ".md")))
+                (if (not (string-match "^/" resolved))
+                    (let ((dir (markdown-dirname (or (buffer-filename) "."))))
+                      (set! resolved (concat dir "/" resolved))))
+                (if (file-exists-p resolved)
+                    (progn
+                      (markdown-push-position)
+                      (find-file-open resolved)
+                      (if heading
+                          (markdown-open-anchor (concat "#" heading))))
+                    (message "Wiki link target not found: %s" resolved)))
+              (if heading
+                  (markdown-open-anchor (concat "#" heading))
+                  (message "Invalid wiki link: %s" target)))))))
+
+(defun markdown-find-unlinked-mentions (title texts)
+  "Find texts that mention TITLE in plain text but NOT as [[TITLE]] links.
+Bug #6: unlinked mentions. Returns a message listing matching texts."
+  (let ((matches '())
+        (i 0))
+    (while (< i (length texts))
+      (let ((text (nth i texts)))
+        ;; First check: does the title appear at all?
+        (if (string-match title text)
+            ;; Second check: strip ALL [[...]] links, see if title still appears.
+            (let ((stripped text))
+              ;; Remove [[target]] patterns by splitting on [[ and taking
+              ;; only the text before each link.
+              (let ((parts (string-split text "[["))
+                    (outside ""))
+                (let ((p 0))
+                  (while (< p (length parts))
+                    (let ((part (nth p parts)))
+                      ;; If this part has no ]], it is outside a link.
+                      (if (not (string-match "]" part))
+                          (set! outside (concat outside " " part))))
+                    (set! p (+ p 1))))
+                (if (string-match title outside)
+                    (set! matches (cons i matches)))))))
+      (set! i (+ i 1)))
+    (set! matches (reverse matches))
+    (if (= (length matches) 0)
+        (message "No unlinked mentions of %s" title)
+        (message "Unlinked mentions of %s in %d text(s)" title (length matches)))))
+
+(defun markdown-backlinks ()
+  "Find all files that link to the current file."
+  (let ((filename (buffer-filename)))
+    (if (not filename)
+        (message "No file associated with buffer")
+        (let* ((basename (buffer-filename))
+               (name-no-ext (replace-regexp-in-string "\\.md$" "" basename))
+               (short-name nil)
+               (i (- (length name-no-ext) 1)))
+          (while (and (> i 0) (not (string= (substring name-no-ext i (+ i 1)) "/")))
+            (set! i (- i 1)))
+          (set! short-name (substring name-no-ext (+ i 1)))
+          (let ((files (file-glob "*.md"))
+                (backlinks '())
+                (j 0))
+            (while (< j (length files))
+              (let* ((fpath (nth j files))
+                     (content (read-file-content fpath)))
+                (if (and content (string-match (concat "\\\\[\\\\[" short-name) content))
+                    (set! backlinks (cons fpath backlinks))))
+              (set! j (+ j 1)))
+            (if (> (length backlinks) 0)
+                (message "Backlinks: %s" (string-join ", " (reverse backlinks)))
+                (message "No backlinks found")))))))
+
+(defun markdown-daily-note ()
+  "Create or open today's daily note."
+  (let ((date-result (shell-command "date +%Y-%m-%d")))
+    (let ((date-str (string-trim date-result)))
+      (let ((path (concat "daily/" date-str ".md")))
+        (find-file-open path)
+        (message "Daily note: %s" path)))))
+
+(defun markdown-expand-template-variables (content title)
+  "Substitute {{date}} and {{title}} placeholders in CONTENT.
+TITLE is the note title (filename without extension). Used by
+markdown-new-from-template after loading a template file."
+  (let ((date-result (shell-command "date +%Y-%m-%d")))
+    (let ((date-str (string-trim date-result))
+          (s content))
+      (set! s (replace-regexp-in-string "{{date}}" date-str s))
+      (set! s (replace-regexp-in-string "{{title}}" title s))
+      s)))
+
+(defun markdown-new-from-template (&optional (template "blank" template-supplied-p))
+  "Create a new note from a template.
+SPEC note (audit P2.6): read-string is a sync stub, so the template name is
+passed via the prefix key: , N for blank, , N d for daily, , N m for meeting.
+Reads ~/.config/tmax/templates/<name>.md if present, else falls back to
+built-in templates. Substitutes {{date}} and {{title}}."
+  (if (not template-supplied-p) (set! template "blank"))
+  (let ((date-result (shell-command "date +%Y-%m-%d")))
+      (let* ((date-str (string-trim date-result))
+            (name date-str)
+            (content nil)
+            (template-file (read-file-content (concat "~/.config/tmax/templates/" template ".md"))))
+        (if template-file
+            ;; User-provided template file wins; expand its variables.
+            (set! content (markdown-expand-template-variables template-file name))
+            ;; Built-in fallbacks.
+            (if (string= template "daily")
+                (set! content (format "# %s\n\n## Tasks\n\n## Notes\n" date-str))
+                (if (string= template "meeting")
+                    (set! content (format "# Meeting: %s\n\n## Attendees\n\n## Agenda\n\n## Notes\n\n## Action Items\n" name))
+                    (set! content (format "# %s\n\n" name)))))
+        (let ((path (concat name ".md")))
+          (find-file-open path)
+          (buffer-insert content)
+          (cursor-move 0 0)
+          (message "Created note: %s" path)))))
+
+(defun markdown-rename-note ()
+  "Rename current note and update all wiki links."
+  (let ((old-name (buffer-filename)))
+    (if (not old-name)
+        (message "No file associated with buffer")
+        (let ((new-name (read-string "New name: ")))
+          (if (> (length new-name) 0)
+              (let* ((old-no-ext (replace-regexp-in-string "\\.md$" "" old-name))
+                     (old-short nil)
+                     (slash-idx (- (length old-no-ext) 1)))
+                (while (and (> slash-idx 0) (not (string= (substring old-no-ext slash-idx (+ slash-idx 1)) "/")))
+                  (set! slash-idx (- slash-idx 1)))
+                (set! old-short (substring old-no-ext (+ slash-idx 1)))
+                (let ((files (file-glob "*.md"))
+                      (i 0))
+                  (while (< i (length files))
+                    (let* ((fpath (nth i files))
+                           (content (read-file-content fpath)))
+                      (if content
+                          (let ((new-content (replace-regexp-in-string
+                                              (concat "\\\\[\\\\[" old-short "\\\\]\\\\]")
+                                              (concat "[[" new-name "]]")
+                                              content)))
+                            (if (not (string= content new-content))
+                                (write-file-content fpath new-content)))))
+                    (set! i (+ i 1))))
+                (let ((new-path (concat new-name ".md")))
+                  (file-rename old-name new-path)
+                  (message "Renamed to %s" new-path)))
+              (message "Cancelled"))))))
+
+(provide "markdown-commands/knowledge")
+)

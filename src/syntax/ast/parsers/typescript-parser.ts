@@ -7,9 +7,16 @@
 
 import { Either, type Either as EitherType } from "../../../utils/task-either.ts";
 import { createConfigError, type ConfigError } from "../../../error/types.ts";
-import type { SourcePosition, SourceSpan } from "../../../tlisp/source.ts";
+import type { SourceSpan } from "../../../tlisp/source.ts";
 import type { ASTNode, EditDescriptor, LanguageParser, ParseError } from "../types.ts";
 import { createNode } from "../types.ts";
+// CHORE-44 Change 11 AC11.4 — shared parser mechanics (position math only).
+import {
+  buildLineMap,
+  positionAt,
+  spanFrom,
+} from "./shared/source-position.ts";
+import { errorNode as sharedErrorNode } from "./shared/node-factory.ts";
 
 // ---------------------------------------------------------------------------
 // Token types
@@ -259,24 +266,9 @@ function isOperatorChar(ch: string): boolean { return "+-*/%<>=!&|^~".includes(c
 
 const LANG = "typescript";
 
-/**
- * Build a SourcePosition from the token stream's source and a character offset.
- * lineOffsets is computed once and reused.
- */
-function positionAt(offset: number, lineOffsets: number[]): SourcePosition {
-  let lo = 0;
-  let hi = lineOffsets.length - 1;
-  while (lo < hi) {
-    const mid = (lo + hi + 1) >> 1;
-    if (lineOffsets[mid]! <= offset) lo = mid;
-    else hi = mid - 1;
-  }
-  return { line: lo, column: offset - lineOffsets[lo]!, offset };
-}
-
-function spanFrom(startOff: number, endOff: number, lineOffsets: number[]): SourceSpan {
-  return { start: positionAt(startOff, lineOffsets), end: positionAt(endOff, lineOffsets) };
-}
+// CHORE-44 Change 11 AC11.4: positionAt/spanFrom moved to shared/source-position.ts.
+// `buildLineMap` is the renamed `computeLineOffsets` (semantically identical:
+// line-start offsets, 0-based, one entry per `\n`).
 
 // ---------------------------------------------------------------------------
 // Recursive-descent parser
@@ -294,7 +286,7 @@ class Parser {
     this.fileName = name;
     this.tokens = tokens;
     this.pos = 0;
-    this.lineOffsets = computeLineOffsets(source);
+    this.lineOffsets = buildLineMap(source);
   }
 
   // -- public entry ----------------------------------------------------------
@@ -2183,21 +2175,15 @@ class Parser {
     }
 
     const endOff = this.peek(-1).endOffset;
-    return createNode("error", this.span(startOff, endOff), LANG, [], message);
+    return sharedErrorNode(this.span(startOff, endOff), LANG, message);
   }
 }
 
 // ---------------------------------------------------------------------------
 // Utility
 // ---------------------------------------------------------------------------
-
-function computeLineOffsets(source: string): number[] {
-  const offsets = [0];
-  for (let i = 0; i < source.length; i++) {
-    if (source[i] === "\n") offsets.push(i + 1);
-  }
-  return offsets;
-}
+// CHORE-44 Change 11 AC11.4: `computeLineOffsets` moved to shared/source-position.ts
+// as `buildLineMap` (semantically identical: line-start offsets, 0-based).
 
 // ---------------------------------------------------------------------------
 // Exported LanguageParser implementation

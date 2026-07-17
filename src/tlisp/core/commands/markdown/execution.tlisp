@@ -1,0 +1,121 @@
+(defmodule editor/commands/markdown/execution
+  (export markdown-find-code-block markdown-execute-block
+    markdown-execute-all-blocks markdown-clear-results)
+
+;; markdown/execution.tlisp — fenced code discovery, execution, result cleanup.
+;; CHORE-44 Change 11: split from markdown.tlisp (move only — no logic changes).
+;; Cross-module calls (markdown-delete-line, markdown-shell-quote) resolve via
+;; the unique-export fallback in the evaluator.
+
+(defun markdown-find-code-block ()
+  "Find fenced code block around cursor. Returns (start end lang) or nil."
+  (let ((cur (cursor-line))
+        (total (buffer-line-count))
+        (open-line nil)
+        (open-lang nil)
+        (close-line nil)
+        (i 0))
+    (set! i cur)
+    (while (and (>= i 0) (not open-line))
+      (let ((text (buffer-get-line i)))
+        (if (string-match "^```\(.*\)" text)
+            (progn
+              (set! open-line i)
+              (set! open-lang (match-string 1 text)))
+            (set! i (- i 1)))))
+    (if open-line
+        (progn
+          (set! i (+ open-line 1))
+          (while (and (< i total) (not close-line))
+            (if (string-match "^```" (buffer-get-line i))
+                (set! close-line i)
+                (set! i (+ i 1))))
+          (if close-line
+              (list open-line close-line (string-trim (or open-lang "")))
+              nil))
+        nil)))
+
+(defun markdown-execute-block ()
+  "Execute the code block at point and insert results."
+  (let ((block (markdown-find-code-block)))
+    (if (not block)
+        (message "Not in a code block")
+        (let ((start (nth 0 block))
+              (end (nth 1 block))
+              (lang (nth 2 block)))
+          (let ((source-lines '())
+                (i (+ start 1)))
+            (while (< i end)
+              (set! source-lines (cons (buffer-get-line i) source-lines))
+              (set! i (+ i 1)))
+            (let ((source (string-join "\n" (reverse source-lines))))
+              (let ((cmd nil))
+                (if (or (string= lang "sh") (string= lang "bash"))
+                    (set! cmd source)
+                    (if (or (string= lang "ts") (string= lang "tsx")
+                            (string= lang "js") (string= lang "jsx"))
+                        (set! cmd (concat "echo '" (markdown-shell-quote source) "' | bun run -"))
+                        (if (or (string= lang "py") (string= lang "python"))
+                            (set! cmd (concat "echo '" (markdown-shell-quote source) "' | python3 -"))
+                            (set! cmd nil))))
+                (if (not cmd)
+                    (message "Unsupported language: %s" lang)
+                    (let ((result (shell-exec cmd))
+                          (results-line nil))
+                      (let ((stdout (nth 0 result))
+                            (stderr (nth 1 result))
+                            (exit-code (nth 2 result)))
+                        (set! results-line
+                          (if (and stderr (> (length stderr) 0))
+                              (format "<!-- results: %s [stderr: %s] -->" stdout stderr)
+                              (format "<!-- results: %s -->" stdout)))
+                        (let ((check-line (+ end 1)))
+                          (if (and (< check-line (buffer-line-count))
+                                   (string-match "^<!-- results:" (buffer-get-line check-line)))
+                              (progn
+                                (markdown-delete-line check-line)
+                                (cursor-move end 0)
+                                (buffer-insert (concat "\n" results-line)))
+                              (progn
+                                (cursor-move end 0)
+                                (buffer-insert (concat "\n" results-line)))))
+                        (message "Executed %s block (exit %d)" lang exit-code)))))))))))
+
+(defun markdown-clear-results ()
+  "Clear execution results below current code block."
+  (let ((block (markdown-find-code-block)))
+    (if (not block)
+        (message "Not in a code block")
+        (let ((end (nth 1 block))
+              (check-line 0))
+          (set! check-line (+ end 1))
+          (if (and (< check-line (buffer-line-count))
+                   (string-match "^<!-- results:" (buffer-get-line check-line)))
+              (progn
+                (let ((total (buffer-line-count)))
+                  (if (= check-line (- total 1))
+                      (buffer-delete-range check-line 0 check-line 999999)
+                      (buffer-delete-range check-line 0 (+ check-line 1) 0)))
+                (message "Cleared results"))
+              (message "No results to clear"))))))
+
+(defun markdown-execute-all-blocks ()
+  "Execute all code blocks in the buffer."
+  ;; Re-read (buffer-line-count) per iteration: each markdown-execute-block
+  ;; call inserts a `<!-- results: -->` line, shifting later block positions.
+  ;; Reading total once before the loop skipped blocks past the original count.
+  (let ((i 0)
+        (count 0))
+    (while (< i (buffer-line-count))
+      (let ((text (buffer-get-line i)))
+        (if (string-match "^```\(sh\|bash\|ts\|tsx\|js\|jsx\|py\|python\)" text)
+            (progn
+              (cursor-move i 0)
+              (markdown-execute-block)
+              (set! count (+ count 1))
+              (set! i (+ i 1)))
+            (set! i (+ i 1)))))
+    (message "Executed %d blocks" count)))
+
+(provide "markdown-commands/execution")
+)

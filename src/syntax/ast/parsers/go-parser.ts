@@ -10,12 +10,21 @@ import { createConfigError, type ConfigError } from "../../../error/types.ts";
 import type { SourceSpan, SourcePosition } from "../../../tlisp/source.ts";
 import type { ASTNode, ParseError, EditDescriptor, LanguageParser } from "../types.ts";
 import { createNode } from "../types.ts";
+// CHORE-44 Change 11 AC11.4 — shared parser mechanics (node/position/span only).
+import {
+  makePosition,
+  makeSpan,
+} from "./shared/node-factory.ts";
 
 // -- Span helpers -----------------------------------------------------------
+// Local thin aliases over the shared constructors so existing call sites
+// stay byte-for-byte unchanged. Go's lexer already emits SourcePosition, so
+// we use the struct-constructor helpers (not the offset→(line,col) math in
+// shared/source-position.ts, which is for byte-offset-only parsers).
 
 const pos = (offset: number, line: number, col: number): SourcePosition =>
-  ({ offset, line, column: col });
-const span = (start: SourcePosition, end: SourcePosition): SourceSpan => ({ start, end });
+  makePosition(offset, line, col);
+const span = (start: SourcePosition, end: SourcePosition): SourceSpan => makeSpan(start, end);
 const zeroSpan: SourceSpan = span(pos(0, 0, 0), pos(0, 0, 0));
 
 // -- Token types ------------------------------------------------------------

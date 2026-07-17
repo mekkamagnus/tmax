@@ -11,7 +11,7 @@
  * structural properties; this file asserts the frozen public inventory itself.
  */
 import { describe, test, expect } from "bun:test";
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync, existsSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import { createEditorAPI } from "../../src/editor/tlisp-api.ts";
@@ -66,10 +66,22 @@ describe("CHORE-44 Step 0 — public inventory parity", () => {
   test("Markdown public command inventory matches the frozen Step 0 set (Change 11 anchor)", () => {
     const expected = baselineSet("markdown-fns.txt");
     // Re-derive the live set from the T-Lisp source: every public markdown-* defun.
-    const src = readFileSync(join(dirname(fileURLToPath(import.meta.url)), "..", "..", "src", "tlisp", "core", "commands", "markdown.tlisp"), "utf8");
-    const live = [
-      ...src.matchAll(/\(defun\s+\(?(markdown-[A-Za-z0-9?-]+)/g),
-    ].map(m => m[1]).filter((v): v is string => !!v).sort();
+    // CHORE-44 Change 11: markdown.tlisp is now a loader/aggregator that
+    // require-module's the seven feature modules under commands/markdown/.
+    // The public inventory is the union of every feature module's defuns.
+    const root = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "src", "tlisp", "core", "commands");
+    const sources: string[] = [readFileSync(join(root, "markdown.tlisp"), "utf8")];
+    const featDir = join(root, "markdown");
+    if (existsSync(featDir)) {
+      for (const f of readdirSync(featDir).filter(n => n.endsWith(".tlisp"))) {
+        sources.push(readFileSync(join(featDir, f), "utf8"));
+      }
+    }
+    const live = sources.flatMap(src =>
+      [...src.matchAll(/\(defun\s+\(?(markdown-[A-Za-z0-9?-]+)/g)]
+        .map(m => m[1])
+        .filter((v): v is string => !!v),
+    ).sort();
     expect(live).toEqual(expected);
   });
 

@@ -1,0 +1,168 @@
+(defmodule editor/commands/markdown/links
+  (export markdown-follow-link markdown-open-file-link
+    markdown-insert-link markdown-insert-link-to-file
+    markdown-link-at-point markdown-anchor-slug markdown-open-anchor
+    markdown-follow-include markdown-follow-embed markdown-embed-target-at-point
+    markdown-shell-quote markdown-dirname)
+
+;; markdown/links.tlisp — ordinary links, anchors, include links, browser dispatch.
+;; CHORE-44 Change 11: split from markdown.tlisp (move only — no logic changes).
+;; Cross-module calls (markdown-push-position, markdown-replace-line, browse-url)
+;; resolve via the unique-export fallback in the evaluator.
+
+(require-module editor/commands/browse-url)
+
+(defun markdown-shell-quote (str)
+  "Escape a string for safe interpolation into a single-quoted shell argument."
+  (replace-regexp-in-string "'" "'\"'\"'" str))
+
+(defun markdown-follow-link ()
+  "Open whatever link is under cursor — URL, file, or anchor."
+  (let* ((line (buffer-get-line (cursor-line)))
+         (col (cursor-column)))
+    (if (string-match "\\\\[([^\\\\]]*)\\\\]\\\\(([^)]*)\\\\)" line)
+        (let ((url (match-string 2 line))
+              (mstart (match-beginning 0))
+              (mend (match-end 2)))
+          (if (and (>= col mstart) (<= col mend))
+              (progn
+                (markdown-push-position)
+                (cond
+                  ((string-match "^#" url)
+                   (markdown-open-anchor url))
+                  ((string-match "^https?://" url)
+                   ;; Delegate external URL dispatch to browse-url for injection-safe argv handling.
+                   (browse-url url))
+                  (t
+                   (markdown-open-file-link url))))
+              (message "Cursor not on a link")))
+        (message "No link found on this line"))))
+
+(defun markdown-insert-link ()
+  "Insert an inline link at point."
+  (let ((url (read-string "URL: "))
+        (text (read-string "Link text: ")))
+    (if (and (> (length url) 0) (> (length text) 0))
+        (progn
+          (buffer-insert (format "[%s](%s)" text url))
+          (message "Link inserted"))
+        (message "Cancelled"))))
+
+(defun markdown-anchor-slug (heading)
+  "Convert heading text to lowercase slug for anchor matching."
+  (replace-regexp-in-string "[^a-z0-9]+" "-" (string-trim (downcase heading))))
+
+(defun markdown-open-anchor (anchor)
+  "Jump to heading matching ANCHOR (without #)."
+  (let ((slug (markdown-anchor-slug (substring anchor 1)))
+        (i 0)
+        (total (buffer-line-count))
+        (found nil))
+    (while (and (< i total) (not found))
+      (let ((text (buffer-get-line i)))
+        (if (string-match "^#+ " text)
+            (let ((heading (substring text (match-end 0))))
+              (if (string= (markdown-anchor-slug heading) slug)
+                  (set! found i)))))
+      (set! i (+ i 1)))
+    (if found
+        (progn (cursor-move found 0) (message "Jumped to heading at line %d" (+ found 1)))
+        (message "No heading matching #%s" slug))))
+
+(defun markdown-dirname (path)
+  "Extract directory portion of PATH."
+  (let ((i (- (length path) 1)))
+    (while (and (> i 0) (not (string= (substring path i (+ i 1)) "/")))
+      (set! i (- i 1)))
+    (if (> i 0)
+        (substring path 0 i)
+        ".")))
+
+(defun markdown-open-file-link (url)
+  "Open a file link URL, which may contain a #fragment."
+  (let ((fragment nil)
+        (path url))
+    (if (string-match "^\([^#]+\)#\(.*\)" url)
+        (progn
+          (set! path (match-string 1 url))
+          (set! fragment (match-string 2 url)))
+        (if (string-match "^#\(.*\)" url)
+            (progn
+              (markdown-open-anchor url)
+              (set! path nil))))
+    (if path
+        (let ((resolved path))
+          (if (not (string-match "^/" path))
+              (let ((dir (markdown-dirname (or (buffer-filename) "."))))
+                (set! resolved (concat dir "/" path))))
+          (find-file-open resolved)
+          (if fragment
+              (markdown-open-anchor (concat "#" fragment)))))))
+
+(defun markdown-link-at-point ()
+  "Return the URL under cursor or nil."
+  (let* ((line (buffer-get-line (cursor-line)))
+         (col (cursor-column)))
+    (if (string-match "\\\\[([^\\\\]]*)\\\\]\\\\(([^)]*)\\\\)" line)
+        (let ((mstart (match-beginning 0))
+              (mend (match-end 2)))
+          (if (and (>= col mstart) (<= col mend))
+              (match-string 2 line)
+              nil))
+        nil)))
+
+(defun markdown-follow-include ()
+  "Follow image or link at point."
+  (let ((url (markdown-link-at-point)))
+    (if url
+        (progn
+          (markdown-push-position)
+          (markdown-open-file-link url))
+        (message "No link at point"))))
+
+;;; ── Embed (image) links ────────────────────────────────────────────────
+
+(defun markdown-embed-target-at-point ()
+  "Find ![[target]] at cursor position. Return target or nil."
+  (let* ((line (buffer-get-line (cursor-line)))
+         (col (cursor-column))
+         (result nil)
+         (search-text line))
+    (while (and (string-match "!\\\\[\\\\[\([^\\\\]\]+\)\\\\]\\\\]" search-text) (not result))
+      (let ((start (match-beginning 0))
+            (end (match-end 0))
+            (target (match-string 1 search-text)))
+        (if (and (>= col start) (<= col end))
+            (set! result target)
+            (set! search-text (substring search-text (match-end 0))))))
+    result))
+
+(defun markdown-follow-embed ()
+  "Follow ![[embed]] at point — navigate to source file. Bug #5."
+  (let ((target (markdown-embed-target-at-point)))
+    (if (not target)
+        (message "No embed at point")
+        (let ((resolved target))
+          (if (not (string-match "\\." target))
+              (set! resolved (concat target ".md")))
+          (if (not (string-match "^/" resolved))
+              (let ((dir (markdown-dirname (or (buffer-filename) "."))))
+                (set! resolved (concat dir "/" resolved))))
+          (if (file-exists-p resolved)
+              (progn
+                (markdown-push-position)
+                (find-file-open resolved)
+                (message "Following embed: %s" target))
+              (message "Embed source not found: %s" resolved))))))
+
+(defun markdown-insert-link-to-file ()
+  "Insert a wiki link to another file."
+  (let ((name (read-string "Link to: ")))
+    (if (> (length name) 0)
+        (progn
+          (buffer-insert (format "[[%s]]" name))
+          (message "Inserted link to %s" name))
+        (message "Cancelled"))))
+
+(provide "markdown-commands/links")
+)

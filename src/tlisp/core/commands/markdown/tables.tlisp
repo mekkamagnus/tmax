@@ -1,0 +1,398 @@
+(defmodule editor/commands/markdown/tables
+  (export markdown-align-table markdown-table-row-p pad-right
+    markdown-table-eval-formula markdown-table-eval-formula-impl
+    markdown-table-formula-parse markdown-table-insert-formula
+    markdown-table-eval-expr markdown-table-extract-range markdown-table-reduce
+    markdown-resolve-cell-refs markdown-table-to-latex)
+
+;; markdown/tables.tlisp — table alignment, formulas, LaTeX conversion.
+;; CHORE-44 Change 11: split from markdown.tlisp (move only — no logic changes).
+;; pad-right is exported because markdown-align-table uses it; keeping it here
+;; preserves the original unqualified call site.
+
+;;; ── Table formatting ────────────────────────────────────────────────
+
+(defun markdown-table-row-p (line)
+  "Check if LINE looks like a markdown table row (has | with content)."
+  (let ((trimmed (string-trim line)))
+    (and (> (length trimmed) 2)
+         (string-match "^|" trimmed)
+         (string-match "|$" trimmed)
+         (> (length (string-split trimmed "|")) 2))))
+
+(defun markdown-align-table ()
+  "Align the pipe table at point."
+  (let* ((start (cursor-line))
+         (end start)
+         (line (buffer-get-line start)))
+    ;; Find table boundaries — only extend over actual table rows
+    (if (not (markdown-table-row-p line))
+        (message "Not in a table")
+        (progn
+          ;; Extend upward
+          (while (and (> start 0)
+                      (markdown-table-row-p (buffer-get-line (- start 1))))
+            (set! start (- start 1)))
+          ;; Extend downward
+          (while (and (< (+ end 1) (buffer-line-count))
+                      (markdown-table-row-p (buffer-get-line (+ end 1))))
+            (set! end (+ end 1)))
+          ;; Parse and align
+          (let ((rows '())
+                (max-cols 0)
+                (i start))
+            (while (<= i end)
+              (let* ((text (buffer-get-line i))
+                     (trimmed (string-trim text))
+                     (cells (string-split trimmed "|")))
+                (set! rows (cons cells rows))
+                (if (> (length cells) max-cols)
+                    (set! max-cols (length cells))))
+              (set! i (+ i 1)))
+            ;; Compute column widths
+            (let ((widths (make-vector max-cols 0))
+                  (all-rows (reverse rows)))
+              (dolist (row all-rows)
+                (let ((j 0))
+                  (while (< j (min (length row) max-cols))
+                    (let ((cell-len (length (string-trim (nth j row)))))
+                      (if (> cell-len (aref widths j))
+                          (aset widths j cell-len)))
+                    (set! j (+ j 1)))))
+              ;; Re-emit aligned table (bottom-up to avoid line shift)
+              (let ((k end)
+                    (idx (- end start)))
+                (while (>= k start)
+                  (let* ((row (nth idx all-rows))
+                         (aligned "")
+                         (j 0))
+                    (while (< j (min (length row) max-cols))
+                      (let ((cell (string-trim (nth j row))))
+                        (set! aligned (concat aligned "| " (pad-right cell (aref widths j)) " ")))
+                      (set! j (+ j 1)))
+                    (set! aligned (concat aligned "|"))
+                    (cursor-move k 0)
+                    (markdown-replace-line aligned)
+                    (set! k (- k 1))
+                    (set! idx (- idx 1))))
+                (message "Table aligned (%d rows, %d cols)" (+ (- end start) 1) max-cols))))))))
+
+(defun pad-right (str len)
+  "Pad string STR to length LEN with spaces."
+  (if (>= (length str) len)
+      str
+      (concat str (make-string (- len (length str)) 32))))
+
+;;; ── Table formulas ────────────────────────────────────────────────────
+
+(defun markdown-table-formula-parse (formula)
+  "Parse @ROW$COL=EXPR formula. ROW/COL may be numeric or `>` (last).
+Returns (row col expr) where row/col are strings; caller resolves `>`."
+  (if (string-match "^@\([0-9>]+\)\\\\$\([0-9>]+\)=\(.*\)" formula)
+      (list (match-string 1 formula)
+            (match-string 2 formula)
+            (match-string 3 formula))
+      nil))
+
+(defun markdown-table-extract-range (table r1 c1 r2 c2)
+  "Collect numbers from TABLE across rows r1..r2, cols c1..c2 (0-indexed)."
+  (let ((nums '())
+        (row-idx r1))
+    (while (<= row-idx r2)
+      (let ((row (nth row-idx table)))
+        (if row
+            (let ((j c1))
+              (while (<= j c2)
+                (let ((c (string-trim (nth j row))))
+                  (if (and c (string-match "^[0-9]+$" c))
+                      (set! nums (cons (string-to-number c) nums))))
+                (set! j (+ j 1))))))
+      (set! row-idx (+ row-idx 1)))
+    (reverse nums)))
+
+(defun markdown-table-reduce (fn-name nums)
+  "Apply aggregate FN-NAME to NUMS list. Returns string number or ERR."
+  (if (= (length nums) 0)
+      "ERR"
+      (let ((result 0)
+            (i 0))
+        (if (= fn-name "sum")
+            (progn
+              (set! i 0)
+              (while (< i (length nums))
+                (set! result (+ result (nth i nums)))
+                (set! i (+ i 1))))
+            (if (= fn-name "count")
+                (set! result (length nums))
+                (progn
+                  (set! result (nth 0 nums))
+                  (set! i 1)
+                  (while (< i (length nums))
+                    (let ((v (nth i nums)))
+                      (if (= fn-name "mean")
+                          (set! result (+ result v))
+                          (if (= fn-name "min")
+                              (if (< v result) (set! result v))
+                              (if (= fn-name "max")
+                                  (if (> v result) (set! result v))))))
+                    (set! i (+ i 1)))
+                  (if (= fn-name "mean")
+                      (set! result (/ result (length nums)))))))
+        (number-to-string result))))
+
+(defun markdown-resolve-cell-refs (expr table)
+  "Replace @R$C cell references in EXPR with their values from TABLE.
+Returns the expression with all cell refs replaced by numbers.
+TABLE rows are the raw `string-split` on `|` so each row has empty sentinels
+at the start/end; $1 maps to the first non-empty cell, so we strip empties."
+  (let ((s expr))
+    (while (string-match "@\([0-9]+\)[$]\([0-9]+\)" s)
+      (let ((row (- (string-to-number (match-string 1 s)) 1))
+            (col (- (string-to-number (match-string 2 s)) 1))
+            (full-match (match-string 0 s)))
+        (let* ((raw-row (nth row table))
+               (row-data (if raw-row
+                             (filter (lambda (c) (not (string= (string-trim c) "")))
+                                     raw-row)
+                             nil)))
+          (if row-data
+              (let ((cell (nth col row-data)))
+                (if cell
+                    (let ((cell-val (string-trim cell)))
+                      (set! s (string-replace s full-match
+                                              (if (string= cell-val "") "0" cell-val))))
+                    (set! s (string-replace s full-match "0"))))
+              (set! s (string-replace s full-match "0"))))))
+    s))
+
+(defun markdown-table-eval-expr (expr table)
+  "Evaluate EXPR against TABLE data. Supports arithmetic, %, cell refs, and range aggregates."
+  (let ((trimmed (string-trim (markdown-resolve-cell-refs expr table))))
+    (if (string-match "^\([0-9]+\)\\\\+\([0-9]+\)$" trimmed)
+        (number-to-string (+ (string-to-number (match-string 1 trimmed))
+                             (string-to-number (match-string 2 trimmed))))
+        (if (string-match "^\([0-9]+\)\\\\-\([0-9]+\)$" trimmed)
+            (number-to-string (- (string-to-number (match-string 1 trimmed))
+                                 (string-to-number (match-string 2 trimmed))))
+            (if (string-match "^\([0-9]+\)\\\\*\([0-9]+\)$" trimmed)
+                (number-to-string (* (string-to-number (match-string 1 trimmed))
+                                     (string-to-number (match-string 2 trimmed))))
+                (if (string-match "^\([0-9]+\\)/\([0-9]+\)$" trimmed)
+                    (let ((divisor (string-to-number (match-string 2 trimmed))))
+                      (if (= divisor 0)
+                          "ERR"
+                          (number-to-string (/ (string-to-number (match-string 1 trimmed)) divisor))))
+                    ;; Modulo: L % R  ==  L - R*floor(L/R). T-Lisp has no `%` builtin
+                    ;; and `/` is float division, so floor() is required.
+                    (if (string-match "^\([0-9]+\)\\\\%\([0-9]+\)$" trimmed)
+                        (let ((l (string-to-number (match-string 1 trimmed)))
+                              (r (string-to-number (match-string 2 trimmed))))
+                          (if (= r 0)
+                              "ERR"
+                              (number-to-string (- l (* r (floor (/ l r)))))))
+                        ;; Range aggregates: sum/mean/min/max/count(@r1$c1..@r2$c2)
+                        ;; Escaping matches the heading regex at line 77:
+                        ;;   \( = capture group (single backslash)
+                        ;;   \\$ = literal dollar (double backslash -> \$ in regex)
+                        (let ((agg-fn nil)
+                              (r1 nil) (c1 nil) (r2 nil) (c2 nil))
+                          (if (string-match "^sum(@\([0-9]+\)\\$\([0-9]+\)\\\.\\\.@\([0-9]+\)\\$\([0-9]+\))$" trimmed)
+                              (set! agg-fn "sum"))
+                          (if (string-match "^mean(@\([0-9]+\)\\$\([0-9]+\)\\\.\\\.@\([0-9]+\)\\$\([0-9]+\))$" trimmed)
+                              (set! agg-fn "mean"))
+                          (if (string-match "^min(@\([0-9]+\)\\$\([0-9]+\)\\\.\\\.@\([0-9]+\)\\$\([0-9]+\))$" trimmed)
+                              (set! agg-fn "min"))
+                          (if (string-match "^max(@\([0-9]+\)\\$\([0-9]+\)\\\.\\\.@\([0-9]+\)\\$\([0-9]+\))$" trimmed)
+                              (set! agg-fn "max"))
+                          (if (string-match "^count(@\([0-9]+\)\\$\([0-9]+\)\\\.\\\.@\([0-9]+\)\\$\([0-9]+\))$" trimmed)
+                              (set! agg-fn "count"))
+                          (if agg-fn
+                              (progn
+                                (set! r1 (- (string-to-number (match-string 1 trimmed)) 1))
+                                (set! c1 (- (string-to-number (match-string 2 trimmed)) 1))
+                                (set! r2 (- (string-to-number (match-string 3 trimmed)) 1))
+                                (set! c2 (- (string-to-number (match-string 4 trimmed)) 1))
+                                (markdown-table-reduce agg-fn
+                                  (markdown-table-extract-range table r1 c1 r2 c2)))
+                              (if (string-match "^[0-9]+$" trimmed)
+                                  trimmed
+                                  "ERR"))))))))))
+
+(defun markdown-table-eval-formula ()
+  "Evaluate ALL formula comments below current table.
+Bug #4 fix: loop over every tblfm line, calling the impl for each.
+Previously only the first formula line was evaluated."
+  (let ((total (buffer-line-count))
+        (any-formula nil))
+    ;; Check if any tblfm line exists below cursor.
+    (let ((scan (cursor-line)))
+      (while (< scan total)
+        (if (string-match "^<!-- tblfm:" (buffer-get-line scan))
+            (set! any-formula t))
+        (set! scan (+ scan 1))))
+    (if (not any-formula)
+        (message "No formula found below table")
+        (progn
+          (set! any-formula t)
+          (let ((evaluated 0))
+            (while (and any-formula (< evaluated 10))
+              (markdown-table-eval-formula-impl)
+              (set! evaluated (+ evaluated 1))
+              ;; Re-scan for remaining formula lines.
+              (set! any-formula nil)
+              (let ((rescan 0))
+                (set! rescan 0)
+                (while (< rescan (buffer-line-count))
+                  (if (string-match "^<!-- tblfm:" (buffer-get-line rescan))
+                      (set! any-formula t))
+                  (set! rescan (+ rescan 1)))))
+            (message "Evaluated %d formula(s)" evaluated))))))
+
+(defun markdown-table-eval-formula-impl ()
+  "Evaluate the FIRST formula comment below current table. Internal."
+  (let ((line (cursor-line))
+        (total (buffer-line-count))
+        (formula-line nil))
+    (let ((i line))
+      (while (and (< i total) (not formula-line))
+        (if (string-match "^<!-- tblfm: \(.*\) -->" (buffer-get-line i))
+            (set! formula-line i)
+            (set! i (+ i 1)))))
+    (if (not formula-line)
+        (message "No formula found below table")
+        (let ((formula-text (match-string 1 (buffer-get-line formula-line))))
+          (let ((parsed (markdown-table-formula-parse formula-text)))
+            (if (not parsed)
+                (message "Invalid formula: %s" formula-text)
+                (let ((target-row (nth 0 parsed))
+                      (target-col (nth 1 parsed))
+                      (expr (nth 2 parsed)))
+                  (let ((table-start nil)
+                        (table-end nil)
+                        (j line))
+                    (while (and (>= j 0) (not table-start))
+                      (if (markdown-table-row-p (buffer-get-line j))
+                          (set! j (- j 1))
+                          (set! table-start (+ j 1))))
+                    ;; Table starts at top of buffer: walk-up exited at j=-1
+                    ;; without ever hitting the else branch.
+                    (if (not table-start) (set! table-start 0))
+                    (set! j line)
+                    (while (and (< j total) (not table-end))
+                      (if (markdown-table-row-p (buffer-get-line j))
+                          (set! j (+ j 1))
+                          (set! table-end (- j 1))))
+                    ;; Table ends at bottom of buffer: walk-down exited at j=total.
+                    (if (not table-end) (set! table-end (- total 1)))
+                    (if (not (and table-start table-end))
+                        (message "Not in a table")
+                        (let ((table '())
+                              (k table-start))
+                          (while (<= k table-end)
+                            (let* ((text (buffer-get-line k))
+                                   (cells (string-split (string-trim text) "|")))
+                              (set! table (cons cells table)))
+                            (set! k (+ k 1)))
+                          (set! table (reverse table))
+                          ;; Resolve `>` shorthand to table dimensions.
+                          ;; `@>$>` = last row, last col. Returns 1-indexed.
+                          (let* ((nrows (length table))
+                                 (ncols (length (nth 0 table)))
+                                 (target-row-num
+                                   (if (string= target-row ">") nrows (string-to-number target-row)))
+                                 (target-col-num
+                                   (if (string= target-col ">") ncols (string-to-number target-col)))
+                                 (val (markdown-table-eval-expr expr table))
+                                 (row-idx (- target-row-num 1)))
+                            (if (and (>= row-idx 0) (< row-idx (length table)))
+                                (let* ((row (nth row-idx table))
+                                       (col-idx (- target-col-num 1)))
+                                  (if (and (>= col-idx 0) (< col-idx (length row)))
+                                      (let* ((new-row nil)
+                                             (m 0))
+                                        (set! new-row '())
+                                        (while (< m (length row))
+                                          (if (= m col-idx)
+                                              (set! new-row (cons (concat " " val " ") new-row))
+                                              (set! new-row (cons (nth m row) new-row)))
+                                          (set! m (+ m 1)))
+                                        (set! new-row (reverse new-row))
+                                        (let ((new-line (string-join "|" new-row)))
+                                          (markdown-delete-line (+ table-start row-idx))
+                                          (buffer-insert-at-position (+ table-start row-idx) 0 new-line)
+                                          (message "Formula result: %s" val)))
+                                      (message "Column %d out of range" target-col-num)))
+                                (message "Row %d out of range" target-row-num)))))))))))))
+
+(defun markdown-table-insert-formula ()
+  "Insert a table formula comment below current table."
+  (let ((line (cursor-line))
+        (total (buffer-line-count))
+        (table-end nil)
+        (i 0))
+    (set! i line)
+    (while (and (< i total) (not table-end))
+      (if (markdown-table-row-p (buffer-get-line i))
+          (set! i (+ i 1))
+          (set! table-end (- i 1))))
+    (if (not table-end)
+        (message "Not in a table")
+        (progn
+          (buffer-insert-at-position (+ table-end 1) 0 "<!-- tblfm: @2$3=@2$1+@2$2 -->")
+          (message "Inserted formula template")))))
+
+;;; ── LaTeX table conversion ──────────────────────────────────────────────
+
+(defun markdown-table-to-latex (rows)
+  "Convert markdown table ROWS to LaTeX tabular. Bug #3 fix."
+  (let ((data-rows '())
+        (result '())
+        (j 0)
+        (ncols 0))
+    ;; Collect non-separator rows.
+    (set! j 0)
+    (while (< j (length rows))
+      (let ((row (nth j rows)))
+        (if (not (string-match "^[-\s]+$" (string-trim (string-replace row "|" ""))))
+            (set! data-rows (cons row data-rows))))
+      (set! j (+ j 1)))
+    (set! data-rows (reverse data-rows))
+    (if (= (length data-rows) 0)
+        ""
+        (progn
+          ;; Count columns: split first row by |.
+          (let ((first-cells (string-split (string-trim (nth 0 data-rows)) "|")))
+            (set! ncols 0)
+            (let ((c 0))
+              (while (< c (length first-cells))
+                (if (> (length (string-trim (nth c first-cells))) 0)
+                    (set! ncols (+ ncols 1)))
+                (set! c (+ c 1)))))
+          ;; Build column spec: "lll..." for ncols columns.
+          (let ((colspec "")
+                (c 0))
+            (while (< c ncols)
+              (set! colspec (concat colspec "l"))
+              (set! c (+ c 1)))
+            (set! result (cons (concat "\\\\begin{tabular}{" colspec "}") result))
+            ;; Convert each row.
+            (set! j 0)
+            (while (< j (length data-rows))
+              (let* ((row (string-trim (nth j data-rows)))
+                     (cells (string-split row "|"))
+                     (clean '())
+                     (k 0))
+                (set! k 0)
+                (while (< k (length cells))
+                  (let ((cell (string-trim (nth k cells))))
+                    (if (> (length cell) 0)
+                        (set! clean (cons cell clean))))
+                  (set! k (+ k 1)))
+                (set! clean (reverse clean))
+                (set! result (cons (concat (string-join " & " clean) " \\\\\\\\") result)))
+              (set! j (+ j 1)))
+            (set! result (cons "\\\\end{tabular}" result))
+            (string-join "\n" (reverse result)))))))
+
+(provide "markdown-commands/tables")
+)

@@ -1,0 +1,168 @@
+(defmodule editor/commands/markdown/export
+  (export markdown-export-dispatch markdown-export-to-html
+    markdown-export-to-text markdown-export-to-latex
+    markdown-inline-to-html markdown-preview)
+
+;; markdown/export.tlisp — HTML, text, LaTeX export.
+;; CHORE-44 Change 11: split from markdown.tlisp (move only — no logic changes).
+
+(defun markdown-inline-to-html (text)
+  "Convert inline markdown formatting to HTML.
+Bug #2: **bold** -> <strong>, *italic* -> <em>, `code` -> <code>."
+  (let ((s text))
+    ;; Inline code first (backticks), so ** inside code isn't converted.
+    (while (string-match "`\([^`]+\\)`" s)
+      (set! s (string-replace s (match-string 0 s) (concat "<code>" (match-string 1 s) "</code>"))))
+    ;; Bold: find ** + content + **.
+    (while (string-match "[*][*]\\([^*]+\\)[*][*]" s)
+      (set! s (string-replace s (match-string 0 s) (concat "<strong>" (match-string 1 s) "</strong>"))))
+    ;; Italic: find * + content + *.
+    (while (string-match "[*]\\([^*]+\\)[*]" s)
+      (set! s (string-replace s (match-string 0 s) (concat "<em>" (match-string 1 s) "</em>"))))
+    s))
+
+(defun markdown-export-to-html ()
+  "Export current buffer to HTML."
+  (let ((filename (buffer-filename)))
+    (if (not filename)
+        (message "No file associated with buffer")
+        (let ((output-path (replace-regexp-in-string "\\.md$" ".html" filename))
+              (total (buffer-line-count))
+              (html-lines '())
+              (in-code-block nil)
+              (i 0))
+          (set! html-lines (cons "<!DOCTYPE html><html><head><meta charset=\"utf-8\"><style>body{font-family:sans-serif;margin:2em auto;max-width:50em}pre{background:#f4f4f4;padding:1em;overflow:auto}code{background:#f4f4f4;padding:0.2em}h1,h2,h3,h4,h5,h6{margin-top:1.5em}table{border-collapse:collapse}td,th{border:1px solid #ccc;padding:0.5em}</style></head><body>" html-lines))
+          (while (< i total)
+            (let ((text (buffer-get-line i)))
+              (if in-code-block
+                  (if (string-match "^```" text)
+                      (progn
+                        (set! html-lines (cons "</pre>" html-lines))
+                        (set! in-code-block nil))
+                      (set! html-lines (cons (concat (replace-regexp-in-string "<" "&lt;" (replace-regexp-in-string "&" "&amp;" text)) "\n") html-lines)))
+                  (if (string-match "^```" text)
+                      (progn
+                        (set! html-lines (cons "<pre><code>" html-lines))
+                        (set! in-code-block t))
+                      (if (string-match "^\(#{1,6}\)\\\\s+\(.*\)" text)
+                          (let ((level (length (match-string 1 text)))
+                                (title (match-string 2 text)))
+                            (set! html-lines (cons (format "<h%d>%s</h%d>" level title level) html-lines)))
+                          (if (string-match "^\\\\s*[-*+]\\\\s+\(.*\)" text)
+                              (set! html-lines (cons (format "<li>%s</li>" (match-string 1 text)) html-lines))
+                              (if (string-match "^\\\\s*\\\\d+\\\\.\\\\s+\(.*\)" text)
+                                  (set! html-lines (cons (format "<li>%s</li>" (match-string 1 text)) html-lines))
+                                  (if (> (length (string-trim text)) 0)
+                                      (set! html-lines (cons (format "<p>%s</p>" text) html-lines))
+                                      nil)))))))
+            (set! i (+ i 1)))
+          (set! html-lines (cons "</body></html>" html-lines))
+          (write-file-content output-path (string-join "\n" (reverse html-lines)))
+          (message "Exported to %s" output-path)))))
+
+(defun markdown-export-to-text ()
+  "Export current buffer to plain text."
+  (let ((filename (buffer-filename)))
+    (if (not filename)
+        (message "No file associated with buffer")
+        (let ((output-path (replace-regexp-in-string "\\.md$" ".txt" filename))
+              (total (buffer-line-count))
+              (lines '())
+              (in-code-block nil)
+              (i 0))
+          (while (< i total)
+            (let ((text (buffer-get-line i)))
+              (if in-code-block
+                  (if (string-match "^```" text)
+                      (set! in-code-block nil)
+                      (set! lines (cons text lines)))
+                  (if (string-match "^```" text)
+                      (set! in-code-block t)
+                      (if (string-match "^#{1,6}\\\\s+\(.*\)" text)
+                          (set! lines (cons (match-string 1 text) lines))
+                          (set! lines (cons text lines))))))
+            (set! i (+ i 1)))
+          (write-file-content output-path (string-join "\n" (reverse lines)))
+          (message "Exported to %s" output-path)))))
+
+(defun markdown-export-to-latex ()
+  "Export current buffer to LaTeX."
+  (let ((filename (buffer-filename)))
+    (if (not filename)
+        (message "No file associated with buffer")
+        (let ((output-path (replace-regexp-in-string "\\.md$" ".tex" filename))
+              (total (buffer-line-count))
+              (lines '())
+              (in-code-block nil)
+              (in-list nil)
+              (i 0))
+          (set! lines (cons "\\documentclass{article}\n\\begin{document}" lines))
+          (while (< i total)
+            (let ((text (buffer-get-line i)))
+              (if in-code-block
+                  (if (string-match "^```" text)
+                      (progn
+                        (set! lines (cons "\\end{verbatim}" lines))
+                        (set! in-code-block nil))
+                      (set! lines (cons text lines)))
+                  (if (string-match "^```" text)
+                      (progn
+                        (if in-list
+                            (progn
+                              (set! lines (cons "\\end{itemize}" lines))
+                              (set! in-list nil)))
+                        (set! lines (cons "\\begin{verbatim}" lines))
+                        (set! in-code-block t))
+                      (if (string-match "^\(#{1,6}\)\\\\s+\(.*\)" text)
+                          (let ((level (length (match-string 1 text)))
+                                (title (match-string 2 text)))
+                            (if in-list
+                                (progn
+                                  (set! lines (cons "\\end{itemize}" lines))
+                                  (set! in-list nil)))
+                            (if (= level 1)
+                                (set! lines (cons (format "\\section{%s}" title) lines))
+                                (if (= level 2)
+                                    (set! lines (cons (format "\\subsection{%s}" title) lines))
+                                    (set! lines (cons (format "\\subsubsection{%s}" title) lines)))))
+                          (if (string-match "^\\\\s*[-*+]\\\\s+\(.*\)" text)
+                              (progn
+                                (if (not in-list)
+                                    (progn
+                                      (set! lines (cons "\\begin{itemize}" lines))
+                                      (set! in-list t)))
+                                (set! lines (cons (format "\\item %s" (match-string 1 text)) lines)))
+                              (progn
+                                (if in-list
+                                    (progn
+                                      (set! lines (cons "\\end{itemize}" lines))
+                                      (set! in-list nil)))
+                                (if (> (length (string-trim text)) 0)
+                                    (set! lines (cons text lines))
+                                    nil)))))))
+            (set! i (+ i 1)))
+          (if in-list
+              (set! lines (cons "\\end{itemize}" lines)))
+          (set! lines (cons "\\end{document}" lines))
+          (write-file-content output-path (string-join "\n" (reverse lines)))
+          (message "Exported to %s" output-path)))))
+
+(defun markdown-export-dispatch ()
+  "Dispatch markdown export. SPEC-CHANGED (audit P2.5): the which-key popup
+MUST was descoped to a status hint because read-string is a sync stub and
+no completing-read/picker primitive exists in T-Lisp yet. Bind the three
+backends directly (see markdown-mode.tlisp), or call markdown-export-to-html
+/ markdown-export-to-text / markdown-export-to-latex explicitly."
+  (message "Export: call markdown-export-to-html / -text / -latex directly (, x h / , x t / , x l)"))
+
+(defun markdown-preview ()
+  "Preview markdown using glow or Oolong."
+  (let ((filename (buffer-filename)))
+    (if filename
+        (progn
+          (shell-command (format "glow '%s' 2>/dev/null || cat '%s'" filename filename))
+          (message "Preview: %s" filename))
+        (message "No file associated with buffer"))))
+
+(provide "markdown-commands/export")
+)
