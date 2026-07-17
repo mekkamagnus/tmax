@@ -133,7 +133,7 @@ The goal is an accurate report, not a defensive one.
 - **Comprehensive editor API** (100+ T-Lisp functions)
 - **Daemon/client architecture** with Frame-based multi-client support (Emacs-style)
 - **`*Messages*` buffer** for editor event observability
-- **Interchangeable frontends**: TUI (ANSI), Ink (React), Steep
+- **Native frontends**: Steep (embedded ANSI) and TUI client (remote frame over daemon socket)
 - **Zero external dependencies**
 
 **Target Users:** Software developers, system administrators, and power users who prefer keyboard-driven terminal workflows with unlimited customization through T-Lisp.
@@ -191,8 +191,8 @@ tmax/
 │   ├── editor/         # Editor with T-Lisp integration
 │   ├── server/         # Daemon (JSON-RPC 2.0 over Unix socket)
 │   ├── client/         # TUI client (ANSI rendering)
-│   ├── frontend/       # Interchangeable frontends (Ink, Steep)
-│   └── main.tsx        # Application entry point
+│   ├── frontend/       # Shared frontend interface + render helpers (Steep/ANSI)
+│   └── main.ts         # Application entry point
 ├── test/               # Comprehensive test suite
 ├── scripts/            # Development scripts (REPL)
 ├── examples/           # Configuration examples

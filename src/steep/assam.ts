@@ -13,7 +13,7 @@ import { Either } from "../utils/task-either.ts";
 
 export class SteepFrontend implements Frontend {
   // Set once run() initializes its render loop. Allows external callers
-  // (e.g. main.tsx wiring an editor.onStateChange subscription) to request a
+  // (e.g. main.ts wiring an editor.onStateChange subscription) to request a
   // re-render from socket-driven input that bypasses local stdin.
   private renderFromEditor: ((editor: EditorClass) => void) | null = null;
 

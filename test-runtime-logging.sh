@@ -20,4 +20,4 @@ echo "Starting editor..."
 echo ""
 
 # Start the editor in dev mode
-bun run src/main.tsx --dev /Users/mekael/Documents/programming/typescript/tmax/runtime-test.txt 2>&1
+bun run src/main.ts --dev /Users/mekael/Documents/programming/typescript/tmax/runtime-test.txt 2>&1

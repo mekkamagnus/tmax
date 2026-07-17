@@ -14,20 +14,15 @@ tmax/
 │   │   │   ├── text-utils.ts       # Shared text utility functions
 │   │   │   └── editor-state.ts     # EditorStateAccess interface
 │   │   └── handlers/   # Mode-specific key handlers
-│   ├── frontend/       # Interchangeable frontends
+│   ├── frontend/       # Shared frontend interface + render helpers (Steep/ANSI)
 │   │   ├── frontends/
-│   │   │   ├── steep/  # Default: Elm Architecture, direct ANSI
-│   │   │   ├── ink/    # Optional: React/Ink reconciler
 │   │   │   └── types.ts
-│   │   ├── render/     # Shared pure render functions
-│   │   │   ├── status-line.ts
-│   │   │   ├── buffer-lines.ts
-│   │   │   ├── command-input.ts
-│   │   │   └── input.ts
-│   │   └── components/ # Legacy Ink components
+│   │   ├── input.ts
+│   │   └── render/     # Shared pure render functions (status-line, buffer-lines, command-input, tab-bar, minibuffer, gutter, …)
+│   ├── steep/          # Steep: embedded native ANSI frontend (Elm Architecture)
 │   ├── server/         # JSON-RPC daemon (Frame-based multi-client)
 │   ├── client/         # TUI client (ANSI rendering, 200ms polling)
-│   └── main.tsx        # Application entry point
+│   └── main.ts         # Application entry point
 ├── test/               # Test suite (1278 tests)
 ├── specs/              # PRD, SRS, RFC specifications
 ├── docs/               # Documentation

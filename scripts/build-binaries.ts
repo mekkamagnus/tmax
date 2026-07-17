@@ -69,7 +69,7 @@ async function buildBinary(
   console.log(`   Target: ${target}`);
 
   try {
-    await $`bun build --compile --target=${target} ./src/main.tsx --outfile ./dist/${output}`;
+    await $`bun build --compile --target=${target} ./src/main.ts --outfile ./dist/${output}`;
 
     const path = `./dist/${output}`;
     const stat = Bun.file(path);

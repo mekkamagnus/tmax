@@ -148,7 +148,7 @@ Core T-Lisp and Editor tests still pass:
 
 2. **Test with custom init:**
    ```bash
-   bun run src/main.tsx --init-file /tmp/my-config.tlisp
+   bun run src/main.ts --init-file /tmp/my-config.tlisp
    ```
 
 3. **Verify in editor:**

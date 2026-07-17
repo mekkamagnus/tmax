@@ -12,7 +12,7 @@ The daemon/client architecture mirrors Emacs (`tmax --daemon` / `tmaxclient`), s
 - **T-Lisp Engine**: Handles high-level editor functionality and user customization
 - **Modal Interface**: Supports normal, insert, visual, command, and M-x modes
 - **Daemon/Client**: Emacs-style daemon with multiple TUI frames sharing state
-- **Interchangeable Frontends**: TUI (ANSI), Ink (React), or Steep — same editor core
+- **Native Frontends**: Steep (embedded ANSI renderer) and TUI client (remote frame over the daemon socket) — same editor core
 - **Extensible**: Users can customize behavior through T-Lisp scripts
 
 ## Features
@@ -269,8 +269,8 @@ tmax/
 │   ├── editor/         # Editor with T-Lisp API, handlers, operations
 │   ├── server/         # Daemon (JSON-RPC 2.0 over Unix socket)
 │   ├── client/         # TUI client (ANSI rendering)
-│   ├── frontend/       # Interchangeable frontends (Ink, Steep)
-│   └── main.tsx        # Application entry point
+│   ├── frontend/       # Shared frontend interface + render helpers (Steep/ANSI)
+│   └── main.ts         # Application entry point
 ├── test/
 │   ├── unit/           # Unit tests
 │   ├── integration/    # Integration tests
@@ -422,9 +422,8 @@ For more information on the architecture patterns used in tmax, see the [rules/]
 
 ## Frontend Architecture
 
-tmax supports multiple interchangeable frontends:
-- **TUI Client** (default): Direct ANSI escape sequence rendering, no framework dependencies
-- **Ink Frontend**: React/Ink based with component architecture
-- **Steep Frontend**: Experimental native terminal frontend
+tmax has two native frontends, both built on the same `Frontend` interface with zero UI framework dependencies:
+- **Steep Frontend** (embedded, default): renders the editor in-process using direct ANSI escape sequences. Used when you run `tmax file.txt` directly.
+- **TUI Client** (remote frame): connects to a running daemon and renders a remote frame over the daemon socket. Used by `bin/tmax` when a daemon is already running.
 
-All frontends communicate with the editor core through the same interface. The daemon/client architecture enables remote frontends via JSON-RPC over Unix sockets.
+Both frontends communicate with the editor core through the same interface. The daemon/client architecture enables remote frontends via JSON-RPC over Unix sockets.

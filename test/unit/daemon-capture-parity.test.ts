@@ -83,7 +83,7 @@ describe("Daemon capture parity", () => {
     previousWorkspaceDir = process.env.TMAX_WORKSPACE_DIR;
 
     daemonProcess = spawn({
-      cmd: ["bun", "src/main.tsx", "--daemon"],
+      cmd: ["bun", "src/main.ts", "--daemon"],
       env: {
         ...process.env,
         HOME: homeDir,

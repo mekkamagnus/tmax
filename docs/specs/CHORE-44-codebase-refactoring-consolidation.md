@@ -69,7 +69,8 @@ Status meanings:
 | Change 7 | **COMPLETE** | `registry.ts` (`EditorAPIContribution` + `registerContributions` with typed duplicate rejection); `createEditorAPI` composes 43 contributions declaratively (no copy loops — AC7.3); ast+navigation share `ctx.caches` (AC7.4); inventory stays exactly 350 (AC7.1); `editor-api-registry.test.ts` (12 tests). Gate 67/0 + broad 173/0. | — |
 | Change 8 | **COMPLETE** | `dispatcher-runtime.ts` (one impl of adwId/appendEvent/writeState/subprocess) + `pipeline.ts` (StageDescriptor + runLinearPipeline); 8 scripts → thin adapters (−789 lines); 3 pipeline configs declarative (AC8.2); `adw-dispatcher-runtime.test.ts` (39 tests). test:adw 420/1 (1 pre-existing from `682c5e3`, not chore-caused); module gate 176/0. | — |
 | Change 9 | **COMPLETE** | `src/core/contracts/{primitives,buffer,terminal,filesystem,editor,workspace}.ts` canonical; `types.ts` 777→80-line barrel; `FunctionalTextBuffer→TextBuffer`, `FunctionalTextBufferImpl→TextBufferImpl`; `FunctionalTerminalIO`/`FunctionalFileSystem` removed (zero `Functional*` matches anywhere — AC9.2); `core-contracts.test.ts`. Gate 88/0 + broad 172/0 + bench 9/9 + typecheck 0. (ink-adapter.ts + save-operations.ts deleted — forced by interface removal; Change 10 still has deps/main.tsx work.) | — |
-| Changes 10–12 | **NOT STARTED** | No numbered change has its principal implementation/test files. | Resume in order only after Change 9. |
+| Change 10 | **COMPLETE** | `main.tsx`→`main.ts`; `dependencies:{}` (ink/react/tsx/typescript removed); React jsx settings gone; zero `.tsx`; version from package.json; one bootstrap model path; dead files (frontend/types.ts, utils/writer.ts) deleted; README updated; `legacy-scaffolding-removed.test.ts`. build 3 binaries OK, `--version` parity, gate 46/0. | — |
+| Changes 11–12 | **NOT STARTED** | No numbered change has its principal implementation/test files. | Resume in order only after Change 10. |
 | Steps 13–14 | **NOT STARTED** | Existing unrelated Vim/Markdown playbooks remain available. | Create the cross-cutting CHORE-44 playbook only after Changes 1–12 are complete, then run the full validation matrix. |
 
 ### Definition of complete for every numbered change
@@ -659,9 +660,19 @@ Honest scope notes: (1) the spec's claim of "5 + 3 files" for TerminalIO consume
 
 Remove confirmed unused Ink/React and utility code, make Bun the direct runtime, eliminate repeated initial-state construction, and make package metadata the version source while preserving all CLIs and build outputs.
 
-#### Current checkpoint status — NOT STARTED (2026-07-17)
+#### Current checkpoint status — COMPLETE (2026-07-18, independently verified)
 
-The Ink/React files and dependencies, `.tsx` entry point, duplicated bootstrap, and named utility files remain. Treat all Change 10 work as pending.
+Confirmed-dead Ink/React/tsx scaffolding is gone; Bun is the direct runtime; the entry point is `src/main.ts`; package metadata is the single version source; the duplicated startup bootstrap is one model path. All CLIs and build outputs preserved.
+
+- **AC10.1** — `package.json` `dependencies` is now `{}` (removed `ink`, `react`, `typescript`, `tsx`); `typescript` moved to `devDependencies`; `@types/react` removed (`@types/node` + `@types/bun` kept — `@types/node` stays explicit per learnings). `tsconfig.json` React JSX settings (`jsx: react-jsxdev`, `jsxImportSource: react`) removed; `include` no longer lists `*.tsx`. Zero `.tsx` files under `src/`. (`src/frontend/ink-adapter.ts` + `src/utils/save-operations.ts` were already deleted in Change 9; this change also deletes `src/frontend/types.ts` + `src/utils/writer.ts` — both zero-importer dead.)
+- **AC10.2** — `src/main.tsx` → `src/main.ts` (git mv); `start`/`dev`/`check`/`build:tmax` scripts now invoke Bun directly (`bun src/main.ts …`); `bin/tmax`, `scripts/build-binaries.ts`, README/AGENTS/CLAUDE entry-point docs, editor.ts/steep comments, and the two shell test scripts updated. `bun run start -- --help`, `bun run check`, and `bun run build` (→ `dist/tmax`, `dist/tlisp`, `dist/tmax-use`) all exit 0.
+- **AC10.3** — `src/main.ts` reads `import pkg from "../package.json" with { type: "json" }`; `const VERSION = pkg.version`. Hard-coded `"0.2.0"` removed. `bun run start -- --version` and `./dist/tmax --version` both print `tmax v0.2.0 …` (compiled-in parity). (`tsconfig` `module` → `esnext` to honor the import attribute — Bun's recommended setting.)
+- **AC10.4** — startup no longer constructs an `EditorState` object literal; one shared path computes `(bufferName, filename, content, statusMessage)` for empty/existing/new-file and bootstraps via `editor.createBuffer(...)` + `applyUpdate(SetCurrentFilename/SetStatusMessage)`. Status text + buffer naming preserved.
+- **AC10.5** — `writer.ts` + `save-operations.ts` (zero consumers) deleted; every retained FP utility (`task-either` 242 consumers, `validation` 30, `state` 15, `adt`/`lens`/`pipeline`/`reader`/`option`/`effect` 1-2 each) has a production consumer.
+- README/AGENTS/CLAUDE architecture claims updated from "Ink/React/Steep interchangeable frontends" to the actual native Steep/ANSI frontend architecture.
+- NEW `test/unit/legacy-scaffolding-removed.test.ts` (8 tests): asserts no ink/react/tsx deps, no jsx settings, no `.tsx`, the 4 dead files absent + `main.ts` present, version parity via package.json import.
+
+Gate evidence (2026-07-18): Change 10 gate + broad regression (legacy-scaffolding-removed, main, cli-flag, frontend-input, steep-input, bench-harness, editor-instance-isolation, server-client, baseline) → **46 pass / 0 fail**; `bun run build` exit 0 (3 binaries); `bun run typecheck` exit 0; `git diff --check` clean.
 
 #### Implementation requirements
 

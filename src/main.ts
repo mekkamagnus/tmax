@@ -1,6 +1,6 @@
 #!/usr/bin/env bun
 /**
- * @file main-bun.tsx
+ * @file main.ts
  * @description Main application entry point for tmax editor
  * T-Lisp drives ALL editor logic - TypeScript is just a thin I/O layer
  */
@@ -8,20 +8,23 @@
 import { Editor as EditorClass } from './editor/editor.ts';
 import { TerminalIOImpl } from './core/terminal.ts';
 import { FileSystemImpl } from './core/filesystem.ts';
-import { TextBufferImpl } from './core/buffer.ts';
-import { EditorState } from './core/types.ts';
 import { TmaxServer } from './server/server.ts';
 import { Logger, LogLevel } from './utils/logger.ts';
 import { SteepFrontend } from './steep/assam.ts';
+// Single source of truth for the version: package.json. The `with { type: "json" }`
+// import attribute is supported by Bun's runtime AND its `bun build --compile`
+// bundler, so the compiled binary and `tmax --version` both read the same value
+// the npm package declares. AC10.3.
+import pkg from "../package.json" with { type: "json" };
 
 /**
  * Main entry point that:
  * 1. Parses command line arguments
  * 2. Loads file if specified (or creates new buffer)
  * 3. Creates Editor class (with T-Lisp interpreter)
- * 4. Renders the React UI (dumb view layer) OR starts daemon
+ * 4. Starts the Steep ANSI frontend OR the daemon
  *
- * Architecture: T-Lisp (core logic) → Editor class → React UI (dumb view)
+ * Architecture: T-Lisp (core logic) → Editor class → Steep frontend (rendering)
  */
 
 async function main() {
@@ -82,8 +85,8 @@ async function main() {
     initFilePath = args[initFileArgIndex + 1];
   }
 
-  // Get version from package.json
-  const VERSION = "0.2.0";
+  // Version comes from package.json (single source of truth, AC10.3).
+  const VERSION = pkg.version;
 
   // Show version if requested
   if (args.includes('--version') || args.includes('-v')) {
@@ -183,12 +186,13 @@ Examples:
     }
   });
 
-  // CHORE-44 Change 3: collapse the prior three-branch bootstrap (which built
-  // three separate EditorState literals) into one shared path. The three cases
-  // (existing file / new+missing file / no file arg) only differ in
-  // (filename, content, status); the rest of the initial state is identical,
-  // so compute those three and commit one setEditorState. Behavior — buffer
-  // naming, status text, filename — is preserved exactly.
+  // CHORE-44 Change 10 (AC10.4): one initial model path for empty,
+  // existing-file, and new-file cases. We no longer construct an EditorState
+  // object literal — instead the three cases differ only in
+  // (bufferName, filename, content, status), and we route the result through
+  // the model API (createBuffer + applyUpdate) exactly as `openFile` does.
+  // Buffer naming, status text, and filename binding match the prior path.
+  let bufferName: string;
   let filename: string | undefined;
   let content = "";
   let statusMessage = "";
@@ -196,6 +200,7 @@ Examples:
   // Phase 4: Load file if specified
   if (fileArgs.length > 0) {
     filename = fileArgs[0]!;
+    bufferName = filename;
     try {
       startupLog.info(`Loading file: ${filename}`, {
         correlationId: startupId,
@@ -221,38 +226,30 @@ Examples:
       });
     }
   } else {
-    // No file specified - start with empty buffer
+    // No file specified - start with the *scratch* buffer
     startupLog.info('No file specified - starting with empty buffer', {
       correlationId: startupId,
       metadata: { phase: 'empty-buffer' }
     });
+    bufferName = '*scratch*';
     filename = undefined;
     content = "";
     statusMessage = '';
   }
 
-  const initialState: EditorState = {
-    currentBuffer: TextBufferImpl.create(content),
-    cursorPosition: { line: 0, column: 0 },
-    mode: 'normal' as const,
-    statusMessage,
-    viewportTop: 0,
-    config: {
-      theme: 'default',
-      tabSize: 4,
-      autoSave: false,
-      keyBindings: {},
-      maxUndoLevels: 100,
-      showLineNumbers: true,
-      wordWrap: false,
-      relativeLineNumbers: false
-    },
-    currentFilename: filename,
-    commandLine: "",
-    mxCommand: "",
-    buffers: editor.getState().buffers,
-  };
-  editor.setEditorState(initialState);
+  // Route the bootstrap through the model API. `createBuffer` sets
+  // currentBuffer, seeds windows, registers default buffer metadata, and (for
+  // the first buffer) initializes the mode to 'normal'. We then attach the
+  // filename on the model (consulted by `saveFile`) and the status text. The
+  // buffer name equals the filename, so per-buffer metadata lookups naturally
+  // resolve; no manual metadata binding is needed.
+  editor.createBuffer(bufferName, content);
+  if (filename !== undefined) {
+    editor.applyUpdate({ type: "SetCurrentFilename", filename });
+  }
+  if (statusMessage) {
+    editor.applyUpdate({ type: "SetStatusMessage", message: statusMessage });
+  }
 
   if (!fileArgs.length) {
     startupLog.debug('Empty buffer initialized', {
@@ -297,7 +294,8 @@ Examples:
   // repaint. requestRender is a no-op until frontend.run initializes its loop.
   editor.onStateChange(() => frontend.requestRender(editor));
   try {
-    await frontend.run(editor, initialState);
+    // Read the post-bootstrap model state as the frontend's initial snapshot.
+    await frontend.run(editor, editor.getState());
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : String(error);
     if (!errorMessage.includes('EDITOR_QUIT_SIGNAL')) {

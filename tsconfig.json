@@ -1,7 +1,7 @@
 {
   "compilerOptions": {
     "target": "ES2022",
-    "module": "ES2022",
+    "module": "esnext",
     "moduleResolution": "bundler",
     "esModuleInterop": true,
     "allowSyntheticDefaultImports": true,
@@ -13,8 +13,6 @@
     "allowJs": true,
     "checkJs": false,
     "noEmit": true,
-    "jsx": "react-jsxdev",
-    "jsxImportSource": "react",
     "types": ["node", "bun"]
   },
   "include": [
@@ -23,8 +21,7 @@
     "scripts/**/*",
     "adws/**/*",
     "tmax-use/**/*",
-    "*.ts",
-    "*.tsx"
+    "*.ts"
   ],
   "exclude": [
     "adws/adw-right-bracket-h.test.ts",

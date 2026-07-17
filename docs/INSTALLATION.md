@@ -31,7 +31,7 @@ cd tmax
 bun install
 
 # Run directly
-bun run src/main.tsx
+bun run src/main.ts
 
 # Or link globally for development
 bun link

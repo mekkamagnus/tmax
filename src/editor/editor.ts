@@ -92,7 +92,7 @@ export class Editor {
   private coreBindingsLoaded: boolean = false;
   // Notified after handleKey mutates editor state (e.g. socket-driven
   // `tmaxclient --keys`), so attached frontends that don't see the local stdin
-  // key can still re-render. See main.tsx subscription.
+  // key can still re-render. See main.ts subscription.
   private stateChangeListeners: Array<() => void> = [];
   private terminal: TerminalIO;
   private filesystem: FileSystem;
@@ -2468,7 +2468,7 @@ export class Editor {
   /**
    * Subscribe to editor state changes. The listener is invoked after
    * handleKey mutates state, so an attached frontend (e.g. the embedded
-   * SteepFrontend in main.tsx) can re-render in response to socket-driven
+   * SteepFrontend in main.ts) can re-render in response to socket-driven
    * input (`tmaxclient --keys`) that bypasses its own stdin. Returns an
    * unsubscribe function.
    */

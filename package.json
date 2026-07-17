@@ -4,8 +4,8 @@
   "description": "Extensible terminal-based text editor with T-Lisp (Alpha)",
   "type": "module",
   "scripts": {
-    "start": "node --import tsx src/main.tsx",
-    "dev": "node --watch --import tsx src/main.tsx --dev",
+    "start": "bun src/main.ts",
+    "dev": "bun --watch src/main.ts --dev",
     "tui": "bun src/client/tui-client.ts",
     "daemon": "bun src/server/server.ts",
     "tlisp": "bun src/tlisp/cli.ts",
@@ -17,7 +17,7 @@
     "test:tmax-use": "bin/tmax-use test",
     "tmux:audit": "bash scripts/tmax-tmux-audit.sh",
     "tmux:cleanup-stale": "bash scripts/tmax-tmux-audit.sh --cleanup-stale-shells",
-    "check": "node --import tsx --eval \"import('./src/main.tsx')\" -- --help",
+    "check": "bun src/main.ts --help",
     "typecheck": "bun run typecheck:src && bun run typecheck:test && bun run typecheck:tmax-use && bun run typecheck:bench",
     "typecheck:src": "bunx tsc --noEmit --project tsconfig.src.json",
     "typecheck:test": "bunx tsc --noEmit --project tsconfig.test.json",
@@ -26,23 +26,18 @@
     "bench": "bun run bench/bench.ts",
     "bench:all": "bun run bench/bench.ts all",
     "build": "bun run build:tmax && bun run build:tlisp && bun run build:tmax-use",
-    "build:tmax": "bun build --compile ./src/main.tsx --outfile dist/tmax",
+    "build:tmax": "bun build --compile ./src/main.ts --outfile dist/tmax",
     "build:tlisp": "bun build --compile ./src/tlisp/cli.ts --outfile dist/tlisp",
     "build:tmax-use": "bun build --compile ./tmax-use/test/cli.ts --outfile dist/tmax-use",
     "test:trt": "bin/trt",
     "adw": "bun adws/adw-launch.ts",
     "adw:resume": "bun adws/adw-launch.ts --resume"
   },
-  "dependencies": {
-    "ink": "^4.4.1",
-    "react": "^18.3.1",
-    "typescript": "^5.9.3",
-    "tsx": "^4.20.5"
-  },
+  "dependencies": {},
   "devDependencies": {
     "@types/bun": "latest",
     "@types/node": "^26.0.1",
-    "@types/react": "^18.3.1"
+    "typescript": "^5.9.3"
   },
   "browser": {
     "fs": false,

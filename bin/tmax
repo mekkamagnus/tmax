@@ -281,4 +281,4 @@ if [ -z "$WORKSPACE" ] && [ -f "$LAST_WS_FILE" ] && is_running >/dev/null 2>&1; 
   fi
 fi
 
-cd "$PROJECT_DIR" && exec bun src/main.tsx "${FILES[@]}"
+cd "$PROJECT_DIR" && exec bun src/main.ts "${FILES[@]}"
