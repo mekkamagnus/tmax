@@ -32,6 +32,7 @@ import { LoggingRuntime } from "./runtime/logging-runtime.ts";
 import { PluginRuntime, type PluginLoadResult } from "./runtime/plugin-runtime.ts";
 import { BindingRuntime } from "./runtime/binding-runtime.ts";
 import { WorkspaceRuntime } from "./runtime/workspace-runtime.ts";
+import { CommandRuntime, type CommandOutcome } from "./runtime/command-runtime.ts";
 import type { LogEntry, LogCategory } from "./log-entry.ts";
 import { handleNormalMode } from "./handlers/normal-handler.ts";
 import { handleInsertMode } from "./handlers/insert-handler.ts";
@@ -60,7 +61,7 @@ import { createModuleLoader } from "../tlisp/module-loader.ts";
 import type { ModuleExportRecord } from "../tlisp/module-registry.ts";
 import { createWhichKeyState, DEFAULT_WHICH_KEY_TIMEOUT, type WhichKeyHandle } from "./utils/which-key-state.ts";
 import type { EditorModel, Msg, Cmd, EditorRuntime } from "./functional/index.ts";
-import { initialModel, modelToEditorState, editorStateToModelPatch, update, runCmd } from "./functional/index.ts";
+import { initialModel, modelToEditorState, editorStateToModelPatch, update } from "./functional/index.ts";
 import type { AppError } from "../error/types.ts";
 import { createValidationError } from "../error/types.ts";
 
@@ -71,16 +72,6 @@ import { createValidationError } from "../error/types.ts";
 export type { KeyMapping } from "./key-resolution.ts";
 export { resolveMapping } from "./key-resolution.ts";
 import type { KeyMapping } from "./key-resolution.ts";
-
-/**
- * Outcome the drain reports to an awaiting public method (CHORE-42).
- * `content` is populated for `OpenFile`, `result` for `EvalTlisp`; effect-level
- * failure carries the typed `AppError` so the caller can mirror prior log
- * behavior without rejecting the public method.
- */
-type CommandOutcome =
-  | { readonly status: "succeeded"; readonly content?: string; readonly result?: TLispValue }
-  | { readonly status: "failed"; readonly error: AppError };
 
 /**
  * Core editor implementation
@@ -110,10 +101,15 @@ export class Editor {
   private logging: LoggingRuntime;
   // CHORE-44 Change 3: plugin parsing/loading + macro persistence delegated.
   private pluginRuntime: PluginRuntime = new PluginRuntime();
-  // CHORE-44 Change 3: binding-file loading delegated.
-  private bindingRuntime: BindingRuntime = new BindingRuntime();
+  // CHORE-44 Change 3: binding-file loading + core/fallback/init-file policy
+  // delegated. Constructed in the constructor (needs `this` for the
+  // core-bindings-loaded flag and the line-numbers post-load hook).
+  private bindingRuntime!: BindingRuntime;
   // CHORE-44 Change 3: workspace serialization/reconciliation delegated.
   private workspaceRuntime: WorkspaceRuntime = new WorkspaceRuntime();
+  // CHORE-44 Change 3: command queue / effect drain delegated. Constructed in
+  // the constructor (needs `this.getRuntime` + `this.applyUpdate`).
+  private commandRuntime!: CommandRuntime;
   spacePressed: boolean = false;  // Track space key for SPC ; sequence (US-1.10.1)
   private windowPrefixPressed: boolean = false;  // Track C-w prefix for window commands (SPEC-004)
   private lspClient: LSPClient;  // LSP client for language server integration (US-3.1.1)
@@ -258,6 +254,28 @@ export class Editor {
     this.logging = new LoggingRuntime({
       setBuffer: (name, text) => { this.buffers.set(name, FunctionalTextBufferImpl.create(text)); },
       updateBufferMetadata: (name, meta) => { this.updateBufferMetadata(name, meta); },
+    });
+
+    // CHORE-44 Change 3: construct the command-runtime collaborator (owns the
+    // Cmd queue, drain loop, ownership waiters). commitMsg = applyUpdate, so
+    // each follow-up Msg / CmdFailed commits through the reducer and fires
+    // notifyStateChange exactly once (AC3.5: notification-once preserved).
+    this.commandRuntime = new CommandRuntime({
+      getRuntime: () => this.getRuntime(),
+      commitMsg: (m) => this.applyUpdate(m),
+    });
+
+    // CHORE-44 Change 3: construct the binding-runtime collaborator with the
+    // core-bindings-loaded flag + post-load hook + status callback. The
+    // binding file/dir paths (computed from import.meta.dir) are passed to
+    // each load call so the path computation stays with the Editor.
+    this.bindingRuntime = new BindingRuntime({
+      filesystem: this.filesystem,
+      evalCode: (code) => this.interpreter.execute(code),
+      setCoreBindingsLoaded: (v) => { this.coreBindingsLoaded = v; },
+      getCoreBindingsLoaded: () => this.coreBindingsLoaded,
+      onCoreBindingsLoaded: () => { this.executeCommand("(editor/modes/line-numbers/global-line-numbers-mode t)"); },
+      setStatusMessage: (message) => { this.applyUpdate({ type: "SetStatusMessage", message }); },
     });
 
     // SPEC-055: tail-load prior-session entries from the persisted JSONL log
@@ -1625,54 +1643,29 @@ export class Editor {
    * @returns true if loaded successfully, false otherwise
    */
   private async loadBindingsFromFile(path: string, silent = false): Promise<boolean> {
-    return this.bindingRuntime.loadBindingsFromFile(path, this.filesystem, (code) => this.interpreter.execute(code), silent);
+    return this.bindingRuntime.loadBindingsFromFile(path, silent);
   }
 
   /**
-   * Load core key bindings from T-Lisp files
+   * Load core key bindings from T-Lisp files. CHORE-44 Change 3: the load
+   * order, required-file list, fallback policy, and post-load line-numbers
+   * toggle live in the binding-runtime collaborator; this is a one-line facade.
    */
   private async loadCoreBindings(): Promise<void> {
-    // Load unified keymap module before bindings (SPEC-038)
-    try {
-      await this.loadBindingsFromFile(`${import.meta.dir}/../tlisp/core/keymaps.tlisp`);
-    } catch {}
-
-    const bindingsDir = `${import.meta.dir}/../tlisp/core/bindings`;
-    const requiredBindingFiles = [
-      `${bindingsDir}/normal.tlisp`,
-      `${bindingsDir}/insert.tlisp`,
-      `${bindingsDir}/visual.tlisp`,
-      `${bindingsDir}/command.tlisp`,
-    ];
-
-    let allLoaded = true;
-    let lastError: string = "";
-
-    for (const path of requiredBindingFiles) {
-      const loaded = await this.loadBindingsFromFile(path);
-      if (!loaded) {
-        allLoaded = false;
-        lastError = `Failed to load from ${path}`;
-      }
-    }
-
-    if (!allLoaded) {
-      console.warn(`Failed to load some core bindings. Last error: ${lastError}`);
-      console.warn("Loading minimal fallback key bindings...");
-      this.loadFallbackBindings();
-    }
-
-    this.coreBindingsLoaded = true;
-    this.executeCommand("(editor/modes/line-numbers/global-line-numbers-mode t)");
+    await this.bindingRuntime.loadCoreBindings(
+      `${import.meta.dir}/../tlisp/core/bindings`,
+      `${import.meta.dir}/../tlisp/core/keymaps.tlisp`,
+    );
   }
 
   /**
    * Ensure core bindings are loaded (lazy loading)
    */
   private async ensureCoreBindingsLoaded(): Promise<void> {
-    if (!this.coreBindingsLoaded) {
-      await this.loadCoreBindings();
-    }
+    await this.bindingRuntime.ensureCoreBindingsLoaded(
+      `${import.meta.dir}/../tlisp/core/bindings`,
+      `${import.meta.dir}/../tlisp/core/keymaps.tlisp`,
+    );
   }
 
   /**
@@ -1714,43 +1707,12 @@ export class Editor {
   }
 
   /**
-   * Load minimal fallback key bindings when core-bindings.tlisp fails
+   * Load minimal fallback key bindings when core-bindings.tlisp fails.
+   * CHORE-44 Change 3: the fallback keymap string + critical-failure status
+   * commit live in the binding-runtime collaborator; this is a one-line facade.
    */
   private loadFallbackBindings(): void {
-    try {
-      // Essential bindings for basic functionality
-      const fallbackBindings = `
-        ;; Minimal fallback bindings
-        (key-bind "q" "(editor-quit)" "normal")
-        (key-bind "i" "(editor-set-mode \\"insert\\")" "normal")
-        (key-bind "Escape" "(editor-set-mode \\"normal\\")" "insert")
-        (key-bind "h" "(cursor-move (cursor-line) (- (cursor-column) 1))" "normal")
-        (key-bind "j" "(cursor-move (+ (cursor-line) 1) (cursor-column))" "normal")
-        (key-bind "k" "(cursor-move (- (cursor-line) 1) (cursor-column))" "normal")
-        (key-bind "l" "(cursor-move (cursor-line) (+ (cursor-column) 1))" "normal")
-        (key-bind ":" "(editor-enter-command-mode)" "normal")
-        (key-bind "Escape" "(editor-exit-command-mode)" "command")
-        (key-bind "Enter" "(editor-execute-command-line)" "command")
-        
-        ;; M-x mode bindings (US-1.10.1)
-        (key-bind " " "(editor-handle-space)" "normal")
-        (key-bind ";" "(execute-extended-command-maybe)" "normal")
-        (key-bind "C-x b" "(switch-buffer)" "normal")
-        (key-bind "Escape" "(minibuffer-dispatch-key \\"Escape\\")" "mx")
-        (key-bind "C-g" "(minibuffer-dispatch-key \\"C-g\\")" "mx")
-        (key-bind "Enter" "(minibuffer-dispatch-key \\"Enter\\")" "mx")
-
-        ;; Window management bindings (SPEC-004)
-        (key-bind "C-w" "(editor-window-prefix)" "normal")
-      `;
-      this.interpreter.execute(fallbackBindings);
-
-      // Enable line-numbers mode by default
-      try { this.interpreter.execute('(global-line-numbers-mode t)'); } catch { /* ok */ }
-    } catch (error) {
-      console.error("Critical: Failed to load even fallback bindings:", error);
-      this.applyUpdate({ type: "SetStatusMessage", message: "Critical: No key bindings available" });
-    }
+    this.bindingRuntime.loadFallbackBindings();
   }
 
   /**
@@ -1764,75 +1726,18 @@ export class Editor {
    *
    * The file is loaded from ~/.config/tmax/init.tlisp (XDG config directory)
    * @param initFilePath - Optional custom init file path
+   *
+   * CHORE-44 Change 3: the discovery algorithm (config-dir creation, default
+   * path, `~/.config/tmax/init.tlisp` fallback, silent "use defaults") lives
+   * in the binding-runtime collaborator; this facade supplies the registered
+   * keymap list (read from keymapSync) and stores the resolved path.
    */
   private async loadInitFile(initFilePath?: string): Promise<void> {
-    const initLog = log.module('editor').fn('loadInitFile');
-
-    // Determine init file path
-    const homeDir = process.env.HOME || process.env.USERPROFILE || '.';
-    const configDir = `${homeDir}/.config/tmax`;
-    const defaultInitFile = `${configDir}/init.tlisp`;
-
-    const initFile = initFilePath || defaultInitFile;
-
-    // Store for later reference
-    this.currentInitFile = initFile;
-
-    try {
-      // Create config directory if it doesn't exist (only for default path)
-      if (!initFilePath) {
-        try {
-          await this.filesystem.createDir(configDir);
-          initLog.debug('Created config directory', { data: { path: configDir } });
-        } catch (dirError) {
-          // Directory creation failed - might already exist or permission error
-          initLog.debug('Config directory creation failed or already exists', {
-            data: {
-              path: configDir,
-              error: dirError instanceof Error ? dirError.message : String(dirError)
-            }
-          });
-        }
-      }
-
-      initLog.debug(`Loading init file: ${initFile}`);
-
-      let initContent: string;
-      try {
-        initContent = await this.filesystem.readFile(initFile);
-      } catch (readError) {
-        if (initFilePath) {
-          throw readError;
-        }
-        initContent = await this.filesystem.readFile("~/.config/tmax/init.tlisp");
-        this.currentInitFile = "~/.config/tmax/init.tlisp";
-      }
-      this.interpreter.execute(initContent);
-
-      initLog.info('Loaded init file', {
-        data: { path: initFile }
-      });
-
-      // Log any keymaps that were registered
-      const registeredKeymaps = ["normal", "insert", "visual", "command", "mx"].filter(mode =>
-        this.keymapSync.hasKeymap(mode)
-      );
-
-      if (registeredKeymaps.length > 0) {
-        initLog.info('Registered T-Lisp keymaps from init file', {
-          data: { modes: registeredKeymaps }
-        });
-      }
-    } catch (error) {
-      // Init file not found or error - use defaults (silent)
-      // This is expected if the user hasn't created an init file yet
-      initLog.debug('No init file found or error loading it', {
-        data: {
-          path: initFile,
-          error: error instanceof Error ? error.message : String(error)
-        }
-      });
-    }
+    const registeredKeymaps = ["normal", "insert", "visual", "command", "mx"].filter(mode =>
+      this.keymapSync.hasKeymap(mode)
+    );
+    const resolved = await this.bindingRuntime.loadInitFile(initFilePath, registeredKeymaps);
+    this.currentInitFile = resolved;
   }
 
   /**
@@ -2584,20 +2489,13 @@ export class Editor {
   // ── Functional core bridge (CHORE-39) ───────────────────────────────
   // The editor's deterministic state lives in `this.model` (EditorModel).
   // `applyUpdate` dispatches a Msg through the pure `update` reducer, commits
-  // the result, enqueues any returned Cmds, and fires state-change listeners
-  // exactly once for that committed change. The command drain runs queued
-  // Cmds asynchronously and feeds follow-up Msgs back through `applyUpdate`.
-
-  private cmdQueue: Cmd[] = [];
-  private cmdDraining = false;
-  /**
-   * Per-command-id ownership waiters (CHORE-42). Each awaiting public method
-   * (openFile/saveFile) registers a waiter before dispatching its initiating
-   * Msg; the drain settles it from the follow-up Msg so the method can resume.
-   * A failed background log write has no waiter and therefore can never reject
-   * an unrelated public method.
-   */
-  private commandWaiters = new Map<string, { resolve: (outcome: CommandOutcome) => void }>();
+  // the result, enqueues any returned Cmds (via the command-runtime
+  // collaborator), and fires state-change listeners exactly once for that
+  // committed change. The drain runs queued Cmds asynchronously and feeds
+  // follow-up Msgs back through `applyUpdate` (CHORE-44 Change 3: the queue,
+  // drain loop, ownership waiters, and outcome classification live in
+  // `command-runtime.ts`; the methods below are one-line facades so the
+  // public/private prototype inventory is unchanged).
 
   /** Canonical typed read access to the editor model. */
   getModel(): EditorModel {
@@ -2634,8 +2532,7 @@ export class Editor {
 
   /** Enqueue a Cmd directly (e.g. from a handler) and kick the drain. */
   enqueueCmd(cmd: Cmd): void {
-    this.cmdQueue.push(cmd);
-    void this.drainCommands();
+    this.commandRuntime.enqueueCmd(cmd);
   }
 
   /**
@@ -2644,61 +2541,21 @@ export class Editor {
    * initiating Msg so the waiter is present when the drain settles it.
    */
   private trackCommand(commandId: string): Promise<CommandOutcome> {
-    return new Promise<CommandOutcome>(resolve => {
-      this.commandWaiters.set(commandId, { resolve });
-    });
+    return this.commandRuntime.trackCommand(commandId);
   }
 
   /**
    * Map a settled Cmd's `runCmd` result to the outcome the awaiting owner
-   * sees. Effect-level success/failure is read from the follow-up Msgs (a
-   * handled filesystem error is a `*Failed` Msg, not a Left); a drain-level
-   * `Left` is a failure carrying the `AppError`.
+   * sees. CHORE-44 Change 3: the classification algorithm lives in the
+   * command-runtime collaborator; this is a one-line facade.
    */
   private classifyCommand(result: Either<AppError, readonly Msg[]>): CommandOutcome {
-    if (result._tag === "Left") {
-      return { status: "failed", error: result.left };
-    }
-    for (const m of result.right) {
-      switch (m.type) {
-        case "OpenFileSucceeded": return { status: "succeeded", content: m.content };
-        case "OpenFileFailed": return { status: "failed", error: m.error };
-        case "SaveFileSucceeded": return { status: "succeeded" };
-        case "SaveFileFailed": return { status: "failed", error: m.error };
-        case "EvalTlispSucceeded": return { status: "succeeded", result: m.result };
-        case "EvalTlispFailed": return { status: "failed", error: m.error };
-        case "BackgroundCommandFailed": return { status: "failed", error: m.error };
-        default: break;
-      }
-    }
-    return { status: "succeeded" };
+    return this.commandRuntime.classifyCommand(result);
   }
 
   /** Drain queued Cmds sequentially; follow-up Msgs commit via applyUpdate. */
   private async drainCommands(): Promise<void> {
-    if (this.cmdDraining) return;
-    this.cmdDraining = true;
-    try {
-      while (this.cmdQueue.length > 0) {
-        const cmd = this.cmdQueue.shift()!;
-        const result = await runCmd(cmd, this.getRuntime()).run();
-        if (result._tag === "Left") {
-          this.applyUpdate({ type: "CmdFailed", commandTag: cmd.tag, commandId: cmd.commandId, error: result.left });
-        } else {
-          for (const followUp of result.right) {
-            this.applyUpdate(followUp);
-          }
-        }
-        // Settle the awaiting owner (if any) for this command id.
-        const waiter = this.commandWaiters.get(cmd.commandId);
-        if (waiter) {
-          this.commandWaiters.delete(cmd.commandId);
-          waiter.resolve(this.classifyCommand(result));
-        }
-      }
-    } finally {
-      this.cmdDraining = false;
-    }
+    await this.commandRuntime.drainCommands();
   }
 
   /** The EditorRuntime capability surface used by Cmd runners. */

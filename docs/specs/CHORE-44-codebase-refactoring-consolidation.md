@@ -62,7 +62,7 @@ Status meanings:
 | Step 0 | **COMPLETE** | `.chore44-baseline/` holds all inventories (editor methods, Markdown fns, static + runtime API names, RPC methods, ADW state keys, ADW event types, CLI exit codes). `test/unit/chore44-baseline-inventory.test.ts` asserts each as a frozen expected set (6 tests green). | — |
 | Change 1 | **COMPLETE** | All session state groups (kill ring, registers, delete/yank, yank-pop, visual, macros, search, dired, syntax, replace, undo/redo, major-mode) live on `EditorModel.session: EditorSessionState`; `EditorSession` is an accessor over model state; `major-mode-ops` module-globals deleted (real isolation bug fixed); isolation test covers every group two-editor. | — |
 | Change 2 | **COMPLETE** | All 18 mutable bridge properties removed from `EditorAPIContext`; `tlisp-api.ts` has 0 bridge-field assignments and 0 reads (AC2.7, independently verified); writes route through `applyUpdate(Msg)` + 4 side-effectful methods; fold latent disconnect fixed; `editor-api-context.test.ts` strengthened with static + behavioral AC2.6/AC2.7 cases. | — |
-| Change 3 | **PARTIAL** | Logging, plugin, binding-file, and workspace algorithms have collaborators with delegation tests. | Extract the command queue/drain/correlation implementation and the remaining core/fallback/init binding policy. Complete bootstrap consolidation and test every collaborator with fakes. |
+| Change 3 | **COMPLETE** | `command-runtime.ts` extracted (queue/drain/correlation/classify); `binding-runtime.ts` owns full core/fallback/init policy; `editor.ts` holds only one-line facades + path resolution (AC3.7 verified); `main.tsx` bootstrap collapsed 3→1 `EditorState`; delegation tests cover CommandRuntime + BindingRuntime with fakes; AC3.5 notification-once preserved. | — |
 | Change 4 | **PARTIAL** | Sync/async parity and evaluator-instance tests exist; `if`/`let` validation is shared; async dispatch uses one recognition set for delegated forms; core test registries are instance fields. | Extract every required validator and the named module/test/function-call/special-form modules; move remaining evaluator-owned mutable coverage/debug state per instance; keep the evaluator as a thin facade/trampoline. |
 | Change 5 | **PARTIAL** | `RpcMethodMap` and a dispatch table exist; the request-method switch and `params: any`/`Promise<any>` signatures are gone. | Give every method exact result types; add runtime version/params validation and error mapping in the router; split domain handlers; centralize sync wrappers; add both required tests. |
 | Change 6 | **PARTIAL** | `EditorDispatchPort` exists; `KeyMapping`/`resolveMapping` moved to `key-resolution.ts`; handlers no longer import `editor.ts`. | Move substitute/Dired parsing and Markdown/indent policy to T-Lisp, finish all policy routing, and run the complete Change 6 gate without output-truncating pipelines. |
@@ -312,20 +312,18 @@ Completion gate: AC2.1–AC2.7, the exact Step 0 API inventory comparison, and t
 
 Keep `Editor` as the one public integration object, but make it a composition root and delegating facade rather than the owner of binding loading, plugin loading, workspace reconciliation, logging persistence, command draining, and every file/buffer lifecycle detail.
 
-#### Current checkpoint status — PARTIAL (2026-07-17)
+#### Current checkpoint status — COMPLETE (2026-07-17)
 
-Completed:
+The command-queue/effect-drain machinery and the binding-load policy are extracted into collaborators; `Editor` retains only one-line delegation facades (plus path resolution that must live where `import.meta.dir` resolves). Listener notifications still fire exactly once per committed model update (AC3.5).
 
-- Added and delegated `LoggingRuntime`, `PluginRuntime`, `BindingRuntime`, and `WorkspaceRuntime` responsibilities.
-- Added `editor-runtime-delegation.test.ts` with focused collaborator/delegation coverage.
-- Runtime collaborators do not import the concrete `Editor` class.
+- **NEW `src/editor/runtime/command-runtime.ts`** (`CommandRuntime`): owns the `cmdQueue`, `cmdDraining` guard, `commandWaiters`, and `enqueueCmd` / `drainCommands` / `trackCommand` / `classifyCommand`. Imports only the pure functional core (`runCmd`, `Cmd`, `EditorRuntime`, `Msg`) + `Either`; depends on injected `getRuntime` and `commitMsg` (= `applyUpdate`). `Editor.enqueueCmd`/`trackCommand` are one-line facades; `drainCommands`/`classifyCommand` bodies removed from `editor.ts`.
+- **`binding-runtime.ts` completed**: now owns the full policy — `REQUIRED_BINDING_FILES`, `FALLBACK_BINDINGS` (the fallback keymap string), `loadCoreBindings` (keymaps + required files + on-failure fallback + post-load line-numbers toggle), `loadFallbackBindings`, `loadInitFile` (XDG + `~/.config/tmax/init.tlisp`), `ensureCoreBindingsLoaded`. `editor.ts`'s `loadCoreBindings`/`loadFallbackBindings`/`loadInitFile`/`ensureCoreBindingsLoaded`/`loadBindingsFromFile` are one-line facades that resolve paths and delegate. AC3.7 (independently verified): `editor.ts` contains no `normal.tlisp`/`insert.tlisp`/… required-file loop, no `FALLBACK`/`requiredBindingFiles`, no drain `while`/`runCmd` loop.
+- **`main.tsx` bootstrap consolidated**: the three `initialState = {…}; editor.setEditorState(initialState)` branches collapsed into ONE shared path (compute `(filename, content, statusMessage)` → one `EditorState` → one `setEditorState`). Status text and buffer naming preserved. (A public `Editor.bootstrapForFile` was deliberately NOT added to avoid changing the frozen method inventory AC3.1; the deeper createBuffer/openFile model-path migration is Change 10's AC10.4.)
+- **`editor-runtime-delegation.test.ts`** extended: `CommandRuntime` fake-dep tests (FIFO drain, follow-up Msgs committed via `commitMsg` exactly once [AC3.5], `trackCommand` settlement, serial drain), `BindingRuntime` policy tests (core load order + line-numbers toggle, fallback on missing required file, init-file path + fallback, `silent`), and AC3.7/AC3.3 static + import-scan assertions.
 
-Remaining:
+Honest note: the `CmdFailed` drain branch is unreachable through fakes (current `runCmd` wraps every error as a Right-with-failed-follow-up), so its test substitutes the reachable equivalent (Right-with-`EvalTlispFailed` committed once). The branch remains as defensive code.
 
-- `Editor` still implements `loadCoreBindings`, `loadFallbackBindings`, `loadInitFile`, command ownership waiters, command enqueueing, and `drainCommands`. Extract these into the specified binding/command collaborators rather than marking `command-runtime.ts` N/A.
-- Create `src/editor/runtime/command-runtime.ts` and move command queue, effect drain, correlation, and command execution coordination behind explicit dependencies.
-- Finish binding runtime ownership of core/fallback/init-file policy, not only the low-level `loadBindingsFromFile` helper.
-- Complete the shared bootstrap construction required by this change and prove listener notifications remain exactly once per committed model update.
+Gate evidence (2026-07-17): spec Change 3 targeted gate (`editor-runtime-delegation`, `editor`, `editor-state-boundary`, `init-file`, `workspace-serialization`, `chore44-baseline-inventory`) → **71 pass / 0 fail**; `bun run typecheck` exit 0; `git diff --check` clean; `plugin-isolation` integration green; frozen Editor method inventory unchanged.
 
 #### Implementation requirements
 

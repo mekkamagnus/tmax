@@ -183,53 +183,29 @@ Examples:
     }
   });
 
+  // CHORE-44 Change 3: collapse the prior three-branch bootstrap (which built
+  // three separate EditorState literals) into one shared path. The three cases
+  // (existing file / new+missing file / no file arg) only differ in
+  // (filename, content, status); the rest of the initial state is identical,
+  // so compute those three and commit one setEditorState. Behavior — buffer
+  // naming, status text, filename — is preserved exactly.
   let filename: string | undefined;
-  let initialState: EditorState;
+  let content = "";
+  let statusMessage = "";
 
   // Phase 4: Load file if specified
   if (fileArgs.length > 0) {
     filename = fileArgs[0]!;
-
-    // Try to load the file
     try {
       startupLog.info(`Loading file: ${filename}`, {
         correlationId: startupId,
         metadata: { phase: 'load-file', filename }
       });
-
-      const content = await filesystem.readFile(filename);
-      initialState = {
-        currentBuffer: FunctionalTextBufferImpl.create(content),
-        cursorPosition: { line: 0, column: 0 },
-        mode: 'normal' as const,
-        statusMessage: `Loaded ${filename}`,
-        viewportTop: 0,
-        config: {
-          theme: 'default',
-          tabSize: 4,
-          autoSave: false,
-          keyBindings: {},
-          maxUndoLevels: 100,
-          showLineNumbers: true,
-          wordWrap: false,
-          relativeLineNumbers: false
-        },
-        currentFilename: filename,
-        commandLine: "",
-        mxCommand: "",
-        buffers: editor.getState().buffers,
-      };
-
-      // Set the filename in the editor state
-      editor.setEditorState(initialState);
-
+      content = await filesystem.readFile(filename);
+      statusMessage = `Loaded ${filename}`;
       startupLog.info('File loaded successfully', {
         correlationId: startupId,
-        data: {
-          filename,
-          bufferSize: content.length,
-          lineCount: initialState.currentBuffer?.getLineCount() ?? 0
-        }
+        data: { filename, bufferSize: content.length }
       });
     } catch (error) {
       // File doesn't exist or can't be read - create new buffer
@@ -237,32 +213,8 @@ Examples:
         correlationId: startupId,
         metadata: { phase: 'new-file', filename }
       });
-
-      initialState = {
-        currentBuffer: FunctionalTextBufferImpl.create(""),
-        cursorPosition: { line: 0, column: 0 },
-        mode: 'normal' as const,
-        statusMessage: `New file: ${filename}`,
-        viewportTop: 0,
-        config: {
-          theme: 'default',
-          tabSize: 4,
-          autoSave: false,
-          keyBindings: {},
-          maxUndoLevels: 100,
-          showLineNumbers: true,
-          wordWrap: false,
-          relativeLineNumbers: false
-        },
-        currentFilename: filename,
-        commandLine: "",
-        mxCommand: "",
-        buffers: editor.getState().buffers,
-      };
-
-      // Set the filename in the editor state
-      editor.setEditorState(initialState);
-
+      content = "";
+      statusMessage = `New file: ${filename}`;
       startupLog.debug('New buffer created', {
         correlationId: startupId,
         data: { filename }
@@ -274,32 +226,35 @@ Examples:
       correlationId: startupId,
       metadata: { phase: 'empty-buffer' }
     });
+    filename = undefined;
+    content = "";
+    statusMessage = '';
+  }
 
-    initialState = {
-      currentBuffer: FunctionalTextBufferImpl.create(""),
-      cursorPosition: { line: 0, column: 0 },
-      mode: 'normal' as const,
-      statusMessage: '',
-      viewportTop: 0,
-      config: {
-        theme: 'default',
-        tabSize: 4,
-        autoSave: false,
-        keyBindings: {},
-        maxUndoLevels: 100,
-        showLineNumbers: true,
-        wordWrap: false,
-        relativeLineNumbers: false
-      },
-      currentFilename: undefined,
-      commandLine: "",
-      mxCommand: "",
-      buffers: editor.getState().buffers,
-    };
+  const initialState: EditorState = {
+    currentBuffer: FunctionalTextBufferImpl.create(content),
+    cursorPosition: { line: 0, column: 0 },
+    mode: 'normal' as const,
+    statusMessage,
+    viewportTop: 0,
+    config: {
+      theme: 'default',
+      tabSize: 4,
+      autoSave: false,
+      keyBindings: {},
+      maxUndoLevels: 100,
+      showLineNumbers: true,
+      wordWrap: false,
+      relativeLineNumbers: false
+    },
+    currentFilename: filename,
+    commandLine: "",
+    mxCommand: "",
+    buffers: editor.getState().buffers,
+  };
+  editor.setEditorState(initialState);
 
-    // Set the initial state in the editor
-    editor.setEditorState(initialState);
-
+  if (!fileArgs.length) {
     startupLog.debug('Empty buffer initialized', {
       correlationId: startupId
     });
