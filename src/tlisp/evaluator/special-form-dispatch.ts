@@ -65,7 +65,7 @@ export const SPECIAL_FORMS: Readonly<Record<string, SpecialFormMeta>> = {
   lambda: { category: "sync-only", minArity: 3, description: "(lambda params [docstring] body...)" },
   defun: { category: "sync-only", minArity: 4, description: "(defun name params [docstring] body...)" },
   defvar: { category: "sync-only", minArity: 3, description: "(defvar name value)" },
-  set: { category: "sync-only", minArity: 3, description: "(set! name value)" },
+  "set!": { category: "sync-only", minArity: 3, description: "(set! name value)" },
   "current-module": { category: "sync-only", minArity: 1, description: "(current-module)" },
   provide: { category: "sync-only", minArity: 2, description: "(provide \"feature\")" },
   featurep: { category: "sync-only", minArity: 2, description: "(featurep \"feature\")" },
