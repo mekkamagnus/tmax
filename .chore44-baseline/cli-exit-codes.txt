@@ -1,0 +1,15 @@
+# CLI exit-code contracts (Step 0 baseline — CHORE-44 parity anchor).
+# bin/tmax
+tmax:success:0
+tmax:help:0
+tmax:daemon-error:1
+tmax:test-pass:0
+tmax:test-fail:1
+tmax:test-no-tests:2
+tmax:unknown-subcommand:2
+# bin/tmaxclient
+tmaxclient:success:0
+tmaxclient:rpc-or-usage-error:1
+# ADW stage/orchestrator scripts
+adw:stage-success:0
+adw:stage-failure:1

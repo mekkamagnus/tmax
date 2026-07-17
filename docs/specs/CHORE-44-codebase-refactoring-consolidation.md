@@ -59,7 +59,7 @@ Status meanings:
 
 | Step/change | Status | Completed checkpoint | Required pickup point |
 |---|---|---|---|
-| Step 0 | **PARTIAL** | `.chore44-baseline/` records Editor methods, Markdown functions, API names, and RPC methods. The pre-existing dirty tree was recorded. | Add the missing ADW state/event/result and CLI inventories; turn every inventory into an asserted expected set in its owning test. |
+| Step 0 | **COMPLETE** | `.chore44-baseline/` holds all inventories (editor methods, Markdown fns, static + runtime API names, RPC methods, ADW state keys, ADW event types, CLI exit codes). `test/unit/chore44-baseline-inventory.test.ts` asserts each as a frozen expected set (6 tests green). | — |
 | Change 1 | **PARTIAL** | Per-editor `EditorSession` and `EditorRuntimeCaches` exist; listed API modules have no top-level mutable `let`; basic register/kill-ring/macro/visual/cache isolation tests pass. | Move all deterministic session state into readonly `EditorModel` domain fields and reducer/state transitions; expand two-editor isolation coverage to every listed state group. |
 | Change 2 | **PARTIAL** | `EditorAPIContext` exists; `TlispEditorState`, compatibility projection functions, and underscored hook names are gone; typed-context tests exist. | Remove the renamed mutable bridge fields and direct `ctx.* =` state mutations. Make `access`/`State`/`Msg`/`Cmd` the only deterministic state path. |
 | Change 3 | **PARTIAL** | Logging, plugin, binding-file, and workspace algorithms have collaborators with delegation tests. | Extract the command queue/drain/correlation implementation and the remaining core/fallback/init binding policy. Complete bootstrap consolidation and test every collaborator with fakes. |
@@ -177,11 +177,17 @@ IMPORTANT: Execute every step in order, top to bottom. Each numbered change is a
 
 ### Step 0 — Record the green baseline before refactoring
 
-#### Current checkpoint status — PARTIAL (2026-07-17)
+#### Current checkpoint status — COMPLETE (2026-07-17)
 
-Completed: `.chore44-baseline/editor-methods.txt`, `markdown-fns.txt`, `api-names-current.txt`, `api-names-static.txt`, and `rpc-methods.txt` exist. The initial dirty-tree inventory was captured and must be preserved by the checkpoint commit.
+All inventories captured under `.chore44-baseline/` and asserted as frozen expected sets in `test/unit/chore44-baseline-inventory.test.ts` (6 tests, 51 assertions, green). Reconciled files:
 
-Remaining before Step 0 is complete: capture ADW state/event/result keys and CLI exit codes; reconcile the static/runtime API inventories; add the captured inventories as exact expected sets in tests. A text file under `.chore44-baseline/` is evidence for later parity work, not by itself an acceptance test.
+- `rpc-methods.txt` — regenerated from the real 23-method `RpcMethodMap` (the prior file held stale line numbers from the removed `switch`).
+- `api-names-static.txt` — regenerated to the live `createEditorAPI()` inventory (350 names; the deterministic, Change-7-governed core).
+- `api-names-current.txt` — regenerated to the runtime-after-start superset (533 names = 350 core ∪ stdlib ∪ `editor.ts` `defineRaw` additions); verified superset ⊇ core.
+- `markdown-fns.txt` — confirmed current (96 public `markdown-*` defuns).
+- `adw-state-keys.txt` (new), `adw-event-types.txt` (new), `cli-exit-codes.txt` (new) — ADW state/event/result JSON keys and CLI exit codes.
+
+Gate evidence: `bun test test/unit/chore44-baseline-inventory.test.ts` → 6 pass / 0 fail. Incidental fix: `isRpcMethod` in `src/server/rpc/router.ts` used `method in HANDLES` on a `Set` (always false); corrected to `HANDLES.has(method)` so the exported route-membership helper actually works. `bun run typecheck` and `git diff --check` green.
 
 - Record `git status --short` and preserve all pre-existing changes.
 - Run the complete baseline commands listed in `Validation Commands`. If a baseline command fails, record the exact pre-existing failure in this spec's implementation notes before changing code; do not silently treat it as caused by this chore.

@@ -1,0 +1,15 @@
+adw_id
+base_sha
+branch
+completed_stages
+description
+error
+forcedType
+goal_reason
+goal_status
+host
+spec_path
+status
+ts
+type
+worktree_path

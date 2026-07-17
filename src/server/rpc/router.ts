@@ -47,7 +47,7 @@ export async function dispatchRpc(handlers: RpcHandlers, method: string, params:
 
 /** True if `method` is a recognized RPC method name. */
 export function isRpcMethod(method: string): method is RpcMethodName {
-  return method in HANDLES;
+  return HANDLES.has(method);
 }
 
 const HANDLES: ReadonlySet<string> = new Set<RpcMethodName>([
