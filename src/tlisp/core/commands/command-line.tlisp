@@ -7,21 +7,27 @@
 ;; command-handler. The handler now passes the raw command-line string here and
 ;; this module decides what to do:
 ;;
-;;   :%s/find/replace/flags   -> (query-replace find replace)   (whole-buffer)
-;;   :%s/find/replace/        -> (query-replace find replace)   (whole-buffer)
+;;   :%s/find/replace/flags   -> whole-buffer replace-all         (replace-find-matches + replace-apply-all)
+;;   :%s/find/replace/        -> whole-buffer replace-all         (same)
 ;;   :s/find/replace/         -> (replace-find-matches find)
-;;                               (replace-apply-all)            (current-line)
+;;                               (replace-apply-all)            (whole-buffer)
 ;;   :dired                   -> (dired ".")
 ;;   :dired <dir>             -> (dired <dir>)
 ;;   anything else            -> (editor-execute-command-line)
 ;;
-;; Behaviour is preserved byte-for-byte from the prior TypeScript policy:
-;;   - whole-buffer replace uses query-replace regardless of flags
-;;     (the original TS code ignored the gic flags and always called
-;;      query-replace, which itself drives replace-find-matches across
-;;      the whole buffer).
-;;   - current-line replace calls replace-find-matches (line-scoped) and
-;;     immediately applies all matches.
+;; Behaviour:
+;;   - :%s/find/replace/[gic] performs a NON-INTERACTIVE whole-buffer
+;;     replace-all (vim :%s/.../g semantics). The prior TypeScript policy
+;;     routed :%s to (query-replace), which is interactive (it prompts
+;;     y/n/a/q) AND errored on an undefined `when` symbol in replace.tlisp —
+;;     so :%s never actually mutated the buffer. The CHORE-44 Step 13
+;;     cross-cutting playbook requires `:%s/alpha/omega/g` to change buffer
+;;     text, so :%s now uses the same proven whole-buffer mechanism as :s
+;;     (replace-find-matches defaults to start=0 = whole buffer, then
+;;     replace-apply-all applies every match). The gic flags are accepted
+;;     but, as in the original TS policy, do not change the dispatched path.
+;;   - :s/find/replace/ calls replace-find-matches (whole-buffer, start=0)
+;;     and immediately applies all matches.
 ;;   - find/replace are passed as runtime string VALUES, never embedded
 ;;     into source, so no quote-escaping is required.
 ;;
@@ -37,18 +43,33 @@ CMD-LINE is the exact text the user typed after the ':' prompt
 substitute/Dired/execute policy."
   (let ((line (if (stringp cmd-line) cmd-line "")))
     (cond
-      ;; :%s/find/replace/flags  — whole-buffer query-replace.
-      ;; Flags (gic) are accepted but, matching the previous TS policy,
-      ;; do not change the dispatched command.
+      ;; :%s/find/replace/flags  — non-interactive whole-buffer replace-all
+      ;; (vim :%s/.../g semantics). Flags (gic) are accepted but do not change
+      ;; the dispatched path, matching the previous TS policy. replace-find-matches
+      ;; returns the match list; replace-state-init binds the replacement text;
+      ;; replace-apply-all applies every match.
       ((string-match "^%s/(.+)/(.*)/([gic]*)$" line)
        (let ((find (match-string 1))
              (replace (match-string 2)))
-         (query-replace (or find "") (or replace ""))))
-      ;; :s/find/replace/  — current-line replace, applied immediately.
-      ((string-match "^s/(.+)/(.*)/?$" line)
-       (let ((find (match-string 1)))
-         (replace-find-matches (or find ""))
+         (replace-state-init (or find "") (or replace "") (replace-find-matches (or find "")))
          (replace-apply-all)))
+      ;; :s/find/replace/  — whole-buffer replace, applied immediately.
+      ((string-match "^s/(.+)/(.*)/?$" line)
+       (let ((find (match-string 1))
+             (replace (match-string 2)))
+         (replace-state-init (or find "") (or replace "") (replace-find-matches (or find "")))
+         (replace-apply-all)))
+      ;; :w / :w!  — write the current buffer to its file (vim :w). The bare
+      ;; command names w/q/wq are not T-Lisp symbols, so the eval fallthrough
+      ;; below would error on them; handle them explicitly here.
+      ((or (string= line "w") (string= line "w!"))
+       (file-save))
+      ;; :wq / :x  — write then quit.
+      ((or (string= line "wq") (string= line "x"))
+       (progn (file-save) (editor-quit)))
+      ;; :q / :q! / :quit  — quit (discard unsaved changes for the ! form).
+      ((or (string= line "q") (string= line "q!") (string= line "quit"))
+       (editor-quit))
       ;; :dired            — open the current directory.
       ((string= line "dired")
        (dired "."))

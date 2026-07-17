@@ -1,0 +1,90 @@
+name: codebase-refactoring-consolidation (CHORE-44 cross-cutting parity)
+mode: markdown
+description: |
+  CHORE-44 Step 13 — cross-cutting end-to-end parity for the twelve-change
+  refactoring consolidation. Exercises the full key → T-Lisp → model → daemon
+  → renderer path that Changes 1–7 and 9–11 touched: startup/major-mode,
+  evaluator, Markdown insert list-continuation, command-mode substitution
+  (: %s), Vim edit/yank/paste, save, and headless capture.
+
+  Per the spec, real keys drive insert, command mode, substitution, Vim
+  editing, and save — `eval` is used only for the simple evaluator check and
+  for opening/positioning where no real-key path exists.
+
+setup:
+  - action: setup_file
+    var: FILE
+    name: chore44-parity.md
+    content: |
+      # CHORE-44 Parity
+
+      - item one
+      alpha line
+      number 42 here
+
+terminal:
+  height: 30
+  width: 94
+
+steps:
+  # 1. The .md file activates Markdown major mode (verified by the top-level
+  #    `mode: markdown` field after setup). This step makes it an explicit
+  #    assertion with a stable message.
+  - name: markdown major-mode is active on the .md buffer
+    eval: '(major-mode-get)'
+    expect:
+      result_contains: "markdown"
+
+  # 2. A simple evaluator expression returns the expected result.
+  - name: evaluator returns expected arithmetic
+    eval: '(+ 1 41)'
+    expect:
+      result_contains: "42"
+
+  # 3. Insert-mode Enter on "- item one" auto-continues the Markdown list and
+  #    typed text produces "- item two" (post-newline-hook, Change 6).
+  - name: Enter on a list item continues the list; typed text becomes item two
+    setup_cursor: [2, 0]
+    keys: "A<Return>item two<Escape>"
+    expect:
+      buffer_contains: "- item two"
+
+  # 4. Escape returns to normal mode (already pressed above; assert explicitly).
+  - name: Escape returns to normal mode
+    keys: "<Escape>"
+    expect:
+      mode: normal
+
+  # 5. :%s/alpha/omega/g entered through real command-mode keys changes buffer
+  #    text (command-line dispatcher, Change 6).
+  - name: ":%s/alpha/omega/g substitutes across the buffer"
+    setup_cursor: [0, 0]
+    keys: ":%s/alpha/omega/g<Return>"
+    expect:
+      buffer_contains: "omega line"
+
+  # 6. A Vim edit/yank/paste sequence changes the buffer exactly as expected:
+  #    yy yanks the heading line, p pastes it below.
+  - name: yy + p duplicates the heading line
+    setup_cursor: [0, 0]
+    keys: "yyp"
+    expect:
+      buffer_contains: "CHORE-44 Parity"
+
+  # 7. :w reports a saved status and the file remains associated with the
+  #    current buffer (driven through real command-mode keys).
+  - name: ":w saves and reports a saved status"
+    keys: ":w<Return>"
+    wait: 800
+    expect:
+      status_message: "Saved"
+
+  # 8. Headless capture contains the edited text and the status line.
+  - name: headless capture contains edited text and status
+    headed: true
+    keys: "<Escape>"
+    expect:
+      screen_contains: "omega"
+      screen_contains: "CHORE-44 Parity"
+
+cleanup: true

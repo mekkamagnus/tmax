@@ -72,7 +72,8 @@ Status meanings:
 | Change 10 | **COMPLETE** | `main.tsx`→`main.ts`; `dependencies:{}` (ink/react/tsx/typescript removed); React jsx settings gone; zero `.tsx`; version from package.json; one bootstrap model path; dead files (frontend/types.ts, utils/writer.ts) deleted; README updated; `legacy-scaffolding-removed.test.ts`. build 3 binaries OK, `--version` parity, gate 46/0. | — |
 | Change 11 | **COMPLETE** | `markdown.tlisp` → 0-defun aggregator; 7 feature modules (navigation/formatting/tables/links/execution/export/knowledge), 96 public fns unchanged (AC11.1/11.2); NEW `parsers/shared/{source-position,token-stream,node-factory}.ts` (mechanics only, AC11.6); all 4 native parsers migrated (AC11.4) with identical ASTs (AC11.5); `markdown-module-boundaries.test.ts` + `parser-shared-foundation.test.ts`. Gate 241/0; markdown.yaml passes; trt 101/4 (4 pre-existing). | — |
 | Change 12 | **COMPLETE** | `createEditorFixture(options)` + `EditorFixtureOptions` + deterministic `dispose` (per-handle, BUG-16 compliant); all 37 test files migrated — zero `new Editor(` in tests (AC12.1); order-independent (AC12.4 fwd+rev 94/0); `editor-fixture-isolation.test.ts` (10 tests). Broad regression 209/0; test:integration 70/0; broad test:unit subset 2775/0 (full test:unit hits pre-existing BUG-16 server hang). | — |
-| Steps 13–14 | **NOT STARTED** | Existing unrelated Vim/Markdown playbooks remain available. | Create the cross-cutting CHORE-44 playbook only after Changes 1–12 are complete, then run the full validation matrix. |
+| Step 13 | **COMPLETE** | `codebase-refactoring-consolidation.yaml` playbook (8 assertions, real keys) passes. Exposed+fixed 4 pre-existing bugs (`:%s` mapping, `markdown-list-continue` regex + `cond`, `:w`/`:q`/`:wq` undefined). Regression 158/0; markdown + vim-parity playbooks still pass. | — |
+| Step 14 | **IN PROGRESS** | — | Run the full Validation Commands matrix + document completion; reconcile pre-existing `test:trt` (4 browse-detect) + `test:unit` BUG-16 hang. |
 
 ### Definition of complete for every numbered change
 
@@ -802,21 +803,16 @@ Gate evidence (2026-07-18): AC12.4 both directions 94/0; broad regression (17 fi
 - Run all 38 currently direct-construction files together, especially `count-prefix.test.ts`, `macro-recording.test.ts`, server tests, and integration keymap tests.
 - Targeted gate: `bun test test/unit/editor-fixture-isolation.test.ts` followed by `bun run test:unit` and `bun run test:integration`.
 
-### Step 13 — Add the cross-cutting tmax-use regression playbook
+### Step 13 — Add the cross-cutting tmax-use regression playbook — COMPLETE (2026-07-18)
 
-- Read `tmax-use/playbooks/README.md`, `_smoke.yaml`, `vim-parity-edit.yaml`, and `markdown.yaml` immediately before authoring.
-- Create `tmax-use/playbooks/codebase-refactoring-consolidation.yaml` with `cleanup: true` and a Markdown setup file containing a heading, a list item, ordinary text, and a numeric line.
-- The playbook must drive real keys where behavior is key-driven and include these independent assertions:
-  1. the `.md` file activates Markdown mode;
-  2. a simple evaluator expression returns the expected result;
-  3. insert-mode Enter on `- item one` auto-continues the Markdown list and typed text produces `- item two`;
-  4. Escape returns to normal mode;
-  5. `:%s/alpha/omega/g` entered through real command-mode keys changes buffer text;
-  6. a Vim edit/yank/paste sequence changes the buffer exactly as expected;
-  7. `:w` reports a saved status and the file remains associated with the current buffer;
-  8. headless capture contains the edited text and status line.
-- Do not use `eval` to bypass the key path for insert, command mode, substitution, Vim editing, or save.
-- Run the new playbook alone before the full playbook suite.
+`tmax-use/playbooks/codebase-refactoring-consolidation.yaml` created with `cleanup: true`, a Markdown setup file (heading + list item + ordinary text + numeric line), and all 8 assertions driving real keys (eval used only for the simple evaluator check #2): (1) `.md` → markdown major-mode; (2) `(+ 1 41)`→42; (3) `A<Return>item two` continues the list → `- item two`; (4) Escape → normal; (5) `:%s/alpha/omega/g` → `omega line`; (6) `yyp` duplicates the heading; (7) `:w` → `Saved` status; (8) headless capture contains the edited text. **Result: `1 passed` (6.2s).**
+
+Authoring this playbook exposed and fixed four pre-existing bugs (the spec required these key-driven behaviors, so restoring them is in scope — they predate CHORE-44):
+- `:%s/find/replace/[gic]` dispatched to interactive `query-replace` (which also errored on an undefined `when`) — never mutated the buffer. Now does a non-interactive whole-buffer replace-all (`replace-state-init` + `replace-apply-all`) via `command-line.tlisp` (vim `:%s/.../g` semantics). Same fix applied to `:s`.
+- `markdown-list-continue` (Change 11 `formatting.tlisp`) had two latent bugs: its regexes used the Emacs dialect (`\(` `\)` `\s` `\d`) which JS `RegExp` (T-Lisp `string-match`) doesn't honor, AND its `cond` clause bodies had >2 elements (T-Lisp `cond` requires exactly `(test expr)`). Both fixed (JS-RegExp-correct patterns + `progn`-wrapped bodies) — list continuation now actually works.
+- `:w`/`:q`/`:wq` were undefined as T-Lisp symbols, so the eval fallthrough errored. `command-line.tlisp` now maps them explicitly (`w`→`file-save`, `wq`/`x`→save+quit, `q`/`q!`/`quit`→`editor-quit`).
+
+Regression: markdown/query-replace/vim-dispatch/architecture-boundaries/count-prefix (7 files) → 158/0; existing `markdown.yaml` + `vim-parity-edit.yaml` playbooks still pass.
 
 ### Step 14 — Run all validation commands and document completion
 

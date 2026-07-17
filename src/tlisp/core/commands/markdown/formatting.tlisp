@@ -265,34 +265,43 @@ If previous line was an empty list item, clears it instead."
             nil
             (let ((text (buffer-get-line prev-line)))
               (cond
-                ;; Unordered list: empty item (just marker + space) → clear it
-                ((string-match "^\(\\\\s*\)\([-*+]\)\\\\s+$" text)
-                 (markdown-delete-line prev-line)
-                 (buffer-insert-at-position prev-line 0 (make-string (length (match-string 1)) 32))
-                 (cursor-move prev-line (length (match-string 1)))
-                 t)
+                ;; Unordered list: empty item (just marker + space) → clear it.
+                ;; Regex uses literal-space whitespace + bare () groups: T-Lisp
+                ;; string-match uses JS RegExp, where \s/\d/\(\) don't behave
+                ;; like the Emacs regexp dialect these were originally written in.
+                ;; Each clause body is wrapped in (progn …) because T-Lisp cond
+                ;; clauses take exactly (test expr) — 2 elements.
+                ((string-match "^( *)([-*+]) +$" text)
+                 (progn
+                   (markdown-delete-line prev-line)
+                   (buffer-insert-at-position prev-line 0 (make-string (length (match-string 1)) 32))
+                   (cursor-move prev-line (length (match-string 1)))
+                   t))
                 ;; Unordered list: has content → insert next marker
-                ((string-match "^\(\\\\s*\)\([-*+]\)\\\\s-" text)
+                ((string-match "^( *)([-*+]) " text)
                  (let* ((indent (match-string 1))
                         (marker (match-string 2)))
-                   (buffer-insert (format "%s%s " indent marker))
-                   (cursor-move cur-line (+ (length indent) (length marker) 1))
-                   t))
+                   (progn
+                     (buffer-insert (format "%s%s " indent marker))
+                     (cursor-move cur-line (+ (length indent) (length marker) 1))
+                     t)))
                 ;; Ordered list: empty item → clear it
-                ((string-match "^\(\\\\s*\)\(\\\\d+\)\([.)]\)\\\\s+$" text)
-                 (markdown-delete-line prev-line)
-                 (buffer-insert-at-position prev-line 0 (make-string (length (match-string 1)) 32))
-                 (cursor-move prev-line (length (match-string 1)))
-                 t)
+                ((string-match "^( *)([0-9]+)([.)]) +$" text)
+                 (progn
+                   (markdown-delete-line prev-line)
+                   (buffer-insert-at-position prev-line 0 (make-string (length (match-string 1)) 32))
+                   (cursor-move prev-line (length (match-string 1)))
+                   t))
                 ;; Ordered list: has content → increment number
-                ((string-match "^\(\\\\s*\)\(\\\\d+\)\([.)]\)\\\\s-" text)
+                ((string-match "^( *)([0-9]+)([.)]) " text)
                  (let* ((indent (match-string 1))
                         (num (string-to-number (match-string 2)))
                         (sep (match-string 3)))
-                   (buffer-insert (format "%s%d%s " indent (+ num 1) sep))
-                   (cursor-move cur-line (+ (length indent) (length (format "%d" (+ num 1))) 1))
-                   t)
-                (t nil))))))))
+                   (progn
+                     (buffer-insert (format "%s%d%s " indent (+ num 1) sep))
+                     (cursor-move cur-line (+ (length indent) (length (format "%d" (+ num 1))) 1))
+                     t)))
+                (t nil)))))))
 (defun markdown-current-subtree-range ()
   "Return (start end level) for the heading at cursor-line, or nil.
 The end includes all child sections."
