@@ -7,13 +7,14 @@
  */
 
 import { describe, test, expect, beforeEach, afterEach } from 'bun:test';
-import { expectRight } from "../helpers/editor-fixture.ts";
+import { createEditorFixture, expectRight, type EditorFixture } from "../helpers/editor-fixture.ts";
 import { TLispInterpreterImpl } from '../../src/tlisp/interpreter';
 import { Editor } from '../../src/editor/editor';
 import { MockTerminal } from '../mocks/terminal.ts';
 import { MockFileSystem } from '../mocks/filesystem.ts';
 
 describe('Plugin Directory Structure (US-2.1.1)', () => {
+  let fixture: EditorFixture;
   let interpreter: TLispInterpreterImpl;
   let terminal: MockTerminal;
   let filesystem: MockFileSystem;
@@ -21,11 +22,10 @@ describe('Plugin Directory Structure (US-2.1.1)', () => {
   let testTlpaDir: string;
 
   beforeEach(async () => {
-    // Create test interpreter and editor
-    terminal = new MockTerminal();
-    filesystem = new MockFileSystem();
-    editor = new Editor(terminal, filesystem);
-    await editor.start();
+    fixture = await createEditorFixture();
+    editor = fixture.editor;
+    terminal = fixture.terminal as MockTerminal;
+    filesystem = fixture.filesystem as MockFileSystem;
     // Get interpreter from editor
     interpreter = (editor as any).interpreter;
 
@@ -35,6 +35,7 @@ describe('Plugin Directory Structure (US-2.1.1)', () => {
   });
 
   afterEach(() => {
+    fixture?.dispose();
     // Cleanup is handled by fresh mock filesystem in beforeEach
   });
 

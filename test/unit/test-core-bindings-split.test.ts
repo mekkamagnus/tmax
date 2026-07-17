@@ -8,20 +8,23 @@ import { expect } from "bun:test";
 import { Editor } from "../../src/editor/editor.ts";
 import { MockTerminal } from "../mocks/terminal.ts";
 import { MockFileSystem } from "../mocks/filesystem.ts";
+import { createEditorFixture, type EditorFixture } from "../helpers/editor-fixture.ts";
 
 describe("Core Binding Files Loading", () => {
+  let fixture: EditorFixture;
   let editor: Editor;
   let mockTerminal: MockTerminal;
   let mockFileSystem: MockFileSystem;
 
-  beforeEach(() => {
+  beforeEach(async () => {
     mockTerminal = new MockTerminal();
     mockFileSystem = new MockFileSystem();
-    editor = new Editor(mockTerminal, mockFileSystem);
+    fixture = await createEditorFixture({ terminal: mockTerminal, filesystem: mockFileSystem, start: false });
+    editor = fixture.editor;
   });
 
   afterEach(() => {
-    editor.stop();
+    fixture?.dispose();
   });
 
   test("should load normal mode bindings from normal.tlisp", async () => {
@@ -91,12 +94,13 @@ describe("Core Binding Files Loading", () => {
 
   test("should handle missing binding files gracefully", async () => {
     const mockFileSystemMissing = new MockFileSystem();
-    const editorMissing = new Editor(mockTerminal, mockFileSystemMissing);
+    const missingFixture = await createEditorFixture({ terminal: mockTerminal, filesystem: mockFileSystemMissing });
+    try {
+      const editorMissing = missingFixture.editor;
 
-    await editorMissing.start();
-
-    expect(editorMissing.isRunning()).toBe(true);
-
-    editorMissing.stop();
+      expect(editorMissing.isRunning()).toBe(true);
+    } finally {
+      missingFixture.dispose();
+    }
   });
 });

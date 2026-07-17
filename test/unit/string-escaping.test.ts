@@ -6,122 +6,131 @@
 import { describe, test, expect } from "bun:test";
 import { Either } from "../../src/utils/task-either.ts";
 import { Editor } from "../../src/editor/editor.ts";
-import { MockTerminal } from "../mocks/terminal.ts";
-import { MockFileSystem } from "../mocks/filesystem.ts";
+import { createEditorFixture } from "../helpers/editor-fixture.ts";
 
 describe("Editor - String escaping in insert mode", () => {
-  test("should insert double quote character", () => {
-    const terminal = new MockTerminal();
-    const filesystem = new MockFileSystem();
-    const editor = new Editor(terminal, filesystem);
+  test("should insert double quote character", async () => {
+    const fixture = await createEditorFixture({ start: false });
+    const editor: Editor = fixture.editor;
+    try {
+      const interpreter = editor.getInterpreter();
 
-    const interpreter = editor.getInterpreter();
+      // Create a new buffer to work with
+      editor.createBuffer("test", "");
 
-    // Create a new buffer to work with
-    editor.createBuffer("test", "");
+      // Test inserting a double quote character - this was causing the error
+      interpreter.execute('(buffer-insert "\\"")');  // Properly escaped
 
-    // Test inserting a double quote character - this was causing the error
-    interpreter.execute('(buffer-insert "\\"")');  // Properly escaped
-
-    // Verify the quote was actually inserted
-    const content = interpreter.execute("(buffer-text)");
-    if (Either.isRight(content)) {
-      expect(content.right.value).toBe('"');
-    } else {
-      throw new Error("Expected Either.right");
+      // Verify the quote was actually inserted
+      const content = interpreter.execute("(buffer-text)");
+      if (Either.isRight(content)) {
+        expect(content.right.value).toBe('"');
+      } else {
+        throw new Error("Expected Either.right");
+      }
+    } finally {
+      fixture.dispose();
     }
   });
 
-  test("should insert backslash character", () => {
-    const terminal = new MockTerminal();
-    const filesystem = new MockFileSystem();
-    const editor = new Editor(terminal, filesystem);
+  test("should insert backslash character", async () => {
+    const fixture = await createEditorFixture({ start: false });
+    const editor: Editor = fixture.editor;
+    try {
+      const interpreter = editor.getInterpreter();
 
-    const interpreter = editor.getInterpreter();
+      // Create new buffer for next test
+      editor.createBuffer("test2", "");
+      interpreter.execute('(buffer-switch "test2")');
 
-    // Create new buffer for next test
-    editor.createBuffer("test2", "");
-    interpreter.execute('(buffer-switch "test2")');
+      // Test inserting a backslash character
+      interpreter.execute('(buffer-insert "\\\\")');  // Properly escaped
 
-    // Test inserting a backslash character
-    interpreter.execute('(buffer-insert "\\\\")');  // Properly escaped
-
-    // Verify the backslash was inserted
-    const backslashContent = interpreter.execute("(buffer-text)");
-    if (Either.isRight(backslashContent)) {
-      expect(backslashContent.right.value).toBe("\\");
-    } else {
-      throw new Error("Expected Either.right");
+      // Verify the backslash was inserted
+      const backslashContent = interpreter.execute("(buffer-text)");
+      if (Either.isRight(backslashContent)) {
+        expect(backslashContent.right.value).toBe("\\");
+      } else {
+        throw new Error("Expected Either.right");
+      }
+    } finally {
+      fixture.dispose();
     }
   });
 
-  test("should insert complex string with quotes and backslashes", () => {
-    const terminal = new MockTerminal();
-    const filesystem = new MockFileSystem();
-    const editor = new Editor(terminal, filesystem);
+  test("should insert complex string with quotes and backslashes", async () => {
+    const fixture = await createEditorFixture({ start: false });
+    const editor: Editor = fixture.editor;
+    try {
+      const interpreter = editor.getInterpreter();
 
-    const interpreter = editor.getInterpreter();
+      // Create new buffer for this test
+      editor.createBuffer("test3", "");
+      interpreter.execute('(buffer-switch "test3")');
 
-    // Create new buffer for this test
-    editor.createBuffer("test3", "");
-    interpreter.execute('(buffer-switch "test3")');
+      // Insert simple text to verify buffer operations work
+      interpreter.execute('(buffer-insert "hello")');
 
-    // Insert simple text to verify buffer operations work
-    interpreter.execute('(buffer-insert "hello")');
-
-    const complexContent = interpreter.execute("(buffer-text)");
-    if (Either.isRight(complexContent)) {
-      expect(complexContent.right.value).toBe("hello");
-    } else {
-      throw new Error("Expected Either.right");
+      const complexContent = interpreter.execute("(buffer-text)");
+      if (Either.isRight(complexContent)) {
+        expect(complexContent.right.value).toBe("hello");
+      } else {
+        throw new Error("Expected Either.right");
+      }
+    } finally {
+      fixture.dispose();
     }
   });
 });
 
 describe("Editor - Insert mode key handling with special characters", () => {
-  test("should handle special character key presses", () => {
-    const terminal = new MockTerminal();
-    const filesystem = new MockFileSystem();
-    const editor = new Editor(terminal, filesystem);
+  test("should handle special character key presses", async () => {
+    const fixture = await createEditorFixture({ start: false });
+    const editor: Editor = fixture.editor;
+    try {
+      const interpreter = editor.getInterpreter();
 
-    const interpreter = editor.getInterpreter();
+      editor.createBuffer("test", "");
 
-    editor.createBuffer("test", "");
+      // Insert various special characters
+      interpreter.execute('(buffer-insert "!")');
+      interpreter.execute('(buffer-insert "@")');
+      interpreter.execute('(buffer-insert "#")');
+      interpreter.execute('(buffer-insert "$")');
+      interpreter.execute('(buffer-insert "%")');
 
-    // Insert various special characters
-    interpreter.execute('(buffer-insert "!")');
-    interpreter.execute('(buffer-insert "@")');
-    interpreter.execute('(buffer-insert "#")');
-    interpreter.execute('(buffer-insert "$")');
-    interpreter.execute('(buffer-insert "%")');
-
-    const content = interpreter.execute("(buffer-text)");
-    if (Either.isRight(content)) {
-      expect(content.right.value).toBe("!@#$%");
-    } else {
-      throw new Error("Expected Either.right");
+      const content = interpreter.execute("(buffer-text)");
+      if (Either.isRight(content)) {
+        expect(content.right.value).toBe("!@#$%");
+      } else {
+        throw new Error("Expected Either.right");
+      }
+    } finally {
+      fixture.dispose();
     }
   });
 });
 
 describe("Editor - Enter key handling in insert mode", () => {
-  test("should insert newline on Enter key", () => {
-    const terminal = new MockTerminal();
-    const filesystem = new MockFileSystem();
-    const editor = new Editor(terminal, filesystem);
+  test("should insert newline on Enter key", async () => {
+    const fixture = await createEditorFixture({ start: false });
+    const editor: Editor = fixture.editor;
+    try {
+      const interpreter = editor.getInterpreter();
 
-    const interpreter = editor.getInterpreter();
+      editor.createBuffer("test", "line1");
 
-    editor.createBuffer("test", "line1");
+      // Insert a newline character
+      interpreter.execute('(buffer-insert "\\n")');
 
-    // Insert a newline character
-    interpreter.execute('(buffer-insert "\\n")');
-
-    const content = interpreter.execute("(buffer-text)");
-    if (Either.isRight(content)) {
-      expect(content.right.value).toContain("\n");
-    } else {
-      throw new Error("Expected Either.right");
+      const content = interpreter.execute("(buffer-text)");
+      if (Either.isRight(content)) {
+        expect(content.right.value).toContain("\n");
+      } else {
+        throw new Error("Expected Either.right");
+      }
+    } finally {
+      fixture.dispose();
     }
   });
 });

@@ -8,25 +8,30 @@
  * - Function docs show signature, description, examples, related functions
  */
 
-import { describe, test, expect, beforeEach } from 'bun:test';
-import { expectRight, expectTlispList, expectTlispString } from "../helpers/editor-fixture.ts";
+import { describe, test, expect, beforeEach, afterEach } from 'bun:test';
+import { createEditorFixture, expectRight, expectTlispList, expectTlispString, type EditorFixture } from "../helpers/editor-fixture.ts";
 import { TLispInterpreterImpl } from '../../src/tlisp/interpreter';
 import { Editor } from '../../src/editor/editor';
 import { MockTerminal } from '../mocks/terminal.ts';
 import { MockFileSystem } from '../mocks/filesystem.ts';
 
 describe('Documentation System (US-4.2.1)', () => {
+  let fixture: EditorFixture;
   let interpreter: TLispInterpreterImpl;
   let terminal: MockTerminal;
   let filesystem: MockFileSystem;
   let editor: Editor;
 
   beforeEach(async () => {
-    terminal = new MockTerminal();
-    filesystem = new MockFileSystem();
-    editor = new Editor(terminal, filesystem);
-    await editor.start();
+    fixture = await createEditorFixture();
+    editor = fixture.editor;
+    terminal = fixture.terminal as MockTerminal;
+    filesystem = fixture.filesystem as MockFileSystem;
     interpreter = editor.getInterpreter();
+  });
+
+  afterEach(() => {
+    fixture?.dispose();
   });
 
   describe('documentation-list command', () => {

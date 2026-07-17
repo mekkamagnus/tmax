@@ -8,8 +8,8 @@
  * - Key dispatch performance
  */
 
-import { describe, test, expect, beforeEach } from "bun:test";
-import { expectDefined, expectRight } from "../helpers/editor-fixture.ts";
+import { describe, test, expect, beforeEach, afterEach } from "bun:test";
+import { createEditorFixture, expectDefined, expectRight, type EditorFixture } from "../helpers/editor-fixture.ts";
 import { Editor } from "../../src/editor/editor.ts";
 import type { TLispInterpreterImpl } from "../../src/tlisp/interpreter.ts";
 import { registerStdlibFunctions } from "../../src/tlisp/stdlib.ts";
@@ -22,15 +22,22 @@ describe("Keymap-Editor Integration", () => {
   let terminal: MockTerminal;
   let filesystem: MockFileSystem;
   let interpreter: TLispInterpreterImpl;
+  let fixture: EditorFixture | undefined;
 
-  beforeEach(() => {
+  beforeEach(async () => {
     terminal = new MockTerminal();
     filesystem = new MockFileSystem();
-    editor = new Editor(terminal, filesystem);
+    fixture = await createEditorFixture({ terminal, filesystem, start: false });
+    editor = fixture.editor;
 
     // Get the interpreter from the editor
     interpreter = editor.getInterpreter();
     registerStdlibFunctions(interpreter);
+  });
+
+  afterEach(() => {
+    fixture?.dispose();
+    fixture = undefined;
   });
 
   describe("T-Lisp Keymap Precedence", () => {
@@ -139,10 +146,15 @@ describe("Keymap-Editor Integration", () => {
     test("Should handle missing KeymapSync gracefully", async () => {
       // If KeymapSync is not initialized, the editor should still work
       // with TypeScript bindings
-      const testEditor = new Editor(terminal, filesystem);
+      const testFixture = await createEditorFixture({ terminal, filesystem, start: false });
+      try {
+        const testEditor = testFixture.editor;
 
-      // Should not throw
-      await testEditor.handleKey("j");
+        // Should not throw
+        await testEditor.handleKey("j");
+      } finally {
+        testFixture.dispose();
+      }
     });
 
     test("Should handle malformed keymaps gracefully", async () => {

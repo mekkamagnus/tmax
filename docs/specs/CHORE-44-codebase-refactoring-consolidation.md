@@ -71,7 +71,7 @@ Status meanings:
 | Change 9 | **COMPLETE** | `src/core/contracts/{primitives,buffer,terminal,filesystem,editor,workspace}.ts` canonical; `types.ts` 777→80-line barrel; `FunctionalTextBuffer→TextBuffer`, `FunctionalTextBufferImpl→TextBufferImpl`; `FunctionalTerminalIO`/`FunctionalFileSystem` removed (zero `Functional*` matches anywhere — AC9.2); `core-contracts.test.ts`. Gate 88/0 + broad 172/0 + bench 9/9 + typecheck 0. (ink-adapter.ts + save-operations.ts deleted — forced by interface removal; Change 10 still has deps/main.tsx work.) | — |
 | Change 10 | **COMPLETE** | `main.tsx`→`main.ts`; `dependencies:{}` (ink/react/tsx/typescript removed); React jsx settings gone; zero `.tsx`; version from package.json; one bootstrap model path; dead files (frontend/types.ts, utils/writer.ts) deleted; README updated; `legacy-scaffolding-removed.test.ts`. build 3 binaries OK, `--version` parity, gate 46/0. | — |
 | Change 11 | **COMPLETE** | `markdown.tlisp` → 0-defun aggregator; 7 feature modules (navigation/formatting/tables/links/execution/export/knowledge), 96 public fns unchanged (AC11.1/11.2); NEW `parsers/shared/{source-position,token-stream,node-factory}.ts` (mechanics only, AC11.6); all 4 native parsers migrated (AC11.4) with identical ASTs (AC11.5); `markdown-module-boundaries.test.ts` + `parser-shared-foundation.test.ts`. Gate 241/0; markdown.yaml passes; trt 101/4 (4 pre-existing). | — |
-| Change 12 | **NOT STARTED** | No principal implementation/test files. | Resume in order only after Change 11. |
+| Change 12 | **COMPLETE** | `createEditorFixture(options)` + `EditorFixtureOptions` + deterministic `dispose` (per-handle, BUG-16 compliant); all 37 test files migrated — zero `new Editor(` in tests (AC12.1); order-independent (AC12.4 fwd+rev 94/0); `editor-fixture-isolation.test.ts` (10 tests). Broad regression 209/0; test:integration 70/0; broad test:unit subset 2775/0 (full test:unit hits pre-existing BUG-16 server hang). | — |
 | Steps 13–14 | **NOT STARTED** | Existing unrelated Vim/Markdown playbooks remain available. | Create the cross-cutting CHORE-44 playbook only after Changes 1–12 are complete, then run the full validation matrix. |
 
 ### Definition of complete for every numbered change
@@ -757,9 +757,19 @@ Gate evidence (2026-07-18): full Change 11 gate (5 markdown + 4 parser + foundat
 
 All tests that need an editor must use one fixture capable of injecting terminals, filesystems, init files, binding behavior, startup options, and deterministic cleanup. Test order must not affect results, and tests must not rely on process-global reset helpers.
 
-#### Current checkpoint status — NOT STARTED (2026-07-17)
+#### Current checkpoint status — COMPLETE (2026-07-18, independently verified)
 
-`editor-fixture.ts` gained helpers for Changes 1–2, but `createEditorFixture()`, the complete options/disposal contract, the static direct-construction guard, and `editor-fixture-isolation.test.ts` do not exist. This change remains not started until its principal fixture API is implemented.
+`test/helpers/editor-fixture.ts` now exposes `createEditorFixture(options)` → `{editor, terminal, filesystem, executeTlisp, dispose}` with `EditorFixtureOptions` (initialContent, bufferName, terminal, filesystem, initFilePath, start, loadRealCoreBindings, disposeTimeouts). `dispose()` is idempotent: `editor.stop()` + per-handle `whichKeyHandle.deactivate()` (NO broad `removeAllListeners` — BUG-16 compliant). `createStartedEditor` is now a thin wrapper. All 37 test files (~75 construction sites) migrated to the fixture — every `new Editor(` in `test/unit` + `test/integration` is gone (AC12.1). Each test's setup intent preserved via options: custom mocks → `terminal`/`filesystem`; init-file → `initFilePath`; no-start/tune-before-start → `start:false`; failing/missing bindings → `filesystem: FailingBindingsFileSystem()` or `loadRealCoreBindings:false` (AC12.3).
+
+- **AC12.1** — `rg 'new Editor\(' test/unit test/integration` is EMPTY (static scan in the isolation test enforces it).
+- **AC12.2** — every fixture editor has real core bindings by default + deterministic cleanup (verified by isolation test).
+- **AC12.4** — the state-sensitive set (count-prefix, macro-recording, visual-mode-selection, dired, init-file, string-escaping, module-system) passes identically forward (94/0/247) AND reversed (94/0/247).
+- **AC12.5** — no editor test uses broad `removeAllListeners`/sleep; only server tests (exempt) retain their cleanup.
+- NEW `test/unit/editor-fixture-isolation.test.ts` (10 tests): defaults, custom deps, no-start, init-file, missing/failing bindings, two concurrent fixtures, idempotent dispose, + the AC12.1 static scan.
+
+Gate evidence (2026-07-18): AC12.4 both directions 94/0; broad regression (17 files: editor/isolation/count/macro/init/string-escaping/module-system/markdown/dired/visual/server-client/evaluator + 3 integration + baseline) → **209 pass / 0 fail**; `bun run test:integration` → **70 pass / 0 fail**; `bun run typecheck` exit 0; `git diff --check` clean; `chore44-baseline-inventory` green.
+
+**Pre-existing (not chore-caused):** `bun run test:unit` hits the known BUG-16 inactivity-timer hang on `server-daemon-hardening.test.ts` + `server-observability.test.ts` (server tests, untouched by Change 12). The broad subset excluding those two is **2775 pass / 0 fail across 192 files**. Step 14 reconciles the full `test:unit` run (the BUG-16 memory notes it passes under the `--dots` reporter).
 
 #### Implementation requirements
 

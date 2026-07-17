@@ -11,22 +11,26 @@
  * - Esc exits visual mode
  */
 
-import { describe, test, expect } from "bun:test";
+import { describe, test, expect, afterEach } from "bun:test";
 import { MockTerminal } from "../mocks/terminal.ts";
 import { MockFileSystem } from "../mocks/filesystem.ts";
 import { Editor } from "../../src/editor/editor.ts";
 import { Either } from "../../src/utils/task-either.ts";
 import { readFileSync } from "fs";
-import { expectRight } from "../helpers/editor-fixture.ts";
+import { expectRight, createEditorFixture, type EditorFixture } from "../helpers/editor-fixture.ts";
 
 describe("Visual Mode Selection - US-1.7.1", () => {
   let terminal: MockTerminal;
   let filesystem: MockFileSystem;
   let editor: Editor;
   let interpreter: any;
+  let fixture: EditorFixture;
 
-  // Setup before each test
-  const setup = (content: string = "Line 1: Hello World\nLine 2: Test Content\nLine 3: Sample Text\nLine 4: Final Line") => {
+  // Setup before each test. Bindings files are pre-seeded into the mock
+  // filesystem BEFORE the editor is constructed, then the seeded filesystem is
+  // passed to createEditorFixture so the editor sees the same fs state. No
+  // start() — the original test relied on constructor-only state.
+  const setup = async (content: string = "Line 1: Hello World\nLine 2: Test Content\nLine 3: Sample Text\nLine 4: Final Line"): Promise<void> => {
     terminal = new MockTerminal();
     filesystem = new MockFileSystem();
 
@@ -47,15 +51,25 @@ describe("Visual Mode Selection - US-1.7.1", () => {
       }
     }
 
-    editor = new Editor(terminal, filesystem);
-    editor.createBuffer("test", content);
+    fixture = await createEditorFixture({
+      start: false,
+      initialContent: content,
+      bufferName: "test",
+      terminal,
+      filesystem,
+    });
+    editor = fixture.editor;
     interpreter = editor.getInterpreter();
   };
+
+  afterEach(() => {
+    fixture?.dispose();
+  });
 
   describe("Character-wise Visual Mode (v)", () => {
     test("v enters character-wise visual mode", async () => {
       // Arrange
-      setup();
+      await setup();
 
       // Act: Press 'v' to enter visual mode
       await editor.handleKey("v");
@@ -67,7 +81,7 @@ describe("Visual Mode Selection - US-1.7.1", () => {
 
     test("v sets selection start at cursor position", async () => {
       // Arrange
-      setup();
+      await setup();
 
       // Move cursor to position
       interpreter.execute("(cursor-move 0 7)");
@@ -101,7 +115,7 @@ describe("Visual Mode Selection - US-1.7.1", () => {
 
     test("multi-line character selection works", async () => {
       // Arrange
-      setup();
+      await setup();
       interpreter.execute("(cursor-move 0 0)");
       await editor.handleKey("v");
 
@@ -120,7 +134,7 @@ describe("Visual Mode Selection - US-1.7.1", () => {
   describe("Line-wise Visual Mode (V)", () => {
     test("V enters line-wise visual mode", async () => {
       // Arrange
-      setup();
+      await setup();
 
       // Act: Press 'V' (Shift+v) to enter line-wise visual mode
       await editor.handleKey("V");
@@ -134,7 +148,7 @@ describe("Visual Mode Selection - US-1.7.1", () => {
 
     test("V selects entire current line", async () => {
       // Arrange
-      setup();
+      await setup();
       interpreter.execute("(cursor-move 1 5)");
 
       // Act: Press 'V'
@@ -151,7 +165,7 @@ describe("Visual Mode Selection - US-1.7.1", () => {
 
     test("vertical movement expands line selection", async () => {
       // Arrange
-      setup();
+      await setup();
       interpreter.execute("(cursor-move 1 0)");
       await editor.handleKey("V");
 
@@ -168,7 +182,7 @@ describe("Visual Mode Selection - US-1.7.1", () => {
   describe("Block-wise Visual Mode (Ctrl+v)", () => {
     test("Ctrl+v enters block-wise visual mode", async () => {
       // Arrange
-      setup();
+      await setup();
 
       // Act: Press Ctrl+v
       await editor.handleKey("\x16"); // Ctrl+v is ASCII 0x16
@@ -182,7 +196,7 @@ describe("Visual Mode Selection - US-1.7.1", () => {
 
     test("block selection works for rectangular areas", async () => {
       // Arrange
-      setup();
+      await setup();
       interpreter.execute("(cursor-move 0 7)");
       await editor.handleKey("\x16");
 
@@ -202,7 +216,7 @@ describe("Visual Mode Selection - US-1.7.1", () => {
   describe("Text Manipulation in Visual Mode", () => {
     test("d deletes selected text", async () => {
       // Arrange
-      setup();
+      await setup();
       interpreter.execute("(cursor-move 1 7)");
       await editor.handleKey("v");
       interpreter.execute("(cursor-move 1 14)");
@@ -278,7 +292,7 @@ describe("Visual Mode Selection - US-1.7.1", () => {
   describe("Exiting Visual Mode", () => {
     test("Esc exits visual mode and clears selection", async () => {
       // Arrange
-      setup();
+      await setup();
       interpreter.execute("(cursor-move 0 7)");
       await editor.handleKey("v");
       interpreter.execute("(cursor-move 0 12)");
@@ -297,9 +311,9 @@ describe("Visual Mode Selection - US-1.7.1", () => {
   });
 
   describe("Selection State", () => {
-    test("getSelection returns null when not in visual mode", () => {
+    test("getSelection returns null when not in visual mode", async () => {
       // Arrange
-      setup();
+      await setup();
 
       // Act: Get selection in normal mode
       const selection = editor.getSelection();
@@ -326,7 +340,7 @@ describe("Visual Mode Selection - US-1.7.1", () => {
 
     test("word navigation (w, b, e) expands selection", async () => {
       // Arrange
-      setup();
+      await setup();
       interpreter.execute("(cursor-move 0 7)");
       await editor.handleKey("v");
 

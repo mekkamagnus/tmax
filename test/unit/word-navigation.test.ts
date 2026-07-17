@@ -10,30 +10,38 @@
  * - Line continuation for word navigation
  */
 
-import { describe, test, expect } from "bun:test";
+import { describe, test, expect, afterEach } from "bun:test";
 import { Editor } from "../../src/editor/editor.ts";
 import { MockTerminal } from "../mocks/terminal.ts";
 import { MockFileSystem } from "../mocks/filesystem.ts";
 import { Either } from "../../src/utils/task-either.ts";
+import { createEditorFixture, type EditorFixture } from "../helpers/editor-fixture.ts";
 
 describe("Word Navigation (US-1.1.1)", () => {
   let terminal: MockTerminal;
   let filesystem: MockFileSystem;
   let editor: Editor;
   let interpreter: any;
+  let fixture: EditorFixture;
 
-  // Setup before each test
-  const setup = (content: string = "hello world") => {
-    terminal = new MockTerminal();
-    filesystem = new MockFileSystem();
-    editor = new Editor(terminal, filesystem);
-    editor.createBuffer("test", content);
+  // Setup before each test. createEditorFixture is async, so setup is async
+  // and every test body awaits it. With start:false the fixture performs no
+  // async work, preserving the prior constructor-only behavior.
+  const setup = async (content: string = "hello world"): Promise<void> => {
+    fixture = await createEditorFixture({ start: false, initialContent: content, bufferName: "test" });
+    editor = fixture.editor;
+    terminal = fixture.terminal as MockTerminal;
+    filesystem = fixture.filesystem as MockFileSystem;
     interpreter = editor.getInterpreter();
   };
 
+  afterEach(() => {
+    fixture?.dispose();
+  });
+
   describe("w - move to start of next word", () => {
-    test("should move cursor to start of next word", () => {
-      setup("hello world");
+    test("should move cursor to start of next word", async () => {
+      await setup("hello world");
       
       // Start at position (0, 0)
       interpreter.execute("(cursor-move 0 0)");
@@ -48,8 +56,8 @@ describe("Word Navigation (US-1.1.1)", () => {
       expect(state.cursorPosition.column).toBe(6);
     });
 
-    test("should move through multiple words", () => {
-      setup("one two three");
+    test("should move through multiple words", async () => {
+      await setup("one two three");
       
       interpreter.execute("(cursor-move 0 0)");
       
@@ -64,8 +72,8 @@ describe("Word Navigation (US-1.1.1)", () => {
       expect(state.cursorPosition.column).toBe(8);
     });
 
-    test("should handle punctuation as word boundaries", () => {
-      setup("hello,world");
+    test("should handle punctuation as word boundaries", async () => {
+      await setup("hello,world");
       
       interpreter.execute("(cursor-move 0 0)");
       interpreter.execute("(word-next)");
@@ -75,8 +83,8 @@ describe("Word Navigation (US-1.1.1)", () => {
       expect(state.cursorPosition.column).toBe(6); // After comma
     });
 
-    test("should continue to next line when at end of line", () => {
-      setup("hello\nworld");
+    test("should continue to next line when at end of line", async () => {
+      await setup("hello\nworld");
       
       // Start at end of first line
       interpreter.execute("(cursor-move 0 5)");
@@ -88,8 +96,8 @@ describe("Word Navigation (US-1.1.1)", () => {
       expect(state.cursorPosition.column).toBe(0);
     });
 
-    test("should handle tabs as word boundaries", () => {
-      setup("hello\tworld");
+    test("should handle tabs as word boundaries", async () => {
+      await setup("hello\tworld");
       
       interpreter.execute("(cursor-move 0 0)");
       interpreter.execute("(word-next)");
@@ -101,8 +109,8 @@ describe("Word Navigation (US-1.1.1)", () => {
   });
 
   describe("b - move to start of previous word", () => {
-    test("should move cursor to start of previous word", () => {
-      setup("hello world");
+    test("should move cursor to start of previous word", async () => {
+      await setup("hello world");
       
       // Start at "world"
       interpreter.execute("(cursor-move 0 6)");
@@ -117,8 +125,8 @@ describe("Word Navigation (US-1.1.1)", () => {
       expect(state.cursorPosition.column).toBe(0);
     });
 
-    test("should move through multiple words backwards", () => {
-      setup("one two three");
+    test("should move through multiple words backwards", async () => {
+      await setup("one two three");
       
       // Start at "three"
       interpreter.execute("(cursor-move 0 8)");
@@ -134,8 +142,8 @@ describe("Word Navigation (US-1.1.1)", () => {
       expect(state.cursorPosition.column).toBe(0);
     });
 
-    test("should continue to previous line when at start of line", () => {
-      setup("hello\nworld");
+    test("should continue to previous line when at start of line", async () => {
+      await setup("hello\nworld");
       
       // Start at beginning of second line
       interpreter.execute("(cursor-move 1 0)");
@@ -147,8 +155,8 @@ describe("Word Navigation (US-1.1.1)", () => {
       expect(state.cursorPosition.column).toBe(0);
     });
 
-    test("should not move beyond start of buffer", () => {
-      setup("hello world");
+    test("should not move beyond start of buffer", async () => {
+      await setup("hello world");
       
       // Start at beginning
       interpreter.execute("(cursor-move 0 0)");
@@ -163,8 +171,8 @@ describe("Word Navigation (US-1.1.1)", () => {
   });
 
   describe("e - move to end of current word", () => {
-    test("should move cursor to end of current word", () => {
-      setup("hello world");
+    test("should move cursor to end of current word", async () => {
+      await setup("hello world");
       
       // Start at beginning of "hello"
       interpreter.execute("(cursor-move 0 0)");
@@ -179,8 +187,8 @@ describe("Word Navigation (US-1.1.1)", () => {
       expect(state.cursorPosition.column).toBe(4);
     });
 
-    test("should move to end of next word from whitespace", () => {
-      setup("hello world");
+    test("should move to end of next word from whitespace", async () => {
+      await setup("hello world");
       
       // Start at space between words
       interpreter.execute("(cursor-move 0 5)");
@@ -191,8 +199,8 @@ describe("Word Navigation (US-1.1.1)", () => {
       expect(state.cursorPosition.column).toBe(10);
     });
 
-    test("should move through multiple words", () => {
-      setup("one two three");
+    test("should move through multiple words", async () => {
+      await setup("one two three");
       
       interpreter.execute("(cursor-move 0 0)");
       
@@ -207,8 +215,8 @@ describe("Word Navigation (US-1.1.1)", () => {
       expect(state.cursorPosition.column).toBe(6);
     });
 
-    test("should continue to next line when at end of word at line end", () => {
-      setup("hello\nworld");
+    test("should continue to next line when at end of word at line end", async () => {
+      await setup("hello\nworld");
       
       // Start at "hello"
       interpreter.execute("(cursor-move 0 0)");
@@ -227,8 +235,8 @@ describe("Word Navigation (US-1.1.1)", () => {
   });
 
   describe("Count prefix support", () => {
-    test("3w should move forward 3 words", () => {
-      setup("one two three four");
+    test("3w should move forward 3 words", async () => {
+      await setup("one two three four");
       
       interpreter.execute("(cursor-move 0 0)");
       
@@ -240,8 +248,8 @@ describe("Word Navigation (US-1.1.1)", () => {
       expect(state.cursorPosition.column).toBe(14);
     });
 
-    test("5b should move backward 5 words", () => {
-      setup("one two three four five six");
+    test("5b should move backward 5 words", async () => {
+      await setup("one two three four five six");
       
       // Start at "six"
       interpreter.execute("(cursor-move 0 20)");
@@ -254,8 +262,8 @@ describe("Word Navigation (US-1.1.1)", () => {
       expect(state.cursorPosition.column).toBe(0);
     });
 
-    test("2e should move to end of second word", () => {
-      setup("one two three");
+    test("2e should move to end of second word", async () => {
+      await setup("one two three");
       
       interpreter.execute("(cursor-move 0 0)");
       
@@ -267,8 +275,8 @@ describe("Word Navigation (US-1.1.1)", () => {
       expect(state.cursorPosition.column).toBe(6);
     });
 
-    test("0w should not move cursor", () => {
-      setup("one two three");
+    test("0w should not move cursor", async () => {
+      await setup("one two three");
       
       interpreter.execute("(cursor-move 0 0)");
       
@@ -282,8 +290,8 @@ describe("Word Navigation (US-1.1.1)", () => {
   });
 
   describe("Edge cases", () => {
-    test("should handle empty buffer", () => {
-      setup("");
+    test("should handle empty buffer", async () => {
+      await setup("");
       
       interpreter.execute("(cursor-move 0 0)");
       
@@ -292,8 +300,8 @@ describe("Word Navigation (US-1.1.1)", () => {
       expect(Either.isRight(result)).toBe(true);
     });
 
-    test("should handle single word", () => {
-      setup("hello");
+    test("should handle single word", async () => {
+      await setup("hello");
       
       interpreter.execute("(cursor-move 0 0)");
       
@@ -308,8 +316,8 @@ describe("Word Navigation (US-1.1.1)", () => {
       expect(state.cursorPosition.column).toBe(0);
     });
 
-    test("should handle multiple spaces", () => {
-      setup("hello    world");
+    test("should handle multiple spaces", async () => {
+      await setup("hello    world");
       
       interpreter.execute("(cursor-move 0 0)");
       interpreter.execute("(word-next)");
@@ -319,8 +327,8 @@ describe("Word Navigation (US-1.1.1)", () => {
       expect(state.cursorPosition.column).toBeGreaterThan(5);
     });
 
-    test("should handle mixed whitespace", () => {
-      setup("hello \t\nworld");
+    test("should handle mixed whitespace", async () => {
+      await setup("hello \t\nworld");
       
       interpreter.execute("(cursor-move 0 0)");
       interpreter.execute("(word-next)");
@@ -330,8 +338,8 @@ describe("Word Navigation (US-1.1.1)", () => {
       expect(state.cursorPosition.line).toBe(1);
     });
 
-    test("should handle single character words", () => {
-      setup("a b c d");
+    test("should handle single character words", async () => {
+      await setup("a b c d");
       
       interpreter.execute("(cursor-move 0 0)");
       
@@ -345,8 +353,8 @@ describe("Word Navigation (US-1.1.1)", () => {
       expect(state.cursorPosition.column).toBe(4);
     });
 
-    test("should handle words with numbers", () => {
-      setup("test123 hello456");
+    test("should handle words with numbers", async () => {
+      await setup("test123 hello456");
       
       interpreter.execute("(cursor-move 0 0)");
       interpreter.execute("(word-next)");
@@ -356,8 +364,8 @@ describe("Word Navigation (US-1.1.1)", () => {
       expect(state.cursorPosition.column).toBeGreaterThan(0);
     });
 
-    test("should handle underscore in words", () => {
-      setup("test_var hello_world");
+    test("should handle underscore in words", async () => {
+      await setup("test_var hello_world");
 
       interpreter.execute("(cursor-move 0 0)");
       interpreter.execute("(word-next)");
@@ -373,8 +381,8 @@ describe("Word Navigation (US-1.1.1)", () => {
   // ====================================================================
 
   describe("SPEC-044 Phase 3.A — WORD motions (W B E)", () => {
-    test("W jumps over punctuation cluster as one WORD", () => {
-      setup("foo.bar baz");
+    test("W jumps over punctuation cluster as one WORD", async () => {
+      await setup("foo.bar baz");
 
       interpreter.execute("(cursor-move 0 0)");
       interpreter.execute("(word-next-WORD)");
@@ -385,8 +393,8 @@ describe("Word Navigation (US-1.1.1)", () => {
       expect(state.cursorPosition.column).toBe(8);
     });
 
-    test("W crosses line boundary on trailing whitespace", () => {
-      setup("foo\nbar baz");
+    test("W crosses line boundary on trailing whitespace", async () => {
+      await setup("foo\nbar baz");
 
       interpreter.execute("(cursor-move 0 0)");
       interpreter.execute("(word-next-WORD)");
@@ -396,8 +404,8 @@ describe("Word Navigation (US-1.1.1)", () => {
       expect(state.cursorPosition.column).toBe(0);
     });
 
-    test("W with count 2 skips two WORDs", () => {
-      setup("one two three four");
+    test("W with count 2 skips two WORDs", async () => {
+      await setup("one two three four");
 
       interpreter.execute("(cursor-move 0 0)");
       interpreter.execute("(word-next-WORD 2)");
@@ -406,8 +414,8 @@ describe("Word Navigation (US-1.1.1)", () => {
       expect(state.cursorPosition.column).toBe(8);
     });
 
-    test("B jumps to start of previous WORD", () => {
-      setup("foo.bar baz");
+    test("B jumps to start of previous WORD", async () => {
+      await setup("foo.bar baz");
 
       interpreter.execute("(cursor-move 0 8)");
       interpreter.execute("(word-previous-WORD)");
@@ -416,8 +424,8 @@ describe("Word Navigation (US-1.1.1)", () => {
       expect(state.cursorPosition.column).toBe(0);
     });
 
-    test("B crosses line boundary backward", () => {
-      setup("foo\nbar");
+    test("B crosses line boundary backward", async () => {
+      await setup("foo\nbar");
 
       interpreter.execute("(cursor-move 1 0)");
       interpreter.execute("(word-previous-WORD)");
@@ -427,8 +435,8 @@ describe("Word Navigation (US-1.1.1)", () => {
       expect(state.cursorPosition.column).toBe(0);
     });
 
-    test("E lands on last char of current WORD including punctuation", () => {
-      setup("foo.bar baz");
+    test("E lands on last char of current WORD including punctuation", async () => {
+      await setup("foo.bar baz");
 
       interpreter.execute("(cursor-move 0 0)");
       interpreter.execute("(word-end-WORD)");
@@ -438,8 +446,8 @@ describe("Word Navigation (US-1.1.1)", () => {
       expect(state.cursorPosition.column).toBe(6);
     });
 
-    test("E skips whitespace to next WORD end", () => {
-      setup("foo.bar baz");
+    test("E skips whitespace to next WORD end", async () => {
+      await setup("foo.bar baz");
 
       interpreter.execute("(cursor-move 0 6)");
       interpreter.execute("(word-end-WORD)");
@@ -454,8 +462,8 @@ describe("Word Navigation (US-1.1.1)", () => {
   // ====================================================================
 
   describe("SPEC-044 Phase 3.B — backward word-end (ge gE)", () => {
-    test("ge lands on last char of previous word", () => {
-      setup("hello world");
+    test("ge lands on last char of previous word", async () => {
+      await setup("hello world");
 
       interpreter.execute("(cursor-move 0 6)"); // 'w' of world
       interpreter.execute("(word-previous-end)");
@@ -465,8 +473,8 @@ describe("Word Navigation (US-1.1.1)", () => {
       expect(state.cursorPosition.column).toBe(4);
     });
 
-    test("gE lands on last char of previous WORD", () => {
-      setup("foo.bar baz");
+    test("gE lands on last char of previous WORD", async () => {
+      await setup("foo.bar baz");
 
       interpreter.execute("(cursor-move 0 8)"); // 'b' of baz
       interpreter.execute("(word-previous-end-WORD)");
@@ -476,8 +484,8 @@ describe("Word Navigation (US-1.1.1)", () => {
       expect(state.cursorPosition.column).toBe(6);
     });
 
-    test("ge at buffer start stays put", () => {
-      setup("hello");
+    test("ge at buffer start stays put", async () => {
+      await setup("hello");
 
       interpreter.execute("(cursor-move 0 0)");
       interpreter.execute("(word-previous-end)");

@@ -3,22 +3,27 @@
  * @description Tests for US-1.11.2 - Describe Function (C-h f) functionality
  */
 
-import { describe, test, expect, beforeEach } from "bun:test";
+import { describe, test, expect, beforeEach, afterEach } from "bun:test";
 import { Editor } from "../../src/editor/editor.ts";
 import { MockTerminal } from "../mocks/terminal.ts";
 import { MockFileSystem } from "../mocks/filesystem.ts";
-import { expectDefined, expectRight, expectTlispList } from "../helpers/editor-fixture.ts";
+import { createEditorFixture, expectDefined, expectRight, expectTlispList, type EditorFixture } from "../helpers/editor-fixture.ts";
 
 describe("US-1.11.2: Describe Function", () => {
+  let fixture: EditorFixture;
   let editor: Editor;
   let terminal: MockTerminal;
   let filesystem: MockFileSystem;
 
   beforeEach(async () => {
-    terminal = new MockTerminal();
-    filesystem = new MockFileSystem();
-    editor = new Editor(terminal, filesystem);
-    await editor.start();
+    fixture = await createEditorFixture();
+    editor = fixture.editor;
+    terminal = fixture.terminal as MockTerminal;
+    filesystem = fixture.filesystem as MockFileSystem;
+  });
+
+  afterEach(() => {
+    fixture?.dispose();
   });
 
   test("describe-function shows function documentation", async () => {

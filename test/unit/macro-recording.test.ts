@@ -4,14 +4,16 @@
  * Tests cover: qa starts recording, q stops recording, @a executes macro, @@ executes last macro
  */
 
-import { describe, test, expect, beforeEach } from "bun:test";
+import { describe, test, expect, beforeEach, afterEach } from "bun:test";
 import {
   createStartedEditor,
+  createEditorFixture,
   expectDefined,
   expectRight,
   expectTlispBoolean,
   expectTlispList,
   expectTlispString,
+  type EditorFixture,
 } from "../helpers/editor-fixture.ts";
 import { Editor } from "../../src/editor/editor.ts";
 import { MockTerminal } from "../mocks/terminal.ts";
@@ -21,17 +23,24 @@ describe("Macro Recording (US-2.4.1)", () => {
   let editor: Editor;
   let mockTerminal: MockTerminal;
   let mockFileSystem: MockFileSystem;
+  let fixture: EditorFixture;
 
-  beforeEach(() => {
-    mockTerminal = new MockTerminal();
-    mockFileSystem = new MockFileSystem();
-    editor = new Editor(mockTerminal, mockFileSystem);
-
-    // Create a test buffer with some content
-    editor.createBuffer("test", "line1\nline2\nline3\nline4");
+  beforeEach(async () => {
+    fixture = await createEditorFixture({
+      start: false,
+      initialContent: "line1\nline2\nline3\nline4",
+      bufferName: "test",
+    });
+    editor = fixture.editor;
+    mockTerminal = fixture.terminal as MockTerminal;
+    mockFileSystem = fixture.filesystem as MockFileSystem;
 
     // Reset macro recording state
     resetMacroRecordingState();
+  });
+
+  afterEach(() => {
+    fixture?.dispose();
   });
 
   /**

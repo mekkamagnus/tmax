@@ -3,27 +3,37 @@
  * @description Test suite for the editor implementation
  */
 
-import { describe, test, expect } from "bun:test";
-import { Editor } from "../../src/editor/editor.ts";
-import { MockTerminal } from "../mocks/terminal.ts";
+import { describe, test, expect, afterEach } from "bun:test";
 import { MockFileSystem } from "../mocks/filesystem.ts";
+import { MockTerminal } from "../mocks/terminal.ts";
 import { Either } from "../../src/utils/task-either.ts";
-import { bufferText } from "../helpers/editor-fixture.ts";
+import { bufferText, createEditorFixture, type EditorFixture } from "../helpers/editor-fixture.ts";
 
 describe("Editor Implementation", () => {
   let terminal: MockTerminal;
   let filesystem: MockFileSystem;
-  let editor: Editor;
+  let fixture: EditorFixture;
+  let editor: import("../../src/editor/editor.ts").Editor;
 
-  // Setup before each test
-  const setup = () => {
+  // Keep a reference for afterEach disposal. setup() creates a fresh fixture
+  // per test; dispose is idempotent so calling it again in afterEach after a
+  // test-local dispose is a no-op.
+  let current: EditorFixture | undefined;
+  afterEach(() => { current?.dispose(); current = undefined; });
+
+  // Setup before each test. Constructor-only state (no start) — these tests
+  // exercise the editor's constructor + interpreter, not the full binding
+  // policy.
+  const setup = async () => {
     terminal = new MockTerminal();
     filesystem = new MockFileSystem();
-    editor = new Editor(terminal, filesystem);
+    fixture = await createEditorFixture({ terminal, filesystem, start: false });
+    editor = fixture.editor;
+    current = fixture;
   };
 
-  test("should create editor with default state", () => {
-    setup();
+  test("should create editor with default state", async () => {
+    await setup();
     const state = editor.getState();
 
     expect(state.mode).toBe("normal");
@@ -32,8 +42,8 @@ describe("Editor Implementation", () => {
     expect(state.currentBuffer).toBeUndefined();
   });
 
-  test("should create buffer", () => {
-    setup();
+  test("should create buffer", async () => {
+    await setup();
     editor.createBuffer("test", "hello\nworld");
 
     const state = editor.getState();
@@ -48,8 +58,8 @@ describe("Editor Implementation", () => {
     }
   });
 
-  test("should execute T-Lisp editor API functions", () => {
-    setup();
+  test("should execute T-Lisp editor API functions", async () => {
+    await setup();
     editor.createBuffer("test", "hello\nworld");
 
     const interpreter = editor.getInterpreter();
@@ -68,8 +78,8 @@ describe("Editor Implementation", () => {
     expect(state3.currentBuffer).toBeDefined();
   });
 
-  test("should handle cursor movement", () => {
-    setup();
+  test("should handle cursor movement", async () => {
+    await setup();
     editor.createBuffer("test", "hello\nworld");
 
     const interpreter = editor.getInterpreter();
@@ -82,8 +92,8 @@ describe("Editor Implementation", () => {
     expect(state.cursorPosition.column).toBe(2);
   });
 
-  test("should handle text insertion", () => {
-    setup();
+  test("should handle text insertion", async () => {
+    await setup();
     editor.createBuffer("test", "hello");
 
     const interpreter = editor.getInterpreter();
@@ -95,8 +105,8 @@ describe("Editor Implementation", () => {
     expect(bufferText(editor)).toBe("hello world");
   });
 
-  test("should handle text deletion", () => {
-    setup();
+  test("should handle text deletion", async () => {
+    await setup();
     editor.createBuffer("test", "hello world");
 
     const interpreter = editor.getInterpreter();
@@ -114,8 +124,8 @@ describe("Editor Implementation", () => {
     expect(state.cursorPosition.column).toBe(5);
   });
 
-  test("should handle mode switching", () => {
-    setup();
+  test("should handle mode switching", async () => {
+    await setup();
     const interpreter = editor.getInterpreter();
 
     // Switch to insert mode
@@ -125,8 +135,8 @@ describe("Editor Implementation", () => {
     expect(state.mode).toBe("insert");
   });
 
-  test("should handle status messages", () => {
-    setup();
+  test("should handle status messages", async () => {
+    await setup();
     const interpreter = editor.getInterpreter();
 
     // Set status message
@@ -136,8 +146,8 @@ describe("Editor Implementation", () => {
     expect(state.statusMessage).toBe("Test message");
   });
 
-  test("should handle buffer management", () => {
-    setup();
+  test("should handle buffer management", async () => {
+    await setup();
     const interpreter = editor.getInterpreter();
 
     // Create multiple buffers
@@ -154,8 +164,8 @@ describe("Editor Implementation", () => {
     expect(currentBuffer).toBeDefined();
   });
 
-  test("should handle key bindings", () => {
-    setup();
+  test("should handle key bindings", async () => {
+    await setup();
     const interpreter = editor.getInterpreter();
 
     // Bind a key - should not throw
@@ -168,8 +178,8 @@ describe("Editor Implementation", () => {
     )).toBe(true);
   });
 
-  test("should handle file operations", () => {
-    setup();
+  test("should handle file operations", async () => {
+    await setup();
 
     // Set up mock file
     filesystem.files.set("test.txt", "file content");
@@ -198,8 +208,8 @@ describe("Editor Implementation", () => {
     }
   });
 
-  test("should handle complex editor operations", () => {
-    setup();
+  test("should handle complex editor operations", async () => {
+    await setup();
     editor.createBuffer("test", "line1\nline2\nline3");
 
     const interpreter = editor.getInterpreter();
@@ -217,8 +227,8 @@ describe("Editor Implementation", () => {
     expect(result).toBeDefined();
   });
 
-  test("should support editor customization", () => {
-    setup();
+  test("should support editor customization", async () => {
+    await setup();
     const interpreter = editor.getInterpreter();
 
     // Define custom function - use single line to avoid parsing issues
@@ -236,8 +246,8 @@ describe("Editor Implementation", () => {
     expect(state.mode).toBe("insert");
   });
 
-  test("should support macro definitions", () => {
-    setup();
+  test("should support macro definitions", async () => {
+    await setup();
     const interpreter = editor.getInterpreter();
 
     // Define macro for common operation - use single line

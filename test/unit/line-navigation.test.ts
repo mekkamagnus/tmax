@@ -11,30 +11,38 @@
  * - Count prefix support (e.g., 5-)
  */
 
-import { describe, test, expect } from "bun:test";
+import { describe, test, expect, afterEach } from "bun:test";
 import { Editor } from "../../src/editor/editor.ts";
 import { MockTerminal } from "../mocks/terminal.ts";
 import { MockFileSystem } from "../mocks/filesystem.ts";
 import { Either } from "../../src/utils/task-either.ts";
+import { createEditorFixture, type EditorFixture } from "../helpers/editor-fixture.ts";
 
 describe("Line Navigation (US-1.1.2)", () => {
   let terminal: MockTerminal;
   let filesystem: MockFileSystem;
   let editor: Editor;
   let interpreter: any;
+  let fixture: EditorFixture;
 
-  // Setup before each test
-  const setup = (content: string = "hello world") => {
-    terminal = new MockTerminal();
-    filesystem = new MockFileSystem();
-    editor = new Editor(terminal, filesystem);
-    editor.createBuffer("test", content);
+  // Setup before each test. createEditorFixture is async, so setup is async
+  // and every test body awaits it. With start:false the fixture performs no
+  // async work, preserving the prior constructor-only behavior.
+  const setup = async (content: string = "hello world"): Promise<void> => {
+    fixture = await createEditorFixture({ start: false, initialContent: content, bufferName: "test" });
+    editor = fixture.editor;
+    terminal = fixture.terminal as MockTerminal;
+    filesystem = fixture.filesystem as MockFileSystem;
     interpreter = editor.getInterpreter();
   };
 
+  afterEach(() => {
+    fixture?.dispose();
+  });
+
   describe("0 - move to first column", () => {
-    test("should move cursor to first column (column 0)", () => {
-      setup("  hello world");
+    test("should move cursor to first column (column 0)", async () => {
+      await setup("  hello world");
 
       // Start at position (0, 5)
       interpreter.execute("(cursor-move 0 5)");
@@ -49,8 +57,8 @@ describe("Line Navigation (US-1.1.2)", () => {
       expect(state.cursorPosition.column).toBe(0);
     });
 
-    test("should stay at column 0 when already there", () => {
-      setup("hello world");
+    test("should stay at column 0 when already there", async () => {
+      await setup("hello world");
 
       // Start at column 0
       interpreter.execute("(cursor-move 0 0)");
@@ -64,8 +72,8 @@ describe("Line Navigation (US-1.1.2)", () => {
       expect(state.cursorPosition.column).toBe(0);
     });
 
-    test("should move to column 0 from middle of line", () => {
-      setup("hello world");
+    test("should move to column 0 from middle of line", async () => {
+      await setup("hello world");
 
       // Start at middle of line
       interpreter.execute("(cursor-move 0 6)");
@@ -80,8 +88,8 @@ describe("Line Navigation (US-1.1.2)", () => {
   });
 
   describe("$ - move to last non-empty column", () => {
-    test("should move cursor to last non-empty column", () => {
-      setup("hello world");
+    test("should move cursor to last non-empty column", async () => {
+      await setup("hello world");
 
       // Start at position (0, 0)
       interpreter.execute("(cursor-move 0 0)");
@@ -96,8 +104,8 @@ describe("Line Navigation (US-1.1.2)", () => {
       expect(state.cursorPosition.column).toBe(10);
     });
 
-    test("should ignore trailing whitespace", () => {
-      setup("hello   ");
+    test("should ignore trailing whitespace", async () => {
+      await setup("hello   ");
 
       // Start at position (0, 0)
       interpreter.execute("(cursor-move 0 0)");
@@ -110,8 +118,8 @@ describe("Line Navigation (US-1.1.2)", () => {
       expect(state.cursorPosition.column).toBe(4);
     });
 
-    test("should handle line with only whitespace", () => {
-      setup("   ");
+    test("should handle line with only whitespace", async () => {
+      await setup("   ");
 
       // Start at position (0, 0)
       interpreter.execute("(cursor-move 0 0)");
@@ -124,8 +132,8 @@ describe("Line Navigation (US-1.1.2)", () => {
       expect(state.cursorPosition.column).toBeGreaterThanOrEqual(0);
     });
 
-    test("should stay at end when already there", () => {
-      setup("hello");
+    test("should stay at end when already there", async () => {
+      await setup("hello");
 
       // Start at end of line
       interpreter.execute("(cursor-move 0 4)");
@@ -140,8 +148,8 @@ describe("Line Navigation (US-1.1.2)", () => {
   });
 
   describe("_ - move to first non-blank column", () => {
-    test("should move cursor to first non-blank column", () => {
-      setup("  hello world");
+    test("should move cursor to first non-blank column", async () => {
+      await setup("  hello world");
 
       // Start at position (0, 0)
       interpreter.execute("(cursor-move 0 0)");
@@ -156,8 +164,8 @@ describe("Line Navigation (US-1.1.2)", () => {
       expect(state.cursorPosition.column).toBe(2);
     });
 
-    test("should stay at column 0 when line starts with non-whitespace", () => {
-      setup("hello world");
+    test("should stay at column 0 when line starts with non-whitespace", async () => {
+      await setup("hello world");
 
       // Start at position (0, 0)
       interpreter.execute("(cursor-move 0 0)");
@@ -170,8 +178,8 @@ describe("Line Navigation (US-1.1.2)", () => {
       expect(state.cursorPosition.column).toBe(0);
     });
 
-    test("should handle tabs as whitespace", () => {
-      setup("\thello world");
+    test("should handle tabs as whitespace", async () => {
+      await setup("\thello world");
 
       // Start at position (0, 0)
       interpreter.execute("(cursor-move 0 0)");
@@ -184,8 +192,8 @@ describe("Line Navigation (US-1.1.2)", () => {
       expect(state.cursorPosition.column).toBeGreaterThan(0);
     });
 
-    test("should move to first non-blank from middle of line", () => {
-      setup("  hello world");
+    test("should move to first non-blank from middle of line", async () => {
+      await setup("  hello world");
 
       // Start at middle of line
       interpreter.execute("(cursor-move 0 5)");
@@ -200,8 +208,8 @@ describe("Line Navigation (US-1.1.2)", () => {
   });
 
   describe("- - move to first non-blank of previous line", () => {
-    test("should move cursor up and to first non-blank", () => {
-      setup("line one\n  line two\nline three");
+    test("should move cursor up and to first non-blank", async () => {
+      await setup("line one\n  line two\nline three");
 
       // Start at position (1, 2)
       interpreter.execute("(cursor-move 1 2)");
@@ -216,8 +224,8 @@ describe("Line Navigation (US-1.1.2)", () => {
       expect(state.cursorPosition.column).toBe(0);
     });
 
-    test("should handle previous line with leading whitespace", () => {
-      setup("line one\n  line two\nline three");
+    test("should handle previous line with leading whitespace", async () => {
+      await setup("line one\n  line two\nline three");
 
       // Start at position (2, 0)
       interpreter.execute("(cursor-move 2 0)");
@@ -231,8 +239,8 @@ describe("Line Navigation (US-1.1.2)", () => {
       expect(state.cursorPosition.column).toBe(2);
     });
 
-    test("should not move beyond first line", () => {
-      setup("line one\nline two");
+    test("should not move beyond first line", async () => {
+      await setup("line one\nline two");
 
       // Start at position (0, 0)
       interpreter.execute("(cursor-move 0 0)");
@@ -247,8 +255,8 @@ describe("Line Navigation (US-1.1.2)", () => {
   });
 
   describe("+ - move to first non-blank of next line", () => {
-    test("should move cursor down and to first non-blank", () => {
-      setup("line one\n  line two\nline three");
+    test("should move cursor down and to first non-blank", async () => {
+      await setup("line one\n  line two\nline three");
 
       // Start at position (0, 0)
       interpreter.execute("(cursor-move 0 0)");
@@ -263,8 +271,8 @@ describe("Line Navigation (US-1.1.2)", () => {
       expect(state.cursorPosition.column).toBe(2);
     });
 
-    test("should handle next line with leading whitespace", () => {
-      setup("  line one\nline two\nline three");
+    test("should handle next line with leading whitespace", async () => {
+      await setup("  line one\nline two\nline three");
 
       // Start at position (0, 0)
       interpreter.execute("(cursor-move 0 0)");
@@ -278,8 +286,8 @@ describe("Line Navigation (US-1.1.2)", () => {
       expect(state.cursorPosition.column).toBe(0);
     });
 
-    test("should not move beyond last line", () => {
-      setup("line one\nline two");
+    test("should not move beyond last line", async () => {
+      await setup("line one\nline two");
 
       // Start at position (1, 0)
       interpreter.execute("(cursor-move 1 0)");
@@ -293,8 +301,8 @@ describe("Line Navigation (US-1.1.2)", () => {
   });
 
   describe("Count prefix support", () => {
-    test("5- should move up 5 lines", () => {
-      setup("line 1\nline 2\nline 3\nline 4\nline 5\nline 6\nline 7");
+    test("5- should move up 5 lines", async () => {
+      await setup("line 1\nline 2\nline 3\nline 4\nline 5\nline 6\nline 7");
 
       // Start at position (6, 0)
       interpreter.execute("(cursor-move 6 0)");
@@ -307,8 +315,8 @@ describe("Line Navigation (US-1.1.2)", () => {
       expect(state.cursorPosition.line).toBe(1);
     });
 
-    test("3+ should move down 3 lines", () => {
-      setup("line 1\nline 2\nline 3\nline 4\nline 5");
+    test("3+ should move down 3 lines", async () => {
+      await setup("line 1\nline 2\nline 3\nline 4\nline 5");
 
       // Start at position (0, 0)
       interpreter.execute("(cursor-move 0 0)");
@@ -321,8 +329,8 @@ describe("Line Navigation (US-1.1.2)", () => {
       expect(state.cursorPosition.line).toBe(3);
     });
 
-    test("0- should not move cursor", () => {
-      setup("line 1\nline 2\nline 3");
+    test("0- should not move cursor", async () => {
+      await setup("line 1\nline 2\nline 3");
 
       // Start at position (2, 0)
       interpreter.execute("(cursor-move 2 0)");
@@ -335,8 +343,8 @@ describe("Line Navigation (US-1.1.2)", () => {
       expect(state.cursorPosition.line).toBe(2);
     });
 
-    test("0+ should not move cursor", () => {
-      setup("line 1\nline 2\nline 3");
+    test("0+ should not move cursor", async () => {
+      await setup("line 1\nline 2\nline 3");
 
       // Start at position (0, 0)
       interpreter.execute("(cursor-move 0 0)");
@@ -351,8 +359,8 @@ describe("Line Navigation (US-1.1.2)", () => {
   });
 
   describe("Edge cases", () => {
-    test("should handle empty buffer", () => {
-      setup("");
+    test("should handle empty buffer", async () => {
+      await setup("");
 
       interpreter.execute("(cursor-move 0 0)");
 
@@ -361,8 +369,8 @@ describe("Line Navigation (US-1.1.2)", () => {
       expect(Either.isRight(result)).toBe(true);
     });
 
-    test("should handle single line", () => {
-      setup("hello world");
+    test("should handle single line", async () => {
+      await setup("hello world");
 
       interpreter.execute("(cursor-move 0 0)");
 
@@ -377,8 +385,8 @@ describe("Line Navigation (US-1.1.2)", () => {
       expect(state.cursorPosition.column).toBe(0);
     });
 
-    test("should handle lines with mixed whitespace", () => {
-      setup(" \t line one\n  line two");
+    test("should handle lines with mixed whitespace", async () => {
+      await setup(" \t line one\n  line two");
 
       // Start at line 1
       interpreter.execute("(cursor-move 1 0)");
@@ -392,9 +400,9 @@ describe("Line Navigation (US-1.1.2)", () => {
       expect(state.cursorPosition.column).toBeGreaterThan(0);
     });
 
-    test("should handle very long lines", () => {
+    test("should handle very long lines", async () => {
       const longLine = "a".repeat(100);
-      setup(longLine);
+      await setup(longLine);
 
       // Start at column 50
       interpreter.execute("(cursor-move 0 50)");
@@ -408,8 +416,8 @@ describe("Line Navigation (US-1.1.2)", () => {
       expect(state.cursorPosition.column).toBeGreaterThan(90);
     });
 
-    test("_ should work on empty line", () => {
-      setup("line one\n\nline three");
+    test("_ should work on empty line", async () => {
+      await setup("line one\n\nline three");
 
       // Start at empty line (line 1)
       interpreter.execute("(cursor-move 1 0)");
@@ -419,8 +427,8 @@ describe("Line Navigation (US-1.1.2)", () => {
       expect(Either.isRight(result)).toBe(true);
     });
 
-    test("$ should work on line with only spaces", () => {
-      setup("line one\n     \nline three");
+    test("$ should work on line with only spaces", async () => {
+      await setup("line one\n     \nline three");
 
       // Start at line 1 (only spaces)
       interpreter.execute("(cursor-move 1 0)");

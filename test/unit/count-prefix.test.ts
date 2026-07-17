@@ -12,25 +12,30 @@
  * - 0w doesn't move cursor (zero count edge case)
  */
 
-import { describe, test, expect, beforeEach } from "bun:test";
+import { describe, test, expect, beforeEach, afterEach } from "bun:test";
 import { Editor } from "../../src/editor/editor.ts";
 import { MockTerminal } from "../mocks/terminal.ts";
 import { MockFileSystem } from "../mocks/filesystem.ts";
-import { bufferText, expectRight } from "../helpers/editor-fixture.ts";
+import { bufferText, expectRight, createEditorFixture, type EditorFixture } from "../helpers/editor-fixture.ts";
 
 describe("Count Prefix (US-1.3.1)", () => {
   let editor: Editor;
   let terminal: MockTerminal;
   let filesystem: MockFileSystem;
+  let fixture: EditorFixture;
 
   beforeEach(async () => {
-    terminal = new MockTerminal();
-    filesystem = new MockFileSystem();
-    editor = new Editor(terminal, filesystem);
-    await editor.start();
+    fixture = await createEditorFixture({
+      initialContent: "one two three four\nfive six seven eight\nnine ten eleven twelve",
+      bufferName: "test",
+    });
+    editor = fixture.editor;
+    terminal = fixture.terminal as MockTerminal;
+    filesystem = fixture.filesystem as MockFileSystem;
+  });
 
-    // Create a test buffer with multiple words and lines
-    editor.createBuffer("test", "one two three four\nfive six seven eight\nnine ten eleven twelve");
+  afterEach(() => {
+    fixture?.dispose();
   });
 
   describe("Digit Accumulation", () => {

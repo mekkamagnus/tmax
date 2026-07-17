@@ -15,6 +15,7 @@ import { describe, test, expect, beforeEach, afterEach } from "bun:test";
 import { Editor } from "../../src/editor/editor.ts";
 import { MockTerminal } from "../mocks/terminal.ts";
 import { MockFileSystem } from "../mocks/filesystem.ts";
+import { createEditorFixture, type EditorFixture } from "../helpers/editor-fixture.ts";
 
 const TEST_WHICH_KEY_TIMEOUT = 50;
 
@@ -32,11 +33,14 @@ describe("Which-Key Popup (US-1.10.3)", () => {
   let editor: Editor;
   let terminal: MockTerminal;
   let filesystem: MockFileSystem;
+  let fixture: EditorFixture;
 
   beforeEach(async () => {
-    terminal = new MockTerminal();
-    filesystem = new MockFileSystem();
-    editor = new Editor(terminal, filesystem);
+    // Use start:false so the test can reset the which-key handle BEFORE start.
+    fixture = await createEditorFixture({ start: false });
+    editor = fixture.editor;
+    terminal = fixture.terminal as MockTerminal;
+    filesystem = fixture.filesystem as MockFileSystem;
     // Reset per-instance which-key state with short timeout for testing
     editor.getWhichKeyHandle().reset(TEST_WHICH_KEY_TIMEOUT);
     await editor.start();
@@ -58,6 +62,7 @@ describe("Which-Key Popup (US-1.10.3)", () => {
 
   afterEach(() => {
     editor.getWhichKeyHandle().reset(1000);
+    fixture?.dispose();
   });
 
   describe("Which-Key State Management", () => {

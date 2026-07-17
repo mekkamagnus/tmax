@@ -6,26 +6,31 @@
  * that search for the word currently under the cursor.
  */
 
-import { describe, test, expect, beforeEach } from "bun:test";
+import { describe, test, expect, beforeEach, afterEach } from "bun:test";
 import { Editor } from "../../src/editor/editor.ts";
 import { MockTerminal } from "../mocks/terminal.ts";
 import { MockFileSystem } from "../mocks/filesystem.ts";
-import { expectRight, expectTlispString, moveCursor } from "../helpers/editor-fixture.ts";
+import { createEditorFixture, expectRight, expectTlispString, moveCursor, type EditorFixture } from "../helpers/editor-fixture.ts";
 
 describe("Word Under Cursor Search (US-1.5.2)", () => {
+  let fixture: EditorFixture;
   let editor: Editor;
   let terminal: MockTerminal;
   let filesystem: MockFileSystem;
 
   beforeEach(async () => {
-    terminal = new MockTerminal();
-    filesystem = new MockFileSystem();
-    editor = new Editor(terminal, filesystem);
-    await editor.start();
+    fixture = await createEditorFixture();
+    editor = fixture.editor;
+    terminal = fixture.terminal as MockTerminal;
+    filesystem = fixture.filesystem as MockFileSystem;
 
     // Create test buffer with multiple occurrences of words
     editor.createBuffer("test.txt", "hello world foo bar hello\ntest hello test world\nfoo bar baz");
 
+  });
+
+  afterEach(() => {
+    fixture?.dispose();
   });
 
   describe("* (word-under-cursor-next) - next occurrence", () => {

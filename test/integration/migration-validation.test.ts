@@ -4,30 +4,39 @@
  */
 
 import { describe, test, expect } from "bun:test";
-import { Editor } from "../../src/editor/editor.ts";
 import { TerminalIOImpl } from "../../src/core/terminal.ts";
 import { FileSystemImpl } from "../../src/core/filesystem.ts";
+import { createEditorFixture } from "../helpers/editor-fixture.ts";
 
 describe("Migration Validation", () => {
-  test("should create editor successfully", () => {
+  test("should create editor successfully", async () => {
     const terminal = new TerminalIOImpl();
     const filesystem = new FileSystemImpl();
-    const editor = new Editor(terminal, filesystem);
+    const fixture = await createEditorFixture({ terminal, filesystem, start: false });
+    try {
+      const editor = fixture.editor;
 
-    // Should create without throwing
-    expect(typeof editor.getState()).toBe("object");
+      // Should create without throwing
+      expect(typeof editor.getState()).toBe("object");
+    } finally {
+      fixture.dispose();
+    }
   });
 
-  test("should have key-bind function available", () => {
+  test("should have key-bind function available", async () => {
     const terminal = new TerminalIOImpl();
     const filesystem = new FileSystemImpl();
-    const editor = new Editor(terminal, filesystem);
+    const fixture = await createEditorFixture({ terminal, filesystem, start: false });
+    try {
+      const editor = fixture.editor;
+      const interpreter = editor.getInterpreter();
 
-    const interpreter = editor.getInterpreter();
-
-    // Should be able to execute a key-bind command without error
-    const result = interpreter.execute('(key-bind "x" "(cursor-move 0 0)" "normal")');
-    expect(typeof result).toBe("object");
+      // Should be able to execute a key-bind command without error
+      const result = interpreter.execute('(key-bind "x" "(cursor-move 0 0)" "normal")');
+      expect(typeof result).toBe("object");
+    } finally {
+      fixture.dispose();
+    }
   });
 
   test("should be able to load core bindings file", async () => {
@@ -43,34 +52,39 @@ describe("Migration Validation", () => {
     expect(content.includes("cursor-move")).toBe(true);
   });
 
-  test("should execute core binding commands", () => {
+  test("should execute core binding commands", async () => {
     const terminal = new TerminalIOImpl();
     const filesystem = new FileSystemImpl();
-    const editor = new Editor(terminal, filesystem);
+    const fixture = await createEditorFixture({ terminal, filesystem, start: false });
+    try {
+      const editor = fixture.editor;
 
-    editor.createBuffer("test.txt", "hello world");
-    const interpreter = editor.getInterpreter();
+      editor.createBuffer("test.txt", "hello world");
+      const interpreter = editor.getInterpreter();
 
-    // Test basic editor API commands that are in core bindings
-    let result;
+      // Test basic editor API commands that are in core bindings
+      let result;
 
-    // Test cursor movement command
-    result = interpreter.execute('(cursor-move 0 5)');
-    expect(typeof result).toBe("object");
+      // Test cursor movement command
+      result = interpreter.execute('(cursor-move 0 5)');
+      expect(typeof result).toBe("object");
 
-    // Test mode setting command
-    result = interpreter.execute('(editor-set-mode "insert")');
-    expect(typeof result).toBe("object");
+      // Test mode setting command
+      result = interpreter.execute('(editor-set-mode "insert")');
+      expect(typeof result).toBe("object");
 
-    // Test buffer operations
-    result = interpreter.execute('(buffer-insert " test")');
-    expect(typeof result).toBe("object");
+      // Test buffer operations
+      result = interpreter.execute('(buffer-insert " test")');
+      expect(typeof result).toBe("object");
 
-    // Verify state changes
-    const state = editor.getState();
-    expect(state.mode).toBe("insert");
-    // After inserting " test" (5 characters) at position 5, cursor should be at 10
-    expect(state.cursorPosition.column).toBe(10);
+      // Verify state changes
+      const state = editor.getState();
+      expect(state.mode).toBe("insert");
+      // After inserting " test" (5 characters) at position 5, cursor should be at 10
+      expect(state.cursorPosition.column).toBe(10);
+    } finally {
+      fixture.dispose();
+    }
   });
 
   test("should preserve original key mapping count", async () => {

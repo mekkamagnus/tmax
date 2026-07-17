@@ -3,11 +3,12 @@
  * @description Integration tests for core bindings loading and execution
  */
 
-import { describe, test, expect } from "bun:test";
+import { describe, test, expect, afterEach } from "bun:test";
 import { Editor } from "../../src/editor/editor.ts";
 import { TerminalIOImpl } from "../../src/core/terminal.ts";
 import { FileSystemImpl } from "../../src/core/filesystem.ts";
 import type { TerminalIO } from "../../src/core/types.ts";
+import { createEditorFixture, type EditorFixture } from "../helpers/editor-fixture.ts";
 
 /**
  * Mock terminal for testing
@@ -88,16 +89,23 @@ describe("Core Bindings Integration", () => {
   let editor: Editor;
   let terminal: MockTerminal;
   let filesystem: FileSystemImpl;
+  let fixture: EditorFixture | undefined;
+
+  afterEach(() => {
+    fixture?.dispose();
+    fixture = undefined;
+  });
 
   // Setup before each test
-  const setup = () => {
+  const setup = async () => {
     terminal = new MockTerminal();
     filesystem = new FileSystemImpl();
-    editor = new Editor(terminal, filesystem);
+    fixture = await createEditorFixture({ terminal, filesystem, start: false });
+    editor = fixture.editor;
   };
 
   test("should load core bindings during editor startup", async () => {
-    setup();
+    await setup();
 
     // Queue a quit command so the editor exits immediately
     terminal.queueKeys(["q"]);
@@ -115,7 +123,7 @@ describe("Core Bindings Integration", () => {
   });
 
   test("should execute navigation commands from core bindings", async () => {
-    setup();
+    await setup();
 
     // Create a test buffer with some content
     editor.createBuffer("test.txt", "line1\\nline2\\nline3");
@@ -134,7 +142,7 @@ describe("Core Bindings Integration", () => {
   });
 
   test("should handle mode switching from core bindings", async () => {
-    setup();
+    await setup();
 
     // Create test buffer
     editor.createBuffer("test.txt", "content");
@@ -153,7 +161,7 @@ describe("Core Bindings Integration", () => {
   });
 
   test("should handle M-x system commands from core bindings", async () => {
-    setup();
+    await setup();
 
     editor.createBuffer("test.txt", "content");
 
@@ -172,7 +180,7 @@ describe("Core Bindings Integration", () => {
   });
 
   test("should handle editing commands from core bindings", async () => {
-    setup();
+    await setup();
 
     editor.createBuffer("test.txt", "hello");
 
@@ -191,7 +199,7 @@ describe("Core Bindings Integration", () => {
   });
 
   test("should gracefully handle missing core bindings file", async () => {
-    setup();
+    await setup();
 
     // Create an editor with a filesystem that will fail to read the core bindings
     class FailingFileSystem extends FileSystemImpl {
@@ -204,15 +212,20 @@ describe("Core Bindings Integration", () => {
     }
 
     const failingFs = new FailingFileSystem();
-    const testEditor = new Editor(terminal, failingFs);
+    const testFixture = await createEditorFixture({ terminal, filesystem: failingFs, start: false });
+    try {
+      const testEditor = testFixture.editor;
 
-    terminal.queueKeys(["q"]);
+      terminal.queueKeys(["q"]);
 
-    // Should not throw an error, but should handle gracefully
-    await testEditor.start();
+      // Should not throw an error, but should handle gracefully
+      await testEditor.start();
 
-    const state = testEditor.getState();
-    expect(testEditor.isRunning()).toBe(true);
-    expect(state.statusMessage).not.toContain("Failed to load core bindings");
+      const state = testEditor.getState();
+      expect(testEditor.isRunning()).toBe(true);
+      expect(state.statusMessage).not.toContain("Failed to load core bindings");
+    } finally {
+      testFixture.dispose();
+    }
   });
 });

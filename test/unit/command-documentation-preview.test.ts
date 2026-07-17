@@ -11,23 +11,19 @@
  */
 
 import { describe, test, expect, beforeEach, afterEach } from "bun:test";
+import { createEditorFixture, type EditorFixture } from "../helpers/editor-fixture.ts";
 import { Editor } from "../../src/editor/editor.ts";
-import { MockTerminal } from "../mocks/terminal.ts";
-import { MockFileSystem } from "../mocks/filesystem.ts";
 
 const TEST_WHICH_KEY_TIMEOUT = 20;
 const waitForWhichKey = () => new Promise(resolve => setTimeout(resolve, TEST_WHICH_KEY_TIMEOUT + 20));
 
 describe("Command Documentation Preview (US-1.10.4)", () => {
+  let fixture: EditorFixture;
   let editor: Editor;
-  let terminal: MockTerminal;
-  let filesystem: MockFileSystem;
 
   beforeEach(async () => {
-    terminal = new MockTerminal();
-    filesystem = new MockFileSystem();
-    editor = new Editor(terminal, filesystem);
-    await editor.start();
+    fixture = await createEditorFixture();
+    editor = fixture.editor;
     editor.getWhichKeyHandle().reset(TEST_WHICH_KEY_TIMEOUT);
 
     // Create a test buffer
@@ -52,7 +48,8 @@ describe("Command Documentation Preview (US-1.10.4)", () => {
   });
 
   afterEach(() => {
-    editor.getWhichKeyHandle().reset(1000);
+    editor?.getWhichKeyHandle()?.reset(1000);
+    fixture?.dispose();
   });
 
   describe("Which-Key Documentation Preview", () => {

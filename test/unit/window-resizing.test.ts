@@ -3,26 +3,31 @@
  * @description Test suite for window resizing functionality (US-3.2.2)
  */
 
-import { describe, test, expect } from "bun:test";
+import { describe, test, expect, afterEach } from "bun:test";
 import { Editor } from "../../src/editor/editor.ts";
 import { MockTerminal } from "../mocks/terminal.ts";
 import { MockFileSystem } from "../mocks/filesystem.ts";
+import { createEditorFixture, type EditorFixture } from "../helpers/editor-fixture.ts";
 
 describe("Window Resizing - US-3.2.2", () => {
   let terminal: MockTerminal;
   let filesystem: MockFileSystem;
   let editor: Editor;
+  let fixture: EditorFixture;
 
-  const setup = () => {
-    terminal = new MockTerminal();
-    filesystem = new MockFileSystem();
-    editor = new Editor(terminal, filesystem);
-    // Create initial buffer
-    editor.createBuffer("main", "line 1\nline 2\nline 3");
+  const setup = async (): Promise<void> => {
+    fixture = await createEditorFixture({ start: false, initialContent: "line 1\nline 2\nline 3", bufferName: "main" });
+    editor = fixture.editor;
+    terminal = fixture.terminal as MockTerminal;
+    filesystem = fixture.filesystem as MockFileSystem;
   };
 
-  test("should initialize with default window height and width", () => {
-    setup();
+  afterEach(() => {
+    fixture?.dispose();
+  });
+
+  test("should initialize with default window height and width", async () => {
+    await setup();
     const state = editor.getState();
     const window = state.windows?.[0];
     
@@ -33,8 +38,8 @@ describe("Window Resizing - US-3.2.2", () => {
     expect(window?.width).toBeGreaterThan(0);
   });
 
-  test("(window-resize-height delta) should increase window height", () => {
-    setup();
+  test("(window-resize-height delta) should increase window height", async () => {
+    await setup();
     const interpreter = editor.getInterpreter();
     
     // Get initial height
@@ -49,8 +54,8 @@ describe("Window Resizing - US-3.2.2", () => {
     expect(newHeight).toBe(initialHeight + 5);
   });
 
-  test("(window-resize-height delta) should decrease window height", () => {
-    setup();
+  test("(window-resize-height delta) should decrease window height", async () => {
+    await setup();
     const interpreter = editor.getInterpreter();
     
     // First increase height to have room to decrease
@@ -67,8 +72,8 @@ describe("Window Resizing - US-3.2.2", () => {
     expect(newHeight).toBe(initialHeight - 3);
   });
 
-  test("(window-resize-height delta) should not decrease below minimum height", () => {
-    setup();
+  test("(window-resize-height delta) should not decrease below minimum height", async () => {
+    await setup();
     const interpreter = editor.getInterpreter();
     
     // Try to decrease height by huge amount
@@ -80,8 +85,8 @@ describe("Window Resizing - US-3.2.2", () => {
     expect(height).toBeGreaterThanOrEqual(3);
   });
 
-  test("(window-resize-width delta) should increase window width", () => {
-    setup();
+  test("(window-resize-width delta) should increase window width", async () => {
+    await setup();
     const interpreter = editor.getInterpreter();
     
     // Get initial width
@@ -96,8 +101,8 @@ describe("Window Resizing - US-3.2.2", () => {
     expect(newWidth).toBe(initialWidth + 10);
   });
 
-  test("(window-resize-width delta) should decrease window width", () => {
-    setup();
+  test("(window-resize-width delta) should decrease window width", async () => {
+    await setup();
     const interpreter = editor.getInterpreter();
     
     // First increase width to have room to decrease
@@ -114,8 +119,8 @@ describe("Window Resizing - US-3.2.2", () => {
     expect(newWidth).toBe(initialWidth - 5);
   });
 
-  test("(window-resize-width delta) should not decrease below minimum width", () => {
-    setup();
+  test("(window-resize-width delta) should not decrease below minimum width", async () => {
+    await setup();
     const interpreter = editor.getInterpreter();
     
     // Try to decrease width by huge amount
@@ -127,8 +132,8 @@ describe("Window Resizing - US-3.2.2", () => {
     expect(width).toBeGreaterThanOrEqual(10);
   });
 
-  test("resizing should affect only current window in split view", () => {
-    setup();
+  test("resizing should affect only current window in split view", async () => {
+    await setup();
     const interpreter = editor.getInterpreter();
     
     // Split window horizontally
@@ -152,8 +157,8 @@ describe("Window Resizing - US-3.2.2", () => {
     expect(window1NewHeight).not.toBe(window1InitialHeight);
   });
 
-  test("vertical split windows should resize width independently", () => {
-    setup();
+  test("vertical split windows should resize width independently", async () => {
+    await setup();
     const interpreter = editor.getInterpreter();
     
     // Split window vertically
@@ -172,8 +177,8 @@ describe("Window Resizing - US-3.2.2", () => {
     expect(window1NewWidth).toBe(window1InitialWidth + 10);
   });
 
-  test("window resize with count prefix should multiply the delta", () => {
-    setup();
+  test("window resize with count prefix should multiply the delta", async () => {
+    await setup();
     const interpreter = editor.getInterpreter();
     
     // Get initial height

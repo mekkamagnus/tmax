@@ -3,26 +3,31 @@
  * @description Test suite for window splitting functionality (US-3.2.1)
  */
 
-import { describe, test, expect } from "bun:test";
+import { describe, test, expect, afterEach } from "bun:test";
 import { Editor } from "../../src/editor/editor.ts";
 import { MockTerminal } from "../mocks/terminal.ts";
 import { MockFileSystem } from "../mocks/filesystem.ts";
+import { createEditorFixture, type EditorFixture } from "../helpers/editor-fixture.ts";
 
 describe("Window Splitting - US-3.2.1", () => {
   let terminal: MockTerminal;
   let filesystem: MockFileSystem;
   let editor: Editor;
+  let fixture: EditorFixture;
 
-  const setup = () => {
-    terminal = new MockTerminal();
-    filesystem = new MockFileSystem();
-    editor = new Editor(terminal, filesystem);
-    // Create initial buffer
-    editor.createBuffer("main", "line 1\nline 2\nline 3");
+  const setup = async (): Promise<void> => {
+    fixture = await createEditorFixture({ start: false, initialContent: "line 1\nline 2\nline 3", bufferName: "main" });
+    editor = fixture.editor;
+    terminal = fixture.terminal as MockTerminal;
+    filesystem = fixture.filesystem as MockFileSystem;
   };
 
-  test("should have single window initially", () => {
-    setup();
+  afterEach(() => {
+    fixture?.dispose();
+  });
+
+  test("should have single window initially", async () => {
+    await setup();
     const state = editor.getState();
     
     // Initially there should be one window
@@ -31,8 +36,8 @@ describe("Window Splitting - US-3.2.1", () => {
     expect(state.currentWindowIndex).toBe(0);
   });
 
-  test(":split should split window horizontally", () => {
-    setup();
+  test(":split should split window horizontally", async () => {
+    await setup();
     const interpreter = editor.getInterpreter();
     
     // Execute split command
@@ -48,8 +53,8 @@ describe("Window Splitting - US-3.2.1", () => {
     expect(window2?.buffer).toBeDefined();
   });
 
-  test(":vsplit should split window vertically", () => {
-    setup();
+  test(":vsplit should split window vertically", async () => {
+    await setup();
     const interpreter = editor.getInterpreter();
     
     // Execute vsplit command
@@ -59,8 +64,8 @@ describe("Window Splitting - US-3.2.1", () => {
     expect(state.windows?.length).toBe(2);
   });
 
-  test("C-w w should switch focus to next window", () => {
-    setup();
+  test("C-w w should switch focus to next window", async () => {
+    await setup();
     const interpreter = editor.getInterpreter();
     
     // Split window
@@ -82,8 +87,8 @@ describe("Window Splitting - US-3.2.1", () => {
     expect(state.currentWindowIndex).toBe(0);
   });
 
-  test("C-w q should close current window", () => {
-    setup();
+  test("C-w q should close current window", async () => {
+    await setup();
     const interpreter = editor.getInterpreter();
     
     // Split window
@@ -101,8 +106,8 @@ describe("Window Splitting - US-3.2.1", () => {
     expect(state.currentWindowIndex).toBe(0);
   });
 
-  test("closing last window should not close editor", () => {
-    setup();
+  test("closing last window should not close editor", async () => {
+    await setup();
     const interpreter = editor.getInterpreter();
     
     // Try to close the only window
@@ -114,8 +119,8 @@ describe("Window Splitting - US-3.2.1", () => {
     expect(state.currentWindowIndex).toBe(0);
   });
 
-  test("windows should maintain independent cursor positions", () => {
-    setup();
+  test("windows should maintain independent cursor positions", async () => {
+    await setup();
     const interpreter = editor.getInterpreter();
     
     // Split window
@@ -142,8 +147,8 @@ describe("Window Splitting - US-3.2.1", () => {
     expect(window2After?.cursorLine).toBe(0);
   });
 
-  test("split should create window with same buffer", () => {
-    setup();
+  test("split should create window with same buffer", async () => {
+    await setup();
     const interpreter = editor.getInterpreter();
     
     // Split window

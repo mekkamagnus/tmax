@@ -5,37 +5,29 @@
 
 import { describe, test, beforeEach, afterEach } from "bun:test";
 import { expect } from "bun:test";
-import { Editor } from "../../src/editor/editor.ts";
-import { MockTerminal } from "../mocks/terminal.ts";
-import { MockFileSystem } from "../mocks/filesystem.ts";
 import {
+  createEditorFixture,
   expectRight,
   expectTlispList,
   expectTlispString,
+  type EditorFixture,
 } from "../helpers/editor-fixture.ts";
 
 const KEY_BIND_ENHANCEMENT_TIMEOUT_MS = 15000;
 
 describe("Enhanced Key Bind Functions", () => {
-  let editor: Editor;
-  let mockTerminal: MockTerminal;
-  let mockFileSystem: MockFileSystem;
+  let fixture: EditorFixture;
 
   beforeEach(async () => {
-    mockTerminal = new MockTerminal();
-    mockFileSystem = new MockFileSystem();
-    // Create an empty filesystem for these tests
-    editor = new Editor(mockTerminal, mockFileSystem);
-    // Start the editor to initialize the interpreter
-    await editor.start();
+    fixture = await createEditorFixture();
   });
 
   afterEach(() => {
-    editor.stop();
+    fixture?.dispose();
   });
 
   test("should create binding with key-bind function", async () => {
-    const interpreter = editor.getInterpreter();
+    const interpreter = fixture.editor.getInterpreter();
 
     // Test basic key binding creation
     const result = interpreter.execute('(key-bind "C-c C-c" "(some-command)")');
@@ -48,7 +40,7 @@ describe("Enhanced Key Bind Functions", () => {
     expect(value.value).toBe("C-c C-c");
 
     // Verify the binding was actually created
-    const keyMappings = editor.getKeyMappings();
+    const keyMappings = fixture.editor.getKeyMappings();
     const mappings = keyMappings.get("C-c C-c");
 
     expect(mappings).toBeDefined();
@@ -58,7 +50,7 @@ describe("Enhanced Key Bind Functions", () => {
   });
 
   test("should create mode-specific binding", async () => {
-    const interpreter = editor.getInterpreter();
+    const interpreter = fixture.editor.getInterpreter();
 
     // Test mode-specific key binding creation
     const result = interpreter.execute('(key-bind "k" "(kill-line)" "normal")');
@@ -71,7 +63,7 @@ describe("Enhanced Key Bind Functions", () => {
     expect(value.value).toBe("k");
 
     // Verify the binding was actually created with mode
-    const keyMappings = editor.getKeyMappings();
+    const keyMappings = fixture.editor.getKeyMappings();
     const mappings = keyMappings.get("k");
 
     expect(mappings).toBeDefined();
@@ -81,7 +73,7 @@ describe("Enhanced Key Bind Functions", () => {
   });
 
   test("should handle two-key sequences", async () => {
-    const interpreter = editor.getInterpreter();
+    const interpreter = fixture.editor.getInterpreter();
 
     // Test two-key sequence binding
     const result = interpreter.execute('(key-bind "g d" "(goto-definition)")');
@@ -94,7 +86,7 @@ describe("Enhanced Key Bind Functions", () => {
     expect(value.value).toBe("g d");
 
     // Verify the binding was actually created
-    const keyMappings = editor.getKeyMappings();
+    const keyMappings = fixture.editor.getKeyMappings();
     const mappings = keyMappings.get("g d");
 
     expect(mappings).toBeDefined();
@@ -103,13 +95,13 @@ describe("Enhanced Key Bind Functions", () => {
   });
 
   test("should remove binding with key-unbind function", async () => {
-    const interpreter = editor.getInterpreter();
+    const interpreter = fixture.editor.getInterpreter();
 
     // First create a binding
     interpreter.execute('(key-bind "C-c C-c" "(some-command)")');
 
     // Verify it exists
-    let keyMappings = editor.getKeyMappings();
+    let keyMappings = fixture.editor.getKeyMappings();
     let mappings = keyMappings.get("C-c C-c");
     expect(mappings).toBeDefined();
     expect(mappings!.length).toBe(1);
@@ -125,19 +117,19 @@ describe("Enhanced Key Bind Functions", () => {
     expect(value.value).toBe("C-c C-c");
 
     // Verify it was removed
-    keyMappings = editor.getKeyMappings();
+    keyMappings = fixture.editor.getKeyMappings();
     mappings = keyMappings.get("C-c C-c");
     expect(mappings).toBeUndefined();
   });
 
   test("should remove mode-specific binding with key-unbind", async () => {
-    const interpreter = editor.getInterpreter();
+    const interpreter = fixture.editor.getInterpreter();
 
     // Create a mode-specific binding
     interpreter.execute('(key-bind "k" "(kill-line)" "normal")');
 
     // Verify it exists
-    let keyMappings = editor.getKeyMappings();
+    let keyMappings = fixture.editor.getKeyMappings();
     let mappings = keyMappings.get("k");
     expect(mappings).toBeDefined();
     expect(mappings?.some(mapping =>
@@ -155,7 +147,7 @@ describe("Enhanced Key Bind Functions", () => {
     expect(value.value).toBe("k");
 
     // Verify it was removed
-    keyMappings = editor.getKeyMappings();
+    keyMappings = fixture.editor.getKeyMappings();
     mappings = keyMappings.get("k");
     expect(mappings?.some(mapping =>
       mapping.command === "(kill-line)" && mapping.mode === "normal"
@@ -163,7 +155,7 @@ describe("Enhanced Key Bind Functions", () => {
   }, KEY_BIND_ENHANCEMENT_TIMEOUT_MS);
 
   test("should list all active bindings with key-bindings function", async () => {
-    const interpreter = editor.getInterpreter();
+    const interpreter = fixture.editor.getInterpreter();
 
     // Create some bindings
     interpreter.execute('(key-bind "a" "(command-a)")');
@@ -200,7 +192,7 @@ describe("Enhanced Key Bind Functions", () => {
   });
 
   test("should return command and source info with key-binding function", async () => {
-    const interpreter = editor.getInterpreter();
+    const interpreter = fixture.editor.getInterpreter();
 
     // Create a binding
     interpreter.execute('(key-bind "C-c C-c" "(some-command)")');
@@ -222,7 +214,7 @@ describe("Enhanced Key Bind Functions", () => {
   });
 
   test("should return mode-specific binding info with key-binding function", async () => {
-    const interpreter = editor.getInterpreter();
+    const interpreter = fixture.editor.getInterpreter();
 
     // Create a mode-specific binding
     interpreter.execute('(key-bind "k" "(kill-line)" "normal")');
@@ -244,7 +236,7 @@ describe("Enhanced Key Bind Functions", () => {
   });
 
   test("should handle conflicting bindings by overriding previous bindings", async () => {
-    const interpreter = editor.getInterpreter();
+    const interpreter = fixture.editor.getInterpreter();
 
     // Create a binding
     const result1 = interpreter.execute('(key-bind "x" "(original-command)" "normal")');
@@ -252,7 +244,7 @@ describe("Enhanced Key Bind Functions", () => {
     expect(result1._tag).toBe("Right");
 
     // Verify it exists
-    let keyMappings = editor.getKeyMappings();
+    let keyMappings = fixture.editor.getKeyMappings();
     let mappings = keyMappings.get("x");
     expect(mappings).toBeDefined();
     expect(mappings![0]!.command).toBe("(original-command)");
@@ -263,7 +255,7 @@ describe("Enhanced Key Bind Functions", () => {
     expect(result2._tag).toBe("Right");
 
     // Verify the new command is there
-    keyMappings = editor.getKeyMappings();
+    keyMappings = fixture.editor.getKeyMappings();
     mappings = keyMappings.get("x");
     expect(mappings).toBeDefined();
     expect(mappings!.length).toBe(1);
@@ -271,7 +263,7 @@ describe("Enhanced Key Bind Functions", () => {
   });
 
   test("should return nil when key-binding function is called for non-existent key", async () => {
-    const interpreter = editor.getInterpreter();
+    const interpreter = fixture.editor.getInterpreter();
 
     // Get info about a non-existent binding
     const result = interpreter.execute('(key-binding "non-existent-key")');

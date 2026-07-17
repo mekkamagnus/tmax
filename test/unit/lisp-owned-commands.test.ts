@@ -1,40 +1,40 @@
 import { describe, expect, test } from "bun:test";
-import { Editor } from "../../src/editor/editor.ts";
-import { MockTerminal } from "../mocks/terminal.ts";
-import { MockFileSystem } from "../mocks/filesystem.ts";
+import { createEditorFixture } from "../helpers/editor-fixture.ts";
 
 describe("Lisp-owned command libraries", () => {
   test("representative command libraries load and define functions", async () => {
-    const editor = new Editor(new MockTerminal(), new MockFileSystem());
-    await editor.start();
-    const registry = editor.getInterpreter().moduleRegistry;
+    const fixture = await createEditorFixture();
+    try {
+      const editor = fixture.editor;
+      const registry = editor.getInterpreter().moduleRegistry;
 
-    for (const name of [
-      "save-buffer",
-      "find-file",
-      "isearch-forward",
-      "query-replace",
-      "indent-current-line",
-      "dired",
-      "vim-operator-apply",
-      "split-window-below",
-      "split-window-right",
-      "other-window",
-      "delete-window",
-      "relative-line-numbers-mode",
-      "completing-read",
-      "orderless-filter",
-      "marginalia-annotate-candidate",
-      "vertico-publish",
-      "switch-buffer",
-      "execute-extended-command",
-    ]) {
-      const resolved = registry.resolveUniqueExport(name);
-      expect(typeof resolved, name).toBe("object");
-      expect((resolved as { value?: { type?: string } }).value?.type).toBe("function");
+      for (const name of [
+        "save-buffer",
+        "find-file",
+        "isearch-forward",
+        "query-replace",
+        "indent-current-line",
+        "dired",
+        "vim-operator-apply",
+        "split-window-below",
+        "split-window-right",
+        "other-window",
+        "delete-window",
+        "relative-line-numbers-mode",
+        "completing-read",
+        "orderless-filter",
+        "marginalia-annotate-candidate",
+        "vertico-publish",
+        "switch-buffer",
+        "execute-extended-command",
+      ]) {
+        const resolved = registry.resolveUniqueExport(name);
+        expect(typeof resolved, name).toBe("object");
+        expect((resolved as { value?: { type?: string } }).value?.type).toBe("function");
+      }
+    } finally {
+      fixture.dispose();
     }
-
-    editor.stop();
   });
 
   test("TypeScript minibuffer handler only routes normalized keys to T-Lisp", async () => {

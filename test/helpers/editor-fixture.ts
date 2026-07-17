@@ -1,4 +1,6 @@
 import { Editor } from "../../src/editor/editor.ts";
+import type { TerminalIO } from "../../src/core/types.ts";
+import type { FileSystem } from "../../src/core/types.ts";
 import type { TLispValue } from "../../src/tlisp/types.ts";
 import { Either, type Either as EitherValue } from "../../src/utils/task-either.ts";
 import { MockFileSystem } from "../mocks/filesystem.ts";
@@ -110,6 +112,63 @@ export function createTestAPIContext(options: TestAPIContextOptions = {}): TestA
 
 
 
+/**
+ * CHORE-44 Change 12 — Options for {@link createEditorFixture}.
+ *
+ * Every field is optional; defaults give the common case (real mocks, real
+ * core bindings, started editor, deterministic cleanup). Tests with specific
+ * setup intent express it through these options rather than ad-hoc
+ * `new Editor(...)` construction (AC12.3).
+ */
+export interface EditorFixtureOptions {
+  /** Seed text for the editor's first test buffer (created via `createBuffer`). */
+  readonly initialContent?: string;
+  /** Name of the seed buffer (defaults to "test"). */
+  readonly bufferName?: string;
+  /** Inject a custom `TerminalIO` (defaults to a fresh `MockTerminal`). */
+  readonly terminal?: TerminalIO;
+  /** Inject a custom `FileSystem` (defaults to a fresh `MockFileSystem`). */
+  readonly filesystem?: FileSystem;
+  /** Custom init-file path passed as the Editor's third constructor arg. */
+  readonly initFilePath?: string;
+  /** Whether to call `editor.start()` (defaults to `true`). Set `false` for
+   *  constructor-only / error-path tests, or when a test needs to mutate
+   *  per-instance state (e.g. which-key timeout) before startup. */
+  readonly start?: boolean;
+  /** Whether `start()` should load real core bindings (defaults to `true`).
+   *  When `false`, the fixture skips `start()` entirely — `Editor.start()` is
+   *  monolithic and always loads bindings, so the only faithful way to test
+   *  missing/failing binding behavior is to either keep `start: false` and
+   *  exercise the constructor, or inject a `filesystem` option whose reads
+   *  fail so the editor falls back to the minimal built-in keymap. */
+  readonly loadRealCoreBindings?: boolean;
+  /** Whether `dispose()` should clean up the per-editor which-key timer handle
+   *  (defaults to `true`). Per-handle only — never broad listener removal
+   *  (BUG-16). Set `false` only for tests that assert on post-dispose handle
+   *  state. */
+  readonly disposeTimeouts?: boolean;
+}
+
+/**
+ * CHORE-44 Change 12 — the handle returned by {@link createEditorFixture}.
+ *
+ * `terminal` and `filesystem` are the exact dependencies the editor was
+ * constructed with (the same instances tests used to seed files or queue
+ * keys), so existing setup code keeps working. `dispose()` is idempotent.
+ */
+export interface EditorFixture {
+  readonly editor: Editor;
+  readonly terminal: TerminalIO;
+  readonly filesystem: FileSystem;
+  /** Execute T-Lisp through the editor's public interpreter boundary, failing
+   *  the test on Left. */
+  readonly executeTlisp: (expression: string) => TLispValue;
+  /** Stop the editor and clean up per-editor handles (which-key timer).
+   *  Idempotent; safe to call from `afterEach` or `try/finally`. Does NOT use
+   *  broad `removeAllListeners` (BUG-16). */
+  readonly dispose: () => void;
+}
+
 /** Isolate the SPEC-055 log file per editor instance so tail-load never reads
  *  the developer's real ~/.config/tmax/messages.log AND never carries entries
  *  from a prior test in the same file (each editor gets its own empty log). */
@@ -118,15 +177,78 @@ function isolatedLogPath(): string {
   return join(dir, "messages.log");
 }
 
-/** Create an editor whose asynchronous startup has completed. */
-export async function createStartedEditor(content?: string): Promise<Editor> {
+/**
+ * CHORE-44 Change 12 — the single construction + cleanup path for editor
+ * tests. Injects terminals, filesystems, init files, startup mode, and
+ * binding behavior; returns a deterministic dispose handle (AC12.2).
+ *
+ * Behavior:
+ *  - sets `TMAX_LOG_PATH` to a fresh isolated directory (per-editor log);
+ *  - constructs `new Editor(terminal, filesystem, initFilePath?)`;
+ *  - unless `start: false`, awaits `editor.start()` (which loads core
+ *    bindings via the real `BindingRuntime` policy);
+ *  - when `initialContent` is provided, creates a buffer named
+ *    `bufferName ?? "test"` with that content;
+ *  - `dispose()` calls `editor.stop()` and, unless `disposeTimeouts: false`,
+ *    deactivates the per-editor which-key handle (clearing its timer). No
+ *    broad listener removal — BUG-16 compliant.
+ */
+export async function createEditorFixture(options: EditorFixtureOptions = {}): Promise<EditorFixture> {
+  const start = options.start ?? true;
+  const loadRealCoreBindings = options.loadRealCoreBindings ?? true;
+  const shouldStart = start && loadRealCoreBindings;
+
   process.env.TMAX_LOG_PATH = isolatedLogPath();
-  const editor = new Editor(new MockTerminal(), new MockFileSystem());
-  await editor.start();
-  if (content !== undefined) {
-    editor.createBuffer("test", content);
+
+  const terminal: TerminalIO = options.terminal ?? new MockTerminal();
+  const filesystem: FileSystem = options.filesystem ?? new MockFileSystem();
+  const editor = new Editor(terminal, filesystem, options.initFilePath);
+
+  if (shouldStart) {
+    await editor.start();
   }
-  return editor;
+
+  if (options.initialContent !== undefined) {
+    editor.createBuffer(options.bufferName ?? "test", options.initialContent);
+  }
+
+  let disposed = false;
+  const disposeTimeouts = options.disposeTimeouts ?? true;
+  const dispose = (): void => {
+    if (disposed) return;
+    disposed = true;
+    if (disposeTimeouts) {
+      // Per-handle cleanup only — see BUG-16. The which-key handle owns a
+      // single setTimeout; deactivate() clears it. No process/socket
+      // listener removal happens here.
+      try {
+        editor.getWhichKeyHandle().deactivate();
+      } catch {
+        // The handle is constructed in the Editor ctor and always present;
+        // guard defensively in case a future code path restructures this.
+      }
+    }
+    editor.stop();
+  };
+
+  const executeTlisp = (expression: string): TLispValue => {
+    return expectRight(editor.getInterpreter().execute(expression), `T-Lisp failed: ${expression}`);
+  };
+
+  return { editor, terminal, filesystem, executeTlisp, dispose };
+}
+
+/**
+ * Convenience wrapper for the common case: a started editor with real core
+ * bindings and optional seed content. Delegates to {@link createEditorFixture}
+ * so it inherits the same deterministic cleanup contract (AC12.2).
+ *
+ * Returns the bare `Editor` for backward compatibility with existing callers;
+ * tests that need `dispose()` should call {@link createEditorFixture} instead.
+ */
+export async function createStartedEditor(content?: string): Promise<Editor> {
+  const fixture = await createEditorFixture({ initialContent: content });
+  return fixture.editor;
 }
 
 /** Return the successful value or fail the test immediately. */

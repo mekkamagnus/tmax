@@ -1,8 +1,6 @@
 import { describe, expect, test } from "bun:test";
-import { Editor } from "../../src/editor/editor.ts";
+import { createEditorFixture } from "../helpers/editor-fixture.ts";
 import { TLispInterpreterImpl } from "../../src/tlisp/interpreter.ts";
-import { MockFileSystem } from "../mocks/filesystem.ts";
-import { MockTerminal } from "../mocks/terminal.ts";
 
 const expectRight = (result: any) => {
   expect(result._tag).toBe("Right");
@@ -38,25 +36,29 @@ describe("Module system integration", () => {
   });
 
   test("editor startup loads core modules and exposes public commands to discovery", async () => {
-    const editor = new Editor(new MockTerminal(), new MockFileSystem());
-    editor.createBuffer("scratch", "abc\n");
-    await editor.start();
+    const fixture = await createEditorFixture();
+    try {
+      const editor = fixture.editor;
+      editor.createBuffer("scratch", "abc\n");
 
-    const interpreter = editor.getInterpreter();
+      const interpreter = editor.getInterpreter();
 
-    expect(expectRight(interpreter.execute('(module-loaded? "editor/commands/vim-dispatch")')).value).toBe(true);
+      expect(expectRight(interpreter.execute('(module-loaded? "editor/commands/vim-dispatch")')).value).toBe(true);
 
-    const describe = expectRight(interpreter.execute('(describe-function "vim-reset-pending")'));
-    const describeValues = describe.value as Array<{ value: unknown }>;
-    expect(describeValues[1]?.value).toContain("from module editor/commands/vim-dispatch");
+      const describe = expectRight(interpreter.execute('(describe-function "vim-reset-pending")'));
+      const describeValues = describe.value as Array<{ value: unknown }>;
+      expect(describeValues[1]?.value).toContain("from module editor/commands/vim-dispatch");
 
-    const apropos = expectRight(interpreter.execute('(apropos-command "vim-reset")'));
-    const names = (apropos.value as Array<{ value: Array<{ value: unknown }> }>).map((row) => row.value[0]?.value);
-    expect(names).toContain("vim-reset-pending");
+      const apropos = expectRight(interpreter.execute('(apropos-command "vim-reset")'));
+      const names = (apropos.value as Array<{ value: Array<{ value: unknown }> }>).map((row) => row.value[0]?.value);
+      expect(names).toContain("vim-reset-pending");
 
-    await editor.handleKey(" ");
-    await editor.handleKey(";");
-    expect(editor.getState().mode).toBe("mx");
-    expect(editor.getState().minibufferView?.rows.length).toBeGreaterThan(0);
+      await editor.handleKey(" ");
+      await editor.handleKey(";");
+      expect(editor.getState().mode).toBe("mx");
+      expect(editor.getState().minibufferView?.rows.length).toBeGreaterThan(0);
+    } finally {
+      fixture.dispose();
+    }
   });
 });

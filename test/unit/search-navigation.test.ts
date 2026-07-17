@@ -6,26 +6,31 @@
  * Support n/N for next/previous match and match highlighting.
  */
 
-import { describe, test, expect, beforeEach } from "bun:test";
+import { describe, test, expect, beforeEach, afterEach } from "bun:test";
 import { Editor } from "../../src/editor/editor.ts";
 import { MockTerminal } from "../mocks/terminal.ts";
 import { MockFileSystem } from "../mocks/filesystem.ts";
-import { moveCursor } from "../helpers/editor-fixture.ts";
+import { createEditorFixture, moveCursor, type EditorFixture } from "../helpers/editor-fixture.ts";
 
 describe("Search Navigation (US-1.5.1)", () => {
+  let fixture: EditorFixture;
   let editor: Editor;
   let terminal: MockTerminal;
   let filesystem: MockFileSystem;
 
   beforeEach(async () => {
-    terminal = new MockTerminal();
-    filesystem = new MockFileSystem();
-    editor = new Editor(terminal, filesystem);
-    await editor.start();
+    fixture = await createEditorFixture();
+    editor = fixture.editor;
+    terminal = fixture.terminal as MockTerminal;
+    filesystem = fixture.filesystem as MockFileSystem;
 
     // Create a buffer with test content
     editor.createBuffer("test.txt", "Hello world\nThis is a test\nSearch for pattern\npattern matches here\nend of file");
 
+  });
+
+  afterEach(() => {
+    fixture?.dispose();
   });
 
   describe("search-forward (/pattern)", () => {
