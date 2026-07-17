@@ -15,7 +15,6 @@
 import type { TLispInterpreter, TLispValue } from "../types.ts";
 import { createString, createNumber, createBoolean, createList, createNil, valueToString } from "../values.ts";
 import { readFileSync, readdirSync } from "node:fs";
-import { setCoverageEnabled, getCoveragePercentage, generateCoverageReport, resetCoverageState, isCoverageEnabled, setCoverageThreshold, getCoverageThreshold, setCoverageFormat, getCoverageFormat } from "../test-coverage.ts";
 import type { AppError } from "../../error/types.ts";
 import { Either } from "../../utils/task-either.ts";
 import {
@@ -32,6 +31,12 @@ import {
  * These are intentionally minimal and side-effect-free except for the store mutation itself.
  */
 export function registerTrtBridgeBuiltins(interpreter: TLispInterpreter): void {
+  // CHORE-44 Change 4 AC4.8: coverage builtins operate on the per-instance
+  // CoverageState owned by this interpreter's evaluator. The non-null
+  // assertion is safe because TLispInterpreterImpl (the sole production
+  // implementor) always exposes `coverage`; the interface marks it optional
+  // only because the test-interface mocks need not.
+  const coverage = interpreter.coverage!;
   // trt-record NAME PASSED ERROR-OR-NIL DURATION-MS [FILE]
   // Record one test outcome in the store. ERROR-OR-NIL is a string when failed, nil when passed.
   interpreter.defineBuiltin("trt-record", (args: TLispValue[]) => {
@@ -111,23 +116,26 @@ export function registerTrtBridgeBuiltins(interpreter: TLispInterpreter): void {
     }
   });
 
-  // coverage-* builtins: preserve the coverage API that wraps test-coverage.ts (the shrunk
-  // primitive that stays). These were formerly registered by the removed test-framework.ts.
+  // coverage-* builtins: the coverage API that wraps the per-instance
+  // CoverageState owned by the active evaluator (CHORE-44 Change 4 AC4.8).
+  // These were formerly registered by the removed test-framework.ts; they
+  // now go through `interpreter.coverage` so two interpreters don't share
+  // coverage state.
   interpreter.defineBuiltin("coverage-enable", (args: TLispValue[]) => {
-    setCoverageEnabled(args[0]!.type === "boolean" ? (args[0]!.value as boolean) : true);
+    coverage.setEnabled(args[0]!.type === "boolean" ? (args[0]!.value as boolean) : true);
     return Either.right(createBoolean(true));
   });
-  interpreter.defineBuiltin("coverage-enabled", () => Either.right(createBoolean(isCoverageEnabled())));
-  interpreter.defineBuiltin("coverage-percentage", () => Either.right(createNumber(getCoveragePercentage())));
-  interpreter.defineBuiltin("coverage-report", () => Either.right(createString(generateCoverageReport())));
-  interpreter.defineBuiltin("coverage-reset", () => { resetCoverageState(); return Either.right(createBoolean(true)); });
+  interpreter.defineBuiltin("coverage-enabled", () => Either.right(createBoolean(coverage.isEnabled())));
+  interpreter.defineBuiltin("coverage-percentage", () => Either.right(createNumber(coverage.getPercentage())));
+  interpreter.defineBuiltin("coverage-report", () => Either.right(createString(coverage.generateReport())));
+  interpreter.defineBuiltin("coverage-reset", () => { coverage.reset(); return Either.right(createBoolean(true)); });
   interpreter.defineBuiltin("coverage-threshold", (args: TLispValue[]) => {
-    if (args.length === 1) { setCoverageThreshold(Number(args[0]!.value)); return Either.right(createBoolean(true)); }
-    return Either.right(createNumber(getCoverageThreshold()));
+    if (args.length === 1) { coverage.setThreshold(Number(args[0]!.value)); return Either.right(createBoolean(true)); }
+    return Either.right(createNumber(coverage.getThreshold()));
   });
   interpreter.defineBuiltin("coverage-format", (args: TLispValue[]) => {
-    if (args.length === 1) { setCoverageFormat(args[0]!.value as "text" | "json"); return Either.right(createBoolean(true)); }
-    return Either.right(createString(getCoverageFormat()));
+    if (args.length === 1) { coverage.setFormat(args[0]!.value as "text" | "json"); return Either.right(createBoolean(true)); }
+    return Either.right(createString(coverage.getFormat()));
   });
 
   // trt-lookup NAME -> the bound value, or nil (for trt-bound-p).
@@ -165,23 +173,23 @@ export function registerTrtBridgeBuiltins(interpreter: TLispInterpreter): void {
 
   // trt-coverage-enable FLAG -> enable/disable function coverage tracking.
   interpreter.defineBuiltin("trt-coverage-enable", (args: TLispValue[]) => {
-    setCoverageEnabled(args[0]!.type === "boolean" ? (args[0]!.value as boolean) : true);
+    coverage.setEnabled(args[0]!.type === "boolean" ? (args[0]!.value as boolean) : true);
     return Either.right(createBoolean(true));
   });
 
   // trt-coverage-pct -> current coverage percentage (0-100).
   interpreter.defineBuiltin("trt-coverage-pct", () => {
-    return Either.right(createNumber(getCoveragePercentage()));
+    return Either.right(createNumber(coverage.getPercentage()));
   });
 
   // trt-coverage-format-report -> text coverage report string.
   interpreter.defineBuiltin("trt-coverage-format-report", () => {
-    return Either.right(createString(generateCoverageReport()));
+    return Either.right(createString(coverage.generateReport()));
   });
 
   // trt-coverage-reset -> clear coverage state.
   interpreter.defineBuiltin("trt-coverage-reset", () => {
-    resetCoverageState();
+    coverage.reset();
     return Either.right(createBoolean(true));
   });
 

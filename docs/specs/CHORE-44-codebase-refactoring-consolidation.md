@@ -63,7 +63,7 @@ Status meanings:
 | Change 1 | **COMPLETE** | All session state groups (kill ring, registers, delete/yank, yank-pop, visual, macros, search, dired, syntax, replace, undo/redo, major-mode) live on `EditorModel.session: EditorSessionState`; `EditorSession` is an accessor over model state; `major-mode-ops` module-globals deleted (real isolation bug fixed); isolation test covers every group two-editor. | — |
 | Change 2 | **COMPLETE** | All 18 mutable bridge properties removed from `EditorAPIContext`; `tlisp-api.ts` has 0 bridge-field assignments and 0 reads (AC2.7, independently verified); writes route through `applyUpdate(Msg)` + 4 side-effectful methods; fold latent disconnect fixed; `editor-api-context.test.ts` strengthened with static + behavioral AC2.6/AC2.7 cases. | — |
 | Change 3 | **COMPLETE** | `command-runtime.ts` extracted (queue/drain/correlation/classify); `binding-runtime.ts` owns full core/fallback/init policy; `editor.ts` holds only one-line facades + path resolution (AC3.7 verified); `main.tsx` bootstrap collapsed 3→1 `EditorState`; delegation tests cover CommandRuntime + BindingRuntime with fakes; AC3.5 notification-once preserved. | — |
-| Change 4 | **PARTIAL** | Sync/async parity and evaluator-instance tests exist; `if`/`let` validation is shared; async dispatch uses one recognition set for delegated forms; core test registries are instance fields. | Extract every required validator and the named module/test/function-call/special-form modules; move remaining evaluator-owned mutable coverage/debug state per instance; keep the evaluator as a thin facade/trampoline. |
+| Change 4 | **COMPLETE** | evaluator.ts 5021→4005 lines; form-shapes validators for all named forms (AC4.1); single `special-form-dispatch.ts` classification (AC4.2); `module-forms.ts`/`test-forms.ts`/`function-calls.ts` extracted, evaluator delegates (AC4.7); per-instance `CoverageState` (AC4.8); TCO/async/macros/modules/trt/trace verified intact (full evaluator gate 154/0). | — |
 | Change 5 | **PARTIAL** | `RpcMethodMap` and a dispatch table exist; the request-method switch and `params: any`/`Promise<any>` signatures are gone. | Give every method exact result types; add runtime version/params validation and error mapping in the router; split domain handlers; centralize sync wrappers; add both required tests. |
 | Change 6 | **PARTIAL** | `EditorDispatchPort` exists; `KeyMapping`/`resolveMapping` moved to `key-resolution.ts`; handlers no longer import `editor.ts`. | Move substitute/Dired parsing and Markdown/indent policy to T-Lisp, finish all policy routing, and run the complete Change 6 gate without output-truncating pipelines. |
 | Changes 7–12 | **NOT STARTED** | No numbered change has its principal implementation/test files. | Resume in order only after Changes 1–6 meet their completion gates. |
@@ -364,21 +364,19 @@ Completion gate: AC3.1–AC3.7, an exact public-method inventory comparison, and
 
 Reduce semantic drift between synchronous and asynchronous evaluation while retaining both public execution modes, tail-call optimization, macro expansion, diagnostics, modules, trt, and promise behavior.
 
-#### Current checkpoint status — PARTIAL (2026-07-17)
+#### Current checkpoint status — COMPLETE (2026-07-17)
 
-Completed:
+The evaluator facade shrank from 5021 → 4005 lines and now delegates module/test/function-call handling to extracted modules while keeping the TCO trampoline + async dispatch intact. TCO, async semantics, macros, modules, trt, traces, and coverage behavior are byte-for-byte preserved (constraint #4).
 
-- Added table-driven sync/async parity coverage and evaluator-instance isolation coverage.
-- Added pure shared validation for `if` and the `let` family in `form-shapes.ts`.
-- Reduced the async special-form switch to genuinely async forms and delegated other recognized forms through one `SPECIAL_FORMS` set.
-- Moved the evaluator's core test/suite/current-suite registries from module globals to instance fields; existing TCO/evaluator targeted tests were reported green before later changes.
+- **AC4.1** — `form-shapes.ts` extended with pure shared validators for `if`, `let`/`let*`/`async-let`, `quote`, `quasiquote`, `cond`, `progn`, `and`, `or`, `while`, `dolist`, `defun`/`lambda`, `provide`/`featurep`/`require`, `deftest`. Both sync and async paths call them; 16 new validation-error parity cases in `evaluator-sync-async-parity.test.ts` assert identical variant + message.
+- **AC4.2** — NEW `special-form-dispatch.ts` is the single classification table (`classifyForm`/`isSpecialForm`/`hasAsyncExecutor`). The local `SPECIAL_FORMS` set was removed from `evaluator.ts`; both `evalList`/`evalListAsync` consult the one table.
+- **AC4.3** — confirmed: `testRegistry`/`suiteRegistry`/`currentSuite`/`moduleRegistry`/`debugState` are already instance fields; no module-global mutable registry remains in `evaluator.ts`.
+- **AC4.7** — NEW `module-forms.ts` (provide/featurep/require/current-module/defmodule/require-module + loadModuleFromDisk), `test-forms.ts` (deftest/suite/fixture handlers — dormant in TS; the live framework is self-hosted `trt`), `function-calls.ts` (macro-expansion detection, coverage mark, trace enter/exit helpers). `evaluator.ts` no longer contains the `provide`/`require`/`deftest`/`testRegistry.set`/`suiteRegistry.set` handler bodies — it delegates. NEW `evaluator-module-boundaries.test.ts` proves this statically. The tail-call emission (`createTailCall`) + trampoline drive stay in `evaluator.ts` (moving them would risk AC4.4).
+- **AC4.8** — NEW `coverage-state.ts` `CoverageState` class; each `TLispEvaluator` owns `readonly coverage: CoverageState = new CoverageState()`. The former `test-coverage.ts` module globals are gone from the live path; `test-coverage.ts` is retained only as a dead compatibility shim (no production importer — a Change 10 cleanup candidate). `interpreter.ts`/`trt/bootstrap.ts` route coverage through `interpreter.coverage` (per-instance). `evaluator-instance-isolation.test.ts` strengthened to 8 cases (coverage enable/threshold/mark/reset, traces, debug stack, test/module registries).
 
-Remaining:
+Gate evidence (2026-07-17): full evaluator gate (evaluator, evaluator-either, evaluator-with-either, evaluator-sync-async-parity, evaluator-instance-isolation, evaluator-module-boundaries, tlisp-async, tlisp-make-promise, tail-call, tail-call-performance, macros, quasiquote-either, module-system, trt-bootstrap, tlisp-trace) → **154 pass / 0 fail**; `bun run typecheck` exit 0; `git diff --check` clean; `chore44-baseline-inventory` green. TCO verified (tail-call-performance 4/4); async preserved (tlisp-async + make-promise green).
 
-- Extract validators for every form named in `Implementation requirements`, not only `if` and `let`. Add parity cases for validation errors and source metadata for each form.
-- Create `special-form-dispatch.ts`, `module-forms.ts`, `test-forms.ts`, and `function-calls.ts`; the corresponding implementations still reside in the approximately 5,000-line evaluator facade.
-- Audit and move mutable coverage/debug/test-support state outside `TLispEvaluator` (for example `test-coverage.ts`) to evaluator-owned instances where the requirement calls for isolation.
-- Re-run the entire Change 4 gate after extraction; earlier targeted results do not validate the unfinished decomposition.
+Honest notes: (1) The TS `deftest`/`deffixture`/`suite-*` handlers are dormant (the live test framework is the T-Lisp `trt` package) but were still extracted per AC4.7 with dormancy documented. (2) The `test-coverage.ts` shim holds a dead module-level `defaultState`; it has no production importer and does not affect evaluator isolation (AC4.8 isolation test green), but strict removal is deferred to Change 10.
 
 #### Implementation requirements
 

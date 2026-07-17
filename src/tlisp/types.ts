@@ -211,6 +211,14 @@ export interface TLispInterpreter {
 
   /** Get suite definition by name */
   getSuiteDefinition?(name: string): { body: TLispValue[], name: string, params: TLispValue, setup?: TLispValue[], teardown?: TLispValue[], tests: string[] } | undefined;
+
+  /**
+   * The per-instance coverage state (CHORE-44 Change 4 AC4.8). Optional
+   * because not every interpreter implementation owns coverage state.
+   * Bridge builtins (trt `coverage-*` / `trt-coverage-*`) thread through
+   * this so two interpreters don't share coverage.
+   */
+  readonly coverage?: import("./coverage-state.ts").CoverageState;
 }
 
 /**

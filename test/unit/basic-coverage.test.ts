@@ -10,28 +10,34 @@
 import { describe, test, expect, beforeEach } from "bun:test";
 import { TLispInterpreterImpl } from "../../src/tlisp/interpreter.ts";
 import { loadTrtFramework } from "../../src/tlisp/trt/bootstrap.ts";
-import {
-  resetCoverageState,
-  setCoverageEnabled,
-  getCoverageReport,
-  setCoverageThreshold,
-  getCoveragePercentage,
-  setCoverageFormat,
-  getCoverageThreshold,
-  generateCoverageReport,
-  isCoverageEnabled
-} from "../../src/tlisp/test-coverage.ts";
 
+// CHORE-44 Change 4 AC4.8: coverage state is now per-instance on the
+// interpreter's evaluator (was module-global). These tests reach it via
+// `interpreter.coverage.*` so they exercise the actual per-instance model
+// the production runtime uses. The legacy module-level shim in
+// `test-coverage.ts` still exists for any external callers that haven't
+// been threaded through an interpreter.
 describe("Basic Coverage (US-0.6.6)", () => {
   let interpreter: TLispInterpreterImpl;
 
   beforeEach(async () => {
     interpreter = new TLispInterpreterImpl();
     await loadTrtFramework(interpreter);
-    resetCoverageState();
+    interpreter.coverage.reset();
     // Enable coverage by default for tests
-    setCoverageEnabled(true);
+    interpreter.coverage.setEnabled(true);
   });
+
+  // Per-instance coverage accessors (replace the former module functions).
+  const resetCoverageState = () => interpreter.coverage.reset();
+  const setCoverageEnabled = (v: boolean) => interpreter.coverage.setEnabled(v);
+  const isCoverageEnabled = () => interpreter.coverage.isEnabled();
+  const setCoverageThreshold = (v: number) => interpreter.coverage.setThreshold(v);
+  const getCoverageThreshold = () => interpreter.coverage.getThreshold();
+  const setCoverageFormat = (v: "text" | "json") => interpreter.coverage.setFormat(v);
+  const getCoverageReport = () => interpreter.coverage.getReport();
+  const getCoveragePercentage = () => interpreter.coverage.getPercentage();
+  const generateCoverageReport = () => interpreter.coverage.generateReport();
 
   describe("Coverage Infrastructure", () => {
     test("should enable and disable coverage tracking", () => {

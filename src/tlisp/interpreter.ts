@@ -10,8 +10,8 @@ import { TLispParser } from "./parser.ts";
 import { TLispEvaluator, createEvaluatorWithBuiltins } from "./evaluator.ts";
 import { createFunction, createNil } from "./values.ts";
 import { Either } from "../utils/task-either.ts";
-import { isCoverageEnabled, registerFunction } from "./test-coverage.ts";
 import { ModuleRegistry } from "./module-registry.ts";
+import type { CoverageState } from "./coverage-state.ts";
 import { diagnosticToJSON } from "./diagnostics.ts";
 import { renderDiagnostic } from "./diagnostic-renderer.ts";
 
@@ -202,24 +202,30 @@ export class TLispInterpreterImpl implements TLispInterpreter {
    * @param name - Function name
    * @param fn - Function implementation that returns Either
    */
+  /**
+   * The per-instance coverage state (CHORE-44 Change 4 AC4.8). Threaded
+   * through to the trt bridge builtins so coverage is owned per evaluator,
+   * not module-globally.
+   */
+  get coverage(): CoverageState {
+    return this.evaluator.coverage;
+  }
+
   defineBuiltin(name: string, fn: TLispFunctionImpl): void {
     const func = createFunction(fn, name);
     // Register into builtinsEnv so modules can see editor primitives
     this.builtinsEnv.define(name, func);
 
-    // Register builtin function for coverage tracking (US-0.6.6)
-    if (isCoverageEnabled()) {
-      registerFunction(name, undefined, undefined, true); // Mark as builtin
-    }
+    // Register builtin function for coverage tracking (US-0.6.6).
+    // CHORE-44 Change 4 AC4.8: per-instance CoverageState (was module-global).
+    this.coverage.registerFunction(name, undefined, undefined, true);
   }
 
   defineAsyncBuiltin(name: string, fn: TLispFunctionImpl, asyncFn: TLispFunctionImplAsync): void {
     const func = createFunction(fn, name, asyncFn);
     this.builtinsEnv.define(name, func);
 
-    if (isCoverageEnabled()) {
-      registerFunction(name, undefined, undefined, true);
-    }
+    this.coverage.registerFunction(name, undefined, undefined, true);
   }
 
   /**

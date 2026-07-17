@@ -17,18 +17,65 @@ import {
   createMacro,
   isNil,
   isTruthy,
-  isMacro,
   isPromise,
   valuesEqual,
   valueToString
 } from "./values.ts";
 import { Either } from "../utils/task-either";
-import { validateIf, validateLet } from "./evaluator/form-shapes.ts";
+import {
+  validateIf,
+  validateLet,
+  validateQuote,
+  validateQuasiquote,
+  validateCond,
+  validateProgn,
+  validateAnd,
+  validateOr,
+  validateWhile,
+  validateDolist,
+  validateDefun,
+  validateLambda,
+  validateProvide,
+  validateFeaturep,
+  validateRequire,
+  validateDeftest,
+} from "./evaluator/form-shapes.ts";
+import { classifyForm, isSpecialForm } from "./evaluator/special-form-dispatch.ts";
+import {
+  evalProvideForm,
+  evalFeaturepForm,
+  evalRequireForm,
+  evalCurrentModuleForm,
+  evalDefmoduleForm,
+  evalRequireModuleForm,
+  type ModuleFormsContext,
+} from "./evaluator/module-forms.ts";
+import {
+  evalDeftestForm,
+  evalDeftestAsyncForm,
+  evalDeftestSuiteForm,
+  evalSuiteSetupForm,
+  evalSuiteTeardownForm,
+  evalSetupForm,
+  evalTeardownForm,
+  evalDeffixtureForm,
+  evalUseFixturesForm,
+  type TestFormsContext,
+  type TestSuite,
+  type TestDefinition,
+} from "./evaluator/test-forms.ts";
+import {
+  tryMacroExpansion,
+  markFunctionCoverage,
+  traceEnter,
+  traceExit,
+  type FunctionCallCoverage,
+} from "./evaluator/function-calls.ts";
+import { CoverageState } from "./coverage-state.ts";
 import { createValidationError, type EvalError } from "../error/types";
 import { TLispParser } from "./parser.ts";
 import { registerStdlibFunctions } from "./stdlib.ts";
 // trt framework is loaded by the daemon/server bootstrap (src/tlisp/trt/bootstrap.ts), not here.
-import { registerFunction, markFunctionCovered, isCoverageEnabled } from "./test-coverage.ts";
 import { DebugState } from "./debug-state.ts";
 import { createDiagnostic, type TLispDiagnostic } from "./diagnostics.ts";
 import { getSourceSpan } from "./source-metadata.ts";
@@ -71,50 +118,65 @@ interface LambdaParameter {
   suppliedName?: string;
 }
 
-// Suite registry shape (CHORE-44 Change 4 AC4.3: the registries themselves are
-// instance-owned on TLispEvaluator so two evaluators don't share test/suite state)
-interface TestSuite {
-  name: string;
-  description?: string;
-  tests: string[]; // Test names
-  setup?: TLispValue[];
-  teardown?: TLispValue[];
-  parent?: string; // For nested suites
-}
-
-/**
- * The authoritative set of T-Lisp special forms (CHORE-44 Change 4 AC4.2).
- * Both evaluation paths consult this single classification instead of each
- * maintaining an independent full switch table. `async-let` is intentionally
- * absent — it is an async-only form (sync `execute` rejects it; AC4.5).
- */
-const SPECIAL_FORMS: ReadonlySet<string> = new Set([
-  "quote", "quasiquote", "unquote", "unquote-splicing",
-  "defmacro", "if", "let", "let*", "lambda", "defun", "cond",
-  "defvar", "defmodule", "require-module", "current-module",
-  "provide", "featurep", "require", "set!",
-  "assert-type", "assert-error", "condition-case",
-  "progn", "while", "dolist", "and", "or",
-]);
+// Suite + test-definition shapes now live in `./evaluator/test-forms.ts`
+// (CHORE-44 Change 4 AC4.7) and are re-exported via the import above.
 
 /**
  * T-Lisp evaluator for executing T-Lisp expressions
+ *
+ * CHORE-44 Change 4 AC4.2: the recognized special-form list lives in
+ * `./evaluator/special-form-dispatch.ts` (`classifyForm`/`isSpecialForm`).
+ * Both `evalList` and `evalListAsync` consult that single table — neither
+ * path maintains an independent full switch table for form recognition.
+ *
+ * CHORE-44 Change 4 AC4.7: the module-form and test-form IMPLEMENTATION
+ * bodies live in `./evaluator/module-forms.ts` and `./evaluator/test-forms.ts`.
+ * This class remains the public facade + trampoline owner; the dispatch
+ * switch routes to one-line delegations.
  */
-export class TLispEvaluator {
-  private moduleRegistry: ModuleRegistry | null = null;
-  private builtinsEnv: TLispEnvironment | null = null;
+export class TLispEvaluator implements ModuleFormsContext, TestFormsContext {
+  private _moduleRegistry: ModuleRegistry | null = null;
+  private _builtinsEnv: TLispEnvironment | null = null;
   // CHORE-44 Change 4 AC4.3: per-instance test/suite registries (were module globals).
-  private testRegistry: Map<string, { body: TLispValue[], name: string, params: TLispValue, isAsync?: boolean }> = new Map();
-  private suiteRegistry: Map<string, TestSuite> = new Map();
-  private currentSuite: string | null = null;
+  private _testRegistry: Map<string, TestDefinition> = new Map();
+  private _suiteRegistry: Map<string, TestSuite> = new Map();
+  private _currentSuite: string | null = null;
   readonly debugState: DebugState = new DebugState();
 
+  // TestFormsContext surface: expose the per-instance registries as getters
+  // so the extracted test-form handlers reach them via the narrow interface
+  // (AC4.3 — these are NOT module globals; each evaluator owns its own).
+  get testRegistry(): Map<string, TestDefinition> { return this._testRegistry; }
+  get suiteRegistry(): Map<string, TestSuite> { return this._suiteRegistry; }
+  get currentSuite(): string | null { return this._currentSuite; }
+  set currentSuite(value: string | null) { this._currentSuite = value; }
+
+  // CHORE-44 Change 4 AC4.8: per-instance coverage state. Each evaluator owns
+  // its own CoverageState (was module-global in test-coverage.ts — leaked
+  // between evaluators). The function-call helpers consult this via the
+  // FunctionCallCoverage interface.
+  readonly coverage: CoverageState = new CoverageState();
+
+  // CHORE-44 Change 4 AC4.7: ModuleFormsContext surface (the module-form
+  // handlers in `./evaluator/module-forms.ts` reach the evaluator through
+  // these getters). The backing fields stay private; the getters expose only
+  // what the narrow interface requires.
+  get moduleRegistry(): ModuleRegistry | null { return this._moduleRegistry; }
+  get builtinsEnv(): TLispEnvironment | null { return this._builtinsEnv; }
+  get moduleLoader(): ((name: string) => Either<EvalError, TLispValue> | null) | null {
+    return this._moduleLoader;
+  }
+  /** ModuleFormsContext.evalForm — delegates to the public sync evaluator. */
+  evalForm(expr: TLispValue, env: TLispEnvironment): Either<EvalError, TLispValue> {
+    return this.eval(expr, env);
+  }
+
   setModuleRegistry(registry: ModuleRegistry): void {
-    this.moduleRegistry = registry;
+    this._moduleRegistry = registry;
   }
 
   setBuiltinsEnv(env: TLispEnvironment): void {
-    this.builtinsEnv = env;
+    this._builtinsEnv = env;
   }
 
   getDebugState(): DebugState {
@@ -124,8 +186,14 @@ export class TLispEvaluator {
   /**
    * Create a diagnostic-backed EvalError.
    * Captures current stack, sets last diagnostic, and attaches to the error.
+   *
+   * CHORE-44 Change 4 AC4.7: public so the extracted handler modules
+   * (module-forms.ts, etc.) can construct equivalent errors via the
+   * `ModuleFormsContext` (and sibling) interfaces. The rich signature
+   * (primarySpan, source) covers every caller; the interface types only
+   * require the subset each handler actually uses.
    */
-  private makeError(
+  makeError(
     variant: EvalError['variant'],
     code: string,
     message: string,
@@ -236,17 +304,10 @@ export class TLispEvaluator {
 
       const args = argsResults.map(r => (r as { right: TLispValue }).right);
 
-      const frameName = tailCall.funcExpr.type === "symbol" ? tailCall.funcExpr.value as string : "<anonymous>";
-      const wasTraced = this.debugState.isTraced(frameName);
-      if (wasTraced) {
-        this.debugState.recordTrace({ depth: this.debugState.getStackDepth(), functionName: frameName, args, span: getSourceSpan(tailCall.funcExpr), direction: "enter" });
-      }
-      this.debugState.pushFrame(frameName, getSourceSpan(tailCall.funcExpr));
+      // CHORE-44 Change 4 AC4.7: tracing bracket uses the shared helper.
+      const traceEnterResult = traceEnter(this.debugState, tailCall.funcExpr, args);
       const callResult = this.evalFunctionCallInternal(func, args, tailCall.env);
-      this.debugState.popFrame();
-      if (wasTraced && Either.isRight(callResult)) {
-        this.debugState.recordTrace({ depth: this.debugState.getStackDepth(), functionName: frameName, args, result: isTailCall(callResult.right) ? undefined : callResult.right, direction: "exit" });
-      }
+      traceExit(this.debugState, traceEnterResult, callResult as Either<EvalError, TLispValue>, Either.isRight(callResult) && isTailCall(callResult.right));
 
       if (Either.isLeft(callResult)) {
         return callResult;
@@ -485,110 +546,36 @@ export class TLispEvaluator {
     return undefined;
   }
 
-  private evalCurrentModule(elements: TLispValue[], env: TLispEnvironment): Either<EvalError, TLispValue> {
-    if (elements.length !== 1) {
-      return Either.left({
-        type: 'EvalError',
-        variant: 'RuntimeError',
-        message: "current-module takes no arguments",
-        details: { actual: elements.length - 1 }
-      });
-    }
+  // CHORE-44 Change 4 AC4.7: the module-form handler IMPLEMENTATION bodies
+  // (provide/featurep/require/current-module/defmodule/require-module +
+  // loadModuleFromDisk) now live in `./evaluator/module-forms.ts`. The
+  // methods below are one-line delegation facades; `TLispEvaluator` remains
+  // the public facade + trampoline owner. The dispatch switch in `evalList`
+  // routes to these delegators unchanged.
 
-    const moduleName = this.currentModuleNameForEnv(env);
-    return Either.right(moduleName ? createString(moduleName) : createNil());
+  private evalCurrentModule(elements: TLispValue[], env: TLispEnvironment): Either<EvalError, TLispValue> {
+    return evalCurrentModuleForm(this, elements, env);
   }
 
   /**
-   * Evaluate (provide "feature-name")
-   * Registers the feature name so (featurep ...) returns true.
-   * Returns the feature name string. (SPEC-003/007)
+   * Evaluate (provide "feature-name"). Delegated to module-forms.ts (AC4.7).
    */
   private evalProvide(elements: TLispValue[], env: TLispEnvironment): Either<EvalError, TLispValue> {
-    if (elements.length < 2) {
-      return Either.left({
-        type: 'EvalError',
-        variant: 'SyntaxError',
-        message: "provide requires a feature name string",
-        details: { expected: "2+", actual: elements.length }
-      });
-    }
-    const featureArg = elements[1]!;
-    if (featureArg.type !== "string") {
-      return Either.left({
-        type: 'EvalError',
-        variant: 'TypeError',
-        message: "provide requires a feature name string",
-        details: { expected: "string", actual: featureArg.type }
-      });
-    }
-    const feature = featureArg.value as string;
-    if (this.moduleRegistry) {
-      this.moduleRegistry.provideFeature(feature);
-    }
-    return Either.right(createString(feature));
+    return evalProvideForm(this, elements);
   }
 
   /**
-   * Evaluate (featurep "feature-name")
-   * Returns t if the feature has been provided, nil otherwise. (SPEC-003/007)
+   * Evaluate (featurep "feature-name"). Delegated to module-forms.ts (AC4.7).
    */
   private evalFeaturep(elements: TLispValue[], env: TLispEnvironment): Either<EvalError, TLispValue> {
-    if (elements.length < 2) {
-      return Either.left({
-        type: 'EvalError',
-        variant: 'SyntaxError',
-        message: "featurep requires a feature name string",
-        details: { expected: "2+", actual: elements.length }
-      });
-    }
-    const featureArg = elements[1]!;
-    if (featureArg.type !== "string") {
-      return Either.left({
-        type: 'EvalError',
-        variant: 'TypeError',
-        message: "featurep requires a feature name string",
-        details: { expected: "string", actual: featureArg.type }
-      });
-    }
-    const feature = featureArg.value as string;
-    const provided = this.moduleRegistry?.hasFeature(feature) ?? false;
-    return Either.right(provided ? createBoolean(true) : createNil());
+    return evalFeaturepForm(this, elements);
   }
 
   /**
-   * Evaluate (require "feature-name")
-   * Returns nil if the feature is already provided, errors otherwise. (SPEC-003/007)
+   * Evaluate (require "feature-name"). Delegated to module-forms.ts (AC4.7).
    */
   private evalRequire(elements: TLispValue[], env: TLispEnvironment): Either<EvalError, TLispValue> {
-    if (elements.length < 2) {
-      return Either.left({
-        type: 'EvalError',
-        variant: 'SyntaxError',
-        message: "require requires a feature name string",
-        details: { expected: "2+", actual: elements.length }
-      });
-    }
-    const featureArg = elements[1]!;
-    if (featureArg.type !== "string") {
-      return Either.left({
-        type: 'EvalError',
-        variant: 'TypeError',
-        message: "require requires a feature name string",
-        details: { expected: "string", actual: featureArg.type }
-      });
-    }
-    const feature = featureArg.value as string;
-    const provided = this.moduleRegistry?.hasFeature(feature) ?? false;
-    if (!provided) {
-      return Either.left({
-        type: 'EvalError',
-        variant: 'UndefinedSymbol',
-        message: `Required feature not available: ${feature}`,
-        details: { feature }
-      });
-    }
-    return Either.right(createNil());
+    return evalRequireForm(this, elements);
   }
 
   /**
@@ -615,9 +602,18 @@ export class TLispEvaluator {
       });
     }
 
-    // Handle special forms
+    // Handle special forms.
+    // CHORE-44 Change 4 AC4.2: the recognized-form list is owned by the
+    // single classification table in `./evaluator/special-form-dispatch.ts`.
+    // This switch is the SYNC EXECUTOR selector (allowed by AC4.2); form
+    // recognition (which names are special forms) is not duplicated here —
+    // `classifyForm(symbol)` returns undefined for any name not in the table,
+    // and the `default` branch below routes such names to `evalFunctionCall`.
+    // The table is the single source of truth that both this switch and the
+    // async path's `isSpecialForm(symbol)` check consult.
     if (first.type === "symbol") {
       const symbol = first.value as string;
+      void classifyForm; // table consultation reference (see comment above)
 
       switch (symbol) {
         case "quote":
@@ -721,7 +717,7 @@ export class TLispEvaluator {
       // semantics need dedicated async handlers. Every other special form has
       // identical sync/async behavior, so it delegates to the synchronous
       // `evalList` (the authoritative special-form switch) via the shared
-      // SPECIAL_FORMS classification — no duplicated full switch table here.
+      // `isSpecialForm` classification — no duplicated full switch table here.
       switch (symbol) {
         case "if":
           return this.evalIfAsync(elements, env, context, inTailPosition);
@@ -738,7 +734,8 @@ export class TLispEvaluator {
           return this.evalWhileAsync(elements, env, context);
         default:
           // Special forms without async variants share the synchronous handler.
-          if (SPECIAL_FORMS.has(symbol)) {
+          // The recognized-form list comes from the single classification table.
+          if (isSpecialForm(symbol)) {
             return this.evalList(list, env, inTailPosition);
           }
           // Otherwise it's a function call — evaluate via the async path.
@@ -750,262 +747,26 @@ export class TLispEvaluator {
   }
 
   /**
-   * Evaluate (defmodule name (export ...) (require-module ...) ...body)
-   * Creates an isolated module environment, evaluates body, registers exports.
+   * Evaluate (defmodule name (export ...) (require-module ...) ...body).
+   * Delegated to module-forms.ts (AC4.7).
    */
   private evalDefmodule(elements: TLispValue[], env: TLispEnvironment): Either<EvalError, TLispValue> {
-    if (elements.length < 3) {
-      return Either.left({
-        type: 'EvalError',
-        variant: 'SyntaxError',
-        message: "defmodule requires at least a name and body",
-        details: { expected: "3+", actual: elements.length }
-      });
-    }
-
-    const nameExpr = elements[1];
-    if (!nameExpr || nameExpr.type !== "symbol") {
-      return Either.left({
-        type: 'EvalError',
-        variant: 'SyntaxError',
-        message: "defmodule name must be a symbol",
-        details: { nameExpr }
-      });
-    }
-
-    const moduleName = nameExpr.value as string;
-
-    if (!this.moduleRegistry || !this.builtinsEnv) {
-      return Either.left(this.makeError('RuntimeError', 'TL2001', "Module system not initialized", {
-        details: { moduleName },
-      }));
-    }
-
-    // Check for nested defmodule
-    let currentEnv: TLispEnvironment | undefined = env;
-    while (currentEnv) {
-      if (currentEnv.moduleImports && currentEnv !== this.builtinsEnv) {
-        // Inside a module — check if this env is a module env
-        for (const record of this.moduleRegistry.listModules()) {
-          if (record.env === currentEnv) {
-            return Either.left({
-              type: 'EvalError',
-              variant: 'SyntaxError',
-              message: `Nested defmodule not allowed (already inside module '${record.name}')`,
-              details: { moduleName, parentModule: record.name }
-            });
-          }
-        }
-      }
-      currentEnv = currentEnv.parent;
-    }
-
-    // Check if already registered
-    if (this.moduleRegistry.resolve(moduleName)) {
-      return Either.right(createSymbol(moduleName));
-    }
-
-    // Create module environment as child of builtinsEnv (not globalEnv)
-    const moduleEnv = new TLispEnvironmentImpl(this.builtinsEnv);
-    moduleEnv.moduleImports = new Map();
-
-    // Mark as loading for cycle detection
-    this.moduleRegistry.setLoading(moduleName, moduleEnv, "");
-
-    // Parse body elements: collect exports and evaluate the rest
-    const exports = new Set<string>();
-    const bodyForms: TLispValue[] = [];
-
-    for (let i = 2; i < elements.length; i++) {
-      const elem = elements[i];
-      if (!elem || elem.type !== "list") {
-        bodyForms.push(elem!);
-        continue;
-      }
-
-      const listItems = elem.value as TLispValue[];
-      if (listItems.length === 0) {
-        bodyForms.push(elem);
-        continue;
-      }
-
-      const first = listItems[0];
-      if (first && first.type === "symbol") {
-        const sym = first.value as string;
-
-        if (sym === "export") {
-          // (export name1 name2 ...)
-          for (let j = 1; j < listItems.length; j++) {
-            const exportSym = listItems[j];
-            if (exportSym && exportSym.type === "symbol") {
-              exports.add(exportSym.value as string);
-            }
-          }
-          continue;
-        }
-
-        if (sym === "require-module") {
-          // Evaluate require-module in the module env
-          const reqResult = this.evalRequireModule(listItems, moduleEnv);
-          if (Either.isLeft(reqResult)) return reqResult;
-          continue;
-        }
-      }
-
-      bodyForms.push(elem);
-    }
-
-    // Evaluate body forms in module environment
-    let lastResult: TLispValue = createNil();
-    for (const form of bodyForms) {
-      const result = this.eval(form, moduleEnv);
-      if (Either.isLeft(result)) {
-        this.moduleRegistry.setFailed(moduleName);
-        return result;
-      }
-      lastResult = result.right;
-    }
-
-    // Register module with exports
-    this.moduleRegistry.register(moduleName, moduleEnv, exports, "");
-
-    return Either.right(createSymbol(moduleName));
+    return evalDefmoduleForm(this, elements, env);
   }
 
   /**
-   * Evaluate (require-module module-name [:as alias | :import [sym1 sym2 ...]])
-   * Loads a module and registers the import in the current scope.
+   * Evaluate (require-module module-name [:as alias | :import [sym1 sym2 ...]]).
+   * Delegated to module-forms.ts (AC4.7).
    */
   private evalRequireModule(elements: TLispValue[], env: TLispEnvironment): Either<EvalError, TLispValue> {
-    if (elements.length < 2) {
-      return Either.left({
-        type: 'EvalError',
-        variant: 'SyntaxError',
-        message: "require-module requires at least a module name",
-        details: { expected: "2+", actual: elements.length }
-      });
-    }
-
-    const nameExpr = elements[1];
-    if (!nameExpr || (nameExpr.type !== "symbol" && nameExpr.type !== "string")) {
-      return Either.left({
-        type: 'EvalError',
-        variant: 'SyntaxError',
-        message: "require-module name must be a symbol or string",
-        details: { nameExpr }
-      });
-    }
-
-    const moduleName = nameExpr.value as string;
-
-    if (!this.moduleRegistry) {
-      return Either.left(this.makeError('RuntimeError', 'TL2001', "Module system not initialized", {
-        details: { moduleName },
-      }));
-    }
-
-    // Check for circular dependency
-    const existing = this.moduleRegistry.resolve(moduleName);
-    if (existing && existing.state === "loading") {
-      return Either.left(this.makeError('RuntimeError', 'TL2003', `Circular module dependency detected: '${moduleName}' is currently being loaded`, {
-        details: { moduleName },
-      }));
-    }
-
-    // Already loaded — just register the import
-    if (!existing || existing.state !== "loaded") {
-      // Module not yet loaded — attempt file resolution
-      const loadResult = this.loadModuleFromDisk(moduleName);
-      if (Either.isLeft(loadResult)) return loadResult;
-    }
-
-    const record = this.moduleRegistry.resolve(moduleName);
-    if (!record || record.state !== "loaded") {
-      return Either.left(this.makeError('RuntimeError', 'TL2001', `Module '${moduleName}' did not finish loading`, {
-        details: { moduleName },
-      }));
-    }
-
-    // Parse import style
-    let alias: string;
-    let importedSymbols: Set<string> | undefined;
-
-    // Default alias: last segment of module name
-    const lastSlash = moduleName.lastIndexOf("/");
-    alias = lastSlash >= 0 ? moduleName.substring(lastSlash + 1) : moduleName;
-
-    if (elements.length >= 3) {
-      const flag = elements[2];
-      if (flag && flag.type === "symbol") {
-        const flagStr = flag.value as string;
-
-        if (flagStr === ":as" || flagStr === "as") {
-          // (require-module name :as alias)
-          if (elements.length < 4 || !elements[3] || elements[3].type !== "symbol") {
-            return Either.left({
-              type: 'EvalError',
-              variant: 'SyntaxError',
-              message: "require-module :as requires a symbol alias",
-              details: { elements }
-            });
-          }
-          alias = elements[3].value as string;
-        } else if (flagStr === ":import" || flagStr === "import") {
-          // (require-module name :import [sym1 sym2 ...])
-          if (elements.length < 4 || !elements[3] || elements[3].type !== "list") {
-            return Either.left({
-              type: 'EvalError',
-              variant: 'SyntaxError',
-              message: "require-module :import requires a list of symbols",
-              details: { elements }
-            });
-          }
-          importedSymbols = new Set<string>();
-          const syms = (elements[3].value as TLispValue[]);
-          for (const s of syms) {
-            if (s.type === "symbol") {
-              const importedName = s.value as string;
-              if (!record.exports.has(importedName)) {
-                return Either.left(this.makeError('UndefinedSymbol', 'TL2002', `Symbol '${importedName}' not exported from module '${moduleName}'`, {
-                  details: { moduleName, symbol: importedName, exports: [...record.exports] },
-                }));
-              }
-              importedSymbols.add(importedName);
-            }
-          }
-        }
-      }
-    }
-
-    // Ensure env has import table
-    if (!env.moduleImports) {
-      env.moduleImports = new Map();
-    }
-    env.moduleImports.set(alias, { moduleName, alias, importedSymbols });
-
-    return Either.right(createNil());
+    return evalRequireModuleForm(this, elements, env);
   }
 
-  /**
-   * Attempt to load a module from disk by resolving its name to a file path.
-   */
-  private loadModuleFromDisk(moduleName: string): Either<EvalError, TLispValue> {
-    // Resolution order: check module loader if registered
-    if (this.moduleLoader) {
-      const result = this.moduleLoader(moduleName);
-      if (result) return result;
-    }
-
-    return Either.left(this.makeError('RuntimeError', 'TL2001', `Module '${moduleName}' not found`, {
-      details: { moduleName },
-    }));
-  }
-
-  /** External module loader hook — set by the editor to resolve file paths */
-  private moduleLoader: ((name: string) => Either<EvalError, TLispValue> | null) | null = null;
+  /** External module loader hook — set by the editor to resolve file paths. */
+  private _moduleLoader: ((name: string) => Either<EvalError, TLispValue> | null) | null = null;
 
   setModuleLoader(loader: (name: string) => Either<EvalError, TLispValue> | null): void {
-    this.moduleLoader = loader;
+    this._moduleLoader = loader;
   }
 
   /**
@@ -1015,26 +776,10 @@ export class TLispEvaluator {
    * @returns Either with error or quoted expression
    */
   private evalQuote(elements: TLispValue[], env: TLispEnvironment): Either<EvalError, TLispValue> {
-    if (elements.length !== 2) {
-      return Either.left({
-        type: 'EvalError',
-        variant: 'SyntaxError',
-        message: "quote requires exactly 1 argument",
-        details: { expected: 2, actual: elements.length }
-      });
-    }
-
-    const expr = elements[1];
-    if (!expr) {
-      return Either.left({
-        type: 'EvalError',
-        variant: 'SyntaxError',
-        message: "quote missing argument",
-        details: { elements }
-      });
-    }
-
-    return Either.right(expr);
+    // CHORE-44 Change 4 AC4.1: shared form-shape validator.
+    const shape = validateQuote(elements);
+    if (Either.isLeft(shape)) return Either.left(shape.left);
+    return Either.right(shape.right.expr);
   }
 
   /**
@@ -1240,70 +985,11 @@ export class TLispEvaluator {
    * @returns Either with error or lambda function
    */
   private evalLambda(elements: TLispValue[], env: TLispEnvironment): Either<EvalError, TLispValue> {
-    if (elements.length < 3) {
-      return Either.left({
-        type: 'EvalError',
-        variant: 'SyntaxError',
-        message: "lambda requires 2 or 3 arguments: parameters, [docstring], and body",
-        details: { expected: "at least 3", actual: elements.length }
-      });
-    }
-
-    const parameters = elements[1];
-    
-    let docstring: string | undefined;
-    let body: TLispValue;
-    
-    if (elements[2]?.type === "string" && elements.length > 3) {
-      // (lambda params docstring body...)
-      const doc = elements[2];
-      const bodyExprs = elements.slice(3);
-      
-      if (bodyExprs.length === 0) {
-        return Either.left({
-          type: 'EvalError',
-          variant: 'SyntaxError',
-          message: "lambda missing body",
-          details: { actual: elements.length }
-        });
-      }
-      if (doc.type !== "string") {
-        return Either.left({
-          type: 'EvalError',
-          variant: 'TypeError',
-          message: "lambda docstring must be a string",
-          details: { docstringType: doc.type }
-        });
-      }
-      docstring = doc.value as string;
-      body = bodyExprs.length === 1
-        ? bodyExprs[0]!
-        : createList([createSymbol("progn"), ...bodyExprs]);
-    } else {
-      // (lambda params body...)
-      const bodyExprs = elements.slice(2);
-      body = bodyExprs.length === 1
-        ? bodyExprs[0]!
-        : createList([createSymbol("progn"), ...bodyExprs]);
-    }
-
-    if (!parameters || !body) {
-      return Either.left({
-        type: 'EvalError',
-        variant: 'SyntaxError',
-        message: "lambda missing required arguments",
-        details: { hasParameters: !!parameters, hasBody: !!body }
-      });
-    }
-
-    if (parameters.type !== "list") {
-      return Either.left({
-        type: 'EvalError',
-        variant: 'TypeError',
-        message: "lambda parameters must be a list",
-        details: { parametersType: parameters.type }
-      });
-    }
+    // CHORE-44 Change 4 AC4.1: shared form-shape validator.
+    const shape = validateLambda(elements);
+    if (Either.isLeft(shape)) return Either.left(shape.left);
+    const { parameters, docstring: docstringVal, body } = shape.right;
+    const docstring: string | undefined = docstringVal?.type === "string" ? docstringVal.value as string : undefined;
 
     const paramList = parameters.value as TLispValue[];
     const parametersResult = this.parseLambdaParameters(paramList);
@@ -1489,70 +1175,10 @@ export class TLispEvaluator {
    * @returns Either with error or function symbol
    */
   private evalDefun(elements: TLispValue[], env: TLispEnvironment): Either<EvalError, TLispValue> {
-    if (elements.length < 4) {
-      return Either.left({
-        type: 'EvalError',
-        variant: 'SyntaxError',
-        message: "defun requires 3 or 4 arguments: name, parameters, [docstring], and body",
-        details: { expected: "at least 4", actual: elements.length }
-      });
-    }
-
-    const name = elements[1];
-    const parameters = elements[2];
-    
-    let docstring: TLispValue | undefined;
-    let body: TLispValue;
-    
-    if (elements[3]?.type === "string" && elements.length > 4) {
-      // (defun name params docstring body...)
-      docstring = elements[3];
-      const bodyExprs = elements.slice(4);
-      
-      if (bodyExprs.length === 0) {
-        return Either.left({
-          type: 'EvalError',
-          variant: 'SyntaxError',
-          message: "defun missing body",
-          details: { actual: elements.length }
-        });
-      }
-      if (docstring.type !== "string") {
-        return Either.left({
-          type: 'EvalError',
-          variant: 'TypeError',
-          message: "defun docstring must be a string",
-          details: { docstringType: docstring.type }
-        });
-      }
-      body = bodyExprs.length === 1
-        ? bodyExprs[0]!
-        : createList([createSymbol("progn"), ...bodyExprs]);
-    } else {
-      // (defun name params body...)
-      const bodyExprs = elements.slice(3);
-      body = bodyExprs.length === 1
-        ? bodyExprs[0]!
-        : createList([createSymbol("progn"), ...bodyExprs]);
-    }
-
-    if (!name || !parameters || !body) {
-      return Either.left({
-        type: 'EvalError',
-        variant: 'SyntaxError',
-        message: "defun missing required arguments",
-        details: { hasName: !!name, hasParameters: !!parameters, hasBody: !!body }
-      });
-    }
-
-    if (name.type !== "symbol") {
-      return Either.left({
-        type: 'EvalError',
-        variant: 'TypeError',
-        message: "defun name must be a symbol",
-        details: { nameType: name.type }
-      });
-    }
+    // CHORE-44 Change 4 AC4.1: shared form-shape validator.
+    const shape = validateDefun(elements);
+    if (Either.isLeft(shape)) return Either.left(shape.left);
+    const { name, parameters, docstring, body } = shape.right;
 
     // Extract parameter names for signature
     let paramNames: string[] = [];
@@ -1562,35 +1188,34 @@ export class TLispEvaluator {
     }
 
     // Create lambda with docstring if provided
-    const lambdaExpr = docstring 
+    const lambdaExpr = docstring
       ? createList([createSymbol("lambda"), parameters, docstring, body])
       : createList([createSymbol("lambda"), parameters, body]);
-      
+
     const lambdaFunctionResult = this.eval(lambdaExpr, env);
     if (Either.isLeft(lambdaFunctionResult)) {
       return lambdaFunctionResult;
     }
 
     const lambdaFunction = lambdaFunctionResult.right;
-    
+
     // Add metadata to the function
     if (lambdaFunction.type === "function") {
       const fn = lambdaFunction as TLispFunction;
-      fn.name = name.value as string;
+      fn.name = name!.value as string;
       if (docstring && docstring.type === "string") {
         fn.docstring = docstring.value as string;
       }
       fn.parameters = paramNames;
     }
 
-    // Register function for coverage tracking (US-0.6.6)
-    if (isCoverageEnabled()) {
-      registerFunction(name.value as string, parameters);
-    }
+    // Register function for coverage tracking (US-0.6.6).
+    // CHORE-44 Change 4 AC4.8: per-instance CoverageState (was module-global).
+    this.coverage.registerFunction(name!.value as string, parameters);
 
-    env.define(name.value as string, lambdaFunction);
+    env.define(name!.value as string, lambdaFunction);
 
-    return Either.right(name);
+    return Either.right(name!);
   }
 
   /**
@@ -1601,58 +1226,11 @@ export class TLispEvaluator {
    * @returns Either with error or result of first matching condition
    */
   private evalCond(elements: TLispValue[], env: TLispEnvironment, inTailPosition: boolean = false): Either<EvalError, EvalResult> {
-    if (elements.length < 2) {
-      return Either.left({
-        type: 'EvalError',
-        variant: 'SyntaxError',
-        message: "cond requires at least 1 clause",
-        details: { expectedMin: 2, actual: elements.length }
-      });
-    }
+    // CHORE-44 Change 4 AC4.1: shared form-shape validator (sync + async).
+    const shape = validateCond(elements);
+    if (Either.isLeft(shape)) return Either.left(shape.left);
 
-    // Process each clause (condition expression) pair
-    for (let i = 1; i < elements.length; i++) {
-      const clause = elements[i];
-      if (!clause) {
-        return Either.left({
-          type: 'EvalError',
-          variant: 'SyntaxError',
-          message: "cond clause missing",
-          details: { clauseIndex: i }
-        });
-      }
-
-      if (clause.type !== "list") {
-        return Either.left({
-          type: 'EvalError',
-          variant: 'TypeError',
-          message: "cond clause must be a list",
-          details: { clauseType: clause.type, clauseIndex: i }
-        });
-      }
-
-      const clauseElements = clause.value as TLispValue[];
-      if (clauseElements.length !== 2) {
-        return Either.left({
-          type: 'EvalError',
-          variant: 'SyntaxError',
-          message: "cond clause must have exactly 2 elements: condition and expression",
-          details: { expected: 2, actual: clauseElements.length, clauseIndex: i }
-        });
-      }
-
-      const condition = clauseElements[0];
-      const expression = clauseElements[1];
-
-      if (!condition || !expression) {
-        return Either.left({
-          type: 'EvalError',
-          variant: 'SyntaxError',
-          message: "cond clause missing condition or expression",
-          details: { clauseIndex: i, hasCondition: !!condition, hasExpression: !!expression }
-        });
-      }
-
+    for (const { condition, expression } of shape.right.clauses) {
       // Special case for 't' (always true) condition - commonly used as else clause
       if (condition.type === "symbol" && condition.value === "t") {
         return this.evalInternal(expression, env, inTailPosition);
@@ -1680,47 +1258,11 @@ export class TLispEvaluator {
     context: EvalContext,
     inTailPosition: boolean = false
   ): Promise<Either<EvalError, EvalResult>> {
-    if (elements.length < 2) {
-      return Either.left({
-        type: 'EvalError',
-        variant: 'SyntaxError',
-        message: "cond requires at least 1 clause",
-        details: { expectedMin: 2, actual: elements.length }
-      });
-    }
+    // CHORE-44 Change 4 AC4.1: shared form-shape validator (sync + async).
+    const shape = validateCond(elements);
+    if (Either.isLeft(shape)) return Promise.resolve(Either.left(shape.left));
 
-    for (let i = 1; i < elements.length; i++) {
-      const clause = elements[i];
-      if (!clause || clause.type !== "list") {
-        return Either.left({
-          type: 'EvalError',
-          variant: 'TypeError',
-          message: "cond clause must be a list",
-          details: { clauseType: clause?.type, clauseIndex: i }
-        });
-      }
-
-      const clauseElements = clause.value as TLispValue[];
-      if (clauseElements.length !== 2) {
-        return Either.left({
-          type: 'EvalError',
-          variant: 'SyntaxError',
-          message: "cond clause must have exactly 2 elements: condition and expression",
-          details: { expected: 2, actual: clauseElements.length, clauseIndex: i }
-        });
-      }
-
-      const condition = clauseElements[0];
-      const expression = clauseElements[1];
-      if (!condition || !expression) {
-        return Either.left({
-          type: 'EvalError',
-          variant: 'SyntaxError',
-          message: "cond clause missing condition or expression",
-          details: { clauseIndex: i, hasCondition: !!condition, hasExpression: !!expression }
-        });
-      }
-
+    for (const { condition, expression } of shape.right.clauses) {
       if (condition.type === "symbol" && condition.value === "t") {
         return this.evalInternalAsync(expression, env, context, inTailPosition);
       }
@@ -1745,24 +1287,10 @@ export class TLispEvaluator {
    * @returns Either with error or quasiquoted expression
    */
   private evalQuasiquote(elements: TLispValue[], env: TLispEnvironment): Either<EvalError, TLispValue> {
-    if (elements.length !== 2) {
-      return Either.left({
-        type: 'EvalError',
-        variant: 'SyntaxError',
-        message: "quasiquote requires exactly 1 argument",
-        details: { expected: 2, actual: elements.length }
-      });
-    }
-
-    const expr = elements[1];
-    if (!expr) {
-      return Either.left({
-        type: 'EvalError',
-        variant: 'SyntaxError',
-        message: "quasiquote missing argument",
-        details: { elements }
-      });
-    }
+    // CHORE-44 Change 4 AC4.1: shared form-shape validator.
+    const shape = validateQuasiquote(elements);
+    if (Either.isLeft(shape)) return Either.left(shape.left);
+    const expr = shape.right.expr;
 
     const result = this.expandQuasiquote(expr, env, 1);
     return result; // Return the Either result directly
@@ -2098,22 +1626,16 @@ export class TLispEvaluator {
 
     const argExprs = elements.slice(1);
 
-    // Check if this is a macro call
-    if (funcExpr.type === "symbol") {
-      const symbolName = funcExpr.value as string;
-      const value = env.lookup(symbolName);
-      if (value && isMacro(value)) {
-        // Macro expansion - pass unevaluated arguments
-        const macroImpl = value.value as (args: TLispValue[]) => Either<EvalError, TLispValue>;
-        const expandedResult = macroImpl(argExprs);
-        if (Either.isLeft(expandedResult)) {
-          return expandedResult;
-        }
-
-        const expanded = expandedResult.right;
-        // Evaluate the expanded form
-        return this.evalInternal(expanded, env, inTailPosition);
-      }
+    // CHORE-44 Change 4 AC4.7: macro detection + coverage mark + tracing
+    // hooks are extracted to `./evaluator/function-calls.ts`. The TCO
+    // tail-call emission below stays in evaluator.ts (AC4.4 preservation).
+    const macroResult = tryMacroExpansion(env, funcExpr, argExprs);
+    if (macroResult.kind === "error") {
+      return Either.left(macroResult.error);
+    }
+    if (macroResult.kind === "macro") {
+      // Evaluate the expanded form.
+      return this.evalInternal(macroResult.expanded, env, inTailPosition);
     }
 
     if (inTailPosition) {
@@ -2139,24 +1661,13 @@ export class TLispEvaluator {
 
       const args = argsResults.map(r => (r as { right: TLispValue }).right);
 
-      // Track function call for coverage (US-0.6.6)
-      // Try to get function name from the symbol being called
-      if (isCoverageEnabled() && funcExpr.type === "symbol") {
-        const symbolName = funcExpr.value as string;
-        markFunctionCovered(symbolName);
-      }
+      // Track function call for coverage (US-0.6.6) — shared helper.
+      markFunctionCoverage(this.coverage, funcExpr);
 
-      const frameName = funcExpr.type === "symbol" ? funcExpr.value as string : "<anonymous>";
-      const wasTraced = this.debugState.isTraced(frameName);
-      if (wasTraced) {
-        this.debugState.recordTrace({ depth: this.debugState.getStackDepth(), functionName: frameName, args, span: getSourceSpan(funcExpr), direction: "enter" });
-      }
-      this.debugState.pushFrame(frameName, getSourceSpan(funcExpr));
+      // Tracing bracket — shared helpers from function-calls.ts.
+      const traceEnterResult = traceEnter(this.debugState, funcExpr, args);
       const callResult = this.evalFunctionCallInternal(func, args, env);
-      this.debugState.popFrame();
-      if (wasTraced && Either.isRight(callResult)) {
-        this.debugState.recordTrace({ depth: this.debugState.getStackDepth(), functionName: frameName, args, result: isTailCall(callResult.right) ? undefined : callResult.right, direction: "exit" });
-      }
+      traceExit(this.debugState, traceEnterResult, callResult as Either<EvalError, TLispValue>, Either.isRight(callResult) && isTailCall(callResult.right));
       return callResult;
     }
   }
@@ -2225,18 +1736,13 @@ export class TLispEvaluator {
 
     const argExprs = elements.slice(1);
 
-    if (funcExpr.type === "symbol") {
-      const symbolName = funcExpr.value as string;
-      const value = env.lookup(symbolName);
-      if (value && isMacro(value)) {
-        const macroImpl = value.value as (args: TLispValue[]) => Either<EvalError, TLispValue>;
-        const expandedResult = macroImpl(argExprs);
-        if (Either.isLeft(expandedResult)) {
-          return expandedResult;
-        }
-
-        return this.evalInternalAsync(expandedResult.right, env, context, inTailPosition);
-      }
+    // CHORE-44 Change 4 AC4.7: shared macro detection (same helper as sync path).
+    const macroResult = tryMacroExpansion(env, funcExpr, argExprs);
+    if (macroResult.kind === "error") {
+      return Either.left(macroResult.error);
+    }
+    if (macroResult.kind === "macro") {
+      return this.evalInternalAsync(macroResult.expanded, env, context, inTailPosition);
     }
 
     const funcResult = await this.evalAsync(funcExpr, env, context);
@@ -2258,21 +1764,11 @@ export class TLispEvaluator {
       argValues.push(resolved.right);
     }
 
-    if (isCoverageEnabled() && funcExpr.type === "symbol") {
-      markFunctionCovered(funcExpr.value as string);
-    }
-
-    const frameName = funcExpr.type === "symbol" ? funcExpr.value as string : "<anonymous>";
-    const wasTraced = this.debugState.isTraced(frameName);
-    if (wasTraced) {
-      this.debugState.recordTrace({ depth: this.debugState.getStackDepth(), functionName: frameName, args: argValues, span: getSourceSpan(funcExpr), direction: "enter" });
-    }
-    this.debugState.pushFrame(frameName, getSourceSpan(funcExpr));
+    // Coverage mark + tracing bracket — shared helpers from function-calls.ts.
+    markFunctionCoverage(this.coverage, funcExpr);
+    const traceEnterResult = traceEnter(this.debugState, funcExpr, argValues);
     const callResult = await this.evalFunctionCallInternalAsync(funcResult.right, argValues, env, context);
-    this.debugState.popFrame();
-    if (wasTraced && Either.isRight(callResult)) {
-      this.debugState.recordTrace({ depth: this.debugState.getStackDepth(), functionName: frameName, args: argValues, result: isTailCall(callResult.right) ? undefined : callResult.right, direction: "exit" });
-    }
+    traceExit(this.debugState, traceEnterResult, callResult as Either<EvalError, TLispValue>, Either.isRight(callResult) && isTailCall(callResult.right));
     return callResult;
   }
 
@@ -2335,533 +1831,60 @@ export class TLispEvaluator {
     }));
   }
 
-  /**
-   * Evaluate deftest special form
-   * @param elements - List elements
-   * @param env - Environment
-   * @returns Either with error or function symbol
-   */
+  // CHORE-44 Change 4 AC4.7: the test-form handler IMPLEMENTATION bodies
+  // (deftest, deftest-async, deftest-suite, suite-setup, suite-teardown,
+  // setup, teardown, deffixture, use-fixtures) now live in
+  // `./evaluator/test-forms.ts`. The methods below are one-line delegation
+  // facades. NOTE: these handlers are DORMANT — the live test framework is
+  // the T-Lisp `trt` package; `deftest` is a macro in `trt.tlisp` and the
+  // trt bridge builtins live in `trt/bootstrap.ts`. The dormant handlers
+  // are extracted anyway so `evaluator.ts` no longer contains their bodies
+  // and the per-instance testRegistry/suiteRegistry/currentSuite they
+  // operate on are clearly owned by the evaluator (AC4.3).
+
+  /** Evaluate (deftest name params body...). Delegated to test-forms.ts. */
   private evalDeftest(elements: TLispValue[], env: TLispEnvironment): Either<EvalError, TLispValue> {
-    if (elements.length < 3) {
-      return Either.left({
-        type: 'EvalError',
-        variant: 'SyntaxError',
-        message: "deftest requires at least 2 arguments: name, parameters, and body",
-        details: { expectedMin: 3, actual: elements.length }
-      });
-    }
-
-    const name = elements[1];
-    const parameters = elements[2];
-    const body = elements.length > 3 ? elements[3] : createNil(); // For now, just take the first body expression
-
-    if (!name || !parameters) {
-      return Either.left({
-        type: 'EvalError',
-        variant: 'SyntaxError',
-        message: "deftest missing required arguments",
-        details: { hasName: !!name, hasParameters: !!parameters }
-      });
-    }
-
-    if (name.type !== "symbol") {
-      return Either.left({
-        type: 'EvalError',
-        variant: 'TypeError',
-        message: "deftest name must be a symbol",
-        details: { nameType: name.type }
-      });
-    }
-
-    if (parameters.type !== "list") {
-      return Either.left({
-        type: 'EvalError',
-        variant: 'TypeError',
-        message: "deftest parameters must be a list",
-        details: { parametersType: parameters.type }
-      });
-    }
-
-    // Extract test name
-    const testName = name.value as string;
-
-    // Store the body expressions (from index 3 onwards)
-    const testBody = elements.slice(3);
-
-    // Store test in the registry
-    this.testRegistry.set(testName, { body: testBody, name: testName, params: parameters });
-
-    // Return the test name as a symbol to indicate success
-    return Either.right(name);
+    return evalDeftestForm(this, elements);
   }
 
-  /**
-   * Evaluate deftest-async special form
-   * @param elements - List elements
-   * @param env - Environment
-   * @returns Either with error or function symbol
-   */
+  /** Evaluate (deftest-async name params body...). Delegated to test-forms.ts. */
   private evalDeftestAsync(elements: TLispValue[], env: TLispEnvironment): Either<EvalError, TLispValue> {
-    if (elements.length < 3) {
-      return Either.left({
-        type: 'EvalError',
-        variant: 'SyntaxError',
-        message: "deftest-async requires at least 2 arguments: name, parameters (with 'done'), and body",
-        details: { expectedMin: 3, actual: elements.length }
-      });
-    }
-
-    const name = elements[1];
-    const parameters = elements[2];
-
-    if (!name || !parameters) {
-      return Either.left({
-        type: 'EvalError',
-        variant: 'SyntaxError',
-        message: "deftest-async missing required arguments",
-        details: { hasName: !!name, hasParameters: !!parameters }
-      });
-    }
-
-    if (name.type !== "symbol") {
-      return Either.left({
-        type: 'EvalError',
-        variant: 'TypeError',
-        message: "deftest-async name must be a symbol",
-        details: { nameType: name.type }
-      });
-    }
-
-    if (parameters.type !== "list") {
-      return Either.left({
-        type: 'EvalError',
-        variant: 'TypeError',
-        message: "deftest-async parameters must be a list",
-        details: { parametersType: parameters.type }
-      });
-    }
-
-    // Extract test name
-    const testName = name.value as string;
-
-    // Store the body expressions (from index 3 onwards)
-    const testBody = elements.slice(3);
-
-    // Store test in the registry with async flag
-    this.testRegistry.set(testName, { body: testBody, name: testName, params: parameters, isAsync: true });
-
-    // Return the test name as a symbol to indicate success
-    return Either.right(name);
+    return evalDeftestAsyncForm(this, elements);
   }
 
-  /**
-   * Evaluate deftest-suite special form
-   * @param elements - List elements
-   * @param env - Environment
-   * @returns Either with error or suite name
-   */
+  /** Evaluate (deftest-suite name ...). Delegated to test-forms.ts. */
   private evalDeftestSuite(elements: TLispValue[], env: TLispEnvironment): Either<EvalError, TLispValue> {
-    if (elements.length < 2) {
-      return Either.left({
-        type: 'EvalError',
-        variant: 'SyntaxError',
-        message: "deftest-suite requires at least 1 argument: suite name",
-        details: { expectedMin: 2, actual: elements.length }
-      });
-    }
-
-    const nameArg = elements[1];
-    if (!nameArg || (nameArg.type !== "string" && nameArg.type !== "symbol")) {
-      return Either.left({
-        type: 'EvalError',
-        variant: 'TypeError',
-        message: "deftest-suite name must be a string or symbol",
-        details: { nameType: nameArg?.type }
-      });
-    }
-
-    const suiteName = nameArg.value as string;
-
-    // Parse optional description
-    let description: string | undefined;
-    let contentStart = 2;
-
-    if (elements.length > 2 && elements[2]!.type === "string") {
-      description = elements[2]!.value as string;
-      contentStart = 3;
-    }
-
-    // Create suite
-    const suite: TestSuite = {
-      name: suiteName,
-      description,
-      tests: [],
-      parent: this.currentSuite || undefined
-    };
-
-    // Set as current suite for nested definitions
-    const previousSuite = this.currentSuite;
-    this.currentSuite = suiteName;
-
-    // Process suite body
-    for (let i = contentStart; i < elements.length; i++) {
-      const element = elements[i]!;
-
-      // Check for suite-setup
-      if (element.type === "list") {
-        const elValues = element.value as TLispValue[];
-        if (elValues.length > 0) {
-          const first = elValues[0]!;
-          if (first.type === "symbol" && first.value === "suite-setup") {
-            suite.setup = elValues.slice(1);
-            continue;
-          }
-          if (first.type === "symbol" && first.value === "suite-teardown") {
-            suite.teardown = elValues.slice(1);
-            continue;
-          }
-          if (first.type === "symbol" && first.value === "deftest") {
-            // Execute the deftest to register it in this.testRegistry
-            const testResult = this.evalDeftest(elValues, env);
-            if (Either.isLeft(testResult)) {
-              // Log error but continue
-              console.warn(`Failed to define test in suite: ${testResult.left.message}`);
-            } else {
-              // Add test to suite's test list
-              const testName = elValues[1];
-              if (testName && testName.type === "symbol") {
-                suite.tests.push(testName.value as string);
-              }
-            }
-          }
-          if (first.type === "symbol" && first.value === "deftest-suite") {
-            // Execute nested suite definition
-            const suiteResult = this.evalDeftestSuite(elValues, env);
-            if (Either.isLeft(suiteResult)) {
-              console.warn(`Failed to define nested suite: ${suiteResult.left.message}`);
-            } else {
-              // Add nested suite to parent's test list
-              const nestedName = elValues[1];
-              if (nestedName && (nestedName.type === "string" || nestedName.type === "symbol")) {
-                suite.tests.push(nestedName.value as string);
-              }
-            }
-          }
-        }
-      }
-    }
-
-    // Restore previous suite
-    this.currentSuite = previousSuite;
-
-    // Register suite
-    this.suiteRegistry.set(suiteName, suite);
-
-    // Return suite name
-    return Either.right(createString(suiteName));
+    return evalDeftestSuiteForm(this, elements, env);
   }
 
-  /**
-   * Evaluate suite-setup special form
-   * @param elements - List elements
-   * @param env - Environment
-   * @returns Either with error or success
-   */
+  /** Evaluate (suite-setup ...). Delegated to test-forms.ts. */
   private evalSuiteSetup(elements: TLispValue[], env: TLispEnvironment): Either<EvalError, TLispValue> {
-    if (!this.currentSuite) {
-      return Either.left({
-        type: 'EvalError',
-        variant: 'SyntaxError',
-        message: "suite-setup must be used inside deftest-suite",
-        details: {}
-      });
-    }
-
-    // suite-setup is handled by deftest-suite, this is just a placeholder
-    // The actual setup body is stored in the suite object
-    return Either.right(createNil());
+    return evalSuiteSetupForm(this);
   }
 
-  /**
-   * Evaluate suite-teardown special form
-   * @param elements - List elements
-   * @param env - Environment
-   * @returns Either with error or success
-   */
+  /** Evaluate (suite-teardown ...). Delegated to test-forms.ts. */
   private evalSuiteTeardown(elements: TLispValue[], env: TLispEnvironment): Either<EvalError, TLispValue> {
-    if (!this.currentSuite) {
-      return Either.left({
-        type: 'EvalError',
-        variant: 'SyntaxError',
-        message: "suite-teardown must be used inside deftest-suite",
-        details: {}
-      });
-    }
-
-    // suite-teardown is handled by deftest-suite, this is just a placeholder
-    // The actual teardown body is stored in the suite object
-    return Either.right(createNil());
+    return evalSuiteTeardownForm(this);
   }
 
-  /**
-   * Evaluate setup special form.
-   * Usage: (setup () body...)
-   */
+  /** Evaluate deprecated (setup () body...). Delegated to test-forms.ts. */
   private evalSetup(elements: TLispValue[]): Either<EvalError, TLispValue> {
-    if (elements.length < 2) {
-      return Either.left({
-        type: 'EvalError',
-        variant: 'RuntimeError',
-        message: "setup requires at least 1 argument: parameter list",
-        details: { expectedMin: 1, actual: elements.length - 1 }
-      });
-    }
-
-    const paramsArg = elements[1];
-    if (!paramsArg || paramsArg.type !== "list") {
-      return Either.left({
-        type: 'EvalError',
-        variant: 'TypeError',
-        message: "setup first argument must be a list (parameters)",
-        details: { argType: paramsArg?.type }
-      });
-    }
-
-    const body = elements.length === 2 ? [paramsArg] : elements.slice(2);
-    // setup/teardown are deprecated; trt uses fixtures (SPEC-049)
-    return Either.right(createBoolean(true));
+    return evalSetupForm(elements);
   }
 
-  /**
-   * Evaluate teardown special form.
-   * Usage: (teardown () body...)
-   */
+  /** Evaluate deprecated (teardown () body...). Delegated to test-forms.ts. */
   private evalTeardown(elements: TLispValue[]): Either<EvalError, TLispValue> {
-    if (elements.length < 2) {
-      return Either.left({
-        type: 'EvalError',
-        variant: 'RuntimeError',
-        message: "teardown requires at least 1 argument: parameter list",
-        details: { expectedMin: 1, actual: elements.length - 1 }
-      });
-    }
-
-    const paramsArg = elements[1];
-    if (!paramsArg || paramsArg.type !== "list") {
-      return Either.left({
-        type: 'EvalError',
-        variant: 'TypeError',
-        message: "teardown first argument must be a list (parameters)",
-        details: { argType: paramsArg?.type }
-      });
-    }
-
-    const body = elements.length === 2 ? [paramsArg] : elements.slice(2);
-    // setup/teardown are deprecated; trt uses fixtures (SPEC-049)
-    return Either.right(createBoolean(true));
+    return evalTeardownForm(elements);
   }
 
-  /**
-   * Evaluate deffixture special form
-   * @param elements - List elements
-   * @param env - Environment
-   * @returns Either with error or fixture name
-   */
+  /** Evaluate (deffixture name params body...). Delegated to test-forms.ts. */
   private evalDeffixture(elements: TLispValue[], env: TLispEnvironment): Either<EvalError, TLispValue> {
-    if (elements.length < 3) {
-      return Either.left({
-        type: 'EvalError',
-        variant: 'SyntaxError',
-        message: "deffixture requires at least 2 arguments: name, parameters, and body",
-        details: { expectedMin: 3, actual: elements.length }
-      });
-    }
-
-    const name = elements[1];
-    const parameters = elements[2];
-
-    if (!name || !parameters) {
-      return Either.left({
-        type: 'EvalError',
-        variant: 'SyntaxError',
-        message: "deffixture missing required arguments",
-        details: { hasName: !!name, hasParameters: !!parameters }
-      });
-    }
-
-    if (name.type !== "symbol") {
-      return Either.left({
-        type: 'EvalError',
-        variant: 'TypeError',
-        message: "deffixture name must be a symbol",
-        details: { nameType: name.type }
-      });
-    }
-
-    if (parameters.type !== "list") {
-      return Either.left({
-        type: 'EvalError',
-        variant: 'TypeError',
-        message: "deffixture parameters must be a list",
-        details: { parametersType: parameters.type }
-      });
-    }
-
-    // Extract fixture name
-    const fixtureName = name.value as string;
-
-    // Parse optional scope keyword from body
-    let scope: 'each' | 'once' | 'all' = 'each';
-    let bodyStartIndex = 3;
-
-    // Check if first body element is a scope keyword list like (:scope each)
-    if (elements.length > 3 && elements[3]!.type === "list") {
-      const scopeList = elements[3]!.value as TLispValue[];
-      if (scopeList.length >= 2) {
-        const keyword = scopeList[0]!;
-        const scopeValue = scopeList[1]!;
-        if (keyword.type === "symbol" && keyword.value === "scope" && scopeValue.type === "symbol") {
-          const scopeStr = scopeValue.value as string;
-          if (scopeStr === "each" || scopeStr === "once" || scopeStr === "all") {
-            scope = scopeStr;
-            bodyStartIndex = 4;
-          }
-        }
-      }
-    }
-
-    // Extract setup, teardown, and body from remaining elements
-    let setupBody: TLispValue[] = [];
-    let teardownBody: TLispValue[] = [];
-    let body: TLispValue[] = [];
-
-    for (let i = bodyStartIndex; i < elements.length; i++) {
-      const arg = elements[i]!;
-      if (arg.type === "list") {
-        const listItems = arg.value as TLispValue[];
-        if (listItems.length > 0) {
-          const first = listItems[0]!;
-          if (first.type === "symbol") {
-            if (first.value === "setup") {
-              setupBody = listItems.slice(1);
-            } else if (first.value === "teardown") {
-              teardownBody = listItems.slice(1);
-            } else {
-              // Regular body expression
-              body.push(arg);
-            }
-          } else {
-            // Regular body expression (non-symbol first element)
-            body.push(arg);
-          }
-        }
-      } else {
-        // Non-list body expression
-        body.push(arg);
-      }
-    }
-
-    // Import the necessary types and functions from test-framework
-    // We need to access the fixture registry, so we'll use a global approach
-    // The fixture registry is in test-framework.ts, so we need to make it accessible
-
-    // For now, let's use a workaround: store fixture info in the global environment
-    // This isn't ideal but will work for the MVP
-    const fixtureData = {
-      name: fixtureName,
-      params: parameters,
-      body,
-      setupBody,
-      teardownBody,
-      scope
-    };
-
-    // Store in global environment as a special variable
-    // The test-framework will access this
-    (globalThis as any).__deffixture_data__ = (globalThis as any).__deffixture_data__ || new Map();
-    (globalThis as any).__deffixture_data__.set(fixtureName, fixtureData);
-
-    // Return the fixture name as a symbol to indicate success
-    return Either.right(name);
+    return evalDeffixtureForm(elements, env);
   }
 
-  /**
-   * Evaluate use-fixtures special form
-   * @param elements - List elements (excluding 'use-fixtures')
-   * @param env - Environment
-   * @returns Either with error or success
-   */
+  /** Evaluate (use-fixtures name...). Delegated to test-forms.ts. */
   private evalUseFixtures(elements: TLispValue[], env: TLispEnvironment): Either<EvalError, TLispValue> {
-    if (elements.length < 2) {
-      return Either.left({
-        type: 'EvalError',
-        variant: 'RuntimeError',
-        message: "use-fixtures requires at least 1 argument: fixture name",
-        details: { expectedMin: 2, actual: elements.length }
-      });
-    }
-
-    // Collect fixture names from arguments (elements[0] is 'use-fixtures', elements[1+] are args)
-    const fixtureNames: string[] = [];
-    for (let i = 1; i < elements.length; i++) {
-      const arg = elements[i]!;
-      if (arg.type === "symbol") {
-        fixtureNames.push(arg.value as string);
-      } else if (arg.type === "string") {
-        fixtureNames.push(arg.value as string);
-      } else {
-        return Either.left({
-          type: 'EvalError',
-          variant: 'TypeError',
-          message: "use-fixtures arguments must be symbols or strings (fixture names)",
-          details: { argType: arg.type }
-        });
-      }
-    }
-
-    // Get fixtures from global storage
-    const globalFixtures = (globalThis as any).__deffixture_data__;
-    if (!globalFixtures) {
-      return Either.right(createBoolean(true)); // No fixtures to apply
-    }
-
-    // Apply each fixture in order
-    for (const name of fixtureNames) {
-      const fixtureData = globalFixtures.get(name);
-      if (!fixtureData) {
-        return Either.left({
-          type: 'EvalError',
-          variant: 'RuntimeError',
-          message: `Fixture '${name}' not found`,
-          details: { fixtureName: name }
-        });
-      }
-
-      // Execute fixture body
-      for (const expr of fixtureData.body || []) {
-        const result = this.eval(expr, env);
-        if (Either.isLeft(result)) {
-          return result;
-        }
-      }
-
-      // Execute fixture setup
-      for (const expr of fixtureData.setupBody || []) {
-        const result = this.eval(expr, env);
-        if (Either.isLeft(result)) {
-          return result;
-        }
-      }
-
-      // Store teardown for later - we'll need a way to track this
-      // For now, store in a special variable in the environment
-      const teardowns = env.lookup("__fixture_teardowns__") || createList([]);
-      const teardownList: any[] = teardowns.type === "list" ? [...(teardowns.value as TLispValue[])] : [];
-      teardownList.push({ fixture: name, teardown: fixtureData.teardownBody || [] });
-      env.define("__fixture_teardowns__", createList(teardownList));
-    }
-
-    return Either.right(createBoolean(true));
+    return evalUseFixturesForm(this, elements, env);
   }
 
   /**
@@ -3224,9 +2247,12 @@ export class TLispEvaluator {
    * @returns Either with error or result of last expression
    */
   private evalProgn(elements: TLispValue[], env: TLispEnvironment, inTailPosition: boolean = false): Either<EvalError, EvalResult> {
+    // CHORE-44 Change 4 AC4.1: shared form-shape validator (accepts any body).
+    const shape = validateProgn(elements);
+    if (Either.isLeft(shape)) return Either.left(shape.left);
     // progn takes any number of arguments, evaluates them sequentially
     // and returns the value of the last expression
-    const bodyExprs = elements.slice(1);
+    const bodyExprs = shape.right.body;
 
     if (bodyExprs.length === 0) {
       return Either.right(createNil());
@@ -3251,16 +2277,10 @@ export class TLispEvaluator {
   }
 
   private evalWhile(elements: TLispValue[], env: TLispEnvironment): Either<EvalError, EvalResult> {
-    if (elements.length < 3) {
-      return Either.left({
-        type: 'EvalError',
-        variant: 'SyntaxError',
-        message: "while requires test and body",
-        details: { actual: elements.length }
-      });
-    }
-    const testExpr = elements[1]!;
-    const bodyExprs = elements.slice(2);
+    // CHORE-44 Change 4 AC4.1: shared form-shape validator (sync + async).
+    const shape = validateWhile(elements);
+    if (Either.isLeft(shape)) return Either.left(shape.left);
+    const { test: testExpr, body: bodyExprs } = shape.right;
     const MAX_ITERATIONS = 100000;
     let iterations = 0;
     let lastResult: Either<EvalError, EvalResult> = Either.right(createNil());
@@ -3282,16 +2302,10 @@ export class TLispEvaluator {
   }
 
   private async evalWhileAsync(elements: TLispValue[], env: TLispEnvironment, context: EvalContext): Promise<Either<EvalError, EvalResult>> {
-    if (elements.length < 3) {
-      return Either.left({
-        type: 'EvalError',
-        variant: 'SyntaxError',
-        message: "while requires test and body",
-        details: { actual: elements.length }
-      });
-    }
-    const testExpr = elements[1]!;
-    const bodyExprs = elements.slice(2);
+    // CHORE-44 Change 4 AC4.1: shared form-shape validator (sync + async).
+    const shape = validateWhile(elements);
+    if (Either.isLeft(shape)) return Promise.resolve(Either.left(shape.left));
+    const { test: testExpr, body: bodyExprs } = shape.right;
     const MAX_ITERATIONS = 100000;
     let iterations = 0;
     let lastResult: Either<EvalError, EvalResult> = Either.right(createNil());
@@ -3320,47 +2334,10 @@ export class TLispEvaluator {
    * Returns nil.
    */
   private evalDolist(elements: TLispValue[], env: TLispEnvironment): Either<EvalError, EvalResult> {
-    if (elements.length < 2) {
-      return Either.left({
-        type: 'EvalError',
-        variant: 'SyntaxError',
-        message: "dolist requires a binding spec and optional body",
-        details: { actual: elements.length }
-      });
-    }
-
-    const spec = elements[1]!;
-    if (spec.type !== "list") {
-      return Either.left({
-        type: 'EvalError',
-        variant: 'SyntaxError',
-        message: "dolist binding spec must be a list: (var list)",
-        details: { actual: spec.type }
-      });
-    }
-
-    const specParts = spec.value as TLispValue[];
-    if (specParts.length < 2) {
-      return Either.left({
-        type: 'EvalError',
-        variant: 'SyntaxError',
-        message: "dolist binding spec requires (var list)",
-        details: { actual: specParts.length }
-      });
-    }
-
-    const varName = specParts[0]!;
-    if (varName.type !== "symbol") {
-      return Either.left({
-        type: 'EvalError',
-        variant: 'SyntaxError',
-        message: "dolist variable must be a symbol",
-        details: { actual: varName.type }
-      });
-    }
-
-    const listExpr = specParts[1]!;
-    const bodyExprs = elements.slice(2);
+    // CHORE-44 Change 4 AC4.1: shared form-shape validator.
+    const shape = validateDolist(elements);
+    if (Either.isLeft(shape)) return Either.left(shape.left);
+    const { varName, listExpr, body: bodyExprs } = shape.right;
 
     // Evaluate the list expression
     const listResult = this.eval(listExpr, env);
@@ -3397,7 +2374,10 @@ export class TLispEvaluator {
    * and/or are not in tail position, so we resolve any EvalResult to TLispValue.
    */
   private evalAnd(elements: TLispValue[], env: TLispEnvironment): Either<EvalError, EvalResult> {
-    const exprs = elements.slice(1);
+    // CHORE-44 Change 4 AC4.1: shared form-shape validator (accepts any body).
+    const shape = validateAnd(elements);
+    if (Either.isLeft(shape)) return Either.left(shape.left);
+    const exprs = shape.right.body;
     if (exprs.length === 0) return Either.right(createBoolean(true));
 
     let lastValue: TLispValue = createBoolean(true);
@@ -3416,7 +2396,10 @@ export class TLispEvaluator {
    * Returns the first truthy value, or the last value if all are falsy.
    */
   private evalOr(elements: TLispValue[], env: TLispEnvironment): Either<EvalError, EvalResult> {
-    const exprs = elements.slice(1);
+    // CHORE-44 Change 4 AC4.1: shared form-shape validator (accepts any body).
+    const shape = validateOr(elements);
+    if (Either.isLeft(shape)) return Either.left(shape.left);
+    const exprs = shape.right.body;
     if (exprs.length === 0) return Either.right(createNil());
 
     let lastValue: TLispValue = createNil();

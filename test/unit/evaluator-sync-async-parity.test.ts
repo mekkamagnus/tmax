@@ -29,10 +29,12 @@ function equalValue(a: TLispValue, b: TLispValue): boolean {
   return true;
 }
 
-/** Normalize a result to { ok, value } so sync + async can be compared. */
-function normalize(result: Either<EvalError, TLispValue>): { ok: boolean; value: TLispValue | null; code: string | null } {
-  if (Either.isLeft(result)) return { ok: false, value: null, code: result.left.type ?? "Error" };
-  return { ok: true, value: result.right, code: null };
+/** Normalize a result to { ok, value, code, variant, message } so sync + async can be compared. */
+function normalize(result: Either<EvalError, TLispValue>): { ok: boolean; value: TLispValue | null; code: string | null; variant: string | null; message: string | null } {
+  if (Either.isLeft(result)) {
+    return { ok: false, value: null, code: result.left.type ?? "Error", variant: result.left.variant ?? null, message: result.left.message ?? null };
+  }
+  return { ok: true, value: result.right, code: null, variant: null, message: null };
 }
 
 const cases: { name: string; source: string }[] = [
@@ -85,4 +87,43 @@ describe("CHORE-44 Change 4 — sync/async evaluator parity", () => {
     const r = await async_.executeAsync("(async-let ((p 5)) p)");
     expect(Either.isRight(r)).toBe(true);
   });
+
+  // AC4.1 validation-error parity: every form whose argument shape is
+  // validated by a shared validator in `form-shapes.ts` must produce the
+  // SAME error (variant + message) under both sync and async execution.
+  // This is the regression net for "validation cannot drift between paths".
+  const validationCases: { name: string; source: string }[] = [
+    { name: "if: too few arguments", source: "(if t)" },
+    { name: "if: too many arguments", source: "(if t 1 2 3)" },
+    { name: "let: missing body", source: "(let ((x 1)))" },
+    { name: "let: missing bindings", source: "(let)" },
+    { name: "let: bindings not a list", source: "(let 5 1)" },
+    { name: "quote: wrong arity", source: "(quote a b)" },
+    { name: "quasiquote: wrong arity", source: "(quasiquote a b)" },
+    { name: "cond: zero clauses", source: "(cond)" },
+    { name: "cond: clause wrong shape", source: "(cond (t 1 2))" },
+    { name: "while: missing body", source: "(while t)" },
+    { name: "dolist: binding spec not a list", source: "(dolist 5 (print x))" },
+    { name: "defun: missing body", source: "(defun name (x))" },
+    { name: "lambda: missing body", source: "(lambda (x))" },
+    { name: "provide: missing feature name", source: "(provide)" },
+    { name: "featurep: wrong type", source: "(featurep 5)" },
+    { name: "require: missing feature name", source: "(require)" },
+  ];
+
+  for (const c of validationCases) {
+    test(`validation error parity (AC4.1): ${c.name}`, async () => {
+      const sync = new TLispInterpreterImpl();
+      const async_ = new TLispInterpreterImpl();
+      const syncResult = normalize(sync.execute(c.source));
+      const asyncResult = normalize(await async_.executeAsync(c.source));
+      // Both paths must reject.
+      expect(syncResult.ok).toBe(false);
+      expect(asyncResult.ok).toBe(false);
+      // The shared validator produces the SAME error variant + message in
+      // both paths (this is the core AC4.1 invariant: drift = bug).
+      expect(asyncResult.variant).toBe(syncResult.variant);
+      expect(asyncResult.message).toBe(syncResult.message);
+    });
+  }
 });
