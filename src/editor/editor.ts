@@ -292,10 +292,14 @@ export class Editor {
     // Create a tlisp-api compatible state object
     const editor = this;
     const tlispState: EditorAPIContext = {
-      get currentBuffer() {
-        return editor.model.currentBuffer ?? null;
-      },
-      set currentBuffer(v: FunctionalTextBuffer | null) {
+      get terminal() { return editor.terminal; },
+      get filesystem() { return editor.filesystem; },
+      // CHORE-44 Change 2 (AC2.6): NO mutable deterministic bridge properties.
+      // Every simple-field write goes through `applyUpdate(msg)`; the four
+      // side-effectful methods below preserve editor-specific invariants the
+      // reducer alone cannot cover (tab/window/metadata/cursor-window sync).
+      applyUpdate: (msg: Msg) => { editor.applyUpdate(msg); },
+      setCurrentBuffer: (v: FunctionalTextBuffer | null) => {
         const previousName = editor.findBufferName(editor.model.currentBuffer);
         const existingName = editor.findBufferName(v ?? undefined);
         const bufferName = existingName ?? previousName;
@@ -329,13 +333,7 @@ export class Editor {
           editor.applyUpdate({ type: "SetCurrentFilename", filename: editor.bufferMetadata.get(bufferName)?.filename });
         }
       },
-      get buffers() {
-        return editor.buffers;
-      },
-      get cursorLine() {
-        return editor.model.cursorPosition.line; 
-      },
-      set cursorLine(v: number) { 
+      setCursorLine: (v: number) => {
         // Update both global and current window cursor position (US-3.2.1)
         editor.model.cursorPosition.line = v;
         const windows = editor.model.windows;
@@ -346,10 +344,7 @@ export class Editor {
           }
         }
       },
-      get cursorColumn() {
-        return editor.model.cursorPosition.column; 
-      },
-      set cursorColumn(v: number) { 
+      setCursorColumn: (v: number) => {
         // Update both global and current window cursor position (US-3.2.1)
         editor.model.cursorPosition.column = v;
         const windows = editor.model.windows;
@@ -360,38 +355,16 @@ export class Editor {
           }
         }
       },
-      get terminal() { return editor.terminal; },
-      get filesystem() { return editor.filesystem; },
-      get mode() { return editor.model.mode; },
-      set mode(v: 'normal' | 'insert' | 'visual' | 'command' | 'mx' | 'replace') { editor.applyUpdate({ type: "SetMode", mode: v }); },
-      get lastCommand() { return ""; },
-      set lastCommand(_: string) { },
-      get statusMessage() { return editor.model.statusMessage; },
-      set statusMessage(v: string) { editor.applyUpdate({ type: "SetStatusMessage", message: v }); },
-      get viewportTop() { return editor.model.viewportTop; },
-      set viewportTop(v: number) { editor.applyUpdate({ type: "SetViewportTop", top: v }); },
-      get viewportLeft() { return editor.model.viewportLeft ?? 0; },
-      set viewportLeft(v: number) { editor.applyUpdate({ type: "SetViewportLeft", left: v }); },
-      get commandLine() { return editor.model.commandLine; },
-      set commandLine(v: string) { editor.applyUpdate({ type: "SetCommandLine", value: v }); },
-      get spacePressed() { return editor.spacePressed; },
-      set spacePressed(v: boolean) { editor.spacePressed = v; },
-      get mxCommand() { return editor.model.mxCommand; },
-      set mxCommand(v: string) { editor.applyUpdate({ type: "SetMxCommand", value: v }); },
-      get cursorFocus() { return editor.model.cursorFocus ?? 'buffer'; },
-      set cursorFocus(v: 'buffer' | 'command') { editor.applyUpdate({ type: "SetCursorFocus", focus: v }); },
-      get lspDiagnostics() { return editor.model.lspDiagnostics ? [...editor.model.lspDiagnostics] : undefined; },
-      logMessage: (msg: string, level?: string, command?: string, frameId?: string) => editor.logMessage(msg, (level as LogLevel) ?? 'info', command, frameId),
-      setEchoOnly: (text: string) => editor.setEchoOnly(text),
-      logProgram: (category: 'shell' | 'process' | 'test' | 'autosave', entry: any) => editor.logProgram(category, entry),
-      get currentFilename() { return editor.model.currentFilename; },
-      set currentFilename(v: string | undefined) {
+      setCurrentFilename: (v: string | undefined) => {
         editor.applyUpdate({ type: "SetCurrentFilename", filename: v });
         const name = editor.findBufferName(editor.model.currentBuffer);
         if (name) editor.updateBufferMetadata(name, { filename: v });
       },
-      get config() { return editor.model.config; },
-      set config(v: EditorState["config"]) { editor.applyUpdate({ type: "SetConfig", config: v }); },
+      // spacePressed is transient leader-key input state, NOT deterministic
+      // EditorModel state. Exposed as a runtime-service accessor pair so it
+      // does not appear as a duplicated model bridge property (AC2.6).
+      getSpacePressed: () => editor.spacePressed,
+      setSpacePressed: (pressed: boolean) => { editor.spacePressed = pressed; },
       get operations() {
         return {
           saveFile: (filename?: string) => editor.saveFile(filename),
@@ -423,8 +396,9 @@ export class Editor {
       setBufferModified: (modified: boolean) => editor.setCurrentBufferModified(modified),
       getMessageLog: () => editor.logging.getMessageLog(),
       getUnifiedLog: () => editor.logging.getUnifiedLog(),
-      get searchMatches() { return editor.model.searchMatches ? [...editor.model.searchMatches] : undefined; },
-      set searchMatches(v: import("../core/types.ts").Range[] | undefined) { editor.applyUpdate({ type: "SetSearchMatches", matches: v }); },
+      logMessage: (msg: string, level?: string, command?: string, frameId?: string) => editor.logMessage(msg, (level as LogLevel) ?? 'info', command, frameId),
+      setEchoOnly: (text: string) => editor.setEchoOnly(text),
+      logProgram: (category: 'shell' | 'process' | 'test' | 'autosave', entry: any) => editor.logProgram(category, entry),
       access: {
         getModel: () => editor.model,
         applyModel: (m) => { editor.model = m; },

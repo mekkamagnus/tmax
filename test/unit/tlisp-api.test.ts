@@ -124,8 +124,13 @@ describe("T-Lisp API", () => {
     const logMsg = expectDefined(api.get("log-message"));
     const result = expectRight(logMsg([createSymbol(":debug"), createString("test debug")]));
     expect(String(result.value)).toBe("test debug");
-    // debug should NOT set status message
-    expect(state.statusMessage).toBe("");
+    // debug should NOT set status message — capture the baseline before the
+    // call and assert the debug-level log did not overwrite it with the log
+    // text.
+    const before = state.getModel().statusMessage;
+    expectRight(logMsg([createSymbol(":debug"), createString("test debug")]));
+    expect(state.getModel().statusMessage).toBe(before);
+    expect(state.getModel().statusMessage).not.toBe("test debug");
   });
 
   test("log-message at error level sets status", () => {
@@ -133,7 +138,7 @@ describe("T-Lisp API", () => {
     const api = createEditorAPI(state);
     const logMsg = expectDefined(api.get("log-message"));
     expectRight(logMsg([createSymbol(":error"), createString("bad")]));
-    expect(state.statusMessage).toBe("bad");
+    expect(state.getModel().statusMessage).toBe("bad");
   });
 
   test("echo sets status WITHOUT logging (SPEC-055 two-tier split)", () => {
@@ -142,7 +147,7 @@ describe("T-Lisp API", () => {
     const echo = expectDefined(api.get("echo"));
     const result = expectRight(echo([createString("which-key hint")]));
     expect(String(result.value)).toBe("which-key hint");
-    expect(state.statusMessage).toBe("which-key hint");
+    expect(state.getModel().statusMessage).toBe("which-key hint");
     // Critical: echo must NOT append to the log (contrast with message).
     const log = state.getMessageLog!();
     expect(log.getEntries()).toHaveLength(0);
@@ -153,7 +158,7 @@ describe("T-Lisp API", () => {
     const api = createEditorAPI(state);
     const message = expectDefined(api.get("message"));
     expectRight(message([createString("logged msg")]));
-    expect(state.statusMessage).toBe("logged msg");
+    expect(state.getModel().statusMessage).toBe("logged msg");
     const log = state.getMessageLog!();
     expect(log.getEntries()).toHaveLength(1);
   });
@@ -211,7 +216,7 @@ describe("T-Lisp API", () => {
 
   test("last-command returns current last command", () => {
     const state = createStateWithMessages();
-    state.lastCommand = "(my-func)";
+    state.setLastCommand("(my-func)");
     const api = createEditorAPI(state);
     const lastCmd = expectDefined(api.get("last-command"));
     const result = expectRight(lastCmd([]));

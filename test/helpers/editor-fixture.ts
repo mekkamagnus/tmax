@@ -8,63 +8,107 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { EditorAPIContext } from "../../src/editor/runtime/editor-api-context.ts";
 import type { FunctionalTextBuffer } from "../../src/core/types.ts";
-import { FunctionalTextBufferImpl } from "../../src/core/buffer.ts";
 import { initialModel } from "../../src/editor/functional/model.ts";
+import type { EditorModel } from "../../src/editor/functional/model.ts";
+import { update } from "../../src/editor/functional/index.ts";
 import { createEditorSession, createEditorSessionState } from "../../src/editor/functional/domain-state.ts";
 import { createEditorRuntimeCaches } from "../../src/editor/runtime/caches.ts";
 
 /**
- * CHORE-44 Change 2 — build a real `EditorAPIContext` for direct `createEditorAPI`
- * unit tests. The model access projects the bridge fields (the former compat
- * path, now in test infra only, never production). Overrides merge on top.
+ * Options for {@link createTestAPIContext}. The fixture holds a real
+ * `EditorModel`; `currentBuffer` / `buffers` overrides seed that model.
  */
-export function createTestAPIContext(overrides: Partial<EditorAPIContext> = {}): EditorAPIContext {
-  const base = {
-    currentBuffer: FunctionalTextBufferImpl.create("") as FunctionalTextBuffer,
-    buffers: new Map<string, FunctionalTextBuffer>(),
-    cursorLine: 0,
-    cursorColumn: 0,
-    terminal: new MockTerminal(),
-    filesystem: new MockFileSystem(),
-    mode: "normal" as const,
-    lastCommand: "",
-    statusMessage: "",
-    viewportTop: 0,
-    viewportLeft: 0,
-    commandLine: "",
-    spacePressed: false,
-    mxCommand: "",
-    cursorFocus: "buffer" as const,
+export interface TestAPIContextOptions {
+  /** Seed buffer for `model.currentBuffer` (also inserted into `buffers` as "default"). */
+  currentBuffer?: FunctionalTextBuffer;
+  /** Seed buffer registry (defaults to a fresh empty Map; "default" is added if `currentBuffer` is set). */
+  buffers?: Map<string, FunctionalTextBuffer>;
+}
+
+/**
+ * Test-only extras layered onto {@link EditorAPIContext} so legacy tests that
+ * previously read/wrote mutable bridge fields can seed and observe model
+ * state through a typed surface. These members do NOT exist on the production
+ * `EditorAPIContext` (AC2.6) — they are test-infrastructure projections over
+ * the model held by the fixture.
+ */
+export interface TestAPIContext extends EditorAPIContext {
+  /** Live mutable buffer registry (the same Map the model holds). Seed/observe here. */
+  readonly buffers: Map<string, FunctionalTextBuffer>;
+  /** Direct model read (alias for `access.getModel()`). */
+  getModel(): EditorModel;
+  /** Seed `model.currentBuffer` directly (test setup). */
+  setCurrentBufferDirect(buffer: FunctionalTextBuffer): void;
+  /** Seed `model.statusMessage` directly (test setup/observation). */
+  setStatusMessage(message: string): void;
+  /** Seed `model.lastCommand` directly (test setup). */
+  setLastCommand(command: string): void;
+}
+
+/**
+ * CHORE-44 Change 2 — build a real `EditorAPIContext` for direct
+ * `createEditorAPI` unit tests. Backed by a genuine `EditorModel`: reads go
+ * through `access.getModel()` and writes go through `applyUpdate(msg)` (which
+ * runs the pure reducer) or the four side-effectful methods (which, for the
+ * fixture, delegate to the reducer since there are no tabs/windows/metadata
+ * to sync). No mutable bridge fields — AC2.6.
+ *
+ * The returned handle includes the {@link TestAPIContext} test-only members
+ * (`buffers`, `getModel`, `setStatusMessage`, `setLastCommand`,
+ * `setCurrentBufferDirect`) so existing tests can seed and observe state
+ * without re-introducing bridge properties on the production context.
+ */
+export function createTestAPIContext(options: TestAPIContextOptions = {}): TestAPIContext {
+  const buffers = options.buffers ?? new Map<string, FunctionalTextBuffer>();
+  let model: EditorModel = {
+    ...initialModel(),
+    buffers,
+    currentBuffer: options.currentBuffer,
+  };
+
+  const ctx: EditorAPIContext = {
+    access: {
+      getModel: () => model,
+      applyModel: (m) => { model = m; },
+    },
     session: createEditorSession(createEditorSessionState()),
     caches: createEditorRuntimeCaches(),
-  };
-  const ctx: EditorAPIContext = { ...base, ...overrides } as EditorAPIContext;
-  ctx.access = {
-    getModel: () => ({
-      ...initialModel(),
-      currentBuffer: ctx.currentBuffer ?? undefined,
-      buffers: ctx.buffers,
-      cursorPosition: { line: ctx.cursorLine, column: ctx.cursorColumn },
-      mode: ctx.mode,
-      statusMessage: ctx.statusMessage,
-      commandLine: ctx.commandLine,
-      mxCommand: ctx.mxCommand,
-      cursorFocus: ctx.cursorFocus,
-      lastCommand: ctx.lastCommand,
-      currentFilename: ctx.currentFilename,
-      viewportTop: ctx.viewportTop,
-      viewportLeft: ctx.viewportLeft,
-    }),
-    applyModel: (m) => {
-      ctx.cursorLine = m.cursorPosition.line;
-      ctx.cursorColumn = m.cursorPosition.column;
-      ctx.mode = m.mode;
-      ctx.statusMessage = m.statusMessage;
-      if (m.currentBuffer !== undefined) ctx.currentBuffer = m.currentBuffer;
+    terminal: new MockTerminal(),
+    filesystem: new MockFileSystem(),
+    applyUpdate: (msg) => { model = update(model, msg).model; },
+    // The fixture has no tabs/windows/bufferMetadata, so the side-effectful
+    // methods reduce to plain model commits via applyUpdate.
+    setCurrentBuffer: (buffer) => {
+      model = update(model, { type: "SetCurrentBuffer", buffer: buffer ?? undefined }).model;
     },
+    setCursorLine: (line) => {
+      model = update(model, { type: "SetCursorPosition", position: { ...model.cursorPosition, line } }).model;
+    },
+    setCursorColumn: (column) => {
+      model = update(model, { type: "SetCursorPosition", position: { ...model.cursorPosition, column } }).model;
+    },
+    setCurrentFilename: (filename) => {
+      model = update(model, { type: "SetCurrentFilename", filename }).model;
+    },
+    getSpacePressed: () => false,
+    setSpacePressed: () => { /* no-op: fixture has no leader-key state */ },
   };
-  return ctx;
+
+  // Test-only projections over the model. These are layered on AFTER the
+  // EditorAPIContext object so the production context shape (AC2.6) is the
+  // authoritative surface handed to `createEditorAPI`.
+  const testCtx: TestAPIContext = {
+    ...ctx,
+    get buffers() { return buffers; },
+    getModel: () => model,
+    setCurrentBufferDirect: (buffer) => { model = { ...model, currentBuffer: buffer }; },
+    setStatusMessage: (message) => { model = { ...model, statusMessage: message }; },
+    setLastCommand: (command) => { model = { ...model, lastCommand: command }; },
+  };
+  return testCtx;
 }
+
+
 
 /** Isolate the SPEC-055 log file per editor instance so tail-load never reads
  *  the developer's real ~/.config/tmax/messages.log AND never carries entries

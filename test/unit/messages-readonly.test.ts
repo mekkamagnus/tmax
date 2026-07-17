@@ -55,7 +55,7 @@ describe("SPEC-016: *Messages* buffer read-only guard", () => {
   test("buffer-insert works when a writable buffer is current", () => {
     const state = createState();
     // Switch to the writable default buffer
-    state.currentBuffer = state.buffers.get("default")!;
+    state.setCurrentBufferDirect(state.buffers.get("default")!);
     const api = createEditorAPI(state);
     const bufferInsert = expectDefined(api.get("buffer-insert"));
 

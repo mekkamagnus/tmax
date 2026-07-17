@@ -61,7 +61,7 @@ Status meanings:
 |---|---|---|---|
 | Step 0 | **COMPLETE** | `.chore44-baseline/` holds all inventories (editor methods, Markdown fns, static + runtime API names, RPC methods, ADW state keys, ADW event types, CLI exit codes). `test/unit/chore44-baseline-inventory.test.ts` asserts each as a frozen expected set (6 tests green). | — |
 | Change 1 | **COMPLETE** | All session state groups (kill ring, registers, delete/yank, yank-pop, visual, macros, search, dired, syntax, replace, undo/redo, major-mode) live on `EditorModel.session: EditorSessionState`; `EditorSession` is an accessor over model state; `major-mode-ops` module-globals deleted (real isolation bug fixed); isolation test covers every group two-editor. | — |
-| Change 2 | **PARTIAL** | `EditorAPIContext` exists; `TlispEditorState`, compatibility projection functions, and underscored hook names are gone; typed-context tests exist. | Remove the renamed mutable bridge fields and direct `ctx.* =` state mutations. Make `access`/`State`/`Msg`/`Cmd` the only deterministic state path. |
+| Change 2 | **COMPLETE** | All 18 mutable bridge properties removed from `EditorAPIContext`; `tlisp-api.ts` has 0 bridge-field assignments and 0 reads (AC2.7, independently verified); writes route through `applyUpdate(Msg)` + 4 side-effectful methods; fold latent disconnect fixed; `editor-api-context.test.ts` strengthened with static + behavioral AC2.6/AC2.7 cases. | — |
 | Change 3 | **PARTIAL** | Logging, plugin, binding-file, and workspace algorithms have collaborators with delegation tests. | Extract the command queue/drain/correlation implementation and the remaining core/fallback/init binding policy. Complete bootstrap consolidation and test every collaborator with fakes. |
 | Change 4 | **PARTIAL** | Sync/async parity and evaluator-instance tests exist; `if`/`let` validation is shared; async dispatch uses one recognition set for delegated forms; core test registries are instance fields. | Extract every required validator and the named module/test/function-call/special-form modules; move remaining evaluator-owned mutable coverage/debug state per instance; keep the evaluator as a thin facade/trampoline. |
 | Change 5 | **PARTIAL** | `RpcMethodMap` and a dispatch table exist; the request-method switch and `params: any`/`Promise<any>` signatures are gone. | Give every method exact result types; add runtime version/params validation and error mapping in the router; split domain handlers; centralize sync wrappers; add both required tests. |
@@ -267,19 +267,15 @@ Completion gate: AC1.1–AC1.7 and the full targeted test invocation must pass t
 
 Make `EditorModel` plus an explicit runtime context the only editor API state path. Remove the legacy compatibility model projection and all underscored callbacks that let API code reach around the typed boundary.
 
-#### Current checkpoint status — PARTIAL (2026-07-17)
+#### Current checkpoint status — COMPLETE (2026-07-17)
 
-Completed:
+All 18 mutable deterministic bridge properties (`currentBuffer`, `buffers`, `cursorLine`, `cursorColumn`, `mode`, `lastCommand`, `statusMessage`, `viewportTop`, `viewportLeft`, `commandLine`, `mxCommand`, `spacePressed`, `cursorFocus`, `currentFilename`, `config`, `lspDiagnostics`, `foldRanges`, `searchMatches`) are removed from `EditorAPIContext` (AC2.6). The context now exposes `access`, `session`, `caches`, runtime services, one general write surface `applyUpdate(msg: Msg)`, and four explicit side-effectful methods (`setCurrentBuffer`, `setCursorLine`, `setCursorColumn`, `setCurrentFilename`) whose bodies are the former editor.ts setters preserved verbatim (tab/window/metadata/cursor-window sync). `spacePressed` (transient input state, not an EditorModel field) is exposed via `getSpacePressed`/`setSpacePressed`.
 
-- Added `src/editor/runtime/editor-api-context.ts` and changed `createEditorAPI` to accept it.
-- Removed `TlispEditorState`, `compatModelFromState`, `compatModelToState`, `liveModel`, and the named underscored escape hatches.
-- Added `createTestAPIContext()` and `editor-api-context.test.ts`; migrated direct `createEditorAPI` tests to the typed helper.
+`src/editor/tlisp-api.ts` now has **zero** `ctx.<bridge> =` assignments and **zero** `ctx.<bridge>` reads (AC2.7, independently verified): all reads go through `access.getModel()` and all writes through `applyUpdate(Msg)` (e.g. `write({type:"SetStatusMessage",...})`) or the four side-effectful methods. The fold primitives now build a fresh `Map` and commit via `SetFoldRanges` — fixing a pre-existing latent disconnect where the old editor.ts context had no `foldRanges` getter (fold state is now genuinely model-backed). `model.buffers` is confirmed to be the live mutable `editor.buffers` Map, so buffer-registry mutations land correctly.
 
-Remaining:
+`editor-api-context.test.ts` was strengthened: static source scans assert `tlisp-api.ts` has no removed-field assignments AND no removed-field reads, and `editor-api-context.ts` declares none of the removed fields; behavioral cases prove `applyUpdate(SetStatusMessage)`, `setCurrentBuffer`, and the `message` primitive land on `access.getModel()`. `createTestAPIContext` now backs `access` with a real `EditorModel` + `update()` reducer.
 
-- `EditorAPIContext` still declares mutable deterministic bridge fields such as `currentBuffer`, `cursorLine`, `cursorColumn`, `mode`, `statusMessage`, and `commandLine` in parallel with `access`.
-- `src/editor/tlisp-api.ts` still performs direct assignments such as `ctx.cursorLine =`, `ctx.currentBuffer =`, and `ctx.statusMessage =`. Replace these with `EditorModelAccess`, `State`, or explicit `Msg`/`Cmd` transitions.
-- Strengthen `editor-api-context.test.ts` to prove state commits use the model path and that missing required runtime services are rejected without casts.
+Gate evidence (2026-07-17): spec Change 2 gate (`editor-api-context`, `tlisp-api`, `editor-state-boundary`, `functional-patterns`, `fold-ops`) → **79 pass / 0 fail**; `bun run typecheck` exit 0; `git diff --check` clean; `chore44-baseline-inventory.test.ts` green (no API names changed); broad regression net (editor/count/macro/undo/dired/search/visual/mode/cursor/buffer/markdown) 186 pass / 0 fail.
 
 #### Implementation requirements
 

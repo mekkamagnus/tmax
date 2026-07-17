@@ -179,7 +179,7 @@ describe("buffer-set-read-only", () => {
   test("sets buffer read-only", () => {
     const state = createState();
     state.buffers.set("test-buf", FunctionalTextBufferImpl.create("hello"));
-    state.currentBuffer = state.buffers.get("test-buf")!;
+    state.setCurrentBufferDirect(state.buffers.get("test-buf")!);
     const api = createEditorAPI(state);
 
     const setRO = expectDefined(api.get("buffer-set-read-only"));
@@ -190,7 +190,7 @@ describe("buffer-set-read-only", () => {
   test("sets buffer writable again", () => {
     const state = createState();
     state.buffers.set("test-buf", FunctionalTextBufferImpl.create("hello"));
-    state.currentBuffer = state.buffers.get("test-buf")!;
+    state.setCurrentBufferDirect(state.buffers.get("test-buf")!);
     const api = createEditorAPI(state);
 
     const setRO = expectDefined(api.get("buffer-set-read-only"));

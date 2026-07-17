@@ -14,6 +14,7 @@ import type { LogCategory, LogView } from "./log-entry.ts";
 import type { LogLevel } from "./message-log.ts";
 import { stateUtils } from "../utils/state.ts";
 import { type EditorModel } from "./functional/model.ts";
+import type { Msg } from "./functional/messages.ts";
 import { runModel, type EditorModelAccess } from "./api/state-context.ts";
 import { createValidationError, AppError } from "../error/types.ts";
 import { createBufferOps } from "./api/buffer-ops.ts";
@@ -86,6 +87,20 @@ export function createEditorAPI(ctx: EditorAPIContext): Map<string, TLispFunctio
   const modelAccess: EditorModelAccess = ctx.access;
   const session = ctx.session;
   const caches = ctx.caches;
+  // CHORE-44 Change 2 (AC2.6/AC2.7): the ONLY deterministic-state read path is
+  // `getModel()` and the ONLY simple-write path is `write(msg)`. Side-effectful
+  // writes that the reducer alone cannot cover go through the named methods on
+  // the context (`ctx.setCurrentBuffer`, `ctx.setCursorLine`, …).
+  const getModel = (): EditorModel => ctx.access.getModel();
+  const write = (msg: Msg): void => { ctx.applyUpdate(msg); };
+  // `model.buffers` is typed ReadonlyMap (a model-level immutability hint) but
+  // the Editor runtime keeps it as the SAME mutable Map instance as
+  // `editor.buffers` (see editor.ts sync-back: `this.model = {...this.model,
+  // buffers: this.buffers}`). The few primitives that need `.get`/`.set` on
+  // the live registry read it through this mutable view. The test fixture
+  // also supplies a mutable Map.
+  const buffersMap = (): Map<string, FunctionalTextBuffer> =>
+    getModel().buffers as Map<string, FunctionalTextBuffer>;
   // Genuine State-monad read of the current mode (used by factories that still
   // take a getMode callback, e.g. cursor-ops). Runs stateUtils.getProperty
   // against EditorModel and commits the (unchanged) snapshot.
@@ -94,12 +109,16 @@ export function createEditorAPI(ctx: EditorAPIContext): Map<string, TLispFunctio
 
   // Add buffer operations
   const setCursorLine = (line: number) => {
-    ctx.cursorLine = line;
-    // Auto-expand fold if cursor lands inside a collapsed region
-    if (ctx.foldRanges && ctx.foldRanges.size > 0) {
-      for (const [foldStart, foldEnd] of ctx.foldRanges) {
+    ctx.setCursorLine(line);
+    // Auto-expand fold if cursor lands inside a collapsed region. Fold state
+    // is deterministic model state — commit a fresh Map through SetFoldRanges.
+    const current = getModel().foldRanges;
+    if (current && current.size > 0) {
+      for (const [foldStart, foldEnd] of current) {
         if (line > foldStart && line <= foldEnd) {
-          ctx.foldRanges.delete(foldStart);
+          const next = new Map(current);
+          next.delete(foldStart);
+          write({ type: "SetFoldRanges", ranges: next });
           break;
         }
       }
@@ -108,11 +127,11 @@ export function createEditorAPI(ctx: EditorAPIContext): Map<string, TLispFunctio
 
   const bufferOps = createBufferOps(
     modelAccess,
-    ctx.buffers,
-    (buffer) => { ctx.currentBuffer = buffer; },
+    buffersMap(),
+    (buffer) => { ctx.setCurrentBuffer(buffer); },
     setCursorLine,
-    (column) => { ctx.cursorColumn = column; },
-    (path: string) => { ctx.currentFilename = path; },
+    (column) => { ctx.setCursorColumn(column); },
+    (path: string) => { ctx.setCurrentFilename(path); },
     (modified: boolean) => ctx.setBufferModified?.(modified),
     new Set(['*Messages*', '*daemon*', '*Shell Output*', '*Async Output*', '*Tests*']),
   );
@@ -124,12 +143,13 @@ export function createEditorAPI(ctx: EditorAPIContext): Map<string, TLispFunctio
   const cursorOps = createCursorOps(
     modelAccess,
     setCursorLine,
-    (column) => { ctx.cursorColumn = column; },
+    (column) => { ctx.setCursorColumn(column); },
     getModeViaState, // getMode - State-monad read (cursor-ops reads cursor/buffer via access)
     () => { // updateVisualSelection callback
       const selection = session.visual.get();
       if (selection) {
-        selection.end = { line: ctx.cursorLine, column: ctx.cursorColumn };
+        const pos = getModel().cursorPosition;
+        selection.end = { line: pos.line, column: pos.column };
       }
     }
   );
@@ -140,13 +160,13 @@ export function createEditorAPI(ctx: EditorAPIContext): Map<string, TLispFunctio
   // Add mode operations
   const modeOps = createModeOps(
     modelAccess,
-    () => ctx.statusMessage,
-    (msg) => { ctx.statusMessage = msg; },
-    () => ctx.commandLine,
-    (cmd) => { ctx.commandLine = cmd; },
-    (pressed) => { ctx.spacePressed = pressed; },
-    () => ctx.cursorFocus,
-    (focus) => { ctx.cursorFocus = focus; }
+    () => getModel().statusMessage,
+    (msg) => { write({ type: "SetStatusMessage", message: msg }); },
+    () => getModel().commandLine,
+    (cmd) => { write({ type: "SetCommandLine", value: cmd }); },
+    (pressed) => { ctx.setSpacePressed(pressed); },
+    () => getModel().cursorFocus ?? 'buffer',
+    (focus) => { write({ type: "SetCursorFocus", focus }); }
   );
   for (const [key, value] of modeOps.entries()) {
     api.set(key, value);
@@ -155,7 +175,7 @@ export function createEditorAPI(ctx: EditorAPIContext): Map<string, TLispFunctio
   // Add file operations
   const fileOps = createFileOps(
     ctx.operations,
-    (msg) => { ctx.statusMessage = msg; },
+    (msg) => { write({ type: "SetStatusMessage", message: msg }); },
     undefined,
     undefined,
     modelAccess,
@@ -167,10 +187,10 @@ export function createEditorAPI(ctx: EditorAPIContext): Map<string, TLispFunctio
   // Add search operations (before bindings so :nohl can call into search state)
   const searchOps = createSearchOps(
     modelAccess,
-    (line) => { ctx.cursorLine = line; },
-    (column) => { ctx.cursorColumn = column; },
-    (message) => { ctx.statusMessage = message; },
-    (ranges) => { ctx.searchMatches = ranges; }
+    (line) => { ctx.setCursorLine(line); },
+    (column) => { ctx.setCursorColumn(column); },
+    (message) => { write({ type: "SetStatusMessage", message }); },
+    (ranges) => { write({ type: "SetSearchMatches", matches: ranges }); }
   );
   for (const [key, value] of searchOps.entries()) {
     api.set(key, value);
@@ -178,18 +198,18 @@ export function createEditorAPI(ctx: EditorAPIContext): Map<string, TLispFunctio
 
   // Add bindings operations
   const clearSearchHighlights = () => {
-    ctx.searchMatches = [];
+    write({ type: "SetSearchMatches", matches: [] });
     const fn = searchOps.get("search-clear-highlights");
     if (fn) fn([]);
   };
   const bindingsOps = createBindingsOps(
     modelAccess,
     () => ctx.operations,
-    (msg) => { ctx.statusMessage = msg; },
-    (cmd) => { ctx.commandLine = cmd; },
-    () => ctx.mode,
-    (mode) => { ctx.mode = mode; },
-    (focus) => { ctx.cursorFocus = focus; },
+    (msg) => { write({ type: "SetStatusMessage", message: msg }); },
+    (cmd) => { write({ type: "SetCommandLine", value: cmd }); },
+    () => getModel().mode,
+    (mode) => { write({ type: "SetMode", mode }); },
+    (focus) => { write({ type: "SetCursorFocus", focus }); },
     clearSearchHighlights,
     ctx.evalTlisp,
     (msg: string, level?: string) => { ctx.logMessage?.(msg, level); }
@@ -201,13 +221,14 @@ export function createEditorAPI(ctx: EditorAPIContext): Map<string, TLispFunctio
   // Add word navigation operations
   const wordOps = createWordOps(
     modelAccess,
-    (line) => { ctx.cursorLine = line; },
-    (column) => { ctx.cursorColumn = column; },
-    () => ctx.mode, // getMode
+    (line) => { ctx.setCursorLine(line); },
+    (column) => { ctx.setCursorColumn(column); },
+    () => getModel().mode, // getMode
     () => { // updateVisualSelection
       const selection = session.visual.get();
       if (selection) {
-        selection.end = { line: ctx.cursorLine, column: ctx.cursorColumn };
+        const pos = getModel().cursorPosition;
+        selection.end = { line: pos.line, column: pos.column };
       }
     }
   );
@@ -218,8 +239,8 @@ export function createEditorAPI(ctx: EditorAPIContext): Map<string, TLispFunctio
   // Add line navigation operations
   const lineOps = createLineOps(
     modelAccess,
-    (line) => { ctx.cursorLine = line; },
-    (column) => { ctx.cursorColumn = column; }
+    (line) => { ctx.setCursorLine(line); },
+    (column) => { ctx.setCursorColumn(column); }
   );
   for (const [key, value] of lineOps.entries()) {
     api.set(key, value);
@@ -229,9 +250,9 @@ export function createEditorAPI(ctx: EditorAPIContext): Map<string, TLispFunctio
   const deleteOps = createDeleteOps(
     modelAccess,
     session,
-    (buffer) => { ctx.currentBuffer = buffer; },
-    (line) => { ctx.cursorLine = line; },
-    (column) => { ctx.cursorColumn = column; }
+    (buffer) => { ctx.setCurrentBuffer(buffer); },
+    (line) => { ctx.setCursorLine(line); },
+    (column) => { ctx.setCursorColumn(column); }
   );
   for (const [key, value] of deleteOps.entries()) {
     api.set(key, value);
@@ -241,9 +262,9 @@ export function createEditorAPI(ctx: EditorAPIContext): Map<string, TLispFunctio
   const yankOps = createYankOps(
     modelAccess,
     session,
-    (buffer) => { ctx.currentBuffer = buffer; },
-    (line) => { ctx.cursorLine = line; },
-    (column) => { ctx.cursorColumn = column; }
+    (buffer) => { ctx.setCurrentBuffer(buffer); },
+    (line) => { ctx.setCursorLine(line); },
+    (column) => { ctx.setCursorColumn(column); }
   );
   for (const [key, value] of yankOps.entries()) {
     api.set(key, value);
@@ -252,10 +273,10 @@ export function createEditorAPI(ctx: EditorAPIContext): Map<string, TLispFunctio
   // Add change operator operations
   const changeOps = createChangeOps(
     modelAccess,
-    (buffer) => { ctx.currentBuffer = buffer; },
-    (line) => { ctx.cursorLine = line; },
-    (column) => { ctx.cursorColumn = column; },
-    (mode) => { ctx.mode = mode; },
+    (buffer) => { ctx.setCurrentBuffer(buffer); },
+    (line) => { ctx.setCursorLine(line); },
+    (column) => { ctx.setCursorColumn(column); },
+    (mode) => { write({ type: "SetMode", mode }); },
     session
   );
   for (const [key, value] of changeOps.entries()) {
@@ -265,14 +286,14 @@ export function createEditorAPI(ctx: EditorAPIContext): Map<string, TLispFunctio
   // Add undo/redo operations
   const undoRedoOps = createUndoRedoOps(
     modelAccess.getModel().session.undoRedo,
-    () => ctx.currentBuffer,
-    (buffer) => { ctx.currentBuffer = buffer; },
-    () => ctx.cursorLine,
-    (line) => { ctx.cursorLine = line; },
-    () => ctx.cursorColumn,
-    (column) => { ctx.cursorColumn = column; },
-    () => ctx.statusMessage,
-    (msg) => { ctx.statusMessage = msg; }
+    () => getModel().currentBuffer ?? null,
+    (buffer) => { ctx.setCurrentBuffer(buffer); },
+    () => getModel().cursorPosition.line,
+    (line) => { ctx.setCursorLine(line); },
+    () => getModel().cursorPosition.column,
+    (column) => { ctx.setCursorColumn(column); },
+    () => getModel().statusMessage,
+    (msg) => { write({ type: "SetStatusMessage", message: msg }); }
   );
   for (const [key, value] of undoRedoOps.api.entries()) {
     api.set(key, value);
@@ -286,11 +307,11 @@ export function createEditorAPI(ctx: EditorAPIContext): Map<string, TLispFunctio
   const visualOps = createVisualOps(
     modelAccess,
     session,
-    (buffer) => { ctx.currentBuffer = buffer; },
-    (line) => { ctx.cursorLine = line; },
-    (column) => { ctx.cursorColumn = column; },
-    (mode) => { ctx.mode = mode; },
-    (msg) => { ctx.statusMessage = msg; }
+    (buffer) => { ctx.setCurrentBuffer(buffer); },
+    (line) => { ctx.setCursorLine(line); },
+    (column) => { ctx.setCursorColumn(column); },
+    (mode) => { write({ type: "SetMode", mode }); },
+    (msg) => { write({ type: "SetStatusMessage", message: msg }); }
   );
   for (const [key, value] of visualOps.entries()) {
     api.set(key, value);
@@ -300,8 +321,8 @@ export function createEditorAPI(ctx: EditorAPIContext): Map<string, TLispFunctio
   const textObjectsOps = createTextObjectsOps(
     modelAccess,
     session,
-    (buffer) => { ctx.currentBuffer = buffer; },
-    (mode) => { ctx.mode = mode; }
+    (buffer) => { ctx.setCurrentBuffer(buffer); },
+    (mode) => { write({ type: "SetMode", mode }); }
   );
   for (const [key, value] of textObjectsOps.entries()) {
     api.set(key, value);
@@ -310,11 +331,11 @@ export function createEditorAPI(ctx: EditorAPIContext): Map<string, TLispFunctio
   // Add jump operations (US-1.6.1)
   const jumpOps = createJumpOps(
     modelAccess,
-    (line) => { ctx.cursorLine = line; },
-    (column) => { ctx.cursorColumn = column; },
-    (top) => { ctx.viewportTop = top; },
+    (line) => { ctx.setCursorLine(line); },
+    (column) => { ctx.setCursorColumn(column); },
+    (top) => { write({ type: "SetViewportTop", top }); },
     () => ctx.terminal.getSize().height,
-    (left: number) => { ctx.viewportLeft = left; },
+    (left: number) => { write({ type: "SetViewportLeft", left }); },
     () => ctx.terminal.getSize().width,
   );
   for (const [key, value] of jumpOps.entries()) {
@@ -343,7 +364,7 @@ export function createEditorAPI(ctx: EditorAPIContext): Map<string, TLispFunctio
   const yankPopOps = createYankPopOps(
     modelAccess,
     session.yankPop,
-    (buffer) => { ctx.currentBuffer = buffer; }
+    (buffer) => { ctx.setCurrentBuffer(buffer); }
   );
   for (const [key, value] of yankPopOps.entries()) {
     api.set(key, value);
@@ -398,13 +419,13 @@ export function createEditorAPI(ctx: EditorAPIContext): Map<string, TLispFunctio
   const syntaxOps = createSyntaxOps(
     modelAccess,
     () => {
-      const buf = ctx.currentBuffer;
+      const buf = getModel().currentBuffer;
       if (!buf) return 0;
       const result = buf.getLineCount();
       return Either.isLeft(result) ? 0 : result.right;
     },
     (line: number) => {
-      const buf = ctx.currentBuffer;
+      const buf = getModel().currentBuffer;
       if (!buf) return '';
       const result = buf.getLine(line);
       return Either.isLeft(result) ? '' : result.right;
@@ -417,8 +438,8 @@ export function createEditorAPI(ctx: EditorAPIContext): Map<string, TLispFunctio
   // Add replace operations
   const replaceOps = createReplaceOps(
     modelAccess,
-    (buffer) => { ctx.currentBuffer = buffer; },
-    (line) => { ctx.cursorLine = line; }
+    (buffer) => { ctx.setCurrentBuffer(buffer); },
+    (line) => { ctx.setCursorLine(line); }
   );
   for (const [key, value] of replaceOps.entries()) {
     api.set(key, value);
@@ -427,8 +448,8 @@ export function createEditorAPI(ctx: EditorAPIContext): Map<string, TLispFunctio
   // Add indent operations
   const indentOps = createIndentOps(
     modelAccess,
-    (buffer) => { ctx.currentBuffer = buffer; },
-    (line) => { ctx.cursorLine = line; },
+    (buffer) => { ctx.setCurrentBuffer(buffer); },
+    (line) => { ctx.setCursorLine(line); },
     () => 4 // tabSize default; TODO: read from config
   );
   for (const [key, value] of indentOps.entries()) {
@@ -459,8 +480,8 @@ export function createEditorAPI(ctx: EditorAPIContext): Map<string, TLispFunctio
   // Add dired operations
   const diredOps = createDiredOps(
     modelAccess,
-    (buffer) => { ctx.currentBuffer = buffer; },
-    ctx.buffers
+    (buffer) => { ctx.setCurrentBuffer(buffer); },
+    buffersMap()
   );
   for (const [key, value] of diredOps.entries()) {
     api.set(key, value);
@@ -514,17 +535,8 @@ export function createEditorAPI(ctx: EditorAPIContext): Map<string, TLispFunctio
       return fn ? fn(expr) : Either.right(createNil());
     },
     {
-      getConfig: () => ctx.config ?? {
-        theme: "default",
-        tabSize: 4,
-        autoSave: false,
-        keyBindings: {},
-        maxUndoLevels: 100,
-        showLineNumbers: true,
-        relativeLineNumbers: false,
-        wordWrap: false,
-      },
-      setConfig: (config) => { ctx.config = config; },
+      getConfig: () => getModel().config,
+      setConfig: (config) => { write({ type: "SetConfig", config }); },
     },
     modelAccess,
   );
@@ -539,31 +551,32 @@ export function createEditorAPI(ctx: EditorAPIContext): Map<string, TLispFunctio
   const astOps = createAstOps({
     access: modelAccess,
     caches,
-    getBufferName: () => ctx.currentFilename ?? "*scratch*",
+    getBufferName: () => getModel().currentFilename ?? "*scratch*",
     getBufferText: () => {
-      const buf = ctx.currentBuffer;
+      const buf = getModel().currentBuffer;
       if (!buf) return "";
       const content = buf.getContent();
       return Either.isLeft(content) ? "" : content.right;
     },
-    getCursorLine: () => ctx.cursorLine,
-    getCursorColumn: () => ctx.cursorColumn,
+    getCursorLine: () => getModel().cursorPosition.line,
+    getCursorColumn: () => getModel().cursorPosition.column,
     getCursorOffset: () => {
-      const buf = ctx.currentBuffer;
+      const m = getModel();
+      const buf = m.currentBuffer;
       if (!buf) return 0;
       // Compute offset from line + column
       const content = buf.getContent();
       if (Either.isLeft(content)) return 0;
       const text = content.right;
       let offset = 0;
-      for (let i = 0; i < ctx.cursorLine; i++) {
+      for (let i = 0; i < m.cursorPosition.line; i++) {
         const nl = text.indexOf("\n", offset);
         if (nl < 0) break;
         offset = nl + 1;
       }
-      return offset + ctx.cursorColumn;
+      return offset + m.cursorPosition.column;
     },
-    setStatusMessage: (msg) => { ctx.statusMessage = msg; },
+    setStatusMessage: (msg) => { write({ type: "SetStatusMessage", message: msg }); },
   });
   for (const [key, value] of astOps.entries()) {
     api.set(key, value);
@@ -573,34 +586,35 @@ export function createEditorAPI(ctx: EditorAPIContext): Map<string, TLispFunctio
   const navigationOps = createNavigationOps({
     access: modelAccess,
     caches,
-    getBufferName: () => ctx.currentFilename ?? "*scratch*",
+    getBufferName: () => getModel().currentFilename ?? "*scratch*",
     getBufferText: () => {
-      const buf = ctx.currentBuffer;
+      const buf = getModel().currentBuffer;
       if (!buf) return "";
       const content = buf.getContent();
       return Either.isLeft(content) ? "" : content.right;
     },
-    getCursorLine: () => ctx.cursorLine,
-    getCursorColumn: () => ctx.cursorColumn,
+    getCursorLine: () => getModel().cursorPosition.line,
+    getCursorColumn: () => getModel().cursorPosition.column,
     getCursorOffset: () => {
-      const buf = ctx.currentBuffer;
+      const m = getModel();
+      const buf = m.currentBuffer;
       if (!buf) return 0;
       const content = buf.getContent();
       if (Either.isLeft(content)) return 0;
       const text = content.right;
       let offset = 0;
-      for (let i = 0; i < ctx.cursorLine; i++) {
+      for (let i = 0; i < m.cursorPosition.line; i++) {
         const nl = text.indexOf("\n", offset);
         if (nl < 0) break;
         offset = nl + 1;
       }
-      return offset + ctx.cursorColumn;
+      return offset + m.cursorPosition.column;
     },
     gotoPosition: (line, column) => {
-      ctx.cursorLine = line;
-      ctx.cursorColumn = column;
+      ctx.setCursorLine(line);
+      ctx.setCursorColumn(column);
     },
-    setStatusMessage: (msg) => { ctx.statusMessage = msg; },
+    setStatusMessage: (msg) => { write({ type: "SetStatusMessage", message: msg }); },
   });
   for (const [key, value] of navigationOps.entries()) {
     api.set(key, value);
@@ -608,7 +622,7 @@ export function createEditorAPI(ctx: EditorAPIContext): Map<string, TLispFunctio
 
   // Add messages operations
   api.set('messages-buffer', (_args: TLispValue[]): Either<AppError, TLispValue> => {
-    const buf = ctx.buffers.get('*Messages*');
+    const buf = buffersMap().get('*Messages*');
     if (!buf) return Either.right(createString(''));
     const content = buf.getContent();
     if (content._tag === 'Left') return Either.right(createString(''));
@@ -619,7 +633,7 @@ export function createEditorAPI(ctx: EditorAPIContext): Map<string, TLispFunctio
   // messages-buffer). Lets users/agents read daemon connection events without
   // buffer switching.
   api.set('daemon-buffer', (_args: TLispValue[]): Either<AppError, TLispValue> => {
-    const buf = ctx.buffers.get('*daemon*');
+    const buf = buffersMap().get('*daemon*');
     if (!buf) return Either.right(createString(''));
     const content = buf.getContent();
     if (content._tag === 'Left') return Either.right(createString(''));
@@ -654,7 +668,7 @@ export function createEditorAPI(ctx: EditorAPIContext): Map<string, TLispFunctio
         }
       }).join(' ');
     }
-    ctx.statusMessage = text;
+    write({ type: "SetStatusMessage", message: text });
     if (ctx.logMessage) ctx.logMessage(text);
     return Either.right(createString(text));
   });
@@ -672,7 +686,7 @@ export function createEditorAPI(ctx: EditorAPIContext): Map<string, TLispFunctio
         default: return '';
       }
     }).join(' ');
-    ctx.statusMessage = text;
+    write({ type: "SetStatusMessage", message: text });
     // Deliberately do NOT call logMessage — echo-only by design.
     return Either.right(createString(text));
   });
@@ -743,7 +757,7 @@ export function createEditorAPI(ctx: EditorAPIContext): Map<string, TLispFunctio
     const validLevels = ['debug', 'info', 'warn', 'error'];
     if (!validLevels.includes(rawLevel)) return Either.left(createValidationError('FormatError', `Invalid log level: ${rawLevel}`));
     if (ctx.logMessage) ctx.logMessage(text, rawLevel);
-    if (['info', 'warn', 'error'].includes(rawLevel)) ctx.statusMessage = text;
+    if (['info', 'warn', 'error'].includes(rawLevel)) write({ type: "SetStatusMessage", message: text });
     return Either.right(createString(text));
   });
 
@@ -780,7 +794,7 @@ export function createEditorAPI(ctx: EditorAPIContext): Map<string, TLispFunctio
     const log = ctx.getMessageLog?.();
     if (log) {
       log.clear();
-      ctx.buffers.set('*Messages*', FunctionalTextBufferImpl.create(''));
+      buffersMap().set('*Messages*', FunctionalTextBufferImpl.create(''));
     }
     return Either.right(createNil());
   });
@@ -840,39 +854,46 @@ export function createEditorAPI(ctx: EditorAPIContext): Map<string, TLispFunctio
   });
 
   api.set('last-command', (_args: TLispValue[]): Either<AppError, TLispValue> => {
-    return Either.right(createString(ctx.lastCommand ?? ''));
+    return Either.right(createString(getModel().lastCommand ?? ''));
   });
 
   // Fold operations
   const getBufferLine = (line: number): string => {
-    const buf = ctx.currentBuffer;
+    const buf = getModel().currentBuffer;
     if (!buf) return '';
     const result = buf.getLine(line);
     return Either.isLeft(result) ? '' : result.right;
   };
   const getBufferLineCount = (): number => {
-    const buf = ctx.currentBuffer;
+    const buf = getModel().currentBuffer;
     if (!buf) return 0;
     const result = buf.getLineCount();
     return Either.isLeft(result) ? 0 : result.right;
+  };
+  // CHORE-44 Change 2: foldRanges is deterministic model state. Build the new
+  // Map from getModel().foldRanges and commit through SetFoldRanges (the
+  // reducer clones into the model). The pure fold helpers always return a
+  // fresh `Map<number, number>` in `result.foldRanges`.
+  const commitFoldRanges = (next: Map<number, number> | undefined): void => {
+    write({ type: "SetFoldRanges", ranges: next ?? new Map() });
   };
 
   api.set('fold-toggle', (args: TLispValue[]): Either<AppError, TLispValue> => {
     if (args.length < 1) return Either.left(createValidationError('FormatError', 'fold-toggle requires a line number'));
     const line = Number(args[0]!.value);
     const headingRanges = findHeadingRanges(getBufferLine, getBufferLineCount());
-    const editorState = { foldRanges: ctx.foldRanges };
+    const editorState = { foldRanges: getModel().foldRanges };
     const result = foldToggle(editorState, line, headingRanges);
-    ctx.foldRanges = result.foldRanges ? new Map(result.foldRanges) : undefined;
+    commitFoldRanges(result.foldRanges ? new Map(result.foldRanges) : undefined);
     return Either.right(createNil());
   });
 
   api.set('fold-open', (args: TLispValue[]): Either<AppError, TLispValue> => {
     if (args.length < 1) return Either.left(createValidationError('FormatError', 'fold-open requires a line number'));
     const line = Number(args[0]!.value);
-    const editorState = { foldRanges: ctx.foldRanges };
+    const editorState = { foldRanges: getModel().foldRanges };
     const result = foldOpen(editorState, line);
-    ctx.foldRanges = result.foldRanges ? new Map(result.foldRanges) : undefined;
+    commitFoldRanges(result.foldRanges ? new Map(result.foldRanges) : undefined);
     return Either.right(createNil());
   });
 
@@ -880,24 +901,24 @@ export function createEditorAPI(ctx: EditorAPIContext): Map<string, TLispFunctio
     if (args.length < 2) return Either.left(createValidationError('FormatError', 'fold-close requires start and end line numbers'));
     const startLine = Number(args[0]!.value);
     const endLine = Number(args[1]!.value);
-    const editorState = { foldRanges: ctx.foldRanges };
+    const editorState = { foldRanges: getModel().foldRanges };
     const result = foldClose(editorState, startLine, endLine);
-    ctx.foldRanges = result.foldRanges ? new Map(result.foldRanges) : undefined;
+    commitFoldRanges(result.foldRanges ? new Map(result.foldRanges) : undefined);
     return Either.right(createNil());
   });
 
   api.set('fold-close-all', (_args: TLispValue[]): Either<AppError, TLispValue> => {
     const headingRanges = findHeadingRanges(getBufferLine, getBufferLineCount());
-    const editorState = { foldRanges: ctx.foldRanges };
+    const editorState = { foldRanges: getModel().foldRanges };
     const result = foldCloseAll(editorState, headingRanges);
-    ctx.foldRanges = result.foldRanges ? new Map(result.foldRanges) : undefined;
+    commitFoldRanges(result.foldRanges ? new Map(result.foldRanges) : undefined);
     return Either.right(createNil());
   });
 
   api.set('fold-open-all', (_args: TLispValue[]): Either<AppError, TLispValue> => {
-    const editorState = { foldRanges: ctx.foldRanges };
+    const editorState = { foldRanges: getModel().foldRanges };
     const result = foldOpenAll(editorState);
-    ctx.foldRanges = result.foldRanges ? new Map(result.foldRanges) : undefined;
+    commitFoldRanges(result.foldRanges ? new Map(result.foldRanges) : undefined);
     return Either.right(createNil());
   });
 
@@ -905,21 +926,21 @@ export function createEditorAPI(ctx: EditorAPIContext): Map<string, TLispFunctio
     if (args.length < 1) return Either.left(createValidationError('FormatError', 'fold-by-level requires a max level'));
     const maxLevel = Number(args[0]!.value);
     const headingRanges = findHeadingRanges(getBufferLine, getBufferLineCount());
-    const editorState = { foldRanges: ctx.foldRanges };
+    const editorState = { foldRanges: getModel().foldRanges };
     const result = foldByLevel(editorState, maxLevel, headingRanges);
-    ctx.foldRanges = result.foldRanges ? new Map(result.foldRanges) : undefined;
+    commitFoldRanges(result.foldRanges ? new Map(result.foldRanges) : undefined);
     return Either.right(createNil());
   });
 
   api.set('fold-is-collapsed', (args: TLispValue[]): Either<AppError, TLispValue> => {
     if (args.length < 1) return Either.left(createValidationError('FormatError', 'fold-is-collapsed requires a line number'));
     const line = Number(args[0]!.value);
-    const editorState = { foldRanges: ctx.foldRanges };
+    const editorState = { foldRanges: getModel().foldRanges };
     return Either.right(createBoolean(foldIsCollapsed(editorState, line)));
   });
 
   api.set('fold-get-ranges', (_args: TLispValue[]): Either<AppError, TLispValue> => {
-    const editorState = { foldRanges: ctx.foldRanges };
+    const editorState = { foldRanges: getModel().foldRanges };
     const ranges = foldGetRanges(editorState);
     return Either.right(createList(ranges.map(r =>
       createList([createNumber(r.start), createNumber(r.end)])
@@ -1117,7 +1138,7 @@ export function createEditorAPI(ctx: EditorAPIContext): Map<string, TLispFunctio
     if (args.length < 1) return Either.left(createValidationError('FormatError', 'read-string requires 1 argument: prompt'));
     if (args[0]!.type !== 'string') return Either.left(createValidationError('TypeError', 'read-string prompt must be a string'));
     // For now, return empty string. Full implementation requires async minibuffer support.
-    ctx.statusMessage = String(args[0]!.value);
+    write({ type: "SetStatusMessage", message: String(args[0]!.value) });
     return Either.right(createString(''));
   });
 
@@ -1484,9 +1505,9 @@ export function createEditorAPI(ctx: EditorAPIContext): Map<string, TLispFunctio
   // Buffer scanning helpers + fs/git context resolvers live alongside.
   const browseUrlDeps: BrowseUrlPrimitiveDeps = {
     access: modelAccess,
-    getCurrentBuffer: () => ctx.currentBuffer,
-    getCurrentBufferName: () => ctx.currentFilename ?? "*scratch*",
-    getCurrentBufferPath: () => ctx.currentFilename,
+    getCurrentBuffer: () => getModel().currentBuffer ?? null,
+    getCurrentBufferName: () => getModel().currentFilename ?? "*scratch*",
+    getCurrentBufferPath: () => getModel().currentFilename,
     spawn: (argv: string[]) => {
       try {
         const proc = Bun.spawn(argv, { stdout: "ignore", stderr: "ignore", stdin: "ignore" });
