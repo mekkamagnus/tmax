@@ -31,23 +31,11 @@ export async function handleInsertMode(editor: EditorDispatchPort, key: string, 
   }
   // Handle Enter key in insert mode with proper escaping
   else if (normalizedKey === "Enter") {
+    // CHORE-44 Change 6 (AC6.3): post-newline policy lives in the T-Lisp
+    // post-newline hook. The handler contains no major-mode branching and
+    // makes no post-newline decision itself.
     editor.executeCommand("(insert-newline)");
-    // Auto-indent: set indent on the new line (cursor is now on it)
-    try {
-      const line = (editor.getModel() as { cursorPosition?: { line: number } }).cursorPosition?.line ?? 0;
-      editor.executeCommand(`(indent-apply-line ${line})`);
-    } catch (_) {
-      // No indent rules set — silently skip
-    }
-    // List auto-continuation for markdown mode only
-    const majorMode = editor.getCurrentMajorMode();
-    if (majorMode === "markdown") {
-      try {
-        editor.executeCommand("(markdown-list-continue)");
-      } catch (_) {
-        // No list context — silently skip
-      }
-    }
+    editor.executeCommand("(post-newline-hook)");
   }
   // Handle Backspace key in insert mode
   else if (normalizedKey === "Backspace") {

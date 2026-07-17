@@ -1,0 +1,43 @@
+(defmodule editor/commands/post-newline
+  (export post-newline-hook)
+
+;; post-newline.tlisp — CHORE-44 Change 6 (AC6.3)
+;;
+;; Generic post-newline policy invoked by insert-handler.ts AFTER
+;; (insert-newline) has committed the line break. The TypeScript handler
+;; contains NO mode branching, NO Markdown name, and NO indentation policy;
+;; it just calls (post-newline-hook).
+;;
+;; Preserves the prior TS policy byte-for-byte:
+;;   1. Auto-indent: read the cursor line (now the newly-created line) and
+;;      call (indent-apply-line N). If no indent rules are registered for
+;;      the current buffer this primitive returns an error, which we swallow
+;;      silently — matching the old try/catch.
+;;   2. Markdown list continuation: if the current major mode is "markdown",
+;;      call (markdown-list-continue); if there is no list context, that
+;;      function returns nil and any inner error is swallowed.
+;;
+;; T-Lisp gotchas observed (see docs/learnings.md):
+;;   - equal, not eq, for the string comparison.
+;;   - condition-case form: (condition-case var body (error (e) handler)).
+;;   - string literals on a single source line.
+
+(defun post-newline--indent-current-line ()
+  "Apply indentation rules to the line the cursor sits on after Enter.
+Swallows the 'no indent rules' error to match the previous TS try/catch."
+  (condition-case err
+    (indent-apply-line (cursor-line))
+    (error (e) nil)))
+
+(defun post-newline-hook ()
+  "Run indent-apply-line (guarded) and, in Markdown mode, list continuation.
+Called by the insert handler immediately after (insert-newline)."
+  (post-newline--indent-current-line)
+  (if (equal (major-mode-get) "markdown")
+      (condition-case err
+        (markdown-list-continue)
+        (error (e) nil))
+      nil))
+
+(provide "post-newline")
+)

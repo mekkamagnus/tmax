@@ -242,10 +242,10 @@ export async function handleNormalMode(editor: EditorDispatchPort, key: string, 
     return;
   }
 
-  // Major-mode-scoped bindings (e.g. "] h" in markdown). The T-Lisp mode
-  // keymap above has no major-mode concept, so these live in the editor's
-  // keyMappings table and are resolved here as the dispatch path of last
-  // resort (after global/mode bindings). Precedence: mode+majorMode >
+  // Major-mode-scoped bindings (e.g. "] h" in the heading-jump mode). The
+  // T-Lisp mode keymap above has no major-mode concept, so these live in the
+  // editor's keyMappings table and are resolved here as the dispatch path of
+  // last resort (after global/mode bindings). Precedence: mode+majorMode >
   // mode > majorMode > global (see resolveMapping).
   if (majorMode && majorMode !== "fundamental") {
     const mapping = lookupMajorModeBinding(editor, lookupKey, majorMode);

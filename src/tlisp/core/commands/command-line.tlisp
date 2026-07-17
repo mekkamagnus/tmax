@@ -1,0 +1,66 @@
+(defmodule editor/commands/command-line
+  (export editor-dispatch-command-line)
+
+;; command-line.tlisp — CHORE-44 Change 6 (AC6.2)
+;;
+;; Owns the command-mode line policy that previously lived inside the TypeScript
+;; command-handler. The handler now passes the raw command-line string here and
+;; this module decides what to do:
+;;
+;;   :%s/find/replace/flags   -> (query-replace find replace)   (whole-buffer)
+;;   :%s/find/replace/        -> (query-replace find replace)   (whole-buffer)
+;;   :s/find/replace/         -> (replace-find-matches find)
+;;                               (replace-apply-all)            (current-line)
+;;   :dired                   -> (dired ".")
+;;   :dired <dir>             -> (dired <dir>)
+;;   anything else            -> (editor-execute-command-line)
+;;
+;; Behaviour is preserved byte-for-byte from the prior TypeScript policy:
+;;   - whole-buffer replace uses query-replace regardless of flags
+;;     (the original TS code ignored the gic flags and always called
+;;      query-replace, which itself drives replace-find-matches across
+;;      the whole buffer).
+;;   - current-line replace calls replace-find-matches (line-scoped) and
+;;     immediately applies all matches.
+;;   - find/replace are passed as runtime string VALUES, never embedded
+;;     into source, so no quote-escaping is required.
+;;
+;; T-Lisp gotchas observed (see docs/learnings.md):
+;;   - string-match uses JS RegExp under the hood and seeds match-string.
+;;   - cond clauses take exactly (test expr); bodies wrapped in progn.
+;;   - string literals must stay on a single source line.
+
+(defun editor-dispatch-command-line (cmd-line)
+  "Dispatch a raw command-mode line to the owning T-Lisp command.
+CMD-LINE is the exact text the user typed after the ':' prompt
+(the leading ':' is NOT included). Preserves the prior TypeScript
+substitute/Dired/execute policy."
+  (let ((line (if (stringp cmd-line) cmd-line "")))
+    (cond
+      ;; :%s/find/replace/flags  — whole-buffer query-replace.
+      ;; Flags (gic) are accepted but, matching the previous TS policy,
+      ;; do not change the dispatched command.
+      ((string-match "^%s/(.+)/(.*)/([gic]*)$" line)
+       (let ((find (match-string 1))
+             (replace (match-string 2)))
+         (query-replace (or find "") (or replace ""))))
+      ;; :s/find/replace/  — current-line replace, applied immediately.
+      ((string-match "^s/(.+)/(.*)/?$" line)
+       (let ((find (match-string 1)))
+         (replace-find-matches (or find ""))
+         (replace-apply-all)))
+      ;; :dired            — open the current directory.
+      ((string= line "dired")
+       (dired "."))
+      ;; :dired <dir>      — open the given directory.
+      ((string-match "^dired[ \t]+(.+)$" line)
+       (let ((dir (match-string 1)))
+         (dired (or dir "."))))
+      ;; Everything else (:q, :w, :wq, :nohl, :marks, unknown…) is handled
+      ;; by the existing TS-backed editor-execute-command-line primitive,
+      ;; which also clears the line and returns to normal mode.
+      (t
+       (editor-execute-command-line)))))
+
+(provide "command-line")
+)

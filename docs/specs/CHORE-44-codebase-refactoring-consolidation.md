@@ -65,7 +65,7 @@ Status meanings:
 | Change 3 | **COMPLETE** | `command-runtime.ts` extracted (queue/drain/correlation/classify); `binding-runtime.ts` owns full core/fallback/init policy; `editor.ts` holds only one-line facades + path resolution (AC3.7 verified); `main.tsx` bootstrap collapsed 3→1 `EditorState`; delegation tests cover CommandRuntime + BindingRuntime with fakes; AC3.5 notification-once preserved. | — |
 | Change 4 | **COMPLETE** | evaluator.ts 5021→4005 lines; form-shapes validators for all named forms (AC4.1); single `special-form-dispatch.ts` classification (AC4.2); `module-forms.ts`/`test-forms.ts`/`function-calls.ts` extracted, evaluator delegates (AC4.7); per-instance `CoverageState` (AC4.8); TCO/async/macros/modules/trt/trace verified intact (full evaluator gate 154/0). | — |
 | Change 5 | **COMPLETE** | Exact named result types for 18/23 methods + named `JsonObject` for 5 genuinely-dynamic serialized-state results (no `unknown`, param catch-all removed — AC5.7); router owns version/lookup/`-32602`/error-mapping (AC5.8); 4 domain handler files + `ServerContext`, server.ts 2353→1614 lines (AC5.9); declarative `SYNC_POLICY` + `server-frame-sync.test.ts` proving AC5.3–5.5; `server-rpc-router.test.ts`. Server gate 84/0 (no hangs). | — |
-| Change 6 | **PARTIAL** | `EditorDispatchPort` exists; `KeyMapping`/`resolveMapping` moved to `key-resolution.ts`; handlers no longer import `editor.ts`. | Move substitute/Dired parsing and Markdown/indent policy to T-Lisp, finish all policy routing, and run the complete Change 6 gate without output-truncating pipelines. |
+| Change 6 | **COMPLETE** | `:%s`/`:s`/`:dired` parsing → T-Lisp `command-line.tlisp` dispatcher; markdown list-continuation + indent → T-Lisp `post-newline.tlisp` hook; handlers are pure routers (AC6.2/6.3); `architecture-boundaries.test.ts` scans all 6 handlers (AC6.6). Found+fixed a Change 4 `set!` dispatch typo (a476392) that had broken 40 editor tests. Gate 209/0. | — |
 | Changes 7–12 | **NOT STARTED** | No numbered change has its principal implementation/test files. | Resume in order only after Changes 1–6 meet their completion gates. |
 | Steps 13–14 | **NOT STARTED** | Existing unrelated Vim/Markdown playbooks remain available. | Create the cross-cutting CHORE-44 playbook only after Changes 1–12 are complete, then run the full validation matrix. |
 
@@ -469,19 +469,21 @@ Completion gate: AC5.1–AC5.9 and every required server test must pass in one u
 
 Remove command-specific decisions from TypeScript handlers, move them into T-Lisp, and break the current `Editor`/handler import cycle. Handlers should normalize/route keys and invoke one typed dispatch surface only.
 
-#### Current checkpoint status — PARTIAL (2026-07-17)
+#### Current checkpoint status — COMPLETE (2026-07-17)
 
-Completed:
+Command-line parsing and post-newline mode policy moved out of TypeScript handlers into T-Lisp; handlers are pure routers.
 
-- Added `src/editor/handlers/editor-dispatch-port.ts` and migrated all six handlers away from imports of `editor.ts`.
-- Moved `KeyMapping` and `resolveMapping` to `key-resolution.ts`, retaining re-exports for public compatibility.
-- AC6.1 and the source typecheck pass. Independently rerun `architecture-boundaries`, `macro-recording`, `count-prefix`, and `vim-dispatch` files pass; the prior “9 fail” summary was concurrent-load timeout noise, not a reproduced assertion failure.
+- **AC6.2** — NEW `src/tlisp/core/commands/command-line.tlisp` `(editor-dispatch-command-line cmd-line)` does the `:%s/find/replace/[gic]`, `:s/find/replace`, `:dired`, `:dired <dir>` parsing via `string-match`/`match-string` (JS RegExp) and dispatches to `dired`/`query-replace`/`replace-find-matches`+`replace-apply-all`/`editor-execute-command-line`. find/replace pass as runtime string values (no source-embedding/escaping). `command-handler.ts` Enter branch is one `(editor-dispatch-command-line …)` call — no `:%s`/`s/`/`dired` regex or strings remain.
+- **AC6.3** — NEW `src/tlisp/core/commands/post-newline.tlisp` `(post-newline-hook)` does `(indent-apply-line (cursor-line))` (guarded by `condition-case`) then `(if (equal (major-mode-get) "markdown") (condition-case (markdown-list-continue) …))`. `insert-handler.ts` Enter branch is `(insert-newline)` then `(post-newline-hook)` — no `markdown`/`getCurrentMajorMode`/indent-policy in TypeScript.
+- Modules registered in `src/tlisp/core/bindings/normal.tlisp` (`require-module` after `replace`/`dired`/`markdown`).
+- **AC6.6** — `architecture-boundaries.test.ts` extended to scan ALL six handlers + the port for: `from "../editor.ts"`, `:%s`/`%s/`/`:s/`, `markdown`/`markdown-list-continue`, `indent-apply-line`/`indent-apply`, `=== "markdown"`, `majorMode === "markdown"`. (`getCurrentMajorMode` is permitted because every handler legitimately passes it to `resolveMapping` for keymap routing — that is routing, not mode policy; the canonical spec Validation command line 859 only forbids `from "../editor.ts" | :%s | majorMode === "markdown"`.) AC6.1 (no editor.ts import) and AC6.4 (no cycle) hold.
+- **AC6.5** — behavior preserved: the exact command-line patterns still mutate the buffer identically; Enter still inserts a newline + applies indent + continues markdown lists in markdown mode.
 
-Remaining:
+**Critical regression found and fixed mid-Change-6:** while validating, the Change 6 targeted gate showed 40 failures (count-prefix/vim-dispatch/minibuffer-input/macro-recording). Bisect isolated these to Change 4 (commit `f41206a`), NOT Change 6: a one-character typo in `src/tlisp/evaluator/special-form-dispatch.ts` (`set:` instead of `"set!":`) made `isSpecialForm("set!")` false, so the ASYNC path mis-dispatched every `(set! …)` — which all key bindings use (the vim-parity modules mutate state via `set!`). The SYNC path kept `case "set!"`, masking it from Change 4's evaluator-only gate. Fixed in commit `a476392`; the 4-file gate went 43/40 → 83/0.
 
-- `command-handler.ts` still owns Dired selection and substitute parsing.
-- `insert-handler.ts` still checks Markdown major mode and invokes indentation/list continuation policy.
-- Finish the T-Lisp command-line dispatcher and generic post-insert/newline hook, extend static architecture tests to all handlers, and run every named Change 6 test plus trt in the exact targeted gate.
+Gate evidence (2026-07-17): Change 6 targeted gate (`architecture-boundaries`, `minibuffer-input`, `query-replace`, `dired`, `macro-recording`, `count-prefix`, `visual-mode-selection`, `vim-dispatch`, `markdown-commands`, `markdown-spec-039`) → **209 pass / 0 fail**; `bun run typecheck` exit 0; `git diff --check` clean; frozen inventory green.
+
+**Pre-existing failure (recorded, not caused by this chore):** `bun run test:trt` reports `101 passed / 4 failed` — the 4 failures are `browse-detect-at-point-*` in `browse-url.test.tlisp`. Verified pre-existing at the starting commit `21f8ce3` (same 101/4) and unrelated to Change 6 (browse-URL detection, not command-line/post-newline). They are inherited in-progress work (constraint #8 — preserve unrelated Vim-parity work) and are deferred; Step 14 will reconcile the full validation matrix.
 
 #### Implementation requirements
 

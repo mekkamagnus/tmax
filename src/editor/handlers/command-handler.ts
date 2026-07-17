@@ -50,30 +50,15 @@ export async function handleCommandMode(editor: EditorDispatchPort, key: string,
     editor.applyUpdate({ type: "ClearCommandLine" });
     return; // Don't process this key further
   } else if (normalizedKey === "Enter") {
-    // Execute the command line through the T-Lisp key binding system
+    // CHORE-44 Change 6 (AC6.2): the command-line parsing policy lives in
+    // T-Lisp now. The handler passes the raw command line as a runtime
+    // string argument to the T-Lisp dispatcher; it owns no command-specific
+    // regex and no command-specific decisions.
     const cmdLine = editor.getModel().commandLine;
+    const escaped = editor.escapeKeyForTLisp(cmdLine);
 
-    // SPEC-035: Dispatch special command patterns
     try {
-      if (cmdLine === "dired" || cmdLine.startsWith("dired ")) {
-        const dir = cmdLine === "dired" ? "." : cmdLine.slice(6).trim();
-        editor.executeCommand(`(dired "${dir}")`);
-      } else if (/^%s\/(.+)\/(.+)\/([gic]*)$/.test(cmdLine)) {
-        // :%s/find/replace/flags — whole-buffer replace
-        const m = cmdLine.match(/^%s\/(.+)\/(.+)\/([gic]*)$/)!;
-        const escapedFind = m[1]!.replace(/"/g, '\\"');
-        const escapedReplace = m[2]!.replace(/"/g, '\\"');
-        editor.executeCommand(`(query-replace "${escapedFind}" "${escapedReplace}")`);
-      } else if (/^s\/(.+)\/(.*)\/?$/.test(cmdLine)) {
-        // :s/find/replace — current-line replace
-        const m = cmdLine.match(/^s\/(.+)\/(.*)\/?$/)!;
-        const escapedFind = m[1]!.replace(/"/g, '\\"');
-        const escapedReplace = (m[2] || "").replace(/"/g, '\\"');
-        editor.executeCommand(`(replace-find-matches "${escapedFind}")`);
-        editor.executeCommand(`(replace-apply-all)`);
-      } else {
-        editor.executeCommand(`(editor-execute-command-line)`);
-      }
+      editor.executeCommand(`(editor-dispatch-command-line "${escaped}")`);
       handlerLog.info('Command executed successfully', {
         data: { command: cmdLine }
       });

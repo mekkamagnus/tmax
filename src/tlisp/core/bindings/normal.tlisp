@@ -49,6 +49,9 @@
   (require-module editor/commands/browse-url)
   (require-module editor/commands/macros)
   (require-module editor/commands/repeat)
+  ;; CHORE-44 Change 6: T-Lisp owns command-line parsing + post-newline policy.
+  (require-module editor/commands/command-line)
+  (require-module editor/commands/post-newline)
 
 ;; normal.tlisp
 ;; Default key bindings for normal mode — single source of truth.
