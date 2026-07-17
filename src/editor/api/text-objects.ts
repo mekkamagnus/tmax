@@ -16,7 +16,7 @@
  * NOTE: Deleted text also added to kill ring (US-1.9.1)
  */
 
-import type { FunctionalTextBuffer, Position } from "../../core/types.ts";
+import type { TextBuffer, Position } from "../../core/types.ts";
 import { Either } from "../../utils/task-either.ts";
 import type { RegisterDeleteFn } from "./evil-integration.ts";
 import { isWordChar, isWhitespace, findWordStart, findWordEndOnLine as findWordEnd, findWordEndWithSpace } from "./text-utils.ts";
@@ -45,7 +45,7 @@ export function createTextObjectsHelpers(opts: TextObjectsOpts) {
  * If there is no current buffer or the helper fails, the model is unchanged.
  */
 const withCurrentBuffer = (
-  fn: (buffer: FunctionalTextBuffer, line: number, column: number) => Either<string, FunctionalTextBuffer>,
+  fn: (buffer: TextBuffer, line: number, column: number) => Either<string, TextBuffer>,
 ): State<EditorModel, void> =>
   State.modify((m: EditorModel): EditorModel => {
     if (!m.currentBuffer) return m;
@@ -66,11 +66,11 @@ const deleteInnerWordState = (count: number = 1): State<EditorModel, void> =>
  * Returns the new buffer after deletion.
  */
 function deleteInnerWord(
-  buffer: FunctionalTextBuffer,
+  buffer: TextBuffer,
   line: number,
   column: number,
   count: number = 1
-): Either<string, FunctionalTextBuffer> {
+): Either<string, TextBuffer> {
   const contentResult = buffer.getContent();
   if (Either.isLeft(contentResult)) {
     return Either.left(contentResult.left);
@@ -125,11 +125,11 @@ function deleteInnerWord(
  * Returns the new buffer after deletion.
  */
 function deleteAroundWord(
-  buffer: FunctionalTextBuffer,
+  buffer: TextBuffer,
   line: number,
   column: number,
   count: number = 1
-): Either<string, FunctionalTextBuffer> {
+): Either<string, TextBuffer> {
   const contentResult = buffer.getContent();
   if (Either.isLeft(contentResult)) {
     return Either.left(contentResult.left);
@@ -193,11 +193,11 @@ function deleteAroundWord(
  * insert — TS primitive is pure delete.
  */
 function changeInnerWord(
-  buffer: FunctionalTextBuffer,
+  buffer: TextBuffer,
   line: number,
   column: number,
   count: number = 1
-): Either<string, FunctionalTextBuffer> {
+): Either<string, TextBuffer> {
   return deleteInnerWord(buffer, line, column, count);
 }
 
@@ -207,11 +207,11 @@ function changeInnerWord(
  * deletion across N around-words. Mode transition lives in the ops wrapper.
  */
 function changeAroundWord(
-  buffer: FunctionalTextBuffer,
+  buffer: TextBuffer,
   line: number,
   column: number,
   count: number = 1
-): Either<string, FunctionalTextBuffer> {
+): Either<string, TextBuffer> {
   return deleteAroundWord(buffer, line, column, count);
 }
 
@@ -260,10 +260,10 @@ function findMatchingQuote(
  * Deletes inside single quotes and returns { buffer: newBuffer, mode: "INSERT" }
  */
 function deleteInnerSingleQuote(
-  buffer: FunctionalTextBuffer,
+  buffer: TextBuffer,
   line: number,
   column: number
-): Either<string, FunctionalTextBuffer> {
+): Either<string, TextBuffer> {
   const contentResult = buffer.getContent();
   if (Either.isLeft(contentResult)) {
     return Either.left(contentResult.left);
@@ -293,10 +293,10 @@ function deleteInnerSingleQuote(
  * Deletes including single quotes and returns new buffer
  */
 function deleteAroundSingleQuote(
-  buffer: FunctionalTextBuffer,
+  buffer: TextBuffer,
   line: number,
   column: number
-): Either<string, FunctionalTextBuffer> {
+): Either<string, TextBuffer> {
   const contentResult = buffer.getContent();
   if (Either.isLeft(contentResult)) {
     return Either.left(contentResult.left);
@@ -326,10 +326,10 @@ function deleteAroundSingleQuote(
  * Deletes inside double quotes and returns new buffer
  */
 function deleteInnerDoubleQuote(
-  buffer: FunctionalTextBuffer,
+  buffer: TextBuffer,
   line: number,
   column: number
-): Either<string, FunctionalTextBuffer> {
+): Either<string, TextBuffer> {
   const contentResult = buffer.getContent();
   if (Either.isLeft(contentResult)) {
     return Either.left(contentResult.left);
@@ -359,10 +359,10 @@ function deleteInnerDoubleQuote(
  * Deletes including double quotes and returns new buffer
  */
 function deleteAroundDoubleQuote(
-  buffer: FunctionalTextBuffer,
+  buffer: TextBuffer,
   line: number,
   column: number
-): Either<string, FunctionalTextBuffer> {
+): Either<string, TextBuffer> {
   const contentResult = buffer.getContent();
   if (Either.isLeft(contentResult)) {
     return Either.left(contentResult.left);
@@ -392,10 +392,10 @@ function deleteAroundDoubleQuote(
  * Deletes inside single quotes and returns { buffer: newBuffer, mode: "INSERT" }
  */
 function changeInnerSingleQuote(
-  buffer: FunctionalTextBuffer,
+  buffer: TextBuffer,
   line: number,
   column: number
-): Either<string, FunctionalTextBuffer> {
+): Either<string, TextBuffer> {
   const contentResult = buffer.getContent();
   if (Either.isLeft(contentResult)) {
     return Either.left(contentResult.left);
@@ -427,10 +427,10 @@ function changeInnerSingleQuote(
  * Deletes including single quotes and returns new buffer
  */
 function changeAroundSingleQuote(
-  buffer: FunctionalTextBuffer,
+  buffer: TextBuffer,
   line: number,
   column: number
-): Either<string, FunctionalTextBuffer> {
+): Either<string, TextBuffer> {
   const contentResult = buffer.getContent();
   if (Either.isLeft(contentResult)) {
     return Either.left(contentResult.left);
@@ -462,10 +462,10 @@ function changeAroundSingleQuote(
  * Deletes inside double quotes and returns new buffer
  */
 function changeInnerDoubleQuote(
-  buffer: FunctionalTextBuffer,
+  buffer: TextBuffer,
   line: number,
   column: number
-): Either<string, FunctionalTextBuffer> {
+): Either<string, TextBuffer> {
   const contentResult = buffer.getContent();
   if (Either.isLeft(contentResult)) {
     return Either.left(contentResult.left);
@@ -497,10 +497,10 @@ function changeInnerDoubleQuote(
  * Deletes including double quotes and returns new buffer
  */
 function changeAroundDoubleQuote(
-  buffer: FunctionalTextBuffer,
+  buffer: TextBuffer,
   line: number,
   column: number
-): Either<string, FunctionalTextBuffer> {
+): Either<string, TextBuffer> {
   const contentResult = buffer.getContent();
   if (Either.isLeft(contentResult)) {
     return Either.left(contentResult.left);
@@ -591,10 +591,10 @@ function findMatchingParen(
  * Deletes inside parentheses and returns new buffer
  */
 function deleteInnerParen(
-  buffer: FunctionalTextBuffer,
+  buffer: TextBuffer,
   line: number,
   column: number
-): Either<string, FunctionalTextBuffer> {
+): Either<string, TextBuffer> {
   const contentResult = buffer.getContent();
   if (Either.isLeft(contentResult)) {
     return Either.left(contentResult.left);
@@ -626,10 +626,10 @@ function deleteInnerParen(
  * Deletes inside parentheses and returns new buffer
  */
 function changeInnerParen(
-  buffer: FunctionalTextBuffer,
+  buffer: TextBuffer,
   line: number,
   column: number
-): Either<string, FunctionalTextBuffer> {
+): Either<string, TextBuffer> {
   const contentResult = buffer.getContent();
   if (Either.isLeft(contentResult)) {
     return Either.left(contentResult.left);
@@ -661,10 +661,10 @@ function changeInnerParen(
  * Deletes including parens and returns new buffer
  */
 function deleteAroundParen(
-  buffer: FunctionalTextBuffer,
+  buffer: TextBuffer,
   line: number,
   column: number
-): Either<string, FunctionalTextBuffer> {
+): Either<string, TextBuffer> {
   const contentResult = buffer.getContent();
   if (Either.isLeft(contentResult)) {
     return Either.left(contentResult.left);
@@ -694,10 +694,10 @@ function deleteAroundParen(
  * Deletes including parens. Mode transition lives in the ops wrapper.
  */
 function changeAroundParen(
-  buffer: FunctionalTextBuffer,
+  buffer: TextBuffer,
   line: number,
   column: number
-): Either<string, FunctionalTextBuffer> {
+): Either<string, TextBuffer> {
   return deleteAroundParen(buffer, line, column);
 }
 
@@ -706,10 +706,10 @@ function changeAroundParen(
  * Deletes inside braces and returns new buffer
  */
 function deleteInnerBrace(
-  buffer: FunctionalTextBuffer,
+  buffer: TextBuffer,
   line: number,
   column: number
-): Either<string, FunctionalTextBuffer> {
+): Either<string, TextBuffer> {
   const contentResult = buffer.getContent();
   if (Either.isLeft(contentResult)) {
     return Either.left(contentResult.left);
@@ -741,10 +741,10 @@ function deleteInnerBrace(
  * Deletes inside braces and returns new buffer
  */
 function changeInnerBrace(
-  buffer: FunctionalTextBuffer,
+  buffer: TextBuffer,
   line: number,
   column: number
-): Either<string, FunctionalTextBuffer> {
+): Either<string, TextBuffer> {
   const contentResult = buffer.getContent();
   if (Either.isLeft(contentResult)) {
     return Either.left(contentResult.left);
@@ -776,10 +776,10 @@ function changeInnerBrace(
  * Deletes including braces and returns new buffer
  */
 function deleteAroundBrace(
-  buffer: FunctionalTextBuffer,
+  buffer: TextBuffer,
   line: number,
   column: number
-): Either<string, FunctionalTextBuffer> {
+): Either<string, TextBuffer> {
   const contentResult = buffer.getContent();
   if (Either.isLeft(contentResult)) {
     return Either.left(contentResult.left);
@@ -809,10 +809,10 @@ function deleteAroundBrace(
  * Deletes including braces. Mode transition lives in the ops wrapper.
  */
 function changeAroundBrace(
-  buffer: FunctionalTextBuffer,
+  buffer: TextBuffer,
   line: number,
   column: number
-): Either<string, FunctionalTextBuffer> {
+): Either<string, TextBuffer> {
   return deleteAroundBrace(buffer, line, column);
 }
 
@@ -821,10 +821,10 @@ function changeAroundBrace(
  * Deletes inside square brackets and returns new buffer
  */
 function deleteInnerBracket(
-  buffer: FunctionalTextBuffer,
+  buffer: TextBuffer,
   line: number,
   column: number
-): Either<string, FunctionalTextBuffer> {
+): Either<string, TextBuffer> {
   const contentResult = buffer.getContent();
   if (Either.isLeft(contentResult)) {
     return Either.left(contentResult.left);
@@ -856,10 +856,10 @@ function deleteInnerBracket(
  * Deletes inside brackets. Mode transition lives in the ops wrapper.
  */
 function changeInnerBracket(
-  buffer: FunctionalTextBuffer,
+  buffer: TextBuffer,
   line: number,
   column: number
-): Either<string, FunctionalTextBuffer> {
+): Either<string, TextBuffer> {
   return deleteInnerBracket(buffer, line, column);
 }
 
@@ -868,10 +868,10 @@ function changeInnerBracket(
  * Deletes including brackets and returns new buffer
  */
 function deleteAroundBracket(
-  buffer: FunctionalTextBuffer,
+  buffer: TextBuffer,
   line: number,
   column: number
-): Either<string, FunctionalTextBuffer> {
+): Either<string, TextBuffer> {
   const contentResult = buffer.getContent();
   if (Either.isLeft(contentResult)) {
     return Either.left(contentResult.left);
@@ -901,10 +901,10 @@ function deleteAroundBracket(
  * Deletes including brackets. Mode transition lives in the ops wrapper.
  */
 function changeAroundBracket(
-  buffer: FunctionalTextBuffer,
+  buffer: TextBuffer,
   line: number,
   column: number
-): Either<string, FunctionalTextBuffer> {
+): Either<string, TextBuffer> {
   return deleteAroundBracket(buffer, line, column);
 }
 
@@ -913,10 +913,10 @@ function changeAroundBracket(
  * Deletes inside angle brackets and returns new buffer
  */
 function deleteInnerAngle(
-  buffer: FunctionalTextBuffer,
+  buffer: TextBuffer,
   line: number,
   column: number
-): Either<string, FunctionalTextBuffer> {
+): Either<string, TextBuffer> {
   const contentResult = buffer.getContent();
   if (Either.isLeft(contentResult)) {
     return Either.left(contentResult.left);
@@ -948,10 +948,10 @@ function deleteInnerAngle(
  * Deletes inside angle brackets. Mode transition lives in the ops wrapper.
  */
 function changeInnerAngle(
-  buffer: FunctionalTextBuffer,
+  buffer: TextBuffer,
   line: number,
   column: number
-): Either<string, FunctionalTextBuffer> {
+): Either<string, TextBuffer> {
   return deleteInnerAngle(buffer, line, column);
 }
 
@@ -960,10 +960,10 @@ function changeInnerAngle(
  * Deletes including angle brackets and returns new buffer
  */
 function deleteAroundAngle(
-  buffer: FunctionalTextBuffer,
+  buffer: TextBuffer,
   line: number,
   column: number
-): Either<string, FunctionalTextBuffer> {
+): Either<string, TextBuffer> {
   const contentResult = buffer.getContent();
   if (Either.isLeft(contentResult)) {
     return Either.left(contentResult.left);
@@ -993,10 +993,10 @@ function deleteAroundAngle(
  * Deletes including angle brackets. Mode transition lives in the ops wrapper.
  */
 function changeAroundAngle(
-  buffer: FunctionalTextBuffer,
+  buffer: TextBuffer,
   line: number,
   column: number
-): Either<string, FunctionalTextBuffer> {
+): Either<string, TextBuffer> {
   return deleteAroundAngle(buffer, line, column);
 }
 
@@ -1080,10 +1080,10 @@ function findTagBounds(
  * Deletes inside HTML/XML tags and returns new buffer
  */
 function deleteInnerTag(
-  buffer: FunctionalTextBuffer,
+  buffer: TextBuffer,
   line: number,
   column: number
-): Either<string, FunctionalTextBuffer> {
+): Either<string, TextBuffer> {
   const contentResult = buffer.getContent();
   if (Either.isLeft(contentResult)) {
     return Either.left(contentResult.left);
@@ -1122,10 +1122,10 @@ function deleteInnerTag(
  * Clears tag contents. Mode transition lives in the ops wrapper.
  */
 function changeInnerTag(
-  buffer: FunctionalTextBuffer,
+  buffer: TextBuffer,
   line: number,
   column: number
-): Either<string, FunctionalTextBuffer> {
+): Either<string, TextBuffer> {
   return deleteInnerTag(buffer, line, column);
 }
 
@@ -1134,10 +1134,10 @@ function changeInnerTag(
  * Deletes opening tag, contents, and closing tag.
  */
 function deleteAroundTag(
-  buffer: FunctionalTextBuffer,
+  buffer: TextBuffer,
   line: number,
   column: number
-): Either<string, FunctionalTextBuffer> {
+): Either<string, TextBuffer> {
   const contentResult = buffer.getContent();
   if (Either.isLeft(contentResult)) {
     return Either.left(contentResult.left);
@@ -1173,10 +1173,10 @@ function deleteAroundTag(
  * Mode transition lives in the ops wrapper.
  */
 function changeAroundTag(
-  buffer: FunctionalTextBuffer,
+  buffer: TextBuffer,
   line: number,
   column: number
-): Either<string, FunctionalTextBuffer> {
+): Either<string, TextBuffer> {
   return deleteAroundTag(buffer, line, column);
 }
 
@@ -1199,7 +1199,7 @@ function changeAroundTag(
  * caller can surface "Unsupported text-object combo".
  */
 function textObjectRegion(
-  buffer: FunctionalTextBuffer,
+  buffer: TextBuffer,
   line: number,
   column: number,
   classChar: string,

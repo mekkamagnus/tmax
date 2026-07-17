@@ -12,7 +12,7 @@ and the subsequent Tier 1b/2/3 CHOREs.
 
 | Name | What it measures | Hot-path target |
 |------|------------------|-----------------|
-| `buffer` | `FunctionalTextBufferImpl.insert` / `delete` throughput on a fixture | RFC-019 Tier 1.1–1.3 (incremental lines, offset cache, array clone) |
+| `buffer` | `TextBufferImpl.insert` / `delete` throughput on a fixture | RFC-019 Tier 1.1–1.3 (incremental lines, offset cache, array clone) |
 | `tlisp`  | `TLispInterpreterImpl.execute` evals/sec on a representative small command | RFC-019 Tier 2.3 (parse cache), Tier 2.6 (tokenizer regexes) |
 | `e2e`    | End-to-end keystroke throughput through a live daemon over the JSON-RPC socket | Full keystroke path: RPC serialize → buffer edit → viewport re-tokenize → repaint |
 

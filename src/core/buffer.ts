@@ -1,26 +1,32 @@
 /**
  * @file buffer.ts
- * @description Functional buffer operations using Either for tmax editor
+ * @description Canonical persistent text buffer implementation using a gap buffer.
+ *
+ * The `TextBuffer` contract (Either-returning immutable operations) lives in
+ * `./contracts/buffer.ts`; this module owns the gap-buffer algorithm and the
+ * `TextBufferImpl` class that implements it.
  */
 
-import type { Position, Range, TextBuffer, FunctionalTextBuffer } from "./types.ts";
+import type { Position, Range, BufferError } from "./contracts/primitives.ts";
+import type { TextBuffer } from "./contracts/buffer.ts";
 import { Either } from "../utils/task-either.ts";
 import { DEFAULT_BUFFER_SIZE, BUFFER_GROWTH_FACTOR } from "../constants/buffer.ts";
 
 /**
- * Buffer operation error types
+ * Re-export so existing `import { BufferError } from "./buffer.ts"` callers
+ * keep compiling. The canonical home is `./contracts/primitives.ts`.
  */
-export type BufferError = string;
+export type { BufferError } from "./contracts/primitives.ts";
 
 /**
- * Buffer operation result types
+ * Buffer operation result type.
  */
 export type BufferResult<T> = Either<BufferError, T>;
 
 /**
  * Immutable gap buffer implementation for functional text editing
  */
-class FunctionalGapBuffer {
+class GapBufferEngine {
   constructor(
     private readonly buffer: ReadonlyArray<string | undefined>,
     private readonly gapStart: number,
@@ -30,7 +36,7 @@ class FunctionalGapBuffer {
   /**
    * Create a new gap buffer
    */
-  static create(initialContent = ""): FunctionalGapBuffer {
+  static create(initialContent = ""): GapBufferEngine {
     // Calculate initial size - ensure it's large enough for content plus some gap space
     const minSize = initialContent.length + DEFAULT_BUFFER_SIZE;
     const initialSize = Math.max(DEFAULT_BUFFER_SIZE, minSize);
@@ -40,10 +46,10 @@ class FunctionalGapBuffer {
       for (let i = 0; i < initialContent.length; i++) {
         buffer[i] = initialContent[i];
       }
-      return new FunctionalGapBuffer(buffer, initialContent.length, initialSize);
+      return new GapBufferEngine(buffer, initialContent.length, initialSize);
     }
 
-    return new FunctionalGapBuffer(buffer, 0, initialSize);
+    return new GapBufferEngine(buffer, 0, initialSize);
   }
 
   /**
@@ -56,7 +62,7 @@ class FunctionalGapBuffer {
   /**
    * Insert text at the specified position (returns new buffer)
    */
-  insert(position: number, text: string): Either<string, FunctionalGapBuffer> {
+  insert(position: number, text: string): Either<string, GapBufferEngine> {
     if (position < 0 || position > this.length()) {
       return Either.left(`Insert position ${position} is out of bounds (0-${this.length()})`);
     }
@@ -84,7 +90,7 @@ class FunctionalGapBuffer {
   /**
    * Delete text at the specified position (returns new buffer)
    */
-  delete(position: number, length: number): Either<string, FunctionalGapBuffer> {
+  delete(position: number, length: number): Either<string, GapBufferEngine> {
     if (position < 0 || position >= this.length()) {
       return Either.left(`Delete position ${position} is out of bounds (0-${this.length() - 1})`);
     }
@@ -102,7 +108,7 @@ class FunctionalGapBuffer {
     const buffer = movedBuffer.right;
     const newGapEnd = Math.min(buffer.gapEnd + actualLength, buffer.buffer.length);
     
-    return Either.right(new FunctionalGapBuffer(
+    return Either.right(new GapBufferEngine(
       buffer.buffer,
       buffer.gapStart,
       newGapEnd
@@ -156,7 +162,7 @@ class FunctionalGapBuffer {
   /**
    * Move gap to specified position (returns new buffer)
    */
-  private moveGap(position: number): Either<string, FunctionalGapBuffer> {
+  private moveGap(position: number): Either<string, GapBufferEngine> {
     if (position < 0 || position > this.length()) {
       return Either.left(`Gap move position ${position} is out of bounds`);
     }
@@ -194,13 +200,13 @@ class FunctionalGapBuffer {
       newGapEnd += moveCount;
     }
 
-    return Either.right(new FunctionalGapBuffer(newBuffer, newGapStart, newGapEnd));
+    return Either.right(new GapBufferEngine(newBuffer, newGapStart, newGapEnd));
   }
 
   /**
    * Grow gap to accommodate more text (returns new buffer)
    */
-  private growGap(minSize: number): Either<string, FunctionalGapBuffer> {
+  private growGap(minSize: number): Either<string, GapBufferEngine> {
     const newSize = Math.max(this.buffer.length * BUFFER_GROWTH_FACTOR, this.buffer.length + minSize);
     const newBuffer = new Array(newSize);
     
@@ -215,13 +221,13 @@ class FunctionalGapBuffer {
       newBuffer[afterGapStart + (i - this.gapEnd)] = this.buffer[i];
     }
     
-    return Either.right(new FunctionalGapBuffer(newBuffer, this.gapStart, afterGapStart));
+    return Either.right(new GapBufferEngine(newBuffer, this.gapStart, afterGapStart));
   }
 
   /**
    * Insert text into the gap (returns new buffer)
    */
-  private insertIntoGap(text: string): Either<string, FunctionalGapBuffer> {
+  private insertIntoGap(text: string): Either<string, GapBufferEngine> {
     if (text.length > this.gapEnd - this.gapStart) {
       return Either.left("Gap is too small for insertion");
     }
@@ -236,7 +242,7 @@ class FunctionalGapBuffer {
       newBuffer[this.gapStart + i] = text[i];
     }
     
-    return Either.right(new FunctionalGapBuffer(
+    return Either.right(new GapBufferEngine(
       newBuffer,
       this.gapStart + text.length,
       this.gapEnd
@@ -247,9 +253,9 @@ class FunctionalGapBuffer {
 /**
  * Functional text buffer implementation using gap buffer
  */
-export class FunctionalTextBufferImpl implements FunctionalTextBuffer {
+export class TextBufferImpl implements TextBuffer {
   constructor(
-    private readonly gapBuffer: FunctionalGapBuffer,
+    private readonly gapBuffer: GapBufferEngine,
     private readonly lines: ReadonlyArray<string>,
     // §1.2 (RFC-019): prefix sums of line offsets. `cumulativeLineOffsets[L]`
     // is the byte offset of the start of line L in the flattened buffer text.
@@ -260,11 +266,11 @@ export class FunctionalTextBufferImpl implements FunctionalTextBuffer {
   /**
    * Create a new text buffer
    */
-  static create(content = ""): FunctionalTextBufferImpl {
-    const gapBuffer = FunctionalGapBuffer.create(content);
-    const lines = FunctionalTextBufferImpl.splitLines(content);
-    const offsets = FunctionalTextBufferImpl.computeOffsets(lines);
-    return new FunctionalTextBufferImpl(gapBuffer, lines, offsets);
+  static create(content = ""): TextBufferImpl {
+    const gapBuffer = GapBufferEngine.create(content);
+    const lines = TextBufferImpl.splitLines(content);
+    const offsets = TextBufferImpl.computeOffsets(lines);
+    return new TextBufferImpl(gapBuffer, lines, offsets);
   }
 
   /**
@@ -315,7 +321,7 @@ export class FunctionalTextBufferImpl implements FunctionalTextBuffer {
    * range and reuses the unchanged prefix/suffix by reference, then refreshes
    * `cumulativeLineOffsets` only from the first edited line onward.
    */
-  insert(position: Position, text: string): BufferResult<FunctionalTextBuffer> {
+  insert(position: Position, text: string): BufferResult<TextBuffer> {
     const offsetResult = this.positionToOffset(position);
     if (Either.isLeft(offsetResult)) {
       return offsetResult;
@@ -329,7 +335,7 @@ export class FunctionalTextBufferImpl implements FunctionalTextBuffer {
     if (text.length === 0) {
       // No content change — keep offsets and lines identical, just hand back
       // a buffer that shares them with this instance.
-      return Either.right(new FunctionalTextBufferImpl(
+      return Either.right(new TextBufferImpl(
         newGapBuffer.right,
         this.lines,
         this.cumulativeLineOffsets
@@ -343,7 +349,7 @@ export class FunctionalTextBufferImpl implements FunctionalTextBuffer {
     const prefix = originalLine.slice(0, clampedColumn);
     const suffix = originalLine.slice(clampedColumn);
 
-    const segments = FunctionalTextBufferImpl.splitLines(text);
+    const segments = TextBufferImpl.splitLines(text);
     let rebuilt: string[];
     if (segments.length === 1) {
       // Single-line insert: just one line is replaced.
@@ -360,14 +366,14 @@ export class FunctionalTextBufferImpl implements FunctionalTextBuffer {
       rebuilt[segments.length - 1] = segments[segments.length - 1]! + suffix;
     }
 
-    const { lines: newLines, offsets: newOffsets } = FunctionalTextBufferImpl.spliceLines(
+    const { lines: newLines, offsets: newOffsets } = TextBufferImpl.spliceLines(
       this.lines,
       this.cumulativeLineOffsets,
       position.line,
       position.line,
       rebuilt
     );
-    return Either.right(new FunctionalTextBufferImpl(newGapBuffer.right, newLines, newOffsets));
+    return Either.right(new TextBufferImpl(newGapBuffer.right, newLines, newOffsets));
   }
 
   /**
@@ -377,7 +383,7 @@ export class FunctionalTextBufferImpl implements FunctionalTextBuffer {
    * line range spanned by [range.start, range.end] is rebuilt; the prefix and
    * suffix line arrays are reused by reference.
    */
-  delete(range: Range): BufferResult<FunctionalTextBuffer> {
+  delete(range: Range): BufferResult<TextBuffer> {
     const startOffsetResult = this.positionToOffset(range.start);
     if (Either.isLeft(startOffsetResult)) {
       return startOffsetResult;
@@ -399,7 +405,7 @@ export class FunctionalTextBufferImpl implements FunctionalTextBuffer {
     // existing cache. `length <= 0` (negative length arises from invalid
     // ranges; the gap buffer already no-ops on those).
     if (length <= 0) {
-      return Either.right(new FunctionalTextBufferImpl(
+      return Either.right(new TextBufferImpl(
         newGapBuffer.right,
         this.lines,
         this.cumulativeLineOffsets
@@ -427,14 +433,14 @@ export class FunctionalTextBufferImpl implements FunctionalTextBuffer {
       rebuilt = [prefix + suffix];
     }
 
-    const { lines: newLines, offsets: newOffsets } = FunctionalTextBufferImpl.spliceLines(
+    const { lines: newLines, offsets: newOffsets } = TextBufferImpl.spliceLines(
       this.lines,
       this.cumulativeLineOffsets,
       startLineIdx,
       endLineIdx,
       rebuilt
     );
-    return Either.right(new FunctionalTextBufferImpl(newGapBuffer.right, newLines, newOffsets));
+    return Either.right(new TextBufferImpl(newGapBuffer.right, newLines, newOffsets));
   }
 
   /**
@@ -482,7 +488,7 @@ export class FunctionalTextBufferImpl implements FunctionalTextBuffer {
   /**
    * Replace text in range (returns new buffer)
    */
-  replace(range: Range, text: string): BufferResult<FunctionalTextBuffer> {
+  replace(range: Range, text: string): BufferResult<TextBuffer> {
     const deletedBuffer = this.delete(range);
     if (Either.isLeft(deletedBuffer)) {
       return deletedBuffer;
@@ -564,9 +570,9 @@ export const BufferUtils = {
   /**
    * Create buffer from file content with validation
    */
-  fromContent: (content: string): BufferResult<FunctionalTextBuffer> => {
+  fromContent: (content: string): BufferResult<TextBuffer> => {
     try {
-      const buffer = FunctionalTextBufferImpl.create(content);
+      const buffer = TextBufferImpl.create(content);
       return Either.right(buffer);
     } catch (error) {
       return Either.left(`Failed to create buffer: ${error instanceof Error ? error.message : String(error)}`);
@@ -576,7 +582,7 @@ export const BufferUtils = {
   /**
    * Get word at position
    */
-  getWordAt: (buffer: FunctionalTextBuffer, position: Position): BufferResult<string> => {
+  getWordAt: (buffer: TextBuffer, position: Position): BufferResult<string> => {
     const contentResult = buffer.getContent();
     if (Either.isLeft(contentResult)) {
       return contentResult;
@@ -612,7 +618,7 @@ export const BufferUtils = {
   /**
    * Find all occurrences of text
    */
-  findAll: (buffer: FunctionalTextBuffer, searchText: string): BufferResult<Position[]> => {
+  findAll: (buffer: TextBuffer, searchText: string): BufferResult<Position[]> => {
     const contentResult = buffer.getContent();
     if (Either.isLeft(contentResult)) {
       return contentResult;
@@ -641,7 +647,7 @@ export const BufferUtils = {
   /**
    * Validate buffer integrity
    */
-  validate: (buffer: FunctionalTextBuffer): BufferResult<{ valid: boolean; issues: string[] }> => {
+  validate: (buffer: TextBuffer): BufferResult<{ valid: boolean; issues: string[] }> => {
     const issues: string[] = [];
 
     // Check line count consistency
@@ -668,6 +674,3 @@ export const BufferUtils = {
     });
   }
 };
-
-// Export utils with functional prefix to avoid conflicts
-export { BufferUtils as FunctionalBufferUtils };

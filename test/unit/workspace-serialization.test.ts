@@ -11,19 +11,19 @@ import {
   workspaceToData,
   dataToWorkspace
 } from "../../src/server/serialize.ts";
-import { FunctionalTextBufferImpl } from "../../src/core/buffer.ts";
-import type { WorkspaceState, WorkspaceData, BufferMetadata, BufferModeState, FunctionalTextBuffer } from "../../src/core/types.ts";
+import { TextBufferImpl } from "../../src/core/buffer.ts";
+import type { WorkspaceState, WorkspaceData, BufferMetadata, BufferModeState, TextBuffer } from "../../src/core/types.ts";
 
 /**
  * Helper to create a test workspace
  */
 function createTestWorkspace(name: string): WorkspaceState {
-  const buffers = new Map<string, import("../../src/core/types.ts").FunctionalTextBuffer>();
+  const buffers = new Map<string, import("../../src/core/types.ts").TextBuffer>();
   const bufferMetadata = new Map<string, BufferMetadata>();
   const bufferModeStates = new Map<string, BufferModeState>();
 
   // Always add *scratch*
-  const scratchBuffer = FunctionalTextBufferImpl.create("");
+  const scratchBuffer = TextBufferImpl.create("");
   buffers.set("*scratch*", scratchBuffer);
   bufferMetadata.set("*scratch*", {
     name: "*scratch*",
@@ -61,7 +61,7 @@ describe("workspace serialization", () => {
       const workspace = createTestWorkspace("roundtrip-test");
 
       // Add modified buffer
-      let modifiedBuffer: FunctionalTextBuffer = FunctionalTextBufferImpl.create("modified content");
+      let modifiedBuffer: TextBuffer = TextBufferImpl.create("modified content");
       const insertResult = modifiedBuffer.insert({ line: 0, column: 16 }, " more");
       if (insertResult._tag === "Right") {
         modifiedBuffer = insertResult.right;
@@ -82,7 +82,7 @@ describe("workspace serialization", () => {
       });
 
       // Add clean (saved) buffer
-      const cleanBuffer = FunctionalTextBufferImpl.create("clean content");
+      const cleanBuffer = TextBufferImpl.create("clean content");
       workspace.buffers.set("clean.ts", cleanBuffer);
       workspace.bufferMetadata.set("clean.ts", {
         name: "clean.ts",
@@ -96,7 +96,7 @@ describe("workspace serialization", () => {
       });
 
       // Add unsaved buffer (no filename)
-      const unsavedBuffer = FunctionalTextBufferImpl.create("unsaved content");
+      const unsavedBuffer = TextBufferImpl.create("unsaved content");
       workspace.buffers.set("unsaved", unsavedBuffer);
       workspace.bufferMetadata.set("unsaved", {
         name: "unsaved",
@@ -187,7 +187,7 @@ describe("workspace serialization", () => {
       const workspace = createTestWorkspace("window-layout");
 
       // Add a buffer for the window
-      const buffer = FunctionalTextBufferImpl.create("window content");
+      const buffer = TextBufferImpl.create("window content");
       workspace.buffers.set("file.ts", buffer);
       workspace.bufferMetadata.set("file.ts", {
         name: "file.ts",
@@ -306,7 +306,7 @@ describe("workspace serialization", () => {
     test("should preserve modified true flag", () => {
       const workspace = createTestWorkspace("modified-true");
 
-      const buffer = FunctionalTextBufferImpl.create("content");
+      const buffer = TextBufferImpl.create("content");
       buffer.insert({ line: 0, column: 7 }, " modified");
       workspace.buffers.set("test.txt", buffer);
       workspace.bufferMetadata.set("test.txt", {
@@ -330,7 +330,7 @@ describe("workspace serialization", () => {
     test("should preserve modified false flag", () => {
       const workspace = createTestWorkspace("modified-false");
 
-      const buffer = FunctionalTextBufferImpl.create("content");
+      const buffer = TextBufferImpl.create("content");
       workspace.buffers.set("test.txt", buffer);
       workspace.bufferMetadata.set("test.txt", {
         name: "test.txt",
@@ -365,7 +365,7 @@ describe("workspace serialization", () => {
       }
       const largeContent = lines.join("\n");
 
-      const buffer = FunctionalTextBufferImpl.create(largeContent);
+      const buffer = TextBufferImpl.create(largeContent);
       workspace.buffers.set("large.txt", buffer);
       workspace.bufferMetadata.set("large.txt", {
         name: "large.txt",
@@ -563,7 +563,7 @@ describe("workspace serialization", () => {
     test("should serialize scrollback buffer", () => {
       const workspace = createTestWorkspace("scrollback-test");
 
-      const buffer = FunctionalTextBufferImpl.create("content");
+      const buffer = TextBufferImpl.create("content");
       workspace.buffers.set("term.txt", buffer);
       workspace.bufferMetadata.set("term.txt", {
         name: "term.txt",

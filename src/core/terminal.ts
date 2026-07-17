@@ -1,10 +1,19 @@
 /**
  * @file terminal.ts
- * @description Functional terminal I/O operations using TaskEither for tmax editor
- * Cross-platform implementation for Bun/Node
+ * @description Canonical terminal runtime implementation for tmax.
+ *
+ * Implements the promise-based `TerminalIO` contract (canonical,
+ * CHORE-44 Change 9). The internal `TerminalEngine` class is the
+ * TaskEither-returning engine that the public `TerminalIOImpl` unwraps;
+ * `TerminalUtils` operates against the engine at the effect-composition
+ * boundary. The prior parallel `TerminalEngineSurface` interface and its
+ * `TerminalEngineSurfaceImpl` wrapper have been removed.
+ *
+ * Cross-platform for Bun/Node. Escape sequences are preserved byte-for-byte.
  */
 
-import type { TerminalSize, Position, TerminalIO } from "./types.ts";
+import type { TerminalSize, Position } from "./contracts/primitives.ts";
+import type { TerminalIO } from "./contracts/terminal.ts";
 import { TaskEither, Either } from "../utils/task-either.ts";
 import { log } from "../utils/logger.ts";
 import { ErrorFactory, TmaxError, ErrorCategory } from "../utils/error-manager.ts";
@@ -13,51 +22,31 @@ import { stdin as stdin, stdout as stdout } from 'process';
 import { DEFAULT_TERMINAL_COLS, DEFAULT_TERMINAL_ROWS } from "../constants/terminal.ts";
 
 /**
- * Terminal operation result types
+ * Terminal operation result types. The canonical string alias lives in
+ * `./contracts/primitives.ts`; this is the rich tmax-error union used by
+ * the engine and re-exported for legacy callers.
  */
 export type TerminalError = TmaxError;
 
 /**
- * Functional terminal operations interface using TaskEither
+ * Structural contract for the internal terminal engine: the TaskEither-returning
+ * primitive surface used by `TerminalUtils` for effect composition. The concrete
+ * implementation is the `TerminalEngine` class below; the public `TerminalIOImpl`
+ * adapts it to the promise-based canonical `TerminalIO` contract.
  */
-export interface FunctionalTerminalIO {
-  /** Get terminal dimensions */
+interface TerminalEngineSurface {
   getSize(): Either<TerminalError, TerminalSize>;
-  
-  /** Clear the terminal */
   clear(): TaskEither<TerminalError, void>;
-  
-  /** Clear from cursor to end of line */
   clearToEndOfLine(): TaskEither<TerminalError, void>;
-  
-  /** Move cursor to position */
   moveCursor(position: Position): TaskEither<TerminalError, void>;
-  
-  /** Write text at current cursor position */
   write(text: string): TaskEither<TerminalError, void>;
-  
-  /** Read a single key press */
   readKey(): TaskEither<TerminalError, string>;
-  
-  /** Enter raw mode */
   enterRawMode(): TaskEither<TerminalError, void>;
-  
-  /** Exit raw mode */
   exitRawMode(): TaskEither<TerminalError, void>;
-  
-  /** Enter alternate screen buffer */
   enterAlternateScreen(): TaskEither<TerminalError, void>;
-  
-  /** Exit alternate screen buffer */
   exitAlternateScreen(): TaskEither<TerminalError, void>;
-  
-  /** Hide cursor */
   hideCursor(): TaskEither<TerminalError, void>;
-  
-  /** Show cursor */
   showCursor(): TaskEither<TerminalError, void>;
-  
-  /** Check if stdin is a TTY */
   isStdinTTY(): Either<TerminalError, boolean>;
 }
 
@@ -121,7 +110,7 @@ export const tokenizeTerminalInput = (input: string): string[] => {
   return keys;
 };
 
-export class FunctionalTerminalIOImpl implements FunctionalTerminalIO {
+export class TerminalEngine implements TerminalEngineSurface {
   private rawMode = false;
   private logger = log.module("Terminal");
   private pendingKeys: string[] = [];
@@ -640,7 +629,7 @@ export const TerminalUtils = {
   /**
    * Write multiple lines with proper positioning
    */
-  writeLines: (terminal: FunctionalTerminalIO, lines: string[], startPosition: Position): TaskEither<TerminalError, void> => {
+  writeLines: (terminal: TerminalEngineSurface, lines: string[], startPosition: Position): TaskEither<TerminalError, void> => {
     const writeOperations = lines.map((line, index) => {
       const position: Position = {
         line: startPosition.line + index,
@@ -658,7 +647,7 @@ export const TerminalUtils = {
   /**
    * Clear a rectangular area of the terminal
    */
-  clearArea: (terminal: FunctionalTerminalIO, topLeft: Position, width: number, height: number): TaskEither<TerminalError, void> => {
+  clearArea: (terminal: TerminalEngineSurface, topLeft: Position, width: number, height: number): TaskEither<TerminalError, void> => {
     const clearOperations = [];
     
     for (let i = 0; i < height; i++) {
@@ -679,7 +668,7 @@ export const TerminalUtils = {
   /**
    * Write text with word wrapping
    */
-  writeWrapped: (terminal: FunctionalTerminalIO, text: string, startPosition: Position, maxWidth: number): TaskEither<TerminalError, Position> => {
+  writeWrapped: (terminal: TerminalEngineSurface, text: string, startPosition: Position, maxWidth: number): TaskEither<TerminalError, Position> => {
     const words = text.split(/\s+/);
     let currentLine = startPosition.line;
     let currentColumn = startPosition.column;
@@ -709,7 +698,7 @@ export const TerminalUtils = {
   /**
    * Setup terminal for editor use
    */
-  setupEditorTerminal: (terminal: FunctionalTerminalIO): TaskEither<TerminalError, void> =>
+  setupEditorTerminal: (terminal: TerminalEngineSurface): TaskEither<TerminalError, void> =>
     terminal.enterRawMode()
       .flatMap(() => terminal.enterAlternateScreen())
       .flatMap(() => terminal.hideCursor())
@@ -728,7 +717,7 @@ export const TerminalUtils = {
   /**
    * Cleanup terminal after editor use
    */
-  cleanupEditorTerminal: (terminal: FunctionalTerminalIO): TaskEither<TerminalError, void> =>
+  cleanupEditorTerminal: (terminal: TerminalEngineSurface): TaskEither<TerminalError, void> =>
     terminal.showCursor()
       .flatMap(() => terminal.exitAlternateScreen())
       .flatMap(() => terminal.exitRawMode())
@@ -746,7 +735,7 @@ export const TerminalUtils = {
   /**
    * Get terminal capabilities
    */
-  getCapabilities: (terminal: FunctionalTerminalIO): Either<TerminalError, { size: TerminalSize; isTTY: boolean }> => {
+  getCapabilities: (terminal: TerminalEngineSurface): Either<TerminalError, { size: TerminalSize; isTTY: boolean }> => {
     const sizeResult = terminal.getSize();
     const ttyResult = terminal.isStdinTTY();
     
@@ -790,17 +779,17 @@ export const TerminalUtils = {
  * Provides the expected Promise-based interface while using functional implementation internally
  */
 export class TerminalIOImpl implements TerminalIO {
-  private functionalTerminal: FunctionalTerminalIOImpl;
+  private engine: TerminalEngine;
 
   constructor(developmentMode = false) {
-    this.functionalTerminal = new FunctionalTerminalIOImpl(developmentMode);
+    this.engine = new TerminalEngine(developmentMode);
   }
 
   /**
    * Get terminal dimensions
    */
   getSize(): TerminalSize {
-    const result = this.functionalTerminal.getSize();
+    const result = this.engine.getSize();
     if (Either.isLeft(result)) {
       throw result.left;
     }
@@ -811,7 +800,7 @@ export class TerminalIOImpl implements TerminalIO {
    * Clear the terminal
    */
   async clear(): Promise<void> {
-    const result = await this.functionalTerminal.clear().run();
+    const result = await this.engine.clear().run();
     if (Either.isLeft(result)) {
       throw result.left;
     }
@@ -821,7 +810,7 @@ export class TerminalIOImpl implements TerminalIO {
    * Clear from cursor to end of line
    */
   async clearToEndOfLine(): Promise<void> {
-    const result = await this.functionalTerminal.clearToEndOfLine().run();
+    const result = await this.engine.clearToEndOfLine().run();
     if (Either.isLeft(result)) {
       throw result.left;
     }
@@ -831,7 +820,7 @@ export class TerminalIOImpl implements TerminalIO {
    * Move cursor to position
    */
   async moveCursor(position: Position): Promise<void> {
-    const result = await this.functionalTerminal.moveCursor(position).run();
+    const result = await this.engine.moveCursor(position).run();
     if (Either.isLeft(result)) {
       throw result.left;
     }
@@ -841,7 +830,7 @@ export class TerminalIOImpl implements TerminalIO {
    * Write text at current cursor position
    */
   async write(text: string): Promise<void> {
-    const result = await this.functionalTerminal.write(text).run();
+    const result = await this.engine.write(text).run();
     if (Either.isLeft(result)) {
       throw result.left;
     }
@@ -851,7 +840,7 @@ export class TerminalIOImpl implements TerminalIO {
    * Read a single key press
    */
   async readKey(): Promise<string> {
-    const result = await this.functionalTerminal.readKey().run();
+    const result = await this.engine.readKey().run();
     if (Either.isLeft(result)) {
       throw result.left;
     }
@@ -862,7 +851,7 @@ export class TerminalIOImpl implements TerminalIO {
    * Enter raw mode
    */
   async enterRawMode(): Promise<void> {
-    const result = await this.functionalTerminal.enterRawMode().run();
+    const result = await this.engine.enterRawMode().run();
     if (Either.isLeft(result)) {
       throw result.left;
     }
@@ -872,7 +861,7 @@ export class TerminalIOImpl implements TerminalIO {
    * Exit raw mode
    */
   async exitRawMode(): Promise<void> {
-    const result = await this.functionalTerminal.exitRawMode().run();
+    const result = await this.engine.exitRawMode().run();
     if (Either.isLeft(result)) {
       throw result.left;
     }
@@ -882,7 +871,7 @@ export class TerminalIOImpl implements TerminalIO {
    * Enter alternate screen buffer
    */
   async enterAlternateScreen(): Promise<void> {
-    const result = await this.functionalTerminal.enterAlternateScreen().run();
+    const result = await this.engine.enterAlternateScreen().run();
     if (Either.isLeft(result)) {
       throw result.left;
     }
@@ -892,7 +881,7 @@ export class TerminalIOImpl implements TerminalIO {
    * Exit alternate screen buffer
    */
   async exitAlternateScreen(): Promise<void> {
-    const result = await this.functionalTerminal.exitAlternateScreen().run();
+    const result = await this.engine.exitAlternateScreen().run();
     if (Either.isLeft(result)) {
       throw result.left;
     }
@@ -902,7 +891,7 @@ export class TerminalIOImpl implements TerminalIO {
    * Hide cursor
    */
   async hideCursor(): Promise<void> {
-    const result = await this.functionalTerminal.hideCursor().run();
+    const result = await this.engine.hideCursor().run();
     if (Either.isLeft(result)) {
       throw result.left;
     }
@@ -912,12 +901,9 @@ export class TerminalIOImpl implements TerminalIO {
    * Show cursor
    */
   async showCursor(): Promise<void> {
-    const result = await this.functionalTerminal.showCursor().run();
+    const result = await this.engine.showCursor().run();
     if (Either.isLeft(result)) {
       throw result.left;
     }
   }
 }
-
-// Export utils with functional prefix to avoid conflicts
-export { TerminalUtils as FunctionalTerminalUtils };

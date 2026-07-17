@@ -7,10 +7,10 @@ import { describe, test, expect } from "bun:test";
 import { captureFrame } from "../../src/render/capture-frame.ts";
 import { Either } from "../../src/utils/task-either.ts";
 import type { EditorState } from "../../src/core/types.ts";
-import { FunctionalTextBufferImpl } from "../../src/core/buffer.ts";
+import { TextBufferImpl } from "../../src/core/buffer.ts";
 
 function makeState(overrides: Partial<EditorState> = {}): EditorState {
-  const buf = FunctionalTextBufferImpl.create("(defun hello ()\n  (print \"world\"))");
+  const buf = TextBufferImpl.create("(defun hello ()\n  (print \"world\"))");
 
   return {
     currentBuffer: buf as any,
@@ -71,7 +71,7 @@ describe("captureFrame", () => {
   });
 
   test("handles empty buffer", () => {
-    const buf = FunctionalTextBufferImpl.create("");
+    const buf = TextBufferImpl.create("");
     const state = makeState({ currentBuffer: buf as any });
     const lines = captureFrame(state, 80, 24);
     expect(lines.length).toBeGreaterThan(0);

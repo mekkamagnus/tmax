@@ -13,7 +13,7 @@
 
 import type {
   Position,
-  FunctionalTextBuffer,
+  TextBuffer,
   WhichKeyBinding,
   LSPDiagnostic,
   Window,
@@ -59,9 +59,9 @@ export type Msg =
   | { readonly type: "SetViewportLeft"; readonly left: number }
   | { readonly type: "SetCursorFocus"; readonly focus: "buffer" | "command" }
   // Buffers
-  | { readonly type: "UpsertBuffer"; readonly name: string; readonly buffer: FunctionalTextBuffer }
-  | { readonly type: "SetCurrentBuffer"; readonly buffer: FunctionalTextBuffer | undefined }
-  | { readonly type: "SetBuffers"; readonly buffers: Map<string, FunctionalTextBuffer> }
+  | { readonly type: "UpsertBuffer"; readonly name: string; readonly buffer: TextBuffer }
+  | { readonly type: "SetCurrentBuffer"; readonly buffer: TextBuffer | undefined }
+  | { readonly type: "SetBuffers"; readonly buffers: Map<string, TextBuffer> }
   | { readonly type: "SetCurrentFilename"; readonly filename: string | undefined }
   | { readonly type: "SetBufferModified"; readonly modified: boolean | undefined }
   // Which-key

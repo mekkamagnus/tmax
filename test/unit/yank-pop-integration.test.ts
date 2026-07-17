@@ -11,7 +11,7 @@
 import { describe, test, expect, beforeEach } from "bun:test";
 import { TLispInterpreterImpl } from "../../src/tlisp/interpreter.ts";
 import { loadTrtFramework } from "../../src/tlisp/trt/bootstrap.ts";
-import { FunctionalTextBufferImpl } from "../../src/core/buffer.ts";
+import { TextBufferImpl } from "../../src/core/buffer.ts";
 import {
   createKillRingOps
 } from "../../src/editor/api/kill-ring.ts";
@@ -26,10 +26,10 @@ import {
 
 describe("Yank Pop Integration (US-1.9.2)", () => {
   let interpreter: TLispInterpreterImpl;
-  let mockBuffer: FunctionalTextBufferImpl;
+  let mockBuffer: TextBufferImpl;
 
   // State management callbacks (simulating editor state)
-  let currentBuffer: FunctionalTextBufferImpl | null = null;
+  let currentBuffer: TextBufferImpl | null = null;
   let cursorLine = 0;
   let cursorColumn = 0;
 
@@ -54,7 +54,7 @@ describe("Yank Pop Integration (US-1.9.2)", () => {
     await loadTrtFramework(interpreter);
 
     // Create mock buffer
-    mockBuffer = FunctionalTextBufferImpl.create();
+    mockBuffer = TextBufferImpl.create();
     currentBuffer = mockBuffer;
 
     // Reset cursor position
@@ -64,7 +64,7 @@ describe("Yank Pop Integration (US-1.9.2)", () => {
     const access = {
       getModel: () => ({ ...initialModel(), currentBuffer: currentBuffer ?? undefined, cursorPosition: { line: cursorLine, column: cursorColumn } }),
       applyModel: (m: ReturnType<typeof initialModel>) => {
-        if (m.currentBuffer) currentBuffer = m.currentBuffer as FunctionalTextBufferImpl;
+        if (m.currentBuffer) currentBuffer = m.currentBuffer as TextBufferImpl;
         cursorLine = m.cursorPosition.line;
         cursorColumn = m.cursorPosition.column;
       },
@@ -80,7 +80,7 @@ describe("Yank Pop Integration (US-1.9.2)", () => {
     const yankOps = createYankOps(
       access,
       session,
-      (buf) => { currentBuffer = buf as FunctionalTextBufferImpl; },
+      (buf) => { currentBuffer = buf as TextBufferImpl; },
       (line) => { cursorLine = line; },
       (col) => { cursorColumn = col; }
     );
@@ -92,7 +92,7 @@ describe("Yank Pop Integration (US-1.9.2)", () => {
     const yankPopOps = createYankPopOps(
       access,
       session.yankPop,
-      (buf) => { currentBuffer = buf as FunctionalTextBufferImpl; }
+      (buf) => { currentBuffer = buf as TextBufferImpl; }
     );
     for (const [name, func] of yankPopOps.entries()) {
       interpreter.defineBuiltin(name, func);
@@ -179,13 +179,13 @@ describe("Yank Pop Integration (US-1.9.2)", () => {
         {
           getModel: () => ({ ...initialModel(), currentBuffer: currentBuffer ?? undefined, cursorPosition: { line: cursorLine, column: cursorColumn } }),
           applyModel: (m) => {
-            if (m.currentBuffer) currentBuffer = m.currentBuffer as FunctionalTextBufferImpl;
+            if (m.currentBuffer) currentBuffer = m.currentBuffer as TextBufferImpl;
             cursorLine = m.cursorPosition.line;
             cursorColumn = m.cursorPosition.column;
           },
         },
         session.yankPop,
-        (buf) => { currentBuffer = buf as FunctionalTextBufferImpl; }
+        (buf) => { currentBuffer = buf as TextBufferImpl; }
       );
 
       // Manually activate state (simulating paste operation)

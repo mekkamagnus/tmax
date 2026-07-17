@@ -5,7 +5,7 @@
 
 import type { TLispValue, TLispFunctionImpl } from "../../tlisp/types.ts";
 import { createNil, createNumber, createString, createList } from "../../tlisp/values.ts";
-import type { FunctionalTextBuffer } from "../../core/types.ts";
+import type { TextBuffer } from "../../core/types.ts";
 import { runModel, readModelField, type EditorModelAccess } from "./state-context.ts";
 import { Either } from "../../utils/task-either.ts";
 import {
@@ -23,7 +23,7 @@ import {
  * WeakMap for storing indent rules keyed by buffer object reference.
  * This avoids needing the buffer name string directly.
  */
-const indentRulesByBuffer: WeakMap<FunctionalTextBuffer, { increase: string[]; decrease: string[] }> = new WeakMap();
+const indentRulesByBuffer: WeakMap<TextBuffer, { increase: string[]; decrease: string[] }> = new WeakMap();
 
 /**
  * Helper: extract a list of strings from a T-Lisp list value
@@ -67,14 +67,14 @@ function extractStringList(listVal: TLispValue, argName: string, funcName: strin
  */
 export function createIndentOps(
   access: EditorModelAccess,
-  setCurrentBuffer: (buffer: FunctionalTextBuffer) => void,
+  setCurrentBuffer: (buffer: TextBuffer) => void,
   setCursorLine: (line: number) => void,
   getTabSize: () => number
 ): Map<string, TLispFunctionImpl> {
   // CHORE-39 Phase 4: cursor/buffer reads flow through the State monad against
   // EditorModel; writes stay on the supplied setters to preserve side effects.
   const getCursorLine = (): number => runModel(access, readModelField("cursorPosition")).line;
-  const getCurrentBuffer = (): FunctionalTextBuffer | null =>
+  const getCurrentBuffer = (): TextBuffer | null =>
     runModel(access, readModelField("currentBuffer")) ?? null;
   const api = new Map<string, TLispFunctionImpl>();
 

@@ -5,8 +5,8 @@
 
 import { describe, test, expect, beforeEach } from "bun:test";
 import { expectRight } from "../helpers/editor-fixture.ts";
-import { FunctionalTextBufferImpl } from "../../src/core/buffer.ts";
-import type { FunctionalTextBuffer } from "../../src/core/types.ts";
+import { TextBufferImpl } from "../../src/core/buffer.ts";
+import type { TextBuffer } from "../../src/core/types.ts";
 import { Either } from "../../src/utils/task-either.ts";
 import { createTextObjectsHelpers } from "../../src/editor/api/text-objects.ts";
 
@@ -37,11 +37,11 @@ const {
   deleteInnerTag,
 } = createTextObjectsHelpers({ registerDelete: (text: string) => { deleteRegister = text; }, setDeleteRegister: (text: string) => { deleteRegister = text; } });
 
-function createBuffer(content: string): FunctionalTextBuffer {
-  return FunctionalTextBufferImpl.create(content);
+function createBuffer(content: string): TextBuffer {
+  return TextBufferImpl.create(content);
 }
 
-function getBufferContent(buffer: FunctionalTextBuffer): string {
+function getBufferContent(buffer: TextBuffer): string {
   const result = buffer.getContent();
   if (Either.isLeft(result)) {
     throw new Error(`Failed to get buffer content: ${result.left}`);

@@ -1,4 +1,4 @@
-import { FunctionalTextBufferImpl } from "../core/buffer.ts";
+import { TextBufferImpl } from "../core/buffer.ts";
 import type { EditorState, Tab, Window, WorkspaceState, WorkspaceData, BufferMetadata, BufferModeState } from "../core/types.ts";
 
 function bufferContent(buffer: EditorState["currentBuffer"]): string {
@@ -22,7 +22,7 @@ function deserializeWindow(raw: unknown): Window | null {
 
   return {
     id: record.id,
-    buffer: FunctionalTextBufferImpl.create(
+    buffer: TextBufferImpl.create(
       typeof record.bufferContent === "string" ? record.bufferContent : "",
     ),
     bufferName: typeof record.bufferName === "string" ? record.bufferName : undefined,
@@ -46,7 +46,7 @@ function deserializeTab(raw: unknown): Tab | null {
   return {
     id: record.id,
     label: record.label,
-    buffer: FunctionalTextBufferImpl.create(
+    buffer: TextBufferImpl.create(
       typeof record.bufferContent === "string" ? record.bufferContent : "",
     ),
     bufferName: typeof record.bufferName === "string" ? record.bufferName : undefined,
@@ -97,7 +97,7 @@ export function jsonToEditorState(json: Record<string, unknown>): EditorState {
     : [];
 
   return {
-    currentBuffer: FunctionalTextBufferImpl.create((json.bufferContent as string) || ""),
+    currentBuffer: TextBufferImpl.create((json.bufferContent as string) || ""),
     cursorPosition: json.cursorPosition as EditorState["cursorPosition"],
     mode: json.mode as EditorState["mode"],
     statusMessage: json.statusMessage as string,
@@ -219,16 +219,16 @@ export function workspaceToData(workspace: WorkspaceState): WorkspaceData {
 /**
  * Convert WorkspaceData to WorkspaceState for deserialization
  *
- * Reconstructs FunctionalTextBuffer instances from string contents.
+ * Reconstructs TextBuffer instances from string contents.
  */
 export function dataToWorkspace(data: WorkspaceData): WorkspaceState {
   // Reconstruct buffers
-  const buffers = new Map<string, import("../core/types.ts").FunctionalTextBuffer>();
+  const buffers = new Map<string, import("../core/types.ts").TextBuffer>();
   const bufferMetadata = new Map<string, BufferMetadata>();
   const bufferModeStates = new Map<string, BufferModeState>();
 
   for (const bufferData of data.buffers ?? []) {
-    const buffer = FunctionalTextBufferImpl.create(bufferData.content);
+    const buffer = TextBufferImpl.create(bufferData.content);
     buffers.set(bufferData.name, buffer);
     bufferMetadata.set(bufferData.name, {
       name: bufferData.name,
@@ -247,7 +247,7 @@ export function dataToWorkspace(data: WorkspaceData): WorkspaceState {
 
   // Ensure *scratch* exists (for old workspaces)
   if (!buffers.has("*scratch*")) {
-    const scratchBuffer = FunctionalTextBufferImpl.create("");
+    const scratchBuffer = TextBufferImpl.create("");
     buffers.set("*scratch*", scratchBuffer);
     bufferMetadata.set("*scratch*", {
       name: "*scratch*",
@@ -333,21 +333,21 @@ export function dataToWorkspace(data: WorkspaceData): WorkspaceState {
  *
  * Helper function for converting array of buffer data to Map.
  */
-export function deserializeBufferList(raw: unknown[]): Map<string, ReturnType<typeof FunctionalTextBufferImpl.create>> {
-  const buffers = new Map<string, ReturnType<typeof FunctionalTextBufferImpl.create>>();
+export function deserializeBufferList(raw: unknown[]): Map<string, ReturnType<typeof TextBufferImpl.create>> {
+  const buffers = new Map<string, ReturnType<typeof TextBufferImpl.create>>();
 
   for (const item of raw) {
     if (!item || typeof item !== "object") continue;
     const record = item as Record<string, unknown>;
 
     if (typeof record.name === "string" && typeof record.content === "string") {
-      buffers.set(record.name, FunctionalTextBufferImpl.create(record.content));
+      buffers.set(record.name, TextBufferImpl.create(record.content));
     }
   }
 
   // Ensure *scratch* exists
   if (!buffers.has("*scratch*")) {
-    buffers.set("*scratch*", FunctionalTextBufferImpl.create(""));
+    buffers.set("*scratch*", TextBufferImpl.create(""));
   }
 
   return buffers;

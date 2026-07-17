@@ -20,7 +20,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { createEditorAPI } from "../../src/editor/tlisp-api.ts";
 import { createTestAPIContext, expectDefined, expectRight } from "../helpers/editor-fixture.ts";
-import { FunctionalTextBufferImpl } from "../../src/core/buffer.ts";
+import { TextBufferImpl } from "../../src/core/buffer.ts";
 import { createString } from "../../src/tlisp/values.ts";
 import { ModuleRegistry } from "../../src/tlisp/module-registry.ts";
 import { Either } from "../../src/utils/task-either.ts";
@@ -108,7 +108,7 @@ describe("CHORE-44 Change 2 — EditorAPIContext", () => {
 
   // ── AC2.6: no mutable bridge properties on EditorAPIContext ──────────
   test("AC2.6: the seeded currentBuffer is observable through the model path", () => {
-    const buf = FunctionalTextBufferImpl.create("hello");
+    const buf = TextBufferImpl.create("hello");
     const ctx = createTestAPIContext({ currentBuffer: buf });
     // The currentBuffer override seeds model.currentBuffer; reads go through
     // access.getModel() (no bridge property).
@@ -129,7 +129,7 @@ describe("CHORE-44 Change 2 — EditorAPIContext", () => {
 
   test("AC2.6/AC2.7: setCurrentBuffer routes through the model (SetCurrentBuffer)", () => {
     const ctx = createTestAPIContext();
-    const buf = FunctionalTextBufferImpl.create("switched");
+    const buf = TextBufferImpl.create("switched");
     expect(ctx.access.getModel().currentBuffer).toBeUndefined();
     ctx.setCurrentBuffer(buf);
     expect(ctx.access.getModel().currentBuffer).toBe(buf);

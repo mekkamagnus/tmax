@@ -12,7 +12,7 @@
 
 import type { TLispValue, TLispFunctionImpl } from "../../tlisp/types.ts";
 import { createNumber, createString, createNil, createList } from "../../tlisp/values.ts";
-import type { FunctionalTextBuffer, Position } from "../../core/types.ts";
+import type { TextBuffer, Position } from "../../core/types.ts";
 import { runModel, readModelField, type EditorModelAccess } from "./state-context.ts";
 import { Either } from "../../utils/task-either.ts";
 import {
@@ -79,7 +79,7 @@ export function createVisualState(): VisualOps {
 export function createVisualOps(
   access: EditorModelAccess,
   session: EditorSession,
-  setBuffer: (buffer: FunctionalTextBuffer | null) => void,
+  setBuffer: (buffer: TextBuffer | null) => void,
   setCursorLine: (line: number) => void,
   setCursorColumn: (column: number) => void,
   setMode: (mode: "normal" | "insert" | "visual" | "command" | "mx" | "replace") => void,
@@ -90,7 +90,7 @@ export function createVisualOps(
   // effects.
   const getCursorLine = (): number => runModel(access, readModelField("cursorPosition")).line;
   const getCursorColumn = (): number => runModel(access, readModelField("cursorPosition")).column;
-  const getBuffer = (): FunctionalTextBuffer | null =>
+  const getBuffer = (): TextBuffer | null =>
     runModel(access, readModelField("currentBuffer")) ?? null;
   const getMode = (): "normal" | "insert" | "visual" | "command" | "mx" | "replace" =>
     runModel(access, readModelField("mode"));

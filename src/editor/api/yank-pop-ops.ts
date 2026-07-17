@@ -11,7 +11,7 @@
 
 import type { TLispValue, TLispFunctionImpl } from "../../tlisp/types.ts";
 import { createString, createNil } from "../../tlisp/values.ts";
-import type { FunctionalTextBuffer, Position } from "../../core/types.ts";
+import type { TextBuffer, Position } from "../../core/types.ts";
 import { runModel, readModelField, type EditorModelAccess } from "./state-context.ts";
 import { Either } from "../../utils/task-either.ts";
 import {
@@ -55,7 +55,7 @@ export interface YankPopOps {
   reset(): void;
   isActive(): boolean;
   pastedText(): string;
-  perform(currentBuffer: FunctionalTextBuffer, setCurrentBuffer: (buffer: FunctionalTextBuffer) => void): Either<AppError, null>;
+  perform(currentBuffer: TextBuffer, setCurrentBuffer: (buffer: TextBuffer) => void): Either<AppError, null>;
 }
 
 /**
@@ -90,8 +90,8 @@ export function bindYankPop(state: YankPopState, killRing: KillRingOps): YankPop
     isActive: (): boolean => state.active,
     pastedText: (): string => state.pastedText,
     perform: (
-      currentBuffer: FunctionalTextBuffer,
-      setCurrentBuffer: (buffer: FunctionalTextBuffer) => void
+      currentBuffer: TextBuffer,
+      setCurrentBuffer: (buffer: TextBuffer) => void
     ): Either<AppError, null> => {
       if (!state.active) {
         return Either.right(null);
@@ -126,11 +126,11 @@ export function bindYankPop(state: YankPopState, killRing: KillRingOps): YankPop
 export function createYankPopOps(
   access: EditorModelAccess,
   ops: YankPopOps,
-  setCurrentBuffer: (buffer: FunctionalTextBuffer) => void
+  setCurrentBuffer: (buffer: TextBuffer) => void
 ): Map<string, TLispFunctionImpl> {
   // CHORE-39 Phase 4: current-buffer read flows through the State monad against
   // EditorModel; writes stay on the supplied setter to preserve side effects.
-  const getCurrentBuffer = (): FunctionalTextBuffer | null =>
+  const getCurrentBuffer = (): TextBuffer | null =>
     runModel(access, readModelField("currentBuffer")) ?? null;
   const api = new Map<string, TLispFunctionImpl>();
 

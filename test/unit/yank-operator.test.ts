@@ -11,21 +11,21 @@
  */
 
 import { describe, test, expect, beforeEach } from "bun:test";
-import { FunctionalTextBufferImpl } from "../../src/core/buffer.ts";
-import type { FunctionalTextBuffer } from "../../src/core/types.ts";
+import { TextBufferImpl } from "../../src/core/buffer.ts";
+import type { TextBuffer } from "../../src/core/types.ts";
 import { Either } from "../../src/utils/task-either.ts";
 
 /**
  * Test helper to create a buffer with content
  */
-function createBuffer(content: string): FunctionalTextBuffer {
-  return FunctionalTextBufferImpl.create(content);
+function createBuffer(content: string): TextBuffer {
+  return TextBufferImpl.create(content);
 }
 
 /**
  * Test helper to get buffer content as string
  */
-function getBufferContent(buffer: FunctionalTextBuffer): string {
+function getBufferContent(buffer: TextBuffer): string {
   const result = buffer.getContent();
   if (Either.isLeft(result)) {
     throw new Error(`Failed to get buffer content: ${result.left}`);
@@ -36,7 +36,7 @@ function getBufferContent(buffer: FunctionalTextBuffer): string {
 /**
  * Test helper to insert text at cursor position
  */
-function insertAtCursor(buffer: FunctionalTextBuffer, text: string, position: { line: number; column: number }): FunctionalTextBuffer {
+function insertAtCursor(buffer: TextBuffer, text: string, position: { line: number; column: number }): TextBuffer {
   const result = buffer.insert(position, text);
   if (Either.isLeft(result)) {
     throw new Error(`Failed to insert: ${result.left}`);
@@ -47,7 +47,7 @@ function insertAtCursor(buffer: FunctionalTextBuffer, text: string, position: { 
 /**
  * Test helper to get text from a range
  */
-function getTextInRange(buffer: FunctionalTextBuffer, start: { line: number; column: number }, end: { line: number; column: number }): string {
+function getTextInRange(buffer: TextBuffer, start: { line: number; column: number }, end: { line: number; column: number }): string {
   const result = buffer.getText({ start, end });
   if (Either.isLeft(result)) {
     throw new Error(`Failed to get text: ${result.left}`);
@@ -59,7 +59,7 @@ function getTextInRange(buffer: FunctionalTextBuffer, start: { line: number; col
  * Mock state for yank operations testing
  */
 interface MockState {
-  currentBuffer: FunctionalTextBuffer | null;
+  currentBuffer: TextBuffer | null;
   cursorLine: number;
   cursorColumn: number;
   yankRegister: string;

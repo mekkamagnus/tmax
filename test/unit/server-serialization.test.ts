@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { FunctionalTextBufferImpl } from "../../src/core/buffer.ts";
+import { TextBufferImpl } from "../../src/core/buffer.ts";
 import type { EditorState } from "../../src/core/types.ts";
 import {
   editorStateToJson,
@@ -13,9 +13,9 @@ const content = (buffer: EditorState["currentBuffer"]): string => {
 
 describe("daemon render-state serialization", () => {
   test("preserves window and tab state needed by remote renderers", () => {
-    const main = FunctionalTextBufferImpl.create("main");
-    const split = FunctionalTextBufferImpl.create("split");
-    const tab = FunctionalTextBufferImpl.create("tab");
+    const main = TextBufferImpl.create("main");
+    const split = TextBufferImpl.create("split");
+    const tab = TextBufferImpl.create("tab");
     const state = {
       currentBuffer: main,
       cursorPosition: { line: 0, column: 0 },
@@ -57,7 +57,7 @@ describe("daemon render-state serialization", () => {
   });
 
   test("round-trips viewportLeft through serialization", () => {
-    const main = FunctionalTextBufferImpl.create("hello");
+    const main = TextBufferImpl.create("hello");
     const state = {
       currentBuffer: main,
       cursorPosition: { line: 0, column: 0 },

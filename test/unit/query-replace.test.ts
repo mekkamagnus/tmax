@@ -1,17 +1,17 @@
 import { describe, test, expect, beforeEach } from "bun:test";
 import { expectRight } from "../helpers/editor-fixture.ts";
 import { createReplaceOps } from "../../src/editor/api/replace-ops.ts";
-import { FunctionalTextBufferImpl } from "../../src/core/buffer.ts";
+import { TextBufferImpl } from "../../src/core/buffer.ts";
 import { createString, createNumber, createList } from "../../src/tlisp/values.ts";
 import { Either } from "../../src/utils/task-either.ts";
 import { initialModel } from "../../src/editor/functional/model.ts";
 
 describe("Query Replace Operations", () => {
-  let buffer: FunctionalTextBufferImpl;
+  let buffer: TextBufferImpl;
   let cursorLine = 0;
 
   beforeEach(() => {
-    buffer = FunctionalTextBufferImpl.create("hello world\nhello there\nhello goodbye");
+    buffer = TextBufferImpl.create("hello world\nhello there\nhello goodbye");
     cursorLine = 0;
   });
 
@@ -21,11 +21,11 @@ describe("Query Replace Operations", () => {
       {
         getModel: () => ({ ...initialModel(), currentBuffer: buffer, cursorPosition: { line: cursorLine, column: 0 } }),
         applyModel: (m) => {
-          if (m.currentBuffer) buffer = m.currentBuffer as FunctionalTextBufferImpl;
+          if (m.currentBuffer) buffer = m.currentBuffer as TextBufferImpl;
           cursorLine = m.cursorPosition.line;
         },
       },
-      (b) => { buffer = b as FunctionalTextBufferImpl; },
+      (b) => { buffer = b as TextBufferImpl; },
       (l) => { cursorLine = l; }
     );
   }

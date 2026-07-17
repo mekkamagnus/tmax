@@ -1,17 +1,17 @@
 import { describe, test, expect, beforeEach } from "bun:test";
 import { createMajorModeOps } from "../../src/editor/api/major-mode-ops.ts";
-import { FunctionalTextBufferImpl } from "../../src/core/buffer.ts";
+import { TextBufferImpl } from "../../src/core/buffer.ts";
 import { createString, createList, createNil, createNumber } from "../../src/tlisp/values.ts";
 import { Either } from "../../src/utils/task-either.ts";
 import { initialModel } from "../../src/editor/functional/model.ts";
 
 describe("Major Modes", () => {
-  let buffer: FunctionalTextBufferImpl;
+  let buffer: TextBufferImpl;
   let currentFilename: string | undefined;
   let tlispEvalLog: string[];
 
   beforeEach(() => {
-    buffer = FunctionalTextBufferImpl.create("// hello");
+    buffer = TextBufferImpl.create("// hello");
     currentFilename = undefined;
     tlispEvalLog = [];
   });
@@ -21,7 +21,7 @@ describe("Major Modes", () => {
     return createMajorModeOps(
       {
         getModel: () => ({ ...initialModel(), currentBuffer: buffer, currentFilename, bufferModified: false }),
-        applyModel: (m) => { if (m.currentBuffer) buffer = m.currentBuffer as FunctionalTextBufferImpl; },
+        applyModel: (m) => { if (m.currentBuffer) buffer = m.currentBuffer as TextBufferImpl; },
       },
       (expr: string) => {
         tlispEvalLog.push(expr);

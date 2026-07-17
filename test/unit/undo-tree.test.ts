@@ -13,10 +13,10 @@ import { describe, test, expect, beforeEach } from "bun:test";
 import { expectRight } from "../helpers/editor-fixture.ts";
 import { Either } from "../../src/utils/task-either.ts";
 import { createUndoTreeOps } from "../../src/editor/api/undo-tree.ts";
-import type { FunctionalTextBuffer } from "../../src/core/types.ts";
+import type { TextBuffer } from "../../src/core/types.ts";
 
 // Mock buffer implementation for testing
-class MockBuffer implements FunctionalTextBuffer {
+class MockBuffer implements TextBuffer {
   private content: string;
 
   constructor(initialContent: string = "") {
@@ -39,17 +39,17 @@ class MockBuffer implements FunctionalTextBuffer {
     return Either.right(this.content.split('\n').length);
   }
 
-  insert(position: { line: number; column: number }, text: string): Either<string, FunctionalTextBuffer> {
+  insert(position: { line: number; column: number }, text: string): Either<string, TextBuffer> {
     const lines = this.content.split('\n');
     const line = lines[position.line] || "";
     const newLine = line.slice(0, position.column) + text + line.slice(position.column);
     lines[position.line] = newLine;
     const newContent = lines.join('\n');
     const newBuffer = new MockBuffer(newContent);
-    return Either.right(newBuffer as FunctionalTextBuffer);
+    return Either.right(newBuffer as TextBuffer);
   }
 
-  delete(range: { start: { line: number; column: number }; end: { line: number; column: number } }): Either<string, FunctionalTextBuffer> {
+  delete(range: { start: { line: number; column: number }; end: { line: number; column: number } }): Either<string, TextBuffer> {
     const lines = this.content.split('\n');
 
     // Simple case: same line
@@ -59,7 +59,7 @@ class MockBuffer implements FunctionalTextBuffer {
       lines[range.start.line] = newLine;
       const newContent = lines.join('\n');
       const newBuffer = new MockBuffer(newContent);
-      return Either.right(newBuffer as FunctionalTextBuffer);
+      return Either.right(newBuffer as TextBuffer);
     }
 
     // Multi-line deletion
@@ -73,10 +73,10 @@ class MockBuffer implements FunctionalTextBuffer {
 
     const newContent = newLines.join('\n');
     const newBuffer = new MockBuffer(newContent);
-    return Either.right(newBuffer as FunctionalTextBuffer);
+    return Either.right(newBuffer as TextBuffer);
   }
 
-  replace(range: { start: { line: number; column: number }; end: { line: number; column: number } }, text: string): Either<string, FunctionalTextBuffer> {
+  replace(range: { start: { line: number; column: number }; end: { line: number; column: number } }, text: string): Either<string, TextBuffer> {
     const deleteResult = this.delete(range);
     if (Either.isLeft(deleteResult)) {
       return deleteResult;
@@ -119,15 +119,15 @@ class MockBuffer implements FunctionalTextBuffer {
 }
 
 describe("Undo Tree Operations", () => {
-  let currentBuffer: FunctionalTextBuffer | null;
+  let currentBuffer: TextBuffer | null;
   let undoTreeOps: Map<string, (args: any[]) => Either<any, any>>;
   // CHORE-44 Change 1: undo-tree state is per-editor; reset/setInitialBuffer
   // come from the factory result (bound to this editor's tree).
   let resetUndoTreeState: () => void;
-  let setTreeInitialBuffer: (buffer: FunctionalTextBuffer) => void;
+  let setTreeInitialBuffer: (buffer: TextBuffer) => void;
 
   beforeEach(() => {
-    currentBuffer = new MockBuffer("Initial content\nLine 2\nLine 3") as FunctionalTextBuffer;
+    currentBuffer = new MockBuffer("Initial content\nLine 2\nLine 3") as TextBuffer;
 
     const undoTreeCore = createUndoTreeOps(
       () => currentBuffer,
@@ -151,9 +151,9 @@ describe("Undo Tree Operations", () => {
       const treeFunc = undoTreeOps.get("undo-tree-structure")!;
 
       // Create edits A, B, C
-      const editA = new MockBuffer("Edit A\nLine 2\nLine 3") as FunctionalTextBuffer;
-      const editB = new MockBuffer("Edit B\nLine 2\nLine 3") as FunctionalTextBuffer;
-      const editC = new MockBuffer("Edit C\nLine 2\nLine 3") as FunctionalTextBuffer;
+      const editA = new MockBuffer("Edit A\nLine 2\nLine 3") as TextBuffer;
+      const editB = new MockBuffer("Edit B\nLine 2\nLine 3") as TextBuffer;
+      const editC = new MockBuffer("Edit C\nLine 2\nLine 3") as TextBuffer;
 
       pushFunc([{ type: 'string', value: 'A' }, { buffer: editA }]);
       pushFunc([{ type: 'string', value: 'B' }, { buffer: editB }]);
@@ -164,7 +164,7 @@ describe("Undo Tree Operations", () => {
       undoFunc([]);
 
       // Create new edit D (creates branch)
-      const editD = new MockBuffer("Edit D\nLine 2\nLine 3") as FunctionalTextBuffer;
+      const editD = new MockBuffer("Edit D\nLine 2\nLine 3") as TextBuffer;
       pushFunc([{ type: 'string', value: 'D' }, { buffer: editD }]);
 
       // Get tree structure
@@ -199,21 +199,21 @@ describe("Undo Tree Operations", () => {
       const undoFunc = undoTreeOps.get("undo-tree-undo")!;
 
       // Create edit A
-      const editA = new MockBuffer("Edit A\nLine 2\nLine 3") as FunctionalTextBuffer;
+      const editA = new MockBuffer("Edit A\nLine 2\nLine 3") as TextBuffer;
       pushFunc([{ type: 'string', value: 'A' }, { buffer: editA }]);
 
       // Undo to initial
       undoFunc([]);
 
       // Create edit B (branch 1)
-      const editB = new MockBuffer("Edit B\nLine 2\nLine 3") as FunctionalTextBuffer;
+      const editB = new MockBuffer("Edit B\nLine 2\nLine 3") as TextBuffer;
       pushFunc([{ type: 'string', value: 'B' }, { buffer: editB }]);
 
       // Undo to initial
       undoFunc([]);
 
       // Create edit C (branch 2)
-      const editC = new MockBuffer("Edit C\nLine 2\nLine 3") as FunctionalTextBuffer;
+      const editC = new MockBuffer("Edit C\nLine 2\nLine 3") as TextBuffer;
       pushFunc([{ type: 'string', value: 'C' }, { buffer: editC }]);
 
       // Get tree structure
@@ -243,9 +243,9 @@ describe("Undo Tree Operations", () => {
       const gotoFunc = undoTreeOps.get("undo-tree-goto")!;
 
       // Create edits A, B, C
-      const editA = new MockBuffer("Edit A\nLine 2\nLine 3") as FunctionalTextBuffer;
-      const editB = new MockBuffer("Edit B\nLine 2\nLine 3") as FunctionalTextBuffer;
-      const editC = new MockBuffer("Edit C\nLine 2\nLine 3") as FunctionalTextBuffer;
+      const editA = new MockBuffer("Edit A\nLine 2\nLine 3") as TextBuffer;
+      const editB = new MockBuffer("Edit B\nLine 2\nLine 3") as TextBuffer;
+      const editC = new MockBuffer("Edit C\nLine 2\nLine 3") as TextBuffer;
 
       pushFunc([{ type: 'string', value: 'A' }, { buffer: editA }]);
       pushFunc([{ type: 'string', value: 'B' }, { buffer: editB }]);
@@ -256,7 +256,7 @@ describe("Undo Tree Operations", () => {
       undoFunc([]);
 
       // Create new edit D (creates branch)
-      const editD = new MockBuffer("Edit D\nLine 2\nLine 3") as FunctionalTextBuffer;
+      const editD = new MockBuffer("Edit D\nLine 2\nLine 3") as TextBuffer;
       pushFunc([{ type: 'string', value: 'D' }, { buffer: editD }]);
 
       // Navigate to node C
@@ -276,8 +276,8 @@ describe("Undo Tree Operations", () => {
       const gotoFunc = undoTreeOps.get("undo-tree-goto")!;
 
       // Create edits A, B
-      const editA = new MockBuffer("Edit A\nLine 2\nLine 3") as FunctionalTextBuffer;
-      const editB = new MockBuffer("Edit B\nLine 2\nLine 3") as FunctionalTextBuffer;
+      const editA = new MockBuffer("Edit A\nLine 2\nLine 3") as TextBuffer;
+      const editB = new MockBuffer("Edit B\nLine 2\nLine 3") as TextBuffer;
 
       pushFunc([{ type: 'string', value: 'A' }, { buffer: editA }]);
       pushFunc([{ type: 'string', value: 'B' }, { buffer: editB }]);
@@ -286,7 +286,7 @@ describe("Undo Tree Operations", () => {
       undoFunc([]);
 
       // Create edit C (branch)
-      const editC = new MockBuffer("Edit C\nLine 2\nLine 3") as FunctionalTextBuffer;
+      const editC = new MockBuffer("Edit C\nLine 2\nLine 3") as TextBuffer;
       pushFunc([{ type: 'string', value: 'C' }, { buffer: editC }]);
 
       // Navigate to B
@@ -315,9 +315,9 @@ describe("Undo Tree Operations", () => {
       const treeFunc = undoTreeOps.get("undo-tree-structure")!;
 
       // Create edits A, B, C
-      const editA = new MockBuffer("Edit A\nLine 2\nLine 3") as FunctionalTextBuffer;
-      const editB = new MockBuffer("Edit B\nLine 2\nLine 3") as FunctionalTextBuffer;
-      const editC = new MockBuffer("Edit C\nLine 2\nLine 3") as FunctionalTextBuffer;
+      const editA = new MockBuffer("Edit A\nLine 2\nLine 3") as TextBuffer;
+      const editB = new MockBuffer("Edit B\nLine 2\nLine 3") as TextBuffer;
+      const editC = new MockBuffer("Edit C\nLine 2\nLine 3") as TextBuffer;
 
       pushFunc([{ type: 'string', value: 'A' }, { buffer: editA }]);
       pushFunc([{ type: 'string', value: 'B' }, { buffer: editB }]);
@@ -326,7 +326,7 @@ describe("Undo Tree Operations", () => {
       // Undo to A and create branch D
       undoFunc([]);
       undoFunc([]);
-      const editD = new MockBuffer("Edit D\nLine 2\nLine 3") as FunctionalTextBuffer;
+      const editD = new MockBuffer("Edit D\nLine 2\nLine 3") as TextBuffer;
       pushFunc([{ type: 'string', value: 'D' }, { buffer: editD }]);
 
       // Get tree structure
@@ -347,7 +347,7 @@ describe("Undo Tree Operations", () => {
       const currentFunc = undoTreeOps.get("undo-tree-current")!;
 
       // Create edit A
-      const editA = new MockBuffer("Edit A\nLine 2\nLine 3") as FunctionalTextBuffer;
+      const editA = new MockBuffer("Edit A\nLine 2\nLine 3") as TextBuffer;
       pushFunc([{ type: 'string', value: 'A' }, { buffer: editA }]);
 
       // Get current position
@@ -366,9 +366,9 @@ describe("Undo Tree Operations", () => {
       const branchesFunc = undoTreeOps.get("undo-tree-branches")!;
 
       // Create edits A, B, C
-      const editA = new MockBuffer("Edit A\nLine 2\nLine 3") as FunctionalTextBuffer;
-      const editB = new MockBuffer("Edit B\nLine 2\nLine 3") as FunctionalTextBuffer;
-      const editC = new MockBuffer("Edit C\nLine 2\nLine 3") as FunctionalTextBuffer;
+      const editA = new MockBuffer("Edit A\nLine 2\nLine 3") as TextBuffer;
+      const editB = new MockBuffer("Edit B\nLine 2\nLine 3") as TextBuffer;
+      const editC = new MockBuffer("Edit C\nLine 2\nLine 3") as TextBuffer;
 
       pushFunc([{ type: 'string', value: 'A' }, { buffer: editA }]);
       pushFunc([{ type: 'string', value: 'B' }, { buffer: editB }]);
@@ -377,7 +377,7 @@ describe("Undo Tree Operations", () => {
       // Undo to A and create branch D
       undoFunc([]);
       undoFunc([]);
-      const editD = new MockBuffer("Edit D\nLine 2\nLine 3") as FunctionalTextBuffer;
+      const editD = new MockBuffer("Edit D\nLine 2\nLine 3") as TextBuffer;
       pushFunc([{ type: 'string', value: 'D' }, { buffer: editD }]);
 
       // Get branches from node A (index 0)
@@ -400,9 +400,9 @@ describe("Undo Tree Operations", () => {
       const nodesFunc = undoTreeOps.get("undo-tree-nodes")!;
 
       // Create edits A, B, C
-      const editA = new MockBuffer("Edit A\nLine 2\nLine 3") as FunctionalTextBuffer;
-      const editB = new MockBuffer("Edit B\nLine 2\nLine 3") as FunctionalTextBuffer;
-      const editC = new MockBuffer("Edit C\nLine 2\nLine 3") as FunctionalTextBuffer;
+      const editA = new MockBuffer("Edit A\nLine 2\nLine 3") as TextBuffer;
+      const editB = new MockBuffer("Edit B\nLine 2\nLine 3") as TextBuffer;
+      const editC = new MockBuffer("Edit C\nLine 2\nLine 3") as TextBuffer;
 
       pushFunc([{ type: 'string', value: 'A' }, { buffer: editA }]);
       pushFunc([{ type: 'string', value: 'B' }, { buffer: editB }]);
@@ -424,7 +424,7 @@ describe("Undo Tree Operations", () => {
       const nodesFunc = undoTreeOps.get("undo-tree-nodes")!;
 
       // Create some edits
-      const editA = new MockBuffer("Edit A\nLine 2\nLine 3") as FunctionalTextBuffer;
+      const editA = new MockBuffer("Edit A\nLine 2\nLine 3") as TextBuffer;
       pushFunc([{ type: 'string', value: 'A' }, { buffer: editA }]);
 
       // Reset
@@ -446,9 +446,9 @@ describe("Undo Tree Operations", () => {
       const redoFunc = undoTreeOps.get("undo-tree-redo")!;
 
       // Create edits A, B, C
-      const editA = new MockBuffer("Edit A\nLine 2\nLine 3") as FunctionalTextBuffer;
-      const editB = new MockBuffer("Edit B\nLine 2\nLine 3") as FunctionalTextBuffer;
-      const editC = new MockBuffer("Edit C\nLine 2\nLine 3") as FunctionalTextBuffer;
+      const editA = new MockBuffer("Edit A\nLine 2\nLine 3") as TextBuffer;
+      const editB = new MockBuffer("Edit B\nLine 2\nLine 3") as TextBuffer;
+      const editC = new MockBuffer("Edit C\nLine 2\nLine 3") as TextBuffer;
 
       pushFunc([{ type: 'string', value: 'A' }, { buffer: editA }]);
       pushFunc([{ type: 'string', value: 'B' }, { buffer: editB }]);

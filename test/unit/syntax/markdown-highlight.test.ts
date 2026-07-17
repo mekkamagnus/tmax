@@ -12,7 +12,7 @@ import { rules } from "../../../src/syntax/languages/markdown.ts";
 import { defaultDarkTheme } from "../../../src/syntax/types.ts";
 import { style, stripAnsi } from "../../../src/steep/matcha.ts";
 import { captureFrame } from "../../../src/render/capture-frame.ts";
-import { FunctionalTextBufferImpl } from "../../../src/core/buffer.ts";
+import { TextBufferImpl } from "../../../src/core/buffer.ts";
 import type { HighlightSpan, EditorState } from "../../../src/core/types.ts";
 
 describe("markdown syntax highlighting — theme coverage", () => {
@@ -163,7 +163,7 @@ describe("markdown syntax highlighting — ANSI output", () => {
 
 describe("markdown syntax highlighting — render pipeline (ANSI output)", () => {
   function renderMarkdown(content: string, filename = "test.md"): string[] {
-    const buffer = FunctionalTextBufferImpl.create(content);
+    const buffer = TextBufferImpl.create(content);
     const state: EditorState = {
       currentBuffer: buffer,
       cursorPosition: { line: 0, column: 0 },

@@ -11,7 +11,7 @@
 import type {
   BufferMetadata,
   BufferModeState,
-  FunctionalTextBuffer,
+  TextBuffer,
   Window,
   WorkspaceData,
   WorkspaceMetadata,
@@ -194,15 +194,15 @@ export class WorkspaceManager {
           };
 
           // Import here to avoid top-level import issues
-          const { FunctionalTextBufferImpl } = await import('../core/buffer.ts');
+          const { TextBufferImpl } = await import('../core/buffer.ts');
 
           // Create initial buffers with *scratch*
-          const buffers = new Map<string, FunctionalTextBuffer>();
+          const buffers = new Map<string, TextBuffer>();
           const bufferMetadata = new Map<string, BufferMetadata>();
           const bufferModeStates = new Map<string, BufferModeState>();
 
           // Always create *scratch* buffer
-          const scratchBuffer = FunctionalTextBufferImpl.create('');
+          const scratchBuffer = TextBufferImpl.create('');
           buffers.set('*scratch*', scratchBuffer);
           bufferMetadata.set('*scratch*', {
             name: '*scratch*',
@@ -217,7 +217,7 @@ export class WorkspaceManager {
             for (const [bufferName, content] of options.initialContent.entries()) {
               if (bufferName === '*scratch*') continue; // Already created
 
-              const buffer = FunctionalTextBufferImpl.create(content);
+              const buffer = TextBufferImpl.create(content);
               buffers.set(bufferName, buffer);
               bufferMetadata.set(bufferName, {
                 name: bufferName,
@@ -522,12 +522,12 @@ export class WorkspaceManager {
   /**
    * Convert WorkspaceData to WorkspaceState
    *
-   * Reconstructs FunctionalTextBuffer instances from serialized content
+   * Reconstructs TextBuffer instances from serialized content
    */
   private dataToWorkspace(data: WorkspaceData): TaskEither<WorkspaceError, WorkspaceState> {
     return TaskEither.tryCatch(
       async () => {
-        const { FunctionalTextBufferImpl } = await import('../core/buffer.ts');
+        const { TextBufferImpl } = await import('../core/buffer.ts');
 
         const fs = await import('fs/promises');
         const restoreWarnings: string[] = [];
@@ -547,7 +547,7 @@ export class WorkspaceManager {
         }
 
         // Reconstruct buffers
-        const buffers = new Map<string, FunctionalTextBuffer>();
+        const buffers = new Map<string, TextBuffer>();
         const bufferMetadata = new Map<string, BufferMetadata>();
         const bufferModeStates = new Map<string, BufferModeState>();
 
@@ -571,7 +571,7 @@ export class WorkspaceManager {
             }
           }
 
-          const buffer = FunctionalTextBufferImpl.create(content);
+          const buffer = TextBufferImpl.create(content);
           buffers.set(bufferData.name, buffer);
           bufferMetadata.set(bufferData.name, {
             name: bufferData.name,
@@ -590,7 +590,7 @@ export class WorkspaceManager {
 
         // Ensure *scratch* exists (for old workspaces)
         if (!buffers.has('*scratch*')) {
-          const scratchBuffer = FunctionalTextBufferImpl.create('');
+          const scratchBuffer = TextBufferImpl.create('');
           buffers.set('*scratch*', scratchBuffer);
           bufferMetadata.set('*scratch*', {
             name: '*scratch*',

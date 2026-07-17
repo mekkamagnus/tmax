@@ -1,45 +1,57 @@
 /**
  * @file core-functional.test.ts
- * @description Tests for functional core modules
+ * @description Tests for the canonical core contracts and their engines.
+ *
+ * Migrated in CHORE-44 Change 9 from the prior parallel `Functional*`
+ * interfaces to the canonical contracts:
+ *   - `TextBuffer` / `TextBufferImpl` (Either-returning, `src/core/buffer.ts`)
+ *   - `TerminalEngine` (TaskEither-returning internal engine,
+ *     `src/core/terminal.ts`); the public `TerminalIOImpl` adapts it to the
+ *     promise-based `TerminalIO` contract.
+ *   - `FileSystemImpl` static `*E` helpers (TaskEither engine) and canonical
+ *     promise-based `FileSystem` methods (`src/core/filesystem.ts`).
+ *   - `TypeGuards` / `Validators` (now in `src/core/contracts/editor.ts`).
  */
 
 import { describe, test, expect } from "bun:test";
 import { Either, TaskEither } from "../../src/utils/task-either.ts";
-import { FunctionalFileSystemImpl, FunctionalFileSystemUtils as FileSystemUtils } from "../../src/core/filesystem.ts";
-import { FunctionalTerminalIOImpl, FunctionalTerminalUtils as TerminalUtils } from "../../src/core/terminal.ts";
-import { FunctionalTextBufferImpl, FunctionalBufferUtils as BufferUtils } from "../../src/core/buffer.ts";
+import {
+  FileSystemImpl,
+  FileSystemUtils,
+} from "../../src/core/filesystem.ts";
+import { TerminalEngine, TerminalUtils } from "../../src/core/terminal.ts";
+import { TextBufferImpl, BufferUtils } from "../../src/core/buffer.ts";
 import { TypeGuards, Validators } from "../../src/core/types.ts";
 import { createFileSystemError } from "../../src/error/types.ts";
 
-describe("Functional Core Modules", () => {
-  test("FileSystem - should handle file operations functionally", async () => {
-    const fs = new FunctionalFileSystemImpl();
+describe("Canonical Core Contracts", () => {
+  test("FileSystem - should handle file operations via the TaskEither engine", async () => {
     const testPath = "./test-functional-file.txt";
     const testContent = "Hello, functional world!";
 
     // Clean up any existing test file
-    await fs.remove(testPath).run();
+    await FileSystemImpl.removeE(testPath).run();
 
     // Test file existence (should not exist initially)
-    const existsResult = await fs.exists(testPath).run();
+    const existsResult = await FileSystemImpl.existsE(testPath).run();
     expect(Either.isRight(existsResult)).toBe(true);
     if (Either.isRight(existsResult)) {
       expect(existsResult.right).toBe(false);
     }
 
     // Test writing file
-    const writeResult = await fs.writeFile(testPath, testContent).run();
+    const writeResult = await FileSystemImpl.writeFileE(testPath, testContent).run();
     expect(Either.isRight(writeResult)).toBe(true);
 
     // Test reading file
-    const readResult = await fs.readFile(testPath).run();
+    const readResult = await FileSystemImpl.readFileE(testPath).run();
     expect(Either.isRight(readResult)).toBe(true);
     if (Either.isRight(readResult)) {
       expect(readResult.right).toBe(testContent);
     }
 
     // Test file existence (should exist now)
-    const existsResult2 = await fs.exists(testPath).run();
+    const existsResult2 = await FileSystemImpl.existsE(testPath).run();
     expect(Either.isRight(existsResult2)).toBe(true);
     if (Either.isRight(existsResult2)) {
       expect(existsResult2.right).toBe(true);
@@ -47,7 +59,7 @@ describe("Functional Core Modules", () => {
 
     // Test atomic save with backup
     const newContent = "Updated content with backup!";
-    const atomicSaveResult = await fs.atomicSave(testPath, newContent).run();
+    const atomicSaveResult = await FileSystemImpl.atomicSaveE(testPath, newContent).run();
     expect(Either.isRight(atomicSaveResult)).toBe(true);
     if (Either.isRight(atomicSaveResult)) {
       expect(atomicSaveResult.right.saved).toBe(true);
@@ -55,17 +67,28 @@ describe("Functional Core Modules", () => {
     }
 
     // Verify new content
-    const newReadResult = await fs.readFile(testPath).run();
+    const newReadResult = await FileSystemImpl.readFileE(testPath).run();
     expect(Either.isRight(newReadResult)).toBe(true);
     if (Either.isRight(newReadResult)) {
       expect(newReadResult.right).toBe(newContent);
     }
 
     // Clean up
-    await fs.remove(testPath).run();
+    await FileSystemImpl.removeE(testPath).run();
     if (Either.isRight(atomicSaveResult) && atomicSaveResult.right.backupPath) {
-      await fs.remove(atomicSaveResult.right.backupPath).run();
+      await FileSystemImpl.removeE(atomicSaveResult.right.backupPath).run();
     }
+  });
+
+  test("FileSystem - canonical promise-based methods round-trip", async () => {
+    const fs = new FileSystemImpl();
+    const testPath = "./test-canonical-fs.txt";
+
+    await FileSystemImpl.removeE(testPath).run();
+    await fs.writeFile(testPath, "canonical");
+    expect(await fs.exists(testPath)).toBe(true);
+    expect(await fs.readFile(testPath)).toBe("canonical");
+    await FileSystemImpl.removeE(testPath).run();
   });
 
   test("FileSystem Utils - should handle JSON operations", async () => {
@@ -73,7 +96,7 @@ describe("Functional Core Modules", () => {
     const testData = { theme: "dark", tabSize: 4, autoSave: true };
 
     // Clean up
-    await new FunctionalFileSystemImpl().remove(testPath).run();
+    await FileSystemImpl.removeE(testPath).run();
 
     // Test writing JSON
     const writeResult = await FileSystemUtils.writeJsonFile(testPath, testData).run();
@@ -89,11 +112,11 @@ describe("Functional Core Modules", () => {
     }
 
     // Clean up
-    await new FunctionalFileSystemImpl().remove(testPath).run();
+    await FileSystemImpl.removeE(testPath).run();
   });
 
-  test("Terminal - should handle operations functionally", () => {
-    const terminal = new FunctionalTerminalIOImpl();
+  test("Terminal - engine should report size and TTY via Either", () => {
+    const terminal = new TerminalEngine();
 
     // Test getting terminal size
     const sizeResult = terminal.getSize();
@@ -111,8 +134,8 @@ describe("Functional Core Modules", () => {
     // We don't check the value since it varies by environment (undefined in non-TTY, boolean in TTY)
   });
 
-  test("Terminal Utils - should provide utility functions", async () => {
-    const terminal = new FunctionalTerminalIOImpl();
+  test("Terminal Utils - should provide utility functions", () => {
+    const terminal = new TerminalEngine();
 
     // Test capabilities
     const capabilities = TerminalUtils.getCapabilities(terminal);
@@ -125,7 +148,7 @@ describe("Functional Core Modules", () => {
   });
 
   test("Buffer - should handle text operations functionally", () => {
-    const buffer = FunctionalTextBufferImpl.create("Hello\nWorld\nFunctional!");
+    const buffer = TextBufferImpl.create("Hello\nWorld\nFunctional!");
 
     // Test getting content
     const contentResult = buffer.getContent();
@@ -170,7 +193,7 @@ describe("Functional Core Modules", () => {
 
   test("Buffer Utils - should provide utility functions", () => {
     const content = "Hello world\nThis is a test\nFunctional programming";
-    const buffer = FunctionalTextBufferImpl.create(content);
+    const buffer = TextBufferImpl.create(content);
 
     // Test finding all occurrences
     const findResult = BufferUtils.findAll(buffer, "is");
@@ -258,17 +281,15 @@ describe("Functional Core Modules", () => {
   });
 
   test("Error handling - should properly handle errors", async () => {
-    const fs = new FunctionalFileSystemImpl();
-
-    // Test reading non-existent file
-    const readResult = await fs.readFile("./non-existent-file.txt").run();
+    // Test reading non-existent file via the TaskEither engine
+    const readResult = await FileSystemImpl.readFileE("./non-existent-file.txt").run();
     expect(Either.isLeft(readResult)).toBe(true);
     if (Either.isLeft(readResult)) {
       expect(readResult.left.message).toContain("Failed to read file");
     }
 
     // Test invalid buffer operations
-    const buffer = FunctionalTextBufferImpl.create("test");
+    const buffer = TextBufferImpl.create("test");
     const invalidLineResult = buffer.getLine(10);
     expect(Either.isLeft(invalidLineResult)).toBe(true);
 
@@ -277,24 +298,24 @@ describe("Functional Core Modules", () => {
   });
 
   test("Functional composition - should compose operations", async () => {
-    const fs = new FunctionalFileSystemImpl();
     const testPath = "./test-composition.txt";
     const originalContent = "Original content";
     const updatedContent = "Updated content";
 
     // Clean up
-    await fs.remove(testPath).run();
+    await FileSystemImpl.removeE(testPath).run();
 
-    // Compose operations: write -> read -> verify -> update -> read
-    const composedOperation = fs.writeFile(testPath, originalContent)
-      .flatMap(() => fs.readFile(testPath))
+    // Compose operations against the engine's TaskEither helpers:
+    // write -> read -> verify -> update -> read
+    const composedOperation = FileSystemImpl.writeFileE(testPath, originalContent)
+      .flatMap(() => FileSystemImpl.readFileE(testPath))
       .flatMap(content => {
         if (content === originalContent) {
-          return fs.writeFile(testPath, updatedContent);
+          return FileSystemImpl.writeFileE(testPath, updatedContent);
         }
         return TaskEither.left(createFileSystemError("WriteError", "Content verification failed", testPath));
       })
-      .flatMap(() => fs.readFile(testPath));
+      .flatMap(() => FileSystemImpl.readFileE(testPath));
 
     const result = await composedOperation.run();
     expect(Either.isRight(result)).toBe(true);
@@ -303,11 +324,10 @@ describe("Functional Core Modules", () => {
     }
 
     // Clean up
-    await fs.remove(testPath).run();
+    await FileSystemImpl.removeE(testPath).run();
   });
 
   test("Parallel operations - should handle multiple files", async () => {
-    const fs = new FunctionalFileSystemImpl();
     const files = [
       { path: "./test-parallel-1.txt", content: "File 1" },
       { path: "./test-parallel-2.txt", content: "File 2" },
@@ -316,12 +336,12 @@ describe("Functional Core Modules", () => {
 
     // Clean up
     for (const file of files) {
-      await fs.remove(file.path).run();
+      await FileSystemImpl.removeE(file.path).run();
     }
 
-    // Write all files in parallel
+    // Write all files in parallel via the engine helpers
     const writeOperations = files.map(file =>
-      fs.writeFile(file.path, file.content)
+      FileSystemImpl.writeFileE(file.path, file.content)
     );
 
     const writeResults = await TaskEither.parallel(writeOperations).run();
@@ -339,7 +359,7 @@ describe("Functional Core Modules", () => {
 
     // Clean up
     for (const file of files) {
-      await fs.remove(file.path).run();
+      await FileSystemImpl.removeE(file.path).run();
     }
   });
 });

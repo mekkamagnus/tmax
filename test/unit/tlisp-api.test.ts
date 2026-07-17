@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { FunctionalTextBufferImpl } from "../../src/core/buffer";
+import { TextBufferImpl } from "../../src/core/buffer";
 import { createEditorAPI } from "../../src/editor/tlisp-api";
 import { createNumber, createString, createSymbol } from "../../src/tlisp/values";
 import { Either } from "../../src/utils/task-either";
@@ -8,7 +8,7 @@ import { MessageLog, type LogLevel } from "../../src/editor/message-log.ts";
 import { Log, ViewBoundLog } from "../../src/editor/log-store.ts";
 
 function createState() {
-  const currentBuffer = FunctionalTextBufferImpl.create("");
+  const currentBuffer = TextBufferImpl.create("");
   return createTestAPIContext({
     currentBuffer,
     buffers: new Map([["default", currentBuffer]]),
@@ -28,7 +28,7 @@ describe("T-Lisp API", () => {
 
   test("switches buffers", () => {
     const state = createState();
-    state.buffers.set("other-buffer", FunctionalTextBufferImpl.create(""));
+    state.buffers.set("other-buffer", TextBufferImpl.create(""));
     const switchBuffer = expectDefined(createEditorAPI(state).get("buffer-switch"));
 
     const result = expectRight(switchBuffer([createString("other-buffer")]));
@@ -64,7 +64,7 @@ describe("T-Lisp API", () => {
 
   function createStateWithMessages() {
     const state = createState();
-    state.buffers.set('*Messages*', FunctionalTextBufferImpl.create(''));
+    state.buffers.set('*Messages*', TextBufferImpl.create(''));
     // CHORE-44 Change 2: logMessage and getMessageLog share one Log store so the
     // SPEC-055 query/max/level primitives observe what (message)/(log-message)
     // record (MessageLog is retained only for the legacy render-based path).
@@ -72,7 +72,7 @@ describe("T-Lisp API", () => {
     const store = new Log();
     state.logMessage = (msg: string, level?: string, command?: string) => {
       store.log({ level: (level ?? 'info') as LogLevel, text: msg, command, category: 'editor' });
-      state.buffers.set('*Messages*', FunctionalTextBufferImpl.create(store.render('messages')));
+      state.buffers.set('*Messages*', TextBufferImpl.create(store.render('messages')));
     };
     state.getMessageLog = () => new ViewBoundLog(store, 'messages');
     return state;

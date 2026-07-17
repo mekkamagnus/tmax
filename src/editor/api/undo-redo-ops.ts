@@ -12,7 +12,7 @@
 
 import type { TLispValue, TLispFunctionImpl } from "../../tlisp/types.ts";
 import { createNumber, createString, createNil } from "../../tlisp/values.ts";
-import type { FunctionalTextBuffer } from "../../core/types.ts";
+import type { TextBuffer } from "../../core/types.ts";
 import { Either } from "../../utils/task-either.ts";
 import { stateUtils } from "../../utils/state.ts";
 import {
@@ -28,7 +28,7 @@ import {
  */
 export interface HistoryItem {
   description: string;          // Description of the edit (e.g., "delete", "insert")
-  buffer: FunctionalTextBuffer;  // Buffer undoState after the edit
+  buffer: TextBuffer;  // Buffer undoState after the edit
   cursorLine?: number;           // Cursor line position after the edit
   cursorColumn?: number;         // Cursor column position after the edit
   preCursorLine?: number;        // Cursor line immediately before the edit
@@ -53,10 +53,10 @@ export interface UndoRedoState {
 export interface UndoRedoDomainState {
   history: HistoryItem[];
   currentIndex: number;
-  initialBuffer: FunctionalTextBuffer | null;
+  initialBuffer: TextBuffer | null;
   initialCursorLine: number | undefined;
   initialCursorColumn: number | undefined;
-  pendingBuffer: FunctionalTextBuffer | null;
+  pendingBuffer: TextBuffer | null;
   pendingCursorLine: number | undefined;
   pendingCursorColumn: number | undefined;
 }
@@ -80,15 +80,15 @@ export function createUndoRedoDomainState(): UndoRedoDomainState {
 
 export function createUndoRedoOps(
   undoState: UndoRedoDomainState,
-  getCurrentBuffer: () => FunctionalTextBuffer | null,
-  setCurrentBuffer: (buffer: FunctionalTextBuffer) => void,
+  getCurrentBuffer: () => TextBuffer | null,
+  setCurrentBuffer: (buffer: TextBuffer) => void,
   getCursorLine: () => number,
   setCursorLine: (line: number) => void,
   getCursorColumn: () => number,
   setCursorColumn: (column: number) => void,
   getStatusMessage: () => string,
   setStatusMessage: (msg: string) => void
-): { api: Map<string, TLispFunctionImpl>; reset: () => void; setInitialBuffer: (buffer: FunctionalTextBuffer) => void } {
+): { api: Map<string, TLispFunctionImpl>; reset: () => void; setInitialBuffer: (buffer: TextBuffer) => void } {
   // CHORE-44 Change 1: per-editor undo/redo state lives on the model-held
   // `undoState` parameter (model.session.undoRedo). The history helpers below
   // close over and mutate that object in place; no module-global state.
@@ -131,7 +131,7 @@ function getUndoRedoState(): UndoRedoState {
  */
 function pushToHistory(
   description: string,
-  buffer: FunctionalTextBuffer,
+  buffer: TextBuffer,
   cursorLine?: number,
   cursorColumn?: number,
   preCursorLine?: number,
@@ -165,7 +165,7 @@ function pushToHistory(
 /**
  * Set initial buffer undoState
  */
-function setInitialBuffer(buffer: FunctionalTextBuffer): void {
+function setInitialBuffer(buffer: TextBuffer): void {
   undoState.initialBuffer = buffer;
 }
 
@@ -177,7 +177,7 @@ function setInitialBuffer(buffer: FunctionalTextBuffer): void {
  * @returns Either error or success with status message
  */
 function undo(
-  setCurrentBuffer: (buffer: FunctionalTextBuffer) => void,
+  setCurrentBuffer: (buffer: TextBuffer) => void,
   setCursorLine?: (line: number) => void,
   setCursorColumn?: (column: number) => void
 ): Either<AppError, TLispValue> {
@@ -239,7 +239,7 @@ function undo(
  * @returns Either error or success with status message
  */
 function redo(
-  setCurrentBuffer: (buffer: FunctionalTextBuffer) => void,
+  setCurrentBuffer: (buffer: TextBuffer) => void,
   setCursorLine?: (line: number) => void,
   setCursorColumn?: (column: number) => void
 ): Either<AppError, TLispValue> {
@@ -413,20 +413,20 @@ function redo(
       ));
     }
 
-    // For the buffer argument, we expect it to be passed directly as a FunctionalTextBuffer
+    // For the buffer argument, we expect it to be passed directly as a TextBuffer
     // This is an internal API, so we'll extract it from the special value
     const bufferArg = args[1]!
     if (typeof bufferArg !== 'object' || !('buffer' in bufferArg)) {
       return Either.left(createValidationError(
         'TypeError',
-        'undo-history-push buffer must be a FunctionalTextBuffer',
+        'undo-history-push buffer must be a TextBuffer',
         'args[1]',
         bufferArg,
-        'FunctionalTextBuffer'
+        'TextBuffer'
       ));
     }
 
-    const buffer = (bufferArg as { buffer: FunctionalTextBuffer }).buffer;
+    const buffer = (bufferArg as { buffer: TextBuffer }).buffer;
 
     // Optional cursor positions (post-edit and pre-edit)
     let cursorLine: number | undefined = undefined;

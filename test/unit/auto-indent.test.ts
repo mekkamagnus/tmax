@@ -1,16 +1,16 @@
 import { describe, test, expect, beforeEach } from "bun:test";
 import { createIndentOps } from "../../src/editor/api/indent-ops.ts";
-import { FunctionalTextBufferImpl } from "../../src/core/buffer.ts";
+import { TextBufferImpl } from "../../src/core/buffer.ts";
 import { createString, createNumber, createList, createNil } from "../../src/tlisp/values.ts";
 import { Either } from "../../src/utils/task-either.ts";
 import { initialModel } from "../../src/editor/functional/model.ts";
 
 describe("Auto Indent", () => {
-  let buffer: FunctionalTextBufferImpl;
+  let buffer: TextBufferImpl;
   let cursorLine: number;
 
   beforeEach(() => {
-    buffer = FunctionalTextBufferImpl.create("function foo() {\n  return 1;\n}\n\nconst x = 2.");
+    buffer = TextBufferImpl.create("function foo() {\n  return 1;\n}\n\nconst x = 2.");
     cursorLine = 0;
   });
 
@@ -21,11 +21,11 @@ describe("Auto Indent", () => {
       {
         getModel: () => ({ ...initialModel(), currentBuffer: buffer, cursorPosition: { line: cursorLine, column: 0 } }),
         applyModel: (m) => {
-          if (m.currentBuffer) buffer = m.currentBuffer as FunctionalTextBufferImpl;
+          if (m.currentBuffer) buffer = m.currentBuffer as TextBufferImpl;
           cursorLine = m.cursorPosition.line;
         },
       },
-      (b) => { buffer = b as FunctionalTextBufferImpl; },
+      (b) => { buffer = b as TextBufferImpl; },
       (l) => { cursorLine = l; },
       () => 4 // tabSize
     );
@@ -139,7 +139,7 @@ describe("Auto Indent", () => {
 
     test("combines increase and decrease patterns correctly", () => {
       // Create a buffer with nested braces for a realistic test
-      const nestedBuffer = FunctionalTextBufferImpl.create("{\n  {\n    x\n  }\n}");
+      const nestedBuffer = TextBufferImpl.create("{\n  {\n    x\n  }\n}");
       buffer = nestedBuffer;
 
       const ops = getOps();
@@ -339,7 +339,7 @@ describe("Auto Indent", () => {
       ]);
 
       // Swap to a different buffer
-      const otherBuffer = FunctionalTextBufferImpl.create("// other");
+      const otherBuffer = TextBufferImpl.create("// other");
       buffer = otherBuffer;
 
       // Swap back to original
@@ -364,7 +364,7 @@ describe("Auto Indent", () => {
       ]);
 
       // Switch to a brand new buffer
-      buffer = FunctionalTextBufferImpl.create("// new file");
+      buffer = TextBufferImpl.create("// new file");
 
       // New buffer should have no rules
       const applyFn = ops.get("indent-apply-line")!;

@@ -5,7 +5,7 @@
 
 import type { TLispValue, TLispFunctionImpl } from "../../tlisp/types.ts";
 import { createNil, createNumber, createString, createBoolean, createList, createSymbol } from "../../tlisp/values.ts";
-import type { FunctionalTextBuffer } from "../../core/types.ts";
+import type { TextBuffer } from "../../core/types.ts";
 import type { EditorModel } from "../functional/model.ts";
 import { runModel, readModelField, type EditorModelAccess } from "./state-context.ts";
 import { Either } from "../../utils/task-either.ts";
@@ -50,7 +50,7 @@ export function createCursorOps(
   // supplied setters so window-tracking/fold side effects are preserved.
   const getCursorLine = (): number => runModel(access, readModelField("cursorPosition")).line;
   const getCursorColumn = (): number => runModel(access, readModelField("cursorPosition")).column;
-  const getCurrentBuffer = (): FunctionalTextBuffer | null =>
+  const getCurrentBuffer = (): TextBuffer | null =>
     runModel(access, readModelField("currentBuffer")) ?? null;
   const api = new Map<string, TLispFunctionImpl>();
 

@@ -1,18 +1,18 @@
 import { describe, test, expect, beforeEach } from "bun:test";
 import { expectRight } from "../helpers/editor-fixture.ts";
 import { createDiredOps } from "../../src/editor/api/dired-ops.ts";
-import { FunctionalTextBufferImpl } from "../../src/core/buffer.ts";
+import { TextBufferImpl } from "../../src/core/buffer.ts";
 import { createString, createList, createSymbol } from "../../src/tlisp/values.ts";
 import { Either } from "../../src/utils/task-either.ts";
 import { initialModel } from "../../src/editor/functional/model.ts";
 
 describe("Dired Operations", () => {
-  let buffer: FunctionalTextBufferImpl;
+  let buffer: TextBufferImpl;
   let cursorLine = 0;
-  const buffers = new Map<string, FunctionalTextBufferImpl>();
+  const buffers = new Map<string, TextBufferImpl>();
 
   beforeEach(() => {
-    buffer = FunctionalTextBufferImpl.create("");
+    buffer = TextBufferImpl.create("");
     cursorLine = 0;
     buffers.clear();
   });
@@ -23,11 +23,11 @@ describe("Dired Operations", () => {
       {
         getModel: () => ({ ...initialModel(), currentBuffer: buffer, cursorPosition: { line: cursorLine, column: 0 } }),
         applyModel: (m) => {
-          if (m.currentBuffer) buffer = m.currentBuffer as FunctionalTextBufferImpl;
+          if (m.currentBuffer) buffer = m.currentBuffer as TextBufferImpl;
           cursorLine = m.cursorPosition.line;
         },
       },
-      (b) => { buffer = b as FunctionalTextBufferImpl; },
+      (b) => { buffer = b as TextBufferImpl; },
       buffers
     );
   }
@@ -54,7 +54,7 @@ describe("Dired Operations", () => {
   });
 
   test("dired-parse-current-entry extracts last token from line", () => {
-    buffer = FunctionalTextBufferImpl.create("  -rw-r--r--  128  /tmp/file1.ts\n  -rw-r--r--  256  /tmp/file2.py");
+    buffer = TextBufferImpl.create("  -rw-r--r--  128  /tmp/file1.ts\n  -rw-r--r--  256  /tmp/file2.py");
     cursorLine = 0;
     const ops = getOps();
     const fn = ops.get("dired-parse-current-entry")!;
@@ -81,7 +81,7 @@ describe("Dired Operations", () => {
   });
 
   test("dired-toggle-mark takes mark argument", () => {
-    buffer = FunctionalTextBufferImpl.create("/tmp\n  file1.ts    128\n  file2.py    256");
+    buffer = TextBufferImpl.create("/tmp\n  file1.ts    128\n  file2.py    256");
     cursorLine = 1;
     const ops = getOps();
     const fn = ops.get("dired-toggle-mark")!;

@@ -11,12 +11,12 @@
  */
 
 import { describe, test, expect, beforeEach } from "bun:test";
-import { FunctionalTextBufferImpl } from "../../src/core/buffer.ts";
-import type { FunctionalTextBuffer } from "../../src/core/types.ts";
+import { TextBufferImpl } from "../../src/core/buffer.ts";
+import type { TextBuffer } from "../../src/core/types.ts";
 import { Either } from "../../src/utils/task-either.ts";
 
 // Mock state for testing
-let currentBuffer: FunctionalTextBuffer | null = null;
+let currentBuffer: TextBuffer | null = null;
 let currentMode: "normal" | "insert" | "visual" | "command" | "mx" = "normal";
 let cursorLine = 0;
 let cursorColumn = 0;
@@ -24,14 +24,14 @@ let cursorColumn = 0;
 /**
  * Test helper to create a buffer with content
  */
-function createBuffer(content: string): FunctionalTextBuffer {
-  return FunctionalTextBufferImpl.create(content);
+function createBuffer(content: string): TextBuffer {
+  return TextBufferImpl.create(content);
 }
 
 /**
  * Test helper to get buffer content as string
  */
-function getBufferContent(buffer: FunctionalTextBuffer): string {
+function getBufferContent(buffer: TextBuffer): string {
   const result = buffer.getContent();
   if (Either.isLeft(result)) {
     throw new Error(`Failed to get buffer content: ${result.left}`);
@@ -42,7 +42,7 @@ function getBufferContent(buffer: FunctionalTextBuffer): string {
 /**
  * Test helper to get text from a range
  */
-function getTextInRange(buffer: FunctionalTextBuffer, start: { line: number; column: number }, end: { line: number; column: number }): string {
+function getTextInRange(buffer: TextBuffer, start: { line: number; column: number }, end: { line: number; column: number }): string {
   const result = buffer.getText({ start, end });
   if (Either.isLeft(result)) {
     throw new Error(`Failed to get text: ${result.left}`);
@@ -53,7 +53,7 @@ function getTextInRange(buffer: FunctionalTextBuffer, start: { line: number; col
 /**
  * Test helper to delete text in a range
  */
-function deleteInRange(buffer: FunctionalTextBuffer, start: { line: number; column: number }, end: { line: number; column: number }): FunctionalTextBuffer {
+function deleteInRange(buffer: TextBuffer, start: { line: number; column: number }, end: { line: number; column: number }): TextBuffer {
   const result = buffer.delete({ start, end });
   if (Either.isLeft(result)) {
     throw new Error(`Failed to delete: ${result.left}`);

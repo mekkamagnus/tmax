@@ -12,8 +12,8 @@
  */
 
 import { describe, test, expect, beforeEach } from "bun:test";
-import { FunctionalTextBufferImpl } from "../../src/core/buffer.ts";
-import type { FunctionalTextBuffer } from "../../src/core/types.ts";
+import { TextBufferImpl } from "../../src/core/buffer.ts";
+import type { TextBuffer } from "../../src/core/types.ts";
 import { Either } from "../../src/utils/task-either.ts";
 import { createEditorSession, createEditorSessionState } from "../../src/editor/functional/domain-state.ts";
 import {
@@ -23,7 +23,7 @@ import {
 } from "../../src/editor/api/evil-integration.ts";
 
 describe("US-1.9.3 - Evil Integration", () => {
-  let buffer: FunctionalTextBuffer;
+  let buffer: TextBuffer;
 
   // CHORE-44 Change 1: registers + kill ring are per-editor session state. Bind
   // one session and re-expose the legacy free-function names as wrappers.
@@ -43,7 +43,7 @@ describe("US-1.9.3 - Evil Integration", () => {
     resetKillRing();
 
     // Create test buffer
-    buffer = FunctionalTextBufferImpl.create("hello world\nfoo bar baz\nqux test");
+    buffer = TextBufferImpl.create("hello world\nfoo bar baz\nqux test");
   });
 
   describe("Register Storage Functions", () => {

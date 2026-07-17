@@ -4,17 +4,17 @@
  */
 
 import { describe, test, expect } from "bun:test";
-import { FunctionalTextBufferImpl } from "../../src/core/buffer.ts";
+import { TextBufferImpl } from "../../src/core/buffer.ts";
 import type { TextBuffer, Position, Range } from "../../src/core/types.ts";
 
 /**
- * Test suite for FunctionalTextBuffer implementation
+ * Test suite for TextBuffer implementation
  */
-describe("FunctionalTextBuffer", () => {
+describe("TextBuffer", () => {
   let buffer: any; // Using any since we're testing internal functionality
 
   test("should create buffer with content", () => {
-    buffer = FunctionalTextBufferImpl.create("Hello");
+    buffer = TextBufferImpl.create("Hello");
     const contentResult = buffer.getContent();
     if (contentResult._tag === "Right") {
       expect(contentResult.right).toBe("Hello");
@@ -22,7 +22,7 @@ describe("FunctionalTextBuffer", () => {
   });
 
   test("should insert text", () => {
-    buffer = FunctionalTextBufferImpl.create("Hello");
+    buffer = TextBufferImpl.create("Hello");
     const result = buffer.insert({ line: 0, column: 5 }, " World");
     if (result._tag === "Right") {
       const contentResult = result.right.getContent();
@@ -33,7 +33,7 @@ describe("FunctionalTextBuffer", () => {
   });
 
   test("should delete text", () => {
-    buffer = FunctionalTextBufferImpl.create("Hello World");
+    buffer = TextBufferImpl.create("Hello World");
     const range: Range = { start: { line: 0, column: 5 }, end: { line: 0, column: 6 } }; // Delete space
     const result = buffer.delete(range);
     if (result._tag === "Right") {
@@ -46,14 +46,14 @@ describe("FunctionalTextBuffer", () => {
 });
 
 /**
- * Test suite for FunctionalTextBuffer implementation (continued)
+ * Test suite for TextBuffer implementation (continued)
  */
-describe("FunctionalTextBuffer Continued", () => {
+describe("TextBuffer Continued", () => {
   let buffer: any;
   const testContent = "Line 1\nLine 2\nLine 3";
 
   test("should create buffer with content", () => {
-    buffer = FunctionalTextBufferImpl.create(testContent);
+    buffer = TextBufferImpl.create(testContent);
     const contentResult = buffer.getContent();
     if (contentResult._tag === "Right") {
       expect(contentResult.right).toBe(testContent);

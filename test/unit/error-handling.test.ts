@@ -14,7 +14,7 @@ import {
   errorManager
 } from "../../src/utils/error-manager.ts";
 import { debugReporter } from "../../src/utils/debug-reporter.ts";
-import { FunctionalTerminalIOImpl } from "../../src/core/terminal.ts";
+import { TerminalEngine } from "../../src/core/terminal.ts";
 import { Either } from "../../src/utils/task-either.ts";
 
 describe("Error Handling and Logging System", () => {
@@ -217,7 +217,7 @@ test("DebugReporter - should track operation performance", () => {
 
   test("Integration - Terminal with enhanced error handling", async () => {
     // Test the enhanced terminal implementation
-    const terminal = new FunctionalTerminalIOImpl();
+    const terminal = new TerminalEngine();
     
     // Test getSize (should not throw)
     const sizeResult = terminal.getSize();

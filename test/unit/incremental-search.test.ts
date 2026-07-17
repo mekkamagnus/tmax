@@ -9,13 +9,13 @@
 
 import { describe, test, expect, beforeEach, afterEach } from "bun:test";
 import { createSearchOps } from "../../src/editor/api/search-ops.ts";
-import { FunctionalTextBufferImpl } from "../../src/core/buffer.ts";
+import { TextBufferImpl } from "../../src/core/buffer.ts";
 import { Either } from "../../src/utils/task-either.ts";
 import { createString, createNil } from "../../src/tlisp/values.ts";
 import { initialModel } from "../../src/editor/functional/model.ts";
 
 describe("Incremental Search", () => {
-  let buffer: FunctionalTextBufferImpl;
+  let buffer: TextBufferImpl;
   let cursorLine: number;
   let cursorColumn: number;
   let statusMessage: string;
@@ -27,7 +27,7 @@ describe("Incremental Search", () => {
     //   line 0: "hello world"
     //   line 1: "foo hello bar"
     //   line 2: "hello"
-    buffer = FunctionalTextBufferImpl.create("hello world\nfoo hello bar\nhello");
+    buffer = TextBufferImpl.create("hello world\nfoo hello bar\nhello");
     cursorLine = 0;
     cursorColumn = 0;
     statusMessage = "";
@@ -37,7 +37,7 @@ describe("Incremental Search", () => {
       {
         getModel: () => ({ ...initialModel(), currentBuffer: buffer, cursorPosition: { line: cursorLine, column: cursorColumn } }),
         applyModel: (m) => {
-          if (m.currentBuffer) buffer = m.currentBuffer as FunctionalTextBufferImpl;
+          if (m.currentBuffer) buffer = m.currentBuffer as TextBufferImpl;
           cursorLine = m.cursorPosition.line;
           cursorColumn = m.cursorPosition.column;
         },

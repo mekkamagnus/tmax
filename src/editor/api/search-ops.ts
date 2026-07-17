@@ -23,7 +23,7 @@
 
 import type { TLispValue, TLispFunctionImpl } from "../../tlisp/types.ts";
 import { createString, createNil, createSymbol, createNumber, createList, createBoolean } from "../../tlisp/values.ts";
-import type { FunctionalTextBuffer, Range } from "../../core/types.ts";
+import type { TextBuffer, Range } from "../../core/types.ts";
 import { runModel, readModelField, type EditorModelAccess } from "./state-context.ts";
 import { Either } from "../../utils/task-either.ts";
 import { isWordChar } from "./text-utils.ts";
@@ -177,7 +177,7 @@ export function createSearchOps(
   // EditorModel; writes stay on the supplied setters to preserve side effects.
   const getCursorLine = (): number => runModel(access, readModelField("cursorPosition")).line;
   const getCursorColumn = (): number => runModel(access, readModelField("cursorPosition")).column;
-  const getCurrentBuffer = (): FunctionalTextBuffer | null =>
+  const getCurrentBuffer = (): TextBuffer | null =>
     runModel(access, readModelField("currentBuffer")) ?? null;
   const api = new Map<string, TLispFunctionImpl>();
 

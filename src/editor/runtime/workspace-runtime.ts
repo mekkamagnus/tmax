@@ -10,19 +10,19 @@
  * results; this module never imports the concrete `Editor` class (AC3.3).
  */
 
-import type { FunctionalTextBuffer, BufferMetadata, WorkspaceState, Window, Tab, Position } from "../../core/types.ts";
-import { FunctionalTextBufferImpl } from "../../core/buffer.ts";
+import type { TextBuffer, BufferMetadata, WorkspaceState, Window, Tab, Position } from "../../core/types.ts";
+import { TextBufferImpl } from "../../core/buffer.ts";
 import { Either } from "../../utils/task-either.ts";
 import type { BufferModeState, MinorModeConfig } from "../mode-state.ts";
 
 /** Editor-side state snapshot consumed by serialization. */
 export interface WorkspaceSnapshot {
-  buffers: Map<string, FunctionalTextBuffer>;
+  buffers: Map<string, TextBuffer>;
   bufferMetadata: Map<string, { filename?: string; modified: boolean; recency: number }>;
   bufferModeStates: Map<string, BufferModeState>;
   minorModeRegistry: Map<string, MinorModeConfig>;
   model: {
-    currentBuffer?: FunctionalTextBuffer;
+    currentBuffer?: TextBuffer;
     cursorPosition: Position;
     windows?: readonly Window[];
     tabs?: readonly Tab[];
@@ -38,7 +38,7 @@ export interface WorkspaceSnapshot {
 
 /** Result of reconciling an incoming workspace into fresh editor-local maps. */
 export interface ReconciledWorkspace {
-  buffers: Map<string, FunctionalTextBufferImpl>;
+  buffers: Map<string, TextBufferImpl>;
   bufferMetadata: Map<string, { filename?: string; modified: boolean; recency: number }>;
   bufferModeStates: Map<string, BufferModeState>;
   /** Next recency counter value (after allocating for each rebuilt buffer). */
@@ -55,13 +55,13 @@ export class WorkspaceRuntime {
    */
   reconcileWorkspace(workspace: WorkspaceState, startRecency: number, messagesRender: string): ReconciledWorkspace {
     let recency = startRecency;
-    const buffers = new Map<string, FunctionalTextBufferImpl>();
+    const buffers = new Map<string, TextBufferImpl>();
     for (const [name, buffer] of workspace.buffers.entries()) {
       const contentResult = buffer.getContent();
       const content = Either.isRight(contentResult) ? contentResult.right : "";
-      buffers.set(name, FunctionalTextBufferImpl.create(content));
+      buffers.set(name, TextBufferImpl.create(content));
     }
-    buffers.set("*Messages*", FunctionalTextBufferImpl.create(messagesRender));
+    buffers.set("*Messages*", TextBufferImpl.create(messagesRender));
 
     const bufferMetadata = new Map<string, { filename?: string; modified: boolean; recency: number }>();
     for (const [name, metadata] of workspace.bufferMetadata.entries()) {
@@ -103,7 +103,7 @@ export class WorkspaceRuntime {
       lastAccessed: now,
       formatVersion: 1,
     };
-    const buffers = new Map<string, FunctionalTextBuffer>();
+    const buffers = new Map<string, TextBuffer>();
     const bufferMetadata = new Map<string, BufferMetadata>();
     const bufferModeStates = new Map<string, import("../../core/types.ts").BufferModeState>();
 
@@ -133,7 +133,7 @@ export class WorkspaceRuntime {
     }
 
     if (!buffers.has("*scratch*")) {
-      buffers.set("*scratch*", FunctionalTextBufferImpl.create(""));
+      buffers.set("*scratch*", TextBufferImpl.create(""));
       bufferMetadata.set("*scratch*", { name: "*scratch*", modified: false, cursorLine: 0, cursorColumn: 0 });
     }
 

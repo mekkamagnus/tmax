@@ -24,7 +24,7 @@
  * typed surface without re-introducing a mutable bridge property.
  */
 
-import type { FunctionalTextBuffer, TerminalIO, FileSystem } from "../../core/types.ts";
+import type { TextBuffer, TerminalIO, FileSystem } from "../../core/types.ts";
 import type { EvalError } from "../../error/types.ts";
 import { Either } from "../../utils/task-either.ts";
 import type { TLispValue } from "../../tlisp/types.ts";
@@ -83,7 +83,7 @@ export interface EditorAPIContext {
    * `SetCurrentBuffer` reducer message alone does — so it cannot be replaced
    * by a bare `applyUpdate({type:"SetCurrentBuffer"})`.
    */
-  setCurrentBuffer: (buffer: FunctionalTextBuffer | null) => void;
+  setCurrentBuffer: (buffer: TextBuffer | null) => void;
   /**
    * Side-effectful cursor-line set. Beyond `SetCursorPosition`, the editor-side
    * body mirrors the line into the current window's `cursorLine` (US-3.2.1).

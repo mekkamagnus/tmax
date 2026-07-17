@@ -6,7 +6,7 @@
  */
 import { describe, test, expect } from "bun:test";
 import { createEditorAPI } from "../../src/editor/tlisp-api";
-import { FunctionalTextBufferImpl } from "../../src/core/buffer";
+import { TextBufferImpl } from "../../src/core/buffer";
 import { createString } from "../../src/tlisp/values";
 import { Either } from "../../src/utils/task-either";
 import { expectDefined, expectRight, createStartedEditor, executeTlisp, createTestAPIContext } from "../helpers/editor-fixture.ts";
@@ -14,10 +14,10 @@ import { expectDefined, expectRight, createStartedEditor, executeTlisp, createTe
 // ── Read-only guard on the 4 new buffers (criterion 2) ────────────────
 
 function createStateWithBuffer(name: string) {
-  const buf = FunctionalTextBufferImpl.create("content\n");
+  const buf = TextBufferImpl.create("content\n");
   return createTestAPIContext({
     currentBuffer: buf,
-    buffers: new Map([["default", FunctionalTextBufferImpl.create("")], [name, buf]]),
+    buffers: new Map([["default", TextBufferImpl.create("")], [name, buf]]),
   });
 }
 

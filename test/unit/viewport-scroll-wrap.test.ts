@@ -11,11 +11,11 @@ import {
   getVisibleViewportLeft,
   getCursorScreenOffset,
 } from "../../src/frontend/render/buffer-lines.ts";
-import { FunctionalTextBufferImpl } from "../../src/core/buffer.ts";
+import { TextBufferImpl } from "../../src/core/buffer.ts";
 import type { EditorState } from "../../src/core/types.ts";
 
 function makeState(content: string, opts?: Partial<EditorState>): EditorState {
-  const buf = FunctionalTextBufferImpl.create(content);
+  const buf = TextBufferImpl.create(content);
   return {
     currentBuffer: buf as any,
     cursorPosition: { line: 0, column: 0 },

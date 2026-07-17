@@ -26,7 +26,7 @@ import type {
   WorkspaceListResult, WorkspaceListRow,
 } from "../types.ts";
 import type { FrameTarget } from "../types.ts";
-import { FunctionalTextBufferImpl } from "../../../core/buffer.ts";
+import { TextBufferImpl } from "../../../core/buffer.ts";
 import type { WorkspaceState } from "../../../core/types.ts";
 import { Either } from "../../../utils/task-either.ts";
 
@@ -211,7 +211,7 @@ export function createWorkspaceHandlers(ctx: ServerContext): {
       const stagedSource = ctx.cloneWorkspace(source);
       const stagedTarget = ctx.cloneWorkspace(target);
       const sourceMeta = stagedSource.bufferMetadata.get(bufferName);
-      const copiedBuffer = FunctionalTextBufferImpl.create(contentResult.right);
+      const copiedBuffer = TextBufferImpl.create(contentResult.right);
 
       stagedTarget.buffers.set(bufferName, copiedBuffer);
       stagedTarget.bufferMetadata.set(bufferName, {
@@ -248,7 +248,7 @@ export function createWorkspaceHandlers(ctx: ServerContext): {
         stagedSource.bufferModeStates.delete(bufferName);
       }
       if (stagedSource.windows.length === 0) {
-        const scratch = stagedSource.buffers.get('*scratch*') ?? FunctionalTextBufferImpl.create('');
+        const scratch = stagedSource.buffers.get('*scratch*') ?? TextBufferImpl.create('');
         stagedSource.buffers.set('*scratch*', scratch);
         if (!stagedSource.bufferMetadata.has('*scratch*')) {
           stagedSource.bufferMetadata.set('*scratch*', {

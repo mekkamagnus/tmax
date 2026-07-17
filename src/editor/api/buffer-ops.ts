@@ -5,8 +5,8 @@
 
 import type { TLispValue, TLispFunctionImpl } from "../../tlisp/types.ts";
 import { createNil, createNumber, createString, createBoolean, createList, createSymbol } from "../../tlisp/values.ts";
-import { FunctionalTextBufferImpl } from "../../core/buffer.ts";
-import type { FunctionalTextBuffer } from "../../core/types.ts";
+import { TextBufferImpl } from "../../core/buffer.ts";
+import type { TextBuffer } from "../../core/types.ts";
 import { runModel, readModelField, type EditorModelAccess } from "./state-context.ts";
 import { Either } from "../../utils/task-either.ts";
 import {
@@ -39,8 +39,8 @@ export type TLispFunctionWithEither = (args: TLispValue[]) => Either<AppError, T
  */
 export function createBufferOps(
   access: EditorModelAccess,
-  buffers: Map<string, FunctionalTextBuffer>,
-  setCurrentBuffer: (buffer: FunctionalTextBuffer) => void,
+  buffers: Map<string, TextBuffer>,
+  setCurrentBuffer: (buffer: TextBuffer) => void,
   setCursorLine: (line: number) => void,
   setCursorColumn: (column: number) => void,
   setCurrentFilename?: (path: string) => void,
@@ -52,7 +52,7 @@ export function createBufferOps(
   // preserve side effects.
   const getCursorLine = (): number => runModel(access, readModelField("cursorPosition")).line;
   const getCursorColumn = (): number => runModel(access, readModelField("cursorPosition")).column;
-  const getCurrentBuffer = (): FunctionalTextBuffer | null =>
+  const getCurrentBuffer = (): TextBuffer | null =>
     runModel(access, readModelField("currentBuffer")) ?? null;
   const getCurrentFilename = (): string | undefined => runModel(access, readModelField("currentFilename"));
   const getBufferModified = (): boolean => runModel(access, readModelField("bufferModified")) ?? false;
@@ -79,7 +79,7 @@ export function createBufferOps(
     }
 
     const name = nameArg.value as string;
-    const buffer = FunctionalTextBufferImpl.create("");
+    const buffer = TextBufferImpl.create("");
     buffers.set(name, buffer);
 
     return Either.right(createString(name));

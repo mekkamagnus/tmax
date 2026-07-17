@@ -8,7 +8,7 @@ import { test, expect, describe, afterAll, beforeAll } from "bun:test";
 import { spawn, type Subprocess } from "bun";
 import { Socket } from "net";
 import { captureFrame } from "../../src/render/capture-frame.ts";
-import { FunctionalTextBufferImpl } from "../../src/core/buffer.ts";
+import { TextBufferImpl } from "../../src/core/buffer.ts";
 import type { EditorState } from "../../src/core/types.ts";
 import { existsSync, mkdtempSync, rmSync, unlinkSync } from "fs";
 import { tmpdir } from "os";

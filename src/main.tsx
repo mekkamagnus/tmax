@@ -8,7 +8,7 @@
 import { Editor as EditorClass } from './editor/editor.ts';
 import { TerminalIOImpl } from './core/terminal.ts';
 import { FileSystemImpl } from './core/filesystem.ts';
-import { FunctionalTextBufferImpl } from './core/buffer.ts';
+import { TextBufferImpl } from './core/buffer.ts';
 import { EditorState } from './core/types.ts';
 import { TmaxServer } from './server/server.ts';
 import { Logger, LogLevel } from './utils/logger.ts';
@@ -232,7 +232,7 @@ Examples:
   }
 
   const initialState: EditorState = {
-    currentBuffer: FunctionalTextBufferImpl.create(content),
+    currentBuffer: TextBufferImpl.create(content),
     cursorPosition: { line: 0, column: 0 },
     mode: 'normal' as const,
     statusMessage,

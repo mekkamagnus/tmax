@@ -14,7 +14,7 @@
 
 import type { TLispValue, TLispFunctionImpl } from "../../tlisp/types.ts";
 import { createNil } from "../../tlisp/values.ts";
-import type { FunctionalTextBuffer } from "../../core/types.ts";
+import type { TextBuffer } from "../../core/types.ts";
 import { runModel, readModelField, type EditorModelAccess } from "./state-context.ts";
 import { Either } from "../../utils/task-either.ts";
 import {
@@ -48,7 +48,7 @@ import { isWordChar, findWordEnd } from "./text-utils.ts";
  */
 export function createChangeOps(
   access: EditorModelAccess,
-  setCurrentBuffer: (buffer: FunctionalTextBuffer) => void,
+  setCurrentBuffer: (buffer: TextBuffer) => void,
   setCursorLine: (line: number) => void,
   setCursorColumn: (column: number) => void,
   setMode: (mode: "normal" | "insert" | "visual" | "command" | "mx" | "replace") => void,
@@ -58,7 +58,7 @@ export function createChangeOps(
   // EditorModel; writes stay on the supplied setters to preserve side effects.
   const getCursorLine = (): number => runModel(access, readModelField("cursorPosition")).line;
   const getCursorColumn = (): number => runModel(access, readModelField("cursorPosition")).column;
-  const getCurrentBuffer = (): FunctionalTextBuffer | null =>
+  const getCurrentBuffer = (): TextBuffer | null =>
     runModel(access, readModelField("currentBuffer")) ?? null;
   const api = new Map<string, TLispFunctionImpl>();
 

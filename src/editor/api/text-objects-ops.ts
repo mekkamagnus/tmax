@@ -8,7 +8,7 @@
 
 import type { TLispValue, TLispFunctionImpl } from "../../tlisp/types.ts";
 import { createNil, createString, createSymbol, createList, createNumber } from "../../tlisp/values.ts";
-import type { FunctionalTextBuffer } from "../../core/types.ts";
+import type { TextBuffer } from "../../core/types.ts";
 import { runModel, readModelField, type EditorModelAccess } from "./state-context.ts";
 import { Either } from "../../utils/task-either.ts";
 import type { AppError } from "../../error/types.ts";
@@ -21,14 +21,14 @@ import type { EditorSession } from "../functional/domain-state.ts";
 export function createTextObjectsOps(
   access: EditorModelAccess,
   session: EditorSession,
-  setCurrentBuffer: (buffer: FunctionalTextBuffer) => void,
+  setCurrentBuffer: (buffer: TextBuffer) => void,
   setMode: (mode: "normal" | "insert" | "visual" | "command" | "mx" | "replace") => void
 ): Map<string, TLispFunctionImpl> {
   // CHORE-39 Phase 4: cursor/buffer reads flow through the State monad against
   // EditorModel; writes stay on the supplied setters to preserve side effects.
   const getCursorLine = (): number => runModel(access, readModelField("cursorPosition")).line;
   const getCursorColumn = (): number => runModel(access, readModelField("cursorPosition")).column;
-  const getCurrentBuffer = (): FunctionalTextBuffer | null =>
+  const getCurrentBuffer = (): TextBuffer | null =>
     runModel(access, readModelField("currentBuffer")) ?? null;
   // CHORE-44 Change 1: bind text-object helpers to this editor's register-delete.
   // Existing call sites below are unchanged (destructured names match the prior

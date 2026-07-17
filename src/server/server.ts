@@ -24,7 +24,7 @@ import { createFramesHandlers } from './rpc/handlers/frames.ts';
 import { createWorkspaceHandlers } from './rpc/handlers/workspaces.ts';
 import { createLifecycleHandlers } from './rpc/handlers/lifecycle.ts';
 import { FileSystemImpl } from '../core/filesystem.ts';
-import { FunctionalTextBufferImpl } from '../core/buffer.ts';
+import { TextBufferImpl } from '../core/buffer.ts';
 import { EditorState, Frame, WorkspaceState } from '../core/types.ts';
 import { WorkspaceManager } from '../core/workspace.ts';
 import { Either } from '../utils/task-either.ts';
@@ -163,7 +163,7 @@ export class TmaxServer {
 
       // Initialize default state
       const initialState: EditorState = {
-        currentBuffer: FunctionalTextBufferImpl.create(""),
+        currentBuffer: TextBufferImpl.create(""),
         cursorPosition: { line: 0, column: 0 },
         mode: 'normal' as const,
         statusMessage: 'Server started',
@@ -335,15 +335,15 @@ export class TmaxServer {
 	  }
 
   private cloneWorkspace(workspace: WorkspaceState): WorkspaceState {
-    const buffers = new Map<string, import('../core/types.ts').FunctionalTextBuffer>();
+    const buffers = new Map<string, import('../core/types.ts').TextBuffer>();
     for (const [name, buffer] of workspace.buffers.entries()) {
       const content = buffer.getContent();
-      buffers.set(name, FunctionalTextBufferImpl.create(Either.isRight(content) ? content.right : ''));
+      buffers.set(name, TextBufferImpl.create(Either.isRight(content) ? content.right : ''));
     }
 
-    const resolveBuffer = (bufferName: string | undefined, fallback?: import('../core/types.ts').FunctionalTextBuffer) => {
+    const resolveBuffer = (bufferName: string | undefined, fallback?: import('../core/types.ts').TextBuffer) => {
       if (bufferName && buffers.has(bufferName)) return buffers.get(bufferName)!;
-      return fallback ?? buffers.get('*scratch*') ?? FunctionalTextBufferImpl.create('');
+      return fallback ?? buffers.get('*scratch*') ?? TextBufferImpl.create('');
     };
 
     return {

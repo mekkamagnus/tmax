@@ -1,15 +1,15 @@
 /**
  * @file buffer-perf-invariants.test.ts
  * @description Correctness guards for the CHORE-34 incremental-derivation
- *   layer in `FunctionalTextBufferImpl` (RFC-019 §1.1–1.3). These tests do not
+ *   layer in `TextBufferImpl` (RFC-019 §1.1–1.3). These tests do not
  *   measure performance — they assert the invariants the incremental layer
  *   must uphold so that the perf-critical `insert`/`delete` paths produce
- *   results identical to the source-of-truth `FunctionalTextBufferImpl.create`.
+ *   results identical to the source-of-truth `TextBufferImpl.create`.
  */
 
 import { describe, test, expect } from "bun:test";
-import { FunctionalTextBufferImpl } from "../../src/core/buffer.ts";
-import type { FunctionalTextBuffer, Position, Range } from "../../src/core/types.ts";
+import { TextBufferImpl } from "../../src/core/buffer.ts";
+import type { TextBuffer, Position, Range } from "../../src/core/types.ts";
 import { Either } from "../../src/utils/task-either.ts";
 
 /** Unwrap an Either.right or throw with the left payload. */
@@ -27,7 +27,7 @@ function unwrap<T>(result: { _tag: "Left" | "Right"; right?: T; left?: unknown }
  * stable internal contract documented in the chore spec.
  */
 type PositionToOffset = (position: Position) => { _tag: "Left" | "Right"; right?: number; left?: unknown };
-function positionToOffset(buffer: FunctionalTextBuffer, position: Position): number {
+function positionToOffset(buffer: TextBuffer, position: Position): number {
   return unwrap((buffer as unknown as { positionToOffset: PositionToOffset }).positionToOffset(position));
 }
 
@@ -40,7 +40,7 @@ function referenceOffset(lines: readonly string[], line: number, column: number)
 }
 
 /** Pull every observable public field of a buffer into a JSON-comparable snapshot. */
-function snapshot(buffer: FunctionalTextBuffer): {
+function snapshot(buffer: TextBuffer): {
   content: string;
   lineCount: number;
   lines: string[];
@@ -54,54 +54,54 @@ function snapshot(buffer: FunctionalTextBuffer): {
   };
 }
 
-describe("FunctionalTextBuffer incremental-derivation invariants (CHORE-34)", () => {
+describe("TextBuffer incremental-derivation invariants (CHORE-34)", () => {
   describe("equivalence with create(content) — single edits", () => {
-    type Case = { name: string; initial: string; op: (b: FunctionalTextBuffer) => FunctionalTextBuffer };
+    type Case = { name: string; initial: string; op: (b: TextBuffer) => TextBuffer };
     const cases: Case[] = [
       {
         name: "insert no-newline at EOF",
         initial: "hello",
-        op: (b) => unwrap(b.insert({ line: 0, column: 5 }, " world")) as FunctionalTextBuffer,
+        op: (b) => unwrap(b.insert({ line: 0, column: 5 }, " world")) as TextBuffer,
       },
       {
         name: "insert no-newline in middle",
         initial: "hello world",
-        op: (b) => unwrap(b.insert({ line: 0, column: 5 }, "X")) as FunctionalTextBuffer,
+        op: (b) => unwrap(b.insert({ line: 0, column: 5 }, "X")) as TextBuffer,
       },
       {
         name: "insert one newline mid-line",
         initial: "hello world",
-        op: (b) => unwrap(b.insert({ line: 0, column: 5 }, "\n")) as FunctionalTextBuffer,
+        op: (b) => unwrap(b.insert({ line: 0, column: 5 }, "\n")) as TextBuffer,
       },
       {
         name: "insert multi-line text mid-line",
         initial: "abcXYZdef",
-        op: (b) => unwrap(b.insert({ line: 0, column: 3 }, "1\n2\n3")) as FunctionalTextBuffer,
+        op: (b) => unwrap(b.insert({ line: 0, column: 3 }, "1\n2\n3")) as TextBuffer,
       },
       {
         name: "insert text with leading and trailing newlines",
         initial: "middle",
-        op: (b) => unwrap(b.insert({ line: 0, column: 0 }, "before\n")) as FunctionalTextBuffer,
+        op: (b) => unwrap(b.insert({ line: 0, column: 0 }, "before\n")) as TextBuffer,
       },
       {
         name: "insert into empty buffer",
         initial: "",
-        op: (b) => unwrap(b.insert({ line: 0, column: 0 }, "first")) as FunctionalTextBuffer,
+        op: (b) => unwrap(b.insert({ line: 0, column: 0 }, "first")) as TextBuffer,
       },
       {
         name: "insert newline into empty buffer",
         initial: "",
-        op: (b) => unwrap(b.insert({ line: 0, column: 0 }, "\n")) as FunctionalTextBuffer,
+        op: (b) => unwrap(b.insert({ line: 0, column: 0 }, "\n")) as TextBuffer,
       },
       {
         name: "insert at start of multi-line buffer",
         initial: "alpha\nbeta\ngamma",
-        op: (b) => unwrap(b.insert({ line: 0, column: 0 }, "Z")) as FunctionalTextBuffer,
+        op: (b) => unwrap(b.insert({ line: 0, column: 0 }, "Z")) as TextBuffer,
       },
       {
         name: "insert column past end of line clamps",
         initial: "hello",
-        op: (b) => unwrap(b.insert({ line: 0, column: 99 }, "!")) as FunctionalTextBuffer,
+        op: (b) => unwrap(b.insert({ line: 0, column: 99 }, "!")) as TextBuffer,
       },
       {
         name: "delete single char on same line",
@@ -109,7 +109,7 @@ describe("FunctionalTextBuffer incremental-derivation invariants (CHORE-34)", ()
         op: (b) =>
           unwrap(
             b.delete({ start: { line: 0, column: 5 }, end: { line: 0, column: 6 } })
-          ) as FunctionalTextBuffer,
+          ) as TextBuffer,
       },
       {
         name: "delete within single line",
@@ -117,7 +117,7 @@ describe("FunctionalTextBuffer incremental-derivation invariants (CHORE-34)", ()
         op: (b) =>
           unwrap(
             b.delete({ start: { line: 0, column: 0 }, end: { line: 0, column: 5 } })
-          ) as FunctionalTextBuffer,
+          ) as TextBuffer,
       },
       {
         name: "delete across two lines collapses them",
@@ -125,7 +125,7 @@ describe("FunctionalTextBuffer incremental-derivation invariants (CHORE-34)", ()
         op: (b) =>
           unwrap(
             b.delete({ start: { line: 0, column: 3 }, end: { line: 1, column: 2 } })
-          ) as FunctionalTextBuffer,
+          ) as TextBuffer,
       },
       {
         name: "delete across three lines collapses them",
@@ -133,7 +133,7 @@ describe("FunctionalTextBuffer incremental-derivation invariants (CHORE-34)", ()
         op: (b) =>
           unwrap(
             b.delete({ start: { line: 0, column: 1 }, end: { line: 2, column: 2 } })
-          ) as FunctionalTextBuffer,
+          ) as TextBuffer,
       },
       {
         name: "delete to end of single line",
@@ -141,7 +141,7 @@ describe("FunctionalTextBuffer incremental-derivation invariants (CHORE-34)", ()
         op: (b) =>
           unwrap(
             b.delete({ start: { line: 0, column: 5 }, end: { line: 0, column: 11 } })
-          ) as FunctionalTextBuffer,
+          ) as TextBuffer,
       },
       {
         name: "delete through trailing newline",
@@ -149,7 +149,7 @@ describe("FunctionalTextBuffer incremental-derivation invariants (CHORE-34)", ()
         op: (b) =>
           unwrap(
             b.delete({ start: { line: 0, column: 5 }, end: { line: 1, column: 0 } })
-          ) as FunctionalTextBuffer,
+          ) as TextBuffer,
       },
       {
         name: "zero-length delete is a no-op",
@@ -157,21 +157,21 @@ describe("FunctionalTextBuffer incremental-derivation invariants (CHORE-34)", ()
         op: (b) =>
           unwrap(
             b.delete({ start: { line: 0, column: 3 }, end: { line: 0, column: 3 } })
-          ) as FunctionalTextBuffer,
+          ) as TextBuffer,
       },
       {
         name: "empty insert is a no-op",
         initial: "hello world",
-        op: (b) => unwrap(b.insert({ line: 0, column: 5 }, "")) as FunctionalTextBuffer,
+        op: (b) => unwrap(b.insert({ line: 0, column: 5 }, "")) as TextBuffer,
       },
     ];
 
     for (const c of cases) {
       test(c.name, () => {
-        const initial = FunctionalTextBufferImpl.create(c.initial);
+        const initial = TextBufferImpl.create(c.initial);
         const edited = c.op(initial);
         // Reconstruct from the resulting content via `create` — the source of truth.
-        const rebuilt = FunctionalTextBufferImpl.create(unwrap(edited.getContent()));
+        const rebuilt = TextBufferImpl.create(unwrap(edited.getContent()));
         expect(snapshot(edited)).toEqual(snapshot(rebuilt));
       });
     }
@@ -180,7 +180,7 @@ describe("FunctionalTextBuffer incremental-derivation invariants (CHORE-34)", ()
   describe("prefix-sum behavior (§1.2)", () => {
     test("positionToOffset matches independent reference for every (L, C)", () => {
       const text = "alpha\nbeta\nlonger line here\ngamma\ndelta";
-      const buffer = FunctionalTextBufferImpl.create(text);
+      const buffer = TextBufferImpl.create(text);
       const lines = text.split("\n");
       for (let line = 0; line < lines.length; line++) {
         for (let column = 0; column <= lines[line]!.length; column++) {
@@ -193,7 +193,7 @@ describe("FunctionalTextBuffer incremental-derivation invariants (CHORE-34)", ()
 
     test("columns past end-of-line clamp to line length", () => {
       const text = "alpha\nbeta\ngamma";
-      const buffer = FunctionalTextBufferImpl.create(text);
+      const buffer = TextBufferImpl.create(text);
       const lines = text.split("\n");
       for (let line = 0; line < lines.length; line++) {
         const clamped = referenceOffset(lines, line, lines[line]!.length);
@@ -204,7 +204,7 @@ describe("FunctionalTextBuffer incremental-derivation invariants (CHORE-34)", ()
     });
 
     test("offsets stay correct after a series of edits", () => {
-      let buffer: FunctionalTextBuffer = FunctionalTextBufferImpl.create("a\nb\nc");
+      let buffer: TextBuffer = TextBufferImpl.create("a\nb\nc");
       buffer = unwrap(buffer.insert({ line: 1, column: 1 }, "XYZ"));
       buffer = unwrap(buffer.insert({ line: 0, column: 0 }, "HEADER\n"));
       buffer = unwrap(
@@ -244,7 +244,7 @@ describe("FunctionalTextBuffer incremental-derivation invariants (CHORE-34)", ()
 
     for (const c of cases) {
       test(c.name, () => {
-        const original = FunctionalTextBufferImpl.create(c.initial);
+        const original = TextBufferImpl.create(c.initial);
         const inserted = unwrap(original.insert(c.position, c.text));
         // Compute the delete range that exactly spans the inserted text.
         // The inserted text occupies [c.position, endPos) where endPos is
@@ -277,7 +277,7 @@ describe("FunctionalTextBuffer incremental-derivation invariants (CHORE-34)", ()
 
     test("every step stays equivalent to create(content)", () => {
       const initial = Array.from({ length: 50 }, (_, i) => `line ${i} has some text`).join("\n");
-      let incremental: FunctionalTextBuffer = FunctionalTextBufferImpl.create(initial);
+      let incremental: TextBuffer = TextBufferImpl.create(initial);
       const rng = lcg(0xC0FFEE);
 
       for (let i = 0; i < 1000; i++) {
@@ -300,7 +300,7 @@ describe("FunctionalTextBuffer incremental-derivation invariants (CHORE-34)", ()
           }
         }
         // The source of truth: rebuild from content and compare snapshots.
-        const rebuilt = FunctionalTextBufferImpl.create(unwrap(incremental.getContent()));
+        const rebuilt = TextBufferImpl.create(unwrap(incremental.getContent()));
         expect(snapshot(incremental)).toEqual(snapshot(rebuilt));
       }
     });

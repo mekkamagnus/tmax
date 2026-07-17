@@ -15,8 +15,8 @@
 import type { TLispValue, TLispFunctionImpl } from "../tlisp/types.ts";
 import { createNil, createNumber, createString, createBoolean, createList } from "../tlisp/values.ts";
 import { renameSync, writeFileSync, readFileSync, existsSync } from "node:fs";
-import type { FunctionalTextBuffer } from "../core/types.ts";
-import { FunctionalTextBufferImpl } from "../core/buffer.ts";
+import type { TextBuffer } from "../core/types.ts";
+import { TextBufferImpl } from "../core/buffer.ts";
 import { Either } from "../utils/task-either.ts";
 import { capTail } from "./log-entry.ts";
 import type { LogCategory, LogView } from "./log-entry.ts";
@@ -129,8 +129,8 @@ function buildEditorAPIContributions(): readonly EditorAPIContribution[] {
       factory: (ctx: EditorAPIContext): Map<string, TLispFunctionImpl> => {
         const modelAccess: EditorModelAccess = ctx.access;
         const getModel = (): EditorModel => ctx.access.getModel();
-        const buffersMap = (): Map<string, FunctionalTextBuffer> =>
-          getModel().buffers as Map<string, FunctionalTextBuffer>;
+        const buffersMap = (): Map<string, TextBuffer> =>
+          getModel().buffers as Map<string, TextBuffer>;
         // setCursorLine with auto-expand-fold semantics — defined here (inside
         // the buffer factory) because buffer-ops receives it as an argument.
         const setCursorLine = (line: number) => {
@@ -610,8 +610,8 @@ function buildEditorAPIContributions(): readonly EditorAPIContribution[] {
       name: "dired",
       factory: (ctx: EditorAPIContext): Map<string, TLispFunctionImpl> => {
         const getModel = (): EditorModel => ctx.access.getModel();
-        const buffersMap = (): Map<string, FunctionalTextBuffer> =>
-          getModel().buffers as Map<string, FunctionalTextBuffer>;
+        const buffersMap = (): Map<string, TextBuffer> =>
+          getModel().buffers as Map<string, TextBuffer>;
         return createDiredOps(
           ctx.access,
           (buffer) => { ctx.setCurrentBuffer(buffer); },
@@ -780,8 +780,8 @@ function buildEditorAPIContributions(): readonly EditorAPIContribution[] {
       factory: (ctx: EditorAPIContext): Map<string, TLispFunctionImpl> => {
         const getModel = (): EditorModel => ctx.access.getModel();
         const write = (msg: Msg): void => { ctx.applyUpdate(msg); };
-        const buffersMap = (): Map<string, FunctionalTextBuffer> =>
-          getModel().buffers as Map<string, FunctionalTextBuffer>;
+        const buffersMap = (): Map<string, TextBuffer> =>
+          getModel().buffers as Map<string, TextBuffer>;
         const ops = new Map<string, TLispFunctionImpl>();
 
         ops.set('messages-buffer', (_args: TLispValue[]): Either<AppError, TLispValue> => {
@@ -938,7 +938,7 @@ function buildEditorAPIContributions(): readonly EditorAPIContribution[] {
           const log = ctx.getMessageLog?.();
           if (log) {
             log.clear();
-            buffersMap().set('*Messages*', FunctionalTextBufferImpl.create(''));
+            buffersMap().set('*Messages*', TextBufferImpl.create(''));
           }
           return Either.right(createNil());
         });

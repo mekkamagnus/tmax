@@ -7,8 +7,8 @@
 
 import { describe, test, expect, beforeEach } from "bun:test";
 import { expectRight } from "../helpers/editor-fixture.ts";
-import { FunctionalTextBufferImpl } from "../../src/core/buffer.ts";
-import type { FunctionalTextBuffer } from "../../src/core/types.ts";
+import { TextBufferImpl } from "../../src/core/buffer.ts";
+import type { TextBuffer } from "../../src/core/types.ts";
 import { Either } from "../../src/utils/task-either.ts";
 import { createYankOps } from "../../src/editor/api/yank-ops.ts";
 import { initialModel } from "../../src/editor/functional/model.ts";
@@ -17,14 +17,14 @@ import { createEditorSession, createEditorSessionState } from "../../src/editor/
 /**
  * Test helper to create a buffer with content
  */
-function createBuffer(content: string): FunctionalTextBuffer {
-  return FunctionalTextBufferImpl.create(content);
+function createBuffer(content: string): TextBuffer {
+  return TextBufferImpl.create(content);
 }
 
 /**
  * Test helper to get buffer content as string
  */
-function getBufferContent(buffer: FunctionalTextBuffer): string {
+function getBufferContent(buffer: TextBuffer): string {
   const result = buffer.getContent();
   if (Either.isLeft(result)) {
     throw new Error(`Failed to get buffer content: ${result.left}`);
@@ -33,7 +33,7 @@ function getBufferContent(buffer: FunctionalTextBuffer): string {
 }
 
 describe("Yank Operator Integration - US-1.2.2", () => {
-  let currentBuffer: FunctionalTextBuffer | null;
+  let currentBuffer: TextBuffer | null;
   let cursorLine: number;
   let cursorColumn: number;
   let yankOps: Map<string, (args: any[]) => Either<any, any>>;

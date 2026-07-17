@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { FunctionalTextBufferImpl } from "../../src/core/buffer";
+import { TextBufferImpl } from "../../src/core/buffer";
 import { createEditorAPI } from "../../src/editor/tlisp-api";
 import { Either } from "../../src/utils/task-either";
 import { expectDefined, expectRight, createTestAPIContext } from "../helpers/editor-fixture.ts";
@@ -7,7 +7,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
 function createState() {
-  const currentBuffer = FunctionalTextBufferImpl.create("");
+  const currentBuffer = TextBufferImpl.create("");
   return createTestAPIContext({
     currentBuffer,
     buffers: new Map([["default", currentBuffer]]),

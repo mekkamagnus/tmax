@@ -20,7 +20,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import type { TLispValue, TLispFunctionImpl } from "../../tlisp/types.ts";
 import { createNil, createNumber, createString, createBoolean, createList } from "../../tlisp/values.ts";
-import type { FunctionalTextBuffer } from "../../core/types.ts";
+import type { TextBuffer } from "../../core/types.ts";
 import { runModel, readModelField, type EditorModelAccess } from "./state-context.ts";
 import { Either } from "../../utils/task-either.ts";
 import {
@@ -86,8 +86,8 @@ function formatEntryLine(entry: EntryLike, marked: boolean): string {
  */
 export function createDiredOps(
   access: EditorModelAccess,
-  setCurrentBuffer: (buffer: FunctionalTextBuffer) => void,
-  buffers: Map<string, FunctionalTextBuffer>
+  setCurrentBuffer: (buffer: TextBuffer) => void,
+  buffers: Map<string, TextBuffer>
 ): Map<string, TLispFunctionImpl> {
   // CHORE-44 Change 1: per-editor Dired state lives on the model-held
   // `access.getModel().session.dired` object; mutated in place.
@@ -96,7 +96,7 @@ export function createDiredOps(
   // CHORE-39 Phase 4: cursor/buffer reads flow through the State monad against
   // EditorModel; writes stay on the supplied setter to preserve side effects.
   const getCursorLine = (): number => runModel(access, readModelField("cursorPosition")).line;
-  const getCurrentBuffer = (): FunctionalTextBuffer | null =>
+  const getCurrentBuffer = (): TextBuffer | null =>
     runModel(access, readModelField("currentBuffer")) ?? null;
   const api = new Map<string, TLispFunctionImpl>();
 

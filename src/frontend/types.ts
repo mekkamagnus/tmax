@@ -4,7 +4,7 @@
  */
 
 import type { Position } from "../core/types.ts";
-import type { FunctionalTextBuffer } from "../core/types.ts";
+import type { TextBuffer } from "../core/types.ts";
 
 /**
  * Props for the main Editor component
@@ -19,7 +19,7 @@ export interface EditorProps {
  * Props for the BufferView component
  */
 export interface BufferViewProps {
-  buffer: FunctionalTextBuffer;
+  buffer: TextBuffer;
   cursorPosition: Position;
   viewportTop: number;
   onViewportChange: (top: number) => void;

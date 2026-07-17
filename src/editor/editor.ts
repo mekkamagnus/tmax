@@ -10,7 +10,7 @@ import { createEditorAPI } from "./tlisp-api.ts";
 import type { EditorAPIContext } from "./runtime/editor-api-context.ts";
 import { createEditorRuntimeCaches } from "./runtime/caches.ts";
 import type { EditorRuntimeCaches } from "./runtime/caches.ts";
-import type { EditorState, FunctionalTextBuffer, Window, HighlightSpan, MinibufferRenderView, WorkspaceState, BufferMetadata } from "../core/types.ts";
+import type { EditorState, TextBuffer, Window, HighlightSpan, MinibufferRenderView, WorkspaceState, BufferMetadata } from "../core/types.ts";
 import { createString, createList, createNil, createNumber, createBoolean, createHashmap, createPromise } from "../tlisp/values.ts";
 import type { TerminalIO, FileSystem } from "../core/types.ts";
 import type { TLispEnvironment, TLispValue, TLispFunctionImpl } from "../tlisp/types.ts";
@@ -25,7 +25,7 @@ import { Either } from "../utils/task-either.ts";
  */
 const HIGHLIGHT_RECOMPUTE_VIEWPORT_LINES = 50;
 import { renderDiagnostic } from "../tlisp/diagnostic-renderer.ts";
-import { FunctionalTextBufferImpl } from "../core/buffer.ts";
+import { TextBufferImpl } from "../core/buffer.ts";
 import { MessageLog, type LogLevel } from "./message-log.ts";
 import { Log, ViewBoundLog } from "./log-store.ts";
 import { LoggingRuntime } from "./runtime/logging-runtime.ts";
@@ -85,7 +85,7 @@ export class Editor {
   private session!: EditorSession;
   // CHORE-44 Change 1: per-editor AST/parse caches (not shared, not serialized).
   private caches: EditorRuntimeCaches = createEditorRuntimeCaches();
-  private buffers: Map<string, FunctionalTextBufferImpl> = new Map();
+  private buffers: Map<string, TextBufferImpl> = new Map();
   private interpreter: TLispInterpreterImpl;
   private keyMappings: Map<string, KeyMapping[]>;
   private running: boolean = false;
@@ -222,18 +222,18 @@ export class Editor {
     this.lspClient = new LSPClient(this.terminal, this.filesystem);
 
     // Create *Messages* buffer
-    this.buffers.set('*Messages*', FunctionalTextBufferImpl.create(''));
+    this.buffers.set('*Messages*', TextBufferImpl.create(''));
     this.bufferMetadata.set('*Messages*', { modified: false, recency: this.bufferRecency++ });
 
     // Create *daemon* buffer — daemon lifecycle event log (SPEC-047). Quiet by
     // default; observable via (switch-to-buffer "*daemon*").
-    this.buffers.set('*daemon*', FunctionalTextBufferImpl.create(''));
+    this.buffers.set('*daemon*', TextBufferImpl.create(''));
     this.bufferMetadata.set('*daemon*', { modified: false, recency: this.bufferRecency++ });
 
     // Create program-run observability buffers (SPEC-055). Each is a filtered
     // view over the unified Log store; populated lazily by logProgram().
     for (const name of ['*Shell Output*', '*Async Output*', '*Tests*']) {
-      this.buffers.set(name, FunctionalTextBufferImpl.create(''));
+      this.buffers.set(name, TextBufferImpl.create(''));
       this.bufferMetadata.set(name, { modified: false, recency: this.bufferRecency++ });
     }
 
@@ -252,7 +252,7 @@ export class Editor {
     // Log store, log path, and log→buffer rendering). Buffer side-effects come
     // back through these callbacks so buffer management stays with the Editor.
     this.logging = new LoggingRuntime({
-      setBuffer: (name, text) => { this.buffers.set(name, FunctionalTextBufferImpl.create(text)); },
+      setBuffer: (name, text) => { this.buffers.set(name, TextBufferImpl.create(text)); },
       updateBufferMetadata: (name, meta) => { this.updateBufferMetadata(name, meta); },
     });
 
@@ -317,11 +317,11 @@ export class Editor {
       // side-effectful methods below preserve editor-specific invariants the
       // reducer alone cannot cover (tab/window/metadata/cursor-window sync).
       applyUpdate: (msg: Msg) => { editor.applyUpdate(msg); },
-      setCurrentBuffer: (v: FunctionalTextBuffer | null) => {
+      setCurrentBuffer: (v: TextBuffer | null) => {
         const previousName = editor.findBufferName(editor.model.currentBuffer);
         const existingName = editor.findBufferName(v ?? undefined);
         const bufferName = existingName ?? previousName;
-        if (v && bufferName) editor.buffers.set(bufferName, v as FunctionalTextBufferImpl);
+        if (v && bufferName) editor.buffers.set(bufferName, v as TextBufferImpl);
         if (v && editor.model.tabs && editor.model.tabs.length > 0) {
           const currentTabIndex = editor.model.currentTabIndex ?? 0;
           const currentTab = editor.model.tabs[currentTabIndex];
@@ -340,7 +340,7 @@ export class Editor {
           if (windows && windows.length > 0) {
             const currentWindow = windows[editor.model.currentWindowIndex ?? 0];
             if (currentWindow) {
-              currentWindow.buffer = v as FunctionalTextBufferImpl;
+              currentWindow.buffer = v as TextBufferImpl;
               currentWindow.bufferName = bufferName;
             }
           }
@@ -2128,7 +2128,7 @@ export class Editor {
 
     // R3-1: Build reverse index from OLD workspace buffers before deep-copy.
     // After deep-copy, identity checks fail because new instances are created.
-    const oldBufferNames = new Map<FunctionalTextBuffer, string>();
+    const oldBufferNames = new Map<TextBuffer, string>();
     for (const [name, buf] of workspace.buffers.entries()) {
       oldBufferNames.set(buf, name);
     }
@@ -2149,7 +2149,7 @@ export class Editor {
     this.bufferRecency = reconciled.nextRecency;
 
     const bufferName = workspace.currentBufferName ?? '*scratch*';
-    const buffer = this.buffers.get(bufferName) ?? this.buffers.get('*scratch*') ?? FunctionalTextBufferImpl.create('');
+    const buffer = this.buffers.get(bufferName) ?? this.buffers.get('*scratch*') ?? TextBufferImpl.create('');
     if (!this.buffers.has(bufferName)) {
       this.buffers.set(bufferName, buffer);
       this.updateBufferMetadata(bufferName, { modified: false });
@@ -2231,7 +2231,7 @@ export class Editor {
    * @param content - Initial content
    */
   createBuffer(name: string, content: string = ""): void {
-    const buffer = FunctionalTextBufferImpl.create(content);
+    const buffer = TextBufferImpl.create(content);
     this.buffers.set(name, buffer);
     this.updateBufferMetadata(name, { modified: false, recency: this.bufferRecency++ });
 
@@ -2665,7 +2665,7 @@ export class Editor {
     if (newState.buffers && newState.buffers !== this.buffers) {
       this.buffers.clear();
       for (const [name, buffer] of newState.buffers.entries()) {
-        this.buffers.set(name, buffer as FunctionalTextBufferImpl);
+        this.buffers.set(name, buffer as TextBufferImpl);
       }
     }
     // Sync-back bridge: model.buffers must reference the shared this.buffers
@@ -2685,7 +2685,7 @@ export class Editor {
     }
   }
 
-  private findBufferName(buffer: FunctionalTextBuffer | undefined): string | undefined {
+  private findBufferName(buffer: TextBuffer | undefined): string | undefined {
     if (!buffer) return undefined;
     for (const [name, candidate] of this.buffers) {
       if (candidate === buffer) return name;

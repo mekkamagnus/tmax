@@ -1,13 +1,13 @@
 import { describe, expect, test } from "bun:test";
-import { FunctionalTextBufferImpl } from "../../src/core/buffer";
+import { TextBufferImpl } from "../../src/core/buffer";
 import { createEditorAPI } from "../../src/editor/tlisp-api";
 import { createString } from "../../src/tlisp/values";
 import { Either } from "../../src/utils/task-either";
 import { expectDefined, expectRight, createTestAPIContext } from "../helpers/editor-fixture.ts";
 
 function createState() {
-  const scratchBuffer = FunctionalTextBufferImpl.create("");
-  const messagesBuffer = FunctionalTextBufferImpl.create("existing messages\n");
+  const scratchBuffer = TextBufferImpl.create("");
+  const messagesBuffer = TextBufferImpl.create("existing messages\n");
   return createTestAPIContext({
     currentBuffer: messagesBuffer,
     buffers: new Map([

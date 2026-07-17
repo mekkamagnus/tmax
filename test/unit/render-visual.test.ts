@@ -10,11 +10,11 @@ import { ansiToHtml, ansiLinesToHtmlDocument } from "../../src/render/ansi-to-ht
 import { defaultDarkTheme } from "../../src/syntax/types.ts";
 import { hexToRGB } from "../../src/steep/matcha.ts";
 import { isHexColor } from "../../src/steep/matcha.ts";
-import { FunctionalTextBufferImpl } from "../../src/core/buffer.ts";
+import { TextBufferImpl } from "../../src/core/buffer.ts";
 import type { EditorState } from "../../src/core/types.ts";
 
 function makeVisualState(content: string, filename: string): EditorState {
-  const buf = FunctionalTextBufferImpl.create(content);
+  const buf = TextBufferImpl.create(content);
   return {
     currentBuffer: buf as any,
     cursorPosition: { line: 0, column: 0 },

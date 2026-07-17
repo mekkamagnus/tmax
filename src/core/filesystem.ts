@@ -1,51 +1,108 @@
 /**
  * @file filesystem.ts
- * @description Functional file system operations using TaskEither for tmax editor
- * Cross-platform implementation for Node/Bun
+ * @description Canonical filesystem runtime implementation for tmax.
+ *
+ * Implements the promise-based `FileSystem` contract (canonical,
+ * CHORE-44 Change 9). The internal helpers (`readFileE`, `writeFileE`,
+ * `existsE`, `statE`, `removeE`, `backupE`, `atomicSaveE`, `createDirE`)
+ * compose with `TaskEither` at the effect-composition boundary and are
+ * the engine the public promise-based methods unwrap. They replace the
+ * previous parallel TaskEither-returning interface and its wrapper class,
+ * which have been removed.
+ *
+ * Cross-platform for Node/Bun. Error messages are preserved byte-for-byte
+ * (AC9.5).
  */
 
-import type { FileStats, FileSystem } from "./types.ts";
+import type { FileStats } from "./contracts/primitives.ts";
+import type { FileSystem } from "./contracts/filesystem.ts";
 import { TaskEither, TaskEitherUtils, Either } from "../utils/task-either.ts";
 import * as fs from 'fs';
 import * as fsPromises from 'fs/promises';
 import { FileSystemError, createFileSystemError } from "../error/types.ts";
 
-/**
- * Functional file system operations interface using TaskEither
- */
-export interface FunctionalFileSystem {
-
-  /** Read file contents */
-  readFile(path: string): TaskEither<FileSystemError, string>;
-
-  /** Write file contents */
-  writeFile(path: string, content: string): TaskEither<FileSystemError, void>;
-
-  /** Check if file exists */
-  exists(path: string): TaskEither<FileSystemError, boolean>;
-
-  /** Get file stats */
-  stat(path: string): TaskEither<FileSystemError, FileStats>;
-
-  /** Remove a file */
-  remove(path: string): TaskEither<FileSystemError, void>;
-
-  /** Create backup of file */
-  backup(path: string): TaskEither<FileSystemError, string>;
-
-  /** Atomic save operation (backup + write) */
-  atomicSave(path: string, content: string): TaskEither<FileSystemError, { saved: boolean; backupPath?: string }>;
-}
+// Re-export so existing `import { FileSystemError } from "../core/filesystem.ts"`
+// callers keep compiling. The canonical home for the string alias is
+// `./contracts/primitives.ts`; the rich error-union type lives in
+// `../error/types.ts` (this re-export targets the rich type).
+export type { FileSystemError } from "../error/types.ts";
 
 /**
- * Functional file system implementation using TaskEither
+ * Canonical filesystem implementation. Owns the promise-based `FileSystem`
+ * contract that `Editor`, `TmaxServer`, and the test mocks consume. Methods
+ * throw the rich `FileSystemError` on failure (preserving the prior engine's
+ * error messages and structure).
+ *
+ * The `*E`-suffixed helpers return `TaskEither` for effect composition
+ * (retry, parallel, JSON parse chains in `FileSystemUtils`). They are the
+ * single implementation — the prior parallel engine has been merged into
+ * this class.
  */
-export class FunctionalFileSystemImpl implements FunctionalFileSystem {
+export class FileSystemImpl implements FileSystem {
+  /**
+   * Read file contents (canonical promise-based `FileSystem` method).
+   */
+  async readFile(path: string): Promise<string> {
+    const result = await FileSystemImpl.readFileE(path).run();
+    if (Either.isLeft(result)) {
+      throw new Error(result.left.message);
+    }
+    return result.right;
+  }
 
   /**
-   * Read file contents with proper error handling
+   * Write file contents (canonical promise-based `FileSystem` method).
    */
-  readFile(path: string): TaskEither<FileSystemError, string> {
+  async writeFile(path: string, content: string): Promise<void> {
+    const result = await FileSystemImpl.writeFileE(path, content).run();
+    if (Either.isLeft(result)) {
+      throw new Error(result.left.message);
+    }
+  }
+
+  /**
+   * Check if file exists (canonical promise-based `FileSystem` method).
+   */
+  async exists(path: string): Promise<boolean> {
+    const result = await FileSystemImpl.existsE(path).run();
+    if (Either.isLeft(result)) {
+      throw new Error(result.left.message);
+    }
+    return result.right;
+  }
+
+  /**
+   * Get file stats (canonical promise-based `FileSystem` method).
+   */
+  async stat(path: string): Promise<FileStats> {
+    const result = await FileSystemImpl.statE(path).run();
+    if (Either.isLeft(result)) {
+      throw new Error(result.left.message);
+    }
+    return result.right;
+  }
+
+  /**
+   * Create directory recursively (SPEC-025).
+   */
+  async createDir(path: string): Promise<void> {
+    const result = await FileSystemImpl.createDirE(path).run();
+    if (Either.isLeft(result)) {
+      throw new Error(result.left.message);
+    }
+  }
+
+  // -------------------------------------------------------------------------
+  // Effect-composition boundary: TaskEither-returning engine.
+  //
+  // These static helpers are the single implementation of the filesystem
+  // primitives. They compose with `TaskEither.parallel`, `.retry`, and
+  // `FileSystemUtils` chains. The promise-based instance methods above are
+  // thin unwrappers that preserve the canonical `FileSystem` contract.
+  // -------------------------------------------------------------------------
+
+  /** Read file contents as a TaskEither. */
+  static readFileE(path: string): TaskEither<FileSystemError, string> {
     return TaskEither.tryCatch(
       async () => {
         const fs = await import('fs/promises');
@@ -60,10 +117,8 @@ export class FunctionalFileSystemImpl implements FunctionalFileSystem {
     );
   }
 
-  /**
-   * Write file contents with proper error handling
-   */
-  writeFile(path: string, content: string): TaskEither<FileSystemError, void> {
+  /** Write file contents as a TaskEither. */
+  static writeFileE(path: string, content: string): TaskEither<FileSystemError, void> {
     return TaskEither.tryCatch(
       async () => {
         const fs = await import('fs/promises');
@@ -78,10 +133,8 @@ export class FunctionalFileSystemImpl implements FunctionalFileSystem {
     );
   }
 
-  /**
-   * Check if file exists without throwing errors
-   */
-  exists(path: string): TaskEither<FileSystemError, boolean> {
+  /** Check if file exists as a TaskEither. */
+  static existsE(path: string): TaskEither<FileSystemError, boolean> {
     return TaskEither.tryCatch(
       async () => {
         try {
@@ -103,10 +156,8 @@ export class FunctionalFileSystemImpl implements FunctionalFileSystem {
     );
   }
 
-  /**
-   * Get file stats with functional error handling
-   */
-  stat(path: string): TaskEither<FileSystemError, FileStats> {
+  /** Get file stats as a TaskEither. */
+  static statE(path: string): TaskEither<FileSystemError, FileStats> {
     return TaskEither.tryCatch(
       async () => {
         const info = await fsPromises.stat(path);
@@ -126,10 +177,8 @@ export class FunctionalFileSystemImpl implements FunctionalFileSystem {
     );
   }
 
-  /**
-   * Remove a file with functional error handling
-   */
-  remove(path: string): TaskEither<FileSystemError, void> {
+  /** Remove a file as a TaskEither. */
+  static removeE(path: string): TaskEither<FileSystemError, void> {
     return TaskEither.tryCatch(
       async () => {
         await fsPromises.unlink(path);
@@ -143,42 +192,36 @@ export class FunctionalFileSystemImpl implements FunctionalFileSystem {
     );
   }
 
-  /**
-   * Create a backup of the file
-   */
-  backup(path: string): TaskEither<FileSystemError, string> {
+  /** Create a backup of the file as a TaskEither. */
+  static backupE(path: string): TaskEither<FileSystemError, string> {
     const backupPath = `${path}.backup.${Date.now()}`;
 
-    return this.readFile(path)
-      .flatMap(content => this.writeFile(backupPath, content))
+    return FileSystemImpl.readFileE(path)
+      .flatMap(content => FileSystemImpl.writeFileE(backupPath, content))
       .map(() => backupPath);
   }
 
-  /**
-   * Atomic save operation: backup existing file then write new content
-   */
-  atomicSave(path: string, content: string): TaskEither<FileSystemError, { saved: boolean; backupPath?: string }> {
-    return this.exists(path)
+  /** Atomic save (backup existing file then write new content) as a TaskEither. */
+  static atomicSaveE(path: string, content: string): TaskEither<FileSystemError, { saved: boolean; backupPath?: string }> {
+    return FileSystemImpl.existsE(path)
       .flatMap((fileExists: boolean): TaskEither<FileSystemError, { saved: boolean; backupPath?: string }> => {
         if (!fileExists) {
           // File doesn't exist, just write it
-          return this.writeFile(path, content)
+          return FileSystemImpl.writeFileE(path, content)
             .map(() => ({ saved: true as const, backupPath: undefined }));
         }
 
         // File exists, backup then write
-        return this.backup(path)
+        return FileSystemImpl.backupE(path)
           .flatMap((backupPath: string) =>
-            this.writeFile(path, content)
+            FileSystemImpl.writeFileE(path, content)
               .map(() => ({ saved: true as const, backupPath }))
           );
       });
   }
 
-  /**
-   * Create directory recursively (SPEC-025)
-   */
-  createDir(path: string): TaskEither<FileSystemError, void> {
+  /** Create directory recursively (SPEC-025) as a TaskEither. */
+  static createDirE(path: string): TaskEither<FileSystemError, void> {
     return TaskEither.tryCatch(
       async () => {
         const fs = await import('fs/promises');
@@ -194,10 +237,15 @@ export class FunctionalFileSystemImpl implements FunctionalFileSystem {
   }
 }
 
-const _fsImpl = new FunctionalFileSystemImpl();
+// Shared singleton instance used by the `FileSystemUtils` composition helpers
+// (preserved from the prior module-level `_fsImpl`, now typed as the canonical
+// promise-based impl). Exposed for tests that build on the same instance.
+const _fsImpl = new FileSystemImpl();
 
 /**
- * Utility functions for common file operations
+ * Utility functions for common file operations at the TaskEither
+ * effect-composition boundary. These replace the prior `Functional`-prefixed
+ * alias and operate against the canonical `FileSystemImpl` engine.
  */
 export const FileSystemUtils = {
   /**
@@ -293,7 +341,7 @@ export const FileSystemUtils = {
    * Check if path is a file
    */
   isFile: (path: string): TaskEither<string, boolean> => {
-    return _fsImpl.stat(path)
+    return FileSystemImpl.statE(path)
       .map(stats => stats.isFile)
       .mapLeft(error => `Failed to check if ${path} is a file: ${error}`);
   },
@@ -302,76 +350,8 @@ export const FileSystemUtils = {
    * Check if path is a directory
    */
   isDirectory: (path: string): TaskEither<string, boolean> => {
-    return _fsImpl.stat(path)
+    return FileSystemImpl.statE(path)
       .map(stats => stats.isDirectory)
       .mapLeft(error => `Failed to check if ${path} is a directory: ${error}`);
   }
 };
-
-/**
- * Backward compatibility wrapper for FileSystemImpl
- * Provides the expected Promise-based interface while using functional implementation internally
- */
-export class FileSystemImpl implements FileSystem {
-  private functionalFileSystem: FunctionalFileSystemImpl;
-
-  constructor() {
-    this.functionalFileSystem = new FunctionalFileSystemImpl();
-  }
-
-  /**
-   * Read file contents
-   */
-  async readFile(path: string): Promise<string> {
-    const result = await this.functionalFileSystem.readFile(path).run();
-    if (Either.isLeft(result)) {
-      throw new Error(result.left.message);
-    }
-    return result.right;
-  }
-
-  /**
-   * Write file contents
-   */
-  async writeFile(path: string, content: string): Promise<void> {
-    const result = await this.functionalFileSystem.writeFile(path, content).run();
-    if (Either.isLeft(result)) {
-      throw new Error(result.left.message);
-    }
-  }
-
-  /**
-   * Check if file exists
-   */
-  async exists(path: string): Promise<boolean> {
-    const result = await this.functionalFileSystem.exists(path).run();
-    if (Either.isLeft(result)) {
-      throw new Error(result.left.message);
-    }
-    return result.right;
-  }
-
-  /**
-   * Get file stats
-   */
-  async stat(path: string): Promise<FileStats> {
-    const result = await this.functionalFileSystem.stat(path).run();
-    if (Either.isLeft(result)) {
-      throw new Error(result.left.message);
-    }
-    return result.right;
-  }
-
-  /**
-   * Create directory recursively (SPEC-025)
-   */
-  async createDir(path: string): Promise<void> {
-    const result = await this.functionalFileSystem.createDir(path).run();
-    if (Either.isLeft(result)) {
-      throw new Error(result.left.message);
-    }
-  }
-}
-
-// Export utils with functional prefix to avoid conflicts
-export { FileSystemUtils as FunctionalFileSystemUtils };

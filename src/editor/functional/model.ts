@@ -6,7 +6,7 @@
  * EditorModel is a STANDALONE immutable interface — it deliberately does NOT
  * `extend` the public `EditorState` type (src/core/types.ts). The public
  * `EditorState` is handed to callers through `getState()` / `getEditorState()`
- * and its mutable collections (`Map<string, FunctionalTextBuffer>`, etc.) and
+ * and its mutable collections (`Map<string, TextBuffer>`, etc.) and
  * non-readonly fields must NOT leak into the editor's internal state. Extending
  * `EditorState` would make this immutability contract unsound, because every
  * inherited field would stay mutable. Instead, EditorModel re-declares each
@@ -25,7 +25,7 @@
 import type {
   EditorConfig,
   EditorState,
-  FunctionalTextBuffer,
+  TextBuffer,
   HighlightSpan,
   JsonValue,
   LSPDiagnostic,
@@ -56,7 +56,7 @@ type EditorMode = 'normal' | 'insert' | 'visual' | 'command' | 'mx' | 'replace';
 export interface EditorModel {
   // Scalar / object fields (mirror EditorState, all readonly)
   /** Currently-focused buffer. */
-  readonly currentBuffer?: FunctionalTextBuffer;
+  readonly currentBuffer?: TextBuffer;
   /** Buffer cursor position (line, column). */
   readonly cursorPosition: Position;
   /** Active editor mode. */
@@ -118,7 +118,7 @@ export interface EditorModel {
 
   // Collection fields → immutable variants (ReadonlyMap / readonly T[])
   /** Named buffers (immutable map). */
-  readonly buffers?: ReadonlyMap<string, FunctionalTextBuffer>;
+  readonly buffers?: ReadonlyMap<string, TextBuffer>;
   /** Open windows (immutable array). */
   readonly windows?: readonly Window[];
   /** Open tabs (immutable array). */

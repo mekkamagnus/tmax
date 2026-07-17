@@ -7,7 +7,7 @@ import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { EditorAPIContext } from "../../src/editor/runtime/editor-api-context.ts";
-import type { FunctionalTextBuffer } from "../../src/core/types.ts";
+import type { TextBuffer } from "../../src/core/types.ts";
 import { initialModel } from "../../src/editor/functional/model.ts";
 import type { EditorModel } from "../../src/editor/functional/model.ts";
 import { update } from "../../src/editor/functional/index.ts";
@@ -20,9 +20,9 @@ import { createEditorRuntimeCaches } from "../../src/editor/runtime/caches.ts";
  */
 export interface TestAPIContextOptions {
   /** Seed buffer for `model.currentBuffer` (also inserted into `buffers` as "default"). */
-  currentBuffer?: FunctionalTextBuffer;
+  currentBuffer?: TextBuffer;
   /** Seed buffer registry (defaults to a fresh empty Map; "default" is added if `currentBuffer` is set). */
-  buffers?: Map<string, FunctionalTextBuffer>;
+  buffers?: Map<string, TextBuffer>;
 }
 
 /**
@@ -34,11 +34,11 @@ export interface TestAPIContextOptions {
  */
 export interface TestAPIContext extends EditorAPIContext {
   /** Live mutable buffer registry (the same Map the model holds). Seed/observe here. */
-  readonly buffers: Map<string, FunctionalTextBuffer>;
+  readonly buffers: Map<string, TextBuffer>;
   /** Direct model read (alias for `access.getModel()`). */
   getModel(): EditorModel;
   /** Seed `model.currentBuffer` directly (test setup). */
-  setCurrentBufferDirect(buffer: FunctionalTextBuffer): void;
+  setCurrentBufferDirect(buffer: TextBuffer): void;
   /** Seed `model.statusMessage` directly (test setup/observation). */
   setStatusMessage(message: string): void;
   /** Seed `model.lastCommand` directly (test setup). */
@@ -59,7 +59,7 @@ export interface TestAPIContext extends EditorAPIContext {
  * without re-introducing bridge properties on the production context.
  */
 export function createTestAPIContext(options: TestAPIContextOptions = {}): TestAPIContext {
-  const buffers = options.buffers ?? new Map<string, FunctionalTextBuffer>();
+  const buffers = options.buffers ?? new Map<string, TextBuffer>();
   let model: EditorModel = {
     ...initialModel(),
     buffers,

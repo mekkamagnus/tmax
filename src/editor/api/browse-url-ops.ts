@@ -18,7 +18,7 @@
 
 import type { TLispValue, TLispFunctionImpl } from "../../tlisp/types.ts";
 import { createNil, createNumber, createString, createBoolean, createList, createHashmap } from "../../tlisp/values.ts";
-import type { FunctionalTextBuffer } from "../../core/types.ts";
+import type { TextBuffer } from "../../core/types.ts";
 import { runModel, readModelField, type EditorModelAccess } from "./state-context.ts";
 import { Either } from "../../utils/task-either.ts";
 import { createValidationError, AppError } from "../../error/types.ts";
@@ -316,7 +316,7 @@ export function dispatchUrl(rawUrl: string, deps: DispatchDeps): DispatchOutcome
 export interface BrowseUrlPrimitiveDeps {
   /** CHORE-39 Phase 4: when provided, buffer/path reads use the State monad against EditorModel. */
   access?: EditorModelAccess;
-  getCurrentBuffer: () => FunctionalTextBuffer | null;
+  getCurrentBuffer: () => TextBuffer | null;
   getCurrentBufferName: () => string;
   getCurrentBufferPath: () => string | undefined;
   /** Spawn used by ts-open-external — exposed so tests can stub the browser. */
@@ -437,7 +437,7 @@ export function tsOpenExternalOutcome(
 
 // ── Buffer scanning primitives ──────────────────────────────────────────
 
-function getBufferLineText(buf: FunctionalTextBuffer | null, line: number): string | null {
+function getBufferLineText(buf: TextBuffer | null, line: number): string | null {
   if (!buf) return null;
   const countResult = buf.getLineCount();
   if (Either.isLeft(countResult)) return null;
@@ -454,7 +454,7 @@ function getBufferLineText(buf: FunctionalTextBuffer | null, line: number): stri
 export function createBrowseUrlOps(deps: BrowseUrlPrimitiveDeps): Map<string, TLispFunctionImpl> {
   // CHORE-39 Phase 4: prefer State-monad buffer/path reads when access is
   // supplied (real editor runtime); fall back to the legacy getters otherwise.
-  const getCurrentBuffer = (): FunctionalTextBuffer | null =>
+  const getCurrentBuffer = (): TextBuffer | null =>
     deps.access ? (runModel(deps.access, readModelField("currentBuffer")) ?? null) : deps.getCurrentBuffer();
   const getCurrentBufferPath = (): string | undefined =>
     deps.access ? runModel(deps.access, readModelField("currentFilename")) : deps.getCurrentBufferPath();

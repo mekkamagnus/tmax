@@ -12,7 +12,7 @@
 
 import type { TLispValue, TLispFunctionImpl } from "../../tlisp/types.ts";
 import { createNumber, createString, createNil, createList, createBoolean } from "../../tlisp/values.ts";
-import type { FunctionalTextBuffer } from "../../core/types.ts";
+import type { TextBuffer } from "../../core/types.ts";
 import { Either } from "../../utils/task-either.ts";
 import { stateUtils } from "../../utils/state.ts";
 import {
@@ -27,7 +27,7 @@ import {
 interface TreeNode {
   id: number;                    // Unique node identifier
   description: string;           // Description of the edit (e.g., "delete", "insert")
-  buffer: FunctionalTextBuffer;  // Buffer treeState after the edit
+  buffer: TextBuffer;  // Buffer treeState after the edit
   cursorLine?: number;           // Cursor line position
   cursorColumn?: number;         // Cursor column position
   parent: number | null;         // Parent node ID (null for root)
@@ -45,13 +45,13 @@ interface UndoTreeState {
 }
 
 export function createUndoTreeOps(
-  getCurrentBuffer: () => FunctionalTextBuffer | null,
-  setCurrentBuffer: (buffer: FunctionalTextBuffer) => void,
+  getCurrentBuffer: () => TextBuffer | null,
+  setCurrentBuffer: (buffer: TextBuffer) => void,
   getCursorLine: () => number,
   setCursorLine: (line: number) => void,
   getCursorColumn: () => number,
   setCursorColumn: (column: number) => void
-): { api: Map<string, TLispFunctionImpl>; reset: () => void; setInitialBuffer: (buffer: FunctionalTextBuffer) => void } {
+): { api: Map<string, TLispFunctionImpl>; reset: () => void; setInitialBuffer: (buffer: TextBuffer) => void } {
   // CHORE-44 Change 1: per-editor undo-tree state (was module-global). The
   // helpers below are inner functions closing over this state.
   let treeState: UndoTreeState = {
@@ -61,7 +61,7 @@ export function createUndoTreeOps(
   };
 
   // Initial buffer treeState (before any edits)
-  let initialBuffer: FunctionalTextBuffer | null = null;
+  let initialBuffer: TextBuffer | null = null;
 
 /**
  * Reset undo tree treeState (for testing)
@@ -82,7 +82,7 @@ function resetUndoTreeState(): void {
 /**
  * Set initial buffer treeState
  */
-function setInitialBuffer(buffer: FunctionalTextBuffer): void {
+function setInitialBuffer(buffer: TextBuffer): void {
   initialBuffer = buffer;
 }
 
@@ -95,7 +95,7 @@ function setInitialBuffer(buffer: FunctionalTextBuffer): void {
  */
 function pushToTree(
   description: string,
-  buffer: FunctionalTextBuffer,
+  buffer: TextBuffer,
   cursorLine?: number,
   cursorColumn?: number
 ): number {
@@ -135,7 +135,7 @@ function pushToTree(
  * @returns Either error or success with status message
  */
 function undo(
-  setCurrentBuffer: (buffer: FunctionalTextBuffer) => void,
+  setCurrentBuffer: (buffer: TextBuffer) => void,
   setCursorLine?: (line: number) => void,
   setCursorColumn?: (column: number) => void
 ): Either<AppError, TLispValue> {
@@ -186,7 +186,7 @@ function undo(
  * @returns Either error or success with status message
  */
 function redo(
-  setCurrentBuffer: (buffer: FunctionalTextBuffer) => void,
+  setCurrentBuffer: (buffer: TextBuffer) => void,
   setCursorLine?: (line: number) => void,
   setCursorColumn?: (column: number) => void
 ): Either<AppError, TLispValue> {
@@ -262,7 +262,7 @@ function redo(
  */
 function gotoNode(
   nodeId: number,
-  setCurrentBuffer: (buffer: FunctionalTextBuffer) => void,
+  setCurrentBuffer: (buffer: TextBuffer) => void,
   setCursorLine?: (line: number) => void,
   setCursorColumn?: (column: number) => void
 ): Either<AppError, TLispValue> {
@@ -381,13 +381,13 @@ function getNodeCount(): number {
     if (typeof bufferArg !== 'object' || !('buffer' in bufferArg)) {
       return Either.left(createValidationError(
         'TypeError',
-        'undo-tree-push buffer must be a FunctionalTextBuffer',
+        'undo-tree-push buffer must be a TextBuffer',
         'args[1]',
         bufferArg
     ));
     }
 
-    const buffer = (bufferArg as { buffer: FunctionalTextBuffer }).buffer;
+    const buffer = (bufferArg as { buffer: TextBuffer }).buffer;
 
     let cursorLine: number | undefined = undefined;
     let cursorColumn: number | undefined = undefined;

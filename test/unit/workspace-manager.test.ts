@@ -8,8 +8,8 @@
 
 import { describe, test, expect, beforeEach, afterEach } from "bun:test";
 import { WorkspaceManager, CURRENT_WORKSPACE_FORMAT_VERSION } from "../../src/core/workspace.ts";
-import { FunctionalTextBufferImpl } from "../../src/core/buffer.ts";
-import type { FunctionalTextBuffer, WorkspaceState, WorkspaceData } from "../../src/core/types.ts";
+import { TextBufferImpl } from "../../src/core/buffer.ts";
+import type { TextBuffer, WorkspaceState, WorkspaceData } from "../../src/core/types.ts";
 import type { Either } from "../../src/utils/task-either.ts";
 import * as fs from "fs/promises";
 import * as path from "path";
@@ -232,9 +232,9 @@ describe("WorkspaceManager", () => {
       const createResult = await manager.create("hash-save-test").run();
       expect(createResult._tag).toBe("Right");
       const workspace = unwrapRight(createResult);
-      const base = FunctionalTextBufferImpl.create("large content");
+      const base = TextBufferImpl.create("large content");
       let getContentCount = 0;
-      const countedBuffer: FunctionalTextBuffer = {
+      const countedBuffer: TextBuffer = {
         getContent: () => {
           getContentCount++;
           return base.getContent();

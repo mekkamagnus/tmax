@@ -15,13 +15,13 @@ import { describe, test, expect, beforeEach } from "bun:test";
 import { expectRight, expectTlispList, expectTlispString } from "../helpers/editor-fixture.ts";
 import { TLispInterpreterImpl } from "../../src/tlisp/interpreter.ts";
 import { loadTrtFramework } from "../../src/tlisp/trt/bootstrap.ts";
-import type { FunctionalTextBuffer } from "../../src/core/types.ts";
-import { FunctionalTextBufferImpl } from "../../src/core/buffer.ts";
+import type { TextBuffer } from "../../src/core/types.ts";
+import { TextBufferImpl } from "../../src/core/buffer.ts";
 import { createKillRingOps, bindKillRing, createKillRingState } from "../../src/editor/api/kill-ring.ts";
 
 describe("Kill Ring Storage (US-1.9.1)", () => {
   let interpreter: TLispInterpreterImpl;
-  let mockBuffer: FunctionalTextBuffer;
+  let mockBuffer: TextBuffer;
 
   // CHORE-44 Change 1: kill ring is per-editor. Bind one instance for the test.
   const killRing = bindKillRing(createKillRingState());
@@ -44,7 +44,7 @@ describe("Kill Ring Storage (US-1.9.1)", () => {
     }
 
     // Create a mock buffer with some test content
-    mockBuffer = FunctionalTextBufferImpl.create();
+    mockBuffer = TextBufferImpl.create();
     mockBuffer.insert({ line: 0, column: 0 }, "Hello world\nThis is a test\nAnother line");
 
     // Define buffer variable in interpreter

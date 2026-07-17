@@ -17,7 +17,7 @@
 
 import type { TLispValue, TLispFunctionImpl } from "../../tlisp/types.ts";
 import { createNil, createString, createList } from "../../tlisp/values.ts";
-import type { FunctionalTextBuffer } from "../../core/types.ts";
+import type { TextBuffer } from "../../core/types.ts";
 import { runModel, readModelField, type EditorModelAccess } from "./state-context.ts";
 import { Either } from "../../utils/task-either.ts";
 import {
@@ -56,7 +56,7 @@ export function createMajorModeOps(
   const mm = access.getModel().session.majorMode;
   // CHORE-39 Phase 4: buffer/filename/modified reads flow through the State
   // monad against EditorModel; mode read/write + eval stay on callbacks.
-  const getCurrentBuffer = (): FunctionalTextBuffer | null =>
+  const getCurrentBuffer = (): TextBuffer | null =>
     runModel(access, readModelField("currentBuffer")) ?? null;
   const getCurrentFilename = (): string | undefined => runModel(access, readModelField("currentFilename"));
   const getBufferModified = (): boolean => runModel(access, readModelField("bufferModified")) ?? false;

@@ -5,7 +5,7 @@
 
 import { describe, test, expect } from "bun:test";
 import { createBufferOps } from "../../src/editor/api/buffer-ops.ts";
-import { FunctionalTextBufferImpl } from "../../src/core/buffer.ts";
+import { TextBufferImpl } from "../../src/core/buffer.ts";
 import { Either } from "../../src/utils/task-either.ts";
 import { createString, createNumber, createBoolean } from "../../src/tlisp/values.ts";
 import { initialModel } from "../../src/editor/functional/model.ts";
@@ -13,13 +13,13 @@ import { initialModel } from "../../src/editor/functional/model.ts";
 describe("Buffer Metadata Operations", () => {
   // Shared mutable state simulating editor state
   const buffers = new Map();
-  let currentBuffer: FunctionalTextBufferImpl | null = null;
+  let currentBuffer: TextBufferImpl | null = null;
   let currentFilename: string | undefined;
   let bufferModified: boolean;
 
   function setupBuffer(content: string) {
     buffers.clear();
-    currentBuffer = FunctionalTextBufferImpl.create(content);
+    currentBuffer = TextBufferImpl.create(content);
     buffers.set("test", currentBuffer);
     currentFilename = undefined;
     bufferModified = false;
@@ -30,10 +30,10 @@ describe("Buffer Metadata Operations", () => {
     return createBufferOps(
       {
         getModel: () => ({ ...initialModel(), currentBuffer: currentBuffer ?? undefined, cursorPosition: { line: 0, column: 0 }, currentFilename, bufferModified }),
-        applyModel: (m) => { if (m.currentBuffer) currentBuffer = m.currentBuffer as FunctionalTextBufferImpl; },
+        applyModel: (m) => { if (m.currentBuffer) currentBuffer = m.currentBuffer as TextBufferImpl; },
       },
       buffers,
-      (buf) => { currentBuffer = buf as FunctionalTextBufferImpl; },
+      (buf) => { currentBuffer = buf as TextBufferImpl; },
       (_l) => {},
       (_c) => {},
       (f) => { currentFilename = f; },

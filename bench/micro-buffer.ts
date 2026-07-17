@@ -2,7 +2,7 @@
  * @file micro-buffer.ts
  * @description Microbenchmark 1 — buffer edit throughput.
  *
- * Loads a fixture, constructs `FunctionalTextBufferImpl`, and performs N=1000
+ * Loads a fixture, constructs `TextBufferImpl`, and performs N=1000
  * alternating insert/delete operations at the end of a moving cursor line. Each
  * edit currently triggers `toString()` + `splitLines()` over the whole buffer
  * (RFC-019 Tier 1.1–1.3), so this microbenchmark is the direct measurement
@@ -13,8 +13,8 @@
  * exceeds it. Baselines are recorded in `bench/README.md`.
  */
 
-import { FunctionalTextBufferImpl } from "../src/core/buffer.ts";
-import type { Range, FunctionalTextBuffer } from "../src/core/types.ts";
+import { TextBufferImpl } from "../src/core/buffer.ts";
+import type { Range, TextBuffer } from "../src/core/types.ts";
 import { Either } from "../src/utils/task-either.ts";
 import { fixturePath } from "./fixtures/generate.ts";
 import { assertFloor, type BenchResult, type BenchSize } from "./output.ts";
@@ -35,13 +35,13 @@ const FLOORS_MS: Record<BenchSize, number> = {
   large: 50000,
 };
 
-function lineLength(b: FunctionalTextBuffer, line: number): number {
+function lineLength(b: TextBuffer, line: number): number {
   const r = b.getLine(line);
   if (Either.isLeft(r)) throw new Error(`getLine(${line}) failed: ${r.left}`);
   return r.right.length;
 }
 
-function doEdit(b: FunctionalTextBuffer, i: number, lineCount: number): FunctionalTextBuffer {
+function doEdit(b: TextBuffer, i: number, lineCount: number): TextBuffer {
   // Each logical "pair" is an insert followed by its cleanup delete. Pair p
   // operates on line `p % lineCount`. Op i is an insert when i is even, a
   // delete when odd — so the buffer state stays bounded across the run.
@@ -69,7 +69,7 @@ export async function runBufferBench(size: BenchSize): Promise<BenchResult> {
   const content = await Bun.file(path).text();
   const contentBytes = content.length;
 
-  let buffer: FunctionalTextBuffer = FunctionalTextBufferImpl.create(content);
+  let buffer: TextBuffer = TextBufferImpl.create(content);
   const lineCountR = buffer.getLineCount();
   if (Either.isLeft(lineCountR)) throw new Error(`getLineCount failed: ${lineCountR.left}`);
   const lineCount = lineCountR.right;
@@ -81,7 +81,7 @@ export async function runBufferBench(size: BenchSize): Promise<BenchResult> {
   }
 
   // Reset to a fresh buffer so warmup state doesn't pollute the measurement.
-  buffer = FunctionalTextBufferImpl.create(content);
+  buffer = TextBufferImpl.create(content);
 
   const start = Bun.nanoseconds();
   for (let i = 0; i < N; i++) {

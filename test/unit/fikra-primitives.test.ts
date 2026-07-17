@@ -1,12 +1,12 @@
 import { describe, expect, test } from "bun:test";
-import { FunctionalTextBufferImpl } from "../../src/core/buffer";
+import { TextBufferImpl } from "../../src/core/buffer";
 import { createEditorAPI } from "../../src/editor/tlisp-api";
 import { createString, createNumber, createBoolean, createList, createSymbol } from "../../src/tlisp/values";
 import { Either } from "../../src/utils/task-either";
 import { expectDefined, expectRight, createTestAPIContext } from "../helpers/editor-fixture.ts";
 
 function createState() {
-  const currentBuffer = FunctionalTextBufferImpl.create("");
+  const currentBuffer = TextBufferImpl.create("");
   return createTestAPIContext({
     currentBuffer,
     buffers: new Map([["default", currentBuffer]]),
@@ -178,7 +178,7 @@ describe("http-request", () => {
 describe("buffer-set-read-only", () => {
   test("sets buffer read-only", () => {
     const state = createState();
-    state.buffers.set("test-buf", FunctionalTextBufferImpl.create("hello"));
+    state.buffers.set("test-buf", TextBufferImpl.create("hello"));
     state.setCurrentBufferDirect(state.buffers.get("test-buf")!);
     const api = createEditorAPI(state);
 
@@ -189,7 +189,7 @@ describe("buffer-set-read-only", () => {
 
   test("sets buffer writable again", () => {
     const state = createState();
-    state.buffers.set("test-buf", FunctionalTextBufferImpl.create("hello"));
+    state.buffers.set("test-buf", TextBufferImpl.create("hello"));
     state.setCurrentBufferDirect(state.buffers.get("test-buf")!);
     const api = createEditorAPI(state);
 

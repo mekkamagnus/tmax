@@ -12,11 +12,11 @@ import { describe, test, expect, beforeEach } from "bun:test";
 import { expectRight } from "../helpers/editor-fixture.ts";
 import { Either } from "../../src/utils/task-either.ts";
 import { createUndoRedoOps, createUndoRedoDomainState } from "../../src/editor/api/undo-redo-ops.ts";
-import type { FunctionalTextBuffer } from "../../src/core/types.ts";
+import type { TextBuffer } from "../../src/core/types.ts";
 import type { TLispValue } from "../../src/tlisp/types.ts";
 
 // Mock buffer implementation for testing
-class MockBuffer implements FunctionalTextBuffer {
+class MockBuffer implements TextBuffer {
   private content: string;
 
   constructor(initialContent: string = "") {
@@ -39,7 +39,7 @@ class MockBuffer implements FunctionalTextBuffer {
     return Either.right(this.content.split('\n').length);
   }
 
-  insert(position: { line: number; column: number }, text: string): Either<string, FunctionalTextBuffer> {
+  insert(position: { line: number; column: number }, text: string): Either<string, TextBuffer> {
     const lines = this.content.split('\n');
     const line = lines[position.line] || "";
 
@@ -48,10 +48,10 @@ class MockBuffer implements FunctionalTextBuffer {
     const newContent = lines.join('\n');
 
     const newBuffer = new MockBuffer(newContent);
-    return Either.right(newBuffer as FunctionalTextBuffer);
+    return Either.right(newBuffer as TextBuffer);
   }
 
-  delete(range: { start: { line: number; column: number }; end: { line: number; column: number } }): Either<string, FunctionalTextBuffer> {
+  delete(range: { start: { line: number; column: number }; end: { line: number; column: number } }): Either<string, TextBuffer> {
     const lines = this.content.split('\n');
 
     // Simple case: same line
@@ -61,7 +61,7 @@ class MockBuffer implements FunctionalTextBuffer {
       lines[range.start.line] = newLine;
       const newContent = lines.join('\n');
       const newBuffer = new MockBuffer(newContent);
-      return Either.right(newBuffer as FunctionalTextBuffer);
+      return Either.right(newBuffer as TextBuffer);
     }
 
     // Multi-line deletion
@@ -75,10 +75,10 @@ class MockBuffer implements FunctionalTextBuffer {
 
     const newContent = newLines.join('\n');
     const newBuffer = new MockBuffer(newContent);
-    return Either.right(newBuffer as FunctionalTextBuffer);
+    return Either.right(newBuffer as TextBuffer);
   }
 
-  replace(range: { start: { line: number; column: number }; end: { line: number; column: number } }, text: string): Either<string, FunctionalTextBuffer> {
+  replace(range: { start: { line: number; column: number }; end: { line: number; column: number } }, text: string): Either<string, TextBuffer> {
     const deleteResult = this.delete(range);
     if (Either.isLeft(deleteResult)) {
       return deleteResult;
@@ -124,16 +124,16 @@ class MockBuffer implements FunctionalTextBuffer {
 }
 
 describe("Undo/Redo Operations", () => {
-  let currentBuffer: FunctionalTextBuffer | null;
+  let currentBuffer: TextBuffer | null;
   let undoRedoOps: Map<string, (args: any[]) => Either<any, any>>;
   let currentStatusMessage: string;
   // CHORE-44 Change 1: undo state is per-editor; reset/setInitialBuffer come
   // from the factory result (bound to this editor's history).
   let resetUndoRedoState: () => void;
-  let setInitialBuffer: (buffer: FunctionalTextBuffer) => void;
+  let setInitialBuffer: (buffer: TextBuffer) => void;
 
   beforeEach(() => {
-    currentBuffer = new MockBuffer("Hello world\nLine 2\nLine 3") as FunctionalTextBuffer;
+    currentBuffer = new MockBuffer("Hello world\nLine 2\nLine 3") as TextBuffer;
     currentStatusMessage = "";
 
     const undoRedoCore = createUndoRedoOps(
@@ -162,7 +162,7 @@ describe("Undo/Redo Operations", () => {
       const pushFunc = undoRedoOps.get("undo-history-push")!;
 
       // Push an edit to history - wrap buffer in special object
-      const modifiedBuffer = new MockBuffer("Hello world modified\nLine 2\nLine 3") as FunctionalTextBuffer;
+      const modifiedBuffer = new MockBuffer("Hello world modified\nLine 2\nLine 3") as TextBuffer;
       const pushResult = pushFunc([
         { type: 'string', value: 'test' },
         { buffer: modifiedBuffer }
@@ -186,9 +186,9 @@ describe("Undo/Redo Operations", () => {
       const undoFunc = undoRedoOps.get("undo")!;
 
       // Push 3 edits
-      const edit1 = new MockBuffer("Edit 1\nLine 2\nLine 3") as FunctionalTextBuffer;
-      const edit2 = new MockBuffer("Edit 2\nLine 2\nLine 3") as FunctionalTextBuffer;
-      const edit3 = new MockBuffer("Edit 3\nLine 2\nLine 3") as FunctionalTextBuffer;
+      const edit1 = new MockBuffer("Edit 1\nLine 2\nLine 3") as TextBuffer;
+      const edit2 = new MockBuffer("Edit 2\nLine 2\nLine 3") as TextBuffer;
+      const edit3 = new MockBuffer("Edit 3\nLine 2\nLine 3") as TextBuffer;
 
       pushFunc([{ type: 'string', value: 'edit1' }, { buffer: edit1 }]);
       pushFunc([{ type: 'string', value: 'edit2' }, { buffer: edit2 }]);
@@ -212,8 +212,8 @@ describe("Undo/Redo Operations", () => {
       const undoFunc = undoRedoOps.get("undo")!;
 
       // Push 2 edits
-      const edit1 = new MockBuffer("Edit 1\nLine 2\nLine 3") as FunctionalTextBuffer;
-      const edit2 = new MockBuffer("Edit 2\nLine 2\nLine 3") as FunctionalTextBuffer;
+      const edit1 = new MockBuffer("Edit 1\nLine 2\nLine 3") as TextBuffer;
+      const edit2 = new MockBuffer("Edit 2\nLine 2\nLine 3") as TextBuffer;
 
       pushFunc([{ type: 'string', value: 'edit1' }, { buffer: edit1 }]);
       pushFunc([{ type: 'string', value: 'edit2' }, { buffer: edit2 }]);
@@ -250,7 +250,7 @@ describe("Undo/Redo Operations", () => {
       const redoFunc = undoRedoOps.get("redo")!;
 
       // Push an edit
-      const edit1 = new MockBuffer("Edit 1\nLine 2\nLine 3") as FunctionalTextBuffer;
+      const edit1 = new MockBuffer("Edit 1\nLine 2\nLine 3") as TextBuffer;
       pushFunc([{ type: 'string', value: 'edit1' }, { buffer: edit1 }]);
 
       // Undo
@@ -273,7 +273,7 @@ describe("Undo/Redo Operations", () => {
       const redoFunc = undoRedoOps.get("redo")!;
 
       // Push an edit
-      const edit1 = new MockBuffer("Edit 1\nLine 2\nLine 3") as FunctionalTextBuffer;
+      const edit1 = new MockBuffer("Edit 1\nLine 2\nLine 3") as TextBuffer;
       pushFunc([{ type: 'string', value: 'edit1' }, { buffer: edit1 }]);
 
       // Try to redo without undoing first
@@ -294,8 +294,8 @@ describe("Undo/Redo Operations", () => {
       const redoFunc = undoRedoOps.get("redo")!;
 
       // Push 2 edits
-      const edit1 = new MockBuffer("Edit 1\nLine 2\nLine 3") as FunctionalTextBuffer;
-      const edit2 = new MockBuffer("Edit 2\nLine 2\nLine 3") as FunctionalTextBuffer;
+      const edit1 = new MockBuffer("Edit 1\nLine 2\nLine 3") as TextBuffer;
+      const edit2 = new MockBuffer("Edit 2\nLine 2\nLine 3") as TextBuffer;
 
       pushFunc([{ type: 'string', value: 'edit1' }, { buffer: edit1 }]);
       pushFunc([{ type: 'string', value: 'edit2' }, { buffer: edit2 }]);
@@ -304,7 +304,7 @@ describe("Undo/Redo Operations", () => {
       undoFunc([]);
 
       // Push new edit (should clear redo history)
-      const edit3 = new MockBuffer("Edit 3\nLine 2\nLine 3") as FunctionalTextBuffer;
+      const edit3 = new MockBuffer("Edit 3\nLine 2\nLine 3") as TextBuffer;
       pushFunc([{ type: 'string', value: 'edit3' }, { buffer: edit3 }]);
 
       // Try to redo - should fail
@@ -322,9 +322,9 @@ describe("Undo/Redo Operations", () => {
       const countFunc = undoRedoOps.get("undo-history-count")!;
 
       // Push 3 edits
-      const edit1 = new MockBuffer("Edit 1\nLine 2\nLine 3") as FunctionalTextBuffer;
-      const edit2 = new MockBuffer("Edit 2\nLine 2\nLine 3") as FunctionalTextBuffer;
-      const edit3 = new MockBuffer("Edit 3\nLine 2\nLine 3") as FunctionalTextBuffer;
+      const edit1 = new MockBuffer("Edit 1\nLine 2\nLine 3") as TextBuffer;
+      const edit2 = new MockBuffer("Edit 2\nLine 2\nLine 3") as TextBuffer;
+      const edit3 = new MockBuffer("Edit 3\nLine 2\nLine 3") as TextBuffer;
 
       pushFunc([{ type: 'string', value: 'edit1' }, { buffer: edit1 }]);
       pushFunc([{ type: 'string', value: 'edit2' }, { buffer: edit2 }]);
@@ -343,7 +343,7 @@ describe("Undo/Redo Operations", () => {
       const countFunc = undoRedoOps.get("undo-history-count")!;
 
       // Push some edits
-      const edit1 = new MockBuffer("Edit 1\nLine 2\nLine 3") as FunctionalTextBuffer;
+      const edit1 = new MockBuffer("Edit 1\nLine 2\nLine 3") as TextBuffer;
       pushFunc([{ type: 'string', value: 'edit1' }, { buffer: edit1 }]);
 
       // Clear history
@@ -359,7 +359,7 @@ describe("Undo/Redo Operations", () => {
 
   describe("Edge cases", () => {
     test("handles empty buffer correctly", () => {
-      const emptyBuffer = new MockBuffer("") as FunctionalTextBuffer;
+      const emptyBuffer = new MockBuffer("") as TextBuffer;
       currentBuffer = emptyBuffer;
       setInitialBuffer(emptyBuffer);
 
@@ -367,7 +367,7 @@ describe("Undo/Redo Operations", () => {
       const undoFunc = undoRedoOps.get("undo")!;
 
       // Push edit on empty buffer
-      const edit1 = new MockBuffer("text") as FunctionalTextBuffer;
+      const edit1 = new MockBuffer("text") as TextBuffer;
       const pushResult = pushFunc([{ type: 'string', value: 'edit1' }, { buffer: edit1 }]);
       expect(Either.isRight(pushResult)).toBe(true);
 
@@ -401,7 +401,7 @@ describe("Undo/Redo Operations", () => {
       const redoFunc = undoRedoOps.get("redo")!;
 
       // Push edit but don't undo - also update current buffer
-      const edit1 = new MockBuffer("Edit 1\nLine 2\nLine 3") as FunctionalTextBuffer;
+      const edit1 = new MockBuffer("Edit 1\nLine 2\nLine 3") as TextBuffer;
       pushFunc([{ type: 'string', value: 'edit1' }, { buffer: edit1 }]);
       currentBuffer = edit1;  // Update current buffer to reflect the edit
 
@@ -439,7 +439,7 @@ describe("Undo/Redo Operations", () => {
       const undoFunc = ops.get("undo")!;
 
       // Push edit with cursor position
-      const edit1 = new MockBuffer("Edit 1\nLine 2\nLine 3") as FunctionalTextBuffer;
+      const edit1 = new MockBuffer("Edit 1\nLine 2\nLine 3") as TextBuffer;
       pushFunc([
         { type: 'string', value: 'edit1' },
         { buffer: edit1 } as unknown as TLispValue,
@@ -486,7 +486,7 @@ describe("Undo/Redo Operations", () => {
 
       // Edit 1: pre-edit cursor at (0,0); mutate buffer; post-edit cursor at (5,10)
       beginFunc([]);
-      const edit1 = new MockBuffer("Edit 1\nLine 2\nLine 3") as FunctionalTextBuffer;
+      const edit1 = new MockBuffer("Edit 1\nLine 2\nLine 3") as TextBuffer;
       currentBuffer = edit1;
       savedLine = 5;
       savedColumn = 10;
@@ -498,7 +498,7 @@ describe("Undo/Redo Operations", () => {
 
       // Edit 2: pre-edit cursor at (15,20); mutate buffer; post-edit cursor at (30,40)
       beginFunc([]);
-      const edit2 = new MockBuffer("Edit 2\nLine 2\nLine 3") as FunctionalTextBuffer;
+      const edit2 = new MockBuffer("Edit 2\nLine 2\nLine 3") as TextBuffer;
       currentBuffer = edit2;
       savedLine = 30;
       savedColumn = 40;
@@ -535,7 +535,7 @@ describe("Undo/Redo Operations", () => {
 
       // Edit 1: pre-edit cursor at (3,7); mutate; post-edit cursor at (5,9)
       beginFunc([]);
-      const edit1 = new MockBuffer("Edit 1\nLine 2\nLine 3") as FunctionalTextBuffer;
+      const edit1 = new MockBuffer("Edit 1\nLine 2\nLine 3") as TextBuffer;
       currentBuffer = edit1;
       savedLine = 5;
       savedColumn = 9;
@@ -579,7 +579,7 @@ describe("Undo/Redo Operations", () => {
 
       // Step 1: edit1 at cursor (0,0); post-edit cursor (0,1).
       beginFunc([]);
-      const edit1 = new MockBuffer("A\nLine 2\nLine 3") as FunctionalTextBuffer;
+      const edit1 = new MockBuffer("A\nLine 2\nLine 3") as TextBuffer;
       currentBuffer = edit1;
       savedLine = 0;
       savedColumn = 1;
@@ -596,7 +596,7 @@ describe("Undo/Redo Operations", () => {
 
       // Step 4: edit2 with pre-edit cursor (1,0); post-edit cursor (1,1).
       beginFunc([]);
-      const edit2 = new MockBuffer("A\nB\nLine 3") as FunctionalTextBuffer;
+      const edit2 = new MockBuffer("A\nB\nLine 3") as TextBuffer;
       currentBuffer = edit2;
       savedLine = 1;
       savedColumn = 1;
