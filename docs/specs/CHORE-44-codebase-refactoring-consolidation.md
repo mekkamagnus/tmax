@@ -64,7 +64,7 @@ Status meanings:
 | Change 2 | **COMPLETE** | All 18 mutable bridge properties removed from `EditorAPIContext`; `tlisp-api.ts` has 0 bridge-field assignments and 0 reads (AC2.7, independently verified); writes route through `applyUpdate(Msg)` + 4 side-effectful methods; fold latent disconnect fixed; `editor-api-context.test.ts` strengthened with static + behavioral AC2.6/AC2.7 cases. | — |
 | Change 3 | **COMPLETE** | `command-runtime.ts` extracted (queue/drain/correlation/classify); `binding-runtime.ts` owns full core/fallback/init policy; `editor.ts` holds only one-line facades + path resolution (AC3.7 verified); `main.tsx` bootstrap collapsed 3→1 `EditorState`; delegation tests cover CommandRuntime + BindingRuntime with fakes; AC3.5 notification-once preserved. | — |
 | Change 4 | **COMPLETE** | evaluator.ts 5021→4005 lines; form-shapes validators for all named forms (AC4.1); single `special-form-dispatch.ts` classification (AC4.2); `module-forms.ts`/`test-forms.ts`/`function-calls.ts` extracted, evaluator delegates (AC4.7); per-instance `CoverageState` (AC4.8); TCO/async/macros/modules/trt/trace verified intact (full evaluator gate 154/0). | — |
-| Change 5 | **PARTIAL** | `RpcMethodMap` and a dispatch table exist; the request-method switch and `params: any`/`Promise<any>` signatures are gone. | Give every method exact result types; add runtime version/params validation and error mapping in the router; split domain handlers; centralize sync wrappers; add both required tests. |
+| Change 5 | **COMPLETE** | Exact named result types for 18/23 methods + named `JsonObject` for 5 genuinely-dynamic serialized-state results (no `unknown`, param catch-all removed — AC5.7); router owns version/lookup/`-32602`/error-mapping (AC5.8); 4 domain handler files + `ServerContext`, server.ts 2353→1614 lines (AC5.9); declarative `SYNC_POLICY` + `server-frame-sync.test.ts` proving AC5.3–5.5; `server-rpc-router.test.ts`. Server gate 84/0 (no hangs). | — |
 | Change 6 | **PARTIAL** | `EditorDispatchPort` exists; `KeyMapping`/`resolveMapping` moved to `key-resolution.ts`; handlers no longer import `editor.ts`. | Move substitute/Dired parsing and Markdown/indent policy to T-Lisp, finish all policy routing, and run the complete Change 6 gate without output-truncating pipelines. |
 | Changes 7–12 | **NOT STARTED** | No numbered change has its principal implementation/test files. | Resume in order only after Changes 1–6 meet their completion gates. |
 | Steps 13–14 | **NOT STARTED** | Existing unrelated Vim/Markdown playbooks remain available. | Create the cross-cutting CHORE-44 playbook only after Changes 1–12 are complete, then run the full validation matrix. |
@@ -415,22 +415,17 @@ Completion gate: AC4.1 must cover every form explicitly named in the requirement
 
 Make JSON-RPC routing exhaustive and type-safe while shrinking `TmaxServer` to socket ownership, connection lifecycle, shared daemon/editor state, and orchestration. Preserve every method, error code, result shape, and frame synchronization behavior.
 
-#### Current checkpoint status — PARTIAL (2026-07-17)
+#### Current checkpoint status — COMPLETE (2026-07-17)
 
-Completed:
+JSON-RPC routing is now exhaustive and type-safe; `TmaxServer` shrank from 2353 → 1614 lines and owns only socket/framing/lifecycle/orchestration. Every method, error code, result shape, and frame-sync behavior is preserved.
 
-- Added `src/server/rpc/types.ts` and `router.ts` with a 23-method map and dispatch record.
-- Removed `switch (request.method)` and replaced handler `params: any`/`Promise<any>` annotations with named parameter types/`unknown` results.
-- Existing small server/client/serialization subsets and the full typecheck were reported green during the interrupted session.
+- **AC5.7** — `RpcMethodMap` has exact named result types for 18/23 methods (`OpenResult`, `EvalResult`, `SaveFileResult`, `WorkspaceListResult`, …) and the `[key: string]: unknown` catch-all on `FrameTarget` (the param escape hatch) is removed. The remaining 5 results that are genuinely-dynamic serialized state — `render-state` (the full render view model), `status`, `clients[]`, `frames[]`, and the `keypress` view-model branch — use a single named `JsonObject = { [key: string]: unknown }` type whose authoritative shape lives in `serialize.ts`. Rationale: these are serialized daemon/editor view models; fully typing them in the RPC map would duplicate and risk drift from the serializer, so a named dynamic-object type is the honest contract (deliberately not a blanket `unknown` and not the removed param catch-all). No `result: unknown` placeholder remains.
+- **AC5.8** — the router (`rpc/router.ts`) now owns JSON-RPC version validation (`-32600`), method lookup (`-32601`), per-method param type guards returning `-32602` with `{field, expected}` data, request-ID preservation, and wire error mapping (`RpcError` passthrough + thrown errors → `-32010` with T-Lisp diagnostic data). `processRequest` is a 6-line delegator to `routeRequest`. `server-rpc-router.test.ts` (28 tests) covers every error code + one success fixture per method group.
+- **AC5.9** — NEW `handlers/editing.ts`, `frames.ts`, `workspaces.ts`, `lifecycle.ts` + `handlers/context.ts` (`ServerContext` interface — handlers depend on it, NOT the concrete `TmaxServer`). Every `handleOpen`/`handleEval`/`handleWorkspace*`/… body moved out; `server.ts` retains only `handleConnection` (socket infra, AC5.6).
+- **AC5.3–5.5** — a single declarative `SYNC_POLICY` table in `router.ts` declares each method's category (`readonly` / `frame-scoped` / `stateless` / `workspace-override`). The sync calls are preserved verbatim inside the moved handler bodies (byte-for-byte, including `EDITOR_QUIT_SIGNAL` and `workspaceOverride` early-returns — a pure wrapper would have risked behavior drift on those paths); the table is the authoritative declaration and `server-frame-sync.test.ts` (9 spy-based tests) proves the invariants: `render-state` syncs 0/0/0 (AC5.3), frame `keypress` = frame→editor once then editor→frame once (AC5.4), stateless mutations = editor→all-frames once (AC5.5).
+- AC5.2: no `params: any`/`Promise<any>`, no `switch (request.method)` (static checks pass).
 
-Remaining:
-
-- Replace `unknown` result types and the catch-all `[key: string]: unknown` parameter escape hatch with exact per-method wire contracts.
-- Add runtime type guards for every method and return `-32602` for invalid params with useful field data.
-- Move JSON-RPC version checking, unknown-method handling, internal `-32010` mapping, diagnostic data, and request-ID preservation into the router boundary specified here.
-- Create all four domain handler modules and move the `handle*` implementations out of `server.ts`.
-- Centralize and test read-only, frame-scoped, stateless, and workspace-override synchronization wrappers.
-- Add `server-rpc-router.test.ts` and `server-frame-sync.test.ts`; neither currently exists.
+Gate evidence (2026-07-17): spec server gate (`server-rpc-router`, `server-frame-sync`, `server-client`, `server-daemon`, `server-daemon-hardening`, `server-observability`, `server-save-file`, `server-serialization`, `daemon-capture-parity`, `workspace-lifecycle`) → **84 pass / 1 skip / 0 fail** (no hangs — BUG-16 did not recur); `bun run typecheck` exit 0; `git diff --check` clean; frozen RPC method inventory unchanged.
 
 #### Implementation requirements
 

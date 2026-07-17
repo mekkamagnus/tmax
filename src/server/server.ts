@@ -11,44 +11,31 @@ import { closeSync, existsSync, mkdirSync, openSync, unlinkSync, writeFileSync, 
 import path from 'path';
 import { Editor } from '../editor/editor.ts';
 import { TerminalIOImpl } from '../core/terminal.ts';
-import { dispatchRpc, RpcError, type RpcHandlers } from './rpc/router.ts';
-import type {
-  JsonValue, FrameTarget, OpenParams, EvalParams, CommandParams, QueryParams, InsertParams,
-  KeypressParams, RenderStateParams, ClientEventParams, SaveFileParams, CaptureParams,
-  WorkspaceNewParams, WorkspaceSwitchParams, WorkspaceSaveParams, WorkspaceKillParams,
-  WorkspaceRenameParams, WorkspaceLoadParams, WorkspaceMoveWindowParams,
-} from './rpc/types.ts';
+import {
+  routeRequest,
+  type JSONRPCRequest,
+  type JSONRPCResponse,
+  type RpcHandlers,
+} from './rpc/router.ts';
+import type { FrameTarget, JsonValue } from './rpc/types.ts';
+import type { ServerContext, ClientRecord, FrameObservability } from './rpc/handlers/context.ts';
+import { createEditingHandlers } from './rpc/handlers/editing.ts';
+import { createFramesHandlers } from './rpc/handlers/frames.ts';
+import { createWorkspaceHandlers } from './rpc/handlers/workspaces.ts';
+import { createLifecycleHandlers } from './rpc/handlers/lifecycle.ts';
 import { FileSystemImpl } from '../core/filesystem.ts';
 import { FunctionalTextBufferImpl } from '../core/buffer.ts';
 import { EditorState, Frame, WorkspaceState } from '../core/types.ts';
 import { WorkspaceManager } from '../core/workspace.ts';
 import { Either } from '../utils/task-either.ts';
 import { loadTrtFrameworkSync } from '../tlisp/trt/bootstrap.ts';
-import { editorStateToJson } from './serialize.ts';
 import { cloneJsonValue } from '../tlisp/serialization.ts';
-import { captureFrame } from '../render/capture-frame.ts';
-import { ansiLinesToHtmlDocument } from '../render/ansi-to-html.ts';
 import { createBoolean, createHashmap, createList, createNil, createString } from '../tlisp/values.ts';
 import type { TLispValue } from '../tlisp/types.ts';
 
-// JSON-RPC 2.0 interfaces
-interface JSONRPCRequest {
-  jsonrpc: '2.0';
-  id?: string | number;
-  method: string;
-  params?: any;
-}
-
-interface JSONRPCResponse {
-  jsonrpc: '2.0';
-  id?: string | number;
-  result?: any;
-  error?: {
-    code: number;
-    message: string;
-    data?: any;
-  };
-}
+// JSON-RPC 2.0 wire shapes are re-exported from rpc/router.ts (typed router
+// boundary — AC5.8). The daemon's per-connection buffer + client record types
+// remain here (socket/connection ownership stays in TmaxServer per AC5.6).
 
 interface ClientConnection {
   id: string;
@@ -71,23 +58,8 @@ interface ObservabilityError {
   message: string;
   clientId?: string;
   frameId?: string;
-  requestId?: string | number;
-  diagnostic?: Record<string, any>;
-}
-
-interface FrameObservability {
-  id: string;
-  clientId?: string;
-  clientType: string;
-  ready: boolean;
-  firstRenderAt?: Date;
-  lastRenderAt?: Date;
-  renderCount: number;
-  rawModeReady: boolean;
-  terminalSize?: { width: number; height: number };
-  lastSyncDirection?: 'frame-to-editor' | 'editor-to-frame';
-  lastSyncAt?: Date;
-  lastError?: string;
+  requestId?: string | number | null;
+  diagnostic?: Record<string, unknown>;
 }
 
 interface LockData {
@@ -647,7 +619,7 @@ export class TmaxServer {
     obs.lastSyncAt = new Date();
   }
 
-  private recordError(source: string, error: unknown, clientId?: string, frameId?: string, diagnostic?: Record<string, any>, requestId?: string | number): void {
+  private recordError(source: string, error: unknown, clientId?: string, frameId?: string, diagnostic?: Record<string, unknown>, requestId?: string | number | null): void {
     const message = error instanceof Error ? error.message : String(error);
     this.recentErrors.push({
       timestamp: new Date().toISOString(),
@@ -958,28 +930,32 @@ export class TmaxServer {
       );
     };
 
-    asyncBuiltin('workspace-list', async () => asTlisp(await this.handleWorkspaceList()));
+    // CHORE-44 Change 5: workspace-* T-Lisp builtins delegate to the same
+    // domain handlers as the JSON-RPC route (no duplicated bodies). Built
+    // fresh here because the interpreter is a one-time registration site.
+    const ws = createWorkspaceHandlers(this.serverContext());
+    asyncBuiltin('workspace-list', async () => asTlisp(await ws['workspace-list']()));
     asyncBuiltin('workspace-new', async (args) => {
-      return asTlisp(await this.handleWorkspaceNew({ name: stringArg(args, 0, 'workspace-new') }));
+      return asTlisp(await ws['workspace-new']({ name: stringArg(args, 0, 'workspace-new') }));
     });
     asyncBuiltin('workspace-switch', async (args) => {
-      return asTlisp(await this.handleWorkspaceSwitch({ name: stringArg(args, 0, 'workspace-switch') }));
+      return asTlisp(await ws['workspace-switch']({ name: stringArg(args, 0, 'workspace-switch') }));
     });
-    asyncBuiltin('workspace-save', async () => asTlisp(await this.handleWorkspaceSave({})));
+    asyncBuiltin('workspace-save', async () => asTlisp(await ws['workspace-save']({})));
     asyncBuiltin('workspace-load', async (args) => {
-      return asTlisp(await this.handleWorkspaceLoad({ name: stringArg(args, 0, 'workspace-load') }));
+      return asTlisp(await ws['workspace-load']({ name: stringArg(args, 0, 'workspace-load') }));
     });
     asyncBuiltin('workspace-kill', async (args) => {
-      return asTlisp(await this.handleWorkspaceKill({ name: stringArg(args, 0, 'workspace-kill') }));
+      return asTlisp(await ws['workspace-kill']({ name: stringArg(args, 0, 'workspace-kill') }));
     });
 	    asyncBuiltin('workspace-rename', async (args) => {
-	      return asTlisp(await this.handleWorkspaceRename({
+	      return asTlisp(await ws['workspace-rename']({
 	        oldName: stringArg(args, 0, 'workspace-rename'),
 	        newName: stringArg(args, 1, 'workspace-rename'),
 	      }));
 	    });
 	    asyncBuiltin('workspace-move-window', async (args) => {
-	      return asTlisp(await this.handleWorkspaceMoveWindow({ target: stringArg(args, 0, 'workspace-move-window') }));
+	      return asTlisp(await ws['workspace-move-window']({ target: stringArg(args, 0, 'workspace-move-window') }));
 	    });
   }
 
@@ -1082,11 +1058,18 @@ export class TmaxServer {
 
           // Auto-create frame on connect-frame request
           if (request.method === 'connect-frame') {
-            const params = request.params ?? {};
-            client.clientType = params.clientType ?? 'tui';
-            client.clientName = params.clientName;
-            client.metadata = params.metadata ?? {};
-	            const requestedWorkspace = params.workspaceId ?? params.workspace ?? (await this.readLastWorkspace()) ?? this.activeWorkspaceId;
+            const params = (request.params ?? {}) as Record<string, unknown>;
+            const clientTypeParam = typeof params.clientType === 'string' ? params.clientType : undefined;
+            const clientNameParam = typeof params.clientName === 'string' ? params.clientName : undefined;
+            const metadataParam = (params.metadata && typeof params.metadata === 'object' && !Array.isArray(params.metadata))
+              ? params.metadata as Record<string, unknown>
+              : {};
+            client.clientType = clientTypeParam ?? 'tui';
+            client.clientName = clientNameParam;
+            client.metadata = metadataParam;
+	            const requestedWorkspace = (typeof params.workspaceId === 'string' ? params.workspaceId : undefined)
+	              ?? (typeof params.workspace === 'string' ? params.workspace : undefined)
+	              ?? (await this.readLastWorkspace()) ?? this.activeWorkspaceId;
 	            const explicitWorkspace = typeof params.workspaceId === 'string' || typeof params.workspace === 'string';
 	            await this.activateWorkspace(requestedWorkspace);
 	            if (explicitWorkspace) await this.updateLastWorkspace(requestedWorkspace);
@@ -1102,12 +1085,17 @@ export class TmaxServer {
             continue;
           }
 
-          request.params = { ...(request.params ?? {}), clientId };
+          const incomingParams = (request.params && typeof request.params === 'object' && !Array.isArray(request.params))
+            ? request.params as Record<string, unknown>
+            : {};
+          const requestParams: Record<string, unknown> = { ...incomingParams, clientId };
+          request.params = requestParams;
 
           // Inject frameId into frame-aware methods if client has a frame
-          if (clientFrameId && !request.params?.frameId) {
+          if (clientFrameId && !requestParams.frameId) {
             if (['keypress', 'render-state', 'client-event'].includes(request.method)) {
-              request.params = { ...request.params, frameId: clientFrameId };
+              requestParams.frameId = clientFrameId;
+              request.params = requestParams;
             }
           }
 
@@ -1119,17 +1107,20 @@ export class TmaxServer {
         } catch (error) {
           console.error('Error processing client request:', error);
           this.recordError('request', error, clientId, clientFrameId ?? undefined);
+          const rawDiag = (error instanceof Error && (error as Error & { diagnostic?: unknown }).diagnostic)
+            ? (error as Error & { diagnostic?: unknown }).diagnostic
+            : undefined;
           const errorResponse: JSONRPCResponse = {
             jsonrpc: '2.0',
             id: request?.id ?? undefined,
             error: {
               code: -32603,
               message: `Internal error: ${error instanceof Error ? error.message : 'Unknown error'}`,
-              ...(error instanceof Error && (error as any).diagnostic ? {
+              ...(rawDiag ? {
                 data: {
                   kind: 'tlisp-diagnostic',
-                  diagnostic: (error as any).diagnostic,
-                }
+                  diagnostic: rawDiag as JsonValue,
+                } as JsonValue
               } : {})
             }
           };
@@ -1156,498 +1147,170 @@ export class TmaxServer {
   }
 
   /**
-   * Process a JSON-RPC request
-   */
-  /**
-   * Build the typed RPC handler table (CHORE-44 Change 5 AC5.2). Each method
-   * (declared in RpcMethodMap) maps to its handler; the router dispatches
-   * against this table instead of a monolithic switch.
+   * Build the typed RPC handler table (CHORE-44 Change 5 AC5.2/AC5.9).
+   *
+   * Each method declared in `RpcMethodMap` maps to a handler built by one of
+   * the four domain handler modules (handlers/{editing,frames,workspaces,
+   * lifecycle}.ts). The handler bodies live THERE; `TmaxServer` supplies the
+   * shared `ServerContext` (editor + frame/workspace state + sync helpers +
+   * lifecycle) and the router owns version/lookup/param/error handling.
    */
   private rpcHandlers(): RpcHandlers {
+    const ctx = this.serverContext();
+    const editing = createEditingHandlers(ctx);
+    const frames = createFramesHandlers(ctx);
+    const workspaces = createWorkspaceHandlers(ctx);
+    const lifecycle = createLifecycleHandlers(ctx);
     return {
-      open: (p) => this.handleOpen(p),
-      eval: (p) => this.handleEval(p),
-      command: (p) => this.handleCommand(p),
-      query: (p) => this.handleQuery(p),
-      insert: (p) => this.handleInsert(p),
-      keypress: (p) => this.handleKeypress(p),
-      'render-state': (p) => this.handleRenderState(p),
-      'client-event': (p) => this.handleClientEvent(p),
-      'save-file': (p) => this.handleSaveFile(p),
-      capture: (p) => this.handleCapture(p),
-      ping: () => this.handlePing(),
-      status: () => this.handleStatus(),
-      clients: () => this.handleClients(),
-      frames: () => this.handleFrames(),
-      shutdown: () => { setTimeout(() => { void this.shutdown(); }, 50); return { ok: true as const }; },
-      'workspace-list': () => this.handleWorkspaceList(),
-      'workspace-new': (p) => this.handleWorkspaceNew(p),
-      'workspace-switch': (p) => this.handleWorkspaceSwitch(p),
-      'workspace-save': (p) => this.handleWorkspaceSave(p),
-      'workspace-kill': (p) => this.handleWorkspaceKill(p),
-      'workspace-rename': (p) => this.handleWorkspaceRename(p),
-      'workspace-load': (p) => this.handleWorkspaceLoad(p),
-      'workspace-move-window': (p) => this.handleWorkspaceMoveWindow(p),
+      open: editing.open,
+      eval: editing.eval,
+      command: editing.command,
+      query: editing.query,
+      insert: editing.insert,
+      keypress: editing.keypress,
+      'render-state': frames['render-state'],
+      'client-event': frames['client-event'],
+      'save-file': editing['save-file'],
+      capture: frames.capture,
+      ping: lifecycle.ping,
+      status: frames.status,
+      clients: frames.clients,
+      frames: frames.frames,
+      shutdown: lifecycle.shutdown,
+      'workspace-list': workspaces['workspace-list'],
+      'workspace-new': workspaces['workspace-new'],
+      'workspace-switch': workspaces['workspace-switch'],
+      'workspace-save': workspaces['workspace-save'],
+      'workspace-kill': workspaces['workspace-kill'],
+      'workspace-rename': workspaces['workspace-rename'],
+      'workspace-load': workspaces['workspace-load'],
+      'workspace-move-window': workspaces['workspace-move-window'],
     };
   }
 
+  /**
+   * The typed `ServerContext` adapter. Exposes the shared daemon/editor state
+   * and every helper the domain handlers need, as closures over `this`. This
+   * is the single bridge between the concrete `TmaxServer` (socket/lifecycle
+   * owner) and the handler modules (which never import `server.ts`). Handlers
+   * declare their dependencies via the `ServerContext` interface only.
+   */
+  private serverContext(): ServerContext {
+    return {
+      editor: this.editor,
+      frames: this.frames,
+      workspaces: this.workspaces,
+      frameObservability: this.frameObservability,
+      clients: this.clients as unknown as Map<string, ClientRecord>,
+      getActiveWorkspaceId: () => this.activeWorkspaceId,
+      setActiveWorkspaceId: (id) => { this.activeWorkspaceId = id; },
+      getActiveFrameId: () => this.activeFrameId,
+      setActiveFrameId: (id) => { this.activeFrameId = id; },
+      workspaceManager: this.workspaceManager,
+      isDaemonRunning: () => this.isRunning,
+      getStartedAt: () => this.startedAt,
+      getSocketPath: () => this.socketPath,
+
+      getFrame: (id) => this.getFrame(id),
+      resolveFrameOptional: (params) => this.resolveFrameOptional(params),
+      syncFrameToEditor: (frame) => this.syncFrameToEditor(frame),
+      syncEditorToFrame: (frame) => this.syncEditorToFrame(frame),
+      syncEditorToAllFrames: () => this.syncEditorToAllFrames(),
+
+      isWorkspaceOverride: (frame, id) => this.isWorkspaceOverride(frame, id),
+      activateFrameWorkspace: (frame, id) => this.activateFrameWorkspace(frame, id),
+      activateWorkspace: (id) => this.activateWorkspace(id),
+      restoreWorkspaceAfterOverride: (override, wsId, frameId) =>
+        this.restoreWorkspaceAfterOverride(override, wsId, frameId),
+      captureActiveWorkspace: () => this.captureActiveWorkspace(),
+      loadWorkspace: (name) => this.loadWorkspace(name),
+      saveWorkspace: (name) => this.saveWorkspace(name),
+      saveWorkspaceSnapshot: (ws) => this.saveWorkspaceSnapshot(ws),
+      cloneWorkspace: (ws) => this.cloneWorkspace(ws),
+      scheduleDirtyWorkspaceSave: (name) => this.scheduleDirtyWorkspaceSave(name),
+      updateLastWorkspace: (name) => this.updateLastWorkspace(name),
+      workspaceDirtyBuffers: (ws) => this.workspaceDirtyBuffers(ws),
+      clearWorkspaceModifiedFlags: (ws) => this.clearWorkspaceModifiedFlags(ws),
+
+      frameToEditorState: (frame) => this.frameToEditorState(frame),
+      currentBufferName: (state) => this.currentBufferName(state),
+      frameStatus: (frame) => this.frameStatus(frame),
+      clientStatus: (client) => this.clientStatus(client as unknown as ClientConnection),
+      buildStatus: () => this.buildStatus(),
+      bufferDetailsForWorkspace: (ws, name) => this.bufferDetailsForWorkspace(ws, name),
+
+      tlispValueToJson: (value) => this.tlispValueToJson(value),
+      diagnosticToJSON: (d) => this.diagnosticToJSON(d),
+      getTlispFunctions: () => this.getTlispFunctions(),
+      getTlispVariables: () => this.getTlispVariables(),
+      getFunctionDocumentation: (name) => this.getFunctionDocumentation(name),
+      getVariableDocumentation: (name) => this.getVariableDocumentation(name),
+      findCommandsByPattern: (pattern) => this.findCommandsByPattern(pattern),
+      findFunctionUsages: (name) => this.findFunctionUsages(name),
+
+      recordError: (source, error, clientId, frameId, diagnostic, requestId) =>
+        this.recordError(source, error, clientId, frameId, diagnostic, requestId ?? undefined),
+      logMessage: (message, level, namespace, frameId) =>
+        this.editor.logMessage(message, level, namespace, frameId),
+
+      scheduleShutdown: (delayMs = 50) => {
+        setTimeout(() => { void this.shutdown(); }, delayMs);
+      },
+    };
+  }
+
+  /**
+   * Process a JSON-RPC request (AC5.8). The router owns version validation
+   * (`-32600`), method lookup (`-32601`), parameter validation (`-32602`),
+   * dispatch, request-ID preservation, and wire error mapping (`-32010` with
+   * T-Lisp diagnostic data). `TmaxServer` only supplies the handler table and
+   * the error-recording hook for its observability buffer.
+   */
   private async processRequest(request: JSONRPCRequest): Promise<JSONRPCResponse> {
-    if (request.jsonrpc !== '2.0') {
-      return {
-        jsonrpc: '2.0',
-        id: request.id,
-        error: {
-          code: -32600,
-          message: 'Invalid Request: JSON-RPC version must be 2.0'
-        }
-      };
-    }
-
-    try {
-      // CHORE-44 Change 5 AC5.2: typed router dispatch replaces the monolithic
-      // switch(request.method). Unknown methods throw RpcError(-32601) → mapped
-      // here to the -32601 response; other thrown errors fall to the catch
-      // below (existing -32010 internal-failure contract, incl. T-Lisp diagnostics).
-      let result;
-      try {
-        result = await dispatchRpc(this.rpcHandlers(), request.method, request.params);
-      } catch (routeError) {
-        if (routeError instanceof RpcError) {
-          return {
-            jsonrpc: '2.0',
-            id: request.id,
-            error: {
-              code: routeError.code,
-              message: routeError.message,
-              ...(routeError.data !== undefined ? { data: routeError.data } : {}),
-            },
-          };
-        }
-        throw routeError;
-      }
-
-      return {
-        jsonrpc: '2.0',
-        id: request.id,
-        result
-      };
-    } catch (error) {
-      const diagnostic = (error instanceof Error && (error as any).diagnostic)
-        ? { kind: 'tlisp-diagnostic', diagnostic: (error as any).diagnostic }
-        : undefined;
+    return routeRequest(this.rpcHandlers(), request, (info) => {
       this.recordError(
-        request.method,
-        error,
-        request.params?.clientId,
-        request.params?.frameId,
-        diagnostic?.diagnostic,
-        request.id,
+        info.method,
+        info.error,
+        info.clientId,
+        info.frameId,
+        info.diagnostic,
+        info.requestId ?? undefined,
       );
-      return {
-        jsonrpc: '2.0',
-        id: request.id,
-        error: {
-          code: -32010,
-          message: `${error instanceof Error ? error.message : 'Unknown error'}`,
-          ...(diagnostic ? { data: diagnostic } : {})
-        }
-      };
-    }
+    });
   }
 
-  /**
-   * Handle save-file request: save current buffer to disk.
-   * Accepts optional `filename` param for save-as.
-   */
-  private async handleSaveFile(params: SaveFileParams): Promise<unknown> {
-    const frame = this.resolveFrameOptional(params);
-    const workspaceOverride = this.isWorkspaceOverride(frame, params?.workspaceId);
-    if (frame && !workspaceOverride) this.syncFrameToEditor(frame);
+  // ────────────────────────────────────────────────────────────────────────
+  // CHORE-44 Change 5 (AC5.9): the domain handle* bodies (open/eval/command/
+  // query/insert/keypress/render-state/client-event/capture/status/clients/
+  // frames/save-file/ping/shutdown and every workspace-* method) now live in
+  // src/server/rpc/handlers/{editing,frames,workspaces,lifecycle}.ts. They
+  // operate on the `ServerContext` built by `serverContext()` above.
+  //
+  // The helpers below remain on TmaxServer because the handlers call them
+  // THROUGH the context (ctx.tlispValueToJson, ctx.frameStatus, etc.). They
+  // are infrastructure — serialization, observability, T-Lisp bridge helpers
+  // — not domain handler logic.
+  // ────────────────────────────────────────────────────────────────────────
 
-    const filename = params?.filename ?? this.editor.getState().currentFilename;
-    if (!filename) {
-      throw new Error('No filename to save to (open a file or provide a filename param)');
-    }
-
-    await this.editor.saveFile(filename);
-
-    this.captureActiveWorkspace();
-    if (frame && !workspaceOverride) this.syncEditorToFrame(frame); else this.syncEditorToAllFrames();
-
-    return { success: true, saved: filename };
-  }
-
-  /**
-   * Handle file open request
-   */
-  private async handleOpen(params: OpenParams): Promise<unknown> {
-    const filepath = params.filepath;
-
-    if (!filepath) {
-      throw new Error('Filepath is required');
-    }
-
-    const frame = this.resolveFrameOptional(params);
-    const workspaceOverride = this.isWorkspaceOverride(frame, params?.workspaceId);
-    const previousWorkspaceId = this.activeWorkspaceId;
-    const previousFrameId = this.activeFrameId;
-
-    try {
-      await this.activateFrameWorkspace(frame, params?.workspaceId);
-
-      // Load the file content
-      let content = '';
-      try {
-        content = await this.editor.getFilesystem().readFile(filepath);
-      } catch (error) {
-        // File doesn't exist, create empty buffer
-        content = '';
-      }
-
-      this.editor.createBuffer(filepath, content);
-      const currentState = this.editor.getState();
-      const newState = {
-        ...currentState,
-        currentFilename: filepath,
-        statusMessage: `Opened ${filepath}`,
-      };
-
-      this.editor.setEditorState(newState);
-      this.editor.activateMajorModeForFile(filepath);
-	    this.editor.logMessage(`Opened ${filepath}`, 'info', undefined, this.activeFrameId ?? undefined);
-
-	    this.captureActiveWorkspace();
-	    this.scheduleDirtyWorkspaceSave(this.activeWorkspaceId);
-	    if (frame && !workspaceOverride) this.syncEditorToFrame(frame); else this.syncEditorToAllFrames();
-
-      return {
-        buffer: filepath,
-        line: 1,
-        column: 1,
-        opened: true
-      };
-    } finally {
-      await this.restoreWorkspaceAfterOverride(workspaceOverride, previousWorkspaceId, previousFrameId);
-    }
-  }
-
-  /**
-   * Handle T-Lisp evaluation request
-   */
-  private async handleEval(params: EvalParams): Promise<unknown> {
-    const code = params.code;
-
-    if (!code) {
-      throw new Error('Code is required for eval');
-    }
-
-    const frame = this.resolveFrameOptional(params);
-    const workspaceOverride = this.isWorkspaceOverride(frame, params?.workspaceId);
-    const previousWorkspaceId = this.activeWorkspaceId;
-    const previousFrameId = this.activeFrameId;
-
-    try {
-      await this.activateFrameWorkspace(frame, params?.workspaceId);
-      if (frame && !workspaceOverride) {
-        this.syncFrameToEditor(frame);
-      }
-
-      // Execute the T-Lisp code using the interpreter
-      const interpreter = this.editor.getInterpreter();
-      const result = interpreter.executeAsync
-        ? await interpreter.executeAsync(code)
-        : interpreter.execute(code);
-
-      // Handle Either return type - check _tag property
-      if (result._tag === 'Left') {
-        const err = result.left as any;
-        // Catch editor-quit signal and trigger graceful shutdown
-        if (err.message === 'EDITOR_QUIT_SIGNAL') {
-          this.syncEditorToAllFrames();
-          setTimeout(() => { this.shutdown(); }, 50);
-          return { quitSignal: true };
-        }
-        const diagnostic = err.diagnostic ? this.diagnosticToJSON(err.diagnostic) : undefined;
-        this.recordError('eval', new Error(err.message), undefined, undefined, diagnostic);
-        const e = new Error(err.message || 'T-Lisp evaluation error');
-        (e as any).diagnostic = diagnostic;
-        throw e;
-      }
-
-	      this.captureActiveWorkspace();
-	      this.scheduleDirtyWorkspaceSave(this.activeWorkspaceId);
-	      if (frame && !workspaceOverride) this.syncEditorToFrame(frame); else this.syncEditorToAllFrames();
-
-      // Convert T-Lisp value to JSON-serializable format
-      return this.tlispValueToJson(result.right);
-    } catch (error) {
-      if ((error as any).diagnostic) throw error;
-      throw new Error(`T-Lisp evaluation error: ${error instanceof Error ? error.message : 'Unknown error'}`);
-    } finally {
-      await this.restoreWorkspaceAfterOverride(workspaceOverride, previousWorkspaceId, previousFrameId);
-    }
-  }
-
-  private diagnosticToJSON(d: any): Record<string, any> {
+  private diagnosticToJSON(d: unknown): Record<string, unknown> {
+    const diag = (d ?? {}) as Record<string, unknown>;
     return {
-      severity: d.severity,
-      code: d.code,
-      message: d.message,
-      ...(d.source ? { source: d.source } : {}),
-      ...(d.primarySpan ? { primarySpan: d.primarySpan } : {}),
-      ...(d.expected ? { expected: d.expected } : {}),
-      ...(d.actual ? { actual: d.actual } : {}),
-      ...(d.help ? { help: d.help } : {}),
-      ...(d.stack ? { stack: d.stack } : {}),
+      severity: diag.severity,
+      code: diag.code,
+      message: diag.message,
+      ...(diag.source ? { source: diag.source } : {}),
+      ...(diag.primarySpan ? { primarySpan: diag.primarySpan } : {}),
+      ...(diag.expected ? { expected: diag.expected } : {}),
+      ...(diag.actual ? { actual: diag.actual } : {}),
+      ...(diag.help ? { help: diag.help } : {}),
+      ...(diag.stack ? { stack: diag.stack } : {}),
     };
   }
 
-  /**
-   * Handle insert request
-   */
-  private async handleInsert(params: InsertParams): Promise<unknown> {
-    const text = params.text;
-
-    if (!text) {
-      throw new Error('Text is required for insert');
-    }
-
-    const frame = this.resolveFrameOptional(params);
-    const workspaceOverride = this.isWorkspaceOverride(frame, params?.workspaceId);
-    const previousWorkspaceId = this.activeWorkspaceId;
-    const previousFrameId = this.activeFrameId;
-
-    try {
-      await this.activateFrameWorkspace(frame, params?.workspaceId);
-      if (frame && !workspaceOverride) this.syncFrameToEditor(frame);
-
-      const interpreter = this.editor.getInterpreter();
-      const escaped = text
-        .replace(/\\/g, '\\\\')
-        .replace(/\n/g, '\\n')
-        .replace(/\r/g, '\\r')
-        .replace(/\t/g, '\\t')
-        .replace(/"/g, '\\"');
-      const result = interpreter.execute(`(buffer-insert "${escaped}")`);
-      if (result._tag === 'Left') {
-        throw new Error(result.left.message || 'T-Lisp evaluation error');
-      }
-
-	      this.captureActiveWorkspace();
-	      this.scheduleDirtyWorkspaceSave(this.activeWorkspaceId);
-	      if (frame && !workspaceOverride) this.syncEditorToFrame(frame); else this.syncEditorToAllFrames();
-
-      return this.tlispValueToJson(result.right);
-    } catch (error) {
-      throw new Error(`Insert error: ${error instanceof Error ? error.message : 'Unknown error'}`);
-    } finally {
-      await this.restoreWorkspaceAfterOverride(workspaceOverride, previousWorkspaceId, previousFrameId);
-    }
-  }
-
-  /**
-   * Handle keypress from TUI client
-   */
-  private async handleKeypress(params: KeypressParams): Promise<unknown> {
-    const key = params.key;
-    if (!key) {
-      throw new Error('Key is required for keypress');
-    }
-
-    try {
-      // If a frame is available, keypresses should mutate that frame-local
-      // state. tmaxclient --key does not know the TUI frame id, so it targets
-      // the active frame.
-      const frameId = params.frameId ?? this.activeFrameId;
-      if (frameId) {
-        const frame = this.getFrame(frameId);
-        const workspaceOverride = this.isWorkspaceOverride(frame, params?.workspaceId);
-        const previousWorkspaceId = this.activeWorkspaceId;
-        const previousFrameId = this.activeFrameId;
-        try {
-          this.activeFrameId = frameId;
-          await this.activateFrameWorkspace(frame, params?.workspaceId);
-          if (!workspaceOverride) this.syncFrameToEditor(frame);
-          await this.editor.handleKey(key);
-	        this.captureActiveWorkspace();
-	        this.scheduleDirtyWorkspaceSave(this.activeWorkspaceId);
-	        if (workspaceOverride) {
-	          this.syncEditorToAllFrames();
-	          return editorStateToJson(this.editor.getEditorState());
-	        }
-	        this.syncEditorToFrame(frame);
-	        return editorStateToJson(this.frameToEditorState(frame));
-        } finally {
-          await this.restoreWorkspaceAfterOverride(workspaceOverride, previousWorkspaceId, previousFrameId);
-        }
-      }
-      // No frameId — operate on editor directly, then sync all frames
-      await this.activateWorkspace(params?.workspaceId ?? this.activeWorkspaceId);
-      await this.editor.handleKey(key);
-	      this.syncEditorToAllFrames();
-	      this.captureActiveWorkspace();
-	      this.scheduleDirtyWorkspaceSave(this.activeWorkspaceId);
-	      return editorStateToJson(this.editor.getEditorState());
-    } catch (error) {
-      if (error instanceof Error && error.message === 'EDITOR_QUIT_SIGNAL') {
-        this.syncEditorToAllFrames();
-        const state = editorStateToJson(this.editor.getEditorState());
-        setTimeout(() => { this.shutdown(); }, 50);
-        return { ...state, quitSignal: true };
-      }
-      throw error;
-    }
-  }
-
-  /**
-   * Handle render-state request (frame-scoped).
-   * READ-only: returns the frame's own state without mutating editor.
-   */
-  private async handleRenderState(params: RenderStateParams): Promise<unknown> {
-    if (params?.frameId) {
-      const frame = this.getFrame(params.frameId);
-      // Read-only: return frame's own state directly, no workspace activation (C2)
-      return editorStateToJson(this.frameToEditorState(frame));
-    }
-    return editorStateToJson(this.editor.getEditorState());
-  }
-
-  /**
-   * Handle capture request — render current frame and return ANSI or HTML.
-   *
-   * Dimension resolution order (per SPEC-061):
-   *   1. Explicit `params.width` / `params.height` (must be positive integers).
-   *   2. Active frame's terminal size (if a frame is resolved).
-   *   3. 80x24 final fallback.
-   *
-   * Non-integer, zero, or negative dimensions are rejected with a JSON-RPC
-   * error so callers cannot accidentally render to a 0×0 frame.
-   */
-  private handleCapture(params: CaptureParams): unknown {
-    const format = params?.format ?? "ansi";
-
-    // Validate explicit dimensions if the caller provided them.
-    const explicitWidth = params?.width;
-    const explicitHeight = params?.height;
-    const isPositiveInt = (v: unknown): v is number =>
-      typeof v === "number" && Number.isInteger(v) && v > 0;
-    if (explicitWidth !== undefined && !isPositiveInt(explicitWidth)) {
-      throw new Error(
-        `capture: width must be a positive integer (got ${JSON.stringify(explicitWidth)})`,
-      );
-    }
-    if (explicitHeight !== undefined && !isPositiveInt(explicitHeight)) {
-      throw new Error(
-        `capture: height must be a positive integer (got ${JSON.stringify(explicitHeight)})`,
-      );
-    }
-
-    // Final fallback: 80x24.
-    let width = 80;
-    let height = 24;
-
-    const frame = this.resolveFrameOptional(params);
-    if (frame) {
-      const obs = this.frameObservability.get(frame.id);
-      if (obs?.terminalSize) {
-        width = obs.terminalSize.width;
-        height = obs.terminalSize.height;
-      }
-    }
-
-    // Explicit params win over everything else.
-    if (explicitWidth !== undefined) width = explicitWidth;
-    if (explicitHeight !== undefined) height = explicitHeight;
-
-    const state = frame
-      ? this.frameToEditorState(frame)
-      : this.editor.getEditorState();
-
-    const lines = captureFrame(state, width, height);
-
-    if (format === "html") {
-      return { html: ansiLinesToHtmlDocument(lines, width), width, height };
-    }
-    return { lines, width, height };
-  }
-
-  /**
-   * Handle lifecycle events from connected clients.
-   */
-  private async handleClientEvent(params: ClientEventParams): Promise<unknown> {
-    const event = params.event;
-    const clientId = params.clientId;
-    const frameId = params.frameId;
-    const now = new Date();
-
-    if (!event) {
-      throw new Error('Client event name is required');
-    }
-
-    const frame = frameId ? this.frameObservability.get(frameId) : undefined;
-    const client = clientId ? this.clients.get(clientId) : undefined;
-
-    if (client) {
-      client.lastRequestAt = now;
-      if (params.clientType) client.clientType = params.clientType;
-      if (params.clientName) client.clientName = params.clientName;
-    }
-
-    if (event === 'error') {
-      const message = params.message ?? 'Unknown client error';
-      this.recordError('client-event', message, clientId, frameId);
-      return { ok: true };
-    }
-
-    if (frame) {
-      if (event === 'tui-started') {
-        frame.clientType = params.clientType ?? frame.clientType;
-      } else if (event === 'first-render') {
-        frame.firstRenderAt = frame.firstRenderAt ?? now;
-        frame.lastRenderAt = now;
-        frame.renderCount++;
-        frame.terminalSize = params.terminalSize ?? frame.terminalSize;
-      } else if (event === 'raw-mode-ready') {
-        frame.rawModeReady = true;
-        frame.ready = Boolean(frame.firstRenderAt);
-      } else if (event === 'render') {
-        frame.lastRenderAt = now;
-        frame.renderCount++;
-        frame.terminalSize = params.terminalSize ?? frame.terminalSize;
-        frame.ready = frame.ready || (frame.rawModeReady && Boolean(frame.firstRenderAt));
-      } else if (event === 'resize') {
-        frame.terminalSize = params.terminalSize ?? frame.terminalSize;
-      } else if (event === 'shutdown') {
-        frame.ready = false;
-      }
-
-      if (frame.rawModeReady && frame.firstRenderAt) {
-        frame.ready = true;
-      }
-    }
-
-    return { ok: true };
-  }
-
-  private async handleStatus(): Promise<unknown> {
-    return this.buildStatus();
-  }
-
-  private async handleClients(): Promise<unknown> {
-    return Array.from(this.clients.values()).map(client => this.clientStatus(client));
-  }
-
-  private async handleFrames(): Promise<unknown> {
-    return Array.from(this.frames.values()).map(frame => this.frameStatus(frame));
-  }
-
-	  private workspaceNameFromParams(params: FrameTarget, key: string = 'name'): string {
-	    const value = params?.[key] ?? params?.workspace ?? params?.workspaceId;
-	    if (typeof value !== 'string' || value.length === 0) {
-	      throw new Error(`Workspace ${key} is required`);
-	    }
-	    return value;
-	  }
+  // handleInsert/handleKeypress/handleRenderState/handleCapture/handleClientEvent/
+  // handleStatus/handleClients/handleFrames moved to handlers/{editing,frames}.ts.
+  // workspaceNameFromParams moved to handlers/workspaces.ts (and re-exported for
+  // any future callers).
 
 	  private workspaceDirtyBuffers(workspace: WorkspaceState): string[] {
 	    return Array.from(workspace.bufferMetadata.entries())
@@ -1677,320 +1340,9 @@ export class TmaxServer {
 	    });
 	  }
 
-  private async handleWorkspaceList(): Promise<unknown> {
-    this.captureActiveWorkspace();
-    const disk = await this.workspaceManager.list().run();
-    if (Either.isLeft(disk)) throw new Error(disk.left);
-    const loadedNames = new Set(this.workspaces.keys());
-    return disk.right.map(metadata => ({
-      name: metadata.name,
-      id: metadata.id,
-      active: metadata.name === this.activeWorkspaceId,
-      loaded: loadedNames.has(metadata.name),
-      lastAccessed: metadata.lastAccessed,
-      projectRoot: metadata.projectRoot ?? null,
-      windowCount: this.workspaces.get(metadata.name)?.windows.length ?? 0,
-    }));
-  }
-
-  private async handleWorkspaceNew(params: WorkspaceNewParams): Promise<unknown> {
-    const name = this.workspaceNameFromParams(params);
-    const result = await this.workspaceManager.create(name, { projectRoot: params?.projectRoot }).run();
-    if (Either.isLeft(result)) throw new Error(result.left);
-    this.workspaces.set(name, result.right);
-    // R4-6: workspace-new is "create only" per spec — don't updateLastWorkspace
-    return { success: true, name, id: result.right.metadata.id };
-  }
-
-  private async handleWorkspaceSwitch(params: WorkspaceSwitchParams): Promise<unknown> {
-    const name = this.workspaceNameFromParams(params);
-    // R4-9: inline the switch logic to avoid double captureActiveWorkspace
-    this.captureActiveWorkspace();
-    await this.saveWorkspace(this.activeWorkspaceId);
-    const workspace = await this.loadWorkspace(name);
-    this.activeWorkspaceId = name;
-    this.editor.applyWorkspace(workspace);
-    await this.updateLastWorkspace(name); // C6
-    if (params?.frameId) {
-      const frame = this.getFrame(params.frameId);
-      frame.workspaceId = name;
-      this.syncEditorToFrame(frame);
-    }
-    return { success: true, activeWorkspaceId: name };
-  }
-
-  private async handleWorkspaceSave(params: WorkspaceSaveParams): Promise<unknown> {
-    const name = params?.name ?? this.activeWorkspaceId;
-    this.captureActiveWorkspace();
-    await this.saveWorkspace(name);
-    return { success: true, name };
-  }
-
-	  private async handleWorkspaceKill(params: WorkspaceKillParams): Promise<unknown> {
-	    const name = this.workspaceNameFromParams(params);
-	    if (name === this.activeWorkspaceId) {
-	      throw new Error('Cannot kill the active workspace; switch to another workspace first');
-	    }
-	    const workspace = await this.loadWorkspace(name);
-	    const dirtyBuffers = this.workspaceDirtyBuffers(workspace);
-	    if (dirtyBuffers.length > 0 && params?.confirm !== true) {
-	      return {
-	        success: false,
-	        confirmationRequired: true,
-	        name,
-	        dirtyBuffers,
-	        message: `Workspace "${name}" has unsaved buffers`,
-	      };
-	    }
-	    const result = await this.workspaceManager.delete(name).run();
-	    if (Either.isLeft(result)) throw new Error(result.left);
-	    this.workspaces.delete(name);
-    for (const frame of this.frames.values()) {
-      if (frame.workspaceId === name) {
-        frame.workspaceId = this.activeWorkspaceId;
-        this.syncEditorToFrame(frame); // I2: reset frame state from active workspace
-      }
-    }
-    return { success: true, name };
-  }
-
-  private async handleWorkspaceRename(params: WorkspaceRenameParams): Promise<unknown> {
-    const oldName = this.workspaceNameFromParams(params, 'oldName');
-    const newName = this.workspaceNameFromParams(params, 'newName');
-    this.captureActiveWorkspace();
-    const result = await this.workspaceManager.rename(oldName, newName).run();
-    if (Either.isLeft(result)) throw new Error(result.left);
-    const loaded = this.workspaces.get(oldName);
-    if (loaded) {
-      loaded.metadata.name = newName;
-      this.workspaces.delete(oldName);
-      this.workspaces.set(newName, loaded);
-    }
-    if (this.activeWorkspaceId === oldName) this.activeWorkspaceId = newName;
-    for (const frame of this.frames.values()) {
-      if (frame.workspaceId === oldName) frame.workspaceId = newName;
-    }
-    return { success: true, oldName, newName };
-  }
-
-	  private async handleWorkspaceLoad(params: WorkspaceLoadParams): Promise<unknown> {
-	    const name = this.workspaceNameFromParams(params);
-	    const workspace = await this.loadWorkspace(name);
-	    return { success: true, name, id: workspace.metadata.id };
-	  }
-
-	  private async handleWorkspaceMoveWindow(params: WorkspaceMoveWindowParams): Promise<unknown> {
-	    const targetName = params?.target ?? params?.name ?? params?.workspace ?? params?.workspaceId;
-	    if (typeof targetName !== 'string' || targetName.length === 0) {
-	      throw new Error('workspace-move-window target is required');
-	    }
-	    const frame = this.resolveFrameOptional(params);
-	    const sourceWorkspaceId = typeof params?.sourceWorkspaceId === 'string' ? params.sourceWorkspaceId : undefined;
-	    const previousWorkspaceId = this.activeWorkspaceId;
-	    const previousFrameId = this.activeFrameId;
-	    const workspaceOverride = typeof sourceWorkspaceId === 'string'
-	      && sourceWorkspaceId.length > 0
-	      && sourceWorkspaceId !== previousWorkspaceId;
-
-	    try {
-	      await this.activateFrameWorkspace(frame, sourceWorkspaceId);
-	      if (frame && !workspaceOverride) this.syncFrameToEditor(frame);
-
-	      const state = this.editor.getState();
-	      const windows = state.windows ?? [];
-	      const currentWindowIndex = state.currentWindowIndex ?? 0;
-	      const currentWindow = windows[currentWindowIndex];
-	      const buffer = currentWindow?.buffer ?? state.currentBuffer;
-	      const bufferName = currentWindow?.bufferName ?? this.currentBufferName(state);
-	      if (!buffer || !bufferName) {
-	        throw new Error('No current window buffer to move');
-	      }
-	      const contentResult = buffer.getContent();
-	      if (Either.isLeft(contentResult)) {
-	        throw new Error(`Failed to read buffer "${bufferName}": ${contentResult.left}`);
-	      }
-
-	      this.captureActiveWorkspace();
-	      const sourceName = this.activeWorkspaceId;
-	      if (targetName === sourceName) {
-	        return { success: true, source: sourceName, target: targetName, moved: bufferName, noop: true };
-	      }
-	      const source = this.workspaces.get(sourceName);
-	      if (!source) throw new Error(`Workspace "${sourceName}" is not loaded`);
-	      const target = await this.loadWorkspace(targetName);
-	      if (target.buffers.has(bufferName)) {
-	        throw new Error(`Target workspace "${targetName}" already has buffer "${bufferName}"`);
-	      }
-
-	      const stagedSource = this.cloneWorkspace(source);
-	      const stagedTarget = this.cloneWorkspace(target);
-	      const sourceMeta = stagedSource.bufferMetadata.get(bufferName);
-	      const copiedBuffer = FunctionalTextBufferImpl.create(contentResult.right);
-
-	      stagedTarget.buffers.set(bufferName, copiedBuffer);
-	      stagedTarget.bufferMetadata.set(bufferName, {
-	        name: bufferName,
-	        filename: sourceMeta?.filename,
-	        modified: sourceMeta?.modified ?? false,
-	        majorMode: sourceMeta?.majorMode,
-	        cursorLine: currentWindow?.cursorLine ?? state.cursorPosition.line,
-	        cursorColumn: currentWindow?.cursorColumn ?? state.cursorPosition.column,
-	      });
-	      stagedTarget.bufferModeStates.set(bufferName, stagedSource.bufferModeStates.get(bufferName) ?? {});
-	      stagedTarget.windows.push({
-	        id: `window-${Date.now()}-${Math.random().toString(36).slice(2)}`,
-	        buffer: copiedBuffer,
-	        bufferName,
-	        cursorLine: currentWindow?.cursorLine ?? state.cursorPosition.line,
-	        cursorColumn: currentWindow?.cursorColumn ?? state.cursorPosition.column,
-	        viewportTop: currentWindow?.viewportTop ?? state.viewportTop,
-	        viewportLeft: currentWindow?.viewportLeft ?? state.viewportLeft ?? 0,
-	        splitType: currentWindow?.splitType,
-	        height: currentWindow?.height,
-	        width: currentWindow?.width,
-	        row: currentWindow?.row,
-	        col: currentWindow?.col,
-	        scrollback: currentWindow?.scrollback ? structuredClone(currentWindow.scrollback) : undefined,
-	      });
-
-	      stagedSource.windows = stagedSource.windows.filter((window) => window.id !== currentWindow?.id);
-	      const bufferStillReferenced = stagedSource.windows.some((window) => window.bufferName === bufferName)
-	        || stagedSource.tabs.some((tab) => tab.bufferName === bufferName);
-	      if (!bufferStillReferenced) {
-	        stagedSource.buffers.delete(bufferName);
-	        stagedSource.bufferMetadata.delete(bufferName);
-	        stagedSource.bufferModeStates.delete(bufferName);
-	      }
-	      if (stagedSource.windows.length === 0) {
-	        const scratch = stagedSource.buffers.get('*scratch*') ?? FunctionalTextBufferImpl.create('');
-	        stagedSource.buffers.set('*scratch*', scratch);
-	        if (!stagedSource.bufferMetadata.has('*scratch*')) {
-	          stagedSource.bufferMetadata.set('*scratch*', {
-	            name: '*scratch*',
-	            modified: false,
-	            cursorLine: 0,
-	            cursorColumn: 0,
-	          });
-	        }
-	        stagedSource.windows = [{
-	          id: 'window-main',
-	          buffer: scratch,
-	          bufferName: '*scratch*',
-	          cursorLine: 0,
-	          cursorColumn: 0,
-	          viewportTop: 0,
-	          viewportLeft: 0,
-	        }];
-	        stagedSource.currentBufferName = '*scratch*';
-	        stagedSource.currentFilename = undefined;
-	      } else if (stagedSource.currentBufferName === bufferName) {
-	        stagedSource.currentBufferName = stagedSource.windows[0]?.bufferName ?? '*scratch*';
-	        stagedSource.currentFilename = stagedSource.currentBufferName
-	          ? stagedSource.bufferMetadata.get(stagedSource.currentBufferName)?.filename
-	          : undefined;
-	      }
-
-	      await this.saveWorkspaceSnapshot(stagedTarget);
-	      await this.saveWorkspaceSnapshot(stagedSource);
-	      this.workspaces.set(sourceName, stagedSource);
-	      this.workspaces.set(targetName, stagedTarget);
-	      this.editor.applyWorkspace(stagedSource);
-	      if (frame && !workspaceOverride) this.syncEditorToFrame(frame); else this.syncEditorToAllFrames();
-	      return { success: true, source: sourceName, target: targetName, moved: bufferName };
-	    } finally {
-	      await this.restoreWorkspaceAfterOverride(workspaceOverride, previousWorkspaceId, previousFrameId);
-	    }
-		  }
-
-	  /**
-	   * Handle editor command request
-   */
-  private async handleCommand(params: CommandParams): Promise<unknown> {
-    const command = params.command;
-
-    if (!command) {
-      throw new Error('Command is required');
-    }
-
-    const frame = this.resolveFrameOptional(params);
-    const workspaceOverride = this.isWorkspaceOverride(frame, params?.workspaceId);
-    const previousWorkspaceId = this.activeWorkspaceId;
-    const previousFrameId = this.activeFrameId;
-
-    try {
-      await this.activateFrameWorkspace(frame, params?.workspaceId);
-
-      // Read-only commands don't need frame sync
-      switch (command) {
-      case 'list-buffers': {
-        const buffers = this.editor.getState().buffers;
-        const names: string[] = [];
-        buffers?.forEach((_buf, name) => names.push(name));
-        return names;
-      }
-      case 'kill-buffer': {
-        const bufferName = params.bufferName;
-        if (bufferName) {
-          const state = this.editor.getState();
-          if (state.buffers?.has(bufferName)) {
-	            const newBuffers = new Map(state.buffers);
-	            newBuffers.delete(bufferName);
-	            this.editor.setEditorState({ ...state, buffers: newBuffers });
-	            this.captureActiveWorkspace();
-	            this.scheduleDirtyWorkspaceSave(this.activeWorkspaceId);
-	            if (frame && !workspaceOverride) this.syncEditorToFrame(frame); else this.syncEditorToAllFrames();
-	            return { success: true, killed: bufferName };
-          } else {
-            return { success: false, error: `Buffer ${bufferName} not found` };
-          }
-        }
-        throw new Error('Buffer name required for kill-buffer');
-      }
-      case 'save-buffer': {
-        if (frame && !workspaceOverride) this.syncFrameToEditor(frame);
-
-        const currentFile = this.editor.getState().currentFilename;
-        if (currentFile) {
-          await this.editor.saveFile(currentFile);
-          this.captureActiveWorkspace();
-          if (frame && !workspaceOverride) this.syncEditorToFrame(frame); else this.syncEditorToAllFrames();
-          return { success: true, saved: currentFile };
-        }
-        throw new Error('No file to save');
-      }
-      case 'server-info':
-        return this.buildStatus();
-      case 'describe-function':
-        const functionName = params.functionName;
-        if (functionName) {
-          return this.getFunctionDocumentation(functionName);
-        }
-        throw new Error('Function name required for describe-function command');
-      case 'describe-variable':
-        const variableName = params.variableName;
-        if (variableName) {
-          return this.getVariableDocumentation(variableName);
-        }
-        throw new Error('Variable name required for describe-variable command');
-      case 'apropos-command':
-        const pattern = params.pattern;
-        if (pattern) {
-          return this.findCommandsByPattern(pattern);
-        }
-        throw new Error('Pattern required for apropos-command');
-      case 'find-usages':
-        const funcName = params.functionName;
-        if (funcName) {
-          return this.findFunctionUsages(funcName);
-        }
-        throw new Error('Function name required for find-usages command');
-      default:
-        throw new Error(`Unknown command: ${command}`);
-      }
-    } finally {
-      await this.restoreWorkspaceAfterOverride(workspaceOverride, previousWorkspaceId, previousFrameId);
-    }
-  }
+  // All handleWorkspace* bodies (list/new/switch/save/kill/rename/load/move-window)
+  // moved to handlers/workspaces.ts. The T-Lisp async builtins in
+  // registerWorkspaceBuiltins() call those handlers directly.
 
   /**
    * Get documentation for a variable
@@ -2134,86 +1486,6 @@ export class TmaxServer {
   /**
    * Handle query request
    */
-	  private async handleQuery(params: QueryParams): Promise<unknown> {
-	    const query = params.query;
-	    // N4: read-only query — do not mutate editor state via activateFrameWorkspace
-	    const frame = this.resolveFrameOptional(params);
-	    const frameWorkspaceId = frame?.workspaceId;
-	    const frameWorkspace = frameWorkspaceId && frameWorkspaceId !== this.activeWorkspaceId
-	      ? this.workspaces.get(frameWorkspaceId)
-	      : undefined;
-	    const state = frame && frameWorkspace
-	      ? this.frameToEditorState(frame)
-	      : this.editor.getState();
-
-	    switch (query) {
-	      case 'buffers': {
-	        return frameWorkspace
-	          ? this.bufferDetailsForWorkspace(frameWorkspace, frame?.currentBufferName ?? frameWorkspace.currentBufferName)
-	          : this.editor.getBufferDetails();
-	      }
-      case 'variables':
-        // Return variables from T-Lisp interpreter
-        return this.getTlispVariables();
-      case 'keybindings':
-        return state.config.keyBindings;
-	      case 'full-state': {
-	        const bufferDetails = frameWorkspace
-	          ? this.bufferDetailsForWorkspace(frameWorkspace, frame?.currentBufferName ?? frameWorkspace.currentBufferName)
-	          : this.editor.getBufferDetails();
-	        const currentBuffer = bufferDetails.find(buffer => buffer.current)?.name ?? null;
-
-        return {
-          buffers: bufferDetails,
-          currentBuffer,
-          mode: state.mode,
-          variables: this.getTlispVariables(),
-          keybindings: state.config.keyBindings,
-          cursorPosition: state.cursorPosition,
-          viewportTop: state.viewportTop,
-          config: state.config
-        };
-      }
-      case 'functions':
-        // Query the T-Lisp interpreter for available functions
-        return this.getTlispFunctions();
-      case 'messages': {
-        // SPEC-055: optional `category` filter routes through the unified store
-        // (raw category) when present; otherwise the messages view (mirror rule).
-        if (params?.category) {
-          const store = this.editor.getUnifiedLog();
-          return { messages: store.getEntries({ category: params.category, level: params?.level, last: params?.last }) };
-        }
-        const log = this.editor.getMessageLog();
-        if (!log) return { messages: [] };
-        const entries = log.getEntries({
-          level: params?.level,
-          last: params?.last,
-        });
-        return { messages: entries };
-      }
-      case 'log': {
-        // SPEC-055: unified query across all categories with view/category/level/last filters.
-        const store = this.editor.getUnifiedLog();
-        const entries = store.getEntries({
-          view: params?.view,
-          category: params?.category,
-          level: params?.level,
-          last: params?.last,
-        });
-        return { entries };
-      }
-      case 'function-documentation':
-        const functionName = params.functionName;
-        if (functionName) {
-          return this.getFunctionDocumentation(functionName);
-        }
-        throw new Error('Function name required for function-documentation query');
-      default:
-        throw new Error(`Unknown query: ${query}`);
-    }
-  }
-
   /**
    * Get documentation for a specific function
    */
@@ -2242,17 +1514,6 @@ export class TmaxServer {
       line: 0,
       examples: [],
       relatedFunctions: []
-    };
-  }
-
-  /**
-   * Handle ping request
-   */
-  private async handlePing(): Promise<unknown> {
-    return {
-      status: 'running',
-      server: 'tmax',
-      frames: this.frames.size
     };
   }
 
