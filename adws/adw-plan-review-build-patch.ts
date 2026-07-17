@@ -44,14 +44,25 @@
  *   agents/{id}/tester/events.jsonl        — written by adw-test subprocess
  *   agents/{id}/patch-reviewer/events.jsonl — written by adw-patch-review subprocess
  */
-import { spawn, execSync } from "child_process";
-import { appendFileSync, existsSync, mkdirSync, readFileSync, realpathSync, statSync } from "fs";
-import { mkdir, writeFile } from "node:fs/promises";
+import { execSync } from "child_process";
+import { existsSync, readFileSync, realpathSync, statSync } from "fs";
 import { join } from "path";
 import { Either, TaskEither } from "../src/utils/task-either.ts";
 import type { PlanType } from "./adws-modules/agent.ts";
 import { withHeartbeat } from "./adws-modules/heartbeat.ts";
-import { findWorkspaceBySpecPath, normalizeSpecPath } from "./adws-modules/workspace.ts";
+import {
+  ADW_ID_RE,
+  adwId,
+  appendEvent as appendEventRaw,
+  writeState as writeStateRaw,
+  tokensOf,
+  spawnStage as spawnStageRaw,
+  readWorkspaceState as readWorkspaceStateRaw,
+  recoverSpecPathFromEvents as recoverSpecPathFromEventsRaw,
+  type WorkspaceState,
+} from "./adws-modules/dispatcher-runtime.ts";
+import { findWorkspaceBySpecPath, normalizeSpecPath } from "./adws-modules/dispatcher-runtime.ts";
+import type { PipelineStageInfo } from "./adws-modules/pipeline.ts";
 import {
   commitSpecToMain,
   commitWorktreeChanges,
@@ -92,10 +103,37 @@ function getWorktreePath(): string | undefined {
 const ORCHESTRATOR_PID = process.pid;
 const ORCHESTRATOR_STARTED_AT_MS = Date.now();
 
-/** 10-char Crockford Base32 ULID-timestamp — the workspace id shape. */
-const ADW_ID_RE = /^[0-9A-HJKMNP-TV-Z]{10}$/;
 type StageName = "plan" | "review" | "build" | "test" | "patch-review";
 const STAGE_ORDER: readonly StageName[] = ["plan", "review", "build", "test", "patch-review"];
+
+/**
+ * CHORE-44 Change 8 (AC8.2): the 5-stage pipeline declared as a configuration
+ * of the generic `StageDescriptor` shape from ./adws-modules/pipeline.ts.
+ *
+ * The 5-stage orchestrator's `runPipeline` body is more complex than the
+ * 2/3-stage variants (worktree isolation per SPEC-065, base_sha recording,
+ * goal-exhausted detection, and the build↔patch-review retry loop), so it does
+ * NOT delegate to `runLinearPipeline`. Instead, this descriptor list documents
+ * the pipeline's shape in the same vocabulary the other two orchestrators use,
+ * and the per-stage `spawnStage`/`tokensOf` calls inside `makeRealDeps`/
+ * `runPipeline` are the concrete execution of each descriptor. The retry loop
+ * wraps the last three stages (build/test/patch-review) per AC8.4.
+ *
+ * Tests that need to assert stage-order invariants can read STAGE_DESCRIPTORS
+ * directly; it is the single source of truth for which stages exist, their
+ * order, their script names, and their agent-subdir contributions.
+ */
+const STAGE_DESCRIPTORS: readonly PipelineStageInfo<StageName>[] = [
+  { name: "plan", label: "plan", script: "adw-plan.ts", agentDir: "planner" },
+  { name: "review", label: "spec-review", script: "adw-spec-review.ts", agentDir: "reviewer" },
+  { name: "build", label: "build", script: "adw-build.ts", agentDir: "builder" },
+  { name: "test", label: "test", script: "adw-test.ts", agentDir: "tester" },
+  { name: "patch-review", label: "patch-review", script: "adw-patch-review.ts", agentDir: "patch-reviewer" },
+];
+
+/** Re-exported so tests can introspect the 5-stage configuration (AC8.2). */
+export const PIPELINE_STAGES = STAGE_DESCRIPTORS;
+
 
 // ---------------------------------------------------------------------------
 // Usage / arg parsing
@@ -228,67 +266,28 @@ export function parseArgs(argv: string[]): Either<string, OrchestratorArgs> {
 }
 
 // ---------------------------------------------------------------------------
-// Run-state: adwId() + appendEvent() + writeState()
+// Run-state: thin wrappers around dispatcher-runtime (CHORE-44 Change 8).
+// The orchestrator-style signatures (id, event, agentsDir?) are preserved as
+// local const arrows so the body of runPipeline below is unchanged. The shared
+// implementation lives in dispatcher-runtime.ts; adwId is imported directly.
 // ---------------------------------------------------------------------------
 
-const CROCKFORD = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
+/**
+ * Append a single lifecycle event as one JSON line to agents/{id}/orchestrator/
+ * events.jsonl. Sync, append-only — survives crashes.
+ */
+const appendEvent = (id: string, event: Record<string, unknown>, agentsDir: string = AGENTS_DIR): void =>
+  appendEventRaw(agentsDir, id, "orchestrator", event);
 
-/** ULID timestamp portion: 48-bit ms-since-epoch → 10 chars Crockford Base32. */
-function adwId(): string {
-  let ms = Date.now();
-  let out = "";
-  for (let i = 0; i < 10; i++) {
-    out = CROCKFORD[ms & 31] + out;
-    ms = Math.floor(ms / 32);
-  }
-  return out;
-}
-
-function appendEvent(id: string, event: Record<string, unknown>, agentsDir: string = AGENTS_DIR): void {
-  const dir = join(agentsDir, id, "orchestrator");
-  mkdirSync(dir, { recursive: true });
-  const line = JSON.stringify({ ts: new Date().toISOString(), ...event }) + "\n";
-  appendFileSync(join(dir, "events.jsonl"), line);
-}
-
-function writeState(id: string, state: Record<string, unknown>, agentsDir: string = AGENTS_DIR): TaskEither<string, void> {
-  return TaskEither.tryCatch(async () => {
-    const dir = join(agentsDir, id);
-    await mkdir(dir, { recursive: true });
-    await writeFile(join(dir, "adw-state.json"), JSON.stringify(state, null, 2) + "\n");
-  }, (e) => `writeState: ${(e as Error).message}`);
-}
+/** Atomically write agents/{id}/adw-state.json. */
+const writeState = (id: string, state: Record<string, unknown>, agentsDir: string = AGENTS_DIR): TaskEither<string, void> =>
+  writeStateRaw(agentsDir, id, state).map(() => undefined);
 
 // ---------------------------------------------------------------------------
 // Resume support: load an existing workspace to recover what's already done
 // ---------------------------------------------------------------------------
 
-/** The on-disk state shape (written by this orchestrator; new fields are optional). */
-interface WorkspaceState {
-  adw_id: string;
-  description?: string;
-  status?: "running" | "completed" | "failed" | "setup";
-  agents?: string[];
-  failed_stage?: StageName;
-  completed_stages?: StageName[];
-  spec_path?: string;
-  patch_review_verdict?: "pass" | "gaps";
-  patch_review_iterations?: number;
-  patch_review_next_action?: "build" | "patch-review";
-  error?: string;
-  /** SPEC-065: absolute path to the sibling worktree (under worktree root). */
-  worktree_path?: string;
-  /** SPEC-065: main HEAD used as the implementation branch diff base. */
-  base_sha?: string;
-  /** SPEC-065: branch name `adw/<id>`. */
-  branch?: string;
-  /** SPEC-065: implementation commit SHA after a successful build (or null when worktree was clean). */
-  implementation_commit?: string | null;
-  /** SPEC-065: remote host when dispatched via --remote. */
-  host?: string;
-  /** SPEC-065: timestamp (ISO) when --setup-only finished (for dashboard derivation). */
-  setup_completed_at?: string;
-}
+// WorkspaceState type comes from dispatcher-runtime (CHORE-44 Change 8).
 
 /** What runPipeline needs to know to resume correctly. */
 export interface ResumeContext {
@@ -308,10 +307,7 @@ export interface ResumeContext {
 
 /** Read agents/{id}/adw-state.json; Left if missing or unparseable. */
 function readWorkspaceState(id: string, agentsDir: string = AGENTS_DIR): Either<string, WorkspaceState> {
-  const stateFile = join(agentsDir, id, "adw-state.json");
-  if (!existsSync(stateFile)) return Either.left(`no workspace agents/${id}/adw-state.json — nothing to resume`);
-  const parsed = Either.tryCatch(() => JSON.parse(readFileSync(stateFile, "utf8")) as WorkspaceState);
-  return Either.mapLeft(parsed, (e) => `failed to parse agents/${id}/adw-state.json: ${(e as Error).message}`);
+  return readWorkspaceStateRaw(agentsDir, id) as Either<string, WorkspaceState>;
 }
 
 /**
@@ -320,18 +316,7 @@ function readWorkspaceState(id: string, agentsDir: string = AGENTS_DIR): Either<
  * `stage-complete` event carrying a non-null spec_path.
  */
 function recoverSpecPathFromEvents(id: string, agentsDir: string = AGENTS_DIR): string | null {
-  const eventsFile = join(agentsDir, id, "orchestrator", "events.jsonl");
-  if (!existsSync(eventsFile)) return null;
-  const lines = readFileSync(eventsFile, "utf8").split("\n").filter((l) => l.trim());
-  for (let i = lines.length - 1; i >= 0; i--) {
-    try {
-      const d = JSON.parse(lines[i]!) as Record<string, unknown>;
-      if (d.event === "stage-complete" && typeof d.spec_path === "string" && d.spec_path) {
-        return d.spec_path as string;
-      }
-    } catch { /* malformed line — skip */ }
-  }
-  return null;
+  return recoverSpecPathFromEventsRaw(agentsDir, id);
 }
 
 const GIT_SHA_RE = /^[0-9a-f]{7,40}$/i;
@@ -384,7 +369,7 @@ export function loadWorkspace(id: string, fromStage?: StageName, agentsDir: stri
   // Recover completedStages: explicit field first, else infer from agents array.
   let completedStages: StageName[];
   if (Array.isArray(state.completed_stages)) {
-    completedStages = state.completed_stages;
+    completedStages = state.completed_stages as StageName[];
   } else {
     completedStages = [];
     const agents = state.agents ?? [];
@@ -499,39 +484,21 @@ export interface PatchReviewResult {
 function spawnStage(
   script: string,
   args: string[],
-  teeFile: string | null,
+  _teeFile: string | null,
   worktreePath?: string,
 ): Promise<{ code: number; stdout: string; stderr: string }> {
-  const child = spawn("bun", [join("adws", script), ...args], {
-    cwd: PROJECT_ROOT,
-    env: {
-      ...process.env,
-      ADW_ORCHESTRATED: "1",
-      ...(worktreePath ? { ADW_WORKTREE: worktreePath } : {}),
-    },
-    stdio: ["ignore", "pipe", "inherit"], // stdout captured, stderr shown live
-    detached: true, // child.pid is the process-group leader → killTree(-pid) reaches all descendants
+  // Delegate to dispatcher-runtime's spawnStage, which sets ADW_ORCHESTRATED=1,
+  // captures stdout, inherits stderr, and (here) detaches so child.pid is the
+  // process-group leader → killTree(-pid) reaches all descendants. The teeFile
+  // param is unused (preserved for call-site compatibility — see comment above).
+  return spawnStageRaw(script, args, {
+    projectRoot: PROJECT_ROOT,
+    detached: true,
+    ...(worktreePath ? { worktreePath } : {}),
   });
-  let stdout = "";
-  child.stdout.on("data", (chunk: Buffer | string) => {
-    stdout += typeof chunk === "string" ? chunk : chunk.toString("utf8");
-  });
-
-  const childDone = new Promise<{ code: number; stdout: string; stderr: string }>((resolve) => {
-    child.on("error", () => resolve({ code: 1, stdout, stderr: `failed to spawn ${script}` }));
-    child.on("close", (code) => resolve({ code: code ?? 1, stdout: stdout.trim(), stderr: "" }));
-  });
-
-  // No tee file → just await the child.
-  return childDone;
 }
 
-/** Parse the last non-empty stdout line as space-separated tokens. */
-function tokensOf(stdout: string): string[] | null {
-  const lines = stdout.split("\n").filter((l) => l.trim());
-  if (lines.length === 0) return null;
-  return lines[lines.length - 1]!.trim().split(/\s+/);
-}
+// tokensOf comes from dispatcher-runtime (no local duplicate).
 
 /**
  * CHORE-40: merge goal fields from the build-outcome.json sidecar into the

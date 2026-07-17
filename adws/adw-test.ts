@@ -29,10 +29,17 @@
  *   agents/{id}/tester/results.json            — normalized result bundle
  */
 import { spawn } from "child_process";
-import { appendFileSync, existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from "fs";
-import { mkdir, writeFile } from "node:fs/promises";
+import { appendFileSync, existsSync, readFileSync, realpathSync, writeFileSync } from "fs";
 import { join } from "path";
 import { Either, TaskEither } from "../src/utils/task-either.ts";
+import {
+  ADW_ID_RE,
+  adwId,
+  appendEvent as appendEventRaw,
+  writeState as writeStateRaw,
+  run,
+  type RunOpts,
+} from "./adws-modules/dispatcher-runtime.ts";
 import {
   TEST_MODEL,
   type TesterDeps,
@@ -45,7 +52,7 @@ import {
   buildTestStageResult,
   writeResults,
 } from "./adws-modules/tester.ts";
-import { findWorkspaceBySpecPath } from "./adws-modules/workspace.ts";
+import { findWorkspaceBySpecPath } from "./adws-modules/dispatcher-runtime.ts";
 import { withClaude529Retry } from "./claude-529-retry.ts";
 
 const PROJECT_ROOT = realpathSync(join(import.meta.dir, ".."));
@@ -102,69 +109,31 @@ export function parseArgs(argv: string[]): Either<string, ParsedArgs> {
 }
 
 // ---------------------------------------------------------------------------
-// Run-state: adwId() + appendEvent() + writeState()
+// Run-state: thin wrappers around dispatcher-runtime (CHORE-44 Change 8).
+// The stage-local `appendEvent(id, event)` signature (no `agent` arg — always
+// writes to agents/{id}/tester/) is preserved via this wrapper so the body of
+// runTest below is unchanged. The shared implementation lives in
+// dispatcher-runtime.ts; these const arrows curry AGENTS_DIR + "tester".
 // ---------------------------------------------------------------------------
 
-const CROCKFORD = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
+const appendEvent = (id: string, event: Record<string, unknown>): void =>
+  appendEventRaw(AGENTS_DIR, id, "tester", event);
 
-function adwId(): string {
-  let ms = Date.now();
-  let out = "";
-  for (let i = 0; i < 10; i++) {
-    out = CROCKFORD[ms & 31] + out;
-    ms = Math.floor(ms / 32);
-  }
-  return out;
-}
-
-function appendEvent(id: string, event: Record<string, unknown>): void {
-  const dir = join(AGENTS_DIR, id, "tester");
-  mkdirSync(dir, { recursive: true });
-  const line = JSON.stringify({ ts: new Date().toISOString(), ...event }) + "\n";
-  appendFileSync(join(dir, "events.jsonl"), line);
-}
-
-function writeState(id: string, state: Record<string, unknown>): TaskEither<string, void> {
-  return TaskEither.tryCatch(async () => {
-    const dir = join(AGENTS_DIR, id);
-    await mkdir(dir, { recursive: true });
-    await writeFile(join(dir, "adw-state.json"), JSON.stringify(state, null, 2) + "\n");
-  }, (e) => `writeState: ${(e as Error).message}`);
-}
+const writeState = (id: string, state: Record<string, unknown>): TaskEither<string, void> =>
+  writeStateRaw(AGENTS_DIR, id, state).map(() => undefined);
 
 // ---------------------------------------------------------------------------
-// Subprocess plumbing: run() + runRaw() + runCapture()
+// Subprocess plumbing: run() comes from dispatcher-runtime; runRaw() and
+// runCapture() are SPECIALIZED for this stage — they add a wall-clock timeout
+// + detached process-group + stdout/stderr drain-on-end. BUG-16: the full
+// unit suite can hang on wedged socket connects, so the timeout + kill-tree
+// semantics are load-bearing here. The shared `runCapture` in
+// dispatcher-runtime does NOT have these — they remain local to adw-test.
 // ---------------------------------------------------------------------------
 
-export interface RunOpts {
-  cwd?: string;
-  env?: Record<string, string>;
-}
-
-function run(cmd: string, args: string[], opts: RunOpts = {}): TaskEither<string, string> {
-  return TaskEither.from(async () => {
-    return await new Promise<Either<string, string>>((resolve) => {
-      const child = spawn(cmd, args, {
-        cwd: opts.cwd,
-        env: opts.env ? { ...process.env, ...opts.env } : process.env,
-        stdio: ["ignore", "pipe", "pipe"],
-      });
-      let stdout = "";
-      let stderr = "";
-      child.stdout.on("data", (chunk: Buffer | string) => {
-        stdout += typeof chunk === "string" ? chunk : chunk.toString("utf8");
-      });
-      child.stderr.on("data", (chunk: Buffer | string) => {
-        stderr += typeof chunk === "string" ? chunk : chunk.toString("utf8");
-      });
-      child.on("error", (e) => resolve(Either.left(`failed to spawn ${cmd}: ${e.message}`)));
-      child.on("close", (code) => {
-        if (code === 0) resolve(Either.right(stdout.trim()));
-        else resolve(Either.left((stderr || stdout).trim() || `${cmd} exited with code ${code}`));
-      });
-    });
-  });
-}
+// Re-export RunOpts for backwards compatibility with tests/external callers
+// that imported it from this module pre-refactor.
+export type { RunOpts };
 
 /** Wall-clock cap on each `bun run test:*` invocation. Catches hangs (e.g. a
  * wedged socket connect with no timeout) so the stage fails fast instead of
@@ -329,8 +298,6 @@ function runCapture(cmd: string, args: string[], opts: RunOpts & { teeTo: string
 // ---------------------------------------------------------------------------
 // Input resolution: spec path OR adw-id → {specPath, source}
 // ---------------------------------------------------------------------------
-
-const ADW_ID_RE = /^[0-9A-HJKMNP-TV-Z]{10}$/;
 
 export interface ResolvedInput {
   specPath: string;

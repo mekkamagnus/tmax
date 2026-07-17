@@ -67,7 +67,8 @@ Status meanings:
 | Change 5 | **COMPLETE** | Exact named result types for 18/23 methods + named `JsonObject` for 5 genuinely-dynamic serialized-state results (no `unknown`, param catch-all removed — AC5.7); router owns version/lookup/`-32602`/error-mapping (AC5.8); 4 domain handler files + `ServerContext`, server.ts 2353→1614 lines (AC5.9); declarative `SYNC_POLICY` + `server-frame-sync.test.ts` proving AC5.3–5.5; `server-rpc-router.test.ts`. Server gate 84/0 (no hangs). | — |
 | Change 6 | **COMPLETE** | `:%s`/`:s`/`:dired` parsing → T-Lisp `command-line.tlisp` dispatcher; markdown list-continuation + indent → T-Lisp `post-newline.tlisp` hook; handlers are pure routers (AC6.2/6.3); `architecture-boundaries.test.ts` scans all 6 handlers (AC6.6). Found+fixed a Change 4 `set!` dispatch typo (a476392) that had broken 40 editor tests. Gate 209/0. | — |
 | Change 7 | **COMPLETE** | `registry.ts` (`EditorAPIContribution` + `registerContributions` with typed duplicate rejection); `createEditorAPI` composes 43 contributions declaratively (no copy loops — AC7.3); ast+navigation share `ctx.caches` (AC7.4); inventory stays exactly 350 (AC7.1); `editor-api-registry.test.ts` (12 tests). Gate 67/0 + broad 173/0. | — |
-| Changes 8–12 | **NOT STARTED** | No numbered change has its principal implementation/test files. | Resume in order only after Change 7. |
+| Change 8 | **COMPLETE** | `dispatcher-runtime.ts` (one impl of adwId/appendEvent/writeState/subprocess) + `pipeline.ts` (StageDescriptor + runLinearPipeline); 8 scripts → thin adapters (−789 lines); 3 pipeline configs declarative (AC8.2); `adw-dispatcher-runtime.test.ts` (39 tests). test:adw 420/1 (1 pre-existing from `682c5e3`, not chore-caused); module gate 176/0. | — |
+| Changes 9–12 | **NOT STARTED** | No numbered change has its principal implementation/test files. | Resume in order only after Change 8. |
 | Steps 13–14 | **NOT STARTED** | Existing unrelated Vim/Markdown playbooks remain available. | Create the cross-cutting CHORE-44 playbook only after Changes 1–12 are complete, then run the full validation matrix. |
 
 ### Definition of complete for every numbered change
@@ -561,9 +562,20 @@ NEW `test/unit/editor-api-registry.test.ts` (12 tests) covers all five ACs. Gate
 
 Remove repeated infrastructure from stage scripts and three orchestrators while preserving CLI syntax, stage subprocesses, workspace identity, resume behavior, worktree isolation, event ordering, state/results schemas, heartbeat output, retry semantics, and exit codes.
 
-#### Current checkpoint status — NOT STARTED (2026-07-17)
+#### Current checkpoint status — COMPLETE (2026-07-17)
 
-`dispatcher-runtime.ts`, `pipeline.ts`, and `adw-dispatcher-runtime.test.ts` do not exist. Preserve the existing ADW code until parity inventories and tests are in place.
+NEW `adws/adws-modules/dispatcher-runtime.ts` holds the ONE implementation each of `adwId`, `appendEvent`, atomic `writeState`, `run`/`runCapture` subprocess capture, `spawnStage`, `tokensOf`, `readWorkspaceState`, `recoverSpecPathFromEvents` (+ re-exports `findWorkspaceBySpecPath`/`normalizeSpecPath`). NEW `adws/adws-modules/pipeline.ts` provides `StageDescriptor`/`PipelineStageInfo` + `runLinearPipeline`. The 8 stage/orchestrator scripts were refactored to thin CLI adapters (−789 lines); CLI syntax, subprocess behavior, workspace identity, resume, worktree isolation, event order, state/result schemas, heartbeat, retry, and exit codes are preserved.
+
+- **AC8.1** — `adwId`/`appendEvent`/`writeState` each have exactly ONE `function` implementation (in `dispatcher-runtime.ts`; call sites use 1-line const-arrow wrappers, verified by static scan).
+- **AC8.2** — the three pipeline variants are declarative configs of shared runner primitives: 2-stage (`adw-plan-reviewspec`) and 3-stage (`adw-plan-reviewspec-build`) are driven end-to-end by `runLinearPipeline`; the 5-stage (`adw-plan-review-build-patch`) declares `STAGE_DESCRIPTORS` (`PIPELINE_STAGES`) and consumes every shared primitive (`spawnStage`/`tokensOf`/`appendEvent`/`writeState`/`adwId`/`readWorkspaceState`), retaining its unique build↔patch retry loop + worktree + goal-exhausted logic (migrating that loop would risk the load-bearing SPEC-065/BUG-20/BUG-16/BUG-18 behavior).
+- **AC8.3** — CLI/args/exit/state-JSON/event-JSONL/result-JSON/resume/worktree unchanged (proven by `test:adw`).
+- **AC8.4** — goal-exhausted/goal-met + build↔patch retry unchanged (covered by `adw-pipeline-loop`/`adw-feedback-stall`).
+- **AC8.5** — all 5 stage scripts remain independently invokable with `--id` (verified `--help` exits 0).
+- NEW `test/unit/adw-dispatcher-runtime.test.ts` (39 tests): IDs, atomic state writes, event order, spec resolution, subprocess normalization, failures — golden-key assertions (no random id/timestamp snapshots).
+
+Honest scope notes: `adw-test.ts`/`adw-patch-review.ts` keep their specialized `runRaw`/`runCapture` (wall-clock timeouts + detached process-group + drain-on-end — BUG-16/BUG-18 load-bearing for `test:unit` hangs and long audits); the simple shared `run`/`runCapture` ARE consolidated. The 5-stage `runPipeline` body is not delegated to `runLinearPipeline` (its retry/worktree/goal loop is unique and high-risk); AC8.2 is met via the declarative stage descriptors + full consumption of shared primitives.
+
+Gate evidence (2026-07-17): `bun run test:adw` → **420 pass / 1 fail** (the 1 failure is `adw-patch-review-gates-phase.test.ts`, PRE-EXISTING — root cause commit `682c5e3` predates CHORE-44; verified failing at Change-7 HEAD and at the starting commit; unrelated to Change 8); module gate (`adw-dispatcher-runtime`, `builder`, `worktree`, `tmux-launcher`, `heartbeat`, `live-filter`, `remote`, `spec-frontmatter`) → **176 pass / 0 fail**; `bun run typecheck` exit 0; `git diff --check` clean; baseline inventory green.
 
 #### Implementation requirements
 

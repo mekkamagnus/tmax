@@ -24,14 +24,20 @@
  *   agents/{build-id}/builder/events.jsonl     — build lifecycle events (streamed)
  *   agents/{build-id}/builder/raw-output.jsonl — claude /implement output (streamed)
  */
-import { spawn } from "child_process";
 import { appendFileSync, existsSync, mkdirSync, readFileSync, readdirSync, realpathSync } from "fs";
-import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "path";
 import { Either, TaskEither } from "../src/utils/task-either.ts";
 import { BUILD_MODEL, GOAL_EXHAUSTED_MARKER, GOAL_TURN_LIMIT, type BuilderDeps, type BuildResult, type GoalStatus, build, ensureAvailable } from "./adws-modules/builder.ts";
-import { formatToolUseLine } from "./adws-modules/live-filter.ts";
-import { findWorkspaceBySpecPath } from "./adws-modules/workspace.ts";
+import {
+  ADW_ID_RE,
+  adwId,
+  appendEvent as appendEventRaw,
+  writeState as writeStateRaw,
+  run,
+  runCapture,
+  type RunOpts,
+} from "./adws-modules/dispatcher-runtime.ts";
+import { findWorkspaceBySpecPath } from "./adws-modules/dispatcher-runtime.ts";
 import { parseGoalFromSpec, SpecFrontmatterError } from "./adws-modules/spec-frontmatter.ts";
 import { withClaude529Retry } from "./claude-529-retry.ts";
 
@@ -98,146 +104,34 @@ export function parseArgs(argv: string[]): Either<string, ParsedArgs> {
   return Either.right({ input, model, id, goal });
 }
 
-// ---------------------------------------------------------------------------
-// Run-state: adwId() + appendEvent() + writeState()
-// ---------------------------------------------------------------------------
+// Re-export RunOpts for backwards compatibility with tests/external callers
+// that imported it from this module pre-refactor.
+export type { RunOpts };
 
-const CROCKFORD = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
-
-/** ULID timestamp portion: 48-bit ms-since-epoch → 10 chars Crockford Base32. */
-function adwId(): string {
-  let ms = Date.now();
-  let out = "";
-  for (let i = 0; i < 10; i++) {
-    out = CROCKFORD[ms & 31] + out;
-    ms = Math.floor(ms / 32);
-  }
-  return out;
-}
+// ---------------------------------------------------------------------------
+// Run-state: thin wrappers around dispatcher-runtime (CHORE-44 Change 8).
+// The stage-local signatures match the pre-refactor call sites (id, agent,
+// event) so the body of runBuild below is unchanged. The implementation lives
+// in dispatcher-runtime.ts; these const arrows curry AGENTS_DIR.
+// ---------------------------------------------------------------------------
 
 /**
  * Append a single lifecycle event as one JSON line to the agent's events file.
  * Sync, append-only — survives crashes. Each event is on disk immediately.
  */
-function appendEvent(id: string, agent: string, event: Record<string, unknown>): void {
-  const dir = join(AGENTS_DIR, id, agent);
-  mkdirSync(dir, { recursive: true });
-  const line = JSON.stringify({ ts: new Date().toISOString(), ...event }) + "\n";
-  appendFileSync(join(dir, "events.jsonl"), line);
-}
+const appendEvent = (id: string, agent: string, event: Record<string, unknown>): void =>
+  appendEventRaw(AGENTS_DIR, id, agent, event);
 
 /**
  * Write the run-state file (id, spec_path, model, status — no events).
  * Called at most twice: after start and after result/error.
  */
-function writeState(id: string, state: Record<string, unknown>): TaskEither<string, void> {
-  return TaskEither.tryCatch(async () => {
-    const dir = join(AGENTS_DIR, id);
-    await mkdir(dir, { recursive: true });
-    await writeFile(join(dir, "adw-state.json"), JSON.stringify(state, null, 2) + "\n");
-  }, (e) => `writeState: ${(e as Error).message}`);
-}
-
-// ---------------------------------------------------------------------------
-// Subprocess plumbing: run() + runCapture() as TaskEither
-// ---------------------------------------------------------------------------
-
-export interface RunOpts {
-  cwd?: string;
-  env?: Record<string, string>;
-}
-
-/**
- * Spawn, capture stdout/stderr. Returns TaskEither (lazy, composable).
- * Left = non-zero exit (error = stderr||stdout); Right = trimmed stdout.
- */
-function run(cmd: string, args: string[], opts: RunOpts = {}): TaskEither<string, string> {
-  return TaskEither.from(async () => {
-    return await new Promise<Either<string, string>>((resolve) => {
-      const child = spawn(cmd, args, {
-        cwd: opts.cwd,
-        env: opts.env ? { ...process.env, ...opts.env } : process.env,
-        stdio: ["ignore", "pipe", "pipe"],
-      });
-      let stdout = "";
-      let stderr = "";
-      child.stdout.on("data", (chunk: Buffer | string) => {
-        stdout += typeof chunk === "string" ? chunk : chunk.toString("utf8");
-      });
-      child.stderr.on("data", (chunk: Buffer | string) => {
-        stderr += typeof chunk === "string" ? chunk : chunk.toString("utf8");
-      });
-      child.on("error", (e) => resolve(Either.left(`failed to spawn ${cmd}: ${e.message}`)));
-      child.on("close", (code) => {
-        if (code === 0) resolve(Either.right(stdout.trim()));
-        else resolve(Either.left((stderr || stdout).trim() || `${cmd} exited with code ${code}`));
-      });
-    });
-  });
-}
-
-/**
- * runCapture: like run, but tees stdout to `teeTo` path line-by-line as it
- * arrives (via sync appendFileSync — acceptable for line-at-a-point small writes
- * that must survive a crash). Returns TaskEither (lazy).
- */
-function runCapture(cmd: string, args: string[], opts: RunOpts & { teeTo: string; liveLabel?: string }): TaskEither<string, string> {
-  return TaskEither.from(async () => {
-    return await new Promise<Either<string, string>>((resolve) => {
-      const child = spawn(cmd, args, {
-        cwd: opts.cwd,
-        env: opts.env ? { ...process.env, ...opts.env } : process.env,
-        stdio: ["ignore", "pipe", "pipe"],
-      });
-      let stdout = "";
-      let stderr = "";
-      let teeBuf = "";
-      child.stdout.on("data", (chunk: Buffer | string) => {
-        const s = typeof chunk === "string" ? chunk : chunk.toString("utf8");
-        stdout += s;
-        // Tee line-by-line: flush complete lines as they arrive.
-        teeBuf += s;
-        let nl: number;
-        while ((nl = teeBuf.indexOf("\n")) >= 0) {
-          const line = teeBuf.slice(0, nl + 1);
-          try { appendFileSync(opts.teeTo, line); } catch { /* ignore */ }
-          // §C: when liveLabel is set, filter and emit tool_use lines to stderr.
-          if (opts.liveLabel) {
-            try {
-              const filtered = formatToolUseLine(opts.liveLabel, line.trimEnd());
-              if (filtered) process.stderr.write(filtered + "\n");
-            } catch { /* best-effort — never crash on live output */ }
-          }
-          teeBuf = teeBuf.slice(nl + 1);
-        }
-      });
-      child.stderr.on("data", (chunk: Buffer | string) => {
-        stderr += typeof chunk === "string" ? chunk : chunk.toString("utf8");
-      });
-      child.on("error", (e) => resolve(Either.left(`failed to spawn ${cmd}: ${e.message}`)));
-      child.on("close", (code) => {
-        // Flush trailing partial line
-        if (teeBuf.length > 0) {
-          try { appendFileSync(opts.teeTo, teeBuf); } catch { /* ignore */ }
-          if (opts.liveLabel) {
-            try {
-              const filtered = formatToolUseLine(opts.liveLabel, teeBuf.trimEnd());
-              if (filtered) process.stderr.write(filtered + "\n");
-            } catch { /* best-effort */ }
-          }
-        }
-        if (code === 0) resolve(Either.right(stdout.trim()));
-        else resolve(Either.left((stderr || stdout).trim() || `${cmd} exited with code ${code}`));
-      });
-    });
-  });
-}
+const writeState = (id: string, state: Record<string, unknown>): TaskEither<string, void> =>
+  writeStateRaw(AGENTS_DIR, id, state).map(() => undefined);
 
 // ---------------------------------------------------------------------------
 // Input resolution: spec path OR adw-id → {specPath, source}
 // ---------------------------------------------------------------------------
-
-const ADW_ID_RE = /^[0-9A-HJKMNP-TV-Z]{10}$/;
 
 export interface ResolvedInput {
   specPath: string;

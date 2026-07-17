@@ -34,19 +34,33 @@
  *   agents/{id}/upgrader/events.jsonl      — written by adw-spec-review (if upgrade runs)
  *   agents/{id}/builder/events.jsonl       — written by adw-build subprocess
  *   agents/{id}/builder/raw-output.jsonl   — written by adw-build subprocess
+ *
+ * CHORE-44 Change 8: this file is now a thin CLI adapter. The shared
+ * id/event/state/spawn helpers live in ./adws-modules/dispatcher-runtime.ts;
+ * the generic stage driver lives in ./adws-modules/pipeline.ts. This
+ * orchestrator declares its stage list as a `PipelineConfig` and delegates.
  */
-import { spawn } from "child_process";
-import { appendFileSync, existsSync, mkdirSync, readFileSync, realpathSync } from "fs";
-import { mkdir, writeFile } from "node:fs/promises";
+import { realpathSync } from "fs";
 import { join } from "path";
-import { Either, TaskEither } from "../src/utils/task-either.ts";
+import { Either } from "../src/utils/task-either.ts";
 import type { PlanType } from "./adws-modules/agent.ts";
+import {
+  ADW_ID_RE,
+  readWorkspaceState,
+  recoverSpecPathFromEvents,
+} from "./adws-modules/dispatcher-runtime.ts";
+import {
+  looksLikeSpecPath,
+  runLinearPipeline,
+  spawnStage,
+  tokensOf,
+  type PipelineConfig,
+  type StageRunArgs,
+} from "./adws-modules/pipeline.ts";
 
 const PROJECT_ROOT = realpathSync(join(import.meta.dir, ".."));
 const AGENTS_DIR = join(PROJECT_ROOT, "agents");
 
-/** 10-char Crockford Base32 ULID-timestamp — the workspace id shape. */
-const ADW_ID_RE = /^[0-9A-HJKMNP-TV-Z]{10}$/;
 type StageName = "plan" | "review" | "build";
 const STAGE_ORDER: readonly StageName[] = ["plan", "review", "build"];
 
@@ -88,12 +102,6 @@ export interface OrchestratorArgs {
   id?: string;
   fromStage?: StageName;
   specPath?: string; // NEW: when the input is an existing spec path, plan is skipped
-}
-
-/** Detect whether a positional arg is a spec path (SPEC/BUG/CHORE-*.md) vs a description. */
-function looksLikeSpecPath(s: string): boolean {
-  const base = s.split("/").pop() ?? s;
-  return /^(SPEC|BUG|CHORE)-.*\.md$/i.test(base);
 }
 
 export function parseArgs(argv: string[]): Either<string, OrchestratorArgs> {
@@ -142,52 +150,8 @@ export function parseArgs(argv: string[]): Either<string, OrchestratorArgs> {
 }
 
 // ---------------------------------------------------------------------------
-// Run-state: adwId() + appendEvent() + writeState()
-// ---------------------------------------------------------------------------
-
-const CROCKFORD = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
-
-/** ULID timestamp portion: 48-bit ms-since-epoch → 10 chars Crockford Base32. */
-function adwId(): string {
-  let ms = Date.now();
-  let out = "";
-  for (let i = 0; i < 10; i++) {
-    out = CROCKFORD[ms & 31] + out;
-    ms = Math.floor(ms / 32);
-  }
-  return out;
-}
-
-function appendEvent(id: string, event: Record<string, unknown>, agentsDir: string = AGENTS_DIR): void {
-  const dir = join(agentsDir, id, "orchestrator");
-  mkdirSync(dir, { recursive: true });
-  const line = JSON.stringify({ ts: new Date().toISOString(), ...event }) + "\n";
-  appendFileSync(join(dir, "events.jsonl"), line);
-}
-
-function writeState(id: string, state: Record<string, unknown>, agentsDir: string = AGENTS_DIR): TaskEither<string, void> {
-  return TaskEither.tryCatch(async () => {
-    const dir = join(agentsDir, id);
-    await mkdir(dir, { recursive: true });
-    await writeFile(join(dir, "adw-state.json"), JSON.stringify(state, null, 2) + "\n");
-  }, (e) => `writeState: ${(e as Error).message}`);
-}
-
-// ---------------------------------------------------------------------------
 // Resume support: load an existing workspace to recover what's already done
 // ---------------------------------------------------------------------------
-
-/** The on-disk state shape (written by this orchestrator; new fields are optional). */
-interface WorkspaceState {
-  adw_id: string;
-  description?: string;
-  status?: "running" | "completed" | "failed";
-  agents?: string[];
-  failed_stage?: StageName;
-  completed_stages?: StageName[];
-  spec_path?: string;
-  error?: string;
-}
 
 /** What runPipeline needs to know to resume correctly. */
 export interface ResumeContext {
@@ -195,35 +159,6 @@ export interface ResumeContext {
   specPath: string | null;
   completedStages: StageName[];
   resumeFrom: StageName;
-}
-
-/** Read agents/{id}/adw-state.json; Left if missing or unparseable. */
-function readWorkspaceState(id: string, agentsDir: string = AGENTS_DIR): Either<string, WorkspaceState> {
-  const stateFile = join(agentsDir, id, "adw-state.json");
-  if (!existsSync(stateFile)) return Either.left(`no workspace agents/${id}/adw-state.json — nothing to resume`);
-  const parsed = Either.tryCatch(() => JSON.parse(readFileSync(stateFile, "utf8")) as WorkspaceState);
-  return Either.mapLeft(parsed, (e) => `failed to parse agents/${id}/adw-state.json: ${(e as Error).message}`);
-}
-
-/**
- * Recover the specPath from the orchestrator event log when the state file
- * doesn't have a `spec_path` field (handles workspaces written before that
- * field existed, e.g. 01KVF905BH). Scans events.jsonl backward for the last
- * `stage-complete` event carrying a non-null spec_path.
- */
-function recoverSpecPathFromEvents(id: string, agentsDir: string = AGENTS_DIR): string | null {
-  const eventsFile = join(agentsDir, id, "orchestrator", "events.jsonl");
-  if (!existsSync(eventsFile)) return null;
-  const lines = readFileSync(eventsFile, "utf8").split("\n").filter((l) => l.trim());
-  for (let i = lines.length - 1; i >= 0; i--) {
-    try {
-      const d = JSON.parse(lines[i]!) as Record<string, unknown>;
-      if (d.event === "stage-complete" && typeof d.spec_path === "string" && d.spec_path) {
-        return d.spec_path as string;
-      }
-    } catch { /* malformed line — skip */ }
-  }
-  return null;
 }
 
 /**
@@ -234,7 +169,7 @@ function recoverSpecPathFromEvents(id: string, agentsDir: string = AGENTS_DIR): 
  * - completedStages: state.completed_stages if present; else inferred from agents array.
  */
 export function loadWorkspace(id: string, fromStage?: StageName, agentsDir: string = AGENTS_DIR): Either<string, ResumeContext> {
-  const ws = readWorkspaceState(id, agentsDir);
+  const ws = readWorkspaceState(agentsDir, id);
   if (Either.isLeft(ws)) return ws;
 
   const state = ws.right;
@@ -253,7 +188,7 @@ export function loadWorkspace(id: string, fromStage?: StageName, agentsDir: stri
   // Recover completedStages: explicit field first, else infer from agents array.
   let completedStages: StageName[];
   if (Array.isArray(state.completed_stages)) {
-    completedStages = state.completed_stages;
+    completedStages = state.completed_stages as StageName[];
   } else {
     completedStages = [];
     const agents = state.agents ?? [];
@@ -263,7 +198,7 @@ export function loadWorkspace(id: string, fromStage?: StageName, agentsDir: stri
   }
 
   // Recover specPath: state field first, else events fallback.
-  const specPath = state.spec_path ?? recoverSpecPathFromEvents(id, agentsDir) ?? null;
+  const specPath = state.spec_path ?? recoverSpecPathFromEvents(agentsDir, id) ?? null;
 
   // Determine resumeFrom: override first, else auto-detect (first incomplete stage).
   let resumeFrom: StageName;
@@ -278,12 +213,7 @@ export function loadWorkspace(id: string, fromStage?: StageName, agentsDir: stri
 }
 
 // ---------------------------------------------------------------------------
-// Subprocess stage execution
-//
-// Each stage is a `bun adws/<child>.ts --id <id> <args>` subprocess. stderr is
-// inherited so the user sees live progress ("adw-plan: classified as feature…",
-// etc.); stdout carries the machine-readable "<id> <…> <spec-path>" result line.
-// ADW_ORCHESTRATED=1 tells the child to skip writing its own adw-state.json.
+// Stage result types (the stdout contracts of each child subprocess)
 // ---------------------------------------------------------------------------
 
 /** One parsed stdout line from a stage subprocess. */
@@ -302,30 +232,6 @@ export interface BuildOutcome {
   specPath: string;
 }
 
-/** Spawn a child stage, inherit stderr, capture stdout. Returns [exitCode, stdout, stderr]. */
-function spawnStage(script: string, args: string[]): Promise<{ code: number; stdout: string; stderr: string }> {
-  return new Promise((resolve) => {
-    const child = spawn("bun", [join("adws", script), ...args], {
-      cwd: PROJECT_ROOT,
-      env: { ...process.env, ADW_ORCHESTRATED: "1" },
-      stdio: ["ignore", "pipe", "inherit"], // stdout captured, stderr shown live
-    });
-    let stdout = "";
-    child.stdout.on("data", (chunk: Buffer | string) => {
-      stdout += typeof chunk === "string" ? chunk : chunk.toString("utf8");
-    });
-    child.on("error", () => resolve({ code: 1, stdout, stderr: `failed to spawn ${script}` }));
-    child.on("close", (code) => resolve({ code: code ?? 1, stdout: stdout.trim(), stderr: "" }));
-  });
-}
-
-/** Parse the last non-empty stdout line as space-separated tokens. */
-function tokensOf(stdout: string): string[] | null {
-  const lines = stdout.split("\n").filter((l) => l.trim());
-  if (lines.length === 0) return null;
-  return lines[lines.length - 1]!.trim().split(/\s+/);
-}
-
 // ---------------------------------------------------------------------------
 // Injectable stage functions (so tests can mock them without spawning subprocesses)
 // ---------------------------------------------------------------------------
@@ -342,7 +248,7 @@ const realDeps: PipelineDeps = {
     const args = [description];
     if (forcedType) args.push(`--${forcedType}`);
     args.push("--id", id);
-    const r = await spawnStage("adw-plan.ts", args);
+    const r = await spawnStage("adw-plan.ts", args, { projectRoot: PROJECT_ROOT });
     if (r.code !== 0) return Either.left(r.stdout || `adw-plan exited with code ${r.code}`);
     const tokens = tokensOf(r.stdout);
     // plan stdout: "<id> <spec-path>" or "<id> -"
@@ -352,7 +258,7 @@ const realDeps: PipelineDeps = {
   },
 
   runSpecReview: async (specPath, id): Promise<Either<string, SpecReviewResult>> => {
-    const r = await spawnStage("adw-spec-review.ts", [specPath, "--id", id]);
+    const r = await spawnStage("adw-spec-review.ts", [specPath, "--id", id], { projectRoot: PROJECT_ROOT });
     if (r.code !== 0) return Either.left(r.stdout || `adw-spec-review exited with code ${r.code}`);
     const tokens = tokensOf(r.stdout);
     // spec-review stdout: "<id> <pass|upgraded|unchanged> <spec-path>"
@@ -368,7 +274,7 @@ const realDeps: PipelineDeps = {
     const args = [specPath];
     if (modelOverride) args.push("--model", modelOverride);
     args.push("--id", id);
-    const r = await spawnStage("adw-build.ts", args);
+    const r = await spawnStage("adw-build.ts", args, { projectRoot: PROJECT_ROOT });
     if (r.code !== 0) return Either.left(r.stdout || `adw-build exited with code ${r.code}`);
     const tokens = tokensOf(r.stdout);
     // build stdout: "<id> <spec-path>"
@@ -378,22 +284,7 @@ const realDeps: PipelineDeps = {
 };
 
 // ---------------------------------------------------------------------------
-// Orchestrator state shape
-// ---------------------------------------------------------------------------
-
-interface OrchestratorState {
-  adw_id: string;
-  description: string;
-  status: "running" | "completed" | "failed";
-  agents?: string[]; // which agent subdirs ran under this workspace id
-  failed_stage?: StageName;
-  completed_stages?: StageName[]; // explicit record of which stages have finished
-  spec_path?: string; // the surviving spec path (for resume recovery)
-  error?: string;
-}
-
-// ---------------------------------------------------------------------------
-// runPipeline() — the callable core (testable with mocked deps)
+// runPipeline() — declarative config consumed by runLinearPipeline
 // ---------------------------------------------------------------------------
 
 export interface PipelineResult {
@@ -405,6 +296,73 @@ export interface PipelineResult {
     build?: BuildOutcome;
   };
 }
+
+/** The three-stage pipeline as a declarative config (AC8.2). */
+const PIPELINE_CONFIG: PipelineConfig<StageName, PipelineDeps, PipelineResult["stages"], PipelineResult> = {
+  pipelineName: "adw-plan-reviewspec-build",
+  successStatus: "completed",
+  agentsFor: (stages) => {
+    const agents: string[] = [];
+    if (stages.plan) agents.push("planner");
+    if (stages.review) agents.push("reviewer", "upgrader");
+    if (stages.build) agents.push("builder");
+    return agents;
+  },
+  buildResult: (ctx, stages) => ({ id: ctx.id, specPath: ctx.specPath!, stages }),
+  stages: [
+    {
+      name: "plan",
+      posLabel: "1/3",
+      scriptName: "plan",
+      shouldRun: (args, resume) => !args.specPathInput && (!resume || resume.resumeFrom === "plan"),
+      skipReason: (args) => args.specPathInput ? "spec path given as input" : "already completed",
+      run: async (deps, ctx) => deps.runPlan(ctx.description, undefined, ctx.id),
+      abortOnEmptySpec: (result) => {
+        const r = result as PlanResult;
+        return r.specPath === null ? "plan stage produced no spec — nothing to review or build" : null;
+      },
+      complete: (result, ctx) => {
+        const r = result as PlanResult;
+        ctx.specPath = r.specPath;
+        return { event: { event: "stage-complete", stage: "plan", spec_path: r.specPath } };
+      },
+    },
+    {
+      name: "review",
+      posLabel: "2/3",
+      scriptName: "spec-review",
+      // On resume-from-build, skip review. The original predicate:
+      //   `!resume || resume.resumeFrom !== "build"`.
+      shouldRun: (_args, resume) => !resume || resume.resumeFrom !== "build",
+      skipReason: () => "already completed",
+      run: async (deps, ctx) => deps.runSpecReview(ctx.specPath!, ctx.id),
+      complete: (result, _ctx) => {
+        const r = result as SpecReviewResult;
+        return {
+          event: {
+            event: "stage-complete",
+            stage: "review",
+            kind: r.kind,
+            spec_path: r.specPath,
+          },
+        };
+      },
+    },
+    {
+      name: "build",
+      posLabel: "3/3",
+      scriptName: "build",
+      // Always runs — it's terminal; re-running is the point.
+      shouldRun: () => true,
+      skipReason: () => "already completed",
+      run: async (deps, ctx) => deps.runBuild(ctx.specPath!, ctx.modelOverride, ctx.id),
+      complete: (result, _ctx) => {
+        const r = result as BuildOutcome;
+        return { event: { event: "stage-complete", stage: "build", spec_path: r.specPath } };
+      },
+    },
+  ],
+};
 
 /**
  * Run the full pipeline (or resume it). Returns Either<string, PipelineResult>
@@ -420,9 +378,6 @@ export async function runPipeline(
   args: OrchestratorArgs,
   agentsDir: string = AGENTS_DIR,
 ): Promise<Either<string, PipelineResult>> {
-  // ── Resolve the workspace id: provided (resume) or minted (fresh run) ────
-  const id = args.id ?? adwId();
-
   // ── If resuming, load the workspace to recover what's already done ───────
   let resume: ResumeContext | null = null;
   if (args.id) {
@@ -431,163 +386,32 @@ export async function runPipeline(
     resume = loaded.right;
   }
 
-  // ── Resolve the description: from args, specPath (plan skipped), or state ─
-  // When a spec path is given as input, plan is skipped (the spec already
-  // exists); the description is the spec path itself for traceability.
-  const description = args.description || args.specPath || resume?.description || "";
-  if (!description) {
-    return Promise.resolve(Either.left("description required for fresh runs (or pass --id to resume)"));
-  }
-
-  // ── State + stages setup ─────────────────────────────────────────────────
-  const completedStages: StageName[] = resume ? [...resume.completedStages] : [];
-  // specPath: from explicit spec-path input, resume recovery, or null (plan will produce it).
-  let specPath: string | null = args.specPath ?? resume?.specPath ?? null;
-  const stages: PipelineResult["stages"] = {} as PipelineResult["stages"];
-  // Seed stages object for finalize's agents computation: skipped stages still
-  // count as "ran" historically.
-  // When a spec path was given as input, plan is treated as completed (the spec
-  // already exists) — seed it so plan is skipped and agents includes "planner".
-  if (args.specPath && !completedStages.includes("plan")) {
-    completedStages.push("plan");
-  }
-  if (completedStages.includes("plan")) {
-    stages.plan = { id, specPath };
-  }
-  if (completedStages.includes("review") && specPath) {
-    stages.review = { id, specPath, kind: "pass" };
-  }
-  if (completedStages.includes("build") && specPath) {
-    stages.build = { id, specPath };
-  }
-
-  const state: OrchestratorState = {
-    adw_id: id,
-    description,
-    status: "running",
-    completed_stages: completedStages,
-    ...(specPath ? { spec_path: specPath } : {}),
+  // Thread orchestrator-specific flags (forcedType, modelOverride) into the
+  // stage fns via curried deps + PipelineContext. forcedType is read by plan
+  // through this closure; modelOverride is carried by PipelineContext and read
+  // by the build descriptor directly.
+  const depsWithFlags: PipelineDeps = {
+    runPlan: (description, forcedType, id) => deps.runPlan(description, args.forcedType ?? forcedType, id),
+    runSpecReview: deps.runSpecReview,
+    runBuild: deps.runBuild,
   };
 
-  // Helper to finalize state + return a Left (stage failure) or Right (success).
-  const finalize = async (result: Either<string, PipelineResult>): Promise<Either<string, PipelineResult>> => {
-    const agents: string[] = [];
-    if (stages.plan) agents.push("planner");
-    if (stages.review) agents.push("reviewer", "upgrader");
-    if (stages.build) agents.push("builder");
-    const finalState: OrchestratorState = { ...state, agents, completed_stages: completedStages };
-    if (specPath) finalState.spec_path = specPath;
-    if (Either.isLeft(result)) {
-      await writeState(id, { ...finalState, status: "failed", error: result.left } as Record<string, unknown>, agentsDir).run();
-    } else {
-      await writeState(id, { ...finalState, status: "completed" } as Record<string, unknown>, agentsDir).run();
-    }
-    return result;
+  const stageRunArgs: StageRunArgs & { description?: string; specPath?: string; id?: string } = {
+    description: args.description,
+    specPath: args.specPath,
+    id: args.id,
+    specPathInput: !!args.specPath,
+    forcedType: args.forcedType,
+    modelOverride: args.modelOverride,
   };
 
-  // Checkpoint: write the current running-state to disk after each stage
-  // completes so an interruption (SIGTERM, crash) between stages leaves a
-  // state file that correctly reflects which stages finished. Without this,
-  // resume would re-run completed stages because the in-memory
-  // `completedStages` array was never persisted.
-  const checkpoint = async (): Promise<void> => {
-    const snapshot: OrchestratorState = { ...state, completed_stages: completedStages };
-    if (specPath) snapshot.spec_path = specPath;
-    await writeState(id, snapshot as unknown as Record<string, unknown>, agentsDir).run();
-  };
-
-  // ── Initial state + start/resume event ───────────────────────────────────
-  await writeState(id, state as unknown as Record<string, unknown>, agentsDir).run();
-  if (resume) {
-    appendEvent(id, {
-      event: "resume",
-      from_stage: resume.resumeFrom,
-      completed_stages: resume.completedStages,
-      recovered_spec_path: resume.specPath,
-    }, agentsDir);
-    process.stderr.write(
-      `adw-plan-reviewspec-build: resuming workspace ${id} from stage "${resume.resumeFrom}" ` +
-      `(completed: ${resume.completedStages.join(",") || "none"})\n`,
-    );
-  } else {
-    appendEvent(id, { event: "start", description }, agentsDir);
-  }
-
-  // ── Stage 1: plan (skip if spec-path input, already completed, or resuming past it) ──
-  const shouldRunPlan = !args.specPath && (!resume || resume.resumeFrom === "plan");
-  if (shouldRunPlan) {
-    process.stderr.write("adw-plan-reviewspec-build: stage 1/3 — plan\n");
-    const planRes = await deps.runPlan(description, args.forcedType, id);
-    if (Either.isLeft(planRes)) {
-      appendEvent(id, { event: "stage-error", stage: "plan", detail: planRes.left }, agentsDir);
-      state.failed_stage = "plan";
-      return finalize(Either.left(`plan stage failed: ${planRes.left}`));
-    }
-    stages.plan = planRes.right;
-    specPath = planRes.right.specPath;
-    if (specPath) state.spec_path = specPath;
-    appendEvent(id, { event: "stage-complete", stage: "plan", spec_path: planRes.right.specPath }, agentsDir);
-
-    if (!planRes.right.specPath) {
-      appendEvent(id, { event: "stage-error", stage: "plan", detail: "plan produced no spec (skill noop)" }, agentsDir);
-      state.failed_stage = "plan";
-      return finalize(Either.left("plan stage produced no spec — nothing to review or build"));
-    }
-    if (!completedStages.includes("plan")) completedStages.push("plan");
-    await checkpoint();
-  } else {
-    const reason = args.specPath ? "spec path given as input" : "already completed";
-    process.stderr.write(`adw-plan-reviewspec-build: stage 1/3 — plan [SKIPPED, ${reason}]\n`);
-    if (args.specPath) {
-      appendEvent(id, { event: "stage-complete", stage: "plan", spec_path: args.specPath, skipped: true, reason: "spec-path input" }, agentsDir);
-    }
-  }
-
-  // specPath is required from here on (either just-produced by plan, or recovered from resume).
-  if (!specPath) {
-    state.failed_stage = "review";
-    return finalize(Either.left("cannot proceed to review: no spec path (plan not completed and no recovered path)"));
-  }
-  const specPathForLater = specPath;
-
-  // ── Stage 2: spec-review (skip if resuming past it) ──────────────────────
-  // Skip when resumeFrom is "build" (forcing start at build) — the override
-  // means skip everything before build regardless of completion state.
-  const shouldRunReview = !resume || resume.resumeFrom !== "build";
-  if (shouldRunReview) {
-    process.stderr.write("adw-plan-reviewspec-build: stage 2/3 — spec-review\n");
-    const reviewRes = await deps.runSpecReview(specPathForLater, id);
-    if (Either.isLeft(reviewRes)) {
-      appendEvent(id, { event: "stage-error", stage: "review", detail: reviewRes.left }, agentsDir);
-      state.failed_stage = "review";
-      return finalize(Either.left(`spec-review stage failed: ${reviewRes.left}`));
-    }
-    stages.review = reviewRes.right;
-    appendEvent(id, {
-      event: "stage-complete",
-      stage: "review",
-      kind: reviewRes.right.kind,
-      spec_path: reviewRes.right.specPath,
-    }, agentsDir);
-    if (!completedStages.includes("review")) completedStages.push("review");
-    await checkpoint();
-  } else {
-    process.stderr.write(`adw-plan-reviewspec-build: stage 2/3 — spec-review [SKIPPED, already completed]\n`);
-  }
-
-  // ── Stage 3: build (always runs — it's terminal; re-running is the point) ─
-  process.stderr.write("adw-plan-reviewspec-build: stage 3/3 — build\n");
-  const buildRes = await deps.runBuild(specPathForLater, args.modelOverride, id);
-  if (Either.isLeft(buildRes)) {
-    appendEvent(id, { event: "stage-error", stage: "build", detail: buildRes.left }, agentsDir);
-    state.failed_stage = "build";
-    return finalize(Either.left(`build stage failed: ${buildRes.left}`));
-  }
-  stages.build = buildRes.right;
-  appendEvent(id, { event: "stage-complete", stage: "build", spec_path: buildRes.right.specPath }, agentsDir);
-  if (!completedStages.includes("build")) completedStages.push("build");
-
-  return finalize(Either.right({ id, specPath: specPathForLater, stages }));
+  return runLinearPipeline<StageName, PipelineDeps, PipelineResult["stages"], PipelineResult>(
+    PIPELINE_CONFIG,
+    depsWithFlags,
+    stageRunArgs,
+    resume,
+    agentsDir,
+  );
 }
 
 // ---------------------------------------------------------------------------

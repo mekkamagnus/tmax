@@ -30,10 +30,10 @@
  * 1 = usage error / missing script / tmux failure; foreground preserves the
  * child's exit code otherwise.
  */
-import { spawn } from "child_process";
 import { existsSync, readdirSync, realpathSync } from "fs";
 import { isAbsolute, join } from "path";
 import { Either, TaskEither } from "../src/utils/task-either.ts";
+import { run, type RunOpts } from "./adws-modules/dispatcher-runtime.ts";
 import {
   ensureSession,
   ensureTmux,
@@ -283,41 +283,9 @@ export function buildTmuxCommand(projectRoot: string, scriptPath: string, script
 // ---------------------------------------------------------------------------
 // Subprocess helper (used as TmuxLauncherDeps.run)
 // ---------------------------------------------------------------------------
-
-interface RunOpts {
-  cwd?: string;
-  env?: Record<string, string>;
-}
-
-/**
- * Spawn, capture stdout/stderr. Returns TaskEither (lazy, composable).
- * Left = non-zero exit (error = stderr||stdout); Right = trimmed stdout.
- * Copied from adw-build.ts — the canonical run() helper for adws dispatchers.
- */
-function run(cmd: string, args: string[], opts: RunOpts = {}): TaskEither<string, string> {
-  return TaskEither.from(async () => {
-    return await new Promise<Either<string, string>>((resolve) => {
-      const child = spawn(cmd, args, {
-        cwd: opts.cwd,
-        env: opts.env ? { ...process.env, ...opts.env } : process.env,
-        stdio: ["ignore", "pipe", "pipe"],
-      });
-      let stdout = "";
-      let stderr = "";
-      child.stdout.on("data", (chunk: Buffer | string) => {
-        stdout += typeof chunk === "string" ? chunk : chunk.toString("utf8");
-      });
-      child.stderr.on("data", (chunk: Buffer | string) => {
-        stderr += typeof chunk === "string" ? chunk : chunk.toString("utf8");
-      });
-      child.on("error", (e) => resolve(Either.left(`failed to spawn ${cmd}: ${e.message}`)));
-      child.on("close", (code) => {
-        if (code === 0) resolve(Either.right(stdout.trim()));
-        else resolve(Either.left((stderr || stdout).trim() || `${cmd} exited with code ${code}`));
-      });
-    });
-  });
-}
+// `run` is imported from ./adws-modules/dispatcher-runtime.ts (CHORE-44
+// Change 8). Previously this file had its own copy "from adw-build.ts — the
+// canonical run() helper"; that duplication is now eliminated.
 
 // ---------------------------------------------------------------------------
 // Remote dispatch (SPEC-065)
