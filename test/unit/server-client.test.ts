@@ -2,7 +2,10 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { connectWithTimeout, forceShutdown, sweepTestSockets } from "../fixtures/server-test-helpers.ts";
 import { TmaxServer } from "../../src/server/server.ts";
 
-const SERVER_CLIENT_TIMEOUT_MS = 20000;
+// Match the canonical unit runner's per-test budget. Under the full serial
+// suite, editor/server startup can exceed 20s even though the same test takes
+// ~1s in isolation; 60s still bounds genuine socket failures.
+const SERVER_CLIENT_TIMEOUT_MS = 60_000;
 
 async function ping(socketPath: string): Promise<Record<string, unknown>> {
   const socket = await connectWithTimeout(socketPath);

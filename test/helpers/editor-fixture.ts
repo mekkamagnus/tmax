@@ -1,6 +1,7 @@
 import { Editor } from "../../src/editor/editor.ts";
-import type { TerminalIO } from "../../src/core/types.ts";
-import type { FileSystem } from "../../src/core/types.ts";
+import { afterEach } from "bun:test";
+import type { TerminalIO } from "../../src/core/contracts/terminal.ts";
+import type { FileSystem } from "../../src/core/contracts/filesystem.ts";
 import type { TLispValue } from "../../src/tlisp/types.ts";
 import { Either, type Either as EitherValue } from "../../src/utils/task-either.ts";
 import { MockFileSystem } from "../mocks/filesystem.ts";
@@ -9,7 +10,7 @@ import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { EditorAPIContext } from "../../src/editor/runtime/editor-api-context.ts";
-import type { TextBuffer } from "../../src/core/types.ts";
+import type { TextBuffer } from "../../src/core/contracts/buffer.ts";
 import { initialModel } from "../../src/editor/functional/model.ts";
 import type { EditorModel } from "../../src/editor/functional/model.ts";
 import { update } from "../../src/editor/functional/index.ts";
@@ -169,6 +170,16 @@ export interface EditorFixture {
   readonly dispose: () => void;
 }
 
+/** Compatibility fixtures returned as bare editors cannot expose dispose().
+ * Keep their handles until Bun's per-test teardown so legacy callers receive
+ * the same deterministic lifecycle as explicit createEditorFixture users. */
+const compatibilityFixtures = new Set<EditorFixture>();
+
+afterEach(() => {
+  for (const fixture of compatibilityFixtures) fixture.dispose();
+  compatibilityFixtures.clear();
+});
+
 /** Isolate the SPEC-055 log file per editor instance so tail-load never reads
  *  the developer's real ~/.config/tmax/messages.log AND never carries entries
  *  from a prior test in the same file (each editor gets its own empty log). */
@@ -248,6 +259,7 @@ export async function createEditorFixture(options: EditorFixtureOptions = {}): P
  */
 export async function createStartedEditor(content?: string): Promise<Editor> {
   const fixture = await createEditorFixture({ initialContent: content });
+  compatibilityFixtures.add(fixture);
   return fixture.editor;
 }
 

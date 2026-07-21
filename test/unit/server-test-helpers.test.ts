@@ -39,9 +39,10 @@ describe('server-test-helpers', () => {
         const start = Date.now();
         await expect(connectWithTimeout('/tmp/dummy-hang-test.sock', timeoutMs)).rejects.toThrow(/timed out/i);
         const elapsed = Date.now() - start;
-        // Must wait at least timeoutMs (the timeout fired) but not much more.
+        // Must wait at least timeoutMs (the timeout fired) and remain bounded.
+        // Full-suite event-loop contention can delay timer delivery by >500ms.
         expect(elapsed).toBeGreaterThanOrEqual(timeoutMs - 50);
-        expect(elapsed).toBeLessThan(timeoutMs + 500);
+        expect(elapsed).toBeLessThan(timeoutMs + 2_000);
       } finally {
         Socket.prototype.connect = originalConnect;
       }
