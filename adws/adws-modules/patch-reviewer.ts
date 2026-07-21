@@ -469,14 +469,11 @@ export function runGates(
       output: (tcRes.right.stdout + tcRes.right.stderr).trim(),
     };
 
-    safePhase(options.onPhase, "gates:unit", "bun test test/unit/");
-    // Spawn 'bun test' directly, NOT 'bun run test:unit'. Same grandchild
-    // drain-block fix as BUG-18 in tester.ts — 'bun run' creates a grandchild
-    // that keeps pipes open with detached:true, preventing stream 'end'.
+    safePhase(options.onPhase, "gates:unit", "bun run test:unit");
     // BUG-16: race against a 10-min wall-clock timeout. The full suite can
     // hang due to the cumulative server-test handle leak; without this cap the
     // patch-review gate blocks indefinitely.
-    const UNIT_GATE_TIMEOUT_MS = 1_200_000; // 20 min — the suite takes ~900s
+    const UNIT_GATE_TIMEOUT_MS = 3_600_000; // outer safety net; runner has a 120s inactivity guard
     let unit: GateResult;
     try {
       // BUG-16: use 'bun run test:unit' (the wrapper) which excludes adw-* LLM

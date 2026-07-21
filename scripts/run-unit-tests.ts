@@ -13,8 +13,8 @@
  * Fix: run `bun test` as a child, stream its stdout/stderr through, and watch
  * for the summary line (`Ran N tests across M files`). Once it appears, we know
  * every test ran — force-kill the child (preserving its exit code) and exit.
- * If a test genuinely hangs (no summary within the hard timeout), the wrapper
- * reports failure instead of masking it.
+ * If a test genuinely hangs (no output within the inactivity timeout), the
+ * wrapper reports failure instead of masking it.
  *
  * Usage: bun scripts/run-unit-tests.ts [extra bun-test args]
  */
@@ -24,9 +24,6 @@ import { spawn } from "child_process";
 // tests (server startup, socket RPC, debounced auto-save) take far longer than
 // their isolated runtime. 60s gives headroom without masking genuine hangs.
 const PER_TEST_TIMEOUT_MS = 60_000;
-// Ceiling for the whole suite: ~3000 tests across ~200 files. Under load the
-// suite takes ~13-15 min; 20 min catches a genuinely hung process.
-const HARD_TIMEOUT_MS = 1_200_000;
 // BUG-16: inactivity timer — if the child produces NO output for this long, a
 // test is blocked mid-suite (not an exit-stall, which happens after the summary).
 // Server tests under load can have 30-60s gaps between output lines during slow
@@ -40,11 +37,17 @@ const INACTIVITY_TIMEOUT_MS = 120_000;
 import { readdirSync } from "fs";
 import { join } from "path";
 
-function buildTestArgs(): string[] {
+// Keep cross-file contention low enough that test-local 20s/60s deadlines
+// remain meaningful on loaded developer machines. Five files still amortize
+// startup while avoiding the starvation seen when all ~200 files shared one
+// Bun process (BUG-16).
+const FILES_PER_BATCH = 5;
+
+function buildTestBatches(): string[][] {
   const explicitTarget = process.argv.slice(2).find((a) => !a.startsWith("-"));
   const flags = process.argv.slice(2).filter((a) => a.startsWith("-"));
   if (explicitTarget) {
-    return ["test", "--timeout", String(PER_TEST_TIMEOUT_MS), explicitTarget, ...flags];
+    return [["test", "--timeout", String(PER_TEST_TIMEOUT_MS), explicitTarget, ...flags]];
   }
   // Default: all test/unit/*.test.ts EXCEPT adw-* (LLM-subprocess integration tests)
   const unitDir = join(import.meta.dir, "..", "test", "unit");
@@ -58,81 +61,74 @@ function buildTestArgs(): string[] {
   // inactivity timer below. With --dots + the per-test timeout, the longest
   // plausible output gap is ~PER_TEST_TIMEOUT_MS, comfortably under 120s, so
   // the inactivity timer still catches a genuine hang.
-  return ["test", "--dots", "--timeout", String(PER_TEST_TIMEOUT_MS), ...allFiles, ...flags];
+  const batches: string[][] = [];
+  for (let i = 0; i < allFiles.length; i += FILES_PER_BATCH) {
+    batches.push([
+      "test", "--dots", "--timeout", String(PER_TEST_TIMEOUT_MS),
+      ...allFiles.slice(i, i + FILES_PER_BATCH),
+      ...flags,
+    ]);
+  }
+  return batches;
 }
 
-const args = buildTestArgs();
-const child = spawn("bun", args, { stdio: ["ignore", "pipe", "pipe"] });
+function runBatch(args: string[], index: number, total: number): Promise<number> {
+  return new Promise((resolve) => {
+    process.stdout.write(`\nrun-unit-tests: batch ${index + 1}/${total}\n`);
+    const child = spawn("bun", args, { stdio: ["ignore", "pipe", "pipe"] });
+    let combined = "";
+    let sawSummary = false;
+    let forcedAfterSummary = false;
+    let lastActivityMs = Date.now();
+    let graceTimeout: ReturnType<typeof setTimeout> | undefined;
 
-let stdout = "";
-let stderr = "";
-let sawSummary = false;
-let lastActivityMs = Date.now();
+    const onOutput = (chunk: Buffer, stream: NodeJS.WriteStream): void => {
+      const text = chunk.toString();
+      combined += text;
+      stream.write(text);
+      lastActivityMs = Date.now();
+      if (!sawSummary && /\bRan \d+ tests? across \d+ files?\b/.test(combined)) {
+        sawSummary = true;
+        graceTimeout = setTimeout(() => {
+          if (child.exitCode === null) {
+            forcedAfterSummary = true;
+            process.stderr.write("\nrun-unit-tests: batch reported; force-exiting stuck event loop (BUG-16).\n");
+            child.kill("SIGKILL");
+          }
+        }, 2000);
+      }
+    };
 
-// Stream output through so the caller sees live progress.
-child.stdout.on("data", (chunk: Buffer) => {
-  const text = chunk.toString();
-  stdout += text;
-  process.stdout.write(text);
-  // The summary line bun prints once all tests in all files have run, e.g.
-  // "Ran 1692 tests across 100 files. [70.64s]" — presence means every file
-  // executed and the only thing left is the (stuck) event-loop drain.
-  if (!sawSummary && /\bRan \d+ tests? across \d+ files?\b/.test(text)) {
-    sawSummary = true;
-  }
-  // Reset the inactivity timer on every output chunk.
-  lastActivityMs = Date.now();
-});
-child.stderr.on("data", (chunk: Buffer) => {
-  const text = chunk.toString();
-  stderr += text;
-  process.stderr.write(text);
-  lastActivityMs = Date.now();
-});
+    child.stdout.on("data", (chunk: Buffer) => onOutput(chunk, process.stdout));
+    child.stderr.on("data", (chunk: Buffer) => onOutput(chunk, process.stderr));
 
-// Hard ceiling: if no summary ever appears, a test is genuinely hanging — fail.
-const hardTimer = setTimeout(() => {
-  if (!sawSummary) {
-    process.stderr.write(
-      `\nrun-unit-tests: no summary after ${Math.round(HARD_TIMEOUT_MS / 1000)}s — a test is hanging, not an exit-stall. Failing.\n`,
-    );
-    child.kill("SIGKILL");
-    process.exit(1);
-  }
-}, HARD_TIMEOUT_MS);
-hardTimer.unref();
-
-child.on("exit", (code) => {
-  clearTimeout(hardTimer);
-  // Natural exit — respect the real code.
-  process.exit(code ?? 1);
-});
-
-// Once the summary has printed, the tests are done; if the child hasn't exited
-// on its own within a short grace window, force-kill it (BUG-16 exit-stall).
-// Also check for mid-suite inactivity (BUG-16 mid-test block).
-const graceTimer = setInterval(() => {
-  // BUG-16 mid-test block: if no output for INACTIVITY_TIMEOUT_MS and we
-  // haven't seen the summary, a test is blocked. Kill and fail loudly.
-  if (!sawSummary && Date.now() - lastActivityMs > INACTIVITY_TIMEOUT_MS) {
-    process.stderr.write(
-      `\nrun-unit-tests: no output for ${Math.round(INACTIVITY_TIMEOUT_MS / 1000)}s and no summary — mid-suite hang (BUG-16). Failing.\n`,
-    );
-    child.kill("SIGKILL");
-    process.exit(1);
-  }
-
-  if (sawSummary) {
-    // Give bun a moment to flush + exit naturally; if still alive, force it.
-    setTimeout(() => {
-      if (!child.killed) {
+    const inactivityTimer = setInterval(() => {
+      if (!sawSummary && Date.now() - lastActivityMs > INACTIVITY_TIMEOUT_MS) {
         process.stderr.write(
-          "\nrun-unit-tests: all tests reported; force-exiting stuck event loop (BUG-16).\n",
+          `\nrun-unit-tests: batch ${index + 1} produced no output for ${Math.round(INACTIVITY_TIMEOUT_MS / 1000)}s — failing.\n`,
         );
         child.kill("SIGKILL");
       }
-    }, 2000).unref();
-    clearInterval(graceTimer);
-  }
-}, 500);
-graceTimer.unref();
+    }, 500);
+
+    child.on("error", (error) => {
+      process.stderr.write(`run-unit-tests: failed to spawn batch: ${error.message}\n`);
+    });
+    child.on("exit", (code) => {
+      clearInterval(inactivityTimer);
+      if (graceTimeout) clearTimeout(graceTimeout);
+      if (forcedAfterSummary) {
+        resolve(/\b[1-9]\d* fail\b/.test(combined) ? 1 : 0);
+      } else {
+        resolve(code ?? 1);
+      }
+    });
+  });
+}
+
+const batches = buildTestBatches();
+for (let i = 0; i < batches.length; i++) {
+  const code = await runBatch(batches[i]!, i, batches.length);
+  if (code !== 0) process.exit(code);
+}
+process.stdout.write(`\nrun-unit-tests: ${batches.length} batches passed\n`);

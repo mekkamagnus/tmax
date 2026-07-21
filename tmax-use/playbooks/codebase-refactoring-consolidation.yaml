@@ -21,6 +21,7 @@ setup:
       - item one
       alpha line
       number 42 here
+      UNIQUE-YANK-TARGET
 
 terminal:
   height: 30
@@ -63,13 +64,16 @@ steps:
     expect:
       buffer_contains: "omega line"
 
-  # 6. A Vim edit/yank/paste sequence changes the buffer exactly as expected:
-  #    yy yanks the heading line, p pastes it below.
-  - name: yy + p duplicates the heading line
-    setup_cursor: [0, 0]
+  # 6. A Vim edit/yank/paste sequence duplicates a line whose text occurs only
+  #    once in setup. The newline-bearing assertion proves adjacent duplication
+  #    rather than merely finding the pre-existing source line.
+  - name: yy + p duplicates the unique target line adjacently
+    setup_cursor: [6, 0]
     keys: "yyp"
     expect:
-      buffer_contains: "CHORE-44 Parity"
+      buffer_contains: |-
+        UNIQUE-YANK-TARGET
+        UNIQUE-YANK-TARGET
 
   # 7. :w reports a saved status and the file remains associated with the
   #    current buffer (driven through real command-mode keys).
@@ -79,12 +83,17 @@ steps:
     expect:
       status_message: "Saved"
 
-  # 8. Headless capture contains the edited text and the status line.
-  - name: headless capture contains edited text and status
+  # 8–9. Each headed assertion gets its own step because YAML mappings cannot
+  #      contain duplicate screen_contains keys.
+  - name: headless capture contains substituted text
     headed: true
     keys: "<Escape>"
     expect:
       screen_contains: "omega"
+
+  - name: headless capture contains document heading
+    headed: true
+    expect:
       screen_contains: "CHORE-44 Parity"
 
 cleanup: true
