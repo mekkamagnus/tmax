@@ -1,5 +1,11 @@
 # Learnings
 
+## Workflow: Repository-local tmax must run repository code
+
+When `tmax` is invoked from inside the tmax repository, launcher and demo validation must prove that the daemon and client originate from the current checkout. A globally installed `tmax` is not an acceptable substitute, even when it appears earlier on `PATH`. Tests and playbooks that claim to exercise normal launch behavior must use the same repository-local entry path a developer uses and must detect stale or foreign daemon code.
+
+**Rule:** Reproduce launcher and UI behavior through the repository-local `tmax` command, verify the daemon/client source identity, and reject stale global or pre-refactor processes before accepting an e2e result.
+
 ## Type Safety: Bun does not enforce TypeScript
 
 Bun strips types at runtime without checking them. `bun test` and `bun run start` pass even with hundreds of type errors. ALWAYS run `bunx tsc --noEmit` (or the `typecheck` script) after changes. The CI pipeline enforces this, but run it locally before pushing.
