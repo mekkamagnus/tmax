@@ -1,5 +1,5 @@
 import { style } from "../../steep/matcha.ts";
-import type { FoldState } from "../../core/types.ts";
+import type { FoldState } from "../../core/contracts/editor.ts";
 
 export interface GutterConfig {
   showLineNumbers: boolean;

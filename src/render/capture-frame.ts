@@ -4,7 +4,7 @@
  * Mirrors the TUI client's render() but returns strings instead of writing to a terminal.
  */
 
-import type { EditorState } from "../core/types.ts";
+import type { EditorState } from "../core/contracts/editor.ts";
 import { renderBufferLines, getVisibleViewportTop } from "../frontend/render/buffer-lines.ts";
 import { renderStatusLine } from "../frontend/render/status-line.ts";
 import { renderCommandInput } from "../frontend/render/command-input.ts";

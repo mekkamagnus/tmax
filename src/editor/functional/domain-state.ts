@@ -34,8 +34,8 @@ import { createVisualState } from "../api/visual-ops.ts";
 import type { VisualOps, VisualSelection } from "../api/visual-ops.ts";
 import { bindMacros, createMacroState } from "../api/macro-recording.ts";
 import type { MacroState, MacroOps } from "../api/macro-recording.ts";
-import type { Range } from "../../core/types.ts";
-import type { HighlightSpan } from "../../core/types.ts";
+import type { Range } from "../../core/contracts/primitives.ts";
+import type { HighlightSpan } from "../../core/contracts/editor.ts";
 import type { MajorModeConfig, AutoModeRule } from "../mode-state.ts";
 import type { UndoRedoDomainState } from "../api/undo-redo-ops.ts";
 

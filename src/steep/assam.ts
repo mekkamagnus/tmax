@@ -1,5 +1,5 @@
 import type { Editor as EditorClass } from "../editor/editor.ts";
-import type { EditorState } from "../core/types.ts";
+import type { EditorState } from "../core/contracts/editor.ts";
 import type { Frontend } from "../frontend/frontends/types.ts";
 import { renderBufferLines, getVisibleViewportTop, getCursorScreenOffset } from "../frontend/render/buffer-lines.ts";
 import { renderCommandInput } from "../frontend/render/command-input.ts";

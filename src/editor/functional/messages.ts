@@ -11,19 +11,9 @@
  * not modelled as Msgs here.
  */
 
-import type {
-  Position,
-  TextBuffer,
-  WhichKeyBinding,
-  LSPDiagnostic,
-  Window,
-  Tab,
-  HighlightSpan,
-  Range,
-  MinibufferRenderView,
-  JsonValue,
-  EditorConfig,
-} from "../../core/types.ts";
+import type { Position, Range } from "../../core/contracts/primitives.ts";
+import type { TextBuffer } from "../../core/contracts/buffer.ts";
+import type { WhichKeyBinding, LSPDiagnostic, Window, Tab, HighlightSpan, MinibufferRenderView, JsonValue, EditorConfig } from "../../core/contracts/editor.ts";
 import type { AppError } from "../../error/types.ts";
 import type { TLispValue } from "../../tlisp/types.ts";
 import type { EditorModel } from "./model.ts";

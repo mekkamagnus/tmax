@@ -3,7 +3,7 @@
  * @description Central registry mapping language names to syntax rules.
  */
 
-import type { SyntaxRule } from "../core/types.ts";
+import type { SyntaxRule } from "../core/contracts/editor.ts";
 import { rules as tsRules } from "./languages/typescript.ts";
 import { rules as pyRules } from "./languages/python.ts";
 import { rules as lispRules } from "./languages/lisp.ts";

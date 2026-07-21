@@ -3,7 +3,7 @@
  * @description JSON-safe serialization for opaque T-Lisp values.
  */
 
-import type { JsonValue } from "../core/types.ts";
+import type { JsonValue } from "../core/contracts/editor.ts";
 import type { TLispValue } from "./types.ts";
 import {
   createBoolean,

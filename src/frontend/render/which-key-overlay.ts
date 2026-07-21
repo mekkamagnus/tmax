@@ -7,7 +7,7 @@
  * prefix header row, accent top border.
  */
 
-import type { WhichKeyBinding } from "../../core/types.ts";
+import type { WhichKeyBinding } from "../../core/contracts/editor.ts";
 import { style, stripAnsi } from "../../steep/matcha.ts";
 
 export interface WhichKeyBindingEntry {

@@ -1,6 +1,6 @@
 import type { TLispValue, TLispFunctionImpl } from "../../tlisp/types.ts";
 import { createNil, createNumber, createString, createList } from "../../tlisp/values.ts";
-import type { Tab } from "../../core/types.ts";
+import type { Tab } from "../../core/contracts/editor.ts";
 import { runModel, readModelField, type EditorModelAccess } from "./state-context.ts";
 import { Either } from "../../utils/task-either.ts";
 

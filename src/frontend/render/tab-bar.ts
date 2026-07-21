@@ -1,4 +1,4 @@
-import type { Tab } from "../../core/types.ts";
+import type { Tab } from "../../core/contracts/editor.ts";
 
 function charWidth(ch: string): number {
   return ch.charCodeAt(0) > 127 ? 2 : 1;

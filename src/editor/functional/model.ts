@@ -22,20 +22,9 @@
  * collections on egress).
  */
 
-import type {
-  EditorConfig,
-  EditorState,
-  TextBuffer,
-  HighlightSpan,
-  JsonValue,
-  LSPDiagnostic,
-  MinibufferRenderView,
-  Position,
-  Range,
-  Tab,
-  WhichKeyBinding,
-  Window,
-} from "../../core/types.ts";
+import type { EditorConfig, EditorState, HighlightSpan, JsonValue, LSPDiagnostic, MinibufferRenderView, Tab, WhichKeyBinding, Window } from "../../core/contracts/editor.ts";
+import type { TextBuffer } from "../../core/contracts/buffer.ts";
+import type { Position, Range } from "../../core/contracts/primitives.ts";
 import type { EditorSessionState } from "./domain-state.ts";
 import { createEditorSessionState } from "./domain-state.ts";
 

@@ -16,7 +16,8 @@
  * NOTE: Deleted text also added to kill ring (US-1.9.1)
  */
 
-import type { TextBuffer, Position } from "../../core/types.ts";
+import type { TextBuffer } from "../../core/contracts/buffer.ts";
+import type { Position } from "../../core/contracts/primitives.ts";
 import { Either } from "../../utils/task-either.ts";
 import type { RegisterDeleteFn } from "./evil-integration.ts";
 import { isWordChar, isWhitespace, findWordStart, findWordEndOnLine as findWordEnd, findWordEndWithSpace } from "./text-utils.ts";

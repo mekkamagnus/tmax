@@ -3,10 +3,10 @@
  * @description Bridge from tokenizer/highlighter to HighlightSpan[][] for the render pipeline.
  */
 
-import type { HighlightSpan } from "../core/types.ts";
+import type { HighlightSpan } from "../core/contracts/editor.ts";
 import { tokenize } from "./tokenizer.ts";
 import type { ParseState } from "./parse-state.ts";
-import type { SyntaxToken } from "../core/types.ts";
+import type { SyntaxToken } from "../core/contracts/editor.ts";
 import { highlightLine } from "./highlighter.ts";
 import { languageMap } from "./language-registry.ts";
 

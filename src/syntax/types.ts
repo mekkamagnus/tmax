@@ -3,8 +3,8 @@
  * @description Syntax highlighting type definitions with 24-bit color theme
  */
 
-export type { SyntaxRule, SyntaxToken, HighlightTheme, ANSIStyle, HighlightSpan } from "../core/types.ts";
-import type { HighlightTheme } from "../core/types.ts";
+export type { SyntaxRule, SyntaxToken, HighlightTheme, ANSIStyle, HighlightSpan } from "../core/contracts/editor.ts";
+import type { HighlightTheme } from "../core/contracts/editor.ts";
 
 /**
  * Default dark theme (One Dark palette) mapping token types to ANSI styles.

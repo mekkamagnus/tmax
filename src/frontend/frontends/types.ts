@@ -1,5 +1,5 @@
 import type { Editor } from "../../editor/editor.ts";
-import type { EditorState } from "../../core/types.ts";
+import type { EditorState } from "../../core/contracts/editor.ts";
 
 export interface TerminalDims {
   width: number;

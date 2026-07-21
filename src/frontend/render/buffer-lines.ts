@@ -1,4 +1,4 @@
-import type { EditorState, FoldState, HighlightSpan, Window } from "../../core/types.ts";
+import type { EditorState, FoldState, HighlightSpan, Window } from "../../core/contracts/editor.ts";
 import { Either } from "../../utils/task-either.ts";
 import { style, type AnsiColor } from "../../steep/matcha.ts";
 import {

@@ -27,7 +27,7 @@ import { Either } from "../../utils/task-either.ts";
 import { runModel, readModelField, setModelField, type EditorModelAccess } from "./state-context.ts";
 import { validateArgsCount, validateArgType } from "../../utils/validation.ts";
 import { createValidationError, AppError } from "../../error/types.ts";
-import type { EditorConfig } from "../../core/types.ts";
+import type { EditorConfig } from "../../core/contracts/editor.ts";
 import type { MinorModeConfig, BufferModeState } from "../mode-state.ts";
 import {
   getOrCreateModeState,

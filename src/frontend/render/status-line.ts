@@ -1,4 +1,4 @@
-import type { EditorState } from "../../core/types.ts";
+import type { EditorState } from "../../core/contracts/editor.ts";
 import { style, stripAnsi, type AnsiColor } from "../../steep/matcha.ts";
 
 export const modeDisplay: Record<EditorState["mode"], { text: string; color: AnsiColor }> = {

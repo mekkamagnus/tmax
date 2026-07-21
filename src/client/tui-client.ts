@@ -11,7 +11,7 @@ import { renderStatusLine } from "../frontend/render/status-line.ts";
 import { renderCommandInput } from "../frontend/render/command-input.ts";
 import { tokenizeTerminalInput } from "../frontend/render/input.ts";
 import { renderTabBarAnsi } from "../frontend/render/tab-bar.ts";
-import type { EditorState } from "../core/types.ts";
+import type { EditorState } from "../core/contracts/editor.ts";
 import { renderMinibuffer } from "../frontend/render/minibuffer.ts";
 import { renderWhichKeyOverlay } from "../frontend/render/which-key-overlay.ts";
 import { computeHighlightSpans } from "../syntax/highlight-buffer.ts";

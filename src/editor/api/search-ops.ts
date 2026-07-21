@@ -23,7 +23,8 @@
 
 import type { TLispValue, TLispFunctionImpl } from "../../tlisp/types.ts";
 import { createString, createNil, createSymbol, createNumber, createList, createBoolean } from "../../tlisp/values.ts";
-import type { TextBuffer, Range } from "../../core/types.ts";
+import type { TextBuffer } from "../../core/contracts/buffer.ts";
+import type { Range } from "../../core/contracts/primitives.ts";
 import { runModel, readModelField, type EditorModelAccess } from "./state-context.ts";
 import { Either } from "../../utils/task-either.ts";
 import { isWordChar } from "./text-utils.ts";

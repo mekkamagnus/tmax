@@ -15,7 +15,7 @@
 import type { TLispValue, TLispFunctionImpl } from "../tlisp/types.ts";
 import { createNil, createNumber, createString, createBoolean, createList } from "../tlisp/values.ts";
 import { renameSync, writeFileSync, readFileSync, existsSync } from "node:fs";
-import type { TextBuffer } from "../core/types.ts";
+import type { TextBuffer } from "../core/contracts/buffer.ts";
 import { TextBufferImpl } from "../core/buffer.ts";
 import { Either } from "../utils/task-either.ts";
 import { capTail } from "./log-entry.ts";

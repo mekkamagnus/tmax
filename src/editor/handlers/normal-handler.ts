@@ -23,7 +23,7 @@
 import type { EditorDispatchPort } from "./editor-dispatch-port.ts";
 import { resolveMapping } from "../key-resolution.ts";
 import { isTruthy } from "../../tlisp/values.ts";
-import type { WhichKeyBinding } from "../../core/types.ts";
+import type { WhichKeyBinding } from "../../core/contracts/editor.ts";
 import { computeWhichKeyPopup } from "../../frontend/render/which-key-overlay.ts";
 
 const DIGIT_KEYS = new Set(["1", "2", "3", "4", "5", "6", "7", "8", "9"]);

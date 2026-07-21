@@ -12,7 +12,7 @@
 
 import type { TLispValue, TLispFunctionImpl } from "../../tlisp/types.ts";
 import { createNumber, createString, createNil, createList, createBoolean } from "../../tlisp/values.ts";
-import type { TextBuffer } from "../../core/types.ts";
+import type { TextBuffer } from "../../core/contracts/buffer.ts";
 import { Either } from "../../utils/task-either.ts";
 import { stateUtils } from "../../utils/state.ts";
 import {

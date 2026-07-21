@@ -6,7 +6,7 @@
  * module-level singleton that caused cross-frame contamination.
  */
 
-import type { WhichKeyBinding } from "../../core/types.ts";
+import type { WhichKeyBinding } from "../../core/contracts/editor.ts";
 
 export const DEFAULT_WHICH_KEY_TIMEOUT = 1000;
 

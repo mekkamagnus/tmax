@@ -10,7 +10,10 @@
  * results; this module never imports the concrete `Editor` class (AC3.3).
  */
 
-import type { TextBuffer, BufferMetadata, WorkspaceState, Window, Tab, Position } from "../../core/types.ts";
+import type { TextBuffer } from "../../core/contracts/buffer.ts";
+import type { BufferMetadata, BufferModeState as WorkspaceBufferModeState, WorkspaceState } from "../../core/contracts/workspace.ts";
+import type { Window, Tab } from "../../core/contracts/editor.ts";
+import type { Position } from "../../core/contracts/primitives.ts";
 import { TextBufferImpl } from "../../core/buffer.ts";
 import { Either } from "../../utils/task-either.ts";
 import type { BufferModeState, MinorModeConfig } from "../mode-state.ts";
@@ -105,7 +108,7 @@ export class WorkspaceRuntime {
     };
     const buffers = new Map<string, TextBuffer>();
     const bufferMetadata = new Map<string, BufferMetadata>();
-    const bufferModeStates = new Map<string, import("../../core/types.ts").BufferModeState>();
+    const bufferModeStates = new Map<string, WorkspaceBufferModeState>();
 
     const currentBufferName = snapshot.currentBufferName;
 

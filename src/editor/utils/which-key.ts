@@ -9,7 +9,7 @@
 export { DEFAULT_WHICH_KEY_TIMEOUT, createWhichKeyState } from "./which-key-state.ts";
 export type { WhichKeyHandle } from "./which-key-state.ts";
 
-import type { WhichKeyBinding } from "../../core/types.ts";
+import type { WhichKeyBinding } from "../../core/contracts/editor.ts";
 
 /**
  * Format which-key bindings for display

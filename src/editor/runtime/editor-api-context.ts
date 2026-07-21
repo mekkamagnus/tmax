@@ -24,7 +24,9 @@
  * typed surface without re-introducing a mutable bridge property.
  */
 
-import type { TextBuffer, TerminalIO, FileSystem } from "../../core/types.ts";
+import type { TextBuffer } from "../../core/contracts/buffer.ts";
+import type { TerminalIO } from "../../core/contracts/terminal.ts";
+import type { FileSystem } from "../../core/contracts/filesystem.ts";
 import type { EvalError } from "../../error/types.ts";
 import { Either } from "../../utils/task-either.ts";
 import type { TLispValue } from "../../tlisp/types.ts";

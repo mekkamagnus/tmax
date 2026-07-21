@@ -25,7 +25,7 @@ import {
   createBufferError,
   AppError,
 } from "../../error/types.ts";
-import type { SyntaxToken, HighlightSpan } from "../../core/types.ts";
+import type { SyntaxToken, HighlightSpan } from "../../core/contracts/editor.ts";
 import { runModel, readModelField, type EditorModelAccess } from "./state-context.ts";
 import { tokenize } from "../../syntax/tokenizer.ts";
 import { highlightLine } from "../../syntax/highlighter.ts";

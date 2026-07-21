@@ -4,7 +4,7 @@
  * Saves and loads keyboard macros from ~/.config/tmax/macros.tlisp
  */
 
-import type { FileSystem } from "../../core/types.ts";
+import type { FileSystem } from "../../core/contracts/filesystem.ts";
 import type { MacroOps } from "./macro-recording.ts";
 import { State } from "../../utils/state.ts";
 import type { EditorModel } from "../functional/model.ts";

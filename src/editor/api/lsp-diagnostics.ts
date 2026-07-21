@@ -9,7 +9,7 @@
  * state callback.
  */
 
-import type { LSPDiagnostic } from "../../core/types.ts";
+import type { LSPDiagnostic } from "../../core/contracts/editor.ts";
 import type { TLispValue, TLispFunctionImpl } from "../../tlisp/types.ts";
 import { createNumber, createString, createBoolean, createList } from "../../tlisp/values.ts";
 import { Either } from "../../utils/task-either.ts";

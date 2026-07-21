@@ -27,7 +27,7 @@ import type {
 } from "../types.ts";
 import type { FrameTarget } from "../types.ts";
 import { TextBufferImpl } from "../../../core/buffer.ts";
-import type { WorkspaceState } from "../../../core/types.ts";
+import type { WorkspaceState } from "../../../core/contracts/workspace.ts";
 import { Either } from "../../../utils/task-either.ts";
 
 /** Resolve a workspace name from params, mirroring the legacy helper. */

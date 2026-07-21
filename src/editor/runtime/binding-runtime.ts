@@ -17,7 +17,7 @@
  * the concrete `Editor` class (AC3.3).
  */
 
-import type { FileSystem } from "../../core/types.ts";
+import type { FileSystem } from "../../core/contracts/filesystem.ts";
 import { Either } from "../../utils/task-either.ts";
 import type { EvalError } from "../../error/types.ts";
 import type { TLispValue } from "../../tlisp/types.ts";

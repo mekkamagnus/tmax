@@ -16,10 +16,8 @@
  * builtins (registered in `trt/bootstrap.ts`) reach the active evaluator's
  * state via the interpreter (see `bootstrap.ts` for the thread-through).
  *
- * `test-coverage.ts` is preserved as a compatibility shim: its exported
- * functions now operate on a single shared default instance so existing
- * external callers (e.g. `basic-coverage.test.ts`) keep working. Production
- * callers go through the evaluator's per-instance state.
+ * Callers access coverage through their evaluator/interpreter instance. There
+ * is deliberately no module-level compatibility singleton.
  */
 
 export interface FunctionCoverage {

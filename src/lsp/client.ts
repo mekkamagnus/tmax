@@ -4,7 +4,9 @@
  * Handles connections to language servers for IDE features
  */
 
-import type { TerminalIO, FileSystem, LSPDiagnostic } from "../core/types.ts";
+import type { TerminalIO } from "../core/contracts/terminal.ts";
+import type { FileSystem } from "../core/contracts/filesystem.ts";
+import type { LSPDiagnostic } from "../core/contracts/editor.ts";
 
 /**
  * LSP client configuration options

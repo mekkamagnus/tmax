@@ -1,4 +1,4 @@
-import type { Window } from "../../core/types.ts";
+import type { Window } from "../../core/contracts/editor.ts";
 
 export interface WindowCell {
   windowId: string;

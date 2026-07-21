@@ -3,7 +3,7 @@
  * @description Generic regex-based syntax tokenizer with stateful cross-line support
  */
 
-import type { SyntaxRule, SyntaxToken } from "../core/types.ts";
+import type { SyntaxRule, SyntaxToken } from "../core/contracts/editor.ts";
 import { ParseState, type StateTransitions, cStyleTransitions, pythonTransitions, lispTransitions } from "./parse-state.ts";
 
 export type { ParseState, StateTransitions };

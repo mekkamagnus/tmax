@@ -1,4 +1,4 @@
-import type { EditorState } from "../../core/types.ts";
+import type { EditorState } from "../../core/contracts/editor.ts";
 import { style } from "../../steep/matcha.ts";
 import { renderMinibuffer } from "./minibuffer.ts";
 

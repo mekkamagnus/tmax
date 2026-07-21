@@ -3,7 +3,7 @@
  * @description Python syntax rules for the tokenizer
  */
 
-import type { SyntaxRule } from "../../core/types.ts";
+import type { SyntaxRule } from "../../core/contracts/editor.ts";
 
 export const extensions = [".py", ".pyi"];
 

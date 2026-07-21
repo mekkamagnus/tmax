@@ -10,7 +10,7 @@
  * `src/editor/api/*.ts` and the `tlisp-api.ts` adapter, not to this reducer.
  */
 
-import type { Window, Tab, HighlightSpan } from "../../core/types.ts";
+import type { Window, Tab, HighlightSpan } from "../../core/contracts/editor.ts";
 import { State } from "../../utils/state.ts";
 import type { EditorModel } from "./model.ts";
 import type { Msg } from "./messages.ts";

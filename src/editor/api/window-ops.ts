@@ -5,7 +5,8 @@
 
 import type { TLispValue, TLispFunctionImpl } from "../../tlisp/types.ts";
 import { createNil, createNumber, createString, createBoolean, createList, createSymbol } from "../../tlisp/values.ts";
-import type { Window } from "../../core/types.ts";
+import type { Window } from "../../core/contracts/editor.ts";
+import type { TextBuffer } from "../../core/contracts/buffer.ts";
 import { runModel, readModelField, type EditorModelAccess } from "./state-context.ts";
 import { AppError } from "../../error/types.ts";
 import { Either } from "../../utils/task-either.ts";
@@ -30,7 +31,7 @@ export function createWindowOps(
   // against EditorModel; writes + terminal-size accessor stay on callbacks.
   const getWindows = (): Window[] => [...(runModel(access, readModelField("windows")) ?? [])];
   const getCurrentWindowIndex = (): number => runModel(access, readModelField("currentWindowIndex")) ?? 0;
-  const getCurrentBuffer = (): import("../../core/types.ts").TextBuffer | undefined =>
+  const getCurrentBuffer = (): TextBuffer | undefined =>
     runModel(access, readModelField("currentBuffer"));
   const ops = new Map<string, TLispFunctionImpl>();
 

@@ -3,7 +3,7 @@
  * @description Maps syntax tokens to ANSI highlight spans
  */
 
-import type { SyntaxToken, HighlightSpan, HighlightTheme, ANSIStyle } from "../core/types.ts";
+import type { SyntaxToken, HighlightSpan, HighlightTheme, ANSIStyle } from "../core/contracts/editor.ts";
 import { defaultDarkTheme } from "./types.ts";
 
 /**

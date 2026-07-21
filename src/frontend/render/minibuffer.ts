@@ -1,4 +1,4 @@
-import type { MinibufferRenderSegment, MinibufferRenderView } from "../../core/types.ts";
+import type { MinibufferRenderSegment, MinibufferRenderView } from "../../core/contracts/editor.ts";
 import { style, type AnsiColor } from "../../steep/matcha.ts";
 
 export interface RenderedMinibuffer {

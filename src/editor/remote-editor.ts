@@ -1,7 +1,7 @@
 import { Socket } from "net";
 import { userInfo } from "os";
 import { jsonToEditorState } from "../server/serialize.ts";
-import type { EditorState } from "../core/types.ts";
+import type { EditorState } from "../core/contracts/editor.ts";
 
 const REQUEST_TIMEOUT_MS = 30_000;
 

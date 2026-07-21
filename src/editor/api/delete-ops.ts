@@ -14,7 +14,8 @@
 
 import type { TLispValue, TLispFunctionImpl } from "../../tlisp/types.ts";
 import { createNumber, createString, createNil } from "../../tlisp/values.ts";
-import type { TextBuffer, Position, Range } from "../../core/types.ts";
+import type { TextBuffer } from "../../core/contracts/buffer.ts";
+import type { Position, Range } from "../../core/contracts/primitives.ts";
 import { runModel, readModelField, type EditorModelAccess } from "./state-context.ts";
 import { Either } from "../../utils/task-either.ts";
 import {
