@@ -31,6 +31,7 @@
  * Exit codes: 0 = --once scan complete or poll loop terminated cleanly; 1 =
  * usage error. The poll loop runs forever (until tmux window killed).
  */
+import { runAdwEntrypoint } from "./adws-modules/process-supervisor.ts";
 import { spawnSync } from "child_process";
 import {
   appendFileSync,
@@ -789,5 +790,5 @@ function main(): Promise<number> {
 }
 
 if (import.meta.main) {
-  main().then((code) => process.exit(code));
+  void runAdwEntrypoint({ label: "adw-watchdog", main });
 }

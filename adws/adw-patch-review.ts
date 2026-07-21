@@ -27,6 +27,7 @@
  *   agents/{id}/patch-reviewer/gather.md       — deterministic gather bundle
  *   agents/{id}/patch-reviewer/verdict.json    — normalized audit verdict
  */
+import { runAdwEntrypoint } from "./adws-modules/process-supervisor.ts";
 import { existsSync, readFileSync, realpathSync, writeFileSync } from "fs";
 import { join } from "path";
 import { Either, TaskEither } from "../src/utils/task-either.ts";
@@ -545,5 +546,5 @@ function main(): Promise<number> {
 }
 
 if (import.meta.main) {
-  main().then((code) => process.exit(code));
+  void runAdwEntrypoint({ label: "adw-patch-review", main });
 }

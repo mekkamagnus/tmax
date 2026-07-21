@@ -28,6 +28,7 @@
  *   agents/{id}/tester/e2e-report-itN/         — tmax-use HTML + JUnit reports
  *   agents/{id}/tester/results.json            — normalized result bundle
  */
+import { runAdwEntrypoint } from "./adws-modules/process-supervisor.ts";
 import { existsSync, readFileSync, realpathSync, writeFileSync } from "fs";
 import { join } from "path";
 import { Either, TaskEither } from "../src/utils/task-either.ts";
@@ -437,5 +438,5 @@ function main(): Promise<number> {
 }
 
 if (import.meta.main) {
-  main().then((code) => process.exit(code));
+  void runAdwEntrypoint({ label: "adw-test", main });
 }

@@ -27,12 +27,13 @@
  * lines, ordering, exit codes). Verified by the ADW test suite
  * (`bun run test:adw`, 14 files).
  */
-import { spawn } from "child_process";
+import { spawn, type ChildProcess, type SpawnOptions } from "child_process";
 import { appendFileSync, existsSync, mkdirSync, readFileSync } from "fs";
 import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "path";
 import { Either, TaskEither } from "../../src/utils/task-either.ts";
 import { formatToolUseLine } from "./live-filter.ts";
+import { getActiveSupervisor, type ManagedProcess } from "./process-supervisor.ts";
 
 // Re-export spec-path resolution so callers have one canonical import surface.
 export { findWorkspaceBySpecPath, normalizeSpecPath, type NormalizedSpecPath } from "./workspace.ts";
@@ -158,12 +159,20 @@ export interface RunRawOpts extends RunOpts {
 export function runRaw(cmd: string, args: string[], opts: RunRawOpts = {}): TaskEither<string, RawRunResult> {
   return TaskEither.from(async () => {
     return await new Promise<Either<string, RawRunResult>>((resolve) => {
-      const child = spawn(cmd, args, {
+      // BUG-25: when an invocation supervisor is active (set by runAdwEntrypoint),
+      // spawn through it so the child is an owned, detached process-group leader
+      // and its descendant tree can be reaped on settle/timeout. Without a
+      // supervisor (legacy direct calls / unit tests) behavior is unchanged.
+      const supervisor = getActiveSupervisor();
+      const spawnOpts: SpawnOptions = {
         cwd: opts.cwd,
         env: opts.env ? { ...process.env, ...opts.env } : process.env,
         stdio: ["ignore", "pipe", "pipe"],
-        ...(opts.detached ? { detached: true } : {}),
-      });
+      };
+      let managed: ManagedProcess | undefined;
+      const child: ChildProcess = supervisor
+        ? (managed = supervisor.spawn(cmd, args, spawnOpts)).child
+        : spawn(cmd, args, { ...spawnOpts, ...(opts.detached ? { detached: true } : {}) });
       let stdout = "";
       let stderr = "";
       let teeBuffer = "";
@@ -191,18 +200,38 @@ export function runRaw(cmd: string, args: string[], opts: RunRawOpts = {}): Task
         teeBuffer = "";
       };
 
+      // Reap the owned tree (graceful→force, awaits confirmed exit) then resolve.
+      // This is the BUG-25 fix for the normal-completion leak: even when the child
+      // exited cleanly, lingering descendants in its group are terminated before
+      // the promise resolves. Idempotent no-op when the tree is already gone.
+      const finishWith = (result: Either<string, RawRunResult>): void => {
+        if (managed && supervisor) {
+          void supervisor.terminate(managed).then(() => resolve(result));
+        } else {
+          resolve(result);
+        }
+      };
+
       const timer = opts.timeoutMs
         ? setTimeout(() => {
           if (settled) return;
           settled = true;
-          if (opts.detached && child.pid) {
-            try { process.kill(-child.pid, "SIGKILL"); } catch { try { child.kill("SIGKILL"); } catch { /* gone */ } }
-          } else {
-            try { child.kill("SIGKILL"); } catch { /* gone */ }
-          }
-          flushTee();
+          if (timer) clearTimeout(timer);
           const message = opts.timeoutMessage ?? `${cmd} ${args.join(" ")} timed out after ${opts.timeoutMs}ms`;
-          resolve(Either.right({ ok: false, exitCode: -1, stdout, stderr: stderr + `\n${message}\n` }));
+          const result = Either.right<RawRunResult>({ ok: false, exitCode: -1, stdout, stderr: stderr + `\n${message}\n` });
+          if (managed && supervisor) {
+            // Graceful SIGTERM → grace → SIGKILL, await tree exit, then resolve.
+            void supervisor.terminate(managed).then(() => { flushTee(); resolve(result); });
+          } else {
+            // Legacy unsupervised path: straight to SIGKILL (preserves prior behavior).
+            if (opts.detached && child.pid) {
+              try { process.kill(-child.pid, "SIGKILL"); } catch { try { child.kill("SIGKILL"); } catch { /* gone */ } }
+            } else {
+              try { child.kill("SIGKILL"); } catch { /* gone */ }
+            }
+            flushTee();
+            resolve(result);
+          }
         }, opts.timeoutMs)
         : undefined;
 
@@ -211,10 +240,10 @@ export function runRaw(cmd: string, args: string[], opts: RunRawOpts = {}): Task
         settled = true;
         if (timer) clearTimeout(timer);
         flushTee();
-        resolve(Either.right({ ok: exitCode === 0, exitCode, stdout, stderr }));
+        finishWith(Either.right({ ok: exitCode === 0, exitCode, stdout, stderr }));
       };
 
-      child.stdout.on("data", (chunk: Buffer | string) => {
+      child.stdout!.on("data", (chunk: Buffer | string) => {
         const text = typeof chunk === "string" ? chunk : chunk.toString("utf8");
         stdout += text;
         if (!opts.teeTo && !opts.liveLabel) return;
@@ -225,16 +254,16 @@ export function runRaw(cmd: string, args: string[], opts: RunRawOpts = {}): Task
           teeBuffer = teeBuffer.slice(newline + 1);
         }
       });
-      child.stdout.on("end", () => { stdoutEnded = true; trySettle(); });
-      child.stderr.on("data", (chunk: Buffer | string) => {
+      child.stdout!.on("end", () => { stdoutEnded = true; trySettle(); });
+      child.stderr!.on("data", (chunk: Buffer | string) => {
         stderr += typeof chunk === "string" ? chunk : chunk.toString("utf8");
       });
-      child.stderr.on("end", () => { stderrEnded = true; trySettle(); });
+      child.stderr!.on("end", () => { stderrEnded = true; trySettle(); });
       child.on("error", (error) => {
         if (settled) return;
         settled = true;
         if (timer) clearTimeout(timer);
-        resolve(Either.left(`failed to spawn ${cmd}: ${error.message}`));
+        finishWith(Either.left(`failed to spawn ${cmd}: ${error.message}`));
       });
       child.on("close", (code) => {
         if (settled) return;
@@ -292,9 +321,11 @@ export interface SpawnStageOpts {
    */
   worktreePath?: string;
   /**
-   * 5-stage orchestrator spawns `detached: true` so child.pid is the
-   * process-group leader → killTree(-pid) reaches all descendants. Off for
-   * the 2/3-stage orchestrators (preserves their existing behavior).
+   * BUG-25: child stages are now ALWAYS detached process-group leaders so the
+   * supervisor can reach their descendants on settle. This field is accepted
+   * for backward compatibility with existing callers but no longer gates
+   * detachment.
+   * @deprecated detachment is now unconditional.
    */
   detached?: boolean;
 }
@@ -305,13 +336,18 @@ export interface SpawnStageOpts {
  * `<id> <…> <spec-path>` result line. Sets `ADW_ORCHESTRATED=1` so the child
  * skips writing its own adw-state.json (the orchestrator owns the workspace
  * state — the single-state-file contract).
+ *
+ * BUG-25: the child is an owned, detached process-group leader (spawned via
+ * the active supervisor when one is present, otherwise a detached bare spawn),
+ * and its tree is reaped on close/error before the promise resolves.
  */
 export function spawnStage(
   script: string,
   args: string[],
   opts: SpawnStageOpts,
 ): Promise<{ code: number; stdout: string; stderr: string }> {
-  const child = spawn("bun", [join("adws", script), ...args], {
+  const supervisor = getActiveSupervisor();
+  const spawnOpts: SpawnOptions = {
     cwd: opts.projectRoot,
     env: {
       ...process.env,
@@ -319,15 +355,26 @@ export function spawnStage(
       ...(opts.worktreePath ? { ADW_WORKTREE: opts.worktreePath } : {}),
     },
     stdio: ["ignore", "pipe", "inherit"], // stdout captured, stderr shown live
-    ...(opts.detached ? { detached: true } : {}),
-  });
+  };
+  let managed: ManagedProcess | undefined;
+  const child: ChildProcess = supervisor
+    ? (managed = supervisor.spawn("bun", [join("adws", script), ...args], spawnOpts)).child
+    : spawn("bun", [join("adws", script), ...args], { ...spawnOpts, detached: true });
   let stdout = "";
-  child.stdout.on("data", (chunk: Buffer | string) => {
+  child.stdout!.on("data", (chunk: Buffer | string) => {
     stdout += typeof chunk === "string" ? chunk : chunk.toString("utf8");
   });
   return new Promise((resolve) => {
-    child.on("error", () => resolve({ code: 1, stdout, stderr: `failed to spawn ${script}` }));
-    child.on("close", (code) => resolve({ code: code ?? 1, stdout: stdout.trim(), stderr: "" }));
+    child.on("error", () => {
+      const result = { code: 1, stdout, stderr: `failed to spawn ${script}` };
+      if (managed && supervisor) void supervisor.terminate(managed).then(() => resolve(result));
+      else resolve(result);
+    });
+    child.on("close", (code) => {
+      const result = { code: code ?? 1, stdout: stdout.trim(), stderr: "" };
+      if (managed && supervisor) void supervisor.terminate(managed).then(() => resolve(result));
+      else resolve(result);
+    });
   });
 }
 

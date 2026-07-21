@@ -30,6 +30,7 @@
  * 1 = usage error / missing script / tmux failure; foreground preserves the
  * child's exit code otherwise.
  */
+import { runAdwEntrypoint } from "./adws-modules/process-supervisor.ts";
 import { existsSync, readdirSync, realpathSync } from "fs";
 import { isAbsolute, join } from "path";
 import { Either, TaskEither } from "../src/utils/task-either.ts";
@@ -701,5 +702,5 @@ function main(): Promise<number> {
 
 // Only auto-run when invoked directly (not when imported by a test).
 if (import.meta.main) {
-  main().then((code) => process.exit(code));
+  void runAdwEntrypoint({ label: "adw-launch", main });
 }

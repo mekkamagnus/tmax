@@ -24,6 +24,7 @@
  *   agents/{build-id}/builder/events.jsonl     — build lifecycle events (streamed)
  *   agents/{build-id}/builder/raw-output.jsonl — claude /implement output (streamed)
  */
+import { runAdwEntrypoint } from "./adws-modules/process-supervisor.ts";
 import { appendFileSync, existsSync, mkdirSync, readFileSync, readdirSync, realpathSync } from "fs";
 import { join } from "path";
 import { Either, TaskEither } from "../src/utils/task-either.ts";
@@ -761,5 +762,5 @@ function main(): Promise<number> {
 // dispatchers (adw-plan.ts, adw-spec-review.ts) don't guard this because nothing
 // imports them yet; adw-build.ts is imported by test/unit/adw-build.test.ts.
 if (import.meta.main) {
-  main().then((code) => process.exit(code));
+  void runAdwEntrypoint({ label: "adw-build", main });
 }

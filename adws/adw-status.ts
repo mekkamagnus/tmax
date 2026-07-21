@@ -31,6 +31,7 @@
  * Pure rendering functions (loadAllWorkspaces, deriveState, renderTable) are
  * exported for unit testing.
  */
+import { runAdwEntrypoint } from "./adws-modules/process-supervisor.ts";
 import { existsSync, readdirSync, readFileSync, realpathSync } from "fs";
 import { join } from "path";
 import { Either } from "../src/utils/task-either.ts";
@@ -410,5 +411,5 @@ async function main(): Promise<number> {
 }
 
 if (import.meta.main) {
-  main().then((code) => process.exit(code));
+  void runAdwEntrypoint({ label: "adw-status", main });
 }

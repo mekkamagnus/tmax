@@ -23,6 +23,7 @@
  * Exit codes: 0 = spec created (adw-id + path printed to stdout); 1 = usage
  * error; 2 = classification/dispatch failure (message on stderr).
  */
+import { runAdwEntrypoint } from "./adws-modules/process-supervisor.ts";
 import { join } from "path";
 import { realpathSync } from "fs";
 import { Either, TaskEither } from "../src/utils/task-either.ts";
@@ -305,5 +306,5 @@ function main(): Promise<number> {
 }
 
 if (import.meta.main) {
-  main().then((code) => process.exit(code));
+  void runAdwEntrypoint({ label: "adw-plan", main });
 }

@@ -23,6 +23,7 @@
  *   agents/{adw-id}/upgrader/events.jsonl         — upgrade lifecycle events (if upgrade runs)
  *   agents/{adw-id}/upgrader/raw-output.jsonl     — codex upgrade output (if upgrade runs)
  */
+import { runAdwEntrypoint } from "./adws-modules/process-supervisor.ts";
 import { existsSync, readFileSync, realpathSync } from "fs";
 import { join } from "path";
 import { Either, TaskEither } from "../src/utils/task-either.ts";
@@ -422,5 +423,5 @@ function main(): Promise<number> {
 }
 
 if (import.meta.main) {
-  main().then((code) => process.exit(code));
+  void runAdwEntrypoint({ label: "adw-spec-review", main });
 }

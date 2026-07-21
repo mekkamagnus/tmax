@@ -44,6 +44,7 @@
  *   agents/{id}/tester/events.jsonl        — written by adw-test subprocess
  *   agents/{id}/patch-reviewer/events.jsonl — written by adw-patch-review subprocess
  */
+import { runAdwEntrypoint } from "./adws-modules/process-supervisor.ts";
 import { execSync } from "child_process";
 import { existsSync, readFileSync, realpathSync, statSync } from "fs";
 import { join } from "path";
@@ -1666,5 +1667,5 @@ function main(): Promise<number> {
 }
 
 if (import.meta.main) {
-  main().then((code) => process.exit(code));
+  void runAdwEntrypoint({ label: "adw-plan-review-build-patch", main });
 }

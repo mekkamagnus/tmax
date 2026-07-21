@@ -40,6 +40,7 @@
  * the generic stage driver lives in ./adws-modules/pipeline.ts. This
  * orchestrator declares its stage list as a `PipelineConfig` and delegates.
  */
+import { runAdwEntrypoint } from "./adws-modules/process-supervisor.ts";
 import { realpathSync } from "fs";
 import { join } from "path";
 import { Either } from "../src/utils/task-either.ts";
@@ -445,5 +446,5 @@ function main(): Promise<number> {
 }
 
 if (import.meta.main) {
-  main().then((code) => process.exit(code));
+  void runAdwEntrypoint({ label: "adw-plan-reviewspec-build", main });
 }
