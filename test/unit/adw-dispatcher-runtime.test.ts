@@ -412,3 +412,33 @@ describe("ADW_ID_RE", () => {
     expect(ADW_ID_RE.test("01abc00000")).toBe(false);
   });
 });
+
+describe("CHORE-44 shared ADW execution boundaries", () => {
+  const source = (relative: string): string => readFileSync(join(process.cwd(), relative), "utf8");
+
+  test("runRaw and runCapture have one implementation and stage dispatchers are thin adapters", () => {
+    const runtime = source("adws/adws-modules/dispatcher-runtime.ts");
+    const testStage = source("adws/adw-test.ts");
+    const patchStage = source("adws/adw-patch-review.ts");
+
+    expect(runtime.match(/export\s+function\s+runRaw\s*\(/g)?.length).toBe(1);
+    expect(runtime.match(/export\s+function\s+runCapture\s*\(/g)?.length).toBe(1);
+    for (const stage of [testStage, patchStage]) {
+      expect(stage).toContain("runRaw as runRawShared");
+      expect(stage).toContain("runCapture as runCaptureShared");
+      expect(stage).not.toMatch(/\bspawn\s*\(/);
+      expect(stage).not.toMatch(/function\s+runRaw\s*\(/);
+      expect(stage).not.toMatch(/function\s+runCapture\s*\(/);
+    }
+  });
+
+  test("linear and retrying pipelines execute configured stages through the same runner", () => {
+    const pipeline = source("adws/adws-modules/pipeline.ts");
+    const retryingPipeline = source("adws/adw-plan-review-build-patch.ts");
+
+    expect(pipeline).toMatch(/export\s+async\s+function\s+runConfiguredStage/);
+    expect(pipeline).toContain("await runConfiguredStage({");
+    expect(retryingPipeline).toContain('import { runConfiguredStage, type PipelineStageInfo }');
+    expect(retryingPipeline.match(/await runConfiguredStage\s*\(\{/g)?.length).toBe(7);
+  });
+});

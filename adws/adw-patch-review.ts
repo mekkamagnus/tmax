@@ -27,14 +27,12 @@
  *   agents/{id}/patch-reviewer/gather.md       — deterministic gather bundle
  *   agents/{id}/patch-reviewer/verdict.json    — normalized audit verdict
  */
-import { spawn } from "child_process";
-import { appendFileSync, existsSync, readFileSync, realpathSync, writeFileSync } from "fs";
+import { existsSync, readFileSync, realpathSync, writeFileSync } from "fs";
 import { join } from "path";
 import { Either, TaskEither } from "../src/utils/task-either.ts";
 import {
   PATCH_REVIEW_MODEL,
   type PatchReviewerDeps,
-  type RawRunResult,
   type GatherBundle,
   type GateResults,
   type AuditVerdict,
@@ -51,6 +49,8 @@ import {
   appendEvent as appendEventRaw,
   writeState as writeStateRaw,
   run,
+  runRaw as runRawShared,
+  runCapture as runCaptureShared,
   type RunOpts,
 } from "./adws-modules/dispatcher-runtime.ts";
 import { findWorkspaceBySpecPath } from "./adws-modules/dispatcher-runtime.ts";
@@ -122,117 +122,23 @@ const writeState = (id: string, state: Record<string, unknown>): TaskEither<stri
   writeStateRaw(AGENTS_DIR, id, state).map(() => undefined);
 
 // ---------------------------------------------------------------------------
-// Subprocess plumbing: run() comes from dispatcher-runtime; runRaw() and
-// runCapture() are SPECIALIZED for this stage — they add detached
-// process-group + stdout/stderr drain-on-end semantics. BUG-18: the gates
-// spawn `bun run test:unit` whose grandchild keeps pipes open, so the
-// drain-safe pattern is load-bearing here. The shared `runCapture` in
-// dispatcher-runtime does NOT have these — they remain local to patch-review.
+// Subprocess plumbing — configured adapters over dispatcher-runtime.
 // ---------------------------------------------------------------------------
 
-// Re-export RunOpts for backwards compatibility with tests/external callers
-// that imported it from this module pre-refactor.
 export type { RunOpts };
 
-function runRaw(cmd: string, args: string[], opts: RunOpts = {}): TaskEither<string, RawRunResult> {
-  return TaskEither.from(async () => {
-    return await new Promise<Either<string, RawRunResult>>((resolve) => {
-      const child = spawn(cmd, args, {
-        cwd: opts.cwd,
-        env: opts.env ? { ...process.env, ...opts.env } : process.env,
-        stdio: ["ignore", "pipe", "pipe"],
-        detached: true,
-      });
-      let stdout = "";
-      let stderr = "";
-      let settled = false;
-      let procClosed = false;
-      let stdoutEnded = false;
-      let stderrEnded = false;
-      let exitCode = -1;
-
-      // Drain-safe: resolve only after process closes AND both streams end.
-      // BUG-18: without this, 'bun run test:unit' grandchild keeps pipes open
-      // and the close event fires before stream data is fully drained.
-      const trySettle = () => {
-        if (settled) return;
-        if (!procClosed || !stdoutEnded || !stderrEnded) return;
-        settled = true;
-        clearTimeout(timer);
-        resolve(Either.right({ ok: exitCode === 0, exitCode, stdout, stderr }));
-      };
-
-      const timer = setTimeout(() => {
-        if (settled) return;
-        settled = true;
-        try { process.kill(-child.pid!, "SIGKILL"); } catch { try { child.kill("SIGKILL"); } catch { /* gone */ } }
-        resolve(Either.right({ ok: false, exitCode: -1, stdout, stderr }));
-      }, 1_200_000);
-
-      child.stdout.on("data", (chunk: Buffer | string) => { stdout += typeof chunk === "string" ? chunk : chunk.toString("utf8"); });
-      child.stdout.on("end", () => { stdoutEnded = true; trySettle(); });
-      child.stderr.on("data", (chunk: Buffer | string) => { stderr += typeof chunk === "string" ? chunk : chunk.toString("utf8"); });
-      child.stderr.on("end", () => { stderrEnded = true; trySettle(); });
-      child.on("error", (e) => { if (!settled) { settled = true; resolve(Either.left(`failed to spawn ${cmd}: ${e.message}`)); } });
-      child.on("close", (code) => { if (!settled) { procClosed = true; exitCode = code ?? -1; trySettle(); } });
-    });
+const runRaw: PatchReviewerDeps["runRaw"] = (cmd, args, opts = {}) =>
+  runRawShared(cmd, args, {
+    ...opts,
+    detached: true,
+    timeoutMs: 1_200_000,
+    timeoutMessage: "[adw-patch-review] runRaw timed out after 1200000ms",
   });
-}
 
-function runCapture(cmd: string, args: string[], opts: RunOpts & { teeTo: string }): TaskEither<string, string> {
-  return TaskEither.from(async () => {
-    return await new Promise<Either<string, string>>((resolve) => {
-      const child = spawn(cmd, args, {
-        cwd: opts.cwd,
-        env: opts.env ? { ...process.env, ...opts.env } : process.env,
-        stdio: ["ignore", "pipe", "pipe"],
-        detached: true,
-      });
-      let stdout = "";
-      let stderr = "";
-      let teeBuf = "";
-      let settled = false;
-      let procClosed = false;
-      let stdoutEnded = false;
-      let stderrEnded = false;
-      let exitCode = -1;
-
-      // No wall-clock timeout on runCapture — the audit call (claude -p)
-      // legitimately runs 20-40 min on a large spec + diff. The timeout
-      // was killing it mid-audit. Protection against hangs comes from:
-      // 1. claude -p's own internal timeout + retries
-      // 2. The 529 retry wrapper (withClaude529Retry)
-      // 3. The drain-safe pattern (process must close + streams must end)
-      const trySettle = () => {
-        if (settled) return;
-        if (!procClosed || !stdoutEnded || !stderrEnded) return;
-        settled = true;
-        if (teeBuf.length > 0) { try { appendFileSync(opts.teeTo, teeBuf); } catch { /* ignore */ } }
-        if (exitCode === 0) resolve(Either.right(stdout.trim()));
-        else resolve(Either.left((stderr || stdout).trim() || `${cmd} exited with code ${exitCode}`));
-      };
-
-      child.stdout.on("data", (chunk: Buffer | string) => {
-        const s = typeof chunk === "string" ? chunk : chunk.toString("utf8");
-        stdout += s;
-        teeBuf += s;
-        let nl: number;
-        while ((nl = teeBuf.indexOf("\n")) >= 0) {
-          const line = teeBuf.slice(0, nl + 1);
-          try { appendFileSync(opts.teeTo, line); } catch { /* ignore */ }
-          teeBuf = teeBuf.slice(nl + 1);
-        }
-      });
-      child.stdout.on("end", () => { stdoutEnded = true; trySettle(); });
-      child.stderr.on("data", (chunk: Buffer | string) => {
-        stderr += typeof chunk === "string" ? chunk : chunk.toString("utf8");
-      });
-      child.stderr.on("end", () => { stderrEnded = true; trySettle(); });
-      child.on("error", (e) => { if (!settled) { settled = true; resolve(Either.left(`failed to spawn ${cmd}: ${e.message}`)); } });
-      child.on("close", (code) => { if (!settled) { procClosed = true; exitCode = code ?? -1; trySettle(); } });
-    });
-  });
-}
+// Claude audits can legitimately run for 20–40 minutes, so capture remains
+// drain-safe and detached but deliberately has no wall-clock timeout.
+const runCapture: PatchReviewerDeps["runCapture"] = (cmd, args, opts) =>
+  runCaptureShared(cmd, args, { ...opts, detached: true });
 
 // ---------------------------------------------------------------------------
 // Input resolution: spec path OR adw-id → {specPath, source}

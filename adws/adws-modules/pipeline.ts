@@ -7,13 +7,9 @@
  *   - 3-stage: `plan → review → build`      (adw-plan-reviewspec-build.ts)
  *   - 5-stage: `plan → review → build → test → patch-review` (adw-plan-review-build-patch.ts)
  *
- * The 2-stage and 3-stage orchestrators delegate fully to `runLinearPipeline`
- * — they are pure configurations of this runner (AC8.2). The 5-stage is more
- * complex (worktree isolation per SPEC-065, base_sha recording, goal-exhausted
- * detection, and the build↔patch-review retry loop); it consumes the
- * `StageDescriptor` / `StageName` / `spawnStage` primitives and declares its
- * stage list via the same config shape, but its `runPipeline` body retains the
- * retry loop because that behavior is unique to it.
+ * All variants execute child stages through `runConfiguredStage`. The linear
+ * variants compose it in `runLinearPipeline`; the five-stage variant supplies
+ * worktree, heartbeat, goal, and retry configuration around the same runner.
  *
  * The descriptor type carries everything `runLinearPipeline` needs to drive
  * each stage generically: the stage's name (for state/events), the human
@@ -56,6 +52,29 @@ export interface PipelineStageInfo<S extends string> {
   readonly script: string;
   /** Agent subdir this stage writes its events under (e.g. "planner"). */
   readonly agentDir: string;
+}
+
+export interface ConfiguredStageRun<S extends string, R> {
+  readonly pipelineName: string;
+  readonly position: string;
+  readonly stage: PipelineStageInfo<S>;
+  readonly suffix?: string;
+  readonly run: () => Promise<Either<string, R>>;
+}
+
+/**
+ * Execute one configured stage with the canonical progress/error contract.
+ * Pipeline variants own state/checkpoint policy, while this runner owns the
+ * actual stage transition and human-visible progress format.
+ */
+export async function runConfiguredStage<S extends string, R>(
+  config: ConfiguredStageRun<S, R>,
+): Promise<Either<string, R>> {
+  const suffix = config.suffix ? ` ${config.suffix}` : "";
+  process.stderr.write(
+    `${config.pipelineName}: stage ${config.position} — ${config.stage.label}${suffix}\n`,
+  );
+  return config.run();
 }
 
 /**
@@ -338,8 +357,17 @@ export async function runLinearPipeline<S extends string, Deps, Stages, Result>(
       continue;
     }
 
-    process.stderr.write(`${config.pipelineName}: stage ${stage.posLabel} — ${stage.scriptName}\n`);
-    const res = await stage.run(deps, ctx);
+    const res = await runConfiguredStage({
+      pipelineName: config.pipelineName,
+      position: stage.posLabel,
+      stage: {
+        name: stage.name,
+        label: stage.scriptName,
+        script: stage.scriptName,
+        agentDir: "orchestrator",
+      },
+      run: () => stage.run(deps, ctx),
+    });
     if (Either.isLeft(res)) {
       appendEvent(agentsDir, id, "orchestrator", { event: "stage-error", stage: stage.name, detail: res.left });
       state.failed_stage = stage.name;

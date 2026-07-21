@@ -28,8 +28,7 @@
  *   agents/{id}/tester/e2e-report-itN/         — tmax-use HTML + JUnit reports
  *   agents/{id}/tester/results.json            — normalized result bundle
  */
-import { spawn } from "child_process";
-import { appendFileSync, existsSync, readFileSync, realpathSync, writeFileSync } from "fs";
+import { existsSync, readFileSync, realpathSync, writeFileSync } from "fs";
 import { join } from "path";
 import { Either, TaskEither } from "../src/utils/task-either.ts";
 import {
@@ -38,12 +37,13 @@ import {
   appendEvent as appendEventRaw,
   writeState as writeStateRaw,
   run,
+  runRaw as runRawShared,
+  runCapture as runCaptureShared,
   type RunOpts,
 } from "./adws-modules/dispatcher-runtime.ts";
 import {
   TEST_MODEL,
   type TesterDeps,
-  type RawRunResult,
   type TrackResult,
   type TestStageResult,
   ensureAvailable,
@@ -123,177 +123,30 @@ const writeState = (id: string, state: Record<string, unknown>): TaskEither<stri
   writeStateRaw(AGENTS_DIR, id, state).map(() => undefined);
 
 // ---------------------------------------------------------------------------
-// Subprocess plumbing: run() comes from dispatcher-runtime; runRaw() and
-// runCapture() are SPECIALIZED for this stage — they add a wall-clock timeout
-// + detached process-group + stdout/stderr drain-on-end. BUG-16: the full
-// unit suite can hang on wedged socket connects, so the timeout + kill-tree
-// semantics are load-bearing here. The shared `runCapture` in
-// dispatcher-runtime does NOT have these — they remain local to adw-test.
+// Subprocess plumbing — configured adapters over dispatcher-runtime.
 // ---------------------------------------------------------------------------
 
-// Re-export RunOpts for backwards compatibility with tests/external callers
-// that imported it from this module pre-refactor.
 export type { RunOpts };
 
-/** Wall-clock cap on each `bun run test:*` invocation. Catches hangs (e.g. a
- * wedged socket connect with no timeout) so the stage fails fast instead of
- * hanging forever. The full unit suite is ~700s on a clean tree (3000+ tests);
- * 1200s gives headroom for a slower CI box. Override via
- * ADW_TEST_STAGE_TIMEOUT_MS. */
 const STAGE_RUN_TIMEOUT_MS = Number(process.env.ADW_TEST_STAGE_TIMEOUT_MS) > 0
   ? Number(process.env.ADW_TEST_STAGE_TIMEOUT_MS)
   : 1_200_000;
 
-function runRaw(cmd: string, args: string[], opts: RunOpts = {}): TaskEither<string, RawRunResult> {
-  return TaskEither.from(async () => {
-    return await new Promise<Either<string, RawRunResult>>((resolve) => {
-      // detached: true makes the child a process-group leader so a timeout can
-      // SIGKILL the whole tree (bun run → bun test → …), not just the direct
-      // child — otherwise a hung grandchild lingers at ~100% CPU and starves
-      // the next resolve iteration.
-      const child = spawn(cmd, args, {
-        cwd: opts.cwd,
-        env: opts.env ? { ...process.env, ...opts.env } : process.env,
-        stdio: ["ignore", "pipe", "pipe"],
-        detached: true,
-      });
-      let stdout = "";
-      let stderr = "";
-      let settled = false;
-      let procClosed = false;
-      let stdoutEnded = false;
-      let stderrEnded = false;
-      let exitCode = -1;
-
-      /** Resolve only after the process has closed AND both stdout/stderr
-       * streams have fully drained. The `close` event fires when the process
-       * exits, but the piped stdout/stderr Readable streams may still have
-       * buffered `data` events pending — resolving on `close` alone loses the
-       * tail (including bun's summary line "N pass / M fail"), which caused the
-       * parseBunTestOutput bug where passed=5/failed=0 despite exit_code=1. */
-      const trySettle = () => {
-        if (settled) return;
-        if (!procClosed) return;
-        // For pipes that never emit 'end' (rare), procClosed is enough if the
-        // stream emitted no 'data' at all. Require stdout/stderr 'end' when
-        // the streams exist.
-        if (!stdoutEnded || !stderrEnded) return;
-        settled = true;
-        clearTimeout(timer);
-        resolve(Either.right({
-          ok: exitCode === 0,
-          exitCode,
-          stdout,
-          stderr,
-        }));
-      };
-
-      const timer = setTimeout(() => {
-        if (settled) return;
-        settled = true;
-        try { process.kill(-child.pid!, "SIGKILL"); } catch { try { child.kill("SIGKILL"); } catch { /* already gone */ } }
-        resolve(Either.right({
-          ok: false,
-          exitCode: -1,
-          stdout,
-          stderr: stderr + `\n[adw-test] runRaw timed out after ${STAGE_RUN_TIMEOUT_MS}ms (killed ${cmd} ${args.join(" ")})\n`,
-        }));
-      }, STAGE_RUN_TIMEOUT_MS);
-      child.stdout.on("data", (chunk: Buffer | string) => {
-        stdout += typeof chunk === "string" ? chunk : chunk.toString("utf8");
-      });
-      child.stdout.on("end", () => { stdoutEnded = true; trySettle(); });
-      child.stderr.on("data", (chunk: Buffer | string) => {
-        stderr += typeof chunk === "string" ? chunk : chunk.toString("utf8");
-      });
-      child.stderr.on("end", () => { stderrEnded = true; trySettle(); });
-      child.on("error", (e) => {
-        if (settled) return;
-        settled = true;
-        clearTimeout(timer);
-        resolve(Either.left(`failed to spawn ${cmd}: ${e.message}`));
-      });
-      child.on("close", (code) => {
-        if (settled) return;
-        procClosed = true;
-        exitCode = code ?? -1;
-        trySettle();
-      });
-    });
+const runRaw: TesterDeps["runRaw"] = (cmd, args, opts = {}) =>
+  runRawShared(cmd, args, {
+    ...opts,
+    detached: true,
+    timeoutMs: STAGE_RUN_TIMEOUT_MS,
+    timeoutMessage: "[adw-test] runRaw timed out after " + STAGE_RUN_TIMEOUT_MS + "ms (killed " + cmd + " " + args.join(" ") + ")",
   });
-}
 
-function runCapture(cmd: string, args: string[], opts: RunOpts & { teeTo: string; liveLabel?: string }): TaskEither<string, string> {
-  return TaskEither.from(async () => {
-    return await new Promise<Either<string, string>>((resolve) => {
-      const child = spawn(cmd, args, {
-        cwd: opts.cwd,
-        env: opts.env ? { ...process.env, ...opts.env } : process.env,
-        stdio: ["ignore", "pipe", "pipe"],
-        detached: true,
-      });
-      let stdout = "";
-      let stderr = "";
-      let teeBuf = "";
-      let settled = false;
-      let procClosed = false;
-      let stdoutEnded = false;
-      let stderrEnded = false;
-      let exitCode = -1;
-
-      const trySettle = () => {
-        if (settled) return;
-        if (!procClosed || !stdoutEnded || !stderrEnded) return;
-        settled = true;
-        clearTimeout(timer);
-        if (teeBuf.length > 0) {
-          try { appendFileSync(opts.teeTo, teeBuf); } catch { /* ignore */ }
-        }
-        if (exitCode === 0) resolve(Either.right(stdout.trim()));
-        else resolve(Either.left((stderr || stdout).trim() || `${cmd} exited with code ${exitCode}`));
-      };
-
-      const timer = setTimeout(() => {
-        if (settled) return;
-        settled = true;
-        try { process.kill(-child.pid!, "SIGKILL"); } catch { try { child.kill("SIGKILL"); } catch { /* already gone */ } }
-        if (teeBuf.length > 0) {
-          try { appendFileSync(opts.teeTo, teeBuf); } catch { /* ignore */ }
-        }
-        resolve(Either.left(`${cmd} ${args.join(" ")} timed out after ${STAGE_RUN_TIMEOUT_MS}ms`));
-      }, STAGE_RUN_TIMEOUT_MS);
-
-      child.stdout.on("data", (chunk: Buffer | string) => {
-        const s = typeof chunk === "string" ? chunk : chunk.toString("utf8");
-        stdout += s;
-        teeBuf += s;
-        let nl: number;
-        while ((nl = teeBuf.indexOf("\n")) >= 0) {
-          const line = teeBuf.slice(0, nl + 1);
-          try { appendFileSync(opts.teeTo, line); } catch { /* ignore */ }
-          teeBuf = teeBuf.slice(nl + 1);
-        }
-      });
-      child.stdout.on("end", () => { stdoutEnded = true; trySettle(); });
-      child.stderr.on("data", (chunk: Buffer | string) => {
-        stderr += typeof chunk === "string" ? chunk : chunk.toString("utf8");
-      });
-      child.stderr.on("end", () => { stderrEnded = true; trySettle(); });
-      child.on("error", (e) => {
-        if (settled) return;
-        settled = true;
-        clearTimeout(timer);
-        resolve(Either.left(`failed to spawn ${cmd}: ${e.message}`));
-      });
-      child.on("close", (code) => {
-        if (settled) return;
-        procClosed = true;
-        exitCode = code ?? -1;
-        trySettle();
-      });
-    });
+const runCapture: TesterDeps["runCapture"] = (cmd, args, opts) =>
+  runCaptureShared(cmd, args, {
+    ...opts,
+    detached: true,
+    timeoutMs: STAGE_RUN_TIMEOUT_MS,
+    timeoutMessage: cmd + " " + args.join(" ") + " timed out after " + STAGE_RUN_TIMEOUT_MS + "ms",
   });
-}
 
 // ---------------------------------------------------------------------------
 // Input resolution: spec path OR adw-id → {specPath, source}

@@ -62,7 +62,7 @@ import {
   type WorkspaceState,
 } from "./adws-modules/dispatcher-runtime.ts";
 import { findWorkspaceBySpecPath, normalizeSpecPath } from "./adws-modules/dispatcher-runtime.ts";
-import type { PipelineStageInfo } from "./adws-modules/pipeline.ts";
+import { runConfiguredStage, type PipelineStageInfo } from "./adws-modules/pipeline.ts";
 import {
   commitSpecToMain,
   commitWorktreeChanges,
@@ -110,14 +110,10 @@ const STAGE_ORDER: readonly StageName[] = ["plan", "review", "build", "test", "p
  * CHORE-44 Change 8 (AC8.2): the 5-stage pipeline declared as a configuration
  * of the generic `StageDescriptor` shape from ./adws-modules/pipeline.ts.
  *
- * The 5-stage orchestrator's `runPipeline` body is more complex than the
- * 2/3-stage variants (worktree isolation per SPEC-065, base_sha recording,
- * goal-exhausted detection, and the build↔patch-review retry loop), so it does
- * NOT delegate to `runLinearPipeline`. Instead, this descriptor list documents
- * the pipeline's shape in the same vocabulary the other two orchestrators use,
- * and the per-stage `spawnStage`/`tokensOf` calls inside `makeRealDeps`/
- * `runPipeline` are the concrete execution of each descriptor. The retry loop
- * wraps the last three stages (build/test/patch-review) per AC8.4.
+ * Worktree setup and retry transitions remain variant-specific configuration,
+ * while every stage execution delegates to the same `runConfiguredStage`
+ * runner used by the linear variants. The retry loop wraps the last three
+ * configured stages (build/test/patch-review) per AC8.4.
  *
  * Tests that need to assert stage-order invariants can read STAGE_DESCRIPTORS
  * directly; it is the single source of truth for which stages exist, their
@@ -133,6 +129,11 @@ const STAGE_DESCRIPTORS: readonly PipelineStageInfo<StageName>[] = [
 
 /** Re-exported so tests can introspect the 5-stage configuration (AC8.2). */
 export const PIPELINE_STAGES = STAGE_DESCRIPTORS;
+
+/** Resolve one descriptor from the exhaustive five-stage configuration. */
+function configuredStage(name: StageName): PipelineStageInfo<StageName> {
+  return STAGE_DESCRIPTORS.find((stage) => stage.name === name)!;
+}
 
 
 // ---------------------------------------------------------------------------
@@ -975,15 +976,19 @@ export async function runPipeline(
 
   const setupPhases = async (): Promise<Either<string, void>> => {
     if (shouldRunPlan) {
-      process.stderr.write("adw-plan-review-build-patch: stage 1/5 — plan\n");
-      const planRes = await withHeartbeat(
-        {
-          stage: "plan",
-          teeFile: join(agentsDir, id, "planner", "raw-output.jsonl"),
-          onBeat: (p) => appendEvent(id, { event: "heartbeat", ...p }, agentsDir),
-        },
-        () => deps.runPlan(description, args.forcedType, id),
-      );
+      const planRes = await runConfiguredStage({
+        pipelineName: "adw-plan-review-build-patch",
+        position: "1/5",
+        stage: configuredStage("plan"),
+        run: () => withHeartbeat(
+          {
+            stage: "plan",
+            teeFile: join(agentsDir, id, "planner", "raw-output.jsonl"),
+            onBeat: (p) => appendEvent(id, { event: "heartbeat", ...p }, agentsDir),
+          },
+          () => deps.runPlan(description, args.forcedType, id),
+        ),
+      });
       if (Either.isLeft(planRes)) {
         appendEvent(id, { event: "stage-error", stage: "plan", detail: planRes.left }, agentsDir);
         state.failed_stage = "plan";
@@ -1014,15 +1019,19 @@ export async function runPipeline(
     }
 
     if (shouldRunReview) {
-      process.stderr.write("adw-plan-review-build-patch: stage 2/5 — spec-review\n");
-      const reviewRes = await withHeartbeat(
-        {
-          stage: "spec-review",
-          teeFile: join(agentsDir, id, "reviewer", "raw-output.jsonl"),
-          onBeat: (p) => appendEvent(id, { event: "heartbeat", ...p }, agentsDir),
-        },
-        () => deps.runSpecReview(specPath!, id),
-      );
+      const reviewRes = await runConfiguredStage({
+        pipelineName: "adw-plan-review-build-patch",
+        position: "2/5",
+        stage: configuredStage("review"),
+        run: () => withHeartbeat(
+          {
+            stage: "spec-review",
+            teeFile: join(agentsDir, id, "reviewer", "raw-output.jsonl"),
+            onBeat: (p) => appendEvent(id, { event: "heartbeat", ...p }, agentsDir),
+          },
+          () => deps.runSpecReview(specPath!, id),
+        ),
+      });
       if (Either.isLeft(reviewRes)) {
         appendEvent(id, { event: "stage-error", stage: "review", detail: reviewRes.left }, agentsDir);
         state.failed_stage = "review";
@@ -1241,15 +1250,19 @@ export async function runPipeline(
   const forcedBuildRestart = resume?.forcedFromStage && resume.resumeFrom === "build";
   const shouldRunInitialBuild = !resume || (resume.resumeFrom !== "test" && resume.resumeFrom !== "patch-review");
   if (shouldRunInitialBuild) {
-    process.stderr.write("adw-plan-review-build-patch: stage 3/5 — build\n");
-    const buildRes = await withHeartbeat(
-      {
-        stage: "build",
-        teeFile: join(agentsDir, id, "builder", "raw-output.jsonl"),
-        onBeat: (p) => appendEvent(id, { event: "heartbeat", ...p }, agentsDir),
-      },
-      () => deps.runBuild(specPathForLater, args.modelOverride, id, effectiveGoal),
-    );
+    const buildRes = await runConfiguredStage({
+      pipelineName: "adw-plan-review-build-patch",
+      position: "3/5",
+      stage: configuredStage("build"),
+      run: () => withHeartbeat(
+        {
+          stage: "build",
+          teeFile: join(agentsDir, id, "builder", "raw-output.jsonl"),
+          onBeat: (p) => appendEvent(id, { event: "heartbeat", ...p }, agentsDir),
+        },
+        () => deps.runBuild(specPathForLater, args.modelOverride, id, effectiveGoal),
+      ),
+    });
     if (Either.isLeft(buildRes)) {
       appendEvent(id, { event: "stage-error", stage: "build", detail: buildRes.left }, agentsDir);
       state.failed_stage = "build";
@@ -1279,15 +1292,19 @@ export async function runPipeline(
   const forcedTestRestart = resume?.forcedFromStage && resume.resumeFrom === "test";
   const shouldRunInitialTest = !resume || (resume.resumeFrom !== "patch-review");
   if (shouldRunInitialTest) {
-    process.stderr.write("adw-plan-review-build-patch: stage 4/5 — test\n");
-    const testRes = await withHeartbeat(
-      {
-        stage: "test",
-        teeFile: join(agentsDir, id, "tester", "events.jsonl"),
-        onBeat: (p) => appendEvent(id, { event: "heartbeat", ...p }, agentsDir),
-      },
-      () => deps.runTest(specPathForLater, args.modelOverride, id),
-    );
+    const testRes = await runConfiguredStage({
+      pipelineName: "adw-plan-review-build-patch",
+      position: "4/5",
+      stage: configuredStage("test"),
+      run: () => withHeartbeat(
+        {
+          stage: "test",
+          teeFile: join(agentsDir, id, "tester", "events.jsonl"),
+          onBeat: (p) => appendEvent(id, { event: "heartbeat", ...p }, agentsDir),
+        },
+        () => deps.runTest(specPathForLater, args.modelOverride, id),
+      ),
+    });
     if (Either.isLeft(testRes)) {
       appendEvent(id, { event: "stage-error", stage: "test", detail: testRes.left }, agentsDir);
       state.failed_stage = "test";
@@ -1362,17 +1379,20 @@ export async function runPipeline(
 
   while (patchIterations < maxRetries) {
     patchIterations++;
-    process.stderr.write(
-      `adw-plan-review-build-patch: stage 5/5 — patch-review (iteration ${patchIterations}/${maxRetries})\n`,
-    );
-    const patchRes = await withHeartbeat(
-      {
-        stage: `patch-review (iteration ${patchIterations}/${maxRetries})`,
-        teeFile: join(agentsDir, id, "patch-reviewer", "raw-output.jsonl"),
-        onBeat: (p) => appendEvent(id, { event: "heartbeat", ...p }, agentsDir),
-      },
-      () => deps.runPatchReview(specPathForLater, args.modelOverride, id),
-    );
+    const patchRes = await runConfiguredStage({
+      pipelineName: "adw-plan-review-build-patch",
+      position: "5/5",
+      stage: configuredStage("patch-review"),
+      suffix: `(iteration ${patchIterations}/${maxRetries})`,
+      run: () => withHeartbeat(
+        {
+          stage: `patch-review (iteration ${patchIterations}/${maxRetries})`,
+          teeFile: join(agentsDir, id, "patch-reviewer", "raw-output.jsonl"),
+          onBeat: (p) => appendEvent(id, { event: "heartbeat", ...p }, agentsDir),
+        },
+        () => deps.runPatchReview(specPathForLater, args.modelOverride, id),
+      ),
+    });
     if (Either.isLeft(patchRes)) {
       appendEvent(id, { event: "stage-error", stage: "patch-review", detail: patchRes.left, iteration: patchIterations }, agentsDir);
       state.failed_stage = "patch-review";
@@ -1490,14 +1510,20 @@ export async function runPipeline(
         retryGoal = effectiveGoal;
       }
 
-      const rebuildRes = await withHeartbeat(
-        {
-          stage: `build (retry ${patchIterations})`,
-          teeFile: join(agentsDir, id, "builder", "raw-output.jsonl"),
-          onBeat: (p) => appendEvent(id, { event: "heartbeat", ...p }, agentsDir),
-        },
-        () => deps.runBuild(specPathForLater, args.modelOverride, id, retryGoal),
-      );
+      const rebuildRes = await runConfiguredStage({
+        pipelineName: "adw-plan-review-build-patch",
+        position: "3/5",
+        stage: configuredStage("build"),
+        suffix: `(retry ${patchIterations})`,
+        run: () => withHeartbeat(
+          {
+            stage: `build (retry ${patchIterations})`,
+            teeFile: join(agentsDir, id, "builder", "raw-output.jsonl"),
+            onBeat: (p) => appendEvent(id, { event: "heartbeat", ...p }, agentsDir),
+          },
+          () => deps.runBuild(specPathForLater, args.modelOverride, id, retryGoal),
+        ),
+      });
       if (Either.isLeft(rebuildRes)) {
         appendEvent(id, { event: "stage-error", stage: "build", detail: rebuildRes.left, iteration: patchIterations, retry: true }, agentsDir);
         state.failed_stage = "build";
@@ -1533,17 +1559,20 @@ export async function runPipeline(
       await writeState(id, state as unknown as Record<string, unknown>, agentsDir).run();
 
       // Re-run test stage after the retry build.
-      process.stderr.write(
-        `adw-plan-review-build-patch: stage 4/5 — test (retry ${patchIterations})\n`,
-      );
-      const retestRes = await withHeartbeat(
-        {
-          stage: `test (retry ${patchIterations})`,
-          teeFile: join(agentsDir, id, "tester", "events.jsonl"),
-          onBeat: (p) => appendEvent(id, { event: "heartbeat", ...p }, agentsDir),
-        },
-        () => deps.runTest(specPathForLater, args.modelOverride, id),
-      );
+      const retestRes = await runConfiguredStage({
+        pipelineName: "adw-plan-review-build-patch",
+        position: "4/5",
+        stage: configuredStage("test"),
+        suffix: `(retry ${patchIterations})`,
+        run: () => withHeartbeat(
+          {
+            stage: `test (retry ${patchIterations})`,
+            teeFile: join(agentsDir, id, "tester", "events.jsonl"),
+            onBeat: (p) => appendEvent(id, { event: "heartbeat", ...p }, agentsDir),
+          },
+          () => deps.runTest(specPathForLater, args.modelOverride, id),
+        ),
+      });
       if (Either.isLeft(retestRes)) {
         appendEvent(id, { event: "stage-error", stage: "test", detail: retestRes.left, iteration: patchIterations, retry: true }, agentsDir);
         state.failed_stage = "test";

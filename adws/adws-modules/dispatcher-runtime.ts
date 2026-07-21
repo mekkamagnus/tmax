@@ -127,6 +127,125 @@ export interface RunOpts {
   env?: Record<string, string>;
 }
 
+export interface RawRunResult {
+  ok: boolean;
+  exitCode: number;
+  stdout: string;
+  stderr: string;
+}
+
+export interface RunRawOpts extends RunOpts {
+  /** Make the child a process-group leader so timeout cleanup reaches descendants. */
+  detached?: boolean;
+  /** Optional wall-clock ceiling. Omit for long-running LLM audit calls. */
+  timeoutMs?: number;
+  /** Optional streamed stdout destination. */
+  teeTo?: string;
+  /** Optional live tool-use filter label for streamed stdout. */
+  liveLabel?: string;
+  /** Text appended to stderr when the timeout fires. */
+  timeoutMessage?: string;
+}
+
+/**
+ * Canonical drain-safe subprocess capture implementation.
+ *
+ * Non-zero exits and timeouts are returned as `Right<RawRunResult>` so callers
+ * that parse test output retain the exit code and complete stdout/stderr.
+ * Spawn/setup failures are `Left`. When a timeout is configured, a detached
+ * child is killed as a process group to avoid orphaned Bun grandchildren.
+ */
+export function runRaw(cmd: string, args: string[], opts: RunRawOpts = {}): TaskEither<string, RawRunResult> {
+  return TaskEither.from(async () => {
+    return await new Promise<Either<string, RawRunResult>>((resolve) => {
+      const child = spawn(cmd, args, {
+        cwd: opts.cwd,
+        env: opts.env ? { ...process.env, ...opts.env } : process.env,
+        stdio: ["ignore", "pipe", "pipe"],
+        ...(opts.detached ? { detached: true } : {}),
+      });
+      let stdout = "";
+      let stderr = "";
+      let teeBuffer = "";
+      let settled = false;
+      let processClosed = false;
+      let stdoutEnded = false;
+      let stderrEnded = false;
+      let exitCode = -1;
+
+      const emitTeeLine = (line: string): void => {
+        if (opts.teeTo) {
+          try { appendFileSync(opts.teeTo, line); } catch { /* best effort */ }
+        }
+        if (opts.liveLabel) {
+          try {
+            const filtered = formatToolUseLine(opts.liveLabel, line.trimEnd());
+            if (filtered) process.stderr.write(filtered + "\n");
+          } catch { /* best effort */ }
+        }
+      };
+
+      const flushTee = (): void => {
+        if (teeBuffer.length === 0) return;
+        emitTeeLine(teeBuffer);
+        teeBuffer = "";
+      };
+
+      const timer = opts.timeoutMs
+        ? setTimeout(() => {
+          if (settled) return;
+          settled = true;
+          if (opts.detached && child.pid) {
+            try { process.kill(-child.pid, "SIGKILL"); } catch { try { child.kill("SIGKILL"); } catch { /* gone */ } }
+          } else {
+            try { child.kill("SIGKILL"); } catch { /* gone */ }
+          }
+          flushTee();
+          const message = opts.timeoutMessage ?? `${cmd} ${args.join(" ")} timed out after ${opts.timeoutMs}ms`;
+          resolve(Either.right({ ok: false, exitCode: -1, stdout, stderr: stderr + `\n${message}\n` }));
+        }, opts.timeoutMs)
+        : undefined;
+
+      const trySettle = (): void => {
+        if (settled || !processClosed || !stdoutEnded || !stderrEnded) return;
+        settled = true;
+        if (timer) clearTimeout(timer);
+        flushTee();
+        resolve(Either.right({ ok: exitCode === 0, exitCode, stdout, stderr }));
+      };
+
+      child.stdout.on("data", (chunk: Buffer | string) => {
+        const text = typeof chunk === "string" ? chunk : chunk.toString("utf8");
+        stdout += text;
+        if (!opts.teeTo && !opts.liveLabel) return;
+        teeBuffer += text;
+        let newline: number;
+        while ((newline = teeBuffer.indexOf("\n")) >= 0) {
+          emitTeeLine(teeBuffer.slice(0, newline + 1));
+          teeBuffer = teeBuffer.slice(newline + 1);
+        }
+      });
+      child.stdout.on("end", () => { stdoutEnded = true; trySettle(); });
+      child.stderr.on("data", (chunk: Buffer | string) => {
+        stderr += typeof chunk === "string" ? chunk : chunk.toString("utf8");
+      });
+      child.stderr.on("end", () => { stderrEnded = true; trySettle(); });
+      child.on("error", (error) => {
+        if (settled) return;
+        settled = true;
+        if (timer) clearTimeout(timer);
+        resolve(Either.left(`failed to spawn ${cmd}: ${error.message}`));
+      });
+      child.on("close", (code) => {
+        if (settled) return;
+        processClosed = true;
+        exitCode = code ?? -1;
+        trySettle();
+      });
+    });
+  });
+}
+
 /**
  * Spawn, capture stdout/stderr. Returns TaskEither (lazy, composable).
  * Left = non-zero exit (error = stderr||stdout); Right = trimmed stdout.
@@ -134,28 +253,9 @@ export interface RunOpts {
  * Identical to the per-stage `run()` helper pre-refactor.
  */
 export function run(cmd: string, args: string[], opts: RunOpts = {}): TaskEither<string, string> {
-  return TaskEither.from(async () => {
-    return await new Promise<Either<string, string>>((resolve) => {
-      const child = spawn(cmd, args, {
-        cwd: opts.cwd,
-        env: opts.env ? { ...process.env, ...opts.env } : process.env,
-        stdio: ["ignore", "pipe", "pipe"],
-      });
-      let stdout = "";
-      let stderr = "";
-      child.stdout.on("data", (chunk: Buffer | string) => {
-        stdout += typeof chunk === "string" ? chunk : chunk.toString("utf8");
-      });
-      child.stderr.on("data", (chunk: Buffer | string) => {
-        stderr += typeof chunk === "string" ? chunk : chunk.toString("utf8");
-      });
-      child.on("error", (e) => resolve(Either.left(`failed to spawn ${cmd}: ${e.message}`)));
-      child.on("close", (code) => {
-        if (code === 0) resolve(Either.right(stdout.trim()));
-        else resolve(Either.left((stderr || stdout).trim() || `${cmd} exited with code ${code}`));
-      });
-    });
-  });
+  return runRaw(cmd, args, opts).flatMap((result) => result.ok
+    ? TaskEither.right<string, string>(result.stdout.trim())
+    : TaskEither.left<string, string>((result.stderr || result.stdout).trim() || `${cmd} exited with code ${result.exitCode}`));
 }
 
 /**
@@ -171,57 +271,11 @@ export function run(cmd: string, args: string[], opts: RunOpts = {}): TaskEither
 export function runCapture(
   cmd: string,
   args: string[],
-  opts: RunOpts & { teeTo: string; liveLabel?: string },
+  opts: RunRawOpts & { teeTo: string },
 ): TaskEither<string, string> {
-  return TaskEither.from(async () => {
-    return await new Promise<Either<string, string>>((resolve) => {
-      const child = spawn(cmd, args, {
-        cwd: opts.cwd,
-        env: opts.env ? { ...process.env, ...opts.env } : process.env,
-        stdio: ["ignore", "pipe", "pipe"],
-      });
-      let stdout = "";
-      let stderr = "";
-      let teeBuf = "";
-      child.stdout.on("data", (chunk: Buffer | string) => {
-        const s = typeof chunk === "string" ? chunk : chunk.toString("utf8");
-        stdout += s;
-        // Tee line-by-line: flush complete lines as they arrive.
-        teeBuf += s;
-        let nl: number;
-        while ((nl = teeBuf.indexOf("\n")) >= 0) {
-          const line = teeBuf.slice(0, nl + 1);
-          try { appendFileSync(opts.teeTo, line); } catch { /* ignore */ }
-          // §C: when liveLabel is set, filter and emit tool_use lines to stderr.
-          if (opts.liveLabel) {
-            try {
-              const filtered = formatToolUseLine(opts.liveLabel, line.trimEnd());
-              if (filtered) process.stderr.write(filtered + "\n");
-            } catch { /* best-effort */ }
-          }
-          teeBuf = teeBuf.slice(nl + 1);
-        }
-      });
-      child.stderr.on("data", (chunk: Buffer | string) => {
-        stderr += typeof chunk === "string" ? chunk : chunk.toString("utf8");
-      });
-      child.on("error", (e) => resolve(Either.left(`failed to spawn ${cmd}: ${e.message}`)));
-      child.on("close", (code) => {
-        // Flush trailing partial line
-        if (teeBuf.length > 0) {
-          try { appendFileSync(opts.teeTo, teeBuf); } catch { /* ignore */ }
-          if (opts.liveLabel) {
-            try {
-              const filtered = formatToolUseLine(opts.liveLabel, teeBuf.trimEnd());
-              if (filtered) process.stderr.write(filtered + "\n");
-            } catch { /* best-effort */ }
-          }
-        }
-        if (code === 0) resolve(Either.right(stdout.trim()));
-        else resolve(Either.left((stderr || stdout).trim() || `${cmd} exited with code ${code}`));
-      });
-    });
-  });
+  return runRaw(cmd, args, opts).flatMap((result) => result.ok
+    ? TaskEither.right<string, string>(result.stdout.trim())
+    : TaskEither.left<string, string>((result.stderr || result.stdout).trim() || `${cmd} exited with code ${result.exitCode}`));
 }
 
 // ---------------------------------------------------------------------------
