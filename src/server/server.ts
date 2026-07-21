@@ -17,7 +17,21 @@ import {
   type JSONRPCResponse,
   type RpcHandlers,
 } from './rpc/router.ts';
-import type { FrameTarget, JsonValue } from './rpc/types.ts';
+import type {
+  AproposCommandResult,
+  BufferDetails,
+  ClientStatusResult,
+  DiagnosticResult,
+  FrameStatusResult,
+  FrameTarget,
+  FunctionDocumentation,
+  FunctionUsagesResult,
+  JsonValue,
+  NamedJsonValues,
+  ObservabilityErrorResult,
+  StatusResult,
+  VariableDocumentation,
+} from './rpc/types.ts';
 import type { ServerContext, ClientRecord, FrameObservability } from './rpc/handlers/context.ts';
 import { createEditingHandlers } from './rpc/handlers/editing.ts';
 import { createFramesHandlers } from './rpc/handlers/frames.ts';
@@ -25,7 +39,9 @@ import { createWorkspaceHandlers } from './rpc/handlers/workspaces.ts';
 import { createLifecycleHandlers } from './rpc/handlers/lifecycle.ts';
 import { FileSystemImpl } from '../core/filesystem.ts';
 import { TextBufferImpl } from '../core/buffer.ts';
-import { EditorState, Frame, WorkspaceState } from '../core/types.ts';
+import type { TextBuffer } from '../core/contracts/buffer.ts';
+import type { EditorState } from '../core/contracts/editor.ts';
+import type { Frame, WorkspaceState } from '../core/contracts/workspace.ts';
 import { WorkspaceManager } from '../core/workspace.ts';
 import { Either } from '../utils/task-either.ts';
 import { loadTrtFrameworkSync } from '../tlisp/trt/bootstrap.ts';
@@ -44,7 +60,7 @@ interface ClientConnection {
   connectedAt: Date;
   clientType: string;
   clientName?: string;
-  metadata?: Record<string, unknown>;
+  metadata?: Record<string, JsonValue>;
   lastRequestAt?: Date;
   requestCount: number;
   lastError?: string;
@@ -52,15 +68,7 @@ interface ClientConnection {
   inputBuffer: string;
 }
 
-interface ObservabilityError {
-  timestamp: string;
-  source: string;
-  message: string;
-  clientId?: string;
-  frameId?: string;
-  requestId?: string | number | null;
-  diagnostic?: Record<string, unknown>;
-}
+type ObservabilityError = ObservabilityErrorResult;
 
 interface LockData {
   pid: number;
@@ -335,13 +343,13 @@ export class TmaxServer {
 	  }
 
   private cloneWorkspace(workspace: WorkspaceState): WorkspaceState {
-    const buffers = new Map<string, import('../core/types.ts').TextBuffer>();
+    const buffers = new Map<string, TextBuffer>();
     for (const [name, buffer] of workspace.buffers.entries()) {
       const content = buffer.getContent();
       buffers.set(name, TextBufferImpl.create(Either.isRight(content) ? content.right : ''));
     }
 
-    const resolveBuffer = (bufferName: string | undefined, fallback?: import('../core/types.ts').TextBuffer) => {
+    const resolveBuffer = (bufferName: string | undefined, fallback?: TextBuffer) => {
       if (bufferName && buffers.has(bufferName)) return buffers.get(bufferName)!;
       return fallback ?? buffers.get('*scratch*') ?? TextBufferImpl.create('');
     };
@@ -619,7 +627,7 @@ export class TmaxServer {
     obs.lastSyncAt = new Date();
   }
 
-  private recordError(source: string, error: unknown, clientId?: string, frameId?: string, diagnostic?: Record<string, unknown>, requestId?: string | number | null): void {
+  private recordError(source: string, error: unknown, clientId?: string, frameId?: string, diagnostic?: DiagnosticResult, requestId?: string | number | null): void {
     const message = error instanceof Error ? error.message : String(error);
     this.recentErrors.push({
       timestamp: new Date().toISOString(),
@@ -653,7 +661,7 @@ export class TmaxServer {
     return null;
   }
 
-  private frameStatus(frame: Frame): Record<string, unknown> {
+  private frameStatus(frame: Frame): FrameStatusResult {
     const obs = this.frameObservability.get(frame.id);
     return {
       id: frame.id,
@@ -680,7 +688,7 @@ export class TmaxServer {
     };
   }
 
-  private clientStatus(client: ClientConnection): Record<string, unknown> {
+  private clientStatus(client: ClientConnection): ClientStatusResult {
     return {
       id: client.id,
       clientType: client.clientType,
@@ -694,7 +702,7 @@ export class TmaxServer {
     };
   }
 
-  private buildStatus(): Record<string, unknown> {
+  private buildStatus(): StatusResult {
     const state = this.editor.getEditorState();
     const clients = Array.from(this.clients.values()).map(client => this.clientStatus(client));
     const frames = Array.from(this.frames.values()).map(frame => this.frameStatus(frame));
@@ -1062,7 +1070,7 @@ export class TmaxServer {
             const clientTypeParam = typeof params.clientType === 'string' ? params.clientType : undefined;
             const clientNameParam = typeof params.clientName === 'string' ? params.clientName : undefined;
             const metadataParam = (params.metadata && typeof params.metadata === 'object' && !Array.isArray(params.metadata))
-              ? params.metadata as Record<string, unknown>
+              ? params.metadata as Record<string, JsonValue>
               : {};
             client.clientType = clientTypeParam ?? 'tui';
             client.clientName = clientNameParam;
@@ -1292,18 +1300,18 @@ export class TmaxServer {
   // — not domain handler logic.
   // ────────────────────────────────────────────────────────────────────────
 
-  private diagnosticToJSON(d: unknown): Record<string, unknown> {
+  private diagnosticToJSON(d: unknown): DiagnosticResult {
     const diag = (d ?? {}) as Record<string, unknown>;
     return {
-      severity: diag.severity,
-      code: diag.code,
-      message: diag.message,
-      ...(diag.source ? { source: diag.source } : {}),
-      ...(diag.primarySpan ? { primarySpan: diag.primarySpan } : {}),
-      ...(diag.expected ? { expected: diag.expected } : {}),
-      ...(diag.actual ? { actual: diag.actual } : {}),
-      ...(diag.help ? { help: diag.help } : {}),
-      ...(diag.stack ? { stack: diag.stack } : {}),
+      severity: diag.severity as JsonValue,
+      code: diag.code as JsonValue,
+      message: diag.message as JsonValue,
+      ...(diag.source ? { source: diag.source as JsonValue } : {}),
+      ...(diag.primarySpan ? { primarySpan: diag.primarySpan as JsonValue } : {}),
+      ...(diag.expected ? { expected: diag.expected as JsonValue } : {}),
+      ...(diag.actual ? { actual: diag.actual as JsonValue } : {}),
+      ...(diag.help ? { help: diag.help as JsonValue } : {}),
+      ...(diag.stack ? { stack: diag.stack as JsonValue } : {}),
     };
   }
 
@@ -1318,7 +1326,7 @@ export class TmaxServer {
 	      .map(([name]) => name);
 	  }
 
-	  private bufferDetailsForWorkspace(workspace: WorkspaceState, currentBufferName?: string): Array<Record<string, unknown>> {
+	  private bufferDetailsForWorkspace(workspace: WorkspaceState, currentBufferName?: string): BufferDetails[] {
 	    return Array.from(workspace.buffers.entries()).map(([name, buffer]) => {
 	      const content = buffer.getContent();
 	      const text = Either.isRight(content) ? content.right : '';
@@ -1347,7 +1355,7 @@ export class TmaxServer {
   /**
    * Get documentation for a variable
    */
-  private getVariableDocumentation(variableName: string): any {
+  private getVariableDocumentation(variableName: string): VariableDocumentation {
     const value = this.editor.lookupGlobalBinding(variableName);
 
     if (value === undefined) {
@@ -1382,7 +1390,7 @@ export class TmaxServer {
   /**
    * Find commands matching a pattern
    */
-  private findCommandsByPattern(pattern: string): any {
+  private findCommandsByPattern(pattern: string): AproposCommandResult {
     const allFunctions = this.getTlispFunctions();
 
     // Convert pattern to regex (handle * wildcards)
@@ -1416,7 +1424,7 @@ export class TmaxServer {
   /**
    * Find usages of a function
    */
-  private findFunctionUsages(functionName: string): any {
+  private findFunctionUsages(functionName: string): FunctionUsagesResult {
     // For now, return an empty array as we don't track function call locations
     // This would require parsing all loaded T-Lisp files and tracking call sites
     return {
@@ -1464,8 +1472,8 @@ export class TmaxServer {
   /**
    * Get all variables from T-Lisp environment
    */
-  private getTlispVariables(): Record<string, any> {
-    const variables: Record<string, any> = {};
+  private getTlispVariables(): NamedJsonValues {
+    const variables: NamedJsonValues = {};
 
     // Get all variable bindings (using *name* convention)
     const rawVars = this.editor.getGlobalVariables();
@@ -1489,7 +1497,7 @@ export class TmaxServer {
   /**
    * Get documentation for a specific function
    */
-  private getFunctionDocumentation(functionName: string): any {
+  private getFunctionDocumentation(functionName: string): FunctionDocumentation {
     const value = this.editor.lookupGlobalBinding(functionName);
 
     if (value === undefined || (value.type !== 'function' && value.type !== 'macro')) {

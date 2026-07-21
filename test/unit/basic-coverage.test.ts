@@ -14,9 +14,7 @@ import { loadTrtFramework } from "../../src/tlisp/trt/bootstrap.ts";
 // CHORE-44 Change 4 AC4.8: coverage state is now per-instance on the
 // interpreter's evaluator (was module-global). These tests reach it via
 // `interpreter.coverage.*` so they exercise the actual per-instance model
-// the production runtime uses. The legacy module-level shim in
-// `test-coverage.ts` still exists for any external callers that haven't
-// been threaded through an interpreter.
+// the production runtime uses. No module-level compatibility state remains.
 describe("Basic Coverage (US-0.6.6)", () => {
   let interpreter: TLispInterpreterImpl;
 

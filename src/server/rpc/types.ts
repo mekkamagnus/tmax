@@ -17,22 +17,33 @@
  * exact contract.
  */
 
-/** JSON-compatible value (the wire shape for all RPC results). */
-export type JsonValue = string | number | boolean | null | JsonValue[] | { [key: string]: JsonValue };
-
-/**
- * A JSON object whose leaf values may be `unknown` (the runtime shape returned
- * by `editorStateToJson`/T-Lisp value converters, where some fields are
- * intentionally dynamic — render view models, diagnostics, log entries). Used
- * by result types whose handlers return a dynamic object graph; this is NOT a
- * blanket `unknown` placeholder (each method still declares a NAMED result
- * type) nor a param catch-all index signature.
- */
-export type JsonObject = { [key: string]: unknown };
-
 // Log types used by query params (re-exported from log-entry for precision).
-import type { LogCategory, LogView } from "../../editor/log-entry.ts";
-import type { LogLevel } from "../../editor/message-log.ts";
+import type { LogCategory, LogEntry, LogView } from "../../editor/log-entry.ts";
+import type { LogLevel, MessageEntry } from "../../editor/message-log.ts";
+import type {
+  EditorConfig,
+  EditorState,
+  JsonValue,
+  MinibufferRenderView,
+  WhichKeyBinding,
+  Window,
+  Tab,
+} from "../../core/contracts/editor.ts";
+import type { Position, TerminalSize } from "../../core/contracts/primitives.ts";
+
+export type { JsonValue } from "../../core/contracts/editor.ts";
+
+export interface DiagnosticResult {
+  severity?: JsonValue;
+  code?: JsonValue;
+  message?: JsonValue;
+  source?: JsonValue;
+  primarySpan?: JsonValue;
+  expected?: JsonValue;
+  actual?: JsonValue;
+  help?: JsonValue;
+  stack?: JsonValue;
+}
 
 /**
  * Frame/client targeting prefix shared by many methods. AC5.7 forbids a
@@ -133,32 +144,201 @@ export interface ShutdownResult { ok: true }
 /** Client-event acknowledgement. */
 export interface ClientEventResult { ok: true }
 
-/** Command result is a per-command JSON value: string[] (list-buffers),
- * `{success, killed}` (kill-buffer), `{success, saved}` (save-buffer),
- * a status object (server-info), or documentation/pattern-usage objects. */
-export type CommandResult = JsonValue | JsonObject | JsonObject[];
+export type SerializedWindow = Omit<Window, "buffer"> & { bufferContent: string };
+export type SerializedTab = Omit<Tab, "buffer"> & { bufferContent: string };
 
-/** Query result is per-query JSON: buffer details, variables, keybindings,
- * full-state, functions, messages/entries, documentation. The handler returns
- * dynamic object graphs (render view models, log entries) so the open tail is
- * `JsonObject` (named, not a blanket `unknown` placeholder). */
-export type QueryResult = JsonValue | JsonObject | JsonObject[];
+/** Exact renderer-facing editor state emitted by `editorStateToJson`. */
+export interface SerializedEditorState {
+  cursorPosition: Position;
+  mode: EditorState["mode"];
+  statusMessage: string;
+  viewportTop: number;
+  viewportLeft?: number;
+  config: EditorConfig;
+  commandLine: string;
+  mxCommand: string;
+  currentFilename?: string;
+  currentMajorMode: string;
+  activeMinorModes: string[];
+  activeMinorModeLighters: string[];
+  minibufferState?: JsonValue;
+  minibufferView?: MinibufferRenderView;
+  cursorFocus: "buffer" | "command";
+  bufferContent: string;
+  windows: SerializedWindow[];
+  currentWindowIndex: number;
+  tabs: SerializedTab[];
+  currentTabIndex: number;
+  whichKeyActive: boolean;
+  whichKeyPrefix: string;
+  whichKeyBindings: WhichKeyBinding[];
+  whichKeyPopup: NonNullable<EditorState["whichKeyPopup"]> | null;
+}
 
-/** Keypress result is the serialized editor state (render view model). On
- * editor-quit it carries `quitSignal: true`. */
-export type KeypressResult = JsonObject | { quitSignal: true };
+export interface BufferDetails {
+  name: string;
+  content: string;
+  filename?: string;
+  majorMode: string;
+  modified: boolean;
+  characters: number;
+  lines: number;
+  current: boolean;
+  special: boolean;
+  recency: number;
+}
+
+export interface FunctionDocumentation {
+  name: string;
+  signature: string;
+  documentation: string;
+  file: string;
+  line: number;
+  examples: string[];
+  relatedFunctions: string[];
+}
+
+export interface VariableDocumentation {
+  name: string;
+  value: JsonValue;
+  type: string;
+  documentation: string;
+  file: string;
+  line: number;
+  customizable: boolean;
+  defaultValue: JsonValue;
+}
+
+export interface AproposCommandResult {
+  matches: Array<{ name: string; binding: string; documentation: string }>;
+}
+
+export interface FunctionUsagesResult {
+  function: string;
+  usages: Array<{ file: string; line: number; column: number }>;
+}
+
+export interface KillBufferResult {
+  success: boolean;
+  killed?: string;
+  error?: string;
+}
+
+export type CommandResult =
+  | string[]
+  | KillBufferResult
+  | SaveFileResult
+  | StatusResult
+  | FunctionDocumentation
+  | VariableDocumentation
+  | AproposCommandResult
+  | FunctionUsagesResult;
+
+/** Dynamic symbol/key names are the only open part of query results. */
+export type NamedJsonValues = Record<string, JsonValue>;
+
+export interface FullStateQueryResult {
+  buffers: BufferDetails[];
+  currentBuffer: string | null;
+  mode: EditorState["mode"];
+  variables: NamedJsonValues;
+  keybindings: Record<string, string>;
+  cursorPosition: Position;
+  viewportTop: number;
+  config: EditorConfig;
+}
+
+export type QueryResult =
+  | BufferDetails[]
+  | NamedJsonValues
+  | Record<string, string>
+  | FullStateQueryResult
+  | string[]
+  | { messages: Array<LogEntry | MessageEntry> }
+  | { entries: LogEntry[] }
+  | FunctionDocumentation;
+
+/** Keypress result is the serialized editor state, optionally carrying quit. */
+export type KeypressResult = SerializedEditorState & { quitSignal?: true };
 
 /** Render-state result is the serialized frame/editor render view model. */
-export type RenderStateResult = JsonObject;
+export type RenderStateResult = SerializedEditorState;
 
-/** Status result is the daemon status summary object. */
-export type StatusResult = JsonObject;
+export interface FrameStatusResult {
+  id: string;
+  clientId?: string;
+  clientType: string;
+  ready: boolean;
+  mode: EditorState["mode"];
+  currentFilename: string | null;
+  bufferName: string | null;
+  workspaceId: string;
+  cursorPosition: Position;
+  statusMessage: string;
+  currentMajorMode: string;
+  activeMinorModes: string[];
+  activeMinorModeLighters: string[];
+  firstRenderAt: string | null;
+  lastRenderAt: string | null;
+  renderCount: number;
+  rawModeReady: boolean;
+  terminalSize: TerminalSize | null;
+  lastSyncDirection: "frame-to-editor" | "editor-to-frame" | null;
+  lastSyncAt: string | null;
+  lastError: string | null;
+}
 
-/** Clients result is an array of per-client status objects. */
-export type ClientsResult = JsonObject[];
+export interface ClientStatusResult {
+  id: string;
+  clientType: string;
+  clientName: string | null;
+  connectedAt: string;
+  lastRequestAt: string | null;
+  requestCount: number;
+  lastError: string | null;
+  frameId: string | null;
+  metadata: Record<string, JsonValue>;
+}
 
-/** Frames result is an array of per-frame status objects. */
-export type FramesResult = JsonObject[];
+export interface ObservabilityErrorResult {
+  timestamp: string;
+  source: string;
+  message: string;
+  clientId?: string;
+  frameId?: string;
+  requestId?: string | number | null;
+  diagnostic?: DiagnosticResult;
+}
+
+export interface StatusResult {
+  daemonReady: boolean;
+  status: "running" | "starting";
+  server: "tmax";
+  uptimeMs: number;
+  startedAt: string;
+  socketPath: string;
+  clientCount: number;
+  frameCount: number;
+  activeFrameId: string | null;
+  activeWorkspaceId: string;
+  workspaceCount: number;
+  editor: {
+    mode: EditorState["mode"];
+    currentFilename: string | null;
+    bufferName: string | null;
+    cursorPosition: Position;
+    statusMessage: string;
+    currentMajorMode: string;
+    activeMinorModes: string[];
+    activeMinorModeLighters: string[];
+  };
+  clients: ClientStatusResult[];
+  frames: FrameStatusResult[];
+  recentErrors: ObservabilityErrorResult[];
+}
+
+export type ClientsResult = ClientStatusResult[];
+export type FramesResult = FrameStatusResult[];
 
 /** Workspace-list result row. */
 export interface WorkspaceListRow {

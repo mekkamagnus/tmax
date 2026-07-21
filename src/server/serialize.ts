@@ -1,5 +1,8 @@
 import { TextBufferImpl } from "../core/buffer.ts";
-import type { EditorState, Tab, Window, WorkspaceState, WorkspaceData, BufferMetadata, BufferModeState } from "../core/types.ts";
+import type { EditorState, Tab, Window } from "../core/contracts/editor.ts";
+import type { TextBuffer } from "../core/contracts/buffer.ts";
+import type { WorkspaceState, WorkspaceData, BufferMetadata, BufferModeState } from "../core/contracts/workspace.ts";
+import type { SerializedEditorState } from "./rpc/types.ts";
 
 function bufferContent(buffer: EditorState["currentBuffer"]): string {
   if (!buffer) return "";
@@ -53,7 +56,7 @@ function deserializeTab(raw: unknown): Tab | null {
   };
 }
 
-export function editorStateToJson(state: EditorState): Record<string, unknown> {
+export function editorStateToJson(state: EditorState): SerializedEditorState {
   return {
     cursorPosition: state.cursorPosition,
     mode: state.mode,
@@ -88,40 +91,43 @@ export function editorStateToJson(state: EditorState): Record<string, unknown> {
   };
 }
 
-export function jsonToEditorState(json: Record<string, unknown>): EditorState {
-  const windows = Array.isArray(json.windows)
-    ? json.windows.map(deserializeWindow).filter((window): window is Window => window !== null)
+export function jsonToEditorState(json: SerializedEditorState): EditorState;
+export function jsonToEditorState(json: Record<string, unknown>): EditorState;
+export function jsonToEditorState(json: SerializedEditorState | Record<string, unknown>): EditorState {
+  const record = json as Record<string, unknown>;
+  const windows = Array.isArray(record.windows)
+    ? record.windows.map(deserializeWindow).filter((window): window is Window => window !== null)
     : [];
-  const tabs = Array.isArray(json.tabs)
-    ? json.tabs.map(deserializeTab).filter((tab): tab is Tab => tab !== null)
+  const tabs = Array.isArray(record.tabs)
+    ? record.tabs.map(deserializeTab).filter((tab): tab is Tab => tab !== null)
     : [];
 
   return {
-    currentBuffer: TextBufferImpl.create((json.bufferContent as string) || ""),
-    cursorPosition: json.cursorPosition as EditorState["cursorPosition"],
-    mode: json.mode as EditorState["mode"],
-    statusMessage: json.statusMessage as string,
-    viewportTop: json.viewportTop as number,
-    viewportLeft: (json.viewportLeft as number | undefined) ?? 0,
-    config: json.config as EditorState["config"],
-    commandLine: json.commandLine as string,
-    mxCommand: json.mxCommand as string,
-    currentFilename: json.currentFilename as string | undefined,
-    currentMajorMode: (json.currentMajorMode as string | undefined) ?? "fundamental",
-    activeMinorModes: (json.activeMinorModes as string[] | undefined) ?? [],
-    activeMinorModeLighters: (json.activeMinorModeLighters as string[] | undefined) ?? [],
-    minibufferState: json.minibufferState as EditorState["minibufferState"],
-    minibufferView: json.minibufferView as EditorState["minibufferView"],
+    currentBuffer: TextBufferImpl.create((record.bufferContent as string) || ""),
+    cursorPosition: record.cursorPosition as EditorState["cursorPosition"],
+    mode: record.mode as EditorState["mode"],
+    statusMessage: record.statusMessage as string,
+    viewportTop: record.viewportTop as number,
+    viewportLeft: (record.viewportLeft as number | undefined) ?? 0,
+    config: record.config as EditorState["config"],
+    commandLine: record.commandLine as string,
+    mxCommand: record.mxCommand as string,
+    currentFilename: record.currentFilename as string | undefined,
+    currentMajorMode: (record.currentMajorMode as string | undefined) ?? "fundamental",
+    activeMinorModes: (record.activeMinorModes as string[] | undefined) ?? [],
+    activeMinorModeLighters: (record.activeMinorModeLighters as string[] | undefined) ?? [],
+    minibufferState: record.minibufferState as EditorState["minibufferState"],
+    minibufferView: record.minibufferView as EditorState["minibufferView"],
     buffers: new Map(),
-    cursorFocus: json.cursorFocus === "command" ? "command" : "buffer",
+    cursorFocus: record.cursorFocus === "command" ? "command" : "buffer",
     windows,
-    currentWindowIndex: (json.currentWindowIndex as number | undefined) ?? 0,
+    currentWindowIndex: (record.currentWindowIndex as number | undefined) ?? 0,
     tabs,
-    currentTabIndex: (json.currentTabIndex as number | undefined) ?? 0,
-    whichKeyActive: (json.whichKeyActive as boolean | undefined) ?? false,
-    whichKeyPrefix: (json.whichKeyPrefix as string | undefined) ?? "",
-    whichKeyBindings: (json.whichKeyBindings as EditorState["whichKeyBindings"]) ?? [],
-    whichKeyPopup: (json.whichKeyPopup as EditorState["whichKeyPopup"]) ?? null,
+    currentTabIndex: (record.currentTabIndex as number | undefined) ?? 0,
+    whichKeyActive: (record.whichKeyActive as boolean | undefined) ?? false,
+    whichKeyPrefix: (record.whichKeyPrefix as string | undefined) ?? "",
+    whichKeyBindings: (record.whichKeyBindings as EditorState["whichKeyBindings"]) ?? [],
+    whichKeyPopup: (record.whichKeyPopup as EditorState["whichKeyPopup"]) ?? null,
   };
 }
 
@@ -223,7 +229,7 @@ export function workspaceToData(workspace: WorkspaceState): WorkspaceData {
  */
 export function dataToWorkspace(data: WorkspaceData): WorkspaceState {
   // Reconstruct buffers
-  const buffers = new Map<string, import("../core/types.ts").TextBuffer>();
+  const buffers = new Map<string, TextBuffer>();
   const bufferMetadata = new Map<string, BufferMetadata>();
   const bufferModeStates = new Map<string, BufferModeState>();
 

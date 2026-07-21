@@ -14,7 +14,7 @@
  * category; `server-frame-sync.test.ts` proves the resulting call patterns.
  */
 
-import type { RpcMethodMap, RpcMethodName, JsonValue } from "./types.ts";
+import type { DiagnosticResult, RpcMethodMap, RpcMethodName, JsonValue } from "./types.ts";
 import type { SyncPolicy } from "./handlers/context.ts";
 
 // ── JSON-RPC wire shapes ─────────────────────────────────────────────────
@@ -29,7 +29,7 @@ export interface JSONRPCRequest {
 export interface JSONRPCResponse {
   jsonrpc: '2.0';
   id?: string | number | null;
-  result?: unknown;
+  result?: RpcMethodMap[RpcMethodName]["result"];
   error?: {
     code: number;
     message: string;
@@ -369,7 +369,7 @@ export async function routeRequest(
     error: unknown;
     clientId?: string;
     frameId?: string;
-    diagnostic?: Record<string, unknown>;
+    diagnostic?: DiagnosticResult;
     requestId?: string | number | null;
   }) => void,
 ): Promise<JSONRPCResponse> {
@@ -428,7 +428,9 @@ export async function routeRequest(
   }
 
   // 4. Dispatch + 5. error mapping.
-  const fn = (handlers as Record<string, (p: unknown) => unknown>)[method];
+  type RpcParams = RpcMethodMap[RpcMethodName]["params"];
+  type RpcResult = RpcMethodMap[RpcMethodName]["result"];
+  const fn = (handlers as Record<RpcMethodName, (params: RpcParams) => RpcResult | Promise<RpcResult>>)[method];
   if (!fn) {
     // Defensive: handler table is exhaustive over HANDLES, but a malformed
     // `handlers` object could miss an entry. Surface as -32601.
@@ -443,7 +445,7 @@ export async function routeRequest(
     };
   }
   try {
-    const result = await fn(request.params);
+    const result = await fn(request.params as RpcParams);
     return { jsonrpc: '2.0', id: request.id, result };
   } catch (error) {
     // RpcError passthrough (e.g. a handler that throws -32601-equivalent).
@@ -476,7 +478,7 @@ export async function routeRequest(
       error,
       clientId: typeof paramsRecord.clientId === 'string' ? paramsRecord.clientId : undefined,
       frameId: typeof paramsRecord.frameId === 'string' ? paramsRecord.frameId : undefined,
-      diagnostic: rawDiagnostic as Record<string, unknown> | undefined,
+      diagnostic: rawDiagnostic as DiagnosticResult | undefined,
       requestId: request.id,
     });
 

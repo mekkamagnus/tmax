@@ -13,6 +13,7 @@ import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import { LoggingRuntime } from "../../src/editor/runtime/logging-runtime.ts";
 import { PluginRuntime } from "../../src/editor/runtime/plugin-runtime.ts";
+import { WorkspaceRuntime } from "../../src/editor/runtime/workspace-runtime.ts";
 import { BindingRuntime } from "../../src/editor/runtime/binding-runtime.ts";
 import { CommandRuntime } from "../../src/editor/runtime/command-runtime.ts";
 import { Either } from "../../src/utils/task-either.ts";
@@ -21,10 +22,74 @@ import type { AppError, EvalError } from "../../src/error/types.ts";
 import type { Cmd, Msg, EditorRuntime } from "../../src/editor/functional/index.ts";
 import type { TLispValue } from "../../src/tlisp/types.ts";
 import { createNil } from "../../src/tlisp/values.ts";
+import { TextBufferImpl } from "../../src/core/buffer.ts";
+import { bindMacros, createMacroState } from "../../src/editor/api/macro-recording.ts";
 import { createStartedEditor, bufferText, expectRight } from "../helpers/editor-fixture.ts";
 import { MockFileSystem } from "../mocks/filesystem.ts";
 import type { BindingEvaluator } from "../../src/editor/runtime/binding-runtime.ts";
-import type { FileSystem } from "../../src/core/types.ts";
+import type { FileSystem } from "../../src/core/contracts/filesystem.ts";
+import type { WorkspaceState } from "../../src/core/contracts/workspace.ts";
+
+describe("CHORE-44 Change 3 — WorkspaceRuntime collaborator", () => {
+  test("serializes editor-owned state while excluding *Messages* and preserving mode metadata", () => {
+    const runtime = new WorkspaceRuntime();
+    const main = TextBufferImpl.create("main text");
+    const messages = TextBufferImpl.create("log text");
+    const workspace = runtime.serializeWorkspace({
+      buffers: new Map([["main", main], ["*Messages*", messages]]),
+      bufferMetadata: new Map([["main", { filename: "/tmp/main.ts", modified: true, recency: 1 }]]),
+      bufferModeStates: new Map([["/tmp/main.ts", {
+        majorMode: "typescript",
+        activeMinorModes: ["line-numbers"],
+        minorModeActivationOrder: ["line-numbers"],
+        minorModeSources: { "line-numbers": "local" },
+        localMinorModeOverrides: {},
+        minorModeSavedConfig: {},
+      }]]),
+      minorModeRegistry: new Map([["line-numbers", {
+        name: "line-numbers", description: "lines", lighter: " LN", global: false,
+        initValue: false, activateHook: "", deactivateHook: "",
+      }]]),
+      model: { currentBuffer: main, cursorPosition: { line: 3, column: 4 }, viewportTop: 2 },
+      currentBufferName: "main",
+      currentMajorMode: "typescript",
+      activeMinorModes: ["line-numbers"],
+    });
+
+    expect(workspace.buffers.has("*Messages*")).toBe(false);
+    expect(workspace.buffers.has("*scratch*")).toBe(true);
+    expect(workspace.bufferMetadata.get("main")).toMatchObject({
+      filename: "/tmp/main.ts", modified: true, cursorLine: 3, cursorColumn: 4,
+    });
+    expect(workspace.bufferModeStates.get("main")).toEqual({
+      majorMode: "typescript", minorModes: ["line-numbers"], lighters: [" LN"],
+    });
+  });
+
+  test("reconcile deep-copies buffers and rebuilds isolated metadata/mode maps", () => {
+    const source = TextBufferImpl.create("source");
+    const incoming: WorkspaceState = {
+      metadata: { id: "w", name: "w", createdAt: "now", lastAccessed: "now", formatVersion: 1 },
+      buffers: new Map([["main", source]]),
+      bufferMetadata: new Map([["main", { name: "main", modified: true, cursorLine: 1, cursorColumn: 2 }]]),
+      bufferModeStates: new Map([["main", { majorMode: "typescript", minorModes: ["numbers"] }]]),
+      windows: [], tabs: [], cursorState: { line: 0, column: 0 }, viewportState: { top: 0 },
+    };
+
+    const reconciled = new WorkspaceRuntime().reconcileWorkspace(incoming, 10, "messages");
+    expect(reconciled.buffers.get("main")).not.toBe(source);
+    expect(expectRight(reconciled.buffers.get("main")!.getContent())).toBe("source");
+    expect(expectRight(reconciled.buffers.get("*Messages*")!.getContent())).toBe("messages");
+    source.insert({ line: 0, column: 6 }, " changed");
+    expect(expectRight(reconciled.buffers.get("main")!.getContent())).toBe("source");
+    expect(reconciled.bufferMetadata.get("main")?.recency).toBe(10);
+    expect(reconciled.bufferMetadata.get("*Messages*")?.recency).toBe(11);
+    expect(reconciled.bufferModeStates.get("main")).toMatchObject({
+      majorMode: "typescript", activeMinorModes: ["numbers"], minorModeSources: { numbers: "local" },
+    });
+    expect(reconciled.nextRecency).toBe(12);
+  });
+});
 
 describe("CHORE-44 Change 3 — LoggingRuntime collaborator", () => {
   test("is unit-testable with fake deps: logMessage renders into the *Messages* buffer via the callback", () => {
@@ -82,6 +147,61 @@ describe("CHORE-44 Change 3 — PluginRuntime collaborator", () => {
     // A plugin that already declares a module is left untouched.
     const selfModule = "(defmodule user/plugin/self (export) (defun x))";
     expect(rt.wrapPluginModule("self", selfModule)).toBe(selfModule);
+  });
+
+  test("discovers plugin directories and reports loaded, skipped, and evaluator failures through fakes", async () => {
+    const fs = new MockFileSystem();
+    fs.setDirectory("/plugins");
+    fs.setDirectory("/plugins/good");
+    fs.setDirectory("/plugins/bad");
+    fs.setDirectory("/plugins/empty");
+    fs.setFile("/plugins/good/plugin.tlisp", "(defun hello () 1)");
+    fs.setFile("/plugins/bad/plugin.tlisp", "(defun broken () 1)");
+    const evaluated: string[] = [];
+    const result = await new PluginRuntime().loadPluginsFromDirectory("/plugins", fs, (code) => {
+      evaluated.push(code);
+      return code.includes("user/plugin/bad")
+        ? Either.left<EvalError, TLispValue>({ type: "EvalError", variant: "RuntimeError", message: "bad plugin" })
+        : Either.right<TLispValue, EvalError>(createNil());
+    });
+
+    expect(result.total).toBe(3);
+    expect(result.loaded).toEqual(["good"]);
+    expect(result.skipped).toEqual(["empty"]);
+    expect(result.errors).toEqual([{ plugin: "bad", error: "bad plugin" }]);
+    expect(evaluated[0]).toContain("(defmodule user/plugin/good");
+  });
+
+  test("reports a missing plugin directory without evaluating code", async () => {
+    let evaluations = 0;
+    const result = await new PluginRuntime().loadPluginsFromDirectory("/missing", new MockFileSystem(), () => {
+      evaluations++;
+      return Either.right<TLispValue, EvalError>(createNil());
+    });
+    expect(result.loaded).toEqual([]);
+    expect(result.errors).toEqual([{ plugin: "directory", error: "Plugin directory does not exist: /missing" }]);
+    expect(evaluations).toBe(0);
+  });
+
+  test("saves and reloads per-editor macros through the injected filesystem", async () => {
+    const previousHome = process.env.HOME;
+    process.env.HOME = "/plugin-runtime-test";
+    try {
+      const fs = new MockFileSystem();
+      const source = bindMacros(createMacroState());
+      expect(Either.isRight(source.set("a", ["i", "x", "Escape"]))).toBe(true);
+      const runtime = new PluginRuntime();
+      expect(await runtime.saveMacros(fs, source)).toBe(true);
+
+      const target = bindMacros(createMacroState());
+      expect(await runtime.loadMacros(fs, target)).toBe(true);
+      const loaded = target.get("a");
+      expect(Either.isRight(loaded)).toBe(true);
+      if (Either.isRight(loaded)) expect(loaded.right).toEqual(["i", "x", "Escape"]);
+    } finally {
+      if (previousHome === undefined) delete process.env.HOME;
+      else process.env.HOME = previousHome;
+    }
   });
 });
 
@@ -345,7 +465,7 @@ describe("CHORE-44 Change 3 — AC3.3 collaborators do not import editor.ts", ()
       const src = readFileSync(join(runtimeDir, file), "utf8");
       expect(src).not.toContain('from "../editor.ts"');
       expect(src).not.toContain('from "../editor"');
-      expect(src).not.toMatch(/import\s+.*\s+from\s+["'].*\/editor\.ts["']/);
+      expect(src).not.toMatch(/import\s+.*\s+from\s+["']\.\.\/editor\.ts["']/);
     });
   }
 });

@@ -1,0 +1,25 @@
+;; Native TRT coverage for CHORE-44 Change 6 policy moved into T-Lisp.
+
+(require-module editor/commands/command-line)
+(require-module editor/commands/post-newline)
+
+(deftest command-line-dispatch-replaces-all-matches ()
+  (buffer-create "*chore44-command-line*")
+  (buffer-switch "*chore44-command-line*")
+  (cursor-move 0 0)
+  (buffer-insert "alpha beta alpha")
+  (editor-dispatch-command-line "%s/alpha/omega/g")
+  (should-equal "omega beta omega" (buffer-text)))
+
+(deftest post-newline-hook-continues-markdown-list ()
+  (buffer-create "*chore44-post-newline*")
+  (buffer-switch "*chore44-post-newline*")
+  (major-mode-set "markdown")
+  (cursor-move 0 0)
+  (buffer-insert "- item one")
+  (cursor-move 0 10)
+  (insert-newline)
+  (post-newline-hook)
+  (should-equal "- item one\n- " (buffer-text))
+  (should-equal 1 (cursor-line))
+  (should-equal 2 (cursor-column)))

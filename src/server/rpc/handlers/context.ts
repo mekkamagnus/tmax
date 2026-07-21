@@ -17,9 +17,22 @@
  */
 
 import type { Editor } from "../../../editor/editor.ts";
-import type { Frame, WorkspaceState, EditorState } from "../../../core/types.ts";
+import type { EditorState } from "../../../core/contracts/editor.ts";
+import type { Frame, WorkspaceState } from "../../../core/contracts/workspace.ts";
 import type { WorkspaceManager } from "../../../core/workspace.ts";
-import type { JsonValue } from "../types.ts";
+import type {
+  AproposCommandResult,
+  BufferDetails,
+  ClientStatusResult,
+  DiagnosticResult,
+  FrameStatusResult,
+  FunctionDocumentation,
+  FunctionUsagesResult,
+  JsonValue,
+  NamedJsonValues,
+  StatusResult,
+  VariableDocumentation,
+} from "../types.ts";
 import type { TLispValue } from "../../../tlisp/types.ts";
 
 /** A connected client (the slice handlers touch). */
@@ -31,7 +44,7 @@ export interface ClientRecord {
   requestCount: number;
   lastError?: string;
   frameId?: string;
-  metadata?: Record<string, unknown>;
+  metadata?: Record<string, JsonValue>;
 }
 
 /** Per-frame observability (the slice handlers touch). */
@@ -103,20 +116,20 @@ export interface ServerContext {
   // ── Serialization + render helpers ──────────────────────────────────────
   frameToEditorState(frame: Frame): EditorState;
   currentBufferName(state: EditorState): string | null;
-  frameStatus(frame: Frame): Record<string, unknown>;
-  clientStatus(client: ClientRecord): Record<string, unknown>;
-  buildStatus(): Record<string, unknown>;
-  bufferDetailsForWorkspace(workspace: WorkspaceState, currentBufferName?: string): Array<Record<string, unknown>>;
+  frameStatus(frame: Frame): FrameStatusResult;
+  clientStatus(client: ClientRecord): ClientStatusResult;
+  buildStatus(): StatusResult;
+  bufferDetailsForWorkspace(workspace: WorkspaceState, currentBufferName?: string): BufferDetails[];
 
   // ── T-Lisp bridge helpers ───────────────────────────────────────────────
   tlispValueToJson(value: TLispValue | null | undefined): JsonValue;
-  diagnosticToJSON(d: unknown): Record<string, unknown>;
+  diagnosticToJSON(d: unknown): DiagnosticResult;
   getTlispFunctions(): string[];
-  getTlispVariables(): Record<string, JsonValue>;
-  getFunctionDocumentation(name: string): Record<string, unknown>;
-  getVariableDocumentation(name: string): Record<string, unknown>;
-  findCommandsByPattern(pattern: string): Record<string, unknown>;
-  findFunctionUsages(name: string): Record<string, unknown>;
+  getTlispVariables(): NamedJsonValues;
+  getFunctionDocumentation(name: string): FunctionDocumentation;
+  getVariableDocumentation(name: string): VariableDocumentation;
+  findCommandsByPattern(pattern: string): AproposCommandResult;
+  findFunctionUsages(name: string): FunctionUsagesResult;
 
   // ── Observability ───────────────────────────────────────────────────────
   recordError(
@@ -124,7 +137,7 @@ export interface ServerContext {
     error: unknown,
     clientId?: string,
     frameId?: string,
-    diagnostic?: Record<string, unknown>,
+    diagnostic?: DiagnosticResult,
     requestId?: string | number,
   ): void;
   logMessage(message: string, level?: 'info' | 'warn' | 'error', namespace?: string, frameId?: string): void;

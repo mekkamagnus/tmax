@@ -141,7 +141,7 @@ export function createEditingHandlers(ctx: ServerContext): {
         const diagnostic = err.diagnostic ? ctx.diagnosticToJSON(err.diagnostic) : undefined;
         ctx.recordError('eval', new Error(err.message), undefined, undefined, diagnostic);
         const e = new Error(err.message || 'T-Lisp evaluation error');
-        (e as Error & { diagnostic?: Record<string, unknown> }).diagnostic = diagnostic;
+        (e as Error & { diagnostic?: typeof diagnostic }).diagnostic = diagnostic;
         throw e;
       }
 

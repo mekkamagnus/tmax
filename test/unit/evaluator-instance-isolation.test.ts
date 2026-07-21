@@ -8,10 +8,15 @@
  */
 
 import { describe, test, expect } from "bun:test";
+import { existsSync } from "node:fs";
+import { join } from "node:path";
 import { TLispInterpreterImpl } from "../../src/tlisp/interpreter.ts";
 import { Either } from "../../src/utils/task-either.ts";
 
 describe("CHORE-44 Change 4 — evaluator instance isolation (AC4.3 + AC4.8)", () => {
+  test("AC4.8: the module-global coverage compatibility shim is removed", () => {
+    expect(existsSync(join(import.meta.dir, "../../src/tlisp/test-coverage.ts"))).toBe(false);
+  });
   test("a module defined in interpreter A is not visible to interpreter B", () => {
     const a = new TLispInterpreterImpl();
     const b = new TLispInterpreterImpl();

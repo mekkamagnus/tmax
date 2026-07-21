@@ -40,7 +40,7 @@ import {
   validateRequire,
   validateDeftest,
 } from "./evaluator/form-shapes.ts";
-import { classifyForm, isSpecialForm } from "./evaluator/special-form-dispatch.ts";
+import { classifyForm } from "./evaluator/special-form-dispatch.ts";
 import {
   evalProvideForm,
   evalFeaturepForm,
@@ -613,73 +613,75 @@ export class TLispEvaluator implements ModuleFormsContext, TestFormsContext {
     // async path's `isSpecialForm(symbol)` check consult.
     if (first.type === "symbol") {
       const symbol = first.value as string;
-      void classifyForm; // table consultation reference (see comment above)
+      const form = classifyForm(symbol);
+      if (!form || form.category === "async-only") {
+        return this.evalFunctionCall(elements, env, inTailPosition);
+      }
 
-      switch (symbol) {
-        case "quote":
+      switch (form.executor) {
+        case "QUOTE":
           return this.evalQuote(elements, env);
-        case "quasiquote":
+        case "QUASIQUOTE":
           return this.evalQuasiquote(elements, env);
-        case "unquote":
+        case "UNQUOTE":
           return Either.left({
             type: 'EvalError',
             variant: 'SyntaxError',
             message: "unquote can only be used inside quasiquote",
             details: { symbol }
           });
-        case "unquote-splicing":
+        case "UNQUOTE_SPLICING":
           return Either.left({
             type: 'EvalError',
             variant: 'SyntaxError',
             message: "unquote-splicing can only be used inside quasiquote",
             details: { symbol }
           });
-        case "defmacro":
+        case "DEFMACRO":
           return this.evalDefmacro(elements, env);
-        case "if":
+        case "IF":
           return this.evalIf(elements, env, inTailPosition);
-        case "let":
-        case "let*":
+        case "LET":
           return this.evalLet(elements, env, inTailPosition);
-        case "lambda":
+        case "LAMBDA":
           return this.evalLambda(elements, env);
-        case "defun":
+        case "DEFUN":
           return this.evalDefun(elements, env);
-        case "cond":
+        case "COND":
           return this.evalCond(elements, env, inTailPosition);
-        case "defvar":
+        case "DEFVAR":
           return this.evalDefvar(elements, env);
-        case "defmodule":
+        case "DEFMODULE":
           return this.evalDefmodule(elements, env);
-        case "require-module":
+        case "REQUIRE_MODULE":
           return this.evalRequireModule(elements, env);
-        case "current-module":
+        case "CURRENT_MODULE":
           return this.evalCurrentModule(elements, env);
-        case "provide":
+        case "PROVIDE":
           return this.evalProvide(elements, env);
-        case "featurep":
+        case "FEATUREP":
           return this.evalFeaturep(elements, env);
-        case "require":
+        case "REQUIRE":
           return this.evalRequire(elements, env);
-        case "set!":
+        case "SET":
           return this.evalSetBang(elements, env);
-        case "assert-type":
+        case "ASSERT_TYPE":
           return this.evalAssertType(elements, env);
-        case "assert-error":
+        case "ASSERT_ERROR":
           return this.evalAssertError(elements, env);
-        case "condition-case":
+        case "CONDITION_CASE":
           return this.evalConditionCase(elements, env, inTailPosition);
-        case "progn":
+        case "PROGN":
           return this.evalProgn(elements, env, inTailPosition);
-        case "while":
+        case "WHILE":
           return this.evalWhile(elements, env);
-        case "dolist":
+        case "DOLIST":
           return this.evalDolist(elements, env);
-        case "and":
+        case "AND":
           return this.evalAnd(elements, env);
-        case "or":
+        case "OR":
           return this.evalOr(elements, env);
-        default:
+        case "ASYNC_LET":
           return this.evalFunctionCall(elements, env, inTailPosition);
       }
     }
@@ -718,28 +720,26 @@ export class TLispEvaluator implements ModuleFormsContext, TestFormsContext {
       // identical sync/async behavior, so it delegates to the synchronous
       // `evalList` (the authoritative special-form switch) via the shared
       // `isSpecialForm` classification — no duplicated full switch table here.
-      switch (symbol) {
-        case "if":
+      const form = classifyForm(symbol);
+      if (!form) {
+        return this.evalFunctionCallAsync(elements, env, context, inTailPosition);
+      }
+
+      switch (form.executor) {
+        case "IF":
           return this.evalIfAsync(elements, env, context, inTailPosition);
-        case "let":
-        case "let*":
+        case "LET":
           return this.evalLetAsync(elements, env, context, inTailPosition, false);
-        case "async-let":
+        case "ASYNC_LET":
           return this.evalLetAsync(elements, env, withAsyncMode(context), inTailPosition, true);
-        case "cond":
+        case "COND":
           return this.evalCondAsync(elements, env, context, inTailPosition);
-        case "progn":
+        case "PROGN":
           return this.evalPrognAsync(elements, env, context, inTailPosition);
-        case "while":
+        case "WHILE":
           return this.evalWhileAsync(elements, env, context);
         default:
-          // Special forms without async variants share the synchronous handler.
-          // The recognized-form list comes from the single classification table.
-          if (isSpecialForm(symbol)) {
-            return this.evalList(list, env, inTailPosition);
-          }
-          // Otherwise it's a function call — evaluate via the async path.
-          return this.evalFunctionCallAsync(elements, env, context, inTailPosition);
+          return this.evalList(list, env, inTailPosition);
       }
     }
 

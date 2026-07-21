@@ -284,6 +284,25 @@ describe("CHORE-44 Change 9 — canonical core contracts", () => {
     expect(fsMock).toMatch(/implements\s+FileSystem/);
   });
 
+  test("AC9.3: production source imports canonical domain contracts directly", () => {
+    const hits: string[] = [];
+    const scan = (dir: string): void => {
+      for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+        const absolute = path.join(dir, entry.name);
+        if (entry.isDirectory()) {
+          scan(absolute);
+        } else if (entry.isFile() && entry.name.endsWith(".ts") && absolute !== TYPES_TS) {
+          const source = fs.readFileSync(absolute, "utf8");
+          if (/core\/types\.ts["']/.test(source)) {
+            hits.push(path.relative(REPO_ROOT, absolute));
+          }
+        }
+      }
+    };
+    scan(path.join(REPO_ROOT, "src"));
+    expect(hits).toEqual([]);
+  });
+
   test("AC9.4: TextBufferImpl preserves immutable Either-returning operations + perf path", () => {
     const buf = TextBufferImpl.create("Hello\nWorld");
     // Receiver is not mutated.

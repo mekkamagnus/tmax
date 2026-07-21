@@ -10,9 +10,12 @@ import { createEditorAPI } from "./tlisp-api.ts";
 import type { EditorAPIContext } from "./runtime/editor-api-context.ts";
 import { createEditorRuntimeCaches } from "./runtime/caches.ts";
 import type { EditorRuntimeCaches } from "./runtime/caches.ts";
-import type { EditorState, TextBuffer, Window, HighlightSpan, MinibufferRenderView, WorkspaceState, BufferMetadata } from "../core/types.ts";
+import type { EditorState, Window, HighlightSpan, MinibufferRenderView } from "../core/contracts/editor.ts";
+import type { TextBuffer } from "../core/contracts/buffer.ts";
+import type { WorkspaceState, BufferMetadata } from "../core/contracts/workspace.ts";
 import { createString, createList, createNil, createNumber, createBoolean, createHashmap, createPromise } from "../tlisp/values.ts";
-import type { TerminalIO, FileSystem } from "../core/types.ts";
+import type { TerminalIO } from "../core/contracts/terminal.ts";
+import type { FileSystem } from "../core/contracts/filesystem.ts";
 import type { TLispEnvironment, TLispValue, TLispFunctionImpl } from "../tlisp/types.ts";
 import type { TLispFunction } from "../tlisp/types.ts";
 import { Either } from "../utils/task-either.ts";
@@ -2820,6 +2823,10 @@ export class Editor {
    */
   stop(): void {
     this.running = false;
+    // The editor owns the which-key timer, so stopping an instance must
+    // release it even when callers do not use the richer test fixture handle.
+    // deactivate() is idempotent and only clears this editor's timer.
+    this.whichKeyHandle.deactivate();
   }
 
   /**
