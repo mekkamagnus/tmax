@@ -1,6 +1,7 @@
 import { Socket } from "net";
 import { userInfo } from "os";
 import { jsonToEditorState } from "../server/serialize.ts";
+import { PROTOCOL_VERSION } from "../server/rpc/types.ts";
 import type { EditorState } from "../core/contracts/editor.ts";
 
 const REQUEST_TIMEOUT_MS = 30_000;
@@ -145,7 +146,7 @@ export class RemoteEditor {
         reject(new Error(`Request timeout: ${method}`));
       }, REQUEST_TIMEOUT_MS);
       this.pending.set(id, { resolve, reject, timer });
-      this.socket.write(JSON.stringify({ jsonrpc: "2.0", id, method, params }) + "\n");
+      this.socket.write(JSON.stringify({ jsonrpc: "2.0", id, method, params, protocolVersion: PROTOCOL_VERSION }) + "\n");
     });
   }
 }

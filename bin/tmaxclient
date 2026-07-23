@@ -10,6 +10,11 @@ import { userInfo } from 'os';
 import { spawnSync, spawn } from 'child_process';
 import { resolve as pathResolve } from 'path';
 import { readFileSync } from 'fs';
+// Single source of truth for the wire-protocol version (RFC-025 #1 / SPEC-070).
+// Deliberately the first src import here: a second hardcoded copy of the
+// version in this client would re-create the exact version-drift hazard this
+// feature prevents.
+import { PROTOCOL_VERSION } from '../src/server/rpc/types.ts';
 
 // JSON-RPC 2.0 interfaces
 interface JSONRPCRequest {
@@ -17,6 +22,8 @@ interface JSONRPCRequest {
   id: string | number;
   method: string;
   params?: any;
+  /** Client-declared wire-protocol version (RFC-025 #1 / SPEC-070). */
+  protocolVersion?: number;
 }
 
 interface JSONRPCResponse {
@@ -77,7 +84,8 @@ class TmaxClient {
       jsonrpc: '2.0',
       id: requestId,
       method,
-      params
+      params,
+      protocolVersion: PROTOCOL_VERSION
     };
 
     return new Promise((resolve, reject) => {

@@ -62,3 +62,14 @@ The Editor class was designed as a single-instance object with mutable global st
 
 - The `Frame` interface lives in `src/core/types.ts` alongside `EditorState`, making the distinction between shared state (buffers, config) and per-client state (cursor, viewport) explicit.
 - Socket path uses `/tmp/tmax-${UID}/server` — follows Emacs convention but should ideally use `XDG_RUNTIME_DIR` (noted as future improvement).
+
+## Amendment — Wire-protocol versioning (SPEC-070, 2026-07-23)
+
+The daemon/client wire protocol is now a **versioned, negotiated contract** (per [SPEC-070](../specs/SPEC-070-daemon-client-protocol-versioning.md) / [RFC-025](../rfcs/RFC-025-daemon-client-protocol-hardening.md) change #1), preempting the silent daemon/client version-skew regression herdr hit and retrofitted late.
+
+- `PROTOCOL_VERSION` (currently `1`) and the `ENFORCE_PROTOCOL_VERSION` transition gate live in `src/server/rpc/types.ts` as the single source of truth. Clients declare `protocolVersion` as a top-level field on every JSON-RPC request envelope (sibling to `jsonrpc`), consistent with the existing per-request `jsonrpc === '2.0'` check.
+- The daemon refuses a mismatched client with a machine-readable `protocol_mismatch` error in the `-32600` (Invalid Request) family before dispatch: `error.data = { kind: "protocol_mismatch", client, server, guidance }`. This is enforced in one pure helper (`validateProtocolVersion`) called in **two** places — inside `routeRequest` (step 1b) and at the top of the `connect-frame` branch in `server.ts` (the handshake bypasses `routeRequest`, so it must be gated separately through the same helper).
+- **Transition policy:** a DECLARED-but-wrong version is always refused; a client that OMITS `protocolVersion` is tolerated while `ENFORCE_PROTOCOL_VERSION === false` (protects an old client binary against a new daemon across a binary swap), then refused once the flag flips to `true`. To enforce next release, set that one constant — no other code changes.
+- The daemon advertises its version: the `status` result and the `connect-frame` success result both carry `protocolVersion`, so `--status`/diagnostics and clients can detect a skew programmatically.
+
+This owns the live wire protocol; the historical `### Protocol` section of [ADR-0018](ADR-0018-basic-server-client-infrastructure.md) now cross-references this amendment.

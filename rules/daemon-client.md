@@ -77,6 +77,18 @@ Each socket path has exactly one owner. The daemon acquires ownership before bin
 - **Client side**: Always accumulate responses into a newline-delimited buffer before parsing — never assume a single `data` event contains a complete response.
 - The daemon sends `{"jsonrpc":"2.0",...}\n` — one JSON object per line.
 
+### Protocol versioning
+
+The wire protocol is a **versioned, negotiated contract** (SPEC-070 / RFC-025 #1). The single source of truth is `PROTOCOL_VERSION` (currently `1`) in `src/server/rpc/types.ts` — never hardcode the version; import the constant.
+
+- **Request field:** every JSON-RPC request carries an optional top-level `protocolVersion: number` (sibling to `jsonrpc`). Clients SHOULD stamp `protocolVersion: PROTOCOL_VERSION` on every request. All in-repo clients do: `RemoteEditor.sendRequest`, `bin/tmaxclient`, and `tmax-use/src/client.ts`.
+- **Negotiation:** the daemon refuses a client whose declared `protocolVersion` does not match, with a machine-readable error **before** dispatch:
+  - code `-32600` (Invalid Request family),
+  - `error.data.kind === "protocol_mismatch"`, with `client` (the declared version), `server` (the daemon's version), and a non-empty `guidance` string (stop/restart the daemon).
+  - The gate is one pure helper, `validateProtocolVersion` in `src/server/rpc/router.ts`, called both in `routeRequest` (step 1b) and at the top of the `connect-frame` branch in `server.ts` (the handshake bypasses `routeRequest`).
+- **Transition (`ENFORCE_PROTOCOL_VERSION`):** a DECLARED-but-wrong version is always refused. While the flag is `false`, a client that OMITS `protocolVersion` is tolerated (protects an old client binary across a binary swap); flipping to `true` next release refuses the omission too. To enforce: set one constant.
+- **Advertisement:** the daemon exposes its version in the `status` result (`protocolVersion`) and in the `connect-frame` success result, so `--status`/diagnostics and clients can detect a skew programmatically.
+
 ## T-Lisp Evaluation Scope
 
 `interpreter.execute(code)` uses the global environment by default. Module exports (functions defined inside `defmodule` blocks) are resolved via `resolveUniqueExport` in the evaluator's symbol lookup. This means:

@@ -13,6 +13,7 @@ import { Editor } from '../editor/editor.ts';
 import { TerminalIOImpl } from '../core/terminal.ts';
 import {
   routeRequest,
+  validateProtocolVersion,
   type JSONRPCRequest,
   type JSONRPCResponse,
   type RpcHandlers,
@@ -32,6 +33,7 @@ import type {
   StatusResult,
   VariableDocumentation,
 } from './rpc/types.ts';
+import { PROTOCOL_VERSION } from './rpc/types.ts';
 import type { ServerContext, ClientRecord, FrameObservability } from './rpc/handlers/context.ts';
 import { createEditingHandlers } from './rpc/handlers/editing.ts';
 import { createFramesHandlers } from './rpc/handlers/frames.ts';
@@ -710,6 +712,7 @@ export class TmaxServer {
       daemonReady: this.isRunning,
       status: this.isRunning ? 'running' : 'starting',
       server: 'tmax',
+      protocolVersion: PROTOCOL_VERSION,
       uptimeMs: Date.now() - this.startedAt.getTime(),
       startedAt: this.startedAt.toISOString(),
       socketPath: this.socketPath,
@@ -1066,6 +1069,15 @@ export class TmaxServer {
 
           // Auto-create frame on connect-frame request
           if (request.method === 'connect-frame') {
+            // Protocol-version gate (RFC-025 #1 / SPEC-070). connect-frame
+            // bypasses routeRequest, so the handshake is gated here via the
+            // same validateProtocolVersion helper — a mismatched attach is
+            // refused before any frame/workspace mutation, with no side effects.
+            const protocolError = validateProtocolVersion(request);
+            if (protocolError) {
+              if (conn.writable) conn.write(JSON.stringify(protocolError) + '\n');
+              continue;
+            }
             const params = (request.params ?? {}) as Record<string, unknown>;
             const clientTypeParam = typeof params.clientType === 'string' ? params.clientType : undefined;
             const clientNameParam = typeof params.clientName === 'string' ? params.clientName : undefined;
@@ -1087,7 +1099,7 @@ export class TmaxServer {
               conn.write(JSON.stringify({
                 jsonrpc: '2.0',
                 id: request.id,
-                result: { clientId, frameId: clientFrameId }
+                result: { clientId, frameId: clientFrameId, protocolVersion: PROTOCOL_VERSION }
               }) + '\n');
             }
             continue;

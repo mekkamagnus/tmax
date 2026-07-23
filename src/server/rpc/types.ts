@@ -33,6 +33,23 @@ import type { Position, TerminalSize } from "../../core/contracts/primitives.ts"
 
 export type { JsonValue } from "../../core/contracts/editor.ts";
 
+/**
+ * The daemon/client wire-protocol version (RFC-025 change #1 / SPEC-070).
+ * Bump ONLY on a breaking wire-protocol change. Clients declare this on every
+ * request envelope (`protocolVersion`); the daemon refuses a mismatch with a
+ * machine-readable `protocol_mismatch` error (-32600) before dispatch.
+ * Single source of truth — import this everywhere; never hardcode `1`.
+ */
+export const PROTOCOL_VERSION = 1;
+
+/**
+ * Transition gate (RFC-025 #1). While `false`, clients that OMIT
+ * `protocolVersion` are tolerated (protects an old client binary against a
+ * new daemon across a binary swap). A DECLARED-but-wrong version is ALWAYS
+ * refused. Flip to `true` next release to enforce the field on all clients.
+ */
+export const ENFORCE_PROTOCOL_VERSION = false;
+
 export interface DiagnosticResult {
   severity?: JsonValue;
   code?: JsonValue;
@@ -314,6 +331,9 @@ export interface StatusResult {
   daemonReady: boolean;
   status: "running" | "starting";
   server: "tmax";
+  /** Daemon wire-protocol version (RFC-025 #1 / SPEC-070). Clients/`--status`
+   *  consumers read this to detect a daemon/client version skew. */
+  protocolVersion: number;
   uptimeMs: number;
   startedAt: string;
   socketPath: string;

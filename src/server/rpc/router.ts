@@ -15,6 +15,7 @@
  */
 
 import type { DiagnosticResult, RpcMethodMap, RpcMethodName, JsonValue } from "./types.ts";
+import { PROTOCOL_VERSION, ENFORCE_PROTOCOL_VERSION } from "./types.ts";
 import type { SyncPolicy } from "./handlers/context.ts";
 
 // ── JSON-RPC wire shapes ─────────────────────────────────────────────────
@@ -24,6 +25,9 @@ export interface JSONRPCRequest {
   id?: string | number | null;
   method: string;
   params?: unknown;
+  /** Client-declared wire-protocol version (RFC-025 #1 / SPEC-070). Optional
+   *  during the transition window; enforced once ENFORCE_PROTOCOL_VERSION. */
+  protocolVersion?: number;
 }
 
 export interface JSONRPCResponse {
@@ -346,9 +350,58 @@ export async function dispatchRpc(handlers: RpcHandlers, method: string, params:
   return await fn(params);
 }
 
+// ── Protocol-version negotiation (RFC-025 #1 / SPEC-070) ──────────────────
+
+/** Build the machine-readable `protocol_mismatch` response (-32600, Invalid
+ *  Request family). `client` is the declared version, or `"omitted"` when the
+ *  field was absent under enforcement. The `kind` discriminator mirrors how
+ *  this codebase tags `-32010` with `data.kind: "tlisp-diagnostic"`. */
+function protocolMismatchResponse(
+  id: string | number | null | undefined,
+  client: number | 'omitted',
+): JSONRPCResponse {
+  const guidance = 'Daemon protocol version mismatch. Stop and restart the daemon (`tmax --stop`) and reconnect with a client whose protocolVersion matches the daemon.';
+  return {
+    jsonrpc: '2.0',
+    id: id ?? null,
+    error: {
+      code: -32600,
+      message: `Invalid Request: protocol_mismatch (client=${client}, server=${PROTOCOL_VERSION})`,
+      data: {
+        kind: 'protocol_mismatch',
+        client,
+        server: PROTOCOL_VERSION,
+        guidance,
+      },
+    },
+  };
+}
+
+/** Result of the protocol-version gate: an error response to write, or `null`
+ *  meaning "version OK, proceed to dispatch". Pure + exported so the
+ *  `connect-frame` handshake path in server.ts (which bypasses `routeRequest`)
+ *  reuses the EXACT same check — no duplicated version logic. A
+ *  declared-but-wrong version is ALWAYS refused; an omitted version is
+ *  tolerated while `enforce` is false, then refused once enforcing. */
+export function validateProtocolVersion(
+  request: JSONRPCRequest,
+  enforce: boolean = ENFORCE_PROTOCOL_VERSION,
+): JSONRPCResponse | null {
+  const declared = request.protocolVersion;
+  if (declared === undefined) {
+    if (!enforce) return null;            // transition: tolerate omission
+    return protocolMismatchResponse(request.id, 'omitted');
+  }
+  if (typeof declared !== 'number' || declared !== PROTOCOL_VERSION) {
+    return protocolMismatchResponse(request.id, declared);
+  }
+  return null;
+}
+
 /**
  * The full JSON-RPC protocol boundary (AC5.8). Performs:
  *   1. Version validation → `-32600` Invalid Request.
+ *   1b. Protocol-version check → `-32600` `protocol_mismatch` (RFC-025 #1 / SPEC-070).
  *   2. Method lookup → `-32601` Method not found.
  *   3. Parameter validation → `-32602` Invalid params (with `{field,expected}`).
  *   4. Dispatch against the typed handler table.
@@ -384,6 +437,13 @@ export async function routeRequest(
       },
     };
   }
+
+  // 1b. Protocol-version negotiation (RFC-025 #1 / SPEC-070). Refuses a
+  // declared-but-wrong version (or an omitted one, once enforcing) before
+  // dispatch. Connect-frame is gated separately in server.ts (it bypasses
+  // routeRequest) via the same validateProtocolVersion helper.
+  const protocolError = validateProtocolVersion(request);
+  if (protocolError) return protocolError;
 
   // 2. Method lookup.
   if (!isRpcMethod(request.method)) {

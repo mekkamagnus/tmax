@@ -5,6 +5,7 @@ import { tmpdir } from 'os';
 import { join } from 'path';
 import { connectWithTimeout, forceShutdown, sweepTestSockets, destroyRejectedServer } from '../fixtures/server-test-helpers.ts';
 import { TmaxServer } from '../../src/server/server.ts';
+import { PROTOCOL_VERSION } from '../../src/server/rpc/types.ts';
 
 function uniqueSocket(): string {
   return `/tmp/tmax-harden-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2)}.sock`;
@@ -341,6 +342,59 @@ describe('Daemon hardening', () => {
     expect(state.tabs.length).toBeGreaterThanOrEqual(1);
     const labels = state.tabs.map((t: any) => t.label);
     expect(labels).toContain('review-tab');
+    conn.close();
+  });
+
+  // ── Protocol-version negotiation (RFC-025 #1 / SPEC-070) ──────────────
+
+  test('connect-frame with a mismatched protocolVersion is refused and creates no frame', async () => {
+    server = new TmaxServer(socketPath, true);
+    await server.start();
+
+    const conn = await RpcConnection.connect(socketPath);
+    const before = await conn.send('status');
+    const framesBefore = before.result.frameCount;
+
+    // The handshake bypasses routeRequest; the mismatch must be gated directly
+    // in the connect-frame branch, before any frame/workspace mutation.
+    conn.sendRaw(JSON.stringify({
+      jsonrpc: '2.0', id: 7777, method: 'connect-frame',
+      params: { clientType: 'tui' }, protocolVersion: PROTOCOL_VERSION + 7,
+    }) + '\n');
+    const responses = await conn.collectResponses(1);
+    const refused = responses[0];
+    expect(refused.id).toBe(7777);
+    expect(refused.error?.code).toBe(-32600);
+    expect(refused.error?.data?.kind).toBe('protocol_mismatch');
+    expect(refused.error?.data?.server).toBe(PROTOCOL_VERSION);
+    expect(refused.result).toBeUndefined();
+
+    // No side effects: frame count unchanged (handshake refused pre-mutation).
+    const after = await conn.send('status');
+    expect(after.result.frameCount).toBe(framesBefore);
+    conn.close();
+  });
+
+  test('connect-frame omitting protocolVersion succeeds (transition tolerance) and advertises the version', async () => {
+    server = new TmaxServer(socketPath, true);
+    await server.start();
+
+    const conn = await RpcConnection.connect(socketPath);
+    // request() omits protocolVersion — tolerated while ENFORCE=false.
+    const frame = await conn.send('connect-frame', { clientType: 'tui' });
+    expect(frame.error).toBeUndefined();
+    expect(frame.result.frameId).toBeTruthy();
+    expect(frame.result.protocolVersion).toBe(PROTOCOL_VERSION);
+    conn.close();
+  });
+
+  test('status advertises the daemon protocolVersion', async () => {
+    server = new TmaxServer(socketPath, true);
+    await server.start();
+
+    const conn = await RpcConnection.connect(socketPath);
+    const status = await conn.send('status');
+    expect(status.result.protocolVersion).toBe(PROTOCOL_VERSION);
     conn.close();
   });
 });

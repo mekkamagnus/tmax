@@ -63,6 +63,8 @@ export class EditorClient {
 
 ### Protocol
 
+> **Note:** This section describes the historical (superseded) message shape. The live daemon/client wire protocol is JSON-RPC 2.0 over a Unix socket, and is now a **versioned, negotiated contract** — see [ADR-0058: Wire-protocol versioning (SPEC-070)](ADR-0058-frame-based-daemon-client.md#amendment--wire-protocol-versioning-spec-070-2026-07-23) for the `protocolVersion` field, the omit-then-enforce transition, and the `protocol_mismatch` (`-32600`) error.
+
 Defined client-server protocol in `src/server/protocol.ts`:
 ```typescript
 export interface ServerMessage {

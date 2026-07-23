@@ -18,11 +18,13 @@
 import { describe, test, expect } from 'bun:test';
 import {
   routeRequest,
+  validateProtocolVersion,
   RpcError,
   type JSONRPCRequest,
   type JSONRPCResponse,
   type RpcHandlers,
 } from '../../src/server/rpc/router.ts';
+import { PROTOCOL_VERSION } from '../../src/server/rpc/types.ts';
 import type { RpcMethodName } from '../../src/server/rpc/types.ts';
 
 // ── Helpers ──────────────────────────────────────────────────────────────
@@ -296,6 +298,98 @@ describe('CHORE-44 Change 5 — typed JSON-RPC router (AC5.8)', () => {
         const err = await routeRequest(handlers, req('nope', {}, id));
         expect(err.id).toBe(id);
       }
+    });
+  });
+
+  describe('protocol-version negotiation (RFC-025 #1 / SPEC-070)', () => {
+    test('a matching protocolVersion proceeds and the handler is called', async () => {
+      let called = false;
+      const handlers = uniformHandlers(() => { called = true; return { ok: true }; });
+      const response = await routeRequest(handlers, {
+        jsonrpc: '2.0', id: 1, method: 'ping', params: {}, protocolVersion: PROTOCOL_VERSION,
+      });
+      expect(response.error).toBeUndefined();
+      expect(called).toBe(true);
+      expect(response.id).toBe(1);
+    });
+
+    test('a mismatched declared version is refused with -32600 protocol_mismatch and the handler is NOT called', async () => {
+      let called = false;
+      const handlers = uniformHandlers(() => { called = true; return { ok: true }; });
+      const response = await routeRequest(handlers, {
+        jsonrpc: '2.0', id: 5, method: 'ping', params: {}, protocolVersion: PROTOCOL_VERSION + 1,
+      });
+      expect(called).toBe(false);
+      expect(response.error?.code).toBe(-32600);
+      const data = response.error?.data as { kind: string; client: number; server: number; guidance: string } | undefined;
+      expect(data?.kind).toBe('protocol_mismatch');
+      expect(data?.server).toBe(PROTOCOL_VERSION);
+      expect(data?.client).toBe(PROTOCOL_VERSION + 1);
+      expect(typeof data?.guidance).toBe('string');
+      expect(data?.guidance.length).toBeGreaterThan(0);
+      expect(response.result).toBeUndefined();
+      expect(response.id).toBe(5);
+    });
+
+    test('a non-number declared protocolVersion (string) is treated as a mismatch, not -32602', async () => {
+      const handlers = uniformHandlers(() => ({ ok: true }));
+      const response = await routeRequest(handlers, {
+        jsonrpc: '2.0', id: 3, method: 'ping', params: {}, protocolVersion: 'v2',
+      } as unknown as JSONRPCRequest);
+      expect(response.error?.code).toBe(-32600);
+      expect((response.error?.data as { kind: string } | undefined)?.kind).toBe('protocol_mismatch');
+    });
+
+    test('an omitted protocolVersion is tolerated under the default enforce=false', async () => {
+      let called = false;
+      const handlers = uniformHandlers(() => { called = true; return { ok: true }; });
+      const response = await routeRequest(handlers, req('ping'));
+      expect(response.error).toBeUndefined();
+      expect(called).toBe(true);
+    });
+
+    test('routeRequest still routes a future/past wrong version identically (both refused)', async () => {
+      const handlers = uniformHandlers(() => ({ ok: true }));
+      const future = await routeRequest(handlers, {
+        jsonrpc: '2.0', id: 1, method: 'ping', params: {}, protocolVersion: PROTOCOL_VERSION + 9,
+      });
+      const past = await routeRequest(handlers, {
+        jsonrpc: '2.0', id: 2, method: 'ping', params: {}, protocolVersion: 0,
+      });
+      expect(future.error?.code).toBe(-32600);
+      expect(past.error?.code).toBe(-32600);
+    });
+
+    // Direct helper assertions — cover the connect-frame path's reuse of the
+    // shared gate without a socket (the handshake is gated via the same helper).
+    test('validateProtocolVersion returns null for a matching version', () => {
+      expect(validateProtocolVersion({ jsonrpc: '2.0', id: 1, method: 'ping', protocolVersion: PROTOCOL_VERSION })).toBeNull();
+    });
+
+    test('validateProtocolVersion returns null for an omitted version under the default enforce', () => {
+      expect(validateProtocolVersion({ jsonrpc: '2.0', id: 1, method: 'ping' })).toBeNull();
+    });
+
+    test('validateProtocolVersion refuses a wrong version with id preserved', () => {
+      const err = validateProtocolVersion({ jsonrpc: '2.0', id: 'abc', method: 'ping', protocolVersion: 99 });
+      expect(err).not.toBeNull();
+      expect(err!.error?.code).toBe(-32600);
+      expect((err!.error?.data as { client: number } | undefined)?.client).toBe(99);
+      expect(err!.id).toBe('abc');
+    });
+
+    test('validateProtocolVersion preserves a null/missing id on mismatch', () => {
+      const err = validateProtocolVersion({ jsonrpc: '2.0', method: 'ping', protocolVersion: 2 });
+      expect(err).not.toBeNull();
+      expect(err!.id).toBe(null);
+    });
+
+    test('validateProtocolVersion with enforce=true refuses an omitted version (client=omitted)', () => {
+      const err = validateProtocolVersion({ jsonrpc: '2.0', id: 9, method: 'ping' }, true);
+      expect(err).not.toBeNull();
+      expect(err!.error?.code).toBe(-32600);
+      expect((err!.error?.data as { client: string } | undefined)?.client).toBe('omitted');
+      expect(err!.id).toBe(9);
     });
   });
 });

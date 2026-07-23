@@ -14,6 +14,7 @@ import { Socket } from 'net';
 import { spawn, type ChildProcessWithoutNullStreams } from 'child_process';
 import { existsSync } from 'fs';
 import { TaskEither, Either } from '../../src/utils/task-either.ts';
+import { PROTOCOL_VERSION } from '../../src/server/rpc/types.ts';
 import { TmaxUseError, rightE, leftE } from './errors.ts';
 
 /** Injectable subprocess dependency so unit tests can mock the CLI. */
@@ -125,7 +126,7 @@ export function requestReal(opts: ClientOptions): (method: string, params: Recor
         throw new Error(`socket not present: ${opts.socketPath}`);
       }
       const id = ++requestCounter;
-      const request = { jsonrpc: '2.0' as const, id, method, params };
+      const request = { jsonrpc: '2.0' as const, id, method, params, protocolVersion: PROTOCOL_VERSION };
       return await new Promise<unknown>((resolve, reject) => {
         const sock = new Socket();
         let buffer = '';
