@@ -29,6 +29,7 @@ Long-form analysis documents exploring tradeoffs, options, and design decisions 
 | [syntax-highlighting-ast-analysis.md](syntax-highlighting-ast-analysis.md) | Analysis of AST-based syntax highlighting approach | [SPEC-013](../specs/SPEC-013-native-ast-engine.md), [ADR-0076](../adrs/ADR-0076-syntax-highlighting-in-render-pipeline.md) |
 | [elm-purity-tradeoff-analysis.md](elm-purity-tradeoff-analysis.md) | Tradeoff analysis for Elm purity: performance, coordination cost, benefit weighting | [RFC-009](../rfcs/RFC-009-elm-purity-gap-analysis.md), [technical-vision.md](../technical-vision.md) |
 | [parallel-ai-agents-worktree-overview.md](parallel-ai-agents-worktree-overview.md) | Overview of parallel AI agent worktree workflow | [ADR-0094](../adrs/ADR-0094-adw-pipeline-architecture.md) |
+| [herdr-client-server-lessons.md](herdr-client-server-lessons.md) | Lessons from the herdr agent-multiplexer codebase for tmax's daemon/client model — protocol versioning, lifecycle/resume, and multi-client state sync (pull-vs-push asymmetry) | [RFC-025](../rfcs/RFC-025-daemon-client-protocol-hardening.md), [ADR-0058](../adrs/ADR-0058-frame-based-daemon-client.md) |
 
 ## Retrospectives
 
