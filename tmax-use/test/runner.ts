@@ -99,6 +99,12 @@ export interface RunnerOptions {
    * is killed after the test; the session is left intact.
    */
   readonly session?: string;
+  /**
+   * BUG-28: cooperative-abort signal. When aborted, runAll stops launching new
+   * playbooks/tests after the in-flight one drains its cleanup, so an interrupt
+   * (SIGINT/SIGTERM/SIGHUP) no longer leaks every started workspace dir.
+   */
+  readonly abortSignal?: AbortSignal;
 }
 
 const DEFAULT_WIDTH = 80;
@@ -580,6 +586,12 @@ function runPlaybookTE(playbookPath: string, opts: RunnerOptions): TaskEither<Tm
       }
       await cleanup(ctx).run();
       await instance.close().run();
+      // BUG-28: remove the isolated daemon home dir (socket's parent). Only when
+      // auto-isolated — a caller-provided opts.socketPath owns its own lifecycle
+      // (launchSocketOpts). Best-effort; must not mask the real failure above.
+      if (!opts.socketPath) {
+        try { await fs.rm(dirname(instance.socketPath), { recursive: true, force: true }); } catch { /* fine */ }
+      }
     }
 
     const passed = failureMessage === undefined && stepResults.every((s) => s.passed);
@@ -701,6 +713,11 @@ export async function runTestFile(testPath: string, opts: RunnerOptions): Promis
   }
 
   await instance.close().run();
+  // BUG-28: remove the isolated daemon home dir (socket's parent). Only when
+  // auto-isolated — a caller-provided opts.socketPath owns its own lifecycle.
+  if (!opts.socketPath) {
+    try { await fs.rm(dirname(instance.socketPath), { recursive: true, force: true }); } catch { /* fine */ }
+  }
 
   return {
     name: testPath,
@@ -808,9 +825,11 @@ export async function runAll(patterns: readonly string[], opts: RunnerOptions): 
   const results: TestResult[] = [];
 
   for (const p of playbooks) {
+    if (opts.abortSignal?.aborted) break; // BUG-28: stop after in-flight drains
     results.push(await runPlaybook(p, opts));
   }
   for (const t of tests) {
+    if (opts.abortSignal?.aborted) break;
     results.push(await runTestFile(t, opts));
   }
 

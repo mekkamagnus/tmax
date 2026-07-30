@@ -212,6 +212,7 @@ async function main(): Promise<number> {
     session: parsed.session,
     width: parsed.width,
     height: parsed.height,
+    abortSignal: abortController.signal, // BUG-28: cooperative abort on interrupt
   };
 
   const suite = await runAll(parsed.patterns, opts);
@@ -224,6 +225,25 @@ async function main(): Promise<number> {
 
   return suite.failed === 0 ? 0 : 1;
 }
+
+// BUG-28: cooperative-abort on interrupt so the in-flight playbook's cleanup
+// drains instead of being skipped by a default-terminate (mirrors ADR-0119).
+// First signal aborts after the current playbook; a second force-exits.
+const abortController = new AbortController();
+let abortSignalCount = 0;
+const onAbortSignal = (sig: "SIGINT" | "SIGTERM" | "SIGHUP"): void => {
+  abortSignalCount++;
+  if (abortSignalCount === 1) {
+    process.stderr.write(`\ntmax-use: received ${sig}; aborting after the current playbook (press again to force exit)\n`);
+    abortController.abort();
+  } else {
+    process.stderr.write(`\ntmax-use: forcing immediate exit\n`);
+    process.exit(130);
+  }
+};
+process.once("SIGINT", () => onAbortSignal("SIGINT"));
+process.once("SIGTERM", () => onAbortSignal("SIGTERM"));
+process.once("SIGHUP", () => onAbortSignal("SIGHUP"));
 
 main().then((code) => process.exit(code)).catch((err) => {
   process.stderr.write(`tmax-use: uncaught error: ${err instanceof Error ? err.stack ?? err.message : String(err)}\n`);
