@@ -4,10 +4,11 @@ Records of significant architectural decisions. Each ADR describes the context, 
 
 Ordered most-recent first (highest ADR number = most recent decision). Topic groupings preserved within each section.
 
-## Recent — adw Patch-Review & Process Supervision (ADR 0117–0118)
+## Recent — adw Patch-Review & Process Supervision (ADR 0117–0119)
 
 | File | Decision | Related |
 |------|----------|---------|
+| [ADR-0119-adw-sighup-cleanup.md](ADR-0119-adw-sighup-cleanup.md) | BUG-27: `runAdwEntrypoint` now registers `SIGHUP` (→ exit 129) alongside SIGINT/SIGTERM so `tmux kill-window` / terminal hangup reaps the owned subprocess tree instead of orphaning it; tmux detach is unaffected | BUG-27, [ADR-0117](ADR-0117-adw-process-supervisor.md), [ADR-0094](ADR-0094-adw-pipeline-architecture.md) |
 | [ADR-0118-patch-review-working-tree-diff.md](ADR-0118-patch-review-working-tree-diff.md) | BUG-26: patch-review `gatherContext` diffs the working tree (`git diff <base>`) instead of the commit range `<base>..HEAD`, which was always empty because the orchestrator commits only after patch-review passes. Ends the blind-audit failure mode on every worktree-isolated run | BUG-26, [ADR-0094](ADR-0094-adw-pipeline-architecture.md), [SPEC-065](../specs/SPEC-065-adw-worktree-isolation.md) |
 | [ADR-0117-adw-process-supervisor.md](ADR-0117-adw-process-supervisor.md) | BUG-25: a dependency-free ProcessSupervisor owns every adw subprocess tree and reaps it on exit/timeout/signal via detached process groups + SIGTERM→SIGKILL escalation, closing the daemon/process leak class | BUG-25, [ADR-0094](ADR-0094-adw-pipeline-architecture.md) |
 
