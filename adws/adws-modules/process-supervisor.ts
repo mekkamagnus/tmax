@@ -358,8 +358,10 @@ export interface EntrypointOptions {
 /**
  * Run an ADW executable with early signal handling and awaited final cleanup.
  *
- * Registers `SIGINT`/`SIGTERM` before `main`, awaits `shutdown()` of every
- * owned tree in `finally`, and preserves the conventional 130/143 exit codes.
+ * Registers `SIGINT`/`SIGTERM`/`SIGHUP` before `main`, awaits `shutdown()` of
+ * every owned tree in `finally`, and preserves the conventional 130/143/129
+ * exit codes. SIGHUP coverage (BUG-27) ensures `tmux kill-window` / terminal
+ * hangup still reaps the owned tree instead of orphaning it.
  *
  * Force-exit backstop: the signal handler awaits `shutdown()` then calls
  * `process.exit(code)`. This is required because some runners' `main` never
@@ -384,8 +386,13 @@ export async function runAdwEntrypoint(options: EntrypointOptions): Promise<void
   };
   const onSigInt = (): void => handleSignal(130);
   const onSigTerm = (): void => handleSignal(143);
+  // BUG-27: tmux kill-window / controlling-terminal hangup sends SIGHUP. Without
+  // a handler, Node default-terminates without running the finally shutdown(),
+  // orphaning the owned subprocess tree. Route it through the same cleanup.
+  const onSigHup = (): void => handleSignal(129); // 128 + SIGHUP(1)
   process.once("SIGINT", onSigInt);
   process.once("SIGTERM", onSigTerm);
+  process.once("SIGHUP", onSigHup);
 
   let exitCode = 1;
   setActiveSupervisor(supervisor);
@@ -403,6 +410,7 @@ export async function runAdwEntrypoint(options: EntrypointOptions): Promise<void
     setActiveSupervisor(undefined);
     process.removeListener("SIGINT", onSigInt);
     process.removeListener("SIGTERM", onSigTerm);
+    process.removeListener("SIGHUP", onSigHup);
     process.exitCode = signalExitCode ?? exitCode;
   }
 }

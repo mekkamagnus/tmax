@@ -109,4 +109,21 @@ describe("ADW runner process-tree cleanup (BUG-25)", () => {
       expect(await waitForZeroMarkers(5_000)).toBe(true);
     });
   });
+
+  describe.each(RUNNERS)("SIGHUP probe — %s", (runner) => {
+    test("SIGHUP yields exit 129 and reaps every descendant (BUG-27)", async () => {
+      // BUG-27: tmux kill-window / terminal hangup sends SIGHUP. Without a
+      // handler, Node default-terminates (exit code null ⇒ -1 here) and never
+      // runs the finally shutdown(), orphaning the owned tree. The handler must
+      // route SIGHUP through the same cleanup as SIGTERM/SIGINT (exit 129).
+      const child = launchProbe(runner, "signal");
+      await waitForProbeAnnounce(child, 10_000);
+      await new Promise((r) => setTimeout(r, 300));
+      expect(countMarkers()).toBeGreaterThan(0); // survivors exist before cleanup
+      child.kill("SIGHUP");
+      const code = await exitCodeOf(child, 20_000);
+      expect(code).toBe(129);
+      expect(await waitForZeroMarkers(5_000)).toBe(true);
+    });
+  });
 });
