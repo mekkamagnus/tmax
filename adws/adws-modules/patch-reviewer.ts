@@ -265,9 +265,13 @@ export function gatherContext(
       let diffArgs: string[];
       let nameArgs: string[];
       if (inWorktree && resolvedDiffBase) {
-        const range = `${resolvedDiffBase}..HEAD`;
-        diffArgs = ["diff", range, "--no-color"];
-        nameArgs = ["diff", "--name-only", range];
+        // BUG-26: diff the working tree against the base, NOT the commit range
+        // `<base>..HEAD`. The orchestrator commits the builder's changes only
+        // AFTER patch-review passes, so at gather time HEAD === base and
+        // `<base>..HEAD` is empty. The working-tree form captures the staged
+        // changes regardless of commit state (and committed changes too).
+        diffArgs = ["diff", resolvedDiffBase, "--no-color"];
+        nameArgs = ["diff", "--name-only", resolvedDiffBase];
       } else {
         const base = resolvedDiffBase ?? "HEAD";
         if (inWorktree && !resolvedDiffBase) {

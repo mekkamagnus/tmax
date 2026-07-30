@@ -395,10 +395,10 @@ describe("gatherContext", () => {
       runRaw: (_cmd, args) => {
         calls.push(args);
         const key = args.join(" ");
-        if (key === "diff abc123def456..HEAD --no-color") {
+        if (key === "diff abc123def456 --no-color") {
           return TaskEither.right({ ok: true, exitCode: 0, stdout: "diff --git a/src/x.ts b/src/x.ts\n+hello", stderr: "" });
         }
-        if (key === "diff --name-only abc123def456..HEAD") {
+        if (key === "diff --name-only abc123def456") {
           return TaskEither.right({ ok: true, exitCode: 0, stdout: "src/x.ts\n", stderr: "" });
         }
         if (key === "ls-files --others --exclude-standard -z") {
@@ -440,10 +440,10 @@ describe("gatherContext", () => {
             stderr: "",
           });
         }
-        if (key === `diff ${reflogBase}..HEAD --no-color`) {
+        if (key === `diff ${reflogBase} --no-color`) {
           return TaskEither.right({ ok: true, exitCode: 0, stdout: "diff --git a/src/y.ts b/src/y.ts\n+world", stderr: "" });
         }
-        if (key === `diff --name-only ${reflogBase}..HEAD`) {
+        if (key === `diff --name-only ${reflogBase}`) {
           return TaskEither.right({ ok: true, exitCode: 0, stdout: "src/y.ts\n", stderr: "" });
         }
         if (key === "ls-files --others --exclude-standard -z") {
@@ -462,6 +462,44 @@ describe("gatherContext", () => {
       expect(result.right.gitWarning).toContain("earliest worktree HEAD reflog");
     }
     expect(calls.some((args) => args[0] === "merge-base")).toBe(false);
+  });
+
+  test("BUG-26: captures staged-but-uncommitted changes via working-tree diff (not <base>..HEAD)", async () => {
+    // The orchestrator commits the builder's worktree changes only AFTER
+    // patch-review passes, so at gather time HEAD === base and the builder's
+    // output is staged-but-uncommitted. The commit-range form `<base>..HEAD`
+    // would be empty here; gather must diff the working tree against <base>.
+    const specPath = join(tmp, "SPEC-026.md");
+    writeFileSync(specPath, "# Spec\n");
+    const calls: string[][] = [];
+    const deps = mockDeps({
+      runRaw: (_cmd, args) => {
+        calls.push(args);
+        const key = args.join(" ");
+        if (key === "diff abc123def456 --no-color") {
+          return TaskEither.right({ ok: true, exitCode: 0, stdout: "diff --git a/src/impl.ts b/src/impl.ts\n+implemented", stderr: "" });
+        }
+        if (key === "diff --name-only abc123def456") {
+          return TaskEither.right({ ok: true, exitCode: 0, stdout: "src/impl.ts\n", stderr: "" });
+        }
+        if (key === "ls-files --others --exclude-standard -z") {
+          return TaskEither.right({ ok: true, exitCode: 0, stdout: "", stderr: "" });
+        }
+        return TaskEither.right({ ok: false, exitCode: 1, stdout: "", stderr: `unexpected ${key}` });
+      },
+    });
+
+    const result = await gatherContext(deps, tmp, specPath, "abc123def456", {
+      worktreePath: tmp,
+    }).run();
+
+    expect(Either.isRight(result)).toBe(true);
+    if (Either.isRight(result)) {
+      expect(result.right.filesChanged).toEqual(["src/impl.ts"]);
+      expect(result.right.diff).toContain("+implemented");
+    }
+    // Regression guard: the commit-range form must never be used.
+    expect(calls.some((args) => args.join(" ").includes("..HEAD"))).toBe(false);
   });
 });
 
