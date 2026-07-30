@@ -27,6 +27,9 @@ Options:
   --workspace-kill NAME  Delete a workspace
   -e EXPR        Evaluate T-Lisp expression (like emacsclient -e)
   --stop         Stop the running daemon
+  --sweep        List orphaned tmax daemons + stale sockets (dry-run)
+  --sweep --apply  Reap orphans (SIGTERM→SIGKILL) + remove stale sockets/locks
+  --sweep --force  Also include the canonical daemon (off by default)
   --capture      Capture current frame as ANSI (colors preserved)
   --capture-html Capture current frame as standalone HTML
   --test         Run the trt native test suite (exit 0 pass / 1 fail / 2 no-tests)
@@ -111,6 +114,9 @@ ensure_daemon() {
 DAEMON_ONLY=false
 EVAL_EXPR=""
 STOP=false
+SWEEP=false
+SWEEP_APPLY=false
+SWEEP_FORCE=false
 CAPTURE=""
 WORKSPACE=""
 WORKSPACES=false
@@ -129,6 +135,9 @@ for arg in "$@"; do
     --workspace-kill) shift_mode=workspace_kill ;;
     -e)             shift_mode=eval ;;
     --stop)         STOP=true ;;
+    --sweep)        SWEEP=true ;;
+    --apply)        SWEEP_APPLY=true ;;
+    --force)        SWEEP_FORCE=true ;;
     --capture)      CAPTURE=ansi ;;
     --capture-html) CAPTURE=html ;;
     --test)         TEST_MODE=true ;;
@@ -188,6 +197,21 @@ if [ "$STOP" = true ]; then
     echo "Daemon not running"
   fi
   exit 0
+fi
+
+# Handle --sweep (BUG-29): PID-reviewed orphan-daemon + stale-socket cleanup.
+# Explicit branches (not an array) — macOS ships bash 3.2, where
+# "${arr[@]}" under `set -u` errors on an empty array.
+if [ "$SWEEP" = true ]; then
+  if [ "$SWEEP_APPLY" = true ] && [ "$SWEEP_FORCE" = true ]; then
+    exec bun "$PROJECT_DIR/src/server/sweep.ts" --apply --force
+  elif [ "$SWEEP_APPLY" = true ]; then
+    exec bun "$PROJECT_DIR/src/server/sweep.ts" --apply
+  elif [ "$SWEEP_FORCE" = true ]; then
+    exec bun "$PROJECT_DIR/src/server/sweep.ts" --force
+  else
+    exec bun "$PROJECT_DIR/src/server/sweep.ts"
+  fi
 fi
 
 # Handle --test (trt native test runner). Evals (trt-run [target]) on the daemon, prints results
