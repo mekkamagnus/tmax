@@ -9,6 +9,7 @@ import { createServer, Server, Socket } from 'net';
 import { userInfo } from 'os';
 import { defaultSocketPath } from '../core/socket-path.ts';import { closeSync, existsSync, mkdirSync, openSync, unlinkSync, writeFileSync, readFileSync, promises as fsPromises } from 'fs';
 import { lockPathFor, readLockRaw } from './lock-file.ts';
+import { tlispValueToJson as tlispValueToJsonImpl } from '../tlisp/serialization.ts';
 import path from 'path';
 import { Editor } from '../editor/editor.ts';
 import { TerminalIOImpl } from '../core/terminal.ts';
@@ -1440,36 +1441,7 @@ export class TmaxServer {
    * Convert T-Lisp value to JSON-serializable value
    */
   private tlispValueToJson(value: any): any {
-    if (value === null || value === undefined) {
-      return null;
-    }
-
-    // Handle T-Lisp value objects
-    if (value.type !== undefined) {
-      switch (value.type) {
-        case 'nil':
-          return null;
-        case 'boolean':
-        case 'number':
-        case 'string':
-          return value.value;
-        case 'list':
-          return value.value.map((v: any) => this.tlispValueToJson(v));
-        case 'hashmap':
-          const obj: Record<string, any> = {};
-          value.value.forEach((v: any, k: string) => {
-            obj[k] = this.tlispValueToJson(v);
-          });
-          return obj;
-        case 'symbol':
-          return value.value;
-        default:
-          return String(value);
-      }
-    }
-
-    // Handle plain values
-    return value;
+    return tlispValueToJsonImpl(value);
   }
 
   /**
