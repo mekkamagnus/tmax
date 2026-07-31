@@ -45,14 +45,16 @@ const FILES_PER_BATCH = 5;
 
 function buildTestBatches(): string[][] {
   const explicitTarget = process.argv.slice(2).find((a) => !a.startsWith("-"));
-  const flags = process.argv.slice(2).filter((a) => a.startsWith("-"));
+  const flags = process.argv.slice(2).filter((a) => a.startsWith("-") && a !== "--adw");
   if (explicitTarget) {
     return [["test", "--timeout", String(PER_TEST_TIMEOUT_MS), explicitTarget, ...flags]];
   }
   // Default: all test/unit/*.test.ts EXCEPT adw-* (LLM-subprocess integration tests)
+  // --adw: ONLY adw-* (routes test:adw through this BUG-16 force-exit harness — issue #31)
+  const adwOnly = process.argv.includes("--adw");
   const unitDir = join(import.meta.dir, "..", "test", "unit");
   const allFiles = readdirSync(unitDir)
-    .filter((f) => f.endsWith(".test.ts") && !f.startsWith("adw-"))
+    .filter((f) => f.endsWith(".test.ts") && (adwOnly ? f.startsWith("adw-") : !f.startsWith("adw-")))
     .map((f) => join("test/unit", f));
   // --dots emits one character per completed test, giving a steady output
   // stream. The default reporter is bursty (file-level results); under the

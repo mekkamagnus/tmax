@@ -12,7 +12,7 @@
     "repl": "bun src/tlisp/cli.ts",
     "test": "bun run test:unit && bun run test:adw && bun run test:integration",
     "test:unit": "bun scripts/run-unit-tests.ts",
-    "test:adw": "bun test --timeout 30000 test/unit/adw-*.test.ts",
+    "test:adw": "bun scripts/run-unit-tests.ts --adw",
     "test:integration": "bun test --timeout 30000 test/integration/",
     "test:tmax-use": "bin/tmax-use test",
     "tmux:audit": "bash scripts/tmax-tmux-audit.sh",
