@@ -3,7 +3,7 @@
  * @description Effect Pattern for controlled side effects with explicit dependency management
  */
 
-import { TaskEither } from "./task-either.ts";
+import { Either, TaskEither } from "./task-either.ts";
 import { Reader } from "./reader.ts";
 import { readFile, writeFile, stat, mkdir } from "node:fs/promises";
 
