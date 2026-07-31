@@ -86,27 +86,35 @@ export interface ParsedArgs {
   id?: string;
 }
 
-export function parseArgs(argv: string[]): Either<string, ParsedArgs> {
+/** Parse result replaces the former Either<string, ParsedArgs> with __help__/
+ *  __usage__ sentinel strings (issue #24). Each variant is explicit. */
+export type PatchReviewParseResult =
+  | { kind: "help" }
+  | { kind: "usage" }
+  | { kind: "error"; message: string }
+  | ({ kind: "run" } & ParsedArgs);
+
+export function parseArgs(argv: string[]): PatchReviewParseResult {
   let input = "";
   let model: string | undefined;
   let id: string | undefined;
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i]!;
-    if (a === "-h" || a === "--help") return Either.left(`__help__:${USAGE}`);
+    if (a === "-h" || a === "--help") return { kind: "help" };
     else if (a === "--model") {
       const val = argv[++i];
-      if (val === undefined) return Either.left("--model requires a value.");
+      if (val === undefined) return { kind: "error", message: "--model requires a value." };
       model = val;
     } else if (a === "--id") {
       const val = argv[++i];
-      if (val === undefined) return Either.left("--id requires a value.");
-      if (!ADW_ID_RE.test(val)) return Either.left(`--id must be a 10-char ULID-timestamp id (got "${val}").`);
+      if (val === undefined) return { kind: "error", message: "--id requires a value." };
+      if (!ADW_ID_RE.test(val)) return { kind: "error", message: `--id must be a 10-char ULID-timestamp id (got "${val}").` };
       id = val;
     } else if (input === "") input = a;
-    else return Either.left(`Unexpected extra argument: ${a}`);
+    else return { kind: "error", message: `Unexpected extra argument: ${a}` };
   }
-  if (!input) return Either.left(`__usage__:${USAGE}`);
-  return Either.right({ input, model, id });
+  if (!input) return { kind: "usage" };
+  return { kind: "run", input, model, id };
 }
 
 // ---------------------------------------------------------------------------
@@ -517,27 +525,26 @@ export function runPatchReviewWithDeps(
 function main(): Promise<number> {
   const parsed = parseArgs(process.argv.slice(2));
 
-  if (Either.isLeft(parsed)) {
-    if (parsed.left.startsWith("__help__:")) {
-      process.stdout.write(parsed.left.slice("__help__:".length) + "\n");
+  switch (parsed.kind) {
+    case "help":
+      process.stdout.write(USAGE + "\n");
       return Promise.resolve(0);
-    }
-    if (parsed.left.startsWith("__usage__:")) {
-      process.stderr.write(parsed.left.slice("__usage__:".length) + "\n");
+    case "usage":
+      process.stderr.write(USAGE + "\n");
       return Promise.resolve(1);
-    }
-    process.stderr.write(`Error: ${parsed.left}\n`);
-    return Promise.resolve(1);
+    case "error":
+      process.stderr.write(`Error: ${parsed.message}\n`);
+      return Promise.resolve(1);
+    case "run":
+      return runPatchReview(parsed.input, parsed.model, parsed.id).then((result) => {
+        if (Either.isLeft(result)) {
+          process.stderr.write(`Error: ${result.left}\n`);
+          return 2;
+        }
+        process.stdout.write(`${result.right.id} ${result.right.verdict} ${result.right.specPath}\n`);
+        return 0;
+      });
   }
-
-  return runPatchReview(parsed.right.input, parsed.right.model, parsed.right.id).then((result) => {
-    if (Either.isLeft(result)) {
-      process.stderr.write(`Error: ${result.left}\n`);
-      return 2;
-    }
-    process.stdout.write(`${result.right.id} ${result.right.verdict} ${result.right.specPath}\n`);
-    return 0;
-  });
 }
 
 if (import.meta.main) {

@@ -106,60 +106,58 @@ function streamResultLine(verdict: AuditVerdict): string {
 describe("parseArgs", () => {
   test("accepts a bare spec path", () => {
     const r = parseArgs(["docs/specs/SPEC-001-x.md"]);
-    expect(Either.isRight(r)).toBe(true);
-    if (Either.isRight(r)) {
-      expect(r.right.input).toBe("docs/specs/SPEC-001-x.md");
-      expect(r.right.model).toBeUndefined();
-      expect(r.right.id).toBeUndefined();
+    expect(r.kind).toBe("run");
+    if (r.kind === "run") {
+      expect(r.input).toBe("docs/specs/SPEC-001-x.md");
+      expect(r.model).toBeUndefined();
+      expect(r.id).toBeUndefined();
     }
   });
 
   test("accepts --model with a value", () => {
     const r = parseArgs(["--model", "glm-5.2", "docs/specs/SPEC-001-x.md"]);
-    expect(Either.isRight(r)).toBe(true);
-    if (Either.isRight(r)) expect(r.right.model).toBe("glm-5.2");
+    expect(r.kind).toBe("run");
+    if (r.kind === "run") expect(r.model).toBe("glm-5.2");
   });
 
   test("accepts --id with a value", () => {
     const r = parseArgs(["--id", "01KVCMJ0QR", "docs/specs/SPEC-001-x.md"]);
-    expect(Either.isRight(r)).toBe(true);
-    if (Either.isRight(r)) expect(r.right.id).toBe("01KVCMJ0QR");
+    expect(r.kind).toBe("run");
+    if (r.kind === "run") expect(r.id).toBe("01KVCMJ0QR");
   });
 
-  test("--model without a value → Left", () => {
+  test("--model without a value → error", () => {
     const r = parseArgs(["--model"]);
-    expect(Either.isLeft(r)).toBe(true);
-    if (Either.isLeft(r)) expect(r.left).toContain("--model requires a value");
+    expect(r.kind).toBe("error");
+    if (r.kind === "error") expect(r.message).toContain("--model requires a value");
   });
 
-  test("--id without a value → Left", () => {
+  test("--id without a value → error", () => {
     const r = parseArgs(["--id"]);
-    expect(Either.isLeft(r)).toBe(true);
-    if (Either.isLeft(r)) expect(r.left).toContain("--id requires a value");
+    expect(r.kind).toBe("error");
+    if (r.kind === "error") expect(r.message).toContain("--id requires a value");
   });
 
-  test("--id with invalid format → Left", () => {
+  test("--id with invalid format → error", () => {
     const r = parseArgs(["--id", "short", "docs/specs/SPEC-001-x.md"]);
-    expect(Either.isLeft(r)).toBe(true);
-    if (Either.isLeft(r)) expect(r.left).toContain("--id must be a 10-char");
+    expect(r.kind).toBe("error");
+    if (r.kind === "error") expect(r.message).toContain("--id must be a 10-char");
   });
 
   test("no args → usage", () => {
     const r = parseArgs([]);
-    expect(Either.isLeft(r)).toBe(true);
-    if (Either.isLeft(r)) expect(r.left.startsWith("__usage__:")).toBe(true);
+    expect(r.kind).toBe("usage");
   });
 
-  test("--help → help sentinel", () => {
+  test("--help → help", () => {
     const r = parseArgs(["--help"]);
-    expect(Either.isLeft(r)).toBe(true);
-    if (Either.isLeft(r)) expect(r.left.startsWith("__help__:")).toBe(true);
+    expect(r.kind).toBe("help");
   });
 
-  test("extra positional arg → Left", () => {
+  test("extra positional arg → error", () => {
     const r = parseArgs(["docs/specs/SPEC-001-x.md", "extra"]);
-    expect(Either.isLeft(r)).toBe(true);
-    if (Either.isLeft(r)) expect(r.left).toContain("Unexpected extra argument");
+    expect(r.kind).toBe("error");
+    if (r.kind === "error") expect(r.message).toContain("Unexpected extra argument");
   });
 });
 
