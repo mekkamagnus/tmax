@@ -181,6 +181,7 @@ describe('Server observability', () => {
   }, SERVER_OBSERVABILITY_TIMEOUT_MS);
 
   // TODO: Requires T-Lisp per-frame state isolation (deferred to separate spec)
+  // @ts-expect-error bun:test test.todo(name) is valid at runtime; @types/bun requires 2 args
   test.todo('frames keep independent opaque minibuffer sessions and views');
 
   test('recent errors are bounded and included in status', async () => {
