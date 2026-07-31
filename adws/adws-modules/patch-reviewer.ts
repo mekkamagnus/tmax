@@ -31,13 +31,10 @@ export interface PatchReviewerDeps {
   runCapture: (cmd: string, args: string[], opts: { cwd?: string; teeTo: string }) => TaskEither<string, string>;
 }
 
-/** Result of a subprocess that completed (even with non-zero exit). Left = spawn/setup failure. */
-export interface RawRunResult {
-  ok: boolean;
-  exitCode: number;
-  stdout: string;
-  stderr: string;
-}
+/** Result of a subprocess that completed (even with non-zero exit). Left = spawn/setup failure.
+ *  Consolidated to dispatcher-runtime.ts (issue #13). */
+import type { RawRunResult } from "./dispatcher-runtime.ts";
+export type { RawRunResult };
 
 /** Result of a single gate command. */
 export interface GateResult {

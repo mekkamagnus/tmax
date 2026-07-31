@@ -35,13 +35,10 @@ const MAX_FAILURE_CHARS = 2_000;
 // Types
 // ---------------------------------------------------------------------------
 
-/** Result of a subprocess that completed (even with non-zero exit). Left = spawn/setup failure. */
-export interface RawRunResult {
-  ok: boolean;
-  exitCode: number;
-  stdout: string;
-  stderr: string;
-}
+/** Result of a subprocess that completed (even with non-zero exit). Left = spawn/setup failure.
+ *  Consolidated to dispatcher-runtime.ts (issue #13). */
+import type { RawRunResult } from "./dispatcher-runtime.ts";
+export type { RawRunResult };
 
 /** Injected subprocess helpers. Mirrors PatchReviewerDeps. */
 export interface TesterDeps {
