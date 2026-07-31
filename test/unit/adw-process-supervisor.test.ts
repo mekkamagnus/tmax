@@ -18,7 +18,7 @@
  */
 import { describe, test, expect, afterEach } from "bun:test";
 import { spawn, type ChildProcess } from "child_process";
-import { ProcessSupervisor } from "./process-supervisor.ts";
+import { ProcessSupervisor } from "../../adws/adws-modules/process-supervisor.ts";
 
 const isAlive = (pid: number | undefined): boolean => {
   if (!pid || pid <= 0) return false;
