@@ -222,11 +222,12 @@ export function gatherContext(
     return TaskEither.from(async () => {
       const inWorktree = Boolean(process.env.ADW_WORKTREE || opts.worktreePath);
       let resolvedDiffBase = diffBase;
-      let gitWarning = inWorktree || diffBase
-        ? undefined
-        : "no build base_sha; diff may include pre-existing dirty changes";
+      const warnings: string[] = [];
+      if (!inWorktree && !diffBase) {
+        warnings.push("no build base_sha; diff may include pre-existing dirty changes");
+      }
       const addWarning = (message: string): void => {
-        gitWarning = `${gitWarning ? `${gitWarning}; ` : ""}${message}`;
+        warnings.push(message);
       };
 
       if (inWorktree && !resolvedDiffBase) {
@@ -312,6 +313,7 @@ export function gatherContext(
         return Either.left(`gather: git ls-files failed to spawn: ${untrackedRes.left}`);
       }
 
+      const gitWarning = warnings.length ? warnings.join("; ") : undefined;
       return Either.right<GatherBundle, string>({
         specContent,
         diff,
