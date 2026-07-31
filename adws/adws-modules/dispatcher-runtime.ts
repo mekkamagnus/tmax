@@ -470,3 +470,19 @@ export function workspacePaths(agentsDir: string): {
     writeState: (id, state) => writeState(agentsDir, id, state).map(() => undefined),
   };
 }
+
+/** Shared CLI availability probe (issue #15). Runs `cmd --version` with cwd,
+ *  maps failure to the install hint. Generic over the run function so each
+ *  module's ensureAvailable can delegate with its own Deps type + cwd. */
+const CLAUDE_INSTALL_HINT = "The `claude` CLI was not runnable. Install Claude Code and ensure `claude` is on PATH, then retry.";
+
+export function ensureCliAvailable(
+  run: (cmd: string, args: string[], opts: { cwd: string }) => TaskEither<string, unknown>,
+  cmd: string,
+  cwd: string,
+  installHint: string = CLAUDE_INSTALL_HINT,
+): TaskEither<string, void> {
+  return run(cmd, ["--version"], { cwd })
+    .mapLeft(() => installHint)
+    .map(() => undefined);
+}

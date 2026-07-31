@@ -127,12 +127,9 @@ export interface TestStageResult {
 // ensureAvailable — dependency guard
 // ---------------------------------------------------------------------------
 
+import { ensureCliAvailable } from "./dispatcher-runtime.ts";
 export function ensureAvailable(deps: TesterDeps, cwd: string): TaskEither<string, void> {
-  return deps.run(CLAUDE, ["--version"], { cwd })
-    .mapLeft(() =>
-      `The \`claude\` CLI was not runnable. Install Claude Code and ensure \`claude\` is on PATH, then retry.`,
-    )
-    .map(() => undefined);
+  return ensureCliAvailable(deps.run, CLAUDE, cwd);
 }
 
 // ---------------------------------------------------------------------------

@@ -56,12 +56,9 @@ export interface BuilderDeps {
  * (which spawns a shell builtin and is unreliable as a bare exec). Returns
  * Right<undefined> when claude responds to --version, Left otherwise.
  */
+import { ensureCliAvailable } from "./dispatcher-runtime.ts";
 export function ensureAvailable(deps: BuilderDeps, cwd: string): TaskEither<string, void> {
-  return deps.run(CLAUDE, ["--version"], { cwd })
-    .mapLeft(() =>
-      `The \`claude\` CLI was not runnable. Install Claude Code and ensure \`claude\` is on PATH, then retry.`,
-    )
-    .map(() => undefined);
+  return ensureCliAvailable(deps.run, CLAUDE, cwd);
 }
 
 /**
