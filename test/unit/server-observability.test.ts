@@ -181,42 +181,7 @@ describe('Server observability', () => {
   }, SERVER_OBSERVABILITY_TIMEOUT_MS);
 
   // TODO: Requires T-Lisp per-frame state isolation (deferred to separate spec)
-  test.skip('frames keep independent opaque minibuffer sessions and views', async () => {
-    const first = await RpcConnection.connect(socketPath);
-    const second = await RpcConnection.connect(socketPath);
-    await first.send('connect-frame', { clientType: 'tui', clientName: 'first' });
-    await second.send('connect-frame', { clientType: 'tui', clientName: 'second' });
-
-    await first.send('keypress', { key: ' ' });
-    await first.send('keypress', { key: ';' });
-    await first.send('keypress', { key: 'b' });
-
-    await second.send('keypress', { key: '\x18' });
-    await second.send('keypress', { key: 'b' });
-
-    const firstState = (await first.send('render-state')).result;
-    const secondState = (await second.send('render-state')).result;
-
-    expect(firstState.minibufferView.prompt).toBe('M-x ');
-    expect(firstState.minibufferView.input).toBe('b');
-    expect(secondState.minibufferView.prompt).toBe('Switch to buffer: ');
-    expect(secondState.minibufferView.input).toBe('');
-    expect(firstState.minibufferState).not.toEqual(secondState.minibufferState);
-    expect(firstState.cursorFocus).toBe('command');
-    expect(secondState.cursorFocus).toBe('command');
-
-    await first.send('keypress', { key: 'Escape' });
-    const firstClosed = (await first.send('render-state')).result;
-    const secondStillOpen = (await second.send('render-state')).result;
-
-    expect(firstClosed.cursorFocus).toBe('buffer');
-    expect(firstClosed.minibufferState).toBeUndefined();
-    expect(secondStillOpen.cursorFocus).toBe('command');
-    expect(secondStillOpen.minibufferView.prompt).toBe('Switch to buffer: ');
-
-    first.close();
-    second.close();
-  }, SERVER_OBSERVABILITY_TIMEOUT_MS);
+  test.todo('frames keep independent opaque minibuffer sessions and views');
 
   test('recent errors are bounded and included in status', async () => {
     await sendRequest(socketPath, 'client-event', {
