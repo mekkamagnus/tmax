@@ -48,15 +48,14 @@ export function findWorkspaceBySpecPath(agentsDir: string, specPath: string): st
   for (const id of entries) {
     const stateFile = join(agentsDir, id, "adw-state.json");
     if (!existsSync(stateFile)) continue;
-    const matchE = Either.tryCatch(
-      () => {
-        const state = JSON.parse(readFileSync(stateFile, "utf8")) as { spec_path?: string };
-        if (!state.spec_path) return false;
-        return normalizeSpecPath(state.spec_path).relative === inputRel;
-      },
-      () => false,
-    );
-    if (Either.isRight(matchE) && matchE.right) return id;
+    try {
+      const state = JSON.parse(readFileSync(stateFile, "utf8")) as { spec_path?: string };
+      if (!state.spec_path) continue;
+      const stateRel = normalizeSpecPath(state.spec_path).relative;
+      if (stateRel === inputRel) return id;
+    } catch {
+      continue; // corrupt state file — skip
+    }
   }
   return null;
 }
