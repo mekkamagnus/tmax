@@ -7,7 +7,7 @@
 
 import { createServer, Server, Socket } from 'net';
 import { userInfo } from 'os';
-import { closeSync, existsSync, mkdirSync, openSync, unlinkSync, writeFileSync, readFileSync, promises as fsPromises } from 'fs';
+import { defaultSocketPath } from '../core/socket-path.ts';import { closeSync, existsSync, mkdirSync, openSync, unlinkSync, writeFileSync, readFileSync, promises as fsPromises } from 'fs';
 import path from 'path';
 import { Editor } from '../editor/editor.ts';
 import { TerminalIOImpl } from '../core/terminal.ts';
@@ -758,9 +758,7 @@ export class TmaxServer {
    * Get the default socket path for the server
    */
   private getDefaultSocketPath(): string {
-    if (process.env.TMAX_SOCKET) return process.env.TMAX_SOCKET;
-    const uid = process.env.SUDO_UID || userInfo().uid.toString();
-    return `/tmp/tmax-${uid}/server`;
+    return defaultSocketPath();
   }
 
   /**

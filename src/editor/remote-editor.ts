@@ -1,4 +1,4 @@
-import { Socket } from "net";
+import { defaultSocketPath } from '../core/socket-path.ts';import { Socket } from "net";
 import { userInfo } from "os";
 import { jsonToEditorState } from "../server/serialize.ts";
 import { PROTOCOL_VERSION } from "../server/rpc/types.ts";
@@ -24,7 +24,7 @@ export class RemoteEditor {
   private workspaceId?: string;
 
   constructor(socketPath?: string, workspaceId?: string) {
-    this.socketPath = socketPath || process.env.TMAX_SOCKET || `/tmp/tmax-${userInfo().uid}/server`;
+    this.socketPath = socketPath || defaultSocketPath();
     this.workspaceId = workspaceId;
   }
 

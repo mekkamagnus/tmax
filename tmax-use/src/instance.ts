@@ -207,9 +207,6 @@ export class TmaxInstance {
   }
 }
 
-/** Default socket path (mirrors `bin/tmaxclient`). */
-export function defaultSocketPath(): string {
-  if (process.env.TMAX_SOCKET) return process.env.TMAX_SOCKET;
-  const uid = process.getuid?.() ?? 501;
-  return `/tmp/tmax-${uid}/server`;
-}
+/** Default socket path — delegates to the shared src/core/socket-path.ts (BUG-30). */
+import { defaultSocketPath } from "../../src/core/socket-path.ts";
+export { defaultSocketPath };
