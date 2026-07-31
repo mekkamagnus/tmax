@@ -85,8 +85,16 @@ function isProcessAlive(pid: number): boolean {
   try { process.kill(pid, 0); return true; } catch { return false; }
 }
 
-function readLock(path: string): LockData | null {
-  return readLockRaw(path) as unknown as LockData | null;
+type LockReadResult =
+  | { kind: 'ok'; data: LockData }
+  | { kind: 'missing' }
+  | { kind: 'corrupt' };
+
+function readLock(path: string): LockReadResult {
+  if (!existsSync(path)) return { kind: 'missing' };
+  const raw = readLockRaw(path);
+  if (!raw) return { kind: 'corrupt' };
+  return { kind: 'ok', data: raw as unknown as LockData };
 }
 
 function writeLock(path: string, data: LockData): void {
@@ -812,13 +820,13 @@ export class TmaxServer {
     // that lost its socket — reclaim it rather than deadlocking startup.
     const existing = readLock(lockPath);
     if (
-      existing &&
-      isProcessAlive(existing.pid) &&
-      existing.socketPath === this.socketPath &&
+      existing.kind === 'ok' &&
+      isProcessAlive(existing.data.pid) &&
+      existing.data.socketPath === this.socketPath &&
       existsSync(this.socketPath) &&
       await this.probeDaemon()
     ) {
-      throw new Error(`Daemon starting (pid ${existing.pid}) at ${this.socketPath}`);
+      throw new Error(`Daemon starting (pid ${existing.data.pid}) at ${this.socketPath}`);
     }
 
     // Stale lock (dead PID, wrong path, or live-but-not-serving) — remove and retry.
@@ -1564,7 +1572,7 @@ export class TmaxServer {
       const lockPath = lockPathFor(this.socketPath);
       const lock = readLock(lockPath);
       // Only remove if lock still identifies this process
-      if (lock && lock.pid === process.pid && lock.socketPath === this.socketPath) {
+      if (lock.kind === 'ok' && lock.data.pid === process.pid && lock.data.socketPath === this.socketPath) {
         removeFile(lockPath);
       }
       this.ownsLock = false;
