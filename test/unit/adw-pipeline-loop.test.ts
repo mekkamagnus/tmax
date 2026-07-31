@@ -14,6 +14,7 @@ import { mkdtempSync, rmSync, existsSync, readFileSync, mkdirSync, writeFileSync
 import { join } from "path";
 import { tmpdir } from "os";
 import { Either, TaskEither } from "../../src/utils/task-either.ts";
+import { createMockWorktreeDeps } from "../helpers/adw-test-fixture.ts";
 import {
   parseArgs,
   runPipeline,
@@ -96,24 +97,7 @@ const mockPatchGaps = (): PatchReviewResult => ({
  * orchestrator doesn't refuse to create a worktree inside the test's temp dir.
  * All other ops return Right with no real effect.
  */
-const mockWorktreeDeps: OrchestratorWorktreeDeps = {
-  // Generic signature matches OrchestratorWorktreeDeps.withPlanningLock<T>.
-  withPlanningLock: async <T>(_rootPath: string, fn: () => Promise<T>): Promise<T> => fn(),
-  commitSpecToMain: () => TaskEither.from(async () => Either.right({ committed: false })),
-  commitWorktreeChanges: () => TaskEither.from(async () => Either.right({ committed: false })),
-  createWorktree: () => TaskEither.from(async () => Either.right("")),
-  createWorktreeFromBase: () => TaskEither.from(async () => Either.right("")),
-  // BUG-20: default to "valid reusable worktree" so existing resume tests
-  // (which don't seed a real worktree) exercise the reuse path unchanged.
-  validateWorktree: () => TaskEither.from(async () => Either.right({ ok: true, path: "/mock/worktree", branch: "adw/test" })),
-  removeWorktree: () => TaskEither.from(async () => Either.right(undefined)),
-  detectWorktree: () => TaskEither.from(async () => Either.right(false)),
-  // OrchestratorWorktreeDeps extends WorktreeDeps. gitRun returns a plausible
-  // SHA so the fresh-setup base_sha capture (guarded by `typeof === "function"`)
-  // records a value rather than failing on empty output.
-  gitRun: () => TaskEither.from(async () => Either.right("deadbeef")),
-  mergeBranchToMain: () => TaskEither.from(async () => Either.right({ sha: "deadbeef" })),
-};
+const mockWorktreeDeps = createMockWorktreeDeps();
 
 /**
  * BUG-20: build worktree deps whose validation + recreation are controllable,

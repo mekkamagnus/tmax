@@ -16,6 +16,7 @@ import { mkdtempSync, rmSync, writeFileSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
 import { Either, TaskEither } from "../../src/utils/task-either.ts";
+import { createMockWorktreeDeps } from "../helpers/adw-test-fixture.ts";
 import {
   runPipeline,
   type PipelineDeps,
@@ -30,18 +31,7 @@ import {
 let AGENTS_DIR = "";
 
 // Shared mock worktree deps (satisfy OrchestratorWorktreeDeps; git ops unused).
-const mockWorktreeDeps: OrchestratorWorktreeDeps = {
-  withPlanningLock: async <T>(_rootPath: string, fn: () => Promise<T>): Promise<T> => fn(),
-  commitSpecToMain: () => TaskEither.from(async () => Either.right({ committed: false })),
-  commitWorktreeChanges: () => TaskEither.from(async () => Either.right({ committed: false })),
-  createWorktree: () => TaskEither.from(async () => Either.right("")),
-  createWorktreeFromBase: () => TaskEither.from(async () => Either.right("")),
-  validateWorktree: () => TaskEither.from(async () => Either.right({ ok: true, path: "/mock", branch: "adw/test" })),
-  removeWorktree: () => TaskEither.from(async () => Either.right(undefined)),
-  detectWorktree: () => TaskEither.from(async () => Either.right(false)),
-  gitRun: () => TaskEither.from(async () => Either.right("deadbeef")),
-  mergeBranchToMain: () => TaskEither.from(async () => Either.right({ sha: "deadbeef" })),
-};
+const mockWorktreeDeps = createMockWorktreeDeps();
 
 const mockPatchGaps = (): PatchReviewResult => ({ id: "P", verdict: "gaps", specPath: "" });
 const mockPatchPass = (): PatchReviewResult => ({ id: "P", verdict: "pass", specPath: "" });
