@@ -17,6 +17,7 @@
  */
 import { spawnSync } from 'child_process';
 import { existsSync, readdirSync, readFileSync, statSync, unlinkSync } from 'fs';
+import { readLockRaw } from './lock-file.ts';
 import { userInfo } from 'os';
 import path from 'path';
 
@@ -154,14 +155,11 @@ function collectLocksRecursive(dir: string, out: string[], depth: number, maxDep
 
 export function readLock(lockFile: string): LockEntry {
   const inferred = lockFile.endsWith('.lock') ? lockFile.slice(0, -'.lock'.length) : lockFile;
-  try {
-    const data = JSON.parse(readFileSync(lockFile, 'utf8')) as Record<string, unknown>;
-    const pid = typeof data.pid === 'number' ? data.pid : undefined;
-    const socketPath = typeof data.socketPath === 'string' ? data.socketPath : inferred;
-    return { lockFile, socketPath, pid };
-  } catch {
-    return { lockFile, socketPath: inferred, pid: undefined };
-  }
+  const raw = readLockRaw(lockFile);
+  if (!raw) return { lockFile, socketPath: inferred, pid: undefined };
+  const pid = typeof raw.pid === 'number' ? raw.pid : undefined;
+  const socketPath = typeof raw.socketPath === 'string' ? raw.socketPath : inferred;
+  return { lockFile, socketPath, pid };
 }
 
 // ---------------------------------------------------------------------------

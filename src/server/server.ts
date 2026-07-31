@@ -8,6 +8,7 @@
 import { createServer, Server, Socket } from 'net';
 import { userInfo } from 'os';
 import { defaultSocketPath } from '../core/socket-path.ts';import { closeSync, existsSync, mkdirSync, openSync, unlinkSync, writeFileSync, readFileSync, promises as fsPromises } from 'fs';
+import { lockPathFor, readLockRaw } from './lock-file.ts';
 import path from 'path';
 import { Editor } from '../editor/editor.ts';
 import { TerminalIOImpl } from '../core/terminal.ts';
@@ -79,20 +80,12 @@ interface LockData {
   cwd: string;
 }
 
-function lockPathFor(socketPath: string): string {
-  return socketPath + '.lock';
-}
-
 function isProcessAlive(pid: number): boolean {
   try { process.kill(pid, 0); return true; } catch { return false; }
 }
 
 function readLock(path: string): LockData | null {
-  try {
-    return JSON.parse(readFileSync(path, 'utf8'));
-  } catch {
-    return null;
-  }
+  return readLockRaw(path) as unknown as LockData | null;
 }
 
 function writeLock(path: string, data: LockData): void {
