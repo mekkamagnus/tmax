@@ -27,7 +27,7 @@ import type {
   SaveFileParams, SaveFileResult,
 } from "../types.ts";
 import { editorStateToJson } from "../../serialize.ts";
-
+import { Either } from "../../../utils/task-either.ts";
 /** Build the editing-domain handlers bound to a `ServerContext`. */
 export function createEditingHandlers(ctx: ServerContext): {
   open: (params: OpenParams) => Promise<OpenResult>;
@@ -130,7 +130,7 @@ export function createEditingHandlers(ctx: ServerContext): {
         : interpreter.execute(code);
 
       // Handle Either return type - check _tag property
-      if (result._tag === 'Left') {
+      if (Either.isLeft(result)) {
         const err = result.left as { message: string; diagnostic?: unknown };
         // Catch editor-quit signal and trigger graceful shutdown
         if (err.message === 'EDITOR_QUIT_SIGNAL') {
@@ -184,7 +184,7 @@ export function createEditingHandlers(ctx: ServerContext): {
         .replace(/\t/g, '\\t')
         .replace(/"/g, '\\"');
       const result = interpreter.execute(`(buffer-insert "${escaped}")`);
-      if (result._tag === 'Left') {
+      if (Either.isLeft(result)) {
         throw new Error(result.left.message || 'T-Lisp evaluation error');
       }
 

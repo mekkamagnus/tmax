@@ -788,7 +788,7 @@ function buildEditorAPIContributions(): readonly EditorAPIContribution[] {
           const buf = buffersMap().get('*Messages*');
           if (!buf) return Either.right(createString(''));
           const content = buf.getContent();
-          if (content._tag === 'Left') return Either.right(createString(''));
+          if (Either.isLeft(content)) return Either.right(createString(''));
           return Either.right(createString(content.right));
         });
 
@@ -796,7 +796,7 @@ function buildEditorAPIContributions(): readonly EditorAPIContribution[] {
           const buf = buffersMap().get('*daemon*');
           if (!buf) return Either.right(createString(''));
           const content = buf.getContent();
-          if (content._tag === 'Left') return Either.right(createString(''));
+          if (Either.isLeft(content)) return Either.right(createString(''));
           return Either.right(createString(content.right));
         });
 

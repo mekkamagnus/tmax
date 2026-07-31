@@ -51,7 +51,7 @@ export class PipelineBuilder<E, A> {
     return new PipelineBuilder(
       TaskEither.from(async () => {
         const result = await this.current.run();
-        if (result._tag === 'Left') {
+        if (Either.isLeft(result)) {
           return await f(result.left).run();
         }
         return result;

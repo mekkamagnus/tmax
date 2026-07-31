@@ -289,7 +289,7 @@ export class StateTaskEither<S, L, A> {
     return new StateTaskEither(state => 
       TaskEither.from(async () => {
         const result = await this.computation(state).run();
-        if (result._tag === 'Left') {
+        if (Either.isLeft(result)) {
           return await f(result.left).run(state).run();
         }
         return result;

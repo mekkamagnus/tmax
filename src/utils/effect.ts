@@ -115,7 +115,7 @@ export const EffectOps = {
   ): Effect<R, E, A> =>
     deps => TaskEither.from(async () => {
       const result = await effect(deps).run();
-      if (result._tag === 'Left') {
+      if (Either.isLeft(result)) {
         return await handler(result.left)(deps).run();
       }
       return result;
@@ -131,7 +131,7 @@ export const EffectOps = {
   ): Effect<R, E2, A> =>
     deps => TaskEither.from(async () => {
       const result = await effect(deps).run();
-      if (result._tag === 'Left' && predicate(result.left)) {
+      if (Either.isLeft(result) && predicate(result.left)) {
         return await handler(result.left)(deps).run();
       }
       return result as { _tag: 'Right'; right: A } | { _tag: 'Left'; left: E2 };
@@ -405,7 +405,7 @@ export const effectResource = {
   ): Effect<R, E, B> =>
     deps => TaskEither.from(async () => {
       const acquireResult = await acquire(deps).run();
-      if (acquireResult._tag === 'Left') {
+      if (Either.isLeft(acquireResult)) {
         return acquireResult;
       }
       

@@ -212,7 +212,7 @@ export class ReaderTaskEither<R, L, A> {
     return new ReaderTaskEither(deps => 
       TaskEither.from(async () => {
         const result = await this.computation(deps).run();
-        if (result._tag === 'Left') {
+        if (Either.isLeft(result)) {
           return await f(result.left).run(deps).run();
         }
         return result;
@@ -619,7 +619,7 @@ const result = await saveCurrentBufferReader("example.txt")
   .run(dependencies)
   .run();
 
-if (result._tag === 'Left') {
+if (Either.isLeft(result)) {
   console.error("Save failed:", result.left);
 } else {
   console.log("Save successful");
