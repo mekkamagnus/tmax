@@ -457,3 +457,16 @@ export function recoverSpecPathFromEvents(agentsDir: string, id: string): string
   }
   return null;
 }
+
+/** Curry appendEvent + writeState with a given agentsDir (issue #12).
+ *  Preserves the injected-agentsDir isolation seam — callers pass their
+ *  AGENTS_DIR (standalone) or agentsDir (orchestrated). */
+export function workspacePaths(agentsDir: string): {
+  appendEvent: (id: string, agent: string, event: Record<string, unknown>) => void;
+  writeState: (id: string, state: Record<string, unknown>) => TaskEither<string, void>;
+} {
+  return {
+    appendEvent: (id, agent, event) => appendEvent(agentsDir, id, agent, event),
+    writeState: (id, state) => writeState(agentsDir, id, state).map(() => undefined),
+  };
+}

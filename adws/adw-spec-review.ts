@@ -31,8 +31,7 @@ import { CODEX, type CodexDeps, type ReviewVerdictPayload, reviewSpec, upgradeSp
 import {
   ADW_ID_RE,
   adwId,
-  appendEvent as appendEventRaw,
-  writeState as writeStateRaw,
+  workspacePaths,
   run,
   runCapture,
   type RunOpts,
@@ -142,15 +141,7 @@ function parseArgs(argv: string[]): Either<string, ParsedArgs> {
  * Append a single lifecycle event as one JSON line to the agent's events file.
  * Sync, append-only — survives crashes. Each event is on disk immediately.
  */
-const appendEvent = (id: string, agent: string, event: Record<string, unknown>): void =>
-  appendEventRaw(AGENTS_DIR, id, agent, event);
-
-/**
- * Write the run-state file (id, spec_path, status — no events).
- * Called at most twice: after start and after result/error.
- */
-const writeState = (id: string, state: Record<string, unknown>): TaskEither<string, void> =>
-  writeStateRaw(AGENTS_DIR, id, state).map(() => undefined);
+const { appendEvent, writeState } = workspacePaths(AGENTS_DIR);
 
 // ---------------------------------------------------------------------------
 // Input resolution: spec path OR adw-id → {specPath, source}

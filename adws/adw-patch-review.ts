@@ -47,8 +47,7 @@ import {
 import {
   ADW_ID_RE,
   adwId,
-  appendEvent as appendEventRaw,
-  writeState as writeStateRaw,
+  workspacePaths,
   run,
   runRaw as runRawShared,
   runCapture as runCaptureShared,
@@ -116,11 +115,7 @@ export function parseArgs(argv: string[]): Either<string, ParsedArgs> {
 // AGENTS_DIR.
 // ---------------------------------------------------------------------------
 
-const appendEvent = (id: string, agent: string, event: Record<string, unknown>): void =>
-  appendEventRaw(AGENTS_DIR, id, agent, event);
-
-const writeState = (id: string, state: Record<string, unknown>): TaskEither<string, void> =>
-  writeStateRaw(AGENTS_DIR, id, state).map(() => undefined);
+const { appendEvent, writeState } = workspacePaths(AGENTS_DIR);
 
 // ---------------------------------------------------------------------------
 // Subprocess plumbing — configured adapters over dispatcher-runtime.

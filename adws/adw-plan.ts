@@ -32,8 +32,7 @@ import { type PlanType, type AgentDeps, type ClassifyResult, type DispatchOutcom
 import {
   ADW_ID_RE,
   adwId,
-  appendEvent as appendEventRaw,
-  writeState as writeStateRaw,
+  workspacePaths,
   run,
   runCapture,
   type RunOpts,
@@ -100,18 +99,7 @@ function parseArgs(argv: string[]): Either<string, ParsedArgs> {
  * Stage-style signature `(id, agent, event)` — delegates to the shared
  * `appendEvent(agentsDir, id, agent, event)` in dispatcher-runtime.
  */
-const appendEvent = (id: string, agent: string, event: Record<string, unknown>): void =>
-  appendEventRaw(AGENTS_DIR, id, agent, event);
-
-/**
- * Write the run-state file (id, description, type, status — no events).
- * Called at most twice: after start and after result/error.
- *
- * Stage-style signature `(id, state)` — delegates to the shared
- * `writeState(agentsDir, id, state)` in dispatcher-runtime.
- */
-const writeState = (id: string, state: Record<string, unknown>): TaskEither<string, void> =>
-  writeStateRaw(AGENTS_DIR, id, state).map(() => undefined);
+const { appendEvent, writeState } = workspacePaths(AGENTS_DIR);
 
 // ---------------------------------------------------------------------------
 // main() — composed pipeline
