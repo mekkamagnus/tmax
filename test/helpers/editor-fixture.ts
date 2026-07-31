@@ -263,6 +263,23 @@ export async function createStartedEditor(content?: string): Promise<Editor> {
   return fixture.editor;
 }
 
+/**
+ * Markdown-test fixture: a started editor with the markdown + find-file command
+ * modules required, a buffer created from `content` (default filename "test.md"),
+ * and the buffer filename set when `filename` is given. Shared by the markdown
+ * test files (deduped from per-file copies — issue #34).
+ */
+export async function setupMdEditor(content: string, filename?: string): Promise<Editor> {
+  const editor = await createStartedEditor();
+  executeTlisp(editor, `(require-module editor/commands/markdown)`);
+  executeTlisp(editor, `(require-module editor/commands/find-file)`);
+  editor.createBuffer(filename ?? "test.md", content);
+  if (filename) {
+    executeTlisp(editor, `(set-buffer-filename "${filename}")`);
+  }
+  return editor;
+}
+
 /** Return the successful value or fail the test immediately. */
 export function expectRight<L, R>(result: EitherValue<L, R>, message: string = "Expected Right"): R {
   if (Either.isLeft(result)) {

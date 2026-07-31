@@ -4,6 +4,12 @@ Records of significant architectural decisions. Each ADR describes the context, 
 
 Ordered most-recent first (highest ADR number = most recent decision). Topic groupings preserved within each section.
 
+## Recent — Test-helper consolidation (ADR 0122)
+
+| File | Decision | Related |
+|------|----------|---------|
+| [ADR-0122-setupmdeditor-shared-fixture.md](ADR-0122-setupmdeditor-shared-fixture.md) | CHORE-46 / #34: export one shared `setupMdEditor` markdown-test fixture beside (not merged into) `createStartedEditor`; drop the byte-identical per-file copies and their now-unused imports | [CHORE-46](../specs/CHORE-46-setupmdeditor-dedup.md), #34 |
+
 ## Recent — adw Patch-Review & Process Supervision (ADR 0117–0121)
 
 | File | Decision | Related |

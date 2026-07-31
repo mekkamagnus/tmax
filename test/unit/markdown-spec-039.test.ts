@@ -7,22 +7,10 @@
 
 import { describe, test, expect } from "bun:test";
 import {
-  createStartedEditor,
   executeTlisp,
   expectTlispString,
+  setupMdEditor,
 } from "../helpers/editor-fixture.ts";
-import type { Editor } from "../../src/editor/editor.ts";
-
-async function setupMdEditor(content: string, filename?: string): Promise<Editor> {
-  const editor = await createStartedEditor();
-  executeTlisp(editor, `(require-module editor/commands/markdown)`);
-  executeTlisp(editor, `(require-module editor/commands/find-file)`);
-  editor.createBuffer(filename ?? "test.md", content);
-  if (filename) {
-    executeTlisp(editor, `(set-buffer-filename "${filename}")`);
-  }
-  return editor;
-}
 
 // ── Phase 1: Subtree operations ──────────────────────────────────────
 
