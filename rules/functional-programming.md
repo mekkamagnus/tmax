@@ -16,11 +16,9 @@ Applies to all TypeScript source files in `src/`.
 - **Function Composition**: Chain operations using compose/pipe patterns
 - **Composition Over Inheritance**: Favor object composition over class inheritance for flexibility and testability
 - **Result Types**: Return `Result<T, E>` objects instead of throwing exceptions
-- **Option Types**: Use `Option<T>` for nullable values instead of null/undefined checks
 
 ## Type Reference
 
-- `Option<T>` — nullable values (`Some(value) | None`)
 - `Either<L, R>` — error handling (`Left(error) | Right(success)`)
 - `TaskEither<E, T>` — async operations with error handling
 - `Result<T, E>` — success/failure without exceptions
@@ -245,7 +243,6 @@ validateBuffer()
 
 - **Task-based**: Use `Task.tryCatch()` for operations that may fail
 - **Result types**: Return `Result<T, E>` instead of throwing exceptions
-- **Option types**: Use `Option<T>` for potentially missing values
 - **Centralized logging**: All errors logged via centralized logger
 - **Different log levels**: Based on error type and severity
 - **Graceful degradation**: User feedback with recovery options
