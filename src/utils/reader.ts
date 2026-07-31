@@ -3,7 +3,7 @@
  * @description Reader Monad pattern for dependency injection
  */
 
-import { TaskEither } from "./task-either.ts";
+import { Either } from "./task-either.ts";import { TaskEither } from "./task-either.ts";
 
 /**
  * Reader monad for dependency injection

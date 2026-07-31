@@ -3,7 +3,7 @@
  * @description State Monad pattern for immutable state management
  */
 
-import { TaskEither } from "./task-either.ts";
+import { Either } from "./task-either.ts";import { TaskEither } from "./task-either.ts";
 
 /**
  * State monad represents a stateful computation that returns a value and a new state

@@ -3,7 +3,7 @@
  * @description Pipeline/Kleisli composition enhancement for readable functional pipelines
  */
 
-import { TaskEither } from "./task-either.ts";
+import { Either } from "./task-either.ts";import { TaskEither } from "./task-either.ts";
 
 /**
  * Pipeline builder for clean, readable sequential operations
