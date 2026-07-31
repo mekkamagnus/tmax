@@ -398,6 +398,22 @@ export function validateProtocolVersion(
   return null;
 }
 
+/** Build a JSON-RPC error response. `data` is included only when defined
+ *  (not undefined) — so null/false/0 survive (issue #14: guard with
+ *  `data !== undefined`, not truthiness). Non-exported. */
+function errorResponse(
+  id: string | number | null | undefined,
+  code: number,
+  message: string,
+  data?: unknown,
+): JSONRPCResponse {
+  return {
+    jsonrpc: '2.0',
+    id,
+    error: { code, message, ...(data !== undefined ? { data: data as JsonValue } : {}) },
+  };
+}
+
 /**
  * The full JSON-RPC protocol boundary (AC5.8). Performs:
  *   1. Version validation → `-32600` Invalid Request.
@@ -428,14 +444,7 @@ export async function routeRequest(
 ): Promise<JSONRPCResponse> {
   // 1. Version validation.
   if (request.jsonrpc !== '2.0') {
-    return {
-      jsonrpc: '2.0',
-      id: request.id,
-      error: {
-        code: -32600,
-        message: 'Invalid Request: JSON-RPC version must be 2.0',
-      },
-    };
+    return errorResponse(request.id, -32600, 'Invalid Request: JSON-RPC version must be 2.0');
   }
 
   // 1b. Protocol-version negotiation (RFC-025 #1 / SPEC-070). Refuses a
@@ -447,15 +456,7 @@ export async function routeRequest(
 
   // 2. Method lookup.
   if (!isRpcMethod(request.method)) {
-    return {
-      jsonrpc: '2.0',
-      id: request.id,
-      error: {
-        code: -32601,
-        message: `Method not found: ${request.method}`,
-        data: { method: request.method },
-      },
-    };
+    return errorResponse(request.id, -32601, `Method not found: ${request.method}`, { method: request.method });
   }
 
   const method: RpcMethodName = request.method;
@@ -465,26 +466,11 @@ export async function routeRequest(
     PARAM_GUARDS[method](request.params);
   } catch (guardError) {
     if (guardError instanceof RpcError) {
-      return {
-        jsonrpc: '2.0',
-        id: request.id,
-        error: {
-          code: guardError.code,
-          message: guardError.message,
-          ...(guardError.data !== undefined ? { data: guardError.data } : {}),
-        },
-      };
+      return errorResponse(request.id, guardError.code, guardError.message, guardError.data);
     }
     // A guard threw a non-RpcError — surface as -32602 with the message.
     const message = guardError instanceof Error ? guardError.message : String(guardError);
-    return {
-      jsonrpc: '2.0',
-      id: request.id,
-      error: {
-        code: -32602,
-        message: `Invalid params: ${message}`,
-      },
-    };
+    return errorResponse(request.id, -32602, `Invalid params: ${message}`);
   }
 
   // 4. Dispatch + 5. error mapping.
@@ -494,15 +480,7 @@ export async function routeRequest(
   if (!fn) {
     // Defensive: handler table is exhaustive over HANDLES, but a malformed
     // `handlers` object could miss an entry. Surface as -32601.
-    return {
-      jsonrpc: '2.0',
-      id: request.id,
-      error: {
-        code: -32601,
-        message: `Method not found: ${request.method}`,
-        data: { method: request.method },
-      },
-    };
+    return errorResponse(request.id, -32601, `Method not found: ${request.method}`, { method: request.method });
   }
   try {
     const result = await fn(request.params as RpcParams);
@@ -510,15 +488,7 @@ export async function routeRequest(
   } catch (error) {
     // RpcError passthrough (e.g. a handler that throws -32601-equivalent).
     if (error instanceof RpcError) {
-      return {
-        jsonrpc: '2.0',
-        id: request.id,
-        error: {
-          code: error.code,
-          message: error.message,
-          ...(error.data !== undefined ? { data: error.data } : {}),
-        },
-      };
+      return errorResponse(request.id, error.code, error.message, error.data);
     }
 
     // T-Lisp diagnostic-aware internal error (-32010, the existing contract).
@@ -542,14 +512,6 @@ export async function routeRequest(
       requestId: request.id,
     });
 
-    return {
-      jsonrpc: '2.0',
-      id: request.id,
-      error: {
-        code: -32010,
-        message: error instanceof Error ? error.message : 'Unknown error',
-        ...(diagnostic ? { data: diagnostic } : {}),
-      },
-    };
+    return errorResponse(request.id, -32010, error instanceof Error ? error.message : 'Unknown error', diagnostic);
   }
 }
