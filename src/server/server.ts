@@ -504,6 +504,11 @@ export class TmaxServer {
     return frame;
   }
 
+  /** Non-throwing frame lookup (issue #27). */
+  private getFrameOption(id: string): Frame | undefined {
+    return this.frames.get(id);
+  }
+
   /**
    * Resolve frame from params or fall back to active frame
    */
@@ -514,14 +519,13 @@ export class TmaxServer {
   }
 
   /**
-   * Non-throwing variant: returns undefined when no frame is active.
+   * Non-throwing variant: returns undefined when no frame is active (issue #27).
+   * Uses getFrameOption directly — no try/catch needed.
    */
   private resolveFrameOptional(params: FrameTarget): Frame | undefined {
-    try {
-      return this.resolveFrame(params);
-    } catch {
-      return undefined;
-    }
+    if (params?.frameId) return this.getFrameOption(params.frameId);
+    if (this.activeFrameId) return this.getFrameOption(this.activeFrameId);
+    return undefined;
   }
 
   /**
