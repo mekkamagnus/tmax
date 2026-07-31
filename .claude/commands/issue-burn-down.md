@@ -24,15 +24,18 @@ You can watch each issue's verify-gate live with `/workflows`.
    b. **Spec.** Ensure a spec with Goal + Completion Criteria exists in `docs/specs/` (create via `/bug` defect, `/feature` new behavior, or `/chore` refactor if missing). Behavior changes MUST be spec'd (precedent: BUG-30, CHORE-45).
    c. **Implement** against the spec IN THE WORKTREE, applying the codex comment's suggested fix/guard. Surgical; match existing style.
    d. **Verify-hard.** In the worktree run `bun run typecheck` + the spec's Validation Commands. Must be GREEN (run them yourself; paste real output).
-   e. **Verify-gate Workflow (Option 1).** Launch:
+   e. **Verify-gate Workflow (Option 1) — INLINE.** (`args` does NOT propagate via `scriptPath`, so launch inline.) Substitute this issue's values into the template (`<<SPEC>>` = spec path string, `<<BASE>>` = baseSha string, `<<ISSUE>>` = issue number, bare), then `Workflow({ script: <substituted JS> })`. Read-only; returns `{ verdict, gaps, summary }`.
+      ```js
+      export const meta = { name: 'verify-gate', phases: [{ title: 'Review' }, { title: 'Synthesize' }] }
+      const specPath = '<<SPEC>>', diffBase = '<<BASE>>', issue = <<ISSUE>>
+      const REVIEW = { type: 'object', additionalProperties: false, properties: { criteria: { type: 'array', items: { type: 'object', additionalProperties: false, properties: { criterion: { type: 'string' }, met: { type: 'boolean' }, note: { type: 'string' } }, required: ['criterion', 'met', 'note'] } }, concerns: { type: 'array', items: { type: 'string' } } }, required: ['criteria', 'concerns'] }
+      const RESULT = { type: 'object', additionalProperties: false, properties: { verdict: { type: 'string', enum: ['PASS', 'GAPS'] }, gaps: { type: 'array', items: { type: 'string' } }, summary: { type: 'string' } }, required: ['verdict', 'gaps', 'summary'] }
+      phase('Review')
+      const r = await agent('Adversarial verifier (tmax, TypeScript/Bun). READ-ONLY: do not edit. (1) Read the spec at ' + specPath + ' — especially its Completion Criteria. (2) Run `git diff ' + diffBase + '` to see the implementation. (3) Fetch the issue comments with `gh api repos/mekkamagnus/tmax/issues/' + issue + '/comments` and use the one whose body contains "Codex review". Then for EACH completion criterion decide met=true/false with a one-line note citing the diff; list concrete concerns (behavior-preservation vs the codex note, regressions, edge-cases). Be skeptical; flag a gap when a criterion is not clearly met.', { label: 'verify', phase: 'Review', schema: REVIEW, effort: 'high' })
+      const gaps = ((r && r.criteria) || []).filter((c) => !c.met).map((c) => c.criterion + ' - ' + c.note).concat((r && r.concerns) || [])
+      phase('Synthesize')
+      return await agent('Verify-gate synthesizer (tmax uses bun). The caller already ran typecheck + tests GREEN; focus ONLY on whether the diff satisfies the spec criteria and honors the codex review. Gaps: ' + JSON.stringify(gaps) + '. Return verdict PASS if there are NO gaps (every criterion met, no real regression). Otherwise GAPS with the list.', { label: 'synthesize', phase: 'Synthesize', schema: RESULT, effort: 'medium' }) || { verdict: 'GAPS', gaps: ['no verdict'], summary: 'none' }
       ```
-      Workflow({ scriptPath: '.claude/workflows/verify-against-spec.wf.js',
-                 args: { specPath: '<spec path>', diffBase: '<baseSha>',
-                         codexNote: '<the issue's codex-review comment text>', tier } })
-      ```
-      - `tier: 'full'` for `codex-concerns` / behavior-change / >5-file changes.
-      - `tier: 'light'` for trivial `codex-approved` single-file dedups.
-      - Returns `{ verdict: 'PASS' | 'GAPS', gaps: [...], summary }`.
    f. **DECIDE.**
       - typecheck+tests GREEN **AND** verdict `PASS` → write ADR (`docs/adrs/ADR-NNNN-<slug>.md` + one line in `docs/adrs/index.md`, next free number) and **commit** (code+spec+ADR together, conventional-commit message, `Co-Authored-By: Claude <noreply@anthropic.com>`) IN THE WORKTREE.
       - verdict `GAPS` → feed the gaps back, reimplement, re-run verify-gate (max 2 retries). Still `GAPS` → label the issue `blocked` (with the gaps), discard the worktree, move on.
