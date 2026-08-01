@@ -51,6 +51,13 @@ export class RemoteEditor {
     return this._clientId;
   }
 
+  /** False once the daemon socket has dropped (close/error) — the TUI checks
+   *  this to render a disconnect banner and quit locally instead of freezing.
+   *  BUG-36 / #54. */
+  get isConnected(): boolean {
+    return this.socket !== null;
+  }
+
   async sendEvent(event: string, params: Record<string, unknown> = {}): Promise<void> {
     await this.sendRequest("client-event", {
       event,
@@ -87,13 +94,22 @@ export class RemoteEditor {
 
   private connect(): Promise<void> {
     return new Promise((resolve, reject) => {
-      this.socket = new Socket();
-      this.socket.on("data", (data: Buffer) => this.onData(data));
-      this.socket.on("close", () => this.rejectAllPending(new Error("Socket closed")));
-      this.socket.on("error", (err) => this.rejectAllPending(err));
-      this.socket.connect(this.socketPath, () => resolve());
+      const socket = new Socket();
+      this.socket = socket;
+      socket.on("data", (data: Buffer) => this.onData(data));
+      // Null the socket on close/error so later sendRequest calls fail FAST via
+      // the !this.socket guard (was: wrote to the dead socket and waited 30s).
+      // Identity-guard: only null if this is still the active socket, so a stale
+      // close/error cannot clobber a newer reconnect. BUG-36 / #54.
+      const onLost = (reason: Error): void => {
+        if (this.socket === socket) this.socket = null;
+        this.rejectAllPending(reason);
+      };
+      socket.on("close", () => onLost(new Error("Socket closed")));
+      socket.on("error", (err) => onLost(err));
+      socket.connect(this.socketPath, () => resolve());
       // Reject connect on error before connection established
-      this.socket.once("error", reject);
+      socket.once("error", reject);
     });
   }
 

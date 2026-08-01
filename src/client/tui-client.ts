@@ -99,6 +99,12 @@ function render(state: EditorState) {
   }
 }
 
+/** Render the last cached state with a disconnect banner — NO daemon round-trip
+ *  (the socket is gone). Used when the daemon drops (BUG-36 / #54). */
+function renderDisconnected(state: EditorState): void {
+  render({ ...state, statusMessage: "daemon disconnected — press q or Esc to quit" });
+}
+
 async function main() {
   const args = process.argv.slice(2);
 
@@ -160,6 +166,7 @@ Requires a running tmax daemon. Start one with:
 
   // Initial render
   let lastState = remote.getEditorState();
+  let disconnected = false;  // set when the daemon socket drops (BUG-36 / #54)
   try {
     render(lastState);
     await remote.sendEvent("first-render", { terminalSize: getDims() });
@@ -187,8 +194,13 @@ Requires a running tmax daemon. Start one with:
         await remote.sendEvent("render", { terminalSize: getDims() });
       }
     } catch (error) {
-      await remote.sendEvent("error", { message: String(error), phase: "render-poll" }).catch(() => undefined);
-      // Daemon unreachable — ignore, will show on next keypress
+      // Daemon socket dropped: surface a visible banner. The socket is nulled
+      // on close (BUG-36), so refreshState now rejects FAST instead of hanging
+      // 30s. Do NOT round-trip an error event — the socket is dead. #54.
+      if (!remote.isConnected && !disconnected) {
+        disconnected = true;
+        renderDisconnected(lastState);
+      }
     }
   }, 200);
 
@@ -199,6 +211,15 @@ Requires a running tmax daemon. Start one with:
       const tokens = tokenizeTerminalInput(chunk, pendingInput);
       pendingInput = tokens.pending;
       for (const key of tokens.keys) {
+        // Daemon gone: quit LOCALLY on q / Esc (no round-trip to a dead socket).
+        // BUG-36 / #54.
+        if (disconnected) {
+          if (key === "q" || key === "\x1b") {
+            cleanup();
+            process.exit(0);
+          }
+          continue;
+        }
         const state = await remote.handleKey(key);
         lastState = state;
         render(state);
@@ -209,8 +230,15 @@ Requires a running tmax daemon. Start one with:
         cleanup();
         process.exit(0);
       }
-      await remote.sendEvent("error", { message: String(error), phase: "keypress" }).catch(() => undefined);
-      render({ ...remote.getEditorState(), statusMessage: `Error: ${String(error)}` } as EditorState);
+      if (!remote.isConnected) {
+        // A keypress hit the dead socket before the poll noticed — mark
+        // disconnected so the next key quits locally. BUG-36 / #54.
+        disconnected = true;
+        renderDisconnected(remote.getEditorState());
+      } else {
+        await remote.sendEvent("error", { message: String(error), phase: "keypress" }).catch(() => undefined);
+        render({ ...remote.getEditorState(), statusMessage: `Error: ${String(error)}` } as EditorState);
+      }
     }
   });
 
