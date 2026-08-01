@@ -37,28 +37,38 @@ function normalize(result: Either<EvalError, TLispValue>): { ok: boolean; value:
   return { ok: true, value: result.right, code: null, variant: null, message: null };
 }
 
-const cases: { name: string; source: string }[] = [
-  { name: "literal number", source: "42" },
-  { name: "literal string", source: '"hello"' },
-  { name: "literal boolean true", source: "t" },
-  { name: "literal nil", source: "nil" },
-  { name: "arithmetic", source: "(+ 1 2 3)" },
-  { name: "symbol lookup", source: "(let ((x 7)) x)" },
-  { name: "quote", source: "(quote (1 2 3))" },
-  { name: "quasiquote", source: "`(1 ,(+ 1 1) 3)" },
-  { name: "if true", source: "(if t 1 2)" },
-  { name: "if false", source: "(if nil 1 2)" },
-  { name: "let", source: "(let ((a 1) (b 2)) (+ a b))" },
-  { name: "let*", source: "(let* ((a 1) (b (+ a 1))) b)" },
-  { name: "cond", source: "(cond (nil 1) (t 2))" },
-  { name: "progn", source: "(progn 1 2 3)" },
-  { name: "and short-circuit", source: "(and 1 2 nil)" },
-  { name: "or", source: "(or nil nil 5)" },
-  { name: "while + dolist", source: "(progn (defvar acc 0) (dolist (x (quote (1 2 3))) (setq acc (+ acc x))) acc)" },
-  { name: "user function", source: "(progn (defun dbl (n) (+ n n)) (dbl 21))" },
-  { name: "macro", source: "(progn (defmacro unless (c body) `(if ,c nil ,body)) (unless nil 99))" },
-  { name: "error: undefined symbol", source: "(undefined-thing-xyz)" },
-  { name: "error: arity", source: "(+ 1)" },
+/** Unwrap a TLispValue to a plain JS value for correctness comparison (#48 / BUG-42):
+ *  lists recurse, nil -> null, scalars -> their .value. */
+function unwrap(v: TLispValue): unknown {
+  if (v.type === "list") return (v.value as TLispValue[]).map(unwrap);
+  if (v.type === "nil") return null;
+  if (v.type === "symbol") return { symbol: (v.value as { name?: string }).name ?? String(v.value) };
+  return v.value;
+}
+
+const cases: { name: string; source: string; expected?: unknown; expectedError?: boolean }[] = [
+  { name: "literal number", source: "42", expected: 42 },
+  { name: "literal string", source: '"hello"', expected: "hello" },
+  { name: "literal boolean true", source: "t", expected: true },
+  { name: "literal nil", source: "nil", expected: null },
+  { name: "arithmetic", source: "(+ 1 2 3)", expected: 6 },
+  { name: "symbol lookup", source: "(let ((x 7)) x)", expected: 7 },
+  { name: "quote", source: "(quote (1 2 3))", expected: [1, 2, 3] },
+  { name: "quasiquote", source: "`(1 ,(+ 1 1) 3)", expected: [1, 2, 3] },
+  { name: "if true", source: "(if t 1 2)", expected: 1 },
+  { name: "if false", source: "(if nil 1 2)", expected: 2 },
+  { name: "let", source: "(let ((a 1) (b 2)) (+ a b))", expected: 3 },
+  { name: "let*", source: "(let* ((a 1) (b (+ a 1))) b)", expected: 2 },
+  { name: "cond", source: "(cond (nil 1) (t 2))", expected: 2 },
+  { name: "progn", source: "(progn 1 2 3)", expected: 3 },
+  { name: "and short-circuit", source: "(and 1 2 nil)", expected: null },
+  { name: "or", source: "(or nil nil 5)", expected: 5 },
+  { name: "dolist accumulator (setq)", source: "(progn (defvar acc 0) (dolist (x (quote (1 2 3))) (setq acc (+ acc x))) acc)", expected: 6 },
+  { name: "while accumulator (setq)", source: "(progn (defvar i 0) (defvar sum 0) (while (< i 3) (setq sum (+ sum 1)) (setq i (+ i 1))) sum)", expected: 3 },
+  { name: "user function", source: "(progn (defun dbl (n) (+ n n)) (dbl 21))", expected: 42 },
+  { name: "macro", source: "(progn (defmacro unless (c body) `(if ,c nil ,body)) (unless nil 99))", expected: 99 },
+  { name: "error: undefined symbol", source: "(undefined-thing-xyz)", expectedError: true },
+  { name: "error: non-numeric +", source: '(+ "a" 1)', expectedError: true },
 ];
 
 describe("CHORE-44 Change 4 — sync/async evaluator parity", () => {
@@ -68,6 +78,20 @@ describe("CHORE-44 Change 4 — sync/async evaluator parity", () => {
       const async_ = new TLispInterpreterImpl();
       const syncResult = normalize(sync.execute(c.source));
       const asyncResult = normalize(await async_.executeAsync(c.source));
+
+      // Correctness oracle (BUG-42 / #48): assert the RIGHT value, not just
+      // sync==async agreement. An agreed-but-wrong result now fails the suite.
+      if (c.expectedError) {
+        expect(syncResult.ok).toBe(false);
+        expect(asyncResult.ok).toBe(false);
+      } else if (c.expected !== undefined) {
+        expect(syncResult.ok).toBe(true);
+        expect(asyncResult.ok).toBe(true);
+        expect(unwrap(syncResult.value!)).toEqual(c.expected);
+        expect(unwrap(asyncResult.value!)).toEqual(c.expected);
+      }
+
+      // Parity (unchanged): sync + async agree on ok + value + error category.
       expect(asyncResult.ok).toBe(syncResult.ok);
       if (syncResult.ok && asyncResult.ok && syncResult.value && asyncResult.value) {
         expect(equalValue(syncResult.value, asyncResult.value)).toBe(true);
