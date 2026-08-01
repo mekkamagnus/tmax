@@ -82,12 +82,28 @@ export function createEditingHandlers(ctx: ServerContext): {
         content = '';
       }
 
+      // Reset cursor/viewport to origin BEFORE createBuffer so createBuffer's
+      // window-sync copies the origin cursor (not the stale prior-buffer one),
+      // then again after with the filename/status. Without this, the first
+      // insert after open targets the stale line and throws
+      // 'Line N is out of bounds'. #55 / BUG-37.
+      const ORIGIN_CURSOR = { line: 0, column: 0 };
+      ctx.editor.setEditorState({
+        ...ctx.editor.getState(),
+        cursorPosition: ORIGIN_CURSOR,
+        viewportTop: 0,
+        viewportLeft: 0,
+      });
+
       ctx.editor.createBuffer(filepath, content);
       const currentState = ctx.editor.getState();
       const newState = {
         ...currentState,
         currentFilename: filepath,
         statusMessage: `Opened ${filepath}`,
+        cursorPosition: ORIGIN_CURSOR,
+        viewportTop: 0,
+        viewportLeft: 0,
       };
 
       ctx.editor.setEditorState(newState);
