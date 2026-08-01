@@ -344,7 +344,13 @@ function realPs(): PsEntry[] {
 }
 
 function realCanonicalPids(uid: number): Set<number> {
-  const res = spawnSync('lsof', ['-t', '-U', canonicalSocket(uid)], { encoding: 'utf8' });
+  // macOS lsof ORs selectors by default: `-U <path>` returns every process
+  // holding ANY unix socket (~170 pids), not just the one at <path>. The `-a`
+  // flag ANDs them: (unix socket) AND (at this path) — so only the canonical
+  // daemon's pid is returned. Without -a, classifyLiveDaemon mislabels every
+  // live tmax daemon as 'canonical-live', and sweep fails to reap orphans.
+  // #57 / BUG-46.
+  const res = spawnSync('lsof', ['-t', '-a', '-U', canonicalSocket(uid)], { encoding: 'utf8' });
   if (res.error || res.status !== 0 || !res.stdout?.trim()) return new Set();
   return new Set(
     res.stdout
