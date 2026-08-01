@@ -57,6 +57,28 @@ export function createEditingHandlers(ctx: ServerContext): {
     return { success: true, saved: filename };
   };
 
+  // ── withWorkspaceOverride HOF (#16) ─────────────────────────────────────
+  // Extracts the common resolve/activate/restore scaffolding from the
+  // open/eval/insert/command handlers. Uses try/finally (NOT bracket — these
+  // handlers propagate restore errors; bracket swallows them).
+  // "Accept the relax": activate errors propagate raw (not wrapped in
+  // handler-specific error messages) — a codex-acknowledged behavior change.
+  async function withWorkspaceOverride<T>(
+    params: { frameId?: string; workspaceId?: string },
+    body: (frame: ReturnType<typeof ctx.resolveFrameOptional>, workspaceOverride: boolean) => Promise<T>,
+  ): Promise<T> {
+    const frame = ctx.resolveFrameOptional(params);
+    const workspaceOverride = ctx.isWorkspaceOverride(frame, params?.workspaceId);
+    const previousWorkspaceId = ctx.getActiveWorkspaceId();
+    const previousFrameId = ctx.getActiveFrameId();
+    try {
+      await ctx.activateFrameWorkspace(frame, params?.workspaceId);
+      return await body(frame, workspaceOverride);
+    } finally {
+      await ctx.restoreWorkspaceAfterOverride(workspaceOverride, previousWorkspaceId, previousFrameId);
+    }
+  }
+
   // ── open ────────────────────────────────────────────────────────────────
   const open = async (params: OpenParams): Promise<OpenResult> => {
     const filepath = params.filepath;
@@ -65,14 +87,7 @@ export function createEditingHandlers(ctx: ServerContext): {
       throw new Error('Filepath is required');
     }
 
-    const frame = ctx.resolveFrameOptional(params);
-    const workspaceOverride = ctx.isWorkspaceOverride(frame, params?.workspaceId);
-    const previousWorkspaceId = ctx.getActiveWorkspaceId();
-    const previousFrameId = ctx.getActiveFrameId();
-
-    try {
-      await ctx.activateFrameWorkspace(frame, params?.workspaceId);
-
+    return withWorkspaceOverride(params, async (frame, workspaceOverride) => {
       // Load the file content
       let content = '';
       try {
@@ -115,9 +130,7 @@ export function createEditingHandlers(ctx: ServerContext): {
       if (frame && !workspaceOverride) ctx.syncEditorToFrame(frame); else ctx.syncEditorToAllFrames();
 
       return { buffer: filepath, line: 1, column: 1, opened: true };
-    } finally {
-      await ctx.restoreWorkspaceAfterOverride(workspaceOverride, previousWorkspaceId, previousFrameId);
-    }
+    });
   };
 
   // ── eval ────────────────────────────────────────────────────────────────
@@ -128,13 +141,8 @@ export function createEditingHandlers(ctx: ServerContext): {
       throw new Error('Code is required for eval');
     }
 
-    const frame = ctx.resolveFrameOptional(params);
-    const workspaceOverride = ctx.isWorkspaceOverride(frame, params?.workspaceId);
-    const previousWorkspaceId = ctx.getActiveWorkspaceId();
-    const previousFrameId = ctx.getActiveFrameId();
-
-    try {
-      await ctx.activateFrameWorkspace(frame, params?.workspaceId);
+    return withWorkspaceOverride(params, async (frame, workspaceOverride) => {
+      try {
       if (frame && !workspaceOverride) {
         ctx.syncFrameToEditor(frame);
       }
@@ -170,9 +178,8 @@ export function createEditingHandlers(ctx: ServerContext): {
     } catch (error) {
       if ((error as Error & { diagnostic?: unknown }).diagnostic) throw error;
       throw new Error(`T-Lisp evaluation error: ${error instanceof Error ? error.message : 'Unknown error'}`);
-    } finally {
-      await ctx.restoreWorkspaceAfterOverride(workspaceOverride, previousWorkspaceId, previousFrameId);
     }
+    });
   };
 
   // ── insert ──────────────────────────────────────────────────────────────
@@ -183,37 +190,31 @@ export function createEditingHandlers(ctx: ServerContext): {
       throw new Error('Text is required for insert');
     }
 
-    const frame = ctx.resolveFrameOptional(params);
-    const workspaceOverride = ctx.isWorkspaceOverride(frame, params?.workspaceId);
-    const previousWorkspaceId = ctx.getActiveWorkspaceId();
-    const previousFrameId = ctx.getActiveFrameId();
+    return withWorkspaceOverride(params, async (frame, workspaceOverride) => {
+      try {
+        if (frame && !workspaceOverride) ctx.syncFrameToEditor(frame);
 
-    try {
-      await ctx.activateFrameWorkspace(frame, params?.workspaceId);
-      if (frame && !workspaceOverride) ctx.syncFrameToEditor(frame);
+        const interpreter = ctx.editor.getInterpreter();
+        const escaped = text
+          .replace(/\\/g, '\\\\')
+          .replace(/\n/g, '\\n')
+          .replace(/\r/g, '\\r')
+          .replace(/\t/g, '\\t')
+          .replace(/"/g, '\\"');
+        const result = interpreter.execute(`(buffer-insert "${escaped}")`);
+        if (Either.isLeft(result)) {
+          throw new Error(result.left.message || 'T-Lisp evaluation error');
+        }
 
-      const interpreter = ctx.editor.getInterpreter();
-      const escaped = text
-        .replace(/\\/g, '\\\\')
-        .replace(/\n/g, '\\n')
-        .replace(/\r/g, '\\r')
-        .replace(/\t/g, '\\t')
-        .replace(/"/g, '\\"');
-      const result = interpreter.execute(`(buffer-insert "${escaped}")`);
-      if (Either.isLeft(result)) {
-        throw new Error(result.left.message || 'T-Lisp evaluation error');
+        ctx.captureActiveWorkspace();
+        ctx.scheduleDirtyWorkspaceSave(ctx.getActiveWorkspaceId());
+        if (frame && !workspaceOverride) ctx.syncEditorToFrame(frame); else ctx.syncEditorToAllFrames();
+
+        return ctx.tlispValueToJson(result.right);
+      } catch (error) {
+        throw new Error(`Insert error: ${error instanceof Error ? error.message : 'Unknown error'}`);
       }
-
-      ctx.captureActiveWorkspace();
-      ctx.scheduleDirtyWorkspaceSave(ctx.getActiveWorkspaceId());
-      if (frame && !workspaceOverride) ctx.syncEditorToFrame(frame); else ctx.syncEditorToAllFrames();
-
-      return ctx.tlispValueToJson(result.right);
-    } catch (error) {
-      throw new Error(`Insert error: ${error instanceof Error ? error.message : 'Unknown error'}`);
-    } finally {
-      await ctx.restoreWorkspaceAfterOverride(workspaceOverride, previousWorkspaceId, previousFrameId);
-    }
+    });
   };
 
   // ── keypress ────────────────────────────────────────────────────────────
@@ -276,14 +277,7 @@ export function createEditingHandlers(ctx: ServerContext): {
       throw new Error('Command is required');
     }
 
-    const frame = ctx.resolveFrameOptional(params);
-    const workspaceOverride = ctx.isWorkspaceOverride(frame, params?.workspaceId);
-    const previousWorkspaceId = ctx.getActiveWorkspaceId();
-    const previousFrameId = ctx.getActiveFrameId();
-
-    try {
-      await ctx.activateFrameWorkspace(frame, params?.workspaceId);
-
+    return withWorkspaceOverride(params, async (frame, workspaceOverride) => {
       // Read-only commands don't need frame sync
       switch (cmd) {
       case 'list-buffers': {
@@ -355,9 +349,7 @@ export function createEditingHandlers(ctx: ServerContext): {
       default:
         throw new Error(`Unknown command: ${cmd}`);
       }
-    } finally {
-      await ctx.restoreWorkspaceAfterOverride(workspaceOverride, previousWorkspaceId, previousFrameId);
-    }
+    });
   };
 
   // ── query ───────────────────────────────────────────────────────────────

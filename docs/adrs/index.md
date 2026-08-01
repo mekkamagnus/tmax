@@ -27,6 +27,7 @@ Ordered most-recent first (highest ADR number = most recent decision). Topic gro
 | [ADR-0159-sweep-macos-lsof-a.md](ADR-0159-sweep-macos-lsof-a.md) | #57 / BUG-46: `sweep` adds the `-a` AND-selector to `lsof -t -U` → `lsof -t -a -U` — macOS `lsof` was ORing selectors (155 false-positive pids) so every tmax daemon was misclassified canonical-live and orphans were never reaped | #57, [BUG-46](../specs/BUG-46-sweep-macos-lsof.md) |
 | [ADR-0160-clean-start.md](ADR-0160-clean-start.md) | #58 / BUG-47: `--clean` flag — skip workspace restore + land on `*scratch*` (was inheriting 50+ leaked buffers on every daemon start); restore-by-default unchanged, `--clean` opt-in | #58, [BUG-47](../specs/BUG-47-clean-start.md) |
 | [ADR-0161-malformed-init-feedback.md](ADR-0161-malformed-init-feedback.md) | #59 / BUG-48: malformed `init.tlisp` surfaces a status-line error (`setStatusMessage`) instead of being silently swallowed; the "Loaded" log only fires on success | #59, [BUG-48](../specs/BUG-48-malformed-init-feedback.md) |
+| [ADR-0162-workspace-override-hof.md](ADR-0162-workspace-override-hof.md) | #16 / CHORE-68: `withWorkspaceOverride` HOF extracts the common prologue/epilogue from 4 editing handlers (open/eval/insert/command); try/finally (not bracket); accept the relax (activate errors propagate raw) | #16, [CHORE-68](../specs/CHORE-68-workspace-override-hof.md) |
 
 ## Recent — Test-helper consolidation (ADR 0122)
 
