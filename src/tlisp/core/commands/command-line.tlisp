@@ -51,14 +51,18 @@ substitute/Dired/execute policy."
       ((string-match "^%s/(.+)/(.*)/([gic]*)$" line)
        (let ((find (match-string 1))
              (replace (match-string 2)))
+         (undo-begin)
          (replace-state-init (or find "") (or replace "") (replace-find-matches (or find "")))
-         (replace-apply-all)))
+         (replace-apply-all)
+         (undo-commit "substitute")))
       ;; :s/find/replace/  — whole-buffer replace, applied immediately.
       ((string-match "^s/(.+)/(.*)/?$" line)
        (let ((find (match-string 1))
              (replace (match-string 2)))
+         (undo-begin)
          (replace-state-init (or find "") (or replace "") (replace-find-matches (or find "")))
-         (replace-apply-all)))
+         (replace-apply-all)
+         (undo-commit "substitute")))
       ;; :w / :w!  — write the current buffer to its file (vim :w). The bare
       ;; command names w/q/wq are not T-Lisp symbols, so the eval fallthrough
       ;; below would error on them; handle them explicitly here.
