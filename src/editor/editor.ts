@@ -2286,6 +2286,46 @@ export class Editor {
   }
 
   /**
+   * The SINGLE shared post-read setup for a file buffer: create the buffer,
+   * bind the filename on the model, and record it in `bufferMetadata` (so
+   * `buffer-insert`'s `currentFilename` re-derivation and `save-buffer` /
+   * `(buffer-filename)` all resolve). Both `openFile` (daemon RPC) and
+   * `openOrCreateFile` (CLI bootstrap) route through here, so the
+   * filename→buffer association has ONE definition, not two (CHORE-69 / #80 —
+   * the "two truths" that let BUG-58 drift). Does NOT activate the major mode
+   * — callers do that once core bindings are loaded. BUG-58.
+   */
+  private attachFileBuffer(filename: string, content: string): void {
+    this.createBuffer(filename, content);
+    this.applyUpdate({ type: "SetCurrentFilename", filename });
+    this.associateBufferFilename(filename);
+  }
+
+  /**
+   * Open-or-create a file for the CLI bootstrap (`tmax file.md`): read the
+   * file; on success load its content, on ENOENT create an empty "new file"
+   * buffer. Either way the buffer is attached via the shared `attachFileBuffer`
+   * (so the filename is recorded in metadata and `:w` works). Unlike
+   * `openFile`, a missing file is NOT an error — CLI startup creates a buffer
+   * for it. Returns the resolved content and whether the file was new.
+   * Major-mode activation is the caller's responsibility (core bindings may not
+   * be loaded yet at bootstrap). CHORE-69 / #80.
+   */
+  async openOrCreateFile(filename: string): Promise<{ content: string; isNew: boolean }> {
+    let content = "";
+    let isNew = false;
+    try {
+      content = await this.filesystem.readFile(filename);
+    } catch {
+      // ENOENT (or unreadable) — treat as a new file the user is creating.
+      isNew = true;
+      content = "";
+    }
+    this.attachFileBuffer(filename, content);
+    return { content, isNew };
+  }
+
+  /**
    * Open a file (CHORE-42: the read is dispatched as an owner-`'openFile'`
    * `OpenFile` Cmd through the live effect layer; the public contract is
    * unchanged — a failed read updates status/logs, leaves the previous buffer
@@ -2304,11 +2344,8 @@ export class Editor {
       return;
     }
     const content = outcome.content ?? "";
-    this.createBuffer(filename, content);
-    // Track the filename for save operations
-    this.applyUpdate({ type: "SetCurrentFilename", filename });
-    const name = this.findBufferName(this.model.currentBuffer);
-    if (name) this.updateBufferMetadata(name, { filename, modified: false });
+    // Shared buffer+filename setup (CHORE-69 / #80 — single source of truth).
+    this.attachFileBuffer(filename, content);
 
     // Notify LSP client about file open (US-3.1.1)
     await this.lspClient.onFileOpen(filename, content);

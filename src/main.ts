@@ -187,71 +187,35 @@ Examples:
     }
   });
 
-  // CHORE-44 Change 10 (AC10.4): one initial model path for empty,
-  // existing-file, and new-file cases. We no longer construct an EditorState
-  // object literal — instead the three cases differ only in
-  // (bufferName, filename, content, status), and we route the result through
-  // the model API (createBuffer + applyUpdate) exactly as `openFile` does.
-  // Buffer naming, status text, and filename binding match the prior path.
-  let bufferName: string;
+  // CHORE-44 Change 10 (AC10.4) + CHORE-69 / #80: the file-open bootstrap now
+  // routes through the Editor-owned `openOrCreateFile`, which shares the SAME
+  // buffer+filename setup (`attachFileBuffer`) as the daemon `open` RPC. This
+  // eliminates the "two file-open paths" drift that let BUG-58 slip through.
+  // The CLI differs from the daemon only in that a missing file creates a new
+  // buffer instead of erroring (openFile leaves the previous buffer intact).
   let filename: string | undefined;
-  let content = "";
   let statusMessage = "";
 
-  // Phase 4: Load file if specified
+  // Phase 4: Load (or create) the file if specified.
   if (fileArgs.length > 0) {
     filename = fileArgs[0]!;
-    bufferName = filename;
-    try {
-      startupLog.info(`Loading file: ${filename}`, {
-        correlationId: startupId,
-        metadata: { phase: 'load-file', filename }
-      });
-      content = await filesystem.readFile(filename);
-      statusMessage = `Loaded ${filename}`;
-      startupLog.info('File loaded successfully', {
-        correlationId: startupId,
-        data: { filename, bufferSize: content.length }
-      });
-    } catch (error) {
-      // File doesn't exist or can't be read - create new buffer
-      startupLog.info(`Creating new file: ${filename}`, {
-        correlationId: startupId,
-        metadata: { phase: 'new-file', filename }
-      });
-      content = "";
-      statusMessage = `New file: ${filename}`;
-      startupLog.debug('New buffer created', {
-        correlationId: startupId,
-        data: { filename }
-      });
-    }
+    const { isNew } = await editor.openOrCreateFile(filename);
+    statusMessage = isNew ? `New file: ${filename}` : `Loaded ${filename}`;
+    startupLog.info(isNew ? `Creating new file: ${filename}` : `Loaded ${filename}`, {
+      correlationId: startupId,
+      metadata: { phase: isNew ? 'new-file' : 'load-file', filename }
+    });
   } else {
     // No file specified - start with the *scratch* buffer
     startupLog.info('No file specified - starting with empty buffer', {
       correlationId: startupId,
       metadata: { phase: 'empty-buffer' }
     });
-    bufferName = '*scratch*';
+    editor.createBuffer('*scratch*', "");
     filename = undefined;
-    content = "";
     statusMessage = '';
   }
 
-  // Route the bootstrap through the model API. `createBuffer` sets
-  // currentBuffer, seeds windows, registers default buffer metadata, and (for
-  // the first buffer) initializes the mode to 'normal'. We then attach the
-  // filename on the model (consulted by `saveFile`) and the status text. The
-  // buffer name equals the filename, so per-buffer metadata lookups naturally
-  // resolve; no manual metadata binding is needed.
-  editor.createBuffer(bufferName, content);
-  if (filename !== undefined) {
-    editor.applyUpdate({ type: "SetCurrentFilename", filename });
-    // Record the filename in bufferMetadata so save-buffer / buffer-filename
-    // resolve correctly. Without this, the first buffer-insert re-derives
-    // currentFilename from the (absent) metadata and wipes it. BUG-58.
-    editor.associateBufferFilename(filename);
-  }
   if (statusMessage) {
     editor.applyUpdate({ type: "SetStatusMessage", message: statusMessage });
   }
