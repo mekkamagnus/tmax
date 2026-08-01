@@ -121,6 +121,9 @@ export class TmaxServer {
   private server: Server;
   private socketPath: string;
   private editor: Editor;
+  /** Custom init file path (--init-file), threaded to loadInitFilePublic in
+   *  startEditor so the daemon honors it (was hardcoded undefined -> default). #56/BUG-38. */
+  private initFilePath?: string;
   private clients: Map<string, ClientConnection>;
   private frames: Map<string, Frame> = new Map();
   private workspaces: Map<string, WorkspaceState> = new Map();
@@ -144,11 +147,12 @@ export class TmaxServer {
 	  private maxDirtyIntervalMs: number;
 	  private lastWorkspaceFile: string;
 
-  constructor(socketPath?: string, testMode: boolean = false, editor?: Editor) {
+  constructor(socketPath?: string, testMode: boolean = false, editor?: Editor, initFilePath?: string) {
     this.socketPath = socketPath || this.getDefaultSocketPath();
     this.server = createServer();
     this.clients = new Map();
     this.testMode = testMode;
+    this.initFilePath = initFilePath;
 	    this.workspaceManager = new WorkspaceManager();
 	    this.autoSaveIntervalMs = Number(process.env.TMAX_WORKSPACE_AUTOSAVE_MS ?? 30_000);
 	    this.debounceSaveMs = Number(process.env.TMAX_WORKSPACE_DEBOUNCE_MS ?? 5_000);
@@ -891,7 +895,7 @@ export class TmaxServer {
     await this.initializeWorkspaces();
 
     await this.editor.ensureCoreBindingsLoadedPublic();
-    await this.editor.loadInitFilePublic(undefined);
+    await this.editor.loadInitFilePublic(this.initFilePath);
     this.registerWorkspaceBuiltins();
 
     // I1: auto-save timer — save dirty workspaces every 30s
@@ -1601,7 +1605,13 @@ export class TmaxServer {
 
 // Main entry point when run directly
 if (import.meta.main) {
-  const server = new TmaxServer(process.env.TMAX_SOCKET);
+  // Honor --init-file when server.ts is the entry (e.g. bin/tmax ensure_daemon
+  // runs `bun src/server/server.ts`); threaded to loadInitFilePublic via the
+  // TmaxServer initFilePath ctor arg. #56 / BUG-38.
+  const argv = process.argv.slice(2);
+  const initIdx = argv.indexOf("--init-file");
+  const initFilePath = initIdx !== -1 ? argv[initIdx + 1] : undefined;
+  const server = new TmaxServer(process.env.TMAX_SOCKET, false, undefined, initFilePath);
   server.start().catch((err) => {
     console.error('Failed to start server:', err);
     process.exit(1);

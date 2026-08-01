@@ -129,7 +129,7 @@ Examples:
     });
 
     console.log('Starting tmax server daemon...');
-    const server = new TmaxServer();
+    const server = new TmaxServer(undefined, false, undefined, initFilePath);
     try {
       await server.start();
 
@@ -264,7 +264,7 @@ Examples:
   });
 
   // Phase 5a: Start embedded socket server (Emacs-style server-start)
-  const server = new TmaxServer(undefined, false, editor);
+  const server = new TmaxServer(undefined, false, editor, initFilePath);
   try {
     await server.startEditor();
 

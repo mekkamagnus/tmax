@@ -26,6 +26,7 @@ Options:
   --workspaces   List workspaces
   --workspace-kill NAME  Delete a workspace
   -e EXPR        Evaluate T-Lisp expression (like emacsclient -e)
+  --init-file FILE  Use custom init file (default: ~/.config/tmax/init.tlisp)
   --stop         Stop the running daemon
   --sweep        List orphaned tmax daemons + stale sockets (dry-run)
   --sweep --apply  Reap orphans (SIGTERM→SIGKILL) + remove stale sockets/locks
@@ -94,8 +95,11 @@ ensure_daemon() {
   # ensure_daemon under `set -e` and locking out ALL tmax use. #53 / BUG-35.
   daemon_log=$(mktemp /tmp/tmax-daemon-start.XXXXXX)
 
-  # Start daemon in background (from project root so relative paths resolve)
-  (cd "$PROJECT_DIR" && TMAX_SOCKET="$SOCKET" bun "$DAEMON" >"$daemon_log" 2>&1) &
+  # Start daemon in background (from project root so relative paths resolve).
+  # Forward --init-file so the daemon honors the custom config. #56 / BUG-38.
+  local daemon_args=("$DAEMON")
+  if [ -n "$INIT_FILE" ]; then daemon_args+=(--init-file "$INIT_FILE"); fi
+  (cd "$PROJECT_DIR" && TMAX_SOCKET="$SOCKET" bun "${daemon_args[@]}" >"$daemon_log" 2>&1) &
   local daemon_pid=$!
 
   # Wait for socket
@@ -129,6 +133,7 @@ WORKSPACE_KILL=""
 TEST_MODE=false
 TEST_JSON=false
 TEST_TARGET=""
+INIT_FILE=""
 FILES=()
 
 for arg in "$@"; do
@@ -139,6 +144,7 @@ for arg in "$@"; do
     --workspaces)   WORKSPACES=true ;;
     --workspace-kill) shift_mode=workspace_kill ;;
     -e)             shift_mode=eval ;;
+    --init-file)    shift_mode=init_file ;;
     --stop)         STOP=true ;;
     --sweep)        SWEEP=true ;;
     --apply)        SWEEP_APPLY=true ;;
@@ -159,6 +165,9 @@ for arg in "$@"; do
       elif [ "${shift_mode:-}" = "workspace_kill" ]; then
         WORKSPACE_KILL="$arg"
         shift_mode=""
+      elif [ "${shift_mode:-}" = "init_file" ]; then
+        INIT_FILE="$arg"
+        shift_mode=""
       elif [ "$TEST_MODE" = true ] && [ -z "$TEST_TARGET" ]; then
         TEST_TARGET="$arg"
       else
@@ -177,6 +186,9 @@ elif [ "${shift_mode:-}" = "workspace_kill" ]; then
   exit 1
 elif [ "${shift_mode:-}" = "eval" ]; then
   echo "Error: -e requires an expression argument" >&2
+  exit 1
+elif [ "${shift_mode:-}" = "init_file" ]; then
+  echo "Error: --init-file requires a file path argument" >&2
   exit 1
 fi
 
@@ -319,4 +331,8 @@ if [ ${#FILES[@]} -gt 0 ] && is_running >/dev/null 2>&1; then
   exec "$CLIENT" -s "$SOCKET" --tui "${FILES[@]}"
 fi
 
-cd "$PROJECT_DIR" && exec bun src/main.ts "${FILES[@]}"
+if [ -n "$INIT_FILE" ]; then
+  cd "$PROJECT_DIR" && exec bun src/main.ts --init-file "$INIT_FILE" "${FILES[@]}"
+else
+  cd "$PROJECT_DIR" && exec bun src/main.ts "${FILES[@]}"
+fi
