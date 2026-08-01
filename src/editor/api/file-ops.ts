@@ -96,14 +96,17 @@ export function createFileOps(
       })));
     }
 
-    if (filesystem) {
-      filesystem.writeFile(path, content)
-        .then(() => log(`Wrote ${path}`))
-        .catch((e) => log(`Write error: ${e instanceof Error ? e.message : String(e)}`));
-    } else {
-      setStatus("write-file-content: no filesystem available");
+    // Sync mode: write SYNCHRONOUSLY so the file exists before this returns.
+    // The daemon's eval RPC returns this result to the client; a fire-and-forget
+    // async write made an immediate `cat <path>` racy (the file did not exist
+    // yet) — silent data loss for the T-Lisp save path. The injected
+    // `filesystem` (ctx.filesystem) is used by the async path above; the sync
+    // path writes through fs.writeFileSync directly. BUG-33 / #45.
+    try {
+      fs.writeFileSync(path, content, "utf-8");
+    } catch (error) {
+      return Either.left(fsRuntimeError("write-file-content", path, error));
     }
-
     return Either.right(createNil());
   });
 

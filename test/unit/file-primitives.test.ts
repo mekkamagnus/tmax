@@ -206,13 +206,23 @@ describe("File Primitives", () => {
     });
   });
 
-  // --- write-file-content (fire-and-forget async) ---
+  // --- write-file-content (synchronous write; BUG-33 / #45) ---
 
   describe("write-file-content", () => {
-    test("returns nil immediately (fire-and-forget)", () => {
+    test("writes the file synchronously — file exists on disk immediately after return", () => {
       const filePath = path.join(tmpDir, "write-test.txt");
       const result = call("write-file-content", [createString(filePath), createString("written data")]);
       expect(result.type).toBe("nil");
+      // BUG-33/#45: the sync path must write BEFORE returning (was fire-and-forget,
+      // so an immediate read missed the file). Mirrors the file-copy assertions.
+      expect(fs.existsSync(filePath)).toBe(true);
+      expect(fs.readFileSync(filePath, "utf-8")).toBe("written data");
+    });
+
+    test("returns Left when the write fails (unwritable target)", () => {
+      // A directory is not writable as a file -> writeFileSync throws -> Either.left.
+      const result = callEither("write-file-content", [createString(tmpDir), createString("x")]);
+      expect(Either.isLeft(result)).toBe(true);
     });
 
     test("rejects wrong argument count", () => {
