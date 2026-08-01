@@ -125,15 +125,32 @@ export function createFileOps(
     }
 
     const path = (pathArg.value as string).replace(/^~/, process.env.HOME ?? '~');
+    // Detect binary/invalid-UTF-8 files: read as Buffer first, validate UTF-8.
+    // Invalid bytes would become U+FFFD on decode, corrupting the file on save.
+    // #66 / BUG-56.
     if (isAsyncMode(context)) {
-      return Either.right(createPromise(fs.promises.readFile(path, 'utf-8')
-        .then((content) => createString(content))
+      return Either.right(createPromise(fs.promises.readFile(path)
+        .then((buf: Buffer) => {
+          const content = buf.toString('utf-8');
+          // Round-trip check: if re-encoding doesn't match, the file has
+          // invalid UTF-8 (or is binary) — refuse with a warning.
+          if (Buffer.from(content, 'utf-8').equals(buf)) {
+            return createString(content);
+          }
+          return createNil(); // signal "not valid UTF-8"
+        })
         .catch(() => createNil())));
     }
 
     try {
-      const content = fs.readFileSync(path, 'utf-8');
-      return Either.right(createString(content));
+      const buf = fs.readFileSync(path);
+      const content = buf.toString('utf-8');
+      if (Buffer.from(content, 'utf-8').equals(buf)) {
+        return Either.right(createString(content));
+      }
+      // Invalid UTF-8 / binary — return nil so callers know the file isn't
+      // editable as text (rather than silently corrupting it on save).
+      return Either.right(createNil());
     } catch {
       return Either.right(createNil());
     }
