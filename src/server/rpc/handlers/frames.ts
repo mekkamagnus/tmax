@@ -23,6 +23,43 @@ import { editorStateToJson } from "../../serialize.ts";
 import { captureFrame } from "../../../render/capture-frame.ts";
 import { ansiLinesToHtmlDocument } from "../../../render/ansi-to-html.ts";
 
+/** Pure reducer for client frame events (issue #23). Takes a frame's current
+ *  state + the event + params + a `now` timestamp (injected for testability)
+ *  and returns the NEXT frame state — no mutation, no side effects.
+ *  Mirrors the sweep.ts classify* pure-function pattern. */
+export function reduceFrameEvent(
+  frame: FrameObservability,
+  event: string,
+  params: { clientType?: string; terminalSize?: FrameObservability["terminalSize"] },
+  now: Date,
+): FrameObservability {
+  const next = { ...frame };
+  if (event === "tui-started") {
+    next.clientType = params.clientType ?? next.clientType;
+  } else if (event === "first-render") {
+    next.firstRenderAt = next.firstRenderAt ?? now;
+    next.lastRenderAt = now;
+    next.renderCount++;
+    next.terminalSize = params.terminalSize ?? next.terminalSize;
+  } else if (event === "raw-mode-ready") {
+    next.rawModeReady = true;
+    next.ready = Boolean(next.firstRenderAt);
+  } else if (event === "render") {
+    next.lastRenderAt = now;
+    next.renderCount++;
+    next.terminalSize = params.terminalSize ?? next.terminalSize;
+    next.ready = next.ready || (next.rawModeReady && Boolean(next.firstRenderAt));
+  } else if (event === "resize") {
+    next.terminalSize = params.terminalSize ?? next.terminalSize;
+  } else if (event === "shutdown") {
+    next.ready = false;
+  }
+  if (next.rawModeReady && next.firstRenderAt) {
+    next.ready = true;
+  }
+  return next;
+}
+
 /** Build the frames-domain handlers bound to a `ServerContext`. */
 export function createFramesHandlers(ctx: ServerContext): {
   "render-state": (params: RenderStateParams) => Promise<RenderStateResult>;
@@ -118,30 +155,8 @@ export function createFramesHandlers(ctx: ServerContext): {
     }
 
     if (frame) {
-      if (event === 'tui-started') {
-        frame.clientType = params.clientType ?? frame.clientType;
-      } else if (event === 'first-render') {
-        frame.firstRenderAt = frame.firstRenderAt ?? now;
-        frame.lastRenderAt = now;
-        frame.renderCount++;
-        frame.terminalSize = params.terminalSize ?? frame.terminalSize;
-      } else if (event === 'raw-mode-ready') {
-        frame.rawModeReady = true;
-        frame.ready = Boolean(frame.firstRenderAt);
-      } else if (event === 'render') {
-        frame.lastRenderAt = now;
-        frame.renderCount++;
-        frame.terminalSize = params.terminalSize ?? frame.terminalSize;
-        frame.ready = frame.ready || (frame.rawModeReady && Boolean(frame.firstRenderAt));
-      } else if (event === 'resize') {
-        frame.terminalSize = params.terminalSize ?? frame.terminalSize;
-      } else if (event === 'shutdown') {
-        frame.ready = false;
-      }
-
-      if (frame.rawModeReady && frame.firstRenderAt) {
-        frame.ready = true;
-      }
+      const updated = reduceFrameEvent(frame, event, params, now);
+      ctx.frameObservability.set(frameId!, updated);
     }
 
     return { ok: true };
