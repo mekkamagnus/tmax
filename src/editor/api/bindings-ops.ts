@@ -139,10 +139,6 @@ export function createBindingsOps(
       } else {
         setStatusMessage(":marks — no marks set");
       }
-    } else if (command.startsWith("e ") || command.startsWith("edit ")) {
-      // TODO: Implement file opening
-      const filename = command.split(" ")[1];
-      setStatusMessage(`Edit ${filename} not implemented yet`);
     } else if (command === "") {
       // Empty command, do nothing
     } else {

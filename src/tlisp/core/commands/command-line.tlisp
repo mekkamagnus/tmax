@@ -73,6 +73,11 @@ substitute/Dired/execute policy."
       ;; :q / :q! / :quit  — quit (discard unsaved changes for the ! form).
       ((or (string= line "q") (string= line "q!") (string= line "quit"))
        (editor-quit))
+      ;; :e <file> / :edit <file> — open a file (was a TS TODO stub). #60 / BUG-49.
+      ((string-match "^e[ \t]+(.+)$" line)
+       (open-file (match-string 1)))
+      ((string-match "^edit[ \t]+(.+)$" line)
+       (open-file (match-string 1)))
       ;; :dired            — open the current directory.
       ((string= line "dired")
        (dired "."))
