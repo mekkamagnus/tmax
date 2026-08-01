@@ -191,8 +191,10 @@ class TmaxClient {
         return;
       }
     } catch (error) {
-      console.error(`Error opening file ${filepath}:`, error);
-      process.exit(1);
+      // Re-throw so callers decide: the non-TUI open loop exits 1, while
+      // `--tui` mode is best-effort (one bad file does not abort the launch).
+      // #52 / BUG-34.
+      throw error;
     }
   }
 
@@ -585,6 +587,28 @@ Examples:
 
   // Handle TUI mode by spawning the TUI client process
   if (tuiMode) {
+    // Open any positional files through the daemon BEFORE attaching the TUI,
+    // so `tmaxclient --tui file.txt` (and `tmax file.txt` with a running daemon)
+    // actually opens the file instead of dropping it. Best-effort PER FILE: a
+    // single unreadable/bad file logs + is skipped; the TUI still attaches with
+    // the files that did open (openFile throws, caught here). #52 / BUG-34.
+    if (filenames.length > 0) {
+      const openClient = new TmaxClient(socketPath);
+      try {
+        await openClient.connect();
+        for (const filename of filenames) {
+          try {
+            await openClient.openFile(filename, { wait: !noWait, workspaceId: workspaceTarget });
+          } catch (error) {
+            console.error(`Could not open ${filename}:`, error instanceof Error ? error.message : error);
+          }
+        }
+        openClient.close();
+      } catch {
+        // Could not connect to the daemon at all — fall through; the TUI spawn
+        // below will surface its own connection error.
+      }
+    }
     const tuiClientPath = pathResolve(__dirname, '..', 'src', 'client', 'tui-client.ts');
     const tuiArgs = [];
     if (socketPath) {
@@ -888,12 +912,17 @@ Examples:
       console.log(typeof result === 'object' ? JSON.stringify(result) : result);
     }
   } else if (filenames.length > 0) {
-    // Open files
+    // Open files (openFile throws on RPC failure; exit non-zero if any failed).
+    let failed = false;
     for (const filename of filenames) {
-      await client.openFile(filename, { wait: !noWait, workspaceId: workspaceTarget });
+      try {
+        await client.openFile(filename, { wait: !noWait, workspaceId: workspaceTarget });
+      } catch (error) {
+        console.error(`Error opening file ${filename}:`, error instanceof Error ? error.message : error);
+        failed = true;
+      }
     }
-    // Exit with success code after opening files
-    process.exit(0);
+    process.exit(failed ? 1 : 0);
   } else {
     // No command specified, show help
     console.error('No command specified. Use --help for usage information.');

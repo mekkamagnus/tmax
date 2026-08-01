@@ -296,13 +296,22 @@ if [ -n "$WORKSPACE" ]; then
   exec "$CLIENT" -s "$SOCKET" --workspace "$WORKSPACE" --tui
 fi
 
-# C6: try last-workspace persistence when no -w flag given
+# C6: try last-workspace persistence when no -w flag AND no files given.
+# SPEC-040 scopes persistence to the bare `tmax` case; with a file argument we
+# must open THAT file, not silently resume the last workspace. #52 / BUG-34.
 LAST_WS_FILE="$HOME/.config/tmax/last-workspace"
-if [ -z "$WORKSPACE" ] && [ -f "$LAST_WS_FILE" ] && is_running >/dev/null 2>&1; then
+if [ -z "$WORKSPACE" ] && [ ${#FILES[@]} -eq 0 ] && [ -f "$LAST_WS_FILE" ] && is_running >/dev/null 2>&1; then
   LAST_WS=$(cat "$LAST_WS_FILE" 2>/dev/null)
   if [ -n "$LAST_WS" ]; then
     exec "$CLIENT" -s "$SOCKET" --workspace "$LAST_WS" --tui
   fi
+fi
+
+# Files given + a daemon is running: route the files THROUGH the daemon (openFile
+# RPC) and attach the TUI. The embedded-editor fallback below cannot share the
+# running daemon's socket/state, so it is only for the no-daemon case. #52/BUG-34.
+if [ ${#FILES[@]} -gt 0 ] && is_running >/dev/null 2>&1; then
+  exec "$CLIENT" -s "$SOCKET" --tui "${FILES[@]}"
 fi
 
 cd "$PROJECT_DIR" && exec bun src/main.ts "${FILES[@]}"
