@@ -220,24 +220,23 @@ fi
 # Handle --stop
 if [ "$STOP" = true ]; then
   if is_running >/dev/null 2>&1; then
-    "$CLIENT" -s "$SOCKET" --stop 2>/dev/null
-    # Verify it actually stopped
+    # Suppress tmaxclient's own "Daemon stopped" so it prints only once (#69/BUG-55).
+    "$CLIENT" -s "$SOCKET" --stop >/dev/null 2>&1
     sleep 1
     if is_running >/dev/null 2>&1; then
       echo "Warning: daemon did not stop gracefully, sending SIGTERM" >&2
-      # Find PID from lsof on the socket
       DAEMON_PID=$(lsof -t -U "$SOCKET" 2>/dev/null | head -1 || true)
       if [ -n "$DAEMON_PID" ]; then
         kill -TERM "$DAEMON_PID" 2>/dev/null || true
         sleep 1
       fi
     fi
-    # Clean up socket and lock
-    rm -f "$SOCKET" "${SOCKET}.lock" 2>/dev/null || true
     echo "Daemon stopped"
   else
     echo "Daemon not running"
   fi
+  # Always clean stale socket/lock — even when no daemon answered (#69/BUG-55).
+  rm -f "$SOCKET" "${SOCKET}.lock" 2>/dev/null || true
   exit 0
 fi
 

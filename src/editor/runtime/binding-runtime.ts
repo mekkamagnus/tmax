@@ -228,13 +228,13 @@ export class BindingRuntime {
       let initContent: string;
       try {
         initContent = await this.deps.filesystem.readFile(initFile);
-      } catch (readError) {
+      } catch {
+        // Init file not found — use defaults silently. The prior literal-'~'
+        // fallback was dead code (no filesystem expands '~'); removed. #74.
         if (initFilePath) {
-          throw readError;
+          throw new Error(`Init file not found: ${initFilePath}`);
         }
-        initContent = await this.deps.filesystem.readFile("~/.config/tmax/init.tlisp");
-        // Returning the literal fallback path mirrors the prior Editor behavior.
-        return "~/.config/tmax/init.tlisp";
+        return initFile;
       }
       // Capture the result — was discarded, so parse/eval errors were silently
       // swallowed while the log falsely reported "Loaded init file". #59 / BUG-48.

@@ -486,12 +486,27 @@ export function registerStdlibFunctions(interpreter: TLispInterpreter): void {
 
   interpreter.defineBuiltin("error", (args: TLispValue[]) => {
     // Signal an error. Returns Either.left so the surrounding `condition-case` (or the runner)
-    // can recover. The message concatenates all string-able args, matching Emacs `(error ...)`.
-    // This is the failure-signaling primitive the trt assertions build on (SPEC-049).
+    // can recover. If the first arg is a format string with %s/%d directives, interpolate
+    // the remaining args (Emacs `(error)` semantics). Otherwise concatenate all string-able
+    // args. This is the failure-signaling primitive the trt assertions build on (SPEC-049).
+    // #72 / BUG-54: added %s/%d/%% format interpolation.
     if (args.length === 0) {
       return Either.left({ type: 'EvalError', variant: 'RuntimeError', message: "error", details: {} });
     }
-    const message = args.map(a => valueToString(a)).join(" ");
+    const first = args[0]!;
+    let message: string;
+    if (first.type === "string" && /%[sd%]/.test(first.value as string) && args.length > 1) {
+      let i = 1;
+      message = (first.value as string).replace(/%([sd%])/g, (_m: string, spec: string): string => {
+        if (spec === '%') return '%';
+        const arg = args[i++];
+        if (!arg) return '';
+        if (spec === 'd') return String(Math.floor(Number(arg.type === 'number' ? arg.value : 0)));
+        return String(arg.value);
+      });
+    } else {
+      message = args.map(a => valueToString(a)).join(" ");
+    }
     return Either.left({ type: 'EvalError', variant: 'RuntimeError', message, details: { signaled: true } });
   });
 
