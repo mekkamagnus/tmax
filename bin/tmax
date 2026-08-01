@@ -134,7 +134,19 @@ TEST_MODE=false
 TEST_JSON=false
 TEST_TARGET=""
 INIT_FILE=""
+end_of_opts=false
 FILES=()
+
+# Diagnostic one-shot client flags: dispatch to tmaxclient. Pass-through ($@)
+# preserves modifiers (--json / --frame / --since-request / -n). Queries the
+# EXISTING daemon on $SOCKET (no auto-start — diagnostics need real state).
+# #47 / BUG-41.
+for _arg in "$@"; do
+  case "$_arg" in
+    --messages|--last-error|--backtrace|--diagnostics|--status|--ping|--frames|--clients|--list-buffers|--server-info|--capture|--capture-html)
+      exec "$CLIENT" -s "$SOCKET" "$@" ;;
+  esac
+done
 
 for arg in "$@"; do
   case "$arg" in
@@ -155,8 +167,11 @@ for arg in "$@"; do
     --json)         TEST_JSON=true ;;
     -t)             ;; # -t is default behavior (open terminal frame)
     -h|--help)      usage ;;
+    --)             end_of_opts=true ;; # POSIX end-of-options: rest are files
     *)
-      if [ "${shift_mode:-}" = "eval" ]; then
+      if [ "${end_of_opts:-}" = true ]; then
+        FILES+=("$arg")
+      elif [ "${shift_mode:-}" = "eval" ]; then
         EVAL_EXPR="$arg"
         shift_mode=""
       elif [ "${shift_mode:-}" = "workspace" ]; then
@@ -170,6 +185,12 @@ for arg in "$@"; do
         shift_mode=""
       elif [ "$TEST_MODE" = true ] && [ -z "$TEST_TARGET" ]; then
         TEST_TARGET="$arg"
+      elif [ -z "${arg##-*}" ]; then
+        # Starts with '-' and is not a recognized flag, a value, or a
+        # diagnostic flag (all handled above) — error loudly instead of
+        # silently dropping it / launching the TUI. #47 / BUG-41.
+        echo "Error: unknown flag '$arg'. Use --help for usage." >&2
+        exit 1
       else
         FILES+=("$arg")
       fi
