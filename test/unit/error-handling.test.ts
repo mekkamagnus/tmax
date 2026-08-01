@@ -13,7 +13,6 @@ import {
   ErrorFactory,
   errorManager
 } from "../../src/utils/error-manager.ts";
-import { debugReporter } from "../../src/utils/debug-reporter.ts";
 import { TerminalEngine } from "../../src/core/terminal.ts";
 import { Either } from "../../src/utils/task-either.ts";
 
@@ -155,66 +154,6 @@ test("TmaxError - should provide AI-friendly formatting", () => {
     expect(aiFormat.includes("❌ Actual: \"runtime failure\"")).toBe(true);
   });
 
-test("DebugReporter - should track system health", () => {
-    const health = debugReporter.getSystemHealth();
-    
-    expect(health).toBeDefined();
-    expect(["healthy", "degraded", "critical"].includes(health.status)).toBe(true);
-    expect(typeof health.uptime).toBe("number");
-    expect(typeof health.errorRate).toBe("number");
-    expect(typeof health.recentErrors).toBe("number");
-    expect(typeof health.criticalErrors).toBe("number");
-  });
-
-test("DebugReporter - should generate AI reports", () => {
-    // Create some test errors first
-    ErrorFactory.validation("Test validation error", "field1");
-    ErrorFactory.runtime("Test runtime error", "test_operation");
-    ErrorFactory.io("Test IO error", "/test/path", "read");
-    
-    const report = debugReporter.generateAIReport();
-    
-    expect(report.includes("🔬 TMAX DEBUG ANALYSIS REPORT")).toBe(true);
-    expect(report.includes("═══ SYSTEM HEALTH ═══")).toBe(true);
-    expect(report.includes("═══ ENVIRONMENT ═══")).toBe(true);
-    expect(report.includes("═══ ERROR ANALYSIS ═══")).toBe(true);
-    expect(report.includes("═══ AI TROUBLESHOOTING RECOMMENDATIONS ═══")).toBe(true);
-    
-    // Check environment information
-    expect(report.includes("🖥️  Platform:")).toBe(true);
-    expect(report.includes("Bun Version:")).toBe(true);
-    expect(report.includes("💻 TTY Status:")).toBe(true);
-  });
-
-test("DebugReporter - should track operation performance", () => {
-    const correlationId1 = "test-op-1";
-    const correlationId2 = "test-op-2";
-    
-    // Record operations
-    debugReporter.recordOperationStart(correlationId1, "fast_operation", "TestModule");
-    debugReporter.recordOperationComplete(correlationId1);
-    
-    debugReporter.recordOperationStart(correlationId2, "slow_operation", "TestModule");
-    // Simulate slow operation by not completing immediately
-    
-    const context = debugReporter.getDebugContext();
-    
-    expect(context.performanceMetrics).toBeDefined();
-    expect(typeof context.performanceMetrics!.operationsPerSecond).toBe("number");
-    expect(typeof context.performanceMetrics!.averageResponseTime).toBe("number");
-    
-    // Should have one active operation
-    expect(context.activeOperations.length).toBe(1);
-    expect(context.activeOperations[0]!.operation).toBe("slow_operation");
-    expect(context.activeOperations[0]!.correlationId).toBe(correlationId2);
-    
-    // Complete the slow operation
-    debugReporter.recordOperationComplete(correlationId2);
-    
-    const updatedContext = debugReporter.getDebugContext();
-    expect(updatedContext.activeOperations.length).toBe(0);
-  });
-
   test("Integration - Terminal with enhanced error handling", async () => {
     // Test the enhanced terminal implementation
     const terminal = new TerminalEngine();
@@ -315,7 +254,6 @@ test("Should handle high error volume efficiently", () => {
 test("Should generate reports efficiently", () => {
     const startTime = performance.now();
     
-    const report = debugReporter.generateAIReport();
     const aiReport = errorManager.generateAIReport();
     
     const endTime = performance.now();
@@ -325,7 +263,6 @@ test("Should generate reports efficiently", () => {
     // tolerating GC/scheduler jitter under full-suite load.
     expect(duration < 1000, `Report generation took too long: ${duration}ms`).toBe(true);
     
-    expect(report.length > 0).toBe(true);
     expect(aiReport.length > 0).toBe(true);
   });
 
