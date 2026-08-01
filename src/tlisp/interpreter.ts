@@ -7,7 +7,7 @@ import type { TLispInterpreter, TLispEnvironment, TLispValue, TLispFunctionImpl,
 import { createEvalContext } from "./async.ts";
 import type { EvalError as EvalErrorType } from "../error/types.ts";
 import { TLispParser } from "./parser.ts";
-import { TLispEvaluator, createEvaluatorWithBuiltins } from "./evaluator.ts";
+import { TLispEvaluator, createEvaluatorWithBuiltins, FunctionReturn } from "./evaluator.ts";
 import { createFunction, createNil } from "./values.ts";
 import { Either } from "../utils/task-either.ts";
 import { ModuleRegistry } from "./module-registry.ts";
@@ -160,12 +160,20 @@ export class TLispInterpreterImpl implements TLispInterpreter {
 
     let lastResult: Either<EvalError, TLispValue> | null = null;
 
-    for (const form of forms) {
-      const evalResult = this.evaluator.eval(form.value, evalEnv);
-      if (Either.isLeft(evalResult)) {
-        return evalResult;
+    try {
+      for (const form of forms) {
+        const evalResult = this.evaluator.eval(form.value, evalEnv);
+        if (Either.isLeft(evalResult)) {
+          return evalResult;
+        }
+        lastResult = evalResult;
       }
-      lastResult = evalResult;
+    } catch (e) {
+      // Top-level return-from (no enclosing function) -> clean error, not a crash (BUG-32).
+      if (e instanceof FunctionReturn) {
+        return Either.left({ type: 'EvalError', variant: 'RuntimeError', message: `return-from: '${e.blockName}' has no enclosing function` });
+      }
+      throw e;
     }
 
     return lastResult || Either.right(createNil());
@@ -186,12 +194,19 @@ export class TLispInterpreterImpl implements TLispInterpreter {
     const context = createEvalContext({ sourceName });
     let lastResult: Either<EvalError, TLispValue> | null = null;
 
-    for (const form of forms) {
-      const evalResult = await this.evaluator.evalAsync(form.value, evalEnv, context);
-      if (Either.isLeft(evalResult)) {
-        return evalResult;
+    try {
+      for (const form of forms) {
+        const evalResult = await this.evaluator.evalAsync(form.value, evalEnv, context);
+        if (Either.isLeft(evalResult)) {
+          return evalResult;
+        }
+        lastResult = evalResult;
       }
-      lastResult = evalResult;
+    } catch (e) {
+      if (e instanceof FunctionReturn) {
+        return Either.left({ type: 'EvalError', variant: 'RuntimeError', message: `return-from: '${e.blockName}' has no enclosing function` });
+      }
+      throw e;
     }
 
     return lastResult || Either.right(createNil());

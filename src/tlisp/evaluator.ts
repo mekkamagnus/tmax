@@ -98,6 +98,26 @@ interface TailCall {
 type EvalResult = TLispValue | TailCall;
 
 /**
+ * Nonlocal-exit signal for `return-from` (BUG-32). Thrown by `evalReturnFrom`
+ * and caught at the function-body evaluation boundary (the sync lambda body
+ * eval and the async lambda body eval), so `(return-from name value)` exits
+ * the enclosing defun with `value`. The function-call error catches re-throw
+ * it so it is never mis-converted to a RuntimeError; a top-level (no enclosing
+ * function) `return-from` surfaces as a clean eval error via the interpreter's
+ * execute() boundary.
+ */
+export class FunctionReturn extends Error {
+  readonly blockName: string;
+  readonly value: TLispValue;
+  constructor(blockName: string, value: TLispValue) {
+    super(`return-from ${blockName}`);
+    this.name = "FunctionReturn";
+    this.blockName = blockName;
+    this.value = value;
+  }
+}
+
+/**
  * Check if result is a tail call
  */
 function isTailCall(result: EvalResult): result is TailCall {
@@ -681,6 +701,12 @@ export class TLispEvaluator implements ModuleFormsContext, TestFormsContext {
           return this.evalAnd(elements, env);
         case "OR":
           return this.evalOr(elements, env);
+        case "WHEN":
+          return this.evalWhen(elements, env);
+        case "UNLESS":
+          return this.evalUnless(elements, env);
+        case "RETURN_FROM":
+          return this.evalReturnFrom(elements, env);
         case "ASYNC_LET":
           return this.evalFunctionCall(elements, env, inTailPosition);
       }
@@ -1045,9 +1071,15 @@ export class TLispEvaluator implements ModuleFormsContext, TestFormsContext {
         }
       }
 
-      // Evaluate body in tail position
-      const result = this.eval(body, callEnv);
-      return result;
+      // Evaluate body in tail position. Catch FunctionReturn here so
+      // (return-from ...) exits THIS function with its value (BUG-32).
+      try {
+        const result = this.eval(body, callEnv);
+        return result;
+      } catch (e) {
+        if (e instanceof FunctionReturn) return Either.right(e.value);
+        throw e;
+      }
     };
 
     const asyncLambdaFunction = async (args: TLispValue[], context: EvalContext): Promise<Either<EvalError, TLispValue>> => {
@@ -1091,7 +1123,15 @@ export class TLispEvaluator implements ModuleFormsContext, TestFormsContext {
         }
       }
 
-      return this.evalAsync(body, callEnv, context);
+      // Catch FunctionReturn here (async path) so (return-from ...) exits THIS
+      // function with its value (BUG-32). The throw surfaces as a rejected
+      // promise through the async eval chain.
+      try {
+        return await this.evalAsync(body, callEnv, context);
+      } catch (e) {
+        if (e instanceof FunctionReturn) return Either.right(e.value);
+        throw e;
+      }
     };
 
     const funcValue = createFunction(lambdaFunction, undefined, asyncLambdaFunction);
@@ -1692,6 +1732,8 @@ export class TLispEvaluator implements ModuleFormsContext, TestFormsContext {
       try {
         result = functionImpl(args);
       } catch (err) {
+        // return-from must propagate, not be converted to a RuntimeError (BUG-32).
+        if (err instanceof FunctionReturn) throw err;
         const msg = err instanceof Error ? err.message : String(err);
         return Either.left(this.makeError('RuntimeError', 'TL4001', msg, {
           details: { error: msg },
@@ -1794,6 +1836,8 @@ export class TLispEvaluator implements ModuleFormsContext, TestFormsContext {
           result = functionValue.value(args, context);
         }
       } catch (err) {
+        // return-from must propagate, not be converted to a RuntimeError (BUG-32).
+        if (err instanceof FunctionReturn) throw err;
         const msg = err instanceof Error ? err.message : String(err);
         return Either.left(this.makeError('RuntimeError', 'TL4001', msg, {
           details: { error: msg },
@@ -1933,11 +1977,69 @@ export class TLispEvaluator implements ModuleFormsContext, TestFormsContext {
   }
 
   /**
-   * Evaluate set! special form
-   * @param elements - List elements (excluding 'set!')
-   * @param env - Environment
-   * @returns Either with error or the new value
+   * Evaluate (when test body...) — evaluate the body forms and return the last
+   * if `test` is truthy, else nil. Special form (not a builtin) so the body is
+   * NOT pre-evaluated when the test is false. BUG-32.
    */
+  private evalWhen(elements: TLispValue[], env: TLispEnvironment): Either<EvalError, TLispValue> {
+    if (elements.length < 2) {
+      return Either.left({ type: 'EvalError', variant: 'SyntaxError', message: "when requires at least 1 argument: (when test body...)" });
+    }
+    const testResult = this.eval(elements[1]!, env);
+    if (Either.isLeft(testResult)) return Either.left(testResult.left);
+    if (!isTruthy(testResult.right)) return Either.right(createNil());
+    let result: TLispValue = createNil();
+    for (let i = 2; i < elements.length; i++) {
+      const r = this.eval(elements[i]!, env);
+      if (Either.isLeft(r)) return Either.left(r.left);
+      result = r.right;
+    }
+    return Either.right(result);
+  }
+
+  /**
+   * Evaluate (unless test body...) — evaluate the body forms and return the last
+   * if `test` is nil/false, else nil. Special form. BUG-32.
+   */
+  private evalUnless(elements: TLispValue[], env: TLispEnvironment): Either<EvalError, TLispValue> {
+    if (elements.length < 2) {
+      return Either.left({ type: 'EvalError', variant: 'SyntaxError', message: "unless requires at least 1 argument: (unless test body...)" });
+    }
+    const testResult = this.eval(elements[1]!, env);
+    if (Either.isLeft(testResult)) return Either.left(testResult.left);
+    if (isTruthy(testResult.right)) return Either.right(createNil());
+    let result: TLispValue = createNil();
+    for (let i = 2; i < elements.length; i++) {
+      const r = this.eval(elements[i]!, env);
+      if (Either.isLeft(r)) return Either.left(r.left);
+      result = r.right;
+    }
+    return Either.right(result);
+  }
+
+  /**
+   * Evaluate (return-from name [value]) — throw a FunctionReturn carrying the
+   * (evaluated) value, caught at the enclosing function's body boundary.
+   * Never returns normally. BUG-32.
+   */
+  private evalReturnFrom(elements: TLispValue[], env: TLispEnvironment): Either<EvalError, TLispValue> {
+    if (elements.length < 2) {
+      return Either.left({ type: 'EvalError', variant: 'SyntaxError', message: "return-from requires a block name: (return-from name [value])" });
+    }
+    const nameArg = elements[1];
+    if (!nameArg || nameArg.type !== "symbol") {
+      return Either.left({ type: 'EvalError', variant: 'TypeError', message: "return-from: first argument must be a symbol (block name)", details: { argType: nameArg?.type } });
+    }
+    const blockName = nameArg.value as string;
+    let value: TLispValue = createNil();
+    if (elements.length >= 3) {
+      const valueResult = this.eval(elements[2]!, env);
+      if (Either.isLeft(valueResult)) return Either.left(valueResult.left);
+      value = valueResult.right;
+    }
+    throw new FunctionReturn(blockName, value);
+  }
+
   private evalSetBang(elements: TLispValue[], env: TLispEnvironment): Either<EvalError, TLispValue> {
     if (elements.length < 3) {
       return Either.left({

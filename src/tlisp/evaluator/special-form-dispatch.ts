@@ -41,7 +41,8 @@ export type SpecialFormExecutor =
   | "DEFVAR" | "DEFMODULE" | "REQUIRE_MODULE" | "CURRENT_MODULE"
   | "PROVIDE" | "FEATUREP" | "REQUIRE" | "SET" | "ASSERT_TYPE"
   | "ASSERT_ERROR" | "CONDITION_CASE" | "PROGN" | "WHILE"
-  | "DOLIST" | "AND" | "OR" | "ASYNC_LET";
+  | "DOLIST" | "AND" | "OR" | "ASYNC_LET"
+  | "WHEN" | "UNLESS" | "RETURN_FROM";
 
 /** Shared error metadata for misuse of a special form (currently informational). */
 export interface SpecialFormMeta {
@@ -82,6 +83,13 @@ export const SPECIAL_FORMS: Readonly<Record<string, SpecialFormMeta>> = {
   // symbol, not a string. Registered here (not as a builtin) so the evaluator
   // does not pre-evaluate the name argument. See BUG-31.
   setq: { category: "sync-only", executor: "SET", minArity: 3, description: "(setq name value) — alias of set!; name is a symbol, not evaluated" },
+  // when/unless are special forms (not builtins) so the body is NOT pre-evaluated
+  // when the test is false — same class of bug as setq (BUG-31). BUG-32.
+  when: { category: "sync-only", executor: "WHEN", minArity: 2, description: "(when test body...) — eval body if test is truthy" },
+  unless: { category: "sync-only", executor: "UNLESS", minArity: 2, description: "(unless test body...) — eval body if test is nil/false" },
+  // return-from exits the enclosing defun with a value (FunctionReturn exception
+  // caught at the function-body boundary). BUG-32.
+  "return-from": { category: "sync-only", executor: "RETURN_FROM", minArity: 2, description: "(return-from name [value]) — early exit from enclosing function" },
   "current-module": { category: "sync-only", executor: "CURRENT_MODULE", minArity: 1, description: "(current-module)" },
   provide: { category: "sync-only", executor: "PROVIDE", minArity: 2, description: "(provide \"feature\")" },
   featurep: { category: "sync-only", executor: "FEATUREP", minArity: 2, description: "(featurep \"feature\")" },

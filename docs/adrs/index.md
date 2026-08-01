@@ -9,6 +9,7 @@ Ordered most-recent first (highest ADR number = most recent decision). Topic gro
 | File | Decision | Related |
 |------|----------|---------|
 | [ADR-0143-setq-special-form.md](ADR-0143-setq-special-form.md) | #41 / BUG-31: `setq` is a special form (alias of `set!`, routed to the existing SET executor) — the name argument is no longer pre-evaluated, fixing accumulator loops + ghost bindings; the eager builtin is removed and string-name callers migrated to symbol form | #41, [BUG-31](../specs/BUG-31-setq-special-form.md) |
+| [ADR-0144-when-unless-return-from.md](ADR-0144-when-unless-return-from.md) | #42 / BUG-32: `when`/`unless`/`return-from` added as sync-only special forms (no eager body eval); `return-from` is a contained `FunctionReturn` exception caught at the function-body boundary — shipped save/replace/dired/indent commands no longer throw Undefined symbol | #42, [BUG-32](../specs/BUG-32-when-unless-return-from.md) |
 
 ## Recent — Test-helper consolidation (ADR 0122)
 
