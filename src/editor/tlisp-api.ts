@@ -52,7 +52,7 @@ import { createPluginOps } from "./api/plugin-ops.ts";
 import { createDocumentationOps } from "./api/documentation.ts";
 import { createHookOps, HookRegistry } from "./api/hook-ops.ts";
 import { createSyntaxOps } from "./api/syntax-ops.ts";
-import { createReplaceOps } from "./api/replace-ops.ts";
+import { createReplaceOps, translateReplacement } from "./api/replace-ops.ts";
 import { createIndentOps } from "./api/indent-ops.ts";
 import { createMajorModeOps } from "./api/major-mode-ops.ts";
 import { createDiredOps } from "./api/dired-ops.ts";
@@ -1305,7 +1305,7 @@ function buildEditorAPIContributions(): readonly EditorAPIContribution[] {
           const str = String(args[2]!.value);
           try {
             const re = new RegExp(pattern, 'g');
-            return Either.right(createString(str.replace(re, replacement)));
+            return Either.right(createString(str.replace(re, translateReplacement(replacement))));
           } catch (e) {
             return Either.left(createValidationError('FormatError', `Invalid regex: ${e instanceof Error ? e.message : String(e)}`));
           }

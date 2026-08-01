@@ -6,6 +6,28 @@
 import type { TLispValue, TLispFunctionImpl } from "../../tlisp/types.ts";
 import { createNil, createNumber, createString, createList } from "../../tlisp/values.ts";
 import type { TextBuffer } from "../../core/contracts/buffer.ts";
+
+/**
+ * Translate Emacs/vim-style replacement syntax to JS String.replace syntax.
+ * \1..\9 → $1..$9 (capture groups); unescaped & → $& (whole match);
+ * \& → literal &; \\ → literal \; $ → $$ (escaped). #64 / BUG-52.
+ */
+export function translateReplacement(rep: string): string {
+  let result = '';
+  for (let i = 0; i < rep.length; i++) {
+    const ch = rep[i]!;
+    if (ch === '\\' && i + 1 < rep.length) {
+      const next = rep[i + 1]!;
+      if (next >= '1' && next <= '9') { result += '$' + next; i++; }
+      else if (next === '&') { result += '&'; i++; }
+      else if (next === '\\') { result += '\\'; i++; }
+      else { result += next; i++; }
+    } else if (ch === '&') { result += '$&'; }
+    else if (ch === '$') { result += '$$'; }
+    else { result += ch; }
+  }
+  return result;
+}
 import { runModel, readModelField, type EditorModelAccess } from "./state-context.ts";
 import { Either } from "../../utils/task-either.ts";
 import {
