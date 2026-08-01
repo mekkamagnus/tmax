@@ -15,6 +15,7 @@ import type { EditorState } from "../core/contracts/editor.ts";
 import { renderMinibuffer } from "../frontend/render/minibuffer.ts";
 import { renderWhichKeyOverlay } from "../frontend/render/which-key-overlay.ts";
 import { computeHighlightSpans } from "../syntax/highlight-buffer.ts";
+import type { HighlightSpan } from "../core/contracts/editor.ts";
 import { Either } from "../utils/task-either.ts";
 
 function enterAltScreen() {
@@ -59,9 +60,21 @@ function render(state: EditorState) {
     const r = state.currentBuffer?.getLine(ln);
     return r && Either.isRight(r) ? r.right : "";
   };
-  const spans = state.currentBuffer
+  let spans = state.currentBuffer
     ? computeHighlightSpans(getLine, vt, vt + bufferHeight, state.currentFilename)
     : undefined;
+
+  // Dim the splash screen in *scratch* (like vim's intro). Client-side detection:
+  // no filename + line 1 starts with "  tmax" = the splash sentinel.
+  if (!state.currentFilename && getLine(1)?.startsWith("  tmax")) {
+    spans = [];
+    for (let i = vt; i < vt + bufferHeight; i++) {
+      const lineText = getLine(i);
+      spans.push(lineText
+        ? [{ start: 0, end: lineText.length, style: { dim: true } }]
+        : []);
+    }
+  }
   const lines = renderBufferLines(state, width, bufferHeight, spans);
 
   clearScreen();
