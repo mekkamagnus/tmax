@@ -1,5 +1,5 @@
 (defmodule editor/commands/buffers
-  (export buffer-detail-more-recent-p buffer-detail-candidate buffer-completion-table switch-buffer-accept switch-buffer)
+  (export buffer-detail-more-recent-p buffer-detail-candidate buffer-completion-table switch-buffer-accept switch-buffer buffer-name current-buffer-name switch-to-buffer open-file)
 
 ;; buffers.tlisp --- Interactive buffer completion
 
@@ -38,4 +38,21 @@
     ""
     "buffer-history"
     "switch-buffer-accept"))
+
+;; Emacs-conventional aliases (#51 / BUG-45).
+(defun buffer-name ()
+  "Return the name of the current buffer (alias of buffer-current)."
+  (buffer-current))
+
+(defun current-buffer-name ()
+  "Return the name of the current buffer (alias of buffer-current)."
+  (buffer-current))
+
+(defun switch-to-buffer (name)
+  "Switch to the buffer named NAME (alias of buffer-switch)."
+  (buffer-switch name))
+
+(defun open-file (filename)
+  "Open FILENAME (alias of find-file-open)."
+  (find-file-open filename))
 )

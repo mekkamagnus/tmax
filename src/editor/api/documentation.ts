@@ -231,7 +231,7 @@ const DOCUMENTATION_DATABASE: DocumentationEntry[] = [
     signature: '(key-bind key command &optional mode)',
     description: 'Bind a key sequence to a command. Optionally specify the mode (normal, insert, visual, command, mx).',
     examples: [
-      '(key-bind "C-c C-c" "save-file")',
+      '(key-bind "C-c C-c" "(save-file)")',
       '(key-bind "k" "kill-line" "normal")'
     ],
     related: ['key-unbind', 'key-bindings', 'key-binding'],
