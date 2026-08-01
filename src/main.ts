@@ -264,8 +264,11 @@ Examples:
     metadata: { phase: 'init-ui', frontend: 'steep' }
   });
 
-  // Phase 5a: Start embedded socket server (Emacs-style server-start)
-  const server = new TmaxServer(undefined, false, editor, initFilePath);
+  // Phase 5a: Start embedded socket server (Emacs-style server-start).
+  // When no file is given, start clean — show *scratch* + splash, not the
+  // last workspace (vim-like behavior).
+  const embeddedCleanStart = fileArgs.length === 0;
+  const server = new TmaxServer(undefined, false, editor, initFilePath, embeddedCleanStart);
   try {
     await server.startEditor();
 

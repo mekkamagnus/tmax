@@ -352,11 +352,11 @@ fi
 # RPC) and attach the TUI. The embedded-editor fallback below cannot share the
 # running daemon's socket/state, so it is only for the no-daemon case. #52/BUG-34.
 if [ ${#FILES[@]} -gt 0 ] && is_running >/dev/null 2>&1; then
-  exec "$CLIENT" -s "$SOCKET" --tui "${FILES[@]}"
+  exec "$CLIENT" -s "$SOCKET" --tui ${FILES[@]+"${FILES[@]}"}
 fi
 
 if [ -n "$INIT_FILE" ]; then
-  cd "$PROJECT_DIR" && exec bun src/main.ts --init-file "$INIT_FILE" "${FILES[@]}"
+  cd "$PROJECT_DIR" && exec bun src/main.ts --init-file "$INIT_FILE" ${FILES[@]+"${FILES[@]}"}
 else
-  cd "$PROJECT_DIR" && exec bun src/main.ts "${FILES[@]}"
+  cd "$PROJECT_DIR" && exec bun src/main.ts ${FILES[@]+"${FILES[@]}"}
 fi
