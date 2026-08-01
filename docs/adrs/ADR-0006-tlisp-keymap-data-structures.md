@@ -175,8 +175,8 @@ User defines keymap in `~/.config/tmax/init.tlisp` → T-Lisp → KeymapSync →
 (defkeymap "*my-custom-keymap*")
 
 ;; Add bindings (immutable - requires setq)
-(setq "*my-custom-keymap*" (keymap-define-key *my-custom-keymap* "j" "my-custom-down"))
-(setq "*my-custom-keymap*" (keymap-define-key *my-custom-keymap* "k" "my-custom-up"))
+(setq *my-custom-keymap* (keymap-define-key *my-custom-keymap* "j" "my-custom-down"))
+(setq *my-custom-keymap* (keymap-define-key *my-custom-keymap* "k" "my-custom-up"))
 
 ;; Register keymap for normal mode
 (keymap-set "normal" *my-custom-keymap*)

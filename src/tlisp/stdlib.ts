@@ -890,36 +890,8 @@ export function registerStdlibFunctions(interpreter: TLispInterpreter): void {
     return hashmapArg;
   }));
 
-  /**
-   * Set a variable in the current environment
-   * Usage: (setq variable-name value)
-   * Sets the variable to the given value and returns the value
-   * The variable name can be a string or a symbol
-   */
-  interpreter.defineBuiltin("setq", raw((args: TLispValue[]) => {
-    if (args.length !== 2) {
-      throw new Error("setq requires exactly 2 arguments: variable name and value");
-    }
-
-    const [nameArg, valueArg] = args as [TLispValue, TLispValue];
-
-    if (!nameArg) {
-      throw new Error("setq first argument cannot be null");
-    }
-
-    let variableName: string;
-
-    if (nameArg.type === "string") {
-      variableName = nameArg.value as string;
-    } else if (nameArg.type === "symbol") {
-      variableName = nameArg.value as string;
-    } else {
-      throw new Error("setq first argument must be a string or symbol (variable name)");
-    }
-
-    // Define the variable in the global environment
-    interpreter.globalEnv.define(variableName, valueArg);
-
-    return valueArg;
-  }));
+  // NOTE: `setq` is a special form (alias of `set!`), not a builtin — see
+  // SPECIAL_FORMS in evaluator/special-form-dispatch.ts (BUG-31). Registering
+  // it here would shadow the special form and re-introduce eager evaluation of
+  // the name argument.
 }

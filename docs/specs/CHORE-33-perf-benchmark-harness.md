@@ -69,7 +69,7 @@ IMPORTANT: Execute every step in order, top to bottom.
 ### Build Microbenchmark 2: T-Lisp eval throughput (`bench/micro-tlisp.ts`)
 - Export `runTLispBench(_size: "small" | "medium" | "large"): BenchResult` (size is ignored for the eval benchmark; same command set regardless — keep the parameter for uniform dispatch).
 - Construct `new TLispInterpreterImpl()` (the editor runtime).
-- Evaluate the same command 10,000 times: `(progn (setq "x" (+ 1 1)) x)` — representative of the kind of small repeated command the keystroke path fires (cf. `src/editor/handlers/normal-handler.ts:48`). Use the quoted variable name because `setq` is an eager builtin in the current interpreter.
+- Evaluate the same command 10,000 times: `(progn (defvar x 0) (setq x (+ 1 1)) x)` — representative of the kind of small repeated command the keystroke path fires (cf. `src/editor/handlers/normal-handler.ts:48`).
 - Measure evals/sec. Set the floor based on the baseline measured during this chore.
 - Note: this benchmark will improve when RFC-019 Tier 2.3 (parse cache) lands. It exists now to give Tier 2 work a measurable target.
 

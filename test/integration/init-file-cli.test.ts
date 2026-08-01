@@ -104,7 +104,7 @@ describe('--init-file CLI Flag Integration Tests', () => {
 (key-bind "C-t" "(test-function)" "normal")
 
 (defkeymap "*test-keymap*")
-(setq "*test-keymap*" (keymap-define-key *test-keymap* "y" "test-down"))
+(setq *test-keymap* (keymap-define-key *test-keymap* "y" "test-down"))
 (keymap-set "normal" *test-keymap*)
 
 (editor-set-status "COMPLEX_INIT_LOADED")

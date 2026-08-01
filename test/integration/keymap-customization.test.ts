@@ -53,8 +53,8 @@ describe("Keymap Customization E2E", () => {
       const initContent = `
 ;; Custom keymap configuration
 (defkeymap "*my-custom-keymap*")
-(setq "*my-custom-keymap*" (keymap-define-key *my-custom-keymap* "j" "custom-down"))
-(setq "*my-custom-keymap*" (keymap-define-key *my-custom-keymap* "k" "custom-up"))
+(setq *my-custom-keymap* (keymap-define-key *my-custom-keymap* "j" "custom-down"))
+(setq *my-custom-keymap* (keymap-define-key *my-custom-keymap* "k" "custom-up"))
 
 ;; Register the keymap for normal mode
 (keymap-set "normal" *my-custom-keymap*)
@@ -136,7 +136,7 @@ describe("Keymap Customization E2E", () => {
       const initContent = `
 ;; Override default 'j' binding
 (defkeymap "*override-keymap*")
-(setq "*override-keymap*" (keymap-define-key *override-keymap* "j" "my-custom-command"))
+(setq *override-keymap* (keymap-define-key *override-keymap* "j" "my-custom-command"))
 (keymap-set "normal" *override-keymap*)
 `;
       filesystem.writeFile(tempConfigPath, initContent);
@@ -162,9 +162,9 @@ describe("Keymap Customization E2E", () => {
       const initContent = `
 ;; Multiple custom bindings
 (defkeymap "*multi-keymap*")
-(setq "*multi-keymap*" (keymap-define-key *multi-keymap* "j" "cmd1"))
-(setq "*multi-keymap*" (keymap-define-key *multi-keymap* "k" "cmd2"))
-(setq "*multi-keymap*" (keymap-define-key *multi-keymap* "l" "cmd3"))
+(setq *multi-keymap* (keymap-define-key *multi-keymap* "j" "cmd1"))
+(setq *multi-keymap* (keymap-define-key *multi-keymap* "k" "cmd2"))
+(setq *multi-keymap* (keymap-define-key *multi-keymap* "l" "cmd3"))
 (keymap-set "normal" *multi-keymap*)
 `;
       filesystem.writeFile(tempConfigPath, initContent);
@@ -193,12 +193,12 @@ describe("Keymap Customization E2E", () => {
       const tmaxrcContent = `
 ;; Normal mode keymap
 (defkeymap "*normal-custom*")
-(setq "*normal-custom*" (keymap-define-key *normal-custom* "j" "normal-cmd-j"))
+(setq *normal-custom* (keymap-define-key *normal-custom* "j" "normal-cmd-j"))
 (keymap-set "normal" *normal-custom*)
 
 ;; Insert mode keymap
 (defkeymap "*insert-custom*")
-(setq "*insert-custom*" (keymap-define-key *insert-custom* "j" "insert-cmd-j"))
+(setq *insert-custom* (keymap-define-key *insert-custom* "j" "insert-cmd-j"))
 (keymap-set "insert" *insert-custom*)
 `;
       filesystem.writeFile(tempConfigPath, tmaxrcContent);
@@ -285,8 +285,8 @@ describe("Keymap Customization E2E", () => {
     test("should allow listing keys in keymap at runtime", async () => {
       const tmaxrcContent = `
 (defkeymap "*keys-test*")
-(setq "*keys-test*" (keymap-define-key *keys-test* "a" "cmd-a"))
-(setq "*keys-test*" (keymap-define-key *keys-test* "b" "cmd-b"))
+(setq *keys-test* (keymap-define-key *keys-test* "a" "cmd-a"))
+(setq *keys-test* (keymap-define-key *keys-test* "b" "cmd-b"))
 (keymap-set "normal" *keys-test*)
 `;
       filesystem.writeFile(tempConfigPath, tmaxrcContent);

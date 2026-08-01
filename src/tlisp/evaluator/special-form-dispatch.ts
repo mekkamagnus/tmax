@@ -78,6 +78,10 @@ export const SPECIAL_FORMS: Readonly<Record<string, SpecialFormMeta>> = {
   defun: { category: "sync-only", executor: "DEFUN", minArity: 4, description: "(defun name params [docstring] body...)" },
   defvar: { category: "sync-only", executor: "DEFVAR", minArity: 3, description: "(defvar name value)" },
   "set!": { category: "sync-only", executor: "SET", minArity: 3, description: "(set! name value)" },
+  // setq is the standard Lisp/Emacs alias of set!: the name is an unevaluated
+  // symbol, not a string. Registered here (not as a builtin) so the evaluator
+  // does not pre-evaluate the name argument. See BUG-31.
+  setq: { category: "sync-only", executor: "SET", minArity: 3, description: "(setq name value) — alias of set!; name is a symbol, not evaluated" },
   "current-module": { category: "sync-only", executor: "CURRENT_MODULE", minArity: 1, description: "(current-module)" },
   provide: { category: "sync-only", executor: "PROVIDE", minArity: 2, description: "(provide \"feature\")" },
   featurep: { category: "sync-only", executor: "FEATUREP", minArity: 2, description: "(featurep \"feature\")" },

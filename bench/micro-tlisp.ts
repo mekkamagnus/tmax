@@ -29,12 +29,13 @@ const WARMUP = 50;
 const FLOOR_MS = 500;
 
 /**
- * Representative small command. `setq` is an eager builtin; the quoted
- * variable name keeps the form simple. `(+ 1 1)` exercises arithmetic +
- * the parse pipeline. `progn` returns the second form (`x`) so the result
- * is well-defined and cheap to check.
+ * Representative small command. `defvar` binds `x`, then `setq` mutates it
+ * (setq is a special form / alias of set!, so the name is an unevaluated
+ * symbol — BUG-31). `(+ 1 1)` exercises arithmetic + the parse pipeline.
+ * `progn` returns the second form (`x`) so the result is well-defined and
+ * cheap to check.
  */
-const COMMAND = '(progn (setq "x" (+ 1 1)) x)';
+const COMMAND = '(progn (defvar x 0) (setq x (+ 1 1)) x)';
 
 /** Estimated serialized size of the command, in bytes (input cost per op). */
 const BYTES_PER_OP = COMMAND.length;

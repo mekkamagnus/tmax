@@ -4,6 +4,12 @@ Records of significant architectural decisions. Each ADR describes the context, 
 
 Ordered most-recent first (highest ADR number = most recent decision). Topic groupings preserved within each section.
 
+## Recent — Alpha readiness push (ADR 0143+)
+
+| File | Decision | Related |
+|------|----------|---------|
+| [ADR-0143-setq-special-form.md](ADR-0143-setq-special-form.md) | #41 / BUG-31: `setq` is a special form (alias of `set!`, routed to the existing SET executor) — the name argument is no longer pre-evaluated, fixing accumulator loops + ghost bindings; the eager builtin is removed and string-name callers migrated to symbol form | #41, [BUG-31](../specs/BUG-31-setq-special-form.md) |
+
 ## Recent — Test-helper consolidation (ADR 0122)
 
 | File | Decision | Related |
