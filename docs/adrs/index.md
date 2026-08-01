@@ -18,6 +18,7 @@ Ordered most-recent first (highest ADR number = most recent decision). Topic gro
 | [ADR-0150-init-file-daemon.md](ADR-0150-init-file-daemon.md) | #56 / BUG-38: `--init-file` honored in daemon mode — threaded through `TmaxServer` ctor → `startEditor` → `loadInitFilePublic` (was hardcoded `undefined` → default), plus `server.ts` entry parse + `bin/tmax` parse/forward + help/guard | #56, [BUG-38](../specs/BUG-38-init-file-daemon.md) |
 | [ADR-0151-teval-clean-error.md](ADR-0151-teval-clean-error.md) | #61 / BUG-39: `tmax -e` failures print a clean single-line T-Lisp error (the eval/command/query catches now print `error.message`, not the whole `Error` object that Bun rendered as a ~14-line stack trace) | #61, [BUG-39](../specs/BUG-39-teval-error-output.md) |
 | [ADR-0152-task-either-bracket-racetimeout.md](ADR-0152-task-either-bracket-racetimeout.md) | #40 / CHORE-66: additive `TaskEither.bracket` (acquire/use/release, guaranteed best-effort cleanup) + `raceTimeout` (race a deadline; loser absorbed; timer cleared) — FP primitives enabling #16 (bracket) and #17 (raceTimeout) | #40, [CHORE-66](../specs/CHORE-66-task-either-bracket-racetimeout.md) |
+| [ADR-0153-tmaxclient-package-bin.md](ADR-0153-tmaxclient-package-bin.md) | #44 / BUG-40: `tmaxclient` added to `package.json` bin — the documented diagnostic CLI was unreachable after `install -g` (only tmax/tlisp/trt/tmax-use were linked); one-line addition, ships in the tarball, links on install | #44, [BUG-40](../specs/BUG-40-tmaxclient-package-bin.md) |
 
 ## Recent — Test-helper consolidation (ADR 0122)
 

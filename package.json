@@ -45,6 +45,7 @@
   },
   "bin": {
     "tmax": "./bin/tmax",
+    "tmaxclient": "./bin/tmaxclient",
     "tlisp": "./bin/tlisp",
     "trt": "./bin/trt",
     "tmax-use": "./bin/tmax-use"
