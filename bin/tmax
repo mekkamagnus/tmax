@@ -87,7 +87,12 @@ ensure_daemon() {
 
   # Capture daemon startup output for diagnostics on failure
   local daemon_log
-  daemon_log=$(mktemp /tmp/tmax-daemon-start.XXXXXX.log)
+  # Trailing-X template: BSD/macOS mktemp only substitutes a TRAILING run of X's.
+  # The prior `/tmp/tmax-daemon-start.XXXXXX.log` had `.log` after the X's, so
+  # every call returned the same literal path -> the first caller won and every
+  # later/concurrent caller hit "mkstemp failed: File exists", aborting
+  # ensure_daemon under `set -e` and locking out ALL tmax use. #53 / BUG-35.
+  daemon_log=$(mktemp /tmp/tmax-daemon-start.XXXXXX)
 
   # Start daemon in background (from project root so relative paths resolve)
   (cd "$PROJECT_DIR" && TMAX_SOCKET="$SOCKET" bun "$DAEMON" >"$daemon_log" 2>&1) &
