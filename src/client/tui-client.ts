@@ -65,8 +65,8 @@ function render(state: EditorState) {
     : undefined;
 
   // Dim the splash screen in *scratch* (like vim's intro). Client-side detection:
-  // no filename + line 1 starts with "  tmax" = the splash sentinel.
-  if (!state.currentFilename && getLine(1)?.startsWith("  tmax")) {
+  // no filename + line 0 starts with "  tmax" = the splash sentinel.
+  if (!state.currentFilename && getLine(0)?.startsWith("  tmax")) {
     spans = [];
     for (let i = vt; i < vt + bufferHeight; i++) {
       const lineText = getLine(i);

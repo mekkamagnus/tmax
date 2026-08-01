@@ -141,7 +141,6 @@ export class TextBufferImpl implements TextBuffer {
    * checks for this sentinel).
    */
   static readonly SPLASH_TEXT = [
-    "",
     "  tmax — extensible terminal editor",
     "  T-Lisp at the core · zero dependencies · runs on Bun",
     "",
@@ -152,7 +151,6 @@ export class TextBufferImpl implements TextBuffer {
     "  :w       Save",
     "",
     "  Version 0.2.0 (Alpha)",
-    "",
   ].join("\n");
 
   constructor(
