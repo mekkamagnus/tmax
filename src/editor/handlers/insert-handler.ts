@@ -26,6 +26,8 @@ export async function handleInsertMode(editor: EditorDispatchPort, key: string, 
 
   // Handle printable characters in insert mode
   if (key.length === 1 && key >= " " && key <= "~") {
+    // Clear the splash screen on first keystroke (like vim's intro).
+    editor.executeCommand("(when (and (string= (buffer-name) \"*scratch*\") (string-prefix-p \"  tmax\" (buffer-text))) (cursor-move 0 0) (let ((n (buffer-line-count))) (while (> n 0) (setq n (- n 1)) (buffer-delete-line))) (cursor-move 0 0))");
     const escapedKey = editor.escapeKeyForTLisp(key);
     editor.executeCommand(`(buffer-insert "${escapedKey}")`);
   }

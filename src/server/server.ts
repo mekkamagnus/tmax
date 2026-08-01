@@ -268,8 +268,30 @@ export class TmaxServer {
       throw new Error(init.left);
     }
 
+    // --clean: skip ALL workspace loading — truly fresh start. Don't touch
+    // disk workspaces; create a minimal in-memory default. #58/BUG-47.
+    if (this.cleanStart) {
+      this.activeWorkspaceId = 'default';
+      const fresh = await this.workspaceManager.create('default').run();
+      if (Either.isLeft(fresh)) {
+        // 'default' already exists on disk — load it but apply a fresh
+        // *scratch* buffer so the user doesn't see leaked state.
+        const loaded = await this.workspaceManager.load('default').run();
+        if (Either.isRight(loaded)) {
+          this.workspaces.set('default', loaded.right);
+          // Don't applyWorkspace — let startEditor create a fresh *scratch*.
+          return;
+        }
+      } else {
+        this.workspaces.set('default', fresh.right);
+        this.editor.applyWorkspace(fresh.right);
+        return;
+      }
+      return;
+    }
+
     const list = await this.workspaceManager.list().run();
-    if (!this.cleanStart && Either.isRight(list) && list.right.length > 0) {
+    if (Either.isRight(list) && list.right.length > 0) {
       // N2: prefer last-workspace if available, otherwise most-recently-accessed
       const lastWorkspace = await this.readLastWorkspace();
       this.activeWorkspaceId = lastWorkspace && list.right.some(m => m.name === lastWorkspace)
@@ -898,9 +920,6 @@ export class TmaxServer {
     await this.initializeWorkspaces();
 
     // --clean: start on *scratch* regardless of what the restored workspace had.
-    // The workspace state (leaked buffers) is still loaded, but the user lands on
-    // a clean *scratch* buffer, not a stale tmp file or expression string.
-    // #58 / BUG-47.
     if (this.cleanStart) {
       this.editor.getInterpreter().execute('(buffer-switch "*scratch*")');
       this.editor.logMessage('Clean start (--clean): opened *scratch*', 'info');
@@ -909,6 +928,9 @@ export class TmaxServer {
     await this.editor.ensureCoreBindingsLoadedPublic();
     await this.editor.loadInitFilePublic(this.initFilePath);
     this.registerWorkspaceBuiltins();
+
+    // Show splash screen in *scratch* if it's empty (no file opened).
+    this.editor.showSplashIfEmpty();
 
     // I1: auto-save timer — save dirty workspaces every 30s
 	    this.autoSaveTimer = setInterval(async () => {

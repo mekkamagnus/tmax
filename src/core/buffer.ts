@@ -135,6 +135,26 @@ class GapBufferEngine {
  * Functional text buffer implementation using gap buffer
  */
 export class TextBufferImpl implements TextBuffer {
+  /**
+   * Splash text shown in *scratch* when the editor opens with no file.
+   * Similar to vim's intro screen. Cleared on first keystroke (insert-handler
+   * checks for this sentinel).
+   */
+  static readonly SPLASH_TEXT = [
+    "",
+    "  tmax — extensible terminal editor",
+    "  T-Lisp at the core · zero dependencies · runs on Bun",
+    "",
+    "  i        Start typing (insert mode)",
+    "  :e FILE  Open a file",
+    "  :q       Quit",
+    "  SPC ;    M-x command palette",
+    "  :w       Save",
+    "",
+    "  Version 0.2.0 (Alpha)",
+    "",
+  ].join("\n");
+
   constructor(
     private readonly gapBuffer: GapBufferEngine,
     private readonly lines: ReadonlyArray<string>,

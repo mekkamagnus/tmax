@@ -2814,7 +2814,21 @@ export class Editor {
     // Create default buffer if no editable buffer is selected. The messages
     // buffer is created during logging and must not suppress scratch startup.
     if (!this.model.currentBuffer) {
-      this.createBuffer("*scratch*", "");
+      this.createBuffer("*scratch*", TextBufferImpl.SPLASH_TEXT);
+    }
+  }
+
+  /**
+   * Show the splash screen in *scratch* if it exists and is empty.
+   * Called by the daemon after all init is complete.
+   */
+  showSplashIfEmpty(): void {
+    const scratch = this.buffers.get("*scratch*");
+    if (scratch) {
+      const content = scratch.getContent();
+      if (Either.isRight(content) && content.right === "") {
+        this.createBuffer("*scratch*", TextBufferImpl.SPLASH_TEXT);
+      }
     }
   }
 
