@@ -205,7 +205,7 @@ class TmaxClient {
     try {
       return await this.sendRequest('eval', { code, ...extraParams });
     } catch (error) {
-      console.error(`Error evaluating code:`, error);
+      console.error('Error evaluating code:', error instanceof Error ? error.message : String(error));
       process.exit(1);
     }
   }
@@ -217,7 +217,7 @@ class TmaxClient {
     try {
       return await this.sendRequest('command', { command, ...params });
     } catch (error) {
-      console.error(`Error executing command ${command}:`, error);
+      console.error(`Error executing command ${command}:`, error instanceof Error ? error.message : String(error));
       process.exit(1);
     }
   }
@@ -229,7 +229,7 @@ class TmaxClient {
     try {
       return await this.sendRequest('query', { query, ...params });
     } catch (error) {
-      console.error(`Error querying server:`, error);
+      console.error('Error querying server:', error instanceof Error ? error.message : String(error));
       process.exit(1);
     }
   }
