@@ -17,7 +17,7 @@ You can watch each issue's verify-gate live with `/workflows`.
 
 1. SURVEY. `gh issue list --state open --json number,title,labels`. Skip `codex-rejected` / `wontfix` / `blocked`. If none remain → DONE, STOP.
 
-2. PICK A BATCH (Option 2). Choose up to N=3 **independent** issues — non-overlapping touched files, so their merges can't conflict. Priority: `codex-approved` first, then `codex-concerns` / `refactor` / `test` with a spec ready, lowest number first. Shrink the batch if fewer are independent; a batch of 1 is fine.
+2. PICK A BATCH (Option 2). Choose up to N=3 **independent** issues — non-overlapping touched files, so their merges can't conflict. Priority: `alpha-blocker` first (the alpha push — these carry the `alpha` label), then `codex-approved`, then `codex-concerns` / `refactor` / `test` with a spec ready, lowest number first. Shrink the batch if fewer are independent; a batch of 1 is fine.
 
 3. FOR EACH ISSUE IN THE BATCH — concurrently, each in its own worktree:
    a. **Worktree.** Create a sibling worktree on `issue-<n>` from current `main`. Record `baseSha = $(git rev-parse HEAD)`.
@@ -44,7 +44,12 @@ You can watch each issue's verify-gate live with `/workflows`.
 
 5. CLOSE. For each landed issue, close it with a comment linking the spec path, the ADR path, the verify-gate verdict, and the green test output.
 
-6. ADVANCE. If open non-blocked issues remain, `ScheduleWakeup` (~60–270s — you're mid-work, keep the cache warm) to run the next cycle. If none remain, STOP.
+6. AUTO-UNBLOCK. Whenever you close an issue #N, re-check every open issue carrying the `blocked` label and unblock any whose blockers have ALL landed. This is what lets the alpha dependency chain flow through the loop unattended (#41→#48, #42→#45→#49→#51, #43→#46, #44→#47, #50←#45).
+   - `gh issue list --state open --label blocked --json number,body`
+   - For each, parse the blocker numbers from its body — the banner line reads `> ⛔ **Blocked by #X, #Y** — …`; extract every `#NNN` token.
+   - For each blocker number, check `gh issue view <b> --json state -q '.state'`. If ALL blockers are now `CLOSED`, remove the `blocked` label (`gh issue edit <num> --remove-label blocked`) and comment "Unblocked — blockers #X (…) landed; ready to implement." If any blocker is still open, leave the label on.
+
+7. ADVANCE. If open non-blocked issues remain, `ScheduleWakeup` (~60–270s — you're mid-work, keep the cache warm) to run the next cycle. If none remain, STOP.
 
 ================================================
 
