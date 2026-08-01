@@ -236,11 +236,22 @@ export class BindingRuntime {
         // Returning the literal fallback path mirrors the prior Editor behavior.
         return "~/.config/tmax/init.tlisp";
       }
-      this.deps.evalCode(initContent);
+      // Capture the result — was discarded, so parse/eval errors were silently
+      // swallowed while the log falsely reported "Loaded init file". #59 / BUG-48.
+      const result = this.deps.evalCode(initContent);
 
-      initLog.info('Loaded init file', {
-        data: { path: initFile }
-      });
+      if (Either.isLeft(result)) {
+        const errMsg = result.left.message ?? 'Unknown init file error';
+        // Surface to the user (status line) + log as error, not "Loaded".
+        this.deps.setStatusMessage(`Init file error: ${errMsg}`);
+        initLog.info('Init file evaluation FAILED', {
+          data: { path: initFile, error: errMsg }
+        });
+      } else {
+        initLog.info('Loaded init file', {
+          data: { path: initFile }
+        });
+      }
 
       // Log any keymaps that were registered (caller supplies the mode list).
       if (registeredKeymaps && registeredKeymaps.length > 0) {

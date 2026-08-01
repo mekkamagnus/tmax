@@ -26,6 +26,7 @@ Ordered most-recent first (highest ADR number = most recent decision). Topic gro
 | [ADR-0158-emacs-symbol-aliases.md](ADR-0158-emacs-symbol-aliases.md) | #51 / BUG-45: Emacs-conventional aliases (`buffer-name`, `current-buffer-name`, `switch-to-buffer`, `open-file`) added as thin T-Lisp wrappers over the working primitives; `documentation.ts` save-file key-bind example fixed | #51, [BUG-45](../specs/BUG-45-emacs-symbol-aliases.md) |
 | [ADR-0159-sweep-macos-lsof-a.md](ADR-0159-sweep-macos-lsof-a.md) | #57 / BUG-46: `sweep` adds the `-a` AND-selector to `lsof -t -U` → `lsof -t -a -U` — macOS `lsof` was ORing selectors (155 false-positive pids) so every tmax daemon was misclassified canonical-live and orphans were never reaped | #57, [BUG-46](../specs/BUG-46-sweep-macos-lsof.md) |
 | [ADR-0160-clean-start.md](ADR-0160-clean-start.md) | #58 / BUG-47: `--clean` flag — skip workspace restore + land on `*scratch*` (was inheriting 50+ leaked buffers on every daemon start); restore-by-default unchanged, `--clean` opt-in | #58, [BUG-47](../specs/BUG-47-clean-start.md) |
+| [ADR-0161-malformed-init-feedback.md](ADR-0161-malformed-init-feedback.md) | #59 / BUG-48: malformed `init.tlisp` surfaces a status-line error (`setStatusMessage`) instead of being silently swallowed; the "Loaded" log only fires on success | #59, [BUG-48](../specs/BUG-48-malformed-init-feedback.md) |
 
 ## Recent — Test-helper consolidation (ADR 0122)
 
