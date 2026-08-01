@@ -1,5 +1,5 @@
 (defmodule editor/commands/buffers
-  (export buffer-detail-more-recent-p buffer-detail-candidate buffer-completion-table switch-buffer-accept switch-buffer buffer-name current-buffer-name switch-to-buffer open-file)
+  (export buffer-detail-more-recent-p buffer-detail-candidate buffer-completion-table switch-buffer-accept switch-buffer buffer-name current-buffer-name switch-to-buffer open-file revert-buffer)
 
 ;; buffers.tlisp --- Interactive buffer completion
 
@@ -55,4 +55,11 @@
 (defun open-file (filename)
   "Open FILENAME (alias of find-file-open)."
   (find-file-open filename))
+
+(defun revert-buffer ()
+  "Reload the current buffer's file from disk (alias of find-file-open on buffer-filename)."
+  (let ((fn (buffer-filename)))
+    (if fn
+      (find-file-open fn)
+      (message "Buffer has no associated file"))))
 )

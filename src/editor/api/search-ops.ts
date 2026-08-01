@@ -51,19 +51,23 @@ function findNextMatch(
   text: string,
   pattern: string,
   startLine: number,
-  startColumn: number
+  startColumn: number,
+  atPoint: boolean = false,
 ): { line: number; column: number } | null {
   const lines = text.split('\n');
 
-  // Start searching from current position + 1 to find next occurrence
+  // For at-point (isearch), start AT the current position; for vim / and *,
+  // start at current + 1 to advance past the cursor. #73 / BUG-56.
   let currentLine = startLine;
-  let currentColumn = startColumn + 1;
+  let currentColumn = atPoint ? startColumn : startColumn + 1;
 
   // Check if there's a match at the current position
-  const currentLineText = lines[currentLine];
-  if (currentLineText && currentLineText.indexOf(pattern) === startColumn) {
-    // Skip past this match
-    currentColumn = startColumn + pattern.length;
+  if (!atPoint) {
+    const currentLineText = lines[currentLine];
+    if (currentLineText && currentLineText.indexOf(pattern) === startColumn) {
+      // Skip past this match
+      currentColumn = startColumn + pattern.length;
+    }
   }
 
   // Search forward through the buffer
@@ -754,7 +758,7 @@ export function createSearchOps(
 
     const text = contentResult.right;
     const match = s.isearchDirection === "forward"
-      ? findNextMatch(text, s.isearchPattern, s.isearchOriginLine, s.isearchOriginColumn)
+      ? findNextMatch(text, s.isearchPattern, s.isearchOriginLine, s.isearchOriginColumn, true)
       : findPreviousMatch(text, s.isearchPattern, s.isearchOriginLine, s.isearchOriginColumn);
 
     // Build highlight ranges for all matches
@@ -819,7 +823,7 @@ export function createSearchOps(
 
     const text = contentResult.right;
     const match = s.isearchDirection === "forward"
-      ? findNextMatch(text, s.isearchPattern, s.isearchOriginLine, s.isearchOriginColumn)
+      ? findNextMatch(text, s.isearchPattern, s.isearchOriginLine, s.isearchOriginColumn, true)
       : findPreviousMatch(text, s.isearchPattern, s.isearchOriginLine, s.isearchOriginColumn);
 
     const lines = text.split('\n');

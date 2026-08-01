@@ -37,7 +37,7 @@ The daemon/client architecture mirrors Emacs (`tmax --daemon` / `tmaxclient`), s
 - ✅ Frame-based multi-client support (independent viewports, shared buffers)
 - ✅ TUI client with 200ms state polling
 - ✅ CLI client for eval, insert, buffers, ping, messages queries
-- ✅ Unified `tmax` CLI with auto-daemon-start
+- ✅ Unified `tmax` CLI (embedded editor + daemon/client)
 - ✅ AI agent control via JSON-RPC 2.0 protocol
 
 ### T-Lisp Integration
@@ -71,7 +71,7 @@ git clone https://github.com/mekkamagnus/tmax.git
 cd tmax
 
 # Install dependencies
-bun install
+bun install   # dev dependencies only (runtime has zero external deps)
 
 # Make the launcher executable
 chmod +x bin/tmax
@@ -85,7 +85,7 @@ source ~/.bashrc
 
 ### Daemon/Client (Recommended)
 ```bash
-# Start tmax with a file (auto-starts daemon if needed)
+# Start tmax with a file (runs the embedded editor)
 tmax filename.txt
 
 # Start daemon only (no TUI)
@@ -286,7 +286,7 @@ tmax/
 ### Available Scripts
 ```bash
 # Development
-tmax                     # Start the editor (auto-daemon)
+tmax                     # Start the editor (embedded)
 bun run dev              # Start with auto-reload
 bun run tlisp            # Run standalone T-Lisp REPL
 bun run repl             # Compatibility alias for standalone T-Lisp REPL

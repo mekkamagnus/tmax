@@ -358,8 +358,6 @@ Options:
   --ping                 Check if server running
   --stop                 Stop the running daemon
   -n, --no-wait         Don't wait for buffer to close
-  -c                     Open in new frame/buffer (not implemented yet)
-  -nw                   No window mode (not implemented yet, for $EDITOR)
   -s, --socket PATH     Custom socket path
   -h, --help            Show this help message
 
