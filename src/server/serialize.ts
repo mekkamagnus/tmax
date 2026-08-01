@@ -1,17 +1,44 @@
 import { TextBufferImpl } from "../core/buffer.ts";
 import type { EditorState, Tab, Window } from "../core/contracts/editor.ts";
 import type { TextBuffer } from "../core/contracts/buffer.ts";
+import { Either } from "../utils/task-either.ts";
 import type { WorkspaceState, WorkspaceData, BufferMetadata, BufferModeState } from "../core/contracts/workspace.ts";
 import type { SerializedEditorState } from "./rpc/types.ts";
 
-function bufferContent(buffer: EditorState["currentBuffer"]): string {
-  if (!buffer) return "";
-  const result = buffer.getContent();
-  return result._tag === "Right" ? result.right : "";
+/**
+ * Default rows serialized when no frame `terminalSize` is known (issue #46).
+ * Matches the standard 24-row terminal minus the status line + minibuffer.
+ * Callers with a real terminal height pass `renderHeight = height - 2`.
+ */
+export const DEFAULT_RENDER_HEIGHT = 22;
+
+/**
+ * Resolve the viewport height for serialization from a frame's recorded
+ * `terminalSize` (issue #46). Returns `height - 2` (status line + minibuffer)
+ * when known, otherwise {@link DEFAULT_RENDER_HEIGHT}. Handlers call this then
+ * pass the result to {@link editorStateToJson}.
+ */
+export function renderHeightForTerminalSize(
+  terminalSize: { width?: number; height?: number } | null | undefined,
+): number {
+  if (terminalSize && typeof terminalSize.height === "number" && terminalSize.height > 2) {
+    return terminalSize.height - 2;
+  }
+  return DEFAULT_RENDER_HEIGHT;
 }
 
 function numberOr(value: unknown, fallback: number): number {
   return typeof value === "number" ? value : fallback;
+}
+
+/**
+ * Read the line count of a buffer, unwrapping the Either. Returns 0 on a
+ * missing buffer or a Left (never throws — serialization must stay total).
+ */
+function lineCountOf(buffer: EditorState["currentBuffer"]): number {
+  if (!buffer) return 0;
+  const result = buffer.getLineCount();
+  return result && result._tag === "Right" ? result.right : 0;
 }
 
 function deserializeWindow(raw: unknown): Window | null {
@@ -25,9 +52,7 @@ function deserializeWindow(raw: unknown): Window | null {
 
   return {
     id: record.id,
-    buffer: TextBufferImpl.create(
-      typeof record.bufferContent === "string" ? record.bufferContent : "",
-    ),
+    buffer: TextBufferImpl.create(""),
     bufferName: typeof record.bufferName === "string" ? record.bufferName : undefined,
     cursorLine: numberOr(record.cursorLine, 0),
     cursorColumn: numberOr(record.cursorColumn, 0),
@@ -49,14 +74,47 @@ function deserializeTab(raw: unknown): Tab | null {
   return {
     id: record.id,
     label: record.label,
-    buffer: TextBufferImpl.create(
-      typeof record.bufferContent === "string" ? record.bufferContent : "",
-    ),
+    buffer: TextBufferImpl.create(""),
     bufferName: typeof record.bufferName === "string" ? record.bufferName : undefined,
   };
 }
 
-export function editorStateToJson(state: EditorState): SerializedEditorState {
+/**
+ * Serialize editor state to its viewport-only wire form (issue #46).
+ *
+ * `renderHeight` is the number of viewport rows to embed (default 22 = a 24-row
+ * terminal minus status line + minibuffer). When a frame's real `terminalSize`
+ * is known, pass `height - 2`. The wire carries ONLY those rows — not the full
+ * buffer — so cost is O(viewport) per response regardless of file size.
+ *
+ * `bufferRevision` is a per-response counter (Date.now()) the client diffs to
+ * detect change in O(1) instead of `JSON.stringify`-ing the whole state.
+ */
+export function editorStateToJson(
+  state: EditorState,
+  renderHeight: number = DEFAULT_RENDER_HEIGHT,
+): SerializedEditorState {
+  const buffer = state.currentBuffer;
+  const viewportTop = Math.max(0, state.viewportTop);
+  const rows = Math.max(1, Math.floor(renderHeight));
+
+  // Compute visibleLines: O(viewport), never O(file).
+  const visibleLines: string[] = [];
+  if (buffer) {
+    for (let i = 0; i < rows; i++) {
+      const lineResult = buffer.getLine(viewportTop + i);
+      visibleLines.push(lineResult && lineResult._tag === "Right" ? lineResult.right : "");
+    }
+  } else {
+    for (let i = 0; i < rows; i++) visibleLines.push("");
+  }
+
+  const totalLines = lineCountOf(buffer);
+
+  // Windows/tabs carry metadata only — their buffer text is NOT on the wire.
+  const windows = state.windows?.map(({ buffer: _buffer, ...rest }) => rest) ?? [];
+  const tabs = state.tabs?.map(({ buffer: _buffer, ...rest }) => rest) ?? [];
+
   return {
     cursorPosition: state.cursorPosition,
     mode: state.mode,
@@ -73,22 +131,82 @@ export function editorStateToJson(state: EditorState): SerializedEditorState {
     minibufferState: state.minibufferState,
     minibufferView: state.minibufferView,
     cursorFocus: state.cursorFocus ?? "buffer",
-    bufferContent: bufferContent(state.currentBuffer),
-    windows: state.windows?.map(window => {
-      const { buffer, ...rest } = window;
-      return { ...rest, bufferContent: bufferContent(buffer) };
-    }) ?? [],
+    visibleLines,
+    totalLines,
+    bufferRevision: Date.now(),
+    windows,
     currentWindowIndex: state.currentWindowIndex ?? 0,
-    tabs: state.tabs?.map(tab => {
-      const { buffer, ...rest } = tab;
-      return { ...rest, bufferContent: bufferContent(buffer) };
-    }) ?? [],
+    tabs,
     currentTabIndex: state.currentTabIndex ?? 0,
     whichKeyActive: state.whichKeyActive ?? false,
     whichKeyPrefix: state.whichKeyPrefix ?? "",
     whichKeyBindings: state.whichKeyBindings ?? [],
     whichKeyPopup: state.whichKeyPopup ?? null,
   };
+}
+
+/**
+ * Viewport-backed TextBuffer used client-side after deserialization (issue #46).
+ *
+ * Only the viewport rows that were on the wire are known. `getLine(i)` returns
+ * the mapped row when `viewportTop <= i < viewportTop + visibleLines.length`,
+ * otherwise `""`. `getLineCount()` returns `totalLines` so the gutter /
+ * scrollback indicator render correctly. `getContent()` joins the viewport —
+ * it is used only by non-rendering paths (e.g. capture's text fallback) and is
+ * explicitly NOT the full file.
+ *
+ * Mutation operations (`insert`/`delete`/`replace`) are unsupported: the
+ * client never edits the deserialized state — every keystroke round-trips to
+ * the daemon, which owns the real buffer. They return Left so any accidental
+ * call fails loudly instead of silently corrupting state.
+ */
+class ViewportBuffer implements TextBuffer {
+  private readonly rows: readonly string[];
+  private readonly top: number;
+  private readonly count: number;
+
+  constructor(visibleLines: string[], viewportTop: number, totalLines: number) {
+    this.rows = visibleLines;
+    this.top = Math.max(0, viewportTop);
+    this.count = Math.max(totalLines, visibleLines.length);
+  }
+
+  getContent(): Either<string, string> {
+    return Either.right(this.rows.join("\n"));
+  }
+
+  getLine(lineNumber: number): Either<string, string> {
+    const offset = lineNumber - this.top;
+    if (offset < 0 || offset >= this.rows.length) return Either.right("");
+    return Either.right(this.rows[offset] ?? "");
+  }
+
+  getLineCount(): Either<string, number> {
+    return Either.right(this.count);
+  }
+
+  insert(): Either<string, TextBuffer> {
+    return Either.left("ViewportBuffer is read-only: edits must round-trip through the daemon (issue #46).");
+  }
+
+  delete(): Either<string, TextBuffer> {
+    return Either.left("ViewportBuffer is read-only: edits must round-trip through the daemon (issue #46).");
+  }
+
+  replace(): Either<string, TextBuffer> {
+    return Either.left("ViewportBuffer is read-only: edits must round-trip through the daemon (issue #46).");
+  }
+
+  getText(): Either<string, string> {
+    return Either.right(this.rows.join("\n"));
+  }
+
+  getStats(): Either<string, { lines: number; characters: number; words: number }> {
+    const text = this.rows.join("\n");
+    const characters = text.length;
+    const words = text.length === 0 ? 0 : text.split(/\s+/).filter(Boolean).length;
+    return Either.right({ lines: this.count, characters, words });
+  }
 }
 
 export function jsonToEditorState(json: SerializedEditorState): EditorState;
@@ -102,8 +220,17 @@ export function jsonToEditorState(json: SerializedEditorState | Record<string, u
     ? record.tabs.map(deserializeTab).filter((tab): tab is Tab => tab !== null)
     : [];
 
+  // Viewport-backed current buffer (issue #46): reconstruct only the rows that
+  // were on the wire. Out-of-viewport getLine() returns "".
+  const visibleLines = Array.isArray(record.visibleLines)
+    ? (record.visibleLines as unknown[]).filter((v): v is string => typeof v === "string")
+    : [];
+  const viewportTop = numberOr(record.viewportTop, 0);
+  const totalLines = numberOr(record.totalLines, visibleLines.length);
+  const currentBuffer = new ViewportBuffer(visibleLines, viewportTop, totalLines);
+
   return {
-    currentBuffer: TextBufferImpl.create((record.bufferContent as string) || ""),
+    currentBuffer,
     cursorPosition: record.cursorPosition as EditorState["cursorPosition"],
     mode: record.mode as EditorState["mode"],
     statusMessage: record.statusMessage as string,

@@ -19,6 +19,9 @@ export class RemoteEditor {
   private pending = new Map<number, PendingRequest>();
   private responseBuffer = "";
   private cachedState!: EditorState;
+  /** Last `bufferRevision` seen from the daemon (issue #46). The TUI's 200ms
+   *  poll diffs this instead of `JSON.stringify`-ing the whole state — O(1). */
+  private _lastBufferRevision = 0;
   private _frameId: string | null = null;
   private _clientId: string | null = null;
   private workspaceId?: string;
@@ -26,6 +29,12 @@ export class RemoteEditor {
   constructor(socketPath?: string, workspaceId?: string) {
     this.socketPath = socketPath || defaultSocketPath();
     this.workspaceId = workspaceId;
+  }
+
+  /** The most recent daemon-side buffer revision (issue #46). O(1) change
+   *  signal for the TUI poll loop. */
+  get lastBufferRevision(): number {
+    return this._lastBufferRevision;
   }
 
   async start(): Promise<void> {
@@ -40,7 +49,7 @@ export class RemoteEditor {
     this._frameId = frameResult.frameId;
     // Get initial state for our frame
     const stateJson = await this.sendRequest("render-state", { frameId: this._frameId });
-    this.cachedState = jsonToEditorState(stateJson as Record<string, unknown>);
+    this.applyStateJson(stateJson as Record<string, unknown>);
   }
 
   get frameId(): string | null {
@@ -74,7 +83,7 @@ export class RemoteEditor {
     if (json.quitSignal) {
       throw new Error("EDITOR_QUIT_SIGNAL");
     }
-    this.cachedState = jsonToEditorState(json as Record<string, unknown>);
+    this.applyStateJson(json as Record<string, unknown>);
     return this.cachedState;
   }
 
@@ -84,8 +93,16 @@ export class RemoteEditor {
 
   async refreshState(): Promise<EditorState> {
     const stateJson = await this.sendRequest("render-state", { frameId: this._frameId });
-    this.cachedState = jsonToEditorState(stateJson as Record<string, unknown>);
+    this.applyStateJson(stateJson as Record<string, unknown>);
     return this.cachedState;
+  }
+
+  /** Build the cached EditorState from a render-state response and record the
+   *  daemon-side `bufferRevision` for O(1) poll change detection (issue #46). */
+  private applyStateJson(stateJson: Record<string, unknown>): void {
+    this.cachedState = jsonToEditorState(stateJson);
+    const rev = stateJson.bufferRevision;
+    this._lastBufferRevision = typeof rev === "number" ? rev : this._lastBufferRevision;
   }
 
   updateTerminalSize(_width: number, _height: number): void {

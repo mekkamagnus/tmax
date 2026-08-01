@@ -184,11 +184,25 @@ Requires a running tmax daemon. Start one with:
     throw error;
   }
 
-  // Poll for external changes every 200ms
+  // Poll for external changes every 200ms. O(1) change detection (issue #46):
+  // compare the daemon-side bufferRevision plus the display fields the render
+  // actually depends on — never JSON.stringify the whole (potentially large)
+  // state.
+  const lastRevision = -1;  // forces a render on the first poll
+  let lastPollRevision = lastRevision;
   pollInterval = setInterval(async () => {
     try {
       const current = await remote.refreshState();
-      if (JSON.stringify(current) !== JSON.stringify(lastState)) {
+      const rev = remote.lastBufferRevision;
+      const changed =
+        rev !== lastPollRevision ||
+        current.mode !== lastState.mode ||
+        current.viewportTop !== lastState.viewportTop ||
+        current.statusMessage !== lastState.statusMessage ||
+        current.cursorPosition.line !== lastState.cursorPosition.line ||
+        current.cursorPosition.column !== lastState.cursorPosition.column;
+      if (changed) {
+        lastPollRevision = rev;
         lastState = current;
         render(current);
         await remote.sendEvent("render", { terminalSize: getDims() });

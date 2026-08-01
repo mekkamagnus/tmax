@@ -38,9 +38,15 @@ export type { JsonValue } from "../../core/contracts/editor.ts";
  * Bump ONLY on a breaking wire-protocol change. Clients declare this on every
  * request envelope (`protocolVersion`); the daemon refuses a mismatch with a
  * machine-readable `protocol_mismatch` error (-32600) before dispatch.
- * Single source of truth — import this everywhere; never hardcode `1`.
+ * Single source of truth — import this everywhere; never hardcode the number.
+ *
+ * v2 (issue #46): the serialized editor state carries `visibleLines` (the
+ * viewport rows), `totalLines`, and a `bufferRevision` counter instead of the
+ * full `bufferContent`. Windows/tabs no longer carry `bufferContent` either.
+ * An old v1 client (expecting `bufferContent`) is refused so it can't silently
+ * render a blank viewport against a v2 daemon.
  */
-export const PROTOCOL_VERSION = 1;
+export const PROTOCOL_VERSION = 2;
 
 /**
  * Transition gate (RFC-025 #1). While `false`, clients that OMIT
@@ -161,10 +167,31 @@ export interface ShutdownResult { ok: true }
 /** Client-event acknowledgement. */
 export interface ClientEventResult { ok: true }
 
-export type SerializedWindow = Omit<Window, "buffer"> & { bufferContent: string };
-export type SerializedTab = Omit<Tab, "buffer"> & { bufferContent: string };
+/**
+ * Window metadata only — the per-window buffer text is NOT on the wire
+ * (issue #46). `Window.buffer` is dropped here; clients that need to render a
+ * split window re-fetch its viewport separately. Carrying every window's full
+ * text per keystroke was the O(file) bottleneck this protocol bump fixed.
+ */
+export type SerializedWindow = Omit<Window, "buffer">;
 
-/** Exact renderer-facing editor state emitted by `editorStateToJson`. */
+/** Tab metadata only — see {@link SerializedWindow}. */
+export type SerializedTab = Omit<Tab, "buffer">;
+
+/**
+ * Exact renderer-facing editor state emitted by `editorStateToJson`.
+ *
+ * Issue #46 — viewport-only wire form. The full buffer text is NEVER
+ * serialized. Instead the wire carries:
+ *  - `visibleLines`: the rows currently in the viewport (`viewportTop ..
+ *    viewportTop + renderHeight`), so a 2 MB file costs ~22 short strings per
+ *    keystroke instead of ~2.5 MB.
+ *  - `totalLines`: line count of the backing buffer (gutter width / scroll
+ *    indicator) — one number, not the whole file.
+ *  - `bufferRevision`: monotonic counter the client compares to its last value
+ *    to detect change in O(1) (was: `JSON.stringify(current) !==
+ *    JSON.stringify(lastState)`, which is O(file)).
+ */
 export interface SerializedEditorState {
   cursorPosition: Position;
   mode: EditorState["mode"];
@@ -181,7 +208,12 @@ export interface SerializedEditorState {
   minibufferState?: JsonValue;
   minibufferView?: MinibufferRenderView;
   cursorFocus: "buffer" | "command";
-  bufferContent: string;
+  /** Viewport rows for the current buffer (issue #46). `""` for out-of-range. */
+  visibleLines: string[];
+  /** Total line count of the current buffer (gutter / scroll indicator). */
+  totalLines: number;
+  /** Monotonic per-response revision — clients diff this, not the text. */
+  bufferRevision: number;
   windows: SerializedWindow[];
   currentWindowIndex: number;
   tabs: SerializedTab[];

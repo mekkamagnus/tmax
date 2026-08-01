@@ -379,7 +379,7 @@ describe('CHORE-44 Change 5 — typed JSON-RPC router (AC5.8)', () => {
     });
 
     test('validateProtocolVersion preserves a null/missing id on mismatch', () => {
-      const err = validateProtocolVersion({ jsonrpc: '2.0', method: 'ping', protocolVersion: 2 });
+      const err = validateProtocolVersion({ jsonrpc: '2.0', method: 'ping', protocolVersion: PROTOCOL_VERSION + 1 });
       expect(err).not.toBeNull();
       expect(err!.id).toBe(null);
     });

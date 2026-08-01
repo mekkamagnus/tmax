@@ -26,7 +26,7 @@ import type {
   KeypressParams, KeypressResult,
   SaveFileParams, SaveFileResult,
 } from "../types.ts";
-import { editorStateToJson } from "../../serialize.ts";
+import { editorStateToJson, renderHeightForTerminalSize } from "../../serialize.ts";
 import { Either } from "../../../utils/task-either.ts";
 /** Build the editing-domain handlers bound to a `ServerContext`. */
 export function createEditingHandlers(ctx: ServerContext): {
@@ -241,12 +241,17 @@ export function createEditingHandlers(ctx: ServerContext): {
           await ctx.editor.handleKey(key);
           ctx.captureActiveWorkspace();
           ctx.scheduleDirtyWorkspaceSave(ctx.getActiveWorkspaceId());
+          // Viewport-only wire (issue #46): embed only the rows the frame's
+          // terminal can show, derived from its recorded terminalSize.
+          const renderHeight = renderHeightForTerminalSize(
+            ctx.frameObservability.get(frameId)?.terminalSize,
+          );
           if (workspaceOverride) {
             ctx.syncEditorToAllFrames();
-            return editorStateToJson(ctx.editor.getEditorState());
+            return editorStateToJson(ctx.editor.getEditorState(), renderHeight);
           }
           ctx.syncEditorToFrame(frame);
-          return editorStateToJson(ctx.frameToEditorState(frame));
+          return editorStateToJson(ctx.frameToEditorState(frame), renderHeight);
         } finally {
           await ctx.restoreWorkspaceAfterOverride(workspaceOverride, previousWorkspaceId, previousFrameId);
         }

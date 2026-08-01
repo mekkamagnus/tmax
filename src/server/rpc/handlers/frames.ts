@@ -19,7 +19,7 @@ import type {
   ClientEventParams, ClientEventResult,
   StatusResult, ClientsResult, FramesResult,
 } from "../types.ts";
-import { editorStateToJson } from "../../serialize.ts";
+import { editorStateToJson, renderHeightForTerminalSize } from "../../serialize.ts";
 import { captureFrame } from "../../../render/capture-frame.ts";
 import { ansiLinesToHtmlDocument } from "../../../render/ansi-to-html.ts";
 
@@ -73,8 +73,13 @@ export function createFramesHandlers(ctx: ServerContext): {
   const renderState = async (params: RenderStateParams): Promise<RenderStateResult> => {
     if (params?.frameId) {
       const frame = ctx.getFrame(params.frameId);
-      // Read-only: return frame's own state directly, no workspace activation (C2)
-      return editorStateToJson(ctx.frameToEditorState(frame));
+      // Read-only: return frame's own state directly, no workspace activation (C2).
+      // Viewport-only wire (issue #46): embed only the rows this frame's
+      // terminal can show.
+      const renderHeight = renderHeightForTerminalSize(
+        ctx.frameObservability.get(params.frameId)?.terminalSize,
+      );
+      return editorStateToJson(ctx.frameToEditorState(frame), renderHeight);
     }
     return editorStateToJson(ctx.editor.getEditorState());
   };
