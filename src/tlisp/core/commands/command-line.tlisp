@@ -63,10 +63,13 @@ substitute/Dired/execute policy."
       ;; command names w/q/wq are not T-Lisp symbols, so the eval fallthrough
       ;; below would error on them; handle them explicitly here.
       ((or (string= line "w") (string= line "w!"))
-       (file-save))
-      ;; :wq / :x  — write then quit.
+       (save-buffer))
+      ;; :wq / :x  — write then quit. save-buffer is SYNCHRONOUS (writes via
+      ;; write-file-content) so editor-quit runs only AFTER the file is
+      ;; persisted — was (file-save) which is fire-and-forget and raced the
+      ;; quit (data loss). #50 / BUG-44.
       ((or (string= line "wq") (string= line "x"))
-       (progn (file-save) (editor-quit)))
+       (progn (save-buffer) (editor-quit)))
       ;; :q / :q! / :quit  — quit (discard unsaved changes for the ! form).
       ((or (string= line "q") (string= line "q!") (string= line "quit"))
        (editor-quit))

@@ -22,6 +22,7 @@ Ordered most-recent first (highest ADR number = most recent decision). Topic gro
 | [ADR-0154-launcher-diagnostic-dispatch.md](ADR-0154-launcher-diagnostic-dispatch.md) | #47 / BUG-41: `bin/tmax` dispatches documented diagnostic flags (`--messages`/`--status`/`--ping`/…) to tmaxclient (pass-through preserves modifiers; queries existing daemon) and errors loudly on unknown `--flags` (honoring POSIX `--`) | #47, [BUG-41](../specs/BUG-41-launcher-diagnostic-dispatch.md) |
 | [ADR-0155-parity-correctness-oracles.md](ADR-0155-parity-correctness-oracles.md) | #48 / CHORE-67: the evaluator sync/async parity tests now assert the CORRECT value (every case has an `expected`/`expectedError` oracle + `unwrap` helper), not just sync==async agreement — the masking defect that let the broken `setq` ship green is closed | #48, [CHORE-67](../specs/CHORE-67-parity-correctness-oracles.md) |
 | [ADR-0156-save-chain-repair.md](ADR-0156-save-chain-repair.md) | #49 / BUG-43: the T-Lisp save chain repaired — `set-buffer-modified-p` accepts nil (Emacs false); `quick-save`/`save-file` thin wrappers over `save-buffer` (SPC x s resolves); documentation.ts save-file refs valid | #49, [BUG-43](../specs/BUG-43-save-chain-repair.md) |
+| [ADR-0157-wq-save-gate.md](ADR-0157-wq-save-gate.md) | #50 / BUG-44: `:wq`/`:w` route through the sync `save-buffer` instead of async `file-save` — the save completes before `editor-quit` runs, closing the quit-vs-save data-loss race | #50, [BUG-44](../specs/BUG-44-wq-save-gate.md) |
 
 ## Recent — Test-helper consolidation (ADR 0122)
 
