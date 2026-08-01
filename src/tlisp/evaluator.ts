@@ -1527,18 +1527,21 @@ export class TLispEvaluator implements ModuleFormsContext, TestFormsContext {
    * @returns Either with error or macro symbol
    */
   private evalDefmacro(elements: TLispValue[], env: TLispEnvironment): Either<EvalError, TLispValue> {
-    if (elements.length !== 4) {
+    // Accept optional docstring (parity with defun). #67 / BUG-53.
+    if (elements.length !== 4 && elements.length !== 5) {
       return Either.left({
         type: 'EvalError',
         variant: 'SyntaxError',
-        message: "defmacro requires exactly 3 arguments: name, parameters, and body",
-        details: { expected: 4, actual: elements.length }
+        message: "defmacro requires 3 or 4 arguments: name, parameters, [docstring], and body",
+        details: { expected: "4 or 5", actual: elements.length }
       });
     }
 
     const name = elements[1];
     const parameters = elements[2];
-    const body = elements[3];
+    const hasDocstring = elements.length === 5 && elements[3]?.type === "string";
+    const docstring = hasDocstring ? elements[3] : undefined;
+    const body = hasDocstring ? elements[4] : elements[3];
 
     if (!name || !parameters || !body) {
       return Either.left({
