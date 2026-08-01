@@ -556,10 +556,14 @@ export function createBufferOps(
       return Either.left(argsValidation.left);
     }
 
-    const flagArg = args[0]!
-    const typeValidation = validateArgType(flagArg, "boolean", 0, "set-buffer-modified-p");
-    if (Either.isLeft(typeValidation)) {
-      return Either.left(typeValidation.left);
+    const flagArg = args[0]!;
+    // Accept nil as the false boolean (Emacs convention) — save-buffer uses
+    // (set-buffer-modified-p nil). #49 / BUG-43.
+    if (flagArg.type !== "nil") {
+      const typeValidation = validateArgType(flagArg, "boolean", 0, "set-buffer-modified-p");
+      if (Either.isLeft(typeValidation)) {
+        return Either.left(typeValidation.left);
+      }
     }
 
     if (!setBufferModified) {
@@ -572,7 +576,7 @@ export function createBufferOps(
       ));
     }
 
-    const flag = flagArg.value as boolean;
+    const flag = flagArg.type === "nil" ? false : (flagArg.value as boolean);
     setBufferModified(flag);
     return Either.right(createNil());
   });

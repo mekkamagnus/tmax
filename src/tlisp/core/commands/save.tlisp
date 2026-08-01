@@ -1,5 +1,5 @@
 (defmodule editor/commands/save
-  (export save-buffer)
+  (export save-buffer quick-save save-file)
 
 ;; save.tlisp — save-buffer command composed from primitives
 (defun save-buffer (&optional filename)
@@ -14,4 +14,14 @@
     (set-buffer-filename path)
     (set-buffer-modified-p nil)
     (message (concat "Saved " path))))
+
+;; quick-save / save-file — thin wrappers over save-buffer (SPC x s / M-x).
+;; #49 / BUG-43.
+(defun quick-save ()
+  "Save the current buffer to its associated file (SPC x s)."
+  (save-buffer))
+
+(defun save-file (filename)
+  "Save the current buffer to FILENAME."
+  (save-buffer filename))
 )
