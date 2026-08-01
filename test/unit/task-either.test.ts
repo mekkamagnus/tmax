@@ -331,3 +331,76 @@ describe("TaskEither", () => {
     }
   });
 });
+
+describe("TaskEither.bracket + raceTimeout (CHORE-66 / #40)", () => {
+  test("bracket runs release on use-success and returns the use result", async () => {
+    let released = false;
+    const result = await TaskEither.bracket(
+      TaskEither.right(42),
+      (n: number) => TaskEither.right(n * 2),
+      () => { released = true; return TaskEither.right<unknown, unknown>(undefined); },
+    ).run();
+    expect(released).toBe(true);
+    expect(Either.isRight(result)).toBe(true);
+    if (Either.isRight(result)) expect(result.right).toBe(84);
+  });
+
+  test("bracket runs release even when use fails; returns the use Left", async () => {
+    let released = false;
+    const acq: TaskEither<string, number> = TaskEither.right(42);
+    const result = await TaskEither.bracket(
+      acq,
+      () => TaskEither.left<string, number>("use-failed"),
+      () => { released = true; return TaskEither.right<unknown, unknown>(undefined); },
+    ).run();
+    expect(released).toBe(true);
+    expect(Either.isLeft(result)).toBe(true);
+    if (Either.isLeft(result)) expect(result.left).toBe("use-failed");
+  });
+
+  test("bracket does NOT call release when acquire fails", async () => {
+    let released = false;
+    const result = await TaskEither.bracket(
+      TaskEither.left<string, number>("acquire-failed"),
+      () => TaskEither.right(1),
+      () => { released = true; return TaskEither.right<unknown, unknown>(undefined); },
+    ).run();
+    expect(released).toBe(false);
+    expect(Either.isLeft(result)).toBe(true);
+    if (Either.isLeft(result)) expect(result.left).toBe("acquire-failed");
+  });
+
+  test("bracket release error does not mask the use result (best-effort)", async () => {
+    const result = await TaskEither.bracket(
+      TaskEither.right(7),
+      (n: number) => TaskEither.right(n + 1),
+      () => TaskEither.tryCatch(async () => { throw new Error("release boom"); }),
+    ).run();
+    expect(Either.isRight(result)).toBe(true); // use result preserved
+    if (Either.isRight(result)) expect(result.right).toBe(8);
+  });
+
+  test("raceTimeout returns the result when it settles before the deadline", async () => {
+    const fast = new TaskEither<string, number>(() => Promise.resolve(Either.right(5)));
+    const result = await fast.raceTimeout(1000).run();
+    expect(Either.isRight(result)).toBe(true);
+    if (Either.isRight(result)) expect(result.right).toBe(5);
+  });
+
+  test("raceTimeout resolves Left when the computation exceeds the deadline", async () => {
+    const slow = new TaskEither<string, number>(
+      () => new Promise((resolve) => setTimeout(() => resolve(Either.right(99)), 200)),
+    );
+    const result = await slow.raceTimeout(30).run();
+    expect(Either.isLeft(result)).toBe(true);
+  });
+
+  test("raceTimeout onTimeout() produces a typed Left", async () => {
+    const slow = new TaskEither<string, number>(
+      () => new Promise((resolve) => setTimeout(() => resolve(Either.right(99)), 200)),
+    );
+    const result = await slow.raceTimeout(20, () => "deadline").run();
+    expect(Either.isLeft(result)).toBe(true);
+    if (Either.isLeft(result)) expect(result.left).toBe("deadline");
+  });
+});

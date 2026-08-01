@@ -386,6 +386,83 @@ export class TaskEither<L, R> {
       }
     });
   }
+
+  /**
+   * Resource management: acquire a resource, use it, and GUARANTEE that release
+   * runs whether `use` succeeds or fails. If `acquire` fails, `release` is NOT
+   * called (nothing was acquired). Release is best-effort — its outcome is
+   * ignored so a cleanup error never masks the `use` result. CHORE-66 / #40.
+   *
+   * Enables FP-style prologue/epilogue (e.g. withWorkspaceOverride, #16).
+   */
+  static bracket<A, B, L>(
+    acquire: TaskEither<L, A>,
+    use: (resource: A) => TaskEither<L, B>,
+    release: (resource: A) => TaskEither<unknown, unknown>,
+  ): TaskEither<L, B> {
+    return new TaskEither(async () => {
+      const acquired = await acquire.run();
+      if (Either.isLeft(acquired)) {
+        return acquired; // nothing acquired — do not release
+      }
+      const resource = acquired.right;
+      let useResult: Either<L, B>;
+      try {
+        useResult = await use(resource).run();
+      } finally {
+        // Always release (best-effort); swallow release errors so they cannot
+        // mask the use result or prevent cleanup of an earlier allocation.
+        try {
+          await release(resource).run();
+        } catch {
+          /* best-effort: ignore release failures */
+        }
+      }
+      return useResult;
+    });
+  }
+
+  /**
+   * Race this TaskEither against a timeout. Resolves with the result if it
+   * settles within `ms`; otherwise resolves Left (the default is an Error, or
+   * `onTimeout()` for a typed Left). The underlying computation is not cancelled
+   * (JS promises can't be) but a rejection after timeout is absorbed. CHORE-66 / #40.
+   *
+   * Enables FP-style deadline gates (e.g. runOneGate, #17).
+   */
+  raceTimeout(ms: number, onTimeout?: () => L): TaskEither<L, R> {
+    return new TaskEither(async () => {
+      let handle: ReturnType<typeof setTimeout> | undefined;
+      const timeout = new Promise<{ tag: "timeout" }>((resolve) => {
+        handle = setTimeout(() => resolve({ tag: "timeout" }), ms);
+      });
+      type Settled = { tag: "result"; either: Either<L, R> };
+      // Wrap the computation so a rejection (post-timeout or otherwise) is
+      // absorbed into a Left rather than surfacing as an unhandled rejection.
+      const settled = (async (): Promise<Settled> => {
+        try {
+          return { tag: "result", either: await this.computation() };
+        } catch (error) {
+          return {
+            tag: "result",
+            either: Either.left(
+              (error instanceof Error ? error : new Error(String(error))) as unknown as L,
+            ) as Either<L, R>,
+          };
+        }
+      })();
+      const winner = await Promise.race([settled, timeout]);
+      // Release the deadline timer once the race is decided (avoids holding the
+      // process alive when the computation wins before the deadline). CHORE-66.
+      if (handle) clearTimeout(handle);
+      if (winner.tag === "result") {
+        return winner.either;
+      }
+      return Either.left(
+        (onTimeout ? onTimeout() : (new Error(`Operation timed out after ${ms}ms`) as unknown as L)),
+      );
+    });
+  }
 }
 
 /**
