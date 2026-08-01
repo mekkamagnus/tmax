@@ -1,18 +1,35 @@
 (defmodule editor/commands/save
   (export save-buffer quick-save save-file)
 
-;; save.tlisp — save-buffer command composed from primitives
-(defun save-buffer (&optional filename)
-  "Save current buffer to its associated file."
+;; Per-buffer mtime tracking for concurrent-modification detection (#65/BUG-55).
+(defvar saved-modtimes (hashmap))
+
+(defun save-buffer (&optional filename force)
+  "Save current buffer to its associated file. Refuses if the file changed
+on disk since open/last save — pass t as the second arg to force (:w!)."
   (let ((path (or filename (buffer-filename))))
     (unless path
       (message "Buffer has no associated file")
       (return-from save-buffer))
+    ;; Concurrent-modification check (#65 / BUG-55). Skip if force is truthy.
+    ;; known-mtime is nil on first save (nothing recorded yet) — the truthiness
+    ;; check short-circuits before string= so nil never reaches it.
+    (let ((known-mtime (hashmap-get saved-modtimes path))
+          (current-mtime (file-modtime path)))
+      (when (and known-mtime
+                 current-mtime
+                 (not (string= known-mtime current-mtime))
+                 (not force))
+        (message "File changed on disk since open — use :w! to force")
+        (return-from save-buffer)))
     (when (file-exists-p path)
       (make-backup-file path))
     (write-file-content path (buffer-text))
     (set-buffer-filename path)
     (set-buffer-modified-p nil)
+    ;; Record the mtime after saving so a subsequent external change is detected.
+    ;; hashmap-set returns a new hashmap (immutable) — must setq back.
+    (setq saved-modtimes (hashmap-set saved-modtimes path (file-modtime path)))
     (message (concat "Saved " path))))
 
 ;; quick-save / save-file — thin wrappers over save-buffer (SPC x s / M-x).
