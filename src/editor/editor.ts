@@ -2273,6 +2273,19 @@ export class Editor {
   }
 
   /**
+   * Associate the current buffer with a filename in `bufferMetadata`. The
+   * bootstrap path (main.ts) creates a file buffer via `createBuffer`, which
+   * only seeds `{ modified, recency }` — it does NOT record the filename. As a
+   * result the first `buffer-insert` re-derives `currentFilename` from the
+   * (absent) metadata and wipes it, so `:w` finds no file to save. Mirrors the
+   * metadata set `openFile` performs. BUG-58.
+   */
+  associateBufferFilename(filename: string): void {
+    const name = this.findBufferName(this.model.currentBuffer);
+    if (name) this.updateBufferMetadata(name, { filename, modified: false });
+  }
+
+  /**
    * Open a file (CHORE-42: the read is dispatched as an owner-`'openFile'`
    * `OpenFile` Cmd through the live effect layer; the public contract is
    * unchanged — a failed read updates status/logs, leaves the previous buffer
@@ -2802,6 +2815,15 @@ export class Editor {
    * The main event loop is handled by React components
    */
   async start(): Promise<void> {
+    // Idempotent: if the server already initialized (core bindings loaded),
+    // just flip the running flag — don't re-evaluate init files/macros, which
+    // would overwrite the editor's state (BUG-58: :w didn't save because
+    // editor.start() re-ran loadInitFile/loadSavedMacros after the server
+    // had already set up the file buffer).
+    if (this.coreBindingsLoaded) {
+      this.running = true;
+      return;
+    }
     this.running = true;
 
     // Load core bindings and user init file
@@ -2819,10 +2841,13 @@ export class Editor {
   }
 
   /**
-   * Show the splash screen in *scratch* if it exists and is empty.
-   * Called by the daemon after all init is complete.
+   * Show the splash screen in *scratch* if it exists, is empty, AND is the
+   * current buffer (no file was opened). Called by the daemon after all init.
    */
   showSplashIfEmpty(): void {
+    // Only show splash if *scratch* is the current buffer — don't hijack
+    // a file the user explicitly opened.
+    if (this.model.currentFilename) return;
     const scratch = this.buffers.get("*scratch*");
     if (scratch) {
       const content = scratch.getContent();

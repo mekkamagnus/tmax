@@ -269,23 +269,20 @@ export class TmaxServer {
     }
 
     // --clean: skip ALL workspace loading — truly fresh start. Don't touch
-    // disk workspaces; create a minimal in-memory default. #58/BUG-47.
+    // disk workspaces; just register the workspace for tracking. NEVER call
+    // applyWorkspace — it would overwrite the editor's pre-loaded file/buffer.
+    // #58/BUG-47 + BUG-58 (embedded editor :w didn't save).
     if (this.cleanStart) {
       this.activeWorkspaceId = 'default';
+      // Try to create; if it exists, load it — but DON'T apply it.
       const fresh = await this.workspaceManager.create('default').run();
-      if (Either.isLeft(fresh)) {
-        // 'default' already exists on disk — load it but apply a fresh
-        // *scratch* buffer so the user doesn't see leaked state.
+      if (Either.isRight(fresh)) {
+        this.workspaces.set('default', fresh.right);
+      } else {
         const loaded = await this.workspaceManager.load('default').run();
         if (Either.isRight(loaded)) {
           this.workspaces.set('default', loaded.right);
-          // Don't applyWorkspace — let startEditor create a fresh *scratch*.
-          return;
         }
-      } else {
-        this.workspaces.set('default', fresh.right);
-        this.editor.applyWorkspace(fresh.right);
-        return;
       }
       return;
     }
@@ -919,8 +916,12 @@ export class TmaxServer {
     this.editor.logMessage('Server started', 'info');
     await this.initializeWorkspaces();
 
-    // --clean: start on *scratch* regardless of what the restored workspace had.
-    if (this.cleanStart) {
+    // --clean skips workspace restore. But it must NOT discard a file the
+    // embedded editor was explicitly opened with (tmax file.md) — only force
+    // *scratch* when no file buffer is present (bare `tmax`). BUG-58: this
+    // unconditional buffer-switch was resetting currentBuffer to *scratch*
+    // after main.ts had already loaded the file, so :w saved nothing.
+    if (this.cleanStart && !this.editor.getState().currentFilename) {
       this.editor.getInterpreter().execute('(buffer-switch "*scratch*")');
       this.editor.logMessage('Clean start (--clean): opened *scratch*', 'info');
     }

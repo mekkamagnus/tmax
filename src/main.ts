@@ -247,6 +247,10 @@ Examples:
   editor.createBuffer(bufferName, content);
   if (filename !== undefined) {
     editor.applyUpdate({ type: "SetCurrentFilename", filename });
+    // Record the filename in bufferMetadata so save-buffer / buffer-filename
+    // resolve correctly. Without this, the first buffer-insert re-derives
+    // currentFilename from the (absent) metadata and wipes it. BUG-58.
+    editor.associateBufferFilename(filename);
   }
   if (statusMessage) {
     editor.applyUpdate({ type: "SetStatusMessage", message: statusMessage });
@@ -265,10 +269,11 @@ Examples:
   });
 
   // Phase 5a: Start embedded socket server (Emacs-style server-start).
-  // When no file is given, start clean — show *scratch* + splash, not the
-  // last workspace (vim-like behavior).
-  const embeddedCleanStart = fileArgs.length === 0;
-  const server = new TmaxServer(undefined, false, editor, initFilePath, embeddedCleanStart);
+  // The embedded editor NEVER restores workspace state — the file (if any) was
+  // explicitly opened by the user. Workspace persistence is a daemon/client
+  // feature. cleanStart=true prevents initializeWorkspaces from overwriting
+  // the just-loaded file + filename.
+  const server = new TmaxServer(undefined, false, editor, initFilePath, true);
   try {
     await server.startEditor();
 
