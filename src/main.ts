@@ -129,7 +129,8 @@ Examples:
     });
 
     console.log('Starting tmax server daemon...');
-    const server = new TmaxServer(undefined, false, undefined, initFilePath);
+    const cleanStart = args.includes('--clean');
+    const server = new TmaxServer(undefined, false, undefined, initFilePath, cleanStart);
     try {
       await server.start();
 

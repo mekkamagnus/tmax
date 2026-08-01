@@ -124,6 +124,8 @@ export class TmaxServer {
   /** Custom init file path (--init-file), threaded to loadInitFilePublic in
    *  startEditor so the daemon honors it (was hardcoded undefined -> default). #56/BUG-38. */
   private initFilePath?: string;
+  /** Skip workspace restore on startup (--clean) — start fresh *scratch*. #58/BUG-47. */
+  private cleanStart: boolean;
   private clients: Map<string, ClientConnection>;
   private frames: Map<string, Frame> = new Map();
   private workspaces: Map<string, WorkspaceState> = new Map();
@@ -147,12 +149,13 @@ export class TmaxServer {
 	  private maxDirtyIntervalMs: number;
 	  private lastWorkspaceFile: string;
 
-  constructor(socketPath?: string, testMode: boolean = false, editor?: Editor, initFilePath?: string) {
+  constructor(socketPath?: string, testMode: boolean = false, editor?: Editor, initFilePath?: string, cleanStart: boolean = false) {
     this.socketPath = socketPath || this.getDefaultSocketPath();
     this.server = createServer();
     this.clients = new Map();
     this.testMode = testMode;
     this.initFilePath = initFilePath;
+    this.cleanStart = cleanStart;
 	    this.workspaceManager = new WorkspaceManager();
 	    this.autoSaveIntervalMs = Number(process.env.TMAX_WORKSPACE_AUTOSAVE_MS ?? 30_000);
 	    this.debounceSaveMs = Number(process.env.TMAX_WORKSPACE_DEBOUNCE_MS ?? 5_000);
@@ -266,7 +269,7 @@ export class TmaxServer {
     }
 
     const list = await this.workspaceManager.list().run();
-    if (Either.isRight(list) && list.right.length > 0) {
+    if (!this.cleanStart && Either.isRight(list) && list.right.length > 0) {
       // N2: prefer last-workspace if available, otherwise most-recently-accessed
       const lastWorkspace = await this.readLastWorkspace();
       this.activeWorkspaceId = lastWorkspace && list.right.some(m => m.name === lastWorkspace)
@@ -893,6 +896,15 @@ export class TmaxServer {
   async startEditor(): Promise<void> {
     this.editor.logMessage('Server started', 'info');
     await this.initializeWorkspaces();
+
+    // --clean: start on *scratch* regardless of what the restored workspace had.
+    // The workspace state (leaked buffers) is still loaded, but the user lands on
+    // a clean *scratch* buffer, not a stale tmp file or expression string.
+    // #58 / BUG-47.
+    if (this.cleanStart) {
+      this.editor.getInterpreter().execute('(buffer-switch "*scratch*")');
+      this.editor.logMessage('Clean start (--clean): opened *scratch*', 'info');
+    }
 
     await this.editor.ensureCoreBindingsLoadedPublic();
     await this.editor.loadInitFilePublic(this.initFilePath);
@@ -1611,7 +1623,8 @@ if (import.meta.main) {
   const argv = process.argv.slice(2);
   const initIdx = argv.indexOf("--init-file");
   const initFilePath = initIdx !== -1 ? argv[initIdx + 1] : undefined;
-  const server = new TmaxServer(process.env.TMAX_SOCKET, false, undefined, initFilePath);
+  const cleanStart = argv.includes("--clean");
+  const server = new TmaxServer(process.env.TMAX_SOCKET, false, undefined, initFilePath, cleanStart);
   server.start().catch((err) => {
     console.error('Failed to start server:', err);
     process.exit(1);

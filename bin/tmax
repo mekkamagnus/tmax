@@ -27,6 +27,7 @@ Options:
   --workspace-kill NAME  Delete a workspace
   -e EXPR        Evaluate T-Lisp expression (like emacsclient -e)
   --init-file FILE  Use custom init file (default: ~/.config/tmax/init.tlisp)
+  --clean           Start with a fresh *scratch* (skip workspace restore)
   --stop         Stop the running daemon
   --sweep        List orphaned tmax daemons + stale sockets (dry-run)
   --sweep --apply  Reap orphans (SIGTERM→SIGKILL) + remove stale sockets/locks
@@ -99,6 +100,7 @@ ensure_daemon() {
   # Forward --init-file so the daemon honors the custom config. #56 / BUG-38.
   local daemon_args=("$DAEMON")
   if [ -n "$INIT_FILE" ]; then daemon_args+=(--init-file "$INIT_FILE"); fi
+  if [ "$CLEAN_START" = true ]; then daemon_args+=(--clean); fi
   (cd "$PROJECT_DIR" && TMAX_SOCKET="$SOCKET" bun "${daemon_args[@]}" >"$daemon_log" 2>&1) &
   local daemon_pid=$!
 
@@ -134,6 +136,7 @@ TEST_MODE=false
 TEST_JSON=false
 TEST_TARGET=""
 INIT_FILE=""
+CLEAN_START=false
 end_of_opts=false
 FILES=()
 
@@ -157,6 +160,7 @@ for arg in "$@"; do
     --workspace-kill) shift_mode=workspace_kill ;;
     -e)             shift_mode=eval ;;
     --init-file)    shift_mode=init_file ;;
+    --clean)        CLEAN_START=true ;;
     --stop)         STOP=true ;;
     --sweep)        SWEEP=true ;;
     --apply)        SWEEP_APPLY=true ;;
