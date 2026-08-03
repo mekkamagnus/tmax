@@ -397,17 +397,18 @@ describe("CHORE-44 Change 3 — BindingRuntime policy (core/fallback/init)", () 
     expect(evaluated).toContain("(defvar x 1)");
   });
 
-  test("loadInitFile falls back to ~/.config/tmax/init.tlisp path on default read failure", async () => {
-    // Seed the literal ~ path so the fallback read succeeds.
-    const { rt } = makeBinding({ "~/.config/tmax/init.tlisp": "(defvar y 2)" });
-    // Override HOME so the default path computation is deterministic; the
-    // MockFileSystem reads by exact key, so the default ${HOME}/.config/...
-    // key is NOT seeded → read fails → fallback to literal ~ path succeeds.
+  test("loadInitFile returns the HOME-based default path on default-read-failure (no literal-~ fallback — #74/#115)", async () => {
+    // #74 removed the literal-'~' fallback (it was dead code: no filesystem
+    // expands '~'). On a default (undefined) path whose read fails, loadInitFile
+    // returns the HOME-based default path and uses defaults silently — it does
+    // NOT fall back to a literal '~'. (BUG-66/#115: this test previously
+    // asserted the removed '~' fallback and was stale.)
+    const { rt } = makeBinding({}); // nothing seeded → default-path read fails
     const oldHome = process.env.HOME;
     process.env.HOME = "/tmp/tmax-binding-test-no-such";
     try {
       const resolved = await rt.loadInitFile(undefined, []);
-      expect(resolved).toBe("~/.config/tmax/init.tlisp");
+      expect(resolved).toBe("/tmp/tmax-binding-test-no-such/.config/tmax/init.tlisp");
     } finally {
       process.env.HOME = oldHome;
     }

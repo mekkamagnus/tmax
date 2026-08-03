@@ -1,4 +1,12 @@
-# Bug (pre-existing): `loadInitFile` fallback unit test fails — core bindings resolve to a bogus `/core/...` path
+# Bug (pre-existing): `loadInitFile` fallback unit test fails — stale test asserting #74's removed literal-`~` fallback
+
+> ## ⚠️ ROOT-CAUSE CORRECTION (verify-gate-style investigation, 2026-08-03) — supersedes the "bogus `/core/...` path" framing below
+>
+> The original framing (core bindings resolve to a leading-slash `/core/...` path) was a **misdiagnosis**. The `/core/bindings/...` "File not found" warnings are **expected** output from `editor-runtime-delegation.test.ts`'s `loadCoreBindings`-falls-back test (line 382), which **deliberately** passes `/core/bindings` as a mock path. Production resolves the bindings root correctly via a file-relative path (`src/editor/editor.ts:1691`: `` `${import.meta.dir}/../tlisp/core/bindings` ``) — there is no leading-slash bug.
+>
+> The **actual** failing test is `editor-runtime-delegation.test.ts:400` ("loadInitFile falls back to ~/.config/tmax/init.tlisp …"). It asserts a **literal-`~/.config/...` fallback** in `loadInitFile` that **issue #74 intentionally removed** ("Remove misleading literal-'~' fallback branch" — the branch was dead code: no filesystem expands `~`). #74 removed the behavior but missed updating this test, so it went stale. `loadInitFile` (binding-runtime.ts:234-237) now returns the **HOME-based default path** on a default-read failure (silent, uses defaults) — no literal-`~` fallback.
+>
+> **Re-scoped fix (the actual change):** update the stale test to assert the current (`#74`) behavior — `loadInitFile(undefined)` on a failed default read returns the HOME-based default path, not a literal `~`. No production code change (production is correct). This is the same "stale test, not a code bug" shape as the BUG-60 correction.
 
 ## Goals
 
