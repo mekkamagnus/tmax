@@ -573,6 +573,7 @@ function buildEditorAPIContributions(): readonly EditorAPIContribution[] {
           ctx.access,
           (buffer) => { ctx.setCurrentBuffer(buffer); },
           (line) => { ctx.setCursorLine(line); },
+          (modified: boolean) => ctx.setBufferModified?.(modified),
         );
       },
     },

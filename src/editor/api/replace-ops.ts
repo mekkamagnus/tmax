@@ -66,7 +66,8 @@ export interface ReplaceState {
 export function createReplaceOps(
   access: EditorModelAccess,
   setCurrentBuffer: (buffer: TextBuffer) => void,
-  setCursorLine: (line: number) => void
+  setCursorLine: (line: number) => void,
+  setBufferModified?: (flag: boolean) => void
 ): Map<string, TLispFunctionImpl> {
   // CHORE-44 Change 1: per-editor replace session state lives on the
   // model-held `access.getModel().session.replace` object; mutated in place.
@@ -268,6 +269,7 @@ export function createReplaceOps(
     }
 
     setCurrentBuffer(insertResult.right);
+    setBufferModified?.(true);
     return Either.right(createNil());
   });
 
@@ -405,6 +407,7 @@ export function createReplaceOps(
     }
 
     setCurrentBuffer(insertResult.right);
+    setBufferModified?.(true);
 
     // Calculate text length difference for adjusting subsequent matches
     const lengthDiff = replaceState.replaceText.length - (match.endCol - match.startCol);

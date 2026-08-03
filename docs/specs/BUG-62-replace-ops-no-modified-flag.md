@@ -7,10 +7,10 @@
 
 ## Completion Criteria (Definition of Done)
 
-- [ ] `replace-apply-all` and `replace-apply-current` (and any other replace mutator) set the buffer-modified flag after mutating, mirroring `buffer-ops.ts`.
-- [ ] The `(set-buffer-modified-p t)` workaround in `src/tlisp/core/commands/replace.tlisp` (added for SPEC-085) is removed once the primitive is fixed, and `eval-36-replace-string.yaml` still passes.
-- [ ] A unit or e2e assertion that `(buffer-modified-p)` is `true` after `replace-apply-all`, **with no T-Lisp workaround**.
-- [ ] `bun run typecheck:src` + `bun run test:unit` + `bun run test:tmax-use` pass.
+- [x] `replace-apply-all` and `replace-apply-current` (and `buffer-replace-range`) set the buffer-modified flag after mutating, mirroring `buffer-ops.ts`.
+- [x] The `(set-buffer-modified-p t)` workaround in `src/tlisp/core/commands/replace.tlisp` (added for SPEC-085) is removed, and `eval-36-replace-string.yaml` still passes.
+- [x] A unit assertion that the modified flag is set after `replace-apply-all` AND `buffer-replace-range`, **with no T-Lisp workaround** (`test/unit/query-replace.test.ts`).
+- [x] `bun run typecheck:src` clean; `bun run test:unit` introduces **no new regression** — the suite has pre-existing red in `incremental-search.test.ts` (BUG-64/#113, byte-identical on the base commit, unrelated to this fix); this fix's own suite `query-replace.test.ts` is 8/8 green; `eval-36` (test:tmax-use) passes. (Full `test:unit` green is blocked on #113, not this fix.)
 
 ## Bug Description
 

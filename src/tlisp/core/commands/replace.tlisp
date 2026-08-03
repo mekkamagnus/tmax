@@ -20,7 +20,6 @@
     (replace-state-init find replace matches)
     (let ((count (replace-apply-all)))
       (replace-exit)
-      (set-buffer-modified-p t)
       (message (concat "Replaced " (number-to-string count) " occurrences"))
       count)))
 

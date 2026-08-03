@@ -69,6 +69,27 @@ describe("Query Replace Operations", () => {
     }
   });
 
+  test("buffer-replace-range marks the buffer modified (BUG-62 / #111)", () => {
+    const modifiedCalls: boolean[] = [];
+    const ops = createReplaceOps(
+      {
+        getModel: () => ({ ...initialModel(), currentBuffer: buffer, cursorPosition: { line: cursorLine, column: 0 } }),
+        applyModel: (m) => {
+          if (m.currentBuffer) buffer = m.currentBuffer as TextBufferImpl;
+          cursorLine = m.cursorPosition.line;
+        },
+      },
+      (b) => { buffer = b as TextBufferImpl; },
+      (l) => { cursorLine = l; },
+      (flag: boolean) => { modifiedCalls.push(flag); },
+    );
+    const result = ops.get("buffer-replace-range")!([
+      createNumber(0), createNumber(0), createNumber(0), createNumber(5), createString("HELLO"),
+    ]);
+    expect(Either.isRight(result)).toBe(true);
+    expect(modifiedCalls).toContain(true); // BUG-62: every replace mutator sets the flag
+  });
+
   test("replace-apply-all replaces all matches end-to-end", () => {
     const ops = getOps();
     // Step 1: find matches
@@ -90,6 +111,34 @@ describe("Query Replace Operations", () => {
       expect(expectRight(content)).toContain("HI goodbye");
       expect(expectRight(content)).not.toContain("hello");
     }
+  });
+
+  test("replace-apply-all marks the buffer modified (BUG-62 / #111)", () => {
+    // Regression: replace-apply-all mutated the buffer via setCurrentBuffer but
+    // never set the modified flag, so (buffer-modified-p) read CLEAN after a
+    // replace — a save would skip / a quit would discard (data-loss class). The
+    // primitive that owns the mutation must mark the buffer modified itself
+    // (TS-owns-mutation ⇒ TS-owns-flag, per src/editor/CLAUDE.md). Previously a
+    // T-Lisp (set-buffer-modified-p t) workaround papered over it; that is now
+    // removed from replace.tlisp, so this guard is the real fix.
+    const modifiedCalls: boolean[] = [];
+    const ops = createReplaceOps(
+      {
+        getModel: () => ({ ...initialModel(), currentBuffer: buffer, cursorPosition: { line: cursorLine, column: 0 } }),
+        applyModel: (m) => {
+          if (m.currentBuffer) buffer = m.currentBuffer as TextBufferImpl;
+          cursorLine = m.cursorPosition.line;
+        },
+      },
+      (b) => { buffer = b as TextBufferImpl; },
+      (l) => { cursorLine = l; },
+      (flag: boolean) => { modifiedCalls.push(flag); },
+    );
+    const matches = expectRight(ops.get("replace-find-matches")!([createString("hello")]));
+    expect(Either.isRight(ops.get("replace-state-init")!([createString("hello"), createString("HI"), matches]))).toBe(true);
+    expect(modifiedCalls).toEqual([]); // not yet mutated
+    expect(Either.isRight(ops.get("replace-apply-all")!([]))).toBe(true);
+    expect(modifiedCalls).toContain(true); // BUG-62: mutation must mark the buffer modified
   });
 
   test("replace-exit clears state", () => {
