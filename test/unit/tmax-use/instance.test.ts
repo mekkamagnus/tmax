@@ -54,6 +54,37 @@ describe('TmaxInstance.launch', () => {
     expect(madeClient).toBe(true);
     expect(calls.length).toBe(0);
   }, 15000);
+
+  test('launch isolates the workspace via TMAX_WORKSPACE_DIR (BUG-61/#110)', async () => {
+    // The daemon must be spawned with an isolated workspace dir (derived from
+    // the socket path) so it does NOT restore the real ~/.config/tmax workspace.
+    let capturedEnv: Record<string, string> | undefined;
+    const { client } = fakeClient();
+    await TmaxInstance.launch(
+      { socketPath: '/tmp/test-launch-ws.socket' },
+      {
+        spawnDaemon: (spec) => { capturedEnv = spec.env; return TaskEither.right(fakeChild()); },
+        stopDaemon: () => TaskEither.right(undefined),
+        makeClient: () => client,
+      },
+    ).run();
+    expect(capturedEnv).toBeDefined();
+    expect(capturedEnv!.TMAX_WORKSPACE_DIR).toBe('/tmp/test-launch-ws.socket-ws');
+  }, 15000);
+
+  test('opts.env.TMAX_WORKSPACE_DIR overrides the derived default (BUG-61/#110)', async () => {
+    let capturedEnv: Record<string, string> | undefined;
+    const { client } = fakeClient();
+    await TmaxInstance.launch(
+      { socketPath: '/tmp/test-launch-ws2.socket', env: { TMAX_WORKSPACE_DIR: '/custom/ws' } },
+      {
+        spawnDaemon: (spec) => { capturedEnv = spec.env; return TaskEither.right(fakeChild()); },
+        stopDaemon: () => TaskEither.right(undefined),
+        makeClient: () => client,
+      },
+    ).run();
+    expect(capturedEnv!.TMAX_WORKSPACE_DIR).toBe('/custom/ws');
+  }, 15000);
 });
 
 describe('TmaxInstance.connect', () => {

@@ -101,6 +101,8 @@ function stopDaemonReal(child: ChildProcessWithoutNullStreams | null, socketPath
       try { child.kill('SIGKILL'); } catch { /* noop */ }
     }
     try { unlinkSync(socketPath); } catch { /* already gone */ }
+    // BUG-61: best-effort remove the isolated workspace dir we created.
+    try { await fs.rm(`${socketPath}-ws`, { recursive: true, force: true }); } catch { /* already gone */ }
     return rightE<void>(undefined);
   });
 }
@@ -123,7 +125,14 @@ export class TmaxInstance {
     const socketPath = opts.socketPath ?? defaultSocketPath();
     const serverPath = opts.serverPath ?? DEFAULT_SERVER_PATH;
     const cwd = opts.cwd ?? PROJECT_ROOT;
-    const env = opts.env ?? {};
+    // BUG-61: isolate the daemon's workspace per instance so it does NOT
+    //    restore the real ~/.config/tmax/workspaces/default.json (stale test
+    //    buffers were polluting playbook runs — e.g. eval-24's 3-buffer cycle
+    //    broke when a leftover buffer was restored). core/workspace.ts:42
+    //    honors TMAX_WORKSPACE_DIR over the HOME-based default. Derived from
+    //    the unique socketPath so it pairs with the socket (+ cleanup).
+    const workspaceDir = `${socketPath}-ws`;
+    const env = { TMAX_WORKSPACE_DIR: workspaceDir, ...opts.env };
     const fullDeps: InstanceDeps = {
       spawnDaemon: deps?.spawnDaemon ?? spawnDaemonReal,
       stopDaemon: deps?.stopDaemon ?? stopDaemonReal,
@@ -137,6 +146,8 @@ export class TmaxInstance {
     const preCleanup: TaskEither<TmaxUseError, void> = TaskEither.from(async () => {
       try { await fullDeps.stopDaemon(null, socketPath).run(); } catch { /* fine */ }
       try { await fs.unlink(socketPath); } catch { /* fine */ }
+      // BUG-61: remove a lingering isolated workspace dir from a prior run.
+      try { await fs.rm(`${socketPath}-ws`, { recursive: true, force: true }); } catch { /* fine */ }
       return rightE<void>(undefined);
     });
 
