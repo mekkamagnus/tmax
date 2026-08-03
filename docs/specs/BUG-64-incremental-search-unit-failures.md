@@ -6,9 +6,9 @@
 
 ## Completion Criteria (Definition of Done)
 
-- [ ] `bun test test/unit/incremental-search.test.ts` → all green.
-- [ ] Root cause identified (cursor-on-match semantics, pattern-narrowing, and/or the full start→update→update→backspace→finish workflow) and either fixed or the tests re-baselined to documented intended behavior.
-- [ ] `bun run test:unit` advances past this file (no longer aborts the batch on these failures).
+- [x] `bun test test/unit/incremental-search.test.ts` → all green (30/30).
+- [x] Root cause identified + tests re-baselined: the 3 tests started the cursor at (0,0) — ON the `h` in `"hello world"` — so #73's at-point isearch (commit `693b214`; `findNextMatch` `atPoint=true` → search from the cursor INCLUSIVE) trivially self-matched (0,0) instead of advancing. Fix: start the cursor OFF the pattern (col 6) in each of the 3 tests, so the at-point search advances to the next `h` at (1,4); the (1,4) expectations are unchanged and the tests stay meaningful (cursor advances (0,6)→(1,4)). The production at-point behavior (#73 / BUG-56) is intentional and correct — no impl change.
+- [x] `bun run test:unit` advances past this file (30/30 green; this was the last pre-existing `test:unit` red after #115/#116, so the full unit suite is now green).
 
 ## Bug Description
 

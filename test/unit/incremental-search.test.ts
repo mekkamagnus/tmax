@@ -178,8 +178,12 @@ describe("Incremental Search", () => {
   // ---------------------------------------------------------------------------
   describe("search-incremental-update", () => {
     test("moves cursor to match when pattern is found", () => {
-      // findNextMatch searches from originColumn + 1. Starting at (0, 0),
-      // it skips col 0 in line 0, finds "h" at line 1 col 4 ("foo hello bar")
+      // #73 made isearch match at-point (findNextMatch searches from the
+      // cursor INCLUSIVE). Start OFF the pattern — col 6 in line 0 ("hello
+      // world" → 'w') — so the at-point search advances to the next "h" at
+      // line 1 col 4 ("foo hello bar").
+      cursorLine = 0;
+      cursorColumn = 6;
       ops.get("search-incremental-start")!([createString("forward")]);
 
       const result = ops.get("search-incremental-update")!([createString("h")]);
@@ -205,8 +209,10 @@ describe("Incremental Search", () => {
     });
 
     test("narrows match as pattern grows", () => {
-      // Start at (0,0). "h" matches at (1,4). Adding "e" gives "he" --
-      // still matches "hello" at (1,4) since "he" is a prefix of "hello"
+      // #73 at-point: start OFF the pattern (col 6) so the search advances.
+      // "h" → (1,4); adding "e" → "he" still matches "hello" at (1,4).
+      cursorLine = 0;
+      cursorColumn = 6;
       ops.get("search-incremental-start")!([createString("forward")]);
 
       ops.get("search-incremental-update")!([createString("h")]);
@@ -405,8 +411,10 @@ describe("Incremental Search", () => {
   // ---------------------------------------------------------------------------
   describe("full isearch workflow", () => {
     test("start -> update -> update -> backspace -> finish", () => {
+      // #73 at-point: start OFF the pattern (col 6, not col 0 which is 'h')
+      // so the incremental search advances into the buffer.
       cursorLine = 0;
-      cursorColumn = 0;
+      cursorColumn = 6;
 
       // Start search
       ops.get("search-incremental-start")!([createString("forward")]);
@@ -427,9 +435,8 @@ describe("Incremental Search", () => {
       // Finish -- cursor should be on a "hello" match
       const result = ops.get("search-incremental-finish")!([]);
       expect(Either.isRight(result)).toBe(true);
-      // From origin (0,0), findNextMatch skips to (1,4) for "h" initially,
-      // but after building "hello", the search finds it wherever the
-      // incremental pattern settled.
+      // From origin (0,6), the at-point search advances to "hello" at (1,4)
+      // and stays there as the pattern grows to "hello".
       expect(cursorColumn).toBe(4); // col 4 in line 1 where "hello" starts
       expect(statusMessage).toContain("hello");
     });
