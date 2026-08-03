@@ -1,5 +1,33 @@
 # Bug: tmax-use `evalReady` gate does not wait for T-Lisp module load → intermittent "Undefined symbol" under load
 
+> ## ⚠️ ROOT-CAUSE CORRECTION (verify-gate finding, 2026-08-03) — supersedes the async-race framing below
+>
+> The **async-race premise of this spec is DISPROVEN.** `server.ts start()` is sequential —
+> `await startEditor()` (which synchronously runs `loadCoreBindings` → the `(require-module …)`
+> chain via synchronous `interpreter.execute`; `loadModuleFromDisk` returns `Either`, not a
+> `Promise`) runs **before** `await startSocket()` (`server.ts:1055-1058`). The socket file
+> therefore **cannot appear until `find-file` is already registered** — there is no race between
+> `evalReady` and module load on the spawned-daemon path.
+>
+> The **real root cause** of the observed `Undefined symbol: find-file` is `loadCoreBindings`
+> **swallowing module-load errors** (`src/editor/runtime/binding-runtime.ts:148-159`: on a required-
+> binding load failure it `console.warn`s + `loadFallbackBindings()` + sets `coreBindingsLoaded(true)`
+> regardless). A parse error in a required `.tlisp` left `find-file` undefined while the daemon
+> started normally. The specific observed instance was the **`find-file.tlisp` stray-paren parse
+> error during SPEC-071..085 work, fixed in `a448b70`** — so *that* flake is already gone.
+>
+> **Re-scoped fix (the actual remaining work):** make `loadCoreBindings` **fail loud** (or surface a
+> clear error to eval clients) when a **required command module** fails to load — instead of silent
+> fallback — so a future `.tlisp` parse error produces a clear start failure, not a cryptic
+> `Undefined symbol` later. Plus a regression test (a `.tlisp` with a syntax error in a required
+> binding → daemon start fails clearly). Keep the keymap fallback (intentional resilience); only
+> required **command** modules should fail-loud.
+>
+> A `moduleReady`-gate approach (`instance.ts` poll for `find-file`) was implemented + **rejected by
+> the verify-gate** as wrong-target: it would mask the symptom (timeout vs Undefined symbol) for the
+> `find-file` case but does not fix the swallowed-error root cause, and the race it targets does not
+> exist (the gate succeeds on the first poll for any correctly-started daemon). Not landed.
+
 ## Goals
 
 - Make playbook runs reliably find T-Lisp commands (`find-file`, `save-buffer`, `replace-string`, …) on the **first** eval, even under concurrent daemon load.
