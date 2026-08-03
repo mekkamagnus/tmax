@@ -1,5 +1,5 @@
 (defmodule editor/commands/windows
-  (export split-window-below split-window-right other-window delete-window)
+  (export split-window-below split-window-right other-window delete-window delete-other-windows balance-windows)
 
 ;; windows.tlisp — Window management commands
 ;; Wraps TypeScript display primitives with editor commands and key bindings
@@ -20,6 +20,29 @@
   "Close current window. Does nothing if only one window."
   (window-close))
 
+(defun delete-other-windows ()
+  "Close every window except the current one (maximize current window).
+Composes window-current/window-next/window-close. No-op when only one
+window remains. SPEC-067: bound under the C-w window prefix, not C-x 1."
+  (let ((keep (window-current)))
+    (while (> (window-count) 1)
+      ;; window-close always closes the CURRENT window, so if the current
+      ;; window is the one we want to keep, rotate to a sibling first.
+      (when (= (window-current) keep)
+        (window-next))
+      (window-close))
+    (message "Deleted other windows")))
+
+(defun balance-windows ()
+  "Equalize window heights and widths across all windows.
+Horizontal splits (top/bottom panes) get equal row heights; vertical
+splits (left/right panes) get equal column widths. No-op when only one
+window exists. SPEC-084. SPEC-067: bound under the C-w window prefix
+(C-w =), not C-x."
+  (window-balance))
+
 ;; Key bindings: C-w prefix for window commands
 (key-bind "C-w" "(editor-window-prefix)" "normal")
+;; SPEC-084: C-w = rebalances pane sizes (extends the C-w prefix; no C-x binding)
+(key-bind "C-w =" "(balance-windows)" "normal")
 )

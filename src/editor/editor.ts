@@ -46,6 +46,7 @@ import { handleReplaceMode } from "./handlers/replace-handler.ts";
 import { LSPClient } from "../lsp/client.ts";
 import { createWindowOps } from "./api/window-ops.ts";
 import { createTabOps } from "./api/tab-ops.ts";
+import { createDescribeOps } from "./api/describe-ops.ts";
 import { log } from "../utils/logger.ts";
 import { KeymapSync } from "./keymap-sync.ts";
 import { createKeymapOps } from "./api/keymap-ops.ts";
@@ -415,6 +416,9 @@ export class Editor {
       getCurrentModuleName: () => editor.getCurrentModuleName(),
       getBufferModified: () => editor.getCurrentBufferModified(),
       setBufferModified: (modified: boolean) => editor.setCurrentBufferModified(modified),
+      killBuffer: (name: string) => editor.killBuffer(name),
+      renameBuffer: (newName: string) => editor.renameBuffer(newName),
+      buryBuffer: (name: string) => editor.buryBuffer(name),
       getMessageLog: () => editor.logging.getMessageLog(),
       getUnifiedLog: () => editor.logging.getUnifiedLog(),
       logMessage: (msg: string, level?: string, command?: string, frameId?: string) => editor.logMessage(msg, (level as LogLevel) ?? 'info', command, frameId),
@@ -1605,6 +1609,29 @@ export class Editor {
       this.interpreter.defineBuiltin(name, fn);
     }
 
+    // Add SPEC-083 describe-* introspection primitives (describe-function-data,
+    // describe-mode-data, describe-variable-data, describe-variables-list,
+    // describe-key-data). These need Editor-private accessors (keyMappings,
+    // resolveCallable, collectVisibleGlobalBindings, globalEnv) that are not on
+    // EditorAPIContext, so they are wired here beside windowOps/tabOps rather
+    // than via the registry. The user-facing describe-function/mode/variable/key
+    // defuns in src/tlisp/core/commands/describe.tlisp compose these `-data`
+    // primitives and render into *Help*.
+    const describeOps = createDescribeOps({
+      getKeyMappings: () => this.keyMappings,
+      resolveCallable: (n) => {
+        const r = this.resolveCallable(n);
+        return r ? { value: r.value, moduleName: r.moduleName } : undefined;
+      },
+      collectVisibleGlobalBindings: () => this.collectVisibleGlobalBindings(),
+      globalEnv: this.interpreter.globalEnv,
+      getMode: () => this.model.mode,
+      getCurrentMajorMode: () => this.getCurrentMajorMode(),
+    });
+    for (const [name, fn] of describeOps) {
+      this.interpreter.defineBuiltin(name, fn);
+    }
+
     // Add tab management operations (SPEC-004)
     const tabOps = createTabOps(
       { getModel: () => this.model, applyModel: (m) => { this.applyModel(m); } },
@@ -1634,10 +1661,15 @@ export class Editor {
       return createString(this.currentInitFile || "");
     });
 
-    // Buffer evaluation (SPEC-025)
-    defineRaw("eval-buffer", (args) => {
-      return this.evalBuffer();
-    });
+    // Buffer evaluation: the user-facing `eval-buffer` command is the T-Lisp
+    // defun in src/tlisp/core/commands/eval.tlisp (SPEC-076), which composes
+    // the `editor-eval-tlisp` primitive and logs a summary line to *Messages*.
+    // The earlier SPEC-025 `defineRaw("eval-buffer", …)` shadowed that defun
+    // (defineBuiltin runs after the T-Lisp modules load, so the legacy builtin
+    // won name lookup). It is intentionally NOT registered here now so the
+    // SPEC-076 defun is the canonical implementation; the private evalBuffer()
+    // method is retained for any direct callers but no longer shadows the
+    // command name.
   }
 
   /**
@@ -2946,6 +2978,107 @@ export class Editor {
         recency: metadata.recency,
       };
     });
+  }
+
+  /**
+   * SPEC-071: Editor-owned buffer-kill callback threaded into the
+   * `buffer-kill` T-Lisp primitive via {@link EditorAPIContext.killBuffer}.
+   * Mirrors the kill-buffer RPC case at src/server/rpc/handlers/editing.ts:
+   * removes the buffer from `this.buffers` + `this.bufferMetadata`, switches
+   * the current buffer to a recency-correct survivor (most-recent OTHER buffer,
+   * or *scratch* when none remain / only special buffers survive), and applies
+   * the editor state update. Returns the killed name, or null if NAME is not a
+   * live buffer.
+   *
+   * The primitive's local fallback handles the no-Editor unit-test path; this
+   * method is the live editor path.
+   */
+  killBuffer(name: string): string | null {
+    if (!this.buffers.has(name)) return null;
+    this.buffers.delete(name);
+    this.bufferMetadata.delete(name);
+
+    // Pick a recency-correct survivor: the most-recently-used OTHER buffer.
+    // Prefer non-special buffers; fall back to *scratch*. If only special
+    // buffers remain, use the most-recent special. If nothing remains, leave
+    // current buffer as-is (the model still points at the deleted buffer's
+    // reference; the primitive's caller can switch to *scratch* explicitly).
+    const survivor = this.pickKillSurvivor(name);
+    if (survivor) {
+      const buf = this.buffers.get(survivor);
+      if (buf) {
+        this.applyUpdate({ type: "SetCurrentBuffer", buffer: buf });
+        const meta = this.bufferMetadata.get(survivor);
+        if (meta?.filename) {
+          this.applyUpdate({ type: "SetCurrentFilename", filename: meta.filename });
+        }
+      }
+    }
+    return name;
+  }
+
+  /**
+   * Choose the survivor buffer after killing NAME. Prefers the most-recent
+   * non-special buffer that is not NAME; falls back to *scratch* (creating it
+   * if absent) when no usable buffer survives.
+   */
+  private pickKillSurvivor(killedName: string): string | undefined {
+    const candidates = Array.from(this.buffers.entries())
+      .filter(([n]) => n !== killedName)
+      .map(([n, _b]) => ({ name: n, meta: this.bufferMetadata.get(n) }))
+      .sort((a, b) => (b.meta?.recency ?? 0) - (a.meta?.recency ?? 0));
+    const nonSpecial = candidates.find(c => !(c.name.startsWith("*") && c.name.endsWith("*")));
+    if (nonSpecial) return nonSpecial.name;
+    const scratch = candidates.find(c => c.name === "*scratch*");
+    if (scratch) return scratch.name;
+    // No survivor — recreate *scratch* so the editor is never bufferless.
+    if (!this.buffers.has("*scratch*")) {
+      const scratchBuf = TextBufferImpl.create("");
+      this.buffers.set("*scratch*", scratchBuf);
+      this.bufferMetadata.set("*scratch*", { modified: false, recency: this.bufferRecency++ });
+    }
+    return "*scratch*";
+  }
+
+  /**
+   * SPEC-084: Editor-owned buffer-rename callback threaded into the
+   * `buffer-rename` T-Lisp primitive. Re-keys `this.buffers` AND
+   * `this.bufferMetadata` under NEW-NAME, preserving the filename/modified/
+   * recency of the current buffer. Keeps the same TextBuffer object current
+   * (no content change). Filename is intentionally NOT changed (rename is a
+   * display-name change, not save-as). Returns NEW-NAME, or null when there is
+   * no current buffer.
+   */
+  renameBuffer(newName: string): string | null {
+    const current = this.model.currentBuffer;
+    const oldName = this.findBufferName(current ?? undefined);
+    if (!oldName || !current) return null;
+    if (newName === oldName) return newName;
+    // Re-key buffers map (insertion-order preserved by Map).
+    this.buffers.delete(oldName);
+    this.buffers.set(newName, current as TextBufferImpl);
+    // Re-key bufferMetadata preserving {filename, modified, recency}.
+    const meta = this.bufferMetadata.get(oldName);
+    this.bufferMetadata.delete(oldName);
+    this.bufferMetadata.set(newName, meta ?? { modified: false, recency: this.bufferRecency++ });
+    return newName;
+  }
+
+  /**
+   * SPEC-084: Editor-owned buffer-bury callback threaded into the
+   * `buffer-bury` T-Lisp primitive. Demotes the named buffer's recency to the
+   * minimum across all live buffers minus one, so it sinks in buffer-list /
+   * switch-buffer ordering. Returns NAME, or null if NAME is not a live buffer.
+   */
+  buryBuffer(name: string): string | null {
+    if (!this.buffers.has(name)) return null;
+    let minRecency = Infinity;
+    for (const meta of this.bufferMetadata.values()) {
+      if (meta.recency < minRecency) minRecency = meta.recency;
+    }
+    if (!Number.isFinite(minRecency)) minRecency = 0;
+    this.updateBufferMetadata(name, { recency: minRecency - 1 });
+    return name;
   }
 
   /**

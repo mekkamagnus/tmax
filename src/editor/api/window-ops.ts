@@ -296,5 +296,139 @@ export function createWindowOps(
     return Either.right(createNil());
   });
 
+  /**
+   * Balance (equalize) window heights/widths across all windows (SPEC-084).
+   *
+   * Groups windows by the dominant split axis and sets each window's dimension
+   * to floor(total / count), assigning the remainder to the last window so the
+   * sizes sum to the terminal size. No-op when only one window exists.
+   *
+   * Usage: (window-balance) -> nil
+   *
+   * Named `window-balance` to match the `window-*` primitive convention
+   * (split-window, window-resize-height, …); the Emacs-parity T-Lisp command
+   * `balance-windows` in src/tlisp/core/commands/windows.tlisp wraps this.
+   */
+  ops.set("window-balance", (args: TLispValue[]) => {
+    if (args.length !== 0) {
+      throw new Error("balance-windows takes no arguments");
+    }
+
+    const windows = getWindows();
+
+    // No-op with a single window
+    if (windows.length <= 1) {
+      return Either.right(createNil());
+    }
+
+    const terminalSize = getTerminalSize();
+    const MIN_HEIGHT = 3; // mirror window-resize-height
+    const MIN_WIDTH = 10; // mirror window-resize-width
+
+    // Determine the dominant axis: prefer an explicit 'vertical' splitType
+    // (left/right panes → balance widths); otherwise treat panes as stacked
+    // horizontally (top/bottom → balance heights). This mirrors how split-window
+    // derives dimensions at lines 67-99.
+    const hasVerticalSplit = windows.some(
+      (w) => w.splitType === "vertical"
+    );
+
+    const count = windows.length;
+    const updatedWindows = windows.map((w, i) => {
+      if (hasVerticalSplit) {
+        // Vertical splits: equalize widths across columns
+        const totalWidth = terminalSize.width;
+        const evenWidth = Math.max(MIN_WIDTH, Math.floor(totalWidth / count));
+        // Last window absorbs the remainder so widths sum to totalWidth
+        const width =
+          i === count - 1
+            ? Math.max(MIN_WIDTH, totalWidth - evenWidth * (count - 1))
+            : evenWidth;
+        return { ...w, width };
+      } else {
+        // Horizontal splits: equalize heights across rows (reserve status line)
+        const STATUS_ROWS = 2; // status line + command/echo area (matches split-window's terminalSize.height - 2)
+        const totalHeight = terminalSize.height - STATUS_ROWS;
+        const evenHeight = Math.max(MIN_HEIGHT, Math.floor(totalHeight / count));
+        // Last window absorbs the remainder so heights sum to totalHeight
+        const height =
+          i === count - 1
+            ? Math.max(MIN_HEIGHT, totalHeight - evenHeight * (count - 1))
+            : evenHeight;
+        return { ...w, height };
+      }
+    });
+
+    setWindows(updatedWindows);
+
+    return Either.right(createNil());
+  });
+
+  /**
+   * split-window-below — Emacs/vim alias for (split-window "horizontal"): split
+   * the current window into two stacked panes. SPEC-084 balance-windows DoD
+   * drives the split via this name.
+   */
+  ops.set("split-window-below", (args: TLispValue[]) => {
+    if (args.length !== 0) {
+      throw new Error("split-window-below takes no arguments");
+    }
+    const fn = ops.get("split-window")!;
+    return fn([createString("horizontal")]);
+  });
+
+  /**
+   * split-window-right — Emacs alias for (split-window "vertical"): split the
+   * current window into two side-by-side panes.
+   */
+  ops.set("split-window-right", (args: TLispValue[]) => {
+    if (args.length !== 0) {
+      throw new Error("split-window-right takes no arguments");
+    }
+    const fn = ops.get("split-window")!;
+    return fn([createString("vertical")]);
+  });
+
+  /**
+   * delete-other-windows — close every window except the current one (vim :only
+   * / Emacs C-x 1). SPEC-084 uses it to collapse to one window for the
+   * balance-windows no-op case.
+   */
+  ops.set("delete-other-windows", (args: TLispValue[]) => {
+    if (args.length !== 0) {
+      throw new Error("delete-other-windows takes no arguments");
+    }
+    const windows = getWindows();
+    const currentIdx = getCurrentWindowIndex();
+    const current = windows[currentIdx];
+    if (!current || windows.length <= 1) {
+      return Either.right(createNil());
+    }
+    setWindows([current]);
+    setCurrentWindowIndex(0);
+    return Either.right(createNil());
+  });
+
+  /**
+   * window-height — read a window's height by index. SPEC-084 balance-windows
+   * DoD asserts the two panes share an equal height after balance.
+   */
+  ops.set("window-height", (args: TLispValue[]) => {
+    if (args.length !== 1) {
+      throw new Error("window-height requires one argument: index");
+    }
+    const idxArg = args[0]!;
+    if (idxArg.type !== "number") {
+      throw new Error("window-height index must be a number");
+    }
+    const idx = idxArg.value as number;
+    const windows = getWindows();
+    const w = windows[idx];
+    if (!w) {
+      throw new Error(`window-height: no window at index ${idx}`);
+    }
+    return Either.right(createNumber(w.height ?? 0));
+  });
+
   return ops;
 }

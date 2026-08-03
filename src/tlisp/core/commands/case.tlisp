@@ -1,0 +1,62 @@
+(defmodule editor/commands/case
+  (export transpose-chars capitalize-word upcase-word downcase-word)
+
+;; case.tlisp -- SPEC-080: character transposition + word-level case changes.
+;;
+;; The factual mutations (immutable buffer.replace -> setBuffer, cursor
+;; placement, word-boundary resolution) live in the TS primitives in
+;; src/editor/api/case-ops.ts. These defuns are thin, docstring-bearing
+;; wrappers so all four commands are discoverable via M-x (a function is
+;; interactive IFF it has a docstring OR a keybinding; these have both).
+;;
+;; Bindings (Emacs standard):
+;;   C-t  transpose-chars       (normal + insert)
+;;   M-c  capitalize-word       (normal + insert)
+;;   M-u  upcase-word           (normal + insert)
+;;   M-l  downcase-word         (normal + insert)
+;;
+;; C-t is a distinct C- key, NOT a C-x chord, so it does not collide with
+;; SPEC-067's C-x decrement assignment. No C-x bindings are introduced here.
+
+(defun transpose-chars ()
+  "Transpose the character at point with the one before it, advancing point.
+At the start of a line (and not on the first line) transposes the last
+character of the previous line with the first character of the current line
+(Emacs C-t behavior). No-op on a buffer too short to transpose. Bound to C-t."
+  (ts-transpose-chars))
+
+(defun capitalize-word ()
+  "Capitalize the word at point: uppercase the first letter, lowercase the rest.
+If point is not on a word character, operates on the next word forward
+(Emacs M-c semantics). Point lands after the transformed word so repeated
+M-c calls walk forward word by word. Bound to M-c."
+  (ts-capitalize-word))
+
+(defun upcase-word ()
+  "Uppercase the word at point.
+If point is not on a word character, operates on the next word forward
+(Emacs M-u semantics). Point lands after the transformed word. Bound to M-u."
+  (ts-upcase-word))
+
+(defun downcase-word ()
+  "Lowercase the word at point.
+If point is not on a word character, operates on the next word forward
+(Emacs M-l semantics). Point lands after the transformed word. Bound to M-l."
+  (ts-downcase-word))
+
+;; =====================================================================
+;; Key bindings
+;; =====================================================================
+
+(key-bind "C-t" "(transpose-chars)" "normal")
+(key-bind "M-c" "(capitalize-word)" "normal")
+(key-bind "M-u" "(upcase-word)" "normal")
+(key-bind "M-l" "(downcase-word)" "normal")
+
+(key-bind "C-t" "(transpose-chars)" "insert")
+(key-bind "M-c" "(capitalize-word)" "insert")
+(key-bind "M-u" "(upcase-word)" "insert")
+(key-bind "M-l" "(downcase-word)" "insert")
+
+(provide "case-commands")
+)

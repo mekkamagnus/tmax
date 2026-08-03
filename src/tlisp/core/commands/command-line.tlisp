@@ -67,13 +67,23 @@ substitute/Dired/execute policy."
       ;; command names w/q/wq are not T-Lisp symbols, so the eval fallthrough
       ;; below would error on them; handle them explicitly here.
       ((string= line "w")
-       (save-buffer))
+       (funcall "save-buffer"))
       ((string= line "w!")
-       (save-buffer nil t))
+       (funcall "save-buffer" nil t))
+      ;; :wa / :wsave — bulk-save every modified buffer (SPEC-072).
+      ;; Uses the synchronous save-all-buffers (vim :wa semantics): the
+      ;; command-mode handler resets mode to `normal` after the dispatch
+      ;; returns, so an interactive completing-read prompt (mx) opened from
+      ;; here cannot survive. save-some-buffers (prompting) is the M-x path.
+      ;; funcall resolves the module-exported name via resolveUniqueExport
+      ;; (direct symbol lookup in this module env does not see sibling
+      ;; module exports).
+      ((or (string= line "wa") (string= line "wsave"))
+       (funcall "save-all-buffers"))
       ((or (string= line "wq") (string= line "x"))
-       (progn (save-buffer) (editor-quit)))
+       (progn (funcall "save-buffer") (editor-quit)))
       ((or (string= line "wq!") (string= line "x!"))
-       (progn (save-buffer nil t) (editor-quit)))
+       (progn (funcall "save-buffer" nil t) (editor-quit)))
       ;; :q / :q! / :quit  — quit (discard unsaved changes for the ! form).
       ((or (string= line "q") (string= line "q!") (string= line "quit"))
        (editor-quit))
@@ -89,6 +99,20 @@ substitute/Dired/execute policy."
       ((string-match "^dired[ \t]+(.+)$" line)
        (let ((dir (match-string 1)))
          (dired (or dir "."))))
+      ;; :bd / :bdelete [name] — kill a buffer (SPEC-071). With no argument
+      ;; kills the current buffer; with a name kills that buffer. kill-buffer
+      ;; lives in editor/commands/buffers (sibling module), so funcall resolves
+      ;; the exported name. The modified-buffer save gate runs inside
+      ;; kill-buffer itself (completing-read); the command-mode handler resets
+      ;; to normal mode after this dispatch returns, so the prompt survives only
+      ;; because completing-read flips mode to mx (the reset sees mx and leaves
+      ;; it — same mechanism :%s relies on for the replace mx flow).
+      ((or (string= line "bd") (string= line "bdelete"))
+       (funcall "kill-buffer"))
+      ((string-match "^bd[ \t]+(.+)$" line)
+       (funcall "kill-buffer" (match-string 1)))
+      ((string-match "^bdelete[ \t]+(.+)$" line)
+       (funcall "kill-buffer" (match-string 1)))
       ;; Everything else (:q, :w, :wq, :nohl, :marks, unknown…) is handled
       ;; by the existing TS-backed editor-execute-command-line primitive,
       ;; which also clears the line and returns to normal mode.

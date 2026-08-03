@@ -1,0 +1,134 @@
+(defmodule editor/commands/comment
+  (export comment-dwim comment-region uncomment-region comment-line-p)
+
+;; comment.tlisp — SPEC-074 comment commands.
+;;
+;; User-facing comment commands composed from the TypeScript comment-ops
+;; primitives (comment-toggle-line / comment-region / uncomment-region /
+;; comment-region-active-p). Editor decisions live here:
+;;   - region-vs-line dispatch (visual-mode selection?),
+;;   - the "comment-or-uncomment the region" choice,
+;;   - the no-syntax user message,
+;;   - returning to normal mode after a region operation.
+;;
+;; The TS primitives only mutate the buffer per the requested range/mode and
+;; report errors. `comment-dwim` is the single command users bind (M-;); the
+;; region/uncomment entry points are exported for M-x / programmatic use.
+;;
+;; DEPENDENCY: comment-line-p reads the active prefix through
+;; (major-mode-comment-syntax), which SPEC-074 step 2 adds to
+;; src/editor/api/major-mode-ops.ts. Until that accessor ships, comment-dwim's
+;; region "is it all already commented?" probe cannot run; the coordinator
+;; must register major-mode-comment-syntax alongside these primitives.
+;;
+;; T-Lisp gotchas (see docs/learnings.md, post-newline.tlisp):
+;;   - condition-case form: (condition-case var body (error (e) handler)).
+;;   - The handler var is bound to the error MESSAGE STRING.
+;;   - string-prefix-p is (PREFIX STRING) — prefix first.
+;;   - nth is (INDEX LIST), 0-based.
+;;   - Use `equal`, not `eq`, for string comparison.
+
+;; comment-line-p LINE -> boolean (non-nil when LINE already carries a comment)
+;; Helper used by comment-dwim to decide comment-vs-uncomment for an active
+;; region: when every selected line is already commented we un-comment,
+;; otherwise we comment. Returns nil when the current major mode has no
+;; comment syntax (so fundamental mode short-circuits to the messaging path).
+(defun comment-line-p (line)
+  "Return non-nil when LINE already starts with the active comment prefix.
+Returns nil when the current major mode has no comment syntax or the line is
+not commented."
+  (let ((prefix (major-mode-comment-syntax)))
+    (if (or (equal prefix nil) (equal prefix ""))
+        nil
+        (let ((content (buffer-line line)))
+          (let ((trimmed (string-trim content)))
+            (string-prefix-p prefix trimmed))))))
+
+;; comment--all-commented-p START END -> boolean
+;; Non-nil when every line in [START, END] already carries the comment prefix.
+;; Used by comment-dwim to choose uncomment-region over comment-region.
+(defun comment--all-commented-p (start end)
+  "Return non-nil when every line in [START, END] is already commented."
+  (let ((all t))
+    (let ((line start))
+      (while (and all (<= line end))
+        (if (not (comment-line-p line))
+            (set! all nil)
+            (set! line (+ line 1)))))
+    all))
+
+;; comment-region FROM TO
+;; Comment every line in [FROM, TO] using the active major-mode prefix.
+;; Surfaces the "No comment syntax for major mode X" message when the mode
+;; has no comment syntax instead of silently no-oping. Delegates to the
+;; comment-region-lines primitive (the primitive is suffixed -lines so this
+;; user-facing command can share the spec-required name without shadowing the
+;; builtin and recursing).
+(defun comment-region (from to)
+  "Comment every line in the inclusive range [FROM, TO].
+Prepends the current major mode's comment prefix (e.g. ; // #) to each line.
+Shows a message and makes no change when the mode has no comment syntax."
+  (condition-case err
+    (progn
+      (comment-region-lines from to)
+      (message "Commented lines %d-%d" from to))
+    (error (e) (message "%s" e))))
+
+;; uncomment-region FROM TO
+;; Strip the comment prefix from every line in [FROM, TO].
+(defun uncomment-region (from to)
+  "Uncomment every line in the inclusive range [FROM, TO].
+Removes the current major mode's comment prefix (and one trailing space) from
+each line. Shows a message and makes no change when the mode has no comment
+syntax."
+  (condition-case err
+    (progn
+      (uncomment-region-lines from to)
+      (message "Uncommented lines %d-%d" from to))
+    (error (e) (message "%s" e))))
+
+;; comment-dwim
+;; "Do what I mean": in visual mode with an active selection, comment (or, if
+;; every selected line is already commented, un-comment) the region and exit to
+;; normal mode; with no selection, toggle the comment prefix on the current
+;; line. Bound to M-; in both normal and visual modes.
+(defun comment-dwim ()
+  "Comment or uncomment the line or region at point.
+With an active visual selection: comment every selected line, or un-comment
+them when they are all already commented, then return to normal mode.
+With no selection: toggle the comment prefix on the current line.
+Uses the current major mode's comment syntax (e.g. ; for Lisp, // for
+TypeScript, # for Python)."
+  (if (comment-region-active-p)
+      ;; Region path: derive inclusive line bounds from the visual selection.
+      ;; visual-get-selection returns (start-line start-col end-line end-col mode).
+      (let ((sel (visual-get-selection)))
+        (if (equal sel nil)
+            (comment-toggle-line)
+            (let ((start-line (nth 0 sel))
+                  (end-line (nth 2 sel)))
+              (let ((from (min start-line end-line))
+                    (to (max start-line end-line)))
+                ;; comment-region / uncomment-region (the wrapper defuns above)
+                ;; already surface the no-syntax message via condition-case, so
+                ;; we only need to exit visual mode on success.
+                (if (comment--all-commented-p from to)
+                    (progn (uncomment-region from to) (visual-exit))
+                    (progn (comment-region from to) (visual-exit)))))))
+      ;; No selection: line toggle.
+      (condition-case err
+        (comment-toggle-line)
+        (error (e) (message "%s" e)))))
+
+;; M-; (Meta-semicolon) is a Meta binding, NOT a C-x chord, so it does not
+;; collide with the SPEC-067 vim-decrement assignment of C-x. Bound in both
+;; normal and visual modes so the region-vs-line dispatch in comment-dwim can
+;; fire from either. NOTE: a binding inside a command module only takes effect
+;; once the module is loaded — the coordinator must add
+;; (require-module editor/commands/comment) to normal.tlisp (or this file must
+;; be required by some already-loaded module) for M-; to be live.
+(key-bind "M-;" "(comment-dwim)" "normal")
+(key-bind "M-;" "(comment-dwim)" "visual")
+
+(provide "comment")
+)

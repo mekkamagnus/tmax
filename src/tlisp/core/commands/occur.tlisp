@@ -1,0 +1,198 @@
+(defmodule editor/commands/occur
+  (export occur occur-jump occur-prompt)
+
+;; occur.tlisp --- listing buffer of all pattern matches (SPEC-082)
+;;
+;; `occur` is the classic Emacs command: given a pattern, gather every line
+;; containing it into a dedicated `*Occur*` listing buffer where pressing RET
+;; on any entry jumps back to that line in the source buffer.
+;;
+;; This is the editor-LOGIC layer (per src/editor/CLAUDE.md). It composes only
+;; existing primitives:
+;;   - search-find-all-matches  (src/editor/api/search-ops.ts) for match lines
+;;   - buffer-line / buffer-line-count  (src/editor/api/buffer-ops.ts)
+;;   - buffer-create / buffer-switch / buffer-list / buffer-replace-range
+;;   - jump-to-line  (src/editor/api/jump-ops.ts, {count}G, 1-indexed)
+;; plus the thin bookkeeping primitive from occur-ops.ts:
+;;   - occur-set-source / occur-source-get / occur-buffer-name
+
+;; --- helpers ---------------------------------------------------------------
+
+;; Pairs of (linenr text) for every line in the current buffer containing PAT.
+;; `search-find-all-matches` may return multiple (line col) hits per line; we
+;; de-duplicate by line number so each source line appears once.
+(defun occur--matching-lines (pat)
+  "Collect (linenr text) pairs for lines containing PAT.
+LINENR is 0-indexed. De-duplicates lines that match more than once."
+  (let ((matches (search-find-all-matches pat))
+        (seen-lines (list))
+        (out (list)))
+    (while (not (null matches))
+      (let* ((hit (car matches))
+             (linenr (car hit)))
+        (if (not (member linenr seen-lines))
+          (progn
+            (setq seen-lines (cons linenr seen-lines))
+            (setq out (cons (list linenr (buffer-line linenr)) out))))
+        (setq matches (cdr matches))))
+    ;; Preserve source order (lowest line number first).
+    (stable-sort (lambda (a b) (< (car a) (car b))) out)))
+
+;; Clear the *Occur* buffer in place so a re-run does not append to the prior
+;; listing. Uses buffer-replace-range over [0,0]..[lastline,lastcol], which is
+;; the existing primitive for wholesale content replacement.
+(defun occur--clear-buffer ()
+  "Replace the entire current buffer contents with the empty string.
+Caller must have switched to the target buffer first."
+  (let ((nlines (buffer-line-count)))
+    ;; Only clear when there is real content (> 1 line, or 1 non-empty line).
+    ;; A fresh buffer-create yields a single empty line; buffer-replace-range
+    ;; on a 1-line buffer with end col 0 mis-handles the zero-width delete
+    ;; (the underlying gap buffer rejects deleting the last line into a 0-line
+    ;; state), so skip clearing in that case — the buffer is already empty.
+    (if (> nlines 1)
+      (buffer-replace-range 0 0 (- nlines 1) 0 "")
+      nil)))
+
+;; --- the command -----------------------------------------------------------
+
+(defun occur (pattern)
+  "Show all lines matching PATTERN in a `*Occur*` listing buffer.
+Each matching line is prefixed with its 1-indexed source line number
+(e.g. `  12: const foo = ...`). The first line is a header naming the
+source buffer and pattern, with the match count. Press RET on a match
+line (see `occur-jump`) to pop back to that line in the source buffer.
+Calling `occur` again with a new pattern refreshes the same `*Occur*`
+buffer in place. An empty PATTERN reuses the last search pattern. Bound
+to `SPC s o`."
+  (let ((pat pattern)
+        (source (buffer-current)))
+    ;; Empty pattern: reuse the last search pattern, mirroring search-next.
+    (if (string= pat "")
+      (setq pat (search-pattern-get)))
+    ;; When occur is invoked WHILE *Occur* is current (a re-run), search the
+    ;; RECORDED source buffer instead of *Occur* itself — otherwise the second
+    ;; run would search the prior listing. Switch back to the source so the
+    ;; search/buffer-line reads below target the right buffer.
+    (if (string= source (occur-buffer-name))
+      (let ((recorded (occur-source-get)))
+        (if (nilp recorded)
+          nil
+          (progn
+            (setq source recorded)
+            (buffer-switch recorded))))
+      nil)
+    (if (string= pat "")
+      (progn
+        (message "occur: no pattern given")
+        nil)
+      ;; Find matches BEFORE switching buffers (search-find-all-matches /
+      ;; buffer-line read the CURRENT buffer).
+      (let ((matching (occur--matching-lines pat))
+            (count 0)
+            (occur-name (occur-buffer-name)))
+        ;; Count without mutating the list.
+        (setq count (length matching))
+        ;; (Re)create the *Occur* buffer. Reuse if present so we never stack
+        ;; up duplicate occur buffers; clear its body in place afterward.
+        (if (member occur-name (buffer-list))
+          (buffer-switch occur-name)
+          (progn
+            (buffer-create occur-name)
+            (buffer-switch occur-name)))
+        (occur--clear-buffer)
+        ;; Record source for occur-jump.
+        (occur-set-source occur-name source)
+        ;; Build the body: header, then one annotated line per match.
+        (buffer-insert-at-position 0 0
+          (format "%d matches for \"%s\" in %s:\n" count pat source))
+        ;; Insert each match line: "<linenr 1-indexed>: <text>\n".
+        (let ((rest matching)
+              (insert-line 1))
+          (while (not (null rest))
+            (let* ((entry (car rest))
+                   (linenr (car entry))
+                   (text (car (cdr entry))))
+              (buffer-insert-at-position insert-line 0
+                (format "%d: %s\n" (+ linenr 1) text))
+              (setq insert-line (+ insert-line 1)))
+            (setq rest (cdr rest))))
+        ;; Land on the first match (line 1, below the header) in normal mode.
+        (cursor-move 1 0)
+        (editor-set-mode "normal")
+        (if (= count 0)
+          (message (format "Pattern '%s' not found" pat))
+          (message (format "%d matches" count)))
+        occur-name))))
+
+(defun occur-jump ()
+  "Jump from a `*Occur*` match line back to its source line.
+Reads the 1-indexed `<digits>:` prefix on the current `*Occur*` line,
+switches to the recorded source buffer, and moves the cursor to that
+line via `jump-to-line`. No-ops (without error) when not in the
+`*Occur*` buffer or when the current line has no line-number prefix,
+so the binding is safe to leave on RET in other buffers. Bound to RET
+(guarded by the buffer-current check)."
+  (if (not (string= (buffer-current) (occur-buffer-name)))
+    nil
+    ;; Parse the leading "<digits>:" prefix. string-match-spans returns
+    ;; (start end) pairs; take the first span of "^[0-9]+:" and slice.
+    (let* ((line (buffer-line (cursor-line))))
+      ;; Use string-match (seeds match-string) to capture the leading digits.
+      ;; Group 1 of "^([0-9]+):" is the bare digit run ("1", "3", ...) which
+      ;; string-to-number parses cleanly.
+      (if (not (string-match "^([0-9]+):" line))
+        (progn
+          (message "occur-jump: no line number on this line")
+          nil)
+        (let* ((numstr (match-string 1))
+               (linenr (string-to-number numstr))
+               (source (occur-source-get)))
+          (if (or (nilp source) (string= source ""))
+            (progn
+              (message "occur-jump: no source buffer recorded")
+              nil)
+            (progn
+              (buffer-switch source)
+              (jump-to-line linenr)
+              source)))))))
+
+;; Interactive prompt wrapper for the SPC s o binding: read a pattern via the
+;; minibuffer then run occur. Mirrors the find-file / switch-buffer prompting
+;; pattern.
+(defun occur-prompt ()
+  "Prompt for a pattern in the minibuffer and run `occur` on it.
+Pre-seeds the minibuffer with the last search pattern. Bound to SPC s o."
+  (let ((initial (search-pattern-get)))
+    (completing-read
+      "Occur: "
+      "occur-completion-table"
+      nil
+      nil
+      initial
+      "occur-history"
+      "occur-accept")))
+
+;; Minibuffer accept handler for occur-prompt.
+(defun occur-accept (pat)
+  "Minibuffer accept handler: run `occur` on PAT."
+  (occur pat))
+
+;; Empty completion table: occur takes free-form patterns, so completion is a
+;; no-op (the user types a literal substring). returning nil lets the minibuffer
+;; accept whatever the user typed.
+(defun occur-completion-table (input action)
+  "Completion table for occur pattern entry. Free-form input, no candidates."
+  nil)
+
+;; --- bindings (SPEC-067: NO C-x chords) -------------------------------------
+;;
+;; RET is bound in the GLOBAL normal keymap but is guarded by occur-jump's
+;; own (buffer-current == *Occur*) check, so it is a no-op everywhere else and
+;; the existing RET behaviour in other buffers is preserved.
+(key-bind "RET" "(occur-jump)" "normal")
+;; SPC s o launches the occur prompt.
+(key-bind "SPC s o" "(occur-prompt)" "normal")
+
+(provide "occur")
+)

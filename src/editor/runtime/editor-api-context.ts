@@ -125,6 +125,18 @@ export interface EditorAPIContext {
   getCurrentModuleName?: () => string | undefined;
   getBufferModified?: () => boolean;
   setBufferModified?: (modified: boolean) => void;
+  /**
+   * SPEC-071 / SPEC-084 buffer lifecycle callbacks. The bufferMetadata Map +
+   * recency mutation live privately on the Editor class and are NOT reachable
+   * from createBufferOps's closure, so the three primitives that need them
+   * (buffer-kill / buffer-rename / buffer-bury) accept optional threaded
+   * callbacks mirroring the existing setCurrentFilename/setBufferModified
+   * optional-param pattern. The Editor wires these at the createBufferOps call
+   * site; when absent the primitives fall back to a local-only path.
+   */
+  killBuffer?: (name: string) => string | null;
+  renameBuffer?: (newName: string) => string | null;
+  buryBuffer?: (name: string) => string | null;
   /** Logging surface for the *Messages* buffer (SPEC-055). */
   logMessage?: (msg: string, level?: string, command?: string, frameId?: string) => void;
   setEchoOnly?: (text: string) => void;

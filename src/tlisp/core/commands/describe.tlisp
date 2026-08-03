@@ -1,0 +1,220 @@
+(defmodule editor/commands/describe
+  (export describe-to-help describe-function describe-mode describe-variable describe-key describe-function-at-point describe-variable-at-point describe-key-at-point describe-binding-line)
+
+;; describe.tlisp --- SPEC-083 Emacs-style self-documentation.
+;;
+;; Composes the factual TS primitives in src/editor/api/describe-ops.ts into
+;; user-facing commands that render into a reusable *Help* buffer (NOT a
+;; reserved buffer per src/editor/CLAUDE.md — it can be killed and is recreated
+;; on the next describe call). The TS layer answers "what does this key run",
+;; "what is this variable's value", "what does this mode bind"; this file
+;; decides HOW to prompt (completing-read / next-key capture) and WHERE to show
+;; the answer (the *Help* buffer).
+;;
+;; Every exported defun has a docstring so it is M-x-discoverable per
+;; command-detail-interactive-p (execute-extended-command.tlisp:15-19): a
+;; function appears in M-x completion IFF it has a docstring OR a keybinding.
+
+(defvar help-buffer-name "*Help*"
+  "Name of the reusable help buffer describe-* commands render into. Not a
+reserved buffer (src/editor/CLAUDE.md reserves only *scratch*/*Messages*/*daemon*),
+so it can be killed and is recreated on the next describe call.")
+
+;; ── Shared renderer ───────────────────────────────────────────────────
+(defun describe-to-help (title body)
+  "Render TITLE + BODY into the reusable *Help* buffer and switch to it in
+normal mode. Creates *Help* if absent (never duplicates it) and clears it on
+each call so re-runs never accumulate. Returns the buffer name. Used by every
+describe-* command so the surface is consistent."
+  (progn
+    (unless (member help-buffer-name (buffer-list))
+      (buffer-create help-buffer-name))
+    (buffer-switch help-buffer-name)
+    ;; Clear existing content: delete from (0,0) to the end of the buffer.
+    ;; Skip when there is no real content (> 1 line) — a fresh buffer-create
+    ;; yields a single empty line and deleting it entirely mis-handles the
+    ;; zero-width/last-line delete in the gap buffer (rejects 0-line state).
+    (let ((lines (buffer-line-count)))
+      (when (> lines 1)
+        (let ((last-line (- lines 1)))
+          ;; delete-range is bounded by line count; delete the whole span.
+          (buffer-delete-range 0 0 last-line 100000))))
+    (buffer-insert-at-position 0 0 (concat title "\n\n" body))
+    (cursor-move 0 0)
+    (editor-set-mode "normal")
+    help-buffer-name))
+
+;; ── describe-function ─────────────────────────────────────────────────
+(defun describe-function (name)
+  "Show the signature, docstring, and source of the named T-Lisp function in
+*Help*. NAME is a function-name string (e.g. \"buffer-save\"). When the
+documentation DB has a static entry for NAME it is appended as a formatted
+Documentation block. Returns nil for an unknown name. M-x discoverable."
+  (let ((resolved (describe-function-data name)))
+    (if (nilp resolved)
+      (describe-to-help
+        (concat "Function: " name)
+        (concat name " is not defined."))
+      (describe-to-help
+        (concat "Function: " (hashmap-get resolved "name"))
+        (let ((sig (hashmap-get resolved "signature"))
+              (doc (hashmap-get resolved "docstring"))
+              (mod (hashmap-get resolved "module"))
+              (full (hashmap-get resolved "documentation")))
+          (concat
+            sig "\n\n"
+            doc
+            (if (nilp mod) "" (concat "\n\nFrom module: " mod))
+            (if (nilp full) "" (concat "\n\n" full))))))))
+
+(defun describe-function-candidate (name)
+  "Completion candidate wrapping a callable-command-details entry into the
+shape completing-read expects (value/display/annotation/metadata)."
+  (hashmap
+    "value" name
+    "display" name
+    "annotation" ""
+    "metadata" (hashmap)))
+
+(defun describe-function-complete-p (name _input _action)
+  "Always-accept predicate so describe-function completing-read admits any
+function name (not just those with a docstring)."
+  name)
+
+(defun describe-function-table (input action)
+  "Completion table for the describe-function minibuffer. Sources every
+visible callable name from callable-command-details."
+  (if (string= action "metadata")
+    (hashmap "category" "command")
+    (mapcar
+      (lambda (details)
+        (describe-function-candidate (hashmap-get details "name")))
+      (callable-command-details))))
+
+(defun describe-function-at-point ()
+  "Prompt for a function name via the minibuffer and describe it in *Help*.
+Bound to SPC h f. M-x discoverable via this docstring."
+  (completing-read
+    "Describe function: "
+    "describe-function-table"
+    nil
+    nil
+    ""
+    "describe-function-history"
+    "describe-function"))
+
+;; ── describe-mode ─────────────────────────────────────────────────────
+(defun describe-binding-line (binding)
+  "Format one describe-mode binding entry [key command mode docstring] into a
+readable line for *Help*."
+  (let ((key (nth 0 binding))
+        (command (nth 1 binding))
+        (doc (nth 3 binding)))
+    (concat
+      key "  →  " command
+      (if (or (nilp doc) (string= doc "No documentation available"))
+        ""
+        (concat "  ; " doc)))))
+
+(defun describe-mode (&optional mode)
+  "Describe the current buffer's major mode and every key bound in the editor
+minor mode (default: the current editor mode). Renders the major mode, editor
+mode, and each binding (key → command ; docstring) into *Help*. Bound to
+SPC h m. M-x discoverable via this docstring."
+  (let ((result (describe-mode-data (or mode (editor-mode)))))
+    (let ((editor (hashmap-get result "editor-mode"))
+          (major (hashmap-get result "major-mode"))
+          (bindings (hashmap-get result "bindings")))
+      (describe-to-help
+        (concat "Mode: " editor)
+        (concat
+          "Major mode: " major "\n"
+          "Editor mode: " editor "\n\n"
+          "Key bindings:\n"
+          (mapcar "describe-binding-line" bindings))))))
+
+;; ── describe-variable ─────────────────────────────────────────────────
+(defun describe-variable (name)
+  "Show the value (and documentation, when available) of the named T-Lisp
+variable in *Help*. Renders `NAME is <value>` for a bound variable, or
+`NAME is not defined` for an unbound one. Bound to SPC h v.
+M-x discoverable via this docstring."
+  (let ((result (describe-variable-data name)))
+    (if (nilp (hashmap-get result "bound"))
+      (describe-to-help
+        (concat "Variable: " name)
+        (concat name " is not defined."))
+      (let ((value (hashmap-get result "value"))
+            (doc (hashmap-get result "documentation")))
+        (describe-to-help
+          (concat "Variable: " name)
+          (concat
+            name " is " (format "%s" value) "\n"
+            (if (nilp doc) "" (concat "\nDocumentation:\n" doc))))))))
+
+(defun describe-variable-candidate (name)
+  "Completion candidate wrapping a variable name for the describe-variable
+minibuffer."
+  (hashmap
+    "value" name
+    "display" name
+    "annotation" ""
+    "metadata" (hashmap)))
+
+(defun describe-variable-table (input action)
+  "Completion table for the describe-variable minibuffer, sourced from
+describe-variables-list (every visible non-function global binding)."
+  (if (string= action "metadata")
+    (hashmap "category" "plain")
+    (mapcar "describe-variable-candidate" (describe-variables-list))))
+
+(defun describe-variable-at-point ()
+  "Prompt for a variable name via the minibuffer and describe it in *Help*.
+Bound to SPC h v. M-x discoverable via this docstring."
+  (completing-read
+    "Describe variable: "
+    "describe-variable-table"
+    nil
+    nil
+    ""
+    "describe-variable-history"
+    "describe-variable"))
+
+;; ── describe-key ──────────────────────────────────────────────────────
+(defun describe-key (key)
+  "Show the command a key runs, plus that command's docstring, in *Help*.
+KEY is a key string (e.g. \"j\"). Uses the current editor mode when none is
+supplied. Bound to SPC h k. M-x discoverable via this docstring."
+  (let ((result (describe-key-data key)))
+    (if (nilp result)
+      (describe-to-help
+        (concat "Key: " key)
+        (concat key " is unbound in this mode."))
+      (let ((command (hashmap-get result "command"))
+            (mode (hashmap-get result "mode"))
+            (doc (hashmap-get result "docstring")))
+        (describe-to-help
+          (concat "Key: " key)
+          (concat
+            key " runs the command " command " (in " mode " mode).\n\n"
+            doc))))))
+
+(defun describe-key-at-point ()
+  "Prompt the user to press a key, then describe that key in *Help*. Sets the
+describe-key pending flag (the existing describe-key-prompt machinery) so the
+next keypress is captured; the actual describe runs in the pending-key
+dispatch path. Bound to SPC h k. M-x discoverable via this docstring.
+
+Known limitation: if the SetDescribeKeyPending next-key dispatch is not yet
+wired end-to-end, drive (describe-key \"j\") directly via eval — the
+docstring-correctness path does not depend on the interactive capture."
+  (describe-key-prompt))
+
+;; ── Bindings (SPEC-067: NO C-x / C-h chords — SPC h prefix only) ───────
+(key-bind "SPC h f" "(describe-function-at-point)" "normal")
+(key-bind "SPC h m" "(describe-mode)" "normal")
+(key-bind "SPC h v" "(describe-variable-at-point)" "normal")
+(key-bind "SPC h k" "(describe-key-at-point)" "normal")
+
+(provide "describe")
+)

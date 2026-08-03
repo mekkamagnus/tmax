@@ -1,5 +1,5 @@
 (defmodule editor/commands/replace
-  (export query-replace replace-yes replace-no replace-all replace-quit)
+  (export query-replace replace-yes replace-no replace-all replace-quit replace-string)
 
 ;; replace.tlisp — query-replace commands
 (defun query-replace (find replace &optional start end)
@@ -10,6 +10,19 @@
       (return-from query-replace))
     (replace-state-init find replace matches)
     (message (concat "Replace " find " with " replace "? (y/n/a/q)"))))
+
+(defun replace-string (find replace &optional start end)
+  "Globally replace every occurrence of FIND with REPLACE in the current buffer, non-interactively (no y/n prompts). Returns the replacement count."
+  (let ((matches (replace-find-matches find start end)))
+    (when (null matches)
+      (message "No matches found")
+      (return-from replace-string 0))
+    (replace-state-init find replace matches)
+    (let ((count (replace-apply-all)))
+      (replace-exit)
+      (set-buffer-modified-p t)
+      (message (concat "Replaced " (number-to-string count) " occurrences"))
+      count)))
 
 (defun replace-yes ()
   "Replace current match and advance."

@@ -45,7 +45,10 @@ export function createBufferOps(
   setCursorColumn: (column: number) => void,
   setCurrentFilename?: (path: string) => void,
   setBufferModified?: (flag: boolean) => void,
-  readonlyBuffers?: Set<string>
+  readonlyBuffers?: Set<string>,
+  killBuffer?: (name: string) => string | null,
+  renameBuffer?: (newName: string) => string | null,
+  buryBuffer?: (name: string) => string | null
 ): Map<string, TLispFunctionImpl> {
   // CHORE-39 Phase 4: cursor/buffer/filename/modified reads flow through the
   // State monad against EditorModel; writes stay on the supplied setters to
@@ -796,6 +799,240 @@ export function createBufferOps(
     }
 
     return Either.left(createBufferError('InvalidOperation', 'No current buffer'));
+  });
+
+  // SPEC-071: buffer-kill — remove a named buffer (default current) from the
+  // buffers Map + bufferMetadata, switching current to the next survivor.
+  // The metadata mutation + recency-aware survivor selection live on Editor
+  // (bufferMetadata, getBufferDetails, captureActiveWorkspace), so the factual
+  // work is delegated to the threaded killBuffer hook when present. When the
+  // hook is absent (e.g. unit-test harness without an Editor) the primitive
+  // falls back to a local removal + insertion-order survivor so it remains
+  // testable. Mirrors the kill-buffer RPC case semantics.
+  api.set("buffer-kill", (args: TLispValue[]): Either<AppError, TLispValue> => {
+    const argsValidation = validateArgsCount(args, 1, "buffer-kill");
+    if (Either.isLeft(argsValidation)) {
+      return Either.left(argsValidation.left);
+    }
+
+    // Resolve target name: explicit string arg, else the current buffer.
+    let name: string;
+    if (args.length === 1 && args[0]!.type !== "nil") {
+      const nameArg = args[0]!;
+      const typeValidation = validateArgType(nameArg, "string", 0, "buffer-kill");
+      if (Either.isLeft(typeValidation)) {
+        return Either.left(typeValidation.left);
+      }
+      name = nameArg.value as string;
+    } else {
+      const currentBuffer = getCurrentBuffer();
+      if (!currentBuffer) {
+        return Either.left(createBufferError(
+          'InvalidOperation',
+          'buffer-kill: no current buffer to kill'
+        ));
+      }
+      name = "";
+      for (const [n, buf] of buffers) {
+        if (buf === currentBuffer) {
+          name = n;
+          break;
+        }
+      }
+      if (!name) {
+        return Either.left(createBufferError(
+          'InvalidOperation',
+          'buffer-kill: current buffer not in buffer map'
+        ));
+      }
+    }
+
+    if (!buffers.has(name)) {
+      return Either.left(createBufferError(
+        'InvalidOperation',
+        `buffer-kill: buffer "${name}" not found`
+      ));
+    }
+
+    if (killBuffer) {
+      // Editor-owned path: removes from buffers + bufferMetadata, picks the
+      // recency-correct survivor, captures the workspace, syncs frames.
+      const killed = killBuffer(name);
+      if (killed === null) {
+        return Either.left(createBufferError(
+          'InvalidOperation',
+          `buffer-kill: buffer "${name}" not found`
+        ));
+      }
+      return Either.right(createString(killed));
+    }
+
+    // Local fallback: remove from this closure's Map and switch current to an
+    // insertion-order survivor (or leave current if it is not the killed one).
+    buffers.delete(name);
+    if (buffers.size === 0) {
+      return Either.right(createString(name));
+    }
+    const currentBuffer = getCurrentBuffer();
+    const currentStillPresent =
+      currentBuffer !== null &&
+      Array.from(buffers.values()).includes(currentBuffer);
+    if (!currentStillPresent) {
+      const survivor = buffers.values().next().value;
+      if (survivor !== undefined) {
+        setCurrentBuffer(survivor);
+      }
+    }
+    return Either.right(createString(name));
+  });
+
+  // SPEC-084: buffer-rename — re-key the current buffer under NEW-NAME.
+  // bufferMetadata is owned by Editor and holds {filename, modified, recency}
+  // per buffer; re-keying both maps lives behind the renameBuffer hook. The
+  // hook re-inserts preserving filename/modified/recency and keeps the same
+  // TextBuffer object current. Filename is intentionally NOT changed: renaming
+  // a buffer is a display-name change, not a save-as.
+  api.set("buffer-rename", (args: TLispValue[]): Either<AppError, TLispValue> => {
+    const argsValidation = validateArgsCount(args, 1, "buffer-rename");
+    if (Either.isLeft(argsValidation)) {
+      return Either.left(argsValidation.left);
+    }
+
+    const nameArg = args[0]!;
+    const typeValidation = validateArgType(nameArg, "string", 0, "buffer-rename");
+    if (Either.isLeft(typeValidation)) {
+      return Either.left(typeValidation.left);
+    }
+
+    const newName = nameArg.value as string;
+    if (newName.length === 0) {
+      return Either.left(createValidationError(
+        'ConstraintViolation',
+        'buffer-rename: new name must be non-empty',
+        'new-name',
+        newName,
+        'non-empty string'
+      ));
+    }
+
+    // Resolve the current buffer's existing name.
+    const currentBuffer = getCurrentBuffer();
+    if (!currentBuffer) {
+      return Either.left(createBufferError(
+        'InvalidOperation',
+        'buffer-rename: no current buffer to rename'
+      ));
+    }
+    let oldName = "";
+    for (const [n, buf] of buffers) {
+      if (buf === currentBuffer) {
+        oldName = n;
+        break;
+      }
+    }
+    if (!oldName) {
+      return Either.left(createBufferError(
+        'InvalidOperation',
+        'buffer-rename: current buffer not in buffer map'
+      ));
+    }
+
+    // Reject renaming onto an existing DIFFERENT buffer.
+    if (newName !== oldName && buffers.has(newName)) {
+      return Either.left(createValidationError(
+        'ConstraintViolation',
+        `buffer-rename: name "${newName}" is already in use`,
+        'new-name',
+        newName,
+        'unique buffer name'
+      ));
+    }
+
+    if (renameBuffer) {
+      // Editor-owned path: re-keys buffers + bufferMetadata atomically,
+      // preserving filename/modified/recency.
+      const result = renameBuffer(newName);
+      if (result === null) {
+        return Either.left(createBufferError(
+          'InvalidOperation',
+          `buffer-rename: failed to rename current buffer to "${newName}"`
+        ));
+      }
+      return Either.right(createString(result));
+    }
+
+    // Local fallback: re-key only the buffers Map (no metadata to preserve).
+    buffers.delete(oldName);
+    buffers.set(newName, currentBuffer);
+    return Either.right(createString(newName));
+  });
+
+  // SPEC-084: buffer-bury — demote the named buffer's recency to the minimum
+  // so it sinks in buffer-list-details (and thus switch-buffer / next-buffer).
+  // Recency mutation is private to Editor (updateBufferMetadata), so this
+  // primitive REQUIRES the buryBuffer hook — there is no correct local fallback.
+  api.set("buffer-bury", (args: TLispValue[]): Either<AppError, TLispValue> => {
+    const argsValidation = validateArgsCount(args, 1, "buffer-bury");
+    if (Either.isLeft(argsValidation)) {
+      return Either.left(argsValidation.left);
+    }
+
+    let name: string;
+    if (args.length === 1 && args[0]!.type !== "nil") {
+      const nameArg = args[0]!;
+      const typeValidation = validateArgType(nameArg, "string", 0, "buffer-bury");
+      if (Either.isLeft(typeValidation)) {
+        return Either.left(typeValidation.left);
+      }
+      name = nameArg.value as string;
+    } else {
+      const currentBuffer = getCurrentBuffer();
+      if (!currentBuffer) {
+        return Either.left(createBufferError(
+          'InvalidOperation',
+          'buffer-bury: no current buffer to bury'
+        ));
+      }
+      name = "";
+      for (const [n, buf] of buffers) {
+        if (buf === currentBuffer) {
+          name = n;
+          break;
+        }
+      }
+      if (!name) {
+        return Either.left(createBufferError(
+          'InvalidOperation',
+          'buffer-bury: current buffer not in buffer map'
+        ));
+      }
+    }
+
+    if (!buffers.has(name)) {
+      return Either.left(createBufferError(
+        'InvalidOperation',
+        `buffer-bury: buffer "${name}" not found`
+      ));
+    }
+
+    if (!buryBuffer) {
+      return Either.left(createValidationError(
+        'ConstraintViolation',
+        'buffer-bury: recency mutator not available (requires Editor-owned bury hook)',
+        'buryBuffer',
+        undefined,
+        'function'
+      ));
+    }
+
+    const buried = buryBuffer(name);
+    if (buried === null) {
+      return Either.left(createBufferError(
+        'InvalidOperation',
+        `buffer-bury: buffer "${name}" not found`
+      ));
+    }
+    return Either.right(createString(buried));
   });
 
   return api;

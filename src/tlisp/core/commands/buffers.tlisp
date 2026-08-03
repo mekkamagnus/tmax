@@ -1,5 +1,5 @@
 (defmodule editor/commands/buffers
-  (export buffer-detail-more-recent-p buffer-detail-candidate buffer-completion-table switch-buffer-accept switch-buffer buffer-name current-buffer-name switch-to-buffer open-file revert-buffer)
+  (export buffer-detail-more-recent-p buffer-detail-candidate buffer-detail-name buffer-completion-table buffer-recency-list buffer-index-of buffer-special-p buffer-rotation-list switch-buffer-accept switch-buffer buffer-name current-buffer-name switch-to-buffer open-file revert-buffer next-buffer previous-buffer kill-buffer-yes-no-table kill-buffer-save-accept kill-buffer rename-buffer-interactive rename-buffer bury-buffer)
 
 ;; buffers.tlisp --- Interactive buffer completion
 
@@ -19,6 +19,40 @@
     (hashmap "category" "buffer")
     (mapcar "buffer-detail-candidate"
       (stable-sort "buffer-detail-more-recent-p" (buffer-list-details)))))
+
+;; SPEC-073: buffer rotation (next-buffer / previous-buffer).
+(defun buffer-detail-name (details)
+  "Extract the \"name\" field from a buffer-details hashmap."
+  (hashmap-get details "name"))
+
+(defun buffer-recency-list ()
+  "Return live buffer names ordered most-recent-first (the sort that
+`buffer-completion-table' already uses, minus the candidate wrapping)."
+  (mapcar "buffer-detail-name"
+    (stable-sort "buffer-detail-more-recent-p" (buffer-list-details))))
+
+(defun buffer-index-of (name list)
+  "Return the 0-based index of NAME in LIST, or -1 when absent.
+Derived from `member', which returns the tail sublist starting at the match."
+  (let ((tail (member name list)))
+    (if (nilp tail)
+      -1
+      (- (length list) (length tail)))))
+
+(defun buffer-special-p (name)
+  "Non-nil if NAME names a special buffer (surrounded by *...*),
+e.g. *scratch*, *Messages*, *daemon*."
+  (and (string-prefix-p "*" name)
+       (string-suffix-p "*" name)))
+
+(defun buffer-rotation-list ()
+  "Live non-special buffers in stable buffer-list (insertion) order.
+Used by `next-buffer' / `previous-buffer' so the cycle is deterministic:
+`buffer-switch' bumps recency on every call, so a recency-sorted list
+recomputed each call would ping-pong between the two most-recent buffers
+and never visit the rest. `buffer-list' (Map insertion order) is stable
+across switches and gives a true cycle."
+  (filter (lambda (name) (not (buffer-special-p name))) (buffer-list)))
 
 (defun switch-buffer-accept (name)
   "Switch to existing buffer NAME or create it."
@@ -62,4 +96,181 @@
     (if fn
       (find-file-open fn)
       (message "Buffer has no associated file"))))
+
+(defun next-buffer ()
+  "Switch to the next buffer in the rotation, wrapping past the end.
+Cycles non-special buffers in stable buffer-list order (newest-inserted
+first, mirroring the recency order a freshly-opened set would have). Bound
+to SPC x n."
+  (let* ((list (buffer-rotation-list))
+         (len (length list)))
+    (if (<= len 1)
+      (buffer-current)
+      (let* ((idx (buffer-index-of (buffer-current) list))
+             ;; If the current buffer is special (filtered out) it is absent:
+             ;; start the rotation from the newest-inserted file buffer.
+             (base (if (< idx 0) (- len 1) idx))
+             (next (mod (+ base (- len 1)) len)))
+        (buffer-switch (nth next list))))))
+
+(defun previous-buffer ()
+  "Switch to the previous buffer in the rotation, wrapping past the start.
+Cycles non-special buffers in stable buffer-list order (oldest-inserted
+direction). Bound to SPC x p."
+  (let* ((list (buffer-rotation-list))
+         (len (length list)))
+    (if (<= len 1)
+      (buffer-current)
+      (let* ((idx (buffer-index-of (buffer-current) list))
+             (base (if (< idx 0) 0 idx))
+             (prev (mod (+ base 1) len)))
+        (buffer-switch (nth prev list))))))
+
+;; SPEC-071: kill-buffer — close a buffer with a save-on-kill gate.
+;;
+;; completing-read is ASYNCHRONOUS: it switches to `mx` mode and returns
+;; immediately; the accept handler runs later when the user presses Enter
+;; (same shape as save-some-buffers in save.tlisp). So kill-buffer splits into:
+;;   - kill-buffer (the entry point): resolves the name, opens the save prompt
+;;     via completing-read ONLY when the buffer is modified, then defers the
+;;     actual removal to kill-buffer-accept. When the buffer is unmodified the
+;;     kill happens synchronously.
+;;   - kill-buffer-accept (the minibuffer handler): runs on "yes"/"no", saves
+;;     on "yes", then performs the kill. This is the ONLY way the prompt's
+;;     answer can reach the kill, because completing-read cannot return a value.
+;; read-string is a sync stub that returns '' (tlisp-api.ts:1314-1319), so it
+;; cannot be used for the y/n prompt — completing-read is the only working
+;; interactive mechanism (mirrors switch-buffer / save-some-buffers).
+(defvar kill-buffer-pending-name nil
+  "Holds the buffer name awaiting a save-on-kill answer, or nil when no
+kill-buffer prompt is open. Set by kill-buffer, consumed by kill-buffer-accept.")
+
+(defun kill-buffer-yes-no-table (input action)
+  "Completion table offering yes/no for the kill-buffer save prompt."
+  (if (string= action "metadata")
+    (hashmap "category" "plain")
+    (list
+      (hashmap "value" "yes" "display" "yes" "annotation" "" "metadata" (hashmap))
+      (hashmap "value" "no"  "display" "no"  "annotation" "" "metadata" (hashmap)))))
+
+(defun kill-buffer-do (name)
+  "Remove buffer NAME via the buffer-kill primitive and report it.
+The primitive switches current to the recency-correct survivor (or *scratch*
+if none remain). Centralised here so both the modified and unmodified paths
+share one removal call."
+  (let ((killed (buffer-kill name)))
+    (message (concat "Killed " killed))
+    killed))
+
+(defun kill-buffer-save-accept (answer)
+  "Minibuffer accept handler for the kill-buffer save prompt.
+On \"yes\", save the pending buffer before killing it (file-less modified
+buffers are still killable: save-buffer messages and returns, then the kill
+proceeds). On \"no\" (or anything else), kill without saving."
+  (let ((name kill-buffer-pending-name))
+    (setq kill-buffer-pending-name nil)
+    (when name
+      (when (string= answer "yes")
+        ;; save-buffer lives in the sibling editor/commands/save module, so a
+        ;; bare symbol lookup in THIS module's env cannot see it. funcall
+        ;; resolves the exported name via the module registry (same mechanism
+        ;; command-line.tlisp uses for save-buffer / save-all-buffers). save-buffer
+        ;; messages and returns early for file-less buffers (save.tlisp:14-16) —
+        ;; that is tolerated: the buffer is then killed.
+        (funcall "save-buffer"))
+      (kill-buffer-do name))))
+
+(defun kill-buffer (&optional name)
+  "Kill a buffer, prompting to save first if it is modified (Emacs convention).
+NAME defaults to the current buffer. When the buffer is modified, opens a
+yes/no completing-read prompt; \"yes\" saves then kills, \"no\" kills without
+saving. Unmodified buffers are killed immediately. After the kill the current
+buffer switches to the next survivor (or *scratch*). M-x discoverable via this
+docstring. Note: the command-line :bd/:bdelete path is wired in command-line.tlisp."
+  (let ((target (or name (buffer-current))))
+    (unless target
+      (message "No buffer to kill")
+      (return-from kill-buffer))
+    ;; Only the CURRENT buffer's modified flag is readable via buffer-modified-p
+    ;; (it reads the model flag, not per-buffer metadata). If the target is not
+    ;; current, switch to it first so the modified-p gate reflects the right
+    ;; buffer, then kill-buffer-accept restores the survivor.
+    (unless (string= target (buffer-current))
+      (buffer-switch target))
+    (if (buffer-modified-p)
+      (progn
+        ;; Modified: defer the kill to the accept handler so the prompt answer
+        ;; can gate the save. completing-read is async — the kill cannot follow
+        ;; it inline.
+        (setq kill-buffer-pending-name target)
+        (completing-read
+          (concat "Save buffer " target " before killing? (yes/no)")
+          "kill-buffer-yes-no-table"
+          nil
+          t
+          ""
+          "kill-buffer-history"
+          "kill-buffer-save-accept"))
+      (kill-buffer-do target))))
+
+;; SPEC-084: rename-buffer — re-key the current buffer under a new display name.
+;; Renaming is a display-name change, NOT a save-as: buffer-filename is left
+;; untouched, so a subsequent save-buffer still writes the original file.
+(defun rename-buffer (new-name)
+  "Rename the CURRENT buffer to NEW-NAME (display name only, not save-as).
+The buffer's associated file (buffer-filename) is unchanged — a later
+save-buffer still writes the original path. NEW-NAME must be non-empty and
+not already used by another buffer. M-x discoverable via this docstring."
+  (let ((renamed (buffer-rename new-name)))
+    (message (concat "Renamed to " renamed))
+    renamed))
+
+;; rename-buffer-interactive — prompts for the new name via the minibuffer.
+;; Used by the SPC x r binding so a keypress can rename without pre-typing the
+;; name. read-string is a sync stub, so the new name is collected through
+;; read-from-minibuffer (a free-form completing-read over an empty table).
+(defvar rename-buffer-pending nil
+  "Flag set by rename-buffer-interactive so rename-buffer-apply knows it is
+servicing a prompted rename rather than a direct M-x rename-buffer call.")
+
+(defun rename-buffer-apply (new-name)
+  "Minibuffer accept handler for the prompted rename. Performs the rename with
+the entered name (unless empty, in which case it aborts silently)."
+  (setq rename-buffer-pending nil)
+  (when (and new-name (not (string= new-name "")))
+    (rename-buffer new-name)))
+
+(defun rename-buffer-interactive ()
+  "Prompt for a new name and rename the current buffer to it (SPC x r).
+Opens a minibuffer; the entered name is applied on Enter. The rename is a
+display-name change only (buffer-filename is preserved). M-x discoverable."
+  (setq rename-buffer-pending t)
+  (read-from-minibuffer
+    "Rename buffer to: "
+    ""
+    "rename-buffer-history"
+    "rename-buffer-apply"))
+
+;; SPEC-084: bury-buffer — demote a buffer to the bottom of the recency order.
+(defun bury-buffer (&optional name)
+  "Bury a buffer so it sinks to the bottom of the recency order.
+NAME defaults to the current buffer. The buffer's recency is set below all
+others, so switch-buffer / next-buffer no longer prefer it. The current
+buffer is left in place (Emacs convention: bury only reorders, it does not
+switch away). M-x discoverable via this docstring."
+  (let ((target (or name (buffer-current))))
+    (unless target
+      (message "No buffer to bury")
+      (return-from bury-buffer))
+    (let ((buried (buffer-bury target)))
+      (message (concat "Buried " buried))
+      buried)))
+
+;; SPEC-073 / SPEC-084: SPC-led bindings (C-x is reserved by SPEC-067 for the
+;; vim decrement-number prefix). SPC x r/z live in this buffer group.
+(key-bind "SPC x n" "(next-buffer)" "normal")
+(key-bind "SPC x p" "(previous-buffer)" "normal")
+(key-bind "SPC x z" "(bury-buffer)" "normal")
+;; SPC x r opens the rename minibuffer (rename-buffer-interactive).
+(key-bind "SPC x r" "(rename-buffer-interactive)" "normal")
 )

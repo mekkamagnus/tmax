@@ -1,5 +1,8 @@
 (defmodule editor/commands/save
-  (export save-buffer quick-save save-file)
+  (export save-buffer quick-save save-file write-file save-some-buffers
+          save-all-buffers save-all-save-one
+          save-some-candidate-p save-some-name-of save-some-build-queue
+          save-some-yes-no-table save-some-accept save-some-prompt-next))
 
 ;; Per-buffer mtime tracking for concurrent-modification detection (#65/BUG-55).
 (defvar saved-modtimes (hashmap))
@@ -41,4 +44,139 @@ on disk since open/last save — pass t as the second arg to force (:w!)."
 (defun save-file (filename)
   "Save the current buffer to FILENAME."
   (save-buffer filename))
-)
+
+;; write-file — Emacs-canonical save-as name, an alias of save-file (SPEC-077).
+;; Both names share one code path (save-buffer), so the alias inherits the
+;; concurrent-modification guard, backup behavior, re-association, and the
+;; "Saved <path>" message for free. Bound SPC f w (SPEC-067: no C-x binding).
+(defun write-file (filename)
+  "Save the current buffer to FILENAME and re-associate it (save-as).
+Emacs-canonical name for save-as; delegates to save-buffer. Bound to SPC f w.
+Note: SPC-led, not C-x C-w — SPEC-067 reserves C-x for vim decrement."
+  (save-buffer filename))
+
+;; ── save-some-buffers (SPEC-072) ──────────────────────────────────────────
+;; Bulk-save every modified, non-special buffer with a per-buffer yes/no prompt.
+;;
+;; completing-read is ASYNCHRONOUS: it switches to `mx` mode and returns
+;; immediately; the accept function is invoked later by minibuffer-accept when
+;; the user presses Enter. A single (save-some-buffers) call therefore cannot
+;; loop synchronously over multiple prompts — only the last session would
+;; survive. Instead this is a CHAIN: save-some-buffers primes a queue of
+;; candidate buffers and opens the first prompt; save-some-accept (the accept
+;; handler) processes one answer, then either opens the next prompt or, when the
+;; queue is drained, restores the originating buffer and messages the summary.
+;;
+;; Iteration state lives in module defvars (mirroring saved-modtimes above).
+;; Special buffers (*scratch*, *Messages*, *daemon*) are skipped via the
+;; `special` flag on buffer-list-details — they have no associated file.
+(defun save-some-candidate-p (details)
+  "Return non-nil if DETAILS describes a saveable modified buffer.
+A candidate is modified and not special (special buffers have no file)."
+  (and (hashmap-get details "modified")
+       (not (hashmap-get details "special"))))
+
+(defun save-some-name-of (details)
+  "Extract the buffer name from a details hashmap."
+  (hashmap-get details "name"))
+
+(defun save-some-build-queue ()
+  "Return the list of saveable modified buffer detail hashmaps, in list order."
+  (filter "save-some-candidate-p" (buffer-list-details)))
+
+;; Chain state. save-some-queue holds the detail hashmaps still to prompt for;
+;; save-some-return-buffer is the buffer to restore when done; save-some-count
+;; is the running tally of buffers actually saved (for the summary message).
+(defvar save-some-queue (list))
+(defvar save-some-return-buffer nil)
+(defvar save-some-count 0)
+(defvar save-some-current-name nil)
+
+(defun save-some-yes-no-table (input action)
+  "Completion table offering yes/no choices for the per-buffer save prompt."
+  (if (string= action "metadata")
+    (hashmap "category" "plain")
+    (list
+      (hashmap "value" "yes" "display" "yes" "annotation" "" "metadata" (hashmap))
+      (hashmap "value" "no"  "display" "no"  "annotation" "" "metadata" (hashmap)))))
+
+(defun save-some-prompt-next ()
+  "Open the yes/no prompt for the next candidate, or finish the chain.
+When the queue is empty, restore the originating buffer and message the summary."
+  (if (null save-some-queue)
+    (progn
+      (when save-some-return-buffer
+        (buffer-switch save-some-return-buffer))
+      (message (concat "Saved " (number-to-string save-some-count) " buffer(s)"))
+      (setq save-some-return-buffer nil))
+    (let ((head (car save-some-queue)))
+      (setq save-some-queue (cdr save-some-queue))
+      (let ((name (save-some-name-of head)))
+        (setq save-some-current-name name)
+        (completing-read
+          (concat "Save buffer " name "? (yes/no)")
+          "save-some-yes-no-table"
+          nil
+          t
+          ""
+          "save-some-history"
+          "save-some-accept")))))
+
+(defun save-some-accept (answer)
+  "Minibuffer accept handler for one save-some-buffers prompt.
+On \"yes\", switch to the pending buffer and save it (guarding the file-less
+case). Then advance to the next candidate via save-some-prompt-next."
+  (let ((name save-some-current-name))
+    (setq save-some-current-name nil)
+    (when (string= answer "yes")
+      (buffer-switch name)
+      (if (buffer-filename)
+        (progn
+          (save-buffer)
+          (setq save-some-count (+ save-some-count 1)))
+        (message (concat "Buffer " name " has no associated file"))))
+    (save-some-prompt-next)))
+
+(defun save-some-buffers ()
+  "Save each modified buffer, prompting yes/no per buffer (Emacs convention).
+Iterates every live buffer; for each modified, non-special one, opens a
+yes/no minibuffer prompt and runs save-buffer on \"yes\". Special buffers
+(*scratch*, *Messages*, *daemon*) and file-less modified buffers are skipped.
+M-x discoverable via this docstring. Drives the quit-safety path."
+  (setq save-some-return-buffer (buffer-current))
+  (setq save-some-count 0)
+  (setq save-some-current-name nil)
+  (setq save-some-queue (save-some-build-queue))
+  (save-some-prompt-next))
+
+;; save-all-buffers — NON-interactive bulk save (vim :wa semantics).
+;; save-some-buffers prompts per buffer via completing-read, which switches to
+;; `mx` mode asynchronously. The command-mode key handler resets mode to
+;; `normal` AFTER the dispatch returns (command-handler.ts:84-86), so an mx
+;; prompt opened from `:wa` cannot survive. The command-line path therefore
+;; uses this synchronous save-all: it walks every modified, non-special buffer
+;; and saves each one that has a file (no prompt), mirroring vim's `:wa`. The
+;; interactive save-some-buffers remains the M-x / quit-safety entry point.
+(defun save-all-save-one (details)
+  "Save one candidate DETAILS hashmap if it has a file; else message and skip.
+Returns to the buffer being processed; caller restores the originating buffer."
+  (let ((name (save-some-name-of details)))
+    (buffer-switch name)
+    (if (buffer-filename)
+      (progn
+        (save-buffer)
+        (setq save-some-count (+ save-some-count 1)))
+      (message (concat "Buffer " name " has no associated file")))))
+
+(defun save-all-buffers ()
+  "Save every modified, non-special buffer that has a file (no prompt).
+Synchronous bulk-save for the `:wa` command-line path (vim :wa semantics).
+File-less modified buffers are reported and skipped; special buffers are
+ignored. Messages the count of buffers saved."
+  (let ((start (buffer-current))
+        (queue (save-some-build-queue)))
+    (setq save-some-count 0)
+    (dolist (details queue)
+      (save-all-save-one details))
+    (buffer-switch start)
+    (message (concat "Saved " (number-to-string save-some-count) " buffer(s)"))))

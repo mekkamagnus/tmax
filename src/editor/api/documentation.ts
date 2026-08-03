@@ -364,6 +364,193 @@ const DOCUMENTATION_DATABASE: DocumentationEntry[] = [
     ],
     related: ['browse-resolve', 'browse-url', 'browse-detect-at-point'],
     type: 'function'
+  },
+  // ── SPEC-071 / SPEC-084: buffer lifecycle ─────────────────────────────
+  {
+    name: 'buffer-rename',
+    category: 'buffer',
+    signature: '(buffer-rename new-name)',
+    description: "Rename the current buffer to NEW-NAME (display name only; the buffer's filename is NOT changed). Rejects empty names and names already in use by a different buffer.",
+    examples: ['(buffer-rename "notes")'],
+    related: ['buffer-kill', 'buffer-bury', 'buffer-switch'],
+    type: 'function'
+  },
+  {
+    name: 'buffer-bury',
+    category: 'buffer',
+    signature: '(buffer-bury &optional buffer-name)',
+    description: 'Demote the named buffer (default: current) in recency so it sinks in buffer-list / switch-buffer / next-buffer ordering. Returns the buried name.',
+    examples: ['(buffer-bury)', '(buffer-bury "scratch")'],
+    related: ['buffer-kill', 'buffer-rename', 'buffer-switch'],
+    type: 'function'
+  },
+  // ── SPEC-074: comment commands ────────────────────────────────────────
+  {
+    name: 'comment-dwim',
+    category: 'editing',
+    signature: '(comment-dwim)',
+    description: 'Toggle the comment prefix on the current line, or comment/uncomment the active visual region. With a region: comments every selected line, or un-comments them when all are already commented. Bound to M-;.',
+    examples: ['(comment-dwim)'],
+    related: ['comment-region', 'uncomment-region'],
+    type: 'function'
+  },
+  {
+    name: 'comment-region',
+    category: 'editing',
+    signature: '(comment-region from to)',
+    description: 'Prepend the active major-mode comment prefix to every line in the inclusive [FROM, TO] line range. Idempotent (skips lines already carrying the prefix).',
+    examples: ['(comment-region 0 4)'],
+    related: ['uncomment-region', 'comment-dwim'],
+    type: 'function'
+  },
+  {
+    name: 'uncomment-region',
+    category: 'editing',
+    signature: '(uncomment-region from to)',
+    description: 'Strip the active major-mode comment prefix (and one trailing space) from every line in the inclusive [FROM, TO] line range. Non-commented lines are left untouched.',
+    examples: ['(uncomment-region 0 4)'],
+    related: ['comment-region', 'comment-dwim'],
+    type: 'function'
+  },
+  // ── SPEC-075 / SPEC-076: eval commands ────────────────────────────────
+  {
+    name: 'eval-expression',
+    category: 'eval',
+    signature: '(eval-expression)',
+    description: 'Read a T-Lisp form from the minibuffer (prompt "Eval: ") and evaluate it in the live interpreter, echoing the result or error to *Messages* and the status line. Bound to M-:.',
+    examples: ['(eval-expression)'],
+    related: ['eval-last-sexp', 'eval-buffer', 'editor-eval-tlisp'],
+    type: 'function'
+  },
+  {
+    name: 'eval-last-sexp',
+    category: 'eval',
+    signature: '(eval-last-sexp)',
+    description: 'Evaluate the balanced T-Lisp sexp immediately before point (current-line backward paren scan) and echo the result. Reports "No sexp before point" when none. Bound to SPC e e.',
+    examples: ['(eval-last-sexp)'],
+    related: ['eval-expression', 'eval-buffer'],
+    type: 'function'
+  },
+  {
+    name: 'eval-buffer',
+    category: 'eval',
+    signature: '(eval-buffer)',
+    description: 'Evaluate the entire current buffer as a T-Lisp program; side effects become live. Logs a summary line naming the buffer. Bound to SPC e b.',
+    examples: ['(eval-buffer)'],
+    related: ['eval-expression', 'eval-last-sexp'],
+    type: 'function'
+  },
+  // ── SPEC-080: transpose + word case ───────────────────────────────────
+  {
+    name: 'transpose-chars',
+    category: 'editing',
+    signature: '(transpose-chars)',
+    description: 'Transpose the character at point with the one before it, advancing point. At column 0 (not first line) transposes the last char of the previous line with the first char of the current line (Emacs C-t). Bound to C-t.',
+    examples: ['(transpose-chars)'],
+    related: ['upcase-word', 'downcase-word', 'capitalize-word'],
+    type: 'function'
+  },
+  {
+    name: 'upcase-word',
+    category: 'editing',
+    signature: '(upcase-word)',
+    description: 'Uppercase the word at point (or the next word forward when point is not on a word char). Point lands after the transformed word. Bound to M-u.',
+    examples: ['(upcase-word)'],
+    related: ['downcase-word', 'capitalize-word', 'transpose-chars'],
+    type: 'function'
+  },
+  {
+    name: 'downcase-word',
+    category: 'editing',
+    signature: '(downcase-word)',
+    description: 'Lowercase the word at point (or the next word forward when point is not on a word char). Point lands after the transformed word. Bound to M-l.',
+    examples: ['(downcase-word)'],
+    related: ['upcase-word', 'capitalize-word', 'transpose-chars'],
+    type: 'function'
+  },
+  {
+    name: 'capitalize-word',
+    category: 'editing',
+    signature: '(capitalize-word)',
+    description: 'Capitalize the word at point: uppercase the first letter, lowercase the rest (Emacs M-c). Point lands after the transformed word. Bound to M-c.',
+    examples: ['(capitalize-word)'],
+    related: ['upcase-word', 'downcase-word', 'transpose-chars'],
+    type: 'function'
+  },
+  // ── SPEC-082: occur ───────────────────────────────────────────────────
+  {
+    name: 'occur',
+    category: 'search',
+    signature: '(occur pattern)',
+    description: 'Build a navigable *Occur* buffer listing every line matching PATTERN (literal substring), with line numbers. Press RET on a match line to jump back to the source buffer.',
+    examples: ['(occur "TODO")'],
+    related: ['occur-jump', 'occur-prompt', 'search-find-all-matches'],
+    type: 'function'
+  },
+  {
+    name: 'occur-jump',
+    category: 'search',
+    signature: '(occur-jump)',
+    description: 'From a line in the *Occur* buffer, switch to the source buffer and jump to the matching line number. No-op outside *Occur*.',
+    examples: ['(occur-jump)'],
+    related: ['occur', 'occur-prompt'],
+    type: 'function'
+  },
+  {
+    name: 'occur-prompt',
+    category: 'search',
+    signature: '(occur-prompt)',
+    description: 'Prompt for a search pattern via the minibuffer and build the *Occur* listing. Bound to SPC s o.',
+    examples: ['(occur-prompt)'],
+    related: ['occur', 'occur-jump'],
+    type: 'function'
+  },
+  // ── SPEC-083: describe commands ───────────────────────────────────────
+  {
+    name: 'describe-function',
+    category: 'help',
+    signature: '(describe-function name)',
+    description: 'Show the signature, docstring, and source of the named T-Lisp function in *Help*. Appends a formatted Documentation block when the documentation DB has a static entry. Bound to SPC h f.',
+    examples: ['(describe-function "buffer-save")'],
+    related: ['describe-mode', 'describe-variable', 'describe-key'],
+    type: 'function'
+  },
+  {
+    name: 'describe-mode',
+    category: 'help',
+    signature: '(describe-mode &optional mode)',
+    description: 'Show the current buffer major mode, editor minor mode, and active key bindings (with per-key docstrings) in *Help*. Bound to SPC h m.',
+    examples: ['(describe-mode)'],
+    related: ['describe-function', 'describe-variable', 'describe-key'],
+    type: 'function'
+  },
+  {
+    name: 'describe-variable',
+    category: 'help',
+    signature: '(describe-variable name)',
+    description: 'Show the value and documentation of the named T-Lisp variable in *Help*. Reports "NAME is not defined" for unbound names. Bound to SPC h v.',
+    examples: ['(describe-variable "kill-ring-max")'],
+    related: ['describe-function', 'describe-mode', 'describe-key'],
+    type: 'function'
+  },
+  {
+    name: 'describe-key',
+    category: 'help',
+    signature: '(describe-key key &optional mode)',
+    description: 'Show the command, mode, and docstring bound to KEY in *Help*. Bound to SPC h k.',
+    examples: ['(describe-key "j")'],
+    related: ['describe-function', 'describe-mode', 'describe-variable'],
+    type: 'function'
+  },
+  // ── SPEC-084: balance-windows ─────────────────────────────────────────
+  {
+    name: 'balance-windows',
+    category: 'window',
+    signature: '(balance-windows)',
+    description: 'Equalize window heights (horizontal splits) or widths (vertical splits) across the window list. No-op when only one window exists. Bound to C-w =.',
+    examples: ['(balance-windows)'],
+    related: ['split-window', 'window-resize-height', 'window-resize-width'],
+    type: 'function'
   }
 ];
 

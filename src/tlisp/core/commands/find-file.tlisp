@@ -1,5 +1,7 @@
 (defmodule editor/commands/find-file
-  (export find-file-accept find-file find-file-open)
+  (export find-file-accept find-file find-file-open
+          find-file-read-only find-file-read-only-accept
+          insert-file insert-file-accept)
 
 ;; find-file.tlisp — find-file command composed from primitives
 
@@ -42,4 +44,61 @@
         (set-buffer-modified-p false)
         (major-mode-auto-detect)
         (message (concat "New file " path))))))
-)
+
+;; find-file-read-only — open a file into a read-only buffer (view without editing).
+;; Composes find-file-open (which establishes the buffer + filename association, the
+;; load-bearing path for :w per BUG-58) with buffer-set-read-only. The flag is
+;; reversible: (buffer-set-read-only nil) re-enables editing.
+(defun find-file-read-only (&optional path)
+  "Open PATH (or prompt) into a read-only buffer — view without editing.
+Composes find-file-open + buffer-set-read-only. The read-only flag is
+reversible: (buffer-set-read-only nil) re-enables editing."
+  (if path
+    (find-file-open path)
+    (completing-read
+      "Find file (read-only): "
+      "file-completion-table"
+      nil
+      nil
+      ""
+      "find-file-history"
+      "find-file-read-only-accept"))
+  (buffer-set-read-only t))
+
+(defun find-file-read-only-accept (path)
+  "Minibuffer accept handler for find-file-read-only: open PATH read-only."
+  (find-file-open path)
+  (buffer-set-read-only t))
+
+;; insert-file — read another file's contents and insert them into the CURRENT
+;; buffer at the cursor (not a new buffer). Composes read-file-content +
+;; buffer-insert. Leaves the buffer's filename/major mode untouched (contrast
+;; with find-file-open, which creates/switches a buffer). read-file-content
+;; returns nil for a missing file AND for invalid-UTF-8/binary, so a single
+;; guard refuses both. buffer-insert leaves the cursor after the inserted text.
+(defun insert-file (&optional path)
+  "Insert the contents of PATH into the current buffer at point.
+Prompts via minibuffer when called without a path. Does not switch
+buffers or change the current buffer's filename."
+  (if path
+    (insert-file-accept path)
+    (completing-read
+      "Insert file: "
+      "file-completion-table"
+      nil
+      nil
+      ""
+      "find-file-history"
+      "insert-file-accept")))
+
+(defun insert-file-accept (path)
+  "Read PATH and insert its contents at point in the current buffer.
+Messages 'no such file' when PATH is missing or not valid UTF-8 and
+leaves the buffer unchanged."
+  (let ((content (read-file-content path)))
+    (if content
+      (progn
+        (buffer-insert content)
+        (message (concat "Inserted " path)))
+      (message (concat "insert-file: no such file " path))))))
+

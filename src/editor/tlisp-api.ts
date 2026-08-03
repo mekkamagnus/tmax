@@ -65,6 +65,10 @@ import { createNavigationOps } from "./api/navigation-ops.ts";
 import type { EditorAPIContext } from "./runtime/editor-api-context.ts";
 import { foldToggle, foldOpen, foldClose, foldCloseAll, foldOpenAll, foldByLevel, foldIsCollapsed, foldGetRanges, findHeadingRanges } from "./api/fold-ops.ts";
 import { createBrowseUrlOps, tsOpenExternalOutcome, type BrowseUrlPrimitiveDeps } from "./api/browse-url-ops.ts";
+import { createCommentOps } from "./api/comment-ops.ts";
+import { createEvalOps } from "./api/eval-ops.ts";
+import { createCaseOps } from "./api/case-ops.ts";
+import { createOccurOps } from "./api/occur-ops.ts";
 
 /**
  * T-Lisp function implementation that returns Either for error handling
@@ -156,6 +160,9 @@ function buildEditorAPIContributions(): readonly EditorAPIContribution[] {
           (path: string) => { ctx.setCurrentFilename(path); },
           (modified: boolean) => ctx.setBufferModified?.(modified),
           new Set(['*Messages*', '*daemon*', '*Shell Output*', '*Async Output*', '*Tests*']),
+          ctx.killBuffer,
+          ctx.renameBuffer,
+          ctx.buryBuffer,
         );
         // Alias: buffer-get-line → buffer-line. Pre-refactor this was
         // `api.set('buffer-get-line', api.get('buffer-line')!)` registered
@@ -1758,6 +1765,78 @@ function buildEditorAPIContributions(): readonly EditorAPIContribution[] {
           return tsOpenExternalOutcome(String(args[0]!.value), browseUrlDeps);
         });
         return ops;
+      },
+    },
+
+    // ── SPEC-074: comment primitives ────────────────────────────────────
+    // Factual line/region comment primitives driven by a per-major-mode
+    // comment-syntax table. The user-facing comment-dwim / comment-region /
+    // uncomment-region defuns live in src/tlisp/core/commands/comment.tlisp
+    // and compose these primitives.
+    {
+      name: "comment",
+      factory: (ctx: EditorAPIContext): Map<string, TLispFunctionImpl> => {
+        return createCommentOps(
+          ctx.access,
+          (buffer) => { ctx.setCurrentBuffer(buffer); },
+          (line) => { ctx.setCursorLine(line); },
+          () => {
+            const fn = ctx.getCurrentMajorMode;
+            return fn ? fn() : "fundamental";
+          },
+        );
+      },
+    },
+
+    // ── SPEC-075 / SPEC-076: T-Lisp evaluation primitives ───────────────
+    // editor-eval-tlisp evaluates a form in the live interpreter; buffer-sexp-
+    // before-point is the factual backward paren scan for eval-last-sexp. The
+    // user-facing eval-expression / eval-last-sexp / eval-buffer defuns live in
+    // src/tlisp/core/commands/eval.tlisp.
+    {
+      name: "eval",
+      factory: (ctx: EditorAPIContext): Map<string, TLispFunctionImpl> => {
+        return createEvalOps({ access: ctx.access, evalTlisp: ctx.evalTlisp });
+      },
+    },
+
+    // ── SPEC-080: transpose-chars + word case primitives ────────────────
+    // case-ops.ts registers bare names (transpose-chars, upcase-word, etc.);
+    // case.tlisp's defuns OWN those canonical user-facing names. To avoid a
+    // defun+builtin name collision (the defun body would resolve its own
+    // binding first → infinite recursion), the primitives are exposed under
+    // `ts-` aliases here. The defuns delegate via (ts-<name>).
+    {
+      name: "case",
+      factory: (ctx: EditorAPIContext): Map<string, TLispFunctionImpl> => {
+        const ops = createCaseOps(
+          ctx.access,
+          (buffer) => { ctx.setCurrentBuffer(buffer); },
+          (line) => { ctx.setCursorLine(line); },
+          (column) => { ctx.setCursorColumn(column); },
+        );
+        // Re-key bare primitive names to the `ts-` aliases the T-Lisp defuns
+        // call. Two names → one impl is a legitimate alias and lives inside
+        // ONE contribution so it does not trip cross-contribution duplicate
+        // detection.
+        return new Map<string, TLispFunctionImpl>([
+          ["ts-transpose-chars", ops.get("transpose-chars")!],
+          ["ts-upcase-word", ops.get("upcase-word")!],
+          ["ts-downcase-word", ops.get("downcase-word")!],
+          ["ts-capitalize-word", ops.get("capitalize-word")!],
+        ]);
+      },
+    },
+
+    // ── SPEC-082: occur source-buffer bookkeeping ───────────────────────
+    // Holds the occur-buffer ↔ source-buffer mapping the occur-jump command
+    // needs. The factory takes no ctx members — the only state is its own
+    // closure map. The user-facing occur / occur-jump / occur-prompt defuns
+    // live in src/tlisp/core/commands/occur.tlisp.
+    {
+      name: "occur",
+      factory: (_ctx: EditorAPIContext): Map<string, TLispFunctionImpl> => {
+        return createOccurOps();
       },
     },
   ];

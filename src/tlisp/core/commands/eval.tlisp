@@ -1,0 +1,104 @@
+(defmodule editor/commands/eval
+  (export eval-expression eval-last-sexp eval-buffer
+          eval-expression-accept eval-last-sexp--echo eval-buffer--echo)
+
+;; eval.tlisp --- M-: (eval-expression), SPC e e (eval-last-sexp),
+;;                SPC e b (eval-buffer).
+;;
+;; TypeScript provides the raw primitive `editor-eval-tlisp` (evaluate a
+;; T-Lisp form string in the live interpreter, return { ok value error })
+;; and `buffer-sexp-before-point` (factual backward paren scan). This module
+;; owns the editor LOGIC: minibuffer flow, *Messages* echo, status line.
+
+;; ── Shared echo helper ────────────────────────────────────────────────
+;; Both eval-expression and eval-last-sexp echo a value-or-error result from
+;; `editor-eval-tlisp`. Centralizing the formatting keeps the rendering rule
+;; (success => "=> <value>", error => "Eval error: <msg>") identical across
+;; the three entry points.
+(defun eval--echo-result (result prefix)
+  "Echo an editor-eval-tlisp RESULT hashmap to *Messages* and the status line.
+PREFIX is a string tag prepended to the error log line (e.g. \"eval-last-sexp\")."
+  (if (hashmap-get result "ok")
+    (let ((value (hashmap-get result "value")))
+      (progn
+        (editor-set-status (concat "=> " value))
+        (log-message "info" (concat "=> " value))))
+    (let ((err (hashmap-get result "error")))
+      (progn
+        (editor-set-status (concat "Eval error: " err))
+        (log-message "error" (concat prefix ": " err))))))
+
+;; ── M-: eval-expression ───────────────────────────────────────────────
+(defun eval-expression-accept (form)
+  "Evaluate FORM (a string) entered in the minibuffer and echo the result.
+Used as the accept callback for `eval-expression'; the minibuffer machinery
+keys its history under `eval-expression-history' so M-p / M-n recall prior
+forms."
+  (eval--echo-result (editor-eval-tlisp form) "eval-expression"))
+
+(defun eval-expression ()
+  "Read a T-Lisp form from the minibuffer (M-:) and evaluate it.
+The result (or error) is echoed to *Messages* and shown on the status line.
+Forms are remembered under `eval-expression-history', recallable with M-p /
+M-n. The form is evaluated in the same interpreter the daemon `eval' RPC and
+`tmax -e' use, so a form that mutates editor state (e.g.
+(set-buffer-filename \"/tmp/x\")) takes effect immediately."
+  (read-from-minibuffer
+    "Eval: "
+    ""
+    "eval-expression-history"
+    "eval-expression-accept"))
+
+;; ── SPC e e eval-last-sexp ────────────────────────────────────────────
+(defun eval-last-sexp--echo (sexp)
+  "Evaluate SEXP (a string extracted from the buffer) and echo the result."
+  (eval--echo-result (editor-eval-tlisp sexp) "eval-last-sexp"))
+
+(defun eval-last-sexp ()
+  "Evaluate the balanced sexp immediately before point (SPC e e).
+The sexp is found by scanning backward on the current line for the matching
+open paren. Result or error is echoed to *Messages*. If no balanced sexp
+precedes point on the current line, a `No sexp before point' notice is
+logged and the editor stays in normal mode."
+  (let ((scan (buffer-sexp-before-point)))
+    (if (hashmap-get scan "ok")
+      (eval-last-sexp--echo (hashmap-get scan "sexp"))
+      (progn
+        (editor-set-status "No sexp before point")
+        (log-message "warn" "eval-last-sexp: no sexp before point")))))
+
+;; ── SPC e b eval-buffer ───────────────────────────────────────────────
+(defun eval-buffer--echo (source bufname)
+  "Evaluate SOURCE (the whole buffer text) and log a summary to *Messages*.
+The buffer is evaluated as a T-Lisp program; all top-level forms run in
+sequence so side effects (defun, key-bind, setq) become live. BUFNAME is
+the buffer name used in the summary line."
+  (let ((result (editor-eval-tlisp source)))
+    (if (hashmap-get result "ok")
+      (progn
+        (editor-set-status "=> (buffer evaluated)")
+        (log-message "info" (concat "eval-buffer: " bufname " evaluated")))
+      (let ((err (hashmap-get result "error")))
+        (progn
+          (editor-set-status (concat "Eval error: " err))
+          (log-message "error" (concat "eval-buffer (" bufname "): " err)))))))
+
+(defun eval-buffer ()
+  "Evaluate the entire current buffer as a T-Lisp program (SPC e b).
+Side effects (defun, key-bind, setq) become live in the editor, so a buffer
+containing (defun foo () 42) makes `foo' immediately callable via M-x. A
+summary line is logged to *Messages* on success, or the error is logged at
+error level on failure. Evaluation runs in the live editor interpreter (the
+same one M-: uses)."
+  (eval-buffer--echo (buffer-text) (buffer-current)))
+
+;; ── Bindings (SPEC-067 aware) ─────────────────────────────────────────
+;; C-x is vim-decrement (SPEC-067), so the Emacs C-x C-e convention is
+;; unreachable. Use the SPC e leader prefix instead, consistent with the
+;; existing SPC x ... family.
+(key-bind "M-:" "(eval-expression)" "normal")
+(key-bind "SPC e e" "(eval-last-sexp)" "normal")
+(key-bind "SPC e b" "(eval-buffer)" "normal")
+
+(provide "eval")
+)
