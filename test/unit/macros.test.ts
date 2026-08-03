@@ -206,7 +206,7 @@ describe("T-Lisp Macro System", () => {
 
     expect(Either.isLeft(result)).toBe(true);
     if (Either.isLeft(result)) {
-      expect(result.left.message).toContain("defmacro requires exactly 3 arguments");
+      expect(result.left.message).toContain("defmacro requires 3 or 4 arguments");
     }
   });
 
