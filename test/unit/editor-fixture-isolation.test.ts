@@ -63,6 +63,17 @@ describe("CHORE-44 Change 12 — editor fixture isolation", () => {
     const forbidden = `new Editor${"("}`;
     const files = [...listTestFiles(join(repoRoot, "test", "unit")), ...listTestFiles(join(repoRoot, "test", "integration"))];
     expect(files.length).toBeGreaterThan(30); // sanity: we found the suite
+    // Allow-list (BUG-67/#116): tests that legitimately construct a REAL
+    // Editor because they exercise a server-lifecycle / startup context the
+    // standalone createEditorFixture helper does not cover. Each entry MUST
+    // carry its reason. The guard still catches any NEW direct construction
+    // not listed here, and the second loop below forces stale entries to be
+    // removed (a migrated/deleted allow-listed file fails the "still
+    // constructs" check), so the allow-list cannot silently rot.
+    const allowed = new Map<string, string>([
+      ["test/unit/server-start-editor.test.ts", "tests cleanStart/startEditor with REAL TerminalIOImpl+FileSystemImpl (BUG-58 guard); fixture uses a different setup"],
+      ["test/unit/editor-open-file.test.ts", "wraps Editor in TmaxServer + startEditor to test open-file through the server; createEditorFixture is standalone (no server)"],
+    ]);
     const offenders: string[] = [];
     for (const file of files) {
       const text = readFileSync(file, "utf8");
@@ -70,7 +81,17 @@ describe("CHORE-44 Change 12 — editor fixture isolation", () => {
         offenders.push(file);
       }
     }
-    expect(offenders).toEqual([]);
+    // Normalize to repo-relative for the allow-list compare.
+    const newOffenders = offenders
+      .map((f) => f.replace(repoRoot + "/", ""))
+      .filter((f) => !allowed.has(f));
+    expect(newOffenders).toEqual([]);
+    // Every allow-list entry must still exist AND still construct — guards
+    // against stale entries surviving after a test is migrated/removed.
+    for (const entry of allowed.keys()) {
+      const text = readFileSync(join(repoRoot, entry), "utf8");
+      expect(text.includes(forbidden)).toBe(true);
+    }
   });
 
   test("AC12.2 default fixture: editor is started with real core bindings", async () => {
