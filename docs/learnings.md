@@ -103,3 +103,39 @@ The evaluator has TWO execution paths — sync (`execute`→`evalList`) and asyn
 **Concrete failure (CHORE-44 Change 4):** extracting the special-form table into `special-form-dispatch.ts` mistyped the `set!` key as `set` (dropped `!`). `isSpecialForm("set!")` returned false, so `evalListAsync` mis-dispatched every `(set! …)` as a function call → "Undefined symbol: set!". The SYNC path kept its `case "set!"`, so direct eval probes worked and the evaluator gate stayed green — but 40 editor tests broke because the vim-parity T-Lisp modules mutate state via `set!` on the async path. The bug shipped across Changes 4–5 because each change's narrow gate missed it. Bisect (`git checkout <commit>` + run the 4 suspect files) isolated it to the exact commit.
 
 **Diagnostic trick:** if a T-Lisp primitive is "Undefined symbol" but TS builtins (`count-get`) work, suspect the async special-form dispatch table, not module loading. Probe both `(vim-n 1)` (module-loaded) and `(count-get)` (TS builtin) to distinguish.
+
+## Testing: tmax-use "Undefined symbol" is a swallowed .tlisp parse error, not a race
+
+An intermittent `Undefined symbol: <cmd>` from a tmax-use playbook is NOT an evalReady/module-load race. `server.ts start()` is sequential — `await startEditor()` (which synchronously runs `loadCoreBindings` → the `(require-module …)` chain via synchronous `interpreter.execute`; `loadModuleFromDisk` returns `Either`, not a `Promise`) runs BEFORE `await startSocket()`, so the socket file cannot appear until the command is registered. The real cause is `loadCoreBindings` SWALLOWING module-load errors (`src/editor/runtime/binding-runtime.ts:148-159`: it `console.warn`s + `loadFallbackBindings()` + sets `coreBindingsLoaded(true)` regardless) — a syntax error in a required `.tlisp` leaves the command undefined while the daemon starts normally. (BUG-60 was initially misdiagnosed as a race; verify-gate disproved it.)
+
+**Rule:** On `Undefined symbol: <cmd>` in tmax-use, check the daemon's stderr for "Failed to load some core bindings" and bisect the `.tlisp` files — do NOT add readiness/race gates. Run playbooks SOLO with `HOME=$(mktemp -d)` after `pkill -f src/server.ts` to isolate from stale-daemon socket reuse (a separate, real contributor).
+
+## T-Lisp: `completing-read` is async — multi-prompt flows need a state machine
+
+`completing-read` switches the editor to `mx` mode and returns immediately; the accept handler runs later on Enter. Only the LAST live session survives, so a single `defun` cannot `while`-loop multiple prompts (each iteration overwrites the prior session). Adding a timer primitive or editing the TS command-handler are off-limits (logic stays in T-Lisp).
+
+**Rule:** For per-item interactive flows (`save-some-buffers`, the `kill-buffer` save gate), prime a module-`defvar` queue + open the first prompt, then process one answer per accept-handler call, opening the next or restoring+summarizing when drained (ADR-0168).
+
+## T-Lisp: cross-module calls resolve via `funcall`, not bare names
+
+A `defun` in module A calling a `defun` from module B by bare name does NOT resolve — module exports are not implicitly global from another module's defun body. The latent symptom is a command that works through the TS fallback path but throws "Undefined symbol" on the T-Lisp dispatch path.
+
+**Rule:** Call cross-module T-Lisp functions via `(funcall "name" …)` (resolved through `resolveUniqueExport`), not bare `(name …)`. (Encountered: `command-line.tlisp` `:w`/`:bd` needed `(funcall "save-buffer" …)` / `(funcall "kill-buffer" …)`.)
+
+## T-Lisp: `defmodule` rejects `--` in defun names
+
+A `(defun name--private …)` inside a `(defmodule …)` parses fine and works in a bare interpreter, but is left UNDEFINED when the module is loaded via `require-module` — single-dash neighbors define correctly (the module export/symbol machinery mishandles `--`). [BUG-63]
+
+**Rule:** Don't use `--` in `defun` names inside modules; use single-dash names or inline `(lambda …)` predicates for private helpers.
+
+## Editing: `buffer-switch` bumps recency — don't cycle on a recency-sorted list
+
+`buffer-switch` calls `touchBuffer` (`src/editor/editor.ts`) on every invocation, bumping the switched-to buffer's recency. A `next-buffer`/`previous-buffer` that recomputes a recency-sorted list each call ping-pongs between the two most-recent buffers and never visits the rest (C→B→C→B…). [SPEC-073]
+
+**Rule:** Build buffer cycling on a STABLE ordering — `(filter non-special (buffer-list))` (Map insertion order, not reordered on switch). A future non-self-bumping recency primitive would restore true-recency cycling (SPEC-087).
+
+## Contract: re-baseline `.chore44-baseline/` when the public API intentionally grows
+
+`test/unit/chore44-baseline-inventory.test.ts` freezes the `createEditorAPI` inventory (`.chore44-baseline/api-names-static.txt`) and the Editor public-method surface (`editor-methods.txt`); `test/unit/editor-api-registry.test.ts` hardcodes the count. Adding a primitive or Editor method turns these red — by design (a change-detector).
+
+**Rule:** When you intentionally add a public API primitive or Editor method, regenerate the baselines (compute the live set the way the test does — `Array.from(createEditorAPI(ctx).keys())` and `Object.getOwnPropertyNames(Editor.prototype)` filtered, sorted — and write it) and update the hardcoded count. Do NOT silence the test.
