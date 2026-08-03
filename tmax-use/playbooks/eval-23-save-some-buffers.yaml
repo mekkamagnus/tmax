@@ -1,0 +1,152 @@
+name: eval-23-save-some-buffers
+description: |
+  SPEC-072 (feature-red): save-some-buffers — bulk-save all modified buffers
+  (quit safety). Asserts the completion criteria EXACTLY — these will fail
+  with "unknown function" until SPEC-072 is implemented (TDD intent):
+    - Two modified file buffers: (save-some-buffers) prompts per buffer via
+      completing-read; answering yes to each writes both files to disk
+      (verified via read-file-content) and clears (buffer-modified-p).
+    - A modified file-less buffer is reported via (message) and skipped
+      (no crash); a modified file buffer is still saved.
+    - Special buffers (*scratch*) are never prompted even if "modified".
+    - :wa invokes bulk-save (vim :wa semantics — saves all modified buffers
+      synchronously, no prompt; the command-mode handler resets mode to normal
+      after dispatch, so an interactive mx prompt cannot survive the `:wa`
+      path. M-x save-some-buffers / quit-safety use the prompting path).
+    - Quit safety: :q with a modified buffer triggers the save-some prompt
+      before quitting; :q! quits immediately.
+    - M-x save-some-buffers is discoverable via completion.
+
+setup:
+  - action: setup_file
+    var: FILE_A
+    name: eval-23-a.txt
+    content: |
+      file a original
+  - action: setup_file
+    var: FILE_B
+    name: eval-23-b.txt
+    content: |
+      file b original
+
+steps:
+  # --- setup: two file buffers, both modified ---
+  - name: switch to normal mode
+    eval: '(editor-set-mode "normal")'
+    expect:
+      mode: normal
+
+  - name: open file A and modify it
+    eval: '(progn (find-file "${FILE_A}") (cursor-move 0 0) (buffer-insert "AAA "))'
+    expect:
+      buffer_contains: "AAA file a original"
+
+  - name: open file B and modify it
+    eval: '(progn (find-file "${FILE_B}") (cursor-move 0 0) (buffer-insert "BBB "))'
+    expect:
+      buffer_contains: "BBB file b original"
+
+  - name: file A is modified
+    eval: '(progn (buffer-switch "${FILE_A}") (buffer-modified-p))'
+    expect:
+      result_contains: "true"
+
+  - name: file B is modified
+    eval: '(progn (buffer-switch "${FILE_B}") (buffer-modified-p))'
+    expect:
+      result_contains: "true"
+
+  # --- save-some-buffers prompts per modified buffer; answer yes to both ---
+  - name: save-some-buffers opens the per-buffer prompt (mx mode)
+    eval: '(save-some-buffers)'
+    expect:
+      mode: mx
+
+  - name: answer yes to the first buffer prompt
+    keys: 'yes<Enter>'
+    expect:
+      mode: mx
+
+  - name: answer yes to the second buffer prompt
+    keys: 'yes<Enter>'
+    expect:
+      mode: normal
+
+  - name: file A on disk reflects the edit
+    eval: '(read-file-content "${FILE_A}")'
+    expect:
+      result_contains: "AAA file a original"
+
+  - name: file B on disk reflects the edit
+    eval: '(read-file-content "${FILE_B}")'
+    expect:
+      result_contains: "BBB file b original"
+
+  - name: file A modified flag cleared
+    eval: '(progn (buffer-switch "${FILE_A}") (buffer-modified-p))'
+    expect:
+      result_contains: "false"
+
+  - name: file B modified flag cleared
+    eval: '(progn (buffer-switch "${FILE_B}") (buffer-modified-p))'
+    expect:
+      result_contains: "false"
+
+  # --- file-less modified buffer is reported + skipped, file buffer still saved ---
+  - name: modify a file-less buffer (scratch)
+    eval: '(progn (buffer-switch "*scratch*") (cursor-move 0 0) (buffer-insert "scratch-edit"))'
+    expect:
+      buffer_contains: "scratch-edit"
+
+  - name: re-modify file A
+    eval: '(progn (buffer-switch "${FILE_A}") (cursor-move 0 0) (buffer-insert "AGAIN "))'
+    expect:
+      buffer_contains: "AGAIN AAA file a original"
+
+  - name: save-some-buffers prompts for file A only (scratch skipped, no crash)
+    eval: '(save-some-buffers)'
+    expect:
+      mode: mx
+
+  - name: answer yes to save file A
+    keys: 'yes<Enter>'
+    expect:
+      mode: normal
+
+  - name: file A on disk has the second edit
+    eval: '(read-file-content "${FILE_A}")'
+    expect:
+      result_contains: "AGAIN AAA file a original"
+
+  # --- :wa command-line invokes save-some-buffers ---
+  - name: modify file B again
+    eval: '(progn (buffer-switch "${FILE_B}") (cursor-move 0 0) (buffer-insert "MORE "))'
+    expect:
+      buffer_contains: "MORE BBB file b original"
+
+  - name: enter command mode for the :wa path
+    eval: '(editor-enter-command-mode)'
+    expect:
+      mode: command
+
+  - name: :wa saves all modified buffers synchronously (vim :wa semantics)
+    keys: 'wa<Enter>'
+    expect:
+      mode: normal
+
+  - name: file B on disk has the third edit
+    eval: '(read-file-content "${FILE_B}")'
+    expect:
+      result_contains: "MORE BBB file b original"
+
+  # --- M-x discoverability ---
+  # command-detail-interactive-p takes a command-detail hashmap (not a name
+  # string). Filter callable-command-details by interactive-p (the same
+  # predicate the M-x completer uses); save-some-buffers appearing in the
+  # filtered set proves its docstring makes it M-x-discoverable.
+  - name: save-some-buffers is an interactive command
+    eval: '(filter "command-detail-interactive-p" (callable-command-details))'
+    expect:
+      result_contains: "save-some-buffers"
+
+cleanup: true

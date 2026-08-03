@@ -1,0 +1,84 @@
+name: eval-31-transpose-and-word-case
+description: |
+  SPEC-080 (feature-red): transpose-chars and the word-case ops
+  upcase-word / downcase-word / capitalize-word. These primitives do not exist
+  yet, so each eval that calls them fails "unknown function" until
+  implementation — the expected RED state. Asserts the post-state per the DoD:
+  transpose swaps the char at point with the char before and advances point;
+  each word-case op transforms the word at (or just after) point and lands
+  point after the transformed word.
+
+setup:
+  - action: setup_file
+    var: FILE
+    name: eval-31-transpose.txt
+    content: |
+      abcd
+      hello world
+
+steps:
+  - name: switch to normal mode
+    eval: '(editor-set-mode "normal")'
+    expect:
+      mode: normal
+
+  - name: open the test file
+    eval: '(find-file "${FILE}")'
+    expect:
+      buffer_contains: "abcd"
+
+  # -- transpose-chars mid-line: cursor on 'c' in "ab|cd" -> "acbd", point on 'b'+1 --
+  - name: place cursor on the c (line 0, col 2)
+    eval: '(cursor-move 0 2)'
+  - name: transpose-chars swaps the two chars around point
+    eval: '(transpose-chars)'
+  - name: line 0 now reads acbd
+    eval: '(buffer-line 0)'
+    expect:
+      result_contains: 'acbd'
+  - name: cursor advanced one column to 3
+    eval: '(cursor-column)'
+    expect:
+      result_contains: '3'
+
+  # -- upcase-word transforms the word at point and lands point after it --
+  - name: move to line 1 col 0 (on 'hello')
+    eval: '(cursor-move 1 0)'
+  - name: upcase-word uppercases hello
+    eval: '(upcase-word)'
+  - name: line 1 now reads HELLO world
+    eval: '(buffer-line 1)'
+    expect:
+      result_contains: 'HELLO world'
+
+  # -- downcase-word on an uppercased word lowercases it --
+  - name: back to start of HELLO
+    eval: '(cursor-move 1 0)'
+  - name: downcase-word lowercases HELLO
+    eval: '(downcase-word)'
+  - name: line 1 now reads hello world
+    eval: '(buffer-line 1)'
+    expect:
+      result_contains: 'hello world'
+
+  # -- capitalize-word capitalizes only the first letter --
+  - name: back to start of hello
+    eval: '(cursor-move 1 0)'
+  - name: capitalize-word capitalizes hello -> Hello
+    eval: '(capitalize-word)'
+  - name: line 1 now reads Hello world
+    eval: '(buffer-line 1)'
+    expect:
+      result_contains: 'Hello world'
+
+  # -- word-case op with point between words operates on the NEXT word forward --
+  - name: place cursor on the space before world (line 1, col 5)
+    eval: '(cursor-move 1 5)'
+  - name: upcase-word uppercases the next word forward
+    eval: '(upcase-word)'
+  - name: line 1 now reads Hello WORLD
+    eval: '(buffer-line 1)'
+    expect:
+      result_contains: 'Hello WORLD'
+
+cleanup: true

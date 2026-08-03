@@ -1,0 +1,162 @@
+name: eval-45-modes
+description: |
+  Major/minor mode T-Lisp surface (CHORE-078). Asserts the EXISTING contract of
+  every major-mode and minor-mode primitive via the daemon-driven eval loop:
+
+  - major-mode-set "markdown" then major-mode-get reflects markdown.
+  - major-mode-register a custom "ts-indent" mode for ".tsind"; it appears in
+    major-mode-list and its ".tsind" extension is resolved by
+    major-mode-auto-detect on a fixture with that suffix.
+  - major-mode-hook-add + auto-detect runs the hook, which pushes a marker
+    into the status line via (message ...).
+  - define-minor-mode "test-mm" then minor-mode-set t enables it; a toggle
+    flips the boolean both ways (read-after-write round-trip).
+  - global-minor-mode-set "line-numbers" t activates it globally; the spread
+    is observable in a freshly-created second buffer via minor-mode-active-p.
+
+  This is a characterization (chore) playbook: every command under test
+  already EXISTS in src/editor/api/major-mode-ops.ts and minor-mode-ops.ts,
+  so the assertions SHOULD pass. Honest assertions only.
+
+  NOTE on result serialization: the daemon's eval path converts T-Lisp values
+  to JSON before the runner substring-matches them (server.ts
+  tlispValueToJson). So nil serializes as the literal "null", the boolean t
+  as "true", lists as JSON arrays, and bare strings/symbols as their text.
+  Assertions below use the JSON form accordingly.
+
+setup:
+  - action: setup_file
+    var: TSFILE
+    name: eval-45-fixture.ts
+    content: |
+      function fixtureFn(x: number): number {
+        return x + 1;
+      }
+  - action: setup_file
+    var: TSINDFILE
+    name: eval-45-fixture.tsind
+    content: |
+      custom-extension-mode content
+
+steps:
+  # ---- major-mode-set / major-mode-get round-trip ----
+  - name: open the .ts fixture so a buffer/filename is current
+    eval: '(find-file "${TSFILE}")'
+    expect:
+      buffer_contains: "fixtureFn"
+
+  - name: major-mode-set markdown then major-mode-get reflects it
+    eval: '(progn (major-mode-set "markdown") (major-mode-get))'
+    expect:
+      result_contains: "markdown"
+
+  # ---- major-mode-register + major-mode-list membership ----
+  - name: register a custom ts-indent major mode for .tsind
+    eval: '(major-mode-register "ts-indent" (list ".tsind") "typescript" (list "{") (list "}"))'
+    expect:
+      result_contains: "null"
+
+  - name: ts-indent now appears in major-mode-list
+    eval: '(member "ts-indent" (major-mode-list))'
+    expect:
+      result_contains: "ts-indent"
+
+  # ---- major-mode-hook-add + auto-detect runs the activate hook ----
+  - name: define a hook marker function that emits a status message
+    eval: '(defun ts-indent--marker () (message "TS-INDENT-HOOK-FIRED"))'
+    expect:
+      result_contains: "ts-indent--marker"
+
+  - name: attach the marker to the ts-indent activate hook
+    eval: '(major-mode-hook-add "ts-indent" "ts-indent--marker")'
+    expect:
+      result_contains: "null"
+
+  - name: open the .tsind fixture (sets currentFilename for auto-detect)
+    eval: '(find-file "${TSINDFILE}")'
+    expect:
+      buffer_contains: "custom-extension-mode"
+
+  - name: auto-detect resolves ts-indent from the .tsind extension
+    eval: '(major-mode-auto-detect)'
+    expect:
+      result_contains: "ts-indent"
+
+  - name: the activate hook fired (marker posted to status line)
+    eval: '(major-mode-auto-detect)'
+    expect:
+      status_message: "TS-INDENT-HOOK-FIRED"
+
+  - name: major-mode-get confirms ts-indent is current after auto-detect
+    eval: '(major-mode-get)'
+    expect:
+      result_contains: "ts-indent"
+
+  # ---- define-minor-mode + minor-mode-set + active-p round-trip ----
+  # A freshly defined minor mode has initValue=false, so its active-p is a
+  # clean, deterministic false BEFORE any enable — the ideal round-trip base.
+  - name: define a brand-new test-mm minor mode
+    eval: '(define-minor-mode "test-mm" "test minor mode" "Test" nil)'
+    expect:
+      result_contains: "test-mm"
+
+  - name: test-mm is inactive before any enable
+    eval: '(minor-mode-active-p "test-mm")'
+    expect:
+      result_contains: "false"
+
+  - name: enable test-mm explicitly via minor-mode-set
+    eval: '(minor-mode-set "test-mm" t)'
+    expect:
+      result_contains: "null"
+
+  - name: minor-mode-active-p confirms test-mm is now active
+    eval: '(minor-mode-active-p "test-mm")'
+    expect:
+      result_contains: "true"
+
+  # ---- minor-mode-toggle flips the boolean ----
+  # minor-mode-toggle returns the NEW boolean state. After the enable above
+  # test-mm is on, so toggling flips it off (returns false).
+  - name: toggle test-mm off (returns the new boolean state)
+    eval: '(minor-mode-toggle "test-mm")'
+    expect:
+      result_contains: "false"
+
+  - name: active-p reflects the flipped (off) state
+    eval: '(minor-mode-active-p "test-mm")'
+    expect:
+      result_contains: "false"
+
+  - name: toggle test-mm back on
+    eval: '(minor-mode-toggle "test-mm")'
+    expect:
+      result_contains: "true"
+
+  # ---- global-minor-mode-set spreads across buffers ----
+  - name: enable line-numbers globally
+    eval: '(global-minor-mode-set "line-numbers" t)'
+    expect:
+      result_contains: "null"
+
+  - name: global-minor-mode-active-p confirms the global flag
+    eval: '(global-minor-mode-active-p "line-numbers")'
+    expect:
+      result_contains: "true"
+
+  - name: create a fresh second buffer
+    eval: '(buffer-create "eval-45-second")'
+    expect:
+      result_contains: "eval-45-second"
+
+  - name: switch into the fresh second buffer
+    eval: '(buffer-switch "eval-45-second")'
+    expect:
+      result_contains: "eval-45-second"
+
+  - name: the globalized minor mode is active in the fresh buffer
+    eval: '(minor-mode-active-p "line-numbers")'
+    expect:
+      result_contains: "true"
+
+cleanup: true

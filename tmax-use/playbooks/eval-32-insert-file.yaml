@@ -1,0 +1,72 @@
+name: eval-32-insert-file
+description: |
+  SPEC-081 (feature-red): insert-file reads another file's contents and
+  inserts them into the CURRENT buffer at the cursor (not a new buffer). The
+  command does not exist yet, so the evals calling it fail "unknown function"
+  until implementation — the expected RED state. Asserts the DoD: after
+  (insert-file B) buffer A contains A's text with B's contents at the cursor,
+  the cursor lands after the inserted text, the receiving buffer is marked
+  modified, a missing source file produces a clear message and no mutation,
+  and the receiving buffer's filename is unchanged (contrast with find-file).
+
+setup:
+  - action: setup_file
+    var: FILEA
+    name: eval-32-a.txt
+    content: |
+      AAA-header
+      AAA-footer
+  - action: setup_file
+    var: FILEB
+    name: eval-32-b.txt
+    content: |
+      BBB-inserted-line-one
+      BBB-inserted-line-two
+
+steps:
+  - name: switch to normal mode
+    eval: '(editor-set-mode "normal")'
+    expect:
+      mode: normal
+
+  - name: open buffer A
+    eval: '(find-file "${FILEA}")'
+    expect:
+      buffer_contains: "AAA-header"
+
+  # -- insert-file inserts B's contents at the cursor in the current buffer --
+  - name: cursor at start of line 0
+    eval: '(cursor-move 0 0)'
+  - name: insert B into A at point
+    eval: '(insert-file "${FILEB}")'
+  - name: A now contains B's first inserted line
+    expect:
+      buffer_contains: "BBB-inserted-line-one"
+  - name: A now contains B's second inserted line
+    expect:
+      buffer_contains: "BBB-inserted-line-two"
+  - name: A still contains its original header
+    expect:
+      buffer_contains: "AAA-header"
+
+  # -- the receiving buffer is marked modified (BUG-58 regression class) --
+  - name: buffer-modified-p is true after the insert
+    eval: '(if (buffer-modified-p) "MODIFIED" "CLEAN")'
+    expect:
+      result_contains: 'MODIFIED'
+
+  # -- a nonexistent source file produces a clear message and no mutation --
+  - name: snapshot line count before the failed insert
+    eval: '(buffer-line-count)'
+  - name: insert-file on a missing path messages and inserts nothing
+    eval: '(insert-file "${FILEA}.does-not-exist")'
+    expect:
+      status_message: 'no such file'
+
+  # -- insert-file does NOT switch buffers or change the filename --
+  - name: the current buffer is still the A buffer (by name)
+    eval: '(buffer-name)'
+    expect:
+      result_contains: 'eval-32-a.txt'
+
+cleanup: true

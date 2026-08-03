@@ -1,0 +1,133 @@
+name: eval-41-undo-tree
+description: |
+  CHORE-074 e2e: black-box coverage for the linear undo/redo path ((undo)/(redo),
+  the u/C-r bindings) and the branching undo-tree-* family.
+
+  Driven entirely through the structured --eval JSON-RPC path (no tmux
+  keystrokes), asserting on (buffer-text) and the boundary status strings.
+
+  Linear section (green today) guards: the round-trip restores buffer text
+  exactly via buffer-text, and the "Already at oldest change" / "Already at
+  newest change" boundary strings are returned (not silently nil).
+
+  Branch-clearing section (BUG-59, commented out): after (undo) restores the
+  initial buffer, a subsequent buffer-insert writes into the STALE post-edit
+  buffer instead of the restored initial buffer. A repro:
+    insert "A" -> "Abaseline"; (undo) -> (buffer-text) shows "baseline"
+    (correctly); (buffer-insert "B") -> produces "BAbaseline" NOT "Bbaseline".
+  So (buffer-text) reports the restored buffer but the next edit mutates the
+  pre-undo buffer — an integration mismatch between the undo path's
+  setCurrentBuffer and buffer-ops' getCurrentBuffer. The branch-clearing
+  assertion depends on undo-then-insert working, so it is commented out until
+  BUG-59 lands.
+
+  Tree section (BUG-60, commented out): the undo-tree-* family
+  (src/editor/api/undo-tree.ts) is defined but NOT wired into the daemon's
+  interpreter — createUndoTreeOps is never called from
+  src/editor/tlisp-api.ts (only createUndoRedoOps is, at tlisp-api.ts:387).
+  Every undo-tree-* call therefore returns "unknown function" via --eval.
+  Additionally undo-tree-push takes a wrapped {buffer: TextBuffer} object (an
+  internal TS contract, undo-tree.ts:380-390), not a T-Lisp value, so even
+  once wired it needs a T-Lisp wrapper passing the current buffer. Both gaps
+  are filed under BUG-60.
+
+setup:
+  - action: setup_file
+    var: FILE
+    name: eval-41-undo.txt
+    content: |
+      baseline
+
+steps:
+  - name: switch to normal mode
+    eval: '(editor-set-mode "normal")'
+    expect:
+      mode: normal
+
+  # ----------------------------------------------------------- open the fixture
+  - name: open the fixture file
+    eval: '(find-file "${FILE}")'
+    expect:
+      buffer_contains: "baseline"
+
+  # ---------------------------------------------------------- linear undo/redo
+  # Insert "A"; the buffer now holds "A" + baseline. Undo drops back to the
+  # initial buffer (buffer-text reports "baseline" again) and signals the
+  # oldest-change boundary.
+  - name: insert marker A at the start
+    eval: '(progn (cursor-move 0 0) (buffer-insert "A"))'
+    expect:
+      buffer_contains: "Abaseline"
+
+  - name: buffer-text confirms A landed
+    eval: '(buffer-text)'
+    expect:
+      result_contains: 'Abaseline'
+
+  - name: undo signals the oldest-change boundary
+    eval: '(undo)'
+    expect:
+      result_contains: 'Already at oldest change'
+
+  - name: buffer-text reports the restored initial buffer (no A)
+    eval: '(buffer-text)'
+    expect:
+      result_contains: 'baseline'
+
+  - name: redo brings A back
+    eval: '(redo)'
+    expect:
+      buffer_contains: "Abaseline"
+
+  - name: a second redo hits the newest boundary
+    eval: '(redo)'
+    expect:
+      result_contains: 'Already at newest change'
+
+  # ---------------------------------------------- BUG-59: undo-then-insert is stale
+  # The intended branch-clearing guard: undo to drop A, then a NEW insert "B"
+  # should truncate the redo future so a follow-up redo hits the newest
+  # boundary instead of restoring A. This is commented out because the undo
+  # path leaves buffer-ops reading a stale buffer: after (undo) restores
+  # "baseline" (confirmed by buffer-text above), (buffer-insert "B") mutates
+  # the pre-undo "Abaseline" buffer, producing "BAbaseline" instead of
+  # "Bbaseline". Uncomment once BUG-59 is fixed:
+  #
+  # - name: undo to drop A before diverging
+  #   eval: '(undo)'
+  #   expect:
+  #     result_contains: 'Already at oldest change'
+  # - name: diverge with a new insert B
+  #   eval: '(progn (cursor-move 0 0) (buffer-insert "B"))'
+  #   expect:
+  #     buffer_contains: "Bbaseline"
+  # - name: redo after divergence reaches newest boundary (A branch was cleared)
+  #   eval: '(redo)'
+  #   expect:
+  #     result_contains: 'Already at newest change'
+
+  # ------------------------------------------------------------ BUG-60: undo-tree-*
+  # The undo-tree-* family is not wired into the daemon interpreter (see
+  # description above). The intended assertions are documented here:
+  #
+  #   (undo-tree-reset)            -> (undo-tree-nodes) reports 0
+  #   (undo-tree-push desc buf ...) -> returns the new node id; nodes grows
+  #   (undo-tree-current)          -> tracks the pushed id (-1 sentinel at root)
+  #   (undo-tree-undo)             -> steps current back to the parent
+  #   (undo-tree-redo)             -> returns current to the leaf
+  #   (undo-tree-goto <id>)        -> jumps current to the chosen node
+  #   (undo-tree-branches <id>)    -> lists child ids; grows after a divergence
+  #
+  # Uncomment once BUG-60 lands (wire createUndoTreeOps + add a T-Lisp wrapper
+  # for undo-tree-push that passes the current buffer):
+  #
+  # - name: reset the undo tree
+  #   eval: '(undo-tree-reset)'
+  #   expect:
+  #     result_contains: 'nil'
+  # - name: tree is empty after reset
+  #   eval: '(undo-tree-nodes)'
+  #   expect:
+  #     result_contains: '0'
+
+cleanup: true

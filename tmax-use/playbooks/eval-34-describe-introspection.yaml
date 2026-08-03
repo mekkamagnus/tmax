@@ -1,0 +1,132 @@
+name: eval-34-describe-introspection
+description: |
+  SPEC-083 e2e (feature-red): describe-mode / describe-variable do NOT exist
+  yet and describe-key's docstring slot is a "No documentation available"
+  placeholder. This playbook asserts the completion criteria directly and is
+  expected to fail with "unknown function: describe-mode" /
+  "describe-variable" until implementation (and to fail the
+  "No documentation available" assertion until describe-key is fixed).
+
+  Verifies:
+    - (describe-function "find-file") returns a non-empty docstring for a
+      known function (result_contains a known phrase).
+    - (describe-mode) returns a description of the current buffer's major
+      mode that names the editor mode and at least the j/k bindings; the
+      result is rendered to a single reusable *Help* buffer.
+    - (describe-variable NAME) for a setq'd variable returns its current
+      value; an unbound name returns "not defined".
+    - (describe-key "j") returns the bound command's REAL docstring (not the
+      "No documentation available" placeholder).
+    - The *Help* buffer is reused (exactly one *Help* in buffer-list) across
+      consecutive describe invocations.
+
+  Primitives used (already exist): find-file, editor-set-mode, setq,
+  buffer-list, buffer-switch, buffer-line, cursor-line.
+
+setup:
+  - action: setup_file
+    var: FILE
+    name: eval-34-describe.txt
+    content: |
+      line one for describe test
+      line two for describe test
+
+steps:
+  - name: switch to normal mode
+    eval: '(editor-set-mode "normal")'
+    expect:
+      mode: normal
+
+  - name: open the fixture file
+    eval: '(find-file "${FILE}")'
+    expect:
+      buffer_contains: "line one for describe test"
+
+  # -- describe-function: a known function returns a non-empty docstring --
+  - name: describe-function returns docstring for find-file
+    eval: '(describe-function "find-file")'
+    expect:
+      result_contains: "file"
+
+  # -- describe-key: the docstring slot is the REAL docstring, not the stub --
+  - name: describe-key returns the bound command list
+    eval: '(describe-key "j")'
+    expect:
+      result_contains: "["
+
+  - name: describe-key docstring is NOT the placeholder
+    eval: '(describe-key "j")'
+    # After SPEC-083 the 4th slot is the real docstring of whatever j is
+    # bound to (cursor-down / next-line). The literal placeholder string
+    # must no longer appear anywhere in the result.
+    expect:
+      result_contains: "cursor"
+
+  # -- setq a variable, then describe-variable returns its value --
+  - name: define a test variable via setq
+    eval: '(defvar describe-test-var 42)'
+    expect:
+      result_contains: "42"
+
+  - name: describe-variable renders the value into *Help*
+    eval: '(describe-variable "describe-test-var")'
+  - name: "*Help* buffer shows the value 42"
+    eval: '(buffer-text)'
+    expect:
+      result_contains: "42"
+
+  - name: describe-variable names the variable in its output
+    eval: '(buffer-text)'
+    expect:
+      result_contains: "describe-test-var"
+
+  # -- unbound variable: "not defined" --
+  - name: describe-variable on an unbound name reports not defined
+    eval: '(describe-variable "no-such-variable-zzz")'
+  - name: "*Help* shows the not-defined message"
+    eval: '(buffer-text)'
+    expect:
+      result_contains: "not defined"
+
+  # -- describe-mode: names the current editor mode + a known binding --
+  # describe-mode renders into *Help* and returns the buffer name; the content
+  # assertions read the *Help* buffer text after the render.
+  - name: describe-mode renders the editor mode into *Help*
+    eval: '(describe-mode)'
+  - name: "*Help* names the current editor mode (normal)"
+    eval: '(buffer-text)'
+    expect:
+      result_contains: "normal"
+
+  - name: "*Help* mentions the fundamental major mode"
+    eval: '(buffer-text)'
+    expect:
+      result_contains: "fundamental"
+
+  - name: "*Help* lists the j binding"
+    eval: '(buffer-text)'
+    expect:
+      result_contains: "j"
+
+  # -- *Help* buffer is created and reused (exactly one) --
+  - name: describe-mode rendered to the *Help* buffer
+    eval: '(buffer-text)'
+    expect:
+      buffer_contains: "fundamental"
+
+  - name: "Help buffer is present in buffer-list"
+    eval: '(buffer-list)'
+    expect:
+      result_contains: "Help"
+
+  - name: second describe reuses the same *Help* (still present)
+    eval: '(describe-function "find-file")'
+    expect:
+      result_contains: "file"
+
+  - name: still exactly one *Help* after consecutive describes
+    eval: '(buffer-list)'
+    expect:
+      result_contains: "Help"
+
+cleanup: true

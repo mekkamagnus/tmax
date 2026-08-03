@@ -1,0 +1,128 @@
+name: eval-37-file-ops
+description: |
+  CHORE-070 e2e: real-disk coverage for the file-operation commands that today
+  have no end-to-end test — revert-buffer, the save-buffer concurrent-modification
+  refusal path, the :w! force path, and make-backup-file.
+
+  All disk state is driven through real fs primitives over the live daemon:
+  write-file-content (sync write), file-modtime (ISO mtime string the gate
+  compares), file-exists-p, and read-file-content. No TS wrapper is needed.
+
+setup:
+  - action: setup_file
+    var: FILE
+    name: eval-37-fileops.txt
+    content: |
+      original line one
+      original line two
+
+steps:
+  - name: switch to normal mode
+    eval: '(editor-set-mode "normal")'
+    expect:
+      mode: normal
+
+  # ---------------------------------------------------------------- revert-buffer
+  # Open the fixture, make an UNSAVED in-memory edit, then revert-buffer reloads
+  # the on-disk content (the unsaved edit is discarded).
+  - name: open the fixture file
+    eval: '(find-file "${FILE}")'
+    expect:
+      buffer_contains: "original line one"
+
+  - name: buffer-filename is associated (BUG-58 class guard)
+    eval: '(buffer-filename)'
+    expect:
+      result_contains: 'eval-37-fileops'
+
+  - name: insert an unsaved in-memory edit
+    eval: '(progn (cursor-move 0 0) (buffer-insert "UNSAVED-EDIT "))'
+    expect:
+      buffer_contains: "UNSAVED-EDIT original line one"
+
+  - name: revert-buffer reloads the on-disk content
+    eval: '(revert-buffer)'
+    expect:
+      buffer_contains: "original line one"
+
+  - name: unsaved edit is gone after revert (disk won)
+    eval: '(buffer-text)'
+    expect:
+      result_contains: 'original line one'
+
+  # ----------------------------------------------- make-backup-file on overwrite
+  # Edit the buffer and save over the existing file. save-buffer calls
+  # make-backup-file before overwriting (save.tlisp:25-26), so <file>~ must exist
+  # and hold the PRE-save (original) content.
+  - name: edit the buffer before save
+    eval: '(progn (cursor-move 0 0) (buffer-insert "SAVED-CONTENT "))'
+
+  - name: save-buffer over the existing file creates a backup
+    eval: '(save-buffer)'
+    expect:
+      status_message: 'Saved'
+
+  - name: backup file exists on disk
+    eval: '(file-exists-p "${FILE}~")'
+    expect:
+      result_contains: 'true'
+
+  - name: backup holds the pre-save (original) content
+    eval: '(read-file-content "${FILE}~")'
+    expect:
+      result_contains: 'original line one'
+
+  - name: on-disk file now holds the saved buffer content
+    eval: '(read-file-content "${FILE}")'
+    expect:
+      result_contains: 'SAVED-CONTENT'
+
+  # -------------------------- concurrent-modification refusal then force (:w!)
+  # Mutate the file on disk from outside the editor (a different string via
+  # write-file-content, advancing mtime past the recorded saved-modtimes entry).
+  # A subsequent :w is REFUSED with the documented message; :w! writes through.
+  - name: external mutation overwrites the file on disk
+    eval: '(write-file-content "${FILE}" "EXTERNAL-CHANGE on disk")'
+    expect:
+      result_contains: 'null'
+
+  - name: edit the buffer to diverge from disk
+    eval: '(progn (cursor-move 0 0) (buffer-insert "BUFFER-VERSION "))'
+
+  - name: save-buffer REFUSED due to concurrent modification
+    eval: '(save-buffer)'
+    expect:
+      status_message: 'File changed on disk since open'
+
+  - name: on-disk file still holds the external content (save refused)
+    eval: '(read-file-content "${FILE}")'
+    expect:
+      result_contains: 'EXTERNAL-CHANGE on disk'
+
+  - name: force-save (w!) writes through the gate
+    eval: '(save-buffer nil t)'
+    expect:
+      status_message: 'Saved'
+
+  - name: on-disk file now holds the buffer content (force won)
+    eval: '(read-file-content "${FILE}")'
+    expect:
+      result_contains: 'BUFFER-VERSION'
+
+  # --------------------------------- no-associated-file bail (BUG-58 class guard)
+  # On a fresh *scratch* buffer with no filename, revert-buffer bails with the
+  # documented message instead of crashing or silently doing nothing.
+  - name: switch to the scratch buffer (no filename)
+    eval: '(buffer-switch "*scratch*")'
+
+  - name: scratch buffer has no associated file
+    eval: '(buffer-filename)'
+    expect:
+      result_contains: 'null'
+
+  - name: revert-buffer on a no-filename buffer bails cleanly
+    eval: '(revert-buffer)'
+    expect:
+      status_message: 'Buffer has no associated file'
+
+cleanup: true

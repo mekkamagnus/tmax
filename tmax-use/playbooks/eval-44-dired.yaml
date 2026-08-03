@@ -1,0 +1,177 @@
+name: eval-44-dired
+description: |
+  CHORE-077 e2e: black-box coverage for the dired (directory editor) command
+  surface — dired, dired-open-file, dired-mark-delete, dired-get-marked,
+  dired-execute-deletions — plus the real-disk primitives those commands
+  compose from (read-dir, file-mkdir, write-file-content, file-remove,
+  file-exists-p).
+
+  TEMP-DIR SAFETY (load-bearing): every disk touch happens inside a per-run
+  sandbox dir created via (file-mkdir ...) anchored under the project root.
+  The destructive file-remove is exercised against that sandbox only — no repo
+  path, no user home, no ~/.config/tmax path is ever passed to file-remove.
+
+  BUG-62 (entire dired command surface blocked): (dired <dir>) crashes on
+  every call over the --eval socket with "Failed to clear buffer: Delete
+  failed: Delete position 0 is out of bounds (0--1)". The root cause is in
+  dired-insert-listing (dired-ops.ts:202-216): when the freshly-created
+  *Dired* buffer has exactly one empty line (the default for a new buffer),
+  the clear-delete computes a zero-width range {start:{0,0}, end:{0,0}} which
+  the gap buffer rejects. Because (dired) itself is the entry point for the
+  whole surface, dired-open-file / dired-mark-delete / dired-get-marked /
+  dired-execute-deletions are ALL untestable until BUG-62 is fixed. Those
+  steps are commented out below.
+
+  What this playbook DOES lock today (green): the disk primitives the dired
+  commands compose from — read-dir returns the seeded entries with the fields
+  dired-insert-listing/formatEntryLine read (name, isDirectory, size,
+  modified); write-file-content seeds files; file-remove unlinks them
+  (confirmed by file-exists-p); file-mkdir creates the sandbox. This is the
+  primitive layer a BUG-62 fix would build on, and it exercises the real
+  destructive unlink safely inside the sandbox.
+
+setup:
+  # The sandbox is created at runtime via (file-mkdir ...) anchored to the
+  # daemon's working area. ${SEED} is a fixture the runner writes under the
+  # project root; stripping its filename yields the project root, so the
+  # sandbox path needs no hardcoded absolute prefix.
+  - action: setup_file
+    var: SEED
+    name: eval-44-anchor.txt
+    content: |
+      anchor
+
+steps:
+  - name: switch to normal mode
+    eval: '(editor-set-mode "normal")'
+    expect:
+      mode: normal
+
+  # -------------------------------------------- create the isolated sandbox dir
+  - name: create the isolated sandbox directory
+    eval: '(file-mkdir (concat (string-replace "${SEED}" "eval-44-anchor.txt" "") "eval-44-sandbox"))'
+    expect:
+      result_contains: 'null'
+
+  # ----------------------------------------- seed disposable files in the sandbox
+  - name: seed alpha.txt in the sandbox
+    eval: '(write-file-content (concat (string-replace "${SEED}" "eval-44-anchor.txt" "") "eval-44-sandbox/alpha.txt") "alpha contents")'
+    expect:
+      result_contains: 'null'
+
+  - name: seed beta.txt in the sandbox
+    eval: '(write-file-content (concat (string-replace "${SEED}" "eval-44-anchor.txt" "") "eval-44-sandbox/beta.txt") "beta contents")'
+    expect:
+      result_contains: 'null'
+
+  - name: seed gamma.dat in the sandbox
+    eval: '(write-file-content (concat (string-replace "${SEED}" "eval-44-anchor.txt" "") "eval-44-sandbox/gamma.dat") "gamma contents")'
+    expect:
+      result_contains: 'null'
+
+  # -------------------------------------- read-dir returns the seeded entries
+  # read-dir is the primitive dired.tlisp:8 composes. Its return shape
+  # (name/isFile/isDirectory/size/modified) is exactly what dired-ops.ts
+  # formatEntryLine reads, so locking it here guards the listing layer a
+  # BUG-62 fix would depend on.
+  - name: read-dir lists alpha.txt
+    eval: '(read-dir (concat (string-replace "${SEED}" "eval-44-anchor.txt" "") "eval-44-sandbox"))'
+    expect:
+      result_contains: 'alpha.txt'
+
+  - name: read-dir lists beta.txt
+    eval: '(read-dir (concat (string-replace "${SEED}" "eval-44-anchor.txt" "") "eval-44-sandbox"))'
+    expect:
+      result_contains: 'beta.txt'
+
+  - name: read-dir lists gamma.dat
+    eval: '(read-dir (concat (string-replace "${SEED}" "eval-44-anchor.txt" "") "eval-44-sandbox"))'
+    expect:
+      result_contains: 'gamma.dat'
+
+  # -------------------------------------- file-remove + file-exists-p lifecycle
+  # The destructive primitive dired-execute-deletions calls (dired.tlisp:42).
+  # Exercised here directly against the sandbox so the unlink path has an e2e
+  # guard even while the dired command layer is blocked by BUG-62.
+  - name: file-remove unlinks alpha.txt
+    eval: '(file-remove (concat (string-replace "${SEED}" "eval-44-anchor.txt" "") "eval-44-sandbox/alpha.txt"))'
+    expect:
+      result_contains: 'null'
+
+  - name: alpha.txt is gone from disk after file-remove
+    eval: '(file-exists-p (concat (string-replace "${SEED}" "eval-44-anchor.txt" "") "eval-44-sandbox/alpha.txt"))'
+    expect:
+      result_contains: 'false'
+
+  - name: file-remove unlinks beta.txt
+    eval: '(file-remove (concat (string-replace "${SEED}" "eval-44-anchor.txt" "") "eval-44-sandbox/beta.txt"))'
+    expect:
+      result_contains: 'null'
+
+  - name: beta.txt is gone from disk after file-remove
+    eval: '(file-exists-p (concat (string-replace "${SEED}" "eval-44-anchor.txt" "") "eval-44-sandbox/beta.txt"))'
+    expect:
+      result_contains: 'false'
+
+  - name: gamma.dat survives (it was not removed)
+    eval: '(file-exists-p (concat (string-replace "${SEED}" "eval-44-anchor.txt" "") "eval-44-sandbox/gamma.dat"))'
+    expect:
+      result_contains: 'true'
+
+  # -------------------------------------------- drain the sandbox for next run
+  - name: file-remove gamma.dat to drain the sandbox
+    eval: '(file-remove (concat (string-replace "${SEED}" "eval-44-anchor.txt" "") "eval-44-sandbox/gamma.dat"))'
+    expect:
+      result_contains: 'null'
+
+  # ------------------------------------------------------------ BUG-62: dired surface
+  # (dired <dir>) crashes on every call (see description above). The intended
+  # dired-command lifecycle guards are documented here. Uncomment once BUG-62
+  # lands (fix the zero-width clear-delete in dired-insert-listing):
+  #
+  # - name: open dired on the sandbox
+  #   eval: '(dired (concat (string-replace "${SEED}" "eval-44-anchor.txt" "") "eval-44-sandbox"))'
+  #   expect:
+  #     status_message: "eval-44-sandbox"
+  # - name: the current buffer is *Dired*
+  #   eval: '(buffer-current)'
+  #   expect:
+  #     result_contains: 'Dired'
+  # - name: the listing contains alpha.txt
+  #   eval: '(buffer-text)'
+  #   expect:
+  #     buffer_contains: "alpha.txt"
+  # - name: position the cursor on the alpha.txt line
+  #   eval: '(progn (cursor-move 0 0) (search-forward "alpha.txt"))'
+  #   expect:
+  #     result_contains: 'null'
+  # - name: dired-open-file opens alpha.txt in its own buffer
+  #   eval: '(dired-open-file)'
+  #   expect:
+  #     buffer_contains: "alpha contents"
+  # - name: switch back to the *Dired* buffer
+  #   eval: '(buffer-switch "*Dired*")'
+  #   expect:
+  #     result_contains: 'Dired'
+  # - name: mark alpha.txt for deletion
+  #   eval: '(progn (cursor-move 0 0) (search-forward "alpha.txt") (dired-mark-delete))'
+  #   expect:
+  #     result_contains: 'null'
+  # - name: mark beta.txt for deletion
+  #   eval: '(progn (cursor-move 0 0) (search-forward "beta.txt") (dired-mark-delete))'
+  #   expect:
+  #     result_contains: 'null'
+  # - name: dired-get-marked includes alpha.txt
+  #   eval: '(dired-get-marked)'
+  #   expect:
+  #     result_contains: 'alpha.txt'
+  # - name: dired-get-marked includes beta.txt
+  #   eval: '(dired-get-marked)'
+  #   expect:
+  #     result_contains: 'beta.txt'
+  # - name: execute the deletions (unlinks marked files on disk)
+  #   eval: '(dired-execute-deletions)'
+  #   expect:
+  #     status_message: "Deleted"
+
+cleanup: true

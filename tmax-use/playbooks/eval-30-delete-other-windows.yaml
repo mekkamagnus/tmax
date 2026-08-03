@@ -1,0 +1,91 @@
+name: eval-30-delete-other-windows
+description: |
+  SPEC-079 delete-other-windows: close every window except the current one
+  (maximize current window). After split-window-below then split-window-right
+  the window-count goes 1->2->3, and (delete-other-windows) brings it back to
+  1. The survivor is the window that was current before the call. No-op when
+  only one window remains.
+
+setup:
+  - action: setup_file
+    var: FILE
+    name: eval-30.txt
+    content: |
+      window hygiene test content
+
+steps:
+  - name: switch to normal mode
+    eval: '(editor-set-mode "normal")'
+    expect:
+      mode: normal
+
+  # The daemon --eval path does not auto-load normal.tlisp, so the windows
+  # command module (which defines split-window-below/delete-other-windows) must
+  # be required explicitly. Buffer primitives (buffer-create/insert/switch) are
+  # always available, so the test buffer is built directly instead of via
+  # find-file (whose module has a pre-existing parse error unrelated to SPEC-079).
+  - name: load the windows command module
+    eval: '(require-module editor/commands/windows)'
+
+  - name: create and switch to the test buffer
+    eval: '(progn (buffer-create "eval-30") (buffer-switch "eval-30") (buffer-insert "window hygiene test content") (buffer-text))'
+    expect:
+      result_contains: "window hygiene test content"
+
+  # -- baseline: one window --
+  - name: baseline window-count is 1
+    eval: '(window-count)'
+    expect:
+      result_contains: '1'
+
+  # -- the assigned criterion: 1 -> 2 -> 3 via splits --
+  - name: split-window-below takes count to 2
+    eval: '(progn (split-window-below) (window-count))'
+    expect:
+      result_contains: '2'
+
+  - name: split-window-right takes count to 3
+    eval: '(progn (split-window-right) (window-count))'
+    expect:
+      result_contains: '3'
+
+  # -- core criterion: delete-other-windows brings count back to 1 --
+  - name: delete-other-windows leaves exactly one window
+    eval: '(progn (delete-other-windows) (window-count))'
+    expect:
+      result_contains: '1'
+
+  - name: survivor is the originally-current window (its buffer survives)
+    eval: '(buffer-current)'
+    expect:
+      result_contains: "eval-30"
+
+  - name: survivor still shows the original content
+    eval: '(buffer-text)'
+    expect:
+      result_contains: "window hygiene test content"
+
+  # -- the index-shift regression: 3+ windows collapse to 1 correctly --
+  - name: rebuild to three windows for the index-shift case
+    eval: '(progn (split-window-below) (split-window-below) (window-count))'
+    expect:
+      result_contains: '3'
+
+  - name: delete-other-windows collapses 3 to 1 (loop does not skip/over-close)
+    eval: '(progn (delete-other-windows) (window-count))'
+    expect:
+      result_contains: '1'
+
+  # -- no-op case: deleting when only one window remains --
+  - name: delete-other-windows is a no-op at count 1
+    eval: '(progn (delete-other-windows) (window-count))'
+    expect:
+      result_contains: '1'
+
+  # -- buffers survive window deletion (close does not kill buffers) --
+  - name: buffer-list still contains the buffer after window deletion
+    eval: '(buffer-list)'
+    expect:
+      result_contains: "eval-30"
+
+cleanup: true

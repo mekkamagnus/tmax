@@ -1,0 +1,140 @@
+name: eval-26-eval-expression
+description: |
+  SPEC-075 feature-red e2e: the `M-:` (`eval-expression`) command does NOT exist
+  yet. This playbook encodes the spec's completion criteria verbatim so it fails
+  RED ("unknown function" / no minibuffer) until SPEC-075 lands.
+
+  It drives the interactive M-: flow via real keys (so the binding and the
+  minibuffer string-collection path are exercised), then inspects the result
+  through the *Messages* buffer and the status line. An error case ((car)) is
+  also driven: the editor must stay alive and return to normal mode.
+
+setup:
+  - action: setup_file
+    var: FILE
+    name: eval-26-mcolon.txt
+    content: |
+      hello from eval-expression
+      second line
+
+steps:
+  - name: switch to normal mode
+    eval: '(editor-set-mode "normal")'
+    expect:
+      mode: normal
+
+  - name: open the test file
+    eval: '(find-file "${FILE}")'
+    expect:
+      buffer_contains: "hello from eval-expression"
+
+  # -- M-: opens the minibuffer with the "Eval: " prompt and sets mx mode --
+  - name: "press M-: to open the eval minibuffer"
+    keys: "<M-:>"
+    expect:
+      mode: mx
+
+  # -- type (+ 1 2) and submit; result => 3 echoes to *Messages* / status --
+  - name: type the form and press Enter
+    keys: "(+ 1 2)<Enter>"
+    wait: 100
+
+  - name: editor returns to normal mode after submit
+    eval: '(editor-mode)'
+    expect:
+      result_contains: 'normal'
+
+  # The result must be visible in the *Messages* buffer (view-messages switches
+  # to it) AND/OR the status line. Assert status_message first (the inline
+  # echo), then the messages buffer.
+  - name: status line shows the result
+    eval: '(editor-status)'
+    expect:
+      result_contains: '3'
+
+  - name: "*Messages* buffer recorded => 3"
+    eval: '(messages-buffer)'
+    expect:
+      result_contains: '3'
+
+  # -- a non-trivial form (buffer-list) echoes a readable rendering --
+  - name: "press M-: again"
+    keys: "<M-:>"
+    expect:
+      mode: mx
+
+  - name: type (buffer-list) and submit
+    keys: "(buffer-list)<Enter>"
+    wait: 100
+
+  - name: back to normal mode
+    eval: '(editor-mode)'
+    expect:
+      result_contains: 'normal'
+
+  - name: "*Messages* has a readable => ... rendering of buffer-list"
+    eval: '(messages-buffer)'
+    expect:
+      result_contains: '=>'
+
+  # -- error case: (car) is malformed and must be caught gracefully --
+  - name: "press M-: for the error case"
+    keys: "<M-:>"
+    expect:
+      mode: mx
+
+  - name: type malformed (car) and submit
+    keys: "(car)<Enter>"
+    wait: 100
+
+  # The editor must NOT crash and must return to normal mode.
+  - name: editor survived the error and is back in normal mode
+    eval: '(editor-mode)'
+    expect:
+      result_contains: 'normal'
+
+  # An error-level line should appear in *Messages* (some non-empty diagnostic).
+  - name: "*Messages* captured the eval error"
+    eval: '(messages-buffer)'
+    expect:
+      result_contains: 'car'
+
+  # -- C-g cancels M-: with no eval, restoring normal mode --
+  - name: "press M-: then cancel with Escape"
+    keys: "<M-:>"
+    wait: 60
+
+  - name: Escape cancels the minibuffer
+    keys: "<Escape>"
+    expect:
+      mode: normal
+
+  # After cancelling, the previously-evaluated state is intact: (+ 1 2) was NOT
+  # re-run, and the editor is usable (mode normal).
+  - name: editor usable after cancel
+    eval: '(editor-mode)'
+    expect:
+      result_contains: 'normal'
+
+  # -- M-p recalls the previously entered form (dedicated history) --
+  - name: "press M-: to recall history"
+    keys: "<M-:>"
+    expect:
+      mode: mx
+
+  - name: M-p recalls the last form into the minibuffer
+    keys: "<M-p>"
+    wait: 100
+
+  - name: cancel the recall
+    keys: "<Escape>"
+    expect:
+      mode: normal
+
+  # -- discoverability: eval-expression appears in the M-x candidate list --
+  - name: eval-expression is an interactive command (has docstring/binding)
+    eval: '(filter (lambda (d) (string= (hashmap-get d "name") "eval-expression")) (callable-command-details))'
+    expect:
+      result_contains: 'eval-expression'
+
+cleanup: true

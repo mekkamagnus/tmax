@@ -91,11 +91,12 @@ export function parseKeys(sequence: string): Either<TmaxUseError, KeyToken[]> {
 export function headlessValues(tokens: readonly KeyToken[]): readonly string[] {
   const out: string[] = [];
   for (const t of tokens) {
-    if (t.headless.length === 2 && t.headless[0] === ESC) {
-      out.push(ESC, t.headless[1]!);
-    } else {
-      out.push(t.headless);
-    }
+    // Keep a Meta sequence (ESC + char) as a SINGLE value so the editor's
+    // normalizeKey (which combines "\x1b<char>" → "M-<char>" only when they
+    // arrive in one keypress event) recognizes it as a Meta key. Splitting
+    // them into two separate keypresses would dispatch ESC (cancel) then the
+    // bare char, never forming the M-<char> binding.
+    out.push(t.headless);
   }
   return out;
 }
@@ -234,11 +235,14 @@ function parseSpecial(name: string, offset: number, full: string): Either<TmaxUs
     return Either.right({ source, headless: byte, tmuxName: `C-${lower}`, offset });
   }
 
-  // 5. Meta letter: <M-x> → ESC + x. Preserve case for <M-X> → ESC + X.
-  const meta = /^M-([a-zA-Z])$/.exec(name);
+  // 5. Meta key: <M-x> → ESC + x. Accepts a single letter OR a single
+  //    non-letter character so Emacs Meta-punctuation bindings like <M-:>
+  //    (eval-expression) and <M-.> can be driven through the harness. Preserve
+  //    case for letters (<M-X> → ESC + X); punctuation is sent verbatim.
+  const meta = /^M-(.)$/.exec(name);
   if (meta) {
-    const letter = meta[1]!;
-    return Either.right({ source, headless: `${ESC}${letter}`, tmuxName: `M-${letter}`, offset });
+    const ch = meta[1]!;
+    return Either.right({ source, headless: `${ESC}${ch}`, tmuxName: `M-${ch}`, offset });
   }
 
   // 6. Shift letter: <S-a> through <S-z> → uppercase literal.

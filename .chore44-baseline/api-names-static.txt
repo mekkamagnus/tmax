@@ -24,6 +24,7 @@ auto-mode-detect
 auto-mode-list
 browse-doc-reference
 browse-git-github-remote
+buffer-bury
 buffer-create
 buffer-current
 buffer-delete
@@ -35,6 +36,7 @@ buffer-get-line-indent
 buffer-get-range
 buffer-insert
 buffer-insert-at-position
+buffer-kill
 buffer-line
 buffer-line-count
 buffer-line-matches
@@ -42,11 +44,13 @@ buffer-lines
 buffer-list
 buffer-modified-p
 buffer-previous-non-blank-line
+buffer-rename
 buffer-replace-range
 buffer-scan-backward-from
 buffer-scan-forward-from
 buffer-set-line-indent
 buffer-set-read-only
+buffer-sexp-before-point
 buffer-switch
 buffer-text
 cache-get
@@ -76,6 +80,9 @@ clear-messages
 clipboard-available?
 clipboard-get
 clipboard-set
+comment-region-active-p
+comment-region-lines
+comment-toggle-line
 current-module
 cursor-column
 cursor-line
@@ -122,6 +129,7 @@ downcase
 echo
 editor-command-line
 editor-enter-command-mode
+editor-eval-tlisp
 editor-execute-command-line
 editor-exit-command-mode
 editor-handle-help-prefix
@@ -228,6 +236,9 @@ module-list
 module-loaded?
 module-lookup
 observability-buffer
+occur-buffer-name
+occur-set-source
+occur-source-get
 page-down
 page-up
 paragraph-boundary-position
@@ -304,7 +315,12 @@ syntax-tokenize-line
 terminal-height-get
 terminal-width-get
 text-object-region
+ts-capitalize-word
+ts-downcase-word
 ts-open-external
+ts-transpose-chars
+ts-upcase-word
+uncomment-region-lines
 undo
 undo-begin
 undo-commit

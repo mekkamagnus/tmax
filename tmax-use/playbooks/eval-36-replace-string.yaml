@@ -1,0 +1,71 @@
+name: eval-36-replace-string
+description: |
+  SPEC-085 (feature-red): replace-string performs a non-interactive global
+  find/replace — every match of FROM becomes TO in one shot, without entering
+  the query-replace y/n loop. The command does not exist yet, so the evals
+  calling it fail "unknown function" until implementation — the expected RED
+  state. Asserts the DoD: (replace-string "foo" "bar") on "foo foo foo" yields
+  "bar bar bar" and returns the integer count 3; a FROM with no matches
+  produces "No matches found" with no mutation; the buffer is modified after a
+  real replace; and query-replace mode is not left active afterward.
+
+setup:
+  - action: setup_file
+    var: FILE
+    name: eval-36-replace.txt
+    content: |
+      foo foo foo
+      keep me here
+
+steps:
+  - name: switch to normal mode
+    eval: '(editor-set-mode "normal")'
+    expect:
+      mode: normal
+
+  - name: open the test file
+    eval: '(find-file "${FILE}")'
+    expect:
+      buffer_contains: "foo foo foo"
+
+  # -- replace-string replaces ALL occurrences without entering the query loop --
+  - name: globally replace foo with bar
+    eval: '(replace-string "foo" "bar")'
+    expect:
+      result_contains: '3'
+  - name: status reports the replacement count
+    expect:
+      status_message: 'Replaced 3 occurrences'
+  - name: buffer no longer contains foo
+    eval: '(buffer-text)'
+  - name: line 0 now reads bar bar bar
+    eval: '(buffer-line 0)'
+    expect:
+      result_contains: 'bar bar bar'
+
+  # -- the buffer is marked modified after the replace --
+  - name: buffer-modified-p is true after the replace
+    eval: '(if (buffer-modified-p) "MODIFIED" "CLEAN")'
+    expect:
+      result_contains: 'MODIFIED'
+
+  # -- a FROM with no matches produces "No matches found" and no mutation --
+  - name: replace-string on a no-match FROM returns 0
+    eval: '(replace-string "zzz" "qqq")'
+    expect:
+      result_contains: '0'
+  - name: status reports no matches
+    expect:
+      status_message: 'No matches found'
+  - name: line 0 is unchanged after the no-op
+    eval: '(buffer-line 0)'
+    expect:
+      result_contains: 'bar bar bar'
+
+  # -- query-replace mode is NOT left active (session cleared) --
+  - name: editor mode is still normal (no dangling replace session)
+    eval: '(editor-mode)'
+    expect:
+      result_contains: 'normal'
+
+cleanup: true

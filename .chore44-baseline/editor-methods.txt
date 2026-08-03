@@ -2,6 +2,9 @@ activateMajorModeForFile
 applyModel
 applyUpdate
 applyWorkspace
+associateBufferFilename
+attachFileBuffer
+buryBuffer
 classifyCommand
 clearModifiedFlags
 clearSelection
@@ -55,6 +58,7 @@ handleKey
 initializeAPI
 isCountActive
 isRunning
+killBuffer
 loadBindingsFromFile
 loadCoreBindings
 loadFallbackBindings
@@ -72,8 +76,11 @@ normalizeKey
 notifyStateChange
 onStateChange
 openFile
+openOrCreateFile
+pickKillSurvivor
 recomputeHighlights
 registerMinorMode
+renameBuffer
 resetCount
 resolveCallable
 saveFile
@@ -83,6 +90,7 @@ setCurrentBufferModified
 setCurrentMajorMode
 setEchoOnly
 setEditorState
+showSplashIfEmpty
 start
 stop
 toAppError

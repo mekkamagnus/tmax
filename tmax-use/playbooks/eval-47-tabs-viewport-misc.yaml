@@ -1,0 +1,202 @@
+name: eval-47-tabs-viewport-misc
+description: |
+  Tabs / viewport / clipboard / documentation / browse / trt T-Lisp surface
+  (CHORE-080). Multi-part characterization playbook asserting the EXISTING
+  contract of six otherwise-unrelated modules:
+    - src/editor/api/tab-ops.ts            (tab lifecycle)
+    - src/editor/api/jump-ops.ts           (viewport setters live HERE, not window-ops)
+    - src/editor/api/clipboard-ops.ts      (OS clipboard bridge, SPEC-044)
+    - src/editor/api/documentation.ts      (documentation browser)
+    - src/editor/api/browse-url-ops.ts     (browse-doc-reference / browse-git-github-remote)
+    - src/tlisp/core/commands/trt-commands.tlisp  (trt-run-tests / trt-find-test)
+
+  Environment-sensitive assertions:
+    - clipboard: the round-trip is guarded by clipboard-available? so headless
+      CI without pbcopy/xclip stays green (the if returns no-clipboard-tool).
+      When the tool IS present the round-trip must reproduce the marker.
+    - browse-git-github-remote: requires a github remote. Run inside this repo
+      it returns ok=true with a github.com URL (SSH or HTTPS); the assertion
+      checks the ok flag resolves via hashmap-get.
+    - trt: the trt commands spawn real test work (107 embedded tests) and
+      return the posted message string as their eval result, so the trt
+      assertions use result_contains (not status_message). The trt section
+      runs LAST with a generous wait.
+
+  Tab note: opening a file directly does NOT create a tab, so the initial
+  tab-count is 0; tab-new is what creates tabs (alpha at index 0, beta at 1).
+
+  NOTE on result serialization: the daemon's eval path converts T-Lisp values
+  to JSON before the runner substring-matches them (server.ts
+  tlispValueToJson). nil -> "null", booleans -> "true"/"false", lists/arrays
+  -> JSON arrays, hashmaps -> JSON objects. Assertions use the JSON form.
+
+setup:
+  - action: setup_file
+    var: DUMMY
+    name: eval-47-anchor.txt
+    content: |
+      anchor file so a real buffer/filename is current for browse-git
+
+steps:
+  - name: open the anchor file so the daemon has a current buffer
+    eval: '(find-file "${DUMMY}")'
+    expect:
+      buffer_contains: "anchor file"
+
+  # ============================================================
+  # TABS SECTION
+  # ============================================================
+  - name: initial tab count is zero (file-open does not create a tab)
+    eval: '(tab-count)'
+    expect:
+      result_contains: "0"
+
+  - name: create tab alpha
+    eval: '(tab-new "alpha")'
+    expect:
+      result_contains: "tab-"
+
+  - name: create tab beta
+    eval: '(tab-new "beta")'
+    expect:
+      result_contains: "tab-"
+
+  - name: tab-list contains alpha
+    eval: '(tab-list)'
+    expect:
+      result_contains: "alpha"
+
+  - name: tab-list also contains beta
+    eval: '(tab-list)'
+    expect:
+      result_contains: "beta"
+
+  - name: tab-count reflects the two new tabs
+    eval: '(tab-count)'
+    expect:
+      result_contains: "2"
+
+  - name: switch to tab index 0 (alpha)
+    eval: '(tab-switch 0)'
+    expect:
+      result_contains: "null"
+
+  - name: the active buffer is now alpha
+    eval: '(buffer-current)'
+    expect:
+      result_contains: "alpha"
+
+  - name: tab-next advances to tab index 1 (beta)
+    eval: '(tab-next)'
+    expect:
+      result_contains: "null"
+
+  - name: the active buffer is now beta
+    eval: '(buffer-current)'
+    expect:
+      result_contains: "beta"
+
+  - name: tab-close reduces the count by one
+    eval: '(tab-close)'
+    expect:
+      result_contains: "null"
+
+  - name: tab-count is now one
+    eval: '(tab-count)'
+    expect:
+      result_contains: "1"
+
+  # ============================================================
+  # VIEWPORT SECTION (setters live in jump-ops.ts)
+  # ============================================================
+  - name: viewport-top-set 3 then viewport-top-get returns 3
+    eval: '(progn (viewport-top-set 3) (viewport-top-get))'
+    expect:
+      result_contains: "3"
+
+  - name: viewport-top-set clamps negative input to 0
+    eval: '(progn (viewport-top-set -1) (viewport-top-get))'
+    expect:
+      result_contains: "0"
+
+  - name: viewport-left-set 2 then viewport-left-get returns 2
+    eval: '(progn (viewport-left-set 2) (viewport-left-get))'
+    expect:
+      result_contains: "2"
+
+  - name: viewport-left-set clamps negative input to 0
+    eval: '(progn (viewport-left-set -1) (viewport-left-get))'
+    expect:
+      result_contains: "0"
+
+  # ============================================================
+  # CLIPBOARD SECTION (guarded by clipboard-available?)
+  # ============================================================
+  - name: clipboard-available? returns a boolean (clip-yes when a tool is present)
+    eval: '(if (clipboard-available?) (quote clip-yes) (quote clip-no))'
+    expect:
+      result_contains: "clip-"
+
+  - name: when a clipboard tool is present, set then get round-trips the marker
+    eval: '(if (clipboard-available?) (progn (clipboard-set "tmax-clip-marker") (clipboard-get)) (quote no-clipboard-tool))'
+    expect:
+      result_contains: "tmax-clip-marker"
+
+  # ============================================================
+  # DOCUMENTATION SECTION
+  # ============================================================
+  - name: documentation-categories returns a non-empty list
+    eval: '(if (> (length (documentation-categories)) 0) (quote cats-present) (quote cats-empty))'
+    expect:
+      result_contains: "cats-present"
+
+  - name: documentation-search for buffer returns buffer-save (a documented buffer fn)
+    eval: '(documentation-search "buffer")'
+    expect:
+      result_contains: "buffer-save"
+
+  - name: documentation-get for buffer-save returns a multi-line string with its name
+    eval: '(documentation-get "buffer-save")'
+    expect:
+      result_contains: "buffer-save"
+
+  # ============================================================
+  # BROWSE SECTION (doc-reference + git github-remote)
+  # ============================================================
+  - name: browse-doc-reference for a nonexistent spec returns ok=false + docs-reference-not-found
+    eval: '(browse-doc-reference "SPEC-9999" "spec")'
+    expect:
+      result_contains: "docs-reference-not-found"
+
+  - name: browse-doc-reference for a real spec (SPEC-070) returns ok=true + a file:// URL
+    eval: '(browse-doc-reference "SPEC-070" "spec")'
+    expect:
+      result_contains: "file://"
+
+  - name: browse-git-github-remote in this repo returns a hashmap with an ok field (shape)
+    eval: '(browse-git-github-remote)'
+    expect:
+      result_contains: "ok"
+
+  - name: when run inside the tmax repo the github remote resolves (ok=true)
+    eval: '(if (equal (hashmap-get (browse-git-github-remote) "ok") t) (quote has-remote) (quote no-remote))'
+    expect:
+      result_contains: "has-remote"
+
+  # ============================================================
+  # TRT SECTION (runs last; spawns real test work — generous wait)
+  # trt commands return their posted *Messages* string as the eval result.
+  # ============================================================
+  - name: "trt-run-tests runs the embedded suite and returns a trt: summary"
+    eval: '(trt-run-tests)'
+    wait: 600
+    expect:
+      result_contains: "trt:"
+
+  - name: trt-find-test for a nonexistent test returns a not-found message
+    eval: '(trt-find-test "nonexistent-test-xyz")'
+    wait: 400
+    expect:
+      result_contains: "not found in test/tlisp/"
+
+cleanup: true

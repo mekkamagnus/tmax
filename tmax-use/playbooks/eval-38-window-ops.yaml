@@ -1,0 +1,169 @@
+name: eval-38-window-ops
+description: |
+  CHORE-071 e2e: live-editor coverage for the window-management commands that
+  today have only unit coverage — split-window-below, split-window-right,
+  other-window (cycle), delete-window (with last-window guard), and
+  window-resize-height / window-resize-width.
+
+  The fixture is opened so the window has a current buffer (split-window throws
+  "No buffer to display in new window" otherwise). Assertions read the window
+  model through the read-only primitives window-count / window-current /
+  window-list so they do not depend on rendered geometry.
+
+  Note: window-list exposes only id / cursor-line / cursor-column — it does NOT
+  expose per-window dimensions. So the resize steps assert that the resize
+  primitives do NOT error and that the window count is unchanged (the dimension
+  delta itself cannot be read back through the public API; spec flags this as a
+  likely indirect-assertion gap).
+
+setup:
+  - action: setup_file
+    var: FILE
+    name: eval-38-windows.txt
+    content: |
+      window fixture line one
+      window fixture line two
+      window fixture line three
+
+steps:
+  - name: switch to normal mode
+    eval: '(editor-set-mode "normal")'
+    expect:
+      mode: normal
+
+  - name: open the fixture (gives the window a current buffer)
+    eval: '(find-file "${FILE}")'
+    expect:
+      buffer_contains: "window fixture line one"
+
+  # ------------------------------------------------------------- baseline state
+  - name: window-count is 1 at start
+    eval: '(window-count)'
+    expect:
+      result_contains: '1'
+
+  - name: window-current is index 0 at start
+    eval: '(window-current)'
+    expect:
+      result_contains: '0'
+
+  # ----------------------------------------------------- split-window-below grows count
+  - name: split-window-below creates a second window
+    eval: '(split-window-below)'
+
+  - name: window-count is 2 after split-window-below
+    eval: '(window-count)'
+    expect:
+      result_contains: '2'
+
+  - name: window-list shows two windows
+    eval: '(window-list)'
+    expect:
+      result_contains: 'window'
+
+  # --------------------------------------------------- other-window cycles 0 -> 1 -> 0
+  - name: other-window advances current index
+    eval: '(other-window)'
+
+  - name: window-current is now index 1
+    eval: '(window-current)'
+    expect:
+      result_contains: '1'
+
+  # C-w w chord dispatch is unreliable — the bare C-w -> editor-window-prefix
+  # terminal binding (editor.ts:1184) competes with the C-w w chord (motions.tlisp:513).
+  # See BUG-59. Drive the cycle via the function so this chore covers the command.
+  - name: other-window cycles back to window 0
+    eval: '(other-window)'
+
+  - name: window-current wrapped back to 0 (modular cycle)
+    eval: '(window-current)'
+    expect:
+      result_contains: '0'
+
+  # ------------------------------------------------- vertical split (split-window-right)
+  - name: split-window-right grows the count to 3
+    eval: '(split-window-right)'
+
+  - name: window-count is 3 after split-window-right
+    eval: '(window-count)'
+    expect:
+      result_contains: '3'
+
+  # ----------------------------------------------------- resize primitives (no error + count held)
+  - name: window-resize-height by +2 does not error
+    eval: '(window-resize-height 2)'
+    expect:
+      result_contains: 'null'
+
+  - name: window-resize-height by large negative delta clamps at MIN_HEIGHT=3 (no error)
+    eval: '(window-resize-height -999)'
+    expect:
+      result_contains: 'null'
+
+  - name: window-count unchanged after height resize
+    eval: '(window-count)'
+    expect:
+      result_contains: '3'
+
+  - name: window-resize-width by +5 does not error
+    eval: '(window-resize-width 5)'
+    expect:
+      result_contains: 'null'
+
+  - name: window-resize-width by large negative delta clamps at MIN_WIDTH=10 (no error)
+    eval: '(window-resize-width -999)'
+    expect:
+      result_contains: 'null'
+
+  - name: window-count unchanged after width resize
+    eval: '(window-count)'
+    expect:
+      result_contains: '3'
+
+  # ------------------------------------------- delete-window decreases count, last-window guard
+  - name: delete-window decreases the count to 2
+    eval: '(delete-window)'
+
+  - name: window-count is 2 after first delete
+    eval: '(window-count)'
+    expect:
+      result_contains: '2'
+
+  - name: delete-window again decreases the count to 1
+    eval: '(delete-window)'
+
+  - name: window-count is 1 after second delete
+    eval: '(window-count)'
+    expect:
+      result_contains: '1'
+
+  - name: delete-window on the last window is a no-op (last-window guard, no error)
+    eval: '(delete-window)'
+    expect:
+      result_contains: 'null'
+
+  - name: window-count stays at 1 (last window cannot be deleted)
+    eval: '(window-count)'
+    expect:
+      result_contains: '1'
+
+  # C-w chord dispatch is unreliable (dual-binding, BUG-59); exercise split + delete
+  # via the functions rather than the keypath.
+  - name: split-window-below creates a second window
+    eval: '(split-window-below)'
+
+  - name: window-count is 2 after split-window-below
+    eval: '(window-count)'
+    expect:
+      result_contains: '2'
+
+  - name: delete-window removes the second window
+    eval: '(delete-window)'
+
+  - name: window-count back to 1 after delete-window
+    eval: '(window-count)'
+    expect:
+      result_contains: '1'
+
+cleanup: true

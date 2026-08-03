@@ -1,0 +1,155 @@
+name: eval-33-occur
+description: |
+  SPEC-082 e2e (feature-red): the `occur` command does NOT exist yet — this
+  playbook asserts the completion criteria directly and is expected to fail
+  with "unknown function: occur" until implementation.
+
+  Verifies:
+    - (occur "PATTERN") builds a *Occur* buffer listing every matching line,
+      each prefixed with its 1-indexed source line number.
+    - The *Occur* header reports the match count, source buffer, and pattern.
+    - The status line reports the match count on completion.
+    - RET (occur-jump) on a match line returns to the source buffer with the
+      cursor on the matching line.
+    - A second (occur) with a different pattern refreshes the SAME *Occur*
+      buffer in place (no duplicate *Occur* buffers in buffer-list).
+    - A no-match pattern yields a "0 matches" header and a
+      "Pattern 'X' not found" status message, with no error thrown.
+
+  Primitives used (already exist): find-file, buffer-current, buffer-list,
+  buffer-line, buffer-line-count, cursor-line, editor-set-mode.
+
+setup:
+  - action: setup_file
+    var: FILE
+    name: eval-33-occur.txt
+    content: |
+      TARGET first match line
+      non-matching filler line
+      TARGET second match line
+      more filler here
+      TARGET third match line
+
+steps:
+  - name: switch to normal mode
+    eval: '(editor-set-mode "normal")'
+    expect:
+      mode: normal
+
+  - name: open the fixture file
+    eval: '(find-file "${FILE}")'
+    expect:
+      buffer_contains: "TARGET first match line"
+
+  # -- (occur PATTERN) builds *Occur* with header + numbered match lines --
+  - name: run occur for TARGET
+    eval: '(occur "TARGET")'
+
+  - name: occur switched to the *Occur* buffer
+    eval: '(buffer-current)'
+    expect:
+      result_contains: "Occur"
+
+  - name: occur buffer exists in buffer-list
+    eval: '(buffer-list)'
+    expect:
+      result_contains: "Occur"
+
+  - name: header reports 3 matches with the pattern
+    eval: '(buffer-text)'
+    expect:
+      buffer_contains: "3 matches"
+
+  - name: header names the pattern
+    eval: '(buffer-line 0)'
+    expect:
+      result_contains: "TARGET"
+
+  - name: header names the source buffer
+    eval: '(buffer-line 0)'
+    expect:
+      result_contains: "occur"
+
+  # -- each matching line is listed, prefixed with its 1-indexed line number --
+  - name: line 1 of source is listed as "1:"
+    eval: '(occur "TARGET")'
+    expect:
+      buffer_contains: "1:"
+
+  - name: first match line text is present
+    eval: '(occur "TARGET")'
+    expect:
+      buffer_contains: "TARGET first match line"
+
+  - name: line 3 of source is listed as "3:"
+    eval: '(occur "TARGET")'
+    expect:
+      buffer_contains: "3:"
+
+  - name: second match line text is present
+    eval: '(occur "TARGET")'
+    expect:
+      buffer_contains: "TARGET second match line"
+
+  - name: line 5 of source is listed as "5:"
+    eval: '(occur "TARGET")'
+    expect:
+      buffer_contains: "5:"
+
+  - name: third match line text is present
+    eval: '(occur "TARGET")'
+    expect:
+      buffer_contains: "TARGET third match line"
+
+  - name: status line reports the match count
+    eval: '(occur "TARGET")'
+    expect:
+      status_message: "3 matches"
+
+  # -- RET (occur-jump) returns to source buffer at the matching line --
+  - name: rebuild occur and land on first match line
+    eval: '(occur "TARGET")'
+    expect:
+      buffer_contains: "TARGET first match line"
+
+  - name: jump back to source line 1 via occur-jump
+    eval: '(occur-jump)'
+
+  - name: jump returned to the source (non-Occur) buffer
+    eval: '(buffer-current)'
+    expect:
+      result_contains: "occur"
+
+  - name: cursor landed on the first matching source line
+    eval: '(buffer-line (cursor-line))'
+    expect:
+      result_contains: "TARGET first match line"
+
+  # -- second (occur) with a different pattern refreshes the same buffer --
+  - name: run occur with a different pattern (filler)
+    eval: '(occur "filler")'
+    expect:
+      buffer_contains: "filler"
+
+  - name: the refresh found 2 filler matches
+    eval: '(occur "filler")'
+    expect:
+      buffer_contains: "2 matches"
+
+  - name: still exactly one *Occur* buffer (no duplicate)
+    eval: '(buffer-list)'
+    expect:
+      result_contains: "Occur"
+
+  # -- no-match pattern: 0 matches header + status, no error --
+  - name: occur for a pattern that matches nothing
+    eval: '(occur "ZZZZNOTHING")'
+    expect:
+      buffer_contains: "0 matches"
+
+  - name: no-match reports not-found status message
+    eval: '(occur "ZZZZNOTHING")'
+    expect:
+      status_message: "not found"
+
+cleanup: true

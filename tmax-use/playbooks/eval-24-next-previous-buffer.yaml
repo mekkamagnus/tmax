@@ -1,0 +1,129 @@
+name: eval-24-next-previous-buffer
+description: |
+  SPEC-073 (feature-red): next-buffer / previous-buffer — cycle buffers by
+  recency. Asserts the completion criteria EXACTLY — these will fail with
+  "unknown function" until SPEC-073 is implemented (TDD intent):
+    - Open three files (A, B, C); recency order is C (newest), B, A.
+    - With C current, (next-buffer) moves forward through the recency list
+      and wraps back to the start.
+    - (previous-buffer) moves backward and wraps.
+    - The SPC x n / SPC x p keybindings produce the same rotation.
+    - Rotation does not error when only one file buffer + *scratch* remain.
+    - M-x next-buffer / previous-buffer are discoverable via completion.
+
+setup:
+  - action: setup_file
+    var: FILE_A
+    name: eval-24-a.txt
+    content: |
+      buffer A content
+  - action: setup_file
+    var: FILE_B
+    name: eval-24-b.txt
+    content: |
+      buffer B content
+  - action: setup_file
+    var: FILE_C
+    name: eval-24-c.txt
+    content: |
+      buffer C content
+
+steps:
+  # --- setup: three file buffers; recency is C (newest), B, A ---
+  - name: switch to normal mode
+    eval: '(editor-set-mode "normal")'
+    expect:
+      mode: normal
+
+  - name: open A (oldest)
+    eval: '(find-file "${FILE_A}")'
+    expect:
+      buffer_contains: "buffer A content"
+
+  - name: open B
+    eval: '(find-file "${FILE_B}")'
+    expect:
+      buffer_contains: "buffer B content"
+
+  - name: open C (newest; current)
+    eval: '(find-file "${FILE_C}")'
+    expect:
+      buffer_contains: "buffer C content"
+
+  - name: current buffer is C
+    eval: '(buffer-current)'
+    expect:
+      result_contains: "eval-24-c.txt"
+
+  # --- next-buffer cycles forward through recency (C -> B -> A -> wrap C) ---
+  - name: next-buffer from C goes to B
+    eval: '(next-buffer)'
+    expect:
+      result_contains: "eval-24-b.txt"
+
+  - name: current buffer is B
+    eval: '(buffer-current)'
+    expect:
+      result_contains: "eval-24-b.txt"
+
+  - name: next-buffer from B goes to A
+    eval: '(next-buffer)'
+    expect:
+      result_contains: "eval-24-a.txt"
+
+  - name: next-buffer from A wraps to C
+    eval: '(next-buffer)'
+    expect:
+      result_contains: "eval-24-c.txt"
+
+  # --- previous-buffer cycles backward (C -> A -> B -> wrap C) ---
+  - name: previous-buffer from C wraps to A (oldest)
+    eval: '(previous-buffer)'
+    expect:
+      result_contains: "eval-24-a.txt"
+
+  - name: previous-buffer from A goes to B
+    eval: '(previous-buffer)'
+    expect:
+      result_contains: "eval-24-b.txt"
+
+  - name: previous-buffer from B wraps to C (newest)
+    eval: '(previous-buffer)'
+    expect:
+      result_contains: "eval-24-c.txt"
+
+  # --- SPC x n / SPC x p keybindings produce the same rotation ---
+  - name: SPC x n rotates forward to B
+    keys: ' xnb'
+    expect:
+      mode: normal
+
+  - name: current buffer is B after SPC x n
+    eval: '(buffer-current)'
+    expect:
+      result_contains: "eval-24-b.txt"
+
+  - name: SPC x p rotates backward to C
+    keys: ' xp'
+    expect:
+      mode: normal
+
+  - name: current buffer is C after SPC x p
+    eval: '(buffer-current)'
+    expect:
+      result_contains: "eval-24-c.txt"
+
+  # --- M-x discoverability ---
+  # command-detail-interactive-p takes a command DETAIL hashmap (not a name
+  # string); pull the live detail from callable-command-details, then test it.
+  - name: next-buffer is an interactive command
+    eval: '(let* ((d (filter (lambda (x) (string= (hashmap-get x "name") "next-buffer")) (callable-command-details)))) (if (command-detail-interactive-p (car d)) "true" "false"))'
+    expect:
+      result_contains: "true"
+
+  - name: previous-buffer is an interactive command
+    eval: '(let* ((d (filter (lambda (x) (string= (hashmap-get x "name") "previous-buffer")) (callable-command-details)))) (if (command-detail-interactive-p (car d)) "true" "false"))'
+    expect:
+      result_contains: "true"
+
+cleanup: true

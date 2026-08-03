@@ -4,7 +4,7 @@
  * is composed declaratively through {@link registerContributions}:
  *
  * - AC7.1: the live `createEditorAPI()` inventory exactly equals the frozen
- *   Step 0 baseline (350 names, asserted by `chore44-baseline-inventory`
+ *   Step 0 baseline (366 names, asserted by `chore44-baseline-inventory`
  *   separately; here we assert count + a deterministic superset directly).
  * - AC7.2: duplicate primitive names across two contributions return a
  *   typed `Left` whose `AppError` names BOTH colliding contribution names
@@ -34,7 +34,7 @@ import type { EditorRuntimeCaches } from "../../src/editor/runtime/caches.ts";
 
 describe("CHORE-44 Change 7 — editor API registry", () => {
   // ── AC7.1: live inventory matches the frozen Step 0 baseline ──────────
-  test("AC7.1: createEditorAPI inventory equals the frozen Step 0 set (350 names)", () => {
+  test("AC7.1: createEditorAPI inventory equals the frozen Step 0 set (366 names)", () => {
     const baselinePath = join(import.meta.dir, "..", "..", ".chore44-baseline", "api-names-static.txt");
     const expected = readFileSync(baselinePath, "utf8")
       .split("\n")
@@ -42,7 +42,7 @@ describe("CHORE-44 Change 7 — editor API registry", () => {
       .filter(l => l.length > 0 && !l.startsWith("#"))
       .sort();
     const live = Array.from(createEditorAPI(createTestAPIContext()).keys()).sort();
-    expect(live.length).toBe(350);
+    expect(live.length).toBe(366);
     expect(live).toEqual(expected);
   });
 
@@ -139,7 +139,7 @@ describe("CHORE-44 Change 7 — editor API registry", () => {
     // Confirm createEditorAPI itself surfaces a typed Left as a thrown
     // Error (the production path). We can't inject the collision through
     // createEditorAPI directly (its contribution list is internal and
-    // frozen at 350 names); the registerContributions Left above is the
+    // frozen at 366 names); the registerContributions Left above is the
     // typed failure AC7.2 requires, and createEditorAPI's throw-on-Left
     // contract is exercised by the inventory test (if a duplicate ever
     // appears in the production list, createEditorAPI throws at startup).

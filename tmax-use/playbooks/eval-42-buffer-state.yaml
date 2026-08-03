@@ -1,0 +1,158 @@
+name: eval-42-buffer-state
+description: |
+  CHORE-075 e2e: black-box coverage for the buffer-state query/mutation API —
+  buffer-modified-p, set-buffer-modified-p, buffer-set-read-only — driven as a
+  state machine through the structured --eval socket.
+
+  Modified-flag section guards: the flag is false on a clean buffer, flips true
+  after buffer-insert, and is cleared by (set-buffer-modified-p nil) without
+  saving (the path save-buffer relies on). The flag is set again by
+  (set-buffer-modified-p t) and cleared by nil once more.
+
+  Read-only section guards: (buffer-set-read-only t) makes buffer-insert refuse
+  (the refusal is caught via condition-case so the step stays green), the
+  buffer text is unchanged, and (buffer-set-read-only nil) re-enables inserts.
+
+  Truthiness section guards: buffer-set-read-only honours t / nil (symbols)
+  and a non-zero number vs zero (numbers). The literal-boolean spellings
+  (true/false) documented in buffer-ops.ts:772-783 are NOT reachable via the
+  --eval socket: the T-Lisp reader treats bare `true`/`false` as undefined
+  symbols ("Undefined symbol: true"), so no boolean literal ever reaches the
+  function. The symbol (t/nil) and number (1/0) paths cover what is actually
+  callable; the boolean-literal branch is effectively dead over RPC and is
+  noted here rather than asserted.
+
+setup:
+  - action: setup_file
+    var: FILE
+    name: eval-42-state.txt
+    content: |
+      clean line
+
+steps:
+  - name: switch to normal mode
+    eval: '(editor-set-mode "normal")'
+    expect:
+      mode: normal
+
+  # -------------------------------------------------------- modified-flag section
+  - name: open the clean fixture
+    eval: '(find-file "${FILE}")'
+    expect:
+      buffer_contains: "clean line"
+
+  - name: a clean buffer is not modified (false)
+    eval: '(buffer-modified-p)'
+    expect:
+      result_contains: 'false'
+
+  - name: buffer-insert flips the modified flag true
+    eval: '(progn (cursor-move 0 0) (buffer-insert "X"))'
+    expect:
+      buffer_contains: "Xclean line"
+
+  - name: modified flag is true after the insert
+    eval: '(buffer-modified-p)'
+    expect:
+      result_contains: 'true'
+
+  # set-buffer-modified-p returns nil on success, which prints as the JSON
+  # value `null` over the --eval socket. Assert on that, then on a follow-up
+  # read of the flag to confirm the side effect.
+  - name: set-buffer-modified-p nil clears the flag (Emacs convention path)
+    eval: '(set-buffer-modified-p nil)'
+    expect:
+      result_contains: 'null'
+
+  - name: modified flag is false after set-buffer-modified-p nil
+    eval: '(buffer-modified-p)'
+    expect:
+      result_contains: 'false'
+
+  - name: set-buffer-modified-p t sets the flag again
+    eval: '(set-buffer-modified-p t)'
+    expect:
+      result_contains: 'null'
+
+  - name: modified flag is true after set-buffer-modified-p t
+    eval: '(buffer-modified-p)'
+    expect:
+      result_contains: 'true'
+
+  - name: set-buffer-modified-p nil clears it once more
+    eval: '(set-buffer-modified-p nil)'
+    expect:
+      result_contains: 'null'
+
+  - name: modified flag is false after the second clear
+    eval: '(buffer-modified-p)'
+    expect:
+      result_contains: 'false'
+
+  # ------------------------------------------------------------- read-only section
+  # Make the buffer read-only; an insert must refuse. The refusal surfaces as
+  # an Either.left which the --eval path turns into a JSON-RPC error (the
+  # client exits non-zero), so wrap the insert in condition-case to catch it
+  # and return a stable "REFUSED" marker.
+  - name: make the buffer read-only via the t symbol
+    eval: '(buffer-set-read-only t)'
+    expect:
+      result_contains: 'true'
+
+  - name: insert against a read-only buffer is refused (caught)
+    eval: '(condition-case err (progn (cursor-move 0 0) (buffer-insert "Y")) (error (e) "REFUSED"))'
+    expect:
+      result_contains: 'REFUSED'
+
+  - name: buffer text is unchanged after the refused insert
+    eval: '(buffer-text)'
+    expect:
+      buffer_contains: "Xclean line"
+
+  - name: nil clears the read-only flag
+    eval: '(buffer-set-read-only nil)'
+    expect:
+      result_contains: 'false'
+
+  - name: insert now lands once read-only is cleared
+    eval: '(progn (cursor-move 0 0) (buffer-insert "Y"))'
+    expect:
+      buffer_contains: "YXclean line"
+
+  # ------------------------------------------------------ truthiness spellings
+  # Cycle the callable spellings through a probe. buffer-set-read-only returns
+  # the resolved boolean, so a successful call's result reflects the spelling.
+  # t / non-zero-number (1) set read-only -> a probe insert returns REFUSED.
+  # nil / zero-number (0) clear read-only -> a probe insert returns its text.
+
+  - name: truthiness t symbol re-enables refusal
+    eval: '(progn (buffer-set-read-only t) (condition-case err (progn (cursor-move 0 0) (buffer-insert "T")) (error (e) "REFUSED")))'
+    expect:
+      result_contains: 'REFUSED'
+
+  - name: truthiness nil symbol re-enables inserts
+    eval: '(progn (buffer-set-read-only nil) (cursor-move 0 0) (buffer-insert "N"))'
+    expect:
+      result_contains: 'N'
+
+  - name: nil-symbol insert landed in the buffer
+    eval: '(buffer-text)'
+    expect:
+      buffer_contains: "NYXclean line"
+
+  - name: truthiness non-zero number (1) re-enables refusal
+    eval: '(progn (buffer-set-read-only 1) (condition-case err (progn (cursor-move 0 0) (buffer-insert "O")) (error (e) "REFUSED")))'
+    expect:
+      result_contains: 'REFUSED'
+
+  - name: truthiness zero number (0) re-enables inserts
+    eval: '(progn (buffer-set-read-only 0) (cursor-move 0 0) (buffer-insert "Z"))'
+    expect:
+      result_contains: 'Z'
+
+  - name: zero-number insert landed in the buffer
+    eval: '(buffer-text)'
+    expect:
+      buffer_contains: "ZNYXclean line"
+
+cleanup: true

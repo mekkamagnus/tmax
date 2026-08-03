@@ -1,0 +1,184 @@
+name: eval-46-indent-syntax-lsp-ast
+description: |
+  Indent / syntax / LSP-diagnostics / AST / code-navigation T-Lisp surface
+  (CHORE-079). Multi-part characterization playbook asserting the EXISTING
+  contract of each primitive. All commands under test already EXIST:
+    - src/editor/api/indent-ops.ts
+    - src/editor/api/syntax-ops.ts
+    - src/editor/api/lsp-diagnostics.ts
+    - src/editor/api/ast-ops.ts
+    - src/editor/api/navigation-ops.ts
+
+  LSP note: this codebase has no live language server; lsp-diagnostics are
+  read-only against EditorModel.lspDiagnostics. There is no T-Lisp primitive
+  to seed diagnostics, so the playbook asserts the count alist SHAPE
+  (contains a "total" entry) and the clear round-trip rather than a populated
+  server. go-to-definition here is the AST-backed navigation-ops.ts primitive
+  (NOT an external LSP), so it works offline once ast-parse-buffer has cached
+  the tree. No external server is required for any assertion.
+
+  The fixture is one small .ts file (nested braces, a function definition, and
+  a call site) that feeds every section. Backslashes are avoided in eval
+  strings (the indent patterns "{" "}" need none).
+
+  NOTE on result serialization: the daemon's eval path converts T-Lisp values
+  to JSON before the runner substring-matches them (server.ts
+  tlispValueToJson). So nil serializes as the literal "null", lists/alists as
+  JSON arrays, hashmaps as JSON objects, and bare strings/symbols as their
+  text. Assertions use the JSON form accordingly.
+
+setup:
+  - action: setup_file
+    var: TSFILE
+    name: eval-46-fixture.ts
+    content: |
+      function fixtureFn(x: number): number {
+        if (x > 0) {
+          return x;
+        }
+        return 0;
+      }
+      fixtureFn(1);
+
+steps:
+  - name: open the .ts fixture
+    eval: '(find-file "${TSFILE}")'
+    expect:
+      buffer_contains: "fixtureFn"
+
+  # ============================================================
+  # INDENT SECTION
+  # ============================================================
+  - name: set indent increase/decrease rules for the buffer
+    eval: '(indent-set-rules (list "{") (list "}"))'
+    expect:
+      result_contains: "null"
+
+  - name: indent-get-rules round-trips the stored rules
+    eval: '(indent-get-rules)'
+    expect:
+      result_contains: "{"
+
+  - name: indent-calculate-column on line 2 is >= tabSize (default 2)
+    eval: '(if (>= (indent-calculate-column 2 (list "{") (list "}")) 2) (quote indented) (quote flat))'
+    expect:
+      result_contains: "indented"
+
+  - name: "indent-apply-region over lines 0-4 returns null (placeholder: calculates but does not write)"
+    eval: '(indent-apply-region 0 4)'
+    expect:
+      result_contains: "null"
+
+  # ============================================================
+  # SYNTAX SECTION
+  # ============================================================
+  - name: syntax-set-language typescript then syntax-get-language reflects it
+    eval: '(progn (syntax-set-language "typescript") (syntax-get-language))'
+    expect:
+      result_contains: "typescript"
+
+  - name: syntax-tokenize-line 0 returns the function keyword token
+    eval: '(syntax-tokenize-line 0)'
+    expect:
+      result_contains: "function"
+
+  - name: syntax-apply-highlights with a sample span list returns null (placeholder wiring)
+    eval: '(syntax-apply-highlights (list (list 0 7 (list (list "fg" "blue")))))'
+    expect:
+      result_contains: "null"
+
+  # ============================================================
+  # LSP DIAGNOSTICS SECTION (no live server; assert shape + clear round-trip)
+  # ============================================================
+  - name: lsp-diagnostics-count returns an alist containing a total entry
+    eval: '(lsp-diagnostics-count)'
+    expect:
+      result_contains: "total"
+
+  - name: lsp-diagnostics-list returns a list (possibly empty)
+    eval: '(lsp-diagnostics-list)'
+    expect:
+      result_contains: "["
+
+  - name: lsp-diagnostics-clear returns true
+    eval: '(lsp-diagnostics-clear)'
+    expect:
+      result_contains: "true"
+
+  - name: after clear, the total count entry is zero
+    eval: '(lsp-diagnostics-count)'
+    expect:
+      result_contains: '["total",0]'
+
+  # ============================================================
+  # AST SECTION
+  # ============================================================
+  - name: ast-node-at-cursor BEFORE parse returns null (common misuse edge case)
+    eval: '(ast-invalidate)'
+    expect:
+      result_contains: "null"
+
+  - name: "ast-parse-buffer typescript returns an ast: handle"
+    eval: '(ast-parse-buffer "typescript")'
+    expect:
+      result_contains: "ast:"
+
+  - name: ast-count-nodes is a positive number for a real .ts fixture
+    eval: '(if (> (ast-count-nodes) 0) (quote positive) (quote empty))'
+    expect:
+      result_contains: "positive"
+
+  - name: place cursor inside the function body (line 3, the return statement)
+    eval: '(cursor-move 3 6)'
+    expect:
+      cursor_line: 3
+
+  - name: ast-enclosing-function at cursor returns a function-kind node
+    eval: '(ast-enclosing-function)'
+    expect:
+      result_contains: "function"
+
+  - name: ast-node-at-cursor returns a non-null hashmap with a kind field
+    eval: '(ast-node-at-cursor)'
+    expect:
+      result_contains: "kind"
+
+  # ============================================================
+  # NAVIGATION SECTION
+  # ============================================================
+  - name: drop any cached AST so the no-AST path is exercised
+    eval: '(ast-invalidate)'
+    expect:
+      result_contains: "null"
+
+  - name: go-to-definition with NO cached AST sets the documented status message
+    eval: '(go-to-definition)'
+    expect:
+      status_message: "No AST"
+
+  - name: re-parse the buffer so navigation has a cached tree
+    eval: '(ast-parse-buffer "typescript")'
+    expect:
+      result_contains: "ast:"
+
+  - name: position cursor on the call site fixtureFn at the last line
+    eval: '(cursor-move 6 0)'
+    expect:
+      cursor_line: 6
+
+  - name: go-to-definition returns the resolved symbol name
+    eval: '(go-to-definition)'
+    expect:
+      result_contains: "fixtureFn"
+
+  - name: find-references for fixtureFn returns a non-empty list
+    eval: '(length (find-references "fixtureFn"))'
+    expect:
+      result_contains: "1"
+
+  - name: document-symbols after ast-parse-buffer lists fixtureFn
+    eval: '(document-symbols)'
+    expect:
+      result_contains: "fixtureFn"
+
+cleanup: true

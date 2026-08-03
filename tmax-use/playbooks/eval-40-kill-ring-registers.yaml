@@ -1,0 +1,128 @@
+name: eval-40-kill-ring-registers
+description: |
+  CHORE-073 e2e: live-editor coverage for the kill ring, yank-pop cycling, and
+  the named-register API — all of which today have only unit coverage.
+
+  Two flows:
+    1. kill-ring-save / kill-ring-yank / kill-ring-list (the ring API in
+       isolation). kill-ring-save pushes to the same per-editor ring that
+       kill-ring-yank/list read (CHORE-44 Change 1 made these per-editor).
+    2. yank-pop cycling: paste-after reads the UNNAMED register and activates
+       yank-pop state; yank-pop then rotates the ring and swaps the pasted text
+       for the previous ring entry. The unnamed register + ring are seeded
+       together via yank-register-set (the only primitive that does both).
+
+  Named registers: set/get round-trip, uppercase "A" APPENDS to "a", register-list
+  formats "<name>: <content>", paste-from-register returns the register content.
+
+setup:
+  - action: setup_file
+    var: FILE
+    name: eval-40-killring.txt
+    content: |
+      seed line one
+      seed line two
+
+steps:
+  - name: switch to normal mode
+    eval: '(editor-set-mode "normal")'
+    expect:
+      mode: normal
+
+  - name: open the fixture (gives a buffer for paste to land in)
+    eval: '(find-file "${FILE}")'
+    expect:
+      buffer_contains: "seed line one"
+
+  # ------------------------------- kill-ring save/yank/list (newest-first)
+  - name: save A into the kill ring
+    eval: '(kill-ring-save "A")'
+    expect:
+      result_contains: 'null'
+
+  - name: save B into the kill ring (now newest)
+    eval: '(kill-ring-save "B")'
+    expect:
+      result_contains: 'null'
+
+  - name: kill-ring-yank returns the newest entry (B)
+    eval: '(kill-ring-yank)'
+    expect:
+      result_contains: 'B'
+
+  - name: kill-ring-list is newest-first
+    eval: '(kill-ring-list)'
+    expect:
+      result_contains: 'B'
+
+  # ------------------------- yank-pop cycle: paste then pop swaps the text
+  # Seed the unnamed register AND the kill ring together (paste-after reads the
+  # unnamed register; yank-pop rotates the ring).
+  - name: seed "first" into unnamed register + ring
+    eval: '(yank-register-set "first")'
+    expect:
+      result_contains: 'null'
+
+  - name: seed "second" into unnamed register + ring (now newest)
+    eval: '(yank-register-set "second")'
+    expect:
+      result_contains: 'null'
+
+  - name: cursor to start of line 0
+    eval: '(cursor-move 0 0)'
+
+  - name: paste-after inserts the unnamed register ("second") and activates yank-pop
+    eval: '(paste-after)'
+    expect:
+      buffer_contains: 'second'
+
+  - name: yank-pop is active right after the paste
+    eval: '(yank-pop-active)'
+    expect:
+      result_contains: 'true'
+
+  - name: yank-pop rotates the ring and swaps the paste for the previous entry ("first")
+    eval: '(yank-pop)'
+    expect:
+      result_contains: 'first'
+
+  - name: buffer now holds the swapped text ("first"), the "second" paste replaced
+    eval: '(buffer-text)'
+    expect:
+      buffer_contains: 'first'
+
+  # ----------------------------- named registers: set/get round-trip
+  - name: set-register "a" to "alpha"
+    eval: '(set-register "a" "alpha")'
+    expect:
+      result_contains: 'null'
+
+  - name: get-register "a" returns "alpha"
+    eval: '(get-register "a")'
+    expect:
+      result_contains: 'alpha'
+
+  # ------------------------- uppercase "A" APPENDS to the "a" register
+  - name: set-register "A" appends to register "a"
+    eval: '(set-register "A" "bet")'
+    expect:
+      result_contains: 'null'
+
+  - name: register "a" now holds the appended content
+    eval: '(get-register "a")'
+    expect:
+      result_contains: 'alphabet'
+
+  # ------------------------- register-list formats entries as "<name>: <content>"
+  - name: register-list includes the formatted a-register entry
+    eval: '(register-list)'
+    expect:
+      result_contains: 'a: alphabet'
+
+  # ------------------------- paste-from-register returns the register content
+  - name: paste-from-register "a" returns the register content
+    eval: '(paste-from-register "a")'
+    expect:
+      result_contains: 'alphabet'
+
+cleanup: true

@@ -1,0 +1,141 @@
+name: eval-35-buffer-window-hygiene
+description: |
+  SPEC-084 buffer/window hygiene: rename-buffer (display-name change, NOT
+  save-as), bury-buffer (demote recency so it sinks in buffer-list-details),
+  and balance-windows (equalize window heights after a split). Driven via eval
+  because none of the three commands exist yet — this is a RED test.
+
+setup:
+  - action: setup_file
+    var: FILE_A
+    name: eval-35-a.txt
+    content: |
+      alpha hygiene content
+  - action: setup_file
+    var: FILE_B
+    name: eval-35-b.txt
+    content: |
+      beta hygiene content
+  - action: setup_file
+    var: FILE_C
+    name: eval-35-c.txt
+    content: |
+      gamma hygiene content
+
+steps:
+  - name: switch to normal mode
+    eval: '(editor-set-mode "normal")'
+    expect:
+      mode: normal
+
+  # ============ rename-buffer ============
+
+  - name: open file A as the rename target
+    eval: '(find-file "${FILE_A}")'
+    expect:
+      buffer_contains: "alpha hygiene content"
+
+  - name: rename the current buffer to a display name
+    eval: '(rename-buffer "work")'
+    expect:
+      status_message: "work"
+
+  - name: current buffer is now the renamed buffer
+    eval: '(buffer-current)'
+    expect:
+      result_contains: "work"
+
+  - name: buffer-name also reflects the rename
+    eval: '(buffer-name)'
+    expect:
+      result_contains: "work"
+
+  # -- rename is display-only: filename and save target are UNCHANGED --
+  - name: buffer-filename still points at the original path (rename != save-as)
+    eval: '(buffer-filename)'
+    expect:
+      result_contains: "eval-35-a.txt"
+
+  - name: save-buffer still writes to the original path
+    eval: '(save-buffer)'
+    expect:
+      status_message: "Saved"
+
+  - name: the original path still exists on disk
+    eval: '(file-exists-p "${FILE_A}")'
+    expect:
+      result_contains: 'true'
+
+  # ============ bury-buffer ============
+
+  - name: visit buffers B and C so multiple exist with recency
+    eval: '(find-file "${FILE_B}")'
+    expect:
+      buffer_contains: "beta hygiene content"
+
+  - name: visit buffer C (now most recent)
+    eval: '(find-file "${FILE_C}")'
+    expect:
+      buffer_contains: "gamma hygiene content"
+
+  - name: switch back to B as the bury candidate
+    eval: '(buffer-switch "${FILE_B}")'
+    expect:
+      buffer_contains: "beta hygiene content"
+
+  - name: bury the current buffer B
+    eval: '(bury-buffer)'
+    expect:
+      status_message: "eval-35-b"
+
+  # -- bury demotes recency: B is now least-recent in buffer-list-details --
+  - name: buffer-list-details still lists B
+    eval: '(buffer-list-details)'
+    expect:
+      result_contains: "eval-35-b"
+
+  - name: burying a named non-current buffer targets that one
+    eval: '(bury-buffer "${FILE_C}")'
+    expect:
+      status_message: "eval-35-c"
+
+  # ============ balance-windows ============
+
+  - name: split into two windows
+    eval: '(progn (split-window-below) (window-count))'
+    expect:
+      result_contains: '2'
+
+  - name: unbalance the windows with a manual resize
+    eval: '(window-resize-height 5)'
+    expect:
+      result_contains: 'null'
+
+  - name: balance-windows equalizes the split
+    eval: '(balance-windows)'
+    expect:
+      result_contains: 'null'
+
+  - name: window-count is unchanged by balance
+    eval: '(window-count)'
+    expect:
+      result_contains: '2'
+
+  # -- balanced heights are equal (SPEC-084 exposes a window-height reader) --
+  - name: both windows share an equal height after balance
+    eval: '(= (window-height 0) (window-height 1))'
+    expect:
+      result_contains: 'true'
+
+  # -- no-op case: one window, balance does nothing --
+  - name: collapse to one window for the no-op case
+    eval: '(progn (delete-other-windows) (window-count))'
+    expect:
+      result_contains: '1'
+
+  - name: balance-windows is a no-op with one window
+    eval: '(progn (balance-windows) (window-count))'
+    expect:
+      result_contains: '1'
+
+cleanup: true

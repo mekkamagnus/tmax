@@ -1,0 +1,94 @@
+name: eval-25-comment-ops
+description: |
+  SPEC-074 (feature-red): comment-toggle-line, comment-region, uncomment-region,
+  and the comment-dwim command. Asserts the per-major-mode comment prefix is
+  prepended / stripped. These primitives do not exist yet, so every eval that
+  calls them fails "unknown function" until implementation — that is the
+  expected RED state. A .ts fixture is used so major-mode-auto-detect selects a
+  mode whose commentSyntax is "//" once the feature seeds it.
+
+setup:
+  - action: setup_file
+    var: TSCODE
+    name: eval-25-code.ts
+    content: |
+      const a = 1;
+      const b = 2;
+      const c = 3;
+
+steps:
+  - name: switch to normal mode
+    eval: '(editor-set-mode "normal")'
+    expect:
+      mode: normal
+
+  - name: open the .ts fixture
+    eval: '(find-file "${TSCODE}")'
+    expect:
+      buffer_contains: "const a = 1;"
+
+  # -- comment-toggle-line on an uncommented code line prepends the mode prefix --
+  - name: cursor on line 0
+    eval: '(cursor-move 0 0)'
+  - name: comment-toggle-line prepends the line comment prefix
+    eval: '(comment-toggle-line)'
+    expect:
+      buffer_contains: "// const a = 1;"
+  - name: line 0 now starts with the comment prefix
+    eval: '(buffer-line 0)'
+    expect:
+      result_contains: '// const a = 1;'
+
+  # -- comment-toggle-line on an already-commented line strips the prefix --
+  - name: comment-toggle-line again removes the prefix
+    eval: '(comment-toggle-line)'
+  - name: line 0 is back to uncommented
+    eval: '(buffer-line 0)'
+    expect:
+      result_contains: 'const a = 1;'
+
+  # -- comment-region over an explicit line range comments every line --
+  - name: comment lines 1..2 inclusive
+    eval: '(comment-region 1 2)'
+  - name: line 1 is commented
+    eval: '(buffer-line 1)'
+    expect:
+      result_contains: '// const b = 2;'
+  - name: line 2 is commented
+    eval: '(buffer-line 2)'
+    expect:
+      result_contains: '// const c = 3;'
+
+  # -- uncomment-region is the exact inverse --
+  - name: uncomment lines 1..2 inclusive
+    eval: '(uncomment-region 1 2)'
+  - name: line 1 is back to uncommented
+    eval: '(buffer-line 1)'
+    expect:
+      result_contains: 'const b = 2;'
+  - name: line 2 is back to uncommented
+    eval: '(buffer-line 2)'
+    expect:
+      result_contains: 'const c = 3;'
+
+  # -- comment-dwim with no active region behaves like comment-toggle-line --
+  - name: comment-dwim toggles the current line
+    eval: '(comment-dwim)'
+  - name: line 0 is commented by comment-dwim
+    eval: '(buffer-line 0)'
+    expect:
+      result_contains: '// const a = 1;'
+
+  # -- fundamental mode (no commentSyntax) renders a clear message, no mutation --
+  - name: switch to fundamental mode
+    eval: '(major-mode-set "fundamental")'
+  - name: comment-toggle-line in a no-syntax mode messages and does not mutate
+    eval: '(comment-dwim)'
+    expect:
+      status_message: "No comment syntax for major mode 'fundamental'"
+  - name: line 0 is unchanged after the no-op
+    eval: '(buffer-line 0)'
+    expect:
+      result_contains: 'const a = 1;'
+
+cleanup: true

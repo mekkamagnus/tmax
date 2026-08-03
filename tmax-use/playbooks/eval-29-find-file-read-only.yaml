@@ -1,0 +1,93 @@
+name: eval-29-find-file-read-only
+description: |
+  SPEC-078 find-file-read-only: open a file into a read-only buffer that
+  refuses edits. Composes find-file-open + buffer-set-read-only. A follow-up
+  buffer-insert is refused (read-only). The flag is buffer-scoped and
+  reversible via (buffer-set-read-only nil). Driven via eval because the
+  command does not exist yet — this is a RED test.
+
+setup:
+  - action: setup_file
+    var: FILE_A
+    name: eval-29-a.txt
+    content: |
+      read-only content A
+      second line A
+  - action: setup_file
+    var: FILE_B
+    name: eval-29-b.txt
+    content: |
+      editable content B
+
+steps:
+  - name: switch to normal mode
+    eval: '(editor-set-mode "normal")'
+    expect:
+      mode: normal
+
+  # -- core criterion: opens the file read-only --
+  - name: find-file-read-only opens the file
+    eval: '(find-file-read-only "${FILE_A}")'
+    expect:
+      buffer_contains: "read-only content A"
+
+  - name: current buffer is the read-only-opened file
+    eval: '(buffer-current)'
+    expect:
+      result_contains: "eval-29-a"
+
+  # -- edits are refused: buffer-insert after read-only open is rejected --
+  # NOTE: an eval RPC that signals an error throws at the wire layer (exit 1)
+  # and never updates the status line, so `status_message` cannot observe it.
+  # Wrap the refused insert in condition-case: on success it returns
+  # "INSERTED-OK"; on the read-only error it returns "REFUSED".
+  - name: buffer-insert is refused in the read-only buffer
+    eval: '(condition-case err (progn (buffer-insert "MUTATED") "INSERTED-OK") (error (e) "REFUSED"))'
+    expect:
+      result_contains: "REFUSED"
+
+  - name: buffer text is unchanged (no MUTATED)
+    eval: '(buffer-text)'
+    expect:
+      result_contains: "read-only content A"
+
+  # -- read-only is reversible --
+  - name: buffer-set-read-only nil re-enables editing
+    eval: '(buffer-set-read-only nil)'
+    expect:
+      result_contains: 'false'
+
+  - name: buffer-insert now succeeds after clearing read-only
+    eval: '(buffer-insert "EDIT-OK")'
+    expect:
+      result_contains: "EDIT-OK"
+
+  # -- re-assert read-only for the buffer-scoped test below --
+  - name: mark buffer A read-only again
+    eval: '(buffer-set-read-only t)'
+    expect:
+      result_contains: 'true'
+
+  # -- read-only is buffer-scoped: a different buffer is editable --
+  - name: open buffer B (editable) and edit it
+    eval: '(find-file "${FILE_B}")'
+    expect:
+      buffer_contains: "editable content B"
+
+  - name: buffer-insert succeeds in the editable buffer B
+    eval: '(buffer-insert "EDITABLE-B")'
+    expect:
+      result_contains: "EDITABLE-B"
+
+  # -- buffer A is still read-only after switching away and back --
+  - name: switch back to buffer A
+    eval: '(buffer-switch "${FILE_A}")'
+    expect:
+      buffer_contains: "read-only content A"
+
+  - name: buffer A is still read-only after a round-trip
+    eval: '(condition-case err (progn (buffer-insert "SHOULD-FAIL") "INSERTED-OK") (error (e) "REFUSED"))'
+    expect:
+      result_contains: "REFUSED"
+
+cleanup: true

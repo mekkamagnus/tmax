@@ -1,0 +1,208 @@
+name: eval-27-eval-last-sexp-buffer
+description: |
+  SPEC-076 feature-red e2e: `eval-last-sexp` (SPC e e) and `eval-buffer`
+  (SPC e b) do NOT exist yet. This playbook encodes the spec's completion
+  criteria verbatim so it fails RED ("unknown function" / SPC e is not a
+  prefix) until SPEC-076 lands.
+
+  It drives both commands through the buffer text:
+    - eval-last-sexp: position point after a sexp, SPC e e, assert => <val> in
+      *Messages* and the status line.
+    - eval-buffer: SPC e b evaluates every form, logs a summary line, and the
+      side effect (a defun) becomes live (verifiable by M-x-ing it).
+  Plus the nested-sexp scan, the no-sexp-before-point message, the error case,
+  discoverability, and the SPEC-067 C-x decrement regression (the new SPC e
+  bindings must not steal the C-x prefix).
+
+setup:
+  - action: setup_file
+    var: FILE
+    name: eval-27-scratch.tlisp
+    content: |
+      (+ 1 2)
+      (foo (bar 1 2))
+
+steps:
+  - name: switch to normal mode
+    eval: '(editor-set-mode "normal")'
+    expect:
+      mode: normal
+
+  - name: open the scratch file
+    eval: '(find-file "${FILE}")'
+    expect:
+      buffer_contains: "(+ 1 2)"
+
+  # ============================================================
+  # eval-last-sexp: point after (+ 1 2) -> => 3
+  # ============================================================
+  - name: position point after the closing paren of (+ 1 2)
+    setup_cursor: [0, 6]
+    eval: '(cursor-position)'
+    expect:
+      result_contains: '['
+
+  - name: press SPC e e to evaluate the sexp before point
+    keys: "<SPC>ee"
+    wait: 100
+
+  - name: editor is back in normal mode after eval-last-sexp
+    eval: '(editor-mode)'
+    expect:
+      result_contains: 'normal'
+
+  - name: status line shows => 3
+    eval: '(editor-status)'
+    expect:
+      result_contains: '3'
+
+  - name: "*Messages* recorded => 3"
+    eval: '(messages-buffer)'
+    expect:
+      result_contains: '3'
+
+  # ============================================================
+  # eval-last-sexp: nested single-line sexp-boundary scan
+  # point on the "2" inside (bar 1 2) -> evaluates (bar 1 2)
+  # (bar is unbound, so this exercises the error path for the inner form;
+  #  the DoD criterion is that the INNER form is selected, not the outer.)
+  # ============================================================
+  - name: position point inside the inner (bar 1 2)
+    setup_cursor: [1, 12]
+    eval: '(cursor-column)'
+    expect:
+      result_contains: '12'
+
+  - name: press SPC e e to evaluate the inner sexp
+    eval: '(eval-last-sexp)'
+
+  - name: editor survives and returns to normal mode
+    eval: '(editor-mode)'
+    expect:
+      result_contains: 'normal'
+
+  # The inner form (bar 1 2) was selected: the error message references the
+  # inner symbol "bar", proving the boundary scan picked the inner sexp, not
+  # the outer (foo ...).
+  - name: "*Messages* shows the inner form (bar) was evaluated"
+    eval: '(messages-buffer)'
+    expect:
+      result_contains: 'bar'
+
+  # ============================================================
+  # eval-last-sexp: no sexp before point -> clear message, no crash
+  # ============================================================
+  - name: position point at the start of line 0 (no paren to the left)
+    setup_cursor: [0, 0]
+    eval: '(cursor-column)'
+    expect:
+      result_contains: '0'
+
+  - name: press SPC e e with no sexp before point
+    eval: '(eval-last-sexp)'
+
+  - name: editor still alive after no-sexp case
+    eval: '(editor-mode)'
+    expect:
+      result_contains: 'normal'
+
+  - name: "*Messages* notes no sexp before point"
+    eval: '(messages-buffer)'
+    expect:
+      result_contains: 'sexp'
+
+  # ============================================================
+  # eval-buffer: evaluate the whole buffer; side effect becomes live
+  # We overwrite the buffer with a defun + a call, then SPC e b.
+  # ============================================================
+  - name: replace buffer with a defun form
+    eval: '(progn (buffer-delete-range 0 0 (- (buffer-line-count) 1) 100) (buffer-insert "(defun live-fn-27 () 99)"))'
+    expect:
+      buffer_contains: 'live-fn-27'
+
+  - name: press SPC e b to evaluate the whole buffer
+    eval: '(eval-buffer)'
+
+  - name: editor returns to normal mode after eval-buffer
+    eval: '(editor-mode)'
+    expect:
+      result_contains: 'normal'
+
+  # Summary line names the buffer / notes evaluation.
+  - name: "*Messages* has the buffer eval summary line"
+    eval: '(messages-buffer)'
+    expect:
+      result_contains: 'eval-buffer'
+
+  # The defun is now live: calling live-fn-27 returns 99.
+  - name: the freshly-defined function is now live (returns 99)
+    eval: '(live-fn-27)'
+    expect:
+      result_contains: '99'
+
+  # ============================================================
+  # error in the evaluated region is caught; editor stays alive
+  # ============================================================
+  - name: replace buffer with a malformed form
+    eval: '(progn (buffer-delete-range 0 0 (- (buffer-line-count) 1) 100) (buffer-insert "(undefined-symbol-27)"))'
+    expect:
+      buffer_contains: 'undefined-symbol-27'
+
+  - name: press SPC e b on the malformed buffer
+    eval: '(eval-buffer)'
+
+  - name: editor alive and in normal mode after malformed eval-buffer
+    eval: '(editor-mode)'
+    expect:
+      result_contains: 'normal'
+
+  - name: "*Messages* logged the eval error"
+    eval: '(messages-buffer)'
+    expect:
+      result_contains: 'undefined-symbol-27'
+
+  # ============================================================
+  # Discoverability: both commands are interactive (docstring + binding)
+  # ============================================================
+  - name: eval-last-sexp is an interactive command
+    eval: '(filter (lambda (d) (string= (hashmap-get d "name") "eval-last-sexp")) (callable-command-details))'
+    expect:
+      result_contains: 'eval-last-sexp'
+
+  - name: eval-buffer is an interactive command
+    eval: '(filter (lambda (d) (string= (hashmap-get d "name") "eval-buffer")) (callable-command-details))'
+    expect:
+      result_contains: 'eval-buffer'
+
+  # ============================================================
+  # SPEC-067 regression: C-x is still vim decrement (not stolen by SPC e)
+  # Put a literal "5" in the buffer, cursor on it, C-x -> "4".
+  # ============================================================
+  - name: replace buffer with a single digit to test C-x decrement
+    eval: '(progn (buffer-delete-range 0 0 (- (buffer-line-count) 1) 100) (buffer-insert "5"))'
+    expect:
+      buffer_contains: '5'
+
+  - name: position cursor on the digit
+    setup_cursor: [0, 0]
+    eval: '(cursor-column)'
+    expect:
+      result_contains: '0'
+
+  # Escape first to clear any lingering which-key prefix from the prior SPC e
+  # sequences (the SPC prefix + which-key popup can leave pending state that
+  # would otherwise intercept the next key).
+  - name: clear any pending prefix state
+    keys: "<Escape>"
+    wait: 100
+
+  - name: press C-x to decrement the number under cursor
+    keys: "<C-x>"
+    wait: 100
+
+  - name: the digit decremented from 5 to 4 (C-x prefix intact)
+    eval: '(buffer-text)'
+    expect:
+      buffer_contains: '4'
+
+cleanup: true

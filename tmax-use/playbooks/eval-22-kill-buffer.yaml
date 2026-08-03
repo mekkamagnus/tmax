@@ -1,0 +1,154 @@
+name: eval-22-kill-buffer
+description: |
+  SPEC-071 (feature-red): kill-buffer command at the T-Lisp/M-x layer.
+  Asserts the completion criteria EXACTLY — these will fail with
+  "unknown function" until SPEC-071 is implemented (that is the TDD intent):
+    - (kill-buffer) on an unmodified buffer removes it from (buffer-list)
+      and (buffer-current) returns the recency survivor.
+    - (kill-buffer) on a MODIFIED buffer fires a save-on-kill gate via
+      completing-read (mode flips to mx). Drive the prompt to "yes" via keys
+      -> buffer is saved (file written, modified flag cleared) then removed.
+      Drive to "no" -> buffer removed, file on disk unchanged.
+    - Killing a file-less modified buffer does not error.
+    - :bd on the command line kills the current buffer.
+    - M-x kill-buffer is discoverable via completion.
+
+setup:
+  - action: setup_file
+    var: FILE1
+    name: eval-22-alpha.txt
+    content: |
+      alpha base content
+  - action: setup_file
+    var: FILE2
+    name: eval-22-beta.txt
+    content: |
+      beta base content
+  - action: setup_file
+    var: FILE3
+    name: eval-22-gamma.txt
+    content: |
+      gamma base content
+
+steps:
+  # --- setup: three buffers live, gamma is the most recent / current ---
+  - name: switch to normal mode
+    eval: '(editor-set-mode "normal")'
+    expect:
+      mode: normal
+
+  - name: open alpha
+    eval: '(find-file "${FILE1}")'
+    expect:
+      buffer_contains: "alpha base content"
+
+  - name: open beta
+    eval: '(find-file "${FILE2}")'
+    expect:
+      buffer_contains: "beta base content"
+
+  - name: open gamma (most recent; current)
+    eval: '(find-file "${FILE3}")'
+    expect:
+      buffer_contains: "gamma base content"
+
+  - name: buffer-list contains all three
+    eval: '(buffer-list)'
+    expect:
+      result_contains: "eval-22-gamma.txt"
+
+  # --- unmodified kill: gamma killed, survivor is next-most-recent (beta) ---
+  - name: kill-buffer on unmodified current buffer
+    eval: '(kill-buffer)'
+    expect:
+      result_contains: "eval-22-gamma.txt"
+
+  - name: killed buffer absent from buffer-list
+    eval: '(buffer-list)'
+    expect:
+      result_contains: "eval-22-beta.txt"
+
+  - name: current buffer is the recency survivor
+    eval: '(buffer-current)'
+    expect:
+      result_contains: "eval-22-beta.txt"
+
+  # --- modified + answer YES: file written, buffer removed ---
+  - name: switch to alpha and modify it
+    eval: '(progn (buffer-switch "${FILE1}") (cursor-move 0 0) (buffer-insert "EDIT "))'
+    expect:
+      buffer_contains: "EDIT alpha base content"
+
+  - name: alpha is now modified
+    eval: '(buffer-modified-p)'
+    expect:
+      result_contains: "true"
+
+  - name: kill-buffer on modified buffer opens the save gate (mx mode)
+    eval: '(kill-buffer)'
+    expect:
+      mode: mx
+
+  - name: accept the save prompt by typing yes then enter
+    keys: 'yes<Enter>'
+    expect:
+      mode: normal
+
+  - name: alpha file on disk now reflects the edit
+    eval: '(read-file-content "${FILE1}")'
+    expect:
+      result_contains: "EDIT alpha base content"
+
+  - name: alpha removed from buffer-list
+    eval: '(buffer-list)'
+    expect:
+      result_contains: "eval-22-beta.txt"
+
+  # --- modified + answer NO: file unchanged on disk, buffer removed ---
+  - name: switch to beta and modify it
+    eval: '(progn (buffer-switch "${FILE2}") (cursor-move 0 0) (buffer-insert "DROP "))'
+    expect:
+      buffer_contains: "DROP beta base content"
+
+  - name: kill-buffer on modified beta opens the save gate
+    eval: '(kill-buffer)'
+    expect:
+      mode: mx
+
+  - name: answer no to the save prompt
+    keys: 'no<Enter>'
+    expect:
+      mode: normal
+
+  - name: beta file on disk is unchanged (no DROP)
+    eval: '(read-file-content "${FILE2}")'
+    expect:
+      result_contains: "beta base content"
+
+  # --- file-less buffer kill does not error ---
+  - name: kill-buffer on scratch (no associated file) does not error
+    eval: '(kill-buffer)'
+    expect:
+      result_contains: "*"
+
+  # --- :bd command-line path kills the current buffer ---
+  - name: enter command mode for the :bd path
+    eval: '(editor-enter-command-mode)'
+    expect:
+      mode: command
+
+  - name: :bd kills the current buffer
+    keys: 'bd<Enter>'
+    expect:
+      status_message: 'Killed'
+
+  # --- M-x discoverability: kill-buffer is interactive (docstring/binding) ---
+  # Filter callable-command-details for the kill-buffer entry; it carries a
+  # docstring so command-detail-interactive-p admits it to M-x. Asserting the
+  # entry exists AND is interactive proves M-x discoverability.
+  - name: kill-buffer is in the callable details with a docstring
+    eval: '(filter (lambda (d) (string= (hashmap-get d "name") "kill-buffer")) (callable-command-details))'
+    expect:
+      result_contains: 'kill-buffer'
+
+cleanup: true

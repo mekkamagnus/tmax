@@ -1,0 +1,81 @@
+name: eval-28-write-file
+description: |
+  SPEC-077 write-file: the Emacs-canonical save-as name as an alias of
+  save-file. (write-file NEWPATH) saves the buffer to NEWPATH, re-associates
+  the buffer with that path, clears the modified flag, and messages
+  "Saved NEWPATH". No C-x binding is added (SPEC-067); the binding is SPC f w.
+  Driven via eval/M-x because the command does not exist yet — this is a RED
+  test that fails "unknown function" until implementation.
+
+setup:
+  - action: setup_file
+    var: FILE
+    name: eval-28-src.txt
+    content: |
+      original content one
+      original content two
+  - action: setup_file
+    var: NEW
+    name: eval-28-dst.txt
+    content: ""
+
+steps:
+  - name: switch to normal mode
+    eval: '(editor-set-mode "normal")'
+    expect:
+      mode: normal
+
+  - name: open the source fixture
+    eval: '(find-file "${FILE}")'
+    expect:
+      buffer_contains: "original content one"
+
+  - name: mutate the buffer before save-as
+    eval: '(progn (cursor-move 0 0) (buffer-insert "WRITE-FILE "))'
+    expect:
+      result_contains: "WRITE-FILE"
+
+  - name: buffer shows the mutation
+    eval: '(buffer-line 0)'
+    expect:
+      result_contains: "WRITE-FILE original content one"
+
+  # -- core criterion: (write-file NEWPATH) writes to NEWPATH (alias of save-file) --
+  - name: write-file to a new path saves the buffer there
+    eval: '(write-file "${NEW}")'
+    expect:
+      status_message: "Saved"
+
+  - name: the new path now exists on disk
+    eval: '(file-exists-p "${NEW}")'
+    expect:
+      result_contains: 't'
+
+  - name: disk contents match the buffer text
+    eval: '(read-file-content "${NEW}")'
+    expect:
+      result_contains: "WRITE-FILE original content one"
+
+  # -- buffer re-association + modified flag cleared (shares save-buffer path) --
+  - name: buffer is now associated with the new path
+    eval: '(buffer-filename)'
+    expect:
+      result_contains: "eval-28-dst.txt"
+
+  - name: modified flag is cleared after the write
+    eval: '(buffer-modified-p)'
+    expect:
+      result_contains: 'false'
+
+  # -- idempotent: a second write-file to the same path is fine --
+  - name: second write-file to same path is idempotent
+    eval: '(write-file "${NEW}")'
+    expect:
+      status_message: "Saved"
+
+  - name: new path still exists after second write
+    eval: '(file-exists-p "${NEW}")'
+    expect:
+      result_contains: 't'
+
+cleanup: true

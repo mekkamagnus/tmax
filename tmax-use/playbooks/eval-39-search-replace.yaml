@@ -1,0 +1,125 @@
+name: eval-39-search-replace
+description: |
+  CHORE-072 e2e: live-buffer coverage for query-replace (yes/no/all/quit cycle)
+  and isearch-backward. eval-20 covers forward isearch only.
+
+  The query-replace sub-commands are un-bound primitives, so they are driven via
+  the eval API exactly as eval-20 drives the search API. The fixture uses the
+  term ALPHA (not a substring of any other word) so match advancement is
+  unambiguous (per eval-20's collision warning).
+
+  isearch-backward is driven via the search-incremental-start/update/finish
+  primitives (typing the pattern via keys does not route to isearch-update
+  end-to-end yet — same Phase 1.D gap eval-20 documents). Direction is proven by
+  landing the cursor on a match whose line index is LESS than the starting line.
+
+setup:
+  - action: setup_file
+    var: FILE
+    name: eval-39-replace.txt
+    content: |
+      ALPHA first line
+      middle ALPHA here
+      ALPHA again at start
+      unrelated tail
+
+steps:
+  - name: switch to normal mode
+    eval: '(editor-set-mode "normal")'
+    expect:
+      mode: normal
+
+  - name: open the fixture
+    eval: '(find-file "${FILE}")'
+    expect:
+      buffer_contains: "ALPHA first line"
+
+  - name: cursor to top so all matches are ahead
+    eval: '(cursor-move 0 0)'
+
+  # -------------------------------------------- query-replace yes/no/quit cycle
+  - name: start query-replace ALPHA -> OMEGA
+    eval: '(query-replace "ALPHA" "OMEGA")'
+    expect:
+      status_message: 'Replace ALPHA with OMEGA'
+
+  - name: replace-yes replaces the first match and advances
+    eval: '(replace-yes)'
+    expect:
+      status_message: 'Replaced'
+
+  - name: first line now holds OMEGA
+    eval: '(buffer-line 0)'
+    expect:
+      result_contains: 'OMEGA first line'
+
+  - name: replace-no skips the second match
+    eval: '(replace-no)'
+
+  - name: second match (line 1) is still ALPHA (skipped)
+    eval: '(buffer-line 1)'
+    expect:
+      result_contains: 'middle ALPHA here'
+
+  - name: replace-quit exits to normal mode
+    eval: '(replace-quit)'
+    expect:
+      mode: normal
+
+  - name: third match (line 2) is untouched after quit
+    eval: '(buffer-line 2)'
+    expect:
+      result_contains: 'ALPHA again at start'
+
+  # ------------------------------------------------------ query-replace-all
+  - name: start a fresh query-replace ALPHA -> OMEGA
+    eval: '(query-replace "ALPHA" "OMEGA")'
+
+  - name: replace-all replaces every remaining match
+    eval: '(replace-all)'
+    expect:
+      status_message: 'All replaced'
+
+  - name: line 1 now holds OMEGA (was ALPHA)
+    eval: '(buffer-line 1)'
+    expect:
+      result_contains: 'middle OMEGA here'
+
+  - name: line 2 now holds OMEGA (was ALPHA)
+    eval: '(buffer-line 2)'
+    expect:
+      result_contains: 'OMEGA again at start'
+
+  # ------------------------------------------------ no-matches path (early bail)
+  - name: query-replace with no matches bails early
+    eval: '(query-replace "zzz" "x")'
+    expect:
+      status_message: 'No matches found'
+
+  # ------------------------- isearch-backward lands on a match BEFORE the start
+  # Place the cursor on the LAST line (line 3), backward-search a term that
+  # appears on an EARLIER line ("OMEGA", now on lines 0/1/2). After finishing,
+  # the cursor's line index must be less than 3 — proving backward direction.
+  - name: move cursor to the last line
+    eval: '(cursor-move 3 0)'
+
+  - name: confirm starting cursor line is 3
+    eval: '(cursor-line)'
+    expect:
+      result_contains: '3'
+
+  - name: start backward incremental search
+    eval: '(search-incremental-start "backward")'
+
+  - name: update the pattern to OMEGA
+    eval: '(search-incremental-update "OMEGA")'
+
+  - name: finish the backward search
+    eval: '(search-incremental-finish)'
+
+  - name: cursor landed on a line BEFORE the start (backward direction proven)
+    eval: '(cursor-line)'
+    expect:
+      result_contains: '2'
+
+cleanup: true
