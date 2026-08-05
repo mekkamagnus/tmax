@@ -78,6 +78,11 @@ The burn-down note's hypothesis that the bug "repros only on the async module-lo
 
 4. **Close issue #112** as wontfix / not-reproducible after the regression test lands (the test is the artifact that proves the closure is correct and prevents regression).
 
+## Codex adversarial review (2026-08-06) — correction
+
+- **Finding:** The Test Plan regression example defined `d--d`/`t---t` but exported `d`/`t`. With `(export s d t)`, the export set names symbols (`d`, `t`) that no `(defun …)` ever binds, so the test would assert the *typo* the report was about — not the `--` resolution it claims to guard. To actually exercise double-/triple-dash export+lookup, the export list must name the defined `--`/`---` symbols verbatim.
+- **Correction applied:** changed the example to `(export s d--d t---t)` so the exports match the defuns. The same exact-match rule applies to the permanent regression test added per Implementation Plan step 1 (export `single-dash`/`double--dash`/`triple---dash`, matching the defuns).
+
 ### If a future report reproduces a REAL `--` failure
 
 The investigation above is the bisect trail. Re-run the dump test (define a module with matching export+defun `--` names, then inspect `(moduleRegistry as any).resolve(name).exports` and `.env.lookup(name)`). If `exports` and the env binding ever disagree, the bug is in `evalDefmoduleForm` (`module-forms.ts:239-247`) or `evalDefun` (`evaluator.ts:1217-1259`); if they agree but lookup still fails, the bug is in `evalSymbol` (`evaluator.ts:432-540`). Today neither branch reproduces.
@@ -89,7 +94,7 @@ The investigation's verification (already executed, all green):
 ```ts
 // Sync execute (inline module) — all Right
 const i = new TLispInterpreterImpl();
-i.execute(`(defmodule dd/test (export s d t)
+i.execute(`(defmodule dd/test (export s d--d t---t)
               (defun s (x) (+ x 1))
               (defun d--d (x) (+ x 2))
               (defun t---t (x) (+ x 3)))`);

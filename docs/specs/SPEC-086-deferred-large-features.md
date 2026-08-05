@@ -158,11 +158,14 @@ multi-file walk + per-file results assembly".
 `grep` is a multi-file `occur`: walk a directory recursively with `read-dir`,
 read each text file with `read-file-content` (reusing its UTF-8/binary guard,
 BUG-56), run the proven substring match loop per file, and write
-`file:line:col: text` rows into a `*grep*` special buffer. A `*grep*`-local RET
-binding parses a row, opens the file, and jumps to the line/col; `n`/`N` step
-rows. The TS layer holds **only** the row→`{file,line,col}` mapping T-Lisp
-cannot re-derive from rendered text cheaply; everything else (walk, match, jump)
-is T-Lisp composing existing primitives, mirroring occur exactly.
+`file:line:col: text` rows into a `*grep*` special buffer. Result-navigation
+keys (RET to parse a row, open the file, and jump to the line/col; `n`/`N` to
+step rows) are bound via a **dedicated `grep` major mode** (`major-mode-register`
++ 4-arg `key-bind … major-mode`), NOT a global keymap with a buffer-current
+guard — see the Codex adversarial review below for why. The TS layer holds
+**only** the row→`{file,line,col}` mapping T-Lisp cannot re-derive from rendered
+text cheaply; everything else (walk, match, jump) is T-Lisp composing existing
+primitives, mirroring occur exactly.
 
 ### Relevant primitives that already exist (compose, do not reinvent)
 
@@ -194,7 +197,10 @@ is T-Lisp composing existing primitives, mirroring occur exactly.
   exporting `grep`, `grep-jump`, `grep-prompt`. Port `occur.tlisp`'s structure
   (header line, per-row insert, RET guarded jump, `SPC s p` / `SPC s g` prompt
   binding) but walk files via `read-dir` + `read-file-content` instead of
-  `search-find-all-matches` on the current buffer.
+  `search-find-all-matches` on the current buffer. **Register a `grep` major
+  mode** (`major-mode-register "grep" '() "fundamental"`), `(major-mode-set "grep")`
+  on entering `*grep*`, and scope RET/n/N with the 4-arg `key-bind … major-mode`
+  form instead of occur's global RET + buffer-current guard (see Codex review).
 - **Wire** `createGrepOps` as a contribution in `src/editor/tlisp-api.ts` next
   to the occur contribution (`tlisp-api.ts:1832-1841`), and add
   `(require-module editor/commands/grep)` to
@@ -212,11 +218,13 @@ is T-Lisp composing existing primitives, mirroring occur exactly.
    `search-find-all-matches` uses. Write rows into `*grep*` with
    `buffer-insert-at-position` and call `grep-row-set` per row so the index
    matches the rendered row.
-3. `grep-jump` (bound to RET, guarded by `(string= (buffer-current) (grep-buffer-name))`)
-   reads the row index from `(cursor-line)`, calls `grep-row-get`, opens the
-   file (`find-file`/`openFile` — see how `find-file.tlisp` opens a path), and
-   `jump-to-line`s to the recorded line. `n`/`N` move the cursor a row and
-   re-jump.
+3. `grep-jump` (bound to RET **in the `grep` major mode**, via the 4-arg
+   `key-bind` form, not globally) reads the row index from `(cursor-line)`, calls
+   `grep-row-get`, opens the file (`find-file`/`openFile` — see how
+   `find-file.tlisp` opens a path), and `jump-to-line`s to the recorded line.
+   `n`/`N` move the cursor a row and re-jump — also major-mode-scoped, since a
+   global `n`/`N` would steal isearch-next in every other buffer (see Codex
+   review).
 4. Subprocess `rg`/`grep` dispatch is an **optional** later optimization gated
    on availability; the primitive-based path is the portable default and keeps
    zero-external-dependencies intact.
@@ -433,11 +441,12 @@ Introduce a `DocNode` tree — minimally, group the existing flat
 `DOCUMENTATION_DATABASE` by `category` (root → category nodes → entry leaves),
 with optional `related` links as cross-references. A new `info` command opens an
 `*info*` special buffer rendering the current node (header + body + child list)
-and a buffer-local keymap implements `next` (next sibling), `prev` (previous
-sibling), `up` (parent), `Enter` (descend into the child under point / follow a
-related link). This is distinct from the **flat** `(documentation-list)` /
-`(documentation-search)` already shipped — those stay as quick lookup; `info`
-is the navigable manual.
+and the navigation keys (`next`/`prev`/`up`/`Enter`) are bound via a dedicated
+`info` major mode (`major-mode-register` + 4-arg `key-bind … major-mode`), NOT a
+buffer-local keymap — see the Codex adversarial review for why (a global n/p/u
+would steal normal-mode paragraph/search-next keys). This is distinct from the
+**flat** `(documentation-list)` / `(documentation-search)` already shipped —
+those stay as quick lookup; `info` is the navigable manual.
 
 ### Relevant primitives that already exist
 
@@ -463,9 +472,10 @@ is the navigable manual.
   `info-render-node` primitives plus a per-editor "current node" cursor (the one
   piece T-Lisp cannot re-derive cheaply). Mirrors `createOccurOps`.
 - **NEW `src/tlisp/core/commands/info.tlisp`** — `(info &optional node)` opens
-  `*info*` at the root (or named node), renders via `info-render-node`, and
-  binds `n`/`p`/`u`/`RET` in the `*info*` buffer (guarded like occur-jump's
-  buffer-current check).
+  `*info*` at the root (or named node), renders via `info-render-node`, and binds
+  `n`/`p`/`u`/`RET` via a **dedicated `info` major mode** (`major-mode-register`
+  + 4-arg `key-bind … major-mode` + `major-mode-set "info"` on entering `*info*`),
+  not a buffer-local keymap (see Codex review).
 - **Wire** `createInfoOps` next to `createDocumentationOps`
   (`tlisp-api.ts:519`) and add `(require-module editor/commands/info)` to
   `normal.tlisp`.
@@ -565,6 +575,28 @@ untouched — this is pure T-Lisp composing existing buffer primitives, exactly 
 - [ ] `tutorial` appears in `M-x` completion (docstring present).
 
 ---
+
+## Codex adversarial review (2026-08-06) — correction
+
+The grep and info sub-feature sketches above assume "buffer-local" key bindings
+for `*grep*`/`*info*` result navigation (n/N/hjkl/RET and n/p/u/RET). **That
+machinery does not exist in tmax.** Unlike `occur`'s RET — which is bound in the
+global normal keymap and is a near-no-op everywhere else — globally binding `n`,
+`N`, `p`, `u` for these buffers would **steal** real normal-mode keys (isearch
+next/prev `n`/`N`, paragraph motion) in every other buffer, and a
+`(buffer-current == *grep*)` guard inside the command does not help because the
+key is intercepted before its normal handler ever runs.
+
+**Corrected approach (applies to the grep and info sub-sections):** scope the
+result-navigation keys with a **dedicated major mode**, using the existing
+machinery — `(major-mode-register "grep" ...)` / `(major-mode-register "info" ...)`,
+`(major-mode-set "grep")` on entering the special buffer, and the 4-arg
+`(key-bind key command mode major-mode)` form (verified in
+`src/editor/editor.ts:458-511`, used by `markdown.tlisp`). This adds no new
+TS machinery; it reuses the major-mode-keymap dispatch path. The **global** key
+each command keeps is only its SPC-prefixed launcher (`SPC s p`/`SPC s g` for
+grep), never `n`/`N`/`RET`. The implementer should re-derive the exact per-major
+mode key set from the occur pattern rather than copying occur's global-RET guard.
 
 ## Implementation Plan
 

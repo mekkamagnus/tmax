@@ -51,6 +51,11 @@ No new helpers, no production changes. The fix is two single-argument additions 
 
 **Do not** "fix" this by altering the splash feature, the startup path (editor.ts:2909), or the insert-handler clear (insert-handler.ts:30) — those are intentional (ADR-0163) and out of scope for a stale-test catch-up.
 
+## Codex adversarial review (2026-08-06) — correction
+
+- **Codex flag (unverified):** claimed `insert-handler.tlisp` calls nonexistent `buffer-delete-line` — `rg buffer-delete-line src/` finds **no such call**, so the claim is UNVERIFIED (possibly erroneous). Verify before acting; **do not** treat as a confirmed fix.
+- The primary fix remains the splash-assertion update (or clear-the-splash test setup) described in the Implementation Plan above.
+
 ### Verification gate
 
 Run with `--timeout 4000` (per-test ms) to avoid the unrelated BUG-72 / issue #122 intermittent hang that can stall this file:

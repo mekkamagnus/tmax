@@ -137,11 +137,21 @@ explicit at the call site and avoids an implicit-flag overload of
    Return `name` (or `null` if the buffer is not live), matching `buryBuffer`'s
    return shape so the primitive's error path mirrors `buffer-bury`.
 
-2. **Thread it as an Editor-owned callback** in the EditorContext block at
-   `src/editor/editor.ts:421` (one line, next to `buryBuffer`):
-   ```ts
-   switchBufferSilent: (name: string) => editor.switchBufferSilent(name),
-   ```
+2. **Thread it through `EditorAPIContext`** (NOT the internal EditorContext at
+   `editor.ts:421`). The existing `buryBuffer` hook — the exact pattern to
+   mirror — is declared as an optional field on the `EditorAPIContext`
+   interface (`src/editor/runtime/editor-api-context.ts:139`), bound in the
+   `tlispState: EditorAPIContext` object assembled at `editor.ts:316`
+   (`buryBuffer: (name) => editor.buryBuffer(name)`), and passed into
+   `createBufferOps(...)` at `src/editor/tlisp-api.ts:154-166` (the
+   `ctx.buryBuffer` arg). Replicate all three for `switchBufferSilent`:
+   - Add `switchBufferSilent?: (name: string) => string | null` to
+     `EditorAPIContext` (next to `buryBuffer`).
+   - Bind it in the `editor.ts:316` `tlispState` object
+     (`switchBufferSilent: (name) => editor.switchBufferSilent(name)`).
+   - Pass `ctx.switchBufferSilent` as the trailing arg at the
+     `createBufferOps(...)` call in `tlisp-api.ts:154-166` (after
+     `ctx.buryBuffer`).
 
 3. **Add the `buffer-switch-silent` primitive** in
    `src/editor/api/buffer-ops.ts`. Mirror `buffer-bury` (lines 974-1036)
@@ -182,11 +192,13 @@ explicit at the call site and avoids an implicit-flag overload of
    - Direction semantics: `buffer-recency-list` is most-recent-first.
      `next-buffer` should go to the **next most recent** after the current
      (index `idx+1`); `previous-buffer` to the **previous most recent**
-     (index `idx-1`). Adjust the existing `mod` arithmetic accordingly — the
-     current `next-buffer` uses `(+ base (- len 1))` because insertion order is
-     oldest-first; recency order is newest-first, so this becomes
-     `(mod (+ idx 1) len)` for next and `(mod (- idx 1) len)` for previous
-     (T-Lisp `mod` already wraps negatives — verify against the interpreter).
+     (index `idx-1`). Recency order is newest-first, so the new formulas are
+     `(mod (+ idx 1) len)` for next and `(mod (+ idx (- len 1)) len)` for
+     previous. **Do NOT use `(mod (- idx 1) len)` for previous** — T-Lisp
+     `mod` is the raw JS `%` operator (see `src/tlisp/evaluator.ts:3918`),
+     which does NOT wrap negatives, so `(mod -1 3)` returns `-1` (verified),
+     not `2`; `(mod (- idx 1) len)` would break at `idx=0`. The `(+ idx
+     (- len 1))` form keeps the operand non-negative so `%` wraps correctly.
    - Keep the `(< idx 0)` fallback (current buffer filtered out / special) →
      start at index 0 for next, index `len-1` for previous.
    - Update the two docstrings: replace "stable buffer-list order" with
@@ -219,6 +231,38 @@ explicit at the call site and avoids an implicit-flag overload of
   wants a stable recency snapshot for display, it can be added later; SPEC-087
   does not require it.
 
+## Codex adversarial review (2026-08-06) — corrections
+
+Two factual errors in the proposed code/wiring, both fixed in place above:
+
+1. **`mod` does not wrap negatives — wrong reverse-cycle formula.** The spec
+   originally proposed `(mod (- idx 1) len)` for `previous-buffer` and hand-waved
+   "T-Lisp `mod` already wraps negatives." Verified against
+   `src/tlisp/evaluator.ts:3918`: `mod` is the raw JS `%` operator, so
+   `(mod -1 3)` returns `-1`, not `2`. At `idx=0` the formula yields `-1`
+   (out of range for `nth`) → `previous-buffer` from the most-recent buffer
+   breaks. Corrected to `(mod (+ idx (- len 1)) len)`, which keeps the operand
+   non-negative so `%` wraps correctly. An `idx=0` regression step was added
+   to the Test Plan.
+
+2. **Wiring goes through `EditorAPIContext` + `tlisp-api.ts`, not
+   `editor.ts:421`.** The spec conflated two context objects. `editor.ts:421`
+   is the internal `EditorContext` (where the `setCurrentBuffer` *setter* lives,
+   the one whose `touchBuffer` we work around) — it is NOT where `buryBuffer`
+   is threaded. The real `buryBuffer` path — the exact pattern to mirror — is:
+   `EditorAPIContext` interface (`editor-api-context.ts:139`) → bound in the
+   `tlispState` object at `editor.ts:316` → passed as `ctx.buryBuffer` to
+   `createBufferOps(...)` at `tlisp-api.ts:154-166`. Layer-1 step 2, the
+   Relevant Files list, and the new `createBufferOps` param were corrected to
+   this path.
+
+   **Carry-over obligation for the implementer:** adding `buffer-switch-silent`
+   raises the live primitive count from 366 → 367. Two inventory gates must be
+   updated in lockstep or the build will fail the registry test: append
+   `buffer-switch-silent` to `.chore44-baseline/api-names-static.txt`, and bump
+   the hardcoded `366` (lines 8, 37, 45 of
+   `test/unit/editor-api-registry.test.ts`) to `367`.
+
 ## Test Plan
 
 **Extend `tmax-use/playbooks/eval-24-next-previous-buffer.yaml`** (do not remove
@@ -237,6 +281,12 @@ existing steps — add a "sustained cycling" block after the current
   bump-on-switch bug. (Implement as 6 named steps with one `result_contains`
   each, matching the playbook's existing one-step-per-expect style.)
 - **Reverse sustained:** `(previous-buffer)` × 3 from C asserts `A, B, C`.
+- **idx=0 wrap regression (previous-buffer):** call `(previous-buffer)`
+  exactly once from the **most-recent** buffer (index 0 in
+  `buffer-recency-list`, e.g. C) and assert it lands on the **least-recent**
+  buffer (index `len-1`, i.e. A), not an error / not staying on C. This is the
+  case the original `(mod (- idx 1) len)` formula would have broken (T-Lisp
+  `(mod -1 3)` → `-1`, out of range for `nth`).
 - **Interactive bump preserved (regression guard):** after a
   `(switch-buffer)` / `(find-file)` to a non-current buffer, assert that
   buffer is now most-recent — e.g. `(buffer-recency-list)`'s first element
@@ -267,10 +317,17 @@ Read these before implementing (all paths verified against `275a9d5`):
   - Lines 342-357 — the `setCurrentBuffer` EditorContext callback; line 354 is
     the unconditional `touchBuffer(bufferName)` that this spec works around.
   - Lines 2807-2809 — `touchBuffer` (the recency bump).
-  - Lines 3073-3082 — `buryBuffer`, the **pattern to mirror** for
+  - Lines 3073-3082 — `buryBuffer`, the **method to mirror** for
     `switchBufferSilent` (Editor-owned recency mutator).
-  - Line 421 — where `buryBuffer` is threaded into the context; add
-    `switchBufferSilent` here.
+  - Line 316 — the `tlispState: EditorAPIContext` object where `buryBuffer` is
+    bound into the context; bind `switchBufferSilent` here (NOT line 421,
+    which is the internal EditorContext, a separate object).
+- **`src/editor/runtime/editor-api-context.ts`** — line 139 declares the
+  optional `buryBuffer` field; add `switchBufferSilent` here (this is the
+  interface the primitive layer reads).
+- **`src/editor/tlisp-api.ts`** — lines 154-166, the `createBufferOps(...)`
+  call site; pass `ctx.switchBufferSilent` as the trailing arg after
+  `ctx.buryBuffer`.
 - **`src/editor/api/buffer-ops.ts`**
   - Lines 43-52 — `createBufferOps` signature; add the `switchBufferSilent`
     optional param here (after `buryBuffer`).

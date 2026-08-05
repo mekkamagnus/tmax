@@ -26,27 +26,29 @@
 > **required command module** fails to load — instead of silent fallback — so a future `.tlisp`
 > parse error produces a clear start failure, not a cryptic `Undefined symbol` later. Plus a
 > regression test. Keep the keymap fallback (intentional resilience); only **required command
-> modules** should fail-loud. (Original title "tmax-use `evalReady` gate does not wait for
+> modules** should fail-loud. **[Superseded by the Codex adversarial review below — correction #1
+> makes `keymaps.tlisp` failure fatal too; there is no TS-level fallback dispatcher.]**
+> (Original title "tmax-use `evalReady` gate does not wait for
 > T-Lisp module load → intermittent Undefined symbol under load" retained here for search; the
 > fix no longer touches `evalReady`.)
 
 ## Goals
 
-- A `.tlisp` parse/load error in a **required command module** (`normal/insert/visual/command.tlisp`, plus the `require-module` chain they pull in — e.g. `editor/commands/find-file.tlisp`) produces a **clear, immediate daemon-start failure** naming the offending file + error — not a healthy-looking daemon that later returns `Undefined symbol: find-file` to the first eval client.
-- Preserve the **keymap** fallback (`FALLBACK_BINDINGS` in `binding-runtime.ts`) as intentional resilience for a degraded-but-usable editor — only **required command module** load failures fail loud.
+- A `.tlisp` parse/load error in a **required command module** (`normal/insert/visual/command.tlisp`, plus the `require-module` chain they pull in — e.g. `editor/commands/find-file.tlisp`) produces a **clear, immediate daemon-start failure** naming the **failing required module file** + error — not a healthy-looking daemon that later returns `Undefined symbol: find-file` to the first eval client. (Per Codex correction #2: the message names the module `loadCoreBindings` was loading — the transitive offending file is NOT guaranteed from `EvalError.message`.)
+- A **`keymaps.tlisp`** parse/load error is **also fatal** (Codex correction #1): normal-mode global dispatch depends on its T-Lisp functions and there is no TS-level fallback dispatcher, so a broken keymap must not silently degrade to dead keys. `FALLBACK_BINDINGS` is retained only as the constructor-time pre-load baseline, not as a `loadCoreBindings` recovery path.
 - Stop the silent `coreBindingsLoaded(true)` lie: the flag must only be set true when the required command modules actually loaded.
 - A regression test that injects a syntax error into a required binding and asserts the daemon start surfaces the error (not `Undefined symbol`).
 
 ## Completion Criteria (Definition of Done)
 
 - [ ] A required-command-module load failure (e.g. a `.tlisp` syntax error, a missing `require-module` target) causes `loadCoreBindings` to **return/throw** the error instead of `console.warn` + `loadFallbackBindings` + `setCoreBindingsLoaded(true)`.
-- [ ] `server.ts start()` (`startEditor` → `ensureCoreBindingsLoadedPublic`) propagates that failure so the daemon **does not reach `await startSocket()`** — i.e. the socket file never appears for a broken core binding, and the process exits non-zero with a message naming the file + parse error.
+- [ ] `server.ts start()` (`startEditor` → `ensureCoreBindingsLoadedPublic`) propagates that failure so the daemon **does not reach `await startSocket()`** — i.e. the socket file never appears for a broken core binding, and the process exits non-zero with a message naming the **failing required module file** (`loadCoreBindings` knows this from its loop) + captured error. (Per Codex correction #2: do NOT assert the *transitive* offending file from the `EvalError.message`; only the directly-loaded required module is guaranteed unless `module-loader.ts` is also changed.)
 - [ ] `coreBindingsLoaded` stays `false` after a failed required-module load (the lazy-load retry path can attempt again on the next keypress; it must not be marked satisfied).
-- [ ] The **keymap fallback** (`FALLBACK_BINDINGS`) is unchanged and still applies for the non-required / keymap-only degradation path (the `loadFallbackBindings` method and its `FALLBACK_BINDINGS` string are NOT removed).
-- [ ] Regression test: a required `.tlisp` with a deliberate syntax error → daemon start fails clearly with a message referencing the file (assertion: error message contains the file name and/or `parse`/`Syntax` — NOT `Undefined symbol`). Mirrors the existing `loadCoreBindings` test pattern in `test/unit/editor-runtime-delegation.test.ts:382`.
+- [ ] A **`keymaps.tlisp`** load failure is also FATAL (per Codex correction #1): it throws on the same path as a required-command-module failure, because normal-mode global dispatch depends on its T-Lisp functions and there is no TS-level fallback dispatcher. `loadFallbackBindings`/`FALLBACK_BINDINGS` is NOT removed — it stays as the constructor-time pre-load baseline (`editor.ts:295`) only, no longer as a `loadCoreBindings` recovery path.
+- [ ] Regression test: a required `.tlisp` with a deliberate syntax error → daemon start fails clearly with a message referencing the **failing required module file** (`loadCoreBindings`' own loop variable — e.g. `normal.tlisp`, NOT the transitive cause) and/or `parse`/`Syntax` — NOT `Undefined symbol`. Mirrors the existing `loadCoreBindings` test pattern in `test/unit/editor-runtime-delegation.test.ts:382`.
 - [ ] Existing `loadCoreBindings loads keymaps + 4 required files in order, then toggles line-numbers` test (`editor-runtime-delegation.test.ts:367`) still passes — the happy path is unchanged.
 - [ ] `bun run typecheck:src`, `bun run typecheck:test`, and `bun run typecheck` are clean.
-- [ ] `bun run test:tmax-use` passes (no new flakiness introduced — the keymap fallback path still works for the `--clean` / degraded cases the suite exercises).
+- [ ] `bun run test:tmax-use` passes (no new flakiness introduced; the `--clean` cases still start cleanly because the happy path loads `keymaps.tlisp` + required modules successfully).
 
 ## Root Cause (investigated 2026-08-03, re-scoped 2026-08-06)
 
@@ -97,6 +99,27 @@ where the socket is up but modules are not — so polling `find-file` in `evalRe
 correctness; it only converts the failure mode from `Undefined symbol` to a timeout, while
 leaving the swallowed-error root cause in place.
 
+## Codex adversarial review (2026-08-06) — correction
+
+1. **keymaps.tlisp load failure must be FATAL, not recoverable.** The plan treats the `keymaps.tlisp`
+   failure as an intentional resilience path (kept `try {} catch {}` + `loadFallbackBindings`). That
+   is unsound: normal-mode global key dispatch depends on the T-Lisp functions `keymaps.tlisp` defines,
+   and the TS-level global bindings do **not** serve as a fallback dispatcher for them. A missing/broken
+   `keymaps.tlisp` yields a silent "dead keys" editor, not "usable-but-bare". **Correction:** make
+   `keymaps.tlisp` load failure fatal too (same throw path as required command modules), rather than
+   silently swallowing it. The plan does NOT add a TS-level fallback dispatcher, so the "intentional
+   resilience" framing for keymaps is dropped — `loadFallbackBindings`/`FALLBACK_BINDINGS` remains only
+   as the constructor-time pre-load baseline (`editor.ts:295`), not as a `loadCoreBindings` recovery
+   path. (If a real TS-level fallback dispatcher is later added and tested, this can be revisited.)
+2. **The "transitive offending FILENAME" criterion cannot be guaranteed.** A top-level
+   `EvalError.message` from `interpreter.execute` does not reliably carry the *transitive* offending
+   file (e.g. the `.tlisp` a `require-module` pulled in). Only the directly-failing required module
+   file — the one `loadCoreBindings` iterated over — is known for sure. **Correction:** weaken the
+   filename criterion to "names the failing required module file" (the `.tlisp` `loadCoreBindings`
+   was trying to load, which IS known from the loop). Do NOT promise the transitive cause in the
+   error string unless `src/tlisp/module-loader.ts` is also changed to attach the source path (out of
+   scope here). The relevant Test Plan / Completion Criteria assertions are adjusted accordingly.
+
 ## Implementation Plan
 
 **Pattern to mirror:** `loadBindingsFromFile` already distinguishes "loaded" (`true`) from
@@ -115,9 +138,9 @@ exactly as it is today.
 ### Step 2 — Make a required-command-module failure fail loud
 **File:** `src/editor/runtime/binding-runtime.ts` (`loadCoreBindings`, 139-165)
 
-- When `!allLoaded` after the required-files loop, **throw** an `Error` whose message names the offending file(s) and includes the captured parse error from Step 1 — e.g. `throw new Error("Failed to load required core bindings: " + failures.join("; "))`. Move the `setCoreBindingsLoaded(true)` + `onCoreBindingsLoaded()` calls to **only** run on the all-loaded path (after the loop, guarded by `if (allLoaded)`).
-- **Keep `loadFallbackBindings()` for the keymap-degradation case only.** Decision point: the current `if (!allLoaded) { … loadFallbackBindings() }` block conflates "a required command module broke" (should fail) with "we want a usable-but-bare editor" (keymap fallback). Since a required-command-module failure now throws, the `loadFallbackBindings` call in this block is no longer reached for that case. Leave `loadFallbackBindings` (180-190) and its `FALLBACK_BINDINGS` string (56-79) **untouched** — it is still invoked from `Editor` construction (`editor.ts:295`) as the pre-load baseline keymap, which is the intentional resilience path.
-- The keymap `try { await this.loadBindingsFromFile(keymapsPath); } catch {}` (line 141-143) stays as-is — a keymap failure is NOT fatal (consistent with the keymap-fallback intent).
+- When `!allLoaded` after the required-files loop, **throw** an `Error` whose message names the **failing required module file(s)** from the loop (these ARE known to `loadCoreBindings`) and includes the captured parse error from Step 1 — e.g. `throw new Error("Failed to load required core bindings: " + failures.join("; "))`. Do NOT promise the *transitive* offending file in the message (correction #2 — `EvalError.message` does not reliably carry it). Move the `setCoreBindingsLoaded(true)` + `onCoreBindingsLoaded()` calls to **only** run on the all-loaded path (after the loop, guarded by `if (allLoaded)`).
+- **`loadFallbackBindings()` is no longer called from `loadCoreBindings`.** Decision point: the current `if (!allLoaded) { … loadFallbackBindings() }` block is removed entirely — both required-command-module failures AND `keymaps.tlisp` failures now throw (correction #1). Leave `loadFallbackBindings` (180-190) and its `FALLBACK_BINDINGS` string (56-79) **untouched** — it is still invoked from `Editor` construction (`editor.ts:295`) as the pre-load baseline keymap (the only remaining caller).
+- The keymap `try { await this.loadBindingsFromFile(keymapsPath); } catch {}` (line 141-143) is **changed to fail loud too** (per Codex correction #1): a `keymaps.tlisp` load failure now throws the same way a required-command-module failure does, because normal-mode global dispatch depends on its T-Lisp functions and there is no TS-level fallback dispatcher. Capture the keymap error message (Step 1 mechanism) and include it in the thrown error. `loadFallbackBindings`/`FALLBACK_BINDINGS` is NOT called from `loadCoreBindings` anymore; it remains only as the constructor-time pre-load baseline (`editor.ts:295`).
 
 ### Step 3 — Propagate the failure through `Editor` → `TmaxServer.start()`
 **Files:** `src/editor/editor.ts` (1689-1694, 1699-1704, 3143-3145), `src/server/server.ts` (915-944, 1055-1059)
@@ -137,29 +160,30 @@ exactly as it is today.
 
 - Add a test: seed the fake filesystem with a `normal.tlisp` whose content is invalid T-Lisp (e.g. `"(defun broken ("` — unbalanced paren), the other three required files valid, and assert `rt.loadCoreBindings(...)` **rejects** with an error whose message references `normal.tlisp` (and ideally the parse error). Mirror the `makeBinding` helper at line ~345 (it already lets each file's content drive `evalCode`; to force a parse failure, point `evalCode` at a real `Interpreter` OR have the fake `evalCode` return `Either.left` for the broken file's content — match the existing harness style).
 - Add a second assertion in the same test: `isCoreLoaded()` is `false` after the rejection (the flag must not be set on failure) — this proves the lazy-load guard can retry.
-- Keep the existing `loadCoreBindings falls back when a required file is missing` test (382-391) **green only if** its intent was "keymap fallback for missing file". Re-scope it: under the new contract, a *missing required* file fails loud (throws). If that test's expectation (`loadFallbackBindings` evaluated) conflicts with the new fail-loud contract, update the test to assert a **throw** instead, and add a separate test confirming `loadFallbackBindings` is still exercised by the **non-required** degradation path (e.g. a corrupt `keymaps.tlisp` only). Document the contract change in the test comment.
+- Keep the existing `loadCoreBindings falls back when a required file is missing` test (382-391) only as a **contract-change marker**: under the new contract a *missing required* file **throws** (correction #1 makes a corrupt/missing `keymaps.tlisp` throw too). Re-scope this test to assert a **throw** (and `isCoreLoaded() === false`), documenting the contract change in a comment. `loadFallbackBindings` is NOT exercised by `loadCoreBindings` under the new contract — its only remaining caller is the constructor-time baseline (`editor.ts:295`), which is covered by the existing happy-path test, not by a `loadCoreBindings` failure test.
 
 ### Verification (post-implementation)
 1. `bun run typecheck:src && bun run typecheck:test && bun run typecheck` — clean.
 2. `bun test test/unit/editor-runtime-delegation.test.ts` — new + existing `loadCoreBindings` tests pass.
 3. Manual regression: temporarily inject a stray `)` into `src/tlisp/core/bindings/normal.tlisp`, run `tmax` (or `bun src/main.ts`), confirm the daemon **fails to start** with a message naming `normal.tlisp`; revert.
-4. `bun run test:tmax-use` — green (the keymap fallback path the suite relies on is unchanged).
+4. `bun run test:tmax-use` — green (happy-path `--clean` starts still load `keymaps.tlisp` + required modules successfully, so the suite is unaffected).
 
 ## Test Plan
 
 | Test | File | Assertion |
 |---|---|---|
-| Required-command-module parse error fails loud (new) | `test/unit/editor-runtime-delegation.test.ts` | `await expect(rt.loadCoreBindings(...)).rejects.toThrow(/normal\.tlisp/)`; `isCoreLoaded() === false` |
-| Real error message preserved (new) | same | rejection message contains the underlying parse error text, not just `"Failed to load from"` |
+| Required-command-module parse error fails loud (new) | `test/unit/editor-runtime-delegation.test.ts` | `await expect(rt.loadCoreBindings(...)).rejects.toThrow(/normal\.tlisp/)` (the required module file `loadCoreBindings` iterated over — NOT the transitive cause); `isCoreLoaded() === false` |
+| Real error message preserved (new) | same | rejection message contains the underlying parse error text captured at the throw site, not just `"Failed to load from"` |
+| Keymaps.tlisp failure is fatal (new, Codex correction #1) | same | a broken `keymaps.tlisp` (valid required modules) → `loadCoreBindings(...)` rejects; normal-mode global dispatch is not left without its T-Lisp functions |
 | Happy path unchanged | `editor-runtime-delegation.test.ts:367` | keymap + 4 files evaluated in order; `isCoreLoaded() === true`; line-numbers toggled |
-| Keymap-fallback / missing-file contract (updated) | `editor-runtime-delegation.test.ts:382` | assert the NEW contract: missing required → throws; (optional) corrupt keymap-only → fallback keymap evaluated |
-| E2E regression (manual / tmax-use) | inject stray `)` in `normal.tlisp`, start daemon | daemon start fails with file-named message; no `Undefined symbol`; revert after |
+| Keymap-fallback / missing-file contract (updated) | `editor-runtime-delegation.test.ts:382` | assert the NEW contract: missing/corrupt required module → throws; corrupt `keymaps.tlisp` → also throws (correction #1). `loadFallbackBindings` is no longer reached from `loadCoreBindings`; its only remaining caller is the constructor-time baseline (`editor.ts:295`) |
+| E2E regression (manual / tmax-use) | inject stray `)` in `normal.tlisp`, start daemon | daemon start fails with a message naming the failing required module file; no `Undefined symbol`; revert after |
 
 ## Relevant Files
 
 Read these first — the implementation plan is grounded in them:
 
-- `src/editor/runtime/binding-runtime.ts` — the bug site. `loadCoreBindings` (139-165) swallows; `loadBindingsFromFile` (89-131) discards the real error; `loadFallbackBindings` (180-190) + `FALLBACK_BINDINGS` (56-79) are the **kept** keymap fallback; `REQUIRED_BINDING_FILES` (44-49) is the required-command-module list.
+- `src/editor/runtime/binding-runtime.ts` — the bug site. `loadCoreBindings` (139-165) swallows; `loadBindingsFromFile` (89-131) discards the real error; `loadFallbackBindings` (180-190) + `FALLBACK_BINDINGS` (56-79) are retained but **no longer called from `loadCoreBindings`** (only the constructor-time baseline at `editor.ts:295`); `REQUIRED_BINDING_FILES` (44-49) is the required-command-module list; `keymapsPath` is now fatal-on-failure too (correction #1).
 - `src/editor/editor.ts` — facades that propagate the rejection: `loadCoreBindings` (1689-1694), `ensureCoreBindingsLoaded` (1699-1704), `ensureCoreBindingsLoadedPublic` (3143-3145); `BindingRuntime` wiring (276-283); constructor-time `loadFallbackBindings()` baseline (295).
 - `src/server/server.ts` — `startEditor()` (915-944, calls `ensureCoreBindingsLoadedPublic` at 929), `start()` (1055-1059, sequential `startEditor` → `startSocket`).
 - `src/server/rpc/handlers/editing.ts` — `evalHandler` (137-183): the surface where `Undefined symbol` previously escaped; unchanged by this fix (no socket to connect to once start fails).
@@ -171,4 +195,4 @@ Read these first — the implementation plan is grounded in them:
 
 - **Priority:** low (downgraded from medium-high after re-scope). The observed flake (`find-file.tlisp` stray paren) is already fixed in `a448b70`; this is now a **diagnostic-enhancement / regression-prevention** chore, not a flakiness fix. It prevents the next required-binding parse error from manifesting as a cryptic `Undefined symbol` and converts it to a clear, immediate daemon-start failure.
 - **Contract change:** a missing/corrupt required command-module file now **fails daemon start** instead of degrading to a keymap-only editor. This is the intended behavior (a daemon with no `find-file`/`save-buffer` is not usable for any playbook) but is a behavior change — flag in the commit message.
-- **Not in scope:** the `moduleReady` gate / `evalReady` polling (original framing) — explicitly rejected by the verify-gate; do not re-add. The keymap fallback (`FALLBACK_BINDINGS`) is **kept** as the resilience path for keymap-only degradation.
+- **Not in scope:** the `moduleReady` gate / `evalReady` polling (original framing) — explicitly rejected by the verify-gate; do not re-add. `FALLBACK_BINDINGS` is kept only as the constructor-time pre-load baseline (`editor.ts:295`); per Codex correction #1 a `keymaps.tlisp` failure is now fatal, so there is no keymap-only degradation resilience path through `loadCoreBindings`. (Adding a real TS-level fallback dispatcher + tests would re-open that path — out of scope here.)

@@ -85,6 +85,21 @@ filter is loosened. It must be closed at the source.
 > read filter at `server.ts:294` (the filter is a useful defense-in-depth and
 > should be left in place).
 
+## Codex adversarial review (2026-08-06) — correction
+The original proposed code `path.join(manager.workspaceDir, 'last-workspace')`
+was **wrong**: it would nest the marker under the workspace dir, producing
+`~/.config/tmax/workspaces/last-workspace` in production — contradicting the
+required production path `~/.config/tmax/last-workspace`. The marker is not a
+symmetric child of the workspace dir. It is a **sibling** under the same env
+root, and the env root differs by case: production root is
+`~/.config/tmax` (the workspace dir's parent, because `defaultWorkspaceDir()`
+appends `workspaces`); sandbox root is `TMAX_WORKSPACE_DIR` itself (the manager
+uses the env var verbatim, no suffix). Derive the marker from the env root, not
+the workspace dir. Corrected scheme (and in-place edit above):
+- Production: `~/.config/tmax/last-workspace` (unchanged).
+- Sandbox: `$TMAX_WORKSPACE_DIR/last-workspace` (e.g. `/tmp/x-ws/last-workspace`).
+Both paths are now covered by the Test Plan (unit assertions for each branch).
+
 ## Implementation Plan
 The fix is a single-source-of-truth change to where the marker path is derived.
 Mirror the convention already established in `defaultWorkspaceDir()`
@@ -114,10 +129,24 @@ HOME-based config dir.
      (the manager is constructed with this exact path), marker =
      `/tmp/x-ws/last-workspace` — inside the sandbox.
    - Since the server constructs its `WorkspaceManager` with no arg
-     (`server.ts:159`), the manager resolves `TMAX_WORKSPACE_DIR` itself; read
-     the root back via the getter added in step 1 and compute
-     `path.join(manager.workspaceDir, 'last-workspace')` (the workspace dir and
-     the marker live side-by-side under it).
+     (`server.ts:159`), the manager resolves `TMAX_WORKSPACE_DIR` itself. The
+     marker is **not** a symmetric function of `manager.workspaceDir`: it is a
+     **sibling** of the workspace dir under a shared root, derived from the same
+     env root the manager uses. Concretely:
+     - Production (`TMAX_WORKSPACE_DIR` unset): the manager's root is
+       `~/.config/tmax`, the workspace dir is `~/.config/tmax/workspaces`, and
+       the marker is `~/.config/tmax/last-workspace` — the workspace dir's
+       parent. (So `path.dirname(manager.workspaceDir)` is correct here.)
+     - Sandboxed (`TMAX_WORKSPACE_DIR=/tmp/x-ws`): the manager's root **is**
+       the env dir itself (`/tmp/x-ws`); the workspace dir is `/tmp/x-ws`
+       (the manager uses `TMAX_WORKSPACE_DIR` verbatim, no `workspaces/`
+       suffix). The marker is `/tmp/x-ws/last-workspace` — a child of the env
+       dir, NOT `dirname` of the workspace dir (which would be `/tmp`).
+     - Therefore derive the marker from the **env root**, not from the
+       workspace dir: `const root = process.env.TMAX_WORKSPACE_DIR ?? path.join(HOME, '.config', 'tmax'); this.lastWorkspaceFile = path.join(root, 'last-workspace');`. (Production yields the
+       parent of `workspaces/` because `defaultWorkspaceDir()` appends
+       `workspaces` to that same root; sandbox yields the env dir directly
+       because the manager does not append the suffix there.)
    - Order matters: move the `lastWorkspaceFile` assignment to **after** the
      `this.workspaceManager = new WorkspaceManager();` line (`server.ts:159`)
      so the manager exists.

@@ -45,6 +45,13 @@ The `BindingEvaluator` is **synchronous** (`src/editor/runtime/binding-runtime.t
 
 **Corrected framing:** the original "together-only" framing is right but the *mechanism* is not "an unawaited daemon spawn" (neither test file spawns a daemon — both use `MockFileSystem`/`MockTerminal` via `createEditorFixture`). The mechanism is **cumulative synchronous T-Lisp evaluation load from N×`editor.start()` + N×sync `handleKey` dispatches**, which under 5-file batch contention pushes one test past the 120s inactivity gap. The investigation's "unawaited async / busy-wait" hypothesis is plausible-but-unconfirmed; profiling is the next concrete step (see Implementation Plan).
 
+## Codex adversarial review (2026-08-06) — correction
+
+- **The "synchronous-load / cross-editor memoization" root cause is a HYPOTHESIS, not confirmed.** The investigation cited no timing or active-handle evidence tying the stall to cumulative sync eval; it inferred the mechanism from a code read. Treat it as one candidate among several.
+- **The plan is now diagnostic-first.** Step 1 (isolated reproducer + per-test timing + active-handle/async-stack capture) must PRODUCE the named slow test AND evidence of *why* it stalls (event-loop block vs. unawaited promise vs. fixture lifecycle) BEFORE any fix is selected. Do not pre-commit to fix branch (A/B/C/D) from the code read alone.
+- **FORBIDDEN: any global "modules already loaded" memoization state** (e.g. a module-level flag that skips `ensureCoreBindingsLoaded` for the second editor). Each `editor.start()` loads into a **fresh per-editor interpreter**; a process-global memo would skip that load and silently break isolation. Per-instance memoization is the only admissible form if (A) is what profiling confirms.
+- **Drop the splash-loop hypothesis.** The insert-handler `(while ...)` splash-clear belongs to BUG-70 (splash); `vim-bindings-smoke` seeds `BUFFER` and does not hit the splash branch, so fix (B) is out of scope here. Do not cite it as a leading cause.
+
 ## Implementation Plan
 
 The plan is **profile-first, then fix at the source**. Do not raise timeouts to mask the slowness.
