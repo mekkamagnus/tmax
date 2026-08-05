@@ -46,7 +46,7 @@ import { TextBufferImpl } from '../core/buffer.ts';
 import type { TextBuffer } from '../core/contracts/buffer.ts';
 import type { EditorState } from '../core/contracts/editor.ts';
 import type { Frame, WorkspaceState } from '../core/contracts/workspace.ts';
-import { WorkspaceManager } from '../core/workspace.ts';
+import { WorkspaceManager, resolveLastWorkspaceFile } from '../core/workspace.ts';
 import { Either } from '../utils/task-either.ts';
 import { loadTrtFrameworkSync } from '../tlisp/trt/bootstrap.ts';
 import { cloneJsonValue } from '../tlisp/serialization.ts';
@@ -160,9 +160,7 @@ export class TmaxServer {
 	    this.autoSaveIntervalMs = Number(process.env.TMAX_WORKSPACE_AUTOSAVE_MS ?? 30_000);
 	    this.debounceSaveMs = Number(process.env.TMAX_WORKSPACE_DEBOUNCE_MS ?? 5_000);
 	    this.maxDirtyIntervalMs = Number(process.env.TMAX_WORKSPACE_MAX_DIRTY_MS ?? 120_000);
-	    this.lastWorkspaceFile = path.join(
-      process.env.HOME ?? '.', '.config', 'tmax', 'last-workspace'
-    );
+	    this.lastWorkspaceFile = resolveLastWorkspaceFile();
 
     if (editor) {
       // Embedded mode: reuse an existing Editor instance

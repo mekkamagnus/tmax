@@ -318,8 +318,13 @@ test("connect-frame with explicit workspace persists last-workspace", async () =
     const frame = await connectFrame(socketPath, "remember_me");
     frameSockets.push(frame.socket);
 
-    const lastWorkspace = await readFile(join(homeDir, ".config", "tmax", "last-workspace"), "utf8");
+    // BUG-73: the last-workspace marker honors TMAX_WORKSPACE_DIR (sandboxed to
+    // workspaceDir in beforeEach), so the explicit-workspace connect writes it
+    // under the isolated dir — NOT the real HOME config (~/.config/tmax/...).
+    const lastWorkspace = await readFile(join(workspaceDir, "last-workspace"), "utf8");
     expect(lastWorkspace.trim()).toBe("remember_me");
+    // Hermeticity: the real HOME config path is never created.
+    await expect(readFile(join(homeDir, ".config", "tmax", "last-workspace"), "utf8")).rejects.toThrow();
   } finally {
     for (const socket of frameSockets) socket.destroy();
     await server.shutdown();

@@ -43,6 +43,28 @@ function defaultWorkspaceDir(): string {
 }
 
 /**
+ * Resolve the last-workspace marker file path.
+ *
+ * Mirrors {@link defaultWorkspaceDir}'s sandbox convention (honors
+ * `TMAX_WORKSPACE_DIR`), but the marker is a SIBLING of the workspace dir under
+ * the same env root, not a child of it:
+ * - Production (`TMAX_WORKSPACE_DIR` unset): root is `~/.config/tmax`, so the
+ *   marker is `~/.config/tmax/last-workspace` (the workspace dir's parent —
+ *   `defaultWorkspaceDir` appends `workspaces`).
+ * - Sandboxed (`TMAX_WORKSPACE_DIR=/tmp/x-ws`): the manager uses the env dir
+ *   verbatim (no `workspaces/` suffix), so the marker is `/tmp/x-ws/last-workspace`.
+ *
+ * Parameterized for hermetic unit testing (defaults to `process.env`).
+ * (BUG-73: previously hardcoded to `process.env.HOME`, bypassing the sandbox.)
+ */
+export function resolveLastWorkspaceFile(
+  env: Readonly<Record<string, string | undefined>> = process.env,
+): string {
+  const root = env.TMAX_WORKSPACE_DIR ?? path.join(env.HOME ?? '.', '.config', 'tmax');
+  return path.join(root, 'last-workspace');
+}
+
+/**
  * Maximum workspace file size (10MB) to prevent corruption from malformed files
  */
 const MAX_WORKSPACE_FILE_SIZE = 10 * 1024 * 1024;
