@@ -73,9 +73,6 @@ const FALLBACK_BINDINGS = `
         (key-bind "Escape" "(minibuffer-dispatch-key \\"Escape\\")" "mx")
         (key-bind "C-g" "(minibuffer-dispatch-key \\"C-g\\")" "mx")
         (key-bind "Enter" "(minibuffer-dispatch-key \\"Enter\\")" "mx")
-
-        ;; Window management bindings (SPEC-004)
-        (key-bind "C-w" "(editor-window-prefix)" "normal")
       `;
 
 export class BindingRuntime {

@@ -89,6 +89,19 @@ describe('parseKeys — control keys', () => {
   test('<C-z> compiles to 0x1a', () => {
     expect(compile('<C-z>')).toEqual(['\x1a']);
   });
+
+  // BUG-59 contract: a C-w chord MUST be authored in the angle-bracket form so
+  // the leading C-w compiles to the \x17 control byte. A bare "C-w s" (no
+  // brackets) tokenizes to five literal characters and silently leaks into the
+  // buffer — the misdiagnosis behind BUG-59. Pin both forms so a future bare
+  // playbook step fails with a clear diff.
+  test('<C-w>s chord compiles to control byte + letter (BUG-59)', () => {
+    expect(compile('<C-w>s')).toEqual(['\x17', 's']);
+  });
+
+  test('bare "C-w s" (no angle brackets) compiles to literal chars, not a chord (BUG-59 negative)', () => {
+    expect(compile('C-w s')).toEqual(['C', '-', 'w', ' ', 's']);
+  });
 });
 
 describe('parseKeys — meta keys', () => {

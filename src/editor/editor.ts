@@ -115,7 +115,6 @@ export class Editor {
   // the constructor (needs `this.getRuntime` + `this.applyUpdate`).
   private commandRuntime!: CommandRuntime;
   spacePressed: boolean = false;  // Track space key for SPC ; sequence (US-1.10.1)
-  private windowPrefixPressed: boolean = false;  // Track C-w prefix for window commands (SPEC-004)
   private lspClient: LSPClient;  // LSP client for language server integration (US-3.1.1)
   keymapSync: KeymapSync;  // Bridge layer for T-Lisp keymap integration (US-0.4.1)
   private currentInitFile: string = '';  // Path to current init file (SPEC-025)
@@ -1182,16 +1181,6 @@ export class Editor {
       if (args.length !== 0) throw new Error("editor-reset-space-prefix requires no arguments");
       this.spacePressed = false;
       return createNil();
-    });
-
-    // Window prefix handler: C-w waits for next key (s/v/w/q)
-    defineRaw("editor-window-prefix", (args) => {
-      if (args.length !== 0) {
-        throw new Error("editor-window-prefix requires no arguments");
-      }
-      this.windowPrefixPressed = true;
-      this.applyUpdate({ type: "SetStatusMessage", message: "C-w" });
-      return createString("window-prefix");
     });
 
     // Which-key API functions (US-1.10.3)

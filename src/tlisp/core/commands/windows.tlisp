@@ -41,8 +41,10 @@ window exists. SPEC-084. SPEC-067: bound under the C-w window prefix
 (C-w =), not C-x."
   (window-balance))
 
-;; Key bindings: C-w prefix for window commands
-(key-bind "C-w" "(editor-window-prefix)" "normal")
+;; C-w is a which-key PREFIX only (never a terminal command). The chord
+;; bindings here (C-w =) and in motions.tlisp (C-w s/v/w/q/+/-/>/<) make C-w
+;; a prefix, so a bare (key-bind "C-w" ...) would be dead weight — the prefix
+;; path (normal-handler.ts) intercepts C-w before binding lookup. See BUG-59.
 ;; SPEC-084: C-w = rebalances pane sizes (extends the C-w prefix; no C-x binding)
 (key-bind "C-w =" "(balance-windows)" "normal")
 )
