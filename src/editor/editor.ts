@@ -418,6 +418,7 @@ export class Editor {
       killBuffer: (name: string) => editor.killBuffer(name),
       renameBuffer: (newName: string) => editor.renameBuffer(newName),
       buryBuffer: (name: string) => editor.buryBuffer(name),
+      switchBufferSilent: (name: string) => editor.switchBufferSilent(name),
       getMessageLog: () => editor.logging.getMessageLog(),
       getUnifiedLog: () => editor.logging.getUnifiedLog(),
       logMessage: (msg: string, level?: string, command?: string, frameId?: string) => editor.logMessage(msg, (level as LogLevel) ?? 'info', command, frameId),
@@ -3072,6 +3073,42 @@ export class Editor {
     }
     if (!Number.isFinite(minRecency)) minRecency = 0;
     this.updateBufferMetadata(name, { recency: minRecency - 1 });
+    return name;
+  }
+
+  /**
+   * Switch to NAME as the current buffer WITHOUT bumping its recency — the
+   * non-self-bumping switch path for deterministic buffer cycling (SPEC-087).
+   * Mirrors `setCurrentBuffer`'s side effects (current buffer + filename + tab
+   * + window sync) EXCEPT it does not call `touchBuffer`, so a
+   * `next-buffer`/`previous-buffer` rotation does not perturb the recency order
+   * it is iterating over. Returns NAME, or null if NAME is not a live buffer.
+   */
+  switchBufferSilent(name: string): string | null {
+    const buffer = this.buffers.get(name);
+    if (!buffer) return null;
+    if (this.model.tabs && this.model.tabs.length > 0) {
+      const currentTabIndex = this.model.currentTabIndex ?? 0;
+      const currentTab = this.model.tabs[currentTabIndex];
+      if (currentTab && currentTab.label === this.model.currentFilename) {
+        this.applyUpdate({
+          type: "SetTabs",
+          tabs: this.model.tabs.map((tab, index) =>
+            index === currentTabIndex ? { ...tab, buffer, bufferName: name } : tab
+          ),
+        });
+      }
+    }
+    const windows = this.model.windows;
+    if (windows && windows.length > 0) {
+      const currentWindow = windows[this.model.currentWindowIndex ?? 0];
+      if (currentWindow) {
+        currentWindow.buffer = buffer;
+        currentWindow.bufferName = name;
+      }
+    }
+    this.applyUpdate({ type: "SetCurrentBuffer", buffer });
+    this.applyUpdate({ type: "SetCurrentFilename", filename: this.bufferMetadata.get(name)?.filename });
     return name;
   }
 

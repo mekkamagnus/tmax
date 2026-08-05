@@ -10,6 +10,8 @@
 > - The spec's recency helpers (`buffer-recency-list`, `buffer-detail-name`) are kept in the module but the cycle itself does not use them.
 >
 > A future fix would add a non-self-bumping recency primitive (or snapshot recency once per rotation) so the original "true recency" intent can be restored; until then insertion-order is the correct, deterministic behavior. This supersedes the recency/specials wording in Goals, Completion Criteria, and Solution below.
+>
+> ✅ **Resolved by SPEC-087 (2026-08-06):** the non-self-bumping primitive shipped — `next-buffer`/`previous-buffer` now cycle **true recency** (most-recent-first, non-special) via the new `buffer-switch-silent` primitive (`src/editor/api/buffer-ops.ts`) + `Editor.switchBufferSilent` (no `touchBuffer`), so the rotation no longer perturbs the recency order it iterates. `eval-24` is extended with sustained-cycling (B,A,C,B,A,C), an idx=0 wrap regression, and an interactive-bump-preserved guard. The insertion-order `buffer-rotation-list` is retained (superseded comment in `buffers.tlisp`).
 
 ## Goals
 

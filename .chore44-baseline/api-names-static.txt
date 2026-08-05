@@ -52,6 +52,7 @@ buffer-set-line-indent
 buffer-set-read-only
 buffer-sexp-before-point
 buffer-switch
+buffer-switch-silent
 buffer-text
 cache-get
 cache-load

@@ -48,7 +48,8 @@ export function createBufferOps(
   readonlyBuffers?: Set<string>,
   killBuffer?: (name: string) => string | null,
   renameBuffer?: (newName: string) => string | null,
-  buryBuffer?: (name: string) => string | null
+  buryBuffer?: (name: string) => string | null,
+  switchBufferSilent?: (name: string) => string | null
 ): Map<string, TLispFunctionImpl> {
   // CHORE-39 Phase 4: cursor/buffer/filename/modified reads flow through the
   // State monad against EditorModel; writes stay on the supplied setters to
@@ -1033,6 +1034,52 @@ export function createBufferOps(
       ));
     }
     return Either.right(createString(buried));
+  });
+
+  // SPEC-087: buffer-switch-silent — switch to NAME as the current buffer
+  // WITHOUT bumping its recency, so next-buffer/previous-buffer can cycle a
+  // recency-sorted list deterministically (no C→B→C→B ping-pong). The no-bump
+  // contract lives in Editor (setCurrentBuffer always touches), so this
+  // primitive REQUIRES the switchBufferSilent hook — there is no correct local
+  // fallback.
+  api.set("buffer-switch-silent", (args: TLispValue[]): Either<AppError, TLispValue> => {
+    const argsValidation = validateArgsCount(args, 1, "buffer-switch-silent");
+    if (Either.isLeft(argsValidation)) {
+      return Either.left(argsValidation.left);
+    }
+
+    const nameArg = args[0]!;
+    const typeValidation = validateArgType(nameArg, "string", 0, "buffer-switch-silent");
+    if (Either.isLeft(typeValidation)) {
+      return Either.left(typeValidation.left);
+    }
+    const name = nameArg.value as string;
+
+    if (!buffers.has(name)) {
+      return Either.left(createBufferError(
+        'InvalidOperation',
+        `buffer-switch-silent: buffer "${name}" not found`
+      ));
+    }
+
+    if (!switchBufferSilent) {
+      return Either.left(createValidationError(
+        'ConstraintViolation',
+        'buffer-switch-silent: silent-switch hook not available (requires Editor-owned switchBufferSilent)',
+        'switchBufferSilent',
+        undefined,
+        'function'
+      ));
+    }
+
+    const switched = switchBufferSilent(name);
+    if (switched === null) {
+      return Either.left(createBufferError(
+        'InvalidOperation',
+        `buffer-switch-silent: buffer "${name}" not found`
+      ));
+    }
+    return Either.right(createString(switched));
   });
 
   return api;

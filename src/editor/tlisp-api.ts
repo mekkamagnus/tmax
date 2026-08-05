@@ -163,6 +163,7 @@ function buildEditorAPIContributions(): readonly EditorAPIContribution[] {
           ctx.killBuffer,
           ctx.renameBuffer,
           ctx.buryBuffer,
+          ctx.switchBufferSilent,
         );
         // Alias: buffer-get-line → buffer-line. Pre-refactor this was
         // `api.set('buffer-get-line', api.get('buffer-line')!)` registered

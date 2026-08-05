@@ -1,5 +1,5 @@
 (defmodule editor/commands/buffers
-  (export buffer-detail-more-recent-p buffer-detail-candidate buffer-detail-name buffer-completion-table buffer-recency-list buffer-index-of buffer-special-p buffer-rotation-list switch-buffer-accept switch-buffer buffer-name current-buffer-name switch-to-buffer open-file revert-buffer next-buffer previous-buffer kill-buffer-yes-no-table kill-buffer-save-accept kill-buffer rename-buffer-interactive rename-buffer bury-buffer)
+  (export buffer-detail-more-recent-p buffer-detail-candidate buffer-detail-name buffer-completion-table buffer-recency-list buffer-recency-rotation buffer-index-of buffer-special-p buffer-rotation-list switch-buffer-accept switch-buffer buffer-name current-buffer-name switch-to-buffer open-file revert-buffer next-buffer previous-buffer kill-buffer-yes-no-table kill-buffer-save-accept kill-buffer rename-buffer-interactive rename-buffer bury-buffer)
 
 ;; buffers.tlisp --- Interactive buffer completion
 
@@ -31,6 +31,14 @@
   (mapcar "buffer-detail-name"
     (stable-sort "buffer-detail-more-recent-p" (buffer-list-details))))
 
+(defun buffer-recency-rotation ()
+  "Live NON-SPECIAL buffer names in recency (most-recent-first) order.
+The rotation source for `next-buffer' / `previous-buffer' (SPEC-087):
+`buffer-recency-list' includes special buffers (*scratch*, *Messages*, …),
+but the cycle must visit only file buffers, so filter them out (mirrors
+`buffer-rotation-list''s filter over `buffer-list')."
+  (filter (lambda (name) (not (buffer-special-p name))) (buffer-recency-list)))
+
 (defun buffer-index-of (name list)
   "Return the 0-based index of NAME in LIST, or -1 when absent.
 Derived from `member', which returns the tail sublist starting at the match."
@@ -47,11 +55,12 @@ e.g. *scratch*, *Messages*, *daemon*."
 
 (defun buffer-rotation-list ()
   "Live non-special buffers in stable buffer-list (insertion) order.
-Used by `next-buffer' / `previous-buffer' so the cycle is deterministic:
-`buffer-switch' bumps recency on every call, so a recency-sorted list
-recomputed each call would ping-pong between the two most-recent buffers
-and never visit the rest. `buffer-list' (Map insertion order) is stable
-across switches and gives a true cycle."
+SUPERSEDED for `next-buffer' / `previous-buffer' by SPEC-087 (those now cycle
+`buffer-recency-list' via `buffer-switch-silent'). Kept here for any external
+caller of the stable insertion-order list; do not delete (CLAUDE.md §3).
+Historically: `buffer-switch' bumps recency on every call, so a recency-sorted
+list recomputed each call would ping-pong between the two most-recent buffers
+— the silent-switch path removed that constraint."
   (filter (lambda (name) (not (buffer-special-p name))) (buffer-list)))
 
 (defun switch-buffer-accept (name)
@@ -98,33 +107,38 @@ across switches and gives a true cycle."
       (message "Buffer has no associated file"))))
 
 (defun next-buffer ()
-  "Switch to the next buffer in the rotation, wrapping past the end.
-Cycles non-special buffers in stable buffer-list order (newest-inserted
-first, mirroring the recency order a freshly-opened set would have). Bound
-to SPC x n."
-  (let* ((list (buffer-rotation-list))
+  "Switch to the next-most-recent buffer, wrapping past the most-recent.
+Cycles non-special buffers in RECENCY order (most-recent-first; the same
+order `buffer-completion-table' uses) via `buffer-switch-silent', so the
+rotation does not perturb the recency order it is iterating over (SPEC-087).
+Bound to SPC x n."
+  (let* ((list (buffer-recency-rotation))
          (len (length list)))
     (if (<= len 1)
       (buffer-current)
       (let* ((idx (buffer-index-of (buffer-current) list))
              ;; If the current buffer is special (filtered out) it is absent:
-             ;; start the rotation from the newest-inserted file buffer.
-             (base (if (< idx 0) (- len 1) idx))
-             (next (mod (+ base (- len 1)) len)))
-        (buffer-switch (nth next list))))))
+             ;; start from the most-recent buffer (index 0).
+             (base (if (< idx 0) 0 idx))
+             (next (mod (+ base 1) len)))
+        (buffer-switch-silent (nth next list))))))
 
 (defun previous-buffer ()
-  "Switch to the previous buffer in the rotation, wrapping past the start.
-Cycles non-special buffers in stable buffer-list order (oldest-inserted
-direction). Bound to SPC x p."
-  (let* ((list (buffer-rotation-list))
+  "Switch to the previous-most-recent buffer, wrapping past the least-recent.
+Cycles non-special buffers in RECENCY order (most-recent-first) in the
+less-recent direction via `buffer-switch-silent' (SPEC-087). Bound to SPC x p."
+  (let* ((list (buffer-recency-rotation))
          (len (length list)))
     (if (<= len 1)
       (buffer-current)
       (let* ((idx (buffer-index-of (buffer-current) list))
-             (base (if (< idx 0) 0 idx))
-             (prev (mod (+ base 1) len)))
-        (buffer-switch (nth prev list))))))
+             ;; If the current buffer is special (filtered out) it is absent:
+             ;; start from the least-recent buffer (index len-1).
+             (base (if (< idx 0) (- len 1) idx))
+             ;; T-Lisp `mod` is raw JS `%` (does not wrap negatives), so add
+             ;; len-1 (not -1) to keep the operand non-negative at idx=0.
+             (prev (mod (+ base (- len 1)) len)))
+        (buffer-switch-silent (nth prev list))))))
 
 ;; SPEC-071: kill-buffer — close a buffer with a save-on-kill gate.
 ;;

@@ -126,4 +126,53 @@ steps:
     expect:
       result_contains: "true"
 
+  # --- SPEC-087: sustained cycling is deterministic (no C->B->C->B ping-pong).
+  #     State here: current C, recency [C,B,A] (every switch above was silent).
+  #     next-buffer x6 from C must yield B,A,C,B,A,C — visiting every buffer
+  #     once per full rotation before repeating. ---
+  - name: sustained next-buffer (1/6) -> B
+    eval: '(next-buffer)'
+    expect:
+      result_contains: "eval-24-b.txt"
+  - name: sustained next-buffer (2/6) -> A
+    eval: '(next-buffer)'
+    expect:
+      result_contains: "eval-24-a.txt"
+  - name: sustained next-buffer (3/6) -> C
+    eval: '(next-buffer)'
+    expect:
+      result_contains: "eval-24-c.txt"
+  - name: sustained next-buffer (4/6) -> B
+    eval: '(next-buffer)'
+    expect:
+      result_contains: "eval-24-b.txt"
+  - name: sustained next-buffer (5/6) -> A
+    eval: '(next-buffer)'
+    expect:
+      result_contains: "eval-24-a.txt"
+  - name: sustained next-buffer (6/6) -> C
+    eval: '(next-buffer)'
+    expect:
+      result_contains: "eval-24-c.txt"
+
+  # --- SPEC-087 idx=0 wrap: previous-buffer from the MOST-recent buffer (C,
+  #     index 0 in [C,B,A]) lands on the LEAST-recent (A), not an error. This
+  #     is the case (mod (- idx 1) len) would have broken (T-Lisp mod = JS %). ---
+  - name: previous-buffer from most-recent C wraps to least-recent A
+    eval: '(previous-buffer)'
+    expect:
+      result_contains: "eval-24-a.txt"
+
+  # --- SPEC-087 interactive bump preserved: the silent path did NOT leak into
+  #     the interactive path — find-file still bumps recency, so B becomes the
+  #     most-recent non-special buffer. ---
+  - name: find-file B bumps it to most-recent
+    eval: '(find-file "${FILE_B}")'
+    expect:
+      buffer_contains: "buffer B content"
+  - name: B is now the most-recent non-special buffer
+    eval: '(car (buffer-recency-rotation))'
+    expect:
+      result_contains: "eval-24-b.txt"
+
 cleanup: true

@@ -137,6 +137,8 @@ export interface EditorAPIContext {
   killBuffer?: (name: string) => string | null;
   renameBuffer?: (newName: string) => string | null;
   buryBuffer?: (name: string) => string | null;
+  /** Non-bumping switch for deterministic buffer cycling (SPEC-087). */
+  switchBufferSilent?: (name: string) => string | null;
   /** Logging surface for the *Messages* buffer (SPEC-055). */
   logMessage?: (msg: string, level?: string, command?: string, frameId?: string) => void;
   setEchoOnly?: (text: string) => void;

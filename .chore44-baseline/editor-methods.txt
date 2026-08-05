@@ -5,6 +5,7 @@ applyWorkspace
 associateBufferFilename
 attachFileBuffer
 buryBuffer
+switchBufferSilent
 classifyCommand
 clearModifiedFlags
 clearSelection
