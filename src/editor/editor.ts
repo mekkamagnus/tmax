@@ -2904,8 +2904,13 @@ export class Editor {
    */
   showSplashIfEmpty(): void {
     // Only show splash if *scratch* is the current buffer — don't hijack
-    // a file the user explicitly opened.
+    // a file the user explicitly opened, and don't clobber a restored
+    // name-only buffer (no filename) that owns the current window (BUG-65:
+    // after a daemon restart a window can hold a durable buffer like
+    // durable.ts; currentFilename is unset so the file guard alone misses it).
     if (this.model.currentFilename) return;
+    const currentWindow = this.model.windows?.[this.model.currentWindowIndex ?? 0];
+    if (currentWindow && currentWindow.bufferName !== "*scratch*") return;
     const scratch = this.buffers.get("*scratch*");
     if (scratch) {
       const content = scratch.getContent();
