@@ -21,14 +21,18 @@ async function press(editor: Editor, keys: string): Promise<void> {
 
 describe("SPEC-005 Vim dispatcher", () => {
   test("starts without a file with a usable scratch buffer", async () => {
-    const editor = await createStartedEditor();
+    // Seed a clean buffer (BUG-70): the default *scratch* now carries the splash
+    // screen (ADR-0163), so pass "" to supplant it with an empty "test" buffer.
+    const editor = await createStartedEditor("");
 
     expect(editor.getState().currentBuffer).toBeDefined();
     expect(bufferText(editor)).toBe("");
   });
 
   test("handles insert-mode Enter, Backspace, and Tab through editor input", async () => {
-    const editor = await createStartedEditor();
+    // Seed a clean buffer (BUG-70): run the insert sequence against an empty
+    // "test" buffer, not the splash *scratch*, so the toBe("a\n\t") holds.
+    const editor = await createStartedEditor("");
 
     await editor.handleKey("i");
     await editor.handleKey("a");
