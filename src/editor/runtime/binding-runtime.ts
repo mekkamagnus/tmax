@@ -79,11 +79,20 @@ export class BindingRuntime {
   constructor(private readonly deps: BindingRuntimeDeps) {}
 
   /**
+   * Most recent binding-load failure message (set by `loadBindingsFromFile` on
+   * any false return, cleared at the start of each call). Read by
+   * `loadCoreBindings` to surface the real parse error in its thrown error
+   * (BUG-60) instead of a generic "Failed to load from <path>".
+   */
+  private lastBindingError: string | undefined;
+
+  /**
    * Load + evaluate a T-Lisp binding file. Returns true on success, false on
    * failure (logged unless `silent`). Falls back to the real filesystem if the
    * injected `FileSystem` cannot read the path.
    */
   async loadBindingsFromFile(path: string, silent = false): Promise<boolean> {
+    this.lastBindingError = undefined;
     const executeContent = (content: string): boolean => {
       const result = this.deps.evalCode(content);
       if (Either.isLeft(result)) {
@@ -113,6 +122,7 @@ export class BindingRuntime {
         }
       } catch (realError) {
         const realMessage = realError instanceof Error ? realError.message : String(realError);
+        this.lastBindingError = realMessage;
         if (!silent) {
           console.warn(`Failed to load bindings from ${path}: ${realMessage}`);
         }
@@ -120,6 +130,7 @@ export class BindingRuntime {
       }
 
       const errorMessage = error instanceof Error ? error.message : String(error);
+      this.lastBindingError = errorMessage;
       if (!silent) {
         console.warn(`Failed to load bindings from ${path}: ${errorMessage}`);
       }
@@ -129,32 +140,35 @@ export class BindingRuntime {
 
   /**
    * Load core key bindings: keymaps.tlisp first (SPEC-038), then the four
-   * required mode files. On any failure, log + load the minimal fallback
-   * keymap. After success, flip the core-bindings-loaded flag and enable the
-   * global line-numbers minor mode.
+   * required mode files. A failure of ANY of these is FATAL (BUG-60): a
+   * daemon with a broken keymap or a missing command module is unusable (dead
+   * keys / `Undefined symbol`), so the load throws — propagating through
+   * `startEditor` → `server.start()` → a non-zero daemon exit that names the
+   * failing required file — instead of silently degrading to the fallback
+   * keymap and lying that core bindings loaded. The minimal fallback keymap
+   * (`loadFallbackBindings`) remains only as the constructor-time pre-load
+   * baseline (`editor.ts`), not a recovery path here. After success, flip the
+   * core-bindings-loaded flag and enable the global line-numbers minor mode.
    */
   async loadCoreBindings(coreBindingsDir: string, keymapsPath: string): Promise<void> {
-    // Load unified keymap module before bindings (SPEC-038)
-    try {
-      await this.loadBindingsFromFile(keymapsPath);
-    } catch {}
-
-    let allLoaded = true;
-    let lastError = "";
+    // Load unified keymap module before bindings (SPEC-038). Fatal on failure
+    // (Codex correction #1): normal-mode global dispatch depends on its T-Lisp
+    // functions and there is no TS-level fallback dispatcher.
+    const keymapLoaded = await this.loadBindingsFromFile(keymapsPath);
+    if (!keymapLoaded) {
+      throw new Error(
+        `Failed to load required keymap ${keymapsPath}${this.lastBindingError ? `: ${this.lastBindingError}` : ""}`,
+      );
+    }
 
     for (const file of REQUIRED_BINDING_FILES) {
       const path = `${coreBindingsDir}/${file}`;
       const loaded = await this.loadBindingsFromFile(path);
       if (!loaded) {
-        allLoaded = false;
-        lastError = `Failed to load from ${path}`;
+        throw new Error(
+          `Failed to load required core binding ${path}${this.lastBindingError ? `: ${this.lastBindingError}` : ""}`,
+        );
       }
-    }
-
-    if (!allLoaded) {
-      console.warn(`Failed to load some core bindings. Last error: ${lastError}`);
-      console.warn("Loading minimal fallback key bindings...");
-      this.loadFallbackBindings();
     }
 
     this.deps.setCoreBindingsLoaded(true);

@@ -340,7 +340,10 @@ describe("CHORE-44 Change 3 — CommandRuntime collaborator", () => {
 
 // ── BindingRuntime policy (AC3.6) ────────────────────────────────────
 describe("CHORE-44 Change 3 — BindingRuntime policy (core/fallback/init)", () => {
-  function makeBinding(files: Record<string, string>) {
+  function makeBinding(
+    files: Record<string, string>,
+    opts?: { failOn?: (code: string) => string | null },
+  ) {
     const fs = new MockFileSystem();
     for (const [path, content] of Object.entries(files)) {
       fs.files.set(path, content);
@@ -351,6 +354,14 @@ describe("CHORE-44 Change 3 — BindingRuntime policy (core/fallback/init)", () 
     let statusMessage = "";
     const evalCode: BindingEvaluator = (code) => {
       evaluated.push(code);
+      const failMsg = opts?.failOn ? opts.failOn(code) : null;
+      if (failMsg) {
+        return Either.left<EvalError, TLispValue>({
+          type: "EvalError",
+          variant: "SyntaxError",
+          message: failMsg,
+        });
+      }
       return Either.right<TLispValue, EvalError>(createNil());
     };
     const rt = new BindingRuntime({
@@ -379,15 +390,55 @@ describe("CHORE-44 Change 3 — BindingRuntime policy (core/fallback/init)", () 
     expect(lineNumbersToggled()).toBe(true);
   });
 
-  test("loadCoreBindings falls back when a required file is missing", async () => {
-    const { rt, evaluated } = makeBinding({
+  test("loadCoreBindings THROWS when a required file is missing (BUG-60 contract change)", async () => {
+    const { rt, isCoreLoaded } = makeBinding({
       "/core/keymaps.tlisp": "(keymaps)",
       "/core/bindings/normal.tlisp": "(normal)",
       // insert/visual/command missing
     });
-    await rt.loadCoreBindings("/core/bindings", "/core/keymaps.tlisp");
-    // Fallback keymap string (contains the fallback bindings comment) is evaluated.
-    expect(evaluated.some(c => c.includes("Minimal fallback bindings"))).toBe(true);
+    // NEW contract (BUG-60): a missing required module fails loud (names the
+    // file) instead of silently degrading to the fallback keymap. The fallback
+    // keymap defines no commands, so the editor would be unusable.
+    await expect(rt.loadCoreBindings("/core/bindings", "/core/keymaps.tlisp"))
+      .rejects.toThrow(/insert\.tlisp/);
+    // coreBindingsLoaded must stay false so the lazy-load guard can retry.
+    expect(isCoreLoaded()).toBe(false);
+  });
+
+  test("loadCoreBindings throws on a required-module parse error, preserving the real message (BUG-60)", async () => {
+    const { rt, isCoreLoaded } = makeBinding(
+      {
+        "/core/keymaps.tlisp": "(keymaps)",
+        "/core/bindings/normal.tlisp": "(broken-syntax", // invalid T-Lisp
+        "/core/bindings/insert.tlisp": "(insert)",
+        "/core/bindings/visual.tlisp": "(visual)",
+        "/core/bindings/command.tlisp": "(command)",
+      },
+      { failOn: (code) => (code.includes("broken-syntax") ? "unexpected end of input" : null) },
+    );
+    // The thrown error names the failing required file AND carries the real
+    // parse error (not just a generic "Failed to load from").
+    await expect(rt.loadCoreBindings("/core/bindings", "/core/keymaps.tlisp"))
+      .rejects.toThrow(/normal\.tlisp.*unexpected end of input/);
+    expect(isCoreLoaded()).toBe(false);
+  });
+
+  test("loadCoreBindings treats a keymaps.tlisp failure as fatal (BUG-60 / Codex correction #1)", async () => {
+    const { rt, isCoreLoaded } = makeBinding(
+      {
+        "/core/keymaps.tlisp": "(broken-keymap",
+        "/core/bindings/normal.tlisp": "(normal)",
+        "/core/bindings/insert.tlisp": "(insert)",
+        "/core/bindings/visual.tlisp": "(visual)",
+        "/core/bindings/command.tlisp": "(command)",
+      },
+      { failOn: (code) => (code.includes("broken-keymap") ? "keymap parse error" : null) },
+    );
+    // A broken keymap must fail loud (no TS-level fallback dispatcher) — a
+    // silent degrade would leave normal-mode global dispatch dead.
+    await expect(rt.loadCoreBindings("/core/bindings", "/core/keymaps.tlisp"))
+      .rejects.toThrow(/keymaps\.tlisp/);
+    expect(isCoreLoaded()).toBe(false);
   });
 
   test("loadInitFile loads the init path and returns it; honors explicit path", async () => {
