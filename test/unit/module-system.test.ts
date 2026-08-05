@@ -37,6 +37,42 @@ describe("T-Lisp module system", () => {
     expect(interpreter.execute("(math/tools/hidden)")._tag).toBe("Left");
   });
 
+  // BUG-63 regression guard: defun names containing `--` (and `---`) export and
+  // resolve identically to single-`-` names on every resolution path. The
+  // original report (a `--` defun left "Undefined" after require-module) was a
+  // source typo — the export list named a different symbol than the defun. The
+  // interpreter is correct; this test pins it so it cannot silently regress.
+  test("exports and resolves defun names containing -- and --- (BUG-63)", async () => {
+    const interpreter = new TLispInterpreterImpl();
+
+    expect(interpreter.execute(`
+      (defmodule dd/names
+        (export single-dash double--dash triple---dash)
+        (defun single-dash (x) (+ x 1))
+        (defun double--dash (x) (+ x 2))
+        (defun triple---dash (x) (+ x 3)))
+    `)._tag).toBe("Right");
+
+    // qualified resolution — single, double, and triple dash all export + resolve
+    expect(rightValue(interpreter.execute("(dd/names/single-dash 10)"))).toEqual({ type: "number", value: 11 });
+    expect(rightValue(interpreter.execute("(dd/names/double--dash 10)"))).toEqual({ type: "number", value: 12 });
+    expect(rightValue(interpreter.execute("(dd/names/triple---dash 10)"))).toEqual({ type: "number", value: 13 });
+
+    // aliased (:as) resolution of a -- name
+    expect(rightValue(interpreter.execute("(progn (require-module dd/names :as dn) (dn/double--dash 10))"))).toEqual({ type: "number", value: 12 });
+
+    // selective import of a -- name
+    expect(rightValue(interpreter.execute("(progn (require-module dd/names :import (double--dash)) (double--dash 10))"))).toEqual({ type: "number", value: 12 });
+
+    // unqualified unique-export resolution of a -- name
+    expect(rightValue(interpreter.execute("(progn (require-module dd/names) (double--dash 10))"))).toEqual({ type: "number", value: 12 });
+
+    // async executeAsync path (defun/defmodule/require-module are sync-only
+    // special forms; the async evaluator delegates to the same handlers — pin
+    // a -- name resolves there too so the path cannot silently regress).
+    expect(rightValue(await interpreter.executeAsync("(progn (require-module dd/names) (double--dash 10))"))).toEqual({ type: "number", value: 12 });
+  });
+
   test("current-module reports the defining module during module evaluation", () => {
     const interpreter = new TLispInterpreterImpl();
 
