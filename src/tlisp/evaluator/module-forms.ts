@@ -218,6 +218,7 @@ export function evalDefmoduleForm(
   // Parse body elements: collect exports and evaluate the rest
   const exports = new Set<string>();
   const bodyForms: TLispValue[] = [];
+  let hasRequireModule = false; // aggregator/parent modules re-export from children
 
   for (let i = 2; i < elements.length; i++) {
     const elem = elements[i];
@@ -248,6 +249,7 @@ export function evalDefmoduleForm(
 
       if (sym === "require-module") {
         // Evaluate require-module in the module env
+        hasRequireModule = true;
         const reqResult = evalRequireModuleForm(ctx, listItems, moduleEnv);
         if (Either.isLeft(reqResult)) return reqResult;
         continue;
@@ -266,6 +268,26 @@ export function evalDefmoduleForm(
       return result;
     }
     lastResult = result.right;
+  }
+
+  // Defensive (BUG-74 / #126): a module that declares exports but bound none
+  // of them in its env is almost certainly a source defect — e.g. a premature
+  // `))` that closed the defmodule right after the export clause, leaving the
+  // defuns to parse as top-level forms that bind in the global env (silently
+  // masked by `funcall`'s global lookup). Warn loud so it surfaces at load,
+  // not months later via module introspection. Skip aggregator/parent modules
+  // (those that `require-module` their children + re-export) — they legitimately
+  // bind nothing in their own env.
+  if (exports.size > 0 && !hasRequireModule) {
+    let anyExportBound = false;
+    for (const name of exports) {
+      if (moduleEnv.lookup(name) !== undefined) { anyExportBound = true; break; }
+    }
+    if (!anyExportBound) {
+      console.warn(
+        `defmodule ${moduleName}: declares ${exports.size} export(s) but bound none in the module env — likely a premature-close source defect (exports: ${Array.from(exports).join(", ")}).`,
+      );
+    }
   }
 
   // Register module with exports

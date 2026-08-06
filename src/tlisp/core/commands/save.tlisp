@@ -2,7 +2,7 @@
   (export save-buffer quick-save save-file write-file save-some-buffers
           save-all-buffers save-all-save-one
           save-some-candidate-p save-some-name-of save-some-build-queue
-          save-some-yes-no-table save-some-accept save-some-prompt-next))
+          save-some-yes-no-table save-some-accept save-some-prompt-next)
 
 ;; Per-buffer mtime tracking for concurrent-modification detection (#65/BUG-55).
 (defvar saved-modtimes (hashmap))
@@ -180,3 +180,4 @@ ignored. Messages the count of buffers saved."
       (save-all-save-one details))
     (buffer-switch start)
     (message (concat "Saved " (number-to-string save-some-count) " buffer(s)"))))
+)  ;; end of defmodule editor/commands/save (BUG-74/#126: was prematurely closed at the export clause)

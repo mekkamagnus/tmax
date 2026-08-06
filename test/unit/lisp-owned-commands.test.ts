@@ -8,6 +8,11 @@ describe("Lisp-owned command libraries", () => {
       const editor = fixture.editor;
       const registry = editor.getInterpreter().moduleRegistry;
 
+      // Collect ALL missing/non-function names before asserting, so one gap
+      // doesn't mask others (BUG-74/#126: save-buffer's module-env binding was
+      // hidden when the test bailed on the first failure).
+      const unresolved: string[] = [];
+      const notFunction: string[] = [];
       for (const name of [
         "save-buffer",
         "find-file",
@@ -29,9 +34,14 @@ describe("Lisp-owned command libraries", () => {
         "execute-extended-command",
       ]) {
         const resolved = registry.resolveUniqueExport(name);
-        expect(typeof resolved, name).toBe("object");
-        expect((resolved as { value?: { type?: string } }).value?.type).toBe("function");
+        if (typeof resolved !== "object" || resolved === null) {
+          unresolved.push(name);
+        } else if ((resolved as { value?: { type?: string } }).value?.type !== "function") {
+          notFunction.push(name);
+        }
       }
+      expect(unresolved, `unresolved command exports: ${unresolved.join(", ")}`).toEqual([]);
+      expect(notFunction, `exports not bound to a function: ${notFunction.join(", ")}`).toEqual([]);
     } finally {
       fixture.dispose();
     }
