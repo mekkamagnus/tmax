@@ -1,15 +1,11 @@
 import type { Editor as EditorClass } from "../editor/editor.ts";
 import type { EditorState } from "../core/contracts/editor.ts";
 import type { Frontend } from "../frontend/frontends/types.ts";
-import { renderBufferLines, getVisibleViewportTop, getCursorScreenOffset } from "../frontend/render/buffer-lines.ts";
-import { renderCommandInput } from "../frontend/render/command-input.ts";
-import { renderStatusLine } from "../frontend/render/status-line.ts";
-import { renderTabBarAnsi } from "../frontend/render/tab-bar.ts";
+import { getCursorScreenOffset } from "../frontend/render/buffer-lines.ts";
 import { Input } from "./input.ts";
 import { Screen } from "./screen.ts";
 import { renderMinibuffer } from "../frontend/render/minibuffer.ts";
-import { computeHighlightSpans } from "../syntax/highlight-buffer.ts";
-import { Either } from "../utils/task-either.ts";
+import { renderSteepFrame } from "./render-frame.ts";
 
 export class SteepFrontend implements Frontend {
   // Set once run() initializes its render loop. Allows external callers
@@ -49,30 +45,14 @@ export class SteepFrontend implements Frontend {
       const minibuffer = state.minibufferView ? renderMinibuffer(state.minibufferView, width) : undefined;
       const commandHeight = minibuffer?.lines.length ?? ((state.mode === "command" || state.mode === "mx") ? 1 : 0);
       const bufferHeight = Math.max(1, height - 1 - commandHeight - tabBarHeight);
-      const vt = getVisibleViewportTop(state, bufferHeight);
-      const getLine = (ln: number) => {
-        const r = state.currentBuffer?.getLine(ln);
-        return r && Either.isRight(r) ? r.right : "";
-      };
-      const spans = state.currentBuffer
-        ? computeHighlightSpans(getLine, vt, vt + bufferHeight, state.currentFilename)
-        : undefined;
-      const lines = renderBufferLines(state, width, bufferHeight, spans);
 
+      // Frame content (tab + buffer + command/minibuffer + status, and the
+      // which-key overlay when active) is produced by the pure
+      // `renderSteepFrame` — extracted so Steep's render is unit-testable
+      // (BUG-24 / #124). Cursor positioning stays here.
+      const lines = renderSteepFrame(state, width, height);
       screen.clear();
-      if (hasTabBar) {
-        screen.writeAt(0, 0, renderTabBarAnsi(state.tabs!, state.currentTabIndex ?? 0, width));
-      }
-      lines.forEach((line, i) => screen.writeAt(i + tabBarHeight, 0, line));
-
-      if (minibuffer) {
-        const start = height - 1 - minibuffer.lines.length;
-        minibuffer.lines.forEach((line, index) => screen.writeAt(start + index, 0, line));
-      } else if (state.mode === "command" || state.mode === "mx") {
-        screen.writeAt(height - 2, 0, renderCommandInput(state, width));
-      }
-
-      screen.writeAt(height - 1, 0, renderStatusLine(state, width));
+      lines.forEach((line, i) => screen.writeAt(i, 0, line));
 
       if (minibuffer) {
         screen.moveTo(height - 1 - minibuffer.lines.length + minibuffer.cursorRow, minibuffer.cursorColumn);

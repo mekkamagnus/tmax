@@ -399,7 +399,7 @@ describe("Which-Key Popup (US-1.10.3)", () => {
       expect(state.whichKeyPrefix).toBe("C-w");
 
       const bindings = state.whichKeyBindings || [];
-      expect(bindings.length).toBe(8);
+      expect(bindings.length).toBe(9);
     });
 
     test("should cancel vim prefix which-key with C-g", async () => {
@@ -500,7 +500,7 @@ describe("Which-Key Popup (US-1.10.3)", () => {
       expect(bindings.length).toBeGreaterThanOrEqual(7);
     });
 
-    test("C-w prefix which-key shows all 8 bindings", async () => {
+    test("C-w prefix which-key shows all 9 bindings", async () => {
       await editor.handleKey("\x17"); // C-w
       await waitForWhichKey(editor);
 
@@ -514,7 +514,8 @@ describe("Which-Key Popup (US-1.10.3)", () => {
       expect(keys).toContain("C-w -");
       expect(keys).toContain("C-w >");
       expect(keys).toContain("C-w <");
-      expect(bindings.length).toBe(8);
+      expect(keys).toContain("C-w =");
+      expect(bindings.length).toBe(9);
     });
   });
 });
