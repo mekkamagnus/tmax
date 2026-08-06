@@ -18,7 +18,7 @@
           should-be-greater-than should-be-less-than
           should-be-close-to
           should-be-a should-be-nil
-          trt--fail trt--format))
+          trt--fail trt--format)
 
 ;; ── Internal helpers ──────────────────────────────────────────────────
 (defun trt--fail (message)
@@ -190,3 +190,4 @@ string, number, symbol, list, nil, hashmap, function, boolean."
        (defvar ,name nil)
        (set! ,name (lambda ,params ,@body))
        ,name-str)))
+)  ;; end of defmodule editor/trt/assertions (BUG-74/#126: was prematurely closed at the export clause)

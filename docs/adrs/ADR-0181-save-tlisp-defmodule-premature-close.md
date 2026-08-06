@@ -64,6 +64,14 @@ as BUG-63 (#112, "exported but not bound in module env") but a different trigger
   months-long silent masking.
 - `test:unit` advances past the `lisp-owned-commands` batch (it previously stopped
   there), unblocking the next cluster member in the #121 sweep.
+- **The guard paid off immediately:** on its first full-suite run it surfaced a
+  *second* instance of the same defect — `src/tlisp/core/trt/assertions.tlisp:21`
+  (`trt--fail trt--format))`, the same doubled-`)`). That module's 19 `should-*`/
+  `trt-*` defuns were likewise binding in `globalEnv` (latent — trt assertions are
+  never resolved via `resolveUniqueExport`, so there was no functional break, only
+  the export/binding mismatch + a per-daemon-startup warning from
+  `loadTrtFrameworkSync`). Fixed with the same one-`)`-relocation. This is exactly
+  the recurrence-prevention the guard was added for.
 
 ## Investigation note
 
