@@ -246,7 +246,6 @@ function buildEditorAPIContributions(): readonly EditorAPIContribution[] {
         return createFileOps(
           ctx.operations,
           (msg) => { write({ type: "SetStatusMessage", message: msg }); },
-          ctx.filesystem,
           undefined,
           ctx.access,
         );

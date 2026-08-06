@@ -105,8 +105,13 @@ describe('parseKeys — control keys', () => {
 });
 
 describe('parseKeys — meta keys', () => {
-  test('<M-x> compiles to ESC + x', () => {
-    expect(compile('<M-x>')).toEqual(['\x1b', 'x']);
+  // <M-x> compiles to ONE keypress value "\x1bx" (ESC + char concatenated), not
+  // two separate values: the editor's normalizeKey combines "\x1b<char>" →
+  // "M-<char>" only within a single keypress event, so splitting would dispatch
+  // ESC (cancel) then the bare char and never form the M-<char> binding. This is
+  // exercised end-to-end by M-key playbooks (e.g. eval-26 <M-:>).
+  test('<M-x> compiles to a single ESC+x keypress value', () => {
+    expect(compile('<M-x>')).toEqual(['\x1bx']);
   });
 
   test('<M-a> through <M-z> all recognized', () => {
@@ -116,7 +121,7 @@ describe('parseKeys — meta keys', () => {
   });
 
   test('<M-X> (uppercase) preserves case', () => {
-    expect(compile('<M-X>')).toEqual(['\x1b', 'X']);
+    expect(compile('<M-X>')).toEqual(['\x1bX']);
   });
 });
 
@@ -261,8 +266,12 @@ describe('headlessValues', () => {
     expect(headlessValues(tokens('<S-Right>'))).toEqual(['S-Right']);
   });
 
-  test('<M-x> splits into ESC + x (two keypress values)', () => {
-    expect(headlessValues(tokens('<M-x>'))).toEqual(['\x1b', 'x']);
+  // <M-x> is ONE keypress value "\x1bx" (not split into ESC + x). The editor's
+  // normalizeKey combines "\x1b<char>" → "M-<char>" within a single keypress
+  // event; splitting would dispatch ESC (cancel) then the bare char and never
+  // form the M-<char> binding. Verified end-to-end by M-key playbooks (eval-26).
+  test('<M-x> produces a single ESC+x keypress value (not split)', () => {
+    expect(headlessValues(tokens('<M-x>'))).toEqual(['\x1bx']);
   });
 });
 

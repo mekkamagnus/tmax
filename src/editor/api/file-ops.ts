@@ -13,18 +13,6 @@ import { isAsyncMode } from "../../tlisp/async.ts";
 import { runModel, setModelField, type EditorModelAccess } from "./state-context.ts";
 
 /**
- * Filesystem interface for async operations (write-file-content).
- * Matches the core FileSystem interface subset needed here.
- */
-export interface FileOpsFilesystem {
-  readFile: (path: string) => Promise<string>;
-  writeFile: (path: string, content: string) => Promise<void>;
-  exists: (path: string) => Promise<boolean>;
-  stat: (path: string) => Promise<{ isFile: boolean; isDirectory: boolean; size: number; modified: Date }>;
-  createDir: (path: string) => Promise<void>;
-}
-
-/**
  * T-Lisp function implementation that returns Either for error handling
  */
 export type TLispFunctionWithEither = (args: TLispValue[]) => Either<AppError, TLispValue>;
@@ -43,14 +31,12 @@ function fsRuntimeError(operation: string, path: string, error: unknown): AppErr
  * Create file operations API functions
  * @param operations - Editor operations reference
  * @param setStatusMessage - Function to set status message
- * @param filesystem - Optional filesystem interface for async operations
  * @param logMessage - Optional message logger (e.g. to *Messages* buffer)
  * @returns Map of file function names to implementations
  */
 export function createFileOps(
   operations: { saveFile?: () => Promise<void>; openFile?: (filename: string) => Promise<void> } | undefined,
   setStatusMessage: (message: string) => void,
-  filesystem?: FileOpsFilesystem,
   logMessage?: (msg: string) => void,
   /** CHORE-39 Phase 4: when provided, status writes use the State monad against EditorModel. */
   access?: EditorModelAccess,
@@ -88,10 +74,14 @@ export function createFileOps(
     const content = contentArg.value as string;
 
     if (isAsyncMode(context)) {
-      const writePromise = filesystem
-        ? filesystem.writeFile(path, content)
-        : fs.promises.writeFile(path, content, "utf-8");
-      return Either.right(createPromise(writePromise.then(() => createNil()).catch((error) => {
+      // Async write goes through the REAL fs (fs.promises), consistent with
+      // read-file-content's async path (fs.promises.readFile) and the sync
+      // write path below — so a write-then-read round-trips on the same fs.
+      // Using the injected `filesystem` here while reads hit real fs created a
+      // mock/real mismatch under test fixtures (write→mock, read→real→nil).
+      // In production ctx.filesystem is the real FileSystemImpl, so this is
+      // behavior-preserving there. BUG-33 / #45 / #121.
+      return Either.right(createPromise(fs.promises.writeFile(path, content, "utf-8").then(() => createNil()).catch((error) => {
         throw fsRuntimeError("write-file-content", path, error);
       })));
     }
@@ -99,9 +89,7 @@ export function createFileOps(
     // Sync mode: write SYNCHRONOUSLY so the file exists before this returns.
     // The daemon's eval RPC returns this result to the client; a fire-and-forget
     // async write made an immediate `cat <path>` racy (the file did not exist
-    // yet) — silent data loss for the T-Lisp save path. The injected
-    // `filesystem` (ctx.filesystem) is used by the async path above; the sync
-    // path writes through fs.writeFileSync directly. BUG-33 / #45.
+    // yet) — silent data loss for the T-Lisp save path. BUG-33 / #45.
     try {
       fs.writeFileSync(path, content, "utf-8");
     } catch (error) {
