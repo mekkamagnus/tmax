@@ -171,6 +171,13 @@ export async function handleNormalMode(editor: EditorDispatchPort, key: string, 
   let lookupKey: string;
   if (currentPrefix) {
     lookupKey = `${currentPrefix} ${normalizedKey}`;
+    // The SPC leader (spacePressed) is now tracked by whichKeyPrefix; clear the
+    // transient flag so a completed SPC sequence does not re-trigger the SPC
+    // popup via the post-command schedulePrefixPopup below (#125: stale popup
+    // after completion). The legitimate bare-SPC path is unaffected: a command
+    // that freshly sets spacePressed runs before whichKeyPrefix is set this
+    // press, so the post-command check still sees it.
+    editor.spacePressed = false;
   } else if (spaceActive) {
     lookupKey = `SPC ${normalizedKey}`;
     editor.spacePressed = false;

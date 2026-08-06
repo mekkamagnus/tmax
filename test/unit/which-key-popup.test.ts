@@ -518,4 +518,34 @@ describe("Which-Key Popup (US-1.10.3)", () => {
       expect(bindings.length).toBe(9);
     });
   });
+
+  describe("#125 — no stale which-key popup after SPC-prefix completion", () => {
+    test("SPC x s (quick-save) does not re-show the SPC popup", async () => {
+      await editor.handleKey(" ");   // SPC
+      await editor.handleKey("x");
+      await editor.handleKey("s");   // quick-save completes the prefix
+
+      // Root-cause check: the transient SPC leader (spacePressed) must be
+      // cleared once the prefix is consumed, so normal-handler's post-command
+      // schedulePrefixPopup("SPC") does not re-fire (#125).
+      expect(editor.spacePressed).toBe(false);
+
+      // Wait past the which-key timeout so any re-scheduled popup would fire.
+      let becameActive = false;
+      for (let i = 0; i < 20; i++) {
+        await new Promise(r => setTimeout(r, 10));
+        if (editor.getState().whichKeyActive) { becameActive = true; break; }
+      }
+      expect(becameActive).toBe(false);
+      expect(editor.getState().whichKeyPopup).toBeNull();
+    });
+
+    test("a bare SPC still shows the popup (the fix preserves the legitimate path)", async () => {
+      await editor.handleKey(" ");   // SPC, then dwell
+      await waitForWhichKey(editor);
+      const state = editor.getState();
+      expect(state.whichKeyActive).toBe(true);
+      expect(state.whichKeyPrefix).toBe("SPC");
+    });
+  });
 });
