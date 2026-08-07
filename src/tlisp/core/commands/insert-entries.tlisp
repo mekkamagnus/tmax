@@ -1,7 +1,24 @@
 (defmodule editor/commands/insert-entries
-  (export vim-line-length insert-newline insert-tab insert-backspace insert-append insert-append-line insert-line-start open-line-below open-line-above)
+  (export vim-line-length insert-newline insert-tab insert-backspace insert-append insert-append-line insert-line-start open-line-below open-line-above set-expand-tabs set-tab-width)
 
 ;; insert-entries.tlisp -- Vim insert entry commands composed in T-Lisp
+
+;; #144: expandtab support — when expand-tabs is non-nil, Tab inserts spaces.
+;; These defvars are module-local, so cross-module setters (:set et in
+;; command-line.tlisp) must go through set-expand-tabs / set-tab-width below
+;; rather than (setq expand-tabs ...) from another module env.
+(defvar expand-tabs nil
+  "If non-nil, Tab inserts spaces instead of a literal tab (vim expandtab).")
+(defvar tab-width 4
+  "Number of columns per tab stop (vim tabstop).")
+
+(defun set-expand-tabs (flag)
+  "Enable/disable expandtab (#144). Non-nil FLAG makes Tab insert spaces."
+  (setq expand-tabs flag))
+
+(defun set-tab-width (n)
+  "Set the tab stop width in columns (#144, vim tabstop)."
+  (setq tab-width n))
 
 (defun vim-line-length (line)
   "Return the length of LINE."
@@ -14,10 +31,15 @@
     t))
 
 (defun insert-tab ()
-  "Insert a tab at point."
-  (progn
-    (buffer-insert "\t")
-    t))
+  "Insert a tab at point (or spaces if expand-tabs is non-nil, #144)."
+  (if expand-tabs
+    (let ((col (cursor-column)))
+      (let ((n (- tab-width (mod col tab-width))))
+        (while (> n 0)
+          (buffer-insert " ")
+          (setq n (- n 1)))))
+    (buffer-insert "\t"))
+  t)
 
 (defun insert-backspace ()
   "Delete the character before point, joining lines at column zero."

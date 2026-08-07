@@ -113,6 +113,16 @@ substitute/Dired/execute policy."
        (funcall "kill-buffer" (match-string 1)))
       ((string-match "^bdelete[ \t]+(.+)$" line)
        (funcall "kill-buffer" (match-string 1)))
+      ;; :set et/noet (expandtab), :set ts=N (tabstop) — #144.
+      ;; expand-tabs/tab-width live in editor/commands/insert-entries (module-
+      ;; local), so go through the exported setters via funcall — direct setq
+      ;; from this module env can't see those variables.
+      ((or (string= line "set et") (string= line "set expandtab"))
+       (funcall "set-expand-tabs" t))
+      ((or (string= line "set noet") (string= line "set noexpandtab"))
+       (funcall "set-expand-tabs" nil))
+      ((string-match "^set ts=(.+)$" line)
+       (funcall "set-tab-width" (string-to-number (match-string 1))))
       ;; :buffers / :ls — list open buffer names (#131). Current buffer
       ;; prefixed with %.
       ((or (string= line "buffers") (string= line "ls"))
