@@ -1,0 +1,15 @@
+(defmodule editor/modes/yaml
+  (export)
+
+;; yaml-mode.tlisp — YAML major mode (#150, SPEC-089)
+;; Whitespace-sensitive indent (CI/CD configs, k8s manifests, playbooks).
+;; Increase when a line ends with ':' (block mapping key) or a bare '-' (block
+;; sequence). YAML dedent is indent-relative (match the parent's column), which
+;; a line-start regex cannot express, so decrease is empty — the indent engine
+;; leaves dedent to manual <BS>/<< as in the existing modes.
+(major-mode-register "yaml" '(".yaml" ".yml") nil
+  '(":\\s*$" "-\\s*$")
+  '())
+
+(provide "yaml-mode")
+)

@@ -1,0 +1,14 @@
+(defmodule editor/modes/json
+  (export)
+
+;; json-mode.tlisp — JSON / JSONC major mode (#150, SPEC-089)
+;; Pure data format: 2-space indent, bracket matching, no comments (strict JSON).
+;; No syntax-language: json has no tokenizer in src/syntax/language-registry.ts,
+;; so nil keeps activation error-free (major-mode-set only calls
+;; syntax-set-language when a language is configured).
+(major-mode-register "json" '(".json" ".jsonc") nil
+  '("\\{$" "\\[$")
+  '("^\\s*}" "^\\s*\\]"))
+
+(provide "json-mode")
+)

@@ -1,0 +1,13 @@
+(defmodule editor/modes/shell
+  (export)
+
+;; shell-mode.tlisp — Bash/zsh file-editing major mode (#150, SPEC-089)
+;; if/fi, case/esac, do/done indent rules; # comments. (This is the FILE EDITING
+;; mode for .sh/.bash/.zsh — the interactive terminal emulator is the separate
+;; shell-mode (special), #155.)
+(major-mode-register "shell" '(".sh" ".bash" ".zsh") nil
+  '("\\bthen$" "\\bdo$" "\\bcase.*\\bin$" "\\{$" "\\($")
+  '("^\\s*fi" "^\\s*esac" "^\\s*done" "^\\s*elif" "^\\s*else" "^\\s*then" "^\\s*\\)" "^\\s*\\}"))
+
+(provide "shell-mode")
+)

@@ -1,0 +1,12 @@
+(defmodule editor/modes/toml
+  (export)
+
+;; toml-mode.tlisp — TOML major mode (#150, SPEC-089)
+;; Section headers [name], key = value pairs. Mostly flat; only arrays of tables
+;; ([[...]] / [[ ... ]] across lines) nest, so indent rules are minimal.
+(major-mode-register "toml" '(".toml") nil
+  '("\\[$")
+  '("^\\s*\\]"))
+
+(provide "toml-mode")
+)
