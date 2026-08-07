@@ -14,7 +14,8 @@
 
 import type { TLispValue, TLispFunctionImpl } from "../tlisp/types.ts";
 import { createNil, createNumber, createString, createBoolean, createList } from "../tlisp/values.ts";
-import { renameSync, writeFileSync, readFileSync, existsSync } from "node:fs";
+import { renameSync, writeFileSync, readFileSync, existsSync, mkdirSync } from "node:fs";
+import { dirname } from "node:path";
 import type { TextBuffer } from "../core/contracts/buffer.ts";
 import { TextBufferImpl } from "../core/buffer.ts";
 import { Either } from "../utils/task-either.ts";
@@ -1444,6 +1445,10 @@ function buildEditorAPIContributions(): readonly EditorAPIContribution[] {
           try {
             const obj: Record<string, string> = {};
             kvCache.forEach((v, k) => { obj[k] = v; });
+            // CHORE-082: ensure the config dir exists (mkdir -p) so cache-save
+            // works under an isolated HOME (CI), not just a dev box where
+            // ~/.config/tmax/ already exists.
+            mkdirSync(dirname(cacheFilePath), { recursive: true });
             writeFileSync(cacheFilePath, JSON.stringify(obj, null, 2));
             return Either.right(createString('saved'));
           } catch (e) {

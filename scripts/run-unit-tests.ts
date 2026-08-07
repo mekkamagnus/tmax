@@ -42,6 +42,11 @@ import { join } from "path";
 // startup while avoiding the starvation seen when all ~200 files shared one
 // Bun process (BUG-16).
 const FILES_PER_BATCH = 5;
+// CHORE-082 / #122: optional cap on bun's cross-file concurrency. The BUG-72
+// stall is the cumulative per-editor ensureCoreBindingsLoaded cost stacking
+// under concurrency; a lower cap reduces (does not eliminate) the stacking.
+// Set TMAX_UNIT_MAX_CONCURRENCY=N (e.g. 4) to opt in; unset = bun's default.
+const MAX_CONCURRENCY = process.env.TMAX_UNIT_MAX_CONCURRENCY;
 
 function buildTestBatches(): string[][] {
   const explicitTarget = process.argv.slice(2).find((a) => !a.startsWith("-"));
@@ -64,9 +69,11 @@ function buildTestBatches(): string[][] {
   // plausible output gap is ~PER_TEST_TIMEOUT_MS, comfortably under 120s, so
   // the inactivity timer still catches a genuine hang.
   const batches: string[][] = [];
+  const concurrencyFlag = MAX_CONCURRENCY ? [`--max-concurrency=${MAX_CONCURRENCY}`] : [];
   for (let i = 0; i < allFiles.length; i += FILES_PER_BATCH) {
     batches.push([
       "test", "--dots", "--timeout", String(PER_TEST_TIMEOUT_MS),
+      ...concurrencyFlag,
       ...allFiles.slice(i, i + FILES_PER_BATCH),
       ...flags,
     ]);
@@ -106,8 +113,19 @@ function runBatch(args: string[], index: number, total: number): Promise<number>
 
     const inactivityTimer = setInterval(() => {
       if (!sawSummary && Date.now() - lastActivityMs > INACTIVITY_TIMEOUT_MS) {
+        // CHORE-082: diagnose the stall — name the last --dots output (often the
+        // hung test), list the batch's files, + dump active handles/requests
+        // (per BUG-16) so BUG-72 / #122 is a named culprit, not a black box.
+        const lastLines = combined.split(/\r?\n/).filter(Boolean).slice(-3).join(" | ");
+        const batchFiles = args.filter((a) => !a.startsWith("-") && a !== "test").join(" ");
+        const handles = (process as any)._getActiveHandles?.()?.map((h: any) => h?.constructor?.name ?? typeof h) ?? [];
+        const requests = (process as any)._getActiveRequests?.()?.map((r: any) => r?.constructor?.name ?? typeof r) ?? [];
         process.stderr.write(
-          `\nrun-unit-tests: batch ${index + 1} produced no output for ${Math.round(INACTIVITY_TIMEOUT_MS / 1000)}s — failing.\n`,
+          `\nrun-unit-tests: batch ${index + 1} produced no output for ${Math.round(INACTIVITY_TIMEOUT_MS / 1000)}s — failing.\n` +
+          `  files: ${batchFiles}\n` +
+          `  last output: ${lastLines || "(none)"}\n` +
+          `  active handles: ${JSON.stringify(handles)}\n` +
+          `  active requests: ${JSON.stringify(requests)}\n`,
         );
         child.kill("SIGKILL");
       }
@@ -128,9 +146,23 @@ function runBatch(args: string[], index: number, total: number): Promise<number>
   });
 }
 
+// CHORE-082: --continue / TMAX_UNIT_CONTINUE=1 — run ALL batches + report every
+// failure instead of stopping at the first (so the sweep sees the whole cluster).
+const CONTINUE = process.env.TMAX_UNIT_CONTINUE === "1" || process.argv.includes("--continue");
+
 const batches = buildTestBatches();
+const failedBatches: number[] = [];
 for (let i = 0; i < batches.length; i++) {
   const code = await runBatch(batches[i]!, i, batches.length);
-  if (code !== 0) process.exit(code);
+  if (code !== 0) {
+    if (!CONTINUE) process.exit(code);
+    failedBatches.push(i + 1);
+    process.stderr.write(`run-unit-tests: batch ${i + 1}/${batches.length} FAILED (code ${code}); continuing (--continue).\n`);
+  }
 }
-process.stdout.write(`\nrun-unit-tests: ${batches.length} batches passed\n`);
+if (failedBatches.length === 0) {
+  process.stdout.write(`\nrun-unit-tests: ${batches.length} batches passed\n`);
+  process.exit(0);
+}
+process.stderr.write(`\nrun-unit-tests: ${failedBatches.length}/${batches.length} batches failed: ${failedBatches.join(", ")}\n`);
+process.exit(1);

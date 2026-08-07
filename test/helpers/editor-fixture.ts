@@ -280,10 +280,19 @@ export async function setupMdEditor(content: string, filename?: string): Promise
   return editor;
 }
 
+/** Stringify an Either Left (often an AppError) readably — not `[object Object]`. */
+function stringifyLeft(left: unknown): string {
+  if (left && typeof left === "object" && "message" in left) {
+    const err = left as { type?: string; variant?: string; message?: string };
+    return [err.type, err.variant].filter(Boolean).join("/") + (err.message ? `: ${err.message}` : "");
+  }
+  return String(left);
+}
+
 /** Return the successful value or fail the test immediately. */
 export function expectRight<L, R>(result: EitherValue<L, R>, message: string = "Expected Right"): R {
   if (Either.isLeft(result)) {
-    throw new Error(`${message}: ${String(result.left)}`);
+    throw new Error(`${message}: ${stringifyLeft(result.left)}`);
   }
   return result.right;
 }
