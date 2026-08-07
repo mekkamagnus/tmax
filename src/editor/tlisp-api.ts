@@ -71,6 +71,8 @@ import { createEvalOps } from "./api/eval-ops.ts";
 import { createCaseOps } from "./api/case-ops.ts";
 import { createOccurOps } from "./api/occur-ops.ts";
 import { createProjectOps } from "./api/project-ops.ts";
+import { createShellOps } from "./api/shell-ops.ts";
+import { TerminalManager } from "../core/terminal-manager.ts";
 
 /**
  * T-Lisp function implementation that returns Either for error handling
@@ -1854,6 +1856,20 @@ function buildEditorAPIContributions(): readonly EditorAPIContribution[] {
         return createProjectOps(
           () => ctx.access.getModel().currentFilename ?? undefined,
         );
+      },
+    },
+
+    // ── shell (#164 Task 5: terminal primitives for shell-mode) ──
+    // One TerminalManager per editor instance; shared across all terminal windows.
+    {
+      name: "shell",
+      factory: (ctx: EditorAPIContext): Map<string, TLispFunctionImpl> => {
+        // Lazily create + cache the TerminalManager on the context
+        const tm = (ctx as any)._terminalManager ??= new TerminalManager();
+        return createShellOps(tm, () => {
+          const m = ctx.access.getModel();
+          return { width: (m as any).terminalWidth ?? 80, height: (m as any).terminalHeight ?? 24 };
+        });
       },
     },
   ];

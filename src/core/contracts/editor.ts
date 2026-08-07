@@ -159,6 +159,8 @@ export interface Window {
   row?: number;  // Window starting row (0-indexed)
   col?: number;  // Window starting column (0-indexed)
   scrollback?: import("./workspace.ts").ScrollbackBuffer;  // Scrollback buffer for terminal windows (RFC-014)
+  isTerminal?: boolean;  // #164: true for PTY-backed terminal windows (shell-mode)
+  terminalId?: string;   // #164: TerminalManager ID for this window's PTY
 }
 
 /**
