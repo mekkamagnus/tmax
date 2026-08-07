@@ -24,6 +24,7 @@ export interface WhichKeyPopupData {
 
 /** Extract function name from a T-Lisp command expression. */
 function extractCommandName(cmd: string): string {
+  if (cmd === "..prefix..") return "prefix";
   if (cmd.startsWith("(")) {
     const inner = cmd.slice(1).trim();
     const spaceIdx = inner.indexOf(" ");

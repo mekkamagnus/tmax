@@ -157,13 +157,14 @@ export class TmaxInstance {
       .flatMap((child) => {
         // 4. Poll the socket file (30 × 100ms = 3s). Matches the proven pattern
         //    in adws/adw-run-e2e.ts and stopDaemonReal below.
+        //    #138: raised from 30 to 400 (40s) — daemon takes ~6s under load.
         const socketReady: TaskEither<TmaxUseError, void> = TaskEitherUtils.retry(
           () => TaskEither.from(async () =>
             existsSync(socketPath)
               ? rightE<void>(undefined)
               : leftE<void>(TmaxUseError.daemonNotResponsive(socketPath, 'socket not yet present')),
           ),
-          30,
+          400,
           100,
         );
         // 5. Poll eval responsiveness (20 × 100ms = 2s).

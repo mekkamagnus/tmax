@@ -301,7 +301,16 @@ function parseKeySequence(sequence: string): string[] {
           'BS': '\x7f',
           'DEL': '\x7f',
         };
-        keys.push(keyMap[keyName] ?? keyName);
+        // #134: support <C-letter> and <M-letter> notation (align with tmax-use keys.ts)
+        let resolved = keyMap[keyName];
+        if (resolved === undefined) {
+          const ctrl = keyName.match(/^C-([a-zA-Z])$/);
+          const meta = keyName.match(/^M-(.)$/);
+          if (ctrl) resolved = String.fromCharCode(ctrl[1]!.toLowerCase().charCodeAt(0) - 96);
+          else if (meta) resolved = '\x1b' + meta[1];
+          else resolved = keyName;
+        }
+        keys.push(resolved);
         i = end + 1;
         continue;
       }
