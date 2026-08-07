@@ -26,4 +26,6 @@
 ;; =================================================================
 ;; Essential editing operations in insert mode
 ;; Note: Enter and Backspace are handled directly in editor.ts for proper escaping
+;; C-u: delete from cursor to beginning of line (#143)
+(key-bind "C-u" "(insert-delete-to-bol)" "insert")
 )

@@ -103,7 +103,7 @@
 (key-bind "0" "(progn (line-first-column) (viewport-left-set 0))" "normal")
 (key-bind "$" "(progn (vim-count-reset) (line-last-column))" "normal")
 (key-bind "_" "(progn (vim-count-reset) (line-first-non-blank))" "normal")
-(key-bind "-" "(line-previous (vim-count-consume 1))" "normal")
+(key-bind "^" "(line-first-non-blank)" "normal")(key-bind "-" "(line-previous (vim-count-consume 1))" "normal")
 (key-bind "+" "(line-next (vim-count-consume 1))" "normal")
 
 ;; =================================================================
@@ -128,7 +128,7 @@
 ;; =================================================================
 
 (key-bind "x" "(vim-delete-char (vim-count-consume 1))" "normal")
-(key-bind "D" "(progn (vim-count-reset) (vim-delete-to-line-end))" "normal")
+(key-bind "X" "(if (> (cursor-column) 0) (progn (cursor-move (cursor-line) (- (cursor-column) 1)) (vim-delete-char 1)))" "normal")(key-bind "D" "(progn (vim-count-reset) (vim-delete-to-line-end))" "normal")
 (key-bind "C" "(progn (vim-count-reset) (vim-change-to-line-end))" "normal")
 (key-bind "Y" "(progn (vim-count-reset) (vim-yank-to-line-end))" "normal")
 (key-bind "J" "(progn (vim-count-reset) (vim-join-lines))" "normal")

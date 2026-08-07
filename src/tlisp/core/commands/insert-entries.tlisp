@@ -78,3 +78,9 @@
       (editor-set-mode "insert")
       t)))
 )
+
+(defun insert-delete-to-bol ()
+  "Delete from cursor to beginning of line (vim insert C-u, #143)."
+  (let ((col (cursor-column)))
+    (if (> col 0)
+      (buffer-delete-range (cursor-line) 0 (cursor-line) col))))
