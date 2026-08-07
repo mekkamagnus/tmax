@@ -10,7 +10,6 @@ Technical proposals for significant features or architectural changes. Each RFC 
 | [RFC-002-server-client-architecture.md](RFC-002-server-client-architecture.md) | Server/Client Architecture | Daemon/client with JSON-RPC, AI agent control protocol | [ADR-0018](../adrs/ADR-0018-basic-server-client-infrastructure.md), [ADR-0058](../adrs/ADR-0058-frame-based-daemon-client.md), [SPEC-034](../specs/SPEC-034-emacs-daemon-client-parity.md) |
 | [RFC-003-emacs-parity-roadmap.md](RFC-003-emacs-parity-roadmap.md) | Emacs Parity Roadmap | Plan for Emacs with Evil-mode parity | [ADR-0035](../adrs/ADR-0035-evil-integration.md) |
 | [RFC-005-tlisp-module-system.md](RFC-005-tlisp-module-system.md) | T-Lisp Module System | defmodule, require-module, export, qualified imports | [SPEC-007](../specs/SPEC-007-tlisp-module-system.md), [module-system-gap-analysis.md](../memos/module-system-gap-analysis.md) |
-| [RFC-007-ui-test-status.md](RFC-007-ui-test-status.md) | UI Test Status | UI testing infrastructure status report | [ADR-0018](../adrs/ADR-0018-ui-test-automation-file-based-ipc.md) |
 
 ## Planned
 
