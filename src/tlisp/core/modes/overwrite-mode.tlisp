@@ -1,0 +1,30 @@
+(defmodule editor/modes/overwrite
+  (export overwrite-mode global-overwrite-mode)
+
+;; overwrite-mode.tlisp — replace-instead-of-insert (#149, SPEC-092)
+;; The behavior is consulted by insert-char (insert-entries.tlisp): when active
+;; and the cursor is before EOL, typing deletes the next char first (net replace).
+(define-minor-mode "overwrite" "Overwrite mode" "Ovwrt")
+
+(defun overwrite-mode (&optional (arg nil arg-supplied-p))
+  "Toggle overwrite mode. No arg = toggle; t/positive = on; nil/0 = off."
+  (if (not arg-supplied-p)
+    (minor-mode-toggle "overwrite")
+    (if (equal arg t)
+      (minor-mode-set "overwrite" t)
+      (if (numberp arg)
+        (minor-mode-set "overwrite" (> arg 0))
+        (minor-mode-set "overwrite" nil)))))
+
+(defun global-overwrite-mode (&optional (arg nil arg-supplied-p))
+  "Toggle overwrite mode globally."
+  (if (not arg-supplied-p)
+    (global-minor-mode-set "overwrite" (not (global-minor-mode-active-p "overwrite")))
+    (if (equal arg t)
+      (global-minor-mode-set "overwrite" t)
+      (if (numberp arg)
+        (global-minor-mode-set "overwrite" (> arg 0))
+        (global-minor-mode-set "overwrite" nil)))))
+
+(provide "overwrite-mode")
+)

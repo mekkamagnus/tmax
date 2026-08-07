@@ -32,7 +32,10 @@ export async function handleInsertMode(editor: EditorDispatchPort, key: string, 
     // Clear the splash screen on first keystroke (like vim's intro).
     editor.executeCommand("(when (and (string= (buffer-name) \"*scratch*\") (string-prefix-p \"  tmax\" (buffer-text))) (cursor-move 0 0) (let ((n (buffer-line-count))) (while (> n 0) (setq n (- n 1)) (buffer-delete-line))) (cursor-move 0 0))");
     const escapedKey = editor.escapeKeyForTLisp(key);
-    editor.executeCommand(`(buffer-insert "${escapedKey}")`);
+    // #149: route through insert-char so overwrite-mode / electric-pair-mode
+    // (minor modes) apply. With both off, insert-char is a plain buffer-insert,
+    // so default insert behavior is unchanged.
+    editor.executeCommand(`(insert-char "${escapedKey}")`);
   }
   // Handle Enter key in insert mode with proper escaping
   else if (normalizedKey === "Enter") {

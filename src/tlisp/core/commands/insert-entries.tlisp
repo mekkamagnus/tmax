@@ -1,5 +1,5 @@
 (defmodule editor/commands/insert-entries
-  (export vim-line-length insert-newline insert-tab insert-backspace insert-append insert-append-line insert-line-start open-line-below open-line-above set-expand-tabs set-tab-width)
+  (export vim-line-length insert-newline insert-tab insert-backspace insert-append insert-append-line insert-line-start open-line-below open-line-above set-expand-tabs set-tab-width insert-char)
 
 ;; insert-entries.tlisp -- Vim insert entry commands composed in T-Lisp
 
@@ -19,6 +19,36 @@
 (defun set-tab-width (n)
   "Set the tab stop width in columns (#144, vim tabstop)."
   (setq tab-width n))
+
+(defun electric-pair--close-for (key)
+  "Return the matching close delimiter for an open KEY, else nil (#149)."
+  (cond
+    ((string= key "(") ")")
+    ((string= key "[") "]")
+    ((string= key "{") "}")
+    ((string= key "\"") "\"")
+    ((string= key "'") "'")
+    (t nil)))
+
+(defun insert-char (key)
+  "Insert KEY at point, honoring overwrite-mode and electric-pair-mode (#149).
+Defaults to a plain buffer-insert when both modes are off (the common case), so
+default insert behavior is unchanged. overwrite-mode replaces the next char
+when the cursor is before EOL; electric-pair-mode inserts the matching close
+delimiter and leaves the cursor between."
+  (if (minor-mode-active-p "overwrite")
+    (if (< (cursor-column) (vim-line-length (cursor-line)))
+      (buffer-delete-range (cursor-line) (cursor-column) (cursor-line) (+ (cursor-column) 1))
+      nil)
+    nil)
+  (buffer-insert key)
+  (if (minor-mode-active-p "electric-pair")
+    (let ((close (electric-pair--close-for key)))
+      (if close
+        (progn (buffer-insert close) (cursor-move (cursor-line) (- (cursor-column) 1)))
+        nil))
+    nil)
+  t)
 
 (defun vim-line-length (line)
   "Return the length of LINE."

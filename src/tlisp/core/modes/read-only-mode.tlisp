@@ -1,0 +1,24 @@
+(defmodule editor/modes/read-only
+  (export read-only-mode)
+
+;; read-only-mode.tlisp — buffer mutation protection (#149, SPEC-092)
+;; The enforcement already lives in buffer-ops.ts (isReadonly() guards
+;; insert/delete/etc.); this toggle drives buffer-set-read-only for the current
+;; buffer. Required by *Help* / *Messages* so generated buffers can't be
+;; accidentally edited.
+(define-minor-mode "read-only" "Read-only buffer protection" "RO")
+
+(defun read-only-mode (&optional (arg nil arg-supplied-p))
+  "Toggle read-only mode for the current buffer.
+With no argument, toggle. With t or a positive number, enable. With nil or 0,
+disable."
+  (if (not arg-supplied-p)
+    (buffer-set-read-only (not (buffer-read-only-p)))
+    (if (equal arg t)
+      (buffer-set-read-only t)
+      (if (numberp arg)
+        (buffer-set-read-only (> arg 0))
+        (buffer-set-read-only nil)))))
+
+(provide "read-only-mode")
+)

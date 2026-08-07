@@ -1,0 +1,35 @@
+(defmodule editor/modes/electric-indent
+  (export electric-indent-mode global-electric-indent-mode)
+
+;; electric-indent-mode.tlisp — auto-indent new lines (#149, SPEC-092)
+;; Consulted by post-newline-hook (post-newline.tlisp): when active, Enter
+;; applies the major mode's indent rules. DEFAULT ON at startup (preserves the
+;; pre-#149 behavior of always auto-indenting on Enter); toggle off to disable.
+;; Phase 1.5 prerequisite for programming major modes (#151).
+(define-minor-mode "electric-indent" "Electric indentation" "Indent")
+
+(defun electric-indent-mode (&optional (arg nil arg-supplied-p))
+  "Toggle electric-indent mode. No arg = toggle; t/positive = on; nil/0 = off."
+  (if (not arg-supplied-p)
+    (minor-mode-toggle "electric-indent")
+    (if (equal arg t)
+      (minor-mode-set "electric-indent" t)
+      (if (numberp arg)
+        (minor-mode-set "electric-indent" (> arg 0))
+        (minor-mode-set "electric-indent" nil)))))
+
+(defun global-electric-indent-mode (&optional (arg nil arg-supplied-p))
+  "Toggle electric-indent mode globally."
+  (if (not arg-supplied-p)
+    (global-minor-mode-set "electric-indent" (not (global-minor-mode-active-p "electric-indent")))
+    (if (equal arg t)
+      (global-minor-mode-set "electric-indent" t)
+      (if (numberp arg)
+        (global-minor-mode-set "electric-indent" (> arg 0))
+        (global-minor-mode-set "electric-indent" nil)))))
+
+;; Default ON: preserve the pre-#149 always-auto-indent-on-Enter behavior.
+(global-minor-mode-set "electric-indent" t)
+
+(provide "electric-indent-mode")
+)

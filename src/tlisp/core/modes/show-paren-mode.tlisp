@@ -1,0 +1,31 @@
+(defmodule editor/modes/show-paren
+  (export show-paren-mode global-show-paren-mode)
+
+;; show-paren-mode.tlisp — highlight matching delimiter (#149, SPEC-092)
+;; REGISTERED toggle only. The visual highlight (matching ()[]{}) needs a char-scan
+;; primitive + a render overlay — a render-pipeline follow-up. This ships the
+;; toggle infrastructure.
+(define-minor-mode "show-paren" "Highlight matching paren" "Paren")
+
+(defun show-paren-mode (&optional (arg nil arg-supplied-p))
+  "Toggle show-paren mode. No arg = toggle; t/positive = on; nil/0 = off."
+  (if (not arg-supplied-p)
+    (minor-mode-toggle "show-paren")
+    (if (equal arg t)
+      (minor-mode-set "show-paren" t)
+      (if (numberp arg)
+        (minor-mode-set "show-paren" (> arg 0))
+        (minor-mode-set "show-paren" nil)))))
+
+(defun global-show-paren-mode (&optional (arg nil arg-supplied-p))
+  "Toggle show-paren mode globally."
+  (if (not arg-supplied-p)
+    (global-minor-mode-set "show-paren" (not (global-minor-mode-active-p "show-paren")))
+    (if (equal arg t)
+      (global-minor-mode-set "show-paren" t)
+      (if (numberp arg)
+        (global-minor-mode-set "show-paren" (> arg 0))
+        (global-minor-mode-set "show-paren" nil)))))
+
+(provide "show-paren-mode")
+)

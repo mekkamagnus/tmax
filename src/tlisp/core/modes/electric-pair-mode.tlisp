@@ -1,0 +1,31 @@
+(defmodule editor/modes/electric-pair
+  (export electric-pair-mode global-electric-pair-mode)
+
+;; electric-pair-mode.tlisp — auto-insert matching pairs (#149, SPEC-092)
+;; Consulted by insert-char (insert-entries.tlisp): when active, typing an open
+;; delimiter (()[]{"}') also inserts the matching close, cursor between.
+;; Phase 1.5 prerequisite for programming major modes (#151).
+(define-minor-mode "electric-pair" "Electric pairing" "Pair")
+
+(defun electric-pair-mode (&optional (arg nil arg-supplied-p))
+  "Toggle electric-pair mode. No arg = toggle; t/positive = on; nil/0 = off."
+  (if (not arg-supplied-p)
+    (minor-mode-toggle "electric-pair")
+    (if (equal arg t)
+      (minor-mode-set "electric-pair" t)
+      (if (numberp arg)
+        (minor-mode-set "electric-pair" (> arg 0))
+        (minor-mode-set "electric-pair" nil)))))
+
+(defun global-electric-pair-mode (&optional (arg nil arg-supplied-p))
+  "Toggle electric-pair mode globally."
+  (if (not arg-supplied-p)
+    (global-minor-mode-set "electric-pair" (not (global-minor-mode-active-p "electric-pair")))
+    (if (equal arg t)
+      (global-minor-mode-set "electric-pair" t)
+      (if (numberp arg)
+        (global-minor-mode-set "electric-pair" (> arg 0))
+        (global-minor-mode-set "electric-pair" nil)))))
+
+(provide "electric-pair-mode")
+)

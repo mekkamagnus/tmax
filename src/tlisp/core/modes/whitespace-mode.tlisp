@@ -1,0 +1,31 @@
+(defmodule editor/modes/whitespace
+  (export whitespace-mode global-whitespace-mode)
+
+;; whitespace-mode.tlisp — visualize tabs / trailing whitespace (#149, SPEC-092)
+;; REGISTERED toggle only. The visual rendering (tab glyphs, trailing-whitespace
+;; markers) is a render-pipeline follow-up; this ships the toggle infrastructure.
+;; Critical for indentation-semantic formats (YAML, Python) once rendered.
+(define-minor-mode "whitespace" "Visualize whitespace" "WS")
+
+(defun whitespace-mode (&optional (arg nil arg-supplied-p))
+  "Toggle whitespace mode. No arg = toggle; t/positive = on; nil/0 = off."
+  (if (not arg-supplied-p)
+    (minor-mode-toggle "whitespace")
+    (if (equal arg t)
+      (minor-mode-set "whitespace" t)
+      (if (numberp arg)
+        (minor-mode-set "whitespace" (> arg 0))
+        (minor-mode-set "whitespace" nil)))))
+
+(defun global-whitespace-mode (&optional (arg nil arg-supplied-p))
+  "Toggle whitespace mode globally."
+  (if (not arg-supplied-p)
+    (global-minor-mode-set "whitespace" (not (global-minor-mode-active-p "whitespace")))
+    (if (equal arg t)
+      (global-minor-mode-set "whitespace" t)
+      (if (numberp arg)
+        (global-minor-mode-set "whitespace" (> arg 0))
+        (global-minor-mode-set "whitespace" nil)))))
+
+(provide "whitespace-mode")
+)

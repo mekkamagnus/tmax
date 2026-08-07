@@ -1,0 +1,32 @@
+(defmodule editor/modes/truncate-lines
+  (export truncate-lines-mode global-truncate-lines-mode)
+
+;; truncate-lines-mode.tlisp — wrap vs clip long lines (#149, SPEC-092)
+;; REGISTERED toggle only. The visual effect (clipping long lines at the viewport
+;; edge instead of wrapping) is a render-pipeline follow-up; this ships the
+;; toggle infrastructure so flipping it on is trivial once the renderer consults
+;; the flag. Vim :set wrap / :set nowrap.
+(define-minor-mode "truncate-lines" "Truncate long lines" "Trunc")
+
+(defun truncate-lines-mode (&optional (arg nil arg-supplied-p))
+  "Toggle truncate-lines mode. No arg = toggle; t/positive = on; nil/0 = off."
+  (if (not arg-supplied-p)
+    (minor-mode-toggle "truncate-lines")
+    (if (equal arg t)
+      (minor-mode-set "truncate-lines" t)
+      (if (numberp arg)
+        (minor-mode-set "truncate-lines" (> arg 0))
+        (minor-mode-set "truncate-lines" nil)))))
+
+(defun global-truncate-lines-mode (&optional (arg nil arg-supplied-p))
+  "Toggle truncate-lines mode globally."
+  (if (not arg-supplied-p)
+    (global-minor-mode-set "truncate-lines" (not (global-minor-mode-active-p "truncate-lines")))
+    (if (equal arg t)
+      (global-minor-mode-set "truncate-lines" t)
+      (if (numberp arg)
+        (global-minor-mode-set "truncate-lines" (> arg 0))
+        (global-minor-mode-set "truncate-lines" nil)))))
+
+(provide "truncate-lines-mode")
+)

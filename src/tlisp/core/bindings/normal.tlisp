@@ -24,6 +24,14 @@
   (require-module editor/modes/sql)
   (require-module editor/modes/line-numbers)
   (require-module editor/modes/relative-line-numbers)
+  ;; #149: T1 minor modes.
+  (require-module editor/modes/read-only)
+  (require-module editor/modes/overwrite)
+  (require-module editor/modes/electric-pair)
+  (require-module editor/modes/electric-indent)
+  (require-module editor/modes/truncate-lines)
+  (require-module editor/modes/show-paren)
+  (require-module editor/modes/whitespace)
   (require-module editor/modes/auto-fill)
 
   (require-module editor/indent/typescript)
