@@ -73,6 +73,7 @@ import { createOccurOps } from "./api/occur-ops.ts";
 import { createProjectOps } from "./api/project-ops.ts";
 import { createShellOps } from "./api/shell-ops.ts";
 import { TerminalManager } from "../core/terminal-manager.ts";
+import { createComintOps, ComintManager } from "./api/comint-ops.ts";
 
 /**
  * T-Lisp function implementation that returns Either for error handling
@@ -1870,6 +1871,37 @@ function buildEditorAPIContributions(): readonly EditorAPIContribution[] {
           const m = ctx.access.getModel();
           return { width: (m as any).terminalWidth ?? 80, height: (m as any).terminalHeight ?? 24 };
         });
+      },
+    },
+
+    // ── comint (#165: command-interpreter for REPLs + build tools) ──
+    {
+      name: "comint",
+      factory: (ctx: EditorAPIContext): Map<string, TLispFunctionImpl> => {
+        const cm = (ctx as any)._comintManager ??= new ComintManager();
+        return createComintOps(
+          ctx.access,
+          cm,
+          (name: string) => {
+            // createBuffer: create a buffer with the given name via T-Lisp
+            ctx.evalTlisp?.(`(buffer-create "${name}")`);
+          },
+          (name: string, text: string) => {
+            // appendToBuffer: switch to buffer, insert text, switch back
+            const currentBuf = (() => {
+              const r = ctx.evalTlisp?.("(buffer-name)");
+              return r && (r as any)._tag === "Right" ? (r as any).right.value as string : "*scratch*";
+            })();
+            const escaped = text.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+            ctx.evalTlisp?.(`(let ((cb (buffer-name))) (buffer-switch "${name}") (goto-char (buffer-end)) (buffer-insert "${escaped}") (if (not (string= cb "${name}")) (buffer-switch cb)))`);
+          },
+          () => {
+            // Get current buffer name via T-Lisp (the interpreter knows)
+            const r = ctx.evalTlisp?.("(buffer-name)");
+            if (r && (r as any)._tag === "Right") return (r as any).right.value as string;
+            return "*scratch*";
+          },
+        );
       },
     },
   ];

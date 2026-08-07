@@ -1,0 +1,63 @@
+(defmodule editor/commands/comint
+  (export run-node run-python comint-send-input comint-interrupt comint-eof
+          comint-prev-input comint-next-input)
+
+;; comint.tlisp — Command-interpreter commands (#165, SPEC-099)
+;; Comint buffers are normal editor buffers with a running subprocess.
+;; Output accumulates; input is typed at the bottom; RET sends to stdin.
+
+(defun run-node ()
+  "Start a Node.js REPL in a comint buffer."
+  (let ((buf (comint-run "node" (list) "*node-repl*")))
+    (buffer-switch buf)
+    (message (concat "Node REPL: " buf))))
+
+(defun run-python ()
+  "Start a Python REPL in a comint buffer."
+  (let ((buf (comint-run "python3" (list "-i") "*python-repl*")))
+    (buffer-switch buf)
+    (message (concat "Python REPL: " buf))))
+
+(defun comint-send-input ()
+  "Send the current line to the comint process."
+  (let ((line (buffer-line (cursor-line))))
+    (if (comint-buffer-p (buffer-name))
+      (progn
+        (comint-send (buffer-name) (concat line "\n"))
+        (insert-newline))
+      (message "Not a comint buffer"))))
+
+(defun comint-interrupt ()
+  "Send SIGINT to the comint process."
+  (if (comint-buffer-p (buffer-name))
+    (comint-signal (buffer-name) "SIGINT")
+    (message "Not a comint buffer")))
+
+(defun comint-eof ()
+  "Send EOF (C-d) to the comint process."
+  (if (comint-buffer-p (buffer-name))
+    (comint-send (buffer-name) "\x04")
+    (message "Not a comint buffer")))
+
+(defun comint-prev-input ()
+  "Cycle to previous input (M-p)."
+  (let ((prev (comint-history-prev)))
+    (if prev
+      (progn
+        (cursor-move (cursor-line) 0)
+        (buffer-delete-range (cursor-line) 0 (cursor-line) (vim-line-length (cursor-line)))
+        (buffer-insert prev))
+      nil)))
+
+(defun comint-next-input ()
+  "Cycle to next input (M-n)."
+  (let ((next (comint-history-next)))
+    (if next
+      (progn
+        (cursor-move (cursor-line) 0)
+        (buffer-delete-range (cursor-line) 0 (cursor-line) (vim-line-length (cursor-line)))
+        (buffer-insert next))
+      nil)))
+
+(provide "comint")
+)

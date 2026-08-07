@@ -89,6 +89,8 @@
   (require-module editor/commands/project)
   ;; #164 Task 5: shell-mode commands.
   (require-module editor/commands/shell)
+  ;; #165: comint-mode commands.
+  (require-module editor/commands/comint)
   (require-module editor/commands/describe)
   ;; CHORE-44 Change 6: T-Lisp owns command-line parsing + post-newline policy.
   (require-module editor/commands/command-line)
