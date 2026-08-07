@@ -1,6 +1,6 @@
-import { describe, expect, it } from "bun:test";
+import { describe, expect, it, beforeAll, afterAll } from "bun:test";
 import type { Editor } from "../../src/editor/editor.ts";
-import { createStartedEditor, executeTlisp } from "../helpers/editor-fixture.ts";
+import { createEditorFixture, executeTlisp, type EditorFixture } from "../helpers/editor-fixture.ts";
 
 // SPEC-067 — comprehensive normal-mode binding smoke test.
 //
@@ -171,9 +171,30 @@ const SMOKES: Array<[string, Key[]]> = [
 ];
 
 describe("SPEC-067 normal-mode bindings smoke", () => {
+  // BUG-72/#122: createStartedEditor per entry = 99 editor.start() calls, each
+  // loading 570 lines of core bindings synchronously. Under batch concurrency
+  // the cumulative cost exceeded the runner's 120s inactivity gap. Share ONE
+  // editor; reset state between entries (Escape clears pending prefix/count/
+  // operator/which-key; createBuffer gives a fresh BUFFER). Each createBuffer is
+  // cheap (no binding reload); the 99→1 editor reduction eliminates the stall.
+  let editor: Editor;
+  let fixture: EditorFixture;
+
+  beforeAll(async () => {
+    fixture = await createEditorFixture();
+    editor = fixture.editor;
+  });
+
+  afterAll(() => {
+    fixture.dispose();
+  });
+
   for (const [label, keys] of SMOKES) {
     it(`${label} sends real keypress(es) without crashing`, async () => {
-      const editor = await createStartedEditor(BUFFER);
+      // Reset between entries: Escape (clear any pending state + ensure normal
+      // mode), then a fresh buffer (cheap — no editor.start()).
+      await editor.handleKey("Escape");
+      editor.createBuffer(`smoke-${label}`, BUFFER);
       await send(editor, keys);
       assertHealthy(editor, label);
     });
