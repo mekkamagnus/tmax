@@ -111,10 +111,13 @@ describe("CHORE-44 Change 4 AC4.7 — evaluator.ts is a facade + trampoline owne
   });
 
   test("evaluator.ts still owns the trampoline (TailCall + isTailCall + createTailCall)", () => {
-    expect(evaluatorSource).toMatch(/interface TailCall/);
+    // #129: the `TailCall` interface moved to types.ts so TLispFunction.bodyEval
+    // can reference it without a cycle; evaluator.ts imports it and STILL owns
+    // isTailCall/createTailCall + the trampoline drive loop.
+    expect(evaluatorSource).toMatch(/import type \{[^}]*TailCall[^}]*\} from "\.\/types\.ts"/);
     expect(evaluatorSource).toMatch(/function isTailCall/);
     expect(evaluatorSource).toMatch(/function createTailCall/);
-    // The trampoline drive loop is in eval().
+    // The trampoline drive loop is in runTrampoline() (extracted from eval).
     expect(evaluatorSource).toMatch(/while \(isTailCall\(currentResult\)\)/);
   });
 

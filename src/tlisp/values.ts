@@ -18,7 +18,10 @@ import type {
   TLispMacroImpl,
   TLispHashmap,
   TLispPromise,
+  TailCall,
 } from "./types.ts";
+import type { EvalError } from "../error/types.ts";
+import { Either } from "../utils/task-either.ts";
 
 /**
  * Create a T-Lisp nil value
@@ -88,11 +91,13 @@ export const createList = (values: TLispValue[]): TLispList => ({
 export const createFunction = (
   fn: TLispFunctionImpl,
   name?: string,
-  asyncFn?: TLispFunctionImplAsync
+  asyncFn?: TLispFunctionImplAsync,
+  bodyEval?: (args: TLispValue[]) => Either<EvalError, TLispValue | TailCall>,
 ): TLispFunction => ({
   type: "function",
   value: fn,
   asyncValue: asyncFn,
+  bodyEval,
   name,
 });
 

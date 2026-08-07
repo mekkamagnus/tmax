@@ -3,7 +3,7 @@
  * @description T-Lisp evaluator implementation with functional error handling
  */
 
-import type { EvalContext, TLispValue, TLispEnvironment, TLispFunction, TLispList, TLispMacro, ModuleImport } from "./types.ts";
+import type { EvalContext, TLispValue, TLispEnvironment, TLispFunction, TLispList, TLispMacro, ModuleImport, TailCall } from "./types.ts";
 import { TLispEnvironmentImpl } from "./environment.ts";
 import type { ModuleRegistry, ModuleRecord } from "./module-registry.ts";
 import {
@@ -83,14 +83,9 @@ import { awaitIfPromise, createEvalContext, withAsyncMode } from "./async.ts";
 
 
 /**
- * Tail call result - represents a function call that should be optimized
+ * Tail call result type — TailCall interface lives in ./types.ts (shared with
+ * TLispFunction.bodyEval). Represents a function call that should be optimized.
  */
-interface TailCall {
-  type: "tail-call";
-  funcExpr: TLispValue;
-  argExprs: TLispValue[];
-  env: TLispEnvironment;
-}
 
 /**
  * Evaluation result - either a value or a tail call
@@ -299,11 +294,22 @@ export class TLispEvaluator implements ModuleFormsContext, TestFormsContext {
       return result;
     }
 
-    let currentResult: EvalResult = result.right;
+    return this.runTrampoline(result.right);
+  }
 
-    // Trampoline: keep evaluating tail calls until we get a value
+  /**
+   * Tail-call trampoline (#129 fix). Drives a chain of deferred `TailCall`
+   * thunks to a concrete value WITHOUT growing the JS stack. Shared by `eval`,
+   * the non-tail call site in `evalFunctionCall`, and `lambdaFunction` (the
+   * `value` path used by higher-order builtins). The flat loop is safe because
+   * each iteration evaluates the next tail call via `evalFunctionCallInternal`,
+   * which for a lambda returns its body's RAW `EvalResult` (`bodyEval`) — a
+   * value or another `TailCall` — instead of recursing.
+   */
+  private runTrampoline(initial: EvalResult): Either<EvalError, TLispValue> {
+    let currentResult: EvalResult = initial;
+
     while (isTailCall(currentResult)) {
-      // Evaluate function and arguments in the trampoline
       const tailCall = currentResult as TailCall;
 
       const funcResult = this.eval(tailCall.funcExpr, tailCall.env);
@@ -1028,7 +1034,13 @@ export class TLispEvaluator implements ModuleFormsContext, TestFormsContext {
     const paramNames = lambdaParams.map((param) => param.name);
 
     // Create closure with tail-call optimization support
-    const lambdaFunction = (args: TLispValue[]): Either<EvalError, TLispValue> => {
+    // Raw body evaluator (#129 fix). Binds args, evaluates the body IN TAIL
+    // POSITION (inTailPosition=true), and returns the raw EvalResult — a value
+    // OR a TailCall thunk — WITHOUT trampolining. The evaluator's
+    // evalFunctionCallInternal calls this directly so the caller's trampoline
+    // drives tail calls flat (no JS stack growth). Catches FunctionReturn here
+    // so (return-from ...) exits THIS function with its value (BUG-32).
+    const bodyEval = (args: TLispValue[]): Either<EvalError, EvalResult> => {
       if (args.length < requiredParams.length || args.length > lambdaParams.length) {
         return Either.left({
           type: 'EvalError',
@@ -1071,15 +1083,20 @@ export class TLispEvaluator implements ModuleFormsContext, TestFormsContext {
         }
       }
 
-      // Evaluate body in tail position. Catch FunctionReturn here so
-      // (return-from ...) exits THIS function with its value (BUG-32).
       try {
-        const result = this.eval(body, callEnv);
-        return result;
+        return this.evalInternal(body, callEnv, true);
       } catch (e) {
         if (e instanceof FunctionReturn) return Either.right(e.value);
         throw e;
       }
+    };
+
+    // The `value` impl used by higher-order builtins (mapcar / funcall / apply
+    // via stdlib `call`): trampolines bodyEval's raw result to a concrete value.
+    const lambdaFunction = (args: TLispValue[]): Either<EvalError, TLispValue> => {
+      const raw = bodyEval(args);
+      if (Either.isLeft(raw)) return raw;
+      return this.runTrampoline(raw.right);
     };
 
     const asyncLambdaFunction = async (args: TLispValue[], context: EvalContext): Promise<Either<EvalError, TLispValue>> => {
@@ -1134,7 +1151,7 @@ export class TLispEvaluator implements ModuleFormsContext, TestFormsContext {
       }
     };
 
-    const funcValue = createFunction(lambdaFunction, undefined, asyncLambdaFunction);
+    const funcValue = createFunction(lambdaFunction, undefined, asyncLambdaFunction, bodyEval);
     
     // Add metadata to the function
     if (docstring) {
@@ -1711,6 +1728,11 @@ export class TLispEvaluator implements ModuleFormsContext, TestFormsContext {
       const traceEnterResult = traceEnter(this.debugState, funcExpr, args);
       const callResult = this.evalFunctionCallInternal(func, args, env);
       traceExit(this.debugState, traceEnterResult, callResult as Either<EvalError, TLispValue>, Either.isRight(callResult) && isTailCall(callResult.right));
+      if (Either.isLeft(callResult)) return callResult;
+      // Non-tail call site: a lambda body may have returned a TailCall thunk
+      // (#129). Drive it to a concrete value via the shared trampoline so this
+      // call produces a value (its caller is not in tail position).
+      if (isTailCall(callResult.right)) return this.runTrampoline(callResult.right);
       return callResult;
     }
   }
@@ -1730,6 +1752,14 @@ export class TLispEvaluator implements ModuleFormsContext, TestFormsContext {
     }
 
     if (func.type === "function") {
+      // User-defined lambda (#129): return the body's RAW EvalResult — a value
+      // OR a TailCall thunk — so the caller's trampoline drives tail calls flat
+      // without growing the JS stack. (bodyEval catches FunctionReturn internally,
+      // BUG-32.) Builtin primitives have no bodyEval and fall through to `value`.
+      const bodyEval = (func as TLispFunction).bodyEval;
+      if (bodyEval) {
+        return bodyEval(args);
+      }
       const functionImpl = func.value as (args: TLispValue[]) => Either<EvalError, TLispValue> | TLispValue;
       let result: Either<any, TLispValue> | TLispValue;
       try {

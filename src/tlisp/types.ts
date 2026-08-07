@@ -98,6 +98,16 @@ export interface TLispFunction extends TLispValue {
   type: "function";
   value: TLispFunctionImpl;
   asyncValue?: TLispFunctionImplAsync;
+  /**
+   * Raw body evaluator for user-defined (lambda) functions, used ONLY by the
+   * evaluator's function-call internal path to drive tail-call optimization
+   * (#129/BUG fix). Returns the body's unevaluated-by-trampoline result — a
+   * value OR a `TailCall` thunk — so the caller's trampoline can loop flat
+   * without growing the JS stack. Higher-order builtins (mapcar / funcall /
+   * apply via stdlib `call`) keep using `value` (which trampolines internally
+   * to a concrete value). Absent on builtin primitives.
+   */
+  bodyEval?: (args: TLispValue[]) => Either<EvalError, TLispValue | TailCall>;
   name?: string;
   docstring?: string;
   parameters?: string[];
@@ -170,6 +180,19 @@ export interface TLispEnvironment {
 
   /** Create a child environment with this as parent */
   createChild(): TLispEnvironment;
+}
+
+/**
+ * Tail-call thunk — a deferred function application produced when a call sits in
+ * tail position. The evaluator's trampoline (`runTrampoline`) drives a chain of
+ * these to a concrete value without growing the JS stack (#129). Lives here so
+ * `TLispFunction.bodyEval` can reference it without a cycle back to evaluator.ts.
+ */
+export interface TailCall {
+  type: "tail-call";
+  funcExpr: TLispValue;
+  argExprs: TLispValue[];
+  env: TLispEnvironment;
 }
 
 /**
