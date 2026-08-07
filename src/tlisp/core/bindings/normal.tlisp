@@ -84,6 +84,8 @@
   (require-module editor/commands/eval)
   (require-module editor/commands/case)
   (require-module editor/commands/occur)
+  ;; #164 Task 9: project-mode commands.
+  (require-module editor/commands/project)
   (require-module editor/commands/describe)
   ;; CHORE-44 Change 6: T-Lisp owns command-line parsing + post-newline policy.
   (require-module editor/commands/command-line)

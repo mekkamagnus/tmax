@@ -1,0 +1,102 @@
+(defmodule editor/commands/project
+  (export project-root project-root-set project-find-file project-search-cmd
+          project-dired project-files-list project-status)
+
+;; project.tlisp — Project-mode commands (RFC-014B / #164 Task 9)
+;; Uses the TS primitives project-detect-root, project-files-walk, project-search.
+
+(defvar *project-root* nil
+  "Path to the current project root directory (nil if not detected).")
+
+(defvar *project-ignore-extra* (list)
+  "Extra ignore patterns beyond the defaults (node_modules, .git, etc.).")
+
+(defun project-root (&optional path)
+  "Detect project root from PATH (default: current file). Returns cached *project-root* if set and no PATH given."
+  (if (and (null path) *project-root*)
+    *project-root*
+    (let ((detected (project-detect-root (or path (buffer-filename) "."))))
+      (if (null detected)
+        (progn
+          (message "No project root detected")
+          nil)
+        (progn
+          (setq *project-root* detected)
+          detected)))))
+
+(defun project-root-set (root)
+  "Manually set the project root to ROOT."
+  (setq *project-root* root)
+  (message (concat "Project root: " root))
+  root)
+
+(defun project-files-list ()
+  "List all files in the project (respecting ignores). Returns a T-Lisp list of paths."
+  (if (null *project-root*)
+    (progn
+      (message "No project root set — use (project-root) first")
+      (list))
+    (project-files-walk *project-root* *project-ignore-extra*)))
+
+(defun project-find-file ()
+  "Find a file in the project using completing-read over project-files-walk results."
+  (if (null *project-root*)
+    (project-root))
+  (if (null *project-root*)
+    (message "No project root — cannot find files")
+    (let ((files (project-files-list)))
+      (if (null files)
+        (message "No files found in project")
+        (completing-read
+          "Find project file: "
+          files
+          nil
+          nil
+          ""
+          "project-file-history"
+          "find-file")))))
+
+(defun project-search-cmd (pattern)
+  "Search project files for PATTERN. Results go to *Search Results* buffer."
+  (if (null *project-root*)
+    (project-root))
+  (if (null *project-root*)
+    (message "No project root — cannot search")
+    (let ((matches (project-search *project-root* pattern *project-ignore-extra*)))
+      (if (null matches)
+        (message (concat "No matches for: " pattern))
+        (progn
+          (buffer-create "*Search Results*")
+          (buffer-switch "*Search Results*")
+          (buffer-set-read-only nil)
+          (let ((i 0))
+            (while (< i (length matches))
+              (let ((m (nth i matches)))
+                (buffer-insert (concat (nth 0 m) ":" (number-to-string (nth 1 m)) ": " (nth 2 m) "\n")))
+              (setq i (+ i 1))))
+          (buffer-set-read-only t)
+          (cursor-move 0 0)
+          (message (concat "Found " (number-to-string (length matches)) " matches")))))))
+
+(defun project-dired ()
+  "Open dired at the project root."
+  (if (null *project-root*)
+    (project-root))
+  (if (null *project-root*)
+    (message "No project root detected")
+    (dired *project-root*)))
+
+(defun project-status ()
+  "Show project status in the status line."
+  (if (null *project-root*)
+    (message "No project")
+    (message (concat "Project: " *project-root*))))
+
+;; SPC p prefix for project commands
+(key-bind "SPC p f" "(project-find-file)" "normal")
+(key-bind "SPC p s" "(project-search-cmd (read-string \"Search: \"))" "normal")
+(key-bind "SPC p d" "(project-dired)" "normal")
+(key-bind "SPC p r" "(project-root)" "normal")
+
+(provide "project")
+)
