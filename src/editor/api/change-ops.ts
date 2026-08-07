@@ -51,7 +51,7 @@ export function createChangeOps(
   setCurrentBuffer: (buffer: TextBuffer) => void,
   setCursorLine: (line: number) => void,
   setCursorColumn: (column: number) => void,
-  setMode: (mode: "normal" | "insert" | "visual" | "command" | "mx" | "replace") => void,
+  setMode: (mode: "normal" | "insert" | "visual" | "command" | "mx" | "replace" | "terminal") => void,
   session: EditorSession
 ): Map<string, TLispFunctionImpl> {
   // CHORE-39 Phase 4: cursor/buffer reads flow through the State monad against

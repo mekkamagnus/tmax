@@ -90,7 +90,7 @@ export function createModeOps(
       ));
     }
 
-    setMode(mode as "normal" | "insert" | "visual" | "command" | "mx" | "replace");
+    setMode(mode as "normal" | "insert" | "visual" | "command" | "mx" | "replace" | "terminal");
 
     return Either.right(createString(mode));
   });

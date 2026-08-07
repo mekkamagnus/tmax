@@ -6,7 +6,7 @@
 /**
  * Editor mode types
  */
-export type EditorMode = 'normal' | 'insert' | 'visual' | 'command' | 'mx';
+export type EditorMode = 'normal' | 'insert' | 'visual' | 'command' | 'mx' | 'replace' | 'terminal';
 
 /**
  * Key sequence type for keyboard input handling

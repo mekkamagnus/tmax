@@ -22,7 +22,7 @@ export function createTextObjectsOps(
   access: EditorModelAccess,
   session: EditorSession,
   setCurrentBuffer: (buffer: TextBuffer) => void,
-  setMode: (mode: "normal" | "insert" | "visual" | "command" | "mx" | "replace") => void
+  setMode: (mode: "normal" | "insert" | "visual" | "command" | "mx" | "replace" | "terminal") => void
 ): Map<string, TLispFunctionImpl> {
   // CHORE-39 Phase 4: cursor/buffer reads flow through the State monad against
   // EditorModel; writes stay on the supplied setters to preserve side effects.

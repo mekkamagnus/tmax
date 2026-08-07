@@ -2,7 +2,7 @@
 export interface KeyMapping {
   key: string;
   command: string;
-  mode?: "normal" | "insert" | "visual" | "command" | "mx" | "replace";
+  mode?: "normal" | "insert" | "visual" | "command" | "mx" | "replace" | "terminal";
   majorMode?: string;
 }
 

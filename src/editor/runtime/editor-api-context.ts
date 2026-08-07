@@ -40,7 +40,7 @@ import type { ViewBoundLog, Log } from "../log-store.ts";
 import type { EditorOperations } from "../tlisp-api.ts";
 
 /** Editor mode union (mirrors the public EditorState mode). */
-export type EditorMode = "normal" | "insert" | "visual" | "command" | "mx" | "replace";
+export type EditorMode = "normal" | "insert" | "visual" | "command" | "mx" | "replace" | "terminal";
 
 /** Minor-mode registry entry (mode name → opaque mode descriptor). */
 export type MinorModeMap = Map<string, unknown>;

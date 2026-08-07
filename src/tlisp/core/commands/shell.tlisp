@@ -1,0 +1,33 @@
+(defmodule editor/commands/shell
+  (export shell-start shell-exit shell-mode-active-p)
+
+;; shell.tlisp — M-x shell entry point (#164 Task 5)
+;; Creates a terminal via the shell-ops primitive, sets editor mode to "terminal",
+;; and stores the terminal ID so the terminal-handler can route keys to the PTY.
+
+(defvar *active-terminal* nil
+  "ID of the currently active terminal (nil when in editor mode).
+Set by shell-start; cleared by shell-exit. Read by terminal-handler.ts.")
+
+(defun shell-start ()
+  "Start a terminal (M-x shell). Creates a PTY, enters terminal mode.
+Keys go to the PTY. Press C-\\ to return to the editor."
+  (let ((term-id (shell)))
+    (setq *active-terminal* term-id)
+    (editor-set-mode "terminal")
+    (message "-- TERMINAL -- (C-\\ to return to editor)")
+    term-id))
+
+(defun shell-exit ()
+  "Exit terminal mode and return to the editor."
+  (setq *active-terminal* nil)
+    (editor-set-mode "normal")
+    (message "")
+    nil)
+
+(defun shell-mode-active-p ()
+  "Return t if currently in terminal mode."
+  (if *active-terminal* t nil))
+
+(provide "shell")
+)

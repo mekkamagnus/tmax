@@ -33,7 +33,7 @@ import { createEditorSessionState } from "./domain-state.ts";
  * Declared here so EditorModel is fully standalone and does not `extend`
  * EditorState.
  */
-type EditorMode = 'normal' | 'insert' | 'visual' | 'command' | 'mx' | 'replace';
+type EditorMode = 'normal' | 'insert' | 'visual' | 'command' | 'mx' | 'replace' | 'terminal';
 
 /**
  * Internal editor model — a standalone, fully-readonly interface. It does NOT

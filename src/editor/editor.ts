@@ -40,6 +40,7 @@ import type { LogEntry, LogCategory } from "./log-entry.ts";
 import { handleNormalMode } from "./handlers/normal-handler.ts";
 import { handleInsertMode } from "./handlers/insert-handler.ts";
 import { handleVisualMode } from "./handlers/visual-handler.ts";
+import { handleTerminalMode } from "./handlers/terminal-handler.ts";
 import { handleCommandMode } from "./handlers/command-handler.ts";
 import { handleMxMode } from "./handlers/mx-handler.ts";
 import { handleReplaceMode } from "./handlers/replace-handler.ts";
@@ -489,17 +490,17 @@ export class Editor {
 
       const key = keyArg.value as string;
       const command = commandArg.value as string;
-      let mode: "normal" | "insert" | "visual" | "command" | "mx" | "replace" | undefined;
+      let mode: "normal" | "insert" | "visual" | "command" | "mx" | "replace" | "terminal" | undefined;
 
       if (modeArg) {
         if (modeArg.type !== "string") {
           throw new Error("key-bind mode must be a string");
         }
         const modeStr = modeArg.value as string;
-        if (!["normal", "insert", "visual", "command", "mx"].includes(modeStr)) {
+        if (!["normal", "insert", "visual", "command", "mx", "terminal"].includes(modeStr)) {
           throw new Error(`Invalid mode: ${modeStr}`);
         }
-        mode = modeStr as "normal" | "insert" | "visual" | "command" | "mx" | "replace";
+        mode = modeStr as "normal" | "insert" | "visual" | "command" | "mx" | "replace" | "terminal";
       }
 
       let majorMode: string | undefined;
@@ -552,17 +553,17 @@ export class Editor {
       }
 
       const key = keyArg.value as string;
-      let mode: "normal" | "insert" | "visual" | "command" | "mx" | "replace" | undefined;
+      let mode: "normal" | "insert" | "visual" | "command" | "mx" | "replace" | "terminal" | undefined;
 
       if (modeArg) {
         if (modeArg.type !== "string") {
           throw new Error("key-unbind mode must be a string");
         }
         const modeStr = modeArg.value as string;
-        if (!["normal", "insert", "visual", "command", "mx"].includes(modeStr)) {
+        if (!["normal", "insert", "visual", "command", "mx", "terminal"].includes(modeStr)) {
           throw new Error(`Invalid mode: ${modeStr}`);
         }
-        mode = modeStr as "normal" | "insert" | "visual" | "command" | "mx" | "replace";
+        mode = modeStr as "normal" | "insert" | "visual" | "command" | "mx" | "replace" | "terminal";
       }
 
       if (this.keyMappings.has(key)) {
@@ -626,17 +627,17 @@ export class Editor {
       }
 
       const key = keyArg.value as string;
-      let mode: "normal" | "insert" | "visual" | "command" | "mx" | "replace" | undefined;
+      let mode: "normal" | "insert" | "visual" | "command" | "mx" | "replace" | "terminal" | undefined;
 
       if (modeArg) {
         if (modeArg.type !== "string") {
           throw new Error("key-binding mode must be a string");
         }
         const modeStr = modeArg.value as string;
-        if (!["normal", "insert", "visual", "command", "mx"].includes(modeStr)) {
+        if (!["normal", "insert", "visual", "command", "mx", "terminal"].includes(modeStr)) {
           throw new Error(`Invalid mode: ${modeStr}`);
         }
-        mode = modeStr as "normal" | "insert" | "visual" | "command" | "mx" | "replace";
+        mode = modeStr as "normal" | "insert" | "visual" | "command" | "mx" | "replace" | "terminal";
       }
 
       const mappings = this.keyMappings.get(key);
@@ -695,20 +696,20 @@ export class Editor {
       }
 
       const key = keyArg.value as string;
-      let mode: "normal" | "insert" | "visual" | "command" | "mx" | "replace" | undefined;
+      let mode: "normal" | "insert" | "visual" | "command" | "mx" | "replace" | "terminal" | undefined;
 
       if (modeArg) {
         if (modeArg.type !== "string") {
           throw new Error("describe-key mode must be a string");
         }
         const modeStr = modeArg.value as string;
-        if (!["normal", "insert", "visual", "command", "mx"].includes(modeStr)) {
+        if (!["normal", "insert", "visual", "command", "mx", "terminal"].includes(modeStr)) {
           throw new Error(`Invalid mode: ${modeStr}`);
         }
-        mode = modeStr as "normal" | "insert" | "visual" | "command" | "mx" | "replace";
+        mode = modeStr as "normal" | "insert" | "visual" | "command" | "mx" | "replace" | "terminal";
       } else {
         // Use current mode if not specified
-        mode = this.getMode() as "normal" | "insert" | "visual" | "command" | "mx" | "replace";
+        mode = this.getMode() as "normal" | "insert" | "visual" | "command" | "mx" | "replace" | "terminal";
       }
 
       const mappings = this.keyMappings.get(key);
@@ -1772,7 +1773,7 @@ export class Editor {
    * keymap list (read from keymapSync) and stores the resolved path.
    */
   private async loadInitFile(initFilePath?: string): Promise<void> {
-    const registeredKeymaps = ["normal", "insert", "visual", "command", "mx"].filter(mode =>
+    const registeredKeymaps = ["normal", "insert", "visual", "command", "mx", "terminal"].filter(mode =>
       this.keymapSync.hasKeymap(mode)
     );
     const resolved = await this.bindingRuntime.loadInitFile(initFilePath, registeredKeymaps);
@@ -2077,6 +2078,9 @@ export class Editor {
         break;
       case "replace":
         await handleReplaceMode(this, key, normalizedKey);
+        break;
+      case "terminal":
+        await handleTerminalMode(this, key, normalizedKey);
         break;
       default:
         // Handle unknown mode as normal mode

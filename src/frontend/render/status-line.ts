@@ -8,6 +8,7 @@ export const modeDisplay: Record<EditorState["mode"], { text: string; color: Ans
   command: { text: "--COMMAND--", color: "cyan" },
   mx: { text: "--M-X--", color: "blue" },
   replace: { text: "--REPLACE--", color: "magenta" },
+  terminal: { text: "--TERMINAL--", color: "blue" },
 };
 
 function visibleLength(text: string): number {

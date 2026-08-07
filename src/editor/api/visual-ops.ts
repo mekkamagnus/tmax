@@ -83,7 +83,7 @@ export function createVisualOps(
   setBuffer: (buffer: TextBuffer | null) => void,
   setCursorLine: (line: number) => void,
   setCursorColumn: (column: number) => void,
-  setMode: (mode: "normal" | "insert" | "visual" | "command" | "mx" | "replace") => void,
+  setMode: (mode: "normal" | "insert" | "visual" | "command" | "mx" | "replace" | "terminal") => void,
   setStatusMessage: (message: string) => void
 ): Map<string, TLispFunctionImpl> {
   // CHORE-39 Phase 4: buffer/cursor/mode reads flow through the State monad
@@ -93,7 +93,7 @@ export function createVisualOps(
   const getCursorColumn = (): number => runModel(access, readModelField("cursorPosition")).column;
   const getBuffer = (): TextBuffer | null =>
     runModel(access, readModelField("currentBuffer")) ?? null;
-  const getMode = (): "normal" | "insert" | "visual" | "command" | "mx" | "replace" =>
+  const getMode = (): "normal" | "insert" | "visual" | "command" | "mx" | "replace" | "terminal" =>
     runModel(access, readModelField("mode"));
   // CHORE-44 Change 1: per-editor visual selection (was module-global). The
   // factory owns the selection locally; session.visual accessors are routed

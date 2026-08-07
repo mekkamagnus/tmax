@@ -190,7 +190,7 @@ export interface KeyBinding {
 export interface EditorState {
   currentBuffer?: TextBuffer;
   cursorPosition: Position;
-  mode: 'normal' | 'insert' | 'visual' | 'command' | 'mx' | 'replace';
+  mode: 'normal' | 'insert' | 'visual' | 'command' | 'mx' | 'replace' | 'terminal';
   statusMessage: string;
   viewportTop: number;
   viewportLeft?: number;
