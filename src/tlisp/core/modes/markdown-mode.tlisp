@@ -5,8 +5,11 @@
 ;; Provides heading navigation, fold operations, and syntax highlighting
 
 (major-mode-register "markdown" '(".md" ".markdown" ".mdx") "markdown"
-  '()   ;; no block-open patterns needed (folding is heading-based)
-  '())  ;; no block-close patterns needed
+  ;; #157 gap 1: best-effort indent-increase heuristics for lists + blockquotes
+  ;; (markdown-list-continue handles list continuation on Enter; these feed the
+  ;; general indent engine for >>/<< and, via #149's electric-indent, Enter).
+  '("^\\s*[-*+]\\s" "^\\s*\\d+\\.\\s" ">\\s*$")
+  '())  ;; markdown dedent is manual (indent-relative, not line-start-detectable)
 
 ;; Enable syntax highlighting for markdown
 (syntax-set-language "markdown")

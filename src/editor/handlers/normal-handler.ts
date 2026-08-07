@@ -318,8 +318,18 @@ function lookupMajorModeBinding(editor: EditorDispatchPort, lookupKey: string, m
  * not a prefix — that case is handled by the binding lookup.
  */
 function isMajorModePrefix(editor: EditorDispatchPort, lookupKey: string, majorMode: string): boolean {
-  if (lookupMajorModeBinding(editor, lookupKey, majorMode)) return false; // complete binding, not a prefix
+  // #157 gap 6: a key is a "complete major-mode binding" (not a prefix) only if
+  // the major mode defines it SPECIFICALLY. A global/mode-only binding (e.g. ","
+  // = vim-repeat-find-reverse) must NOT exclude the key from acting as a
+  // major-mode prefix — otherwise it shadows the whole major-mode leader (", b"
+  // in markdown never dispatched). lookupMajorModeBinding falls through to
+  // global via resolveMapping, so it cannot be used for this check.
   const candidates = majorModeLookupKeys(lookupKey);
+  const hasMajorModeSpecific = candidates.some(form => {
+    const ms = editor.getKeyMappings().get(form);
+    return !!ms && ms.some(m => m.majorMode === majorMode);
+  });
+  if (hasMajorModeSpecific) return false; // major mode defines this exact key → complete binding
   for (const [key, ms] of editor.getKeyMappings()) {
     if (!candidates.some(c => key.startsWith(`${c} `))) continue;
     if (ms.some(m => m.majorMode === majorMode && (m.mode === "normal" || !m.mode))) {
