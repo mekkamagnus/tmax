@@ -1,0 +1,12 @@
+(defmodule editor/modes/java
+  (export)
+
+;; java-mode.tlisp — Java major mode (#154, SPEC-091)
+;; Brace-block language. No Java tokenizer ships → syntax-language nil. Full
+;; behavior (generics indent, electric pairs) is Phase 1.5 (#149/#151).
+(major-mode-register "java" '(".java") nil
+  '("\\{$")
+  '("^\\s*}"))
+
+(provide "java-mode")
+)

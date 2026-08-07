@@ -1,0 +1,12 @@
+(defmodule editor/modes/sql
+  (export)
+
+;; sql-mode.tlisp — SQL major mode (#154, SPEC-091)
+;; Statements (`SELECT ...;`). Flat at the line level; no nested-block indent
+;; heuristic shipped. No SQL tokenizer → syntax-language nil.
+(major-mode-register "sql" '(".sql" ".psql") nil
+  '()
+  '())
+
+(provide "sql-mode")
+)

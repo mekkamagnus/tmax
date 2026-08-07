@@ -1,0 +1,12 @@
+(defmodule editor/modes/cpp
+  (export)
+
+;; cpp-mode.tlisp — C++ major mode (#154, SPEC-091)
+;; Brace-block language. The tokenizer supports "cpp" → real font-lock on
+;; activate. Template/namespace indent nuance is Phase 1.5 (#149/#151).
+(major-mode-register "cpp" '(".cpp" ".cc" ".cxx" ".hpp" ".hh" ".hxx") "cpp"
+  '("\\{$")
+  '("^\\s*}"))
+
+(provide "cpp-mode")
+)

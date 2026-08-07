@@ -1,0 +1,11 @@
+(defmodule editor/modes/c
+  (export)
+
+;; c-mode.tlisp — C major mode (#154, SPEC-091)
+;; Brace-block language. The tokenizer supports "c" → real font-lock on activate.
+(major-mode-register "c" '(".c" ".h") "c"
+  '("\\{$")
+  '("^\\s*}"))
+
+(provide "c-mode")
+)

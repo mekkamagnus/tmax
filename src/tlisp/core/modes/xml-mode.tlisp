@@ -1,0 +1,12 @@
+(defmodule editor/modes/xml
+  (export)
+
+;; xml-mode.tlisp — XML major mode (#154, SPEC-091)
+;; Tag-aware indent is best-effort here (same heuristic as html-mode). Full tag
+;; text objects are ROADMAP §1.9; no XML tokenizer ships, so syntax-language nil.
+(major-mode-register "xml" '(".xml" ".xsd" ".xsl" ".svg" ".plist") nil
+  '(">$")
+  '("^\\s*</"))
+
+(provide "xml-mode")
+)
