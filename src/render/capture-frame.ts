@@ -19,6 +19,13 @@ import { Either } from "../utils/task-either.ts";
  * Each line includes any syntax highlighting escape codes.
  */
 export function captureFrame(state: EditorState, width: number, height: number): string[] {
+  // #155: Terminal mode — render screen-buffer lines instead of editor buffer.
+  // The terminal-handler routes keys to the PTY; the TerminalManager's screen
+  // buffer holds the parsed ANSI output. Here we composite those lines.
+  if (state.mode === "terminal") {
+    return captureTerminalFrame(state, width, height);
+  }
+
   const hasTabBar = (state.tabs?.length ?? 0) > 1;
   const tabBarHeight = hasTabBar ? 1 : 0;
   const minibuffer = state.minibufferView ? renderMinibuffer(state.minibufferView, width) : undefined;
@@ -66,6 +73,48 @@ export function captureFrame(state: EditorState, width: number, height: number):
       }
     }
   }
+
+  return screen;
+}
+
+/**
+ * #155: Render a terminal frame — screen-buffer lines + status line.
+ * The terminal lines come from the TerminalManager's screen buffer (via the
+ * shell-get-lines T-Lisp primitive). This function is called when
+ * `state.mode === "terminal"`.
+ *
+ * Note: The screen buffer lives in the TerminalManager (not in EditorState),
+ * so we can't access it directly from this pure render function. Instead, the
+ * caller (editor.ts) populates `state.visibleLines` before calling captureFrame,
+ * OR we read them via a callback. For the MVP, we check if the state already
+ * has terminal lines; if not, we render a placeholder.
+ *
+ * The actual terminal-line injection happens in editor.ts's render path (it
+ * calls shell-get-lines and stores the result). This function just formats them.
+ */
+function captureTerminalFrame(state: EditorState, width: number, height: number): string[] {
+  const bufferHeight = Math.max(1, height - 1); // -1 for status line
+  const screen: string[] = [];
+
+  // Terminal lines are injected via state.visibleLines (set by editor.ts
+  // before calling captureFrame, or by the daemon's render path).
+  const terminalLines = (state as any).terminalLines as string[] | undefined;
+
+  if (terminalLines && terminalLines.length > 0) {
+    for (let i = 0; i < bufferHeight && i < terminalLines.length; i++) {
+      const line = terminalLines[i] ?? "";
+      // Truncate/pad to width
+      screen.push(line.length > width ? line.slice(0, width) : line);
+    }
+  } else {
+    // Placeholder when terminal lines aren't injected yet
+    for (let i = 0; i < bufferHeight; i++) {
+      screen.push("");
+    }
+  }
+
+  // Status line
+  screen.push(renderStatusLine(state, width));
 
   return screen;
 }
