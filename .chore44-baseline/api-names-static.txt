@@ -25,6 +25,7 @@ auto-mode-list
 browse-doc-reference
 browse-git-github-remote
 buffer-bury
+buffer-count
 buffer-create
 buffer-current
 buffer-delete
@@ -44,6 +45,7 @@ buffer-lines
 buffer-list
 buffer-modified-p
 buffer-previous-non-blank-line
+buffer-read-only-p
 buffer-rename
 buffer-replace-range
 buffer-scan-backward-from

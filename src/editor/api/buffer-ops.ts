@@ -109,7 +109,27 @@ export function createBufferOps(
     }
 
     setCurrentBuffer(buffer!);
+    // #127: reset cursor to (0,0) on buffer switch — the new buffer may have
+    // fewer lines than the previous one, and an inherited cursor causes
+    // "Line N out of bounds" on the next insert.
+    setCursorLine(0);
+    setCursorColumn(0);
     return Either.right(createString(name));
+  });
+
+  api.set("buffer-count", (): Either<AppError, TLispValue> => {
+    return Either.right(createNumber(buffers.size));
+  });
+
+  // #135: read-only getter (the setter buffer-set-read-only exists at line ~770).
+  api.set("buffer-read-only-p", (): Either<AppError, TLispValue> => {
+    const currentBuf = getCurrentBuffer();
+    for (const [name, buf] of buffers) {
+      if (buf === currentBuf) {
+        return Either.right(createBoolean(readonly.has(name)));
+      }
+    }
+    return Either.right(createBoolean(false));
   });
 
   api.set("buffer-current", (args: TLispValue[]): Either<AppError, TLispValue> => {
