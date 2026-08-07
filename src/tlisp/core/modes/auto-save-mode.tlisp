@@ -1,0 +1,29 @@
+(defmodule editor/modes/auto-save
+  (export auto-save-mode global-auto-save-mode)
+
+;; auto-save-mode.tlisp — Periodic auto-save to a recovery file (#153, SPEC-096)
+;; REGISTERED toggle only. Needs timer hooks + recovery-file design; deferred.
+(define-minor-mode "auto-save" "Periodic auto-save to a recovery file" "AS")
+
+(defun auto-save-mode (&optional (arg nil arg-supplied-p))
+  "Toggle auto-save mode. No arg = toggle; t/positive = on; nil/0 = off."
+  (if (not arg-supplied-p)
+    (minor-mode-toggle "auto-save")
+    (if (equal arg t)
+      (minor-mode-set "auto-save" t)
+      (if (numberp arg)
+        (minor-mode-set "auto-save" (> arg 0))
+        (minor-mode-set "auto-save" nil)))))
+
+(defun global-auto-save-mode (&optional (arg nil arg-supplied-p))
+  "Toggle auto-save mode globally."
+  (if (not arg-supplied-p)
+    (global-minor-mode-set "auto-save" (not (global-minor-mode-active-p "auto-save")))
+    (if (equal arg t)
+      (global-minor-mode-set "auto-save" t)
+      (if (numberp arg)
+        (global-minor-mode-set "auto-save" (> arg 0))
+        (global-minor-mode-set "auto-save" nil)))))
+
+(provide "auto-save-mode")
+)

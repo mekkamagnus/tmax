@@ -1,0 +1,29 @@
+(defmodule editor/modes/flymake
+  (export flymake-mode global-flymake-mode)
+
+;; flymake-mode.tlisp — On-the-fly linting (#153, SPEC-096)
+;; REGISTERED toggle only. Needs an external-linter integration; deferred.
+(define-minor-mode "flymake" "On-the-fly linting" "Flym")
+
+(defun flymake-mode (&optional (arg nil arg-supplied-p))
+  "Toggle flymake mode. No arg = toggle; t/positive = on; nil/0 = off."
+  (if (not arg-supplied-p)
+    (minor-mode-toggle "flymake")
+    (if (equal arg t)
+      (minor-mode-set "flymake" t)
+      (if (numberp arg)
+        (minor-mode-set "flymake" (> arg 0))
+        (minor-mode-set "flymake" nil)))))
+
+(defun global-flymake-mode (&optional (arg nil arg-supplied-p))
+  "Toggle flymake mode globally."
+  (if (not arg-supplied-p)
+    (global-minor-mode-set "flymake" (not (global-minor-mode-active-p "flymake")))
+    (if (equal arg t)
+      (global-minor-mode-set "flymake" t)
+      (if (numberp arg)
+        (global-minor-mode-set "flymake" (> arg 0))
+        (global-minor-mode-set "flymake" nil)))))
+
+(provide "flymake-mode")
+)

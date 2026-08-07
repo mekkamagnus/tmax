@@ -1,0 +1,29 @@
+(defmodule editor/modes/subword
+  (export subword-mode global-subword-mode)
+
+;; subword-mode.tlisp — Word motion stops inside CamelCase (#153, SPEC-096)
+;; REGISTERED toggle only. Needs a subword-aware word-motion TS primitive; deferred.
+(define-minor-mode "subword" "Word motion stops inside CamelCase" "SubW")
+
+(defun subword-mode (&optional (arg nil arg-supplied-p))
+  "Toggle subword mode. No arg = toggle; t/positive = on; nil/0 = off."
+  (if (not arg-supplied-p)
+    (minor-mode-toggle "subword")
+    (if (equal arg t)
+      (minor-mode-set "subword" t)
+      (if (numberp arg)
+        (minor-mode-set "subword" (> arg 0))
+        (minor-mode-set "subword" nil)))))
+
+(defun global-subword-mode (&optional (arg nil arg-supplied-p))
+  "Toggle subword mode globally."
+  (if (not arg-supplied-p)
+    (global-minor-mode-set "subword" (not (global-minor-mode-active-p "subword")))
+    (if (equal arg t)
+      (global-minor-mode-set "subword" t)
+      (if (numberp arg)
+        (global-minor-mode-set "subword" (> arg 0))
+        (global-minor-mode-set "subword" nil)))))
+
+(provide "subword-mode")
+)

@@ -1,0 +1,29 @@
+(defmodule editor/modes/font-lock
+  (export font-lock-mode global-font-lock-mode)
+
+;; font-lock-mode.tlisp — Syntax highlighting (font-lock) (#153, SPEC-096)
+;; REGISTERED toggle only. Per-buffer highlighting needs a render-path change (the client computeHighlightSpans is global); deferred.
+(define-minor-mode "font-lock" "Syntax highlighting (font-lock)" "Font")
+
+(defun font-lock-mode (&optional (arg nil arg-supplied-p))
+  "Toggle font-lock mode. No arg = toggle; t/positive = on; nil/0 = off."
+  (if (not arg-supplied-p)
+    (minor-mode-toggle "font-lock")
+    (if (equal arg t)
+      (minor-mode-set "font-lock" t)
+      (if (numberp arg)
+        (minor-mode-set "font-lock" (> arg 0))
+        (minor-mode-set "font-lock" nil)))))
+
+(defun global-font-lock-mode (&optional (arg nil arg-supplied-p))
+  "Toggle font-lock mode globally."
+  (if (not arg-supplied-p)
+    (global-minor-mode-set "font-lock" (not (global-minor-mode-active-p "font-lock")))
+    (if (equal arg t)
+      (global-minor-mode-set "font-lock" t)
+      (if (numberp arg)
+        (global-minor-mode-set "font-lock" (> arg 0))
+        (global-minor-mode-set "font-lock" nil)))))
+
+(provide "font-lock-mode")
+)

@@ -1,0 +1,29 @@
+(defmodule editor/modes/abbrev
+  (export abbrev-mode global-abbrev-mode)
+
+;; abbrev-mode.tlisp — Expand abbreviations as you type (#153, SPEC-096)
+;; REGISTERED toggle only. Needs an abbrev-table subsystem; deferred.
+(define-minor-mode "abbrev" "Expand abbreviations as you type" "Abbr")
+
+(defun abbrev-mode (&optional (arg nil arg-supplied-p))
+  "Toggle abbrev mode. No arg = toggle; t/positive = on; nil/0 = off."
+  (if (not arg-supplied-p)
+    (minor-mode-toggle "abbrev")
+    (if (equal arg t)
+      (minor-mode-set "abbrev" t)
+      (if (numberp arg)
+        (minor-mode-set "abbrev" (> arg 0))
+        (minor-mode-set "abbrev" nil)))))
+
+(defun global-abbrev-mode (&optional (arg nil arg-supplied-p))
+  "Toggle abbrev mode globally."
+  (if (not arg-supplied-p)
+    (global-minor-mode-set "abbrev" (not (global-minor-mode-active-p "abbrev")))
+    (if (equal arg t)
+      (global-minor-mode-set "abbrev" t)
+      (if (numberp arg)
+        (global-minor-mode-set "abbrev" (> arg 0))
+        (global-minor-mode-set "abbrev" nil)))))
+
+(provide "abbrev-mode")
+)

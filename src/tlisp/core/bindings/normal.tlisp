@@ -32,6 +32,14 @@
   (require-module editor/modes/truncate-lines)
   (require-module editor/modes/show-paren)
   (require-module editor/modes/whitespace)
+  ;; #153: T2 minor modes.
+  (require-module editor/modes/indent-tabs)
+  (require-module editor/modes/font-lock)
+  (require-module editor/modes/subword)
+  (require-module editor/modes/highlight-changes)
+  (require-module editor/modes/auto-save)
+  (require-module editor/modes/abbrev)
+  (require-module editor/modes/flymake)
   (require-module editor/modes/auto-fill)
 
   (require-module editor/indent/typescript)

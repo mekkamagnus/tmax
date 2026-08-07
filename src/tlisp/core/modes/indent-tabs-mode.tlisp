@@ -1,0 +1,33 @@
+(defmodule editor/modes/indent-tabs
+  (export indent-tabs-mode global-indent-tabs-mode)
+
+;; indent-tabs-mode.tlisp — per-buffer tabs-vs-spaces (#153, SPEC-096)
+;; When active, Tab inserts a literal \t (overriding the global expand-tabs of
+;; #144); when inactive, Tab falls back to expand-tabs. Consulted by insert-tab
+;; (insert-entries.tlisp) via (minor-mode-active-p "indent-tabs") — the minor-mode
+;; system is already per-buffer, so no new buffer-state plumbing. Critical for
+;; go (tabs) vs typescript/python (spaces) in the same session.
+(define-minor-mode "indent-tabs" "Tab inserts literal tabs" "Tabs")
+
+(defun indent-tabs-mode (&optional (arg nil arg-supplied-p))
+  "Toggle indent-tabs mode. No arg = toggle; t/positive = on; nil/0 = off."
+  (if (not arg-supplied-p)
+    (minor-mode-toggle "indent-tabs")
+    (if (equal arg t)
+      (minor-mode-set "indent-tabs" t)
+      (if (numberp arg)
+        (minor-mode-set "indent-tabs" (> arg 0))
+        (minor-mode-set "indent-tabs" nil)))))
+
+(defun global-indent-tabs-mode (&optional (arg nil arg-supplied-p))
+  "Toggle indent-tabs mode globally."
+  (if (not arg-supplied-p)
+    (global-minor-mode-set "indent-tabs" (not (global-minor-mode-active-p "indent-tabs")))
+    (if (equal arg t)
+      (global-minor-mode-set "indent-tabs" t)
+      (if (numberp arg)
+        (global-minor-mode-set "indent-tabs" (> arg 0))
+        (global-minor-mode-set "indent-tabs" nil)))))
+
+(provide "indent-tabs-mode")
+)

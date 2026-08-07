@@ -61,14 +61,19 @@ delimiter and leaves the cursor between."
     t))
 
 (defun insert-tab ()
-  "Insert a tab at point (or spaces if expand-tabs is non-nil, #144)."
-  (if expand-tabs
-    (let ((col (cursor-column)))
-      (let ((n (- tab-width (mod col tab-width))))
-        (while (> n 0)
-          (buffer-insert " ")
-          (setq n (- n 1)))))
-    (buffer-insert "\t"))
+  "Insert a tab at point (#144 expand-tabs, #153 indent-tabs-mode).
+indent-tabs-mode (per-buffer, minor-mode) takes precedence when active → literal
+\\t; otherwise the global expand-tabs behavior (spaces when non-nil). Default
+(indent-tabs off, expand-tabs nil) is unchanged."
+  (if (minor-mode-active-p "indent-tabs")
+    (buffer-insert "\t")
+    (if expand-tabs
+      (let ((col (cursor-column)))
+        (let ((n (- tab-width (mod col tab-width))))
+          (while (> n 0)
+            (buffer-insert " ")
+            (setq n (- n 1)))))
+      (buffer-insert "\t")))
   t)
 
 (defun insert-backspace ()

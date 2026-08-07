@@ -1,0 +1,29 @@
+(defmodule editor/modes/highlight-changes
+  (export highlight-changes-mode global-highlight-changes-mode)
+
+;; highlight-changes-mode.tlisp — Highlight unsaved edits (#153, SPEC-096)
+;; REGISTERED toggle only. Needs change-tracking since last save; deferred.
+(define-minor-mode "highlight-changes" "Highlight unsaved edits" "Chg")
+
+(defun highlight-changes-mode (&optional (arg nil arg-supplied-p))
+  "Toggle highlight-changes mode. No arg = toggle; t/positive = on; nil/0 = off."
+  (if (not arg-supplied-p)
+    (minor-mode-toggle "highlight-changes")
+    (if (equal arg t)
+      (minor-mode-set "highlight-changes" t)
+      (if (numberp arg)
+        (minor-mode-set "highlight-changes" (> arg 0))
+        (minor-mode-set "highlight-changes" nil)))))
+
+(defun global-highlight-changes-mode (&optional (arg nil arg-supplied-p))
+  "Toggle highlight-changes mode globally."
+  (if (not arg-supplied-p)
+    (global-minor-mode-set "highlight-changes" (not (global-minor-mode-active-p "highlight-changes")))
+    (if (equal arg t)
+      (global-minor-mode-set "highlight-changes" t)
+      (if (numberp arg)
+        (global-minor-mode-set "highlight-changes" (> arg 0))
+        (global-minor-mode-set "highlight-changes" nil)))))
+
+(provide "highlight-changes-mode")
+)
