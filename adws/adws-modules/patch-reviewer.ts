@@ -450,95 +450,126 @@ function safePhase(onPhase: GatePhaseCallback | undefined, phase: GatePhase, com
   try { onPhase(phase, command); } catch { /* observer must not affect gates */ }
 }
 
+/** Options for runOneGate: one of the three gates (typecheck / unit / tmax-use)
+ *  run by runGates. Encapsulates the safePhase → runRaw → (optional Promise.race
+ *  timeout) → GateResult mapping that the three gate blocks previously duplicated. */
+interface RunOneGateOptions {
+  /** Phase label emitted via onPhase before the gate runs (e.g. "gates:typecheck"). */
+  phase: GatePhase;
+  /** Human-readable command label passed to onPhase (e.g. "bun run typecheck:src"). */
+  cmdLabel: string;
+  /** Subprocess command handed to deps.runRaw (e.g. "bun", "bin/tmax-use"). */
+  cmd: string;
+  /** Subprocess args handed to deps.runRaw. */
+  args: string[];
+  /** Optional BUG-16 wall-clock timeout in ms. typecheck has none; unit=3_600_000; tmax-use=180_000. */
+  timeoutMs?: number;
+  /** Label used in spawn-failed and timeout messages (e.g. "test:unit", "test:tmax-use"). */
+  timeoutLabel: string;
+  /** Phase observer forwarded from runGates options. */
+  onPhase?: GatePhaseCallback;
+}
+
+/** Run a single gate: fire onPhase, spawn the gate command, race an optional
+ *  timeout, map the result to GateResult. Left = spawn failure (propagated up
+ *  with a `runGates: <label> spawn failed: ...` message). Right = a GateResult,
+ *  including a `{ ok: false }` GateResult on timeout. */
+function runOneGate(
+  deps: PatchReviewerDeps,
+  cwd: string,
+  opts: RunOneGateOptions,
+): TaskEither<string, GateResult> {
+  return TaskEither.from(async () => {
+    safePhase(opts.onPhase, opts.phase, opts.cmdLabel);
+    try {
+      const runP = deps.runRaw(opts.cmd, opts.args, { cwd }).run();
+      const result = opts.timeoutMs
+        ? await Promise.race([
+            runP,
+            new Promise<never>((_, reject) =>
+              setTimeout(() => reject(new Error(`BUG-16 ${opts.timeoutLabel} timeout`)), opts.timeoutMs),
+            ),
+          ])
+        : await runP;
+      if (Either.isLeft(result)) {
+        return Either.left(`runGates: ${opts.timeoutLabel} spawn failed: ${result.left}`);
+      }
+      const r = result.right;
+      return Either.right<GateResult, string>({
+        ok: r.ok,
+        exitCode: r.exitCode,
+        stdout: r.stdout,
+        stderr: r.stderr,
+        output: (r.stdout + r.stderr).trim(),
+      });
+    } catch (e) {
+      return Either.right<GateResult, string>({
+        ok: false,
+        exitCode: -1,
+        stdout: "",
+        stderr: e instanceof Error ? e.message : String(e),
+        output: opts.timeoutMs
+          ? `BUG-16: ${opts.timeoutLabel} gate timed out after ${opts.timeoutMs / 1000}s`
+          : String(e),
+      });
+    }
+  });
+}
+
 export function runGates(
   deps: PatchReviewerDeps,
   cwd: string,
   options: RunGatesOptions = {},
 ): TaskEither<string, GateResults> {
   return TaskEither.from(async () => {
-    safePhase(options.onPhase, "gates:typecheck", "bun run typecheck:src");
-    const tcRes = await deps.runRaw("bun", ["run", "typecheck:src"], { cwd }).run();
-    if (Either.isLeft(tcRes)) {
-      return Either.left(`runGates: typecheck spawn failed: ${tcRes.left}`);
-    }
-    const typecheck: GateResult = {
-      ok: tcRes.right.ok,
-      exitCode: tcRes.right.exitCode,
-      stdout: tcRes.right.stdout,
-      stderr: tcRes.right.stderr,
-      output: (tcRes.right.stdout + tcRes.right.stderr).trim(),
-    };
+    // typecheck gate — no timeout (tsc is fast and deterministic).
+    const tcEither = await runOneGate(deps, cwd, {
+      phase: "gates:typecheck",
+      cmdLabel: "bun run typecheck:src",
+      cmd: "bun",
+      args: ["run", "typecheck:src"],
+      timeoutLabel: "typecheck",
+      onPhase: options.onPhase,
+    }).run();
+    if (Either.isLeft(tcEither)) return Either.left(tcEither.left);
+    const typecheck: GateResult = tcEither.right;
 
-    safePhase(options.onPhase, "gates:unit", "bun run test:unit");
-    // BUG-16: race against a 10-min wall-clock timeout. The full suite can
-    // hang due to the cumulative server-test handle leak; without this cap the
-    // patch-review gate blocks indefinitely.
+    // unit gate — BUG-16: race against a 10-min wall-clock timeout. The full
+    // suite can hang due to the cumulative server-test handle leak; without
+    // this cap the patch-review gate blocks indefinitely. Use 'bun run
+    // test:unit' (the wrapper) which excludes adw-* LLM integration tests;
+    // bare 'bun test test/unit/' includes those 14 files which spawn real
+    // claude/codex subprocesses and hang under load.
     const UNIT_GATE_TIMEOUT_MS = 3_600_000; // outer safety net; runner has a 120s inactivity guard
-    let unit: GateResult;
-    try {
-      // BUG-16: use 'bun run test:unit' (the wrapper) which excludes adw-* LLM
-      // integration tests. Bare 'bun test test/unit/' includes those 14 files
-      // which spawn real claude/codex subprocesses and hang under load.
-      const unitResult = await Promise.race([
-        deps.runRaw("bun", ["run", "test:unit"], { cwd }).run(),
-        new Promise<never>((_, reject) =>
-          setTimeout(() => reject(new Error(`BUG-16 timeout`)), UNIT_GATE_TIMEOUT_MS),
-        ),
-      ]);
-      if (Either.isLeft(unitResult)) {
-        return Either.left(`runGates: test:unit spawn failed: ${unitResult.left}`);
-      }
-      unit = {
-        ok: unitResult.right.ok,
-        exitCode: unitResult.right.exitCode,
-        stdout: unitResult.right.stdout,
-        stderr: unitResult.right.stderr,
-        output: (unitResult.right.stdout + unitResult.right.stderr).trim(),
-      };
-    } catch (e) {
-      unit = {
-        ok: false,
-        exitCode: -1,
-        stdout: "",
-        stderr: e instanceof Error ? e.message : String(e),
-        output: `BUG-16: test:unit gate timed out after ${UNIT_GATE_TIMEOUT_MS / 1000}s`,
-      };
-    }
+    const unitEither = await runOneGate(deps, cwd, {
+      phase: "gates:unit",
+      cmdLabel: "bun run test:unit",
+      cmd: "bun",
+      args: ["run", "test:unit"],
+      timeoutMs: UNIT_GATE_TIMEOUT_MS,
+      timeoutLabel: "test:unit",
+      onPhase: options.onPhase,
+    }).run();
+    if (Either.isLeft(unitEither)) return Either.left(unitEither.left);
+    const unit: GateResult = unitEither.right;
 
     // tmax-use gate: optional, runs only if playbooks or tests exist.
+    // Spawn bin/tmax-use directly, NOT 'bun run test:tmax-use'. Same grandchild
+    // drain-block fix as BUG-18. BUG-16: race against a 3-min wall-clock timeout.
     let tmaxUse: GateResult | undefined;
     if (hasTmaxUseTargets(cwd)) {
-      safePhase(options.onPhase, "gates:tmax-use", "bin/tmax-use test");
-      // Spawn bin/tmax-use directly, NOT 'bun run test:tmax-use'. Same grandchild
-      // drain-block fix as BUG-18.
-      // BUG-16: race against a 3-min wall-clock timeout.
       const TMAXUSE_GATE_TIMEOUT_MS = 180_000;
-      try {
-        const tuRes = await Promise.race([
-          deps.runRaw("bin/tmax-use", ["test"], { cwd }).run(),
-          new Promise<never>((_, reject) =>
-            setTimeout(() => reject(new Error("BUG-16 tmax-use timeout")), TMAXUSE_GATE_TIMEOUT_MS),
-          ),
-        ]);
-        if (Either.isLeft(tuRes)) {
-          return Either.left(`runGates: test:tmax-use spawn failed: ${tuRes.left}`);
-        }
-        tmaxUse = {
-          ok: tuRes.right.ok,
-          exitCode: tuRes.right.exitCode,
-          stdout: tuRes.right.stdout,
-          stderr: tuRes.right.stderr,
-          output: (tuRes.right.stdout + tuRes.right.stderr).trim(),
-        };
-      } catch (e) {
-        tmaxUse = {
-          ok: false,
-          exitCode: -1,
-          stdout: "",
-          stderr: e instanceof Error ? e.message : String(e),
-          output: `BUG-16: test:tmax-use gate timed out after ${TMAXUSE_GATE_TIMEOUT_MS / 1000}s`,
-        };
-      }
+      const tuEither = await runOneGate(deps, cwd, {
+        phase: "gates:tmax-use",
+        cmdLabel: "bin/tmax-use test",
+        cmd: "bin/tmax-use",
+        args: ["test"],
+        timeoutMs: TMAXUSE_GATE_TIMEOUT_MS,
+        timeoutLabel: "test:tmax-use",
+        onPhase: options.onPhase,
+      }).run();
+      if (Either.isLeft(tuEither)) return Either.left(tuEither.left);
+      tmaxUse = tuEither.right;
     }
 
     return Either.right<GateResults, string>({ typecheck, unit, tmaxUse });
