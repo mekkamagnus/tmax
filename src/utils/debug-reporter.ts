@@ -194,7 +194,7 @@ export class DebugReporter {
         platform: process.platform,
         bunVersion: typeof Bun !== 'undefined' ? Bun.version : 'N/A',
         nodeVersion: process.version,
-        tmaxVersion: "1.0.0", // TODO: Get from package.json
+        tmaxVersion: process.env.TMAX_VERSION ?? "0.2.0", // #163: was hardcoded "1.0.0"
         workingDirectory: process.cwd(),
         ttyStatus: process.stdin.isTTY
       }
