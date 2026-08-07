@@ -2303,14 +2303,15 @@ export class TLispEvaluator implements ModuleFormsContext, TestFormsContext {
       const params = clauseParts[1];
       const handlerBody = clauseParts.slice(2);
 
-      if (!condName || (condName.type !== "symbol" && condName.type !== "string")) {
+      const isCatchAllT = condName?.type === "boolean" && condName?.value === true;
+      if (!condName || (!isCatchAllT && condName.type !== "symbol" && condName.type !== "string")) {
         return Either.left({
           type: 'EvalError', variant: 'SyntaxError',
           message: "condition-case condition name must be a symbol or string",
           details: { condType: condName?.type }
         });
       }
-      const condValue = String(condName.value);
+      const condValue = isCatchAllT ? "t" : String(condName.value);
 
       // `error` and `t` are universal — they match any error. Otherwise exact match (future:
       // typed conditions). This is intentionally simple for now.
@@ -3031,7 +3032,18 @@ export const createEvaluatorWithBuiltins = (moduleRegistry?: ModuleRegistry): { 
       });
     }
 
-    return Either.right(createBoolean(a === b));
+    // eq: identity comparison. Primitives (number, string, boolean, nil, symbol)
+    // compare by type + value; lists/functions/other complex types use reference
+    // equality (same object in memory). Symbols compare by name since T-Lisp
+    // doesn't intern them (#128).
+    const sameType = a.type === b.type;
+    const sameValue = sameType && (
+      a.type === "nil" ? true :
+      a.type === "number" || a.type === "string" || a.type === "boolean" || a.type === "symbol"
+        ? a.value === b.value
+        : a === b
+    );
+    return Either.right(createBoolean(sameValue));
   }, "eq"));
   
   // ============================================================================
