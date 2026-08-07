@@ -31,6 +31,30 @@
 (key-bind "b" "(progn (word-previous) (visual-update-end))" "visual")
 (key-bind "e" "(progn (word-end) (visual-update-end))" "visual")
 
+;; WORD navigation (#146) — same pattern, WORD variants
+(key-bind "W" "(progn (word-next-WORD) (visual-update-end))" "visual")
+(key-bind "B" "(progn (word-previous-WORD) (visual-update-end))" "visual")
+(key-bind "E" "(progn (word-end-WORD) (visual-update-end))" "visual")
+
+;; Line navigation (#146) — extend selection to line boundaries
+(key-bind "0" "(progn (line-first-column) (visual-update-end))" "visual")
+(key-bind "$" "(progn (line-last-column) (visual-update-end))" "visual")
+(key-bind "_" "(progn (line-first-non-blank) (visual-update-end))" "visual")
+
+;; Buffer navigation (#146) — extend selection to buffer boundaries
+(key-bind "G" "(progn (vim-G) (visual-update-end))" "visual")
+
+;; Paragraph motion (#146) — extend selection
+(key-bind "}" "(progn (paragraph-next) (visual-update-end))" "visual")
+(key-bind "{" "(progn (paragraph-previous) (visual-update-end))" "visual")
+
+;; Toggle-off (#146) — pressing v/V/C-v in visual mode exits to normal
+(key-bind "v" "(visual-exit)" "visual")
+(key-bind "V" "(visual-exit)" "visual")
+
+;; Additional operators (#146)
+(key-bind "x" "(visual-delete)" "visual")
+
 ;; Exit visual mode (Escape)
 (key-bind "Escape" "(visual-exit)" "visual")
 
