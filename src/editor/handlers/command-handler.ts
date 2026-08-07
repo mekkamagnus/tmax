@@ -7,6 +7,10 @@ import type { EditorDispatchPort } from "./editor-dispatch-port.ts";
 import { resolveMapping } from "../key-resolution.ts";
 import { log } from "../../utils/logger.ts";
 
+// #147: Command-line history (Up/Down navigation).
+const commandHistory: string[] = [];
+let historyIndex = -1;
+
 /**
  * Handle key input in command mode
  * @param editor - Editor instance
@@ -81,10 +85,47 @@ export async function handleCommandMode(editor: EditorDispatchPort, key: string,
       editor.logMessage(`Command error: ${errorMsg}`, 'error');
     }
 
+    // #147: Record command in history before clearing
+    if (cmdLine.trim().length > 0) {
+      commandHistory.push(cmdLine);
+      if (commandHistory.length > 100) commandHistory.shift();
+    }
+    historyIndex = -1;
+
     // Clear command line and return to normal mode
     editor.applyUpdate({ type: "ClearCommandLine" });
     editor.applyUpdate({ type: "SetMode", mode: "normal" });
     return; // Don't process this key further
+  }
+  // #147: In-line editing keys (C-w delete word, C-u clear line, Up/Down history)
+  else if (normalizedKey === "C-w") {
+    // Delete the last word from the command line (vim C-w semantics)
+    const line = editor.getModel().commandLine;
+    const trimmed = line.replace(/\s+$/, '');
+    const lastSpace = trimmed.lastIndexOf(' ');
+    editor.applyUpdate({ type: "SetCommandLine", value: lastSpace >= 0 ? trimmed.substring(0, lastSpace + 1) : "" });
+    return;
+  } else if (normalizedKey === "C-u") {
+    // Clear the entire command line (vim C-u semantics)
+    editor.applyUpdate({ type: "SetCommandLine", value: "" });
+    return;
+  } else if (normalizedKey === "Up") {
+    // Navigate command history backward
+    if (commandHistory.length > 0 && historyIndex < commandHistory.length - 1) {
+      historyIndex++;
+      editor.applyUpdate({ type: "SetCommandLine", value: commandHistory[commandHistory.length - 1 - historyIndex]! });
+    }
+    return;
+  } else if (normalizedKey === "Down") {
+    // Navigate command history forward
+    if (historyIndex > 0) {
+      historyIndex--;
+      editor.applyUpdate({ type: "SetCommandLine", value: commandHistory[commandHistory.length - 1 - historyIndex]! });
+    } else {
+      historyIndex = -1;
+      editor.applyUpdate({ type: "SetCommandLine", value: "" });
+    }
+    return;
   }
   // For other keys, fall through to key binding system
   else {
