@@ -13,7 +13,7 @@ describe("TerminalManager", () => {
     const mgr = new TerminalManager();
     const id = mgr.createTerminal({ cols: 80, rows: 24, command: "/bin/sh", cwd: "/tmp" });
 
-    expect(id).toMatch(/^term-\d+$/);
+    expect(id).toMatch(/^term-[a-f0-9]{8}$/);
     expect(mgr.isAlive(id)).toBe(true);
 
     // Write a command and check output appears
@@ -91,7 +91,7 @@ describe("shell-ops (T-Lisp primitives)", () => {
     const { ops, mgr } = setupShellOps();
     const result = ops.get("shell")!([]);
     expect(result._tag).toBe("Right");
-    expect((result as any).right.value).toMatch(/^term-\d+$/);
+    expect((result as any).right.value).toMatch(/^term-[a-f0-9]{8}$/);
     mgr.destroyAll();
   });
 

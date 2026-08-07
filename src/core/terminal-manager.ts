@@ -27,11 +27,12 @@ export interface TerminalInstance {
  */
 export class TerminalManager {
   private terminals = new Map<string, TerminalInstance>();
-  private counter = 0;
 
   /** Create a new terminal (spawns $SHELL in a PTY). Returns the terminal ID. */
-  createTerminal(opts?: { cols?: number; rows?: number; cwd?: string; command?: string }): string {
-    const id = `term-${++this.counter}`;
+  createTerminal(opts?: { cols?: number; rows?: number; cwd?: string }): string {
+    // Security: use random ID (not predictable counter) + only spawn $SHELL
+    // (no arbitrary command parameter) — see ADR-0195.
+    const id = `term-${crypto.randomUUID().slice(0, 8)}`;
     const cols = opts?.cols ?? 80;
     const rows = opts?.rows ?? 24;
 
@@ -48,8 +49,9 @@ export class TerminalManager {
       screen.apply(op);
     });
 
+    // Security (#164 review): only spawn the user's $SHELL — no arbitrary command.
+    // If a custom command is needed in future, gate behind an allowlist.
     const pty = spawn({
-      command: opts?.command,
       cwd: opts?.cwd,
       cols,
       rows,

@@ -20,19 +20,20 @@ export function createShellOps(
   const api = new Map<string, TLispFunctionImpl>();
 
   /**
-   * shell — Create a new terminal. Returns the terminal ID.
-   * Usage: (shell) or (shell "command") or (shell "command" "cwd")
+   * shell — Create a new terminal (spawns $SHELL). Returns the terminal ID.
+   * Usage: (shell) or (shell "cwd")
+   *
+   * Security: only spawns $SHELL (no arbitrary command parameter). The cwd is
+   * user-controlled (terminals inherently have full filesystem access). See ADR-0195.
    */
   api.set("shell", (args: TLispValue[]): Either<AppError, TLispValue> => {
-    const command = args.length > 0 && args[0]?.type === "string" ? args[0]!.value as string : undefined;
-    const cwd = args.length > 1 && args[1]?.type === "string" ? args[1]!.value as string : undefined;
+    const cwd = args.length > 0 && args[0]?.type === "string" ? args[0]!.value as string : undefined;
     const size = getTerminalSize();
 
     const id = terminalManager.createTerminal({
       cols: size.width,
-      rows: Math.max(1, size.height - 1), // -1 for status line
+      rows: Math.max(1, size.height - 1),
       cwd,
-      command,
     });
 
     return Either.right(createString(id));
