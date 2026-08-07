@@ -40,6 +40,9 @@ import {
   waitForAttachedFrame, type TmuxSession,
 } from './headed.ts';
 
+// #140: one-shot warning flag for screen_contains headless-assert trap.
+let screenWarned = false;
+
 export interface StepResult {
   readonly name: string;
   readonly passed: boolean;
@@ -423,6 +426,13 @@ function evaluateExpect(expect: PlaybookAssert, evalResult: string, ctx: Playboo
   }
   const screenContains = expect.screen_contains;
   if (screenContains !== undefined) {
+    // #140: warn that screen_contains asserts against the headless daemon-capture
+    // render, NOT the real TUI/Steep frontend. This is the BUG-24 false-green
+    // trap — use --headed + headed: true for real-TUI assertions.
+    if (!screenWarned) {
+      screenWarned = true;
+      process.stderr.write('WARNING: screen_contains/screen_not_contains assert against the headless daemon-capture render, not the real TUI. Use --headed for real-TUI assertions. (#140)\n');
+    }
     chain = chain.flatMap(() => collect(assertScreenContains(ctx.frame, screenContains)));
   }
   const screenNotContains = expect.screen_not_contains;
