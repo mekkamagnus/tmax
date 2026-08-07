@@ -24,8 +24,11 @@ export async function handleInsertMode(editor: EditorDispatchPort, key: string, 
     });
   }
 
-  // Handle printable characters in insert mode
-  if (key.length === 1 && key >= " " && key <= "~") {
+  // Handle printable characters in insert mode (#142: accept any printable
+  // char including Unicode — was ASCII-only `key <= "~"` which rejected é, 中,
+  // emoji, etc.)
+  const charCode = key.length === 1 ? key.charCodeAt(0) : 0;
+  if (key.length === 1 && charCode >= 32 && charCode !== 127) {
     // Clear the splash screen on first keystroke (like vim's intro).
     editor.executeCommand("(when (and (string= (buffer-name) \"*scratch*\") (string-prefix-p \"  tmax\" (buffer-text))) (cursor-move 0 0) (let ((n (buffer-line-count))) (while (> n 0) (setq n (- n 1)) (buffer-delete-line))) (cursor-move 0 0))");
     const escapedKey = editor.escapeKeyForTLisp(key);
