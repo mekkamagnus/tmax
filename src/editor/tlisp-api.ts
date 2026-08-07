@@ -70,6 +70,7 @@ import { createCommentOps } from "./api/comment-ops.ts";
 import { createEvalOps } from "./api/eval-ops.ts";
 import { createCaseOps } from "./api/case-ops.ts";
 import { createOccurOps } from "./api/occur-ops.ts";
+import { createProjectOps } from "./api/project-ops.ts";
 
 /**
  * T-Lisp function implementation that returns Either for error handling
@@ -1843,6 +1844,16 @@ function buildEditorAPIContributions(): readonly EditorAPIContribution[] {
       name: "occur",
       factory: (_ctx: EditorAPIContext): Map<string, TLispFunctionImpl> => {
         return createOccurOps();
+      },
+    },
+
+    // ── project (#164 Task 6-7: root detection + file discovery + search) ──
+    {
+      name: "project",
+      factory: (ctx: EditorAPIContext): Map<string, TLispFunctionImpl> => {
+        return createProjectOps(
+          () => ctx.access.getModel().currentFilename ?? undefined,
+        );
       },
     },
   ];
