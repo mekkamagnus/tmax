@@ -1,0 +1,12 @@
+(defmodule editor/modes/purescript
+  (export)
+
+;; purescript-mode.tlisp — PureScript major mode (#166, SPEC-098)
+;; Haskell-derived syntax: significant whitespace, :: type annotations,
+;; where/do/let blocks, type classes. 4-backslash escapes per ADR-0193.
+(major-mode-register "purescript" '(".purs") nil
+  '("where$" "do$" "let$" "in$" "then$" "else$" "=$" "::$" "\\\\{$")
+  '("^\\\\s*\\\\}" "^\\\\s*in\\\\b" "^\\\\s*else" "^\\\\s*then"))
+
+(provide "purescript-mode")
+)
