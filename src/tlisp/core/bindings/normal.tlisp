@@ -57,6 +57,8 @@
   ;; CHORE-44 Change 6: T-Lisp owns command-line parsing + post-newline policy.
   (require-module editor/commands/command-line)
   (require-module editor/commands/post-newline)
+  ;; #158: Wire Fikra AI assistant into startup.
+  (require-module fikra/mode)
 
 ;; normal.tlisp
 ;; Default key bindings for normal mode — single source of truth.

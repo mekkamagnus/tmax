@@ -19,7 +19,7 @@
     (message "Fikra: not active — press SPC a a first")
     (progn
       ;; Create capture buffer
-      (if (not (buffer-exists-p fikra-capture-buffer-name))
+      (if (not ((member fikra-capture-buffer-name (buffer-list))))
         (buffer-create fikra-capture-buffer-name)
         ;; Clear existing content
         (progn

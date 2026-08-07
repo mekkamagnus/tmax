@@ -31,10 +31,15 @@ OPTIONS is an alist of backend-specific settings."
     (if (not (string= line ""))
       (let ((json (json-read-from-string line)))
         (if (and json (not (eq json nil)))
-          (let ((type-val (alist-get "type" json))
-                (content-val (alist-get "content" json)))
-            (if (and content-val (not (string= content-val "")))
-              (fikra-token-insert (if type-val type-val "text") content-val))))))))
+          (let ((type-entry (assoc "type" json))
+                (content-entry (or (assoc "content" json) (assoc "text" json))))
+            ;; #158: was (alist-get "content" json) — alist-get doesn't exist.
+            ;; Claude stream-json sends {"type":"assistant","message":{"content":[{"text":"..."}]}}
+            ;; We try "content" first, then "text" (delta format).
+            (let ((type-val (if type-entry (cdr type-entry) nil))
+                  (content-val (if content-entry (cdr content-entry) nil)))
+              (if (and content-val (not (string= content-val "")))
+                (fikra-token-insert (if type-val type-val "text") content-val)))))))))
 
 (defun fikra-backend-claude-sentinel (pid exit-code)
   "Handle claude process exit."
