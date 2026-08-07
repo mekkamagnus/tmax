@@ -1,36 +1,30 @@
 /**
  * @file pty.ts
- * @description Zero-dependency PTY manager using `script(1)` + Bun.spawn.
+ * @description Zero-dependency PTY manager using Bun's native terminal API.
  *
- * node-pty (the standard Node.js PTY library) is INCOMPATIBLE with Bun — its
- * native addon calls `posix_spawnp` which fails under Bun's runtime. Instead,
- * we use the Unix `script` command (available on macOS + Linux) to allocate a
- * real PTY, communicating via Bun.spawn's stdin/stdout pipes.
- *
- * The inner process (shell, vim, htop, Claude Code) sees a REAL tty — they can
- * call `isatty()`, use cursor addressing, full-screen TUI, colors, etc. The
- * tradeoff vs node-pty: no direct SIGWINCH forwarding (resize via `stty` inside
- * the PTY instead) and a thin layer of echo/latency from the `script` wrapper.
- *
- * Architecture:
- *   tmax ←(pipes)→ script ←(PTY)→ shell/agent
+ * Bun shipped first-party PTY support in v1.3.5 via `Bun.spawn({ terminal })`.
+ * Under the hood it calls `openpty()` on POSIX. No node-pty (incompatible with
+ * Bun — microsoft/node-pty#632 closed out-of-scope), no script(1) hack.
  *
  * @see SPEC-097 RFC-014A (shell-mode)
+ * @see https://bun.com/reference/bun/Terminal
  */
 
 /** A handle to a running PTY process. */
 export interface PTYHandle {
-  /** Write data to the PTY's stdin (goes to the shell/program). */
+  /** Write data to the PTY (goes to the shell/program). */
   write(data: string | Uint8Array): void;
-  /** Resize the PTY (sends `stty cols W rows H` into the PTY). */
+  /** Resize the PTY. */
   resize(cols: number, rows: number): void;
+  /** Set raw mode on the PTY (pass-through all keys). */
+  setRawMode(enabled: boolean): void;
   /** Kill the process. */
   kill(signal?: string): void;
-  /** Register a callback for PTY output (stdout+stderr combined). */
+  /** Register a callback for PTY output. */
   onOutput(cb: (data: string) => void): void;
   /** Register a callback for process exit. */
   onExit(cb: (code: number | null) => void): void;
-  /** The PID of the spawned process (for process-state queries). */
+  /** The PID of the spawned process. */
   readonly pid: number;
 }
 
@@ -50,16 +44,15 @@ export interface PTYSpawnOptions {
   rows?: number;
 }
 
-/** Default terminal dimensions. */
 const DEFAULT_COLS = 80;
 const DEFAULT_ROWS = 24;
 
 /**
- * Spawn a process with a real PTY using `script(1)`.
+ * Spawn a process with a real PTY using Bun's native terminal API.
  *
- * `script -q /dev/null <command>` allocates a pseudo-terminal for the inner
- * command. tmax communicates with `script` via Bun.spawn's stdin/stdout pipes.
- * The inner process sees a real tty (/dev/ttys* or /dev/pts/*).
+ * `Bun.spawn({ terminal })` allocates a pseudo-terminal via `openpty()`. The
+ * inner process sees a real tty — `isatty()` returns true, cursor addressing
+ * works, vim/htop/Claude Code render correctly.
  */
 export function spawn(opts: PTYSpawnOptions = {}): PTYHandle {
   const command = opts.command ?? process.env.SHELL ?? "/bin/sh";
@@ -69,95 +62,42 @@ export function spawn(opts: PTYSpawnOptions = {}): PTYHandle {
     ...process.env,
     ...(opts.env ?? {}),
     TERM: opts.env?.TERM ?? process.env.TERM ?? "xterm-256color",
-    // Force line-buffered output for responsiveness
-    LC_ALL: process.env.LC_ALL ?? "en_US.UTF-8",
   };
   const cols = opts.cols ?? DEFAULT_COLS;
   const rows = opts.rows ?? DEFAULT_ROWS;
 
-  // Build the script(1) command line. On macOS: `script -q /dev/null cmd args...`
-  // On Linux: `script -qec "cmd args" /dev/null` (different flag syntax).
-  // Detect the platform.
-  const isLinux = process.platform === "linux";
-  const fullCommand = [command, ...args];
-
-  let scriptArgs: string[];
-  if (isLinux) {
-    // Linux script: `script -qec "command" /dev/null`
-    scriptArgs = ["-qe", "-c", fullCommand.join(" "), "/dev/null"];
-  } else {
-    // macOS script: `script -q /dev/null command args...`
-    scriptArgs = ["-q", "/dev/null", ...fullCommand];
-  }
-
-  const proc = Bun.spawn(["script", ...scriptArgs], {
-    stdin: "pipe",
-    stdout: "pipe",
-    stderr: "pipe",
-    cwd,
-    env,
-  });
-
   const outputCallbacks: ((data: string) => void)[] = [];
   const exitCallbacks: ((code: number | null) => void)[] = [];
-  let exited = false;
-
-  // Set initial terminal size inside the PTY
-  proc.stdin.write(`stty cols ${cols} rows ${rows} 2>/dev/null;`);
-
-  // Read stdout (PTY output goes here)
   const decoder = new TextDecoder();
-  (async () => {
-    const reader = proc.stdout.getReader();
-    try {
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        const text = decoder.decode(value, { stream: true });
-        for (const cb of outputCallbacks) cb(text);
-      }
-    } catch {
-      // Stream closed
-    }
-  })();
 
-  // Read stderr (some output may go here)
-  (async () => {
-    const reader = proc.stderr.getReader();
-    try {
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        const text = decoder.decode(value, { stream: true });
+  const proc = Bun.spawn([command, ...args], {
+    cwd,
+    env,
+    terminal: {
+      cols,
+      rows,
+      data(_term, data: Uint8Array) {
+        const text = decoder.decode(data, { stream: true });
         for (const cb of outputCallbacks) cb(text);
-      }
-    } catch {
-      // Stream closed
-    }
-  })();
-
-  // Handle exit
-  (async () => {
-    const code = await proc.exited;
-    if (exited) return;
-    exited = true;
-    for (const cb of exitCallbacks) cb(code);
-  })();
+      },
+      exit(_term, code: number, _signal: string | null) {
+        for (const cb of exitCallbacks) cb(code);
+      },
+    },
+  });
 
   return {
     pid: proc.pid!,
     write(data: string | Uint8Array): void {
-      if (exited) return;
-      proc.stdin.write(data);
+      proc.terminal!.write(data);
     },
     resize(c: number, r: number): void {
-      if (exited) return;
-      // Send stty resize into the PTY (script doesn't forward SIGWINCH).
-      // The shell processes stty and updates the terminal dimensions.
-      proc.stdin.write(`stty cols ${c} rows ${r} 2>/dev/null;`);
+      proc.terminal!.resize(c, r);
+    },
+    setRawMode(enabled: boolean): void {
+      proc.terminal!.setRawMode(enabled);
     },
     kill(signal?: string): void {
-      if (exited) return;
       try {
         proc.kill(signal as any ?? "SIGTERM");
       } catch {
