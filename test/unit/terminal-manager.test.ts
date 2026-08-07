@@ -11,7 +11,7 @@ import { createShellOps } from "../../src/editor/api/shell-ops.ts";
 describe("TerminalManager", () => {
   test("createTerminal spawns a shell and produces output", async () => {
     const mgr = new TerminalManager();
-    const id = mgr.createTerminal({ cols: 80, rows: 24, command: "/bin/sh", cwd: "/tmp" });
+    const id = mgr.createTerminal({ cols: 80, rows: 24, cwd: "/tmp" });
 
     expect(id).toMatch(/^term-[a-f0-9]{8}$/);
     expect(mgr.isAlive(id)).toBe(true);
@@ -41,8 +41,8 @@ describe("TerminalManager", () => {
 
   test("list returns all terminal IDs", () => {
     const mgr = new TerminalManager();
-    const id1 = mgr.createTerminal({ cols: 80, rows: 24, command: "/bin/sh", cwd: "/tmp" });
-    const id2 = mgr.createTerminal({ cols: 80, rows: 24, command: "/bin/sh", cwd: "/tmp" });
+    const id1 = mgr.createTerminal({ cols: 80, rows: 24, cwd: "/tmp" });
+    const id2 = mgr.createTerminal({ cols: 80, rows: 24, cwd: "/tmp" });
 
     const ids = mgr.list();
     expect(ids).toContain(id1);
@@ -54,7 +54,7 @@ describe("TerminalManager", () => {
 
   test("kill terminates the terminal", async () => {
     const mgr = new TerminalManager();
-    const id = mgr.createTerminal({ cols: 80, rows: 24, command: "/bin/sh", args: ["-c", "sleep 30"], cwd: "/tmp" });
+    const id = mgr.createTerminal({ cols: 80, rows: 24, cwd: "/tmp" });
 
     expect(mgr.isAlive(id)).toBe(true);
     mgr.kill(id, "SIGKILL");
@@ -68,7 +68,7 @@ describe("TerminalManager", () => {
 
   test("resize updates the screen buffer dimensions", () => {
     const mgr = new TerminalManager();
-    const id = mgr.createTerminal({ cols: 80, rows: 24, command: "/bin/sh", cwd: "/tmp" });
+    const id = mgr.createTerminal({ cols: 80, rows: 24, cwd: "/tmp" });
 
     mgr.resize(id, 120, 40);
 

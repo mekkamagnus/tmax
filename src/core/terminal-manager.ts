@@ -41,9 +41,14 @@ export class TerminalManager {
 
     // The ANSI parser writes parsed ops to the screen buffer
     const parser = new ANSIParser((op: ScreenOp) => {
-      // Handle cursorMove with row=-1 (current row) — the parser uses this for CR
-      if (op.type === "cursorMove" && op.row === -1) {
-        screen.apply({ type: "cursorMove", row: screen.cursor.row, col: op.col });
+      // Handle cursorMove with row=-1 (current row, from CR/CHA) or col=-1
+      // (current col, from VPA). The screen buffer can't handle -1 values.
+      if (op.type === "cursorMove") {
+        screen.apply({
+          type: "cursorMove",
+          row: op.row === -1 ? screen.cursor.row : op.row,
+          col: op.col === -1 ? screen.cursor.col : op.col,
+        });
         return;
       }
       screen.apply(op);

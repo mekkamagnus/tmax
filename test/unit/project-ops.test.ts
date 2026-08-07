@@ -50,7 +50,7 @@ describe("project-ops", () => {
 
     const result = ops.get("project-detect-root")!([str(join(noProj, "file.txt"))]);
     expect(result._tag).toBe("Right");
-    expect(result.right.type).toBe("nil");
+    expect((result as any).right.type).toBe("nil");
   });
 
   test("project-files-walk lists files, respects ignores", () => {

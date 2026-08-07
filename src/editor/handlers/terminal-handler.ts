@@ -63,15 +63,16 @@ function keyToPtyBytes(normalizedKey: string, rawKey: string): string | null {
  * C-\ exits terminal mode (back to normal editor mode).
  */
 export async function handleTerminalMode(editor: EditorDispatchPort, key: string, normalizedKey: string): Promise<void> {
+  const interp = editor.getInterpreter();
+
   // C-\ is the escape hatch — exit terminal mode
-  if (normalizedKey === "C-\\" || normalizedKey === "C-\\") {
-    editor.applyUpdate({ type: "SetMode", mode: "normal" });
-    editor.applyUpdate({ type: "SetStatusMessage", message: "" });
+  if (normalizedKey === "C-\\") {
+    // Clear the active terminal reference + return to normal mode
+    interp.execute("(shell-exit)");
     return;
   }
 
   // Get the active terminal ID from the T-Lisp variable
-  const interp = editor.getInterpreter();
   const result = interp.execute("(if (boundp '*active-terminal*) *active-terminal* nil)") as any;
   const terminalId = result?._tag === "Right" ? result.right?.value : null;
 

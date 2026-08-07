@@ -2015,6 +2015,8 @@ export class Editor {
       case "\x19": return "C-y";
       case "\x1a": return "C-z";
       case "\x1b": return "Escape";
+      case "\x1c": return "C-\\"; // #164: Ctrl-backslash — terminal-mode escape hatch
+      case "\x1d": return "C-]";
       case "\x7f": return "Backspace";
       case "\r": return "Enter";
       case "\n": return "Enter";
