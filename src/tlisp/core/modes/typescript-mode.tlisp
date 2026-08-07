@@ -2,7 +2,13 @@
   (export)
 
 ;; typescript-mode.tlisp — TypeScript/TSX major mode
+;; #151: indent rules use 4-backslash escapes so they survive the (tokenizer+
+;; parser) string parse as correct regexes; major-mode-ops now stores them
+;; directly (no evalTlisp re-embed). `\\($?` was malformed (`?` after `$`) → `\\($`.
 (major-mode-register "typescript" '(".ts" ".tsx" ".js" ".jsx" ".mjs") "typescript"
-  '("\\{$" "\\($?" "\\[$" "=>$" "else$" "catch$" "finally$")
-  '("^\\s*}" "^\\s*\\)" "^\\s*\\]" "^\\s*else" "^\\s*catch" "^\\s*finally"))
+  '("\\\\{$" "\\\\($" "\\\\[$" "=>$" "else$" "catch$" "finally$")
+  '("^\\\\s*}" "^\\\\s*[)]" "^\\\\s*]" "^\\\\s*else" "^\\\\s*catch" "^\\\\s*finally"))
 )
+
+;; #151: per-mode keymap. g = re-indents the whole buffer using the mode rules.
+(key-bind "g =" "(reindent-buffer)" "normal" "typescript")

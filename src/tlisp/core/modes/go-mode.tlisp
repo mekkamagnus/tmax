@@ -2,7 +2,11 @@
   (export)
 
 ;; go-mode.tlisp — Go major mode
+;; #151: 4-backslash escapes (see typescript-mode.tlisp).
 (major-mode-register "go" '(".go") "go"
-  '("\\{$" "\\($" "\\[$" "=>$")
-  '("^\\s*}" "^\\s*\\)" "^\\s*\\]"))
+  '("\\\\{$" "\\\\(" "\\\\[$" "=>$")
+  '("^\\\\s*}" "^\\\\s*[)]" "^\\\\s*]"))
 )
+
+;; #151: per-mode keymap. g = re-indents the whole buffer using the mode rules.
+(key-bind "g =" "(reindent-buffer)" "normal" "go")

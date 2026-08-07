@@ -18,6 +18,7 @@
 import type { TLispValue, TLispFunctionImpl } from "../../tlisp/types.ts";
 import { createNil, createString, createList } from "../../tlisp/values.ts";
 import type { TextBuffer } from "../../core/contracts/buffer.ts";
+import { indentRulesByBuffer } from "./indent-ops.ts";
 import { runModel, readModelField, type EditorModelAccess } from "./state-context.ts";
 import { Either } from "../../utils/task-either.ts";
 import {
@@ -178,13 +179,19 @@ export function createMajorModeOps(
       evalTlisp(`(syntax-set-language "${config.syntaxLanguage}")`);
     }
 
-    // If the mode has indent rules, set them
+    // #151: store the mode's indent rules DIRECTLY (the as-registered config
+    // values), bypassing the evalTlisp `(indent-set-rules ...)` re-embed. That
+    // re-embedded the regexes into a new source string and re-parsed them,
+    // corrupting backslashes a second time. Direct storage preserves them.
     if (config.indentIncrease && config.indentIncrease.length > 0) {
-      const incStr = config.indentIncrease.map((s) => `"${s}"`).join(" ");
-      const decStr = config.indentDecrease && config.indentDecrease.length > 0
-        ? config.indentDecrease.map((s) => `"${s}"`).join(" ")
-        : "";
-      evalTlisp(`(indent-set-rules '(${incStr}) '(${decStr}))`);
+      const buf = getCurrentBuffer();
+      if (buf) {
+        
+        indentRulesByBuffer.set(buf, {
+          increase: config.indentIncrease,
+          decrease: config.indentDecrease ?? [],
+        });
+      }
     }
 
     // Run the mode's activate hook
@@ -237,11 +244,14 @@ export function createMajorModeOps(
         }
 
         if (config.indentIncrease && config.indentIncrease.length > 0) {
-          const incStr = config.indentIncrease.map((s) => `"${s}"`).join(" ");
-          const decStr = config.indentDecrease && config.indentDecrease.length > 0
-            ? config.indentDecrease.map((s) => `"${s}"`).join(" ")
-            : "";
-          evalTlisp(`(indent-set-rules '(${incStr}) '(${decStr}))`);
+          // #151: direct-store (see major-mode-set) — no evalTlisp re-embed.
+          const buf = getCurrentBuffer();
+          if (buf) {
+            indentRulesByBuffer.set(buf, {
+              increase: config.indentIncrease,
+              decrease: config.indentDecrease ?? [],
+            });
+          }
         }
 
         // Run the mode's activate hook

@@ -2,7 +2,11 @@
   (export)
 
 ;; lisp-mode.tlisp — Lisp/T-Lisp major mode
+;; #151: 4-backslash escapes (see typescript-mode.tlisp).
 (major-mode-register "lisp" '(".tlisp" ".lisp" ".el" ".clj") "lisp"
-  '("\\($" "defun$" "let$" "if$" "when$" "unless$" "progn$" "cond$" "do$")
-  '("^\\s*\\)"))
+  '("\\\\($" "defun$" "let$" "if$" "when$" "unless$" "progn$" "cond$" "do$")
+  '("^\\\\s*[)]"))
 )
+
+;; #151: per-mode keymap. g = re-indents the whole buffer using the mode rules.
+(key-bind "g =" "(reindent-buffer)" "normal" "lisp")

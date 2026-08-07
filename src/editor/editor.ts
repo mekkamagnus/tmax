@@ -76,6 +76,7 @@ import { createValidationError } from "../error/types.ts";
 export type { KeyMapping } from "./key-resolution.ts";
 export { resolveMapping } from "./key-resolution.ts";
 import type { KeyMapping } from "./key-resolution.ts";
+import { indentRulesByBuffer } from "./api/indent-ops.ts";
 
 /**
  * Core editor implementation
@@ -321,6 +322,19 @@ export class Editor {
       // reducer alone cannot cover (tab/window/metadata/cursor-window sync).
       applyUpdate: (msg: Msg) => { editor.applyUpdate(msg); },
       setCurrentBuffer: (v: TextBuffer | null) => {
+        // #151: TextBuffer is immutable, so every mutation (insert/replace/…)
+        // swaps model.currentBuffer to a NEW object. indentRulesByBuffer is keyed
+        // by that object reference (set once at mode activation), so without
+        // migration the rules are orphaned on the first edit — electric-indent on
+        // Enter silently died (post-newline-hook ran insert-newline, which swapped
+        // the buffer, BEFORE indent-apply-line). Migrate the rules old→new here so
+        // any buffer swap preserves them. (Single chokepoint: every
+        // setCurrentBuffer callback in tlisp-api routes through this one closure.)
+        const oldBufForRules = editor.model.currentBuffer;
+        if (v && oldBufForRules && v !== oldBufForRules) {
+          const rules = indentRulesByBuffer.get(oldBufForRules as TextBuffer);
+          if (rules) indentRulesByBuffer.set(v, rules);
+        }
         const previousName = editor.findBufferName(editor.model.currentBuffer);
         const existingName = editor.findBufferName(v ?? undefined);
         const bufferName = existingName ?? previousName;

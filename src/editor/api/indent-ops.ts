@@ -23,7 +23,11 @@ import {
  * WeakMap for storing indent rules keyed by buffer object reference.
  * This avoids needing the buffer name string directly.
  */
-const indentRulesByBuffer: WeakMap<TextBuffer, { increase: string[]; decrease: string[] }> = new WeakMap();
+// #151: exported so major-mode-ops can store a mode's indent rules DIRECTLY
+// (bypassing the evalTlisp `(indent-set-rules ...)` re-embed, whose second
+// tokenizer parse re-corrupted the regex backslashes). Module-level (keyed by
+// the per-editor TextBuffer) — consistent with the pre-existing state.
+export const indentRulesByBuffer: WeakMap<TextBuffer, { increase: string[]; decrease: string[] }> = new WeakMap();
 
 /**
  * Helper: extract a list of strings from a T-Lisp list value
@@ -315,6 +319,42 @@ export function createIndentOps(
       createList(rules.increase.map(s => createString(s))),
       createList(rules.decrease.map(s => createString(s)))
     ]);
+
+    // #151 (indent-engine fix): APPLY the calculated column — set the line's
+    // leading whitespace to `column` spaces. indent-apply-line was previously
+    // calculate-only (returned the column without mutating), so electric-indent
+    // (post-newline-hook) was a silent no-op. No-op if the line is already at
+    // the target indent.
+    if (Either.isRight(result)) {
+      const targetCol = Math.max(0, (result.right as TLispValue).value as number);
+      const lineNumber = lineArg.value as number;
+      const lineTextRes = currentBuffer!.getLine(lineNumber);
+      if (Either.isRight(lineTextRes)) {
+        const lineText = lineTextRes.right;
+        const leadMatch = lineText.match(/^[ \t]*/);
+        const leadLen = leadMatch && leadMatch[0] ? leadMatch[0].length : 0;
+        const targetWs = " ".repeat(targetCol);
+        const alreadyCorrect = leadLen === targetWs.length && lineText.slice(0, leadLen) === targetWs;
+        if (!alreadyCorrect) {
+          // #151: use insert for the zero-width case (leadLen===0) — buffer.replace
+          // rejects a zero-width range at end-of-buffer (e.g. the trailing empty
+          // line after \n: {line,col:0} maps to offset === length, and replace's
+          // delete-half rejects offset > length-1). insert allows offset === length.
+          const mutRes = leadLen === 0
+            ? currentBuffer!.insert({ line: lineNumber, column: 0 }, targetWs)
+            : currentBuffer!.replace(
+              { start: { line: lineNumber, column: 0 }, end: { line: lineNumber, column: leadLen } },
+              targetWs,
+            );
+          if (Either.isRight(mutRes)) {
+            setCurrentBuffer(mutRes.right);
+            // #151: buffer.insert/replace return a NEW immutable TextBuffer; re-key
+            // the rules so the next indent-apply-line / electric-indent finds them.
+            indentRulesByBuffer.set(mutRes.right, rules);
+          }
+        }
+      }
+    }
 
     return result;
   });

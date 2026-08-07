@@ -321,8 +321,8 @@ function isMajorModePrefix(editor: EditorDispatchPort, lookupKey: string, majorM
   // #157 gap 6: a key is a "complete major-mode binding" (not a prefix) only if
   // the major mode defines it SPECIFICALLY. A global/mode-only binding (e.g. ","
   // = vim-repeat-find-reverse) must NOT exclude the key from acting as a
-  // major-mode prefix — otherwise it shadows the whole major-mode leader (", b"
-  // in markdown never dispatched). lookupMajorModeBinding falls through to
+  // major-mode prefix — otherwise it shadows the whole major-mode leader (the
+  // comma-prefixed bindings never dispatched). lookupMajorModeBinding falls through to
   // global via resolveMapping, so it cannot be used for this check.
   const candidates = majorModeLookupKeys(lookupKey);
   const hasMajorModeSpecific = candidates.some(form => {

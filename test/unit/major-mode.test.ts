@@ -1,5 +1,6 @@
 import { describe, test, expect, beforeEach } from "bun:test";
 import { createMajorModeOps } from "../../src/editor/api/major-mode-ops.ts";
+import { indentRulesByBuffer } from "../../src/editor/api/indent-ops.ts";
 import { TextBufferImpl } from "../../src/core/buffer.ts";
 import { createString, createList, createNil, createNumber } from "../../src/tlisp/values.ts";
 import { Either } from "../../src/utils/task-either.ts";
@@ -237,7 +238,7 @@ describe("Major Modes", () => {
       expect(tlispEvalLog).toContainEqual(expect.stringContaining("syntax-set-language"));
     });
 
-    test("evaluates indent-set-rules when mode has indent rules", () => {
+    test("stores indent rules directly when mode has indent rules (#151 direct-store)", () => {
       const ops = getOps();
 
       const registerFn = ops.get("major-mode-register")!;
@@ -253,7 +254,13 @@ describe("Major Modes", () => {
       const setFn = ops.get("major-mode-set")!;
       setFn([createString("java")]);
 
-      expect(tlispEvalLog).toContainEqual(expect.stringContaining("indent-set-rules"));
+      // #151: rules are stored DIRECTLY in indentRulesByBuffer (no evalTlisp
+      // `(indent-set-rules ...)` re-embed, which re-corrupted backslashes).
+      expect(indentRulesByBuffer.get(buffer)).toEqual({
+        increase: ["\\{$"],
+        decrease: ["^\\s*}"],
+      });
+      expect(tlispEvalLog).not.toContainEqual(expect.stringContaining("indent-set-rules"));
     });
   });
 

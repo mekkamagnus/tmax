@@ -1,6 +1,6 @@
 (defmodule editor/commands/indent-ops
   (export vim-toggle-case-char vim-toggle-case-line vim-lowercase-line vim-uppercase-line vim-indent-line vim-outdent-line vim-shiftwidth-get vim-shiftwidth-set
-          vim-visual-indent vim-visual-outdent vim-visual-toggle-case vim-visual-lowercase vim-visual-uppercase)
+          vim-visual-indent vim-visual-outdent vim-visual-toggle-case vim-visual-lowercase vim-visual-uppercase reindent-buffer)
 
 ;; indent-ops.tlisp -- SPEC-044 Phase 5: indent + case operators.
 ;; Line-scoped only (>>, <<, ~, guu, gUU, g~~). Operator+motion forms
@@ -19,6 +19,18 @@
 (defun vim-shiftwidth-set (n)
   "Set the shiftwidth to N spaces (for testing or init.tlisp configuration)."
   (set! vim-shiftwidth n))
+
+(defun reindent-buffer ()
+  "Re-apply the active major mode's indent rules to every line (#151).
+Loops top-to-bottom calling (indent-apply-line N) (the engine now both
+calculates and APPLIES the target column). Per-line errors are swallowed."
+  (let ((i 0) (n (buffer-line-count)))
+    (while (< i n)
+      (condition-case err
+        (indent-apply-line i)
+        (error (e) nil))
+      (setq i (+ i 1)))
+    t))
 
 (defun vim-toggle-case-char (count)
   "Toggle the case of COUNT characters starting at the cursor, then

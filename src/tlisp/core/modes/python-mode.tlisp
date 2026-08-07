@@ -2,9 +2,14 @@
   (export)
 
 ;; python-mode.tlisp — Python major mode
+;; #151: 4-backslash escapes (see typescript-mode.tlisp). Increase rules have no
+;; backslashes so they're unchanged; the `\s` in decrease rules → `\\\\s`.
 (major-mode-register "python" '(".py" ".pyi") "python"
   '(":$" "else:$" "elif .+:$" "except$" "finally$" "class .+:$" "def .+:$")
-  '("^\\s*return" "^\\s*break" "^\\s*pass" "^\\s*else:" "^\\s*elif" "^\\s*except" "^\\s*finally"))
+  '("^\\\\s*return" "^\\\\s*break" "^\\\\s*pass" "^\\\\s*else:" "^\\\\s*elif" "^\\\\s*except" "^\\\\s*finally"))
 
 (provide "python-mode")
 )
+
+;; #151: per-mode keymap. g = re-indents the whole buffer using the mode rules.
+(key-bind "g =" "(reindent-buffer)" "normal" "python")
