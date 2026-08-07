@@ -118,6 +118,13 @@ substitute/Dired/execute policy."
       ((or (string= line "buffers") (string= line "ls"))
        (let* ((bufs (buffer-list)) (current (buffer-current)))
          (message (string-join (mapcar (lambda (name) (concat (if (string= name current) "%" " ") " " name)) bufs) "  "))))
+      ;; :set nu/nonu/rnu/nornu — toggle line-number display (#132)
+      ((string= line "set nu") (global-line-numbers-mode t))
+      ((string= line "set number") (global-line-numbers-mode t))
+      ((string= line "set nonu") (global-line-numbers-mode nil))
+      ((string= line "set rnu") (global-relative-line-numbers-mode t))
+      ((string= line "set relativenumber") (global-relative-line-numbers-mode t))
+      ((string= line "set nornu") (global-relative-line-numbers-mode nil))
       ;; :help — show help system entry points (#133).
       ((or (string= line "help") (string= line "h"))
        (message "Help: SPC h f function | SPC h m mode | SPC h v variable | SPC h k key | M-x apropos"))
