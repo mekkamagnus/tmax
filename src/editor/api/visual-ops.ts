@@ -315,6 +315,39 @@ export function createVisualOps(
       ? visualSelection.end
       : visualSelection.start;
 
+    // #145: block mode — operate on the RECTANGLE (per-line column slice), not a
+    // contiguous span. Lines [topLine, bottomLine] × cols [leftCol, rightCol]
+    // (inclusive, vim semantics). Each line's slice is deleted independently, so
+    // line numbers never shift. Ragged lines (leftCol past EOL) contribute nothing.
+    if (visualSelection.mode === 'block') {
+      const topLine = Math.min(visualSelection.start.line, visualSelection.end.line);
+      const bottomLine = Math.max(visualSelection.start.line, visualSelection.end.line);
+      const leftCol = Math.min(visualSelection.start.column, visualSelection.end.column);
+      const rightCol = Math.max(visualSelection.start.column, visualSelection.end.column);
+      const segments: string[] = [];
+      let current = buffer;
+      for (let L = topLine; L <= bottomLine; L++) {
+        const lineRes = current.getLine(L);
+        if (Either.isLeft(lineRes)) { segments.push(""); continue; }
+        const lineText = lineRes.right;
+        if (leftCol >= lineText.length) { segments.push(""); continue; }
+        const segEnd = Math.min(rightCol, lineText.length - 1);
+        segments.push(lineText.slice(leftCol, segEnd + 1));
+        const del = current.delete({ start: { line: L, column: leftCol }, end: { line: L, column: segEnd + 1 } });
+        if (Either.isRight(del)) current = del.right;
+      }
+      const yanked = segments.join("\n");
+      session.deleteRegister.set(yanked);
+      session.registers.del(yanked, false);
+      setBuffer(current);
+      setCursorLine(topLine);
+      setCursorColumn(leftCol);
+      visualSelection = null;
+      setMode("normal");
+      setStatusMessage("");
+      return Either.right(createNil());
+    }
+
     // Get selected text and store in delete register
     const selectedText = buffer.getText({ start, end });
     if (Either.isLeft(selectedText)) {
@@ -380,6 +413,31 @@ export function createVisualOps(
        visualSelection.start.column <= visualSelection.end.column)
       ? visualSelection.end
       : visualSelection.start;
+
+    // #145: block mode — yank the RECTANGLE (per-line column slice), joined with
+    // newlines. No buffer mutation. See visual-delete for the rectangle math.
+    if (visualSelection.mode === 'block') {
+      const topLine = Math.min(visualSelection.start.line, visualSelection.end.line);
+      const bottomLine = Math.max(visualSelection.start.line, visualSelection.end.line);
+      const leftCol = Math.min(visualSelection.start.column, visualSelection.end.column);
+      const rightCol = Math.max(visualSelection.start.column, visualSelection.end.column);
+      const segments: string[] = [];
+      for (let L = topLine; L <= bottomLine; L++) {
+        const lineRes = buffer.getLine(L);
+        if (Either.isLeft(lineRes)) { segments.push(""); continue; }
+        const lineText = lineRes.right;
+        if (leftCol >= lineText.length) { segments.push(""); continue; }
+        const segEnd = Math.min(rightCol, lineText.length - 1);
+        segments.push(lineText.slice(leftCol, segEnd + 1));
+      }
+      const yanked = segments.join("\n");
+      session.yankRegister.set(yanked);
+      session.registers.set('"', yanked);
+      visualSelection = null;
+      setMode("normal");
+      setStatusMessage("");
+      return Either.right(createNil());
+    }
 
     // Get selected text and store in yank register
     const selectedText = buffer.getText({ start, end });
