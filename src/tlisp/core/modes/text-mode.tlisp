@@ -1,0 +1,11 @@
+(defmodule editor/modes/text
+  (export)
+
+;; text-mode.tlisp — plain-text / prose major mode (#152, SPEC-090)
+;; Parent for prose modes. No indent rules (prose wraps, not indents).
+(major-mode-register "text" '(".txt") nil
+  '()
+  '())
+
+(provide "text-mode")
+)

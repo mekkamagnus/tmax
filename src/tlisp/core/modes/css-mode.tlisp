@@ -1,0 +1,13 @@
+(defmodule editor/modes/css
+  (export)
+
+;; css-mode.tlisp — CSS/SCSS/Less major mode (#152, SPEC-090)
+;; Brace-delimited rule blocks; property: value; lines. Full behavior (nested
+;; selectors, electric pairs) is Phase 1.5 (#149/#151); this registers the mode
+;; + best-effort brace indent hints.
+(major-mode-register "css" '(".css" ".scss" ".less") nil
+  '("\\{$")
+  '("^\\s*}"))
+
+(provide "css-mode")
+)

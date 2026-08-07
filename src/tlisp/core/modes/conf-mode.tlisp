@@ -1,0 +1,11 @@
+(defmodule editor/modes/conf
+  (export)
+
+;; conf-mode.tlisp — INI/conf/properties major mode (#152, SPEC-090)
+;; [section] headers, key=value / key value lines, # / ; comments. Flat grammar.
+(major-mode-register "conf" '(".conf" ".ini" ".cfg" ".properties" ".env") nil
+  '()
+  '())
+
+(provide "conf-mode")
+)

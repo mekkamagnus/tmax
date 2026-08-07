@@ -1,0 +1,13 @@
+(defmodule editor/modes/rust
+  (export)
+
+;; rust-mode.tlisp — Rust major mode (#152, SPEC-090)
+;; Brace-block language (fn/impl/match/struct) structurally similar to go-mode.
+;; Full behavior (lifetime ticks, match-arm indent, electric pairs) is Phase 1.5
+;; (#149/#151); this registers the mode + brace indent hints.
+(major-mode-register "rust" '(".rs") nil
+  '("\\{$")
+  '("^\\s*}"))
+
+(provide "rust-mode")
+)

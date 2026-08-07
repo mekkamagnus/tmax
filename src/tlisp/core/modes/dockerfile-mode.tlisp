@@ -1,0 +1,15 @@
+(defmodule editor/modes/dockerfile
+  (export)
+
+;; dockerfile-mode.tlisp — Dockerfile major mode (#152, SPEC-090)
+;; `INSTRUCTION argument` lines; uppercase keywords (FROM/RUN/COPY…) and `\`
+;; continuations. Two auto-detect paths: the `.dockerfile` extension, AND a
+;; regexp rule for the `Dockerfile` filename (which has no extension —
+;; detectAutoMode tests regexp rules against the full filename).
+(major-mode-register "dockerfile" '(".dockerfile") nil
+  '()
+  '())
+(auto-mode-add "[Dd]ockerfile" "dockerfile" "regexp")
+
+(provide "dockerfile-mode")
+)

@@ -1,0 +1,14 @@
+(defmodule editor/modes/html
+  (export)
+
+;; html-mode.tlisp — HTML major mode (#152, SPEC-090)
+;; Tag-aware indent is genuinely hard (block vs inline tags, attributes); this
+;; ships a best-effort heuristic (indent after a line ending in '>', dedent a
+;; line starting with '</'). Full tag text objects + electric behavior are Phase
+;; 1.5 (#149/#151, ROADMAP §1.9).
+(major-mode-register "html" '(".html" ".htm" ".xhtml") nil
+  '(">$")
+  '("^\\s*</"))
+
+(provide "html-mode")
+)
