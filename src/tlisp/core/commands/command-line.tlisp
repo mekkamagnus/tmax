@@ -113,6 +113,14 @@ substitute/Dired/execute policy."
        (funcall "kill-buffer" (match-string 1)))
       ((string-match "^bdelete[ \t]+(.+)$" line)
        (funcall "kill-buffer" (match-string 1)))
+      ;; :buffers / :ls — list open buffer names (#131). Current buffer
+      ;; prefixed with %.
+      ((or (string= line "buffers") (string= line "ls"))
+       (let* ((bufs (buffer-list)) (current (buffer-current)))
+         (message (string-join (mapcar (lambda (name) (concat (if (string= name current) "%" " ") " " name)) bufs) "  "))))
+      ;; :help — show help system entry points (#133).
+      ((or (string= line "help") (string= line "h"))
+       (message "Help: SPC h f function | SPC h m mode | SPC h v variable | SPC h k key | M-x apropos"))
       ;; Everything else (:q, :w, :wq, :nohl, :marks, unknown…) is handled
       ;; by the existing TS-backed editor-execute-command-line primitive,
       ;; which also clears the line and returns to normal mode.
