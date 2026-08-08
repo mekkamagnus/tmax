@@ -44,7 +44,7 @@
 ** TODO 0.5 init.tlisp Configuration
    Support for an `init.tlisp` file for user configuration, similar to Emacs' `init.el`.
 *** Instructions
-   - This will require updating all documentation (README.md, docs/manual/tmax.texi, etc.) to remove mentions of `.tmaxrc` (previously `.tmaxrc`) and replace with `init.tlisp`.
+   - This will require updating all documentation (README.md, docs/tmax/tmax.texinfo, etc.) to remove mentions of `.tmaxrc` (previously `.tmaxrc`) and replace with `init.tlisp`.
 
 * Phase 1: Enhanced Editing (v0.2.0)
 ** TODO 1.1 Local Development Package Directories

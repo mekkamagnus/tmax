@@ -67,6 +67,7 @@ This manual describes tmax version @value{VERSION}.
 * Daemon/Client Architecture::  The server-based editing model.
 * Basic Usage::                 Starting, editing, and saving files.
 * Editing Modes::               Normal, insert, visual, command, and M-x.
+* Major Modes::                 Language modes and automatic mode detection.
 * Key Bindings::                Default key bindings for all modes.
 * Operators and Text Objects::  Delete, yank, change, and text objects.
 * Search and Replace::          Finding and replacing text.
@@ -669,6 +670,156 @@ Reload the init file.
 @end table
 
 Press @kbd{Escape} to cancel M-x mode without executing a command.
+
+@c ============================================================
+@node Major Modes
+@chapter Major Modes
+@cindex major modes
+@cindex language modes
+@cindex mode detection
+
+In addition to the five @ref{Editing Modes} that control how keystrokes are
+interpreted, tmax selects a @dfn{major mode} for each buffer based on the file's
+language.  A major mode provides syntax highlighting, indentation rules, and
+language-specific key bindings and commands.
+
+@menu
+* Built-in Major Modes::   The language modes shipped with tmax.
+* Mode Detection::         How tmax chooses a mode automatically.
+* Minor Modes::            Optional behaviors layered on a major mode.
+@end menu
+
+@node Built-in Major Modes
+@section Built-in Major Modes
+@cindex built-in major modes
+
+tmax ships a major mode for each of the following languages.  The
+``Extensions'' column lists the filename suffixes that trigger the mode by
+default; the ``Highlighter'' column is the syntax highlighter used (some modes
+ship without one).
+
+@c MAINTAINER: keep this table in sync with the registered modes. Run
+@c   make drift-check
+@c (in docs/tmax/) to verify every `major-mode-register` in
+@c src/tlisp/core/modes/*.tlisp has an @code{<mode>} entry here.
+@multitable @columnfractions .22 .40 .20
+@headitem Mode @tab Extensions @tab Highlighter
+@item @code{c}            @tab @file{.c}, @file{.h} @tab c
+@item @code{conf}         @tab @file{.conf}, @file{.ini}, @file{.cfg}, @file{.properties}, @file{.env} @tab ---
+@item @code{cpp}          @tab @file{.cpp}, @file{.cc}, @file{.cxx}, @file{.hpp}, @file{.hh}, @file{.hxx} @tab cpp
+@item @code{css}          @tab @file{.css}, @file{.scss}, @file{.less} @tab ---
+@item @code{dockerfile}   @tab @file{.dockerfile}, @file{Dockerfile}, @file{dockerfile} (regexp) @tab ---
+@item @code{fundamental}  @tab (none) @tab ---
+@item @code{go}           @tab @file{.go} @tab go
+@item @code{html}         @tab @file{.html}, @file{.htm}, @file{.xhtml} @tab ---
+@item @code{java}         @tab @file{.java} @tab ---
+@item @code{json}         @tab @file{.json}, @file{.jsonc} @tab ---
+@item @code{lisp}         @tab @file{.tlisp}, @file{.lisp}, @file{.el}, @file{.clj} @tab lisp
+@item @code{markdown}     @tab @file{.md}, @file{.markdown}, @file{.mdx} @tab markdown
+@item @code{purescript}   @tab @file{.purs} @tab ---
+@item @code{python}       @tab @file{.py}, @file{.pyi} @tab python
+@item @code{rust}         @tab @file{.rs} @tab ---
+@item @code{shell}        @tab @file{.sh}, @file{.bash}, @file{.zsh} @tab ---
+@item @code{sql}          @tab @file{.sql}, @file{.psql} @tab ---
+@item @code{text}         @tab @file{.txt} @tab ---
+@item @code{toml}         @tab @file{.toml} @tab ---
+@item @code{typescript}   @tab @file{.ts}, @file{.tsx}, @file{.js}, @file{.jsx}, @file{.mjs} @tab typescript
+@item @code{xml}          @tab @file{.xml}, @file{.xsd}, @file{.xsl}, @file{.svg}, @file{.plist} @tab ---
+@item @code{yaml}         @tab @file{.yaml}, @file{.yml} @tab ---
+@end multitable
+
+@code{fundamental-mode} is the default when nothing else matches; see
+@ref{Mode Detection} for how to change that.
+
+@node Mode Detection
+@section Mode Detection
+@cindex mode detection
+@cindex auto-mode
+@cindex file-local variables
+@cindex magic mode detection
+
+When a buffer is opened (or saved to a new file), tmax chooses its major mode
+automatically.  Modes are resolved in this precedence order --- the first match
+wins:
+
+@enumerate
+@item
+@strong{File-local @code{mode:} variable.}  A file may declare its own mode,
+overriding everything else.  Two forms are honored: a first-line magic comment
+such as @code{-*- mode: markdown; -*-} (including the bare @code{-*- markdown -*-}
+shorthand and the form embedded in a line comment), and a trailing
+@code{Local Variables:}@dots{}@code{End:} block with a @code{mode:} entry.
+Only the @code{mode:} variable is honored; @code{eval:}-style locals are
+intentionally not implemented for security.  The feature can be disabled with
+@code{(set-enable-local-variables nil)}.
+
+@item
+@strong{Filename (@code{auto-mode-alist}).}  The buffer's filename is matched
+against extension and regexp rules registered by each mode (the
+``Extensions'' column above, plus patterns like @file{Dockerfile}).
+
+@item
+@strong{Magic (content-based) detection.}  When the filename matches nothing,
+tmax sniffs the buffer head: a shebang line such as
+@code{#!/usr/bin/env bash} resolves to the interpreter's mode (bash/sh to
+@code{shell}, python to @code{python}, node to @code{typescript}), then
+user/fallback magic regexps (for example @code{<!DOCTYPE html} to
+@code{html}, @code{<?xml} to @code{xml}).  User rules take precedence over
+fallback rules; add one with @code{(magic-mode-add "@var{regexp}" "@var{mode}")}.
+
+@item
+@strong{Configurable default.}  If nothing matches, tmax uses
+@code{default-major-mode} (default @code{fundamental}); change it with
+@code{(set-default-major-mode "@var{mode}")}.
+@end enumerate
+
+@subheading Save-as re-detection
+@cindex save-as mode detection
+@cindex @code{write-file}
+
+Saving a buffer to a @emph{new} file (save-as: @code{:w @var{file}},
+@code{write-file}, @code{save-file}, or the T-Lisp @code{save-buffer}) re-runs
+mode detection for the new filename, so @code{:w notes.md} activates
+@code{markdown-mode}.  The detected mode and filename survive subsequent edits.
+A plain @code{:w} (no filename) keeps the mode set when the file was opened.
+
+@subheading Inspecting the active mode
+@cindex describe-mode
+
+@kbd{SPC h m} (@code{describe-mode}) shows the active major mode, its
+documentation, and its key bindings.
+
+@node Minor Modes
+@section Minor Modes
+@cindex minor modes
+
+Minor modes layer optional behavior on top of a major mode.  Notable shipped
+minor modes:
+
+@table @code
+@item which-key-mode
+@cindex which-key
+Shows the available follow-up keys (with one-line descriptions) after a prefix
+pause, e.g.@: after pressing @kbd{SPC} or @kbd{C-h}.  Enabled by default.
+@item snippet-mode
+@cindex snippet-mode
+@cindex yasnippet
+Yasnippet-style template expansion: type a trigger and @kbd{Tab} expands it into
+a multi-line template with @code{$1}/@code{@{1:default@}} fill-in fields and a
+@code{$0} final position.  Templates are plain-text files under
+@file{~/.config/tmax/snippets/<mode>/}.
+@item comint-mode
+@cindex comint-mode
+A generalized command interpreter for running REPLs and build tools
+(@code{run-node}, @code{run-python}, @dots{}) in an editor buffer, with an
+input/edit region at the bottom, accumulating output above, and @kbd{M-p}/
+@kbd{M-n} history.
+@end table
+
+Separately, @code{terminal-mode} runs a full PTY-backed interactive shell
+(@code{(shell)}), and @code{project-mode} adds project-root detection and
+project-wide file search/dired commands (@kbd{SPC p f}, @kbd{SPC p s},
+@kbd{SPC p d}).
 
 @c ============================================================
 @node Key Bindings

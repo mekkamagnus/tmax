@@ -1,10 +1,8 @@
-# docs/manual/ — Standalone HTML Manual
+# docs/manual/ — Redirect
 
-Generated HTML manual from texinfo source.
+The canonical Texinfo manual lives in [`docs/tmax/`](../tmax/index.md) — both
+the source (`tmax.texinfo`, `tlisp.texinfo`) and the compiled outputs
+(`tmax.info`, `tmax.html`, etc.), built via `make info` / `make html`.
 
-| File | Description | Related |
-|------|-------------|---------|
-| [tmax.html](tmax.html) | Compiled HTML manual | [tmax/](../tmax/index.md) — texinfo sources |
-| [tmax.texi](tmax.texi) | Texinfo source for the manual | [tmax/](../tmax/index.md) — compiled versions |
-
-See [tmax/](../tmax/index.md) for the canonical texinfo sources and compiled outputs (HTML + info).
+The legacy Deno-era manual that previously lived here has been removed. Build and
+read the manuals from [`docs/tmax/`](../tmax/index.md) instead.

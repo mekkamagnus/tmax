@@ -71,6 +71,7 @@ text editor.
 * Daemon/Client Architecture::  The server-based editing model.
 * Basic Usage::                 Starting, editing, and saving files.
 * Editing Modes::               Normal, insert, visual, command, and M-x.
+* Major Modes::                 Language modes and automatic mode detection.
 * Key Bindings::                Default key bindings for all modes.
 * Operators and Text Objects::  Delete, yank, change, and text objects.
 * Search and Replace::          Finding and replacing text.
@@ -427,7 +428,7 @@ the editor is doing.
      tmaxclient --messages  View from the command line
 
 
-File: tmax.info,  Node: Editing Modes,  Next: Key Bindings,  Prev: Basic Usage,  Up: Top
+File: tmax.info,  Node: Editing Modes,  Next: Major Modes,  Prev: Basic Usage,  Up: Top
 
 5 Editing Modes
 ***************
@@ -568,15 +569,158 @@ Examples:
    Press ‘Escape’ to cancel M-x mode without executing a command.
 
 
-File: tmax.info,  Node: Key Bindings,  Next: Operators and Text Objects,  Prev: Editing Modes,  Up: Top
+File: tmax.info,  Node: Major Modes,  Next: Key Bindings,  Prev: Editing Modes,  Up: Top
 
-6 Key Bindings
+6 Major Modes
+*************
+
+In addition to the five *note Editing Modes:: that control how
+keystrokes are interpreted, tmax selects a “major mode” for each buffer
+based on the file's language.  A major mode provides syntax
+highlighting, indentation rules, and language-specific key bindings and
+commands.
+
+* Menu:
+
+* Built-in Major Modes::   The language modes shipped with tmax.
+* Mode Detection::         How tmax chooses a mode automatically.
+* Minor Modes::            Optional behaviors layered on a major mode.
+
+
+File: tmax.info,  Node: Built-in Major Modes,  Next: Mode Detection,  Up: Major Modes
+
+6.1 Built-in Major Modes
+========================
+
+tmax ships a major mode for each of the following languages.  The
+"Extensions" column lists the filename suffixes that trigger the mode by
+default; the "Highlighter" column is the syntax highlighter used (some
+modes ship without one).
+
+Mode             Extensions                    Highlighter
+--------------------------------------------------------------
+‘c’              ‘.c’, ‘.h’                    c
+‘conf’           ‘.conf’, ‘.ini’, ‘.cfg’,      --
+                 ‘.properties’, ‘.env’
+‘cpp’            ‘.cpp’, ‘.cc’, ‘.cxx’,        cpp
+                 ‘.hpp’, ‘.hh’, ‘.hxx’
+‘css’            ‘.css’, ‘.scss’, ‘.less’      --
+‘dockerfile’     ‘.dockerfile’,                --
+                 ‘Dockerfile’, ‘dockerfile’
+                 (regexp)
+‘fundamental’    (none)                        --
+‘go’             ‘.go’                         go
+‘html’           ‘.html’, ‘.htm’, ‘.xhtml’     --
+‘java’           ‘.java’                       --
+‘json’           ‘.json’, ‘.jsonc’             --
+‘lisp’           ‘.tlisp’, ‘.lisp’, ‘.el’,     lisp
+                 ‘.clj’
+‘markdown’       ‘.md’, ‘.markdown’, ‘.mdx’    markdown
+‘purescript’     ‘.purs’                       --
+‘python’         ‘.py’, ‘.pyi’                 python
+‘rust’           ‘.rs’                         --
+‘shell’          ‘.sh’, ‘.bash’, ‘.zsh’        --
+‘sql’            ‘.sql’, ‘.psql’               --
+‘text’           ‘.txt’                        --
+‘toml’           ‘.toml’                       --
+‘typescript’     ‘.ts’, ‘.tsx’, ‘.js’,         typescript
+                 ‘.jsx’, ‘.mjs’
+‘xml’            ‘.xml’, ‘.xsd’, ‘.xsl’,       --
+                 ‘.svg’, ‘.plist’
+‘yaml’           ‘.yaml’, ‘.yml’               --
+
+   ‘fundamental-mode’ is the default when nothing else matches; see
+*note Mode Detection:: for how to change that.
+
+
+File: tmax.info,  Node: Mode Detection,  Next: Minor Modes,  Prev: Built-in Major Modes,  Up: Major Modes
+
+6.2 Mode Detection
+==================
+
+When a buffer is opened (or saved to a new file), tmax chooses its major
+mode automatically.  Modes are resolved in this precedence order -- the
+first match wins:
+
+  1. *File-local ‘mode:’ variable.*  A file may declare its own mode,
+     overriding everything else.  Two forms are honored: a first-line
+     magic comment such as ‘-*- mode: markdown; -*-’ (including the bare
+     ‘-*- markdown -*-’ shorthand and the form embedded in a line
+     comment), and a trailing ‘Local Variables:’...‘End:’ block with a
+     ‘mode:’ entry.  Only the ‘mode:’ variable is honored; ‘eval:’-style
+     locals are intentionally not implemented for security.  The feature
+     can be disabled with ‘(set-enable-local-variables nil)’.
+
+  2. *Filename (‘auto-mode-alist’).*  The buffer's filename is matched
+     against extension and regexp rules registered by each mode (the
+     "Extensions" column above, plus patterns like ‘Dockerfile’).
+
+  3. *Magic (content-based) detection.*  When the filename matches
+     nothing, tmax sniffs the buffer head: a shebang line such as
+     ‘#!/usr/bin/env bash’ resolves to the interpreter's mode (bash/sh
+     to ‘shell’, python to ‘python’, node to ‘typescript’), then
+     user/fallback magic regexps (for example ‘<!DOCTYPE html’ to
+     ‘html’, ‘<?xml’ to ‘xml’).  User rules take precedence over
+     fallback rules; add one with ‘(magic-mode-add "REGEXP" "MODE")’.
+
+  4. *Configurable default.*  If nothing matches, tmax uses
+     ‘default-major-mode’ (default ‘fundamental’); change it with
+     ‘(set-default-major-mode "MODE")’.
+
+Save-as re-detection
+--------------------
+
+Saving a buffer to a _new_ file (save-as: ‘:w FILE’, ‘write-file’,
+‘save-file’, or the T-Lisp ‘save-buffer’) re-runs mode detection for the
+new filename, so ‘:w notes.md’ activates ‘markdown-mode’.  The detected
+mode and filename survive subsequent edits.  A plain ‘:w’ (no filename)
+keeps the mode set when the file was opened.
+
+Inspecting the active mode
+--------------------------
+
+‘SPC h m’ (‘describe-mode’) shows the active major mode, its
+documentation, and its key bindings.
+
+
+File: tmax.info,  Node: Minor Modes,  Prev: Mode Detection,  Up: Major Modes
+
+6.3 Minor Modes
+===============
+
+Minor modes layer optional behavior on top of a major mode.  Notable
+shipped minor modes:
+
+‘which-key-mode’
+     Shows the available follow-up keys (with one-line descriptions)
+     after a prefix pause, e.g. after pressing ‘SPC’ or ‘C-h’.  Enabled
+     by default.
+‘snippet-mode’
+     Yasnippet-style template expansion: type a trigger and ‘Tab’
+     expands it into a multi-line template with ‘$1’/‘{1:default}’
+     fill-in fields and a ‘$0’ final position.  Templates are plain-text
+     files under ‘~/.config/tmax/snippets/<mode>/’.
+‘comint-mode’
+     A generalized command interpreter for running REPLs and build tools
+     (‘run-node’, ‘run-python’, ...) in an editor buffer, with an
+     input/edit region at the bottom, accumulating output above, and
+     ‘M-p’/ ‘M-n’ history.
+
+   Separately, ‘terminal-mode’ runs a full PTY-backed interactive shell
+(‘(shell)’), and ‘project-mode’ adds project-root detection and
+project-wide file search/dired commands (‘SPC p f’, ‘SPC p s’, ‘SPC p
+d’).
+
+
+File: tmax.info,  Node: Key Bindings,  Next: Operators and Text Objects,  Prev: Major Modes,  Up: Top
+
+7 Key Bindings
 **************
 
-6.1 Normal Mode Key Bindings
+7.1 Normal Mode Key Bindings
 ============================
 
-6.1.1 Navigation
+7.1.1 Navigation
 ----------------
 
 ‘h’
@@ -602,7 +746,7 @@ File: tmax.info,  Node: Key Bindings,  Next: Operators and Text Objects,  Prev: 
 ‘G’
      Move to the bottom of the file.
 
-6.1.2 Mode Switching
+7.1.2 Mode Switching
 --------------------
 
 ‘i’
@@ -618,7 +762,7 @@ File: tmax.info,  Node: Key Bindings,  Next: Operators and Text Objects,  Prev: 
 ‘SPC ;’
      Enter M-x mode.
 
-6.1.3 Editing
+7.1.3 Editing
 -------------
 
 ‘dd’
@@ -640,7 +784,7 @@ File: tmax.info,  Node: Key Bindings,  Next: Operators and Text Objects,  Prev: 
 ‘C-r’
      Redo the last undone change.
 
-6.1.4 Search
+7.1.4 Search
 ------------
 
 ‘/’
@@ -650,7 +794,7 @@ File: tmax.info,  Node: Key Bindings,  Next: Operators and Text Objects,  Prev: 
 ‘n’
      Jump to the next search match.
 
-6.1.5 Count Prefix
+7.1.5 Count Prefix
 ------------------
 
 Most normal-mode commands accept a numeric count prefix.  Type a number
@@ -665,13 +809,13 @@ before the command to repeat it:
 ‘10G’
      Go to line 10.
 
-6.1.6 Other
+7.1.6 Other
 -----------
 
 ‘q’
      Quit the editor (single-file mode, no daemon).
 
-6.2 Insert Mode Key Bindings
+7.2 Insert Mode Key Bindings
 ============================
 
 ‘Escape’
@@ -683,7 +827,7 @@ before the command to repeat it:
 ‘CHAR’
      Insert the character at cursor position.
 
-6.3 Visual Mode Key Bindings
+7.3 Visual Mode Key Bindings
 ============================
 
 ‘d’
@@ -697,7 +841,7 @@ before the command to repeat it:
 ‘Escape’
      Cancel selection and return to normal mode.
 
-6.4 Command Mode Key Bindings
+7.4 Command Mode Key Bindings
 =============================
 
 ‘TEXT’
@@ -709,7 +853,7 @@ before the command to repeat it:
 ‘Escape’
      Cancel and return to normal mode.
 
-6.5 Custom Key Bindings
+7.5 Custom Key Bindings
 =======================
 
 You can define custom key bindings in your init file using the
@@ -729,7 +873,7 @@ You can define custom key bindings in your init file using the
      The mode in which the binding is active: ‘"normal"’, ‘"insert"’,
      ‘"visual"’, ‘"command"’, or ‘"mx"’.
 
-6.6 Which-Key Popup
+7.6 Which-Key Popup
 ===================
 
 When you press a prefix key (such as ‘SPC’ or ‘g’), tmax briefly
@@ -740,10 +884,10 @@ prefix.  This popup disappears after a configurable timeout (default
 
 File: tmax.info,  Node: Operators and Text Objects,  Next: Search and Replace,  Prev: Key Bindings,  Up: Top
 
-7 Operators and Text Objects
+8 Operators and Text Objects
 ****************************
 
-7.1 Operators
+8.1 Operators
 =============
 
 Operators are commands that perform an action on a range of text.  tmax
@@ -761,7 +905,7 @@ supports the following operators in normal mode:
      Change operator.  Deletes text and enters insert mode.  Examples:
      ‘cw’ (change word), ‘cc’ (change entire line).
 
-7.2 Text Objects
+8.2 Text Objects
 ================
 
 Text objects define structural units of text that can be used with
@@ -769,7 +913,7 @@ operators.  Text objects come in two forms: “inner” (‘i’) which excludes
 surrounding whitespace and delimiters, and “around” (‘a’) which includes
 them.
 
-7.2.1 Word Text Object
+8.2.1 Word Text Object
 ----------------------
 
 ‘diw’
@@ -778,7 +922,7 @@ them.
 ‘daw’
      Delete around word (the word plus surrounding spaces).
 
-7.2.2 Quoted String Text Objects
+8.2.2 Quoted String Text Objects
 --------------------------------
 
 ‘ci'’
@@ -790,7 +934,7 @@ them.
 ‘ca"’
      Change around double-quoted string (including the quotes).
 
-7.2.3 Parenthesis and Bracket Text Objects
+8.2.3 Parenthesis and Bracket Text Objects
 ------------------------------------------
 
 ‘di(’
@@ -813,7 +957,7 @@ them.
 ‘dit’
      Delete inner HTML/XML tag.
 
-7.3 Count Prefix with Operators
+8.3 Count Prefix with Operators
 ===============================
 
 Operators support the numeric count prefix to multiply their effect:
@@ -828,10 +972,10 @@ Operators support the numeric count prefix to multiply their effect:
 
 File: tmax.info,  Node: Search and Replace,  Next: Kill Ring,  Prev: Operators and Text Objects,  Up: Top
 
-8 Search and Replace
+9 Search and Replace
 ********************
 
-8.1 Incremental Search
+9.1 Incremental Search
 ======================
 
 tmax provides incremental search in normal mode:
@@ -849,7 +993,7 @@ tmax provides incremental search in normal mode:
 Type your search pattern and press ‘Enter’.  Press ‘Escape’ to cancel
 the search.
 
-8.2 Replace Operations
+9.2 Replace Operations
 ======================
 
 Replace operations are exposed as T-Lisp commands:
@@ -863,7 +1007,7 @@ Replace operations are exposed as T-Lisp commands:
      ;; Replace all matches
      (replace-all)
 
-8.3 Replace T-Lisp Functions
+9.3 Replace T-Lisp Functions
 ============================
 
 ‘(query-replace FIND REPLACE)’
@@ -885,15 +1029,15 @@ T-Lisp commands that need direct control over replace state.
 
 File: tmax.info,  Node: Kill Ring,  Next: Buffer Management,  Prev: Search and Replace,  Up: Top
 
-9 Kill Ring
-***********
+10 Kill Ring
+************
 
 tmax implements an Emacs-style kill ring, a circular buffer that stores
 multiple entries of deleted or yanked text.  This is more powerful than
 a simple clipboard because you can cycle through previous deletions.
 
-9.1 How the Kill Ring Works
-===========================
+10.1 How the Kill Ring Works
+============================
 
    • When you delete text (e.g., with ‘dd’, ‘dw’, or visual mode ‘d’),
      the deleted text is added to the front of the kill ring.
@@ -903,8 +1047,8 @@ a simple clipboard because you can cycle through previous deletions.
    • The default kill ring size is 5 entries.  When the ring is full,
      the oldest entry is discarded.
 
-9.2 Kill Ring T-Lisp Functions
-==============================
+10.2 Kill Ring T-Lisp Functions
+===============================
 
 ‘(kill-ring-save TEXT)’
      Add TEXT to the front of the kill ring.
@@ -920,8 +1064,8 @@ a simple clipboard because you can cycle through previous deletions.
 ‘(get-kill-ring-max)’
      Return the configured maximum kill ring size.
 
-9.3 Yank-Pop
-============
+10.3 Yank-Pop
+=============
 
 After yanking text with ‘p’ or ‘P’, you can cycle through the kill ring
 entries by calling ‘(yank-pop)’.  Each invocation replaces the
@@ -933,14 +1077,14 @@ just-yanked text with the next older entry from the kill ring.
 
 File: tmax.info,  Node: Buffer Management,  Next: Configuration,  Prev: Kill Ring,  Up: Top
 
-10 Buffer Management
+11 Buffer Management
 ********************
 
 tmax supports multiple buffers simultaneously.  Each buffer holds the
 contents of a file (or scratch text) and maintains its own cursor
 position.
 
-10.1 Opening Buffers
+11.1 Opening Buffers
 ====================
 
 Use command mode to open files into new buffers:
@@ -952,7 +1096,7 @@ Use command mode to open files into new buffers:
      (buffer-create "scratch")
      (buffer-switch "otherfile.txt")
 
-10.2 Switching Buffers
+11.2 Switching Buffers
 ======================
 
 Switch between open buffers using the T-Lisp API:
@@ -963,7 +1107,7 @@ Switch between open buffers using the T-Lisp API:
 
      tmaxclient --list-buffers
 
-10.3 Special Buffers
+11.3 Special Buffers
 ====================
 
 tmax creates several special buffers automatically:
@@ -975,7 +1119,7 @@ tmax creates several special buffers automatically:
      A scratch buffer for temporary text and T-Lisp experimentation.
      Use ‘(eval-buffer)’ to evaluate its contents as T-Lisp code.
 
-10.4 Buffer T-Lisp Functions
+11.4 Buffer T-Lisp Functions
 ============================
 
 ‘(buffer-create NAME)’
@@ -1003,7 +1147,7 @@ tmax creates several special buffers automatically:
 ‘(set-buffer-modified-p FLAG)’
      Set the current buffer's modified flag.
 
-10.5 Gap Buffer Implementation
+11.5 Gap Buffer Implementation
 ==============================
 
 tmax uses a “gap buffer” data structure for efficient text editing.  A
@@ -1015,14 +1159,14 @@ moved.
 
 File: tmax.info,  Node: Configuration,  Next: Plugin System,  Prev: Buffer Management,  Up: Top
 
-11 Configuration
+12 Configuration
 ****************
 
 tmax is configured through T-Lisp scripts.  The primary configuration
 file is ‘~/.config/tmax/init.tlisp’, which is loaded automatically when
 the editor starts.
 
-11.1 The Init File
+12.1 The Init File
 ==================
 
 Create or edit ‘~/.config/tmax/init.tlisp’ to customize tmax.  This file
@@ -1051,7 +1195,7 @@ environment, so you have access to the full T-Lisp editor API.
 
      (key-bind "zz" "(center-cursor)" "normal")
 
-11.2 Custom Init File Path
+12.2 Custom Init File Path
 ==========================
 
 You can specify a custom init file on the command line:
@@ -1062,7 +1206,7 @@ You can specify a custom init file on the command line:
 
      tmax --init-file /dev/null
 
-11.3 Reloading Configuration
+12.3 Reloading Configuration
 ============================
 
 To reload your init file without restarting the editor:
@@ -1073,7 +1217,7 @@ To reload your init file without restarting the editor:
 
      tmax -e '(eval-init-file)'
 
-11.4 Evaluating a Buffer
+12.4 Evaluating a Buffer
 ========================
 
 You can evaluate the contents of the current buffer as T-Lisp code:
@@ -1083,7 +1227,7 @@ You can evaluate the contents of the current buffer as T-Lisp code:
    This is particularly useful with the ‘*scratch*’ buffer for testing
 T-Lisp expressions interactively.
 
-11.5 Init File T-Lisp Functions
+12.5 Init File T-Lisp Functions
 ===============================
 
 ‘(init-file-path)’
@@ -1093,7 +1237,7 @@ T-Lisp expressions interactively.
 ‘(eval-buffer)’
      Evaluate the current buffer's text as T-Lisp code.
 
-11.6 Editor Settings
+12.6 Editor Settings
 ====================
 
 The editor state includes the following configurable settings:
@@ -1109,7 +1253,7 @@ The editor state includes the following configurable settings:
 ‘auto-save’
      Whether to automatically save changes (default: false).
 
-11.7 Macro Recording and Playback
+12.7 Macro Recording and Playback
 =================================
 
 tmax supports Vim-style keyboard macro recording:
@@ -1131,14 +1275,14 @@ tmax supports Vim-style keyboard macro recording:
      q         Stop recording
      @a       Replay the macro
 
-11.8 T-Lisp Standard Library
+12.8 T-Lisp Standard Library
 ============================
 
 The T-Lisp interpreter includes a standard library of built-in
 functions.  These are available in the global environment without any
 imports.
 
-11.8.1 Arithmetic
+12.8.1 Arithmetic
 -----------------
 
 ‘(+ A B ...)’
@@ -1168,7 +1312,7 @@ imports.
 ‘(max A B ...)’
      Maximum.
 
-11.8.2 Comparison
+12.8.2 Comparison
 -----------------
 
 ‘(= A B)’
@@ -1180,7 +1324,7 @@ imports.
 ‘(eq A B)’
      Identity/equality test.
 
-11.8.3 List Operations
+12.8.3 List Operations
 ----------------------
 
 ‘(cons A B)’
@@ -1204,7 +1348,7 @@ imports.
 ‘(length SEQ)’
      Return the length of a list or string.
 
-11.8.4 String Operations
+12.8.4 String Operations
 ------------------------
 
 ‘(substring STR START END)’
@@ -1222,7 +1366,7 @@ imports.
 ‘(string-downcase STR)’
      Convert to lowercase.
 
-11.8.5 Predicates
+12.8.5 Predicates
 -----------------
 
 ‘(null X)’
@@ -1248,7 +1392,7 @@ imports.
 ‘(not X)’
      Logical negation.
 
-11.8.6 Special Forms
+12.8.6 Special Forms
 --------------------
 
 ‘(quote X)’
@@ -1268,7 +1412,7 @@ imports.
 ‘(cond (TEST1 EXPR1) (TEST2 EXPR2) ...)’
      Multi-branch conditional.
 
-11.8.7 Quasiquote
+12.8.7 Quasiquote
 -----------------
 
 ‘`TEMPLATE’
@@ -1280,7 +1424,7 @@ imports.
      Unquote-splicing: evaluate EXPR and splice the resulting list into
      the surrounding list.
 
-11.8.8 Hash Maps
+12.8.8 Hash Maps
 ----------------
 
 ‘(hashmap KEY1 VAL1 ...)’
@@ -1296,7 +1440,7 @@ imports.
 ‘(hashmap-has-key? MAP KEY)’
      Return true if MAP contains KEY.
 
-11.8.9 Keymaps
+12.8.9 Keymaps
 --------------
 
 ‘(defkeymap NAME)’
@@ -1308,7 +1452,7 @@ imports.
 ‘(keymap-lookup KEYMAP KEY)’
      Look up a key binding, following parent keymap chains.
 
-11.8.10 I/O
+12.8.10 I/O
 -----------
 
 ‘(print X)’
@@ -1317,14 +1461,14 @@ imports.
 
 File: tmax.info,  Node: Plugin System,  Next: Frontends,  Prev: Configuration,  Up: Top
 
-12 Plugin System
+13 Plugin System
 ****************
 
 tmax supports a plugin system through the TLPA (T-Lisp Package Archive)
 repository.  Plugins are T-Lisp scripts that extend the editor's
 functionality.
 
-12.1 Plugin Management
+13.1 Plugin Management
 ======================
 
 Plugins are managed through T-Lisp functions:
@@ -1340,14 +1484,14 @@ Plugins are managed through T-Lisp functions:
 ‘(plugin-info NAME)’
      Return metadata about an installed plugin.
 
-12.2 Plugin Installation Directory
+13.2 Plugin Installation Directory
 ==================================
 
 Installed plugins are stored in ‘~/.config/tmax/tlpa/’.  Each plugin is
 a T-Lisp file (or a directory containing a main T-Lisp file) that is
 loaded into the editor's T-Lisp environment.
 
-12.3 Available Plugins
+13.3 Available Plugins
 ======================
 
 The TLPA repository includes plugins such as:
@@ -1365,7 +1509,7 @@ The TLPA repository includes plugins such as:
 ‘example-plugin’
      Example plugin demonstrating the plugin API.
 
-12.4 Creating Plugins
+13.4 Creating Plugins
 =====================
 
 To create a plugin, write a T-Lisp script that defines functions, key
@@ -1382,7 +1526,7 @@ submit it to the TLPA repository.
 
      (key-bind "SPC tn" "(toggle-line-numbers)" "normal")
 
-12.5 Submitting Plugins
+13.5 Submitting Plugins
 =======================
 
 Plugins can be submitted to the TLPA repository for inclusion.  Each
@@ -1392,7 +1536,7 @@ license, and optional homepage URL.
 
 File: tmax.info,  Node: Frontends,  Next: Troubleshooting,  Prev: Plugin System,  Up: Top
 
-13 Frontends
+14 Frontends
 ************
 
 tmax supports multiple interchangeable frontends.  All frontends
@@ -1400,7 +1544,7 @@ communicate with the editor core through the same interface, and the
 daemon/client architecture enables remote frontends via JSON-RPC over
 Unix sockets.
 
-13.1 TUI Frontend (Default)
+14.1 TUI Frontend (Default)
 ===========================
 
 The default frontend is a TUI (Terminal User Interface) client that
@@ -1421,7 +1565,7 @@ frameworks or dependencies.
      tmaxclient --tui  Start TUI connected to running daemon
      bun run tui       Start TUI directly
 
-13.2 Ink Frontend (React)
+14.2 Ink Frontend (React)
 =========================
 
 The Ink frontend uses the Ink (https://github.com/vadimdemedes/ink)
@@ -1432,14 +1576,14 @@ more complex UI layouts.
    The Ink frontend is located in ‘src/frontend/’ and uses the same
 editor core API as the TUI frontend.
 
-13.3 Steep Frontend
+14.3 Steep Frontend
 ===================
 
 The Steep frontend is an experimental native terminal frontend that
 provides an alternative rendering approach.  It is under active
 development.
 
-13.4 Selecting a Frontend
+14.4 Selecting a Frontend
 =========================
 
 The frontend is determined by how you launch tmax:
@@ -1455,10 +1599,10 @@ customization.
 
 File: tmax.info,  Node: Troubleshooting,  Next: Command Reference,  Prev: Frontends,  Up: Top
 
-14 Troubleshooting
+15 Troubleshooting
 ******************
 
-14.1 The Daemon Will Not Start
+15.1 The Daemon Will Not Start
 ==============================
 
 If ‘tmax --daemon’ fails:
@@ -1472,7 +1616,7 @@ If ‘tmax --daemon’ fails:
           which bun
           bun --version
 
-14.2 Key Bindings Not Working
+15.2 Key Bindings Not Working
 =============================
 
 If custom key bindings from your init file are not taking effect:
@@ -1485,7 +1629,7 @@ If custom key bindings from your init file are not taking effect:
    • Check the ‘*Messages*’ buffer for error messages:
           tmaxclient --messages
 
-14.3 The Editor Freezes or Does Not Respond
+15.3 The Editor Freezes or Does Not Respond
 ===========================================
 
    • Make sure you are not in command mode or M-x mode with a pending
@@ -1496,7 +1640,7 @@ If custom key bindings from your init file are not taking effect:
           tmax --stop
           tmax
 
-14.4 File Encoding Issues
+15.4 File Encoding Issues
 =========================
 
 tmax reads and writes files using UTF-8 encoding.  If you encounter
@@ -1505,7 +1649,7 @@ encoding issues, verify that your terminal is configured for UTF-8:
      echo $LANG
      Should contain "UTF-8"
 
-14.5 Init File Errors
+15.5 Init File Errors
 =====================
 
 If the init file contains errors, tmax will log them to the ‘*Messages*’
@@ -1517,7 +1661,7 @@ buffer but will still start.  Check the messages:
 
      tmax --init-file /dev/null
 
-14.6 Getting Help
+15.6 Getting Help
 =================
 
 tmax includes a built-in help system:
@@ -1538,14 +1682,14 @@ tmax includes a built-in help system:
 
 File: tmax.info,  Node: Command Reference,  Next: Index,  Prev: Troubleshooting,  Up: Top
 
-15 Command Reference
+16 Command Reference
 ********************
 
 This chapter provides a brief summary of available commands.  For full
 documentation of each function, use the built-in help system (*note
 Troubleshooting::).
 
-15.1 Editor API Categories
+16.1 Editor API Categories
 ==========================
 
 The T-Lisp editor API is organized into the following modules:
@@ -1622,7 +1766,7 @@ The T-Lisp editor API is organized into the following modules:
 ‘Macro Persistence (macro-persistence)’
      Save and load macros to/from files.
 
-15.2 Cursor Functions
+16.2 Cursor Functions
 =====================
 
 ‘(cursor-position)’
@@ -1634,7 +1778,7 @@ The T-Lisp editor API is organized into the following modules:
 ‘(cursor-column)’
      Return the current column number (zero-indexed).
 
-15.3 Mode Functions
+16.3 Mode Functions
 ===================
 
 ‘(editor-mode)’
@@ -1649,7 +1793,7 @@ The T-Lisp editor API is organized into the following modules:
 ‘(editor-quit)’
      Quit the editor.
 
-15.4 File Functions
+16.4 File Functions
 ===================
 
 ‘(read-file-content FILENAME)’
@@ -1657,7 +1801,7 @@ The T-Lisp editor API is organized into the following modules:
 ‘(write-file-content FILENAME CONTENT)’
      Write CONTENT to FILENAME.
 
-15.5 LSP Diagnostics Functions
+16.5 LSP Diagnostics Functions
 ==============================
 
 ‘(lsp-diagnostics-list)’
@@ -1673,7 +1817,7 @@ The T-Lisp editor API is organized into the following modules:
 ‘(lsp-diagnostics-has-errors)’
      Return true if there are any error-level diagnostics.
 
-15.6 Hook Functions
+16.6 Hook Functions
 ===================
 
 ‘(add-hook HOOK-NAME FUNCTION)’
@@ -1683,7 +1827,7 @@ The T-Lisp editor API is organized into the following modules:
 ‘(run-hooks HOOK-NAME)’
      Execute all functions attached to the named hook.
 
-15.7 Testing Framework
+16.7 Testing Framework
 ======================
 
 The T-Lisp interpreter includes a built-in testing framework:
@@ -1711,7 +1855,7 @@ The T-Lisp interpreter includes a built-in testing framework:
 ‘(deftest-suite NAME () BODY)’
      Define a test suite.
 
-15.8 T-Lisp REPL
+16.8 T-Lisp REPL
 ================
 
 The standalone ‘tlisp’ CLI provides a REPL, one-shot evaluation, script
@@ -1770,6 +1914,7 @@ Index
                                                               (line   6)
 * auto-daemon-start:                     Daemon/Client Architecture.
                                                               (line  21)
+* auto-mode:                             Mode Detection.      (line   6)
 * basic usage:                           Basic Usage.         (line   6)
 * bindings, troubleshooting:             Troubleshooting.     (line  23)
 * block-wise selection:                  Visual Mode.         (line  15)
@@ -1778,6 +1923,8 @@ Index
 * buffers:                               Buffer Management.   (line   6)
 * building from source:                  Installation.        (line  21)
 * built-in functions:                    Configuration.       (line 122)
+* built-in major modes:                  Built-in Major Modes.
+                                                              (line   6)
 * Bun runtime:                           Installation.        (line   9)
 * change operator:                       Operators and Text Objects.
                                                               (line  21)
@@ -1787,6 +1934,7 @@ Index
 * client commands:                       Daemon/Client Architecture.
                                                               (line  54)
 * clipboard:                             Kill Ring.           (line   6)
+* comint-mode:                           Minor Modes.         (line  19)
 * command mode:                          Command Mode.        (line   6)
 * command mode commands:                 Command Mode.        (line  11)
 * command reference:                     Command Reference.   (line   6)
@@ -1811,6 +1959,7 @@ Index
                                                               (line  13)
 * describe-function:                     Troubleshooting.     (line  68)
 * describe-key:                          Troubleshooting.     (line  68)
+* describe-mode:                         Mode Detection.      (line  47)
 * design philosophy:                     Introduction.        (line  52)
 * development scripts:                   Installation.        (line  61)
 * editing modes:                         Introduction.        (line  27)
@@ -1830,6 +1979,7 @@ Index
 * ex commands:                           Command Mode.        (line   6)
 * exiting insert mode:                   Insert Mode.         (line  11)
 * FAQ:                                   Troubleshooting.     (line   6)
+* file-local variables:                  Mode Detection.      (line   6)
 * first steps:                           Basic Usage.         (line  24)
 * Frame:                                 Daemon/Client Architecture.
                                                               (line 112)
@@ -1865,6 +2015,7 @@ Index
 * kill ring:                             Introduction.        (line  38)
 * kill ring <1>:                         Kill Ring.           (line   6)
 * lambda:                                Configuration.       (line 246)
+* language modes:                        Major Modes.         (line   6)
 * launcher scripts:                      Installation.        (line  36)
 * let:                                   Configuration.       (line 244)
 * line-wise selection:                   Visual Mode.         (line  13)
@@ -1874,9 +2025,14 @@ Index
 * macro recording:                       Introduction.        (line  45)
 * macro recording <1>:                   Configuration.       (line 100)
 * macros, keyboard:                      Configuration.       (line 100)
+* magic mode detection:                  Mode Detection.      (line   6)
+* major modes:                           Major Modes.         (line   6)
 * Messages buffer:                       Introduction.        (line  47)
 * messages buffer:                       Basic Usage.         (line  72)
+* minor modes:                           Minor Modes.         (line   6)
 * modal editing:                         Introduction.        (line  25)
+* mode detection:                        Major Modes.         (line   6)
+* mode detection <1>:                    Mode Detection.      (line   6)
 * modes:                                 Editing Modes.       (line   6)
 * multi-client:                          Daemon/Client Architecture.
                                                               (line 112)
@@ -1916,10 +2072,12 @@ Index
 * replace:                               Search and Replace.  (line   6)
 * replace <1>:                           Search and Replace.  (line  27)
 * replace-yes:                           Search and Replace.  (line  27)
+* save-as mode detection:                Mode Detection.      (line  38)
 * saving:                                Basic Usage.         (line  29)
 * search:                                Search and Replace.  (line   6)
 * server:                                Daemon/Client Architecture.
                                                               (line   6)
+* snippet-mode:                          Minor Modes.         (line  14)
 * socket:                                Daemon/Client Architecture.
                                                               (line  88)
 * SPC ;:                                 M-x Mode.            (line   6)
@@ -1964,37 +2122,44 @@ Index
 * visual mode IS IMPLEMENTED:            Visual Mode.         (line   6)
 * visual mode operations:                Visual Mode.         (line  17)
 * which-key:                             Introduction.        (line  41)
-* which-key <1>:                         Key Bindings.        (line 165)
+* which-key <1>:                         Minor Modes.         (line  10)
+* which-key <2>:                         Key Bindings.        (line 165)
+* write-file:                            Mode Detection.      (line  38)
 * yank:                                  Kill Ring.           (line   6)
 * yank operator:                         Operators and Text Objects.
                                                               (line  17)
 * yank-pop:                              Kill Ring.           (line  41)
+* yasnippet:                             Minor Modes.         (line  14)
 * zero dependencies:                     Introduction.        (line  19)
 
 
 Tag Table:
 Node: Top1309
-Node: Introduction4113
-Node: Installation6851
-Node: Daemon/Client Architecture8987
-Node: Basic Usage12838
-Node: Editing Modes15425
-Node: Normal Mode15852
-Node: Insert Mode16457
-Node: Visual Mode17039
-Node: Command Mode17898
-Node: M-x Mode18414
-Node: Key Bindings19340
-Node: Operators and Text Objects22980
-Node: Search and Replace25302
-Node: Kill Ring26896
-Node: Buffer Management28659
-Node: Configuration31139
-Node: Plugin System38479
-Node: Frontends40679
-Node: Troubleshooting42753
-Node: Command Reference45074
-Node: Index51688
+Node: Introduction4190
+Node: Installation6928
+Node: Daemon/Client Architecture9064
+Node: Basic Usage12915
+Node: Editing Modes15502
+Node: Normal Mode15928
+Node: Insert Mode16533
+Node: Visual Mode17115
+Node: Command Mode17974
+Node: M-x Mode18490
+Node: Major Modes19416
+Node: Built-in Major Modes20031
+Node: Mode Detection22320
+Node: Minor Modes24691
+Node: Key Bindings25885
+Node: Operators and Text Objects29523
+Node: Search and Replace31845
+Node: Kill Ring33439
+Node: Buffer Management35210
+Node: Configuration37690
+Node: Plugin System45030
+Node: Frontends47230
+Node: Troubleshooting49304
+Node: Command Reference51625
+Node: Index58239
 
 End Tag Table
 
