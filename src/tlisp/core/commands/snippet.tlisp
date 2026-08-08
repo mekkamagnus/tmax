@@ -6,8 +6,7 @@
 ;; Loads snippets from ~/.config/tmax/snippets/<mode>/, expands on Tab.
 
 (defun snippet-try-expand ()
-  "Look up the word before cursor as a snippet key. Expand if found; return nil if not.
-Called by the Tab handler when snippet-mode is active and no field is being navigated."
+  "Look up the word before cursor as a snippet key. Expand if found; return nil if not."
   (let ((word (word-before-cursor)))
     (if (or (null word) (string= word ""))
       nil
@@ -15,7 +14,7 @@ Called by the Tab handler when snippet-mode is active and no field is being navi
         (if (null snippet)
           nil
           (progn
-            ;; Delete the abbreviation
+            ;; Delete the abbreviation word
             (let ((len (length word)))
               (buffer-delete-range (cursor-line) (- (cursor-column) len) (cursor-line) (cursor-column)))
             ;; Expand the template body
@@ -25,41 +24,57 @@ Called by the Tab handler when snippet-mode is active and no field is being navi
 (defun snippet-expand (body)
   "Expand a snippet template BODY at the cursor.
 Parses $1/$2/${1:default}/$0 placeholders, inserts the template, enters
-field-navigation state."
+field-navigation state. After expansion, cursor is at the first field."
   (let ((parsed (snippet-parse-body body)))
     (let ((expanded (nth 0 parsed))
-          (fields (nth 1 parsed)))
-      ;; Insert the expanded template
-      (buffer-insert expanded)
-      ;; TODO: set up field markers for navigation
-      ;; For now, the expanded text (with defaults filled in) is inserted.
-      ;; Full placeholder navigation is Phase 3 of SPEC-101.
-      t)))
+          (field-info (nth 1 parsed)))
+      ;; Record insertion point
+      (let ((start-line (cursor-line))
+            (start-col (cursor-column)))
+        ;; Insert the expanded template (defaults filled in)
+        (buffer-insert expanded)
+        ;; Start field navigation (positions computed from insertion point)
+        (snippet-start-expansion field-info start-line start-col)
+        ;; Move cursor to the first field
+        (let ((field (snippet-current-field)))
+          (if field
+            (progn
+              ;; Move to field start, select default text (if any)
+              (let ((fl (nth 0 field))
+                    (fc (nth 1 field)))
+                (cursor-move fl fc)))
+            ;; No fields → cursor stays at insertion point
+            nil))))
+    t))
 
 (defun snippet-next-field ()
-  "Move to the next placeholder field (Tab during snippet navigation)."
-  (if (snippet-field-active-p)
-    (progn
-      ;; TODO: advance to next field marker
-      nil)
-    nil))
+  "Move to the next placeholder field (Tab during snippet navigation).
+Returns t if a field was found, nil if all fields are done (exits snippet state)."
+  (let ((field (snippet-next-field-internal)))
+    (if field
+      (progn
+        (cursor-move (nth 0 field) (nth 1 field))
+        t)
+      (progn
+        (snippet-exit)
+        nil))))
 
 (defun snippet-prev-field ()
   "Move to the previous placeholder field (S-Tab during snippet navigation)."
-  (if (snippet-field-active-p)
-    (progn
-      ;; TODO: advance to previous field marker
-      nil)
-    nil))
+  (let ((field (snippet-prev-field-internal)))
+    (if field
+      (progn
+        (cursor-move (nth 0 field) (nth 1 field))
+        t)
+      nil)))
 
 (defun snippet-exit ()
   "Exit snippet field navigation."
-  ;; TODO: clear active expansion state
-  nil)
+  (snippet-exit-internal))
 
 (defun snippet-help ()
   "Show snippet-mode help."
-  (message "Snippet mode: type abbreviation + Tab to expand. M-x snippet-reload to re-read files."))
+  (message "Snippet mode: type abbreviation + Tab to expand. Tab cycles fields."))
 
 (provide "snippet")
 )

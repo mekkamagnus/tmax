@@ -50,6 +50,66 @@ export class SnippetManager {
   /** Active expansion (null when not navigating fields) */
   active: SnippetExpansion | null = null;
 
+  /** Start tracking a new expansion: record field positions relative to the
+   * insertion point, then convert to absolute buffer positions. */
+  startExpansion(
+    fields: { id: number; defaultText?: string; positions: { line: number; col: number }[] }[],
+    startLine: number,
+    startCol: number,
+  ): void {
+    const snippetFields: SnippetField[] = [];
+    for (const f of fields) {
+      const firstPos = f.positions[0];
+      if (!firstPos) continue;
+      // Convert relative position to absolute: line offset + col (for line 0, add startCol)
+      const absLine = startLine + firstPos.line;
+      const absCol = firstPos.line === 0 ? startCol + firstPos.col : firstPos.col;
+      const defaultLen = f.defaultText?.length ?? 0;
+      const endCol = absCol + defaultLen;
+      const mirrors = f.positions.slice(1).map(p => ({
+        line: startLine + p.line,
+        col: p.line === 0 ? startCol + p.col : p.col,
+      }));
+      snippetFields.push({
+        id: f.id,
+        startLine: absLine, startCol: absCol,
+        endLine: absLine, endCol,
+        defaultText: f.defaultText,
+        mirrors,
+      });
+    }
+    this.active = { fields: snippetFields, currentFieldIndex: 0 };
+  }
+
+  /** Get the current field (or null if no active expansion / all fields done). */
+  currentField(): SnippetField | null {
+    if (!this.active || this.active.currentFieldIndex >= this.active.fields.length) return null;
+    return this.active.fields[this.active.currentFieldIndex]!;
+  }
+
+  /** Advance to the next field. Returns the field or null if done ($0 reached). */
+  nextField(): SnippetField | null {
+    if (!this.active) return null;
+    this.active.currentFieldIndex++;
+    if (this.active.currentFieldIndex >= this.active.fields.length) {
+      this.active = null;
+      return null;
+    }
+    return this.currentField();
+  }
+
+  /** Go to the previous field. Returns the field or null. */
+  prevField(): SnippetField | null {
+    if (!this.active || this.active.currentFieldIndex <= 0) return null;
+    this.active.currentFieldIndex--;
+    return this.currentField();
+  }
+
+  /** Exit snippet navigation (clear active state). */
+  exit(): void {
+    this.active = null;
+  }
+
   /** Snippet directory root (default: ~/.config/tmax/snippets) */
   private snippetRoot: string;
 
@@ -302,9 +362,63 @@ export function createSnippetOps(
       createList(fields.map(f => createList([
         createNumber(f.id),
         f.defaultText ? createString(f.defaultText) : createNil(),
-        createNumber(f.positions.length),
+        createList(f.positions.map(p => createList([createNumber(p.line), createNumber(p.col)]))),
       ]))),
     ]));
+  });
+
+  // #167 Phase 3: field marker tracking
+
+  api.set("snippet-start-expansion", (args: TLispValue[]): Either<AppError, TLispValue> => {
+    const vc = validateArgsCount(args, 3, "snippet-start-expansion");
+    if (Either.isLeft(vc)) return Either.left(vc.left);
+
+    // Parse the field-info list (from snippet-parse-body) back into structured form
+    const fieldInfoList = args[0]!;
+    const startLine = args[1]!.value as number;
+    const startCol = args[2]!.value as number;
+
+    if (fieldInfoList.type !== "list") {
+      return Either.right(createNil());
+    }
+
+    const fields = (fieldInfoList.value as TLispValue[]).map(item => {
+      const items = (item as TLispValue).value as TLispValue[];
+      const id = items[0]!.value as number;
+      const defaultText = items[1]?.type === "string" ? items[1]!.value as string : undefined;
+      const positionsList = (items[2]?.value as TLispValue[]) ?? [];
+      const positions = positionsList.map(p => {
+        const posItems = (p as TLispValue).value as TLispValue[];
+        return { line: posItems[0]!.value as number, col: posItems[1]!.value as number };
+      });
+      return { id, defaultText, positions };
+    });
+
+    manager.startExpansion(fields, startLine, startCol);
+    return Either.right(createNil());
+  });
+
+  api.set("snippet-current-field", (_args: TLispValue[]): Either<AppError, TLispValue> => {
+    const field = manager.currentField();
+    if (!field) return Either.right(createNil());
+    return Either.right(createList([createNumber(field.startLine), createNumber(field.startCol)]));
+  });
+
+  api.set("snippet-next-field-internal", (_args: TLispValue[]): Either<AppError, TLispValue> => {
+    const field = manager.nextField();
+    if (!field) return Either.right(createNil());
+    return Either.right(createList([createNumber(field.startLine), createNumber(field.startCol)]));
+  });
+
+  api.set("snippet-prev-field-internal", (_args: TLispValue[]): Either<AppError, TLispValue> => {
+    const field = manager.prevField();
+    if (!field) return Either.right(createNil());
+    return Either.right(createList([createNumber(field.startLine), createNumber(field.startCol)]));
+  });
+
+  api.set("snippet-exit-internal", (_args: TLispValue[]): Either<AppError, TLispValue> => {
+    manager.exit();
+    return Either.right(createNil());
   });
 
   return api;
