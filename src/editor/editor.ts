@@ -886,6 +886,10 @@ export class Editor {
       }
 
       const pattern = (patternArg.value as string).toLowerCase();
+      // ReDoS hygiene: cap pattern length (user-typed regex in a single-user
+      // local editor; the matched strings — symbol names — are short, so
+      // catastrophic backtracking is low-risk, but a giant pattern is pointless).
+      if (pattern.length > 500) throw new Error("apropos pattern too long (max 500 chars)");
 
       // Find all matching commands
       const matchingCommands: TLispValue[] = [];
@@ -894,7 +898,6 @@ export class Editor {
       // Helper to check if pattern matches and build result
       const checkMatch = (name: string, value: TLispValue): void => {
         if (seen.has(name)) return;
-        if (value.type !== "function") return;
 
         const lowerName = name.toLowerCase();
         let matches = false;
@@ -907,19 +910,24 @@ export class Editor {
 
         if (matches) {
           seen.add(name);
-          // Get key bindings for this command
+          const isFunction = value.type === "function";
+
+          // Key bindings only apply to functions (commands).
           const bindings: string[] = [];
-          for (const [key, mappings] of this.keyMappings) {
-            for (const mapping of mappings) {
-              if (mapping.command === name) {
-                const modeStr = mapping.mode ? ` (${mapping.mode})` : "";
-                bindings.push(`${key}${modeStr}`);
+          if (isFunction) {
+            for (const [key, mappings] of this.keyMappings) {
+              for (const mapping of mappings) {
+                if (mapping.command === name) {
+                  const modeStr = mapping.mode ? ` (${mapping.mode})` : "";
+                  bindings.push(`${key}${modeStr}`);
+                }
               }
             }
           }
 
-          const func = value as TLispFunction;
-          const docstring = func.docstring || "No documentation available";
+          const docstring = isFunction
+            ? (value as TLispFunction).docstring || "No documentation available"
+            : "(variable)";
 
           const result: TLispValue[] = [
             createString(name),
@@ -955,6 +963,54 @@ export class Editor {
       this.applyUpdate({ type: "SetStatusMessage", message: "Apropos command: " });
 
       return createString("waiting for search pattern");
+    });
+
+    // SPEC-107 (#174): apropos-documentation — search the BODIES of docstrings
+    // (not names) for a regex; the "I think there's a command that does X" tool.
+    // Returns (name type docstring) for each function whose docstring matches.
+    // Mirrors apropos-command's enumeration; variables lack docstrings in tmax
+    // today, so only function docstrings are searched.
+    defineRaw("apropos-documentation", (args) => {
+      if (args.length !== 1) {
+        throw new Error("apropos-documentation requires exactly 1 argument: pattern");
+      }
+      const patternArg = args[0];
+      if (!patternArg || patternArg.type !== "string") {
+        throw new Error("apropos-documentation requires a string pattern");
+      }
+      const pattern = (patternArg.value as string);
+      // ReDoS hygiene: cap pattern length (same rationale as apropos-command).
+      if (pattern.length > 500) throw new Error("apropos-documentation pattern too long (max 500 chars)");
+
+      const matching: TLispValue[] = [];
+      const seen = new Set<string>();
+
+      const checkMatch = (name: string, value: TLispValue): void => {
+        if (seen.has(name)) return;
+        const type = value.type === "function" ? "function" : "variable";
+        const doc = value.type === "function" ? ((value as TLispFunction).docstring || "") : "";
+        if (!doc) return;
+        let matches = false;
+        try {
+          matches = new RegExp(pattern, "i").test(doc);
+        } catch {
+          matches = doc.toLowerCase().includes(pattern.toLowerCase());
+        }
+        if (matches) {
+          seen.add(name);
+          matching.push(createList([createString(name), createString(type), createString(doc)]));
+        }
+      };
+
+      for (const [name, value] of this.collectVisibleGlobalBindings()) {
+        checkMatch(name, value);
+      }
+      const moduleExports = this.interpreter.moduleRegistry.allExports();
+      for (const [name, entry] of moduleExports) {
+        checkMatch(name, entry.value);
+      }
+
+      return createList(matching);
     });
 
     // Add count prefix API functions (US-1.3.1)

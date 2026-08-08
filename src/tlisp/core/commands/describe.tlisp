@@ -1,5 +1,5 @@
 (defmodule editor/commands/describe
-  (export describe-to-help describe-function describe-mode describe-variable describe-key describe-function-at-point describe-variable-at-point describe-key-at-point describe-binding-line)
+  (export describe-to-help describe-function describe-mode describe-variable describe-key describe-function-at-point describe-variable-at-point describe-key-at-point describe-binding-line apropos apropos-documentation apropos-run apropos-documentation-run)
 
 ;; describe.tlisp --- SPEC-083 Emacs-style self-documentation.
 ;;
@@ -210,11 +210,74 @@ wired end-to-end, drive (describe-key \"j\") directly via eval — the
 docstring-correctness path does not depend on the interactive capture."
   (describe-key-prompt))
 
+;; ── Apropos (SPEC-107 / #174) ─────────────────────────────────────────
+;; Search the live symbol table. `apropos` matches command/function NAMES;
+;; `apropos-documentation` matches docstring BODIES (the "I think there's a
+;; command for X" tool). Both render to *Help*. The TS primitives
+;; (`apropos-command`, `apropos-documentation` in editor.ts) enumerate visible
+;; global bindings + module exports; results are (name bindings doc) and
+;; (name type doc) respectively.
+
+(defun apropos--render-empty (title)
+  "Render a no-matches *Help* page."
+  (describe-to-help title "No matches."))
+
+(defun apropos-run (pattern)
+  "Run the name-search (apropos-command) for PATTERN and render to *Help*.
+Accept-function for `apropos' (called by the minibuffer with the typed regex)."
+  (let ((matches (apropos-command pattern)))
+    (if (or (nilp matches) (= (length matches) 0))
+      (apropos--render-empty (concat "Apropos: " pattern))
+      (describe-to-help
+        (concat "Apropos: " pattern)
+        (string-join
+          "\n\n"
+          (mapcar
+            (lambda (row)
+              (let ((name (nth 0 row))
+                    (bindings (nth 1 row))
+                    (doc (nth 2 row)))
+                (concat
+                  name
+                  (if (or (nilp bindings) (string= bindings "")) "" (concat "  [" bindings "]"))
+                  "\n  " doc)))
+            matches))))))
+
+(defun apropos-documentation-run (pattern)
+  "Run the docstring-search (apropos-documentation) for PATTERN and render to *Help*.
+Accept-function for `apropos-documentation'."
+  (let ((matches (apropos-documentation pattern)))
+    (if (or (nilp matches) (= (length matches) 0))
+      (apropos--render-empty (concat "Apropos doc: " pattern))
+      (describe-to-help
+        (concat "Apropos doc: " pattern)
+        (string-join
+          "\n\n"
+          (mapcar
+            (lambda (row)
+              (let ((name (nth 0 row))
+                    (type (nth 1 row))
+                    (doc (nth 2 row)))
+                (concat name "  (" type ")\n  " doc)))
+            matches))))))
+
+(defun apropos ()
+  "Prompt for a regex and list matching command/function names in *Help*.
+Searches NAMES. Bound to SPC h a. M-x discoverable via this docstring."
+  (read-from-minibuffer "Apropos (regex): " "" "apropos-history" "apropos-run"))
+
+(defun apropos-documentation ()
+  "Prompt for a regex and list functions whose docstrings match in *Help*.
+Searches docstring BODIES. M-x discoverable via this docstring."
+  (read-from-minibuffer "Apropos doc (regex): " "" "apropos-doc-history" "apropos-documentation-run"))
+
 ;; ── Bindings (SPEC-067: NO C-x / C-h chords — SPC h prefix only) ───────
 (key-bind "SPC h f" "(describe-function-at-point)" "normal")
 (key-bind "SPC h m" "(describe-mode)" "normal")
 (key-bind "SPC h v" "(describe-variable-at-point)" "normal")
 (key-bind "SPC h k" "(describe-key-at-point)" "normal")
+(key-bind "SPC h a" "(apropos)" "normal")
+(key-bind "SPC h A" "(apropos-documentation)" "normal")
 
 (provide "describe")
 )
