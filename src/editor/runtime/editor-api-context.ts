@@ -137,6 +137,15 @@ export interface EditorAPIContext {
   killBuffer?: (name: string) => string | null;
   renameBuffer?: (newName: string) => string | null;
   buryBuffer?: (name: string) => string | null;
+  /**
+   * SPEC-105 (#172): persist a filename in `bufferMetadata` (the private
+   * buffer-name → filename map). Same optional-threaded-callback reason as
+   * kill/rename/bury above — bufferMetadata is not reachable from
+   * createBufferOps's closure. Used by `set-buffer-filename` so a filename set
+   * via the T-Lisp save path survives `buffer-insert` (which re-derives
+   * currentFilename from metadata each keystroke — BUG-58).
+   */
+  associateBufferFilename?: (filename: string) => void;
   /** Non-bumping switch for deterministic buffer cycling (SPEC-087). */
   switchBufferSilent?: (name: string) => string | null;
   /** Logging surface for the *Messages* buffer (SPEC-055). */

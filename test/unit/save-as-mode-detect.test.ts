@@ -104,3 +104,46 @@ test('plain save (no filename arg) does NOT re-detect — keeps the current mode
     try { await server.shutdown(); } catch { /* best-effort */ }
   }
 }, 30_000);
+
+// SPEC-105 (#172): the T-Lisp save path (write-file / save-file / save-buffer)
+// reaches parity with the TS `:w <file>` path: re-detect the mode on save-as,
+// and the filename must persist in bufferMetadata so a subsequent buffer-insert
+// (which re-derives currentFilename — BUG-58) does not wipe it / reset the mode.
+
+test('save-buffer <file>.md (write-file / save-file path) re-detects markdown-mode (SPEC-105)', async () => {
+  const { editor, server } = await startedEditor();
+  try {
+    editor.executeCommand('(buffer-create "work")');
+    editor.executeCommand('(buffer-switch "work")');
+    editor.executeCommand('(buffer-insert "# heading")');
+
+    const mdFile = join(fakeHome, 'tlisp-note.md');
+    editor.executeCommand(`(save-buffer "${mdFile}")`);
+
+    expect(editor.getState().currentFilename).toBe(mdFile);
+    expect(currentMajorMode(editor)).toBe('markdown');
+  } finally {
+    try { await server.shutdown(); } catch { /* best-effort */ }
+  }
+}, 30_000);
+
+test('set-buffer-filename persists in bufferMetadata — filename survives buffer-insert (SPEC-105 / BUG-58)', async () => {
+  const { editor, server } = await startedEditor();
+  try {
+    editor.executeCommand('(buffer-create "work")');
+    editor.executeCommand('(buffer-switch "work")');
+    editor.executeCommand('(buffer-insert "# hi")');
+    const mdFile = join(fakeHome, 'persist.md');
+    // T-Lisp save-as sets the filename via set-buffer-filename (now also
+    // persists in bufferMetadata) + re-detects the mode.
+    editor.executeCommand(`(save-buffer "${mdFile}")`);
+    expect(currentMajorMode(editor)).toBe('markdown');
+
+    // The first edit after save-as must NOT wipe the filename / reset the mode.
+    editor.executeCommand('(buffer-insert " more")');
+    expect(editor.getState().currentFilename).toBe(mdFile);
+    expect(currentMajorMode(editor)).toBe('markdown');
+  } finally {
+    try { await server.shutdown(); } catch { /* best-effort */ }
+  }
+}, 30_000);

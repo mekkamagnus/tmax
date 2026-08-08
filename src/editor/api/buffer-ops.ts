@@ -49,7 +49,10 @@ export function createBufferOps(
   killBuffer?: (name: string) => string | null,
   renameBuffer?: (newName: string) => string | null,
   buryBuffer?: (name: string) => string | null,
-  switchBufferSilent?: (name: string) => string | null
+  switchBufferSilent?: (name: string) => string | null,
+  // SPEC-105 (#172): persist filename in bufferMetadata so a T-Lisp
+  // set-buffer-filename survives buffer-insert (BUG-58 re-derivation).
+  associateBufferFilename?: (filename: string) => void
 ): Map<string, TLispFunctionImpl> {
   // CHORE-39 Phase 4: cursor/buffer/filename/modified reads flow through the
   // State monad against EditorModel; writes stay on the supplied setters to
@@ -558,6 +561,10 @@ export function createBufferOps(
 
     const path = pathArg.value as string;
     setCurrentFilename(path);
+    // SPEC-105 (#172): also persist in bufferMetadata so buffer-insert (which
+    // re-derives currentFilename from metadata each keystroke — BUG-58) does
+    // not wipe a filename set via the T-Lisp save path.
+    associateBufferFilename?.(path);
     return Either.right(createString(path));
   });
 

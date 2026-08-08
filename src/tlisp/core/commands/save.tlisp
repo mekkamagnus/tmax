@@ -29,6 +29,13 @@ on disk since open/last save — pass t as the second arg to force (:w!)."
       (make-backup-file path))
     (write-file-content path (buffer-text))
     (set-buffer-filename path)
+    ;; SPEC-105 (#172): re-detect the major mode on save-as (filename arg) —
+    ;; Emacs write-file → normal-mode parity. major-mode-auto-detect reads
+    ;; currentFilename (set-buffer-filename above now also persists it in
+    ;; bufferMetadata, so the mode survives subsequent buffer-inserts). Plain
+    ;; :w (no filename) keeps the mode set when the file was opened.
+    (when filename
+      (major-mode-auto-detect))
     (set-buffer-modified-p nil)
     ;; Record the mtime after saving so a subsequent external change is detected.
     ;; hashmap-set returns a new hashmap (immutable) — must setq back.

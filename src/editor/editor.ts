@@ -433,6 +433,9 @@ export class Editor {
       killBuffer: (name: string) => editor.killBuffer(name),
       renameBuffer: (newName: string) => editor.renameBuffer(newName),
       buryBuffer: (name: string) => editor.buryBuffer(name),
+      // SPEC-105 (#172): persist filename in bufferMetadata so the T-Lisp
+      // save path's set-buffer-filename survives buffer-insert (BUG-58).
+      associateBufferFilename: (fn: string) => editor.associateBufferFilename(fn),
       switchBufferSilent: (name: string) => editor.switchBufferSilent(name),
       getMessageLog: () => editor.logging.getMessageLog(),
       getUnifiedLog: () => editor.logging.getUnifiedLog(),
