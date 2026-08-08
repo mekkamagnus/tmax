@@ -16,7 +16,7 @@
  */
 
 import type { TLispValue, TLispFunctionImpl } from "../../tlisp/types.ts";
-import { createNil, createString, createList } from "../../tlisp/values.ts";
+import { createNil, createString, createList, createBoolean } from "../../tlisp/values.ts";
 import type { TextBuffer } from "../../core/contracts/buffer.ts";
 import { indentRulesByBuffer } from "./indent-ops.ts";
 import { runModel, readModelField, type EditorModelAccess } from "./state-context.ts";
@@ -31,6 +31,7 @@ import {
 } from "../../error/types.ts";
 import type { MajorModeConfig } from "../mode-state.ts";
 import { normalizeExtension } from "../mode-state.ts";
+import { findFileLocalMode } from "../local-variables.ts";
 import { createExtensionRule, createRegexpRule, detectAutoMode } from "../auto-mode.ts";
 import type { AutoModeRule } from "../mode-state.ts";
 
@@ -107,6 +108,25 @@ export function createMajorModeOps(
     }
     writeCurrentMode("fundamental");
     return "fundamental";
+  };
+
+  // SPEC-102: the highest-precedence signal — the file declares its own mode via
+  // a file-local `mode:` variable (`-*- mode: X; -*-` or a `Local Variables:`
+  // block). Returns the activated mode name, or undefined when no (registered)
+  // declaration is present (so the caller falls through to filename detection).
+  // Only the `mode:` variable is honored; `eval:`-style locals are NOT.
+  const resolveFileLocal = (): string | undefined => {
+    if (!mm.enableLocalVariables) return undefined;
+    const buf = getCurrentBuffer();
+    if (!buf) return undefined;
+    const contentResult = buf.getContent();
+    if (!contentResult || (contentResult as any)._tag !== "Right") return undefined;
+    const declared = findFileLocalMode((contentResult as any).right as string);
+    if (!declared) return undefined;
+    // An unregistered declared mode falls through (do not error) — filename
+    // detection then has its chance.
+    if (!mm.registry.has(declared)) return undefined;
+    return activateConfig(mm.registry.get(declared)!);
   };
 
   // (major-mode-register NAME EXTENSIONS &optional SYNTAX-LANGUAGE INDENT-INCREASE INDENT-DECREASE)
@@ -265,6 +285,13 @@ export function createMajorModeOps(
       return Either.left(argsValidation.left);
     }
 
+    // SPEC-102: file-local `mode:` declaration has the highest precedence — a
+    // file can override filename/content detection by declaring its own mode.
+    const fileLocal = resolveFileLocal();
+    if (fileLocal) {
+      return Either.right(createString(fileLocal));
+    }
+
     const filename = getCurrentFilename();
     if (filename) {
       const detected = detectAutoMode(filename, mm.autoModeRules);
@@ -275,8 +302,9 @@ export function createMajorModeOps(
         }
       }
     }
-    // No filename, or filename matched no rule → fall back to the configurable
-    // default-major-mode (SPEC-104), then fundamental.
+    // No file-local declaration, no filename, or filename matched no rule →
+    // fall back to the configurable default-major-mode (SPEC-104), then
+    // fundamental.
     return Either.right(createString(resolveDefault()));
   });
 
@@ -308,6 +336,44 @@ export function createMajorModeOps(
     }
     mm.defaultMajorMode = nameArg.value as string;
     return Either.right(createString(mm.defaultMajorMode));
+  });
+
+  // SPEC-102: gate for file-local variable detection. Default true. When false,
+  // `-*- mode: X; -*-` / `Local Variables:` blocks are ignored (filename
+  // detection only). Like default-major-mode, exposed via primitives, not a
+  // setq-able variable (T-Lisp is Lisp-1).
+  api.set("enable-local-variables-p", (args: TLispValue[]): Either<AppError, TLispValue> => {
+    const argsValidation = validateArgsCount(args, 0, "enable-local-variables-p");
+    if (Either.isLeft(argsValidation)) {
+      return Either.left(argsValidation.left);
+    }
+    return Either.right(createBoolean(mm.enableLocalVariables));
+  });
+
+  api.set("set-enable-local-variables", (args: TLispValue[]): Either<AppError, TLispValue> => {
+    const argsValidation = validateArgsCount(args, 1, "set-enable-local-variables");
+    if (Either.isLeft(argsValidation)) {
+      return Either.left(argsValidation.left);
+    }
+    const flagArg = args[0]!;
+    let flag: boolean;
+    if (flagArg.type === "boolean") {
+      flag = flagArg.value as boolean;
+    } else if (flagArg.type === "nil") {
+      flag = false;
+    } else if (flagArg.type === "symbol" && flagArg.value === "t") {
+      flag = true;
+    } else {
+      return Either.left(createValidationError(
+        'TypeError',
+        'set-enable-local-variables requires a boolean argument',
+        'flag',
+        String(flagArg.value),
+        't or nil',
+      ));
+    }
+    mm.enableLocalVariables = flag;
+    return Either.right(createBoolean(mm.enableLocalVariables));
   });
 
   // (auto-mode-add PATTERN MODE &optional KIND)

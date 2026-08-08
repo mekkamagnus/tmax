@@ -57,39 +57,40 @@ local variables are enabled), activates that mode.
   2. `auto-mode-alist` (existing `detectAutoMode`).
   3. magic content detection (SPEC-103, when present).
   4. `default-major-mode` (SPEC-104, when present).
-- Add a user setting `enable-local-variables` (default `t`); when `nil`, skip
-  the file-local scan entirely.
+- Add a user setting `enable-local-variables` (default `t`); when off, skip the
+  file-local scan entirely. Exposed via primitives `(set-enable-local-variables FLAG)`
+  + `(enable-local-variables-p)` (NOT a setq-able variable — T-Lisp is Lisp-1,
+  same idiom as `set-default-major-mode`, SPEC-104).
 
 ## Relevant Files
 
-- `src/editor/auto-mode.ts` — `detectAutoMode` (filename rules; unchanged, but
-  called after the file-local check).
-- `src/editor/api/major-mode-ops.ts` — `major-mode-auto-detect` primitive
-  (inject the file-local check before `detectAutoMode`).
-- `src/editor/editor.ts` — `activateMajorModeForFile` (orchestrates detection).
-- New: `src/editor/local-variables.ts` — pure scanner for `-*- mode: -*-` and
-  `Local Variables:` blocks (reads from the buffer's text, not disk).
-- New T-Lisp variable: `enable-local-variables` (default `t`).
+- `src/editor/local-variables.ts` (NEW) — pure scanner `findFileLocalMode(text)`.
+- `src/editor/api/major-mode-ops.ts` — `major-mode-auto-detect` (file-local check
+  first via a new `resolveFileLocal` helper); `(set-enable-local-variables FLAG)`
+  + `(enable-local-variables-p)` primitives.
+- `src/editor/functional/domain-state.ts` — `enableLocalVariables` field on
+  `MajorModeDomainState` (default `true`).
 
 ### New Files
 - `src/editor/local-variables.ts` — the scanner.
-- `test/unit/file-local-mode.test.ts` — pins both forms + precedence + the gate.
+- `test/unit/file-local-mode.test.ts` — pins the scanner + precedence + the gate.
 
 ## Implementation Plan
 
 ### Phase 1: Scanner
 Pure function `findFileLocalMode(bufferText: string): string | undefined` that:
-- Matches `-*- ... mode: (\w+) ... -*-` on the first line (allow surrounding
-  comment syntax). Also support the bare `-*- NAME -*-` shorthand.
+- Matches `-*- ... mode: NAME ... -*-` on the first line (allow surrounding
+  comment syntax). Also supports the bare `-*- NAME -*-` shorthand.
 - Scans the last ~3000 chars for a `Local Variables:` … `End:` block and
   extracts `mode: NAME`.
 
 ### Phase 2: Wire into detection
-In `major-mode-auto-detect`, after computing the filename match, FIRST check the
-file-local mode (if `enable-local-variables` is non-nil) and prefer it.
+In `major-mode-auto-detect`, FIRST check the file-local mode (when enabled) and
+prefer it; only then try `detectAutoMode` (filename), then the default.
 
 ### Phase 3: Setting + gating
-Register `enable-local-variables` (defvar, default `t`). When `nil`, skip the scan.
+`enableLocalVariables` on `MajorModeDomainState` (default `true`); toggled via
+`(set-enable-local-variables FLAG)`. When off, `resolveFileLocal` short-circuits.
 
 ## Step by Step Tasks
 
@@ -121,11 +122,12 @@ deterministic and side-effect-free.
 
 ### Task 3: enable-local-variables gate
 **User Story**: As a security-conscious user, I can disable file-local variables.
-- Register `enable-local-variables` (default `t`).
-- When `nil`, skip the scan (filename detection only).
+- `enableLocalVariables` (default `true`) on `MajorModeDomainState`; toggled via
+  `(set-enable-local-variables FLAG)` (accepts `t`/`nil`/boolean); queried via
+  `(enable-local-variables-p)`. When off, `resolveFileLocal` skips the scan.
 
 **Acceptance Criteria**:
-- [ ] `(setq enable-local-variables nil)` → `-*- mode: X; -*-` is ignored
+- [ ] `(set-enable-local-variables nil)` → `-*- mode: X; -*-` is ignored
 - [ ] Default `t` → honored
 
 ### Task 4: Validation
@@ -148,7 +150,7 @@ the `startedEditor` fixture (real modes registered).
 - [ ] First-line `-*- mode: X; -*-` activates `X-mode`, overriding the filename.
 - [ ] `Local Variables:` block `mode:` is honored.
 - [ ] Precedence: file-local > filename (auto-mode-alist) > magic (SPEC-103) > default (SPEC-104).
-- [ ] `enable-local-variables = nil` disables the feature.
+- [ ] (set-enable-local-variables nil) disables the feature.
 - [ ] No regression: files without a declaration detect exactly as before.
 
 ## Validation Commands

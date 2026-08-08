@@ -111,6 +111,10 @@ export interface MajorModeDomainState {
   // matches — the configurable Emacs `default-major-mode` equivalent. Default
   // "fundamental". Set via `(set-default-major-mode "name")`.
   defaultMajorMode: string;
+  // SPEC-102: whether file-local variables (the `-*- mode: X; -*-` magic
+  // comment / `Local Variables:` block) are honored. Default true. Toggled
+  // via `(set-enable-local-variables FLAG)`.
+  enableLocalVariables: boolean;
 }
 
 /**
@@ -205,6 +209,7 @@ export function createEditorSessionState(): EditorSessionState {
       autoModeRules: [],
       fallback: "fundamental",
       defaultMajorMode: "fundamental",
+      enableLocalVariables: true,
     },
   };
 }
