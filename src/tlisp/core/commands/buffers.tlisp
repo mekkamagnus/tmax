@@ -1,5 +1,5 @@
 (defmodule editor/commands/buffers
-  (export buffer-detail-more-recent-p buffer-detail-candidate buffer-detail-name buffer-completion-table buffer-recency-list buffer-recency-rotation buffer-index-of buffer-special-p buffer-rotation-list switch-buffer-accept switch-buffer buffer-name current-buffer-name switch-to-buffer open-file revert-buffer next-buffer previous-buffer kill-buffer-yes-no-table kill-buffer-save-accept kill-buffer rename-buffer-interactive rename-buffer bury-buffer)
+  (export buffer-detail-more-recent-p buffer-detail-candidate buffer-detail-name buffer-completion-table buffer-recency-list buffer-recency-rotation buffer-index-of buffer-special-p buffer-rotation-list switch-buffer-accept switch-buffer buffer-name current-buffer-name clear-splash-if-present switch-to-buffer open-file revert-buffer next-buffer previous-buffer kill-buffer-yes-no-table kill-buffer-save-accept kill-buffer rename-buffer-interactive rename-buffer bury-buffer)
 
 ;; buffers.tlisp --- Interactive buffer completion
 
@@ -90,6 +90,21 @@ list recomputed each call would ping-pong between the two most-recent buffers
 (defun current-buffer-name ()
   "Return the name of the current buffer (alias of buffer-current)."
   (buffer-current))
+
+;; BUG-76: clear the *scratch* splash screen on the first keystroke (vim-style
+;; intro). The splash is seeded read-only by Editor.showSplashIfEmpty; this
+;; lifts read-only and deletes all splash text so the keystroke lands in a
+;; clean, editable buffer. No-op unless *scratch* still shows the splash
+;; sentinel, so it is cheap to run on every keystroke from the normal and
+;; insert handlers. End line is lc-1 (lines are 0-indexed; lc is the count and
+;; would be out of bounds); column 99999 is clamped to end-of-line.
+(defun clear-splash-if-present ()
+  "Clear the *scratch* splash on first keystroke. No-op otherwise."
+  (when (and (string= (buffer-current) "*scratch*")
+             (string-prefix-p "  tmax" (buffer-text)))
+    (buffer-set-read-only nil)
+    (let ((lc (buffer-line-count)))
+      (buffer-delete-range 0 0 (- lc 1) 99999))))
 
 (defun switch-to-buffer (name)
   "Switch to the buffer named NAME (alias of buffer-switch)."

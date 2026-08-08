@@ -35,10 +35,10 @@ export async function handleInsertMode(editor: EditorDispatchPort, key: string, 
   // emoji, etc.)
   const charCode = key.length === 1 ? key.charCodeAt(0) : 0;
   if (key.length === 1 && charCode >= 32 && charCode !== 127) {
-    // Clear the splash screen on first keystroke (like vim's intro).
-    // BUG-76: replaced non-existent buffer-delete-line with buffer-delete-range;
-    // also clear read-only so the scratch buffer is editable after clearing.
-    editor.executeCommand("(when (and (string= (buffer-name) \"*scratch*\") (string-prefix-p \"  tmax\" (buffer-text))) (buffer-set-read-only nil) (let ((lc (buffer-line-count))) (buffer-delete-range 0 0 lc 0)) (cursor-move 0 0))");
+    // Clear the splash screen on first keystroke (like vim's intro). The logic
+    // lives in T-Lisp (buffers.tlisp::clear-splash-if-present); the handler is a
+    // thin router and does no buffer mutation inline.
+    editor.executeCommand("(clear-splash-if-present)");
     const escapedKey = editor.escapeKeyForTLisp(key);
     // #149: route through insert-char so overwrite-mode / electric-pair-mode
     // (minor modes) apply. With both off, insert-char is a plain buffer-insert,

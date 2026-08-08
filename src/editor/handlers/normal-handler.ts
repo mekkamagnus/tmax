@@ -53,8 +53,9 @@ export async function handleNormalMode(editor: EditorDispatchPort, key: string, 
   const currentPrefix = state.whichKeyPrefix || "";
 
   // BUG-76: Clear splash screen on first keystroke in normal mode (like vim).
-  // Same logic as insert-handler — clears the *scratch* splash buffer.
-  exec("(when (and (string= (buffer-name) \"*scratch*\") (string-prefix-p \"  tmax\" (buffer-text))) (buffer-set-read-only nil) (let ((lc (buffer-line-count))) (buffer-delete-range 0 0 lc 0)) (cursor-move 0 0))");
+  // The logic lives in T-Lisp (buffers.tlisp::clear-splash-if-present) — the
+  // handler is a thin router (no buffer mutation inline).
+  exec("(clear-splash-if-present)");
 
   // SPEC-044 Phase 1.F-1.H — macro pending states must be routed BEFORE the
   // generic Escape/C-g handler. q<Escape> is a quit command per spec MUST,

@@ -80,3 +80,33 @@ test('cleanStart=true with no file lands on *scratch* (bare startup)', async () 
     try { await server.shutdown(); } catch { /* best-effort */ }
   }
 }, 30_000);
+
+// BUG-76: the bare-embedded path (main.ts → TmaxServer.startEditor) must seed
+// the read-only splash into *scratch* so the Steep TUI has something to render
+// on a fresh `tmax`. This pins the full server path (initializeWorkspaces →
+// cleanStart buffer-switch → showSplashIfEmpty), not just showSplashIfEmpty in
+// isolation (covered by show-splash.test.ts).
+test('cleanStart bare startup seeds the read-only splash into *scratch* (BUG-76)', async () => {
+  const editor = new Editor(new TerminalIOImpl(true), new FileSystemImpl());
+  editor.createBuffer('*scratch*', ''); // bare startup: empty *scratch*, current
+
+  const server = new TmaxServer(undefined, true, editor, undefined, true); // cleanStart
+  try {
+    await server.startEditor();
+    expect(currentBufferName(editor)).toBe('*scratch*');
+    // The current buffer (now *scratch*) must hold the splash text and be RO.
+    const text = editor.getInterpreter().execute('(buffer-text)');
+    expect(text._tag).toBe('Right');
+    if (text._tag === 'Right') {
+      expect(text.right.value).toContain('tmax — extensible terminal editor');
+      expect(text.right.value).toContain('Press any key to continue');
+    }
+    const ro = editor.getInterpreter().execute('(buffer-read-only-p)');
+    expect(ro._tag).toBe('Right');
+    if (ro._tag === 'Right') {
+      expect(ro.right.value).toBe(true);
+    }
+  } finally {
+    try { await server.shutdown(); } catch { /* best-effort */ }
+  }
+}, 30_000);
