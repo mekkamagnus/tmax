@@ -8,5 +8,6 @@
   '()
   '())
 
+(major-mode-doc "sql" "SQL query files")
 (provide "sql-mode")
 )

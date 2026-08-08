@@ -16,5 +16,6 @@
 (major-mode-magic "html" "^<!DOCTYPE")
 (major-mode-magic "html" "^<html")
 
+(major-mode-doc "html" "HTML markup editing")
 (provide "html-mode")
 )

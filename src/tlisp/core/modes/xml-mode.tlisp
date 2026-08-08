@@ -12,5 +12,6 @@
 ;; `[?]` keeps this backslash-free (the T-Lisp reader double-processes escapes).
 (major-mode-magic "xml" "^[<][?]xml")
 
+(major-mode-doc "xml" "XML document editing")
 (provide "xml-mode")
 )

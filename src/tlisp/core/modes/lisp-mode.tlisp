@@ -6,6 +6,7 @@
 (major-mode-register "lisp" '(".tlisp" ".lisp" ".el" ".clj") "lisp"
   '("\\\\($" "defun$" "let$" "if$" "when$" "unless$" "progn$" "cond$" "do$")
   '("^\\\\s*[)]"))
+(major-mode-doc "lisp" "Lisp dialects (T-Lisp, Emacs Lisp, Clojure)")
 )
 
 ;; #151: per-mode keymap. g = re-indents the whole buffer using the mode rules.

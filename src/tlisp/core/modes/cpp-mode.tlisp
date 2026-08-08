@@ -8,5 +8,6 @@
   '("\\{$")
   '("^\\s*}"))
 
+(major-mode-doc "cpp" "C++ source code editing")
 (provide "cpp-mode")
 )

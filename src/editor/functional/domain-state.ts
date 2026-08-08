@@ -209,7 +209,7 @@ export function createEditorSessionState(): EditorSessionState {
     },
     majorMode: {
       registry: new Map<string, MajorModeConfig>([
-        ["fundamental", { name: "fundamental", extensions: [] }],
+        ["fundamental", { name: "fundamental", extensions: [], description: "Default mode with no language-specific behavior" }],
       ]),
       autoModeRules: [],
       fallback: "fundamental",

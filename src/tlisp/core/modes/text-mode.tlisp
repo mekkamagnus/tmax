@@ -7,5 +7,6 @@
   '()
   '())
 
+(major-mode-doc "text" "Plain text")
 (provide "text-mode")
 )

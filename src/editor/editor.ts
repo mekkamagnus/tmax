@@ -1010,6 +1010,25 @@ export class Editor {
         checkMatch(name, entry.value);
       }
 
+      // SPEC-108 (#175): also search major-mode descriptions so mode docs feed
+      // apropos-documentation.
+      const modeRegistry = this.model.session.majorMode.registry;
+      for (const [modeName, config] of modeRegistry) {
+        if (seen.has(modeName)) continue;
+        const modeDoc = config.description ?? "";
+        if (!modeDoc) continue;
+        let docMatches = false;
+        try {
+          docMatches = new RegExp(pattern, "i").test(modeDoc);
+        } catch {
+          docMatches = modeDoc.toLowerCase().includes(pattern.toLowerCase());
+        }
+        if (docMatches) {
+          seen.add(modeName);
+          matching.push(createList([createString(modeName), createString("major-mode"), createString(modeDoc)]));
+        }
+      }
+
       return createList(matching);
     });
 

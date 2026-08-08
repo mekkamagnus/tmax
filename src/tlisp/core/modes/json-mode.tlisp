@@ -10,5 +10,6 @@
   '("\\{$" "\\[$")
   '("^\\s*}" "^\\s*\\]"))
 
+(major-mode-doc "json" "JSON data files")
 (provide "json-mode")
 )

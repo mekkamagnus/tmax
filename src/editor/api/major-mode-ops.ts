@@ -298,6 +298,35 @@ export function createMajorModeOps(
     return Either.right(createList(modeNames));
   });
 
+  // SPEC-108 (#175): set/get a mode's human-readable purpose description.
+  api.set("major-mode-doc", (args: TLispValue[]): Either<AppError, TLispValue> => {
+    const argsValidation = validateArgsCount(args, 2, "major-mode-doc");
+    if (Either.isLeft(argsValidation)) return Either.left(argsValidation.left);
+    const nameV = validateArgType(args[0]!, "string", 0, "major-mode-doc");
+    if (Either.isLeft(nameV)) return Either.left(nameV.left);
+    const descV = validateArgType(args[1]!, "string", 1, "major-mode-doc");
+    if (Either.isLeft(descV)) return Either.left(descV.left);
+    const name = args[0]!.value as string;
+    const config = mm.registry.get(name);
+    if (!config) {
+      return Either.left(createValidationError(
+        'ConstraintViolation', `major-mode-doc: mode '${name}' is not registered`,
+        'name', name, 'a registered mode name'));
+    }
+    config.description = args[1]!.value as string;
+    return Either.right(createString(config.description));
+  });
+
+  api.set("major-mode-description", (args: TLispValue[]): Either<AppError, TLispValue> => {
+    const argsValidation = validateArgsCount(args, 1, "major-mode-description");
+    if (Either.isLeft(argsValidation)) return Either.left(argsValidation.left);
+    const nameV = validateArgType(args[0]!, "string", 0, "major-mode-description");
+    if (Either.isLeft(nameV)) return Either.left(nameV.left);
+    const name = args[0]!.value as string;
+    const config = mm.registry.get(name);
+    return Either.right(createString(config?.description ?? ""));
+  });
+
   // (major-mode-auto-detect)
   api.set("major-mode-auto-detect", (args: TLispValue[]): Either<AppError, TLispValue> => {
     const argsValidation = validateArgsCount(args, 0, "major-mode-auto-detect");

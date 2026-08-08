@@ -8,6 +8,7 @@
 (major-mode-register "typescript" '(".ts" ".tsx" ".js" ".jsx" ".mjs") "typescript"
   '("\\\\{$" "\\\\($" "\\\\[$" "=>$" "else$" "catch$" "finally$")
   '("^\\\\s*}" "^\\\\s*[)]" "^\\\\s*]" "^\\\\s*else" "^\\\\s*catch" "^\\\\s*finally"))
+(major-mode-doc "typescript" "TypeScript and JavaScript editing")
 )
 
 ;; #151: per-mode keymap. g = re-indents the whole buffer using the mode rules.

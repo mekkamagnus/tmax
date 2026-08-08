@@ -9,5 +9,6 @@
   '("\\{$")
   '("^\\s*}"))
 
+(major-mode-doc "css" "CSS, SCSS, and Less stylesheets")
 (provide "css-mode")
 )

@@ -8,5 +8,6 @@
   '("where$" "do$" "let$" "in$" "then$" "else$" "=$" "::$" "\\\\{$")
   '("^\\\\s*\\\\}" "^\\\\s*in\\\\b" "^\\\\s*else" "^\\\\s*then"))
 
+(major-mode-doc "purescript" "PureScript source code editing")
 (provide "purescript-mode")
 )

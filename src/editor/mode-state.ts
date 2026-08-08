@@ -54,6 +54,8 @@ export interface MajorModeConfig {
   indentDecrease?: string[];
   /** T-Lisp keymap value name if set */
   keymap?: string;
+  /** SPEC-108 (#175): human-readable purpose doc, shown by describe-mode. */
+  description?: string;
 }
 
 /**

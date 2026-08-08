@@ -125,13 +125,16 @@ SPC h m. M-x discoverable via this docstring."
     (let ((editor (hashmap-get result "editor-mode"))
           (major (hashmap-get result "major-mode"))
           (bindings (hashmap-get result "bindings")))
-      (describe-to-help
-        (concat "Mode: " editor)
-        (concat
-          "Major mode: " major "\n"
-          "Editor mode: " editor "\n\n"
-          "Key bindings:\n"
-          (mapcar "describe-binding-line" bindings))))))
+      (let ((desc (major-mode-description major)))
+        (describe-to-help
+          (concat "Mode: " editor)
+          (concat
+            "Major mode: " major
+            (if (string= desc "") "" (concat " — " desc))
+            "\n"
+            "Editor mode: " editor "\n\n"
+            "Key bindings:\n"
+            (mapcar "describe-binding-line" bindings)))))))
 
 ;; ── describe-variable ─────────────────────────────────────────────────
 (defun describe-variable (name)

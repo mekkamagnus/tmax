@@ -4,4 +4,6 @@
 ;; fundamental.tlisp — Plain text fallback mode
 ;; No syntax highlighting, no indent rules
 (major-mode-register "fundamental" '())
+(major-mode-doc "fundamental" "Default mode with no language-specific behavior")
+(provide "fundamental-mode")
 )

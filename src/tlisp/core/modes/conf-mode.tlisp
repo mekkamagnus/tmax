@@ -7,5 +7,6 @@
   '()
   '())
 
+(major-mode-doc "conf" "Configuration files (.conf, .ini, .cfg, .properties, .env)")
 (provide "conf-mode")
 )

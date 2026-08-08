@@ -11,5 +11,6 @@
   '())
 (auto-mode-add "[Dd]ockerfile" "dockerfile" "regexp")
 
+(major-mode-doc "dockerfile" "Docker container build files")
 (provide "dockerfile-mode")
 )

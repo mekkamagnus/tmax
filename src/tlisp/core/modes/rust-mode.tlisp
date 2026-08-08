@@ -9,5 +9,6 @@
   '("\\{$")
   '("^\\s*}"))
 
+(major-mode-doc "rust" "Rust source code editing")
 (provide "rust-mode")
 )

@@ -6,6 +6,7 @@
 (major-mode-register "go" '(".go") "go"
   '("\\\\{$" "\\\\(" "\\\\[$" "=>$")
   '("^\\\\s*}" "^\\\\s*[)]" "^\\\\s*]"))
+(major-mode-doc "go" "Go source code editing")
 )
 
 ;; #151: per-mode keymap. g = re-indents the whole buffer using the mode rules.

@@ -11,5 +11,6 @@
   '(":\\s*$" "-\\s*$")
   '())
 
+(major-mode-doc "yaml" "YAML data serialization")
 (provide "yaml-mode")
 )

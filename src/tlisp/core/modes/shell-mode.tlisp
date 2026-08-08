@@ -9,5 +9,6 @@
   '("\\bthen$" "\\bdo$" "\\bcase.*\\bin$" "\\{$" "\\($")
   '("^\\s*fi" "^\\s*esac" "^\\s*done" "^\\s*elif" "^\\s*else" "^\\s*then" "^\\s*\\)" "^\\s*\\}"))
 
+(major-mode-doc "shell" "Shell scripts (bash, sh, zsh)")
 (provide "shell-mode")
 )

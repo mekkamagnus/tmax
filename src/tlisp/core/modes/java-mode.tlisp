@@ -8,5 +8,6 @@
   '("\\{$")
   '("^\\s*}"))
 
+(major-mode-doc "java" "Java source code editing")
 (provide "java-mode")
 )

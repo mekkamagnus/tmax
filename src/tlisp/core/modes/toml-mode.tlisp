@@ -8,5 +8,6 @@
   '("\\[$")
   '("^\\s*\\]"))
 
+(major-mode-doc "toml" "TOML configuration files")
 (provide "toml-mode")
 )

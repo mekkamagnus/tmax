@@ -110,5 +110,6 @@
 (key-bind "] l" "(markdown-next-wiki-link)" "normal" "markdown")
 (key-bind "[ l" "(markdown-prev-wiki-link)" "normal" "markdown")
 
+(major-mode-doc "markdown" "Markdown rich-text editing")
 (provide "markdown-mode")
 )
