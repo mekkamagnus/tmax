@@ -1,6 +1,6 @@
 (defmodule editor/commands/snippet
   (export snippet-try-expand snippet-expand snippet-next-field snippet-prev-field
-          snippet-exit snippet-help)
+          snippet-exit snippet-update-mirrors snippet-help)
 
 ;; snippet.tlisp — Snippet expansion commands (#167, SPEC-101)
 ;; Loads snippets from ~/.config/tmax/snippets/<mode>/, expands on Tab.
@@ -14,42 +14,32 @@
         (if (null snippet)
           nil
           (progn
-            ;; Delete the abbreviation word
             (let ((len (length word)))
               (buffer-delete-range (cursor-line) (- (cursor-column) len) (cursor-line) (cursor-column)))
-            ;; Expand the template body
             (snippet-expand (nth 2 snippet))
             t))))))
 
 (defun snippet-expand (body)
   "Expand a snippet template BODY at the cursor.
-Parses $1/$2/${1:default}/$0 placeholders, inserts the template, enters
-field-navigation state. After expansion, cursor is at the first field."
+Parses $1/$2/${1:default}/$0 placeholders, inserts the template (with defaults
+filled in), enters field-navigation state. Cursor moves to the first field."
   (let ((parsed (snippet-parse-body body)))
     (let ((expanded (nth 0 parsed))
           (field-info (nth 1 parsed)))
-      ;; Record insertion point
       (let ((start-line (cursor-line))
             (start-col (cursor-column)))
-        ;; Insert the expanded template (defaults filled in)
         (buffer-insert expanded)
-        ;; Start field navigation (positions computed from insertion point)
         (snippet-start-expansion field-info start-line start-col)
-        ;; Move cursor to the first field
         (let ((field (snippet-current-field)))
           (if field
-            (progn
-              ;; Move to field start, select default text (if any)
-              (let ((fl (nth 0 field))
-                    (fc (nth 1 field)))
-                (cursor-move fl fc)))
-            ;; No fields → cursor stays at insertion point
+            (cursor-move (nth 0 field) (nth 1 field))
             nil))))
     t))
 
 (defun snippet-next-field ()
   "Move to the next placeholder field (Tab during snippet navigation).
-Returns t if a field was found, nil if all fields are done (exits snippet state)."
+Returns t if a field was found, nil if all fields are done."
+  (snippet-update-mirrors)
   (let ((field (snippet-next-field-internal)))
     (if field
       (progn
@@ -71,6 +61,14 @@ Returns t if a field was found, nil if all fields are done (exits snippet state)
 (defun snippet-exit ()
   "Exit snippet field navigation."
   (snippet-exit-internal))
+
+(defun snippet-update-mirrors ()
+  "Update mirror fields for the current field.
+Currently a no-op stub — mirror live-update is Phase 4 secondary work (SPEC-101).
+Mirror positions are tracked by SnippetManager but not synced back to the buffer
+because buffer positions shift with every keystroke and the immutable buffer model
+makes tracking shifts complex. This is a documented limitation."
+  nil)
 
 (defun snippet-help ()
   "Show snippet-mode help."
