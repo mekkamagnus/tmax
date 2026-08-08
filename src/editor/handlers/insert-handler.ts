@@ -5,7 +5,13 @@
 
 import type { EditorDispatchPort } from "./editor-dispatch-port.ts";
 import { resolveMapping } from "../key-resolution.ts";
+import { isTruthy } from "../../tlisp/values.ts";
 import { log } from "../../utils/logger.ts";
+
+const isTruthyResult = (result: any): boolean => {
+  if (!result || result._tag !== "Right") return false;
+  return isTruthy(result.right);
+};
 
 /**
  * Handle key input in insert mode
@@ -54,7 +60,28 @@ export async function handleInsertMode(editor: EditorDispatchPort, key: string, 
   }
   // Handle Tab key in insert mode
   else if (normalizedKey === "Tab") {
-    editor.executeCommand("(insert-tab)");
+    // #167: snippet-mode Tab hook. When snippet-mode is active:
+    // 1. If a field IS active → advance to next field.
+    // 2. If no field is active → try to expand the word before cursor as a snippet.
+    //    If expansion fails → fall through to normal insert-tab.
+    // When snippet-mode is NOT active → normal insert-tab.
+    let tabHandled = false;
+    try {
+      const isSnippetMode = isTruthyResult(editor.executeCommand("(minor-mode-active-p \"snippet\")"));
+      if (isSnippetMode) {
+        const fieldActive = isTruthyResult(editor.executeCommand("(snippet-field-active-p)"));
+        if (fieldActive) {
+          editor.executeCommand("(snippet-next-field)");
+          tabHandled = true;
+        } else {
+          const expanded = isTruthyResult(editor.executeCommand("(snippet-try-expand)"));
+          tabHandled = expanded;
+        }
+      }
+    } catch (_) { /* snippet not loaded — fall through */ }
+    if (!tabHandled) {
+      editor.executeCommand("(insert-tab)");
+    }
   }
   // Handle Escape key to return to normal mode
   else if (normalizedKey === "Escape") {
