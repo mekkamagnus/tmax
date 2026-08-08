@@ -72,6 +72,43 @@ export function createMajorModeOps(
     }
   };
 
+  // Fully activate a registered mode config: set it current, apply its syntax
+  // language + indent rules, and run its activate hook. Returns the mode name.
+  const activateConfig = (config: MajorModeConfig): string => {
+    writeCurrentMode(config.name);
+    if (config.syntaxLanguage) {
+      evalTlisp(`(syntax-set-language "${config.syntaxLanguage}")`);
+    }
+    if (config.indentIncrease && config.indentIncrease.length > 0) {
+      // #151: direct-store (see major-mode-set) — no evalTlisp re-embed.
+      const buf = getCurrentBuffer();
+      if (buf) {
+        indentRulesByBuffer.set(buf, {
+          increase: config.indentIncrease,
+          decrease: config.indentDecrease ?? [],
+        });
+      }
+    }
+    evalTlisp(`(run-hooks "mode-${config.name}-activate-hook")`);
+    return config.name;
+  };
+
+  // SPEC-104: resolve the no-match fallback. Uses the user-configurable
+  // default-major-mode when it names a registered mode; otherwise fundamental.
+  // An unregistered configured default warns (surfaces in *Messages*) and
+  // falls back to fundamental rather than crashing.
+  const resolveDefault = (): string => {
+    const configured = mm.defaultMajorMode;
+    if (configured && configured !== "fundamental" && mm.registry.has(configured)) {
+      return activateConfig(mm.registry.get(configured)!);
+    }
+    if (configured && configured !== "fundamental" && !mm.registry.has(configured)) {
+      evalTlisp(`(message "default-major-mode '${configured}' is not registered; using fundamental-mode")`);
+    }
+    writeCurrentMode("fundamental");
+    return "fundamental";
+  };
+
   // (major-mode-register NAME EXTENSIONS &optional SYNTAX-LANGUAGE INDENT-INCREASE INDENT-DECREASE)
   api.set("major-mode-register", (args: TLispValue[]): Either<AppError, TLispValue> => {
     if (args.length < 2 || args.length > 5) {
@@ -229,39 +266,48 @@ export function createMajorModeOps(
     }
 
     const filename = getCurrentFilename();
-    if (!filename) {
-      return Either.right(createString("fundamental"));
-    }
-
-    const detected = detectAutoMode(filename, mm.autoModeRules);
-    if (detected) {
-      const config = mm.registry.get(detected);
-      if (config) {
-        writeCurrentMode(config.name);
-
-        if (config.syntaxLanguage) {
-          evalTlisp(`(syntax-set-language "${config.syntaxLanguage}")`);
+    if (filename) {
+      const detected = detectAutoMode(filename, mm.autoModeRules);
+      if (detected) {
+        const config = mm.registry.get(detected);
+        if (config) {
+          return Either.right(createString(activateConfig(config)));
         }
-
-        if (config.indentIncrease && config.indentIncrease.length > 0) {
-          // #151: direct-store (see major-mode-set) — no evalTlisp re-embed.
-          const buf = getCurrentBuffer();
-          if (buf) {
-            indentRulesByBuffer.set(buf, {
-              increase: config.indentIncrease,
-              decrease: config.indentDecrease ?? [],
-            });
-          }
-        }
-
-        // Run the mode's activate hook
-        evalTlisp(`(run-hooks "mode-${config.name}-activate-hook")`);
-
-        return Either.right(createString(config.name));
       }
     }
+    // No filename, or filename matched no rule → fall back to the configurable
+    // default-major-mode (SPEC-104), then fundamental.
+    return Either.right(createString(resolveDefault()));
+  });
 
-    return Either.right(createString("fundamental"));
+  // SPEC-104: getter for the configurable no-match fallback. Deliberately NOT
+  // named `default-major-mode`: T-Lisp is Lisp-1 (one namespace for variables
+  // and functions), so a user `(setq default-major-mode "text")` would shadow a
+  // same-named function and corrupt the session. tmax therefore exposes the
+  // Emacs-`default-major-mode` equivalent via setter/getter primitives (the same
+  // idiom as `set-expand-tabs` / `set-tab-width`, #144), not a setq-able var.
+  api.set("default-major-mode-get", (args: TLispValue[]): Either<AppError, TLispValue> => {
+    const argsValidation = validateArgsCount(args, 0, "default-major-mode-get");
+    if (Either.isLeft(argsValidation)) {
+      return Either.left(argsValidation.left);
+    }
+    return Either.right(createString(mm.defaultMajorMode));
+  });
+
+  // SPEC-104: setter. Does not validate registration here — the check runs at
+  // use time (resolveDefault) so a mode can be set before it is registered.
+  api.set("set-default-major-mode", (args: TLispValue[]): Either<AppError, TLispValue> => {
+    const argsValidation = validateArgsCount(args, 1, "set-default-major-mode");
+    if (Either.isLeft(argsValidation)) {
+      return Either.left(argsValidation.left);
+    }
+    const nameArg = args[0]!;
+    const nameValidation = validateArgType(nameArg, "string", 0, "set-default-major-mode");
+    if (Either.isLeft(nameValidation)) {
+      return Either.left(nameValidation.left);
+    }
+    mm.defaultMajorMode = nameArg.value as string;
+    return Either.right(createString(mm.defaultMajorMode));
   });
 
   // (auto-mode-add PATTERN MODE &optional KIND)

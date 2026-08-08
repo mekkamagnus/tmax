@@ -107,6 +107,10 @@ export interface MajorModeDomainState {
   registry: Map<string, MajorModeConfig>;
   autoModeRules: AutoModeRule[];
   fallback: string;
+  // SPEC-104: the major mode used when no detection rule (filename, magic)
+  // matches — the configurable Emacs `default-major-mode` equivalent. Default
+  // "fundamental". Set via `(set-default-major-mode "name")`.
+  defaultMajorMode: string;
 }
 
 /**
@@ -200,6 +204,7 @@ export function createEditorSessionState(): EditorSessionState {
       ]),
       autoModeRules: [],
       fallback: "fundamental",
+      defaultMajorMode: "fundamental",
     },
   };
 }

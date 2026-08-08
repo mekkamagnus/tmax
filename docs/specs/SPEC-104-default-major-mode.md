@@ -13,10 +13,12 @@ Precedence: the FINAL fallback, after file-local (SPEC-102), filename
 
 ## Goals
 
-- `(setq default-major-mode "text")` makes new/undetected buffers open in
+- `(set-default-major-mode "text")` makes new/undetected buffers open in
   `text-mode` instead of `fundamental-mode`.
 - Default value is `"fundamental"` (unchanged behavior).
 - Applies to: brand-new buffers, files whose name+content match no rule.
+- NOTE: the API is a setter primitive, not `(setq default-major-mode …)`, because
+  T-Lisp is Lisp-1 (see Solution Statement).
 
 ## User Story
 
@@ -33,79 +35,89 @@ is no way to change that fallback. Users who want a non-fundamental default
 
 ## Solution Statement
 
-- Add a T-Lisp variable `default-major-mode` (string, default `"fundamental"`).
+- Add a per-editor `defaultMajorMode` field to the major-mode session state
+  (`domain-state.ts`), default `"fundamental"`.
 - In `major-mode-auto-detect`, when filename (and magic, SPEC-103) detection
-  both return nothing, activate `default-major-mode` instead of hard-coded
-  `"fundamental"`.
-- If `default-major-mode` names an unregistered mode, fall back to
-  `fundamental` and log a warning (don't crash).
-- Expose via the init file: `(setq default-major-mode "text")`.
+  both return nothing, activate `defaultMajorMode` (if registered) instead of
+  hard-coded `"fundamental"`.
+- If it names an unregistered mode, fall back to `fundamental` and warn.
+- **API**: `(set-default-major-mode "text")` (setter) and
+  `(default-major-mode-get)` (getter). NOT `(setq default-major-mode …)`:
+  T-Lisp is Lisp-1 (one namespace for variables and functions), so a setq-able
+  variable named `default-major-mode` would collide with / shadow a same-named
+  function. tmax therefore uses the setter/getter-primitive idiom — the same
+  pattern as `set-expand-tabs` / `set-tab-width` (#144). (Emacs is Lisp-2, so
+  its `setq` parity is not directly expressible in T-Lisp today.) A user
+  `(setq default-major-mode "text")` errors cleanly ("variable not defined" —
+  T-Lisp `setq` requires a prior `defvar`) instead of corrupting the session;
+  the configured default is unchanged.
 
 ## Relevant Files
 
-- `src/editor/api/major-mode-ops.ts` — `major-mode-auto-detect` (replace the
-  hard-coded `"fundamental"` fallback with the variable's value + existence check).
-- `src/tlisp/core/commands/major-mode.tlisp` (or wherever mode vars live) —
-  register `(defvar default-major-mode "fundamental …)`.
+- `src/editor/api/major-mode-ops.ts` — `major-mode-auto-detect` (no-match path
+  → `resolveDefault`); `activateConfig`/`resolveDefault` helpers; the
+  `(set-default-major-mode NAME)` setter + `(default-major-mode-get)` getter.
+- `src/editor/functional/domain-state.ts` — `defaultMajorMode` field on
+  `MajorModeDomainState` (default `"fundamental"`) + its initialization.
 - New: `test/unit/default-major-mode.test.ts`.
 
 ### New Files
-- `test/unit/default-major-mode.test.ts` — pins the variable + fallback safety.
+- `test/unit/default-major-mode.test.ts` — pins the fallback, setter/getter,
+  precedence, unregistered-safety, and setq-non-corruption.
 
 ## Implementation Plan
 
-### Phase 1: Variable
-Register `default-major-mode` (defvar, default `"fundamental"`).
+### Phase 1: State + primitives
+Add `defaultMajorMode` (default `"fundamental"`) to major-mode session state;
+add `(set-default-major-mode NAME)` setter + `(default-major-mode-get)` getter.
 
 ### Phase 2: Use it as the fallback
-In `major-mode-auto-detect`, on no-match: read the variable; if the named mode
-is registered, activate it; else activate `fundamental` and log a warning.
+In `major-mode-auto-detect`, on no-match: read `defaultMajorMode`; if the named
+mode is registered, activate it; else activate `fundamental` and log a warning.
 
 ## Step by Step Tasks
 
-### Task 1: Register + read the variable
-**User Story**: As a user, I can set the default mode.
-- Register `(defvar default-major-mode "fundamental" …)`.
-- `major-mode-auto-detect` reads it on no-match.
+### Task 1: Setter/getter primitives + fallback wiring
+**User Story**: As a user, I can set the default mode for undetected buffers.
+- Add `defaultMajorMode` (default `"fundamental"`) to the major-mode session state.
+- Wire `major-mode-auto-detect`'s no-match path to it (via a `resolveDefault` helper).
+- Add `(set-default-major-mode NAME)` setter + `(default-major-mode-get)` getter.
 
 **Acceptance Criteria**:
 - [ ] Default value is `"fundamental"` → behavior unchanged.
-- [ ] `(setq default-major-mode "text")` → undetected buffers open in `text-mode`.
+- [ ] `(set-default-major-mode "text")` → undetected buffers open in `text-mode`
+      (for a registered prose mode).
+- [ ] `(setq default-major-mode "text")` errors cleanly + non-corrupting (Lisp-1).
+- [ ] Unregistered configured default → `fundamental` + warning, no exception.
 
-### Task 2: Unregistered-mode safety
-**User Story**: As a user, a typo in the variable doesn't break the editor.
-- If the named mode is unregistered → fall back to `fundamental` + warn.
-
-**Acceptance Criteria**:
-- [ ] `(setq default-major-mode "nosuchmode")` → undetected buffer is
-      `fundamental-mode`, a warning is logged, no exception.
-
-### Task 3: Validation
+### Task 2: Validation
 - `bun run typecheck`, `bun run build`, `bun test test/unit/default-major-mode.test.ts`.
 
 ## Testing Strategy
 
 ### Unit Tests
 - Default → fundamental on an extension-less, no-shebang, no-`-*-` buffer.
-- `setq default-major-mode "text"` → text-mode (assuming text-mode registered;
-  if not, substitute a registered prose mode or skip that assertion).
+- `(set-default-major-mode "markdown")` → undetected buffer resolves to markdown.
+- Filename detection beats the default (precedence).
 - Unregistered name → fundamental + warn.
+- `(setq default-major-mode …)` errors cleanly + non-corrupting (Lisp-1 guard).
 
 ### Edge Cases
-- Variable set to `"fundamental"` explicitly (idempotent).
-- Variable set mid-session applies to the NEXT detection, not retroactively.
+- Set to `"fundamental"` explicitly (idempotent).
+- Set mid-session applies to the NEXT detection, not retroactively.
 
 ## Acceptance Criteria (Completion)
-- [ ] `default-major-mode` variable exists, defaults to `"fundamental"`.
-- [ ] Undetected buffers use the variable's mode.
+- [ ] `(set-default-major-mode NAME)` + `(default-major-mode-get)` exist; default `"fundamental"`.
+- [ ] Undetected buffers use the configured default mode.
 - [ ] Unregistered mode name → safe fallback + warning.
-- [ ] Default behavior unchanged when the variable is at its default.
+- [ ] `(setq default-major-mode …)` errors cleanly + non-corrupting (T-Lisp Lisp-1).
+- [ ] Default behavior unchanged when at the default.
 
 ## Validation Commands
 - `bun run typecheck`
 - `bun run build`
 - `bun test test/unit/default-major-mode.test.ts`
-- Manual: `(setq default-major-mode "text")` in init.tlisp, then `tmax scratch-file`.
+- Manual: `(set-default-major-mode "text")` (e.g. in init.tlisp), then `tmax scratch-file`.
 
 ## Notes
 - Emacs reference: variable `default-major-mode` (default `fundamental-mode`).
