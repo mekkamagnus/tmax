@@ -2460,8 +2460,19 @@ export class Editor {
     }
     // Success: SaveFileSucceeded reducer set status "Saved X" + cleared the
     // model modified flag. Reconcile Editor-side tracking + metadata.
-    if (filename && !this.model.currentFilename) {
-      this.applyUpdate({ type: "SetCurrentFilename", filename });
+    if (filename) {
+      // Save-as (`:w <file>` / SPC f w): re-associate the buffer with the new
+      // file and re-detect the major mode from its name. Emacs `write-file`
+      // runs `normal-mode`, so `:w notes.md` activates markdown-mode. Without
+      // this, save-as kept whatever mode the buffer had at open time (e.g.
+      // *scratch*'s fundamental-mode). BUG-77.
+      this.activateMajorModeForFile(filename);
+      // BUG-58: persist the filename in bufferMetadata so a subsequent
+      // buffer-insert (which re-derives currentFilename from metadata) doesn't
+      // wipe it — otherwise save-as :w loses its filename on the first
+      // keystroke and the just-detected mode resets to fundamental. Mirrors
+      // attachFileBuffer / openOrCreateFile.
+      this.associateBufferFilename(filename);
     }
     this.setCurrentBufferModified(false);
     this.logMessage(`Saved ${saveFilename}`, 'info');
