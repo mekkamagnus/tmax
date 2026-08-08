@@ -94,6 +94,22 @@ When the user corrects a mistake you made:
 - `rules/` - path-scoped rule files. Each declares its scope on the first line; read the ones that match what you're touching.
 - Directory-level `Claude.md` files (e.g. `src/tlisp/Claude.md`, `src/editor/Claude.md`) declare rules that apply to all files in that directory.
 
+## 7b. Agentic coding — reframe cost, don't remove it
+
+This project is implemented by LLM agents, not humans. That **changes the cost calculus; it does not eliminate cost.**
+
+**Writing code is cheap; living with code is expensive.** The agent does the typing, so the cost of *producing* code (lines, files, mechanical work) is **not** a reason to pick a smaller or half-finished design. When the only thing a choice trades away is "more code for the agent to write," choose the option with the better **long-term** outcome — correct design, less technical debt, fewer future rewrites. Optimize for the future you maintain, not the sprint that writes it.
+
+**Do not** frame recommendations as MVP-first / "defer the full thing" / "cheaper alternative" / "is it worth it?" on the grounds of *writing effort* — that's the agent's job. When asked to plan/spec, write the right scope.
+
+**The costs that still matter** (long-term or human-borne):
+- **Maintenance burden** — code that's hard to maintain/extend is expensive forever. Prefer designs that age well, even if the agent writes more now.
+- **Review & verifiability** — a human still reviews and verifies agent output. Prefer work that's structured to be reviewable and testable (small, clear, well-tested changes).
+- **Genuine over-engineering** — speculative generality / unused flexibility adds maintenance cost without value. Simplicity-as-design-virtue (§2, §3) still applies.
+- **Blast radius** — larger/riskier changes need correspondingly more verification.
+
+**The test:** cut something because it's *unnecessary*, adds *maintenance cost without proportional value*, or is *hard to verify* — never merely because it's *a lot of code for the agent to write*.
+
 ## 8. Verify Before Reporting Complete
 
 Before reporting any task as complete, verify it actually works:
