@@ -1,0 +1,65 @@
+(defmodule editor/commands/snippet
+  (export snippet-try-expand snippet-expand snippet-next-field snippet-prev-field
+          snippet-exit snippet-help)
+
+;; snippet.tlisp — Snippet expansion commands (#167, SPEC-101)
+;; Loads snippets from ~/.config/tmax/snippets/<mode>/, expands on Tab.
+
+(defun snippet-try-expand ()
+  "Look up the word before cursor as a snippet key. Expand if found; return nil if not.
+Called by the Tab handler when snippet-mode is active and no field is being navigated."
+  (let ((word (word-before-cursor)))
+    (if (or (null word) (string= word ""))
+      nil
+      (let ((snippet (snippet-lookup word (major-mode-get))))
+        (if (null snippet)
+          nil
+          (progn
+            ;; Delete the abbreviation
+            (let ((len (length word)))
+              (buffer-delete-range (cursor-line) (- (cursor-column) len) (cursor-line) (cursor-column)))
+            ;; Expand the template body
+            (snippet-expand (nth 2 snippet))
+            t))))))
+
+(defun snippet-expand (body)
+  "Expand a snippet template BODY at the cursor.
+Parses $1/$2/${1:default}/$0 placeholders, inserts the template, enters
+field-navigation state."
+  (let ((parsed (snippet-parse-body body)))
+    (let ((expanded (nth 0 parsed))
+          (fields (nth 1 parsed)))
+      ;; Insert the expanded template
+      (buffer-insert expanded)
+      ;; TODO: set up field markers for navigation
+      ;; For now, the expanded text (with defaults filled in) is inserted.
+      ;; Full placeholder navigation is Phase 3 of SPEC-101.
+      t)))
+
+(defun snippet-next-field ()
+  "Move to the next placeholder field (Tab during snippet navigation)."
+  (if (snippet-field-active-p)
+    (progn
+      ;; TODO: advance to next field marker
+      nil)
+    nil))
+
+(defun snippet-prev-field ()
+  "Move to the previous placeholder field (S-Tab during snippet navigation)."
+  (if (snippet-field-active-p)
+    (progn
+      ;; TODO: advance to previous field marker
+      nil)
+    nil))
+
+(defun snippet-exit ()
+  "Exit snippet field navigation."
+  ;; TODO: clear active expansion state
+  nil)
+
+(defun snippet-help ()
+  "Show snippet-mode help."
+  (message "Snippet mode: type abbreviation + Tab to expand. M-x snippet-reload to re-read files."))
+
+(provide "snippet")
+)

@@ -23,6 +23,9 @@
   (require-module editor/modes/java)
   (require-module editor/modes/sql)
   (require-module editor/modes/purescript)
+  ;; #167: snippet-mode.
+  (require-module editor/modes/snippet)
+  (require-module editor/commands/snippet)
   (require-module editor/modes/line-numbers)
   (require-module editor/modes/relative-line-numbers)
   ;; #149: T1 minor modes.

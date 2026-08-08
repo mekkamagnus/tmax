@@ -74,6 +74,7 @@ import { createProjectOps } from "./api/project-ops.ts";
 import { createShellOps } from "./api/shell-ops.ts";
 import { TerminalManager } from "../core/terminal-manager.ts";
 import { createComintOps, ComintManager } from "./api/comint-ops.ts";
+import { createSnippetOps, SnippetManager } from "./api/snippet-ops.ts";
 
 /**
  * T-Lisp function implementation that returns Either for error handling
@@ -1900,6 +1901,26 @@ function buildEditorAPIContributions(): readonly EditorAPIContribution[] {
             const r = ctx.evalTlisp?.("(buffer-name)");
             if (r && (r as any)._tag === "Right") return (r as any).right.value as string;
             return "*scratch*";
+          },
+        );
+      },
+    },
+
+    // ── snippet (#167: yasnippet-style template expansion) ──
+    {
+      name: "snippet",
+      factory: (ctx: EditorAPIContext): Map<string, TLispFunctionImpl> => {
+        const sm = (ctx as any)._snippetManager ??= new SnippetManager();
+        return createSnippetOps(
+          ctx.access,
+          sm,
+          () => {
+            const r = ctx.evalTlisp?.("(major-mode-get)");
+            return r && (r as any)._tag === "Right" ? (r as any).right.value as string : "fundamental";
+          },
+          () => {
+            const r = ctx.evalTlisp?.("(buffer-name)");
+            return r && (r as any)._tag === "Right" ? (r as any).right.value as string : "*scratch*";
           },
         );
       },
