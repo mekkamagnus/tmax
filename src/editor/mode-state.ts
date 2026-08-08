@@ -69,6 +69,18 @@ export interface AutoModeRule {
 }
 
 /**
+ * Magic mode rule (SPEC-103) — a regexp matched against the HEAD of the buffer
+ * content to detect a mode from content (shebangs, `<?xml`, doctypes) when the
+ * filename matches nothing. User rules take precedence over fallback rules.
+ */
+export interface MagicRule {
+  /** Regexp pattern. */
+  regexp: string;
+  /** Mode to activate. */
+  mode: string;
+}
+
+/**
  * Get or initialize mode state for a buffer key
  */
 export function getOrCreateModeState(

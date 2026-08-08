@@ -36,7 +36,7 @@ import { bindMacros, createMacroState } from "../api/macro-recording.ts";
 import type { MacroState, MacroOps } from "../api/macro-recording.ts";
 import type { Range } from "../../core/contracts/primitives.ts";
 import type { HighlightSpan } from "../../core/contracts/editor.ts";
-import type { MajorModeConfig, AutoModeRule } from "../mode-state.ts";
+import type { MajorModeConfig, AutoModeRule, MagicRule } from "../mode-state.ts";
 import type { UndoRedoDomainState } from "../api/undo-redo-ops.ts";
 
 /**
@@ -115,6 +115,11 @@ export interface MajorModeDomainState {
   // comment / `Local Variables:` block) are honored. Default true. Toggled
   // via `(set-enable-local-variables FLAG)`.
   enableLocalVariables: boolean;
+  // SPEC-103: content-based (magic) detection rules. User rules (via
+  // `(magic-mode-add REGEXP MODE)`) take precedence over fallback rules
+  // (registered by modes via `(major-mode-magic MODE REGEXP)`).
+  magicUserRules: MagicRule[];
+  magicFallbackRules: MagicRule[];
 }
 
 /**
@@ -210,6 +215,8 @@ export function createEditorSessionState(): EditorSessionState {
       fallback: "fundamental",
       defaultMajorMode: "fundamental",
       enableLocalVariables: true,
+      magicUserRules: [],
+      magicFallbackRules: [],
     },
   };
 }

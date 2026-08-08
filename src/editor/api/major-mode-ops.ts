@@ -32,6 +32,7 @@ import {
 import type { MajorModeConfig } from "../mode-state.ts";
 import { normalizeExtension } from "../mode-state.ts";
 import { findFileLocalMode } from "../local-variables.ts";
+import { detectMagicMode, detectShebang } from "../magic-mode.ts";
 import { createExtensionRule, createRegexpRule, detectAutoMode } from "../auto-mode.ts";
 import type { AutoModeRule } from "../mode-state.ts";
 
@@ -127,6 +128,25 @@ export function createMajorModeOps(
     // detection then has its chance.
     if (!mm.registry.has(declared)) return undefined;
     return activateConfig(mm.registry.get(declared)!);
+  };
+
+  // SPEC-103: content-based (magic) detection — used when no filename rule
+  // matched. Sniffs the buffer head: a shebang (interpreter → mode) first, then
+  // user magic rules, then fallback magic rules (e.g. markup signatures). User
+  // rules beat fallback. An unmatched/unregistered result falls through to the
+  // default. Only the buffer HEAD is scanned (bounded).
+  const resolveMagic = (): string | undefined => {
+    const buf = getCurrentBuffer();
+    if (!buf) return undefined;
+    const contentResult = buf.getContent();
+    if (!contentResult || (contentResult as any)._tag !== "Right") return undefined;
+    const text = (contentResult as any).right as string;
+    const registered = new Set(mm.registry.keys());
+    const shebang = detectShebang(text, registered);
+    if (shebang) return activateConfig(mm.registry.get(shebang)!);
+    const magic = detectMagicMode(text, mm.magicUserRules, mm.magicFallbackRules);
+    if (magic && mm.registry.has(magic)) return activateConfig(mm.registry.get(magic)!);
+    return undefined;
   };
 
   // (major-mode-register NAME EXTENSIONS &optional SYNTAX-LANGUAGE INDENT-INCREASE INDENT-DECREASE)
@@ -302,9 +322,13 @@ export function createMajorModeOps(
         }
       }
     }
-    // No file-local declaration, no filename, or filename matched no rule →
-    // fall back to the configurable default-major-mode (SPEC-104), then
-    // fundamental.
+    // Filename matched nothing → try content-based (magic) detection (SPEC-103).
+    const magic = resolveMagic();
+    if (magic) {
+      return Either.right(createString(magic));
+    }
+    // No file-local declaration, no filename, no magic → fall back to the
+    // configurable default-major-mode (SPEC-104), then fundamental.
     return Either.right(createString(resolveDefault()));
   });
 
@@ -374,6 +398,58 @@ export function createMajorModeOps(
     }
     mm.enableLocalVariables = flag;
     return Either.right(createBoolean(mm.enableLocalVariables));
+  });
+
+  // SPEC-103: a mode registers a fallback magic signature (regexp matched
+  // against the buffer head). Used by modes like html (`<!DOCTYPE html`).
+  api.set("major-mode-magic", (args: TLispValue[]): Either<AppError, TLispValue> => {
+    const argsValidation = validateArgsCount(args, 2, "major-mode-magic");
+    if (Either.isLeft(argsValidation)) {
+      return Either.left(argsValidation.left);
+    }
+    const modeArg = args[0]!;
+    const reArg = args[1]!;
+    const modeV = validateArgType(modeArg, "string", 0, "major-mode-magic");
+    if (Either.isLeft(modeV)) return Either.left(modeV.left);
+    const reV = validateArgType(reArg, "string", 1, "major-mode-magic");
+    if (Either.isLeft(reV)) return Either.left(reV.left);
+    const regexp = reArg.value as string;
+    const mode = modeArg.value as string;
+    if (!mm.magicFallbackRules.some((r) => r.regexp === regexp && r.mode === mode)) {
+      mm.magicFallbackRules.push({ regexp, mode });
+    }
+    return Either.right(createString(mode));
+  });
+
+  // SPEC-103: user magic rule. User rules take precedence over fallback rules.
+  api.set("magic-mode-add", (args: TLispValue[]): Either<AppError, TLispValue> => {
+    const argsValidation = validateArgsCount(args, 2, "magic-mode-add");
+    if (Either.isLeft(argsValidation)) {
+      return Either.left(argsValidation.left);
+    }
+    const reArg = args[0]!;
+    const modeArg = args[1]!;
+    const reV = validateArgType(reArg, "string", 0, "magic-mode-add");
+    if (Either.isLeft(reV)) return Either.left(reV.left);
+    const modeV = validateArgType(modeArg, "string", 1, "magic-mode-add");
+    if (Either.isLeft(modeV)) return Either.left(modeV.left);
+    const regexp = reArg.value as string;
+    const mode = modeArg.value as string;
+    if (!mm.magicUserRules.some((r) => r.regexp === regexp && r.mode === mode)) {
+      mm.magicUserRules.push({ regexp, mode });
+    }
+    return Either.right(createString(mode));
+  });
+
+  // SPEC-103: list all magic rules (user then fallback), for introspection.
+  api.set("magic-mode-rules", (args: TLispValue[]): Either<AppError, TLispValue> => {
+    const argsValidation = validateArgsCount(args, 0, "magic-mode-rules");
+    if (Either.isLeft(argsValidation)) {
+      return Either.left(argsValidation.left);
+    }
+    const toList = (rules: readonly { regexp: string; mode: string }[]) =>
+      rules.map((r) => createList([createString(r.regexp), createString(r.mode)]));
+    return Either.right(createList([...toList(mm.magicUserRules), ...toList(mm.magicFallbackRules)]));
   });
 
   // (auto-mode-add PATTERN MODE &optional KIND)

@@ -10,5 +10,11 @@
   '(">$")
   '("^\\s*</"))
 
+;; SPEC-103: detect HTML by its doctype/opening tag when the filename matches
+;; nothing (e.g. an extension-less generated page). Backslash-free patterns:
+;; the T-Lisp reader double-processes string escapes, so avoid `\s`/`\b` here.
+(major-mode-magic "html" "^<!DOCTYPE")
+(major-mode-magic "html" "^<html")
+
 (provide "html-mode")
 )

@@ -8,5 +8,9 @@
   '(">$")
   '("^\\s*</"))
 
+;; SPEC-103: detect XML by its prolog when the filename matches nothing.
+;; `[?]` keeps this backslash-free (the T-Lisp reader double-processes escapes).
+(major-mode-magic "xml" "^[<][?]xml")
+
 (provide "xml-mode")
 )
