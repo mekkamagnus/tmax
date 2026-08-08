@@ -137,7 +137,12 @@ substitute/Dired/execute policy."
       ((string= line "set nornu") (global-relative-line-numbers-mode nil))
       ;; :help — show help system entry points (#133).
       ((or (string= line "help") (string= line "h"))
-       (message "Help: SPC h f function | SPC h m mode | SPC h v variable | SPC h k key | M-x apropos"))
+       (message "Help: SPC h f function | SPC h m mode | SPC h v variable | SPC h k key | M-x apropos | M-x helpgrep"))
+      ;; :helpgrep <pattern> — full-text search the manual (SPEC-111, #178).
+      ((string-match "^helpgrep[ \t]+(.+)$" line)
+       (helpgrep-run (match-string 1)))
+      ((string= line "helpgrep")
+       (helpgrep))
       ;; Everything else (:q, :w, :wq, :nohl, :marks, unknown…) is handled
       ;; by the existing TS-backed editor-execute-command-line primitive,
       ;; which also clears the line and returns to normal mode.

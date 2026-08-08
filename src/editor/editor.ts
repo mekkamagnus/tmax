@@ -4,6 +4,7 @@
  * This class manages the editor state and logic but delegates rendering to React components
  */
 
+import * as fs from "fs";
 import { TLispInterpreterImpl } from "../tlisp/interpreter.ts";
 import { FileSystemImpl } from "../core/filesystem.ts";
 import { createEditorAPI } from "./tlisp-api.ts";
@@ -1030,6 +1031,44 @@ export class Editor {
       }
 
       return createList(matching);
+    });
+
+    // SPEC-111 (#178): helpgrep-search — full-text search over the Texinfo
+    // manual corpus. Returns ((file line text) ...) for each match.
+    defineRaw("helpgrep-search", (args) => {
+      if (args.length !== 1 || args[0]?.type !== "string") {
+        throw new Error("helpgrep-search requires 1 string argument: pattern");
+      }
+      const pattern = args[0]!.value as string;
+      if (pattern.length > 500) throw new Error("helpgrep pattern too long (max 500 chars)");
+
+      const docsDir = `${import.meta.dir}/../../docs/tmax`;
+      const corpus = [`${docsDir}/tmax.texinfo`, `${docsDir}/tlisp.texinfo`];
+      let re: RegExp;
+      try { re = new RegExp(pattern, "i"); }
+      catch { re = new RegExp(pattern.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i"); }
+
+      const results: TLispValue[] = [];
+      for (const file of corpus) {
+        let content: string;
+        try { content = fs.readFileSync(file, "utf-8"); } catch { continue; }
+        const lines = content.split("\n");
+        for (let i = 0; i < lines.length; i++) {
+          if (re.test(lines[i]!)) {
+            results.push(createList([
+              createString(file.split("/").pop()!),
+              { type: "number", value: i + 1 } as TLispValue,
+              createString(lines[i]!.trim().substring(0, 120)),
+            ]));
+          }
+        }
+      }
+      return createList(results);
+    });
+
+    // SPEC-111 (#178): helpgrep-docs-dir — resolve the docs corpus directory.
+    defineRaw("helpgrep-docs-dir", () => {
+      return createString(`${import.meta.dir}/../../docs/tmax`);
     });
 
     // Add count prefix API functions (US-1.3.1)

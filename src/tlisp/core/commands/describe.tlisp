@@ -1,5 +1,5 @@
 (defmodule editor/commands/describe
-  (export describe-to-help describe-function describe-mode describe-variable describe-key describe-function-at-point describe-variable-at-point describe-key-at-point describe-binding-line apropos apropos-documentation apropos-run apropos-documentation-run cheatsheet)
+  (export describe-to-help describe-function describe-mode describe-variable describe-key describe-function-at-point describe-variable-at-point describe-key-at-point describe-binding-line apropos apropos-documentation apropos-run apropos-documentation-run cheatsheet helpgrep helpgrep-run helpgrep-jump)
 
 ;; describe.tlisp --- SPEC-083 Emacs-style self-documentation.
 ;;
@@ -273,6 +273,45 @@ Searches NAMES. Bound to SPC h a. M-x discoverable via this docstring."
   "Prompt for a regex and list functions whose docstrings match in *Help*.
 Searches docstring BODIES. M-x discoverable via this docstring."
   (read-from-minibuffer "Apropos doc (regex): " "" "apropos-doc-history" "apropos-documentation-run"))
+
+;; ── Helpgrep: full-text search over the manual (SPEC-111, #178) ──────
+(defun helpgrep-run (pattern)
+  "Search the Texinfo manual corpus for PATTERN and render results in *Help*.
+Accept-function for `helpgrep'."
+  (let ((matches (helpgrep-search pattern)))
+    (if (or (nilp matches) (= (length matches) 0))
+      (describe-to-help (concat "Helpgrep: " pattern) "No matches in the doc corpus.")
+      (describe-to-help
+        (concat "Helpgrep: " pattern "  (" (number-to-string (length matches)) " matches)")
+        (string-join
+          "\n"
+          (mapcar
+            (lambda (m)
+              (concat (nth 0 m) ":" (number-to-string (nth 1 m)) ": " (nth 2 m)))
+            matches)))))
+  (major-mode-set "helpgrep"))
+
+(defun helpgrep ()
+  "Prompt for a regex and full-text search the tmax + T-Lisp manuals.
+Distinct from apropos (live symbol metadata) — this searches the WRITTEN prose.
+M-x / :helpgrep discoverable via this docstring."
+  (read-from-minibuffer "Helpgrep (regex): " "" "helpgrep-history" "helpgrep-run"))
+
+(defun helpgrep-jump ()
+  "Jump to the corpus file + line shown at cursor in *Help*.
+Parses the 'file:line:text' format of helpgrep results. Bound to RET in
+helpgrep results (major-mode 'helpgrep')."
+  (let ((line (buffer-line (cursor-line))))
+    (when (string-match "^\\([a-z]+\\.texinfo\\):\\([0-9]+\\):" line)
+      (let ((file (match-string 1))
+            (lineno (string-to-number (match-string 2))))
+        (funcall "find-file" (concat (helpgrep-docs-dir) "/" file))
+        (cursor-move (- lineno 1) 0)))))
+
+;; Register the helpgrep results mode + RET binding.
+(major-mode-register "helpgrep" '() nil)
+(major-mode-doc "helpgrep" "Helpgrep results mode — RET jumps to the corpus source location")
+(key-bind "RET" "(helpgrep-jump)" "normal" "helpgrep")
 
 ;; ── Cheatsheet (SPEC-109, #176) ──────────────────────────────────────
 (defun cheatsheet ()
