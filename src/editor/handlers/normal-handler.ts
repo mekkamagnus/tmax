@@ -52,6 +52,10 @@ export async function handleNormalMode(editor: EditorDispatchPort, key: string, 
   const spaceActive = editor.spacePressed === true;
   const currentPrefix = state.whichKeyPrefix || "";
 
+  // BUG-76: Clear splash screen on first keystroke in normal mode (like vim).
+  // Same logic as insert-handler — clears the *scratch* splash buffer.
+  exec("(when (and (string= (buffer-name) \"*scratch*\") (string-prefix-p \"  tmax\" (buffer-text))) (buffer-set-read-only nil) (let ((lc (buffer-line-count))) (buffer-delete-range 0 0 lc 0)) (cursor-move 0 0))");
+
   // SPEC-044 Phase 1.F-1.H — macro pending states must be routed BEFORE the
   // generic Escape/C-g handler. q<Escape> is a quit command per spec MUST,
   // resolved by macro-dispatch-record calling editor-quit; if the generic

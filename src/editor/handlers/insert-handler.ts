@@ -36,7 +36,9 @@ export async function handleInsertMode(editor: EditorDispatchPort, key: string, 
   const charCode = key.length === 1 ? key.charCodeAt(0) : 0;
   if (key.length === 1 && charCode >= 32 && charCode !== 127) {
     // Clear the splash screen on first keystroke (like vim's intro).
-    editor.executeCommand("(when (and (string= (buffer-name) \"*scratch*\") (string-prefix-p \"  tmax\" (buffer-text))) (cursor-move 0 0) (let ((n (buffer-line-count))) (while (> n 0) (setq n (- n 1)) (buffer-delete-line))) (cursor-move 0 0))");
+    // BUG-76: replaced non-existent buffer-delete-line with buffer-delete-range;
+    // also clear read-only so the scratch buffer is editable after clearing.
+    editor.executeCommand("(when (and (string= (buffer-name) \"*scratch*\") (string-prefix-p \"  tmax\" (buffer-text))) (buffer-set-read-only nil) (let ((lc (buffer-line-count))) (buffer-delete-range 0 0 lc 0)) (cursor-move 0 0))");
     const escapedKey = editor.escapeKeyForTLisp(key);
     // #149: route through insert-char so overwrite-mode / electric-pair-mode
     // (minor modes) apply. With both off, insert-char is a plain buffer-insert,

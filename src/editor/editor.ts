@@ -2937,6 +2937,10 @@ export class Editor {
       const content = scratch.getContent();
       if (Either.isRight(content) && content.right === "") {
         this.createBuffer("*scratch*", TextBufferImpl.SPLASH_TEXT);
+        // BUG-76: make the splash read-only so the user can't accidentally edit it.
+        // Cleared on first keystroke (insert-handler + normal-handler clear it
+        // via buffer-set-read-only nil + buffer-delete-range before processing the key).
+        this.interpreter.execute("(buffer-set-read-only t)");
       }
     }
   }

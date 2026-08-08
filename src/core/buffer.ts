@@ -142,15 +142,18 @@ export class TextBufferImpl implements TextBuffer {
    */
   static readonly SPLASH_TEXT = [
     "  tmax — extensible terminal editor",
-    "  T-Lisp at the core · zero dependencies · runs on Bun",
-    "",
-    "  i        Start typing (insert mode)",
-    "  :e FILE  Open a file",
-    "  :q       Quit",
-    "  SPC ;    M-x command palette",
-    "  :w       Save",
+    "  T-Lisp core · zero deps · Bun runtime",
     "",
     "  Version 0.2.0 (Alpha)",
+    "",
+    "  i           Enter insert mode",
+    "  :e FILE     Open a file",
+    "  :w          Save",
+    "  :q          Quit",
+    "  SPC ;       M-x command palette",
+    "  C-h         Help prefix",
+    "",
+    "  Press any key to continue",
   ].join("\n");
 
   constructor(
