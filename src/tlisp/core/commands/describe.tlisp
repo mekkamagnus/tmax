@@ -1,5 +1,5 @@
 (defmodule editor/commands/describe
-  (export describe-to-help describe-function describe-mode describe-variable describe-key describe-function-at-point describe-variable-at-point describe-key-at-point describe-binding-line apropos apropos-documentation apropos-run apropos-documentation-run)
+  (export describe-to-help describe-function describe-mode describe-variable describe-key describe-function-at-point describe-variable-at-point describe-key-at-point describe-binding-line apropos apropos-documentation apropos-run apropos-documentation-run cheatsheet)
 
 ;; describe.tlisp --- SPEC-083 Emacs-style self-documentation.
 ;;
@@ -274,13 +274,72 @@ Searches NAMES. Bound to SPC h a. M-x discoverable via this docstring."
 Searches docstring BODIES. M-x discoverable via this docstring."
   (read-from-minibuffer "Apropos doc (regex): " "" "apropos-doc-history" "apropos-documentation-run"))
 
-;; ── Bindings (SPEC-067: NO C-x / C-h chords — SPC h prefix only) ───────
+;; ── Cheatsheet (SPEC-109, #176) ──────────────────────────────────────
+(defun cheatsheet ()
+  "Open a read-only cheatsheet buffer with essential tmax keys.
+Bound to SPC h c. M-x discoverable via this docstring."
+  (progn
+    (unless (member "*Cheatsheet*" (buffer-list))
+      (buffer-create "*Cheatsheet*"))
+    (buffer-switch "*Cheatsheet*")
+    (let ((lines (buffer-line-count)))
+      (when (> lines 1)
+        (let ((last (- lines 1)))
+          (buffer-delete-range 0 0 last 100000))))
+    (buffer-insert-at-position 0 0
+      (concat
+        "tmax Cheatsheet\n\n"
+        "Modes:\n"
+        "  i           Insert mode\n"
+        "  Escape      Normal mode\n"
+        "  v / V / C-v Visual (char / line / block)\n"
+        "  :           Command mode (:w :q :e FILE)\n"
+        "  SPC ;       M-x (command palette)\n\n"
+        "Movement:\n"
+        "  h j k l     Left / down / up / right\n"
+        "  w b e       Word motions\n"
+        "  gg  G       Top / bottom of file\n"
+        "  0  $        Line start / end\n\n"
+        "Editing:\n"
+        "  d y c       Delete / yank / change (operators)\n"
+        "  p           Paste from kill ring\n"
+        "  u  C-r      Undo / redo\n\n"
+        "Files:\n"
+        "  :e FILE     Open\n"
+        "  :w          Save\n"
+        "  :q          Quit\n"
+        "  :wq         Save and quit\n\n"
+        "Help:\n"
+        "  SPC h f     Describe function\n"
+        "  SPC h m     Describe mode\n"
+        "  SPC h k     Describe key\n"
+        "  SPC h v     Describe variable\n"
+        "  SPC h a     Apropos (name search)\n"
+        "  SPC h A     Apropos documentation (docstring search)\n"
+        "  SPC h c     This cheatsheet\n"
+        "  C-h f/m/v/k Same as SPC h (help prefix)\n"
+        "  C-h e/s/a/t View *Messages* / *Shell* / *Async* / *Tests*\n"))
+    (buffer-set-read-only t)
+    (cursor-move 0 0)))
+
+;; ── Bindings ─────────────────────────────────────────────────────────
+;; SPC h prefix (primary help leader):
 (key-bind "SPC h f" "(describe-function-at-point)" "normal")
 (key-bind "SPC h m" "(describe-mode)" "normal")
 (key-bind "SPC h v" "(describe-variable-at-point)" "normal")
 (key-bind "SPC h k" "(describe-key-at-point)" "normal")
 (key-bind "SPC h a" "(apropos)" "normal")
 (key-bind "SPC h A" "(apropos-documentation)" "normal")
+(key-bind "SPC h c" "(cheatsheet)" "normal")
+
+;; C-h prefix (SPEC-109, #176): mirrors SPC h for Emacs muscle-memory.
+;; C-h a is already view-async-output (observability.tlisp); apropos stays SPC h a.
+;; C-h e/s/t are existing log viewers (messages.tlisp + observability.tlisp).
+(key-bind "C-h f" "(describe-function-at-point)" "normal")
+(key-bind "C-h m" "(describe-mode)" "normal")
+(key-bind "C-h v" "(describe-variable-at-point)" "normal")
+(key-bind "C-h k" "(describe-key-at-point)" "normal")
+(key-bind "C-h A" "(apropos-documentation)" "normal")
 
 (provide "describe")
 )

@@ -303,8 +303,10 @@
 ;; HELP SYSTEM (US-1.11.1 - US-1.11.3)
 ;; =================================================================
 
-;; C-h prefix for help commands
-(key-bind "C-h" "(editor-handle-help-prefix)" "normal")
+;; C-h is a real prefix (SPEC-109, #176): the normal handler detects it as a
+;; prefix because C-h f/m/v/k/A/?/e/s/a/t bindings exist (added in describe.tlisp
+;; + observability.tlisp + messages.tlisp). Do NOT bind C-h as a single key —
+;; that would intercept before the prefix mechanism.
 
 ;; =================================================================
 ;; BROWSE-URL (SPEC-056)
