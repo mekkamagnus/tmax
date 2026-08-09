@@ -1145,6 +1145,71 @@ export class Editor {
       return createString(result);
     });
 
+    // SPEC-112 (#179): info-parse — parse a .info file into a hashmap of nodes.
+    // Each node: { name, next, prev, up, text }. Splits on \x1f; extracts
+    // Node:/Next:/Prev:/Up: from the header line (requires BOTH File: AND Node:).
+    defineRaw("info-parse", (args) => {
+      if (args.length !== 1 || args[0]?.type !== "string") {
+        throw new Error("info-parse requires 1 string argument: file-path");
+      }
+      const filePath = args[0]!.value as string;
+      let content: string;
+      try { content = fs.readFileSync(filePath, "utf-8"); }
+      catch (e) { return createHashmap([]); }
+      const segments = content.split("\x1f");
+      const entries: [string, TLispValue][] = [];
+      for (let i = 1; i < segments.length; i++) {
+        const seg = segments[i]!;
+        const lines = seg.split("\n");
+        const headerLine = lines.find((l) => l.includes("File:") && l.includes("Node:"));
+        if (!headerLine) continue;
+        const extract = (field: string): string => {
+          const m = headerLine.match(new RegExp(field + ":\\s*([^,]+)"));
+          return m ? m[1]!.trim() : "";
+        };
+        const name = extract("Node");
+        const next = extract("Next");
+        const prev = extract("Prev");
+        const up = extract("Up");
+        const headerIdx = lines.indexOf(headerLine);
+        const text = lines.slice(headerIdx + 1).join("\n").replace(/^\n+/, "").trimEnd();
+        entries.push([name, createHashmap([
+          ["name", createString(name)],
+          ["next", createString(next)],
+          ["prev", createString(prev)],
+          ["up", createString(up)],
+          ["text", createString(text)],
+        ])]);
+      }
+      return createHashmap(entries);
+    });
+
+    // SPEC-112 (#179): info-parse-links — extract menu items and *Note
+    // cross-references from node text. Returns ((type display target) ...).
+    defineRaw("info-parse-links", (args) => {
+      if (args.length !== 1 || args[0]?.type !== "string") {
+        throw new Error("info-parse-links requires 1 string argument: text");
+      }
+      const text = args[0]!.value as string;
+      const links: TLispValue[] = [];
+      // Menu items: * Name::  or  * Name: Node.  or  * Name: (file)Node.
+      const menuRe = /^\*\s+([^:]+)(?:::|:\s*([^\.\n]+))/gm;
+      let m;
+      while ((m = menuRe.exec(text)) !== null) {
+        const displayName = m[1]!.replace(/::$/, "").replace(/:\s*.*/, "").trim();
+        const target = m[2] ? m[2]!.trim() : displayName;
+        links.push(createList([createString("menu"), createString(displayName), createString(target)]));
+      }
+      // *Note cross-refs: *Note name::  or  *Note name: node.
+      const noteRe = /\*Note\s+([^:]+)(?:::|:\s*([^\.\n,]+))/g;
+      while ((m = noteRe.exec(text)) !== null) {
+        const displayName = m[1]!.replace(/::$/, "").replace(/:\s*.*/, "").trim();
+        const target = m[2] ? m[2]!.trim() : displayName;
+        links.push(createList([createString("note"), createString(displayName), createString(target)]));
+      }
+      return createList(links);
+    });
+
     // Add count prefix API functions (US-1.3.1)
     defineRaw("count-get", (args) => {
       if (args.length !== 0) {

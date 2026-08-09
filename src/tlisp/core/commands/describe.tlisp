@@ -1,5 +1,5 @@
 (defmodule editor/commands/describe
-  (export describe-to-help describe-function describe-mode describe-variable describe-key describe-function-at-point describe-variable-at-point describe-key-at-point describe-binding-line apropos apropos-documentation apropos-run apropos-documentation-run cheatsheet helpgrep helpgrep-run helpgrep-jump help-follow help-next-ref help-prev-ref help-back help-forward help-bury help-detect-references help-history-push)
+  (export describe-to-help describe-function describe-mode describe-variable describe-key describe-function-at-point describe-variable-at-point describe-key-at-point describe-binding-line apropos apropos-documentation apropos-run apropos-documentation-run cheatsheet helpgrep helpgrep-run helpgrep-jump help-follow help-next-ref help-prev-ref help-back help-forward help-bury help-detect-references help-history-push info info-next info-prev info-up info-top info-bury info-menu info-goto-node info--render-node info--menu-accept)
 
 ;; describe.tlisp --- SPEC-083 Emacs-style self-documentation.
 ;;
@@ -400,6 +400,108 @@ helpgrep results (major-mode 'helpgrep')."
 (major-mode-register "helpgrep" '() nil)
 (major-mode-doc "helpgrep" "Helpgrep results mode — RET jumps to the corpus source location")
 (key-bind "RET" "(helpgrep-jump)" "normal" "helpgrep")
+
+;; ── Info reader: browse .info manuals (SPEC-112, #179) ──────────────
+(defvar info-nodes (hashmap))
+(defvar info-current-node "")
+(defvar info-buffer-name "*Info*")
+
+(defun info--render-node (node-name)
+  "Render NODE-NAME from info-nodes into *Info* (read-only, major-mode 'info')."
+  (let ((node (hashmap-get info-nodes node-name)))
+    (if (nilp node)
+      (message (concat "Info: node '" node-name "' not found"))
+      (progn
+        (setq info-current-node node-name)
+        (unless (member info-buffer-name (buffer-list))
+          (buffer-create info-buffer-name))
+        (buffer-switch info-buffer-name)
+        (buffer-set-read-only nil info-buffer-name)
+        (let ((lines (buffer-line-count)))
+          (when (> lines 1)
+            (let ((last (- lines 1)))
+              (buffer-delete-range 0 0 last 100000))))
+        (buffer-insert-at-position 0 0
+          (concat "Node: " node-name "\n\n"
+            (hashmap-get node "text")))
+        (buffer-set-read-only t info-buffer-name)
+        (major-mode-set "info")
+        (cursor-move 0 0)
+        (editor-set-mode "normal")
+        info-buffer-name))))
+
+(defun info-next ()
+  "Navigate to the Next node. Bound to n in info-mode."
+  (let ((node (hashmap-get info-nodes info-current-node)))
+    (when node
+      (let ((next (hashmap-get node "next")))
+        (when (and next (not (string= next "")))
+          (info--render-node next))))))
+
+(defun info-prev ()
+  "Navigate to the Previous node. Bound to p in info-mode."
+  (let ((node (hashmap-get info-nodes info-current-node)))
+    (when node
+      (let ((prev (hashmap-get node "prev")))
+        (when (and prev (not (string= prev "")))
+          (info--render-node prev))))))
+
+(defun info-up ()
+  "Navigate to the Up node. Bound to u in info-mode."
+  (let ((node (hashmap-get info-nodes info-current-node)))
+    (when node
+      (let ((up (hashmap-get node "up")))
+        (when (and up (not (string= up "")) (not (string= up "(dir)")))
+          (info--render-node up))))))
+
+(defun info-top ()
+  "Navigate to the Top node. Bound to t in info-mode."
+  (info--render-node "Top"))
+
+(defun info-bury ()
+  "Bury the *Info* buffer. Bound to q in info-mode."
+  (funcall "bury-buffer"))
+
+(defun info-menu ()
+  "Prompt for a menu item from the current node and navigate. Bound to m.
+Parses the current node text for '* Name::' menu entries via info-parse-links."
+  (let ((node (hashmap-get info-nodes info-current-node)))
+    (if (nilp node)
+      (message "No current node")
+      (let ((links (info-parse-links (hashmap-get node "text"))))
+        (if (or (nilp links) (= (length links) 0))
+          (message "No menu items in this node")
+          (let ((choice (read-from-minibuffer "Menu item (node name): " "" "info-menu-history" "info--menu-accept")))
+            (when choice choice)))))))
+
+(defun info--menu-accept (name)
+  "Accept-function for info-menu: render the named node."
+  (when (and name (not (string= name "")))
+    (info--render-node name)))
+
+(defun info-goto-node ()
+  "Navigate to the Index node and search within it. Bound to i.
+Opens the Index node (which IS the manual's index); use s (occur) to search."
+  (let ((idx (hashmap-get info-nodes "Index")))
+    (if (nilp idx)
+      (message "No Index node in this manual")
+      (info--render-node "Index"))))
+
+(defun info ()
+  "Open the tmax manual in *Info*. M-x / :info discoverable."
+  (let ((path (concat (helpgrep-docs-dir) "/tmax.info")))
+    (setq info-nodes (info-parse path))
+    (info--render-node "Top")))
+
+(major-mode-register "info" '() nil)
+(major-mode-doc "info" "Info reader mode — n/p/u/t navigate, m menu, i index, q buries")
+(key-bind "n" "(info-next)" "normal" "info")
+(key-bind "p" "(info-prev)" "normal" "info")
+(key-bind "u" "(info-up)" "normal" "info")
+(key-bind "t" "(info-top)" "normal" "info")
+(key-bind "m" "(info-menu)" "normal" "info")
+(key-bind "i" "(info-goto-node)" "normal" "info")
+(key-bind "q" "(info-bury)" "normal" "info")
 
 ;; ── Cheatsheet (SPEC-109, #176) ──────────────────────────────────────
 (defun cheatsheet ()
