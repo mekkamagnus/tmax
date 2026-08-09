@@ -124,8 +124,11 @@ export function createBufferOps(
     return Either.right(createNumber(buffers.size));
   });
 
-  // #135: read-only getter (the setter buffer-set-read-only exists at line ~770).
-  api.set("buffer-read-only-p", (): Either<AppError, TLispValue> => {
+  // #135: read-only getter. Optional NAME arg bypasses object-ref match.
+  api.set("buffer-read-only-p", (args: TLispValue[]): Either<AppError, TLispValue> => {
+    if (args.length >= 1 && args[0]?.type === "string") {
+      return Either.right(createBoolean(readonly.has(args[0]!.value as string)));
+    }
     const currentBuf = getCurrentBuffer();
     for (const [name, buf] of buffers) {
       if (buf === currentBuf) {
@@ -795,9 +798,8 @@ export function createBufferOps(
 
   // buffer-set-read-only: toggle buffer read-only state at runtime
   api.set("buffer-set-read-only", (args: TLispValue[]): Either<AppError, TLispValue> => {
-    const argsValidation = validateArgsCount(args, 1, "buffer-set-read-only");
-    if (Either.isLeft(argsValidation)) {
-      return Either.left(argsValidation.left);
+    if (args.length < 1 || args.length > 2) {
+      return Either.left(createValidationError('ConstraintViolation', 'buffer-set-read-only requires 1-2 arguments: flag, [name]', 'args', args.length, '1-2 arguments'));
     }
 
     const flagArg = args[0]!;
@@ -812,6 +814,13 @@ export function createBufferOps(
       flag = (flagArg.value as number) !== 0;
     } else {
       return Either.left(createValidationError('TypeError', 'buffer-set-read-only requires a boolean argument', 'flag', String(flagArg.value), 't or nil'));
+    }
+
+    // SPEC-110/SPEC-112: optional NAME arg bypasses the object-ref match.
+    if (args.length >= 2 && args[1]?.type === "string") {
+      const bufName = args[1]!.value as string;
+      if (flag) readonly.add(bufName); else readonly.delete(bufName);
+      return Either.right(createBoolean(flag));
     }
 
     // Find the current buffer name
