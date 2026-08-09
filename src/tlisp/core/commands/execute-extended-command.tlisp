@@ -4,6 +4,11 @@
 ;; execute-extended-command.tlisp --- M-x through generic completion
 
 (defvar command-completion-candidates (list))
+;; BUG-78: the candidate-build (callable-command-details + filter + mapcar) is
+;; ~280ms and only changes when a module loads. Cache it for the session,
+;; keyed on module-registry-generation (bumps on every register/load).
+(defvar command-completion-cache nil)
+(defvar command-completion-cache-gen -1)
 
 (defun command-detail-candidate (details)
   (hashmap
@@ -23,12 +28,20 @@ which must never appear in M-x (#148)."
              (string-prefix-p "should-" name)))))
 
 (defun command-completion-refresh ()
-  "Refresh the factual command snapshot used by the active M-x session.
-Sources only M-x command candidates from callable-command-details
-(interactive-only) per SPEC-115, then strips test-infrastructure names."
-  (set! command-completion-candidates
-    (mapcar "command-detail-candidate"
-      (filter "command-detail-interactive-p" (callable-command-details t)))))
+  "Refresh the M-x candidate snapshot, caching across the session (BUG-78).
+The candidate-build (callable-command-details + filter + mapcar) is ~280ms and
+only changes when a module loads, so it is cached and recomputed only when
+module-registry-generation bumps. Sources only M-x command candidates
+(interactive-only, SPEC-115) and strips test-infrastructure names."
+  (let ((gen (module-registry-generation)))
+    (if (and command-completion-cache (= gen command-completion-cache-gen))
+      (set! command-completion-candidates command-completion-cache)
+      (progn
+        (set! command-completion-candidates
+          (mapcar "command-detail-candidate"
+            (filter "command-detail-interactive-p" (callable-command-details t))))
+        (set! command-completion-cache command-completion-candidates)
+        (set! command-completion-cache-gen gen)))))
 
 (defun command-completion-table (input action)
   "Completion table for callable T-Lisp commands."

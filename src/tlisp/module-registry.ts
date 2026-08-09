@@ -39,6 +39,13 @@ export interface ModuleExportRecord {
 export class ModuleRegistry {
   private modules: Map<string, ModuleRecord> = new Map();
   private providedFeatures: Set<string> = new Set();
+  /**
+   * Monotonic generation counter, bumped whenever a module is registered or
+   * marked loaded. Used as a cheap cache-invalidation token (BUG-78: the M-x
+   * candidate-build caches across a session and recomputes only when the
+   * command set could have changed — i.e. a module loaded).
+   */
+  private generation = 0;
 
   register(name: string, env: TLispEnvironment, exports: Set<string>, sourcePath: string): void {
     this.modules.set(name, {
@@ -48,6 +55,12 @@ export class ModuleRegistry {
       sourcePath,
       state: "loaded",
     });
+    this.generation += 1;
+  }
+
+  /** Current generation — bumps on every module register/load. */
+  getGeneration(): number {
+    return this.generation;
   }
 
   resolve(name: string): ModuleRecord | undefined {
@@ -84,6 +97,7 @@ export class ModuleRegistry {
     if (record) {
       record.exports = exports;
       record.state = "loaded";
+      this.generation += 1;
     }
   }
 

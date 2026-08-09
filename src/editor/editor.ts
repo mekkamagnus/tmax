@@ -1445,6 +1445,14 @@ export class Editor {
       return createList(commands.length > 0 ? commands : all);
     });
 
+    defineRaw("module-registry-generation", (args) => {
+      if (args.length !== 0) throw new Error("module-registry-generation requires no arguments");
+      // BUG-78: cheap cache-invalidation token for the M-x candidate-build.
+      // Bumps whenever a module is registered/loaded, so the candidate cache can
+      // recompute only when the command set could have changed.
+      return createNumber(this.interpreter.moduleRegistry.getGeneration());
+    });
+
     defineRaw("invoke-command", (args) => {
       if (args.length !== 1 || args[0]?.type !== "string") {
         throw new Error("invoke-command requires a command name string");

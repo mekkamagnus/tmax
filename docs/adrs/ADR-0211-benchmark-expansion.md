@@ -17,13 +17,12 @@ Add 4 microbenchmarks, a shared in-process editor harness, and per-bench
 regression floors:
 
 1. **`minibuffer`** (`micro-minibuffer.ts`) — measures `(command-completion-refresh)`,
-   the real M-x candidate-build: `callable-command-details` (enumerate) +
-   `filter command-detail-interactive-p` + `mapcar command-detail-candidate`.
-   This is the full "enumeration + filtering" of the M-x path (the Vertico
-   render half is covered by `render`). Baseline is **~280ms/call** — the
-   enumeration is ~15ms; the T-Lisp string-name `filter`/`mapcar` dominates the
-   rest. This is the BUG-78 hot path and the number per-session caching (#182)
-   must beat. Size-independent; measured once (cached).
+   the M-x candidate-build (`callable-command-details` enumerate + `filter` +
+   `mapcar`). Originally (CHORE-84) it measured the uncached build (~280ms/call);
+   after BUG-78/#182 landed per-session caching, the warmup populates the cache
+   and the timed loop measures the **cached** path (~0.4ms/call). A cache
+   regression spikes this ~150× back toward ~14s, failing the floor loudly.
+   Size-independent; measured once (cached across size rows).
 2. **`render`** (`micro-render.ts`) — measures `captureFrame(state, 80, 24)`,
    the shared ANSI render path (syntax spans + viewport + status line + tab
    bar + minibuffer + which-key), per size. ~Half the per-key cost.
@@ -46,7 +45,8 @@ Supporting changes:
   their live paths covered by `bun run bench`.
 
 ## Floors (dev machine baseline, ~50–70% headroom)
-- `minibuffer`: 22000ms (N=50, ~280ms/call — the full candidate-build).
+- `minibuffer`: 400ms (N=50, cached path post-#182 ~19ms; was 22000ms for the
+  uncached build — #182 lowered it when caching landed).
 - `render`: small 250 / medium 200 / large 350 (N=500 frames).
 - `startup`: 2500ms (avg of 5 cycles).
 - `keynorm`: small 10000 / medium 12000 / large 12000 (N=300 keys).
