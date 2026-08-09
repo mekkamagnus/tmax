@@ -109,16 +109,23 @@ Sections, SEE ALSO following, within-page search, history, `q`.
 - Manual: `:man tar`, `:man 3 printf`, follow SEE ALSO, in-page search, comint `K`.
 
 ## Acceptance Criteria (Completion)
-- [ ] `:man <topic>` renders the page via an auto-selected backend (`man` if present, else `woman`).
-- [ ] Section syntax (`:man 3 printf`, `printf(3)`) works.
-- [ ] `man-mode`: section jumps, `SEE ALSO` follow, within-page search, history, `q`.
-- [ ] **Zero-dep default** — the `woman` backend renders real pages with no `man` binary.
-- [ ] comint/shell `K` opens the man page for the command under point.
-- [ ] Cross-platform (macOS + Linux man paths).
+- [x] `:man <topic>` renders the page via an auto-selected backend (`man` if present, else `woman`).
+- [x] Section syntax (`:man 3 printf`, `printf(3)`) works.
+- [x] `man-mode`: section jumps (`}`/`{`), `SEE ALSO` follow (RET), within-page search (`s`), history, `q`.
+- [x] **Zero-dep default** — the `woman` backend renders real pages with no `man` binary.
+- [x] comint/shell `K` opens the man page for the command under point (vim-traditional `K` in normal mode).
+- [x] Cross-platform (macOS + Linux man paths, `.gz`).
+
+## How it was implemented
+- **Resolver** (`src/editor/man/resolver.ts`): searches `MANPATH` (or the standard macOS/Linux/homebrew dirs) for `topic.S[.gz]`, honoring an optional section + `MANSECT`. `Bun.gunzipSync` for `.gz`.
+- **`woman` renderer** (`woman.ts`): pure-TS roff → text. Handles classic-man (`.TH/.SH/.SS/.LP/.PP/.TP/.RS/.RE/.br`, inline font macros) AND mdoc (`.Dt/.Sh/.Ss/.Pp/.Nm/.Nd/.Sy/.Fl/.Ar/.Li/.Cm/.Op/.Dl/.Bd/.Ed/.Bl/.It/.El/.Xr`). Inline macros append to a paragraph buffer (so mdoc's one-macro-per-line reflows); block macros flush. Font escapes consumed (plain text).
+- **`man` backend** (`man-backend.ts`): spawns the system `man` with `MANPAGER=cat` (no pager hang), strips nroff overstrike to plain text.
+- **Selector** (`manpage.ts`): `man` binary if present (portable `command -v man` check), else `woman`. Resolves the real section in both paths. Extracts SEE ALSO cross-refs.
+- **`man-mode` + commands** (`src/tlisp/core/commands/man.tlisp`): `(man topic)`, `:man` dispatch, section nav, SEE-ALSO follow, search, quit; `K` in normal mode → man page for the word under point.
 
 ## Validation Commands
 - `bun run typecheck`; `bun run build`
-- `bun test test/unit/man-viewer.test.ts` (new)
+- `bun test test/unit/man-page-viewer.test.ts`
 - Manual: `:man ls`; `:man 3 printf`; comint `K` on `grep`.
 
 ## Notes

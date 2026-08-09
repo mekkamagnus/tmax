@@ -1,0 +1,131 @@
+(defmodule editor/commands/man
+  (export man man-run man-follow man-next-section man-prev-section man-search man-quit man--render man--parse-topic)
+
+;; man.tlisp --- SPEC-114 (#181) man-page viewer (man/woman backends in TS).
+;;
+;; Renders a system man page in a read-only *Man* buffer under man-mode.
+;; Section syntax: (man "printf") / (man "printf" "3") / via :man "3 printf"
+;; or :man "printf(3)". Navigation: } / { section jumps, RET follows a
+;; name(section) cross-ref, s within-page search, q buries.
+
+(defvar man-buffer-name "*Man*")
+(defvar man-history (list))
+
+;; Parse an input string into (topic . section-or-nil). Accepts "topic",
+;; "topic(sec)", and "sec topic".
+(defun man--parse-topic (input)
+  "Split INPUT into a (topic section) list. Handles `topic`, `topic(sec)`,
+and `sec topic` (section is nil when absent)."
+  (let ((s (string-trim input)))
+    (cond
+      ((string-match "^\\(.+\\)(\\([0-9][a-zA-Z0-9+-]*\\))$" s)
+       (list (match-string 1 s) (match-string 2 s)))
+      ((string-match "^\\([0-9][a-zA-Z0-9+-]*\\)[ \t]+\\(.+\\)$" s)
+       (list (match-string 2 s) (match-string 1 s)))
+      (t (list s nil)))))
+
+(defun man--render (topic section)
+  "Render TOPIC (optional SECTION) into *Man* in man-mode. Pushes the prior
+page onto man-history. Returns the buffer name, or nil if the page is missing."
+  (let ((parsed (if section (list topic section) (man--parse-topic topic))))
+    (let ((name (nth 0 parsed))
+          (sec (nth 1 parsed)))
+      (let ((page (if sec (man-format name sec) (man-format name))))
+        (if (nilp page)
+          (progn (message "No manual entry for %s" name) nil)
+          (progn
+            (when (member man-buffer-name (buffer-list))
+              (let ((cur (buffer-text)))
+                (setq man-history (cons (list (buffer-name) cur) man-history))))
+            (unless (member man-buffer-name (buffer-list))
+              (buffer-create man-buffer-name))
+            (buffer-switch man-buffer-name)
+            (buffer-set-read-only nil man-buffer-name)
+            (let ((lines (buffer-line-count)))
+              (when (> lines 1)
+                (buffer-delete-range 0 0 (- lines 1) 100000)))
+            (buffer-insert-at-position 0 0 (hashmap-get page "text"))
+            (buffer-set-read-only t man-buffer-name)
+            (major-mode-set "man")
+            (cursor-move 0 0)
+            (editor-set-mode "normal")
+            man-buffer-name))))))
+
+(defun man-run (input)
+  "Render a man page from an INPUT string (`:man <input>` dispatch target)."
+  (interactive)
+  (let ((parsed (man--parse-topic input)))
+    (man--render (nth 0 parsed) (nth 1 parsed))))
+
+(defun man (&optional topic)
+  "Render a man page in *Man* (man-mode). With TOPIC, render it directly; with
+none, prompt (defaulting to the word at point). M-x / :man discoverable."
+  (interactive)
+  (if topic
+    (man-run topic)
+    (let ((input (read-from-minibuffer "Man page: " (or (symbol-at-point) "") "man-history" "man-run")))
+      (man-run input))))
+
+(defun man-follow ()
+  "Open the man page named by the name(section) token under the cursor."
+  (let ((line (buffer-line (cursor-line))))
+    (if (string-match "\\([a-zA-Z_][a-zA-Z0-9_+-]*\\)(\\([0-9][a-zA-Z0-9+-]*\\))" (or line ""))
+      (man--render (match-string 1 (or line "")) (match-string 2 (or line "")))
+      (message "No man-page reference under point"))))
+
+(defun man--section-line-p (line)
+  "True if LINE looks like an all-caps man section header (NAME, SYNOPSIS…)."
+  (and (string-match "^[A-Z][A-Z &-]+$" line) (> (length line) 2)))
+
+(defun man-next-section ()
+  "Move the cursor to the next section header (NAME/SYNOPSIS/…)."
+  (let ((n (buffer-line-count)) (ln (+ (cursor-line) 1)) (found nil))
+    (while (and (not found) (< ln n))
+      (let ((text (buffer-line ln)))
+        (if (man--section-line-p (or text ""))
+          (progn (cursor-move ln 0) (setq found t))
+          (setq ln (+ ln 1)))))
+    (if (not found) (message "No next section"))))
+
+(defun man-prev-section ()
+  "Move the cursor to the previous section header."
+  (let ((ln (- (cursor-line) 1)) (found nil))
+    (while (and (not found) (>= ln 0))
+      (let ((text (buffer-line ln)))
+        (if (man--section-line-p (or text ""))
+          (progn (cursor-move ln 0) (setq found t))
+          (setq ln (- ln 1)))))
+    (if (not found) (message "No previous section"))))
+
+(defun man-search ()
+  "Prompt for a string and move to its next occurrence in the page."
+  (let ((needle (read-from-minibuffer "Search man: " "" nil nil)))
+    (if (or (nilp needle) (string= needle ""))
+      nil
+      (let ((n (buffer-line-count)) (ln (cursor-line)) (found nil))
+        (while (and (not found) (< ln n))
+          (let ((text (buffer-line ln)))
+            (if (and text (string-contains-p needle text))
+              (progn (cursor-move ln 0) (setq found t))
+              (setq ln (+ ln 1)))))
+        (if (not found) (message "Not found: %s" needle))))))
+
+(defun man-quit ()
+  "Bury the *Man* buffer and return to the previous buffer."
+  (bury-buffer man-buffer-name)
+  (editor-set-mode "normal"))
+
+;; ── man-mode ───────────────────────────────────────────────────────────
+(major-mode-register "man" '() nil)
+(major-mode-doc "man" "Man-page viewer — } / { jump sections, RET follows SEE ALSO, s searches, q buries.")
+(key-bind "}" "(man-next-section)" "normal" "man")
+(key-bind "{" "(man-prev-section)" "normal" "man")
+(key-bind "RET" "(man-follow)" "normal" "man")
+(key-bind "s" "(man-search)" "normal" "man")
+(key-bind "q" "(man-quit)" "normal" "man")
+
+;; K (vim-traditional) in normal mode → man page for the word under point.
+;; Works in any buffer including comint/shell (they use normal mode).
+(key-bind "K" "(man (symbol-at-point))" "normal")
+(provide "man")
+)

@@ -143,6 +143,11 @@ substitute/Dired/execute policy."
        (helpgrep-run (match-string 1)))
       ((string= line "helpgrep")
        (helpgrep))
+      ;; :man <topic> — render a man page in *Man* (SPEC-114, #181).
+      ((string-match "^man[ \t]+(.+)$" line)
+       (man-run (match-string 1)))
+      ((string= line "man")
+       (man))
       ;; Everything else (:q, :w, :wq, :nohl, :marks, unknown…) is handled
       ;; by the existing TS-backed editor-execute-command-line primitive,
       ;; which also clears the line and returns to normal mode.

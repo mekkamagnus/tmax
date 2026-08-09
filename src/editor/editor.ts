@@ -49,6 +49,7 @@ import { LSPClient } from "../lsp/client.ts";
 import { createWindowOps } from "./api/window-ops.ts";
 import { createTabOps } from "./api/tab-ops.ts";
 import { createDescribeOps } from "./api/describe-ops.ts";
+import { formatManPage } from "./man/manpage.ts";
 import { log } from "../utils/logger.ts";
 import { KeymapSync } from "./keymap-sync.ts";
 import { createKeymapOps } from "./api/keymap-ops.ts";
@@ -1504,6 +1505,26 @@ export class Editor {
         }
       }
       return createList(refs);
+    });
+
+    defineRaw("man-format", (args) => {
+      // SPEC-114 (#181) man-page viewer: render TOPIC [SECTION] via the
+      // auto-selected backend (man binary if present, else the zero-dep woman
+      // roff renderer). Returns a hashmap {text, section, title, seeAlso} or
+      // nil if the page can't be found.
+      if (args.length < 1 || args.length > 2 || args[0]?.type !== "string") {
+        throw new Error("man-format requires a topic string and optional section");
+      }
+      const topic = args[0].value as string;
+      const section = args[1]?.type === "string" ? args[1].value as string : undefined;
+      const page = formatManPage(topic, section);
+      if (!page) return createNil();
+      return createHashmap([
+        ["text", createString(page.text)],
+        ["section", createString(page.section)],
+        ["title", createString(page.title)],
+        ["seeAlso", createList(page.seeAlso.map(s => createString(s)))],
+      ]);
     });
 
     defineRaw("invoke-command", (args) => {
