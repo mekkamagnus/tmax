@@ -46,26 +46,53 @@ consistent."
     help-buffer-name))
 
 ;; ── describe-function ─────────────────────────────────────────────────
+;; helpful-style section formatters (SPEC-113 / #180).
+(defun help-source-section (src)
+  "Format the helpful “Source” section from a help-source-location result
+(file:line + excerpt), or empty string when SRC is nil."
+  (if (nilp src) ""
+    (concat "\n\n— Source —\n"
+            (hashmap-get src "file") ":"
+            (format "%d" (hashmap-get src "line"))
+            "\n\n" (hashmap-get src "excerpt"))))
+
+(defun help-list-section (title sep items)
+  "Format a titled section joining ITEMS with SEP, or empty string when ITEMS
+is nil or empty."
+  (if (or (nilp items) (= (length items) 0)) ""
+    (concat "\n\n— " title " —\n" (string-join sep items))))
+
 (defun describe-function (name)
-  "Show the signature, docstring, and source of the named T-Lisp function in
-*Help*. NAME is a function-name string (e.g. \"buffer-save\"). When the
-documentation DB has a static entry for NAME it is appended as a formatted
-Documentation block. Returns nil for an unknown name. M-x discoverable."
+  "Show the signature, docstring, source location + excerpt, key bindings,
+references, related, and examples for the named T-Lisp function in *Help*
+(helpful-style rich layout, SPEC-113). NAME is a function-name string.
+Returns nil for an unknown name. M-x discoverable."
   (let ((resolved (describe-function-data name)))
     (if (nilp resolved)
       (describe-to-help
         (concat "Function: " name)
         (concat name " is not defined."))
-      (describe-to-help
-        (concat "Function: " (hashmap-get resolved "name"))
-        (let ((sig (hashmap-get resolved "signature"))
-              (doc (hashmap-get resolved "docstring"))
-              (mod (hashmap-get resolved "module"))
-              (full (hashmap-get resolved "documentation")))
+      (let* ((rname (hashmap-get resolved "name"))
+             (sig (hashmap-get resolved "signature"))
+             (doc (hashmap-get resolved "docstring"))
+             (mod (hashmap-get resolved "module"))
+             (full (hashmap-get resolved "documentation"))
+             (keys (hashmap-get resolved "keys"))
+             (related (hashmap-get resolved "related"))
+             (examples (hashmap-get resolved "examples"))
+             (src (help-source-location name))
+             (refs (help-symbol-references name)))
+        (describe-to-help
+          (concat "Function: " rname)
           (concat
             (help-linkify sig) "\n\n"
             (help-linkify doc)
             (if (nilp mod) "" (concat "\n\nFrom module: " mod))
+            (help-source-section src)
+            (help-list-section "Key bindings" ", " keys)
+            (help-list-section "References" ", " refs)
+            (help-list-section "Related" ", " related)
+            (help-list-section "Examples" "\n" examples)
             (if (nilp full) "" (concat "\n\n" (help-linkify full)))))))))
 
 (defun describe-function-candidate (name)
@@ -139,22 +166,26 @@ SPC h m. M-x discoverable via this docstring."
 
 ;; ── describe-variable ─────────────────────────────────────────────────
 (defun describe-variable (name)
-  "Show the value (and documentation, when available) of the named T-Lisp
-variable in *Help*. Renders `NAME is <value>` for a bound variable, or
-`NAME is not defined` for an unbound one. Bound to SPC h v.
-M-x discoverable via this docstring."
+  "Show the value, documentation, source location, and references of the named
+T-Lisp variable in *Help* (helpful-style, SPEC-113). Renders `NAME is <value>`
+for a bound variable, or `NAME is not defined` for an unbound one.
+Bound to SPC h v. M-x discoverable via this docstring."
   (let ((result (describe-variable-data name)))
     (if (nilp (hashmap-get result "bound"))
       (describe-to-help
         (concat "Variable: " name)
         (concat name " is not defined."))
-      (let ((value (hashmap-get result "value"))
-            (doc (hashmap-get result "documentation")))
+      (let* ((value (hashmap-get result "value"))
+             (doc (hashmap-get result "documentation"))
+             (src (help-source-location name))
+             (refs (help-symbol-references name)))
         (describe-to-help
           (concat "Variable: " name)
           (concat
             name " is " (format "%s" value) "\n"
-            (if (nilp doc) "" (concat "\nDocumentation:\n" (help-linkify doc)))))))))
+            (if (nilp doc) "" (concat "\nDocumentation:\n" (help-linkify doc)))
+            (help-source-section src)
+            (help-list-section "References" ", " refs)))))))
 
 (defun describe-variable-candidate (name)
   "Completion candidate wrapping a variable name for the describe-variable

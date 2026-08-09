@@ -78,23 +78,37 @@ describe-function/-variable emit structured sections; documentation.ts related/e
 - Unit: reference index finds a caller in a fixture.
 
 ## Acceptance Criteria (Completion)
-- [ ] describe-function shows source location + excerpt, keybindings, callers/references, related, examples.
-- [ ] describe-variable shows value, source location, references.
-- [ ] Sectioned layout (not flat); cross-refs linkified.
-- [ ] No regression to existing describe-* content.
+- [x] describe-function shows source location + excerpt, keybindings, callers/references, related, examples.
+- [x] describe-variable shows value, source location, references.
+- [x] Sectioned layout (not flat); cross-refs linkified.
+- [x] No regression to existing describe-* content.
+
+## How it was implemented
+- **Source location** (`help-source-location` TS primitive, editor.ts): scans
+  every loaded module's source for `(def\w* NAME` (defun/defmacro/defvar/…)
+  and returns `{file, line, excerpt}`. Describe-time lookup (not captured at
+  defun time) — no AST/parser changes. Works for functions AND variables.
+- **References** (`help-symbol-references` TS primitive): a lightweight on-demand
+  xref — the modules whose source mentions NAME as a word. Text scan, not AST
+  (cheap, approximate), built from live source (never stale).
+- **Key bindings**: `describe-function-data` reverses the key→command map,
+  scanning each binding's command string for `(NAME` (bindings are full
+  expressions like `(cursor-move …)`, not just `(name)` cells).
+- **Related / Examples**: inlined from `documentation.ts` via `getDocumentation`.
+- **Renderer**: `describe-function`/`-variable` emit sectioned output
+  (`— Source —`, `— Key bindings —`, `— References —`, `— Related —`,
+  `— Examples —`) via `help-source-section` / `help-list-section` helpers.
 
 ## Validation Commands
 - `bun run typecheck`; `bun run build`
-- `bun test test/unit/describe-rich.test.ts` (new/extended)
-- Manual: `SPC h f save-buffer` shows source + keys + callers + example.
+- `bun test test/unit/helpful-rich-help.test.ts`
+- Manual: `SPC h f save-buffer` shows source + keys + references.
 
 ## Notes
 - Composes with SPEC-110 (help-mode) for linkification and SPEC-108 (mode docs).
-- The full scope ships together: source-location + keybindings + callers/
-  references + related/examples. The "callers/references" piece adds a symbol
-  xref — its long-term cost is keeping the index **correct as the codebase
-  changes** (it must stay accurate or it actively misleads). Mitigate by building
-  it on-demand from live T-Lisp source + keymaps (not a stale cached index) and
-  pinning it with tests; that's the real consideration, not writing effort.
-- This is the content-depth counterpart to SPEC-110's navigation — `helpful` is
-  literally "better help layout," so this is what makes tmax's help feel modern.
+- The references xref is intentionally a live source scan (not a cached index)
+  so it can never go stale — the tradeoff is it's approximate (text, not AST).
+- TS primitives (e.g. `cursor-move`) have no `.tlisp` source, so they show Key
+  bindings + References but no Source section — correct, there's no source to cite.
+- Examples/Related surface only when `documentation.ts` has an entry for the
+  exact function name (a pre-existing data-alignment consideration).

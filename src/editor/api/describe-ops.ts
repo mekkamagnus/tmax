@@ -167,7 +167,29 @@ export function createDescribeOps(
     const staticDoc = getDocumentation(name);
     if (staticDoc) {
       entry.push(["documentation", createString(formatDocumentation(staticDoc))]);
+      // SPEC-113 (#180) helpful-style sections: Related + Examples.
+      if (staticDoc.related.length > 0) {
+        entry.push(["related", createList(staticDoc.related.map(r => createString(r)))]);
+      }
+      if (staticDoc.examples.length > 0) {
+        entry.push(["examples", createList(staticDoc.examples.map(e => createString(e)))]);
+      }
     }
+
+    // SPEC-113 (#180) helpful-style "Key Bindings" — the keys that invoke this
+    // command. Bindings are full T-Lisp expressions (e.g. `(cursor-move ...)`,
+    // `(progn (save-buffer ...))`), not just `(name)` cells, so we scan each
+    // binding's command string for `(NAME` as the invoked command.
+    const keyRe = new RegExp("\\(" + name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + "\\b");
+    const keys: string[] = [];
+    const seenKey = new Set<string>();
+    for (const [key, mappings] of access.getKeyMappings()) {
+      if (seenKey.has(key)) continue;
+      for (const m of mappings) {
+        if (keyRe.test(m.command)) { keys.push(key); seenKey.add(key); break; }
+      }
+    }
+    if (keys.length > 0) entry.push(["keys", createList(keys.map(k => createString(k)))]);
 
     return Either.right(createHashmap(entry));
   });

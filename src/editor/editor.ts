@@ -1453,6 +1453,59 @@ export class Editor {
       return createNumber(this.interpreter.moduleRegistry.getGeneration());
     });
 
+    defineRaw("help-source-location", (args) => {
+      if (args.length !== 1 || args[0]?.type !== "string") {
+        throw new Error("help-source-location requires a name string");
+      }
+      // SPEC-113 (#180) helpful-style "Source" section: scan every loaded
+      // module's source for the `(def\w* NAME` form (defun/defmacro/defvar/...)
+      // and return file:line + an excerpt. Scanning all modules (not just the
+      // exporting one) covers variables and non-exported helpers too. Returns
+      // nil when no defining form is found.
+      const name = args[0].value as string;
+      const esc = name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      const re = new RegExp("\\(def\\w*\\s+" + esc + "\\b");
+      for (const mod of this.interpreter.moduleRegistry.listModules()) {
+        if (mod.state !== "loaded" || !mod.sourcePath) continue;
+        let src: string;
+        try { src = fs.readFileSync(mod.sourcePath, "utf8"); } catch { continue; }
+        const lines = src.split("\n");
+        const idx = lines.findIndex(l => re.test(l));
+        if (idx >= 0) {
+          const excerpt = lines.slice(idx, Math.min(idx + 6, lines.length)).join("\n");
+          return createHashmap([
+            ["file", createString(mod.sourcePath)],
+            ["line", createNumber(idx + 1)],
+            ["excerpt", createString(excerpt)],
+          ]);
+        }
+      }
+      return createNil();
+    });
+
+    defineRaw("help-symbol-references", (args) => {
+      if (args.length !== 1 || args[0]?.type !== "string") {
+        throw new Error("help-symbol-references requires a name string");
+      }
+      // SPEC-113 (#180) helpful-style "References" — a lightweight on-demand
+      // xref: the modules whose source mentions NAME as a word. Text scan, not
+      // AST (cheap, approximate), per the spec's "build on demand" guidance.
+      const name = args[0].value as string;
+      const re = new RegExp("\\b" + name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + "\\b");
+      const refs: TLispValue[] = [];
+      const seen = new Set<string>();
+      for (const mod of this.interpreter.moduleRegistry.listModules()) {
+        if (mod.state !== "loaded" || !mod.sourcePath) continue;
+        let src: string;
+        try { src = fs.readFileSync(mod.sourcePath, "utf8"); } catch { continue; }
+        if (re.test(src) && !seen.has(mod.name)) {
+          refs.push(createString(mod.name));
+          seen.add(mod.name);
+        }
+      }
+      return createList(refs);
+    });
+
     defineRaw("invoke-command", (args) => {
       if (args.length !== 1 || args[0]?.type !== "string") {
         throw new Error("invoke-command requires a command name string");
