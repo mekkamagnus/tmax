@@ -3,9 +3,11 @@
  * @description CHORE-44 Change 7 — proves the editor API primitive inventory
  * is composed declaratively through {@link registerContributions}:
  *
- * - AC7.1: the live `createEditorAPI()` inventory exactly equals the frozen
- *   Step 0 baseline (369 names, asserted by `chore44-baseline-inventory`
- *   separately; here we assert count + a deterministic superset directly).
+ * - AC7.1: the live `createEditorAPI()` inventory exactly equals the checked-in
+ *   baseline (408 names — regenerated when features intentionally add APIs;
+ *   asserted by `chore44-baseline-inventory` separately; here we assert count +
+ *   a deterministic superset directly). A checked-in snapshot forces every API
+ *   addition to surface as a reviewed diff in `api-names-static.txt`.
  * - AC7.2: duplicate primitive names across two contributions return a
  *   typed `Left` whose `AppError` names BOTH colliding contribution names
  *   and the duplicated primitive.
@@ -33,8 +35,8 @@ import type { TLispFunctionImpl } from "../../src/tlisp/types.ts";
 import type { EditorRuntimeCaches } from "../../src/editor/runtime/caches.ts";
 
 describe("CHORE-44 Change 7 — editor API registry", () => {
-  // ── AC7.1: live inventory matches the frozen Step 0 baseline ──────────
-  test("AC7.1: createEditorAPI inventory equals the frozen Step 0 set (369 names)", () => {
+  // ── AC7.1: live inventory matches the checked-in baseline ────────────
+  test("AC7.1: createEditorAPI inventory equals the checked-in baseline (408 names)", () => {
     const baselinePath = join(import.meta.dir, "..", "..", ".chore44-baseline", "api-names-static.txt");
     const expected = readFileSync(baselinePath, "utf8")
       .split("\n")
@@ -42,7 +44,7 @@ describe("CHORE-44 Change 7 — editor API registry", () => {
       .filter(l => l.length > 0 && !l.startsWith("#"))
       .sort();
     const live = Array.from(createEditorAPI(createTestAPIContext()).keys()).sort();
-    expect(live.length).toBe(369);
+    expect(live.length).toBe(408);
     expect(live).toEqual(expected);
   });
 

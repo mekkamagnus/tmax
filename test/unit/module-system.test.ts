@@ -136,7 +136,10 @@ describe("T-Lisp module system", () => {
       editor.createBuffer("scratch", "abc\n");
       await editor.start();
 
-      const result = editor.getInterpreter().execute('(describe-function "vim-reset-pending")');
+      // #177 renamed the array-returning TS primitive `describe-function` →
+      // `describe-function-info` (the bare name now renders to *Help*). This
+      // test inspects the raw module-origin metadata, so it uses the info form.
+      const result = editor.getInterpreter().execute('(describe-function-info "vim-reset-pending")');
 
       expect(result._tag).toBe("Right");
       if (result._tag === "Left") return;
