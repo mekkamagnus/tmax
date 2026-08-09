@@ -12,6 +12,7 @@ Set by shell-start; cleared by shell-exit. Read by terminal-handler.ts.")
 (defun shell-start ()
   "Start a terminal (M-x shell). Creates a PTY, enters terminal mode.
 Keys go to the PTY. Press C-\\ to return to the editor."
+  (interactive)
   (let ((term-id (shell)))
     (setq *active-terminal* term-id)
     (editor-set-mode "terminal")

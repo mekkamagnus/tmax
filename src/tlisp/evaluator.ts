@@ -1235,7 +1235,7 @@ export class TLispEvaluator implements ModuleFormsContext, TestFormsContext {
     // CHORE-44 Change 4 AC4.1: shared form-shape validator.
     const shape = validateDefun(elements);
     if (Either.isLeft(shape)) return Either.left(shape.left);
-    const { name, parameters, docstring, body } = shape.right;
+    const { name, parameters, docstring, body, interactive } = shape.right;
 
     // Extract parameter names for signature
     let paramNames: string[] = [];
@@ -1264,6 +1264,9 @@ export class TLispEvaluator implements ModuleFormsContext, TestFormsContext {
         fn.docstring = docstring.value as string;
       }
       fn.parameters = paramNames;
+      // SPEC-115: record the `(interactive)` declaration so M-x completion
+      // can filter to user-callable commands.
+      if (interactive) fn.interactive = true;
     }
 
     // Register function for coverage tracking (US-0.6.6).

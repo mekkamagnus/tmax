@@ -68,6 +68,7 @@ not commented."
   "Comment every line in the inclusive range [FROM, TO].
 Prepends the current major mode's comment prefix (e.g. ; // #) to each line.
 Shows a message and makes no change when the mode has no comment syntax."
+  (interactive)
   (condition-case err
     (progn
       (comment-region-lines from to)
@@ -81,6 +82,7 @@ Shows a message and makes no change when the mode has no comment syntax."
 Removes the current major mode's comment prefix (and one trailing space) from
 each line. Shows a message and makes no change when the mode has no comment
 syntax."
+  (interactive)
   (condition-case err
     (progn
       (uncomment-region-lines from to)

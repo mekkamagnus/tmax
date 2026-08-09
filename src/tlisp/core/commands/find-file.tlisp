@@ -53,6 +53,7 @@
   "Open PATH (or prompt) into a read-only buffer — view without editing.
 Composes find-file-open + buffer-set-read-only. The read-only flag is
 reversible: (buffer-set-read-only nil) re-enables editing."
+  (interactive)
   (if path
     (find-file-open path)
     (completing-read
@@ -80,6 +81,7 @@ reversible: (buffer-set-read-only nil) re-enables editing."
   "Insert the contents of PATH into the current buffer at point.
 Prompts via minibuffer when called without a path. Does not switch
 buffers or change the current buffer's filename."
+  (interactive)
   (if path
     (insert-file-accept path)
     (completing-read

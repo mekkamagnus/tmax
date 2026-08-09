@@ -112,6 +112,12 @@ export interface TLispFunction extends TLispValue {
   docstring?: string;
   parameters?: string[];
   source?: string;
+  /**
+   * True when the defun declared `(interactive)` (Emacs parity, SPEC-115). An
+   * interactive function is an M-x command candidate. Absent on built-in
+   * primitives (those are surfaced as commands via key bindings instead).
+   */
+  interactive?: boolean;
 }
 
 /**

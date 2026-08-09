@@ -14,21 +14,21 @@
 
 (defun command-detail-interactive-p (details)
   "Return non-nil for commands exposed through the interactive M-x source.
-Excludes test-infrastructure commands (trt-*, should-*) that have docstrings
-but shouldn't appear in the M-x list (#148)."
+callable-command-details already restricted the table to command candidates
+(declared `(interactive)` OR key-bound, SPEC-115); this predicate is the
+secondary guard that excludes test-infrastructure commands (trt-*, should-*)
+which must never appear in M-x (#148)."
   (let ((name (hashmap-get details "name")))
-    (and
-      (not (or (string-prefix-p "trt-" name)
-               (string-prefix-p "should-" name)))
-      (or
-        (> (length (hashmap-get details "documentation")) 0)
-        (not (null (hashmap-get details "bindings")))))))
+    (not (or (string-prefix-p "trt-" name)
+             (string-prefix-p "should-" name)))))
 
 (defun command-completion-refresh ()
-  "Refresh the factual command snapshot used by the active M-x session."
+  "Refresh the factual command snapshot used by the active M-x session.
+Sources only M-x command candidates from callable-command-details
+(interactive-only) per SPEC-115, then strips test-infrastructure names."
   (set! command-completion-candidates
     (mapcar "command-detail-candidate"
-      (filter "command-detail-interactive-p" (callable-command-details)))))
+      (filter "command-detail-interactive-p" (callable-command-details t)))))
 
 (defun command-completion-table (input action)
   "Completion table for callable T-Lisp commands."

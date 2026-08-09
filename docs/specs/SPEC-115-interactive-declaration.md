@@ -2,23 +2,27 @@
 
 ## Feature Description
 
-Add Emacs-style `(interactive)` support to T-Lisp `defun`. Only functions
-declared `(interactive)` are M-x candidates. Internal helpers without
-`(interactive)` are excluded from the completion list, the key-binding
-discoverability surface, and the `describe-*` command tables. This mirrors
-Emacs's separation of commands (user-callable) from functions (internal).
+Add Emacs-style `(interactive)` support to T-Lisp `defun`. A function is an M-x
+command candidate iff it is declared `(interactive)` **or** it is bound to a key.
+Internal helpers, stdlib, and TS primitives (not key-bound, not declared
+interactive) are excluded from the M-x completion list. This mirrors Emacs's
+separation of commands (user-callable) from functions (internal), and uses the
+key-binding table as the primary "this is a command" signal so the common case
+needs no annotation.
 
 ## Goals
 
 - `defun` accepts an optional `(interactive)` or `(interactive "spec")` form after
   the docstring.
 - `TLispFunction` gains an `interactive?: boolean` field.
-- M-x completion (`describe-function-table`) filters to `interactive === true` only.
-- Graceful fallback: if zero functions are marked interactive (e.g., before
-  migration completes), the completion table shows all callables (current behavior).
-- The ~50-80 user-facing commands get `(interactive)` added in their `.tlisp` files.
-- The ~1,100 internal helpers do NOT get `(interactive)` — they disappear from M-x.
-- Measurable improvement: M-x candidate count drops from ~1,164 to ~50-80.
+- M-x completion (`command-completion-refresh`) filters to commands: declared
+  `(interactive)` **OR** key-bound.
+- Graceful fallback: if zero commands qualify, the completion table shows all
+  callables (current behavior) so M-x is never empty.
+- The non-key-bound user-facing commands get `(interactive)` added in their
+  `.tlisp` files; key-bound commands need no change.
+- Measurable improvement: M-x candidate count drops from ~1,164 to <200
+  (measured ~146, an 8× reduction; stdlib + internal helpers removed).
 
 ## User Story
 
@@ -29,9 +33,11 @@ scrolling through hundreds of irrelevant entries.
 
 ## Problem Statement
 
-Today every `defun` is a potential M-x candidate. There are 1,164 callables in
-the completion table, but only ~50-80 are user-facing commands. The rest are
-internal helpers that clutter the list and slow down completion (BUG-78).
+Today every `defun` is a potential M-x candidate (the old rule: "has a docstring
+OR key-bound"). There are 1,164 callables in the completion table, but only the
+~146 key-bound + declared-interactive ones are real commands. The rest are
+stdlib and internal helpers that clutter the list and slow down completion
+(BUG-78).
 
 ## Solution Statement
 
@@ -44,26 +50,38 @@ internal helpers that clutter the list and slow down completion (BUG-78).
 
 ### Phase 2: Completion filtering
 - `callable-command-details` (TS primitive) gains an optional `interactive-only`
-  parameter. When true, it filters to `interactive === true`.
-- `describe-function-table` (T-Lisp) passes `interactive-only: true` to
-  `callable-command-details`.
-- Fallback: if the result is empty (no functions marked interactive), re-call
-  without the filter (shows all — current behavior).
+  parameter. When truthy, a function is included iff it is a **command**:
+  `fn.interactive === true` **OR** it is bound to a key. The key-bound check
+  reuses the existing `bindingsByCommand` map — a key binding already declares
+  "this is a user-facing command", so it is treated as interactive by default
+  (DRY: no need to repeat `(interactive)` in every key-bound defun).
+- `command-completion-refresh` (the M-x source, in execute-extended-command.tlisp)
+  calls `(callable-command-details t)` and keeps its secondary `trt-`/`should-`
+  guard (`command-detail-interactive-p`).
+- `describe-function-table` (the SPC-h-f source) is **unchanged** — it calls
+  `(callable-command-details)` with no arg, so describe-function still lists
+  every callable (no regression to per-symbol help).
+- Fallback: if `interactive-only` yields zero candidates (nothing key-bound and
+  nothing marked), the full table is returned so M-x is never empty.
 
 ### Phase 3: Migration
-- Add `(interactive)` to the ~50-80 user-facing commands across all `.tlisp`
-  command files. These are the functions with key bindings, M-x discoverability, or
-  that a user would invoke directly.
-- Do NOT add `(interactive)` to internal helpers, utility functions, or TS
-  primitives.
+- `(interactive)` is added to the **non-key-bound** user-facing commands — those
+  reachable only via M-x (e.g. `save-buffer`, `query-replace`, `occur`, `dired`,
+  `info`, `helpgrep`, `switch-to-buffer`). Key-bound commands need no change
+  (Phase 2's key-bound check covers them).
+- Do NOT add `(interactive)` to internal helpers (`--` names, `*-candidate`,
+  `*-table`, `*-accept`, `*-p` predicates, the `vim-*` state machine), utility
+  functions, stdlib, or TS primitives — those are the "inapplicable options"
+  the user wants removed from M-x.
 
 ## Relevant Files
 
 - `src/tlisp/types.ts` — `TLispFunction` type (add `interactive?: boolean`).
-- `src/tlisp/evaluator.ts` — `defun` special form evaluation (detect `(interactive)`).
-- `src/editor/api/describe-ops.ts` — `callable-command-details` (add interactive filter).
-- `src/tlisp/core/commands/describe.tlisp` — `describe-function-table` (pass filter).
-- `src/tlisp/core/commands/*.tlisp` — add `(interactive)` to user-facing commands.
+- `src/tlisp/evaluator/form-shapes.ts` — `parseFunctionDef` (detect + strip `(interactive)`).
+- `src/tlisp/evaluator.ts` — `evalDefun` (set `fn.interactive`).
+- `src/editor/editor.ts` — `callable-command-details` (add `interactive-only` filter).
+- `src/tlisp/core/commands/execute-extended-command.tlisp` — `command-completion-refresh` (M-x source).
+- `src/tlisp/core/commands/*.tlisp` — add `(interactive)` to non-key-bound user commands.
 
 ### New Files
 - None.
@@ -76,21 +94,21 @@ check if the first non-docstring body element is a list starting with
 `interactive`. If so, set the flag and remove it from the body.
 
 ### Phase 2: Completion filtering
-Add an optional boolean arg to `callable-command-details`. When true, skip
-callables where `interactive !== true`. Wire `describe-function-table` to pass it.
+Add an optional boolean arg to `callable-command-details`. When truthy, include a
+callable iff `fn.interactive === true` OR it is key-bound. Wire the M-x source
+(`command-completion-refresh`) to pass it; leave `describe-function-table` (SPC h f)
+unfiltered.
 
 ### Phase 3: Migration
-Grep for all `(defun` in `src/tlisp/core/commands/*.tlisp`. For each, decide:
-user-facing (add `(interactive)`) or internal (skip). Rule of thumb: if it has a
-`key-bind`, a docstring mentioning "Bound to", or appears in the cheatsheet, it's
-interactive.
+Add `(interactive)` to the non-key-bound user-facing commands (those reachable
+only via M-x). Key-bound commands are auto-included by Phase 2.
 
 ## Acceptance Criteria (Completion)
 - [ ] `defun` with `(interactive)` sets the flag on `TLispFunction`.
 - [ ] `defun` without `(interactive)` leaves the flag unset.
-- [ ] M-x completion shows only interactive commands (fallback to all if none marked).
-- [ ] The ~50-80 user-facing commands have `(interactive)`.
-- [ ] M-x candidate count drops from ~1,164 to <100.
+- [ ] M-x completion shows only commands (declared interactive OR key-bound), with the all-callables fallback if none qualify.
+- [ ] The non-key-bound user-facing commands have `(interactive)`.
+- [ ] M-x candidate count drops from ~1,164 to <200 (measured: ~146, an 8× reduction; stdlib and internal helpers excluded).
 - [ ] No regression to describe-function (it shows all, not just interactive).
 
 ## Validation Commands

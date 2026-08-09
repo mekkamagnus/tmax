@@ -14,10 +14,12 @@
 
 (defun set-expand-tabs (flag)
   "Enable/disable expandtab (#144). Non-nil FLAG makes Tab insert spaces."
+  (interactive)
   (setq expand-tabs flag))
 
 (defun set-tab-width (n)
   "Set the tab stop width in columns (#144, vim tabstop)."
+  (interactive)
   (setq tab-width n))
 
 (defun electric-pair--close-for (key)

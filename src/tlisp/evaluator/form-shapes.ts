@@ -343,6 +343,20 @@ export interface FunctionDefShape {
   parameters: TLispValue;
   docstring?: TLispValue;
   body: TLispValue;
+  /** True when an `(interactive [spec])` form preceded the body (SPEC-115). */
+  interactive: boolean;
+}
+
+/**
+ * Is `value` an `(interactive ...)` marker form — a list whose head is the
+ * symbol `interactive`? Recognizes both the bare `(interactive)` form and the
+ * argument-spec form `(interactive "fFile: ")` (the spec is ignored for now;
+ * argument prompting is a future enhancement). SPEC-115.
+ */
+function isInteractiveForm(value: TLispValue | undefined): boolean {
+  if (!value || value.type !== "list") return false;
+  const head = (value.value as TLispValue[])[0];
+  return head?.type === "symbol" && head.value === "interactive";
 }
 
 /** Parse the common (defun|lambda name? params [docstring] body...) shape. */
@@ -380,7 +394,16 @@ function parseFunctionDef(
     docstring = docSlot;
   }
   const bodyExprs = elements.slice(tailStart);
-  if (bodyExprs.length === 0) {
+  // Detect an optional `(interactive [spec])` marker as the FIRST body form
+  // (Emacs parity, SPEC-115). It may follow the docstring; strip it from the
+  // body so it is never evaluated, and record the flag on the parsed shape.
+  let interactive = false;
+  let realBodyExprs = bodyExprs;
+  if (bodyExprs.length > 0 && isInteractiveForm(bodyExprs[0])) {
+    interactive = true;
+    realBodyExprs = bodyExprs.slice(1);
+  }
+  if (realBodyExprs.length === 0) {
     return Either.left({
       type: "EvalError",
       variant: "SyntaxError",
@@ -397,9 +420,9 @@ function parseFunctionDef(
     });
   }
   // Reconstruct the body progn form (single → as-is, multiple → wrapped).
-  const body = bodyExprs.length === 1
-    ? bodyExprs[0]!
-    : { type: "list" as const, value: [{ type: "symbol" as const, value: "progn" }, ...bodyExprs] };
+  const body = realBodyExprs.length === 1
+    ? realBodyExprs[0]!
+    : { type: "list" as const, value: [{ type: "symbol" as const, value: "progn" }, ...realBodyExprs] };
 
   // Required-arg presence + type checks.
   if (kind === "defun" && (!name || !parameters || !body)) {
@@ -435,7 +458,7 @@ function parseFunctionDef(
     });
   }
 
-  return Either.right({ name, parameters: parameters!, docstring, body });
+  return Either.right({ name, parameters: parameters!, docstring, body, interactive });
 }
 
 /** Validate a `defun` form's argument shape (name + params + optional docstring + body). */

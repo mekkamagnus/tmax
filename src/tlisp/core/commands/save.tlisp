@@ -10,6 +10,7 @@
 (defun save-buffer (&optional filename force)
   "Save current buffer to its associated file. Refuses if the file changed
 on disk since open/last save — pass t as the second arg to force (:w!)."
+  (interactive)
   (let ((path (or filename (buffer-filename))))
     (unless path
       (message "Buffer has no associated file")
@@ -50,6 +51,7 @@ on disk since open/last save — pass t as the second arg to force (:w!)."
 
 (defun save-file (filename)
   "Save the current buffer to FILENAME."
+  (interactive)
   (save-buffer filename))
 
 ;; write-file — Emacs-canonical save-as name, an alias of save-file (SPEC-077).
@@ -60,6 +62,7 @@ on disk since open/last save — pass t as the second arg to force (:w!)."
   "Save the current buffer to FILENAME and re-associate it (save-as).
 Emacs-canonical name for save-as; delegates to save-buffer. Bound to SPC f w.
 Note: SPC-led, not C-x C-w — SPEC-067 reserves C-x for vim decrement."
+  (interactive)
   (save-buffer filename))
 
 ;; ── save-some-buffers (SPEC-072) ──────────────────────────────────────────
@@ -150,6 +153,7 @@ Iterates every live buffer; for each modified, non-special one, opens a
 yes/no minibuffer prompt and runs save-buffer on \"yes\". Special buffers
 (*scratch*, *Messages*, *daemon*) and file-less modified buffers are skipped.
 M-x discoverable via this docstring. Drives the quit-safety path."
+  (interactive)
   (setq save-some-return-buffer (buffer-current))
   (setq save-some-count 0)
   (setq save-some-current-name nil)
@@ -180,6 +184,7 @@ Returns to the buffer being processed; caller restores the originating buffer."
 Synchronous bulk-save for the `:wa` command-line path (vim :wa semantics).
 File-less modified buffers are reported and skipped; special buffers are
 ignored. Messages the count of buffers saved."
+  (interactive)
   (let ((start (buffer-current))
         (queue (save-some-build-queue)))
     (setq save-some-count 0)

@@ -383,6 +383,7 @@ Accept-function for `helpgrep'."
   "Prompt for a regex and full-text search the tmax + T-Lisp manuals.
 Distinct from apropos (live symbol metadata) — this searches the WRITTEN prose.
 M-x / :helpgrep discoverable via this docstring."
+  (interactive)
   (read-from-minibuffer "Helpgrep (regex): " "" "helpgrep-history" "helpgrep-run"))
 
 (defun helpgrep-jump ()
@@ -489,6 +490,7 @@ Opens the Index node (which IS the manual's index); use s (occur) to search."
 
 (defun info ()
   "Open the tmax manual in *Info*. M-x / :info discoverable."
+  (interactive)
   (let ((path (concat (helpgrep-docs-dir) "/tmax.info")))
     (setq info-nodes (info-parse path))
     (info--render-node "Top")))

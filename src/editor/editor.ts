@@ -1386,7 +1386,14 @@ export class Editor {
     });
 
     defineRaw("callable-command-details", (args) => {
-      if (args.length !== 0) throw new Error("callable-command-details requires no arguments");
+      if (args.length > 1) throw new Error("callable-command-details accepts 0 or 1 arguments");
+      // SPEC-115: when INTERACTIVE-ONLY is truthy, restrict the table to M-x
+      // command candidates — a function is a command if it declared
+      // `(interactive)` OR it is bound to a key. This excludes stdlib helpers
+      // and TS primitives that are not user-callable, shrinking the M-x list
+      // from every visible callable to just the commands. With no argument the
+      // full table is returned (used by describe-function, which must show all).
+      const interactiveOnly = args.length === 1 && args[0]?.type === "boolean" && (args[0].value as boolean);
       const bindingsByCommand = new Map<string, string[]>();
       for (const [key, mappings] of this.keyMappings) {
         for (const mapping of mappings) {
@@ -1395,36 +1402,47 @@ export class Editor {
           bindingsByCommand.set(match[1], [...(bindingsByCommand.get(match[1]) ?? []), key]);
         }
       }
+      // A callable is an M-x command candidate: declared interactive OR bound.
+      const isCommand = (name: string, fn: TLispFunction): boolean =>
+        fn.interactive === true || bindingsByCommand.has(name);
+
       const seen = new Set<string>();
-      const results: TLispValue[] = [];
+      const all: TLispValue[] = [];
+      const commandNames = new Set<string>();
+      const pushEntry = (name: string, fn: TLispFunction, module?: string): void => {
+        if (isCommand(name, fn)) commandNames.add(name);
+        const entry: [string, TLispValue][] = [
+          ["name", createString(name)],
+          ["documentation", createString((fn.docstring ?? "").split("\n")[0] ?? "")],
+          ["bindings", createList((bindingsByCommand.get(name) ?? []).map(key => createString(key)))],
+        ];
+        if (module) entry.push(["module", createString(module)]);
+        all.push(createHashmap(entry));
+      };
 
       for (const [name, value] of this.collectVisibleGlobalBindings().entries()) {
         if (value.type === "function") {
           seen.add(name);
-          const fn = value as TLispFunction;
-          results.push(createHashmap([
-            ["name", createString(name)],
-            ["documentation", createString((fn.docstring ?? "").split("\n")[0] ?? "")],
-            ["bindings", createList((bindingsByCommand.get(name) ?? []).map(key => createString(key)))],
-          ]));
+          pushEntry(name, value as TLispFunction);
         }
       }
 
-      // Module exports
       const moduleExports = this.interpreter.moduleRegistry.allExports();
       for (const [name, entry] of moduleExports) {
         if (!seen.has(name) && entry.value.type === "function") {
-          const fn = entry.value as TLispFunction;
-          results.push(createHashmap([
-            ["name", createString(name)],
-            ["documentation", createString((fn.docstring ?? "").split("\n")[0] ?? "")],
-            ["bindings", createList((bindingsByCommand.get(name) ?? []).map(key => createString(key)))],
-            ["module", createString(entry.moduleName)],
-          ]));
+          pushEntry(name, entry.value as TLispFunction, entry.moduleName);
         }
       }
 
-      return createList(results);
+      if (!interactiveOnly) return createList(all);
+
+      // Filter to command candidates; fall back to the full table if the filter
+      // excluded everything (graceful migration — M-x is never empty).
+      const commands = all.filter(entry => {
+        const nameVal = (entry.value as Map<string, TLispValue>).get("name");
+        return nameVal?.type === "string" && commandNames.has(nameVal.value as string);
+      });
+      return createList(commands.length > 0 ? commands : all);
     });
 
     defineRaw("invoke-command", (args) => {

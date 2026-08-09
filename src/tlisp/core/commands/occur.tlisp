@@ -65,6 +65,7 @@ line (see `occur-jump`) to pop back to that line in the source buffer.
 Calling `occur` again with a new pattern refreshes the same `*Occur*`
 buffer in place. An empty PATTERN reuses the last search pattern. Bound
 to `SPC s o`."
+  (interactive)
   (let ((pat pattern)
         (source (buffer-current)))
     ;; Empty pattern: reuse the last search pattern, mirroring search-next.

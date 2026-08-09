@@ -8,12 +8,14 @@
 
 (defun run-node ()
   "Start a Node.js REPL in a comint buffer."
+  (interactive)
   (let ((buf (comint-run "node" (list) "*node-repl*")))
     (buffer-switch buf)
     (message (concat "Node REPL: " buf))))
 
 (defun run-python ()
   "Start a Python REPL in a comint buffer."
+  (interactive)
   (let ((buf (comint-run "python3" (list "-i") "*python-repl*")))
     (buffer-switch buf)
     (message (concat "Python REPL: " buf))))

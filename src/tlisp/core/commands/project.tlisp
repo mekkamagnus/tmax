@@ -26,6 +26,7 @@
 
 (defun project-root-set (root)
   "Manually set the project root to ROOT."
+  (interactive)
   (setq *project-root* root)
   (message (concat "Project root: " root))
   root)
@@ -88,6 +89,7 @@
 
 (defun project-status ()
   "Show project status in the status line."
+  (interactive)
   (if (null *project-root*)
     (message "No project")
     (message (concat "Project: " *project-root*))))

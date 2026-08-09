@@ -108,14 +108,17 @@ list recomputed each call would ping-pong between the two most-recent buffers
 
 (defun switch-to-buffer (name)
   "Switch to the buffer named NAME (alias of buffer-switch)."
+  (interactive)
   (buffer-switch name))
 
 (defun open-file (filename)
   "Open FILENAME (alias of find-file-open)."
+  (interactive)
   (find-file-open filename))
 
 (defun revert-buffer ()
   "Reload the current buffer's file from disk (alias of find-file-open on buffer-filename)."
+  (interactive)
   (let ((fn (buffer-filename)))
     (if fn
       (find-file-open fn)
@@ -216,6 +219,7 @@ yes/no completing-read prompt; \"yes\" saves then kills, \"no\" kills without
 saving. Unmodified buffers are killed immediately. After the kill the current
 buffer switches to the next survivor (or *scratch*). M-x discoverable via this
 docstring. Note: the command-line :bd/:bdelete path is wired in command-line.tlisp."
+  (interactive)
   (let ((target (or name (buffer-current))))
     (unless target
       (message "No buffer to kill")
@@ -250,6 +254,7 @@ docstring. Note: the command-line :bd/:bdelete path is wired in command-line.tli
 The buffer's associated file (buffer-filename) is unchanged — a later
 save-buffer still writes the original path. NEW-NAME must be non-empty and
 not already used by another buffer. M-x discoverable via this docstring."
+  (interactive)
   (let ((renamed (buffer-rename new-name)))
     (message (concat "Renamed to " renamed))
     renamed))

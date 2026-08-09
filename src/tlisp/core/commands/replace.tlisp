@@ -4,6 +4,7 @@
 ;; replace.tlisp — query-replace commands
 (defun query-replace (find replace &optional start end)
   "Start interactive find/replace."
+  (interactive)
   (let ((matches (replace-find-matches find start end)))
     (when (null matches)
       (message "No matches found")
@@ -13,6 +14,7 @@
 
 (defun replace-string (find replace &optional start end)
   "Globally replace every occurrence of FIND with REPLACE in the current buffer, non-interactively (no y/n prompts). Returns the replacement count."
+  (interactive)
   (let ((matches (replace-find-matches find start end)))
     (when (null matches)
       (message "No matches found")
@@ -34,6 +36,7 @@
 
 (defun replace-all ()
   "Replace all remaining matches."
+  (interactive)
   (replace-apply-all)
   (message "All replaced"))
 
