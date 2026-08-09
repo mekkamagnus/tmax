@@ -33,7 +33,7 @@ describe("US-1.11.2: Describe Function", () => {
     interpreter.execute('(defun test-function () "This is a test function with documentation." (editor-quit))');
 
     // Describe the function
-    const result = interpreter.execute('(describe-function "test-function")');
+    const result = interpreter.execute('(describe-function-info "test-function")');
 
     // Should return structured information
     if (typeof result === "object" && "right" in result) {
@@ -66,7 +66,7 @@ describe("US-1.11.2: Describe Function", () => {
 
   test("describe-function for unknown function shows error", async () => {
     const interpreter = editor.getInterpreter();
-    const result = interpreter.execute('(describe-function "unknown-function")');
+    const result = interpreter.execute('(describe-function-info "unknown-function")');
 
     // Should return nil or error indicator
     if (typeof result === "object" && "right" in result) {
@@ -81,7 +81,7 @@ describe("US-1.11.2: Describe Function", () => {
     interpreter.execute('(defun no-doc-function () (editor-quit))');
 
     // Describe the function
-    const result = interpreter.execute('(describe-function "no-doc-function")');
+    const result = interpreter.execute('(describe-function-info "no-doc-function")');
 
     if (typeof result === "object" && "right" in result) {
       expect(result.right.type).toBe("list");
@@ -107,7 +107,7 @@ describe("US-1.11.2: Describe Function", () => {
     // Define a function with parameters (single line)
     interpreter.execute('(defun greet (name greeting) "Greet someone with a custom greeting." (message greeting name))');
 
-    const result = interpreter.execute('(describe-function "greet")');
+    const result = interpreter.execute('(describe-function-info "greet")');
 
     if (typeof result === "object" && "right" in result) {
       expect(result.right.type).toBe("list");
@@ -146,7 +146,7 @@ describe("US-1.11.2: Describe Function", () => {
     const interpreter = editor.getInterpreter();
 
     // Describe a built-in function
-    const result = interpreter.execute('(describe-function "editor-quit")');
+    const result = interpreter.execute('(describe-function-info "editor-quit")');
 
     if (typeof result === "object" && "right" in result) {
       expect(result.right.type).toBe("list");

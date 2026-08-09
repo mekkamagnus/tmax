@@ -767,8 +767,9 @@ export class Editor {
       });
     }
 
-    // Add describe-function function (US-1.11.2)
-    defineRaw("describe-function", (args) => {
+    // SPEC-110 (#177): renamed from "describe-function" to unshadow the T-Lisp
+    // describe-function (describe.tlisp) which calls describe-to-help → *Help*.
+    defineRaw("describe-function-info", (args) => {
       if (args.length !== 1) {
         throw new Error("describe-function requires exactly 1 argument: function-name");
       }
@@ -1069,6 +1070,79 @@ export class Editor {
     // SPEC-111 (#178): helpgrep-docs-dir — resolve the docs corpus directory.
     defineRaw("helpgrep-docs-dir", () => {
       return createString(`${import.meta.dir}/../../docs/tmax`);
+    });
+
+    // SPEC-110 (#177): symbol-at-point — extract the word at the cursor.
+    defineRaw("symbol-at-point", (args) => {
+      if (args.length !== 0) throw new Error("symbol-at-point requires no arguments");
+      const buf = this.model.currentBuffer;
+      const cursor = this.model.cursorPosition;
+      if (!buf || !cursor) return createString("");
+      const lineResult = buf.getLine(cursor.line);
+      if (!lineResult || (lineResult as any)._tag !== "Right") return createString("");
+      const line = (lineResult as any).right as string;
+      const col = Math.min(cursor.column, line.length);
+      let start = col;
+      while (start > 0 && /[-a-zA-Z0-9]/.test(line[start - 1]!)) start--;
+      let end = col;
+      while (end < line.length && /[-a-zA-Z0-9]/.test(line[end]!)) end++;
+      return createString(line.substring(start, end));
+    });
+
+    // SPEC-110 (#177): help-scan-references — scan buffer for [name] patterns.
+    defineRaw("help-scan-references", (args) => {
+      if (args.length !== 0) throw new Error("help-scan-references requires no arguments");
+      const buf = this.model.currentBuffer;
+      if (!buf) return createList([]);
+      const lcResult = buf.getLineCount();
+      if (!lcResult || (lcResult as any)._tag !== "Right") return createList([]);
+      const lc = (lcResult as any).right as number;
+      const refs: TLispValue[] = [];
+      for (let i = 0; i < lc; i++) {
+        const lineResult = buf.getLine(i);
+        if (!lineResult || (lineResult as any)._tag !== "Right") continue;
+        const line = (lineResult as any).right as string;
+        const re = /\[([a-zA-Z][-a-zA-Z0-9]*)\]/g;
+        let m;
+        while ((m = re.exec(line)) !== null) {
+          refs.push(createList([
+            { type: "number", value: i } as TLispValue,
+            createString(m[1]!),
+          ]));
+        }
+      }
+      return createList(refs);
+    });
+
+    // SPEC-110 (#177): S-TAB (Shift-TAB) normalization. Terminal sends \x1b[Z.
+    // Register it as a recognized key so key-bind works for help-prev-ref.
+    const origNormalizeKey = this.normalizeKey.bind(this);
+    this.normalizeKey = (key: string): string => {
+      if (key === "\x1b[Z" || key === "[Z") return "S-TAB";
+      return origNormalizeKey(key);
+    };
+
+    // SPEC-110 (#177): help-linkify — scan TEXT for known callable names and
+    // wrap them in [name] markers so help-scan-references detects them.
+    defineRaw("help-linkify", (args) => {
+      if (args.length !== 1 || args[0]?.type !== "string") {
+        throw new Error("help-linkify requires 1 string argument: text");
+      }
+      const text = args[0]!.value as string;
+      const names = new Set<string>();
+      for (const [n, value] of this.collectVisibleGlobalBindings()) {
+        if (value.type === "function" && n.length >= 3 && n.includes("-")) names.add(n);
+      }
+      for (const [n, entry] of this.interpreter.moduleRegistry.allExports()) {
+        if (entry.value.type === "function" && n.length >= 3 && n.includes("-")) names.add(n);
+      }
+      let result = text;
+      for (const name of names) {
+        const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+        const re = new RegExp(`\\b${escaped}\\b(?!\\])`, "g");
+        result = result.replace(re, `[${name}]`);
+      }
+      return createString(result);
     });
 
     // Add count prefix API functions (US-1.3.1)

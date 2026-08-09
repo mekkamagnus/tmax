@@ -1,5 +1,5 @@
 (defmodule editor/commands/describe
-  (export describe-to-help describe-function describe-mode describe-variable describe-key describe-function-at-point describe-variable-at-point describe-key-at-point describe-binding-line apropos apropos-documentation apropos-run apropos-documentation-run cheatsheet helpgrep helpgrep-run helpgrep-jump)
+  (export describe-to-help describe-function describe-mode describe-variable describe-key describe-function-at-point describe-variable-at-point describe-key-at-point describe-binding-line apropos apropos-documentation apropos-run apropos-documentation-run cheatsheet helpgrep helpgrep-run helpgrep-jump help-follow help-next-ref help-prev-ref help-back help-forward help-bury help-detect-references help-history-push)
 
 ;; describe.tlisp --- SPEC-083 Emacs-style self-documentation.
 ;;
@@ -22,24 +22,25 @@ so it can be killed and is recreated on the next describe call.")
 
 ;; ── Shared renderer ───────────────────────────────────────────────────
 (defun describe-to-help (title body)
-  "Render TITLE + BODY into the reusable *Help* buffer and switch to it in
-normal mode. Creates *Help* if absent (never duplicates it) and clears it on
-each call so re-runs never accumulate. Returns the buffer name. Used by every
-describe-* command so the surface is consistent."
+  "Render TITLE + BODY into the reusable *Help* buffer in help-mode (read-only,
+cross-references, history). Creates *Help* if absent and clears it on each call.
+Returns the buffer name. Used by every describe-* command so the surface is
+consistent."
   (progn
+    ;; Push current page onto help history before rendering the new one.
+    (help-history-push title body)
     (unless (member help-buffer-name (buffer-list))
       (buffer-create help-buffer-name))
     (buffer-switch help-buffer-name)
-    ;; Clear existing content: delete from (0,0) to the end of the buffer.
-    ;; Skip when there is no real content (> 1 line) — a fresh buffer-create
-    ;; yields a single empty line and deleting it entirely mis-handles the
-    ;; zero-width/last-line delete in the gap buffer (rejects 0-line state).
+    (buffer-set-read-only nil help-buffer-name)
     (let ((lines (buffer-line-count)))
       (when (> lines 1)
         (let ((last-line (- lines 1)))
-          ;; delete-range is bounded by line count; delete the whole span.
           (buffer-delete-range 0 0 last-line 100000))))
     (buffer-insert-at-position 0 0 (concat title "\n\n" body))
+    (buffer-set-read-only t help-buffer-name)
+    (major-mode-set "help")
+    (help-detect-references)
     (cursor-move 0 0)
     (editor-set-mode "normal")
     help-buffer-name))
@@ -62,10 +63,10 @@ Documentation block. Returns nil for an unknown name. M-x discoverable."
               (mod (hashmap-get resolved "module"))
               (full (hashmap-get resolved "documentation")))
           (concat
-            sig "\n\n"
-            doc
+            (help-linkify sig) "\n\n"
+            (help-linkify doc)
             (if (nilp mod) "" (concat "\n\nFrom module: " mod))
-            (if (nilp full) "" (concat "\n\n" full))))))))
+            (if (nilp full) "" (concat "\n\n" (help-linkify full)))))))))
 
 (defun describe-function-candidate (name)
   "Completion candidate wrapping a callable-command-details entry into the
@@ -111,7 +112,7 @@ readable line for *Help*."
         (command (nth 1 binding))
         (doc (nth 3 binding)))
     (concat
-      key "  →  " command
+      key "  →  [" command "]"
       (if (or (nilp doc) (string= doc "No documentation available"))
         ""
         (concat "  ; " doc)))))
@@ -153,7 +154,7 @@ M-x discoverable via this docstring."
           (concat "Variable: " name)
           (concat
             name " is " (format "%s" value) "\n"
-            (if (nilp doc) "" (concat "\nDocumentation:\n" doc))))))))
+            (if (nilp doc) "" (concat "\nDocumentation:\n" (help-linkify doc)))))))))
 
 (defun describe-variable-candidate (name)
   "Completion candidate wrapping a variable name for the describe-variable
@@ -199,8 +200,8 @@ supplied. Bound to SPC h k. M-x discoverable via this docstring."
         (describe-to-help
           (concat "Key: " key)
           (concat
-            key " runs the command " command " (in " mode " mode).\n\n"
-            doc))))))
+            key " runs the command [" command "] (in " mode " mode).\n\n"
+            (help-linkify doc)))))))
 
 (defun describe-key-at-point ()
   "Prompt the user to press a key, then describe that key in *Help*. Sets the
@@ -241,8 +242,8 @@ Accept-function for `apropos' (called by the minibuffer with the typed regex)."
                     (bindings (nth 1 row))
                     (doc (nth 2 row)))
                 (concat
-                  name
-                  (if (or (nilp bindings) (string= bindings "")) "" (concat "  [" bindings "]"))
+                  "[" name "]"
+                  (if (or (nilp bindings) (string= bindings "")) "" (concat "  (" bindings ")"))
                   "\n  " doc)))
             matches))))))
 
@@ -261,7 +262,7 @@ Accept-function for `apropos-documentation'."
               (let ((name (nth 0 row))
                     (type (nth 1 row))
                     (doc (nth 2 row)))
-                (concat name "  (" type ")\n  " doc)))
+                (concat "[" name "]  (" type ")\n  " doc)))
             matches))))))
 
 (defun apropos ()
@@ -273,6 +274,93 @@ Searches NAMES. Bound to SPC h a. M-x discoverable via this docstring."
   "Prompt for a regex and list functions whose docstrings match in *Help*.
 Searches docstring BODIES. M-x discoverable via this docstring."
   (read-from-minibuffer "Apropos doc (regex): " "" "apropos-doc-history" "apropos-documentation-run"))
+
+;; ── Help-mode: cross-references + history (SPEC-110, #177) ───────────
+(defvar help-history (list))
+(defvar help-history-pos 0)
+(defvar help-references (list))
+
+(defun help-detect-references ()
+  "Scan the current *Help* buffer for [name] patterns; store in help-references."
+  (setq help-references (help-scan-references)))
+
+(defun help-history-push (title body)
+  "Push (title body) onto the help navigation history before rendering a new page."
+  (setq help-history (cons (list title body) help-history))
+  (setq help-history-pos 0))
+
+(defun help-history-render (entry)
+  "Render a history entry (title body) into *Help* WITHOUT pushing history."
+  (let ((title (nth 0 entry))
+        (body (nth 1 entry)))
+    (buffer-switch help-buffer-name)
+    (buffer-set-read-only nil help-buffer-name)
+    (let ((lines (buffer-line-count)))
+      (when (> lines 1)
+        (let ((last (- lines 1)))
+          (buffer-delete-range 0 0 last 100000))))
+    (buffer-insert-at-position 0 0 (concat title "\n\n" body))
+    (buffer-set-read-only t help-buffer-name)
+    (major-mode-set "help")
+    (help-detect-references)
+    (cursor-move 0 0)
+    (editor-set-mode "normal")
+    help-buffer-name))
+
+(defun help-follow ()
+  "Describe the symbol at point in *Help* and push onto history.
+Bound to RET in help-mode."
+  (let ((name (symbol-at-point)))
+    (if (or (nilp name) (string= name ""))
+      (message "No symbol at cursor")
+      (describe-function name))))
+
+(defun help-find-next-ref (refs cur-line)
+  (if (nilp refs) nil
+    (if (> (nth 0 (car refs)) cur-line) (car refs)
+      (help-find-next-ref (cdr refs) cur-line))))
+
+(defun help-find-less-ref (refs cur-line)
+  (if (nilp refs) nil
+    (if (< (nth 0 (car refs)) cur-line) (car refs)
+      (help-find-less-ref (cdr refs) cur-line))))
+
+(defun help-next-ref ()
+  "Move cursor to the next [name] reference in *Help*. Bound to TAB."
+  (let ((ref (help-find-next-ref help-references (cursor-line))))
+    ;; col 1 lands inside the [ brackets so symbol-at-point can read the name.
+    (if ref (cursor-move (nth 0 ref) 1) (message "No next reference"))))
+
+(defun help-prev-ref ()
+  "Move cursor to the previous [name] reference. Bound to S-TAB."
+  (let ((ref (help-find-less-ref (reverse help-references) (cursor-line))))
+    (if ref (cursor-move (nth 0 ref) 1) (message "No previous reference"))))
+
+(defun help-back ()
+  "Navigate help history backward (previous page). Bound to l."
+  (let ((new-pos (+ help-history-pos 1)))
+    (when (< new-pos (length help-history))
+      (setq help-history-pos new-pos)
+      (help-history-render (nth help-history-pos help-history)))))
+
+(defun help-forward ()
+  "Navigate help history forward (next page). Bound to r."
+  (when (> help-history-pos 0)
+    (setq help-history-pos (- help-history-pos 1))
+    (help-history-render (nth help-history-pos help-history))))
+
+(defun help-bury ()
+  "Bury the *Help* buffer. Bound to q in help-mode."
+  (funcall "bury-buffer"))
+
+(major-mode-register "help" '() nil)
+(major-mode-doc "help" "Read-only navigation mode for *Help* — RET follows references, TAB cycles, l/r history, q buries")
+(key-bind "RET" "(help-follow)" "normal" "help")
+(key-bind "TAB" "(help-next-ref)" "normal" "help")
+(key-bind "l" "(help-back)" "normal" "help")
+(key-bind "r" "(help-forward)" "normal" "help")
+(key-bind "q" "(help-bury)" "normal" "help")
+(key-bind "S-TAB" "(help-prev-ref)" "normal" "help")
 
 ;; ── Helpgrep: full-text search over the manual (SPEC-111, #178) ──────
 (defun helpgrep-run (pattern)
