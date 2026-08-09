@@ -13,6 +13,10 @@
 import { describe, test, expect } from "bun:test";
 import { runBufferBench } from "../../bench/micro-buffer.ts";
 import { runTLispBench } from "../../bench/micro-tlisp.ts";
+import { runMinibufferBench } from "../../bench/micro-minibuffer.ts";
+import { runRenderBench } from "../../bench/micro-render.ts";
+import { runKeynormBench } from "../../bench/micro-keynorm.ts";
+import { runStartupBench } from "../../bench/micro-startup.ts";
 import {
   assertFloor,
   formatResults,
@@ -100,5 +104,34 @@ describe("bench-harness microbenchmarks return well-formed results", () => {
     expect(isFiniteNonNegative(r.wallMs)).toBe(true);
     expect(isFinitePositive(r.floorMs)).toBe(true);
     expect(typeof r.passed).toBe("boolean");
+  });
+});
+
+describe("CHORE-84 — new microbenchmarks return well-formed results", () => {
+  // `render` is run live at all 3 sizes (it is fast — ~150ms for N=500 frames)
+  // to prove wiring + a well-formed BenchResult. Timing is NOT asserted — it
+  // varies by machine and belongs in the harness floors.
+  // `minibuffer` / `keynorm` / `startup` are heavy (the candidate-build is
+  // ~280ms/call; keynorm ~22ms/key; startup runs 5 full startEditor cycles),
+  // so like `runE2EBench` they are checked for importability here; their live
+  // paths are covered by `bun run bench minibuffer|keynorm|startup`.
+
+  test("runRenderBench returns a well-formed BenchResult per size", async () => {
+    for (const size of ["small", "medium", "large"] as const) {
+      const r = await runRenderBench(size);
+      expect(r.name).toBe("render");
+      expect(r.size).toBe(size);
+      expect(isFinitePositive(r.opsPerSec)).toBe(true);
+      expect(isFinitePositive(r.bytesPerOp)).toBe(true); // rendered frame byte total
+      expect(isFiniteNonNegative(r.wallMs)).toBe(true);
+      expect(isFinitePositive(r.floorMs)).toBe(true);
+      expect(typeof r.passed).toBe("boolean");
+    }
+  }, 30_000);
+
+  test("runMinibufferBench / runKeynormBench / runStartupBench are wired (importable)", () => {
+    expect(typeof runMinibufferBench).toBe("function");
+    expect(typeof runKeynormBench).toBe("function");
+    expect(typeof runStartupBench).toBe("function");
   });
 });

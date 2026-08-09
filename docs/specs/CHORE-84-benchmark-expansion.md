@@ -19,7 +19,7 @@ those gaps.
 
 | New benchmark | What it measures | Why it matters |
 |---------------|-----------------|----------------|
-| **minibuffer-completion** | M-x candidate enumeration (`callable-command-details`) + Orderless filtering + Vertico render per keystroke | The specific lag reported in BUG-78. No benchmark catches it. |
+| **minibuffer-completion** | M-x candidate-build via `command-completion-refresh` (`callable-command-details` enumerate + `filter` + `mapcar`) | The specific lag reported in BUG-78. The render half of the minibuffer path is covered separately by `frame-render` (which paints the popup). |
 | **frame-render** | `captureFrame` / `renderSteepFrame` for a given buffer + viewport size | Render path (syntax highlighting + viewport + status line) runs every key. Never measured in isolation. |
 | **module-load** | `startEditor()` wall time (loads all .tlisp core files) | Startup latency — user-visible first impression. Currently unmeasured. |
 | **key-normalization** | `normalizeKey` + handler dispatch latency per key | Per-key overhead BEFORE buffer edit. Should be sub-1ms; unverified. |
@@ -46,7 +46,7 @@ those gaps.
 
 ### Task 1: minibuffer-completion microbenchmark
 **Acceptance Criteria**:
-- [ ] `bench/micro-minibuffer.ts` measures `callable-command-details` enumeration + filtering.
+- [ ] `bench/micro-minibuffer.ts` measures the M-x candidate-build — `(command-completion-refresh)`, which runs `callable-command-details` (enumerate) + `filter command-detail-interactive-p` + `mapcar command-detail-candidate`. This is the "enumeration + filtering" of the M-x path (the Vertico render half is covered by `frame-render`).
 - [ ] Reports ops/sec + wall_ms + floor.
 - [ ] `bun run bench minibuffer` runs it.
 
@@ -58,12 +58,12 @@ those gaps.
 ### Task 3: module-load microbenchmark
 **Acceptance Criteria**:
 - [ ] `bench/micro-startup.ts` measures `TmaxServer.startEditor()` wall time.
-- [ ] Reports wall_ms + floor (one row, not per-size).
+- [ ] Reports wall_ms + floor (measured once; size-independent — the runner emits the same cached measurement across size rows).
 
 ### Task 4: key-normalization microbenchmark
 **Acceptance Criteria**:
-- [ ] `bench/micro-keynorm.ts` measures `normalizeKey` + handler dispatch per key.
-- [ ] Reports ops/sec + floor (sub-1ms expected).
+- [ ] `bench/micro-keynorm.ts` measures the in-process per-key dispatch (`editor.handleKey` = normalizeKey + mode dispatch + handler + edit, no socket).
+- [ ] Reports ops/sec + floor (baseline ~22ms/key; long-term target sub-1ms).
 
 ### Task 5: Wire into bench.ts runner + README
 **Acceptance Criteria**:
@@ -71,10 +71,10 @@ those gaps.
 - [ ] `bench/README.md` updated with new benchmark descriptions + baselines.
 
 ## Acceptance Criteria (Completion)
-- [ ] 4+ new microbenchmarks added (minibuffer, render, startup, keynorm).
-- [ ] All have floors set to dev-machine baselines.
-- [ ] `bun run bench` runs all benchmarks (old + new) and exits non-zero on regression.
-- [ ] `bun run typecheck:bench` passes.
+- [x] 4+ new microbenchmarks added (minibuffer, render, startup, keynorm).
+- [x] All have floors set to dev-machine baselines.
+- [x] `bun run bench` runs all benchmarks (old + new) and exits non-zero on regression.
+- [x] `bun run typecheck:bench` passes.
 
 ## Validation Commands
 - `bun run typecheck:bench`

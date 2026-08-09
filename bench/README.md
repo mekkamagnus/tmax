@@ -15,20 +15,44 @@ and the subsequent Tier 1b/2/3 CHOREs.
 | `buffer` | `TextBufferImpl.insert` / `delete` throughput on a fixture | RFC-019 Tier 1.1–1.3 (incremental lines, offset cache, array clone) |
 | `tlisp`  | `TLispInterpreterImpl.execute` evals/sec on a representative small command | RFC-019 Tier 2.3 (parse cache), Tier 2.6 (tokenizer regexes) |
 | `e2e`    | End-to-end keystroke throughput through a live daemon over the JSON-RPC socket | Full keystroke path: RPC serialize → buffer edit → viewport re-tokenize → repaint |
+| `minibuffer` | `command-completion-refresh` (the M-x candidate-build: `callable-command-details` enumerate + `filter` + `mapcar`) builds/sec | BUG-78 / SPEC-115 — the per-M-x candidate-build; the baseline per-session caching (#182) must beat. The Vertico render half is covered by `render`. |
+| `render` | `captureFrame` (ANSI render: syntax spans + viewport + status line + tab bar + minibuffer + which-key) frames/sec | The per-keystroke repaint cost shared by Steep + TUI (~half the per-key cost) |
+| `startup` | `startEditor()` wall time — loads every core `.tlisp` file + registers primitives | User-visible first-impression latency (measured once; size ignored) |
+| `keynorm` | `editor.handleKey` in-process keys/sec (normalize + dispatch + edit, no socket) | The "dragging on every keystroke" cost, isolated from daemon overhead |
 
 The `e2e` microbenchmark is the most RFC-019-sensitive: it exercises the entire
 per-key path and will move the most when Tier 1 buffer fixes land. The
 isolated `buffer` and `tlisp` microbenchmarks exist to **attribute** that
-movement to specific subsystems.
+movement to specific subsystems. The `minibuffer` / `render` / `startup` /
+`keynorm` microbenchmarks (CHORE-84) close the attribution gap for the M-x
+completion, render, startup, and per-key-dispatch surfaces — the paths most
+relevant to the user-reported keystroke lag (BUG-78).
+
+### Baselines (dev machine, CHORE-84)
+
+Floors are sized to these baselines (~50–70% headroom for CI / cold-JIT
+variance). The harness exits non-zero if any row exceeds its floor.
+
+| Name | small | medium | large | Notes |
+|------|-------|--------|-------|-------|
+| `minibuffer` | ~14s (N=50, ~280ms/build) | size-independent | size-independent | full candidate-build: enumerate + filter + mapcar (the enumeration alone is ~15ms; the T-Lisp filter/mapcar dominates) |
+| `render` | ~150ms | ~90ms | ~220ms | N=500 frames, 80×24 |
+| `startup` | ~1490ms | (measured once) | (measured once) | avg of 5 startEditor cycles |
+| `keynorm` | ~6.6s (N=300, ~22ms/key) | ~7.7s | ~7.5s | the lag to eliminate |
+
+`keynorm`'s ~22ms/key is well above the long-term sub-1ms target — the floor
+is set at current reality and will FAIL-pass-forward as per-key work is removed.
 
 ## Running
 
 ```bash
-bun run bench                  # all 3 microbenchmarks × 3 sizes (9 rows)
+bun run bench                  # all 7 microbenchmarks × 3 sizes
 bun run bench:all              # same as above
-bun run bench all medium       # all 3 microbenchmarks, medium size only
+bun run bench all medium       # all microbenchmarks, medium size only
 bun run bench buffer medium    # single row
-bun run bench tlisp            # T-Lisp eval across all sizes
+bun run bench minibuffer       # M-x candidate-table enumeration
+bun run bench render large     # frame render path, large fixture
+bun run bench startup          # startEditor() wall time (measured once)
 bun run bench --help           # usage
 ```
 
