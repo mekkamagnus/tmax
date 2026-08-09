@@ -16,7 +16,7 @@ function createState() {
 
 describe("Fikra Phase 2 — T-Lisp Modules", () => {
   test("fikra-mode.tlisp exists and contains key bindings", () => {
-    const content = readFileSync(join(process.cwd(), "src/tlisp/core/fikra/fikra-mode.tlisp"), "utf-8");
+    const content = readFileSync(join(process.cwd(), "src/tlisp/core/fikra/mode.tlisp"), "utf-8");
     expect(content).toContain('SPC a a');
     expect(content).toContain('fikra-chat-open');
     expect(content).toContain('define-minor-mode "fikra"');
@@ -24,7 +24,7 @@ describe("Fikra Phase 2 — T-Lisp Modules", () => {
   });
 
   test("fikra-adapter.tlisp defines backend registry", () => {
-    const content = readFileSync(join(process.cwd(), "src/tlisp/core/fikra/fikra-adapter.tlisp"), "utf-8");
+    const content = readFileSync(join(process.cwd(), "src/tlisp/core/fikra/adapter.tlisp"), "utf-8");
     expect(content).toContain("fikra-register-backend");
     expect(content).toContain("fikra-set-backend");
     expect(content).toContain("fikra-backend-call");
@@ -32,7 +32,7 @@ describe("Fikra Phase 2 — T-Lisp Modules", () => {
   });
 
   test("fikra-backend-claude.tlisp defines adapter protocol", () => {
-    const content = readFileSync(join(process.cwd(), "src/tlisp/core/fikra/fikra-backend-claude.tlisp"), "utf-8");
+    const content = readFileSync(join(process.cwd(), "src/tlisp/core/fikra/backend-claude.tlisp"), "utf-8");
     expect(content).toContain("fikra-backend-claude-available-p");
     expect(content).toContain("fikra-backend-claude-chat");
     expect(content).toContain("fikra-backend-claude-abort");
@@ -41,7 +41,7 @@ describe("Fikra Phase 2 — T-Lisp Modules", () => {
   });
 
   test("fikra-chat.tlisp defines chat buffer management", () => {
-    const content = readFileSync(join(process.cwd(), "src/tlisp/core/fikra/fikra-chat.tlisp"), "utf-8");
+    const content = readFileSync(join(process.cwd(), "src/tlisp/core/fikra/chat.tlisp"), "utf-8");
     expect(content).toContain("fikra-chat-open");
     expect(content).toContain("fikra-token-insert");
     expect(content).toContain("fikra-turn-send");
@@ -50,7 +50,7 @@ describe("Fikra Phase 2 — T-Lisp Modules", () => {
   });
 
   test("fikra-capture.tlisp defines capture buffer lifecycle", () => {
-    const content = readFileSync(join(process.cwd(), "src/tlisp/core/fikra/fikra-capture.tlisp"), "utf-8");
+    const content = readFileSync(join(process.cwd(), "src/tlisp/core/fikra/capture.tlisp"), "utf-8");
     expect(content).toContain("fikra-capture");
     expect(content).toContain("fikra-capture-submit");
     expect(content).toContain("fikra-capture-cancel");
@@ -59,7 +59,7 @@ describe("Fikra Phase 2 — T-Lisp Modules", () => {
   });
 
   test("fikra-context.tlisp defines context extraction", () => {
-    const content = readFileSync(join(process.cwd(), "src/tlisp/core/fikra/fikra-context.tlisp"), "utf-8");
+    const content = readFileSync(join(process.cwd(), "src/tlisp/core/fikra/context.tlisp"), "utf-8");
     expect(content).toContain("fikra-build-context");
     expect(content).toContain("buffer-filename");
     expect(content).toContain("visual-get-selection");
@@ -67,7 +67,7 @@ describe("Fikra Phase 2 — T-Lisp Modules", () => {
   });
 
   test("fikra-workflow.tlisp defines all workflow functions", () => {
-    const content = readFileSync(join(process.cwd(), "src/tlisp/core/fikra/fikra-workflow.tlisp"), "utf-8");
+    const content = readFileSync(join(process.cwd(), "src/tlisp/core/fikra/workflow.tlisp"), "utf-8");
     expect(content).toContain("fikra-explain");
     expect(content).toContain("fikra-fix");
     expect(content).toContain("fikra-refactor");
@@ -78,13 +78,13 @@ describe("Fikra Phase 2 — T-Lisp Modules", () => {
 
   test("all 7 fikra module files exist", () => {
     const files = [
-      "fikra-mode.tlisp",
-      "fikra-adapter.tlisp",
-      "fikra-backend-claude.tlisp",
-      "fikra-chat.tlisp",
-      "fikra-capture.tlisp",
-      "fikra-context.tlisp",
-      "fikra-workflow.tlisp",
+      "mode.tlisp",
+      "adapter.tlisp",
+      "backend-claude.tlisp",
+      "chat.tlisp",
+      "capture.tlisp",
+      "context.tlisp",
+      "workflow.tlisp",
     ];
     for (const f of files) {
       const content = readFileSync(join(process.cwd(), "src/tlisp/core/fikra", f), "utf-8");
