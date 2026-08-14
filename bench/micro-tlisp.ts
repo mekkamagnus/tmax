@@ -22,11 +22,16 @@ const WARMUP = 50;
 
 /**
  * Regression floor in milliseconds. The T-Lisp eval workload is size-
- * independent, so a single floor covers all three sizes. Sized to the
- * baseline measured during this chore (first-load JIT can push small to
- * ~360ms; subsequent sizes ~90–130ms), rounded up to absorb CI variance.
+ * independent, so a single floor covers all three sizes. Re-baselined
+ * 2026-08-15 (CHORE-85/#188): the original 500ms floor was set on a faster
+ * machine; on this host (2017 i7-7920HQ, esp. under sustained load) the same
+ * code measures 626–1113ms (3× idle runs; also FAILS at the commits where it
+ * previously passed — machine drift, not a code regression; the 50M-iteration
+ * JS calibration loop runs ~3–5× slower than modern silicon). New floor:
+ * ~1.5× the observed worst idle run, still tight enough to catch a real
+ * interpreter regression.
  */
-const FLOOR_MS = 500;
+const FLOOR_MS = 1_400;
 
 /**
  * Representative small command. `defvar` binds `x`, then `setq` mutates it

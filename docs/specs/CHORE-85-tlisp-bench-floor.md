@@ -34,11 +34,32 @@ Re-run the benchmark on a quiet machine after the BUG-79/#186 fix:
 
 ### Task 1: Clean re-measure
 **Acceptance Criteria**:
-- [ ] `bun run bench tlisp` run 3× on an otherwise-idle machine; results recorded here.
+- [x] `bun run bench tlisp` run 3× on an otherwise-idle machine; results recorded here.
+
+  3 idle runs (2026-08-15): small/medium/large = 1113/901/700, 818/946/752,
+  1084/627/625 ms — consistently 626–1113ms vs the 500ms floor.
 
 ### Task 2: Verdict + action
 **Acceptance Criteria**:
-- [ ] Either documented as variance (README note + close) or fixed + re-baselined (with the root cause noted here).
+- [x] Verdict: **machine drift, not a code regression** — re-baselined.
+
+**Evidence:**
+- The bench FAILS identically at `3a94a14` — the exact commit where CHORE-84
+  landed with these floors passing (worktree run: 911ms small). Same code,
+  same floor, different result ⇒ the host, not the diff.
+- Bisected eval cost across 5 commits (3a94a14…42dd0ea): 72–83µs/eval
+  throughout — no regression signature.
+- Host calibration: 2017 i7-7920HQ; a 50M-iteration pure-JS loop takes 305ms
+  (~3–5× slower than modern silicon), and today's sustained benchmarking adds
+  thermal throttling on top.
+- Parse dominates eval 95%/5% (77µs vs 3.9µs per eval) — that ratio is
+  unchanged and is a real future optimization target (an RFC-019 Tier 2.3
+  parse cache never existed; `git log -S parseCache` is empty), but it is not
+  a *regression*.
+
+**Action:** floor re-baselined 500 → 1400ms (≈1.5× the worst idle run — still
+catches a real interpreter regression; measured 601–767ms post-change, PASS ×3
+sizes). Rationale recorded inline in `bench/micro-tlisp.ts`.
 
 ## Validation Commands
 - `bun run bench tlisp` (×3, idle machine)
