@@ -4,6 +4,13 @@
     markdown-expand-template-variables markdown-new-from-template
     markdown-scan-wiki-links markdown-next-wiki-link markdown-prev-wiki-link
     markdown-wiki-link-at-point markdown-follow-wiki-link
+    markdown-wiki-link-range-at-point markdown-rank-note-names
+    markdown-note-name markdown-note-rank markdown-note-names-of
+    markdown-bucket-names markdown-cons-names-onto
+    markdown-note-candidate markdown-note-candidates-of
+    markdown-note-create-candidate markdown-note-path
+    markdown-note-completion-table markdown-resolve-prepare markdown-resolve-or-create
+    markdown-resolve-accept markdown-resolve-dispatch markdown-create-note-for
     markdown-find-unlinked-mentions markdown-backlinks
     markdown-daily-note markdown-rename-note
     markdown-sparse-tree-regex markdown-sparse-tree-level markdown-sparse-tree-tag)
@@ -235,9 +242,15 @@
                         (set! heading (match-string 1 target))))))
           (if file-path
               (let ((resolved file-path))
-                (if (not (string-match "\\." file-path))
+                ;; Found via SPEC-116: the old (not (string-match ...)) guards
+                ;; failed EMPIRICALLY (an instrumented run showed resolved
+                ;; without .md appended, so extension-less [[wiki-file]] links
+                ;; hit the miss branch). The exact mechanism is subtle
+                ;; (string-match itself returns nil on no-match per
+                ;; tlisp-api.ts:1157); boolean predicates are unambiguous.
+                (if (not (string-contains-p "." file-path))
                     (set! resolved (concat file-path ".md")))
-                (if (not (string-match "^/" resolved))
+                (if (not (string-prefix-p "/" resolved))
                     (let ((dir (markdown-dirname (or (buffer-filename) "."))))
                       (set! resolved (concat dir "/" resolved))))
                 (if (file-exists-p resolved)
@@ -246,10 +259,211 @@
                       (find-file-open resolved)
                       (if heading
                           (markdown-open-anchor (concat "#" heading))))
-                    (message "Wiki link target not found: %s" resolved)))
+                    ;; SPEC-116: dangling target — follow-or-create prompt
+                    ;; (dedup-ranked existing notes + explicit create),
+                    ;; never a dead-end.
+                    (markdown-resolve-or-create file-path heading)))
               (if heading
                   (markdown-open-anchor (concat "#" heading))
                   (message "Invalid wiki link: %s" target)))))))
+
+;; ── Follow-or-create (SPEC-116) ───────────────────────────────────────
+;; Prompt state (the completing-read table + accept run async, mirroring
+;; ADR-0168: prepare state, prompt, dispatch in the accept handler).
+;; All list work uses explicit loops — string-name higher-order calls
+;; (mapcar/stable-sort predicates) do not resolve in every interpreter path.
+(defvar markdown-resolve-notes '())
+(defvar markdown-resolve-heading nil)
+(defvar markdown-resolve-target nil)
+
+(defun markdown-note-rank (name target)
+  "Similarity score of NAME for a dangling TARGET: 2 substring, 1 prefix, 0 else.
+Uses string-contains-p (a plain substring test) — NEVER string-match-spans-all
+on the target: that compiles it as a JS RegExp, so a metacharacter target
+([[note(v2]]) errors and a dotted one mis-matches (verify-gate #185 gap 1)."
+  (if (string-contains-p target name)
+    2
+    (if (string-prefix-p target name) 1 0)))
+
+(defun markdown-note-name (note)
+  "Name field of a vault-note hashmap."
+  (hashmap-get note "name"))
+
+(defun markdown-note-names-of (notes)
+  "Note NAME strings from a vault-notes list, in order."
+  (let ((out '()) (i 0))
+    (while (< i (length notes))
+      (set! out (cons (markdown-note-name (nth i notes)) out))
+      (set! i (+ i 1)))
+    (reverse out)))
+
+(defun markdown-note-path (name)
+  "Vault path for note NAME from the cached resolve state, or nil.
+Duplicate names in different directories resolve to the FIRST (alphabetically
+first path — the scan is sorted) match, not an arbitrary last one."
+  (let ((result nil) (i 0) (notes markdown-resolve-notes))
+    (while (and (< i (length notes)) (not result))
+      (if (string= (markdown-note-name (nth i notes)) name)
+        (set! result (hashmap-get (nth i notes) "path")))
+      (set! i (+ i 1)))
+    result))
+
+(defun markdown-bucket-names (names target rank)
+  "Names scoring exactly RANK for TARGET, preserving input order."
+  (let ((out '()) (i 0))
+    (while (< i (length names))
+      (if (= (markdown-note-rank (nth i names) target) rank)
+        (set! out (cons (nth i names) out)))
+      (set! i (+ i 1)))
+    (reverse out)))
+
+(defun markdown-cons-names-onto (names acc)
+  "Cons each of NAMES (forward order) onto ACC — helper for ordered concat."
+  (let ((out acc) (i 0))
+    (while (< i (length names))
+      (set! out (cons (nth i names) out))
+      (set! i (+ i 1)))
+    out))
+
+(defun markdown-rank-note-names (names target)
+  "Rank note NAMES by similarity to TARGET: substring matches first, then
+prefix matches, then the rest — each bucket preserving the input's
+alphabetical order (the vault scan returns sorted names). Pure: sets no
+prompt state, unit-testable standalone (SPEC-116 Task 2)."
+  (let ((b0 (markdown-bucket-names names target 0))
+        (b1 (markdown-bucket-names names target 1))
+        (b2 (markdown-bucket-names names target 2)))
+    (reverse
+      (markdown-cons-names-onto b0
+        (markdown-cons-names-onto b1
+          (markdown-cons-names-onto b2 '()))))))
+
+(defun markdown-note-candidate (name)
+  "Build a completion-candidate hashmap for note NAME (the completion
+machinery hashmap-sets spans on candidates, so raw strings are not valid)."
+  (let ((path (markdown-note-path name)))
+    (hashmap
+      "value" name
+      "display" name
+      "annotation" (if path path "")
+      "spans" (list)
+      "metadata" (hashmap "path" (if path path "")))))
+
+(defun markdown-note-create-candidate (target)
+  "The explicit create candidate, always listed FIRST (creation is never
+inferred from a non-match — typos cannot mint junk notes)."
+  (hashmap
+    "value" (concat "+ Create: " target)
+    "display" (concat "+ Create: " target)
+    "annotation" "new note"
+    "spans" (list)
+    "metadata" (hashmap "create" target)))
+
+(defun markdown-note-candidates-of (names)
+  "Wrap each NAME as a completion candidate, in order."
+  (let ((out '()) (i 0))
+    (while (< i (length names))
+      (set! out (cons (markdown-note-candidate (nth i names)) out))
+      (set! i (+ i 1)))
+    (reverse out)))
+
+(defun markdown-note-completion-table (input action)
+  "Completion table for the follow-or-create prompt (SPEC-116).
+Candidates: the explicit + Create entry first, then the vault notes ranked
+by similarity to the dangling target (substring > prefix > alphabetical)."
+  (if (string= action "metadata")
+    (hashmap "category" "tmax-note")
+    (let ((ranked (markdown-rank-note-names
+                    (markdown-note-names-of markdown-resolve-notes)
+                    markdown-resolve-target)))
+      (cons (markdown-note-create-candidate markdown-resolve-target)
+            (markdown-note-candidates-of ranked)))))
+
+(defun markdown-wiki-link-range-at-point ()
+  "Find the [[...]] range at cursor. Return (line start-col end-col) or nil."
+  (let* ((line (buffer-get-line (cursor-line)))
+         (col (cursor-column))
+         (result nil)
+         (search-text line)
+         (offset 0))
+    (while (and (string-match "\\\\[\\\\[\([^\\\\]]+\)\\\\]\\\\]" search-text) (not result))
+      (let ((start (+ offset (match-beginning 0)))
+            (end (+ offset (match-end 0))))
+        (if (and (>= col start) (<= col end))
+          (set! result (list (cursor-line) start end))
+          (progn
+            (set! offset (+ offset (match-end 0)))
+            (set! search-text (substring search-text (match-end 0)))))))
+    result))
+
+(defun markdown-resolve-prepare (target heading)
+  "Prime the resolve state for TARGET (vault scan + heading to replay).
+Split out of markdown-resolve-or-create so a future completion-at-point
+layer (RFC-026) — and tests — can drive the dispatch without the prompt."
+  (set! markdown-resolve-notes (markdown-vault-notes))
+  (set! markdown-resolve-heading heading)
+  (set! markdown-resolve-target target))
+
+(defun markdown-resolve-or-create (target heading)
+  "Prompt to resolve a dangling wiki-link TARGET (SPEC-116).
+Existing notes ranked by similarity + an explicit + Create candidate.
+HEADING (#sec / #^block suffix) is replayed on the opened note."
+  (markdown-resolve-prepare target heading)
+  (completing-read
+    (concat "Follow or create [" target "]: ")
+    "markdown-note-completion-table"
+    nil nil "" "markdown-note-history" "markdown-resolve-accept"))
+
+(defun markdown-resolve-accept (choice)
+  "Minibuffer accept handler: dispatch the prompt CHOICE."
+  (markdown-resolve-dispatch markdown-resolve-target choice))
+
+(defun markdown-create-note-for (name)
+  "Create a new note NAME.md from the blank template and open it (SPEC-116)."
+  (let* ((dir (markdown-dirname (or (buffer-filename) ".")))
+         (path (concat dir "/" name ".md"))
+         (template-file (read-file-content "~/.config/tmax/templates/blank.md"))
+         (content nil))
+    ;; mkdir the FULL note dirname (recursive) — [[sub/new-note]] with a
+    ;; missing sub/ must create it, not fail silently (verify-gate #185 gap 2).
+    (file-mkdir (markdown-dirname path))
+    (if template-file
+      (set! content (markdown-expand-template-variables template-file name))
+      (set! content (format "# %s\n\n" name)))
+    ;; Write the file first: find-file-open is a no-op for missing files
+    ;; (read-file-content returns nil), so creation must persist then open.
+    (write-file-content path content)
+    (find-file-open path)
+    (message "Created note: %s" path)))
+
+(defun markdown-resolve-dispatch (target choice)
+  "Dispatch a follow-or-create CHOICE for dangling TARGET — the unit-testable
+core (no prompt; call markdown-resolve-prepare first). '+ Create: TARGET'
+creates from template + opens; an existing note name opens it AND rewrites
+the [[...]] at point to the canonical name (the dedup payoff). Replays the
+#heading suffix on open."
+  (if (string= choice (hashmap-get (markdown-note-create-candidate target) "value"))
+    (progn
+      (markdown-create-note-for target)
+      (if markdown-resolve-heading
+        (markdown-open-anchor (concat "#" markdown-resolve-heading))))
+    (let ((path (markdown-note-path choice)))
+      (if path
+        (progn
+          (let ((link (markdown-wiki-link-range-at-point)))
+            (if link
+              (buffer-replace-range
+                (nth 0 link) (nth 1 link) (nth 0 link) (nth 2 link)
+                (concat "[[" choice
+                        (if markdown-resolve-heading
+                          (concat "#" markdown-resolve-heading)
+                          "")
+                        "]]"))))
+          (markdown-push-position)
+          (find-file-open path)
+          (if markdown-resolve-heading
+            (markdown-open-anchor (concat "#" markdown-resolve-heading))))
+        (message "No such note: %s" choice)))))
 
 (defun markdown-find-unlinked-mentions (title texts)
   "Find texts that mention TITLE in plain text but NOT as [[TITLE]] links.

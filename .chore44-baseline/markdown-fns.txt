@@ -1,8 +1,11 @@
 markdown-align-table
 markdown-anchor-slug
 markdown-backlinks
+markdown-bucket-names
 markdown-clear-results
+markdown-cons-names-onto
 markdown-copy-subtree
+markdown-create-note-for
 markdown-current-subtree-range
 markdown-daily-note
 markdown-delete-line
@@ -52,6 +55,14 @@ markdown-next-heading
 markdown-next-same-level-heading
 markdown-next-tag
 markdown-next-wiki-link
+markdown-note-candidate
+markdown-note-candidates-of
+markdown-note-completion-table
+markdown-note-create-candidate
+markdown-note-name
+markdown-note-names-of
+markdown-note-path
+markdown-note-rank
 markdown-open-anchor
 markdown-open-file-link
 markdown-prev-footnote
@@ -63,10 +74,15 @@ markdown-preview
 markdown-promote-heading
 markdown-promote-subtree
 markdown-push-position
+markdown-rank-note-names
 markdown-rename-note
 markdown-renumber-list
 markdown-replace-line
+markdown-resolve-accept
 markdown-resolve-cell-refs
+markdown-resolve-dispatch
+markdown-resolve-or-create
+markdown-resolve-prepare
 markdown-scan-tags
 markdown-scan-wiki-links
 markdown-shell-quote
@@ -94,3 +110,4 @@ markdown-toggle-strikethrough
 markdown-up-heading
 markdown-visibility-cycle
 markdown-wiki-link-at-point
+markdown-wiki-link-range-at-point

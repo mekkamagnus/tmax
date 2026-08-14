@@ -232,6 +232,7 @@ make-backup-file
 make-process
 make-string
 make-vector
+markdown-vault-notes
 match-beginning
 match-bracket-position
 match-end

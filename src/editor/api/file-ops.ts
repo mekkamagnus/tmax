@@ -413,5 +413,54 @@ export function createFileOps(
     }
   });
 
+  /**
+   * markdown-vault-notes - list note candidates for wiki-link completion (SPEC-116)
+   * Usage: (markdown-vault-notes)
+   *
+   * Recursively scans the current buffer's directory tree for `.md` files and
+   * returns a list of {name, path} hashmaps (name = basename minus `.md`),
+   * sorted by name. Returns an empty list when the buffer has no associated
+   * file (unsaved buffer). Single source of note candidates for the
+   * follow-or-create prompt, backlinks tooling, and a future capf layer
+   * (RFC-026). On-demand per prompt — no index cache (RFC scope).
+   */
+  api.set("markdown-vault-notes", (): Either<AppError, TLispValue> => {
+    const model = access?.getModel();
+    const filename = model?.currentFilename;
+    if (!filename) {
+      return Either.right(createList([]));
+    }
+    const rootDir = filename.slice(0, Math.max(0, filename.lastIndexOf("/"))) || ".";
+    const notes: { name: string; path: string }[] = [];
+    const walk = (dir: string): void => {
+      let entries: fs.Dirent[];
+      try {
+        entries = fs.readdirSync(dir, { withFileTypes: true });
+      } catch {
+        return; // unreadable subdir: skip, not fail
+      }
+      for (const entry of entries) {
+        const entryPath = dir === "." ? entry.name : `${dir}/${entry.name}`;
+        if (entry.isDirectory()) {
+          // Real-world footgun (verify-gate #185): a README.md at a repo root
+          // would otherwise walk .git/ and node_modules/ — thousands of
+          // unrelated candidates per prompt, synchronously.
+          if (entry.name === ".git" || entry.name === "node_modules") continue;
+          walk(entryPath);
+        } else if (entry.isFile() && entry.name.endsWith(".md")) {
+          notes.push({ name: entry.name.slice(0, -3), path: entryPath });
+        }
+      }
+    };
+    walk(rootDir);
+    notes.sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
+    return Either.right(createList(
+      notes.map((note) => createHashmap([
+        ["name", createString(note.name)],
+        ["path", createString(note.path)],
+      ])),
+    ));
+  });
+
   return api;
 }

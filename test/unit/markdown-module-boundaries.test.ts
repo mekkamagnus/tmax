@@ -70,7 +70,7 @@ describe("CHORE-44 Change 11 — Markdown module boundaries", () => {
       .split("\n").map(l => l.trim()).filter(l => l.length > 0 && !l.startsWith("#")).sort();
 
     expect(publicFns).toEqual(expected);
-    expect(publicFns.length).toBe(96);
+    expect(publicFns.length).toBe(113);
   });
 
   test("AC11.2: aggregator is a pure loader (no feature defun)", () => {
