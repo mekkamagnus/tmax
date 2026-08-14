@@ -97,19 +97,12 @@
   (orderless-match-components components candidate (list) (list)))
 
 (defun orderless-filter (input candidates)
-  "Filter CANDIDATES by all space-separated INPUT components."
-  (let ((components (filter "orderless-nonempty-string-p" (string-split input " "))))
-    (if (null components)
-      (mapcar
-        (lambda (candidate)
-          (hashmap-set
-            (hashmap-set candidate "spans" (list))
-            "annotation-spans" (list)))
-        candidates)
-      (filter "identity"
-        (mapcar
-          (lambda (candidate) (orderless-filter-candidate components candidate))
-          candidates)))))
+  "Filter CANDIDATES by all space-separated INPUT components.
+Bulk-matched by the orderless-filter-candidates builtin (BUG-79): identical
+component semantics to the per-candidate functions above — which stay as the
+reference implementation — but in one call instead of one interpreter
+round-trip per candidate × component (~250ms per M-x keystroke before)."
+  (orderless-filter-candidates input candidates))
 
 (completion-register-style "orderless" "orderless-filter")
 )

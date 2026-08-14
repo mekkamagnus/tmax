@@ -38,6 +38,166 @@ function raw(fn: (args: TLispValue[]) => TLispValue): (args: TLispValue[]) => Ei
   return (args) => Either.right(fn(args));
 }
 
+// ── Completion span matching ────────────────────────────────────────────────
+// Shared by the string-*-spans builtins below AND the bulk orderless filter,
+// so the two can never drift (BUG-79: the bulk filter exists because driving
+// these per candidate × per component through the interpreter cost ~250ms per
+// M-x keystroke).
+
+/** A [start, end) match span. */
+type Span = [number, number];
+
+function literalSpansOf(needle: string, target: string, caseSensitive: boolean): Span[] {
+  const t = caseSensitive ? target : target.toLowerCase();
+  const q = caseSensitive ? needle : needle.toLowerCase();
+  if (q.length === 0) return [];
+  const spans: Span[] = [];
+  let start = 0;
+  while (start <= t.length) {
+    const index = t.indexOf(q, start);
+    if (index < 0) break;
+    spans.push([index, index + q.length]);
+    start = index + Math.max(1, q.length);
+  }
+  return spans;
+}
+
+function regexpSpansOf(pattern: string, target: string, caseSensitive: boolean): Span[] {
+  try {
+    const regexp = new RegExp(pattern, caseSensitive ? "gu" : "giu");
+    const spans: Span[] = [];
+    for (const match of target.matchAll(regexp)) {
+      if (match.index === undefined) continue;
+      const text = match[0] ?? "";
+      spans.push([match.index, match.index + text.length]);
+      if (text.length === 0) regexp.lastIndex++;
+    }
+    return spans;
+  } catch {
+    return [];
+  }
+}
+
+function flexSpansOf(pattern: string, target: string, caseSensitive: boolean): Span[] {
+  const p = caseSensitive ? pattern : pattern.toLowerCase();
+  const t = caseSensitive ? target : target.toLowerCase();
+  const spans: Span[] = [];
+  let targetIndex = 0;
+  for (const character of p) {
+    const index = t.indexOf(character, targetIndex);
+    if (index < 0) return [];
+    spans.push([index, index + character.length]);
+    targetIndex = index + character.length;
+  }
+  return spans;
+}
+
+function initialismSpansOf(pattern: string, target: string, caseSensitive: boolean): Span[] {
+  const p = caseSensitive ? pattern : pattern.toLowerCase();
+  const t = caseSensitive ? target : target.toLowerCase();
+  const starts = Array.from(t.matchAll(/(^|[-_\s/])([\p{L}\p{N}])/gu))
+    .map(match => (match.index ?? 0) + (match[1]?.length ?? 0));
+  const spans: Span[] = [];
+  let startIndex = 0;
+  for (const character of p) {
+    const found = starts.findIndex((position, index) =>
+      index >= startIndex && t.slice(position).startsWith(character),
+    );
+    if (found < 0) return [];
+    const position = starts[found]!;
+    spans.push([position, position + character.length]);
+    startIndex = found + 1;
+  }
+  return spans;
+}
+
+function spansToValue(spans: Span[]): TLispValue {
+  return createList(spans.map(([s, e]) => createList([createNumber(s), createNumber(e)])));
+}
+
+/**
+ * BUG-79: annotation for one candidate under one of the three BUILT-IN
+ * marginalia categories — a faithful TS port of marginalia-buffer-annotation /
+ * -command-annotation / -file-annotation in marginalia.tlisp (levels 0–2),
+ * which stay the reference implementation. Returns "" for unknown categories
+ * (the generic T-Lisp path handles custom annotators).
+ */
+function marginaliaAnnotationOf(category: string, level: number, candidate: TLispValue): string {
+  const meta = candidate.type === "hashmap"
+    ? ((candidate.value as Map<string, TLispValue>).get("metadata")?.value as Map<string, TLispValue> | undefined)
+    : undefined;
+  const field = (key: string): TLispValue | undefined => meta?.get(key);
+  const str = (key: string): string => {
+    const v = field(key);
+    return v === undefined || v.type === "nil" ? "" : String(v.value);
+  };
+  const flag = (key: string, mark: string): string => {
+    const v = field(key);
+    return v !== undefined && isTruthy(v) ? mark : " ";
+  };
+  const firstBinding = (): string | null => {
+    const bindings = field("bindings");
+    if (!bindings || bindings.type !== "list") return null;
+    const first = (bindings.value as TLispValue[])[0];
+    return first?.type === "string" ? first.value as string : null;
+  };
+  if (category === "command") {
+    if (level >= 2) return "  ";
+    const key = firstBinding();
+    const prefix = "  " + (key ? `[${key}] ` : "");
+    return level === 1 ? prefix : prefix + str("documentation");
+  }
+  if (category === "buffer") {
+    const marks = `${flag("current", "*")}${flag("modified", "+")}`;
+    if (level === 0) {
+      const filename = str("filename");
+      return `  ${marks}  ${str("major-mode")}  ${str("characters")} chars${filename ? "  " + filename : ""}`;
+    }
+    return level === 1 ? `  ${marks}  ${str("major-mode")}` : `  ${marks}`;
+  }
+  if (category === "file") {
+    const isDir = field("is-dir");
+    return isDir !== undefined && isTruthy(isDir) ? "  dir" : `  ${str("size")} bytes`;
+  }
+  return "";
+}
+
+/**
+ * Match one orderless component against a candidate. A faithful TS port of
+ * orderless.tlisp's component dispatch: `=` literal, `^` prefix (literal at
+ * 0), `~` flex, `,` initialism, `&` regexp on the annotation, default regexp
+ * on the display; `!` negates (literal over the display). Smart-case is
+ * computed on the FULL component (sigil included), as in the T-Lisp.
+ */
+function orderlessMatchComponent(
+  component: string,
+  display: string,
+  annotation: string,
+): { reject: boolean; spans: Span[]; onAnnotation: boolean } {
+  const first = component[0] ?? "";
+  const sigil = first !== "" && "=^~,!&".includes(first);
+  const body = sigil ? component.slice(1) : component;
+  const caseSensitive = component !== component.toLowerCase();
+  if (first === "!") {
+    return { reject: literalSpansOf(body, display, caseSensitive).length > 0, spans: [], onAnnotation: false };
+  }
+  const onAnnotation = first === "&";
+  const target = onAnnotation ? annotation : display;
+  let spans: Span[];
+  switch (first) {
+    case "=": spans = literalSpansOf(body, target, caseSensitive); break;
+    case "^": {
+      const literal = literalSpansOf(body, target, caseSensitive);
+      spans = literal.length > 0 && literal[0]![0] === 0 ? literal : [];
+      break;
+    }
+    case "~": spans = flexSpansOf(body, target, caseSensitive); break;
+    case ",": spans = initialismSpansOf(body, target, caseSensitive); break;
+    default: spans = regexpSpansOf(body, target, caseSensitive); break;
+  }
+  return { reject: spans.length === 0, spans, onAnnotation };
+}
+
 /**
  * Register all standard library functions with the T-Lisp interpreter
  * @param interpreter - The T-Lisp interpreter instance
@@ -339,19 +499,7 @@ export function registerStdlibFunctions(interpreter: TLispInterpreter): void {
       throw new Error("string-match-spans requires pattern, string, and optional case-sensitive flag");
     }
     const caseSensitive = args[2]?.type === "boolean" ? args[2].value as boolean : true;
-    try {
-      const regexp = new RegExp(args[0].value as string, caseSensitive ? "gu" : "giu");
-      const spans: TLispValue[] = [];
-      for (const match of (args[1].value as string).matchAll(regexp)) {
-        if (match.index === undefined) continue;
-        const text = match[0] ?? "";
-        spans.push(createList([createNumber(match.index), createNumber(match.index + text.length)]));
-        if (text.length === 0) regexp.lastIndex++;
-      }
-      return createList(spans);
-    } catch {
-      return createList([]);
-    }
+    return spansToValue(regexpSpansOf(args[0].value as string, args[1].value as string, caseSensitive));
   }));
 
   interpreter.defineBuiltin("literal-match-spans", raw((args: TLispValue[]) => {
@@ -359,20 +507,7 @@ export function registerStdlibFunctions(interpreter: TLispInterpreter): void {
       throw new Error("literal-match-spans requires needle, string, and optional case-sensitive flag");
     }
     const caseSensitive = args[2]?.type === "boolean" ? args[2].value as boolean : true;
-    const original = args[1].value as string;
-    const needle = args[0].value as string;
-    const target = caseSensitive ? original : original.toLowerCase();
-    const query = caseSensitive ? needle : needle.toLowerCase();
-    if (query.length === 0) return createList([]);
-    const spans: TLispValue[] = [];
-    let start = 0;
-    while (start <= target.length) {
-      const index = target.indexOf(query, start);
-      if (index < 0) break;
-      spans.push(createList([createNumber(index), createNumber(index + query.length)]));
-      start = index + Math.max(1, query.length);
-    }
-    return createList(spans);
+    return spansToValue(literalSpansOf(args[0].value as string, args[1].value as string, caseSensitive));
   }));
 
   interpreter.defineBuiltin("string-join", raw((args: TLispValue[]) => {
@@ -515,17 +650,7 @@ export function registerStdlibFunctions(interpreter: TLispInterpreter): void {
       throw new Error("string-flex-spans requires pattern, string, and optional case-sensitive flag");
     }
     const caseSensitive = args[2]?.type === "boolean" ? args[2].value as boolean : true;
-    const pattern = caseSensitive ? args[0].value as string : (args[0].value as string).toLowerCase();
-    const target = caseSensitive ? args[1].value as string : (args[1].value as string).toLowerCase();
-    const spans: TLispValue[] = [];
-    let targetIndex = 0;
-    for (const character of pattern) {
-      const index = target.indexOf(character, targetIndex);
-      if (index < 0) return createList([]);
-      spans.push(createList([createNumber(index), createNumber(index + character.length)]));
-      targetIndex = index + character.length;
-    }
-    return createList(spans);
+    return spansToValue(flexSpansOf(args[0].value as string, args[1].value as string, caseSensitive));
   }));
 
   interpreter.defineBuiltin("string-initialism-spans", raw((args: TLispValue[]) => {
@@ -533,23 +658,63 @@ export function registerStdlibFunctions(interpreter: TLispInterpreter): void {
       throw new Error("string-initialism-spans requires pattern, string, and optional case-sensitive flag");
     }
     const caseSensitive = args[2]?.type === "boolean" ? args[2].value as boolean : true;
-    const pattern = caseSensitive ? args[0].value as string : (args[0].value as string).toLowerCase();
-    const original = args[1].value as string;
-    const target = caseSensitive ? original : original.toLowerCase();
-    const starts = Array.from(target.matchAll(/(^|[-_\s/])([\p{L}\p{N}])/gu))
-      .map(match => (match.index ?? 0) + (match[1]?.length ?? 0));
-    const spans: TLispValue[] = [];
-    let startIndex = 0;
-    for (const character of pattern) {
-      const found = starts.findIndex((position, index) =>
-        index >= startIndex && target.slice(position).startsWith(character)
-      );
-      if (found < 0) return createList([]);
-      const position = starts[found]!;
-      spans.push(createList([createNumber(position), createNumber(position + character.length)]));
-      startIndex = found + 1;
+    return spansToValue(initialismSpansOf(args[0].value as string, args[1].value as string, caseSensitive));
+  }));
+
+  // BUG-79: bulk marginalia annotation. The built-in categories are ported to
+  // TS (see marginaliaAnnotationOf); custom registered annotators keep the
+  // generic T-Lisp path (this returns nil for unknown categories). One call
+  // replaces ~candidates × annotator-function evals (~217ms per M-x keystroke
+  // before this).
+  interpreter.defineBuiltin("marginalia-annotate-builtin-candidates", raw((args: TLispValue[]) => {
+    if (args.length !== 3 || args[0]?.type !== "string" || args[1]?.type !== "list" || args[2]?.type !== "number") {
+      throw new Error("marginalia-annotate-builtin-candidates requires a category string, a candidate list, and a level number");
     }
-    return createList(spans);
+    const category = args[0].value as string;
+    if (category !== "buffer" && category !== "command" && category !== "file") return createNil();
+    const level = args[2].value as number;
+    const results: TLispValue[] = [];
+    for (const candidate of (args[1].value as TLispValue[])) {
+      const source = candidate.type === "hashmap"
+        ? [...(candidate.value as Map<string, TLispValue>).entries()].filter(([k]) => k !== "annotation")
+        : [];
+      source.push(["annotation", createString(marginaliaAnnotationOf(category, level, candidate))]);
+      results.push(createHashmap(source));
+    }
+    return createList(results);
+  }));
+  interpreter.defineBuiltin("orderless-filter-candidates", raw((args: TLispValue[]) => {
+    if (args.length !== 2 || args[0]?.type !== "string" || args[1]?.type !== "list") {
+      throw new Error("orderless-filter-candidates requires an input string and a candidate list");
+    }
+    const input = args[0].value as string;
+    const candidates = args[1].value as TLispValue[];
+    const components = input.split(" ").filter((c) => c.length > 0);
+    const results: TLispValue[] = [];
+    for (const candidate of candidates) {
+      const source = candidate.type === "hashmap"
+        ? candidate.value as Map<string, TLispValue>
+        : new Map<string, TLispValue>();
+      const displayVal = source.get("display");
+      const display = displayVal?.type === "string" ? displayVal.value as string : "";
+      const annotationVal = source.get("annotation");
+      const annotation = annotationVal?.type === "string" ? annotationVal.value as string : "";
+      let displaySpans: Span[] = [];
+      let annotationSpans: Span[] = [];
+      let keep = true;
+      for (const component of components) {
+        const m = orderlessMatchComponent(component, display, annotation);
+        if (m.reject) { keep = false; break; }
+        if (m.onAnnotation) annotationSpans = annotationSpans.concat(m.spans);
+        else displaySpans = displaySpans.concat(m.spans);
+      }
+      if (!keep) continue;
+      const out = [...source.entries()].filter(([k]) => k !== "spans" && k !== "annotation-spans");
+      out.push(["spans", spansToValue(displaySpans)]);
+      out.push(["annotation-spans", spansToValue(annotationSpans)]);
+      results.push(createHashmap(out));
+    }
+    return createList(results);
   }));
 
   interpreter.defineBuiltin("display-width", raw((args: TLispValue[]) => {

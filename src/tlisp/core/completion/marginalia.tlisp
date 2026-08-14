@@ -69,10 +69,18 @@
       (hashmap-set candidate "annotation" ""))))
 
 (defun marginalia-annotate-candidates (category candidates)
-  "Annotate every CATEGORY candidate."
-  (mapcar
-    (lambda (candidate) (marginalia-annotate-candidate category candidate))
-    candidates))
+  "Annotate every CATEGORY candidate.
+The three built-in categories (command/buffer/file) bulk-annotate via the
+marginalia-annotate-builtin-candidates builtin (BUG-79) — identical output to
+the per-candidate annotators below, which stay the reference implementation —
+because driving those per candidate cost ~217ms per M-x keystroke. Custom
+registered annotators keep the generic per-candidate path."
+  (let ((bulk (marginalia-annotate-builtin-candidates category candidates marginalia-current-level)))
+    (if (nilp bulk)
+      (mapcar
+        (lambda (candidate) (marginalia-annotate-candidate category candidate))
+        candidates)
+      bulk)))
 
 (marginalia-register-annotator "buffer" "marginalia-buffer-annotation")
 (marginalia-register-annotator "command" "marginalia-command-annotation")
