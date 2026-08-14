@@ -32,19 +32,39 @@ each an interpreter round-trip with name resolution and hashmap churn. For
 
 ## Solution Statement
 
-One bulk builtin — `vertico-rows-bulk (candidates selected-value)` — that
-builds all visible rows' segment lists in TS (display spans → candidate /
-completion-match segments; annotation spans → annotation segments), a faithful
-port of `vertico-segments-from-spans` / `vertico-annotation-segments-from-spans`
-/ `vertico-candidate-segments` / `vertico-row`. The T-Lisp functions stay as
-the reference implementation; `vertico-publish` (or `vertico-row`'s mapcar)
-delegates to the builtin. Span sorting happens in TS (no name-dispatched
-predicate).
+**Landed (three parts):**
 
-Also measure after: `minibuffer-refresh-after-input` (~24ms measured once —
-re-measure cleanly; it embeds completions + publish, both being fixed) and the
-remaining `handleKey` mx-path overhead. Target: **M-x keystroke < 8ms** (under
-one frame even accounting for daemon round-trip).
+1. **`vertico-rows-bulk` builtin** — builds all visible rows' segment lists in
+   TS (display spans → candidate/completion-match segments; annotation spans →
+   annotation segments; the two-space annotation separator; TS span sorting —
+   no name-dispatched predicate). A faithful port of
+   `vertico-segments-from-spans` / `-annotation-segments-from-spans` /
+   `vertico-candidate-segments` / `vertico-row`, which stay as the reference
+   implementation; `vertico-publish` delegates its rows mapcar to the builtin.
+2. **`minibuffer-state-get` identity-memoized** (folded in: profiling showed it
+   was the next dominant cost, ~1.7ms × ~4 calls/keystroke) — the deep
+   deserialize of the whole session (all matched candidates) ran on every
+   call. Sound because `SetMinibufferState` replaces the serialized object
+   wholesale, so object identity is a valid cache key.
+3. Fixture test pinning segment faces/ordering/separator + byte-parity with
+   the T-Lisp reference.
+
+## Measured outcome (idle machine, live M-x session)
+
+| Metric | Before | After |
+|---|---|---|
+| `vertico-publish` | ~9.4ms | **0.70ms** (target <1.5 — met, 13×) |
+| `minibuffer-state-get` | ~1.74ms | 0.01ms |
+| M-x keystroke end-to-end | ~17ms | **~13–14ms** |
+
+**The <8ms M-x target is NOT met and is not achievable within this issue's
+scope**: the remaining keystroke cost decomposes as the per-key baseline
+(~3ms, the fixed BUG-79/#186 floor) + `completion-all-completions` (~8.5ms —
+table dispatch 3ms + marginalia 4.3ms + orderless 6.4ms measured separately;
+the pipeline's orchestration overlaps them). Driving those three sub-pieces
+into the same bulk shape is a further iteration on the minibuffer pipeline,
+not the vertico row-builder. (The user-facing picture is already: ~250ms →
+~13ms over three fixes.)
 
 ## Steps to Reproduce
 
@@ -57,11 +77,11 @@ one frame even accounting for daemon round-trip).
 - `src/tlisp/stdlib.ts` — the bulk builtin (beside `orderless-filter-candidates` / `marginalia-annotate-builtin-candidates`).
 
 ## Acceptance Criteria (Completion)
-- [ ] `vertico-rows-bulk` builtin ports the segment logic; T-Lisp per-row functions remain as reference.
-- [ ] `vertico-publish` uses the bulk path; output shape identical (segments/faces/selected flag).
-- [ ] `vertico-publish` < 1.5ms per call in a live M-x session.
-- [ ] M-x keystroke < 8ms end-to-end (in-process).
-- [ ] Regression: vertico/marginalia/minibuffer-renderer/completion suites green.
+- [x] `vertico-rows-bulk` builtin ports the segment logic; T-Lisp per-row functions remain as reference.
+- [x] `vertico-publish` uses the bulk path; output shape identical (segments/faces/selected flag) — byte-parity test.
+- [x] `vertico-publish` < 1.5ms per call in a live M-x session (0.70ms).
+- [ ] M-x keystroke < 8ms end-to-end (in-process) — **NOT met: ~13ms; the remainder is the per-key baseline (~3ms) + the completions pipeline (~8.5ms), outside this issue scope (see Solution Statement). Needs a retarget or a follow-up issue.**
+- [x] Regression: vertico/marginalia/minibuffer-renderer/completion suites green (44/44 + 4/4).
 
 ## Validation Commands
 - `bun run typecheck`

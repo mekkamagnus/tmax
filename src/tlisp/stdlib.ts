@@ -116,6 +116,61 @@ function spansToValue(spans: Span[]): TLispValue {
 }
 
 /**
+ * BUG-80 (#187): build one vertico row's segments in TS — a faithful port of
+ * vertico-segments-from-spans / vertico-annotation-segments-from-spans /
+ * vertico-candidate-segments / vertico-row in vertico.tlisp (the reference
+ * implementation). Spans are sorted here by start position (no name-dispatched
+ * predicate). Faces: "candidate" / "completion-match" for the display,
+ * "annotation" / "completion-match" for the annotation.
+ */
+function verticoRowOf(candidate: TLispValue, selectedValue: string): [string, TLispValue][] {
+  const map = candidate.type === "hashmap" ? candidate.value as Map<string, TLispValue> : new Map();
+  const str = (key: string): string => {
+    const v = map.get(key);
+    return v?.type === "string" ? v.value as string : "";
+  };
+  const spans = (key: string): [number, number][] => {
+    const v = map.get(key);
+    if (!v || v.type !== "list") return [];
+    return (v.value as TLispValue[])
+      .map((pair) => {
+        const p = pair?.type === "list" ? pair.value as TLispValue[] : [];
+        const s = p[0]?.type === "number" ? p[0].value as number : 0;
+        const e = p[1]?.type === "number" ? p[1].value as number : 0;
+        return [s, e] as [number, number];
+      })
+      .sort((a, b) => a[0] - b[0]);
+  };
+  // Walk spans over TEXT emitting face-tagged segments (mirrors the recursive
+  // segments-from-spans: leading plain run, matched run, recurse past end).
+  const segmentsFrom = (text: string, spanList: [number, number][], point: number, plainFace: string, out: [string, TLispValue][]): void => {
+    if (spanList.length === 0) {
+      if (point < text.length) out.push(["", createHashmap([["text", createString(text.slice(point))], ["face", createString(plainFace)]])]);
+      return;
+    }
+    const [rawStart, rawEnd] = spanList[0]!;
+    const start = Math.max(point, rawStart);
+    const end = Math.max(start, rawEnd);
+    if (point < start) out.push(["", createHashmap([["text", createString(text.slice(point, start))], ["face", createString(plainFace)]])]);
+    if (start < end) out.push(["", createHashmap([["text", createString(text.slice(start, end))], ["face", createString("completion-match")]])]);
+    segmentsFrom(text, spanList.slice(1), end, plainFace, out);
+  };
+
+  const display = str("display");
+  const annotation = str("annotation");
+  const segments: [string, TLispValue][] = [];
+  segmentsFrom(display, spans("spans"), 0, "candidate", segments);
+  if (annotation.length > 0) {
+    segments.push(["", createHashmap([["text", createString("  ")], ["face", createString("annotation")]])]);
+    segmentsFrom(annotation, spans("annotation-spans"), 0, "annotation", segments);
+  }
+  return [
+    ["selected", createBoolean(str("value") === selectedValue)],
+    ["segments", createList(segments.map(([, v]) => v))],
+  ];
+}
+
+/**
  * BUG-79: annotation for one candidate under one of the three BUILT-IN
  * marginalia categories — a faithful TS port of marginalia-buffer-annotation /
  * -command-annotation / -file-annotation in marginalia.tlisp (levels 0–2),
@@ -682,6 +737,18 @@ export function registerStdlibFunctions(interpreter: TLispInterpreter): void {
       results.push(createHashmap(source));
     }
     return createList(results);
+  }));
+
+  // BUG-80 (#187): bulk vertico row builder. One call replaces the per-row
+  // vertico-row mapcar (name-dispatched stable-sort + recursive segment
+  // building ≈ 50+ evals, ~9ms per M-x keystroke).
+  interpreter.defineBuiltin("vertico-rows-bulk", raw((args: TLispValue[]) => {
+    if (args.length !== 2 || args[0]?.type !== "list" || args[1]?.type !== "string") {
+      throw new Error("vertico-rows-bulk requires a candidate list and the selected value string");
+    }
+    const selectedValue = args[1].value as string;
+    const rows = (args[0].value as TLispValue[]).map((c) => createHashmap(verticoRowOf(c, selectedValue)));
+    return createList(rows);
   }));
   interpreter.defineBuiltin("orderless-filter-candidates", raw((args: TLispValue[]) => {
     if (args.length !== 2 || args[0]?.type !== "string" || args[1]?.type !== "list") {

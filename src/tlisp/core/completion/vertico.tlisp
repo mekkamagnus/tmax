@@ -74,7 +74,11 @@
           nil)))))
 
 (defun vertico-publish ()
-  "Publish the current vertical completion render view."
+  "Publish the current vertical completion render view.
+Rows are built in bulk by the vertico-rows-bulk builtin (BUG-80/#187) — the
+per-row functions below stay as the reference implementation — because the
+per-row mapcar (name-dispatched sort + recursive segments) cost ~9ms per
+keystroke."
   (let ((session (minibuffer-state-get)))
     (let ((matches (hashmap-get session "matches")))
       (let ((selected (hashmap-get session "selection")))
@@ -87,13 +91,10 @@
                   "prompt" (hashmap-get session "prompt")
                   "input" (hashmap-get session "input")
                   "input-point" (hashmap-get session "input-point")
-                  "rows" (mapcar
-                    (lambda (candidate)
-                      (vertico-row candidate
-                        (if selected-candidate
-                          (hashmap-get selected-candidate "value")
-                          "")))
-                    visible)
+                  "rows" (vertico-rows-bulk visible
+                           (if selected-candidate
+                             (hashmap-get selected-candidate "value")
+                             ""))
                   "message" (if (= (length matches) 0)
                     "No match"
                     (if (< selected 0)

@@ -11,7 +11,7 @@ import { createEditorAPI } from "./tlisp-api.ts";
 import type { EditorAPIContext } from "./runtime/editor-api-context.ts";
 import { createEditorRuntimeCaches } from "./runtime/caches.ts";
 import type { EditorRuntimeCaches } from "./runtime/caches.ts";
-import type { EditorState, Window, HighlightSpan, MinibufferRenderView } from "../core/contracts/editor.ts";
+import type { EditorState, Window, HighlightSpan, MinibufferRenderView, JsonValue } from "../core/contracts/editor.ts";
 import type { TextBuffer } from "../core/contracts/buffer.ts";
 import type { WorkspaceState, BufferMetadata } from "../core/contracts/workspace.ts";
 import { createString, createList, createNil, createNumber, createBoolean, createHashmap, createPromise } from "../tlisp/values.ts";
@@ -1316,9 +1316,20 @@ export class Editor {
       return createNil();
     });
 
+    // BUG-80 (#187): the serialized session is replaced wholesale by every
+    // SetMinibufferState, so its object identity is a sound cache key — the
+    // deep deserialize (all matched candidates) was ~1.7ms × ~4 calls per
+    // minibuffer keystroke.
+    let memoizedStateSrc: JsonValue | undefined;
+    let memoizedStateVal: TLispValue = createNil();
     defineRaw("minibuffer-state-get", (args) => {
       if (args.length !== 0) throw new Error("minibuffer-state-get requires no arguments");
-      return deserializeTlispValue(this.model.minibufferState);
+      const src = this.model.minibufferState;
+      if (src !== memoizedStateSrc) {
+        memoizedStateSrc = src;
+        memoizedStateVal = deserializeTlispValue(src);
+      }
+      return memoizedStateVal;
     });
 
     defineRaw("minibuffer-state-set", (args) => {
