@@ -28,28 +28,48 @@ client/daemon sync work.
 
 ## Root Cause Analysis
 
-*(to be filled during investigation — instrumentation breakdown of handleKey)*
+**FOUND (2026-08-14): `ModuleRegistry.listExports()` rebuilt the entire export
+table on EVERY unqualified cross-module function call.**
 
-Measured attribution so far (2026-08-14, idle machine, in-process editor):
+The unique-export fallback (`resolveUniqueExport` in module-registry.ts, used
+by stdlib's `resolveCallable` whenever a function name isn't in the global env)
+called `listExports()`, which walks **every loaded module × every export** with
+one env-chain lookup each and rebuilds the full record array — ~1.1ms per call
+(~1,000 exports across 100 modules). The normal-mode handler makes **~10 such
+cross-module predicate calls per keystroke** (`vim-find-pending-p`,
+`vim-mark-pending-p`, `macro-record-pending-p`, `vim-operator-pending-p`, …,
+`clear-splash-if-present`), each a T-Lisp exec whose name resolution hits the
+fallback → ~11ms of pure re-indexing per key, plus the keymap lookup path and
+per-update notify churn making up the rest of the ~19ms.
 
-| Piece | Cost |
-|-------|------|
-| `handleKey('j')` total | ~19ms |
-| T-Lisp `(cursor-move ...)` eval (what the handler runs) | 0.04ms |
-| `captureFrame` (render, incl. highlight) | 0.19–0.43ms |
-| `command-completion-refresh` (cached) | ~0.4ms |
+Measured attribution (idle machine, in-process editor):
 
-⇒ ~18.5ms is unattributed dispatch/state machinery between the key arriving and
-the command evaluating.
+| Piece | Before | After |
+|-------|--------|-------|
+| `handleKey('j')` total | ~19ms | **2.85ms** (keynorm) |
+| 10 pending-predicate execs | 12.4ms | **1.45ms** |
+| T-Lisp `(cursor-move …)` eval | 0.04ms | unchanged |
+| `captureFrame` render | 0.19–0.43ms | unchanged |
+| M-x keystroke end-to-end | ~250ms (pre-BUG-79-completion-fix) | **~17ms** |
+
+Ruled out along the way: `ensureCoreBindingsLoaded` (stubbed, no change),
+state-change listeners (removed, no change), the T-Lisp command itself
+(0.04ms), render (sub-ms), applyUpdate count (6/key — not the cost).
 
 ## Solution Statement
 
-Instrument `handleKey`'s internals (normalizeKey, ensureCoreBindingsLoaded,
-mode-handler dispatch, executeCommand path, applyUpdate cascade, any per-key
-sync) to attribute the ~18.5ms, then eliminate or cache the top contributors.
-Target: **<5ms per plain-motion key in-process** (keynorm floor tightened to
-match), which combined with the completed M-x fix puts M-x typing under one
-frame and general typing well under it.
+**Landed:** cache `listExports()` keyed on the registry's generation counter
+(the ADR-0212 pattern) — invalidated at every mutation point (register,
+setLoading, setLoaded, setFailed). Values are the function objects bound at
+module load; every shipped mutation path bumps, so the cache cannot go stale.
+`keynorm` floors tightened 10000/12000/12000 → 2000/2500/2500ms (measured
+854/901/813ms).
+
+**Remaining (smaller, optional follow-up):** M-x is now ~17ms/keystroke, of
+which ~9ms is `vertico-publish` (per-row `stable-sort` by string-name predicate
++ recursive segment building in T-Lisp over ~8 visible rows) and the rest the
+minibuffer refresh path. A bulk row-segments builtin (same shape as the
+orderless/marginalia fixes) would take M-x typing under one frame.
 
 ## Steps to Reproduce
 
@@ -63,11 +83,11 @@ frame and general typing well under it.
 - `bench/micro-keynorm.ts` — the regression benchmark (floor to be tightened after the fix).
 
 ## Acceptance Criteria (Completion)
-- [ ] The ~19ms is attributed with a measured breakdown (per-stage timings).
-- [ ] Top contributors eliminated/cached; plain-motion `handleKey` < 5ms.
-- [ ] `keynorm` floor tightened from 10000/12000/12000ms to match the new baseline (with headroom).
-- [ ] No behavior change: motion/editing/visual/M-x regression suites green.
-- [ ] Breakdown documented here + ADR.
+- [x] The ~19ms is attributed with a measured breakdown (per-stage timings).
+- [x] Top contributors eliminated/cached; plain-motion `handleKey` < 5ms (2.85ms).
+- [x] `keynorm` floor tightened from 10000/12000/12000ms to 2000/2500/2500ms (with headroom).
+- [x] No behavior change: motion/editing/visual/M-x regression suites green (115+ tests).
+- [x] Breakdown documented here + ADR-0215.
 
 ## Validation Commands
 - `bun run bench keynorm`

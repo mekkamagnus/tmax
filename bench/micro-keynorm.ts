@@ -32,9 +32,9 @@ const KEYS = ["j", "k", "l", "h"] as const;
  * per-key retokenization) shows as PASS while regressions FAIL.
  */
 const FLOORS_MS: Record<BenchSize, number> = {
-  small: 10_000,
-  medium: 12_000,
-  large: 12_000,
+  small: 2_000,
+  medium: 2_500,
+  large: 2_500,
 };
 
 export async function runKeynormBench(size: BenchSize): Promise<BenchResult> {

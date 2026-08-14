@@ -56,11 +56,61 @@ export class ModuleRegistry {
       state: "loaded",
     });
     this.generation += 1;
+    this.exportCache = null;
   }
 
   /** Current generation — bumps on every module register/load. */
   getGeneration(): number {
     return this.generation;
+  }
+
+  /**
+   * BUG-79 (#186): cached export index. listExports() rebuilds the whole table
+   * (every module × every export, one env-chain lookup each), and it runs on
+   * EVERY unqualified cross-module function call (the unique-export fallback in
+   * stdlib) — ~10× per keystroke, which was the bulk of the ~19ms/key baseline.
+   * The cache is keyed on the generation counter (bumped on every register/
+   * load), the same pattern as the M-x candidate cache (ADR-0212). Values are
+   * the function objects bound at module load; mid-session re-definition of an
+   * exported symbol inside a module env without a re-load would read stale —
+   * no shipped path does that (loads and require-module both bump).
+   */
+  private exportCache: ModuleExportRecord[] | null = null;
+
+  listExports(): ModuleExportRecord[] {
+    if (this.exportCache !== null) return this.exportCache;
+    this.exportCache = this.buildExports();
+    return this.exportCache;
+  }
+
+  private buildExports(): ModuleExportRecord[] {
+    const loadedRecords = Array.from(this.modules.values()).filter((record) => record.state === "loaded");
+    const exportCounts = new Map<string, number>();
+
+    for (const record of loadedRecords) {
+      for (const exportName of record.exports) {
+        exportCounts.set(exportName, (exportCounts.get(exportName) ?? 0) + 1);
+      }
+    }
+
+    const result: ModuleExportRecord[] = [];
+    for (const record of loadedRecords) {
+      if (record.state !== "loaded") continue;
+      for (const exportName of record.exports) {
+        const value = record.env.lookup(exportName);
+        if (value !== undefined) {
+          const duplicated = (exportCounts.get(exportName) ?? 0) > 1;
+          result.push({
+            publicName: duplicated ? `${record.name}/${exportName}` : exportName,
+            exportName,
+            moduleName: record.name,
+            value,
+            env: record.env,
+          });
+        }
+      }
+    }
+    return result;
   }
 
   resolve(name: string): ModuleRecord | undefined {
@@ -90,6 +140,7 @@ export class ModuleRegistry {
       sourcePath,
       state: "loading",
     });
+    this.exportCache = null;
   }
 
   setLoaded(name: string, exports: Set<string>): void {
@@ -98,6 +149,7 @@ export class ModuleRegistry {
       record.exports = exports;
       record.state = "loaded";
       this.generation += 1;
+      this.exportCache = null;
     }
   }
 
@@ -105,6 +157,7 @@ export class ModuleRegistry {
     const record = this.modules.get(name);
     if (record) {
       record.state = "failed";
+      this.exportCache = null;
     }
   }
 
@@ -117,36 +170,6 @@ export class ModuleRegistry {
 
   listModules(): ModuleRecord[] {
     return Array.from(this.modules.values());
-  }
-
-  listExports(): ModuleExportRecord[] {
-    const loadedRecords = Array.from(this.modules.values()).filter((record) => record.state === "loaded");
-    const exportCounts = new Map<string, number>();
-
-    for (const record of loadedRecords) {
-      for (const exportName of record.exports) {
-        exportCounts.set(exportName, (exportCounts.get(exportName) ?? 0) + 1);
-      }
-    }
-
-    const result: ModuleExportRecord[] = [];
-    for (const record of loadedRecords) {
-      if (record.state !== "loaded") continue;
-      for (const exportName of record.exports) {
-        const value = record.env.lookup(exportName);
-        if (value !== undefined) {
-          const duplicated = (exportCounts.get(exportName) ?? 0) > 1;
-          result.push({
-            publicName: duplicated ? `${record.name}/${exportName}` : exportName,
-            exportName,
-            moduleName: record.name,
-            value,
-            env: record.env,
-          });
-        }
-      }
-    }
-    return result;
   }
 
   allExports(): Map<string, { value: any; moduleName: string; exportName: string; env: TLispEnvironment }> {
