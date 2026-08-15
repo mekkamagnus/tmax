@@ -32,6 +32,10 @@ export function computeHighlightSpans(
   startLine: number,
   endLine: number,
   filename?: string,
+  /** SPEC-118: re-classify [[wiki-link]] tokens as resolved/dangling. Only
+   *  applied to markdown buffers; callers pass the classifier built from the
+   *  buffer under render (see wiki-link-faces.ts). */
+  resolveWikiLink?: (target: string) => string,
 ): HighlightSpan[][] {
   const lang = languageFromFilename(filename);
   if (!lang) return [];
@@ -52,6 +56,16 @@ export function computeHighlightSpans(
     } else {
       tokens = result.tokens;
       state = result.nextState;
+    }
+    if (resolveWikiLink && lang === "markdown") {
+      for (const token of tokens) {
+        if (token.type !== "wiki-link") continue;
+        const target = lineText
+          .slice(token.startCol, token.endCol)
+          .replace(/^\[\[/, "")
+          .replace(/\]\]$/, "");
+        token.type = resolveWikiLink(target);
+      }
     }
     spans[lineNum] = highlightLine(tokens);
   }

@@ -12,6 +12,7 @@ import { renderTabBarAnsi } from "../frontend/render/tab-bar.ts";
 import { renderMinibuffer } from "../frontend/render/minibuffer.ts";
 import { renderWhichKeyOverlay } from "../frontend/render/which-key-overlay.ts";
 import { computeHighlightSpans } from "../syntax/highlight-buffer.ts";
+import { makeWikiLinkResolver } from "../syntax/wiki-link-faces.ts";
 import { Either } from "../utils/task-either.ts";
 
 /**
@@ -38,7 +39,14 @@ export function captureFrame(state: EditorState, width: number, height: number):
     return r && Either.isRight(r) ? r.right : "";
   };
   const spans = state.currentBuffer
-    ? computeHighlightSpans(getLine, vt, vt + bufferHeight, state.currentFilename)
+    ? computeHighlightSpans(
+        getLine,
+        vt,
+        vt + bufferHeight,
+        state.currentFilename,
+        // SPEC-118: dim dangling [[wiki-links]] (no-op for non-markdown langs).
+        makeWikiLinkResolver(state.currentBuffer, state.currentFilename),
+      )
     : undefined;
 
   const screen: string[] = [];

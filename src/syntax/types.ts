@@ -35,6 +35,12 @@ export const defaultDarkTheme: HighlightTheme = {
   bold: { fg: "#d19a66", bold: true },
   italic: { fg: "#c678dd" },
   link: { fg: "#61afef", underline: true },
+  // SPEC-118: wiki-link health — resolved = the standard link face; dangling =
+  // the dimmed variant (link hue at reduced intensity, still underlined so it
+  // reads as a link). Plain "wiki-link" is the no-resolver fallback.
+  "wiki-link": { fg: "#61afef", underline: true },
+  "wiki-link-resolved": { fg: "#61afef", underline: true },
+  "wiki-link-dangling": { fg: "#61afef", underline: true, dim: true },
   image: { fg: "#61afef" },
   code: { fg: "#98c379" },
   "code-delimiter": { fg: "#5c6370" },
