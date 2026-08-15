@@ -343,3 +343,28 @@ avoid minting junk notes in the real journal.
 - Fixture note: `setupMdEditor` does not run auto-mode — markdown buffers
   in tests need an explicit `(major-mode-set "markdown")` (same discovery
   as SPEC-119's live-vs-fixture differences).
+
+## Gate retry 1 corrections (2026-08-15)
+
+- **`+ Create` moved LAST** (was first): Enter on a non-exact input accepts
+  the first listed candidate, so notes-first means a typo (`goal` + Enter)
+  completes to the fuzzy best match (`goals`) and + Create takes a deliberate
+  Down — or, for a genuinely-new name, is the only match left so plain Enter
+  creates. SPEC-116's "typos cannot mint junk notes" philosophy now holds
+  here too. (The live transcript shows Down before Enter because create was
+  first at the time; the ordering fix removes the need.)
+- **Blank-input guard**: the create candidate is omitted for
+  whitespace-only input as well (`" "` used to mint the literal file " .md").
+- **Finder candidates are annotated from the FINDER's scan**
+  (`markdown-complete-path` over `markdown-complete-notes`) — the candidate
+  builder no longer reads SPEC-116's `markdown-resolve-notes` defvar, which
+  was never primed here (empty — or stale after a gx prompt) annotations.
+- **Post-accept render assertion added**: the completed link renders
+  bracket-less (SPEC-119) with the link face (SPEC-118) — now unit-pinned,
+  not just live-transcript.
+- **Electric-pair interplay documented precisely**: with electric-pair-mode
+  ON the finder is fully disabled (the guard suppresses `[[`-before-`]`),
+  and even with it off, `[[` typed immediately before a pre-existing literal
+  `]` in the text does not trigger (the guard cannot distinguish an
+  electric-inserted `]` from a typed one). Both accepted: electric-pair is
+  off by default and the second case is self-inflicted text.

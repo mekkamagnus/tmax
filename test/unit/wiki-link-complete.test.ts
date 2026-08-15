@@ -70,16 +70,41 @@ describe("SPEC-120: [[ fuzzy note finder", () => {
       expect(cands).toContain("goals");
       expect(cands).toContain("gardening");
       expect(cands).toContain("deep");
-      // create candidate comes FIRST
-      expect(cands.indexOf("+ Create: go")).toBeLessThan(cands.indexOf("goals"));
+      // GATE: create candidate comes LAST — Enter on a non-exact input must
+      // pick the fuzzy best match, never mint a file from a typo
+      expect(cands.indexOf("+ Create: go")).toBeGreaterThan(cands.indexOf("goals"));
     });
 
-    test("empty input omits the create candidate", async () => {
+    test("empty AND whitespace-only input omit the create candidate (gate)", async () => {
       const editor = await setupMdEditor("x\n", join(vault, "index.md"));
       executeTlisp(editor, "(markdown-complete-prepare)");
-      const cands = tl(editor, '(markdown-complete-table "" "candidates")');
-      expect(cands).not.toContain("+ Create:");
-      expect(cands).toContain("goals");
+      expect(tl(editor, '(markdown-complete-table "" "candidates")')).not.toContain("+ Create:");
+      // " " used to mint '+ Create:  ' → the literal file " .md"
+      expect(tl(editor, '(markdown-complete-table " " "candidates")')).not.toContain("+ Create:");
+    });
+
+    test("GATE: typo + Enter path — non-exact input's first candidate is a NOTE, not + Create", async () => {
+      const editor = await setupMdEditor("x\n", join(vault, "index.md"));
+      executeTlisp(editor, "(markdown-complete-prepare)");
+      const cands = tl(editor, '(markdown-complete-table "goal" "candidates")');
+      // first listed is the fuzzy best match; create trails
+      expect(cands.indexOf("goals")).toBeLessThan(cands.indexOf("+ Create: goal"));
+    });
+
+    test("GATE: genuinely-new input leaves + Create as a listed candidate (creation stays one Enter)", async () => {
+      const editor = await setupMdEditor("x\n", join(vault, "index.md"));
+      executeTlisp(editor, "(markdown-complete-prepare)");
+      const cands = tl(editor, '(markdown-complete-table "brand-new-thing" "candidates")');
+      expect(cands).toContain("+ Create: brand-new-thing");
+    });
+
+    test("GATE: finder candidates are annotated from the FINDER's scan (no stale gx-prompt state)", async () => {
+      const editor = await setupMdEditor("x\n", join(vault, "index.md"));
+      // Prime SPEC-116's resolve state with a DIFFERENT scan (stale coupling probe)
+      executeTlisp(editor, '(markdown-resolve-prepare "nothing" nil)');
+      executeTlisp(editor, "(markdown-complete-prepare)");
+      expect(tl(editor, '(markdown-complete-path "goals")')).toContain("goals.md");
+      expect(tl(editor, '(markdown-complete-path "deep")')).toContain("sub/deep.md");
     });
 
     test("metadata category", async () => {
@@ -180,6 +205,21 @@ describe("SPEC-120: [[ fuzzy note finder", () => {
       executeTlisp(editor, '(insert-char "[")');
       expect(editor.getState().mode).toBe("mx"); // re-triggered
       expect(tl(editor, "(buffer-text)")).toBe("note [[\n[[more\n"); // inserted at line 1 col 0
+    });
+  });
+
+  describe("GATE: post-accept render (SPEC-118 face + SPEC-119 bracket-less)", () => {
+    test("the completed link renders bracket-less with the link face", async () => {
+      const { captureFrame } = await import("../../src/render/capture-frame.ts");
+      const editor = await typeOpenBrackets("see here\n", 4);
+      executeTlisp(editor, '(minibuffer-set-input "goals")');
+      executeTlisp(editor, '(minibuffer-dispatch-key "Enter")');
+      expect(tl(editor, "(buffer-text)")).toBe("see [[goals]]here\n");
+      const state = editor.getEditorState();
+      const lines = captureFrame(state as any, 80, 24);
+      const row = (lines[0] ?? "").replace(/\x1b\[[0-9;]*[A-Za-z]/g, "");
+      expect(row).toContain("see goalshere"); // brackets hidden (SPEC-119)
+      expect(lines[0] ?? "").toContain("38;2;97;175;239"); // link face (SPEC-118)
     });
   });
 
