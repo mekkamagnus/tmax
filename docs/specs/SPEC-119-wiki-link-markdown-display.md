@@ -82,3 +82,15 @@ Display-only transform in the markdown render path (where syntax faces are appli
   spans-less cursor-offset path.
 - Documented tradeoffs unchanged: horizontal scroll renders raw; non-focused
   split windows render raw.
+
+## Gate retry 2 corrections (2026-08-15)
+
+- ADR-0222 test count refreshed (17/17 after the retry-1 regressions).
+- The transform now requires a markdown-language filename when a filename
+  exists (a markdown-major buffer named `notes.txt` renders raw — a
+  transformed-but-faceless link was worse than brackets; unsaved scratch
+  buffers still transform).
+- The fenced-code-block leak is a PRE-EXISTING stateless-tokenize defect
+  (fence interiors never get code-block spans) — filed as BUG-82
+  (docs/specs/BUG-82-fenced-code-tokenize-stateless.md), out of this
+  branch's scope per the gate's recommendation.

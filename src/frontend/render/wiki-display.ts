@@ -25,8 +25,18 @@ const WIKI_LINK_RE = /\[\[([^\[\]|]+)(?:\|([^\[\]]+))?\]\]/g;
 export const WIKI_DISPLAY_MINOR = "wiki-link-display";
 
 export function wikiDisplayActive(state: EditorState): boolean {
-  return state.currentMajorMode === "markdown"
-    && (state.activeMinorModes ?? []).includes(WIKI_DISPLAY_MINOR);
+  if (state.currentMajorMode !== "markdown") return false;
+  if (!(state.activeMinorModes ?? []).includes(WIKI_DISPLAY_MINOR)) return false;
+  // The link FACE comes from the highlighter, which keys on the filename's
+  // language — without a markdown-language filename there are no wiki-link
+  // spans, and a transformed-but-faceless link is worse than raw brackets.
+  // (A missing filename — unsaved scratch — still transforms.)
+  if (state.currentFilename) {
+    const dot = state.currentFilename.lastIndexOf(".");
+    const ext = dot >= 0 ? state.currentFilename.slice(dot).toLowerCase() : "";
+    if (![".md", ".markdown", ".mdx"].includes(ext)) return false;
+  }
+  return true;
 }
 
 export interface WikiDisplayLine {

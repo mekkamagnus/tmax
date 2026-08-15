@@ -53,7 +53,10 @@ discoverable in M-x.
 - Discovered en route (filed, not fixed here): BUG-81 — `SPC ;` is
   unreliable/broken in the live embedded editor while the engine is provably
   correct; it blocked the live M-x toggle demo (unit-verified instead).
-- Suite: wiki-link-display 13/13 (transform mapping, alias, code-span
-  protection, toggle on/off, non-markdown pass-through, buffer-unchanged,
-  plain-link/frontmatter regressions, cursor mapping); render+syntax sweep
-  358/358; typecheck clean.
+- Suite: wiki-link-display 17/17 (transform mapping, exact alias mapping +
+  trimmed-alias region, code-span protection incl. the spans-less text scan,
+  toggle on/off, non-markdown pass-through, buffer-unchanged,
+  plain-link/frontmatter regressions, whitespace-only raw, cursor mapping +
+  terminal-cursor/render agreement); render+syntax sweep 375/375; typecheck
+  clean. Gate retry 1 also found the fenced-code-block leak — PRE-EXISTING
+  stateless tokenize (filed as BUG-82, not fixed here).

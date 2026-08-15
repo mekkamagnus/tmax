@@ -159,6 +159,13 @@ describe("SPEC-119: render integration (toggle on/off)", () => {
     expect(stripAnsi(lines[0]!)).toContain("---");
   });
 
+  test("GATE: markdown-mode buffer without a markdown filename renders raw (no faceless transform)", () => {
+    const state = makeState("see [[goals]] now");
+    state.currentFilename = "notes.txt"; // major mode markdown, wrong extension
+    const lines = captureFrame(state, 80, 24);
+    expect(stripAnsi(lines[0]!)).toContain("[[goals]]");
+  });
+
   test("GATE: terminal cursor (getCursorScreenOffset) agrees with render on code-span lines", () => {
     // '`[[a]]` x' — the wiki link is inside an inline code span, so the line
     // renders RAW. The offset path must therefore NOT shift the column.
