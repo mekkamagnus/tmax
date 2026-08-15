@@ -148,18 +148,24 @@
 ;;; ── Wiki-links and Zettelkasten ───────────────────────────────────────
 
 (defun markdown-wiki-link-at-point ()
-  "Find [[target]] at cursor position. Return target or nil."
+  "Find [[target]] at cursor position. Return target or nil.
+BUG-74: match offsets are relative to the truncated search-text, so track a
+cumulative offset and compare against ABSOLUTE positions — without it, any
+link preceded by another link on the same line is undetectable."
   (let* ((line (buffer-get-line (cursor-line)))
          (col (cursor-column))
          (result nil)
-         (search-text line))
+         (search-text line)
+         (offset 0))
     (while (and (string-match "\\\\[\\\\[\([^\\\\]]+\)\\\\]\\\\]" search-text) (not result))
-      (let ((start (match-beginning 0))
-            (end (match-end 0))
+      (let ((start (+ offset (match-beginning 0)))
+            (end (+ offset (match-end 0)))
             (target (match-string 1 search-text)))
         (if (and (>= col start) (<= col end))
             (set! result target)
-            (set! search-text (substring search-text (match-end 0))))))
+            (progn
+              (set! offset (+ offset (match-end 0)))
+              (set! search-text (substring search-text (match-end 0)))))))
     result))
 
 (defun markdown-scan-wiki-links ()

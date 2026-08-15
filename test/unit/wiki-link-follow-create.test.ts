@@ -243,3 +243,23 @@ describe("SPEC-116 wiki-link follow-or-create", () => {
     });
   });
 });
+
+describe("BUG-74: at-point on links preceded by other links", () => {
+  test("second and third links on one line are detectable + followable", async () => {
+    const e = await setupMdEditor("see [[one]] and [[two]] plus [[three]] end\n", "t.md");
+    executeTlisp(e, "(cursor-move 0 20)");
+    expect(tl(e, "(markdown-wiki-link-at-point)")).toBe("two");
+    executeTlisp(e, "(cursor-move 0 33)");
+    expect(tl(e, "(markdown-wiki-link-at-point)")).toBe("three");
+    // range-at-point returns ABSOLUTE cols for the 2nd link ([[two]] spans 16-23)
+    executeTlisp(e, "(cursor-move 0 20)");
+    expect(tl(e, "(markdown-wiki-link-range-at-point)")).toBe("(0 16 23)");
+    executeTlisp(e, "(cursor-move 0 8)");
+    expect(tl(e, "(markdown-wiki-link-at-point)")).toBe("one");
+    // follow the 2nd (dangling) link: prompt opens, no "No wiki link" misread
+    executeTlisp(e, "(cursor-move 0 20)");
+    executeTlisp(e, "(markdown-follow-wiki-link)");
+    expect(e.getState().mode).toBe("mx");
+    expect(tl(e, "(editor-status)")).not.toContain("No wiki link");
+  });
+});
