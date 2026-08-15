@@ -58,6 +58,20 @@ export function captureFrame(state: EditorState, width: number, height: number):
     }
   } else if (state.mode === "command" || state.mode === "mx") {
     screen.push(renderCommandInput(state, width));
+  } else if (state.statusMessage) {
+    // BUG-76: echo row. The TUI client overlays the status message on the
+    // last buffer line (height-2); captureFrame — used by the embedded Steep
+    // frontend and `tmax --capture` — omitted it, so commands ran (messages
+    // landed in *Messages*) but gave NO visible feedback. Mirror the TUI
+    // exactly: same row, same truncation, overlay semantics (frame stays
+    // exactly `height` lines).
+    const msg = state.statusMessage.length > width
+      ? state.statusMessage.slice(0, width - 1)
+      : state.statusMessage;
+    const row = tabBarHeight + bufferHeight - 1;
+    if (row >= 0 && row < screen.length) {
+      screen[row] = msg;
+    }
   }
 
   screen.push(renderStatusLine(state, width));

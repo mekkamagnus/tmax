@@ -81,4 +81,50 @@ describe("SPEC-035 markdown link navigation", () => {
       expect(editor.getState().cursorPosition.line).toBe(0);
     });
   });
+
+  // BUG-76: only the FIRST [t](u) link on a line was ever detected — the
+  // regex match bounds were checked against the first match regardless of
+  // cursor position. Verified live in the mekkapi pane (link-test.md).
+  describe("multi-link lines (BUG-76)", () => {
+    const LINE = "links: [Anthropic](https://anthropic.com) and [note](#note)";
+
+    test("markdown-link-at-point finds the second link on the line", async () => {
+      const editor = await setupMdEditor(LINE + "\n\n# Note");
+      // Column 48 = inside [note] (second link)
+      executeTlisp(editor, `(cursor-move 0 48)`);
+      const result = executeTlisp(editor, `(markdown-link-at-point)`);
+      expectTlispString(result, "#note");
+    });
+
+    test("markdown-link-at-point still finds the first link", async () => {
+      const editor = await setupMdEditor(LINE);
+      // Column 9 = inside [Anthropic]
+      executeTlisp(editor, `(cursor-move 0 9)`);
+      const result = executeTlisp(editor, `(markdown-link-at-point)`);
+      expectTlispString(result, "https://anthropic.com");
+    });
+
+    test("markdown-link-at-point returns nil between links", async () => {
+      const editor = await setupMdEditor(LINE);
+      // Column 43 = the space after the first link's ')'
+      executeTlisp(editor, `(cursor-move 0 43)`);
+      const result = executeTlisp(editor, `(markdown-link-at-point)`);
+      expect(result.type).toBe("nil");
+    });
+
+    test("markdown-follow-link follows the second link, not the first", async () => {
+      const editor = await setupMdEditor("# Intro\n\n" + LINE + "\n\n# Note");
+      executeTlisp(editor, `(cursor-move 2 55)`);
+      executeTlisp(editor, `(markdown-follow-link)`);
+      // Jumped to the #Note heading (line 4), not line 0
+      expect(editor.getState().cursorPosition.line).toBe(4);
+    });
+
+    test("markdown-do dispatches the second link", async () => {
+      const editor = await setupMdEditor("# Intro\n\n" + LINE + "\n\n# Note");
+      executeTlisp(editor, `(cursor-move 2 55)`);
+      executeTlisp(editor, `(markdown-do)`);
+      expect(editor.getState().cursorPosition.line).toBe(4);
+    });
+  });
 });

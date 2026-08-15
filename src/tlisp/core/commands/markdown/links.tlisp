@@ -19,25 +19,23 @@
 (defun markdown-follow-link ()
   "Open whatever link is under cursor — URL, file, or anchor."
   (interactive)
-  (let* ((line (buffer-get-line (cursor-line)))
-         (col (cursor-column)))
-    (if (string-match "\\\\[([^\\\\]]*)\\\\]\\\\(([^)]*)\\\\)" line)
-        (let ((url (match-string 2 line))
-              (mstart (match-beginning 0))
-              (mend (match-end 2)))
-          (if (and (>= col mstart) (<= col mend))
-              (progn
-                (markdown-push-position)
-                (cond
-                  ((string-match "^#" url)
-                   (markdown-open-anchor url))
-                  ((string-match "^https?://" url)
-                   ;; Delegate external URL dispatch to browse-url for injection-safe argv handling.
-                   (browse-url url))
-                  (t
-                   (markdown-open-file-link url))))
-              (message "Cursor not on a link")))
-        (message "No link found on this line"))))
+  ;; BUG-76: reuse markdown-link-at-point rather than an inline first-match
+  ;; regex — the inline copy returned the FIRST link's bounds on multi-link
+  ;; lines, so any link but the first was unfollowable ("Cursor not on a
+  ;; link" even with the cursor inside it).
+  (let ((url (markdown-link-at-point)))
+    (if url
+        (progn
+          (markdown-push-position)
+          (cond
+            ((string-match "^#" url)
+             (markdown-open-anchor url))
+            ((string-match "^https?://" url)
+             ;; Delegate external URL dispatch to browse-url for injection-safe argv handling.
+             (browse-url url))
+            (t
+             (markdown-open-file-link url))))
+        (message "Cursor not on a link"))))
 
 (defun markdown-insert-link ()
   "Insert an inline link at point."
@@ -102,17 +100,26 @@
               (markdown-open-anchor (concat "#" fragment)))))))
 
 (defun markdown-link-at-point ()
-  "Return the URL under cursor or nil."
+  "Return the URL under cursor or nil. BUG-76: like BUG-74's
+markdown-wiki-link-at-point, match offsets are relative to the (truncated)
+search text, so a line with several links needs a cumulative offset — the
+first-match-only version returned nil whenever the cursor sat on any link
+but the first."
   (interactive)
   (let* ((line (buffer-get-line (cursor-line)))
-         (col (cursor-column)))
-    (if (string-match "\\\\[([^\\\\]]*)\\\\]\\\\(([^)]*)\\\\)" line)
-        (let ((mstart (match-beginning 0))
-              (mend (match-end 2)))
-          (if (and (>= col mstart) (<= col mend))
-              (match-string 2 line)
-              nil))
-        nil)))
+         (col (cursor-column))
+         (result nil)
+         (search-text line)
+         (offset 0))
+    (while (and (string-match "\\\\[([^\\\\]]*)\\\\]\\\\(([^)]*)\\\\)" search-text) (not result))
+      (let ((start (+ offset (match-beginning 0)))
+            (end (+ offset (match-end 2)))
+            (url (match-string 2 search-text)))
+        (if (and (>= col start) (<= col end))
+            (set! result url)
+            (progn (set! offset (+ offset (match-end 0)))
+                   (set! search-text (substring search-text (match-end 0)))))))
+    result))
 
 (defun markdown-follow-include ()
   "Follow image or link at point."

@@ -88,4 +88,50 @@ describe("captureFrame", () => {
       expect(visible.length).toBeLessThanOrEqual(42); // Allow some tolerance for gutter + padding
     }
   });
+
+  // BUG-76: the echo row. captureFrame (embedded Steep + `tmax --capture`)
+  // used to drop state.statusMessage entirely, so commands like gx/markdown-do
+  // ran with zero visible feedback in the live embedded editor. The TUI client
+  // overlays the message on the last buffer line (height-2) — captureFrame
+  // must mirror that.
+  describe("status message echo row (BUG-76)", () => {
+    test("renders statusMessage on the last buffer row when in normal mode", () => {
+      const state = makeState({ statusMessage: "Browse: https://anthropic.com" });
+      const lines = captureFrame(state, 80, 24);
+      // height-2 row (index 22), just above the status line
+      const echoRow = stripAnsi(lines[22]!);
+      expect(echoRow).toContain("Browse: https://anthropic.com");
+      // Frame stays exactly `height` lines (overlay semantics, no growth)
+      expect(lines.length).toBe(24);
+    });
+
+    test("truncates long messages to the terminal width", () => {
+      const state = makeState({ statusMessage: "x".repeat(120) });
+      const lines = captureFrame(state, 80, 24);
+      const echoRow = stripAnsi(lines[22]!);
+      expect(echoRow.length).toBeLessThanOrEqual(80);
+      expect(echoRow).not.toContain("\x1b");
+    });
+
+    test("no echo row when statusMessage is empty — buffer line stays visible", () => {
+      const state = makeState({ statusMessage: "" });
+      const lines = captureFrame(state, 80, 24);
+      const row = stripAnsi(lines[22]!);
+      // The buffer only has 2 lines; row 22 is past the text — must not
+      // contain the previous message ("test" default from makeState).
+      expect(row).not.toContain("Browse");
+    });
+
+    test("command mode takes precedence over the echo row", () => {
+      const state = makeState({ mode: "command", commandLine: ":w", statusMessage: "stale" });
+      const lines = captureFrame(state, 80, 24);
+      const row = stripAnsi(lines[lines.length - 2]!);
+      expect(row).toContain(":w");
+      expect(row).not.toContain("stale");
+    });
+  });
 });
+
+function stripAnsi(s: string): string {
+  return s.replace(/\x1b\[[0-9;]*[A-Za-z]/g, "");
+}
