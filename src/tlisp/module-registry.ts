@@ -3,7 +3,7 @@
  * @description T-Lisp module registry for Guile/Racket-style module system
  */
 
-import type { TLispEnvironment } from "./types.ts";
+import type { TLispEnvironment, TLispValue } from "./types.ts";
 
 /**
  * Metadata for a single module import within a scope
@@ -85,29 +85,42 @@ export class ModuleRegistry {
 
   private buildExports(): ModuleExportRecord[] {
     const loadedRecords = Array.from(this.modules.values()).filter((record) => record.state === "loaded");
-    const exportCounts = new Map<string, number>();
 
+    // BUG-75 (#190): count duplicates only among exports that actually RESOLVE.
+    // The markdown aggregator (commands/markdown.tlisp) RE-LISTS every public
+    // markdown-* name in its (export ...) form but defines none of them — its
+    // env.lookup returns undefined and its entries are (by design) skipped
+    // below. Counting the mere LISTING made every markdown command
+    // "duplicated", qualifying its publicName to
+    // "editor/commands/markdown/<feature>/<name>" — invisible to M-x, which
+    // matches on the plain name. Resolution-aware counting keeps the
+    // conflict-qualification design (two modules genuinely providing DIFFERENT
+    // values for one name) while ignoring list-only re-exporters.
+    const resolved = new Map<string, { record: ModuleRecord; value: TLispValue }[]>();
     for (const record of loadedRecords) {
       for (const exportName of record.exports) {
-        exportCounts.set(exportName, (exportCounts.get(exportName) ?? 0) + 1);
+        const value = record.env.lookup(exportName);
+        if (value === undefined) continue;
+        const bucket = resolved.get(exportName) ?? [];
+        bucket.push({ record, value });
+        resolved.set(exportName, bucket);
       }
     }
 
     const result: ModuleExportRecord[] = [];
-    for (const record of loadedRecords) {
-      if (record.state !== "loaded") continue;
-      for (const exportName of record.exports) {
-        const value = record.env.lookup(exportName);
-        if (value !== undefined) {
-          const duplicated = (exportCounts.get(exportName) ?? 0) > 1;
-          result.push({
-            publicName: duplicated ? `${record.name}/${exportName}` : exportName,
-            exportName,
-            moduleName: record.name,
-            value,
-            env: record.env,
-          });
-        }
+    for (const [exportName, entries] of resolved) {
+      // Same VALUE object in several modules = an intentional re-export of one
+      // defun, not a conflict — keep the plain public name.
+      const distinctValues = new Set(entries.map((entry) => entry.value));
+      for (const { record, value } of entries) {
+        const duplicated = distinctValues.size > 1;
+        result.push({
+          publicName: duplicated ? `${record.name}/${exportName}` : exportName,
+          exportName,
+          moduleName: record.name,
+          value,
+          env: record.env,
+        });
       }
     }
     return result;

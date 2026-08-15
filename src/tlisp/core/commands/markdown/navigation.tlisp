@@ -15,6 +15,7 @@
 
 (defun markdown-next-heading ()
   "Move cursor to next heading line."
+  (interactive)
   (let ((line (+ (cursor-line) 1))
         (total (buffer-line-count)))
     (while (and (< line total)
@@ -27,6 +28,7 @@
 
 (defun markdown-prev-heading ()
   "Move cursor to previous heading line."
+  (interactive)
   (let ((line (- (cursor-line) 1)))
     (while (and (>= line 0)
                 (not (string-match "^#" (buffer-get-line line))))
@@ -38,6 +40,7 @@
 
 (defun markdown-next-same-level-heading ()
   "Move to next heading of same or higher level."
+  (interactive)
   (let* ((current (buffer-get-line (cursor-line)))
          (level (if (string-match "^\(#+\)" current)
                     (length (match-string 1))
@@ -57,6 +60,7 @@
 
 (defun markdown-prev-same-level-heading ()
   "Move to previous heading of same or higher level."
+  (interactive)
   (let* ((current (buffer-get-line (cursor-line)))
          (level (if (string-match "^\(#+\)" current)
                     (length (match-string 1))
@@ -75,6 +79,7 @@
 
 (defun markdown-up-heading ()
   "Move to parent heading (fewer #s)."
+  (interactive)
   (let* ((current (buffer-get-line (cursor-line)))
          (level (if (string-match "^\(#+\)" current)
                     (length (match-string 1))
@@ -93,6 +98,7 @@
 
 (defun markdown-heading-outline ()
   "Show all headings in the minibuffer."
+  (interactive)
   (let ((lines '())
         (total (buffer-line-count))
         (i 0))
@@ -109,26 +115,31 @@
 
 (defun markdown-fold-toggle ()
   "Toggle fold at current heading."
+  (interactive)
   (fold-toggle (cursor-line)))
 
 (defun markdown-fold-close-all ()
   "Close all headings."
+  (interactive)
   (fold-close-all)
   (message "All headings folded"))
 
 (defun markdown-fold-open-all ()
   "Open all folds."
+  (interactive)
   (fold-open-all)
   (message "All folds opened"))
 
 (defun markdown-fold-by-level ()
   "Fold headings deeper than level N. Reads count prefix."
+  (interactive)
   (let ((level (or (prefix-numeric-value) 1)))
     (fold-by-level level)
     (message "Folded headings deeper than level %d" level)))
 
 (defun markdown-visibility-cycle ()
   "TAB cycle: collapsed -> subheadings visible -> fully expanded."
+  (interactive)
   (let* ((line (cursor-line))
          (text (buffer-get-line line)))
     (if (not (string-match "^#" text))
@@ -144,6 +155,7 @@
 (defun markdown-scan-tags ()
   "Scan all lines for #tag patterns. Return list of (line col tag).
 Skips lines inside fenced code blocks (edge fix)."
+  (interactive)
   (let ((total (buffer-line-count))
         (tags '())
         (in-code nil)
@@ -167,6 +179,7 @@ Skips lines inside fenced code blocks (edge fix)."
 
 (defun markdown-next-tag ()
   "Move cursor to next tag after current position."
+  (interactive)
   (let ((tags (markdown-scan-tags))
         (cur-line (cursor-line))
         (cur-col (cursor-column))
@@ -187,6 +200,7 @@ Skips lines inside fenced code blocks (edge fix)."
 
 (defun markdown-prev-tag ()
   "Move cursor to previous tag before current position."
+  (interactive)
   (let ((tags (markdown-scan-tags))
         (cur-line (cursor-line))
         (cur-col (cursor-column))
@@ -208,6 +222,7 @@ Skips lines inside fenced code blocks (edge fix)."
 
 (defun markdown-tag-list ()
   "List all unique tags in the buffer."
+  (interactive)
   (let ((tags (markdown-scan-tags))
         (unique '())
         (i 0))
@@ -228,6 +243,7 @@ Skips lines inside fenced code blocks (edge fix)."
 
 (defun markdown-next-footnote ()
   "Move to next footnote reference."
+  (interactive)
   (let ((line (cursor-line))
         (col (cursor-column))
         (total (buffer-line-count))
@@ -245,6 +261,7 @@ Skips lines inside fenced code blocks (edge fix)."
 
 (defun markdown-prev-footnote ()
   "Move to previous footnote reference."
+  (interactive)
   (let ((line (cursor-line))
         (col (cursor-column))
         (found nil))
@@ -272,6 +289,7 @@ Skips lines inside fenced code blocks (edge fix)."
 
 (defun markdown-push-position ()
   "Push current position onto the link ring for back-navigation."
+  (interactive)
   (let ((entry (list (buffer-current) (cursor-line) (cursor-column)))
         (ring (or *markdown-link-ring* '())))
     (set! *markdown-link-ring* (cons entry ring))
@@ -280,6 +298,7 @@ Skips lines inside fenced code blocks (edge fix)."
 
 (defun markdown-jump-back ()
   "Jump back to previous position before following a markdown link."
+  (interactive)
   (if (or (not *markdown-link-ring*) (= (length *markdown-link-ring*) 0))
       (message "No previous position")
       (let ((entry (car *markdown-link-ring*)))

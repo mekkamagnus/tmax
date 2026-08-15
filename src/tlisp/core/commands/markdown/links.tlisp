@@ -18,6 +18,7 @@
 
 (defun markdown-follow-link ()
   "Open whatever link is under cursor — URL, file, or anchor."
+  (interactive)
   (let* ((line (buffer-get-line (cursor-line)))
          (col (cursor-column)))
     (if (string-match "\\\\[([^\\\\]]*)\\\\]\\\\(([^)]*)\\\\)" line)
@@ -40,6 +41,7 @@
 
 (defun markdown-insert-link ()
   "Insert an inline link at point."
+  (interactive)
   (let ((url (read-string "URL: "))
         (text (read-string "Link text: ")))
     (if (and (> (length url) 0) (> (length text) 0))
@@ -101,6 +103,7 @@
 
 (defun markdown-link-at-point ()
   "Return the URL under cursor or nil."
+  (interactive)
   (let* ((line (buffer-get-line (cursor-line)))
          (col (cursor-column)))
     (if (string-match "\\\\[([^\\\\]]*)\\\\]\\\\(([^)]*)\\\\)" line)
@@ -113,6 +116,7 @@
 
 (defun markdown-follow-include ()
   "Follow image or link at point."
+  (interactive)
   (let ((url (markdown-link-at-point)))
     (if url
         (progn
@@ -124,6 +128,7 @@
 
 (defun markdown-embed-target-at-point ()
   "Find ![[target]] at cursor position. Return target or nil."
+  (interactive)
   (let* ((line (buffer-get-line (cursor-line)))
          (col (cursor-column))
          (result nil)
@@ -139,6 +144,7 @@
 
 (defun markdown-follow-embed ()
   "Follow ![[embed]] at point — navigate to source file. Bug #5."
+  (interactive)
   (let ((target (markdown-embed-target-at-point)))
     (if (not target)
         (message "No embed at point")
@@ -157,6 +163,7 @@
 
 (defun markdown-insert-link-to-file ()
   "Insert a wiki link to another file."
+  (interactive)
   (let ((name (read-string "Link to: ")))
     (if (> (length name) 0)
         (progn

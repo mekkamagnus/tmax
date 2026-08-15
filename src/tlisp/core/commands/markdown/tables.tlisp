@@ -22,6 +22,7 @@
 
 (defun markdown-align-table ()
   "Align the pipe table at point."
+  (interactive)
   (let* ((start (cursor-line))
          (end start)
          (line (buffer-get-line start)))
@@ -222,6 +223,7 @@ at the start/end; $1 maps to the first non-empty cell, so we strip empties."
   "Evaluate ALL formula comments below current table.
 Bug #4 fix: loop over every tblfm line, calling the impl for each.
 Previously only the first formula line was evaluated."
+  (interactive)
   (let ((total (buffer-line-count))
         (any-formula nil))
     ;; Check if any tblfm line exists below cursor.
@@ -250,6 +252,7 @@ Previously only the first formula line was evaluated."
 
 (defun markdown-table-eval-formula-impl ()
   "Evaluate the FIRST formula comment below current table. Internal."
+  (interactive)
   (let ((line (cursor-line))
         (total (buffer-line-count))
         (formula-line nil))
@@ -326,6 +329,7 @@ Previously only the first formula line was evaluated."
 
 (defun markdown-table-insert-formula ()
   "Insert a table formula comment below current table."
+  (interactive)
   (let ((line (cursor-line))
         (total (buffer-line-count))
         (table-end nil)

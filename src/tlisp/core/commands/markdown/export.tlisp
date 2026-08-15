@@ -23,6 +23,7 @@ Bug #2: **bold** -> <strong>, *italic* -> <em>, `code` -> <code>."
 
 (defun markdown-export-to-html ()
   "Export current buffer to HTML."
+  (interactive)
   (let ((filename (buffer-filename)))
     (if (not filename)
         (message "No file associated with buffer")
@@ -62,6 +63,7 @@ Bug #2: **bold** -> <strong>, *italic* -> <em>, `code` -> <code>."
 
 (defun markdown-export-to-text ()
   "Export current buffer to plain text."
+  (interactive)
   (let ((filename (buffer-filename)))
     (if (not filename)
         (message "No file associated with buffer")
@@ -87,6 +89,7 @@ Bug #2: **bold** -> <strong>, *italic* -> <em>, `code` -> <code>."
 
 (defun markdown-export-to-latex ()
   "Export current buffer to LaTeX."
+  (interactive)
   (let ((filename (buffer-filename)))
     (if (not filename)
         (message "No file associated with buffer")
@@ -153,10 +156,12 @@ MUST was descoped to a status hint because read-string is a sync stub and
 no completing-read/picker primitive exists in T-Lisp yet. Bind the three
 backends directly (see markdown-mode.tlisp), or call markdown-export-to-html
 / markdown-export-to-text / markdown-export-to-latex explicitly."
+  (interactive)
   (message "Export: call markdown-export-to-html / -text / -latex directly (, x h / , x t / , x l)"))
 
 (defun markdown-preview ()
   "Preview markdown using glow or Oolong."
+  (interactive)
   (let ((filename (buffer-filename)))
     (if filename
         (progn

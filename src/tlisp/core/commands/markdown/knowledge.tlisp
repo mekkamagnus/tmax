@@ -23,6 +23,7 @@
 
 (defun markdown-skip-front-matter ()
   "Return the line number after YAML front matter, or 0 if none."
+  (interactive)
   (if (and (> (buffer-line-count) 0) (string= (buffer-get-line 0) "---"))
       (let ((i 1)
             (total (buffer-line-count)))
@@ -35,6 +36,7 @@
 
 (defun markdown-generate-toc ()
   "Generate a table of contents from all headings."
+  (interactive)
   (let ((toc-lines '())
         (total (buffer-line-count))
         (i 0))
@@ -131,6 +133,7 @@
 
 (defun markdown-frontmatter-show ()
   "Display all frontmatter key-value pairs."
+  (interactive)
   (if (not (string= (buffer-get-line 0) "---"))
       (message "No frontmatter")
       (let ((i 1)
@@ -152,6 +155,7 @@
 BUG-74: match offsets are relative to the truncated search-text, so track a
 cumulative offset and compare against ABSOLUTE positions — without it, any
 link preceded by another link on the same line is undetectable."
+  (interactive)
   (let* ((line (buffer-get-line (cursor-line)))
          (col (cursor-column))
          (result nil)
@@ -170,6 +174,7 @@ link preceded by another link on the same line is undetectable."
 
 (defun markdown-scan-wiki-links ()
   "Scan all lines for [[link]] patterns. Return list of (line col target)."
+  (interactive)
   (let ((total (buffer-line-count))
         (links '())
         (i 0))
@@ -187,6 +192,7 @@ link preceded by another link on the same line is undetectable."
 
 (defun markdown-next-wiki-link ()
   "Move cursor to next [[wiki-link]] after current position."
+  (interactive)
   (let ((links (markdown-scan-wiki-links))
         (cur-line (cursor-line))
         (cur-col (cursor-column))
@@ -207,6 +213,7 @@ link preceded by another link on the same line is undetectable."
 
 (defun markdown-prev-wiki-link ()
   "Move cursor to previous [[wiki-link]] before current position."
+  (interactive)
   (let ((links (markdown-scan-wiki-links))
         (cur-line (cursor-line))
         (cur-col (cursor-column))
@@ -228,6 +235,7 @@ link preceded by another link on the same line is undetectable."
 
 (defun markdown-follow-wiki-link ()
   "Follow [[wiki-link]] at point."
+  (interactive)
   (let ((target (markdown-wiki-link-at-point)))
     (if (not target)
         (message "No wiki link at point")
@@ -387,6 +395,7 @@ by similarity to the dangling target (substring > prefix > alphabetical)."
 
 (defun markdown-wiki-link-range-at-point ()
   "Find the [[...]] range at cursor. Return (line start-col end-col) or nil."
+  (interactive)
   (let* ((line (buffer-get-line (cursor-line)))
          (col (cursor-column))
          (result nil)
@@ -503,6 +512,7 @@ Bug #6: unlinked mentions. Returns a message listing matching texts."
 
 (defun markdown-backlinks ()
   "Find all files that link to the current file."
+  (interactive)
   (let ((filename (buffer-filename)))
     (if (not filename)
         (message "No file associated with buffer")
@@ -528,6 +538,7 @@ Bug #6: unlinked mentions. Returns a message listing matching texts."
 
 (defun markdown-daily-note ()
   "Create or open today's daily note."
+  (interactive)
   (let ((date-result (shell-command "date +%Y-%m-%d")))
     (let ((date-str (string-trim date-result)))
       (let ((path (concat "daily/" date-str ".md")))
@@ -574,6 +585,7 @@ built-in templates. Substitutes {{date}} and {{title}}."
 
 (defun markdown-rename-note ()
   "Rename current note and update all wiki links."
+  (interactive)
   (let ((old-name (buffer-filename)))
     (if (not old-name)
         (message "No file associated with buffer")

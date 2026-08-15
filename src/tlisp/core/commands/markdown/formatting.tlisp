@@ -23,18 +23,22 @@
             (buffer-delete-range line 0 (+ line 1) 0)))))
 (defun markdown-toggle-bold ()
   "Toggle **bold** around word at point."
+  (interactive)
   (markdown-toggle-delimiter "**" "**"))
 
 (defun markdown-toggle-italic ()
   "Toggle *italic* around word at point."
+  (interactive)
   (markdown-toggle-delimiter "*" "*"))
 
 (defun markdown-toggle-strikethrough ()
   "Toggle ~~strikethrough~~ around word at point."
+  (interactive)
   (markdown-toggle-delimiter "~~" "~~"))
 
 (defun markdown-toggle-code ()
   "Toggle `code` around word at point."
+  (interactive)
   (markdown-toggle-delimiter "`" "`"))
 (defun markdown-replace-line (new-text)
   "Replace current line content with NEW-TEXT."
@@ -84,6 +88,7 @@
               (cursor-move (cursor-line) (+ word-start (length open))))))))
 (defun markdown-toggle-code-block ()
   "Wrap/unwrap fenced code block around current line or selection."
+  (interactive)
   (let ((line (buffer-get-line (cursor-line))))
     (if (string-match "^```" line)
         ;; Unwrap: find the matching fence and remove both
@@ -122,6 +127,7 @@
             (message "Wrapped in code block"))))))
 (defun markdown-promote-heading ()
   "Decrease heading level (## -> #)."
+  (interactive)
   (let ((line (buffer-get-line (cursor-line))))
     (if (string-match "^\(#+\)\\\\s+" line)
         (let* ((hashes (match-string 1))
@@ -136,6 +142,7 @@
 
 (defun markdown-demote-heading ()
   "Increase heading level (## -> ###)."
+  (interactive)
   (let ((line (buffer-get-line (cursor-line))))
     (if (string-match "^\(#+\)\\\\s+" line)
         (let ((len (length (match-string 1))))
@@ -148,6 +155,7 @@
         (message "Not on a heading"))))
 (defun markdown-insert-heading ()
   "Insert a new heading at the given level (reads prefix arg)."
+  (interactive)
   (let ((level (or (prefix-numeric-value) 2)))
     (if (> level 6) (set! level 6))
     (if (< level 1) (set! level 1))
@@ -157,6 +165,7 @@
       (message "Inserted level %d heading" level))))
 (defun markdown-insert-list-item ()
   "Insert a new list item below current, matching marker and indent."
+  (interactive)
   (let* ((line (buffer-get-line (cursor-line)))
          (indent 0))
     ;; Detect indent
@@ -193,6 +202,7 @@
          (message "Not on a list item"))))))
 (defun markdown-renumber-list ()
   "Renumber the ordered list at point."
+  (interactive)
   (let ((line (cursor-line))
         (text (buffer-get-line (cursor-line))))
     (if (not (string-match "^\\\\s*\(\\\\d+\)[.)]" text))
@@ -232,6 +242,7 @@
           (message "Renumbered %d items" (+ (- end start) 1))))))
 (defun markdown-do ()
   "Context-aware action at point: follow link, fold heading, toggle checkbox."
+  (interactive)
   (let ((line (buffer-get-line (cursor-line))))
     (cond
       ((markdown-link-at-point)
@@ -243,6 +254,7 @@
 
 (defun markdown-toggle-checkbox ()
   "Toggle checkbox state on current line."
+  (interactive)
   (let ((line (buffer-get-line (cursor-line))))
     (if (string-match "^\(\\\\s*[-*+]\\\\s-\)\\\\[ \\\\]" line)
         (progn
@@ -257,6 +269,7 @@
   "Auto-continue list on Enter. Called after newline is inserted.
 Checks previous line for list marker and inserts continuation.
 If previous line was an empty list item, clears it instead."
+  (interactive)
   (if (not (string= (major-mode-get) "markdown"))
       nil
       (let ((prev-line (- (cursor-line) 1))
@@ -305,6 +318,7 @@ If previous line was an empty list item, clears it instead."
 (defun markdown-current-subtree-range ()
   "Return (start end level) for the heading at cursor-line, or nil.
 The end includes all child sections."
+  (interactive)
   (let ((ranges (find-heading-ranges))
         (found-range nil)
         (i 0))
@@ -339,6 +353,7 @@ The end includes all child sections."
 
 (defun markdown-kill-subtree ()
   "Kill the subtree at current heading (heading + children)."
+  (interactive)
   (let ((range (markdown-current-subtree-range)))
     (if (not range)
         (message "Not on a heading")
@@ -355,6 +370,7 @@ The end includes all child sections."
 
 (defun markdown-copy-subtree ()
   "Copy the subtree at current heading to kill ring."
+  (interactive)
   (let ((range (markdown-current-subtree-range)))
     (if (not range)
         (message "Not on a heading")
@@ -366,6 +382,7 @@ The end includes all child sections."
 
 (defun markdown-find-sibling-ranges ()
   "Find all sibling heading ranges at the same level as current heading."
+  (interactive)
   (let ((ranges (find-heading-ranges))
         (cur-range (markdown-current-subtree-range))
         (siblings '()))
@@ -381,6 +398,7 @@ The end includes all child sections."
           (reverse siblings)))))
 (defun markdown-move-subtree-up ()
   "Move current subtree up, swapping with previous sibling."
+  (interactive)
   (let ((siblings (markdown-find-sibling-ranges)))
     (if (or (not siblings) (< (length siblings) 2))
         (message "No sibling to swap with")
@@ -415,6 +433,7 @@ The end includes all child sections."
 
 (defun markdown-move-subtree-down ()
   "Move current subtree down, swapping with next sibling."
+  (interactive)
   (let ((siblings (markdown-find-sibling-ranges)))
     (if (or (not siblings) (< (length siblings) 2))
         (message "No sibling to swap with")
@@ -448,6 +467,7 @@ The end includes all child sections."
                 (message "Moved subtree down")))))))
 (defun markdown-promote-subtree ()
   "Promote all headings in subtree (reduce heading level by 1)."
+  (interactive)
   (let ((range (markdown-current-subtree-range)))
     (if (not range)
         (message "Not on a heading")
@@ -471,6 +491,7 @@ The end includes all child sections."
 
 (defun markdown-demote-subtree ()
   "Demote all headings in subtree (increase heading level by 1)."
+  (interactive)
   (let ((range (markdown-current-subtree-range)))
     (if (not range)
         (message "Not on a heading")

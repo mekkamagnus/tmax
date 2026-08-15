@@ -9,6 +9,7 @@
 
 (defun markdown-find-code-block ()
   "Find fenced code block around cursor. Returns (start end lang) or nil."
+  (interactive)
   (let ((cur (cursor-line))
         (total (buffer-line-count))
         (open-line nil)
@@ -37,6 +38,7 @@
 
 (defun markdown-execute-block ()
   "Execute the code block at point and insert results."
+  (interactive)
   (let ((block (markdown-find-code-block)))
     (if (not block)
         (message "Not in a code block")
@@ -83,6 +85,7 @@
 
 (defun markdown-clear-results ()
   "Clear execution results below current code block."
+  (interactive)
   (let ((block (markdown-find-code-block)))
     (if (not block)
         (message "Not in a code block")
@@ -101,6 +104,7 @@
 
 (defun markdown-execute-all-blocks ()
   "Execute all code blocks in the buffer."
+  (interactive)
   ;; Re-read (buffer-line-count) per iteration: each markdown-execute-block
   ;; call inserts a `<!-- results: -->` line, shifting later block positions.
   ;; Reading total once before the loop skipped blocks past the original count.
