@@ -41,4 +41,12 @@ plain text.
 - Non-markdown buffers are untouched even if a resolver is passed (tested).
 - Wiki-links previously invisible-as-links now always read as links — a
   side-effect fix that makes the whole feature discoverable.
-- Suite: wiki-link-faces 10/10; syntax+render sweep 313/313; typecheck clean.
+- **Gate retry 1 corrections:** extension detection now mirrors T-Lisp
+  EXACTLY (`string-contains-p "."` on the whole target — a dot in an
+  intermediate segment counts; unit-tested so face and follow can't
+  disagree); the memoization perf test now deletes the file mid-TTL to
+  PROVE no re-stat; the resolver callback is typed to the `WikiLinkClass`
+  union; heading-slug scan is one multiline regex over `getContent()`
+  (lazy, only when a heading-only link is visible); the live-e2e ANSI
+  transcript is committed into the spec as the auditable artifact.
+- Suite: wiki-link-faces 11/11; syntax+render sweep 301/301; typecheck clean.

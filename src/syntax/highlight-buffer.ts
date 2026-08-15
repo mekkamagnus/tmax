@@ -8,6 +8,7 @@ import { tokenize } from "./tokenizer.ts";
 import type { ParseState } from "./parse-state.ts";
 import type { SyntaxToken } from "../core/contracts/editor.ts";
 import { highlightLine } from "./highlighter.ts";
+import type { WikiLinkClass } from "./wiki-link-faces.ts";
 import { languageMap } from "./language-registry.ts";
 
 const extToLang: Map<string, string> = new Map([
@@ -35,7 +36,7 @@ export function computeHighlightSpans(
   /** SPEC-118: re-classify [[wiki-link]] tokens as resolved/dangling. Only
    *  applied to markdown buffers; callers pass the classifier built from the
    *  buffer under render (see wiki-link-faces.ts). */
-  resolveWikiLink?: (target: string) => string,
+  resolveWikiLink?: (target: string) => WikiLinkClass,
 ): HighlightSpan[][] {
   const lang = languageFromFilename(filename);
   if (!lang) return [];

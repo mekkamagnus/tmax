@@ -42,20 +42,12 @@ function slugify(text: string): string {
   return text.trim().toLowerCase().replace(/[^a-z0-9]+/g, "-");
 }
 
-function bufferLine(buffer: TextBuffer, n: number): string {
-  const r = buffer.getLine(n);
-  return Either.isRight(r) ? r.right : "";
-}
-
-function bufferLineCount(buffer: TextBuffer): number {
-  const r = buffer.getLineCount();
-  return Either.isRight(r) ? r.right : 0;
-}
-
 /**
  * Build a target → face-class classifier for one buffer. The heading-slug
- * scan (only needed for `[[#heading]]` forms) is lazy — plain file links
- * never pay for it, and neither does a buffer with no heading-only links.
+ * scan (only needed for `[[#heading]]` forms) is lazy AND single-pass: one
+ * multiline regex over getContent() (not per-line exec calls), only when a
+ * heading-only link is actually classified — plain file links never pay for
+ * it, and neither does a buffer with no heading-only links.
  */
 export function makeWikiLinkResolver(
   buffer: TextBuffer,
@@ -66,10 +58,11 @@ export function makeWikiLinkResolver(
   const headingSlugs = (): Set<string> => {
     if (!slugs) {
       slugs = new Set<string>();
-      const count = bufferLineCount(buffer);
-      for (let i = 0; i < count; i++) {
-        const m = /^(#{1,6})\s+(.+)$/.exec(bufferLine(buffer, i));
-        if (m) slugs.add(slugify(m[2]!));
+      const content = buffer.getContent();
+      const text = Either.isRight(content) ? content.right : "";
+      const headingRe = /^#{1,6}[ \t]+(.+)$/gm;
+      for (let m = headingRe.exec(text); m !== null; m = headingRe.exec(text)) {
+        slugs.add(slugify(m[1]!));
       }
     }
     return slugs;
@@ -88,8 +81,12 @@ export function makeWikiLinkResolver(
         : "wiki-link-dangling";
     }
 
-    // [[file]] / [[file#heading]]: the file part drives resolution.
-    let path = /\.[^/\\]+$/.test(filePart) ? filePart : `${filePart}.md`;
+    // [[file]] / [[file#heading]]: the file part drives resolution. Extension
+    // rule mirrors the T-Lisp follow EXACTLY (knowledge.tlisp:
+    // string-contains-p "." on the whole target) — a dot anywhere (even in an
+    // intermediate path segment like docs.v2/note) counts as "has extension",
+    // so face and follow never disagree on the same link.
+    let path = filePart.includes(".") ? filePart : `${filePart}.md`;
     if (!path.startsWith("/")) path = `${dir}/${path}`;
     return cachedExists(path) ? "wiki-link-resolved" : "wiki-link-dangling";
   };

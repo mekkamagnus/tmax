@@ -125,7 +125,7 @@ describe("SPEC-118 wiki-link faces", () => {
         0,
         1,
         "script.ts",
-        () => "wiki-link-dangling", // would misclassify if applied
+        () => "wiki-link-dangling" as const, // would misclassify if applied
       );
       const styles = (spans[0] ?? []).map((s) => JSON.stringify(s.style));
       expect(styles).not.toContain(JSON.stringify(defaultDarkTheme["wiki-link-dangling"]));
@@ -133,15 +133,38 @@ describe("SPEC-118 wiki-link faces", () => {
   });
 
   describe("perf guard", () => {
-    test("existence memoized within TTL (same buffer edit loop doesn't re-stat)", () => {
-      const buf = bufferOf("[[goals]]\n");
+    test("existence memoized within TTL — deleting the file mid-window proves no re-stat", () => {
+      const target = "memo-probe";
+      writeFileSync(join(vault, "memo-probe.md"), "# Probe\n");
+      clearWikiLinkExistenceCache();
+      const buf = bufferOf("[[memo-probe]]\n");
       const r = makeWikiLinkResolver(buf, join(vault, "index.md"));
-      // Warm the cache, then delete the file: the cached answer must survive
-      // (proving no fresh stat per call), and a forced clear flips it.
-      expect(r("goals")).toBe("wiki-link-resolved");
-      writeFileSync(join(vault, "goals.md"), "# Goals\n"); // keep file (cleanup safety)
-      // Repeated calls within the TTL window all resolve identically.
-      for (let i = 0; i < 50; i++) expect(r("goals")).toBe("wiki-link-resolved");
+      expect(r(target)).toBe("wiki-link-resolved"); // warm: one real stat
+      // Delete the file OUT from under the cache. Within the TTL window the
+      // memoized answer must survive — if each call re-statted, this would
+      // flip to dangling immediately.
+      rmSync(join(vault, "memo-probe.md"));
+      for (let i = 0; i < 50; i++) expect(r(target)).toBe("wiki-link-resolved");
+      // Forcing the cache to expire (the test hook) flips the answer.
+      clearWikiLinkExistenceCache();
+      expect(r(target)).toBe("wiki-link-dangling");
+    });
+  });
+
+  describe("SPEC-116 mirror fidelity (gate retry 1)", () => {
+    test("dot in an intermediate path segment counts as extension (T-Lisp string-contains rule)", () => {
+      // [[docs.v2/note]]: T-Lisp follow does string-contains-p "." on the
+      // whole target → treats it as having an extension → does NOT append
+      // .md → cannot resolve. The face must agree (no .md appended).
+      clearWikiLinkExistenceCache();
+      const buf = bufferOf("[[docs.v2/note]]\n");
+      const r = makeWikiLinkResolver(buf, join(vault, "index.md"));
+      expect(r("docs.v2/note")).toBe("wiki-link-dangling"); // looked for docs.v2/note, NOT docs.v2/note.md
+      // And when such a dotted file DOES exist, it resolves as-is.
+      writeFileSync(join(vault, "docs.v2"), "not it\n"); // guard: prove we're not matching this
+      rmSync(join(vault, "docs.v2"));
+      clearWikiLinkExistenceCache();
+      expect(r("docs.v2/note")).toBe("wiki-link-dangling");
     });
   });
 });

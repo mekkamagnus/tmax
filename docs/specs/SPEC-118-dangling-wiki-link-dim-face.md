@@ -22,3 +22,39 @@
 
 - `src/editor/api/syntax-ops.ts` — tokenizer + faces.
 - `src/tlisp/core/commands/markdown/knowledge.tlisp` — the resolution rule to mirror (extension append + dir-relative).
+
+## Live e2e transcript (mekkapi tab, herdr pane w2:p3, 2026-08-15)
+
+Captured from the real TUI (embedded Steep via the ~/.bun/bin/tmax shim) on
+`~/Documents/md-journal/link-test.md`, read with `herdr pane read --ansi`:
+
+```
+# line 3 — RESOLVED link [[2026-08-08]] (note exists):
+^[[0m^[[2m^[[38;5;245m 3 ^[[0m…plus ^[[0m^[[38;2;97;175;239m[[2026-08-08]]^[[0m wiki
+                    └── link face #61afef (97;175;239), full intensity
+
+# line 4 — DANGLING link [[brand new thought]] (no such note):
+^[[0m^[[2m^[[38;5;245m 4 ^[[0m…see ^[[0m^[[2m^[[38;2;97;175;239m[[brand new thought]]^[[0m dangling
+                        └── ESC[2m (dim) preceding the SAME #61afef hue
+```
+
+Two visually distinct intensities of the same link color, one face per span —
+the criterion's exact requirement.
+
+## Implementation notes (gate retry 1)
+
+- **Extension rule mirrors T-Lisp exactly**: `string-contains-p "."` on the
+  whole target (a dot in an intermediate segment like `docs.v2/note` counts
+  as "has extension") — face and follow can never disagree. Unit-tested.
+- **Perf guard**: `existsSync` behind a 2s TTL memo (no vault stats per
+  keystroke; proven by a delete-the-file-mid-window test). The heading-slug
+  scan for `[[#heading]]` forms is lazy per render and single-pass (one
+  multiline regex over `getContent()`) — paid only when a heading-only link
+  is visible. TTL staleness after follow-or-create is bounded at 2s (no
+  invalidation hook; documented tradeoff).
+- **Intentional behavior change**: plain `wiki-link` previously had NO theme
+  entry (rendered completely unstyled). It now renders with the link face
+  even without a resolver — wiki-links reading as links is the point of the
+  feature.
+- **Out of scope**: `![[embed]]` tokens are not reclassified (pre-existing
+  behavior, unchanged).
