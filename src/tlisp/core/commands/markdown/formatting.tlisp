@@ -243,10 +243,15 @@
 (defun markdown-do ()
   "Context-aware action at point: follow link, fold heading, toggle checkbox."
   (interactive)
+  ;; SPEC-117: gx is the ONE context key — wiki-links follow too (existing
+  ;; targets open; dangling ones get the SPEC-116 follow-or-create prompt).
+  ;; Precedence: inline link > wiki-link > heading fold > checkbox.
   (let ((line (buffer-get-line (cursor-line))))
     (cond
       ((markdown-link-at-point)
        (markdown-follow-link))
+      ((markdown-wiki-link-at-point)
+       (markdown-follow-wiki-link))
       ((string-match "^#" line)
        (markdown-fold-toggle))
       (t

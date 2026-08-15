@@ -263,3 +263,54 @@ describe("BUG-74: at-point on links preceded by other links", () => {
     expect(tl(e, "(editor-status)")).not.toContain("No wiki link");
   });
 });
+
+// SPEC-117 (#192): gx (markdown-do) is the ONE context key — wiki-links
+// follow through it too. Precedence: inline link > wiki-link > heading fold.
+describe("SPEC-117: markdown-do dispatches wiki-links", () => {
+  let vault: string;
+
+  beforeAll(() => {
+    vault = mkdtempSync(join(tmpdir(), "tmax-vault-gx-"));
+    writeFileSync(join(vault, "goals.md"), "# Goals\n\nthe real goals note\n");
+  });
+
+  afterAll(() => {
+    rmSync(vault, { recursive: true, force: true });
+  });
+
+  test("gx on an existing [[link]] opens it", async () => {
+    const e = await setupMdEditor("see [[goals]] now\n", join(vault, "index.md"));
+    executeTlisp(e, "(cursor-move 0 8)"); // inside [[goals]]
+    executeTlisp(e, "(markdown-do)");
+    expect(e.getState().mode).toBe("normal"); // opened, no prompt
+    expect(tl(e, "(buffer-current)")).toContain("goals.md");
+  });
+
+  test("gx on a dangling [[link]] opens the follow-or-create prompt", async () => {
+    const e = await setupMdEditor("go [[fresh idea]] now\n", join(vault, "index.md"));
+    executeTlisp(e, "(cursor-move 0 6)");
+    executeTlisp(e, "(markdown-do)");
+    expect(e.getState().mode).toBe("mx"); // completing-read prompt
+    expect(tl(e, "(editor-status)")).not.toContain("Nothing to do");
+  });
+
+  test("precedence: inline link wins inside a pathological [[…[t](u)…]]", async () => {
+    // "[[see [goals](goals.md)]]" — cursor on the inner inline link text.
+    // Deterministic order is fine (spec); pin: inline check runs first.
+    const e = await setupMdEditor("[[see [goals](goals.md)]] end\n", join(vault, "index.md"));
+    executeTlisp(e, "(cursor-move 0 7)"); // inside inner [goals]
+    expect(tl(e, "(markdown-link-at-point)")).toBe("goals.md"); // inline detected at point
+    executeTlisp(e, "(markdown-do)");
+    // inline path → markdown-follow-link → file link opens goals.md
+    expect(tl(e, "(buffer-current)")).toContain("goals.md");
+  });
+
+  test("no regression: gx on a heading still folds", async () => {
+    const e = await setupMdEditor("# Heading\n\ncontent\n\n# Other\n");
+    executeTlisp(e, "(cursor-move 0 0)");
+    executeTlisp(e, "(markdown-do)");
+    // fold applied (not "Nothing to do at point", not a link follow)
+    expect(e.getState().mode).toBe("normal");
+    expect(tl(e, "(editor-status)")).not.toContain("Nothing to do");
+  });
+});

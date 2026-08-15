@@ -6,12 +6,12 @@
 
 ## Completion Criteria (Definition of Done)
 
-- [ ] `markdown-do`'s dispatch (formatting.tlisp ~line 236) checks `markdown-wiki-link-at-point` BEFORE falling through to heading/checkbox — `[[link]]` at point → `markdown-follow-wiki-link` (existing links open; dangling → the follow-or-create prompt).
-- [ ] Precedence rule pinned: inline link > wiki-link > heading fold > checkbox. (A `[t](u)` inside a `[[…]]` is pathological; any deterministic order is fine, just tested.)
-- [ ] Unit tests: gx-path dispatch on each category at point.
-- [ ] **Live e2e in the mekkapi tab**: on a note in `~/Documents/md-journal`, `gx` over an existing `[[2026-08-08]]` opens it; over a dangling `[[fresh idea]]` opens the follow-or-create prompt — verified by reading the pane.
-- [ ] No regression: `gx` on a heading still folds, on a checkbox still toggles (markdown-do's existing behavior, covered by its tests).
-- [ ] `bun run typecheck` + markdown suites green.
+- [x] `markdown-do`'s dispatch (formatting.tlisp ~line 236) checks `markdown-wiki-link-at-point` BEFORE falling through to heading/checkbox — `[[link]]` at point → `markdown-follow-wiki-link` (existing links open; dangling → the follow-or-create prompt).
+- [x] Precedence rule pinned: inline link > wiki-link > heading fold > checkbox. (A `[t](u)` inside a `[[…]]` is pathological; any deterministic order is fine, just tested.)
+- [x] Unit tests: gx-path dispatch on each category at point.
+- [x] **Live e2e in the mekkapi tab**: on a note in `~/Documents/md-journal`, `gx` over an existing `[[2026-08-08]]` opens it; over a dangling `[[fresh idea]]` opens the follow-or-create prompt — verified by reading the pane.
+- [x] No regression: `gx` on a heading still folds, on a checkbox still toggles (markdown-do's existing behavior, covered by its tests).
+- [x] `bun run typecheck` + markdown suites green.
 
 ## Motivation
 
