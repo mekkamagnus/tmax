@@ -430,6 +430,8 @@ layer (RFC-026) — and tests — can drive the dispatch without the prompt."
 Existing notes ranked by similarity + an explicit + Create candidate.
 HEADING (#sec / #^block suffix) is replayed on the opened note."
   (markdown-resolve-prepare target heading)
+  ;; "markdown-note-history" is DELIBERATELY shared with the SPEC-120 finder
+  ;; (markdown-complete-at-point): one note-selection history across both.
   (completing-read
     (concat "Follow or create [" target "]: ")
     "markdown-note-completion-table"
@@ -584,6 +586,9 @@ Called by insert-char on the second consecutive [ in a markdown buffer."
   ;; require-match t: Enter only accepts a listed candidate — the
   ;; + Create entry (present for any non-empty input) keeps creation
   ;; reachable, and raw unmatched text can never silently link nothing.
+  ;; "markdown-note-history" is DELIBERATELY shared with SPEC-116's
+  ;; follow-or-create prompt (markdown-resolve-or-create): one
+  ;; note-selection history across both.
   (completing-read
     "Link to: "
     "markdown-complete-table"

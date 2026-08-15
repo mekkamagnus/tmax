@@ -225,6 +225,22 @@ describe("SPEC-120: [[ fuzzy note finder", () => {
     });
   });
 
+  describe("GATE: + Create accept renders the fresh link RESOLVED (non-dim)", () => {
+    test("captureFrame after a + Create accept shows the link face without dim", async () => {
+      const { captureFrame } = await import("../../src/render/capture-frame.ts");
+      const editor = await typeOpenBrackets("see here\n", 4);
+      executeTlisp(editor, '(minibuffer-set-input "brand-new-note")');
+      executeTlisp(editor, '(minibuffer-dispatch-key "Enter")');
+      expect(existsSync(join(vault, "brand-new-note.md"))).toBe(true);
+      const lines = captureFrame(editor.getEditorState() as any, 80, 24);
+      const row = (lines[0] ?? "").replace(/\x1b\[[0-9;]*[A-Za-z]/g, "");
+      expect(row).toContain("see brand-new-notehere"); // SPEC-119 bracket-less
+      expect(lines[0] ?? "").toContain("38;2;97;175;239"); // link face
+      // the file was written BEFORE the render → resolved, NOT dim
+      expect(lines[0] ?? "").not.toContain("\x1b[2m\x1b[38;2;97;175;239");
+    });
+  });
+
   describe("SPEC-116 regression", () => {
     test("markdown-create-note-for still opens the created note", async () => {
       const editor = await setupMdEditor("x\n", join(vault, "index.md"));

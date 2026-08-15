@@ -56,7 +56,8 @@ prepare/table/accept trio:
   "insert")`, cursor after the closing `]]`. `+ Create` additionally writes
   the new note from the template (`markdown-create-note-for` minus the
   `find-file-open` — creating must NOT yank the user out of their note; the
-  new link renders dimmed per SPEC-118 until followed).
+  file exists by the next render, so the new link renders resolved per
+  SPEC-118 immediately).
 - **Cancel** — Escape/C-g in the minibuffer already returns to normal mode
   untouched; the accept wrapper's cancel path restores insert mode and the
   cursor position (the bare `[[` remains, as typed).
@@ -192,8 +193,9 @@ IMPORTANT: Execute every step in order, top to bottom.
 - Unit: trigger → `minibuffer-set-input "goal"` → dispatch Enter → buffer
   contains `[[goals]]`, cursor after, insert mode; the file was NOT switched.
 - Unit: trigger → Enter on `+ Create: fresh` → buffer `[[fresh]]` + file
-  `fresh.md` exists + buffer NOT switched; the link renders dangling
-  (SPEC-118 face, via the wiki-link-faces resolver in a render assertion).
+  `fresh.md` exists + buffer NOT switched; the fresh link renders RESOLVED
+  (SPEC-118 non-dim face, via a captureFrame render assertion — the file
+  is written before the next render).
 
 ### Step 6: Regression sweep + live e2e
 - `bun run typecheck`, `bun run typecheck:test`.

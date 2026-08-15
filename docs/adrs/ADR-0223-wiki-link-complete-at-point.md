@@ -45,16 +45,20 @@ Pure T-Lisp, zero new TS primitives, three pieces:
   and `minibuffer-cancel` restores it; the cursor never moved — no cancel
   code was written for this feature.
 - Obsidian-flow parity, live-verified in the mekkapi tab: second `[` opens
-  "Link to:" with the vault listed (1/5 → filtered 2/2), Down+Enter
-  completes `[[2026-08-08]]` in place still in INSERT, and `gx` follows the
-  fresh link immediately after.
+  "Link to:" with the vault listed (1/5 → filtered 2/2), and — with the
+  retry-1 create-LAST ordering, re-verified live — plain Enter completes
+  `[[2026-08-08]]` to the fuzzy best match in place, still in INSERT; `gx`
+  follows the fresh link immediately after.
+- The finder and SPEC-116's gx prompt deliberately share the
+  `"markdown-note-history"` minibuffer history (one note-selection history
+  across both surfaces); both call sites carry a comment saying so.
 - Fixture gotcha recorded: `setupMdEditor` does not run auto-mode — markdown
   tests need an explicit `(major-mode-set "markdown")`.
 - Known v1 tradeoff (documented in the spec): `[[text](url)` also opens the
   finder (Escape costs one keystroke); smart suppression awaits BUG-82's
   fence spans.
-- Suite: wiki-link-complete 13/13 (table ordering/omission, trigger matrix
+- Suite: wiki-link-complete 17/17 (table ordering/omission, trigger matrix
   incl. non-markdown + mode-off + column-1 guard, existing-note accept with
   cursor + no-buffer-switch, +Create accept with file-written-not-opened,
-  cancel + re-trigger, SPEC-116 create-still-opens regression); wiki cluster
-  68/68; typecheck clean.
+  cancel + re-trigger, SPEC-116 create-still-opens regression, +Create-path
+  resolved render); wiki cluster green; typecheck clean.
