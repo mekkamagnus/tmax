@@ -50,6 +50,28 @@ delimiter and leaves the cursor between."
         (progn (buffer-insert close) (cursor-move (cursor-line) (- (cursor-column) 1)))
         nil))
     nil)
+  ;; SPEC-120: the second `[` of a freshly typed `[[` instantly opens the
+  ;; fuzzy vault-note finder (markdown buffers, wiki-link-complete mode).
+  ;; The consult runs AFTER buffer-insert, so both `[`s are in the buffer
+  ;; and the cursor sits right after them when the prompt opens.
+  (if (and (string= key "[")
+           (minor-mode-active-p "wiki-link-complete")
+           (string= (major-mode-get) "markdown")
+           (>= (cursor-column) 2)
+           ;; the char just typed is preceded by another `[`…
+           (string= (substring (buffer-get-line (cursor-line))
+                               (- (cursor-column) 2)
+                               (- (cursor-column) 1))
+                    "[")
+           ;; …and the cursor is NOT sitting before an electric-pair close
+           ;; (with electric-pair on, `[[` yields "[[]]"; completing inside
+           ;; that would double the closing brackets).
+           (not (string= (substring (buffer-get-line (cursor-line))
+                                    (cursor-column)
+                                    (+ (cursor-column) 1))
+                         "]")))
+    (markdown-complete-at-point)
+    nil)
   t)
 
 (defun vim-line-length (line)

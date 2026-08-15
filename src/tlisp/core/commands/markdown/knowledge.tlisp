@@ -11,6 +11,9 @@
     markdown-note-create-candidate markdown-note-path
     markdown-note-completion-table markdown-resolve-prepare markdown-resolve-or-create
     markdown-resolve-accept markdown-resolve-dispatch markdown-create-note-for
+    markdown-write-note-template
+    markdown-complete-prepare markdown-complete-table markdown-complete-accept
+    markdown-complete-at-point
     markdown-find-unlinked-mentions markdown-backlinks
     markdown-daily-note markdown-rename-note
     markdown-sparse-tree-regex markdown-sparse-tree-level markdown-sparse-tree-tag)
@@ -433,14 +436,16 @@ HEADING (#sec / #^block suffix) is replayed on the opened note."
   "Minibuffer accept handler: dispatch the prompt CHOICE."
   (markdown-resolve-dispatch markdown-resolve-target choice))
 
-(defun markdown-create-note-for (name)
-  "Create a new note NAME.md from the blank template and open it (SPEC-116)."
+(defun markdown-write-note-template (name)
+  "Write note NAME.md from the blank template (no open) — SPEC-120 split out
+of markdown-create-note-for so completion-at-point can create WITHOUT
+yanking the user out of the note they are writing. mkdirs the FULL dirname
+(recursive) — [[sub/new-note]] with a missing sub/ must create it, not fail
+silently (verify-gate #185 gap 2). Returns the written path."
   (let* ((dir (markdown-dirname (or (buffer-filename) ".")))
          (path (concat dir "/" name ".md"))
          (template-file (read-file-content "~/.config/tmax/templates/blank.md"))
          (content nil))
-    ;; mkdir the FULL note dirname (recursive) — [[sub/new-note]] with a
-    ;; missing sub/ must create it, not fail silently (verify-gate #185 gap 2).
     (file-mkdir (markdown-dirname path))
     (if template-file
       (set! content (markdown-expand-template-variables template-file name))
@@ -448,6 +453,11 @@ HEADING (#sec / #^block suffix) is replayed on the opened note."
     ;; Write the file first: find-file-open is a no-op for missing files
     ;; (read-file-content returns nil), so creation must persist then open.
     (write-file-content path content)
+    path))
+
+(defun markdown-create-note-for (name)
+  "Create a new note NAME.md from the blank template and open it (SPEC-116)."
+  (let ((path (markdown-write-note-template name)))
     (find-file-open path)
     (message "Created note: %s" path)))
 
@@ -479,6 +489,67 @@ the [[...]] at point to the canonical name (the dedup payoff). Replays the
           (if markdown-resolve-heading
             (markdown-open-anchor (concat "#" markdown-resolve-heading))))
         (message "No such note: %s" choice)))))
+
+
+;; ── Completion-at-point (SPEC-120) ────────────────────────────────────
+;; Prompt state in the SPEC-116 shape (ADR-0168): module defvars are NOT
+;; set!-able from outside → exported prepare; accept runs in the minibuffer
+;; accept handler. The recorded line/col is where the typed "[[" ENDS, so
+;; intermediate minibuffer interaction cannot skew the insert target.
+(defvar markdown-complete-notes '())
+(defvar markdown-complete-line 0)
+(defvar markdown-complete-col 0)
+
+(defun markdown-complete-prepare ()
+  "Prime the completion-at-point state: vault scan + the [[ position.
+The cursor sits right after the just-typed second [ — record it."
+  (interactive)
+  (set! markdown-complete-notes (markdown-vault-notes))
+  (set! markdown-complete-line (cursor-line))
+  (set! markdown-complete-col (cursor-column)))
+
+(defun markdown-complete-table (input action)
+  "Completion table for the [[ finder (SPEC-120): '+ Create: <input>' first
+(omitted while INPUT is empty — nothing to create yet), then EVERY vault
+note. No re-ranking: the minibuffer's input filtering is the fuzzy match —
+the input IS the query."
+  (if (string= action "metadata")
+    (hashmap "category" "tmax-note-complete")
+    (let ((notes (markdown-note-candidates-of
+                   (markdown-note-names-of markdown-complete-notes))))
+      (if (string= input "")
+        notes
+        (cons (markdown-note-create-candidate input) notes)))))
+
+(defun markdown-complete-accept (choice)
+  "Accept handler: complete the [[ at the recorded position, in place.
+Existing note → '<choice>]]'; '+ Create: X' → 'X]]' plus the note file
+written from template WITHOUT opening it (creating must not yank the user
+out of the note being written; the link renders dangling until followed).
+Cursor lands after ']]', back in insert mode."
+  (let ((name (if (string-prefix-p "+ Create: " choice)
+                (substring choice 10)
+                choice)))
+    (cursor-move markdown-complete-line markdown-complete-col)
+    (buffer-insert (concat name "]]"))
+    (if (string-prefix-p "+ Create: " choice)
+      (progn
+        (markdown-write-note-template name)
+        (message "Created note: %s" name))
+      (message "Linked: %s" name))
+    (editor-set-mode "insert")))
+
+(defun markdown-complete-at-point ()
+  "Open the fuzzy vault-note finder for the [[ just typed (SPEC-120).
+Called by insert-char on the second consecutive [ in a markdown buffer."
+  (markdown-complete-prepare)
+  ;; require-match t: Enter only accepts a listed candidate — the
+  ;; + Create entry (present for any non-empty input) keeps creation
+  ;; reachable, and raw unmatched text can never silently link nothing.
+  (completing-read
+    "Link to: "
+    "markdown-complete-table"
+    nil t "" "markdown-note-history" "markdown-complete-accept"))
 
 (defun markdown-find-unlinked-mentions (title texts)
   "Find texts that mention TITLE in plain text but NOT as [[TITLE]] links.

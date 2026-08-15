@@ -1,0 +1,47 @@
+(defmodule editor/modes/wiki-link-complete
+  (export wiki-link-complete-mode global-wiki-link-complete-mode)
+
+;; wiki-link-complete-mode.tlisp — SPEC-120 (#197)
+;; Typing the second `[` of `[[` in insert mode (markdown buffers) instantly
+;; opens the fuzzy vault-note finder: pick an existing note or the
+;; + Create candidate and the link completes in place. Consulted by
+;; insert-char (insert-entries.tlisp) — the electric-pair pattern.
+
+(define-minor-mode "wiki-link-complete" "Fuzzy [[ note finder" "WikiC")
+
+(defun wiki-link-complete-mode (&optional (arg nil arg-supplied-p))
+  "Toggle wiki-link-complete mode.
+With no argument, toggle.
+With t, enable.
+With positive number, enable.
+With 0 or negative number, disable."
+  (interactive)
+  (if (not arg-supplied-p)
+    (minor-mode-toggle "wiki-link-complete")
+    (if (equal arg t)
+      (minor-mode-set "wiki-link-complete" t)
+      (if (numberp arg)
+        (if (> arg 0)
+          (minor-mode-set "wiki-link-complete" t)
+          (minor-mode-set "wiki-link-complete" nil))
+        (minor-mode-set "wiki-link-complete" nil)))))
+
+(defun global-wiki-link-complete-mode (&optional (arg nil arg-supplied-p))
+  "Toggle wiki-link-complete mode globally (all markdown buffers)."
+  (interactive)
+  (if (not arg-supplied-p)
+    (global-minor-mode-set "wiki-link-complete"
+      (not (global-minor-mode-active-p "wiki-link-complete")))
+    (if (equal arg t)
+      (global-minor-mode-set "wiki-link-complete" t)
+      (if (numberp arg)
+        (if (> arg 0)
+          (global-minor-mode-set "wiki-link-complete" t)
+          (global-minor-mode-set "wiki-link-complete" nil))
+        (global-minor-mode-set "wiki-link-complete" nil)))))
+
+;; SPEC-120: default ON.
+(global-minor-mode-set "wiki-link-complete" t)
+
+(provide "wiki-link-complete-mode")
+)

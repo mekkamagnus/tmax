@@ -36,6 +36,8 @@
   (require-module editor/modes/truncate-lines)
   ;; SPEC-119: [[wiki-link]] display transform toggle (default ON).
   (require-module editor/modes/wiki-link-display)
+  ;; SPEC-120: instant fuzzy [[ note finder (default ON).
+  (require-module editor/modes/wiki-link-complete)
   (require-module editor/modes/show-paren)
   (require-module editor/modes/whitespace)
   ;; #153: T2 minor modes.
