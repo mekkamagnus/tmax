@@ -333,8 +333,9 @@ describe("SPEC-117: markdown-do dispatches wiki-links", () => {
 
   // Verify-gate retry 1: markdown-do's docstring always promised "toggle
   // checkbox" but no branch existed — and markdown-toggle-checkbox itself
-  // never matched (regex \s- typo + escaping-broken groups + text-dropping
-  // flow). The branch and the toggle are both fixed and pinned here.
+  // never matched (the \s- regex typo was the sole matching defect; the
+  // delete-line+insert flow also dropped the task text). The branch and the
+  // toggle are both fixed and pinned here.
   describe("checkbox tier (heading fold > checkbox is vacuous; checkbox > fallback)", () => {
     test("gx on an unchecked checkbox checks it, preserving the task text", async () => {
       const e = await setupMdEditor("- [ ] buy milk\n");

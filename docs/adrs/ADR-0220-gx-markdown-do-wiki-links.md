@@ -23,10 +23,11 @@ check and the heading-fold check:
  (markdown-follow-wiki-link))
 ```
 
-Precedence pinned by test: **inline link > wiki-link > heading fold**. Both
-at-point predicates are cursor-scoped (post-BUG-74/76 they return non-nil only
-when the cursor is inside that link), so the order only matters for the
-pathological `[[…[t](u)…]]` nesting — deterministic and tested.
+Precedence: **inline link > wiki-link > heading fold** by clause order. As
+the Consequences section details, inline-vs-wiki order is in fact
+UNOBSERVABLE (cursor-scoped predicates; the wiki regex cannot match lines
+containing an inner `[t](u)`), so the observable orderings — wiki > heading,
+heading-fold, checkbox — are what the tests pin.
 
 ## Consequences
 
