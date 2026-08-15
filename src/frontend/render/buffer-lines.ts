@@ -9,6 +9,7 @@ import {
   type GutterConfig,
 } from "./gutter.ts";
 import { computeLayout, renderSeparators, type WindowCell } from "./window-layout.ts";
+import { wikiDisplayActive, transformWikiLine } from "./wiki-display.ts";
 
 function getLineCount(state: EditorState): number {
   const result = state.currentBuffer?.getLineCount();
@@ -129,7 +130,18 @@ export function getCursorScreenOffset(state: EditorState, bufferHeight: number, 
   const viewportTop = getVisibleViewportTop(state, bufferHeight);
   const viewportLeft = getVisibleViewportLeft(state, contentWidth);
   const row = Math.max(0, Math.min(bufferHeight - 1, state.cursorPosition.line - viewportTop));
-  const col = Math.max(0, state.cursorPosition.column - viewportLeft);
+  let cursorColumn = state.cursorPosition.column;
+  // SPEC-119: when the wiki-link display transform is active, the rendered
+  // line is shorter than the buffer line — map the cursor column into
+  // display coordinates (delimiters are zero-width; visible text maps 1:1).
+  if (viewportLeft === 0 && wikiDisplayActive(state)) {
+    const line = state.currentBuffer?.getLine(state.cursorPosition.line);
+    if (line && Either.isRight(line)) {
+      const t = transformWikiLine(line.right);
+      if (t.changed) cursorColumn = t.mapCol(cursorColumn);
+    }
+  }
+  const col = Math.max(0, cursorColumn - viewportLeft);
   return { row, col };
 }
 
@@ -259,6 +271,7 @@ function renderSingleWindow(
   isFocused: boolean,
   highlightSpans?: HighlightSpan[][],
   foldRanges?: Map<number, number>,
+  wikiDisplay?: boolean,
 ): string[] {
   const gw = gutterDisplayWidth(totalLines, gutterCfg);
   const cw = Math.max(1, contentWidth - gw);
@@ -315,10 +328,26 @@ function renderSingleWindow(
 
     const gutter = renderGutterLine(lineNumber, cursorLine, totalLines, gutterCfg, isCurrentLine, foldState);
 
-    const effectiveCursorCol = isCurrentLine ? Math.max(0, cursorColumn - viewportLeft) : -1;
-
     const lineSpans = highlightSpans?.[lineNumber];
-    if (lineSpans && lineSpans.length > 0) {
+
+    // SPEC-119: display-only [[wiki-link]] transform. Skipped when
+    // horizontally scrolled (the viewportLeft slicing operates on raw
+    // columns) — a scrolled line renders raw.
+    let displayLine = rawLine;
+    let displaySpans: HighlightSpan[] | undefined = lineSpans;
+    let displayCursor = cursorColumn;
+    if (wikiDisplay && viewportLeft === 0) {
+      const t = transformWikiLine(rawLine, lineSpans);
+      if (t.changed) {
+        displayLine = t.text;
+        displaySpans = lineSpans ? t.spans : undefined;
+        displayCursor = t.mapCol(cursorColumn);
+      }
+    }
+
+    const effectiveCursorCol = isCurrentLine ? Math.max(0, displayCursor - viewportLeft) : -1;
+
+    if (displaySpans && displaySpans.length > 0) {
       if (viewportLeft > 0) {
         const sliced = sliceFromVisualOffset(rawLine, viewportLeft);
         const sw = stringWidth(sliced);
@@ -327,7 +356,7 @@ function renderSingleWindow(
           ? sliceToVisualWidth(sliced, cw - 2) + "\u00BB"
           : (sw <= cw - 1 ? sliced + " ".repeat(cw - 1 - sw) : sliceToVisualWidth(sliced, cw - 1));
         const display = "\u00AB" + truncated;
-        const clamped = clampSpans(lineSpans, rawLine.length);
+        const clamped = clampSpans(displaySpans, rawLine.length);
         const offset = viewportLeft;
         const shifted = clamped
           .map(s => ({ ...s, start: s.start - offset, end: s.end - offset }))
@@ -338,10 +367,10 @@ function renderSingleWindow(
         const rendered = isCurrentLine ? renderWithBlockCursorAnsi(padded, effectiveCursorCol) : padded;
         lines.push(gutter + rendered);
       } else {
-        const truncated = stringWidth(rawLine) > cw
-          ? (cw > 3 ? sliceToVisualWidth(rawLine, cw - 3) + "..." : sliceToVisualWidth(rawLine, cw))
-          : rawLine;
-        const clamped = clampSpans(lineSpans, truncated.length);
+        const truncated = stringWidth(displayLine) > cw
+          ? (cw > 3 ? sliceToVisualWidth(displayLine, cw - 3) + "..." : sliceToVisualWidth(displayLine, cw))
+          : displayLine;
+        const clamped = clampSpans(displaySpans, truncated.length);
         const highlighted = applyHighlights(truncated, clamped);
         const padded = padAnsiToWidth(highlighted, cw);
         const rendered = isCurrentLine ? renderWithBlockCursorAnsi(padded, effectiveCursorCol) : padded;
@@ -361,7 +390,7 @@ function renderSingleWindow(
         const rendered = isCurrentLine ? renderWithBlockCursor(display, effectiveCursorCol) : display;
         lines.push(gutter + rendered);
       } else {
-        const lineContent = fitToWidth(rawLine, cw);
+        const lineContent = fitToWidth(displayLine, cw);
         const rendered = isCurrentLine ? renderWithBlockCursor(lineContent, effectiveCursorCol) : lineContent;
         lines.push(gutter + rendered);
       }
@@ -397,6 +426,7 @@ function renderSingleWindowWrapped(
   isFocused: boolean,
   highlightSpans?: HighlightSpan[][],
   foldRanges?: Map<number, number>,
+  wikiDisplay?: boolean,
 ): string[] {
   const gw = gutterDisplayWidth(totalLines, gutterCfg);
   const cw = Math.max(1, contentWidth - gw);
@@ -434,7 +464,19 @@ function renderSingleWindowWrapped(
     const isHeading = isMarkdownHeading(rawLine);
     const foldState: FoldState | undefined = isHeading && foldRanges ? "expandable" : undefined;
 
-    const wrappedRows = wrapLine(rawLine, cw);
+    // SPEC-119: display-only [[wiki-link]] transform, then wrap the DISPLAY
+    // text; the cursor column is mapped into display coordinates first.
+    let displayLine = rawLine;
+    let displayCursorCol = cursorColumn;
+    if (wikiDisplay) {
+      const t = transformWikiLine(rawLine, highlightSpans?.[logicalLine]);
+      if (t.changed) {
+        displayLine = t.text;
+        displayCursorCol = t.mapCol(cursorColumn);
+      }
+    }
+
+    const wrappedRows = wrapLine(displayLine, cw);
 
     // Find which wrapped row the cursor is on
     let cursorWrapRow = 0;
@@ -442,7 +484,7 @@ function renderSingleWindowWrapped(
       let accumWidth = 0;
       for (let wr = 0; wr < wrappedRows.length; wr++) {
         const rowWidth = stringWidth(wrappedRows[wr]!);
-        if (cursorColumn < accumWidth + rowWidth) {
+        if (displayCursorCol < accumWidth + rowWidth) {
           cursorWrapRow = wr;
           break;
         }
@@ -451,7 +493,7 @@ function renderSingleWindowWrapped(
       }
     }
     const cursorWrapCol = isCurrentLine
-      ? cursorColumn - (cursorWrapRow > 0 ? wrappedRows.slice(0, cursorWrapRow).reduce((s, r) => s + stringWidth(r), 0) : 0)
+      ? displayCursorCol - (cursorWrapRow > 0 ? wrappedRows.slice(0, cursorWrapRow).reduce((s, r) => s + stringWidth(r), 0) : 0)
       : -1;
 
     for (let wr = 0; wr < wrappedRows.length && screenRow < visibleLines; wr++) {
@@ -486,6 +528,10 @@ export function renderBufferLines(
   const wordWrap = state.config.wordWrap;
   const viewportLeft = wordWrap ? 0 : (state.viewportLeft ?? 0);
 
+  // SPEC-119: the [[wiki-link]] display transform applies to the focused
+  // buffer's windows when the minor mode is on (markdown buffers only).
+  const wikiDisp = wikiDisplayActive(state);
+
   // Single-window path (default, most common)
   if (!windows || windows.length <= 1) {
     const gutterCfg = gutterConfigFromState(state.activeMinorModes, state.config);
@@ -505,6 +551,7 @@ export function renderBufferLines(
         true,
         highlightSpans,
         state.foldRanges,
+        wikiDisp,
       );
     }
 
@@ -521,6 +568,7 @@ export function renderBufferLines(
       true,
       highlightSpans,
       state.foldRanges,
+      wikiDisp,
     );
   }
 
@@ -549,10 +597,12 @@ export function renderBufferLines(
       ? renderSingleWindowWrapped(
           buf, cursorLine, cursorColumn, totalLines, viewportTop,
           cell.width, cell.height, gutterCfg, isFocused, highlightSpans,
+          undefined, isFocused && wikiDisp,
         )
       : renderSingleWindow(
           buf, cursorLine, cursorColumn, totalLines, viewportTop,
           winViewportLeft, cell.width, cell.height, gutterCfg, isFocused, highlightSpans,
+          undefined, isFocused && wikiDisp,
         );
 
     for (let row = 0; row < cell.height && row < cellLines.length; row++) {

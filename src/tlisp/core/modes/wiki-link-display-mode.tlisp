@@ -1,0 +1,47 @@
+(defmodule editor/modes/wiki-link-display
+  (export wiki-link-display-mode global-wiki-link-display-mode)
+
+;; wiki-link-display-mode.tlisp — SPEC-119 (#194)
+;; Render [[wiki-links]] as their target text with the link face
+;; (Obsidian-style display). The transform is display-only — the buffer text
+;; is never modified. Default ON (globally enabled below); the render layer
+;; applies it only to markdown buffers.
+
+(define-minor-mode "wiki-link-display" "Render [[wiki-links]] as links" "Wiki")
+
+(defun wiki-link-display-mode (&optional (arg nil arg-supplied-p))
+  "Toggle wiki-link-display mode.
+With no argument, toggle.
+With t, enable.
+With positive number, enable.
+With 0 or negative number, disable."
+  (interactive)
+  (if (not arg-supplied-p)
+    (minor-mode-toggle "wiki-link-display")
+    (if (equal arg t)
+      (minor-mode-set "wiki-link-display" t)
+      (if (numberp arg)
+        (if (> arg 0)
+          (minor-mode-set "wiki-link-display" t)
+          (minor-mode-set "wiki-link-display" nil))
+        (minor-mode-set "wiki-link-display" nil)))))
+
+(defun global-wiki-link-display-mode (&optional (arg nil arg-supplied-p))
+  "Toggle wiki-link-display mode globally (all markdown buffers)."
+  (interactive)
+  (if (not arg-supplied-p)
+    (global-minor-mode-set "wiki-link-display"
+      (not (global-minor-mode-active-p "wiki-link-display")))
+    (if (equal arg t)
+      (global-minor-mode-set "wiki-link-display" t)
+      (if (numberp arg)
+        (if (> arg 0)
+          (global-minor-mode-set "wiki-link-display" t)
+          (global-minor-mode-set "wiki-link-display" nil))
+        (global-minor-mode-set "wiki-link-display" nil)))))
+
+;; SPEC-119: default ON.
+(global-minor-mode-set "wiki-link-display" t)
+
+(provide "wiki-link-display-mode")
+)
