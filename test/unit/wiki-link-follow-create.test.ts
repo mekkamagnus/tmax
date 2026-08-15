@@ -294,23 +294,73 @@ describe("SPEC-117: markdown-do dispatches wiki-links", () => {
     expect(tl(e, "(editor-status)")).not.toContain("Nothing to do");
   });
 
-  test("precedence: inline link wins inside a pathological [[…[t](u)…]]", async () => {
-    // "[[see [goals](goals.md)]]" — cursor on the inner inline link text.
-    // Deterministic order is fine (spec); pin: inline check runs first.
-    const e = await setupMdEditor("[[see [goals](goals.md)]] end\n", join(vault, "index.md"));
-    executeTlisp(e, "(cursor-move 0 7)"); // inside inner [goals]
-    expect(tl(e, "(markdown-link-at-point)")).toBe("goals.md"); // inline detected at point
+  test("inline links still dispatch first on multi-link lines (BUG-76 regression)", async () => {
+    // Inline-vs-wiki order is UNOBSERVABLE (the wiki regex cannot match a
+    // line containing an inner [t](u), so the predicates are mutually
+    // exclusive by construction). This pins that inline dispatch itself
+    // still works through markdown-do after the wiki clause was inserted.
+    const e = await setupMdEditor("see [goals](goals.md) then [[dangler]]\n", join(vault, "index.md"));
+    executeTlisp(e, "(cursor-move 0 6)"); // inside [goals]
     executeTlisp(e, "(markdown-do)");
-    // inline path → markdown-follow-link → file link opens goals.md
     expect(tl(e, "(buffer-current)")).toContain("goals.md");
   });
 
-  test("no regression: gx on a heading still folds", async () => {
+  // Verify-gate retry 1: the old "pathological nesting" test was not an
+  // order discriminator — the wiki regex \[\[[^\]]+\]\] cannot match a line
+  // containing an inner [t](u) (the ] breaks it), so inline-vs-wiki order is
+  // unobservable by construction (both at-point predicates are cursor-scoped
+  // and mutually exclusive). The OBSERVABLE orderings are pinned below.
+  test("precedence: wiki-link beats heading fold on a heading line containing [[link]]", async () => {
+    const e = await setupMdEditor("# Notes on [[goals]]\n\nbody\n", join(vault, "index.md"));
+    executeTlisp(e, "(cursor-move 0 14)"); // inside [[goals]]
+    executeTlisp(e, "(markdown-do)");
+    // The wiki clause fired BEFORE the heading clause: the note opened,
+    // and no fold range was created.
+    expect(tl(e, "(buffer-current)")).toContain("goals.md");
+  });
+
+  test("heading fold still applies (strong assertion: fold range recorded)", async () => {
     const e = await setupMdEditor("# Heading\n\ncontent\n\n# Other\n");
     executeTlisp(e, "(cursor-move 0 0)");
     executeTlisp(e, "(markdown-do)");
-    // fold applied (not "Nothing to do at point", not a link follow)
     expect(e.getState().mode).toBe("normal");
     expect(tl(e, "(editor-status)")).not.toContain("Nothing to do");
+    // fold-get-ranges is the fold observable — non-empty means a fold was
+    // actually applied, not just that the fallback wasn't reached.
+    expect(tl(e, "(fold-get-ranges)")).not.toBe("nil");
+    expect(tl(e, "(fold-get-ranges)")).toContain("(");
+  });
+
+  // Verify-gate retry 1: markdown-do's docstring always promised "toggle
+  // checkbox" but no branch existed — and markdown-toggle-checkbox itself
+  // never matched (regex \s- typo + escaping-broken groups + text-dropping
+  // flow). The branch and the toggle are both fixed and pinned here.
+  describe("checkbox tier (heading fold > checkbox is vacuous; checkbox > fallback)", () => {
+    test("gx on an unchecked checkbox checks it, preserving the task text", async () => {
+      const e = await setupMdEditor("- [ ] buy milk\n");
+      executeTlisp(e, "(cursor-move 0 0)");
+      executeTlisp(e, "(markdown-do)");
+      expect(tl(e, "(buffer-text)")).toContain("- [x] buy milk");
+    });
+
+    test("gx on a checked checkbox unchecks it", async () => {
+      const e = await setupMdEditor("- [x] bought\n");
+      executeTlisp(e, "(cursor-move 0 0)");
+      executeTlisp(e, "(markdown-do)");
+      expect(tl(e, "(buffer-text)")).toContain("- [ ] bought");
+    });
+
+    test("gx on a capital-X checkbox unchecks it; * markers work; plain [ ] is untouched", async () => {
+      const e = await setupMdEditor("- [X] caps\n* [ ] star\nplain [ ] no marker\n");
+      executeTlisp(e, "(cursor-move 0 0)");
+      executeTlisp(e, "(markdown-do)");
+      expect(tl(e, "(buffer-text)")).toContain("- [ ] caps");
+      executeTlisp(e, "(cursor-move 1 0)");
+      executeTlisp(e, "(markdown-do)");
+      expect(tl(e, "(buffer-text)")).toContain("* [x] star");
+      executeTlisp(e, "(cursor-move 2 0)");
+      executeTlisp(e, "(markdown-do)");
+      expect(tl(e, "(buffer-text)")).toContain("plain [ ] no marker"); // not a checkbox line
+    });
   });
 });

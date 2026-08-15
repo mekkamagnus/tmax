@@ -6,11 +6,11 @@
 
 ## Completion Criteria (Definition of Done)
 
-- [x] `markdown-do`'s dispatch (formatting.tlisp ~line 236) checks `markdown-wiki-link-at-point` BEFORE falling through to heading/checkbox — `[[link]]` at point → `markdown-follow-wiki-link` (existing links open; dangling → the follow-or-create prompt).
-- [x] Precedence rule pinned: inline link > wiki-link > heading fold > checkbox. (A `[t](u)` inside a `[[…]]` is pathological; any deterministic order is fine, just tested.)
+- [x] `markdown-do`'s dispatch (formatting.tlisp) checks `markdown-wiki-link-at-point` BEFORE falling through to heading/checkbox — `[[link]]` at point → `markdown-follow-wiki-link` (existing links open; dangling → the follow-or-create prompt).
+- [x] Precedence rule pinned where observable: inline link > wiki-link > heading fold > checkbox. **Verify-gate correction:** inline-vs-wiki order is unobservable by construction — both at-point predicates are cursor-scoped and the wiki regex `\[\[[^\]]+\]\]` cannot match a line containing an inner `[t](u)`, so the two are mutually exclusive; the clause order documents intent. The OBSERVABLE orderings are tested: wiki > heading (a heading line containing `[[link]]` follows the link, not the fold) and heading-fold/checkbox behavior pinned below.
 - [x] Unit tests: gx-path dispatch on each category at point.
-- [x] **Live e2e in the mekkapi tab**: on a note in `~/Documents/md-journal`, `gx` over an existing `[[2026-08-08]]` opens it; over a dangling `[[fresh idea]]` opens the follow-or-create prompt — verified by reading the pane.
-- [x] No regression: `gx` on a heading still folds, on a checkbox still toggles (markdown-do's existing behavior, covered by its tests).
+- [x] **Live e2e in the mekkapi tab**: on a note in `~/Documents/md-journal`, `gx` over an existing `[[2026-08-08]]` opens it; over a dangling `[[brand new thought]]` opens the follow-or-create prompt — verified by reading the pane (transcript in issue #192).
+- [x] No regression — **verify-gate correction:** the original wording said "on a checkbox still toggles (markdown-do's existing behavior)" but markdown-do had NO checkbox branch, and `markdown-toggle-checkbox` itself had never worked (its regex used `\s-` where `\s+` was meant, `\(…\)` capture groups mis-escape in this interpreter's string layer, and its delete-line+insert flow dropped the task text). This change ADDS the checkbox branch the docstring always promised and FIXES the toggle (groupless detection + substring surgery, single-char character classes only). `gx` on a heading now folds with a strong assertion (fold-get-ranges non-empty); `gx` on a checkbox toggles both directions with text preserved (`- [ ] buy milk` → `- [x] buy milk`, `- [x]`/`- [X]` → `- [ ]`, `*` markers work, bare `[ ]` lines untouched).
 - [x] `bun run typecheck` + markdown suites green.
 
 ## Motivation

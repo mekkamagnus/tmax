@@ -254,22 +254,30 @@
        (markdown-follow-wiki-link))
       ((string-match "^#" line)
        (markdown-fold-toggle))
+      ((if (string-match "^\\\\s*[-*+]\\\\s+\\\\[ \\\\]" line)
+           t
+           (if (string-match "^\\\\s*[-*+]\\\\s+\\\\[x\\\\]" line)
+               t
+               (string-match "^\\\\s*[-*+]\\\\s+\\\\[X\\\\]" line)))
+       (markdown-toggle-checkbox))
       (t
        (message "Nothing to do at point")))))
 
 (defun markdown-toggle-checkbox ()
-  "Toggle checkbox state on current line."
+  "Toggle checkbox state on current line. SPEC-117: the old version never
+matched (its regex used \\\\s- where \\\\s+ was meant, and \\\\(...\\\\) groups
+mis-escape in this interpreter's string layer) and its delete-line+insert
+flow dropped the task text. Groupless detection + substring surgery now;
+single-char classes only ([ xX] multi-char classes silently never match)."
   (interactive)
   (let ((line (buffer-get-line (cursor-line))))
-    (if (string-match "^\(\\\\s*[-*+]\\\\s-\)\\\\[ \\\\]" line)
-        (progn
-          (markdown-delete-line (cursor-line))
-          (buffer-insert (concat (match-string 1 line) "[x]")))
-        (if (string-match "^\(\\\\s*[-*+]\\\\s-\)\\\\[x\\\\]" line)
-            (progn
-              (markdown-delete-line (cursor-line))
-              (buffer-insert (concat (match-string 1 line) "[ ]")))
-            (message "Not a checkbox")))))
+    (if (string-match "^\\\\s*[-*+]\\\\s+\\\\[ \\\\]" line)
+        (markdown-replace-line (concat (substring line 0 (- (match-end 0) 3)) "[x]" (substring line (match-end 0))))
+        (if (string-match "^\\\\s*[-*+]\\\\s+\\\\[x\\\\]" line)
+            (markdown-replace-line (concat (substring line 0 (- (match-end 0) 3)) "[ ]" (substring line (match-end 0))))
+            (if (string-match "^\\\\s*[-*+]\\\\s+\\\\[X\\\\]" line)
+                (markdown-replace-line (concat (substring line 0 (- (match-end 0) 3)) "[ ]" (substring line (match-end 0))))
+                (message "Not a checkbox"))))))
 (defun markdown-list-continue ()
   "Auto-continue list on Enter. Called after newline is inserted.
 Checks previous line for list marker and inserts continuation.

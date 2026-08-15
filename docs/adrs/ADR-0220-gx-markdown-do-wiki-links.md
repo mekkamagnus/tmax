@@ -32,10 +32,20 @@ pathological `[[…[t](u)…]]` nesting — deterministic and tested.
 
 - `gx` is the single context key: inline URL, inline file link, wiki-link
   (existing → open; dangling → the SPEC-116 follow-or-create prompt), heading
-  fold.
+  fold, checkbox toggle.
+- **Verify-gate retry 1 findings folded in:** inline-vs-wiki clause order is
+  unobservable by construction (cursor-scoped at-point predicates; the wiki
+  regex cannot match lines containing inner `[t](u)`); the observable
+  orderings are pinned — wiki > heading (heading line with `[[link]]`
+  follows, doesn't fold), heading fold asserted via `fold-get-ranges`.
+- **Latent bug fixed en route:** `markdown-toggle-checkbox` had NEVER worked
+  (regex `\\s-` typo for `\\s+`; `\\(...\\)` groups mis-escape in the string
+  layer; the flow also dropped the task text). Rewritten groupless with
+  substring surgery; note for the codebase: only single-char character
+  classes survive this string layer (`[ xX]` silently never matches — use
+  split classes), and 4-backslash source escaping is the working convention
+  for regex metachars in .tlisp files.
 - Live-verified in the mekkapi tab: `[[2026-08-08]]` opens the note;
   `[[brand new thought]]` (dangling) opens the "Follow or create" prompt with
   the `+ Create:` candidate.
-- 4 new tests in `test/unit/wiki-link-follow-create.test.ts` (existing-link
-  open, dangling prompt, inline-precedence on pathological nesting, heading
-  fold regression) — suite 22/22, markdown suites 22/22, typecheck clean.
+- Suite 26/26 (8 SPEC-117 tests), markdown suites green, typecheck clean.
