@@ -10,6 +10,8 @@ import {
 } from "./gutter.ts";
 import { computeLayout, renderSeparators, type WindowCell } from "./window-layout.ts";
 import { wikiDisplayActive, transformWikiLine } from "./wiki-display.ts";
+import { computeHighlightSpans } from "../../syntax/highlight-buffer.ts";
+import { makeWikiLinkResolver } from "../../syntax/wiki-link-faces.ts";
 
 function getLineCount(state: EditorState): number {
   const result = state.currentBuffer?.getLineCount();
@@ -134,10 +136,24 @@ export function getCursorScreenOffset(state: EditorState, bufferHeight: number, 
   // SPEC-119: when the wiki-link display transform is active, the rendered
   // line is shorter than the buffer line — map the cursor column into
   // display coordinates (delimiters are zero-width; visible text maps 1:1).
+  // The SAME spans the render path uses are recomputed for this line, so
+  // code-span protection applies identically and the terminal cursor never
+  // desyncs from the rendered block cursor.
   if (viewportLeft === 0 && wikiDisplayActive(state)) {
-    const line = state.currentBuffer?.getLine(state.cursorPosition.line);
-    if (line && Either.isRight(line)) {
-      const t = transformWikiLine(line.right);
+    const buffer = state.currentBuffer;
+    const line = buffer?.getLine(state.cursorPosition.line);
+    if (buffer && line && Either.isRight(line)) {
+      const spans = computeHighlightSpans(
+        (ln) => {
+          const r = buffer.getLine(ln);
+          return r && Either.isRight(r) ? r.right : "";
+        },
+        state.cursorPosition.line,
+        state.cursorPosition.line + 1,
+        state.currentFilename,
+        makeWikiLinkResolver(buffer, state.currentFilename),
+      );
+      const t = transformWikiLine(line.right, spans[state.cursorPosition.line]);
       if (t.changed) cursorColumn = t.mapCol(cursorColumn);
     }
   }

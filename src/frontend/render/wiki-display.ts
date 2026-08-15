@@ -44,13 +44,29 @@ export interface WikiDisplayLine {
  *  backticks must render raw (spec regression criterion). Span styles are the
  *  theme entry objects themselves (resolveStyle returns them by reference),
  *  so identity comparison identifies code reliably. */
-function codeRanges(spans: HighlightSpan[] | undefined): Array<[number, number]> {
-  if (!spans) return [];
+function codeRanges(rawLine: string, spans: HighlightSpan[] | undefined): Array<[number, number]> {
   const ranges: Array<[number, number]> = [];
-  for (const s of spans) {
-    if (s.style === defaultDarkTheme.code || s.style === defaultDarkTheme["code-block"]) {
-      ranges.push([s.start, s.end]);
+  if (spans) {
+    const codeColors = new Set(
+      [defaultDarkTheme.code?.fg, defaultDarkTheme["code-block"]?.fg].filter(Boolean) as string[],
+    );
+    for (const s of spans) {
+      const isCode = s.style === defaultDarkTheme.code
+        || s.style === defaultDarkTheme["code-block"]
+        || (s.style.fg !== undefined && codeColors.has(s.style.fg));
+      if (isCode) ranges.push([s.start, s.end]);
     }
+  }
+  // Textual backtick scan — REQUIRED, not a fallback: the tokenizer gives
+  // wiki-link (priority 62) precedence over inline code (55), so a
+  // `[[link]]` inside backticks emits a wiki-link span and NO code span.
+  // Pairing backticks on the raw line protects code content regardless of
+  // token priorities (and works in the spans-less cursor-offset path).
+  let open = -1;
+  for (let i = 0; i < rawLine.length; i++) {
+    if (rawLine[i] !== "`") continue;
+    if (open === -1) open = i + 1;
+    else { ranges.push([open, i]); open = -1; }
   }
   return ranges;
 }
@@ -59,15 +75,27 @@ function codeRanges(spans: HighlightSpan[] | undefined): Array<[number, number]>
  * Transform one line for display. Pure: no buffer mutation, no I/O.
  */
 export function transformWikiLine(rawLine: string, spans?: HighlightSpan[]): WikiDisplayLine {
-  const protectedRanges = codeRanges(spans);
-  const matches: Array<{ start: number; end: number; display: string }> = [];
+  const protectedRanges = codeRanges(rawLine, spans);
+  // `displayStart`/`displayEnd` are RAW columns of the visible sub-region
+  // (the alias's display text, or the whole target) — needed for exact 1:1
+  // cursor mapping over the visible glyphs.
+  const matches: Array<{ start: number; end: number; display: string; displayStart: number; displayEnd: number }> = [];
   WIKI_LINK_RE.lastIndex = 0;
   for (let m = WIKI_LINK_RE.exec(rawLine); m !== null; m = WIKI_LINK_RE.exec(rawLine)) {
     const start = m.index;
     const end = start + m[0]!.length;
     if (protectedRanges.some(([s, e]) => start < e && end > s)) continue; // inside code
     // [[target|display]] renders the display part; [[target]] renders target.
-    matches.push({ start, end, display: (m[2] ?? m[1])!.trim() });
+    const display = (m[2] ?? m[1])!.trim();
+    if (display.length === 0) continue; // [[ ]] / [[a| ]]: nothing to show — render raw
+    // Position of the VISIBLE (trimmed) text in raw coordinates.
+    const rawVisible = (m[2] ?? m[1])!;
+    const lead = rawVisible.length - rawVisible.trimStart().length;
+    const displayStart = (m[2] !== undefined
+      ? start + 2 + m[1]!.length + 1 // skip "[[", target, "|"
+      : start + 2) + lead;           // skip leading trim whitespace
+    const displayEnd = displayStart + display.length;
+    matches.push({ start, end, display, displayStart, displayEnd });
   }
 
   if (matches.length === 0) {
@@ -84,15 +112,16 @@ export function transformWikiLine(rawLine: string, spans?: HighlightSpan[]): Wik
     for (let i = 0; i < before.length; i++) colMap[prev + i] = text.length + i;
     text += before;
 
-    // Delimiters (and an alias's target prefix) are zero-width; the visible
-    // text maps 1:1. Inner raw column i: the first two ("[[") map to the
-    // span start, the rest clamp into [start, start+L) — which is exactly
-    // 1:1 for non-alias links and a clamp for the alias form.
+    // Delimiters (and an alias's hidden target+pipe) are zero-width: raw
+    // columns at/before the visible region clamp to the span start; columns
+    // in the visible region map EXACTLY 1:1; columns after ("]]") clamp to
+    // the span end.
     const L = match.display.length;
-    const inner = match.end - match.start;
-    for (let i = 0; i < inner; i++) {
-      const d = i < 2 ? 0 : Math.min(i - 2, L);
-      colMap[match.start + i] = text.length + d;
+    for (let r = match.start; r < match.end; r++) {
+      const d = r < match.displayStart ? 0
+        : r < match.displayEnd ? r - match.displayStart
+        : L;
+      colMap[r] = text.length + d;
     }
     text += match.display;
     colMap[match.end] = text.length;

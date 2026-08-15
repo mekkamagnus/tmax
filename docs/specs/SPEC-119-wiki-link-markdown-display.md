@@ -61,3 +61,24 @@ Display-only transform in the markdown render path (where syntax faces are appli
    2 │2026-08-15          ← the target note opened; ITS wiki link also renders
 --NORMAL--   2026-08-08.md   L1 C1 [markdown] (Indent Wiki Ln)   ← "Wiki" lighter on
 ```
+
+## Gate retry 1 corrections (2026-08-15)
+
+- **Alias cursor mapping is now EXACT 1:1** over the visible display text
+  (the first cut used offset-then-clamp, putting cursors on the wrong glyph:
+  'b' of `[[a|bcd]]` rendered over 'd'). Hidden target/pipe columns clamp to
+  the span start; `]]` clamps to the span end. Trimmed alias displays map
+  over the trimmed region.
+- **Terminal cursor no longer desyncs on code-span lines**:
+  `getCursorScreenOffset` now recomputes the SAME spans + resolver the render
+  path uses (previously it transformed without spans).
+- **Whitespace-only links render raw**: `[[ ]]` / `[[a| ]]` no longer vanish
+  to a zero-width link.
+- **Code-span protection is now text-based too** (backtick pairing on the raw
+  line) — REQUIRED, not a fallback: the tokenizer gives wiki-link (priority
+  62) precedence over inline code (55), so a `[[link]]` inside backticks
+  emits a wiki-link span and NO code span; span-identity protection alone
+  could never fire through the real pipeline. The text scan also covers the
+  spans-less cursor-offset path.
+- Documented tradeoffs unchanged: horizontal scroll renders raw; non-focused
+  split windows render raw.

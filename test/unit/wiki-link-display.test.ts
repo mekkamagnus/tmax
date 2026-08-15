@@ -68,11 +68,13 @@ describe("SPEC-119: transformWikiLine (pure)", () => {
     expect(t.spans[0]!.style).toBe(resolved);
   });
 
-  test("a [[ inside an inline code span renders raw", () => {
-    const code = { start: 0, end: 10, style: defaultDarkTheme.code! };
-    const t = transformWikiLine("`[[code]]` x", [code]);
-    expect(t.changed).toBe(false);
-    expect(t.text).toBe("`[[code]]` x");
+  test("a [[ inside inline code renders raw (span-based AND text-scan protection)", () => {
+    const code: HighlightSpan = { start: 0, end: 10, style: defaultDarkTheme.code! };
+    expect(transformWikiLine("`[[code]]` x", [code]).changed).toBe(false);
+    // No spans at all (the cursor-offset path): the backtick text scan protects.
+    const bare = transformWikiLine("`[[code]]` x");
+    expect(bare.changed).toBe(false);
+    expect(bare.text).toBe("`[[code]]` x");
   });
 
   test("no wiki links → identity, cheap path", () => {
@@ -80,6 +82,34 @@ describe("SPEC-119: transformWikiLine (pure)", () => {
     expect(t.changed).toBe(false);
     expect(t.text).toBe("plain [text](url) line");
     expect(t.mapCol(5)).toBe(5);
+  });
+
+  test("GATE: alias cursor maps EXACTLY 1:1 over the visible display text", () => {
+    // [[a|bcd]] → "bcd". Raw cols: [ [ a | b c d ] ] = 0..8.
+    const t = transformWikiLine("[[a|bcd]]");
+    expect(t.text).toBe("bcd");
+    expect(t.mapCol(4)).toBe(0); // 'b' — was min(4-2,3)=2 (rendered over 'd')
+    expect(t.mapCol(5)).toBe(1); // 'c'
+    expect(t.mapCol(6)).toBe(2); // 'd'
+    expect(t.mapCol(3)).toBe(0); // '|' (hidden) clamps to span start
+    expect(t.mapCol(2)).toBe(0); // 'a' (hidden target) clamps to span start
+    expect(t.mapCol(7)).toBe(3); // ']' clamps to span end
+  });
+
+  test("GATE: whitespace-only inner text renders raw (no zero-width link)", () => {
+    const t = transformWikiLine("a [[ ]] b");
+    expect(t.changed).toBe(false);
+    expect(t.text).toBe("a [[ ]] b");
+    const t2 = transformWikiLine("a [[x| ]] b");
+    expect(t2.changed).toBe(false);
+  });
+
+  test("GATE: trimmed alias display maps over the TRIMMED region", () => {
+    // [[goals| the note ]] → "the note"; leading space of the display is skipped.
+    const t = transformWikiLine("[[goals| the note ]]");
+    expect(t.text).toBe("the note");
+    expect(t.mapCol(9)).toBe(0); // 't' of "the" (raw col 9)
+    expect(t.mapCol(10)).toBe(1); // 'h'
   });
 
   test("multiple links on one line", () => {
@@ -127,6 +157,14 @@ describe("SPEC-119: render integration (toggle on/off)", () => {
   test("frontmatter renders unchanged", () => {
     const lines = captureFrame(makeState("---\ntitle: x\n---\n"), 80, 24);
     expect(stripAnsi(lines[0]!)).toContain("---");
+  });
+
+  test("GATE: terminal cursor (getCursorScreenOffset) agrees with render on code-span lines", () => {
+    // '`[[a]]` x' — the wiki link is inside an inline code span, so the line
+    // renders RAW. The offset path must therefore NOT shift the column.
+    const state = makeState("`[[a]]` x");
+    state.cursorPosition = { line: 0, column: 8 }; // on 'x'
+    expect(getCursorScreenOffset(state, 24, 80).col).toBe(8);
   });
 
   test("cursor on the line maps into display coordinates", () => {
