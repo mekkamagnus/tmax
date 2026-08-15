@@ -25,17 +25,19 @@ Pure T-Lisp, zero new TS primitives, three pieces:
    the finder. Both `[`s remain in the buffer.
 2. **Finder** — the SPEC-116 prepare/table/accept shape, new instance:
    `markdown-complete-prepare` (vault scan + the `[[` position in defvars),
-   `markdown-complete-table` (`+ Create: <input>` first for non-empty input,
-   then every note — the minibuffer input IS the fuzzy query, no re-ranking),
+   `markdown-complete-table` (every note first, `+ Create: <input>` LAST
+   and only for non-blank input — the minibuffer input IS the fuzzy query,
+   no re-ranking; retry-1 ordering: Enter on a non-exact input completes to
+   the fuzzy best match, so a typo cannot mint a file),
    `markdown-complete-accept` (insert `<name>]]` at the recorded position,
    cursor after, insert mode; `+ Create` additionally writes the note from
-   template WITHOUT opening). `require-match t` so raw text can never
-   silently link nothing.
+   template WITHOUT opening — the file exists by the next render, so the
+   fresh link renders resolved immediately). `require-match t` so raw text
+   can never silently link nothing.
 3. **Creation split** — `markdown-create-note-for` factored into
    `markdown-write-note-template` (mkdir + template + write, returns path);
    SPEC-116 keeps write+open, the finder writes without opening (creating
-   must not yank the writer out of their note; the fresh link renders
-   dimmed per SPEC-118 until followed).
+   must not yank the writer out of their note).
 
 ## Consequences
 

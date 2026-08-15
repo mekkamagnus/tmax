@@ -61,7 +61,7 @@ describe("SPEC-120: [[ fuzzy note finder", () => {
   }
 
   describe("the completion table", () => {
-    test("lists + Create first for non-empty input, then every vault note", async () => {
+    test("lists every vault note, + Create LAST for non-blank input", async () => {
       const editor = await setupMdEditor("x\n", join(vault, "index.md"));
       executeTlisp(editor, '(major-mode-set "markdown")');
       executeTlisp(editor, "(markdown-complete-prepare)");
@@ -220,6 +220,8 @@ describe("SPEC-120: [[ fuzzy note finder", () => {
       const row = (lines[0] ?? "").replace(/\x1b\[[0-9;]*[A-Za-z]/g, "");
       expect(row).toContain("see goalshere"); // brackets hidden (SPEC-119)
       expect(lines[0] ?? "").toContain("38;2;97;175;239"); // link face (SPEC-118)
+      // goals.md EXISTS → resolved: no dim attribute on the link color
+      expect(lines[0] ?? "").not.toContain("\x1b[2m\x1b[38;2;97;175;239");
     });
   });
 

@@ -249,13 +249,15 @@ IMPORTANT: Execute every step in order, top to bottom.
       second `[` of `[[` in insert mode opens the vault-note completing-read
       within the same keystroke — no additional command.
 - [x] The finder lists every vault note plus `+ Create: <typed input>`
-      (first; omitted while input is empty); typing filters the list.
+      (LAST — retry 1 correction; omitted while input is blank); typing
+      filters the list.
 - [x] Enter on an existing note completes the link in place
       (`[[name]]`), leaves the cursor after `]]`, and stays in insert mode;
       no buffer/file switch occurs.
 - [x] Enter on `+ Create: X` completes `[[X]]` in place AND writes `X.md`
-      from the template WITHOUT opening it; the link renders with the
-      dangling face until followed.
+      from the template WITHOUT opening it. **Retry-1 correction:** the
+      file exists by the next render, so the fresh link renders RESOLVED
+      immediately (not dangling as first written here).
 - [x] Escape/C-g leaves the bare `[[` in the buffer, insert mode, cursor
       after `[[`.
 - [x] Non-markdown buffers, and markdown buffers with the minor mode off,
@@ -368,3 +370,26 @@ avoid minting junk notes in the real journal.
   `]` in the text does not trigger (the guard cannot distinguish an
   electric-inserted `]` from a typed one). Both accepted: electric-pair is
   off by default and the second case is self-inflicted text.
+
+## Live ordering re-verification (retry 2, mekkapi tab, 2026-08-15)
+
+Re-ran the finder with the retry-1 create-LAST ordering live:
+
+```
+$ … A then [ then [ :
+Link to:                    1/5
+2026-08-08 / 2026-08-15 / fresh idea / link-test / wiki-demo
+
+$ typed filter "2026-08-08":
+Link to: 2026-08-08         1/2
+2026-08-08          ← NOTE first
++ Create: 2026-08-08        ← create LAST
+
+$ Enter (NO Down):
+  4 │see brand new thought dangling2026-08-08   ← completed to the NOTE
+--INSERT--  link-test.md  L4 C49
+```
+
+The earlier transcript's Down-before-Enter was the pre-retry create-first
+ordering; with create-LAST, plain Enter picks the fuzzy best match —
+verified live above.

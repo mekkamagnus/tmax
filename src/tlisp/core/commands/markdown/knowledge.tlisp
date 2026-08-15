@@ -368,8 +368,10 @@ machinery hashmap-sets spans on candidates, so raw strings are not valid)."
       "metadata" (hashmap "path" (if path path "")))))
 
 (defun markdown-note-create-candidate (target)
-  "The explicit create candidate, always listed FIRST (creation is never
-inferred from a non-match — typos cannot mint junk notes)."
+  "The explicit create candidate. Listed FIRST in SPEC-116's resolve table
+(the gx follow-or-create prompt); listed LAST in SPEC-120's finder (where
+Enter-on-non-exact must pick the fuzzy best match). Creation is never
+inferred from a non-match — typos cannot mint junk notes."
   (hashmap
     "value" (concat "+ Create: " target)
     "display" (concat "+ Create: " target)
@@ -560,7 +562,8 @@ the input IS the query."
   "Accept handler: complete the [[ at the recorded position, in place.
 Existing note → '<choice>]]'; '+ Create: X' → 'X]]' plus the note file
 written from template WITHOUT opening it (creating must not yank the user
-out of the note being written; the link renders dangling until followed).
+out of the note being written). The file EXISTS by the next render, so the
+fresh link renders RESOLVED immediately (SPEC-118), not dangling.
 Cursor lands after ']]', back in insert mode."
   (let ((name (if (string-prefix-p "+ Create: " choice)
                 (string-trim (substring choice 10))
