@@ -38,13 +38,14 @@ pathological `[[…[t](u)…]]` nesting — deterministic and tested.
   regex cannot match lines containing inner `[t](u)`); the observable
   orderings are pinned — wiki > heading (heading line with `[[link]]`
   follows, doesn't fold), heading fold asserted via `fold-get-ranges`.
-- **Latent bug fixed en route:** `markdown-toggle-checkbox` had NEVER worked
-  (regex `\\s-` typo for `\\s+`; `\\(...\\)` groups mis-escape in the string
-  layer; the flow also dropped the task text). Rewritten groupless with
-  substring surgery; note for the codebase: only single-char character
-  classes survive this string layer (`[ xX]` silently never matches — use
-  split classes), and 4-backslash source escaping is the working convention
-  for regex metachars in .tlisp files.
+- **Latent bug fixed en route:** `markdown-toggle-checkbox` had NEVER worked.
+  Root cause (gate-corrected): a `\\s-` typo where `\\s+` was meant (the sole
+  matching defect — 2-backslash capture groups work fine, as knowledge.tlisp's
+  own wiki regex demonstrates) plus a delete-line+insert flow that dropped the
+  task text after the marker. Rewritten groupless with substring surgery.
+  Empirical string-layer note: a multi-char class DIRECTLY inside escaped
+  brackets (`\\[ xX\\]`) silently never matches, while `\\[ \\]` and
+  `\\[x\\]` do — split single-char-class patterns are the safe form.
 - Live-verified in the mekkapi tab: `[[2026-08-08]]` opens the note;
   `[[brand new thought]]` (dangling) opens the "Follow or create" prompt with
   the `+ Create:` candidate.

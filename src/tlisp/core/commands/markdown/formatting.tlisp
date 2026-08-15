@@ -265,10 +265,11 @@
 
 (defun markdown-toggle-checkbox ()
   "Toggle checkbox state on current line. SPEC-117: the old version never
-matched (its regex used \\\\s- where \\\\s+ was meant, and \\\\(...\\\\) groups
-mis-escape in this interpreter's string layer) and its delete-line+insert
-flow dropped the task text. Groupless detection + substring surgery now;
-single-char classes only ([ xX] multi-char classes silently never match)."
+matched (its regex used \\\\s- where \\\\s+ was meant) and its
+delete-line+insert flow dropped the task text after the marker. Groupless
+detection + substring surgery now (empirical note: a multi-char class
+directly inside escaped brackets, e.g. \\\\[ xX\\\\], silently never matches
+— single-char classes and split patterns do)."
   (interactive)
   (let ((line (buffer-get-line (cursor-line))))
     (if (string-match "^\\\\s*[-*+]\\\\s+\\\\[ \\\\]" line)

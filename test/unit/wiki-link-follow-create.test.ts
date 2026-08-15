@@ -314,8 +314,8 @@ describe("SPEC-117: markdown-do dispatches wiki-links", () => {
     const e = await setupMdEditor("# Notes on [[goals]]\n\nbody\n", join(vault, "index.md"));
     executeTlisp(e, "(cursor-move 0 14)"); // inside [[goals]]
     executeTlisp(e, "(markdown-do)");
-    // The wiki clause fired BEFORE the heading clause: the note opened,
-    // and no fold range was created.
+    // The wiki clause fired BEFORE the heading clause: the note opened
+    // (the heading branch would have folded in place instead).
     expect(tl(e, "(buffer-current)")).toContain("goals.md");
   });
 
