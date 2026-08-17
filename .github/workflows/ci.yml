@@ -1,8 +1,17 @@
 name: CI
 on: [push, pull_request]
+
+# One CI run per ref — a new push cancels the previous run's still-queued /
+# hung jobs instead of stacking them (drain protection for the shared
+# Actions budget).
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   typecheck-source:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
       - uses: oven-sh/setup-bun@v2
@@ -10,6 +19,7 @@ jobs:
       - run: bun run typecheck:src
   typecheck-test:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
       - uses: oven-sh/setup-bun@v2
@@ -17,6 +27,7 @@ jobs:
       - run: bun run typecheck:test
   typecheck-full:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
       - uses: oven-sh/setup-bun@v2
@@ -24,13 +35,25 @@ jobs:
       - run: bun run typecheck
   test-bun:
     runs-on: ubuntu-latest
+    # Hard ceiling: the raw `bun test` this job used to run hung for HOURS
+    # per run (no per-test timeout; it swept adw-* tests that spawn real LLM
+    # CLI subprocesses, which wait forever on an un-authed headless runner,
+    # plus every daemon/socket suite). 20min comfortably covers the
+    # legitimate ~13min suite; the ceiling exists so a future hang dies in
+    # minutes, not hours.
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
       - uses: oven-sh/setup-bun@v2
       - run: bun install
-      - run: bun test
+      # The project's hardened unit runner (BUG-16): batches of 5 files,
+      # per-test timeout, --dots steady output + a 120s inactivity kill,
+      # and adw-* EXCLUDED (they spawn LLM subprocesses — integration
+      # territory). Never raw `bun test` in CI.
+      - run: bun run test:unit
   test-tmax-use:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
       - uses: oven-sh/setup-bun@v2
