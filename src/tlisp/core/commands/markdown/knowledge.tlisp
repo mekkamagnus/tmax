@@ -666,16 +666,34 @@ wiki form. Cursor lands after the link, back in insert mode."
          (link (markdown-complete-link-text name (if (string= target "") (concat name ".md") target))))
     ;; Replace the typed [[ (markdown-complete-col is right after it) with
     ;; the finished link; with slugging off this is plain buffer-insert at
-    ;; the recorded col (the [[ stays, legacy behavior).
-    (if markdown-slugify-note-names
-      (buffer-replace-range markdown-complete-line (- markdown-complete-col 2)
-                            markdown-complete-line markdown-complete-col
-                            link)
+    ;; the recorded col (the [[ stays, legacy behavior). The replace
+    ;; VERIFIES the recorded span still holds "[[" — if the buffer shifted
+    ;; while the finder was open (multi-client daemon, side effects), it
+    ;; falls back to the non-destructive insert instead of replacing the
+    ;; wrong text (verify-gate #200 gap 2).
+    (if (if markdown-slugify-note-names
+          (string= (substring (buffer-get-line markdown-complete-line)
+                              (- markdown-complete-col 2)
+                              markdown-complete-col)
+                   "[[")
+          t)
+      (if markdown-slugify-note-names
+        (progn
+          (buffer-replace-range markdown-complete-line (- markdown-complete-col 2)
+                                markdown-complete-line markdown-complete-col
+                                link)
+          (cursor-move markdown-complete-line
+                       (+ (- markdown-complete-col 2) (length link))))
+        (progn
+          (cursor-move markdown-complete-line markdown-complete-col)
+          (buffer-insert link)
+          ;; legacy cursor: after the inserted "name]]" (verify-gate #200 gap 1)
+          (cursor-move markdown-complete-line
+                       (+ markdown-complete-col (length link)))))
+      ;; stale span: insert at the CURRENT cursor instead of replacing
       (progn
-        (cursor-move markdown-complete-line markdown-complete-col)
-        (buffer-insert link)))
-    (cursor-move markdown-complete-line
-                 (+ (- markdown-complete-col 2) (length link)))
+        (buffer-insert link)
+        (message "Link: %s" name)))
     (if create
       (progn
         (markdown-write-note-template name)

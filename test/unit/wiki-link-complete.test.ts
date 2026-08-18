@@ -297,6 +297,8 @@ describe("SPEC-120: [[ fuzzy note finder", () => {
       executeTlisp(editor, '(minibuffer-set-input "legacy name")');
       executeTlisp(editor, '(minibuffer-dispatch-key "Enter")');
       expect(tl(editor, "(buffer-text)")).toBe("idea: [[legacy name]]\n");
+      // EXACT legacy cursor: after the inserted "legacy name]]" (col 8 + 13 = EOL)
+      expect(tl(editor, "(cursor-column)")).toBe("21");
       expect(existsSync(join(vault, "legacy name.md"))).toBe(true);
       executeTlisp(editor, '(markdown-slugify-set t)'); // restore default
     });

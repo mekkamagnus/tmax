@@ -319,3 +319,19 @@ against hostile input, not just the finder.
 - Test-order hygiene: suites with a shared on-disk vault must clean up
   files they create — a created `marcketing.md` silently turned a later
   test's "dangling" link resolved.
+
+## Gate retry 1 fixes (2026-08-18)
+
+- **Toggle-off cursor is EXACT-legacy** (after the inserted `name]]`, col =
+  recorded col + len; was off by 2 via the shared replace-branch formula) —
+  pinned by test.
+- **Stale-span guard**: the destructive `[[`-replace now verifies the
+  recorded span still contains `[[` (multi-client/side-effect buffer shifts
+  while the finder is open); on mismatch it falls back to the
+  non-destructive insert at the current cursor. Documented exposure class,
+  now guarded.
+- Caveated (not gaps): no-overwrite is check-then-write (single-user
+  acceptable, TOCTOU noted); bare relative targets like `docs/page` get
+  file-health faces (they ARE relative file paths by the SPEC-116 rule);
+  `[x]()` compact-but-plain-face inconsistency (harmless); labels with
+  nested brackets render raw (documented constraint).
