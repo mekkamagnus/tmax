@@ -77,11 +77,29 @@ describe("SPEC-119: transformWikiLine (pure)", () => {
     expect(bare.text).toBe("`[[code]]` x");
   });
 
-  test("no wiki links → identity, cheap path", () => {
-    const t = transformWikiLine("plain [text](url) line");
+  test("no links at all → identity, cheap path", () => {
+    const t = transformWikiLine("plain text line");
     expect(t.changed).toBe(false);
-    expect(t.text).toBe("plain [text](url) line");
+    expect(t.text).toBe("plain text line");
     expect(t.mapCol(5)).toBe(5);
+  });
+
+  // SPEC-121: inline markdown links compact to their label (design
+  // confirmed: file text keeps the full link; display shows text only).
+  test("[text](target) renders as text — delimiters zero-width", () => {
+    const t = transformWikiLine("go [goals](goals.md) now");
+    expect(t.changed).toBe(true);
+    expect(t.text).toBe("go goals now");
+    expect(t.mapCol(3)).toBe(3);   // on "[" → span start
+    expect(t.mapCol(4)).toBe(3);   // 'g' of the label → 1:1 begins
+    expect(t.mapCol(8)).toBe(7);   // 's' (label end) → display 7
+    expect(t.mapCol(9)).toBe(8);   // on "]" → clamps to span end (display 8)
+    expect(t.mapCol(19)).toBe(8);  // ")" → still span end
+    expect(t.mapCol(21)).toBe(9);  // 'n' of "now" → identity-shifted
+  });
+
+  test("blank-label []() renders raw", () => {
+    expect(transformWikiLine("a [](x) b").changed).toBe(false);
   });
 
   test("GATE: alias cursor maps EXACTLY 1:1 over the visible display text", () => {
@@ -148,10 +166,13 @@ describe("SPEC-119: render integration (toggle on/off)", () => {
     expect(Either.isRight(line) ? line.right : String(line)).toBe("see [[goals]] now");
   });
 
-  test("plain [text](url) links render unchanged", () => {
+  test("SPEC-121: [text](url) links render compact (label only, link face)", () => {
     const lines = captureFrame(makeState("go [Anthropic](https://anthropic.com) now"), 80, 24);
     const row = stripAnsi(lines[0]!);
-    expect(row).toContain("[Anthropic](https://anthropic.com)");
+    expect(row).toContain("go Anthropic now"); // label only — no brackets, no url
+    expect(row).not.toContain("](https://");
+    // still link-faced
+    expect(lines[0]!).toContain("38;2;97;175;239");
   });
 
   test("frontmatter renders unchanged", () => {

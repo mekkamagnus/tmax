@@ -18,6 +18,9 @@ import type { EditorState, HighlightSpan } from "../../core/contracts/editor.ts"
 import { defaultDarkTheme } from "../../syntax/types.ts";
 
 const WIKI_LINK_RE = /\[\[([^\[\]|]+)(?:\|([^\[\]]+))?\]\]/g;
+// SPEC-121: inline markdown links [label](target) — displayed as just the
+// label (same compact treatment as wiki-links).
+const MD_LINK_RE = /\[([^\[\]]*)\]\(([^()]*)\)/g;
 
 /** The minor mode that toggles the transform (registered in T-Lisp,
  *  wiki-link-display-mode.tlisp; default ON globally, applied only to
@@ -90,14 +93,13 @@ export function transformWikiLine(rawLine: string, spans?: HighlightSpan[]): Wik
   // (the alias's display text, or the whole target) — needed for exact 1:1
   // cursor mapping over the visible glyphs.
   const matches: Array<{ start: number; end: number; display: string; displayStart: number; displayEnd: number }> = [];
-  WIKI_LINK_RE.lastIndex = 0;
-  for (let m = WIKI_LINK_RE.exec(rawLine); m !== null; m = WIKI_LINK_RE.exec(rawLine)) {
+  const pushWiki = (m: RegExpExecArray) => {
     const start = m.index;
     const end = start + m[0]!.length;
-    if (protectedRanges.some(([s, e]) => start < e && end > s)) continue; // inside code
+    if (protectedRanges.some(([s, e]) => start < e && end > s)) return; // inside code
     // [[target|display]] renders the display part; [[target]] renders target.
     const display = (m[2] ?? m[1])!.trim();
-    if (display.length === 0) continue; // [[ ]] / [[a| ]]: nothing to show — render raw
+    if (display.length === 0) return; // [[ ]] / [[a| ]]: nothing to show — render raw
     // Position of the VISIBLE (trimmed) text in raw coordinates.
     const rawVisible = (m[2] ?? m[1])!;
     const lead = rawVisible.length - rawVisible.trimStart().length;
@@ -106,7 +108,28 @@ export function transformWikiLine(rawLine: string, spans?: HighlightSpan[]): Wik
       : start + 2) + lead;           // skip leading trim whitespace
     const displayEnd = displayStart + display.length;
     matches.push({ start, end, display, displayStart, displayEnd });
+  };
+  const pushInline = (m: RegExpExecArray) => {
+    const start = m.index;
+    const end = start + m[0]!.length;
+    if (protectedRanges.some(([s, e]) => start < e && end > s)) return; // inside code
+    // SPEC-121: [label](target) renders as just the label; an empty/blank
+    // label renders raw (nothing to compact onto).
+    const display = m[1]!.trim();
+    if (display.length === 0) return;
+    const lead = m[1]!.length - m[1]!.trimStart().length;
+    const displayStart = start + 1 + lead; // skip "["
+    const displayEnd = displayStart + display.length;
+    matches.push({ start, end, display, displayStart, displayEnd });
+  };
+  WIKI_LINK_RE.lastIndex = 0;
+  for (let m = WIKI_LINK_RE.exec(rawLine); m !== null; m = WIKI_LINK_RE.exec(rawLine)) pushWiki(m);
+  MD_LINK_RE.lastIndex = 0;
+  for (let m = MD_LINK_RE.exec(rawLine); m !== null; m = MD_LINK_RE.exec(rawLine)) {
+    // A wiki match wins on overlap ("[[a]](b)" pathological forms).
+    if (!matches.some((x) => m.index < x.end && m.index + m[0]!.length > x.start)) pushInline(m);
   }
+  matches.sort((a, b) => a.start - b.start);
 
   if (matches.length === 0) {
     return { text: rawLine, spans: spans ?? [], mapCol: (c) => c, changed: false };

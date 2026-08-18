@@ -181,6 +181,25 @@ describe("SPEC-116 wiki-link follow-or-create", () => {
     });
   });
 
+  describe("SPEC-121: gx create branch rewrites to a markdown link", () => {
+    test("dangling create via markdown-resolve-dispatch leaves [target](slug.md)", () => {
+      executeTlisp(editor, `(buffer-switch "${join(vault, "index.md")}")`);
+      executeTlisp(editor, "(cursor-move 0 6)"); // inside [[marcketing]]
+      primeResolveState("marcketing");
+      executeTlisp(editor, '(markdown-resolve-dispatch "marcketing" "+ Create: marcketing")');
+      // The link at point became a portable markdown link with the slug
+      // (the dispatch also OPENS the new note — switch back to assert).
+      executeTlisp(editor, `(buffer-switch "${join(vault, "index.md")}")`);
+      expect(tl(editor, "(buffer-text)")).toContain("[marcketing](marcketing.md)");
+      expect(tl(editor, "(buffer-text)")).not.toContain("[[marcketing]");
+      expect(existsSync(join(vault, "marcketing.md"))).toBe(true);
+      // Restore the shared vault: later Task-4 tests rely on [[marcketing…]]
+      // being DANGLING, and the index buffer's [[marcketing]] link.
+      rmSync(join(vault, "marcketing.md"));
+      executeTlisp(editor, '(markdown-replace-line "see [[marcketing]] and [[goals]]")');
+    });
+  });
+
   describe("Task 4: follow integration", () => {
     test("existing [[link]] follows exactly as before (real invocation)", async () => {
       // Fresh editor: earlier tests already rewrote the shared buffer's dangling link.

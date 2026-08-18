@@ -100,3 +100,22 @@ test('the span builtins and the bulk filter share one implementation', () => {
   expect(spans).toEqual([[0, 4]]);
   expect(firstSpans('=save')).toEqual(spans);
 });
+
+// SPEC-121: hostile characters in a completion component ("(2026" is an
+// INVALID JS RegExp) must degrade to a LITERAL match, not drop every
+// candidate — the live bug where typing a paren made the [[ finder show
+// "No match".
+test('invalid-regex components degrade to literal matching (SPEC-121)', () => {
+  const spans = (pattern: string, target: string): number => {
+    const r = interp.execute(`(length (string-match-spans ${JSON.stringify(pattern)} ${JSON.stringify(target)} nil))`) as any;
+    return r.right.value as number;
+  };
+  expect(spans('(2026', '+ Create: Fresh Idea (2026')).toBe(1);
+  expect(spans('[x', 'a [x] b')).toBe(1);
+  expect(spans('zzz', 'abc')).toBe(0);
+  // Through the BULK filter an invalid-regex component no longer ERRORS or
+  // wipes the pool — it literal-matches (no fixture display contains "(",
+  // so the correct result is none; before the fix this same call also
+  // returned [], but any component MIXED with "(" killed all matches).
+  expect(filteredValues('(')).toEqual([]);
+});

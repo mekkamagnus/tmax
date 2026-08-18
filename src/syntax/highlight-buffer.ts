@@ -60,6 +60,17 @@ export function computeHighlightSpans(
     }
     if (resolveWikiLink && lang === "markdown") {
       for (const token of tokens) {
+        // SPEC-121: inline markdown links whose target is a RELATIVE FILE
+        // get the same resolved/dangling health faces as wiki-links;
+        // URLs, mailto, and #anchors keep the plain link face.
+        if (token.type === "link") {
+          const m = /\]\(([^()]*)\)/.exec(lineText.slice(token.startCol, token.endCol));
+          const url = m?.[1] ?? "";
+          if (url !== "" && !/^(https?:|mailto:|#)/.test(url)) {
+            token.type = resolveWikiLink(url);
+          }
+          continue;
+        }
         if (token.type !== "wiki-link") continue;
         const target = lineText
           .slice(token.startCol, token.endCol)

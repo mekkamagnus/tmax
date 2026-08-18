@@ -74,7 +74,11 @@ function regexpSpansOf(pattern: string, target: string, caseSensitive: boolean):
     }
     return spans;
   } catch {
-    return [];
+    // SPEC-121: an INVALID REGEX pattern (e.g. a completion component like
+    // "(2026" typed into the minibuffer) must degrade to a LITERAL match,
+    // not silently drop every candidate — "No match" for one paren was the
+    // live bug. Orderless-style components stay usable for hostile input.
+    return literalSpansOf(pattern, target, caseSensitive);
   }
 }
 

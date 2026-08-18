@@ -7,7 +7,7 @@
  */
 
 import { describe, test, expect, beforeAll, afterAll } from "bun:test";
-import { mkdtempSync, writeFileSync, rmSync, existsSync, mkdirSync } from "node:fs";
+import { mkdtempSync, writeFileSync, rmSync, existsSync, mkdirSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -164,10 +164,12 @@ describe("SPEC-120: [[ fuzzy note finder", () => {
       expect(editor.getState().mode).toBe("mx");
       executeTlisp(editor, '(minibuffer-set-input "goals")');
       executeTlisp(editor, '(minibuffer-dispatch-key "Enter")');
-      expect(tl(editor, "(buffer-text)")).toBe("link: [[goals]]here\n");
+      // SPEC-121: the typed [[ is replaced by a portable markdown link to
+      // the SCANNED vault path.
+      expect(tl(editor, "(buffer-text)")).toBe("link: [goals](goals.md)here\n");
       expect(editor.getState().mode).toBe("insert");
-      // cursor sits right after "]]"
-      expect(tl(editor, "(cursor-column)")).toBe("15"); // 6 "link: " + 9 "[[goals]]"
+      // cursor sits right after the ")"
+      expect(tl(editor, "(cursor-column)")).toBe("23"); // 6 + len("[goals](goals.md)")
       // no buffer switch — still the note we were writing
       expect(tl(editor, "(buffer-current)")).toContain("index.md");
     });
@@ -178,9 +180,11 @@ describe("SPEC-120: [[ fuzzy note finder", () => {
       const editor = await typeOpenBrackets("idea: \n", 6);
       executeTlisp(editor, '(minibuffer-set-input "fresh idea")');
       executeTlisp(editor, '(minibuffer-dispatch-key "Enter")');
-      expect(tl(editor, "(buffer-text)")).toBe("idea: [[fresh idea]]\n");
+      // SPEC-121: slug filename + portable markdown link; H1 keeps the typed name.
+      expect(tl(editor, "(buffer-text)")).toBe("idea: [fresh idea](fresh-idea.md)\n");
       expect(editor.getState().mode).toBe("insert");
-      expect(existsSync(join(vault, "fresh idea.md"))).toBe(true);
+      expect(existsSync(join(vault, "fresh-idea.md"))).toBe(true);
+      expect(readFileSync(join(vault, "fresh-idea.md"), "utf-8")).toContain("# fresh idea");
       // NOT opened — we are still writing our note
       expect(tl(editor, "(buffer-current)")).toContain("index.md");
     });
@@ -214,7 +218,7 @@ describe("SPEC-120: [[ fuzzy note finder", () => {
       const editor = await typeOpenBrackets("see here\n", 4);
       executeTlisp(editor, '(minibuffer-set-input "goals")');
       executeTlisp(editor, '(minibuffer-dispatch-key "Enter")');
-      expect(tl(editor, "(buffer-text)")).toBe("see [[goals]]here\n");
+      expect(tl(editor, "(buffer-text)")).toBe("see [goals](goals.md)here\n");
       const state = editor.getEditorState();
       const lines = captureFrame(state as any, 80, 24);
       const row = (lines[0] ?? "").replace(/\x1b\[[0-9;]*[A-Za-z]/g, "");
@@ -238,6 +242,63 @@ describe("SPEC-120: [[ fuzzy note finder", () => {
       expect(lines[0] ?? "").toContain("38;2;97;175;239"); // link face
       // the file was written BEFORE the render → resolved, NOT dim
       expect(lines[0] ?? "").not.toContain("\x1b[2m\x1b[38;2;97;175;239");
+    });
+  });
+
+  describe("SPEC-121: slug table", () => {
+    test("dangerous names slug; clean names pass through; paths preserved", async () => {
+      const editor = await setupMdEditor("x\n", join(vault, "index.md"));
+      const cases: Array<[string, string]> = [
+        ["fresh idea (2026)", "fresh-idea-2026"],
+        ["Bob's idea (v2!)", "bob-s-idea-v2"],
+        ["2026-08-08", "2026-08-08"],
+        ["brand new thought", "brand-new-thought"],
+        ["  spaced  ", "spaced"],
+        ["sub/New Idea (2)", "sub/new-idea-2"],
+        ["sub/new-note", "sub/new-note"],
+      ];
+      for (const [name, want] of cases) {
+        expect(tl(editor, `(markdown-note-slug "${name}")`)).toBe(want);
+      }
+      // all-punctuation falls back to the raw trimmed name
+      expect(tl(editor, '(markdown-note-slug "???")')).toBe("???");
+    });
+  });
+
+  describe("SPEC-121: no-overwrite creation", () => {
+    test("creating an existing name never clobbers the file", async () => {
+      const existing = join(vault, "goals.md");
+      writeFileSync(existing, "# PRECIOUS\n");
+      const editor = await setupMdEditor("x\n", join(vault, "index.md"));
+      const path = tl(editor, '(markdown-write-note-template "goals")');
+      expect(path).toContain("goals.md");
+      expect(readFileSync(existing, "utf-8")).toBe("# PRECIOUS\n");
+    });
+
+    test("a NEW name writes and keeps the TYPED name as H1 with a slug path", async () => {
+      const editor = await setupMdEditor("x\n", join(vault, "index.md"));
+      const path = tl(editor, '(markdown-write-note-template "Fresh Idea (2)")');
+      expect(path).toContain("fresh-idea-2.md");
+      expect(readFileSync(join(vault, "fresh-idea-2.md"), "utf-8")).toContain("# Fresh Idea (2)");
+    });
+  });
+
+  describe("SPEC-121: toggle off restores the legacy wiki form", () => {
+    test("markdown-slugify-note-names nil → [[name]] + verbatim filename", async () => {
+      const editor = await setupMdEditor("idea: \n", join(vault, "index.md"));
+      executeTlisp(editor, '(major-mode-set "markdown")');
+      executeTlisp(editor, '(markdown-slugify-set nil)');
+      executeTlisp(editor, "(cursor-move 0 6)");
+      executeTlisp(editor, '(editor-set-mode "insert")');
+      executeTlisp(editor, '(insert-char "[")');
+      executeTlisp(editor, '(insert-char "[")');
+      // unique name — no note (nor its slug) exists in the shared vault,
+      // so the + Create candidate is the only match.
+      executeTlisp(editor, '(minibuffer-set-input "legacy name")');
+      executeTlisp(editor, '(minibuffer-dispatch-key "Enter")');
+      expect(tl(editor, "(buffer-text)")).toBe("idea: [[legacy name]]\n");
+      expect(existsSync(join(vault, "legacy name.md"))).toBe(true);
+      executeTlisp(editor, '(markdown-slugify-set t)'); // restore default
     });
   });
 

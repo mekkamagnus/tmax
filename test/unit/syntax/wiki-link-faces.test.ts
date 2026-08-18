@@ -151,6 +151,27 @@ describe("SPEC-118 wiki-link faces", () => {
     });
   });
 
+  describe("SPEC-121: inline markdown links get health faces (file targets only)", () => {
+    test("resolved file link full face, missing file link dim, URL plain", () => {
+      clearWikiLinkExistenceCache();
+      const buf = bufferOf(
+        "a [ok](goals.md) b [gone](missing-note.md) c [web](https://example.com) d [mail](mailto:x@y.z) e [top](#anchor) f\n",
+      );
+      const spans = computeHighlightSpans(
+        getLineOf(buf),
+        0,
+        1,
+        join(vault, "index.md"),
+        makeWikiLinkResolver(buf, join(vault, "index.md")),
+      );
+      const styles = (spans[0] ?? []).map((s) => JSON.stringify(s.style));
+      expect(styles).toContain(JSON.stringify(defaultDarkTheme["wiki-link-resolved"]));
+      expect(styles).toContain(JSON.stringify(defaultDarkTheme["wiki-link-dangling"]));
+      // URLs / mailto / anchors keep the PLAIN link face (no re-tagging)
+      expect(styles).toContain(JSON.stringify(defaultDarkTheme.link));
+    });
+  });
+
   describe("SPEC-116 mirror fidelity (gate retry 1)", () => {
     test("dot in an intermediate path segment counts as extension (T-Lisp string-contains rule)", () => {
       // [[docs.v2/note]]: T-Lisp follow does string-contains-p "." on the
