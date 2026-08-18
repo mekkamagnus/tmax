@@ -233,27 +233,30 @@ function findMatchingQuote(
 
   const currentLine = lines[line]!;
 
-  // Find opening quote before cursor
-  let start = column;
-  while (start >= 0 && currentLine[start]! !== quoteChar) {
-    start--;
+  // BUG-83: vim pairing semantics. The old backward/forward scan assumed the
+  // cursor was strictly INSIDE a string, so a cursor before the first quote
+  // failed outright (the "vi\" doesn't work" report), a cursor between two
+  // strings paired a closing quote with the NEXT string's opening quote (a
+  // phantom region), and a cursor on a closing quote mis-paired. Instead:
+  // collect the line's quotes, pair them in order, pick the pair containing
+  // the cursor (inclusive), else the NEXT pair — exactly vim's behavior.
+  const positions: number[] = [];
+  for (let i = 0; i < currentLine.length; i++) {
+    if (currentLine[i] === quoteChar) positions.push(i);
   }
 
-  if (start < 0) {
-    return Either.left(`No opening ${quoteChar} found`);
+  for (let p = 0; p + 1 < positions.length; p += 2) {
+    const start = positions[p]!;
+    const end = positions[p + 1]!; // closing quote (trailing unpaired quote is ignored)
+    if (column >= start && column <= end) {
+      return Either.right({ start, end }); // cursor inside (or on) this string
+    }
+    if (start >= column) {
+      return Either.right({ start, end }); // next string on the line
+    }
   }
 
-  // Find closing quote after cursor
-  let end = column + 1;
-  while (end < currentLine.length && currentLine[end]! !== quoteChar) {
-    end++;
-  }
-
-  if (end >= currentLine.length) {
-    return Either.left(`No closing ${quoteChar} found`);
-  }
-
-  return Either.right({ start, end });
+  return Either.left(`No ${quoteChar} pair at/after cursor`);
 }
 
 /**

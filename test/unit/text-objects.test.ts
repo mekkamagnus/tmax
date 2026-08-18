@@ -35,6 +35,8 @@ const {
   deleteInnerBracket,
   deleteInnerAngle,
   deleteInnerTag,
+  textObjectRegion,
+  deleteInnerDoubleQuote,
 } = createTextObjectsHelpers({ registerDelete: (text: string) => { deleteRegister = text; }, setDeleteRegister: (text: string) => { deleteRegister = text; } });
 
 function createBuffer(content: string): TextBuffer {
@@ -356,6 +358,70 @@ describe("Text Objects - US-1.8.1", () => {
       const result = deleteInnerParen(buffer, 0, 2);
 
       expect(Either.isLeft(result)).toBe(true);
+    });
+  });
+
+  // BUG-83: vim pairing semantics for quotes. The old finder required the
+  // cursor to already sit between a pair — vi" from OUTSIDE the quotes was a
+  // silent no-op (the user report), and a cursor between two strings paired a
+  // closing quote with the next string's opener (a phantom region).
+  describe("BUG-83: quote pairing (vim parity)", () => {
+    const LINE = 'say "hello world" now';
+
+    function region(buffer: TextBuffer, col: number, cls: string, kind: string) {
+      const r = textObjectRegion(buffer, 0, col, cls, kind, 1);
+      if (Either.isLeft(r)) return `LEFT:${r.left}`;
+      const { start, end } = r.right;
+      return `${start.column}..${end.column}`;
+    }
+
+    test("cursor BEFORE the string selects it (the vi\" report)", () => {
+      const buffer = createBuffer(LINE);
+      expect(region(buffer, 1, '"', "i")).toBe("5..16");
+      expect(region(buffer, 3, '"', "a")).toBe("4..17");
+    });
+
+    test("cursor INSIDE still works (unchanged)", () => {
+      const buffer = createBuffer(LINE);
+      expect(region(buffer, 6, '"', "i")).toBe("5..16");
+    });
+
+    test("cursor ON a quote char counts as inside", () => {
+      const buffer = createBuffer(LINE);
+      expect(region(buffer, 4, '"', "i")).toBe("5..16"); // on the opener
+      expect(region(buffer, 16, '"', "i")).toBe("5..16"); // on the closer
+    });
+
+    test("cursor between two strings selects the NEXT one, not a phantom", () => {
+      const buffer = createBuffer('a "x" b "y" c');
+      expect(region(buffer, 7, '"', "i")).toBe("9..10"); // "y" inner (y at col 9)
+    });
+
+    test("cursor past the last string still fails (vim parity failure)", () => {
+      const buffer = createBuffer('a "x" b "y" c');
+      expect(region(buffer, 13, '"', "i")).toMatch(/^LEFT:/);
+    });
+
+    test("unterminated trailing quote is ignored", () => {
+      const buffer = createBuffer('a "x" trailing "');
+      // quotes at 2,5,16 → pairs (2,5); 16 unpaired. Cursor at 10 → past (2,5) → LEFT
+      expect(region(buffer, 10, '"', "i")).toMatch(/^LEFT:/);
+      // cursor before x still works
+      expect(region(buffer, 0, '"', "i")).toBe("3..4");
+    });
+
+    test("single-quote family gets the same semantics", () => {
+      const buffer = createBuffer("say 'hello' now");
+      expect(region(buffer, 1, "'", "i")).toBe("5..10");
+      expect(region(buffer, 1, "'", "a")).toBe("4..11");
+    });
+
+    test("delete path: di\" from before the string deletes its contents", () => {
+      const buffer = createBuffer(LINE);
+      const result = deleteInnerDoubleQuote(buffer, 0, 1);
+      const right = expectRight(result);
+      const content = right.getContent();
+      expect(Either.isRight(content) ? content.right : "").toBe('say "" now');
     });
   });
 });
