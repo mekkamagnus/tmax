@@ -189,3 +189,19 @@ read). Also: the obsolete `as unknown as` casts in both frontends dropped
 (the fields are typed on EditorState), the #201 tests' sleeps shortened
 (4.2s total, comfortably under the 5s default), and terminal.test.ts run in
 this pass (28/28 across the five suites).
+
+## Color rendering (#202, 2026-08-19)
+
+The v1 colors-dropped caveat is RESOLVED. The cell model, SGR parsing, and
+setSGR application existed since #164 — only the read path joined bare
+chars. Shipped: `getStyledLine` (run-deduped ANSI, explicit resets on
+styled→default transitions and at line end, default-blank padding trim),
+`getVisibleStyledLines` feeding the injection, and the TUI no longer
+slices ANSI lines. Two pre-existing #164 bugs surfaced and fixed: the
+palette +1-bias decode (SGR 31 rendered green) and RGB fields never copied
+into cells (truecolor text/backgrounds lost).
+
+Live: `echo -e` red/bold-green/256-orange → `\\x1b[38;5;1m`,
+`\\x1b[1;38;5;2m`, `\\x1b[38;5;208m` exactly; the zsh prompt's full
+palette renders in the embedded pane (per-run resets, no bleed).
+screen-buffer 13/13 (6 new); cluster 41/41 per-file; typecheck clean.

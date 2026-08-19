@@ -1,6 +1,7 @@
 /** screen-buffer.test.ts — virtual terminal screen buffer tests */
 import { describe, test, expect } from "bun:test";
 import { ScreenBuffer } from "../../src/core/screen-buffer.ts";
+import { ANSIParser } from "../../src/syntax/ansi-parser.ts";
 
 describe("ScreenBuffer", () => {
   test("write chars + newline → cursor advances", () => {
@@ -61,5 +62,51 @@ describe("ScreenBuffer", () => {
     sb.apply({ type: "write", char: "Z" });
     expect(sb.cells[0]![0]!.bold).toBe(true);
     expect(sb.cells[0]![0]!.fg).toBe(2);
+  });
+});
+
+// #202: styled line rendering — colors survive the cells → ANSI round trip.
+describe("#202 getStyledLine", () => {
+  function feedAndRender(input: string, row = 0): string {
+    const screen = new ScreenBuffer(5, 80);
+    const parser = new ANSIParser((op) => screen.apply(op));
+    parser.feed(input);
+    return screen.getStyledLine(row);
+  }
+
+  test("plain text emits no escape codes and no row padding", () => {
+    expect(feedAndRender("hello")).toBe("hello");
+  });
+
+  test("SGR red round-trips EXACTLY (palette bias decoded)", () => {
+    const line = feedAndRender("\x1b[31mRED\x1b[0m plain");
+    expect(line).toContain("\x1b[38;5;1mRED");
+    // An explicit reset closes the red run before the plain text (no bleed).
+    expect(line).toContain("RED\x1b[0m plain");
+    expect(line).not.toContain("\x1b[38;5;1mRED plain");
+    // The off-by-one this test pins: 31 must NOT render as palette 2.
+    expect(line).not.toContain("38;5;2mRED");
+  });
+
+  test("bold + color combine; 256-color passes through exactly", () => {
+    const line = feedAndRender("\x1b[1;32mBG\x1b[0m \x1b[38;5;208mOR\x1b[0m");
+    expect(line).toContain("\x1b[1;38;5;2mBG");
+    expect(line).toContain("\x1b[38;5;208mOR");
+  });
+
+  test("consecutive same-style cells dedupe into one prefix", () => {
+    const line = feedAndRender("\x1b[31mABCDE\x1b[0m");
+    expect(line.split("ABCDE")[0]).toBe("\x1b[38;5;1m"); // exactly one prefix
+  });
+
+  test("truecolor round-trips (RGB fields reach the cell — #164 gap)", () => {
+    const line = feedAndRender("\x1b[38;2;10;20;30mX\x1b[0m");
+    expect(line).toContain("\x1b[38;2;10;20;30mX");
+  });
+
+  test("truecolor BACKGROUND survives blank cells", () => {
+    const line = feedAndRender("\x1b[48;2;1;2;3m  X\x1b[0m");
+    expect(line).toContain("48;2;1;2;3");
+    expect(line).toContain("  X");
   });
 });

@@ -57,8 +57,10 @@ function render(state: EditorState) {
   const termLines = state.terminalLines;
   if (state.mode === "terminal" && termLines) {
     clearScreen();
-    termLines.slice(0, height - 1).forEach((line, i) =>
-      writeAt(i, 0, line.length > width ? line.slice(0, width) : line));
+    // #202: lines are ANSI-styled — never .slice() them (that can cut an
+    // escape sequence mid-code). The PTY's width matches the pane (resize
+    // forwards), so rows are already width-bounded.
+    termLines.slice(0, height - 1).forEach((line, i) => writeAt(i, 0, line));
     writeAt(height - 1, 0, renderStatusLine(state, width));
     const tc = state.terminalCursor;
     if (tc) moveTo(Math.max(0, Math.min(height - 2, tc.row)), Math.max(0, Math.min(width - 1, tc.col)));

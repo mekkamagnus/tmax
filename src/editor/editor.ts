@@ -3131,7 +3131,8 @@ export class Editor {
       const id = this.activeTerminalId();
       const term = tm && id ? tm.get(id) : undefined;
       if (tm && id && term) {
-        (base as unknown as { terminalLines?: string[] }).terminalLines = tm.getVisibleLines(id);
+        // #202: styled lines — colors flow to every render path.
+        (base as unknown as { terminalLines?: string[] }).terminalLines = tm.getVisibleStyledLines(id);
         (base as unknown as { terminalCursor?: { row: number; col: number } }).terminalCursor =
           { row: term.screen.cursor.row, col: term.screen.cursor.col };
       }

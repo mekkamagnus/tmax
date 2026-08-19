@@ -127,13 +127,25 @@ export class TerminalManager {
     return this.terminals.get(id);
   }
 
-  /** Get visible screen lines (for rendering). Returns the screen buffer's rows as strings. */
+  /** Get visible screen lines as PLAIN text (T-Lisp/text consumers). */
   getVisibleLines(id: string): string[] {
     const term = this.terminals.get(id);
     if (!term) return [];
     const lines: string[] = [];
     for (let r = 0; r < term.screen.rows; r++) {
       lines.push(term.screen.getLine(r));
+    }
+    return lines;
+  }
+
+  /** #202: visible screen lines as ANSI-styled strings (the render path —
+   *  colors survive exactly as the child program wrote them). */
+  getVisibleStyledLines(id: string): string[] {
+    const term = this.terminals.get(id);
+    if (!term) return [];
+    const lines: string[] = [];
+    for (let r = 0; r < term.screen.rows; r++) {
+      lines.push(term.screen.getStyledLine(r));
     }
     return lines;
   }

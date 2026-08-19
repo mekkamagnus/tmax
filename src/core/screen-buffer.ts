@@ -54,11 +54,33 @@ const defaultSGR = (): SGRState => ({
   fgR: 0, fgG: 0, fgB: 0, bgR: 0, bgG: 0, bgB: 0,
 });
 
+/** #202: the SGR parameter string reproducing a cell's attributes ("" =
+ *  default — emits nothing). Stable ordering keeps run-dedup exact. */
+function cellSGRCode(c: Cell): string {
+  const parts: string[] = [];
+  if (c.bold) parts.push("1");
+  if (c.italic) parts.push("3");
+  if (c.underline) parts.push("4");
+  if (c.reverse) parts.push("7");
+  // The parser stores palette colors +1-BIASED (0 = default; 1-256 = palette
+  // index + 1) — decode with -1 when re-emitting (the #202 off-by-one that
+  // rendered SGR 31 red as palette-2 green).
+  if (c.fg === -1) parts.push(`38;2;${c.fgR ?? 0};${c.fgG ?? 0};${c.fgB ?? 0}`);
+  else if (c.fg > 0) parts.push(`38;5;${c.fg - 1}`);
+  if (c.bg === -1) parts.push(`48;2;${c.bgR ?? 0};${c.bgG ?? 0};${c.bgB ?? 0}`);
+  else if (c.bg > 0) parts.push(`48;5;${c.bg - 1}`);
+  return parts.join(";");
+}
+
 /** Create a blank cell. */
 function blankCell(sgr: SGRState): Cell {
+  // #202: RGB fields included — a truecolor background must paint blanks too
+  // (pre-existing #164 gap: blanks dropped their RGB).
   return {
     char: " ", fg: sgr.fg, bg: sgr.bg,
     bold: sgr.bold, italic: sgr.italic, underline: sgr.underline, reverse: sgr.reverse,
+    fgR: sgr.fgR, fgG: sgr.fgG, fgB: sgr.fgB,
+    bgR: sgr.bgR, bgG: sgr.bgG, bgB: sgr.bgB,
   };
 }
 
@@ -124,6 +146,9 @@ export class ScreenBuffer {
       fg: this.sgr.fg, bg: this.sgr.bg,
       bold: this.sgr.bold, italic: this.sgr.italic,
       underline: this.sgr.underline, reverse: this.sgr.reverse,
+      // #202: RGB fields — truecolor text was losing its color (#164 gap).
+      fgR: this.sgr.fgR, fgG: this.sgr.fgG, fgB: this.sgr.fgB,
+      bgR: this.sgr.bgR, bgG: this.sgr.bgG, bgB: this.sgr.bgB,
     };
     this.cursor.col++;
   }
@@ -236,6 +261,42 @@ export class ScreenBuffer {
   /** Get a line as a plain string (for rendering/testing). */
   getLine(row: number): string {
     return (this.cells[row] ?? []).map((c) => c.char).join("");
+  }
+
+  /**
+   * #202: the row as an ANSI-STYLED string — consecutive cells with equal
+   * attributes emit one SGR prefix (deduped); an all-default row is plain
+   * text. This is the color path the renderer consumes (getLine stays plain
+   * for T-Lisp/text consumers).
+   */
+  getStyledLine(row: number): string {
+    let cells = this.cells[row] ?? [];
+    // Trim trailing fully-default BLANK cells — they are row padding, not
+    // content (renderers position rows absolutely). A colored cell (e.g. a
+    // full-row background) stops the trim.
+    let end = cells.length;
+    while (end > 0 && cells[end - 1]!.char === " " && cellSGRCode(cells[end - 1]!) === "") end--;
+    cells = cells.slice(0, end);
+    let out = "";
+    let prev: string | null = null;
+    for (const c of cells) {
+      const code = cellSGRCode(c);
+      if (code !== prev) {
+        if (code === "") {
+          // styled → default REQUIRES an explicit reset — emitting nothing
+          // would let the previous style bleed over the plain text.
+          // (prev === null: the line starts default — nothing to reset.)
+          if (prev !== null) out += "\x1b[0m";
+        } else {
+          out += `\x1b[${code}m`;
+        }
+        prev = code;
+      }
+      out += c.char;
+    }
+    // Close any lingering style: ANSI state persists across writes, so a
+    // styled row must not bleed into the next row or the status line.
+    return prev === null || prev === "" ? out : out + "\x1b[0m";
   }
 
   /** Get scrollback lines (most recent first, up to count). */
