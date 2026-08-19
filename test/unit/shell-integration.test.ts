@@ -69,6 +69,33 @@ describe("#201 shell-mode end-to-end", () => {
     expect(after.terminalLines).toBeUndefined();
   });
 
+  test("styled terminal lines reach the state injection (escapes present, #202)", async () => {
+    // Interactive zsh's zle wedges on programmatically-typed $(...)/escape
+    // input (echoes but never executes); plain sh is faithful. The PTY spawns
+    // $SHELL, so point it at /bin/sh for this test only.
+    const prevShell = process.env.SHELL;
+    process.env.SHELL = "/bin/sh";
+    try {
+    const editor = await createStartedEditor("");
+    editor.getInterpreter().execute("(shell-start)");
+    const id = (editor.getInterpreter().execute("(shell-active-terminal-id)") as any)?.right?.value;
+    // 31 = red: the escape must survive PTY → parser → cells → injection.
+    // tput emits the ANSI codes SHELL-SIDE — no backslash escapes needed
+    // (T-Lisp literals mangle backslash-033, and a RAW ESC byte sent into
+    // an interactive zle line garbles the command).
+    editor.getInterpreter().execute(`(shell-send "${id}" "echo X$(tput setaf 1)COLOR-PROBE-OK$(tput sgr0)Y
+")`);
+    await new Promise((r) => setTimeout(r, 1500));
+    const lines = (editor.getEditorState() as unknown as { terminalLines?: string[] }).terminalLines ?? [];
+    const joined = lines.join("\n");
+    expect(joined).toContain("COLOR-PROBE-OK");
+    expect(joined).toContain("\x1b[38;5;1m");
+    editor.getInterpreter().execute("(shell-exit)");
+    } finally {
+      process.env.SHELL = prevShell;
+    }
+  });
+
   test("editor resize resizes the active PTY (screen rows follow, status line reserved)", async () => {
     const editor = await createStartedEditor("");
     editor.getInterpreter().execute("(shell-start)");

@@ -54,6 +54,23 @@ const defaultSGR = (): SGRState => ({
   fgR: 0, fgG: 0, fgB: 0, bgR: 0, bgG: 0, bgB: 0,
 });
 
+/** #202: code points that occupy two terminal columns (East-Asian Wide +
+ *  Fullwidth ranges + emoji). Conservative — mistyped narrow is harmless
+ *  here, mistyped wide would drift. */
+function isWideChar(ch: string): boolean {
+  const cp = ch.codePointAt(0) ?? 0;
+  return (cp >= 0x1100 && cp <= 0x115f)      // Hangul Jamo
+    || (cp >= 0x2e80 && cp <= 0xa4cf)        // CJK radicals..Yi
+    || (cp >= 0xac00 && cp <= 0xd7a3)        // Hangul syllables
+    || (cp >= 0xf900 && cp <= 0xfaff)        // CJK compat ideographs
+    || (cp >= 0xfe30 && cp <= 0xfe6f)        // CJK compat forms
+    || (cp >= 0xff00 && cp <= 0xff60)        // Fullwidth forms
+    || (cp >= 0xffe0 && cp <= 0xffe6)
+    || (cp >= 0x1f300 && cp <= 0x1f64f)      // emoji (misc symbols..emoticons)
+    || (cp >= 0x1f900 && cp <= 0x1f9ff)      // emoji supplemental
+    || (cp >= 0x20000 && cp <= 0x3fffd);     // CJK ext B+
+}
+
 /** #202: the SGR parameter string reproducing a cell's attributes ("" =
  *  default — emits nothing). Stable ordering keeps run-dedup exact. */
 function cellSGRCode(c: Cell): string {
@@ -150,7 +167,15 @@ export class ScreenBuffer {
       fgR: this.sgr.fgR, fgG: this.sgr.fgG, fgB: this.sgr.fgB,
       bgR: this.sgr.bgR, bgG: this.sgr.bgG, bgB: this.sgr.bgB,
     };
+    // #202 (gate): East-Asian-wide and emoji glyphs render 2 columns in a
+    // real terminal — occupy the continuation cell too so columns after the
+    // glyph align (pre-existing #164 drift; claude/codex UIs are wide-char
+    // heavy, and the zsh prompt carries emoji).
     this.cursor.col++;
+    if (isWideChar(char) && this.cursor.col < this.cols) {
+      this.cells[this.cursor.row]![this.cursor.col] = blankCell(this.sgr);
+      this.cursor.col++;
+    }
   }
 
   /** Line feed: move cursor down (scroll if at bottom of scroll region). */

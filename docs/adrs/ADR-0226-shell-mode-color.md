@@ -43,6 +43,12 @@ Bugs found while wiring (all pre-existing from #164, exposed by color):
 - Live-verified: `echo -e` red/bold-green/256-orange render as exactly
   `38;5;1` / `1;38;5;2` / `38;5;208`; the zsh prompt's full palette renders
   in the embedded pane with per-run resets (no bleed).
-- Suites: screen-buffer 13/13 (6 new styled-line tests incl. the two bug
-  pins), shell/terminal cluster per-file green (41/41 total); typecheck
-  clean.
+- Gate retry 1: wide-glyph continuation cells (CJK/emoji alignment — the
+  emoji-bearing zsh prompt and claude/codex UIs were drifting, pre-existing
+  #164), an injection-path test (tput color asserted in terminalLines,
+  /bin/sh-scoped because zle wedges on programmatically-typed $(...) input),
+  and the recorded gotcha that the EVAL-path string parser ignores `\r`
+  escapes (tests embed a raw CR).
+- Suites: screen-buffer 14/14, shell-integration 8/8, terminal 4/4,
+  terminal-manager 8/8, input-tokenizer 4/4, pty 5/5 — 43/43 per-file;
+  typecheck clean.

@@ -205,3 +205,19 @@ Live: `echo -e` red/bold-green/256-orange → `\\x1b[38;5;1m`,
 `\\x1b[1;38;5;2m`, `\\x1b[38;5;208m` exactly; the zsh prompt's full
 palette renders in the embedded pane (per-run resets, no bleed).
 screen-buffer 13/13 (6 new); cluster 41/41 per-file; typecheck clean.
+
+## Color gate retry 1 (2026-08-19)
+
+- **Wide glyphs now occupy a continuation cell** (East-Asian/emoji ranges) —
+  columns after them align; claude/codex UIs and the zsh prompt's emoji were
+  drifting (pre-existing #164). Pinned: two wide emoji push `X` to col 4.
+- **Injection-path test added**: /bin/sh-scoped (interactive zsh's zle
+  wedges on programmatically-typed `$(...)` input — echoes but never
+  executes; recorded), `tput setaf 1` output flows PTY → parser → cells →
+  `terminalLines` with the re-encoded `\\x1b[38;5;1m` asserted.
+- Discovered en route: **the EVAL-path string parser does not process \\r**
+  escapes (the working tests embed a RAW CR byte) — the same two-layer
+  string quirk documented across BUG-74/120/121.
+- Caveated (accepted): the default-blank padding trim can drop a typed
+  trailing space (cosmetic; rows are absolutely positioned); SGR re-encoding
+  is semantically equivalent, not byte-identical.

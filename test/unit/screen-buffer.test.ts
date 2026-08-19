@@ -104,6 +104,16 @@ describe("#202 getStyledLine", () => {
     expect(line).toContain("\x1b[38;2;10;20;30mX");
   });
 
+  test("wide glyphs occupy a continuation cell (columns after them align)", () => {
+    const screen = new ScreenBuffer(3, 20);
+    const parser = new ANSIParser((op) => screen.apply(op));
+    parser.feed("\u{1F30C}\u{1F30C}XY");
+    // 2 wide emoji = 4 columns; X at col 4, Y at col 5.
+    const plain = screen.getLine(0);
+    expect(plain.indexOf("X")).toBe(4);
+    expect(screen.getStyledLine(0).includes("XY")).toBe(true);
+  });
+
   test("truecolor BACKGROUND survives blank cells", () => {
     const line = feedAndRender("\x1b[48;2;1;2;3m  X\x1b[0m");
     expect(line).toContain("48;2;1;2;3");
