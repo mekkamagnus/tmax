@@ -241,7 +241,8 @@ export class ScreenBuffer {
   private insertLines(n: number): void {
     const top = this.cursor.row;
     const bottom = this.scrollRegion.bottom;
-    if (top > bottom) return;
+    if (top > bottom || top < this.scrollRegion.top) return;
+    this.cursor.col = 0; // xterm: IL/DL move the cursor to column 1
     const count = Math.min(n, bottom - top + 1);
     const region = this.cells.slice(top, bottom + 1);
     const kept = region.slice(0, region.length - count);
@@ -255,7 +256,8 @@ export class ScreenBuffer {
   private deleteLines(n: number): void {
     const top = this.cursor.row;
     const bottom = this.scrollRegion.bottom;
-    if (top > bottom) return;
+    if (top > bottom || top < this.scrollRegion.top) return;
+    this.cursor.col = 0; // xterm: IL/DL move the cursor to column 1
     const count = Math.min(n, bottom - top + 1);
     const region = this.cells.slice(top, bottom + 1);
     const kept = region.slice(count);

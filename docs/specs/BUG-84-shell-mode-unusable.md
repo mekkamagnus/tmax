@@ -248,3 +248,14 @@ sentinel = current last row. Also: precise IL/DL/DCH/ICH semantics, and the
 captured stream ships as a fixture regression
 (test/fixtures/claude-welcome-35x108.bin). Live: input box + status render
 at the true bottom; typing lands in the box.
+
+## Gate caveats (retry 1, accepted)
+
+- The replay fixture is VERSION-LOCKED to claude v2.1.195 (hard-pinned rows
+  31/33/1); a fixture refresh re-pins — it is a regression pin, not a conformance
+  suite.
+- Raw `ScreenBuffer.apply` does NOT normalize cursorMove -1 row/col; only the
+  TerminalManager adapter does. New direct consumers must replicate that
+  adapter (documented here + in the test comment).
+- DECSTBM home-on-set behavior ships with the sentinel change (both are
+  xterm-correct).

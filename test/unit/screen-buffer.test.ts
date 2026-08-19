@@ -191,6 +191,15 @@ describe("#204 line/char edit ops", () => {
     expect(s.getLine(0)).toMatch(/^helloworld\s*$/);
   });
 
+  test("IL/DL move the cursor to column 1 and no-op outside the region (xterm)", () => {
+    const s1 = fed("abcdef\x1b[1;4H\x1b[L", 4, 10);
+    expect((s1 as unknown as { cursor: { col: number } }).cursor.col).toBe(0);
+    // cursor ABOVE the region top: IL/DL are no-ops
+    const s2 = fed("abc\r\ndef\x1b[3;1r\x1b[1;1H\x1b[L", 4, 8);
+    expect(s2.getLine(0)).toMatch(/^abc/);
+    expect(s2.getLine(1)).toMatch(/^def/);
+  });
+
   test("ICH inserts blanks at the cursor, rest shifts right", () => {
     const s = fed("abcdef\x1b[1;2H\x1b[2@", 2, 12);
     expect(s.getLine(0)).toMatch(/^a\s\sbcdef\s*$/);
