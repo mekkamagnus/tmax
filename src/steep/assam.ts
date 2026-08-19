@@ -110,9 +110,11 @@ export class SteepFrontend implements Frontend {
       // THIS point is still the startup mode; the guard re-checks each tick).
       termTick = setInterval(() => {
         if (stopped) return;
-        const fresh = editor.getEditorState();
-        if (fresh.mode !== "terminal") return;
-        state = fresh;
+        // Cheap model read FIRST — getEditorState clones the whole state, and
+        // the tick runs for the frontend's lifetime even outside terminal mode
+        // (verify-gate #201 retry 1).
+        if (editor.getState().mode !== "terminal") return;
+        state = editor.getEditorState();
         render();
       }, 100);
 

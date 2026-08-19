@@ -69,6 +69,18 @@ describe("#201 shell-mode end-to-end", () => {
     expect(after.terminalLines).toBeUndefined();
   });
 
+  test("editor resize resizes the active PTY (screen rows follow, status line reserved)", async () => {
+    const editor = await createStartedEditor("");
+    editor.getInterpreter().execute("(shell-start)");
+    const id = (editor.getInterpreter().execute("(shell-active-terminal-id)") as any)?.right?.value;
+    const linesBefore = (editor.getInterpreter().execute(`(length (shell-get-lines "${id}"))`) as any)?.right?.value;
+    editor.updateTerminalSize(100, 30);
+    const linesAfter = (editor.getInterpreter().execute(`(length (shell-get-lines "${id}"))`) as any)?.right?.value;
+    expect(linesAfter).toBe(29); // 30 rows minus the status line
+    expect(linesAfter).not.toBe(linesBefore);
+    editor.getInterpreter().execute("(shell-exit)");
+  });
+
   test("the active-terminal getter resolves without boundp (key routing fix)", async () => {
     const editor = await createStartedEditor("");
     editor.getInterpreter().execute("(shell-start)");

@@ -168,3 +168,13 @@ $ C-c → exits → zsh prompt back
   editors to matter); the TUI width-slice can miscount double-width glyphs
   (v1 text-only scope); live transcripts are the e2e evidence (established
   convention).
+
+## Gate retry 2 fixes (2026-08-19)
+
+- The tick's mode guard reads the cheap MODEL state first — getEditorState
+  (a full clone) only runs in terminal mode, not every 100ms for the
+  frontend's lifetime.
+- Resize is unit-pinned: updateTerminalSize(100, 30) → the PTY screen
+  becomes 29 rows (status line reserved).
+- Caveat (pre-existing layout assumption, accepted): the terminal-cursor
+  clamp assumes exactly one status-line row.
