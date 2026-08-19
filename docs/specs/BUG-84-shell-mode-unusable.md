@@ -221,3 +221,18 @@ screen-buffer 13/13 (6 new); cluster 41/41 per-file; typecheck clean.
 - Caveated (accepted): the default-blank padding trim can drop a typed
   trailing space (cosmetic; rows are absolutely positioned); SGR re-encoding
   is semantically equivalent, not byte-identical.
+
+## Color gate retry 2 (2026-08-19)
+
+- isWideChar covers the FULL emoji plane span (0x1F300–0x1FAFF, incl. the
+  transport block 🚀 the gate caught) plus 0x2B00–0x2BFF; the wrong
+  "narrow-mistype is harmless" comment corrected (it reintroduces drift).
+- **The parser now iterates CODE POINTS, not UTF-16 units** — surrogate
+  pairs (all emoji/CJK-ext) were torn across two cells, splitting glyphs at
+  wraps. Discovered via the last-column pin: `abcde🌌X` previously left
+  surrogate halves on two rows.
+- The last-column wide-glyph edge traced + pinned: no continuation written
+  when none fits, row never exceeds cols, next char wraps (deferred-wrap
+  semantics).
+- Test-hygiene: wide-glyph assertions measure CELLS (columns), not JS
+  string indices — surrogate pairs make indexOf lie about columns.

@@ -2,6 +2,7 @@
 import { describe, test, expect } from "bun:test";
 import { ScreenBuffer } from "../../src/core/screen-buffer.ts";
 import { ANSIParser } from "../../src/syntax/ansi-parser.ts";
+import type { Cell } from "../../src/core/screen-buffer.ts";
 
 describe("ScreenBuffer", () => {
   test("write chars + newline → cursor advances", () => {
@@ -108,10 +109,35 @@ describe("#202 getStyledLine", () => {
     const screen = new ScreenBuffer(3, 20);
     const parser = new ANSIParser((op) => screen.apply(op));
     parser.feed("\u{1F30C}\u{1F30C}XY");
-    // 2 wide emoji = 4 columns; X at col 4, Y at col 5.
-    const plain = screen.getLine(0);
-    expect(plain.indexOf("X")).toBe(4);
+    // Measure COLUMNS (cells), not JS string indices — surrogate pairs make
+    // indexOf lie about columns. 2 wide emoji = 4 columns; X at cell 4.
+    const cells = (screen as unknown as { cells: Cell[][] }).cells[0]!;
+    expect(cells[0]!.char).toBe("\u{1F30C}");
+    expect(cells[1]!.char).toBe(" "); // continuation
+    expect(cells[4]!.char).toBe("X");
+    expect(cells[5]!.char).toBe("Y");
     expect(screen.getStyledLine(0).includes("XY")).toBe(true);
+  });
+
+  test("transport emoji (rocket) and arrow blocks are WIDE (gate retry 1 gap)", () => {
+    const screen = new ScreenBuffer(3, 20);
+    const parser = new ANSIParser((op) => screen.apply(op));
+    parser.feed("\u{1F680}\u{1F680}Z\u{2B06}W");
+    const cells = (screen as unknown as { cells: Cell[][] }).cells[0]!;
+    expect(cells[4]!.char).toBe("Z");     // two rockets = 4 columns
+    expect(cells[5]!.char).toBe("\u{2B06}");
+    expect(cells[7]!.char).toBe("W");     // wide arrow consumed 2 columns
+  });
+
+  test("wide glyph at the LAST column wraps without extending the row", () => {
+    const screen = new ScreenBuffer(3, 6);
+    const parser = new ANSIParser((op) => screen.apply(op));
+    parser.feed("abcde\u{1F30C}X"); // wide glyph lands at col 5 (last)
+    const row0 = (screen as unknown as { cells: Cell[][] }).cells[0]!;
+    expect(row0.length).toBe(6); // row never exceeds cols
+    expect(row0[5]!.char).toBe("\u{1F30C}"); // the intact code point (not torn)
+    const row1 = (screen as unknown as { cells: Cell[][] }).cells[1]!;
+    expect(row1[0]!.char).toBe("X"); // next char wrapped
   });
 
   test("truecolor BACKGROUND survives blank cells", () => {

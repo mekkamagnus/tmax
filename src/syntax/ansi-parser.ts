@@ -43,7 +43,12 @@ export class ANSIParser {
   private processBuffer(): void {
     let i = 0;
     while (i < this.buffer.length) {
-      const ch = this.buffer[i]!;
+      // #202: iterate by CODE POINT, not UTF-16 unit — surrogate pairs
+      // (emoji, CJK ext) were torn across two cells/writes, splitting the
+      // glyph when a wrap intervened.
+      const cp = this.buffer.codePointAt(i)!;
+      const ch = String.fromCodePoint(cp);
+      const chLen = ch.length;
 
       if (ch === "\x1b") {
         // Escape sequence — try to parse it
@@ -68,9 +73,9 @@ export class ANSIParser {
         this.outputCb({ type: "cursorForward", n: 8 });
         i++;
       } else if (ch >= " ") {
-        // Printable character
+        // Printable character (possibly a full surrogate-pair code point)
         this.outputCb({ type: "write", char: ch });
-        i++;
+        i += chLen;
       } else {
         // Other control char — skip
         i++;

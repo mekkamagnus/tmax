@@ -55,8 +55,11 @@ const defaultSGR = (): SGRState => ({
 });
 
 /** #202: code points that occupy two terminal columns (East-Asian Wide +
- *  Fullwidth ranges + emoji). Conservative — mistyped narrow is harmless
- *  here, mistyped wide would drift. */
+ *  Fullwidth ranges + emoji-presentation blocks). NOTE: mistyping NARROW is
+ *  NOT harmless — it reintroduces the 1-column drift the continuation cell
+ *  exists to prevent (verify-gate #202 retry 1: the transport-emoji gap
+ *  mistyped 🚀 narrow). When in doubt for an emoji-adjacent block, include
+ *  it — real terminals render these wide. */
 function isWideChar(ch: string): boolean {
   const cp = ch.codePointAt(0) ?? 0;
   return (cp >= 0x1100 && cp <= 0x115f)      // Hangul Jamo
@@ -66,8 +69,8 @@ function isWideChar(ch: string): boolean {
     || (cp >= 0xfe30 && cp <= 0xfe6f)        // CJK compat forms
     || (cp >= 0xff00 && cp <= 0xff60)        // Fullwidth forms
     || (cp >= 0xffe0 && cp <= 0xffe6)
-    || (cp >= 0x1f300 && cp <= 0x1f64f)      // emoji (misc symbols..emoticons)
-    || (cp >= 0x1f900 && cp <= 0x1f9ff)      // emoji supplemental
+    || (cp >= 0x1f300 && cp <= 0x1faff)      // ALL emoji blocks (incl. transport 🚀 + extended)
+    || (cp >= 0x2b00 && cp <= 0x2bff)        // arrows/stars (emoji-presentation)
     || (cp >= 0x20000 && cp <= 0x3fffd);     // CJK ext B+
 }
 
@@ -172,6 +175,10 @@ export class ScreenBuffer {
     // glyph align (pre-existing #164 drift; claude/codex UIs are wide-char
     // heavy, and the zsh prompt carries emoji).
     this.cursor.col++;
+    // Continuation cell only when one FITS: a wide glyph at the LAST column
+    // leaves cursor.col === cols with no continuation written — the row
+    // never exceeds cols, and the next writeChar's `col >= cols` check
+    // wraps to the next line (matching a real terminal's deferred wrap).
     if (isWideChar(char) && this.cursor.col < this.cols) {
       this.cells[this.cursor.row]![this.cursor.col] = blankCell(this.sgr);
       this.cursor.col++;

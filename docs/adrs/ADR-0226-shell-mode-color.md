@@ -52,3 +52,8 @@ Bugs found while wiring (all pre-existing from #164, exposed by color):
 - Suites: screen-buffer 14/14, shell-integration 8/8, terminal 4/4,
   terminal-manager 8/8, input-tokenizer 4/4, pty 5/5 — 43/43 per-file;
   typecheck clean.
+- Gate retry 2: isWideChar covers the full emoji span (the transport block
+  was the gate's catch) + arrows; the parser iterates CODE POINTS
+  (surrogate pairs were torn across cells — all emoji were at risk, pinned
+  via the last-column case); the wrong narrow-is-harmless comment fixed;
+  wide-glyph tests measure cells not string indices.
