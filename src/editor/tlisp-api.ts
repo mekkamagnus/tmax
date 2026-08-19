@@ -1871,8 +1871,13 @@ function buildEditorAPIContributions(): readonly EditorAPIContribution[] {
         // contract: EditorAPIContext.terminalManager — #201)
         const tm = ctx.terminalManager ??= new TerminalManager();
         return createShellOps(tm, () => {
-          const m = ctx.access.getModel();
-          return { width: (m as any).terminalWidth ?? 80, height: (m as any).terminalHeight ?? 24 };
+          // #203: the REAL terminal size — the old closure read
+          // model.terminalWidth, a field that does not exist anywhere, so
+          // every PTY was created 80x23 regardless of the pane ("view is
+          // not full screen" in a large pane). ctx.terminal is the live
+          // TerminalIO the frontend keeps updated via updateTerminalSize.
+          const size = ctx.terminal.getSize();
+          return { width: size.width, height: size.height };
         });
       },
     },

@@ -69,6 +69,18 @@ describe("#201 shell-mode end-to-end", () => {
     expect(after.terminalLines).toBeUndefined();
   });
 
+  test("the PTY is created at the LIVE terminal size, not a hardcoded 80x23 (#203)", async () => {
+    const editor = await createStartedEditor("");
+    // The size closure reads the ctx's TerminalIO — inject a distinct size so
+    // a regression to any hardcoded/dead-field default fails the numbers.
+    (editor as any).terminal.getSize = () => ({ width: 120, height: 44 });
+    editor.getInterpreter().execute("(shell-start)");
+    const id = (editor.getInterpreter().execute("(shell-active-terminal-id)") as any)?.right?.value;
+    const rows = (editor.getInterpreter().execute(`(length (shell-get-lines "${id}"))`) as any)?.right?.value;
+    expect(rows).toBe(43); // 44 minus the status line — NOT 23
+    editor.getInterpreter().execute("(shell-exit)");
+  });
+
   test("styled terminal lines reach the state injection (escapes present, #202)", async () => {
     // Interactive zsh's zle wedges on programmatically-typed $(...)/escape
     // input (echoes but never executes); plain sh is faithful. The PTY spawns
