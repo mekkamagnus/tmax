@@ -178,3 +178,14 @@ $ C-c → exits → zsh prompt back
   becomes 29 rows (status line reserved).
 - Caveat (pre-existing layout assumption, accepted): the terminal-cursor
   clamp assumes exactly one status-line row.
+
+## Gate retry 2 correction (2026-08-19, post-final-gate)
+
+The retry-2 "cheap model read" claim was WRONG as first written: the guard
+used `editor.getState().mode`, and `getState()` is an ALIAS for
+`getEditorState()` — the full clone still ran every 100ms (the gate verified
+this on disk). Corrected to `editor.getMode()` (the direct `model.mode`
+read). Also: the obsolete `as unknown as` casts in both frontends dropped
+(the fields are typed on EditorState), the #201 tests' sleeps shortened
+(4.2s total, comfortably under the 5s default), and terminal.test.ts run in
+this pass (28/28 across the five suites).

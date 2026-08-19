@@ -54,13 +54,13 @@ function render(state: EditorState) {
 
   // #201 (BUG-84): terminal mode renders the daemon's PTY screen — not the
   // editor buffer — plus the status line and the PTY's own cursor.
-  const termLines = (state as unknown as { terminalLines?: string[] }).terminalLines;
+  const termLines = state.terminalLines;
   if (state.mode === "terminal" && termLines) {
     clearScreen();
     termLines.slice(0, height - 1).forEach((line, i) =>
       writeAt(i, 0, line.length > width ? line.slice(0, width) : line));
     writeAt(height - 1, 0, renderStatusLine(state, width));
-    const tc = (state as unknown as { terminalCursor?: { row: number; col: number } }).terminalCursor;
+    const tc = state.terminalCursor;
     if (tc) moveTo(Math.max(0, Math.min(height - 2, tc.row)), Math.max(0, Math.min(width - 1, tc.col)));
     return;
   }

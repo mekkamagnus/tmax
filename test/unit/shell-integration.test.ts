@@ -47,7 +47,7 @@ describe("#201 shell-mode end-to-end", () => {
     const editor = await createStartedEditor("");
     editor.getInterpreter().execute("(shell-start)");
     // Give the spawned $SHELL a moment to paint its prompt.
-    await new Promise((r) => setTimeout(r, 1500));
+    await new Promise((r) => setTimeout(r, 700));
     expect(editor.getState().mode).toBe("terminal");
     const state = editor.getEditorState() as unknown as {
       terminalLines?: string[]; terminalCursor?: { row: number; col: number };
@@ -58,7 +58,7 @@ describe("#201 shell-mode end-to-end", () => {
     // prompt at all) and watch it land on the virtual screen.
     const id = (editor.getInterpreter().execute("(shell-active-terminal-id)") as any)?.right?.value;
     editor.getInterpreter().execute(`(shell-send "${id}" "echo test-ok\r")`);
-    await new Promise((r) => setTimeout(r, 2000));
+    await new Promise((r) => setTimeout(r, 1200));
     const joined = ((editor.getEditorState() as unknown as { terminalLines?: string[] })
       .terminalLines ?? []).join("\n");
     expect(joined).toContain("test-ok");

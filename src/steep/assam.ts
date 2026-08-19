@@ -66,7 +66,7 @@ export class SteepFrontend implements Frontend {
           // #201: the PTY owns the cursor position in terminal mode — clamped
           // to the visible pane (a PTY can report past it; the TUI branch
           // clamps too).
-          const tc = (state as unknown as { terminalCursor?: { row: number; col: number } }).terminalCursor;
+          const tc = state.terminalCursor;
           if (tc) {
             const { width: w, height: h } = screen.getDims();
             screen.moveTo(Math.max(0, Math.min(h - 2, tc.row)), Math.max(0, Math.min(w - 1, tc.col)));
@@ -110,10 +110,11 @@ export class SteepFrontend implements Frontend {
       // THIS point is still the startup mode; the guard re-checks each tick).
       termTick = setInterval(() => {
         if (stopped) return;
-        // Cheap model read FIRST — getEditorState clones the whole state, and
-        // the tick runs for the frontend's lifetime even outside terminal mode
-        // (verify-gate #201 retry 1).
-        if (editor.getState().mode !== "terminal") return;
+        // Cheap model read FIRST — getMode reads this.model.mode directly
+        // (getState/getEditorState CLONE the whole state, and the tick runs
+        // for the frontend's lifetime even outside terminal mode).
+        // verify-gate #201 retries 1+2.
+        if (editor.getMode() !== "terminal") return;
         state = editor.getEditorState();
         render();
       }, 100);
