@@ -152,3 +152,19 @@ $ C-c → exits → zsh prompt back
   byte (`send-keys -l "$(printf '\x1c')")`; C-\ itself works in both paths.
 - Colors: ScreenBuffer is text-only — claude/codex CONTENT renders; SGR
   colors are dropped (documented v1 scope, follow-up).
+
+## Gate retry 1 fixes (2026-08-19)
+
+- assam terminal cursor now clamps to the visible pane (matches the TUI
+  branch; a PTY can report past it).
+- The `_terminalManager` implicit contract is TYPED:
+  `EditorAPIContext.terminalManager?` — set by the shell-ops factory, read
+  by the injection (a rename now fails typecheck, not silently).
+- `activeTerminalId()` memoizes the id (the interpreter round-trip ran every
+  100ms tick); the cache clears when the mode leaves terminal and revalidates
+  against the manager.
+- Caveated (accepted): `frameToEditorState` reads the single server editor
+  for terminal fields (the daemon hosts ONE editor — would need per-frame
+  editors to matter); the TUI width-slice can miscount double-width glyphs
+  (v1 text-only scope); live transcripts are the e2e evidence (established
+  convention).

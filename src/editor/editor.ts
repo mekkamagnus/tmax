@@ -93,15 +93,30 @@ export class Editor {
 
   /** #201: the shell-mode TerminalManager, if the shell API was ever loaded. */
   private shellTerminals(): TerminalManager | undefined {
-    return (this.apiContext as unknown as { _terminalManager?: TerminalManager } | undefined)?._terminalManager;
+    return this.apiContext?.terminalManager;
   }
+
+  /** #201: memo of the active shell-mode terminal id — getEditorState runs
+   * every 100ms in terminal mode and the interpreter round-trip would
+   * dominate the tick (verify-gate #201). Validated against the live lookup
+   * when the mode ENTERS terminal; cleared on shell-exit (mode leaves). */
+  private cachedTerminalId: string | undefined;
 
   /** #201: the active shell-mode terminal id (shell.tlisp's exported getter —
    *  boundp is not a builtin, so the defvar can't be read inline from TS). */
   private activeTerminalId(): string | undefined {
+    if (this.model.mode !== "terminal") {
+      this.cachedTerminalId = undefined;
+      return undefined;
+    }
+    if (this.cachedTerminalId && this.shellTerminals()?.get(this.cachedTerminalId)) {
+      return this.cachedTerminalId;
+    }
     const r = this.interpreter.execute("(shell-active-terminal-id)") as unknown as
       { _tag?: string; right?: { type?: string; value?: unknown } };
-    return r?._tag === "Right" && r.right?.type === "string" ? (r.right.value as string) : undefined;
+    const id = r?._tag === "Right" && r.right?.type === "string" ? (r.right.value as string) : undefined;
+    this.cachedTerminalId = id;
+    return id;
   }
   // CHORE-44 Change 1: per-editor session accessors (kill ring, registers,
   // visual, macros, …) bound over `this.model.session`. Set in the constructor

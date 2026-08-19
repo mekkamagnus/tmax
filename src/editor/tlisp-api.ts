@@ -1867,8 +1867,9 @@ function buildEditorAPIContributions(): readonly EditorAPIContribution[] {
     {
       name: "shell",
       factory: (ctx: EditorAPIContext): Map<string, TLispFunctionImpl> => {
-        // Lazily create + cache the TerminalManager on the context
-        const tm = (ctx as any)._terminalManager ??= new TerminalManager();
+        // Lazily create + cache the TerminalManager on the context (typed
+        // contract: EditorAPIContext.terminalManager — #201)
+        const tm = ctx.terminalManager ??= new TerminalManager();
         return createShellOps(tm, () => {
           const m = ctx.access.getModel();
           return { width: (m as any).terminalWidth ?? 80, height: (m as any).terminalHeight ?? 24 };

@@ -63,10 +63,13 @@ export class SteepFrontend implements Frontend {
         screen.moveTo(height - 1 - minibuffer.lines.length + minibuffer.cursorRow, minibuffer.cursorColumn);
       } else {
         if (state.mode === "terminal") {
-          // #201: the PTY owns the cursor position in terminal mode.
+          // #201: the PTY owns the cursor position in terminal mode — clamped
+          // to the visible pane (a PTY can report past it; the TUI branch
+          // clamps too).
           const tc = (state as unknown as { terminalCursor?: { row: number; col: number } }).terminalCursor;
           if (tc) {
-            screen.moveTo(Math.max(0, tc.row), Math.max(0, tc.col));
+            const { width: w, height: h } = screen.getDims();
+            screen.moveTo(Math.max(0, Math.min(h - 2, tc.row)), Math.max(0, Math.min(w - 1, tc.col)));
           }
         } else {
           const cursor = getCursorScreenOffset(state, bufferHeight, width);

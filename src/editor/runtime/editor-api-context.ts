@@ -64,6 +64,11 @@ export interface EditorAPIContext {
 
   // Runtime services ----------------------------------------------------------
   terminal: TerminalIO;
+  /** #201: shell-mode's per-editor TerminalManager — set by the shell-ops
+   * factory (lazily, on first shell API use); Editor.getEditorState reads it
+   * for terminal-mode state injection. Typed here so the cross-file contract
+   * is explicit (verify-gate #201). */
+  terminalManager?: import("../../core/terminal-manager.ts").TerminalManager;
   filesystem: FileSystem;
   /** Optional file/state operations (used by file-ops). */
   operations?: EditorOperations;
