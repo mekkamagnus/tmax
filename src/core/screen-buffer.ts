@@ -36,6 +36,10 @@ export type ScreenOp =
   | { type: "setSGR"; attrs: Partial<SGRState> }
   | { type: "scrollUp"; n: number }
   | { type: "scrollDown"; n: number }
+  | { type: "insertLines"; n: number }
+  | { type: "deleteLines"; n: number }
+  | { type: "deleteChars"; n: number }
+  | { type: "insertChars"; n: number }
   | { type: "setScrollRegion"; top: number; bottom: number }
   | { type: "altScreen"; enable: boolean }
   | { type: "cursorVisible"; visible: boolean };
@@ -151,7 +155,15 @@ export class ScreenBuffer {
       case "setSGR": Object.assign(this.sgr, op.attrs); break;
       case "scrollUp": this.scrollUp(op.n); break;
       case "scrollDown": this.scrollDown(op.n); break;
-      case "setScrollRegion": this.scrollRegion = { top: op.top, bottom: op.bottom }; break;
+      case "insertLines": this.insertLines(op.n); break;
+      case "deleteLines": this.deleteLines(op.n); break;
+      case "deleteChars": this.deleteChars(op.n); break;
+      case "insertChars": this.insertChars(op.n); break;
+      // #204: bottom === -1 means "last row" (DECSTBM with an omitted bottom
+      // — the parser cannot know the row count).
+      case "setScrollRegion":
+        this.scrollRegion = { top: op.top, bottom: op.bottom === -1 ? this.rows - 1 : op.bottom };
+        break;
       case "altScreen": this.toggleAltScreen(op.enable); break;
       case "cursorVisible": this.cursor.visible = op.visible; break;
     }
@@ -221,6 +233,56 @@ export class ScreenBuffer {
       }
       this.cells[top] = blankLine(this.cols, this.sgr);
     }
+  }
+
+  /** #204: IL — insert n blank lines AT THE CURSOR ROW, shifting lines from
+   *  the cursor down to the scroll-region bottom DOWN by n (content above the
+   *  cursor and below the region is untouched). */
+  private insertLines(n: number): void {
+    const top = this.cursor.row;
+    const bottom = this.scrollRegion.bottom;
+    if (top > bottom) return;
+    const count = Math.min(n, bottom - top + 1);
+    const region = this.cells.slice(top, bottom + 1);
+    const kept = region.slice(0, region.length - count);
+    this.cells.splice(top, region.length,
+      ...Array.from({ length: count }, () => blankLine(this.cols, this.sgr)),
+      ...kept);
+  }
+
+  /** #204: DL — delete n lines AT THE CURSOR ROW, shifting lines below UP
+   *  within the scroll region (blanks appear at the region bottom). */
+  private deleteLines(n: number): void {
+    const top = this.cursor.row;
+    const bottom = this.scrollRegion.bottom;
+    if (top > bottom) return;
+    const count = Math.min(n, bottom - top + 1);
+    const region = this.cells.slice(top, bottom + 1);
+    const kept = region.slice(count);
+    this.cells.splice(top, region.length,
+      ...kept,
+      ...Array.from({ length: count }, () => blankLine(this.cols, this.sgr)));
+  }
+
+  /** #204: DCH — delete n cells AT THE CURSOR on the cursor's row; the rest
+   *  of the line shifts LEFT, blanks pad the end. */
+  private deleteChars(n: number): void {
+    const row = this.cells[this.cursor.row];
+    if (!row) return;
+    const count = Math.min(n, this.cols - this.cursor.col);
+    row.splice(this.cursor.col, count);
+    while (row.length < this.cols) row.push(blankCell(this.sgr));
+  }
+
+  /** #204: ICH — insert n blank cells AT THE CURSOR; the rest of the line
+   *  shifts RIGHT (cells pushed past the edge are lost). */
+  private insertChars(n: number): void {
+    const row = this.cells[this.cursor.row];
+    if (!row) return;
+    const count = Math.min(n, this.cols - this.cursor.col);
+    const blanks = Array.from({ length: count }, () => blankCell(this.sgr));
+    row.splice(this.cursor.col, 0, ...blanks);
+    row.length = this.cols;
   }
 
   /** Erase part or all of the display. */

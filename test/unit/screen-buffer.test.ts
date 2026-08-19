@@ -3,6 +3,7 @@ import { describe, test, expect } from "bun:test";
 import { ScreenBuffer } from "../../src/core/screen-buffer.ts";
 import { ANSIParser } from "../../src/syntax/ansi-parser.ts";
 import type { Cell } from "../../src/core/screen-buffer.ts";
+import { readFileSync } from "node:fs";
 
 describe("ScreenBuffer", () => {
   test("write chars + newline → cursor advances", () => {
@@ -144,5 +145,91 @@ describe("#202 getStyledLine", () => {
     const line = feedAndRender("\x1b[48;2;1;2;3m  X\x1b[0m");
     expect(line).toContain("48;2;1;2;3");
     expect(line).toContain("  X");
+  });
+});
+// #204: precise IL/DL/DCH/ICH — the old approximations (scroll-from-top /
+// blank-to-EOL) corrupted Ink-style redraws (claude's input box vanished).
+describe("#204 line/char edit ops", () => {
+  function fed(input: string, rows = 6, cols = 20): ScreenBuffer {
+    const screen = new ScreenBuffer(rows, cols);
+    // Same adapter TerminalManager uses: CR/VPA arrive with row/col -1
+    // meaning "current" — raw ScreenBuffer.apply does not normalize them.
+    const parser = new ANSIParser((op) => {
+      if (op.type === "cursorMove") {
+        screen.apply({
+          type: "cursorMove",
+          row: op.row === -1 ? screen.cursor.row : op.row,
+          col: op.col === -1 ? screen.cursor.col : op.col,
+        });
+        return;
+      }
+      screen.apply(op);
+    });
+    parser.feed(input);
+    return screen;
+  }
+
+  test("IL inserts at the cursor; content ABOVE and the cursor line shift down, below-region untouched", () => {
+    // 3 rows: AAA/BBB/CCC; cursor to row 1; insert 1 line.
+    const s = fed("AAA\r\nBBB\r\nCCC\x1b[2;1H\x1b[L", 4, 8);
+    expect(s.getLine(0)).toMatch(/^AAA/);
+    expect(s.getLine(1)).toMatch(/^\s+$/); // inserted blank
+    expect(s.getLine(2)).toMatch(/^BBB/);   // shifted down
+    expect(s.getLine(3)).toMatch(/^CCC/);   // below cursor pushed, not lost
+  });
+
+  test("DL deletes at the cursor; lines below shift up", () => {
+    const s = fed("AAA\r\nBBB\r\nCCC\x1b[1;1H\x1b[M", 3, 8);
+    expect(s.getLine(0)).toMatch(/^BBB/);
+    expect(s.getLine(1)).toMatch(/^CCC/);
+    expect(s.getLine(2)).toMatch(/^\s+$/);
+  });
+
+  test("DCH deletes at the cursor and shifts the REST OF THE LINE left (not blank-to-EOL)", () => {
+    // "hello world", cursor at col 5, delete 1 char -> "helloworld"
+    const s = fed("hello world\x1b[1;6H\x1b[P", 2, 20);
+    expect(s.getLine(0)).toMatch(/^helloworld\s*$/);
+  });
+
+  test("ICH inserts blanks at the cursor, rest shifts right", () => {
+    const s = fed("abcdef\x1b[1;2H\x1b[2@", 2, 12);
+    expect(s.getLine(0)).toMatch(/^a\s\sbcdef\s*$/);
+  });
+});
+// #204 regression: a REAL captured claude welcome-screen stream (35x108
+// PTY). Root cause: DECSTBM with an omitted bottom (ESC[r = reset) defaulted
+// the region bottom to 24 — on a 35-row terminal every cursorDown clamped at
+// row 23, collapsing the input box + status onto one row ("input box not
+// showing"). The fix: -1 sentinel resolved to the last row by the buffer.
+describe("#204 claude welcome replay (DECSTBM default bottom)", () => {
+  test("the input box renders near the BOTTOM, not collapsed onto row 23", () => {
+    const data = readFileSync(import.meta.dir + "/../fixtures/claude-welcome-35x108.bin", "utf8");
+    const screen = new ScreenBuffer(35, 108);
+    const parser = new ANSIParser((op) => {
+      if (op.type === "cursorMove") {
+        screen.apply({
+          type: "cursorMove",
+          row: op.row === -1 ? screen.cursor.row : op.row,
+          col: op.col === -1 ? screen.cursor.col : op.col,
+        });
+        return;
+      }
+      screen.apply(op);
+    });
+    parser.feed(data);
+    const lines = Array.from({ length: screen.rows }, (_, r) => screen.getLine(r));
+    const inputRow = lines.findIndex((l) => l.includes("❯"));
+    expect(inputRow).toBe(31);           // bottom-anchored input box
+    expect(inputRow).not.toBe(23);       // the collapsed row (the bug)
+    expect(lines[33]).toContain("md-journal -> glm");  // status line below
+    expect(lines[1]).toContain("Claude Code v");       // box top intact
+  });
+
+  test("ESC[r (bare reset) sets the region to the FULL screen at any size", () => {
+    const screen = new ScreenBuffer(40, 20);
+    const parser = new ANSIParser((op) => screen.apply(op));
+    parser.feed("\x1b[r"); // reset with NO params
+    const region = (screen as unknown as { scrollRegion: { top: number; bottom: number } }).scrollRegion;
+    expect(region).toEqual({ top: 0, bottom: 39 }); // NOT 23
   });
 });

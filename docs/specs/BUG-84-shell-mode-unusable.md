@@ -236,3 +236,15 @@ screen-buffer 13/13 (6 new); cluster 41/41 per-file; typecheck clean.
   semantics).
 - Test-hygiene: wide-glyph assertions measure CELLS (columns), not JS
   string indices — surrogate pairs make indexOf lie about columns.
+
+## Appendix: #204 — the input-box collapse (2026-08-20)
+
+Symptom: on tall terminals claude showed only the welcome box at the top;
+the input box and status collapsed onto row ~23. Diagnosis: env-gated raw
+PTY capture -> sequence census -> event trace (claude draws the bottom UI
+with CR + cursorDown after ESC[r) -> deterministic replay in a unit
+harness. Root cause: the DECSTBM default bottom was hardcoded 24. Fix: -1
+sentinel = current last row. Also: precise IL/DL/DCH/ICH semantics, and the
+captured stream ships as a fixture regression
+(test/fixtures/claude-welcome-35x108.bin). Live: input box + status render
+at the true bottom; typing lands in the box.

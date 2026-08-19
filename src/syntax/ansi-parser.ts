@@ -198,8 +198,17 @@ export class ANSIParser {
       // Scroll
       case "S": this.outputCb({ type: "scrollUp", n: params[0] || 1 }); break;
       case "T": this.outputCb({ type: "scrollDown", n: params[0] || 1 }); break;
-      case "r": // DECSTBM — set scroll region
-        this.outputCb({ type: "setScrollRegion", top: (params[0] || 1) - 1, bottom: (params[1] || 24) - 1 });
+      case "r": // DECSTBM — set scroll region. An OMITTED bottom (ESC[r =
+        // reset to full screen) must mean "last row", not 24 — the parser
+        // cannot know the row count, so emit the -1 sentinel and let the
+        // ScreenBuffer resolve it (#204: hardcoded 24 clamped claude's
+        // cursorDown moves to row 23 on tall terminals, collapsing the
+        // input box onto the status line).
+        this.outputCb({
+          type: "setScrollRegion",
+          top: (params[0] || 1) - 1,
+          bottom: params[1] !== undefined && params[1] !== 0 ? params[1] - 1 : -1,
+        });
         this.outputCb({ type: "cursorMove", row: 0, col: 0 });
         break;
       // SGR — colors/attributes
@@ -209,14 +218,14 @@ export class ANSIParser {
       case "l":
         // Standard mode set/reset (not private) — skip
         break;
-      case "L": // Insert lines — approximate as scroll down
-        this.outputCb({ type: "scrollDown", n: params[0] || 1 }); break;
-      case "M": // Delete lines — approximate as scroll up
-        this.outputCb({ type: "scrollUp", n: params[0] || 1 }); break;
-      case "P": // Delete characters — approximate as erase
-        this.outputCb({ type: "eraseLine", mode: 0 }); break;
-      case "@": // Insert characters — skip
-        break;
+      case "L": // IL — insert lines at the cursor (#204: precise, was scrollDown)
+        this.outputCb({ type: "insertLines", n: params[0] || 1 }); break;
+      case "M": // DL — delete lines at the cursor (#204: precise, was scrollUp)
+        this.outputCb({ type: "deleteLines", n: params[0] || 1 }); break;
+      case "P": // DCH — delete chars, line shifts left (#204: was blank-to-EOL)
+        this.outputCb({ type: "deleteChars", n: params[0] || 1 }); break;
+      case "@": // ICH — insert chars, line shifts right (#204: was skipped)
+        this.outputCb({ type: "insertChars", n: params[0] || 1 }); break;
       case "n": // Device status report — skip
         break;
     }
