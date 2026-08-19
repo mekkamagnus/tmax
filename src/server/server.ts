@@ -878,7 +878,16 @@ export class TmaxServer {
 	      ? workspaceBuffers.get(bufferName)
 	      : frame.currentBuffer;
 	    return {
-	      currentBuffer: frameBuffer,
+	      // #201 (BUG-84): terminal mode renders the PTY screen — the frame
+      // doesn't carry it, so pull the injected fields off the live editor.
+      ...(frame.mode === "terminal"
+        ? (({ terminalLines, terminalCursor }) => ({ terminalLines, terminalCursor }))(
+            this.editor.getEditorState() as unknown as {
+              terminalLines?: string[]; terminalCursor?: { row: number; col: number };
+            },
+          )
+        : {}),
+      currentBuffer: frameBuffer,
 	      cursorPosition: { ...frame.cursorPosition },
 	      mode: frame.mode,
 	      statusMessage: frame.statusMessage,

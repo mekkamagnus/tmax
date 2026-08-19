@@ -1,5 +1,5 @@
 (defmodule editor/commands/shell
-  (export shell-start shell-exit shell-mode-active-p)
+  (export shell-start shell-exit shell-mode-active-p shell-active-terminal-id)
 
 ;; shell.tlisp — M-x shell entry point (#164 Task 5)
 ;; Creates a terminal via the shell-ops primitive, sets editor mode to "terminal",
@@ -26,9 +26,19 @@ Keys go to the PTY. Press C-\\ to return to the editor."
     (message "")
     nil)
 
+(defun shell-active-terminal-id ()
+  "The active terminal id (nil when not in terminal mode) — TS-side hook for
+the render/resize wiring (#201). shell.tlisp owns the defvar; boundp is not
+a builtin here, so TS must call this instead of reading the variable."
+  *active-terminal*)
+
 (defun shell-mode-active-p ()
   "Return t if currently in terminal mode."
   (if *active-terminal* t nil))
+
+;; #201: the conventional shell binding (M-x shell stays; BUG-81 makes the
+;; M-x chord flaky live — shell-mode needs a reliable direct entry).
+(key-bind "SPC !" "(shell-start)" "normal")
 
 (provide "shell")
 )

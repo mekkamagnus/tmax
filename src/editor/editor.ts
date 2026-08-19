@@ -9,6 +9,7 @@ import { TLispInterpreterImpl } from "../tlisp/interpreter.ts";
 import { FileSystemImpl } from "../core/filesystem.ts";
 import { createEditorAPI } from "./tlisp-api.ts";
 import type { EditorAPIContext } from "./runtime/editor-api-context.ts";
+import type { TerminalManager } from "../core/terminal-manager.ts"; // #201: terminal-mode state injection
 import { createEditorRuntimeCaches } from "./runtime/caches.ts";
 import type { EditorRuntimeCaches } from "./runtime/caches.ts";
 import type { EditorState, Window, HighlightSpan, MinibufferRenderView, JsonValue } from "../core/contracts/editor.ts";
@@ -86,6 +87,22 @@ import { indentRulesByBuffer } from "./api/indent-ops.ts";
  */
 export class Editor {
   private model: EditorModel;
+  // #201 (BUG-84): the EditorAPIContext this editor created — getEditorState
+  // reaches the per-editor TerminalManager the shell-ops factory caches on it.
+  private apiContext: EditorAPIContext | undefined;
+
+  /** #201: the shell-mode TerminalManager, if the shell API was ever loaded. */
+  private shellTerminals(): TerminalManager | undefined {
+    return (this.apiContext as unknown as { _terminalManager?: TerminalManager } | undefined)?._terminalManager;
+  }
+
+  /** #201: the active shell-mode terminal id (shell.tlisp's exported getter —
+   *  boundp is not a builtin, so the defvar can't be read inline from TS). */
+  private activeTerminalId(): string | undefined {
+    const r = this.interpreter.execute("(shell-active-terminal-id)") as unknown as
+      { _tag?: string; right?: { type?: string; value?: unknown } };
+    return r?._tag === "Right" && r.right?.type === "string" ? (r.right.value as string) : undefined;
+  }
   // CHORE-44 Change 1: per-editor session accessors (kill ring, registers,
   // visual, macros, …) bound over `this.model.session`. Set in the constructor
   // immediately after `this.model` is assigned so concurrent editors are
@@ -452,6 +469,9 @@ export class Editor {
       caches: editor.caches,
     };
 
+    // #201: getEditorState reads the per-editor TerminalManager that the
+    // shell-ops factory lazily caches on this context object.
+    this.apiContext = tlispState;
     const api = createEditorAPI(tlispState);
 
     for (const [name, fn] of api) {
@@ -3088,6 +3108,19 @@ export class Editor {
     // modelToEditorState clones mutable collections so callers cannot mutate
     // internal model state through retained references.
     const base = modelToEditorState(this.model);
+    // #201 (BUG-84): in terminal mode the frame renders the PTY's screen, not
+    // the buffer — attach the active terminal's lines + cursor (the
+    // render wiring captureTerminalFrame always expected but nothing fed).
+    if (base.mode === "terminal") {
+      const tm = this.shellTerminals();
+      const id = this.activeTerminalId();
+      const term = tm && id ? tm.get(id) : undefined;
+      if (tm && id && term) {
+        (base as unknown as { terminalLines?: string[] }).terminalLines = tm.getVisibleLines(id);
+        (base as unknown as { terminalCursor?: { row: number; col: number } }).terminalCursor =
+          { row: term.screen.cursor.row, col: term.screen.cursor.col };
+      }
+    }
     return {
       ...base,
       cursorFocus: this.model.cursorFocus ?? 'buffer',
@@ -3263,6 +3296,13 @@ export class Editor {
     const terminalIO = this.terminal as { updateSize?: (width: number, height: number) => void };
     if (typeof terminalIO.updateSize === 'function') {
       terminalIO.updateSize(width, height);
+    }
+    // #201 (BUG-84): keep the active shell-mode PTY in lockstep with the
+    // editor's terminal (claude/codex redraw for the new size).
+    if (this.model.mode === "terminal") {
+      const tm = this.shellTerminals();
+      const id = this.activeTerminalId();
+      if (tm && id) tm.resize(id, width, Math.max(1, height - 1));
     }
   }
 

@@ -191,6 +191,10 @@ export interface EditorState {
   currentBuffer?: TextBuffer;
   cursorPosition: Position;
   mode: 'normal' | 'insert' | 'visual' | 'command' | 'mx' | 'replace' | 'terminal';
+  /** #201 (BUG-84): shell-mode PTY screen rows + cursor (terminal mode only;
+   *  injected by Editor.getEditorState, carried on the daemon wire). */
+  terminalLines?: string[];
+  terminalCursor?: { row: number; col: number };
   statusMessage: string;
   viewportTop: number;
   viewportLeft?: number;

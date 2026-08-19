@@ -214,6 +214,9 @@ export interface SerializedEditorState {
   totalLines: number;
   /** Monotonic per-response revision — clients diff this, not the text. */
   bufferRevision: number;
+  /** #201 (BUG-84): shell-mode PTY screen rows + cursor (terminal mode only). */
+  terminalLines?: string[];
+  terminalCursor?: { row: number; col: number };
   windows: SerializedWindow[];
   currentWindowIndex: number;
   tabs: SerializedTab[];

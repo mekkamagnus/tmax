@@ -72,9 +72,11 @@ export async function handleTerminalMode(editor: EditorDispatchPort, key: string
     return;
   }
 
-  // Get the active terminal ID from the T-Lisp variable
-  const result = interp.execute("(if (boundp '*active-terminal*) *active-terminal* nil)") as any;
-  const terminalId = result?._tag === "Right" ? result.right?.value : null;
+  // Get the active terminal ID from shell.tlisp's exported getter
+  // (#201: boundp is not a builtin — this lookup ALWAYS errored before, so
+  // keys never reached the PTY).
+  const result = interp.execute("(shell-active-terminal-id)") as any;
+  const terminalId = result?._tag === "Right" && result.right?.type === "string" ? result.right.value : null;
 
   if (!terminalId || typeof terminalId !== "string") {
     // No active terminal — bail to normal mode

@@ -61,7 +61,9 @@ export function spawn(opts: PTYSpawnOptions = {}): PTYHandle {
   const env = {
     ...process.env,
     ...(opts.env ?? {}),
-    TERM: opts.env?.TERM ?? process.env.TERM ?? "xterm-256color",
+    // #201: never let TERM=dumb reach the child (Ink-based CLIs like claude
+    // degrade on it); unset (GUI daemon) also gets a real terminal type.
+    TERM: opts.env?.TERM ?? (process.env.TERM && process.env.TERM !== "dumb" ? process.env.TERM : "xterm-256color"),
   };
   const cols = opts.cols ?? DEFAULT_COLS;
   const rows = opts.rows ?? DEFAULT_ROWS;

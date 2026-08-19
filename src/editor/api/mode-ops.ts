@@ -79,7 +79,7 @@ export function createModeOps(
     }
 
     const mode = modeArg.value as string;
-    const validModes = ['normal', 'insert', 'visual', 'command', 'mx', 'replace'];
+    const validModes = ['normal', 'insert', 'visual', 'command', 'mx', 'replace', 'terminal'];
     if (!validModes.includes(mode)) {
       return Either.left(createValidationError(
         'ConstraintViolation',

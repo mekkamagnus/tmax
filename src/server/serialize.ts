@@ -134,6 +134,10 @@ export function editorStateToJson(
     visibleLines,
     totalLines,
     bufferRevision: Date.now(),
+    // #201 (BUG-84): shell-mode's PTY screen + cursor ride the wire so the
+    // TUI renders terminal mode from the daemon's TerminalManager.
+    terminalLines: (state as unknown as { terminalLines?: string[] }).terminalLines,
+    terminalCursor: (state as unknown as { terminalCursor?: { row: number; col: number } }).terminalCursor,
     windows,
     currentWindowIndex: state.currentWindowIndex ?? 0,
     tabs,
@@ -244,6 +248,9 @@ export function jsonToEditorState(json: SerializedEditorState | Record<string, u
     activeMinorModes: (record.activeMinorModes as string[] | undefined) ?? [],
     activeMinorModeLighters: (record.activeMinorModeLighters as string[] | undefined) ?? [],
     minibufferState: record.minibufferState as EditorState["minibufferState"],
+    // #201: shell-mode PTY screen + cursor (absent outside terminal mode).
+    terminalLines: (record.terminalLines as string[] | undefined) ?? undefined,
+    terminalCursor: (record.terminalCursor as { row: number; col: number } | undefined) ?? undefined,
     minibufferView: record.minibufferView as EditorState["minibufferView"],
     buffers: new Map(),
     cursorFocus: record.cursorFocus === "command" ? "command" : "buffer",

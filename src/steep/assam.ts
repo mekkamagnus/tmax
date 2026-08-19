@@ -29,9 +29,14 @@ export class SteepFrontend implements Frontend {
     let stopped = false;
     let stopResize = () => {};
 
+    // #201 (BUG-84): while in shell-mode the PTY produces output
+    // asynchronously (claude/codex stream while the user types nothing) — a
+    // repaint tick keeps the screen live without a keystroke.
+    let termTick: ReturnType<typeof setInterval> | undefined;
     const cleanup = () => {
       if (stopped) return;
       stopped = true;
+      if (termTick) clearInterval(termTick);
       stopResize();
       input.stop();
       screen.showCursor();
@@ -57,10 +62,18 @@ export class SteepFrontend implements Frontend {
       if (minibuffer) {
         screen.moveTo(height - 1 - minibuffer.lines.length + minibuffer.cursorRow, minibuffer.cursorColumn);
       } else {
-        const cursor = getCursorScreenOffset(state, bufferHeight, width);
-        const cursorRow = Math.max(0, Math.min(bufferHeight - 1, cursor.row));
-        const cursorCol = Math.max(0, Math.min(width - 1, cursor.col));
-        screen.moveTo(cursorRow + tabBarHeight, cursorCol);
+        if (state.mode === "terminal") {
+          // #201: the PTY owns the cursor position in terminal mode.
+          const tc = (state as unknown as { terminalCursor?: { row: number; col: number } }).terminalCursor;
+          if (tc) {
+            screen.moveTo(Math.max(0, tc.row), Math.max(0, tc.col));
+          }
+        } else {
+          const cursor = getCursorScreenOffset(state, bufferHeight, width);
+          const cursorRow = Math.max(0, Math.min(bufferHeight - 1, cursor.row));
+          const cursorCol = Math.max(0, Math.min(width - 1, cursor.col));
+          screen.moveTo(cursorRow + tabBarHeight, cursorCol);
+        }
       }
     };
 
@@ -87,6 +100,18 @@ export class SteepFrontend implements Frontend {
         state = editor.getEditorState();
         render();
       });
+
+      // #201: a terminal-mode repaint tick — the PTY produces output while
+      // the user types nothing (claude/codex streaming), so keypress-driven
+      // rendering is not enough. Always-on with a mode guard (the mode at
+      // THIS point is still the startup mode; the guard re-checks each tick).
+      termTick = setInterval(() => {
+        if (stopped) return;
+        const fresh = editor.getEditorState();
+        if (fresh.mode !== "terminal") return;
+        state = fresh;
+        render();
+      }, 100);
 
       input.onKey(async (msg) => {
         try {
