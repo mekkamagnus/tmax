@@ -259,3 +259,13 @@ at the true bottom; typing lands in the box.
   adapter (documented here + in the test comment).
 - DECSTBM home-on-set behavior ships with the sentinel change (both are
   xterm-correct).
+
+## Appendix: #205 — styled rows sliced by JS length (2026-08-20)
+
+Symptom: after #204 the right border of claude's box (the last couple of
+columns) didn't render. Root cause: captureTerminalFrame truncated the
+ANSI-styled rows with a JS-length slice — escapes consumed the width budget
+(the unstyled status line rendered full width; colored rows didn't — the
+discriminator). Fix: sliceByVisibleWidth (escapes uncounted + never cut
+mid-sequence; wide glyphs count 2). Live: all rows measure the full 113
+visible columns including ╮/│/╯. capture-frame 14/14 (3 new).

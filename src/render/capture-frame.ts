@@ -125,8 +125,10 @@ function captureTerminalFrame(state: EditorState, width: number, height: number)
   if (terminalLines && terminalLines.length > 0) {
     for (let i = 0; i < bufferHeight && i < terminalLines.length; i++) {
       const line = terminalLines[i] ?? "";
-      // Truncate/pad to width
-      screen.push(line.length > width ? line.slice(0, width) : line);
+      // #205: slice by VISIBLE width — the rows are ANSI-styled (#202), so a
+      // JS-length slice cuts inside escape sequences and loses visible
+      // columns to the escape budget (claude's colored right border vanished).
+      screen.push(sliceByVisibleWidth(line, width));
     }
   } else {
     // Placeholder when terminal lines aren't injected yet
@@ -139,4 +141,44 @@ function captureTerminalFrame(state: EditorState, width: number, height: number)
   screen.push(renderStatusLine(state, width));
 
   return screen;
+}
+
+/**
+ * #205: truncate an ANSI-styled line to `maxCols` VISIBLE columns. Escape
+ * sequences pass through uncounted (and are never cut mid-sequence); a wide
+ * glyph that would straddle the boundary is dropped. Unstyled tail beyond the
+ * boundary is simply omitted (the caller paints rows at absolute positions).
+ */
+function sliceByVisibleWidth(line: string, maxCols: number): string {
+  let out = "";
+  let cols = 0;
+  let i = 0;
+  while (i < line.length) {
+    const code = line.codePointAt(i)!;
+    const ch = String.fromCodePoint(code);
+    const chLen = ch.length;
+    if (ch === "\x1b") {
+      // Pass the whole sequence through uncounted.
+      const m = /^\x1b\[[0-9;]*[A-Za-z]/.exec(line.slice(i));
+      if (m) {
+        out += m[0];
+        i += m[0].length;
+        continue;
+      }
+      // Bare ESC (unexpected in styled rows) — stop here.
+      break;
+    }
+    const w = code >= 0x1100 && (
+      (code >= 0x2e80 && code <= 0xa4cf) || (code >= 0xac00 && code <= 0xd7a3)
+      || (code >= 0xf900 && code <= 0xfaff) || (code >= 0xfe30 && code <= 0xfe6f)
+      || (code >= 0xff00 && code <= 0xff60) || (code >= 0xffe0 && code <= 0xffe6)
+      || (code >= 0x1f300 && code <= 0x1faff) || (code >= 0x2b00 && code <= 0x2bff)
+      || (code >= 0x20000 && code <= 0x3fffd)
+    ) ? 2 : 1;
+    if (cols + w > maxCols) break;
+    out += ch;
+    cols += w;
+    i += chLen;
+  }
+  return out;
 }

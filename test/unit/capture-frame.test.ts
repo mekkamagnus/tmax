@@ -135,3 +135,39 @@ describe("captureFrame", () => {
 function stripAnsi(s: string): string {
   return s.replace(/\x1b\[[0-9;]*[A-Za-z]/g, "");
 }
+
+// #205: terminal-mode rows are ANSI-styled; a JS-length slice loses visible
+// columns to the escape budget (claude's colored right border vanished).
+describe("#205 styled terminal rows render full visible width", () => {
+  const styled = (txt: string) => `\x1b[38;5;1m${txt}\x1b[0m`;
+
+  function termState(lines: string[]): EditorState {
+    return { ...makeState(), mode: "terminal" as const, terminalLines: lines } as EditorState;
+  }
+
+  test("a styled 100-col row renders all 100 visible cols (escapes uncounted)", () => {
+    const row = styled("X".repeat(40)) + "Y".repeat(60);
+    const lines = captureFrame(termState([row]), 100, 5);
+    const plain = stripAnsi(lines[0]!);
+    expect(plain.length).toBe(100);
+    expect(plain.startsWith("X".repeat(40))).toBe(true);
+    expect(plain.endsWith("Y".repeat(60))).toBe(true);
+  });
+
+  test("a row WIDER than the frame is cut at the visible boundary, escape-safe", () => {
+    const row = styled("A".repeat(60)) + "B".repeat(60);
+    const lines = captureFrame(termState([row]), 100, 5);
+    const plain = stripAnsi(lines[0]!);
+    expect(plain.length).toBe(100);
+    expect(plain.endsWith("B".repeat(40))).toBe(true);
+    // the styled prefix's reset survived intact (not cut mid-sequence)
+    expect(lines[0]!).toContain("\x1b[0m");
+  });
+
+  test("wide glyphs count 2 columns at the boundary", () => {
+    const row = "\u{1F30C}".repeat(50); // 100 visible cols
+    const lines = captureFrame(termState([row]), 99, 5);
+    const plain = stripAnsi(lines[0]!);
+    expect(plain.length).toBe(98);
+  });
+});
