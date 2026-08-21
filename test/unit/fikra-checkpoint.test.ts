@@ -20,6 +20,7 @@ beforeEach(() => {
   execFileSync("git", ["init", "-q"], { cwd: repoDir });
   execFileSync("git", ["config", "user.email", "t@t"], { cwd: repoDir });
   execFileSync("git", ["config", "user.name", "t"], { cwd: repoDir });
+  writeFileSync(join(repoDir, ".gitignore"), ".tmax/\n");
   writeFileSync(join(repoDir, "base.txt"), "base\n");
   execFileSync("git", ["add", "-A"], { cwd: repoDir });
   execFileSync("git", ["commit", "-q", "-m", "init"], { cwd: repoDir });
@@ -208,7 +209,7 @@ describe("#217 FAEP events + async reactor", () => {
     const pid = e(editor, '(fikra/checkpoint/fikra-checkpoint-capture-async "completion")');
     expect(Number(pid.value)).toBeGreaterThan(0);
     // Wait for the async sentinel to emit (loaded machine: allow slack).
-    for (let i = 0; i < 10; i++) {
+    for (let i = 0; i < 30; i++) {
       await new Promise((r) => setTimeout(r, 300));
       const log2 = String(e(editor, "(fikra/thread/fikra-thread-log-path)").value);
       const kinds2 = readFileSync(log2, "utf8").trimEnd().split("\n").map((l) => JSON.parse(l).kind);

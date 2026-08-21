@@ -250,8 +250,8 @@ text-deltas inside the batch join into the same line."
     (dolist (e events)
       (if (string= (fikra-event-get-str e "kind") "checkpoint-reverted")
         (setq out (cons (list
-                          (+ 1 (+ 1 (fikra-event-turn-num e)))
-                          (string-to-number (fikra-event-get-str e "revert-point")))
+                          (+ 1 (fikra-event-tombstone-turn e "target"))
+                          (fikra-event-tombstone-turn e "revert-point"))
                         out))))
     out))
 
@@ -262,6 +262,49 @@ text-deltas inside the batch join into the same line."
       ((numberp v) v)
       ((stringp v) (string-to-number v))
       (t 0))))
+
+;; Turn field of a TOMBSTONE may be a bare number, a numeric string, or a
+;; full ref name (refs/fikra/main/3-baseline) — extract the turn integer
+;; from the thread/turn segment.
+(defun fikra-event-tombstone-turn (event key)
+  (let ((v (fikra-event-get event key)))
+    (cond
+      ((numberp v) v)
+      ((stringp v)
+        (let ((n (fikra-ref-turn-digits v)))
+          (if n n 0)))
+      (t 0))))
+
+;; "refs/fikra/main/3-baseline" → 3 ; "3" → 3 ; garbage → nil.
+;; Manual slicing (no regex — T-Lisp string escaping makes regex brackets
+;; fragile). Algorithm: strip a trailing "-baseline"; if a "/" remains,
+;; take the segment after the LAST "/"; digits-only then number, else nil.
+(defun fikra-ref-turn-digits (s)
+  (let ((base (if (>= (length s) 9)
+                (if (string= (substring s (- (length s) 9) (length s)) "-baseline")
+                  (substring s 0 (- (length s) 9))
+                  s)
+                s)))
+    (let ((seg (fikra-segment-after-last-slash base 0 nil)))
+      (if (and seg (fikra-all-digits-p seg) (> (length seg) 0))
+        (string-to-number seg)
+        nil))))
+
+(defun fikra-segment-after-last-slash (s i last-slash)
+  (if (>= i (length s))
+    (if last-slash (substring s (+ last-slash 1) (length s)) s)
+    (fikra-segment-after-last-slash s (+ i 1)
+      (if (string= (substring s i (+ i 1)) "/") i last-slash))))
+
+(defun fikra-all-digits-p (s)
+  (fikra-digits-scan s 0))
+
+(defun fikra-digits-scan (s i)
+  (if (>= i (length s))
+    t
+    (if (string-match "^[0-9]$" (substring s i (+ i 1)))
+      (fikra-digits-scan s (+ i 1))
+      nil)))
 
 (defun fikra-event-in-range-p (turn ranges)
   (if (null ranges)

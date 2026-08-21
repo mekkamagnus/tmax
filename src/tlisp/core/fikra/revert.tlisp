@@ -1,0 +1,187 @@
+(defmodule fikra/revert
+  (export fikra-revert fikra-revert-paths fikra-diff-command
+          fikra-diff-stat fikra-revertable-p)
+
+;; #218 (RFC-027 §D6, Phase 2): diff view + TREE-DIFF-INVERSE revert.
+;; `git restore --source` alone overwrites modified paths but leaves files
+;; CREATED after the target on disk — a silent revert failure. Correct
+;; revert computes the tree diff target→completion and applies its inverse
+;; per the 2×2 presence matrix:
+;;   in-target & present-now    → restore from target ref
+;;   in-target & absent-now     → restore (deletion undone)
+;;   absent-target & present    → DELETE (later-created file)
+;;   absent-target & absent     → no-op
+;; Standing exclusions: untracked-not-in-completion (user's own new files)
+;; and ignored paths are NEVER touched. The CONTENT-DIVERGENCE check
+;; guards every destructive step: a path whose working-tree content
+;; differs from the completion ref aborts THAT path (report + patch saved
+;; via git diff --binary), regardless of who edited it. The event log is
+;; append-only forever — revert appends a checkpoint-reverted tombstone;
+;; rendering continues past it (#212's FAEP contract).
+;; Refs live for the thread's ENTIRE lifetime (#217's retention rule);
+;; ref pruning is #218's close-time concern only via diff export.
+
+(require-module fikra/event)
+(require-module fikra/thread)
+(require-module fikra/checkpoint)
+
+(defun fikra-diff-command (target completion)
+  "The diff command between two checkpoint refs (name-status form for the
+tree matrix; the *Fikra-Diff* buffer renders a second full patch form)."
+  (concat "git diff --name-status " target " " completion))
+
+(defun fikra-diff-stat (target completion)
+  "Per-turn diff stat (the *Fikra-Diff* header)."
+  (shell-command (concat "git diff --stat " target " " completion)))
+
+;; Parse `git diff --name-status A B` lines: XY<tab>path (X=from-status,
+;; Y=to-status; D100 = deleted, A100 = added, M = modified).
+(defun fikra-diff-paths (output)
+  (let ((lines (string-split output "\n"))
+        (out (list)))
+    (dolist (line lines)
+      (let ((trimmed (string-trim line)))
+        (if (> (length trimmed) 0)
+          (setq out (cons trimmed out)))))
+    (reverse out)))
+
+;; In TARGET and present/absent now — decided by inspecting the CURRENT
+;; working tree against both refs. Returns an alist of (path . action)
+;; where action ∈ restore|delete.
+(defun fikra-revert-paths (target completion)
+  "Compute the revert plan per the 2×2 presence matrix. PATHS is the union
+of files in either ref (from the diff). For each diff entry:
+  D (in target, absent in completion) → the file existed at target and was
+    deleted by the turn → restore.
+  A (absent in target, created by turn) → DELETE.
+  M (in both, modified) → restore from target.
+Untracked-not-in-completion files are not diff entries — untouched."
+  (let ((entries (fikra-diff-paths
+                   (shell-command (fikra-diff-command target completion))))
+        (plan (list)))
+    (dolist (entry entries)
+      (let ((status (substring entry 0 1))
+            (path (fikra-diff-path entry)))
+        (if path
+          (setq plan
+            (cons (list path (if (string= status "A") "delete" "restore"))
+                  plan)))))
+    (reverse plan)))
+
+;; Extract the path from a name-status line: after the tab.
+(defun fikra-diff-path (entry)
+  (let ((i (fikra-index-of-tab entry)))
+    (if (null i)
+      nil
+      (let ((p (string-trim (substring entry (+ i 1) (length entry)))))
+        (if (> (length p) 0) p nil)))))
+
+(defun fikra-index-of-tab (s)
+  (fikra-find-tab s 0 (length s)))
+
+(defun fikra-find-tab (s i len)
+  (if (>= i len)
+    nil
+    (if (string= (substring s i (+ i 1)) "\t")
+      i
+      (fikra-find-tab s (+ i 1) len))))
+
+;; Content-divergence check — the guard only fires when there IS something
+;; on disk that the turn did not leave behind. Absent-in-completion:
+;;   absent on disk too  → clean restore (the turn deleted it; nothing to
+;;                          lose) — D entries restore normally.
+;;   present on disk     → the USER recreated it post-turn → diverged
+;;                          (abort + stash).
+(defun fikra-path-diverged-p (path completion)
+  (let ((exists-now (string= (string-trim (shell-command
+                 (concat "test -e " (fikra-quote path) " && echo y || echo n")))
+                "y"))
+        (in-completion (string= (string-trim (shell-command
+                 (concat "git cat-file -e " completion ":" path " 2>/dev/null && echo y || echo n")))
+                "y")))
+    (cond
+      ((and (not exists-now) (not in-completion)) nil)
+      ((and exists-now (not in-completion)) t)
+      ((and (not exists-now) in-completion) t)
+      (t (not (string= (string-trim (shell-command
+             (concat "git show " completion ":" path " 2>/dev/null | cmp -s - "
+                     (fikra-quote path) " && echo same || echo diff")))
+          "same"))))))
+
+(defun fikra-quote (path)
+  ;; Paths in these repos are simple; single-quote for shell safety.
+  (concat "'" path "'"))
+
+(defun fikra-revertable-p (target completion)
+  "t when both refs exist (rev-parse verifies both)."
+  (string= (string-trim (shell-command
+           (concat "git rev-parse --verify -q " target " >/dev/null 2>&1 && "
+                   "git rev-parse --verify -q " completion " >/dev/null 2>&1 && "
+                   "echo ok || echo missing")))
+    "ok"))
+
+(defun fikra-revert (target completion)
+  "Revert to TARGET: apply the tree-diff inverse (target→completion
+reversed) per the 2×2 matrix, with the content-divergence guard and the
+tombstone event. Returns t on completion (aborted paths are reported and
+stashed, not fatal)."
+  (if (not (fikra-revertable-p target completion))
+    (progn (editor-set-status "Fikra: checkpoint refs missing") nil)
+    (progn
+      (let ((plan (fikra-revert-paths target completion))
+            (aborted (list))
+            (done 0))
+        (dolist (entry plan)
+          (let ((path (car entry))
+                (action (car (cdr entry))))
+            ;; The divergence guard covers BOTH destructive actions —
+            ;; restore AND delete (gate catch: delete was unguarded, so
+            ;; deleting a file the user recreated/edited post-turn
+            ;; silently destroyed their work).
+            (if (fikra-path-diverged-p path completion)
+              ;; Diverged from the completion ref — save the current
+              ;; content as a re-appliable patch, do NOT touch the file.
+              (progn
+                ;; --no-index /dev/null: a creation patch of the CURRENT
+                ;; disk content — works even for files git doesn't track
+                ;; (A-entries absent from HEAD/index; gate catch: the old
+                ;; `git diff completion --` form stashed a deletion patch
+                ;; with NONE of the user's content).
+                (shell-command
+                  (concat "mkdir -p .tmax/fikra/stash && git diff --binary --no-index /dev/null "
+                          (fikra-quote path)
+                          " > .tmax/fikra/stash/revert-" (fikra-slugify path) ".patch"))
+                (setq aborted (cons path aborted)))
+              (progn
+                (if (string= action "delete")
+                  (shell-command (concat "rm -f -- " (fikra-quote path)))
+                  (shell-command
+                    (concat "git checkout " target " -- " (fikra-quote path))))
+                (setq done (+ done 1))))))
+        ;; The tombstone: invalidates (target-turn, revert-point] —
+        ;; rendering continues after it (FAEP contract).
+        (fikra/event/fikra-event-emit
+          (list (list "kind" "checkpoint-reverted")
+                (list "target" target)
+                (list "revert-point" completion)
+                (list "paths-reverted" done)
+                (list "paths-aborted" (length aborted))))
+        (editor-set-status
+          (concat "Fikra: reverted " (number-to-string done) " paths"
+                  (if (> (length aborted) 0)
+                    (concat " (" (number-to-string (length aborted))
+                            " diverged — patches in .tmax/fikra/stash)")
+                    "")))
+        t))))
+
+(defun fikra-slugify (path)
+  (fikra-slug-chars (string-split path "/") ""))
+
+(defun fikra-slug-chars (parts acc)
+  (if (null parts)
+    acc
+    (fikra-slug-chars (cdr parts)
+      (concat acc (if (string= acc "") "" "-") (car parts)))))
+
+(provide "fikra-revert")
+)
