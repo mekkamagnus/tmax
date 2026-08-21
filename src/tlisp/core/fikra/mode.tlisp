@@ -1,5 +1,5 @@
 (defmodule fikra/mode
-  (export fikra-mode fikra-stop fikra-active-p)
+  (export fikra-mode fikra-start fikra-stop fikra-active-p)
 
 ;; Fikra — AI coding assistant minor mode
 ;; Activated with SPC a, provides chat-first AI interaction
@@ -41,10 +41,10 @@ With 0 or negative number, disable."
   "Start fikra mode, load modules, register backends."
   (setq fikra-mode-active t)
   (minor-mode-set "fikra" t)
-  ;; Load fikra modules
+  ;; Load fikra modules. fikra/chat and fikra/capture are LAZY (their
+  ;; SPC a bindings require-module on first use) — eager-loading them
+  ;; creates mode↔chat/capture cycles.
   (require-module fikra/adapter)
-  (require-module fikra/chat)
-  (require-module fikra/capture)
   (require-module fikra/context)
   (require-module fikra/workflow)
   ;; Discover and set default backend
@@ -68,14 +68,14 @@ With 0 or negative number, disable."
 
 ;; ── SPC a key bindings ──────────────────────────────────────────────
 
-(key-bind "SPC a a" "(fikra-chat-open)" "normal")
+(key-bind "SPC a a" "(progn (fikra-start) (require-module fikra/chat) (fikra/chat/fikra-chat-open))" "normal")
 (key-bind "SPC a q" "(fikra-stop)" "normal")
 (key-bind "SPC a e" "(fikra-explain)" "normal")
 (key-bind "SPC a f" "(fikra-fix)" "normal")
 (key-bind "SPC a r" "(fikra-refactor)" "normal")
 (key-bind "SPC a g" "(fikra-test)" "normal")
 (key-bind "SPC a s" "(fikra-chat-region)" "normal")
-(key-bind "SPC a i" "(fikra-complete)" "normal")
+(key-bind "SPC a i" "(progn (require-module fikra/capture) (fikra/capture/fikra-capture))" "normal")
 (key-bind "SPC a b" "(fikra-set-backend (fikra-backend-prompt))" "normal")
 
 (provide "fikra-mode")

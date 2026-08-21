@@ -1,133 +1,114 @@
 (defmodule fikra/chat
-  (export fikra-chat-open fikra-chat-close fikra-token-insert fikra-follow-link
-          fikra-turn-send fikra-turn-complete fikra-turn-interrupt fikra-turn-status
-          fikra-quit fikra-ensure-buffer-keymap)
+  (export fikra-chat-open fikra-chat-close fikra-turn-send
+          fikra-turn-interrupt fikra-turn-status fikra-quit
+          fikra-ensure-buffer-keymap fikra-refresh-lighter
+          fikra-follow-link)
 
-;; Chat buffer management — *Fikra* buffer, streaming, file links
+;; #216 (RFC-027 §UI): the chat UI as a THIN layer over the Phase-1 stack —
+;; threads own state (#213), FAEP owns rendering (#212), adapters own turns
+;; (#214). The old globals (fikra-message-history, fikra-turn-status-val)
+;; are GONE; the modeline rides dynamic minor-mode lighters (#211).
 
-(defvar fikra-turn-status-val 'idle
-  "Current turn status: idle, running, interrupted, error.")
+(require-module fikra/event)
+(require-module fikra/thread)
+(require-module fikra/adapter)
 
 (defvar fikra-chat-buffer-name "*Fikra*"
   "Name of the Fikra chat buffer.")
 
-(defvar fikra-message-history '()
-  "List of (role . content) message pairs in current thread.")
-
-(defun fikra-turn-status ()
-  "Get current turn status."
-  fikra-turn-status-val)
-
+;; ── open / close ────────────────────────────────────────────────────
 (defun fikra-chat-open ()
-  "Open the Fikra chat buffer full-screen. Create if not exists."
-  ;; Ensure fikra mode is active
-  (if (not fikra-mode-active) (fikra-start))
-  ;; Create buffer if needed
-  (if (not (buffer-exists-p fikra-chat-buffer-name))
-    (progn
-      (buffer-create fikra-chat-buffer-name)
-      (buffer-set-read-only t)))
-  ;; Buffer-local keymap whether freshly created or pre-existing (#206)
+  "Open the project chat: thread init-or-load + history replay into *Fikra*
++ buffer-local keymap + lighter. The SPC a a entry point."
+  ;; Mode activation is the caller's job (SPC a a starts it) — requiring
+  ;; fikra/mode here would create a mode↔chat cycle.
+  (fikra/thread/fikra-thread-open)
   (fikra-ensure-buffer-keymap)
-  ;; Switch to chat buffer
-  (buffer-switch fikra-chat-buffer-name)
-  ;; Load claude adapter if not loaded
-  (require-module fikra/backend-claude)
-  ;; Auto-create main thread if needed
-  (if (not (string= fikra-current-backend-name "none"))
-    (editor-set-status (concat "fikra:" fikra-current-backend-name "●")))
+  (fikra-refresh-lighter)
   fikra-chat-buffer-name)
 
 (defun fikra-chat-close ()
-  "Close the Fikra chat buffer view (thread preserved)."
+  "Close the chat buffer view (thread + log preserved)."
   (buffer-switch "default"))
 
 (defun fikra-quit ()
-  "Close chat and return to previous buffer."
   (fikra-chat-close))
 
-(defun fikra-token-insert (type content)
-  "Insert a streaming token into the *Fikra* buffer."
-  (let ((buf (buffer-current)))
-    (if (string= buf fikra-chat-buffer-name)
-      (progn
-        (buffer-set-read-only nil)
-        ;; Move to end of buffer and insert
-        (let ((lines (buffer-line-count)))
-          (cursor-move (max 0 (- lines 1)) 0)
-          (buffer-insert content))
-        (buffer-set-read-only t)))))
-
-(defun fikra-follow-link ()
-  "Follow file link under cursor in *Fikra* buffer."
-  (let ((line (buffer-current-line-text)))
-    (if (fikra-file-path-in-line-p line)
-      (let ((path (fikra-extract-file-path line)))
-        (if path
-          (find-file path)
-          (message "Fikra: invalid file path"))))))
-
-(defun fikra-file-path-in-line-p (line)
-  "Check if LINE contains a file path pattern."
-  (or (string-match-p "src/[^ \t\n]+" line)
-      (string-match-p "test/[^ \t\n]+" line)
-      (string-match-p "[a-zA-Z0-9_-]+\\.[a-z]+\\:[0-9]+" line)))
-
-(defun fikra-extract-file-path (line)
-  "Extract a file path from LINE."
-  (let ((match (string-match "src/[^\s\t\n,;)\"]+" line)))
-    (if match
-      match
-      (let ((match2 (string-match "test/[^\s\t\n,;)\"]+" line)))
-        (if match2 match2 nil)))))
-
+;; ── turn lifecycle ──────────────────────────────────────────────────
 (defun fikra-turn-send (message)
-  "Send MESSAGE as a new turn to the current backend."
-  (if (not fikra-current-backend-name)
-    (message "Fikra: no backend selected")
+  "Send MESSAGE as a new turn: FAEP user text + the backend's start-turn.
+The adapter drives everything after this (turn-begin, stream, turn-end)."
+  (if (string= (fikra/adapter/fikra-current-backend) "none")
     (progn
-      (setq fikra-turn-status-val 'running)
-      ;; Add user message to history
-      (push (cons "user" message) fikra-message-history)
-      ;; Display user message in chat buffer
-      (buffer-set-read-only nil)
-      (let ((lines (buffer-line-count)))
-        (cursor-move (max 0 (- lines 1)) 0)
-        (buffer-insert (concat "\nYou: " message "\n\n"))
-        (buffer-set-read-only t))
-      ;; Update modeline
-      (editor-set-status (concat "fikra:" fikra-current-backend-name "◉"))
-      ;; Call backend
-      (fikra-backend-call "chat" fikra-message-history '()))))
-
-(defun fikra-turn-complete (exit-code)
-  "Called when a turn completes."
-  (if (eq exit-code 0)
-    (setq fikra-turn-status-val 'idle)
-    (setq fikra-turn-status-val 'error))
-  (editor-set-status (concat "fikra:" fikra-current-backend-name
-                        (if (eq exit-code 0) "●" "✗"))))
+      (editor-set-status "Fikra: no backend — SPC a b to select")
+      nil)
+    (progn
+      ;; The user's message is part of the transcript.
+      (fikra/event/fikra-event-emit
+        (list (list "kind" "text-delta") (list "text" (concat "You: " message))))
+      (fikra-refresh-lighter)
+      (fikra/adapter/fikra-backend-start-turn message))))
 
 (defun fikra-turn-interrupt ()
-  "Cancel the current in-progress turn."
-  (fikra-backend-call "abort")
-  (setq fikra-turn-status-val 'interrupted)
-  (editor-set-status (concat "fikra:" fikra-current-backend-name "●"))
-  (message "Fikra: turn interrupted"))
+  "Cancel the in-progress turn (backend abort; guard prevents double-end)."
+  (fikra/adapter/fikra-backend-abort)
+  (fikra-refresh-lighter))
 
-;; Chat buffer key bindings — BUFFER-LOCAL to *Fikra* (#206). The old global
-;; normal-mode RET/C-g bindings leaked into every buffer.
+(defun fikra-turn-status ()
+  "Thread status (idle/running/confirming/interrupted/error)."
+  (fikra/thread/fikra-thread-status))
+
+;; ── modeline (#211 dynamic lighters) ────────────────────────────────
+;; fikra:<backend><state> — recomputed from live state; NOT the transient
+;; editor-set-status slot. #219 wires the per-FAEP-event refresh hook; for
+;; now the interactive entry points (open/send/interrupt) refresh.
+(defun fikra-lighter-state-char ()
+  (let ((s (fikra/thread/fikra-thread-status)))
+    (cond
+      ((string= s "running") "◉")
+      ((string= s "confirming") "?")
+      ((string= s "interrupted") "◈")
+      ((string= s "error") "✗")
+      (t "●"))))
+
+(defun fikra-refresh-lighter ()
+  "Recompute the fikra minor-mode lighter from live state."
+  (minor-mode-set-lighter "fikra"
+    (concat "fikra:" (fikra/adapter/fikra-current-backend)
+            (fikra-lighter-state-char))))
+
+;; ── buffer-local keymap (#206 chain) ────────────────────────────────
 (defun fikra-ensure-buffer-keymap ()
   "Attach the *Fikra* buffer-local keymap (idempotent)."
   (let ((kmap (editor/keymaps/buffer-keymap fikra-chat-buffer-name)))
     (if (not kmap)
       (progn
         (setq kmap (editor/keymaps/keymap-init "fikra-chat"))
-        (editor/keymaps/keymap-set-key kmap "RET" "(fikra-follow-link)")
-        (editor/keymaps/keymap-set-key kmap "C-g" "(fikra-turn-interrupt)")
-        (editor/keymaps/buffer-set-keymap fikra-chat-buffer-name kmap)))
-    )
+        (editor/keymaps/keymap-set-key kmap "RET" "(fikra/chat/fikra-follow-link)")
+        (editor/keymaps/keymap-set-key kmap "C-g" "(fikra/chat/fikra-turn-interrupt)")
+        (editor/keymaps/buffer-set-keymap fikra-chat-buffer-name kmap))))
   t)
+
+;; RET follows file links — paths in tool-call/file-change lines are
+;; navigable (rendered by FAEP's §D2 table).
+(defun fikra-follow-link ()
+  "Follow the file path under cursor in *Fikra*."
+  (let ((line (buffer-current-line-text)))
+    (let ((path (fikra-extract-file-path line)))
+      (if path
+        (find-file path)
+        (editor-set-status "Fikra: no file path on this line")))))
+
+(defun fikra-file-path-in-line-p (line)
+  (or (string-match-p "src/[^ \t\n]+" line)
+      (string-match-p "test/[^ \t\n]+" line)))
+
+(defun fikra-extract-file-path (line)
+  (let ((m1 (string-match "src/[^\s\t\n,;)\"]+" line)))
+    (if m1
+      m1
+      (let ((m2 (string-match "test/[^\s\t\n,;)\"]+" line)))
+        m2))))
 
 (provide "fikra-chat")
 )

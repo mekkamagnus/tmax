@@ -11,17 +11,19 @@ import { createStartedEditor, executeTlisp } from "../helpers/editor-fixture.ts"
 type Editor = Awaited<ReturnType<typeof createStartedEditor>>;
 
 let repoDir = "";
+const repoDirs: string[] = [];
 const originalCwd = process.cwd();
 
 beforeEach(() => {
   repoDir = mkdtempSync(join(tmpdir(), "fikra-thread-"));
+  repoDirs.push(repoDir);
   execFileSync("git", ["init", "-q"], { cwd: repoDir });
   process.chdir(repoDir);
 });
 
 afterAll(() => {
   process.chdir(originalCwd);
-  if (repoDir) rmSync(repoDir, { recursive: true, force: true });
+  for (const dir of repoDirs) rmSync(dir, { recursive: true, force: true });
 });
 
 const e = (editor: Editor, expr: string) => executeTlisp(editor, expr);

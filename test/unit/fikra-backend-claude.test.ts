@@ -1,5 +1,27 @@
-import { describe, expect, test, beforeEach } from "bun:test";
+import { describe, expect, test, beforeEach, afterAll } from "bun:test";
+import { execFileSync } from "node:child_process";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { createStartedEditor, executeTlisp } from "../helpers/editor-fixture.ts";
+
+// Thread state is repo-tree-scoped (.tmax/ under the git toplevel) — each
+// test runs in its OWN temp git repo so logs never accumulate across runs
+// and the real repo tree stays clean (gate catch: the real-subprocess
+// abort test asserted exactly-1 turn-end in a SHARED log).
+let repoDir = "";
+const repoDirs: string[] = [];
+const originalCwd = process.cwd();
+beforeEach(() => {
+  repoDir = mkdtempSync(join(tmpdir(), "fikra-bc-"));
+  repoDirs.push(repoDir);
+  execFileSync("git", ["init", "-q"], { cwd: repoDir });
+  process.chdir(repoDir);
+});
+afterAll(() => {
+  process.chdir(originalCwd);
+  for (const dir of repoDirs) rmSync(dir, { recursive: true, force: true });
+});
 
 // #214 (RFC-027 §D3/§D4) — adapter contract v2 + the Claude agent backend.
 // Normalization is fixture-tested WITHOUT spawning claude: the pure

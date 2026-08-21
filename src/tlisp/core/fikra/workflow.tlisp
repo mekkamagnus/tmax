@@ -53,8 +53,9 @@ Cover happy paths, edge cases, and error conditions."
   "Run a named workflow: open chat, send context with prompt."
   ;; Ensure fikra is active
   (if (not fikra-mode-active) (fikra-start))
-  ;; Open chat buffer
-  (fikra-chat-open)
+  ;; Open chat buffer (lazy: mode no longer eager-loads chat)
+  (require-module fikra/chat)
+  (fikra/chat/fikra-chat-open)
   ;; Insert workflow header
   (buffer-set-read-only nil)
   (let ((lines (buffer-line-count)))
@@ -64,7 +65,7 @@ Cover happy paths, edge cases, and error conditions."
   ;; Build and send the message
   (let ((context (fikra-build-context))
         (message (concat prompt "\n\n" context)))
-    (fikra-turn-send message)))
+    (fikra/chat/fikra-turn-send message)))
 
 (defun fikra-chat-region ()
   "Send visual selection to Fikra Chat."
@@ -72,16 +73,18 @@ Cover happy paths, edge cases, and error conditions."
   (let ((sel (visual-get-selection)))
     (if sel
       (progn
-        (fikra-chat-open)
-        (fikra-turn-send sel))
+        (require-module fikra/chat)
+        (fikra/chat/fikra-chat-open)
+        (fikra/chat/fikra-turn-send sel))
       (message "Fikra: no selection — select text first"))))
 
 (defun fikra-chat-with-context (message)
   "Send MESSAGE with buffer context to current backend."
   (if (not fikra-mode-active) (fikra-start))
-  (fikra-chat-open)
+  (require-module fikra/chat)
+  (fikra/chat/fikra-chat-open)
   (let ((full-msg (concat message "\n\n" (fikra-build-context))))
-    (fikra-turn-send full-msg)))
+    (fikra/chat/fikra-turn-send full-msg)))
 
 (provide "fikra-workflow")
 )

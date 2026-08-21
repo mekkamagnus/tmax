@@ -44,9 +44,10 @@ describe("Fikra Phase 2 — T-Lisp Modules", () => {
   test("fikra-chat.tlisp defines chat buffer management", () => {
     const content = readFileSync(join(process.cwd(), "src/tlisp/core/fikra/chat.tlisp"), "utf-8");
     expect(content).toContain("fikra-chat-open");
-    expect(content).toContain("fikra-token-insert");
     expect(content).toContain("fikra-turn-send");
-    expect(content).toContain("buffer-set-read-only");
+    expect(content).toContain("fikra-refresh-lighter");     // #216: modeline via lighters
+    expect(content).toContain("fikra-ensure-buffer-keymap"); // #206: buffer-local
+    expect(content).toContain("fikra/thread/fikra-thread-open"); // thin layer over #213
     expect(content).toContain("*Fikra*");
   });
 

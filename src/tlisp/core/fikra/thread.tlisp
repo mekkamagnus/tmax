@@ -17,7 +17,6 @@
 ;; Module deps: FAEP (#212) owns the event log; chat (#206) owns the
 ;; *Fikra* buffer-local keymap.
 (require-module fikra/event)
-(require-module fikra/chat)
 
 (defvar fikra-threads (hashmap)
   "Thread-id → state hashmap (in-memory cache).")
@@ -58,7 +57,8 @@ history into it (daemon-restart reopen path), focus it."
     (progn
       (buffer-create "*Fikra*")
       (buffer-set-read-only t)))
-  (fikra/chat/fikra-ensure-buffer-keymap)
+  ;; The buffer-local keymap is attached by fikra/chat (chat-open, after
+  ;; this returns) — requiring chat here would cycle.
   (buffer-switch "*Fikra*")
   ;; Reopen: replay the full log into the buffer (empty log → empty buffer).
   (fikra/event/fikra-event-rebuild-fikra-buffer)
@@ -126,14 +126,34 @@ history into it (daemon-restart reopen path), focus it."
   fikra-current-thread-id)
 
 (defun fikra-thread-state ()
-  (hashmap-get fikra-threads (if fikra-current-thread-id fikra-current-thread-id "main")))
+  "The focused thread's state; LAZY-INITIALIZES the main thread when absent
+  (backends may fire turn lifecycle before an explicit init — mutating nil
+  would crash; #216 hardening)."
+  (let ((id (if fikra-current-thread-id fikra-current-thread-id "main")))
+    (let ((state (hashmap-get fikra-threads id)))
+      (if state
+        state
+        (progn
+          (setq fikra-current-thread-id id)
+          (let* ((root (fikra-thread-root))
+                 (dir (concat root "/.tmax/fikra/threads/" id)))
+            ;; An implicit thread is a REAL thread — init's contract:
+            ;; mkdir + load + FAEP log wiring, so saves and emits work.
+            (file-mkdir dir)
+            (fikra/event/fikra-event-log-set (concat dir "/events.jsonl"))
+            (let ((fresh (fikra-thread-load root id)))
+              (editor/keymaps/keymap-mutable-set! fikra-threads id fresh)
+              fresh)))))))
 
 (defun fikra-thread-field (key)
   (let ((state (fikra-thread-state)))
     (if state (hashmap-get state key) nil)))
 
 (defun fikra-thread-status ()
-  (fikra-thread-field "status"))
+  "Current status; an un-initialized thread reads as idle (nil never leaks
+into string= transitions — #216 gate-hardening)."
+  (let ((s (fikra-thread-field "status")))
+    (if s s "idle")))
 
 (defun fikra-thread-turn-count ()
   (fikra-thread-field "turn-count"))
