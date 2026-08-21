@@ -1498,6 +1498,8 @@ function buildEditorAPIContributions(): readonly EditorAPIContribution[] {
           const commandArg = kwargs['command'];
           const filterFn = kwargs['filter'];
           const sentinelFn = kwargs['sentinel'];
+          const cwdArg = kwargs['cwd'];
+          const envArg = kwargs['env'];
 
           if (!commandArg) return Either.left(createValidationError('FormatError', 'make-process requires :command argument'));
 
@@ -1510,11 +1512,37 @@ function buildEditorAPIContributions(): readonly EditorAPIContribution[] {
             return Either.left(createValidationError('TypeError', ':command must be a list or string'));
           }
 
+          // #208 (RFC-027 §D3/§D7): :cwd sets the process working directory
+          // (fikra threads run in their project/worktree root); :env takes a
+          // T-Lisp list of ("KEY" "VALUE") entries MERGED over the inherited
+          // environment — full replacement would break PATH lookups.
+          if (cwdArg && cwdArg.type !== 'string') {
+            return Either.left(createValidationError('TypeError', ':cwd must be a string'));
+          }
+          const envExtra: Record<string, string> = {};
+          if (envArg) {
+            if (envArg.type !== 'list') {
+              return Either.left(createValidationError('TypeError', ':env must be a list of ("KEY" "VALUE") pairs'));
+            }
+            for (const entry of envArg.value as TLispValue[]) {
+              if (entry.type !== 'list' || (entry.value as TLispValue[]).length !== 2) {
+                return Either.left(createValidationError('FormatError', ':env entries must be ("KEY" "VALUE") pairs'));
+              }
+              const [k, v] = entry.value as TLispValue[];
+              if (k?.type !== 'string' || v?.type !== 'string') {
+                return Either.left(createValidationError('TypeError', ':env keys and values must be strings'));
+              }
+              envExtra[String(k.value)] = String(v.value);
+            }
+          }
+
           try {
             const proc = Bun.spawn(command, {
               stdout: 'pipe',
               stderr: 'pipe',
               stdin: 'pipe',
+              ...(cwdArg ? { cwd: String(cwdArg.value) } : {}),
+              ...(envArg ? { env: { ...process.env, ...envExtra } } : {}),
             });
 
             const pid = nextProcessId++;
@@ -1544,6 +1572,15 @@ function buildEditorAPIContributions(): readonly EditorAPIContribution[] {
                   }
                 } catch { /* stderr closed */ }
               })();
+              // #208 (RFC-027 §D3): filter evals are SERIALIZED per process —
+              // every chunk's eval runs to completion before the next begins.
+              // The old fire-and-forget call let two chunks' evals overlap
+              // when evalTlisp is async, so a streaming consumer could read
+              // state set by an earlier chunk before that chunk's eval had
+              // settled it. The sentinel chains after ALL filters (sentinel
+              // runs last, by construction). A rejected filter eval is logged
+              // and does not kill the stream.
+              let filterChain: Promise<unknown> = Promise.resolve();
               try {
                 while (true) {
                   const { done, value } = await reader.read();
@@ -1551,11 +1588,22 @@ function buildEditorAPIContributions(): readonly EditorAPIContribution[] {
                   const text = decoder.decode(value, { stream: true });
                   tailBuf += text;
                   if (filterName && ctx.evalTlisp) {
-                    ctx.evalTlisp(`(${filterName} ${pid} ${JSON.stringify(text)})`);
+                    const expr = `(${filterName} ${pid} ${JSON.stringify(text)})`;
+                    filterChain = filterChain
+                      .then(() => ctx.evalTlisp!(expr))
+                      .catch((e: unknown) => {
+                        ctx.logProgram?.('process', {
+                          level: 'error',
+                          text: `filter eval failed: ${e instanceof Error ? e.message : String(e)}`,
+                          pid,
+                        });
+                      });
+                    await filterChain;
                   }
                 }
               } catch { /* stream closed */ }
               await errLoop;
+              await filterChain;
 
               await proc.exited;
               const exitCode = proc.exitCode ?? 0;

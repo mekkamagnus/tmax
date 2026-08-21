@@ -438,6 +438,14 @@ export class TLispEvaluator implements ModuleFormsContext, TestFormsContext {
   private evalSymbol(symbol: TLispValue, env: TLispEnvironment): Either<EvalError, TLispValue> {
     const name = symbol.value as string;
 
+    // #208: keyword symbols self-evaluate (CL semantics). make-process /
+    // http-request take :key value kwargs — without this, every unquoted
+    // :command-style caller (e.g. fikra's backend-claude) died with
+    // UndefinedSymbol before reaching the primitive.
+    if (name.startsWith(":")) {
+      return Either.right(symbol);
+    }
+
     if (this.moduleRegistry && name.includes("/")) {
       const publicExport = this.moduleRegistry.resolvePublicName(name);
       if (publicExport) {
