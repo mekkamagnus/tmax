@@ -5,7 +5,7 @@
 
 import type { HighlightSpan } from "../core/contracts/editor.ts";
 import { tokenize } from "./tokenizer.ts";
-import type { ParseState } from "./parse-state.ts";
+import { ParseState } from "./parse-state.ts";
 import type { SyntaxToken } from "../core/contracts/editor.ts";
 import { highlightLine } from "./highlighter.ts";
 import type { WikiLinkClass } from "./wiki-link-faces.ts";
@@ -45,11 +45,29 @@ export function computeHighlightSpans(
   if (!rules) return [];
 
   const spans: HighlightSpan[][] = [];
-  let state: ParseState | undefined;
+  // BUG-82: the stateful path must be primed, not optional. `tokenize` takes
+  // the STATELESS branch whenever no ParseState is passed and returns plain
+  // tokens — the old `state ?? undefined` call could therefore never assign
+  // state (line 1 had none), so multi-line constructs (code fences, block
+  // comments, triple-quoted strings) never engaged.
+  let state = new ParseState();
+
+  // Prime [0, startLine): callers pass viewport windows, so a fence opened
+  // above the window still applies to the lines being rendered. Warm-up is
+  // O(startLine) per call and output-discarding; per-revision state caching
+  // is the RFC-019 follow-up, not this fix.
+  for (let warm = 0; warm < startLine; warm++) {
+    // A state is always passed, so the array form never occurs at runtime —
+    // but tokenize's declared return is a union (it has no overload
+    // signatures), so tsc needs the guard for narrowing.
+    const warmed = tokenize(getLine(warm), warm, rules, state, lang);
+    if (Array.isArray(warmed)) continue;
+    state = warmed.nextState;
+  }
 
   for (let lineNum = startLine; lineNum < endLine; lineNum++) {
     const lineText = getLine(lineNum);
-    const result = tokenize(lineText, lineNum, rules, state ?? undefined, lang);
+    const result = tokenize(lineText, lineNum, rules, state, lang);
 
     let tokens: SyntaxToken[];
     if (Array.isArray(result)) {
