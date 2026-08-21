@@ -1,0 +1,190 @@
+(defmodule fikra/checkpoint
+  (export fikra-checkpoint-capture fikra-checkpoint-capture-async
+          fikra-checkpoint-ref fikra-checkpoint-disable-p
+          fikra-git-fikra-p fikra-git-unborn-p
+          fikra-checkpoint-command fikra-checkpoint-tail
+          fikra-checkpoint-filter fikra-checkpoint-sentinel
+          fikra-checkpoint-capture-with-path)
+
+;; #217 (RFC-027 §D6, Phase 2): non-invasive git checkpoints. Every turn
+;; gets two refs (baseline/completion) built on a TEMPORARY index — the
+;; user's index, HEAD, and working tree are NEVER touched.
+;;
+;; Capture command contract (exact, from the RFC — argv arrays via
+;; make-process, no shell):
+;;   GIT_INDEX_FILE=<tmp> git add -A -- .     ; fresh index = disk state
+;;   git write-tree                          → tree (deletions by absence)
+;;   git commit-tree <tree> [-p HEAD] -m ... → commit
+;;   git update-ref refs/fikra/<t>/<n> <c>   ; the atomic commit point
+;; Failure rules: pre-update-ref failure → checkpoint-error event, no ref,
+;; turn state untouched. Unborn HEAD / non-git → checkpointing disabled.
+;;
+;; Process-based reactor: the turn sentinel (or tests) spawn capture via
+;; make-process; per-thread capture chain ordering is the CALLER's choice
+;; of when to spawn (#214's sentinel ends the turn, then spawns this).
+
+(require-module fikra/event)
+(require-module fikra/thread)
+
+(defvar fikra-checkpoint-disabled nil
+  "t when checkpointing is disabled for the CURRENT thread root (non-git
+or unborn). The cache is keyed by root — a different root re-probes, so
+one non-git thread can never poison a later git-rooted one (gate catch:
+the old sticky-flag design did exactly that).")
+
+(defvar fikra-checkpoint-disabled-root nil
+  "The thread root the disable verdict was computed for.")
+
+(defvar fikra-checkpoint-last-ref nil
+  "The last successfully-captured ref (test/inspection surface).")
+
+(defvar fikra-checkpoint-last-output nil
+  "The async filter's captured output (sentinel consumes it).")
+
+(defvar fikra-checkpoint-async-kinds (hashmap)
+  "PID → kind of in-flight async captures (the sentinel emits the ref for
+ITS capture's kind — a single global would race between concurrent
+captures; gate final-round catch).")
+
+(defun fikra-checkpoint-disable-p ()
+  "t when the current thread root cannot checkpoint (non-git or unborn).
+Cached PER ROOT: a root change re-probes."
+  (let ((root (fikra/thread/fikra-thread-field "root")))
+    (if (and fikra-checkpoint-disabled
+             (string= (if fikra-checkpoint-disabled-root fikra-checkpoint-disabled-root "") (if root root "")))
+      fikra-checkpoint-disabled
+      (progn
+        (setq fikra-checkpoint-disabled-root root)
+        (setq fikra-checkpoint-disabled
+          (or (not (fikra-git-fikra-p))
+              (fikra-git-unborn-p)))))))
+
+(defun fikra-git-fikra-p ()
+  "t when the thread root is inside a git work tree."
+  (> (length (string-trim (shell-command "git rev-parse --is-inside-work-tree 2>/dev/null"))) 0))
+
+(defun fikra-git-unborn-p ()
+  "t when HEAD is unborn (no commits yet — checkpointing waits for the first)."
+  (string= (string-trim (shell-command "git rev-parse --verify -q HEAD >/dev/null 2>&1 && echo ok || echo unborn")) "unborn"))
+
+;; The exact capture command sequence as ONE shell line (shell-command is
+;; sync; the RFC's per-step argv contract is preserved inside it). The
+;; final echo delimits the ref for parsing.
+(defun fikra-checkpoint-command (tmp-index kind)
+  "Build the capture command for KIND ('baseline'|'completion')."
+  (concat
+    "export GIT_INDEX_FILE=" tmp-index " ; "
+    "rm -f " tmp-index " ; "
+    "git add -A -- . >/dev/null 2>&1 && "
+    "tree=$(git write-tree) && "
+    "commit=$(git commit-tree $tree -p HEAD -m \"fikra checkpoint " kind "\") && "
+    "git update-ref " (fikra-checkpoint-ref kind) " $commit && "
+    "rm -f " tmp-index " && "
+    "echo REF:$commit || echo CAPTURE-FAILED"))
+
+(defun fikra-checkpoint-ref (kind)
+  "The refs/fikra/<thread>/<turn>[-baseline] ref name for this capture."
+  (concat "refs/fikra/" (fikra/thread/fikra-thread-field "id") "/"
+          (fikra/thread/fikra-thread-turn-count)
+          (if (string= kind "baseline") "-baseline" "")))
+
+(defun fikra-checkpoint-tail (output)
+  "Extract the REF:<sha> marker from capture output, or nil.
+string-match returns the match START INDEX — slice a fixed 40-hex window
+after it (+4 skips the marker)."
+  (if (not (stringp output))
+    nil
+    (let ((i (string-match "REF:[0-9a-f]+" output)))
+      (if (or (null i) (not (numberp i)))
+        nil
+        (substring (match-string 0) 4 (length (match-string 0)))))))
+
+;; ── synchronous capture (tests + explicit callers) ─────────────────
+(defun fikra-checkpoint-capture (kind)
+  "Capture a checkpoint of KIND for the current turn. Returns the ref's
+commit sha on success; emits checkpoint-ready/checkpoint-error FAEP
+events; nil when disabled or failed. Never touches turn state."
+  (if (fikra-checkpoint-disable-p)
+    nil
+    (let* ((tmp (concat (fikra/thread/fikra-thread-field "root")
+                        "/.tmax/fikra/tmp-index-" kind))
+           (out (shell-command (fikra-checkpoint-command tmp kind))))
+      (let ((sha (fikra-checkpoint-tail out)))
+        (setq fikra-checkpoint-last-ref sha)
+        (fikra/event/fikra-event-emit
+          (if sha
+            (list (list "kind" "checkpoint-ready")
+                  (list "ref" (fikra-checkpoint-ref kind))
+                  (list "sha" sha))
+            (list (list "kind" "checkpoint-error")
+                  (list "reason" (string-trim (substring out 0 (min 200 (length out))))))))
+        sha))))
+
+;; Test seam: capture with a PATH prepend — forces REAL git failures
+;; (e.g. a write-tree stub) to verify the checkpoint-error contract.
+(defun fikra-checkpoint-capture-with-path (binpath kind)
+  (if (fikra-checkpoint-disable-p)
+    nil
+    (let* ((tmp (concat (fikra/thread/fikra-thread-field "root")
+                        "/.tmax/fikra/tmp-index-" kind))
+           (out (shell-command (concat "PATH=" binpath ":$PATH ; "
+                                       (fikra-checkpoint-command tmp kind)))))
+      (let ((sha (fikra-checkpoint-tail out)))
+        (setq fikra-checkpoint-last-ref sha)
+        (fikra/event/fikra-event-emit
+          (if sha
+            (list (list "kind" "checkpoint-ready")
+                  (list "ref" (fikra-checkpoint-ref kind))
+                  (list "sha" sha))
+            (list (list "kind" "checkpoint-error")
+                  (list "reason" (string-trim (substring out 0 (min 200 (length out))))))))
+        sha))))
+
+;; ── process-based capture (the RFC's async reactor) ────────────────
+;; Spawned via make-process; the sentinel parses the tail and emits the
+;; FAEP event. Used by #214's turn sentinel for completion captures.
+(defun fikra-checkpoint-capture-async (kind)
+  "Spawn the capture as its own process (async follow-up — never blocks
+the next turn). Returns the pid or nil when disabled. The pid→kind map
+keys the sentinel's ref name (concurrent captures cannot race)."
+  (if (fikra-checkpoint-disable-p)
+    nil
+    (let* ((tmp (concat (fikra/thread/fikra-thread-field "root")
+                        "/.tmax/fikra/tmp-index-" kind))
+           (pid (make-process
+                  :command (list "sh" "-c" (fikra-checkpoint-command tmp kind))
+                  :cwd (fikra/thread/fikra-thread-field "root")
+                  :filter "fikra/checkpoint/fikra-checkpoint-filter"
+                  :sentinel "fikra/checkpoint/fikra-checkpoint-sentinel")))
+      (editor/keymaps/keymap-mutable-set! fikra-checkpoint-async-kinds
+        (number-to-string pid) kind)
+      pid)))
+
+(defun fikra-checkpoint-filter (pid output)
+  ;; APPEND chunks — stdout may split mid-REF: marker (gate catch: the
+  ;; last-chunk-only store misreported split captures as failures).
+  (setq fikra-checkpoint-last-output
+    (concat (if fikra-checkpoint-last-output fikra-checkpoint-last-output "") output)))
+
+(defun fikra-checkpoint-sentinel (pid exit-code)
+  ;; exit-code is NOT consulted: the capture chain ends
+  ;; `|| echo CAPTURE-FAILED`, so failure also exits 0 — correctness
+  ;; rests on the REF: tail parse (gate final-round note).
+  (let* ((out (if fikra-checkpoint-last-output fikra-checkpoint-last-output ""))
+         (key (number-to-string pid))
+         (kind (let ((k (hashmap-get fikra-checkpoint-async-kinds key)))
+                 (if k k "completion"))))
+    (let ((sha (fikra-checkpoint-tail out)))
+      (setq fikra-checkpoint-last-ref sha)
+      (setq fikra-checkpoint-last-output nil)
+      (editor/keymaps/keymap-mutable-set! fikra-checkpoint-async-kinds key nil)
+      (fikra/event/fikra-event-emit
+        (if sha
+          (list (list "kind" "checkpoint-ready")
+                (list "ref" (fikra-checkpoint-ref kind))
+                (list "sha" sha))
+          (list (list "kind" "checkpoint-error")
+                (list "reason" (string-trim (substring out 0 (min 200 (length out)))))))))))
+
+(provide "fikra-checkpoint")
+)
