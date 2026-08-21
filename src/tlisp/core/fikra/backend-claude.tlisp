@@ -3,7 +3,8 @@
           fikra-backend-claude-start-turn fikra-backend-claude-abort
           fikra-backend-claude-normalize fikra-backend-claude-args
           fikra-backend-claude-line-events fikra-backend-claude-filter
-          fikra-backend-claude-abort-sim fikra-backend-claude-adopt-process)
+          fikra-backend-claude-abort-sim fikra-backend-claude-adopt-process
+          fikra-backend-claude-reset-accumulator fikra-afield)
 
 ;; #214 (RFC-027 §D3/§D4): Claude Code CLI adapter, agent edition.
 ;; Process-per-turn + session resume; JSONL lines normalize to FAEP events
@@ -236,6 +237,12 @@ SKIPPED when the turn was already ended by a local abort (interrupted)."
   (if (not fikra-claude-aborted)
     (fikra/thread/fikra-thread-turn-end
       (if (= exit-code 0) "completed" "error"))))
+
+;; Test seam: reset the line accumulator (module vars are not settable
+;; cross-module; #215's replay backend reuses this drain and resets it).
+(defun fikra-backend-claude-reset-accumulator ()
+  (setq fikra-claude-line-buffer "")
+  t)
 
 ;; Test seam: point the module's process handle at an externally spawned
 ;; pid (module vars are not settable cross-module).

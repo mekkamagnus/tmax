@@ -1,0 +1,118 @@
+(defmodule fikra/backend-replay
+  (export fikra-backend-replay-available-p fikra-backend-replay-capabilities
+          fikra-backend-replay-start-turn fikra-backend-replay-abort
+          fikra-backend-replay-load)
+
+;; #215 (RFC-027 §Testing, §Phase 1): the keystone for keyless CI — a
+;; backend that reads a recorded FIXTURE (raw CLI JSONL transcript or a
+;; synthetic FAEP sequence) and drives the IDENTICAL pipeline real backends
+;; run: normalization → FAEP batch-per-chunk → thread lifecycle. No network,
+;; no API keys, no CLI installs.
+;;
+;; Fixture = a file of raw JSONL lines (same shapes backend-claude
+;; normalizes) with SYNCHRONIZATION MARKERS: a line containing only "###"
+;; ends a chunk. Feeding chunk N happens on the Nth start-turn call, so a
+;; test can assert per-chunk coalescing and turn boundaries.
+
+(require-module fikra/adapter)
+(require-module fikra/event)
+(require-module fikra/thread)
+(require-module fikra/backend-claude)
+
+(defvar fikra-replay-fixture nil
+  "Path to the loaded fixture file.")
+
+(defvar fikra-replay-chunks nil
+  "Parsed fixture: list of chunks (each a list of raw lines), oldest-first.")
+
+(defvar fikra-replay-cursor 0
+  "Index of the NEXT chunk to feed (0-based).")
+
+(defvar fikra-replay-running nil
+  "t between start-turn and its synchronous end (replay turns end immediately).")
+
+(defun fikra-backend-replay-available-p ()
+  "The replay backend is always available (it needs no CLI)."
+  t)
+
+(defun fikra-backend-replay-capabilities ()
+  (list (list "session-resume" t)
+        (list "interactive-approvals" nil)
+        (list "sandbox-presets" nil)
+        (list "replay" t)))
+
+;; ── fixture loading ─────────────────────────────────────────────────
+;; Split the fixture into chunks on "###" separator lines. Empty chunks are
+;; dropped. A fixture with no markers = ONE chunk (simple sequences).
+(defun fikra-backend-replay-load (path)
+  "Load a fixture: raw JSONL lines, chunks separated by ### lines."
+  (setq fikra-replay-fixture path)
+  (setq fikra-replay-cursor 0)
+  (let* ((raw (if (file-exists-p path) (read-file-content path) ""))
+         (lines (if (or (null raw) (string= raw ""))
+                  (list)
+                  (string-split raw "\n"))))
+    (setq fikra-replay-chunks (fikra-replay-parse-chunks lines (list) (list)))
+    path))
+
+;; Fold lines → chunks: current chunk accumulates until a "###" marker.
+(defun fikra-replay-parse-chunks (lines cur out)
+  (if (null lines)
+    (let ((final (if (> (length cur) 0) (cons (reverse cur) out) out)))
+      (reverse final))
+    (let ((line (car lines)))
+      (if (string= (string-trim line) "###")
+        (fikra-replay-parse-chunks (cdr lines)
+          (list)
+          (if (> (length cur) 0) (cons (reverse cur) out) out))
+        (if (string= (string-trim line) "")
+          ;; Blank lines (trailing newline artifacts) are skipped.
+          (fikra-replay-parse-chunks (cdr lines) cur out)
+          (fikra-replay-parse-chunks (cdr lines) (cons line cur) out))))))
+
+;; ── backend contract ────────────────────────────────────────────────
+;; start-turn feeds the NEXT chunk through the real pipeline: the chunk's
+;; lines are joined and handed to backend-claude's LINE ACCUMULATOR (the
+;; same drain + normalize the live filter uses), emitted as ONE FAEP batch,
+;; and — because a replay turn is instantaneous — the turn ENDS within the
+;; call (turn-begin … turn-end "completed"). Chunks are consumed in order;
+;; running past the fixture ends the turn with no events.
+(defun fikra-backend-replay-start-turn (message)
+  (if (not fikra-replay-chunks)
+    (progn (editor-set-status "Fikra-replay: no fixture loaded") nil)
+    (progn
+      (fikra/thread/fikra-thread-turn-begin)
+      (let* ((chunk-lines (if (< fikra-replay-cursor (length fikra-replay-chunks))
+                            (nth fikra-replay-cursor fikra-replay-chunks)
+                            (list)))
+             (chunk (fikra-replay-join-lines chunk-lines "")))
+        (setq fikra-replay-cursor (+ fikra-replay-cursor 1))
+        ;; Reuse the REAL backend's accumulator: same drain/normalize the
+        ;; live filter runs (the identical-pipeline guarantee).
+        (fikra/backend-claude/fikra-backend-claude-reset-accumulator)
+        (let ((events (fikra/backend-claude/fikra-backend-claude-line-events chunk)))
+          (if events
+            (progn
+              ;; Session events record the handle (mirrors the live filter).
+              (dolist (ev events)
+                (if (string= (fikra/backend-claude/fikra-afield ev "kind") "session")
+                  (fikra/thread/fikra-thread-set-session-id
+                    (fikra/backend-claude/fikra-afield ev "id"))))
+              (fikra/event/fikra-event-emit-batch events))))
+        (fikra/thread/fikra-thread-turn-end "completed")))))
+
+(defun fikra-replay-join-lines (lines acc)
+  (if (null lines)
+    (if (string= acc "") "" (concat acc "\n"))
+    (fikra-replay-join-lines (cdr lines)
+      (if (string= acc "") (car lines) (concat acc "\n" (car lines))))))
+
+(defun fikra-backend-replay-abort ()
+  ;; Replay turns are synchronous — there is nothing to abort.
+  nil)
+
+;; Self-register
+(fikra/adapter/fikra-register-backend "replay")
+
+(provide "fikra-backend-replay")
+)
