@@ -98,6 +98,46 @@ export function createFileOps(
     return Either.right(createNil());
   });
 
+  // #209 (RFC-018 Tier 1 / RFC-027 §D2): append counterpart to
+  // write-file-content — creates the file if absent, appends otherwise.
+  // O_APPEND semantics per call; the FAEP event log is append-only JSONL.
+  api.set("append-file", (args: TLispValue[], context?: EvalContext): Either<AppError, TLispValue> => {
+    const argsValidation = validateArgsCount(args, 2, "append-file");
+    if (Either.isLeft(argsValidation)) {
+      return Either.left(argsValidation.left);
+    }
+
+    const pathArg = args[0]!
+    const pathTypeValidation = validateArgType(pathArg, "string", 0, "append-file");
+    if (Either.isLeft(pathTypeValidation)) {
+      return Either.left(pathTypeValidation.left);
+    }
+
+    const contentArg = args[1]!
+    const contentTypeValidation = validateArgType(contentArg, "string", 1, "append-file");
+    if (Either.isLeft(contentTypeValidation)) {
+      return Either.left(contentTypeValidation.left);
+    }
+
+    const path = pathArg.value as string;
+    const content = contentArg.value as string;
+
+    if (isAsyncMode(context)) {
+      return Either.right(createPromise(fs.promises.appendFile(path, content, "utf-8").then(() => createNil()).catch((error) => {
+        throw fsRuntimeError("append-file", path, error);
+      })));
+    }
+
+    // Sync: the append is on disk before this returns (same rationale as
+    // write-file-content's sync path — BUG-33 / #45).
+    try {
+      fs.appendFileSync(path, content, "utf-8");
+    } catch (error) {
+      return Either.left(fsRuntimeError("append-file", path, error));
+    }
+    return Either.right(createNil());
+  });
+
   // --- Synchronous reads (fs.readFileSync) ---
 
   api.set("read-file-content", (args: TLispValue[], context?: EvalContext): Either<AppError, TLispValue> => {

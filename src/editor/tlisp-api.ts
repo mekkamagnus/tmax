@@ -1783,6 +1783,66 @@ function buildEditorAPIContributions(): readonly EditorAPIContribution[] {
           }
         });
 
+        // #209 (RFC-018 Tier 1 / RFC-027 §D2): T-Lisp → JSON, the inverse of
+        // json-read-from-string. Objects decode to alists of ("key" value)
+        // pairs; this encodes such alists back to objects (and hashmaps with
+        // string keys). A list is an object iff it is non-empty and every
+        // element is a ("key" x) pair — otherwise it is an array. Plain lists
+        // of non-pairs round-trip as arrays.
+        ops.set('json-encode', (args: TLispValue[]): Either<AppError, TLispValue> => {
+          if (args.length !== 1) return Either.left(createValidationError('FormatError', 'json-encode requires 1 argument'));
+          function toJson(val: TLispValue): unknown {
+            switch (val.type) {
+              case 'nil':
+                return null;
+              case 'boolean':
+                return val.value === true;
+              case 'number':
+                return Number(val.value);
+              case 'string':
+                return String(val.value);
+              case 'symbol':
+                // t / nil in symbol form map to JSON booleans; other symbols
+                // encode as their name (a pragmatic choice for tag enums).
+                if (val.value === 't') return true;
+                if (val.value === 'nil') return false;
+                return String(val.value);
+              case 'hashmap': {
+                const obj: Record<string, unknown> = {};
+                for (const [k, v] of (val.value as Map<string, TLispValue>).entries()) {
+                  obj[String(k)] = toJson(v);
+                }
+                return obj;
+              }
+              case 'list': {
+                const items = val.value as TLispValue[];
+                const isObject = items.length > 0 && items.every(
+                  (item) =>
+                    item.type === 'list' &&
+                    (item.value as TLispValue[]).length === 2 &&
+                    (item.value as TLispValue[])[0]!.type === 'string'
+                );
+                if (isObject) {
+                  const obj: Record<string, unknown> = {};
+                  for (const item of items) {
+                    const [k, v] = item.value as TLispValue[];
+                    obj[String(k!.value)] = toJson(v!);
+                  }
+                  return obj;
+                }
+                return items.map(toJson);
+              }
+              default:
+                return null;
+            }
+          }
+          try {
+            return Either.right(createString(JSON.stringify(toJson(args[0]!))));
+          } catch (e) {
+            return Either.left(createValidationError('FormatError', `json-encode failed: ${e instanceof Error ? e.message : String(e)}`));
+          }
+        });
+
         return ops;
       },
     },
