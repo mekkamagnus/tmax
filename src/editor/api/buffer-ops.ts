@@ -333,6 +333,57 @@ export function createBufferOps(
     return Either.right(createString(text));
   });
 
+  // #207 (RFC-027 §UI): append-at-end for streaming consumers. Unlike
+  // buffer-insert this never moves the cursor (the cursor dance is
+  // O(buffer) per token when appending at the end repeatedly) and targets
+  // the end of the buffer directly.
+  api.set("buffer-append", (args: TLispValue[]): Either<AppError, TLispValue> => {
+    const argsValidation = validateArgsCount(args, 1, "buffer-append");
+    if (Either.isLeft(argsValidation)) {
+      return Either.left(argsValidation.left);
+    }
+
+    if (isReadonly()) return Either.left(createBufferError('ReadOnly', 'Buffer is read-only'));
+
+    const currentBuffer = getCurrentBuffer();
+    const bufferValidation = validateBufferExists(currentBuffer);
+    if (Either.isLeft(bufferValidation)) {
+      return Either.left(bufferValidation.left);
+    }
+
+    const textArg = args[0]!
+    const typeValidation = validateArgType(textArg, "string", 0, "buffer-append");
+    if (Either.isLeft(typeValidation)) {
+      return Either.left(typeValidation.left);
+    }
+    const text = textArg.value as string;
+
+    const lineCountResult = currentBuffer!.getLineCount();
+    if (Either.isLeft(lineCountResult)) {
+      return Either.left(createBufferError('InvalidOperation', `Failed to append: ${lineCountResult.left}`));
+    }
+    const lastLine = lineCountResult.right - 1;
+    const lastLineTextResult = currentBuffer!.getLine(lastLine);
+    if (Either.isLeft(lastLineTextResult)) {
+      return Either.left(createBufferError('InvalidOperation', `Failed to append: ${lastLineTextResult.left}`));
+    }
+
+    // RFC-019 incremental insert rebuilds only the affected tail — appending
+    // at the last line is amortized-cheap, no cursor round-trip.
+    const insertResult = currentBuffer!.insert(
+      { line: lastLine, column: (lastLineTextResult.right as string).length },
+      text,
+    );
+    if (Either.isLeft(insertResult)) {
+      return Either.left(createBufferError('InvalidOperation', `Failed to append text: ${insertResult.left}`));
+    }
+
+    setCurrentBuffer(insertResult.right);
+    setBufferModified?.(true);
+
+    return Either.right(createString(text));
+    });
+
   api.set("buffer-delete", (args: TLispValue[]): Either<AppError, TLispValue> => {
     const argsValidation = validateArgsCount(args, 1, "buffer-delete");
     if (Either.isLeft(argsValidation)) {
