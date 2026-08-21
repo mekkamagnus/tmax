@@ -30,11 +30,41 @@ export const tokenizeSteepInput = (
   };
 };
 
+/**
+ * Serialize key-message dispatch onto a promise chain: each handler call runs
+ * to completion before the next begins, both within one chunk and across
+ * overlapping chunks (#195 / BUG-81). The terminal coalesces fast keystrokes
+ * into a single stdin chunk ("SPC ;" arrives as " ;") — concurrent dispatch
+ * let the second key read leader/prefix state (spacePressed) before the first
+ * key's async handleKey had set it, so "SPC ;" fell through as bare ";".
+ *
+ * Handler contract: onKey handlers handle their own errors (SteepFrontend
+ * catches EDITOR_QUIT_SIGNAL and render errors). The catch only keeps the
+ * chain alive if that contract is violated — surfaced on stderr, never
+ * silently swallowed.
+ */
+export const dispatchSerialized = (
+  messages: readonly KeyMsg[],
+  handler: KeyHandler,
+  tail: Promise<void>,
+): Promise<void> => {
+  let queue = tail;
+  for (const message of messages) {
+    queue = queue
+      .then(() => handler(message))
+      .catch((error: unknown) => {
+        console.error("input dispatch error:", error);
+      });
+  }
+  return queue;
+};
+
 export class Input {
   private handler?: KeyHandler;
   private running = false;
   private previousRawMode?: boolean;
   private pendingInput = "";
+  private dispatchTail: Promise<void> = Promise.resolve();
 
   onKey(handler: KeyHandler) {
     this.handler = handler;
@@ -66,10 +96,15 @@ export class Input {
   private handleData = (chunk: string) => {
     if (!this.running || !this.handler) return;
 
+    // Ordering invariant: tokenizer state (pendingInput) is updated
+    // synchronously here, while dispatch is chained asynchronously. This is
+    // safe because tokenization is pure over (chunk, pending) — it never
+    // re-enters the handler — so the next data event always tokenizes
+    // against the complete residue of the last one. Keys already queued
+    // still dispatch even if stop() runs mid-chain (running only gates NEW
+    // chunks); handlers are expected to be no-op-safe during teardown.
     const result = tokenizeSteepInput(chunk, this.pendingInput);
     this.pendingInput = result.pending;
-    for (const message of result.messages) {
-      void this.handler(message);
-    }
+    this.dispatchTail = dispatchSerialized(result.messages, this.handler, this.dispatchTail);
   };
 }
