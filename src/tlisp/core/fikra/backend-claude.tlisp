@@ -1,60 +1,269 @@
 (defmodule fikra/backend-claude
-  (export fikra-backend-claude-available-p fikra-backend-claude-chat fikra-backend-claude-abort)
+  (export fikra-backend-claude-available-p fikra-backend-claude-capabilities
+          fikra-backend-claude-start-turn fikra-backend-claude-abort
+          fikra-backend-claude-normalize fikra-backend-claude-args
+          fikra-backend-claude-line-events fikra-backend-claude-filter
+          fikra-backend-claude-abort-sim fikra-backend-claude-adopt-process)
 
-;; Claude Code CLI adapter — uses make-process to spawn claude subprocess
+;; #214 (RFC-027 §D3/§D4): Claude Code CLI adapter, agent edition.
+;; Process-per-turn + session resume; JSONL lines normalize to FAEP events
+;; through the SEPARABLE normalize pipeline below (fixture-testable without
+;; spawning claude); the filter holds a partial-line accumulator (stdout
+;; chunks are arbitrary); the sentinel is the AUTHORITATIVE turn end.
+
+(require-module fikra/adapter)
+(require-module fikra/event)
+(require-module fikra/thread)
 
 (defvar fikra-claude-process nil
-  "Current claude subprocess handle.")
+  "Current claude subprocess pid (number) or nil.")
+
+(defvar fikra-claude-line-buffer ""
+  "Partial-line accumulator — stdout chunks are arbitrary; JSON objects
+must not be parsed until a full newline-delimited line has arrived.")
+
+(defvar fikra-claude-aborted nil
+  "t when the current process was aborted LOCALLY — the abort path already
+ended the turn as interrupted; the SIGTERM'd process's sentinel must not
+end it AGAIN (double turn-end / error-overrides-interrupted, gate catch).")
 
 (defun fikra-backend-claude-available-p ()
-  "Return t if claude CLI is on PATH."
-  (let ((result (shell-command "which claude 2>/dev/null")))
+  "t when the claude CLI is on PATH."
+  (let ((result (shell-command "command -v claude 2>/dev/null")))
     (not (string= (string-trim result) ""))))
 
-(defun fikra-backend-claude-chat (messages options)
-  "Send MESSAGES to claude CLI, streaming tokens into *Fikra*.
-MESSAGES is a list of (role . content) pairs.
-OPTIONS is an alist of backend-specific settings."
-  (let* ((prompt (if (and messages (cdr messages))
-                   (concat (cdr (car (last messages))) "\n\nContext:\n" (fikra-build-context))
-                   (if messages (cdr (car messages)) "")))
-         (args (list "--print" "--output-format" "stream-json" "-p" prompt)))
+(defun fikra-backend-claude-capabilities ()
+  (list (list "session-resume" t)
+        (list "interactive-approvals" nil) ; probed for real in #220
+        (list "sandbox-presets" nil)))
+
+;; ── arg construction (fixture-testable) ─────────────────────────────
+(defun fikra-backend-claude-args (message resume-id)
+  "Build the claude argv for one turn. RESUME-ID nil = first turn."
+  (let ((base (list "--print"
+                    "--output-format" "stream-json"
+                    "--verbose"
+                    "--permission-mode" "default")))
+    (if resume-id
+      (append base (list "--resume" resume-id "-p" message))
+      (append base (list "-p" message)))))
+
+;; ── normalization: one JSONL line → FAEP events (pure, fixture-tested) ──
+;; Returns a LIST of events (0, 1, or more) or nil for unparseable lines.
+(defun fikra-backend-claude-normalize (line)
+  "One JSONL line → a LIST of FAEP events (pure; fixture-tested). Nil for
+unparseable or non-event lines. Flat dispatch — one branch per wire type."
+  (condition-case nil
+    (let ((obj (json-read-from-string line)))
+      (if (null obj)
+        nil
+        (let ((type (fikra-afield obj "type")))
+          (cond
+            ((string= type "system")
+              (fikra-norm-system obj))
+            ((string= type "assistant")
+              (fikra-norm-assistant obj))
+            ((string= type "user")
+              (fikra-norm-user obj))
+            (t nil)))))
+    (error nil)))
+
+;; system/init → session event (the resume handle).
+(defun fikra-norm-system (obj)
+  (let ((sid (fikra-afield obj "session_id")))
+    (if sid
+      (list (list (list "kind" "session") (list "id" sid)))
+      nil)))
+
+;; assistant → text-delta / tool-call events from the content blocks.
+(defun fikra-norm-assistant (obj)
+  (let ((msg (fikra-afield obj "message")))
+    (if (not (listp msg))
+      nil
+      (let ((content (fikra-afield msg "content")))
+        (if (not (listp content))
+          nil
+          (fikra-norm-blocks content (list)))))))
+
+;; Fold content blocks → events, accumulated in OUT (oldest-first).
+(defun fikra-norm-blocks (blocks out)
+  (if (null blocks)
+    (reverse out)
+    (let* ((block (car blocks))
+           (btype (fikra-afield block "type"))
+           (event
+             (cond
+               ((string= btype "text")
+                 (let ((txt (fikra-afield block "text")))
+                   (if (and txt (> (length txt) 0))
+                     (list (list "kind" "text-delta") (list "text" txt))
+                     nil)))
+               ((string= btype "tool_use")
+                 (fikra-tool-call-event block))
+               (t nil))))
+      (fikra-norm-blocks (cdr blocks)
+        (if event (cons event out) out)))))
+
+;; user → tool-result events.
+(defun fikra-norm-user (obj)
+  (let ((msg (fikra-afield obj "message")))
+    (if (not (listp msg))
+      nil
+      (let ((content (fikra-afield msg "content")))
+        (if (not (listp content))
+          nil
+          (fikra-norm-results content (list)))))))
+
+(defun fikra-norm-results (blocks out)
+  (if (null blocks)
+    (reverse out)
+    ;; Only tool_result blocks — a stray text block in a user message must
+    ;; not produce a spurious tool-result (gate catch).
+    (let* ((block (car blocks))
+           (btype (fikra-afield block "type")))
+      (if (not (string= btype "tool_result"))
+        (fikra-norm-results (cdr blocks) out)
+        (let* ((is-error (fikra-afield block "is_error"))
+               (content-v (fikra-afield block "content")))
+          (fikra-norm-results (cdr blocks)
+            (cons (list (list "kind" "tool-result")
+                        (list "ok" (if is-error nil t))
+                        (list "summary" (if content-v content-v "")))
+                  out)))))))
+
+;; tool_use block → tool-call event with a per-tool summary.
+(defun fikra-tool-call-event (block)
+  (let* ((name (fikra-afield block "name"))
+         (input (fikra-afield block "input"))
+         (summary (fikra-tool-summary name input)))
+    (list (list "kind" "tool-call")
+          (list "tool" (if name name "?"))
+          (list "summary" summary))))
+
+(defun fikra-tool-summary (name input)
+  (cond
+    ((string= name "Bash")
+      (let ((cmd (fikra-afield input "command")))
+        (if cmd cmd "bash")))
+    ((or (string= name "Edit") (string= name "Write") (string= name "Read"))
+      (let ((p (fikra-afield input "file_path")))
+        (if p p name)))
+    (t (if name name "?"))))
+
+;; alist field getter (json-read objects are ("k" v) alists).
+(defun fikra-afield (obj key)
+  (let ((found nil))
+    (if (listp obj)
+      (dolist (entry obj)
+        (if (and (not found)
+                 (listp entry)
+                 (= (length entry) 2)
+                 (string= (car entry) key))
+          (setq found (car (cdr entry)))))
+      nil)
+    found))
+
+;; ── line assembly: feed a raw chunk, get complete lines ────────────
+;; Returns the list of COMPLETE lines carried by the chunk; keeps the
+;; remainder in the accumulator. Fixture-testable without a process.
+(defun fikra-backend-claude-line-events (chunk)
+  "Feed CHUNK into the line accumulator; normalize every complete line and
+return the concatenated FAEP events (a flat list)."
+  (setq fikra-claude-line-buffer (concat fikra-claude-line-buffer chunk))
+  ;; Loop while a newline exists — T-Lisp's `while` macro is unavailable, so
+  ;; this is a recursion over the accumulator with a terminal check.
+  (fikra-drain-lines))
+
+(defun fikra-drain-lines ()
+  (let ((nl (fikra-index-of-newline fikra-claude-line-buffer)))
+    (if (null nl)
+      nil
+      (let ((line (substring fikra-claude-line-buffer 0 nl)))
+        (setq fikra-claude-line-buffer
+              (substring fikra-claude-line-buffer (+ nl 1) (length fikra-claude-line-buffer)))
+        (let ((evs (fikra-backend-claude-normalize line)))
+          (let ((rest (fikra-drain-lines)))
+            (if evs
+              (if rest (append evs rest) evs)
+              rest)))))))
+
+(defun fikra-index-of-newline (s)
+  (fikra-find-nl s 0 (length s)))
+
+(defun fikra-find-nl (s i len)
+  (if (>= i len)
+    nil
+    (if (string= (substring s i (+ i 1)) "\n")
+      i
+      (fikra-find-nl s (+ i 1) len))))
+
+;; ── process lifecycle ───────────────────────────────────────────────
+(defun fikra-backend-claude-start-turn (message)
+  "Spawn one turn: process-per-turn, resume the thread's session, stream
+JSONL → FAEP. The sentinel is the authoritative turn end (#213)."
+  (let* ((sid (fikra/thread/fikra-thread-session-id))
+         (args (fikra-backend-claude-args message sid)))
+    (setq fikra-claude-line-buffer "")
+    (setq fikra-claude-aborted nil)
+    (fikra/thread/fikra-thread-turn-begin)
     (setq fikra-claude-process
       (make-process
         :command (cons "claude" args)
-        :filter 'fikra-backend-claude-filter
-        :sentinel 'fikra-backend-claude-sentinel))))
+        :cwd (fikra/thread/fikra-thread-root)
+        :filter "fikra-backend-claude-filter"
+        :sentinel "fikra-backend-claude-sentinel"))
+    fikra-claude-process))
 
 (defun fikra-backend-claude-filter (pid output)
-  "Parse streamed output from claude, insert tokens into *Fikra*."
-  (dolist (line (split-string output "\n"))
-    (if (not (string= line ""))
-      (let ((json (json-read-from-string line)))
-        (if (and json (not (eq json nil)))
-          (let ((type-entry (assoc "type" json))
-                (content-entry (or (assoc "content" json) (assoc "text" json))))
-            ;; #158: was (alist-get "content" json) — alist-get doesn't exist.
-            ;; Claude stream-json sends {"type":"assistant","message":{"content":[{"text":"..."}]}}
-            ;; We try "content" first, then "text" (delta format).
-            (let ((type-val (if type-entry (cdr type-entry) nil))
-                  (content-val (if content-entry (cdr content-entry) nil)))
-              (if (and content-val (not (string= content-val "")))
-                (fikra-token-insert (if type-val type-val "text") content-val)))))))))
+  "Serialized per-process (#208): normalize complete lines from this chunk
+and emit them as ONE FAEP batch (per-chunk coalescing). The first session
+event records the resume handle."
+  (let ((events (fikra-backend-claude-line-events output)))
+    (if events
+      (progn
+        ;; Record the session id if this batch introduced one.
+        (dolist (e events)
+          (if (string= (fikra-afield e "kind") "session")
+            (fikra/thread/fikra-thread-set-session-id (fikra-afield e "id"))))
+        (fikra/event/fikra-event-emit-batch events)))))
 
 (defun fikra-backend-claude-sentinel (pid exit-code)
-  "Handle claude process exit."
+  "AUTHORITATIVE turn end: process exit settles the thread state machine
+(§D3 — checkpoint capture is #217's async follow-up, never blocks).
+SKIPPED when the turn was already ended by a local abort (interrupted)."
   (setq fikra-claude-process nil)
-  (fikra-turn-complete exit-code))
+  (setq fikra-claude-line-buffer "")
+  (if (not fikra-claude-aborted)
+    (fikra/thread/fikra-thread-turn-end
+      (if (= exit-code 0) "completed" "error"))))
+
+;; Test seam: point the module's process handle at an externally spawned
+;; pid (module vars are not settable cross-module).
+(defun fikra-backend-claude-adopt-process (pid)
+  (setq fikra-claude-process pid)
+  pid)
+
+;; Test seam: reproduce the abort→sentinel sequence without a process
+;; (mark-aborted, end interrupted, then fire the sentinel with exit 1).
+(defun fikra-backend-claude-abort-sim ()
+  (setq fikra-claude-aborted t)
+  (fikra/thread/fikra-thread-turn-end "interrupted")
+  (fikra-backend-claude-sentinel 0 1)
+  "sim-done")
 
 (defun fikra-backend-claude-abort ()
-  "Kill the running claude process."
   (if fikra-claude-process
     (progn
+      ;; Mark BEFORE signaling: the sentinel fires after exit and must skip.
+      (setq fikra-claude-aborted t)
       (signal fikra-claude-process "SIGTERM")
-      (setq fikra-claude-process nil))))
+      (setq fikra-claude-process nil)
+      (fikra/thread/fikra-thread-turn-end "interrupted")
+      t)
+    nil))
 
 ;; Self-register
-(fikra-register-backend "claude")
+(fikra/adapter/fikra-register-backend "claude")
 
 (provide "fikra-backend-claude")
 )

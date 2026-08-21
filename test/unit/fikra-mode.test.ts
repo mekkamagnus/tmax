@@ -28,13 +28,14 @@ describe("Fikra Phase 2 — T-Lisp Modules", () => {
     expect(content).toContain("fikra-register-backend");
     expect(content).toContain("fikra-set-backend");
     expect(content).toContain("fikra-backend-call");
+    expect(content).toContain("fikra-backend-start-turn");
     expect(content).toContain("provide \"fikra-adapter\"");
   });
 
   test("fikra-backend-claude.tlisp defines adapter protocol", () => {
     const content = readFileSync(join(process.cwd(), "src/tlisp/core/fikra/backend-claude.tlisp"), "utf-8");
     expect(content).toContain("fikra-backend-claude-available-p");
-    expect(content).toContain("fikra-backend-claude-chat");
+    expect(content).toContain("fikra-backend-claude-start-turn");
     expect(content).toContain("fikra-backend-claude-abort");
     expect(content).toContain("make-process");
     expect(content).toContain("fikra-register-backend \"claude\"");

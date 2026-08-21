@@ -1,38 +1,72 @@
 (defmodule fikra/adapter
   (export fikra-register-backend fikra-set-backend fikra-current-backend
           fikra-list-backends fikra-list-available-backends fikra-backend-available-p
-          fikra-backend-call fikra-backend-prompt)
+          fikra-backend-capabilities fikra-backend-capable-p
+          fikra-backend-start-turn fikra-backend-abort
+          fikra-backend-prompt fikra-backend-call)
 
-;; Adapter registry — manages AI backends
+;; #214 (RFC-027 §D4): Adapter contract v2. A backend module provides:
+;;   fikra-backend-<name>-available-p           → t/nil (probed, cached)
+;;   fikra-backend-<name>-capabilities          → alist of capability booleans
+;;   fikra-backend-<name>-start-turn            → spawn the turn's process
+;;   fikra-backend-<name>-abort                 → signal the process
+;; The registry dispatches by NAME via funcall (string path) — no intern.
+;; Capability flags (#224 codex / future ACP): session-resume,
+;; interactive-approvals, sandbox-presets.
 
 (defvar fikra-backends '()
-  "Alist of (name . available-p) for registered backends.")
+  "Alist of (name . registered) for known backends.")
 
 (defvar fikra-current-backend-name nil
   "Name of the currently active backend.")
 
-;; #158: intern/fboundp replaced with funcall + condition-case (the symbols
-;; are module-exported T-Lisp functions, resolvable via funcall's string-name
-;; path). No new primitives needed.
+;; T-Lisp has no assoc — membership scan over the registry alist.
+(defun fikra-backend-known-p (name)
+  (let ((hit nil))
+    (dolist (entry fikra-backends)
+      (if (and (not hit) (string= (car entry) name))
+        (setq hit t)))
+    hit))
+
 (defun fikra-register-backend (name)
-  "Register a backend by name. The backend must provide:
-   fikra-backend-<name>-available-p
-   fikra-backend-<name>-chat
-   fikra-backend-<name>-abort"
-  (let ((exists (assoc name fikra-backends)))
-    (if (not exists)
-      (setq fikra-backends (cons (cons name t) fikra-backends))))
+  "Register backend NAME (idempotent)."
+  (if (not (fikra-backend-known-p name))
+    (setq fikra-backends (cons (list name t) fikra-backends)))
   name)
 
 (defun fikra-backend-available-p (name)
-  "Check if a backend is installed and ready (#158: condition-case replaces intern/fboundp)."
+  "Probe whether backend NAME is installed and ready."
   (let ((fn-name (concat "fikra-backend-" name "-available-p")))
     (condition-case nil
-      (funcall fn-name)
+      (let ((r (funcall fn-name)))
+        (if (and r (not (eq r nil))) t nil))
       (error nil))))
 
+;; Note: nil stringifies as "null" on the TS bridge; capable-p normalizes
+;; to t/nil booleans for wire cleanliness.
+
+(defun fikra-backend-capabilities (name)
+  "Backend NAME's capability alist ((\"cap\" . t/nil) ...). Unknown caps
+default nil; a missing capabilities fn yields the empty alist."
+  (let ((fn-name (concat "fikra-backend-" name "-capabilities")))
+    (condition-case nil
+      (funcall fn-name)
+      (error '()))))
+
+(defun fikra-backend-capable-p (name cap)
+  "t when NAME's CAPABILITY alist marks CAP truthy. Entries are
+LIST-shaped ("cap" value) — T-Lisp has no dotted pairs."
+  (let ((caps (fikra-backend-capabilities name))
+        (hit nil))
+    (dolist (entry caps)
+      (if (and (not hit) (string= (car entry) cap))
+        (let ((v (car (cdr entry))))
+          (setq hit (if (and v (not (eq v nil))) t nil)))))
+    hit))
+
 (defun fikra-set-backend (name)
-  "Switch to the named backend."
+  "Switch to backend NAME (mid-conversation safe: FAEP logs are backend-
+agnostic). Refuses unavailable backends."
   (if (fikra-backend-available-p name)
     (progn
       (setq fikra-current-backend-name name)
@@ -43,42 +77,61 @@
       nil)))
 
 (defun fikra-current-backend ()
-  "Get the name of the current backend."
-  (if fikra-current-backend-name
-    fikra-current-backend-name
-    "none"))
+  (if fikra-current-backend-name fikra-current-backend-name "none"))
 
 (defun fikra-list-backends ()
-  "List all registered backend names."
   (mapcar car fikra-backends))
 
 (defun fikra-list-available-backends ()
-  "List names of backends that are available (installed and ready)."
   (let ((result '()))
     (dolist (entry fikra-backends)
       (let ((name (car entry)))
         (if (fikra-backend-available-p name)
-          (setq result (cons name result))))))
+          (setq result (cons name result)))))
     (reverse result)))
 
-(defun fikra-backend-call (method &rest args)
-  "Call METHOD on the current backend with ARGS (#158: condition-case replaces intern/fboundp/apply)."
+;; start-turn: spawn this turn's process on the current backend. Backends
+;; receive MESSAGE and drive fikra/thread's turn lifecycle themselves.
+(defun fikra-backend-start-turn (message)
   (if (not fikra-current-backend-name)
     (progn (message "Fikra: no backend selected") nil)
-    (let ((fn-name (concat "fikra-backend-" fikra-current-backend-name "-" method)))
+    (let ((fn-name (concat "fikra-backend-" fikra-current-backend-name "-start-turn")))
+      (condition-case nil
+        (funcall fn-name message)
+        (error
+          (progn
+            (message "Fikra: backend %s has no start-turn" fikra-current-backend-name)
+            nil))))))
+
+(defun fikra-backend-abort ()
+  (if (not fikra-current-backend-name)
+    nil
+    (let ((fn-name (concat "fikra-backend-" fikra-current-backend-name "-abort")))
       (condition-case nil
         (funcall fn-name)
-        (error (progn (message "Fikra: backend %s has no method %s" fikra-current-backend-name method) nil))))))
+        (error nil)))))
 
 (defun fikra-backend-prompt ()
-  "Prompt user to select a backend. Returns the selected name."
+  "Prompt user to select a backend (first available; full popup Phase 3+)."
   (let ((available (fikra-list-available-backends)))
     (if (= (length available) 0)
       (progn (message "Fikra: no backends available") nil)
-      (if (= (length available) 1)
-        (car available)
-        ;; For now, return first available. Full selector popup in Phase 3.
-        (car available)))))
+      (car available))))
+
+;; Legacy bridge: chat(messages, options) → start-turn(last message). Kept so
+;; pre-#216 callers keep working; #216 rebinds everything to threads.
+(defun fikra-backend-call (method &rest args)
+  (if (string= method "start-turn")
+    (fikra-backend-start-turn (car args))
+    (if (string= method "abort")
+      (fikra-backend-abort)
+      (if (string= method "chat")
+        (let ((messages (car args)))
+          (fikra-backend-start-turn
+            (if messages (cdr (car (last messages))) "")))
+        (progn
+          (message "Fikra: unknown backend method %s" method)
+          nil)))))
 
 (provide "fikra-adapter")
 )
