@@ -1,5 +1,27 @@
-import { describe, expect, test } from "bun:test";
+import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { createStartedEditor, executeTlisp, minibufferRowText } from "../helpers/editor-fixture.ts";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+
+// #198: hermetic fixture — the old tests asserted the CHECKOUT's cwd listing
+// ("src", "package.json"), which fails on CI runners whose directory listing
+// differs. Run them against a fixture tree with exactly the entries they
+// assert. bun test isolates per file (own worker); afterAll restores cwd.
+const originalCwd = process.cwd();
+let fixtureDir = "";
+beforeAll(() => {
+  fixtureDir = mkdtempSync(join(tmpdir(), "tmax-find-file-"));
+  mkdirSync(join(fixtureDir, "src", "core"), { recursive: true });
+  writeFileSync(join(fixtureDir, "package.json"), "{}\n");
+  writeFileSync(join(fixtureDir, "README.md"), "# fixture\n");
+  writeFileSync(join(fixtureDir, "src", "core", "buffer.ts"), "export {};\n");
+  process.chdir(fixtureDir);
+});
+afterAll(() => {
+  process.chdir(originalCwd);
+  if (fixtureDir) rmSync(fixtureDir, { recursive: true, force: true });
+});
 
 const startFindFile = async () => {
   const editor = await createStartedEditor();
