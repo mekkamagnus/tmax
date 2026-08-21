@@ -93,3 +93,6 @@ agents/
 # Local environment secrets (never commit — contains API keys/tokens)
 .env
 .env.*
+
+# fikra thread state (RFC-027)
+.tmax/

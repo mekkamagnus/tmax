@@ -1,0 +1,222 @@
+(defmodule fikra/thread
+  (export fikra-thread-init fikra-thread-open fikra-thread-reopen
+          fikra-thread-current fikra-thread-status fikra-thread-status-set
+          fikra-thread-turn-begin fikra-thread-turn-end fikra-thread-turn-count
+          fikra-thread-root fikra-thread-log-path fikra-thread-session-id
+          fikra-thread-set-session-id fikra-thread-save fikra-thread-field)
+
+;; #213 (RFC-027 §D3/§D7, Phase 1 — MINIMAL subset): one implicit "main"
+;; thread per project. State machine + persistence + reopen-after-restart +
+;; project-root detection. NO thread creation/list/worktrees (Phase 4).
+;;
+;; Thread state lives under <project-root>/.tmax/fikra/threads/<id>/:
+;;   events.jsonl — the FAEP log (#212; fikra/event points at it)
+;;   state.json   — backend, session-id, runtime-mode, trust, turn-count
+;; The FAEP module is the only integration seam: log-set wires the log path.
+
+;; Module deps: FAEP (#212) owns the event log; chat (#206) owns the
+;; *Fikra* buffer-local keymap.
+(require-module fikra/event)
+(require-module fikra/chat)
+
+(defvar fikra-threads (hashmap)
+  "Thread-id → state hashmap (in-memory cache).")
+
+(defvar fikra-current-thread-id nil
+  "Focused thread id (the minimal subset has only \"main\").")
+
+;; ── project root ────────────────────────────────────────────────────
+(defun fikra-thread-root ()
+  "Project root = git toplevel of cwd (fallback: cwd)."
+  (let ((out (string-trim (shell-command "git rev-parse --show-toplevel 2>/dev/null"))))
+    (if (> (length out) 0) out (process-cwd))))
+
+(defun process-cwd ()
+  (string-trim (shell-command "pwd")))
+
+;; ── init / open / reopen ────────────────────────────────────────────
+(defun fikra-thread-init ()
+  "Detect the project root and initialize (or load) the main thread.
+Creates .tmax/fikra/threads/main/ and points the FAEP log at it. Returns
+the thread id. Idempotent."
+  (let* ((root (fikra-thread-root))
+         (dir (concat root "/.tmax/fikra/threads/main")))
+    (file-mkdir dir)
+    (let ((state (fikra-thread-load root "main")))
+      (editor/keymaps/keymap-mutable-set! fikra-threads "main" state)
+      (setq fikra-current-thread-id "main")
+      ;; Wire FAEP at the thread's log; loading resets in-memory events, so
+      ;; re-point even when the thread already existed.
+      (fikra/event/fikra-event-log-set (concat dir "/events.jsonl"))
+      "main")))
+
+(defun fikra-thread-open ()
+  "Open the main thread: init-or-load, create *Fikra* when absent, replay
+history into it (daemon-restart reopen path), focus it."
+  (fikra-thread-init)
+  (if (not (member "*Fikra*" (buffer-list)))
+    (progn
+      (buffer-create "*Fikra*")
+      (buffer-set-read-only t)))
+  (fikra/chat/fikra-ensure-buffer-keymap)
+  (buffer-switch "*Fikra*")
+  ;; Reopen: replay the full log into the buffer (empty log → empty buffer).
+  (fikra/event/fikra-event-rebuild-fikra-buffer)
+  "*Fikra*")
+
+(defun fikra-thread-reopen ()
+  "Alias of fikra-thread-open (the daemon-restart entry point)."
+  (fikra-thread-open))
+
+;; Load state.json for ID under ROOT; absent file → fresh state.
+(defun fikra-thread-load (root id)
+  (let* ((dir (concat root "/.tmax/fikra/threads/" id))
+         (path (concat dir "/state.json"))
+         (fresh (hashmap "id" id
+                         "root" root
+                         "backend" "none"
+                         "session-id" nil
+                         "runtime-mode" "approval-required"
+                         "trust" (list)
+                         "status" "idle"
+                         "turn-count" 0)))
+    (if (file-exists-p path)
+      (let* ((raw (read-file-content path))
+             (parsed (if raw (json-read-from-string raw) nil)))
+        (if (null parsed)
+          fresh
+          (let ((state fresh))
+            ;; Overlay persisted fields onto fresh defaults (forward-
+            ;; compatible: unknown persisted fields ignored, missing fields
+            ;; keep defaults).
+            (dolist (key (list "backend" "session-id" "runtime-mode" "turn-count"))
+              (let ((v (fikra-alist-get key parsed)))
+                (if (not (null v))
+                  (editor/keymaps/keymap-mutable-set! state key v))))
+            (editor/keymaps/keymap-mutable-set! state "root" root)
+            state)))
+      fresh)))
+
+;; alist getter (json-read produces ("k" v) 2-list alists).
+(defun fikra-alist-get (key alist)
+  (let ((found nil))
+    (dolist (entry alist)
+      (if (and (not found)
+               (listp entry)
+               (= (length entry) 2)
+               (string= (car entry) key))
+        (setq found (car (cdr entry)))))
+    found))
+
+(defun fikra-thread-save ()
+  "Persist the current thread's state.json."
+  (let* ((state (fikra-thread-state)))
+    (write-file-content
+      (concat (fikra-thread-field "root") "/.tmax/fikra/threads/"
+              (fikra-thread-field "id") "/state.json")
+      (json-encode (list
+                     (list "id" (fikra-thread-field "id"))
+                     (list "backend" (fikra-thread-field "backend"))
+                     (list "session-id" (fikra-thread-field "session-id"))
+                     (list "runtime-mode" (fikra-thread-field "runtime-mode"))
+                     (list "turn-count" (fikra-thread-field "turn-count")))))))
+
+(defun fikra-thread-current ()
+  "Current thread id (nil before init)."
+  fikra-current-thread-id)
+
+(defun fikra-thread-state ()
+  (hashmap-get fikra-threads (if fikra-current-thread-id fikra-current-thread-id "main")))
+
+(defun fikra-thread-field (key)
+  (let ((state (fikra-thread-state)))
+    (if state (hashmap-get state key) nil)))
+
+(defun fikra-thread-status ()
+  (fikra-thread-field "status"))
+
+(defun fikra-thread-turn-count ()
+  (fikra-thread-field "turn-count"))
+
+(defun fikra-thread-root-id ()
+  (fikra-thread-field "root"))
+
+(defun fikra-thread-log-path ()
+  (concat (fikra-thread-field "root") "/.tmax/fikra/threads/"
+          (fikra-thread-field "id") "/events.jsonl"))
+
+(defun fikra-thread-session-id ()
+  (fikra-thread-field "session-id"))
+
+(defun fikra-thread-set-session-id (sid)
+  "Record the backend session id (#214's adapter calls this on the first
+turn's init event); persisted on save."
+  (editor/keymaps/keymap-mutable-set! (fikra-thread-state) "session-id" sid)
+  (fikra-thread-save)
+  sid)
+
+;; ── state machine ───────────────────────────────────────────────────
+;; idle → running → {idle | error | interrupted}
+;; running → confirming → running (approval round-trip; #220 wires it)
+;; Validity is CHECKED: illegal transitions error (a crashed adapter must
+;; not silently corrupt thread state).
+(defun fikra-thread-status-set (new-status)
+  (let ((from (fikra-thread-status)))
+    (if (not (fikra-transition-valid-p from new-status))
+      (error (concat "fikra: illegal thread transition " from " → " new-status))
+      (progn
+        (editor/keymaps/keymap-mutable-set! (fikra-thread-state) "status" new-status)
+        (fikra-thread-save)
+        new-status))))
+
+(defun fikra-transition-valid-p (from to)
+  (or
+    ;; Any state can be reset by open (init path).
+    (string= to "idle")
+    (and (string= from "idle") (string= to "running"))
+    (and (string= from "running")
+         (or (string= to "error")
+             (string= to "interrupted")
+             (string= to "confirming")))
+    (and (string= from "confirming")
+         (or (string= to "running") (string= to "interrupted")))
+    ;; Recovery: error/interrupted resume to running on the next turn.
+    (and (or (string= from "error") (string= from "interrupted"))
+         (string= to "running"))))
+
+;; ── turn lifecycle (#214's adapter drives these) ───────────────────
+;; fikra-thread-turn-begin: bump turn-count, set running, emit turn-start.
+;; fikra-thread-turn-end: the AUTHORITATIVE end (process exit per §D3 —
+;; checkpoint capture is async follow-up in #217 and never blocks the next
+;; turn): emit turn-end, settle the state machine.
+(defun fikra-thread-turn-begin ()
+  ;; Validate the transition FIRST — an illegal begin must not bump the
+  ;; persisted turn count (checked-state hygiene, gate catch).
+  (fikra-thread-status-set "running")
+  (let* ((state (fikra-thread-state))
+         (n (+ 1 (hashmap-get state "turn-count"))))
+    (editor/keymaps/keymap-mutable-set! state "turn-count" n)
+    (fikra/event/fikra-event-emit
+      (list (list "kind" "turn-start")
+            (list "turn" (if (numberp n) n (string-to-number (if (stringp n) n "0"))))
+            (list "backend" (fikra-thread-field "backend"))))
+    ;; Persist the bumped count (a crash before turn-end must still show
+    ;; the turn happened).
+    (fikra-thread-save)
+    n))
+
+(defun fikra-thread-turn-end (status)
+  "STATUS: completed | error | interrupted (the turn-end event's status)."
+  (fikra/event/fikra-event-emit
+    (list (list "kind" "turn-end")
+          (list "turn" (fikra-thread-field "turn-count"))
+          (list "status" status)))
+  ;; Map the event status onto the thread state machine.
+  (fikra-thread-status-set
+    (cond
+      ((string= status "completed") "idle")
+      ((string= status "interrupted") "interrupted")
+      (t "error"))))
+
+(provide "fikra-thread")
+)
