@@ -359,6 +359,46 @@ export function createMinorModeOps(
     return Either.right(createString(config ? config.lighter : ""));
   });
 
+  // #211 (RFC-027 §UI): mutate a registered mode's lighter at runtime. The
+  // registry record is shared, so the NEXT minor-mode-list-lighters render
+  // (which feeds the status line) reflects the change — dynamic modeline
+  // segments (fikra:backend● etc.) re-render by calling this per event.
+  // Unlike editor-set-status (a transient message slot), the lighter is
+  // persistent state owned by the mode.
+  api.set("minor-mode-set-lighter", (args: TLispValue[]): Either<AppError, TLispValue> => {
+    const argsValidation = validateArgsCount(args, 2, "minor-mode-set-lighter");
+    if (Either.isLeft(argsValidation)) {
+      return Either.left(argsValidation.left);
+    }
+
+    const nameArg = args[0]!
+    const nameValidation = validateArgType(nameArg, "string", 0, "minor-mode-set-lighter");
+    if (Either.isLeft(nameValidation)) {
+      return Either.left(nameValidation.left);
+    }
+
+    const lighterArg = args[1]!
+    const lighterValidation = validateArgType(lighterArg, "string", 1, "minor-mode-set-lighter");
+    if (Either.isLeft(lighterValidation)) {
+      return Either.left(lighterValidation.left);
+    }
+
+    const name = nameArg.value as string;
+    const config = getMinorModeRegistry().get(name);
+    if (!config) {
+      return Either.left(createValidationError(
+        "ConstraintViolation",
+        `minor-mode-set-lighter: no minor mode named '${name}'`,
+        "name",
+        name,
+        "a registered minor mode"
+      ));
+    }
+
+    config.lighter = lighterArg.value as string;
+    return Either.right(createString(config.lighter));
+  });
+
   // (minor-mode-list-lighters)
   api.set("minor-mode-list-lighters", (args: TLispValue[]): Either<AppError, TLispValue> => {
     const argsValidation = validateArgsCount(args, 0, "minor-mode-list-lighters");
