@@ -29,6 +29,7 @@ import { runModel, type EditorModelAccess } from "./api/state-context.ts";
 import { createValidationError, AppError } from "../error/types.ts";
 import { registerContributions, type EditorAPIContribution } from "./api/registry.ts";
 import { createBufferOps } from "./api/buffer-ops.ts";
+import { createConfirmationOps } from "./api/confirmation-ops.ts";
 import { createCursorOps } from "./api/cursor-ops.ts";
 import { createModeOps } from "./api/mode-ops.ts";
 import { createFileOps } from "./api/file-ops.ts";
@@ -1747,6 +1748,16 @@ function buildEditorAPIContributions(): readonly EditorAPIContribution[] {
         });
 
         return ops;
+      },
+    },
+
+    // ── #210 (RFC-027 §D5 L2 Phase 0): confirmation primitives ─────────
+    {
+      name: "confirmation",
+      factory: (ctx: EditorAPIContext): Map<string, TLispFunctionImpl> => {
+        return createConfirmationOps({
+          evalTlisp: (code: string) => ctx.evalTlisp!(code),
+        });
       },
     },
 

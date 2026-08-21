@@ -432,6 +432,25 @@ export interface WorkspaceMoveWindowResult {
  * method here is the single place a new route is declared (AC5.1). Every
  * result is an exact JSON-compatible type — no `unknown`, no catch-all.
  */
+
+/** #210 (RFC-027 §D5 L2 Phase 0): generic deferred confirmation. */
+export interface ConfirmationMediateParams {
+  source: string;
+  /** One-time token from (confirmation-token-mint "source" "scope"). */
+  token: string;
+  kind: string;
+  detail: string;
+  /** Auto-reject after this many ms. */
+  timeoutMs?: number;
+}
+
+export interface ConfirmationMediateResult {
+  decision: "allow" | "reject" | "always";
+  /** The token's scope on a settled prompt; a rejection REASON on invalid
+   *  tokens (unknown/stale/cross-source) — rejected before any prompt. */
+  scope: string;
+}
+
 export interface RpcMethodMap {
   open: { params: OpenParams; result: OpenResult };
   eval: { params: EvalParams; result: EvalResult };
@@ -456,6 +475,7 @@ export interface RpcMethodMap {
   "workspace-rename": { params: WorkspaceRenameParams; result: WorkspaceRenameResult };
   "workspace-load": { params: WorkspaceLoadParams; result: WorkspaceLoadResult };
   "workspace-move-window": { params: WorkspaceMoveWindowParams; result: WorkspaceMoveWindowResult };
+  "confirmation/mediate": { params: ConfirmationMediateParams; result: ConfirmationMediateResult };
 }
 
 /** Every recognized method name (the authoritative route inventory). */

@@ -44,7 +44,7 @@ describe("CHORE-44 Step 0 — public inventory parity", () => {
     // Sanity: the router recognizes the whole frozen set, and the set is the
     // authoritative count (23 methods today).
     expect(recognized.length).toBe(expected.length);
-    expect(expected.length).toBe(23);
+    expect(expected.length).toBe(24);
   });
 
   test("Editor public method surface matches the frozen Step 0 set (Change 3 anchor)", () => {

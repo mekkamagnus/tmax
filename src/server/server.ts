@@ -39,6 +39,7 @@ import { PROTOCOL_VERSION } from './rpc/types.ts';
 import type { ServerContext, ClientRecord, FrameObservability } from './rpc/handlers/context.ts';
 import { createEditingHandlers } from './rpc/handlers/editing.ts';
 import { createFramesHandlers } from './rpc/handlers/frames.ts';
+import { createConfirmationHandlers } from './rpc/handlers/confirmation.ts';
 import { createWorkspaceHandlers } from './rpc/handlers/workspaces.ts';
 import { createLifecycleHandlers } from './rpc/handlers/lifecycle.ts';
 import { FileSystemImpl } from '../core/filesystem.ts';
@@ -1231,6 +1232,7 @@ export class TmaxServer {
     const frames = createFramesHandlers(ctx);
     const workspaces = createWorkspaceHandlers(ctx);
     const lifecycle = createLifecycleHandlers(ctx);
+    const confirmation = createConfirmationHandlers(ctx);
     return {
       open: editing.open,
       eval: editing.eval,
@@ -1255,6 +1257,7 @@ export class TmaxServer {
       'workspace-rename': workspaces['workspace-rename'],
       'workspace-load': workspaces['workspace-load'],
       'workspace-move-window': workspaces['workspace-move-window'],
+      'confirmation/mediate': confirmation['confirmation/mediate'],
     };
   }
 

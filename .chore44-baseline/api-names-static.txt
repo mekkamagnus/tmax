@@ -1,4 +1,5 @@
 add-hook
+append-file
 aref
 aset
 ast-count-nodes
@@ -24,6 +25,7 @@ auto-mode-detect
 auto-mode-list
 browse-doc-reference
 browse-git-github-remote
+buffer-append
 buffer-bury
 buffer-count
 buffer-create
@@ -95,6 +97,11 @@ comint-signal
 comment-region-active-p
 comment-region-lines
 comment-toggle-line
+confirmation-cancel
+confirmation-handler-register
+confirmation-pending
+confirmation-resolve
+confirmation-token-mint
 current-module
 cursor-column
 cursor-line
@@ -190,6 +197,7 @@ indent-apply-region
 indent-calculate-column
 indent-get-rules
 indent-set-rules
+json-encode
 json-read-from-string
 jump-to-first-line
 jump-to-last-line
@@ -243,6 +251,7 @@ message-log-max
 messages-buffer
 minor-mode-active-p
 minor-mode-global-p
+minor-mode-keymap
 minor-mode-lighter
 minor-mode-list-active
 minor-mode-list-all
@@ -250,6 +259,7 @@ minor-mode-list-lighters
 minor-mode-register
 minor-mode-set
 minor-mode-set-keymap
+minor-mode-set-lighter
 minor-mode-toggle
 module-exports
 module-list

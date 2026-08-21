@@ -244,6 +244,15 @@ const workspaceMoveWindowGuard: ParamGuard = (p) => {
   if ('sourceWorkspaceId' in r && !isOptString(r.sourceWorkspaceId)) throw new ParamError('sourceWorkspaceId', 'string');
 };
 
+const confirmationMediateGuard: ParamGuard = (r: unknown) => {
+  const o = asRecord(r, true);
+  if (!isString(o.source)) throw new ParamError('source', 'string');
+  if (!isString(o.token)) throw new ParamError('token', 'string');
+  if (!isString(o.kind)) throw new ParamError('kind', 'string');
+  if (!isString(o.detail)) throw new ParamError('detail', 'string');
+  if ('timeoutMs' in o && !isOptNumber(o.timeoutMs)) throw new ParamError('timeoutMs', 'number');
+};
+
 const PARAM_GUARDS: Readonly<Record<RpcMethodName, ParamGuard>> = {
   open: openGuard,
   eval: evalGuard,
@@ -268,6 +277,7 @@ const PARAM_GUARDS: Readonly<Record<RpcMethodName, ParamGuard>> = {
   "workspace-rename": workspaceRenameGuard,
   "workspace-load": workspaceLoadGuard,
   "workspace-move-window": workspaceMoveWindowGuard,
+  "confirmation/mediate": confirmationMediateGuard,
 };
 
 // ── Sync policy table (AC5.3–AC5.5 + workspaceOverride exception) ─────────
@@ -315,6 +325,7 @@ export const SYNC_POLICY: Readonly<Record<RpcMethodName, SyncPolicy>> = {
   "workspace-rename": "workspace-override",
   "workspace-load": "workspace-override",
   "workspace-move-window": "workspace-override",
+  "confirmation/mediate": "stateless",
 };
 
 // ── Method inventory ─────────────────────────────────────────────────────
@@ -324,6 +335,7 @@ const HANDLES: ReadonlySet<RpcMethodName> = new Set<RpcMethodName>([
   "client-event", "save-file", "capture", "ping", "status", "clients", "frames",
   "shutdown", "workspace-list", "workspace-new", "workspace-switch", "workspace-save",
   "workspace-kill", "workspace-rename", "workspace-load", "workspace-move-window",
+  "confirmation/mediate",
 ]);
 
 /** True if `method` is a recognized RPC method name. */

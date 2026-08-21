@@ -2,6 +2,7 @@ capture
 client-event
 clients
 command
+confirmation/mediate
 eval
 frames
 insert
