@@ -1,0 +1,295 @@
+(defmodule fikra/event
+  (export fikra-event-log-set fikra-event-log-path fikra-event-emit
+          fikra-event-emit-batch fikra-event-replay fikra-event-events
+          fikra-event-reset fikra-event-render-line)
+
+;; #212 (RFC-027 §D2) — FAEP: the Fikra Agent Event Protocol. Every backend's
+;; output normalizes into ONE event vocabulary; threads are event-sourced
+;; JSONL logs; the transcript is a pure replay of events.
+;;
+;; Event = alist of ("field" value) pairs with a mandatory "kind". Kinds:
+;;   turn-start turn-end session text-delta thought tool-call tool-result
+;;   permission-request permission-response file-change
+;;   checkpoint-start checkpoint-ready checkpoint-error checkpoint-reverted
+;;
+;; Emit contract (synchronous, in order): append to the JSONL log → render
+;; incrementally (buffer-append into the current buffer when it is *Fikra*;
+;; buffer mutation bumps the daemon revision for the TUI poll) → record
+;; in-memory. Batch emit = ONE append + ONE render pass (the per-chunk
+;; coalescing adapters build on — no timers anywhere).
+;;
+;; Replay is crash-tolerant: a trailing partial JSONL line is dropped.
+
+(defvar fikra-event-log nil
+  "Active JSONL log path (set per-thread by fikra/thread in #213).")
+
+(defvar fikra-event-memory (list)
+  "In-memory copy of emitted events (test/inspection surface).")
+
+(defvar fikra-text-open nil
+  "Whether a text-delta run is open (adjacent deltas join into one line).")
+
+(defun fikra-event-log-set (path)
+  "Point the FAEP log at PATH and reset in-memory state."
+  (setq fikra-event-log path)
+  (setq fikra-event-memory (list))
+  (setq fikra-text-open nil)
+  path)
+
+(defun fikra-event-log-path ()
+  (if fikra-event-log fikra-event-log nil))
+
+(defun fikra-event-reset ()
+  "Clear in-memory state (tests). Does not touch the log file."
+  (setq fikra-event-memory (list))
+  (setq fikra-text-open nil)
+  t)
+
+;; ── field accessors (alist of ("k" v)) ──────────────────────────────
+(defun fikra-event-get (event key)
+  "FIELD accessor for alist events — T-Lisp has no assoc builtin."
+  (let ((found nil))
+    (dolist (entry event)
+      (if (and (not found)
+               (listp entry)
+               (= (length entry) 2)
+               (string= (car entry) key))
+        (setq found (car (cdr entry)))))
+    found))
+
+(defun fikra-event-get-str (event key)
+  (let ((v (fikra-event-get event key)))
+    (if v v "")))
+
+;; ── render: one event → display text ("" = nothing) ─────────────────
+;; RFC §D2 table. Adjacent text-deltas join: the first opens a "You/AI: "
+;; run, followers append without re-rendering the prefix; any other event
+;; closes the run.
+(defun fikra-event-render-line (event)
+  (let ((kind (fikra-event-get-str event "kind")))
+    (cond
+      ((string= kind "turn-start")
+        (concat "\n── turn " (fikra-event-get-str event "turn")
+                " · " (fikra-event-get-str event "backend") " ──\n"))
+      ((string= kind "session") "")
+      ((string= kind "text-delta")
+        (fikra-event-get-str event "text"))
+      ((string= kind "thought")
+        (concat "· " (fikra-event-get-str event "text") "\n"))
+      ((string= kind "tool-call")
+        (concat "⚙ " (fikra-event-get-str event "tool")
+                "  " (fikra-event-get-str event "summary") "\n"))
+      ((string= kind "tool-result")
+        (concat "  → " (if (fikra-event-get event "ok") "ok" "FAIL")
+                " " (fikra-event-get-str event "summary") "\n"))
+      ((string= kind "permission-request")
+        (concat "? " (fikra-event-get-str event "action")
+                "  [y] Allow [n] Reject [a] Always\n"))
+      ((string= kind "permission-response")
+        (concat "  = " (fikra-event-get-str event "decision") "\n"))
+      ((string= kind "file-change")
+        (concat "± " (fikra-event-get-str event "path")
+                " +" (fikra-event-get-str event "adds")
+                " -" (fikra-event-get-str event "dels") "\n"))
+      ((string= kind "turn-end")
+        (concat "── " (fikra-event-get-str event "status") " ──\n"))
+      ((string= kind "checkpoint-start") "")
+      ((string= kind "checkpoint-ready")
+        (concat "  ⌘ checkpoint " (fikra-event-get-str event "ref") "\n"))
+      ((string= kind "checkpoint-error")
+        (concat "  ⌘ checkpoint-error: " (fikra-event-get-str event "reason") "\n"))
+      ((string= kind "checkpoint-reverted")
+        (concat "\n── reverted to turn "
+                (fikra-event-get-str event "target")
+                " (discarded through " (fikra-event-get-str event "revert-point") ") ──\n"))
+      (t ""))))
+
+;; ── emit ────────────────────────────────────────────────────────────
+(defun fikra-event-emit (event)
+  "Emit ONE event: append to the JSONL log, render incrementally, record.
+The current buffer receives the rendered text via buffer-append when it is
+*Fikra* (rendering elsewhere would corrupt user buffers); buffer mutation
+bumps the revision the TUI poll consumes."
+  (fikra-event-emit-batch (list event)))
+
+(defun fikra-event-emit-batch (events)
+  "Emit a BATCH with ONE log append + ONE render pass — the per-chunk
+coalescing primitive (#208's serialized filters hand each chunk's events
+here as one batch). Non-delta events append immediately; adjacent
+text-deltas inside the batch join into the same line."
+  (if (null events)
+    nil
+    (progn
+      ;; 1. Append: one JSONL line per event, single append-file call.
+      (if fikra-event-log
+        (append-file fikra-event-log
+          (apply 'concat
+            (mapcar (lambda (e) (concat (json-encode e) "\n")) events))))
+      ;; 2. Render: a tombstone INVALIDATES already-rendered turns — append
+      ;; would leave stale content on screen, so rebuild *Fikra* from
+      ;; replay instead. Otherwise render incrementally. Read-only state is
+      ;; saved/restored around the mutation (a user who made the buffer
+      ;; writable keeps it writable).
+      (if (fikra-event-batch-has-tombstone-p events)
+        (if (string= (buffer-current) "*Fikra*")
+          (fikra-event-rebuild-fikra-buffer))
+        (let ((text (fikra-event-render-batch events)))
+          (if (and (> (length text) 0)
+                   (string= (buffer-current) "*Fikra*"))
+            (let ((was-ro (buffer-read-only-p)))
+              (buffer-set-read-only nil)
+              (buffer-append text)
+              (buffer-set-read-only was-ro)))))
+      ;; 3. Record in memory.
+      (dolist (e events)
+        (setq fikra-event-memory (cons e fikra-event-memory)))
+      t)))
+
+(defun fikra-event-batch-has-tombstone-p (events)
+  (let ((found nil))
+    (dolist (e events)
+      (if (string= (fikra-event-get-str e "kind") "checkpoint-reverted")
+        (setq found t)))
+    found))
+
+;; Rebuild the *Fikra* buffer from the log (must be current when called).
+(defun fikra-event-rebuild-fikra-buffer ()
+  (let ((was-ro (buffer-read-only-p))
+        (text (fikra-event-replay)))
+    (buffer-set-read-only nil)
+    (let ((count (buffer-line-count)))
+      (if (> count 0)
+        (buffer-delete-range 0 0 (- count 1) 0)))
+    (if (> (length text) 0)
+      (buffer-append text))
+    (buffer-set-read-only was-ro)
+    t))
+
+;; Shared render fold: events -> text with the text-run state machine
+;; (adjacent text-deltas join under one "AI: " prefix; any other event
+;; closes the run). OPEN-FLAG is threaded explicitly so replay can run the
+;; fold with its own state without touching emit's.
+(defun fikra-event-render-fold (events out open)
+  (if (null events)
+    out
+    (let ((e (car events))
+          (kind (fikra-event-get-str (car events) "kind")))
+      (if (string= kind "text-delta")
+        (fikra-event-render-fold (cdr events)
+          (concat out (if open "" "AI: ") (fikra-event-get-str (car events) "text"))
+          t)
+        (fikra-event-render-fold (cdr events)
+          (concat out (if open "\n" "") (fikra-event-render-line (car events)))
+          nil)))))
+
+;; Batch renderer for emit (threads the global run state).
+(defun fikra-event-render-batch (events)
+  (let ((text (fikra-event-render-fold events "" fikra-text-open)))
+    ;; Keep the global run-state in step with the batch's LAST event.
+    (if (> (length events) 0)
+      (setq fikra-text-open
+        (string= (fikra-event-get-str (last events) "kind") "text-delta")))
+    text))
+
+;; Read the log, dropping a trailing partial line (crash tolerance: the
+;; last write may have been interrupted mid-line).
+(defun fikra-event-read-log-lines ()
+  (let ((raw (if (file-exists-p fikra-event-log)
+               (read-file-content fikra-event-log)
+               "")))
+    (if (or (null raw) (string= raw ""))
+      (list)
+      (let ((lines (string-split raw "\n")))
+        ;; A trailing "" from the final newline is not a partial line; a
+        ;; non-empty final element IS partial (no newline) — drop it.
+        (if (and (> (length lines) 0) (string= (last lines) ""))
+          (setq lines (reverse (cdr (reverse lines)))))
+        (if (> (length lines) 0)
+          (let ((lastln (last lines)))
+            (if (not (fikra-event-line-complete-p lastln))
+              (setq lines (reverse (cdr (reverse lines)))))))
+        lines))))
+
+;; A complete line parses as JSON (cheap validity probe).
+(defun fikra-event-line-complete-p (line)
+  (if (or (null line) (string= line ""))
+    nil
+    (condition-case nil
+      (let ((parsed (json-read-from-string line)))
+        (not (null parsed)))
+      (error nil))))
+
+;; Replay: log -> full transcript. Crash-tolerant (partial trailing line
+;; dropped). Tombstone-aware: checkpoint-reverted {target, revert-point}
+;; invalidates the turn range (target, revert-point]; those events were
+;; emitted BEFORE the tombstone, so replay PRE-SCANS for tombstones and
+;; renders skipping invalidated turns. The tombstone renders ONE collapsed
+;; marker; rendering CONTINUES for post-revert turns (numbers past
+;; revert-point).
+(defun fikra-event-replay ()
+  (if (not fikra-event-log)
+    ""
+    (let ((events (fikra-event-parse-lines (fikra-event-read-log-lines))))
+      (fikra-event-render-skip events (fikra-event-tombstone-ranges events) 0 "" nil))))
+
+;; JSONL lines -> parsed events (unparseable lines skipped).
+(defun fikra-event-parse-lines (lines)
+  (let ((out (list)))
+    (dolist (line lines)
+      (let ((e (condition-case nil (json-read-from-string line) (error nil))))
+        (if (not (null e))
+          (setq out (cons e out)))))
+    (reverse out)))
+
+;; Tombstones -> list of (from . to) turn ranges to skip:
+;; from = target+1, to = revert-point (the range (target, point]).
+(defun fikra-event-tombstone-ranges (events)
+  (let ((out (list)))
+    (dolist (e events)
+      (if (string= (fikra-event-get-str e "kind") "checkpoint-reverted")
+        (setq out (cons (list
+                          (+ 1 (string-to-number (fikra-event-get-str e "target")))
+                          (string-to-number (fikra-event-get-str e "revert-point")))
+                        out))))
+    out))
+
+(defun fikra-event-in-range-p (turn ranges)
+  (if (null ranges)
+    nil
+    (if (and (>= turn (car (car ranges))) (<= turn (car (cdr (car ranges)))))
+      t
+      (fikra-event-in-range-p turn (cdr ranges)))))
+
+;; Render with turn tracking: events inside an invalidated range are
+;; swallowed; the tombstone renders its marker. Turn 0 = pre-first-turn
+;; events (session etc.) always render.
+(defun fikra-event-render-skip (events ranges turn out open)
+  (if (null events)
+    out
+    (let ((kind (fikra-event-get-str (car events) "kind")))
+      (cond
+        ((string= kind "turn-start")
+          ;; Header renders only for turns OUTSIDE invalidated ranges.
+          (let ((tn (string-to-number (fikra-event-get-str (car events) "turn"))))
+            (fikra-event-render-skip (cdr events) ranges tn
+              (if (fikra-event-in-range-p tn ranges)
+                out
+                (concat out (if open "\n" "") (fikra-event-render-line (car events))))
+              nil)))
+        ((string= kind "checkpoint-reverted")
+          (fikra-event-render-skip (cdr events) ranges turn
+            (concat out (if open "\n" "") (fikra-event-render-line (car events))) nil))
+        ((or (= turn 0) (not (fikra-event-in-range-p turn ranges)))
+          (if (string= kind "text-delta")
+            (fikra-event-render-skip (cdr events) ranges turn
+              (concat out (if open "" "AI: ") (fikra-event-get-str (car events) "text")) t)
+            (fikra-event-render-skip (cdr events) ranges turn
+              (concat out (if open "\n" "") (fikra-event-render-line (car events))) nil)))
+        (t
+          (fikra-event-render-skip (cdr events) ranges turn out open))))))
+(defun fikra-event-events ()
+  "In-memory events, oldest-first."
+  (reverse fikra-event-memory))
+
+(provide "fikra-event")
+)
