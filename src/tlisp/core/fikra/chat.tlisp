@@ -1,7 +1,7 @@
 (defmodule fikra/chat
   (export fikra-chat-open fikra-chat-close fikra-token-insert fikra-follow-link
           fikra-turn-send fikra-turn-complete fikra-turn-interrupt fikra-turn-status
-          fikra-quit)
+          fikra-quit fikra-ensure-buffer-keymap)
 
 ;; Chat buffer management — *Fikra* buffer, streaming, file links
 
@@ -27,6 +27,8 @@
     (progn
       (buffer-create fikra-chat-buffer-name)
       (buffer-set-read-only t)))
+  ;; Buffer-local keymap whether freshly created or pre-existing (#206)
+  (fikra-ensure-buffer-keymap)
   ;; Switch to chat buffer
   (buffer-switch fikra-chat-buffer-name)
   ;; Load claude adapter if not loaded
@@ -113,10 +115,19 @@
   (editor-set-status (concat "fikra:" fikra-current-backend-name "●"))
   (message "Fikra: turn interrupted"))
 
-;; Chat buffer key bindings (only active when in *Fikra* buffer)
-;; These are registered in normal mode since fikra captures via 'i'
-(key-bind "RET" "(fikra-follow-link)" "normal")
-(key-bind "C-g" "(fikra-turn-interrupt)" "normal")
+;; Chat buffer key bindings — BUFFER-LOCAL to *Fikra* (#206). The old global
+;; normal-mode RET/C-g bindings leaked into every buffer.
+(defun fikra-ensure-buffer-keymap ()
+  "Attach the *Fikra* buffer-local keymap (idempotent)."
+  (let ((kmap (editor/keymaps/buffer-keymap fikra-chat-buffer-name)))
+    (if (not kmap)
+      (progn
+        (setq kmap (editor/keymaps/keymap-init "fikra-chat"))
+        (editor/keymaps/keymap-set-key kmap "RET" "(fikra-follow-link)")
+        (editor/keymaps/keymap-set-key kmap "C-g" "(fikra-turn-interrupt)")
+        (editor/keymaps/buffer-set-keymap fikra-chat-buffer-name kmap)))
+    )
+  t)
 
 (provide "fikra-chat")
 )

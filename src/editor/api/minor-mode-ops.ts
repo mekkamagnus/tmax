@@ -235,6 +235,23 @@ export function createMinorModeOps(
     return Either.right(createNil());
   });
 
+  // #206 (RFC-027 §UI): getter for the keymap lookup chain — returns the
+  // registered keymap NAME ("" when the mode has none). The T-Lisp chain
+  // builder resolves the name via keymaps.tlisp's named-keymap registry.
+  api.set("minor-mode-keymap", (args: TLispValue[]): Either<AppError, TLispValue> => {
+    const argsValidation = validateArgsCount(args, 1, "minor-mode-keymap");
+    if (Either.isLeft(argsValidation)) {
+      return Either.left(argsValidation.left);
+    }
+    const nameArg = args[0]!
+    const nameValidation = validateArgType(nameArg, "string", 0, "minor-mode-keymap");
+    if (Either.isLeft(nameValidation)) {
+      return Either.left(nameValidation.left);
+    }
+    const config = getMinorModeRegistry().get(nameArg.value as string);
+    return Either.right(createString(config?.keymap ?? ""));
+  });
+
   // (minor-mode-toggle NAME)
   api.set("minor-mode-toggle", (args: TLispValue[]): Either<AppError, TLispValue> => {
     const argsValidation = validateArgsCount(args, 1, "minor-mode-toggle");

@@ -2,12 +2,23 @@
   (export normal-keymap insert-keymap visual-keymap command-keymap
           current-keymap keymap-ref keymap-set-key keymap-set-key-nested
           keymap-walk-prefix keymap-prefix-p
-          keymap-all-bindings keymap-prefix-bindings keymap-bindings-list)
+          keymap-all-bindings keymap-prefix-bindings keymap-bindings-list
+          buffer-set-keymap buffer-keymap keymap-chain
+          keymap-init keymap-register keymap-named keymap-mutable-set!)
 
 (defvar normal-keymap nil)
 (defvar insert-keymap nil)
 (defvar visual-keymap nil)
 (defvar command-keymap nil)
+
+;; #206 (RFC-027 §UI): per-buffer keymaps. Lookup chain is NORMATIVE:
+;;   buffer-local → active minor-mode keymaps (later-activated innermost)
+;;   → the editor-mode keymap. Inner levels shadow outer for BINDINGS; a
+;;   partial sequence that is a prefix at ANY level keeps waiting for the
+;;   next key. LIMITATION: the handler checks prefix-p before ref, so a
+;;   buffer-local FULL binding of a key that is a prefix at an outer level
+;;   (bare g/SPC) cannot fire — the outer prefix wins.
+(defvar buffer-keymaps (hashmap))
 
 (defun keymap-init (mode-name)
   "Create a fresh keymap hashmap."
@@ -16,8 +27,16 @@
            "bindings" (hashmap)
            "prefix-table" (hashmap)))
 
-(defun current-keymap ()
-  "Return the active keymap for the current editor mode."
+(defun buffer-set-keymap (buffer-name kmap)
+  "Attach KMAP as BUFFER-NAME's buffer-local keymap (shadow tier)."
+  (keymap-mutable-set! buffer-keymaps buffer-name kmap))
+
+(defun buffer-keymap (buffer-name)
+  "Return BUFFER-NAME's buffer-local keymap, or nil."
+  (hashmap-get buffer-keymaps buffer-name))
+
+(defun mode-keymap ()
+  "The editor-mode base keymap (chain tail)."
   (let ((m (editor-mode)))
     (cond
       ((string= m "normal") normal-keymap)
@@ -27,14 +46,80 @@
       ((string= m "mx") command-keymap)
       (t nil))))
 
+;; Active minor-mode keymaps, innermost-first: minor-mode-list-active is
+;; earliest-first, and cons prepends — so the accumulated list already has
+;; LATER-activated innermost (the normative precedence). Modes without a
+;; registered keymap name or with unresolvable names are skipped.
+(defun minor-mode-keymap-chain ()
+  (let ((result (list)))
+    (dolist (name (minor-mode-list-active))
+      (let ((kmap-name (minor-mode-keymap name)))
+        (if (and kmap-name (not (string= kmap-name "")))
+          (let ((kmap (keymap-named kmap-name)))
+            (if kmap (setq result (cons kmap result)))))))
+    result))
+
+;; Named-keymap registry: minor-mode-set-keymap stores a keymap NAME string;
+;; names resolve here. Register with (keymap-register "name" kmap).
+(defvar named-keymaps (hashmap))
+
+(defun keymap-register (name kmap)
+  "Register KMAP under NAME for name-based references (minor-mode keymaps)."
+  (keymap-mutable-set! named-keymaps name kmap))
+
+(defun keymap-named (name)
+  "Return the keymap registered under NAME, or nil."
+  (hashmap-get named-keymaps name))
+
+(defun keymap-chain ()
+  "Full lookup chain for the current buffer, innermost-first:
+buffer-local, then active minor-mode keymaps (later-activated first), then
+the editor-mode keymap (outermost)."
+  (let ((local (buffer-keymap (buffer-name)))
+        (minors (minor-mode-keymap-chain))
+        (tail (mode-keymap)))
+    (append (if local (list local) '())
+            (if minors minors '())
+            (if tail (list tail) '()))))
+
+(defun keymap-link-chain (kmaps)
+  "Link KMAPS (innermost-first) via the parent field; returns the INNERMOST.
+The outermost map's parent is always reset to nil — a previously-linked map
+must not carry a stale parent."
+  (if (null kmaps)
+    nil
+    (progn
+      (keymap-link-rest kmaps)
+      (car kmaps))))
+
+(defun keymap-link-rest (kmaps)
+  "Link each map to the next; the last (outermost) gets parent nil."
+  (if (null (cdr kmaps))
+    (keymap-mutable-set! (car kmaps) "parent" nil)
+    (progn
+      (keymap-mutable-set! (car kmaps) "parent" (car (cdr kmaps)))
+      (keymap-link-rest (cdr kmaps)))))
+
+(defun current-keymap ()
+  "Return the active keymap chain for the current buffer/mode, innermost map
+first with outer maps reachable via the parent field."
+  (keymap-link-chain (keymap-chain)))
+
 (defun keymap-ref (kmap key)
-  "Look up KEY in KMAP's bindings. Returns the command string or nil."
+  "Look up KEY in KMAP's bindings, walking the parent chain (#206):
+innermost level wins, outer levels are fallback."
   (if (or (null kmap) (not (hashmapp kmap)))
     nil
-    (let ((bindings (hashmap-get kmap "bindings")))
-      (if (hashmapp bindings)
-        (hashmap-get bindings key)
-        nil))))
+    (let ((here (let ((bindings (hashmap-get kmap "bindings")))
+                  (if (hashmapp bindings)
+                    (hashmap-get bindings key)
+                    nil))))
+      (if here
+        here
+        (let ((parent (hashmap-get kmap "parent")))
+          (if (hashmapp parent)
+            (keymap-ref parent key)
+            nil))))))
 
 (defun keymap-set-key (kmap key command)
   "Bind KEY to COMMAND in KMAP. Multi-key sequences (e.g. \"SPC x f\")
@@ -80,43 +165,93 @@ create nested prefix entries in prefix-table."
           nil)))))
 
 (defun keymap-prefix-p (kmap key)
-  "Return t if KEY is a prefix in KMAP (has sub-bindings in prefix-table)."
+  "Return t if KEY is a prefix in KMAP's prefix-table OR any ancestor's
+(#206): a partial sequence that is a prefix at ANY level keeps waiting for
+the next key — a buffer-local binding must not shadow a mode-level prefix
+mid-sequence."
   (if (or (null kmap) (not (hashmapp kmap)))
     nil
-    (let ((pt (hashmap-get kmap "prefix-table")))
-      (if (hashmapp pt)
-        (hashmapp (keymap-walk-prefix pt (string-split key " ")))
-        nil))))
+    (let ((here (let ((pt (hashmap-get kmap "prefix-table")))
+                  (if (hashmapp pt)
+                    (hashmapp (keymap-walk-prefix pt (string-split key " ")))
+                    nil))))
+      (if here
+        t
+        (let ((parent (hashmap-get kmap "parent")))
+          (if (hashmapp parent)
+            (keymap-prefix-p parent key)
+            nil))))))
 
 (defun keymap-bindings-list (kmap)
-  "Return all bindings in KMAP as ((key command) ...)."
+  "Return all bindings in KMAP as ((key command) ...). Chain-aware (#206):
+ancestor bindings are included; on key collision the INNERMOST level wins."
   (if (or (null kmap) (not (hashmapp kmap)))
     nil
-    (let ((bindings (hashmap-get kmap "bindings")))
-      (if (hashmapp bindings)
-        (let ((keys (hashmap-keys bindings)))
-          (mapcar (lambda (k)
-                    (list k (hashmap-get bindings k)))
-                  keys))
-        nil))))
+    (keymap-merge-bindings
+      (cons (keymap-bindings-local kmap)
+            (keymap-ancestor-bindings-lists kmap)))))
+
+;; Level-local bindings (no chain walk) — the pre-#206 semantics.
+(defun keymap-bindings-local (kmap)
+  (let ((bindings (hashmap-get kmap "bindings")))
+    (if (hashmapp bindings)
+      (let ((keys (hashmap-keys bindings)))
+        (mapcar (lambda (k)
+                  (list k (hashmap-get bindings k)))
+                keys))
+      nil)))
+
+;; Ancestor levels' binding lists, innermost-first.
+(defun keymap-ancestor-bindings-lists (kmap)
+  (let ((parent (hashmap-get kmap "parent")))
+    (if (hashmapp parent)
+      (cons (keymap-bindings-local parent)
+            (keymap-ancestor-bindings-lists parent))
+      (list))))
+
+;; Merge binding lists given innermost-first; first occurrence of a key wins.
+(defun keymap-merge-bindings (lists)
+  (let ((seen (list))
+        (out (list)))
+    (dolist (lst lists)
+      (dolist (entry lst)
+        (let ((k (car entry)))
+          (if (not (member k seen))
+            (progn
+              (setq seen (cons k seen))
+              (setq out (cons entry out)))))))
+    (reverse out)))
 
 (defun keymap-prefix-bindings (kmap prefix)
-  "Return sub-bindings for PREFIX from KMAP's prefix-table as ((full-key command) ...).
-Intermediate prefixes show as \"..prefix..\"."
+  "Return sub-bindings for PREFIX as ((full-key command) ...), merged across
+the parent chain (#206 — which-key shows candidates from every level,
+deduped, innermost winning). Intermediate prefixes show as \"..prefix..\"."
   (if (or (null kmap) (not (hashmapp kmap)))
     nil
-    (let ((pt (hashmap-get kmap "prefix-table")))
-      (if (hashmapp pt)
-        (let ((sub (keymap-walk-prefix pt (string-split prefix " "))))
-          (if (hashmapp sub)
-            (let ((keys (hashmap-keys sub)))
-              (mapcar (lambda (k)
-                        (let ((v (hashmap-get sub k)))
-                          (list (concat prefix " " k)
-                                (if (hashmapp v) "..prefix.." v))))
-                      keys))
-            nil))
-        nil))))
+    (keymap-merge-bindings
+      (cons (keymap-prefix-bindings-local kmap prefix)
+            (keymap-ancestor-prefix-lists kmap prefix)))))
+
+(defun keymap-prefix-bindings-local (kmap prefix)
+  (let ((pt (hashmap-get kmap "prefix-table")))
+    (if (hashmapp pt)
+      (let ((sub (keymap-walk-prefix pt (string-split prefix " "))))
+        (if (hashmapp sub)
+          (let ((keys (hashmap-keys sub)))
+            (mapcar (lambda (k)
+                      (let ((v (hashmap-get sub k)))
+                        (list (concat prefix " " k)
+                              (if (hashmapp v) "..prefix.." v))))
+                    keys))
+          nil))
+      nil)))
+
+(defun keymap-ancestor-prefix-lists (kmap prefix)
+  (let ((parent (hashmap-get kmap "parent")))
+    (if (hashmapp parent)
+      (cons (keymap-prefix-bindings-local parent prefix)
+            (keymap-ancestor-prefix-lists parent prefix))
+      (list))))
 
 (defun keymap-flatten-prefix (sub prefix)
   "Recursively flatten nested prefix sub-keymap SUB with PREFIX into ((key command) ...)."
@@ -133,22 +268,36 @@ Intermediate prefixes show as \"..prefix..\"."
                 keys)))))
 
 (defun keymap-all-bindings (kmap)
-  "Return all bindings in KMAP, including from prefix-tables, as ((key command) ...)."
+  "Return all bindings in KMAP, including from prefix-tables, as
+((key command) ...). Chain-aware (#206): ancestors included, innermost wins
+on collision."
   (if (or (null kmap) (not (hashmapp kmap)))
     nil
-    (let ((direct (keymap-bindings-list kmap))
-          (pt (hashmap-get kmap "prefix-table")))
-      (if (hashmapp pt)
-        (let ((prefixes (hashmap-keys pt)))
-          (append direct
-                  (apply 'append
-                    (mapcar (lambda (p)
-                              (let ((sub (hashmap-get pt p)))
-                                (if (hashmapp sub)
-                                  (keymap-flatten-prefix sub p)
-                                  nil)))
-                            prefixes))))
-        direct))))
+    (keymap-merge-bindings
+      (cons (keymap-all-bindings-local kmap)
+            (keymap-ancestor-all-lists kmap)))))
+
+(defun keymap-all-bindings-local (kmap)
+  (let ((direct (keymap-bindings-local kmap))
+        (pt (hashmap-get kmap "prefix-table")))
+    (if (hashmapp pt)
+      (let ((prefixes (hashmap-keys pt)))
+        (append direct
+                (apply 'append
+                  (mapcar (lambda (p)
+                            (let ((sub (hashmap-get pt p)))
+                              (if (hashmapp sub)
+                                (keymap-flatten-prefix sub p)
+                                nil)))
+                          prefixes))))
+      direct)))
+
+(defun keymap-ancestor-all-lists (kmap)
+  (let ((parent (hashmap-get kmap "parent")))
+    (if (hashmapp parent)
+      (cons (keymap-all-bindings-local parent)
+            (keymap-ancestor-all-lists parent))
+      (list))))
 
 ;; Initialize mode keymaps
 (set! normal-keymap (keymap-init "normal"))
