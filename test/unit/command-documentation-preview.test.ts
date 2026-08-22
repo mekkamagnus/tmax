@@ -128,7 +128,7 @@ describe("Command Documentation Preview (US-1.10.4)", () => {
       const interpreter = (editor as any).getInterpreter();
 
       // Get completion for "test-short"
-      const result = interpreter.execute('(describe-function "test-short-doc")');
+      const result = interpreter.execute('(describe-function-info "test-short-doc")');
 
       expect(result._tag).toBe("Right");
 
@@ -149,7 +149,7 @@ describe("Command Documentation Preview (US-1.10.4)", () => {
       const interpreter = (editor as any).getInterpreter();
 
       // Get info for function without documentation
-      const result = interpreter.execute('(describe-function "test-no-doc")');
+      const result = interpreter.execute('(describe-function-info "test-no-doc")');
 
       expect(result._tag).toBe("Right");
 
@@ -170,7 +170,7 @@ describe("Command Documentation Preview (US-1.10.4)", () => {
       const interpreter = (editor as any).getInterpreter();
 
       // Get full documentation for long-doc function
-      const result = interpreter.execute('(describe-function "test-long-doc")');
+      const result = interpreter.execute('(describe-function-info "test-long-doc")');
 
       expect(result._tag).toBe("Right");
 
@@ -219,7 +219,7 @@ describe("Command Documentation Preview (US-1.10.4)", () => {
 
         // Get full documentation
         const interpreter = (editor as any).getInterpreter();
-        const result = interpreter.execute(`(describe-function "${command}")`);
+        const result = interpreter.execute(`(describe-function-info "${command}")`);
 
         expect(result._tag).toBe("Right");
 
