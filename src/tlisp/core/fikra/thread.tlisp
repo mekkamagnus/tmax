@@ -1,5 +1,5 @@
 (defmodule fikra/thread
-  (export fikra-thread-working-dir fikra-thread-in-worktree-p fikra-thread-focus fikra-thread-init fikra-thread-open fikra-thread-reopen
+  (export fikra-thread-buffer-name fikra-thread-working-dir fikra-thread-in-worktree-p fikra-thread-focus fikra-thread-new fikra-thread-archive fikra-thread-archived-p fikra-thread-switch fikra-thread-rows fikra-thread-ids fikra-thread-init fikra-thread-open fikra-thread-reopen
           fikra-thread-current fikra-thread-status fikra-thread-status-set
           fikra-thread-turn-begin fikra-thread-turn-end fikra-thread-turn-count
           fikra-thread-root fikra-thread-log-path fikra-thread-session-id
@@ -37,6 +37,15 @@
 ;; #221 (RFC-027 §D7): the thread's WORKING dir — the worktree path when
 ;; in worktree mode (backend cwd + checkpoint captures run there), the
 ;; local project root otherwise. State (.tmax) stays under the LOCAL root.
+;; #222: PER-THREAD chat buffer — main keeps the historical *Fikra* name
+;; (back-compat), other threads get *Fikra-<id>*. Concurrent threads
+;; stream to separate buffers with no shared state.
+(defun fikra-thread-buffer-name ()
+  (let ((id (fikra-thread-current)))
+    ;; nil-safe: events can render before any thread is focused.
+    (if (or (null id) (string= id "main")) "*Fikra*"
+      (concat "*Fikra-" id "*"))))
+
 (defun fikra-thread-working-dir ()
   (let ((wt (fikra-thread-field "worktree")))
     (if wt wt (fikra-thread-field "root"))))
@@ -64,16 +73,13 @@ the thread id. Idempotent."
   "Open the main thread: init-or-load, create *Fikra* when absent, replay
 history into it (daemon-restart reopen path), focus it."
   (fikra-thread-init)
-  (if (not (member "*Fikra*" (buffer-list)))
-    (progn
-      (buffer-create "*Fikra*")
-      (buffer-set-read-only t)))
+  (fikra-thread-ensure-chat-buffer)
   ;; The buffer-local keymap is attached by fikra/chat (chat-open, after
   ;; this returns) — requiring chat here would cycle.
-  (buffer-switch "*Fikra*")
+  (buffer-switch (fikra-thread-buffer-name))
   ;; Reopen: replay the full log into the buffer (empty log → empty buffer).
   (fikra/event/fikra-event-rebuild-fikra-buffer)
-  "*Fikra*")
+  (fikra-thread-buffer-name))
 
 (defun fikra-thread-reopen ()
   "Alias of fikra-thread-open (the daemon-restart entry point)."
@@ -93,6 +99,7 @@ history into it (daemon-restart reopen path), focus it."
                          "runtime-mode" nil
                          "worktree" nil
                          "worktree-base" nil
+                         "archived" nil
                          "trust" (list)
                          "status" "idle"
                          "turn-count" 0)))
@@ -105,7 +112,7 @@ history into it (daemon-restart reopen path), focus it."
             ;; Overlay persisted fields onto fresh defaults (forward-
             ;; compatible: unknown persisted fields ignored, missing fields
             ;; keep defaults).
-            (dolist (key (list "backend" "session-id" "runtime-mode" "trust" "worktree" "worktree-base" "turn-count"))
+            (dolist (key (list "backend" "session-id" "runtime-mode" "trust" "worktree" "worktree-base" "archived" "turn-count"))
               (let ((v (fikra-alist-get key parsed)))
                 (if (not (null v))
                   (editor/keymaps/keymap-mutable-set! state key v))))
@@ -138,6 +145,7 @@ history into it (daemon-restart reopen path), focus it."
                      (list "trust" (fikra-thread-field "trust"))
                      (list "worktree" (fikra-thread-field "worktree"))
                      (list "worktree-base" (fikra-thread-field "worktree-base"))
+                     (list "archived" (fikra-thread-field "archived"))
                      (list "turn-count" (fikra-thread-field "turn-count")))))))
 
 (defun fikra-thread-current ()
@@ -152,6 +160,146 @@ history into it (daemon-restart reopen path), focus it."
   (setq fikra-current-thread-id id)
   (fikra-thread-state)
   id)
+
+;; ── #222: creation / switching / archive / listing ─────────────────
+(defun fikra-thread-ensure-chat-buffer ()
+  "Create the current thread's chat buffer (read-only) when absent."
+  (let ((name (fikra-thread-buffer-name)))
+    (if (not (member name (buffer-list)))
+      (progn (buffer-create name) (buffer-set-read-only t)))))
+
+(defun fikra-thread-ids ()
+  "All thread ids known for the current project root (disk listing —
+a restarted editor sees old threads; the current session's threads are
+on disk from their init)."
+  (if (not fikra-current-thread-id) (fikra-thread-init))
+  (fikra-thread-ids-scan (fikra-thread-field "root") (list)))
+
+(defun fikra-thread-ids-scan (root acc)
+  ;; ls the threads dir; registry ids not on disk (created this session,
+  ;; dir exists anyway after init) are covered by the dir listing.
+  (let ((out (string-trim (shell-command
+            (concat "ls -1 " (fikra-shq2 (concat root "/.tmax/fikra/threads/"))
+                    " 2>/dev/null || true")))))
+    (if (string= out "")
+      acc
+      (fikra-thread-ids-collect (string-split out "\n") acc))))
+
+(defun fikra-thread-ids-collect (lines acc)
+  (if (null lines)
+    acc
+    (fikra-thread-ids-collect (cdr lines)
+      (if (> (length (car lines)) 0) (cons (car lines) acc) acc))))
+
+(defun fikra-thread-new ()
+  "Create a NEW thread with a generated short id (fix-<n> style — the
+first free number), inheriting the current thread's runtime mode. Focuses
+it and opens its chat buffer. Returns the id."
+  ;; let*: the id binding READS root — parallel let would see an unbound
+  ;; symbol (probe catch).
+  (let* ((parent-mode (if fikra-current-thread-id (fikra-thread-field "runtime-mode") nil))
+         (root (progn (if (not fikra-current-thread-id) (fikra-thread-init))
+                      (fikra-thread-field "root")))
+         (id (fikra-thread-free-id root 1)))
+    (setq fikra-current-thread-id id)
+    (let ((state (fikra-thread-state)))
+      (editor/keymaps/keymap-mutable-set! state "id" id)
+      (editor/keymaps/keymap-mutable-set! state "root" root)
+      ;; Child threads inherit the parent's runtime mode (#219).
+      (if parent-mode
+        (editor/keymaps/keymap-mutable-set! state "runtime-mode" parent-mode)))
+    (fikra-thread-ensure-chat-buffer)
+    (buffer-switch (fikra-thread-buffer-name))
+    (fikra-thread-save)
+    id))
+
+(defun fikra-thread-free-id (root n)
+  (let ((candidate (concat "fix-" (number-to-string n))))
+    (if (or (file-exists-p (concat root "/.tmax/fikra/threads/" candidate "/state.json"))
+            (file-exists-p (concat root "/.tmax/fikra/threads/" candidate "/events.jsonl")))
+      (fikra-thread-free-id root (+ n 1))
+      candidate)))
+
+(defun fikra-thread-switch (id)
+  "Switch focus to thread ID: state, FAEP log pointer, chat buffer, and
+modeline all follow; concurrent threads keep independent state."
+  (setq fikra-current-thread-id id)
+  (let* ((state (fikra-thread-state))
+         (dir (concat (fikra-thread-field "root") "/.tmax/fikra/threads/" id)))
+    (fikra/event/fikra-event-log-set (concat dir "/events.jsonl"))
+    (fikra-thread-ensure-chat-buffer)
+    (buffer-switch (fikra-thread-buffer-name))
+    (fikra/event/fikra-event-rebuild-fikra-buffer)
+    (fikra-refresh-switch-lighter)
+    id))
+
+(defun fikra-refresh-switch-lighter ()
+  (condition-case nil
+    (funcall "fikra/chat/fikra-refresh-lighter")
+    (error () nil)))
+
+(defun fikra-thread-archive ()
+  "Soft-delete the current thread: hidden from lists, logs + refs
+preserved (the retention policy owns real deletion). Cannot archive main."
+  (let ((id (fikra-thread-current)))
+    (if (string= id "main")
+      (progn (editor-set-status "Fikra: main thread cannot be archived") nil)
+      (progn
+        (editor/keymaps/keymap-mutable-set! (fikra-thread-state) "archived" t)
+        (fikra-thread-save)
+        (editor-set-status (concat "Fikra: thread " id " archived"))
+        t))))
+
+(defun fikra-thread-archived-p (id)
+  ;; Read from disk when the thread is not loaded (a restarted editor).
+  (if (and (string= id (fikra-thread-current))
+           (hashmap-get (fikra-thread-state) "archived"))
+    t
+    (string= (string-trim (shell-command
+      (concat "test -f " (fikra-shq2 (fikra-thread-archived-path id))
+              " && jq -r '.archived // empty' "
+              (fikra-shq2 (fikra-thread-archived-path id)) " 2>/dev/null || echo no")))
+      "true")))
+
+(defun fikra-thread-archived-path (id)
+  (concat (if fikra-current-thread-id (fikra-thread-field "root") (process-cwd))
+          "/.tmax/fikra/threads/" id "/state.json"))
+
+(defun fikra-thread-rows ()
+  "List rows (hashmap: id/backend/mode/location/status/turns) for the
+current project's NON-archived threads."
+  (fikra-thread-rows-collect (fikra-thread-ids) (list)))
+
+(defun fikra-thread-rows-collect (ids acc)
+  (if (null ids)
+    (reverse acc)
+    (fikra-thread-rows-collect (cdr ids)
+      (if (fikra-thread-archived-p (car ids))
+        acc
+        (cons (fikra-thread-row-for (car ids)) acc)))))
+
+(defun fikra-thread-row-for (id)
+  ;; Load that thread's state from disk (or registry when current).
+  (let* ((current (string= id (fikra-thread-current)))
+         (state (if current (fikra-thread-state) (fikra-thread-load-row id)))
+         (get (lambda (k) (if state (hashmap-get state k) nil))))
+    (hashmap
+      "id" id
+      "backend" (funcall get "backend")
+      "mode" (funcall get "runtime-mode")
+      "location" (if (funcall get "worktree") "worktree" "local")
+      "status" (funcall get "status")
+      "turns" (funcall get "turn-count"))))
+
+(defun fikra-thread-load-row (id)
+  ;; Parse another thread's state.json (registry holds only loaded threads).
+  (let ((path (fikra-thread-archived-path id)))
+    (if (file-exists-p path)
+      (json-read-from-string (read-file-content path))
+      nil)))
+
+(defun fikra-shq2 (s)
+  (concat "'" s "'"))
 
 (defun fikra-thread-state ()
   "The focused thread's state; LAZY-INITIALIZES the main thread when absent

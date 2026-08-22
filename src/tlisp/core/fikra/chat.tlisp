@@ -86,13 +86,13 @@ state char + effective runtime mode with the degradation star (#219)."
 ;; ── buffer-local keymap (#206 chain) ────────────────────────────────
 (defun fikra-ensure-buffer-keymap ()
   "Attach the *Fikra* buffer-local keymap (idempotent)."
-  (let ((kmap (editor/keymaps/buffer-keymap fikra-chat-buffer-name)))
+  (let ((kmap (editor/keymaps/buffer-keymap (fikra/thread/fikra-thread-buffer-name))))
     (if (not kmap)
       (progn
         (setq kmap (editor/keymaps/keymap-init "fikra-chat"))
         (editor/keymaps/keymap-set-key kmap "RET" "(fikra/chat/fikra-follow-link)")
         (editor/keymaps/keymap-set-key kmap "C-g" "(fikra/chat/fikra-turn-interrupt)")
-        (editor/keymaps/buffer-set-keymap fikra-chat-buffer-name kmap))))
+        (editor/keymaps/buffer-set-keymap (fikra/thread/fikra-thread-buffer-name) kmap))))
   t)
 
 ;; RET follows file links — paths in tool-call/file-change lines are

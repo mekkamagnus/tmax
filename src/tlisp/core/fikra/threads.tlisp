@@ -1,0 +1,143 @@
+(defmodule fikra/threads
+  (export fikra-threads-list-open fikra-threads-render
+          fikra-threads-selected-id fikra-threads-RET
+          fikra-threads-archive-selected fikra-threads-new-thread
+          fikra-threads-j fikra-threads-k)
+
+;; #222 (RFC-027 §D7): the *Fikra-Threads* buffer — threads grouped by
+;; project (zcode model), columns name/backend/mode/location(local|
+;; worktree)/status/turns. j/k navigate, RET switches (focus + buffer +
+;; modeline), d archives (soft delete), n creates. Buffer-local keymap.
+
+(require-module fikra/thread)
+
+(defvar fikra-threads-buffer-name "*Fikra-Threads*")
+(defvar fikra-threads-selected 0
+  "Selected row index in the list buffer (0-based).")
+
+(defun fikra-threads-list-open ()
+  "Open (or refresh) the *Fikra-Threads* buffer and focus it."
+  (if (not (member fikra-threads-buffer-name (buffer-list)))
+    (progn
+      (buffer-create fikra-threads-buffer-name)
+      (buffer-set-read-only t)))
+  (buffer-switch fikra-threads-buffer-name)
+  (fikra-threads-ensure-keymap)
+  (fikra-threads-render)
+  fikra-threads-buffer-name)
+
+(defun fikra-threads-render ()
+  "Re-render the list from live thread state (grouped by project —
+the current project; multi-project grouping lands with multi-root
+daemons)."
+  (let ((rows (fikra/thread/fikra-thread-rows))
+        (was-ro (buffer-read-only-p)))
+    (buffer-set-read-only nil)
+    (let ((count (buffer-line-count)))
+      (if (> count 1) (buffer-delete-range 0 0 (- count 1) 0)))
+    ;; buffer-insert is CURSOR-relative — reset before rewriting or later
+    ;; renders stack mid-buffer.
+    (cursor-move 0 0)
+    (buffer-insert (concat "Threads — " (fikra-threads-project-label) "\n"))
+    (buffer-insert "  name        backend   mode                location   status   turns\n")
+    (buffer-insert "  ──────────────────────────────────────────────────────────────\n")
+    (let ((i 0))
+      (dolist (row rows)
+        (buffer-insert
+          (concat (if (= i fikra-threads-selected) "▶ " "  ")
+                  (fikra-threads-pad (hashmap-get row "id") 12)
+                  (fikra-threads-pad (hashmap-get row "backend") 9)
+                  (fikra-threads-pad (hashmap-get row "mode") 20)
+                  (fikra-threads-pad (hashmap-get row "location") 10)
+                  (fikra-threads-pad (hashmap-get row "status") 8)
+                  ;; pad handles nil/non-numbers ("-" column) — a disk row
+                  ;; from an older state.json may lack turns.
+                  (fikra-threads-pad (hashmap-get row "turns") 5) "\n"))
+        (setq i (+ i 1))))
+    (buffer-set-read-only was-ro)
+    (cursor-move 0 0)
+    (cursor-move (+ 3 fikra-threads-selected) 0)))
+
+(defun fikra-threads-project-label ()
+  (let ((root (progn (if (not (fikra/thread/fikra-thread-current))
+                       (fikra/thread/fikra-thread-init))
+                     (fikra/thread/fikra-thread-field "root"))))
+    (if root root "(no project)")))
+
+(defun fikra-threads-pad (s width)
+  (let ((str (if (stringp s) s (if (numberp s) (number-to-string s) "-"))))
+    (if (>= (length str) width)
+      str
+      (concat str (fikra-threads-spaces (- width (length str)))))))
+
+(defun fikra-threads-spaces (n)
+  (if (<= n 0) "" (concat " " (fikra-threads-spaces (- n 1)))))
+
+(defun fikra-threads-count ()
+  (length (fikra/thread/fikra-thread-rows)))
+
+(defun fikra-threads-selected-id ()
+  "The thread id at the selected row (nil when the list is empty)."
+  (fikra-threads-selected-id-at (fikra/thread/fikra-thread-rows) 0))
+
+(defun fikra-threads-selected-id-at (rows i)
+  (if (null rows)
+    nil
+    (if (= i fikra-threads-selected)
+      (hashmap-get (car rows) "id")
+      (fikra-threads-selected-id-at (cdr rows) (+ i 1)))))
+
+;; ── actions (buffer-local keymap targets) ───────────────────────────
+(defun fikra-threads-j () (fikra-threads-move 1))
+(defun fikra-threads-k () (fikra-threads-move -1))
+
+(defun fikra-threads-move (delta)
+  (let ((n (fikra-threads-count)))
+    (if (> n 0)
+      (progn
+        (setq fikra-threads-selected
+              (max 0 (min (- n 1) (+ fikra-threads-selected delta))))
+        (fikra-threads-render)))
+    nil))
+
+(defun fikra-threads-RET ()
+  "Switch to the selected thread (focus + FAEP log + chat buffer +
+modeline)."
+  (let ((id (fikra-threads-selected-id)))
+    (if id
+      (progn (fikra/thread/fikra-thread-switch id) id)
+      (progn (editor-set-status "Fikra: no thread selected") nil))))
+
+(defun fikra-threads-archive-selected ()
+  "Archive (soft delete) the selected thread; the list refreshes."
+  (let ((id (fikra-threads-selected-id)))
+    (if id
+      (progn
+        (fikra/thread/fikra-thread-focus id)
+        (let ((r (fikra/thread/fikra-thread-archive)))
+          ;; Focus back to main for the refreshed listing.
+          (fikra/thread/fikra-thread-focus "main")
+          (setq fikra-threads-selected 0)
+          (fikra-threads-render)
+          r)))))
+
+(defun fikra-threads-new-thread ()
+  "Create a new thread (inherits the current mode) and switch to it."
+  (fikra/thread/fikra-thread-new))
+
+;; ── buffer-local keymap ─────────────────────────────────────────────
+(defun fikra-threads-ensure-keymap ()
+  (if (not (editor/keymaps/buffer-keymap fikra-threads-buffer-name))
+    (let ((kmap (editor/keymaps/keymap-init "fikra-threads")))
+      (editor/keymaps/keymap-set-key kmap "j" "(fikra/threads/fikra-threads-j)")
+      (editor/keymaps/keymap-set-key kmap "k" "(fikra/threads/fikra-threads-k)")
+      (editor/keymaps/keymap-set-key kmap "Down" "(fikra/threads/fikra-threads-j)")
+      (editor/keymaps/keymap-set-key kmap "Up" "(fikra/threads/fikra-threads-k)")
+      (editor/keymaps/keymap-set-key kmap "RET" "(fikra/threads/fikra-threads-RET)")
+      (editor/keymaps/keymap-set-key kmap "d" "(fikra/threads/fikra-threads-archive-selected)")
+      (editor/keymaps/keymap-set-key kmap "n" "(fikra/threads/fikra-threads-new-thread)")
+      (editor/keymaps/buffer-set-keymap fikra-threads-buffer-name kmap)))
+  t)
+
+(provide "fikra-threads")
+)

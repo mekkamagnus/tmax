@@ -56,7 +56,7 @@ SPC a i binding implies it; requiring fikra/mode here would cycle.)"
           (if (> count 1) (buffer-delete-range 0 count)))
         ;; Close capture window, return to chat
         (delete-window)
-        (buffer-switch "*Fikra*")
+        (buffer-switch (fikra/thread/fikra-thread-buffer-name))
         (editor-set-mode "normal")
         ;; Send the message
         (progn (require-module fikra/chat) (fikra/chat/fikra-turn-send text))))))
@@ -70,7 +70,7 @@ SPC a i binding implies it; requiring fikra/mode here would cycle.)"
     (if (> count 1) (buffer-delete-range 0 count)))
   ;; Close window, return to chat
   (delete-window)
-  (buffer-switch "*Fikra*")
+  (buffer-switch (fikra/thread/fikra-thread-buffer-name))
   (editor-set-mode "normal")
   (editor-set-status "Fikra: capture cancelled"))
 

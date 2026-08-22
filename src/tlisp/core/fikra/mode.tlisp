@@ -84,6 +84,10 @@ With 0 or negative number, disable."
 ;; #221: worktree handoff — patch-apply-or-refuse, never a merge. Enters
 ;; worktree mode when local; applies the worktree patch when active.
 (key-bind "SPC a w" "(progn (require-module fikra/worktree) (fikra/worktree/fikra-worktree-toggle))" "normal")
+;; #222: new thread (generated id, inherits runtime mode) + the
+;; *Fikra-Threads* list buffer (j/k/RET/d/n).
+(key-bind "SPC a t" "(progn (require-module fikra/thread) (fikra/thread/fikra-thread-new))" "normal")
+(key-bind "SPC a T" "(progn (require-module fikra/threads) (fikra/threads/fikra-threads-list-open))" "normal")
 
 (provide "fikra-mode")
 )

@@ -160,7 +160,7 @@ writes thread trust (promoted to --allowedTools on later turns)."
 (defun fikra-approvals-ensure-bindings ()
   (require-module fikra/chat)
   (fikra/chat/fikra-ensure-buffer-keymap)
-  (let ((kmap (editor/keymaps/buffer-keymap "*Fikra*")))
+  (let ((kmap (editor/keymaps/buffer-keymap (fikra/thread/fikra-thread-buffer-name))))
     (if kmap
       (progn
         (editor/keymaps/keymap-set-key kmap "y" "(fikra/approvals/fikra-approval-answer-allow)")

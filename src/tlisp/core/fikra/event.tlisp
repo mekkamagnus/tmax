@@ -117,6 +117,9 @@ bumps the revision the TUI poll consumes."
 coalescing primitive (#208's serialized filters hand each chunk's events
 here as one batch). Non-delta events append immediately; adjacent
 text-deltas inside the batch join into the same line."
+  ;; #222: per-thread buffer names live in fikra/thread — LAZY require
+  ;; (thread requires event; the cycle forbids a top-level require).
+  (require-module fikra/thread)
   (if (null events)
     nil
     (progn
@@ -131,11 +134,11 @@ text-deltas inside the batch join into the same line."
       ;; saved/restored around the mutation (a user who made the buffer
       ;; writable keeps it writable).
       (if (fikra-event-batch-has-tombstone-p events)
-        (if (string= (buffer-current) "*Fikra*")
+        (if (string= (buffer-current) (fikra/thread/fikra-thread-buffer-name))
           (fikra-event-rebuild-fikra-buffer))
         (let ((text (fikra-event-render-batch events)))
           (if (and (> (length text) 0)
-                   (string= (buffer-current) "*Fikra*"))
+                   (string= (buffer-current) (fikra/thread/fikra-thread-buffer-name)))
             (let ((was-ro (buffer-read-only-p)))
               (buffer-set-read-only nil)
               (buffer-append text)
@@ -154,6 +157,7 @@ text-deltas inside the batch join into the same line."
 
 ;; Rebuild the *Fikra* buffer from the log (must be current when called).
 (defun fikra-event-rebuild-fikra-buffer ()
+  (require-module fikra/thread)
   (let ((was-ro (buffer-read-only-p))
         (text (fikra-event-replay)))
     (buffer-set-read-only nil)
