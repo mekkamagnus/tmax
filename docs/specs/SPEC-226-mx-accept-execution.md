@@ -39,7 +39,9 @@ its own env) — applying it to forms was the bug.
       the pane dies (with BUG-81's `;`-injection gotcha worked around:
       load-buffer + paste-buffer).
 - [x] `M-x switch… Tab Enter` opens the follow-up "Switch to buffer:"
-      minibuffer — verified live (1/6 candidates).
+      minibuffer — verified live (1/6 candidates) AND pinned in-process
+      (gate round-1 catch: the symptom had no automated regression; the
+      test asserts mode==mx + the live session's prompt).
 - [x] Errors from commands surface in the status line AND *Messages*
       (pinned).
 - [x] Unit regression: accepted-command execution observable (a test
@@ -47,7 +49,10 @@ its own env) — applying it to forms was the bug.
       (pinned).
 - [x] The bare-name module-env retry still resolves module-scoped
       commands (pinned: `minibuffer-accept`); unknown names surface their
-      error (pinned).
+      error (pinned). A retried command's QUIT SIGNAL converts to a throw
+      (gate round-1 catch: the retry branch bypassed the signal→throw
+      conversion — same swallow class, now fixed + the SYNC
+      executeCommand twin restricted to bare names symmetrically).
 - [x] typecheck:src + :test green; mx/minibuffer/keymap/macro suites
       green (mx-accept 4/4; minibuffer+mx caches 22/22; key-handling
       58/58; macros+which-key 115/115 after the one pinned-swallow

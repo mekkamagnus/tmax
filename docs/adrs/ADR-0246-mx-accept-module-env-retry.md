@@ -25,8 +25,11 @@ surfaced).
 2. **Failures surface, never vanish**: the diagnostic-aware status-line +
    *Messages* reporting (extracted as `reportCommandError`) is the shared
    tail for both the direct path and a failed retry.
-3. **Signals are not errors**: EDITOR_QUIT_SIGNAL still converts to a
-   thrown Error before reporting (the quit path must propagate, not log).
+3. **Signals are not errors**: EDITOR_QUIT_SIGNAL converts to a thrown
+   Error before reporting (the quit path must propagate, not log) — in the
+   direct path AND the retry branch, and in BOTH the async and sync
+   executeCommand twins (gate round-1: the retry branch and the sync path
+   each had the same swallow).
 
 ## Consequences
 

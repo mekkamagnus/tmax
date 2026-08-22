@@ -35,6 +35,22 @@ describe("BUG-83: M-x accepted commands execute", () => {
     expect(fixture.executeTlisp("(editor-status)").value).toBe("MX-RAN");
   });
 
+  test("symptom 3: M-x switch-to-buffer Enter opens the FOLLOW-UP minibuffer prompt", async () => {
+    const fixture = await createEditorFixture();
+    const ed = fixture.editor;
+    await ed.handleKey(" ");
+    await ed.handleKey(";");
+    for (const ch of "switch-buffer") await ed.handleKey(ch);
+    await ed.handleKey("Tab"); // complete the candidate (require-match)
+    await ed.handleKey("Enter");
+    // The accepted command RAN — and switch-to-buffer opens its own
+    // completing-read: the editor is back in mx with a live session
+    // (before the fix: mode normal, no follow-up prompt).
+    expect(ed.getMode()).toBe("mx");
+    const session = fixture.executeTlisp('(hashmap-get (minibuffer-state-get) "prompt")');
+    expect(String(session.value)).toContain("Switch to buffer");
+  });
+
   test("command FAILURES surface on the status line + *Messages* (not silent)", async () => {
     const fixture = await createEditorFixture();
     const ed = fixture.editor;

@@ -2318,7 +2318,11 @@ export class Editor {
         this.logMessage(err.message, 'error', this.model.lastCommand);
       }
 
-      const source = command.trim().startsWith("(") ? command : `(${command})`;
+      // BUG-83 (#226), sync twin: the module-env retry is BARE-NAME-ONLY
+      // here too — re-evaluating a failed parenthesized FORM re-runs its
+      // side effects (the async path's swallow, same class).
+      if (command.trim().startsWith("(")) return result;
+      const source = `(${command.trim()})`;
       const head = this.commandHead(source);
       if (!head) return result;
 
@@ -2328,7 +2332,13 @@ export class Editor {
       }
 
       const expr = this.interpreter.parse(source);
-      return this.interpreter.eval(expr, callable.env);
+      const retried = this.interpreter.eval(expr, callable.env);
+      if (Either.isRight(retried)) return retried;
+      if ((retried.left as { message: string }).message === 'EDITOR_QUIT_SIGNAL') {
+        throw new Error('EDITOR_QUIT_SIGNAL');
+      }
+      this.reportCommandError(retried.left);
+      return retried;
     } catch (error) {
       if (error instanceof Error && (error.message === "EDITOR_QUIT_SIGNAL" || error.message.includes("EDITOR_QUIT_SIGNAL"))) {
         throw new Error("EDITOR_QUIT_SIGNAL"); // Re-throw clean quit signal
@@ -2365,8 +2375,14 @@ export class Editor {
           if (Either.isRight(retried)) {
             return retried;
           }
+          // Gate catch: a retried command can signal quit too — the signal
+          // must CONVERT to a throw (the quit path propagates, never logs),
+          // exactly like the direct path below.
+          if ((retried.left as { message: string }).message === 'EDITOR_QUIT_SIGNAL') {
+            throw new Error('EDITOR_QUIT_SIGNAL');
+          }
           // The retry failed too — surface IT (it carries the module-env
-          // context) through the shared error path below.
+          // context) through the shared error path.
           return this.reportCommandError(retried.left);
         }
       }
