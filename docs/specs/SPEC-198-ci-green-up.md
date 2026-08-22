@@ -79,6 +79,29 @@ bugs:
   exists — the strong local pin; roundtrip-headless-broken on headless
   runners) and asserts the path ran.
 
+## The CI tail (rounds 3-6 — converged GREEN 2026-08-22, run 32560263747)
+
+- **Round 3**: CHORE-44 baselines regenerated (+activeTerminalId/
+  +shellTerminals from the terminal work, +reportCommandError from #226,
+  +the #220 confirmation ops — those cycles never re-ran the inventory
+  suite); the clipboard step's outcomes unified under a `clipboard-`
+  prefix so the no-tool runner path asserts too.
+- **Round 4**: the doc-preview suite still called old-shape
+  `describe-function` at 4 sites (ADR-0208 sweep); AC12.1 grandfathered
+  15 files that drifted past the Change-12 fixture convention (migration
+  tracked in #228) — the convention still guards NEW files.
+- **Round 5**: the checkpoint fixture pins branch `main` (runner git
+  defaults to `master` — a local init.defaultBranch masked it); the
+  opt-in smoke playbook never parsed (eval+keys on one step — schema
+  violation).
+- **Round 6**: the runner has NO skip marker — the default sweep executes
+  everything under tmax-use/playbooks, underscore prefix included; the
+  opt-in playbook moved to `tmax-use/optin/` (location is the opt-in
+  mechanism). The registry count baseline bumped 419→421.
+- **Result**: run 32560263747 — typecheck-source/test/full + test-bun +
+  test-tmax-use ALL success. Six landing rounds, every failure test- or
+  fixture-side, zero production bugs.
+
 ## Notes
 
 - The runner's halt-on-first-failing-batch means the CI run after landing
