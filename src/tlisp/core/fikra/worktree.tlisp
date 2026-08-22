@@ -1,0 +1,247 @@
+(defmodule fikra/worktree
+  (export fikra-worktree-path fikra-worktree-enter fikra-worktree-handoff
+          fikra-worktree-close fikra-worktree-active-p
+          fikra-worktree-toggle fikra-worktree-latest-ref)
+
+;; #221 (RFC-027 §D7): worktree isolation per thread. SIBLING checkout at
+;; <repo>.fikra-<thread-id>/ on branch fikra/<thread-id> (the adw SPEC-065
+;; precedent: never nested inside the repo). The backend process cwd and
+;; checkpoint captures run INSIDE the worktree (thread field "worktree" —
+;; see fikra-thread-working-dir); thread STATE stays in the local root's
+;; .tmax (refs are repo-global, shared across worktrees by design).
+;;
+;; Handoff (SPC a w) is PATCH-APPLY-OR-REFUSE — it NEVER merges:
+;;   local → worktree: refuse when the local tree is dirty with changes
+;;     not in the thread's latest checkpoint (report; user commits/stashes
+;;     first); else create the worktree from the latest completion ref
+;;     (HEAD when none) and record the base.
+;;   worktree → local: snapshot the worktree to a ref, compute the
+;;     cumulative patch (base ref → snapshot), git apply locally; on
+;;     conflict ABORT — the worktree stays intact, conflicted paths are
+;;     reported, and the patch is saved to
+;;     .tmax/fikra/patches/<thread>.patch for manual application.
+;; Close: snapshot + export per-turn diffs (retention) + prune; pruning
+;; REFUSES (and reports) when the snapshot fails or the worktree holds
+;; unmerged changes.
+
+(require-module fikra/thread)
+(require-module fikra/checkpoint)
+(require-module fikra/event)
+
+;; ── paths ────────────────────────────────────────────────────────────
+(defun fikra-worktree-path ()
+  "The sibling worktree path for the current thread:
+<dirname(root)>/<basename(root)>.fikra-<thread-id>/."
+  (let ((root (fikra/thread/fikra-thread-field "root")))
+    (concat (fikra-dirname root) "/"
+            (fikra-basename root) ".fikra-"
+            (fikra/thread/fikra-thread-current) "/")))
+
+(defun fikra-dirname (path)
+  ;; No dirname primitive — slice to the last "/".
+  (fikra-dirname-scan path -1 0))
+
+(defun fikra-dirname-scan (path last i)
+  (if (>= i (length path))
+    (if (< last 0) "." (substring path 0 last))
+    (fikra-dirname-scan path
+      (if (string= (substring path i (+ i 1)) "/") i last)
+      (+ i 1))))
+
+(defun fikra-basename (path)
+  ;; Trailing slashes are not part of a repo root from rev-parse, but be
+  ;; safe: strip, then take everything after the last "/".
+  (fikra-basename-after (fikra-rstrip-slash path) -1 0))
+
+(defun fikra-basename-after (path last i)
+  (if (>= i (length path))
+    (if (< last 0) path (substring path (+ last 1) (length path)))
+    (fikra-basename-after path
+      (if (string= (substring path i (+ i 1)) "/") i last)
+      (+ i 1))))
+
+(defun fikra-rstrip-slash (path)
+  (if (and (> (length path) 1)
+           (string= (substring path (- (length path) 1) (length path)) "/"))
+    (substring path 0 (- (length path) 1))
+    path))
+
+(defun fikra-worktree-active-p ()
+  "t when the current thread is in worktree mode."
+  (if (fikra/thread/fikra-thread-field "worktree") t nil))
+
+;; ── local → worktree ────────────────────────────────────────────────
+(defun fikra-worktree-latest-ref ()
+  "The thread's latest completion ref, or nil when no checkpoints exist."
+  (let* ((n (fikra/thread/fikra-thread-turn-count))
+         (ref (concat "refs/fikra/" (fikra/thread/fikra-thread-current) "/" n)))
+    (if (string= (string-trim (shell-command
+             (concat "git rev-parse --verify -q " ref " >/dev/null 2>&1 && echo ok || echo no")))
+          "ok")
+      ref nil)))
+
+(defun fikra-worktree-dirty-p ()
+  "t when the LOCAL tree differs from the latest checkpoint (or HEAD when
+none): tracked changes beyond the ref, or any untracked file (captures
+snapshot the full disk — add -A — so disk == ref means clean)."
+  (let* ((ref (or (fikra-worktree-latest-ref) "HEAD"))
+         (tracked (string-trim (shell-command
+                   (concat "git diff --name-only " ref " -- 2>/dev/null"))))
+         ;; .tmax/ is tmax's OWN state dir — never user dirt (probe catch:
+         ;; an unignored .tmax blocked worktree entry on a clean tree).
+         (untracked (shell-command "git status --porcelain 2>/dev/null | grep '^??' | grep -v '\.tmax/' || true")))
+    (or (> (length tracked) 0)
+        (> (length (string-trim untracked)) 0))))
+
+(defun fikra-worktree-enter ()
+  "Enter worktree mode for the current thread. REFUSES on a dirty local
+tree (changes beyond the latest checkpoint — commit or stash first) or
+when the worktree already exists in a broken state. Creates the worktree
+from the latest completion ref (HEAD when none), records worktree + base
+in thread state, refreshes the lighter. Returns the worktree path."
+  (if (fikra-worktree-active-p)
+    (progn (editor-set-status "Fikra: already in worktree mode") nil)
+    (if (fikra-worktree-dirty-p)
+      (progn
+        (editor-set-status
+          "Fikra: local tree dirty beyond the latest checkpoint — commit or stash first")
+        nil)
+      (let* ((base (or (fikra-worktree-latest-ref) "HEAD"))
+             (path (fikra-worktree-path))
+             (out (shell-command
+                    (concat "git worktree add " (fikra-shq path)
+                            " -b fikra/" (fikra/thread/fikra-thread-current)
+                            " " base " 2>&1 && echo WT-OK || echo WT-FAILED"))))
+        (if (not (string-match "WT-OK" out))
+          (progn (editor-set-status (concat "Fikra: worktree create failed: " (string-trim out))) nil)
+          (progn
+            (fikra/thread/fikra-thread-set-field "worktree" path)
+            (fikra/thread/fikra-thread-set-field "worktree-base" base)
+            (fikra/thread/fikra-thread-save)
+            (fikra-refresh-worktree-lighter)
+            (editor-set-status (concat "Fikra: worktree " path " (from " base ")"))
+            path))))))
+
+;; ── worktree → local (patch-apply-or-refuse) ────────────────────────
+(defun fikra-worktree-patch-path ()
+  (concat (fikra/thread/fikra-thread-field "root")
+          "/.tmax/fikra/patches/" (fikra/thread/fikra-thread-current) ".patch"))
+
+(defun fikra-worktree-handoff ()
+  "Apply the worktree's cumulative changes to the LOCAL tree as a patch.
+Snapshot the worktree to a checkpoint ref; the patch spans the recorded
+base → snapshot; git apply locally. On conflict: ABORT (worktree intact,
+field untouched), conflicted paths reported, the patch saved for manual
+application. Returns t on success."
+  (if (not (fikra-worktree-active-p))
+    (progn (editor-set-status "Fikra: not in worktree mode") nil)
+    (let ((sha (fikra/checkpoint/fikra-checkpoint-capture "completion")))
+      (if (not sha)
+        (progn (editor-set-status "Fikra: handoff refused — snapshot failed (worktree intact)") nil)
+        (let* ((base (fikra/thread/fikra-thread-field "worktree-base"))
+               (snapshot (fikra-worktree-latest-ref))
+               (patch-path (fikra-worktree-patch-path))
+               (root (fikra/thread/fikra-thread-field "root")))
+          (shell-command (concat "mkdir -p " (fikra-shq (fikra-dirname patch-path))))
+          (shell-command (concat "git diff --binary " base " " snapshot
+                                 " > " (fikra-shq patch-path)))
+          (let ((check (string-trim (shell-command
+                       (concat "git apply --check --binary " (fikra-shq patch-path)
+                               " 2>&1 && echo APPLY-OK || echo APPLY-CONFLICT")))))
+            (if (not (string-match "APPLY-OK" check))
+              (progn
+                (editor-set-status
+                  (concat "Fikra: handoff CONFLICT — patch saved to " patch-path
+                          " ; worktree intact"))
+                nil)
+              (progn
+                (shell-command (concat "git apply --binary " (fikra-shq patch-path)))
+                (editor-set-status
+                  (concat "Fikra: applied " (fikra/thread/fikra-thread-current)
+                          " patch to local (base " base ")"))
+                t))))))))
+
+;; ── close: snapshot + export + prune ────────────────────────────────
+(defun fikra-worktree-close ()
+  "Close worktree mode: snapshot to a ref, export the per-turn diffs
+(.tmax/fikra/threads/<id>/diffs/ — the #217/#218 retention policy), prune
+the worktree, its branch, and the thread's checkpoint refs. REFUSES (and
+reports) when the snapshot fails or the worktree holds unmerged changes.
+Returns t when fully closed."
+  (if (not (fikra-worktree-active-p))
+    (progn (editor-set-status "Fikra: not in worktree mode") nil)
+    (let ((path (fikra/thread/fikra-thread-field "worktree")))
+      ;; Snapshot FIRST, then refuse if anything on disk is NOT in the
+      ;; snapshot (probe catch: the old pre-snapshot porcelain check tripped
+      ;; on the very changes the snapshot exists to capture).
+      (let ((sha (fikra/checkpoint/fikra-checkpoint-capture "completion")))
+        (if (not sha)
+          (progn (editor-set-status "Fikra: close refused — snapshot failed") nil)
+          (let ((snapshot (fikra-worktree-latest-ref)))
+            (if (or
+                  (> (length (string-trim
+                        (shell-command (concat "git -C " (fikra-shq path)
+                                               " diff --name-only " snapshot
+                                               " -- 2>/dev/null")))) 0)
+                  ;; Untracked files that appeared AFTER the snapshot.
+                  (> (length (string-trim
+                        (shell-command (concat "git -C " (fikra-shq path)
+                                               " status --porcelain 2>/dev/null | grep '^??' | grep -v '\.tmax/' || true")))) 0))
+              (progn
+                (editor-set-status "Fikra: close refused — worktree has unmerged changes (beyond the snapshot)")
+                nil)
+              (progn
+              ;; Retention: export per-turn diffs before deleting refs.
+              (fikra-worktree-export-diffs)
+              (let ((id (fikra/thread/fikra-thread-current)))
+                (shell-command (concat "git worktree remove --force " (fikra-shq path)))
+                (shell-command (concat "git branch -D fikra/" id " 2>/dev/null || true"))
+                (shell-command (concat "git for-each-ref --format='%(refname)' refs/fikra/" id "/ "
+                                       " | xargs -n1 git update-ref -d 2>/dev/null || true"))
+                (fikra/thread/fikra-thread-set-field "worktree" nil)
+                (fikra/thread/fikra-thread-set-field "worktree-base" nil)
+                (fikra/thread/fikra-thread-save)
+                (fikra-refresh-worktree-lighter)
+                (editor-set-status (concat "Fikra: worktree " id " closed + pruned"))
+                t)))))))))
+
+(defun fikra-worktree-export-diffs ()
+  "Export every captured turn's diff (baseline→completion) to
+.tmax/fikra/threads/<id>/diffs/<n>.patch (the close-time retention step)."
+  (let* ((id (fikra/thread/fikra-thread-current))
+         (n (fikra/thread/fikra-thread-turn-count))
+         (dir (concat (fikra/thread/fikra-thread-field "root")
+                      "/.tmax/fikra/threads/" id "/diffs")))
+    (shell-command (concat "mkdir -p " (fikra-shq dir)))
+    (fikra-worktree-export-loop id dir 0 n)))
+
+(defun fikra-worktree-export-loop (id dir i n)
+  (if (> i n)
+    t
+    (progn
+      (shell-command (concat "git diff --binary refs/fikra/" id "/" i "-baseline"
+                             " refs/fikra/" id "/" i
+                             " > " (fikra-shq (concat dir "/" i ".patch"))
+                             " 2>/dev/null || true"))
+      (fikra-worktree-export-loop id dir (+ i 1) n))))
+
+;; ── lighter + binding ───────────────────────────────────────────────
+(defun fikra-refresh-worktree-lighter ()
+  "Re-render the lighter (the wt:<id> segment lands via chat's refresh
+when the worktree field is set)."
+  (condition-case nil
+    (funcall "fikra/chat/fikra-refresh-lighter")
+    (error () nil)))
+
+(defun fikra-worktree-toggle ()
+  "SPC a w: enter worktree mode when local, hand off to local when in a
+worktree (patch-apply-or-refuse)."
+  (if (fikra-worktree-active-p)
+    (fikra-worktree-handoff)
+    (fikra-worktree-enter)))
+
+(defun fikra-shq (s)
+  (concat "'" s "'"))
+
+(provide "fikra-worktree")
+)

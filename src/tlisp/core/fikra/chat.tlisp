@@ -72,7 +72,16 @@ state char + effective runtime mode with the degradation star (#219)."
     (concat "fikra:" (fikra/adapter/fikra-current-backend)
             (fikra/modes/fikra-lighter-state-char)
             ":" (fikra/modes/fikra-effective-mode)
-            (fikra/modes/fikra-mode-star))))
+            (fikra/modes/fikra-mode-star)
+            ;; #221: the wt:<id> segment appears only in worktree mode.
+            (fikra-worktree-segment))))
+
+;; #221: worktree marker — requires thread lazily (chat→worktree cycle:
+;; worktree requires checkpoint → thread; chat requires modes only).
+(defun fikra-worktree-segment ()
+  (require-module fikra/thread)
+  (let ((wt (fikra/thread/fikra-thread-field "worktree")))
+    (if wt (concat " wt:" (fikra/thread/fikra-thread-current)) "")))
 
 ;; ── buffer-local keymap (#206 chain) ────────────────────────────────
 (defun fikra-ensure-buffer-keymap ()

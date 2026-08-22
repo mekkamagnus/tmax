@@ -328,7 +328,7 @@ scope names THIS turn) and BEFORE the spawn (args reference the path)."
       (setq fikra-claude-process
         (make-process
           :command (cons "claude" args)
-          :cwd (fikra/thread/fikra-thread-root)
+          :cwd (fikra/thread/fikra-thread-working-dir) ; #221: worktree-aware — agent edits land in the worktree
           :filter "fikra-backend-claude-filter"
           :sentinel "fikra-backend-claude-sentinel"))
       fikra-claude-process)))

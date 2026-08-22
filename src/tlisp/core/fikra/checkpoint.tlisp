@@ -73,6 +73,9 @@ Cached PER ROOT: a root change re-probes."
 (defun fikra-checkpoint-command (tmp-index kind)
   "Build the capture command for KIND ('baseline'|'completion')."
   (concat
+    ;; #221: capture runs INSIDE the thread's working dir (worktree-aware —
+    ;; fikra-thread-working-dir); the tmp index stays in the LOCAL root.
+    "cd " (fikra/thread/fikra-thread-working-dir) " && "
     "export GIT_INDEX_FILE=" tmp-index " ; "
     "rm -f " tmp-index " ; "
     "git add -A -- . >/dev/null 2>&1 && "

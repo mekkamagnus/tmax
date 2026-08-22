@@ -1,5 +1,5 @@
 (defmodule fikra/thread
-  (export fikra-thread-init fikra-thread-open fikra-thread-reopen
+  (export fikra-thread-working-dir fikra-thread-in-worktree-p fikra-thread-focus fikra-thread-init fikra-thread-open fikra-thread-reopen
           fikra-thread-current fikra-thread-status fikra-thread-status-set
           fikra-thread-turn-begin fikra-thread-turn-end fikra-thread-turn-count
           fikra-thread-root fikra-thread-log-path fikra-thread-session-id
@@ -33,6 +33,16 @@
 
 (defun process-cwd ()
   (string-trim (shell-command "pwd")))
+
+;; #221 (RFC-027 §D7): the thread's WORKING dir — the worktree path when
+;; in worktree mode (backend cwd + checkpoint captures run there), the
+;; local project root otherwise. State (.tmax) stays under the LOCAL root.
+(defun fikra-thread-working-dir ()
+  (let ((wt (fikra-thread-field "worktree")))
+    (if wt wt (fikra-thread-field "root"))))
+
+(defun fikra-thread-in-worktree-p ()
+  (if (fikra-thread-field "worktree") t nil))
 
 ;; ── init / open / reopen ────────────────────────────────────────────
 (defun fikra-thread-init ()
@@ -81,6 +91,8 @@ history into it (daemon-restart reopen path), focus it."
                          ;; fikra/modes owns the default (defvar + setter
                          ;; escape hatch); seeding here would freeze it.
                          "runtime-mode" nil
+                         "worktree" nil
+                         "worktree-base" nil
                          "trust" (list)
                          "status" "idle"
                          "turn-count" 0)))
@@ -93,7 +105,7 @@ history into it (daemon-restart reopen path), focus it."
             ;; Overlay persisted fields onto fresh defaults (forward-
             ;; compatible: unknown persisted fields ignored, missing fields
             ;; keep defaults).
-            (dolist (key (list "backend" "session-id" "runtime-mode" "trust" "turn-count"))
+            (dolist (key (list "backend" "session-id" "runtime-mode" "trust" "worktree" "worktree-base" "turn-count"))
               (let ((v (fikra-alist-get key parsed)))
                 (if (not (null v))
                   (editor/keymaps/keymap-mutable-set! state key v))))
@@ -124,11 +136,22 @@ history into it (daemon-restart reopen path), focus it."
                      (list "session-id" (fikra-thread-field "session-id"))
                      (list "runtime-mode" (fikra-thread-field "runtime-mode"))
                      (list "trust" (fikra-thread-field "trust"))
+                     (list "worktree" (fikra-thread-field "worktree"))
+                     (list "worktree-base" (fikra-thread-field "worktree-base"))
                      (list "turn-count" (fikra-thread-field "turn-count")))))))
 
 (defun fikra-thread-current ()
   "Current thread id (nil before init)."
   fikra-current-thread-id)
+
+;; #221: focus another thread id (lazy state init happens on first
+;; access — fikra-thread-state). Module defvars are not setq-able from
+;; outside, hence the setter. Full thread switching machinery is #222.
+(defun fikra-thread-focus (id)
+  "Focus thread ID (creating its state lazily). Returns the id."
+  (setq fikra-current-thread-id id)
+  (fikra-thread-state)
+  id)
 
 (defun fikra-thread-state ()
   "The focused thread's state; LAZY-INITIALIZES the main thread when absent

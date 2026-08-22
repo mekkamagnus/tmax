@@ -81,6 +81,9 @@ With 0 or negative number, disable."
 ;; the four modes (approval-required / auto-accept-edits / auto /
 ;; full-access; unknown refused by fikra-set-runtime-mode).
 (key-bind "SPC a m" "(progn (require-module fikra/modes) (fikra/modes/fikra-runtime-mode-prompt))" "normal")
+;; #221: worktree handoff — patch-apply-or-refuse, never a merge. Enters
+;; worktree mode when local; applies the worktree patch when active.
+(key-bind "SPC a w" "(progn (require-module fikra/worktree) (fikra/worktree/fikra-worktree-toggle))" "normal")
 
 (provide "fikra-mode")
 )
