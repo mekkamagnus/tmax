@@ -3,6 +3,14 @@ markdown-anchor-slug
 markdown-backlinks
 markdown-bucket-names
 markdown-clear-results
+markdown-complete-accept
+markdown-complete-at-point
+markdown-complete-candidate
+markdown-complete-candidates-of
+markdown-complete-link-text
+markdown-complete-path
+markdown-complete-prepare
+markdown-complete-table
 markdown-cons-names-onto
 markdown-copy-subtree
 markdown-create-note-for
@@ -63,6 +71,7 @@ markdown-note-name
 markdown-note-names-of
 markdown-note-path
 markdown-note-rank
+markdown-note-slug
 markdown-open-anchor
 markdown-open-file-link
 markdown-prev-footnote
@@ -75,6 +84,7 @@ markdown-promote-heading
 markdown-promote-subtree
 markdown-push-position
 markdown-rank-note-names
+markdown-relative-note-path
 markdown-rename-note
 markdown-renumber-list
 markdown-replace-line
@@ -87,6 +97,7 @@ markdown-scan-tags
 markdown-scan-wiki-links
 markdown-shell-quote
 markdown-skip-front-matter
+markdown-slugify-set
 markdown-sparse-tree-level
 markdown-sparse-tree-regex
 markdown-sparse-tree-tag
@@ -111,3 +122,4 @@ markdown-up-heading
 markdown-visibility-cycle
 markdown-wiki-link-at-point
 markdown-wiki-link-range-at-point
+markdown-write-note-template

@@ -339,3 +339,4 @@ Ordered most-recent first (highest ADR number = most recent decision). Topic gro
 | File | Description |
 |------|-------------|
 | [adr-template.md](adr-template.md) | Template for writing new ADRs |
+| [ADR-0247-markdown-baseline-refreeze.md](ADR-0247-markdown-baseline-refreeze.md) | #227: markdown boundary drift — internal helpers don't carry the markdown- public prefix (RENAME over export: note-slug-segment); the CHORE-44 inventory baseline refrozen 113→125 with the change documented in the test (prefix = visibility contract). | #227, [SPEC-227](../specs/SPEC-227-markdown-boundary-drift.md) |

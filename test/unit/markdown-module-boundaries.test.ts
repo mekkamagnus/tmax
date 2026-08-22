@@ -70,7 +70,12 @@ describe("CHORE-44 Change 11 — Markdown module boundaries", () => {
       .split("\n").map(l => l.trim()).filter(l => l.length > 0 && !l.startsWith("#")).sort();
 
     expect(publicFns).toEqual(expected);
-    expect(publicFns.length).toBe(113);
+    // #227: refrozen 2026-08-22 — the CHORE-44 baseline (113) predated the
+    // SPEC-116/120/121-era feature additions (completion-at-point, slugify,
+    // backlinks…); those 12 are exported per AC11.2, and the internal helper
+    // markdown-note-slug-segment was renamed note-slug-segment (private —
+    // never exported, absent from the public namespace).
+    expect(publicFns.length).toBe(125);
   });
 
   test("AC11.2: aggregator is a pure loader (no feature defun)", () => {
