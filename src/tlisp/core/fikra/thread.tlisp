@@ -1,5 +1,5 @@
 (defmodule fikra/thread
-  (export fikra-thread-buffer-name fikra-thread-buffer-name-of fikra-thread-field-root-of fikra-thread-working-dir fikra-thread-in-worktree-p fikra-thread-focus fikra-thread-new fikra-thread-archive fikra-thread-archived-p fikra-thread-switch fikra-thread-rows fikra-thread-ids fikra-thread-init fikra-thread-open fikra-thread-reopen
+  (export fikra-thread-buffer-name fikra-thread-buffer-name-of fikra-thread-field-root-of fikra-thread-set-session-id-for fikra-thread-working-dir fikra-thread-in-worktree-p fikra-thread-focus fikra-thread-new fikra-thread-archive fikra-thread-archived-p fikra-thread-switch fikra-thread-rows fikra-thread-ids fikra-thread-init fikra-thread-open fikra-thread-reopen
           fikra-thread-current fikra-thread-status fikra-thread-status-set
           fikra-thread-turn-begin fikra-thread-turn-end fikra-thread-turn-count
           fikra-thread-root fikra-thread-log-path fikra-thread-session-id
@@ -158,10 +158,33 @@ history into it (daemon-restart reopen path), focus it."
 ;; id-scoped readers for background-thread operations (#222 gate catch):
 ;; read another thread's root/buffer WITHOUT changing focus.
 (defun fikra-thread-field-root-of (id)
+  "id's project root WITHOUT changing focus. Gate round-2: nil for an
+UNKNOWN id — never substitute the focused root (a misrouted event must
+not land under the wrong project)."
   (let ((state (hashmap-get fikra-threads id)))
-    (if state (hashmap-get state "root")
-      (progn (if (not fikra-current-thread-id) (fikra-thread-init))
-             (fikra-thread-field "root")))))
+    (if state (hashmap-get state "root") nil)))
+
+;; #222 gate round-2: record a session id on ANOTHER thread (a background
+;; turn's resume handle) without stealing focus.
+(defun fikra-thread-set-session-id-for (id sid)
+  (let ((state (hashmap-get fikra-threads id)))
+    (if state
+      (progn
+        (editor/keymaps/keymap-mutable-set! state "session-id" sid)
+        (write-file-content
+          (concat (hashmap-get state "root") "/.tmax/fikra/threads/" id "/state.json")
+          (json-encode (list
+                         (list "id" id)
+                         (list "backend" (hashmap-get state "backend"))
+                         (list "session-id" sid)
+                         (list "runtime-mode" (hashmap-get state "runtime-mode"))
+                         (list "trust" (hashmap-get state "trust"))
+                         (list "worktree" (hashmap-get state "worktree"))
+                         (list "worktree-base" (hashmap-get state "worktree-base"))
+                         (list "archived" (hashmap-get state "archived"))
+                         (list "turn-count" (hashmap-get state "turn-count")))))
+        sid)
+      nil)))
 
 (defun fikra-thread-buffer-name-of (id)
   (if (or (null id) (string= id "main")) "*Fikra*"

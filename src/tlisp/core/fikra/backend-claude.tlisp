@@ -3,7 +3,7 @@
           fikra-backend-claude-start-turn fikra-backend-claude-abort
           fikra-backend-claude-normalize fikra-backend-claude-args
           fikra-backend-claude-line-events fikra-backend-claude-filter
-          fikra-backend-claude-abort-sim fikra-backend-claude-adopt-process
+          fikra-backend-claude-abort-sim fikra-backend-claude-adopt-process fikra-backend-claude-adopt-pid
           fikra-backend-claude-reset-accumulator fikra-afield
           fikra-claude-approvals-probe fikra-claude-write-mcp-config
           fikra-claude-mcp-config-path fikra-claude-trust-arg
@@ -357,17 +357,22 @@ and emit them as ONE FAEP batch (per-chunk coalescing). #222 gate catch:
 the batch routes to the TURN'S thread (emit-batch-for) — the session-id
 records on that thread, and switching focus mid-stream cannot bleed the
 chunks into another thread's log."
-  (let* ((thread-id (or (hashmap-get fikra-claude-pid-thread (number-to-string pid))
-                        (fikra/thread/fikra-thread-current)))
-         (events (fikra-backend-claude-line-events-for thread-id output)))
-    (if events
+  (let* ((thread-id (hashmap-get fikra-claude-pid-thread (number-to-string pid)))
+         (events (if thread-id
+                   (fikra-backend-claude-line-events-for thread-id output)
+                   nil)))
+    ;; Gate round-2: an UNKNOWN pid is DROPPED, never assumed focused —
+    ;; a straggler chunk must not bleed into whatever the user views.
+    (if (and thread-id events)
       (progn
-        ;; Record the session id if this batch introduced one — on the
-        ;; TURN'S thread (a background turn must not touch focused state).
-        (if (string= thread-id (fikra/thread/fikra-thread-current))
-          (dolist (e events)
-            (if (string= (fikra-afield e "kind") "session")
-              (fikra/thread/fikra-thread-set-session-id (fikra-afield e "id")))))
+        ;; Record the session id if this batch introduced one — ON THE
+        ;; TURN'S THREAD (gate round-2: a background turn completing while
+        ;; unfocused must still record its resume handle).
+        (dolist (e events)
+          (if (string= (fikra-afield e "kind") "session")
+            (if (string= thread-id (fikra/thread/fikra-thread-current))
+              (fikra/thread/fikra-thread-set-session-id (fikra-afield e "id"))
+              (fikra/thread/fikra-thread-set-session-id-for thread-id (fikra-afield e "id")))))
         (fikra/event/fikra-event-emit-batch-for thread-id events)))))
 
 (defun fikra-backend-claude-sentinel (pid exit-code)
@@ -376,13 +381,17 @@ chunks into another thread's log."
 SKIPPED when the turn was already ended by a local abort (interrupted).
 #222 gate catch: settles the PID'S thread — a background turn ending must
 not mutate the focused thread's state."
-  (let* ((thread-id (or (hashmap-get fikra-claude-pid-thread (number-to-string pid))
-                        (fikra/thread/fikra-thread-current)))
-         (focused (string= thread-id (fikra/thread/fikra-thread-current))))
-    (editor/keymaps/keymap-mutable-set! fikra-claude-processes thread-id nil)
-    (editor/keymaps/keymap-mutable-set! fikra-claude-line-buffers thread-id "")
-    (editor/keymaps/keymap-mutable-set! fikra-claude-pid-thread (number-to-string pid) nil)
-    (if (not (hashmap-get fikra-claude-aborteds thread-id))
+  (let* ((thread-id (hashmap-get fikra-claude-pid-thread (number-to-string pid)))
+         (focused (if thread-id (string= thread-id (fikra/thread/fikra-thread-current)) nil)))
+    ;; Gate round-2: unknown pid → no-op (never assume focused). The
+    ;; pid→thread entry stays RESIDENT after exit so late straggler chunks
+    ;; still route to the right thread's accumulator.
+    (if thread-id
+      (progn
+        (editor/keymaps/keymap-mutable-set! fikra-claude-processes thread-id nil)
+        (editor/keymaps/keymap-mutable-set! fikra-claude-line-buffers thread-id ""))
+      nil)
+    (if (and thread-id (not (hashmap-get fikra-claude-aborteds thread-id)))
       (if focused
         (fikra/thread/fikra-thread-turn-end
           (if (= exit-code 0) "completed" "error"))
@@ -409,6 +418,13 @@ not mutate the focused thread's state."
 (defun fikra-backend-claude-adopt-process (pid)
   (editor/keymaps/keymap-mutable-set! fikra-claude-processes
     (fikra/thread/fikra-thread-current) pid)
+  pid)
+
+;; Test seam: register pid→thread for direct filter/sentinel calls (the
+;; unknown-pid DROP means tests feeding a fake pid must route it first).
+(defun fikra-backend-claude-adopt-pid (pid)
+  (editor/keymaps/keymap-mutable-set! fikra-claude-pid-thread
+    (number-to-string pid) (fikra/thread/fikra-thread-current))
   pid)
 
 ;; Test seam: reproduce the abort→sentinel sequence without a process

@@ -243,8 +243,10 @@ describe("#214 filter → FAEP integration (no process)", () => {
   test("filter emits a FAEP batch and records the session id", async () => {
     const editor = await createStartedEditor("");
     e(editor, "(require-module fikra/backend-claude)");
-    // Init a thread in the tmax repo (cwd) so FAEP has a log.
+    // Init a thread in the tmax repo (cwd) so FAEP has a log. #222: the
+    // filter DROPS unknown pids — register the fake pid first.
     e(editor, "(fikra/thread/fikra-thread-init)");
+    e(editor, "(fikra/backend-claude/fikra-backend-claude-adopt-pid 0)");
     const chunk = '{"type":"system","subtype":"init","session_id":"fx-1"}\n{"type":"assistant","message":{"content":[{"type":"text","text":"hi"}]}}\n';
     e(editor, `(fikra/backend-claude/fikra-backend-claude-filter 0 ${JSON.stringify(chunk)})`);
     // Session id landed in the thread state.

@@ -119,13 +119,13 @@ bumps the revision the TUI poll consumes."
 ;; misroute; it merely pauses live rendering for the background thread).
 (defun fikra-event-emit-batch-for (id events)
   (require-module fikra/thread)
-  (let ((target-log (concat (fikra/thread/fikra-thread-field-root-of id)
-                            "/.tmax/fikra/threads/" id "/events.jsonl"))
+  (let ((target-root (fikra/thread/fikra-thread-field-root-of id))
         (target-buffer (fikra/thread/fikra-thread-buffer-name-of id)))
-    (if (null events)
+    ;; Gate round-2: unknown id (nil root) → DROP, never guess.
+    (if (or (null target-root) (null events))
       nil
       (progn
-        (append-file target-log
+        (append-file (concat target-root "/.tmax/fikra/threads/" id "/events.jsonl")
           (apply 'concat
             (mapcar (lambda (e) (concat (json-encode e) "\n")) events)))
         (if (not (fikra-event-batch-has-tombstone-p events))
