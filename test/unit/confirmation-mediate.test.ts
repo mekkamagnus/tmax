@@ -14,7 +14,7 @@ function setupTestHandler(editor: Editor) {
   // T-Lisp handler records its invocation into globals the test can read.
   executeTlisp(editor, "(defvar *confirm-calls* (list))");
   executeTlisp(editor, "(defvar *confirm-last-detail* nil)");
-  executeTlisp(editor, '(defun test-confirm-handler (id detail kind) (setq *confirm-last-detail* detail) (setq *confirm-calls* (cons (list id kind) *confirm-calls*)))');
+  executeTlisp(editor, '(defun test-confirm-handler (id detail kind scope) (setq *confirm-last-detail* detail) (setq *confirm-calls* (cons (list id kind scope) *confirm-calls*)))');
   executeTlisp(editor, '(confirmation-handler-register "test-source" "test-confirm-handler")');
 }
 

@@ -1,0 +1,161 @@
+(defmodule fikra/approvals
+  (export fikra-approval-enqueue fikra-approval-answer
+          fikra-approval-answer-allow fikra-approval-answer-reject
+          fikra-approval-answer-always fikra-approval-resolve-guard
+          fikra-set-approval-guard fikra-approval-pending-p
+          fikra-approvals-ensure-bindings)
+
+;; #220 (RFC-027 §D5 L2, §Security) — Fikra policy on the generic
+;; confirmation mechanism (#210): the daemon parks a mediate from the MCP
+;; bridge (bin/tmax-mcp-confirmation), this handler validates the scope
+;; names a LIVE thread+turn (cross-turn/stale tokens reject BEFORE any
+;; prompt), then prompts in *Fikra* with [y] allow / [n] reject / [a]
+;; always-allow (buffer-local bindings, confirming state).
+;;
+;; DEFAULT RESOLVE POLICY: interactive-frames-only. The daemon stamps the
+;; resolver kind at dispatch (server.ts: keypress=interactive, eval=
+;; headless); a headless client — the threat is an agent with Bash access
+;; spawning `tmaxclient --eval` to approve its own request — is DENIED and
+;; the prompt stays pending. `always` additionally writes thread trust
+;; (#219), which the claude adapter promotes to --allowedTools.
+;; The kind fact is READ-ONLY from T-Lisp (confirmation-resolver-kind) —
+;; deliberately no setter: eval-reachable code must not self-mark
+;; interactive. Users who genuinely want headless resolution install a
+;; guard override via fikra-set-approval-guard (deliberate, visible).
+
+(require-module fikra/event)
+(require-module fikra/thread)
+
+;; Registered for source "fikra" — the token's minted source must match.
+(confirmation-handler-register "fikra" "fikra/approvals/fikra-approval-enqueue")
+
+(defvar fikra-approval-pending-id nil
+  "The parked mediate id the y/n/a keys answer (single pending per thread
+until #222's child threads).")
+
+(defvar fikra-approval-pending-kind nil
+  "The pending request's action class (trust key on always-allow).")
+
+(defvar fikra-approval-guard-override nil
+  "User override: a T-Lisp fn NAME (string) replacing the default
+interactive-frames-only guard. Set via fikra-set-approval-guard only
+(module defvars are not setq-able cross-module) — a deliberate act.")
+
+(defun fikra-set-approval-guard (fn-name)
+  "Override the approval resolve guard (default: interactive-frames-only).
+FN-NAME is a T-Lisp function name answering t/nil."
+  (setq fikra-approval-guard-override fn-name))
+
+(defun fikra-approval-resolve-guard ()
+  "t when the CURRENT resolver may answer approvals. Default policy:
+anything except a headless eval client. An override fn, when installed,
+decides instead."
+  (if fikra-approval-guard-override
+    (funcall fikra-approval-guard-override)
+    (not (string= (confirmation-resolver-kind) "headless"))))
+
+;; ── scope liveness (the cross-turn gate) ────────────────────────────
+;; Scope format: "<thread-id>/<turn>" — minted by the adapter per turn.
+;; A token from an earlier turn (turn-count moved on), another thread, or
+;; a mid-turn-less moment (status not running) is DEAD: reject before any
+;; prompt is shown.
+(defun fikra-approval-scope-live-p (scope)
+  (let ((parts (string-split scope "/")))
+    (if (not (= (length parts) 2))
+      nil
+      (let ((thread (car parts))
+            (turn-str (car (cdr parts))))
+        ;; string-to-number THROWS on garbage — regex-gate first
+        ;; (string-match returns the match INDEX or nil; there is no
+        ;; string-match-p builtin — chat.tlisp's old calls are latent).
+        (if (null (string-match "^[0-9]+$" turn-str))
+          nil
+          (let ((turn (string-to-number turn-str)))
+            (and (string= thread (fikra/thread/fikra-thread-current))
+                 (= turn (fikra/thread/fikra-thread-turn-count))
+                 (string= (fikra/thread/fikra-thread-status) "running"))))))))
+
+(defun fikra-approval-pending-p ()
+  (if fikra-approval-pending-id t nil))
+
+;; ── the registered handler (runs at mediate-park time) ─────────────
+(defun fikra-approval-enqueue (id detail kind scope)
+  "A confirmation/mediate arrived for fikra. Validate the scope names a
+LIVE thread+turn; dead correlation → reject immediately (no prompt).
+Live → permission-request FAEP event, confirming state, y/n/a prompt."
+  (if (not (fikra-approval-scope-live-p scope))
+    (progn
+      ;; Settles the parked mediate reject — the subprocess unblocks; no
+      ;; prompt was ever shown.
+      (confirmation-resolve id "reject")
+      (editor-set-status "Fikra: approval rejected (dead correlation)"))
+    (progn
+      (setq fikra-approval-pending-id id)
+      (setq fikra-approval-pending-kind kind)
+      (fikra-approvals-ensure-bindings)
+      (fikra/event/fikra-event-emit
+        (list (list "kind" "permission-request")
+              (list "action" (concat kind ": " detail))
+              (list "id" id)))
+      ;; running → confirming (checked transition — an illegal enqueue
+      ;; errors rather than corrupting thread state).
+      (fikra/thread/fikra-thread-status-set "confirming")
+      (editor-set-status
+        (concat "Fikra: approve " kind "? [y] allow [n] reject [a] always"))
+      t)))
+
+;; ── answering ────────────────────────────────────────────────────────
+(defun fikra-approval-answer (decision)
+  "Answer the pending approval (allow | reject | always). Guarded: a
+headless resolver is DENIED and the prompt stays pending. always also
+writes thread trust (promoted to --allowedTools on later turns)."
+  (if (null fikra-approval-pending-id)
+    (progn (editor-set-status "Fikra: no pending approval") nil)
+    (if (not (fikra-approval-resolve-guard))
+      (progn
+        ;; The denial leaves the mediate PARKED (pending) — only an
+        ;; interactive client may settle it.
+        (editor-set-status
+          "Fikra: approval resolve DENIED — interactive client required; prompt stays pending")
+        nil)
+      (let ((id fikra-approval-pending-id)
+            (kind fikra-approval-pending-kind))
+        (setq fikra-approval-pending-id nil)
+        (setq fikra-approval-pending-kind nil)
+        ;; First resolver wins; a lost race returns nil (audited).
+        (let ((won (confirmation-resolve id decision)))
+          (fikra/event/fikra-event-emit
+            (list (list "kind" "permission-response")
+                  (list "decision" decision)))
+          (if (string= decision "always")
+            (progn
+              (require-module fikra/modes)
+              (fikra/modes/fikra-trust-add kind)
+              (message "Fikra: %s trusted for this thread (--allowedTools on later turns)" kind)))
+          ;; confirming → running (only if still confirming — the turn may
+          ;; have ended under us; that settle is the turn's business).
+          (if (string= (fikra/thread/fikra-thread-status) "confirming")
+            (fikra/thread/fikra-thread-status-set "running"))
+          won)))))
+
+(defun fikra-approval-answer-allow () (fikra-approval-answer "allow"))
+(defun fikra-approval-answer-reject () (fikra-approval-answer "reject"))
+(defun fikra-approval-answer-always () (fikra-approval-answer "always"))
+
+;; ── buffer-local y/n/a in *Fikra* ───────────────────────────────────
+;; Extends chat's buffer keymap (created on first use by chat's ensure —
+;; during a real turn the buffer always exists; bindings tolerate a nil
+;; keymap by re-running on the next enqueue).
+(defun fikra-approvals-ensure-bindings ()
+  (require-module fikra/chat)
+  (fikra/chat/fikra-ensure-buffer-keymap)
+  (let ((kmap (editor/keymaps/buffer-keymap "*Fikra*")))
+    (if kmap
+      (progn
+        (editor/keymaps/keymap-set-key kmap "y" "(fikra/approvals/fikra-approval-answer-allow)")
+        (editor/keymaps/keymap-set-key kmap "n" "(fikra/approvals/fikra-approval-answer-reject)")
+        (editor/keymaps/keymap-set-key kmap "a" "(fikra/approvals/fikra-approval-answer-always)"))))
+  t)
+
+(provide "fikra-approvals")
+)

@@ -40,6 +40,7 @@ import type { ServerContext, ClientRecord, FrameObservability } from './rpc/hand
 import { createEditingHandlers } from './rpc/handlers/editing.ts';
 import { createFramesHandlers } from './rpc/handlers/frames.ts';
 import { createConfirmationHandlers } from './rpc/handlers/confirmation.ts';
+import { confirmationService } from '../editor/api/confirmation-service.ts';
 import { createWorkspaceHandlers } from './rpc/handlers/workspaces.ts';
 import { createLifecycleHandlers } from './rpc/handlers/lifecycle.ts';
 import { FileSystemImpl } from '../core/filesystem.ts';
@@ -1340,6 +1341,18 @@ export class TmaxServer {
    * the error-recording hook for its observability buffer.
    */
   private async processRequest(request: JSONRPCRequest): Promise<JSONRPCResponse> {
+    // #220 (RFC-027 §Security): stamp the FACT the approval resolve guard
+    // reads — which KIND of client is driving this dispatch. Frame-scoped
+    // keypress = an attached TUI (interactive); eval = the surface a
+    // headless client (incl. an agent-spawned `tmaxclient --eval`) can
+    // reach. Stamped HERE (TS-side only): the kind must never be settable
+    // from T-Lisp — an agent with eval access must not be able to mark
+    // itself interactive. Everything else stays "unknown" (embedded mode
+    // has a single local user — interactive by construction).
+    confirmationService.resolverHint =
+      request.method === "keypress" ? "interactive"
+      : request.method === "eval" ? "headless"
+      : confirmationService.resolverHint;
     return routeRequest(this.rpcHandlers(), request, (info) => {
       this.recordError(
         info.method,

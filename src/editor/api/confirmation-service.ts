@@ -60,7 +60,10 @@ export interface ResolutionRecord {
   contestedBy?: string[];
 }
 
-type HandlerFn = (id: number, detail: string, kind: string) => void | Promise<void>;
+/** Registered per source; called when a mediate parks. SCOPE is the minted
+ * token's scope string (#220: fikra validates thread/turn liveness against
+ * it before prompting — the service itself never interprets scopes). */
+type HandlerFn = (id: number, detail: string, kind: string, scope: string) => void | Promise<void>;
 
 interface TokenBinding {
   source: string;
@@ -144,7 +147,7 @@ export class ConfirmationService {
       // resolved, cancelled, or timed out — a broken handler must never hang
       // the mediate silently with an unrecorded state.
       try {
-        void Promise.resolve(handler(id, request.detail, request.kind)).catch((e: unknown) => {
+        void Promise.resolve(handler(id, request.detail, request.kind, binding.scope)).catch((e: unknown) => {
           console.error(`confirmation handler for '${request.source}' threw:`, e);
         });
       } catch (e) {

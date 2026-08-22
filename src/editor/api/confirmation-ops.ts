@@ -35,10 +35,21 @@ export function createConfirmationOps(deps: ConfirmationOpsDeps): Map<string, TL
     const fnE = stringArg(args, 1, "confirmation-handler-register");
     if (Either.isLeft(fnE)) return Either.left(fnE.left);
     const fnName = fnE.right;
-    confirmationService.registerHandler(sourceE.right, (id, detail, kind) => {
-      deps.evalTlisp(`(${fnName} ${id} ${JSON.stringify(detail)} ${JSON.stringify(kind)})`);
+    confirmationService.registerHandler(sourceE.right, (id, detail, kind, scope) => {
+      deps.evalTlisp(`(${fnName} ${id} ${JSON.stringify(detail)} ${JSON.stringify(kind)} ${JSON.stringify(scope)})`);
     });
     return Either.right(createNil());
+  });
+
+  // (confirmation-resolver-kind) → "interactive" | "headless" | "unknown".
+  // READ-ONLY fact for #220's resolve guard. There is deliberately NO
+  // setter on the T-Lisp surface: the daemon stamps the kind at dispatch
+  // (server.ts processRequest); an eval-reachable client must not be able
+  // to mark itself interactive.
+  api.set("confirmation-resolver-kind", (args: TLispValue[]): Either<AppError, TLispValue> => {
+    const count = validateArgsCount(args, 0, "confirmation-resolver-kind");
+    if (Either.isLeft(count)) return Either.left(count.left);
+    return Either.right(createString(confirmationService.resolverHint));
   });
 
   // (confirmation-token-mint "source" "scope") → token string

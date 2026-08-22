@@ -4,7 +4,10 @@
           fikra-backend-claude-normalize fikra-backend-claude-args
           fikra-backend-claude-line-events fikra-backend-claude-filter
           fikra-backend-claude-abort-sim fikra-backend-claude-adopt-process
-          fikra-backend-claude-reset-accumulator fikra-afield)
+          fikra-backend-claude-reset-accumulator fikra-afield
+          fikra-claude-approvals-probe fikra-claude-write-mcp-config
+          fikra-claude-mcp-config-path fikra-claude-trust-arg
+          fikra-claude-set-approvals-override)
 
 ;; #214 (RFC-027 §D3/§D4): Claude Code CLI adapter, agent edition.
 ;; Process-per-turn + session resume; JSONL lines normalize to FAEP events
@@ -33,28 +36,128 @@ end it AGAIN (double turn-end / error-overrides-interrupted, gate catch).")
   (let ((result (shell-command "command -v claude 2>/dev/null")))
     (not (string= (string-trim result) ""))))
 
+;; #220: L2 is capability-GATED on --permission-prompt-tool — the hook that
+;; routes claude's permission decisions through a tool. The installed
+;; 2.1.195 surface does NOT have it (recorded 2026-08-22; --mcp-config and
+;; --allowedTools do), so L2 degrades to L1 + turn-boundary review for
+;; claude — the harness stays correct, only real-time mediation is lost.
+(defvar fikra-claude-interactive-approvals-override nil
+  "Test seam: \"on\"/\"off\" force the capability; nil = probe the CLI.")
+
+(defvar fikra-claude-approvals-probe-cache nil
+  "Cached probe result — the --help surface doesn't change mid-session.")
+
+(defun fikra-claude-approvals-probe ()
+  "t when the installed claude exposes --permission-prompt-tool."
+  (cond
+    ;; nil override must not reach string= (type error) — guard first.
+    ((and fikra-claude-interactive-approvals-override
+          (string= fikra-claude-interactive-approvals-override "on")) t)
+    ((and fikra-claude-interactive-approvals-override
+          (string= fikra-claude-interactive-approvals-override "off")) nil)
+    (fikra-claude-approvals-probe-cache fikra-claude-approvals-probe-cache)
+    (t
+      (progn
+        ;; grep -c counts matching lines; "0" = hook absent.
+        (setq fikra-claude-approvals-probe-cache
+              (not (string= (string-trim
+                              (shell-command "claude --help 2>/dev/null | grep -c -- --permission-prompt-tool"))
+                            "0")))
+        fikra-claude-approvals-probe-cache))))
+
+(defun fikra-claude-set-approvals-override (v)
+  "Test seam: \"on\"/\"off\" force the interactive-approvals capability;
+nil restores the real CLI probe. Keyless CI must pin BOTH the wiring and
+the L1-degradation contract without the hook existing anywhere."
+  (setq fikra-claude-interactive-approvals-override v)
+  v)
+
 (defun fikra-backend-claude-capabilities ()
   (list (list "session-resume" t)
-        (list "interactive-approvals" nil) ; probed for real in #220
+        (list "interactive-approvals" (fikra-claude-approvals-probe))
         (list "sandbox-presets" nil)))
 
 ;; ── arg construction (fixture-testable) ─────────────────────────────
+;; #220: trusted tool classes (#219 trust state, written by always-allow)
+;; promote to --allowedTools — trusted classes stop costing round trips.
+(defun fikra-claude-trust-arg ()
+  "Comma-joined trust list for --allowedTools, or nil when empty."
+  (require-module fikra/modes)
+  (let ((trust (fikra/thread/fikra-thread-field "trust")))
+    (if (null trust)
+      nil
+      (fikra-join-strings trust ","))))
+
+(defun fikra-join-strings (parts sep)
+  (if (null parts)
+    ""
+    (fikra-join-tail (cdr parts) sep (car parts))))
+
+(defun fikra-join-tail (parts sep acc)
+  (if (null parts)
+    acc
+    (fikra-join-tail (cdr parts) sep (concat acc sep (car parts)))))
+
 (defun fikra-backend-claude-args (message resume-id)
   "Build the claude argv for one turn. RESUME-ID nil = first turn.
 #219: --permission-mode comes from the EFFECTIVE runtime mode
 (degradation-aware) — never hard-coded (codex-review catch: the mode
-changed nothing about spawned turns). Lazy require per the #216
-convention."
+changed nothing about spawned turns). #220: trust promotes to
+--allowedTools; when the installed CLI has the permission hook, the
+adapter-written --mcp-config + --permission-prompt-tool ride along (the
+config is written per turn by fikra-claude-write-mcp-config)."
   (require-module fikra/modes)
-  (let ((base (list "--print"
-                    "--output-format" "stream-json"
-                    "--verbose"
-                    "--permission-mode"
-                    (fikra/modes/fikra-claude-mode-arg
-                      (fikra/modes/fikra-effective-mode)))))
+  (let* ((base (list "--print"
+                     "--output-format" "stream-json"
+                     "--verbose"
+                     "--permission-mode"
+                     (fikra/modes/fikra-claude-mode-arg
+                       (fikra/modes/fikra-effective-mode))))
+         (with-trust
+           (let ((trust-arg (fikra-claude-trust-arg)))
+             (if trust-arg
+               (append base (list "--allowedTools" trust-arg))
+               base)))
+         (with-l2
+           (if (fikra-claude-approvals-probe)
+             (append with-trust
+                     (list "--mcp-config"
+                           (fikra-claude-mcp-config-path)
+                           ;; claude's MCP tool naming: mcp__<server>__<tool>.
+                           "--permission-prompt-tool"
+                           "mcp__tmax-confirmation__permission"))
+             with-trust)))
     (if (and resume-id (stringp resume-id) (> (length resume-id) 0))
-      (append base (list "--resume" resume-id "-p" message))
-      (append base (list "-p" message)))))
+      (append with-l2 (list "--resume" resume-id "-p" message))
+      (append with-l2 (list "-p" message)))))
+
+;; ── L2 wiring: the per-turn --mcp-config + token ────────────────────
+;; The adapter mints the one-time token itself and writes the config
+;; pointing claude at the bridge (source+token in argv — the token never
+;; transits model-controlled space). Socket: the bridge resolves the
+;; default daemon socket itself.
+(defun fikra-claude-mcp-config-path ()
+  (concat (fikra/thread/fikra-thread-root)
+          "/.tmax/fikra/mcp/"
+          (fikra/thread/fikra-thread-current) "-"
+          (number-to-string (fikra/thread/fikra-thread-turn-count)) ".json"))
+
+(defun fikra-claude-write-mcp-config ()
+  "Mint the turn's approval token and write the --mcp-config JSON.
+Returns the token (nil when the capability probe failed — L2 stays off)."
+  (if (not (fikra-claude-approvals-probe))
+    nil
+    (let* ((scope (concat (fikra/thread/fikra-thread-current) "/"
+                          (number-to-string (fikra/thread/fikra-thread-turn-count))))
+           (token (confirmation-token-mint "fikra" scope))
+           (path (fikra-claude-mcp-config-path)))
+      (shell-command (concat "mkdir -p " (fikra/thread/fikra-thread-root) "/.tmax/fikra/mcp"))
+      (write-file-content path
+        (concat "{\"mcpServers\":{\"tmax-confirmation\":{"
+                "\"command\":\"bun\","
+                "\"args\":[\"bin/tmax-mcp-confirmation.ts\",\"fikra\",\""
+                token "\"]}}}"))
+      token)))
 
 ;; ── normalization: one JSONL line → FAEP events (pure, fixture-tested) ──
 ;; Returns a LIST of events (0, 1, or more) or nil for unparseable lines.
@@ -208,19 +311,24 @@ return the concatenated FAEP events (a flat list)."
 ;; ── process lifecycle ───────────────────────────────────────────────
 (defun fikra-backend-claude-start-turn (message)
   "Spawn one turn: process-per-turn, resume the thread's session, stream
-JSONL → FAEP. The sentinel is the authoritative turn end (#213)."
-  (let* ((sid (fikra/thread/fikra-thread-session-id))
-         (args (fikra-backend-claude-args message sid)))
+JSONL → FAEP. The sentinel is the authoritative turn end (#213).
+#220: the approval token + --mcp-config are written AFTER turn-begin (the
+scope names THIS turn) and BEFORE the spawn (args reference the path)."
+  (let ((sid (fikra/thread/fikra-thread-session-id)))
     (setq fikra-claude-line-buffer "")
     (setq fikra-claude-aborted nil)
     (fikra/thread/fikra-thread-turn-begin)
-    (setq fikra-claude-process
-      (make-process
-        :command (cons "claude" args)
-        :cwd (fikra/thread/fikra-thread-root)
-        :filter "fikra-backend-claude-filter"
-        :sentinel "fikra-backend-claude-sentinel"))
-    fikra-claude-process))
+    ;; L2: mint the turn's token + config (nil-op when the CLI lacks the
+    ;; permission hook — args omit the flags too, same probe).
+    (fikra-claude-write-mcp-config)
+    (let ((args (fikra-backend-claude-args message sid)))
+      (setq fikra-claude-process
+        (make-process
+          :command (cons "claude" args)
+          :cwd (fikra/thread/fikra-thread-root)
+          :filter "fikra-backend-claude-filter"
+          :sentinel "fikra-backend-claude-sentinel"))
+      fikra-claude-process)))
 
 (defun fikra-backend-claude-filter (pid output)
   "Serialized per-process (#208): normalize complete lines from this chunk

@@ -1,0 +1,32 @@
+# #220 (RFC-027 §D5 L2) — OPT-IN smoke: live interactive approvals.
+# Requires: a claude CLI with --permission-prompt-tool (the recorded 2.1.195
+# surface LACKS it — run with the capability forced via init.tlisp:
+#   (fikra/backend-claude/fikra-claude-set-approvals-override "on")
+# after (require-module fikra/backend-claude)) plus API credentials.
+# NEVER required for CI; the hermetic gates live in
+# test/unit/fikra-approvals.test.ts (#220 L2 section) and
+# test/unit/mcp-confirmation-shim.test.ts.
+name: fikra-approvals
+description: >
+  Smoke the L2 approval round trip end to end: a permission-request prompt
+  renders in *Fikra*, y proceeds, a silences the next same-class write
+  (--allowedTools promotion), n rejects and the agent redirects.
+steps:
+  - name: open fikra chat
+    keys: " a a"
+  - name: send a turn that triggers a write approval
+    eval: '(fikra/chat/fikra-turn-send "create a file tmp/approval-smoke.txt with the word ok")'
+  - name: the permission prompt renders
+    eval: '(switch-to-buffer "*Fikra*")'
+  - name: answer allow (y proceeds)
+    keys: "y"
+  - name: trust state unchanged (y is one-shot)
+    eval: '(fikra/modes/fikra-trust-has-p "Edit")'
+  - name: second same-class request — answer always (a silences the class)
+    eval: '(fikra/chat/fikra-turn-send "edit tmp/approval-smoke.txt to say ok2")'
+    keys: "a"
+  - name: trust now records the class (promotion on the next turn)
+    eval: '(fikra/modes/fikra-trust-has-p "Edit")'
+  - name: third request — no prompt for the trusted class; n redirects anything else
+    eval: '(fikra/chat/fikra-turn-send "run: echo hi")'
+    keys: "n"

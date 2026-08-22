@@ -4,10 +4,15 @@ import { mkdtempSync, rmSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createStartedEditor, executeTlisp } from "../helpers/editor-fixture.ts";
+import { confirmationService } from "../../src/editor/api/confirmation-service.ts";
+import { createConfirmationHandlers } from "../../src/server/rpc/handlers/confirmation.ts";
 
 // #219 (RFC-027 §D5 L1) — runtime modes: four presets, strictness-ordered
 // degradation, per-backend fallback fixtures, trust state, mode-aware
 // modeline. All keyless (replay backend + checked-in fixtures).
+// #220 (§D5 L2) — interactive approvals: the MCP bridge is exercised in
+// mcp-confirmation-shim.test.ts; here the FIKRA policy rides the generic
+// daemon primitive (confirmation/mediate) end-to-end.
 
 type Editor = Awaited<ReturnType<typeof createStartedEditor>>;
 
@@ -277,5 +282,183 @@ describe("#219 L1 — mode-aware modeline", () => {
     e(editor, '(fikra/adapter/fikra-set-backend-forced "nonexistent")');
     e(editor, '(fikra/modes/fikra-refresh-mode-lighter)');
     expect(String(e(editor, '(minor-mode-lighter "fikra")').value)).toBe("fikra:nonexistent●:approval-required*");
+  });
+});
+
+// ══════════════════════════════════════════════════════════════════════
+// #220 (RFC-027 §D5 L2) — interactive approvals on the generic primitive
+// ══════════════════════════════════════════════════════════════════════
+
+/** Drive the REAL daemon-side handler (the same object server.ts routes
+ * to) — the mediate parks, the fikra handler runs, resolution is T-Lisp. */
+async function mediate(token: string, kind: string, detail: string): Promise<{ decision: string; scope: string }> {
+  const handlers = createConfirmationHandlers({} as never);
+  return handlers["confirmation/mediate"]({ source: "fikra", token, kind, detail, timeoutMs: 60_000 });
+}
+
+async function l2setup(): Promise<Editor> {
+  const editor = await createStartedEditor("");
+  e(editor, "(require-module fikra/approvals)");
+  e(editor, "(require-module fikra/thread)");
+  e(editor, "(require-module fikra/adapter)");
+  e(editor, "(fikra/thread/fikra-thread-init)");
+  e(editor, "(fikra/adapter/fikra-set-backend-forced \"replay\")");
+  e(editor, "(fikra/thread/fikra-thread-turn-begin)");
+  confirmationService.resolverHint = "interactive"; // default: no headless stamp
+  return editor;
+}
+
+describe("#220 L2 — live enqueue drives the prompt UI headlessly", () => {
+  beforeEach(() => { confirmationService.reset(); });
+
+  test("mediate parks → permission-request renders → confirming state; y resolves the parked RPC", async () => {
+    const editor = await l2setup();
+    const token = String(e(editor, '(confirmation-token-mint "fikra" "main/1")').value);
+    const parked = mediate(token, "write-file", "write to src/x.ts");
+    // The fikra handler ran at park time: pending + confirming + prompt line.
+    expect(String(e(editor, "(fikra/approvals/fikra-approval-pending-p)").value)).toBe("true");
+    expect(String(e(editor, "(fikra/thread/fikra-thread-status)").value)).toBe("confirming");
+    const replayed = String(e(editor, "(fikra/event/fikra-event-replay)").value);
+    expect(replayed).toContain("? write-file: write to src/x.ts");
+    expect(replayed).toContain("[y] Allow");
+    // Answer allow → the parked daemon RPC settles allow.
+    expect(String(e(editor, "(fikra/approvals/fikra-approval-answer-allow)").value)).toBe("true");
+    expect((await parked).decision).toBe("allow");
+    expect(String(e(editor, "(fikra/approvals/fikra-approval-pending-p)").value)).toBe("null");
+    expect(String(e(editor, "(fikra/thread/fikra-thread-status)").value)).toBe("running");
+    // The decision is in the FAEP log (auditable).
+    expect(String(e(editor, "(fikra/event/fikra-event-replay)").value)).toContain("= allow");
+  });
+});
+
+describe("#220 L2 — THE GATE TEST: headless clients cannot resolve", () => {
+  beforeEach(() => { confirmationService.reset(); });
+
+  test("agent-spawned eval resolve DENIED + prompt stays pending; attached client then resolves", async () => {
+    const editor = await l2setup();
+    const token = String(e(editor, '(confirmation-token-mint "fikra" "main/1")').value);
+    const parked = mediate(token, "bash", "rm -rf /tmp/thing");
+    expect(String(e(editor, "(fikra/approvals/fikra-approval-pending-p)").value)).toBe("true");
+    // THE THREAT: the agent (Bash access) spawns `tmaxclient --eval
+    // "(fikra-approval-answer-allow)"`. The daemon stamps eval dispatches
+    // headless (server.ts) — here we stamp the same fact directly.
+    confirmationService.resolverHint = "headless";
+    expect(String(e(editor, "(fikra/approvals/fikra-approval-answer-allow)").value)).toBe("null");
+    // Denied: the prompt STAYS pending, the RPC stays parked.
+    expect(String(e(editor, "(fikra/approvals/fikra-approval-pending-p)").value)).toBe("true");
+    expect((confirmationService.pendingList())).toHaveLength(1);
+    expect(String(e(editor, "(fikra/thread/fikra-thread-status)").value)).toBe("confirming");
+    // A second ATTACHED client (keypress dispatch → interactive) resolves.
+    confirmationService.resolverHint = "interactive";
+    expect(String(e(editor, "(fikra/approvals/fikra-approval-answer-allow)").value)).toBe("true");
+    expect((await parked).decision).toBe("allow");
+    expect(confirmationService.pendingList()).toHaveLength(0);
+  });
+
+  test("guard override (deliberate init.tlisp act) permits headless resolution", async () => {
+    const editor = await l2setup();
+    e(editor, "(defun my-permissive-guard () t)");
+    e(editor, '(fikra/approvals/fikra-set-approval-guard "my-permissive-guard")');
+    const token = String(e(editor, '(confirmation-token-mint "fikra" "main/1")').value);
+    const parked = mediate(token, "write-file", "x");
+    confirmationService.resolverHint = "headless";
+    expect(String(e(editor, "(fikra/approvals/fikra-approval-answer-reject)").value)).toBe("true");
+    expect((await parked).decision).toBe("reject");
+  });
+});
+
+describe("#220 L2 — token gates: forged / stale / cross-turn reject pre-prompt", () => {
+  beforeEach(() => { confirmationService.reset(); });
+
+  test("forged token → immediate reject, NO prompt (no permission-request event)", async () => {
+    const editor = await l2setup();
+    const eventsBefore = String(e(editor, "(fikra/event/fikra-event-replay)").value);
+    const result = await mediate("forged-token-not-minted", "bash", "evil");
+    expect(result.decision).toBe("reject");
+    expect(confirmationService.pendingList()).toHaveLength(0);
+    expect(String(e(editor, "(fikra/approvals/fikra-approval-pending-p)").value)).toBe("null");
+    expect(String(e(editor, "(fikra/thread/fikra-thread-status)").value)).toBe("running");
+    expect(String(e(editor, "(fikra/event/fikra-event-replay)").value)).toBe(eventsBefore); // no prompt event
+  });
+
+  test("stale (single-use) token → reject on reuse", async () => {
+    const editor = await l2setup();
+    const token = String(e(editor, '(confirmation-token-mint "fikra" "main/1")').value);
+    const first = mediate(token, "write-file", "one");
+    e(editor, "(fikra/approvals/fikra-approval-answer-allow)");
+    expect((await first).decision).toBe("allow");
+    const second = await mediate(token, "write-file", "two");
+    expect(second.decision).toBe("reject"); // used token — no second prompt
+    expect(confirmationService.pendingList()).toHaveLength(0);
+  });
+
+  test("cross-turn token (scope names an old turn) → handler rejects before any prompt", async () => {
+    const editor = await l2setup(); // turn-count is now 1
+    const stale = String(e(editor, '(confirmation-token-mint "fikra" "main/0")').value);
+    const result = await mediate(stale, "bash", "late arrival from a dead turn");
+    expect(result.decision).toBe("reject");
+    expect(confirmationService.pendingList()).toHaveLength(0); // never parked for prompting
+    expect(String(e(editor, "(fikra/approvals/fikra-approval-pending-p)").value)).toBe("null");
+    expect(String(e(editor, "(fikra/thread/fikra-thread-status)").value)).toBe("running"); // never entered confirming
+  });
+});
+
+describe("#220 L2 — always-allow promotes to trust + --allowedTools", () => {
+  beforeEach(() => { confirmationService.reset(); });
+
+  test("'always' writes thread trust; the next turn's claude args carry --allowedTools", async () => {
+    const editor = await l2setup();
+    e(editor, "(require-module fikra/backend-claude)");
+    e(editor, '(fikra/backend-claude/fikra-claude-set-approvals-override "off")'); // pin: no L2 flags noise
+    // Before trust: no --allowedTools.
+    let args = (e(editor, '(fikra/backend-claude/fikra-backend-claude-args "q" nil)').value as { value: string }[]).map((v) => String(v.value));
+    expect(args).not.toContain("--allowedTools");
+    // Answer always on an Edit-class request.
+    const token = String(e(editor, '(confirmation-token-mint "fikra" "main/1")').value);
+    const parked = mediate(token, "Edit", "edit src/x.ts");
+    expect(String(e(editor, "(fikra/approvals/fikra-approval-answer-always)").value)).toBe("true");
+    expect((await parked).decision).toBe("always");
+    expect(String(e(editor, '(fikra/modes/fikra-trust-has-p "Edit")').value) === "true").toBe(true);
+    // The promotion: the next turn's args silence the same class.
+    args = (e(editor, '(fikra/backend-claude/fikra-backend-claude-args "q" nil)').value as { value: string }[]).map((v) => String(v.value));
+    const idx = args.indexOf("--allowedTools");
+    expect(idx).toBeGreaterThan(-1);
+    expect(args[idx + 1]).toBe("Edit");
+  });
+});
+
+describe("#220 L2 — capability gating (claude-first, probe-driven)", () => {
+  beforeEach(() => { confirmationService.reset(); });
+
+  test("hook ABSENT (\"off\"): args omit --mcp-config/--permission-prompt-tool; write-mcp-config no-ops", async () => {
+    const editor = await l2setup();
+    e(editor, "(require-module fikra/backend-claude)");
+    e(editor, '(fikra/backend-claude/fikra-claude-set-approvals-override "off")');
+    expect(String(e(editor, "(fikra/backend-claude/fikra-claude-write-mcp-config)").value)).toBe("null");
+    const args = (e(editor, '(fikra/backend-claude/fikra-backend-claude-args "q" nil)').value as { value: string }[]).map((v) => String(v.value));
+    expect(args).not.toContain("--mcp-config");
+    expect(args).not.toContain("--permission-prompt-tool");
+    // The recorded 2.1.195 surface lacks the hook — the REAL probe (no
+    // override) also reports absent on this machine. (Not asserted as a
+    // test: a future CLI gaining the hook must flip it, by design.)
+  });
+
+  test("hook PRESENT (\"on\"): adapter mints the token, writes --mcp-config, args wire the prompt tool", async () => {
+    const editor = await l2setup();
+    e(editor, "(require-module fikra/backend-claude)");
+    e(editor, '(fikra/backend-claude/fikra-claude-set-approvals-override "on")');
+    const token = String(e(editor, "(fikra/backend-claude/fikra-claude-write-mcp-config)").value);
+    expect(token).toMatch(/^[0-9a-f]{48}$/); // the minted one-time token
+    // The config file exists, parses, and plants source+token in argv —
+    // the token never transits model-controlled space.
+    const configPath = join(repoDir, ".tmax/fikra/mcp/main-1.json");
+    const config = JSON.parse(readFileSync(configPath, "utf8")) as { mcpServers: { "tmax-confirmation": { command: string; args: string[] } } };
+    expect(config.mcpServers["tmax-confirmation"].command).toBe("bun");
+    expect(config.mcpServers["tmax-confirmation"].args).toEqual(["bin/tmax-mcp-confirmation.ts", "fikra", token]);
+    // The turn's args reference the config + claude's MCP tool name.
+    const args = (e(editor, '(fikra/backend-claude/fikra-backend-claude-args "q" nil)').value as { value: string }[]).map((v) => String(v.value));
+    expect(args).toContain("--mcp-config");
+    expect(args).toContain("mcp__tmax-confirmation__permission");
+    e(editor, '(fikra/backend-claude/fikra-claude-set-approvals-override "off")');
   });
 });

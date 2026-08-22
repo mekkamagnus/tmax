@@ -25,6 +25,7 @@ tmax-*
 !.zcode/skills/tmax-patch-review/
 !tmax-use/
 !bin/tmax-use
+!bin/tmax-mcp-confirmation.ts
 tmax.exe
 
 # Bun incremental-build artifacts (hex-hash temp binaries — never commit)
