@@ -24,6 +24,9 @@ beforeEach(() => {
   writeFileSync(join(repoDir, "base.txt"), "base\n");
   execFileSync("git", ["add", "-A"], { cwd: repoDir });
   execFileSync("git", ["commit", "-q", "-m", "init"], { cwd: repoDir });
+  // #198: pin the branch name — runner git defaults to 'master' (no
+  // init.defaultBranch config); the assertions reference 'main'.
+  execFileSync("git", ["branch", "-M", "main"], { cwd: repoDir });
   process.chdir(repoDir);
 });
 

@@ -32,11 +32,13 @@ steps:
     keys: "y"
   - name: trust state unchanged (y is one-shot)
     eval: '(fikra/modes/fikra-trust-has-p "Edit")'
-  - name: second same-class request — answer always (a silences the class)
+  - name: second same-class request
     eval: '(fikra/chat/fikra-turn-send "edit tmp/approval-smoke.txt to say ok2")'
+  - name: answer always (a silences the class)
     keys: "a"
   - name: trust now records the class (promotion on the next turn)
     eval: '(fikra/modes/fikra-trust-has-p "Edit")'
-  - name: third request — no prompt for the trusted class; n redirects anything else
+  - name: third request — no prompt for the trusted class
     eval: '(fikra/chat/fikra-turn-send "run: echo hi")'
+  - name: n redirects anything else
     keys: "n"
