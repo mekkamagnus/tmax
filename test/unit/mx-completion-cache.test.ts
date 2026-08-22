@@ -10,8 +10,7 @@
  */
 import { test, expect, beforeEach, afterEach } from 'bun:test';
 import { Editor } from '../../src/editor/editor.ts';
-import { TerminalIOImpl } from '../../src/core/terminal.ts';
-import { FileSystemImpl } from '../../src/core/filesystem.ts';
+import { createEditorFixture } from '../helpers/editor-fixture.ts';
 import { TmaxServer } from '../../src/server/server.ts';
 import { mkdtempSync, rmSync } from 'fs';
 import { tmpdir } from 'os';
@@ -32,10 +31,12 @@ afterEach(() => {
 });
 
 async function startedEditor(): Promise<{ editor: Editor; server: TmaxServer }> {
-  const editor = new Editor(new TerminalIOImpl(true), new FileSystemImpl());
-  const server = new TmaxServer(undefined, true, editor, undefined, true);
+  // #228: createEditorFixture (the Change-12 convention) instead of a
+  // direct Editor construction; the fixture's teardown handles dispose.
+  const fixture = await createEditorFixture();
+  const server = new TmaxServer(undefined, true, fixture.editor, undefined, true);
   await server.startEditor();
-  return { editor, server };
+  return { editor: fixture.editor, server };
 }
 
 function evalNum(editor: Editor, expr: string): number {

@@ -73,25 +73,6 @@ describe("CHORE-44 Change 12 — editor fixture isolation", () => {
     const allowed = new Map<string, string>([
       ["test/unit/server-start-editor.test.ts", "tests cleanStart/startEditor with REAL TerminalIOImpl+FileSystemImpl (BUG-58 guard); fixture uses a different setup"],
       ["test/unit/editor-open-file.test.ts", "wraps Editor in TmaxServer + startEditor to test open-file through the server; createEditorFixture is standalone (no server)"],
-      // #198 CI tail (2026-08-22): 15 files drifted past the Change-12
-      // convention while tests accreted faster than the migration; they are
-      // grandfathered HERE so the convention still guards NEW files. The
-      // migration is tracked in #228 — remove entries as they migrate.
-      ["test/unit/apropos.test.ts", "grandfathered 2026-08-22 (#198 CI tail): predates enforcement accretion; migrate to createEditorFixture (tracked in #228)"],
-      ["test/unit/mx-completion-cache.test.ts", "grandfathered 2026-08-22 (#198 CI tail): predates enforcement accretion; migrate to createEditorFixture (tracked in #228)"],
-      ["test/unit/help-prefix-cheatsheet.test.ts", "grandfathered 2026-08-22 (#198 CI tail): predates enforcement accretion; migrate to createEditorFixture (tracked in #228)"],
-      ["test/unit/save-as-mode-detect.test.ts", "grandfathered 2026-08-22 (#198 CI tail): predates enforcement accretion; migrate to createEditorFixture (tracked in #228)"],
-      ["test/unit/man-page-viewer.test.ts", "grandfathered 2026-08-22 (#198 CI tail): predates enforcement accretion; migrate to createEditorFixture (tracked in #228)"],
-      ["test/unit/interactive.test.ts", "grandfathered 2026-08-22 (#198 CI tail): predates enforcement accretion; migrate to createEditorFixture (tracked in #228)"],
-      ["test/unit/magic-mode-detect.test.ts", "grandfathered 2026-08-22 (#198 CI tail): predates enforcement accretion; migrate to createEditorFixture (tracked in #228)"],
-      ["test/unit/helpful-rich-help.test.ts", "grandfathered 2026-08-22 (#198 CI tail): predates enforcement accretion; migrate to createEditorFixture (tracked in #228)"],
-      ["test/unit/helpgrep.test.ts", "grandfathered 2026-08-22 (#198 CI tail): predates enforcement accretion; migrate to createEditorFixture (tracked in #228)"],
-      ["test/unit/file-local-mode.test.ts", "grandfathered 2026-08-22 (#198 CI tail): predates enforcement accretion; migrate to createEditorFixture (tracked in #228)"],
-      ["test/unit/help-mode.test.ts", "grandfathered 2026-08-22 (#198 CI tail): predates enforcement accretion; migrate to createEditorFixture (tracked in #228)"],
-      ["test/unit/default-major-mode.test.ts", "grandfathered 2026-08-22 (#198 CI tail): predates enforcement accretion; migrate to createEditorFixture (tracked in #228)"],
-      ["test/unit/major-mode-docs.test.ts", "grandfathered 2026-08-22 (#198 CI tail): predates enforcement accretion; migrate to createEditorFixture (tracked in #228)"],
-      ["test/unit/vertico-bulk-rows.test.ts", "grandfathered 2026-08-22 (#198 CI tail): predates enforcement accretion; migrate to createEditorFixture (tracked in #228)"],
-      ["test/unit/info-reader.test.ts", "grandfathered 2026-08-22 (#198 CI tail): predates enforcement accretion; migrate to createEditorFixture (tracked in #228)"],
     ]);
     const offenders: string[] = [];
     for (const file of files) {
