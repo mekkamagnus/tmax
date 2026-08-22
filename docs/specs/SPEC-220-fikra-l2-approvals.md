@@ -87,9 +87,11 @@ promotes: `fikra-backend-claude-args` appends `--allowedTools <classes>`
 whenever the thread trust list is non-empty. Test seams:
 `fikra-claude-set-approvals-override "on"/"off"/nil`.
 
-**Playbook**: `tmax-use/playbooks/_smoke-fikra-approvals.yaml` — opt-in
-(underscore prefix = explicit-run-only per the playbooks README), never
-in CI.
+**Playbook**: `tmax-use/optin/fikra-approvals.yaml` — opt-in by
+LOCATION (outside the discovery tree; the runner has no skip marker and
+the default sweep executes everything under tmax-use/playbooks — a
+#198-tail discovery). Run explicitly: `bin/tmax-use test
+tmax-use/optin/fikra-approvals.yaml`; never in CI.
 
 ## Completion Criteria
 

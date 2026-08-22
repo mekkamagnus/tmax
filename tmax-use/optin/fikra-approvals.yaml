@@ -1,4 +1,8 @@
 # #220 (RFC-027 §D5 L2) — OPT-IN smoke: live interactive approvals.
+# Lives in tmax-use/optin/ (OUTSIDE the default discovery tree) — the
+# runner has no skip marker and the default sweep executes everything
+# under tmax-use/playbooks. Run explicitly:
+#   bin/tmax-use test tmax-use/optin/fikra-approvals.yaml
 # Requires ALL of:
 #   1. A claude CLI with --permission-prompt-tool (the recorded 2.1.195
 #      surface LACKS it — force the capability in init.tlisp:

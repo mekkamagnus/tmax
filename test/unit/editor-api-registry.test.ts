@@ -44,7 +44,9 @@ describe("CHORE-44 Change 7 — editor API registry", () => {
       .filter(l => l.length > 0 && !l.startsWith("#"))
       .sort();
     const live = Array.from(createEditorAPI(createTestAPIContext()).keys()).sort();
-    expect(live.length).toBe(419);
+    // #198: 419 → 421 — the #220 confirmation ops (resolver-kind +
+    // set-resolve-policy) plus this cycle's regeneration.
+    expect(live.length).toBe(421);
     expect(live).toEqual(expected);
   });
 
