@@ -54,9 +54,12 @@ its own env) — applying it to forms was the bug.
       conversion — same swallow class, now fixed + the SYNC
       executeCommand twin restricted to bare names symmetrically).
 - [x] typecheck:src + :test green; mx/minibuffer/keymap/macro suites
-      green (mx-accept 4/4; minibuffer+mx caches 22/22; key-handling
-      58/58; macros+which-key 115/115 after the one pinned-swallow
-      update).
+      green (mx-accept 5/5; minibuffer+mx caches 22/22; key-handling
+      70/70; macros+which-key 83/83; the BUG-81 suite
+      spc-semicolon-mx 4/4 — its editor-quit pin updated to expect the
+      propagated signal, exactly as its own comment anticipated; the
+      retry-branch signal conversion is advisory-documented (no natural
+      bare-name quit fixture exists — contrived coverage declined).
 
 ## Notes
 

@@ -41,10 +41,10 @@ describe("#195 (BUG-81): SPC ; enters M-x", () => {
     // #195 scope is M-x ENTRY. Full command execution from M-x is broken
     // separately (#226 / BUG-83: accepted commands don't run — editor-quit's
     // signal and command errors are swallowed in the minibuffer accept path).
-    // Here we pin the #195 boundary: typed input reaches the minibuffer, and
-    // Enter closes the M-x session (mx → normal). NOTE: once #226 lands,
-    // Enter on "editor-quit" will genuinely quit — revisit this assertion
-    // then (it should still pass: quit also leaves mx, via teardown).
+    // Here we pin the #195 boundary: typed input reaches the minibuffer.
+    // #226 landed (gate round-2 revisit, as this comment anticipated): Enter
+    // on "editor-quit" now GENUINELY QUITS — the signal propagates out of
+    // handleKey (BUG-83's swallow is fixed), and quit still leaves mx.
     const editor = await createStartedEditor("");
     await editor.handleKey(" ");
     await editor.handleKey(";");
@@ -53,7 +53,7 @@ describe("#195 (BUG-81): SPC ; enters M-x", () => {
       await editor.handleKey(key);
     }
     expect(editor.getEditorState().minibufferView?.input).toBe("editor-quit");
-    await editor.handleKey("Enter");
+    await expect(editor.handleKey("Enter")).rejects.toThrow("EDITOR_QUIT_SIGNAL");
     expect(mode(editor)).not.toBe("mx");
   });
 
