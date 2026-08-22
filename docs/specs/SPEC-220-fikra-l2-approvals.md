@@ -22,13 +22,33 @@ deferred decision as the tool result. Reject/bridge-error → `isError`
 (the agent proceeds on the safe side, never hangs on a dead bridge).
 Zero Fikra logic; listens on nothing; exits with stdin.
 
-**Resolver-kind stamping** (`server.ts processRequest`): frame-scoped
-`keypress` dispatches stamp `confirmationService.resolverHint =
-"interactive"`, `eval` dispatches stamp `"headless"`. The fact is
-READ-ONLY from T-Lisp (`confirmation-resolver-kind`) — deliberately no
-setter: eval-reachable code must not self-mark interactive. The handler
-signature gained a 4th arg (the minted token's SCOPE) so fikra can
-validate thread/turn liveness T-Lisp-side.
+**Resolver-kind stamping** (`server.ts processRequest` → pure exported
+`computeResolverKind`, unit-tested): `keypress` with an ATTACHED FRAME
+(a frameId the daemon knows, from connect-frame) stamps `"interactive"`;
+FRAMELESS keypresses and every `eval` stamp `"headless"` (gate round-1
+catch: the first cut trusted the method NAME — any same-uid process, or
+the agent from Bash, could write a raw keypress JSON-RPC to the socket
+and self-declare interactive; tmax-use's per-call connections are
+frameless by construction and are correctly classified headless). Other
+methods preserve the current kind (`"unknown"` = embedded startup —
+interactive by construction). The fact is READ-ONLY from T-Lisp
+(`confirmation-resolver-kind`).
+
+**Enforcement lives at the PRIMITIVE, not just the wrapper** (gate
+round-1 catch: `confirmation-resolve` was T-Lisp-reachable and unguarded
+— an agent could bypass `fikra-approval-answer` entirely via
+`tmaxclient --eval "(confirmation-resolve ...)"`). The service's
+`resolve()` refuses headless resolvers under the default
+`interactive-only` policy: the request STAYS pending, the attempt is
+audited. `confirmation-cancel` stays open (rejecting is the safe
+settle).
+
+**The escape hatch is provenance-checked in BOTH layers.**
+`confirmation-set-resolve-policy "permissive"` (the op that relaxes the
+primitive) REFUSES a headless caller — an eval-reachable agent must not
+unlock its own approvals; init.tlisp (startup, "unknown") and
+interactive M-x contexts pass. `fikra-set-approval-guard` carries the
+same check and flips both layers when accepted.
 
 **`src/tlisp/core/fikra/approvals.tlisp`** (new): registers
 `fikra-approval-enqueue` for source `"fikra"`.
@@ -82,6 +102,19 @@ in CI.
 - [x] THE GATE TEST: headless (eval-stamped) resolve DENIED, prompt stays
       pending, thread stays confirming; a second INTERACTIVE
       (keypress-stamped) client resolves normally (pinned).
+- [x] PRIMITIVE enforcement (gate round-1 catch): the RAW
+      `confirmation-resolve` op — the direct bypass the wrapper can't
+      see — is refused for headless callers, request stays pending
+      (pinned).
+- [x] Guard/policy setters REFUSE headless callers (an agent must not
+      install its own guard or flip the policy from eval); interactive
+      callers install it and headless resolution then works through the
+      override (pinned).
+- [x] `computeResolverKind` (the untested critical path, gate round-1
+      catch): eval always headless; attached-frame keypress interactive;
+      frameless and unknown-frame keypresses headless (forged raw-socket
+      keypresses cannot self-declare); other methods preserve (pinned,
+      5 unit tests in resolver-kind.test.ts).
 - [x] Guard override fn permits headless resolution when deliberately
       installed (pinned).
 - [x] Forged token → immediate reject, NO prompt event, thread never
@@ -97,10 +130,37 @@ in CI.
       the prompt tool (pinned). The REAL probe result on 2.1.195 (absent)
       is documented, not pinned — a future CLI gaining the hook must flip
       it, by design.
-- [x] typecheck:src + typecheck:test green; fikra-approvals 26/26 (17 L1
-      + 9 L2); confirmation-mediate 10/10 (handler signature updated for
-      the scope arg); mcp-shim 5/5; related suites (backend-claude,
-      chat-ui) green.
+- [x] typecheck (all 4 projects) green; fikra-approvals 28/28 (17 L1 +
+      11 L2); resolver-kind 5/5; confirmation-mediate 10/10 (the #210
+      fact test updated to the layered contract: headless refuses,
+      interactive settles and is recorded); mcp-shim 5/5; tmax-use smoke
+      PASS; related suites green. Suites run with the repo convention
+      `--timeout 20000` (bun's 5s default is exceeded by multi-editor
+      tests under parallel load); the L1 live-adapter test now forces the
+      probe override "off" so no suite shells out to `claude --help`.
+
+## Known bounds (gate round-1, accepted + documented)
+
+- **Residual same-uid bypass.** A determined same-uid process can
+  connect-frame (open same-user RPC) and then send frame-attached
+  keypresses, emulating a TUI. This is inside the RFC's stated boundary —
+  "the security boundary for resolving an approval is the same as every
+  other tmax RPC: an authenticated same-user daemon connection." The
+  default policy blocks the trivial, documented surface
+  (`tmaxclient --eval` and frameless keypresses); a presence requirement
+  is the user's guard-override territory. Same-uid is the outer wall for
+  ALL daemon RPC, not just approvals.
+- **Token filesystem visibility.** The per-turn mediate token lives in
+  `.tmax/fikra/mcp/<thread>-<turn>.json` (chmod 600, gitignored) inside
+  the workspace the agent operates on — a same-user agent CAN read it.
+  The token authorizes ORIGINATING a mediate (source-bound), never
+  RESOLVING one; the worst a reader can do is file mediate requests that
+  prompt the USER. The RFC's "never transits model-controlled space"
+  refers to the model's tool-input space (the CLI's prompt context),
+  which holds.
+- The `#210` mediate suite's fact test now pins the layered contract
+  (headless refuses, interactive settles) — the primitive's default
+  behavior changed BY DESIGN in #220.
 
 ## Notes
 

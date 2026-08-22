@@ -157,6 +157,9 @@ Returns the token (nil when the capability probe failed — L2 stays off)."
                 "\"command\":\"bun\","
                 "\"args\":[\"bin/tmax-mcp-confirmation.ts\",\"fikra\",\""
                 token "\"]}}}"))
+      ;; Best-effort 0600 (gate note): the token authorizes ORIGINATING a
+      ;; mediate, never resolving — but don't leave it world-readable.
+      (shell-command (concat "chmod 600 " path))
       token)))
 
 ;; ── normalization: one JSONL line → FAEP events (pure, fixture-tested) ──

@@ -81,6 +81,12 @@ export class ConfirmationService {
   /** FACT channel: the daemon eval path stamps the resolving client's kind
    * around evals; resolve() reads it at decision time. Default "unknown". */
   resolverHint: string = "unknown";
+  /** #220 (RFC-027 §Security): the PRIMITIVE enforces the default resolve
+   * policy — "interactive-only" refuses headless resolvers (the wrapper
+   * guard alone was bypassable by calling confirmation-resolve directly;
+   * gate catch). Flipped to "permissive" only by the provenance-checked
+   * setter op (which itself refuses headless callers). */
+  resolvePolicy: "interactive-only" | "permissive" = "interactive-only";
 
   reset(): void {
     for (const entry of this.pending.values()) this.clearTimer(entry);
@@ -90,6 +96,7 @@ export class ConfirmationService {
     this.resolutions.clear();
     this.nextId = 1;
     this.resolverHint = "unknown";
+    this.resolvePolicy = "interactive-only";
   }
 
   registerHandler(source: string, handler: HandlerFn): void {
@@ -158,8 +165,20 @@ export class ConfirmationService {
 
   /** First resolver wins. Returns the resolution record when this call
    * settled the request; null when already settled (idempotent no-op — the
-   * contest is still AUDITED on the original record). */
+   * contest is still AUDITED on the original record) or when the resolve
+   * POLICY refused this caller (#220: a headless resolver under the default
+   * interactive-only policy — the request stays pending, audited). */
   resolve(id: number, decision: ConfirmationDecision): ResolutionRecord | null {
+    if (this.resolvePolicy === "interactive-only" && this.resolverHint === "headless") {
+      // Refused BEFORE any settle: audit the attempt on the record if one
+      // exists, leave the entry pending for an interactive client.
+      const prior = this.resolutions.get(id);
+      if (prior) {
+        prior.contestedBy = prior.contestedBy ?? [];
+        prior.contestedBy.push(`denied/headless/${decision}`);
+      }
+      return null;
+    }
     const entry = this.pending.get(id);
     if (!entry) {
       // Already settled: audit the contested attempt on the original record.

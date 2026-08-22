@@ -43,8 +43,19 @@ interactive-frames-only guard. Set via fikra-set-approval-guard only
 
 (defun fikra-set-approval-guard (fn-name)
   "Override the approval resolve guard (default: interactive-frames-only).
-FN-NAME is a T-Lisp function name answering t/nil."
-  (setq fikra-approval-guard-override fn-name))
+FN-NAME is a T-Lisp function name answering t/nil.
+PROVENANCE-CHECKED (gate catch): refuses a headless caller — an agent
+reaching this via eval must not install a trivially-passing guard and
+unlock its own approvals. Installing the override ALSO relaxes the
+primitive-level policy (the enforcement lives in BOTH layers)."
+  (if (string= (confirmation-resolver-kind) "headless")
+    (progn
+      (editor-set-status "Fikra: guard override refused — interactive client required")
+      nil)
+    (progn
+      (setq fikra-approval-guard-override fn-name)
+      (confirmation-set-resolve-policy "permissive")
+      fn-name)))
 
 (defun fikra-approval-resolve-guard ()
   "t when the CURRENT resolver may answer approvals. Default policy:

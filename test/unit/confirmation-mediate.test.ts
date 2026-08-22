@@ -127,19 +127,23 @@ describe("#210 confirmation/mediate — deferred resolution", () => {
     expect(record?.contestedBy?.length).toBe(1);
   });
 
-  test("client-kind FACT captured on resolution (headless vs interactive)", async () => {
+  test("client-kind FACT captured on resolution (interactive settles; headless is REFUSED by the #220 policy)", async () => {
     const editor = await createStartedEditor("");
     setupTestHandler(editor);
     const token = mint(editor);
     const pending = mediateRaw({ token, timeoutMs: 5_000 });
     const id = Number((executeTlisp(editor, "(confirmation-pending)").value as { value: unknown }[])[0]!.value);
-    // Simulate the daemon stamping the resolving eval's client kind (#220's
-    // interactive-only policy consumes this fact).
+    // Simulate the daemon stamping the resolving dispatch's client kind
+    // (#220's interactive-only policy consumes this fact). A HEADLESS
+    // resolve is now refused at the primitive — the entry stays pending.
     confirmationService.resolverHint = "headless";
+    expect(String(executeTlisp(editor, `(confirmation-resolve ${id} "allow")`).value)).toBe("false");
+    expect(confirmationService.pendingList()).toHaveLength(1);
+    // An INTERACTIVE resolver settles; the FACT is captured on the record.
+    confirmationService.resolverHint = "interactive";
     executeTlisp(editor, `(confirmation-resolve ${id} "allow")`);
-    confirmationService.resolverHint = "unknown";
     await pending;
-    expect(confirmationService.resolution(id)?.resolverKind).toBe("headless");
+    expect(confirmationService.resolution(id)?.resolverKind).toBe("interactive");
   });
 
   test("unregistered source: immediate reject, no prompt", async () => {

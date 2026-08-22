@@ -1,8 +1,18 @@
 # #220 (RFC-027 §D5 L2) — OPT-IN smoke: live interactive approvals.
-# Requires: a claude CLI with --permission-prompt-tool (the recorded 2.1.195
-# surface LACKS it — run with the capability forced via init.tlisp:
-#   (fikra/backend-claude/fikra-claude-set-approvals-override "on")
-# after (require-module fikra/backend-claude)) plus API credentials.
+# Requires ALL of:
+#   1. A claude CLI with --permission-prompt-tool (the recorded 2.1.195
+#      surface LACKS it — force the capability in init.tlisp:
+#        (require-module fikra/backend-claude)
+#        (fikra/backend-claude/fikra-claude-set-approvals-override "on"))
+#   2. API credentials.
+#   3. The permissive resolve policy in init.tlisp — this driver's
+#      keypresses are FRAMELESS (one connection per request), so the
+#      daemon classifies them headless; the documented escape hatch:
+#        (defun always-allow () t)
+#        (require-module fikra/approvals)
+#        (fikra/approvals/fikra-set-approval-guard "always-allow")
+#      (Runs at startup where the resolver kind is "unknown" — accepted.
+#      The same call from an eval context is REFUSED, by design.)
 # NEVER required for CI; the hermetic gates live in
 # test/unit/fikra-approvals.test.ts (#220 L2 section) and
 # test/unit/mcp-confirmation-shim.test.ts.

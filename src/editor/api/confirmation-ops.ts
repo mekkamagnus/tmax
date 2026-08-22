@@ -52,6 +52,35 @@ export function createConfirmationOps(deps: ConfirmationOpsDeps): Map<string, TL
     return Either.right(createString(confirmationService.resolverHint));
   });
 
+  // (confirmation-set-resolve-policy "permissive"|"interactive-only").
+  // The DELIBERATE act that re-enables headless resolution (RFC-027
+  // §Security). PROVENANCE-CHECKED: refuses a headless caller — an agent
+  // that can reach eval must not be able to unlock its own approvals.
+  // init.tlisp (startup, "unknown") and interactive M-x users pass.
+  api.set("confirmation-set-resolve-policy", (args: TLispValue[]): Either<AppError, TLispValue> => {
+    const count = validateArgsCount(args, 1, "confirmation-set-resolve-policy");
+    if (Either.isLeft(count)) return Either.left(count.left);
+    const policyE = stringArg(args, 0, "confirmation-set-resolve-policy");
+    if (Either.isLeft(policyE)) return Either.left(policyE.left);
+    const policy = policyE.right;
+    if (policy !== "permissive" && policy !== "interactive-only") {
+      return Either.left(createValidationError(
+        "ConstraintViolation",
+        "confirmation-set-resolve-policy: policy must be permissive or interactive-only",
+        "policy",
+        policy,
+        "permissive | interactive-only",
+      ));
+    }
+    if (confirmationService.resolverHint === "headless") {
+      // Refusal is an expected OUTCOME (not a type error) — return nil so
+      // T-Lisp callers can branch on it; the policy is unchanged.
+      return Either.right(createNil());
+    }
+    confirmationService.resolvePolicy = policy;
+    return Either.right(createString(policy));
+  });
+
   // (confirmation-token-mint "source" "scope") → token string
   api.set("confirmation-token-mint", (args: TLispValue[]): Either<AppError, TLispValue> => {
     const count = validateArgsCount(args, 2, "confirmation-token-mint");

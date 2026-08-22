@@ -119,6 +119,31 @@ function removeFile(path: string): void {
   try { unlinkSync(path); } catch { /* already gone */ }
 }
 
+/**
+ * #220 (RFC-027 §Security): the resolver-kind FACT. "interactive" requires
+ * an ATTACHED FRAME — a keypress whose frameId names a frame the daemon
+ * knows. A frameless keypress (any same-uid process can write raw JSON-RPC
+ * to the socket; the agent can do it from Bash) and every eval are
+ * "headless". Everything else keeps the prior value ("unknown" = embedded
+ * mode's single local user — interactive by construction).
+ *
+ * Exported pure for unit tests — this is the only barrier between an eval
+ * client and "headless", so the mapping itself is pinned.
+ */
+export function computeResolverKind(
+  current: string,
+  method: string,
+  params: Record<string, unknown>,
+  frames: Map<string, unknown>,
+): string {
+  if (method === "keypress") {
+    const frameId = typeof params.frameId === "string" ? params.frameId : undefined;
+    return frameId !== undefined && frames.has(frameId) ? "interactive" : "headless";
+  }
+  if (method === "eval") return "headless";
+  return current;
+}
+
 export class TmaxServer {
   private server: Server;
   private socketPath: string;
@@ -1342,17 +1367,13 @@ export class TmaxServer {
    */
   private async processRequest(request: JSONRPCRequest): Promise<JSONRPCResponse> {
     // #220 (RFC-027 §Security): stamp the FACT the approval resolve guard
-    // reads — which KIND of client is driving this dispatch. Frame-scoped
-    // keypress = an attached TUI (interactive); eval = the surface a
-    // headless client (incl. an agent-spawned `tmaxclient --eval`) can
-    // reach. Stamped HERE (TS-side only): the kind must never be settable
-    // from T-Lisp — an agent with eval access must not be able to mark
-    // itself interactive. Everything else stays "unknown" (embedded mode
-    // has a single local user — interactive by construction).
+    // reads — which KIND of client is driving this dispatch. Pure logic in
+    // computeResolverKind (unit-tested); "interactive" requires an ATTACHED
+    // FRAME (a frameless keypress — forgeable by any same-uid process
+    // writing raw JSON-RPC to the socket — is NOT interactive; gate catch).
+    const params = typeof request.params === "object" && request.params !== null ? request.params as Record<string, unknown> : {};
     confirmationService.resolverHint =
-      request.method === "keypress" ? "interactive"
-      : request.method === "eval" ? "headless"
-      : confirmationService.resolverHint;
+      computeResolverKind(confirmationService.resolverHint, request.method, params, this.frames);
     return routeRequest(this.rpcHandlers(), request, (info) => {
       this.recordError(
         info.method,

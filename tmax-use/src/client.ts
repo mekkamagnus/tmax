@@ -243,6 +243,11 @@ export class TmaxClient {
   keys(values: readonly string[]): TaskEither<TmaxUseError, void> {
     if (values.length === 0) return TaskEither.right<void, TmaxUseError>(undefined);
     return TaskEither.from(async () => {
+      // NOTE (#220): these are FRAMELESS keypresses (each request is its own
+      // connection — frames can't attach), which the daemon's resolver-kind
+      // stamp classifies as headless. That is correct for a test driver;
+      // interactive approval answers need an attached-frame client (the real
+      // TUI) or the documented init.tlisp permissive-policy escape hatch.
       for (const value of values) {
         const r = await this.deps.request('keypress', { key: value }).run();
         if (Either.isLeft(r)) return leftE<void>(r.left);
