@@ -127,6 +127,36 @@ describe("#225 workflows — create-or-append labeled threads", () => {
     expect(String(e(editor, "(fikra/thread/fikra-thread-current)").value)).toBe("fix-2");
   });
 
+  test("GATE: a LEGACY archived row (boolean true, pre-label-clear state) never routes", async () => {
+    const editor = await setup();
+    e(editor, "(fikra-explain)");
+    // Simulate a PRE-fix archive: the label stays, archived is JSON true
+    // (what old archives left on disk). The scan must still skip it.
+    const statePath = join(repoDir, ".tmax/fikra/threads/fix-1/state.json");
+    const state = JSON.parse(readFileSync(statePath, "utf8"));
+    state.archived = true; // boolean — json-read decodes to boolean, not "true"
+    writeFileSync(statePath, JSON.stringify(state));
+    expect(String(e(editor, '(fikra-workflow-thread-for "explain")').value)).toBe("null");
+    // Re-invoke: a FRESH thread.
+    e(editor, `(fikra/backend-replay/fikra-backend-replay-load "${join(repoDir, "fixture.jsonl")}")`);
+    e(editor, "(fikra-explain)");
+    expect(String(e(editor, '(fikra-workflow-thread-for "explain")').value)).toBe("fix-2");
+  });
+
+  test("GATE: the origin RE-PINS when the workflow is invoked from a different user buffer", async () => {
+    const editor = await setup("first-buffer-content\n");
+    e(editor, "(fikra-explain)");
+    // Switch to a DIFFERENT user buffer and re-invoke: the context comes
+    // from the NEW buffer (the origin re-pins), not the first.
+    e(editor, '(progn (buffer-create "second.txt") (buffer-switch "second.txt") (buffer-insert "second-buffer-content"))');
+    e(editor, `(fikra/backend-replay/fikra-backend-replay-load "${join(repoDir, "fixture.jsonl")}")`);
+    e(editor, "(fikra-explain)");
+    const log = readFileSync(join(repoDir, ".tmax/fikra/threads/fix-1/events.jsonl"), "utf8");
+    const echoes = log.trimEnd().split("\n").map((l) => JSON.parse(l)).filter((ev) => ev.kind === "text-delta" && ev.text.startsWith("You:"));
+    expect(echoes[1]!.text).toContain("second-buffer-content");
+    expect(echoes[1]!.text).not.toContain("first-buffer-content");
+  });
+
   test("GATE: re-invocation contexts come from the ORIGIN buffer, not the chat buffer", async () => {
     const editor = await setup("unique-origin-content-42\n");
     e(editor, "(fikra-explain)");

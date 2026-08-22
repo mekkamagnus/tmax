@@ -68,7 +68,7 @@ dragged back to main.
       probe catch — pinned implicitly by every workflow test running on
       the forced replay backend).
 - [x] fikra-build-context includes file/mode/selection/buffer (pinned).
-- [x] typecheck green; fikra-workflows 11/11 (incl. the archive-routing + origin-context gate pins); the touched-suite batch green.
+- [x] typecheck green; fikra-workflows 13/13 (archive-routing, legacy-boolean row, origin re-pin, origin-context pins); the touched-suite batch green.
 
 ## Gate round — routing + context-drift findings (all fixed)
 
@@ -82,6 +82,21 @@ dragged back to main.
   transcript as "context". Each workflow now remembers its ORIGIN buffer
   (first invocation) and re-snapshots from it (pinned: the second
   invocation's echo carries the origin buffer's content, not the chat).
+
+## Gate round 2 — the boolean check + origin re-pinning (all fixed)
+
+- **DEAD archived-row check**: `json-read` decodes JSON `true` to the
+  BOOLEAN t, but the skip tested the STRING "true" — it never fired, so
+  a legacy archived row (the exact pre-fix on-disk shape) still routed.
+  Live check now `(eq arch t)` (string "true" kept for hand-written
+  states); pinned with a seeded legacy state.json {workflow, archived:
+  boolean true} → no route → a fresh thread takes over.
+- **Origin re-pinning**: the origin was pinned once per session — invoking
+  the workflow later from a DIFFERENT buffer silently snapshotted the
+  first buffer, and a post-restart first invocation (chat buffer current)
+  could pin the chat buffer. Origins now re-pin whenever the invocation
+  comes from a real user buffer (fikra special buffers never pin); pinned:
+  the second invocation from second.txt carries second-buffer content.
 
 ## Notes
 

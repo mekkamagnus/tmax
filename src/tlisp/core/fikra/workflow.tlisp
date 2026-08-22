@@ -39,6 +39,9 @@ in-session labels ride the registry."
   ;; Gate catch: ARCHIVED threads never route — an archived workflow
   ;; thread would be resurrected and forever starve a same-labeled
   ;; successor. (Archive also clears the label — belt and braces.)
+  ;; Round-2 catch: json-read decodes JSON true to a BOOLEAN — a
+  ;; string= test never fired; booleanp is the live check (string "true"
+  ;; kept for hand-written states).
   (if (or found (null ids))
     found
     (let* ((id (car ids))
@@ -46,8 +49,12 @@ in-session labels ride the registry."
            (wf (if row (fikra-workflow-field-of row "workflow") nil))
            (arch (if row (fikra-workflow-field-of row "archived") nil)))
       (fikra-workflow-find label (cdr ids)
+        ;; json-read decodes JSON true to the BOOLEAN t — eq t is the
+        ;; live check (booleanp does not exist; string "true" kept for
+        ;; hand-written states).
         (if (and wf (string= wf label)
-                 (not (and (stringp arch) (string= arch "true"))))
+                 (not (or (eq arch t)
+                          (and (stringp arch) (string= arch "true")))))
           id nil)))))
 
 ;; alist getter for a parsed state row (json-read 2-list alists).
@@ -63,47 +70,40 @@ in-session labels ride the registry."
 
 (defun fikra-workflow-open (label prompt)
   "Open-or-reuse the workflow's labeled thread and send PROMPT+context.
-Creates `wf-<label>` on first use (inheriting the runtime mode); later
-invocations append to the SAME thread."
+Creates a labeled thread on first use (inheriting the runtime mode);
+later invocations append to the SAME thread."
   ;; Start fikra ONLY when inactive — re-starting resets the backend to
   ;; the default (probe catch: rounds 2+ lost the replay backend).
   (require-module fikra/mode)
   (if (not (fikra-active-p))
     (condition-case nil (fikra-start) (error () nil))
     nil)
-  ;; Snapshot the context from the USER'S buffer. Gate catch: on a SECOND
-  ;; invocation the current buffer is the workflow's own chat buffer —
-  ;; remember the ORIGIN buffer on first open and re-snapshot from it
-  ;; (the context-first in-call ordering alone did not fix cross-invocation
-  ;; drift).
-  (let* ((origin (or (hashmap-get fikra-workflow-origins label)
-                     (progn
-                       (editor/keymaps/keymap-mutable-set! fikra-workflow-origins
-                         label (buffer-current))
-                       (buffer-current))))
-         (in-origin (string= (buffer-current) origin))
-         (context (if in-origin
-                   (fikra-build-context)
-                   (progn
-                     (buffer-switch origin)
-                     (let ((ctx (fikra-build-context)))
-                       ;; back to wherever we were (the switch path below
-                       ;; re-targets the thread buffer anyway)
-                       ctx))))
-         (existing (fikra-workflow-thread-for label)))
-    (if existing
-      (fikra/thread/fikra-thread-switch existing)
-      (fikra-workflow-label-thread label))
-    ;; Chat surface: buffer + the snapshotted context prompt.
-    (require-module fikra/chat)
-    (condition-case nil (fikra/chat/fikra-chat-open) (error () nil))
-    (let ((message (concat prompt "\n\n" context)))
-      (require-module fikra/adapter)
-      (condition-case nil
-        (progn
-          (require-module fikra/chat)
-          (fikra/chat/fikra-turn-send message))
-        (error () (editor-set-status "Fikra: no backend — SPC a b to select"))))))
+  ;; Gate rounds 1+2: snapshot the context from the USER'S buffer. The
+  ;; origin RE-PINS whenever the invocation comes from a real user buffer
+  ;; (not a fikra special buffer) — a forever-pinned first origin would
+  ;; snapshot the wrong buffer when the user moves, and a post-restart
+  ;; first invocation lands in the chat buffer. Special buffers never pin.
+  (let ((cur (buffer-current)))
+    (if (not (or (string-prefix-p "*" cur) (string= cur "default")))
+      (editor/keymaps/keymap-mutable-set! fikra-workflow-origins label cur)
+      nil))
+  (let ((origin (or (hashmap-get fikra-workflow-origins label) (buffer-current))))
+    ;; Switch to the origin buffer for the snapshot when needed.
+    (if (not (string= (buffer-current) origin))
+      (buffer-switch origin)
+      nil)
+    (let ((context (fikra-build-context)))
+      (let ((existing (fikra-workflow-thread-for label)))
+        (if existing
+          (fikra/thread/fikra-thread-switch existing)
+          (fikra-workflow-label-thread label))
+        ;; Chat surface: buffer + the snapshotted context prompt.
+        (require-module fikra/chat)
+        (condition-case nil (fikra/chat/fikra-chat-open) (error () nil))
+        (let ((message (concat prompt "\n\n" context)))
+          (condition-case nil
+            (fikra/chat/fikra-turn-send message)
+            (error () (editor-set-status "Fikra: no backend — SPC a b to select"))))))))
 
 (defun fikra-workflow-label-thread (label)
   "Create (and focus) a thread for workflow LABEL, recording the label in
@@ -194,7 +194,7 @@ Cover happy paths, edge cases, and error conditions."
 ;; ── custom workflows (RFC-013 §Custom Workflow, thread-aware) ───────
 (defvar fikra-custom-workflows (hashmap)
   "name → prompt string. (fikra-register-workflow name prompt) from
-init.tlisp; invoke via (fikra-run-named-workflow name) or bind a key.")
+init.tlisp; invoke via fikra-run-named-workflow or bind a key.")
 
 (defun fikra-register-workflow (name prompt)
   "Register a custom workflow NAME with PROMPT (thread-aware: it gets
