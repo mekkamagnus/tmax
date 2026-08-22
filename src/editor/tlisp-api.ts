@@ -1589,7 +1589,15 @@ function buildEditorAPIContributions(): readonly EditorAPIContribution[] {
                   const text = decoder.decode(value, { stream: true });
                   tailBuf += text;
                   if (filterName && ctx.evalTlisp) {
-                    const expr = `(${filterName} ${pid} ${JSON.stringify(text)})`;
+                    // #224 gate catch: the chunk must cross the READER-SAFE
+                    // boundary — interpolating JSON into a T-Lisp string
+                    // literal lets the reader strip backslash escapes
+                    // (escaped quotes become real quotes → the JSON parse
+                    // drops the event). HEX-ENCODE the chunk (hex chars are
+                    // reader-safe) and let hex-decode restore the exact
+                    // bytes inside the filter call.
+                    const hex = Buffer.from(text, "utf8").toString("hex");
+                    const expr = `(${filterName} ${pid} (hex-decode "${hex}"))`;
                     filterChain = filterChain
                       .then(() => ctx.evalTlisp!(expr))
                       .catch((e: unknown) => {

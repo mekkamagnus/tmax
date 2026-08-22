@@ -181,6 +181,36 @@ describe("#224 backend registry + switcher", () => {
     expect(String(e(editor, "(fikra/adapter/fikra-current-backend)").value)).toBe("codex");
   });
 
+  test("GATE: escaped-quote payloads survive the READER boundary (hex transport) — no dropped events", async () => {
+    const editor = await setup();
+    e(editor, "(fikra/backend-codex/fikra-backend-codex-adopt-pid 0)");
+    // Real codex emits escaped quotes in commands constantly. The transport
+    // hex-encodes chunks (the T-Lisp reader strips literal-level escapes —
+    // plain JSON.stringify DROPPED these events); hex-decode restores the
+    // exact bytes.
+    const line = '{"type":"item.started","item":{"id":"i9","type":"command_execution","command":"grep \\"x\\" f.txt","status":"in_progress"}}';
+    const hex = Buffer.from(line + "\n", "utf8").toString("hex");
+    e(editor, `(fikra/backend-codex/fikra-backend-codex-filter 0 (hex-decode "${hex}"))`);
+    const log = readFileSync(join(repoDir, ".tmax/fikra/threads/main/events.jsonl"), "utf8");
+    const kinds = log.trimEnd().split("\n").map((l) => JSON.parse(l).kind);
+    expect(kinds).toContain("tool-call"); // NOT dropped
+    expect(log).toContain("grep");
+  });
+
+  test("GATE: a BACKGROUND turn records its session id (the #222 bar)", async () => {
+    const editor = await setup();
+    e(editor, "(require-module fikra/threads)");
+    e(editor, "(fikra/thread/fikra-thread-new)"); // fix-1 owns the turn
+    e(editor, "(fikra/backend-codex/fikra-backend-codex-adopt-pid 7)");
+    const feed = RECORDED.threadStarted + "\n";
+    const hex = Buffer.from(feed, "utf8").toString("hex");
+    e(editor, `(fikra/backend-codex/fikra-backend-codex-filter 7 (hex-decode "${hex}"))`);
+    // Focus MAIN afterwards — fix-1's session id must STILL be recorded.
+    e(editor, '(fikra/thread/fikra-thread-switch "main")');
+    e(editor, '(fikra/thread/fikra-thread-switch "fix-1")');
+    expect(String(e(editor, "(fikra/thread/fikra-thread-session-id)").value)).toBe("01a0295e-d5d5-78b0-8aae-9c765160cbd5");
+  });
+
   test("a recorded transcript streams end-to-end into the thread's own log", async () => {
     const editor = await setup();
     e(editor, "(fikra/backend-codex/fikra-backend-codex-adopt-pid 0)");

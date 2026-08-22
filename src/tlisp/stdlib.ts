@@ -333,6 +333,26 @@ export function registerStdlibFunctions(interpreter: TLispInterpreter): void {
     return result as TLispValue;
   };
 
+  // #224 gate catch: process-output chunks must cross the READER-safe
+  // boundary — the T-Lisp reader processes backslash escapes in string
+  // literals, so raw JSON payloads lose their escaped quotes (and with
+  // them whole events). The transport hex-encodes the chunk (hex chars
+  // are reader-safe); this decodes it back to the exact original string.
+  interpreter.defineBuiltin("hex-decode", (args: TLispValue[]) => {
+    if (args.length !== 1 || !args[0] || args[0].type !== "string") {
+      return Either.left({ type: "EvalError", variant: "TypeError", message: "hex-decode requires a hex string" });
+    }
+    const hex = args[0].value as string;
+    if (hex.length % 2 !== 0 || !/^[0-9a-f]*$/.test(hex)) {
+      return Either.left({ type: "EvalError", variant: "TypeError", message: "hex-decode: invalid hex string" });
+    }
+    const bytes = new Uint8Array(hex.length / 2);
+    for (let i = 0; i < bytes.length; i++) {
+      bytes[i] = parseInt(hex.slice(i * 2, i * 2 + 2), 16);
+    }
+    return Either.right(createString(new TextDecoder().decode(bytes)));
+  });
+
   interpreter.defineBuiltin("promise-resolved-p", (args: TLispValue[]) => {
     if (args.length !== 1 || !args[0] || !isPromise(args[0])) {
       return Either.left({ type: "EvalError", variant: "TypeError", message: "promise-resolved-p requires a promise" });

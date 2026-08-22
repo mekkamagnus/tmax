@@ -59,7 +59,22 @@ normalization to FAEP, and the #222-hardened per-thread turn pattern.
       probed; the forced seam always works (keyless) (pinned).
 - [x] A recorded transcript streams end-to-end into the thread's OWN log
       with the session id recorded in thread state (pinned).
-- [x] typecheck green; fikra-codex 9/9; the batch suites green.
+- [x] typecheck green; fikra-codex 11/11 (incl. the escaped-quote hex-transport pin + the background session-id pin); the batch suites green.
+
+## Gate round — the transport + parity findings (all fixed)
+
+- **THE READER BOUNDARY (HIGH)**: interpolating process chunks into
+  T-Lisp string literals let the READER strip backslash escapes — an
+  escaped quote in any command/output became a REAL quote inside the
+  JSON and the parse DROPPED the whole event (fixtures only had `\n`,
+  so it was unpinned). The transport now HEX-ENCODES chunks (hex chars
+  are reader-safe) and a new pure `hex-decode` stdlib op restores the
+  exact bytes — pinned with an escaped-quote payload through the real
+  filter path.
+- **Background session-id loss** (the #222 bar): the filter recorded the
+  resume handle only when its thread was FOCUSED — background turns now
+  record via `fikra-thread-set-session-id-for` (pinned: a background
+  turn's session id survives a focus switch).
 
 ## Notes
 

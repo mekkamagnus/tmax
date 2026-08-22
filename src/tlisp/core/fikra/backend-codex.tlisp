@@ -194,10 +194,13 @@ regex, no nested string-escape quoting."
     ;; Unknown pid → DROP (never assume focused).
     (if (and thread-id events)
       (progn
-        (if (string= thread-id (fikra/thread/fikra-thread-current))
-          (dolist (e events)
-            (if (string= (fikra-codex-field e "kind") "session")
-              (fikra/thread/fikra-thread-set-session-id (fikra-codex-field e "id")))))
+        ;; Gate catch: record the resume handle ON THE TURN'S THREAD — a
+        ;; background codex turn must not lose its session id (#222 bar).
+        (dolist (e events)
+          (if (string= (fikra-codex-field e "kind") "session")
+            (if (string= thread-id (fikra/thread/fikra-thread-current))
+              (fikra/thread/fikra-thread-set-session-id (fikra-codex-field e "id"))
+              (fikra/thread/fikra-thread-set-session-id-for thread-id (fikra-codex-field e "id")))))
         (fikra/event/fikra-event-emit-batch-for thread-id events)))))
 
 (defun fikra-backend-codex-line-events (chunk)
