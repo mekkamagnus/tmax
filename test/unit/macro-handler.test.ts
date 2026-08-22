@@ -84,8 +84,10 @@ describe("SPEC-044 Phase 1.F — q dispatcher records into registers", () => {
   test("q<Escape> cancels pending record and quits the editor", async () => {
     const editor = await createStartedEditor("hello\nworld");
     await press(editor, "q");
-    await editor.handleKey("Escape");
     // Editor signals quit via EDITOR_QUIT_SIGNAL thrown from handleKey chain.
+    // BUG-83 (#226): the signal used to be swallowed by executeCommandAsync's
+    // form re-eval — it now propagates; assert it.
+    await expect(editor.handleKey("Escape")).rejects.toThrow("EDITOR_QUIT_SIGNAL");
     // After the signal, recording must NOT be active.
     expect(isRecording(editor)).toBe(false);
     expect(currentRegister(editor)).toBe(null);

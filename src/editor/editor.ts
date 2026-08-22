@@ -30,6 +30,7 @@ import { Either } from "../utils/task-either.ts";
  */
 const HIGHLIGHT_RECOMPUTE_VIEWPORT_LINES = 50;
 import { renderDiagnostic } from "../tlisp/diagnostic-renderer.ts";
+import type { TLispDiagnostic } from "../tlisp/diagnostics.ts";
 import { TextBufferImpl } from "../core/buffer.ts";
 import { MessageLog, type LogLevel } from "./message-log.ts";
 import { Log, ViewBoundLog } from "./log-store.ts";
@@ -2347,24 +2348,33 @@ export class Editor {
       }
 
       const err = result.left;
-      const source = command.trim().startsWith("(") ? command : `(${command})`;
-      const head = this.commandHead(source);
-      const callable = head ? this.resolveCallable(head) : undefined;
-      if (callable?.env && callable.value.type === "function") {
-        const expr = this.interpreter.parse(source);
-        return this.interpreter.evalAsync!(expr, callable.env);
+      // BUG-83 (#226): the module-env RETRY is only for BARE command names
+      // (executeAsync evaluates in the global env; a module-scoped symbol
+      // needs the callable's own env). Re-evaluating an already-parenthesized
+      // FORM whose eval FAILED silently swallowed the failure: the M-x
+      // accept chain ran once (closing the minibuffer + signaling), the
+      // retry re-ran dispatch on the CLEARED session, returned a harmless
+      // nil, and the quit signal/error died with no status, no log.
+      if (!command.trim().startsWith("(")) {
+        const source = `(${command.trim()})`;
+        const head = this.commandHead(source);
+        const callable = head ? this.resolveCallable(head) : undefined;
+        if (callable?.env && callable.value.type === "function") {
+          const expr = this.interpreter.parse(source);
+          const retried = await this.interpreter.evalAsync!(expr, callable.env);
+          if (Either.isRight(retried)) {
+            return retried;
+          }
+          // The retry failed too — surface IT (it carries the module-env
+          // context) through the shared error path below.
+          return this.reportCommandError(retried.left);
+        }
       }
 
       if (err.message === 'EDITOR_QUIT_SIGNAL') {
         throw new Error('EDITOR_QUIT_SIGNAL');
       }
-      if (err.diagnostic) {
-        this.applyUpdate({ type: "SetStatusMessage", message: `[${err.diagnostic.code}] ${err.message}` });
-        this.logMessage(renderDiagnostic(err.diagnostic), 'error', this.model.lastCommand);
-      } else {
-        this.applyUpdate({ type: "SetStatusMessage", message: err.message });
-        this.logMessage(err.message, 'error', this.model.lastCommand);
-      }
+      this.reportCommandError(err);
       return result;
     } catch (error) {
       if (error instanceof Error && (error.message === "EDITOR_QUIT_SIGNAL" || error.message.includes("EDITOR_QUIT_SIGNAL"))) {
@@ -2373,6 +2383,21 @@ export class Editor {
       this.applyUpdate({ type: "SetStatusMessage", message: `Error: ${error instanceof Error ? error.message : String(error)}` });
       this.logMessage(this.model.statusMessage, 'error', this.model.lastCommand);
       throw error;
+    }
+  }
+
+  /**
+   * BUG-83 (#226): surface a failed command's error on the status line and
+   * in *Messages* (diagnostic-aware). Previously the M-x accept chain could
+   * swallow failures entirely.
+   */
+  private reportCommandError(err: { message: string; diagnostic?: TLispDiagnostic }): void {
+    if (err.diagnostic) {
+      this.applyUpdate({ type: "SetStatusMessage", message: `[${err.diagnostic.code}] ${err.message}` });
+      this.logMessage(renderDiagnostic(err.diagnostic), 'error', this.model.lastCommand);
+    } else {
+      this.applyUpdate({ type: "SetStatusMessage", message: err.message });
+      this.logMessage(err.message, 'error', this.model.lastCommand);
     }
   }
 
