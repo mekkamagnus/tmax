@@ -119,7 +119,10 @@ test('callable-command-details with interactive-only excludes stdlib + internal 
     const filtered = evalStr(editor, '(length (callable-command-details t))');
     const full = evalStr(editor, '(length (callable-command-details))');
     expect(filtered).toBeLessThan(full);
-    expect(filtered).toBeLessThan(200); // ~146 today (was ~1,164)
+    // #198: ceiling bumped — the interactive command surface grew with the
+    // fikra (SPC a *) and markdown feature landings; the GUARD is
+    // filtered << full (the 1,164 stdlib explosion), not an exact count.
+    expect(filtered).toBeLessThan(300); // ~231 today (was ~146; 1,164 pre-guard)
     // Stdlib and internal helpers are excluded.
     for (const name of ['car', 'cdr', 'string-join', 'mapcar', '+']) {
       expect(inFiltered(editor, name)).toBe(false);

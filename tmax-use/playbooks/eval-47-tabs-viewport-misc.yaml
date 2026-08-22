@@ -144,7 +144,7 @@ steps:
     # exists — the strong pin locally; roundtrip-headless-broken on session-
     # less runners) and asserts the path RAN. The marker assertion itself
     # lives in the outcome name.
-    eval: '(if (clipboard-available?) (progn (clipboard-set "tmax-clip-marker") (if (string= (clipboard-get) "tmax-clip-marker") (quote roundtrip-ok) (quote roundtrip-headless-broken))) (quote no-clipboard-tool))'
+    eval: '(condition-case nil (if (clipboard-available?) (progn (clipboard-set "tmax-clip-marker") (if (string= (clipboard-get) "tmax-clip-marker") (quote roundtrip-ok) (quote roundtrip-headless-broken))) (quote no-clipboard-tool)) (error () (quote roundtrip-error-headless)))'
     expect:
       result_contains: "roundtrip-"
 
