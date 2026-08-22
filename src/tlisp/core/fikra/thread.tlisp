@@ -93,7 +93,7 @@ history into it (daemon-restart reopen path), focus it."
             ;; Overlay persisted fields onto fresh defaults (forward-
             ;; compatible: unknown persisted fields ignored, missing fields
             ;; keep defaults).
-            (dolist (key (list "backend" "session-id" "runtime-mode" "turn-count"))
+            (dolist (key (list "backend" "session-id" "runtime-mode" "trust" "turn-count"))
               (let ((v (fikra-alist-get key parsed)))
                 (if (not (null v))
                   (editor/keymaps/keymap-mutable-set! state key v))))
@@ -123,6 +123,7 @@ history into it (daemon-restart reopen path), focus it."
                      (list "backend" (fikra-thread-field "backend"))
                      (list "session-id" (fikra-thread-field "session-id"))
                      (list "runtime-mode" (fikra-thread-field "runtime-mode"))
+                     (list "trust" (fikra-thread-field "trust"))
                      (list "turn-count" (fikra-thread-field "turn-count")))))))
 
 (defun fikra-thread-current ()

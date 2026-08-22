@@ -103,15 +103,52 @@ test was updated to the new format.
       (pinned via direct fikra-runtime-mode-degrade calls).
 - [x] Unknown backend: no surface record → everything degrades to
       `approval-required` (pinned).
-- [x] Trust-add is idempotent; trust-has-p queries (pinned).
+- [x] Trust-add is idempotent; trust-has-p queries; trust PERSISTS to
+      `state.json` (gate round-1 catch: the writer never persisted the
+      `trust` field and trust-add never saved — trust died on restart;
+      both fixed + pinned) AND a fresh editor reads it back (codex-review
+      catch: persisted ≠ reloaded; pinned).
 - [x] Modeline shows the EFFECTIVE mode; the degradation star renders iff
-      degraded; expressible mode → no star (pinned).
-- [x] One-time explain message on degradation at set time; the lighter
-      star persists the signal (message pinned indirectly via set path).
-- [x] typecheck:src + typecheck:test green; fikra-approvals 11/11; the
+      degraded; expressible mode → no star (pinned). Pre-chat fallback and
+      chat's refresh render the SAME format `fikra:<backend><state>:<mode><star>`
+      (codex-review catch: they diverged; the state char now lives once in
+      fikra/modes).
+- [x] One-time explain message — once per DEGRADING SET (not per render),
+      naming both modes; absent for expressible sets (pinned via the
+      *Messages* log — gate round-1 catch: previously unpinned).
+- [x] Set-mode PERSISTS across editors (fresh editor on the same repo
+      reloads state.json — the full nil→field chain pinned end-to-end).
+- [x] `SPC a m` registered in the normal-mode keymap (pinned via
+      key-binding lookup).
+- [x] The LIVE claude adapter consumes the effective mode:
+      `fikra-backend-claude-args` takes `--permission-mode` from
+      `fikra-claude-mode-arg` of the EFFECTIVE mode (codex-review catch:
+      it was hard-coded default — the mode was decorative). Pinned: mode
+      changes change spawned-turn args; degradation keeps them
+      conservative.
+- [x] typecheck:src + typecheck:test green; fikra-approvals 16/16; the
       full 10-suite fikra batch green with `--timeout 20000` (any #215
       module-load timeout under full parallel load is the known
       load-family flake from SPEC-218 — passes solo).
+- [x] Codex review round posted to the issue (request-changes → all
+      actionable findings fixed; dispositions recorded in the comment).
+
+## Known bounds (gate round-1 + codex review, accepted)
+
+- **Token-membership, not semantic proof.** Expressibility verifies that
+  emitted flag TOKENS appear in the recorded surface; the mapping
+  `--approve-for-me` ≈ `auto` is an interpretive judgment recorded in the
+  surface data + fixtures, not something the checker can derive. The
+  fixtures + RFC correction note are the honesty mechanism.
+- **Records are data, unvalidated until #224.** The checked-in surfaces
+  were recorded by hand from the installed CLIs; the opt-in live probe
+  (never a CI gate) refreshes them.
+- **Keystroke-level e2e for the minibuffer path** rides the general
+  minibuffer machinery (already covered by the #195-era suites); the
+  handler, table, accept, and keymap registration are each pinned here.
+- **Codex helpers unintegrated**: `fikra-codex-flags` has no live
+  consumer yet — the codex backend itself is #224; the claude adapter is
+  the integration proof of the pattern.
 
 ## Notes
 

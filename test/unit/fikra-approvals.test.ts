@@ -155,7 +155,7 @@ describe("#219 L1 — fixture-driven fallback matrices", () => {
 });
 
 describe("#219 L1 — thread trust state (L2 groundwork)", () => {
-  test("trust-add records a class once (idempotent); trust-has-p queries", async () => {
+  test("trust-add records a class once (idempotent); trust-has-p queries; PERSISTS", async () => {
     const editor = await setup();
     expect(String(e(editor, '(fikra/modes/fikra-trust-add "Edit")').type)).toBe("boolean");
     e(editor, '(fikra/modes/fikra-trust-add "Edit")'); // idempotent
@@ -164,6 +164,81 @@ describe("#219 L1 — thread trust state (L2 groundwork)", () => {
     expect(entries.filter((t) => t === "Edit")).toHaveLength(1);
     expect(String(e(editor, '(fikra/modes/fikra-trust-has-p "Edit")').value)).toBe("true");
     expect(String(e(editor, '(fikra/modes/fikra-trust-has-p "Bash")').value)).toBe("null");
+    // Gate catch: trust was in-memory only — the writer didn't persist the
+    // field, so trust died on restart. Now state.json carries it.
+    const state = JSON.parse(readFileSync(join(repoDir, ".tmax/fikra/threads/main/state.json"), "utf8"));
+    expect(state.trust).toContain("Edit");
+    // And a FRESH editor on the same repo reads it back (codex-review
+    // catch: persisted ≠ reloaded).
+    const editor2 = await createStartedEditor("");
+    e(editor2, "(require-module fikra/modes)");
+    e(editor2, "(require-module fikra/thread)");
+    e(editor2, "(fikra/thread/fikra-thread-init)");
+    expect(String(e(editor2, '(fikra/modes/fikra-trust-has-p "Edit")').value)).toBe("true");
+  });
+});
+
+describe("#219 L1 — degradation explain message + persistence chain", () => {
+  test("a degrading set emits the ONE-TIME explain message; lighter refresh does not repeat it", async () => {
+    const editor = await setup("nonexistent");
+    const msgsBefore = editor.getMessageLog().getEntries().length;
+    e(editor, '(fikra/modes/fikra-set-runtime-mode "full-access")');
+    const after = editor.getMessageLog().getEntries().slice(msgsBefore);
+    const explain = after.filter((m) => m.text.includes("cannot express"));
+    expect(explain).toHaveLength(1); // fires exactly once, at set time
+    expect(explain[0]!.text).toContain("full-access");
+    expect(explain[0]!.text).toContain("approval-required"); // names both
+    // Not repeated per-render (the star persists the signal).
+    e(editor, "(fikra/modes/fikra-refresh-mode-lighter)");
+    expect(editor.getMessageLog().getEntries().slice(msgsBefore).filter((m) => m.text.includes("cannot express"))).toHaveLength(1);
+  });
+
+  test("an expressible set emits NO explain message", async () => {
+    const editor = await setup("claude");
+    const msgsBefore = editor.getMessageLog().getEntries().length;
+    e(editor, '(fikra/modes/fikra-set-runtime-mode "auto")');
+    expect(editor.getMessageLog().getEntries().slice(msgsBefore).filter((m) => m.text.includes("cannot express"))).toHaveLength(0);
+  });
+
+  test("set-mode persists across editors (state.json reload)", async () => {
+    const editor = await setup("claude");
+    e(editor, '(fikra/modes/fikra-set-runtime-mode "full-access")');
+    // A FRESH editor on the same repo reloads state.json.
+    const editor2 = await createStartedEditor("");
+    e(editor2, "(require-module fikra/modes)");
+    e(editor2, "(require-module fikra/thread)");
+    e(editor2, "(fikra/thread/fikra-thread-init)");
+    expect(String(e(editor2, "(fikra/modes/fikra-runtime-mode)").value)).toBe("full-access");
+  });
+
+  test("SPC a m is registered in the normal-mode keymap", async () => {
+    const editor = await setup();
+    e(editor, "(require-module fikra/mode)");
+    // key-binding returns the parsed command (segment list) — flatten it.
+    const binding = JSON.stringify(e(editor, '(key-binding "SPC a m" "normal")').value);
+    expect(binding).toContain("fikra-runtime-mode-prompt");
+  });
+
+  test("the LIVE claude adapter consumes the effective mode (codex-review catch)", async () => {
+    const editor = await setup("claude");
+    e(editor, "(require-module fikra/backend-claude)");
+    // Default: approval-required → --permission-mode default.
+    let args = (e(editor, '(fikra/backend-claude/fikra-backend-claude-args "hi" nil)').value as { value: string }[]).map((v) => String(v.value));
+    expect(args).toContain("default");
+    // Changing the mode CHANGES the spawned turn's flags — before the fix
+    // this was hard-coded "default" and the mode was decorative.
+    e(editor, '(fikra/modes/fikra-set-runtime-mode "auto")');
+    args = (e(editor, '(fikra/backend-claude/fikra-backend-claude-args "hi" nil)').value as { value: string }[]).map((v) => String(v.value));
+    expect(args).toContain("auto");
+    e(editor, '(fikra/modes/fikra-set-runtime-mode "full-access")');
+    args = (e(editor, '(fikra/backend-claude/fikra-backend-claude-args "hi" nil)').value as { value: string }[]).map((v) => String(v.value));
+    expect(args).toContain("bypassPermissions");
+    // Degradation reaches the CLI too: unknown backend degrades auto →
+    // approval-required → the args stay conservative.
+    e(editor, '(fikra/adapter/fikra-set-backend-forced "nonexistent")');
+    e(editor, '(fikra/modes/fikra-set-runtime-mode "auto")');
+    args = (e(editor, '(fikra/backend-claude/fikra-backend-claude-args "hi" nil)').value as { value: string }[]).map((v) => String(v.value));
+    expect(args).toContain("default");
   });
 });
 

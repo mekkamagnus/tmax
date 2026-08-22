@@ -4,7 +4,7 @@
           fikra-trust-add fikra-trust-has-p fikra-mode-star fikra-refresh-mode-lighter
           fikra-runtime-mode-prompt fikra-runtime-mode-table fikra-runtime-mode-accept
           fikra-backend-surface fikra-mode-expressible-p fikra-translate-flags
-          fikra-set-default-runtime-mode)
+          fikra-set-default-runtime-mode fikra-lighter-state-char)
 
 ;; #219 (RFC-027 §D5 L1): four runtime modes per thread, translated to CLI
 ;; capability flags per backend. Strictness order:
@@ -230,27 +230,43 @@ setter (module vars aren't setq-able from user code)."
 ;; ── thread trust state (--allowedTools promotion groundwork) ───────
 (defun fikra-trust-add (tool-class)
   "Record a trusted tool class for this thread (L2 'always allow'
-  promotes these to --allowedTools on subsequent turns)."
+  promotes these to --allowedTools on subsequent turns). Persists via
+  thread-save so trust survives a restart."
   (let ((trust (fikra/thread/fikra-thread-field "trust")))
     (if (not (fikra-member-p tool-class trust))
-      (fikra/thread/fikra-thread-set-field "trust" (cons tool-class trust)))
+      (progn
+        (fikra/thread/fikra-thread-set-field "trust" (cons tool-class trust))
+        (fikra/thread/fikra-thread-save)))
     t))
 
 (defun fikra-trust-has-p (tool-class)
   (fikra-member-p tool-class (fikra/thread/fikra-thread-field "trust")))
 
 ;; ── modeline (effective mode + degradation marker) ─────────────────
-;; Delegates to chat's state-char-aware refresh when fikra/chat is loaded
-;; (lazy funcall — the modes↔chat module cycle forbids a top-level
-;; require); the fallback form keeps backend+mode visible pre-chat.
+;; The STATE CHAR lives here (thread status is already a modes dep) so the
+;; pre-chat fallback and chat's refresh render the SAME format:
+;; fikra:<backend><state>:<effective-mode><star>.
+(defun fikra-lighter-state-char ()
+  (let ((s (fikra/thread/fikra-thread-status)))
+    (cond
+      ((string= s "running") "◉")
+      ((string= s "confirming") "?")
+      ((string= s "interrupted") "◈")
+      ((string= s "error") "✗")
+      (t "●"))))
+
+;; Delegates to chat's refresh when fikra/chat is loaded (lazy funcall —
+;; the modes↔chat module cycle forbids a top-level require); the fallback
+;; renders the identical format from modes' own helpers.
 (defun fikra-refresh-mode-lighter ()
   (condition-case nil
     (funcall "fikra/chat/fikra-refresh-lighter")
     (error
       (minor-mode-set-lighter "fikra"
         (concat "fikra:" (fikra/adapter/fikra-current-backend)
-                (fikra-mode-star)
-                ":" (fikra-effective-mode))))))
+                (fikra-lighter-state-char)
+                ":" (fikra-effective-mode)
+                (fikra-mode-star))))))
 
 ;; ── SPC a m: the interactive prompt ─────────────────────────────────
 ;; completing-read resolves the table/accept names by symbol at call time

@@ -59,25 +59,18 @@ The adapter drives everything after this (turn-begin, stream, turn-end)."
   (fikra/thread/fikra-thread-status))
 
 ;; ── modeline (#211 dynamic lighters) ────────────────────────────────
-;; fikra:<backend><state> — recomputed from live state; NOT the transient
-;; editor-set-status slot. #219 wires the per-FAEP-event refresh hook; for
-;; now the interactive entry points (open/send/interrupt) refresh.
-(defun fikra-lighter-state-char ()
-  (let ((s (fikra/thread/fikra-thread-status)))
-    (cond
-      ((string= s "running") "◉")
-      ((string= s "confirming") "?")
-      ((string= s "interrupted") "◈")
-      ((string= s "error") "✗")
-      (t "●"))))
-
+;; fikra:<backend><state>:<effective-mode><star> — recomputed from live
+;; state; NOT the transient editor-set-status slot. The state char lives
+;; in fikra/modes (#219: ONE definition, same format pre- and post-chat).
+;; #219 wires the per-FAEP-event refresh hook; for now the interactive
+;; entry points (open/send/interrupt) refresh.
 (defun fikra-refresh-lighter ()
   "Recompute the fikra minor-mode lighter from live state: backend +
 state char + effective runtime mode with the degradation star (#219)."
   (require-module fikra/modes)
   (minor-mode-set-lighter "fikra"
     (concat "fikra:" (fikra/adapter/fikra-current-backend)
-            (fikra-lighter-state-char)
+            (fikra/modes/fikra-lighter-state-char)
             ":" (fikra/modes/fikra-effective-mode)
             (fikra/modes/fikra-mode-star))))
 

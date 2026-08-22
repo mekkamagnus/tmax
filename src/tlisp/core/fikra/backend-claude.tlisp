@@ -40,11 +40,18 @@ end it AGAIN (double turn-end / error-overrides-interrupted, gate catch).")
 
 ;; ── arg construction (fixture-testable) ─────────────────────────────
 (defun fikra-backend-claude-args (message resume-id)
-  "Build the claude argv for one turn. RESUME-ID nil = first turn."
+  "Build the claude argv for one turn. RESUME-ID nil = first turn.
+#219: --permission-mode comes from the EFFECTIVE runtime mode
+(degradation-aware) — never hard-coded (codex-review catch: the mode
+changed nothing about spawned turns). Lazy require per the #216
+convention."
+  (require-module fikra/modes)
   (let ((base (list "--print"
                     "--output-format" "stream-json"
                     "--verbose"
-                    "--permission-mode" "default")))
+                    "--permission-mode"
+                    (fikra/modes/fikra-claude-mode-arg
+                      (fikra/modes/fikra-effective-mode)))))
     (if (and resume-id (stringp resume-id) (> (length resume-id) 0))
       (append base (list "--resume" resume-id "-p" message))
       (append base (list "-p" message)))))
