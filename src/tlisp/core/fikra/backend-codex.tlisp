@@ -1,0 +1,290 @@
+(defmodule fikra/backend-codex
+  (export fikra-backend-codex-available-p fikra-backend-codex-capabilities
+          fikra-backend-codex-start-turn fikra-backend-codex-abort
+          fikra-backend-codex-normalize fikra-backend-codex-args
+          fikra-backend-codex-line-events fikra-backend-codex-filter
+          fikra-backend-codex-adopt-pid fikra-backend-codex-reset-accumulator
+          fikra-codex-json-sanitize)
+
+;; #224 (RFC-027 §D4): the Codex CLI adapter (contract v2, the #222-hardened
+;; claude pattern: PER-THREAD state, pid→thread dispatch, THREAD-ROUTED
+;; emits — nothing may bleed across threads).
+;;
+;; RECORDED EVENT SHAPES (codex-cli 0.147.0, `codex exec --json`, captured
+;; 2026-08-22 — same discipline as #219's flag surfaces):
+;;   {"type":"thread.started","thread_id":"<uuid>"}        → session
+;;   {"type":"turn.started"} / {"type":"turn.completed",…} → lifecycle (our
+;;     own turn-begin/end own the thread; the process exit is authoritative)
+;;   {"type":"item.completed","item":{"type":"agent_message","text":…}}
+;;                                                          → text-delta
+;;   {"type":"item.started","item":{"type":"command_execution","command":…}}
+;;                                                          → tool-call
+;;   {"type":"item.completed","item":{"type":"command_execution",
+;;    "command":…,"aggregated_output":…,"exit_code":N,…}}  → tool-result
+;;   {"type":"item.completed","item":{"type":"file_change",
+;;    "changes":[{"path":…,"kind":"add|…"}]}}               → file-change
+;;   item type "error" — plugin/config noise in practice; SKIPPED (the
+;;     captured example was a hook-timeout warning, not agent content).
+;;
+;; L1 flags come from fikra/modes' RECORDED 0.147 surface (#219 corrected
+;; the pre-recording fallback matrix): sandbox presets + --approve-for-me.
+;; Resume: `codex exec resume <thread-id> "<prompt>"`.
+;; Sandbox presets reported; interactive-approvals nil (L1 + turn review
+;; only — Codex L2 needs the app-server protocol, deferred).
+
+(require-module fikra/adapter)
+(require-module fikra/event)
+(require-module fikra/thread)
+
+(defvar fikra-codex-processes (hashmap)
+  "thread-id → subprocess pid (per-thread; the #222 pattern).")
+(defvar fikra-codex-line-buffers (hashmap)
+  "thread-id → partial-line accumulator.")
+(defvar fikra-codex-pid-thread (hashmap)
+  "pid → thread-id (filter/sentinel dispatch; entries resident).")
+
+(defun fikra-backend-codex-available-p ()
+  "t when the codex CLI is on PATH."
+  (let ((result (shell-command "command -v codex 2>/dev/null")))
+    (not (string= (string-trim result) ""))))
+
+(defun fikra-backend-codex-capabilities ()
+  (list (list "session-resume" t)
+        (list "interactive-approvals" nil) ; L1 + turn review only
+        (list "sandbox-presets" t)))
+
+;; ── args (fixture-testable) ──────────────────────────────────────────
+(defun fikra-backend-codex-args (message resume-id)
+  "Build the codex argv for one turn. L1 flags come from the RECORDED
+0.147 surface (fikra/modes fikra-codex-flags — #219's correction: all
+four runtime modes express; --approve-for-me IS auto). RESUME-ID nil =
+first turn."
+  (require-module fikra/modes)
+  (require-module fikra/plan)
+  (if (and resume-id (stringp resume-id) (> (length resume-id) 0))
+    ;; codex exec resume <id> [options] "<prompt>"
+    (append (list "exec" "resume" resume-id "--json" "--skip-git-repo-check")
+            (fikra-codex-mode-flags)
+            (list message))
+    (append (list "exec" "--json" "--skip-git-repo-check")
+            (fikra-codex-mode-flags)
+            (list message))))
+
+(defun fikra-codex-mode-flags ()
+  "The L1 runtime-mode flags (effective mode; the recorded surface)."
+  (fikra/modes/fikra-codex-flags (fikra/modes/fikra-effective-mode)))
+
+;; ── normalization: one JSONL line → FAEP events (pure, fixture-tested) ──
+(defun fikra-backend-codex-normalize (line)
+  "One codex --json line → a LIST of FAEP events (nil for unhandled
+lines). Flat dispatch on the wire type."
+  ;; json-read cannot parse backslash escapes (\n, \", \\ return NIL —
+  ;; probe-found); real codex output is full of them (aggregated_output).
+  ;; Sanitize to single-char stand-ins BEFORE parsing.
+  (let ((obj (condition-case nil
+                (json-read-from-string (fikra-codex-json-sanitize line))
+                (error nil))))
+    (if (null obj)
+      nil
+      (let ((type (fikra-codex-field obj "type")))
+        (cond
+          ((string= type "thread.started")
+            (list (list (list "kind" "session")
+                        (list "id" (fikra-codex-field obj "thread_id")))))
+          ((string= type "item.started")
+            (fikra-codex-item-events (fikra-codex-field obj "item") "tool-call"))
+          ((string= type "item.completed")
+            (fikra-codex-item-completed (fikra-codex-field obj "item")))
+          ;; turn.started / turn.completed / anything else: our own turn
+          ;; lifecycle owns the thread (the process exit is authoritative).
+          (t nil))))))
+
+(defun fikra-codex-item-completed (item)
+  (cond
+    ((string= (fikra-codex-field item "type") "agent_message")
+      (list (list (list "kind" "text-delta")
+                  (list "text" (fikra-codex-field item "text")))))
+    ((string= (fikra-codex-field item "type") "command_execution")
+      (list (list (list "kind" "tool-result")
+                  (list "tool" "Bash")
+                  (list "ok" (= (fikra-codex-field item "exit_code") 0))
+                  (list "summary" (fikra-codex-field item "aggregated_output")))))
+    ((string= (fikra-codex-field item "type") "file_change")
+      (fikra-codex-file-change-events (fikra-codex-field item "changes")))
+    ;; "error" items are plugin/config noise in the recorded transcripts.
+    (t nil)))
+
+(defun fikra-codex-item-events (item call-kind)
+  "item.started → a tool-call event for command executions."
+  (if (string= (fikra-codex-field item "type") "command_execution")
+    (list (list (list "kind" call-kind)
+                (list "tool" "Bash")
+                (list "summary" (fikra-codex-field item "command"))))
+    nil))
+
+(defun fikra-codex-file-change-events (changes)
+  ;; append-based (cons rejects a nil second arg in T-Lisp).
+  (if (null changes)
+    (list)
+    (append
+      (list (list (list "kind" "file-change")
+                  (list "path" (fikra-codex-field (car changes) "path"))
+                  (list "adds" "0")
+                  (list "dels" "0")))
+      (fikra-codex-file-change-events (cdr changes)))))
+
+(defun fikra-codex-json-sanitize (line)
+  "Strip JSON escape sequences to single-char stand-ins so the T-Lisp
+JSON reader accepts the line (it returns NIL on backslash escapes —
+probe-found; real codex output is full of them). Manual scanner — no
+regex, no nested string-escape quoting."
+  (fikra-codex-unescape-scan line 0 "" ))
+
+(defun fikra-codex-unescape-scan (s i out)
+  (if (>= i (length s))
+    out
+    (let ((ch (substring s i (+ i 1))))
+      (cond
+        ;; A literal backslash followed by ANY char: flatten the PAIR (the
+        ;; T-Lisp reader usually already turned \\-escapes into control
+        ;; chars — this covers the raw form too).
+        ((and (string= ch "\\") (< (+ i 1) (length s)))
+          (fikra-codex-unescape-scan s (+ i 2) (concat out " ")))
+        ;; REAL control chars inside strings (the reader-converted form —
+        ;; json-read rejects them).
+        ((or (string= ch "\n") (string= ch "\t"))
+          (fikra-codex-unescape-scan s (+ i 1) (concat out " ")))
+        (t (fikra-codex-unescape-scan s (+ i 1) (concat out ch)))))))
+
+;; alist getter (json-read produces ("k" v) 2-list alists).
+(defun fikra-codex-field (alist key)
+  (let ((found nil))
+    (dolist (entry alist)
+      (if (and (not found)
+               (listp entry)
+               (= (length entry) 2)
+               (string= (car entry) key))
+        (setq found (car (cdr entry)))))
+    found))
+
+;; ── turn lifecycle (the per-thread pattern) ──────────────────────────
+(defun fikra-backend-codex-start-turn (message)
+  "Spawn one codex turn: process-per-turn, resume the thread session."
+  (let ((sid (fikra/thread/fikra-thread-session-id))
+        (thread-id (fikra/thread/fikra-thread-current)))
+    (editor/keymaps/keymap-mutable-set! fikra-codex-line-buffers thread-id "")
+    (fikra/thread/fikra-thread-turn-begin)
+    (let ((args (fikra-backend-codex-args message sid)))
+      (let ((pid (make-process
+                   :command (cons "codex" args)
+                   :cwd (fikra/thread/fikra-thread-working-dir)
+                   :filter "fikra-backend-codex-filter"
+                   :sentinel "fikra-backend-codex-sentinel")))
+        (editor/keymaps/keymap-mutable-set! fikra-codex-processes thread-id pid)
+        (editor/keymaps/keymap-mutable-set! fikra-codex-pid-thread
+          (number-to-string pid) thread-id)
+        pid))))
+
+(defun fikra-backend-codex-filter (pid output)
+  "Per-chunk coalescing through the pid's OWN thread (routed emits)."
+  (let* ((thread-id (hashmap-get fikra-codex-pid-thread (number-to-string pid)))
+         (events (if thread-id
+                   (fikra-backend-codex-line-events-for thread-id output)
+                   nil)))
+    ;; Unknown pid → DROP (never assume focused).
+    (if (and thread-id events)
+      (progn
+        (if (string= thread-id (fikra/thread/fikra-thread-current))
+          (dolist (e events)
+            (if (string= (fikra-codex-field e "kind") "session")
+              (fikra/thread/fikra-thread-set-session-id (fikra-codex-field e "id")))))
+        (fikra/event/fikra-event-emit-batch-for thread-id events)))))
+
+(defun fikra-backend-codex-line-events (chunk)
+  "The focused thread's accumulator (test seam for direct feeding)."
+  (let ((id (fikra/thread/fikra-thread-current)))
+    (fikra-backend-codex-line-events-for (if id id "main") chunk)))
+
+(defun fikra-backend-codex-line-events-for (thread-id chunk)
+  ;; Split FIRST (structural newlines are line boundaries in the RAW
+  ;; process path); normalize() sanitizes each extracted line (backslash
+  ;; escapes flattened there — json-read rejects them).
+  (editor/keymaps/keymap-mutable-set! fikra-codex-line-buffers thread-id
+    (concat (hashmap-get fikra-codex-line-buffers thread-id) chunk))
+  (fikra-codex-drain-for thread-id (hashmap-get fikra-codex-line-buffers thread-id)))
+
+(defun fikra-codex-drain-for (thread-id buf)
+  (let ((nl (fikra-codex-index-of-newline buf)))
+    (if (null nl)
+      (progn
+        (editor/keymaps/keymap-mutable-set! fikra-codex-line-buffers thread-id buf)
+        nil)
+      (let ((line (substring buf 0 nl)))
+        (setq buf (substring buf (+ nl 1) (length buf)))
+        (let ((evs (fikra-backend-codex-normalize line)))
+          (let ((rest (fikra-codex-drain-for thread-id buf)))
+            (if evs
+              (if rest (append evs rest) evs)
+              rest)))))))
+
+(defun fikra-codex-index-of-newline (s)
+  (fikra-codex-find-nl s 0 (length s)))
+
+(defun fikra-codex-find-nl (s i len)
+  (if (>= i len)
+    nil
+    (if (string= (substring s i (+ i 1)) "\n")
+      i
+      (fikra-codex-find-nl s (+ i 1) len))))
+
+(defun fikra-backend-codex-sentinel (pid exit-code)
+  "AUTHORITATIVE turn end (the process exit); settles the PID'S thread."
+  (let* ((thread-id (hashmap-get fikra-codex-pid-thread (number-to-string pid)))
+         (focused (if thread-id (string= thread-id (fikra/thread/fikra-thread-current)) nil)))
+    (if thread-id
+      (progn
+        (editor/keymaps/keymap-mutable-set! fikra-codex-processes thread-id nil)
+        (editor/keymaps/keymap-mutable-set! fikra-codex-line-buffers thread-id ""))
+      nil)
+    (if thread-id
+      (if focused
+        (fikra/thread/fikra-thread-turn-end
+          (if (= exit-code 0) "completed" "error"))
+      (fikra-backend-codex-turn-end-bg thread-id exit-code)))))
+
+(defun fikra-backend-codex-turn-end-bg (thread-id exit-code)
+  (let ((prev (fikra/thread/fikra-thread-current)))
+    (fikra/thread/fikra-thread-focus thread-id)
+    (fikra/thread/fikra-thread-turn-end
+      (if (= exit-code 0) "completed" "error"))
+    (fikra/thread/fikra-thread-focus prev)
+    thread-id))
+
+(defun fikra-backend-codex-abort ()
+  (let* ((thread-id (fikra/thread/fikra-thread-current))
+         (pid (hashmap-get fikra-codex-processes thread-id)))
+    (if pid
+      (progn
+        (signal pid "SIGTERM")
+        (editor/keymaps/keymap-mutable-set! fikra-codex-processes thread-id nil)
+        (fikra/thread/fikra-thread-turn-end "interrupted")
+        t)
+      nil)))
+
+;; Test seam: route a fake pid to the focused thread.
+(defun fikra-backend-codex-adopt-pid (pid)
+  (editor/keymaps/keymap-mutable-set! fikra-codex-pid-thread
+    (number-to-string pid) (fikra/thread/fikra-thread-current))
+  pid)
+
+;; Test seam: reset the focused thread's accumulator.
+(defun fikra-backend-codex-reset-accumulator ()
+  (editor/keymaps/keymap-mutable-set! fikra-codex-line-buffers
+    (fikra/thread/fikra-thread-current) "")
+  t)
+
+;; Self-register
+(fikra/adapter/fikra-register-backend "codex")
+
+(provide "fikra-backend-codex")
+)

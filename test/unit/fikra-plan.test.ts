@@ -155,6 +155,15 @@ describe("#223 end-to-end wiring + isolation (gate round)", () => {
     expect(String(e(editor2, "(fikra/plan/fikra-plan-mode-p)").value)).toBe("true");
   });
 
+  test("MULTI-LINE plan text captures fully (embedded newline escapes — the latent #223 bug)", async () => {
+    const editor = await planSetup();
+    e(editor, "(fikra/plan/fikra-plan-toggle)");
+    planTurn(editor, "# Plan\nline two\nline three");
+    e(editor, "(fikra/thread/fikra-thread-open)");
+    expect(String(e(editor, "(fikra/plan/fikra-plan-capture-from-log)").value)).toContain("line two");
+    expect(String(e(editor, "(fikra/plan/fikra-plan-capture-from-log)").value)).toContain("line three");
+  });
+
   test("capture on an empty log → nil (no crash)", async () => {
     const editor = await planSetup();
     expect(String(e(editor, "(fikra/plan/fikra-plan-capture-from-log)").value)).toBe("null");

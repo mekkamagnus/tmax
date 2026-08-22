@@ -104,11 +104,17 @@ excluding the user echo (You-prefixed). Nil when there is no last turn."
         (t (fikra-plan-scan (cdr lines) next-i last-start acc))))))
 
 (defun fikra-plan-parse (line)
-  "JSON-parse one log line (nil for blanks/broken lines)."
+  "JSON-parse one log line (nil for blanks/broken lines). Sanitized
+first — json-read rejects backslash escapes, and MULTI-LINE plan text
+embeds \\n escapes in our own json-encode output (the latent #223 bug;
+the backend-codex sanitizer flattens them)."
   (if (or (null line) (<= (length (string-trim line)) 0))
     nil
     (condition-case nil
-      (json-read-from-string line)
+      (progn
+        (require-module fikra/backend-codex)
+        (json-read-from-string
+          (fikra/backend-codex/fikra-codex-json-sanitize line)))
       (error nil))))
 
 ;; alist getter (json-read produces ("k" v) 2-list alists).
