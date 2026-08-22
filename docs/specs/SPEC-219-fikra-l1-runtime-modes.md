@@ -112,7 +112,11 @@ test was updated to the new format.
       degraded; expressible mode → no star (pinned). Pre-chat fallback and
       chat's refresh render the SAME format `fikra:<backend><state>:<mode><star>`
       (codex-review catch: they diverged; the state char now lives once in
-      fikra/modes).
+      fikra/modes). The PRE-CHAT fallback path itself is pinned (gate
+      round-2 catch: it never worked — the condition-case handler clause
+      is `(error (var) body...)` and the body form was being consumed as
+      the var slot, silently evaluating to nil; shape fixed + pinned both
+      star and no-star fallback renders).
 - [x] One-time explain message — once per DEGRADING SET (not per render),
       naming both modes; absent for expressible sets (pinned via the
       *Messages* log — gate round-1 catch: previously unpinned).
@@ -126,12 +130,28 @@ test was updated to the new format.
       it was hard-coded default — the mode was decorative). Pinned: mode
       changes change spawned-turn args; degradation keeps them
       conservative.
-- [x] typecheck:src + typecheck:test green; fikra-approvals 16/16; the
+- [x] typecheck:src + typecheck:test green; fikra-approvals 17/17; the
       full 10-suite fikra batch green with `--timeout 20000` (any #215
       module-load timeout under full parallel load is the known
       load-family flake from SPEC-218 — passes solo).
 - [x] Codex review round posted to the issue (request-changes → all
       actionable findings fixed; dispositions recorded in the comment).
+
+## Advisories (gate round-2, recorded — not gaps)
+
+- The conservative base: when NOTHING is expressible, degradation returns
+  `approval-required` even if that mode is itself inexpressible — the
+  intent is "clamp to strictest known," which is safe because unexpressible
+  backends spawn nothing (adapters consume only expressible effective
+  modes; the claude adapter's defensive `fikra-claude-mode-arg` falls to
+  `default`).
+- `fikra-nearest-stricter` uses `<=` on strictness diff: with duplicate
+  strictness values a later candidate would win the tie. Unreachable
+  today (strictness values are unique per mode by construction).
+- A pre-existing, unread `fikra-default-runtime-mode` defvar lives in
+  `fikra/mode` (predates this branch); the LIVE default + setter are in
+  `fikra/modes`. Left in place per surgical-change rules; noted here so
+  it isn't mistaken for the escape hatch.
 
 ## Known bounds (gate round-1 + codex review, accepted)
 

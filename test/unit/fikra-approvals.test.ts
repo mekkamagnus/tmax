@@ -260,4 +260,22 @@ describe("#219 L1 — mode-aware modeline", () => {
     expect(lighter2).toContain("auto");
     expect(lighter2).not.toContain("*");
   });
+
+  test("PRE-CHAT fallback lighter: same format without fikra/chat loaded", async () => {
+    // Gate round-2 catch: the condition-case fallback (funcall-on-string
+    // of the chat refresh fails → modes' own renderer) was never pinned.
+    // No fikra/chat here — mode (define-minor-mode registers the mode) +
+    // modes + thread. Activate directly (chat-open normally does this).
+    const editor = await setup("codex");
+    e(editor, "(require-module fikra/mode)");
+    e(editor, '(minor-mode-set "fikra" t)');
+    e(editor, '(fikra/modes/fikra-set-runtime-mode "auto")');
+    const lighter = String(e(editor, '(minor-mode-lighter "fikra")').value);
+    // codex expresses auto → no star; state idle → ●.
+    expect(lighter).toBe("fikra:codex●:auto");
+    // Degraded (unknown backend) → star, same shape as chat's renderer.
+    e(editor, '(fikra/adapter/fikra-set-backend-forced "nonexistent")');
+    e(editor, '(fikra/modes/fikra-refresh-mode-lighter)');
+    expect(String(e(editor, '(minor-mode-lighter "fikra")').value)).toBe("fikra:nonexistent●:approval-required*");
+  });
 });

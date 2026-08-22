@@ -258,10 +258,14 @@ setter (module vars aren't setq-able from user code)."
 ;; Delegates to chat's refresh when fikra/chat is loaded (lazy funcall —
 ;; the modes↔chat module cycle forbids a top-level require); the fallback
 ;; renders the identical format from modes' own helpers.
+;; GOTCHA (gate round-2, found by the fallback pin): a condition-case
+;; handler clause is (name (var) body...) — a body form in the VAR slot is
+;; silently consumed and the handler evaluates to nil. The () param list
+;; is load-bearing.
 (defun fikra-refresh-mode-lighter ()
   (condition-case nil
     (funcall "fikra/chat/fikra-refresh-lighter")
-    (error
+    (error ()
       (minor-mode-set-lighter "fikra"
         (concat "fikra:" (fikra/adapter/fikra-current-backend)
                 (fikra-lighter-state-char)
