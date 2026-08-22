@@ -68,7 +68,20 @@ dragged back to main.
       probe catch — pinned implicitly by every workflow test running on
       the forced replay backend).
 - [x] fikra-build-context includes file/mode/selection/buffer (pinned).
-- [x] typecheck green; fikra-workflows 9/9; the touched-suite batch green.
+- [x] typecheck green; fikra-workflows 11/11 (incl. the archive-routing + origin-context gate pins); the touched-suite batch green.
+
+## Gate round — routing + context-drift findings (all fixed)
+
+- **Archive resurrection**: the label scan matched ANY thread with the
+  workflow field — an ARCHIVED workflow thread would be resurrected and
+  forever starve a same-labeled successor. The scan now skips archived
+  rows AND archive clears the workflow label (belt and braces; pinned:
+  archive → no route → a fresh fix-2 thread takes over).
+- **Cross-invocation context drift**: after a workflow turn the user sits
+  in the chat buffer, so a SECOND invocation snapshotted the chat
+  transcript as "context". Each workflow now remembers its ORIGIN buffer
+  (first invocation) and re-snapshots from it (pinned: the second
+  invocation's echo carries the origin buffer's content, not the chat).
 
 ## Notes
 

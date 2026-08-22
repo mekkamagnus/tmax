@@ -302,6 +302,9 @@ preserved (the retention policy owns real deletion). Cannot archive main."
       (progn (editor-set-status "Fikra: main thread cannot be archived") nil)
       (progn
         (editor/keymaps/keymap-mutable-set! (fikra-thread-state) "archived" t)
+        ;; #225 gate catch: clear the WORKFLOW label too — an archived
+        ;; workflow thread must never route again.
+        (editor/keymaps/keymap-mutable-set! (fikra-thread-state) "workflow" nil)
         (fikra-thread-save)
         (editor-set-status (concat "Fikra: thread " id " archived"))
         t))))

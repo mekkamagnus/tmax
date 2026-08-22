@@ -113,6 +113,35 @@ describe("#225 workflows — create-or-append labeled threads", () => {
     expect(String(e(editor2, '(fikra-workflow-thread-for "explain")').value)).toBe("fix-1");
   });
 
+  test("GATE: an ARCHIVED workflow thread never routes again (a fresh labeled thread takes over)", async () => {
+    const editor = await setup();
+    e(editor, "(fikra-explain)");
+    expect(String(e(editor, '(fikra-workflow-thread-for "explain")').value)).toBe("fix-1");
+    // Archive it (the soft delete clears the label too — belt and braces).
+    e(editor, '(fikra/thread/fikra-thread-archive)');
+    expect(String(e(editor, '(fikra-workflow-thread-for "explain")').value)).toBe("null");
+    // Re-invoke: a FRESH thread (not the archived fix-1).
+    e(editor, `(fikra/backend-replay/fikra-backend-replay-load "${join(repoDir, "fixture.jsonl")}")`);
+    e(editor, "(fikra-explain)");
+    expect(String(e(editor, '(fikra-workflow-thread-for "explain")').value)).toBe("fix-2");
+    expect(String(e(editor, "(fikra/thread/fikra-thread-current)").value)).toBe("fix-2");
+  });
+
+  test("GATE: re-invocation contexts come from the ORIGIN buffer, not the chat buffer", async () => {
+    const editor = await setup("unique-origin-content-42\n");
+    e(editor, "(fikra-explain)");
+    const log1 = readFileSync(join(repoDir, ".tmax/fikra/threads/fix-1/events.jsonl"), "utf8");
+    expect(log1).toContain("unique-origin-content-42");
+    // After the turn we sit in the chat buffer; the SECOND context still
+    // comes from the origin buffer.
+    e(editor, `(fikra/backend-replay/fikra-backend-replay-load "${join(repoDir, "fixture.jsonl")}")`);
+    e(editor, "(fikra-explain)");
+    const log = readFileSync(join(repoDir, ".tmax/fikra/threads/fix-1/events.jsonl"), "utf8");
+    const echoes = log.trimEnd().split("\n").map((l) => JSON.parse(l)).filter((ev) => ev.kind === "text-delta" && ev.text.startsWith("You:"));
+    expect(echoes.length).toBe(2);
+    expect(echoes[1]!.text).toContain("unique-origin-content-42"); // NOT the chat transcript
+  });
+
   test("workflow threads inherit the runtime mode (#219)", async () => {
     const editor = await setup();
     e(editor, "(require-module fikra/modes)");

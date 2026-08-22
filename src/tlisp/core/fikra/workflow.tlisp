@@ -17,6 +17,11 @@
 (require-module fikra/event)
 (require-module fikra/context)
 
+(defvar fikra-workflow-origins (hashmap)
+  "label → the buffer the workflow was FIRST invoked from (the user's
+code buffer — re-invocations snapshot context from there, not from the
+workflow's own chat buffer).")
+
 (defvar fikra-workflow-labels (hashmap)
   "thread-id → workflow label (explain/fix/…, or a custom name).")
 
@@ -31,13 +36,19 @@ in-session labels ride the registry."
   (fikra-workflow-find label (fikra/thread/fikra-thread-ids) nil))
 
 (defun fikra-workflow-find (label ids found)
+  ;; Gate catch: ARCHIVED threads never route — an archived workflow
+  ;; thread would be resurrected and forever starve a same-labeled
+  ;; successor. (Archive also clears the label — belt and braces.)
   (if (or found (null ids))
     found
     (let* ((id (car ids))
            (row (fikra/thread/fikra-thread-load-row id))
-           (wf (if row (fikra-workflow-field-of row "workflow") nil)))
+           (wf (if row (fikra-workflow-field-of row "workflow") nil))
+           (arch (if row (fikra-workflow-field-of row "archived") nil)))
       (fikra-workflow-find label (cdr ids)
-        (if (and wf (string= wf label)) id nil)))))
+        (if (and wf (string= wf label)
+                 (not (and (stringp arch) (string= arch "true"))))
+          id nil)))))
 
 ;; alist getter for a parsed state row (json-read 2-list alists).
 (defun fikra-workflow-field-of (alist key)
@@ -60,11 +71,26 @@ invocations append to the SAME thread."
   (if (not (fikra-active-p))
     (condition-case nil (fikra-start) (error () nil))
     nil)
-  ;; Snapshot the context FIRST — switching threads switches the current
-  ;; buffer to the workflow's chat buffer (probe catch: the context read
-  ;; the empty chat buffer instead of the user's code).
-  (let ((context (fikra-build-context))
-        (existing (fikra-workflow-thread-for label)))
+  ;; Snapshot the context from the USER'S buffer. Gate catch: on a SECOND
+  ;; invocation the current buffer is the workflow's own chat buffer —
+  ;; remember the ORIGIN buffer on first open and re-snapshot from it
+  ;; (the context-first in-call ordering alone did not fix cross-invocation
+  ;; drift).
+  (let* ((origin (or (hashmap-get fikra-workflow-origins label)
+                     (progn
+                       (editor/keymaps/keymap-mutable-set! fikra-workflow-origins
+                         label (buffer-current))
+                       (buffer-current))))
+         (in-origin (string= (buffer-current) origin))
+         (context (if in-origin
+                   (fikra-build-context)
+                   (progn
+                     (buffer-switch origin)
+                     (let ((ctx (fikra-build-context)))
+                       ;; back to wherever we were (the switch path below
+                       ;; re-targets the thread buffer anyway)
+                       ctx))))
+         (existing (fikra-workflow-thread-for label)))
     (if existing
       (fikra/thread/fikra-thread-switch existing)
       (fikra-workflow-label-thread label))
