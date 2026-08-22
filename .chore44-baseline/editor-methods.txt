@@ -1,11 +1,11 @@
 activateMajorModeForFile
+activeTerminalId
 applyModel
 applyUpdate
 applyWorkspace
 associateBufferFilename
 attachFileBuffer
 buryBuffer
-switchBufferSilent
 classifyCommand
 clearModifiedFlags
 clearSelection
@@ -82,6 +82,7 @@ pickKillSurvivor
 recomputeHighlights
 registerMinorMode
 renameBuffer
+reportCommandError
 resetCount
 resolveCallable
 saveFile
@@ -91,9 +92,11 @@ setCurrentBufferModified
 setCurrentMajorMode
 setEchoOnly
 setEditorState
+shellTerminals
 showSplashIfEmpty
 start
 stop
+switchBufferSilent
 toAppError
 touchBuffer
 trackCommand

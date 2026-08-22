@@ -101,6 +101,8 @@ confirmation-cancel
 confirmation-handler-register
 confirmation-pending
 confirmation-resolve
+confirmation-resolver-kind
+confirmation-set-resolve-policy
 confirmation-token-mint
 current-module
 cursor-column
