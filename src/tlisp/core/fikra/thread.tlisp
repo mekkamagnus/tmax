@@ -3,7 +3,8 @@
           fikra-thread-current fikra-thread-status fikra-thread-status-set
           fikra-thread-turn-begin fikra-thread-turn-end fikra-thread-turn-count
           fikra-thread-root fikra-thread-log-path fikra-thread-session-id
-          fikra-thread-set-session-id fikra-thread-save fikra-thread-field)
+          fikra-thread-set-session-id fikra-thread-save fikra-thread-field
+          fikra-thread-set-field)
 
 ;; #213 (RFC-027 §D3/§D7, Phase 1 — MINIMAL subset): one implicit "main"
 ;; thread per project. State machine + persistence + reopen-after-restart +
@@ -76,7 +77,10 @@ history into it (daemon-restart reopen path), focus it."
                          "root" root
                          "backend" "none"
                          "session-id" nil
-                         "runtime-mode" "approval-required"
+                         ;; runtime-mode stays nil until set — #219's
+                         ;; fikra/modes owns the default (defvar + setter
+                         ;; escape hatch); seeding here would freeze it.
+                         "runtime-mode" nil
                          "trust" (list)
                          "status" "idle"
                          "turn-count" 0)))
@@ -148,6 +152,11 @@ history into it (daemon-restart reopen path), focus it."
 (defun fikra-thread-field (key)
   (let ((state (fikra-thread-state)))
     (if state (hashmap-get state key) nil)))
+
+(defun fikra-thread-set-field (key value)
+  "Mutate a thread-state field (runtime mode, trust, ...). Callers save."
+  (editor/keymaps/keymap-mutable-set! (fikra-thread-state) key value)
+  value)
 
 (defun fikra-thread-status ()
   "Current status; an un-initialized thread reads as idle (nil never leaks

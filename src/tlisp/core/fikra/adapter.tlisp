@@ -3,7 +3,7 @@
           fikra-list-backends fikra-list-available-backends fikra-backend-available-p
           fikra-backend-capabilities fikra-backend-capable-p
           fikra-backend-start-turn fikra-backend-abort
-          fikra-backend-prompt fikra-backend-call)
+          fikra-backend-prompt fikra-backend-call fikra-set-backend-forced)
 
 ;; #214 (RFC-027 §D4): Adapter contract v2. A backend module provides:
 ;;   fikra-backend-<name>-available-p           → t/nil (probed, cached)
@@ -75,6 +75,13 @@ agnostic). Refuses unavailable backends."
     (progn
       (message "Fikra: backend %s not available" name)
       nil)))
+
+(defun fikra-set-backend-forced (name)
+  "Set the backend WITHOUT an availability probe — test seam: keyless
+  fixture tests exercise flag translation for backends whose CLIs may not
+  be installed on the runner."
+  (setq fikra-current-backend-name name)
+  name)
 
 (defun fikra-current-backend ()
   (if fikra-current-backend-name fikra-current-backend-name "none"))

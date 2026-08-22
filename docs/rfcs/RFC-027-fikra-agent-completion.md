@@ -339,6 +339,18 @@ verifiable mode rather than being declared expressed by fixture row alone. CI
 asserts adapter output against the fixture; live probes are opt-in smoke,
 never gates.
 
+> **Correction (2026-08-22, SPEC-219):** recording the actual installed
+> surfaces overturned two assumptions above. Claude 2.1.195's
+> `--permission-mode` grew a NATIVE `auto` choice (no acceptEdits
+> approximation, no `auto*`). Codex-cli 0.147.0 REMOVED
+> `--ask-for-approval` entirely; its surface is `--sandbox
+> {read-only, workspace-write, danger-full-access}` plus `--approve-for-me`
+> (approvals routed through automatic review — that IS `auto`) and
+> `--dangerously-bypass-approvals-and-sandbox`. Both recorded backends
+> therefore express all four modes; the semantics rule still governs
+> (unknown backends and future surface gaps degrade), and expressibility is
+> now DERIVED from the checked-in surface records rather than tabulated.
+
 **Default-mode stance.** Fikra defaults to `approval-required` — a conscious
 divergence from t3code, which defaults to *Full access*. t3code threads are
 disposable workspaces behind a GUI; fikra threads start in the user's live

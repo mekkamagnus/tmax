@@ -72,10 +72,14 @@ The adapter drives everything after this (turn-begin, stream, turn-end)."
       (t "●"))))
 
 (defun fikra-refresh-lighter ()
-  "Recompute the fikra minor-mode lighter from live state."
+  "Recompute the fikra minor-mode lighter from live state: backend +
+state char + effective runtime mode with the degradation star (#219)."
+  (require-module fikra/modes)
   (minor-mode-set-lighter "fikra"
     (concat "fikra:" (fikra/adapter/fikra-current-backend)
-            (fikra-lighter-state-char))))
+            (fikra-lighter-state-char)
+            ":" (fikra/modes/fikra-effective-mode)
+            (fikra/modes/fikra-mode-star))))
 
 ;; ── buffer-local keymap (#206 chain) ────────────────────────────────
 (defun fikra-ensure-buffer-keymap ()

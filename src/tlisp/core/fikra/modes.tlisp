@@ -1,0 +1,286 @@
+(defmodule fikra/modes
+  (export fikra-runtime-mode fikra-effective-mode fikra-set-runtime-mode fikra-runtime-mode-degrade
+          fikra-claude-flags fikra-claude-mode-arg fikra-codex-flags
+          fikra-trust-add fikra-trust-has-p fikra-mode-star fikra-refresh-mode-lighter
+          fikra-runtime-mode-prompt fikra-runtime-mode-table fikra-runtime-mode-accept
+          fikra-backend-surface fikra-mode-expressible-p fikra-translate-flags
+          fikra-set-default-runtime-mode)
+
+;; #219 (RFC-027 §D5 L1): four runtime modes per thread, translated to CLI
+;; capability flags per backend. Strictness order:
+;;   approval-required < auto-accept-edits < auto < full-access
+;; Degradation = the nearest STRICTER mode a backend can express.
+;; DEFAULT = approval-required (deliberate divergence from t3code's
+;; full-access default: the thread works in the user's LIVE working tree
+;; inside the editor — checkpoints are the net, not the permission).
+;; Escape hatch: (setq fikra-default-runtime-mode "full-access").
+;;
+;; Flag translation is ILLUSTRATIVE-not-contractual per backend; the
+;; behavior column is the contract, checked-in fixtures pin adapter output.
+;; The capability probe records the CLI version + --help surface; a mode
+;; whose SEMANTICS can't be verified from that surface degrades rather
+;; than passing by fixture row alone.
+
+(require-module fikra/adapter)
+(require-module fikra/thread)
+
+(defvar fikra-modes
+  (list "approval-required" "auto-accept-edits" "auto" "full-access"))
+
+(defvar fikra-mode-strictness
+  (list (list "approval-required" 0)
+        (list "auto-accept-edits" 1)
+        (list "auto" 2)
+        (list "full-access" 3)))
+
+(defun fikra-mode-strictness-of (mode)
+  (let ((hit nil))
+    (dolist (entry fikra-mode-strictness)
+      (if (and (not hit) (string= (car entry) mode))
+        (setq hit (car (cdr entry)))))
+    (if hit hit 0)))
+
+;; Degradation: the nearest STRICTER mode (lower strictness) than REQUESTED
+;; the backend can express. EXPRESSIBLE is the backend's list (backend-
+;; specific; claude expresses all four, codex three without `auto`).
+(defun fikra-runtime-mode-degrade (requested expressible)
+  (if (fikra-member-p requested expressible)
+    requested
+    (fikra-nearest-stricter requested expressible 3 nil)))
+
+(defun fikra-nearest-stricter (requested expressible best-diff best-mode)
+  ;; Scan expressible modes; keep the one closest below requested's
+  ;; strictness. Strictness order means "stricter" = smaller number.
+  (if (null expressible)
+    (if best-mode best-mode "approval-required")
+    (let* ((cand (car expressible))
+           (cand-s (fikra-mode-strictness-of cand))
+           (req-s (fikra-mode-strictness-of requested))
+           (diff (- req-s cand-s)))
+      (if (and (>= diff 0) (<= diff best-diff))
+        (fikra-nearest-stricter requested (cdr expressible) diff cand)
+        (fikra-nearest-stricter requested (cdr expressible) best-diff best-mode)))))
+
+(defun fikra-member-p (x lst)
+  (let ((hit nil))
+    (dolist (v lst)
+      (if (and (not hit) (string= v x))
+        (setq hit t)))
+    hit))
+
+;; ── backend capability tables ───────────────────────────────────────
+;; Recorded CLI surfaces (claude 2.1.195, codex-cli 0.147.0 — recorded
+;; 2026-08-22 from the installed `--help` output; refreshed only by the
+;; opt-in live probe landing with #224, never a CI gate). EXPRESSIBILITY
+;; DERIVES from these records: a mode is expressible iff its translator
+;; has an explicit mapping AND every flag token it emits appears in the
+;; backend's record.
+;; SURPRISE vs the original issue fixture: codex 0.147 REPLACED
+;; --ask-for-approval with --approve-for-me (automatic approval review) —
+;; `auto` IS expressible now — and claude grew a native `auto`
+;; permission-mode choice. The issue's own rule governs: semantics the
+;; surface cannot verify degrade; semantics it CAN verify pass. Degradation
+;; therefore fires for unknown backends and future surface gaps, not for
+;; these two records.
+(defvar fikra-recorded-surfaces
+  (list
+    (list "claude" "2.1.195"
+          (list "--permission-mode" "default" "acceptEdits" "auto" "bypassPermissions"))
+    (list "codex" "0.147.0"
+          (list "--sandbox" "read-only" "workspace-write" "danger-full-access"
+                "--approve-for-me" "--dangerously-bypass-approvals-and-sandbox"))
+    (list "replay" "builtin" (list "*"))))
+
+(defun fikra-backend-surface (backend)
+  "The recorded (version . flag-token-list) surface for BACKEND; nil when
+the backend has no record."
+  (let ((hit nil))
+    (dolist (entry fikra-recorded-surfaces)
+      (if (and (not hit) (string= (car entry) backend))
+        (setq hit entry)))
+    hit))
+
+(defun fikra-surface-tokens (backend)
+  (let ((record (fikra-backend-surface backend)))
+    (if record (car (cdr (cdr record))) nil)))
+
+(defun fikra-mode-expressible-p (backend mode)
+  "t when MODE translates explicitly on BACKEND and every emitted flag
+token is in the recorded surface. Unmapped modes return nil from the
+translators — they DEGRADE, never silently map to a default."
+  (let ((flags (fikra-translate-flags backend mode)))
+    (if (null flags)
+      nil
+      (let ((tokens (fikra-surface-tokens backend))
+            (ok t))
+        (dolist (f flags)
+          (if (and ok
+                   (not (fikra-member-p "*" tokens))
+                   (not (fikra-member-p f tokens)))
+            (setq ok nil)))
+        ok))))
+
+(defun fikra-translate-flags (backend mode)
+  (if (string= backend "claude")
+    (fikra-claude-flags mode)
+    (if (string= backend "codex")
+      (fikra-codex-flags mode)
+      ;; replay: the deterministic in-editor backend — flags are unused
+      ;; (nothing spawns), but translation must be explicit so the
+      ;; wildcard "*" surface can verify it.
+      (if (string= backend "replay")
+        (fikra-claude-flags mode)
+        nil))))
+
+(defun fikra-backend-expressible (backend)
+  "Which of the four modes BACKEND can express, DERIVED from the recorded
+surface + explicit translations (see fikra-mode-expressible-p)."
+  (let ((out (list)))
+    (dolist (m fikra-modes)
+      (if (fikra-mode-expressible-p backend m)
+        (setq out (cons m out))))
+    (reverse out)))
+
+;; Claude flag translation (fixtures pin adapter output against the
+;; recorded 2.1.195 surface).
+(defun fikra-claude-flags (mode)
+  (cond
+    ((string= mode "approval-required")
+      (list "--permission-mode" "default"))
+    ((string= mode "auto-accept-edits")
+      (list "--permission-mode" "acceptEdits"))
+    ((string= mode "auto")
+      ;; Native since the recorded surface grew the "auto" choice — no
+      ;; acceptEdits approximation, no auto* marker.
+      (list "--permission-mode" "auto"))
+    ((string= mode "full-access")
+      (list "--permission-mode" "bypassPermissions"))
+    (t nil)))
+
+;; The claude --permission-mode VALUE for a mode (used by #214's args fn).
+(defun fikra-claude-mode-arg (mode)
+  (let ((flags (fikra-claude-flags mode)))
+    ;; flags are ("--permission-mode" "<value>") or nil (unmapped) —
+    ;; unmapped falls to the conservative default.
+    (if flags (car (cdr flags)) "default")))
+
+;; Codex flag translation (recorded 0.147.0 surface: --sandbox policies +
+;; --approve-for-me; --ask-for-approval no longer exists).
+(defun fikra-codex-flags (mode)
+  (cond
+    ((string= mode "approval-required")
+      ;; read-only: the agent cannot mutate anything without escalation.
+      (list "--sandbox" "read-only"))
+    ((string= mode "auto-accept-edits")
+      ;; workspace-write: edits auto-approved inside the sandbox.
+      (list "--sandbox" "workspace-write"))
+    ((string= mode "auto")
+      ;; --approve-for-me: approvals routed through automatic review.
+      (list "--sandbox" "workspace-write" "--approve-for-me"))
+    ((string= mode "full-access")
+      (list "--dangerously-bypass-approvals-and-sandbox"))
+    (t nil)))
+
+;; ── per-thread runtime mode (persisted via #213's state) ───────────
+(defvar fikra-default-runtime-mode "approval-required"
+  "Escape hatch: threads default to approval-required (the deliberate
+t3code divergence). Module defvars are not settable cross-module — use
+fikra-set-default-runtime-mode (from init.tlisp) to change the DEFAULT.")
+
+(defun fikra-set-default-runtime-mode (mode)
+  "Set the DEFAULT runtime mode for threads without an explicit one.
+The issue's `(setq fikra-default-runtime-mode ...)` escape hatch, as a
+setter (module vars aren't setq-able from user code)."
+  (if (not (fikra-member-p mode fikra-modes))
+    (progn (editor-set-status (concat "Fikra: unknown mode " mode)) nil)
+    (progn (setq fikra-default-runtime-mode mode) mode)))
+
+(defun fikra-runtime-mode ()
+  "The thread's REQUESTED runtime mode (from thread state)."
+  (let ((m (fikra/thread/fikra-thread-field "runtime-mode")))
+    (if m m fikra-default-runtime-mode)))
+
+(defun fikra-set-runtime-mode (mode)
+  "Set the thread's runtime mode (SPC a m). Validates against the four;
+  persists via thread-save; refreshes the lighter. When the backend cannot
+  express the requested mode, the ONE-TIME explain message says what the
+  lighter's star means."
+  (if (not (fikra-member-p mode fikra-modes))
+    (progn (editor-set-status (concat "Fikra: unknown mode " mode)) nil)
+    (progn
+      (fikra/thread/fikra-thread-set-field "runtime-mode" mode)
+      (fikra/thread/fikra-thread-save)
+      (fikra-refresh-mode-lighter)
+      (if (not (string= (fikra-effective-mode) mode))
+        (message "Fikra: %s cannot express %s — using %s (marked * in the modeline)"
+                 (fikra/adapter/fikra-current-backend) mode (fikra-effective-mode)))
+      mode)))
+
+;; Effective mode = requested, degraded by the current backend.
+(defun fikra-effective-mode ()
+  (let ((backend (fikra/adapter/fikra-current-backend)))
+    (fikra-runtime-mode-degrade (fikra-runtime-mode)
+      (fikra-backend-expressible backend))))
+
+;; Degradation marker: auto* when effective < requested.
+(defun fikra-mode-star ()
+  (if (not (string= (fikra-effective-mode) (fikra-runtime-mode)))
+    "*" ""))
+
+;; ── thread trust state (--allowedTools promotion groundwork) ───────
+(defun fikra-trust-add (tool-class)
+  "Record a trusted tool class for this thread (L2 'always allow'
+  promotes these to --allowedTools on subsequent turns)."
+  (let ((trust (fikra/thread/fikra-thread-field "trust")))
+    (if (not (fikra-member-p tool-class trust))
+      (fikra/thread/fikra-thread-set-field "trust" (cons tool-class trust)))
+    t))
+
+(defun fikra-trust-has-p (tool-class)
+  (fikra-member-p tool-class (fikra/thread/fikra-thread-field "trust")))
+
+;; ── modeline (effective mode + degradation marker) ─────────────────
+;; Delegates to chat's state-char-aware refresh when fikra/chat is loaded
+;; (lazy funcall — the modes↔chat module cycle forbids a top-level
+;; require); the fallback form keeps backend+mode visible pre-chat.
+(defun fikra-refresh-mode-lighter ()
+  (condition-case nil
+    (funcall "fikra/chat/fikra-refresh-lighter")
+    (error
+      (minor-mode-set-lighter "fikra"
+        (concat "fikra:" (fikra/adapter/fikra-current-backend)
+                (fikra-mode-star)
+                ":" (fikra-effective-mode))))))
+
+;; ── SPC a m: the interactive prompt ─────────────────────────────────
+;; completing-read resolves the table/accept names by symbol at call time
+;; (#214 lesson: pass module-QUALIFIED names — bare names from other
+;; contexts are undefined symbols).
+(defun fikra-runtime-mode-candidate (name)
+  (hashmap "value" name "display" name "annotation" "" "metadata" (hashmap)))
+
+(defun fikra-runtime-mode-table (input action)
+  "Completion table for the runtime-mode prompt: the four modes."
+  (if (string= action "metadata")
+    (hashmap "category" "command")
+    (mapcar
+      (lambda (m) (fikra-runtime-mode-candidate m))
+      fikra-modes)))
+
+(defun fikra-runtime-mode-accept (mode)
+  "Minibuffer accept handler: set the chosen runtime MODE."
+  (fikra-set-runtime-mode mode))
+
+(defun fikra-runtime-mode-prompt ()
+  "Prompt for the runtime mode via the minibuffer (SPC a m)."
+  (completing-read
+    "Runtime mode: "
+    "fikra/modes/fikra-runtime-mode-table"
+    nil
+    nil
+    ""
+    "fikra-runtime-mode-history"
+    "fikra/modes/fikra-runtime-mode-accept"))
+
+(provide "fikra-modes")
+)

@@ -77,6 +77,10 @@ With 0 or negative number, disable."
 (key-bind "SPC a s" "(fikra-chat-region)" "normal")
 (key-bind "SPC a i" "(progn (require-module fikra/capture) (fikra/capture/fikra-capture))" "normal")
 (key-bind "SPC a b" "(fikra-set-backend (fikra-backend-prompt))" "normal")
+;; #219: L1 runtime mode — set mid-thread via minibuffer completion over
+;; the four modes (approval-required / auto-accept-edits / auto /
+;; full-access; unknown refused by fikra-set-runtime-mode).
+(key-bind "SPC a m" "(progn (require-module fikra/modes) (fikra/modes/fikra-runtime-mode-prompt))" "normal")
 
 (provide "fikra-mode")
 )

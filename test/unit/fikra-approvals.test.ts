@@ -1,0 +1,188 @@
+import { describe, expect, test, beforeEach, afterAll } from "bun:test";
+import { execFileSync } from "node:child_process";
+import { mkdtempSync, rmSync, readFileSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { createStartedEditor, executeTlisp } from "../helpers/editor-fixture.ts";
+
+// #219 (RFC-027 §D5 L1) — runtime modes: four presets, strictness-ordered
+// degradation, per-backend fallback fixtures, trust state, mode-aware
+// modeline. All keyless (replay backend + checked-in fixtures).
+
+type Editor = Awaited<ReturnType<typeof createStartedEditor>>;
+
+let repoDir = "";
+const repoDirs: string[] = [];
+const originalCwd = process.cwd();
+
+beforeEach(() => {
+  repoDir = mkdtempSync(join(tmpdir(), "fikra-l1-"));
+  repoDirs.push(repoDir);
+  execFileSync("git", ["init", "-q"], { cwd: repoDir });
+  // .tmax/ gitignored per the #218 fixture rule.
+  writeFileSync(join(repoDir, ".gitignore"), ".tmax/\n");
+  process.chdir(repoDir);
+});
+
+afterAll(() => {
+  process.chdir(originalCwd);
+  for (const d of repoDirs) rmSync(d, { recursive: true, force: true });
+});
+
+const e = (editor: Editor, expr: string) => executeTlisp(editor, expr);
+
+async function setup(backend = "replay"): Promise<Editor> {
+  const editor = await createStartedEditor("");
+  e(editor, "(require-module fikra/modes)");
+  e(editor, "(require-module fikra/adapter)");
+  e(editor, "(require-module fikra/thread)");
+  e(editor, "(fikra/thread/fikra-thread-init)");
+  // Forced (no availability probe): keyless fixture tests must not
+  // depend on the runner having the CLI installed.
+  e(editor, `(fikra/adapter/fikra-set-backend-forced "${backend}")`);
+  return editor;
+}
+
+describe("#219 L1 — runtime mode defaults + lifecycle", () => {
+  test("default is approval-required (the deliberate t3code divergence)", async () => {
+    const editor = await setup();
+    expect(String(e(editor, "(fikra/modes/fikra-runtime-mode)").value)).toBe("approval-required");
+    // Persisted in thread state and reloads after a fresh editor on the same repo.
+    e(editor, '(fikra/modes/fikra-set-runtime-mode "full-access")');
+    const state = JSON.parse(readFileSync(join(repoDir, ".tmax/fikra/threads/main/state.json"), "utf8"));
+    expect(state["runtime-mode"]).toBe("full-access");
+  });
+
+  test("SPC a m (set-runtime-mode) changes mid-thread; unknown mode refused", async () => {
+    const editor = await setup();
+    expect(String(e(editor, '(fikra/modes/fikra-set-runtime-mode "auto")').value)).toBe("auto");
+    expect(String(e(editor, "(fikra/modes/fikra-runtime-mode)").value)).toBe("auto");
+    expect(String(e(editor, '(fikra/modes/fikra-set-runtime-mode "banana")').value)).toBe("null");
+    expect(String(e(editor, "(fikra/modes/fikra-runtime-mode)").value)).toBe("auto");
+  });
+
+  test("SPC a m prompt surface: table offers exactly the four modes; accept sets it", async () => {
+    const editor = await setup();
+    // The completion table (non-metadata action → candidates). Extract the
+    // "value" field in T-Lisp (hashmap entries don't cross the bridge).
+    const cands = (e(editor, '(mapcar (lambda (c) (hashmap-get c "value")) (fikra/modes/fikra-runtime-mode-table "" ""))').value as { value: string }[]).map((v) => String(v.value));
+    expect(cands).toEqual(["approval-required", "auto-accept-edits", "auto", "full-access"]);
+    // The accept handler is what the minibuffer invokes on RET.
+    expect(String(e(editor, '(fikra/modes/fikra-runtime-mode-accept "full-access")').value)).toBe("full-access");
+    expect(String(e(editor, "(fikra/modes/fikra-runtime-mode)").value)).toBe("full-access");
+  });
+});
+
+describe("#219 L1 — fixture-driven fallback matrices", () => {
+  // Fixtures derived from the RECORDED CLI surfaces (checked in modes.tlisp:
+  // claude 2.1.195, codex-cli 0.147.0, recorded 2026-08-22). Rows cover ALL
+  // FOUR modes for both backends. NOTE the recorded-surface discovery: the
+  // original issue fixture assumed codex could not express `auto`
+  // (--ask-for-approval era) and claude approximated it — the CURRENT
+  // surfaces give claude a native `auto` choice and codex `--approve-for-me`,
+  // so all four modes are expressible on BOTH backends and nothing degrades.
+  // The issue's governing rule still applies: semantics the surface cannot
+  // verify DEGRADE (pinned below via synthetic + unknown-backend cases).
+  const CLAUDE_FIXTURE: Array<{ requested: string; flags: string[]; effective: string }> = [
+    { requested: "approval-required", flags: ["--permission-mode", "default"], effective: "approval-required" },
+    { requested: "auto-accept-edits", flags: ["--permission-mode", "acceptEdits"], effective: "auto-accept-edits" },
+    { requested: "auto", flags: ["--permission-mode", "auto"], effective: "auto" },
+    { requested: "full-access", flags: ["--permission-mode", "bypassPermissions"], effective: "full-access" },
+  ];
+  const CODEX_FIXTURE: Array<{ requested: string; flags: string[]; effective: string }> = [
+    { requested: "approval-required", flags: ["--sandbox", "read-only"], effective: "approval-required" },
+    { requested: "auto-accept-edits", flags: ["--sandbox", "workspace-write"], effective: "auto-accept-edits" },
+    { requested: "auto", flags: ["--sandbox", "workspace-write", "--approve-for-me"], effective: "auto" },
+    { requested: "full-access", flags: ["--dangerously-bypass-approvals-and-sandbox"], effective: "full-access" },
+  ];
+
+  test("claude expresses all four; adapter flags match the fixture for every mode", async () => {
+    const editor = await setup("claude");
+    for (const row of CLAUDE_FIXTURE) {
+      e(editor, `(fikra/modes/fikra-set-runtime-mode "${row.requested}")`);
+      // Adapters consume the EFFECTIVE mode (post-degradation) — that is
+      // the mode actually handed to the CLI.
+      const gotFlags = (e(editor, "(fikra/modes/fikra-claude-flags (fikra/modes/fikra-effective-mode))").value as { value: string }[]).map((v) => String(v.value));
+      expect(gotFlags).toEqual(row.flags);
+      const gotEffective = String(e(editor, "(fikra/modes/fikra-effective-mode)").value);
+      expect(gotEffective).toBe(row.effective);
+    }
+  });
+
+  test("codex (0.147 surface): all four expressible — --approve-for-me IS auto", async () => {
+    const editor = await setup("codex");
+    for (const row of CODEX_FIXTURE) {
+      e(editor, `(fikra/modes/fikra-set-runtime-mode "${row.requested}")`);
+      const gotFlags = (e(editor, "(fikra/modes/fikra-codex-flags (fikra/modes/fikra-effective-mode))").value as { value: string }[]).map((v) => String(v.value));
+      expect(gotFlags).toEqual(row.flags);
+      expect(String(e(editor, "(fikra/modes/fikra-effective-mode)").value)).toBe(row.effective);
+    }
+  });
+
+  test("unmapped modes return nil from translators — never a silent default", async () => {
+    const editor = await setup("codex");
+    expect(String(e(editor, '(fikra/modes/fikra-codex-flags "banana")').value)).toBe("null");
+    expect(String(e(editor, '(fikra/modes/fikra-claude-flags "banana")').value)).toBe("null");
+    // The defensive mode-arg helper still yields the conservative value.
+    expect(String(e(editor, '(fikra/modes/fikra-claude-mode-arg "banana")').value)).toBe("default");
+  });
+
+  test("degradation always picks the NEAREST STRICTER expressible mode, never looser", async () => {
+    const editor = await setup();
+    // Synthetic expressible list (what a future surface gap produces):
+    // auto missing → nearest stricter is auto-accept-edits — NOT
+    // full-access (looser) and NOT approval-required (two steps away).
+    expect(String(e(editor, '(fikra/modes/fikra-runtime-mode-degrade "auto" (list "approval-required" "auto-accept-edits" "full-access"))').value)).toBe("auto-accept-edits");
+    // auto-accept-edits missing → approval-required (the only stricter one).
+    expect(String(e(editor, '(fikra/modes/fikra-runtime-mode-degrade "auto-accept-edits" (list "approval-required" "full-access"))').value)).toBe("approval-required");
+    // Nothing expressible at all → the conservative base.
+    expect(String(e(editor, '(fikra/modes/fikra-runtime-mode-degrade "full-access" (list))').value)).toBe("approval-required");
+  });
+
+  test("unknown backend: no surface record → everything degrades to approval-required", async () => {
+    const editor = await setup("nonexistent");
+    e(editor, '(fikra/modes/fikra-set-runtime-mode "full-access")');
+    expect(String(e(editor, "(fikra/modes/fikra-effective-mode)").value)).toBe("approval-required");
+  });
+
+  test("escape hatch: set-default-runtime-mode changes the default for unset threads", async () => {
+    const editor = await setup();
+    // Module defvars aren't setq-able cross-module — the setter IS the
+    // escape hatch (init.tlisp calls it).
+    e(editor, '(fikra/modes/fikra-set-default-runtime-mode "full-access")');
+    expect(String(e(editor, "(fikra/modes/fikra-runtime-mode)").value)).toBe("full-access");
+  });
+});
+
+describe("#219 L1 — thread trust state (L2 groundwork)", () => {
+  test("trust-add records a class once (idempotent); trust-has-p queries", async () => {
+    const editor = await setup();
+    expect(String(e(editor, '(fikra/modes/fikra-trust-add "Edit")').type)).toBe("boolean");
+    e(editor, '(fikra/modes/fikra-trust-add "Edit")'); // idempotent
+    const trust = e(editor, '(fikra/thread/fikra-thread-field "trust")');
+    const entries = (trust.value as { value: string }[]).map((v) => String(v.value));
+    expect(entries.filter((t) => t === "Edit")).toHaveLength(1);
+    expect(String(e(editor, '(fikra/modes/fikra-trust-has-p "Edit")').value)).toBe("true");
+    expect(String(e(editor, '(fikra/modes/fikra-trust-has-p "Bash")').value)).toBe("null");
+  });
+});
+
+describe("#219 L1 — mode-aware modeline", () => {
+  test("effective mode always shown; degradation renders the star", async () => {
+    const editor = await setup("nonexistent");
+    e(editor, '(fikra/modes/fikra-set-runtime-mode "full-access")');
+    e(editor, "(require-module fikra/chat)");
+    e(editor, "(fikra/chat/fikra-refresh-lighter)");
+    const lighter = String(e(editor, '(minor-mode-lighter "fikra")').value);
+    expect(lighter).toContain("approval-required"); // EFFECTIVE mode shown
+    expect(lighter).toContain("*"); // degradation star
+    // Expressible mode → effective == requested → no star (codex's
+    // recorded 0.147 surface expresses auto via --approve-for-me).
+    e(editor, '(fikra/adapter/fikra-set-backend-forced "codex")');
+    e(editor, '(fikra/modes/fikra-set-runtime-mode "auto")');
+    e(editor, "(fikra/chat/fikra-refresh-lighter)");
+    const lighter2 = String(e(editor, '(minor-mode-lighter "fikra")').value);
+    expect(lighter2).toContain("auto");
+    expect(lighter2).not.toContain("*");
+  });
+});
