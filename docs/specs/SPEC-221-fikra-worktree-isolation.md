@@ -71,6 +71,14 @@ patch-apply-or-refuse, NEVER a merge. Close = snapshot + retention export
       locally (pinned).
 - [x] Close REFUSES on post-snapshot divergence (worktree intact, status
       reports refused) (pinned).
+- [x] Close REFUSES on GITIGNORED worktree content (gate round-1 catch:
+      invisible to the diff+untracked checks and never captured — add -A
+      respects gitignore — a force-remove would destroy it; .tmax alone
+      exempt); removing the file unblocks the close (pinned).
+- [x] Each destructive close step is VERIFIED before the next (gate
+      round-1 catch: a failed `worktree remove` previously still deleted
+      branch/refs/state, orphaning the worktree — now the sequence aborts
+      with everything kept).
 - [x] Lighter carries `wt:<id>` only in worktree mode (pinned on/off/
       after-close); `SPC a w` registered via key-binding lookup (pinned).
 - [x] Working dir + backend `:cwd` worktree-aware (pinned via

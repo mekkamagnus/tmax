@@ -186,7 +186,14 @@ Returns t when fully closed."
                   ;; Untracked files that appeared AFTER the snapshot.
                   (> (length (string-trim
                         (shell-command (concat "git -C " (fikra-shq path)
-                                               " status --porcelain 2>/dev/null | grep '^??' | grep -v '\.tmax/' || true")))) 0))
+                                               " status --porcelain 2>/dev/null | grep '^??' | grep -v '\.tmax/' || true")))) 0)
+                  ;; Gate catch: GITIGNORED content (agent-written .env,
+                  ;; build artifacts) is invisible to both checks above and
+                  ;; was never captured (add -A respects gitignore) — close
+                  ;; would destroy it. Refuse unless it is only .tmax/.
+                  (> (length (string-trim
+                        (shell-command (concat "git -C " (fikra-shq path)
+                                               " status --porcelain --ignored 2>/dev/null | grep '^!!' | grep -v '\.tmax/' || true")))) 0))
               (progn
                 (editor-set-status "Fikra: close refused — worktree has unmerged changes (beyond the snapshot)")
                 nil)
@@ -194,16 +201,25 @@ Returns t when fully closed."
               ;; Retention: export per-turn diffs before deleting refs.
               (fikra-worktree-export-diffs)
               (let ((id (fikra/thread/fikra-thread-current)))
-                (shell-command (concat "git worktree remove --force " (fikra-shq path)))
-                (shell-command (concat "git branch -D fikra/" id " 2>/dev/null || true"))
-                (shell-command (concat "git for-each-ref --format='%(refname)' refs/fikra/" id "/ "
-                                       " | xargs -n1 git update-ref -d 2>/dev/null || true"))
-                (fikra/thread/fikra-thread-set-field "worktree" nil)
-                (fikra/thread/fikra-thread-set-field "worktree-base" nil)
-                (fikra/thread/fikra-thread-save)
-                (fikra-refresh-worktree-lighter)
-                (editor-set-status (concat "Fikra: worktree " id " closed + pruned"))
-                t)))))))))
+                ;; Gate catch: each destructive step is VERIFIED before the
+                ;; next — a failed worktree remove must not orphan the
+                ;; worktree with its branch/refs/state already gone.
+                (if (not (string-match "REMOVE-OK"
+                          (shell-command (concat "git worktree remove --force " (fikra-shq path)
+                                                 " 2>&1 && echo REMOVE-OK || echo REMOVE-FAILED"))))
+                  (progn
+                    (editor-set-status "Fikra: close ABORTED — worktree remove failed; branch/refs/state kept")
+                    nil)
+                  (progn
+                    (shell-command (concat "git branch -D fikra/" id " 2>/dev/null || true"))
+                    (shell-command (concat "git for-each-ref --format='%(refname)' refs/fikra/" id "/ "
+                                           " | xargs -n1 git update-ref -d 2>/dev/null || true"))
+                    (fikra/thread/fikra-thread-set-field "worktree" nil)
+                    (fikra/thread/fikra-thread-set-field "worktree-base" nil)
+                    (fikra/thread/fikra-thread-save)
+                    (fikra-refresh-worktree-lighter)
+                    (editor-set-status (concat "Fikra: worktree " id " closed + pruned"))
+                    t)))))))))))
 
 (defun fikra-worktree-export-diffs ()
   "Export every captured turn's diff (baseline→completion) to

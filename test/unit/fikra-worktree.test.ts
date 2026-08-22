@@ -164,6 +164,24 @@ describe("#221 close — snapshot + retention export + prune", () => {
     expect(readFileSync(join(repoDir, "shared.txt"), "utf8")).toBe("final version\n");
   });
 
+  test("close REFUSES on GITIGNORED worktree content (gate catch: invisible to diff+untracked, never captured — remove would destroy it)", async () => {
+    const a = await setupThread("a");
+    e(a, "(fikra/worktree/fikra-worktree-enter)");
+    const wt = worktreePathFor(repoDir, "a");
+    writeFileSync(join(wt, "shared.txt"), "edit\n");
+    e(a, "(fikra/worktree/fikra-worktree-handoff)");
+    // An agent-written gitignored file (add -A never captures it).
+    writeFileSync(join(wt, ".env"), "SECRET=1\n");
+    expect(String(e(a, "(fikra/worktree/fikra-worktree-close)").value)).toBe("null");
+    expect(readFileSync(join(wt, ".env"), "utf8")).toBe("SECRET=1\n"); // NOT destroyed
+    expect(existsSync(wt)).toBe(true); // worktree intact
+    expect(String(e(a, "(editor-status)").value)).toContain("refused");
+    // Removing the ignored file unblocks the close.
+    rmSync(join(wt, ".env"));
+    expect(String(e(a, "(fikra/worktree/fikra-worktree-close)").value)).toBe("true");
+    expect(existsSync(wt)).toBe(false);
+  });
+
   test("close REFUSES when the worktree has changes beyond the snapshot", async () => {
     const a = await setupThread("a");
     e(a, "(fikra/worktree/fikra-worktree-enter)");
