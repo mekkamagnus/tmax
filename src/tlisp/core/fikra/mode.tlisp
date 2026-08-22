@@ -47,7 +47,12 @@ With 0 or negative number, disable."
   (require-module fikra/adapter)
   (require-module fikra/context)
   (require-module fikra/workflow)
-  ;; Discover and set default backend
+  ;; Discover and set the default backend — but NEVER override an explicit
+  ;; selection (SPC a b / a test seam choosing first; #225 probe catch:
+  ;; a workflow's start clobbered the chosen backend).
+  (if (and (not backend)
+           (not (string= (fikra-current-backend) "none")))
+    (message "Fikra mode started (%s)" (fikra-current-backend))
   (let ((target (if backend backend fikra-default-backend)))
     (if (fikra-backend-available-p target)
       (fikra-set-backend target)
@@ -57,7 +62,7 @@ With 0 or negative number, disable."
         (let ((available (fikra-list-available-backends)))
           (if available
             (fikra-set-backend (car available))
-            (message "Fikra: no AI backends found"))))))
+            (message "Fikra: no AI backends found")))))))
   (message "Fikra mode started (%s)" (fikra-current-backend)))
 
 (defun fikra-stop ()

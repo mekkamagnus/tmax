@@ -1,9 +1,95 @@
 (defmodule fikra/workflow
   (export fikra-explain fikra-fix fikra-refactor fikra-review fikra-test
-          fikra-chat-region fikra-chat-with-context)
+          fikra-chat-region fikra-chat-with-context
+          fikra-workflow-thread-for fikra-workflow-label-for
+          fikra-register-workflow fikra-registered-workflows
+          fikra-run-named-workflow)
 
-;; Workflows — single-shot AI interactions with specialized prompts
+;; #225 (RFC-027 §Phase 5 + RFC-013 §T-Lisp API): workflows re-bound to
+;; CREATE-OR-APPEND threads. Each workflow (explain/fix/refactor/review/
+;; test) opens or reuses a thread labeled with the workflow name —
+;; repeated invocations CONTINUE the same conversation; results stream
+;; per FAEP with checkpoints (#214/#217 own that machinery).
+;; fikra-build-context stays user-overridable via setq (unchanged).
 
+(require-module fikra/thread)
+(require-module fikra/threads)
+(require-module fikra/event)
+(require-module fikra/context)
+
+(defvar fikra-workflow-labels (hashmap)
+  "thread-id → workflow label (explain/fix/…, or a custom name).")
+
+(defun fikra-workflow-label-for (id)
+  "The workflow label recorded for thread ID (nil when none)."
+  (hashmap-get fikra-workflow-labels id))
+
+(defun fikra-workflow-thread-for (label)
+  "The thread id carrying workflow LABEL (nil when none exists yet).
+Threads whose state.json records the label are found across restarts;
+in-session labels ride the registry."
+  (fikra-workflow-find label (fikra/thread/fikra-thread-ids) nil))
+
+(defun fikra-workflow-find (label ids found)
+  (if (or found (null ids))
+    found
+    (let* ((id (car ids))
+           (row (fikra/thread/fikra-thread-load-row id))
+           (wf (if row (fikra-workflow-field-of row "workflow") nil)))
+      (fikra-workflow-find label (cdr ids)
+        (if (and wf (string= wf label)) id nil)))))
+
+;; alist getter for a parsed state row (json-read 2-list alists).
+(defun fikra-workflow-field-of (alist key)
+  (let ((hit nil))
+    (dolist (entry alist)
+      (if (and (not hit)
+               (listp entry)
+               (= (length entry) 2)
+               (string= (car entry) key))
+        (setq hit (car (cdr entry)))))
+    hit))
+
+(defun fikra-workflow-open (label prompt)
+  "Open-or-reuse the workflow's labeled thread and send PROMPT+context.
+Creates `wf-<label>` on first use (inheriting the runtime mode); later
+invocations append to the SAME thread."
+  ;; Start fikra ONLY when inactive — re-starting resets the backend to
+  ;; the default (probe catch: rounds 2+ lost the replay backend).
+  (require-module fikra/mode)
+  (if (not (fikra-active-p))
+    (condition-case nil (fikra-start) (error () nil))
+    nil)
+  ;; Snapshot the context FIRST — switching threads switches the current
+  ;; buffer to the workflow's chat buffer (probe catch: the context read
+  ;; the empty chat buffer instead of the user's code).
+  (let ((context (fikra-build-context))
+        (existing (fikra-workflow-thread-for label)))
+    (if existing
+      (fikra/thread/fikra-thread-switch existing)
+      (fikra-workflow-label-thread label))
+    ;; Chat surface: buffer + the snapshotted context prompt.
+    (require-module fikra/chat)
+    (condition-case nil (fikra/chat/fikra-chat-open) (error () nil))
+    (let ((message (concat prompt "\n\n" context)))
+      (require-module fikra/adapter)
+      (condition-case nil
+        (progn
+          (require-module fikra/chat)
+          (fikra/chat/fikra-turn-send message))
+        (error () (editor-set-status "Fikra: no backend — SPC a b to select"))))))
+
+(defun fikra-workflow-label-thread (label)
+  "Create (and focus) a thread for workflow LABEL, recording the label in
+its state.json + the registry. Returns the thread id."
+  (let ((id (fikra/thread/fikra-thread-new)))
+    (editor/keymaps/keymap-mutable-set! fikra-workflow-labels id label)
+    ;; Persist the label through the exported set-field + save path.
+    (fikra/thread/fikra-thread-set-field "workflow" label)
+    (fikra/thread/fikra-thread-save)
+    id))
+
+;; ── the built-in workflows (SPC a e/f/r/g + review) ─────────────────
 (defvar fikra-explain-prompt
   "You are a code explainer. Explain the following code clearly and concisely.
 Focus on: what it does, why, and any non-obvious patterns."
@@ -30,61 +116,84 @@ Cover happy paths, edge cases, and error conditions."
   "System prompt for the test workflow.")
 
 (defun fikra-explain ()
-  "Send current buffer/selection to Fikra Chat with explain prompt."
-  (fikra-run-workflow "explain" fikra-explain-prompt))
+  "Send current buffer/selection to the EXPLAIN workflow thread (reused)."
+  (fikra-workflow-open "explain" fikra-explain-prompt))
 
 (defun fikra-fix ()
-  "Send current buffer/selection to Fikra Chat with fix prompt."
-  (fikra-run-workflow "fix" fikra-fix-prompt))
+  "Send current buffer/selection to the FIX workflow thread (reused)."
+  (fikra-workflow-open "fix" fikra-fix-prompt))
 
 (defun fikra-refactor ()
-  "Send current buffer/selection to Fikra Chat with refactor prompt."
-  (fikra-run-workflow "refactor" fikra-refactor-prompt))
+  "Send current buffer/selection to the REFACTOR workflow thread (reused)."
+  (fikra-workflow-open "refactor" fikra-refactor-prompt))
 
 (defun fikra-review ()
-  "Send current buffer/selection to Fikra Chat with review prompt."
-  (fikra-run-workflow "review" fikra-review-prompt))
+  "Send current buffer/selection to the REVIEW workflow thread (reused)."
+  (fikra-workflow-open "review" fikra-review-prompt))
 
 (defun fikra-test ()
-  "Send current buffer/selection to Fikra Chat with test prompt."
-  (fikra-run-workflow "test" fikra-test-prompt))
+  "Send current buffer/selection to the TEST workflow thread (reused)."
+  (fikra-workflow-open "test" fikra-test-prompt))
 
-(defun fikra-run-workflow (name prompt)
-  "Run a named workflow: open chat, send context with prompt."
-  ;; Ensure fikra is active
-  (if (not fikra-mode-active) (fikra-start))
-  ;; Open chat buffer (lazy: mode no longer eager-loads chat)
-  (require-module fikra/chat)
-  (fikra/chat/fikra-chat-open)
-  ;; Insert workflow header
-  (buffer-set-read-only nil)
-  (let ((lines (buffer-line-count)))
-    (cursor-move (max 0 (- lines 1)) 0)
-    (buffer-insert (concat "\n[" name "] " (buffer-filename) "\n\n"))
-    (buffer-set-read-only t))
-  ;; Build and send the message
-  (let ((context (fikra-build-context))
-        (message (concat prompt "\n\n" context)))
-    (fikra/chat/fikra-turn-send message)))
-
+;; ── region + free-form (unchanged single-thread surfaces) ───────────
 (defun fikra-chat-region ()
   "Send visual selection to Fikra Chat."
-  (if (not fikra-mode-active) (fikra-start))
+  ;; Start fikra ONLY when inactive — re-starting resets the backend to
+  ;; the default (probe catch: rounds 2+ lost the replay backend).
+  (require-module fikra/mode)
+  (if (not (fikra-active-p))
+    (condition-case nil (fikra-start) (error () nil))
+    nil)
   (let ((sel (visual-get-selection)))
     (if sel
       (progn
         (require-module fikra/chat)
-        (fikra/chat/fikra-chat-open)
+        (condition-case nil (fikra/chat/fikra-chat-open) (error () nil))
         (fikra/chat/fikra-turn-send sel))
       (message "Fikra: no selection — select text first"))))
 
 (defun fikra-chat-with-context (message)
-  "Send MESSAGE with buffer context to current backend."
-  (if (not fikra-mode-active) (fikra-start))
+  "Send MESSAGE with buffer context to the current thread."
+  ;; Start fikra ONLY when inactive — re-starting resets the backend to
+  ;; the default (probe catch: rounds 2+ lost the replay backend).
+  (require-module fikra/mode)
+  (if (not (fikra-active-p))
+    (condition-case nil (fikra-start) (error () nil))
+    nil)
   (require-module fikra/chat)
-  (fikra/chat/fikra-chat-open)
+  (condition-case nil (fikra/chat/fikra-chat-open) (error () nil))
   (let ((full-msg (concat message "\n\n" (fikra-build-context))))
     (fikra/chat/fikra-turn-send full-msg)))
+
+;; ── custom workflows (RFC-013 §Custom Workflow, thread-aware) ───────
+(defvar fikra-custom-workflows (hashmap)
+  "name → prompt string. (fikra-register-workflow name prompt) from
+init.tlisp; invoke via (fikra-run-named-workflow name) or bind a key.")
+
+(defun fikra-register-workflow (name prompt)
+  "Register a custom workflow NAME with PROMPT (thread-aware: it gets
+its own labeled thread on first use)."
+  (editor/keymaps/keymap-mutable-set! fikra-custom-workflows name prompt)
+  name)
+
+(defun fikra-registered-workflows ()
+  "The registered custom workflow names."
+  (fikra-custom-workflow-names (fikra-custom-workflow-keys) (list)))
+
+(defun fikra-custom-workflow-keys ()
+  (hashmap-keys fikra-custom-workflows))
+
+(defun fikra-custom-workflow-names (keys acc)
+  (if (null keys)
+    (reverse acc)
+    (fikra-custom-workflow-names (cdr keys) (cons (car keys) acc))))
+
+(defun fikra-run-named-workflow (name)
+  "Run custom workflow NAME (creates-or-reuses its labeled thread)."
+  (let ((prompt (hashmap-get fikra-custom-workflows name)))
+    (if prompt
+      (fikra-workflow-open name prompt)
+      (editor-set-status (concat "Fikra: no workflow " name)))))
 
 (provide "fikra-workflow")
 )

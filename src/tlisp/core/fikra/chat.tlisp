@@ -19,10 +19,17 @@
 ;; ── open / close ────────────────────────────────────────────────────
 (defun fikra-chat-open ()
   "Open the project chat: thread init-or-load + history replay into *Fikra*
-+ buffer-local keymap + lighter. The SPC a a entry point."
++ buffer-local keymap + lighter. The SPC a a entry point.
+#225: init-or-load runs only when NO thread is focused — a workflow that
+just created/switched its OWN thread must not be dragged back to main."
   ;; Mode activation is the caller's job (SPC a a starts it) — requiring
   ;; fikra/mode here would create a mode↔chat cycle.
-  (fikra/thread/fikra-thread-open)
+  (if (not (fikra/thread/fikra-thread-current))
+    (fikra/thread/fikra-thread-open)
+    (progn
+      (fikra/thread/fikra-thread-ensure-chat-buffer)
+      (buffer-switch (fikra/thread/fikra-thread-buffer-name))
+      (fikra/event/fikra-event-rebuild-fikra-buffer)))
   (fikra-ensure-buffer-keymap)
   (fikra-refresh-lighter)
   fikra-chat-buffer-name)

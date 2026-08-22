@@ -1,5 +1,5 @@
 (defmodule fikra/thread
-  (export fikra-thread-ensure-chat-buffer fikra-thread-buffer-name fikra-thread-buffer-name-of fikra-thread-field-root-of fikra-thread-set-session-id-for fikra-thread-working-dir fikra-thread-in-worktree-p fikra-thread-focus fikra-thread-new fikra-thread-archive fikra-thread-archived-p fikra-thread-switch fikra-thread-rows fikra-thread-ids fikra-thread-init fikra-thread-open fikra-thread-reopen
+  (export fikra-thread-load-row fikra-thread-ensure-chat-buffer fikra-thread-buffer-name fikra-thread-buffer-name-of fikra-thread-field-root-of fikra-thread-set-session-id-for fikra-thread-working-dir fikra-thread-in-worktree-p fikra-thread-focus fikra-thread-new fikra-thread-archive fikra-thread-archived-p fikra-thread-switch fikra-thread-rows fikra-thread-ids fikra-thread-init fikra-thread-open fikra-thread-reopen
           fikra-thread-current fikra-thread-status fikra-thread-status-set
           fikra-thread-turn-begin fikra-thread-turn-end fikra-thread-turn-count
           fikra-thread-root fikra-thread-log-path fikra-thread-session-id
@@ -112,7 +112,7 @@ history into it (daemon-restart reopen path), focus it."
             ;; Overlay persisted fields onto fresh defaults (forward-
             ;; compatible: unknown persisted fields ignored, missing fields
             ;; keep defaults).
-            (dolist (key (list "backend" "session-id" "runtime-mode" "trust" "worktree" "worktree-base" "archived" "interaction" "turn-count"))
+            (dolist (key (list "backend" "session-id" "runtime-mode" "trust" "worktree" "worktree-base" "archived" "interaction" "workflow" "turn-count"))
               (let ((v (fikra-alist-get key parsed)))
                 (if (not (null v))
                   (editor/keymaps/keymap-mutable-set! state key v))))
@@ -147,6 +147,7 @@ history into it (daemon-restart reopen path), focus it."
                      (list "worktree-base" (fikra-thread-field "worktree-base"))
                      (list "archived" (fikra-thread-field "archived"))
                      (list "interaction" (fikra-thread-field "interaction"))
+                     (list "workflow" (fikra-thread-field "workflow"))
                      (list "turn-count" (fikra-thread-field "turn-count")))))))
 
 (defun fikra-thread-current ()
@@ -184,6 +185,7 @@ not land under the wrong project)."
                          (list "worktree-base" (hashmap-get state "worktree-base"))
                          (list "archived" (hashmap-get state "archived"))
                          (list "interaction" (hashmap-get state "interaction"))
+                         (list "workflow" (hashmap-get state "workflow"))
                          (list "turn-count" (hashmap-get state "turn-count")))))
         sid)
       nil)))
@@ -444,6 +446,13 @@ turn's init event); persisted on save."
 ;; fikra-thread-turn-end: the AUTHORITATIVE end (process exit per §D3 —
 ;; checkpoint capture is async follow-up in #217 and never blocks the next
 ;; turn): emit turn-end, settle the state machine.
+(defun fikra-turn-backend-name ()
+  "The adapter's current backend name ('none' fallback; lazy require —
+thread→adapter has no cycle but keep the lazy convention)."
+  (condition-case nil
+    (progn (require-module fikra/adapter) (fikra/adapter/fikra-current-backend))
+    (error () (fikra-thread-field "backend"))))
+
 (defun fikra-thread-turn-begin ()
   ;; Validate the transition FIRST — an illegal begin must not bump the
   ;; persisted turn count (checked-state hygiene, gate catch).
@@ -451,10 +460,13 @@ turn's init event); persisted on save."
   (let* ((state (fikra-thread-state))
          (n (+ 1 (hashmap-get state "turn-count"))))
     (editor/keymaps/keymap-mutable-set! state "turn-count" n)
+    ;; #225: the turn-start records the backend ACTUALLY driving the turn
+    ;; (the adapter's current selection — a mid-thread switch changes it;
+    ;; the thread field alone stays stale).
     (fikra/event/fikra-event-emit
       (list (list "kind" "turn-start")
             (list "turn" (if (numberp n) n (string-to-number (if (stringp n) n "0"))))
-            (list "backend" (fikra-thread-field "backend"))))
+            (list "backend" (fikra-turn-backend-name))))
     ;; Persist the bumped count (a crash before turn-end must still show
     ;; the turn happened).
     (fikra-thread-save)
