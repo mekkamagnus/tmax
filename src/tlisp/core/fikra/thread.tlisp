@@ -1,5 +1,5 @@
 (defmodule fikra/thread
-  (export fikra-thread-buffer-name fikra-thread-working-dir fikra-thread-in-worktree-p fikra-thread-focus fikra-thread-new fikra-thread-archive fikra-thread-archived-p fikra-thread-switch fikra-thread-rows fikra-thread-ids fikra-thread-init fikra-thread-open fikra-thread-reopen
+  (export fikra-thread-buffer-name fikra-thread-buffer-name-of fikra-thread-field-root-of fikra-thread-working-dir fikra-thread-in-worktree-p fikra-thread-focus fikra-thread-new fikra-thread-archive fikra-thread-archived-p fikra-thread-switch fikra-thread-rows fikra-thread-ids fikra-thread-init fikra-thread-open fikra-thread-reopen
           fikra-thread-current fikra-thread-status fikra-thread-status-set
           fikra-thread-turn-begin fikra-thread-turn-end fikra-thread-turn-count
           fikra-thread-root fikra-thread-log-path fikra-thread-session-id
@@ -155,11 +155,27 @@ history into it (daemon-restart reopen path), focus it."
 ;; #221: focus another thread id (lazy state init happens on first
 ;; access — fikra-thread-state). Module defvars are not setq-able from
 ;; outside, hence the setter. Full thread switching machinery is #222.
+;; id-scoped readers for background-thread operations (#222 gate catch):
+;; read another thread's root/buffer WITHOUT changing focus.
+(defun fikra-thread-field-root-of (id)
+  (let ((state (hashmap-get fikra-threads id)))
+    (if state (hashmap-get state "root")
+      (progn (if (not fikra-current-thread-id) (fikra-thread-init))
+             (fikra-thread-field "root")))))
+
+(defun fikra-thread-buffer-name-of (id)
+  (if (or (null id) (string= id "main")) "*Fikra*"
+    (concat "*Fikra-" id "*")))
+
 (defun fikra-thread-focus (id)
-  "Focus thread ID (creating its state lazily). Returns the id."
+  "Focus thread ID (creating its state lazily). Re-points the FAEP log —
+  EVERY focus change re-wires the log pointer (gate catch: archive used to
+  leave the log aimed at the archived thread). Returns the id."
   (setq fikra-current-thread-id id)
-  (fikra-thread-state)
-  id)
+  (let ((state (fikra-thread-state)))
+    (fikra/event/fikra-event-log-set
+      (concat (hashmap-get state "root") "/.tmax/fikra/threads/" id "/events.jsonl"))
+    id))
 
 ;; ── #222: creation / switching / archive / listing ─────────────────
 (defun fikra-thread-ensure-chat-buffer ()
@@ -230,6 +246,19 @@ modeline all follow; concurrent threads keep independent state."
     (fikra-thread-ensure-chat-buffer)
     (buffer-switch (fikra-thread-buffer-name))
     (fikra/event/fikra-event-rebuild-fikra-buffer)
+    ;; Gate catch: attach the chat + approvals buffer-local keymaps — only
+    ;; chat-open used to, so a list-RET switch landed keyless. Lazy requires
+    ;; (both modules require thread; cycles forbid top-level).
+    (condition-case nil
+      (progn
+        (require-module fikra/chat)
+        (fikra/chat/fikra-ensure-buffer-keymap))
+      (error () nil))
+    (condition-case nil
+      (progn
+        (require-module fikra/approvals)
+        (fikra/approvals/fikra-approvals-ensure-bindings))
+      (error () nil))
     (fikra-refresh-switch-lighter)
     id))
 

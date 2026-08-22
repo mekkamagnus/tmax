@@ -1,5 +1,5 @@
 (defmodule fikra/event
-  (export fikra-event-log-set fikra-event-log-path fikra-event-emit
+  (export fikra-event-log-set fikra-event-log-path fikra-event-emit-batch-for fikra-event-emit
           fikra-event-emit-batch fikra-event-replay fikra-event-events
           fikra-event-reset fikra-event-render-line fikra-event-rebuild-fikra-buffer)
 
@@ -111,6 +111,40 @@ The current buffer receives the rendered text via buffer-append when it is
 *Fikra* (rendering elsewhere would corrupt user buffers); buffer mutation
 bumps the revision the TUI poll consumes."
   (fikra-event-emit-batch (list event)))
+
+;; #222 gate catch: THREAD-ROUTED emit. The single fikra-event-log pointer
+;; follows FOCUS — a background turn's chunks would land in whatever thread
+;; the user is looking at. Emitting FOR an id appends to id's own log and
+;; renders only when id's buffer is current (switching views does not
+;; misroute; it merely pauses live rendering for the background thread).
+(defun fikra-event-emit-batch-for (id events)
+  (require-module fikra/thread)
+  (let ((target-log (concat (fikra/thread/fikra-thread-field-root-of id)
+                            "/.tmax/fikra/threads/" id "/events.jsonl"))
+        (target-buffer (fikra/thread/fikra-thread-buffer-name-of id)))
+    (if (null events)
+      nil
+      (progn
+        (append-file target-log
+          (apply 'concat
+            (mapcar (lambda (e) (concat (json-encode e) "\n")) events)))
+        (if (not (fikra-event-batch-has-tombstone-p events))
+          (let ((text (fikra-event-render-batch events)))
+            (if (and (> (length text) 0)
+                     (string= (buffer-current) target-buffer))
+              (let ((was-ro (buffer-read-only-p)))
+                (buffer-set-read-only nil)
+                (buffer-append text)
+                (buffer-set-read-only was-ro)))))
+        ;; Memory + in-memory log pointer stay FOCUS-scoped (replay reads
+        ;; the log FILE, so the background thread's history is intact).
+        (if (string= id (fikra/thread/fikra-thread-current))
+          (progn
+            (dolist (e events)
+              (setq fikra-event-memory (cons e fikra-event-memory)))
+            (if (fikra-event-batch-has-tombstone-p events)
+              (fikra-event-rebuild-fikra-buffer))))
+        t))))
 
 (defun fikra-event-emit-batch (events)
   "Emit a BATCH with ONE log append + ONE render pass — the per-chunk

@@ -19,17 +19,24 @@
 (require-module fikra/event)
 (require-module fikra/thread)
 
-(defvar fikra-claude-process nil
-  "Current claude subprocess pid (number) or nil.")
+;; #222 gate catch: PER-THREAD backend state — the module-globals bled
+;; concurrent turns (a second turn reset the shared line accumulator
+;; mid-stream and overwrote the process handle, so interrupt killed the
+;; wrong process). Keyed by THREAD id; pid→thread resolved at dispatch.
+(defvar fikra-claude-processes (hashmap)
+  "thread-id → subprocess pid (number) or nil.")
 
-(defvar fikra-claude-line-buffer ""
-  "Partial-line accumulator — stdout chunks are arbitrary; JSON objects
-must not be parsed until a full newline-delimited line has arrived.")
+(defvar fikra-claude-line-buffers (hashmap)
+  "thread-id → partial-line accumulator — stdout chunks are arbitrary; JSON
+objects must not be parsed until a full newline-delimited line has arrived.")
 
-(defvar fikra-claude-aborted nil
-  "t when the current process was aborted LOCALLY — the abort path already
-ended the turn as interrupted; the SIGTERM'd process's sentinel must not
-end it AGAIN (double turn-end / error-overrides-interrupted, gate catch).")
+(defvar fikra-claude-aborteds (hashmap)
+  "thread-id → t when that process was aborted LOCALLY — the abort path
+already ended the turn as interrupted; the SIGTERM'd process's sentinel
+must not end it AGAIN (double turn-end, gate catch).")
+
+(defvar fikra-claude-pid-thread (hashmap)
+  "pid → thread-id (the filter/sentinel dispatch key).")
 
 (defun fikra-backend-claude-available-p ()
   "t when the claude CLI is on PATH."
@@ -281,22 +288,31 @@ unparseable or non-event lines. Flat dispatch — one branch per wire type."
 ;; Returns the list of COMPLETE lines carried by the chunk; keeps the
 ;; remainder in the accumulator. Fixture-testable without a process.
 (defun fikra-backend-claude-line-events (chunk)
-  "Feed CHUNK into the line accumulator; normalize every complete line and
-return the concatenated FAEP events (a flat list)."
-  (setq fikra-claude-line-buffer (concat fikra-claude-line-buffer chunk))
-  ;; Loop while a newline exists — T-Lisp's `while` macro is unavailable, so
-  ;; this is a recursion over the accumulator with a terminal check.
-  (fikra-drain-lines))
+  "Feed CHUNK into the FOCUSED thread's line accumulator (test seam kept
+for the existing single-thread suites)."
+  (let ((id (fikra/thread/fikra-thread-current)))
+    (fikra-backend-claude-line-events-for (if id id "main") chunk)))
 
-(defun fikra-drain-lines ()
-  (let ((nl (fikra-index-of-newline fikra-claude-line-buffer)))
+(defun fikra-backend-claude-line-events-for (thread-id chunk)
+  "Feed CHUNK into THREAD-ID's accumulator; normalize every complete line
+and return the concatenated FAEP events (a flat list). Loop while a
+newline exists — T-Lisp's `while` macro is unavailable, so this is a
+recursion over the accumulator with a terminal check."
+  (editor/keymaps/keymap-mutable-set! fikra-claude-line-buffers thread-id
+    (concat (hashmap-get fikra-claude-line-buffers thread-id) chunk))
+  (fikra-drain-lines-for thread-id (hashmap-get fikra-claude-line-buffers thread-id)))
+
+(defun fikra-drain-lines-for (thread-id buf)
+  (let ((nl (fikra-index-of-newline buf)))
     (if (null nl)
-      nil
-      (let ((line (substring fikra-claude-line-buffer 0 nl)))
-        (setq fikra-claude-line-buffer
-              (substring fikra-claude-line-buffer (+ nl 1) (length fikra-claude-line-buffer)))
+      (progn
+        ;; Persist the leftover partial line back to THIS thread's slot.
+        (editor/keymaps/keymap-mutable-set! fikra-claude-line-buffers thread-id buf)
+        nil)
+      (let ((line (substring buf 0 nl)))
+        (setq buf (substring buf (+ nl 1) (length buf)))
         (let ((evs (fikra-backend-claude-normalize line)))
-          (let ((rest (fikra-drain-lines)))
+          (let ((rest (fikra-drain-lines-for thread-id buf)))
             (if evs
               (if rest (append evs rest) evs)
               rest)))))))
@@ -317,75 +333,106 @@ return the concatenated FAEP events (a flat list)."
 JSONL → FAEP. The sentinel is the authoritative turn end (#213).
 #220: the approval token + --mcp-config are written AFTER turn-begin (the
 scope names THIS turn) and BEFORE the spawn (args reference the path)."
-  (let ((sid (fikra/thread/fikra-thread-session-id)))
-    (setq fikra-claude-line-buffer "")
-    (setq fikra-claude-aborted nil)
+  (let ((sid (fikra/thread/fikra-thread-session-id))
+        (thread-id (fikra/thread/fikra-thread-current)))
+    (editor/keymaps/keymap-mutable-set! fikra-claude-line-buffers thread-id "")
+    (editor/keymaps/keymap-mutable-set! fikra-claude-aborteds thread-id nil)
     (fikra/thread/fikra-thread-turn-begin)
     ;; L2: mint the turn's token + config (nil-op when the CLI lacks the
     ;; permission hook — args omit the flags too, same probe).
     (fikra-claude-write-mcp-config)
     (let ((args (fikra-backend-claude-args message sid)))
-      (setq fikra-claude-process
-        (make-process
-          :command (cons "claude" args)
-          :cwd (fikra/thread/fikra-thread-working-dir) ; #221: worktree-aware — agent edits land in the worktree
-          :filter "fikra-backend-claude-filter"
-          :sentinel "fikra-backend-claude-sentinel"))
-      fikra-claude-process)))
+      (let ((pid (make-process
+                   :command (cons "claude" args)
+                   :cwd (fikra/thread/fikra-thread-working-dir) ; #221: worktree-aware
+                   :filter "fikra-backend-claude-filter"
+                   :sentinel "fikra-backend-claude-sentinel")))
+        (editor/keymaps/keymap-mutable-set! fikra-claude-processes thread-id pid)
+        (editor/keymaps/keymap-mutable-set! fikra-claude-pid-thread (number-to-string pid) thread-id)
+        pid))))
 
 (defun fikra-backend-claude-filter (pid output)
   "Serialized per-process (#208): normalize complete lines from this chunk
-and emit them as ONE FAEP batch (per-chunk coalescing). The first session
-event records the resume handle."
-  (let ((events (fikra-backend-claude-line-events output)))
+and emit them as ONE FAEP batch (per-chunk coalescing). #222 gate catch:
+the batch routes to the TURN'S thread (emit-batch-for) — the session-id
+records on that thread, and switching focus mid-stream cannot bleed the
+chunks into another thread's log."
+  (let* ((thread-id (or (hashmap-get fikra-claude-pid-thread (number-to-string pid))
+                        (fikra/thread/fikra-thread-current)))
+         (events (fikra-backend-claude-line-events-for thread-id output)))
     (if events
       (progn
-        ;; Record the session id if this batch introduced one.
-        (dolist (e events)
-          (if (string= (fikra-afield e "kind") "session")
-            (fikra/thread/fikra-thread-set-session-id (fikra-afield e "id"))))
-        (fikra/event/fikra-event-emit-batch events)))))
+        ;; Record the session id if this batch introduced one — on the
+        ;; TURN'S thread (a background turn must not touch focused state).
+        (if (string= thread-id (fikra/thread/fikra-thread-current))
+          (dolist (e events)
+            (if (string= (fikra-afield e "kind") "session")
+              (fikra/thread/fikra-thread-set-session-id (fikra-afield e "id")))))
+        (fikra/event/fikra-event-emit-batch-for thread-id events)))))
 
 (defun fikra-backend-claude-sentinel (pid exit-code)
   "AUTHORITATIVE turn end: process exit settles the thread state machine
 (§D3 — checkpoint capture is #217's async follow-up, never blocks).
-SKIPPED when the turn was already ended by a local abort (interrupted)."
-  (setq fikra-claude-process nil)
-  (setq fikra-claude-line-buffer "")
-  (if (not fikra-claude-aborted)
+SKIPPED when the turn was already ended by a local abort (interrupted).
+#222 gate catch: settles the PID'S thread — a background turn ending must
+not mutate the focused thread's state."
+  (let* ((thread-id (or (hashmap-get fikra-claude-pid-thread (number-to-string pid))
+                        (fikra/thread/fikra-thread-current)))
+         (focused (string= thread-id (fikra/thread/fikra-thread-current))))
+    (editor/keymaps/keymap-mutable-set! fikra-claude-processes thread-id nil)
+    (editor/keymaps/keymap-mutable-set! fikra-claude-line-buffers thread-id "")
+    (editor/keymaps/keymap-mutable-set! fikra-claude-pid-thread (number-to-string pid) nil)
+    (if (not (hashmap-get fikra-claude-aborteds thread-id))
+      (if focused
+        (fikra/thread/fikra-thread-turn-end
+          (if (= exit-code 0) "completed" "error"))
+        ;; Background thread: settle it WITHOUT stealing focus.
+        (fikra-backend-claude-turn-end-bg thread-id exit-code)))))
+
+(defun fikra-backend-claude-turn-end-bg (thread-id exit-code)
+  (let ((prev (fikra/thread/fikra-thread-current)))
+    (fikra/thread/fikra-thread-focus thread-id)
     (fikra/thread/fikra-thread-turn-end
-      (if (= exit-code 0) "completed" "error"))))
+      (if (= exit-code 0) "completed" "error"))
+    (fikra/thread/fikra-thread-focus prev)
+    thread-id))
 
 ;; Test seam: reset the line accumulator (module vars are not settable
 ;; cross-module; #215's replay backend reuses this drain and resets it).
 (defun fikra-backend-claude-reset-accumulator ()
-  (setq fikra-claude-line-buffer "")
+  (editor/keymaps/keymap-mutable-set! fikra-claude-line-buffers
+    (fikra/thread/fikra-thread-current) "")
   t)
 
 ;; Test seam: point the module's process handle at an externally spawned
 ;; pid (module vars are not settable cross-module).
 (defun fikra-backend-claude-adopt-process (pid)
-  (setq fikra-claude-process pid)
+  (editor/keymaps/keymap-mutable-set! fikra-claude-processes
+    (fikra/thread/fikra-thread-current) pid)
   pid)
 
 ;; Test seam: reproduce the abort→sentinel sequence without a process
 ;; (mark-aborted, end interrupted, then fire the sentinel with exit 1).
 (defun fikra-backend-claude-abort-sim ()
-  (setq fikra-claude-aborted t)
-  (fikra/thread/fikra-thread-turn-end "interrupted")
-  (fikra-backend-claude-sentinel 0 1)
-  "sim-done")
+  (let ((thread-id (fikra/thread/fikra-thread-current)))
+    (editor/keymaps/keymap-mutable-set! fikra-claude-aborteds thread-id t)
+    (fikra/thread/fikra-thread-turn-end "interrupted")
+    (fikra-backend-claude-sentinel 0 1)
+    "sim-done"))
 
 (defun fikra-backend-claude-abort ()
-  (if fikra-claude-process
-    (progn
-      ;; Mark BEFORE signaling: the sentinel fires after exit and must skip.
-      (setq fikra-claude-aborted t)
-      (signal fikra-claude-process "SIGTERM")
-      (setq fikra-claude-process nil)
-      (fikra/thread/fikra-thread-turn-end "interrupted")
-      t)
-    nil))
+  ;; #222: interrupts the FOCUSED thread's process (its own slot).
+  (let* ((thread-id (fikra/thread/fikra-thread-current))
+         (pid (hashmap-get fikra-claude-processes thread-id)))
+    (if pid
+      (progn
+        ;; Mark BEFORE signaling: the sentinel fires after exit and must skip.
+        (editor/keymaps/keymap-mutable-set! fikra-claude-aborteds thread-id t)
+        (signal pid "SIGTERM")
+        (editor/keymaps/keymap-mutable-set! fikra-claude-processes thread-id nil)
+        (fikra/thread/fikra-thread-turn-end "interrupted")
+        t)
+      nil)))
 
 ;; Self-register
 (fikra/adapter/fikra-register-backend "claude")
