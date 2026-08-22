@@ -40,12 +40,10 @@ setup:
       (defun eval-43-counter-bump ()
         (setq eval-43-counter (+ eval-43-counter 1))
         eval-43-counter)
-      (defun eval-43-hook-a ()
-        (buffer-switch "*eval43-hooks*")
-        (buffer-insert "[A]"))
-      (defun eval-43-hook-b ()
-        (buffer-switch "*eval43-hooks*")
-        (buffer-insert "[B]"))
+      ;; #198: hook fns moved OUT of the module (below, top-level) —
+      ;; run-hooks resolves hook names from GLOBAL scope; bare names
+      ;; defined inside a loaded module are module-scoped and would never
+      ;; run.
       (provide "eval-43-mod")
 
 steps:
@@ -107,6 +105,18 @@ steps:
     expect:
       result_contains: 'eval43-hooks'
 
+  # #198: hook bodies defined at TOP LEVEL (global scope) so run-hooks can
+  # resolve them by name.
+  - name: define hook-a body (appends [A] to the marker buffer)
+    eval: '(defun eval-43-hook-a () (buffer-switch "*eval43-hooks*") (cursor-move 999999 999999) (buffer-insert "[A]"))'
+    expect:
+      result_contains: 'eval-43-hook-a'
+
+  - name: define hook-b body (appends [B] to the marker buffer)
+    eval: '(defun eval-43-hook-b () (buffer-switch "*eval43-hooks*") (cursor-move 999999 999999) (buffer-insert "[B]"))'
+    expect:
+      result_contains: 'eval-43-hook-b'
+
   # add-hook PREPENDS by default. After adding a then b, the list is [b, a].
   - name: add hook a (prepend)
     eval: '(add-hook "eval-43-hook" "eval-43-hook-a")'
@@ -131,7 +141,7 @@ steps:
   # add-hook with a non-nil third arg APPENDS. Define hook-c's body first so a
   # later run-hooks can call it, then append it -> list becomes [b, a, c].
   - name: define hook-c body (appends [C] to the marker buffer)
-    eval: '(defun eval-43-hook-c () (buffer-switch "*eval43-hooks*") (buffer-insert "[C]"))'
+    eval: '(defun eval-43-hook-c () (buffer-switch "*eval43-hooks*") (cursor-move 999999 999999) (buffer-insert "[C]"))'
     expect:
       result_contains: 'eval-43-hook-c'
 

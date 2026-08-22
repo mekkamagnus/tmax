@@ -94,7 +94,10 @@ steps:
 
   # --- file-less modified buffer is reported + skipped, file buffer still saved ---
   - name: modify a file-less buffer (scratch)
-    eval: '(progn (buffer-switch "*scratch*") (cursor-move 0 0) (buffer-insert "scratch-edit"))'
+    # #198: a fresh daemon seeds the *scratch* splash read-only; a real
+    # user's first keystroke clears it via clear-splash-if-present — do the
+    # same before inserting.
+    eval: '(progn (buffer-switch "*scratch*") (clear-splash-if-present) (cursor-move 0 0) (buffer-insert "scratch-edit"))'
     expect:
       buffer_contains: "scratch-edit"
 

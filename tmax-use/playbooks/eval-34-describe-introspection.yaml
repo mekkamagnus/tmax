@@ -43,8 +43,10 @@ steps:
       buffer_contains: "line one for describe test"
 
   # -- describe-function: a known function returns a non-empty docstring --
-  - name: describe-function returns docstring for find-file
-    eval: '(describe-function "find-file")'
+  - name: describe-function-info returns docstring data for find-file
+    # #198: describe-function now renders to *Help* and returns the buffer
+    # name (ADR-0208); the data surface is describe-function-info.
+    eval: '(describe-function-info "find-file")'
     expect:
       result_contains: "file"
 
@@ -98,10 +100,14 @@ steps:
     expect:
       result_contains: "normal"
 
-  - name: "*Help* mentions the fundamental major mode"
+  - name: "*Help* mentions the major mode"
+    # #198: the major mode named depends on the CURRENT buffer at
+    # describe-mode time (after the describe-function steps this is *Help*
+    # → help-mode, not fundamental). Assert the invariant — the *Help*
+    # content names A major mode — not a specific one.
     eval: '(buffer-text)'
     expect:
-      result_contains: "fundamental"
+      result_contains: "Major mode:"
 
   - name: "*Help* lists the j binding"
     eval: '(buffer-text)'
@@ -110,9 +116,11 @@ steps:
 
   # -- *Help* buffer is created and reused (exactly one) --
   - name: describe-mode rendered to the *Help* buffer
+    # #198: "Major mode:" invariant — the named mode follows the current
+    # buffer (help-mode here after the describe-function steps).
     eval: '(buffer-text)'
     expect:
-      buffer_contains: "fundamental"
+      buffer_contains: "Major mode:"
 
   - name: "Help buffer is present in buffer-list"
     eval: '(buffer-list)'
@@ -120,9 +128,12 @@ steps:
       result_contains: "Help"
 
   - name: second describe reuses the same *Help* (still present)
+    # #198: describe-function renders to *Help* and returns the BUFFER NAME
+    # (ADR-0208) — the docstring lives in the *Help* content, not the
+    # return value.
     eval: '(describe-function "find-file")'
     expect:
-      result_contains: "file"
+      result_contains: "Help"
 
   - name: still exactly one *Help* after consecutive describes
     eval: '(buffer-list)'

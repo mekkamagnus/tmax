@@ -243,23 +243,31 @@ describe("Enhanced Key Bind Functions", () => {
     expect(result1).toBeDefined();
     expect(result1._tag).toBe("Right");
 
-    // Verify it exists
+    // Verify it exists. NOTE (#198): mappings.get(key) is a FLAT list across
+    // modes with no order guarantee — "x" also carries the default VISUAL
+    // binding (visual-delete), which is why this test used to fail reading
+    // [0]. key-bind DOES override same key+mode (the filter in the key-bind
+    // primitive replaces matching mode+majorMode entries — pinned below);
+    // select the NORMAL-mode entry instead of assuming list position.
     let keyMappings = fixture.editor.getKeyMappings();
-    let mappings = keyMappings.get("x");
-    expect(mappings).toBeDefined();
-    expect(mappings![0]!.command).toBe("(original-command)");
+    let mappings = keyMappings.get("x")!;
+    expect(mappings.find((m) => m.mode === "normal")?.command).toBe("(original-command)");
+    // The visual-mode default coexists (different mode — not a conflict).
+    expect(mappings.find((m) => m.mode === "visual")?.command).toBe("(visual-delete)");
 
     // Override with new command
     const result2 = interpreter.execute('(key-bind "x" "(new-command)" "normal")');
     expect(result2).toBeDefined();
     expect(result2._tag).toBe("Right");
 
-    // Verify the new command is there
+    // Verify the new command replaced the normal-mode binding (exactly one
+    // normal-mode entry remains, and it is the NEW command).
     keyMappings = fixture.editor.getKeyMappings();
-    mappings = keyMappings.get("x");
-    expect(mappings).toBeDefined();
-    expect(mappings!.length).toBe(1);
-    expect(mappings![0]!.command).toBe("(new-command)");
+    mappings = keyMappings.get("x")!;
+    expect(mappings.filter((m) => m.mode === "normal")).toHaveLength(1);
+    expect(mappings.find((m) => m.mode === "normal")?.command).toBe("(new-command)");
+    // The visual binding is untouched by a normal-mode rebind.
+    expect(mappings.find((m) => m.mode === "visual")?.command).toBe("(visual-delete)");
   });
 
   test("should return nil when key-binding function is called for non-existent key", async () => {
