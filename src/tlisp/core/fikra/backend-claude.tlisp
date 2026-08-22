@@ -105,6 +105,13 @@ the L1-degradation contract without the hook existing anywhere."
     acc
     (fikra-join-tail (cdr parts) sep (concat acc sep (car parts)))))
 
+(defun fikra-plan-active-p ()
+  "t when the focused thread's interaction mode is plan (#223).
+Nil-safe (the field is unset on default threads)."
+  (require-module fikra/thread)
+  (let ((mode (fikra/thread/fikra-thread-field "interaction")))
+    (if (stringp mode) (string= mode "plan") nil)))
+
 (defun fikra-backend-claude-args (message resume-id)
   "Build the claude argv for one turn. RESUME-ID nil = first turn.
 #219: --permission-mode comes from the EFFECTIVE runtime mode
@@ -114,12 +121,18 @@ changed nothing about spawned turns). #220: trust promotes to
 adapter-written --mcp-config + --permission-prompt-tool ride along (the
 config is written per turn by fikra-claude-write-mcp-config)."
   (require-module fikra/modes)
-  (let* ((base (list "--print"
-                     "--output-format" "stream-json"
-                     "--verbose"
-                     "--permission-mode"
-                     (fikra/modes/fikra-claude-mode-arg
-                       (fikra/modes/fikra-effective-mode))))
+  (require-module fikra/plan)
+  ;; #223: a PLAN interaction turn runs READ-ONLY (native --permission-mode
+  ;; plan + edit tools disallowed) — a plan turn never edits.
+  (let* ((base (if (fikra-plan-active-p)
+                 (append (list "--print" "--output-format" "stream-json" "--verbose")
+                         (fikra/plan/fikra-plan-claude-flags))
+                 (list "--print"
+                       "--output-format" "stream-json"
+                       "--verbose"
+                       "--permission-mode"
+                       (fikra/modes/fikra-claude-mode-arg
+                         (fikra/modes/fikra-effective-mode)))))
          (with-trust
            (let ((trust-arg (fikra-claude-trust-arg)))
              (if trust-arg

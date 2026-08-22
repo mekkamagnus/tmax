@@ -1,0 +1,241 @@
+(defmodule fikra/plan
+  (export fikra-plan-mode-p fikra-plan-toggle fikra-plan-claude-flags
+          fikra-plan-approval-pending-p fikra-plan-offer-approval
+          fikra-plan-approve fikra-plan-edit fikra-plan-discard
+          fikra-plan-capture-from-log fikra-plan-buffer-name
+          fikra-plan-edit-approve fikra-plan-edit-cancel)
+
+;; #223 (RFC-027 §Phase 5): plan as a thread INTERACTION MODE (t3code
+;; model — default/plan, a THREAD property, not an event). SPC a p
+;; toggles. In plan mode the backend runs READ-ONLY and proposes a
+;; markdown plan in the thread's chat buffer instead of editing; the plan
+;; text is ordinary FAEP content (the thread log makes it diffable, and
+;; plan turns participate fully in checkpoints).
+;;
+;; Approval flow (offered when a plan-mode turn completes): y approves →
+;; an implementation turn carrying the plan (interaction returns to
+;; default — the normal runtime mode resumes); e edits the plan in a
+;; buffer first; n discards → thread idle.
+
+(require-module fikra/thread)
+(require-module fikra/event)
+
+(defvar fikra-plan-pending nil
+  "t when a plan-mode turn completed and awaits y/e/n approval.")
+
+(defvar fikra-plan-text nil
+  "The captured plan markdown (the last plan turn's assistant text).")
+
+;; ── interaction mode (thread property, persisted) ───────────────────
+(defun fikra-plan-mode-p ()
+  "t when the FOCUSED thread's interaction mode is plan. Nil-safe (the
+field is unset on default threads)."
+  (let ((mode (fikra/thread/fikra-thread-field "interaction")))
+    (if (stringp mode) (string= mode "plan") nil)))
+
+(defun fikra-plan-toggle ()
+  "SPC a p: toggle the thread's interaction mode plan/default. Persists."
+  (let ((mode (if (fikra-plan-mode-p) "default" "plan")))
+    (fikra/thread/fikra-thread-set-field "interaction" mode)
+    (fikra/thread/fikra-thread-save)
+    ;; Leaving plan mode drops any pending approval.
+    (if (string= mode "default") (setq fikra-plan-pending nil))
+    (editor-set-status (concat "Fikra: interaction mode " mode))
+    mode))
+
+;; ── L1: read-only translation for plan turns ────────────────────────
+;; claude's recorded 2.1.195 surface HAS a native --permission-mode plan
+;; (read-only exploration). Backends without a plan preset fall back to
+;; the strictest flags + edit tools disallowed.
+(defun fikra-plan-claude-flags ()
+  "The claude flags for a PLAN turn: the native plan permission mode
+(where the surface has it) with edit tools DISALLOWED as belt-and-braces
+— a plan turn must never edit."
+  (list "--permission-mode" "plan"
+        "--disallowedTools" "Edit,Write,NotebookEdit,MultiEdit"))
+
+;; ── plan capture (from the thread's own log) ────────────────────────
+(defun fikra-plan-buffer-name ()
+  "*Fikra-Plan*")
+
+(defun fikra-plan-capture-from-log ()
+  "Extract the plan markdown: the assistant text of the LAST turn in the
+focused thread's log — text-delta events after the final turn-start,
+excluding the user echo (You-prefixed). Nil when there is no last turn."
+  (let* ((log (fikra/thread/fikra-thread-log-path))
+         (raw (if (file-exists-p log) (read-file-content log) nil)))
+    (if raw
+      (fikra-plan-scan (string-split raw "\n") -1 -1 "")
+      nil)))
+
+;; Single pass: track the LAST turn-start line index; after it, collect
+;; text-delta texts that are not the user echo.
+(defun fikra-plan-scan (lines i last-start acc)
+  (if (null lines)
+    (if (>= last-start 0) acc nil)
+    (let* ((line (car lines))
+           (obj (fikra-plan-parse line))
+           (kind (if obj (fikra-plan-field obj "kind") nil))
+           (next-i (+ i 1)))
+      (cond
+        ((and kind (string= kind "turn-start"))
+          (fikra-plan-scan (cdr lines) next-i next-i ""))
+        ((and (>= i last-start) (>= last-start 0) kind (string= kind "text-delta"))
+          (let ((text (fikra-plan-field obj "text")))
+            (if (fikra-plan-user-echo-p text)
+              (fikra-plan-scan (cdr lines) next-i last-start acc)
+              (fikra-plan-scan (cdr lines) next-i last-start (concat acc text)))))
+        (t (fikra-plan-scan (cdr lines) next-i last-start acc))))))
+
+(defun fikra-plan-parse (line)
+  "JSON-parse one log line (nil for blanks/broken lines)."
+  (if (or (null line) (<= (length (string-trim line)) 0))
+    nil
+    (condition-case nil
+      (json-read-from-string line)
+      (error nil))))
+
+;; alist getter (json-read produces ("k" v) 2-list alists).
+(defun fikra-plan-field (alist key)
+  (let ((found nil))
+    (dolist (entry alist)
+      (if (and (not found)
+               (listp entry)
+               (= (length entry) 2)
+               (string= (car entry) key))
+        (setq found (car (cdr entry)))))
+    found))
+
+(defun fikra-plan-user-echo-p (text)
+  (and (stringp text) (>= (length text) 4)
+       (string= (substring text 0 4) "You:")))
+
+;; ── approval flow ───────────────────────────────────────────────────
+(defun fikra-plan-approval-pending-p ()
+  (if fikra-plan-pending t nil))
+
+(defun fikra-plan-offer-approval ()
+  "Called when a plan-mode turn COMPLETES: capture the plan text and
+offer y/e/n in the chat buffer. Returns t when the offer is live."
+  (if (not (fikra-plan-mode-p))
+    nil
+    (let ((text (fikra-plan-capture-from-log)))
+      (setq fikra-plan-text text)
+      (setq fikra-plan-pending t)
+      (fikra-plan-ensure-bindings)
+      (fikra/event/fikra-event-emit
+        (list (list "kind" "permission-request")
+              (list "action" "plan review")
+              (list "id" 0)))
+      ;; Reuse the familiar prompt line: y approve / e edit / n discard.
+      (editor-set-status "Fikra: plan ready — [y] approve [e] edit [n] discard")
+      t)))
+
+(defun fikra-plan-approve ()
+  "y: approve the pending plan — starts an IMPLEMENTATION turn carrying
+the plan; interaction returns to default (the runtime mode resumes)."
+  (if (not fikra-plan-pending)
+    (progn (editor-set-status "Fikra: no plan pending") nil)
+    (let ((plan (or fikra-plan-text "")))
+      (setq fikra-plan-pending nil)
+      (setq fikra-plan-text nil)
+      (fikra/thread/fikra-thread-set-field "interaction" "default")
+      (fikra/thread/fikra-thread-save)
+      (fikra/event/fikra-event-emit
+        (list (list "kind" "permission-response")
+              (list "decision" "plan-approved")))
+      ;; The implementation turn references the plan (it rides the prompt;
+      ;; the plan itself is already diffable in this thread's log).
+      (require-module fikra/chat)
+      (fikra/chat/fikra-turn-send
+        (concat "Implement this plan:\n" plan))
+      t)))
+
+(defun fikra-plan-edit ()
+  "e: open the pending plan in an editable buffer for revision. RET
+(y-bound in that buffer) approves the EDITED plan."
+  (if (not fikra-plan-pending)
+    (progn (editor-set-status "Fikra: no plan pending") nil)
+    (progn
+      (let ((name (fikra-plan-buffer-name)))
+        (if (not (member name (buffer-list)))
+          (buffer-create name))
+        (buffer-switch name)
+        ;; Writable NOW (current == the plan buffer) — buffer-set-read-only
+        ;; with no arg acts on the CURRENT buffer, so ordering matters.
+        (buffer-set-read-only nil)
+        (let ((count (buffer-line-count)))
+          (if (> count 1) (buffer-delete-range 0 0 (- count 1) 0)))
+        (cursor-move 0 0)
+        (if fikra-plan-text (buffer-insert fikra-plan-text))
+        ;; Replace the pending plan text on approval in that buffer.
+        (setq fikra-plan-editing t)
+        (fikra-plan-ensure-edit-bindings)
+        (editor-set-status "Fikra: edit the plan; y approves, n returns it")
+        t))))
+
+(defvar fikra-plan-editing nil
+  "t while the plan buffer is open for editing.")
+
+(defun fikra-plan-edit-approve ()
+  "y in the plan buffer: adopt the edited text as the plan and approve."
+  (if (not fikra-plan-editing)
+    nil
+    (progn
+      (setq fikra-plan-text (buffer-text))
+      (setq fikra-plan-editing nil)
+      (fikra/thread/fikra-thread-ensure-chat-buffer)
+      (buffer-switch (fikra/thread/fikra-thread-buffer-name))
+      (fikra-plan-approve))))
+
+(defun fikra-plan-edit-cancel ()
+  "n in the plan buffer: back to the pending plan, unchanged."
+  (if (not fikra-plan-editing)
+    nil
+    (progn
+      (setq fikra-plan-editing nil)
+      (fikra/thread/fikra-thread-ensure-chat-buffer)
+      (buffer-switch (fikra/thread/fikra-thread-buffer-name))
+      (editor-set-status "Fikra: plan unchanged — still pending")
+      t)))
+
+(defun fikra-plan-discard ()
+  "n: discard the pending plan — the thread goes idle; plan mode stays."
+  (if (not fikra-plan-pending)
+    (progn (editor-set-status "Fikra: no plan pending") nil)
+    (progn
+      (setq fikra-plan-pending nil)
+      (setq fikra-plan-text nil)
+      (fikra/event/fikra-event-emit
+        (list (list "kind" "permission-response")
+              (list "decision" "plan-discarded")))
+      (editor-set-status "Fikra: plan discarded — thread idle")
+      t)))
+
+;; ── keymaps ─────────────────────────────────────────────────────────
+(defun fikra-plan-ensure-bindings ()
+  "y/e/n in the THREAD's chat buffer while a plan is pending."
+  (require-module fikra/chat)
+  (fikra/chat/fikra-ensure-buffer-keymap)
+  (let ((kmap (editor/keymaps/buffer-keymap (fikra/thread/fikra-thread-buffer-name))))
+    (if kmap
+      (progn
+        (editor/keymaps/keymap-set-key kmap "y" "(fikra/plan/fikra-plan-approve)")
+        (editor/keymaps/keymap-set-key kmap "e" "(fikra/plan/fikra-plan-edit)")
+        (editor/keymaps/keymap-set-key kmap "n" "(fikra/plan/fikra-plan-discard)"))))
+  t)
+
+(defun fikra-plan-ensure-edit-bindings ()
+  "y/n in the plan EDIT buffer."
+  (let ((kmap (editor/keymaps/buffer-keymap (fikra-plan-buffer-name))))
+    (if (not kmap)
+      (progn
+        (setq kmap (editor/keymaps/keymap-init "fikra-plan"))
+        (editor/keymaps/buffer-set-keymap (fikra-plan-buffer-name) kmap))))
+  (let ((kmap (editor/keymaps/buffer-keymap (fikra-plan-buffer-name))))
+    (editor/keymaps/keymap-set-key kmap "y" "(fikra/plan/fikra-plan-edit-approve)")
+    (editor/keymaps/keymap-set-key kmap "n" "(fikra/plan/fikra-plan-edit-cancel)")
+    t))
+
+(provide "fikra-plan")
+)

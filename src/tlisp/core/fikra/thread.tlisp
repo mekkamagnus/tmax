@@ -1,5 +1,5 @@
 (defmodule fikra/thread
-  (export fikra-thread-buffer-name fikra-thread-buffer-name-of fikra-thread-field-root-of fikra-thread-set-session-id-for fikra-thread-working-dir fikra-thread-in-worktree-p fikra-thread-focus fikra-thread-new fikra-thread-archive fikra-thread-archived-p fikra-thread-switch fikra-thread-rows fikra-thread-ids fikra-thread-init fikra-thread-open fikra-thread-reopen
+  (export fikra-thread-ensure-chat-buffer fikra-thread-buffer-name fikra-thread-buffer-name-of fikra-thread-field-root-of fikra-thread-set-session-id-for fikra-thread-working-dir fikra-thread-in-worktree-p fikra-thread-focus fikra-thread-new fikra-thread-archive fikra-thread-archived-p fikra-thread-switch fikra-thread-rows fikra-thread-ids fikra-thread-init fikra-thread-open fikra-thread-reopen
           fikra-thread-current fikra-thread-status fikra-thread-status-set
           fikra-thread-turn-begin fikra-thread-turn-end fikra-thread-turn-count
           fikra-thread-root fikra-thread-log-path fikra-thread-session-id
@@ -112,7 +112,7 @@ history into it (daemon-restart reopen path), focus it."
             ;; Overlay persisted fields onto fresh defaults (forward-
             ;; compatible: unknown persisted fields ignored, missing fields
             ;; keep defaults).
-            (dolist (key (list "backend" "session-id" "runtime-mode" "trust" "worktree" "worktree-base" "archived" "turn-count"))
+            (dolist (key (list "backend" "session-id" "runtime-mode" "trust" "worktree" "worktree-base" "archived" "interaction" "turn-count"))
               (let ((v (fikra-alist-get key parsed)))
                 (if (not (null v))
                   (editor/keymaps/keymap-mutable-set! state key v))))
@@ -146,6 +146,7 @@ history into it (daemon-restart reopen path), focus it."
                      (list "worktree" (fikra-thread-field "worktree"))
                      (list "worktree-base" (fikra-thread-field "worktree-base"))
                      (list "archived" (fikra-thread-field "archived"))
+                     (list "interaction" (fikra-thread-field "interaction"))
                      (list "turn-count" (fikra-thread-field "turn-count")))))))
 
 (defun fikra-thread-current ()
@@ -182,6 +183,7 @@ not land under the wrong project)."
                          (list "worktree" (hashmap-get state "worktree"))
                          (list "worktree-base" (hashmap-get state "worktree-base"))
                          (list "archived" (hashmap-get state "archived"))
+                         (list "interaction" (hashmap-get state "interaction"))
                          (list "turn-count" (hashmap-get state "turn-count")))))
         sid)
       nil)))

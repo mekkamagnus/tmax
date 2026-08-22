@@ -88,6 +88,8 @@ With 0 or negative number, disable."
 ;; *Fikra-Threads* list buffer (j/k/RET/d/n).
 (key-bind "SPC a t" "(progn (require-module fikra/thread) (fikra/thread/fikra-thread-new))" "normal")
 (key-bind "SPC a T" "(progn (require-module fikra/threads) (fikra/threads/fikra-threads-list-open))" "normal")
+;; #223: plan interaction mode toggle (thread property).
+(key-bind "SPC a p" "(progn (require-module fikra/plan) (fikra/plan/fikra-plan-toggle))" "normal")
 
 (provide "fikra-mode")
 )
