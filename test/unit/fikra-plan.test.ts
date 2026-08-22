@@ -54,7 +54,9 @@ function planTurn(editor: Editor, plan: string): void {
   e(editor, '(fikra/event/fikra-event-emit (list (list "kind" "turn-start") (list "turn" 1) (list "backend" "replay")))');
   e(editor, `(fikra/event/fikra-event-emit (list (list "kind" "text-delta") (list "text" "You: make a plan")))`);
   e(editor, `(fikra/event/fikra-event-emit (list (list "kind" "text-delta") (list "text" ${JSON.stringify(plan)})))`);
-  e(editor, '(fikra/event/fikra-event-emit (list (list "kind" "turn-end") (list "status" "completed")))');
+  // The LIFECYCLE fn (the production turn-end path — backends call this,
+  // not a bare event emit).
+  e(editor, '(fikra/thread/fikra-thread-turn-end "completed")');
 }
 
 describe("#223 interaction mode — toggle + persistence", () => {
@@ -100,6 +102,62 @@ describe("#223 plan turns run READ-ONLY", () => {
     expect(kinds).not.toContain("file-change");
     expect(kinds).not.toContain("tool-call");
     expect(kinds).toContain("text-delta"); // the plan itself is ordinary content
+  });
+});
+
+describe("#223 end-to-end wiring + isolation (gate round)", () => {
+  test("turn-end OFFERS automatically in plan mode (production call site)", async () => {
+    const editor = await planSetup();
+    e(editor, "(fikra/plan/fikra-plan-toggle)");
+    planTurn(editor, "AUTO OFFERED");
+    // turn-end(completed) itself offered — no explicit offer call.
+    expect(String(e(editor, "(fikra/plan/fikra-plan-approval-pending-p)").value)).toBe("true");
+    // The captured plan is the turn's text (echo excluded).
+    e(editor, "(fikra/plan/fikra-plan-edit)");
+    expect(bufferText(editor)).toContain("AUTO OFFERED");
+    expect(bufferText(editor)).not.toContain("You:");
+  });
+
+  test("cross-thread isolation: B's toggle/discard never touch A's pending plan", async () => {
+    const editor = await planSetup();
+    e(editor, "(require-module fikra/threads)");
+    e(editor, "(fikra/plan/fikra-plan-toggle)"); // main → plan
+    planTurn(editor, "MAIN PLAN");
+    expect(String(e(editor, "(fikra/plan/fikra-plan-approval-pending-p)").value)).toBe("true");
+    // A second thread B, toggled off plan.
+    e(editor, "(fikra/thread/fikra-thread-new)"); // fix-1
+    e(editor, "(fikra/plan/fikra-plan-toggle)"); // fix-1: plan → default
+    expect(String(e(editor, "(fikra/plan/fikra-plan-approval-pending-p)").value)).toBe("null"); // B has none
+    e(editor, '(fikra/thread/fikra-thread-switch "main")');
+    expect(String(e(editor, "(fikra/plan/fikra-plan-approval-pending-p)").value)).toBe("true"); // A intact
+  });
+
+  test("plan args NEVER carry --allowedTools, even with accumulated trust", async () => {
+    const editor = await planSetup();
+    e(editor, "(require-module fikra/modes)");
+    e(editor, '(fikra/modes/fikra-trust-add "Edit")');
+    e(editor, "(fikra/plan/fikra-plan-toggle)");
+    const planArgs = (e(editor, '(fikra/backend-claude/fikra-backend-claude-args "q" nil)').value as { value: string }[]).map((v) => String(v.value));
+    expect(planArgs).not.toContain("--allowedTools"); // deny by construction
+    expect(planArgs).toContain("--disallowedTools");
+    // Leaving plan mode restores trust promotion.
+    e(editor, "(fikra/plan/fikra-plan-toggle)");
+    const implArgs = (e(editor, '(fikra/backend-claude/fikra-backend-claude-args "q" nil)').value as { value: string }[]).map((v) => String(v.value));
+    expect(implArgs).toContain("--allowedTools");
+  });
+
+  test("interaction field reloads from state.json (reopen)", async () => {
+    const editor = await planSetup();
+    e(editor, "(fikra/plan/fikra-plan-toggle)");
+    const editor2 = await createStartedEditor("");
+    e(editor2, "(require-module fikra/plan)");
+    e(editor2, "(fikra/thread/fikra-thread-init)");
+    expect(String(e(editor2, "(fikra/plan/fikra-plan-mode-p)").value)).toBe("true");
+  });
+
+  test("capture on an empty log → nil (no crash)", async () => {
+    const editor = await planSetup();
+    expect(String(e(editor, "(fikra/plan/fikra-plan-capture-from-log)").value)).toBe("null");
   });
 });
 

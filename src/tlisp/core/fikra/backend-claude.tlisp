@@ -134,10 +134,15 @@ config is written per turn by fikra-claude-write-mcp-config)."
                        (fikra/modes/fikra-claude-mode-arg
                          (fikra/modes/fikra-effective-mode)))))
          (with-trust
-           (let ((trust-arg (fikra-claude-trust-arg)))
-             (if trust-arg
-               (append base (list "--allowedTools" trust-arg))
-               base)))
+           ;; #223 gate catch: a PLAN turn never carries --allowedTools —
+           ;; trust promotion could contradict the plan deny list (deny
+           ;; precedence by CONSTRUCTION: the flag is simply absent).
+           (if (fikra-plan-active-p)
+             base
+             (let ((trust-arg (fikra-claude-trust-arg)))
+               (if trust-arg
+                 (append base (list "--allowedTools" trust-arg))
+                 base))))
          (with-l2
            (if (fikra-claude-approvals-probe)
              (append with-trust

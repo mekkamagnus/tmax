@@ -20,11 +20,24 @@
 (require-module fikra/thread)
 (require-module fikra/event)
 
-(defvar fikra-plan-pending nil
-  "t when a plan-mode turn completed and awaits y/e/n approval.")
+;; Gate catch: approval state is PER-THREAD (module-globals leaked across
+;; threads — a toggle on B cleared A's pending approval; a stray y could
+;; approve A's plan into focused B). Keyed by thread id.
+(defvar fikra-plan-pending-map (hashmap)
+  "thread-id → t when that thread's plan awaits y/e/n.")
 
-(defvar fikra-plan-text nil
-  "The captured plan markdown (the last plan turn's assistant text).")
+(defvar fikra-plan-text-map (hashmap)
+  "thread-id → the captured plan markdown.")
+
+(defun fikra-plan-pending-id ()
+  "The thread id whose plan is pending for the FOCUSED thread."
+  (fikra/thread/fikra-thread-current))
+
+(defun fikra-plan-pending-for (id)
+  (if (hashmap-get fikra-plan-pending-map id) t nil))
+
+(defun fikra-plan-text-for (id)
+  (hashmap-get fikra-plan-text-map id))
 
 ;; ── interaction mode (thread property, persisted) ───────────────────
 (defun fikra-plan-mode-p ()
@@ -38,8 +51,11 @@ field is unset on default threads)."
   (let ((mode (if (fikra-plan-mode-p) "default" "plan")))
     (fikra/thread/fikra-thread-set-field "interaction" mode)
     (fikra/thread/fikra-thread-save)
-    ;; Leaving plan mode drops any pending approval.
-    (if (string= mode "default") (setq fikra-plan-pending nil))
+    ;; Leaving plan mode drops THIS thread's pending approval (gate catch:
+    ;; the old module-global cleared EVERY thread's).
+    (if (string= mode "default")
+      (editor/keymaps/keymap-mutable-set! fikra-plan-pending-map
+        (fikra/thread/fikra-thread-current) nil))
     (editor-set-status (concat "Fikra: interaction mode " mode))
     mode))
 
@@ -112,16 +128,17 @@ excluding the user echo (You-prefixed). Nil when there is no last turn."
 
 ;; ── approval flow ───────────────────────────────────────────────────
 (defun fikra-plan-approval-pending-p ()
-  (if fikra-plan-pending t nil))
+  (fikra-plan-pending-for (fikra/thread/fikra-thread-current)))
 
 (defun fikra-plan-offer-approval ()
   "Called when a plan-mode turn COMPLETES: capture the plan text and
 offer y/e/n in the chat buffer. Returns t when the offer is live."
   (if (not (fikra-plan-mode-p))
     nil
-    (let ((text (fikra-plan-capture-from-log)))
-      (setq fikra-plan-text text)
-      (setq fikra-plan-pending t)
+    (let* ((id (fikra/thread/fikra-thread-current))
+           (text (fikra-plan-capture-from-log)))
+      (editor/keymaps/keymap-mutable-set! fikra-plan-text-map id text)
+      (editor/keymaps/keymap-mutable-set! fikra-plan-pending-map id t)
       (fikra-plan-ensure-bindings)
       (fikra/event/fikra-event-emit
         (list (list "kind" "permission-request")
@@ -133,13 +150,16 @@ offer y/e/n in the chat buffer. Returns t when the offer is live."
 
 (defun fikra-plan-approve ()
   "y: approve the pending plan — starts an IMPLEMENTATION turn carrying
-the plan; interaction returns to default (the runtime mode resumes)."
-  (if (not fikra-plan-pending)
-    (progn (editor-set-status "Fikra: no plan pending") nil)
-    (let ((plan (or fikra-plan-text "")))
-      (setq fikra-plan-pending nil)
-      (setq fikra-plan-text nil)
-      (fikra/thread/fikra-thread-set-field "interaction" "default")
+the plan; interaction returns to default (the runtime mode resumes).
+Gate catch: routes to the plan's OWNING thread (pressing y in another
+thread's buffer must not approve the wrong plan into the wrong thread)."
+  (let ((id (fikra/thread/fikra-thread-current)))
+    (if (not (fikra-plan-pending-for id))
+      (progn (editor-set-status "Fikra: no plan pending") nil)
+      (let ((plan (or (fikra-plan-text-for id) "")))
+        (editor/keymaps/keymap-mutable-set! fikra-plan-pending-map id nil)
+        (editor/keymaps/keymap-mutable-set! fikra-plan-text-map id nil)
+        (fikra/thread/fikra-thread-set-field "interaction" "default")
       (fikra/thread/fikra-thread-save)
       (fikra/event/fikra-event-emit
         (list (list "kind" "permission-response")
@@ -147,14 +167,14 @@ the plan; interaction returns to default (the runtime mode resumes)."
       ;; The implementation turn references the plan (it rides the prompt;
       ;; the plan itself is already diffable in this thread's log).
       (require-module fikra/chat)
-      (fikra/chat/fikra-turn-send
-        (concat "Implement this plan:\n" plan))
-      t)))
+        (fikra/chat/fikra-turn-send
+          (concat "Implement this plan:\n" plan))
+        t))))
 
 (defun fikra-plan-edit ()
   "e: open the pending plan in an editable buffer for revision. RET
 (y-bound in that buffer) approves the EDITED plan."
-  (if (not fikra-plan-pending)
+  (if (not (fikra-plan-approval-pending-p))
     (progn (editor-set-status "Fikra: no plan pending") nil)
     (progn
       (let ((name (fikra-plan-buffer-name)))
@@ -167,7 +187,8 @@ the plan; interaction returns to default (the runtime mode resumes)."
         (let ((count (buffer-line-count)))
           (if (> count 1) (buffer-delete-range 0 0 (- count 1) 0)))
         (cursor-move 0 0)
-        (if fikra-plan-text (buffer-insert fikra-plan-text))
+        (let ((pt (fikra-plan-text-for (fikra/thread/fikra-thread-current))))
+          (if pt (buffer-insert pt)))
         ;; Replace the pending plan text on approval in that buffer.
         (setq fikra-plan-editing t)
         (fikra-plan-ensure-edit-bindings)
@@ -182,7 +203,8 @@ the plan; interaction returns to default (the runtime mode resumes)."
   (if (not fikra-plan-editing)
     nil
     (progn
-      (setq fikra-plan-text (buffer-text))
+      (editor/keymaps/keymap-mutable-set! fikra-plan-text-map
+        (fikra/thread/fikra-thread-current) (buffer-text))
       (setq fikra-plan-editing nil)
       (fikra/thread/fikra-thread-ensure-chat-buffer)
       (buffer-switch (fikra/thread/fikra-thread-buffer-name))
@@ -201,16 +223,17 @@ the plan; interaction returns to default (the runtime mode resumes)."
 
 (defun fikra-plan-discard ()
   "n: discard the pending plan — the thread goes idle; plan mode stays."
-  (if (not fikra-plan-pending)
-    (progn (editor-set-status "Fikra: no plan pending") nil)
-    (progn
-      (setq fikra-plan-pending nil)
-      (setq fikra-plan-text nil)
-      (fikra/event/fikra-event-emit
-        (list (list "kind" "permission-response")
-              (list "decision" "plan-discarded")))
-      (editor-set-status "Fikra: plan discarded — thread idle")
-      t)))
+  (let ((id (fikra/thread/fikra-thread-current)))
+    (if (not (fikra-plan-pending-for id))
+      (progn (editor-set-status "Fikra: no plan pending") nil)
+      (progn
+        (editor/keymaps/keymap-mutable-set! fikra-plan-pending-map id nil)
+        (editor/keymaps/keymap-mutable-set! fikra-plan-text-map id nil)
+        (fikra/event/fikra-event-emit
+          (list (list "kind" "permission-response")
+                (list "decision" "plan-discarded")))
+        (editor-set-status "Fikra: plan discarded — thread idle")
+        t))))
 
 ;; ── keymaps ─────────────────────────────────────────────────────────
 (defun fikra-plan-ensure-bindings ()

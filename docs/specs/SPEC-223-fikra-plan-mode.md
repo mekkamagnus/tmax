@@ -64,12 +64,31 @@ paths kept in sync); `mode.tlisp` binds SPC a p (lazy require).
       including a second edit round after cancel).
 - [x] n discards: thread idle, no implementation turn, plan mode stays,
       `plan-discarded` recorded (pinned).
-- [x] typecheck green; fikra-plan 8/8; the fikra batch green (modulo the
+- [x] typecheck green; fikra-plan 13/13; the fikra batch green (modulo the
       documented load flakes).
+
+## Gate round — the wiring + isolation findings (all fixed)
+
+- **The offer had NO production call site** (test-only): the turn-end
+  LIFECYCLE fn now offers automatically on a completed plan-interaction
+  turn (lazy require; every backend gets it — the sentinel path).
+- **Approval state was module-global against #222's per-thread model** (a
+  toggle on B cleared A's pending; a stray y could approve A's plan into
+  focused B): pending/text are thread-keyed maps; toggle/discard/approve
+  touch only the focused thread's entries.
+- **Trust promotion could contradict the plan deny list**: plan turns now
+  NEVER carry `--allowedTools` (deny precedence by construction — the
+  flag is simply absent in plan interaction; pinned WITH accumulated
+  trust, and restoration after leaving plan mode).
+- New pins: the auto-offer from turn-end (echo excluded from the captured
+  plan), cross-thread isolation, the interaction field's reopen reload,
+  and the empty-log capture → nil. The no-edits evidence: argv-level (the
+  flags) is the real guarantee; the replay fixture's event log is
+  consistent with it by construction.
 
 ## Notes
 
-- The offer is driven by the CALLER (chat's turn-end or a test); plan
-  turns end through the normal backend sentinel.
+- The offer fires from the turn-end LIFECYCLE fn (every backend's
+  sentinel path); emitting a bare turn-end EVENT does not offer.
 - Backends without a native plan preset fall back to the strictest flags
   + `--disallowedTools` (the same fn reads naturally for both).

@@ -466,6 +466,16 @@ turn's init event); persisted on save."
     (list (list "kind" "turn-end")
           (list "turn" (fikra-thread-field "turn-count"))
           (list "status" status)))
+  ;; #223 (gate catch: the offer had NO production call site): a COMPLETED
+  ;; turn in plan interaction offers the y/e/n approval. Lazy require
+  ;; (plan requires thread; the cycle forbids top-level).
+  (if (string= status "completed")
+    (condition-case nil
+      (progn
+        (require-module fikra/plan)
+        (fikra/plan/fikra-plan-offer-approval))
+      (error () nil))
+    nil)
   ;; Map the event status onto the thread state machine.
   (fikra-thread-status-set
     (cond
