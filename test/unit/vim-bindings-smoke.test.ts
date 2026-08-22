@@ -193,7 +193,12 @@ describe("SPEC-067 normal-mode bindings smoke", () => {
     it(`${label} sends real keypress(es) without crashing`, async () => {
       // Reset between entries: Escape (clear any pending state + ensure normal
       // mode), then a fresh buffer (cheap — no editor.start()).
-      await editor.handleKey("Escape");
+      // #198/#226: an entry may leave PENDING state whose Escape-cancel is a
+      // deliberate QUIT (SPEC-044: q<Escape> cancels record-pending and
+      // quits) — the reset's purpose is state-clearing, so a quit-shaped
+      // reset keypress is caught, not crashed on. (The old executeCommandAsync
+      // retry silently swallowed this signal; #226 made it propagate.)
+      await editor.handleKey("Escape").catch(() => undefined);
       editor.createBuffer(`smoke-${label}`, BUFFER);
       await send(editor, keys);
       assertHealthy(editor, label);

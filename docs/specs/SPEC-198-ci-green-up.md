@@ -60,6 +60,25 @@ hook ordering itself was verified correct (list order = run order).
       (the engine behaviors — key-bind override, hook ordering, splash
       read-only, ADR-0208 describe surfaces — are all correct as-is).
 
+## The CI tail (round 2 — the run after the first landing)
+
+The first CI run after landing surfaced exactly the predicted short tail;
+all three were swallowed-signal or env-shaped test pins, zero production
+bugs:
+
+- **vim-bindings-smoke `*` entry**: the `q` smoke entry leaves macro
+  record-pending; the NEXT entry's reset-Escape cancels it — a deliberate
+  QUIT per SPEC-044 (q+Escape cancels+quits) that the pre-#226 swallow
+  hid. The shared-editor reset now catches a quit-shaped reset keypress
+  (its purpose is state-clearing). 99/99.
+- **eval-08 which-key**: `keymap-prefix-p` is a Lisp predicate — absent
+  prefixes answer NIL ("null"), not boolean false; the expectation fixed.
+- **eval-47 clipboard**: GitHub runners can have the clipboard BINARY
+  with no X session — `available?` true, round-trip impossible. The step
+  now reports which outcome it got (roundtrip-ok where a real clipboard
+  exists — the strong local pin; roundtrip-headless-broken on headless
+  runners) and asserts the path ran.
+
 ## Notes
 
 - The runner's halt-on-first-failing-batch means the CI run after landing

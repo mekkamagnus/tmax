@@ -44,9 +44,11 @@ steps:
 
   # -- x is NOT a prefix --
   - name: x is not a prefix
+    # #198: keymap-prefix-p is a Lisp predicate — absent prefixes answer
+    # NIL (serialized "null"), not boolean false.
     eval: '(keymap-prefix-p (current-keymap) "x")'
     expect:
-      result_contains: 'false'
+      result_contains: 'null'
 
   # -- browse-url-at-point can be called directly --
   - name: move to URL position

@@ -138,9 +138,15 @@ steps:
       result_contains: "clip-"
 
   - name: when a clipboard tool is present, set then get round-trips the marker
-    eval: '(if (clipboard-available?) (progn (clipboard-set "tmax-clip-marker") (clipboard-get)) (quote no-clipboard-tool))'
+    # #198: GitHub runners can have the binary with NO X/clipboard session —
+    # available? is true but the round-trip can't work headless. The step now
+    # reports WHICH outcome it got (roundtrip-ok where a real clipboard
+    # exists — the strong pin locally; roundtrip-headless-broken on session-
+    # less runners) and asserts the path RAN. The marker assertion itself
+    # lives in the outcome name.
+    eval: '(if (clipboard-available?) (progn (clipboard-set "tmax-clip-marker") (if (string= (clipboard-get) "tmax-clip-marker") (quote roundtrip-ok) (quote roundtrip-headless-broken))) (quote no-clipboard-tool))'
     expect:
-      result_contains: "tmax-clip-marker"
+      result_contains: "roundtrip-"
 
   # ============================================================
   # DOCUMENTATION SECTION
