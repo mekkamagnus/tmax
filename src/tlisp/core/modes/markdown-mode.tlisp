@@ -15,6 +15,10 @@
 (syntax-set-language "markdown")
 (syntax-highlight-enable)
 
+;; #229: align every pipe table when the mode activates (find-file /
+;; major-mode-set) so tables open aligned, org-table style.
+(major-mode-hook-add "markdown" "markdown-align-tables-in-buffer")
+
 ;; Mode-specific key bindings — scoped to markdown major mode (4th arg)
 ;; Multi-key sequences use space separators: "g h", ", b", "z c"
 
@@ -37,7 +41,8 @@
 (key-bind "z 4" "(progn (set-prefix 4) (markdown-fold-by-level))" "normal" "markdown")
 (key-bind "z 5" "(progn (set-prefix 5) (markdown-fold-by-level))" "normal" "markdown")
 (key-bind "z 6" "(progn (set-prefix 6) (markdown-fold-by-level))" "normal" "markdown")
-(key-bind "<Tab>" "(markdown-visibility-cycle)" "normal" "markdown")
+;; #229: TAB aligns the table at point (org-style); falls back to visibility cycling.
+(key-bind "<Tab>" "(markdown-tab)" "normal" "markdown")
 
 ;; Formatting
 (key-bind ", b" "(markdown-toggle-bold)" "normal" "markdown")

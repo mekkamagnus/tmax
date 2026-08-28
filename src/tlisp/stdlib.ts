@@ -30,6 +30,7 @@ import {
   valuesEqual,
 } from "./values.ts";
 import { Either } from "../utils/task-either.ts";
+import { isWideChar } from "../core/screen-buffer.ts";
 import type { AppError } from "../error/types.ts";
 import { awaitPromiseValue } from "./async.ts";
 
@@ -542,6 +543,20 @@ export function registerStdlibFunctions(interpreter: TLispInterpreter): void {
       throw new Error("string-suffix-p requires suffix and string");
     }
     return createBoolean((args[1].value as string).endsWith(args[0].value as string));
+  }));
+
+  // #229: terminal display width of a string — wide (CJK/emoji) code points
+  // count as 2 columns. Reuses the renderer's isWideChar table so text padded
+  // by markdown-align-table lines up with what the terminal actually draws.
+  interpreter.defineBuiltin("string-display-width", raw((args: TLispValue[]) => {
+    if (args.length !== 1 || args[0]?.type !== "string") {
+      throw new Error("string-display-width requires a string");
+    }
+    let width = 0;
+    for (const ch of args[0].value as string) {
+      width += isWideChar(ch) ? 2 : 1;
+    }
+    return createNumber(width);
   }));
 
   interpreter.defineBuiltin("string-contains-p", raw((args: TLispValue[]) => {

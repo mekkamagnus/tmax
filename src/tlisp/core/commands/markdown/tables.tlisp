@@ -3,14 +3,23 @@
     markdown-table-eval-formula markdown-table-eval-formula-impl
     markdown-table-formula-parse markdown-table-insert-formula
     markdown-table-eval-expr markdown-table-extract-range markdown-table-reduce
-    markdown-resolve-cell-refs markdown-table-to-latex)
+    markdown-resolve-cell-refs markdown-table-to-latex
+    markdown-tab markdown-align-tables-in-buffer markdown-table-realign-after-newline)
 
 ;; markdown/tables.tlisp — table alignment, formulas, LaTeX conversion.
 ;; CHORE-44 Change 11: split from markdown.tlisp (move only — no logic changes).
 ;; pad-right is exported because markdown-align-table uses it; keeping it here
 ;; preserves the original unqualified call site.
 
-;;; ── Table formatting ────────────────────────────────────────────────
+;;; ── Table formatting (#229: org-table semantics) ─────────────────────
+;;
+;; Alignment core: padding is computed on TERMINAL DISPLAY WIDTH (wide
+;; CJK/emoji code points count as 2 via the string-display-width builtin),
+;; the delimiter row is stretched with dashes (colons preserved), :--- /
+;; :---: / ---: markers select left/center/right cell padding, empty edge
+;; cells no longer create a phantom column, short rows are padded rather
+;; than truncated, unchanged lines are skipped (idempotent — clean buffers
+;; stay clean), and the cursor is mapped pipe-to-pipe into the same cell.
 
 (defun markdown-table-row-p (line)
   "Check if LINE looks like a markdown table row (has | with content)."
@@ -20,63 +29,286 @@
          (string-match "|$" trimmed)
          (> (length (string-split trimmed "|")) 2))))
 
-(defun markdown-align-table ()
-  "Align the pipe table at point."
-  (interactive)
-  (let* ((start (cursor-line))
-         (end start)
-         (line (buffer-get-line start)))
-    ;; Find table boundaries — only extend over actual table rows
-    (if (not (markdown-table-row-p line))
-        (message "Not in a table")
+(defun md-table-cell-split (line)
+  "Split LINE into table cells, dropping the empty edge cells produced by the leading/trailing pipes (#229)."
+  (let ((cells (string-split (string-trim line) "|")))
+    (if (and (> (length cells) 0) (string= (string-trim (nth 0 cells)) ""))
+        (set! cells (cdr cells)))
+    (if (and (> (length cells) 0)
+             (string= (string-trim (nth (- (length cells) 1) cells)) ""))
+        (set! cells (reverse (cdr (reverse cells)))))
+    cells))
+
+(defun md-table-sep-cell-p (cell)
+  "Non-nil if CELL is a delimiter cell (---, :---, ---:, :---:)."
+  (let ((c (string-trim cell)))
+    (and (> (length c) 0)
+         (string-match "^:?-+:?$" c))))
+
+(defun md-table-separator-row-p (cells)
+  "Non-nil if CELLS (edge-stripped) form a delimiter row."
+  (let ((n (length cells))
+        (i 0)
+        (all t))
+    (while (< i n)
+      (if (not (md-table-sep-cell-p (nth i cells)))
+          (set! all nil))
+      (set! i (+ i 1)))
+    (and all (> n 0))))
+
+(defun md-table-column-align (sep-cell)
+  "Alignment of a column from its delimiter cell: none, left, center, or right."
+  (let ((c (string-trim sep-cell)))
+    (if (and (string-prefix-p ":" c) (string-suffix-p ":" c))
+        "center"
+        (if (string-suffix-p ":" c)
+            "right"
+            (if (string-prefix-p ":" c)
+                "left"
+                "none")))))
+
+(defun md-table-pad-cell (cell width align)
+  "Pad trimmed CELL to terminal display WIDTH. none/left pad right, right pads left, center splits."
+  (let* ((c (string-trim cell))
+         (fill (- width (string-display-width c))))
+    (if (<= fill 0)
+        c
+        (if (equal align "right")
+            (concat (make-string fill 32) c)
+            (if (equal align "center")
+                (let ((lpad (floor (/ fill 2))))
+                  (concat (make-string lpad 32) c (make-string (- fill lpad) 32)))
+                (concat c (make-string fill 32)))))))
+
+(defun md-table-sep-cell-render (width align)
+  "Render a delimiter cell filling display WIDTH with dashes, keeping colons."
+  (if (equal align "center")
+      (let ((w (if (< width 3) 3 width)))
+        (concat ":" (make-string (- w 2) 45) ":"))
+      (if (equal align "right")
+          (let ((w (if (< width 2) 2 width)))
+            (concat (make-string (- w 1) 45) ":"))
+          (if (equal align "left")
+              (let ((w (if (< width 2) 2 width)))
+                (concat ":" (make-string (- w 1) 45)))
+              (make-string (if (< width 1) 1 width) 45)))))
+
+(defun md-table-line-indent (line)
+  "Number of leading spaces in LINE."
+  (let ((n 0)
+        (lim (length line)))
+    (while (and (< n lim) (string= (substring line n (+ n 1)) " "))
+      (set! n (+ n 1)))
+    n))
+
+(defun md-table-pipe-positions (line)
+  "Buffer columns of every | character in LINE."
+  (let ((ps (list))
+        (i 0)
+        (lim (length line)))
+    (while (< i lim)
+      (if (string= (substring line i (+ i 1)) "|")
+          (set! ps (cons i ps)))
+      (set! i (+ i 1)))
+    (reverse ps)))
+
+(defun md-table-at-most (a limit)
+  "A clamped to LIMIT (cursor-mapping helper)."
+  (if (< a limit) a limit))
+
+(defun md-table-map-column (old-line new-line col)
+  "Map cursor column COL on OLD-LINE to NEW-LINE by matching pipe positions, so the cursor stays in its cell across a realign."
+  (let* ((old-pipes (md-table-pipe-positions old-line))
+         (new-pipes (md-table-pipe-positions new-line))
+         (n (length old-pipes))
+         (k 0))
+    (while (and (< k n) (<= (nth k old-pipes) col))
+      (set! k (+ k 1)))
+    (if (= k 0)
+        (if (> (length new-pipes) 0)
+            (md-table-at-most col (- (nth 0 new-pipes) 1))
+            col)
+        (let* ((k1 (- k 1))
+               (target (+ (nth k1 new-pipes) (- col (nth k1 old-pipes)))))
+          (if (< k (length new-pipes))
+              (md-table-at-most target (- (nth k new-pipes) 1))
+              (md-table-at-most target (length new-line)))))))
+
+(defun md-table-emit-row (cells widths aligns ncols)
+  "Render one data-row line with display-width padding; missing cells become empty cells."
+  (let ((s "")
+        (j 0))
+    (while (< j ncols)
+      (let ((cell (if (< j (length cells)) (nth j cells) "")))
+        (set! s (concat s "| " (md-table-pad-cell cell (aref widths j) (aref aligns j)) " ")))
+      (set! j (+ j 1)))
+    (concat s "|")))
+
+(defun md-table-emit-sep (widths aligns ncols)
+  "Render the delimiter row stretched to the final column widths."
+  (let ((s "")
+        (j 0))
+    (while (< j ncols)
+      (set! s (concat s "| " (md-table-sep-cell-render (aref widths j) (aref aligns j)) " "))
+      (set! j (+ j 1)))
+    (concat s "|")))
+
+(defun md-table-collect (start end)
+  "Parse table rows START..END into edge-stripped cell lists (#229)."
+  (let ((rows (list))
+        (i start))
+    (while (<= i end)
+      (set! rows (cons (md-table-cell-split (buffer-get-line i)) rows))
+      (set! i (+ i 1)))
+    (reverse rows)))
+
+(defun md-table-ncols-of (rows)
+  "Column count: widest edge-stripped row (#229)."
+  (let ((n 0)
+        (j 0))
+    (while (< j (length rows))
+      (if (> (length (nth j rows)) n)
+          (set! n (length (nth j rows))))
+      (set! j (+ j 1)))
+    n))
+
+(defun md-table-aligns-of (rows ncols)
+  "Per-column alignment vector, from the first delimiter row (#229)."
+  (let ((aligns (make-vector ncols "none"))
+        (k 0)
+        (found nil))
+    (while (and (< k (length rows)) (not found))
+      (if (md-table-separator-row-p (nth k rows))
+          (set! found t)
+          (set! k (+ k 1))))
+    (if found
+        (let ((j 0))
+          (while (< j (length (nth k rows)))
+            (aset aligns j (md-table-column-align (nth j (nth k rows))))
+            (set! j (+ j 1)))))
+    aligns))
+
+(defun md-table-widths-of (rows ncols aligns)
+  "Per-column max display width over data (non-delimiter) rows; marker columns are at least 3 wide so the delimiter cell fits (#229)."
+  (let ((widths (make-vector ncols 0))
+        (r 0))
+    (while (< r (length rows))
+      (if (not (md-table-separator-row-p (nth r rows)))
+          (let ((c 0))
+            (while (< c ncols)
+              (let ((w (string-display-width
+                         (string-trim
+                           (if (< c (length (nth r rows))) (nth c (nth r rows)) "")))))
+                (if (> w (aref widths c))
+                    (aset widths c w)))
+              (set! c (+ c 1)))))
+      (set! r (+ r 1)))
+    (let ((c2 0))
+      (while (< c2 ncols)
+        (let ((minw (if (equal (aref aligns c2) "none") 1 3)))
+          (if (< (aref widths c2) minw)
+              (aset widths c2 minw)))
+        (set! c2 (+ c2 1))))
+    widths))
+
+(defun md-table-align-core ()
+  "Align the pipe table at point. Returns the number of changed lines, or nil when point is not in a table. Silent — wrappers message (#229)."
+  (let ((start (cursor-line))
+        (end (cursor-line)))
+    (if (not (markdown-table-row-p (buffer-get-line start)))
+        nil
         (progn
-          ;; Extend upward
+          ;; Extend over contiguous table rows
           (while (and (> start 0)
                       (markdown-table-row-p (buffer-get-line (- start 1))))
             (set! start (- start 1)))
-          ;; Extend downward
           (while (and (< (+ end 1) (buffer-line-count))
                       (markdown-table-row-p (buffer-get-line (+ end 1))))
             (set! end (+ end 1)))
-          ;; Parse and align
-          (let ((rows '())
-                (max-cols 0)
-                (i start))
-            (while (<= i end)
-              (let* ((text (buffer-get-line i))
-                     (trimmed (string-trim text))
-                     (cells (string-split trimmed "|")))
-                (set! rows (cons cells rows))
-                (if (> (length cells) max-cols)
-                    (set! max-cols (length cells))))
-              (set! i (+ i 1)))
-            ;; Compute column widths
-            (let ((widths (make-vector max-cols 0))
-                  (all-rows (reverse rows)))
-              (dolist (row all-rows)
-                (let ((j 0))
-                  (while (< j (min (length row) max-cols))
-                    (let ((cell-len (length (string-trim (nth j row)))))
-                      (if (> cell-len (aref widths j))
-                          (aset widths j cell-len)))
-                    (set! j (+ j 1)))))
-              ;; Re-emit aligned table (bottom-up to avoid line shift)
-              (let ((k end)
-                    (idx (- end start)))
-                (while (>= k start)
-                  (let* ((row (nth idx all-rows))
-                         (aligned "")
-                         (j 0))
-                    (while (< j (min (length row) max-cols))
-                      (let ((cell (string-trim (nth j row))))
-                        (set! aligned (concat aligned "| " (pad-right cell (aref widths j)) " ")))
-                      (set! j (+ j 1)))
-                    (set! aligned (concat aligned "|"))
-                    (cursor-move k 0)
-                    (markdown-replace-line aligned)
-                    (set! k (- k 1))
-                    (set! idx (- idx 1))))
-                (message "Table aligned (%d rows, %d cols)" (+ (- end start) 1) max-cols))))))))
+          (let* ((first (buffer-get-line start))
+                 (prefix (substring first 0 (md-table-line-indent first)))
+                 (rows (md-table-collect start end))
+                 (ncols (md-table-ncols-of rows))
+                 (aligns (md-table-aligns-of rows ncols))
+                 (widths (md-table-widths-of rows ncols aligns))
+                 (cur-line (cursor-line))
+                 (cur-col (cursor-column))
+                 (pre-line (buffer-get-line cur-line)))
+            ;; Re-emit bottom-up, skipping unchanged lines (idempotence)
+            (let ((changed 0)
+                  (kk end)
+                  (idx (- (length rows) 1)))
+              (while (>= kk start)
+                (let* ((row (nth idx rows))
+                       (body (if (md-table-separator-row-p row)
+                                 (md-table-emit-sep widths aligns ncols)
+                                 (md-table-emit-row row widths aligns ncols)))
+                       (new-line (concat prefix body)))
+                  (if (not (string= (buffer-get-line kk) new-line))
+                      (progn
+                        (cursor-move kk 0)
+                        (markdown-replace-line new-line)
+                        (set! changed (+ changed 1)))))
+                (set! kk (- kk 1))
+                (set! idx (- idx 1)))
+              ;; Restore cursor, mapped pipe-to-pipe into the same cell
+              (if (and (>= cur-line start) (<= cur-line end))
+                  (cursor-move cur-line
+                               (md-table-map-column pre-line (buffer-get-line cur-line) cur-col))
+                  (cursor-move cur-line cur-col))
+              changed))))))
+
+(defun markdown-align-table ()
+  "Align the pipe table at point, org-table style (#229)."
+  (interactive)
+  (let ((changed (md-table-align-core)))
+    (if changed
+        (if (> changed 0)
+            (message "Table aligned (%d lines adjusted)" changed)
+            (message "Table already aligned"))
+        (message "Not in a table"))))
+
+(defun markdown-align-tables-in-buffer ()
+  "Align every pipe table in the buffer. Registered on the markdown mode-activate hook so tables open aligned (#229)."
+  (interactive)
+  (let ((save-line (cursor-line))
+        (save-col (cursor-column))
+        (i 0))
+    (while (< i (buffer-line-count))
+      (if (markdown-table-row-p (buffer-get-line i))
+          (progn
+            (cursor-move i 0)
+            (md-table-align-core)
+            (while (and (< i (buffer-line-count))
+                        (markdown-table-row-p (buffer-get-line i)))
+              (set! i (+ i 1))))
+          (set! i (+ i 1))))
+    (cursor-move save-line save-col)))
+
+(defun markdown-table-realign-after-newline ()
+  "Realign the table around point after Enter (#229). Silent; called from post-newline-hook."
+  (let ((cur (cursor-line)))
+    (if (markdown-table-row-p (buffer-get-line cur))
+        (md-table-align-core)
+        (if (and (> cur 0)
+                 (markdown-table-row-p (buffer-get-line (- cur 1))))
+            ;; The current (new) line is not a table row, so the align cannot
+            ;; rewrite it — but map the column through pipe positions anyway
+            ;; (identity for an untouched line) so point can never land in a
+            ;; different cell if that ever changes. #229 verify-gate retry 1.
+            (let* ((col (cursor-column))
+                   (pre (buffer-get-line cur)))
+              (cursor-move (- cur 1) 0)
+              (md-table-align-core)
+              (cursor-move cur (md-table-map-column pre (buffer-get-line cur) col)))
+            nil))))
+
+(defun markdown-tab ()
+  "TAB in markdown-mode: align the table at point, else cycle visibility (#229)."
+  (interactive)
+  (if (markdown-table-row-p (buffer-get-line (cursor-line)))
+      (markdown-align-table)
+      (markdown-visibility-cycle)))
 
 (defun pad-right (str len)
   "Pad string STR to length LEN with spaces."
@@ -273,6 +505,13 @@ Previously only the first formula line was evaluated."
                   (let ((table-start nil)
                         (table-end nil)
                         (j line))
+                    ;; #229: the outer eval-formula loop re-enters with the
+                    ;; cursor wherever the previous impl left it — possibly on
+                    ;; the formula comment itself. When point is not on a table
+                    ;; row, anchor the table search at the line above the
+                    ;; formula (the comment lives below its table by contract).
+                    (if (not (markdown-table-row-p (buffer-get-line j)))
+                        (set! j (- formula-line 1)))
                     (while (and (>= j 0) (not table-start))
                       (if (markdown-table-row-p (buffer-get-line j))
                           (set! j (- j 1))
@@ -287,7 +526,7 @@ Previously only the first formula line was evaluated."
                           (set! table-end (- j 1))))
                     ;; Table ends at bottom of buffer: walk-down exited at j=total.
                     (if (not table-end) (set! table-end (- total 1)))
-                    (if (not (and table-start table-end))
+                    (if (not (and table-start table-end (<= table-start table-end)))
                         (message "Not in a table")
                         (let ((table '())
                               (k table-start))
@@ -308,22 +547,37 @@ Previously only the first formula line was evaluated."
                                  (val (markdown-table-eval-expr expr table))
                                  (row-idx (- target-row-num 1)))
                             (if (and (>= row-idx 0) (< row-idx (length table)))
-                                (let* ((row (nth row-idx table))
-                                       (col-idx (- target-col-num 1)))
-                                  (if (and (>= col-idx 0) (< col-idx (length row)))
-                                      (let* ((new-row nil)
-                                             (m 0))
-                                        (set! new-row '())
-                                        (while (< m (length row))
-                                          (if (= m col-idx)
-                                              (set! new-row (cons (concat " " val " ") new-row))
-                                              (set! new-row (cons (nth m row) new-row)))
+                                (let* ((cells (md-table-cell-split
+                                                (buffer-get-line (+ table-start row-idx))))
+                                       (c-idx (- target-col-num 1)))
+                                  ;; #229/SPEC-039: WRITE with sentinel-aware cell indexing
+                                  ;; ($1 = first VISIBLE cell — reads already filter the empty
+                                  ;; edge cells, the old write indexed the raw split row and
+                                  ;; put $1 into the leading sentinel). Replace the line in
+                                  ;; place; the old markdown-delete-line + buffer-insert-at-
+                                  ;; position pair merged the row into the formula-comment
+                                  ;; line that shifts into the deleted slot. Re-align after.
+                                  (if (and (>= c-idx 0) (< c-idx (length cells)))
+                                      (let ((out (list))
+                                            (m 0))
+                                        (while (< m (length cells))
+                                          (set! out (cons (if (= m c-idx)
+                                                              (concat " " val " ")
+                                                              (nth m cells))
+                                                          out))
                                           (set! m (+ m 1)))
-                                        (set! new-row (reverse new-row))
-                                        (let ((new-line (string-join "|" new-row)))
-                                          (markdown-delete-line (+ table-start row-idx))
-                                          (buffer-insert-at-position (+ table-start row-idx) 0 new-line)
-                                          (message "Formula result: %s" val)))
+                                        (set! out (reverse out))
+                                        (cursor-move (+ table-start row-idx) 0)
+                                        (markdown-replace-line (concat "| " (string-join " | " out) " |"))
+                                        (md-table-align-core)
+                                        ;; Consume the evaluated formula comment (org-style):
+                                        ;; the outer eval-formula loop re-scans for the FIRST
+                                        ;; tblfm line, so a retained comment is re-evaluated
+                                        ;; forever and later formulas are never reached (the
+                                        ;; old delete+insert merge corruption used to mangle
+                                        ;; the first comment out of the scan by accident).
+                                        (markdown-delete-line formula-line)
+                                        (message "Formula result: %s" val))
                                       (message "Column %d out of range" target-col-num)))
                                 (message "Row %d out of range" target-row-num)))))))))))))
 

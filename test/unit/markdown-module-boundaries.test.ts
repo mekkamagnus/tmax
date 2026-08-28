@@ -75,7 +75,10 @@ describe("CHORE-44 Change 11 — Markdown module boundaries", () => {
     // backlinks…); those 12 are exported per AC11.2, and the internal helper
     // markdown-note-slug-segment was renamed note-slug-segment (private —
     // never exported, absent from the public namespace).
-    expect(publicFns.length).toBe(125);
+    // #229: refrozen 2026-08-28 — +3 public table commands (markdown-tab,
+    // markdown-align-tables-in-buffer, markdown-table-realign-after-newline).
+    // The 17 alignment helpers are md-table-* (private, per the #227 rule).
+    expect(publicFns.length).toBe(128);
   });
 
   test("AC11.2: aggregator is a pure loader (no feature defun)", () => {

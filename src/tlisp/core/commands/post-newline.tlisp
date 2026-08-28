@@ -30,17 +30,24 @@ Swallows the 'no indent rules' error to match the previous TS try/catch."
     (error (e) nil)))
 
 (defun post-newline-hook ()
-  "Run indent-apply-line (guarded) and, in Markdown mode, list continuation.
-Called by the insert handler immediately after (insert-newline).
+  "Run indent-apply-line (guarded) and, in Markdown mode, list continuation
+plus table realign (#229: the table around point stays aligned when Enter
+splits a row). Called by the insert handler immediately after (insert-newline).
 #149: indent-apply-line runs only when electric-indent-mode is active (it is
 globally enabled at startup, preserving the pre-#149 always-auto-indent behavior)."
   (if (minor-mode-active-p "electric-indent")
       (post-newline--indent-current-line)
       nil)
   (if (equal (major-mode-get) "markdown")
-      (condition-case err
-        (markdown-list-continue)
-        (error (e) nil))
+      (progn
+        (condition-case err
+          (markdown-list-continue)
+          (error (e) nil))
+        ;; #229: realign the table when Enter splits a row (current or
+        ;; previous line is a table row). Silent; errors swallowed like above.
+        (condition-case err
+          (markdown-table-realign-after-newline)
+          (error (e) nil)))
       nil))
 
 (provide "post-newline")

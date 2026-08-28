@@ -64,7 +64,7 @@ const defaultSGR = (): SGRState => ({
  *  exists to prevent (verify-gate #202 retry 1: the transport-emoji gap
  *  mistyped 🚀 narrow). When in doubt for an emoji-adjacent block, include
  *  it — real terminals render these wide. */
-function isWideChar(ch: string): boolean {
+export function isWideChar(ch: string): boolean {
   const cp = ch.codePointAt(0) ?? 0;
   return (cp >= 0x1100 && cp <= 0x115f)      // Hangul Jamo
     || (cp >= 0x2e80 && cp <= 0xa4cf)        // CJK radicals..Yi

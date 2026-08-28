@@ -23,6 +23,7 @@
     markdown-execute-all-blocks
     markdown-table-eval-formula markdown-table-eval-formula-impl markdown-table-insert-formula
     markdown-table-formula-parse markdown-table-eval-expr markdown-table-row-p markdown-table-extract-range markdown-table-reduce markdown-resolve-cell-refs
+    markdown-tab markdown-align-tables-in-buffer markdown-table-realign-after-newline
     markdown-delete-line
     markdown-export-to-html markdown-export-to-text markdown-export-to-latex
     markdown-export-dispatch
