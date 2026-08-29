@@ -46,7 +46,8 @@ describe("CHORE-44 Change 7 — editor API registry", () => {
     const live = Array.from(createEditorAPI(createTestAPIContext()).keys()).sort();
     // #198: 419 → 421 — the #220 confirmation ops (resolver-kind +
     // set-resolve-policy) plus this cycle's regeneration.
-    expect(live.length).toBe(421);
+    // #231: 421 → 422 — the flash-region goggles primitive.
+    expect(live.length).toBe(422);
     expect(live).toEqual(expected);
   });
 

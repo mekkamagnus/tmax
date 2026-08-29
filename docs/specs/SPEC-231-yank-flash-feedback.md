@@ -42,3 +42,24 @@ Every register mutation gives visible feedback: the affected region **flashes** 
 ## Out of scope
 
 A `setq` duration knob (constant for now), blockwise-specific flash shaping (treated as its bounding region), clipboard-put flashes, and any T-Lisp timer machinery.
+
+## Verify-gate audit (2026-08-29, retry 1 amendments)
+
+Round 1 found three runtime-proven defects, all fixed and tested:
+- **BUG A — misindexed spans**: the primitive built a dense array (index 0 = region top) while consumers index absolutely by buffer line; every flash below line 0 highlighted the wrong line. Spans are now padded/absolute, with a render-level test (the row containing the flashed text is the row that changes).
+- **BUG B — flash never reached the TUI**: `editorStateToJson` serialized `flashSpans` but `jsonToEditorState` (and the daemon's `frameToEditorState`) dropped it — the client merge and poll edge-check were dead code. Both mappings now carry it; a serialize→deserialize round-trip test locks it.
+- **BUG C — unmatched text objects errored**: the text-object flash sat outside the null-region guard, so `yi"` with no delimiters surfaced "nth second argument must be a list" instead of the unsupported-combo status. The flash now lives inside the guard.
+
+Acknowledged deviations (documented, accepted):
+- **Style is a gray background block (`bg #555555`), not inverse** — `ANSIStyle`/`applyHighlights` supports only fg/bg/bold/dim; "subtle inverse/dim" resolves to a subtle gray block.
+- **Unflashed paths**: find-motion operators (`dfs`), the uppercase D/C/Y variants, and multi-line yank/paste flashes (only the first line's extent flashes — the register-length heuristic is cursor-relative). The numbered criteria are met; the Goal's "every register mutation" over-promises and these are follow-ups.
+- **dd's flash** is the 2-column cut site at the collapse point (criterion 2's letter), not the full removed line range.
+- The per-editor timer closure may fire after editor teardown (benign write to a dead model) — noted, untested.
+
+## Verify-gate audit (retry 2)
+
+- **Spurious flash on failed operators** (live-proven): unsupported combos (`dz`) still hit the tail flash — phantom feedback for a mutation that never happened. `vim-operator-apply` now tracks an `applied` flag (set false only on the unsupported-combo/motion-failure path) and flashes only when applied; tested.
+- **TUI poll missed superseding flashes**: presence-only compare dropped a second flash within one 200 ms poll window; now a value-shape compare (`JSON.stringify` of flashSpans — tiny arrays).
+- **TUI merge untested**: the client's span merge is extracted as `mergeFlashSpans` (BUG-24 renderSteepFrame precedent) and directly tested — the "both render paths" criterion letter now holds (capture-frame test + client merge test).
+- The TTL-clear hook test now drives the real yank path (`yiw`), not the paste helper.
+- Still not actionable: no Codex review artifact exists for #231 (none was run).

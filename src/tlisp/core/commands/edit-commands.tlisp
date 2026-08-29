@@ -1,5 +1,5 @@
 (defmodule editor/commands/edit-commands
-  (export vim-delete-char vim-change-char vim-delete-to-line-end vim-change-to-line-end vim-yank-to-line-end vim-paste-after vim-paste-before vim-join-lines visual-change visual-swap-anchor vim-change-number vim-increment-number vim-decrement-number vim-visual-paste vim-visual-paste-block)
+  (export vim-delete-char vim-change-char vim-delete-to-line-end vim-change-to-line-end vim-yank-to-line-end vim-paste-after vim-paste-before vim-flash-pasted vim-join-lines visual-change visual-swap-anchor vim-change-number vim-increment-number vim-decrement-number vim-visual-paste vim-visual-paste-block vim-visual-yank-flash vim-visual-delete-flash)
 
 ;; edit-commands.tlisp -- Single-key Vim edit commands composed in T-Lisp
 
@@ -12,6 +12,8 @@
         (set-register "\"" deleted)
         (undo-commit "x")
         (vim-record-change "x" count)
+        ;; #231: goggles flash at the cut site.
+        (flash-region (cursor-line) (cursor-column) (cursor-line) (+ (cursor-column) 1))
         t))))
 
 (defun vim-change-char (count)
@@ -64,12 +66,26 @@ SPEC-044 Phase 2.4: for + or * registers, pull from the OS clipboard
               (if (or (string= register "+") (string= register "*"))
                 (clipboard-get)
                 (get-register register)))
-            (paste-after count)
-            (set-register "\"" saved)))
-        (paste-after count)))
+            (let ((pasted (get-register "\"")))
+              (paste-after count)
+              (set-register "\"" saved)
+              (vim-flash-pasted pasted count))))
+        (let ((pasted (get-register "\"")))
+          (paste-after count)
+          (vim-flash-pasted pasted count))))
     (undo-commit "p")
     (vim-record-change "p" count)
     t))
+
+(defun vim-flash-pasted (text count)
+  "Flash the pasted extent from the cursor (#231): COUNT copies of TEXT's
+first line (count-prefixed paste 3p inserts 3 copies). Cursor sits on the
+first pasted character after paste-after/paste-before."
+  (let ((width (* (length (nth 0 (string-split text "\n"))) count)))
+    (if (> width 0)
+        (flash-region (cursor-line) (cursor-column)
+                      (cursor-line) (+ (cursor-column) (- width 1)))))
+  t)
 
 (defun vim-paste-before (count)
   "Vim P: paste before cursor COUNT times. See vim-paste-after for the
@@ -84,9 +100,13 @@ register-prefix swap-and-restore logic."
               (if (or (string= register "+") (string= register "*"))
                 (clipboard-get)
                 (get-register register)))
-            (paste-before count)
-            (set-register "\"" saved)))
-        (paste-before count)))
+            (let ((pasted (get-register "\"")))
+              (paste-before count)
+              (set-register "\"" saved)
+              (vim-flash-pasted pasted count))))
+        (let ((pasted (get-register "\"")))
+          (paste-before count)
+          (vim-flash-pasted pasted count))))
     (undo-commit "P")
     (vim-record-change "P" count)
     t))
@@ -209,6 +229,14 @@ block's top-left (blockwise). P === p in visual mode."
                                 (cursor-move (cursor-line)
                                              (+ (cursor-column) (- (length source) 1)))))))
                   (set-register "\"" swapped)
+                  ;; #231: flash the inserted extent — charwise from the cursor
+                  ;; (on the last pasted char) back over the pasted length;
+                  ;; linewise/blockwise flash the current line.
+                  (if (and (string= mode "char")
+                           (not (string-match "\n" source)))
+                      (flash-region (cursor-line) (- (cursor-column) (- (length source) 1))
+                                    (cursor-line) (cursor-column))
+                      (flash-region (cursor-line) 0 (cursor-line) 9999))
                   (undo-commit "visual-p")
                   (vim-record-change "p" 1)
                   t)))))))
@@ -217,6 +245,23 @@ block's top-left (blockwise). P === p in visual mode."
   "Swap visual selection anchor and active endpoint."
   (progn
     (visual-swap-endpoints)
+    t))
+
+(defun vim-visual-yank-flash ()
+  "Visual y with goggles flash (#231): flash what was copied. The selection's
+end column is one-past (end-exclusive); flash-region adds 1 back."
+  (let ((sel (visual-get-selection)))
+    (visual-yank)
+    (if sel
+        (flash-region (nth 0 sel) (nth 1 sel) (nth 2 sel) (- (nth 3 sel) 1)))
+    t))
+
+(defun vim-visual-delete-flash ()
+  "Visual delete with goggles flash (#231): flash the cut site."
+  (let ((sel (visual-get-selection)))
+    (visual-delete)
+    (if sel
+        (flash-region (nth 0 sel) (nth 1 sel) (nth 0 sel) (+ (nth 1 sel) 1)))
     t))
 
 ;; =====================================================================

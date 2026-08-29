@@ -175,6 +175,7 @@ file-stat
 find-char-position
 find-heading-ranges
 find-references
+flash-region
 fold-by-level
 fold-close
 fold-close-all

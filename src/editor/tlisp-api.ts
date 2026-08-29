@@ -43,6 +43,7 @@ import { createChangeOps } from "./api/change-ops.ts";
 import { createUndoRedoOps } from "./api/undo-redo-ops.ts";
 import { createCountOps } from "./api/count-ops.ts";
 import { createVisualOps } from "./api/visual-ops.ts";
+import { createFlashOps } from "./api/flash-ops.ts";
 import { createTextObjectsOps } from "./api/text-objects-ops.ts";
 import { createJumpOps } from "./api/jump-ops.ts";
 import { createKillRingOps } from "./api/kill-ring.ts";
@@ -432,6 +433,15 @@ function buildEditorAPIContributions(): readonly EditorAPIContribution[] {
     },
 
     // ── text objects ────────────────────────────────────────────────────
+    {
+      name: "flash",
+      factory: (ctx: EditorAPIContext): Map<string, TLispFunctionImpl> => {
+        const write = (msg: Msg): void => { ctx.applyUpdate(msg); };
+        return createFlashOps(write);
+      },
+    },
+
+    // ── text objects (continued) ────────────────────────────────────────
     {
       name: "text-objects",
       factory: (ctx: EditorAPIContext): Map<string, TLispFunctionImpl> => {

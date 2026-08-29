@@ -114,6 +114,8 @@ export interface EditorModel {
   readonly tabs?: readonly Tab[];
   /** Per-line syntax-highlight spans (immutable array of arrays). */
   readonly highlightSpans?: readonly (readonly HighlightSpan[])[];
+  /** #231: transient vim-goggles flash spans (inverse style, TTL-cleared). */
+  readonly flashSpans?: readonly (readonly HighlightSpan[])[];
   /** Current search match ranges (immutable array). */
   readonly searchMatches?: readonly Range[];
   /** Collapsed fold ranges keyed by start line (immutable map). */
@@ -231,6 +233,7 @@ export function modelToEditorState(model: EditorModel): EditorState {
     tabs: model.tabs ? model.tabs.map(t => ({ ...t })) : undefined,
     currentTabIndex: model.currentTabIndex,
     highlightSpans: model.highlightSpans ? model.highlightSpans.map(spans => [...spans]) : undefined,
+    flashSpans: model.flashSpans ? model.flashSpans.map(spans => [...spans]) : undefined,
     searchMatches: model.searchMatches ? [...model.searchMatches] : undefined,
     currentMajorMode: model.currentMajorMode,
     activeMinorModes: model.activeMinorModes ? [...model.activeMinorModes] : undefined,
@@ -277,6 +280,7 @@ export function editorStateToModelPatch(external: EditorState): Partial<EditorMo
   if (external.windows !== undefined) patch.windows = external.windows.map(cloneWindow);
   if (external.tabs !== undefined) patch.tabs = external.tabs.map(t => ({ ...t }));
   if (external.highlightSpans !== undefined) patch.highlightSpans = external.highlightSpans.map(spans => [...spans]);
+  if (external.flashSpans !== undefined) patch.flashSpans = external.flashSpans.map(spans => [...spans]);
   if (external.activeMinorModes !== undefined) patch.activeMinorModes = [...external.activeMinorModes];
   if (external.activeMinorModeLighters !== undefined) patch.activeMinorModeLighters = [...external.activeMinorModeLighters];
   if (external.searchMatches !== undefined) patch.searchMatches = [...external.searchMatches];

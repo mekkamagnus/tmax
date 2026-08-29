@@ -226,6 +226,8 @@ export interface EditorState {
   currentTabIndex?: number;  // Index of active tab
   // Syntax highlighting
   highlightSpans?: HighlightSpan[][];
+  /** #231: transient vim-goggles flash spans (TTL-cleared, merged at render). */
+  flashSpans?: HighlightSpan[][];
   searchMatches?: Range[];
   currentMajorMode?: string;
   activeMinorModes?: string[];

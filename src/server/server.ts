@@ -939,6 +939,8 @@ export class TmaxServer {
 		      whichKeyPrefix: shared.whichKeyPrefix,
 		      whichKeyBindings: shared.whichKeyBindings,
 		      whichKeyPopup: shared.whichKeyPopup,
+			      // #231: flash spans ride frame render-state too.
+			      flashSpans: shared.flashSpans,
 	    };
 	  }
 

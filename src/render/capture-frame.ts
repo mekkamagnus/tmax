@@ -38,7 +38,7 @@ export function captureFrame(state: EditorState, width: number, height: number):
     const r = state.currentBuffer?.getLine(ln);
     return r && Either.isRight(r) ? r.right : "";
   };
-  const spans = state.currentBuffer
+  const syntaxSpans = state.currentBuffer
     ? computeHighlightSpans(
         getLine,
         vt,
@@ -48,6 +48,19 @@ export function captureFrame(state: EditorState, width: number, height: number):
         makeWikiLinkResolver(state.currentBuffer, state.currentFilename),
       )
     : undefined;
+  // #231: merge the transient goggles flash on top of the syntax spans so
+  // every capture-frame consumer (Steep embedded, capture RPC) shows it.
+  // Merges to max(syntax, flash) length — truncating to the flash's length
+  // would drop syntax spans below the flash region for its TTL (gate retry 3).
+  const spans = state.flashSpans
+    ? (() => {
+        const b = syntaxSpans ?? [];
+        const len = Math.max(b.length, state.flashSpans!.length);
+        const out: (typeof syntaxSpans) = [];
+        for (let i = 0; i < len; i++) out.push([...(b[i] ?? []), ...(state.flashSpans![i] ?? [])]);
+        return out;
+      })()
+    : syntaxSpans;
 
   const screen: string[] = [];
 

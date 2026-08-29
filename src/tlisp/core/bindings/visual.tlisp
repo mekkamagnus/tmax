@@ -52,17 +52,18 @@
 (key-bind "v" "(visual-exit)" "visual")
 (key-bind "V" "(visual-exit)" "visual")
 
-;; Additional operators (#146)
-(key-bind "x" "(visual-delete)" "visual")
+;; Additional operators (#146) — #231: d/x flash the cut site, y flashes
+;; what was copied (vim-goggles).
+(key-bind "x" "(vim-visual-delete-flash)" "visual")
 
 ;; Exit visual mode (Escape)
 (key-bind "Escape" "(visual-exit)" "visual")
 
-;; Delete selected text (d)
-(key-bind "d" "(visual-delete)" "visual")
+;; Delete selected text (d) — #231: flashes the cut site.
+(key-bind "d" "(vim-visual-delete-flash)" "visual")
 
-;; Yank (copy) selected text (y)
-(key-bind "y" "(visual-yank)" "visual")
+;; Yank (copy) selected text (y) — #231: flashes what was copied.
+(key-bind "y" "(vim-visual-yank-flash)" "visual")
 
 ;; Lowercase selected text (u) — SPEC-044 Phase 5.C T-Lisp implementation
 (key-bind "u" "(vim-visual-lowercase)" "visual")

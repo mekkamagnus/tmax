@@ -121,6 +121,11 @@ export function editorStateToJson(
     statusMessage: state.statusMessage,
     viewportTop: state.viewportTop,
     viewportLeft: state.viewportLeft,
+    // #231: transient goggles flash spans — the TUI client merges these into
+    // its render and re-renders when flash presence changes (200 ms poll).
+    flashSpans: state.flashSpans
+      ? state.flashSpans.map((line) => line.map((s) => ({ start: s.start, end: s.end, style: s.style })))
+      : undefined,
     config: state.config,
     commandLine: state.commandLine,
     mxCommand: state.mxCommand,
@@ -262,6 +267,9 @@ export function jsonToEditorState(json: SerializedEditorState | Record<string, u
     whichKeyPrefix: (record.whichKeyPrefix as string | undefined) ?? "",
     whichKeyBindings: (record.whichKeyBindings as EditorState["whichKeyBindings"]) ?? [],
     whichKeyPopup: (record.whichKeyPopup as EditorState["whichKeyPopup"]) ?? null,
+    // #231: transient goggles flash spans must survive the round-trip or the
+    // TUI client's render merge + poll edge-check are dead code (verify-gate B).
+    flashSpans: (record.flashSpans as EditorState["flashSpans"]) ?? undefined,
   };
 }
 

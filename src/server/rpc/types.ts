@@ -198,6 +198,8 @@ export interface SerializedEditorState {
   statusMessage: string;
   viewportTop: number;
   viewportLeft?: number;
+  /** #231: transient goggles flash spans (TTL-cleared client-side rendering). */
+  flashSpans?: EditorState["flashSpans"];
   config: EditorConfig;
   commandLine: string;
   mxCommand: string;

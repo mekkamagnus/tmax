@@ -69,6 +69,7 @@ export type Msg =
   | { readonly type: "SetCurrentTabIndex"; readonly index: number }
   // Syntax / search / folds
   | { readonly type: "SetHighlightSpans"; readonly spans: readonly HighlightSpan[][] | undefined }
+  | { readonly type: "SetFlashSpans"; readonly spans: readonly HighlightSpan[][] | undefined }
   | { readonly type: "SetSearchMatches"; readonly matches: readonly Range[] | undefined }
   | { readonly type: "SetFoldRanges"; readonly ranges: Map<number, number> }
   // Help system

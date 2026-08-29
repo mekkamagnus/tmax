@@ -49,6 +49,25 @@ function getDims() {
   };
 }
 
+/** #231: merge the transient goggles flash spans on top of the base spans.
+ * Extracted (BUG-24 renderSteepFrame precedent) so the client's flash merge
+ * is directly testable — the render() caller is module-private.
+ * Merges out to max(base, flash) length — a flash.map(...) truncation would
+ * drop syntax spans on every line below the flash for its TTL (gate retry 3). */
+export function mergeFlashSpans(
+  base: HighlightSpan[][] | undefined,
+  flash: HighlightSpan[][] | undefined,
+): HighlightSpan[][] | undefined {
+  if (!flash) return base;
+  const b = base ?? [];
+  const len = Math.max(b.length, flash.length);
+  const out: HighlightSpan[][] = [];
+  for (let i = 0; i < len; i++) {
+    out.push([...(b[i] ?? []), ...(flash[i] ?? [])]);
+  }
+  return out;
+}
+
 function render(state: EditorState) {
   const { width, height } = getDims();
 
@@ -99,6 +118,8 @@ function render(state: EditorState) {
         : []);
     }
   }
+  // #231: merge the transient goggles flash spans (from render-state) on top.
+  spans = mergeFlashSpans(spans, state.flashSpans);
   const lines = renderBufferLines(state, width, bufferHeight, spans);
 
   clearScreen();
@@ -237,7 +258,12 @@ Requires a running tmax daemon. Start one with:
         current.viewportTop !== lastState.viewportTop ||
         current.statusMessage !== lastState.statusMessage ||
         current.cursorPosition.line !== lastState.cursorPosition.line ||
-        current.cursorPosition.column !== lastState.cursorPosition.column;
+        current.cursorPosition.column !== lastState.cursorPosition.column ||
+        // #231: flash onset, clear, AND supersede must re-render — a
+        // value-shape compare, not presence (two yy within one poll window
+        // otherwise drops the second flash; verify-gate retry 2). Flash
+        // arrays are tiny, so JSON compare is cheap.
+        JSON.stringify(current.flashSpans) !== JSON.stringify(lastState.flashSpans);
       if (changed) {
         lastPollRevision = rev;
         lastState = current;

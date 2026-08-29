@@ -194,7 +194,16 @@ y3aw compose per vim semantics."
                     operator
                     (nth 0 region) (nth 1 region) (nth 2 region) (nth 3 region) (nth 4 region))
                   (if (string= operator "y") nil (undo-commit combo))
-                  (if (string= operator "y") nil (vim-record-change combo count))))
+                  (if (string= operator "y") nil (vim-record-change combo count))
+                  ;; #231: goggles flash — the text-object region is exact here
+                  ;; (its end column is EXCLUSIVE; flash-region adds 1 back).
+                  ;; Yank flashes what was copied, delete/change flashes the cut
+                  ;; site. INSIDE the null-region guard (verify-gate C).
+                  (if (string= operator "y")
+                      (flash-region (nth 0 region) (nth 1 region)
+                                    (nth 2 region) (- (nth 3 region) 1))
+                      (flash-region (nth 0 region) (nth 1 region)
+                                    (nth 0 region) (+ (nth 1 region) 1)))))
               (vim-maybe-apply-register)
               t)))))))
 
@@ -460,7 +469,8 @@ can report \"Unsupported operator\"."
   (let ((operator vim-pending-operator))
     (let ((count (vim-operator-total-count)))
       (let ((combo (concat operator motion)))
-        (progn
+        (let ((applied t))
+          (progn
           (vim-reset-operator)
           (vim-count-reset)
           (if (string= operator "y") nil (undo-begin))
@@ -482,11 +492,27 @@ can report \"Unsupported operator\"."
             (t
               (if (vim-operator-apply-motion operator motion count)
                 nil
-                (editor-set-status (concat "Unsupported operator: " combo)))))
+                (progn
+                  (set! applied nil)
+                  (editor-set-status (concat "Unsupported operator: " combo))))))
           (if (string= operator "y") nil (undo-commit combo))
           (if (string= operator "y") nil (vim-record-change combo count))
           (vim-maybe-apply-register)
-          t)))))
+          ;; #231: goggles flash — yank flashes the yanked extent (the register
+          ;; content from the cursor, which sits at the region start); delete
+          ;; and change flash the cut site (cursor lands at the cut). Only on
+          ;; APPLIED operators — a failed combo must not flash a phantom
+          ;; mutation (verify-gate retry 2).
+          (if applied
+              (if (string= operator "y")
+                  (let ((reg (get-register "\"")))
+                    (if (> (length reg) 0)
+                        (flash-region (cursor-line) (cursor-column)
+                                      (cursor-line) (+ (cursor-column)
+                                                       (- (length (nth 0 (string-split reg "\n"))) 1)))))
+                  (flash-region (cursor-line) (cursor-column)
+                                (cursor-line) (+ (cursor-column) 1))))
+          t))))))
 
 (defun vim-dispatch-operator-key (key)
   "Dispatch KEY while an operator is pending."
