@@ -7,6 +7,8 @@
 
 import { RemoteEditor } from "../editor/remote-editor.ts";
 import { renderBufferLines, getVisibleViewportTop, getCursorScreenOffset } from "../frontend/render/buffer-lines.ts";
+import { mergeFlashSpans } from "../render/flash-merge.ts";
+export { mergeFlashSpans };
 import { renderStatusLine } from "../frontend/render/status-line.ts";
 import { renderCommandInput } from "../frontend/render/command-input.ts";
 import { tokenizeTerminalInput } from "../frontend/render/input.ts";
@@ -47,25 +49,6 @@ function getDims() {
     width: process.stdout.columns || 80,
     height: process.stdout.rows || 24,
   };
-}
-
-/** #231: merge the transient goggles flash spans on top of the base spans.
- * Extracted (BUG-24 renderSteepFrame precedent) so the client's flash merge
- * is directly testable — the render() caller is module-private.
- * Merges out to max(base, flash) length — a flash.map(...) truncation would
- * drop syntax spans on every line below the flash for its TTL (gate retry 3). */
-export function mergeFlashSpans(
-  base: HighlightSpan[][] | undefined,
-  flash: HighlightSpan[][] | undefined,
-): HighlightSpan[][] | undefined {
-  if (!flash) return base;
-  const b = base ?? [];
-  const len = Math.max(b.length, flash.length);
-  const out: HighlightSpan[][] = [];
-  for (let i = 0; i < len; i++) {
-    out.push([...(b[i] ?? []), ...(flash[i] ?? [])]);
-  }
-  return out;
 }
 
 function render(state: EditorState) {

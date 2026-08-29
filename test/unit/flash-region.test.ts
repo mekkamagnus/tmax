@@ -218,3 +218,16 @@ describe("SPEC-231: operator hooks", () => {
     expect(spans).toBeDefined();
   });
 });
+describe("SPEC-231: count-paste flash", () => {
+  test("3p flashes exactly three copies of the register", async () => {
+    const editor = await createStartedEditor("ab--");
+    executeTlisp(editor, `(cursor-move 0 0)`);
+    await press(editor, "yiw");            // "ab"
+    executeTlisp(editor, `(cursor-move 0 2)`);
+    executeTlisp(editor, `(vim-paste-after 3)`); // inserts at col 3
+    const spans = flashOf(editor) as { start: number; end: number }[][];
+    expect(spans).toBeDefined();
+    const s = spans[0]![0]!;
+    expect(s.end - s.start).toBe(6);       // 3 copies of "ab"
+  });
+});

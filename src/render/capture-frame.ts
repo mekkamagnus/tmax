@@ -11,6 +11,7 @@ import { renderCommandInput } from "../frontend/render/command-input.ts";
 import { renderTabBarAnsi } from "../frontend/render/tab-bar.ts";
 import { renderMinibuffer } from "../frontend/render/minibuffer.ts";
 import { renderWhichKeyOverlay } from "../frontend/render/which-key-overlay.ts";
+import { mergeFlashSpans } from "./flash-merge.ts";
 import { computeHighlightSpans } from "../syntax/highlight-buffer.ts";
 import { makeWikiLinkResolver } from "../syntax/wiki-link-faces.ts";
 import { Either } from "../utils/task-either.ts";
@@ -50,17 +51,7 @@ export function captureFrame(state: EditorState, width: number, height: number):
     : undefined;
   // #231: merge the transient goggles flash on top of the syntax spans so
   // every capture-frame consumer (Steep embedded, capture RPC) shows it.
-  // Merges to max(syntax, flash) length — truncating to the flash's length
-  // would drop syntax spans below the flash region for its TTL (gate retry 3).
-  const spans = state.flashSpans
-    ? (() => {
-        const b = syntaxSpans ?? [];
-        const len = Math.max(b.length, state.flashSpans!.length);
-        const out: (typeof syntaxSpans) = [];
-        for (let i = 0; i < len; i++) out.push([...(b[i] ?? []), ...(state.flashSpans![i] ?? [])]);
-        return out;
-      })()
-    : syntaxSpans;
+  const spans = mergeFlashSpans(syntaxSpans, state.flashSpans);
 
   const screen: string[] = [];
 

@@ -63,3 +63,10 @@ Acknowledged deviations (documented, accepted):
 - **TUI merge untested**: the client's span merge is extracted as `mergeFlashSpans` (BUG-24 renderSteepFrame precedent) and directly tested — the "both render paths" criterion letter now holds (capture-frame test + client merge test).
 - The TTL-clear hook test now drives the real yank path (`yiw`), not the paste helper.
 - Still not actionable: no Codex review artifact exists for #231 (none was run).
+
+## Verify-gate audit (retry 3)
+
+- **Merge truncation** (the round-2 verdict's core finding): both merges built `flash.map(...)`, dropping syntax spans on every line below the flash for its TTL — fixed by merging to max(base, flash) length, and the merge now lives in ONE shared helper (`src/render/flash-merge.ts`) imported by both capture-frame and the TUI client, with the truncation test locking it.
+- **Count-paste flash width**: `vim-flash-pasted` now takes COUNT (3p flashes 3 copies); test asserts the exact 3-copy width. Known cosmetic edge: the paste primitive dedups when the suffix already equals the register (yank-ops.ts:398 inserts count-1 copies), so such pastes over-flash by one copy for 300 ms — documented here, accepted.
+- **yy flash** has a direct test (tail-applied operator path).
+- server.ts indentation aligned with siblings.
