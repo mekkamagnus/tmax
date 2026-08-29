@@ -315,6 +315,55 @@ export function createVisualOps(
       ? visualSelection.end
       : visualSelection.start;
 
+    // #230: line mode — operate on WHOLE LINES (Vim: V d/y/p move complete
+    // lines including newlines). The span-based path below left an empty line
+    // behind and produced registers without the trailing newline, so a
+    // linewise paste fell back to charwise.
+    if (visualSelection.mode === 'line') {
+      const topLine = Math.min(visualSelection.start.line, visualSelection.end.line);
+      const bottomLine = Math.max(visualSelection.start.line, visualSelection.end.line);
+      const countRes = buffer.getLineCount();
+      const lineCount = Either.isRight(countRes) ? countRes.right : bottomLine + 1;
+      const lines: string[] = [];
+      for (let L = topLine; L <= bottomLine; L++) {
+        const lineRes = buffer.getLine(L);
+        if (Either.isLeft(lineRes)) { lines.push(""); continue; }
+        lines.push(lineRes.right);
+      }
+      const yanked = lines.join('\n') + '\n';
+      session.deleteRegister.set(yanked);
+      session.registers.del(yanked, true);
+      // Remove the lines entirely: through the newline AFTER the block when a
+      // following line exists, otherwise through the newline BEFORE it (tail
+      // deletions keep the buffer's final line).
+      let deleteResult;
+      if (bottomLine + 1 < lineCount) {
+        deleteResult = buffer.delete({ start: { line: topLine, column: 0 }, end: { line: bottomLine + 1, column: 0 } });
+      } else if (topLine > 0) {
+        const prevRes = buffer.getLine(topLine - 1);
+        const prevLen = Either.isRight(prevRes) ? prevRes.right.length : 0;
+        const lastRes = buffer.getLine(bottomLine);
+        const lastLen = Either.isRight(lastRes) ? lastRes.right.length : 0;
+        deleteResult = buffer.delete({ start: { line: topLine - 1, column: prevLen }, end: { line: bottomLine, column: lastLen } });
+      } else {
+        const lastRes = buffer.getLine(bottomLine);
+        const lastLen = Either.isRight(lastRes) ? lastRes.right.length : 0;
+        deleteResult = buffer.delete({ start: { line: 0, column: 0 }, end: { line: bottomLine, column: lastLen } });
+      }
+      if (Either.isLeft(deleteResult)) {
+        return Either.left({ type: 'BufferError' as const, variant: 'InvalidOperation' as const, message: deleteResult.left });
+      }
+      setBuffer(deleteResult.right);
+      const newCountRes = deleteResult.right.getLineCount();
+      const newCount = Either.isRight(newCountRes) ? newCountRes.right : 1;
+      setCursorLine(Math.min(topLine, Math.max(0, newCount - 1)));
+      setCursorColumn(0);
+      visualSelection = null;
+      setMode("normal");
+      setStatusMessage("");
+      return Either.right(createNil());
+    }
+
     // #145: block mode — operate on the RECTANGLE (per-line column slice), not a
     // contiguous span. Lines [topLine, bottomLine] × cols [leftCol, rightCol]
     // (inclusive, vim semantics). Each line's slice is deleted independently, so
@@ -354,9 +403,10 @@ export function createVisualOps(
       return Either.left({ type: 'BufferError' as const, variant: 'InvalidOperation' as const, message: selectedText.left });
     }
 
-    // Store in delete register
+    // Store in delete register (charwise fall-through — the line and block
+    // branches above returned already, so never a linewise register here).
     session.deleteRegister.set(selectedText.right);
-    session.registers.del(selectedText.right, visualSelection.mode === 'line');
+    session.registers.del(selectedText.right, false);
 
     // Delete the selected text
     const deleteResult = buffer.delete({ start, end });
@@ -413,6 +463,26 @@ export function createVisualOps(
        visualSelection.start.column <= visualSelection.end.column)
       ? visualSelection.end
       : visualSelection.start;
+
+    // #230: line mode — yank WHOLE LINES with the trailing newline so a
+    // linewise paste (the primitives' \n detection) pastes as lines.
+    if (visualSelection.mode === 'line') {
+      const topLine = Math.min(visualSelection.start.line, visualSelection.end.line);
+      const bottomLine = Math.max(visualSelection.start.line, visualSelection.end.line);
+      const lines: string[] = [];
+      for (let L = topLine; L <= bottomLine; L++) {
+        const lineRes = buffer.getLine(L);
+        if (Either.isLeft(lineRes)) { lines.push(""); continue; }
+        lines.push(lineRes.right);
+      }
+      const yanked = lines.join('\n') + '\n';
+      session.yankRegister.set(yanked);
+      session.registers.set('"', yanked);
+      visualSelection = null;
+      setMode("normal");
+      setStatusMessage("");
+      return Either.right(createNil());
+    }
 
     // #145: block mode — yank the RECTANGLE (per-line column slice), joined with
     // newlines. No buffer mutation. See visual-delete for the rectangle math.

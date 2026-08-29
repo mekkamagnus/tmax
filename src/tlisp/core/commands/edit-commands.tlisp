@@ -1,5 +1,5 @@
 (defmodule editor/commands/edit-commands
-  (export vim-delete-char vim-change-char vim-delete-to-line-end vim-change-to-line-end vim-yank-to-line-end vim-paste-after vim-paste-before vim-join-lines visual-change visual-swap-anchor vim-change-number vim-increment-number vim-decrement-number)
+  (export vim-delete-char vim-change-char vim-delete-to-line-end vim-change-to-line-end vim-yank-to-line-end vim-paste-after vim-paste-before vim-join-lines visual-change visual-swap-anchor vim-change-number vim-increment-number vim-decrement-number vim-visual-paste vim-visual-paste-block)
 
 ;; edit-commands.tlisp -- Single-key Vim edit commands composed in T-Lisp
 
@@ -118,6 +118,100 @@ register-prefix swap-and-restore logic."
     (undo-commit "visual-change")
     (editor-set-mode "insert")
     t))
+
+(defun vim-visual-paste-block (top left source)
+  "Re-insert SOURCE as a block at TOP/LEFT, one segment per line (#230).
+Short lines pad with spaces to the block column; segments past the buffer
+end append as new lines (inserted at the END of the last line so no
+out-of-bounds position ever aborts the paste mid-way). Leaves the cursor
+at the block's top-left — the caller moves it there (buffer-insert-at-
+position moves the cursor on every insert)."
+  (let ((segs (string-split source "\n"))
+        (i 0))
+    (while (< i (length segs))
+      (let ((ln (+ top i)))
+        (if (< ln (buffer-line-count))
+            (let* ((line-len (length (buffer-get-line ln)))
+                   (col (if (< left line-len) left line-len))
+                   (pad (- left col)))
+              (buffer-insert-at-position ln col
+                (if (> pad 0)
+                    (concat (make-string pad 32) (nth i segs))
+                    (nth i segs))))
+            (let* ((last (- (buffer-line-count) 1))
+                   (last-len (length (buffer-get-line last))))
+              (buffer-insert-at-position last last-len
+                (concat "\n" (make-string left 32) (nth i segs))))))
+      (set! i (+ i 1)))))
+
+(defun vim-visual-paste ()
+  "Vim visual p/P (#230): replace the visual selection with the unnamed
+register (or a pending \"x register prefix; +/* read the OS clipboard).
+Vim swap — visual-delete leaves the replaced selection in the unnamed
+register. Exits to normal mode; cursor on the last pasted character
+(charwise), first non-blank of the first pasted line (linewise), or the
+block's top-left (blockwise). P === p in visual mode."
+  (let ((sel (visual-get-selection)))
+    (if (null sel)
+        (progn (editor-set-status "No visual selection") t)
+        ;; Normalize bounds the way visual-delete does (it does not move the cursor).
+        (let* ((sl (nth 0 sel))
+               (sc (nth 1 sel))
+               (el (nth 2 sel))
+               (ec (nth 3 sel))
+               (fwd (or (< sl el) (and (= sl el) (<= sc ec))))
+               (start-line (if fwd sl el))
+               (start-col (if fwd sc ec))
+               ;; Block rectangles use the true left/top edges regardless of
+               ;; which corner the anchor is (verify-gate: forward-normalized
+               ;; cols paste at the wrong column for reversed selections).
+               (block-top (if (< sl el) sl el))
+               (block-left (if (< sc ec) sc ec))
+               (mode (nth 4 sel))
+               (reg (vim-consume-pending-register))
+               (source (if reg
+                           (if (or (string= reg "+") (string= reg "*"))
+                               (clipboard-get)
+                               (get-register reg))
+                           (get-register "\""))))
+          (if (string= source "")
+              (progn (editor-set-status "Nothing to paste") t)
+              (progn
+                (undo-begin)
+                ;; Removes the selection, sets " to the removed text (the
+                ;; swap), exits to normal mode.
+                (visual-delete)
+                (let ((swapped (get-register "\"")))
+                  (set-register "\"" source)
+                  (if (string= mode "block")
+                      (progn
+                        (vim-visual-paste-block block-top block-left source)
+                        ;; The per-segment inserts move the cursor; pin it to
+                        ;; the block's top-left (verify-gate: docstring claim).
+                        (cursor-move block-top block-left))
+                      (if (string= mode "line")
+                          (progn
+                            (cursor-move start-line 0)
+                            ;; Deletion through EOF: the remaining last line is
+                            ;; above the paste point — lines go below it.
+                            (if (>= start-line (buffer-line-count))
+                                (paste-after 1)
+                                (paste-before 1))
+                            (line-first-non-blank))
+                          (progn
+                            (cursor-move start-line start-col)
+                            (paste-before 1)
+                            ;; Cursor to the LAST pasted character (single-line
+                            ;; registers; multi-line ones follow the primitives'
+                            ;; existing \n-implies-linewise behavior).
+                            (if (string-match "\n" source)
+                                nil
+                                (cursor-move (cursor-line)
+                                             (+ (cursor-column) (- (length source) 1)))))))
+                  (set-register "\"" swapped)
+                  (undo-commit "visual-p")
+                  (vim-record-change "p" 1)
+                  t)))))))
 
 (defun visual-swap-anchor ()
   "Swap visual selection anchor and active endpoint."

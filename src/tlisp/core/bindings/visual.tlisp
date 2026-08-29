@@ -73,6 +73,10 @@
 ;; Change selected text (c)
 (key-bind "c" "(visual-change)" "visual")
 
+;; Paste over selection (#230) — p and P are equivalent in visual mode (Vim).
+(key-bind "p" "(vim-visual-paste)" "visual")
+(key-bind "P" "(vim-visual-paste)" "visual")
+
 ;; Swap visual anchor (o)
 (key-bind "o" "(visual-swap-anchor)" "visual")
 
