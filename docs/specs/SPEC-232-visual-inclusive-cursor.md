@@ -28,3 +28,7 @@ Visual charwise selections use Vim's INCLUSIVE convention: the cursor rests ON t
 ## Out of scope
 
 Linewise/blockwise cursor conventions, `o` swap-anchor interactions beyond consistency, and operator-pending (`di"`) paths (already correct).
+
+## Verify-gate audit (2026-08-31, retry 1 = PASS)
+
+Round 1 caught: the case-transform primitives (`visual-lowercase`/`visual-uppercase`) half-patched — read inclusive, replaced exclusive — an M-x-reachable delete-5-insert-6 corruption the green battery missed (the `u`/`U` keys bypass them); the load-bearing zero-width guard unpinned; a stale end-exclusive docstring on the flash wrapper; no backwards charwise d/y test. All fixed and pinned in round 2. One intended behavior pinned explicitly: `vi"` on empty `""` anchors in place and consumes one char.
