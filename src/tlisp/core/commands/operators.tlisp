@@ -245,8 +245,13 @@ region end. Unsupported classes clear the pending state and report a status."
           (progn
             (cursor-move (nth 0 region) (nth 1 region))
             (visual-enter-char-mode)
-            (cursor-move (nth 2 region) (nth 3 region))
-            (visual-update-end)))))))
+            ;; #232: regions are end-EXCLUSIVE; visual selections are
+            ;; INCLUSIVE of the cursor. Anchor on the LAST inner char (never
+            ;; past the start on zero-width regions, e.g. empty "").
+            (let ((endc (- (nth 3 region) 1)))
+              (if (< endc (nth 1 region)) (set! endc (nth 1 region)))
+              (cursor-move (nth 2 region) endc)
+              (visual-update-end))))))))
 
 (defun vim-dispatch-text-object (class-char)
   "Consume CLASS-CHAR as the text-object class for a stashed operator.

@@ -398,7 +398,9 @@ export function createVisualOps(
     }
 
     // Get selected text and store in delete register
-    const selectedText = buffer.getText({ start, end });
+    // #232: charwise visual selections are INCLUSIVE of the cursor — operate
+    // one past the anchored end (buffer layer is end-exclusive).
+    const selectedText = buffer.getText({ start, end: { line: end.line, column: end.column + 1 } });
     if (Either.isLeft(selectedText)) {
       return Either.left({ type: 'BufferError' as const, variant: 'InvalidOperation' as const, message: selectedText.left });
     }
@@ -409,7 +411,7 @@ export function createVisualOps(
     session.registers.del(selectedText.right, false);
 
     // Delete the selected text
-    const deleteResult = buffer.delete({ start, end });
+    const deleteResult = buffer.delete({ start, end: { line: end.line, column: end.column + 1 } });
     if (Either.isLeft(deleteResult)) {
       return Either.left({ type: 'BufferError' as const, variant: 'InvalidOperation' as const, message: deleteResult.left });
     }
@@ -510,7 +512,9 @@ export function createVisualOps(
     }
 
     // Get selected text and store in yank register
-    const selectedText = buffer.getText({ start, end });
+    // #232: charwise visual selections are INCLUSIVE of the cursor — operate
+    // one past the anchored end (buffer layer is end-exclusive).
+    const selectedText = buffer.getText({ start, end: { line: end.line, column: end.column + 1 } });
     if (Either.isLeft(selectedText)) {
       return Either.left({ type: 'BufferError' as const, variant: 'InvalidOperation' as const, message: selectedText.left });
     }
@@ -571,7 +575,9 @@ export function createVisualOps(
       : visualSelection.start;
 
     // Get selected text
-    const selectedText = buffer.getText({ start, end });
+    // #232: charwise visual selections are INCLUSIVE of the cursor — operate
+    // one past the anchored end (buffer layer is end-exclusive).
+    const selectedText = buffer.getText({ start, end: { line: end.line, column: end.column + 1 } });
     if (Either.isLeft(selectedText)) {
       return Either.left({ type: 'BufferError' as const, variant: 'InvalidOperation' as const, message: selectedText.left });
     }
@@ -634,7 +640,9 @@ export function createVisualOps(
       : visualSelection.start;
 
     // Get selected text
-    const selectedText = buffer.getText({ start, end });
+    // #232: charwise visual selections are INCLUSIVE of the cursor — operate
+    // one past the anchored end (buffer layer is end-exclusive).
+    const selectedText = buffer.getText({ start, end: { line: end.line, column: end.column + 1 } });
     if (Either.isLeft(selectedText)) {
       return Either.left({ type: 'BufferError' as const, variant: 'InvalidOperation' as const, message: selectedText.left });
     }

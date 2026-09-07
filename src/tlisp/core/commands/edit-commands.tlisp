@@ -253,7 +253,8 @@ end column is one-past (end-exclusive); flash-region adds 1 back."
   (let ((sel (visual-get-selection)))
     (visual-yank)
     (if sel
-        (flash-region (nth 0 sel) (nth 1 sel) (nth 2 sel) (- (nth 3 sel) 1)))
+        ;; #232: selection end is INCLUSIVE — flash it exactly.
+        (flash-region (nth 0 sel) (nth 1 sel) (nth 2 sel) (nth 3 sel)))
     t))
 
 (defun vim-visual-delete-flash ()

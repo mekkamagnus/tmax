@@ -354,3 +354,32 @@ describe("Visual Mode Selection - US-1.7.1", () => {
     });
   });
 });
+
+// #232 — inclusive visual cursor (vim parity).
+describe("SPEC-232: inclusive visual cursor", () => {
+  test("vi\" leaves the cursor on the last inner character, never on the quote", async () => {
+    const { Editor } = await import("../../src/editor/editor.ts");
+    const { createStartedEditor, executeTlisp } = await import("../helpers/editor-fixture.ts");
+    const editor = await createStartedEditor('say "hello" there');
+    executeTlisp(editor, `(cursor-move 0 5)`);
+    for (const k of ["v", "i", '"']) await editor.handleKey(k);
+    expect(executeTlisp(editor, `(cursor-column)`).value).toBe(9); // 'o'
+    expect(executeTlisp(editor, `(buffer-get-line 0)`).value).toBe('say "hello" there');
+  });
+
+  test("v l l selects 3 chars inclusively (vim count) and d deletes exactly them", async () => {
+    const { Editor } = await import("../../src/editor/editor.ts");
+    const { createStartedEditor, bufferText, executeTlisp } = await import("../helpers/editor-fixture.ts");
+    const editor = await createStartedEditor("abcdef");
+    executeTlisp(editor, `(cursor-move 0 0)`);
+    for (const k of ["v", "l", "l"]) await editor.handleKey(k);
+    expect(executeTlisp(editor, `(cursor-column)`).value).toBe(2); // on 'c'
+    await editor.handleKey("y");
+    expect(executeTlisp(editor, `(get-register "\\\"")`).value).toBe("abc");
+    const e2 = await createStartedEditor("abcdef");
+    executeTlisp(e2, `(cursor-move 0 0)`);
+    for (const k of ["v", "l", "l"]) await e2.handleKey(k);
+    await e2.handleKey("d");
+    expect(bufferText(e2)).toBe("def");
+  });
+});

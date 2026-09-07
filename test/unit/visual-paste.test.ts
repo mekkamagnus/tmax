@@ -77,8 +77,10 @@ describe("SPEC-230: visual paste over selection", () => {
   test("backwards selection (anchor after cursor) pastes at the selection start", async () => {
     const editor = await createStartedEditor('say "hello world" out loud');
     setRegister(editor, "XY");
-    // Enter visual at the far end, extend BACK to col 5 — start normalizes to 5.
-    moveTo(editor, 0, 16);
+    // Enter visual on the LAST INNER char (col 15 — inclusive #232), extend
+    // BACK to col 5. (The old col-16 anchor sat on the closing quote under
+    // the previous end-exclusive convention.)
+    moveTo(editor, 0, 15);
     await press(editor, "v");
     moveTo(editor, 0, 5);
     await press(editor, "p");
