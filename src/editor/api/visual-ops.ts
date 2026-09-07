@@ -584,7 +584,8 @@ export function createVisualOps(
 
     // Convert to lowercase and replace
     const lowercased = selectedText.right.toLowerCase();
-    const replaceResult = buffer.replace({ start, end }, lowercased);
+    // #232: inclusive selection — replace the same one-past range getText read.
+    const replaceResult = buffer.replace({ start, end: { line: end.line, column: end.column + 1 } }, lowercased);
     if (Either.isLeft(replaceResult)) {
       return Either.left({ type: 'BufferError' as const, variant: 'InvalidOperation' as const, message: replaceResult.left });
     }
@@ -649,7 +650,8 @@ export function createVisualOps(
 
     // Convert to uppercase and replace
     const uppercased = selectedText.right.toUpperCase();
-    const replaceResult = buffer.replace({ start, end }, uppercased);
+    // #232: inclusive selection — replace the same one-past range getText read.
+    const replaceResult = buffer.replace({ start, end: { line: end.line, column: end.column + 1 } }, uppercased);
     if (Either.isLeft(replaceResult)) {
       return Either.left({ type: 'BufferError' as const, variant: 'InvalidOperation' as const, message: replaceResult.left });
     }

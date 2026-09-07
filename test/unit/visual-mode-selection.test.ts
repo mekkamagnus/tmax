@@ -383,3 +383,53 @@ describe("SPEC-232: inclusive visual cursor", () => {
     expect(bufferText(e2)).toBe("def");
   });
 });
+
+// #232 verify-gate round 2: pin the load-bearing guard + backwards charwise ops
+// + the half-patched visual-lowercase/uppercase primitives.
+describe("SPEC-232: gate round 2 pins", () => {
+  const setup = async () => {
+    const { createStartedEditor, executeTlisp } = await import("../helpers/editor-fixture.ts");
+    return { editor: await createStartedEditor('say "" there'), executeTlisp };
+  };
+
+  test("vi\" on an empty quoted string anchors in place (guard) and d deletes exactly one char, not both quotes", async () => {
+    const { editor, executeTlisp } = await setup();
+    executeTlisp(editor, `(cursor-move 0 5)`);
+    for (const k of ["v", "i", '"']) await editor.handleKey(k);
+    expect(executeTlisp(editor, `(cursor-column)`).value).toBe(5);
+    await editor.handleKey("d");
+    // Zero-width selection consumes one char under the inclusive convention —
+    // never the anchored-backwards both-quotes corruption the guard prevents.
+    expect(executeTlisp(editor, `(buffer-get-line 0)`).value).toBe('say " there');
+  });
+
+  test("backwards charwise d and y operate on exactly the selected chars", async () => {
+    const { createStartedEditor, executeTlisp, bufferText } = await import("../helpers/editor-fixture.ts");
+    const e1 = await createStartedEditor("abcdefgh");
+    executeTlisp(e1, `(cursor-move 0 4)`); // on 'e'
+    await e1.handleKey("v");
+    executeTlisp(e1, `(cursor-move 0 1)`); // extend BACK to 'b'
+    await e1.handleKey("y");
+    expect(executeTlisp(e1, `(get-register "\\\"")`).value).toBe("bcde");
+    const e2 = await createStartedEditor("abcdefgh");
+    executeTlisp(e2, `(cursor-move 0 4)`);
+    await e2.handleKey("v");
+    executeTlisp(e2, `(cursor-move 0 1)`);
+    await e2.handleKey("d");
+    expect(bufferText(e2)).toBe("afgh");
+  });
+
+  test("visual-lowercase/visual-uppercase primitives replace the full inclusive selection", async () => {
+    const { createStartedEditor, executeTlisp } = await import("../helpers/editor-fixture.ts");
+    const e = await createStartedEditor("HELLO world");
+    executeTlisp(e, `(cursor-move 0 0)`);
+    for (const k of ["v", "l", "l", "l", "l"]) await e.handleKey(k); // select HELLO
+    executeTlisp(e, `(visual-lowercase)`);
+    expect(executeTlisp(e, `(buffer-get-line 0)`).value).toBe("hello world"); // no double-space corruption
+    const e2 = await createStartedEditor("hello world");
+    executeTlisp(e2, `(cursor-move 0 0)`);
+    for (const k of ["v", "l", "l", "l", "l"]) await e2.handleKey(k);
+    executeTlisp(e2, `(visual-uppercase)`);
+    expect(executeTlisp(e2, `(buffer-get-line 0)`).value).toBe("HELLO world");
+  });
+});
