@@ -6,7 +6,7 @@
 import type { TLispInterpreter, TLispEnvironment, TLispValue, TLispFunctionImpl, TLispFunctionImplAsync, EvalError } from "./types.ts";
 import { createEvalContext } from "./async.ts";
 import type { EvalError as EvalErrorType } from "../error/types.ts";
-import { TLispParser } from "./parser.ts";
+import { TLispParser, type ParsedForm, type ParseError } from "./parser.ts";
 import { TLispEvaluator, createEvaluatorWithBuiltins, FunctionReturn } from "./evaluator.ts";
 import { createFunction, createNil } from "./values.ts";
 import { Either } from "../utils/task-either.ts";
@@ -14,6 +14,14 @@ import { ModuleRegistry } from "./module-registry.ts";
 import type { CoverageState } from "./coverage-state.ts";
 import { diagnosticToJSON } from "./diagnostics.ts";
 import { renderDiagnostic } from "./diagnostic-renderer.ts";
+
+/**
+ * #234 (SPEC-234): parse is a fixed ~4–9µs of every execute() dispatch, and
+ * command dispatch (keybinding bodies, M-x expressions) re-executes the same
+ * strings on every key press. Successful parses are cached per interpreter,
+ * LRU-bounded so unbounded user evals can't grow it.
+ */
+const PARSE_CACHE_MAX = 256;
 
 /**
  * T-Lisp interpreter implementation
@@ -25,6 +33,7 @@ export class TLispInterpreterImpl implements TLispInterpreter {
   public moduleRegistry: ModuleRegistry;
   private parser: TLispParser;
   private evaluator: TLispEvaluator;
+  private parseCache = new Map<string, ParsedForm[]>();
 
   /**
    * Create a new T-Lisp interpreter
@@ -141,6 +150,51 @@ export class TLispInterpreterImpl implements TLispInterpreter {
   }
 
   /**
+   * parseProgram with the parse cache (#234 / SPEC-234). Keyed by
+   * sourceName + source so identical dispatch strings skip re-parsing.
+   * Cache safety: only the UNEXPANDED parse is cached (macro expansion
+   * happens at eval, so macro redefinitions take effect on the next
+   * dispatch), and sharing parsed AST nodes is safe because nothing in
+   * T-Lisp mutates parsed values in place (evaluator builds fresh values;
+   * no rplaca/vector-set-style primitives exist). Syntax errors and empty
+   * programs are never cached.
+   */
+  private parseProgramCached(source: string, sourceName?: string): Either<ParseError, ParsedForm[]> {
+    const key = (sourceName ?? "") + "\0" + source;
+    const hit = this.parseCache.get(key);
+    if (hit !== undefined) {
+      // LRU refresh: re-insert so Map insertion order tracks recency.
+      this.parseCache.delete(key);
+      this.parseCache.set(key, hit);
+      return Either.right(hit);
+    }
+    const result = this.parser.parseProgram(source, sourceName);
+    if (Either.isLeft(result) || result.right.length === 0) {
+      return result;
+    }
+    this.parseCache.set(key, result.right);
+    if (this.parseCache.size > PARSE_CACHE_MAX) {
+      const oldest = this.parseCache.keys().next().value;
+      if (oldest !== undefined) this.parseCache.delete(oldest);
+    }
+    return result;
+  }
+
+  /**
+   * Drop all cached parses. Hook for memory-pressure wiring (#243) and tests.
+   */
+  clearParseCache(): void {
+    this.parseCache.clear();
+  }
+
+  /**
+   * Number of cached parses (test/observability only).
+   */
+  parseCacheSize(): number {
+    return this.parseCache.size;
+  }
+
+  /**
    * Execute T-Lisp source code (single expression or multiple expressions)
    * @param source - Source code to execute
    * @param env - Environment for execution
@@ -148,7 +202,7 @@ export class TLispInterpreterImpl implements TLispInterpreter {
    */
   execute(source: string, env?: TLispEnvironment, sourceName?: string): Either<EvalError, TLispValue> {
     const evalEnv = env || this.globalEnv;
-    const programResult = this.parser.parseProgram(source, sourceName);
+    const programResult = this.parseProgramCached(source, sourceName);
     if (Either.isLeft(programResult)) {
       return Either.left({ type: 'EvalError', variant: 'SyntaxError', message: programResult.left.message });
     }
@@ -181,7 +235,7 @@ export class TLispInterpreterImpl implements TLispInterpreter {
 
   async executeAsync(source: string, env?: TLispEnvironment, sourceName?: string): Promise<Either<EvalError, TLispValue>> {
     const evalEnv = env || this.globalEnv;
-    const programResult = this.parser.parseProgram(source, sourceName);
+    const programResult = this.parseProgramCached(source, sourceName);
     if (Either.isLeft(programResult)) {
       return Either.left({ type: 'EvalError', variant: 'SyntaxError', message: programResult.left.message });
     }

@@ -223,6 +223,12 @@ export interface TLispInterpreter {
   /** Execute T-Lisp source code asynchronously */
   executeAsync?(source: string, env?: TLispEnvironment, sourceName?: string): Promise<Either<AppError, TLispValue>>;
 
+  /** Drop all cached parses (#234). Hook for memory-pressure wiring (#243). */
+  clearParseCache?(): void;
+
+  /** Number of cached parses (observability only, #234). */
+  parseCacheSize?(): number;
+
   /** Define a built-in function */
   defineBuiltin(name: string, fn: TLispFunctionImpl): void;
 
