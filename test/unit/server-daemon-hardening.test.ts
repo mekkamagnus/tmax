@@ -200,6 +200,23 @@ describe('Daemon hardening', () => {
     expect(existsSync(socketPath)).toBe(false);
   });
 
+  // #235 (SPEC-235): Bun 1.4 removes the .sock file on server.close(), so by
+  // the time shutdown's ownsSocket cleanup runs the file may already be gone —
+  // the manual unlink must tolerate ENOENT and the lock must still be cleaned.
+  test('shutdown tolerates a socket file already removed by close (Bun 1.4 .sock cleanup)', async () => {
+    server = new TmaxServer(socketPath, true);
+    await server.start();
+    expect(existsSync(socketPath + '.lock')).toBe(true);
+
+    // Simulate Bun 1.4's close()-cleanup having beaten us to it.
+    unlinkSync(socketPath);
+
+    await server.shutdown();
+    server = null;
+
+    expect(existsSync(socketPath + '.lock')).toBe(false);
+  });
+
   test('start resolves only after socket is listening', async () => {
     server = new TmaxServer(socketPath, true);
     await server.start();

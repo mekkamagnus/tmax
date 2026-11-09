@@ -316,8 +316,11 @@ fi
 # Handle --daemon only
 if [ "$DAEMON_ONLY" = true ]; then
   if is_running >/dev/null 2>&1; then
-    echo "Daemon already running"
-    exit 0
+    # #235 (SPEC-235): fail loudly — exit 0 here masked an occupied socket as a
+    # successful start for wrappers/scripts (the server's own acquisition path
+    # has always exited non-zero; this pre-check short-circuited it).
+    echo "Daemon already running" >&2
+    exit 1
   fi
   cd "$PROJECT_DIR" && TMAX_SOCKET="$SOCKET" exec bun "$DAEMON"
 fi
