@@ -1,4 +1,4 @@
-import { stripAnsi } from "../matcha.ts";
+import { stringWidth } from "../../frontend/render/width.ts";
 
 export function wrapAnsi(text: string, width: number, indent: number = 0): string[] {
   if (width <= 0) return [text];
@@ -12,7 +12,7 @@ export function wrapAnsi(text: string, width: number, indent: number = 0): strin
   let currentLineWidth = 0;
 
   for (const word of words) {
-    const wordWidth = visualWidth(word);
+    const wordWidth = stringWidth(word);
 
     if (currentLineWidth === 0) {
       currentLine = word;
@@ -67,8 +67,4 @@ function splitWords(text: string): string[] {
 
   if (current.length > 0) words.push(current);
   return words;
-}
-
-function visualWidth(text: string): number {
-  return stripAnsi(text).length;
 }

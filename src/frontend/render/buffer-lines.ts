@@ -12,6 +12,7 @@ import { computeLayout, renderSeparators, type WindowCell } from "./window-layou
 import { wikiDisplayActive, transformWikiLine } from "./wiki-display.ts";
 import { computeHighlightSpans } from "../../syntax/highlight-buffer.ts";
 import { makeWikiLinkResolver } from "../../syntax/wiki-link-faces.ts";
+import { charWidth, stringWidth, sliceToVisualWidth, fitToWidth, sliceFromVisualOffset, padAnsiToWidth } from "./width.ts";
 
 function getLineCount(state: EditorState): number {
   const result = state.currentBuffer?.getLineCount();
@@ -31,49 +32,6 @@ function getLine(state: EditorState, lineNumber: number): string {
 function getLineForBuffer(buffer: Window["buffer"], lineNumber: number): string {
   const result = buffer.getLine(lineNumber);
   return result && Either.isRight(result) ? result.right : "";
-}
-
-function charWidth(ch: string): number {
-  return ch.charCodeAt(0) > 127 ? 2 : 1;
-}
-
-function stringWidth(str: string): number {
-  let w = 0;
-  for (const ch of str) w += charWidth(ch);
-  return w;
-}
-
-function sliceToVisualWidth(text: string, maxCols: number): string {
-  let cols = 0;
-  let i = 0;
-  for (const ch of text) {
-    const cw = charWidth(ch);
-    if (cols + cw > maxCols) break;
-    cols += cw;
-    i += ch.length;
-  }
-  return text.slice(0, i);
-}
-
-function fitToWidth(text: string, width: number): string {
-  if (width <= 0) return "";
-  const sw = stringWidth(text);
-  if (sw <= width) return text + " ".repeat(width - sw);
-  if (width <= 3) return sliceToVisualWidth(text, width);
-  return sliceToVisualWidth(text, width - 3) + "...";
-}
-
-function sliceFromVisualOffset(text: string, offset: number): string {
-  let cols = 0;
-  let i = 0;
-  while (i < text.length) {
-    if (cols >= offset) break;
-    const cw = charWidth(text[i]!);
-    if (cols + cw > offset) break;
-    cols += cw;
-    i += text[i]!.length;
-  }
-  return text.slice(i);
 }
 
 function fitToWidthWithScroll(rawLine: string, cw: number, viewportLeft: number): { content: string; continuesRight: boolean } {
@@ -203,13 +161,6 @@ function clampSpans(spans: HighlightSpan[], maxWidth: number): HighlightSpan[] {
       end: Math.min(span.end, maxWidth),
     }))
     .filter(span => span.start < span.end);
-}
-
-function padAnsiToWidth(text: string, width: number): string {
-  const visible = text.replace(/\x1b\[[0-9;]*m/g, "");
-  const sw = stringWidth(visible);
-  if (sw >= width) return text;
-  return text + " ".repeat(width - sw);
 }
 
 function isMarkdownHeading(line: string): boolean {

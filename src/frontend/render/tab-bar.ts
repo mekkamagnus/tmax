@@ -1,26 +1,5 @@
 import type { Tab } from "../../core/contracts/editor.ts";
-
-function charWidth(ch: string): number {
-  return ch.charCodeAt(0) > 127 ? 2 : 1;
-}
-
-function stringWidth(str: string): number {
-  let w = 0;
-  for (const ch of str) w += charWidth(ch);
-  return w;
-}
-
-function sliceToVisualWidth(text: string, maxCols: number): string {
-  let cols = 0;
-  let i = 0;
-  for (const ch of text) {
-    const cw = charWidth(ch);
-    if (cols + cw > maxCols) break;
-    cols += cw;
-    i += ch.length;
-  }
-  return text.slice(0, i);
-}
+import { stringWidth, sliceToVisualWidth } from "./width.ts";
 
 /** Render a terminal tab bar with the active tab highlighted. */
 export function renderTabBarAnsi(
@@ -38,7 +17,7 @@ export function renderTabBarAnsi(
     const maxLabelWidth = 16;
     const labelVisWidth = stringWidth(label);
     const truncated = labelVisWidth > maxLabelWidth
-      ? sliceToVisualWidth(label, maxLabelWidth - 1) + "\u2026"
+      ? sliceToVisualWidth(label, maxLabelWidth - 1) + "…"
       : label;
     const display = ` ${truncated} `;
     const segmentWidth = stringWidth(display);
