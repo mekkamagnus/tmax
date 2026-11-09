@@ -311,7 +311,8 @@ describe("SPEC-005 Vim dispatcher", () => {
     expect(editor.getState().cursorPosition).toEqual({ line: 0, column: 0 });
 
     await editor.handleKey("c");
-    expect(bufferText(editor)).toBe("bc");
+    // SPEC-232: visual selections are inclusive — v l selects "ab", so c changes both.
+    expect(bufferText(editor)).toBe("c");
     expect(editor.getState().mode).toBe("insert");
   });
 

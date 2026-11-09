@@ -258,12 +258,13 @@ steps:
     expect:
       buffer_contains: "row111"
 
-  - name: VISUAL char v + ll + d deletes cols 3-4 (row1)
+  # SPEC-232: inclusive selection — v l l from col 3 covers cols 3-5 ("111").
+  - name: VISUAL char v + ll + d deletes cols 3-5 (row1)
     keys: "vlld"
     setup_cursor: [0, 3]
     expect:
       cursor_line: 0
-      line_text: "row1"
+      line_text: "row"
       mode: normal
 
   - name: VISUAL line open file

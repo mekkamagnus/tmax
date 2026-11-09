@@ -34,10 +34,12 @@ steps:
     expect:
       mode: normal
 
-  - name: ABC space removed
+  # SPEC-232: selections are inclusive of the cursor — cursor at col 4 ('D')
+  # selects "ABC D" (was: exclusive, "ABC ").
+  - name: ABC space and D removed (inclusive)
     eval: '(buffer-line 0)'
     expect:
-      result_contains: 'DEF GHI'
+      result_contains: 'EF GHI'
 
   # -- line visual mode: V + y --
   - name: enter visual line mode

@@ -45,9 +45,14 @@ describe("Module system integration", () => {
 
       expect(expectRight(interpreter.execute('(module-loaded? "editor/commands/vim-dispatch")')).value).toBe(true);
 
+      // #180 (SPEC-113): describe-* commands render a helpful-style *Help*
+      // buffer and return its name (was: returned a data list with the module
+      // line at [1]). The module attribution is in the rendered text.
       const describe = expectRight(interpreter.execute('(describe-function "vim-reset-pending")'));
-      const describeValues = describe.value as Array<{ value: unknown }>;
-      expect(describeValues[1]?.value).toContain("from module editor/commands/vim-dispatch");
+      expect(describe.value).toBe("*Help*");
+      expect(expectRight(interpreter.execute("(buffer-text)")).value).toContain(
+        "From module: editor/commands/vim-dispatch"
+      );
 
       const apropos = expectRight(interpreter.execute('(apropos-command "vim-reset")'));
       const names = (apropos.value as Array<{ value: Array<{ value: unknown }> }>).map((row) => row.value[0]?.value);

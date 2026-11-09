@@ -245,7 +245,7 @@ describe("Enhanced Key Bind Functions", () => {
 
     // Verify it exists. NOTE (#198): mappings.get(key) is a FLAT list across
     // modes with no order guarantee — "x" also carries the default VISUAL
-    // binding (visual-delete), which is why this test used to fail reading
+    // binding, which is why this test used to fail reading
     // [0]. key-bind DOES override same key+mode (the filter in the key-bind
     // primitive replaces matching mode+majorMode entries — pinned below);
     // select the NORMAL-mode entry instead of assuming list position.
@@ -253,7 +253,8 @@ describe("Enhanced Key Bind Functions", () => {
     let mappings = keyMappings.get("x")!;
     expect(mappings.find((m) => m.mode === "normal")?.command).toBe("(original-command)");
     // The visual-mode default coexists (different mode — not a conflict).
-    expect(mappings.find((m) => m.mode === "visual")?.command).toBe("(visual-delete)");
+    // NOTE (#231): the default is the flash-wrapped visual-delete.
+    expect(mappings.find((m) => m.mode === "visual")?.command).toBe("(vim-visual-delete-flash)");
 
     // Override with new command
     const result2 = interpreter.execute('(key-bind "x" "(new-command)" "normal")');
@@ -267,7 +268,7 @@ describe("Enhanced Key Bind Functions", () => {
     expect(mappings.filter((m) => m.mode === "normal")).toHaveLength(1);
     expect(mappings.find((m) => m.mode === "normal")?.command).toBe("(new-command)");
     // The visual binding is untouched by a normal-mode rebind.
-    expect(mappings.find((m) => m.mode === "visual")?.command).toBe("(visual-delete)");
+    expect(mappings.find((m) => m.mode === "visual")?.command).toBe("(vim-visual-delete-flash)");
   });
 
   test("should return nil when key-binding function is called for non-existent key", async () => {
