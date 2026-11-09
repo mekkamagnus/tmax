@@ -17,6 +17,14 @@
  * wrapper reports failure instead of masking it.
  *
  * Usage: bun scripts/run-unit-tests.ts [extra bun-test args]
+ *
+ * #241: bun-test flags pass through verbatim (anything starting with "-"),
+ * including `--shard=i/n` (run a balanced subset — for splitting across CI
+ * jobs) and `--timings=<file> [--update-timings]` (per-file durations that
+ * balance shards and make --parallel start the slowest files first). CI's
+ * test-bun job carries `.unit-test-timings.json` across runs via
+ * actions/cache so every run's workers are ordered by the previous run's
+ * measurements.
  */
 import { spawn } from "child_process";
 

@@ -54,11 +54,25 @@ jobs:
         with:
           bun-version: 1.4.4
       - run: bun install
-      # The project's hardened unit runner (BUG-16): batches of 5 files,
-      # per-test timeout, --dots steady output + a 120s inactivity kill,
-      # and adw-* EXCLUDED (they spawn LLM subprocesses — integration
-      # territory). Never raw `bun test` in CI.
-      - run: bun run test:unit
+      # The project's hardened unit runner (BUG-16): ONE `bun test --parallel`
+      # invocation (#239) with a per-test timeout, --dots steady output + a
+      # 120s inactivity kill, and adw-* EXCLUDED (they spawn LLM subprocesses —
+      # integration territory). Never raw `bun test` in CI.
+      # #241: carry per-file timings across runs (actions/cache, rolling key)
+      # so --parallel starts the slowest files first and any future --shard
+      # matrix has data to balance on. Tolerates a cold cache (missing file).
+      - uses: actions/cache/restore@v4
+        with:
+          path: .unit-test-timings.json
+          key: unit-test-timings-${{ github.run_id }}
+          restore-keys: |
+            unit-test-timings-
+      - run: bun run test:unit --timings=.unit-test-timings.json --update-timings
+      - uses: actions/cache/save@v4
+        if: always()
+        with:
+          path: .unit-test-timings.json
+          key: unit-test-timings-${{ github.run_id }}
   test-tmax-use:
     runs-on: ubuntu-latest
     timeout-minutes: 15

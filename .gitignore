@@ -97,3 +97,6 @@ agents/
 
 # fikra thread state (RFC-027)
 .tmax/
+
+# bun test per-file durations (CI cache artifact, #241)
+.unit-test-timings.json
