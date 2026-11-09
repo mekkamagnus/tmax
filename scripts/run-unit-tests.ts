@@ -70,9 +70,16 @@ function buildTestBatches(): string[][] {
   // the inactivity timer still catches a genuine hang.
   const batches: string[][] = [];
   const concurrencyFlag = MAX_CONCURRENCY ? [`--max-concurrency=${MAX_CONCURRENCY}`] : [];
+  // #237: --isolate gives every test file a fresh global + module registry and
+  // cleans leaked handles/timers between files (Bun 1.4). It directly targets
+  // our order-dependence history (BUG-16-class "passes solo, fails in suite")
+  // and is the prerequisite for --parallel (#239). TMAX_UNIT_NO_ISOLATE=1 opts
+  // out for A/B comparisons.
+  const isolateFlag = process.env.TMAX_UNIT_NO_ISOLATE === "1" ? [] : ["--isolate"];
   for (let i = 0; i < allFiles.length; i += FILES_PER_BATCH) {
     batches.push([
       "test", "--dots", "--timeout", String(PER_TEST_TIMEOUT_MS),
+      ...isolateFlag,
       ...concurrencyFlag,
       ...allFiles.slice(i, i + FILES_PER_BATCH),
       ...flags,
