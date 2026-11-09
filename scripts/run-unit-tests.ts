@@ -70,6 +70,22 @@ function buildTestBatches(): string[][] {
   // the inactivity timer still catches a genuine hang.
   const batches: string[][] = [];
   const concurrencyFlag = MAX_CONCURRENCY ? [`--max-concurrency=${MAX_CONCURRENCY}`] : [];
+  // #239: --parallel runs test files concurrently in worker processes (implies
+  // --isolate, Bun 1.4) — one invocation with ALL files so bun can balance
+  // workers itself; the 5-file serial batches would just serialize the pool.
+  // Per-worker daemon-socket namespacing (testSocketPath/testWorkerToken in
+  // test/fixtures/server-test-helpers.ts) is what makes concurrent files safe.
+  // TMAX_UNIT_NO_PARALLEL=1 opts out to the #237 serial-isolate mode for A/B.
+  if (process.env.TMAX_UNIT_NO_PARALLEL !== "1") {
+    batches.push([
+      "test", "--dots", "--timeout", String(PER_TEST_TIMEOUT_MS),
+      "--parallel",
+      ...concurrencyFlag,
+      ...allFiles,
+      ...flags,
+    ]);
+    return batches;
+  }
   // #237: --isolate gives every test file a fresh global + module registry and
   // cleans leaked handles/timers between files (Bun 1.4). It directly targets
   // our order-dependence history (BUG-16-class "passes solo, fails in suite")

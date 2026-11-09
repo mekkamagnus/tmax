@@ -8,7 +8,7 @@
 
 import { describe, test, expect, beforeAll, beforeEach, afterEach } from 'bun:test';
 import { TmaxServer } from '../../src/server/server.ts';
-import { connectWithTimeout, forceShutdown, sweepTestSockets } from '../fixtures/server-test-helpers.ts';
+import { connectWithTimeout, forceShutdown, sweepTestSockets, testSocketPath } from '../fixtures/server-test-helpers.ts';
 
 const AI_AGENT_CONTROL_TIMEOUT_MS = 20000;
 
@@ -58,7 +58,7 @@ async function sendRequest(socketPath: string, request: string): Promise<any> {
 
 describe('AI Agent Control', () => {
   let server: TmaxServer | null = null;
-  let testSocketPath: string;
+  let sock: string;
 
   beforeAll(() => {
     sweepTestSockets();
@@ -66,7 +66,7 @@ describe('AI Agent Control', () => {
 
   beforeEach(async () => {
     // Create a unique socket path for each test
-    testSocketPath = `/tmp/tmax-test-${process.pid}-${Date.now()}.sock`;
+    sock = testSocketPath('ai-agent');
   });
 
   afterEach(async () => {
@@ -76,7 +76,7 @@ describe('AI Agent Control', () => {
 
   describe('query:full-state', () => {
     test('should return full editor state', async () => {
-      server = new TmaxServer(testSocketPath, true); // test mode = true
+      server = new TmaxServer(sock, true); // test mode = true
       await server.start();
 
       // Wait for server to start
@@ -86,7 +86,7 @@ describe('AI Agent Control', () => {
         query: 'full-state'
       }, 1);
 
-      const response: any = await sendRequest(testSocketPath, request);
+      const response: any = await sendRequest(sock, request);
 
       expect(response.jsonrpc).toBe('2.0');
       expect(response.id).toBe(1);
@@ -120,7 +120,7 @@ describe('AI Agent Control', () => {
     }, AI_AGENT_CONTROL_TIMEOUT_MS);
 
     test('should include buffer information in full-state', async () => {
-      server = new TmaxServer(testSocketPath, true);
+      server = new TmaxServer(sock, true);
       await server.start();
 
       // Wait for server to start
@@ -132,14 +132,14 @@ describe('AI Agent Control', () => {
         wait: false
       }, 1);
 
-      await sendRequest(testSocketPath, openRequest);
+      await sendRequest(sock, openRequest);
 
       // Now query full state
       const stateRequest = createRequest('query', {
         query: 'full-state'
       }, 2);
 
-      const response: any = await sendRequest(testSocketPath, stateRequest);
+      const response: any = await sendRequest(sock, stateRequest);
 
       expect(response.result.buffers.length).toBeGreaterThan(0);
       expect(response.result.buffers[0]).toHaveProperty('name');
@@ -151,7 +151,7 @@ describe('AI Agent Control', () => {
 
   describe('describe-function', () => {
     test('should return function documentation', async () => {
-      server = new TmaxServer(testSocketPath, true);
+      server = new TmaxServer(sock, true);
       await server.start();
 
       // Wait for server to start
@@ -162,7 +162,7 @@ describe('AI Agent Control', () => {
         functionName: 'buffer-insert'
       }, 1);
 
-      const response: any = await sendRequest(testSocketPath, request);
+      const response: any = await sendRequest(sock, request);
 
       expect(response.jsonrpc).toBe('2.0');
       expect(response.id).toBe(1);
@@ -186,7 +186,7 @@ describe('AI Agent Control', () => {
     }, AI_AGENT_CONTROL_TIMEOUT_MS);
 
     test('should handle unknown function gracefully', async () => {
-      server = new TmaxServer(testSocketPath, true);
+      server = new TmaxServer(sock, true);
       await server.start();
 
       // Wait for server to start
@@ -197,7 +197,7 @@ describe('AI Agent Control', () => {
         functionName: 'non-existent-function'
       }, 1);
 
-      const response: any = await sendRequest(testSocketPath, request);
+      const response: any = await sendRequest(sock, request);
 
       expect(response.jsonrpc).toBe('2.0');
       expect(response.id).toBe(1);
@@ -214,7 +214,7 @@ describe('AI Agent Control', () => {
 
   describe('find-usages', () => {
     test('should return function usage locations', async () => {
-      server = new TmaxServer(testSocketPath, true);
+      server = new TmaxServer(sock, true);
       await server.start();
 
       // Wait for server to start
@@ -225,7 +225,7 @@ describe('AI Agent Control', () => {
         functionName: 'buffer-insert'
       }, 1);
 
-      const response: any = await sendRequest(testSocketPath, request);
+      const response: any = await sendRequest(sock, request);
 
       expect(response.jsonrpc).toBe('2.0');
       expect(response.id).toBe(1);
@@ -250,7 +250,7 @@ describe('AI Agent Control', () => {
 
   describe('apropos-command', () => {
     test('should find commands matching pattern', async () => {
-      server = new TmaxServer(testSocketPath, true);
+      server = new TmaxServer(sock, true);
       await server.start();
 
       // Wait for server to start
@@ -261,7 +261,7 @@ describe('AI Agent Control', () => {
         pattern: 'buffer'
       }, 1);
 
-      const response: any = await sendRequest(testSocketPath, request);
+      const response: any = await sendRequest(sock, request);
 
       expect(response.jsonrpc).toBe('2.0');
       expect(response.id).toBe(1);
@@ -283,7 +283,7 @@ describe('AI Agent Control', () => {
     }, AI_AGENT_CONTROL_TIMEOUT_MS);
 
     test('should handle regex patterns correctly', async () => {
-      server = new TmaxServer(testSocketPath, true);
+      server = new TmaxServer(sock, true);
       await server.start();
 
       // Wait for server to start
@@ -294,7 +294,7 @@ describe('AI Agent Control', () => {
         pattern: 'buffer.*save'
       }, 1);
 
-      const response: any = await sendRequest(testSocketPath, request);
+      const response: any = await sendRequest(sock, request);
 
       expect(response.jsonrpc).toBe('2.0');
       expect(response.id).toBe(1);
@@ -309,7 +309,7 @@ describe('AI Agent Control', () => {
 
   describe('describe-variable', () => {
     test('should return variable information', async () => {
-      server = new TmaxServer(testSocketPath, true);
+      server = new TmaxServer(sock, true);
       await server.start();
 
       // Wait for server to start
@@ -321,7 +321,7 @@ describe('AI Agent Control', () => {
         variableName: 'hashmap'
       }, 1);
 
-      const response: any = await sendRequest(testSocketPath, request);
+      const response: any = await sendRequest(sock, request);
 
       expect(response.jsonrpc).toBe('2.0');
       expect(response.id).toBe(1);
@@ -344,7 +344,7 @@ describe('AI Agent Control', () => {
     }, AI_AGENT_CONTROL_TIMEOUT_MS);
 
     test('should handle unknown variable gracefully', async () => {
-      server = new TmaxServer(testSocketPath, true);
+      server = new TmaxServer(sock, true);
       await server.start();
 
       // Wait for server to start
@@ -355,7 +355,7 @@ describe('AI Agent Control', () => {
         variableName: '*unknown-variable*'
       }, 1);
 
-      const response: any = await sendRequest(testSocketPath, request);
+      const response: any = await sendRequest(sock, request);
 
       expect(response.jsonrpc).toBe('2.0');
       expect(response.id).toBe(1);
@@ -371,7 +371,7 @@ describe('AI Agent Control', () => {
 
   describe('Performance', () => {
     test('should execute T-Lisp code and test verification within a bounded time', async () => {
-      server = new TmaxServer(testSocketPath, true);
+      server = new TmaxServer(sock, true);
       await server.start();
 
       // Wait for server to start
@@ -384,7 +384,7 @@ describe('AI Agent Control', () => {
         code: '(buffer-list)'
       }, 1);
 
-      const evalResponse: any = await sendRequest(testSocketPath, evalRequest);
+      const evalResponse: any = await sendRequest(sock, evalRequest);
 
       expect(evalResponse.jsonrpc).toBe('2.0');
       expect(evalResponse.error).toBeUndefined();
@@ -399,7 +399,7 @@ describe('AI Agent Control', () => {
     }, AI_AGENT_CONTROL_TIMEOUT_MS);
 
     test('should handle multiple rapid requests within a bounded time', async () => {
-      server = new TmaxServer(testSocketPath, true);
+      server = new TmaxServer(sock, true);
       await server.start();
 
       // Wait for server to start
@@ -415,7 +415,7 @@ describe('AI Agent Control', () => {
       ];
 
       const responses = await Promise.all(
-        requests.map(req => sendRequest(testSocketPath, req))
+        requests.map(req => sendRequest(sock, req))
       );
 
       const duration = Date.now() - startTime;
@@ -439,7 +439,7 @@ describe('AI Agent Control', () => {
 
   describe('Error Handling', () => {
     test('should return error for invalid query type', async () => {
-      server = new TmaxServer(testSocketPath, true);
+      server = new TmaxServer(sock, true);
       await server.start();
 
       // Wait for server to start
@@ -449,7 +449,7 @@ describe('AI Agent Control', () => {
         query: 'invalid-query-type'
       }, 1);
 
-      const response: any = await sendRequest(testSocketPath, request);
+      const response: any = await sendRequest(sock, request);
 
       expect(response.jsonrpc).toBe('2.0');
       expect(response.id).toBe(1);
@@ -460,7 +460,7 @@ describe('AI Agent Control', () => {
     }, AI_AGENT_CONTROL_TIMEOUT_MS);
 
     test('should return error for missing function name in describe-function', async () => {
-      server = new TmaxServer(testSocketPath, true);
+      server = new TmaxServer(sock, true);
       await server.start();
 
       // Wait for server to start
@@ -471,7 +471,7 @@ describe('AI Agent Control', () => {
         // Missing functionName
       }, 1);
 
-      const response: any = await sendRequest(testSocketPath, request);
+      const response: any = await sendRequest(sock, request);
 
       expect(response.jsonrpc).toBe('2.0');
       expect(response.id).toBe(1);
@@ -481,7 +481,7 @@ describe('AI Agent Control', () => {
     }, AI_AGENT_CONTROL_TIMEOUT_MS);
 
     test('should return error for missing pattern in apropos-command', async () => {
-      server = new TmaxServer(testSocketPath, true);
+      server = new TmaxServer(sock, true);
       await server.start();
 
       // Wait for server to start
@@ -492,7 +492,7 @@ describe('AI Agent Control', () => {
         // Missing pattern
       }, 1);
 
-      const response: any = await sendRequest(testSocketPath, request);
+      const response: any = await sendRequest(sock, request);
 
       expect(response.jsonrpc).toBe('2.0');
       expect(response.id).toBe(1);

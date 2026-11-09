@@ -20,6 +20,7 @@
  * process.exit) and never binds a socket — `processRequest` is called directly.
  */
 import { describe, test, expect, beforeEach, afterEach } from 'bun:test';
+import { testSocketPath } from '../fixtures/server-test-helpers.ts';
 import { mkdtempSync, rmSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
@@ -69,7 +70,7 @@ async function startTestServer(): Promise<{ server: TmaxServer; socketPath: stri
   const homeDir = mkdtempSync(join(tmpdir(), 'tmax-sync-home-'));
   const oldHome = process.env.HOME;
   process.env.HOME = homeDir;
-  const socketPath = `/tmp/tmax-sync-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2)}.sock`;
+  const socketPath = testSocketPath('sync');
   const server = new TmaxServer(socketPath, true);
   // startEditor loads workspaces + bindings. Socket is never bound — we call
   // processRequest directly. (startSocket is intentionally NOT called.)

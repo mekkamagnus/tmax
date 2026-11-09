@@ -13,9 +13,9 @@ import type { EditorState } from "../../src/core/types.ts";
 import { existsSync, mkdtempSync, rmSync, unlinkSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
-import { connectWithTimeout, sweepTestSockets } from "../fixtures/server-test-helpers.ts";
+import { connectWithTimeout, sweepTestSockets, testSocketPath } from "../fixtures/server-test-helpers.ts";
 
-const SOCKET = `/tmp/tmax-capture-parity-${process.pid}.sock`;
+const SOCKET = testSocketPath('capture-parity');
 let daemonProcess: Subprocess | null = null;
 let requestId = 0;
 

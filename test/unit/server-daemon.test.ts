@@ -3,7 +3,7 @@ import { exec, spawn, type ChildProcess } from 'child_process';
 import { promisify } from 'util';
 import { createConnection } from 'net';
 import { existsSync } from 'fs';
-import { sweepTestSockets } from '../fixtures/server-test-helpers.ts';
+import { sweepTestSockets, testSocketPath } from '../fixtures/server-test-helpers.ts';
 
 const execAsync = promisify(exec);
 
@@ -109,7 +109,7 @@ function teardown(child: ChildProcess, socketPath: string): Promise<void> {
 }
 
 test('should start tmax server daemon', async () => {
-  const socket = `/tmp/tmax-server-daemon-test-${process.pid}-${Date.now()}.sock`;
+  const socket = testSocketPath('server-daemon');
   try {
     const { stdout, stderr } = await startDaemonUntilListening(socket);
     const output = `${stdout}\n${stderr}`;

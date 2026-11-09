@@ -14,15 +14,26 @@ import type { TmaxServer } from '../../src/server/server.ts';
 
 const DEFAULT_CONNECT_TIMEOUT_MS = 2000;
 
-const SOCKET_PREFIXES = [
-  'tmax-test-',
-  'tmax-observability-',
-  'tmax-harden-',
-  'tmax-save-',
-  'tmax-server-client-',
-  'tmax-server-daemon-test-',
-  'tmax-capture-parity-',
-];
+/**
+ * #239: identity of the current bun-test worker. Under `--parallel` each file
+ * runs in its own worker PROCESS (Bun sets BUN_TEST_WORKER_ID); serially it is
+ * undefined and we pin '0'. Combined with process.pid this token uniquely
+ * identifies every concurrent test-worker in a run — and lets the sweep below
+ * unlink only OUR OWN sockets, never a sibling worker's live ones.
+ */
+export function testWorkerToken(): string {
+  return `p${process.pid}w${process.env.BUN_TEST_WORKER_ID ?? '0'}`;
+}
+
+/**
+ * #239: canonical derivation for server-test socket paths. Embeds the worker
+ * token + timestamp + random so (a) two concurrent workers can never derive
+ * the same path, and (b) sweepTestSockets can recognize our own entries.
+ * Replaces the per-file hand-rolled `/tmp/tmax-<label>-<pid>-<ts>.sock` variants.
+ */
+export function testSocketPath(label: string): string {
+  return `/tmp/tmax-${label}-${testWorkerToken()}-${Date.now()}-${Math.random().toString(36).slice(2)}.sock`;
+}
 
 /**
  * Wraps net.connect() with a connection-phase timeout. A healthy local Unix
@@ -145,12 +156,22 @@ export function destroyRejectedServer(server: unknown): void {
 }
 
 /**
- * Best-effort sweep of orphaned tmax server-test socket files in /tmp.
- * Intended as a one-shot safety net in a global beforeAll/afterAll — it does
- * NOT replace per-test forceShutdown, just defends against historical
- * accumulation (e.g. orphans left by a prior crashed run).
+ * Best-effort sweep of orphaned tmax server-test socket files in /tmp —
+ * scoped to THIS worker's own entries (#239). Intended as a one-shot safety
+ * net in a global beforeAll/afterAll; it does NOT replace per-test
+ * forceShutdown.
+ *
+ * #239 (parallel suite): the old prefix-based sweep unlinked EVERY matching
+ * /tmp/*.sock, including sockets belonging to sibling workers' LIVE servers —
+ * under `bun test --parallel` a sibling file's beforeEach sweep would rip
+ * another file's listening socket mid-test (observed: connect ENOENT on
+ * /tmp/tmax-test-<pid>-<ts>.sock). Matching the worker token instead makes
+ * cross-worker kills impossible. Trade-off: a crashed run's stale sockets are
+ * no longer cleaned by later runs (cosmetic only — unique name derivation
+ * means stale files can never collide with a new bind; the OS reaps /tmp).
  */
 export function sweepTestSockets(): void {
+  const token = testWorkerToken();
   let entries: string[];
   try {
     entries = readdirSync('/tmp');
@@ -159,8 +180,8 @@ export function sweepTestSockets(): void {
   }
 
   for (const entry of entries) {
-    if (!entry.endsWith('.sock')) continue;
-    if (!SOCKET_PREFIXES.some((prefix) => entry.startsWith(prefix))) continue;
+    if (!entry.startsWith('tmax-') || !entry.endsWith('.sock')) continue;
+    if (!entry.includes(`-${token}-`)) continue;
 
     const fullPath = join('/tmp', entry);
     try {

@@ -3,12 +3,12 @@ import { Socket } from 'net';
 import { existsSync, mkdtempSync, rmSync, unlinkSync, writeFileSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
-import { connectWithTimeout, forceShutdown, sweepTestSockets, destroyRejectedServer } from '../fixtures/server-test-helpers.ts';
+import { connectWithTimeout, forceShutdown, sweepTestSockets, destroyRejectedServer, testSocketPath } from '../fixtures/server-test-helpers.ts';
 import { TmaxServer } from '../../src/server/server.ts';
 import { PROTOCOL_VERSION } from '../../src/server/rpc/types.ts';
 
 function uniqueSocket(): string {
-  return `/tmp/tmax-harden-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2)}.sock`;
+  return testSocketPath('harden');
 }
 
 function request(method: string, params: any = {}, id: number = Date.now()): string {

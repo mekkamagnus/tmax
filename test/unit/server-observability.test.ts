@@ -1,6 +1,6 @@
 import { afterEach, beforeAll, beforeEach, describe, expect, test } from 'bun:test';
 import { Socket } from 'net';
-import { connectWithTimeout, forceShutdown, sweepTestSockets } from '../fixtures/server-test-helpers.ts';
+import { connectWithTimeout, forceShutdown, sweepTestSockets, testSocketPath } from '../fixtures/server-test-helpers.ts';
 import { TmaxServer } from '../../src/server/server.ts';
 
 const SERVER_OBSERVABILITY_TIMEOUT_MS = 20000;
@@ -87,7 +87,7 @@ describe('Server observability', () => {
   });
 
   beforeEach(async () => {
-    socketPath = `/tmp/tmax-observability-${Date.now()}-${Math.random().toString(36).slice(2)}.sock`;
+    socketPath = testSocketPath('observability');
     server = new TmaxServer(socketPath, true);
     await server.start();
     await new Promise(resolve => setTimeout(resolve, 250));

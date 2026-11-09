@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { connectWithTimeout, forceShutdown, sweepTestSockets } from "../fixtures/server-test-helpers.ts";
+import { connectWithTimeout, forceShutdown, sweepTestSockets, testSocketPath } from "../fixtures/server-test-helpers.ts";
 import { TmaxServer } from "../../src/server/server.ts";
 
 // Match the canonical unit runner's per-test budget. Under the full serial
@@ -39,7 +39,7 @@ describe("Server client", () => {
 
   beforeEach(() => {
     sweepTestSockets();
-    socketPath = `/tmp/tmax-server-client-${process.pid}-${Date.now()}.sock`;
+    socketPath = testSocketPath('server-client');
   });
 
   afterEach(async () => {

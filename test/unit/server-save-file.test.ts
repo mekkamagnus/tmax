@@ -1,5 +1,5 @@
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, test } from 'bun:test';
-import { connectWithTimeout, forceShutdown, sweepTestSockets } from '../fixtures/server-test-helpers.ts';
+import { connectWithTimeout, forceShutdown, sweepTestSockets, testSocketPath } from '../fixtures/server-test-helpers.ts';
 import { mkdtempSync, writeFileSync, readFileSync, rmSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
@@ -33,7 +33,7 @@ async function sendRequest(socketPath: string, method: string, params: any = {})
 }
 
 async function startServer(): Promise<{ server: TmaxServer; socketPath: string }> {
-  const socketPath = `/tmp/tmax-save-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2)}.sock`;
+  const socketPath = testSocketPath('save');
   const server = new TmaxServer(socketPath, true);
   await server.start();
   await new Promise(resolve => setTimeout(resolve, 250));

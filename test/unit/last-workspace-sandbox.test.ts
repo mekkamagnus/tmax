@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, test } from 'bun:test';
+import { testSocketPath } from '../fixtures/server-test-helpers.ts';
 import { existsSync, mkdtempSync, readFileSync, rmSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
@@ -14,7 +15,7 @@ const ORIGINAL_HOME = process.env.HOME;
 const ORIGINAL_WS_DIR = process.env.TMAX_WORKSPACE_DIR;
 
 function uniqueSocket(): string {
-  return `/tmp/tmax-lw-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2)}.sock`;
+  return testSocketPath('lw');
 }
 
 afterEach(() => {
