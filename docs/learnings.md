@@ -139,3 +139,9 @@ A `(defun name--private …)` inside a `(defmodule …)` parses fine and works i
 `test/unit/chore44-baseline-inventory.test.ts` freezes the `createEditorAPI` inventory (`.chore44-baseline/api-names-static.txt`) and the Editor public-method surface (`editor-methods.txt`); `test/unit/editor-api-registry.test.ts` hardcodes the count. Adding a primitive or Editor method turns these red — by design (a change-detector).
 
 **Rule:** When you intentionally add a public API primitive or Editor method, regenerate the baselines (compute the live set the way the test does — `Array.from(createEditorAPI(ctx).keys())` and `Object.getOwnPropertyNames(Editor.prototype)` filtered, sorted — and write it) and update the hardcoded count. Do NOT silence the test.
+
+## Editing: emitting `\0` (or other control-char escapes) in Edit/Write tool calls can write a RAW byte into the file
+
+When tool-call content should contain the two-character escape `\0` (backslash + zero) inside a string literal, the emitted content may instead carry a single raw NUL byte — the file then "contains `"\0"`" functionally but grep/rg treat it as binary (matches silently vanish), tsc/JSC may still parse it, and diffs look invisible. Happened twice in one session (interpreter key + test key helper); both times grep "misfiring" was the tell.
+
+**Rule:** Never hand-type `\0` in generated source. Use `String.fromCharCode(0)` (or `"\\0"` only via a scripted `perl -i` write). If greps return nothing for text you know is in a file, hexdump the line (`sed -n 'Np' f | od -c`) before trusting the search — a raw control byte makes grep/rg skip the file as binary.
