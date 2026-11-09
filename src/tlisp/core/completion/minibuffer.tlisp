@@ -1,5 +1,5 @@
 (defmodule editor/completion/minibuffer
-  (export minibuffer-history-values minibuffer-history minibuffer-history-add-to minibuffer-history-add minibuffer-empty-table minibuffer-selection-clamp minibuffer-scroll-for-selection minibuffer-exact-selection-index minibuffer-replace-session minibuffer-refresh completing-read read-from-minibuffer minibuffer-set-input minibuffer-refresh-after-input minibuffer-insert-character minibuffer-backward-delete-char minibuffer-move-point minibuffer-history-previous minibuffer-history-next minibuffer-close minibuffer-cancel minibuffer-accept minibuffer-dispatch-key)
+  (export minibuffer-history-values minibuffer-history minibuffer-history-add-to minibuffer-history-add minibuffer-empty-table minibuffer-selection-clamp minibuffer-scroll-for-selection minibuffer-exact-selection-index minibuffer-exact-selection-index-recursive minibuffer-replace-session minibuffer-refresh completing-read read-from-minibuffer minibuffer-set-input minibuffer-refresh-after-input minibuffer-insert-character minibuffer-backward-delete-char minibuffer-move-point minibuffer-history-previous minibuffer-history-next minibuffer-close minibuffer-cancel minibuffer-accept minibuffer-dispatch-key)
 
 ;; minibuffer.tlisp --- Serializable Lisp-owned minibuffer state machine
 
@@ -43,12 +43,20 @@
         (+ (- selection maximum) 1)
         scroll))))
 
-(defun minibuffer-exact-selection-index (input matches index)
+(defun minibuffer-exact-selection-index (input matches)
+  "Index of the candidate whose value equals INPUT, else -1 (#236).
+Bulk-scanned by the minibuffer-exact-index-bulk builtin; identical result to
+the recursive reference below — which stays the semantic spec — but in one TS
+loop instead of one interpreter round-trip per candidate (~6µs each)."
+  (minibuffer-exact-index-bulk input matches))
+
+(defun minibuffer-exact-selection-index-recursive (input matches index)
+  "Reference implementation for minibuffer-exact-selection-index (#236)."
   (if (null matches)
     -1
     (if (string= input (hashmap-get (car matches) "value"))
       index
-      (minibuffer-exact-selection-index input (cdr matches) (+ index 1)))))
+      (minibuffer-exact-selection-index-recursive input (cdr matches) (+ index 1)))))
 
 (defun minibuffer-replace-session (session)
   "Replace the active semantic session and republish it."
@@ -72,7 +80,7 @@
                      (hashmap-get session "predicate"))))
       (let ((exact-selection
               (minibuffer-exact-selection-index
-                (hashmap-get session "input") matches 0)))
+                (hashmap-get session "input") matches)))
         (let ((selection (if (>= exact-selection 0)
                            exact-selection
                            (minibuffer-selection-clamp

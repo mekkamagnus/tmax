@@ -760,6 +760,13 @@ export function registerStdlibFunctions(interpreter: TLispInterpreter): void {
   // generic T-Lisp path (this returns nil for unknown categories). One call
   // replaces ~candidates × annotator-function evals (~217ms per M-x keystroke
   // before this).
+  // #236 (SPEC-236): the annotated snapshot is memoized on (category, level,
+  // candidate-list identity). The M-x candidate list is session-cached and
+  // identity-stable (BUG-78), so its ~230µs annotation pass ran identically on
+  // every keystroke; buffer/file tables build fresh lists per call and always
+  // miss (re-annotate — never stale), and marginalia-cycle changes the level
+  // (part of the key). Single-entry: bounded, no leak surface.
+  let annotateMemo: { category: string; level: number; list: TLispValue[]; out: TLispValue } | null = null;
   interpreter.defineBuiltin("marginalia-annotate-builtin-candidates", raw((args: TLispValue[]) => {
     if (args.length !== 3 || args[0]?.type !== "string" || args[1]?.type !== "list" || args[2]?.type !== "number") {
       throw new Error("marginalia-annotate-builtin-candidates requires a category string, a candidate list, and a level number");
@@ -767,15 +774,41 @@ export function registerStdlibFunctions(interpreter: TLispInterpreter): void {
     const category = args[0].value as string;
     if (category !== "buffer" && category !== "command" && category !== "file") return createNil();
     const level = args[2].value as number;
+    const list = args[1].value as TLispValue[];
+    if (annotateMemo && annotateMemo.category === category && annotateMemo.level === level && annotateMemo.list === list) {
+      return annotateMemo.out;
+    }
     const results: TLispValue[] = [];
-    for (const candidate of (args[1].value as TLispValue[])) {
+    for (const candidate of list) {
       const source = candidate.type === "hashmap"
         ? [...(candidate.value as Map<string, TLispValue>).entries()].filter(([k]) => k !== "annotation")
         : [];
       source.push(["annotation", createString(marginaliaAnnotationOf(category, level, candidate))]);
       results.push(createHashmap(source));
     }
-    return createList(results);
+    const out = createList(results);
+    annotateMemo = { category, level, list, out };
+    return out;
+  }));
+
+  // #236 (SPEC-236): bulk exact-selection scan for the minibuffer. Identical
+  // result to the recursive T-Lisp reference
+  // (minibuffer-exact-selection-index-recursive), which stays the semantic
+  // spec — but one TS loop instead of one interpreter round-trip per candidate
+  // (~6µs each; ~1.8ms at M-x open when every candidate is visible).
+  interpreter.defineBuiltin("minibuffer-exact-index-bulk", raw((args: TLispValue[]) => {
+    if (args.length !== 2 || args[0]?.type !== "string" || args[1]?.type !== "list") {
+      throw new Error("minibuffer-exact-index-bulk requires an input string and a candidate list");
+    }
+    const input = args[0].value as string;
+    const matches = args[1].value as TLispValue[];
+    for (let i = 0; i < matches.length; i++) {
+      const value = matches[i]!.type === "hashmap"
+        ? (matches[i]!.value as Map<string, TLispValue>).get("value")
+        : undefined;
+      if (value?.type === "string" && value.value === input) return createNumber(i);
+    }
+    return createNumber(-1);
   }));
 
   // BUG-80 (#187): bulk vertico row builder. One call replaces the per-row
