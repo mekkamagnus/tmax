@@ -55,6 +55,17 @@ describe('sweep — isTmaxDaemonCommand (BUG-29)', () => {
     expect(isTmaxDaemonCommand('./dist/tmax')).toBe(true);
     // boundary: a hypothetical compiled client must not match
     expect(isTmaxDaemonCommand('/repo/dist/tmaxclient --eval 1')).toBe(false);
+    // gate round 1: suffixed lookalikes must not match — `main.ts` is a stock
+    // Bun entrypoint name and this regex decides process SIGNING; an
+    // unrelated `bun src/main.tsx` service reparented to init would otherwise
+    // be classified orphan and SIGKILLed by --apply.
+    expect(isTmaxDaemonCommand('bun src/main.tsx')).toBe(false);
+    expect(isTmaxDaemonCommand('bun run build --entry src/main.tsx')).toBe(false);
+    expect(isTmaxDaemonCommand('bun --watch src/main.ts.bak')).toBe(false);
+    expect(isTmaxDaemonCommand('bun src/server/server.tsx')).toBe(false);
+    // …while a trailing flag/arg on the real entrypoints still matches.
+    expect(isTmaxDaemonCommand('bun src/main.ts --init-file /tmp/i.tlisp')).toBe(true);
+    expect(isTmaxDaemonCommand('bun src/server/server.ts --socket /tmp/s')).toBe(true);
   });
 });
 

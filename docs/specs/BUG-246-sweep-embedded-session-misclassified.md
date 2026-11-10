@@ -75,6 +75,14 @@ cannot promote clients to reap candidates.
 
 - [ ] `isTmaxDaemonCommand` matches `bun …/src/main.ts <file>` and
       `…/dist/tmax <file>` (both with and without a leading bun for dist).
+- [ ] Gate round 1: entrypoint alternatives end in a suffix-proof boundary —
+      `bun src/main.tsx`, `bun run build --entry src/main.tsx`,
+      `bun --watch src/main.ts.bak`, and `bun src/server/server.tsx` are all
+      REJECTED (the regex decides process signaling; a lookalike entrypoint
+      reparented to init would otherwise be reaped as an orphan), while
+      `bun src/main.ts --init-file …` / `bun src/server/server.ts --socket …`
+      still match. (The pre-existing `server.ts` suffix hole is hardened by
+      the same token in this diff.)
 - [ ] `isTmaxDaemonCommand` still rejects `bun bin/tmaxclient`, the bash
       launcher `bash …/bin/tmax`, the TUI client, unrelated commands, and
       additionally `…/dist/tmaxclient` (word boundary).
