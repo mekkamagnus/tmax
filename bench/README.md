@@ -35,7 +35,7 @@ variance). The harness exits non-zero if any row exceeds its floor.
 
 | Name | small | medium | large | Notes |
 |------|-------|--------|-------|-------|
-| `minibuffer` | ~14s (N=50, ~280ms/build) | size-independent | size-independent | full candidate-build: enumerate + filter + mapcar (the enumeration alone is ~15ms; the T-Lisp filter/mapcar dominates) |
+| `minibuffer` | ~1ms (N=50 cached, ~20µs/call — #238) | size-independent | size-independent | cached candidate-build (`command-completion-refresh`); the uncached build was ~280ms at BUG-78/#182 time, ~8ms post-#234 |
 | `render` | ~150ms | ~90ms | ~220ms | N=500 frames, 80×24 |
 | `startup` | ~1490ms | (measured once) | (measured once) | avg of 5 startEditor cycles |
 | `keynorm` | ~6.6s (N=300, ~22ms/key) | ~7.7s | ~7.5s | the lag to eliminate |

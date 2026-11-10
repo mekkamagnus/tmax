@@ -111,10 +111,12 @@ describe("CHORE-84 — new microbenchmarks return well-formed results", () => {
   // `render` is run live at all 3 sizes (it is fast — ~150ms for N=500 frames)
   // to prove wiring + a well-formed BenchResult. Timing is NOT asserted — it
   // varies by machine and belongs in the harness floors.
-  // `minibuffer` / `keynorm` / `startup` are heavy (the candidate-build is
-  // ~280ms/call; keynorm ~22ms/key; startup runs 5 full startEditor cycles),
-  // so like `runE2EBench` they are checked for importability here; their live
-  // paths are covered by `bun run bench minibuffer|keynorm|startup`.
+  // `minibuffer` / `keynorm` / `startup` are heavy (startup runs 5 full
+  // startEditor cycles; keynorm drives 300 keys — both minutes-scale when
+  // live; the candidate-build was ~280ms/call at BUG-78 time and is ~8ms
+  // post-#234, #238), so like `runE2EBench` they are checked for
+  // importability here; their live paths are covered by
+  // `bun run bench minibuffer|keynorm|startup`.
 
   test("runRenderBench returns a well-formed BenchResult per size", async () => {
     for (const size of ["small", "medium", "large"] as const) {

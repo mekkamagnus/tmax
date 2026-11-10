@@ -4,9 +4,12 @@
 ;; execute-extended-command.tlisp --- M-x through generic completion
 
 (defvar command-completion-candidates (list))
-;; BUG-78: the candidate-build (callable-command-details + filter + mapcar) is
-;; ~280ms and only changes when a module loads. Cache it for the session,
-;; keyed on module-registry-generation (bumps on every register/load).
+;; BUG-78: the candidate-build (callable-command-details + filter + mapcar)
+;; only changes when a module loads. Cache it for the session, keyed on
+;; module-registry-generation (bumps on every register/load). The build cost
+;; ~280ms at BUG-78 time (1,164 candidates); post-#234 it is ~8ms (median,
+;; 234 candidates) — still worth caching, but no longer user-perceptible
+;; (#238 / ADR-0268 re-profile; the cache stays).
 (defvar command-completion-cache nil)
 (defvar command-completion-cache-gen -1)
 
@@ -29,10 +32,12 @@ which must never appear in M-x (#148)."
 
 (defun command-completion-refresh ()
   "Refresh the M-x candidate snapshot, caching across the session (BUG-78).
-The candidate-build (callable-command-details + filter + mapcar) is ~280ms and
-only changes when a module loads, so it is cached and recomputed only when
-module-registry-generation bumps. Sources only M-x command candidates
-(interactive-only, SPEC-115) and strips test-infrastructure names."
+The candidate-build (callable-command-details + filter + mapcar) only changes
+when a module loads, so it is cached and recomputed only when
+module-registry-generation bumps. It was ~280ms at BUG-78 time and is ~8ms
+post-#234 (#238 re-profile), so the cache is a cheap win, not a latency fix.
+Sources only M-x command candidates (interactive-only, SPEC-115) and strips
+test-infrastructure names."
   (let ((gen (module-registry-generation)))
     (if (and command-completion-cache (= gen command-completion-cache-gen))
       (set! command-completion-candidates command-completion-cache)

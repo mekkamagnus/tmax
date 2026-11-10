@@ -8,12 +8,14 @@
  * post-#182 (BUG-78) it is cached per-session, invalidated only on module load.
  *
  * The bench warmup populates the cache, so the timed loop measures the REALISTIC
- * cached path (~1–2ms/call) — the M-x experience a user gets. A cache regression
- * (or accidental cache-bust) spikes this ~150× back toward ~14s, failing the
- * floor loudly.
+ * cached path (~1ms for N=50, ~16–21µs/call measured 2026-11-10; ~85ms for
+ * N=50 at #182 time) — the M-x experience a user gets. A cache regression (or
+ * accidental cache-bust) drops back to the uncached build, now ~8ms/call
+ * post-#234 (was ~280ms at BUG-78 time — #238 re-profile), i.e. ~400ms for
+ * N=50, failing the tightened 100ms floor 4× over (#238 / ADR-0268).
  *
  * Size-independent (the candidate set does not depend on a buffer) and the
- * uncached build is ~280ms, so it is measured ONCE and cached — the runner
+ * build is cached after warmup, so it is measured ONCE — the runner
  * dispatches it per-size but each call returns the same cached row.
  */
 
@@ -26,11 +28,14 @@ const WARMUP = 3;
 
 /**
  * Regression floor in milliseconds (total budget for N=50 cached refreshes).
- * Post-#182 the cached path is ~85ms for N=50; the floor is ~5× that to absorb
- * CI / cold-JIT variance while still catching a cache regression (which would
- * spike this to ~14000ms — ~35× the floor).
+ * Measured 2026-11-10 (#238): cached path ~1ms for N=50 (~16–21µs/call) —
+ * the floor is ~100× that to absorb CI / cold-JIT variance. A full cache-bust
+ * regression lands at ~400ms (50 × ~8ms post-#234), failing this 4× over;
+ * at the old 400ms floor a bust sat exactly ON the pass boundary
+ * (`wallMs <= floorMs` passes), so the floor was tightened 400→100 (#238 /
+ * ADR-0268).
  */
-const FLOOR_MS = 400;
+const FLOOR_MS = 100;
 
 const EXPR = "(command-completion-refresh)";
 

@@ -89,8 +89,9 @@ test('command-completion-refresh runs without error and stays cached across call
 test('repeated M-x opens are instant after the first (the cache pays off)', async () => {
   // Substantiates BUG-78's manual-repro criterion ("repeated M-x opens are
   // instant after the first") with an automated artifact: the first refresh
-  // (uncached) is the ~280ms candidate-build; the second (cached) is sub-ms.
-  // The delta is ~100–700×, so a "second is >10× faster" assertion is robust
+  // (uncached) is the ~8ms candidate-build post-#234 (was ~280ms at BUG-78
+  // time — #238 re-profile); the second (cached) is sub-ms. The delta is
+  // ~60–200×, so a "second is >10× faster" assertion is robust
   // against machine/JIT variance while still failing if the cache regresses.
   const { editor, server } = await startedEditor();
   try {
