@@ -84,12 +84,15 @@ export interface SweepReport {
 // ---------------------------------------------------------------------------
 
 /**
- * Matches a tmax *daemon* command line: source form `bun …/src/server/server.ts`
- * or installed-binary form `bun …/bin/tmax`. Excludes `tmaxclient`
- * (`bin/tmaxclient` has no word boundary after `tmax`) and the bash launcher
- * (not run under `bun`). This is the only place process identity is decided.
+ * Matches a tmax *daemon* command line: source form `bun …/src/server/server.ts`,
+ * installed-binary form `bun …/bin/tmax`, the embedded-Steep path
+ * `bun …/src/main.ts <file>` (#246 — one process binding + serving the daemon
+ * socket), or the #244 compiled binary `…/dist/tmax …` (no `bun` prefix at
+ * all). Excludes `tmaxclient` (`bin/tmaxclient`/`dist/tmaxclient` have no
+ * word boundary after `tmax`) and the bash launcher (not run under `bun`).
+ * This is the only place process identity is decided.
  */
-const TMAX_DAEMON_RE = /\bbun\b.*(?:src\/server\/server\.ts|bin\/tmax\b)/;
+const TMAX_DAEMON_RE = /(?:\bbun\b.*(?:src\/server\/server\.ts|src\/main\.ts|bin\/tmax\b))|\bdist\/tmax\b/;
 
 export function isTmaxDaemonCommand(command: string | undefined): boolean {
   return !!command && TMAX_DAEMON_RE.test(command);
@@ -209,9 +212,16 @@ export function discover(opts: { uid: number; scanRoot?: string; deps?: Partial<
   const out: DaemonCandidate[] = [];
   const livePids = new Set<number>();
 
-  // 1. Live tmax daemons (process-driven, PID-reviewed).
+  // 1. Live tmax daemons (process-driven, PID-reviewed). Identity is the
+  // command shape OR owning the canonical socket (#246): launch paths the RE
+  // has not learned — embedded Steep, compiled binary, future entrypoints —
+  // still hold the daemon socket, and a live socket owner must never fall
+  // into the stale-lock path (its lock+socket would be unlinked from under
+  // it). classifyLiveDaemon maps such owners to 'canonical-live' (kept
+  // unless --force). lsof lists only the listener, not connected clients,
+  // so clients are never promoted to candidates.
   for (const entry of psList) {
-    if (!isTmaxDaemonCommand(entry.command)) continue;
+    if (!isTmaxDaemonCommand(entry.command) && !canonical.has(entry.pid)) continue;
     livePids.add(entry.pid);
     const kind = classifyLiveDaemon(entry, psMap, canonical);
     const lock = lockByPid.get(entry.pid);

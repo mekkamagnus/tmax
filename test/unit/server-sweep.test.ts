@@ -45,6 +45,17 @@ describe('sweep — isTmaxDaemonCommand (BUG-29)', () => {
     expect(isTmaxDaemonCommand('node /unrelated/server.ts')).toBe(false);
     expect(isTmaxDaemonCommand(undefined)).toBe(false);
   });
+  test('#246: matches the embedded-Steep path and the compiled binary', () => {
+    // bin/tmax <file> execs `bun src/main.ts <file>` — one process that binds
+    // and serves the daemon socket.
+    expect(isTmaxDaemonCommand('bun src/main.ts /tmp/tmax-play.md')).toBe(true);
+    expect(isTmaxDaemonCommand('bun /repo/src/main.ts')).toBe(true);
+    // #244 single binary: no `bun` in the command line at all.
+    expect(isTmaxDaemonCommand('/repo/dist/tmax /tmp/f.md')).toBe(true);
+    expect(isTmaxDaemonCommand('./dist/tmax')).toBe(true);
+    // boundary: a hypothetical compiled client must not match
+    expect(isTmaxDaemonCommand('/repo/dist/tmaxclient --eval 1')).toBe(false);
+  });
 });
 
 describe('sweep — classifyLiveDaemon (BUG-29)', () => {
@@ -203,5 +214,49 @@ describe('sweep — runSweep (BUG-29)', () => {
     expect(report.kept).toBe(0);
     expect(report.reaped).toContain(PID);
     expect(report.removedLocks).toEqual([join(tmp, 'tmax-canon/server.lock')]);
+  });
+
+  test('#246: live embedded-Steep session (bun src/main.ts) is canonical-live, not stale-recycled', async () => {
+    // The live repro: `bin/tmax file` → `bun src/main.ts file` owning the
+    // canonical socket. Pre-fix the RE missed it → livePids skipped it → its
+    // lock classified stale-recycled → --apply unlinked the LIVE socket.
+    plantLock('tmax-canon/server.lock', { pid: 200, socketPath: CANONICAL, startedAt: 'x', cwd: 'x' });
+    const deps = { ps: () => [daemon(200, 1, 'bun src/main.ts /tmp/f.md')], canonicalPids: () => new Set([200]) };
+
+    const report = await runSweep({ apply: true, force: false, uid: UID, scanRoot: tmp, deps });
+
+    expect(report.kept).toBe(1); // canonical-live
+    expect(report.removedLocks).toEqual([]);
+    expect(report.removedSockets).toEqual([]);
+    expect(existsSync(join(tmp, 'tmax-canon/server.lock'))).toBe(true);
+  });
+
+  test('#246: canonical-socket owner with an UNRECOGNIZED command is still canonical-live (structural guard)', async () => {
+    // Any future launch path the RE has not learned: as long as the process
+    // owns the canonical socket, it must never fall into the stale-lock path.
+    plantLock('tmax-canon/server.lock', { pid: 300, socketPath: CANONICAL, startedAt: 'x', cwd: 'x' });
+    const deps = { ps: () => [{ pid: 300, ppid: 1, command: '/some/future/entrypoint --serve' }], canonicalPids: () => new Set([300]) };
+
+    const report = await runSweep({ apply: true, force: false, uid: UID, scanRoot: tmp, deps });
+
+    expect(report.kept).toBe(1);
+    expect(report.removedLocks).toEqual([]);
+    expect(report.removedSockets).toEqual([]);
+  });
+
+  test('#246: non-canonical embedded session (custom socket) with live parent → owned → kept', async () => {
+    // TMAX_SOCKET set: the embedded session does NOT own the canonical
+    // socket, so identity must come from the RE (src/main.ts) — owned (parent
+    // alive) → kept under --apply.
+    const custom = plantFile('tmax-custom/server');
+    plantLock('tmax-custom/server.lock', { pid: 310, socketPath: custom, startedAt: 'x', cwd: 'x' });
+    const parent = { pid: 309, ppid: 1, command: 'zsh' };
+    const deps = { ps: () => [parent, daemon(310, 309, 'bun src/main.ts /tmp/f.md')], canonicalPids: () => new Set<number>() };
+
+    const report = await runSweep({ apply: true, force: false, uid: UID, scanRoot: tmp, deps });
+
+    expect(report.kept).toBe(1); // owned
+    expect(report.removedLocks).toEqual([]);
+    expect(existsSync(join(tmp, 'tmax-custom/server.lock'))).toBe(true);
   });
 });
