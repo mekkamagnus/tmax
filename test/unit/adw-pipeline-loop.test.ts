@@ -19,6 +19,7 @@ import {
   parseArgs,
   runPipeline,
   loadWorkspace,
+  makeRealDeps,
   type PipelineDeps,
   type OrchestratorArgs,
   type PlanResult,
@@ -150,18 +151,22 @@ function mockDeps(opts: {
   build?: Either<string, BuildOutcome> | Array<Either<string, BuildOutcome>>;
   patch?: Either<string, PatchReviewResult> | Array<Either<string, PatchReviewResult>>;
   test?: Either<string, TestOutcome> | Array<Either<string, TestOutcome>>;
+  /** #240: the full-suite final gate outcome (undefined = gate not exercised). */
+  gate?: Either<string, TestOutcome>;
 } = {}): PipelineDeps & {
   planCalls: Array<{ description: string; forcedType?: string; id: string }>;
   reviewCalls: Array<{ input: string; id: string }>;
   buildCalls: Array<{ input: string; modelOverride?: string; id: string; goalCondition?: string }>;
   patchCalls: Array<{ input: string; modelOverride?: string; id: string }>;
   testCalls: Array<{ input: string; modelOverride?: string; id: string; retry?: boolean }>;
+  gateCalls: Array<{ input: string; id: string }>;
 } {
   const planCalls: Array<{ description: string; forcedType?: string; id: string }> = [];
   const reviewCalls: Array<{ input: string; id: string }> = [];
   const buildCalls: Array<{ input: string; modelOverride?: string; id: string; goalCondition?: string }> = [];
   const patchCalls: Array<{ input: string; modelOverride?: string; id: string }> = [];
   const testCalls: Array<{ input: string; modelOverride?: string; id: string; retry?: boolean }> = [];
+  const gateCalls: Array<{ input: string; id: string }> = [];
 
   const buildQueue = Array.isArray(opts.build) ? [...opts.build] : null;
   const patchQueue = Array.isArray(opts.patch) ? [...opts.patch] : null;
@@ -173,6 +178,7 @@ function mockDeps(opts: {
     buildCalls,
     patchCalls,
     testCalls,
+    gateCalls,
     runPlan: async (description, forcedType, id) => {
       planCalls.push({ description, forcedType, id });
       return opts.plan ?? Either.right(mockPlan(mockSpecPath()));
@@ -208,6 +214,14 @@ function mockDeps(opts: {
       }
       return opts.patch && !Array.isArray(opts.patch) ? opts.patch : Either.right(mockPatchPass());
     },
+    // #240: only wired when opts.gate is set, so pre-existing tests (which
+    // omit it) pin the no-gate passthrough exactly like legacy deps mocks.
+    ...(opts.gate ? {
+      runFinalGate: async (input: string, id: string): Promise<Either<string, TestOutcome>> => {
+        gateCalls.push({ input, id });
+        return opts.gate!;
+      },
+    } : {}),
   };
 }
 
@@ -322,6 +336,84 @@ describe("runPipeline — fresh run", () => {
     expect(state.completed_stages).toEqual(["plan", "review", "build", "test", "patch-review"]);
     expect(state.agents).toContain("patch-reviewer");
     expect(state.agents).toContain("tester");
+  });
+
+  // ─────────────────── #240 full-suite final gate ───────────────────
+
+  test("gate green on patch-review pass: runs exactly once, state completed with final_gate_verdict", async () => {
+    const deps = mockDeps({ patch: Either.right(mockPatchPass()), gate: Either.right(mockTestPass()) });
+    const result = await runPipeline(deps, baseArgs(), AGENTS_DIR, mockWorktreeDeps);
+    if (Either.isLeft(result)) throw new Error(result.left);
+
+    expect(deps.gateCalls).toHaveLength(1);
+    expect(deps.gateCalls[0]!.id).toBe(deps.patchCalls[0]!.id);
+    const state = JSON.parse(readFileSync(join(AGENTS_DIR, result.right.id, "adw-state.json"), "utf8"));
+    expect(state.status).toBe("completed");
+    expect(state.final_gate_verdict).toBe("pass");
+    expect(state.completed_stages).toContain("patch-review");
+    const events = readFileSync(join(AGENTS_DIR, result.right.id, "orchestrator", "events.jsonl"), "utf8")
+      .split("\n").filter((l) => l.trim()).map((l) => JSON.parse(l));
+    expect(events.some((e) => e.event === "final-gate-pass")).toBe(true);
+  });
+
+  test("gate red: pipeline failed, failed_stage final-gate, patch-review NOT completed, no merge", async () => {
+    const mergeCalls: string[] = [];
+    const worktreeDeps = {
+      ...mockWorktreeDeps,
+      mergeBranchToMain: (rootPath: string, branch: string) => {
+        mergeCalls.push(branch);
+        return TaskEither.from(async () => Either.right({ sha: "deadbeef" }));
+      },
+    };
+    const gapsGate = mockTestPass();
+    const deps = mockDeps({ patch: Either.right(mockPatchPass()), gate: Either.right({ ...gapsGate, verdict: "gaps" }) });
+    const result = await runPipeline(deps, baseArgs({ merge: true }), AGENTS_DIR, worktreeDeps);
+    expect(Either.isLeft(result)).toBe(true);
+
+    const id = deps.planCalls[0]!.id;
+    const state = JSON.parse(readFileSync(join(AGENTS_DIR, id, "adw-state.json"), "utf8"));
+    expect(state.status).toBe("failed");
+    expect(state.failed_stage).toBe("final-gate");
+    expect(state.final_gate_verdict).toBe("gaps");
+    expect(state.completed_stages).not.toContain("patch-review");
+    expect(mergeCalls).toHaveLength(0);
+    const events = readFileSync(join(AGENTS_DIR, id, "orchestrator", "events.jsonl"), "utf8")
+      .split("\n").filter((l) => l.trim()).map((l) => JSON.parse(l));
+    expect(events.some((e) => e.event === "final-gate-failed")).toBe(true);
+  });
+
+  test("gate run error (Left): pipeline failed with final-gate-error", async () => {
+    const deps = mockDeps({ patch: Either.right(mockPatchPass()), gate: Either.left("spawn crashed") });
+    const result = await runPipeline(deps, baseArgs(), AGENTS_DIR, mockWorktreeDeps);
+    expect(Either.isLeft(result)).toBe(true);
+    const id = deps.planCalls[0]!.id;
+    const state = JSON.parse(readFileSync(join(AGENTS_DIR, id, "adw-state.json"), "utf8"));
+    expect(state.status).toBe("failed");
+    expect(state.failed_stage).toBe("final-gate");
+    const events = readFileSync(join(AGENTS_DIR, id, "orchestrator", "events.jsonl"), "utf8")
+      .split("\n").filter((l) => l.trim()).map((l) => JSON.parse(l));
+    expect(events.some((e) => e.event === "final-gate-error")).toBe(true);
+  });
+
+  test("gate does not run on gaps verdicts (loop iteration, not completion)", async () => {
+    const deps = mockDeps({
+      patch: [Either.right(mockPatchGaps()), Either.right(mockPatchPass())],
+      gate: Either.right(mockTestPass()),
+    });
+    const result = await runPipeline(deps, baseArgs(), AGENTS_DIR, mockWorktreeDeps);
+    if (Either.isLeft(result)) throw new Error(result.left);
+    // Two patch-review runs (gaps then pass) but the gate ran once, only at completion.
+    expect(deps.patchCalls).toHaveLength(2);
+    expect(deps.gateCalls).toHaveLength(1);
+  });
+
+  test("production deps always wire the final gate (#240)", () => {
+    // The gate is optional in PipelineDeps only so mock deps can omit it; a
+    // future deps variant that drops it would complete pipelines without the
+    // full-suite gate (a stderr warning at runtime, nothing structural). Pin
+    // the production factory.
+    const real = makeRealDeps({ getWorktreePath: () => undefined });
+    expect(typeof real.runFinalGate).toBe("function");
   });
 
   test("records base_sha before worktree creation and includes from_sha on event", async () => {

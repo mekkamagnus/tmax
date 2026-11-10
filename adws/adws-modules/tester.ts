@@ -127,7 +127,7 @@ export interface TestStageResult {
 // ensureAvailable — dependency guard
 // ---------------------------------------------------------------------------
 
-import { ensureCliAvailable } from "./dispatcher-runtime.ts";
+import { ensureCliAvailable, readWorkspaceState } from "./dispatcher-runtime.ts";
 export function ensureAvailable(deps: TesterDeps, cwd: string): TaskEither<string, void> {
   return ensureCliAvailable(deps.run, CLAUDE, cwd);
 }
@@ -339,6 +339,117 @@ export interface TrackCallbacks {
   onResolve?: (failureName: string, iteration: number) => void;
 }
 
+/** Options for the unit track. */
+export interface UnitTrackOpts {
+  /**
+   * #240: run only test files affected by the diff since this ref (the
+   * SPEC-065 worktree's recorded base_sha). Every loop iteration passes
+   * `--changed=<ref>` — resolver edits extend the diff, so the affected set
+   * updates each run. The full-suite verdict comes from the pipeline's final
+   * gate (see runFinalGate), not from this loop.
+   */
+  changedRef?: string;
+}
+
+/**
+ * #240: derive the unit track's --changed ref. Only an orchestrated run inside
+ * the SPEC-065 worktree gets affected-only mode: ADW_WORKTREE must be set AND
+ * the workspace state must record a base_sha (a validated full SHA at write
+ * time). Anything else — standalone runs, legacy state without base_sha —
+ * keeps today's full-suite behavior.
+ */
+export function deriveChangedRef(
+  agentsDir: string,
+  id: string,
+  worktreeEnv: string | undefined,
+): string | undefined {
+  if (!worktreeEnv) return undefined;
+  const state = readWorkspaceState(agentsDir, id);
+  if (Either.isLeft(state)) return undefined;
+  const sha = state.right.base_sha;
+  return typeof sha === "string" && sha.length > 0 ? sha : undefined;
+}
+
+/**
+ * #240: the full-suite final gate — ONE raw `bun test` invocation of the whole
+ * unit suite (wrapper-equivalent scope, see unitTestFiles), run at the end of
+ * the pipeline (after patch-review passes, before the implementation
+ * merge/completion). Same raw-call discipline as the unit track loop:
+ * spawning 'bun test' directly, not 'bun run test:unit' (the wrapper's
+ * grandchild keeps the process group alive and defeats drain-safe output
+ * collection). No resolve loop — a red gate stops the line for operator
+ * review; it never self-heals.
+ */
+export function runFinalGate(deps: TesterDeps, cwd: string): TaskEither<string, TrackResult> {
+  return TaskEither.from(async () => {
+    const start = Date.now();
+    const res = await deps.runRaw("bun", bunUnitArgs(unitTestFiles(cwd)), { cwd }).run();
+    if (Either.isLeft(res)) {
+      return Either.left(`runFinalGate: bun spawn failed: ${res.left}`);
+    }
+    const raw = res.right;
+    const parsed = parseBunTestOutput(raw.stdout, raw.stderr);
+    const output = truncate(`${raw.stdout}\n${raw.stderr}`.trim(), MAX_OUTPUT_CHARS);
+    return Either.right<TrackResult, string>({
+      // Stricter than the loop's condition: the gate's job is suite-wide
+      // verification, so a 0-test run (empty/missing test/unit listing) is
+      // RED here — never a vacuous green. The loop keeps the lenient
+      // `passed > 0 || exitCode === 0` form because a clean-worktree
+      // --changed no-op legitimately runs 0 tests there.
+      ok: raw.ok && parsed.failed === 0 && parsed.passed > 0,
+      exitCode: raw.exitCode,
+      passed: parsed.passed,
+      failed: parsed.failed,
+      durationMs: Date.now() - start,
+      iterations: 1,
+      failures: parsed.failures,
+      output,
+    });
+  });
+}
+
+/**
+ * The unit suite's file selection — the SAME rule scripts/run-unit-tests.ts
+ * (the test:unit wrapper) applies: every top-level test/unit/*.test.ts EXCEPT
+ * adw-* (LLM-subprocess integration tests; they belong to the test:adw CI job)
+ * and except the test/unit/tmax-use/ subdirectory the wrapper's non-recursive
+ * scan never picks up (measured 2026-11-10: that raw recursive scope is red on
+ * a pristine main — 7 failures across adw-process-cleanup ×3 and
+ * tmax-use instance/client ×4, serial AND parallel — so a raw recursive gate
+ * could never pass; the wrapper scope is what CI actually gates on and is
+ * green).
+ */
+function unitTestFiles(cwd: string): string[] {
+  return readdirSync(join(cwd, "test", "unit"))
+    .filter((f) => f.endsWith(".test.ts") && !f.startsWith("adw-"))
+    .map((f) => join("test/unit", f))
+    .sort(); // deterministic arg order across hosts (readdirSync is unsorted)
+}
+
+/**
+ * The raw `bun test` invocation of the unit suite — shared by the unit track
+ * loop (which appends `--changed=<ref>` in #240 affected-only mode) and the
+ * full-suite final gate. Deliberately NOT `bun run test:unit`: the wrapper
+ * spawns `bun test` as a grandchild; with detached:true, the grandchild keeps
+ * the process group alive after the test finishes, so Node's stdout/stderr
+ * streams never emit 'end' and the drain-safe trySettle never fires. The
+ * 20-min STAGE_RUN_TIMEOUT_MS timer then resolves with partial output (the
+ * first few KB, not the summary line), producing passed=5/failed=0. Spawning
+ * `bun test` directly avoids the grandchild entirely. The wrapper's FLAGS are
+ * adopted verbatim — they are the proven-green config: --parallel (worker
+ * processes, implies --isolate per #239; a serial raw run exceeded the 20-min
+ * stage timeout under host load, measured exit -1 / partial output / 1202 s,
+ * and a serial wrapper-scope run stalled past 500 s) and --timeout 60000 (the
+ * wrapper's value: server-startup/socket tests can far out-run their isolated
+ * time under full-suite load). Per-worker daemon-socket safety comes from the
+ * worker-token fixtures (#239) in the suite itself.
+ */
+function bunUnitArgs(unitFiles: string[], changedRef?: string): string[] {
+  return changedRef === undefined
+    ? ["test", "--dots", "--timeout", "60000", "--parallel", ...unitFiles]
+    : ["test", "--dots", "--timeout", "60000", "--parallel", `--changed=${changedRef}`, ...unitFiles];
+}
+
 /**
  * Run the unit track with a resolve-then-rerun loop.
  *
@@ -354,6 +465,7 @@ export function runUnitTrack(
   id: string,
   model: string = TEST_MODEL,
   callbacks: TrackCallbacks = {},
+  opts: UnitTrackOpts = {},
 ): TaskEither<string, TrackResult> {
   return TaskEither.from(async () => {
     const start = Date.now();
@@ -383,14 +495,9 @@ export function runUnitTrack(
       iterations++;
       callbacks.onIteration?.(iterations, maxSuiteRuns);
 
-      // Spawn 'bun test' directly, NOT 'bun run test:unit'. The 'bun run' wrapper
-      // spawns 'bun test' as a grandchild; with detached:true, the grandchild keeps
-      // the process group alive after the test finishes, so Node's stdout/stderr
-      // streams never emit 'end' and the drain-safe trySettle never fires. The
-      // 20-min STAGE_RUN_TIMEOUT_MS timer then resolves with partial output (the
-      // first few KB, not the summary line), producing passed=5/failed=0.
-      // Spawning 'bun test' directly avoids the grandchild entirely.
-      const res = await deps.runRaw("bun", ["test", "--timeout", "30000", "test/unit/"], { cwd }).run();
+      // #240: affected-only mode adds --changed=<ref>; the invocation itself
+      // (raw spawn, wrapper flags, wrapper file selection) lives in bunUnitArgs.
+      const res = await deps.runRaw("bun", bunUnitArgs(unitTestFiles(cwd), opts.changedRef), { cwd }).run();
       if (Either.isLeft(res)) {
         return Either.left(`runUnitTrack: bun spawn failed: ${res.left}`);
       }

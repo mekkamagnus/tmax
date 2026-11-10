@@ -25,6 +25,8 @@ import {
   buildTestStageResult,
   ensureAvailable,
   runUnitTrack,
+  runFinalGate,
+  deriveChangedRef,
   runE2eTrack,
 } from "../../adws/adws-modules/tester.ts";
 
@@ -156,6 +158,17 @@ describe("adw-test parseArgs", () => {
       expect(r.right.input).toBe("docs/specs/SPEC-063-adw-test.md");
       expect(r.right.model).toBeUndefined();
       expect(r.right.id).toBeUndefined();
+      expect(r.right.fullGate).toBe(false);
+    }
+  });
+
+  test("--full-gate + spec path → Right({ fullGate: true }) (#240)", () => {
+    const r = parseArgs(["--full-gate", "--id", "ADWTESTXYZ", "docs/specs/SPEC-001.md"]);
+    expect(Either.isRight(r)).toBe(true);
+    if (Either.isRight(r)) {
+      expect(r.right.fullGate).toBe(true);
+      expect(r.right.id).toBe("ADWTESTXYZ");
+      expect(r.right.input).toBe("docs/specs/SPEC-001.md");
     }
   });
 
@@ -409,6 +422,23 @@ describe("buildTestStageResult", () => {
 
 // ─────────────────────── runUnitTrack (mocked) ─────────────────────
 
+/**
+ * #240: a cwd with a real test/unit tree for the raw-invocation tests. The
+ * tester builds the bun args from the cwd's directory listing (the wrapper's
+ * selection rule), so "/tmp" would throw ENOENT — and the fixture pins the
+ * rule itself: top-level *.test.ts in, adw-* and subdirectories out.
+ */
+const UNIT_CWD: string = (() => {
+  const cwd = mkdtempSync(join(tmpdir(), "adw-unitcwd-"));
+  mkdirSync(join(cwd, "test", "unit", "tmax-use"), { recursive: true });
+  writeFileSync(join(cwd, "test", "unit", "alpha.test.ts"), "");
+  writeFileSync(join(cwd, "test", "unit", "beta.test.ts"), "");
+  writeFileSync(join(cwd, "test", "unit", "adw-nope.test.ts"), "");
+  writeFileSync(join(cwd, "test", "unit", "notes.txt"), "");
+  writeFileSync(join(cwd, "test", "unit", "tmax-use", "gamma.test.ts"), "");
+  return cwd;
+})();
+
 describe("runUnitTrack", () => {
   test("first-iteration pass → iterations=1, ok=true, no resolve spawn", async () => {
     let rawCalls = 0;
@@ -418,7 +448,7 @@ describe("runUnitTrack", () => {
       onRaw: (n) => { rawCalls = n; },
       onCapture: (n) => { captureCalls = n; },
     });
-    const r = await runUnitTrack(deps, "/tmp", "/tmp/agents", "TEST", "m", {}).run();
+    const r = await runUnitTrack(deps, UNIT_CWD, "/tmp/agents", "TEST", "m", {}).run();
     expect(Either.isRight(r)).toBe(true);
     if (Either.isRight(r)) {
       expect(r.right.ok).toBe(true);
@@ -438,7 +468,7 @@ describe("runUnitTrack", () => {
       onRaw: (n) => { rawCalls = n; },
       onCapture: (n) => { captureCalls = n; },
     });
-    const r = await runUnitTrack(deps, "/tmp", "/tmp/agents", "TEST", "m", {}).run();
+    const r = await runUnitTrack(deps, UNIT_CWD, "/tmp/agents", "TEST", "m", {}).run();
     expect(Either.isRight(r)).toBe(true);
     if (Either.isRight(r)) {
       expect(r.right.ok).toBe(false);
@@ -451,7 +481,7 @@ describe("runUnitTrack", () => {
 
   test("spawn failure → Left (propagates as stage error)", async () => {
     const deps = failingSpawnDeps();
-    const r = await runUnitTrack(deps, "/tmp", "/tmp/agents", "TEST", "m", {}).run();
+    const r = await runUnitTrack(deps, UNIT_CWD, "/tmp/agents", "TEST", "m", {}).run();
     expect(Either.isLeft(r)).toBe(true);
   });
 
@@ -466,7 +496,7 @@ describe("runUnitTrack", () => {
       onRaw: (n) => { rawCalls = n; },
       onCapture: (n) => { captureCalls = n; },
     });
-    const r = await runUnitTrack(deps, "/tmp", "/tmp/agents", "TEST", "m", {}).run();
+    const r = await runUnitTrack(deps, UNIT_CWD, "/tmp/agents", "TEST", "m", {}).run();
     expect(Either.isRight(r)).toBe(true);
     if (Either.isRight(r)) {
       expect(r.right.ok).toBe(true);
@@ -488,7 +518,7 @@ describe("runUnitTrack", () => {
         captureCalls.push({ cmd, args, teeTo: captureOpts.teeTo });
       },
     });
-    const r = await runUnitTrack(deps, "/tmp", "/tmp/agents", "TEST", "m", {}).run();
+    const r = await runUnitTrack(deps, UNIT_CWD, "/tmp/agents", "TEST", "m", {}).run();
     expect(Either.isRight(r)).toBe(true);
     if (Either.isRight(r)) {
       expect(r.right.ok).toBe(false);
@@ -523,7 +553,7 @@ describe("runUnitTrack", () => {
         onRaw: (n) => { rawCalls = n; },
         onCapture: (n) => { captureCalls = n; },
       });
-      const r = await runUnitTrack(deps, "/tmp", "/tmp/agents", "TEST", "m", {}).run();
+      const r = await runUnitTrack(deps, UNIT_CWD, "/tmp/agents", "TEST", "m", {}).run();
       expect(Either.isRight(r)).toBe(true);
       if (Either.isRight(r)) {
         expect(r.right.ok).toBe(false);
@@ -550,7 +580,7 @@ describe("runUnitTrack", () => {
       },
       runCapture: deps.runCapture,
     };
-    const r = await runUnitTrack(trackingDeps, "/tmp", "/tmp/agents", "TEST", "m", {}).run();
+    const r = await runUnitTrack(trackingDeps, UNIT_CWD, "/tmp/agents", "TEST", "m", {}).run();
     // Loop runs all 1 + MAX_UNIT_ITERATIONS cycles despite runCapture returning Left.
     expect(Either.isRight(r)).toBe(true);
     if (Either.isRight(r)) {
@@ -558,6 +588,161 @@ describe("runUnitTrack", () => {
       expect(r.right.iterations).toBe(1 + MAX_UNIT_ITERATIONS);
     }
     expect(rawCalls).toBe(1 + MAX_UNIT_ITERATIONS);
+  });
+});
+
+// ─────────────────── runUnitTrack --changed (#240) ───────────────────
+
+/** Deps whose runRaw records every (cmd, args) and returns a fixed raw result. */
+function argsRecordingDeps(raw: RawRunResult): TesterDeps & { rawCalls: Array<{ cmd: string; args: string[] }> } {
+  const rawCalls: Array<{ cmd: string; args: string[] }> = [];
+  return {
+    rawCalls,
+    run: () => TaskEither.right<string>(""),
+    runRaw: (cmd, args) => {
+      rawCalls.push({ cmd, args });
+      return TaskEither.from(async () => Either.right<RawRunResult, string>(raw));
+    },
+    runCapture: () => TaskEither.right<string>(""),
+  };
+}
+
+describe("runUnitTrack --changed (#240)", () => {
+  test("changedRef → every suite invocation passes --changed=<ref>", async () => {
+    const deps = argsRecordingDeps(failedRaw);
+    await runUnitTrack(deps, UNIT_CWD, "/tmp/agents", "TEST", "m", {}, { changedRef: "abc123" }).run();
+    // Loop ran the full 1 + MAX_UNIT_ITERATIONS cycles; every one used the flag.
+    expect(deps.rawCalls.length).toBe(1 + MAX_UNIT_ITERATIONS);
+    for (const call of deps.rawCalls) {
+      expect(call.cmd).toBe("bun");
+      expect(call.args).toContain("--changed=abc123");
+      expect(call.args).toContain("test/unit/alpha.test.ts");
+      expect(call.args).toContain("test/unit/beta.test.ts");
+      // Wrapper selection rule: adw-* files and subdirectories never selected.
+      expect(call.args.some((a) => a.includes("adw-nope"))).toBe(false);
+      expect(call.args.some((a) => a.includes("tmax-use"))).toBe(false);
+    }
+  });
+
+  test("no changedRef → wrapper-equivalent invocation (flags + file list, no --changed)", async () => {
+    const deps = argsRecordingDeps(okRaw);
+    const r = await runUnitTrack(deps, UNIT_CWD, "/tmp/agents", "TEST", "m", {}).run();
+    expect(Either.isRight(r)).toBe(true);
+    if (Either.isRight(r)) expect(r.right.ok).toBe(true);
+    expect(deps.rawCalls).toHaveLength(1);
+    const args = deps.rawCalls[0]!.args;
+    // The wrapper's proven flags, verbatim (scripts/run-unit-tests.ts).
+    expect(args.slice(0, 5)).toEqual(["test", "--dots", "--timeout", "60000", "--parallel"]);
+    expect(args.slice(5).sort()).toEqual(["test/unit/alpha.test.ts", "test/unit/beta.test.ts"]);
+    expect(args.some((a) => a.startsWith("--changed"))).toBe(false);
+  });
+
+  test("clean worktree (--changed runs 0 tests, exit 0) → ok, iterations=1", async () => {
+    // Probed bun 1.4.4 behavior for an empty diff: "--changed: no changed
+    // files, nothing to run", exit 0, "Ran 0 tests across 0 files". The loop's
+    // ok condition (passed > 0 || exitCode === 0) accepts it; the pipeline's
+    // full-suite final gate carries the suite verdict.
+    const zeroRaw: RawRunResult = {
+      ok: true,
+      exitCode: 0,
+      stdout: "--changed: no changed files, nothing to run\n\n0 pass\n0 fail",
+      stderr: "",
+    };
+    const deps = argsRecordingDeps(zeroRaw);
+    const r = await runUnitTrack(deps, UNIT_CWD, "/tmp/agents", "TEST", "m", {}, { changedRef: "abc123" }).run();
+    expect(Either.isRight(r)).toBe(true);
+    if (Either.isRight(r)) {
+      expect(r.right.ok).toBe(true);
+      expect(r.right.iterations).toBe(1);
+      expect(r.right.passed).toBe(0);
+    }
+  });
+});
+
+// ─────────────────── deriveChangedRef (#240) ───────────────────
+
+describe("deriveChangedRef (#240)", () => {
+  test("no ADW_WORKTREE → undefined (standalone keeps full-suite behavior)", () => {
+    expect(deriveChangedRef("/tmp/agents", "TEST", undefined)).toBeUndefined();
+    expect(deriveChangedRef("/tmp/agents", "TEST", "")).toBeUndefined();
+  });
+
+  test("workspace state without base_sha → undefined", () => {
+    const agentsDir = mkdtempSync(join(tmpdir(), "adw-changedref-"));
+    try {
+      mkdirSync(join(agentsDir, "WTESTNOSHA"), { recursive: true });
+      writeFileSync(join(agentsDir, "WTESTNOSHA", "adw-state.json"), JSON.stringify({ adw_id: "WTESTNOSHA" }));
+      expect(deriveChangedRef(agentsDir, "WTESTNOSHA", "/tmp/wt")).toBeUndefined();
+    } finally {
+      rmSync(agentsDir, { recursive: true, force: true });
+    }
+  });
+
+  test("worktree env + recorded base_sha → the sha", () => {
+    const agentsDir = mkdtempSync(join(tmpdir(), "adw-changedref-"));
+    try {
+      mkdirSync(join(agentsDir, "WTESTSHA001"), { recursive: true });
+      writeFileSync(
+        join(agentsDir, "WTESTSHA001", "adw-state.json"),
+        JSON.stringify({ adw_id: "WTESTSHA001", base_sha: "04106c0deadbeef" }),
+      );
+      expect(deriveChangedRef(agentsDir, "WTESTSHA001", "/tmp/wt")).toBe("04106c0deadbeef");
+    } finally {
+      rmSync(agentsDir, { recursive: true, force: true });
+    }
+  });
+
+  test("missing workspace state → undefined (legacy/misrouted id degrades to full)", () => {
+    expect(deriveChangedRef("/tmp/agents-does-not-exist", "TEST", "/tmp/wt")).toBeUndefined();
+  });
+});
+
+// ─────────────────── runFinalGate (#240) ───────────────────
+
+describe("runFinalGate (#240)", () => {
+  test("green full run → ok=true, iterations=1, no resolve spawn", async () => {
+    let captureCalls = 0;
+    const deps = makeDeps({
+      raw: okRaw,
+      onCapture: (n) => { captureCalls = n; },
+    });
+    const r = await runFinalGate(deps, UNIT_CWD).run();
+    expect(Either.isRight(r)).toBe(true);
+    if (Either.isRight(r)) {
+      expect(r.right.ok).toBe(true);
+      expect(r.right.iterations).toBe(1);
+      expect(r.right.failed).toBe(0);
+    }
+    expect(captureCalls).toBe(0);
+  });
+
+  test("red full run → ok=false with the suite's failure counts (no self-heal)", async () => {
+    const deps = makeDeps({ raw: multiFailedRaw });
+    const r = await runFinalGate(deps, UNIT_CWD).run();
+    expect(Either.isRight(r)).toBe(true);
+    if (Either.isRight(r)) {
+      expect(r.right.ok).toBe(false);
+      expect(r.right.failed).toBe(3);
+      expect(r.right.failures).toHaveLength(3);
+    }
+  });
+
+  test("spawn failure → Left", async () => {
+    const r = await runFinalGate(failingSpawnDeps(), UNIT_CWD).run();
+    expect(Either.isLeft(r)).toBe(true);
+  });
+
+  test("0-test exit-0 run (empty/missing listing) → ok=false, never a vacuous green", async () => {
+    // The gate's whole job is suite-wide verification — unlike the loop's
+    // lenient condition, a run that executed NOTHING is red here.
+    const zeroRaw: RawRunResult = { ok: true, exitCode: 0, stdout: "0 pass\n0 fail", stderr: "" };
+    const deps = argsRecordingDeps(zeroRaw);
+    const r = await runFinalGate(deps, UNIT_CWD).run();
+    expect(Either.isRight(r)).toBe(true);
+    if (Either.isRight(r)) {
+      expect(r.right.ok).toBe(false);
+      expect(r.right.passed).toBe(0);
+    }
   });
 });
 
@@ -781,8 +966,8 @@ describe("runTestWithDeps (end-to-end, mocked deps)", () => {
       run: () => TaskEither.right<string>("claude 1.0"),
       runRaw: (cmd, args) => {
         // Differentiate by the command: tester.ts dispatches
-        // `bun test --timeout 30000 test/unit/` for the unit track and
-        // `bin/tmax-use test` for the e2e track.
+        // `bun test --dots --timeout 60000 --parallel <unit files>` for the
+        // unit track and `bin/tmax-use test` for the e2e track.
         if (cmd === "bin/tmax-use" || (cmd === "bun" && args?.[1] === "test:tmax-use")) {
           return TaskEither.from(async () => Either.right<RawRunResult, string>({
             ok: false,
@@ -892,5 +1077,70 @@ describe("runTestWithDeps (end-to-end, mocked deps)", () => {
     });
     expect(Either.isLeft(r)).toBe(true);
     if (Either.isLeft(r)) expect(r.left).toContain("claude");
+  }, 30_000);
+
+  // ─────────────────── --full-gate mode (#240) ───────────────────
+
+  test("fullGate green → verdict pass, final_gate event, no state/results clobber", async () => {
+    // Pre-seed a workspace state a standalone --full-gate must NOT touch:
+    // writeState REPLACES the file, so a state-owning gate would wipe
+    // base_sha/completed_stages of an existing workspace.
+    const statePath = join(agentsIdDir, "adw-state.json");
+    const sentinelState = JSON.stringify({ adw_id: testId, base_sha: "04106c0deadbeef", completed_stages: ["plan"] });
+    mkdirSync(agentsIdDir, { recursive: true });
+    writeFileSync(statePath, sentinelState);
+    const r = await runTestWithDeps(specInput, {
+      modelOverride: "m",
+      id: testId,
+      fullGate: true,
+      deps: passTracksDeps(),
+    });
+    expect(Either.isRight(r)).toBe(true);
+    if (Either.isRight(r)) {
+      expect(r.right.verdict).toBe("pass");
+      expect(r.right.id).toBe(testId);
+    }
+    // The gate never owns state: the pre-existing file is byte-identical.
+    expect(readFileSync(statePath, "utf8")).toBe(sentinelState);
+    const eventsFile = join(agentsIdDir, "tester", "events.jsonl");
+    expect(existsSync(eventsFile)).toBe(true);
+    const events = readFileSync(eventsFile, "utf8").split("\n").filter((l) => l.trim()).map((l) => JSON.parse(l));
+    const start = events.find((e) => e.event === "start");
+    expect(start?.mode).toBe("full-gate");
+    const gate = events.find((e) => e.event === "final_gate");
+    expect(gate?.ok).toBe(true);
+    expect(gate?.passed).toBe(5);
+    // The gate must not clobber the test stage's results bundle.
+    expect(existsSync(join(agentsIdDir, "tester", "results.json"))).toBe(false);
+  }, 30_000);
+
+  test("fullGate red → verdict gaps, final_gate event with failures", async () => {
+    const deps: TesterDeps = {
+      run: () => TaskEither.right<string>("claude 1.0"),
+      runRaw: (cmd) => {
+        if (cmd === "bun") {
+          return TaskEither.from(async () => Either.right<RawRunResult, string>(multiFailedRaw));
+        }
+        return TaskEither.from(async () => Either.right<RawRunResult, string>({
+          ok: true, exitCode: 0, stdout: "", stderr: "",
+        }));
+      },
+      runCapture: () => TaskEither.right<string>(""),
+    };
+    const r = await runTestWithDeps(specInput, {
+      modelOverride: "m",
+      id: testId,
+      fullGate: true,
+      deps,
+    });
+    expect(Either.isRight(r)).toBe(true);
+    if (Either.isRight(r)) {
+      expect(r.right.verdict).toBe("gaps");
+    }
+    const events = readFileSync(join(agentsIdDir, "tester", "events.jsonl"), "utf8")
+      .split("\n").filter((l) => l.trim()).map((l) => JSON.parse(l));
+    const gate = events.find((e) => e.event === "final_gate");
+    expect(gate?.ok).toBe(false);
+    expect(gate?.failed).toBe(3);
   }, 30_000);
 });

@@ -49,6 +49,8 @@ import {
   type TestStageResult,
   ensureAvailable,
   runUnitTrack,
+  runFinalGate,
+  deriveChangedRef,
   runE2eTrack,
   buildTestStageResult,
   writeResults,
@@ -74,6 +76,10 @@ Prints "<id> <pass|gaps> <spec-path>" on success. E2e is skipped if unit fails.
   --id <id>      Use a specific workspace id (default: reuse discovered workspace).
   <spec-path>    A docs/specs/{SPEC,BUG,CHORE}-*.md path.
   <adw-id>       A 10-char ULID-timestamp id from a prior adw-build run.
+  --full-gate    #240: skip the tracks — run ONE full-suite unit invocation and
+                 report pass|gaps. The orchestrator invokes this at the end of
+                 the pipeline (after patch-review passes) as the final gate;
+                 unit-loop iterations use --changed=<base_sha> instead.
 
 State: ./agents/{id}/adw-state.json; events:
 ./agents/{id}/tester/events.jsonl; resolver output:
@@ -84,15 +90,18 @@ export interface ParsedArgs {
   input: string;
   model?: string;
   id?: string;
+  fullGate?: boolean;
 }
 
 export function parseArgs(argv: string[]): Either<string, ParsedArgs> {
   let input = "";
   let model: string | undefined;
   let id: string | undefined;
+  let fullGate = false;
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i]!;
     if (a === "-h" || a === "--help") return Either.left(`__help__:${USAGE}`);
+    else if (a === "--full-gate") fullGate = true;
     else if (a === "--model") {
       const val = argv[++i];
       if (val === undefined) return Either.left("--model requires a value.");
@@ -106,7 +115,7 @@ export function parseArgs(argv: string[]): Either<string, ParsedArgs> {
     else return Either.left(`Unexpected extra argument: ${a}`);
   }
   if (!input) return Either.left(`__usage__:${USAGE}`);
-  return Either.right({ input, model, id });
+  return Either.right({ input, model, id, fullGate });
 }
 
 // ---------------------------------------------------------------------------
@@ -220,14 +229,17 @@ export function runTest(
   input: string,
   modelOverride?: string,
   id?: string,
+  fullGate = false,
 ): Promise<Either<string, TestOutcome>> {
   const deps: TesterDeps = { run, runRaw, runCapture };
-  return runTestWithDeps(input, { modelOverride, id, deps });
+  return runTestWithDeps(input, { modelOverride, id, fullGate, deps });
 }
 
 interface TestOptions {
   modelOverride?: string;
   id?: string;
+  /** #240: gate-only invocation — one full-suite unit run, no tracks. */
+  fullGate?: boolean;
   deps?: TesterDeps;
 }
 
@@ -248,7 +260,11 @@ export function runTestWithDeps(
     }),
   };
 
-  const ownsState = process.env.ADW_ORCHESTRATED !== "1";
+  // Full-gate (#240) never owns state even standalone: it's a probe/diagnostic
+  // entry (the orchestrator owns the workspace state in production), and
+  // writeState REPLACES the file — owning it here would clobber an existing
+  // workspace's base_sha/completed_stages on a standalone --full-gate run.
+  const ownsState = options.fullGate ? false : process.env.ADW_ORCHESTRATED !== "1";
 
   // Hoisted: resolve input BEFORE minting the id.
   const resolvedInput = resolveInput(input);
@@ -288,6 +304,65 @@ export function runTestWithDeps(
   // back to PROJECT_ROOT and behaves exactly as before.
   const cwd = process.env.ADW_WORKTREE ?? PROJECT_ROOT;
 
+  // #240: gate-only mode — one full-suite invocation as the pipeline's final
+  // gate (the orchestrator calls this after patch-review passes). No tracks,
+  // no resolve loop: a red gate stops the line. The gate never writes state
+  // (ownsState is false in full-gate mode): events under agents/{id}/tester/
+  // are its only record, and the orchestrator owns the workspace state.
+  if (options.fullGate) {
+    const gateProgram = TaskEither
+      .right<Resolved, string>(currentRun)
+      // Step 0: dependency guard — claude on PATH (keeps gate runs honest if
+      // future revisions route failures through the resolver).
+      .flatMap((s) => ensureAvailable(deps, cwd).map(() => s))
+      // Step 1: start event.
+      .flatMap((ctx) => {
+        appendEvent(ctx.id, {
+          event: "start",
+          mode: "full-gate",
+          spec_path: ctx.specPath,
+          source: ctx.source,
+          model: ctx.model,
+        });
+        return TaskEither.right<Resolved, string>(ctx);
+      })
+      // Step 2: the gate — ONE full-suite unit run.
+      .flatMap((ctx) => {
+        writePhase(`[test] full-gate (1 suite run)\n`);
+        return runFinalGate(deps, cwd)
+          .tap((gate: TrackResult) => appendEvent(ctx.id, {
+            event: "final_gate",
+            ok: gate.ok,
+            exit_code: gate.exitCode,
+            passed: gate.passed,
+            failed: gate.failed,
+            duration_ms: gate.durationMs,
+          }))
+          .map((gate: TrackResult) => ({
+            id: ctx.id,
+            verdict: gate.ok ? ("pass" as const) : ("gaps" as const),
+            specPath: ctx.specPath,
+          }) as TestOutcome);
+      });
+    return gateProgram.run().then((result) => {
+      if (Either.isLeft(result)) {
+        if (currentRun) {
+          appendEvent(currentRun.id, { event: "error", mode: "full-gate", detail: result.left });
+        }
+        return Either.left(result.left);
+      }
+      return Either.right(result.right);
+    });
+  }
+
+  // #240: affected-only unit iterations — only when orchestrated inside the
+  // SPEC-065 worktree with a recorded base_sha (standalone = full suite, as
+  // before). The full-suite verdict comes from the pipeline's final gate.
+  const changedRef = deriveChangedRef(AGENTS_DIR, runId, process.env.ADW_WORKTREE);
+  if (changedRef) {
+    process.stderr.write(`adw-test: unit loop --changed=${changedRef} (affected-only; full gate at pipeline end)\n`);
+  }
+
   const program = TaskEither
     .right<Resolved, string>(currentRun)
     // Step 0: dependency guard — claude on PATH.
@@ -315,7 +390,7 @@ export function runTestWithDeps(
         onResolve: (name, it) => {
           appendEvent(ctx.id, { event: "unit_resolve", iteration: it, failure: name });
         },
-      })
+      }, { changedRef })
         .tap((unit: TrackResult) => appendEvent(ctx.id, {
           event: "unit_track",
           ok: unit.ok,
@@ -324,6 +399,7 @@ export function runTestWithDeps(
           failed: unit.failed,
           iterations: unit.iterations,
           duration_ms: unit.durationMs,
+          ...(changedRef ? { changed_ref: changedRef } : {}),
           ...(unit.reportDir ? { report_dir: unit.reportDir } : {}),
         }))
         .map((unit: TrackResult) => ({ ...ctx, unit }));
@@ -427,7 +503,7 @@ function main(): Promise<number> {
     return Promise.resolve(1);
   }
 
-  return runTest(parsed.right.input, parsed.right.model, parsed.right.id).then((result) => {
+  return runTest(parsed.right.input, parsed.right.model, parsed.right.id, parsed.right.fullGate).then((result) => {
     if (Either.isLeft(result)) {
       process.stderr.write(`Error: ${result.left}\n`);
       return 2;

@@ -413,6 +413,8 @@ export interface WorkspaceState {
   patch_review_iterations?: number;
   patch_review_next_action?: "build" | "patch-review";
   patch_review_verdict?: string;
+  /** #240: verdict of the full-suite final gate (set once the gate ran). */
+  final_gate_verdict?: string;
   goal_condition?: string;
   /** SPEC-065: implementation commit SHA after a successful build (or null when worktree was clean). */
   implementation_commit?: string | null;

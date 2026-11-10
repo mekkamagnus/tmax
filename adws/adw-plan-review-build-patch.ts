@@ -624,6 +624,12 @@ export interface PipelineDeps {
   runBuild: (specPath: string, modelOverride: string | undefined, id: string, goalCondition?: string) => Promise<Either<string, BuildOutcome>>;
   runTest: (specPath: string, modelOverride: string | undefined, id: string) => Promise<Either<string, TestOutcome>>;
   runPatchReview: (specPath: string, modelOverride: string | undefined, id: string) => Promise<Either<string, PatchReviewResult>>;
+  /**
+   * #240: the full-suite final gate — one complete unit-suite run at the end
+   * of the pipeline (after patch-review passes, before merge/completion).
+   * Optional so existing deps mocks skip it; makeRealDeps always provides it.
+   */
+  runFinalGate?: (specPath: string, id: string) => Promise<Either<string, TestOutcome>>;
 }
 
 /**
@@ -657,7 +663,9 @@ export interface OrchestratorWorktreeDeps extends WorktreeDeps {
  * In tests, the caller injects mock `deps` directly — they don't need this
  * factory at all. This factory is the production glue.
  */
-function makeRealDeps(opts: { getWorktreePath: () => string | undefined }): PipelineDeps {
+// Exported for the wiring test: the #240 final gate must always be present in
+// the production deps (its absence only warns at runtime).
+export function makeRealDeps(opts: { getWorktreePath: () => string | undefined }): PipelineDeps {
   const getWt = opts.getWorktreePath;
   return {
     runPlan: async (description, forcedType, id): Promise<Either<string, PlanResult>> => {
@@ -732,6 +740,19 @@ function makeRealDeps(opts: { getWorktreePath: () => string | undefined }): Pipe
       }
       return Either.right({ id: tokens[0]!, verdict, specPath: tokens.slice(2).join(" ") });
     },
+    // #240: the full-suite final gate — adw-test.ts --full-gate (one complete
+    // unit-suite run, no tracks). Same stdout contract as runTest.
+    runFinalGate: async (specPath, id): Promise<Either<string, TestOutcome>> => {
+      const r = await spawnStage("adw-test.ts", ["--full-gate", specPath, "--id", id], null, getWt());
+      if (r.code !== 0) return Either.left(r.stdout || `adw-test --full-gate exited with code ${r.code}`);
+      const tokens = tokensOf(r.stdout);
+      if (!tokens || tokens.length < 3) return Either.left(`adw-test --full-gate: unparseable stdout: ${r.stdout.slice(0, 200)}`);
+      const verdict = tokens[1];
+      if (verdict !== "pass" && verdict !== "gaps") {
+        return Either.left(`adw-test --full-gate: unexpected verdict "${verdict}" in stdout`);
+      }
+      return Either.right({ id: tokens[0]!, verdict, specPath: tokens.slice(2).join(" ") });
+    },
   };
 }
 
@@ -768,7 +789,8 @@ interface OrchestratorState {
   /** OS process start time in ms (Layer-2 watchdog PID-identity check). */
   orchestrator_started_at_ms?: number;
   agents?: string[];
-  failed_stage?: StageName;
+  /** #240: "final-gate" joins the union for the full-suite gate failure path. */
+  failed_stage?: StageName | "final-gate";
   completed_stages?: StageName[];
   spec_path?: string;
   patch_review_verdict?: "pass" | "gaps";
@@ -787,6 +809,8 @@ interface OrchestratorState {
   host?: string;
   /** SPEC-065: timestamp (ISO) when --setup-only finished (for dashboard derivation). */
   setup_completed_at?: string;
+  /** #240: verdict of the full-suite final gate (set once the gate ran). */
+  final_gate_verdict?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -1413,9 +1437,11 @@ export async function runPipeline(
     state.patch_review_iterations = patchIterations;
 
     if (patchVerdict === "pass") {
-      // Gaps closed — finalize as completed.
+      // Gaps closed — finalize as completed. patch-review is marked complete
+      // only AFTER the #240 full-suite final gate below: a red gate leaves it
+      // incomplete so a resume re-runs patch-review → gate (not a silent
+      // completed release with a red suite).
       delete state.patch_review_next_action;
-      if (!completedStages.includes("patch-review")) completedStages.push("patch-review");
 
       // SPEC-065: commit implementation dirt on adw/<id> before finalize so
       // mergeBranchToMain() and remote fetch see committed history (not dirt).
@@ -1433,20 +1459,51 @@ export async function runPipeline(
           event: commitRes.right.committed ? "implementation-committed" : "implementation-commit-skipped",
           ...(commitRes.right.sha ? { sha: commitRes.right.sha } : {}),
         }, agentsDir);
+      }
 
-        // SPEC-065: optional --merge lands adw/<id> on main via --no-ff.
-        if (args.merge) {
-          const mergeMsg = `adw ${id}: merge ${branch}`;
-          const mergeRes = await worktreeDeps.mergeBranchToMain(PROJECT_ROOT, branch, mergeMsg).run();
-          if (Either.isLeft(mergeRes)) {
-            appendEvent(id, { event: "merge-error", detail: mergeRes.left, worktree_path: currentWorktreePath }, agentsDir);
-            state.failed_stage = "patch-review";
-            return finalize(Either.left(
-              `merge conflict — resolve in worktree at ${currentWorktreePath}: ${mergeRes.left}`,
-            ));
-          }
-          appendEvent(id, { event: "merged-to-main", branch, sha: mergeRes.right.sha }, agentsDir);
+      // #240: full-suite final gate — the loop's unit runs were affected-only
+      // (--changed=<base_sha>); this ONE complete run is the pipeline's
+      // suite-wide verdict. Runs after the implementation commit (clean tree)
+      // and before marking patch-review complete / --merge (a red suite must
+      // never land on main). A red gate fails the pipeline for operator
+      // review — it never routes back into build automatically.
+      if (deps.runFinalGate) {
+        const gateRes = await deps.runFinalGate(specPathForLater, id);
+        if (Either.isLeft(gateRes)) {
+          appendEvent(id, { event: "final-gate-error", detail: gateRes.left }, agentsDir);
+          state.failed_stage = "final-gate";
+          return finalize(Either.left(`final gate failed to run: ${gateRes.left}`));
         }
+        state.final_gate_verdict = gateRes.right.verdict;
+        if (gateRes.right.verdict !== "pass") {
+          appendEvent(id, { event: "final-gate-failed", verdict: gateRes.right.verdict }, agentsDir);
+          state.failed_stage = "final-gate";
+          return finalize(Either.left(
+            `final gate: full unit suite red (see agents/${id}/tester/events.jsonl final_gate)`,
+          ));
+        }
+        appendEvent(id, { event: "final-gate-pass" }, agentsDir);
+      } else {
+        // Optional only so mock-deps unit tests can omit it; production
+        // (makeRealDeps) always wires it. Warn loudly if a wiring ever doesn't.
+        process.stderr.write(`adw ${id}: deps.runFinalGate not wired — completing WITHOUT the full-suite gate\n`);
+      }
+      if (!completedStages.includes("patch-review")) completedStages.push("patch-review");
+
+      // SPEC-065: optional --merge lands adw/<id> on main via --no-ff. Still
+      // worktree-gated exactly as before #240 (the block used to nest inside
+      // `if (currentWorktreePath)`); --merge without a worktree never merged.
+      if (currentWorktreePath && args.merge) {
+        const mergeMsg = `adw ${id}: merge ${branch}`;
+        const mergeRes = await worktreeDeps.mergeBranchToMain(PROJECT_ROOT, branch, mergeMsg).run();
+        if (Either.isLeft(mergeRes)) {
+          appendEvent(id, { event: "merge-error", detail: mergeRes.left, worktree_path: currentWorktreePath }, agentsDir);
+          state.failed_stage = "patch-review";
+          return finalize(Either.left(
+            `merge conflict — resolve in worktree at ${currentWorktreePath}: ${mergeRes.left}`,
+          ));
+        }
+        appendEvent(id, { event: "merged-to-main", branch, sha: mergeRes.right.sha }, agentsDir);
       }
 
       await writeState(id, state as unknown as Record<string, unknown>, agentsDir).run();
