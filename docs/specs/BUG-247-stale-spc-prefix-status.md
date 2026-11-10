@@ -93,5 +93,6 @@ Live: `SPC ;` then `Escape` in any frontend.
 - The issue's restore-snapshot hypothesis was disproven by repro: no snapshot
   restore exists; the indicator is simply never cleared.
 
-Status: implemented pending gate (verify-gate + CI) — land only with typecheck
-clean, unit suite green, verify-gate PASS.
+Status: RESOLVED pending CI green — implemented at issue-247 (aff1499);
+typecheck clean, unit suite 3,605/0, verify-gate PASS round 1 (verifier
+independently re-ran the mutation proof: 3/6 red without the two exec calls).
