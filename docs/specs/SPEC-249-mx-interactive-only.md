@@ -106,5 +106,7 @@ fallback (filter-empty → full table) are unchanged.
 - Counts: 116 (already interactive) + 79 (migrated defuns) + 12 (marked TS)
   = 207 commands.
 
-Status: implemented pending gate (verify-gate + CI) — land only with typecheck
-clean, unit suite green, verify-gate PASS.
+Status: RESOLVED pending CI green — implemented at issue-249 (f450602, amended
+after gate round 1 caught the lost T-Lisp guard edit); typecheck clean, unit
+suite 3,610/0, verify-gate PASS on retry 1 (verifier independently
+re-proved the isCommand mutation).
