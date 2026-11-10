@@ -88,7 +88,16 @@ export function getVisibleViewportLeft(state: EditorState, contentWidth: number)
 
 export function getCursorScreenOffset(state: EditorState, bufferHeight: number, contentWidth: number): { row: number; col: number } {
   const viewportTop = getVisibleViewportTop(state, bufferHeight);
-  const viewportLeft = getVisibleViewportLeft(state, contentWidth);
+  // #248: the rendered frame prefixes every buffer line with the gutter
+  // (` N │`), and the drawn block cursor sits at gutter + content column.
+  // Mirror the render path: clamp against the gutter-reduced content width
+  // (renderBufferLines fits content to `width - gw`) and return the ABSOLUTE
+  // screen column so the hardware cursor the frontends position via moveTo()
+  // lands on the same cell the frame painted. Gutter off → gw = 0 →
+  // byte-identical to the old behavior.
+  const gutterCfg = gutterConfigFromState(state.activeMinorModes, state.config);
+  const gw = gutterDisplayWidth(getLineCount(state), gutterCfg);
+  const viewportLeft = getVisibleViewportLeft(state, Math.max(1, contentWidth - gw));
   const row = Math.max(0, Math.min(bufferHeight - 1, state.cursorPosition.line - viewportTop));
   let cursorColumn = state.cursorPosition.column;
   // SPEC-119: when the wiki-link display transform is active, the rendered
@@ -115,7 +124,7 @@ export function getCursorScreenOffset(state: EditorState, bufferHeight: number, 
       if (t.changed) cursorColumn = t.mapCol(cursorColumn);
     }
   }
-  const col = Math.max(0, cursorColumn - viewportLeft);
+  const col = gw + Math.max(0, cursorColumn - viewportLeft);
   return { row, col };
 }
 
