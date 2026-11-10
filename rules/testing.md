@@ -80,6 +80,26 @@ import { describe, test, expect } from "bun:test";
 - Tests must be isolated and repeatable
 - Use clear, descriptive names for test files and test cases
 
+### Per-test retry policy (#245 / ADR-0269)
+
+Bun 1.4 supports per-test `test("name", { retry: N }, fn)`. Use it **sparingly** —
+never a blanket CLI `--retry`. Order of preference:
+
+1. **Fix the flake** (raise an unrealistic time budget, scope a socket, remove
+   the race). Most "flaky" tests are fixable and should be.
+2. **Isolate / run solo** for load-sensitive populations (the default
+   `--isolate`; tmax-use stays solo).
+3. **`{ retry: 1 }`** only when the test is (a) *confirmed* flaky — actually
+   observed failing-then-green, documented in an ADR/spec/issue; (b)
+   *investigated* — the failure mode is understood well enough to state why a
+   retry cannot mask a real regression (environmental contention, not logic);
+   (c) minimal N (one re-attempt unless evidence demands more).
+
+Every retry is tracked: a comment at the test citing the issue/ADR and the
+qualifying reasons, plus a row in the ADR's registry. Current registry:
+ADR-0269 (one test — `server-daemon-hardening > starting a second server on
+the same socket rejects`).
+
 ## trt (T-Lisp Runtime Testing) Rules
 
 **trt** is the native, self-hosted test framework (SPEC-049). The framework is authored **in

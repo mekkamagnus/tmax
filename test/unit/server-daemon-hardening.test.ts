@@ -125,7 +125,12 @@ describe('Daemon hardening', () => {
     try { rmSync(homeDir, { recursive: true, force: true }); } catch {}
   });
 
-  test('starting a second server on the same socket rejects', async () => {
+  // { retry: 1 } (#245 / ADR-0269): observed flaking once in a parallel
+  // full-suite run (ADR-0267's "known residual") — OS-level bind/lock
+  // contention under load, not logic: the assertion accepts either rejection
+  // path, and a real regression (second server ACCEPTING the taken socket)
+  // would fail deterministically on every attempt, so a retry cannot mask it.
+  test('starting a second server on the same socket rejects', { retry: 1 }, async () => {
     server = new TmaxServer(socketPath, true);
     await server.start();
 
