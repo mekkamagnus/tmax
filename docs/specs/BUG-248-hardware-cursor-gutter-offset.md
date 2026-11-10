@@ -96,5 +96,6 @@ to today; all existing tests run gutter-off and stay green.
   span multiple screen rows; the hardware row math here stays line-based.
   That is a separate pre-existing concern, not part of this fix.
 
-Status: implemented pending gate (verify-gate + CI) — land only with
-typecheck clean, unit suite green, verify-gate PASS.
+Status: RESOLVED pending CI green — implemented at issue-248 (9d402ac);
+typecheck clean, unit suite 3,595/0, verify-gate PASS round 1 (verifier
+re-ran typecheck + the mutation proof independently).
