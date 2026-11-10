@@ -183,9 +183,14 @@ export async function handleNormalMode(editor: EditorDispatchPort, key: string, 
     // that freshly sets spacePressed runs before whichKeyPrefix is set this
     // press, so the post-command check still sees it.
     editor.spacePressed = false;
+    // #247: clear the transient "SPC-" status indicator with the leader
+    // state — logic in T-Lisp (clear-leader-indicator guards to the bare
+    // indicator so real status messages win).
+    exec("(clear-leader-indicator)");
   } else if (spaceActive) {
     lookupKey = `SPC ${normalizedKey}`;
     editor.spacePressed = false;
+    exec("(clear-leader-indicator)");
   } else {
     lookupKey = normalizedKey;
   }

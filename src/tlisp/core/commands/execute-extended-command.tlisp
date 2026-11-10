@@ -1,5 +1,5 @@
 (defmodule editor/commands/execute-extended-command
-  (export command-detail-candidate command-detail-interactive-p command-completion-refresh command-completion-table execute-extended-command-accept execute-extended-command execute-extended-command-maybe)
+  (export command-detail-candidate command-detail-interactive-p command-completion-refresh command-completion-table execute-extended-command-accept execute-extended-command execute-extended-command-maybe clear-leader-indicator)
 
 ;; execute-extended-command.tlisp --- M-x through generic completion
 
@@ -81,3 +81,15 @@ test-infrastructure names."
       (editor-reset-space-prefix)
       (editor-set-status "Unbound key: ;"))))
 )
+
+(defun clear-leader-indicator ()
+  "Clear the transient SPC- leader indicator if it is still showing (#247).
+editor-handle-space sets status \"SPC-\"; the indicator must die when the
+leader sequence resolves (normal-handler calls this from both lookup
+branches, mirroring the #125 spacePressed clearing) instead of staying in
+the status message and resurfacing after an M-x/switch-buffer minibuffer
+closes. Guarded to the bare indicator: a real status message set in the
+meantime (an async command's feedback landing between keystrokes) must win."
+  (if (string= (editor-status) "SPC-")
+    (editor-set-status "")
+    nil))
