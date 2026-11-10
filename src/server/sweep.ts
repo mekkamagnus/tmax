@@ -90,12 +90,12 @@ export interface SweepReport {
  * socket), or the #244 compiled binary `…/dist/tmax …` (no `bun` prefix at
  * all). Excludes `tmaxclient` (`bin/tmaxclient`/`dist/tmaxclient` have no
  * word boundary after `tmax`), the bash launcher (not run under `bun`), and
- * suffixed lookalikes (`src/main.tsx`, `src/main.ts.bak` — `main.ts` is a
+ * suffixed lookalikes (`src/main.tsx`, `dist/tmax.test.ts`, `src/main.ts.bak` — `main.ts` is a
  * stock Bun entrypoint name, and this regex decides SIGNALING, so the
  * entrypoint alternatives end in a `(?![\w.])` boundary).
  * This is the only place process identity is decided.
  */
-const TMAX_DAEMON_RE = /(?:\bbun\b.*(?:src\/server\/server\.ts(?![\w.])|src\/main\.ts(?![\w.])|bin\/tmax\b))|\bdist\/tmax\b/;
+const TMAX_DAEMON_RE = /(?:\bbun\b.*(?:src\/server\/server\.ts(?![\w.])|src\/main\.ts(?![\w.])|bin\/tmax\b))|\bdist\/tmax(?![\w.])/;
 
 export function isTmaxDaemonCommand(command: string | undefined): boolean {
   return !!command && TMAX_DAEMON_RE.test(command);

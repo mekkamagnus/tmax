@@ -112,5 +112,7 @@ cannot promote clients to reap candidates.
 - `dist/tmax` blind spot was code-inspection only; if a compiled binary is
   handy, one dry-run sweep against it is a bonus check, not a gate.
 
-Status: implemented pending gate (verify-gate + CI) — land only with typecheck
-clean, unit suite green, verify-gate PASS.
+Status: RESOLVED pending CI green — implemented at issue-246 (47e8f33 +
+29edce0 + advisory token); typecheck clean, unit suite 3,599/0, verify-gate
+PASS on retry 1 (round 1 caught a real suffix over-match: `bun src/main.tsx`
+classified as a daemon — fixed with `(?![\w.])` boundaries).

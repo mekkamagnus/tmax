@@ -63,6 +63,7 @@ describe('sweep — isTmaxDaemonCommand (BUG-29)', () => {
     expect(isTmaxDaemonCommand('bun run build --entry src/main.tsx')).toBe(false);
     expect(isTmaxDaemonCommand('bun --watch src/main.ts.bak')).toBe(false);
     expect(isTmaxDaemonCommand('bun src/server/server.tsx')).toBe(false);
+    expect(isTmaxDaemonCommand('bun test dist/tmax.test.ts')).toBe(false); // gate-retry-1 advisory
     // …while a trailing flag/arg on the real entrypoints still matches.
     expect(isTmaxDaemonCommand('bun src/main.ts --init-file /tmp/i.tlisp')).toBe(true);
     expect(isTmaxDaemonCommand('bun src/server/server.ts --socket /tmp/s')).toBe(true);
