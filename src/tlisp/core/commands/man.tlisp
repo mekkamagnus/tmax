@@ -68,6 +68,7 @@ none, prompt (defaulting to the word at point). M-x / :man discoverable."
 
 (defun man-follow ()
   "Open the man page named by the name(section) token under the cursor."
+  (interactive)
   (let ((line (buffer-line (cursor-line))))
     (if (string-match "\\([a-zA-Z_][a-zA-Z0-9_+-]*\\)(\\([0-9][a-zA-Z0-9+-]*\\))" (or line ""))
       (man--render (match-string 1 (or line "")) (match-string 2 (or line "")))
@@ -79,6 +80,7 @@ none, prompt (defaulting to the word at point). M-x / :man discoverable."
 
 (defun man-next-section ()
   "Move the cursor to the next section header (NAME/SYNOPSIS/…)."
+  (interactive)
   (let ((n (buffer-line-count)) (ln (+ (cursor-line) 1)) (found nil))
     (while (and (not found) (< ln n))
       (let ((text (buffer-line ln)))
@@ -89,6 +91,7 @@ none, prompt (defaulting to the word at point). M-x / :man discoverable."
 
 (defun man-prev-section ()
   "Move the cursor to the previous section header."
+  (interactive)
   (let ((ln (- (cursor-line) 1)) (found nil))
     (while (and (not found) (>= ln 0))
       (let ((text (buffer-line ln)))
@@ -99,6 +102,7 @@ none, prompt (defaulting to the word at point). M-x / :man discoverable."
 
 (defun man-search ()
   "Prompt for a string and move to its next occurrence in the page."
+  (interactive)
   (let ((needle (read-from-minibuffer "Search man: " "" nil nil)))
     (if (or (nilp needle) (string= needle ""))
       nil
@@ -112,6 +116,7 @@ none, prompt (defaulting to the word at point). M-x / :man discoverable."
 
 (defun man-quit ()
   "Bury the *Man* buffer and return to the previous buffer."
+  (interactive)
   (bury-buffer man-buffer-name)
   (editor-set-mode "normal"))
 

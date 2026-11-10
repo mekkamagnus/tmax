@@ -30,6 +30,36 @@ import { Either } from "../utils/task-either.ts";
  * used to bound the re-tokenization window.
  */
 const HIGHLIGHT_RECOMPUTE_VIEWPORT_LINES = 50;
+
+/**
+ * #249 (SPEC-249): TS-defined editor primitives that are M-x commands.
+ * T-Lisp defuns declare command-hood with `(interactive)`; these builtins
+ * cannot carry a declaration form, so command-hood for them is decided by
+ * this set (consulted wherever `fn.interactive` is). A set — not mutating
+ * the registered values — because registration order varies (tab-ops lands
+ * ~1,600 lines after the main API loop). Includes three names where a TS
+ * builtin SHADOWS a `(interactive)`-declaring defun (apropos-documentation,
+ * split-window-below/right): the table collects the visible global — the
+ * builtin — so the defun's marker never reaches the entry.
+ * Key dispatch is unaffected — this list only decides M-x membership.
+ */
+const TS_COMMAND_NAMES: ReadonlySet<string> = new Set([
+  "apropos-documentation",
+  "editor-quit",
+  "line-first-non-blank",
+  "line-last-column",
+  "redo",
+  "search-next",
+  "search-previous",
+  "split-window-below",
+  "split-window-right",
+  "tab-next",
+  "tab-prev",
+  "undo",
+  "word-under-cursor-next",
+  "word-under-cursor-previous",
+  "yank-pop",
+]);
 import { renderDiagnostic } from "../tlisp/diagnostic-renderer.ts";
 import type { TLispDiagnostic } from "../tlisp/diagnostics.ts";
 import { TextBufferImpl } from "../core/buffer.ts";
@@ -1455,11 +1485,15 @@ export class Editor {
     defineRaw("callable-command-details", (args) => {
       if (args.length > 1) throw new Error("callable-command-details accepts 0 or 1 arguments");
       // SPEC-115: when INTERACTIVE-ONLY is truthy, restrict the table to M-x
-      // command candidates — a function is a command if it declared
-      // `(interactive)` OR it is bound to a key. This excludes stdlib helpers
-      // and TS primitives that are not user-callable, shrinking the M-x list
-      // from every visible callable to just the commands. With no argument the
-      // full table is returned (used by describe-function, which must show all).
+      // command candidates — a function is a command iff it declared
+      // `(interactive)` (#249: the OR key-bound arm is GONE; being bound does
+      // not make a function a command — Emacs parity). Genuine key-bound
+      // commands were migrated to declare (interactive) (T-Lisp defuns) or
+      // are marked in TS_COMMAND_NAMES (TS primitives, which cannot carry a
+      // declaration form). This excludes stdlib helpers, internal key
+      // plumbing, and TS primitives that are not user-callable. With no
+      // argument the full table is returned (used by describe-function,
+      // which must show all).
       const interactiveOnly = args.length === 1 && args[0]?.type === "boolean" && (args[0].value as boolean);
       const bindingsByCommand = new Map<string, string[]>();
       for (const [key, mappings] of this.keyMappings) {
@@ -1469,9 +1503,10 @@ export class Editor {
           bindingsByCommand.set(match[1], [...(bindingsByCommand.get(match[1]) ?? []), key]);
         }
       }
-      // A callable is an M-x command candidate: declared interactive OR bound.
+      // A callable is an M-x command candidate iff it declared interactive
+      // (defun `(interactive)` form) or is one of the TS-declared commands.
       const isCommand = (name: string, fn: TLispFunction): boolean =>
-        fn.interactive === true || bindingsByCommand.has(name);
+        fn.interactive === true || TS_COMMAND_NAMES.has(name);
 
       const seen = new Set<string>();
       const all: TLispValue[] = [];
@@ -1482,6 +1517,9 @@ export class Editor {
           ["name", createString(name)],
           ["documentation", createString((fn.docstring ?? "").split("\n")[0] ?? "")],
           ["bindings", createList((bindingsByCommand.get(name) ?? []).map(key => createString(key)))],
+          // #249: expose the declaration so the T-Lisp side can filter or
+          // annotate without re-deriving identity.
+          ["interactive", createBoolean(isCommand(name, fn))],
         ];
         if (module) entry.push(["module", createString(module)]);
         all.push(createHashmap(entry));

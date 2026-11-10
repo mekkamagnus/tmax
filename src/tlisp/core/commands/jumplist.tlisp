@@ -90,6 +90,7 @@ entries drop and the pointer is clamped to the new max index."
 
 (defun vim-jump-back ()
   "C-o: move to the previous entry in the jumplist."
+  (interactive)
   (if (<= vim-jump-pointer 0)
     (progn
       (editor-set-status "No older jump position")
@@ -105,6 +106,7 @@ entries drop and the pointer is clamped to the new max index."
 
 (defun vim-jump-forward ()
   "C-i: move to the next entry in the jumplist."
+  (interactive)
   (let ((max-index (- (length vim-jumplist) 1)))
     (if (>= vim-jump-pointer max-index)
       (progn

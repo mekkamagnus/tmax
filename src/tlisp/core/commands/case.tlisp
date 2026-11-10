@@ -23,6 +23,7 @@
 At the start of a line (and not on the first line) transposes the last
 character of the previous line with the first character of the current line
 (Emacs C-t behavior). No-op on a buffer too short to transpose. Bound to C-t."
+  (interactive)
   (ts-transpose-chars))
 
 (defun capitalize-word ()
@@ -30,18 +31,21 @@ character of the previous line with the first character of the current line
 If point is not on a word character, operates on the next word forward
 (Emacs M-c semantics). Point lands after the transformed word so repeated
 M-c calls walk forward word by word. Bound to M-c."
+  (interactive)
   (ts-capitalize-word))
 
 (defun upcase-word ()
   "Uppercase the word at point.
 If point is not on a word character, operates on the next word forward
 (Emacs M-u semantics). Point lands after the transformed word. Bound to M-u."
+  (interactive)
   (ts-upcase-word))
 
 (defun downcase-word ()
   "Lowercase the word at point.
 If point is not on a word character, operates on the next word forward
 (Emacs M-l semantics). Point lands after the transformed word. Bound to M-l."
+  (interactive)
   (ts-downcase-word))
 
 ;; =====================================================================

@@ -798,6 +798,7 @@ SPEC note (audit P2.6): read-string is a sync stub, so the template name is
 passed via the prefix key: , N for blank, , N d for daily, , N m for meeting.
 Reads ~/.config/tmax/templates/<name>.md if present, else falls back to
 built-in templates. Substitutes {{date}} and {{title}}."
+  (interactive)
   (if (not template-supplied-p) (set! template "blank"))
   (let ((date-result (shell-command "date +%Y-%m-%d")))
       (let* ((date-str (string-trim date-result))

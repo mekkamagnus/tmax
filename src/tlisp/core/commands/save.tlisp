@@ -47,6 +47,7 @@ on disk since open/last save — pass t as the second arg to force (:w!)."
 ;; #49 / BUG-43.
 (defun quick-save ()
   "Save the current buffer to its associated file (SPC x s)."
+  (interactive)
   (save-buffer))
 
 (defun save-file (filename)

@@ -134,6 +134,7 @@ line via `jump-to-line`. No-ops (without error) when not in the
 `*Occur*` buffer or when the current line has no line-number prefix,
 so the binding is safe to leave on RET in other buffers. Bound to RET
 (guarded by the buffer-current check)."
+  (interactive)
   (if (not (string= (buffer-current) (occur-buffer-name)))
     nil
     ;; Parse the leading "<digits>:" prefix. string-match-spans returns
@@ -164,6 +165,7 @@ so the binding is safe to leave on RET in other buffers. Bound to RET
 (defun occur-prompt ()
   "Prompt for a pattern in the minibuffer and run `occur` on it.
 Pre-seeds the minibuffer with the last search pattern. Bound to SPC s o."
+  (interactive)
   (let ((initial (search-pattern-get)))
     (completing-read
       "Occur: "

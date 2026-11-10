@@ -73,6 +73,7 @@ list recomputed each call would ping-pong between the two most-recent buffers
 
 (defun switch-buffer ()
   "Switch buffers through the generic completion minibuffer."
+  (interactive)
   (completing-read
     "Switch to buffer: "
     "buffer-completion-table"
@@ -130,6 +131,7 @@ Cycles non-special buffers in RECENCY order (most-recent-first; the same
 order `buffer-completion-table' uses) via `buffer-switch-silent', so the
 rotation does not perturb the recency order it is iterating over (SPEC-087).
 Bound to SPC x n."
+  (interactive)
   (let* ((list (buffer-recency-rotation))
          (len (length list)))
     (if (<= len 1)
@@ -145,6 +147,7 @@ Bound to SPC x n."
   "Switch to the previous-most-recent buffer, wrapping past the least-recent.
 Cycles non-special buffers in RECENCY order (most-recent-first) in the
 less-recent direction via `buffer-switch-silent' (SPEC-087). Bound to SPC x p."
+  (interactive)
   (let* ((list (buffer-recency-rotation))
          (len (length list)))
     (if (<= len 1)
@@ -278,6 +281,7 @@ the entered name (unless empty, in which case it aborts silently)."
   "Prompt for a new name and rename the current buffer to it (SPC x r).
 Opens a minibuffer; the entered name is applied on Enter. The rename is a
 display-name change only (buffer-filename is preserved). M-x discoverable."
+  (interactive)
   (setq rename-buffer-pending t)
   (read-from-minibuffer
     "Rename buffer to: "
@@ -292,6 +296,7 @@ NAME defaults to the current buffer. The buffer's recency is set below all
 others, so switch-buffer / next-buffer no longer prefer it. The current
 buffer is left in place (Emacs convention: bury only reorders, it does not
 switch away). M-x discoverable via this docstring."
+  (interactive)
   (let ((target (or name (buffer-current))))
     (unless target
       (message "No buffer to bury")

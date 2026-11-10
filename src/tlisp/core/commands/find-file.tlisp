@@ -7,6 +7,7 @@
 
 (defun find-file (&optional path)
   "Open a file into a buffer. Prompts via minibuffer when called without a path."
+  (interactive)
   (if path
     (find-file-open path)
     (completing-read

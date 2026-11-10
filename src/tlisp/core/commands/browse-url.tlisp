@@ -404,6 +404,7 @@ Returns the structured ts-open-external hashmap."
 
 (defun browse-url-at-point ()
   "Detect and open the URL at point via browse-url."
+  (interactive)
   (let ((detection (browse-detect-at-point)))
     (if (not (hashmap-get detection "ok"))
         (progn

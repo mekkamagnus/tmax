@@ -24,6 +24,7 @@
   "Re-apply the active major mode's indent rules to every line (#151).
 Loops top-to-bottom calling (indent-apply-line N) (the engine now both
 calculates and APPLIES the target column). Per-line errors are swallowed."
+  (interactive)
   (let ((i 0) (n (buffer-line-count)))
     (while (< i n)
       (condition-case err
@@ -69,14 +70,17 @@ whole current line and replace it in place. COMBO is the undo-commit label."
 
 (defun vim-toggle-case-line ()
   "Toggle case of every char in the current line (g~~)."
+  (interactive)
   (vim-transform-line "toggle" "g~~"))
 
 (defun vim-lowercase-line ()
   "Lowercase the current line (guu)."
+  (interactive)
   (vim-transform-line "downcase" "guu"))
 
 (defun vim-uppercase-line ()
   "Uppercase the current line (gUU)."
+  (interactive)
   (vim-transform-line "upcase" "gUU"))
 
 (defun vim-line-current-indent (text)

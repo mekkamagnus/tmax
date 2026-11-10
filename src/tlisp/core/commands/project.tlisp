@@ -13,6 +13,7 @@
 
 (defun project-root (&optional path)
   "Detect project root from PATH (default: current file). Returns cached *project-root* if set and no PATH given."
+  (interactive)
   (if (and (null path) *project-root*)
     *project-root*
     (let ((detected (project-detect-root (or path (buffer-filename) "."))))
@@ -41,6 +42,7 @@
 
 (defun project-find-file ()
   "Find a file in the project using completing-read over project-files-walk results."
+  (interactive)
   (if (null *project-root*)
     (project-root))
   (if (null *project-root*)
@@ -81,6 +83,7 @@
 
 (defun project-dired ()
   "Open dired at the project root."
+  (interactive)
   (if (null *project-root*)
     (project-root))
   (if (null *project-root*)

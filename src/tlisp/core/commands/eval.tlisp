@@ -43,6 +43,7 @@ Forms are remembered under `eval-expression-history', recallable with M-p /
 M-n. The form is evaluated in the same interpreter the daemon `eval' RPC and
 `tmax -e' use, so a form that mutates editor state (e.g.
 (set-buffer-filename \"/tmp/x\")) takes effect immediately."
+  (interactive)
   (read-from-minibuffer
     "Eval: "
     ""
@@ -60,6 +61,7 @@ The sexp is found by scanning backward on the current line for the matching
 open paren. Result or error is echoed to *Messages*. If no balanced sexp
 precedes point on the current line, a `No sexp before point' notice is
 logged and the editor stays in normal mode."
+  (interactive)
   (let ((scan (buffer-sexp-before-point)))
     (if (hashmap-get scan "ok")
       (eval-last-sexp--echo (hashmap-get scan "sexp"))
@@ -90,6 +92,7 @@ containing (defun foo () 42) makes `foo' immediately callable via M-x. A
 summary line is logged to *Messages* on success, or the error is logged at
 error level on failure. Evaluation runs in the live editor interpreter (the
 same one M-: uses)."
+  (interactive)
   (eval-buffer--echo (buffer-text) (buffer-current)))
 
 ;; ── Bindings (SPEC-067 aware) ─────────────────────────────────────────

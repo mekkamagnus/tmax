@@ -6,18 +6,22 @@
 
 (defun split-window-below ()
   "Split current window horizontally (top/bottom)."
+  (interactive)
   (split-window "horizontal"))
 
 (defun split-window-right ()
   "Split current window vertically (left/right)."
+  (interactive)
   (split-window "vertical"))
 
 (defun other-window ()
   "Cycle to next window."
+  (interactive)
   (window-next))
 
 (defun delete-window ()
   "Close current window. Does nothing if only one window."
+  (interactive)
   (window-close))
 
 (defun delete-other-windows ()
@@ -39,6 +43,7 @@ Horizontal splits (top/bottom panes) get equal row heights; vertical
 splits (left/right panes) get equal column widths. No-op when only one
 window exists. SPEC-084. SPEC-067: bound under the C-w window prefix
 (C-w =), not C-x."
+  (interactive)
   (window-balance))
 
 ;; C-w is a which-key PREFIX only (never a terminal command). The chord

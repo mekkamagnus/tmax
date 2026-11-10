@@ -70,6 +70,7 @@
 
 (defun vim-repeat-find ()
   "Repeat the last Vim find-char command."
+  (interactive)
   (if (null vim-last-find-char)
     (progn
       (vim-count-reset)
@@ -84,6 +85,7 @@
 
 (defun vim-repeat-find-reverse ()
   "Repeat the last Vim find-char command in the opposite direction."
+  (interactive)
   (if (null vim-last-find-char)
     (progn
       (vim-count-reset)
@@ -93,42 +95,49 @@
 
 (defun vim-match-bracket ()
   "Move to the matching bracket at point."
+  (interactive)
   (progn
     (vim-move-to-position (match-bracket-position))
     t))
 
 (defun paragraph-previous ()
   "Move to previous paragraph boundary."
+  (interactive)
   (progn
     (vim-move-to-position (paragraph-boundary-position "backward"))
     t))
 
 (defun paragraph-next ()
   "Move to next paragraph boundary."
+  (interactive)
   (progn
     (vim-move-to-position (paragraph-boundary-position "forward"))
     t))
 
 (defun scroll-cursor-top ()
   "Align current line to the top of the viewport."
+  (interactive)
   (progn
     (viewport-top-set (cursor-line))
     t))
 
 (defun scroll-cursor-center ()
   "Align current line to the center of the viewport."
+  (interactive)
   (progn
     (viewport-top-set (max 0 (- (cursor-line) (floor (/ (terminal-height-get) 2)))))
     t))
 
 (defun scroll-cursor-bottom ()
   "Align current line to the bottom of the viewport."
+  (interactive)
   (progn
     (viewport-top-set (max 0 (- (cursor-line) (- (terminal-height-get) 2))))
     t))
 
 (defun scroll-column-left ()
   "Scroll viewport right by half screen width (content moves left)."
+  (interactive)
   (let ((half (floor (/ (terminal-width-get) 2))))
     (progn
       (viewport-left-set (+ (viewport-left-get) half))
@@ -136,6 +145,7 @@
 
 (defun scroll-column-right ()
   "Scroll viewport left by half screen width (content moves right)."
+  (interactive)
   (let ((half (floor (/ (terminal-width-get) 2))))
     (progn
       (viewport-left-set (max 0 (- (viewport-left-get) half)))
@@ -143,12 +153,14 @@
 
 (defun scroll-cursor-start ()
   "Set viewport left so cursor column is at the left edge."
+  (interactive)
   (progn
     (viewport-left-set (cursor-column))
     t))
 
 (defun scroll-cursor-end ()
   "Set viewport left so cursor column is at the right edge."
+  (interactive)
   (let ((col (cursor-column)))
     (progn
       (viewport-left-set (max 0 (- col (floor (/ (terminal-width-get) 2)))))
@@ -156,12 +168,14 @@
 
 (defun vim-gg ()
   "Handle gg: with count jump to line N, without jump to first line."
+  (interactive)
   (if (vim-count-active-p)
     (jump-to-line (vim-count-consume))
     (progn (vim-count-reset) (jump-to-first-line))))
 
 (defun vim-G ()
   "Handle G: with count jump to line N, without jump to last line."
+  (interactive)
   (if (vim-count-active-p)
     (jump-to-line (vim-count-consume))
     (progn (vim-count-reset) (jump-to-last-line))))
@@ -183,6 +197,7 @@
 
 (defun vim-window-middle ()
   "M: move to the middle line of the viewport."
+  (interactive)
   (progn
     (vim-count-reset)
     (let ((mid (+ (viewport-top-get) (floor (/ (terminal-height-get) 2)))))

@@ -101,6 +101,7 @@ them when they are all already commented, then return to normal mode.
 With no selection: toggle the comment prefix on the current line.
 Uses the current major mode's comment syntax (e.g. ; for Lisp, // for
 TypeScript, # for Python)."
+  (interactive)
   (if (comment-region-active-p)
       ;; Region path: derive inclusive line bounds from the visual selection.
       ;; visual-get-selection returns (start-line start-col end-line end-col mode).

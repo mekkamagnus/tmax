@@ -67,6 +67,7 @@ With 0 or negative number, disable."
 
 (defun fikra-stop ()
   "Stop fikra mode, close buffers."
+  (interactive)
   (setq fikra-mode-active nil)
   (minor-mode-set "fikra" nil)
   (message "Fikra mode stopped"))

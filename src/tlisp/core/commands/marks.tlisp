@@ -149,6 +149,7 @@ Called by the TS insert-mode Escape handler on every exit from insert mode."
   "gi: move to the last insert position (^ mark) and re-enter insert mode.
 If no insert position has been recorded yet, stays put and still enters
 insert mode (matches vim behavior on a fresh buffer)."
+  (interactive)
   (let ((pos (vim-mark-get "^")))
     (progn
       (vim-count-reset)

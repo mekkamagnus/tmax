@@ -22,13 +22,15 @@
 
 (defun command-detail-interactive-p (details)
   "Return non-nil for commands exposed through the interactive M-x source.
-callable-command-details already restricted the table to command candidates
-(declared `(interactive)` OR key-bound, SPEC-115); this predicate is the
-secondary guard that excludes test-infrastructure commands (trt-*, should-*)
-which must never appear in M-x (#148)."
+callable-command-details restricts the table to declared-interactive command
+candidates (#249; the key-bound arm is gone — Emacs parity); this predicate
+is the secondary guard: it requires the exposed \"interactive\" flag
+(defense in depth) and excludes test-infrastructure commands (trt-*,
+should-*) which must never appear in M-x (#148)."
   (let ((name (hashmap-get details "name")))
-    (not (or (string-prefix-p "trt-" name)
-             (string-prefix-p "should-" name)))))
+    (and (hashmap-get details "interactive")
+         (not (or (string-prefix-p "trt-" name)
+                  (string-prefix-p "should-" name))))))
 
 (defun command-completion-refresh ()
   "Refresh the M-x candidate snapshot, caching across the session (BUG-78).
@@ -62,6 +64,7 @@ test-infrastructure names."
 
 (defun execute-extended-command ()
   "Read and invoke a named command using generic completion."
+  (interactive)
   (progn
     (command-completion-refresh)
     (completing-read

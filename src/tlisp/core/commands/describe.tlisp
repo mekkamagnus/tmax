@@ -122,6 +122,7 @@ visible callable name from callable-command-details."
 (defun describe-function-at-point ()
   "Prompt for a function name via the minibuffer and describe it in *Help*.
 Bound to SPC h f. M-x discoverable via this docstring."
+  (interactive)
   (completing-read
     "Describe function: "
     "describe-function-table"
@@ -149,6 +150,7 @@ readable line for *Help*."
 minor mode (default: the current editor mode). Renders the major mode, editor
 mode, and each binding (key → command ; docstring) into *Help*. Bound to
 SPC h m. M-x discoverable via this docstring."
+  (interactive)
   (let ((result (describe-mode-data (or mode (editor-mode)))))
     (let ((editor (hashmap-get result "editor-mode"))
           (major (hashmap-get result "major-mode"))
@@ -206,6 +208,7 @@ describe-variables-list (every visible non-function global binding)."
 (defun describe-variable-at-point ()
   "Prompt for a variable name via the minibuffer and describe it in *Help*.
 Bound to SPC h v. M-x discoverable via this docstring."
+  (interactive)
   (completing-read
     "Describe variable: "
     "describe-variable-table"
@@ -243,6 +246,7 @@ dispatch path. Bound to SPC h k. M-x discoverable via this docstring.
 Known limitation: if the SetDescribeKeyPending next-key dispatch is not yet
 wired end-to-end, drive (describe-key \"j\") directly via eval — the
 docstring-correctness path does not depend on the interactive capture."
+  (interactive)
   (describe-key-prompt))
 
 ;; ── Apropos (SPEC-107 / #174) ─────────────────────────────────────────
@@ -299,11 +303,13 @@ Accept-function for `apropos-documentation'."
 (defun apropos ()
   "Prompt for a regex and list matching command/function names in *Help*.
 Searches NAMES. Bound to SPC h a. M-x discoverable via this docstring."
+  (interactive)
   (read-from-minibuffer "Apropos (regex): " "" "apropos-history" "apropos-run"))
 
 (defun apropos-documentation ()
   "Prompt for a regex and list functions whose docstrings match in *Help*.
 Searches docstring BODIES. M-x discoverable via this docstring."
+  (interactive)
   (read-from-minibuffer "Apropos doc (regex): " "" "apropos-doc-history" "apropos-documentation-run"))
 
 ;; ── Help-mode: cross-references + history (SPEC-110, #177) ───────────
@@ -341,6 +347,7 @@ Searches docstring BODIES. M-x discoverable via this docstring."
 (defun help-follow ()
   "Describe the symbol at point in *Help* and push onto history.
 Bound to RET in help-mode."
+  (interactive)
   (let ((name (symbol-at-point)))
     (if (or (nilp name) (string= name ""))
       (message "No symbol at cursor")
@@ -358,17 +365,20 @@ Bound to RET in help-mode."
 
 (defun help-next-ref ()
   "Move cursor to the next [name] reference in *Help*. Bound to TAB."
+  (interactive)
   (let ((ref (help-find-next-ref help-references (cursor-line))))
     ;; col 1 lands inside the [ brackets so symbol-at-point can read the name.
     (if ref (cursor-move (nth 0 ref) 1) (message "No next reference"))))
 
 (defun help-prev-ref ()
   "Move cursor to the previous [name] reference. Bound to S-TAB."
+  (interactive)
   (let ((ref (help-find-less-ref (reverse help-references) (cursor-line))))
     (if ref (cursor-move (nth 0 ref) 1) (message "No previous reference"))))
 
 (defun help-back ()
   "Navigate help history backward (previous page). Bound to l."
+  (interactive)
   (let ((new-pos (+ help-history-pos 1)))
     (when (< new-pos (length help-history))
       (setq help-history-pos new-pos)
@@ -376,12 +386,14 @@ Bound to RET in help-mode."
 
 (defun help-forward ()
   "Navigate help history forward (next page). Bound to r."
+  (interactive)
   (when (> help-history-pos 0)
     (setq help-history-pos (- help-history-pos 1))
     (help-history-render (nth help-history-pos help-history))))
 
 (defun help-bury ()
   "Bury the *Help* buffer. Bound to q in help-mode."
+  (interactive)
   (funcall "bury-buffer"))
 
 (major-mode-register "help" '() nil)
@@ -421,6 +433,7 @@ M-x / :helpgrep discoverable via this docstring."
   "Jump to the corpus file + line shown at cursor in *Help*.
 Parses the 'file:line:text' format of helpgrep results. Bound to RET in
 helpgrep results (major-mode 'helpgrep')."
+  (interactive)
   (let ((line (buffer-line (cursor-line))))
     (when (string-match "^\\([a-z]+\\.texinfo\\):\\([0-9]+\\):" line)
       (let ((file (match-string 1))
@@ -464,6 +477,7 @@ helpgrep results (major-mode 'helpgrep')."
 
 (defun info-next ()
   "Navigate to the Next node. Bound to n in info-mode."
+  (interactive)
   (let ((node (hashmap-get info-nodes info-current-node)))
     (when node
       (let ((next (hashmap-get node "next")))
@@ -472,6 +486,7 @@ helpgrep results (major-mode 'helpgrep')."
 
 (defun info-prev ()
   "Navigate to the Previous node. Bound to p in info-mode."
+  (interactive)
   (let ((node (hashmap-get info-nodes info-current-node)))
     (when node
       (let ((prev (hashmap-get node "prev")))
@@ -480,6 +495,7 @@ helpgrep results (major-mode 'helpgrep')."
 
 (defun info-up ()
   "Navigate to the Up node. Bound to u in info-mode."
+  (interactive)
   (let ((node (hashmap-get info-nodes info-current-node)))
     (when node
       (let ((up (hashmap-get node "up")))
@@ -488,15 +504,18 @@ helpgrep results (major-mode 'helpgrep')."
 
 (defun info-top ()
   "Navigate to the Top node. Bound to t in info-mode."
+  (interactive)
   (info--render-node "Top"))
 
 (defun info-bury ()
   "Bury the *Info* buffer. Bound to q in info-mode."
+  (interactive)
   (funcall "bury-buffer"))
 
 (defun info-menu ()
   "Prompt for a menu item from the current node and navigate. Bound to m.
 Parses the current node text for '* Name::' menu entries via info-parse-links."
+  (interactive)
   (let ((node (hashmap-get info-nodes info-current-node)))
     (if (nilp node)
       (message "No current node")
@@ -514,6 +533,7 @@ Parses the current node text for '* Name::' menu entries via info-parse-links."
 (defun info-goto-node ()
   "Navigate to the Index node and search within it. Bound to i.
 Opens the Index node (which IS the manual's index); use s (occur) to search."
+  (interactive)
   (let ((idx (hashmap-get info-nodes "Index")))
     (if (nilp idx)
       (message "No Index node in this manual")
@@ -540,6 +560,7 @@ Opens the Index node (which IS the manual's index); use s (occur) to search."
 (defun cheatsheet ()
   "Open a read-only cheatsheet buffer with essential tmax keys.
 Bound to SPC h c. M-x discoverable via this docstring."
+  (interactive)
   (progn
     (unless (member "*Cheatsheet*" (buffer-list))
       (buffer-create "*Cheatsheet*"))
