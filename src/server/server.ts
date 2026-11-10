@@ -167,6 +167,10 @@ export class TmaxServer {
   private ownsSocket: boolean = false;
   private ownsLock: boolean = false;
   private shuttingDown: boolean = false;
+  // #243: auto-bound so the registered and removed listener identities match.
+  private readonly onMemoryPressure = (level: "warning" | "critical"): void => {
+    this.handleMemoryPressure(level);
+  };
 	  private autoSaveTimer: ReturnType<typeof setInterval> | null = null;
 	  private debouncedSaveTimers: Map<string, ReturnType<typeof setTimeout>> = new Map();
 	  private lastSaveHashes: Map<string, string> = new Map();
@@ -1083,6 +1087,10 @@ export class TmaxServer {
     // Handle graceful shutdown
     process.on('SIGTERM', () => this.shutdown());
     process.on('SIGINT', () => this.shutdown());
+    // #243: drop reclaimable caches when the OS reports memory pressure
+    // (Bun 1.4; levels "warning" | "critical"). Removed in shutdown() so test
+    // servers sharing a process don't accumulate listeners.
+    process.on('memoryPressure', this.onMemoryPressure);
   }
 
   /**
@@ -1598,12 +1606,36 @@ export class TmaxServer {
   }
 
   /**
+   * React to an OS memory-pressure notification (#243): drop re-derivable
+   * caches before the OS kills the long-running daemon. Only the interpreter
+   * parse cache (#234, LRU of ASTs, ~µs to rebuild) is reclaimable here —
+   * workspace/buffer snapshots are persisted user state, never dropped. The
+   * body is defensive by contract: a memory-pressure hook must never throw.
+   * Public for direct testing; registered via `onMemoryPressure` in startSocket.
+   */
+  handleMemoryPressure(level: "warning" | "critical"): void {
+    const interp = this.editor?.getInterpreter();
+    let dropped = 0;
+    try {
+      dropped = interp?.parseCacheSize?.() ?? 0;
+      interp?.clearParseCache?.();
+    } catch { /* best-effort reclaim — never fatal */ }
+    try {
+      this.editor?.logDaemonEvent('memory-pressure', `level=${level} parse-cache-dropped=${dropped}`);
+    } catch { /* best-effort observability */ }
+  }
+
+  /**
    * Shutdown the server gracefully. Idempotent.
    */
   async shutdown(): Promise<void> {
     if (this.shuttingDown) return;
     this.shuttingDown = true;
     console.log('Shutting down tmax server...');
+
+    // #243: detach the memory-pressure listener first — a shut-down server
+    // (especially in tests, where many share one process) must not react.
+    process.off('memoryPressure', this.onMemoryPressure);
 
 	    if (this.autoSaveTimer) {
 	      clearInterval(this.autoSaveTimer);
