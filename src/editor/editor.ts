@@ -5,6 +5,7 @@
  */
 
 import * as fs from "fs";
+import { normalize } from "node:path";
 import { TLispInterpreterImpl } from "../tlisp/interpreter.ts";
 import { FileSystemImpl } from "../core/filesystem.ts";
 import { createEditorAPI } from "./tlisp-api.ts";
@@ -73,6 +74,24 @@ import type { EditorModel, Msg, Cmd, EditorRuntime } from "./functional/index.ts
 import { initialModel, modelToEditorState, editorStateToModelPatch, update } from "./functional/index.ts";
 import type { AppError } from "../error/types.ts";
 import { createValidationError } from "../error/types.ts";
+
+/**
+ * #244 (SPEC-244): bundled-asset roots, layout-aware. In the source tree the
+ * core/doc files sit at the dev-relative paths; in a `bun build --compile`
+ * binary the modules are bundled at the virtual root (import.meta.dir ===
+ * "/$bunfs/root") and `--asset` embeds each path under its basename —
+ * `--asset ./src/tlisp/core` lands the core tree at "/$bunfs/root/core", and
+ * the two corpus texinfo files are embedded flat next to the bundle (a
+ * directory embed of ./docs/tmax would collide with the entry point, whose
+ * virtual name is the outfile basename). Probe the dev layout first so
+ * behavior in the repo is byte-identical.
+ */
+export const TLISP_CORE_DIR = fs.existsSync(`${import.meta.dir}/../tlisp/core`)
+  ? normalize(`${import.meta.dir}/../tlisp/core`)
+  : `${import.meta.dir}/core`;
+export const DOCS_TMAX_DIR = fs.existsSync(`${import.meta.dir}/../../docs/tmax`)
+  ? normalize(`${import.meta.dir}/../../docs/tmax`)
+  : import.meta.dir;
 
 /**
  * Key mapping for editor commands
@@ -224,7 +243,7 @@ export class Editor {
       minibufferState: undefined,
       minibufferView: undefined,
       countPrefix: 0,
-      loadPaths: [`${import.meta.dir}/../tlisp/core`],
+      loadPaths: [TLISP_CORE_DIR],
       currentModuleName: undefined,
       // CHORE-44 Change 1: per-editor session state — construct first so the
       // session field is initialized before any API factory reads it. The model
@@ -255,7 +274,7 @@ export class Editor {
     editorLog.debug('T-Lisp interpreter created', { correlationId: initId });
 
     this.interpreter.setModuleLoader(createModuleLoader(this.interpreter, {
-      coreRoot: `${import.meta.dir}/../tlisp/core`,
+      coreRoot: TLISP_CORE_DIR,
     }));
 
     this.keyMappings = new Map();
@@ -1080,7 +1099,7 @@ export class Editor {
       const pattern = args[0]!.value as string;
       if (pattern.length > 500) throw new Error("helpgrep pattern too long (max 500 chars)");
 
-      const docsDir = `${import.meta.dir}/../../docs/tmax`;
+      const docsDir = DOCS_TMAX_DIR;
       const corpus = [`${docsDir}/tmax.texinfo`, `${docsDir}/tlisp.texinfo`];
       let re: RegExp;
       try { re = new RegExp(pattern, "i"); }
@@ -1106,7 +1125,7 @@ export class Editor {
 
     // SPEC-111 (#178): helpgrep-docs-dir — resolve the docs corpus directory.
     defineRaw("helpgrep-docs-dir", () => {
-      return createString(`${import.meta.dir}/../../docs/tmax`);
+      return createString(DOCS_TMAX_DIR);
     });
 
     // SPEC-110 (#177): symbol-at-point — extract the word at the cursor.
@@ -2096,8 +2115,8 @@ export class Editor {
    */
   private async loadCoreBindings(): Promise<void> {
     await this.bindingRuntime.loadCoreBindings(
-      `${import.meta.dir}/../tlisp/core/bindings`,
-      `${import.meta.dir}/../tlisp/core/keymaps.tlisp`,
+      `${TLISP_CORE_DIR}/bindings`,
+      `${TLISP_CORE_DIR}/keymaps.tlisp`,
     );
   }
 
@@ -2106,8 +2125,8 @@ export class Editor {
    */
   private async ensureCoreBindingsLoaded(): Promise<void> {
     await this.bindingRuntime.ensureCoreBindingsLoaded(
-      `${import.meta.dir}/../tlisp/core/bindings`,
-      `${import.meta.dir}/../tlisp/core/keymaps.tlisp`,
+      `${TLISP_CORE_DIR}/bindings`,
+      `${TLISP_CORE_DIR}/keymaps.tlisp`,
     );
   }
 

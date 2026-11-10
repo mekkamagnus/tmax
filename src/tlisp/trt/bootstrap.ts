@@ -14,7 +14,8 @@
 
 import type { TLispInterpreter, TLispValue } from "../types.ts";
 import { createString, createNumber, createBoolean, createList, createNil, valueToString } from "../values.ts";
-import { readFileSync, readdirSync } from "node:fs";
+import { readFileSync, readdirSync, existsSync } from "node:fs";
+import { normalize } from "node:path";
 import type { AppError } from "../../error/types.ts";
 import { Either } from "../../utils/task-either.ts";
 import {
@@ -25,6 +26,18 @@ import {
   toJson,
   emptyRunResult,
 } from "./results.ts";
+
+/**
+ * #244 (SPEC-244): compiled-binary layout awareness — same probe as
+ * editor.ts. In the source tree the trt files sit at `../core` relative to
+ * this module; a `bun build --compile` binary bundles modules at the virtual
+ * root ("/$bunfs/root") and `--asset ./src/tlisp/core` lands the core tree at
+ * "/$bunfs/root/core". Dev layout probed first so in-repo behavior is
+ * byte-identical.
+ */
+export const TRT_CORE_DIR = existsSync(`${import.meta.dir}/../core/trt`)
+  ? normalize(`${import.meta.dir}/../core`)
+  : `${import.meta.dir}/core`;
 
 /**
  * Register the bridge builtins that let the T-Lisp framework talk to the result store.
@@ -238,7 +251,7 @@ function isTruthyVal(v: TLispValue): boolean {
 export async function loadTrtFramework(interpreter: TLispInterpreter): Promise<boolean> {
   registerTrtBridgeBuiltins(interpreter);
 
-  const coreDir = `${import.meta.dir}/../core/trt`;
+  const coreDir = `${TRT_CORE_DIR}/trt`;
   // Load order matters: trt.tlisp defines the registry/runner that the others build on.
   const files = [
     "trt.tlisp",
@@ -266,7 +279,7 @@ export async function loadTrtFramework(interpreter: TLispInterpreter): Promise<b
     }
   }
   // Load the M-x trt command (lives outside core/trt, in core/commands).
-  const commandSource = readFileSync(`${import.meta.dir}/../core/commands/trt-commands.tlisp`, "utf8");
+  const commandSource = readFileSync(`${TRT_CORE_DIR}/commands/trt-commands.tlisp`, "utf8");
   loadOne(interpreter, "trt-commands.tlisp", commandSource);
   return true;
 }
@@ -278,11 +291,13 @@ export async function loadTrtFramework(interpreter: TLispInterpreter): Promise<b
 export function loadTrtFrameworkSync(interpreter: TLispInterpreter): boolean {
   registerTrtBridgeBuiltins(interpreter);
 
-  const coreDir = `${import.meta.dir}/../core/trt`;
+  const coreDir = `${TRT_CORE_DIR}/trt`;
   const files = ["trt.tlisp", "assertions.tlisp", "cli.tlisp", "fixtures.tlisp", "suites.tlisp", "parametrize.tlisp", "async.tlisp", "snapshots.tlisp", "coverage.tlisp", "mock.tlisp", "bench.tlisp", "doctest.tlisp", "../commands/trt-commands.tlisp"];
 
   for (const file of files) {
-    const path = `${coreDir}/${file}`;
+    // #244: normalize — the compiled virtual fs ($bunfs) does not resolve
+    // ".." segments, so the "../commands/…" entry must collapse before read.
+    const path = normalize(`${coreDir}/${file}`);
     try {
       const source = readFileSync(path, "utf8");
       loadOne(interpreter, file, source);
@@ -292,7 +307,7 @@ export function loadTrtFrameworkSync(interpreter: TLispInterpreter): boolean {
     }
   }
   try {
-    const cmdSrc = readFileSync(`${import.meta.dir}/../core/commands/trt-commands.tlisp`, "utf8");
+    const cmdSrc = readFileSync(`${TRT_CORE_DIR}/commands/trt-commands.tlisp`, "utf8");
     loadOne(interpreter, "trt-commands.tlisp", cmdSrc);
   } catch (e) {
     console.error("TRT COMMAND LOAD FAILED:", (e as Error).message);

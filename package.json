@@ -26,7 +26,7 @@
     "bench": "bun run bench/bench.ts",
     "bench:all": "bun run bench/bench.ts all",
     "build": "bun run build:tmax && bun run build:tlisp && bun run build:tmax-use",
-    "build:tmax": "bun build --compile ./src/main.ts --outfile dist/tmax",
+    "build:tmax": "bun build --compile ./src/main.ts --asset ./src/tlisp/core --asset ./docs/tmax/tmax.texinfo --asset ./docs/tmax/tlisp.texinfo --outfile dist/tmax",
     "build:tlisp": "bun build --compile ./src/tlisp/cli.ts --outfile dist/tlisp",
     "build:tmax-use": "bun build --compile ./tmax-use/test/cli.ts --outfile dist/tmax-use",
     "test:trt": "bin/trt",
