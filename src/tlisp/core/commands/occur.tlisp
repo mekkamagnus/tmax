@@ -1,5 +1,5 @@
 (defmodule editor/commands/occur
-  (export occur occur-jump occur-prompt)
+  (export occur occur-jump occur-prompt occur-completion-table)
 
 ;; occur.tlisp --- listing buffer of all pattern matches (SPEC-082)
 ;;

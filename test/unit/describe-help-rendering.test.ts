@@ -45,6 +45,28 @@ describe("#253: describe-mode help rendering", () => {
   });
 });
 
+describe("#256: M-x-invoked completing-read tables resolve (module exports)", () => {
+  it("string-named completion tables are exported from their modules", async () => {
+    const editor = await createStartedEditor("");
+    // completing-read resolves table names in the GLOBAL scope; a table
+    // referenced by string but not exported is a latent TL4001 — surfaced by
+    // M-x when alphabetical order made describe-function-at-point the
+    // default "describe" candidate.
+    for (const table of ["describe-function-table", "describe-variable-table", "occur-completion-table"]) {
+      const r = editor.getInterpreter().execute(`(${table} "" "")`);
+      expect(r?._tag).toBe("Right");
+    }
+  });
+
+  it("markdown-table-eval-formula-impl is not an M-x command (internal by docstring)", async () => {
+    const editor = await createStartedEditor("");
+    const r = executeTlisp(editor, "(callable-command-details t)");
+    const names = (r.value as any[]).map((h: any) => (h.value as Map<string, any>).get("name")?.value as string);
+    expect(names).not.toContain("markdown-table-eval-formula-impl");
+    expect(names).toContain("markdown-table-eval-formula");
+  });
+});
+
 describe("#254: command table is alphabetical", () => {
   it("interactive-only candidates sort A→Z by name", async () => {
     const editor = await createStartedEditor("");

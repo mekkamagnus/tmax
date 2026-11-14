@@ -483,8 +483,9 @@ Previously only the first formula line was evaluated."
             (message "Evaluated %d formula(s)" evaluated))))))
 
 (defun markdown-table-eval-formula-impl ()
-  "Evaluate the FIRST formula comment below current table. Internal."
-  (interactive)
+  "Evaluate the FIRST formula comment below current table. Internal — an
+implementation detail of markdown-table-eval-formula; deliberately NOT an
+M-x command (#249 review: the docstring says internal, so no (interactive))."
   (let ((line (cursor-line))
         (total (buffer-line-count))
         (formula-line nil))

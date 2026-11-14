@@ -1,5 +1,5 @@
 (defmodule editor/commands/describe
-  (export describe-to-help describe-function describe-mode describe-variable describe-key describe-function-at-point describe-variable-at-point describe-key-at-point describe-binding-line apropos apropos-documentation apropos-run apropos-documentation-run cheatsheet helpgrep helpgrep-run helpgrep-jump help-follow help-next-ref help-prev-ref help-back help-forward help-bury help-detect-references help-history-push info info-next info-prev info-up info-top info-bury info-menu info-goto-node info--render-node info--menu-accept)
+  (export describe-to-help describe-function describe-mode describe-variable describe-key describe-function-at-point describe-variable-at-point describe-key-at-point describe-binding-line apropos apropos-documentation apropos-run apropos-documentation-run cheatsheet helpgrep helpgrep-run helpgrep-jump help-follow help-next-ref help-prev-ref help-back help-forward help-bury help-detect-references help-history-push describe-function-table describe-variable-table info info-next info-prev info-up info-top info-bury info-menu info-goto-node info--render-node info--menu-accept)
 
 ;; describe.tlisp --- SPEC-083 Emacs-style self-documentation.
 ;;
