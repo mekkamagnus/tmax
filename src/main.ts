@@ -214,7 +214,10 @@ async function main() {
       editor.activateMajorModeForFile(filename);
     }
 
-    server.startSocket().catch((err: Error) => {
+    // #252: quiet — the TUI owns this screen; the async "listening" log of a
+    // fire-and-forget startSocket would print at the cursor and clobber the
+    // first rendered line.
+    server.startSocket(true).catch((err: Error) => {
       // Graceful degradation: editor works without socket if already in use
       startupLog.info('Socket server not started (already in use or unavailable)', {
         correlationId: startupId,

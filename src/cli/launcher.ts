@@ -78,9 +78,11 @@ async function isRunning(): Promise<boolean> {
 }
 
 /** Wait for the daemon socket to answer; clear a stale (dead-pid) lock so a
- *  racing start can retry. 25 × 200ms, like the bash launcher. */
+ *  racing start can retry. 100 × 50ms (5s budget; 50ms poll — the bash
+ *  launcher's 200ms added up to a fifth of a second of dead time before the
+ *  freshly spawned daemon answers). */
 async function waitForDaemon(): Promise<boolean> {
-  for (let attempts = 0; attempts < 25; attempts++) {
+  for (let attempts = 0; attempts < 100; attempts++) {
     if (await isRunning()) return true;
     const lockFile = `${SOCKET}.lock`;
     if (existsSync(lockFile)) {
@@ -95,7 +97,7 @@ async function waitForDaemon(): Promise<boolean> {
         try { unlinkSync(lockFile); } catch { /* best-effort */ }
       }
     }
-    await new Promise((r) => setTimeout(r, 200));
+    await new Promise((r) => setTimeout(r, 50));
   }
   return false;
 }

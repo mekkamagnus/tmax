@@ -1057,7 +1057,14 @@ export class TmaxServer {
    * Start the socket listener.
    * Called by start() or non-blocking for embedded use.
    */
-  async startSocket(): Promise<void> {
+  /**
+   * Bind the daemon socket. QUIET suppresses the "listening" stdout line —
+   * required in the embedded editor path (#252): startSocket is fire-and-forget
+   * there, and the async console.log lands at the hardware cursor AFTER the
+   * TUI's first frame, clobbering the first rendered line (cursor sits at
+   * L1 C1). Foreground --daemon keeps the banner (it owns the terminal).
+   */
+  async startSocket(quiet = false): Promise<void> {
     // Ensure the socket directory exists
     const socketDir = this.socketPath.substring(0, this.socketPath.lastIndexOf('/'));
     mkdirSync(socketDir, { recursive: true });
@@ -1077,7 +1084,7 @@ export class TmaxServer {
       });
 
       this.server.listen(this.socketPath, () => {
-        console.log(`tmax server listening on ${this.socketPath}`);
+        if (!quiet) console.log(`tmax server listening on ${this.socketPath}`);
         this.isRunning = true;
         this.ownsSocket = true;
         resolve();

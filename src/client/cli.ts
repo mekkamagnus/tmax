@@ -364,7 +364,7 @@ Examples:
       process.exit(isRunning ? 0 : 1);
     } catch (error) {
       // Server not running
-      console.error('tmax server not running');
+      console.error(`tmax server not running (socket: ${client.socketPath} — start one with: tmax --daemon, or just run tmax)`);
       process.exit(1);
     }
   }

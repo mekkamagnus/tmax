@@ -40,7 +40,8 @@ export interface JSONRPCResponse {
 }
 
 export class TmaxClient {
-  private socketPath: string;
+  /** #252: public read — diagnostics (--ping) name the socket they probed. */
+  readonly socketPath: string;
   private connection: Socket | null = null;
 
   constructor(socketPath?: string) {
