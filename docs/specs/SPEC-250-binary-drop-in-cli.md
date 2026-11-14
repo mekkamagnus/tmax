@@ -74,7 +74,8 @@ orphan would be catastrophic).
 - [x] tmax-use e2e green: **62/62, exit 0** (solo run; the first batch run had
       2 timing failures caused by a concurrent `build:tmax` on the same host —
       both pass solo, the known concurrent-load gotcha).
-- [ ] Verify-gate PASS; CI green.
+- [x] Verify-gate: GAPS round 1 (TUI attach didn't block — tmux masked it; daemon cwd + trt unhandled rejection) → fixed 9b2c22e → PASS retry 1 (verifier re-probed live).
+- [ ] CI green (post-push).
 
 ## Relevant Files
 

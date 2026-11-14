@@ -1,6 +1,6 @@
 # ADR-0276: One CLI surface — src/main.ts owns the tmax CLI; the compiled binary is a drop-in
 
-- **Status**: Accepted (verify-gate pending; landed pending CI green)
+- **Status**: Accepted (verify-gate PASS on retry 1; landed pending CI green)
 - **Date**: 2026-11-14
 - **Issue**: [#250](https://github.com/mekkamagnus/tmax/issues/250)
 - **Spec**: [SPEC-250](../specs/SPEC-250-binary-drop-in-cli.md)
@@ -51,6 +51,18 @@ source runs keep identical behavior and keep running repo code (learnings
 rule). Plus: the sweep never classifies or signals itself (`dist/tmax --sweep`
 matches its own command line; a cron/nohup sweep reaping itself as an orphan
 would be catastrophic).
+
+## Gate round 1 — two real regressions caught
+
+The adversarial gate caught what live tmux testing masked: (1) the TUI
+attach spawned the child and `process.exit(0)`'d immediately — the parent
+died (or raced an embedded boot via un-awaited call sites), and the
+"working" tmux pane was just the orphaned child holding the pty; the attach
+now awaits the child and exits with its code (bash `exec` semantics:
+the parent IS the session). (2) the source daemon spawned with the caller's
+cwd, so `--test`'s relative `test/tlisp/` ENOENT'd outside the repo AND the
+failure escaped as an unhandled rejection; the daemon now spawns with
+cwd=repo-root (bash parity) and trt failures map to the documented exit 2.
 
 ## Alternatives considered
 
