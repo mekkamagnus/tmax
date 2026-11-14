@@ -71,8 +71,9 @@ orphan would be catastrophic).
 - [x] `bun run typecheck` clean; `bun run test:unit` green (2 stale
       layout-pins updated: bin/tmax text → launcher.ts, daemonMode →
       runDaemonMode).
-- [ ] tmax-use e2e green (running; the playbooks exercise bin/tmax +
-      tmaxclient heavily).
+- [x] tmax-use e2e green: **62/62, exit 0** (solo run; the first batch run had
+      2 timing failures caused by a concurrent `build:tmax` on the same host —
+      both pass solo, the known concurrent-load gotcha).
 - [ ] Verify-gate PASS; CI green.
 
 ## Relevant Files
