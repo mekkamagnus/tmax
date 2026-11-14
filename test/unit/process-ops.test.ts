@@ -87,7 +87,14 @@ describe("#208 make-process serialized filter dispatch", () => {
     expect(joined).toBe("1:2:3:4:5:6:7:8:9:10:"); // loop prints ':' after every i
   });
 
-  test("a filter that throws does not kill the stream or the sentinel", async () => {
+  // ADR-0269 registry: confirmed flaky — failed in two full-suite runs under
+  // parallel load (local 2026-11-14 + CI run 43589588952), passes solo. Root
+  // cause: the fixture's three `sleep 0.05`-spaced printfs COALESCE into
+  // fewer chunks under load, so the throw-trigger chunk ("2\n" exact match)
+  // and the expected "1\n3\n" join both depend on chunk boundaries the OS
+  // doesn't guarantee. The retry cannot mask a real make-process regression:
+  // a genuinely broken filter/sentinel dispatch fails deterministically.
+  test("a filter that throws does not kill the stream or the sentinel", { retry: 1 }, async () => {
     const editor = await createStartedEditor();
     executeTlisp(editor, '(defvar *ok-chunks* (quote ()))');
     executeTlisp(editor, '(defvar *sentinel-ran* nil)');
