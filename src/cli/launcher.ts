@@ -31,6 +31,7 @@ function usage(): never {
   console.log(`Usage: tmax [options] [file]
 
 Options:
+  -v, --version  Show version and exit
   --daemon       Start daemon only (no TUI frame)
   -w, --workspace NAME  Open/connect to workspace NAME
   -w new:NAME    Create workspace NAME, then connect to it
@@ -40,6 +41,7 @@ Options:
   --init-file FILE  Use custom init file (default: ~/.config/tmax/init.tlisp)
   --clean           Start with a fresh *scratch* (skip workspace restore)
   --stop         Stop the running daemon
+  --ping         Check if the daemon is running (no auto-start)
   --sweep        List orphaned tmax daemons + stale sockets (dry-run)
   --sweep --apply  Reap orphans (SIGTERM→SIGKILL) + remove stale sockets/locks
   --sweep --force  Also include the canonical daemon (off by default)
@@ -51,8 +53,9 @@ Options:
   -h, --help     Show this help message
 
 Examples:
-  tmax                  Start daemon + open TUI frame
-  tmax file.txt         Start daemon + open TUI with file
+  tmax                  Open the editor (embedded single-process when no
+                        daemon is running; attaches to the daemon otherwise)
+  tmax file.txt         Open file.txt the same way
   tmax --daemon         Start daemon only
   tmax -e '(buffer-text)'  Evaluate T-Lisp
   tmax --capture        Dump current frame with colors
