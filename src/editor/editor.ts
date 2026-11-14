@@ -1539,6 +1539,15 @@ export class Editor {
         }
       }
 
+      // #254: alphabetical by name for every consumer (M-x candidates,
+      // describe-function) — Emacs parity; registration order reads as random.
+      const byName = (a: TLispValue, b: TLispValue): number => {
+        const an = ((a.value as Map<string, TLispValue>).get("name")?.value as string) ?? "";
+        const bn = ((b.value as Map<string, TLispValue>).get("name")?.value as string) ?? "";
+        return an < bn ? -1 : an > bn ? 1 : 0;
+      };
+      all.sort(byName);
+
       if (!interactiveOnly) return createList(all);
 
       // Filter to command candidates; fall back to the full table if the filter

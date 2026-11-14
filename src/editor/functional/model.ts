@@ -216,6 +216,12 @@ export function modelToEditorState(model: EditorModel): EditorState {
     mxCommand: model.mxCommand,
     lastCommand: model.lastCommand,
     currentFilename: model.currentFilename,
+    // #253: reverse-lookup name for the status line — special buffers
+    // (*Help*, …) carry no filename, and the renderer must still name the
+    // buffer the user is looking at.
+    currentBufferName: model.currentBuffer
+      ? [...(model.buffers ?? new Map())].find(([, b]) => b === model.currentBuffer)?.[0]
+      : undefined,
     buffers: new Map(model.buffers ?? new Map()),
     cursorFocus: model.cursorFocus,
     whichKeyActive: model.whichKeyActive,

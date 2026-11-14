@@ -40,7 +40,10 @@ export function renderStatusLine(state: EditorState, width: number): string {
   const rightLen = visibleLength(right);
   const centerSpace = Math.max(0, width - leftLen - rightLen);
 
-  const filename = basename(state.currentFilename);
+  // #253: file buffers show their file; special buffers (*Help*, *scratch*)
+  // carry no filename — fall back to the buffer NAME so the status line
+  // names the buffer the user is actually looking at.
+  const filename = basename(state.currentFilename ?? state.currentBufferName ?? "");
   const filenameLen = filename.length;
 
   let center: string;

@@ -164,7 +164,9 @@ SPC h m. M-x discoverable via this docstring."
             "\n"
             "Editor mode: " editor "\n\n"
             "Key bindings:\n"
-            (mapcar "describe-binding-line" bindings)))))))
+            ;; #253: string-join the mapcar result (the codebase idiom — concat
+            ;; alone stringifies the LIST as [object Object],[object Object],…).
+            (string-join "\n" (mapcar "describe-binding-line" bindings))))))))
 
 ;; ── describe-variable ─────────────────────────────────────────────────
 (defun describe-variable (name)

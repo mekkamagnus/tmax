@@ -203,6 +203,7 @@ export interface EditorState {
   mxCommand: string;
   lastCommand?: string;
   currentFilename?: string;  // Filename associated with current buffer
+  currentBufferName?: string;  // #253: name of the current buffer (special buffers have no filename)
   buffers?: Map<string, TextBuffer>;
   cursorFocus?: 'buffer' | 'command';  // Track where cursor focus should be
   // Which-key popup state (US-1.10.3)

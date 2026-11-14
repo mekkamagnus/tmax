@@ -495,9 +495,13 @@ export function registerStdlibFunctions(interpreter: TLispInterpreter): void {
     );
   }));
 
-  interpreter.defineBuiltin("stable-sort", raw((args: TLispValue[]) => {
+  // #255: one implementation, two names — `sort` (the Emacs name, primary)
+  // and `stable-sort` (the original name, kept for compatibility). T-Lisp
+  // lists are values, so unlike Emacs's destructive `sort` this returns a
+  // NEW list (documented in tlisp.texinfo).
+  const sortImpl = raw((args: TLispValue[]) => {
     if (args.length !== 2 || args[1]?.type !== "list") {
-      throw new Error("stable-sort requires a predicate and list");
+      throw new Error("sort requires a predicate and list");
     }
     const values = [...(args[1].value as TLispValue[])];
     values.sort((left, right) => {
@@ -506,7 +510,9 @@ export function registerStdlibFunctions(interpreter: TLispInterpreter): void {
       return 0;
     });
     return createList(values);
-  }));
+  });
+  interpreter.defineBuiltin("sort", sortImpl);
+  interpreter.defineBuiltin("stable-sort", sortImpl);
 
   interpreter.defineBuiltin("identity", raw((args: TLispValue[]) => {
     if (args.length !== 1) throw new Error("identity requires one argument");

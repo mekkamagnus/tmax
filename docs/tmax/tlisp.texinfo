@@ -562,10 +562,12 @@ result list.
 Return elements of @var{list} for which @var{predicate} is truthy.
 @end deffn
 
-@deffn Function stable-sort predicate list
+@deffn Function sort predicate list
 Return a sorted copy of @var{list}.  @var{predicate} receives two
 values and should return true when the first should sort before the
-second.
+second.  Unlike Emacs's destructive @code{sort}, T-Lisp lists are
+values: the original list is unchanged.  @code{stable-sort} is an
+alias (the original name).
 @end deffn
 
 @section String Operations
