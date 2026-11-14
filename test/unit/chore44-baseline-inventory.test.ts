@@ -112,10 +112,12 @@ describe("CHORE-44 Step 0 — public inventory parity", () => {
   });
 
   test("CLI exit-code contracts: tmax --test documents the 0/1/2 trt contract", () => {
-    const tmaxSrc = readFileSync(join(dirname(fileURLToPath(import.meta.url)), "..", "..", "bin", "tmax"), "utf8");
+    // #250: the tmax CLI surface lives in src/cli/launcher.ts (bin/tmax is a
+    // thin exec over src/main.ts, which routes through the launcher).
+    const tmaxSrc = readFileSync(join(dirname(fileURLToPath(import.meta.url)), "..", "..", "src", "cli", "launcher.ts"), "utf8");
     // The documented --test contract (Step 0 inventory): 0 pass / 1 fail / 2 no-tests.
     expect(tmaxSrc).toMatch(/exit 0 pass\s*\/\s*1 fail\s*\/\s*2 no-tests/);
-    // Unknown subcommand exits 2.
-    expect(tmaxSrc).toMatch(/\*\)\s+exit\s+2/);
+    // Invalid/unparsed trt exit codes map to 2 (was the bash `*) exit 2` arm).
+    expect(tmaxSrc).toMatch(/\? exitCode : 2/);
   });
 });

@@ -224,6 +224,9 @@ export function discover(opts: { uid: number; scanRoot?: string; deps?: Partial<
   // unless --force). lsof lists only the listener, not connected clients,
   // so clients are never promoted to candidates.
   for (const entry of psList) {
+    // #250: a compiled-binary sweep matches its OWN command line
+    // (`dist/tmax --sweep`); never classify or signal ourselves.
+    if (entry.pid === process.pid) continue;
     if (!isTmaxDaemonCommand(entry.command) && !canonical.has(entry.pid)) continue;
     livePids.add(entry.pid);
     const kind = classifyLiveDaemon(entry, psMap, canonical);

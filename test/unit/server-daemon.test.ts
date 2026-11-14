@@ -129,6 +129,7 @@ test('should have tmaxclient executable', async () => {
 
 test('should have updated main.ts with daemon support', async () => {
   // Read the main.ts file and verify it contains daemon support
-  const { stdout } = await execAsync('grep -c "daemonMode" src/main.ts');
+  // (#250: the --daemon route lives in runDaemonMode, reached via the launcher)
+  const { stdout } = await execAsync('grep -c "runDaemonMode" src/main.ts');
   expect(parseInt(stdout.trim())).toBeGreaterThan(0);
 });

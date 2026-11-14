@@ -18,7 +18,7 @@ import { tmpdir, userInfo } from 'node:os';
 import { join } from 'node:path';
 import { TmaxClient } from '../client/rpc-client.ts';
 import { runTmaxClient } from '../client/cli.ts';
-import { daemonSpawnTarget, tuiSpawnTarget } from './exec-target.ts';
+import { daemonSpawnTarget } from './exec-target.ts';
 import { main as sweepMain } from '../server/sweep.ts';
 import { readLockRaw } from '../server/lock-file.ts';
 
@@ -252,13 +252,14 @@ async function runTrtSuite(p: ParsedArgs): Promise<never> {
   }
 }
 
-/** Attach the TUI as a child process and exit with its code. */
-function attachTui(args: string[]): never {
-  const tui = tuiSpawnTarget();
-  const child = spawn(tui.cmd, [...tui.args, ...args], { stdio: 'inherit', env: process.env });
-  child.on('exit', (code) => process.exit(code ?? 0));
-  // Keep this process alive until the child exits.
-  return new Promise<never>(() => {}) as never;
+/** Attach the TUI by delegating to the client CLI's --tui mode — the exact
+ *  bash flow (`exec tmaxclient -s … --tui [files…]`): tmaxclient opens any
+ *  files through the daemon BEFORE spawning the TUI child (#52/BUG-34), and
+ *  its TUI spawn is exec-target aware (source: bun tui-client.ts; binary:
+ *  self-exec --tui-client). */
+async function attachTui(args: string[]): Promise<never> {
+  await runTmaxClient(['-s', SOCKET, '--tui', ...args]);
+  process.exit(0);
 }
 
 /**
@@ -374,7 +375,7 @@ export async function runLauncher(argv: string[]): Promise<LauncherRoute> {
         process.exit(1);
       }
     }
-    attachTui(['-s', SOCKET, '--workspace', ws]);
+    attachTui(['--workspace', ws]);
   }
 
   // Last-workspace persistence, only for the bare `tmax` case (SPEC-040,
@@ -382,14 +383,14 @@ export async function runLauncher(argv: string[]): Promise<LauncherRoute> {
   if (!p.workspace && p.files.length === 0 && existsSync(LAST_WS_FILE) && await isRunning()) {
     const lastWs = readFileSync(LAST_WS_FILE, 'utf8').trim();
     if (lastWs) {
-      attachTui(['-s', SOCKET, '--workspace', lastWs]);
+      attachTui(['--workspace', lastWs]);
     }
   }
 
   // Files + a running daemon: route the files THROUGH the daemon and attach
   // the TUI (the embedded editor cannot share the daemon's state). #52/BUG-34.
   if (p.files.length > 0 && await isRunning()) {
-    attachTui(['-s', SOCKET, ...p.files]);
+    attachTui([...p.files]);
   }
 
   // No daemon: the single-process embedded editor (emacs-style — the editor
