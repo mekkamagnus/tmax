@@ -25,9 +25,20 @@ export function tuiSpawnTarget(): { cmd: string; args: string[] } {
 }
 
 /** Spawn target for a fresh daemon process (`tmax --daemon` semantics). */
-export function daemonSpawnTarget(): { cmd: string; args: string[] } {
+export function daemonSpawnTarget(): { cmd: string; args: string[]; cwd?: string } {
   if (isCompiledBinary()) {
+    // No source tree exists; the daemon keeps the caller's cwd (a compiled
+    // binary's --test is repo-checkout-scoped by nature — test/tlisp is not
+    // bundled).
     return { cmd: process.execPath, args: ["--daemon"] };
   }
-  return { cmd: process.execPath, args: [resolve(`${import.meta.dir}/../server/server.ts`)] };
+  // Source parity with the bash launcher's `cd "$PROJECT_DIR" && bun
+  // server.ts`: the daemon resolves RELATIVE paths (notably trt's
+  // test/tlisp/) against the repo root, so -e/--test work from any cwd.
+  // (exec-target.ts lives at <repo>/src/cli → the repo root is two levels up.)
+  return {
+    cmd: process.execPath,
+    args: [resolve(`${import.meta.dir}/../server/server.ts`)],
+    cwd: resolve(`${import.meta.dir}/../..`),
+  };
 }

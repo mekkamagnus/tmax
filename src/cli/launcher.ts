@@ -115,6 +115,7 @@ async function ensureDaemon(opts: { initFile: string; cleanStart: boolean }): Pr
   const child = spawn(target.cmd, daemonArgs, {
     stdio: ['ignore', logFd, logFd],
     env: { ...process.env, TMAX_SOCKET: SOCKET },
+    cwd: target.cwd,
     detached: true,
   });
   child.unref();
@@ -234,8 +235,16 @@ const DIAGNOSTIC_FLAGS = new Set([
 async function runTrtSuite(p: ParsedArgs): Promise<never> {
   await ensureDaemon(p);
   const client = new TmaxClient(SOCKET);
-  await client.connect();
   try {
+    await client.connect();
+  } catch (error) {
+    console.error('tmax --test: cannot reach the daemon:', error instanceof Error ? error.message : String(error));
+    process.exit(2);
+  }
+  try {
+    // The trt directory is resolved by the DAEMON's cwd (repo root in source
+    // mode; the compiled binary keeps the caller's cwd — test/tlisp is not
+    // bundled, so a binary --test needs a repo checkout).
     const loadExpr = p.testTarget
       ? `(trt-load-file "${p.testTarget}")`
       : `(trt-load-directory "test/tlisp/")`;
@@ -247,6 +256,11 @@ async function runTrtSuite(p: ParsedArgs): Promise<never> {
     const exitCodeRaw = await client.sendRequest('eval', { code: '(trt-exit-code-ts)' });
     const exitCode = Number(exitCodeRaw);
     process.exit(exitCode === 0 || exitCode === 1 || exitCode === 2 ? exitCode : 2);
+  } catch (error) {
+    // Load/run failure (e.g. no test/tlisp at the daemon's cwd) maps to the
+    // documented no-tests/error code — never an unhandled rejection.
+    console.error('tmax --test: load/run failed:', error instanceof Error ? error.message : String(error));
+    process.exit(2);
   } finally {
     client.close();
   }
@@ -375,7 +389,7 @@ export async function runLauncher(argv: string[]): Promise<LauncherRoute> {
         process.exit(1);
       }
     }
-    attachTui(['--workspace', ws]);
+    await attachTui(['--workspace', ws]);
   }
 
   // Last-workspace persistence, only for the bare `tmax` case (SPEC-040,
@@ -383,14 +397,14 @@ export async function runLauncher(argv: string[]): Promise<LauncherRoute> {
   if (!p.workspace && p.files.length === 0 && existsSync(LAST_WS_FILE) && await isRunning()) {
     const lastWs = readFileSync(LAST_WS_FILE, 'utf8').trim();
     if (lastWs) {
-      attachTui(['--workspace', lastWs]);
+      await attachTui(['--workspace', lastWs]);
     }
   }
 
   // Files + a running daemon: route the files THROUGH the daemon and attach
   // the TUI (the embedded editor cannot share the daemon's state). #52/BUG-34.
   if (p.files.length > 0 && await isRunning()) {
-    attachTui([...p.files]);
+    await attachTui([...p.files]);
   }
 
   // No daemon: the single-process embedded editor (emacs-style — the editor

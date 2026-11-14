@@ -320,14 +320,19 @@ Examples:
     // #250: spawn the TUI as a child (process isolation for raw-mode/SIGINT
     // cleanup is part of the TUI design). Source runs spawn the .ts entry;
     // the compiled binary re-execs itself with the internal --tui-client flag
-    // that main.ts routes to the TUI main.
+    // that main.ts routes to the TUI main. This function BLOCKS for the whole
+    // session — the parent exits with the child's code only when the TUI
+    // exits (the bash `exec` semantics: tmax was the editor session).
     const tui = tuiSpawnTarget();
     const child = spawn(tui.cmd, [...tui.args, ...tuiArgs], {
       stdio: 'inherit',
       env: process.env
     });
-    child.on('exit', (code: number) => process.exit(code));
-    return;
+    const code = await new Promise<number | null>((resolve) => {
+      child.on('exit', (c) => resolve(c));
+      child.on('error', () => resolve(1));
+    });
+    process.exit(code ?? 0);
   }
 
   // Special handling for --stop - send shutdown RPC
