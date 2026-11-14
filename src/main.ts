@@ -11,6 +11,13 @@ import { FileSystemImpl } from './core/filesystem.ts';
 import { TmaxServer } from './server/server.ts';
 import { Logger, LogLevel } from './utils/logger.ts';
 import { SteepFrontend } from './steep/assam.ts';
+// #250: main.ts is THE tmax CLI. The launcher (ported from bin/tmax) handles
+// every terminal verb (client/sweep/stop/test/capture/TUI-attach) in-process
+// so the compiled binary is a drop-in `tmax`; it returns the route for the
+// two in-process paths ('daemon' / 'embedded') below. Internal child-process
+// flags the launcher spawns (never user-facing): --tui-client runs the TUI
+// client's main in this process.
+import { runLauncher } from './cli/launcher.ts';
 // Single source of truth for the version: package.json. The `with { type: "json" }`
 // import attribute is supported by Bun's runtime AND its `bun build --compile`
 // bundler, so the compiled binary and `tmax --version` both read the same value
@@ -29,14 +36,39 @@ import pkg from "../package.json" with { type: "json" };
 
 async function main() {
   const startTime = Date.now();
-  const perfLog = Logger.getInstance().module('performance').fn('main');
   const startupLog = Logger.getInstance().module('main').fn('main');
   const startupId = startupLog.startOperation('editor-initialization');
 
   // Configure logger based on mode
   const args = process.argv.slice(2);
+
+  // #250: internal child-process entry — the launcher spawns the compiled
+  // binary with --tui-client for TUI attach (process isolation for raw-mode
+  // /SIGINT cleanup is part of the TUI design). Route straight to the TUI
+  // client's main; never user-facing.
+  if (args[0] === '--tui-client') {
+    const tui = await import('./client/tui-client.ts');
+    await tui.main();
+    return;
+  }
+
+  // Version BEFORE the launcher: `tmax --version` must print even when a
+  // daemon is running (the launcher would otherwise route bare invocations
+  // to a TUI attach). Same for --help (the launcher prints the full usage).
+  if (args.includes('--version') || args.includes('-v')) {
+    console.log(`tmax v${pkg.version} (T-Lisp powered terminal editor)`);
+    process.exit(0);
+  }
+
+  // #250: the launcher handles every terminal verb (exiting like the bash
+  // exec's) and returns the in-process route for the rest.
+  const route = await runLauncher(args);
+  if (route === 'daemon') {
+    await runDaemonMode(args);
+    return;
+  }
   const devMode = args.includes('--dev') || args.includes('--no-tty');
-  const daemonMode = args.includes('--daemon');
+  // (--daemon is routed by the launcher before this point.)
 
   const logger = Logger.getInstance();
   if (devMode) {
@@ -85,72 +117,8 @@ async function main() {
     initFilePath = args[initFileArgIndex + 1];
   }
 
-  // Version comes from package.json (single source of truth, AC10.3).
-  const VERSION = pkg.version;
-
-  // Show version if requested
-  if (args.includes('--version') || args.includes('-v')) {
-    console.log(`tmax v${VERSION} (T-Lisp powered terminal editor)`);
-    startupLog.completeOperation('editor-initialization', startupId);
-    process.exit(0);
-  }
-
-  // Show help if requested
-  if (args.includes('--help') || args.includes('-h')) {
-    console.log(`
-tmax - Terminal-based text editor (T-Lisp powered)
-Version: ${VERSION}
-
-Usage: tmax [options] [filename]
-
-Options:
-  -v, --version       Show version and exit
-  -h, --help          Show this help message
-  --daemon            Start server daemon mode
-  --dev, --no-tty     Development mode (skip TTY checks for AI coding assistants)
-  --init-file FILE    Use custom init file (default: ~/.config/tmax/init.tlisp)
-
-Examples:
-  tmax                    # Start editor with native frontend
-  tmax file.txt           # Open file.txt
-  tmax --daemon           # Start server daemon
-  tmax --dev              # Start in development mode
-  tmax --init-file ./my-config.tlisp  # Use custom init file
-    `);
-    startupLog.completeOperation('editor-initialization', startupId);
-    process.exit(0);
-  }
-
-  // Handle daemon mode
-  if (daemonMode) {
-    startupLog.info('Phase 1: Starting server daemon', {
-      correlationId: startupId,
-      metadata: { phase: 'daemon' }
-    });
-
-    console.log('Starting tmax server daemon...');
-    const cleanStart = args.includes('--clean');
-    const server = new TmaxServer(undefined, false, undefined, initFilePath, cleanStart);
-    try {
-      await server.start();
-
-      startupLog.info('Server daemon started successfully', {
-        correlationId: startupId,
-        data: { uptime: Date.now() - startTime }
-      });
-
-      // Keep the process alive
-      await new Promise(() => {}); // This will keep the server running indefinitely
-    } catch (error) {
-      const err = error instanceof Error ? error : new Error(String(error));
-      startupLog.failOperation('editor-initialization', startupId, err, {
-        phase: 'daemon'
-      });
-      console.error('Failed to start server:', error);
-      process.exit(1);
-    }
-    return;
-  }
+  // Version and help were handled BEFORE the launcher above (--version) and
+  // by the launcher's usage() (-h/--help, the full tmax CLI surface).
 
   // Filter out file arguments
   const fileArgs = args.filter(arg => !arg.startsWith('--') && arg !== '-d');
@@ -275,6 +243,27 @@ Examples:
       console.error("Error starting tmax:", errorMessage);
       process.exit(1);
     }
+  }
+}
+
+/** Daemon mode (#250): `tmax --daemon` — the launcher has already verified
+ *  the socket is free (#235 loud failure) and routed here. */
+async function runDaemonMode(args: string[]): Promise<void> {
+  const startupLog = Logger.getInstance().module('main').fn('runDaemonMode');
+  const initFileArgIndex = args.indexOf('--init-file');
+  const initFilePath = initFileArgIndex !== -1 ? args[initFileArgIndex + 1] : undefined;
+  const cleanStart = args.includes('--clean');
+
+  console.log('Starting tmax server daemon...');
+  const server = new TmaxServer(undefined, false, undefined, initFilePath, cleanStart);
+  try {
+    await server.start();
+    startupLog.info('Server daemon started successfully', {});
+    // Keep the process alive
+    await new Promise(() => {}); // This will keep the server running indefinitely
+  } catch (error) {
+    console.error('Failed to start server:', error);
+    process.exit(1);
   }
 }
 

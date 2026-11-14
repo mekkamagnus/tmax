@@ -146,7 +146,11 @@ function renderDisconnected(state: EditorState): void {
   render({ ...state, statusMessage: "daemon disconnected — press q or Esc to quit" });
 }
 
-async function main() {
+// #250: exported so main.ts can route the launcher's internal --tui-client
+// child-process flag here (the compiled binary re-execs itself for TUI
+// attach). `import.meta.main` below keeps direct `bun tui-client.ts` runs
+// working.
+export async function main() {
   const args = process.argv.slice(2);
 
   if (args.includes("--help") || args.includes("-h")) {
