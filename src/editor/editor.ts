@@ -2119,6 +2119,19 @@ export class Editor {
       (tab) => {
         this.applyUpdate({ type: "SetCurrentBuffer", buffer: tab.buffer });
         this.applyUpdate({ type: "SetCurrentFilename", filename: tab.label });
+        // Keep the focused window record bound to the tab's buffer — the
+        // same R4-3 invariant the setCurrentBuffer context method maintains.
+        // Focus switches (#262) persist/restore per-window records, so every
+        // model-buffer mutation must rebind the focused record; a later
+        // focus round-trip would otherwise silently undo the tab switch.
+        const windows = this.model.windows;
+        const idx = this.model.currentWindowIndex ?? 0;
+        const currentWindow = windows?.[idx];
+        if (windows && currentWindow) {
+          const updated = [...windows];
+          updated[idx] = { ...currentWindow, buffer: tab.buffer, bufferName: tab.bufferName };
+          this.applyUpdate({ type: "SetWindows", windows: updated });
+        }
       },
     );
 
@@ -2782,10 +2795,12 @@ export class Editor {
 
   /**
    * Switch focus to the window at `index`.
-   * Persists the leaving window's effective view into its record and
-   * restores the target window's viewport into the model. Switching to
-   * the already-focused window is a full no-op (restoring the record's
-   * creation-time viewport would spuriously reset the model's scroll).
+   * Persists the leaving window's editing context (buffer, cursor, and
+   * effective viewport) into its record and rebinds the model to the
+   * target window's record: buffer + filename metadata, cursor, focus,
+   * viewport (#262; viewport sync per #258). A same-index re-switch of the
+   * same window is a no-op (see the guard inside); a same-index call after
+   * window-close (a different window in the slot) still rebinds.
    */
   private switchWindow(index: number): void {
     const windows = this.model.windows;
@@ -2793,20 +2808,55 @@ export class Editor {
     if (!target) return;
 
     const currentIndex = this.model.currentWindowIndex ?? 0;
-    if (index === currentIndex) return;
+    // No-op only when the model already edits the target window's buffer:
+    // a same-index re-switch of one pane (single-window window-next) must
+    // not disturb the model's live scroll/cursor, but after window-close
+    // removes the focused pane a DIFFERENT window occupies the same index —
+    // and that must still rebind (#262).
+    if (index === currentIndex && this.model.currentBuffer === target.buffer) return;
     const leaving = windows?.[currentIndex];
-    if (leaving && leaving !== target) {
+    // Persist the model's context into the leaving record only when it
+    // belongs to that record (normal switch: record and model are in sync).
+    // After window-close removed the focused pane, the occupant of
+    // currentIndex is a different pane whose record must keep its own context.
+    if (leaving && leaving !== target && leaving.buffer === this.model.currentBuffer) {
       const paneHeight = leaving.height ?? (this.terminal.getSize().height - 2);
       const updated = [...(windows ?? [])];
       updated[currentIndex] = {
         ...leaving,
+        buffer: this.model.currentBuffer ?? leaving.buffer,
+        bufferName: this.findBufferName(this.model.currentBuffer) ?? leaving.bufferName,
+        cursorLine: this.model.cursorPosition.line,
+        cursorColumn: this.model.cursorPosition.column,
         viewportTop: getVisibleViewportTop(this.model, paneHeight),
         viewportLeft: this.model.viewportLeft ?? 0,
       };
       this.applyUpdate({ type: "SetWindows", windows: updated });
     }
 
+    // Rebind the model to the target window's editing context. Buffer
+    // semantics match buffer-switch (buffer + filename metadata; no mode
+    // re-derivation, no recency touch), except the cursor is restored from
+    // the window record instead of resetting to (0,0) — per-window cursor
+    // memory, like emacs window-point.
     this.applyUpdate({ type: "SetCurrentWindowIndex", index });
+    this.applyUpdate({ type: "SetCurrentBuffer", buffer: target.buffer });
+    const targetName = target.bufferName ?? this.findBufferName(target.buffer);
+    if (targetName) {
+      this.applyUpdate({
+        type: "SetCurrentFilename",
+        filename: this.bufferMetadata.get(targetName)?.filename,
+      });
+    }
+    const lineCount = target.buffer.getLineCount();
+    const maxLine = (lineCount && Either.isRight(lineCount) ? lineCount.right : 1) - 1;
+    this.applyUpdate({
+      type: "SetCursorPosition",
+      position: {
+        line: Math.min(Math.max(0, target.cursorLine), Math.max(0, maxLine)),
+        column: Math.max(0, target.cursorColumn),
+      },
+    });
     this.applyUpdate({ type: "SetViewportTop", top: target.viewportTop });
     this.applyUpdate({ type: "SetViewportLeft", left: target.viewportLeft });
   }

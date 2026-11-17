@@ -162,10 +162,11 @@ export function createWindowOps(
     const newWindows = windows.filter((_, i) => i !== currentIndex);
     setWindows(newWindows);
 
-    // Adjust current window index if needed
-    if (currentIndex >= newWindows.length) {
-      setCurrentWindowIndex(newWindows.length - 1);
-    }
+    // The focused window was removed — the model must rebind to the
+    // surviving window that now occupies this slot (or the last one).
+    // Closing a focused non-last window previously left the model editing
+    // the CLOSED window's buffer (#262).
+    setCurrentWindowIndex(Math.min(currentIndex, newWindows.length - 1));
 
     return Either.right(createNil());
   });
@@ -404,7 +405,20 @@ export function createWindowOps(
     if (!current || windows.length <= 1) {
       return Either.right(createNil());
     }
-    setWindows([current]);
+    // The focused window survives as the only pane. Absorb the model's live
+    // context into its record BEFORE the switch port restores from it —
+    // otherwise the restore snaps the model back to the record's
+    // last-saved cursor/viewport (#262).
+    const cursor = runModel(access, readModelField("cursorPosition"));
+    const kept: Window = {
+      ...current,
+      buffer: getCurrentBuffer() ?? current.buffer,
+      cursorLine: cursor?.line ?? current.cursorLine,
+      cursorColumn: cursor?.column ?? current.cursorColumn,
+      viewportTop: runModel(access, readModelField("viewportTop")) ?? current.viewportTop,
+      viewportLeft: runModel(access, readModelField("viewportLeft")) ?? current.viewportLeft,
+    };
+    setWindows([kept]);
     setCurrentWindowIndex(0);
     return Either.right(createNil());
   });
