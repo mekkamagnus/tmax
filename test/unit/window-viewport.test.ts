@@ -168,8 +168,9 @@ describe("Focus switch viewport sync (issue #258)", () => {
 
       interpreter.execute("(window-next)");
       const state = fixture.editor.getState();
-      // Initial window keeps height 22 (terminal 24 - 2): viewport clamps to 60 - 22 + 1
-      expect(state.windows?.[0]?.viewportTop).toBe(39);
+      // #259: the origin window's stored height halves on split (22 → 11,
+      // matching its rendered cell), so the leave-save clamps to 60 - 11 + 1.
+      expect(state.windows?.[0]?.viewportTop).toBe(50);
     } finally {
       fixture.dispose();
     }
@@ -185,7 +186,7 @@ describe("Focus switch viewport sync (issue #258)", () => {
 
       interpreter.execute("(window-prev)");
       const state = fixture.editor.getState();
-      expect(state.viewportTop).toBe(39);
+      expect(state.viewportTop).toBe(50);
       expect(state.currentWindowIndex).toBe(0);
     } finally {
       fixture.dispose();

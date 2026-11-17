@@ -66,23 +66,30 @@ export function createWindowOps(
     // Get terminal size for window dimensions (US-3.2.2)
     const terminalSize = getTerminalSize();
     
-    // Calculate dimensions based on split type
+    // Calculate dimensions based on split type. A split divides the pane:
+    // BOTH halves get a share of the divided dimension (#259 — previously
+    // only the new window got floor(dim/2) while the origin kept its full
+    // stored size, so stored sizes summed past the terminal).
     const currentHeight = currentWindow.height || terminalSize.height - 2;
     const currentWidth = currentWindow.width || terminalSize.width;
-    
+
     let newHeight: number;
     let newWidth: number;
-    
+    let originHeight = currentHeight;
+    let originWidth = currentWidth;
+
     if (type === "horizontal") {
       // Split horizontally: divide height
-      newHeight = Math.floor(currentHeight / 2);
+      newHeight = Math.max(3, Math.floor(currentHeight / 2));
       newWidth = currentWidth;
+      originHeight = Math.max(3, currentHeight - newHeight);
     } else {
       // Split vertically: divide width
       newHeight = currentHeight;
-      newWidth = Math.floor(currentWidth / 2);
+      newWidth = Math.max(10, Math.floor(currentWidth / 2));
+      originWidth = Math.max(10, currentWidth - newWidth);
     }
-    
+
     const newWindow: Window = {
       id: `window-${Date.now()}`,
       buffer: currentBuffer,
@@ -96,9 +103,16 @@ export function createWindowOps(
       width: newWidth,
     };
 
-    // Add new window after current window
+    // Add new window after the current one; the origin window's stored
+    // dimension shrinks to its half of the split.
     const newWindows = [...windows];
-    newWindows.splice(getCurrentWindowIndex() + 1, 0, newWindow);
+    const originIndex = getCurrentWindowIndex();
+    newWindows[originIndex] = {
+      ...currentWindow,
+      height: originHeight,
+      width: originWidth,
+    };
+    newWindows.splice(originIndex + 1, 0, newWindow);
     setWindows(newWindows);
 
     return Either.right(createNil());
