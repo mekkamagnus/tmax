@@ -1,4 +1,5 @@
 import type { EditorState, FoldState, HighlightSpan, Window } from "../../core/contracts/editor.ts";
+import { getVisibleViewportTop } from "../../core/viewport.ts";
 import { Either } from "../../utils/task-either.ts";
 import { style, type AnsiColor } from "../../steep/matcha.ts";
 import {
@@ -56,20 +57,7 @@ function fitToWidthWithScroll(rawLine: string, cw: number, viewportLeft: number)
   return { content: "\u00AB" + displayContent, continuesRight };
 }
 
-export function getVisibleViewportTop(state: EditorState, height: number): number {
-  const visibleLines = Math.max(1, height);
-  const viewportTop = Math.max(0, state.viewportTop);
-
-  if (state.cursorPosition.line < viewportTop) {
-    return Math.max(0, state.cursorPosition.line);
-  }
-
-  if (state.cursorPosition.line >= viewportTop + visibleLines) {
-    return Math.max(0, state.cursorPosition.line - visibleLines + 1);
-  }
-
-  return viewportTop;
-}
+export { getVisibleViewportTop };
 
 export function getVisibleViewportLeft(state: EditorState, contentWidth: number): number {
   const cursorColumn = state.cursorPosition.column;
@@ -566,8 +554,10 @@ export function renderBufferLines(
     const totalLines = getLineCountForBuffer(buf);
     const cursorLine = isFocused ? state.cursorPosition.line : win.cursorLine;
     const cursorColumn = isFocused ? state.cursorPosition.column : 0;
-    const viewportTop = win.viewportTop;
-    const winViewportLeft = wordWrap ? 0 : (win.viewportLeft ?? 0);
+    // Focused pane follows the model viewport (self-healing, same as the
+    // single-window path); unfocused panes render from their own record.
+    const viewportTop = isFocused ? getVisibleViewportTop(state, cell.height) : win.viewportTop;
+    const winViewportLeft = isFocused ? viewportLeft : (wordWrap ? 0 : (win.viewportLeft ?? 0));
 
     const cellLines = wordWrap
       ? renderSingleWindowWrapped(
@@ -584,23 +574,31 @@ export function renderBufferLines(
     for (let row = 0; row < cell.height && row < cellLines.length; row++) {
       const screenRow = cell.y + row;
       if (screenRow >= height) break;
-      // Place cell content at the right screen position
+      // Place the cell's row at cell.x, ANSI-aware: clamp to the cell's
+      // exact visual width, then compose with what is already on the row
+      // to the left/right (cells never overlap — computeLayout reserves
+      // separator gaps — so a plain raw slice would both ignore cell.x
+      // and cut into ANSI escapes).
       const line = cellLines[row]!;
-      const stripped = line.replace(/\x1b\[[0-9;]*m/g, "");
-      const padded = line + " ".repeat(Math.max(0, cell.width - stringWidth(stripped)));
-      screen[screenRow] = padded.slice(0, cell.width);
+      const padded = padAnsiToWidth(sliceToVisualWidth(line, cell.width), cell.width);
+      const before = screen[screenRow]!;
+      screen[screenRow] =
+        sliceToVisualWidth(before, cell.x) +
+        padded +
+        sliceFromVisualOffset(before, cell.x + cell.width);
     }
   }
 
-  // Overlay separators
+  // Overlay separators (ANSI-aware overwrite: rows carry SGR escapes, so a
+  // raw splice at index x would cut into them — compose by visual column)
   for (let y = 0; y < height; y++) {
-    if (seps[y] && seps[y]!.trim().length > 0) {
-      // Merge separator characters into the screen row
+    const sepRow = seps[y];
+    if (sepRow && sepRow.trim().length > 0) {
       let row = screen[y]!;
       for (let x = 0; x < width; x++) {
-        const ch = seps[y]![x];
+        const ch = sepRow[x];
         if (ch && ch !== " ") {
-          row = row.slice(0, x) + ch + row.slice(x + 1);
+          row = sliceToVisualWidth(row, x) + ch + sliceFromVisualOffset(row, x + 1);
         }
       }
       screen[y] = row;

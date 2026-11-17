@@ -26,27 +26,29 @@ export function computeLayout(
   const hasVertical = windows.some(w => w.splitType === "vertical");
 
   if (hasVertical) {
-    const colWidth = Math.floor(terminalWidth / n);
+    // Reserve a column between panes so separators never overlap content
+    const colWidth = Math.floor((terminalWidth - (n - 1)) / n);
     for (let i = 0; i < n; i++) {
       const window = windows[i]!;
       cells.push({
         windowId: window.id,
-        x: i * colWidth,
+        x: i * (colWidth + 1),
         y: 0,
-        width: i === n - 1 ? terminalWidth - i * colWidth : colWidth,
+        width: i === n - 1 ? terminalWidth - i * (colWidth + 1) : colWidth,
         height: terminalHeight,
       });
     }
   } else {
-    const rowHeight = Math.floor(terminalHeight / n);
+    // Reserve a row between panes so separators never overlap content
+    const rowHeight = Math.floor((terminalHeight - (n - 1)) / n);
     for (let i = 0; i < n; i++) {
       const window = windows[i]!;
       cells.push({
         windowId: window.id,
         x: 0,
-        y: i * rowHeight,
+        y: i * (rowHeight + 1),
         width: terminalWidth,
-        height: i === n - 1 ? terminalHeight - i * rowHeight : rowHeight,
+        height: i === n - 1 ? terminalHeight - i * (rowHeight + 1) : rowHeight,
       });
     }
   }

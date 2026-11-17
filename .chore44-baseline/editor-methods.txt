@@ -1,3 +1,6 @@
+# Refrozen 105->106 (issue #258 / ADR-0277): +switchWindow — window-focus switch
+# now routes through it to persist/restore per-window viewports. TS-private today;
+# #262 (focus-switch buffer/cursor rebind) will consume it as its insertion point.
 activateMajorModeForFile
 activeTerminalId
 applyModel
@@ -97,6 +100,7 @@ showSplashIfEmpty
 start
 stop
 switchBufferSilent
+switchWindow
 toAppError
 touchBuffer
 trackCommand

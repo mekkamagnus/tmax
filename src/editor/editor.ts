@@ -63,6 +63,7 @@ const TS_COMMAND_NAMES: ReadonlySet<string> = new Set([
 import { renderDiagnostic } from "../tlisp/diagnostic-renderer.ts";
 import type { TLispDiagnostic } from "../tlisp/diagnostics.ts";
 import { TextBufferImpl } from "../core/buffer.ts";
+import { getVisibleViewportTop } from "../core/viewport.ts";
 import { MessageLog, type LogLevel } from "./message-log.ts";
 import { Log, ViewBoundLog } from "./log-store.ts";
 import { LoggingRuntime } from "./runtime/logging-runtime.ts";
@@ -2075,7 +2076,7 @@ export class Editor {
     const windowOps = createWindowOps(
       { getModel: () => this.model, applyModel: (m) => { this.applyModel(m); } },
       (windows) => { this.applyUpdate({ type: "SetWindows", windows }); },
-      (index) => { this.applyUpdate({ type: "SetCurrentWindowIndex", index }); },
+      (index) => { this.switchWindow(index); },
       () => this.terminal.getSize()
     );
 
@@ -2777,6 +2778,37 @@ export class Editor {
       activeMinorModes,
       base,
     });
+  }
+
+  /**
+   * Switch focus to the window at `index`.
+   * Persists the leaving window's effective view into its record and
+   * restores the target window's viewport into the model. Switching to
+   * the already-focused window is a full no-op (restoring the record's
+   * creation-time viewport would spuriously reset the model's scroll).
+   */
+  private switchWindow(index: number): void {
+    const windows = this.model.windows;
+    const target = windows?.[index];
+    if (!target) return;
+
+    const currentIndex = this.model.currentWindowIndex ?? 0;
+    if (index === currentIndex) return;
+    const leaving = windows?.[currentIndex];
+    if (leaving && leaving !== target) {
+      const paneHeight = leaving.height ?? (this.terminal.getSize().height - 2);
+      const updated = [...(windows ?? [])];
+      updated[currentIndex] = {
+        ...leaving,
+        viewportTop: getVisibleViewportTop(this.model, paneHeight),
+        viewportLeft: this.model.viewportLeft ?? 0,
+      };
+      this.applyUpdate({ type: "SetWindows", windows: updated });
+    }
+
+    this.applyUpdate({ type: "SetCurrentWindowIndex", index });
+    this.applyUpdate({ type: "SetViewportTop", top: target.viewportTop });
+    this.applyUpdate({ type: "SetViewportLeft", left: target.viewportLeft });
   }
 
   /**

@@ -62,6 +62,7 @@ RFC-001 (TRT framework) is implemented across five sequentially-dependent specs.
 | [BUG-01-daemon-client-broken-features.md](BUG-01-daemon-client-broken-features.md) | Daemon/Client Broken and Missing Features | — |
 | [BUG-02-multiline-insert-and-tui-stale-state.md](BUG-02-multiline-insert-and-tui-stale-state.md) | Multiline Insert and TUI Stale State | — |
 | [BUG-05-demo-skill-visual-tmux.md](BUG-05-demo-skill-visual-tmux.md) | Demo skill outputs text instead of visual TUI | — |
+| [SPEC-251-window-viewport-sync.md](SPEC-251-window-viewport-sync.md) | Split panes render from a frozen viewport — cursor invisible in all panes | [ADR-0277](../adrs/ADR-0277-window-viewport-model-authoritative.md), #258 |
 | [BUG-06-markdown-syntax-highlighting.md](BUG-06-markdown-syntax-highlighting.md) | No markdown-mode syntax highlighting | [ADR-0115](../adrs/ADR-0115-tui-rendering-display-interaction-hardening.md) |
 | [BUG-07-which-key-popup.md](BUG-07-which-key-popup.md) | Which-key popup missing for vim prefix keys (z, g, C-w) | [ADR-0115](../adrs/ADR-0115-tui-rendering-display-interaction-hardening.md) |
 | [BUG-08-test-failures-cleanup.md](BUG-08-test-failures-cleanup.md) | 12 pre-existing test failures | — |
