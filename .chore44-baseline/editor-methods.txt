@@ -1,6 +1,8 @@
 # Refrozen 105->106 (issue #258 / ADR-0277): +switchWindow — window-focus switch
 # now routes through it to persist/restore per-window viewports. TS-private today;
 # #262 (focus-switch buffer/cursor rebind) will consume it as its insertion point.
+# Refrozen 106->107 (issue #265 / ADR-0279): +rebindFocusedWindowRecord — extracted
+# focused-record rebind helper (record-sync invariant); called by killBuffer + tabs.
 activateMajorModeForFile
 activeTerminalId
 applyModel
@@ -83,6 +85,7 @@ openFile
 openOrCreateFile
 pickKillSurvivor
 recomputeHighlights
+rebindFocusedWindowRecord
 registerMinorMode
 renameBuffer
 reportCommandError

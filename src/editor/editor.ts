@@ -2119,19 +2119,10 @@ export class Editor {
       (tab) => {
         this.applyUpdate({ type: "SetCurrentBuffer", buffer: tab.buffer });
         this.applyUpdate({ type: "SetCurrentFilename", filename: tab.label });
-        // Keep the focused window record bound to the tab's buffer — the
-        // same R4-3 invariant the setCurrentBuffer context method maintains.
-        // Focus switches (#262) persist/restore per-window records, so every
-        // model-buffer mutation must rebind the focused record; a later
-        // focus round-trip would otherwise silently undo the tab switch.
-        const windows = this.model.windows;
-        const idx = this.model.currentWindowIndex ?? 0;
-        const currentWindow = windows?.[idx];
-        if (windows && currentWindow) {
-          const updated = [...windows];
-          updated[idx] = { ...currentWindow, buffer: tab.buffer, bufferName: tab.bufferName };
-          this.applyUpdate({ type: "SetWindows", windows: updated });
-        }
+        // Keep the focused window record bound to the tab's buffer (#262
+        // record-sync invariant) — a later focus round-trip would otherwise
+        // silently undo the tab switch.
+        this.rebindFocusedWindowRecord(tab.buffer, tab.bufferName ?? tab.label);
       },
     );
 
@@ -3654,9 +3645,33 @@ export class Editor {
         if (meta?.filename) {
           this.applyUpdate({ type: "SetCurrentFilename", filename: meta.filename });
         }
+        // #265: rebind the focused window record to the survivor — a focus
+        // round-trip would otherwise resurrect the killed buffer (the
+        // record-sync invariant, ADR-0278).
+        this.rebindFocusedWindowRecord(buf, survivor);
       }
     }
     return name;
+  }
+
+  /**
+   * Rebind the focused window's record to the given buffer (#262 record-sync
+   * invariant: every model-buffer mutation must rebind the focused record, or
+   * a later focus switch restores a stale binding and silently undoes the
+   * mutation — e.g. resurrecting a killed buffer). Shared by killBuffer and
+   * the tab-switch buffer callback; the `setCurrentBuffer` context method,
+   * `switchBufferSilent`, and `createBuffer` keep their own (equivalent,
+   * pre-existing) sync.
+   */
+  private rebindFocusedWindowRecord(buffer: TextBuffer, bufferName: string): void {
+    const windows = this.model.windows;
+    const idx = this.model.currentWindowIndex ?? 0;
+    const currentWindow = windows?.[idx];
+    if (windows && currentWindow) {
+      const updated = [...windows];
+      updated[idx] = { ...currentWindow, buffer, bufferName };
+      this.applyUpdate({ type: "SetWindows", windows: updated });
+    }
   }
 
   /**
