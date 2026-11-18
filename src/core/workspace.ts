@@ -626,9 +626,29 @@ export class WorkspaceManager {
         // C4: reconstruct windows with buffer references
         const windows: Window[] = [];
         for (const winData of data.windows ?? []) {
-          const resolvedName = buffers.has(winData.bufferName) ? winData.bufferName : '*scratch*';
-          if (winData.bufferName && !buffers.has(winData.bufferName)) {
-            console.warn(`dataToWorkspace: window "${winData.id}" references unknown buffer "${winData.bufferName}", falling back to *scratch*`);
+          // #264: a window may reference a buffer absent from the persisted
+          // list — serializeWorkspace deliberately excludes *Messages*
+          // (regenerated from the log by reconcileWorkspace). Create the
+          // named buffer so the binding survives the round-trip; fall back
+          // to *scratch* only when the reference has no name at all.
+          let resolvedName: string;
+          if (winData.bufferName && buffers.has(winData.bufferName)) {
+            resolvedName = winData.bufferName;
+          } else if (winData.bufferName) {
+            buffers.set(winData.bufferName, TextBufferImpl.create(''));
+            bufferMetadata.set(winData.bufferName, {
+              name: winData.bufferName,
+              modified: false,
+              cursorLine: 0,
+              cursorColumn: 0,
+            });
+            bufferModeStates.set(winData.bufferName, {});
+            restoreWarnings.push(
+              `window "${winData.id}" references buffer "${winData.bufferName}" missing from workspace data; restored as an empty buffer`,
+            );
+            resolvedName = winData.bufferName;
+          } else {
+            resolvedName = '*scratch*';
           }
           const buffer = buffers.get(resolvedName)!;
           const window: Window = {
@@ -649,12 +669,28 @@ export class WorkspaceManager {
           windows.push(window);
         }
 
-        // Reconstruct tabs
+        // Reconstruct tabs (missing referenced buffers are re-created —
+        // same #264 rule as windows: keep the binding, warn observably)
         const tabs: import('./types.ts').Tab[] = [];
         for (const tabData of data.tabs ?? []) {
-          const resolvedName = buffers.has(tabData.bufferName) ? tabData.bufferName : '*scratch*';
-          if (tabData.bufferName && !buffers.has(tabData.bufferName)) {
-            console.warn(`dataToWorkspace: tab "${tabData.id}" references unknown buffer "${tabData.bufferName}", falling back to *scratch*`);
+          let resolvedName: string;
+          if (tabData.bufferName && buffers.has(tabData.bufferName)) {
+            resolvedName = tabData.bufferName;
+          } else if (tabData.bufferName) {
+            buffers.set(tabData.bufferName, TextBufferImpl.create(''));
+            bufferMetadata.set(tabData.bufferName, {
+              name: tabData.bufferName,
+              modified: false,
+              cursorLine: 0,
+              cursorColumn: 0,
+            });
+            bufferModeStates.set(tabData.bufferName, {});
+            restoreWarnings.push(
+              `tab "${tabData.id}" references buffer "${tabData.bufferName}" missing from workspace data; restored as an empty buffer`,
+            );
+            resolvedName = tabData.bufferName;
+          } else {
+            resolvedName = '*scratch*';
           }
           const buffer = buffers.get(resolvedName)!;
           tabs.push({
