@@ -399,7 +399,8 @@ describe("Which-Key Popup (US-1.10.3)", () => {
       expect(state.whichKeyPrefix).toBe("C-w");
 
       const bindings = state.whichKeyBindings || [];
-      expect(bindings.length).toBe(9);
+      // #261 grew the C-w chord set from 9 to 16 (W/o/r/h/j/k/l added).
+      expect(bindings.length).toBe(16);
     });
 
     test("should cancel vim prefix which-key with C-g", async () => {
@@ -500,7 +501,7 @@ describe("Which-Key Popup (US-1.10.3)", () => {
       expect(bindings.length).toBeGreaterThanOrEqual(7);
     });
 
-    test("C-w prefix which-key shows all 9 bindings", async () => {
+    test("C-w prefix which-key shows all 16 bindings", async () => {
       await editor.handleKey("\x17"); // C-w
       await waitForWhichKey(editor);
 
@@ -509,13 +510,20 @@ describe("Which-Key Popup (US-1.10.3)", () => {
       expect(keys).toContain("C-w s");
       expect(keys).toContain("C-w v");
       expect(keys).toContain("C-w w");
+      expect(keys).toContain("C-w W");
       expect(keys).toContain("C-w q");
+      expect(keys).toContain("C-w o");
+      expect(keys).toContain("C-w r");
+      expect(keys).toContain("C-w h");
+      expect(keys).toContain("C-w j");
+      expect(keys).toContain("C-w k");
+      expect(keys).toContain("C-w l");
       expect(keys).toContain("C-w +");
       expect(keys).toContain("C-w -");
       expect(keys).toContain("C-w >");
       expect(keys).toContain("C-w <");
       expect(keys).toContain("C-w =");
-      expect(bindings.length).toBe(9);
+      expect(bindings.length).toBe(16);
     });
   });
 

@@ -1,8 +1,12 @@
 (defmodule editor/commands/windows
-  (export split-window-below split-window-right other-window delete-window delete-other-windows balance-windows)
+  (export split-window-below split-window-right other-window other-window-reverse
+          windmove-left windmove-right windmove-up windmove-down
+          delete-window rotate-windows balance-windows)
 
 ;; windows.tlisp — Window management commands
-;; Wraps TypeScript display primitives with editor commands and key bindings
+;; Wraps TypeScript display primitives with editor commands and key bindings.
+;; The single home of the C-w chord set (#261 — previously split between
+;; motions.tlisp and here).
 
 (defun split-window-below ()
   "Split current window horizontally (top/bottom)."
@@ -19,23 +23,47 @@
   (interactive)
   (window-next))
 
+(defun other-window-reverse ()
+  "Cycle to previous window (vim C-w W)."
+  (interactive)
+  (window-prev))
+
+(defun windmove-left ()
+  "Focus the pane to the left (vim C-w h). No-op at the edge."
+  (interactive)
+  (window-move-focus "left"))
+
+(defun windmove-right ()
+  "Focus the pane to the right (vim C-w l). No-op at the edge."
+  (interactive)
+  (window-move-focus "right"))
+
+(defun windmove-up ()
+  "Focus the pane above (vim C-w k). No-op at the edge."
+  (interactive)
+  (window-move-focus "up"))
+
+(defun windmove-down ()
+  "Focus the pane below (vim C-w j). No-op at the edge."
+  (interactive)
+  (window-move-focus "down"))
+
 (defun delete-window ()
   "Close current window. Does nothing if only one window."
   (interactive)
   (window-close))
 
-(defun delete-other-windows ()
-  "Close every window except the current one (maximize current window).
-Composes window-current/window-next/window-close. No-op when only one
-window remains. SPEC-067: bound under the C-w window prefix, not C-x 1."
-  (let ((keep (window-current)))
-    (while (> (window-count) 1)
-      ;; window-close always closes the CURRENT window, so if the current
-      ;; window is the one we want to keep, rotate to a sibling first.
-      (when (= (window-current) keep)
-        (window-next))
-      (window-close))
-    (message "Deleted other windows")))
+;; delete-other-windows has no defun here: the TS primitive of the same
+;; name is the live implementation (#261 deduplication — TS builtins win
+;; symbol resolution over same-named defuns, so the former windows.tlisp
+;; loop was dead code AND behaviorally worse: it lost the model cursor by
+;; restoring sibling records mid-loop). C-w o binds the primitive directly.
+
+(defun rotate-windows ()
+  "Swap the focused window with the next one (vim C-w r): pane contents
+trade places while focus stays on the same slot."
+  (interactive)
+  (window-rotate))
 
 (defun balance-windows ()
   "Equalize window heights and widths across all windows.
@@ -47,9 +75,24 @@ window exists. SPEC-084. SPEC-067: bound under the C-w window prefix
   (window-balance))
 
 ;; C-w is a which-key PREFIX only (never a terminal command). The chord
-;; bindings here (C-w =) and in motions.tlisp (C-w s/v/w/q/+/-/>/<) make C-w
-;; a prefix, so a bare (key-bind "C-w" ...) would be dead weight — the prefix
-;; path (normal-handler.ts) intercepts C-w before binding lookup. See BUG-59.
-;; SPEC-084: C-w = rebalances pane sizes (extends the C-w prefix; no C-x binding)
+;; bindings below make C-w a prefix, so a bare (key-bind "C-w" ...) would be
+;; dead weight — the prefix path (normal-handler.ts) intercepts C-w before
+;; binding lookup. See BUG-59. #261 consolidated every C-w chord here (was:
+;; s/v/w/q/+/-/>/< in motions.tlisp, = here).
+(key-bind "C-w s" "(split-window-below)" "normal")
+(key-bind "C-w v" "(split-window-right)" "normal")
+(key-bind "C-w w" "(other-window)" "normal")
+(key-bind "C-w W" "(other-window-reverse)" "normal")
+(key-bind "C-w q" "(delete-window)" "normal")
+(key-bind "C-w o" "(delete-other-windows)" "normal")
+(key-bind "C-w r" "(rotate-windows)" "normal")
+(key-bind "C-w h" "(windmove-left)" "normal")
+(key-bind "C-w j" "(windmove-down)" "normal")
+(key-bind "C-w k" "(windmove-up)" "normal")
+(key-bind "C-w l" "(windmove-right)" "normal")
+(key-bind "C-w +" "(window-resize-height 1)" "normal")
+(key-bind "C-w -" "(window-resize-height -1)" "normal")
+(key-bind "C-w >" "(window-resize-width 1)" "normal")
+(key-bind "C-w <" "(window-resize-width -1)" "normal")
 (key-bind "C-w =" "(balance-windows)" "normal")
 )

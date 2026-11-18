@@ -2799,18 +2799,22 @@ export class Editor {
     if (!target) return;
 
     const currentIndex = this.model.currentWindowIndex ?? 0;
-    // No-op only when the model already edits the target window's buffer:
+    const targetName = target.bufferName ?? this.findBufferName(target.buffer);
+    const currentName = this.findBufferName(this.model.currentBuffer);
+    // No-op only when the model already edits the target window's buffer
+    // (compared by NAME — records can hold stale TextBuffer instances after
+    // immutable inserts, and name comparison is instance-staleness-proof):
     // a same-index re-switch of one pane (single-window window-next) must
     // not disturb the model's live scroll/cursor, but after window-close
     // removes the focused pane a DIFFERENT window occupies the same index —
     // and that must still rebind (#262).
-    if (index === currentIndex && this.model.currentBuffer === target.buffer) return;
+    if (index === currentIndex && currentName === targetName) return;
     const leaving = windows?.[currentIndex];
     // Persist the model's context into the leaving record only when it
-    // belongs to that record (normal switch: record and model are in sync).
-    // After window-close removed the focused pane, the occupant of
-    // currentIndex is a different pane whose record must keep its own context.
-    if (leaving && leaving !== target && leaving.buffer === this.model.currentBuffer) {
+    // belongs to that record (name-compared, staleness-proof). After
+    // window-close removed the focused pane, the occupant of currentIndex
+    // is a different pane whose record must keep its own context.
+    if (leaving && leaving !== target && leaving.bufferName === currentName) {
       const paneHeight = leaving.height ?? (this.terminal.getSize().height - 2);
       const updated = [...(windows ?? [])];
       updated[currentIndex] = {
@@ -2831,15 +2835,21 @@ export class Editor {
     // the window record instead of resetting to (0,0) — per-window cursor
     // memory, like emacs window-point.
     this.applyUpdate({ type: "SetCurrentWindowIndex", index });
-    this.applyUpdate({ type: "SetCurrentBuffer", buffer: target.buffer });
-    const targetName = target.bufferName ?? this.findBufferName(target.buffer);
+    // Prefer the registry's live instance for the record's name: a record
+    // can hold a stale TextBuffer instance (immutable inserts swap the
+    // instance in the registry + the FOCUSED record; unfocused copies keep
+    // the old reference — e.g. a split copy).
+    const targetBuffer = targetName !== undefined
+      ? (this.buffers.get(targetName) ?? target.buffer)
+      : target.buffer;
+    this.applyUpdate({ type: "SetCurrentBuffer", buffer: targetBuffer });
     if (targetName) {
       this.applyUpdate({
         type: "SetCurrentFilename",
         filename: this.bufferMetadata.get(targetName)?.filename,
       });
     }
-    const lineCount = target.buffer.getLineCount();
+    const lineCount = targetBuffer.getLineCount();
     const maxLine = (lineCount && Either.isRight(lineCount) ? lineCount.right : 1) - 1;
     this.applyUpdate({
       type: "SetCursorPosition",

@@ -523,12 +523,6 @@ char AFTER the boundary. Returns nil if none."
 (key-bind "C-e" "(vim-scroll-line-down (vim-count-consume 1))" "normal")
 (key-bind "C-y" "(vim-scroll-line-up (vim-count-consume 1))" "normal")
 
-(key-bind "C-w s" "(split-window-below)" "normal")
-(key-bind "C-w v" "(split-window-right)" "normal")
-(key-bind "C-w w" "(other-window)" "normal")
-(key-bind "C-w q" "(delete-window)" "normal")
-(key-bind "C-w +" "(window-resize-height 1)" "normal")
-(key-bind "C-w -" "(window-resize-height -1)" "normal")
-(key-bind "C-w >" "(window-resize-width 1)" "normal")
-(key-bind "C-w <" "(window-resize-width -1)" "normal")
+;; C-w window chords live in windows.tlisp (#261 consolidated them there —
+;; one home for the whole C-w prefix set).
 )

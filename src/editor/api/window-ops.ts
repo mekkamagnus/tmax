@@ -8,6 +8,7 @@ import { createNil, createNumber, createString, createBoolean, createList, creat
 import type { Window } from "../../core/contracts/editor.ts";
 import type { TextBuffer } from "../../core/contracts/buffer.ts";
 import { runModel, readModelField, type EditorModelAccess } from "./state-context.ts";
+import { computeLayout } from "../../core/window-layout.ts";
 import { AppError } from "../../error/types.ts";
 import { Either } from "../../utils/task-either.ts";
 
@@ -406,8 +407,13 @@ export function createWindowOps(
 
   /**
    * delete-other-windows — close every window except the current one (vim :only
-   * / Emacs C-x 1). SPEC-084 uses it to collapse to one window for the
-   * balance-windows no-op case.
+   * / Emacs C-x 1). The focused window survives as the only pane: its record
+   * absorbs the model's live context before the switch port restores from it,
+   * so the collapse keeps the model cursor where the user is (#262). #261: this
+   * TS implementation is the live one (TS builtins win symbol resolution over
+   * same-named T-Lisp defuns — the windows.tlisp loop duplicate was removed);
+   * the array surgery + context absorb is layout-mutation logic that belongs
+   * at this altitude.
    */
   ops.set("delete-other-windows", (args: TLispValue[]) => {
     if (args.length !== 0) {
@@ -419,10 +425,6 @@ export function createWindowOps(
     if (!current || windows.length <= 1) {
       return Either.right(createNil());
     }
-    // The focused window survives as the only pane. Absorb the model's live
-    // context into its record BEFORE the switch port restores from it —
-    // otherwise the restore snaps the model back to the record's
-    // last-saved cursor/viewport (#262).
     const cursor = runModel(access, readModelField("cursorPosition"));
     const kept: Window = {
       ...current,
@@ -434,6 +436,97 @@ export function createWindowOps(
     };
     setWindows([kept]);
     setCurrentWindowIndex(0);
+    return Either.right(createNil());
+  });
+
+  /**
+   * window-move-focus — focus the nearest pane in a direction
+   * ("left"|"right"|"up"|"down") using the computeLayout cell geometry
+   * (#261). A candidate must share an edge overlap on the perpendicular
+   * axis and lie strictly on the target side; the nearest edge wins
+   * (largest overlap breaks ties). No candidate → nil, focus unchanged.
+   * The focus switch routes through the switch port, so the full #262
+   * context rebind applies.
+   */
+  ops.set("window-move-focus", (args: TLispValue[]): Either<AppError, TLispValue> => {
+    if (args.length !== 1) {
+      throw new Error("window-move-focus requires one argument: direction");
+    }
+    const dirArg = args[0]!;
+    if (dirArg.type !== "string") {
+      throw new Error("window-move-focus direction must be a string");
+    }
+    const dir = dirArg.value as string;
+    if (dir !== "left" && dir !== "right" && dir !== "up" && dir !== "down") {
+      throw new Error("window-move-focus direction must be 'left', 'right', 'up', or 'down'");
+    }
+
+    const windows = getWindows();
+    if (windows.length <= 1) return Either.right(createNil());
+    const cells = computeLayout(windows, getTerminalSize().width, getTerminalSize().height);
+    const currentIndex = getCurrentWindowIndex();
+    const current = cells[currentIndex];
+    if (!current) return Either.right(createNil());
+
+    let bestIndex = -1;
+    let bestDistance = Infinity;
+    let bestOverlap = 0;
+    for (let i = 0; i < cells.length; i++) {
+      if (i === currentIndex) continue;
+      const cell = cells[i]!;
+      let distance: number;
+      let overlap: number;
+      if (dir === "left" || dir === "right") {
+        overlap = Math.min(cell.y + cell.height, current.y + current.height) - Math.max(cell.y, current.y);
+        distance = dir === "left"
+          ? current.x - (cell.x + cell.width)
+          : cell.x - (current.x + current.width);
+      } else {
+        overlap = Math.min(cell.x + cell.width, current.x + current.width) - Math.max(cell.x, current.x);
+        distance = dir === "up"
+          ? current.y - (cell.y + cell.height)
+          : cell.y - (current.y + current.height);
+      }
+      // Strictly on the target side, sharing some perpendicular extent.
+      if (distance <= 0 || overlap <= 0) continue;
+      // Nearest edge wins (the immediately adjacent pane — windmove/vim
+      // semantics); largest perpendicular overlap only breaks distance ties.
+      // (The orderings coincide on flat single-axis layouts; they diverge
+      // under #260's mixed-axis trees.)
+      if (distance < bestDistance || (distance === bestDistance && overlap > bestOverlap)) {
+        bestIndex = i;
+        bestDistance = distance;
+        bestOverlap = overlap;
+      }
+    }
+
+    if (bestIndex === -1) return Either.right(createNil());
+    setCurrentWindowIndex(bestIndex);
+    return Either.right(createNumber(bestIndex));
+  });
+
+  /**
+   * window-rotate — swap the focused window with the next one (cyclic), vim
+   * C-w r: pane CONTENTS trade places while focus stays on the same slot
+   * (#261). No-op with a single window.
+   */
+  ops.set("window-rotate", (args: TLispValue[]): Either<AppError, TLispValue> => {
+    if (args.length !== 0) {
+      throw new Error("window-rotate takes no arguments");
+    }
+    const windows = getWindows();
+    if (windows.length <= 1) return Either.right(createNil());
+    const currentIndex = getCurrentWindowIndex();
+    const nextIndex = (currentIndex + 1) % windows.length;
+    const rotated = [...windows];
+    const a = rotated[currentIndex]!;
+    rotated[currentIndex] = rotated[nextIndex]!;
+    rotated[nextIndex] = a;
+    setWindows(rotated);
+    // The focused slot now holds the OTHER record — re-route the switch port
+    // so the model rebinds to the slot's new occupant (same-index switch with
+    // a different buffer rebinds; same buffer is already consistent).
+    setCurrentWindowIndex(currentIndex);
     return Either.right(createNil());
   });
 
