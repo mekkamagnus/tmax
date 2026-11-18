@@ -215,6 +215,10 @@ export class Editor {
   // currentModuleName now lives on this.model (CHORE-39 Phase 4).
   private bufferMetadata: Map<string, { filename?: string; modified: boolean; recency: number }> = new Map();
   private bufferRecency: number = 0;
+  // #263: window-ID sequence — monotonic per editor; applyWorkspace advances
+  // it past restored IDs so a post-restore split cannot mint a duplicate
+  // (the render path keys panes by ID).
+  private windowIdSeq: number = 0;
   private whichKeyHandle: import("./utils/which-key-state.ts").WhichKeyHandle;
   private currentWorkspace?: WorkspaceState;
 
@@ -2077,7 +2081,8 @@ export class Editor {
       { getModel: () => this.model, applyModel: (m) => { this.applyModel(m); } },
       (windows) => { this.applyUpdate({ type: "SetWindows", windows }); },
       (index) => { this.switchWindow(index); },
-      () => this.terminal.getSize()
+      () => this.terminal.getSize(),
+      () => `window-${++this.windowIdSeq}`
     );
 
     for (const [name, fn] of windowOps) {
@@ -2719,6 +2724,15 @@ export class Editor {
     this.applyUpdate({ type: "SetCursorPosition", position: { ...workspace.cursorState } });
     this.applyUpdate({ type: "SetViewportTop", top: workspace.viewportState.top });
     this.applyUpdate({ type: "SetViewportLeft", left: workspace.viewportState.left ?? 0 });
+    // #263: deterministic window IDs — advance the minting sequence past any
+    // restored IDs, so a post-restore split cannot mint a duplicate (the
+    // restored IDs live in this editor now; the render path keys panes by ID).
+    for (const restored of workspace.windows) {
+      const seqMatch = /^window-(\d+)$/.exec(restored.id);
+      if (seqMatch) {
+        this.windowIdSeq = Math.max(this.windowIdSeq, Number(seqMatch[1]));
+      }
+    }
     // R3-1: use oldBufferNames reverse index to resolve buffer names,
     // then look up the new deep-copied instance from this.buffers
 	    const defaultWindow: Window = {

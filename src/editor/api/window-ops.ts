@@ -26,7 +26,8 @@ export function createWindowOps(
   access: EditorModelAccess,
   setWindows: (windows: Window[]) => void,
   setCurrentWindowIndex: (index: number) => void,
-  getTerminalSize: () => { width: number; height: number }
+  getTerminalSize: () => { width: number; height: number },
+  mintWindowId: () => string,
 ): Map<string, TLispFunctionImpl> {
   // CHORE-39 Phase 4: window/index/buffer reads flow through the State monad
   // against EditorModel; writes + terminal-size accessor stay on callbacks.
@@ -36,9 +37,19 @@ export function createWindowOps(
     runModel(access, readModelField("currentBuffer"));
   const ops = new Map<string, TLispFunctionImpl>();
 
+  // #263: window IDs must be unique — the render path keys panes by ID
+  // (windows.find(w => w.id === cell.windowId)). The Editor owns the
+  // sequence so workspace restore can advance it past restored IDs
+  // (persisted IDs live in the same editor after applyWorkspace).
+
   /**
    * Split window horizontally or vertically
    * Usage: (split-window "horizontal") or (split-window "vertical")
+   *
+   * Terminology (#263, Emacs-inherited inversion): "horizontal" produces
+   * STACKED panes (divides HEIGHT — one above the other); "vertical"
+   * produces SIDE-BY-SIDE panes (divides WIDTH). The unambiguous aliases
+   * are split-window-below (horizontal) and split-window-right (vertical).
    */
   ops.set("split-window", (args: TLispValue[]) => {
     if (args.length !== 1) {
@@ -66,11 +77,13 @@ export function createWindowOps(
     // Create new window with same buffer
     // Get terminal size for window dimensions (US-3.2.2)
     const terminalSize = getTerminalSize();
-    
+
     // Calculate dimensions based on split type. A split divides the pane:
     // BOTH halves get a share of the divided dimension (#259 — previously
     // only the new window got floor(dim/2) while the origin kept its full
     // stored size, so stored sizes summed past the terminal).
+    const MIN_HEIGHT = 3; // mirror window-resize-height
+    const MIN_WIDTH = 10; // mirror window-resize-width
     const currentHeight = currentWindow.height || terminalSize.height - 2;
     const currentWidth = currentWindow.width || terminalSize.width;
 
@@ -81,18 +94,28 @@ export function createWindowOps(
 
     if (type === "horizontal") {
       // Split horizontally: divide height
-      newHeight = Math.max(3, Math.floor(currentHeight / 2));
+      // #263: refuse to split below the pane minimum (vim behavior) —
+      // clamping instead would produce two over-subscribed half-panes. The
+      // guard guarantees both halves >= MIN (floor(dim/2) >= MIN), so no
+      // post-split clamping is needed.
+      if (currentHeight < MIN_HEIGHT * 2) {
+        throw new Error(`split-window: pane height ${currentHeight} too small to split (minimum ${MIN_HEIGHT * 2})`);
+      }
+      newHeight = Math.floor(currentHeight / 2);
       newWidth = currentWidth;
-      originHeight = Math.max(3, currentHeight - newHeight);
+      originHeight = currentHeight - newHeight;
     } else {
       // Split vertically: divide width
+      if (currentWidth < MIN_WIDTH * 2) {
+        throw new Error(`split-window: pane width ${currentWidth} too small to split (minimum ${MIN_WIDTH * 2})`);
+      }
       newHeight = currentHeight;
-      newWidth = Math.max(10, Math.floor(currentWidth / 2));
-      originWidth = Math.max(10, currentWidth - newWidth);
+      newWidth = Math.floor(currentWidth / 2);
+      originWidth = currentWidth - newWidth;
     }
 
     const newWindow: Window = {
-      id: `window-${Date.now()}`,
+      id: mintWindowId(),
       buffer: currentBuffer,
       bufferName: currentWindow.bufferName,
       cursorLine: currentWindow.cursorLine,
@@ -196,12 +219,18 @@ export function createWindowOps(
     }
 
     const windows = getWindows();
-    const windowList = windows.map(w => 
+    // #263: expose bufferName + dimensions — the fields live layout
+    // debugging actually needs (cursor alone made the #258/#259 triage
+    // awkward).
+    const windowList = windows.map(w =>
       createList([
         createSymbol("window"),
         createString(w.id),
+        createString(w.bufferName ?? ""),
         createNumber(w.cursorLine),
-        createNumber(w.cursorColumn)
+        createNumber(w.cursorColumn),
+        createNumber(w.height ?? 0),
+        createNumber(w.width ?? 0),
       ])
     );
 
@@ -327,7 +356,7 @@ export function createWindowOps(
    */
   ops.set("window-balance", (args: TLispValue[]) => {
     if (args.length !== 0) {
-      throw new Error("balance-windows takes no arguments");
+      throw new Error("window-balance takes no arguments");
     }
 
     const windows = getWindows();
@@ -549,6 +578,27 @@ export function createWindowOps(
       throw new Error(`window-height: no window at index ${idx}`);
     }
     return Either.right(createNumber(w.height ?? 0));
+  });
+
+  /**
+   * window-width — read a window's width by index (#263: the symmetric
+   * twin of window-height, absent before).
+   */
+  ops.set("window-width", (args: TLispValue[]) => {
+    if (args.length !== 1) {
+      throw new Error("window-width requires one argument: index");
+    }
+    const idxArg = args[0]!;
+    if (idxArg.type !== "number") {
+      throw new Error("window-width index must be a number");
+    }
+    const idx = idxArg.value as number;
+    const windows = getWindows();
+    const w = windows[idx];
+    if (!w) {
+      throw new Error(`window-width: no window at index ${idx}`);
+    }
+    return Either.right(createNumber(w.width ?? 0));
   });
 
   return ops;

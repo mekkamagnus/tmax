@@ -553,7 +553,10 @@ export function renderBufferLines(
     const buf = win.buffer;
     const totalLines = getLineCountForBuffer(buf);
     const cursorLine = isFocused ? state.cursorPosition.line : win.cursorLine;
-    const cursorColumn = isFocused ? state.cursorPosition.column : 0;
+    // Unfocused panes pass through their stored per-window column (#263 —
+    // was hardcoded 0). Cosmetic symmetry: unfocused cursors never render,
+    // but consumers of the render shapes see consistent data.
+    const cursorColumn = isFocused ? state.cursorPosition.column : win.cursorColumn;
     // Focused pane follows the model viewport (self-healing, same as the
     // single-window path); unfocused panes render from their own record.
     const viewportTop = isFocused ? getVisibleViewportTop(state, cell.height) : win.viewportTop;
