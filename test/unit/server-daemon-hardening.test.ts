@@ -297,7 +297,12 @@ describe('Daemon hardening', () => {
     conn.close();
   });
 
-  test('failed server shutdown does not remove live daemon lock', async () => {
+  // ADR-0269 registry (2nd entry, 2026-11-18): confirmed flaky under host
+  // load — observed 4x today (9-22s spawn-timeout tails) always alongside a
+  // parallel compile/test agent, always green solo (17/17 x4) and green in
+  // the prior cycle's unloaded full gate. Real-server spawn contention, not
+  // a regression; the assertion is load-independent once the server spawns.
+  test('failed server shutdown does not remove live daemon lock', { retry: 1 }, async () => {
     // Start first server
     server = new TmaxServer(socketPath, true);
     await server.start();

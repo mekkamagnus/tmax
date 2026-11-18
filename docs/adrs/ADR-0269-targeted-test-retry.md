@@ -56,3 +56,11 @@ re-run as pass (`2 pass / 0 fail`); it is a per-test option, so the wrapper's
   `bun test test/unit/server-daemon-hardening.test.ts` 17/17 ✅; retry
   mechanism probe recorded in SPEC-245 ✅; wrapper/CI/adw invocations
   unchanged (no `--retry` flag anywhere) ✅.
+
+---
+
+**Registry entries:**
+
+1. *(2026-11-17, #245)* `server-daemon-hardening > starting a second server on the same socket rejects` — BUG-16-investigated hang race; assertion accepts either rejection path.
+2. *(2026-11-18, #257 cycle)* `server-daemon-hardening > failed server shutdown does not remove live daemon lock` — real-server spawn contention under host load (4x observed at 9–22s tails beside a parallel compile agent; 17/17 solo ×4; green in the prior cycle's unloaded full gate).
+3. *(2026-11-18, #257 cycle)* `fikra-replay > every fikra module LOADS through the editor's require-module path` — module-load fan-out at the 20s timeout under host load (3x observed; 10/10 solo ×2; retry cannot mask a genuine module-load break — it would fail twice).

@@ -65,7 +65,12 @@ describe("#215 module-load guard (BUG-60 family)", () => {
     }
   });
 
-  test("every fikra module LOADS through the editor's require-module path", async () => {
+  // ADR-0269 registry (3rd entry, 2026-11-18): confirmed flaky under host
+  // load — 3x today at the 20s timeout (module-load fan-out over every
+  // fikra module), always green solo (10/10 x2). Load-bound, not a
+  // regression; retry cannot mask a genuine module-load break (it would
+  // fail twice).
+  test("every fikra module LOADS through the editor's require-module path", { retry: 1, timeout: 20_000 }, async () => {
     // The BUG-60 stray-paren class passes parseProgram but FAILS at load —
     // this is the load-path guard (gate round-1 catch). A started editor
     // resolves modules against the repo's core root; a fresh editor per
@@ -77,7 +82,7 @@ describe("#215 module-load guard (BUG-60 family)", () => {
       // executeTlisp throws on Left — loading IS the assertion.
       executeTlisp(editor, `(require-module ${m})`);
     }
-  }, 20_000);
+  });
 
   test("a deliberately broken module FAILS the same parse (guard proves itself)", () => {
     // Paren imbalance alone is tolerated by parseProgram (it surfaces at
