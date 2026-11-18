@@ -34,11 +34,9 @@ describe("Stored-dimension layout (issue #259)", () => {
       const interpreter = fixture.editor.getInterpreter();
       interpreter.execute('(split-window "horizontal")');
       const state = fixture.editor.getState();
-      // Stored: origin 11 (22-11), new 11 — summing to the pre-split size.
-      expect(state.windows?.[0]?.height).toBe(11);
-      expect(state.windows?.[1]?.height).toBe(11);
-      // Rendered: even split of 23 available rows (11 + sep + 12).
-      const cells = computeLayout(state.windows!, 80, 24);
+      // #260 tree semantics: a fresh split divides the frame's 23 content
+      // rows at ratio 0.5 (floor-first) — cells 11 + separator + 12.
+      const cells = computeLayout(state.windows!, 80, 24, state.windowLayout);
       expect(cells.map((c) => c.height)).toEqual([11, 12]);
       expect(cells[1]!.y).toBe(12);
     } finally {
@@ -54,13 +52,14 @@ describe("Stored-dimension layout (issue #259)", () => {
       const before = separatorRow(renderBufferLines(fixture.editor.getState(), 80, 24));
       expect(before).toBe(11);
 
-      interpreter.execute("(window-resize-height 10)"); // stored 11 → 21
+      interpreter.execute("(window-resize-height 10)"); // ratio 0.5 → ~0.93, min-clamped
       const after = separatorRow(renderBufferLines(fixture.editor.getState(), 80, 24));
-      // Stored [21, 11] scales into 23 rows: floor(23*21/32)=15 → sep at 15.
-      expect(after).toBe(15);
+      // #260: ratio clamps so the sibling keeps its 3-row minimum:
+      // floor(23 * (1 - 3/23)) = 20 → cells [20, 3], separator at row 20.
+      expect(after).toBe(20);
       const state = fixture.editor.getState();
-      const cells = computeLayout(state.windows!, 80, 24);
-      expect(cells.map((c) => c.height)).toEqual([15, 8]);
+      const cells = computeLayout(state.windows!, 80, 24, state.windowLayout);
+      expect(cells.map((c) => c.height)).toEqual([20, 3]);
       expect(cells[0]!.height + cells[1]!.height).toBe(23); // tiles exactly
     } finally {
       fixture.dispose();
@@ -75,7 +74,8 @@ describe("Stored-dimension layout (issue #259)", () => {
       interpreter.execute("(window-resize-height 10)");
       interpreter.execute("(window-balance)");
       const state = fixture.editor.getState();
-      const cells = computeLayout(state.windows!, 80, 24);
+      // #260: balance resets tree ratios to 0.5 — even cells again.
+      const cells = computeLayout(state.windows!, 80, 24, state.windowLayout);
       expect(cells.map((c) => c.height)).toEqual([11, 12]);
     } finally {
       fixture.dispose();
@@ -87,12 +87,10 @@ describe("Stored-dimension layout (issue #259)", () => {
     try {
       const interpreter = fixture.editor.getInterpreter();
       interpreter.execute('(split-window "horizontal")');
-      interpreter.execute("(window-resize-height -100)"); // clamps at MIN 3
+      interpreter.execute("(window-resize-height -100)"); // ratio clamps at the MIN guard
       const state = fixture.editor.getState();
-      expect(state.windows?.[0]?.height).toBe(3);
-      const cells = computeLayout(state.windows!, 80, 24);
-      // Stored [3, 11] → proportional fit keeps every pane ≥ MIN 3 and the
-      // small pane visibly small.
+      const cells = computeLayout(state.windows!, 80, 24, state.windowLayout);
+      // #260: the ratio clamps so the resized pane keeps its 3-row minimum.
       expect(cells[0]!.height).toBeGreaterThanOrEqual(3);
       expect(cells[0]!.height).toBeLessThan(cells[1]!.height);
       expect(cells[0]!.height + cells[1]!.height).toBe(23);
@@ -107,12 +105,11 @@ describe("Stored-dimension layout (issue #259)", () => {
       const interpreter = fixture.editor.getInterpreter();
       interpreter.execute('(split-window "vertical")');
       // First window stored width 80 → origin 40, new 40.
-      interpreter.execute("(window-resize-width -20)"); // stored 20
+      interpreter.execute("(window-resize-width -20)"); // ratio 0.5 → 0.5 - 20/79
       const state = fixture.editor.getState();
-      const cells = computeLayout(state.windows!, 80, 24);
-      // Available 79 columns: [20, 40] → floor(79*20/60)=26?? — proportional
-      // to stored: 26 and 52, +1 remainder to last → [26, 53].
-      expect(cells[0]!.width).toBe(26);
+      const cells = computeLayout(state.windows!, 80, 24, state.windowLayout);
+      // #260: floor(79 * (0.5 - 20/79)) = floor(19.5) = 19 → [19, 60].
+      expect(cells[0]!.width).toBe(19);
       expect(cells[1]!.x).toBe(cells[0]!.width + 1);
       expect(cells[0]!.width + cells[1]!.width).toBe(79);
     } finally {

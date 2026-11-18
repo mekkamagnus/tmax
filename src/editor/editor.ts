@@ -64,6 +64,7 @@ import { renderDiagnostic } from "../tlisp/diagnostic-renderer.ts";
 import type { TLispDiagnostic } from "../tlisp/diagnostics.ts";
 import { TextBufferImpl } from "../core/buffer.ts";
 import { getVisibleViewportTop } from "../core/viewport.ts";
+import { pruneTree, computeLayout } from "../core/window-layout.ts";
 import { MessageLog, type LogLevel } from "./message-log.ts";
 import { Log, ViewBoundLog } from "./log-store.ts";
 import { LoggingRuntime } from "./runtime/logging-runtime.ts";
@@ -2082,7 +2083,10 @@ export class Editor {
       (windows) => { this.applyUpdate({ type: "SetWindows", windows }); },
       (index) => { this.switchWindow(index); },
       () => this.terminal.getSize(),
-      () => `window-${++this.windowIdSeq}`
+      () => `window-${++this.windowIdSeq}`,
+      // #260: layout-tree accessors (mixed-axis geometry).
+      () => this.model.windowLayout,
+      (layout) => { this.applyUpdate({ type: "SetWindowLayout", layout }); },
     );
 
     for (const [name, fn] of windowOps) {
@@ -2760,6 +2764,14 @@ export class Editor {
 	      : [];
 
 	    this.applyUpdate({ type: "SetWindows", windows });
+	    // #260: restore the split tree, pruned of windows that did not
+	    // resolve (absent tree → flat fallback in the layout).
+	    if (workspace.windowLayout) {
+	      const liveIds = new Set(windows.map((w) => w.id));
+	      this.applyUpdate({ type: "SetWindowLayout", layout: pruneTree(workspace.windowLayout, liveIds) });
+	    } else {
+	      this.applyUpdate({ type: "SetWindowLayout", layout: undefined });
+	    }
 	    this.applyUpdate({ type: "SetCurrentWindowIndex", index: 0 });
 	    this.applyUpdate({ type: "SetTabs", tabs });
 	    this.applyUpdate({ type: "SetCurrentTabIndex", index: 0 });
@@ -2829,7 +2841,12 @@ export class Editor {
     // window-close removed the focused pane, the occupant of currentIndex
     // is a different pane whose record must keep its own context.
     if (leaving && leaving !== target && leaving.bufferName === currentName) {
-      const paneHeight = leaving.height ?? (this.terminal.getSize().height - 2);
+      // #260: the CELL height is authoritative for the viewport clamp
+      // (stored dims are advisory under the split tree).
+      const termSize = this.terminal.getSize();
+      const leavingCell = computeLayout([...(windows ?? [])], termSize.width, termSize.height, this.model.windowLayout)
+        .find((c) => c.windowId === leaving.id);
+      const paneHeight = leavingCell?.height ?? leaving.height ?? (termSize.height - 2);
       const updated = [...(windows ?? [])];
       updated[currentIndex] = {
         ...leaving,
@@ -2906,6 +2923,8 @@ export class Editor {
       };
       this.applyUpdate({ type: "SetWindows", windows: [initialWindow] });
       this.applyUpdate({ type: "SetCurrentWindowIndex", index: 0 });
+      // #260: the layout tree starts as the single leaf.
+      this.applyUpdate({ type: "SetWindowLayout", layout: { kind: "leaf", windowId: "window-main" } });
     } else {
       // Update current window's buffer
       const currentWindow = this.model.windows[this.model.currentWindowIndex ?? 0];

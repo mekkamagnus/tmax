@@ -22,7 +22,7 @@
  * collections on egress).
  */
 
-import type { EditorConfig, EditorState, HighlightSpan, JsonValue, LSPDiagnostic, MinibufferRenderView, Tab, WhichKeyBinding, Window } from "../../core/contracts/editor.ts";
+import type { EditorConfig, EditorState, HighlightSpan, JsonValue, LSPDiagnostic, MinibufferRenderView, Tab, WhichKeyBinding, Window, LayoutNode} from "../../core/contracts/editor.ts";
 import type { TextBuffer } from "../../core/contracts/buffer.ts";
 import type { Position, Range } from "../../core/contracts/primitives.ts";
 import type { EditorSessionState } from "./domain-state.ts";
@@ -110,6 +110,8 @@ export interface EditorModel {
   readonly buffers?: ReadonlyMap<string, TextBuffer>;
   /** Open windows (immutable array). */
   readonly windows?: readonly Window[];
+  /** #260: binary split tree over `windows` (mixed-axis layout). */
+  readonly windowLayout?: LayoutNode;
   /** Open tabs (immutable array). */
   readonly tabs?: readonly Tab[];
   /** Per-line syntax-highlight spans (immutable array of arrays). */
@@ -236,6 +238,7 @@ export function modelToEditorState(model: EditorModel): EditorState {
     lspDiagnostics: model.lspDiagnostics ? [...model.lspDiagnostics] : undefined,
     windows: model.windows ? model.windows.map(cloneWindow) : undefined,
     currentWindowIndex: model.currentWindowIndex,
+    windowLayout: model.windowLayout,
     tabs: model.tabs ? model.tabs.map(t => ({ ...t })) : undefined,
     currentTabIndex: model.currentTabIndex,
     highlightSpans: model.highlightSpans ? model.highlightSpans.map(spans => [...spans]) : undefined,

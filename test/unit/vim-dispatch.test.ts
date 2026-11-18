@@ -342,9 +342,14 @@ describe("SPEC-005 Vim dispatcher", () => {
     await press(editor, "\x17w");
     expect(editor.getState().currentWindowIndex).toBe(1);
 
-    const initialHeight = editor.getState().windows?.[1]?.height ?? 0;
+    // #260 tree semantics: C-w + grows the focused pane's CELL by trading
+    // a row with its sibling (the pair still tiles the content rows).
+    const heightOf = (i: number) => editor.getState().windows?.[i]?.height ?? 0;
+    const beforeFocused = heightOf(1);
+    const beforeSibling = heightOf(0);
     await press(editor, "\x17+");
-    expect(editor.getState().windows?.[1]?.height).toBe(initialHeight + 1);
+    expect(heightOf(1)).toBe(beforeFocused + 1);
+    expect(heightOf(0)).toBe(beforeSibling - 1);
 
     await press(editor, "\x17q");
     expect(editor.getState().windows).toHaveLength(1);

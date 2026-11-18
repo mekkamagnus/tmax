@@ -536,9 +536,10 @@ export function renderBufferLines(
     );
   }
 
-  // Multi-window path
-  const cells = computeLayout(windows, width, height);
-  const seps = renderSeparators(cells, width, height);
+  // Multi-window path (#260: cells come from the split tree when present —
+  // nested mixed-axis panes; legacy states fall back to the flat layout).
+  const cells = computeLayout(windows, width, height, state.windowLayout);
+  const seps = renderSeparators(cells, width, height, state.windowLayout);
   const gutterCfg = gutterConfigFromState(state.activeMinorModes, state.config);
 
   // Build a screen-sized output, one string per terminal row

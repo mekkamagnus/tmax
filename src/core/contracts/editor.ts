@@ -164,6 +164,38 @@ export interface Window {
 }
 
 /**
+ * Layout tree (#260): a binary split tree. Leaves reference windows by ID;
+ * split nodes divide their rectangle along one axis with a `ratio` share for
+ * the first child (0..1) and a dedicated separator row/column at the
+ * boundary (#258 semantics, per split). Axis naming inherits the Emacs
+ * inversion: "horizontal" produces STACKED panes (divides height),
+ * "vertical" produces SIDE-BY-SIDE panes (divides width) — see
+ * split-window's docstring. JSON-serializable for workspace persistence.
+ */
+export type LayoutAxis = "horizontal" | "vertical";
+
+export type LayoutNode =
+  | { readonly kind: "leaf"; readonly windowId: string }
+  | {
+      readonly kind: "split";
+      readonly axis: LayoutAxis;
+      /** Share of the divided axis (after the separator) for `first`, 0..1. */
+      readonly ratio: number;
+      readonly first: LayoutNode;
+      readonly second: LayoutNode;
+    };
+
+/** Build a leaf node (convenience). */
+export function layoutLeaf(windowId: string): LayoutNode {
+  return { kind: "leaf", windowId };
+}
+
+/** Build a split node (convenience); ratio clamped to 0..1. */
+export function layoutSplit(axis: LayoutAxis, ratio: number, first: LayoutNode, second: LayoutNode): LayoutNode {
+  return { kind: "split", axis, ratio: Math.min(1, Math.max(0, ratio)), first, second };
+}
+
+/**
  * Tab interface.
  */
 export interface Tab {
@@ -222,6 +254,9 @@ export interface EditorState {
   // Window management (US-3.2.1)
   windows?: Window[];  // Array of windows
   currentWindowIndex?: number;  // Index of currently focused window
+  /** #260: binary split tree over `windows` (mixed-axis layout). Absent on
+   *  legacy states — renderers fall back to the flat single-axis layout. */
+  windowLayout?: LayoutNode;
   // Tabs
   tabs?: Tab[];  // Array of tabs
   currentTabIndex?: number;  // Index of active tab

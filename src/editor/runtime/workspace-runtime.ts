@@ -12,7 +12,7 @@
 
 import type { TextBuffer } from "../../core/contracts/buffer.ts";
 import type { BufferMetadata, BufferModeState as WorkspaceBufferModeState, WorkspaceState } from "../../core/contracts/workspace.ts";
-import type { Window, Tab } from "../../core/contracts/editor.ts";
+import type { Window, Tab, LayoutNode } from "../../core/contracts/editor.ts";
 import type { Position } from "../../core/contracts/primitives.ts";
 import { TextBufferImpl } from "../../core/buffer.ts";
 import { Either } from "../../utils/task-either.ts";
@@ -28,6 +28,8 @@ export interface WorkspaceSnapshot {
     currentBuffer?: TextBuffer;
     cursorPosition: Position;
     windows?: readonly Window[];
+    /** #260: split tree carried into the workspace snapshot. */
+    windowLayout?: LayoutNode;
     tabs?: readonly Tab[];
     viewportTop: number;
     viewportLeft?: number;
@@ -146,6 +148,8 @@ export class WorkspaceRuntime {
       bufferMetadata,
       bufferModeStates,
       windows: [...(snapshot.model.windows ?? [])],
+      // #260: the split tree is part of the workspace snapshot.
+      windowLayout: snapshot.model.windowLayout,
       tabs: [...(snapshot.model.tabs ?? [])],
       cursorState: { ...snapshot.model.cursorPosition },
       viewportState: { top: snapshot.model.viewportTop, left: snapshot.model.viewportLeft ?? 0 },

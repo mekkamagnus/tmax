@@ -13,7 +13,7 @@
 
 import type { Position, Range } from "../../core/contracts/primitives.ts";
 import type { TextBuffer } from "../../core/contracts/buffer.ts";
-import type { WhichKeyBinding, LSPDiagnostic, Window, Tab, HighlightSpan, MinibufferRenderView, JsonValue, EditorConfig } from "../../core/contracts/editor.ts";
+import type { WhichKeyBinding, LSPDiagnostic, Window, Tab, HighlightSpan, MinibufferRenderView, JsonValue, EditorConfig, LayoutNode} from "../../core/contracts/editor.ts";
 import type { AppError } from "../../error/types.ts";
 import type { TLispValue } from "../../tlisp/types.ts";
 import type { EditorModel } from "./model.ts";
@@ -64,6 +64,7 @@ export type Msg =
   | { readonly type: "SetLspDiagnostics"; readonly diagnostics: readonly LSPDiagnostic[] }
   // Windows / tabs
   | { readonly type: "SetWindows"; readonly windows: readonly Window[] }
+  | { readonly type: "SetWindowLayout"; readonly layout: LayoutNode | undefined }
   | { readonly type: "SetCurrentWindowIndex"; readonly index: number }
   | { readonly type: "SetTabs"; readonly tabs: readonly Tab[] }
   | { readonly type: "SetCurrentTabIndex"; readonly index: number }

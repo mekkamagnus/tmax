@@ -102,6 +102,8 @@ export function update(model: EditorModel, msg: Msg): UpdateResult {
     case "SetLspDiagnostics":
       return { model: patch(model, { lspDiagnostics: [...msg.diagnostics] }), cmds: noCmds };
 
+    case "SetWindowLayout":
+      return { model: patch(model, { windowLayout: msg.layout }), cmds: noCmds };
     case "SetWindows":
       return { model: patch(model, { windows: msg.windows.map((w: Window) => ({ ...w })) }), cmds: noCmds };
     case "SetCurrentWindowIndex":

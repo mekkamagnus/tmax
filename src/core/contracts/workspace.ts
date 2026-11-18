@@ -85,6 +85,9 @@ export interface WorkspaceState {
   bufferMetadata: Map<string, BufferMetadata>;  // Buffer name → metadata
   bufferModeStates: Map<string, BufferModeState>;  // Buffer name → mode state
   windows: Window[];  // Array of windows in this workspace
+  /** #260: binary split tree over `windows` (mixed-axis layout). Absent on
+   *  legacy workspaces — the flat single-axis layout applies. */
+  windowLayout?: import("./editor.ts").LayoutNode;
   tabs: Tab[];  // Array of tabs (reserved for future use)
   cursorState: Position;  // Current cursor position
   viewportState: ViewportState;  // Current viewport state
@@ -135,6 +138,8 @@ export interface WorkspaceData {
       viewportOffset: number;
     };
   }>;
+  /** #260: serialized split tree (JSON-shaped LayoutNode). */
+  layout?: import("./editor.ts").LayoutNode;
   tabs: Array<{
     id: string;
     label: string;

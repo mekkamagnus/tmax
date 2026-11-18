@@ -708,6 +708,9 @@ export class WorkspaceManager {
           bufferMetadata,
           bufferModeStates,
           windows,
+          // #260: the split tree round-trips (pruned of windows that no
+          // longer resolve — applyWorkspace's flat fallback covers absence).
+          windowLayout: data.layout,
           tabs,
           cursorState: data.cursorState || { line: 0, column: 0 },
           viewportState: data.viewportState || { top: 0 },
@@ -838,6 +841,8 @@ export class WorkspaceManager {
           metadata: workspace.metadata,
           buffers,
           windows,
+          // #260: the split tree persists (mixed-axis layouts survive).
+          layout: workspace.windowLayout,
           tabs,
           cursorState: workspace.cursorState,
           viewportState: workspace.viewportState,

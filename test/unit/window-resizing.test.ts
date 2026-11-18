@@ -139,22 +139,25 @@ describe("Window Resizing - US-3.2.2", () => {
     // Split window horizontally
     interpreter.execute('(split-window "horizontal")');
     
-    let state = editor.getState();
-    const window1InitialHeight = state.windows?.[0]?.height || 0;
-    const window2InitialHeight = state.windows?.[1]?.height || 0;
-    
-    // Resize current window (window 0)
+    // #260 tree semantics: resize trades space between siblings — the
+    // focused pane's CELL grows (ratio on the enclosing split), the sibling
+    // shrinks, and the pair still tiles the terminal exactly.
+    const h = (i: number) => {
+      const r = interpreter.execute(`(window-height ${i})`);
+      return r._tag === "Right" ? (r.right.value as number) : -1;
+    };
+    const before0 = h(0);
+    const before1 = h(1);
+    expect(before0).toBe(11); // fresh split cells on 24 rows: 11 + sep + 12
+    expect(before1).toBe(12);
+
     interpreter.execute('(window-resize-height 5)');
-    
-    state = editor.getState();
-    const window1NewHeight = state.windows?.[0]?.height || 0;
-    const window2NewHeight = state.windows?.[1]?.height || 0;
-    
-    // Window 1 should be resized
-    expect(window1NewHeight).toBe(window1InitialHeight + 5);
-    // Window 2 should remain unchanged or be adjusted to maintain total
-    // (implementation may vary, but window 1 should definitely change)
-    expect(window1NewHeight).not.toBe(window1InitialHeight);
+
+    const after0 = h(0);
+    const after1 = h(1);
+    expect(after0).toBeGreaterThan(before0); // the resized pane grew
+    expect(after1).toBeLessThan(before1);    // the sibling ceded the space
+    expect(after0 + after1).toBe(23);        // tiles the 23 content rows exactly
   });
 
   test("vertical split windows should resize width independently", async () => {
@@ -164,17 +167,21 @@ describe("Window Resizing - US-3.2.2", () => {
     // Split window vertically
     interpreter.execute('(split-window "vertical")');
     
-    let state = editor.getState();
-    const window1InitialWidth = state.windows?.[0]?.width || 0;
-    
-    // Resize current window width
+    // #260 tree semantics: the focused pane's CELL width grows by the ratio
+    // adjustment; the pair still tiles the content columns exactly.
+    const w = (i: number) => {
+      const r = interpreter.execute(`(window-width ${i})`);
+      return r._tag === "Right" ? (r.right.value as number) : -1;
+    };
+    const before0 = w(0);
+    expect(before0).toBe(39); // fresh vertical split on 80 cols: 39 + sep + 40
+
     interpreter.execute('(window-resize-width 10)');
-    
-    state = editor.getState();
-    const window1NewWidth = state.windows?.[0]?.width || 0;
-    
-    // Window 1 width should change
-    expect(window1NewWidth).toBe(window1InitialWidth + 10);
+
+    const after0 = w(0);
+    const after1 = w(1);
+    expect(after0).toBeGreaterThan(before0);
+    expect(after0 + after1).toBe(79); // tiles the 79 content columns exactly
   });
 
   test("window resize with count prefix should multiply the delta", async () => {

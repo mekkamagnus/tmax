@@ -8,7 +8,9 @@ import { createNil, createNumber, createString, createBoolean, createList, creat
 import type { Window } from "../../core/contracts/editor.ts";
 import type { TextBuffer } from "../../core/contracts/buffer.ts";
 import { runModel, readModelField, type EditorModelAccess } from "./state-context.ts";
-import { computeLayout } from "../../core/window-layout.ts";
+import { computeLayout, flatTree, pruneTree, annotateLayout, type AnnotatedLayout } from "../../core/window-layout.ts";
+import type { LayoutNode } from "../../core/contracts/editor.ts";
+import { layoutSplit } from "../../core/contracts/editor.ts";
 import { AppError } from "../../error/types.ts";
 import { Either } from "../../utils/task-either.ts";
 
@@ -28,6 +30,8 @@ export function createWindowOps(
   setCurrentWindowIndex: (index: number) => void,
   getTerminalSize: () => { width: number; height: number },
   mintWindowId: () => string,
+  getLayout: () => LayoutNode | undefined,
+  setLayout: (layout: LayoutNode | undefined) => void,
 ): Map<string, TLispFunctionImpl> {
   // CHORE-39 Phase 4: window/index/buffer reads flow through the State monad
   // against EditorModel; writes + terminal-size accessor stay on callbacks.
@@ -41,6 +45,71 @@ export function createWindowOps(
   // (windows.find(w => w.id === cell.windowId)). The Editor owns the
   // sequence so workspace restore can advance it past restored IDs
   // (persisted IDs live in the same editor after applyWorkspace).
+
+  // ── #260 layout tree ─────────────────────────────────────────────────
+  // The flat `windows` array stays the leaf registry (records, focus index,
+  // rebind, rotate); the split tree owns GEOMETRY. Helpers here keep the
+  // two in lockstep; without a tree (legacy states) the flat single-axis
+  // layout applies and stored dims remain advisory.
+  const liveIds = (windows: Window[]): Set<string> => new Set(windows.map((w) => w.id));
+  /** Cells for cell-math (guards, introspection, navigation): the REAL
+   * tree when present, else the flat branch (matches render exactly — never
+   * a fabricated tree, whose geometry could diverge from the flat layout). */
+  const layoutCells = () => {
+    const size = getTerminalSize();
+    return computeLayout(getWindows(), size.width, size.height, getLayout());
+  };
+  const replaceLeaf = (node: LayoutNode, targetId: string, replacement: LayoutNode): LayoutNode =>
+    node.kind === "leaf"
+      ? node.windowId === targetId ? replacement : node
+      : { ...node, first: replaceLeaf(node.first, targetId, replacement), second: replaceLeaf(node.second, targetId, replacement) };
+  /** Nearest enclosing split of `axis` on the path to the focused leaf;
+   * adjusts its ratio by delta rows/cols. Returns the updated tree, or
+   * undefined when no matching ancestor exists. */
+  const resizeTreeRatio = (tree: LayoutNode, focusedId: string, axis: "horizontal" | "vertical", delta: number): LayoutNode | undefined => {
+    const size = getTerminalSize();
+    const annotated = annotateLayout(tree, size.width, size.height);
+    const path: AnnotatedLayout[] = [];
+    const walk = (a: AnnotatedLayout): boolean => {
+      path.push(a);
+      if (a.node.kind === "leaf") {
+        if (a.node.windowId === focusedId) return true;
+        path.pop();
+        return false;
+      }
+      if ((a.first && walk(a.first)) || (a.second && walk(a.second))) return true;
+      path.pop();
+      return false;
+    };
+    if (!walk(annotated)) return undefined;
+    for (let i = path.length - 2; i >= 0; i--) {
+      const ancestor = path[i]!;
+      if (ancestor.node.kind === "split" && ancestor.node.axis === axis) {
+        const content = Math.max(1, (axis === "horizontal" ? ancestor.height : ancestor.width) - 1);
+        const min = axis === "horizontal" ? 3 : 10;
+        const lo = Math.min(0.5, min / content);
+        const hi = 1 - lo;
+        // `ratio` is the FIRST child's share: growing a pane nested under
+        // `second` means SHRINKING the ratio (and vice versa).
+        const side = path[i + 1] === ancestor.first ? 1 : -1;
+        const ratio = Math.min(hi, Math.max(lo, ancestor.node.ratio + (side * delta) / content));
+        const target = ancestor.node;
+        const replace = (n: LayoutNode): LayoutNode =>
+          n === target ? { ...n, ratio } : n.kind === "leaf" ? n : { ...n, first: replace(n.first), second: replace(n.second) };
+        return replace(tree);
+      }
+    }
+    return undefined;
+  };
+  /** Sync informational stored dims from the authoritative cells. */
+  const syncStoredDims = (windows: Window[]): void => {
+    const cells = layoutCells();
+    const updated = windows.map((w) => {
+      const cell = cells.find((c) => c.windowId === w.id);
+      return cell ? { ...w, height: cell.height, width: cell.width } : w;
+    });
+    setWindows(updated);
+  };
 
   /**
    * Split window horizontally or vertically
@@ -78,40 +147,24 @@ export function createWindowOps(
     // Get terminal size for window dimensions (US-3.2.2)
     const terminalSize = getTerminalSize();
 
-    // Calculate dimensions based on split type. A split divides the pane:
-    // BOTH halves get a share of the divided dimension (#259 — previously
-    // only the new window got floor(dim/2) while the origin kept its full
-    // stored size, so stored sizes summed past the terminal).
+    // #260: the CELL is the authoritative pane size — the split minimum
+    // guard (#263) reads the focused pane's rendered geometry, not stored
+    // dims (which are advisory under the tree).
     const MIN_HEIGHT = 3; // mirror window-resize-height
     const MIN_WIDTH = 10; // mirror window-resize-width
-    const currentHeight = currentWindow.height || terminalSize.height - 2;
-    const currentWidth = currentWindow.width || terminalSize.width;
+    const cells = layoutCells();
+    const focusedCell = cells.find((c) => c.windowId === currentWindow.id);
+    const currentHeight = focusedCell?.height ?? currentWindow.height ?? terminalSize.height - 2;
+    const currentWidth = focusedCell?.width ?? currentWindow.width ?? terminalSize.width;
 
-    let newHeight: number;
-    let newWidth: number;
-    let originHeight = currentHeight;
-    let originWidth = currentWidth;
-
-    if (type === "horizontal") {
-      // Split horizontally: divide height
-      // #263: refuse to split below the pane minimum (vim behavior) —
-      // clamping instead would produce two over-subscribed half-panes. The
-      // guard guarantees both halves >= MIN (floor(dim/2) >= MIN), so no
-      // post-split clamping is needed.
-      if (currentHeight < MIN_HEIGHT * 2) {
-        throw new Error(`split-window: pane height ${currentHeight} too small to split (minimum ${MIN_HEIGHT * 2})`);
-      }
-      newHeight = Math.floor(currentHeight / 2);
-      newWidth = currentWidth;
-      originHeight = currentHeight - newHeight;
-    } else {
-      // Split vertically: divide width
-      if (currentWidth < MIN_WIDTH * 2) {
-        throw new Error(`split-window: pane width ${currentWidth} too small to split (minimum ${MIN_WIDTH * 2})`);
-      }
-      newHeight = currentHeight;
-      newWidth = Math.floor(currentWidth / 2);
-      originWidth = currentWidth - newWidth;
+    if (type === "horizontal" && currentHeight < MIN_HEIGHT * 2) {
+      // Split horizontally: divide height — refuse below the pane minimum
+      // (#263 vim behavior; clamping would produce two over-subscribed
+      // half-panes).
+      throw new Error(`split-window: pane height ${currentHeight} too small to split (minimum ${MIN_HEIGHT * 2})`);
+    }
+    if (type === "vertical" && currentWidth < MIN_WIDTH * 2) {
+      throw new Error(`split-window: pane width ${currentWidth} too small to split (minimum ${MIN_WIDTH * 2})`);
     }
 
     const newWindow: Window = {
@@ -123,21 +176,31 @@ export function createWindowOps(
       viewportTop: currentWindow.viewportTop,
       viewportLeft: currentWindow.viewportLeft ?? 0,
       splitType: type,
-      height: newHeight,
-      width: newWidth,
+      height: Math.floor(currentHeight / 2),
+      width: Math.floor(currentWidth / 2),
     };
 
-    // Add new window after the current one; the origin window's stored
-    // dimension shrinks to its half of the split.
+    // Add new window after the current one (flat registry order); stored
+    // dims stay advisory.
     const newWindows = [...windows];
     const originIndex = getCurrentWindowIndex();
-    newWindows[originIndex] = {
-      ...currentWindow,
-      height: originHeight,
-      width: originWidth,
-    };
+    newWindows[originIndex] = { ...currentWindow };
     newWindows.splice(originIndex + 1, 0, newWindow);
     setWindows(newWindows);
+
+    // #260: split the FOCUSED PANE in the tree — the new split node nests
+    // inside the focused leaf's frame (mixed-axis layouts become
+    // representable; previously one vertical pane re-flowed every pane into
+    // columns).
+    const tree = getLayout() ?? flatTree(windows) ?? { kind: "leaf", windowId: currentWindow.id } as LayoutNode;
+    const grown = replaceLeaf(
+      tree,
+      currentWindow.id,
+      layoutSplit(type, 0.5, { kind: "leaf", windowId: currentWindow.id }, { kind: "leaf", windowId: newWindow.id }),
+    );
+    setLayout(grown);
+    // Stored dims are informational — keep them mirroring the new cells.
+    syncStoredDims(getWindows());
 
     return Either.right(createNil());
   });
@@ -195,10 +258,17 @@ export function createWindowOps(
     }
 
     const currentIndex = getCurrentWindowIndex();
-    
+
     // Remove current window
     const newWindows = windows.filter((_, i) => i !== currentIndex);
     setWindows(newWindows);
+
+    // #260: prune the closed leaf from the tree — single-child splits
+    // collapse (the surviving sibling takes its parent's frame).
+    const afterClose = getLayout();
+    if (afterClose) {
+      setLayout(pruneTree(afterClose, liveIds(newWindows)));
+    }
 
     // The focused window was removed — the model must rebind to the
     // surviving window that now occupies this slot (or the last one).
@@ -221,18 +291,20 @@ export function createWindowOps(
     const windows = getWindows();
     // #263: expose bufferName + dimensions — the fields live layout
     // debugging actually needs (cursor alone made the #258/#259 triage
-    // awkward).
-    const windowList = windows.map(w =>
-      createList([
+    // awkward). #260: dimensions are the authoritative CELLS.
+    const cells = layoutCells();
+    const windowList = windows.map(w => {
+      const cell = cells.find((c) => c.windowId === w.id);
+      return createList([
         createSymbol("window"),
         createString(w.id),
         createString(w.bufferName ?? ""),
         createNumber(w.cursorLine),
         createNumber(w.cursorColumn),
-        createNumber(w.height ?? 0),
-        createNumber(w.width ?? 0),
-      ])
-    );
+        createNumber(cell?.height ?? w.height ?? 0),
+        createNumber(cell?.width ?? w.width ?? 0),
+      ]);
+    });
 
     return Either.right(createList(windowList));
   });
@@ -284,6 +356,21 @@ export function createWindowOps(
       throw new Error("No current window");
     }
 
+    // #260: with a split tree, resize adjusts the ratio of the nearest
+    // enclosing horizontal split (both sides keep the pane minimum). Stored
+    // dims sync from the new cells. A bare-leaf tree (single window) or no
+    // tree falls to the legacy stored-dim arithmetic.
+    const tree = getLayout();
+    if (tree && tree.kind === "split") {
+      const resized = resizeTreeRatio(tree, currentWindow.id, "horizontal", delta);
+      if (resized) {
+        setLayout(resized);
+        syncStoredDims(getWindows());
+        return Either.right(createNil());
+      }
+      return Either.right(createNil()); // no horizontal split on the path — no-op
+    }
+
     const currentHeight = currentWindow.height || 24; // Default terminal height
     const MIN_HEIGHT = 3; // Minimum window height
 
@@ -322,6 +409,18 @@ export function createWindowOps(
 
     if (!currentWindow) {
       throw new Error("No current window");
+    }
+
+    // #260: tree-first ratio resize (see window-resize-height).
+    const tree = getLayout();
+    if (tree && tree.kind === "split") {
+      const resized = resizeTreeRatio(tree, currentWindow.id, "vertical", delta);
+      if (resized) {
+        setLayout(resized);
+        syncStoredDims(getWindows());
+        return Either.right(createNil());
+      }
+      return Either.right(createNil()); // no vertical split on the path — no-op
     }
 
     const currentWidth = currentWindow.width || 80; // Default terminal width
@@ -363,6 +462,19 @@ export function createWindowOps(
 
     // No-op with a single window
     if (windows.length <= 1) {
+      return Either.right(createNil());
+    }
+
+    // #260: with a tree, balance resets every split ratio to 0.5 (each
+    // frame divides evenly, recursively) and stored dims sync from cells.
+    const tree = getLayout();
+    if (tree) {
+      const rebalance = (node: LayoutNode): LayoutNode =>
+        node.kind === "leaf"
+          ? node
+          : { ...node, ratio: 0.5, first: rebalance(node.first), second: rebalance(node.second) };
+      setLayout(rebalance(tree));
+      syncStoredDims(getWindows());
       return Either.right(createNil());
     }
 
@@ -464,6 +576,8 @@ export function createWindowOps(
       viewportLeft: runModel(access, readModelField("viewportLeft")) ?? current.viewportLeft,
     };
     setWindows([kept]);
+    // #260: the tree collapses to the surviving leaf (full frame).
+    setLayout({ kind: "leaf", windowId: kept.id });
     setCurrentWindowIndex(0);
     return Either.right(createNil());
   });
@@ -492,17 +606,17 @@ export function createWindowOps(
 
     const windows = getWindows();
     if (windows.length <= 1) return Either.right(createNil());
-    const cells = computeLayout(windows, getTerminalSize().width, getTerminalSize().height);
+    // #260: cells come from the tree when present (nested geometry).
+    const cells = layoutCells();
     const currentIndex = getCurrentWindowIndex();
-    const current = cells[currentIndex];
+    const current = cells.find((c) => c.windowId === windows[currentIndex]?.id);
     if (!current) return Either.right(createNil());
 
-    let bestIndex = -1;
+    let bestId: string | undefined;
     let bestDistance = Infinity;
     let bestOverlap = 0;
-    for (let i = 0; i < cells.length; i++) {
-      if (i === currentIndex) continue;
-      const cell = cells[i]!;
+    for (const cell of cells) {
+      if (cell.windowId === current.windowId) continue;
       let distance: number;
       let overlap: number;
       if (dir === "left" || dir === "right") {
@@ -523,15 +637,17 @@ export function createWindowOps(
       // (The orderings coincide on flat single-axis layouts; they diverge
       // under #260's mixed-axis trees.)
       if (distance < bestDistance || (distance === bestDistance && overlap > bestOverlap)) {
-        bestIndex = i;
+        bestId = cell.windowId;
         bestDistance = distance;
         bestOverlap = overlap;
       }
     }
 
-    if (bestIndex === -1) return Either.right(createNil());
-    setCurrentWindowIndex(bestIndex);
-    return Either.right(createNumber(bestIndex));
+    if (!bestId) return Either.right(createNil());
+    const targetIndex = getWindows().findIndex((w) => w.id === bestId);
+    if (targetIndex < 0) return Either.right(createNil());
+    setCurrentWindowIndex(targetIndex);
+    return Either.right(createNumber(targetIndex));
   });
 
   /**
@@ -577,7 +693,9 @@ export function createWindowOps(
     if (!w) {
       throw new Error(`window-height: no window at index ${idx}`);
     }
-    return Either.right(createNumber(w.height ?? 0));
+    // #260: the authoritative height is the CELL (tree layout).
+    const cell = layoutCells().find((c) => c.windowId === w.id);
+    return Either.right(createNumber(cell?.height ?? w.height ?? 0));
   });
 
   /**
@@ -598,7 +716,9 @@ export function createWindowOps(
     if (!w) {
       throw new Error(`window-width: no window at index ${idx}`);
     }
-    return Either.right(createNumber(w.width ?? 0));
+    // #260: the authoritative width is the CELL (tree layout).
+    const cell = layoutCells().find((c) => c.windowId === w.id);
+    return Either.right(createNumber(cell?.width ?? w.width ?? 0));
   });
 
   return ops;

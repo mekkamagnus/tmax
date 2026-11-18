@@ -18,14 +18,18 @@ describe("Window hygiene (issue #263)", () => {
     const fixture = await setup();
     try {
       const interpreter = fixture.editor.getInterpreter();
-      // Same-millisecond splits (scripted): all four IDs must be distinct.
-      interpreter.execute('(split-window "horizontal")');
+      // Same-millisecond splits (scripted): all minted IDs must be distinct.
+      // #260 note: nested splits shrink the focused pane, so a 24-row
+      // terminal only admits 3 splits before the minimum guard refuses —
+      // the 4th proves the guard and its distinct-id sibling behavior.
       interpreter.execute('(split-window "horizontal")');
       interpreter.execute('(split-window "vertical")');
       interpreter.execute('(split-window "horizontal")');
       const ids = fixture.editor.getState().windows?.map((w) => w.id) ?? [];
-      expect(ids.length).toBe(5);
-      expect(new Set(ids).size).toBe(5);
+      expect(ids.length).toBe(4);
+      expect(new Set(ids).size).toBe(4);
+      const refused = interpreter.execute('(split-window "horizontal")');
+      expect(refused._tag).toBe("Left");
     } finally {
       fixture.dispose();
     }
@@ -54,7 +58,8 @@ describe("Window hygiene (issue #263)", () => {
       const w0 = interpreter.execute("(window-width 0)");
       expect(w0._tag).toBe("Right");
       if (w0._tag === "Right") {
-        expect(w0.right.value).toBe(40);
+        // #260 tree floor semantics: content 79 at ratio 0.5 → 39/40.
+        expect(w0.right.value).toBe(39);
       }
       const missing = interpreter.execute("(window-width 9)");
       expect(missing._tag).toBe("Left");
