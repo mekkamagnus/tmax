@@ -57,7 +57,9 @@ export interface DaemonCandidate {
 export interface SweepDeps {
   ps: () => PsEntry[];
   canonicalPids: () => Set<number>; // pids owning /tmp/tmax-<uid>/server (lsof)
-  kill: (pid: number, sig: string) => void;
+  /** `sig` is a signal name or the numeric 0 liveness probe (#251: Bun
+   *  rejects the STRING '0' — the probe must pass a number). */
+  kill: (pid: number, sig: string | number) => void;
   now: () => number;
   sleep: (ms: number) => Promise<void>;
   graceMs: number;
@@ -265,9 +267,13 @@ export function discover(opts: { uid: number; scanRoot?: string; deps?: Partial<
 // ---------------------------------------------------------------------------
 
 async function reapPid(pid: number, deps: SweepDeps): Promise<boolean> {
+  // #251: the liveness probe must pass signal 0 as a NUMBER — Bun rejects
+  // the STRING '0' ("Unknown signal: 0"), which made alive() always false,
+  // so reapPid returned "reaped" at entry WITHOUT EVER SIGNALLING (the sweep
+  // reported reaped while the orphans lived).
   const alive = (): boolean => {
     try {
-      deps.kill(pid, '0');
+      deps.kill(pid, 0);
       return true;
     } catch {
       return false;
@@ -290,7 +296,14 @@ async function reapPid(pid: number, deps: SweepDeps): Promise<boolean> {
     } catch {
       /* gone */
     }
-    await deps.sleep(50);
+    // Poll for up to ~500ms after SIGKILL: signal 0 also succeeds on a
+    // not-yet-reaped zombie, so a single 50ms check can misread a killed
+    // process as surviving while its (reparented) parent reaps it.
+    const killDeadline = deps.now() + 500;
+    while (deps.now() < killDeadline) {
+      if (!alive()) return true;
+      await deps.sleep(50);
+    }
   }
   return !alive();
 }
@@ -380,7 +393,7 @@ function withDefaults(d: Partial<SweepDeps> | undefined, uid: number): SweepDeps
   return {
     ps: d?.ps ?? realPs,
     canonicalPids: d?.canonicalPids ?? (() => realCanonicalPids(uid)),
-    kill: d?.kill ?? ((pid, sig) => process.kill(pid, sig as NodeJS.Signals)),
+    kill: d?.kill ?? ((pid, sig) => process.kill(pid, sig as NodeJS.Signals)), // number 0 passes through the cast
     now: d?.now ?? Date.now,
     sleep: d?.sleep ?? ((ms) => new Promise<void>((r) => setTimeout(r, ms))),
     graceMs: d?.graceMs ?? 3000,

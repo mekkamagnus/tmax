@@ -193,12 +193,12 @@ describe('sweep — runSweep (BUG-29)', () => {
     const deps = {
       ps: () => [daemon(777, 1)], // reparented to init → orphan
       canonicalPids: () => new Set<number>(),
-      kill: (_pid: number, sig: string) => {
-        if (sig === '0') {
+      kill: (_pid: number, sig: string | number) => {
+        if (sig === 0) { // #251: the probe is numeric (Bun rejects the string '0')
           if (killed) throw new Error('ESRCH'); // signal-0 liveness probe
           return;
         }
-        signals.push(sig);
+        signals.push(String(sig));
         if (sig === 'SIGKILL') killed = true; // SIGTERM ignored, SIGKILL ends it
       },
       now: () => Date.now(),
