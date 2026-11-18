@@ -778,7 +778,22 @@ Bug #6: unlinked mentions. Returns a message listing matching texts."
   (let ((date-result (shell-command "date +%Y-%m-%d")))
     (let ((date-str (string-trim date-result)))
       (let ((path (concat "daily/" date-str ".md")))
-        (find-file-open path)
+        (if (file-exists-p path)
+          (find-file-open path)
+          ;; find-file-open is a no-op for missing files, so creation must
+          ;; persist then open — same pattern as markdown-write-note-template
+          ;; (verify-gate #185 gap 2). mkdir first: :w into a journal without
+          ;; daily/ hit write-file-content ENOENT (#270). Daily template from
+          ;; ~/.config/tmax/templates/daily.md wins; same built-in fallback as
+          ;; markdown-new-from-template.
+          (let ((template-file (read-file-content "~/.config/tmax/templates/daily.md"))
+                (content nil))
+            (file-mkdir (markdown-dirname path))
+            (if template-file
+              (set! content (markdown-expand-template-variables template-file date-str))
+              (set! content (format "# %s\n\n## Tasks\n\n## Notes\n" date-str)))
+            (write-file-content path content)
+            (find-file-open path)))
         (message "Daily note: %s" path)))))
 
 (defun markdown-expand-template-variables (content title)
