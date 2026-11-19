@@ -16,21 +16,33 @@
 (defun fikra-capture ()
   "Open capture buffer for composing a message. (Mode must be active — the
 SPC a i binding implies it; requiring fikra/mode here would cycle.)"
+  (interactive)
   (progn
       ;; Create capture buffer
       (if (not (member fikra-capture-buffer-name (buffer-list)))
         (buffer-create fikra-capture-buffer-name)
-        ;; Clear existing content
+        ;; Clear existing content — and leave it WRITABLE: the reuse path
+        ;; used to re-set read-only t here, making every second compose
+        ;; untypable ("Buffer is read-only") while the create path stayed
+        ;; writable. Writable is the contract the insert-mode typing needs.
         (progn
           (buffer-switch fikra-capture-buffer-name)
           (buffer-set-read-only nil)
           (let ((count (buffer-line-count)))
             (if (> count 1)
-              (buffer-delete-range 0 count)))
-          (buffer-set-read-only t)))
+              (buffer-delete-range 0 count)))))
       ;; Split window to show capture buffer
       (split-window "horizontal")
       (buffer-switch fikra-capture-buffer-name)
+      ;; Attach the advertised C-c C-c / C-c C-k keymap (idempotent) — the
+      ;; status line promised this chord since #214 but nothing bound it.
+      (let ((kmap (editor/keymaps/buffer-keymap fikra-capture-buffer-name)))
+        (if (not kmap)
+          (progn
+            (setq kmap (editor/keymaps/keymap-init "fikra-capture"))
+            (editor/keymaps/keymap-set-key kmap "C-c C-c" "(fikra/capture/fikra-capture-submit)")
+            (editor/keymaps/keymap-set-key kmap "C-c C-k" "(fikra/capture/fikra-capture-cancel)")
+            (editor/keymaps/buffer-set-keymap fikra-capture-buffer-name kmap))))
       ;; Enter insert mode
       (editor-set-mode "insert")
       (setq fikra-history-index -1)

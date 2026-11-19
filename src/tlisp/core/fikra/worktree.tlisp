@@ -252,6 +252,7 @@ when the worktree field is set)."
 (defun fikra-worktree-toggle ()
   "SPC a w: enter worktree mode when local, hand off to local when in a
 worktree (patch-apply-or-refuse)."
+  (interactive)
   (if (fikra-worktree-active-p)
     (fikra-worktree-handoff)
     (fikra-worktree-enter)))

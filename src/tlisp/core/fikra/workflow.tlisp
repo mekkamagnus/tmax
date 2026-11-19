@@ -143,27 +143,33 @@ Cover happy paths, edge cases, and error conditions."
 
 (defun fikra-explain ()
   "Send current buffer/selection to the EXPLAIN workflow thread (reused)."
+  (interactive)
   (fikra-workflow-open "explain" fikra-explain-prompt))
 
 (defun fikra-fix ()
   "Send current buffer/selection to the FIX workflow thread (reused)."
+  (interactive)
   (fikra-workflow-open "fix" fikra-fix-prompt))
 
 (defun fikra-refactor ()
   "Send current buffer/selection to the REFACTOR workflow thread (reused)."
+  (interactive)
   (fikra-workflow-open "refactor" fikra-refactor-prompt))
 
 (defun fikra-review ()
   "Send current buffer/selection to the REVIEW workflow thread (reused)."
+  (interactive)
   (fikra-workflow-open "review" fikra-review-prompt))
 
 (defun fikra-test ()
   "Send current buffer/selection to the TEST workflow thread (reused)."
+  (interactive)
   (fikra-workflow-open "test" fikra-test-prompt))
 
 ;; ── region + free-form (unchanged single-thread surfaces) ───────────
 (defun fikra-chat-region ()
   "Send visual selection to Fikra Chat."
+  (interactive)
   ;; Start fikra ONLY when inactive — re-starting resets the backend to
   ;; the default (probe catch: rounds 2+ lost the replay backend).
   (require-module fikra/mode)

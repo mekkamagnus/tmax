@@ -25,6 +25,7 @@ With no argument, toggle.
 With t, enable.
 With positive number, enable.
 With 0 or negative number, disable."
+  (interactive)
   (if (not arg-supplied-p)
     (if fikra-mode-active
       (fikra-stop)
@@ -39,6 +40,7 @@ With 0 or negative number, disable."
 
 (defun fikra-start (&optional backend)
   "Start fikra mode, load modules, register backends."
+  (interactive)
   (setq fikra-mode-active t)
   (minor-mode-set "fikra" t)
   ;; Load fikra modules. fikra/chat and fikra/capture are LAZY (their
@@ -47,6 +49,12 @@ With 0 or negative number, disable."
   (require-module fikra/adapter)
   (require-module fikra/context)
   (require-module fikra/workflow)
+  ;; Backends self-register ON LOAD (fikra-register-backend runs at module
+  ;; top level). Without these requires the live registry stays empty and
+  ;; every fresh session reports "(none)" — only the test harness's replay
+  ;; seeding ever registered one.
+  (require-module fikra/backend-claude)
+  (require-module fikra/backend-codex)
   ;; Discover and set the default backend — but NEVER override an explicit
   ;; selection (SPC a b / a test seam choosing first; #225 probe catch:
   ;; a workflow's start clobbered the chosen backend).
@@ -96,6 +104,8 @@ With 0 or negative number, disable."
 (key-bind "SPC a T" "(progn (require-module fikra/threads) (fikra/threads/fikra-threads-list-open))" "normal")
 ;; #223: plan interaction mode toggle (thread property).
 (key-bind "SPC a p" "(progn (require-module fikra/plan) (fikra/plan/fikra-plan-toggle))" "normal")
+;; Turn diff view (mockup 8.4 entry point; the ± rows land at turn end).
+(key-bind "SPC a d" "(progn (require-module fikra/diff) (fikra/diff/fikra-turn-diff))" "normal")
 
 (provide "fikra-mode")
 )

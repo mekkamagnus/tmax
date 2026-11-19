@@ -22,6 +22,7 @@
 + buffer-local keymap + lighter. The SPC a a entry point.
 #225: init-or-load runs only when NO thread is focused — a workflow that
 just created/switched its OWN thread must not be dragged back to main."
+  (interactive)
   ;; Mode activation is the caller's job (SPC a a starts it) — requiring
   ;; fikra/mode here would create a mode↔chat cycle.
   (if (not (fikra/thread/fikra-thread-current))
@@ -30,6 +31,17 @@ just created/switched its OWN thread must not be dragged back to main."
       (fikra/thread/fikra-thread-ensure-chat-buffer)
       (buffer-switch (fikra/thread/fikra-thread-buffer-name))
       (fikra/event/fikra-event-rebuild-fikra-buffer)))
+  ;; Markdown major mode: AI replies are markdown (code fences, lists) —
+  ;; the buffer-local chat keymap (RET/C-g/approval y/n) still wins over
+  ;; mode bindings because buffer keymaps take precedence (codex round-3:
+  ;; "the final answer still shows raw Markdown").
+  (major-mode-set "markdown")
+  ;; Word wrap: long AI replies must not clip at the terminal edge (codex
+  ;; round 4). auto-fill toggles the renderer's wordWrap. Safe since the
+  ;; wrapped path now uses the ANSI-aware block-cursor walker (the naive
+  ;; one crashed the client on live-appended colored lines — fixed
+  ;; 2026-11-20 in buffer-lines.ts).
+  (minor-mode-set "auto-fill" t)
   (fikra-ensure-buffer-keymap)
   (fikra-refresh-lighter)
   fikra-chat-buffer-name)
@@ -50,9 +62,13 @@ The adapter drives everything after this (turn-begin, stream, turn-end)."
       (editor-set-status "Fikra: no backend — SPC a b to select")
       nil)
     (progn
-      ;; The user's message is part of the transcript.
+      ;; The user's message is part of the transcript — tagged with the
+      ;; speaker so the renderer prefixes "You: " (the old baked-in prefix
+      ;; doubled up as "AI: You: …" — codex UI verification, structure 3/10).
       (fikra/event/fikra-event-emit
-        (list (list "kind" "text-delta") (list "text" (concat "You: " message))))
+        (list (list "kind" "text-delta")
+              (list "speaker" "user")
+              (list "text" message)))
       (fikra-refresh-lighter)
       (fikra/adapter/fikra-backend-start-turn message))))
 
@@ -73,8 +89,13 @@ The adapter drives everything after this (turn-begin, stream, turn-end)."
 ;; entry points (open/send/interrupt) refresh.
 (defun fikra-refresh-lighter ()
   "Recompute the fikra minor-mode lighter from live state: backend +
-state char + effective runtime mode with the degradation star (#219)."
+state char + effective runtime mode with the degradation star (#219).
+Also re-ENABLES the minor mode — a fresh editor session (client restart)
+starts with every minor mode off, so a buffer-switch back into the chat
+without an SPC a a lost the lighter entirely (codex round-5/6: mode-line
+context flakiness)."
   (require-module fikra/modes)
+  (minor-mode-set "fikra" t)
   (minor-mode-set-lighter "fikra"
     (concat "fikra:" (fikra/adapter/fikra-current-backend)
             (fikra/modes/fikra-lighter-state-char)

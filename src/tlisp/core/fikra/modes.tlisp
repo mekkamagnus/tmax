@@ -293,6 +293,7 @@ setter (module vars aren't setq-able from user code)."
 
 (defun fikra-runtime-mode-prompt ()
   "Prompt for the runtime mode via the minibuffer (SPC a m)."
+  (interactive)
   (completing-read
     "Runtime mode: "
     "fikra/modes/fikra-runtime-mode-table"

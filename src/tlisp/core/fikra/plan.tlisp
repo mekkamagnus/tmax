@@ -48,6 +48,7 @@ field is unset on default threads)."
 
 (defun fikra-plan-toggle ()
   "SPC a p: toggle the thread's interaction mode plan/default. Persists."
+  (interactive)
   (let ((mode (if (fikra-plan-mode-p) "default" "plan")))
     (fikra/thread/fikra-thread-set-field "interaction" mode)
     (fikra/thread/fikra-thread-save)

@@ -17,6 +17,7 @@
 
 (defun fikra-threads-list-open ()
   "Open (or refresh) the *Fikra-Threads* buffer and focus it."
+  (interactive)
   (if (not (member fikra-threads-buffer-name (buffer-list)))
     (progn
       (buffer-create fikra-threads-buffer-name)
