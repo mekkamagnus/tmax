@@ -432,3 +432,26 @@ The round 11 diff is a meaningful improvement: its totals and per-file rows are 
 4. **Complete and capture diff turn context.** The §8.4 mockup includes tool breakdown and visible revert and previous/next-turn controls; demonstrate those interactions and their available context in [diff.tlisp](/Users/mekael/Documents/programming/typescript/tmax/src/tlisp/core/fikra/diff.tlisp:37).
 
 Round 12 earns a meaningful approval increase: this is a real confirmation-service round-trip with an enforced interactive resolver, and the rendered gate explains both the pause and the trust choice. It does not yet establish the mockup’s central end-to-end promise for a real Claude tool call, and its compact transcript gate omits several details from the proposed approval panel. I independently ran the approval suite: **28 tests passed, 0 failed**. The other carried-forward scores rely on the round 11 review and evidence.
+
+---
+
+# Round 13 (gate provenance + new-file nav) — 2026-11-20
+
+| Area | Score | Justification |
+|---|---:|---|
+| Chat transcript | **8/10** | The composite shows a coherent turn with inline tool evidence, correlated result, response, change counts and one completion marker; the mockup’s per-action checkpoint remains absent. |
+| Modeline | **8/10** | The dynamic lighter carries backend, state, runtime mode, turn count and tool count, though it is denser and less descriptive than the mockup. |
+| Approval | **7/10** | The pause line now identifies the gating mode and shows the available decisions; the mockup’s richer action, checkpoint and authenticated-origin details are still missing. |
+| Diff viewer | **8/10** | The captured viewer has file summaries, totals and colored tracked-file diff; the new-file navigation change is present in code but is not demonstrated by the older capture. |
+| End-to-end confidence | **6/10** | The composite demonstrates production rendering and the approval machinery has tests, but it is assembled, and a real Claude CLI-mediated approval remains unverified on this installation. |
+| **Overall** | **8/10** | The chat now closely conveys the intended workflow; approval detail and a live mediated turn remain the largest gaps. |
+
+## Top remaining fixes
+
+1. **Make real CLI mediation work and capture one continuous turn.** The installed Claude CLI lacks the required hook, so the composite cannot establish that an actual CLI tool call pauses and resumes through this UI. Address the adapter capability path in [backend-claude.tlisp](/Users/mekael/Documents/programming/typescript/tmax/src/tlisp/core/fikra/backend-claude.tlisp:47), then exercise it with a supported backend or CLI and retain the existing [approval tests](/Users/mekael/Documents/programming/typescript/tmax/test/unit/fikra-approvals.test.ts:315).
+
+2. **Enrich the approval presentation with verified context.** The mode label identifies the policy in force; it does not by itself establish the authenticated origin shown in the mockup. Surface available action details, checkpoint status and actual verified provenance in [approvals.tlisp](/Users/mekael/Documents/programming/typescript/tmax/src/tlisp/core/fikra/approvals.tlisp:98) and [event.tlisp](/Users/mekael/Documents/programming/typescript/tmax/src/tlisp/core/fikra/event.tlisp:186), without implying a verification the system has not performed.
+
+3. **Show checkpoint and navigation context closer to the mockup.** Connect checkpoint status to mutating tool rows where supported, and add the diff viewer’s turn navigation/revert context and tool summary in [event.tlisp](/Users/mekael/Documents/programming/typescript/tmax/src/tlisp/core/fikra/event.tlisp:214) and [diff.tlisp](/Users/mekael/Documents/programming/typescript/tmax/src/tlisp/core/fikra/diff.tlisp:99). Capture `n/N` landing on both tracked and new-file sections to verify the latest navigation change visually.
+
+The round 13 changes improve the approval story: the user can now see which mode caused the pause, and the diff navigation code recognizes new-file sections. The supplied composite is persuasive evidence of the individual rendered elements, but it should remain labeled as an assembled artifact, and the mode label should not be conflated with authenticated request provenance. Against the RFC’s proposed native-loop screens, this is a strong chat presentation with a meaningful remaining integration gap around live per-action mediation and checkpoint evidence.

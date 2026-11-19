@@ -29,6 +29,8 @@
 ;; Registered for source "fikra" — the token's minted source must match.
 (confirmation-handler-register "fikra" "fikra/approvals/fikra-approval-enqueue")
 
+(require-module fikra/modes)
+
 (defvar fikra-approval-pending-id nil
   "The parked mediate id the y/n/a keys answer (single pending per thread
 until #222's child threads).")
@@ -107,7 +109,10 @@ Live → permission-request FAEP event, confirming state, y/n/a prompt."
       (fikra/event/fikra-event-emit
         (list (list "kind" "permission-request")
               (list "action" (concat kind ": " detail))
-              (list "id" id)))
+              (list "id" id)
+              ;; Provenance (codex round 12: "richer approval presentation"):
+              ;; the runtime mode that GATED this action rides the event.
+              (list "mode" (fikra/modes/fikra-effective-mode))))
       ;; running → confirming (checked transition — an illegal enqueue
       ;; errors rather than corrupting thread state).
       (fikra/thread/fikra-thread-status-set "confirming")

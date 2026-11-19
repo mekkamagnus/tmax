@@ -186,13 +186,16 @@ round-12 approvals catch)."
       ((string= kind "permission-request")
         ;; Mockup 8.3's gate, L2: the action + the paused-turn contract —
         ;; the thread holds in `confirming` until y/n/a settles the parked
-        ;; mediate. The second line states the pause + the trust effect of
-        ;; `a` (the #219 trust class promoted to --allowedTools).
+        ;; mediate. The dim line states the pause, the gating runtime mode
+        ;; (provenance, when the event carries it), and `a`'s trust effect.
         (concat (fikra-face "\e[1;33m"
                     (concat "? " (fikra-event-get-str event "action")))
                 (fikra-event-id-tag event) "\n"
                 (fikra-face "\e[2m"
-                    (concat "  turn paused — [y] allow · [n] reject · [a] always-allow"
+                    (concat "  turn paused"
+                            (let ((gm (fikra-event-get-str event "mode")))
+                              (if (string= gm "") "" (concat " (" gm ")")))
+                            " — [y] allow · [n] reject · [a] always-allow"
                             " (trusts this action class for the thread)")) "\n"))
       ((string= kind "permission-response")
         (concat (fikra-face "\e[2m" (concat "  = " (fikra-event-get-str event "decision"))) "\n"))
