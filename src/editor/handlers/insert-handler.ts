@@ -6,6 +6,7 @@
 import type { EditorDispatchPort } from "./editor-dispatch-port.ts";
 import { resolveMapping } from "../key-resolution.ts";
 import { isTruthy } from "../../tlisp/values.ts";
+import type { TLispValue } from "../../tlisp/types.ts";
 import { log } from "../../utils/logger.ts";
 
 const isTruthyResult = (result: any): boolean => {
@@ -22,6 +23,45 @@ const isTruthyResult = (result: any): boolean => {
  */
 export async function handleInsertMode(editor: EditorDispatchPort, key: string, normalizedKey: string): Promise<void> {
   const handlerLog = log.module('handlers').fn('handleInsertMode');
+
+  // #278 (compose-then-commit, #277): a PENDING keymap prefix (the C-c of
+  // C-c C-c / C-c C-k bound in the *Capture* buffer-local map) routes every
+  // next key through the T-Lisp keymap chain — buffer-local first — before
+  // any insert-mode behavior, so chords win over typing and a printable
+  // continuation key never leaks into the buffer. No prefix pending → this
+  // block is a no-op and insert-mode behavior is byte-identical.
+  const pendingPrefix = (editor.getModel().whichKeyPrefix as string) || "";
+  if (pendingPrefix) {
+    const interp = editor.getInterpreter();
+    const esc = (s: string) => editor.escapeKeyForTLisp(s);
+    const lookupKey = `${pendingPrefix} ${normalizedKey}`;
+    const isRightResult = (r: unknown): r is { _tag: "Right"; right: TLispValue } =>
+      !!r && typeof r === "object" && (r as { _tag?: string })._tag === "Right";
+    const prefixResult = interp.execute(`(keymap-prefix-p (current-keymap) "${esc(lookupKey)}")`);
+    if (isRightResult(prefixResult) && isTruthy(prefixResult.right)) {
+      editor.applyUpdate({ type: "SetWhichKeyPrefix", prefix: lookupKey });
+      return;
+    }
+    const cmdResult = interp.execute(`(keymap-ref (current-keymap) "${esc(lookupKey)}")`);
+    const cmdRight = isRightResult(cmdResult) ? (cmdResult.right as { type?: string; value?: string } | null) : null;
+    // The chord is over either way — clear the prefix before dispatching so
+    // the committed command starts from clean state.
+    editor.applyUpdate({ type: "SetWhichKeyPrefix", prefix: "" });
+    if (cmdRight && cmdRight.type === "string" && typeof cmdRight.value === "string") {
+      try {
+        await editor.executeCommandAsync(cmdRight.value);
+      } catch (error) {
+        if (error instanceof Error && (error.message === "EDITOR_QUIT_SIGNAL" || error.message.includes("EDITOR_QUIT_SIGNAL"))) {
+          throw new Error("EDITOR_QUIT_SIGNAL");
+        }
+        const errorMsg = error instanceof Error ? error.message : String(error);
+        editor.applyUpdate({ type: "SetStatusMessage", message: `Error: ${errorMsg}` });
+      }
+      return;
+    }
+    editor.applyUpdate({ type: "SetStatusMessage", message: `Unbound key: ${lookupKey}` });
+    return;
+  }
 
   // Log Escape key to return to normal mode
   if (normalizedKey === "Escape") {
@@ -97,6 +137,37 @@ export async function handleInsertMode(editor: EditorDispatchPort, key: string, 
   }
   // For other keys in insert mode, treat as regular key mappings
   else {
+    // #278: non-printable keys consult the T-Lisp keymap chain (buffer-local
+    // → minor → mode, `current-keymap`) BEFORE the TS registry — this arms
+    // buffer-local compose chords (C-c C-c / C-c C-k / C-g in *Capture*,
+    // the #277 contract; no C-c chords exist in the default maps). A chain
+    // miss falls through to the registry path below, so default insert-mode
+    // behavior is unchanged.
+    const interp = editor.getInterpreter();
+    const esc = (s: string) => editor.escapeKeyForTLisp(s);
+    const isRightResult = (r: unknown): r is { _tag: "Right"; right: TLispValue } =>
+      !!r && typeof r === "object" && (r as { _tag?: string })._tag === "Right";
+    const chainPrefix = interp.execute(`(keymap-prefix-p (current-keymap) "${esc(normalizedKey)}")`);
+    if (isRightResult(chainPrefix) && isTruthy(chainPrefix.right)) {
+      editor.applyUpdate({ type: "SetWhichKeyPrefix", prefix: normalizedKey });
+      return;
+    }
+    const chainCmd = interp.execute(`(keymap-ref (current-keymap) "${esc(normalizedKey)}")`);
+    const chainRight = isRightResult(chainCmd) ? (chainCmd.right as { type?: string; value?: string } | null) : null;
+    if (chainRight && chainRight.type === "string" && typeof chainRight.value === "string") {
+      try {
+        await editor.executeCommandAsync(chainRight.value);
+      } catch (error) {
+        if (error instanceof Error && (error.message === "EDITOR_QUIT_SIGNAL" || error.message.includes("EDITOR_QUIT_SIGNAL"))) {
+          throw new Error("EDITOR_QUIT_SIGNAL"); // Re-throw clean quit signal to main loop
+        }
+        const errorMsg = error instanceof Error ? error.message : String(error);
+        editor.applyUpdate({ type: "SetStatusMessage", message: `Command error: ${errorMsg}` });
+        editor.logMessage(`Command error: ${errorMsg}`, 'error');
+      }
+      return;
+    }
+
     const mappings = editor.getKeyMappings().get(normalizedKey);
 
     if (!mappings) {

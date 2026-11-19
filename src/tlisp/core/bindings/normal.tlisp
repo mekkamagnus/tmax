@@ -85,6 +85,8 @@
   (require-module editor/commands/windows)
   (require-module editor/commands/tabs)
   (require-module editor/commands/markdown)
+  ;; #278: capture (SPC r d -- compose-then-commit to the daily note).
+  (require-module editor/commands/capture)
   (require-module editor/commands/browse-url)
   (require-module editor/commands/macros)
   (require-module editor/commands/repeat)

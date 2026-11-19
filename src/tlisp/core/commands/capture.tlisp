@@ -1,0 +1,98 @@
+(defmodule editor/commands/capture
+  (export capture-daily capture-commit capture-abort)
+
+;; capture.tlisp -- #278: direct capture to today's daily note, the
+;; org-roam-dailies-capture-today parity (the user's most-used Emacs chord,
+;; SPC r d). From anywhere: compose in *Capture*, C-c C-c files a
+;; timestamped entry to today's journal note, C-c C-k (or C-g) aborts --
+;; prior buffer/mode/point restored exactly.
+;;
+;; First consumer of the compose-then-commit contract (#277): the
+;; buffer-local-keymap front-end (the fikra-chat #206 pattern -- no C-c
+;; chords exist anywhere else in the default maps, so Emacs's exact
+;; C-c C-c / C-c C-k contract is free).
+;;
+;; Entry format "- [YYYY-MM-DD HH:MM] text" matches the org-log convention
+;; and the fikra send-log mockups (M1/M3).
+
+(defvar capture-return-buffer nil
+  "Buffer name to restore after the capture ends.")
+(defvar capture-return-mode "normal"
+  "Editor mode to restore after the capture ends.")
+(defvar capture-return-line 0)
+(defvar capture-return-col 0)
+
+(defun capture-timestamp ()
+  "Current timestamp as YYYY-MM-DD HH:MM (org-log entry style)."
+  (string-trim (shell-command "date '+%Y-%m-%d %H:%M'")))
+
+(defun capture-ensure-keymap ()
+  "Attach the *Capture* buffer-local keymap (idempotent)."
+  (let ((kmap (editor/keymaps/buffer-keymap "*Capture*")))
+    (if (not kmap)
+      (progn
+        (setq kmap (editor/keymaps/keymap-init "capture"))
+        (editor/keymaps/keymap-set-key kmap "C-c C-c" "(capture-commit)")
+        (editor/keymaps/keymap-set-key kmap "C-c C-k" "(capture-abort)")
+        (editor/keymaps/keymap-set-key kmap "C-g" "(capture-abort)")
+        (editor/keymaps/buffer-set-keymap "*Capture*" kmap))))
+  t)
+
+(defun capture-restore ()
+  "Kill *Capture* and return to the recorded buffer/mode/point."
+  (condition-case err
+    (buffer-kill "*Capture*")
+    (error (e) nil))
+  (switch-to-buffer
+    (if (string= capture-return-buffer "*Capture*")
+      "*scratch*"
+      capture-return-buffer))
+  (cursor-move capture-return-line capture-return-col)
+  (editor-set-mode capture-return-mode))
+
+(defun capture-daily ()
+  "Capture directly to today's journal note: compose in *Capture*, C-c C-c
+files the entry as \\n- [ts] text\\n under markdown-journal-path, C-c C-k
+aborts. Prior context is restored either way."
+  (interactive)
+  (require-module editor/commands/markdown/knowledge)
+  (set! capture-return-buffer (buffer-current))
+  (set! capture-return-mode (editor-mode))
+  (set! capture-return-line (cursor-line))
+  (set! capture-return-col (cursor-column))
+  ;; Fresh compose buffer every time: kill any previous *Capture* so no
+  ;; stale text survives, then create + switch.
+  (condition-case err
+    (buffer-kill "*Capture*")
+    (error (e) nil))
+  (buffer-create "*Capture*")
+  (switch-to-buffer "*Capture*")
+  (editor-set-mode "insert")
+  (capture-ensure-keymap)
+  (editor-set-status "Capture to daily - C-c C-c file | C-c C-k abort"))
+
+(defun capture-commit ()
+  "File the *Capture* text to today's journal note and restore context.
+Empty compose text is a no-write abort."
+  (interactive)
+  (let ((text (string-trim (buffer-text))))
+    (if (> (length text) 0)
+      (let* ((date-str (string-trim (shell-command "date +%Y-%m-%d")))
+             (path (markdown-journal-path date-str)))
+        (if (not (file-exists-p path))
+          (markdown-daily-note-init path date-str))
+        (append-file path (concat "\n- [" (capture-timestamp) "] " text "\n"))
+        (message "Captured to %s" path))
+      (message "Capture empty - aborted")))
+  (capture-restore))
+
+(defun capture-abort ()
+  "Discard the capture and restore context."
+  (interactive)
+  (capture-restore)
+  (editor-set-status "Capture aborted"))
+
+(key-bind "SPC r d" "(capture-daily)" "normal")
+
+(provide "editor/commands/capture")
+)

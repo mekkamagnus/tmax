@@ -19,7 +19,7 @@
     markdown-complete-at-point
     markdown-find-unlinked-mentions markdown-backlinks
     markdown-daily-note markdown-rename-note
-    markdown-journal-dir-set markdown-journal-path
+    markdown-journal-dir-set markdown-journal-path markdown-daily-note-init
     markdown-sparse-tree-regex markdown-sparse-tree-level markdown-sparse-tree-tag)
 
 ;; markdown/knowledge.tlisp — frontmatter, wiki links, backlinks, templates,
@@ -789,6 +789,20 @@ Bug #6: unlinked mentions. Returns a message listing matching texts."
     (concat date-str ".md")
     (concat markdown-journal-dir "/" date-str ".md")))
 
+(defun markdown-daily-note-init (path date-str)
+  "Persist a fresh daily note at PATH for DATE-STR without opening it (#278
+capture shares this with markdown-daily-note). mkdirs the dirname, writes the
+daily template (~/.config/tmax/templates/daily.md wins, built-in fallback),
+returns PATH."
+  (let ((template-file (read-file-content "~/.config/tmax/templates/daily.md"))
+        (content nil))
+    (file-mkdir (markdown-dirname path))
+    (if template-file
+      (set! content (markdown-expand-template-variables template-file date-str))
+      (set! content (format "# %s\n\n## Tasks\n\n## Notes\n" date-str)))
+    (write-file-content path content)
+    path))
+
 (defun markdown-daily-note ()
   "Create or open today's daily note."
   (interactive)
@@ -800,17 +814,8 @@ Bug #6: unlinked mentions. Returns a message listing matching texts."
           ;; find-file-open is a no-op for missing files, so creation must
           ;; persist then open — same pattern as markdown-write-note-template
           ;; (verify-gate #185 gap 2). mkdir first: :w into a journal without
-          ;; daily/ hit write-file-content ENOENT (#270). Daily template from
-          ;; ~/.config/tmax/templates/daily.md wins; same built-in fallback as
-          ;; markdown-new-from-template.
-          (let ((template-file (read-file-content "~/.config/tmax/templates/daily.md"))
-                (content nil))
-            (file-mkdir (markdown-dirname path))
-            (if template-file
-              (set! content (markdown-expand-template-variables template-file date-str))
-              (set! content (format "# %s\n\n## Tasks\n\n## Notes\n" date-str)))
-            (write-file-content path content)
-            (find-file-open path)))
+          ;; daily/ hit write-file-content ENOENT (#270).
+          (find-file-open (markdown-daily-note-init path date-str)))
         (message "Daily note: %s" path)))))
 
 (defun markdown-expand-template-variables (content title)
