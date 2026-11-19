@@ -455,3 +455,28 @@ Round 12 earns a meaningful approval increase: this is a real confirmation-servi
 3. **Show checkpoint and navigation context closer to the mockup.** Connect checkpoint status to mutating tool rows where supported, and add the diff viewer’s turn navigation/revert context and tool summary in [event.tlisp](/Users/mekael/Documents/programming/typescript/tmax/src/tlisp/core/fikra/event.tlisp:214) and [diff.tlisp](/Users/mekael/Documents/programming/typescript/tmax/src/tlisp/core/fikra/diff.tlisp:99). Capture `n/N` landing on both tracked and new-file sections to verify the latest navigation change visually.
 
 The round 13 changes improve the approval story: the user can now see which mode caused the pause, and the diff navigation code recognizes new-file sections. The supplied composite is persuasive evidence of the individual rendered elements, but it should remain labeled as an assembled artifact, and the mode label should not be conflated with authenticated request provenance. Against the RFC’s proposed native-loop screens, this is a strong chat presentation with a meaningful remaining integration gap around live per-action mediation and checkpoint evidence.
+
+---
+
+# Round 14 (genuine live captures; regex + revert follow-ups) — 2026-11-20
+
+34,233
+| Area | Score | Justification |
+|---|---:|---|
+| Chat and inline evidence | **9/10** | The live turn shows readable tool calls, inline edit previews, correlated results, AI text and one completion marker; per-action checkpoint references from the mockup are absent. |
+| Modeline and context | **8/10** | The live modeline identifies Fikra, Claude and full-access mode; it does not show the mockup’s thread name, turn count or tool count. |
+| Turn diff viewer | **7/10** | The viewer has a colored patch, per-file rows, totals and navigation hint, but navigation has a code defect and the mockup’s turn navigation and revert controls are not demonstrated here. |
+| Approval | **7/10** | The existing prompt conveys the action, pause, mode and choices, but checkpoint and origin details remain missing, and a live CLI-mediated turn remains unverified. |
+| End-to-end confidence | **8/10** | The two live frames agree on both files and totals, demonstrating a real full-access turn through to the viewer; they do not demonstrate mediation or new-file navigation. |
+| **Overall** | **8/10** | The live chat-to-diff evidence substantially improves confidence, while approval and viewer navigation still fall short of the proposed experience. |
+
+The captures cross-check: `hello.ts +1 -1` plus `notes.md +2 -0` gives the viewer’s **2 files, +3 -1**. One claimed piece of evidence is absent, however: the supplied viewer frame shows `notes.md` as a `diff --git` patch with `--- a/notes.md` and `+++ b/notes.md`; it contains no `+++ new file:` section. The hint also does not show that `n` or `N` was pressed.
+
+Top remaining fixes:
+
+1. **Repair and exercise file navigation.** [diff.tlisp](/Users/mekael/Documents/programming/typescript/tmax/src/tlisp/core/fikra/diff.tlisp:95) uses `^+++ new file:` as a regular expression; unescaped `+` characters make it invalid in JavaScript regex syntax. Escape the literal signs and test `n`/`N` across ordinary lines, tracked patches and a genuine new-file section, then capture the cursor landing there.
+2. **Enrich the approval prompt.** Carry verified checkpoint and origin/provenance details through [approvals.tlisp](/Users/mekael/Documents/programming/typescript/tmax/src/tlisp/core/fikra/approvals.tlisp:109) and render them in [event.tlisp](/Users/mekael/Documents/programming/typescript/tmax/src/tlisp/core/fikra/event.tlisp:186), without implying a provenance guarantee that the underlying data cannot establish.
+3. **Demonstrate a mediated approval when supported.** The capability probe in [backend-claude.tlisp](/Users/mekael/Documents/programming/typescript/tmax/src/tlisp/core/fikra/backend-claude.tlisp:58) gates the CLI hook; capture a real paused request and resolution with a compatible backend, or implement and verify a supported mediation route.
+4. **Close the remaining diff presentation gaps.** [diff.tlisp](/Users/mekael/Documents/programming/typescript/tmax/src/tlisp/core/fikra/diff.tlisp:37) could expose file status and the mockup’s revert/turn navigation affordances alongside the existing counts.
+
+Round 14 provides convincing live evidence for the full-access chat and matching turn summary, so the earlier assembled-evidence concern is materially reduced. It does not establish the claimed new-file navigation, and the invalid navigation pattern is a concrete remaining defect. Approval remains at 7 because its richer context and a live mediated turn are still outstanding.

@@ -1,5 +1,5 @@
 (defmodule fikra/diff
-  (export fikra-turn-diff fikra-diff-next fikra-diff-prev)
+  (export fikra-turn-diff fikra-diff-next fikra-diff-prev fikra-diff-revert-turn)
 
 ;; SPC a d — the turn diff view (mockup 8.4's entry point). TURN-SCOPED
 ;; (codex round 6: the viewer must show THIS turn's patch, not the whole
@@ -40,7 +40,7 @@
           (number-to-string (fikra-diff-total rows 1)) " -"
           (number-to-string (fikra-diff-total rows 2)) " ──\e[0m\n\n"
           (fikra-diff-rows rows)
-          "\n n/N: next/prev file · SPC a d refreshes \n\n"))
+          "\n n/N: next/prev file · r revert turn · SPC a d refreshes \n\n"))
 
 ;; ROWS are ((path adds dels) ...); IDX 1 = adds column, 2 = dels.
 (defun fikra-diff-total (rows idx)
@@ -85,6 +85,7 @@
         (setq kmap (editor/keymaps/keymap-init "fikra-diff"))
         (editor/keymaps/keymap-set-key kmap "n" "(fikra/diff/fikra-diff-next)")
         (editor/keymaps/keymap-set-key kmap "N" "(fikra/diff/fikra-diff-prev)")
+        (editor/keymaps/keymap-set-key kmap "r" "(fikra/diff/fikra-diff-revert-turn)")
         (editor/keymaps/buffer-set-keymap fikra-diff-buffer-name kmap))))
   t)
 
@@ -98,13 +99,39 @@
     ;; Both section shapes are navigable: tracked patches ("diff --git")
     ;; AND new-file sections ("+++ new file:"). (codex round 11: new-file
     ;; navigation gap.)
+    ;; NOTE: the + signs MUST be regex-escaped (\\+ in the string) —
+    ;; bare +++ is a quantifier chain and never matches (codex round-14
+    ;; catch; the T-Lisp-regex fragility learnings warned exactly this).
     (if (or (string-match "^diff --git" (buffer-line line))
-            (string-match "^+++ new file:" (buffer-line line)))
+            (string-match "^\\+\\+\\+ new file:" (buffer-line line)))
       (cursor-move line 0)
       (fikra-diff-scan (+ line step) step count))))
 
 (defun fikra-diff-next () (interactive) (fikra-diff-jump 1))
 (defun fikra-diff-prev () (interactive) (fikra-diff-jump -1))
+
+;; Mockup 8.4's revert control: r restores THIS turn's touched tracked
+;; paths to the baseline tree (git checkout <tree> -- paths) and deletes
+;; files the turn CREATED. Destructive — requires an explicit "revert"
+;; confirmation in the minibuffer.
+(defun fikra-diff-revert-turn ()
+  (interactive)
+  (require-module fikra/thread)
+  (let ((dir (fikra/thread/fikra-thread-working-dir))
+        (tree (fikra-baseline-tree))
+        (paths (fikra-changed-paths-since-baseline)))
+    (if (or (null paths) (= (length paths) 0) (not (stringp dir)))
+      (editor-set-status "Fikra: nothing to revert")
+      (let ((confirm (read-string "Revert this turn's changes? type revert: ")))
+        (if (not (string= confirm "revert"))
+          (editor-set-status "Fikra: revert cancelled")
+          (progn
+            (dolist (p paths)
+              (if (string= (fikra-file-kind dir p) "tracked")
+                (shell-command (concat "git -C '" dir "' checkout " tree " -- '" p "' 2>/dev/null"))
+                (shell-command (concat "rm -f '" dir "/" p "'"))))
+            (editor-set-status "Fikra: turn reverted — SPC a d to refresh")
+            (fikra-turn-diff)))))))
 
 ;; Paths changed since the stored baseline — the DRY computation shared
 ;; with the turn-end ± rows (fikra-thread-compute-changes → ((path a d) …)).
