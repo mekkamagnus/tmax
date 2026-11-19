@@ -28,6 +28,10 @@ const ev = (editor: Editor, kind: string, fields: Record<string, string>) => {
   executeTlisp(editor, `(fikra/event/fikra-event-emit (list ${pairs}))`);
 };
 
+
+// Faces (codex UI-verification arc): renders carry ANSI SGR — strip for
+// content assertions; face codes themselves are pinned separately.
+const stripAnsi = (s: string): string => s.replace(/\u001b\[[0-9;]*m/g, "");
 const replay = (editor: Editor): string =>
   String(executeTlisp(editor, "(fikra/event/fikra-event-replay)").value);
 
@@ -79,11 +83,13 @@ describe("#212 FAEP — replay rendering (RFC §D2 table)", () => {
     ev(editor, "turn-end", { turn: "1", status: "completed" });
 
     const text = replay(editor);
-    expect(text).toContain("── turn 1 · claude ──");
-    expect(text).toContain("AI: The gap buffer is O(1) at the gap.\n");
-    expect(text).toContain("⚙ Bash  bun test buffer\n");
-    expect(text).toContain("  → ok 92 pass\n");
-    expect(text).toContain("± src/x.ts +8 -0\n");
+    expect(stripAnsi(text)).toContain("── turn 1 · claude ──");
+    expect(text).toContain("\u001b[1;36m── turn 1");
+    expect(stripAnsi(text)).toContain("AI: The gap buffer is O(1) at the gap.\n");
+    expect(text).toContain("\u001b[1;35mAI: ");
+    expect(stripAnsi(text)).toContain("⚙ Bash  bun test buffer\n");
+    expect(stripAnsi(text)).toContain("  → ok 92 pass\n");
+    expect(stripAnsi(text)).toContain("± src/x.ts +8 -0\n");
     expect(text).toContain("── completed ──");
   });
 
@@ -95,10 +101,10 @@ describe("#212 FAEP — replay rendering (RFC §D2 table)", () => {
     ev(editor, "permission-response", { decision: "allow" });
     ev(editor, "checkpoint-ready", { ref: "refs/fikra/main/1" });
     const text = replay(editor);
-    expect(text).toContain("· considering the gap\n");
-    expect(text).toContain("? write src/x.ts  [y] Allow [n] Reject [a] Always\n");
-    expect(text).toContain("  = allow\n");
-    expect(text).toContain("  ⌘ checkpoint refs/fikra/main/1\n");
+    expect(stripAnsi(text)).toContain("· considering the gap\n");
+    expect(stripAnsi(text)).toContain("? write src/x.ts  [y] Allow [n] Reject [a] Always\n");
+    expect(stripAnsi(text)).toContain("  = allow\n");
+    expect(stripAnsi(text)).toContain("  ⌘ checkpoint refs/fikra/main/1\n");
   });
 
   test("tombstone invalidates the turn range; rendering CONTINUES after it", async () => {
@@ -166,14 +172,14 @@ describe("#212 FAEP — incremental render into *Fikra*", () => {
     ev(editor, "text-delta", { text: "streaming!" });
 
     const bufText = String(executeTlisp(editor, "(buffer-text)").value);
-    expect(bufText).toContain("AI: streaming!");
+    expect(stripAnsi(bufText)).toContain("AI: streaming!");
     // Switching away: further emits must NOT render into this buffer.
     executeTlisp(editor, '(buffer-switch "test")');
     ev(editor, "text-delta", { text: "second-chunk" });
     expect(String(executeTlisp(editor, '(buffer-text)').value)).not.toContain("second-chunk");
     // ...but *Fikra* keeps its first render.
     executeTlisp(editor, '(buffer-switch "*Fikra*")');
-    expect(String(executeTlisp(editor, '(buffer-text)').value)).toContain("AI: streaming!");
+    expect(stripAnsi(String(executeTlisp(editor, '(buffer-text)').value))).toContain("AI: streaming!");
   });
 
   test("emit does not write into non-Fikra buffers", async () => {

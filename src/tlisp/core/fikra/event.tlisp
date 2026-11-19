@@ -61,6 +61,17 @@
   (let ((v (fikra-event-get event key)))
     (if v v "")))
 
+;; ── semantic faces (ANSI SGR; \e is the tokenizer's ESC escape) ──────
+;; The *Fikra* buffer carries ANSI; buffer-lines' ANSI-aware padding keeps
+;; column math correct (codex UI verification: "plain event log" → styled).
+(defvar fikra-face-reset "\e[0m")
+(defun fikra-face (code s) (concat code s fikra-face-reset))
+
+(defun fikra-event-id-tag (event)
+  "Dim #XXXXXX correlation suffix (empty when the event has no id)."
+  (let ((id (fikra-event-get-str event "id")))
+    (if (string= id "") "" (concat " " (fikra-face "\e[2m" (concat "#" id))))))
+
 ;; ── render: one event → display text ("" = nothing) ─────────────────
 ;; RFC §D2 table. Adjacent text-deltas join: the first opens a "You/AI: "
 ;; run, followers append without re-rendering the prefix; any other event
@@ -69,40 +80,78 @@
   (let ((kind (fikra-event-get-str event "kind")))
     (cond
       ((string= kind "turn-start")
-        (concat "\n── turn " (fikra-event-get-str event "turn")
-                " · " (fikra-event-get-str event "backend") " ──\n"))
+        (concat "\n" (fikra-face "\e[1;36m"
+                    (concat "── turn " (fikra-event-get-str event "turn")
+                            " · " (fikra-event-get-str event "backend")
+                            (let ((m (fikra-event-get-str event "mode")))
+                              (if (string= m "") "" (concat " · " m)))
+                            " ──")) "\n"))
       ((string= kind "session") "")
       ((string= kind "text-delta")
         (fikra-event-get-str event "text"))
       ((string= kind "thought")
-        (concat "· " (fikra-event-get-str event "text") "\n"))
+        (concat (fikra-face "\e[2m" (concat "· " (fikra-event-get-str event "text"))) "\n"))
       ((string= kind "tool-call")
-        (concat "⚙ " (fikra-event-get-str event "tool")
-                "  " (fikra-event-get-str event "summary") "\n"))
+        ;; Id first here too — symmetry with results, and clip-proof.
+        (concat (fikra-face "\e[33m"
+                    (concat "⚙ " (fikra-event-get-str event "tool")))
+                (fikra-event-id-tag event)
+                (fikra-face "\e[33m" (concat "  " (fikra-event-get-str event "summary")))
+                "\n"))
       ((string= kind "tool-result")
-        (concat "  → " (if (fikra-event-get event "ok") "ok" "FAIL")
-                " " (fikra-event-get-str event "summary") "\n"))
+        ;; Id BEFORE the summary: the 100-char one-line cap clips the tail,
+        ;; which used to cut the correlation id off the terminal edge
+        ;; (codex round-3 catch: "#86fcca appears only once").
+        (concat (if (fikra-event-get event "ok")
+                  (fikra-face "\e[32m" (concat "  → ok"))
+                  (fikra-face "\e[1;31m" (concat "  → FAIL")))
+                (fikra-event-id-tag event) " "
+                (fikra-face (if (fikra-event-get event "ok") "\e[32m" "\e[1;31m")
+                  (fikra-event-one-line (fikra-event-get-str event "summary")))
+                "\n"))
       ((string= kind "permission-request")
-        (concat "? " (fikra-event-get-str event "action")
-                "  [y] Allow [n] Reject [a] Always\n"))
+        (concat (fikra-face "\e[1;33m"
+                    (concat "? " (fikra-event-get-str event "action")
+                            "  [y] Allow [n] Reject [a] Always")) "\n"))
       ((string= kind "permission-response")
-        (concat "  = " (fikra-event-get-str event "decision") "\n"))
+        (concat (fikra-face "\e[2m" (concat "  = " (fikra-event-get-str event "decision"))) "\n"))
       ((string= kind "file-change")
-        (concat "± " (fikra-event-get-str event "path")
-                " +" (fikra-event-get-str event "adds")
-                " -" (fikra-event-get-str event "dels") "\n"))
+        (concat (fikra-face "\e[35m"
+                    (concat "± " (fikra-event-get-str event "path")
+                            " +" (fikra-event-get-str event "adds")
+                            " -" (fikra-event-get-str event "dels"))) "\n"))
       ((string= kind "turn-end")
-        (concat "── " (fikra-event-get-str event "status") " ──\n"))
+        (let ((st (fikra-event-get-str event "status")))
+          (concat (if (string= st "completed")
+                    (fikra-face "\e[2m" (concat "── " st " ──"))
+                    (fikra-face "\e[1;31m" (concat "── " st " ──")))
+                  "\n")))
       ((string= kind "checkpoint-start") "")
       ((string= kind "checkpoint-ready")
-        (concat "  ⌘ checkpoint " (fikra-event-get-str event "ref") "\n"))
+        (concat (fikra-face "\e[36m" (concat "  ⌘ checkpoint " (fikra-event-get-str event "ref"))) "\n"))
       ((string= kind "checkpoint-error")
-        (concat "  ⌘ checkpoint-error: " (fikra-event-get-str event "reason") "\n"))
+        (concat (fikra-face "\e[1;31m" (concat "  ⌘ checkpoint-error: " (fikra-event-get-str event "reason"))) "\n"))
       ((string= kind "checkpoint-reverted")
-        (concat "\n── reverted to turn "
-                (fikra-event-get-str event "target")
-                " (discarded through " (fikra-event-get-str event "revert-point") ") ──\n"))
+        (concat "\n" (fikra-face "\e[1;36m"
+                    (concat "── reverted to turn " (fikra-event-get-str event "target")
+                            " (discarded through " (fikra-event-get-str event "revert-point") ") ──")) "\n"))
       (t ""))))
+
+;; Collapse a summary to ONE display line: first line, hard-capped at 100
+;; chars, with an elision marker when more lines existed. A raw Bash dump
+;; (an ls listing) must not swamp the conversation — codex UI verification:
+;; "full directory listing dominating the chat" (tool presentation 4/10).
+(defun fikra-event-one-line (s)
+  (let* ((lines (string-split s "\n"))
+         (first (if (> (length lines) 0) (car lines) ""))
+         (trimmed (if (and (> (length lines) 1) (string= (last lines) ""))
+                    (reverse (cdr (reverse lines)))
+                    lines))
+         (extra (- (length trimmed) 1))
+         (capped (if (> (length first) 100)
+                   (concat (substring first 0 100) "…")
+                   first)))
+    (if (> extra 0) (concat capped " …+" extra "L") capped)))
 
 ;; ── emit ────────────────────────────────────────────────────────────
 (defun fikra-event-emit (event)
@@ -216,7 +265,12 @@ text-deltas inside the batch join into the same line."
           (kind (fikra-event-get-str (car events) "kind")))
       (if (string= kind "text-delta")
         (fikra-event-render-fold (cdr events)
-          (concat out (if open "" "AI: ") (fikra-event-get-str (car events) "text"))
+          (concat out
+                  (if open ""
+                    (if (string= (fikra-event-get-str (car events) "speaker") "user")
+                      (fikra-face "\e[1;34m" "You: ")
+                      (fikra-face "\e[1;35m" "AI: ")))
+                  (fikra-event-get-str (car events) "text"))
           t)
         (fikra-event-render-fold (cdr events)
           (concat out (if open "\n" "") (fikra-event-render-line (car events)))
@@ -373,7 +427,13 @@ text-deltas inside the batch join into the same line."
         ((or (= turn 0) (not (fikra-event-in-range-p turn ranges)))
           (if (string= kind "text-delta")
             (fikra-event-render-skip (cdr events) ranges turn
-              (concat out (if open "" "AI: ") (fikra-event-get-str (car events) "text")) t)
+              (concat out
+                      (if open ""
+                        (if (string= (fikra-event-get-str (car events) "speaker") "user")
+                          (fikra-face "\e[1;34m" "You: ")
+                          (fikra-face "\e[1;35m" "AI: ")))
+                      (fikra-event-get-str (car events) "text"))
+              t)
             (fikra-event-render-skip (cdr events) ranges turn
               (concat out (if open "\n" "") (fikra-event-render-line (car events))) nil)))
         (t

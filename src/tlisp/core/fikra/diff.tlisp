@@ -1,0 +1,100 @@
+(defmodule fikra/diff
+  (export fikra-turn-diff)
+
+;; SPC a d — the turn diff view (mockup 8.4's entry point). TURN-SCOPED
+;; (codex round 6: the viewer must show THIS turn's patch, not the whole
+;; working tree): the paths changed since the stored turn-begin baseline
+;; drive the diff — `git diff HEAD -- <paths>` for tracked changes plus
+;; full content for new untracked files — COLOR-PRESERVED (git
+;; --color=always; the chat established buffers carry ANSI) in a
+;; read-only *Fikra-Diff* buffer.
+
+(defvar fikra-diff-buffer-name "*Fikra-Diff*"
+  "Name of the turn-diff buffer.")
+
+(defun fikra-turn-diff ()
+  "Show the changes since the last turn's begin baseline (colored) in
+*Fikra-Diff* — SPC a d."
+  (interactive)
+  (require-module fikra/thread)
+  (let* ((state (fikra/thread/fikra-thread-field "turn-count"))
+         (dir (fikra/thread/fikra-thread-working-dir))
+         (paths (fikra-changed-paths-since-baseline)))
+    (if (not (stringp dir))
+      (editor-set-status "Fikra: no working dir for this thread")
+      (if (or (null paths) (= (length paths) 0))
+        (editor-set-status "Fikra: no changes in this turn")
+        (let ((patch (fikra-diff-for-paths dir paths (fikra-baseline-tree))))
+          (if (or (null patch) (string= patch ""))
+            (editor-set-status "Fikra: no changes in this turn")
+            (progn
+              (fikra-diff-render
+                (concat "── turn " (if (numberp state) (number-to-string state) "?")
+                        " changes · " (number-to-string (length paths)) " file(s) ──\n\n"
+                        patch)))))))))
+
+;; The header + patch land in the (re)created read-only buffer.
+(defun fikra-diff-render (content)
+  (if (member fikra-diff-buffer-name (buffer-list))
+    (progn
+      (buffer-switch fikra-diff-buffer-name)
+      (buffer-set-read-only nil)
+      (let ((count (buffer-line-count)))
+        (if (> count 1) (buffer-delete-range 0 count))))
+    (buffer-create fikra-diff-buffer-name))
+  (buffer-switch fikra-diff-buffer-name)
+  (buffer-set-read-only nil)
+  (buffer-append content)
+  (buffer-set-read-only t)
+  (editor-set-mode "normal")
+  (editor-set-status "Fikra: turn diff"))
+
+;; Paths changed since the stored baseline — the DRY computation shared
+;; with the turn-end ± rows (fikra-thread-compute-changes → ((path a d) …)).
+(defun fikra-changed-paths-since-baseline ()
+  (condition-case nil
+    (let ((rows (fikra/thread/fikra-thread-compute-changes)))
+      (if rows
+        (let ((paths (list)))
+          (dolist (r rows)
+            (setq paths (cons (car r) paths)))
+          (reverse paths))
+        nil))
+    (error () nil)))
+
+;; The turn's baseline tree (stash-create snapshot at turn-begin; HEAD
+;; when the tree was clean). Diffing against it isolates the turn's OWN
+;; content changes, even in files dirty before the turn (codex round 7).
+(defun fikra-baseline-tree ()
+  (let ((t-v (fikra/thread/fikra-thread-field "change-baseline-tree")))
+    (if (and (stringp t-v) (> (length t-v) 0)) t-v "HEAD")))
+
+;; The colored patch for PATHS: tracked diff vs the BASELINE TREE +
+;; untracked file contents.
+(defun fikra-diff-for-paths (dir paths tree)
+  (let ((tracked (list))
+        (untracked (list))
+        (out ""))
+    ;; Split paths: tracked (appear in git diff) vs new untracked.
+    (dolist (p paths)
+      (if (string= (fikra-file-kind dir p) "tracked")
+        (setq tracked (cons p tracked))
+        (setq untracked (cons p untracked))))
+    (if (> (length tracked) 0)
+      (setq out (concat out (shell-command (concat "git -C '" dir "' diff " tree " --color=always -- "
+                                                  (fikra-join-args (reverse tracked)) " 2>/dev/null")))))
+    (dolist (p (reverse untracked))
+      (setq out (concat out "\n+++ new file: " p "\n"
+                        (shell-command (concat "cat '" dir "/" p "' 2>/dev/null")) "\n")))
+    out))
+
+(defun fikra-file-kind (dir path)
+  (if (> (length (string-trim (shell-command (concat "git -C '" dir "' ls-files -- '" path "' 2>/dev/null")))) 0)
+    "tracked" "untracked"))
+
+(defun fikra-join-args (parts)
+  (if (null parts) ""
+    (concat "'" (car parts) "'" (if (cdr parts) (concat " " (fikra-join-args (cdr parts))) ""))))
+
+(provide "fikra-diff")
+)

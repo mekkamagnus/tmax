@@ -2,6 +2,7 @@
   (export fikra-thread-load-row fikra-thread-ensure-chat-buffer fikra-thread-buffer-name fikra-thread-buffer-name-of fikra-thread-field-root-of fikra-thread-set-session-id-for fikra-thread-working-dir fikra-thread-in-worktree-p fikra-thread-focus fikra-thread-new fikra-thread-archive fikra-thread-archived-p fikra-thread-switch fikra-thread-rows fikra-thread-ids fikra-thread-init fikra-thread-open fikra-thread-reopen
           fikra-thread-current fikra-thread-status fikra-thread-status-set
           fikra-thread-turn-begin fikra-thread-turn-end fikra-thread-turn-count
+          fikra-thread-emit-file-changes fikra-thread-compute-changes
           fikra-thread-root fikra-thread-log-path fikra-thread-session-id
           fikra-thread-set-session-id fikra-thread-save fikra-thread-field
           fikra-thread-set-field)
@@ -238,6 +239,7 @@ on disk from their init)."
   "Create a NEW thread with a generated short id (fix-<n> style — the
 first free number), inheriting the current thread's runtime mode. Focuses
 it and opens its chat buffer. Returns the id."
+  (interactive)
   ;; let*: the id binding READS root — parallel let would see an unbound
   ;; symbol (probe catch).
   (let* ((parent-mode (if fikra-current-thread-id (fikra-thread-field "runtime-mode") nil))
@@ -463,24 +465,129 @@ thread→adapter has no cycle but keep the lazy convention)."
   (let* ((state (fikra-thread-state))
          (n (+ 1 (hashmap-get state "turn-count"))))
     (editor/keymaps/keymap-mutable-set! state "turn-count" n)
+    ;; Turn-scoped diff baseline (round 4): snapshot BEFORE the turn runs so
+    ;; turn-end attributes only THIS turn's changes. Nil on non-git dirs.
+    ;; Two parts: the content-exact BASELINE TREE (tracked changes) and the
+    ;; untracked-signature map (round 7: changes WITHIN files, not just
+    ;; file filtering).
+    (condition-case nil
+      (let ((bdir (fikra-thread-working-dir)))
+        (if (stringp bdir)
+          (editor/keymaps/keymap-mutable-set! state "change-baseline-tree"
+            (fikra-thread-capture-baseline-tree bdir))))
+      (error () nil))
+    (condition-case nil
+      (editor/keymaps/keymap-mutable-set! state "change-baseline"
+        (fikra-thread-snapshot-changes))
+      (error () nil))
     ;; #225: the turn-start records the backend ACTUALLY driving the turn
     ;; (the adapter's current selection — a mid-thread switch changes it;
     ;; the thread field alone stays stale).
     (fikra/event/fikra-event-emit
       (list (list "kind" "turn-start")
             (list "turn" (if (numberp n) n (string-to-number (if (stringp n) n "0"))))
-            (list "backend" (fikra-turn-backend-name))))
+            (list "backend" (fikra-turn-backend-name))
+            ;; Context header: the thread's runtime mode rides the turn
+            ;; header (codex UI verification — "no runtime mode shown").
+            (list "mode" (if (hashmap-get state "runtime-mode")
+                           (hashmap-get state "runtime-mode")
+                           ""))))
     ;; Persist the bumped count (a crash before turn-end must still show
     ;; the turn happened).
     (fikra-thread-save)
     n))
 
+;; ── turn-scoped diff surfacing (codex UI round 4: false attribution) ─
+;; A BASELINE snapshot (path → "adds:dels") is captured at turn-begin onto
+;; the thread record (hashmap — mutation-shared, so the sentinel's evalTlisp
+;; context reads it); turn-end emits ONLY paths that are new or whose counts
+;; moved since the baseline. The whole working tree is never attributed to a
+;; turn again. No baseline (daemon restart mid-turn) → emit nothing.
+;; Content signature for an untracked file (md5, first 10 chars) — an
+;; untracked file EDITED within a turn changes its hash, so the turn-scoped
+;; diff detects content changes, not just existence (codex round-5 catch).
+(defun fikra-file-signature (dir path)
+  (condition-case nil
+    (substring (string-trim (shell-command (concat "md5 -q '" dir "/" path "'"))) 0 10)
+    (error () "?")))
+
+(defun fikra-thread-snapshot-changes ()
+  "Untracked-file snapshot: hashmap path → md5 signature (tracked changes
+  are handled by the BASELINE TREE, which is content-exact)."
+  (let ((dir (fikra-thread-working-dir)))
+    (if (not (stringp dir))
+      nil
+      (let ((snap (hashmap)))
+        (dolist (line (string-split (shell-command (concat "git -C '" dir "' ls-files --others --exclude-standard 2>/dev/null")) "\n"))
+          (if (and (> (length line) 6) (not (string= (substring line 0 6) ".tmax/")))
+            (editor/keymaps/keymap-mutable-set! snap line (fikra-file-signature dir line))))
+        snap))))
+
+;; Content-exact baseline for TRACKED changes (codex round 7: file filtering
+;; must isolate the changes WITHIN files). `git stash create` snapshots the
+;; dirty tree as a commit object WITHOUT touching the worktree; diffing
+;; against it later yields exactly the turn's edits even in files that were
+;; already dirty. Clean tree → empty output → baseline is HEAD.
+(defun fikra-thread-capture-baseline-tree (dir)
+  (let ((sha (string-trim (shell-command (concat "git -C '" dir "' stash create 2>/dev/null")))))
+    (if (> (length sha) 0) sha "HEAD")))
+
+(defun fikra-file-change-event (path adds dels)
+  (list (list "kind" "file-change")
+        (list "path" path)
+        (list "adds" adds)
+        (list "dels" dels)))
+
+;; DRY change computation (no emission): ((path adds dels) ...) changed
+;; since the stored turn-begin baseline; nil when no baseline exists.
+;; Shared by the turn-end ± rows and the SPC a d turn-scoped diff viewer.
+(defun fikra-thread-compute-changes ()
+  (let* ((state (fikra-thread-state))
+         (baseline (hashmap-get state "change-baseline"))
+         (dir (fikra-thread-working-dir)))
+    (if (or (null baseline) (not (stringp dir)))
+      nil
+      (let* ((btree (hashmap-get state "change-baseline-tree"))
+             (tree (if (and (stringp btree) (> (length btree) 0)) btree "HEAD"))
+             (rows (list)))
+        (dolist (line (string-split (shell-command (concat "git -C '" dir "' diff " tree " --numstat 2>/dev/null")) "\n"))
+          (let ((parts (string-split line "\t")))
+            (if (= (length parts) 3)
+              (let ((path (car (cdr (cdr parts)))))
+                (if (not (string= (substring path 0 6) ".tmax/"))
+                  (setq rows
+                    (cons (list path (car parts) (car (cdr parts))) rows)))))))
+        (dolist (line (string-split (shell-command (concat "git -C '" dir "' ls-files --others --exclude-standard 2>/dev/null")) "\n"))
+          (if (and (> (length line) 6)
+                   (not (string= (substring line 0 6) ".tmax/"))
+                   (not (string= (hashmap-get baseline line) (fikra-file-signature dir line))))
+            (setq rows (cons (list line "?" "?") rows))))
+        (reverse rows)))))
+
+(defun fikra-thread-emit-file-changes ()
+  "Emit file-change rows for changes SINCE the turn-begin baseline only."
+  (let ((rows (condition-case nil (fikra-thread-compute-changes) (error () nil))))
+    (if rows
+      (fikra/event/fikra-event-emit-batch-for (fikra-thread-current)
+        (mapcar (lambda (r) (fikra-file-change-event (car r) (car (cdr r)) (car (cdr (cdr r)))))
+          rows))
+      nil)))
+
 (defun fikra-thread-turn-end (status)
   "STATUS: completed | error | interrupted (the turn-end event's status)."
-  (fikra/event/fikra-event-emit
-    (list (list "kind" "turn-end")
-          (list "turn" (fikra-thread-field "turn-count"))
-          (list "status" status)))
+  ;; Changed files render inside the completing turn (before the marker).
+  (condition-case nil (fikra-thread-emit-file-changes) (error () nil))
+  ;; Emitted via the EXPLICIT-PATH batch emitter: turn-end runs from the
+  ;; process SENTINEL's evalTlisp context, where module variables setq'd in
+  ;; the main session (fikra-event-log!) read as their INITIAL nil — the
+  ;; pointer-based emit silently dropped every live turn-end (no
+  ;; ── completed ── markers, threads stuck "running"). The -for emitter
+  ;; derives the log path from the thread record (mutation-shared state),
+  ;; exactly like the stream filter's events.
+  (fikra/event/fikra-event-emit-batch-for (fikra-thread-current)
+    (list (list (list "kind" "turn-end")
+                (list "turn" (fikra-thread-field "turn-count"))
+                (list "status" status))))
   ;; #223 (gate catch: the offer had NO production call site): a COMPLETED
   ;; turn in plan interaction offers the y/e/n approval. Lazy require
   ;; (plan requires thread; the cycle forbids top-level).
