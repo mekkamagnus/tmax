@@ -8,7 +8,7 @@
 
 `capture-daily` upgrades from full-buffer switch to the **popup shape**:
 
-1. **Geometry** — single window → `split-window-below` (50/50, Emacs's exact ratio; Emacs adapts direction by frame width, tmax fixes always-bottom per user preference). Existing layout (≥2 windows) → reuse the current window, never stack a third.
+1. **Geometry** — the compose pane is always a LOWER pane (mockup): single window splits 50/50 bottom (Emacs's exact ratio; Emacs adapts direction by frame width, tmax fixes always-bottom); an existing layout reuses a pane below the origin when one exists in its column, and otherwise SPLITS the column-bottom pane (side-by-side layouts grow a third pane this way — geometry beats pane-count).
 2. **Skeleton** — compose buffer seeds `capture -> <path>` header + `- [ts] ` prefix, cursor after it (Emacs `%?` placement). `capture-opened-ts` stamps at open (`%U` semantics): the entry keeps its open time.
 3. **Commit-strip** — `capture-strip-skeleton` drops the header; `capture-body` removes the untouched seeded prefix (bare-prefix + trailing-space-trim cases matched explicitly) so an untouched skeleton is a no-write abort; `capture-entry` honors an edited `- [` prefix or re-adds the open-time one. Skeleton never reaches the file.
 4. **Restore** — commit/abort close the popup window (when we created it) + kill `*Capture*` + restore buffer/point/mode exactly.
@@ -20,6 +20,10 @@
 3. Header strip is the exact 11-char `capture -> ` seed prefix (named `capture-header-prefix` — no magic numbers; a miscounted 10 shipped for one round and filed the header); user lines starting with "capture" pass through.
 4. Existing layouts compose in the BOTTOM pane (`capture-goto-bottom-pane`); the pane's buffer is restored and focus returns to the chord's origin window (`capture-refocus`).
 5. Status hint includes `C-g`.
+
+## Restore policy (codex r5-r6)
+
+Abort/commit restore the ORIGIN pane (located by buffer), close the popup pane (located by buffer), and revert any pane the recovery used. A HIDDEN popup — the user switched its pane's buffer away — is unidentifiable afterwards; restore is CONSERVATIVE: the compose buffer is killed, the origin pane survives focused, and no pane the restore cannot identify is ever deleted (deleting by guess was the r5 bug).
 
 ## Completion criteria
 

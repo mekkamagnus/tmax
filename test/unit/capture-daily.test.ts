@@ -255,7 +255,13 @@ describe("#285: capture popup (SPC r d)", () => {
       const content = readFileSync(join(vault, "daily", files[0]!), "utf-8");
       expect(content).toContain("PRECIOUS DRAFT");
       expect(content).not.toContain("hello world");
-      expect(tl(editor, "(window-count)")).toBe("1");
+      // Conservative restore: a HIDDEN popup's pane is unidentifiable after
+      // the user switched its buffer away — abort/commit never delete a pane
+      // they cannot identify; the compose buffer is gone and no user pane
+      // was touched.
+      const panes = tl(editor, "(window-list)");
+      expect(panes.includes("*Capture*")).toBe(false);
+      expect(tl(editor, "(buffer-current)")).toBe("test");
     } finally {
       process.chdir(prevCwd);
       rmSync(vault, { recursive: true, force: true });
@@ -337,9 +343,12 @@ describe("#285: capture popup (SPC r d)", () => {
       // Navigate to the ORIGINAL pane, then abort
       executeTlisp(editor, "(windmove-up)");
       executeTlisp(editor, "(capture-abort)");
-      // The ORIGIN pane survived; one window; original buffer current
-      expect(tl(editor, "(window-count)")).toBe("1");
+      // The ORIGIN pane survived and is focused; the ex-popup pane (now
+      // showing the user's chosen buffer) is left in place — conservative
+      // restore never deletes an unidentifiable pane.
       expect(tl(editor, "(buffer-current)")).toBe("test");
+      const panes2 = tl(editor, "(window-list)");
+      expect(panes2.includes("*Capture*")).toBe(false);
     } finally {
       process.chdir(prevCwd);
       rmSync(vault, { recursive: true, force: true });
@@ -368,6 +377,60 @@ describe("#285: capture popup (SPC r d)", () => {
       const files = readdirSync(join(vault, "daily")).filter((f) => f.endsWith(".md"));
       const content = readFileSync(join(vault, "daily", files[0]!), "utf-8");
       expect(content).toContain("must survive save");
+    } finally {
+      process.chdir(prevCwd);
+      rmSync(vault, { recursive: true, force: true });
+    }
+  });
+
+  test("codex r6: journal opened via ABSOLUTE path — save still cannot overwrite the entry", async () => {
+    const vault = mkdtempSync(join(tmpdir(), "tmax-capture-"));
+    const prevCwd = process.cwd();
+    process.chdir(vault);
+    try {
+      const editor = await createStartedEditor("x");
+      // Today's note opened by ABSOLUTE path (different buffer name form
+      // than the capture's relative target)
+      const today = tmaxToday(editor);
+      const absPath = join(vault, "daily", `${today}.md`);
+      mkdirSync(join(vault, "daily"));
+      writeFileSync(absPath, "# ABS\n");
+      executeTlisp(editor, `(find-file-open "${absPath}")`);
+      executeTlisp(editor, '(switch-to-buffer "test")');
+      executeTlisp(editor, "(capture-daily)");
+      executeTlisp(editor, '(buffer-insert "abs-path entry")');
+      executeTlisp(editor, "(capture-commit)");
+      // The absolute-path buffer picked the entry up; saving keeps it
+      executeTlisp(editor, `(switch-to-buffer "${absPath}")`);
+      expect(tl(editor, "(buffer-text)")).toContain("abs-path entry");
+      executeTlisp(editor, "(save-buffer)");
+      expect(readFileSync(join(vault, "daily", `${today}.md`), "utf-8")).toContain("abs-path entry");
+    } finally {
+      process.chdir(prevCwd);
+      rmSync(vault, { recursive: true, force: true });
+    }
+  });
+
+  test("codex r6: side-by-side panes — focus returns to the ORIGIN pane (not the neighbor)", async () => {
+    const vault = mkdtempSync(join(tmpdir(), "tmax-capture-"));
+    const prevCwd = process.cwd();
+    process.chdir(vault);
+    try {
+      const editor = await createStartedEditor("hello world");
+      executeTlisp(editor, "(split-window-right)");
+      // Put a DIFFERENT buffer in the right pane
+      executeTlisp(editor, '(window-move-focus "right")');
+      executeTlisp(editor, '(buffer-create "*RIGHT*")');
+      executeTlisp(editor, '(switch-to-buffer "*RIGHT*")');
+      // Chord from the LEFT pane
+      executeTlisp(editor, '(window-move-focus "left")');
+      executeTlisp(editor, "(capture-daily)");
+      executeTlisp(editor, "(capture-abort)");
+      // Focus is back on the LEFT pane showing the original buffer
+      expect(tl(editor, "(buffer-current)")).toBe("test");
+      expect(tl(editor, "(window-count)")).toBe("2");
+      executeTlisp(editor, '(window-move-focus "right")');
+      expect(tl(editor, "(buffer-current)")).toBe("*RIGHT*");
     } finally {
       process.chdir(prevCwd);
       rmSync(vault, { recursive: true, force: true });

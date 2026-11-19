@@ -1,6 +1,7 @@
 (defmodule editor/commands/capture
   (export capture-daily capture-commit capture-abort
-          capture-entry capture-strip-skeleton capture-body)
+          capture-entry capture-strip-skeleton capture-body
+          capture-refocus-origin capture-focus-popup-pane)
 
 ;; capture.tlisp -- #278/#285: direct capture to today's daily note,
 ;; org-roam-dailies-capture-today parity (the user's most-used Emacs chord,
@@ -105,6 +106,21 @@ panes close or open (codex r3)."
         (set! i (+ i 1))))
     pos))
 
+(defun capture-refocus-origin ()
+  "Return focus to the ORIGIN pane — located by its BUFFER when unique
+(window indices shift when the popup split inserts a pane; codex r6
+side-by-side repro left focus on the neighbor), index fallback otherwise."
+  (let ((wins (window-list)) (pos nil) (i 0))
+    (while (and (< i (length wins)) (not pos))
+      (if (string= (nth 2 (nth i wins)) capture-return-buffer)
+        (set! pos i)
+        (set! i (+ i 1))))
+    (if pos
+      (capture-refocus pos)
+      (if capture-focus-window
+        (capture-refocus capture-focus-window)))
+    t))
+
 (defun capture-focus-popup-pane ()
   "Put focus on the pane showing *Capture* (wherever it is, however the
 layout changed). When NO pane shows it (the user switched the popup pane
@@ -140,52 +156,52 @@ POPUP pane — focus may have moved elsewhere since the chord (codex r2)."
     (progn
       (switch-to-buffer capture-recovery-buffer)
       (set! capture-recovery-buffer nil)))
-  (capture-focus-popup-pane)
   ;; The user may have SPLIT the compose pane — close every pane showing
-  ;; *Capture* beyond the reused one (codex r4: a duplicate pane survived
-  ;; the kill and lingered in the layout).
+  ;; *Capture* beyond the first (codex r4 duplicate-pane linger).
   (while (and (> (window-count) 1)
-              (> (or (capture-count-capture-panes) 1) 1)
+              (> (capture-count-capture-panes) 1)
               (capture-popup-position))
-    (delete-window)
-    (capture-focus-popup-pane))
+    (capture-focus-popup-pane)
+    (delete-window))
   (if capture-popup-window
-    ;; We created the popup: focus the ORIGIN window first, then close the
-    ;; pane that is not it — never the user's pane, whichever pane the
-    ;; recovery used (codex r5).
+    ;; We created the popup: close THE POPUP PANE (located by buffer —
+    ;; never the origin, never the neighbor), then focus the origin.
     (progn
-      (if capture-focus-window
-        (capture-refocus capture-focus-window))
-      (if (> (window-count) 1)
+      (if (and (> (window-count) 1) (capture-popup-position))
         (progn
-          (window-next)
-          (delete-window))))
-    ;; Reuse case: put the pane's own buffer back, then return focus to
-    ;; the window the chord was pressed in (its buffer/point never moved).
+          (capture-focus-popup-pane)
+          (delete-window)))
+      (capture-refocus-origin))
+    ;; Reuse case: put the pane's own buffer back, then focus the origin.
     (progn
       (if capture-pane-restore
         (switch-to-buffer capture-pane-restore))
-      (if capture-focus-window
-        (capture-refocus capture-focus-window))))
+      (capture-refocus-origin)))
   (set! capture-popup-window nil)
   (set! capture-pane-restore nil)
   (set! capture-active-p nil)
-  (condition-case err
-    (buffer-kill "*Capture*")
-    (error (e) nil))
-  ;; Popup case safety net: ensure the original buffer/point are current.
-  (if (string= (buffer-current) "*Capture*")
-    (switch-to-buffer
-      (if (string= capture-return-buffer "*Capture*")
-        "*scratch*"
-        capture-return-buffer)))
+  ;; Kill the compose buffer. buffer-kill REBINDS the current pane to a
+  ;; recency survivor even when the killed buffer is not displayed there
+  ;; (codex r6 trace: the *RIGHT* pane was hijacked to "test") — snapshot
+  ;; the intended buffer and force it back afterwards.
+  (let ((intended (buffer-current)))
+    (condition-case err
+      (buffer-kill "*Capture*")
+      (error (e) nil))
+    (if (not (string= (buffer-current) intended))
+      (switch-to-buffer intended)))
+  ;; Popup-path safety net: the origin buffer must be current.
+  (if (and (not (string= capture-return-buffer "*Capture*"))
+           (not (string= (buffer-current) capture-return-buffer))
+           (= (window-count) 1))
+    (switch-to-buffer capture-return-buffer))
   (if (not (string= capture-return-buffer "*Capture*"))
     (cursor-move capture-return-line capture-return-col))
   (editor-set-mode capture-return-mode))
 
 (defvar capture-header-prefix "capture -> "
-  "The seeded header prefix — 11 chars, named so no substring magic number
-drifts (a miscounted 10 shipped for one round: the header was filed).")
+  "The seeded header prefix — named so no substring magic number drifts
+(a miscounted 10 shipped for one round: the header was filed).")
 
 (defun capture-strip-skeleton (text)
   "Drop the seeded header line from compose TEXT — the EXACT seeded line
@@ -292,15 +308,27 @@ either way. An in-progress capture is re-focused, never discarded."
       (editor-set-status "Capture in progress - finish (C-c C-c) or abort (C-c C-k) it first"))
     (capture-open)))
 
+(defun capture-ends-with (s suffix)
+  "t when S ends with SUFFIX."
+  (and (>= (length s) (length suffix))
+       (string= (substring s (- (length s) (length suffix))) suffix)))
+
+(defun capture-journal-buffer-p (name)
+  "t when buffer NAME is the target note, in ANY path form — the capture
+target may be relative (daily/x.md) while the buffer was opened via an
+absolute or tilde path (codex r6: exact-name matching missed it and a
+stale buffer's save destroyed the entry)."
+  (or (string= name capture-target-path)
+      (capture-ends-with name (concat "/" capture-target-path))))
+
 (defun capture-sync-open-buffer (entry-text)
   "Keep an already-open daily-note buffer consistent with the appended
 file: its next :w must not overwrite the captured entry (codex r5 data
-loss). The buffer is found by NAME — find-file-open names buffers by
-path."
+loss). Matched by path suffix so relative/absolute/tilde forms agree."
   (let ((cur (buffer-current))
         (bufs (buffer-list)) (i 0) (hit nil))
     (while (and (< i (length bufs)) (not hit))
-      (if (string= (nth i bufs) capture-target-path)
+      (if (capture-journal-buffer-p (nth i bufs))
         (set! hit (nth i bufs)))
       (set! i (+ i 1)))
     (when hit
