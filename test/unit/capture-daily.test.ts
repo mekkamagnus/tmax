@@ -57,7 +57,8 @@ describe("#285: capture popup (SPC r d)", () => {
       // Skeleton: header names the target; seeded prefix carries open-time ts
       const skel = tl(editor, "(buffer-text)");
       expect(skel.startsWith("capture -> ")).toBe(true);
-      expect(skel).toMatch(/\n- \[2026-\d\d-\d\d \d\d:\d\d\] $/);
+      const yr = tmaxToday(editor).slice(0, 4);
+      expect(skel).toMatch(new RegExp(`\\n- \\[${yr}-\\d\\d-\\d\\d \\d\\d:\\d\\d\\] $`));
 
       executeTlisp(editor, '(buffer-insert "first thought")');
       await editor.handleKey("C-c");
@@ -74,7 +75,7 @@ describe("#285: capture popup (SPC r d)", () => {
       const files = readdirSync(join(vault, "daily")).filter((f) => f.endsWith(".md"));
       expect(files).toHaveLength(1);
       const content = readFileSync(join(vault, "daily", files[0]!), "utf-8");
-      expect(content).toMatch(/^# 2026-\d\d-\d\d/m);
+      expect(content).toMatch(/^# \d{4}-\d\d-\d\d/m);
       expect(content).not.toContain("capture ->");
       expect(content).toMatch(/- \[2026-\d\d-\d\d \d\d:\d\d\] first thought\n$/);
     } finally {

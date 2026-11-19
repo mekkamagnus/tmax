@@ -363,9 +363,12 @@ daily/<date>.md suffix is never touched."
           ;; so capture-canonical would receive nil on file-less buffers
           (if fname
             (if (string= (capture-canonical fname) canonical-target)
-              (progn
+              ;; Preserve the buffer's cursor: appending must not yank the
+              ;; user's point to the end (codex r10 polish).
+              (let ((pl (cursor-line)) (pc (cursor-column)))
                 (cursor-move (- (buffer-line-count) 1) 100000)
                 (buffer-insert entry-text)
+                (cursor-move pl pc)
                 (set! synced t)))))
         (set! i (+ i 1))))
     (switch-to-buffer cur)
