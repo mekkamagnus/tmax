@@ -1,5 +1,5 @@
 import { describe, test, expect } from "bun:test";
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync, readdirSync, readFileSync } from "node:fs";
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync, readdirSync, readFileSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { setupMdEditor, executeTlisp } from "../helpers/editor-fixture.ts";
@@ -54,6 +54,29 @@ describe("#270: markdown-daily-note", () => {
       expect(readFileSync(join(vault, "daily", `${today}.md`), "utf-8")).toBe("# PRECIOUS\n");
       const notes = readdirSync(join(vault, "daily")).filter((f) => f.endsWith(".md"));
       expect(notes).toEqual([`${today}.md`]);
+    } finally {
+      process.chdir(prevCwd);
+      rmSync(vault, { recursive: true, force: true });
+    }
+  });
+
+  test("#271: markdown-journal-dir-set \".\" writes flat (user's layout)", async () => {
+    const vault = mkdtempSync(join(tmpdir(), "tmax-daily-note-"));
+    const prevCwd = process.cwd();
+    process.chdir(vault);
+    try {
+      const editor = await setupMdEditor("x\n", join(vault, "index.md"));
+      executeTlisp(editor, '(markdown-journal-dir-set ".")');
+      executeTlisp(editor, "(markdown-daily-note)");
+      // Flat: dated note lands in the vault root, no daily/ dir created
+      expect(readdirSync(vault)).not.toContain("daily");
+      const flat = readdirSync(vault).filter((f) => /^\d{4}-\d\d-\d\d\.md$/.test(f));
+      expect(flat).toHaveLength(1);
+      expect(existsSync(join(vault, flat[0]!))).toBe(true);
+      // :w still persists to the flat path
+      executeTlisp(editor, "(buffer-insert \"flat entry\\n\")");
+      executeTlisp(editor, "(save-buffer)");
+      expect(readFileSync(join(vault, flat[0]!), "utf-8")).toContain("flat entry");
     } finally {
       process.chdir(prevCwd);
       rmSync(vault, { recursive: true, force: true });

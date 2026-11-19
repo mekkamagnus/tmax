@@ -19,6 +19,7 @@
     markdown-complete-at-point
     markdown-find-unlinked-mentions markdown-backlinks
     markdown-daily-note markdown-rename-note
+    markdown-journal-dir-set markdown-journal-path
     markdown-sparse-tree-regex markdown-sparse-tree-level markdown-sparse-tree-tag)
 
 ;; markdown/knowledge.tlisp — frontmatter, wiki links, backlinks, templates,
@@ -772,12 +773,28 @@ Bug #6: unlinked mentions. Returns a message listing matching texts."
                 (message "Backlinks: %s" (string-join ", " (reverse backlinks)))
                 (message "No backlinks found")))))))
 
+;; Journal layout (#271, org-journal's org-journal-dir analog): where dated
+;; notes go. Default "daily" preserves #270; "." or "" = flat, cwd-relative;
+;; absolute paths allowed. Exported setter (module defvars are not set!-able
+;; from outside — the ADR-0168 pattern).
+(defvar markdown-journal-dir "daily")
+
+(defun markdown-journal-dir-set (dir)
+  "Set the journal directory (#271). \".\" or \"\" = flat (cwd-relative)."
+  (set! markdown-journal-dir dir))
+
+(defun markdown-journal-path (date-str)
+  "Journal note path for DATE-STR under markdown-journal-dir."
+  (if (or (string= markdown-journal-dir ".") (string= markdown-journal-dir ""))
+    (concat date-str ".md")
+    (concat markdown-journal-dir "/" date-str ".md")))
+
 (defun markdown-daily-note ()
   "Create or open today's daily note."
   (interactive)
   (let ((date-result (shell-command "date +%Y-%m-%d")))
     (let ((date-str (string-trim date-result)))
-      (let ((path (concat "daily/" date-str ".md")))
+      (let ((path (markdown-journal-path date-str)))
         (if (file-exists-p path)
           (find-file-open path)
           ;; find-file-open is a no-op for missing files, so creation must
