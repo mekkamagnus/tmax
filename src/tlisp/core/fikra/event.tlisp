@@ -1,5 +1,6 @@
 (defmodule fikra/event
   (export fikra-event-log-set fikra-event-log-path fikra-event-emit-batch-for fikra-event-emit
+          fikra-event-set-refresh-hook
           fikra-event-turn-tools
           fikra-event-emit-batch fikra-event-replay fikra-event-events
           fikra-event-reset fikra-event-render-line fikra-event-rebuild-fikra-buffer)
@@ -45,6 +46,22 @@
 
 (defvar fikra-text-open nil
   "Whether a text-delta run is open (adjacent deltas join into one line).")
+
+;; Per-FAEP-event refresh hook (#219 specced it; codex round 14: the
+;; modeline's turn/tool segments only updated at open/send). A fn NAME
+;; (string) called after each rendered emit batch; nil = off. A hook
+;; error is swallowed — the hook must never kill an emit.
+(defvar fikra-event-refresh-hook nil
+  "Fn name called after each rendered emit batch (the modeline lighter).")
+
+(defun fikra-event-set-refresh-hook (fn-name)
+  (setq fikra-event-refresh-hook fn-name)
+  fn-name)
+
+(defun fikra-event-run-hook ()
+  (if fikra-event-refresh-hook
+    (condition-case nil (funcall fikra-event-refresh-hook) (error () nil))
+    nil))
 
 (defun fikra-event-log-set (path)
   "Point the FAEP log at PATH and reset in-memory state."
@@ -270,6 +287,7 @@ bumps the revision the TUI poll consumes."
                 (buffer-set-read-only nil)
                 (buffer-append text)
                 (buffer-set-read-only was-ro)))))
+        (fikra-event-run-hook)
         ;; Memory + in-memory log pointer stay FOCUS-scoped (replay reads
         ;; the log FILE, so the background thread's history is intact).
         (if (string= id (fikra/thread/fikra-thread-current))
@@ -315,6 +333,7 @@ text-deltas inside the batch join into the same line."
       ;; 3. Record in memory.
       (dolist (e events)
         (setq fikra-event-memory (cons e fikra-event-memory)))
+      (fikra-event-run-hook)
       t)))
 
 (defun fikra-event-batch-has-tombstone-p (events)

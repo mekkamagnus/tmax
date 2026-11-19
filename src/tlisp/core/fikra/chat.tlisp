@@ -43,6 +43,10 @@ just created/switched its OWN thread must not be dragged back to main."
   ;; 2026-11-20 in buffer-lines.ts).
   (minor-mode-set "auto-fill" t)
   (fikra-ensure-buffer-keymap)
+  ;; #219's per-FAEP-event refresh: the lighter recomputes after every
+  ;; rendered batch, so the modeline's turn/tool segments track live.
+  (require-module fikra/event)
+  (fikra/event/fikra-event-set-refresh-hook "fikra/chat/fikra-refresh-lighter")
   (fikra-refresh-lighter)
   fikra-chat-buffer-name)
 
