@@ -179,6 +179,67 @@ describe("#285: capture popup (SPC r d)", () => {
     }
   });
 
+  test("codex r3: compose lands in the LOWER pane (geometry, not just count)", async () => {
+    const vault = mkdtempSync(join(tmpdir(), "tmax-capture-"));
+    const prevCwd = process.cwd();
+    process.chdir(vault);
+    try {
+      const editor = await createStartedEditor("hello world");
+      executeTlisp(editor, "(capture-daily)");
+      // Geometry by navigation: the compose pane is the LOWER one — moving
+      // up from it lands on the ORIGINAL buffer (window-list is not
+      // layout-ordered, so pane order cannot be read off it).
+      expect(tl(editor, "(buffer-current)")).toBe("*Capture*");
+      executeTlisp(editor, "(windmove-up)");
+      expect(tl(editor, "(buffer-current)")).toBe("test");
+      executeTlisp(editor, "(windmove-down)");
+      expect(tl(editor, "(buffer-current)")).toBe("*Capture*");
+      executeTlisp(editor, "(capture-abort)");
+    } finally {
+      process.chdir(prevCwd);
+      rmSync(vault, { recursive: true, force: true });
+    }
+  });
+
+  test("codex r3: commit from ANOTHER pane files the DRAFT, not that pane's buffer", async () => {
+    const vault = mkdtempSync(join(tmpdir(), "tmax-capture-"));
+    const prevCwd = process.cwd();
+    process.chdir(vault);
+    try {
+      const editor = await createStartedEditor("hello world");
+      executeTlisp(editor, "(capture-daily)");
+      executeTlisp(editor, '(buffer-insert "PRECIOUS DRAFT")');
+      executeTlisp(editor, "(windmove-up)"); // now genuinely another pane
+      executeTlisp(editor, "(capture-commit)");
+      expect(tl(editor, "(window-count)")).toBe("1");
+      expect(tl(editor, "(buffer-current)")).toBe("test");
+      const files = readdirSync(join(vault, "daily")).filter((f) => f.endsWith(".md"));
+      const content = readFileSync(join(vault, "daily", files[0]!), "utf-8");
+      expect(content).toContain("PRECIOUS DRAFT");
+      expect(content).not.toContain("hello world");
+    } finally {
+      process.chdir(prevCwd);
+      rmSync(vault, { recursive: true, force: true });
+    }
+  });
+
+  test("codex r3: a Markdown task body keeps the open-time prefix (- [ ] is not an edited seed)", async () => {
+    const vault = mkdtempSync(join(tmpdir(), "tmax-capture-"));
+    const prevCwd = process.cwd();
+    process.chdir(vault);
+    try {
+      const editor = await createStartedEditor("x");
+      executeTlisp(editor, "(capture-daily)");
+      const ts = (tl(editor, "(buffer-text)").match(/\[(\d{4}-\d\d-\d\d \d\d:\d\d)\]/) ?? [])[1]!;
+      expect(tl(editor, '(capture-entry "- [ ] water the plants")')).toBe(`- [${ts}] - [ ] water the plants`);
+      expect(tl(editor, '(capture-entry "- [1999-01-01 00:00] edited")')).toBe("- [1999-01-01 00:00] edited");
+      executeTlisp(editor, "(capture-abort)");
+    } finally {
+      process.chdir(prevCwd);
+      rmSync(vault, { recursive: true, force: true });
+    }
+  });
+
   test("codex r1: commit files to the path the header SHOWS (target stamped at open)", async () => {
     const vault = mkdtempSync(join(tmpdir(), "tmax-capture-"));
     const prevCwd = process.cwd();
