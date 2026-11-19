@@ -152,7 +152,7 @@ describe("#225 workflows — create-or-append labeled threads", () => {
     e(editor, `(fikra/backend-replay/fikra-backend-replay-load "${join(repoDir, "fixture.jsonl")}")`);
     e(editor, "(fikra-explain)");
     const log = readFileSync(join(repoDir, ".tmax/fikra/threads/fix-1/events.jsonl"), "utf8");
-    const echoes = log.trimEnd().split("\n").map((l) => JSON.parse(l)).filter((ev) => ev.kind === "text-delta" && ev.text.startsWith("You:"));
+    const echoes = log.trimEnd().split("\n").map((l) => JSON.parse(l)).filter((ev) => ev.kind === "text-delta" && ev.speaker === "user");
     expect(echoes[1]!.text).toContain("second-buffer-content");
     expect(echoes[1]!.text).not.toContain("first-buffer-content");
   });
@@ -167,7 +167,7 @@ describe("#225 workflows — create-or-append labeled threads", () => {
     e(editor, `(fikra/backend-replay/fikra-backend-replay-load "${join(repoDir, "fixture.jsonl")}")`);
     e(editor, "(fikra-explain)");
     const log = readFileSync(join(repoDir, ".tmax/fikra/threads/fix-1/events.jsonl"), "utf8");
-    const echoes = log.trimEnd().split("\n").map((l) => JSON.parse(l)).filter((ev) => ev.kind === "text-delta" && ev.text.startsWith("You:"));
+    const echoes = log.trimEnd().split("\n").map((l) => JSON.parse(l)).filter((ev) => ev.kind === "text-delta" && ev.speaker === "user");
     expect(echoes.length).toBe(2);
     expect(echoes[1]!.text).toContain("unique-origin-content-42"); // NOT the chat transcript
   });
