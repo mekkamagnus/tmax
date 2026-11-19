@@ -406,3 +406,29 @@ The L1 denial treatment is a substantial improvement over round 8: it communicat
 4. **Capture a named-thread, live-backend modeline.** [chat.tlisp](/Users/mekael/Documents/programming/typescript/tmax/src/tlisp/core/fikra/chat.tlisp:115) contains both count and non-main thread segments, but the provided fixture demonstrates only `none`, `t2`, and `x2`.
 
 The round 11 diff is a meaningful improvement: its totals and per-file rows are visible in the artifact, and the lighter now carries the requested tool count. The new-file navigation issue keeps the viewer from fully delivering its advertised file-by-file navigation, and the L2 approval panel remains the largest gap against the mockup. This is a capture-and-source review; I did not independently exercise the keys or run the test suite.
+
+---
+
+# Round 12 (the L2 gate render + live-tested mediation) — 2026-11-20
+
+| Dimension | Score | Justification |
+|---|---:|---|
+| Chat transcript and hierarchy | 8/10 | The capture clearly separates the user, turn boundary, tool activity, assistant response, and completion. |
+| Inline tool evidence | 8/10 | The Write call, ID, colored preview, and correlated result make the action understandable. |
+| Turn change summaries | 9/10 | The captured `± readme.md +2 -0` row gives a concise per-file change summary. |
+| Diff viewer | 8/10 | Round 11’s viewer evidence remains applicable; the previously identified new-file navigation and turn-context gaps remain unverified here. |
+| Modeline context | 8/10 | The round 11 score carries forward; this transcript does not show the modeline or a named live-backend thread. |
+| Per-action approval | 6/10 | The real parked RPC, confirming state, interactive resolution, and headless denial substantiate the gate, but its trigger is synthetic and the installed Claude CLI cannot mediate live turns. |
+| **Overall chat experience** | **8/10** | The approval interaction is materially closer to §8.3, while live backend mediation and the richer approval presentation remain substantial gaps. |
+
+**Top remaining fixes**
+
+1. **Enable and verify mediation for a real backend turn.** The capability probe and CLI flag selection are in [backend-claude.tlisp](/Users/mekael/Documents/programming/typescript/tmax/src/tlisp/core/fikra/backend-claude.tlisp:58). Use a supported backend integration and capture an actual tool request parking, being answered, and continuing or rejecting.
+
+2. **Bring the approval presentation closer to §8.3.** [event.tlisp](/Users/mekael/Documents/programming/typescript/tmax/src/tlisp/core/fikra/event.tlisp:186) shows the action, token, pause, and decisions, but the mockup also calls for thread/turn context, provenance, checkpoint information, and a visible abort control. Only display provenance or checkpoint guarantees the underlying path can substantiate.
+
+3. **Fix new-file diff navigation and presentation.** [diff.tlisp](/Users/mekael/Documents/programming/typescript/tmax/src/tlisp/core/fikra/diff.tlisp:95) previously scanned tracked-file patch headers while new files used a different format. Verify navigation across both types and present added lines consistently.
+
+4. **Complete and capture diff turn context.** The §8.4 mockup includes tool breakdown and visible revert and previous/next-turn controls; demonstrate those interactions and their available context in [diff.tlisp](/Users/mekael/Documents/programming/typescript/tmax/src/tlisp/core/fikra/diff.tlisp:37).
+
+Round 12 earns a meaningful approval increase: this is a real confirmation-service round-trip with an enforced interactive resolver, and the rendered gate explains both the pause and the trust choice. It does not yet establish the mockup’s central end-to-end promise for a real Claude tool call, and its compact transcript gate omits several details from the proposed approval panel. I independently ran the approval suite: **28 tests passed, 0 failed**. The other carried-forward scores rely on the round 11 review and evidence.
