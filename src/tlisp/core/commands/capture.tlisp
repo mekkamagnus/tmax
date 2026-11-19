@@ -2,7 +2,7 @@
   (export capture-daily capture-commit capture-abort
           capture-entry capture-strip-skeleton capture-body
           capture-refocus-origin capture-focus-popup-pane
-          capture-shell-quote capture-canonical)
+          capture-canonical)
 
 ;; capture.tlisp -- #278/#285: direct capture to today's daily note,
 ;; org-roam-dailies-capture-today parity (the user's most-used Emacs chord,
@@ -332,15 +332,15 @@ stale buffer's save destroyed the entry)."
   (or (string= name capture-target-path)
       (capture-ends-with name (concat "/" capture-target-path))))
 
-(defun capture-shell-quote (s)
-  "Single-quote S for safe shell interpolation (spaces, etc)."
-  (concat "'" (replace-regexp-in-string "'" "'\\''" s) "'"))
-
 (defun capture-canonical (path)
-  "Canonical identity of PATH via realpath — QUOTED (codex r8: a path with
-spaces made the unquoted command fail and a stale buffer's save destroy
-the entry). Empty string on failure (never crashes the commit)."
-  (string-trim (shell-command (concat "realpath " (capture-shell-quote path) " 2>/dev/null"))))
+  "Canonical identity of PATH via the file-realpath PRIMITIVE (codex r9:
+shelling out to realpath kept breaking on quoting — spaces, then
+apostrophes — each time as silent entry loss). Falls back to the raw path
+when resolution fails, so comparison degrades consistently on both sides."
+  (let ((rp (file-realpath path)))
+    (if (> (length rp) 0)
+      rp
+      path)))
 
 (defun capture-sync-open-buffer (entry-text)
   "Keep EVERY already-open alias of the daily note consistent with the

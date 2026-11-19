@@ -377,6 +377,35 @@ export function createFileOps(
     return Either.right(createNil());
   });
 
+  // #285 codex r9: canonical file identity as a PRIMITIVE — T-Lisp was
+  // shelling out to `realpath`, and quoting paths through the shell kept
+  // breaking (spaces, then apostrophes), each time as silent entry loss
+  // when a stale buffer's save overwrote the captured note.
+  api.set("file-realpath", (args: TLispValue[], context?: EvalContext): Either<AppError, TLispValue> => {
+    const argsValidation = validateArgsCount(args, 1, "file-realpath");
+    if (Either.isLeft(argsValidation)) {
+      return Either.left(argsValidation.left);
+    }
+    const pathArg = args[0]!;
+    const typeValidation = validateArgType(pathArg, "string", 0, "file-realpath");
+    if (Either.isLeft(typeValidation)) {
+      return Either.left(typeValidation.left);
+    }
+    const path = expandHomePath(pathArg.value as string);
+    if (isAsyncMode(context)) {
+      return Either.right(createPromise(fs.promises.realpath(path)
+        .then((resolved) => createString(resolved))
+        .catch(() => createString(""))));
+    }
+    try {
+      return Either.right(createString(fs.realpathSync(path)));
+    } catch {
+      // Missing/unresolvable: empty string — callers fall back to the raw
+      // path rather than crashing the capture commit.
+      return Either.right(createString(""));
+    }
+  });
+
   api.set("file-mkdir", (args: TLispValue[], context?: EvalContext): Either<AppError, TLispValue> => {
     const argsValidation = validateArgsCount(args, 1, "file-mkdir");
     if (Either.isLeft(argsValidation)) {

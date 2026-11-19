@@ -519,6 +519,31 @@ describe("#285: capture popup (SPC r d)", () => {
     }
   });
 
+  test("codex r9: journal path with an APOSTROPHE — sync still holds, save keeps the entry", async () => {
+    const vault = mkdtempSync(join(tmpdir(), "tmax capture apo'stro-"));
+    const prevCwd = process.cwd();
+    process.chdir(vault);
+    try {
+      const editor = await createStartedEditor("x");
+      const today = tmaxToday(editor);
+      const absPath = join(vault, "daily", `${today}.md`);
+      mkdirSync(join(vault, "daily"));
+      writeFileSync(absPath, "# APO\n");
+      executeTlisp(editor, `(find-file-open "${absPath}")`);
+      executeTlisp(editor, '(switch-to-buffer "test")');
+      executeTlisp(editor, "(capture-daily)");
+      executeTlisp(editor, '(buffer-insert "apostrophe entry")');
+      executeTlisp(editor, "(capture-commit)");
+      executeTlisp(editor, `(switch-to-buffer "${absPath}")`);
+      expect(tl(editor, "(buffer-text)")).toContain("apostrophe entry");
+      executeTlisp(editor, "(save-buffer)");
+      expect(readFileSync(absPath, "utf-8")).toContain("apostrophe entry");
+    } finally {
+      process.chdir(prevCwd);
+      rmSync(vault, { recursive: true, force: true });
+    }
+  });
+
   test("codex r1: commit files to the path the header SHOWS (target stamped at open)", async () => {
     const vault = mkdtempSync(join(tmpdir(), "tmax-capture-"));
     const prevCwd = process.cwd();
