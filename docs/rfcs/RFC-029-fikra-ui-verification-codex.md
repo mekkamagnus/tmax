@@ -592,3 +592,25 @@ The round-15 navigation defect is closed by the new evidence: the trajectory rea
 4. **Capture the updated modeline and live streaming.** Show `th:main` in a current terminal capture and record a turn while partial text arrives; the thread lighter is in [chat.tlisp](/Users/mekael/Documents/programming/typescript/tmax/src/tlisp/core/fikra/chat.tlisp:128), and partial-event handling is in [backend-claude.tlisp](/Users/mekael/Documents/programming/typescript/tmax/src/tlisp/core/fikra/backend-claude.tlisp:222).
 
 The enriched gate resolves the earlier visibility gap: its checkpoint is explicitly the turn baseline that revert targets, and its origin label communicates who may answer. The restore demonstration adds meaningful evidence for both modified and newly created files. Those are substantial improvements, while the mediated gate remains fixture evidence and the interactive revert confirmation has not been driven; neither should be counted as a fully demonstrated live workflow. The RFC’s native per-action approval and provenance details are design targets, so the current wrapped-CLI implementation should be graded against them with that distinction in mind.
+
+---
+
+# Round 18 (the boxed gate panel) — 2026-11-20
+
+| Criterion | Score | Justification |
+|---|---:|---|
+| Chat and tool presentation | **8/10** | The captures show a readable transcript with inline tool calls, edit previews, results and completion, close to §8.1. |
+| Visual hierarchy | **7/10** | The yellow border gives approval a distinct focus, but long rows visibly overrun the fixed-width box and the capture is an inline transcript panel rather than the mockup’s overlaid panel. |
+| Approval interaction and provenance | **7/10** | The mediated-turn artifact shows the action, token, pause state, choices, checkpoint and origin; it does not establish the mockup’s verified native-loop provenance or live CLI mediation. |
+| Streaming | **7/10** | Partial-message normalization is present and was previously live-verified; this round provides no stable live latency evidence. |
+| Modeline and context | **8/10** | The thread-name fix joins backend, mode and turn/tool context, though the new name was not independently shown in the supplied round-21 gate capture. |
+| Diff and revert | **8/10** | The prior artifact demonstrates file navigation and restoration of modified and newly created files; the mockup’s complete native-turn flow remains unproven. |
+| End-to-end fidelity | **7/10** | The supplied mediated turn is coherent, but a live CLI approval and the RFC’s proposed native per-action loop remain unverified. |
+
+**Top remaining fixes**
+
+1. Wrap panel content to the available display width and align all borders, including ANSI-styled text and narrow terminals. The supplied capture already shows overflowing rows; see [event.tlisp](/Users/mekael/Documents/programming/typescript/tmax/src/tlisp/core/fikra/event.tlisp:117).
+2. Implement and verify per-action native-loop mediation with trustworthy provenance; the Claude adapter currently capability-gates its hook and documents degradation when it is unavailable. See [backend-claude.tlisp](/Users/mekael/Documents/programming/typescript/tmax/src/tlisp/core/fikra/backend-claude.tlisp:47) and [approvals.tlisp](/Users/mekael/Documents/programming/typescript/tmax/src/tlisp/core/fikra/approvals.tlisp:95).
+3. Capture a stable live session showing incremental text arrival and an interactive approval through completion, including the active thread name in the modeline. The streaming normalization is at [backend-claude.tlisp](/Users/mekael/Documents/programming/typescript/tmax/src/tlisp/core/fikra/backend-claude.tlisp:222); the lighter is in [chat.tlisp](/Users/mekael/Documents/programming/typescript/tmax/src/tlisp/core/fikra/chat.tlisp:88).
+
+The new approval panel materially improves the hierarchy and supplies the key decision context in the mediated-turn artifact. It is not yet a clean match for §8.3: the borders overflow, and the evidence does not demonstrate the proposed native-loop provenance or live CLI gate. Overall, the chat is visually and functionally close in its demonstrated paths, with the largest remaining gap in live, per-action verification.

@@ -114,6 +114,49 @@ round-12 approvals catch)."
         (concat " " (fikra-face "\e[2m" (concat "#" (number-to-string v)))))
       (t ""))))
 
+;; The boxed approval panel (mockup 8.3's focused presentation). Width 62;
+;; content lines are padded to the inner width so the right border aligns.
+(defun fikra-gate-panel (event)
+  (let* ((mode (fikra-event-get-str event "mode"))
+         (cp (fikra-event-get-str event "checkpoint"))
+         (org (fikra-event-get-str event "origin"))
+         (rows (list
+                 (concat "? " (fikra-event-get-str event "action") (fikra-event-id-tag event))
+                 (concat "turn paused"
+                         (if (string= mode "") "" (concat " (" mode ")"))
+                         " — holds until you answer")
+                 (concat "[y] allow   [n] reject   [a] always-allow (trusts class)")
+                 (if (string= cp "") "" (concat "checkpoint " cp " · r in the diff view reverts"))
+                 (if (string= org "") "" (concat "origin: " org)))))
+    (concat
+      (fikra-face "\e[1;33m" (fikra-box-line "┌" "─" " approval required " "┐")) "\n"
+      (fikra-face "\e[1;33m"
+        (apply 'concat
+          (mapcar (lambda (r) (concat (fikra-gate-row r) "\n")) rows)))
+      (fikra-face "\e[1;33m" (fikra-box-line "└" "─" "" "┘")) "\n")))
+
+;; One bordered row: "│ content…padded │" at the panel's inner width.
+(defun fikra-gate-row (content)
+  ;; Overlong content TRUNCATES (…) — the border must never be overrun
+  ;; (codex round-18 catch: long rows visibly overflowed the fixed box).
+  (let ((c (if (> (length content) 58)
+             (concat (substring content 0 55) "…")
+             (fikra-pad-to content 58))))
+    (concat "│ " c " │")))
+
+(defun fikra-pad-to (s width)
+  (if (>= (length s) width) s
+    (concat s (fikra-repeat-str " " (- width (length s))))))
+
+(defun fikra-repeat-str (s n)
+  (if (<= n 0) "" (concat s (fikra-repeat-str s (- n 1)))))
+
+;; "┌─ title ─────┐"-style rule to the 62-col outer width: left, title,
+;; then FILL characters out to the right edge.
+(defun fikra-box-line (left fill title right)
+  (let ((used (+ (length left) (length title) (length right))))
+    (concat left title (fikra-repeat-str fill (max 0 (- 62 used))) right)))
+
 ;; A DENIED tool-result (the backend CLI's own permission system refused —
 ;; the L1 reality; fikra has no gate to offer). Detected by the denial
 ;; signatures the CLIs actually emit. Codex round 1: "never present a
@@ -201,28 +244,13 @@ round-12 approvals catch)."
                     (fikra-event-one-line (fikra-event-get-str event "summary")))
                   "\n")))
       ((string= kind "permission-request")
-        ;; Mockup 8.3's gate, L2: the action + the paused-turn contract —
-        ;; the thread holds in `confirming` until y/n/a settles the parked
-        ;; mediate. The dim line states the pause, the gating runtime mode
-        ;; (provenance, when the event carries it), and `a`'s trust effect.
-        (concat (fikra-face "\e[1;33m"
-                    (concat "? " (fikra-event-get-str event "action")))
-                (fikra-event-id-tag event) "\n"
-                (fikra-face "\e[2m"
-                    (concat "  turn paused"
-                            (let ((gm (fikra-event-get-str event "mode")))
-                              (if (string= gm "") "" (concat " (" gm ")")))
-                            " — [y] allow · [n] reject · [a] always-allow"
-                            " (trusts this action class for the thread)"
-                            ;; Checkpoint + origin (codex rounds 12/16):
-                            ;; the baseline the turn began from is the
-                            ;; revert target; the origin names the resolver
-                            ;; class that may answer.
-                            (let ((cp (fikra-event-get-str event "checkpoint"))
-                                  (org (fikra-event-get-str event "origin")))
-                              (concat
-                                (if (string= cp "") "" (concat "\n  checkpoint " cp " — the turn's baseline (r in the diff view reverts to it)"))
-                                (if (string= org "") "" (concat " · origin: " org)))))) "\n"))
+        ;; Mockup 8.3's gate as a FOCUSED PANEL (codex rounds 17: "inline
+        ;; block rather than the mockup's focused panel"): a boxed frame —
+        ;; the action + token, the paused-turn contract with the gating
+        ;; mode, the checkpoint (revert target) + origin (permitted
+        ;; resolver class), and the y/n/a keys. Box width is fixed; long
+        ;; lines flow via wrap continuation rows.
+        (fikra-gate-panel event))
       ((string= kind "permission-response")
         (concat (fikra-face "\e[2m" (concat "  = " (fikra-event-get-str event "decision"))) "\n"))
       ((string= kind "file-change")

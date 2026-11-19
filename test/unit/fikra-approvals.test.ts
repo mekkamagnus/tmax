@@ -323,8 +323,8 @@ describe("#220 L2 — live enqueue drives the prompt UI headlessly", () => {
     expect(String(e(editor, "(fikra/approvals/fikra-approval-pending-p)").value)).toBe("true");
     expect(String(e(editor, "(fikra/thread/fikra-thread-status)").value)).toBe("confirming");
     const replayed = String(e(editor, "(fikra/event/fikra-event-replay)").value);
-    expect(replayed).toContain("? write-file: write to src/x.ts");
-    expect(replayed).toContain("turn paused (approval-required) — [y] allow");
+    expect(replayed).toContain("? write-file: write to src/x.ts"); // panel action row
+    expect(replayed).toContain("turn paused (approval-required)");
     // Answer allow → the parked daemon RPC settles allow.
     expect(String(e(editor, "(fikra/approvals/fikra-approval-answer-allow)").value)).toBe("true");
     expect((await parked).decision).toBe("allow");

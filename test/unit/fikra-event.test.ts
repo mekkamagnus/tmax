@@ -102,8 +102,8 @@ describe("#212 FAEP — replay rendering (RFC §D2 table)", () => {
     ev(editor, "checkpoint-ready", { ref: "refs/fikra/main/1" });
     const text = replay(editor);
     expect(stripAnsi(text)).toContain("· considering the gap\n");
-    expect(stripAnsi(text)).toContain("? write src/x.ts\n");
-    expect(stripAnsi(text)).toContain("turn paused — [y] allow");
+    expect(stripAnsi(text)).toContain("? write src/x.ts"); // panel action row
+    expect(stripAnsi(text)).toContain("turn paused");
     expect(stripAnsi(text)).toContain("  = allow\n");
     expect(stripAnsi(text)).toContain("  ⌘ checkpoint refs/fikra/main/1\n");
   });
