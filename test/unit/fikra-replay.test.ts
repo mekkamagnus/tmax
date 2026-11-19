@@ -49,6 +49,8 @@ function logKinds(editor: Editor): string[] {
   return readFileSync(log, "utf8").trimEnd().split("\n").map((l) => JSON.parse(l).kind);
 }
 
+const stripAnsi = (s: string): string => s.replace(/\u001b\[[0-9;]*m/g, "");
+
 describe("#215 module-load guard (BUG-60 family)", () => {
   test("every fikra module parses clean", () => {
     const dir = "src/tlisp/core/fikra";
@@ -144,7 +146,9 @@ describe("#215 replay backend — fixture pipeline", () => {
     turn(editor, "q1");
     const log1 = readFileSync(String(e(editor, "(fikra/thread/fikra-thread-log-path)").value), "utf8");
     const toolCall = log1.trimEnd().split("\n").map((l) => JSON.parse(l)).find((l) => l.kind === "tool-call");
-    expect(toolCall).toEqual({ kind: "tool-call", tool: "Bash", summary: "bun test" });
+    expect(toolCall).toEqual(expect.objectContaining({ kind: "tool-call", tool: "Bash", summary: "bun test" }));
+    // Correlation id rides along (codex UI arc): a 6-char tool_use suffix.
+    expect(typeof toolCall.id).toBe("string");
     turn(editor, "q2");
     const kinds = logKinds(editor);
     expect(kinds).toContain("tool-result");
@@ -194,8 +198,9 @@ describe("#215 e2e: fixture → FAEP → rendering → thread state", () => {
     turn(editor, "q1");
     turn(editor, "q2");
     const buf = String(e(editor, "(buffer-text)").value);
-    expect(buf).toContain("AI: rendered from a fixture");
-    expect(buf).toContain("⚙ Bash  echo hi");
+    expect(stripAnsi(buf)).toContain("AI: rendered from a fixture");
+    expect(stripAnsi(buf)).toContain("⚙ Bash");
+    expect(stripAnsi(buf)).toContain("echo hi");
     expect(buf).toContain("── turn 2");
     // And replay-from-disk agrees with the live buffer (rebuild is idempotent).
     e(editor, "(fikra/event/fikra-event-rebuild-fikra-buffer)");

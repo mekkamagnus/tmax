@@ -28,6 +28,8 @@ afterAll(() => {
 
 const e = (editor: Editor, expr: string) => executeTlisp(editor, expr);
 
+const stripAnsi = (s: string): string => s.replace(/\u001b\[[0-9;]*m/g, "");
+
 describe("#213 thread core — init + persistence", () => {
   test("init creates .tmax/fikra/threads/main under the git root and wires FAEP", async () => {
     const editor = await createStartedEditor("");
@@ -150,7 +152,7 @@ describe("#213 thread core — reopen replays history into *Fikra*", () => {
     e(editorB, "(require-module fikra/thread)");
     e(editorB, "(fikra/thread/fikra-thread-open)");
     const buf = String(e(editorB, '(buffer-text)').value);
-    expect(buf).toContain("AI: persisted turn text");
+    expect(stripAnsi(buf)).toContain("AI: persisted turn text");
     expect(buf).toContain("── turn 1");
     // Fresh editor's *Fikra* buffer was created + focused.
     expect(String(e(editorB, '(buffer-current)').value)).toBe("*Fikra*");
