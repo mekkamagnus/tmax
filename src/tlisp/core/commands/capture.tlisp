@@ -1,7 +1,8 @@
 (defmodule editor/commands/capture
   (export capture-daily capture-commit capture-abort
           capture-entry capture-strip-skeleton capture-body
-          capture-refocus-origin capture-focus-popup-pane)
+          capture-refocus-origin capture-focus-popup-pane
+          capture-shell-quote capture-canonical)
 
 ;; capture.tlisp -- #278/#285: direct capture to today's daily note,
 ;; org-roam-dailies-capture-today parity (the user's most-used Emacs chord,
@@ -331,9 +332,15 @@ stale buffer's save destroyed the entry)."
   (or (string= name capture-target-path)
       (capture-ends-with name (concat "/" capture-target-path))))
 
+(defun capture-shell-quote (s)
+  "Single-quote S for safe shell interpolation (spaces, etc)."
+  (concat "'" (replace-regexp-in-string "'" "'\\''" s) "'"))
+
 (defun capture-canonical (path)
-  "Realpath of PATH via the shell — canonical file identity."
-  (string-trim (shell-command (concat "realpath " path))))
+  "Canonical identity of PATH via realpath — QUOTED (codex r8: a path with
+spaces made the unquoted command fail and a stale buffer's save destroy
+the entry). Empty string on failure (never crashes the commit)."
+  (string-trim (shell-command (concat "realpath " (capture-shell-quote path) " 2>/dev/null"))))
 
 (defun capture-sync-open-buffer (entry-text)
   "Keep EVERY already-open alias of the daily note consistent with the
@@ -341,23 +348,28 @@ appended file: any of their next :w must not overwrite the entry (codex
 r5/r7). Candidates are suffix matches (relative/absolute/tilde forms) and
 are CONFIRMED by canonical realpath, so an unrelated journal with the same
 daily/<date>.md suffix is never touched."
+  ;; EVERY buffer is checked by canonical identity — no name prefilter
+  ;; (codex r8: an alias whose buffer NAME differs from the target path was
+  ;; missed by the suffix filter; realpath comparison is the whole rule)
   (let ((cur (buffer-current))
-        (bufs (buffer-list)) (i 0) (hits (list)))
-    (while (< i (length bufs))
-      (if (capture-journal-buffer-p (nth i bufs))
-        (set! hits (append hits (list (nth i bufs)))))
-      (set! i (+ i 1)))
-    (when (> (length hits) 0)
-      (let ((canonical-target (capture-canonical capture-target-path)) (j 0))
-        (while (< j (length hits))
-          (switch-to-buffer (nth j hits))
-          (if (string= (capture-canonical (buffer-filename)) canonical-target)
-            (progn
-              (cursor-move (- (buffer-line-count) 1) 100000)
-              (buffer-insert entry-text)))
-          (set! j (+ j 1)))
-        (switch-to-buffer cur)))
-    t))
+        (bufs (buffer-list))
+        (canonical-target (capture-canonical capture-target-path))
+        (i 0) (synced nil))
+    (when (> (length canonical-target) 0)
+      (while (< i (length bufs))
+        (switch-to-buffer (nth i bufs))
+        (let ((fname (buffer-filename)))
+          ;; nested ifs, not (and ...) — T-Lisp `and` does not short-circuit,
+          ;; so capture-canonical would receive nil on file-less buffers
+          (if fname
+            (if (string= (capture-canonical fname) canonical-target)
+              (progn
+                (cursor-move (- (buffer-line-count) 1) 100000)
+                (buffer-insert entry-text)
+                (set! synced t)))))
+        (set! i (+ i 1))))
+    (switch-to-buffer cur)
+    synced))
 
 (defun capture-commit ()
   "File the *Capture* text to the note named in the skeleton header (the

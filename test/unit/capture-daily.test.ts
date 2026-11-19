@@ -492,6 +492,33 @@ describe("#285: capture popup (SPC r d)", () => {
     }
   });
 
+  test("codex r8: journal path with SPACES — open buffer still syncs, save keeps the entry", async () => {
+    const vault = mkdtempSync(join(tmpdir(), "tmax capture spaces-"));
+    const prevCwd = process.cwd();
+    process.chdir(vault);
+    try {
+      const editor = await createStartedEditor("x");
+      const today = tmaxToday(editor);
+      // The note opened by absolute path UNDER A DIR WITH SPACES
+      const absPath = join(vault, "daily", `${today}.md`);
+      mkdirSync(join(vault, "daily"));
+      writeFileSync(absPath, "# SPACES\n");
+      executeTlisp(editor, `(find-file-open "${absPath}")`);
+      executeTlisp(editor, '(switch-to-buffer "test")');
+      executeTlisp(editor, "(capture-daily)");
+      executeTlisp(editor, '(buffer-insert "spaces entry")');
+      executeTlisp(editor, "(capture-commit)");
+      // The buffer under the spaced path picked the entry up; save keeps it
+      executeTlisp(editor, `(switch-to-buffer "${absPath}")`);
+      expect(tl(editor, "(buffer-text)")).toContain("spaces entry");
+      executeTlisp(editor, "(save-buffer)");
+      expect(readFileSync(absPath, "utf-8")).toContain("spaces entry");
+    } finally {
+      process.chdir(prevCwd);
+      rmSync(vault, { recursive: true, force: true });
+    }
+  });
+
   test("codex r1: commit files to the path the header SHOWS (target stamped at open)", async () => {
     const vault = mkdtempSync(join(tmpdir(), "tmax-capture-"));
     const prevCwd = process.cwd();
