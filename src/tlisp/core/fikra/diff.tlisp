@@ -99,11 +99,12 @@
     ;; Both section shapes are navigable: tracked patches ("diff --git")
     ;; AND new-file sections ("+++ new file:"). (codex round 11: new-file
     ;; navigation gap.)
-    ;; NOTE: the + signs MUST be regex-escaped (\\+ in the string) —
-    ;; bare +++ is a quantifier chain and never matches (codex round-14
-    ;; catch; the T-Lisp-regex fragility learnings warned exactly this).
-    (if (or (string-match "^diff --git" (buffer-line line))
-            (string-match "^\\+\\+\\+ new file:" (buffer-line line)))
+    ;; PREFIX tests, not regexes: string-match's pattern layer mangles
+    ;; backslash-escapes (a source "^\\+\\+\\+" arrives at JS as ^+++
+    ;; → "nothing to repeat" — codex round-15 LIVE catch; the second
+    ;; T-Lisp-regex fragility incident in this file).
+    (if (or (string-prefix-p "diff --git" (buffer-line line))
+            (string-prefix-p "+++ new file:" (buffer-line line)))
       (cursor-move line 0)
       (fikra-diff-scan (+ line step) step count))))
 

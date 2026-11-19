@@ -480,3 +480,62 @@ Top remaining fixes:
 4. **Close the remaining diff presentation gaps.** [diff.tlisp](/Users/mekael/Documents/programming/typescript/tmax/src/tlisp/core/fikra/diff.tlisp:37) could expose file status and the mockup’s revert/turn navigation affordances alongside the existing counts.
 
 Round 14 provides convincing live evidence for the full-access chat and matching turn summary, so the earlier assembled-evidence concern is materially reduced. It does not establish the claimed new-file navigation, and the invalid navigation pattern is a concrete remaining defect. Approval remains at 7 because its richer context and a live mediated turn are still outstanding.
+
+---
+
+# Addendum: the animation gap and the architectural boundary (2026-11-20)
+
+**Context:** the grading rounds established that text *streaming* works (per-token
+deltas land since round 3) while the Claude Code *vibe* — an animated
+working indicator — cannot exist yet. The cause decomposition and board
+breakdown live in #318 (repaint cadence), #319 (working indicator),
+#320 (thought routing), #321 (blank-tail render bug). This addendum records
+the design conclusion reached in review: **animation is an additive,
+painter-layer change — not a fundamental architecture change** — and the
+boundary that makes it so.
+
+**The boundary.** FAEP's "no timers anywhere" (`event.tlisp`) is a property
+of the *emit path*: the log is a pure function of events, replay equals
+live, no hidden async state in T-Lisp. It was never a rendering invariant.
+Rendering already splits into state authority (daemon) and painter (client),
+and a painter may repaint at any time — frames are idempotent in state, so a
+clock-driven repaint is the same class of thing as a blinking terminal
+cursor. Emacs is the precedent: buffers never animate, redisplay decorates.
+
+**The three implementations that WOULD be fundamental — excluded:**
+
+1. Daemon-pushed animation frames (cadence-bumping the revision — the
+   counter would lie about data versions, and the frame protocol changes
+   for every client). Chosen instead: a client-side repaint tick.
+2. Liveness in the event log (spinner ticks as events — a replayed session
+   would animate fake activity; violates event sourcing).
+3. Timers in T-Lisp (a `run-at-time` primitive would infect the layer where
+   the no-timers invariant is actually load-bearing). The client owns the
+   clock.
+
+**The discipline contract.** Transient display state must never leak
+backward into data (log, events, thread state). #318's log-parity
+criterion — the stream must be byte-identical with the cadence on and off —
+is therefore not just a test but the architectural guarantee itself.
+
+---
+
+# Round 15 (live captures + the regex catch) — 2026-11-20
+
+| Area | Score | Justification |
+|---|---:|---|
+| Chat and tool timeline | **8.5/10** | The live turn shows inline edit previews, correlated parallel tool results, AI text, accurate per-file counts and one completion marker; the native-loop checkpoint annotation remains absent. |
+| Modeline | **8/10** | Backend, state, runtime mode, turn count and tool count are visible; the mockup also names the thread. |
+| Turn diff and navigation | **7/10** | Totals match the chat and the actual patch is visible, but the captured viewer ends with **“Invalid regex: Invalid regular expression: nothing to repeat”** and the cursor remains at L1, so navigation is not demonstrated. |
+| Revert | **6/10** | The viewer exposes `r` and the implementation has a confirmation path, but this capture does not demonstrate a confirmed revert or restoration of both file types. |
+| Approval | **4/10** | Checkpoint and origin details remain missing, and the installed CLI’s absent permission hook prevents demonstrating live per-action mediation. |
+| End-to-end evidence | **8/10** | The captures now provide a consistent, single-session edit-to-diff example, including a tracked and an untracked file; navigation, revert and approval remain outside the demonstrated path. |
+
+Top remaining fixes:
+
+1. **Prove navigation against the current build.** The viewer capture contains an explicit regex error, so it cannot substantiate the claimed fix. Exercise `n` and `N` across both tracked and new-file sections and capture the resulting cursor positions; inspect [diff.tlisp](/Users/mekael/Documents/programming/typescript/tmax/src/tlisp/core/fikra/diff.tlisp:92).
+2. **Verify revert end to end.** Confirm `r`, then inspect disk state to show the tracked file restored and the turn-created file removed; the control starts in [diff.tlisp](/Users/mekael/Documents/programming/typescript/tmax/src/tlisp/core/fikra/diff.tlisp:117).
+3. **Complete approval provenance and mediation.** Add verified checkpoint and origin details to the approval surface in [approvals.tlisp](/Users/mekael/Documents/programming/typescript/tmax/src/tlisp/core/fikra/approvals.tlisp:1), and address the capability-gated CLI bridge in [backend-claude.tlisp](/Users/mekael/Documents/programming/typescript/tmax/src/tlisp/core/fikra/backend-claude.tlisp:47). The RFC’s native per-action gate is a larger outstanding capability.
+4. **Close the remaining presentation gaps.** Add thread identity to the modeline and, where supported by real events, checkpoint references to mutating tool rows.
+
+The chat is now a strong match for the mockup’s core visual flow, and the live, cross-consistent counts resolve the earlier evidence concern. The viewer looks substantially closer too, but its captured regex error makes navigation an observed failure in this evidence, even if the source has since been corrected. Revert and approvals need behavioral demonstrations before their controls can receive the same confidence as the completed edit-to-diff path.
