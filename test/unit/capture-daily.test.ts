@@ -240,6 +240,91 @@ describe("#285: capture popup (SPC r d)", () => {
     }
   });
 
+  test("codex r4: hidden popup — pane switched away, commit still files the DRAFT", async () => {
+    const vault = mkdtempSync(join(tmpdir(), "tmax-capture-"));
+    const prevCwd = process.cwd();
+    process.chdir(vault);
+    try {
+      const editor = await createStartedEditor("hello world");
+      executeTlisp(editor, "(capture-daily)");
+      executeTlisp(editor, '(buffer-insert "PRECIOUS DRAFT")');
+      // The popup pane is switched to another buffer — *Capture* is hidden
+      executeTlisp(editor, '(switch-to-buffer "test")');
+      executeTlisp(editor, "(capture-commit)");
+      const files = readdirSync(join(vault, "daily")).filter((f) => f.endsWith(".md"));
+      const content = readFileSync(join(vault, "daily", files[0]!), "utf-8");
+      expect(content).toContain("PRECIOUS DRAFT");
+      expect(content).not.toContain("hello world");
+      expect(tl(editor, "(window-count)")).toBe("1");
+    } finally {
+      process.chdir(prevCwd);
+      rmSync(vault, { recursive: true, force: true });
+    }
+  });
+
+  test("codex r4: side-by-side layout — popup still lands BELOW, not hijacking a full-height pane", async () => {
+    const vault = mkdtempSync(join(tmpdir(), "tmax-capture-"));
+    const prevCwd = process.cwd();
+    process.chdir(vault);
+    try {
+      const editor = await createStartedEditor("hello world");
+      executeTlisp(editor, "(split-window-right)");
+      expect(tl(editor, "(window-count)")).toBe("2");
+      executeTlisp(editor, "(capture-daily)");
+      expect(tl(editor, "(buffer-current)")).toBe("*Capture*");
+      // The compose pane has a pane ABOVE it (a bottom split was created)
+      executeTlisp(editor, "(windmove-up)");
+      expect(tl(editor, "(buffer-current)")).not.toBe("*Capture*");
+      executeTlisp(editor, "(windmove-down)");
+      executeTlisp(editor, "(capture-abort)");
+      // Layout back to the original two side-by-side panes
+      expect(tl(editor, "(window-count)")).toBe("2");
+    } finally {
+      process.chdir(prevCwd);
+      rmSync(vault, { recursive: true, force: true });
+    }
+  });
+
+  test("codex r4: a split of the compose pane — abort closes ALL *Capture* panes", async () => {
+    const vault = mkdtempSync(join(tmpdir(), "tmax-capture-"));
+    const prevCwd = process.cwd();
+    process.chdir(vault);
+    try {
+      const editor = await createStartedEditor("hello world");
+      executeTlisp(editor, "(capture-daily)");
+      // The user splits the compose pane — two panes now show *Capture*
+      executeTlisp(editor, "(split-window-below)");
+      expect(tl(editor, "(window-count)")).toBe("3");
+      executeTlisp(editor, "(capture-abort)");
+      expect(tl(editor, "(window-count)")).toBe("1");
+      const panes = tl(editor, "(window-list)");
+      expect(panes.includes("*Capture*")).toBe(false);
+    } finally {
+      process.chdir(prevCwd);
+      rmSync(vault, { recursive: true, force: true });
+    }
+  });
+
+  test("codex r4: ts-shaped TYPED text after the untouched seed keeps the open-time prefix", async () => {
+    const vault = mkdtempSync(join(tmpdir(), "tmax-capture-"));
+    const prevCwd = process.cwd();
+    process.chdir(vault);
+    try {
+      const editor = await createStartedEditor("x");
+      executeTlisp(editor, "(capture-daily)");
+      const ts = (tl(editor, "(buffer-text)").match(/\[(\d{4}-\d\d-\d\d \d\d:\d\d)\]/) ?? [])[1]!;
+      // Typed PAST the untouched seed: first thought, then a ts-shaped line
+      executeTlisp(editor, '(buffer-insert "note: then at - [1999-01-01 00:00] something happened")');
+      executeTlisp(editor, "(capture-commit)");
+      const files = readdirSync(join(vault, "daily")).filter((f) => f.endsWith(".md"));
+      const content = readFileSync(join(vault, "daily", files[0]!), "utf-8");
+      expect(content).toContain(`- [${ts}] note: then at - [1999-01-01 00:00] something happened`);
+    } finally {
+      process.chdir(prevCwd);
+      rmSync(vault, { recursive: true, force: true });
+    }
+  });
+
   test("codex r1: commit files to the path the header SHOWS (target stamped at open)", async () => {
     const vault = mkdtempSync(join(tmpdir(), "tmax-capture-"));
     const prevCwd = process.cwd();

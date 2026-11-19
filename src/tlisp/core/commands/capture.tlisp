@@ -103,17 +103,39 @@ panes close or open (codex r3)."
 
 (defun capture-focus-popup-pane ()
   "Put focus on the pane showing *Capture* (wherever it is, however the
-layout changed). Returns t when found."
+layout changed). When NO pane shows it (the user switched the popup pane
+elsewhere), pop it back up in the CURRENT pane — the draft lives in the
+buffer and must never be read from an unrelated pane (codex r4). Returns
+t when the compose buffer is current afterwards."
   (let ((pos (capture-popup-position)))
     (if pos
       (capture-refocus pos)
-      nil)))
+      (progn
+        (switch-to-buffer "*Capture*")
+        t))))
+
+(defun capture-count-capture-panes ()
+  "How many panes currently display *Capture* (a user split can duplicate)."
+  (let ((wins (window-list)) (n 0) (i 0))
+    (while (< i (length wins))
+      (if (string= (nth 2 (nth i wins)) "*Capture*")
+        (set! n (+ n 1)))
+      (set! i (+ i 1)))
+    n))
 
 (defun capture-restore ()
   "Close the popup (or revert the reused pane + refocus the origin
 window), kill *Capture*, and restore the recorded context. Acts on the
 POPUP pane — focus may have moved elsewhere since the chord (codex r2)."
   (capture-focus-popup-pane)
+  ;; The user may have SPLIT the compose pane — close every pane showing
+  ;; *Capture* beyond the reused one (codex r4: a duplicate pane survived
+  ;; the kill and lingered in the layout).
+  (while (and (> (window-count) 1)
+              (> (or (capture-count-capture-panes) 1) 1)
+              (capture-popup-position))
+    (delete-window)
+    (capture-focus-popup-pane))
   (if capture-popup-window
     ;; We created the popup: closing it leaves the original window current,
     ;; its buffer and point untouched all along.
@@ -210,16 +232,20 @@ Markdown task — gets the OPEN-time prefix prepended."
   ;; Popup geometry: only a single-window layout grows the 50/50 bottom
   ;; split; an existing layout composes in its BOTTOM pane, whose buffer
   ;; is restored afterwards.
-  (set! capture-popup-window (= (window-count) 1))
-  (if capture-popup-window
-    (progn
-      ;; split-window-below leaves focus on the ORIGINAL pane — move down
-      ;; so *Capture* takes the LOWER pane, as the mockup promises (codex r3).
-      (split-window-below)
-      (window-move-focus "down"))
-    (progn
-      (capture-goto-bottom-pane)
-      (set! capture-pane-restore (buffer-current))))
+  ;; Popup geometry: the compose pane must be a LOWER pane (mockup). When
+  ;; the layout already has one below us, reuse it (its buffer is restored
+  ;; afterwards); when it does not — single window OR side-by-side column
+  ;; bottoms (codex r4) — split the current pane and take the new lower half.
+  (let ((before (window-current)))
+    (capture-goto-bottom-pane)
+    (if (= (window-current) before)
+      (progn
+        (split-window-below)
+        (window-move-focus "down")
+        (set! capture-popup-window t))
+      (progn
+        (set! capture-popup-window nil)
+        (set! capture-pane-restore (buffer-current)))))
   (buffer-create "*Capture*")
   (switch-to-buffer "*Capture*")
   ;; Skeleton: the header names the exact commit target; the seeded prefix
@@ -257,12 +283,29 @@ no-write abort."
   ;; from another pane previously filed that pane's buffer instead).
   (capture-focus-popup-pane)
   (let* ((text (string-trim (buffer-text)))
-         (body (capture-body (string-trim (capture-strip-skeleton text)))))
+         (stripped (string-trim (capture-strip-skeleton text)))
+         (seeded (concat "- [" capture-opened-ts "] "))
+         ;; untouched = the exact seeded prefix (or its bare form when the
+         ;; trailing space was eaten by trim) and nothing else was typed
+         (untouched (or (string= stripped (string-trim seeded))
+                        (and (>= (length stripped) (length seeded))
+                             (string= (substring stripped 0 (length seeded)) seeded))))
+         ;; An UNTOUCHED seed was removed — the remainder is typed text and
+         ;; keeps the open-time prefix even when ts-shaped (codex r4); an
+         ;; ABSENT-but-present prefix means the seed was EDITED and passes
+         ;; through verbatim (capture-prefix-p).
+         (body (if untouched
+                 (string-trim (substring stripped (length seeded)))
+                 stripped))
+         (entry (cond
+                  (untouched (concat seeded body))
+                  ((capture-prefix-p stripped) stripped)
+                  (t (concat "- [" capture-opened-ts "] " stripped)))))
     (if (> (length body) 0)
       (progn
         (if (not (file-exists-p capture-target-path))
           (markdown-daily-note-init capture-target-path capture-target-date))
-        (append-file capture-target-path (concat "\n" (capture-entry body) "\n"))
+        (append-file capture-target-path (concat "\n" entry "\n"))
         (message "Captured to %s" capture-target-path))
       (message "Capture empty - aborted")))
   (capture-restore))
