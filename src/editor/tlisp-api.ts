@@ -1592,39 +1592,50 @@ function buildEditorAPIContributions(): readonly EditorAPIContribution[] {
               // runs last, by construction). A rejected filter eval is logged
               // and does not kill the stream.
               let filterChain: Promise<unknown> = Promise.resolve();
-              try {
-                while (true) {
-                  const { done, value } = await reader.read();
-                  if (done) break;
-                  const text = decoder.decode(value, { stream: true });
-                  tailBuf += text;
-                  if (filterName && ctx.evalTlisp) {
-                    // #224 gate catch: the chunk must cross the READER-SAFE
-                    // boundary — interpolating JSON into a T-Lisp string
-                    // literal lets the reader strip backslash escapes
-                    // (escaped quotes become real quotes → the JSON parse
-                    // drops the event). HEX-ENCODE the chunk (hex chars are
-                    // reader-safe) and let hex-decode restore the exact
-                    // bytes inside the filter call.
-                    const hex = Buffer.from(text, "utf8").toString("hex");
-                    const expr = `(${filterName} ${pid} (hex-decode "${hex}"))`;
-                    filterChain = filterChain
-                      .then(() => ctx.evalTlisp!(expr))
-                      .catch((e: unknown) => {
-                        ctx.logProgram?.('process', {
-                          level: 'error',
-                          text: `filter eval failed: ${e instanceof Error ? e.message : String(e)}`,
-                          pid,
+              // SENTINEL-PIPE-HOLD (fikra live catch): the stdout/stderr
+              // drains run DETACHED. A child that inherits the pipes (hooks,
+              // daemons, backgrounded subprocesses) keeps them open long
+              // after the main process exits — awaiting the drain before the
+              // sentinel delayed turn-end sentinels indefinitely (fikra
+              // threads stuck "running", no ── completed ── markers). The
+              // process EXIT is authoritative: settle the evals for every
+              // chunk received so far, fire the sentinel, and let straggler
+              // chunks (rare; lingering children hold the pipe silently)
+              // keep flowing through the serialized filter chain after.
+              const drainPromise = (async () => {
+                try {
+                  while (true) {
+                    const { done, value } = await reader.read();
+                    if (done) break;
+                    const text = decoder.decode(value, { stream: true });
+                    tailBuf += text;
+                    if (filterName && ctx.evalTlisp) {
+                      // #224 gate catch: the chunk must cross the READER-SAFE
+                      // boundary — interpolating JSON into a T-Lisp string
+                      // literal lets the reader strip backslash escapes
+                      // (escaped quotes become real quotes → the JSON parse
+                      // drops the event). HEX-ENCODE the chunk (hex chars are
+                      // reader-safe) and let hex-decode restore the exact
+                      // bytes inside the filter call.
+                      const hex = Buffer.from(text, "utf8").toString("hex");
+                      const expr = `(${filterName} ${pid} (hex-decode "${hex}"))`;
+                      filterChain = filterChain
+                        .then(() => ctx.evalTlisp!(expr))
+                        .catch((e: unknown) => {
+                          ctx.logProgram?.('process', {
+                            level: 'error',
+                            text: `filter eval failed: ${e instanceof Error ? e.message : String(e)}`,
+                            pid,
+                          });
                         });
-                      });
-                    await filterChain;
+                      await filterChain;
+                    }
                   }
-                }
-              } catch { /* stream closed */ }
-              await errLoop;
-              await filterChain;
+                } catch { /* stream closed */ }
+              })();
 
               await proc.exited;
+              await filterChain;
               const exitCode = proc.exitCode ?? 0;
               ctx.logProgram?.('process', {
                 level: exitCode === 0 ? 'info' : 'error',
@@ -1636,6 +1647,8 @@ function buildEditorAPIContributions(): readonly EditorAPIContribution[] {
                 ctx.evalTlisp(`(${sentinelName} ${pid} ${exitCode})`);
               }
               processTable.delete(pid);
+              await drainPromise;
+              await errLoop;
             })();
 
             return Either.right(createNumber(pid));

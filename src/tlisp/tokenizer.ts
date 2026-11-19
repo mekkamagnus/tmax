@@ -160,6 +160,7 @@ export class TLispTokenizer {
             case "n": result += "\n"; break;
             case "t": result += "\t"; break;
             case "r": result += "\r"; break;
+            case "e": result += "\x1b"; break;
             case "\\": result += "\\"; break;
             case '"': result += '"'; break;
             default: result += escaped;
