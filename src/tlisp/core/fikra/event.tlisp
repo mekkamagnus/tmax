@@ -100,6 +100,25 @@
 ;; RFC §D2 table. Adjacent text-deltas join: the first opens a "You/AI: "
 ;; run, followers append without re-rendering the prefix; any other event
 ;; closes the run.
+;; Inline change evidence: the tool-call's preview lines (sign-prefixed)
+;; render colored under the tool row — green +, red -, dim indent.
+(defun fikra-event-render-preview (event)
+  (let ((preview (fikra-event-get-str event "preview")))
+    (if (or (null preview) (string= preview ""))
+      ""
+      (let ((out "")
+            (lines (string-split preview "\n")))
+        (dolist (l lines)
+          (if (> (length l) 1)
+            (let ((sign (substring l 0 1))
+                  (body (substring l 2 (length l))))
+              (setq out (concat out
+                                (if (string= sign "+")
+                                  (fikra-face "\e[32m" (concat "    + " body))
+                                  (fikra-face "\e[31m" (concat "    - " body)))
+                                "\n")))))
+        out))))
+
 (defun fikra-event-render-line (event)
   (let ((kind (fikra-event-get-str event "kind")))
     (cond
@@ -121,7 +140,8 @@
                     (concat "⚙ " (fikra-event-get-str event "tool")))
                 (fikra-event-id-tag event)
                 (fikra-face "\e[33m" (concat "  " (fikra-event-get-str event "summary")))
-                "\n"))
+                "\n"
+                (fikra-event-render-preview event)))
       ((string= kind "tool-result")
         ;; Permission-denied results render the truthful actionable block
         ;; instead of a bare FAIL the user must decode (L1 has no gate).
@@ -349,11 +369,31 @@ text-deltas inside the batch join into the same line."
 ;; renders skipping invalidated turns. The tombstone renders ONE collapsed
 ;; marker; rendering CONTINUES for post-revert turns (numbers past
 ;; revert-point).
+;; Drop a turn-end that immediately follows an identical turn-end — the
+;; probe-era logs carry doubled markers and replay would render both
+;; (codex rounds 7-9: "duplicate completion markers remain distracting").
+(defun fikra-event-dedupe-markers (events)
+  (fikra-dedupe-scan events (list) "" ""))
+
+(defun fikra-dedupe-scan (events acc last-kind last-status)
+  (if (null events)
+    (reverse acc)
+    (let* ((e (car events))
+           (k (fikra-event-get-str e "kind"))
+           (st (fikra-event-get-str e "status")))
+      (if (and (string= k "turn-end")
+               (string= last-kind "turn-end")
+               (string= st last-status))
+        (fikra-dedupe-scan (cdr events) acc last-kind last-status)
+        (fikra-dedupe-scan (cdr events) (cons e acc) k
+          (if (string= k "turn-end") st last-status))))))
+
 (defun fikra-event-replay ()
   (if (not fikra-event-log)
     ""
     (let ((events (fikra-event-parse-lines (fikra-event-read-log-lines))))
-      (fikra-event-render-skip events (fikra-event-tombstone-ranges events) 0 "" nil))))
+      (fikra-event-render-skip (fikra-event-dedupe-markers events)
+        (fikra-event-tombstone-ranges events) 0 "" nil))))
 
 ;; JSONL lines -> parsed events (unparseable lines skipped).
 (defun fikra-event-parse-lines (lines)

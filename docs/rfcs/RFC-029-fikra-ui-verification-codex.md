@@ -326,3 +326,28 @@ The approval score uses the supplied live event log and deterministic rendered b
 4. **Preserve tool evidence and clean up replay.** Provide access to full abbreviated results and normalize duplicate historical completion markers around [event.tlisp](/Users/mekael/Documents/programming/typescript/tmax/src/tlisp/core/fikra/event.tlisp:125).
 
 The new denial message is a meaningful improvement: it identifies a completed refusal, explains that fikra has no L1 gate, and offers a concrete next step without implying an approval is waiting. The turn count also closes part of the mode-line gap. The chat remains recognizably close to the mockup, but section 8.3’s native per-action approval experience and complete turn-change evidence are still the largest differences; the unchanged scores rely on the round 8 captures and reported checks.
+
+---
+
+# Round 10 (inline evidence + real counts + marker dedup) — 2026-11-20
+
+| Area | Score | Justification |
+|---|---:|---|
+| Chat layout and readability | **8/10** | Roles, turn boundaries, tool rows, results and completion are clearly distinguished; the older live capture also shows the gutter and wrapping. |
+| Inline tool evidence | **8/10** | The supplied render now shows red removals and green additions directly below Edit and Write rows, though previews are capped and Claude-specific. |
+| Tool results and correlation | **8/10** | Matching short IDs connect calls to concise success results; the mockup’s richer command output and action context are less visible. |
+| Change summaries | **8/10** | Both modified and new files have concrete ± counts in the supplied fixture, including the three-line untracked file. |
+| Turn lifecycle | **8/10** | The fixture shows one completion marker despite duplicate end events; live behavior for this round was not captured in the supplied transcript. |
+| Modeline and context | **6/10** | Backend and runtime mode are visible in the older live capture; the current lighter supports a turn segment, but thread name and tool count remain absent. |
+| Diff and revert surface | **6/10** | A turn-scoped diff command exists, but its presentation lacks the mockup’s file summary, totals and navigation; no current diff capture was supplied. |
+| Approval surface | **3/10** | The L1 denial is described as truthful and actionable, but the mockup’s paused, per-action L2 panel and provenance are still open. |
+| **Overall** | **8/10** | Inline edit evidence closes the largest chat-specific gap from round 9; the score reflects partial mockup fidelity, with approval and diff presentation still material gaps. |
+
+## Top remaining fixes
+
+1. **Build the native per-action approval flow and panel.** Connect the native backend’s paused tool execution and verified provenance to [approvals.tlisp](/Users/mekael/Documents/programming/typescript/tmax/src/tlisp/core/fikra/approvals.tlisp:93) and the permission presentation in [event.tlisp](/Users/mekael/Documents/programming/typescript/tmax/src/tlisp/core/fikra/event.tlisp:155). This remains dependent on the native-backend work.
+2. **Bring the turn diff closer to §8.4.** Extend [diff.tlisp](/Users/mekael/Documents/programming/typescript/tmax/src/tlisp/core/fikra/diff.tlisp:15) with per-file status and counts, aggregate totals, and visible turn navigation/revert affordances; render untracked content as additions.
+3. **Complete the modeline context.** Add thread name and tool count to [chat.tlisp](/Users/mekael/Documents/programming/typescript/tmax/src/tlisp/core/fikra/chat.tlisp:90), with refreshes as events arrive.
+4. **Make preview limits and coverage clear.** [backend-claude.tlisp](/Users/mekael/Documents/programming/typescript/tmax/src/tlisp/core/fikra/backend-claude.tlisp:333) silently omits lines beyond three per side; indicate omitted content and extend equivalent evidence to other backends where their events provide it.
+
+The round-10 fixture is a meaningful improvement: a reader can now see the actual edit in context, the new file’s count, and a single completion marker. It supports raising the overall grade from **7 to 8**, while stopping short of mockup parity: the evidence is a deterministic renderer fixture rather than a new live TUI capture, the diff screen was not shown, and the proposed L2 approval experience is still unfinished.

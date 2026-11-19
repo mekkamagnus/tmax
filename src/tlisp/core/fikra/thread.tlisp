@@ -561,7 +561,12 @@ thread→adapter has no cycle but keep the lazy convention)."
           (if (and (> (length line) 6)
                    (not (string= (substring line 0 6) ".tmax/"))
                    (not (string= (hashmap-get baseline line) (fikra-file-signature dir line))))
-            (setq rows (cons (list line "?" "?") rows))))
+            ;; New untracked file: adds = its line count (codex rounds 8-9:
+            ;; "untracked-file counts remain unknown"), dels 0.
+            (setq rows (cons (list line
+                                   (string-trim (shell-command (concat "wc -l < '" dir "/" line "'")))
+                                   "0")
+                             rows))))
         (reverse rows)))))
 
 (defun fikra-thread-emit-file-changes ()

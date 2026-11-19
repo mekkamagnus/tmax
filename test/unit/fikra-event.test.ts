@@ -192,3 +192,21 @@ describe("#212 FAEP — incremental render into *Fikra*", () => {
     expect(readFileSync(log, "utf8")).toContain("should not appear");
   });
 });
+
+describe("round-10: inline preview + marker dedup", () => {
+  test("tool-call preview lines render colored under the row; doubled turn-ends dedupe", async () => {
+    const editor = await createStartedEditor("");
+    setup(editor);
+    turn(editor, 1);
+    ev(editor, "tool-call", { tool: "Edit", id: "abc123", summary: "/x/a.ts", preview: "- old line\n+ new line\n" });
+    ev(editor, "tool-result", { ok: "t", id: "abc123", summary: "ok" });
+    ev(editor, "turn-end", { status: "completed" });
+    ev(editor, "turn-end", { status: "completed" });
+    const text = replay(editor);
+    expect(stripAnsi(text)).toContain("    + new line");
+    expect(stripAnsi(text)).toContain("    - old line");
+    expect(text).toContain("\u001b[32m    + new line");
+    // Doubled marker renders ONCE.
+    expect(stripAnsi(text).split("── completed ──").length - 1).toBe(1);
+  });
+});

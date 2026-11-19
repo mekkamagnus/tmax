@@ -302,21 +302,60 @@ unparseable or non-event lines. Flat dispatch — one branch per wire type."
         (let* ((is-error (fikra-afield block "is_error"))
                (content-v (fikra-afield block "content")))
           (fikra-norm-results (cdr blocks)
-            (cons (list (list "kind" "tool-result")
-                        (list "ok" (if is-error nil t))
-                        (list "id" (fikra-tool-id-short (fikra-afield block "tool_use_id")))
-                        (list "summary" (if content-v content-v "")))
-                  out)))))))
+            (let ((rid (fikra-tool-id-short (fikra-afield block "tool_use_id"))))
+              (cons (list (list "kind" "tool-result")
+                          (list "ok" (if is-error nil t))
+                          (list "tool" (hashmap-get fikra-claude-tool-names rid))
+                          (list "id" rid)
+                          (list "summary" (if content-v content-v "")))
+                    out)))))))
 
 ;; tool_use block → tool-call event with a per-tool summary.
+(defvar fikra-claude-tool-names (hashmap)
+  "short-id → tool NAME — the denial row names the tool (codex round 9:
+  the denied tool-result carried only the id).")
 (defun fikra-tool-call-event (block)
   (let* ((name (fikra-afield block "name"))
          (input (fikra-afield block "input"))
-         (summary (fikra-tool-summary name input)))
+         (summary (fikra-tool-summary name input))
+         (short (fikra-tool-id-short (fikra-afield block "id"))))
+    (editor/keymaps/keymap-mutable-set! fikra-claude-tool-names short
+      (if name name "?"))
     (list (list "kind" "tool-call")
           (list "tool" (if name name "?"))
-          (list "id" (fikra-tool-id-short (fikra-afield block "id")))
-          (list "summary" summary))))
+          (list "id" short)
+          (list "summary" summary)
+          ;; Inline change evidence (codex rounds 8-9: "edits are not shown
+          ;; inline") — Edit/Write inputs become sign-prefixed preview lines.
+          (list "preview" (fikra-tool-preview name input)))))
+
+;; Sign-prefixed preview lines ("- old" / "+ new"), ≤3 per side, 72-char
+;; capped — the renderer colors them under the tool row.
+(defun fikra-tool-preview (name input)
+  (cond
+    ((string= name "Edit")
+      (let ((old (fikra-afield input "old_string"))
+            (new (fikra-afield input "new_string")))
+        (if (and (stringp old) (stringp new))
+          (concat (fikra-preview-lines "-" old) (fikra-preview-lines "+" new))
+          "")))
+    ((string= name "Write")
+      (let ((c (fikra-afield input "content")))
+        (if (stringp c) (fikra-preview-lines "+" c) "")))
+    (t "")))
+
+(defun fikra-preview-lines (sign text)
+  (let ((lines (string-split text "\n"))
+        (out "")
+        (n 0))
+    (dolist (l lines)
+      (if (< n 3)
+        (progn
+          (setq out (concat out sign " "
+                            (if (> (length l) 72) (concat (substring l 0 72) "…") l)
+                            "\n"))
+          (setq n (+ n 1)))))
+    out))
 
 ;; "toolu_01XFDUDYJgAC" → "FDUDYJ" (last 6). Correlation key: the tool-result
 ;; carries the matching suffix so parallel calls pair with their results
