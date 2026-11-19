@@ -82,4 +82,29 @@ describe("#270: markdown-daily-note", () => {
       rmSync(vault, { recursive: true, force: true });
     }
   });
+
+  test("#275: absolute home via ~ — journal-dir \"~/journal\" expands uniformly", async () => {
+    const fakeHome = mkdtempSync(join(tmpdir(), "tmax-home-"));
+    const prevHome = process.env.HOME;
+    const prevCwd = process.cwd();
+    process.env.HOME = fakeHome;
+    try {
+      const editor = await setupMdEditor("x\n", join(fakeHome, "index.md"));
+      executeTlisp(editor, '(markdown-journal-dir-set "~/journal")');
+      executeTlisp(editor, "(markdown-daily-note)");
+      // mkdir + write + exists all expanded ~ → note in the fake home's
+      // journal/, and NO literal "~" directory anywhere
+      const journalDir = join(fakeHome, "journal");
+      const notes = readdirSync(journalDir).filter((f) => f.endsWith(".md"));
+      expect(notes).toHaveLength(1);
+      expect(existsSync(join(prevCwd, "~"))).toBe(false);
+      executeTlisp(editor, "(buffer-insert \"home entry\\n\")");
+      executeTlisp(editor, "(save-buffer)");
+      expect(readFileSync(join(journalDir, notes[0]!), "utf-8")).toContain("home entry");
+    } finally {
+      process.env.HOME = prevHome;
+      process.chdir(prevCwd);
+      rmSync(fakeHome, { recursive: true, force: true });
+    }
+  });
 });

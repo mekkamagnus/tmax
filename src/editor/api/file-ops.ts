@@ -28,6 +28,18 @@ function fsRuntimeError(operation: string, path: string, error: unknown): AppErr
 }
 
 /**
+ * Expand a leading `~` to $HOME for every path-taking builtin (#275).
+ * read-file-content always did this inline; the write/mkdir/stat ops did not,
+ * so the same path string resolved differently per op — a `~/journal` dir
+ * read from $HOME but wrote into a literal `./~/`. Non-`~` paths are
+ * byte-identical (regex no-op). Trailing `~` (backup suffix in file-copy)
+ * is untouched — only the LEADING tilde is a home reference.
+ */
+function expandHomePath(path: string): string {
+  return path.replace(/^~/, process.env.HOME ?? '~');
+}
+
+/**
  * Create file operations API functions
  * @param operations - Editor operations reference
  * @param setStatusMessage - Function to set status message
@@ -70,7 +82,7 @@ export function createFileOps(
       return Either.left(contentTypeValidation.left);
     }
 
-    const path = pathArg.value as string;
+    const path = expandHomePath(pathArg.value as string);
     const content = contentArg.value as string;
 
     if (isAsyncMode(context)) {
@@ -119,7 +131,7 @@ export function createFileOps(
       return Either.left(contentTypeValidation.left);
     }
 
-    const path = pathArg.value as string;
+    const path = expandHomePath(pathArg.value as string);
     const content = contentArg.value as string;
 
     if (isAsyncMode(context)) {
@@ -152,7 +164,7 @@ export function createFileOps(
       return Either.left(typeValidation.left);
     }
 
-    const path = (pathArg.value as string).replace(/^~/, process.env.HOME ?? '~');
+    const path = expandHomePath(pathArg.value as string);
     // Detect binary/invalid-UTF-8 files: read as Buffer first, validate UTF-8.
     // Invalid bytes would become U+FFFD on decode, corrupting the file on save.
     // #66 / BUG-56.
@@ -198,7 +210,7 @@ export function createFileOps(
       return Either.left(typeValidation.left);
     }
 
-    const path = pathArg.value as string;
+    const path = expandHomePath(pathArg.value as string);
     if (isAsyncMode(context)) {
       return Either.right(createPromise(fs.promises.access(path)
         .then(() => createBoolean(true))
@@ -220,7 +232,7 @@ export function createFileOps(
       return Either.left(typeValidation.left);
     }
 
-    const path = pathArg.value as string;
+    const path = expandHomePath(pathArg.value as string);
     if (isAsyncMode(context)) {
       return Either.right(createPromise(fs.promises.stat(path)
         .then((stat) => createString(stat.mtime.toISOString()))
@@ -247,7 +259,7 @@ export function createFileOps(
       return Either.left(typeValidation.left);
     }
 
-    const path = pathArg.value as string;
+    const path = expandHomePath(pathArg.value as string);
     const statToValue = (stat: fs.Stats) => createList([
       createSymbol("size"),
       createNumber(stat.size),
@@ -291,8 +303,8 @@ export function createFileOps(
       return Either.left(destTypeValidation.left);
     }
 
-    const src = srcArg.value as string;
-    const dest = destArg.value as string;
+    const src = expandHomePath(srcArg.value as string);
+    const dest = expandHomePath(destArg.value as string);
     if (isAsyncMode(context)) {
       return Either.right(createPromise(fs.promises.copyFile(src, dest)
         .then(() => createNil())
@@ -321,7 +333,7 @@ export function createFileOps(
       return Either.left(typeValidation.left);
     }
 
-    const path = pathArg.value as string;
+    const path = expandHomePath(pathArg.value as string);
     if (isAsyncMode(context)) {
       return Either.right(createPromise(fs.promises.copyFile(path, path + '~')
         .then(() => createNil())
@@ -350,7 +362,7 @@ export function createFileOps(
       return Either.left(typeValidation.left);
     }
 
-    const path = pathArg.value as string;
+    const path = expandHomePath(pathArg.value as string);
     if (isAsyncMode(context)) {
       return Either.right(createPromise(fs.promises.unlink(path)
         .then(() => createNil())
@@ -377,7 +389,7 @@ export function createFileOps(
       return Either.left(typeValidation.left);
     }
 
-    const path = pathArg.value as string;
+    const path = expandHomePath(pathArg.value as string);
     if (isAsyncMode(context)) {
       return Either.right(createPromise(fs.promises.mkdir(path, { recursive: true })
         .then(() => createNil())
@@ -406,7 +418,7 @@ export function createFileOps(
       return Either.left(typeValidation.left);
     }
 
-    const path = pathArg.value as string;
+    const path = expandHomePath(pathArg.value as string);
     const entryToValue = (entry: fs.Dirent, size: number, modified: string) => createHashmap([
       ["name", createString(entry.name)],
       ["isFile", createBoolean(entry.isFile())],
