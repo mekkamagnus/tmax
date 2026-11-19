@@ -46,10 +46,12 @@ describe("#270: markdown-daily-note", () => {
     const prevCwd = process.cwd();
     process.chdir(vault);
     try {
-      const today = new Date().toLocaleDateString("sv-SE"); // YYYY-MM-DD, local tz
+      const editor = await setupMdEditor("x\n", join(vault, "index.md"));
+      // tmax's own local date — Bun's sv-SE locale yields the UTC date,
+      // diverging from shell `date` between 00:00 and 08:00 local.
+      const today = String((executeTlisp(editor, '(string-trim (shell-command "date +%Y-%m-%d"))') as { value: string }).value);
       mkdirSync(join(vault, "daily"));
       writeFileSync(join(vault, "daily", `${today}.md`), "# PRECIOUS\n");
-      const editor = await setupMdEditor("x\n", join(vault, "index.md"));
       executeTlisp(editor, "(markdown-daily-note)");
       expect(readFileSync(join(vault, "daily", `${today}.md`), "utf-8")).toBe("# PRECIOUS\n");
       const notes = readdirSync(join(vault, "daily")).filter((f) => f.endsWith(".md"));

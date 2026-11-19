@@ -6,11 +6,11 @@ import { createStartedEditor, executeTlisp } from "../helpers/editor-fixture.ts"
 import type { Editor } from "../../src/editor/editor.ts";
 
 /**
- * #278: SPC r d — direct capture to today's daily note
- * (org-roam-dailies-capture-today parity). Compose in *Capture*, C-c C-c
- * appends a timestamped entry to markdown-journal-path, C-c C-k / C-g abort,
- * prior buffer/mode/point restored exactly. Key delivery follows the
- * mx-nested-describe-status pattern: handleKey(" ") is SPC.
+ * #278/#285: SPC r d — popup capture to today's daily note (org-capture
+ * parity, verified against Emacs 30.1). Single window splits 50/50 bottom;
+ * existing layout is reused. Skeleton (header + seeded open-time prefix) is
+ * commit-stripped and never reaches the file. C-c C-c / C-c C-k close the
+ * popup and restore buffer/mode/point exactly.
  */
 
 /** Stringify a T-Lisp eval result for assertions (wiki-link-complete shape). */
@@ -30,14 +30,19 @@ function tl(editor: Editor, form: string): string {
   return render(r);
 }
 
-describe("#278: capture-daily (SPC r d)", () => {
-  test("SPC r d opens a fresh *Capture* buffer in insert mode and restores on C-c C-c", async () => {
+/** tmax's own local date via shell `date` — Bun's sv-SE locale returns the
+ *  UTC date, which diverges from the local `date` between 00:00 and 08:00. */
+function tmaxToday(editor: Editor): string {
+  return tl(editor, '(string-trim (shell-command "date +%Y-%m-%d"))');
+}
+
+describe("#285: capture popup (SPC r d)", () => {
+  test("SPC r d: popup split + skeleton; C-c C-c strips skeleton, restores exactly", async () => {
     const vault = mkdtempSync(join(tmpdir(), "tmax-capture-"));
     const prevCwd = process.cwd();
     process.chdir(vault);
     try {
       const editor = await createStartedEditor("hello world");
-      // Park the cursor somewhere specific to prove point restoration
       executeTlisp(editor, "(cursor-move 0 4)");
       const before = { buf: tl(editor, "(buffer-current)"), line: tl(editor, "(cursor-line)"), col: tl(editor, "(cursor-column)") };
 
@@ -45,25 +50,32 @@ describe("#278: capture-daily (SPC r d)", () => {
       await editor.handleKey("r");
       await editor.handleKey("d");
 
+      // Popup: single window grew a 50/50 bottom split; compose buffer live
       expect(tl(editor, "(buffer-current)")).toBe("*Capture*");
       expect(tl(editor, "(editor-mode)")).toBe("insert");
+      expect(tl(editor, "(length (window-list))")).toBe("2");
+      // Skeleton: header names the target; seeded prefix carries open-time ts
+      const skel = tl(editor, "(buffer-text)");
+      expect(skel.startsWith("capture -> ")).toBe(true);
+      expect(skel).toMatch(/\n- \[2026-\d\d-\d\d \d\d:\d\d\] $/);
+
       executeTlisp(editor, '(buffer-insert "first thought")');
-      // second capture later must not see stale text — covered by fresh-buffer test below
-
       await editor.handleKey("C-c");
       await editor.handleKey("C-c");
 
-      // Context restored exactly
+      // Context restored exactly: buffer, point, mode, single window
       expect(tl(editor, "(buffer-current)")).toBe(before.buf);
       expect(tl(editor, "(cursor-line)")).toBe(before.line);
       expect(tl(editor, "(cursor-column)")).toBe(before.col);
       expect(tl(editor, "(editor-mode)")).toBe("normal");
+      expect(tl(editor, "(length (window-list))")).toBe("1");
 
-      // Entry appended to today's note under the default daily/ layout
+      // Entry appended; the skeleton never reached the file
       const files = readdirSync(join(vault, "daily")).filter((f) => f.endsWith(".md"));
       expect(files).toHaveLength(1);
       const content = readFileSync(join(vault, "daily", files[0]!), "utf-8");
       expect(content).toMatch(/^# 2026-\d\d-\d\d/m);
+      expect(content).not.toContain("capture ->");
       expect(content).toMatch(/- \[2026-\d\d-\d\d \d\d:\d\d\] first thought\n$/);
     } finally {
       process.chdir(prevCwd);
@@ -71,7 +83,7 @@ describe("#278: capture-daily (SPC r d)", () => {
     }
   });
 
-  test("C-c C-k aborts: existing note untouched, no note created", async () => {
+  test("C-c C-k aborts: popup closes, no note created", async () => {
     const vault = mkdtempSync(join(tmpdir(), "tmax-capture-"));
     const prevCwd = process.cwd();
     process.chdir(vault);
@@ -82,8 +94,30 @@ describe("#278: capture-daily (SPC r d)", () => {
       await editor.handleKey("C-c");
       await editor.handleKey("C-k");
       expect(tl(editor, "(buffer-current)")).toBe("test");
-      // No journal file was created by the aborted capture
+      expect(tl(editor, "(length (window-list))")).toBe("1");
       expect(readdirSync(vault).includes("daily")).toBe(false);
+    } finally {
+      process.chdir(prevCwd);
+      rmSync(vault, { recursive: true, force: true });
+    }
+  });
+
+  test("an existing layout is reused — no third window stacked", async () => {
+    const vault = mkdtempSync(join(tmpdir(), "tmax-capture-"));
+    const prevCwd = process.cwd();
+    process.chdir(vault);
+    try {
+      const editor = await createStartedEditor("hello world");
+      executeTlisp(editor, "(split-window-below)");
+      expect(tl(editor, "(length (window-list))")).toBe("2");
+      executeTlisp(editor, "(capture-daily)");
+      expect(tl(editor, "(buffer-current)")).toBe("*Capture*");
+      expect(tl(editor, "(length (window-list))")).toBe("2");
+      executeTlisp(editor, '(buffer-insert "reused")');
+      executeTlisp(editor, "(capture-commit)");
+      expect(tl(editor, "(length (window-list))")).toBe("2");
+      const files = readdirSync(join(vault, "daily")).filter((f) => f.endsWith(".md"));
+      expect(readFileSync(join(vault, "daily", files[0]!), "utf-8")).toContain("reused");
     } finally {
       process.chdir(prevCwd);
       rmSync(vault, { recursive: true, force: true });
@@ -95,10 +129,10 @@ describe("#278: capture-daily (SPC r d)", () => {
     const prevCwd = process.cwd();
     process.chdir(vault);
     try {
-      const today = new Date().toLocaleDateString("sv-SE");
+      const editor = await createStartedEditor("x");
+      const today = tmaxToday(editor);
       mkdirSync(join(vault, "daily"));
       writeFileSync(join(vault, "daily", `${today}.md`), "# PRECIOUS\n");
-      const editor = await createStartedEditor("x");
       executeTlisp(editor, "(capture-daily)");
       executeTlisp(editor, '(buffer-insert "second thought")');
       executeTlisp(editor, "(capture-commit)");
@@ -106,6 +140,7 @@ describe("#278: capture-daily (SPC r d)", () => {
       expect(content.startsWith("# PRECIOUS\n")).toBe(true);
       expect(content).toContain("second thought");
       expect((content.match(/^# /gm) ?? []).length).toBe(1);
+      expect(content).not.toContain("capture ->");
     } finally {
       process.chdir(prevCwd);
       rmSync(vault, { recursive: true, force: true });
@@ -125,14 +160,16 @@ describe("#278: capture-daily (SPC r d)", () => {
       expect(readdirSync(vault).includes("daily")).toBe(false);
       const flat = readdirSync(vault).filter((f) => /^\d{4}-\d\d-\d\d\.md$/.test(f));
       expect(flat).toHaveLength(1);
-      expect(readFileSync(join(vault, flat[0]!), "utf-8")).toContain("flat capture");
+      const content = readFileSync(join(vault, flat[0]!), "utf-8");
+      expect(content).toContain("- [");
+      expect(content).toContain("flat capture");
     } finally {
       process.chdir(prevCwd);
       rmSync(vault, { recursive: true, force: true });
     }
   });
 
-  test("repeat capture starts from an empty compose buffer (no stale text)", async () => {
+  test("repeat capture seeds a fresh skeleton (no stale text)", async () => {
     const vault = mkdtempSync(join(tmpdir(), "tmax-capture-"));
     const prevCwd = process.cwd();
     process.chdir(vault);
@@ -142,23 +179,46 @@ describe("#278: capture-daily (SPC r d)", () => {
       executeTlisp(editor, '(buffer-insert "first")');
       executeTlisp(editor, "(capture-commit)");
       executeTlisp(editor, "(capture-daily)");
-      expect(tl(editor, "(buffer-text)")).toBe("");
+      expect(tl(editor, "(buffer-text)")).toMatch(/^capture -> .+\n- \[\d{4}-\d\d-\d\d \d\d:\d\d\] $/);
     } finally {
       process.chdir(prevCwd);
       rmSync(vault, { recursive: true, force: true });
     }
   });
 
-  test("empty compose text commits nothing", async () => {
+  test("skeleton-only commit writes nothing (empty-body abort)", async () => {
     const vault = mkdtempSync(join(tmpdir(), "tmax-capture-"));
     const prevCwd = process.cwd();
     process.chdir(vault);
     try {
       const editor = await createStartedEditor("x");
       executeTlisp(editor, "(capture-daily)");
-      executeTlisp(editor, "(capture-commit)");
+      executeTlisp(editor, "(capture-commit)"); // nothing typed past the skeleton
       expect(readdirSync(vault).includes("daily")).toBe(false);
       expect(tl(editor, "(buffer-current)")).toBe("test");
+      expect(tl(editor, "(length (window-list))")).toBe("1");
+    } finally {
+      process.chdir(prevCwd);
+      rmSync(vault, { recursive: true, force: true });
+    }
+  });
+
+  test("strip + entry rules: edited prefix passes through; absent prefix re-added from open-time ts", async () => {
+    const vault = mkdtempSync(join(tmpdir(), "tmax-capture-"));
+    const prevCwd = process.cwd();
+    process.chdir(vault);
+    try {
+      const editor = await createStartedEditor("x");
+      executeTlisp(editor, "(capture-daily)"); // sets capture-opened-ts
+      const ts = (tl(editor, "(buffer-text)").match(/\[(\d{4}-\d\d-\d\d \d\d:\d\d)\]/) ?? [])[1]!;
+      // body without a prefix -> open-time prefix prepended
+      expect(tl(editor, '(capture-entry "plain body")')).toBe(`- [${ts}] plain body`);
+      // body with an edited prefix passes through verbatim
+      expect(tl(editor, '(capture-entry "- [1999-01-01 00:00] edited")')).toBe("- [1999-01-01 00:00] edited");
+      // header stripping drops the seeded line only
+      expect(tl(editor, '(capture-strip-skeleton "capture -> /x/y.md\\n- [t] body")')).toBe("- [t] body");
+      expect(tl(editor, '(capture-strip-skeleton "- [t] no header")')).toBe("- [t] no header");
+      executeTlisp(editor, "(capture-abort)");
     } finally {
       process.chdir(prevCwd);
       rmSync(vault, { recursive: true, force: true });
