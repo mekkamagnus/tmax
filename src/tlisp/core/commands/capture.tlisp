@@ -4,22 +4,28 @@
 
 ;; capture.tlisp -- #278/#285: direct capture to today's daily note,
 ;; org-roam-dailies-capture-today parity (the user's most-used Emacs chord,
-;; SPC r d), now in the org-parity POPUP shape (verified against Emacs 30.1
-;; org-capture + org-roam source, 2026-11-20 session):
+;; SPC r d), in the org-parity POPUP shape (verified against Emacs 30.1
+;; org-capture + org-roam source; hardened through codex review):
 ;;
 ;;   - single window  -> split-window-below, compose in the lower pane (50/50,
-;;     Emacs's exact ratio; Emacs ADAPTS direction by frame width -- capture
-;;     right when wider than split-width-threshold -- tmax fixes ALWAYS
-;;     bottom, the preferred shape)
-;;   - split already exists -> REUSE the current window (friendlier than
-;;     Emacs's delete-other-windows collapse)
-;;   - skeleton in the buffer: dim header "capture -> <path>" + the seeded
-;;     "- [ts] " prefix with the cursor after it (Emacs %? placement); the
-;;     timestamp is stamped at OPEN (%U semantics) and kept by the entry
-;;   - commit STRIPS the skeleton (header dropped, prefix matched loosely;
-;;     an edited/absent prefix falls back to whole-text + stored ts) --
-;;     the skeleton never reaches the file
-;;   - C-c C-c / C-c C-k close the popup and restore buffer/mode/point
+;;     Emacs's exact ratio; Emacs ADAPTS direction by frame width -- tmax
+;;     fixes ALWAYS bottom, the preferred shape)
+;;   - split already exists -> move to the BOTTOM pane and compose there
+;;     (the pane's buffer is restored afterwards, focus returns to the
+;;     window the chord was pressed in)
+;;   - skeleton in the buffer: header "capture -> <path>" + the seeded
+;;     "- [ts] " prefix with the cursor after it (Emacs %? placement)
+;;   - the TARGET PATH and the timestamp are stamped at OPEN (%U / codex
+;;     r1: a capture left open across midnight files exactly where the
+;;     header says) and reused at commit
+;;   - a capture in progress is never discarded: SPC r d again focuses the
+;;     open compose buffer instead of resetting it (codex r1)
+;;   - commit STRIPS the skeleton (the exact "capture -> " header line is
+;;     dropped; the untouched seeded prefix is removed -- bare-prefix and
+;;     trim-eaten-space cases matched explicitly; an edited "- [" prefix
+;;     passes through) -- the skeleton never reaches the file
+;;   - C-c C-c / C-c C-k / C-g close the popup and restore buffer/mode/
+;;     point/focus exactly
 ;;
 ;; Compose-then-commit contract (#277): buffer-local keymap front-end (the
 ;; fikra-chat #206 pattern; insert-mode chord routing landed with #278).
@@ -31,10 +37,20 @@
 (defvar capture-return-line 0)
 (defvar capture-return-col 0)
 (defvar capture-opened-ts nil
-  "Timestamp stamped when the compose buffer opened (Emacs %U semantics:
-the entry keeps its open time even if filed later).")
+  "Timestamp stamped at open (Emacs %U: the entry keeps its open time).")
+(defvar capture-target-path nil
+  "Path stamped at OPEN — commit files exactly where the header says.")
+(defvar capture-target-date nil
+  "Date string for capture-target-path (feeds markdown-daily-note-init).")
+(defvar capture-active-p nil
+  "t while a compose buffer is open — SPC r d re-focuses instead of
+discarding the draft.")
 (defvar capture-popup-window nil
   "t when this capture created the popup window (it is closed on restore).")
+(defvar capture-pane-restore nil
+  "Buffer the reused bottom pane showed before *Capture* took it.")
+(defvar capture-focus-window nil
+  "Window index the chord was pressed in — focus returns there on restore.")
 
 (defun capture-timestamp ()
   "Current timestamp as YYYY-MM-DD HH:MM (org-log entry style)."
@@ -56,29 +72,68 @@ the entry keeps its open time even if filed later).")
         (editor/keymaps/buffer-set-keymap "*Capture*" kmap))))
   t)
 
+(defun capture-goto-bottom-pane ()
+  "Move focus to the bottom-most pane (windmove-down until it stops
+moving). Returns the window index landed on."
+  (let ((cur (window-current)))
+    (while (progn
+             (window-move-focus "down")
+             (not (= (window-current) cur)))
+      (set! cur (window-current)))
+    (window-current)))
+
+(defun capture-refocus (idx)
+  "Cycle window-next until focus lands on window index IDX (bounded)."
+  (let ((guard 0))
+    (while (and (< guard 10) (not (= (window-current) idx)))
+      (window-next)
+      (set! guard (+ guard 1)))
+    t))
+
 (defun capture-restore ()
-  "Close the popup window (if we opened it), kill *Capture*, and return to
-the recorded buffer/mode/point."
-  (if (and capture-popup-window (> (length (window-list)) 1))
-    (delete-window))
+  "Close the popup (or revert the reused pane + refocus the origin
+window), kill *Capture*, and restore the recorded context."
+  (if capture-popup-window
+    ;; We created the popup: closing it leaves the original window current,
+    ;; its buffer and point untouched all along.
+    (if (> (window-count) 1)
+      (delete-window))
+    ;; Reuse case: put the pane's own buffer back, then return focus to
+    ;; the window the chord was pressed in (its buffer/point never moved).
+    (progn
+      (if capture-pane-restore
+        (switch-to-buffer capture-pane-restore))
+      (if capture-focus-window
+        (capture-refocus capture-focus-window))))
   (set! capture-popup-window nil)
+  (set! capture-pane-restore nil)
+  (set! capture-active-p nil)
   (condition-case err
     (buffer-kill "*Capture*")
     (error (e) nil))
-  (switch-to-buffer
-    (if (string= capture-return-buffer "*Capture*")
-      "*scratch*"
-      capture-return-buffer))
-  (cursor-move capture-return-line capture-return-col)
+  ;; Popup case safety net: ensure the original buffer/point are current.
+  (if (string= (buffer-current) "*Capture*")
+    (switch-to-buffer
+      (if (string= capture-return-buffer "*Capture*")
+        "*scratch*"
+        capture-return-buffer)))
+  (if (not (string= capture-return-buffer "*Capture*"))
+    (cursor-move capture-return-line capture-return-col))
   (editor-set-mode capture-return-mode))
 
+(defvar capture-header-prefix "capture -> "
+  "The seeded header prefix — 11 chars, named so no substring magic number
+drifts (a miscounted 10 shipped for one round: the header was filed).")
+
 (defun capture-strip-skeleton (text)
-  "Drop the seeded header line from compose TEXT (loose match on the
-\"capture \" prefix). Everything else passes through verbatim."
+  "Drop the seeded header line from compose TEXT. The match is the exact
+capture-header-prefix of the SEED — a user line that merely starts with
+\"capture\" is NOT eaten (codex r1). Everything else passes through."
   (let ((lines (string-split text "\n")))
     (if (and (> (length lines) 0)
-             (> (length (nth 0 lines)) 8)
-             (string= (substring (nth 0 lines) 0 8) "capture "))
+             (>= (length (nth 0 lines)) (length capture-header-prefix))
+             (string= (substring (nth 0 lines) 0 (length capture-header-prefix))
+                      capture-header-prefix))
       (string-join "\n" (cdr lines))
       text)))
 
@@ -96,59 +151,78 @@ so the bare-prefix case is matched explicitly)."
       (t stripped))))
 
 (defun capture-entry (body)
-  "Turn stripped compose BODY into the filed entry: a body already starting
-with \"- [\" keeps its (possibly edited) prefix; anything else gets the
+  "Turn compose BODY into the filed entry: a body already starting with
+\"- [\" keeps its (possibly edited) prefix; anything else gets the
 OPEN-time prefix prepended (the entry keeps its capture timestamp)."
   (if (and (> (length body) 3)
            (string= (substring body 0 3) "- ["))
     body
     (concat "- [" capture-opened-ts "] " body)))
 
-(defun capture-daily ()
-  "Capture directly to today's journal note (SPC r d): popup split, compose
-in *Capture* with the skeleton seeded, C-c C-c files the entry under
-markdown-journal-path, C-c C-k aborts. Prior context is restored either way."
-  (interactive)
-  (require-module editor/commands/markdown/knowledge)
+(defun capture-open ()
+  "Open the popup compose flow (assumes no capture is active)."
   (set! capture-return-buffer (buffer-current))
   (set! capture-return-mode (editor-mode))
   (set! capture-return-line (cursor-line))
   (set! capture-return-col (cursor-column))
+  (set! capture-focus-window (window-current))
   (set! capture-opened-ts (capture-timestamp))
-  ;; Fresh compose buffer every time: kill any previous *Capture* so no
-  ;; stale text survives, then create + switch.
+  ;; Target stamped ONCE — the header and the commit agree even across
+  ;; midnight (codex r1).
+  (set! capture-target-date (capture-today))
+  (set! capture-target-path (markdown-journal-path capture-target-date))
+  ;; Fresh compose buffer (no capture active means no draft to lose).
   (condition-case err
     (buffer-kill "*Capture*")
     (error (e) nil))
   ;; Popup geometry: only a single-window layout grows the 50/50 bottom
-  ;; split; an existing layout is reused, never stacked on.
-  (set! capture-popup-window (= (length (window-list)) 1))
-  (if capture-popup-window (split-window-below))
+  ;; split; an existing layout composes in its BOTTOM pane, whose buffer
+  ;; is restored afterwards.
+  (set! capture-popup-window (= (window-count) 1))
+  (if capture-popup-window
+    (split-window-below)
+    (progn
+      (capture-goto-bottom-pane)
+      (set! capture-pane-restore (buffer-current))))
   (buffer-create "*Capture*")
   (switch-to-buffer "*Capture*")
-  ;; Skeleton: dim header names the target; the seeded prefix carries the
-  ;; open-time timestamp and the cursor sits right after it (%? placement).
-  (buffer-insert (concat "capture -> " (markdown-journal-path (capture-today))
+  ;; Skeleton: the header names the exact commit target; the seeded prefix
+  ;; carries the open-time timestamp, cursor right after it (%? placement).
+  (buffer-insert (concat "capture -> " capture-target-path
                          "\n- [" capture-opened-ts "] "))
   (editor-set-mode "insert")
   (capture-ensure-keymap)
-  (editor-set-status "Capture to daily - C-c C-c file | C-c C-k abort"))
+  (set! capture-active-p t)
+  (editor-set-status "Capture to daily - C-c C-c file | C-c C-k or C-g abort"))
+
+(defun capture-daily ()
+  "Capture directly to today's journal note (SPC r d): popup split, compose
+in *Capture* with the skeleton seeded, C-c C-c files the entry under
+markdown-journal-path, C-c C-k / C-g abort. Prior context is restored
+either way. An in-progress capture is re-focused, never discarded."
+  (interactive)
+  (require-module editor/commands/markdown/knowledge)
+  (if capture-active-p
+    (progn
+      (switch-to-buffer "*Capture*")
+      (editor-set-status "Capture in progress - finish (C-c C-c) or abort (C-c C-k) it first"))
+    (capture-open)))
 
 (defun capture-commit ()
-  "File the *Capture* text to today's journal note and restore context.
-The skeleton (header + seeded prefix) is stripped; an edited prefix passes
-through; an absent one is re-added from the open-time timestamp. Empty
-compose text is a no-write abort."
+  "File the *Capture* text to the note named in the skeleton header (the
+target stamped at OPEN) and restore context. The skeleton (header +
+seeded prefix) is stripped; an edited prefix passes through; an absent one
+is re-added from the open-time timestamp. Empty compose text is a
+no-write abort."
   (interactive)
   (let* ((text (string-trim (buffer-text)))
          (body (capture-body (string-trim (capture-strip-skeleton text)))))
     (if (> (length body) 0)
-      (let* ((date-str (capture-today))
-             (path (markdown-journal-path date-str)))
-        (if (not (file-exists-p path))
-          (markdown-daily-note-init path date-str))
-        (append-file path (concat "\n" (capture-entry body) "\n"))
-        (message "Captured to %s" path))
+      (progn
+        (if (not (file-exists-p capture-target-path))
+          (markdown-daily-note-init capture-target-path capture-target-date))
+        (append-file capture-target-path (concat "\n" (capture-entry body) "\n"))
+        (message "Captured to %s" capture-target-path))
       (message "Capture empty - aborted")))
   (capture-restore))
 
