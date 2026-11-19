@@ -539,3 +539,29 @@ Top remaining fixes:
 4. **Close the remaining presentation gaps.** Add thread identity to the modeline and, where supported by real events, checkpoint references to mutating tool rows.
 
 The chat is now a strong match for the mockup’s core visual flow, and the live, cross-consistent counts resolve the earlier evidence concern. The viewer looks substantially closer too, but its captured regex error makes navigation an observed failure in this evidence, even if the source has since been corrected. Revert and approvals need behavioral demonstrations before their controls can receive the same confidence as the completed edit-to-diff path.
+
+---
+
+# Round 16 (nav proof + thread name) — 2026-11-20
+
+| Area | Score | Justification |
+|---|---:|---|
+| Chat timeline and tool evidence | **8.5/10** | The live capture shows two turns, tool calls and results, colored edit evidence, file summaries, and completion markers in one readable timeline. |
+| Modeline and session context | **7.5/10** | Backend, access mode, turn, and tool count are visible; the main thread’s name is absent. |
+| Turn diff presentation | **8/10** | The live viewer shows totals, per-file summaries, and colored patch content, though its presentation is less compact than the mockup. |
+| Diff navigation | **8.5/10** | The new dispatch-path proof shows `n → n → N` moving across both colored file sections; it does not demonstrate navigation in the captured terminal frame. |
+| Revert | **6/10** | A confirmation-backed command is implemented, but the supplied artifacts do not demonstrate confirmation and the resulting file restoration. |
+| Approval experience | **5/10** | Approval machinery exists, but live CLI mediation is unavailable in this environment and the mockup’s checkpoint and origin details remain incomplete. |
+| Live end-to-end workflow | **8/10** | The genuine single-session captures connect real chat turns to a multi-file diff; the navigation proof closes the prior dispatch defect separately. |
+
+## Top remaining fixes
+
+1. **Prove a complete revert in an interactive frame.** Drive `r`, answer the minibuffer confirmation, and verify both restored file contents and the resulting viewer/chat state. Start at [diff.tlisp](/Users/mekael/Documents/programming/typescript/tmax/src/tlisp/core/fikra/diff.tlisp:138).
+
+2. **Make live approval mediation available and demonstrate it.** The Claude adapter gates L2 on CLI support for `--permission-prompt-tool`; validate a supported integration or provide a working alternative, then capture an actual allow/reject round trip. See [backend-claude.tlisp](/Users/mekael/Documents/programming/typescript/tmax/src/tlisp/core/fikra/backend-claude.tlisp:47).
+
+3. **Enrich the approval view with trustworthy checkpoint and origin context.** Carry and render the available correlation, checkpoint, and provenance information without implying a verified origin that the service cannot establish. See [approvals.tlisp](/Users/mekael/Documents/programming/typescript/tmax/src/tlisp/core/fikra/approvals.tlisp:95) and [event.tlisp](/Users/mekael/Documents/programming/typescript/tmax/src/tlisp/core/fikra/event.tlisp:122).
+
+4. **Show the main thread name in the modeline.** This would complete the session context visible in the mockup and in the supplied capture. See [chat.tlisp](/Users/mekael/Documents/programming/typescript/tmax/src/tlisp/core/fikra/chat.tlisp:88).
+
+The round-15 navigation defect is closed by the new evidence: the trajectory reaches both sections and returns through the real key dispatch path, including colored patch content. The older viewer capture still contains the historical regex error, so it should be read as presentation evidence rather than current navigation evidence. Chat and diff inspection now compare well with the mockups; the largest remaining confidence gaps are an observed interactive revert and a real mediated approval, especially because the RFC’s per-action native loop is still a proposed target.
