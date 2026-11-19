@@ -1,5 +1,6 @@
 (defmodule fikra/event
   (export fikra-event-log-set fikra-event-log-path fikra-event-emit-batch-for fikra-event-emit
+          fikra-event-turn-tools
           fikra-event-emit-batch fikra-event-replay fikra-event-events
           fikra-event-reset fikra-event-render-line fikra-event-rebuild-fikra-buffer)
 
@@ -25,6 +26,22 @@
 
 (defvar fikra-event-memory (list)
   "In-memory copy of emitted events (test/inspection surface).")
+
+;; Turn-scoped tool-call counter (modeline context, codex round 10:
+;; "tool count absent"): reset at turn-start, bumped per tool-call, at
+;; EMIT time only (replay never recounts). Getter below is the export.
+(defvar fikra-event-turn-tools-v 0
+  "Tool-calls in the current/last turn.")
+
+(defun fikra-event-turn-tools ()
+  fikra-event-turn-tools-v)
+
+(defun fikra-event-count-tools (events)
+  (dolist (e events)
+    (let ((k (fikra-event-get-str e "kind")))
+      (cond
+        ((string= k "turn-start") (setq fikra-event-turn-tools-v 0))
+        ((string= k "tool-call") (setq fikra-event-turn-tools-v (+ fikra-event-turn-tools-v 1)))))))
 
 (defvar fikra-text-open nil
   "Whether a text-delta run is open (adjacent deltas join into one line).")
@@ -217,6 +234,7 @@ bumps the revision the TUI poll consumes."
 ;; misroute; it merely pauses live rendering for the background thread).
 (defun fikra-event-emit-batch-for (id events)
   (require-module fikra/thread)
+  (fikra-event-count-tools events)
   (let ((target-root (fikra/thread/fikra-thread-field-root-of id))
         (target-buffer (fikra/thread/fikra-thread-buffer-name-of id)))
     ;; Gate round-2: unknown id (nil root) → DROP, never guess.
@@ -252,6 +270,7 @@ text-deltas inside the batch join into the same line."
   ;; #222: per-thread buffer names live in fikra/thread — LAZY require
   ;; (thread requires event; the cycle forbids a top-level require).
   (require-module fikra/thread)
+  (fikra-event-count-tools events)
   (if (null events)
     nil
     (progn

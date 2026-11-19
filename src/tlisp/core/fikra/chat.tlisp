@@ -104,8 +104,22 @@ context flakiness)."
             ;; Turn count (mockup modeline: thread context): t9-style,
             ;; omitted before the first turn.
             (fikra-lighter-turn-segment)
+            ;; Tool calls in the current/last turn (mockup modeline):
+            ;; x5-style, omitted at zero.
+            (fikra-lighter-tools-segment)
+            ;; Thread name when not the implicit main thread.
+            (fikra-lighter-thread-segment)
             ;; #221: the wt:<id> segment appears only in worktree mode.
             (fikra-worktree-segment))))
+
+(defun fikra-lighter-tools-segment ()
+  (require-module fikra/event)
+  (let ((n (fikra/event/fikra-event-turn-tools)))
+    (if (and (numberp n) (> n 0)) (concat ":x" (number-to-string n)) "")))
+
+(defun fikra-lighter-thread-segment ()
+  (let ((id (fikra/thread/fikra-thread-current)))
+    (if (and id (not (string= id "main"))) (concat " th:" id) "")))
 
 (defun fikra-lighter-turn-segment ()
   (let ((n (fikra/thread/fikra-thread-field "turn-count")))
@@ -145,11 +159,14 @@ context flakiness)."
       (string-match-p "test/[^ \t\n]+" line)))
 
 (defun fikra-extract-file-path (line)
-  (let ((m1 (string-match "src/[^\s\t\n,;)\"]+" line)))
-    (if m1
-      m1
-      (let ((m2 (string-match "test/[^\s\t\n,;)\"]+" line)))
-        m2))))
+  ;; Absolute paths first (tool rows print repo/temp roots), then any
+  ;; path-shaped relative token (codex round 9: the old matcher only knew
+  ;; src|test and could not follow the paths actually shown).
+  (let ((m-abs (string-match "/[A-Za-z0-9_.][^\s\t\n,;)\"]*" line)))
+    (if m-abs
+      m-abs
+      (let ((m-rel (string-match "[A-Za-z0-9_.-]+/[A-Za-z0-9_./-]+" line)))
+        (if m-rel m-rel nil)))))
 
 (provide "fikra-chat")
 )

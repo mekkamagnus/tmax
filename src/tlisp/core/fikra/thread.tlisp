@@ -560,7 +560,11 @@ thread→adapter has no cycle but keep the lazy convention)."
         (dolist (line (string-split (shell-command (concat "git -C '" dir "' ls-files --others --exclude-standard 2>/dev/null")) "\n"))
           (if (and (> (length line) 6)
                    (not (string= (substring line 0 6) ".tmax/"))
-                   (not (string= (hashmap-get baseline line) (fikra-file-signature dir line))))
+                   ;; nil-safe: a file ABSENT from the baseline is new —
+                   ;; string= against nil errors in strict T-Lisp (round-11
+                   ;; fixture catch; new untracked files never emitted ±).
+                   (not (string= (or (hashmap-get baseline line) "")
+                                 (fikra-file-signature dir line))))
             ;; New untracked file: adds = its line count (codex rounds 8-9:
             ;; "untracked-file counts remain unknown"), dels 0.
             (setq rows (cons (list line

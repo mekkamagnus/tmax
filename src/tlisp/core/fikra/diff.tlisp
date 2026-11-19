@@ -1,5 +1,5 @@
 (defmodule fikra/diff
-  (export fikra-turn-diff)
+  (export fikra-turn-diff fikra-diff-next fikra-diff-prev)
 
 ;; SPC a d — the turn diff view (mockup 8.4's entry point). TURN-SCOPED
 ;; (codex round 6: the viewer must show THIS turn's patch, not the whole
@@ -19,6 +19,7 @@
   (require-module fikra/thread)
   (let* ((state (fikra/thread/fikra-thread-field "turn-count"))
          (dir (fikra/thread/fikra-thread-working-dir))
+         (rows (condition-case nil (fikra/thread/fikra-thread-compute-changes) (error () nil)))
          (paths (fikra-changed-paths-since-baseline)))
     (if (not (stringp dir))
       (editor-set-status "Fikra: no working dir for this thread")
@@ -29,9 +30,35 @@
             (editor-set-status "Fikra: no changes in this turn")
             (progn
               (fikra-diff-render
-                (concat "── turn " (if (numberp state) (number-to-string state) "?")
-                        " changes · " (number-to-string (length paths)) " file(s) ──\n\n"
-                        patch)))))))))
+                (concat (fikra-diff-summary state rows) "\n" patch)))))))))
+
+;; Summary table (mockup 8.4: file summary + totals) — colored header,
+;; magenta ± rows with per-file counts, totals line.
+(defun fikra-diff-summary (turn rows)
+  (concat "\e[1;36m── turn " (if (numberp turn) (number-to-string turn) "?")
+          " changes · " (number-to-string (length rows)) " file(s) · +"
+          (number-to-string (fikra-diff-total rows 1)) " -"
+          (number-to-string (fikra-diff-total rows 2)) " ──\e[0m\n\n"
+          (fikra-diff-rows rows)
+          "\n n/N: next/prev file · SPC a d refreshes \n\n"))
+
+;; ROWS are ((path adds dels) ...); IDX 1 = adds column, 2 = dels.
+(defun fikra-diff-total (rows idx)
+  (let ((sum 0))
+    (dolist (r rows)
+      (let ((v (if (= idx 1) (car (cdr r)) (car (cdr (cdr r))))))
+        (if (numberp v) (setq sum (+ sum v))
+          (if (stringp v) (setq sum (+ sum (string-to-number v)))))))
+    sum))
+
+(defun fikra-diff-rows (rows)
+  (let ((out ""))
+    (dolist (r rows)
+      (setq out (concat out "\e[35m± " (car r)
+                        " +" (if (numberp (car (cdr r))) (number-to-string (car (cdr r))) (car (cdr r)))
+                        " -" (if (numberp (car (cdr (cdr r)))) (number-to-string (car (cdr (cdr r)))) (car (cdr (cdr r))))
+                        "\e[0m\n")))
+    out))
 
 ;; The header + patch land in the (re)created read-only buffer.
 (defun fikra-diff-render (content)
@@ -47,7 +74,33 @@
   (buffer-append content)
   (buffer-set-read-only t)
   (editor-set-mode "normal")
+  (fikra-diff-ensure-keymap)
   (editor-set-status "Fikra: turn diff"))
+
+;; n/N jump between per-file patches ("diff --git" headers).
+(defun fikra-diff-ensure-keymap ()
+  (let ((kmap (editor/keymaps/buffer-keymap fikra-diff-buffer-name)))
+    (if (not kmap)
+      (progn
+        (setq kmap (editor/keymaps/keymap-init "fikra-diff"))
+        (editor/keymaps/keymap-set-key kmap "n" "(fikra/diff/fikra-diff-next)")
+        (editor/keymaps/keymap-set-key kmap "N" "(fikra/diff/fikra-diff-prev)")
+        (editor/keymaps/buffer-set-keymap fikra-diff-buffer-name kmap))))
+  t)
+
+(defun fikra-diff-jump (step)
+  (let ((count (buffer-line-count)))
+    (fikra-diff-scan (+ (cursor-line) step) step count)))
+
+(defun fikra-diff-scan (line step count)
+  (if (or (< line 0) (>= line count))
+    (editor-set-status "Fikra: no more files")
+    (if (string-match "^diff --git" (buffer-line line))
+      (cursor-move line 0)
+      (fikra-diff-scan (+ line step) step count))))
+
+(defun fikra-diff-next () (interactive) (fikra-diff-jump 1))
+(defun fikra-diff-prev () (interactive) (fikra-diff-jump -1))
 
 ;; Paths changed since the stored baseline — the DRY computation shared
 ;; with the turn-end ± rows (fikra-thread-compute-changes → ((path a d) …)).

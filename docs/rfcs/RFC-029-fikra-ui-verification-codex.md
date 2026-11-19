@@ -351,3 +351,58 @@ The new denial message is a meaningful improvement: it identifies a completed re
 4. **Make preview limits and coverage clear.** [backend-claude.tlisp](/Users/mekael/Documents/programming/typescript/tmax/src/tlisp/core/fikra/backend-claude.tlisp:333) silently omits lines beyond three per side; indicate omitted content and extend equivalent evidence to other backends where their events provide it.
 
 The round-10 fixture is a meaningful improvement: a reader can now see the actual edit in context, the new file’s count, and a single completion marker. It supports raising the overall grade from **7 to 8**, while stopping short of mockup parity: the evidence is a deterministic renderer fixture rather than a new live TUI capture, the diff screen was not shown, and the proposed L2 approval experience is still unfinished.
+
+---
+
+# Round 9 (denial surface + turn-count lighter) — 2026-11-20
+
+## Round 9 grade: **7.5/10 overall**
+
+| Dimension | Score | Justification |
+|---|---:|---|
+| Chat hierarchy and readability | **8/10** | Colored speaker labels, turn headers, completion markers, and compact tool rows make the transcript easy to scan; the duplicate completion marker on turn 1 is distracting. |
+| Tool calls and evidence | **7/10** | Tool names, targets, result status, and correlation IDs are clear, but the supplied replay shows truncated summaries rather than the inline edit evidence in §8.1. |
+| Approval and denial | **7/10** | Turn 10 clearly identifies the denial, explains the L1 limitation, and gives a next step; the denied row omits the tool name, and §8.3’s interactive L2 gate is outside this L1 capture. |
+| Turn changes and diff | **7/10** | Turn 9’s `hello2.ts +1 -0` demonstrates a turn-scoped count on an already-dirty tracked file; the separate diff viewer and revert flow are not shown in this artifact. |
+| Navigation and context | **6/10** | The reported lighter adds useful turn context, but the current RET path extractor only recognizes `src/` and `test/`, so it cannot follow the paths shown in this replay. |
+| Visual fidelity | **7/10** | ANSI colors and semantic hierarchy approach the mockup, but this renderer-boundary transcript does not show the gutter, actual screen wrapping, mode line, or diff screen. |
+
+### Top remaining fixes
+
+1. **Make RET follow the paths actually displayed.** [chat.tlisp](/Users/mekael/Documents/programming/typescript/tmax/src/tlisp/core/fikra/chat.tlisp:133) extracts only `src/` and `test/` paths; the replay’s absolute `/private/tmp/...` tool paths and `± hello2.ts` rows therefore do not match. Resolve paths against the thread working directory and preserve the complete path, including spaces.
+
+2. **Carry the tool name into denial results.** The rendered block in [event.tlisp](/Users/mekael/Documents/programming/typescript/tmax/src/tlisp/core/fikra/event.tlisp:87) expects a `tool` field, but the captured output shows `⚠ permission denied #41f077` with no `Write`. Correlate the result with its tool call so the warning stands on its own.
+
+3. **Make untracked-file changes genuinely turn-scoped.** [thread.tlisp](/Users/mekael/Documents/programming/typescript/tmax/src/tlisp/core/fikra/thread.tlisp:555) reports the entire current line count for a changed untracked file, and [diff.tlisp](/Users/mekael/Documents/programming/typescript/tmax/src/tlisp/core/fikra/diff.tlisp:75) displays its entire current contents as new. Preserve or retrieve the turn-start content so edits to an already-existing untracked file show the actual patch; also handle short filenames, which the current `length > 6` filter skips.
+
+4. **Verify and polish the separate diff workflow.** [diff.tlisp](/Users/mekael/Documents/programming/typescript/tmax/src/tlisp/core/fikra/diff.tlisp:15) provides a latest-turn patch, but the capture does not demonstrate §8.4’s file summary, previous/next turn navigation, or revert affordance. Test those interactions on screen and expose the supported actions clearly. The requested three-way conflict view remains Tier 3.
+
+5. **Remove duplicate lifecycle markers and verify current evidence rendering.** Turn 1 contains two completion markers, and no edit preview appears in this replay despite the preview renderer in [event.tlisp](/Users/mekael/Documents/programming/typescript/tmax/src/tlisp/core/fikra/event.tlisp:105). Check event production and replay together; earlier rows may reflect older recorded events rather than current behavior.
+
+The L1 denial treatment is a substantial improvement over round 8: it communicates a real refusal without inventing a pending approval, and the turn 9 count is convincing evidence of the tracked-file baseline improvement. The main reasons this remains below mockup parity are navigation that does not support the demonstrated paths, incomplete turn-scoped handling of untracked files, and the lack of a captured diff/revert screen. This grade is based on the provided renderer-boundary replay and source inspection; it does not independently verify live wrapping, the reported mode line, or interactive behavior.
+
+---
+
+# Round 11 (viewer summary/totals/nav + modeline tools/thread) — 2026-11-20
+
+| Dimension | Score | Justification |
+|---|---:|---|
+| Chat transcript and hierarchy | 8/10 | User and assistant messages, turn boundaries, tool activity, and completion are visually distinct. |
+| Inline tool evidence | 8/10 | Tool names, call IDs, results, and colored edit previews make the captured actions understandable. |
+| Turn change summaries | 9/10 | The chat shows per-file additions and deletions, including the newly created file. |
+| Diff viewer | 8/10 | The capture now has totals, per-file counts, a navigation hint, and a colored tracked-file patch; new-file patches still have a presentation and navigation gap. |
+| Modeline context | 8/10 | The captured lighter includes backend, state, runtime mode, turn, and tool count; the non-main thread segment exists in code but is not demonstrated in this capture. |
+| Per-action approval | 3/10 | The mockup’s paused, actionable L2 approval panel remains open work; a mode label alone does not demonstrate that interaction. |
+| **Overall chat experience** | **8/10** | The new diff and modeline details close the named round 10 presentation gaps substantially, while per-action approval remains the major missing interaction. |
+
+## Top remaining fixes
+
+1. **Implement the native L2 approval interaction.** Connect the action gate to a paused chat panel with action details, provenance, and allow/reject/abort controls, as specified in [RFC-029 §8.3](/Users/mekael/Documents/programming/typescript/tmax/docs/rfcs/RFC-029-fikra-native-harness.html:262). The existing approval bindings are attached from [thread.tlisp](/Users/mekael/Documents/programming/typescript/tmax/src/tlisp/core/fikra/thread.tlisp:278); the native gate and panel need end-to-end verification.
+
+2. **Make new-file patches navigable and visually consistent.** [diff.tlisp](/Users/mekael/Documents/programming/typescript/tmax/src/tlisp/core/fikra/diff.tlisp:95) scans only `diff --git` headers, while [the new-file renderer](/Users/mekael/Documents/programming/typescript/tmax/src/tlisp/core/fikra/diff.tlisp:139) emits `+++ new file:` followed by uncolored content. Consequently, the supplied two-file capture does not provide an `n/N` target for its second file. Render a recognizable patch header and added lines for new files, and test navigation across both kinds.
+
+3. **Complete and demonstrate the diff’s turn context.** The mockup includes tool breakdown and visible revert/previous/next-turn controls; the current summary and hint in [diff.tlisp](/Users/mekael/Documents/programming/typescript/tmax/src/tlisp/core/fikra/diff.tlisp:37) show file counts and file navigation instead. Add the relevant context and controls where supported, then capture their behavior.
+
+4. **Capture a named-thread, live-backend modeline.** [chat.tlisp](/Users/mekael/Documents/programming/typescript/tmax/src/tlisp/core/fikra/chat.tlisp:115) contains both count and non-main thread segments, but the provided fixture demonstrates only `none`, `t2`, and `x2`.
+
+The round 11 diff is a meaningful improvement: its totals and per-file rows are visible in the artifact, and the lighter now carries the requested tool count. The new-file navigation issue keeps the viewer from fully delivering its advertised file-by-file navigation, and the L2 approval panel remains the largest gap against the mockup. This is a capture-and-source review; I did not independently exercise the keys or run the test suite.
