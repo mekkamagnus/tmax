@@ -351,11 +351,11 @@ function renderSingleWindow(
         } else {
           display = fitToWidth("\u00AB" + sliced, cw);
         }
-        const rendered = isCurrentLine ? renderWithBlockCursor(display, effectiveCursorCol) : display;
+        const rendered = isCurrentLine ? renderWithBlockCursorAnsi(display, effectiveCursorCol) : display;
         lines.push(gutter + rendered);
       } else {
         const lineContent = fitToWidth(displayLine, cw);
-        const rendered = isCurrentLine ? renderWithBlockCursor(lineContent, effectiveCursorCol) : lineContent;
+        const rendered = isCurrentLine ? renderWithBlockCursorAnsi(lineContent, effectiveCursorCol) : lineContent;
         lines.push(gutter + rendered);
       }
     }
@@ -370,7 +370,17 @@ function wrapLine(rawLine: string, width: number): string[] {
   const rows: string[] = [];
   let remaining = rawLine;
   while (stringWidth(remaining) > width) {
-    const chunk = sliceToVisualWidth(remaining, width);
+    let chunk = sliceToVisualWidth(remaining, width);
+    // Word-boundary preference (codex round 7: hard splits break words
+    // mid-token): when the row cuts inside a word AND a space exists
+    // earlier in the row, break at the LAST space instead. Long unbroken
+    // tokens still hard-split (paths, URLs).
+    if (chunk.length > 0 && !/\s$/.test(chunk)) {
+      const lastSpace = chunk.lastIndexOf(" ");
+      if (lastSpace > 0) {
+        chunk = chunk.slice(0, lastSpace + 1);
+      }
+    }
     rows.push(chunk);
     remaining = sliceFromVisualOffset(remaining, stringWidth(chunk));
   }
@@ -466,7 +476,10 @@ function renderSingleWindowWrapped(
         : renderEmptyGutter(totalLines, gutterCfg);
       const rowText = fitToWidth(wrappedRows[wr]!, cw);
       const onCursorRow = isCurrentLine && wr === cursorWrapRow;
-      const rendered = onCursorRow ? renderWithBlockCursor(rowText, cursorWrapCol) : rowText;
+      // ANSI variant: chat rows carry SGR faces; the naive walker split
+      // inside escape sequences and crashed the client on live-appended
+      // colored lines (2026-11-20, wrap-iteration catch).
+      const rendered = onCursorRow ? renderWithBlockCursorAnsi(rowText, cursorWrapCol) : rowText;
       lines.push(gutter + rendered);
       screenRow++;
     }
