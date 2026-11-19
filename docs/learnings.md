@@ -151,3 +151,9 @@ When tool-call content should contain the two-character escape `\0` (backslash +
 2026-11-20 (fikra UI arc): after several rapid back-to-back `bun run build:tmax` iterations, the produced binary loaded only PART of the core .tlisp bindings in the daemon (fikra/SPC-a subtree missing, `editor-dispatch-command-line` undefined) while the same source loaded perfectly in test fixtures and all embedded asset strings were present in the binary. `rm dist/tmax` + rebuild fixed it instantly.
 
 **Rule:** when a freshly built `dist/tmax` shows impossible "module/binding not loaded" behavior that the source tree contradicts, delete `dist/tmax` and rebuild once before debugging the .tlisp. Never bisect source against a binary produced by 4+ rebuilds-in-a-row without a clean.
+
+## Fikra streaming render — the buffer-ownership question (round 22-23, OPEN)
+
+2026-11-20: live sessions prove 243 text-deltas reach the FAEP log while the TUI's *Fikra* never grows during a turn (and after turn-end the TUI shows only the turn header). `buffer-append-to` (by-name append, committed 3e68b20) works when probed via `-e`, but the filter-context render still doesn't land in the TUI's view — AND the headless `-e` session's buffer-list shows `*Fikra-Capture*` (chat state it should never have). The buffer-sharing model between the daemon's `-e` editor and the TUI frame editor is contradictory across observations (round 9 saw sharing; this session sees divergence).
+
+**Rule:** before the next streaming-render attempt, instrument `fikra-event-emit-batch-for`'s render path to append-file its target/`buffer-append-to` result to /tmp (the condition-case currently swallows everything), and dump BOTH sessions' `*Fikra*` line counts mid-turn. Do not add more render-path variants on top of an unverified ownership model.
