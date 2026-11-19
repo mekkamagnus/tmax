@@ -102,11 +102,31 @@
     ;; PREFIX tests, not regexes: string-match's pattern layer mangles
     ;; backslash-escapes (a source "^\\+\\+\\+" arrives at JS as ^+++
     ;; → "nothing to repeat" — codex round-15 LIVE catch; the second
-    ;; T-Lisp-regex fragility incident in this file).
-    (if (or (string-prefix-p "diff --git" (buffer-line line))
+    ;; T-Lisp-regex fragility incident in this file). The STRIP is needed
+    ;; because git --color prefixes section headers with SGR codes — a
+    ;; plain prefix test never sees "diff --git" through them (round-16
+    ;; fixture catch: n skipped colored sections).
+    (if (or (string-prefix-p "diff --git" (fikra-strip-ansi (buffer-line line)))
             (string-prefix-p "+++ new file:" (buffer-line line)))
       (cursor-move line 0)
       (fikra-diff-scan (+ line step) step count))))
+
+;; Remove ANSI CSI sequences (ESC … m) — a byte scan, no regex (see the
+;; fragility notes above). O(n²) concat is fine for viewer-sized lines.
+(defun fikra-strip-ansi (s)
+  (fikra-sa-scan s 0 ""))
+
+(defun fikra-sa-scan (s i out)
+  (if (>= i (length s))
+    out
+    (if (string= (substring s i (+ i 1)) "\e")
+      (fikra-sa-scan s (+ (fikra-sa-skip s (+ i 1)) 1) out)
+      (fikra-sa-scan s (+ i 1) (concat out (substring s i (+ i 1)))))))
+
+(defun fikra-sa-skip (s i)
+  (if (or (>= i (length s)) (string= (substring s i (+ i 1)) "m"))
+    i
+    (fikra-sa-skip s (+ i 1))))
 
 (defun fikra-diff-next () (interactive) (fikra-diff-jump 1))
 (defun fikra-diff-prev () (interactive) (fikra-diff-jump -1))
