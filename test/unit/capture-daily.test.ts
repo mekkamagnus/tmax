@@ -151,6 +151,34 @@ describe("#285: capture popup (SPC r d)", () => {
     }
   });
 
+  test("codex r2: reopening a draft from ANOTHER pane never destroys the layout", async () => {
+    const vault = mkdtempSync(join(tmpdir(), "tmax-capture-"));
+    const prevCwd = process.cwd();
+    process.chdir(vault);
+    try {
+      const editor = await createStartedEditor("hello world");
+      executeTlisp(editor, "(capture-daily)");
+      executeTlisp(editor, '(buffer-insert "draft")');
+      // Focus moves to the TOP (original) pane, then the chord fires again
+      executeTlisp(editor, "(windmove-up)");
+      executeTlisp(editor, "(capture-daily)");
+      // Focus landed on the EXISTING popup — and the top pane still shows
+      // the ORIGINAL buffer (no second pane hijacked into *Capture*)
+      expect(tl(editor, "(buffer-current)")).toBe("*Capture*");
+      const panes = tl(editor, "(window-list)");
+      expect(panes.match(/\*Capture\*/g)?.length).toBe(1);
+      expect(panes.includes("test")).toBe(true);
+      // Abort from here: the POPUP pane closes, the original pane survives
+      executeTlisp(editor, "(capture-abort)");
+      expect(tl(editor, "(window-count)")).toBe("1");
+      expect(tl(editor, "(buffer-current)")).toBe("test");
+      expect(readdirSync(vault).includes("daily")).toBe(false);
+    } finally {
+      process.chdir(prevCwd);
+      rmSync(vault, { recursive: true, force: true });
+    }
+  });
+
   test("codex r1: commit files to the path the header SHOWS (target stamped at open)", async () => {
     const vault = mkdtempSync(join(tmpdir(), "tmax-capture-"));
     const prevCwd = process.cwd();
@@ -172,21 +200,21 @@ describe("#285: capture popup (SPC r d)", () => {
     }
   });
 
-  test("codex r1: a user line starting with \"capture\" is NOT stripped", async () => {
+  test("codex r1/r2: only the EXACT seeded header line is stripped", async () => {
     const vault = mkdtempSync(join(tmpdir(), "tmax-capture-"));
     const prevCwd = process.cwd();
     process.chdir(vault);
     try {
       const editor = await createStartedEditor("x");
       executeTlisp(editor, "(capture-daily)");
-      // Replace the whole compose content: no seeded header, a first line
-      // that merely starts with "capture"
-      executeTlisp(editor, "(cursor-move 0 0)");
-      executeTlisp(editor, '(buffer-insert "capture the flag notes\n")');
-      executeTlisp(editor, '(capture-strip-skeleton (buffer-text))');
-      // Direct rule check: only the exact "capture -> " prefix is stripped
+      // The exact seeded line (prefix + open-stamped target path)
+      const seeded = tl(editor, "(buffer-text)").split("\n")[0]!;
+      // A user/edited line with the prefix but a DIFFERENT path is NOT eaten
+      expect(tl(editor, `(capture-strip-skeleton "capture -> /not/the/target.md\nbody")`))
+        .toBe("capture -> /not/the/target.md\nbody");
       expect(tl(editor, '(capture-strip-skeleton "capture the flag")')).toBe("capture the flag");
-      expect(tl(editor, '(capture-strip-skeleton "capture -> /x.md\n- [t] body")')).toBe("- [t] body");
+      // The exact seed line IS dropped
+      expect(tl(editor, `(capture-strip-skeleton "${seeded}\n- [t] body")`)).toBe("- [t] body");
       executeTlisp(editor, "(capture-abort)");
     } finally {
       process.chdir(prevCwd);
@@ -285,8 +313,9 @@ describe("#285: capture popup (SPC r d)", () => {
       expect(tl(editor, '(capture-entry "plain body")')).toBe(`- [${ts}] plain body`);
       // body with an edited prefix passes through verbatim
       expect(tl(editor, '(capture-entry "- [1999-01-01 00:00] edited")')).toBe("- [1999-01-01 00:00] edited");
-      // header stripping drops the seeded line only
-      expect(tl(editor, '(capture-strip-skeleton "capture -> /x/y.md\\n- [t] body")')).toBe("- [t] body");
+      // header stripping drops the exact seeded line only
+      const seeded = tl(editor, "(buffer-text)").split("\n")[0]!;
+      expect(tl(editor, `(capture-strip-skeleton "${seeded}\n- [t] body")`)).toBe("- [t] body");
       expect(tl(editor, '(capture-strip-skeleton "- [t] no header")')).toBe("- [t] no header");
       executeTlisp(editor, "(capture-abort)");
     } finally {

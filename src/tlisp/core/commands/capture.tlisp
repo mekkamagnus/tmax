@@ -51,6 +51,9 @@ discarding the draft.")
   "Buffer the reused bottom pane showed before *Capture* took it.")
 (defvar capture-focus-window nil
   "Window index the chord was pressed in — focus returns there on restore.")
+(defvar capture-popup-window-id nil
+  "Window index showing *Capture* — restore acts THERE, wherever focus has
+moved since (codex r2: refocus-then-delete, never the focused pane).")
 
 (defun capture-timestamp ()
   "Current timestamp as YYYY-MM-DD HH:MM (org-log entry style)."
@@ -92,7 +95,10 @@ moving). Returns the window index landed on."
 
 (defun capture-restore ()
   "Close the popup (or revert the reused pane + refocus the origin
-window), kill *Capture*, and restore the recorded context."
+window), kill *Capture*, and restore the recorded context. Acts on the
+POPUP pane — focus may have moved elsewhere since the chord (codex r2)."
+  (if capture-popup-window-id
+    (capture-refocus capture-popup-window-id))
   (if capture-popup-window
     ;; We created the popup: closing it leaves the original window current,
     ;; its buffer and point untouched all along.
@@ -126,14 +132,14 @@ window), kill *Capture*, and restore the recorded context."
 drifts (a miscounted 10 shipped for one round: the header was filed).")
 
 (defun capture-strip-skeleton (text)
-  "Drop the seeded header line from compose TEXT. The match is the exact
-capture-header-prefix of the SEED — a user line that merely starts with
-\"capture\" is NOT eaten (codex r1). Everything else passes through."
-  (let ((lines (string-split text "\n")))
+  "Drop the seeded header line from compose TEXT — the EXACT seeded line
+(capture-header-prefix + the open-stamped capture-target-path). An edited
+header or a user line merely starting with the prefix is NOT eaten (codex
+r1/r2: only the seed is sacrificial)."
+  (let ((lines (string-split text "\n"))
+        (seeded-line (concat capture-header-prefix capture-target-path)))
     (if (and (> (length lines) 0)
-             (>= (length (nth 0 lines)) (length capture-header-prefix))
-             (string= (substring (nth 0 lines) 0 (length capture-header-prefix))
-                      capture-header-prefix))
+             (string= (nth 0 lines) seeded-line))
       (string-join "\n" (cdr lines))
       text)))
 
@@ -166,10 +172,10 @@ OPEN-time prefix prepended (the entry keeps its capture timestamp)."
   (set! capture-return-line (cursor-line))
   (set! capture-return-col (cursor-column))
   (set! capture-focus-window (window-current))
+  ;; ONE clock reading (codex r2): the date is derived from the timestamp,
+  ;; so ts and target can never straddle midnight differently.
   (set! capture-opened-ts (capture-timestamp))
-  ;; Target stamped ONCE — the header and the commit agree even across
-  ;; midnight (codex r1).
-  (set! capture-target-date (capture-today))
+  (set! capture-target-date (substring capture-opened-ts 0 10))
   (set! capture-target-path (markdown-journal-path capture-target-date))
   ;; Fresh compose buffer (no capture active means no draft to lose).
   (condition-case err
@@ -186,6 +192,7 @@ OPEN-time prefix prepended (the entry keeps its capture timestamp)."
       (set! capture-pane-restore (buffer-current))))
   (buffer-create "*Capture*")
   (switch-to-buffer "*Capture*")
+  (set! capture-popup-window-id (window-current))
   ;; Skeleton: the header names the exact commit target; the seeded prefix
   ;; carries the open-time timestamp, cursor right after it (%? placement).
   (buffer-insert (concat "capture -> " capture-target-path
@@ -204,7 +211,10 @@ either way. An in-progress capture is re-focused, never discarded."
   (require-module editor/commands/markdown/knowledge)
   (if capture-active-p
     (progn
-      (switch-to-buffer "*Capture*")
+      ;; Focus the EXISTING popup pane (codex r2: switching the current
+      ;; pane's buffer made abort delete the user's pane).
+      (if capture-popup-window-id
+        (capture-refocus capture-popup-window-id))
       (editor-set-status "Capture in progress - finish (C-c C-c) or abort (C-c C-k) it first"))
     (capture-open)))
 
