@@ -337,6 +337,37 @@ export function createBufferOps(
   // buffer-insert this never moves the cursor (the cursor dance is
   // O(buffer) per token when appending at the end repeatedly) and targets
   // the end of the buffer directly.
+  // STREAMING RENDER (fikra round-22 catch): append to a NAMED buffer —
+  // the chat's per-chunk live render runs in the process filter's eval
+  // context where buffer-current can read differently than the user's
+  // view; by-name append lands the streamed text regardless.
+  api.set("buffer-append-to", (args: TLispValue[]): Either<AppError, TLispValue> => {
+    const countValidation = validateArgsCount(args, 2, "buffer-append-to");
+    if (Either.isLeft(countValidation)) return Either.left(countValidation.left);
+    const nameArg = args[0]!;
+    if (nameArg.type !== "string") return Either.left(createValidationError('TypeError', 'buffer-append-to: buffer name must be a string'));
+    const name = nameArg.value as string;
+    const buffer = buffers.get(name);
+    if (!buffer) return Either.left(createValidationError('ConstraintViolation', `buffer-append-to: buffer not found: ${name}`));
+    const textArg = args[1]!;
+    if (textArg.type !== "string") return Either.left(createValidationError('TypeError', 'buffer-append-to: text must be a string'));
+    // Read-only is name-keyed (SPEC-110): lift for the append, restore after.
+    const wasRo = readonly.has(name);
+    if (wasRo) readonly.delete(name);
+    const lineCountResult = buffer.getLineCount();
+    if (Either.isLeft(lineCountResult)) return Either.left(createBufferError('InvalidOperation', `buffer-append-to: ${lineCountResult.left}`));
+    const lastLine = lineCountResult.right - 1;
+    const lastLineTextResult = buffer.getLine(lastLine);
+    if (Either.isLeft(lastLineTextResult)) return Either.left(createBufferError('InvalidOperation', `buffer-append-to: ${lastLineTextResult.left}`));
+    const insertResult = buffer.insert(
+      { line: lastLine, column: (lastLineTextResult.right as string).length },
+      textArg.value as string,
+    );
+    if (wasRo) readonly.add(name);
+    if (Either.isLeft(insertResult)) return Either.left(createBufferError('InvalidOperation', `buffer-append-to: ${insertResult.left}`));
+    return Either.right(createString(textArg.value as string));
+  });
+
   api.set("buffer-append", (args: TLispValue[]): Either<AppError, TLispValue> => {
     const argsValidation = validateArgsCount(args, 1, "buffer-append");
     if (Either.isLeft(argsValidation)) {

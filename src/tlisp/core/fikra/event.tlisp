@@ -318,12 +318,15 @@ bumps the revision the TUI poll consumes."
             (mapcar (lambda (e) (concat (json-encode e) "\n")) events)))
         (if (not (fikra-event-batch-has-tombstone-p events))
           (let ((text (fikra-event-render-batch events)))
-            (if (and (> (length text) 0)
-                     (string= (buffer-current) target-buffer))
-              (let ((was-ro (buffer-read-only-p)))
-                (buffer-set-read-only nil)
-                (buffer-append text)
-                (buffer-set-read-only was-ro)))))
+            (if (> (length text) 0)
+              ;; BY-NAME append (round-22 catch): the filter's evalTlisp
+              ;; context can read buffer-current differently than the
+              ;; user's view — 243 deltas streamed to the log while the
+              ;; on-screen buffer never grew. Named append lands the text
+              ;; regardless; read-only handling is inside the primitive.
+              (condition-case nil
+                (buffer-append-to target-buffer text)
+                (error () nil)))))
         (fikra-event-run-hook)
         ;; Memory + in-memory log pointer stay FOCUS-scoped (replay reads
         ;; the log FILE, so the background thread's history is intact).
