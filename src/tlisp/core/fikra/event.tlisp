@@ -72,6 +72,30 @@
   (let ((id (fikra-event-get-str event "id")))
     (if (string= id "") "" (concat " " (fikra-face "\e[2m" (concat "#" id))))))
 
+;; A DENIED tool-result (the backend CLI's own permission system refused —
+;; the L1 reality; fikra has no gate to offer). Detected by the denial
+;; signatures the CLIs actually emit. Codex round 1: "never present a
+;; nonexistent approval as pending" — the old bare FAIL row forced the
+;; user to guess; this renders the truthful state + the actionable next
+;; step (mockup 8.3's spirit, L1-honest).
+(defun fikra-event-denied-p (summary)
+  (or (string-match "requested permission" summary)
+      (string-match "requires approval" summary)
+      (string-match "haven't granted" summary)
+      (string-match "permission mode" summary)))
+
+(defun fikra-event-render-denial (event)
+  (concat (fikra-face "\e[1;33m"
+              (concat "⚠ permission denied "
+                      (fikra-event-get-str event "tool")
+                      (fikra-event-id-tag event)))
+          "\n"
+          (fikra-face "\e[2m"
+              (concat "  The CLI's permission system refused this action (fikra has no "
+                      "approval gate in L1). SPC a m switches runtime mode "
+                      "(auto-accept-edits / full-access), then re-ask."))
+          "\n"))
+
 ;; ── render: one event → display text ("" = nothing) ─────────────────
 ;; RFC §D2 table. Adjacent text-deltas join: the first opens a "You/AI: "
 ;; run, followers append without re-rendering the prefix; any other event
@@ -99,16 +123,21 @@
                 (fikra-face "\e[33m" (concat "  " (fikra-event-get-str event "summary")))
                 "\n"))
       ((string= kind "tool-result")
-        ;; Id BEFORE the summary: the 100-char one-line cap clips the tail,
-        ;; which used to cut the correlation id off the terminal edge
-        ;; (codex round-3 catch: "#86fcca appears only once").
-        (concat (if (fikra-event-get event "ok")
-                  (fikra-face "\e[32m" (concat "  → ok"))
-                  (fikra-face "\e[1;31m" (concat "  → FAIL")))
-                (fikra-event-id-tag event) " "
-                (fikra-face (if (fikra-event-get event "ok") "\e[32m" "\e[1;31m")
-                  (fikra-event-one-line (fikra-event-get-str event "summary")))
-                "\n"))
+        ;; Permission-denied results render the truthful actionable block
+        ;; instead of a bare FAIL the user must decode (L1 has no gate).
+        (if (and (not (fikra-event-get event "ok"))
+                 (fikra-event-denied-p (fikra-event-get-str event "summary")))
+          (fikra-event-render-denial event)
+          ;; Id BEFORE the summary: the 100-char one-line cap clips the tail,
+          ;; which used to cut the correlation id off the terminal edge
+          ;; (codex round-3 catch: "#86fcca appears only once").
+          (concat (if (fikra-event-get event "ok")
+                    (fikra-face "\e[32m" (concat "  → ok"))
+                    (fikra-face "\e[1;31m" (concat "  → FAIL")))
+                  (fikra-event-id-tag event) " "
+                  (fikra-face (if (fikra-event-get event "ok") "\e[32m" "\e[1;31m")
+                    (fikra-event-one-line (fikra-event-get-str event "summary")))
+                  "\n")))
       ((string= kind "permission-request")
         (concat (fikra-face "\e[1;33m"
                     (concat "? " (fikra-event-get-str event "action")

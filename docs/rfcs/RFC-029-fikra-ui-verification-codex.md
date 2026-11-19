@@ -293,3 +293,36 @@ Round 7 is a meaningful improvement over 6/10: the capture has a coherent visual
 4. **Clean up replayed completion markers and preserve tool evidence.** Normalize duplicate historical turn-end events around [event.tlisp](/Users/mekael/Documents/programming/typescript/tmax/src/tlisp/core/fikra/event.tlisp:123), and provide access to the full output behind abbreviated tool results.
 
 The capture confirms a substantial readability improvement: the long response wraps cleanly, and the colored, correlated event stream is easy to scan. The reported live tracked-file test addresses the specific round 7 objection about earlier edits appearing in the current turn’s patch; that viewer and test are not independently visible in this artifact. Approval presentation is now the clearest visual gap, while untracked-file diffs and historical turn review still need stronger evidence before change attribution can be considered complete. The RFC’s native-loop and L2 screens are design targets, so their absence is a fidelity gap rather than proof that the current wrapped-CLI workflow is broken.
+
+---
+
+# Round 9 (truthful denial surface + turn-count modeline) — 2026-11-20
+
+## Round 9: **7/10**
+
+| Area | Score | Justification |
+|---|---:|---|
+| Conversation hierarchy | **7/10** | Colored speakers, turn headers, and completion markers make the exchange easy to follow. |
+| Tool calls and results | **7/10** | Colored calls and outcomes have matching IDs; result evidence remains abbreviated and edits are not inline. |
+| Wrapping and readability | **8/10** | The round 8 capture shows word-boundary wrapping with a clear continuation gutter. |
+| Turn boundaries and completion | **7/10** | Turns have clear boundaries, though duplicate markers in older replayed history remain distracting. |
+| File-change summaries | **7/10** | Tracked changes have useful counts; untracked-file counts and attribution remain incomplete. |
+| Turn diff viewer | **7/10** | The reported live test supports isolation of tracked-file edits; untracked-file patches remain limited. |
+| Mode-line context | **8/10** | Backend, state, runtime mode, and now turn count are present; thread name and tool count are still absent. |
+| Approval presentation | **5/10** | The denial block clearly states the L1 outcome and next step, but the proposed contextual, per-action L2 approval panel remains absent. |
+| Visual fidelity | **7/10** | The gutter, blue mode line, roles, and tool activity evoke the mockup; inline patches and richer approval details are missing. |
+| **Overall** | **7/10** | The truthful denial surface resolves a significant usability concern, while the larger approval and change-evidence gaps keep the overall grade steady. |
+
+The approval score uses the supplied live event log and deterministic rendered block. The log establishes that the CLI denied a real action; the fixture establishes how the denial branch renders. The interrupted TUI attempts do **not** independently establish the complete live display.
+
+### Top remaining fixes
+
+1. **Build and capture the actual L2 approval experience.** Expand [approvals.tlisp](/Users/mekael/Documents/programming/typescript/tmax/src/tlisp/core/fikra/approvals.tlisp:93) and [event.tlisp](/Users/mekael/Documents/programming/typescript/tmax/src/tlisp/core/fikra/event.tlisp:141) to present the action, target, thread, turn, pending state, and working decision keys together. Show checkpoint and provenance only when established, and verify a real paused request through resolution.
+
+2. **Complete untracked-file change evidence.** [thread.tlisp](/Users/mekael/Documents/programming/typescript/tmax/src/tlisp/core/fikra/thread.tlisp:509) needs sufficient baseline content and path coverage to detect edits and deletions; [diff.tlisp](/Users/mekael/Documents/programming/typescript/tmax/src/tlisp/core/fikra/diff.tlisp:74) can then show a genuine turn patch for previously existing untracked files.
+
+3. **Complete review context and navigation.** Add thread name and tool count where space permits in [chat.tlisp](/Users/mekael/Documents/programming/typescript/tmax/src/tlisp/core/fikra/chat.tlisp:90), and per-file totals plus applicable navigation and revert cues in [diff.tlisp](/Users/mekael/Documents/programming/typescript/tmax/src/tlisp/core/fikra/diff.tlisp:15).
+
+4. **Preserve tool evidence and clean up replay.** Provide access to full abbreviated results and normalize duplicate historical completion markers around [event.tlisp](/Users/mekael/Documents/programming/typescript/tmax/src/tlisp/core/fikra/event.tlisp:125).
+
+The new denial message is a meaningful improvement: it identifies a completed refusal, explains that fikra has no L1 gate, and offers a concrete next step without implying an approval is waiting. The turn count also closes part of the mode-line gap. The chat remains recognizably close to the mockup, but section 8.3’s native per-action approval experience and complete turn-change evidence are still the largest differences; the unchanged scores rely on the round 8 captures and reported checks.

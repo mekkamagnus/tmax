@@ -101,8 +101,15 @@ context flakiness)."
             (fikra/modes/fikra-lighter-state-char)
             ":" (fikra/modes/fikra-effective-mode)
             (fikra/modes/fikra-mode-star)
+            ;; Turn count (mockup modeline: thread context): t9-style,
+            ;; omitted before the first turn.
+            (fikra-lighter-turn-segment)
             ;; #221: the wt:<id> segment appears only in worktree mode.
             (fikra-worktree-segment))))
+
+(defun fikra-lighter-turn-segment ()
+  (let ((n (fikra/thread/fikra-thread-field "turn-count")))
+    (if (and (numberp n) (> n 0)) (concat ":t" (number-to-string n)) "")))
 
 ;; #221: worktree marker — requires thread lazily (chat→worktree cycle:
 ;; worktree requires checkpoint → thread; chat requires modes only).
