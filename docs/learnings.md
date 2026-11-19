@@ -145,3 +145,9 @@ A `(defun name--private …)` inside a `(defmodule …)` parses fine and works i
 When tool-call content should contain the two-character escape `\0` (backslash + zero) inside a string literal, the emitted content may instead carry a single raw NUL byte — the file then "contains `"\0"`" functionally but grep/rg treat it as binary (matches silently vanish), tsc/JSC may still parse it, and diffs look invisible. Happened twice in one session (interpreter key + test key helper); both times grep "misfiring" was the tell.
 
 **Rule:** Never hand-type `\0` in generated source. Use `String.fromCharCode(0)` (or `"\\0"` only via a scripted `perl -i` write). If greps return nothing for text you know is in a file, hexdump the line (`sed -n 'Np' f | od -c`) before trusting the search — a raw control byte makes grep/rg skip the file as binary.
+
+## Build: rapid successive `build:tmax` compiles can poison the binary
+
+2026-11-20 (fikra UI arc): after several rapid back-to-back `bun run build:tmax` iterations, the produced binary loaded only PART of the core .tlisp bindings in the daemon (fikra/SPC-a subtree missing, `editor-dispatch-command-line` undefined) while the same source loaded perfectly in test fixtures and all embedded asset strings were present in the binary. `rm dist/tmax` + rebuild fixed it instantly.
+
+**Rule:** when a freshly built `dist/tmax` shows impossible "module/binding not loaded" behavior that the source tree contradicts, delete `dist/tmax` and rebuild once before debugging the .tlisp. Never bisect source against a binary produced by 4+ rebuilds-in-a-row without a clean.
