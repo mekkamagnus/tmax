@@ -51,6 +51,10 @@ discarding the draft.")
   "Buffer the reused bottom pane showed before *Capture* took it.")
 (defvar capture-focus-window nil
   "Window index the chord was pressed in — focus returns there on restore.")
+(defvar capture-recovery-buffer nil
+  "Buffer the recovery pane showed before *Capture* was popped into it
+(hidden-popup case) — restore switches it back instead of deleting the
+user's pane (codex r5).")
 
 (defun capture-timestamp ()
   "Current timestamp as YYYY-MM-DD HH:MM (org-log entry style)."
@@ -111,6 +115,7 @@ t when the compose buffer is current afterwards."
     (if pos
       (capture-refocus pos)
       (progn
+        (set! capture-recovery-buffer (buffer-current))
         (switch-to-buffer "*Capture*")
         t))))
 
@@ -127,6 +132,14 @@ t when the compose buffer is current afterwards."
   "Close the popup (or revert the reused pane + refocus the origin
 window), kill *Capture*, and restore the recorded context. Acts on the
 POPUP pane — focus may have moved elsewhere since the chord (codex r2)."
+  ;; Hidden-popup recovery (codex r5): the pane *Capture* was popped into
+  ;; gets its own buffer back — it may or may not have been the original
+  ;; popup pane (the user hid the compose by switching ITS pane away), so
+  ;; window deletion below targets the pane that is NOT the origin.
+  (if capture-recovery-buffer
+    (progn
+      (switch-to-buffer capture-recovery-buffer)
+      (set! capture-recovery-buffer nil)))
   (capture-focus-popup-pane)
   ;; The user may have SPLIT the compose pane — close every pane showing
   ;; *Capture* beyond the reused one (codex r4: a duplicate pane survived
@@ -137,10 +150,16 @@ POPUP pane — focus may have moved elsewhere since the chord (codex r2)."
     (delete-window)
     (capture-focus-popup-pane))
   (if capture-popup-window
-    ;; We created the popup: closing it leaves the original window current,
-    ;; its buffer and point untouched all along.
-    (if (> (window-count) 1)
-      (delete-window))
+    ;; We created the popup: focus the ORIGIN window first, then close the
+    ;; pane that is not it — never the user's pane, whichever pane the
+    ;; recovery used (codex r5).
+    (progn
+      (if capture-focus-window
+        (capture-refocus capture-focus-window))
+      (if (> (window-count) 1)
+        (progn
+          (window-next)
+          (delete-window))))
     ;; Reuse case: put the pane's own buffer back, then return focus to
     ;; the window the chord was pressed in (its buffer/point never moved).
     (progn
@@ -254,6 +273,7 @@ Markdown task — gets the OPEN-time prefix prepended."
                          "\n- [" capture-opened-ts "] "))
   (editor-set-mode "insert")
   (capture-ensure-keymap)
+  (set! capture-recovery-buffer nil)
   (set! capture-active-p t)
   (editor-set-status "Capture to daily - C-c C-c file | C-c C-k or C-g abort"))
 
@@ -271,6 +291,24 @@ either way. An in-progress capture is re-focused, never discarded."
       (capture-focus-popup-pane)
       (editor-set-status "Capture in progress - finish (C-c C-c) or abort (C-c C-k) it first"))
     (capture-open)))
+
+(defun capture-sync-open-buffer (entry-text)
+  "Keep an already-open daily-note buffer consistent with the appended
+file: its next :w must not overwrite the captured entry (codex r5 data
+loss). The buffer is found by NAME — find-file-open names buffers by
+path."
+  (let ((cur (buffer-current))
+        (bufs (buffer-list)) (i 0) (hit nil))
+    (while (and (< i (length bufs)) (not hit))
+      (if (string= (nth i bufs) capture-target-path)
+        (set! hit (nth i bufs)))
+      (set! i (+ i 1)))
+    (when hit
+      (switch-to-buffer hit)
+      (cursor-move (- (buffer-line-count) 1) 100000)
+      (buffer-insert entry-text)
+      (switch-to-buffer cur))
+    t))
 
 (defun capture-commit ()
   "File the *Capture* text to the note named in the skeleton header (the
@@ -306,6 +344,7 @@ no-write abort."
         (if (not (file-exists-p capture-target-path))
           (markdown-daily-note-init capture-target-path capture-target-date))
         (append-file capture-target-path (concat "\n" entry "\n"))
+        (capture-sync-open-buffer (concat "\n" entry "\n"))
         (message "Captured to %s" capture-target-path))
       (message "Capture empty - aborted")))
   (capture-restore))

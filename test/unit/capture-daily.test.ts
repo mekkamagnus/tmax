@@ -325,6 +325,55 @@ describe("#285: capture popup (SPC r d)", () => {
     }
   });
 
+  test("codex r5: hide popup, abort from the ORIGINAL pane — origin survives, layout back", async () => {
+    const vault = mkdtempSync(join(tmpdir(), "tmax-capture-"));
+    const prevCwd = process.cwd();
+    process.chdir(vault);
+    try {
+      const editor = await createStartedEditor("hello world");
+      executeTlisp(editor, "(capture-daily)");
+      // Hide the compose: its pane switches to another buffer
+      executeTlisp(editor, '(switch-to-buffer "test")');
+      // Navigate to the ORIGINAL pane, then abort
+      executeTlisp(editor, "(windmove-up)");
+      executeTlisp(editor, "(capture-abort)");
+      // The ORIGIN pane survived; one window; original buffer current
+      expect(tl(editor, "(window-count)")).toBe("1");
+      expect(tl(editor, "(buffer-current)")).toBe("test");
+    } finally {
+      process.chdir(prevCwd);
+      rmSync(vault, { recursive: true, force: true });
+    }
+  });
+
+  test("codex r5: an ALREADY-OPEN journal buffer stays consistent — save cannot overwrite the entry", async () => {
+    const vault = mkdtempSync(join(tmpdir(), "tmax-capture-"));
+    const prevCwd = process.cwd();
+    process.chdir(vault);
+    try {
+      const editor = await createStartedEditor("x");
+      // Today's note is open in a buffer (markdown-daily-note opens it)
+      executeTlisp(editor, "(markdown-daily-note)");
+      const journalBuffer = tl(editor, "(buffer-current)");
+      // Capture from the *scratch*-ish buffer
+      executeTlisp(editor, '(switch-to-buffer "test")');
+      executeTlisp(editor, "(capture-daily)");
+      executeTlisp(editor, '(buffer-insert "must survive save")');
+      executeTlisp(editor, "(capture-commit)");
+      // The open journal buffer picked the entry up
+      executeTlisp(editor, `(switch-to-buffer "${journalBuffer}")`);
+      expect(tl(editor, "(buffer-text)")).toContain("must survive save");
+      // Saving it afterwards keeps the entry (no overwrite data loss)
+      executeTlisp(editor, "(save-buffer)");
+      const files = readdirSync(join(vault, "daily")).filter((f) => f.endsWith(".md"));
+      const content = readFileSync(join(vault, "daily", files[0]!), "utf-8");
+      expect(content).toContain("must survive save");
+    } finally {
+      process.chdir(prevCwd);
+      rmSync(vault, { recursive: true, force: true });
+    }
+  });
+
   test("codex r1: commit files to the path the header SHOWS (target stamped at open)", async () => {
     const vault = mkdtempSync(join(tmpdir(), "tmax-capture-"));
     const prevCwd = process.cwd();
