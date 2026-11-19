@@ -565,3 +565,30 @@ The chat is now a strong match for the mockup’s core visual flow, and the live
 4. **Show the main thread name in the modeline.** This would complete the session context visible in the mockup and in the supplied capture. See [chat.tlisp](/Users/mekael/Documents/programming/typescript/tmax/src/tlisp/core/fikra/chat.tlisp:88).
 
 The round-15 navigation defect is closed by the new evidence: the trajectory reaches both sections and returns through the real key dispatch path, including colored patch content. The older viewer capture still contains the historical regex error, so it should be read as presentation evidence rather than current navigation evidence. Chat and diff inspection now compare well with the mockups; the largest remaining confidence gaps are an observed interactive revert and a real mediated approval, especially because the RFC’s per-action native loop is still a proposed target.
+
+---
+
+# Round 17 (gate checkpoint/origin + restore proof) — 2026-11-20
+
+| Dimension | Score | Justification |
+|---|---:|---|
+| Conversation structure | **9/10** | The timeline clearly separates the user, tool activity, approval, assistant response and completion. |
+| Turn state and metadata | **8/10** | Turn, backend, runtime mode and tool count are visible; the thread name is now present in code, though the supplied modeline capture predates that fix. |
+| Tool presentation | **9/10** | Calls, inline edits and outcomes are visually distinct and correlated by token ID. |
+| Visual hierarchy and styling | **8/10** | ANSI colors and emphasis make roles, actions, additions and deletions easy to scan; the approval remains an inline block rather than the mockup’s focused panel. |
+| Streaming | **6/10** | The adapter requests and normalizes partial messages, but these captures do not establish live rendering latency or smoothness. |
+| Approval UI | **7/10** | The mediated-turn rendering now shows the action, choices, baseline and permitted resolver class; a live CLI-to-interactive-frame approval remains unverified. |
+| Diff and checkpoint visibility | **8/10** | The colored viewer shows file summaries and patches, navigation is demonstrated, and restoration of a tracked and a turn-created file is proven; interactive confirmation remains untested. |
+| **Overall** | **8/10** | The supplied evidence shows a coherent, usable approximation of the mockups, with the largest remaining gap in live approval and revert interaction. |
+
+## Top remaining fixes
+
+1. **Prove live approval mediation with a capable backend.** Exercise an actual tool request through the CLI, pause it, resolve it from an interactive frame and verify execution resumes. The capability probe and hook configuration are in [backend-claude.tlisp](/Users/mekael/Documents/programming/typescript/tmax/src/tlisp/core/fikra/backend-claude.tlisp:47); the current installed CLI capability remains the stated blocker.
+
+2. **Drive revert through its full interactive path.** In a real frame, press `r`, enter `revert` in the minibuffer and verify both restored and deleted files. The confirmation and restore call are in [diff.tlisp](/Users/mekael/Documents/programming/typescript/tmax/src/tlisp/core/fikra/diff.tlisp:145); the supplied artifact proves the mechanism beneath that confirmation.
+
+3. **Strengthen approval context toward the mockup.** The displayed `interactive-frame` describes the permitted resolver class, not a specific originating frame or verified native-loop provenance. If those mockup details are implemented, expose their actual evidence alongside the existing baseline in [event.tlisp](/Users/mekael/Documents/programming/typescript/tmax/src/tlisp/core/fikra/event.tlisp:212).
+
+4. **Capture the updated modeline and live streaming.** Show `th:main` in a current terminal capture and record a turn while partial text arrives; the thread lighter is in [chat.tlisp](/Users/mekael/Documents/programming/typescript/tmax/src/tlisp/core/fikra/chat.tlisp:128), and partial-event handling is in [backend-claude.tlisp](/Users/mekael/Documents/programming/typescript/tmax/src/tlisp/core/fikra/backend-claude.tlisp:222).
+
+The enriched gate resolves the earlier visibility gap: its checkpoint is explicitly the turn baseline that revert targets, and its origin label communicates who may answer. The restore demonstration adds meaningful evidence for both modified and newly created files. Those are substantial improvements, while the mediated gate remains fixture evidence and the interactive revert confirmation has not been driven; neither should be counted as a fully demonstrated live workflow. The RFC’s native per-action approval and provenance details are design targets, so the current wrapped-CLI implementation should be graded against them with that distinction in mind.

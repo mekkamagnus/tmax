@@ -213,7 +213,16 @@ round-12 approvals catch)."
                             (let ((gm (fikra-event-get-str event "mode")))
                               (if (string= gm "") "" (concat " (" gm ")")))
                             " — [y] allow · [n] reject · [a] always-allow"
-                            " (trusts this action class for the thread)")) "\n"))
+                            " (trusts this action class for the thread)"
+                            ;; Checkpoint + origin (codex rounds 12/16):
+                            ;; the baseline the turn began from is the
+                            ;; revert target; the origin names the resolver
+                            ;; class that may answer.
+                            (let ((cp (fikra-event-get-str event "checkpoint"))
+                                  (org (fikra-event-get-str event "origin")))
+                              (concat
+                                (if (string= cp "") "" (concat "\n  checkpoint " cp " — the turn's baseline (r in the diff view reverts to it)"))
+                                (if (string= org "") "" (concat " · origin: " org)))))) "\n"))
       ((string= kind "permission-response")
         (concat (fikra-face "\e[2m" (concat "  = " (fikra-event-get-str event "decision"))) "\n"))
       ((string= kind "file-change")

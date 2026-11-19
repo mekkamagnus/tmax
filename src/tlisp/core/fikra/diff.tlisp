@@ -1,5 +1,6 @@
 (defmodule fikra/diff
-  (export fikra-turn-diff fikra-diff-next fikra-diff-prev fikra-diff-revert-turn)
+  (export fikra-turn-diff fikra-diff-next fikra-diff-prev fikra-diff-revert-turn
+          fikra-diff-restore-turn fikra-changed-paths-since-baseline)
 
 ;; SPC a d — the turn diff view (mockup 8.4's entry point). TURN-SCOPED
 ;; (codex round 6: the viewer must show THIS turn's patch, not the whole
@@ -138,21 +139,26 @@
 (defun fikra-diff-revert-turn ()
   (interactive)
   (require-module fikra/thread)
-  (let ((dir (fikra/thread/fikra-thread-working-dir))
-        (tree (fikra-baseline-tree))
-        (paths (fikra-changed-paths-since-baseline)))
-    (if (or (null paths) (= (length paths) 0) (not (stringp dir)))
+  (let ((paths (fikra-changed-paths-since-baseline)))
+    (if (or (null paths) (= (length paths) 0))
       (editor-set-status "Fikra: nothing to revert")
       (let ((confirm (read-string "Revert this turn's changes? type revert: ")))
         (if (not (string= confirm "revert"))
           (editor-set-status "Fikra: revert cancelled")
           (progn
-            (dolist (p paths)
-              (if (string= (fikra-file-kind dir p) "tracked")
-                (shell-command (concat "git -C '" dir "' checkout " tree " -- '" p "' 2>/dev/null"))
-                (shell-command (concat "rm -f '" dir "/" p "'"))))
+            (fikra-diff-restore-turn paths)
             (editor-set-status "Fikra: turn reverted — SPC a d to refresh")
             (fikra-turn-diff)))))))
+
+;; The restore mechanism, separate from the confirmation gate (the gate is
+;; read-string — interactive-only; the restore is testable/demoable).
+(defun fikra-diff-restore-turn (paths)
+  (let ((dir (fikra/thread/fikra-thread-working-dir))
+        (tree (fikra-baseline-tree)))
+    (dolist (p paths)
+      (if (string= (fikra-file-kind dir p) "tracked")
+        (shell-command (concat "git -C '" dir "' checkout " tree " -- '" p "' 2>/dev/null"))
+        (shell-command (concat "rm -f '" dir "/" p "'"))))))
 
 ;; Paths changed since the stored baseline — the DRY computation shared
 ;; with the turn-end ± rows (fikra-thread-compute-changes → ((path a d) …)).

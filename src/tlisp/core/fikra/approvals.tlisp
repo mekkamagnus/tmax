@@ -110,9 +110,17 @@ Live → permission-request FAEP event, confirming state, y/n/a prompt."
         (list (list "kind" "permission-request")
               (list "action" (concat kind ": " detail))
               (list "id" id)
-              ;; Provenance (codex round 12: "richer approval presentation"):
-              ;; the runtime mode that GATED this action rides the event.
-              (list "mode" (fikra/modes/fikra-effective-mode))))
+              ;; Provenance (codex rounds 12/16: richer approval presentation):
+              ;; the runtime mode that GATED this action, the content
+              ;; CHECKPOINT the turn began from (the stash baseline tree —
+              ;; revert target), and the resolver origin.
+              (list "mode" (fikra/modes/fikra-effective-mode))
+              (list "checkpoint" (condition-case nil
+                                    (let ((t-v (fikra/thread/fikra-thread-field "change-baseline-tree")))
+                                      (if (stringp t-v) (substring t-v 0 8) ""))
+                                    (error () "")))
+              (list "origin" (if (string= (confirmation-resolver-kind) "headless")
+                               "headless" "interactive-frame"))))
       ;; running → confirming (checked transition — an illegal enqueue
       ;; errors rather than corrupting thread state).
       (fikra/thread/fikra-thread-status-set "confirming")
