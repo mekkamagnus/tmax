@@ -3,6 +3,7 @@
           fikra-backend-codex-start-turn fikra-backend-codex-abort
           fikra-backend-codex-normalize fikra-backend-codex-args
           fikra-backend-codex-line-events fikra-backend-codex-filter
+          fikra-backend-codex-sentinel
           fikra-backend-codex-adopt-pid fikra-backend-codex-reset-accumulator
           fikra-codex-json-sanitize)
 

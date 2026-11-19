@@ -3,6 +3,7 @@
           fikra-backend-claude-start-turn fikra-backend-claude-abort
           fikra-backend-claude-normalize fikra-backend-claude-args
           fikra-backend-claude-line-events fikra-backend-claude-filter
+          fikra-backend-claude-sentinel
           fikra-backend-claude-abort-sim fikra-backend-claude-adopt-process fikra-backend-claude-adopt-pid
           fikra-backend-claude-reset-accumulator fikra-afield
           fikra-claude-approvals-probe fikra-claude-write-mcp-config
@@ -125,11 +126,13 @@ config is written per turn by fikra-claude-write-mcp-config)."
   ;; #223: a PLAN interaction turn runs READ-ONLY (native --permission-mode
   ;; plan + edit tools disallowed) — a plan turn never edits.
   (let* ((base (if (fikra-plan-active-p)
-                 (append (list "--print" "--output-format" "stream-json" "--verbose")
+                 (append (list "--print" "--output-format" "stream-json" "--verbose"
+                               "--include-partial-messages")
                          (fikra/plan/fikra-plan-claude-flags))
                  (list "--print"
                        "--output-format" "stream-json"
                        "--verbose"
+                       "--include-partial-messages"
                        "--permission-mode"
                        (fikra/modes/fikra-claude-mode-arg
                          (fikra/modes/fikra-effective-mode)))))
@@ -200,6 +203,8 @@ unparseable or non-event lines. Flat dispatch — one branch per wire type."
           (cond
             ((string= type "system")
               (fikra-norm-system obj))
+            ((string= type "stream_event")
+              (fikra-norm-stream-event obj))
             ((string= type "assistant")
               (fikra-norm-assistant obj))
             ((string= type "user")
@@ -213,6 +218,33 @@ unparseable or non-event lines. Flat dispatch — one branch per wire type."
     (if sid
       (list (list (list "kind" "session") (list "id" sid)))
       nil)))
+
+;; stream_event → text-delta per partial chunk. --include-partial-messages
+;; (now always on) delivers content_block_delta/text_delta chunks; each
+;; becomes its own text-delta so the *Fikra* buffer renders assistant text
+;; AS IT STREAMS (t3code/zcode parity; codex UI verification: live
+;; streaming 3/10). The complete assistant message still arrives at the
+;; end — its text blocks are skipped when partial mode streamed them
+;; already (see fikra-norm-blocks) so text never double-renders.
+(defun fikra-norm-stream-event (obj)
+  (let* ((ev (fikra-afield obj "event"))
+         (etype (if (listp ev) (fikra-afield ev "type") nil))
+         (delta (if (listp ev) (fikra-afield ev "delta") nil))
+         (dtype (if (listp delta) (fikra-afield delta "type") nil))
+         (txt (if (listp delta) (fikra-afield delta "text") nil)))
+    (if (and (stringp etype) (string= etype "content_block_delta")
+             (stringp dtype) (string= dtype "text_delta")
+             (stringp txt) (> (length txt) 0))
+      (progn
+        (setq fikra-claude-saw-partial t)
+        (list (list (list "kind" "text-delta") (list "text" txt))))
+      nil)))
+
+;; Set by fikra-norm-stream-event on the first live partial chunk; reset per
+;; turn by fikra-backend-claude-start-turn. Truthy → the completed assistant
+;; message's text blocks are skipped (they were already streamed live).
+(defvar fikra-claude-saw-partial nil
+  "Whether this turn streamed partial text chunks (--include-partial-messages).")
 
 ;; assistant → text-delta / tool-call events from the content blocks.
 (defun fikra-norm-assistant (obj)
@@ -234,7 +266,12 @@ unparseable or non-event lines. Flat dispatch — one branch per wire type."
              (cond
                ((string= btype "text")
                  (let ((txt (fikra-afield block "text")))
-                   (if (and txt (> (length txt) 0))
+                   ;; Partial mode streams every chunk live; the completed
+                   ;; message's text is then skipped (double-render guard).
+                   ;; The guard is STATEFUL: replay fixtures carry complete
+                   ;; messages only — no stream_events ever set the flag —
+                   ;; so their text still renders.
+                   (if (and txt (> (length txt) 0) (not fikra-claude-saw-partial))
                      (list (list "kind" "text-delta") (list "text" txt))
                      nil)))
                ((string= btype "tool_use")
@@ -267,6 +304,7 @@ unparseable or non-event lines. Flat dispatch — one branch per wire type."
           (fikra-norm-results (cdr blocks)
             (cons (list (list "kind" "tool-result")
                         (list "ok" (if is-error nil t))
+                        (list "id" (fikra-tool-id-short (fikra-afield block "tool_use_id")))
                         (list "summary" (if content-v content-v "")))
                   out)))))))
 
@@ -277,7 +315,16 @@ unparseable or non-event lines. Flat dispatch — one branch per wire type."
          (summary (fikra-tool-summary name input)))
     (list (list "kind" "tool-call")
           (list "tool" (if name name "?"))
+          (list "id" (fikra-tool-id-short (fikra-afield block "id")))
           (list "summary" summary))))
+
+;; "toolu_01XFDUDYJgAC" → "FDUDYJ" (last 6). Correlation key: the tool-result
+;; carries the matching suffix so parallel calls pair with their results
+;; visually (codex UI verification: calls grouped ahead of unlabeled results).
+(defun fikra-tool-id-short (id)
+  (if (and (stringp id) (> (length id) 6))
+    (substring id (- (length id) 6) (length id))
+    (if (stringp id) id "")))
 
 (defun fikra-tool-summary (name input)
   (cond
@@ -355,6 +402,9 @@ scope names THIS turn) and BEFORE the spawn (args reference the path)."
         (thread-id (fikra/thread/fikra-thread-current)))
     (editor/keymaps/keymap-mutable-set! fikra-claude-line-buffers thread-id "")
     (editor/keymaps/keymap-mutable-set! fikra-claude-aborteds thread-id nil)
+    ;; Per-turn reset: the double-render guard only applies when THIS turn
+    ;; actually streamed partial chunks (replay fixtures never do).
+    (setq fikra-claude-saw-partial nil)
     (fikra/thread/fikra-thread-turn-begin)
     ;; L2: mint the turn's token + config (nil-op when the CLI lacks the
     ;; permission hook — args omit the flags too, same probe).
