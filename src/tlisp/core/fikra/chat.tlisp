@@ -125,7 +125,7 @@ context flakiness)."
   ;; Always shown (codex round 16: "the main thread's name is absent" —
   ;; the mockup's session context names the thread even when it's main).
   (let ((id (fikra/thread/fikra-thread-current)))
-    (if id (concat " th:" id) "")))
+    (if id (concat ":th:" id) "")))
 
 (defun fikra-lighter-turn-segment ()
   (let ((n (fikra/thread/fikra-thread-field "turn-count")))
