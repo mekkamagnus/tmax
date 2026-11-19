@@ -243,15 +243,14 @@ export function createEditingHandlers(ctx: ServerContext): {
           ctx.scheduleDirtyWorkspaceSave(ctx.getActiveWorkspaceId());
           // Viewport-only wire (issue #46): embed only the rows the frame's
           // terminal can show, derived from its recorded terminalSize.
-          const renderHeight = renderHeightForTerminalSize(
-            ctx.frameObservability.get(frameId)?.terminalSize,
-          );
+          const frameTermSize = ctx.frameObservability.get(frameId)?.terminalSize;
+          const renderHeight = renderHeightForTerminalSize(frameTermSize);
           if (workspaceOverride) {
             ctx.syncEditorToAllFrames();
-            return editorStateToJson(ctx.editor.getEditorState(), renderHeight);
+            return editorStateToJson(ctx.editor.getEditorState(), renderHeight, frameTermSize?.width);
           }
           ctx.syncEditorToFrame(frame);
-          return editorStateToJson(ctx.frameToEditorState(frame), renderHeight);
+          return editorStateToJson(ctx.frameToEditorState(frame), renderHeight, frameTermSize?.width);
         } finally {
           await ctx.restoreWorkspaceAfterOverride(workspaceOverride, previousWorkspaceId, previousFrameId);
         }

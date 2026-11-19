@@ -93,20 +93,44 @@ function deserializeTab(raw: unknown): Tab | null {
 export function editorStateToJson(
   state: EditorState,
   renderHeight: number = DEFAULT_RENDER_HEIGHT,
+  renderWidth?: number,
 ): SerializedEditorState {
   const buffer = state.currentBuffer;
   const viewportTop = Math.max(0, state.viewportTop);
   const rows = Math.max(1, Math.floor(renderHeight));
 
+  // WRAP EXPANSION (2026-11-20 live catch): the client re-renders the wire
+  // window with word wrap — one logical line can occupy MULTIPLE screen
+  // rows, so a rows-sized window truncates the wrapped tail (large chat
+  // buffers rendered blank tails; small buffers fit and masked it). When
+  // wrap is on and the frame's width is known, walk lines accumulating
+  // wrapped-row counts until the screen is covered (cw approximates the
+  // gutter-reduced width conservatively; over-sending is harmless — the
+  // client's ViewportBuffer just holds extra rows).
+  let neededRows = rows;
+  if (state.config?.wordWrap && renderWidth && renderWidth > 24 && buffer) {
+    const cw = Math.max(20, renderWidth - 12);
+    const rowLimit = rows * 6; // wire bound: pathological single-line walls
+    let wrappedRows = 0;
+    let i = 0;
+    while (wrappedRows < rows && i < rowLimit) {
+      const lineResult = buffer.getLine(viewportTop + i);
+      const text = lineResult && lineResult._tag === "Right" ? lineResult.right : "";
+      wrappedRows += Math.max(1, Math.ceil(Bun.stringWidth(text) / cw));
+      i++;
+    }
+    neededRows = Math.max(rows, i);
+  }
+
   // Compute visibleLines: O(viewport), never O(file).
   const visibleLines: string[] = [];
   if (buffer) {
-    for (let i = 0; i < rows; i++) {
+    for (let i = 0; i < neededRows; i++) {
       const lineResult = buffer.getLine(viewportTop + i);
       visibleLines.push(lineResult && lineResult._tag === "Right" ? lineResult.right : "");
     }
   } else {
-    for (let i = 0; i < rows; i++) visibleLines.push("");
+    for (let i = 0; i < neededRows; i++) visibleLines.push("");
   }
 
   const totalLines = lineCountOf(buffer);
