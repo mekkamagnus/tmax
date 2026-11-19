@@ -109,17 +109,24 @@ panes close or open (codex r3)."
 (defun capture-refocus-origin ()
   "Return focus to the ORIGIN pane — located by its BUFFER when unique
 (window indices shift when the popup split inserts a pane; codex r6
-side-by-side repro left focus on the neighbor), index fallback otherwise."
-  (let ((wins (window-list)) (pos nil) (i 0))
-    (while (and (< i (length wins)) (not pos))
-      (if (string= (nth 2 (nth i wins)) capture-return-buffer)
-        (set! pos i)
-        (set! i (+ i 1))))
-    (if pos
-      (capture-refocus pos)
-      (if capture-focus-window
-        (capture-refocus capture-focus-window)))
-    t))
+side-by-side repro left focus on the neighbor). With DUPLICATE buffers on
+several panes, the saved index wins when it still shows the origin buffer;
+otherwise the first match."
+  (let ((wins (window-list)))
+    (if (and capture-focus-window
+             (< capture-focus-window (length wins))
+             (string= (nth 2 (nth capture-focus-window wins)) capture-return-buffer))
+      (capture-refocus capture-focus-window)
+      (let ((pos nil) (i 0))
+        (while (and (< i (length wins)) (not pos))
+          (if (string= (nth 2 (nth i wins)) capture-return-buffer)
+            (set! pos i)
+            (set! i (+ i 1))))
+        (if pos
+          (capture-refocus pos)
+          (if capture-focus-window
+            (capture-refocus capture-focus-window)))
+        t))))
 
 (defun capture-focus-popup-pane ()
   "Put focus on the pane showing *Capture* (wherever it is, however the
@@ -172,8 +179,11 @@ POPUP pane — focus may have moved elsewhere since the chord (codex r2)."
           (capture-focus-popup-pane)
           (delete-window)))
       (capture-refocus-origin))
-    ;; Reuse case: put the pane's own buffer back, then focus the origin.
+    ;; Reuse case: locate the compose pane FIRST (an abort issued from
+    ;; another pane previously rewrote THAT pane), restore its buffer, then
+    ;; focus the origin.
     (progn
+      (capture-focus-popup-pane)
       (if capture-pane-restore
         (switch-to-buffer capture-pane-restore))
       (capture-refocus-origin)))
@@ -321,21 +331,32 @@ stale buffer's save destroyed the entry)."
   (or (string= name capture-target-path)
       (capture-ends-with name (concat "/" capture-target-path))))
 
+(defun capture-canonical (path)
+  "Realpath of PATH via the shell — canonical file identity."
+  (string-trim (shell-command (concat "realpath " path))))
+
 (defun capture-sync-open-buffer (entry-text)
-  "Keep an already-open daily-note buffer consistent with the appended
-file: its next :w must not overwrite the captured entry (codex r5 data
-loss). Matched by path suffix so relative/absolute/tilde forms agree."
+  "Keep EVERY already-open alias of the daily note consistent with the
+appended file: any of their next :w must not overwrite the entry (codex
+r5/r7). Candidates are suffix matches (relative/absolute/tilde forms) and
+are CONFIRMED by canonical realpath, so an unrelated journal with the same
+daily/<date>.md suffix is never touched."
   (let ((cur (buffer-current))
-        (bufs (buffer-list)) (i 0) (hit nil))
-    (while (and (< i (length bufs)) (not hit))
+        (bufs (buffer-list)) (i 0) (hits (list)))
+    (while (< i (length bufs))
       (if (capture-journal-buffer-p (nth i bufs))
-        (set! hit (nth i bufs)))
+        (set! hits (append hits (list (nth i bufs)))))
       (set! i (+ i 1)))
-    (when hit
-      (switch-to-buffer hit)
-      (cursor-move (- (buffer-line-count) 1) 100000)
-      (buffer-insert entry-text)
-      (switch-to-buffer cur))
+    (when (> (length hits) 0)
+      (let ((canonical-target (capture-canonical capture-target-path)) (j 0))
+        (while (< j (length hits))
+          (switch-to-buffer (nth j hits))
+          (if (string= (capture-canonical (buffer-filename)) canonical-target)
+            (progn
+              (cursor-move (- (buffer-line-count) 1) 100000)
+              (buffer-insert entry-text)))
+          (set! j (+ j 1)))
+        (switch-to-buffer cur)))
     t))
 
 (defun capture-commit ()

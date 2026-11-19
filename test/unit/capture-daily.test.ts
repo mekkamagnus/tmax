@@ -437,6 +437,61 @@ describe("#285: capture popup (SPC r d)", () => {
     }
   });
 
+  test("codex r7: aliases of the note (rel + abs opens) all sync; an unrelated same-suffix journal does not", async () => {
+    const vault = mkdtempSync(join(tmpdir(), "tmax-capture-"));
+    const prevCwd = process.cwd();
+    process.chdir(vault);
+    try {
+      const editor = await createStartedEditor("x");
+      const today = tmaxToday(editor);
+      // The real note (relative open) AND a decoy journal with the SAME
+      // daily/<date>.md suffix in a different directory
+      mkdirSync(join(vault, "daily"));
+      writeFileSync(join(vault, "daily", `${today}.md`), "# REAL\n");
+      mkdirSync(join(vault, "decoy", "daily"), { recursive: true });
+      writeFileSync(join(vault, "decoy", "daily", `${today}.md`), "# DECOY\n");
+      executeTlisp(editor, `(find-file-open "daily/${today}.md")`);
+      const relBuf = tl(editor, "(buffer-current)");
+      const decoyPath = join(vault, "decoy", "daily", `${today}.md`);
+      executeTlisp(editor, `(find-file-open "${decoyPath}")`);
+      executeTlisp(editor, '(switch-to-buffer "test")');
+      executeTlisp(editor, "(capture-daily)");
+      executeTlisp(editor, '(buffer-insert "alias sync")');
+      executeTlisp(editor, "(capture-commit)");
+      // The relative-alias buffer was synced...
+      executeTlisp(editor, `(switch-to-buffer "${relBuf}")`);
+      expect(tl(editor, "(buffer-text)")).toContain("alias sync");
+      // ...and the decoy (same suffix, different file) was NOT touched
+      expect(readFileSync(join(vault, "decoy", "daily", `${today}.md`), "utf-8")).toBe("# DECOY\n");
+    } finally {
+      process.chdir(prevCwd);
+      rmSync(vault, { recursive: true, force: true });
+    }
+  });
+
+  test("codex r7: abort from ANOTHER pane in the reuse case restores the compose pane, not the current one", async () => {
+    const vault = mkdtempSync(join(tmpdir(), "tmax-capture-"));
+    const prevCwd = process.cwd();
+    process.chdir(vault);
+    try {
+      const editor = await createStartedEditor("hello world");
+      executeTlisp(editor, "(split-window-below)");
+      executeTlisp(editor, "(capture-daily)");
+      // Focus the TOP pane, then abort from THERE
+      executeTlisp(editor, "(windmove-up)");
+      expect(tl(editor, "(buffer-current)")).toBe("test");
+      executeTlisp(editor, "(capture-abort)");
+      // The TOP pane was never rewritten to the pane-restore buffer
+      expect(tl(editor, "(buffer-current)")).toBe("test");
+      const panes = tl(editor, "(window-list)");
+      expect(panes.includes("*Capture*")).toBe(false);
+      expect(tl(editor, "(window-count)")).toBe("2");
+    } finally {
+      process.chdir(prevCwd);
+      rmSync(vault, { recursive: true, force: true });
+    }
+  });
+
   test("codex r1: commit files to the path the header SHOWS (target stamped at open)", async () => {
     const vault = mkdtempSync(join(tmpdir(), "tmax-capture-"));
     const prevCwd = process.cwd();

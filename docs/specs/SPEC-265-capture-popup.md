@@ -27,7 +27,7 @@ Abort/commit restore the ORIGIN pane (located by buffer), close the popup pane (
 
 ## Completion criteria
 
-- [x] Popup split 50/50 single-window; reuse multi-window (no third pane)
+- [x] Popup split 50/50 single-window; existing layouts reuse a below-pane when present, else split the column bottom (matches the geometry decision above)
 - [x] Skeleton visible; skeleton-only commit writes nothing; edited prefix passes through; absent prefix re-added from open-time ts
 - [x] Existing-file append (no clobber/dup header), flat journal-dir honored, fresh skeleton per capture
 - [x] 8/8 popup tests + 4/4 daily-note + 66-test regression batch; typecheck clean
