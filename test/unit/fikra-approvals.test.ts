@@ -509,4 +509,24 @@ describe("#220 L2 — capability gating (claude-first, probe-driven)", () => {
     expect(argv).toContain("mcp__tmax-confirmation__permission");
     e(editor, '(fikra/backend-claude/fikra-claude-set-approvals-override "off")');
   });
+
+  test("target/risk table (r71): first path wins, long paths qualify, downcased destructive", async () => {
+    const editor = await l2setup();
+    const P = (label: string, expr: string) => {
+      const r = e(editor, expr);
+      return String((r as unknown as { value?: unknown }).value ?? r);
+    };
+    // First PATH wins over the command word and later paths.
+    expect(P("t", '(fikra/approvals/fikra-approval-target "cp src/a.ts dst/b.ts")')).toBe("src/a.ts");
+    // A long PATH still qualifies (the cap is the word-fallback's).
+    expect(P("t", '(fikra/approvals/fikra-approval-target "cat src/very/deeply/nested/path/that/exceeds/the/cap/x.ts")')).toContain("nested");
+    // No path → the first word (the command).
+    expect(P("t", '(fikra/approvals/fikra-approval-target "make test")')).toBe("make");
+    // Downcased destructive detail matches.
+    const sqlDetail = "psql -c " + String.fromCharCode(39) + "drop table users" + String.fromCharCode(39);
+    expect(P("t", `(fikra/approvals/fikra-approval-risk "Bash" "${sqlDetail}")`)).toBe("destructive");
+    // Case-insensitive tool classes.
+    expect(P("t", '(fikra/approvals/fikra-approval-risk "Bash" "ls")')).toBe("shell");
+    expect(P("t", '(fikra/approvals/fikra-approval-risk "Edit" "{}")')).toBe("file-edit");
+  });
 });

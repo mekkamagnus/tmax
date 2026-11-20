@@ -105,34 +105,39 @@ decides instead."
 (defun fikra-approval-target (detail)
   (fikra-approval-target-words (string-split detail " ") nil))
 
-(defun fikra-approval-target-words (words hit)
+;; Two slots (r71): WORD — the first short non-filler word (the command
+;; fallback); PATH — the first word containing "/". The FIRST path wins
+;; over any word and stops the scan; a long PATH still qualifies (the
+;; cap applies only to the word fallback).
+(defun fikra-approval-target-words (words word)
   (if (null words)
-    (if hit hit "")
+    word
     (let ((w (car words)))
-      (if (or (string= w "") (string= w "to") (string= w "in") (string= w "at")
-              (> (length w) 36))
-        (fikra-approval-target-words (cdr words) hit)
-        (if (string-match "/" w)
-          (fikra-approval-target-words (cdr words) w)
-          (if hit
-            (fikra-approval-target-words (cdr words) hit)
+      (if (string-match "/" w)
+        w
+        (if (or (string= w "") (string= w "to") (string= w "in") (string= w "at")
+                (> (length w) 36))
+          (fikra-approval-target-words (cdr words) word)
+          (if word
+            (fikra-approval-target-words (cdr words) word)
             (fikra-approval-target-words (cdr words) w)))))))
 
 (defun fikra-approval-risk (kind detail)
   ;; Destructive first (any tool can carry it), then the tool class —
-  ;; CASE-INSENSITIVE (the CLIs emit "Bash"/"Edit").
-  (if (or (string-match "rm -rf" detail)
-          (string-match "rm -fr" detail)
-          (string-match "git push --force" detail)
-          (string-match "git reset --hard" detail)
-          (string-match "DROP TABLE" detail))
+  ;; BOTH case-insensitive (the detail is downcased; "drop table" counts).
+  (let ((d (fikra-risk-down detail)))
+    (if (or (string-match "rm -rf" d)
+            (string-match "rm -fr" d)
+            (string-match "git push --force" d)
+            (string-match "git reset --hard" d)
+            (string-match "drop table" d))
     "destructive"
     (if (or (string= (fikra-risk-down kind) "bash") (string= (fikra-risk-down kind) "shell"))
       "shell"
       (if (or (string= (fikra-risk-down kind) "edit") (string= (fikra-risk-down kind) "write")
               (string= (fikra-risk-down kind) "buffer-edit"))
         "file-edit"
-        ""))))
+        "")))))
 
 (defun fikra-risk-down (s)
   (if s (fikra-risk-down-scan s 0 "") ""))
