@@ -309,6 +309,21 @@ not land under the wrong project)."
   (let ((state (fikra-thread-state)))
     (fikra/event/fikra-event-log-set
       (concat (hashmap-get state "root") "/.tmax/fikra/threads/" id "/events.jsonl"))
+    ;; 8.5 (codex r45): a thread's SAVED backend follows focus — dispatch
+    ;; reads the adapter's global; without this, one thread's choice bled
+    ;; into every other.
+    ;; Isolation cuts BOTH ways: a saved backend is restored; NO saved
+    ;; backend RESETS the adapter (the previous thread's choice must not
+    ;; bleed into this one).
+    (condition-case nil
+      (progn
+        (require-module fikra/adapter)
+        (let ((saved (hashmap-get state "backend")))
+          (if (and saved (not (string= saved "none")) (not (string= saved "")))
+            (if (fikra/adapter/fikra-backend-available-p saved)
+              (fikra/adapter/fikra-set-backend-forced saved))
+            (fikra/adapter/fikra-set-backend-forced "none"))))
+      (error () nil))
     id))
 
 ;; ── #222: creation / switching / archive / listing ─────────────────
@@ -493,7 +508,12 @@ current project's NON-archived threads."
       "location" (if legacy "legacy"
                    (if (funcall get "worktree") "worktree" "local"))
       "legacy" (if legacy t nil)
-      "status" (funcall get "status")
+      ;; A non-loaded thread cannot be mid-turn: a disk row's "running"
+      ;; is a crash artifact (the load path normalizes the same way).
+      "status" (if (and (not current)
+                        (string= (if (funcall get "status") (funcall get "status") "") "running"))
+                 "idle"
+                 (funcall get "status"))
       "turns" (funcall get "turn-count")
       "last-at" (funcall get "last-at"))))
 

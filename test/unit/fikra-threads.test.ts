@@ -218,3 +218,36 @@ describe("#8.5 threads list — mockup row shape + actions (r43)", () => {
     expect(String(e(editor, "(fikra/threads/fikra-threads-last-ago nil)").value)).toBe("-");
   });
 });
+
+describe("#8.5 threads — backend isolation + crash display (r45)", () => {
+  test("focusing a thread restores ITS saved backend to the adapter", async () => {
+    const a = await setup();
+    e(a, "(require-module fikra/adapter)");
+    e(a, "(require-module fikra/backend-replay)");
+    e(a, "(require-module fikra/backend-replay)");
+    e(a, '(require-module "fikra/thread")');
+    // Thread r saves backend replay; thread s has none saved.
+    e(a, '(fikra/thread/fikra-thread-focus "r")');
+    e(a, '(fikra/adapter/fikra-set-backend-forced "replay")');
+    e(a, '(fikra/thread/fikra-thread-set-field "backend" "replay")');
+    e(a, '(fikra/thread/fikra-thread-focus "s")');
+    expect(String(e(a, "(fikra/adapter/fikra-current-backend)").value)).not.toBe("replay");
+    e(a, '(fikra/thread/fikra-thread-focus "r")');
+    expect(String(e(a, "(fikra/adapter/fikra-current-backend)").value)).toBe("replay");
+  });
+
+  test("a crashed DISK row renders idle, not running", async () => {
+    const a = await setup();
+    e(a, '(require-module "fikra/thread")');
+    e(a, '(fikra/thread/fikra-thread-focus "z")');
+    e(a, '(fikra/thread/fikra-thread-turn-begin)'); // running, no end — crash
+    e(a, '(fikra/thread/fikra-thread-focus "main")');
+    const rows = e(a, "(fikra/thread/fikra-thread-rows)");
+    const z = e(a, `
+      (let ((hit nil))
+        (dolist (r (fikra/thread/fikra-thread-rows))
+          (if (string= (hashmap-get r "id") "z") (setq hit (hashmap-get r "status"))))
+        hit)`);
+    expect(String(z.value)).not.toBe("running");
+  });
+});

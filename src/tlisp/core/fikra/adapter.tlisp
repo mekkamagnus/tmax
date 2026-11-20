@@ -126,9 +126,11 @@ agnostic). Refuses unavailable backends."
   (let ((available (fikra-list-available-backends)))
     (if (= (length available) 0)
       (progn (message "Fikra: no backends available") nil)
+      ;; require-match=t: free text cannot reach the accept (r45 — a
+      ;; rejected choice must never persist).
       (completing-read "backend "
                        "fikra/adapter/fikra-backend-table"
-                       nil nil ""
+                       nil t ""
                        "fikra-backend-history"
                        "fikra/adapter/fikra-backend-accept"))))
 
@@ -152,12 +154,15 @@ agnostic). Refuses unavailable backends."
   ;; never sees the choice): set the ADAPTER selection AND the CURRENT
   ;; thread's persisted backend field, then save.
   (if (and choice (> (length choice) 0))
-    (progn
-      (fikra-set-backend choice)
-      (require-module fikra/thread)
-      (fikra/thread/fikra-thread-set-field "backend" choice)
-      (fikra/thread/fikra-thread-save)
-      (editor-set-status (concat "Fikra: backend " choice)))
+    ;; Persist ONLY on a successful switch — set-backend refuses
+    ;; unavailable backends (r45: a rejected choice must not stick).
+    (if (fikra-set-backend choice)
+      (progn
+        (require-module fikra/thread)
+        (fikra/thread/fikra-thread-set-field "backend" choice)
+        (fikra/thread/fikra-thread-save)
+        (editor-set-status (concat "Fikra: backend " choice)))
+      (editor-set-status (concat "Fikra: backend " choice " not available")))
     nil))
 
 (defvar fikra-backend-history nil)
