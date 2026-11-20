@@ -1,7 +1,9 @@
 import { describe, expect, test } from "bun:test";
 import { editorStateToJson, jsonToEditorState } from "../helpers/wire-imports.ts";
 import { executeTlisp } from "../helpers/editor-fixture.ts";
-import { createStartedEditor, type Editor } from "../helpers/editor-fixture.ts";
+import { createStartedEditor } from "../helpers/editor-fixture.ts";
+
+type Editor = Awaited<ReturnType<typeof createStartedEditor>>;
 
 // The modeline's named-buffer fix (round 32): currentBufferName must survive
 // the frame round trip — serialize -> wire -> deserialize -> status line.

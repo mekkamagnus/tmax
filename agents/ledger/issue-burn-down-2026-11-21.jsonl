@@ -1,0 +1,6 @@
+{"event":"run-start","ts":"2026-11-20T10:15:13Z","label":"issue-burn-down","goal":"work docs/burn-down-order.md (50 issues) to zero with codex grade-gate protocol","model":"glm-5.3","order-file-ref":"docs/burn-down-order.md","note":"mid-flight amendment: ledger duty starts at the protocol message 2026-11-21; prior history lives in issue comments (#298 grade receipts, #321 gate rounds, #299 landing) — per no-retro-fabrication"}
+{"event":"unit-start","ts":"2026-11-20T10:15:13Z","unit":"#300"}
+{"event":"telemetry","ts":"2026-11-20T10:15:13Z","wall-minutes":null,"active-minutes":null,"in-tokens":null,"out-tokens":null,"ctx-remaining-pct":null,"note":"CLI footer not readable from this session's tool surface — honest nulls; context is near-exhausted by behavior"}
+{"event":"escalation","ts":"2026-11-20T10:15:13Z","reason":"ctx<25%","action":"recorded #300 investigation state to memory (worktree ../tmax.issue-300 ready, label-path suspect mapped); closing this session cleanly for a fresh-context continuation"}
+{"event":"telemetry","ts":"2026-11-20T10:36:51Z","wall-minutes":null,"active-minutes":null,"in-tokens":null,"out-tokens":null,"ctx-remaining-pct":null,"note":"continuation context; footer unreadable — honest nulls"}
+{"event":"gate","ts":"2026-11-20T11:00:13Z","kind":"verify-gate","verdict":"GAPS","rounds":1,"reviewed-sha":"74bf007","findings-count":4}
