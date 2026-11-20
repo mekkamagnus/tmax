@@ -103,6 +103,12 @@ anything unreadable — never estimated.
 | `out-tokens` | number \| null | output tokens produced so far |
 | `ctx-remaining-pct` | number \| null | integer 0–100, remaining context headroom |
 
+Telemetry may be **self-reported** (agent reads its own CLI footer) or **scraped**
+(extra field `source:"scraped"` — appended by `scripts/ledger-scrape.ts`, the herdr
+footer poller, issue #326). A per-turn `↓ Nk tokens` delta is a turn figure, never a
+cumulative `in-tokens`; the reader cross-checks self-reported vs scraped pairs
+(±10% tokens, ±5 points ctx) and a mismatch is itself an alarm (RFC-036 §6).
+
 **Valid (all fields readable):**
 
 ```json

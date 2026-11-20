@@ -72,6 +72,12 @@ export type Scorecard = {
     unknown: number; // escalated with no telemetry ever read
     ctxBelow25Observed: boolean;
   };
+  /** scraped vs self-reported telemetry cross-check (#326, RFC-036 §6) */
+  telemetryCrossCheck: {
+    scraped: number;
+    paired: number; // scraped events with a self report within ±5 min
+    mismatches: { at: string; fields: string[]; self: string; scraped: string }[];
+  };
   trailerAudit: {
     runStartTs: string | null;
     ledgerCommits: number;
@@ -325,6 +331,48 @@ export const computeScorecard = (
     });
   }
 
+  // --- Telemetry cross-check (#326) ----------------------------------------
+  // RFC-036 §6: self-report and scrape should agree; a mismatch is itself a
+  // finding. Pair each scraped telemetry with the nearest self-reported one
+  // within ±5 minutes and compare the comparable fields: ctx (absolute ±5
+  // points) and in-tokens (relative ±10%). Fields that are null on either
+  // side are uncomparable, not matching — they are skipped, not excused.
+  const scraped = telemetry.filter((e) => (e as LedgerEvent)['source'] === 'scraped');
+  const self = telemetry.filter((e) => (e as LedgerEvent)['source'] !== 'scraped');
+  const PAIR_WINDOW_MS = 5 * 60_000;
+  const mismatches: Scorecard['telemetryCrossCheck']['mismatches'] = [];
+  let paired = 0;
+  for (const sc of scraped) {
+    const scMs = tsMs(sc as LedgerEvent);
+    let best: LedgerEvent | null = null;
+    let bestDelta = Infinity;
+    for (const se of self) {
+      const d = Math.abs(tsMs(se as LedgerEvent) - scMs);
+      if (d < bestDelta) { bestDelta = d; best = se as LedgerEvent; }
+    }
+    if (!best || bestDelta > PAIR_WINDOW_MS) continue;
+    paired++;
+    const fields: string[] = [];
+    const selfCtx = num(best, 'ctx-remaining-pct');
+    const scCtx = num(sc as LedgerEvent, 'ctx-remaining-pct');
+    if (selfCtx !== null && scCtx !== null && Math.abs(selfCtx - scCtx) > 5) fields.push(`ctx ${selfCtx}% vs ${scCtx}%`);
+    const selfIn = num(best, 'in-tokens');
+    const scIn = num(sc as LedgerEvent, 'in-tokens');
+    if (
+      selfIn !== null && scIn !== null &&
+      Math.abs(selfIn - scIn) / Math.max(selfIn, scIn) > 0.10
+    ) fields.push(`in-tokens ${selfIn.toLocaleString('en-US')} vs ${scIn.toLocaleString('en-US')}`);
+    if (fields.length > 0) {
+      mismatches.push({ at: (sc as LedgerEvent).ts, fields, self: best.ts, scraped: (sc as LedgerEvent).ts });
+    }
+  }
+  for (const m of mismatches) {
+    alarms.push({
+      benchmark: 'telemetry',
+      detail: `self-report vs scrape mismatch at ${m.at}: ${m.fields.join('; ')} (self ${m.self}, scraped ${m.scraped})`,
+    });
+  }
+
   // --- Trailer audit (#323) ------------------------------------------------
   const audit = opts?.trailerAudit ?? null;
   const trailerAudit = {
@@ -365,6 +413,7 @@ export const computeScorecard = (
     claimVerification,
     escalationLatency: latency,
     headroom: { disciplined, late, unknown, ctxBelow25Observed },
+    telemetryCrossCheck: { scraped: scraped.length, paired, mismatches },
     trailerAudit,
     alarms,
   };
@@ -414,6 +463,14 @@ export const renderHuman = (s: Scorecard): string => {
   L.push(
     `   escalations: ${s.headroom.disciplined} disciplined, ${s.headroom.late} late, ${s.headroom.unknown} unknown | ctx<25% observed: ${s.headroom.ctxBelow25Observed ? 'yes' : 'no'}`,
   );
+  L.push('6. Telemetry cross-check (self-report vs scrape)');
+  if (s.telemetryCrossCheck.scraped === 0) {
+    L.push('   no scraped telemetry (poller: scripts/ledger-scrape.ts <pane> <ledger>)');
+  } else {
+    L.push(
+      `   ${s.telemetryCrossCheck.scraped} scraped, ${s.telemetryCrossCheck.paired} paired with self-reports, ${s.telemetryCrossCheck.mismatches.length} mismatch(es)`,
+    );
+  }
   L.push('');
   if (s.alarms.length === 0) {
     L.push('Alarms: none');
