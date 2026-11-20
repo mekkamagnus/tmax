@@ -57,7 +57,7 @@ With 0 or negative number, disable."
   (require-module fikra/backend-codex)
   ;; Skills (8.7): the SPC a k picker's module must be LOADED for the
   ;; binding to resolve (the approvals lesson, round 38).
-  (require-module fikra/skills)
+  (require-module "fikra/skills")
   ;; Round-38 live catch: approvals registers the L2 mediate HANDLER at
   ;; module load (confirmation-handler-register). Nothing on the plain
   ;; SPC a a path loaded it — the CLI's permission mediate arrived, hit
@@ -115,7 +115,7 @@ With 0 or negative number, disable."
 ;; Turn diff view (mockup 8.4 entry point; the ± rows land at turn end).
 (key-bind "SPC a d" "(progn (require-module fikra/diff) (fikra/diff/fikra-turn-diff))" "normal")
 ;; Skills picker (mockup 8.7: .fikra/skills surfaced to model and user).
-(key-bind "SPC a k" "(progn (require-module fikra/skills) (fikra/skills/fikra-skill-prompt))" "normal")
+(key-bind "SPC a k" "(progn (require-module "fikra/skills") (fikra/skills/fikra-skill-prompt))" "normal")
 
 (provide "fikra-mode")
 )
