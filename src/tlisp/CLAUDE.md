@@ -46,12 +46,15 @@ through the SPAWNING editor's `evalTlisp`. The verified model (pinned by
   environment — a `setq` performed in the main session IS visible to the
   filter, and hashmap mutations are shared. There is no two-state split
   within one interpreter.
-- **Cross session (the 2026-11-20 incident class):** when a daemon hosts
-  multiple editor sessions, a callback's `evalTlisp` is bound to the
-  session that SPAWNED the process — module variables `setq`'d in a
-  DIFFERENT session are invisible there, while shared object state
-  (hashmaps mutated via `keymap-mutable-set!`) crosses. The dropped
-  turn-end incident was this split, not interpreter scoping.
+- **Cross session (the 2026-11-20 incident class — incident evidence,
+  not fixture-proven):** when a daemon hosts multiple editor sessions, a
+  callback's `evalTlisp` is bound to the session that SPAWNED the
+  process — module variables `setq`'d in a DIFFERENT session are
+  invisible there. The dropped turn-end incident showed this split for
+  defvar reads; whether hashmap mutations ALWAYS cross sessions is
+  incident-inferred (the explicit-path emitters were adopted so landing
+  does not depend on it). Do not rely on cross-session sharing without
+  a same-session fallback.
 
 **Safe patterns:** derive what callbacks need from mutation-shared
 carriers (`keymap-mutable-set!` hashmaps) or thread-record fields; the

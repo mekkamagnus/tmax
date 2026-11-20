@@ -46,15 +46,18 @@ const PROBE_MODULE = `
   ;; The FILTER + SENTINEL — both run in the make-process callback's
   ;; evalTlisp context; each records WHICH fired plus its view of BOTH
   ;; carriers into the observations map.
+  ;; Each callback records BOTH observations under its OWN key prefix —
+  ;; the filter's and sentinel's views are asserted independently
+  ;; (codex r1: one shared record could not distinguish them).
   (defun cb-probe-record (which)
     (editor/keymaps/keymap-mutable-set! cb-probe-observations
-      "var-as-seen-by-filter" (if (stringp cb-probe-var) cb-probe-var "NON-STRING"))
+      (concat which "-var") (if (stringp cb-probe-var) cb-probe-var "NON-STRING"))
     (editor/keymaps/keymap-mutable-set! cb-probe-observations
-      "map-as-seen-by-filter"
+      (concat which "-map")
       (if (hashmap-get cb-probe-map "main-key") "shared" "NOT-SHARED"))
     (editor/keymaps/keymap-mutable-set! cb-probe-observations which "t"))
-  (defun cb-probe-filter (pid output) (cb-probe-record "filter-ran"))
-  (defun cb-probe-sentinel (pid code) (cb-probe-record "sentinel-ran"))
+  (defun cb-probe-filter (pid output) (cb-probe-record "filter"))
+  (defun cb-probe-sentinel (pid code) (cb-probe-record "sentinel"))
 (provide "callback-probe")
 )
 `;
@@ -83,27 +86,29 @@ describe("#306 — the evalTlisp callback-context state model (regression)", () 
     // Wait for the callback to have run (process exit fires the sentinel).
     for (let i = 0; i < 40; i++) {
       await new Promise((r) => setTimeout(r, 250));
-      const ran = String(e(editor, '(callback-probe/cb-probe-obs "filter-ran")').value);
-      const sent = String(e(editor, '(callback-probe/cb-probe-obs "sentinel-ran")').value);
+      const ran = String(e(editor, '(callback-probe/cb-probe-obs "filter")').value);
+      const sent = String(e(editor, '(callback-probe/cb-probe-obs "sentinel")').value);
       if (ran === "t" && sent === "t") break;
     }
 
     const obs = (k: string) => String(e(editor, `(callback-probe/cb-probe-obs "${k}")`).value);
-    expect(obs("filter-ran")).toBe("t");
+    expect(obs("filter")).toBe("t");
 
-    // DIRECTION 1 — the NARROWED finding: within one session the filter
-    // sees the main session's setq (the incident's invisibility was the
-    // daemon's separate-editor-session split, NOT interpreter scoping).
-    expect(obs("var-as-seen-by-filter")).toBe("main-session-value");
+    // DIRECTION 1 — the NARROWED finding: within one session EACH callback
+    // kind sees the main session's setq (the incident's invisibility was
+    // the daemon's separate-editor-session split, NOT interpreter scoping).
+    expect(obs("filter-var")).toBe("main-session-value");
+    expect(obs("sentinel-var")).toBe("main-session-value");
 
-    // DIRECTION 2 — mutation-shared: the filter SEES the main session's
-    // hashmap write.
-    expect(obs("map-as-seen-by-filter")).toBe("shared");
+    // DIRECTION 2 — mutation-shared: EACH callback kind SEES the main
+    // session's hashmap write.
+    expect(obs("filter-map")).toBe("shared");
+    expect(obs("sentinel-map")).toBe("shared");
 
     // BOTH callback kinds fired (filter for the output chunk, sentinel
     // for process exit) — and the main session reads the callback's own
     // writes through the shared observations map (callback→main sharing).
-    expect(obs("filter-ran")).toBe("t");
-    expect(obs("sentinel-ran")).toBe("t");
+    expect(obs("filter")).toBe("t");
+    expect(obs("sentinel")).toBe("t");
   });
 });
