@@ -702,3 +702,25 @@ The highest-impact remaining fixes are:
 4. **Complete diff review evidence.** Add the proposed turn/tool context and verify revert through the live UI; summary, navigation, and revert handlers are in [diff.tlisp](/Users/mekael/Documents/programming/typescript/tmax/src/tlisp/core/fikra/diff.tlisp:38).
 
 The new captures resolve the previous visibility gap for diff navigation and establish both worktree-entry outcomes. Fikra now has substantial live evidence across all six areas, with especially strong proof of the existing CLI approval bridge and diff navigation. The largest remaining distance from the RFC is the proposed native harness and the **finished worktree-to-main handoff**: creating a worktree and refusing unsafe entry do not yet prove that handoff screen or its choices. These grades compare the supplied captures and current code with the proposal; I did not rerun the workflows for this review.
+
+---
+
+# Round 23 (the completed-worktree handoff) — 2026-11-20
+
+| Section | Grade | Justification |
+|---|---:|---|
+| **8.1 Chat** | **8/10** | Live chat shows turns, inline tool calls, results and edits; the dense, wrapping modeline and CLI-mediated execution still differ from the native-loop mockup. |
+| **8.2 Capture** | **7/10** | The capture buffer and send/cancel controls are visible, but the mockup’s recipient, context, history and persistent help are not shown. |
+| **8.3 Approval** | **7/10** | A live CLI-mediated approval pauses a Write before execution and shows a checkpoint; narrow rendering truncates action details and controls, and the mockup’s native provenance is not demonstrated. |
+| **8.4 Turn diff + revert** | **8/10** | The live diff shows changed files and contents, with working file navigation; turn navigation and a live revert are not demonstrated in the supplied captures. |
+| **8.5 Threads** | **7/10** | The live list exposes thread, backend, mode, location, status and turns, but its fixed-width rows wrap heavily and the mockup’s activity and worktree summary are absent. |
+| **8.6 Worktree handoff** | **7/10** | A completed worktree turn now lands locally via patch, with the resulting `PATCHED` file verified; the dedicated review/apply/refuse screen and an exit-path conflict refusal are not demonstrated. |
+
+The top remaining fixes are:
+
+1. Add a reviewable handoff screen with patch summary, clean-apply status, diff, apply and refuse controls in [worktree.tlisp](/Users/mekael/Documents/programming/typescript/tmax/src/tlisp/core/fikra/worktree.tlisp:125). Verify exit refusal against a conflicting local change.
+2. Make approval details and choices readable at narrow widths in [event.tlisp](/Users/mekael/Documents/programming/typescript/tmax/src/tlisp/core/fikra/event.tlisp:133), including an untruncated target and accurate provenance.
+3. Adapt the thread list to available width and add the mockup’s summary and action hints in [threads.tlisp](/Users/mekael/Documents/programming/typescript/tmax/src/tlisp/core/fikra/threads.tlisp:30).
+4. Surface capture recipient, context and history controls in [capture.tlisp](/Users/mekael/Documents/programming/typescript/tmax/src/tlisp/core/fikra/capture.tlisp:16); complete and demonstrate turn navigation and revert in [diff.tlisp](/Users/mekael/Documents/programming/typescript/tmax/src/tlisp/core/fikra/diff.tlisp:44).
+
+The completed-worktree exit evidence closes the principal functional gap from round 22: work performed inside the worktree was applied to the local tree, and the local file contains `PATCHED`. All six sections now reach **7/10 or higher** on this rubric, though that is a comparison against the supplied captures, not a claim of full mockup parity. The largest remaining gaps are reviewable handoff UX, narrow-terminal readability, and live evidence for conflict refusal and revert.
