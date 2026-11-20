@@ -36,7 +36,7 @@ import type { EditorRuntimeCaches } from "../../src/editor/runtime/caches.ts";
 
 describe("CHORE-44 Change 7 — editor API registry", () => {
   // ── AC7.1: live inventory matches the checked-in baseline ────────────
-  test("AC7.1: createEditorAPI inventory equals the checked-in baseline (427 names)", () => {
+  test("AC7.1: createEditorAPI inventory equals the checked-in baseline (430 names)", () => {
     const baselinePath = join(import.meta.dir, "..", "..", ".chore44-baseline", "api-names-static.txt");
     const expected = readFileSync(baselinePath, "utf8")
       .split("\n")
@@ -49,7 +49,8 @@ describe("CHORE-44 Change 7 — editor API registry", () => {
     // #231: 421 → 424 — the flash-region goggles primitive.
     // Round-34: 424 → 426 — tmax-root + tmax-mcp-bridge-path (the L2 seam).
     // #298: 426 → 427 — client-launch-dir (client-context thread roots).
-    expect(live.length).toBe(427);
+    // 8.8 arc: 427 → 430 — ghost-text-set/clear + ghost-anchor-set.
+    expect(live.length).toBe(430);
     expect(live).toEqual(expected);
   });
 
