@@ -248,6 +248,15 @@ describe("#304: id-based ending dedup", () => {
     expect(stripAnsi(text).split("── completed ──").length - 1).toBe(2);
   });
 
+  test("IMMEDIATELY adjacent distinct-id endings with the same status BOTH render (codex r1)", async () => {
+    const editor = await createStartedEditor("");
+    setup(editor);
+    ev(editor, "turn-end", { turn: "8", status: "completed" });
+    ev(editor, "turn-end", { turn: "9", status: "completed" });
+    const text = replay(editor);
+    expect(stripAnsi(text).split("── completed ──").length - 1).toBe(2);
+  });
+
   test("the *Messages* note fires when stale endings drop (gate r1: normative rule had zero coverage)", async () => {
     const editor = await createStartedEditor("");
     setup(editor);
