@@ -4,7 +4,7 @@
           fikra-event-turn-tools
           fikra-event-emit-batch fikra-event-replay fikra-event-events
           fikra-event-reset fikra-event-render-line fikra-event-rebuild-fikra-buffer
-          fikra-event-inline-ckpt-merge fikra-event-render-fold fikra-inline-find-call fikra-inline-edit-p fikra-inline-ref-turn fikra-inline-event-turn)
+          fikra-event-inline-ckpt-merge fikra-event-render-fold fikra-inline-find-call fikra-inline-edit-p fikra-inline-ref-identity fikra-inline-event-identity)
 
 ;; #212 (RFC-027 §D2) — FAEP: the Fikra Agent Event Protocol. Every backend's
 ;; output normalizes into ONE event vocabulary; threads are event-sourced
@@ -635,17 +635,18 @@ text-deltas inside the batch join into the same line."
           ;; ref to turn 2's edit — the boundary limited position, not
           ;; identity). The checkpoint's ref turn must EQUAL the turn of
           ;; the call it would attach to.
-          (let* ((ckpt-turn (fikra-inline-ref-turn
-                              (fikra-event-get-str e "ref")))
+          (let* ((ckpt-id (fikra-inline-ref-identity
+                         (fikra-event-get-str e "ref")))
                  (call-idx (if (eq last-kind 'turn)
                              nil
                              (fikra-inline-find-call out 0)))
-                 (call-turn (if call-idx
-                              (fikra-inline-event-turn out call-idx)
-                              nil)))
-            (if (and call-idx
-                     (or (not ckpt-turn) (not call-turn)
-                         (string= ckpt-turn call-turn)))
+                 (call-id (if call-idx
+                            (fikra-inline-event-identity out call-idx)
+                            nil)))
+            ;; Full identity: "<thread>/<turn>" on BOTH sides, and NO
+            ;; attach when either is unparseable (r67: a missing side
+            ;; used to attach — no identity, no marker).
+            (if (and call-idx ckpt-id call-id (string= ckpt-id call-id))
               (fikra-event-inline-ckpt-merge (cdr events)
                 (fikra-inline-replace out call-idx
                   (fikra-event-with-ckpt (nth call-idx out)
@@ -655,17 +656,18 @@ text-deltas inside the batch join into the same line."
         (t
           (fikra-event-inline-ckpt-merge (cdr events) (cons e out) k))))))
 
-;; The "<turn>" from refs/fikra/<id>/<n>[-baseline] (nil when unparseable).
-(defun fikra-inline-ref-turn (ref)
-  (fikra-inline-ref-turn-scan (string-split ref "/") (list)))
+;; "<thread>/<turn>" from refs/fikra/<id>/<n>[-baseline] — the FULL
+;; identity (nil when unparseable).
+(defun fikra-inline-ref-identity (ref)
+  (fikra-inline-ref-id-scan (string-split ref "/") (list)))
 
-(defun fikra-inline-ref-turn-scan (segs acc)
+(defun fikra-inline-ref-id-scan (segs acc)
   (if (null segs)
-    (let ((kept acc)) ;; kept = (turn id) newest-first — nth 0 IS the turn.
+    (let ((kept acc)) ;; kept = (turn id) newest-first.
       (if (>= (length kept) 2)
-        (fikra-inline-strip-baseline (nth 0 kept))
+        (concat (nth 1 kept) "/" (fikra-inline-strip-baseline (nth 0 kept)))
         nil))
-    (fikra-inline-ref-turn-scan (cdr segs)
+    (fikra-inline-ref-id-scan (cdr segs)
       (if (or (string= (car segs) "refs") (string= (car segs) "fikra"))
         acc
         (cons (car segs) acc)))))
@@ -676,16 +678,23 @@ text-deltas inside the batch join into the same line."
     (substring seg 0 (- (length seg) 9))
     seg))
 
-;; The turn an event at OUT index I belongs to: scan backward for its
-;; turn-start (the accumulator is newest-first; turn numbers ride it).
-(defun fikra-inline-event-turn (out i)
+;; "<thread>/<turn>" for the event at OUT index I: the current thread +
+;; its turn-start's number (nil when no turn-start precedes).
+(defun fikra-inline-event-identity (out i)
   (if (>= i (length out))
     nil
     (let ((ev (nth i out)))
       (if (string= (fikra-event-get-str ev "kind") "turn-start")
         (let ((tn (fikra-event-get ev "turn")))
-          (if tn (number-to-string tn) nil))
-        (fikra-inline-event-turn out (+ i 1))))))
+          (if tn
+            (concat (condition-case nil
+                        (progn (require-module fikra/thread)
+                               (let ((tid (fikra/thread/fikra-thread-current)))
+                                 (if (and tid (> (length tid) 0)) tid "main")))
+                        (error () "main")) "/"
+                    (number-to-string tn))
+            nil))
+        (fikra-inline-event-identity out (+ i 1))))))
 
 ;; The index of the nearest EDIT-like tool-call in OUT, stopping at the
 ;; turn boundary, or nil.

@@ -119,9 +119,9 @@ describe("#8.1 inline ckpt marker (r63)", () => {
     const ed = await createStartedEditor("");
     e(ed, '(require-module "fikra/event")');
     e(ed, '(defvar r63-evs nil)');
-    e(ed, '(setq r63-evs (fikra/event/fikra-event-inline-ckpt-merge (list (list (list "kind" "tool-call") (list "tool" "buffer-edit") (list "id" "ab12") (list "summary" "src/x.ts @118")) (list (list "kind" "checkpoint-ready") (list "ref" "refs/fikra/main/3"))) (list) nil))');
-    expect(String(e(ed, "(length r63-evs)").value)).toBe("1");
-    const line = String(e(ed, "(fikra/event/fikra-event-render-line (nth 0 r63-evs))").value);
+    e(ed, '(setq r63-evs (fikra/event/fikra-event-inline-ckpt-merge (list (list (list "kind" "turn-start") (list "turn" 3) (list "backend" "replay") (list "mode" "")) (list (list "kind" "tool-call") (list "tool" "buffer-edit") (list "id" "ab12") (list "summary" "src/x.ts @118")) (list (list "kind" "checkpoint-ready") (list "ref" "refs/fikra/main/3"))) (list) nil))');
+    expect(String(e(ed, "(length r63-evs)").value)).toBe("2"); // ts + merged Edit
+    const line = String(e(ed, "(fikra/event/fikra-event-render-line (nth 1 r63-evs))").value);
     expect(line).toContain("⚙ buffer-edit");
     expect(line).toContain("[ckpt main/3 ✓]");
     expect(line).toContain("src/x.ts @118");
@@ -154,9 +154,9 @@ describe("#8.1 inline ckpt marker (r63)", () => {
     expect(String(e(ed, "(fikra/event/fikra-event-render-line (nth 4 r64-b))").value)).toContain("[ckpt main/2 ✓]");
     // Same-turn Edit + intervening result: attaches to the CALL.
     e(ed, '(defvar r64-c nil)');
-    e(ed, '(setq r64-c (fikra/event/fikra-event-inline-ckpt-merge (list (list (list "kind" "tool-call") (list "tool" "Edit") (list "id" "ef02") (list "summary" "src/a.ts @7")) (list (list "kind" "tool-result") (list "ok" t) (list "id" "ef02") (list "summary" "applied")) (list (list "kind" "checkpoint-ready") (list "ref" "refs/fikra/main/5"))) (list) nil))');
-    expect(String(e(ed, "(fikra/event/fikra-event-render-line (nth 0 r64-c))").value)).toContain("[ckpt main/5 ✓]");
-    expect(String(e(ed, "(fikra/event/fikra-event-render-line (nth 1 r64-c))").value)).not.toContain("[ckpt");
+    e(ed, '(setq r64-c (fikra/event/fikra-event-inline-ckpt-merge (list (list (list "kind" "turn-start") (list "turn" 5) (list "backend" "replay") (list "mode" "")) (list (list "kind" "tool-call") (list "tool" "Edit") (list "id" "ef02") (list "summary" "src/a.ts @7")) (list (list "kind" "tool-result") (list "ok" t) (list "id" "ef02") (list "summary" "applied")) (list (list "kind" "checkpoint-ready") (list "ref" "refs/fikra/main/5"))) (list) nil))');
+    expect(String(e(ed, "(fikra/event/fikra-event-render-line (nth 1 r64-c))").value)).toContain("[ckpt main/5 ✓]");
+    expect(String(e(ed, "(fikra/event/fikra-event-render-line (nth 2 r64-c))").value)).not.toContain("[ckpt");
   });
 
   test("Edit→bash→checkpoint: the marker does NOT reach past the shell (r64)", async () => {
