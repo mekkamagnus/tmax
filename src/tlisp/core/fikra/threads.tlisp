@@ -8,9 +8,10 @@
 
 ;; #222 (RFC-027 §D7): the *Fikra-Threads* buffer — threads grouped by
 ;; project (zcode model), columns name/backend/mode/location(local|
-;; worktree|legacy #298)/status/turns. j/k navigate, RET switches (focus +
-;; buffer + modeline), d archives (soft delete), n creates. Buffer-local
-;; keymap.
+;; worktree|legacy #298)/status/turns. j/Up/Down navigate (k is the
+;; mockup's KILL — archive), RET switches (focus + buffer + modeline),
+;; d archives (soft delete), n/t create, b picks the selected thread's
+;; backend, w enters/reviews its worktree. Buffer-local keymap.
 
 (require-module fikra/thread)
 
@@ -41,7 +42,7 @@ L<level>, worktree/main-tree, last activity), and the key-hint row."
       (if (> count 1) (buffer-delete-range 0 0 (- count 1) 0)))
     (cursor-move 0 0)
     (buffer-insert
-      (concat "PROJECT " (fikra-threads-project-label)
+      (concat "PROJECT " (fikra-threads-basename (fikra-threads-project-label))
               "  ·  " (number-to-string (length rows)) " thread(s)"
               "  ·  worktrees: " (number-to-string (fikra-threads-worktree-count rows 0)) " active\n"))
     (buffer-insert "\n")
@@ -89,6 +90,19 @@ L<level>, worktree/main-tree, last activity), and the key-hint row."
     (let* ((diff (/ (- (current-time) last-at) 60000))
            (mins (if (< diff 1) 0 (- diff (mod diff 1)))))
       (concat (number-to-string mins) "m ago"))))
+
+;; The root's BASENAME (the mockup's "PROJECT tmax", not the full path).
+(defun fikra-threads-basename (path)
+  (if (or (not path) (= (length path) 0))
+    "-"
+    (fikra-threads-basename-scan path -1 0)))
+
+(defun fikra-threads-basename-scan (path last i)
+  (if (>= i (length path))
+    (substring path (+ last 1) (length path))
+    (fikra-threads-basename-scan path
+      (if (string= (substring path i (+ i 1)) "/") i last)
+      (+ i 1))))
 
 (defun fikra-threads-project-label ()
   (let ((root (progn (if (not (fikra/thread/fikra-thread-current))
@@ -187,7 +201,7 @@ modeline)."
   (if (not (editor/keymaps/buffer-keymap fikra-threads-buffer-name))
     (let ((kmap (editor/keymaps/keymap-init "fikra-threads")))
       (editor/keymaps/keymap-set-key kmap "j" "(fikra/threads/fikra-threads-j)")
-      (editor/keymaps/keymap-set-key kmap "k" "(fikra/threads/fikra-threads-k)")
+      ;; k = KILL (the mockup); up-navigation stays on Up (j/Down/Up).
       (editor/keymaps/keymap-set-key kmap "Down" "(fikra/threads/fikra-threads-j)")
       (editor/keymaps/keymap-set-key kmap "Up" "(fikra/threads/fikra-threads-k)")
       (editor/keymaps/keymap-set-key kmap "RET" "(fikra/threads/fikra-threads-RET)")

@@ -1,5 +1,6 @@
 (defmodule fikra/adapter
   (export fikra-register-backend fikra-set-backend fikra-current-backend
+          fikra-backend-table fikra-backend-accept
           fikra-list-backends fikra-list-available-backends fikra-backend-available-p
           fikra-backend-capabilities fikra-backend-capable-p
           fikra-backend-start-turn fikra-backend-abort
@@ -119,11 +120,43 @@ agnostic). Refuses unavailable backends."
         (error nil)))))
 
 (defun fikra-backend-prompt ()
-  "Prompt user to select a backend (first available; full popup Phase 3+)."
+  "Pick a backend via completing-read over the REGISTERED backends (the
+  runtime-mode picker pattern; the old 'first available' stub never
+  prompted — codex r43)."
   (let ((available (fikra-list-available-backends)))
     (if (= (length available) 0)
       (progn (message "Fikra: no backends available") nil)
-      (car available))))
+      (completing-read "backend "
+                       "fikra/adapter/fikra-backend-table"
+                       nil nil ""
+                       "fikra-backend-history"
+                       "fikra/adapter/fikra-backend-accept"))))
+
+(defun fikra-backend-table (input action)
+  (if (string= action "metadata")
+    (hashmap "category" "backend")
+    (fikra-backend-rows (fikra-list-available-backends) (list))))
+
+(defun fikra-backend-rows (backends acc)
+  (if (null backends)
+    (reverse acc)
+    (fikra-backend-rows (cdr backends)
+      (cons (hashmap "value" (car backends)
+                     "display" (car backends)
+                     "annotation" "  backend"
+                     "metadata" (hashmap))
+            acc))))
+
+(defun fikra-backend-accept (choice)
+  ;; completing-read's accept DOES the work (the runtime-mode pattern):
+  ;; set the adapter selection AND the thread's persisted backend field.
+  (if (and choice (> (length choice) 0))
+    (progn
+      (fikra-set-backend choice)
+      (editor-set-status (concat "Fikra: backend " choice)))
+    nil))
+
+(defvar fikra-backend-history nil)
 
 ;; Legacy bridge: chat(messages, options) → start-turn(last message). Kept so
 ;; pre-#216 callers keep working; #216 rebinds everything to threads.

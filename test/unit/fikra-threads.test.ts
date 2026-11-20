@@ -136,7 +136,8 @@ describe("#222 *Fikra-Threads* list buffer", () => {
     const text = bufferText(editor);
     // Header + project root grouping label.
     expect(text).toContain("PROJECT ");
-    expect(text).toContain(repoDir);
+    // The header shows the root's BASENAME (the mockup's "PROJECT tmax").
+    expect(text).toContain(basename(repoDir));
     // Both threads listed with columns.
     expect(text).toContain("main");
     expect(text).toContain("fix-1");
