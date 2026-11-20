@@ -1,6 +1,6 @@
 import { describe, expect, test, beforeEach, afterAll } from "bun:test";
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, rmSync, writeFileSync, readFileSync, existsSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync, readFileSync, existsSync, readdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createStartedEditor, executeTlisp } from "../helpers/editor-fixture.ts";
@@ -82,7 +82,10 @@ describe("#8.4 turn navigation + history revert (r48)", () => {
     e(ed, "(fikra/diff/fikra-diff-revert-turn)");
     e(ed, '(fikra/diff/fikra-diff-revert-completed-accept "revert")');
     expect(readFileSync(join(repoDir, "app.txt"), "utf8")).toBe("line1\nfeature-a\nfeature-b\n");
-    expect(existsSync(join(repoDir, ".tmax/fikra/stash/revert-nav-1.patch"))).toBe(true);
+    // Unique per attempt (timestamped) — assert SOME stash exists.
+    const stashDir = join(repoDir, ".tmax/fikra/stash");
+    const stashes = existsSync(stashDir) ? readdirSync(stashDir).filter(f => f.startsWith("revert-nav-1-")) : [];
+    expect(stashes.length).toBeGreaterThan(0);
     // The cancel path leaves everything untouched.
     e(ed, "(fikra/diff/fikra-diff-revert-completed 2)");
     e(ed, '(fikra/diff/fikra-diff-revert-completed-accept "cancel")');
@@ -134,6 +137,41 @@ describe("#8.4 turn navigation + history revert (r48)", () => {
     // The later edit survives untouched.
     expect(readFileSync(join(repoDir, "app.txt"), "utf8")).toBe("line1\nfeature-a\nLATER-EDIT\n");
     // The divergent content was stashed for manual re-application.
-    expect(existsSync(join(repoDir, ".tmax/fikra/stash/revert-nav-1.patch"))).toBe(true);
+    // Unique per attempt (timestamped) — assert SOME stash exists.
+    const stashDir = join(repoDir, ".tmax/fikra/stash");
+    const stashes = existsSync(stashDir) ? readdirSync(stashDir).filter(f => f.startsWith("revert-nav-1-")) : [];
+    expect(stashes.length).toBeGreaterThan(0);
+  });
+
+  test("a turn-DELETED file the user RECREATED is refused (the untracked blind spot, r51)", async () => {
+    const ed = await createStartedEditor("");
+    e(ed, '(require-module "fikra/adapter")');
+    e(ed, "(require-module fikra/backend-replay)");
+    e(ed, '(require-module "fikra/thread")');
+    e(ed, '(fikra-thread-focus "nav")');
+    e(ed, '(fikra-thread-set-field "turn-count" 1)');
+    // Baseline HAS gone.txt; the turn's completion DELETED it.
+    writeFileSync(join(repoDir, "gone.txt"), "original\n");
+    writeFileSync(join(repoDir, "app.txt"), "line1\n");
+    execFileSync("git", ["add", "-A"], { cwd: repoDir });
+    const baseTree = execFileSync("git", ["write-tree"], { cwd: repoDir }).toString().trim();
+    const baseC = execFileSync("git", ["commit-tree", baseTree, "-m", "b"], { cwd: repoDir }).toString().trim();
+    execFileSync("git", ["update-ref", "refs/fikra/nav/1-baseline", baseC], { cwd: repoDir });
+    // Turn 1: completion deletes gone.txt.
+    const compTree = execFileSync("git", ["write-tree"], { cwd: repoDir }).toString().trim(); // still has it — write a tree WITHOUT it:
+    // (simplest: temp index not needed — commit a tree where gone.txt is absent via git rm)
+    execFileSync("git", ["rm", "-q", "--cached", "gone.txt"], { cwd: repoDir });
+    const compTree2 = execFileSync("git", ["write-tree"], { cwd: repoDir }).toString().trim();
+    const compC = execFileSync("git", ["commit-tree", compTree2, "-m", "c"], { cwd: repoDir }).toString().trim();
+    execFileSync("git", ["update-ref", "refs/fikra/nav/1", compC], { cwd: repoDir });
+    execFileSync("git", ["reset", "-q"], { cwd: repoDir });
+    // The user recreates gone.txt as an UNTRACKED file.
+    writeFileSync(join(repoDir, "gone.txt"), "user recreated\n");
+    e(ed, '(require-module "fikra/diff")');
+    e(ed, "(fikra/diff/fikra-diff-revert-completed 1)");
+    e(ed, '(fikra/diff/fikra-diff-revert-completed-accept "revert")');
+    // REFUSED: the recreation survives (the old guard passed diff --quiet
+    // here and checkout clobbered it).
+    expect(readFileSync(join(repoDir, "gone.txt"), "utf8")).toBe("user recreated\n");
   });
 });

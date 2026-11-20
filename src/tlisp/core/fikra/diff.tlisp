@@ -220,6 +220,9 @@ ambiguity)."
 ;; r49: CONFIRMED first (the live revert's contract — the r48 direct
 ;; dispatch skipped confirmation). The pending turn rides a defvar; the
 ;; ACCEPT owns the work (completing-read never returns the choice).
+(defvar fikra-diff-last-stash nil
+  "The most recent revert-refusal stash path (nil until one exists).")
+
 (defvar fikra-diff-pending-revert-turn nil
   "The history turn awaiting revert confirmation.")
 
@@ -256,16 +259,22 @@ ambiguity)."
     (if (or (null paths) (= (length paths) 0))
       (editor-set-status (concat "Fikra: turn " (number-to-string n) " has no captured changes"))
       (progn
-        ;; SPEC-218: save divergent content BEFORE any restore runs.
-        (shell-command (concat "mkdir -p " (fikra/thread/fikra-thread-shq
-                         (concat root "/.tmax/fikra/stash"))))
-        (shell-command
-          (concat "git -C " (fikra/thread/fikra-thread-shq root)
-                  " diff --binary " completion " -- "
-                  (fikra-join-args paths)
-                  " > " (fikra/thread/fikra-thread-shq
-                          (concat root "/.tmax/fikra/stash/revert-" id "-" (number-to-string n) ".patch"))
-                  " 2>/dev/null || true"))
+        ;; SPEC-218: save divergent content BEFORE any restore runs —
+        ;; UNIQUE filename per attempt (r51: a fixed name was overwritten
+        ;; on repeated reverts) and the patch generation is VERIFIED (the
+        ;; refusal message only claims a stash when one exists).
+        (let ((stash-path (concat root "/.tmax/fikra/stash/revert-" id "-"
+                                  (number-to-string n) "-"
+                                  (number-to-string (current-time)) ".patch")))
+          (shell-command (concat "mkdir -p " (fikra/thread/fikra-thread-shq
+                           (concat root "/.tmax/fikra/stash"))))
+          (setq fikra-diff-last-stash stash-path)
+          (shell-command
+            (concat "git -C " (fikra/thread/fikra-thread-shq root)
+                    " diff --binary " completion " -- "
+                    (fikra-join-args paths)
+                    " > " (fikra/thread/fikra-thread-shq stash-path)
+                    " 2>/dev/null || true")))
         (dolist (p paths)
           (let ((step (fikra-diff-restore-one root base completion p)))
             (cond
@@ -277,7 +286,9 @@ ambiguity)."
           (editor-set-status
             (concat "Fikra: revert REFUSED — changed since the turn: "
                     (fikra-diff-join-names (reverse diverged) "")
-                    " (saved to .tmax/fikra/stash/revert-" id "-" (number-to-string n) ".patch)"))
+                    (if (and fikra-diff-last-stash (file-exists-p fikra-diff-last-stash))
+                      (concat " (stash: " fikra-diff-last-stash ")")
+                      " (no stash — content untracked)")))
           (if (> (length failures) 0)
             (editor-set-status (concat "Fikra: revert FAILED for: "
                                        (fikra-diff-join-names (reverse failures) "")))
@@ -290,6 +301,14 @@ ambiguity)."
 ;; else the failing path. Divergent content is saved to
 ;; .tmax/fikra/stash/revert-<n>.patch before any restore runs.
 (defun fikra-diff-restore-one (root base completion p)
+  ;; SPEC-218's four-way table — computed EXPLICITLY, never inferred from
+  ;; git diff --quiet alone (r51: an untracked recreation is INVISIBLE to
+  ;; diff, so the quiet check passed and checkout clobbered the user's
+  ;; file):
+  ;;   absent-completion + absent-disk  -> clean restore (checkout base)
+  ;;   absent-completion + present-disk -> DIVERGED (user recreated)
+  ;;   present-completion + absent-disk -> DIVERGED (user deleted)
+  ;;   present-both                    -> cmp contents (diff --quiet)
   (let ((in-base (string= (string-trim (shell-command
                (concat "git -C " (fikra/thread/fikra-thread-shq root)
                        " cat-file -e " base ":" (fikra/thread/fikra-thread-shq p)
@@ -298,35 +317,43 @@ ambiguity)."
                (concat "git -C " (fikra/thread/fikra-thread-shq root)
                        " cat-file -e " completion ":" (fikra/thread/fikra-thread-shq p)
                        " 2>/dev/null && echo yes || echo no"))) "yes"))
+        (on-disk (string= (string-trim (shell-command
+               (concat "test -f " (fikra/thread/fikra-thread-shq (concat root "/" p))
+                       " && echo yes || echo no"))) "yes"))
         (same-as-completion (string= (string-trim (shell-command
                (concat "git -C " (fikra/thread/fikra-thread-shq root)
                        " diff --quiet " completion " -- " (fikra/thread/fikra-thread-shq p)
                        " 2>/dev/null && echo same || echo diff"))) "same")))
-    (if (not same-as-completion)
-      (concat "DIV:" p)
-      (if in-base
-        (if in-completion
-          ;; M: restore from the baseline (guard proved no later edits).
-          (if (string-match "RESTORE-OK"
-                (string-trim (shell-command
-                  (concat "git -C " (fikra/thread/fikra-thread-shq root)
-                          " checkout " base " -- " (fikra/thread/fikra-thread-shq p)
-                          " 2>&1 && echo RESTORE-OK || echo RESTORE-FAIL"))))
-            "ok" p)
-          ;; In base, not in completion: the turn DELETED it — restore.
-          (if (string-match "RESTORE-OK"
-                (string-trim (shell-command
-                  (concat "git -C " (fikra/thread/fikra-thread-shq root)
-                          " checkout " base " -- " (fikra/thread/fikra-thread-shq p)
-                          " 2>&1 && echo RESTORE-OK || echo RESTORE-FAIL"))))
-            "ok" p))
-        ;; Not in base: the turn ADDED it — the guard (same-as-completion)
-        ;; proved the disk still matches the completion, so remove is safe.
-        (if (string-match "REMOVE-OK"
+    (if (not in-completion)
+      ;; The turn ended WITHOUT this path (deleted or never added).
+      (if on-disk
+        (concat "DIV:" p)
+        ;; Absent everywhere: clean restore from the baseline.
+        (if (string-match "RESTORE-OK"
               (string-trim (shell-command
-                (concat "rm -f " (fikra/thread/fikra-thread-shq (concat root "/" p))
-                        " 2>&1 && echo REMOVE-OK || echo REMOVE-FAIL"))))
-          "ok" p)))))
+                (concat "git -C " (fikra/thread/fikra-thread-shq root)
+                        " checkout " base " -- " (fikra/thread/fikra-thread-shq p)
+                        " 2>&1 && echo RESTORE-OK || echo RESTORE-FAIL"))))
+          "ok" p))
+      ;; Present in the completion.
+      (if (not on-disk)
+        (concat "DIV:" p)
+        (if (not same-as-completion)
+          (concat "DIV:" p)
+          (if in-base
+            (if (string-match "RESTORE-OK"
+                  (string-trim (shell-command
+                    (concat "git -C " (fikra/thread/fikra-thread-shq root)
+                            " checkout " base " -- " (fikra/thread/fikra-thread-shq p)
+                            " 2>&1 && echo RESTORE-OK || echo RESTORE-FAIL"))))
+              "ok" p)
+            ;; In the completion but not the base: the turn ADDED it, and
+            ;; the guard proved the disk matches the completion — remove.
+            (if (string-match "REMOVE-OK"
+                  (string-trim (shell-command
+                    (concat "rm -f " (fikra/thread/fikra-thread-shq (concat root "/" p))
+                            " 2>&1 && echo REMOVE-OK || echo REMOVE-FAIL"))))
+              "ok" p)))))))
 
 (defun fikra-diff-join-names (items acc)
   (if (null items)
