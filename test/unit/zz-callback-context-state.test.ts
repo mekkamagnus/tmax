@@ -28,7 +28,7 @@ const e = (editor: Editor, expr: string) => executeTlisp(editor, expr);
 const PROBE_MODULE = `
 (defmodule callback-probe
   (export cb-probe-set-var cb-probe-map-set cb-probe-obs
-          cb-probe-reset cb-probe-filter)
+          cb-probe-reset cb-probe-filter cb-probe-sentinel)
   ;; Exported defvars read as functions — a getter is the accessor.
   (defun cb-probe-obs (k)
     (hashmap-get cb-probe-observations k))
