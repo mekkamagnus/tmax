@@ -1,6 +1,7 @@
 (defmodule fikra/capture
   (export fikra-capture fikra-capture-submit fikra-capture-cancel
-          fikra-history-prev fikra-history-next)
+          fikra-history-prev fikra-history-next
+          fikra-capture-body fikra-capture-to-line fikra-capture-set-body fikra-capture-hint)
 
 ;; Capture buffer — org-capture inspired popup for composing messages
 
@@ -14,39 +15,81 @@
   "Current position in input history (-1 = not browsing).")
 
 (defun fikra-capture ()
-  "Open capture buffer for composing a message. (Mode must be active — the
-SPC a i binding implies it; requiring fikra/mode here would cycle.)"
+  "Open the capture composer (mockup 8.2): the To/Context header + separator
+ride the top; the compose body starts at line 3; submit sends only the
+body. (Mode must be active — the SPC a i binding implies it.)"
   (interactive)
-  (progn
-      ;; Create capture buffer
-      (if (not (member fikra-capture-buffer-name (buffer-list)))
-        (buffer-create fikra-capture-buffer-name)
-        ;; Clear existing content — and leave it WRITABLE: the reuse path
-        ;; used to re-set read-only t here, making every second compose
-        ;; untypable ("Buffer is read-only") while the create path stayed
-        ;; writable. Writable is the contract the insert-mode typing needs.
-        (progn
-          (buffer-switch fikra-capture-buffer-name)
-          (buffer-set-read-only nil)
-          (let ((count (buffer-line-count)))
-            (if (> count 1)
-              (buffer-delete-range 0 count)))))
-      ;; Split window to show capture buffer
-      (split-window "horizontal")
-      (buffer-switch fikra-capture-buffer-name)
-      ;; Attach the advertised C-c C-c / C-c C-k keymap (idempotent) — the
-      ;; status line promised this chord since #214 but nothing bound it.
-      (let ((kmap (editor/keymaps/buffer-keymap fikra-capture-buffer-name)))
-        (if (not kmap)
-          (progn
-            (setq kmap (editor/keymaps/keymap-init "fikra-capture"))
-            (editor/keymaps/keymap-set-key kmap "C-c C-c" "(fikra/capture/fikra-capture-submit)")
-            (editor/keymaps/keymap-set-key kmap "C-c C-k" "(fikra/capture/fikra-capture-cancel)")
-            (editor/keymaps/buffer-set-keymap fikra-capture-buffer-name kmap))))
-      ;; Enter insert mode
-      (editor-set-mode "insert")
-      (setq fikra-history-index -1)
-      (editor-set-status "Fikra Capture — C-c C-c: send  C-c C-k: cancel")))
+  (if (not (member fikra-capture-buffer-name (buffer-list)))
+    (buffer-create fikra-capture-buffer-name)
+    nil)
+  (split-window "horizontal")
+  (buffer-switch fikra-capture-buffer-name)
+  (buffer-set-read-only nil)
+  (let ((count (buffer-line-count)))
+    (if (> count 1) (buffer-delete-range 0 0 (- count 1) 0)))
+  (cursor-move 0 0)
+  (buffer-insert (concat (fikra-capture-to-line) "\n"))
+  (buffer-insert "--------------------------------------------------------------\n")
+  (cursor-move 2 0)
+  (let ((kmap (editor/keymaps/buffer-keymap fikra-capture-buffer-name)))
+    (if (not kmap)
+      (progn
+        (setq kmap (editor/keymaps/keymap-init "fikra-capture"))
+        (editor/keymaps/keymap-set-key kmap "C-c C-c" "(fikra/capture/fikra-capture-submit)")
+        (editor/keymaps/keymap-set-key kmap "C-c C-k" "(fikra/capture/fikra-capture-cancel)")
+        (editor/keymaps/keymap-set-key kmap "M-p" "(fikra/capture/fikra-history-prev)")
+        (editor/keymaps/keymap-set-key kmap "M-n" "(fikra/capture/fikra-history-next)")
+        (editor/keymaps/buffer-set-keymap fikra-capture-buffer-name kmap))))
+  (editor-set-mode "insert")
+  (setq fikra-history-index -1)
+  (fikra-capture-hint))
+
+;; The compose BODY: everything below the two header lines.
+(defun fikra-capture-body ()
+  (let* ((full (buffer-text))
+         (nl1 (fikra-str-index-of full 0))
+         (nl2 (if nl1 (fikra-str-index-of full (+ nl1 1)) nil)))
+    (if (not nl2)
+      ""
+      (substring full (+ nl2 1) (length full)))))
+
+(defun fikra-str-index-of (s from)
+  (if (>= from (length s))
+    nil
+    (if (string= (substring s from (+ from 1)) "\n")
+      from
+      (fikra-str-index-of s (+ from 1)))))
+
+;; "To: thread fix-scroll (ollama)   Context: tui-client.ts @112-124"
+(defun fikra-capture-to-line ()
+  (require-module fikra/adapter)
+  (require-module fikra/thread)
+  (let ((tid (fikra/thread/fikra-thread-current)))
+    (concat "To: thread " (if (and tid (> (length tid) 0)) tid "main")
+          " (" (fikra/adapter/fikra-current-backend) ")"
+          "   Context: " (fikra-capture-context-label))))
+
+(defun fikra-capture-context-label ()
+  ;; The CALLING buffer's file @ the selection's line range when visual
+  ;; mode was active, else the cursor line.
+  ;; The selection is a LIST: (start-line start-col end-line end-col mode).
+  (let ((sel (condition-case nil (visual-get-selection) (error () nil))))
+    (if (and sel (> (length sel) 2))
+      (concat (fikra-capture-basename (if (buffer-filename) (buffer-filename) "region"))
+              "@" (number-to-string (+ (nth 0 sel) 1))
+              "-" (number-to-string (+ (nth 2 sel) 1)))
+      (concat (fikra-capture-basename (if (buffer-filename) (buffer-filename) "scratch"))
+              "@" (number-to-string (+ (cursor-line) 1))))))
+
+(defun fikra-capture-basename (path)
+  (fikra-cap-base-scan path -1 0))
+
+(defun fikra-cap-base-scan (path last i)
+  (if (>= i (length path))
+    (substring path (+ last 1) (length path))
+    (fikra-cap-base-scan path
+      (if (string= (substring path i (+ i 1)) "/") i last)
+      (+ i 1))))
 
 (defun fikra-capture-submit ()
   "Submit capture buffer contents as a new turn."
@@ -54,7 +97,7 @@ SPC a i binding implies it; requiring fikra/mode here would cycle.)"
   ;; "default" buffer name is a fixture artifact; the capture buffer is the
   ;; content source either way.
   (buffer-switch fikra-capture-buffer-name)
-  (let* ((text (string-trim (buffer-text))))
+  (let* ((text (string-trim (fikra-capture-body))))
     (if (string= text "")
       (progn
         (editor-set-status "Empty message — type something first")
@@ -65,7 +108,7 @@ SPC a i binding implies it; requiring fikra/mode here would cycle.)"
         ;; Clear capture buffer
         (buffer-set-read-only nil)
         (let ((count (buffer-line-count)))
-          (if (> count 1) (buffer-delete-range 0 count)))
+          (if (> count 1) (buffer-delete-range 0 0 (- count 1) 0)))
         ;; Close capture window, return to chat
         (delete-window)
         (buffer-switch (fikra/thread/fikra-thread-buffer-name))
@@ -79,7 +122,7 @@ SPC a i binding implies it; requiring fikra/mode here would cycle.)"
   (buffer-switch fikra-capture-buffer-name)
   (buffer-set-read-only nil)
   (let ((count (buffer-line-count)))
-    (if (> count 1) (buffer-delete-range 0 count)))
+    (if (> count 1) (buffer-delete-range 0 0 (- count 1) 0)))
   ;; Close window, return to chat
   (delete-window)
   (buffer-switch (fikra/thread/fikra-thread-buffer-name))
@@ -87,35 +130,43 @@ SPC a i binding implies it; requiring fikra/mode here would cycle.)"
   (editor-set-status "Fikra: capture cancelled"))
 
 (defun fikra-history-prev ()
-  "Insert previous message from history into capture buffer."
+  "Insert previous message from history into the compose BODY (the
+To/Context header stays)."
   (if (= (length fikra-input-history) 0)
     (editor-set-status "No history")
     (progn
       (setq fikra-history-index (min (+ fikra-history-index 1) (- (length fikra-input-history) 1)))
-      (let ((msg (nth fikra-history-index fikra-input-history)))
-        (buffer-set-read-only nil)
-        (let ((count (buffer-line-count)))
-          (if (> count 1) (buffer-delete-range 0 count)))
-        (buffer-insert msg)
-        (buffer-set-read-only t)))))
+      (fikra-capture-set-body (nth fikra-history-index fikra-input-history))
+      (fikra-capture-hint))))
 
 (defun fikra-history-next ()
-  "Insert next message from history into capture buffer."
+  "Insert next message from history into the compose BODY."
   (if (<= fikra-history-index 0)
     (progn
       (setq fikra-history-index -1)
-      (buffer-set-read-only nil)
-      (let ((count (buffer-line-count)))
-        (if (> count 1) (buffer-delete-range 0 count)))
-      (buffer-set-read-only t))
+      (fikra-capture-set-body "")
+      (fikra-capture-hint))
     (progn
       (setq fikra-history-index (- fikra-history-index 1))
-      (let ((msg (nth fikra-history-index fikra-input-history)))
-        (buffer-set-read-only nil)
-        (let ((count (buffer-line-count)))
-          (if (> count 1) (buffer-delete-range 0 count)))
-        (buffer-insert msg)
-        (buffer-set-read-only t)))))
+      (fikra-capture-set-body (nth fikra-history-index fikra-input-history))
+      (fikra-capture-hint))))
+
+;; Replace the body below the two header lines (header preserved).
+(defun fikra-capture-set-body (text)
+  ;; buffer-delete-range's line args are 0-BASED line indexes; the body
+  ;; spans lines 2..count-1. Delete from line 2 to the LAST line.
+  (buffer-switch fikra-capture-buffer-name)
+  (buffer-set-read-only nil)
+  (let ((count (buffer-line-count)))
+    (if (> count 3)
+      (buffer-delete-range 2 0 (- count 1) 0)))
+  (cursor-move 2 0)
+  (buffer-insert text))
+
+(defun fikra-capture-hint ()
+  (editor-set-status (concat "C-c C-c send   C-c C-k cancel   M-p/M-n history   "
+                              (number-to-string (length fikra-input-history))
+                              " msg(s) in history")))
 
 ;; Capture buffer key bindings
 ;; 'i' in *Fikra* opens capture
