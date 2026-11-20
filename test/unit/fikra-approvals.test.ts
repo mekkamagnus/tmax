@@ -564,3 +564,18 @@ describe("r82 — claude's JSON tool-input detail: the command IS the target", (
     expect(String(e(editor, '(fikra/approvals/fikra-approval-target "rm -rf src/client/.legacy-render/")').value)).toBe("src/client/.legacy-render/");
   });
 });
+
+describe("r83 — escaped quotes in the JSON command survive the target scan", () => {
+  const q = '(hex-decode "22")';
+  const bs = '(hex-decode "5c")';
+  // JSON value: echo \"hi\" there  (hex-built: literal backslash escapes
+  // are reader-hostile in T-Lisp string literals).
+  const detail = `(concat "Bash: {" ${q} "command" ${q} ":" ${q} "echo " ${bs} ${q} "hi" ${bs} ${q} " there" ${q} "}")`;
+
+  test("the accumulator rejoins escaped quotes (codex r82 P2)", async () => {
+    const editor = await createStartedEditor("");
+    e(editor, "(require-module fikra/approvals)");
+    expect(String(e(editor, `(fikra/approvals/fikra-approval-json-command ${detail})`).value))
+      .toBe('echo \"hi\" there');
+  });
+});

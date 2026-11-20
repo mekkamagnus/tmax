@@ -353,7 +353,18 @@ round-12 approvals catch)."
         ;; lines flow via wrap continuation rows.
         (fikra-gate-panel event))
       ((string= kind "permission-response")
-        (concat (fikra-face "\e[2m" (concat "  = " (fikra-event-get-str event "decision"))) "\n"))
+        ;; r83: the pause path's richer wording (was a bare "= allow" —
+        ;; codex r82 P3). reject says "rejected", NOT the fixture's
+        ;; "turn ended" — a rejected live tool call does NOT end the turn.
+        (concat (fikra-face "\e[2m"
+                  (concat "  = "
+                    (let ((d (fikra-event-get-str event "decision")))
+                      (cond
+                        ((string= d "allow") "allowed this request")
+                        ((string= d "reject") "rejected")
+                        ((string= d "always") "allowed (always for this tool+scope)")
+                        (t d)))))
+          "\n"))
       ;; #303 (gate r1 catch): the fixture backend's decision kinds
       ;; previously fell to the empty-string default — the decision lived
       ;; only in the log, never in a rendered frame.

@@ -170,12 +170,29 @@ segment reads)."
             (fikra-approval-json-scan (cdr parts) "want-value")
             (fikra-approval-json-scan (cdr parts) nil)))
         ((string= mode "want-value")
-          (if (> (length p) 0) p (fikra-approval-json-scan (cdr parts) "want-value")))
+          (fikra-approval-json-acc parts ""))
         (t
           (if (or (string= p "command") (string= (string-trim p) "{command")
                   (string= (string-trim p) ",command"))
             (fikra-approval-json-scan (cdr parts) "want-colon")
             (fikra-approval-json-scan (cdr parts) "")))))))
+
+;; Collect the value across ESCAPED quotes (r83, codex r82 P2): a command
+;; with quoted args arrives as JSON 'echo \"hi\" there' — the quote-split
+;; leaves the escape backslash at each part's end; rejoin with the quote
+;; until a part does NOT end in a backslash.
+(defun fikra-approval-json-acc (parts acc)
+  (if (null parts)
+    (if (> (length acc) 0) acc nil)
+    (let ((p (car parts)))
+      (if (and (> (length p) 0)
+               (string= (substring p (- (length p) 1) (length p)) (hex-decode "5c")))
+        ;; DECODE the escape: drop the backslash, keep the quote (the JSON
+        ;; value's backslash is the ESCAPE, not part of the command).
+        (fikra-approval-json-acc (cdr parts)
+          (concat acc (substring p 0 (- (length p) 1)) (hex-decode "22")))
+        (let ((final (concat acc p)))
+          (if (> (length final) 0) final nil))))))
 
 (defun fikra-approval-target (detail)
   (let ((cmd (fikra-approval-json-command detail)))
