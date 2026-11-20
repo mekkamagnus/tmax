@@ -121,16 +121,35 @@ describe("#8.8 ghost — real key dispatch + renderer (r39)", () => {
     expect(state.ghostText).toBeUndefined();
   });
 
-  test("move away, EDIT, return to the origin: the ghost no longer accepts (r40)", async () => {
+  test("a PREFIX edit invalidates even back at the exact anchor (content check, isolated)", async () => {
     const editor = await createStartedEditor("");
     e(editor, '(require-module "fikra/ghost")');
-    e(editor, '(buffer-insert "hello")');
-    e(editor, '(fikra/ghost/fikra-ghost-set " world")');
-    // Move + edit elsewhere (append a char on line 2), then return home.
-    (editor as unknown as { applyUpdate: (u: unknown) => void }).applyUpdate({ type: "SetCursorPosition", position: { line: 0, column: 0 } });
-    e(editor, '(buffer-insert "X")');
-    (editor as unknown as { applyUpdate: (u: unknown) => void }).applyUpdate({ type: "SetCursorPosition", position: { line: 0, column: 6 } });
+    e(editor, '(buffer-insert "hello world")');
+    const upd0 = (editor as unknown as { applyUpdate: (u: unknown) => void }).applyUpdate.bind(editor);
+    upd0({ type: "SetCursorPosition", position: { line: 0, column: 5 } });
+    e(editor, '(fikra/ghost/fikra-ghost-set "!!!")');   // anchors at column 5, prefix "hello"
+    // Same-length PREFIX edit (hello -> hellO): returning to column 5
+    // keeps COORDINATES valid; only the content differs.
+    const upd = (editor as unknown as { applyUpdate: (u: unknown) => void }).applyUpdate.bind(editor);
+    upd({ type: "SetCursorPosition", position: { line: 0, column: 4 } });
+    e(editor, '(buffer-insert "O")');
+    e(editor, '(buffer-delete 1)');
+    upd({ type: "SetCursorPosition", position: { line: 0, column: 5 } });
     expect(String(e(editor, '(if (fikra/ghost/fikra-ghost-accept) "accepted" "refused")').value)).toBe("refused");
+  });
+
+  test("a SUFFIX edit does NOT invalidate (the stated product boundary)", async () => {
+    const editor = await createStartedEditor("");
+    e(editor, '(require-module "fikra/ghost")');
+    e(editor, '(buffer-insert "hello world")');
+    const upd = (editor as unknown as { applyUpdate: (u: unknown) => void }).applyUpdate.bind(editor);
+    upd({ type: "SetCursorPosition", position: { line: 0, column: 5 } });
+    e(editor, '(fikra/ghost/fikra-ghost-set "!!!")');
+    upd({ type: "SetCursorPosition", position: { line: 0, column: 11 } });
+    e(editor, '(buffer-insert "X")');
+    upd({ type: "SetCursorPosition", position: { line: 0, column: 5 } });
+    expect(String(e(editor, '(if (fikra/ghost/fikra-ghost-accept) "accepted" "refused")').value)).toBe("accepted");
+    expect(String(e(editor, "(buffer-text)").value)).toBe("hello!!! worldX");
   });
 
   test("the renderer draws the ghost ONLY at its anchor, keeping the suffix", async () => {
@@ -158,5 +177,19 @@ describe("#8.8 ghost — real key dispatch + renderer (r39)", () => {
     // ghost's absence and the suffix's presence.
     expect(moved[0]).toContain("world");
     expect(moved[0]).not.toContain("WIDE");
+  });
+});
+
+describe("#8.8 ghost - pre-1.4 width fallback (r41)", () => {
+  test("the fallback keeps ANSI sequences whole and never exceeds the width", async () => {
+    const { _fallbackCells } = await import("../../src/frontend/render/width.ts");
+    const E = "\u001b";
+    const styled = E + "[31mabc" + E + "[0m";
+    const s1 = _fallbackCells.sliceCells(styled, 0, 1);
+    expect(s1).not.toContain("[");
+    expect(_fallbackCells.cellWidth(s1)).toBeLessThanOrEqual(1);
+    expect(_fallbackCells.sliceCells("\u4e2da", 0, 1)).toBe("");
+    expect(_fallbackCells.sliceCells("a\u4e2d", 0, 2)).toBe("a");
+    expect(_fallbackCells.sliceCells("a" + E + "[31mb" + E + "[0mc", 1, 2)).toContain(E + "[31m");
   });
 });

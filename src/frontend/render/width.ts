@@ -34,29 +34,42 @@ function cellWidth(str: string): number {
 }
 
 function cellsOf(str: string): string[] {
+  // One CSI sequence = ONE zero-width cell (the whole ESC..m run). The
+  // r41 review caught the old flag logic emitting literal '[' fragments.
   const cells: string[] = [];
-  let inEsc = false;
-  let esc = "";
+  let esc: string | null = null;
   for (const ch of str) {
-    if (ch === "\u001b" || inEsc) {
+    if (esc !== null) {
       esc += ch;
-      inEsc = ch !== "m" && (ch !== "\u001b" || esc.length > 1);
-      if (ch === "m") { cells.push(esc); esc = ""; inEsc = false; }
+      if (ch === "m") { cells.push(esc); esc = null; }
       continue;
     }
+    if (ch === "\u001b") { esc = ch; continue; }
     cells.push(ch);
   }
+  if (esc !== null) cells.push(esc);
   return cells;
 }
 
+/** Test surface for the pre-1.4 fallback (r41: the scanner corrupted ANSI
+ * and the slice exceeded widths — now unit-gated directly). */
+export const _fallbackCells = { cellWidth, cellsOf, sliceCells };
+
 function sliceCells(text: string, start: number, end: number): string {
+  // Slice by CELL RANGE — a wide cell that would cross `end` is DROPPED
+  // (never exceed the requested width; r41: slicing 中a to 1 col must not
+  // return the 2-col 中). Escape cells ride along at their position.
   const cells = cellsOf(text);
   let w = 0;
   let out = "";
   for (const c of cells) {
     const cw = cellWidth(c);
-    if (w >= start && w < end) out += c;
-    w += cw > 0 ? cw : 0;
+    if (cw === 0) {
+      if (w >= start && w > 0) out += c;
+      continue;
+    }
+    if (w >= start && w + cw <= end) out += c;
+    w += cw;
     if (w >= end) break;
   }
   return out;

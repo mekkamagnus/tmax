@@ -67,9 +67,11 @@ re-armed after move-away-and-back; the CONTENT must match too).")
   (if (fikra-ghost-active-p) fikra-ghost-current nil))
 
 (defun fikra-ghost-anchored-p ()
-  ;; The suggestion belongs to its (line, column) AND the line CONTENT at
-  ;; that column (r40: coordinates alone re-armed after a move away and
-  ;; back — any edit in between changes the prefix and invalidates).
+  ;; The suggestion belongs to its (line, column) AND the line's PREFIX
+  ;; up to that column (r40: coordinates alone re-armed after a move away
+  ;; and back). PREFIX edits invalidate (the completion's basis changed);
+  ;; suffix edits do not (the ghost still means the same insertion at the
+  ;; same position; the r41 product boundary, stated deliberately).
   (if (not (fikra-ghost-active-p))
     nil
     (and (= fikra-ghost-anchor-line (cursor-line))
