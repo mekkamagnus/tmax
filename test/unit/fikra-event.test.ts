@@ -211,3 +211,51 @@ describe("round-10: inline preview + marker dedup", () => {
     expect(stripAnsi(text).split("── completed ──").length - 1).toBe(1);
   });
 });
+
+describe("#304: id-based ending dedup", () => {
+  test("non-consecutive duplicate endings for the SAME turn id drop", async () => {
+    const editor = await createStartedEditor("");
+    setup(editor);
+    turn(editor, 1);
+    ev(editor, "text-delta", { text: "work" });
+    ev(editor, "turn-end", { turn: "1", status: "completed" });
+    ev(editor, "text-delta", { text: "stray late delta" });
+    ev(editor, "turn-end", { turn: "1", status: "completed" });
+    const text = replay(editor);
+    expect(stripAnsi(text).split("── completed ──").length - 1).toBe(1);
+  });
+
+  test("conflicting statuses: the LAST by log order wins (completed after error)", async () => {
+    const editor = await createStartedEditor("");
+    setup(editor);
+    turn(editor, 2);
+    ev(editor, "turn-end", { turn: "2", status: "error" });
+    ev(editor, "text-delta", { text: "retry noise" });
+    ev(editor, "turn-end", { turn: "2", status: "completed" });
+    const text = replay(editor);
+    expect(stripAnsi(text).split("── completed ──").length - 1).toBe(1);
+    expect(stripAnsi(text)).not.toContain("── error");
+  });
+
+  test("adjacent DISTINCT turns with identical statuses both render", async () => {
+    const editor = await createStartedEditor("");
+    setup(editor);
+    turn(editor, 3);
+    ev(editor, "turn-end", { turn: "3", status: "completed" });
+    turn(editor, 4);
+    ev(editor, "turn-end", { turn: "4", status: "completed" });
+    const text = replay(editor);
+    expect(stripAnsi(text).split("── completed ──").length - 1).toBe(2);
+  });
+
+  test("no-id legacy logs keep the consecutive rule (non-consecutive NOT deduped — documented fallback)", async () => {
+    const editor = await createStartedEditor("");
+    setup(editor);
+    ev(editor, "turn-end", { status: "completed" });
+    ev(editor, "text-delta", { text: "intervening" });
+    ev(editor, "turn-end", { status: "completed" });
+    const text = replay(editor);
+    // Frozen-history semantics: only CONSECUTIVE duplicates dedupe.
+    expect(stripAnsi(text).split("── completed ──").length - 1).toBe(2);
+  });
+});

@@ -8,3 +8,9 @@
 {"event":"gate","ts":"2026-11-20T11:43:19Z","kind":"codex-grade","verdict":"7/10","rounds":2,"reviewed-sha":"2280c65","findings-count":2}
 {"event":"gate","ts":"2026-11-20T11:44:17Z","kind":"codex-grade","verdict":"9/10","rounds":3,"reviewed-sha":"5792aa5","findings-count":1}
 {"event":"landing","ts":"2026-11-20T11:49:58Z","unit":"#300","shas":["cc97e06"],"files-staged-count":6,"tests-run":[{"name":"bun run test:unit","output":"3843 pass\n0 fail\nRan 3844 tests across 306 files. [197.78s]"},{"name":"bun test test/unit/label-tracks-frame.test.ts","output":"2 pass\n0 fail"}],"adr-spec":["docs/adrs/ADR-0295-label-tracks-frame-lighter-restarts.md","docs/specs/SPEC-269-label-tracks-frame-lighter-restarts.md"]}
+{"event":"escalation","ts":"2026-11-20T12:12:09Z","reason":"stalled","action":"restored the ledger from origin/main after the gate caught a stale-copy overwrite deleting #300 history; #301 events re-append from here"}
+{"event":"gate","ts":"2026-11-20T12:20:30Z","kind":"verify-gate","verdict":"GAPS","rounds":1,"reviewed-sha":"3e6dade","findings-count":4}
+{"event":"gate","ts":"2026-11-20T12:36:14Z","kind":"verify-gate","verdict":"GAPS","rounds":2,"reviewed-sha":"97a843f","findings-count":3}
+{"event":"gate","ts":"2026-11-20T12:45:46Z","kind":"verify-gate","verdict":"GAPS","rounds":3,"reviewed-sha":"a9cd77a","findings-count":1}
+{"event":"escalation","ts":"2026-11-20T12:45:46Z","reason":"valve-fired","action":"verify-gate retry budget spent (3 GAPS rounds); #301 labeled blocked with the r3 one-line fix + regression committed on-branch — the unblock is a single gate re-run"}
+{"event":"unit-start","ts":"2026-11-20T12:47:01Z","unit":"#304","note":"issue-304 in wt-burn; ledger carried forward from issue-301 ( fragmentation across branches reconciled here)"}

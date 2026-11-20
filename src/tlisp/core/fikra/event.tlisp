@@ -480,12 +480,66 @@ text-deltas inside the batch join into the same line."
 ;; renders skipping invalidated turns. The tombstone renders ONE collapsed
 ;; marker; rendering CONTINUES for post-revert turns (numbers past
 ;; revert-point).
-;; Drop a turn-end that immediately follows an identical turn-end — the
-;; probe-era logs carry doubled markers and replay would render both
-;; (codex rounds 7-9: "duplicate completion markers remain distracting").
-(defun fikra-event-dedupe-markers (events)
-  (fikra-dedupe-scan events (list) "" ""))
+;; #304: dedupe turn-endings by TURN IDENTITY — a turn's ending is the
+;; LAST turn-end for its id in the log prefix; earlier endings for the
+;; same id drop at render regardless of what intervenes (non-consecutive
+;; covered), the LAST status by log order wins (a turn that errored then
+;; completed renders completed — log order is the truth), and the drops
+;; are counted (replay notes "N stale endings dropped" in *Messages*).
+;; Distinct ids NEVER merge (adjacent same-status turns both render).
+;; Logs with NO turn ids (probe-era legacy) keep the old consecutive rule
+;; (those logs are frozen history).
+(defvar fikra-dedupe-dropped 0
+  "Stale endings dropped by the last id-based dedupe pass (#304).")
 
+(defun fikra-event-dedupe-markers (events)
+  (setq fikra-dedupe-dropped 0)
+  (if (fikra-dedupe-has-ids events)
+    (fikra-dedupe-by-id (reverse events) (hashmap) (list))
+    (fikra-dedupe-scan events (list) "" "")))
+
+;; The turn id as a STRING (logs carry numbers, fixtures carry strings,
+;; missing reads nil — "length requires string or list" otherwise).
+(defun fikra-dedupe-turn-id (e)
+  (let ((v (fikra-event-get-str e "turn")))
+    (cond
+      ((stringp v) v)
+      ((numberp v) (number-to-string v))
+      (t ""))))
+
+;; Any turn-end carrying a turn id?
+(defun fikra-dedupe-has-ids (events)
+  (let ((found nil))
+    (dolist (e events)
+      (if (and (not found)
+               (string= (fikra-event-get-str e "kind") "turn-end")
+               (> (length (fikra-dedupe-turn-id e)) 0))
+        (setq found t)))
+    found))
+
+;; Backward scan: the FIRST turn-end seen per id (from the end) is the
+;; LAST by log order — keep it; every later sighting for the same id is a
+;; stale ending (dropped + counted).
+(defun fikra-dedupe-by-id (rev-events seen acc)
+  ;; Iterating the REVERSED list, cons-building yields FORWARD order
+  ;; already — no final reverse (the double-reverse shipped reversed
+  ;; transcripts; caught by the replay regression tests).
+  (if (null rev-events)
+    acc
+    (let* ((e (car rev-events))
+           (tid (fikra-dedupe-turn-id e))
+           (is-end (string= (fikra-event-get-str e "kind") "turn-end")))
+      (if (and is-end (> (length tid) 0))
+        (if (hashmap-get seen tid)
+          (progn
+            (setq fikra-dedupe-dropped (+ 1 fikra-dedupe-dropped))
+            (fikra-dedupe-by-id (cdr rev-events) seen acc))
+          (fikra-dedupe-by-id (cdr rev-events)
+            (progn (editor/keymaps/keymap-mutable-set! seen tid t) seen)
+            (cons e acc)))
+        (fikra-dedupe-by-id (cdr rev-events) seen (cons e acc))))))
+
+;; The legacy consecutive rule (no-id logs only).
 (defun fikra-dedupe-scan (events acc last-kind last-status)
   (if (null events)
     (reverse acc)
@@ -503,8 +557,14 @@ text-deltas inside the batch join into the same line."
   (if (not fikra-event-log)
     ""
     (let ((events (fikra-event-parse-lines (fikra-event-read-log-lines))))
-      (fikra-event-render-skip (fikra-event-dedupe-markers events)
-        (fikra-event-tombstone-ranges events) 0 "" nil))))
+      (let ((deduped (fikra-event-dedupe-markers events)))
+        ;; #304: the count notes stale endings dropped on replay.
+        (if (> fikra-dedupe-dropped 0)
+          (message (concat (number-to-string fikra-dedupe-dropped)
+                           " stale ending" (if (= fikra-dedupe-dropped 1) "" "s")
+                           " dropped")))
+        (fikra-event-render-skip deduped
+          (fikra-event-tombstone-ranges events) 0 "" nil)))))
 
 ;; JSONL lines -> parsed events (unparseable lines skipped).
 (defun fikra-event-parse-lines (lines)
