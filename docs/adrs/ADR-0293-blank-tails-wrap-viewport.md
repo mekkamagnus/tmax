@@ -30,15 +30,19 @@ disabling the expansion there. Three changes, one contract:
 1. **The client advances the viewport top wrap-awarely (operative).**
    `renderSingleWindowWrapped` walks the cursor's wrapped-row span and
    advances the top until it fits — using the client's exact wrapLine +
-   gutter math, fold-hidden lines counted as zero rows. The advance is
-   ONE shared helper (`advanceWrappedTop`); `getWrappedViewportTop` (span
-   precompute) delegates to it — verify-gate r1 caught the duplicated
-   fold-blind copies as a desync risk.
+   gutter math, fold-hidden lines counted as zero rows and fold-START
+   headings as their single "... [N lines]" indicator row. The advance is
+   ONE shared helper (`advanceWrappedTop` + `makeFoldAwareRowsOf`);
+   `getWrappedViewportTop` (span precompute) threads state.foldRanges
+   through the SAME fold-aware rowsOf — verify-gate r1 caught the
+   duplicated copies, r2 caught the span path advancing fold-blind.
 2. **The wire window carries fill slack.** The daemon's expansion walks
-   until wrapped rows cover the screen AND past the cursor line; width-
-   less paths span through the cursor + screen slack under the same 6×
-   wire bound. `render-state` now passes the frame width (expansion was
-   silently disabled there).
+   until wrapped rows cover the screen AND one line past the cursor (the
+   client's whole-line advance overshoots — a window ending exactly at the
+   cursor leaves blank rows below it; verify-gate r2); width-less paths
+   span through the cursor + screen slack under the same 6× wire bound.
+   `render-state` now passes the frame width (expansion was silently
+   disabled there).
 3. **Spans follow the rendered range.** Frontends precompute syntax spans
    from `getWrappedViewportTop` over a 2× logical span so the advanced
    window keeps its colors.

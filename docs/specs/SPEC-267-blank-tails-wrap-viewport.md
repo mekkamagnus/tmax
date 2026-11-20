@@ -38,9 +38,11 @@ matrix demanded.
   ONE shared helper (`advanceWrappedTop`); `getWrappedViewportTop` (for
   the frontends' span precompute) delegates to it.
 - **Wire (coverage hardening)**: the expansion walk continues until the
-  screen is covered AND past the cursor line (fill-below-cursor slack on
-  width-carrying paths); width-less paths (no-frame / no-width) span
-  through the cursor + screen slack under the same 6× wire bound.
+  screen is covered AND one line PAST the cursor (the client's whole-line
+  advance can overshoot the cursor — a window ending exactly at it leaves
+  blank rows below; verify-gate r2); width-less paths (no-frame /
+  no-width) span through the cursor + screen slack under the same 6×
+  wire bound.
 - **render-state** passes the frame's terminal width.
 - `tui-client.ts` + `capture-frame.ts`: syntax spans are precomputed from
   the wrap-aware top over a 2× logical span (no color loss on the advanced

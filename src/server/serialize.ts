@@ -195,7 +195,10 @@ export function editorStateToJson(
       const rowLimit = rows * 6; // wire bound: pathological single-line walls
       let wrappedRows = 0;
       let i = 0;
-      while ((wrappedRows < rows || viewportTop + i <= cursorLine) && i < rowLimit) {
+      // +1 line of post-cursor slack: the client's whole-line advance can
+      // overshoot the cursor; a window ending EXACTLY at the cursor leaves
+      // blank rows below it (verify-gate r2).
+      while ((wrappedRows < rows || viewportTop + i <= cursorLine + 1) && i < rowLimit) {
         const lineResult = buffer.getLine(viewportTop + i);
         const text = lineResult && lineResult._tag === "Right" ? lineResult.right : "";
         wrappedRows += Math.max(1, Math.ceil(Bun.stringWidth(text) / cw));

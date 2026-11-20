@@ -68,6 +68,25 @@ export { getVisibleViewportTop };
  * never render); absent it counts every line (an over-advance that only
  * pins the cursor higher — harmless for span precomputation).
  */
+export function makeFoldAwareRowsOf(
+  getRawLine: (ln: number) => string,
+  cw: number,
+  foldRanges?: Map<number, number>,
+): (ln: number) => number {
+  const hidden = new Set<number>();
+  const starts = new Set<number>();
+  if (foldRanges) {
+    for (const [foldStart, foldEnd] of foldRanges) {
+      starts.add(foldStart);
+      for (let ln = foldStart + 1; ln <= foldEnd; ln++) hidden.add(ln);
+    }
+  }
+  return (ln: number) =>
+    hidden.has(ln) ? 0
+    : starts.has(ln) ? 1 // the renderer emits ONE "... [N lines]" row
+    : Math.max(1, wrapLine(getRawLine(ln), cw).length);
+}
+
 export function advanceWrappedTop(
   getRawLine: (ln: number) => string,
   top: number,
@@ -108,6 +127,7 @@ export function getWrappedViewportTop(state: EditorState, visibleLines: number, 
     totalLines,
     visibleLines,
     cw,
+    makeFoldAwareRowsOf((ln) => getLine(state, ln), cw, state.foldRanges),
   );
 }
 
@@ -484,7 +504,7 @@ function renderSingleWindowWrapped(
         totalLines,
         visibleLines,
         cw,
-        (ln) => (hiddenLines.has(ln) ? 0 : Math.max(1, wrapLine(getLineForBuffer(buffer, ln), cw).length)),
+        makeFoldAwareRowsOf((ln) => getLineForBuffer(buffer, ln), cw, foldRanges),
       )
     : viewportTop;
 
