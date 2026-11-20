@@ -190,6 +190,9 @@ fold-toggle
 format
 get-kill-ring-max
 get-register
+ghost-anchor-set
+ghost-text-clear
+ghost-text-set
 global-minor-mode-active-p
 global-minor-mode-list-active
 global-minor-mode-set
