@@ -9,6 +9,9 @@
  * TOGGLED between renders to prove per-frame derivation.
  */
 import { describe, test, expect, beforeEach, afterEach } from 'bun:test';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { testSocketPath, connectWithTimeout } from '../fixtures/server-test-helpers.ts';
 import { TmaxServer } from '../../src/server/server.ts';
 import { jsonToEditorState } from '../../src/server/serialize.ts';
@@ -18,10 +21,12 @@ import type { Socket } from 'node:net';
 let server: TmaxServer;
 let nextId = 1;
 
-// Workspace isolation (codex r1 fix 3): suppress the daemon's workspace
-// autosave entirely for the test's lifetime — no reads/writes of any
-// persisted workspace can race the assertions.
+// Workspace isolation (codex r2 fix 1): the daemon's workspace storage is
+// rooted under HOME — swap it to a throwaway dir for the ENTIRE lifecycle
+// (startup, autosave, and the unconditional shutdown save), and suppress
+// autosave timers besides. The user's real workspace is never touched.
 const SAVED_ENV = { ...process.env };
+let isoHome = '';
 
 /** A real client connection: connect-frame handshake over a real socket. */
 async function connectClient(sockPath: string): Promise<{ socket: Socket; frameId: string; send: (m: string, p?: Record<string, unknown>) => Promise<any> }> {
@@ -53,6 +58,8 @@ function frameLine(frame: any, width = 100): string {
 
 describe('#300 — label tracks the frame; lighter survives restarts', () => {
   beforeEach(async () => {
+    isoHome = mkdtempSync(join(tmpdir(), 'i300-home-'));
+    process.env.HOME = isoHome;
     process.env.TMAX_WORKSPACE_AUTOSAVE_MS = '2147483647';
     process.env.TMAX_WORKSPACE_DEBOUNCE_MS = '2147483647';
     process.env.TMAX_WORKSPACE_MAX_DIRTY_MS = '2147483647';
@@ -62,6 +69,7 @@ describe('#300 — label tracks the frame; lighter survives restarts', () => {
   afterEach(async () => {
     await (server as unknown as { shutdown: () => Promise<void> }).shutdown?.();
     Object.assign(process.env, SAVED_ENV);
+    rmSync(isoHome, { recursive: true, force: true });
   });
 
   test('A: every rendered frame names its buffer — keypress responses AND render-state', async () => {

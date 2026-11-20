@@ -25,8 +25,11 @@ workspace) cycles each render `*Fikra*` + the `fikra` lighter
 
 ## Completion criteria
 
-- [x] A: label-tracks-frame test — the exact *Fikra* → *scratch* →
-      *Fikra* switch sequence through real keypress round-trips, every
-      frame's label asserted
+- [x] A: label-tracks-frame test — a named-buffer switch sequence
+      (uniquely-named special buffers; fikra owns the *Fikra* name
+      variants, so the harness mints its own) through real keypress
+      round-trips, every frame's label asserted on BOTH the keypress
+      response and render-state via the client pipeline; the *Fikra*
+      label itself is asserted throughout B
 - [x] B: lighter present on every *Fikra* frame across 3
       disconnect/reconnect cycles; per-frame derivation verified
