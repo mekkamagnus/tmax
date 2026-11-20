@@ -105,7 +105,7 @@ describe("#212 FAEP — replay rendering (RFC §D2 table)", () => {
     expect(stripAnsi(text)).toContain("? write src/x.ts"); // panel action row
     expect(stripAnsi(text)).toContain("paused");
     expect(stripAnsi(text)).toContain("  = allow\n");
-    expect(stripAnsi(text)).toContain("  ⌘ checkpoint refs/fikra/main/1\n");
+    expect(stripAnsi(text)).toContain("  ⌘ [ckpt main/1 ✓]\n");
   });
 
   test("tombstone invalidates the turn range; rendering CONTINUES after it", async () => {

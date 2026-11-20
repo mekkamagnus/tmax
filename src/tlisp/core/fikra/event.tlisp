@@ -3,7 +3,8 @@
           fikra-event-set-refresh-hook
           fikra-event-turn-tools
           fikra-event-emit-batch fikra-event-replay fikra-event-events
-          fikra-event-reset fikra-event-render-line fikra-event-rebuild-fikra-buffer)
+          fikra-event-reset fikra-event-render-line fikra-event-rebuild-fikra-buffer
+          fikra-event-inline-ckpt-merge fikra-event-render-fold)
 
 ;; #212 (RFC-027 §D2) — FAEP: the Fikra Agent Event Protocol. Every backend's
 ;; output normalizes into ONE event vocabulary; threads are event-sourced
@@ -243,11 +244,16 @@ round-12 approvals catch)."
       ((string= kind "thought")
         (concat (fikra-face "\e[2m" (concat "· " (fikra-event-get-str event "text"))) "\n"))
       ((string= kind "tool-call")
-        ;; Id first here too — symmetry with results, and clip-proof.
+        ;; Id first here too — symmetry with results, and clip-proof. The
+        ;; merged ckpt rides INLINE (r62): "⚙ buffer-edit ... [ckpt id/n ✓]".
         (concat (fikra-face "\e[33m"
                     (concat "⚙ " (fikra-event-get-str event "tool")))
                 (fikra-event-id-tag event)
                 (fikra-face "\e[33m" (concat "  " (fikra-event-get-str event "summary")))
+                (if (fikra-event-get event "ckpt")
+                  (concat " " (fikra-face "\e[36m"
+                    (concat "[ckpt " (fikra-ckpt-short (fikra-event-get-str event "ckpt")) " ✓]")))
+                  "")
                 "\n"
                 (fikra-event-render-preview event)))
       ((string= kind "tool-result")
@@ -597,6 +603,55 @@ text-deltas inside the batch join into the same line."
         (fikra-dedupe-scan (cdr events) (cons e acc) k
           (if (string= k "turn-end") st last-status))))))
 
+;; Merge checkpoint-ready markers INLINE (mockup 8.1's "[ckpt ... ✓]"
+;; on the buffer-edit row). Pure list transform: a checkpoint-ready that
+;; directly follows a tool-call attaches its ref to that call and is
+;; dropped; anything else keeps the standalone marker row.
+(defun fikra-event-inline-ckpt-merge (events out last-kind)
+  (if (null events)
+    (reverse out)
+    (let* ((e (car events))
+           (k (fikra-event-get-str e "kind")))
+      (cond
+        ((string= k "checkpoint-ready")
+          (let ((call-idx (fikra-inline-find-call out 0)))
+            (if call-idx
+              ;; Attach to the nearest preceding TOOL-CALL (results may
+              ;; intervene; the mockup puts the marker on the ⚙ row).
+              (fikra-event-inline-ckpt-merge (cdr events)
+                (fikra-inline-replace out call-idx
+                  (fikra-event-with-ckpt (nth call-idx out)
+                    (fikra-event-get-str e "ref")))
+                last-kind)
+              (fikra-event-inline-ckpt-merge (cdr events) (cons e out) last-kind))))
+        (t
+          (fikra-event-inline-ckpt-merge (cdr events) (cons e out) k))))))
+
+;; The index of the nearest tool-call in OUT (a reversed accumulator), or nil.
+(defun fikra-inline-find-call (out i)
+  (if (>= i (length out))
+    nil
+    (if (string= (fikra-event-get-str (nth i out) "kind") "tool-call")
+      i
+      (fikra-inline-find-call out (+ i 1)))))
+
+;; Replace index I in the reversed accumulator OUT (rebuild the tail).
+(defun fikra-inline-replace (out i new)
+  (if (= i 0)
+    (cons new (cdr out))
+    (cons (car out) (fikra-inline-replace (cdr out) (- i 1) new))))
+
+;; Attach the ckpt ref to EVENT (both shapes: the FAEP parse yields
+;; ALISTS — cons the pair; hashmaps get a copied set).
+(defun fikra-event-with-ckpt (event ref)
+  (if (hashmapp event)
+    (let ((copy (hashmap)))
+      (dolist (k (hashmap-keys event))
+        (editor/keymaps/keymap-mutable-set! copy k (hashmap-get event k)))
+      (editor/keymaps/keymap-mutable-set! copy "ckpt" ref)
+      copy)
+    (cons (list "ckpt" ref) event)))
+
 (defun fikra-event-replay ()
   (if (not fikra-event-log)
     ""
@@ -607,8 +662,12 @@ text-deltas inside the batch join into the same line."
           (message (concat (number-to-string fikra-dedupe-dropped)
                            " stale ending" (if (= fikra-dedupe-dropped 1) "" "s")
                            " dropped")))
-        (fikra-event-render-skip deduped
-          (fikra-event-tombstone-ranges events) 0 "" nil)))))
+        ;; r62 follow-up: the mockup puts the ckpt marker INLINE on the
+        ;; edit row. Merge each checkpoint-ready into the tool-call it
+        ;; follows (when one does); otherwise the standalone row stands.
+        (let ((merged (fikra-event-inline-ckpt-merge deduped (list) nil)))
+          (fikra-event-render-skip merged
+            (fikra-event-tombstone-ranges events) 0 "" nil))))))
 
 ;; JSONL lines -> parsed events (unparseable lines skipped).
 (defun fikra-event-parse-lines (lines)

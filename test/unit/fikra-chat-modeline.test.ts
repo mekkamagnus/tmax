@@ -113,3 +113,38 @@ describe("#8.1 modeline + checkpoint marker (r58)", () => {
     // (The failed-turn walk lives in the nav suite where refs exist.)
   });
 });
+
+describe("#8.1 inline ckpt marker (r63)", () => {
+  test("a checkpoint following a tool-call renders INLINE on that row", async () => {
+    const ed = await createStartedEditor("");
+    e(ed, '(require-module "fikra/event")');
+    e(ed, '(defvar r63-evs nil)');
+    e(ed, '(setq r63-evs (fikra/event/fikra-event-inline-ckpt-merge (list (list (list "kind" "tool-call") (list "tool" "buffer-edit") (list "id" "ab12") (list "summary" "src/x.ts @118")) (list (list "kind" "checkpoint-ready") (list "ref" "refs/fikra/main/3"))) (list) nil))');
+    expect(String(e(ed, "(length r63-evs)").value)).toBe("1");
+    const line = String(e(ed, "(fikra/event/fikra-event-render-line (nth 0 r63-evs))").value);
+    expect(line).toContain("⚙ buffer-edit");
+    expect(line).toContain("[ckpt main/3 ✓]");
+    expect(line).toContain("src/x.ts @118");
+  });
+
+  test("a checkpoint NOT following a tool-call keeps its standalone row", async () => {
+    const ed = await createStartedEditor("");
+    e(ed, '(require-module "fikra/event")');
+    e(ed, '(defvar r63-evs2 nil)');
+    e(ed, '(setq r63-evs2 (fikra/event/fikra-event-inline-ckpt-merge (list (list (list "kind" "text-delta") (list "speaker" "user") (list "text" "hi")) (list (list "kind" "checkpoint-ready") (list "ref" "refs/fikra/main/2"))) (list) nil))');
+    expect(String(e(ed, "(length r63-evs2)").value)).toBe("2");
+    const line = String(e(ed, "(fikra/event/fikra-event-render-line (nth 1 r63-evs2))").value);
+    expect(line).toContain("[ckpt main/2 ✓]");
+  });
+
+  test("a tool-result between the call and the checkpoint still attaches to the CALL", async () => {
+    const ed = await createStartedEditor("");
+    e(ed, '(require-module "fikra/event")');
+    e(ed, '(defvar r63-evs3 nil)');
+    e(ed, '(setq r63-evs3 (fikra/event/fikra-event-inline-ckpt-merge (list (list (list "kind" "tool-call") (list "tool" "bash") (list "id" "cd34") (list "summary" "make test")) (list (list "kind" "tool-result") (list "ok" t) (list "id" "cd34") (list "summary" "pass")) (list (list "kind" "checkpoint-ready") (list "ref" "refs/fikra/main/4"))) (list) nil))');
+    const call = String(e(ed, "(fikra/event/fikra-event-render-line (nth 0 r63-evs3))").value);
+    expect(call).toContain("[ckpt main/4 ✓]");
+    const result = String(e(ed, "(fikra/event/fikra-event-render-line (nth 1 r63-evs3))").value);
+    expect(result).not.toContain("[ckpt");
+  });
+});
