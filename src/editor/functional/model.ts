@@ -120,6 +120,8 @@ export interface EditorModel {
   readonly flashSpans?: readonly (readonly HighlightSpan[])[];
   /** RFC-029 §8.8: the dim inline completion (single line). */
   readonly ghostText?: string;
+  /** §8.8 r39: the cursor origin the ghost was computed for. */
+  readonly ghostAnchor?: { readonly line: number; readonly column: number };
   /** Current search match ranges (immutable array). */
   readonly searchMatches?: readonly Range[];
   /** Collapsed fold ranges keyed by start line (immutable map). */
@@ -246,6 +248,7 @@ export function modelToEditorState(model: EditorModel): EditorState {
     highlightSpans: model.highlightSpans ? model.highlightSpans.map(spans => [...spans]) : undefined,
     flashSpans: model.flashSpans ? model.flashSpans.map(spans => [...spans]) : undefined,
     ghostText: model.ghostText,
+    ghostAnchor: model.ghostAnchor,
     searchMatches: model.searchMatches ? [...model.searchMatches] : undefined,
     currentMajorMode: model.currentMajorMode,
     activeMinorModes: model.activeMinorModes ? [...model.activeMinorModes] : undefined,

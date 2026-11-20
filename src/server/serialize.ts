@@ -151,6 +151,7 @@ export function editorStateToJson(
       ? state.flashSpans.map((line) => line.map((s) => ({ start: s.start, end: s.end, style: s.style })))
       : undefined,
     ghostText: state.ghostText,
+    ghostAnchor: state.ghostAnchor,
     config: state.config,
     commandLine: state.commandLine,
     mxCommand: state.mxCommand,
@@ -301,6 +302,7 @@ export function jsonToEditorState(json: SerializedEditorState | Record<string, u
     // TUI client's render merge + poll edge-check are dead code (verify-gate B).
     flashSpans: (record.flashSpans as EditorState["flashSpans"]) ?? undefined,
     ghostText: (record.ghostText as string | undefined) ?? undefined,
+    ghostAnchor: (record.ghostAnchor as EditorState["ghostAnchor"]) ?? undefined,
   };
 }
 

@@ -658,6 +658,7 @@ export class TmaxServer {
 	    frame.currentBuffer = state.currentBuffer;
 	    frame.currentBufferName = this.currentBufferName(state) ?? undefined;
 	    frame.ghostText = state.ghostText;
+	    frame.ghostAnchor = state.ghostAnchor;
 	    frame.statusMessage = state.statusMessage;
     frame.currentMajorMode = state.currentMajorMode ?? 'fundamental';
     frame.activeMinorModes = state.activeMinorModes ?? [];
@@ -934,6 +935,7 @@ export class TmaxServer {
       // (fikra modeline; codex r25-r31).
       currentBufferName: bufferName ?? undefined,
       ghostText: frame.ghostText,
+      ghostAnchor: frame.ghostAnchor,
 	      cursorPosition: { ...frame.cursorPosition },
 	      mode: frame.mode,
 	      statusMessage: frame.statusMessage,

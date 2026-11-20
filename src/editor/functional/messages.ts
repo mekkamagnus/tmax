@@ -72,6 +72,7 @@ export type Msg =
   | { readonly type: "SetHighlightSpans"; readonly spans: readonly HighlightSpan[][] | undefined }
   | { readonly type: "SetFlashSpans"; readonly spans: readonly HighlightSpan[][] | undefined }
   | { readonly type: "SetGhostText"; readonly text: string | undefined }
+  | { readonly type: "SetGhostAnchor"; readonly line: number; readonly column: number }
   | { readonly type: "SetSearchMatches"; readonly matches: readonly Range[] | undefined }
   | { readonly type: "SetFoldRanges"; readonly ranges: Map<number, number> }
   // Help system

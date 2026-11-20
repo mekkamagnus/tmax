@@ -188,6 +188,7 @@ export interface Frame {
   currentBufferName?: string;  // Name of the current buffer within the frame workspace
   /** §8.8: the dim inline completion at the cursor (transient render state). */
   ghostText?: string;
+  ghostAnchor?: { line: number; column: number };
   statusMessage: string;
   cursorFocus: 'buffer' | 'command';
   lastActivity: Date;

@@ -35,7 +35,11 @@ custom function name taking the line prefix and returning a string/nil.")
     (setq fikra-ghost-current (if (> (length first) 0) first nil))
     (setq fikra-ghost-anchor-line (cursor-line))
     (setq fikra-ghost-anchor-col (cursor-column))
-    (if fikra-ghost-current (ghost-text-set fikra-ghost-current) (ghost-text-clear))))
+    (if fikra-ghost-current
+      (progn
+        (ghost-text-set fikra-ghost-current)
+        (ghost-anchor-set fikra-ghost-anchor-line fikra-ghost-anchor-col))
+      (ghost-text-clear))))
 
 (defun fikra-ghost-first-line (s i)
   (if (or (>= i (length s)) (string= (substring s i (+ i 1)) "\n"))
@@ -90,7 +94,9 @@ clears) when the cursor left the suggestion's anchor."
       (buffer-insert (fikra-ghost-word-prefix fikra-ghost-current 0 ""))
       (fikra-ghost-dismiss)
       t)
-    nil))
+    (progn
+      (fikra-ghost-dismiss)
+      nil)))
 
 (defun fikra-ghost-word-prefix (s i acc)
   ;; Through the first word: skip leading spaces, then include through the

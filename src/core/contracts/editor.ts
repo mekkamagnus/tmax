@@ -267,6 +267,8 @@ export interface EditorState {
   /** RFC-029 §8.8 ghost text: the dim inline completion at the cursor
    * (single line; rendered after the cursor column on the cursor row). */
   ghostText?: string;
+  /** §8.8: the ghost's cursor origin — renders only while matched. */
+  ghostAnchor?: { line: number; column: number };
   searchMatches?: Range[];
   currentMajorMode?: string;
   activeMinorModes?: string[];

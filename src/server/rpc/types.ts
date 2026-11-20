@@ -208,6 +208,7 @@ export interface SerializedEditorState {
   currentBufferName?: string | null;
   /** RFC-029 §8.8 wire: the dim inline completion at the cursor. */
   ghostText?: string;
+  ghostAnchor?: { line: number; column: number };
   currentMajorMode: string;
   activeMinorModes: string[];
   activeMinorModeLighters: string[];

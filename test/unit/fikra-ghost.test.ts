@@ -102,3 +102,49 @@ describe("#8.8 ghost text", () => {
     expect(String(e(editor, '(if (fikra/ghost/fikra-ghost-active-p) "active" "inactive")').value)).toBe("inactive");
   });
 });
+
+describe("#8.8 ghost — real key dispatch + renderer (r39)", () => {
+  test("Escape → re-enter insert → Tab does NOT accept (real handler keys)", async () => {
+    const editor = await createStartedEditor("");
+    e(editor, '(require-module "fikra/ghost")');
+    e(editor, '(buffer-insert "hello")');
+    const ed = editor as unknown as { handleKey: (k: string) => Promise<unknown> };
+    await ed.handleKey("i");             // the Escape path lives in the INSERT handler
+    e(editor, '(fikra/ghost/fikra-ghost-set " world")');
+    await ed.handleKey("Escape");        // leaves insert, dismisses through the module
+    await ed.handleKey("i");             // re-enter insert
+    await ed.handleKey("Tab");           // must NOT insert the dismissed ghost
+    // (Tab falls through to insert-tab — a literal tab is acceptable; the
+    // GHOST text must not appear.)
+    expect(String(e(editor, "(buffer-text)").value)).not.toContain("world");
+    const state = editor.getEditorState() as { ghostText?: string };
+    expect(state.ghostText).toBeUndefined();
+  });
+
+  test("the renderer draws the ghost ONLY at its anchor, keeping the suffix", async () => {
+    const { renderBufferLines } = await import("../../src/frontend/render/buffer-lines.ts");
+    const buf = {
+      getLine: (n: number) => ({ _tag: "Right", right: n === 0 ? "hello world" : "" }),
+      getLineCount: () => ({ _tag: "Right", right: 3 }),
+      getContent: () => ({ _tag: "Right", right: "hello world" }),
+    };
+    const base = {
+      currentBuffer: buf, viewportTop: 0, viewportLeft: 0,
+      config: { wordWrap: false }, activeMinorModes: [], windows: undefined,
+    };
+    const anchored = renderBufferLines(
+      { ...base, cursorPosition: { line: 0, column: 5 }, ghostText: " WIDE", ghostAnchor: { line: 0, column: 5 } } as never,
+      60, 5) as unknown as string[];
+    expect(anchored[0]).toContain("hello");
+    expect(anchored[0]).toContain("WIDE");
+    expect(anchored[0]).toContain("world"); // mid-line suffix preserved
+    // Moved cursor (column 2): the ghost does NOT render.
+    const moved = renderBufferLines(
+      { ...base, cursorPosition: { line: 0, column: 2 }, ghostText: " WIDE", ghostAnchor: { line: 0, column: 5 } } as never,
+      60, 5) as unknown as string[];
+    // The cursor cell's ANSI breaks contiguous "hello" — assert on the
+    // ghost's absence and the suffix's presence.
+    expect(moved[0]).toContain("world");
+    expect(moved[0]).not.toContain("WIDE");
+  });
+});

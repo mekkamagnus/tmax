@@ -551,19 +551,25 @@ export function renderBufferLines(
     // cursor's screen column (gutter + column minus horizontal scroll),
     // dim italic, width-clipped to the content width. (Appending after the
     // row's padding pushed it off-screen at wide terminals — live catch.)
-    if (state.ghostText) {
+    // §8.8: the ghost renders ONLY while the cursor sits at its recorded
+    // anchor (r39: movement otherwise displayed the suggestion at a spot it
+    // was not computed for). col is a SCREEN column (gutter included) and
+    // the clip budgets use the TOTAL width against it (mixing cw —
+    // gutter-excluded — clipped the ghost too early under a gutter).
+    if (state.ghostText
+        && state.ghostAnchor
+        && state.ghostAnchor.line === state.cursorPosition.line
+        && state.ghostAnchor.column === state.cursorPosition.column) {
       const cursorRow = state.cursorPosition.line - getVisibleViewportTop(state, height);
       if (cursorRow >= 0 && cursorRow < rows.length) {
         const gw = gutterDisplayWidth(getLineCount(state), gutterCfg);
         const col = gw + Math.max(0, state.cursorPosition.column - viewportLeft);
         const row = rows[cursorRow]!;
-        // sliceToVisualWidth = the PREFIX up to the cursor column
-        // (sliceFromVisualOffset returns the suffix — viewport-scroll use).
         const head = sliceToVisualWidth(row, col);
-        const ghost = sliceToVisualWidth(style(state.ghostText, { dim: true, italic: true }), cw - Math.min(col, cw));
-        // Keep the text AFTER the cursor visible (codex r38: replacing the
-        // row hid a mid-line suffix); clipped to the remaining width.
-        const suffix = sliceToVisualWidth(sliceFromVisualOffset(row, col), cw - Math.min(col + stringWidth(state.ghostText), cw));
+        const ghost = sliceToVisualWidth(style(state.ghostText, { dim: true, italic: true }), Math.max(0, width - col));
+        // Keep the text after the cursor visible (r38), TOTAL-width budget.
+        const afterGhost = col + stringWidth(state.ghostText);
+        const suffix = afterGhost < width ? sliceToVisualWidth(sliceFromVisualOffset(row, col), width - afterGhost) : "";
         rows[cursorRow] = head + ghost + suffix;
       }
     }
