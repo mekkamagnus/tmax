@@ -12,26 +12,81 @@
 // Known limitation (unchanged by #242): tabs count 0 (the old model said 1);
 // neither model expands real tab stops. See SPEC-242 "Out of scope".
 
+// Bun 1.4 built-ins; feature-detected fallbacks for older runtimes
+// (codex r40 ran 1.3.9 where Bun.sliceAnsi is absent — renders THREW). The
+// fallback skips ANSI CSI sequences and counts East-Asian-wide code points
+// as 2 cells; wide-GRAPHHEME grouping (ZWJ etc.) degrades to per-code-point
+// — the wide-char parity suite gates the 1.4 path where it runs.
+const bunSlice = (Bun as unknown as { sliceAnsi?: (t: string, s: number, e: number) => string }).sliceAnsi;
+const bunWidth = (Bun as unknown as { stringWidth?: (s: string) => number }).stringWidth;
+
+const WIDE_RE = /[\u1100-\u115F\u2E80-\uA4CF\uAC00-\uD7A3\uF900-\uFAFF\uFE30-\uFE6F\uFF00-\uFF60\uFFE0-\uFFE6]/;
+
+function cellWidth(str: string): number {
+  let w = 0;
+  let inEsc = false;
+  for (const ch of str) {
+    if (ch === "\u001b") { inEsc = true; continue; }
+    if (inEsc) { if (ch === "m") inEsc = false; continue; }
+    w += WIDE_RE.test(ch) ? 2 : 1;
+  }
+  return w;
+}
+
+function cellsOf(str: string): string[] {
+  const cells: string[] = [];
+  let inEsc = false;
+  let esc = "";
+  for (const ch of str) {
+    if (ch === "\u001b" || inEsc) {
+      esc += ch;
+      inEsc = ch !== "m" && (ch !== "\u001b" || esc.length > 1);
+      if (ch === "m") { cells.push(esc); esc = ""; inEsc = false; }
+      continue;
+    }
+    cells.push(ch);
+  }
+  return cells;
+}
+
+function sliceCells(text: string, start: number, end: number): string {
+  const cells = cellsOf(text);
+  let w = 0;
+  let out = "";
+  for (const c of cells) {
+    const cw = cellWidth(c);
+    if (w >= start && w < end) out += c;
+    w += cw > 0 ? cw : 0;
+    if (w >= end) break;
+  }
+  return out;
+}
+
 export function stringWidth(str: string): number {
-  return Bun.stringWidth(str);
+  if (bunWidth) return bunWidth(str);
+  return cellWidth(str);
 }
 
 export function charWidth(ch: string): number {
-  return Bun.stringWidth(ch);
+  return stringWidth(ch);
 }
 
 export function sliceToVisualWidth(text: string, maxCols: number): string {
-  let end = maxCols;
-  let slice = Bun.sliceAnsi(text, 0, end);
-  while (stringWidth(slice) > maxCols && end > 0) {
-    end -= 1;
-    slice = Bun.sliceAnsi(text, 0, end);
+  if (bunSlice) {
+    let end = maxCols;
+    let slice = bunSlice(text, 0, end);
+    while (stringWidth(slice) > maxCols && end > 0) {
+      end -= 1;
+      slice = bunSlice(text, 0, end);
+    }
+    return slice;
   }
-  return slice;
+  return sliceCells(text, 0, maxCols);
 }
 
 export function sliceFromVisualOffset(text: string, offset: number): string {
-  return Bun.sliceAnsi(text, offset, Infinity);
+  if (bunSlice) return bunSlice(text, offset, Infinity);
+  return sliceCells(text, offset, Number.MAX_SAFE_INTEGER);
 }
 
 export function fitToWidth(text: string, width: number): string {

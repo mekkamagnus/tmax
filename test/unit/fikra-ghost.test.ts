@@ -121,6 +121,18 @@ describe("#8.8 ghost — real key dispatch + renderer (r39)", () => {
     expect(state.ghostText).toBeUndefined();
   });
 
+  test("move away, EDIT, return to the origin: the ghost no longer accepts (r40)", async () => {
+    const editor = await createStartedEditor("");
+    e(editor, '(require-module "fikra/ghost")');
+    e(editor, '(buffer-insert "hello")');
+    e(editor, '(fikra/ghost/fikra-ghost-set " world")');
+    // Move + edit elsewhere (append a char on line 2), then return home.
+    (editor as unknown as { applyUpdate: (u: unknown) => void }).applyUpdate({ type: "SetCursorPosition", position: { line: 0, column: 0 } });
+    e(editor, '(buffer-insert "X")');
+    (editor as unknown as { applyUpdate: (u: unknown) => void }).applyUpdate({ type: "SetCursorPosition", position: { line: 0, column: 6 } });
+    expect(String(e(editor, '(if (fikra/ghost/fikra-ghost-accept) "accepted" "refused")').value)).toBe("refused");
+  });
+
   test("the renderer draws the ghost ONLY at its anchor, keeping the suffix", async () => {
     const { renderBufferLines } = await import("../../src/frontend/render/buffer-lines.ts");
     const buf = {

@@ -26,6 +26,9 @@ custom function name taking the line prefix and returning a string/nil.")
 (defvar fikra-ghost-anchor-line nil
   "The line the ghost was computed for (accept refuses on a moved cursor).")
 (defvar fikra-ghost-anchor-col nil)
+(defvar fikra-ghost-anchor-prefix nil
+  "The line's text up to the anchor at trigger time (r40: coordinates alone
+re-armed after move-away-and-back; the CONTENT must match too).")
 
 (defun fikra-ghost-set (text)
   ;; Single-line scope: the MIRROR stores the same first line the render
@@ -35,6 +38,10 @@ custom function name taking the line prefix and returning a string/nil.")
     (setq fikra-ghost-current (if (> (length first) 0) first nil))
     (setq fikra-ghost-anchor-line (cursor-line))
     (setq fikra-ghost-anchor-col (cursor-column))
+    (setq fikra-ghost-anchor-prefix
+      (let ((l (buffer-line)))
+        (if (> fikra-ghost-anchor-col (length l)) l
+          (substring l 0 fikra-ghost-anchor-col))))
     (if fikra-ghost-current
       (progn
         (ghost-text-set fikra-ghost-current)
@@ -60,12 +67,19 @@ custom function name taking the line prefix and returning a string/nil.")
   (if (fikra-ghost-active-p) fikra-ghost-current nil))
 
 (defun fikra-ghost-anchored-p ()
-  ;; The suggestion belongs to its (line, column); edits or movement past
-  ;; it make acceptance stale (codex r38).
+  ;; The suggestion belongs to its (line, column) AND the line CONTENT at
+  ;; that column (r40: coordinates alone re-armed after a move away and
+  ;; back — any edit in between changes the prefix and invalidates).
   (if (not (fikra-ghost-active-p))
     nil
     (and (= fikra-ghost-anchor-line (cursor-line))
-         (= fikra-ghost-anchor-col (cursor-column)))))
+         (= fikra-ghost-anchor-col (cursor-column))
+         (string= (fikra-ghost-current-prefix) fikra-ghost-anchor-prefix))))
+
+(defun fikra-ghost-current-prefix ()
+  (let ((l (buffer-line)))
+    (if (> fikra-ghost-anchor-col (length l)) l
+      (substring l 0 fikra-ghost-anchor-col))))
 
 (defun fikra-ghost-stale-dismiss ()
   "Public: clear a ghost that no longer matches its context (movement)."
