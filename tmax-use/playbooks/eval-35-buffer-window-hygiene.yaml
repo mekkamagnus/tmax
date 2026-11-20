@@ -122,8 +122,12 @@ steps:
       result_contains: '2'
 
   # -- balanced heights are equal (SPEC-084 exposes a window-height reader) --
-  - name: both windows share an equal height after balance
-    eval: '(= (window-height 0) (window-height 1))'
+  - name: both windows share an (near-)equal height after balance
+    # The separator row makes panes of an even-height terminal split an ODD
+    # content height (e.g. 24 rows -> 23 content -> 11 + 12). Balance
+    # equalizes the RATIO (0.5/0.5); the row remainder lands in the second
+    # pane. Equality holds only when content is even.
+    eval: '(<= (abs (- (window-height 0) (window-height 1))) 1)'
     expect:
       result_contains: 'true'
 
