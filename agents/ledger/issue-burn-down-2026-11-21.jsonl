@@ -34,3 +34,4 @@
 {"event":"gate","ts":"2026-11-20T20:50:29Z","kind":"codex-grade","verdict":"10/10","rounds":2,"reviewed-sha":"e5b8327","findings-count":0}
 {"event":"landing","ts":"2026-11-20T20:50:29Z","unit":"#303","shas":["c3b255a"],"files-staged-count":8,"tests-run":[{"name":"bun run test:unit","output":"3902 pass\n1 fail (man-format 30s load flake, 12/12 solo; prior run on the same tree 3901/0)"},{"name":"bun test test/unit/pausing-backend.test.ts","output":"5 pass\n0 fail"}],"adr-spec":["docs/adrs/ADR-0300-pausing-approval-fixture.md","docs/specs/SPEC-274-pausing-approval-fixture.md"]}
 {"event":"unit-start","ts":"2026-11-20T21:01:08Z","unit":"#305"}
+{"event":"gate","ts":"2026-11-20T21:18:27Z","kind":"verify-gate","verdict":"GAPS","rounds":1,"reviewed-sha":"43c4253","findings-count":4}
