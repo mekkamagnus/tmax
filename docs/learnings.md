@@ -254,3 +254,7 @@ completion-all-completions OVERWRITES each row's "annotation" via the marginalia
 ## -e side effects leak into the live TUI frame
 
 Daemon-side `(buffer-switch ...)`/thread ops from a probe -e call mutate the SHARED editor state and the live TUI renders them (mid-artifact, the frame jumped to *scratch* and threads switched). Before probing around a live capture, snapshot what you need; re-drive the UI state (SPC a a / thread switch) after any -e that touched buffers or threads.
+
+## Live claude turns spam session events; rebuild truncation follows (round 33)
+
+The claude CLI re-prints its system/init line around tool rounds; the backend filter re-emitted every one — one short turn logged 11k+ duplicate session events (92% of the thread's FAEP log). Fixed in the filter (drop session events whose id matches the thread's record). SECONDARY: chat-open's rebuild walks every log event; a bloated log silently truncates the rendered transcript (recursion-depth suspicion) and intermittently TL4001s ("string-split requires string") when the rebuild reads the log MID-APPEND (a live turn still writing). Rebuild is clean once the turn ends and the log is compact. OPEN (8.1): the rebuild renders fully from `-e` but truncates in the TUI key-dispatch context on the same log — an eval-context difference, not the log.
