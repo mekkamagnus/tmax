@@ -436,6 +436,17 @@ export class Editor {
         const existingName = editor.findBufferName(v ?? undefined);
         const bufferName = existingName ?? previousName;
         if (v && bufferName) editor.buffers.set(bufferName, v as TextBufferImpl);
+        // A buffer SWITCH swaps the file context: the modeline (and :w)
+        // must follow the TARGET buffer's metadata — switching to a named
+        // non-file buffer (e.g. *Fikra*) clears the stale filename instead
+        // of showing the previously opened file (fikra modeline, codex
+        // r25-r31). Content swaps (same buffer, immutable rebuild) keep it.
+        if (v && bufferName && bufferName !== previousName) {
+          const targetFilename = editor.bufferMetadata.get(bufferName)?.filename;
+          if ((targetFilename ?? undefined) !== (editor.model.currentFilename ?? undefined)) {
+            editor.applyUpdate({ type: "SetCurrentFilename", filename: targetFilename });
+          }
+        }
         if (v && editor.model.tabs && editor.model.tabs.length > 0) {
           const currentTabIndex = editor.model.currentTabIndex ?? 0;
           const currentTab = editor.model.tabs[currentTabIndex];
@@ -3452,7 +3463,7 @@ export class Editor {
     }
   }
 
-  private findBufferName(buffer: TextBuffer | undefined): string | undefined {
+  findBufferName(buffer: TextBuffer | undefined): string | undefined {
     if (!buffer) return undefined;
     for (const [name, candidate] of this.buffers) {
       if (candidate === buffer) return name;

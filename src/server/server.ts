@@ -724,15 +724,12 @@ export class TmaxServer {
   }
 
   private currentBufferName(state: EditorState): string | null {
-    // A NAMED buffer (e.g. *Fikra*) wins over a stale filename — the old
-    // filename-first branch kept showing the opened file after the chat
-    // buffer switched in (fikra modeline, codex r25-r30).
-    if (state.buffers) {
-      for (const [name, buffer] of state.buffers.entries()) {
-        if (buffer === state.currentBuffer) return name;
-      }
-    }
-    return state.currentFilename ?? null;
+    // #253's modelToEditorState already resolves the buffer NAME from the
+    // live model (reference-true, before the buffers map is cloned out of
+    // the state). Re-deriving it from the CLONED state's references always
+    // missed — the modeline fell back to *scratch* over named buffers
+    // (fikra modeline, codex r25-r31).
+    return state.currentBufferName ?? state.currentFilename ?? null;
   }
 
   private frameStatus(frame: Frame): FrameStatusResult {
@@ -930,6 +927,11 @@ export class TmaxServer {
           )
         : {}),
       currentBuffer: frameBuffer,
+      // The modeline name: frameToEditorState computed bufferName for the
+      // BUFFER resolution but never exposed it — every keypress response
+      // fell through to the *scratch* fallback over a named chat buffer
+      // (fikra modeline; codex r25-r31).
+      currentBufferName: bufferName ?? undefined,
 	      cursorPosition: { ...frame.cursorPosition },
 	      mode: frame.mode,
 	      statusMessage: frame.statusMessage,
