@@ -23,7 +23,7 @@ endings (error + completed interleaved).
 
 ## Implementation
 
-`fikra-event-dedupe-memarkers` dispatches: id'd logs → a BACKWARD scan
+`fikra-event-dedupe-markers` dispatches: id'd logs → a BACKWARD scan
 (first turn-end seen per id = last by log order; later sightings drop,
 counted in `fikra-dedupe-dropped`); no-id logs → the old consecutive
 scan unchanged. Replay notes `N stale endings dropped` via `message`
