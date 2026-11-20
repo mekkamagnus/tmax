@@ -614,3 +614,25 @@ The enriched gate resolves the earlier visibility gap: its checkpoint is explici
 3. Capture a stable live session showing incremental text arrival and an interactive approval through completion, including the active thread name in the modeline. The streaming normalization is at [backend-claude.tlisp](/Users/mekael/Documents/programming/typescript/tmax/src/tlisp/core/fikra/backend-claude.tlisp:222); the lighter is in [chat.tlisp](/Users/mekael/Documents/programming/typescript/tmax/src/tlisp/core/fikra/chat.tlisp:88).
 
 The new approval panel materially improves the hierarchy and supplies the key decision context in the mediated-turn artifact. It is not yet a clean match for §8.3: the borders overflow, and the evidence does not demonstrate the proposed native-loop provenance or live CLI gate. Overall, the chat is visually and functionally close in its demonstrated paths, with the largest remaining gap in live, per-action verification.
+
+---
+
+# Round 19 (live wrapped stream verified) — 2026-11-20
+
+| Area | Grade | Justification |
+|---|---:|---|
+| Chat presentation | 8/10 | Turn separators, speaker labels, gutter, wrapping, and the live modeline establish the mockup’s editor-native feel; the native tool-loop presentation remains a proposal. |
+| Streaming and wrapping | 8/10 | The new TUI frame shows word-boundary wrapping across continuation rows; it is a single frame, so it does not independently measure latency or smoothness. |
+| Composition | 8/10 | The prior single-session captures support a usable capture-and-send flow, though it is less visually detailed than the mockup. |
+| Approval | 6/10 | The boxed panel improves visual fidelity, but it is inline and live Claude CLI mediation remains unavailable with the installed CLI. |
+| Diff and navigation | 8/10 | The prior colored viewer captures and `n`/`N` navigation proof demonstrate the core review flow. |
+| Checkpoint and restore | 8/10 | The prior restore proof supports the core revert workflow; the mockup’s per-native-action checkpoint presentation remains future work. |
+| Modeline and context | 8/10 | The live backend, runtime, turn, and thread segments provide useful context, though the narrow capture wraps the modeline. |
+
+**Top remaining fixes**
+
+1. **Enable and verify live approval mediation.** The Claude adapter capability probe and hook setup are in [backend-claude.tlisp](/Users/mekael/Documents/programming/typescript/tmax/src/tlisp/core/fikra/backend-claude.tlisp:47). Support an available mediation mechanism or a compatible backend, then demonstrate a real tool request paused and allowed or rejected end to end.
+2. **Place the approval panel as an overlay.** The current boxed inline panel is produced in [event.tlisp](/Users/mekael/Documents/programming/typescript/tmax/src/tlisp/core/fikra/event.tlisp:117); a focused overlay would match §8.3 more closely.
+3. **Capture a timed streaming sequence.** The render path is in [event.tlisp](/Users/mekael/Documents/programming/typescript/tmax/src/tlisp/core/fikra/event.tlisp:320) and client polling in [tui-client.ts](/Users/mekael/Documents/programming/typescript/tmax/src/client/tui-client.ts:233). Successive timestamped frames would establish incremental display and responsiveness. The supplied frame visibly ends during sentence five; the claimed complete six-sentence buffer is not wholly visible in that viewport.
+
+Fikra now looks substantially closer to the existing chat and review surfaces in the mockups, and the new capture resolves the concern that the client cannot wrap the streamed reply. The strongest remaining functional gap is live approval mediation; the clearest visual gap is the inline rather than overlaid gate. Section 8 also depicts a proposed native agent loop, so its per-action tool and checkpoint details should not be treated as already demonstrated by the wrapped-CLI captures.
