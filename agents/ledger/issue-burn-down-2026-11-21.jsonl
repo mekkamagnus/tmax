@@ -14,3 +14,4 @@
 {"event":"gate","ts":"2026-11-20T12:45:46Z","kind":"verify-gate","verdict":"GAPS","rounds":3,"reviewed-sha":"a9cd77a","findings-count":1}
 {"event":"escalation","ts":"2026-11-20T12:45:46Z","reason":"valve-fired","action":"verify-gate retry budget spent (3 GAPS rounds); #301 labeled blocked with the r3 one-line fix + regression committed on-branch — the unblock is a single gate re-run"}
 {"event":"unit-start","ts":"2026-11-20T12:47:01Z","unit":"#304","note":"issue-304 in wt-burn; ledger carried forward from issue-301 ( fragmentation across branches reconciled here)"}
+{"event":"gate","ts":"2026-11-20T13:08:05Z","kind":"verify-gate","verdict":"GAPS","rounds":1,"reviewed-sha":"49eae59","findings-count":2}
