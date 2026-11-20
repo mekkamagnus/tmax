@@ -114,19 +114,20 @@ round-12 approvals catch)."
         (concat " " (fikra-face "\e[2m" (concat "#" (number-to-string v)))))
       (t ""))))
 
-;; The boxed approval panel (mockup 8.3's focused presentation). Width 62;
-;; content lines are padded to the inner width so the right border aligns.
+;; The boxed approval panel (mockup 8.3's focused presentation). Width 44 (round-21: 62 overflowed narrow panes — the wrap
+;; continuation gutter shredded the border); content lines pad/truncate to
+;; the inner width so the border always aligns.
 (defun fikra-gate-panel (event)
   (let* ((mode (fikra-event-get-str event "mode"))
          (cp (fikra-event-get-str event "checkpoint"))
          (org (fikra-event-get-str event "origin"))
          (rows (list
-                 (concat "? " (fikra-event-get-str event "action") (fikra-event-id-tag event))
-                 (concat "turn paused"
+                 (concat "? " (fikra-event-get-str event "action"))
+                 (concat "paused"
                          (if (string= mode "") "" (concat " (" mode ")"))
                          " — holds until you answer")
-                 (concat "[y] allow   [n] reject   [a] always-allow (trusts class)")
-                 (if (string= cp "") "" (concat "checkpoint " cp " · r in the diff view reverts"))
+                 (concat "[y] allow  [n] reject  [a] always (trusts)")
+                 (if (string= cp "") "" (concat "ckpt " cp " · r reverts"))
                  (if (string= org "") "" (concat "origin: " org)))))
     (concat
       (fikra-face "\e[1;33m" (fikra-box-line "┌" "─" " approval required " "┐")) "\n"
@@ -139,9 +140,9 @@ round-12 approvals catch)."
 (defun fikra-gate-row (content)
   ;; Overlong content TRUNCATES (…) — the border must never be overrun
   ;; (codex round-18 catch: long rows visibly overflowed the fixed box).
-  (let ((c (if (> (length content) 58)
-             (concat (substring content 0 55) "…")
-             (fikra-pad-to content 58))))
+  (let ((c (if (> (length content) 40)
+             (concat (substring content 0 37) "…")
+             (fikra-pad-to content 40))))
     (concat "│ " c " │")))
 
 (defun fikra-pad-to (s width)
@@ -155,7 +156,7 @@ round-12 approvals catch)."
 ;; then FILL characters out to the right edge.
 (defun fikra-box-line (left fill title right)
   (let ((used (+ (length left) (length title) (length right))))
-    (concat left title (fikra-repeat-str fill (max 0 (- 62 used))) right)))
+    (concat left title (fikra-repeat-str fill (max 0 (- 44 used))) right)))
 
 ;; A DENIED tool-result (the backend CLI's own permission system refused —
 ;; the L1 reality; fikra has no gate to offer). Detected by the denial
