@@ -73,6 +73,7 @@ describe("CHORE-44 Change 12 — editor fixture isolation", () => {
     const allowed = new Map<string, string>([
       ["test/unit/server-start-editor.test.ts", "tests cleanStart/startEditor with REAL TerminalIOImpl+FileSystemImpl (BUG-58 guard); fixture uses a different setup"],
       ["test/unit/editor-open-file.test.ts", "wraps Editor in TmaxServer + startEditor to test open-file through the server; createEditorFixture is standalone (no server)"],
+      ["test/unit/fikra-thread-context.test.ts", "#298: INJECTS a real Editor into TmaxServer (the constructor seam) to assert the connect-frame clientCwd handshake lands on the serving editor — untestable through createStartedEditor (no server)"],
     ]);
     const offenders: string[] = [];
     for (const file of files) {

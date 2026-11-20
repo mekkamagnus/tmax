@@ -72,6 +72,10 @@ interface ClientConnection {
   lastError?: string;
   frameId?: string;
   inputBuffer: string;
+  /** #298: the launch dir this client's connect-frame recorded on the
+   *  editor — cleared on disconnect so a stale dir never outlives its
+   *  client (unless a LATER client overwrote it first). */
+  launchDirSet?: string;
 }
 
 type ObservabilityError = ObservabilityErrorResult;
@@ -1186,6 +1190,15 @@ export class TmaxServer {
 	              ?? (await this.readLastWorkspace()) ?? this.activeWorkspaceId;
 	            const explicitWorkspace = typeof params.workspaceId === 'string' || typeof params.workspace === 'string';
 	            await this.activateWorkspace(requestedWorkspace);
+	            // #298: record the CLIENT's launch directory on the serving
+	            // editor (after workspace activation so it lands on the editor
+	            // this frame actually uses). fikra threads resolve their project
+	            // root from this client context, never the daemon cwd.
+	            const clientCwd = typeof params.clientCwd === 'string' ? params.clientCwd : undefined;
+	            if (clientCwd) {
+	              this.editor?.setClientLaunchDir(clientCwd);
+	              client.launchDirSet = clientCwd;
+	            }
 	            if (explicitWorkspace) await this.updateLastWorkspace(requestedWorkspace);
 	            clientFrameId = this.createFrameForWorkspace(clientId, client.clientType, requestedWorkspace);
             client.frameId = clientFrameId;
@@ -1248,6 +1261,12 @@ export class TmaxServer {
 
     conn.on('close', () => {
       this.editor?.logDaemonEvent('client-disconnected', clientId);
+      // #298 (verify-gate r2): clear the launch dir THIS client recorded —
+      // a disconnected client's context must not outlive it. Value-equality
+      // guard: a LATER client that already overwrote the dir keeps theirs.
+      if (client.launchDirSet && this.editor?.getClientLaunchDir() === client.launchDirSet) {
+        this.editor.setClientLaunchDir(undefined);
+      }
       if (clientFrameId) this.deleteFrame(clientFrameId);
       this.clients.delete(clientId);
     });
@@ -1255,6 +1274,10 @@ export class TmaxServer {
     conn.on('error', (err) => {
       console.error(`Client ${clientId} error:`, err);
       this.recordError('client-socket', err, clientId, clientFrameId ?? undefined);
+      // Same #298 staleness guard as close (error paths tear the conn too).
+      if (client.launchDirSet && this.editor?.getClientLaunchDir() === client.launchDirSet) {
+        this.editor.setClientLaunchDir(undefined);
+      }
       if (clientFrameId) this.deleteFrame(clientFrameId);
       this.clients.delete(clientId);
     });

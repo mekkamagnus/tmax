@@ -31,8 +31,9 @@ tree matrix; the *Fikra-Diff* buffer renders a second full patch form)."
   (concat "git diff --name-status " target " " completion))
 
 (defun fikra-diff-stat (target completion)
-  "Per-turn diff stat (the *Fikra-Diff* header)."
-  (shell-command (concat "git diff --stat " target " " completion)))
+  "Per-turn diff stat (the *Fikra-Diff* header). #298: runs at the
+thread's persisted root."
+  (fikra/thread/fikra-thread-root-shell (concat "git diff --stat " target " " completion)))
 
 ;; Parse `git diff --name-status A B` lines: XY<tab>path (X=from-status,
 ;; Y=to-status; D100 = deleted, A100 = added, M = modified).
@@ -57,7 +58,7 @@ of files in either ref (from the diff). For each diff entry:
   M (in both, modified) → restore from target.
 Untracked-not-in-completion files are not diff entries — untouched."
   (let ((entries (fikra-diff-paths
-                   (shell-command (fikra-diff-command target completion))))
+                   (fikra/thread/fikra-thread-root-shell (fikra-diff-command target completion))))
         (plan (list)))
     (dolist (entry entries)
       (let ((status (substring entry 0 1))
@@ -93,17 +94,19 @@ Untracked-not-in-completion files are not diff entries — untouched."
 ;;   present on disk     → the USER recreated it post-turn → diverged
 ;;                          (abort + stash).
 (defun fikra-path-diverged-p (path completion)
-  (let ((exists-now (string= (string-trim (shell-command
+  ;; #298: all three probes run at the thread's persisted root (the diff
+  ;; entries are repo-relative paths of THAT repo).
+  (let ((exists-now (string= (string-trim (fikra/thread/fikra-thread-root-shell
                  (concat "test -e " (fikra-quote path) " && echo y || echo n")))
                 "y"))
-        (in-completion (string= (string-trim (shell-command
+        (in-completion (string= (string-trim (fikra/thread/fikra-thread-root-shell
                  (concat "git cat-file -e " completion ":" path " 2>/dev/null && echo y || echo n")))
                 "y")))
     (cond
       ((and (not exists-now) (not in-completion)) nil)
       ((and exists-now (not in-completion)) t)
       ((and (not exists-now) in-completion) t)
-      (t (not (string= (string-trim (shell-command
+      (t (not (string= (string-trim (fikra/thread/fikra-thread-root-shell
              (concat "git show " completion ":" path " 2>/dev/null | cmp -s - "
                      (fikra-quote path) " && echo same || echo diff")))
           "same"))))))
@@ -113,8 +116,9 @@ Untracked-not-in-completion files are not diff entries — untouched."
   (concat "'" path "'"))
 
 (defun fikra-revertable-p (target completion)
-  "t when both refs exist (rev-parse verifies both)."
-  (string= (string-trim (shell-command
+  "t when both refs exist (rev-parse verifies both). #298: at the
+thread's persisted root."
+  (string= (string-trim (fikra/thread/fikra-thread-root-shell
            (concat "git rev-parse --verify -q " target " >/dev/null 2>&1 && "
                    "git rev-parse --verify -q " completion " >/dev/null 2>&1 && "
                    "echo ok || echo missing")))
@@ -147,15 +151,15 @@ stashed, not fatal)."
                 ;; (A-entries absent from HEAD/index; gate catch: the old
                 ;; `git diff completion --` form stashed a deletion patch
                 ;; with NONE of the user's content).
-                (shell-command
+                (fikra/thread/fikra-thread-root-shell
                   (concat "mkdir -p .tmax/fikra/stash && git diff --binary --no-index /dev/null "
                           (fikra-quote path)
                           " > .tmax/fikra/stash/revert-" (fikra-slugify path) ".patch"))
                 (setq aborted (cons path aborted)))
               (progn
                 (if (string= action "delete")
-                  (shell-command (concat "rm -f -- " (fikra-quote path)))
-                  (shell-command
+                  (fikra/thread/fikra-thread-root-shell (concat "rm -f -- " (fikra-quote path)))
+                  (fikra/thread/fikra-thread-root-shell
                     (concat "git checkout " target " -- " (fikra-quote path))))
                 (setq done (+ done 1))))))
         ;; The tombstone: invalidates (target-turn, revert-point] —

@@ -43,6 +43,10 @@ export class RemoteEditor {
     const frameResult = await this.sendRequest("connect-frame", {
       clientType: "tui",
       clientName: "tmax-tui",
+      // #298: the client's launch directory — the daemon records it so fikra
+      // threads resolve their project root from the CLIENT'S context, not the
+      // daemon cwd.
+      clientCwd: process.cwd(),
       ...(this.workspaceId ? { workspaceId: this.workspaceId } : {}),
     });
     this._clientId = frameResult.clientId ?? null;

@@ -72,10 +72,11 @@
 
 ;; ── local → worktree ────────────────────────────────────────────────
 (defun fikra-worktree-latest-ref ()
-  "The thread's latest completion ref, or nil when no checkpoints exist."
+  "The thread's latest completion ref, or nil when no checkpoints exist.
+#298: verified at the thread's persisted root."
   (let* ((n (fikra/thread/fikra-thread-turn-count))
          (ref (concat "refs/fikra/" (fikra/thread/fikra-thread-current) "/" n)))
-    (if (string= (string-trim (shell-command
+    (if (string= (string-trim (fikra/thread/fikra-thread-root-shell
              (concat "git rev-parse --verify -q " ref " >/dev/null 2>&1 && echo ok || echo no")))
           "ok")
       ref nil)))
@@ -83,13 +84,14 @@
 (defun fikra-worktree-dirty-p ()
   "t when the LOCAL tree differs from the latest checkpoint (or HEAD when
 none): tracked changes beyond the ref, or any untracked file (captures
-snapshot the full disk — add -A — so disk == ref means clean)."
+snapshot the full disk — add -A — so disk == ref means clean). #298: both
+probes run at the thread's persisted root."
   (let* ((ref (or (fikra-worktree-latest-ref) "HEAD"))
-         (tracked (string-trim (shell-command
+         (tracked (string-trim (fikra/thread/fikra-thread-root-shell
                    (concat "git diff --name-only " ref " -- 2>/dev/null"))))
          ;; .tmax/ is tmax's OWN state dir — never user dirt (probe catch:
          ;; an unignored .tmax blocked worktree entry on a clean tree).
-         (untracked (shell-command "git status --porcelain 2>/dev/null | grep '^??' | grep -v '\.tmax/' || true")))
+         (untracked (fikra/thread/fikra-thread-root-shell "git status --porcelain 2>/dev/null | grep '^??' | grep -v '\.tmax/' || true")))
     (or (> (length tracked) 0)
         (> (length (string-trim untracked)) 0))))
 
@@ -108,7 +110,7 @@ in thread state, refreshes the lighter. Returns the worktree path."
         nil)
       (let* ((base (or (fikra-worktree-latest-ref) "HEAD"))
              (path (fikra-worktree-path))
-             (out (shell-command
+             (out (fikra/thread/fikra-thread-root-shell
                     (concat "git worktree add " (fikra-shq path)
                             " -b fikra/" (fikra/thread/fikra-thread-current)
                             " " base " 2>&1 && echo WT-OK || echo WT-FAILED"))))
@@ -143,9 +145,10 @@ application. Returns t on success."
                (patch-path (fikra-worktree-patch-path))
                (root (fikra/thread/fikra-thread-field "root")))
           (shell-command (concat "mkdir -p " (fikra-shq (fikra-dirname patch-path))))
-          (shell-command (concat "git diff --binary " base " " snapshot
-                                 " > " (fikra-shq patch-path)))
-          (let ((check (string-trim (shell-command
+          (fikra/thread/fikra-thread-root-shell
+            (concat "git diff --binary " base " " snapshot
+                    " > " (fikra-shq patch-path)))
+          (let ((check (string-trim (fikra/thread/fikra-thread-root-shell
                        (concat "git apply --check --binary " (fikra-shq patch-path)
                                " 2>&1 && echo APPLY-OK || echo APPLY-CONFLICT")))))
             (if (not (string-match "APPLY-OK" check))
@@ -155,7 +158,8 @@ application. Returns t on success."
                           " ; worktree intact"))
                 nil)
               (progn
-                (shell-command (concat "git apply --binary " (fikra-shq patch-path)))
+                (fikra/thread/fikra-thread-root-shell
+                  (concat "git apply --binary " (fikra-shq patch-path)))
                 (editor-set-status
                   (concat "Fikra: applied " (fikra/thread/fikra-thread-current)
                           " patch to local (base " base ")"))
@@ -205,14 +209,14 @@ Returns t when fully closed."
                 ;; next — a failed worktree remove must not orphan the
                 ;; worktree with its branch/refs/state already gone.
                 (if (not (string-match "REMOVE-OK"
-                          (shell-command (concat "git worktree remove --force " (fikra-shq path)
+                          (fikra/thread/fikra-thread-root-shell (concat "git worktree remove --force " (fikra-shq path)
                                                  " 2>&1 && echo REMOVE-OK || echo REMOVE-FAILED"))))
                   (progn
                     (editor-set-status "Fikra: close ABORTED — worktree remove failed; branch/refs/state kept")
                     nil)
                   (progn
-                    (shell-command (concat "git branch -D fikra/" id " 2>/dev/null || true"))
-                    (shell-command (concat "git for-each-ref --format='%(refname)' refs/fikra/" id "/ "
+                    (fikra/thread/fikra-thread-root-shell (concat "git branch -D fikra/" id " 2>/dev/null || true"))
+                    (fikra/thread/fikra-thread-root-shell (concat "git for-each-ref --format='%(refname)' refs/fikra/" id "/ "
                                            " | xargs -n1 git update-ref -d 2>/dev/null || true"))
                     (fikra/thread/fikra-thread-set-field "worktree" nil)
                     (fikra/thread/fikra-thread-set-field "worktree-base" nil)
@@ -235,7 +239,7 @@ Returns t when fully closed."
   (if (> i n)
     t
     (progn
-      (shell-command (concat "git diff --binary refs/fikra/" id "/" i "-baseline"
+      (fikra/thread/fikra-thread-root-shell (concat "git diff --binary refs/fikra/" id "/" i "-baseline"
                              " refs/fikra/" id "/" i
                              " > " (fikra-shq (concat dir "/" i ".patch"))
                              " 2>/dev/null || true"))

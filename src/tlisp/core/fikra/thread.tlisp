@@ -5,7 +5,9 @@
           fikra-thread-emit-file-changes fikra-thread-compute-changes
           fikra-thread-root fikra-thread-log-path fikra-thread-session-id
           fikra-thread-set-session-id fikra-thread-save fikra-thread-field
-          fikra-thread-set-field)
+          fikra-thread-set-field
+          fikra-thread-context-dir fikra-root-from-context
+          fikra-thread-root-shell)
 
 ;; #213 (RFC-027 §D3/§D7, Phase 1 — MINIMAL subset): one implicit "main"
 ;; thread per project. State machine + persistence + reopen-after-restart +
@@ -26,14 +28,56 @@
 (defvar fikra-current-thread-id nil
   "Focused thread id (the minimal subset has only \"main\").")
 
-;; ── project root ────────────────────────────────────────────────────
+;; ── project root (#298: the CLIENT'S working context, not the daemon cwd) ─
 (defun fikra-thread-root ()
-  "Project root = git toplevel of cwd (fallback: cwd)."
+  "LEGACY resolution (#298): git toplevel of the DAEMON cwd (fallback: the
+cwd itself). Used ONLY for records persisted before the client-context
+fix — a legacy thread keeps this resolution and is flagged legacy in the
+thread list (no silent re-targeting of old threads)."
   (let ((out (string-trim (shell-command "git rev-parse --show-toplevel 2>/dev/null"))))
     (if (> (length out) 0) out (process-cwd))))
 
 (defun process-cwd ()
   (string-trim (shell-command "pwd")))
+
+;; No dirname primitive — slice to the last "/" (worktree.tlisp has the
+;; same helper; requiring worktree here would cycle).
+(defun fikra-thread-dirname (path)
+  (fikra-thread-dirname-scan path -1 0))
+
+(defun fikra-thread-dirname-scan (path last i)
+  (if (>= i (length path))
+    (if (< last 0) "." (substring path 0 last))
+    (fikra-thread-dirname-scan path
+      (if (string= (substring path i (+ i 1)) "/") i last)
+      (+ i 1))))
+
+(defun fikra-thread-context-dir ()
+  "The CLIENT'S working context dir (#298): the current buffer's FILE dir
+when a file buffer is attached, else the connected client's launch dir,
+else the daemon cwd (embedded editors — identical to legacy behavior).
+Always a string; threaded into thread creation and persisted as
+context-dir on the record."
+  (let ((bf (buffer-filename)))
+    (if (and (stringp bf) (> (length bf) 0))
+      (fikra-thread-dirname bf)
+      (let ((cld (client-launch-dir)))
+        (if (and (stringp cld) (> (length cld) 0))
+          cld
+          (process-cwd))))))
+
+(defun fikra-root-from-context (dir)
+  "git toplevel of DIR, executing git with DIR as the process cwd (the
+shell-command cwd argument — the make-process :cwd capability; no cwd
+inheritance). Fallback: DIR itself."
+  (let ((out (string-trim (shell-command "git rev-parse --show-toplevel 2>/dev/null" dir))))
+    (if (> (length out) 0) out dir)))
+
+(defun fikra-thread-root-shell (cmd)
+  "Run CMD with the current thread's PERSISTED root as the process cwd
+(#298: every consumer runs its git steps rooted at the record's root —
+never the daemon cwd, never an independent re-resolution)."
+  (shell-command cmd (fikra-thread-field "root")))
 
 ;; #221 (RFC-027 §D7): the thread's WORKING dir — the worktree path when
 ;; in worktree mode (backend cwd + checkpoint captures run there), the
@@ -56,19 +100,23 @@
 
 ;; ── init / open / reopen ────────────────────────────────────────────
 (defun fikra-thread-init ()
-  "Detect the project root and initialize (or load) the main thread.
-Creates .tmax/fikra/threads/main/ and points the FAEP log at it. Returns
-the thread id. Idempotent."
-  (let* ((root (fikra-thread-root))
-         (dir (concat root "/.tmax/fikra/threads/main")))
-    (file-mkdir dir)
-    (let ((state (fikra-thread-load root "main")))
-      (editor/keymaps/keymap-mutable-set! fikra-threads "main" state)
-      (setq fikra-current-thread-id "main")
-      ;; Wire FAEP at the thread's log; loading resets in-memory events, so
-      ;; re-point even when the thread already existed.
-      (fikra/event/fikra-event-log-set (concat dir "/events.jsonl"))
-      "main")))
+  "Detect the project root FROM THE CLIENT'S WORKING CONTEXT (#298) and
+initialize (or load) the main thread. Creates .tmax/fikra/threads/main/
+and points the FAEP log at it. Returns the thread id. Idempotent."
+  (let* ((ctxdir (fikra-thread-context-dir))
+         (root (fikra-root-from-context ctxdir)))
+    (let ((state (fikra-thread-load root "main" ctxdir)))
+      ;; The RECORD's root wins (a legacy record keeps its daemon-cwd root;
+      ;; a post-fix record re-resolves from its persisted context) — mkdir
+      ;; and the FAEP log follow the SAME source.
+      (let ((dir (concat (hashmap-get state "root") "/.tmax/fikra/threads/main")))
+        (file-mkdir dir)
+        (editor/keymaps/keymap-mutable-set! fikra-threads "main" state)
+        (setq fikra-current-thread-id "main")
+        ;; Wire FAEP at the thread's log; loading resets in-memory events, so
+        ;; re-point even when the thread already existed.
+        (fikra/event/fikra-event-log-set (concat dir "/events.jsonl"))
+        "main"))))
 
 (defun fikra-thread-open ()
   "Open the main thread: init-or-load, create *Fikra* when absent, replay
@@ -86,12 +134,19 @@ history into it (daemon-restart reopen path), focus it."
   "Alias of fikra-thread-open (the daemon-restart entry point)."
   (fikra-thread-open))
 
-;; Load state.json for ID under ROOT; absent file → fresh state.
-(defun fikra-thread-load (root id)
+;; Load state.json for ID under ROOT; absent file → fresh state. CTXDIR is
+;; the client-context dir (#298) seeded onto a FRESH record; a disk record
+;; carries its own: WITH context-dir the root re-resolves from it (the
+;; single source); WITHOUT (a pre-#298 record) the root keeps the LEGACY
+;; daemon-cwd resolution and the record is flagged legacy — old threads are
+;; never silently re-targeted.
+(defun fikra-thread-load (root id ctxdir)
   (let* ((dir (concat root "/.tmax/fikra/threads/" id))
          (path (concat dir "/state.json"))
          (fresh (hashmap "id" id
                          "root" root
+                         "context-dir" ctxdir
+                         "legacy" nil
                          "backend" "none"
                          "session-id" nil
                          ;; runtime-mode stays nil until set — #219's
@@ -113,11 +168,26 @@ history into it (daemon-restart reopen path), focus it."
             ;; Overlay persisted fields onto fresh defaults (forward-
             ;; compatible: unknown persisted fields ignored, missing fields
             ;; keep defaults).
-            (dolist (key (list "backend" "session-id" "runtime-mode" "trust" "worktree" "worktree-base" "archived" "interaction" "workflow" "turn-count"))
+            (dolist (key (list "backend" "session-id" "runtime-mode" "trust" "worktree" "worktree-base" "archived" "interaction" "workflow" "turn-count" "context-dir"))
               (let ((v (fikra-alist-get key parsed)))
                 (if (not (null v))
                   (editor/keymaps/keymap-mutable-set! state key v))))
-            (editor/keymaps/keymap-mutable-set! state "root" root)
+            ;; #298 root resolution FROM THE RECORD. The persisted alist is
+            ;; the authority (an overlaid nil would be indistinguishable
+            ;; from absent): context-dir present → re-resolve; absent →
+            ;; legacy daemon-cwd root, flagged. A legacy record ALSO has
+            ;; its seeded context-dir CLEARED — saves then persist null,
+            ;; so the first save of an old thread can never stamp today's
+            ;; client context onto it and silently re-target the project
+            ;; on the next load (verify-gate catch).
+            (let ((persisted-ctx (fikra-alist-get "context-dir" parsed)))
+              (if (and (stringp persisted-ctx) (> (length persisted-ctx) 0))
+                (editor/keymaps/keymap-mutable-set! state "root"
+                  (fikra-root-from-context persisted-ctx))
+                (progn
+                  (editor/keymaps/keymap-mutable-set! state "root" (fikra-thread-root))
+                  (editor/keymaps/keymap-mutable-set! state "legacy" t)
+                  (editor/keymaps/keymap-mutable-set! state "context-dir" nil))))
             state)))
       fresh)))
 
@@ -140,6 +210,7 @@ history into it (daemon-restart reopen path), focus it."
               (fikra-thread-field "id") "/state.json")
       (json-encode (list
                      (list "id" (fikra-thread-field "id"))
+                     (list "context-dir" (fikra-thread-field "context-dir"))
                      (list "backend" (fikra-thread-field "backend"))
                      (list "session-id" (fikra-thread-field "session-id"))
                      (list "runtime-mode" (fikra-thread-field "runtime-mode"))
@@ -178,6 +249,7 @@ not land under the wrong project)."
           (concat (hashmap-get state "root") "/.tmax/fikra/threads/" id "/state.json")
           (json-encode (list
                          (list "id" id)
+                         (list "context-dir" (hashmap-get state "context-dir"))
                          (list "backend" (hashmap-get state "backend"))
                          (list "session-id" sid)
                          (list "runtime-mode" (hashmap-get state "runtime-mode"))
@@ -243,6 +315,7 @@ it and opens its chat buffer. Returns the id."
   ;; let*: the id binding READS root — parallel let would see an unbound
   ;; symbol (probe catch).
   (let* ((parent-mode (if fikra-current-thread-id (fikra-thread-field "runtime-mode") nil))
+         (parent-ctx (if fikra-current-thread-id (fikra-thread-field "context-dir") nil))
          (root (progn (if (not fikra-current-thread-id) (fikra-thread-init))
                       (fikra-thread-field "root")))
          (id (fikra-thread-free-id root 1)))
@@ -250,6 +323,10 @@ it and opens its chat buffer. Returns the id."
     (let ((state (fikra-thread-state)))
       (editor/keymaps/keymap-mutable-set! state "id" id)
       (editor/keymaps/keymap-mutable-set! state "root" root)
+      ;; Child threads inherit the parent's client context (#298 — a
+      ;; sibling stays in the same project and reloads non-legacy).
+      (if parent-ctx
+        (editor/keymaps/keymap-mutable-set! state "context-dir" parent-ctx))
       ;; Child threads inherit the parent's runtime mode (#219).
       (if parent-mode
         (editor/keymaps/keymap-mutable-set! state "runtime-mode" parent-mode)))
@@ -339,21 +416,44 @@ current project's NON-archived threads."
         acc
         (cons (fikra-thread-row-for (car ids)) acc)))))
 
+;; #298: normalize a DISK row's json alist into the hashmap shape row-for
+;; reads (hashmap-get throws on alists; the current thread's registry state
+;; is already a hashmap).
+(defun fikra-thread-row-normalize (alist)
+  (let ((row (hashmap)))
+    (dolist (key (list "backend" "runtime-mode" "worktree" "status"
+                       "turn-count" "context-dir"))
+      (let ((v (fikra-alist-get key alist)))
+        (if (not (null v))
+          (editor/keymaps/keymap-mutable-set! row key v))))
+    row))
+
 (defun fikra-thread-row-for (id)
-  ;; Load that thread's state from disk (or registry when current).
+  ;; Load that thread's state from disk (or registry when current). #298:
+  ;; LEGACY rows (pre-client-context records) are flagged — the current
+  ;; thread's state carries the computed flag; a disk row is legacy exactly
+  ;; when its record has no context-dir.
   (let* ((current (string= id (fikra-thread-current)))
-         (state (if current (fikra-thread-state) (fikra-thread-load-row id)))
-         (get (lambda (k) (if state (hashmap-get state k) nil))))
+         (disk (if current nil (fikra-thread-load-row id)))
+         (state (if current (fikra-thread-state)
+                  (if disk (fikra-thread-row-normalize disk) nil)))
+         (get (lambda (k) (if state (hashmap-get state k) nil)))
+         (legacy (if current (funcall get "legacy")
+                   (if disk (null (fikra-alist-get "context-dir" disk)) nil))))
     (hashmap
       "id" id
       "backend" (funcall get "backend")
       "mode" (funcall get "runtime-mode")
-      "location" (if (funcall get "worktree") "worktree" "local")
+      "location" (if (funcall get "worktree") "worktree"
+                   (if legacy "legacy" "local"))
+      "legacy" (if legacy t nil)
       "status" (funcall get "status")
       "turns" (funcall get "turn-count"))))
 
 (defun fikra-thread-load-row (id)
   ;; Parse another thread's state.json (registry holds only loaded threads).
+  ;; Returns the RAW json alist (workflow.tlisp iterates it with dolist —
+  ;; do not normalize the return type here).
   (let ((path (fikra-thread-archived-path id)))
     (if (file-exists-p path)
       (json-read-from-string (read-file-content path))
@@ -365,22 +465,26 @@ current project's NON-archived threads."
 (defun fikra-thread-state ()
   "The focused thread's state; LAZY-INITIALIZES the main thread when absent
   (backends may fire turn lifecycle before an explicit init — mutating nil
-  would crash; #216 hardening)."
+  would crash; #216 hardening). #298: implicit threads resolve their root
+  from the CLIENT'S working context exactly like init."
   (let ((id (if fikra-current-thread-id fikra-current-thread-id "main")))
     (let ((state (hashmap-get fikra-threads id)))
       (if state
         state
         (progn
           (setq fikra-current-thread-id id)
-          (let* ((root (fikra-thread-root))
-                 (dir (concat root "/.tmax/fikra/threads/" id)))
-            ;; An implicit thread is a REAL thread — init's contract:
-            ;; mkdir + load + FAEP log wiring, so saves and emits work.
-            (file-mkdir dir)
-            (fikra/event/fikra-event-log-set (concat dir "/events.jsonl"))
-            (let ((fresh (fikra-thread-load root id)))
-              (editor/keymaps/keymap-mutable-set! fikra-threads id fresh)
-              fresh)))))))
+          (let* ((ctxdir (fikra-thread-context-dir))
+                 (root (fikra-root-from-context ctxdir)))
+            (let ((fresh (fikra-thread-load root id ctxdir)))
+              ;; An implicit thread is a REAL thread — init's contract:
+              ;; mkdir + load + FAEP log wiring, so saves and emits work.
+              ;; The RECORD's root is the single source (legacy records
+              ;; keep theirs).
+              (let ((dir (concat (hashmap-get fresh "root") "/.tmax/fikra/threads/" id)))
+                (file-mkdir dir)
+                (fikra/event/fikra-event-log-set (concat dir "/events.jsonl"))
+                (editor/keymaps/keymap-mutable-set! fikra-threads id fresh)
+                fresh))))))))
 
 (defun fikra-thread-field (key)
   (let ((state (fikra-thread-state)))

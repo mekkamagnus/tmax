@@ -165,7 +165,10 @@ config is written per turn by fikra-claude-write-mcp-config)."
 ;; transits model-controlled space). Socket: the bridge resolves the
 ;; default daemon socket itself.
 (defun fikra-claude-mcp-config-path ()
-  (concat (fikra/thread/fikra-thread-root)
+  ;; #298: the thread's PERSISTED root (the legacy daemon-cwd resolver
+  ;; would split the config path from the mkdir below once client
+  ;; context ≠ daemon cwd — verify-gate catch).
+  (concat (fikra/thread/fikra-thread-field "root")
           "/.tmax/fikra/mcp/"
           (fikra/thread/fikra-thread-current) "-"
           (number-to-string (fikra/thread/fikra-thread-turn-count)) ".json"))
@@ -186,7 +189,9 @@ Returns the token (nil when the capability probe failed — L2 stays off)."
                           (number-to-string (fikra/thread/fikra-thread-turn-count))))
            (token (confirmation-token-mint "fikra" scope))
            (path (fikra-claude-mcp-config-path)))
-      (shell-command (concat "mkdir -p " (fikra/thread/fikra-thread-root) "/.tmax/fikra/mcp"))
+      ;; #298: the thread's PERSISTED root (fikra-thread-root is the legacy
+      ;; daemon-cwd resolution — wrong once client context ≠ daemon cwd).
+      (shell-command (concat "mkdir -p " (fikra/thread/fikra-thread-field "root") "/.tmax/fikra/mcp"))
       ;; ABSOLUTE bridge path (round-34 live catch): the CLI resolves the
       ;; MCP server's args against ITS cwd (the thread working dir), so a
       ;; relative "bin/tmax-mcp-confirmation.ts" pointed at the user

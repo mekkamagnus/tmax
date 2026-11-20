@@ -220,3 +220,9 @@ ALSO: a parallel session is actively editing fikra/*.tlisp in THIS checkout (wor
 
 Discovery is live-verified: fikra-skills-refresh finds n=3 in .fikra/skills with correct model-visible/user-only tagging (the scan's original grep -v '^\\.' pipeline died silently in T-Lisp string escaping — plain ls works; grep patterns in double-quoted T-Lisp strings: MANGLED, third instance of the escaping lesson).
 REMAINING: SPC a k's require-module + call reports "Undefined symbol: fikra/skills/fikra-skill-prompt" IN THE TUI despite the symbol being exported and embedded (strings confirms). The -e direct call HANGS (the prompt opens a minibuffer — actually correct behavior). Hypothesis: the interactive TUI's key-dispatch evaluates the binding in a context where the module registry hasn't seen skills.tlisp — check whether SPC a k works AFTER first running M-x fikra-skill-prompt once (module warms), and if so the fix is eager-loading fikra/skills in fikra-start (the approvals lesson, round 38).
+
+## Persistence: seed-then-overlay silently migrates legacy records (#298 gate rounds)
+
+When a loader seeds a fresh-defaults record and overlays persisted fields "if non-nil", a NEW field (here `context-dir`) is indistinguishable between "record predates the field" and "field present but null" — and both save paths then persist the SEEDED value, silently migrating a legacy record to today's context on its first save.
+
+**Rule:** legacy detection must read the RAW persisted record (the parsed alist, not the overlaid state), and the legacy branch must CLEAR the seeded field so saves persist null — plus a save+reload immutability test. Also: when introducing a context/cwd source, grep EVERY consumer of the old resolver in the feature family (the L2 mcp-config path kept the legacy root while its adjacent mkdir migrated — verify-gate r1), and lifecycle-bound client state must be cleared on disconnect (verify-gate r2), not just set on connect.

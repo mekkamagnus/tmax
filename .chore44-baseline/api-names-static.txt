@@ -83,6 +83,7 @@ change-line
 change-to-line-end
 change-word
 clear-messages
+client-launch-dir
 clipboard-available?
 clipboard-get
 clipboard-set

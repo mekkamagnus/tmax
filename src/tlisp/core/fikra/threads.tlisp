@@ -6,8 +6,9 @@
 
 ;; #222 (RFC-027 §D7): the *Fikra-Threads* buffer — threads grouped by
 ;; project (zcode model), columns name/backend/mode/location(local|
-;; worktree)/status/turns. j/k navigate, RET switches (focus + buffer +
-;; modeline), d archives (soft delete), n creates. Buffer-local keymap.
+;; worktree|legacy #298)/status/turns. j/k navigate, RET switches (focus +
+;; buffer + modeline), d archives (soft delete), n creates. Buffer-local
+;; keymap.
 
 (require-module fikra/thread)
 

@@ -1,8 +1,6 @@
-# Refrozen 105->106 (issue #258 / ADR-0277): +switchWindow — window-focus switch
-# now routes through it to persist/restore per-window viewports. TS-private today;
-# #262 (focus-switch buffer/cursor rebind) will consume it as its insertion point.
-# Refrozen 106->107 (issue #265 / ADR-0279): +rebindFocusedWindowRecord — extracted
-# focused-record rebind helper (record-sync invariant); called by killBuffer + tabs.
+# Refrozen 107->109 (issue #298): +getClientLaunchDir/+setClientLaunchDir — the
+# client's launch directory (connect-frame handshake) feeds fikra's
+# client-context thread-root resolution.
 activateMajorModeForFile
 activeTerminalId
 applyModel
@@ -34,6 +32,7 @@ getAllGlobalBindings
 getAutoModeRules
 getBufferDetails
 getBufferModeStates
+getClientLaunchDir
 getCount
 getCurrentBufferKey
 getCurrentBufferModified
@@ -84,8 +83,8 @@ onStateChange
 openFile
 openOrCreateFile
 pickKillSurvivor
-recomputeHighlights
 rebindFocusedWindowRecord
+recomputeHighlights
 registerMinorMode
 renameBuffer
 reportCommandError
@@ -93,6 +92,7 @@ resetCount
 resolveCallable
 saveFile
 saveMacros
+setClientLaunchDir
 setCount
 setCurrentBufferModified
 setCurrentMajorMode

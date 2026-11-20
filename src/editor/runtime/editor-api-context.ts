@@ -115,6 +115,13 @@ export interface EditorAPIContext {
   // appear as a duplicated EditorModel bridge property (AC2.6).
   getSpacePressed: () => boolean;
   setSpacePressed: (pressed: boolean) => void;
+  /**
+   * #298: the connected client's launch directory (set by the daemon's
+   * connect-frame handler; undefined for embedded editors with no client).
+   * Same transient-runtime-state rationale as spacePressed — read by the
+   * `client-launch-dir` primitive for client-context root resolution.
+   */
+  getClientLaunchDir?: () => string | undefined;
 
   // Typed runtime service callbacks (formerly underscored escape hatches) -----
   /** Evaluate a T-Lisp expression against the editor's interpreter. */

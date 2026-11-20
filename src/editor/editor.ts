@@ -203,6 +203,12 @@ export class Editor {
   // the constructor (needs `this.getRuntime` + `this.applyUpdate`).
   private commandRuntime!: CommandRuntime;
   spacePressed: boolean = false;  // Track space key for SPC ; sequence (US-1.10.1)
+  // #298: the connected client's launch directory (set by the daemon on
+  // connect-frame; undefined for embedded editors with no client). Transient
+  // runtime input state, NOT deterministic model state — the spacePressed
+  // pattern. Read by T-Lisp via the `client-launch-dir` primitive for
+  // client-context root resolution (fikra threads).
+  private clientLaunchDir: string | undefined;
   private lspClient: LSPClient;  // LSP client for language server integration (US-3.1.1)
   keymapSync: KeymapSync;  // Bridge layer for T-Lisp keymap integration (US-0.4.1)
   private currentInitFile: string = '';  // Path to current init file (SPEC-025)
@@ -491,6 +497,9 @@ export class Editor {
       // does not appear as a duplicated model bridge property (AC2.6).
       getSpacePressed: () => editor.spacePressed,
       setSpacePressed: (pressed: boolean) => { editor.spacePressed = pressed; },
+      // #298: the connected client's launch dir — same transient-runtime-
+      // state rationale as spacePressed (read via `client-launch-dir`).
+      getClientLaunchDir: () => editor.getClientLaunchDir(),
       get operations() {
         return {
           saveFile: (filename?: string) => editor.saveFile(filename),
@@ -3108,6 +3117,19 @@ export class Editor {
    */
   getCurrentBufferKey(): string {
     return this.model.currentFilename ?? "*scratch*";
+  }
+
+  /**
+   * #298: the connected client's launch directory (undefined for embedded
+   * editors with no client). Set by the daemon's connect-frame handler.
+   */
+  getClientLaunchDir(): string | undefined {
+    return this.clientLaunchDir;
+  }
+
+  /** #298: record the connecting client's launch directory. */
+  setClientLaunchDir(dir: string | undefined): void {
+    this.clientLaunchDir = dir;
   }
 
   /**

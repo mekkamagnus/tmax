@@ -138,8 +138,17 @@ function buildEditorAPIContributions(): readonly EditorAPIContribution[] {
     // ── tmax runtime ───────────────────────────────────────────────────
     {
       name: "tmax-runtime",
-      factory: (): Map<string, TLispFunctionImpl> => {
+      factory: (ctx: EditorAPIContext): Map<string, TLispFunctionImpl> => {
         const ops = new Map<string, TLispFunctionImpl>();
+        // (client-launch-dir) — #298: the connected client's launch
+        // directory (nil for embedded editors with no client). The daemon's
+        // connect-frame handler records it; fikra threads resolve their
+        // project root from the CLIENT'S working context, never the daemon
+        // cwd.
+        ops.set("client-launch-dir", (): Either<AppError, TLispValue> => {
+          const dir = ctx.getClientLaunchDir?.();
+          return Either.right(dir ? createString(dir) : createNil());
+        });
         // (tmax-root) — the tmax installation root (round-34 L2 seam):
         // source mode resolves from this module's location (the
         // exec-target.ts pattern); a compiled binary exposes $bunfs
@@ -1397,10 +1406,18 @@ function buildEditorAPIContributions(): readonly EditorAPIContribution[] {
         ops.set('shell-command', (args: TLispValue[]): Either<AppError, TLispValue> => {
           if (args.length < 1) return Either.left(createValidationError('FormatError', 'shell-command requires 1 argument: command'));
           if (args[0]!.type !== 'string') return Either.left(createValidationError('TypeError', 'shell-command requires a string'));
+          // #298: optional second argument = working directory (the same
+          // capability as make-process's :cwd — no cwd inheritance). fikra
+          // roots its git calls at the thread's persisted root, never the
+          // daemon cwd.
+          if (args.length > 1 && args[1] && args[1].type !== 'nil' && args[1].type !== 'string') {
+            return Either.left(createValidationError('TypeError', 'shell-command cwd argument must be a string'));
+          }
+          const cwd = args.length > 1 && args[1]?.type === 'string' ? String(args[1].value) : undefined;
           try {
             const cmd = String(args[0]!.value);
             const t0 = Date.now();
-            const output = Bun.spawnSync(['sh', '-c', cmd], { stdout: 'pipe', stderr: 'pipe', timeout: 30_000 });
+            const output = Bun.spawnSync(['sh', '-c', cmd], { stdout: 'pipe', stderr: 'pipe', timeout: 30_000, ...(cwd ? { cwd } : {}) });
             const stdout = output.stdout ? new TextDecoder().decode(output.stdout) : '';
             const stderr = output.stderr ? new TextDecoder().decode(output.stderr) : '';
             const exitCode = output.exitCode ?? 0;
