@@ -792,3 +792,11 @@ Codex top fixes for 8.7 (round 27 targets):
 3. fikra-skills-list refreshes only when the GLOBAL cache is empty — stale after skill edits or a root switch (scope/refresh the cache).
 4. Complete live-turn evidence: fix the TUI-context rebuild truncation, retain argv + FAEP log as artifacts, count semantics (mockup filtered/total vs vertico position).
 Also noted by codex: the modeline buffer-name shows *scratch* while Fikra content renders (frame buffer-name sync — parallel #298 territory).
+
+# Round 27 (r26 fixes: workflow-only gate, anchored visibility, root-scoped cache) — 2026-11-20
+
+8.7 = 7.5/10. Fixes landed: anchored visibility, root-scoped cache, workflow-only picker gate; live argv + FAEP evidence recorded (/tmp/skill87/10,12). Remaining per codex: parser edge cases (visibility:user read as "ser"), edit-invalidation, prompt not exercised end to end, rebuild capture.
+
+# Round 28 (r27 fixes: parser +1 slice, modtime stamp, testable gate; NEW catch) — 2026-11-20
+
+8.7 = 7/10. Landed: fm-value +1-slice+trim (visibility:user fixed), shared parser, modtime-stamp invalidation, exported gate predicate, complete replay-text artifact (14-r27-replay-text.txt — the renderer's exact output ending with the full accepted-skill turn). Codex's NEW catch: the stamp's ls used literal quotes (apostrophe-root breakage/injection) — fixed in 8f090b7 with fikra-thread-shq + an add-invalidation test. Also: model-initiated skill use still not demonstrated; modeline *scratch* + count badge open.
