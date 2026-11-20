@@ -770,3 +770,25 @@ Codex top fixes for 8.7:
 2. Add defworkflow candidates and annotations to the picker (composition stays §9 Q3).
 3. Parse the frontmatter visibility field rather than matching arbitrary body text.
 4. Capture a picker over a confirmed *Fikra* buffer, demonstrate multi-term orderless filtering and the filtered/total count, and verify a selected skill against a live backend.
+
+# Round 26 (codex r25 8.7 fixes landed — 8.7 to 7) — 2026-11-20
+
+All four round-25 fixes implemented + live-verified: roster via --append-system-prompt (confirmed on the live process argv), defworkflow picker rows + workflow-thread dispatch (07-defworkflow-accept), frontmatter-scoped visibility + description fields (unit-tested), multi-term orderless filter ("re no" → 1/1). Bonus: live claude filter session-event dedup (was 11k+ dups/turn). Artifacts /tmp/skill87/05-08.
+
+| Section | Round 26 | One-line justification |
+|---|---:|---|
+| 8.1 Chat | 7/10 | Carried forward (live render after turn end limited by the rebuild truncation — open). |
+| 8.2 Capture | 8/10 | Carried forward. |
+| 8.3 Approval | 7/10 | Carried forward. |
+| 8.4 Diff + revert | 8/10 | Carried forward. |
+| 8.5 Threads | 7/10 | Carried forward. |
+| 8.6 Worktree | 6/10 | Carried forward. |
+| 8.7 Skills | **7/10** | Combined picker and dispatch evidenced; workflow-only use, visibility parsing, roster freshness and a complete live result need work. |
+| 8.8 Ghost text | 0/10 | Carried forward. |
+
+Codex top fixes for 8.7 (round 27 targets):
+1. fikra-skill-prompt checks only the skill cache — workflow-only projects get "no skills" (rows unreachable).
+2. Visibility match is an unanchored substring INSIDE the frontmatter block — anchor to the field syntax.
+3. fikra-skills-list refreshes only when the GLOBAL cache is empty — stale after skill edits or a root switch (scope/refresh the cache).
+4. Complete live-turn evidence: fix the TUI-context rebuild truncation, retain argv + FAEP log as artifacts, count semantics (mockup filtered/total vs vertico position).
+Also noted by codex: the modeline buffer-name shows *scratch* while Fikra content renders (frame buffer-name sync — parallel #298 territory).
