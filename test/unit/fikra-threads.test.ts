@@ -70,7 +70,10 @@ describe("#222 lifecycle — create / switch / archive", () => {
   test("switch swaps focus, FAEP log pointer, buffer, and modeline", async () => {
     const editor = await setup();
     e(editor, '(require-module fikra/adapter)');
-    e(editor, '(fikra/adapter/fikra-set-backend-forced "replay")');
+    e(editor, '(require-module fikra/backend-replay)');
+    // plain set-backend (r46: it PERSISTS the field; forced bypasses —
+    // main keeps its choice across switches).
+    e(editor, '(fikra/adapter/fikra-set-backend "replay")');
     e(editor, "(require-module fikra/chat)");
     e(editor, '(fikra/event/fikra-event-emit (list (list "kind" "text-delta") (list "text" "from main")))');
     e(editor, "(fikra/thread/fikra-thread-new)"); // fix-1
@@ -86,7 +89,12 @@ describe("#222 lifecycle — create / switch / archive", () => {
     expect(bufferText(editor)).toContain("from fix-1");
     expect(bufferText(editor)).not.toContain("from main");
     // The modeline follows the focused thread (wt: only in worktree mode —
-    // none here; the backend is visible).
+    // none here). r46 isolation: fix-1 has NO saved backend — the adapter
+    // RESETS on switch (the parent's replay must not bleed); main keeps
+    // its own persisted choice (set-backend persists the field).
+    e(editor, "(fikra/chat/fikra-refresh-lighter)");
+    expect(String(e(editor, '(minor-mode-lighter "fikra")').value)).toContain("none");
+    e(editor, '(fikra/thread/fikra-thread-switch "main")');
     e(editor, "(fikra/chat/fikra-refresh-lighter)");
     expect(String(e(editor, '(minor-mode-lighter "fikra")').value)).toContain("replay");
   });
@@ -236,18 +244,28 @@ describe("#8.5 threads — backend isolation + crash display (r45)", () => {
     expect(String(e(a, "(fikra/adapter/fikra-current-backend)").value)).toBe("replay");
   });
 
-  test("a crashed DISK row renders idle, not running", async () => {
+  test("a LIVE running thread's row shows running; an UNLOADED crash row shows idle", async () => {
+    // Editor A: thread z runs a turn and stays loaded (genuinely running).
     const a = await setup();
     e(a, '(require-module "fikra/thread")');
     e(a, '(fikra/thread/fikra-thread-focus "z")');
-    e(a, '(fikra/thread/fikra-thread-turn-begin)'); // running, no end — crash
-    e(a, '(fikra/thread/fikra-thread-focus "main")');
-    const rows = e(a, "(fikra/thread/fikra-thread-rows)");
-    const z = e(a, `
+    e(a, '(fikra/thread/fikra-thread-turn-begin)');
+    const liveRow = e(a, `
       (let ((hit nil))
         (dolist (r (fikra/thread/fikra-thread-rows))
           (if (string= (hashmap-get r "id") "z") (setq hit (hashmap-get r "status"))))
         hit)`);
-    expect(String(z.value)).not.toBe("running");
+    expect(String(liveRow.value)).toBe("running");
+    // Editor B (fresh): z is NOT in its registry — the DISK row's
+    // persisted "running" is a crash artifact and renders idle.
+    const b = await createStartedEditor("");
+    e(b, '(require-module "fikra/thread")');
+    e(b, "(fikra/thread/fikra-thread-init)");
+    const diskRow = e(b, `
+      (let ((hit nil))
+        (dolist (r (fikra/thread/fikra-thread-rows))
+          (if (string= (hashmap-get r "id") "z") (setq hit (hashmap-get r "status"))))
+        (if hit hit "absent"))`);
+    expect(String(diskRow.value)).not.toBe("running");
   });
 });

@@ -67,10 +67,20 @@ LIST-shaped ("cap" value) — T-Lisp has no dotted pairs."
 
 (defun fikra-set-backend (name)
   "Switch to backend NAME (mid-conversation safe: FAEP logs are backend-
-agnostic). Refuses unavailable backends."
+agnostic). Refuses unavailable backends. The choice PERSISTS on the
+current thread (r46 isolation: focus-restore then keeps it — a direct
+set-backend survives refocus instead of being reset)."
   (if (fikra-backend-available-p name)
     (progn
       (setq fikra-current-backend-name name)
+      (condition-case nil
+        (progn
+          (require-module fikra/thread)
+          (if (fikra/thread/fikra-thread-current)
+            (progn
+              (fikra/thread/fikra-thread-set-field "backend" name)
+              (fikra/thread/fikra-thread-save))))
+        (error () nil))
       (message "Fikra: backend set to %s" name)
       name)
     (progn

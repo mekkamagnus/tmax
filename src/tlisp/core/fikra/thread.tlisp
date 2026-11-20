@@ -312,19 +312,24 @@ not land under the wrong project)."
     ;; 8.5 (codex r45): a thread's SAVED backend follows focus — dispatch
     ;; reads the adapter's global; without this, one thread's choice bled
     ;; into every other.
-    ;; Isolation cuts BOTH ways: a saved backend is restored; NO saved
-    ;; backend RESETS the adapter (the previous thread's choice must not
-    ;; bleed into this one).
-    (condition-case nil
-      (progn
-        (require-module fikra/adapter)
-        (let ((saved (hashmap-get state "backend")))
-          (if (and saved (not (string= saved "none")) (not (string= saved "")))
-            (if (fikra/adapter/fikra-backend-available-p saved)
-              (fikra/adapter/fikra-set-backend-forced saved))
-            (fikra/adapter/fikra-set-backend-forced "none"))))
-      (error () nil))
+    (fikra-thread-restore-backend)
     id))
+
+;; Isolation cuts BOTH ways: a saved backend is restored; NO saved (or an
+;; UNAVAILABLE) backend RESETS the adapter (r46: the previous thread's
+;; choice must not bleed — and new/switch route here too, not just focus).
+(defun fikra-thread-restore-backend ()
+  (condition-case nil
+    (progn
+      (require-module fikra/adapter)
+      (let ((saved (hashmap-get (fikra-thread-state) "backend")))
+        (if (and saved
+                 (not (string= saved "none"))
+                 (not (string= saved ""))
+                 (fikra/adapter/fikra-backend-available-p saved))
+          (fikra/adapter/fikra-set-backend-forced saved)
+          (fikra/adapter/fikra-set-backend-forced "none"))))
+    (error () nil)))
 
 ;; ── #222: creation / switching / archive / listing ─────────────────
 (defun fikra-thread-ensure-chat-buffer ()
@@ -394,6 +399,9 @@ it and opens its chat buffer. Returns the id."
     (fikra-thread-ensure-chat-buffer)
     (buffer-switch (fikra-thread-buffer-name))
     (fikra-thread-save)
+    ;; r46: a NEW thread starts with a clean adapter (no inheritance of
+    ;; the parent's live choice — its own field decides).
+    (fikra-thread-restore-backend)
     id))
 
 (defun fikra-thread-free-id (root n)
@@ -410,6 +418,8 @@ modeline all follow; concurrent threads keep independent state."
   (let* ((state (fikra-thread-state))
          (dir (concat (fikra-thread-field "root") "/.tmax/fikra/threads/" id)))
     (fikra/event/fikra-event-log-set (concat dir "/events.jsonl"))
+    ;; r46: switch routes through the same backend isolation as focus.
+    (fikra-thread-restore-backend)
     (fikra-thread-ensure-chat-buffer)
     (buffer-switch (fikra-thread-buffer-name))
     (fikra/event/fikra-event-rebuild-fikra-buffer)
@@ -495,9 +505,14 @@ current project's NON-archived threads."
   ;; thread's state carries the computed flag; a disk row is legacy exactly
   ;; when its record has no context-dir.
   (let* ((current (string= id (fikra-thread-current)))
+         (live (hashmap-get fikra-threads id))
          (disk (if current nil (fikra-thread-load-row id)))
+         ;; LOADED threads use their LIVE registry state (a background
+         ;; turn-in-progress is genuinely running); only UNLOADED rows
+         ;; read disk — where "running" is a crash artifact (r46).
          (state (if current (fikra-thread-state)
-                  (if disk (fikra-thread-row-normalize disk) nil)))
+                  (if live live
+                    (if disk (fikra-thread-row-normalize disk) nil))))
          (get (lambda (k) (if state (hashmap-get state k) nil)))
          (legacy (if current (funcall get "legacy")
                    (if disk (null (fikra-alist-get "context-dir" disk)) nil))))
@@ -510,7 +525,7 @@ current project's NON-archived threads."
       "legacy" (if legacy t nil)
       ;; A non-loaded thread cannot be mid-turn: a disk row's "running"
       ;; is a crash artifact (the load path normalizes the same way).
-      "status" (if (and (not current)
+      "status" (if (and (not current) (not live)
                         (string= (if (funcall get "status") (funcall get "status") "") "running"))
                  "idle"
                  (funcall get "status"))
