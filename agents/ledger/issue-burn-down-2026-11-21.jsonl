@@ -4,3 +4,4 @@
 {"event":"escalation","ts":"2026-11-20T10:15:13Z","reason":"ctx<25%","action":"recorded #300 investigation state to memory (worktree ../tmax.issue-300 ready, label-path suspect mapped); closing this session cleanly for a fresh-context continuation"}
 {"event":"telemetry","ts":"2026-11-20T10:36:51Z","wall-minutes":null,"active-minutes":null,"in-tokens":null,"out-tokens":null,"ctx-remaining-pct":null,"note":"continuation context; footer unreadable — honest nulls"}
 {"event":"gate","ts":"2026-11-20T11:00:13Z","kind":"verify-gate","verdict":"GAPS","rounds":1,"reviewed-sha":"74bf007","findings-count":4}
+{"event":"gate","ts":"2026-11-20T11:37:54Z","kind":"codex-grade","verdict":"5/10","rounds":1,"reviewed-sha":"5a6f627","findings-count":3}
