@@ -155,7 +155,9 @@ changes when a skill is added, removed, or edited."
   (fikra-skills-dir-names-filter
     (if (not (file-exists-p dir))
       (list)
-      (string-split (shell-command (concat "ls -1 '" dir "' 2>/dev/null || true")) "\n"))
+      ;; shq like the scanner (codex r28: literal quotes broke/injected
+      ;; on roots containing apostrophes).
+      (string-split (shell-command (concat "ls -1 " (fikra/thread/fikra-thread-shq dir) " 2>/dev/null || true")) "\n"))
     (list)))
 
 (defun fikra-skills-dir-names-filter (names out)
