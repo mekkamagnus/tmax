@@ -492,7 +492,9 @@ export function dataToWorkspace(data: WorkspaceData): WorkspaceState {
     tabs,
     cursorState: data.cursorState ?? { line: 0, column: 0 },
     viewportState: data.viewportState ?? { top: 0 },
-    currentBufferName: data.currentBufferName ?? "*scratch*",
+    // Never fabricate *scratch* when a filename is known — a null buffer
+    // name over a file buffer showed the wrong modeline (fikra live catch).
+    currentBufferName: data.currentBufferName ?? data.currentFilename ?? "*scratch*",
     currentFilename: data.currentFilename,
     currentMajorMode: data.currentMajorMode,
     activeMinorModes: data.activeMinorModes,

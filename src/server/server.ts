@@ -724,13 +724,15 @@ export class TmaxServer {
   }
 
   private currentBufferName(state: EditorState): string | null {
-    if (state.currentFilename) return state.currentFilename;
+    // A NAMED buffer (e.g. *Fikra*) wins over a stale filename — the old
+    // filename-first branch kept showing the opened file after the chat
+    // buffer switched in (fikra modeline, codex r25-r30).
     if (state.buffers) {
       for (const [name, buffer] of state.buffers.entries()) {
         if (buffer === state.currentBuffer) return name;
       }
     }
-    return null;
+    return state.currentFilename ?? null;
   }
 
   private frameStatus(frame: Frame): FrameStatusResult {
