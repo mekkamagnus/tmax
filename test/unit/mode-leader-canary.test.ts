@@ -63,14 +63,16 @@ describe("#299 mode-leader canary (stale-binary closure regression)", () => {
       await editor.handleKey(" ");
       expect(status(editor)).toBe("SPC-");
 
-      // 2. The leader's `a` subtree is CONSUMED (a recognized prefix — not
-      //    "Unbound key: a").
+      // 2. The leader's `a` subtree is entered POSITIVELY: completing
+      //    SPC a T opens the *Fikra-Threads* list (codex r1 — exclusion of
+      //    "Unbound key" alone proves nothing about the subtree).
       await editor.handleKey("a");
       expect(status(editor)).not.toContain("Unbound key: a");
       expect(status(editor)).not.toContain("Unbound key");
-
-      // Clear the pending prefix so the command-mode probe starts clean.
-      await editor.handleKey("Escape");
+      await editor.handleKey("T");
+      expect(String(executeTlisp(editor, "(buffer-current)").value ?? "")).toBe("*Fikra-Threads*");
+      // Return to the file buffer for the command-mode probe.
+      executeTlisp(editor, '(buffer-switch "test")');
       expect(editor.getEditorState().mode).toBe("normal");
 
       // 3. Command mode: ':' enters, Enter dispatches through
