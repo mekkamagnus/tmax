@@ -65,3 +65,6 @@
 {"event":"landing","ts":"2026-11-22T01:30:00+08:00","unit":"iter-8.4-turnnav-verify","shas":["HEAD"],"files-staged-count":1,"tests-run":[{"name":"bun test test/unit/fikra-revert.test.ts","output":"0 fail\n22 expect() calls\nRan 7 tests across 1 file."}],"adr-spec":[]}
 {"event":"gate","ts":"2026-11-22T02:00:00+08:00","kind":"codex-grade","verdict":"7/10","rounds":48,"reviewed-sha":"2db21a3","findings-count":5}
 {"event":"landing","ts":"2026-11-22T02:20:00+08:00","unit":"iter-8.4-turnnav-verify","shas":["a438003"],"files-staged-count":2,"tests-run":[{"name":"bun test test/unit/fikra-revert.test.ts test/unit/fikra-diff-nav.test.ts","output":"0 fail\n29 expect() calls\nRan 9 tests across 2 files."}],"adr-spec":[]}
+{"event":"gate","ts":"2026-11-21T12:40:00+08:00","kind":"codex-grade","verdict":"5/10","rounds":49,"reviewed-sha":"a438003","findings-count":4}
+{"event":"escalation","ts":"2026-11-21T12:50:00+08:00","kind":"cap","note":"8.4 r49 fixes discarded mid-edit (defmodule paren structure repeatedly broken); landed r48 state stands at 4f3946e, 9/9; r49 findings named as follow-ups in the round doc; 8.4 sub-arc at 2 of 5 grade rounds — continuing next tick"}
+{"event":"telemetry","ts":"2026-11-21T12:55:00+08:00","wall-minutes":60,"active-minutes":null,"in-tokens":null,"out-tokens":null,"ctx-remaining-pct":null}
