@@ -160,6 +160,10 @@ describe("#305 B — the revert affordance (r semantics)", () => {
     execFileSync("git", ["add", "staged-new.txt"], { cwd: dir });
     e(editor, '(fikra/diff/fikra-diff-restore-turn (list "staged-new.txt"))');
     expect(existsSync(join(dir, "staged-new.txt"))).toBe(false);
+    // The staged INDEX entry is gone too (gate r2: rm alone left an AD
+    // entry that a plain commit resurrected) — status is clean for it.
+    const st = String(execFileSync("git", ["status", "--porcelain", "staged-new.txt"], { cwd: dir })).trim();
+    expect(st).toBe("");
 
     // NIL baseline → conservative no-op (the exported fn must not rm on
     // a missing baseline — gate r1 catch 2).

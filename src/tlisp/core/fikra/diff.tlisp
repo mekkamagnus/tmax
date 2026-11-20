@@ -505,9 +505,15 @@ ambiguity)."
                                  " restore --staged " (fikra/thread/fikra-thread-shq p) " 2>/dev/null"))))
       ;; ABSENT from the baseline (or the baseline is nil/errored —
       ;; conservative: the ± emission's nil→emit-nothing mirror, NOT
-      ;; rm-everything) AND the file exists → turn-created → remove.
+      ;; rm-everything) AND the file exists → turn-created → remove the
+      ;; WORKTREE file AND any staged index entry (gate r2: an agent
+      ;; `git add`ed file resurrects from the AD index state on a plain
+      ;; commit — rm alone left the repo inconsistent).
       ((file-exists-p (concat dir "/" p))
-        (shell-command (concat "rm -f " (fikra/thread/fikra-thread-shq (concat dir "/" p)))))
+        (progn
+          (shell-command (concat "git -C " (fikra/thread/fikra-thread-shq dir)
+                                 " restore --staged " (fikra/thread/fikra-thread-shq p) " 2>/dev/null"))
+          (shell-command (concat "rm -f " (fikra/thread/fikra-thread-shq (concat dir "/" p))))))
       (t nil))))
 
 (defun fikra-diff-restore-turn (paths)
