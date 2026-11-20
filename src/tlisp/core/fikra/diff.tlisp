@@ -93,19 +93,35 @@
 ;; The LAST COMPLETED turn: the count bumps at turn-START, so a
 ;; mid-flight turn must not be the revert target (codex r58).
 (defun fikra-last-completed-turn ()
+  ;; The LAST turn that ENDED COMPLETED (r60: an error/interrupted turn
+  ;; leaves the count at itself but gets NO completion checkpoint — the
+  ;; shortcut must not target it). Scans DOWN from the count; the count
+  ;; itself counts only when the thread is at rest AND that turn
+  ;; completed (a mid-flight count-N turn is running by construction).
   (require-module fikra/thread)
   (let ((n (fikra/thread/fikra-thread-field "turn-count"))
         (st (fikra/thread/fikra-thread-status)))
-    (cond
-      ;; A mid-flight FIRST turn: nothing has completed — 0 (the caller
-      ;; reports 'no captured diff for turn 0'; r59's catch).
-      ((and (or (string= st "running") (string= st "confirming")) (= n 1)) 0)
-      ((and (numberp n)
-            (or (string= st "running") (string= st "confirming"))
-            (> n 1))
-        (- n 1))
-      ((numberp n) n)
-      (t 0))))
+    (if (not (numberp n))
+      0
+      (let ((top (if (or (string= st "running") (string= st "confirming"))
+                   (- n 1)
+                   n)))
+        (fikra-last-completed-scan top)))))
+
+;; Walk down to the newest turn whose completion ref EXISTS (the
+;; checkpoint IS the completion record).
+(defun fikra-last-completed-scan (n)
+  (cond
+    ((< n 1) 0)
+    ((fikra-completion-ref-exists-p n) n)
+    (t (fikra-last-completed-scan (- n 1)))))
+
+(defun fikra-completion-ref-exists-p (n)
+  (string= (string-trim (shell-command
+    (concat "git -C " (fikra/thread/fikra-thread-shq (fikra/thread/fikra-thread-working-dir))
+            " rev-parse --verify -q refs/fikra/" (fikra/thread/fikra-thread-current)
+            "/" (number-to-string n) " >/dev/null 2>&1 && echo yes || echo no")))
+    "yes"))
 
 (defun fikra-diff-turn-next () (fikra-diff-turn-step 1))
 (defun fikra-diff-turn-prev () (fikra-diff-turn-step -1))

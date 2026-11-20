@@ -174,4 +174,21 @@ describe("#8.4 turn navigation + history revert (r48)", () => {
     // here and checkout clobbered it).
     expect(readFileSync(join(repoDir, "gone.txt"), "utf8")).toBe("user recreated\n");
   });
+
+  test("an ERROR last turn is skipped — the target stays the last COMPLETED (r60)", async () => {
+    const ed = await createStartedEditor("");
+    e(ed, '(require-module "fikra/adapter")');
+    e(ed, "(require-module fikra/backend-replay)");
+    e(ed, '(require-module "fikra/thread")');
+    e(ed, '(fikra-thread-focus "nav")');
+    ref("nav", 1, "baseline", "line1\n");
+    ref("nav", 1, "completion", "line1\nfeature-a\n");
+    ref("nav", 2, "baseline", "line1\nfeature-a\n");
+    ref("nav", 2, "completion", "line1\nfeature-a\nfeature-b\n");
+    // Turn 3 FAILED: count 3, status error, NO ref — target must be 2.
+    e(ed, '(fikra-thread-set-field "turn-count" 3)');
+    e(ed, '(fikra-thread-set-field "status" "error")');
+    e(ed, '(require-module "fikra/diff")');
+    expect(String(e(ed, "(fikra/diff/fikra-last-completed-turn)").value)).toBe("2");
+  });
 });
