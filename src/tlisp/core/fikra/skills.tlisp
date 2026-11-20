@@ -1,7 +1,7 @@
 (defmodule fikra/skills
   (export fikra-skills-list fikra-skills-rows fikra-skills-refresh
           fikra-skills-dir fikra-skill-prompt fikra-skill-accept
-          fikra-skill-table)
+          fikra-skill-table fikra-skill-name-of)
 
 ;; RFC-029 section 8.7 (P3, built round-29): .fikra/skills/*/SKILL.md discovery,
 ;; surfaced to model and user. Skills from
