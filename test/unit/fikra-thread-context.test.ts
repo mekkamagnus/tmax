@@ -90,6 +90,11 @@ describe("#298 client-context thread roots", () => {
     // The persisted record carries the client context (single source).
     const state = JSON.parse(readFileSync(join(realpathSync(b), ".tmax/fikra/threads/main/state.json"), "utf8"));
     expect(state["context-dir"]).toBe(b);
+    // codex r1 fix 1: the skills dir (a late-landing consumer) reads the
+    // persisted root too — not the legacy daemon-cwd resolver.
+    e(editor, "(require-module fikra/skills)");
+    expect(String(e(editor, "(fikra/skills/fikra-skills-dir)").value))
+      .toBe(join(realpathSync(b), ".fikra/skills"));
 
     // A restart re-attaches via the persisted context when the client
     // reconnects from B (the daemon cwd is STILL A).
@@ -219,6 +224,44 @@ describe("#298 client-context thread roots", () => {
     expect(String(e(editor2, '(fikra/thread/fikra-thread-field "legacy")').value)).toBe("true");
     expect(existsSync(join(b, ".tmax"))).toBe(false);
   });
+
+  test("a child of a LEGACY parent stays legacy on the parent's root (codex r1 fix 3)", async () => {
+    const a = makeDir("fikra-ctx-a", true);
+    const b = makeDir("fikra-ctx-b", true);
+    process.chdir(a);
+    mkdirSync(join(a, ".tmax/fikra/threads/main"), { recursive: true });
+    writeFileSync(
+      join(a, ".tmax/fikra/threads/main/state.json"),
+      JSON.stringify({ id: "main", backend: "claude", "turn-count": 1, status: "idle" }),
+    );
+    const editor = await createStartedEditor("");
+    e(editor, "(require-module fikra/thread)");
+    e(editor, "(require-module fikra/threads)");
+    e(editor, "(fikra/thread/fikra-thread-init)"); // legacy main (no client)
+    editor.setClientLaunchDir(b); // a different context attaches MID-session
+    const child = String(e(editor, "(fikra/thread/fikra-thread-new)").value);
+    expect(child).toBe("fix-1");
+    // The child inherited the LEGACY parent's semantics: parent root, no
+    // context stamped, legacy flag set (not the attached client's project).
+    expect(String(e(editor, '(fikra/thread/fikra-thread-field "root")').value)).toBe(realpathSync(a));
+    expect(e(editor, '(fikra/thread/fikra-thread-field "context-dir")').type).toBe("nil");
+    expect(String(e(editor, '(fikra/thread/fikra-thread-field "legacy")').value)).toBe("true");
+    // And the list shows the legacy label for the child.
+    e(editor, '(fikra/thread/fikra-thread-switch "fix-1")');
+    e(editor, "(fikra/threads/fikra-threads-list-open)");
+    expect(stripAnsi(bufferText(editor))).toContain("legacy");
+    expect(existsSync(join(b, ".tmax"))).toBe(false);
+  });
+
+  test("a file directly under / yields context-dir / (codex r1 fix 4)", async () => {
+    const a = makeDir("fikra-ctx-a");
+    process.chdir(a);
+    const editor = await createStartedEditor("");
+    e(editor, '(find-file-open "/x-edge-test.txt")'); // new-file buffer
+    expect(String(e(editor, "(buffer-filename)").value)).toBe("/x-edge-test.txt");
+    e(editor, "(require-module fikra/thread)");
+    expect(String(e(editor, "(fikra/thread/fikra-thread-context-dir)").value)).toBe("/");
+  });
 });
 
 describe("#298 connect-frame handshake (production wiring)", () => {
@@ -270,6 +313,29 @@ describe("#298 connect-frame handshake (production wiring)", () => {
       });
       expect(editor.getClientLaunchDir()).toBe(otherDir);
       sock3.destroy();
+      await new Promise((r) => setTimeout(r, 300));
+      expect(editor.getClientLaunchDir()).toBeUndefined();
+
+      // codex r1 fix 2: two clients sharing the SAME cwd — one leaving
+      // must NOT clear the other's context (value-refcounted release).
+      const shared = makeDir("fikra-ctx-shared");
+      const sockA = await connectWithTimeout(socketPath);
+      await new Promise<void>((resolve, reject) => {
+        const timer = setTimeout(() => reject(new Error("connect-frame timeout A")), 10_000);
+        sockA.on("data", (d) => { clearTimeout(timer); resolve(); });
+        sockA.write(request(3, "connect-frame", { clientType: "tui", clientName: "a", clientCwd: shared }));
+      });
+      const sockB = await connectWithTimeout(socketPath);
+      await new Promise<void>((resolve, reject) => {
+        const timer = setTimeout(() => reject(new Error("connect-frame timeout B")), 10_000);
+        sockB.on("data", (d) => { clearTimeout(timer); resolve(); });
+        sockB.write(request(4, "connect-frame", { clientType: "tui", clientName: "b", clientCwd: shared }));
+      });
+      expect(editor.getClientLaunchDir()).toBe(shared);
+      sockA.destroy(); // first sharer leaves — the value SURVIVES
+      await new Promise((r) => setTimeout(r, 300));
+      expect(editor.getClientLaunchDir()).toBe(shared);
+      sockB.destroy(); // last sharer leaves — now it clears
       await new Promise((r) => setTimeout(r, 300));
       expect(editor.getClientLaunchDir()).toBeUndefined();
     } finally {

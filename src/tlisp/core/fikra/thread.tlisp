@@ -41,13 +41,14 @@ thread list (no silent re-targeting of old threads)."
   (string-trim (shell-command "pwd")))
 
 ;; No dirname primitive — slice to the last "/" (worktree.tlisp has the
-;; same helper; requiring worktree here would cycle).
+;; same helper; requiring worktree here would cycle). A file directly
+;; under "/" yields "/" (codex r1), never "".
 (defun fikra-thread-dirname (path)
   (fikra-thread-dirname-scan path -1 0))
 
 (defun fikra-thread-dirname-scan (path last i)
   (if (>= i (length path))
-    (if (< last 0) "." (substring path 0 last))
+    (if (< last 0) "." (if (= last 0) "/" (substring path 0 last)))
     (fikra-thread-dirname-scan path
       (if (string= (substring path i (+ i 1)) "/") i last)
       (+ i 1))))
@@ -316,20 +317,32 @@ it and opens its chat buffer. Returns the id."
   ;; symbol (probe catch).
   (let* ((parent-mode (if fikra-current-thread-id (fikra-thread-field "runtime-mode") nil))
          (parent-ctx (if fikra-current-thread-id (fikra-thread-field "context-dir") nil))
+         (parent-legacy (if fikra-current-thread-id (fikra-thread-field "legacy") nil))
          (root (progn (if (not fikra-current-thread-id) (fikra-thread-init))
                       (fikra-thread-field "root")))
          (id (fikra-thread-free-id root 1)))
     (setq fikra-current-thread-id id)
-    (let ((state (fikra-thread-state)))
+    ;; #298 (codex r1): construct the child's state DIRECTLY from the
+    ;; parent record — a lazy (fikra-thread-state) here would resolve the
+    ;; CURRENT context, mkdir under it, and (for a legacy parent) birth a
+    ;; re-targeted child. The child inherits the parent's project.
+    (let ((state (fikra-thread-load root id parent-ctx)))
+      (editor/keymaps/keymap-mutable-set! fikra-threads id state)
       (editor/keymaps/keymap-mutable-set! state "id" id)
       (editor/keymaps/keymap-mutable-set! state "root" root)
-      ;; Child threads inherit the parent's client context (#298 — a
-      ;; sibling stays in the same project and reloads non-legacy).
-      (if parent-ctx
-        (editor/keymaps/keymap-mutable-set! state "context-dir" parent-ctx))
+      ;; A LEGACY parent (no context) births a LEGACY child on the same
+      ;; root — never a re-targeted one via today's context.
+      (if (and (null parent-ctx) parent-legacy)
+        (progn
+          (editor/keymaps/keymap-mutable-set! state "context-dir" nil)
+          (editor/keymaps/keymap-mutable-set! state "legacy" t)))
       ;; Child threads inherit the parent's runtime mode (#219).
       (if parent-mode
         (editor/keymaps/keymap-mutable-set! state "runtime-mode" parent-mode)))
+    ;; mkdir + FAEP wiring under the PARENT root (the state's own source).
+    (let ((dir (concat root "/.tmax/fikra/threads/" id)))
+      (file-mkdir dir)
+      (fikra/event/fikra-event-log-set (concat dir "/events.jsonl")))
     (fikra-thread-ensure-chat-buffer)
     (buffer-switch (fikra-thread-buffer-name))
     (fikra-thread-save)
@@ -444,8 +457,8 @@ current project's NON-archived threads."
       "id" id
       "backend" (funcall get "backend")
       "mode" (funcall get "runtime-mode")
-      "location" (if (funcall get "worktree") "worktree"
-                   (if legacy "legacy" "local"))
+      "location" (if legacy "legacy"
+                   (if (funcall get "worktree") "worktree" "local"))
       "legacy" (if legacy t nil)
       "status" (funcall get "status")
       "turns" (funcall get "turn-count"))))

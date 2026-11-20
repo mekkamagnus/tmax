@@ -14,7 +14,9 @@
 (defvar fikra-skills-cache (list))
 
 (defun fikra-skills-dir ()
-  (concat (progn (require-module fikra/thread) (fikra/thread/fikra-thread-root)) "/.fikra/skills"))
+  ;; #298: the thread's PERSISTED root (the legacy resolver follows the
+  ;; daemon cwd — wrong once client context differs).
+  (concat (progn (require-module fikra/thread) (fikra/thread/fikra-thread-field "root")) "/.fikra/skills"))
 
 (defun fikra-skills-refresh ()
   "Rescan .fikra/skills/*/SKILL.md. Skills with SKILL.md files whose

@@ -158,6 +158,11 @@ export class TmaxServer {
   /** Skip workspace restore on startup (--clean) — start fresh *scratch*. #58/BUG-47. */
   private cleanStart: boolean;
   private clients: Map<string, ClientConnection>;
+  /** #298: launch-dir refcounts — how many CONNECTED clients recorded each
+   *  cwd via connect-frame. The editor's launch dir clears only when the
+   *  LAST client for that exact value disconnects (two clients sharing a
+   *  cwd must not clear each other's context). */
+  private launchDirCounts: Map<string, number> = new Map();
   private frames: Map<string, Frame> = new Map();
   private workspaces: Map<string, WorkspaceState> = new Map();
   private activeWorkspaceId: string = 'default';
@@ -1198,6 +1203,7 @@ export class TmaxServer {
 	            if (clientCwd) {
 	              this.editor?.setClientLaunchDir(clientCwd);
 	              client.launchDirSet = clientCwd;
+	              this.launchDirCounts.set(clientCwd, (this.launchDirCounts.get(clientCwd) ?? 0) + 1);
 	            }
 	            if (explicitWorkspace) await this.updateLastWorkspace(requestedWorkspace);
 	            clientFrameId = this.createFrameForWorkspace(clientId, client.clientType, requestedWorkspace);
@@ -1261,12 +1267,10 @@ export class TmaxServer {
 
     conn.on('close', () => {
       this.editor?.logDaemonEvent('client-disconnected', clientId);
-      // #298 (verify-gate r2): clear the launch dir THIS client recorded —
-      // a disconnected client's context must not outlive it. Value-equality
-      // guard: a LATER client that already overwrote the dir keeps theirs.
-      if (client.launchDirSet && this.editor?.getClientLaunchDir() === client.launchDirSet) {
-        this.editor.setClientLaunchDir(undefined);
-      }
+      // #298 (verify-gate r2): a disconnected client's context must not
+      // outlive it — unless another connected client shares the same cwd
+      // (codex r1: value-refcounted release).
+      this.releaseLaunchDir(client);
       if (clientFrameId) this.deleteFrame(clientFrameId);
       this.clients.delete(clientId);
     });
@@ -1274,13 +1278,30 @@ export class TmaxServer {
     conn.on('error', (err) => {
       console.error(`Client ${clientId} error:`, err);
       this.recordError('client-socket', err, clientId, clientFrameId ?? undefined);
-      // Same #298 staleness guard as close (error paths tear the conn too).
-      if (client.launchDirSet && this.editor?.getClientLaunchDir() === client.launchDirSet) {
-        this.editor.setClientLaunchDir(undefined);
-      }
+      // Same #298 release as close (error paths tear the conn too).
+      this.releaseLaunchDir(client);
       if (clientFrameId) this.deleteFrame(clientFrameId);
       this.clients.delete(clientId);
     });
+  }
+
+  /** #298: decrement the disconnecting client's launch-dir refcount; clear
+   *  the editor's recorded dir only when no connected client still holds
+   *  that value AND the editor currently shows it (a later client that
+   *  overwrote the dir keeps theirs). */
+  private releaseLaunchDir(client: ClientConnection): void {
+    const dir = client.launchDirSet;
+    if (!dir) return;
+    client.launchDirSet = undefined;
+    const next = (this.launchDirCounts.get(dir) ?? 1) - 1;
+    if (next > 0) {
+      this.launchDirCounts.set(dir, next);
+      return;
+    }
+    this.launchDirCounts.delete(dir);
+    if (this.editor?.getClientLaunchDir() === dir) {
+      this.editor.setClientLaunchDir(undefined);
+    }
   }
 
   /**
